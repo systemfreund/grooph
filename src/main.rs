@@ -1,5 +1,7 @@
 #![allow(dead_code)]
 
+mod measure;
+
 use eframe::egui::{Context, Rangef, Stroke, Ui};
 use eframe::emath::{Align2, pos2};
 use eframe::epaint::text::{FontInsert, InsertFontFamily};
@@ -23,36 +25,6 @@ fn add_font(ctx: &egui::Context) {
             priority: egui::epaint::text::FontPriority::Highest,
         }],
     ));
-}
-
-enum Sticking {
-    R, L
-}
-
-enum Duration {
-    Quarter,
-    Eighth,
-    TripletEighth,
-    Sixteenth,
-    QuintupletSixteenth,
-    SextupletSixteenth,
-    SeptupletSixteenth,
-    ThirtySecond,
-    NonupletThirtySecond
-}
-
-struct Note {
-    duration: Duration,
-    sticking: Sticking,
-}
-
-struct Rest {
-    duration: Duration
-}
-
-enum Beat {
-    Note(Note),
-    Rest(Rest)
 }
 
 impl MyApp {
