@@ -28,6 +28,7 @@ impl TimeSignature {
     }
 }
 
+#[derive(Copy, Clone)]
 pub enum Sticking {
     R,
     L,
@@ -104,6 +105,8 @@ impl Measure {
         }
     }
 
+    /// Expose a read-only view of beats (primarily for tests/inspection)
+    pub fn beats(&self) -> &Vec<Beat> { &self.beats }
 
     /// Returns the current total duration in ticks (exact)
     fn current_ticks(&self) -> i32 {
@@ -139,6 +142,138 @@ impl Measure {
         dp[target]
     }
 
+    /// Internal: compute best fill of exactly `gap_ticks` using durations, optimizing:
+    /// primary -> minimal token count; secondary -> minimal total weight; tertiary -> prefer larger last step.
+    fn best_fill_for_gap(gap_ticks: i32) -> Option<Vec<Duration>> {
+        if gap_ticks < 0 { return None; }
+        if gap_ticks == 0 { return Some(Vec::new()); }
+        // Precompute coins and weights
+        let mut coins: Vec<(i32, Duration, i32)> = Duration::DURATIONS
+            .iter()
+            .map(|&d| {
+                let ticks = Duration::TICKS_PER_WHOLE / Duration::denominator_of(d);
+                let weight = Duration::denominator_of(d); // smaller denominator preferred
+                (ticks, d, weight)
+            })
+            .collect();
+        // Sort by descending tick size to help tertiary tie-break towards larger steps
+        coins.sort_unstable_by(|a,b| b.0.cmp(&a.0));
+
+        let target = gap_ticks as usize;
+        #[derive(Clone, Copy)]
+        struct Cell { len: u16, weight: i32, prev: i32, choice_idx: u8 }
+        let mut dp: Vec<Option<Cell>> = vec![None; target + 1];
+        dp[0] = Some(Cell { len: 0, weight: 0, prev: -1, choice_idx: 0 });
+
+        for i in 1..=target {
+            let mut best: Option<Cell> = None;
+            for (idx, (ticks, _d, w)) in coins.iter().enumerate() {
+                let t = *ticks as usize;
+                if t <= i {
+                    if let Some(prev) = dp[i - t] {
+                        let cand = Cell { len: prev.len.saturating_add(1), weight: prev.weight + *w, prev: (i - t) as i32, choice_idx: idx as u8 };
+                        best = match best {
+                            None => Some(cand),
+                            Some(cur) => {
+                                // Compare (len, weight); if equal, prefer larger step (since coins sorted desc, smaller idx is larger)
+                                if cand.len < cur.len || (cand.len == cur.len && (cand.weight < cur.weight || (cand.weight == cur.weight && (cand.choice_idx as i32) < (cur.choice_idx as i32)))) {
+                                    Some(cand)
+                                } else { Some(cur) }
+                            }
+                        };
+                    }
+                }
+            }
+            dp[i] = best;
+        }
+
+        if dp[target].is_none() { return None; }
+        // Reconstruct durations in forward order
+        let mut seq_idxs: Vec<usize> = Vec::new();
+        let mut i = target as i32;
+        while i > 0 {
+            let cell = dp[i as usize].unwrap();
+            let ci = cell.choice_idx as usize;
+            seq_idxs.push(ci);
+            i = cell.prev;
+        }
+        seq_idxs.reverse();
+        let result: Vec<Duration> = seq_idxs.into_iter().map(|ci| coins[ci].1).collect();
+        Some(result)
+    }
+
+    /// Normalize the current measure by reconstructing a simpler equivalent that preserves onsets.
+    /// Strategy: rebuild from onset set; for each span between onsets (and edges), fill with minimal-token durations.
+    pub fn normalize(&mut self) {
+        let max_ticks = self.time_signature.measure_duration_ticks();
+        // Collect onset positions and their sticking (if any)
+        let mut onsets: Vec<(i32, Option<Sticking>)> = Vec::new();
+        let mut pos = 0;
+        for beat in &self.beats {
+            match beat.kind {
+                BeatKind::Note(stick) => {
+                    onsets.push((pos, stick));
+                }
+                BeatKind::Rest => {}
+            }
+            pos += beat.duration.ticks();
+        }
+        // Build boundaries: always start at 0; ensure end boundary
+        let mut boundaries: Vec<i32> = vec![0];
+        for (p, _) in &onsets { if *p > 0 { boundaries.push(*p); } }
+        if boundaries.last().copied() != Some(max_ticks) { boundaries.push(max_ticks); }
+        boundaries.sort_unstable();
+        boundaries.dedup();
+
+        // We'll iterate over spans between consecutive boundaries, but we need to know which are onsets.
+        // Build a map from position to sticking for quick lookup (last specified sticking wins if duplicates).
+        use std::collections::BTreeMap;
+        let mut onset_map: BTreeMap<i32, Option<Sticking>> = BTreeMap::new();
+        for (p, s) in onsets { onset_map.insert(p, s); }
+
+        let mut new_beats: Vec<Beat> = Vec::new();
+        for w in boundaries.windows(2) {
+            let start = w[0];
+            let end = w[1];
+            let gap = end - start;
+            if gap <= 0 { continue; }
+            let is_onset = onset_map.contains_key(&start);
+            let sticking = onset_map.get(&start).copied().flatten();
+            if let Some(seq) = Self::best_fill_for_gap(gap) {
+                if is_onset {
+                    // First token is Note with sticking; rest are Rests
+                    if let Some((first, rest)) = seq.split_first() {
+                        if let Some(stick) = sticking {
+                            new_beats.push(Beat::note_with_sticking(*first, stick));
+                        } else {
+                            new_beats.push(Beat::note(*first));
+                        }
+                        for d in rest { new_beats.push(Beat::rest(*d)); }
+                    }
+                } else {
+                    // Entire span is rest
+                    for d in seq { new_beats.push(Beat::rest(d)); }
+                }
+            } else {
+                // Should not happen because original measure was valid; fall back to original micro-chunk
+                // Emit as a single rest for safety if possible
+                // Try to find a duration exactly equal to gap
+                let mut matched = false;
+                for &d in Duration::DURATIONS.iter() {
+                    if d.ticks() == gap { new_beats.push(Beat::rest(d)); matched = true; break; }
+                }
+                if !matched {
+                    // In worst case, fill with smallest durations
+                    let smallest = Duration::DURATIONS.iter().min_by_key(|d| d.ticks()).copied().unwrap();
+                    let mut rem = gap;
+                    while rem > 0 { new_beats.push(Beat::rest(smallest)); rem -= smallest.ticks(); }
+                }
+            }
+        }
+
+        self.beats = new_beats;
+    }
+
     /// Adds a beat to this measure if it doesn't exceed the time signature and remains completable
     ///
     /// # Returns
@@ -172,7 +307,7 @@ impl Measure {
 
 #[cfg(test)]
 mod tests {
-    use crate::duration::Duration::{Quarter, Eighth, Sixteenth, TripletEighth};
+    use crate::duration::Duration::{Quarter, Eighth, Sixteenth, TripletEighth, SextupletSixteenth, QuintupletSixteenth, ThirtySecond};
     use super::*;
 
     #[test]
@@ -193,5 +328,32 @@ mod tests {
         assert!(measure.add_beat(Beat::note(Quarter)).is_err());
         assert!(measure.add_beat(Beat::note(Eighth)).is_err());
         assert!(measure.add_beat(Beat::note(Sixteenth)).is_err());
+        assert!(measure.add_beat(Beat::note(ThirtySecond)).is_err());
+    }
+
+    #[test]
+    fn normalize_sextuplet_alternating_to_triplets() {
+        let mut measure = Measure::new(TimeSignature::ONE_FOUR);
+        // Build: (N 1/24, R 1/24) x 3
+        for _ in 0..3 {
+            assert!(measure.add_beat(Beat::note(SextupletSixteenth)).is_ok());
+            assert!(measure.add_beat(Beat::rest(SextupletSixteenth)).is_ok());
+        }
+        // At this point, measure is exactly full
+        assert_eq!(measure.current_ticks(), measure.time_signature.measure_duration_ticks());
+
+        // Normalize
+        measure.normalize();
+
+        // Expect three TripletEighth notes
+        let beats = measure.beats();
+        assert_eq!(beats.len(), 3);
+        for b in beats {
+            assert_eq!(b.duration.ticks(), TripletEighth.ticks());
+            match b.kind {
+                BeatKind::Note(_) => {}
+                _ => panic!("expected notes after normalization"),
+            }
+        }
     }
 }
