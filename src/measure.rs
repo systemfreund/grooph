@@ -21,6 +21,15 @@ impl TimeSignature {
         beat_unit: 4,
     };
 
+    pub const FOUR_EIGHT: Self = Self {
+        beats: 4,
+        beat_unit: 8,
+    };
+
+    pub const SEVEN_EIGHT: Self = Self {
+        beats: 7,
+        beat_unit: 8,
+    };
 
     /// Returns the total duration in integer ticks
     pub fn measure_duration_ticks(&self) -> i32 {

@@ -129,7 +129,30 @@ impl RhythmMeasure {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::duration::Duration::{TripletEighth, SextupletSixteenth};
+    use crate::duration::Duration::{TripletEighth, SextupletSixteenth, Quarter, Eighth};
+
+    #[test]
+    fn flatten_empty_measure_over_four_four() {
+        let rm = RhythmMeasure::new(TimeSignature::FOUR_FOUR);
+        let m = rm.flatten_to_measure();
+        let beats = m.beats();
+        assert_eq!(beats.len(), 4);
+        for b in beats.iter() {
+            assert_eq!(b.duration.ticks(), Quarter.ticks());
+        }
+    }
+
+    #[test]
+    fn flatten_empty_measure_over_seven_eight() {
+        let rm = RhythmMeasure::new(TimeSignature::SEVEN_EIGHT);
+        let m = rm.flatten_to_measure();
+        let beats = m.beats();
+        assert_eq!(beats.len(), 4);
+        for i in 0..2 {
+            assert_eq!(beats[i].duration.ticks(), Quarter.ticks());
+        }
+        assert_eq!(beats.last().unwrap().duration.ticks(), Eighth.ticks());
+    }
 
     #[test]
     fn flatten_triplet_over_one_four() {
