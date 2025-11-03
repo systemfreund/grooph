@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
 mod measure;
+mod duration;
 
 use eframe::egui::{Context, Rangef, Stroke, Ui};
 use eframe::emath::{Align2, pos2};

@@ -1,3 +1,5 @@
+use crate::duration::Duration;
+
 /// Represents a time signature (e.g., 4/4, 3/4, 6/8)
 pub struct TimeSignature {
     /// Number of beats per measure
@@ -29,39 +31,6 @@ impl TimeSignature {
 pub enum Sticking {
     R,
     L,
-}
-
-pub enum Duration {
-    Quarter,
-    Eighth,
-    TripletEighth,
-    Sixteenth,
-    QuintupletSixteenth,
-    SextupletSixteenth,
-    SeptupletSixteenth,
-    ThirtySecond,
-    NonupletThirtySecond,
-}
-
-impl Duration {
-    /// Ticks per whole note. Choose LCM of denominators used by all durations.
-    pub const TICKS_PER_WHOLE: i32 = 10080; // lcm(4,8,12,16,20,24,28,32,36)
-
-
-    /// Returns the duration in integer ticks (exact)
-    pub fn ticks(&self) -> i32 {
-        match self {
-            Duration::Quarter => Self::TICKS_PER_WHOLE / 4,           // 2520
-            Duration::Eighth => Self::TICKS_PER_WHOLE / 8,            // 1260
-            Duration::TripletEighth => Self::TICKS_PER_WHOLE / 12,    // 840
-            Duration::Sixteenth => Self::TICKS_PER_WHOLE / 16,        // 630
-            Duration::QuintupletSixteenth => Self::TICKS_PER_WHOLE / 20, // 504
-            Duration::SextupletSixteenth => Self::TICKS_PER_WHOLE / 24,  // 420
-            Duration::SeptupletSixteenth => Self::TICKS_PER_WHOLE / 28,  // 360
-            Duration::ThirtySecond => Self::TICKS_PER_WHOLE / 32,     // 315
-            Duration::NonupletThirtySecond => Self::TICKS_PER_WHOLE / 36, // 280
-        }
-    }
 }
 
 pub enum BeatKind {
@@ -145,25 +114,20 @@ impl Measure {
     fn is_remainder_fillable(remaining_ticks: i32) -> bool {
         if remaining_ticks == 0 { return true; }
         if remaining_ticks < 0 { return false; }
-        // Available coin sizes (ticks) in non-increasing order for early pruning
-        const COINS: [i32; 9] = [
-            Duration::TICKS_PER_WHOLE / 4,   // Quarter = 2520
-            Duration::TICKS_PER_WHOLE / 8,   // Eighth = 1260
-            Duration::TICKS_PER_WHOLE / 12,  // TripletEighth = 840
-            Duration::TICKS_PER_WHOLE / 16,  // Sixteenth = 630
-            Duration::TICKS_PER_WHOLE / 20,  // Quintuplet 16th = 504
-            Duration::TICKS_PER_WHOLE / 24,  // Sextuplet 16th = 420
-            Duration::TICKS_PER_WHOLE / 28,  // Septuplet 16th = 360
-            Duration::TICKS_PER_WHOLE / 32,  // ThirtySecond = 315
-            Duration::TICKS_PER_WHOLE / 36,  // Nonuplet 32nd = 280
-        ];
+        // Build the available coin sizes (ticks) from the supported durations. Larger first helps pruning.
+        let mut coins: Vec<i32> = Duration::DURATIONS
+            .iter()
+            .map(|&dur| Duration::TICKS_PER_WHOLE / Duration::denominator_of(dur))
+            .collect();
+        coins.sort_unstable_by(|a, b| b.cmp(a));
+
         // Simple DP (unbounded knapsack reachability)
         let target = remaining_ticks as usize;
         let mut dp = vec![false; target + 1];
         dp[0] = true;
         for i in 1..=target {
             let mut reachable = false;
-            for &c in COINS.iter() {
+            for &c in coins.iter() {
                 let cu = c as usize;
                 if cu <= i && dp[i - cu] {
                     reachable = true;
@@ -208,8 +172,7 @@ impl Measure {
 
 #[cfg(test)]
 mod tests {
-    use Duration::Quarter;
-    use crate::measure::Duration::{Eighth, Sixteenth, TripletEighth};
+    use crate::duration::Duration::{Quarter, Eighth, Sixteenth, TripletEighth};
     use super::*;
 
     #[test]
