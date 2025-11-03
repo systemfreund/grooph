@@ -1,6 +1,7 @@
 use crate::duration::Duration;
 
 /// Represents a time signature (e.g., 4/4, 3/4, 6/8)
+#[derive(Debug, Clone)]
 pub struct TimeSignature {
     /// Number of beats per measure
     pub beats: u8,
