@@ -17,11 +17,6 @@ impl TimeSignature {
         beat_unit: 4,
     };
 
-    /// Returns the total duration of this measure as a fraction of a whole note
-    pub fn measure_duration(&self) -> f64 {
-        let beat_value = 1.0 / (self.beat_unit as f64);
-        (self.beats as f64) * beat_value
-    }
 
     /// Returns the total duration in integer ticks
     pub fn measure_duration_ticks(&self) -> i32 {
@@ -52,20 +47,6 @@ impl Duration {
     /// Ticks per whole note. Choose LCM of denominators used by all durations.
     pub const TICKS_PER_WHOLE: i32 = 10080; // lcm(4,8,12,16,20,24,28,32,36)
 
-    /// Returns the duration as a fraction of a whole note
-    pub fn value(&self) -> f64 {
-        match self {
-            Duration::Quarter => 0.25,
-            Duration::Eighth => 0.125,
-            Duration::TripletEighth => 1.0 / 12.0, // 1/3 of a quarter
-            Duration::Sixteenth => 0.0625,
-            Duration::QuintupletSixteenth => 0.05, // 1/5 of a quarter
-            Duration::SextupletSixteenth => 1.0 / 24.0, // 1/6 of a quarter
-            Duration::SeptupletSixteenth => 1.0 / 28.0, // 1/7 of a quarter
-            Duration::ThirtySecond => 0.03125,
-            Duration::NonupletThirtySecond => 1.0 / 36.0, // 1/9 of a quarter
-        }
-    }
 
     /// Returns the duration in integer ticks (exact)
     pub fn ticks(&self) -> i32 {
@@ -118,10 +99,6 @@ impl Beat {
         }
     }
 
-    /// Returns the duration of this beat as a fraction of a whole note
-    pub fn duration(&self) -> f64 {
-        self.duration.value()
-    }
 }
 
 /// Errors that can occur when adding beats to a measure
@@ -158,10 +135,6 @@ impl Measure {
         }
     }
 
-    /// Returns the current total duration of all beats in this measure
-    fn current_duration(&self) -> f64 {
-        self.beats.iter().map(|beat| beat.duration()).sum()
-    }
 
     /// Returns the current total duration in ticks (exact)
     fn current_ticks(&self) -> i32 {
