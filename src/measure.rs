@@ -22,6 +22,13 @@ impl TimeSignature {
         let beat_value = 1.0 / (self.beat_unit as f64);
         (self.beats as f64) * beat_value
     }
+
+    /// Returns the total duration in integer ticks
+    pub fn measure_duration_ticks(&self) -> i32 {
+        // number of whole-note fractions: beats / beat_unit of a whole note
+        // Convert to ticks: (beats * TICKS_PER_WHOLE) / beat_unit
+        ((self.beats as i32) * Duration::TICKS_PER_WHOLE) / (self.beat_unit as i32)
+    }
 }
 
 pub enum Sticking {
@@ -42,6 +49,9 @@ pub enum Duration {
 }
 
 impl Duration {
+    /// Ticks per whole note. Choose LCM of denominators used by all durations.
+    pub const TICKS_PER_WHOLE: i32 = 10080; // lcm(4,8,12,16,20,24,28,32,36)
+
     /// Returns the duration as a fraction of a whole note
     pub fn value(&self) -> f64 {
         match self {
@@ -54,6 +64,21 @@ impl Duration {
             Duration::SeptupletSixteenth => 1.0 / 28.0, // 1/7 of a quarter
             Duration::ThirtySecond => 0.03125,
             Duration::NonupletThirtySecond => 1.0 / 36.0, // 1/9 of a quarter
+        }
+    }
+
+    /// Returns the duration in integer ticks (exact)
+    pub fn ticks(&self) -> i32 {
+        match self {
+            Duration::Quarter => Self::TICKS_PER_WHOLE / 4,           // 2520
+            Duration::Eighth => Self::TICKS_PER_WHOLE / 8,            // 1260
+            Duration::TripletEighth => Self::TICKS_PER_WHOLE / 12,    // 840
+            Duration::Sixteenth => Self::TICKS_PER_WHOLE / 16,        // 630
+            Duration::QuintupletSixteenth => Self::TICKS_PER_WHOLE / 20, // 504
+            Duration::SextupletSixteenth => Self::TICKS_PER_WHOLE / 24,  // 420
+            Duration::SeptupletSixteenth => Self::TICKS_PER_WHOLE / 28,  // 360
+            Duration::ThirtySecond => Self::TICKS_PER_WHOLE / 32,     // 315
+            Duration::NonupletThirtySecond => Self::TICKS_PER_WHOLE / 36, // 280
         }
     }
 }
@@ -104,10 +129,17 @@ impl Beat {
 pub enum MeasureError {
     /// The beat would cause the measure to exceed its time signature
     Overflow {
-        /// Duration that was attempted to add
+        /// Duration that was attempted to add (fraction of a whole note)
         attempted: f64,
-        /// Space available in the measure
+        /// Space available in the measure (fraction of a whole note)
         available: f64,
+    },
+    /// The beat would leave a remainder that cannot be exactly filled with available durations
+    Unfillable {
+        /// Duration that was attempted to add (fraction of a whole note)
+        attempted: f64,
+        /// Remaining space after the attempted add (fraction of a whole note)
+        remaining: f64,
     },
 }
 
@@ -131,27 +163,73 @@ impl Measure {
         self.beats.iter().map(|beat| beat.duration()).sum()
     }
 
-    /// Adds a beat to this measure if it doesn't exceed the time signature
+    /// Returns the current total duration in ticks (exact)
+    fn current_ticks(&self) -> i32 {
+        self.beats.iter().map(|beat| beat.duration.ticks()).sum()
+    }
+
+    /// Returns true if the remaining ticks can be exactly filled using the available durations
+    fn is_remainder_fillable(remaining_ticks: i32) -> bool {
+        if remaining_ticks == 0 { return true; }
+        if remaining_ticks < 0 { return false; }
+        // Available coin sizes (ticks) in non-increasing order for early pruning
+        const COINS: [i32; 9] = [
+            Duration::TICKS_PER_WHOLE / 4,   // Quarter = 2520
+            Duration::TICKS_PER_WHOLE / 8,   // Eighth = 1260
+            Duration::TICKS_PER_WHOLE / 12,  // TripletEighth = 840
+            Duration::TICKS_PER_WHOLE / 16,  // Sixteenth = 630
+            Duration::TICKS_PER_WHOLE / 20,  // Quintuplet 16th = 504
+            Duration::TICKS_PER_WHOLE / 24,  // Sextuplet 16th = 420
+            Duration::TICKS_PER_WHOLE / 28,  // Septuplet 16th = 360
+            Duration::TICKS_PER_WHOLE / 32,  // ThirtySecond = 315
+            Duration::TICKS_PER_WHOLE / 36,  // Nonuplet 32nd = 280
+        ];
+        // Simple DP (unbounded knapsack reachability)
+        let target = remaining_ticks as usize;
+        let mut dp = vec![false; target + 1];
+        dp[0] = true;
+        for i in 1..=target {
+            let mut reachable = false;
+            for &c in COINS.iter() {
+                let cu = c as usize;
+                if cu <= i && dp[i - cu] {
+                    reachable = true;
+                    break;
+                }
+            }
+            dp[i] = reachable;
+        }
+        dp[target]
+    }
+
+    /// Adds a beat to this measure if it doesn't exceed the time signature and remains completable
     ///
     /// # Returns
     /// - `Ok(())` if the beat was successfully added
     /// - `Err(MeasureError::Overflow)` if adding the beat would exceed the measure's capacity
+    /// - `Err(MeasureError::Unfillable)` if the addition leaves an unfillable remainder
     pub fn add_beat(&mut self, beat: Beat) -> Result<(), MeasureError> {
-        let current = self.current_duration();
-        let max_duration = self.time_signature.measure_duration();
-        let beat_duration = beat.duration();
-        let new_total = current + beat_duration;
+        let current_ticks = self.current_ticks();
+        let max_ticks = self.time_signature.measure_duration_ticks();
+        let beat_ticks = beat.duration.ticks();
+        let new_total_ticks = current_ticks + beat_ticks;
 
-        if new_total > max_duration {
-            let available = max_duration - current;
-            Err(MeasureError::Overflow {
-                attempted: beat_duration,
-                available,
-            })
-        } else {
-            self.beats.push(beat);
-            Ok(())
+        if new_total_ticks > max_ticks {
+            let available_ticks = max_ticks - current_ticks;
+            let available = (available_ticks as f64) / (Duration::TICKS_PER_WHOLE as f64);
+            let attempted = (beat_ticks as f64) / (Duration::TICKS_PER_WHOLE as f64);
+            return Err(MeasureError::Overflow { attempted, available });
         }
+
+        let remaining_ticks = max_ticks - new_total_ticks;
+        if remaining_ticks != 0 && !Self::is_remainder_fillable(remaining_ticks) {
+            let remaining = (remaining_ticks as f64) / (Duration::TICKS_PER_WHOLE as f64);
+            let attempted = (beat_ticks as f64) / (Duration::TICKS_PER_WHOLE as f64);
+            return Err(MeasureError::Unfillable { attempted, remaining });
+        }
+
+        self.beats.push(beat);
+        Ok(())
     }
 }
 
