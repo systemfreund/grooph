@@ -1,4 +1,5 @@
 use crate::duration::Duration;
+use crate::fill::best_fill_for_gap;
 
 /// Represents a time signature (e.g., 4/4, 3/4, 6/8)
 #[derive(Debug, Clone)]
@@ -143,65 +144,6 @@ impl Measure {
         dp[target]
     }
 
-    /// Internal: compute best fill of exactly `gap_ticks` using durations, optimizing:
-    /// primary -> minimal token count; secondary -> minimal total weight; tertiary -> prefer larger last step.
-    fn best_fill_for_gap(gap_ticks: i32) -> Option<Vec<Duration>> {
-        if gap_ticks < 0 { return None; }
-        if gap_ticks == 0 { return Some(Vec::new()); }
-        // Precompute coins and weights
-        let mut coins: Vec<(i32, Duration, i32)> = Duration::DURATIONS
-            .iter()
-            .map(|&d| {
-                let ticks = Duration::TICKS_PER_WHOLE / Duration::denominator_of(d);
-                let weight = Duration::denominator_of(d); // smaller denominator preferred
-                (ticks, d, weight)
-            })
-            .collect();
-        // Sort by descending tick size to help tertiary tie-break towards larger steps
-        coins.sort_unstable_by(|a,b| b.0.cmp(&a.0));
-
-        let target = gap_ticks as usize;
-        #[derive(Clone, Copy)]
-        struct Cell { len: u16, weight: i32, prev: i32, choice_idx: u8 }
-        let mut dp: Vec<Option<Cell>> = vec![None; target + 1];
-        dp[0] = Some(Cell { len: 0, weight: 0, prev: -1, choice_idx: 0 });
-
-        for i in 1..=target {
-            let mut best: Option<Cell> = None;
-            for (idx, (ticks, _d, w)) in coins.iter().enumerate() {
-                let t = *ticks as usize;
-                if t <= i {
-                    if let Some(prev) = dp[i - t] {
-                        let cand = Cell { len: prev.len.saturating_add(1), weight: prev.weight + *w, prev: (i - t) as i32, choice_idx: idx as u8 };
-                        best = match best {
-                            None => Some(cand),
-                            Some(cur) => {
-                                // Compare (len, weight); if equal, prefer larger step (since coins sorted desc, smaller idx is larger)
-                                if cand.len < cur.len || (cand.len == cur.len && (cand.weight < cur.weight || (cand.weight == cur.weight && (cand.choice_idx as i32) < (cur.choice_idx as i32)))) {
-                                    Some(cand)
-                                } else { Some(cur) }
-                            }
-                        };
-                    }
-                }
-            }
-            dp[i] = best;
-        }
-
-        if dp[target].is_none() { return None; }
-        // Reconstruct durations in forward order
-        let mut seq_idxs: Vec<usize> = Vec::new();
-        let mut i = target as i32;
-        while i > 0 {
-            let cell = dp[i as usize].unwrap();
-            let ci = cell.choice_idx as usize;
-            seq_idxs.push(ci);
-            i = cell.prev;
-        }
-        seq_idxs.reverse();
-        let result: Vec<Duration> = seq_idxs.into_iter().map(|ci| coins[ci].1).collect();
-        Some(result)
-    }
 
     /// Normalize the current measure by reconstructing a simpler equivalent that preserves onsets.
     /// Strategy: rebuild from onset set; for each span between onsets (and edges), fill with minimal-token durations.
@@ -240,7 +182,7 @@ impl Measure {
             if gap <= 0 { continue; }
             let is_onset = onset_map.contains_key(&start);
             let sticking = onset_map.get(&start).copied().flatten();
-            if let Some(seq) = Self::best_fill_for_gap(gap) {
+            if let Some(seq) = best_fill_for_gap(gap) {
                 if is_onset {
                     // First token is Note with sticking; rest are Rests
                     if let Some((first, rest)) = seq.split_first() {

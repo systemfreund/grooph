@@ -3,6 +3,7 @@
 mod measure;
 mod duration;
 mod rhythm;
+mod fill;
 
 use eframe::egui::{Context, Rangef, Stroke, Ui};
 use eframe::emath::{Align2, pos2};
