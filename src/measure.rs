@@ -158,7 +158,7 @@ impl Measure {
 #[cfg(test)]
 mod tests {
     use Duration::Quarter;
-    use crate::measure::Duration::{Eighth, TripletEighth};
+    use crate::measure::Duration::{Eighth, Sixteenth, TripletEighth};
     use super::*;
 
     #[test]
@@ -176,7 +176,8 @@ mod tests {
 
         assert!(measure.add_beat(Beat::note(TripletEighth)).is_ok());
         assert!(measure.add_beat(Beat::rest(TripletEighth)).is_ok());
-        assert!(measure.add_beat(Beat::note(Eighth)).is_err());
         assert!(measure.add_beat(Beat::note(Quarter)).is_err());
+        assert!(measure.add_beat(Beat::note(Eighth)).is_err());
+        assert!(measure.add_beat(Beat::note(Sixteenth)).is_err());
     }
 }
