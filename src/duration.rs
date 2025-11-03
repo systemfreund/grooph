@@ -1,0 +1,77 @@
+#[derive(Copy, Clone)]
+pub enum Duration {
+    Quarter,
+    Eighth,
+    TripletEighth,
+    Sixteenth,
+    QuintupletSixteenth,
+    SextupletSixteenth,
+    SeptupletSixteenth,
+    ThirtySecond,
+    NonupletThirtySecond,
+}
+
+// Compile-time utilities to compute GCD/LCM for integer constants
+const fn gcd(mut a: i32, mut b: i32) -> i32 {
+    while b != 0 {
+        let t = a % b;
+        a = b;
+        b = t;
+    }
+    if a < 0 { -a } else { a }
+}
+
+const fn lcm(a: i32, b: i32) -> i32 {
+    (a / gcd(a, b)) * b
+}
+
+impl Duration {
+    /// All supported durations.
+    pub const DURATIONS: [Duration; 9] = [
+        Duration::Quarter,
+        Duration::Eighth,
+        Duration::TripletEighth,
+        Duration::Sixteenth,
+        Duration::QuintupletSixteenth,
+        Duration::SextupletSixteenth,
+        Duration::SeptupletSixteenth,
+        Duration::ThirtySecond,
+        Duration::NonupletThirtySecond,
+    ];
+
+    /// Returns the denominator of this duration as a fraction of a whole note (e.g., Quarter -> 4).
+    pub const fn denominator_of(d: Duration) -> i32 {
+        match d {
+            Duration::Quarter => 4,
+            Duration::Eighth => 8,
+            Duration::TripletEighth => 12,
+            Duration::Sixteenth => 16,
+            Duration::QuintupletSixteenth => 20,
+            Duration::SextupletSixteenth => 24,
+            Duration::SeptupletSixteenth => 28,
+            Duration::ThirtySecond => 32,
+            Duration::NonupletThirtySecond => 36,
+        }
+    }
+
+    /// Compute LCM of denominators of the provided durations (const-evaluable)
+    pub const fn lcm_durations(arr: &[Duration]) -> i32 {
+        let mut i = 0;
+        let mut result = 1;
+        while i < arr.len() {
+            let d = Self::denominator_of(arr[i]);
+            result = lcm(result, d);
+            i += 1;
+        }
+        result
+    }
+
+    /// Ticks per whole note. Computed at compile time as the LCM of all denominators.
+    pub const TICKS_PER_WHOLE: i32 = Self::lcm_durations(&Self::DURATIONS);
+
+    /// Returns the duration in integer ticks (exact)
+    pub fn ticks(&self) -> i32 {
+        let denom = Self::denominator_of(*self);
+        Self::TICKS_PER_WHOLE / denom
+    }
+}
