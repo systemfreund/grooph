@@ -7,11 +7,12 @@ mod rhythm;
 
 use duration::Duration;
 use measure::{BeatKind, TimeSignature};
-use rhythm::RhythmMeasure;
+use rhythm::{RhythmMeasure, RhythmNode, SlotContent};
 
-use eframe::egui::{pos2, Align2, Context, Rangef, Stroke};
+use eframe::egui::{pos2, Align2, Context, Rangef, Stroke, Rounding};
+use crate::fill::best_fill_for_gap;
 use eframe::epaint::text::{FontInsert, InsertFontFamily};
-use eframe::epaint::{Color32, FontFamily, FontId};
+use eframe::epaint::{Color32, FontFamily, FontId, StrokeKind};
 use eframe::{App, CreationContext, egui};
 use egui::containers::Frame;
 
@@ -37,7 +38,8 @@ impl MyApp {
         add_font(&cc.egui_ctx);
         let ff = FontFamily::Name("music".into());
         // Example rhythm: empty 7/8 measure (will render as rests)
-        let measure = RhythmMeasure::new(TimeSignature::SEVEN_EIGHT);
+        let mut measure = RhythmMeasure::new(TimeSignature::SEVEN_EIGHT);
+        // measure.subdivide(&[], 2);
         Self {
             font_family: ff.clone(),
             font_id: FontId::new(64.0, ff),
@@ -64,6 +66,78 @@ fn rest_glyph_for_duration(d: Duration) -> char {
     }
 }
 
+// Helper: choose rest glyph by duration already defined above
+
+#[derive(Clone)]
+struct SlotBox {
+    rect: egui::Rect,
+    span_ticks: i32,
+    content: SlotContent,
+}
+
+fn layout_rhythm_boxes(node: &RhythmNode, span_ticks: i32, rect: egui::Rect, out: &mut Vec<SlotBox>) {
+    match node {
+        RhythmNode::Leaf(content) => {
+            out.push(SlotBox { rect, span_ticks, content: content.clone() });
+        }
+        RhythmNode::Group { n, children } => {
+            let n_i = *n as i32;
+            let slot_ticks = span_ticks / n_i;
+            let child_w = rect.width() / (*n as f32);
+            for (i, child) in children.iter().enumerate() {
+                let left = rect.left() + child_w * (i as f32);
+                let child_rect = egui::Rect::from_min_max(
+                    pos2(left, rect.top()),
+                    pos2(left + child_w, rect.bottom()),
+                );
+                layout_rhythm_boxes(child, slot_ticks, child_rect, out);
+            }
+        }
+    }
+}
+
+fn draw_slot_overlays(ui: &mut egui::Ui, font_id: &FontId, rm: &RhythmMeasure, inner_rect: egui::Rect) {
+    let painter = ui.painter();
+
+    let mut boxes = Vec::new();
+    let total_ticks = rm.time_signature.measure_duration_ticks();
+    layout_rhythm_boxes(&rm.root, total_ticks, inner_rect, &mut boxes);
+
+    let border = Stroke::new(1.0, Color32::from_gray(170));
+    let fill_a = Color32::from_rgba_unmultiplied(80, 160, 255, 40);
+    let fill_b = Color32::from_rgba_unmultiplied(80, 255, 160, 24);
+
+    for (idx, sb) in boxes.iter().enumerate() {
+        let fill = if idx % 2 == 0 { fill_a } else { fill_b };
+        painter.rect_filled(sb.rect, 3.0, fill);
+        painter.rect_stroke(sb.rect, 3.0, border, StrokeKind::Inside);
+
+        // Within each slot, draw the local minimal spelling.
+        if let Some(seq) = best_fill_for_gap(sb.span_ticks) {
+            let mut x = sb.rect.left();
+            let width = sb.rect.width();
+            let mut acc_ticks = 0.0_f32;
+            let total = sb.span_ticks as f32;
+
+            for (j, d) in seq.iter().enumerate() {
+                acc_ticks += d.ticks() as f32;
+                let next_x = if j == seq.len() - 1 { sb.rect.right() } else { sb.rect.left() + width * (acc_ticks / total) };
+                let mid = pos2(0.5 * (x + next_x), 0.5 * (sb.rect.top() + sb.rect.bottom()));
+
+                let glyph = match sb.content {
+                    SlotContent::Note => {
+                        if j == 0 { GLYPH_NOTEHEAD_BLACK } else { rest_glyph_for_duration(*d) }
+                    }
+                    SlotContent::Rest => rest_glyph_for_duration(*d),
+                };
+
+                painter.text(mid, Align2::CENTER_CENTER, glyph.to_string(), font_id.clone(), Color32::WHITE);
+                x = next_x;
+            }
+        }
+    }
+}
+
 fn draw_measure(ui: &mut egui::Ui, font_id: &FontId, rm: &RhythmMeasure, rect: egui::Rect) {
     let painter = ui.painter();
     let y = rect.center().y;
@@ -78,25 +152,10 @@ fn draw_measure(ui: &mut egui::Ui, font_id: &FontId, rm: &RhythmMeasure, rect: e
     // layout area inside barlines
     let left = rect.left() + 24.0;
     let right = rect.right() - 24.0;
+    let inner_rect = egui::Rect::from_min_max(pos2(left, y - 36.0), pos2(right, y + 36.0));
 
-    let m = rm.flatten_to_measure();
-    let beats = m.beats();
-    if beats.is_empty() { return; }
-
-    let total_ticks = rm.time_signature.measure_duration_ticks() as f32;
-    let mut x = left;
-    for (i, b) in beats.iter().enumerate() {
-        let next_x = if i == beats.len() - 1 { right } else { left + (right - left) * (beats[..=i].iter().map(|bb| bb.duration.ticks() as f32).sum::<f32>() / total_ticks) };
-        let mid_x = (x + next_x) * 0.5;
-        // Choose glyph
-        let glyph = match b.kind {
-            BeatKind::Note(_) => GLYPH_NOTEHEAD_BLACK,
-            BeatKind::Rest => rest_glyph_for_duration(b.duration),
-        };
-        // Draw glyph centered at mid_x on the staff line
-        painter.text(pos2(mid_x, y), Align2::CENTER_CENTER, glyph.to_string(), font_id.clone(), Color32::WHITE);
-        x = next_x;
-    }
+    // Draw semi-transparent slot overlays containing local spelling
+    draw_slot_overlays(ui, font_id, rm, inner_rect);
 }
 
 impl App for MyApp {
