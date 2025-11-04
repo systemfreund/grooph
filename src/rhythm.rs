@@ -27,36 +27,72 @@ pub struct RhythmMeasure {
 }
 
 impl RhythmMeasure {
-    /// Create a new rhythm measure with a single Rest leaf spanning the whole measure.
     pub fn new(time_signature: TimeSignature) -> Self {
-        Self { time_signature, root: RhythmNode::Leaf(SlotContent::Rest) }
+        let mut result = Self { time_signature, root: RhythmNode::Leaf(SlotContent::Rest) };
+        result.init_beat_grid();
+        result
+    }
+
+    pub fn toggle_leaf(&mut self, path: &[usize]) -> bool {
+        match Self::get_mut(&mut self.root, path) {
+            Some(RhythmNode::Leaf(content)) => {
+                *content = match content {
+                    SlotContent::Note => SlotContent::Rest,
+                    SlotContent::Rest => SlotContent::Note,
+                };
+                true
+            }
+            _ => false,
+        }
+    }
+
+    pub fn init_beat_grid(&mut self) -> bool {
+        // Split root into one box per beat (e.g. 7 for 7/8, 4 for 4/4)
+        let n = self.time_signature.beats as usize;
+        // Initialize all children as Rest
+        if self.subdivide(&[], n, SlotContent::Rest) {
+            true
+        } else {
+            false
+        }
     }
 
     /// Subdivide the node at `path` (empty path -> root) into `n` equal slots.
-    /// Children are initialized as Note leaves by default (so they click by default).
-    pub fn subdivide(&mut self, path: &[usize], n: usize) -> bool {
+    pub fn subdivide(&mut self, path: &[usize], n: usize, init: SlotContent) -> bool {
         if n == 0 { return false; }
         let node = Self::get_mut(&mut self.root, path);
         match node {
-            Some(RhythmNode::Group { .. }) => {
-                // Replace existing group with a new one of size n, keeping content as Notes
-                let children = vec![RhythmNode::Leaf(SlotContent::Note); n];
+            Some(RhythmNode::Group { .. }) | Some(RhythmNode::Leaf(_)) => {
+                let children = vec![RhythmNode::Leaf(init.clone()); n];
                 *node.unwrap() = RhythmNode::Group { n, children };
-                true
-            }
-            Some(leaf @ RhythmNode::Leaf(_)) => {
-                let children = vec![RhythmNode::Leaf(SlotContent::Note); n];
-                *leaf = RhythmNode::Group { n, children };
                 true
             }
             None => false,
         }
     }
 
-    /// Set the leaf content at `path`. The node at path must be a Leaf.
-    pub fn set_leaf(&mut self, path: &[usize], content: SlotContent) -> bool {
+    pub fn unsplit(&mut self, path: &[usize]) -> bool {
         match Self::get_mut(&mut self.root, path) {
-            Some(node @ RhythmNode::Leaf(_)) => { *node = RhythmNode::Leaf(content); true }
+            Some(RhythmNode::Group { n: _, children }) => {
+                let mut any_note = false;
+                let mut all_rest = true;
+                for ch in children.iter() {
+                    match ch {
+                        RhythmNode::Leaf(SlotContent::Note) => {
+                            any_note = true; all_rest = false;
+                        }
+                        RhythmNode::Leaf(SlotContent::Rest) => {}
+                        RhythmNode::Group { .. } => {
+                            // nested groups -> policy: treat as note
+                            any_note = true; all_rest = false;
+                        }
+                    }
+                }
+                let leaf = if any_note { SlotContent::Note } else { SlotContent::Rest };
+                *children = Vec::new();
+                *Self::get_mut(&mut self.root, path).unwrap() = RhythmNode::Leaf(leaf);
+                true
+            }
             _ => false,
         }
     }
@@ -147,18 +183,17 @@ mod tests {
         let rm = RhythmMeasure::new(TimeSignature::SEVEN_EIGHT);
         let m = rm.flatten_to_measure();
         let beats = m.beats();
-        assert_eq!(beats.len(), 4);
-        for i in 0..2 {
-            assert_eq!(beats[i].duration.ticks(), Quarter.ticks());
+        assert_eq!(beats.len(), 7);
+        for b in beats.iter() {
+            assert_eq!(b.duration.ticks(), Eighth.ticks());
         }
-        assert_eq!(beats.last().unwrap().duration.ticks(), Eighth.ticks());
     }
 
     #[test]
     fn flatten_triplet_over_one_four() {
         let mut rm = RhythmMeasure::new(TimeSignature::ONE_FOUR);
         // Subdivide root into 3 slots (triplet) and keep all as notes
-        assert!(rm.subdivide(&[], 3));
+        assert!(rm.subdivide(&[], 3, SlotContent::Rest));
         let m = rm.flatten_to_measure();
         let beats = m.beats();
         assert_eq!(beats.len(), 3);
@@ -170,9 +205,9 @@ mod tests {
     #[test]
     fn flatten_triplet_with_last_slot_subdivided_into_two() {
         let mut rm = RhythmMeasure::new(TimeSignature::ONE_FOUR);
-        assert!(rm.subdivide(&[], 3));
+        assert!(rm.subdivide(&[], 3, SlotContent::Rest));
         // Subdivide third slot (index 2) into two and keep both as notes
-        assert!(rm.subdivide(&[2], 2));
+        assert!(rm.subdivide(&[2], 2, SlotContent::Rest));
         let m = rm.flatten_to_measure();
         let beats = m.beats();
         assert_eq!(beats.len(), 4);

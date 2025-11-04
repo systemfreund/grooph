@@ -39,7 +39,6 @@ impl MyApp {
         let ff = FontFamily::Name("music".into());
         // Example rhythm: empty 7/8 measure (will render as rests)
         let mut measure = RhythmMeasure::new(TimeSignature::SEVEN_EIGHT);
-        // measure.subdivide(&[], 2);
         Self {
             font_family: ff.clone(),
             font_id: FontId::new(64.0, ff),
@@ -73,12 +72,13 @@ struct SlotBox {
     rect: egui::Rect,
     span_ticks: i32,
     content: SlotContent,
+    path: Vec<usize>,
 }
 
-fn layout_rhythm_boxes(node: &RhythmNode, span_ticks: i32, rect: egui::Rect, out: &mut Vec<SlotBox>) {
+fn layout_rhythm_boxes(node: &RhythmNode, span_ticks: i32, rect: egui::Rect, path: &mut Vec<usize>, out: &mut Vec<SlotBox>) {
     match node {
         RhythmNode::Leaf(content) => {
-            out.push(SlotBox { rect, span_ticks, content: content.clone() });
+            out.push(SlotBox { rect, span_ticks, content: content.clone(), path: path.clone() });
         }
         RhythmNode::Group { n, children } => {
             let n_i = *n as i32;
@@ -90,7 +90,9 @@ fn layout_rhythm_boxes(node: &RhythmNode, span_ticks: i32, rect: egui::Rect, out
                     pos2(left, rect.top()),
                     pos2(left + child_w, rect.bottom()),
                 );
-                layout_rhythm_boxes(child, slot_ticks, child_rect, out);
+                path.push(i);
+                layout_rhythm_boxes(child, slot_ticks, child_rect, path, out);
+                path.pop();
             }
         }
     }
@@ -101,7 +103,7 @@ fn draw_slot_overlays(ui: &mut egui::Ui, font_id: &FontId, rm: &RhythmMeasure, i
 
     let mut boxes = Vec::new();
     let total_ticks = rm.time_signature.measure_duration_ticks();
-    layout_rhythm_boxes(&rm.root, total_ticks, inner_rect, &mut boxes);
+    layout_rhythm_boxes(&rm.root, total_ticks, inner_rect, &mut[].to_vec(), &mut boxes);
 
     let border = Stroke::new(1.0, Color32::from_gray(170));
     let fill_a = Color32::from_rgba_unmultiplied(80, 160, 255, 40);
