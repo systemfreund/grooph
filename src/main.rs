@@ -6,11 +6,11 @@ mod measure;
 mod rhythm;
 
 use duration::Duration;
-use measure::{BeatKind, TimeSignature};
+use measure::TimeSignature;
 use rhythm::{RhythmMeasure, RhythmNode, SlotContent};
 
-use eframe::egui::{pos2, Align2, Context, Rangef, Stroke, Rounding};
 use crate::fill::best_fill_for_gap;
+use eframe::egui::{Align2, Context, Id, Rangef, Sense, Stroke, pos2};
 use eframe::epaint::text::{FontInsert, InsertFontFamily};
 use eframe::epaint::{Color32, FontFamily, FontId, StrokeKind};
 use eframe::{App, CreationContext, egui};
@@ -60,7 +60,10 @@ fn rest_glyph_for_duration(d: Duration) -> char {
     match d {
         Duration::Quarter => GLYPH_REST_QUARTER,
         Duration::Eighth | Duration::TripletEighth => GLYPH_REST_EIGHTH,
-        Duration::Sixteenth | Duration::QuintupletSixteenth | Duration::SextupletSixteenth | Duration::SeptupletSixteenth => GLYPH_REST_SIXTEENTH,
+        Duration::Sixteenth
+        | Duration::QuintupletSixteenth
+        | Duration::SextupletSixteenth
+        | Duration::SeptupletSixteenth => GLYPH_REST_SIXTEENTH,
         Duration::ThirtySecond | Duration::NonupletThirtySecond => GLYPH_REST_32ND,
     }
 }
@@ -75,10 +78,21 @@ struct SlotBox {
     path: Vec<usize>,
 }
 
-fn layout_rhythm_boxes(node: &RhythmNode, span_ticks: i32, rect: egui::Rect, path: &mut Vec<usize>, out: &mut Vec<SlotBox>) {
+fn layout_rhythm_boxes(
+    node: &RhythmNode,
+    span_ticks: i32,
+    rect: egui::Rect,
+    path: &mut Vec<usize>,
+    out: &mut Vec<SlotBox>,
+) {
     match node {
         RhythmNode::Leaf(content) => {
-            out.push(SlotBox { rect, span_ticks, content: content.clone(), path: path.clone() });
+            out.push(SlotBox {
+                rect,
+                span_ticks,
+                content: content.clone(),
+                path: path.clone(),
+            });
         }
         RhythmNode::Group { n, children } => {
             let n_i = *n as i32;
@@ -98,18 +112,32 @@ fn layout_rhythm_boxes(node: &RhythmNode, span_ticks: i32, rect: egui::Rect, pat
     }
 }
 
-fn draw_slot_overlays(ui: &mut egui::Ui, font_id: &FontId, rm: &RhythmMeasure, inner_rect: egui::Rect) {
+fn draw_slot_overlays(
+    ui: &mut egui::Ui,
+    font_id: &FontId,
+    rm: &mut RhythmMeasure,
+    inner_rect: egui::Rect,
+) {
     let painter = ui.painter();
 
     let mut boxes = Vec::new();
     let total_ticks = rm.time_signature.measure_duration_ticks();
-    layout_rhythm_boxes(&rm.root, total_ticks, inner_rect, &mut[].to_vec(), &mut boxes);
+    let mut path: Vec<usize> = Vec::new();
+    layout_rhythm_boxes(&rm.root, total_ticks, inner_rect, &mut path, &mut boxes);
 
     let border = Stroke::new(1.0, Color32::from_gray(170));
     let fill_a = Color32::from_rgba_unmultiplied(80, 160, 255, 40);
     let fill_b = Color32::from_rgba_unmultiplied(80, 255, 160, 24);
 
     for (idx, sb) in boxes.iter().enumerate() {
+        // Interactivity: toggle on click
+        let id = Id::new(("slot_box", &sb.path));
+        let resp = ui.interact(sb.rect, id, Sense::click());
+        if resp.clicked() {
+            // Toggle between Rest and Note at this slot path
+            rm.toggle_leaf(&sb.path);
+        }
+
         let fill = if idx % 2 == 0 { fill_a } else { fill_b };
         painter.rect_filled(sb.rect, 3.0, fill);
         painter.rect_stroke(sb.rect, 3.0, border, StrokeKind::Inside);
@@ -123,33 +151,59 @@ fn draw_slot_overlays(ui: &mut egui::Ui, font_id: &FontId, rm: &RhythmMeasure, i
 
             for (j, d) in seq.iter().enumerate() {
                 acc_ticks += d.ticks() as f32;
-                let next_x = if j == seq.len() - 1 { sb.rect.right() } else { sb.rect.left() + width * (acc_ticks / total) };
+                let next_x = if j == seq.len() - 1 {
+                    sb.rect.right()
+                } else {
+                    sb.rect.left() + width * (acc_ticks / total)
+                };
                 let mid = pos2(0.5 * (x + next_x), 0.5 * (sb.rect.top() + sb.rect.bottom()));
 
                 let glyph = match sb.content {
                     SlotContent::Note => {
-                        if j == 0 { GLYPH_NOTEHEAD_BLACK } else { rest_glyph_for_duration(*d) }
+                        if j == 0 {
+                            GLYPH_NOTEHEAD_BLACK
+                        } else {
+                            rest_glyph_for_duration(*d)
+                        }
                     }
                     SlotContent::Rest => rest_glyph_for_duration(*d),
                 };
 
-                painter.text(mid, Align2::CENTER_CENTER, glyph.to_string(), font_id.clone(), Color32::WHITE);
+                painter.text(
+                    mid,
+                    Align2::CENTER_CENTER,
+                    glyph.to_string(),
+                    font_id.clone(),
+                    Color32::WHITE,
+                );
                 x = next_x;
             }
         }
     }
 }
 
-fn draw_measure(ui: &mut egui::Ui, font_id: &FontId, rm: &RhythmMeasure, rect: egui::Rect) {
+fn draw_measure(ui: &mut egui::Ui, font_id: &FontId, rm: &mut RhythmMeasure, rect: egui::Rect) {
     let painter = ui.painter();
     let y = rect.center().y;
     // staff line
-    painter.hline(Rangef::new(rect.left(), rect.right()), y, Stroke::new(1.0, Color32::WHITE));
+    painter.hline(
+        Rangef::new(rect.left(), rect.right()),
+        y,
+        Stroke::new(1.0, Color32::WHITE),
+    );
 
     // barlines
     let bar_stroke = Stroke::new(2.0, Color32::WHITE);
-    painter.vline(rect.left() + 16.0, Rangef::new(y - 24.0, y + 24.0), bar_stroke);
-    painter.vline(rect.right() - 16.0, Rangef::new(y - 24.0, y + 24.0), bar_stroke);
+    painter.vline(
+        rect.left() + 16.0,
+        Rangef::new(y - 24.0, y + 24.0),
+        bar_stroke,
+    );
+    painter.vline(
+        rect.right() - 16.0,
+        Rangef::new(y - 24.0, y + 24.0),
+        bar_stroke,
+    );
 
     // layout area inside barlines
     let left = rect.left() + 24.0;
@@ -165,7 +219,7 @@ impl App for MyApp {
         egui::CentralPanel::default().show(ctx, |ui| {
             Frame::canvas(ui.style()).show(ui, |ui| {
                 let (_id, rect) = ui.allocate_space(ui.available_size());
-                draw_measure(ui, &self.font_id, &self.measure, rect);
+                draw_measure(ui, &self.font_id, &mut self.measure, rect);
             });
         });
     }
