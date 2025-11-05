@@ -14,6 +14,7 @@ use eframe::egui::{Align2, Context, Id, Rangef, Sense, Stroke, pos2};
 use eframe::epaint::text::{FontInsert, InsertFontFamily};
 use eframe::epaint::{Color32, FontFamily, FontId, StrokeKind};
 use eframe::{App, CreationContext, egui};
+use eframe::emath::Pos2;
 use egui::containers::Frame;
 
 struct MyApp {
@@ -88,7 +89,7 @@ fn flag_glyph_for_duration(d: Duration) -> Option<char> {
 
 // Helper: choose rest glyph by duration already defined above
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct SlotBox {
     rect: egui::Rect,
     span_ticks: i32,
@@ -159,68 +160,56 @@ fn draw_slot_overlays(
         painter.rect_stroke(sb.rect, 3.0, border, StrokeKind::Inside);
 
         // Within each slot, draw the local minimal spelling.
-        if let Some(seq) = best_fill_for_gap(sb.span_ticks) {
-            let mut x = sb.rect.left();
-            let width = sb.rect.width();
-            let mut acc_ticks = 0.0_f32;
-            let total = sb.span_ticks as f32;
+        //println!("{:?} - {} => {:?}", sb.path, sb.span_ticks, duration);
+        draw_note(painter, font_id, sb);
+    }
+}
 
-            for (j, d) in seq.iter().enumerate() {
-                acc_ticks += d.ticks() as f32;
-                let next_x = if j == seq.len() - 1 {
-                    sb.rect.right()
-                } else {
-                    sb.rect.left() + width * (acc_ticks / total)
-                };
-                let mid = pos2(0.5 * (x + next_x), 0.5 * (sb.rect.top() + sb.rect.bottom()));
+fn draw_note(
+    painter: &egui::Painter,
+    font_id: &FontId,
+    sb: &SlotBox,
+) {
+    let x = sb.rect.left();
+    let next_x = sb.rect.left() + sb.rect.width();
+    let mid = pos2(0.5 * (x + next_x), 0.5 * (sb.rect.top() + sb.rect.bottom()));
+    let duration = Duration::from_ticks(sb.span_ticks).unwrap();
+    let glyph = match sb.content {
+        SlotContent::Note => GLYPH_NOTEHEAD_BLACK,
+        SlotContent::Rest => rest_glyph_for_duration(duration),
+    };
 
-                let glyph = match sb.content {
-                    SlotContent::Note => {
-                        if j == 0 {
-                            GLYPH_NOTEHEAD_BLACK
-                        } else {
-                            rest_glyph_for_duration(*d)
-                        }
-                    }
-                    SlotContent::Rest => rest_glyph_for_duration(*d),
-                };
+    // Draw the glyph (notehead or rest)
+    painter.text(
+        mid,
+        Align2::CENTER_CENTER,
+        glyph.to_string(),
+        font_id.clone(),
+        Color32::WHITE,
+    );
 
-                // Draw the glyph (notehead or rest)
-                painter.text(
-                    mid,
-                    Align2::CENTER_CENTER,
-                    glyph.to_string(),
-                    font_id.clone(),
-                    Color32::WHITE,
-                );
+    // If this is a Note, draw a simple upward stem next to the notehead,
+    // and add a flag according to the duration (8th=1, 16th=2, 32nd=3; tuplets map similarly).
+    if sb.content == SlotContent::Note {
+        // Stem positioning relative to notehead center.
+        let stem_offset_x = font_id.size * 0.13; // tweak by eye for Bravura
+        let stem_len = font_id.size * 0.9; // proportional stem length
+        let stem_thickness = 2.2;
+        let start = pos2(mid.x + stem_offset_x, mid.y);
+        let end = pos2(start.x, mid.y - stem_len);
+        painter.line_segment([start, end], Stroke::new(stem_thickness, Color32::WHITE));
 
-                // If this is the first segment of a Note, draw a simple upward stem next to the notehead,
-                // and add a flag according to the duration (8th=1, 16th=2, 32nd=3; tuplets map similarly).
-                if sb.content == SlotContent::Note && j == 0 {
-                    // Stem positioning relative to notehead center.
-                    let stem_offset_x = font_id.size * 0.13; // tweak by eye for Bravura
-                    let stem_len = font_id.size * 0.9;       // proportional stem length
-                    let stem_thickness = 2.2;
-                    let start = pos2(mid.x + stem_offset_x, mid.y);
-                    let end = pos2(start.x, mid.y - stem_len);
-                    painter.line_segment([start, end], Stroke::new(stem_thickness, Color32::WHITE));
-
-                    // Flag glyph at the stem tip for short durations
-                    if let Some(flag) = flag_glyph_for_duration(*d) {
-                        let fx = end.x + font_id.size * 0.00;
-                        let fy = end.y + font_id.size * 0.00;
-                        painter.text(
-                            pos2(fx, fy),
-                            Align2::LEFT_CENTER,
-                            flag.to_string(),
-                            font_id.clone(),
-                            Color32::WHITE,
-                        );
-                    }
-                }
-
-                x = next_x;
-            }
+        // Flag glyph at the stem tip for short durations
+        if let Some(flag) = flag_glyph_for_duration(duration) {
+            let fx = end.x + font_id.size * 0.00;
+            let fy = end.y + font_id.size * 0.00;
+            painter.text(
+                pos2(fx, fy),
+                Align2::LEFT_CENTER,
+                flag.to_string(),
+                font_id.clone(),
+                Color32::WHITE,
+            );
         }
     }
 }
