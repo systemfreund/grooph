@@ -37,8 +37,9 @@ impl MyApp {
     fn new(cc: &CreationContext) -> Self {
         add_font(&cc.egui_ctx);
         let ff = FontFamily::Name("music".into());
-        // Example rhythm: empty 7/8 measure (will render as rests)
         let mut measure = RhythmMeasure::new(TimeSignature::SEVEN_EIGHT);
+        measure.subdivide(&[1], 2, SlotContent::Note);
+        measure.subdivide(&[3], 3, SlotContent::Note);
         Self {
             font_family: ff.clone(),
             font_id: FontId::new(64.0, ff),
@@ -126,8 +127,7 @@ fn draw_slot_overlays(
     layout_rhythm_boxes(&rm.root, total_ticks, inner_rect, &mut path, &mut boxes);
 
     let border = Stroke::new(1.0, Color32::from_gray(170));
-    let fill_a = Color32::from_rgba_unmultiplied(80, 160, 255, 40);
-    let fill_b = Color32::from_rgba_unmultiplied(80, 255, 160, 24);
+    let fill = Color32::from_rgba_unmultiplied(80, 160, 255, 40);
 
     for (idx, sb) in boxes.iter().enumerate() {
         // Interactivity: toggle on click
@@ -138,7 +138,6 @@ fn draw_slot_overlays(
             rm.toggle_leaf(&sb.path);
         }
 
-        let fill = if idx % 2 == 0 { fill_a } else { fill_b };
         painter.rect_filled(sb.rect, 3.0, fill);
         painter.rect_stroke(sb.rect, 3.0, border, StrokeKind::Inside);
 
@@ -232,7 +231,7 @@ fn main() -> eframe::Result {
     };
 
     eframe::run_native(
-        "Rustronome",
+        "grooph",
         options,
         Box::new(|cc| Ok(Box::new(MyApp::new(cc)))),
     )
