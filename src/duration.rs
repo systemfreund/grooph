@@ -1,4 +1,4 @@
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Duration {
     Quarter,
     Eighth,
@@ -73,5 +73,30 @@ impl Duration {
     pub fn ticks(&self) -> i32 {
         let denom = Self::denominator_of(*self);
         Self::TICKS_PER_WHOLE / denom
+    }
+
+    /// Returns the Duration that exactly corresponds to the given tick count, if any.
+    /// This performs an exact match; if the ticks value doesn't match a supported
+    /// duration, None is returned.
+    pub fn from_ticks(ticks: i32) -> Option<Duration> {
+        let mut i = 0;
+        while i < Self::DURATIONS.len() {
+            let d = Self::DURATIONS[i];
+            if d.ticks() == ticks { return Some(d); }
+            i += 1;
+        }
+        None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Duration;
+
+    #[test]
+    fn from_ticks_roundtrip() {
+        for d in Duration::DURATIONS.iter() {
+            assert_eq!(Duration::from_ticks(d.ticks()), Some(*d));
+        }
     }
 }

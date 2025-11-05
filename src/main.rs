@@ -57,6 +57,11 @@ const GLYPH_REST_EIGHTH: char = '\u{E4E6}';
 const GLYPH_REST_SIXTEENTH: char = '\u{E4E7}';
 const GLYPH_REST_32ND: char = '\u{E4E8}';
 
+// Up-stem flags (SMuFL): U+E240..U+E242
+const GLYPH_FLAG_8TH_UP: char = '\u{E240}';
+const GLYPH_FLAG_16TH_UP: char = '\u{E241}';
+const GLYPH_FLAG_32ND_UP: char = '\u{E242}';
+
 fn rest_glyph_for_duration(d: Duration) -> char {
     match d {
         Duration::Quarter => GLYPH_REST_QUARTER,
@@ -66,6 +71,18 @@ fn rest_glyph_for_duration(d: Duration) -> char {
         | Duration::SextupletSixteenth
         | Duration::SeptupletSixteenth => GLYPH_REST_SIXTEENTH,
         Duration::ThirtySecond | Duration::NonupletThirtySecond => GLYPH_REST_32ND,
+    }
+}
+
+fn flag_glyph_for_duration(d: Duration) -> Option<char> {
+    match d {
+        Duration::Quarter => None,
+        Duration::Eighth | Duration::TripletEighth => Some(GLYPH_FLAG_8TH_UP),
+        Duration::Sixteenth
+        | Duration::QuintupletSixteenth
+        | Duration::SextupletSixteenth
+        | Duration::SeptupletSixteenth => Some(GLYPH_FLAG_16TH_UP),
+        Duration::ThirtySecond | Duration::NonupletThirtySecond => Some(GLYPH_FLAG_32ND_UP),
     }
 }
 
@@ -129,7 +146,7 @@ fn draw_slot_overlays(
     let border = Stroke::new(1.0, Color32::from_gray(170));
     let fill = Color32::from_rgba_unmultiplied(80, 160, 255, 40);
 
-    for (idx, sb) in boxes.iter().enumerate() {
+    for (_idx, sb) in boxes.iter().enumerate() {
         // Interactivity: toggle on click
         let id = Id::new(("slot_box", &sb.path));
         let resp = ui.interact(sb.rect, id, Sense::click());
@@ -168,6 +185,7 @@ fn draw_slot_overlays(
                     SlotContent::Rest => rest_glyph_for_duration(*d),
                 };
 
+                // Draw the glyph (notehead or rest)
                 painter.text(
                     mid,
                     Align2::CENTER_CENTER,
@@ -175,6 +193,32 @@ fn draw_slot_overlays(
                     font_id.clone(),
                     Color32::WHITE,
                 );
+
+                // If this is the first segment of a Note, draw a simple upward stem next to the notehead,
+                // and add a flag according to the duration (8th=1, 16th=2, 32nd=3; tuplets map similarly).
+                if sb.content == SlotContent::Note && j == 0 {
+                    // Stem positioning relative to notehead center.
+                    let stem_offset_x = font_id.size * 0.13; // tweak by eye for Bravura
+                    let stem_len = font_id.size * 0.9;       // proportional stem length
+                    let stem_thickness = 2.2;
+                    let start = pos2(mid.x + stem_offset_x, mid.y);
+                    let end = pos2(start.x, mid.y - stem_len);
+                    painter.line_segment([start, end], Stroke::new(stem_thickness, Color32::WHITE));
+
+                    // Flag glyph at the stem tip for short durations
+                    if let Some(flag) = flag_glyph_for_duration(*d) {
+                        let fx = end.x + font_id.size * 0.00;
+                        let fy = end.y + font_id.size * 0.00;
+                        painter.text(
+                            pos2(fx, fy),
+                            Align2::LEFT_CENTER,
+                            flag.to_string(),
+                            font_id.clone(),
+                            Color32::WHITE,
+                        );
+                    }
+                }
+
                 x = next_x;
             }
         }

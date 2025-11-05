@@ -259,7 +259,7 @@ impl Measure {
 
 #[cfg(test)]
 mod tests {
-    use crate::duration::Duration::{Quarter, Eighth, Sixteenth, TripletEighth, SextupletSixteenth, QuintupletSixteenth, ThirtySecond};
+    use crate::duration::Duration::{Quarter, Eighth, Sixteenth, TripletEighth, SextupletSixteenth, ThirtySecond};
     use super::*;
 
     #[test]

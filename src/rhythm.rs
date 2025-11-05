@@ -75,16 +75,18 @@ impl RhythmMeasure {
         match Self::get_mut(&mut self.root, path) {
             Some(RhythmNode::Group { n: _, children }) => {
                 let mut any_note = false;
-                let mut all_rest = true;
+                // let mut all_rest = true;
                 for ch in children.iter() {
                     match ch {
                         RhythmNode::Leaf(SlotContent::Note) => {
-                            any_note = true; all_rest = false;
+                            any_note = true;
+                            // all_rest = false;
                         }
                         RhythmNode::Leaf(SlotContent::Rest) => {}
                         RhythmNode::Group { .. } => {
                             // nested groups -> policy: treat as note
-                            any_note = true; all_rest = false;
+                            any_note = true;
+                            // all_rest = false;
                         }
                     }
                 }
