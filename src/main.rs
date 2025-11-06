@@ -102,19 +102,25 @@ fn layout_rhythm_boxes(
         RhythmNode::Leaf(content) => {
             out.push(SlotBox { rect, span_ticks, content: *content, path: path.clone() });
         }
-        RhythmNode::Group { n, children } => {
-            let n_i = *n as i32;
-            let slot_ticks = span_ticks / n_i;
-            let child_w = rect.width() / (*n as f32);
-            for (i, child) in children.iter().enumerate() {
-                let left = rect.left() + child_w * (i as f32);
+        RhythmNode::Weighted { weights, children } => {
+            let sum_w: i32 = weights.iter().map(|&w| w as i32).sum();
+            if sum_w <= 0 { return; }
+            let unit_ticks = span_ticks / sum_w;
+            let total_w = sum_w as f32;
+            let mut acc_w = 0f32;
+            for (i, (w, child)) in weights.iter().zip(children.iter()).enumerate() {
+                let w_f = *w as f32;
+                let left = rect.left() + rect.width() * (acc_w / total_w);
+                let right = rect.left() + rect.width() * ((acc_w + w_f) / total_w);
                 let child_rect = egui::Rect::from_min_max(
                     pos2(left, rect.top()),
-                    pos2(left + child_w, rect.bottom()),
+                    pos2(right, rect.bottom()),
                 );
+                let child_ticks = unit_ticks * (*w as i32);
                 path.push(i);
-                layout_rhythm_boxes(child, slot_ticks, child_rect, path, out);
+                layout_rhythm_boxes(child, child_ticks, child_rect, path, out);
                 path.pop();
+                acc_w += w_f;
             }
         }
     }

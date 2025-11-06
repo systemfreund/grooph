@@ -1,7 +1,8 @@
 use crate::fill::best_fill_for_gap;
 use crate::measure::{Beat, Measure, TimeSignature};
 
-/// Authoritative rhythm representation: a tree of equal-time slots (groups) and leaves.
+/// Authoritative rhythm representation: a tree of weighted groups (internal) and leaves.
+/// Public façade exposes only equal subdivide and tuplet-insertion operations.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SlotContent {
     /// Click at the start of the span; remainder of the span is silent.
@@ -12,9 +13,9 @@ pub enum SlotContent {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RhythmNode {
-    /// Subdivide the current span into `n` equal slots.
-    /// Children length must equal `n`.
-    Group { n: usize, children: Vec<RhythmNode> },
+    /// Weighted group: subdivide the current span proportionally to weights.
+    /// Children length must equal `weights.len()`.
+    Weighted { weights: Vec<u32>, children: Vec<RhythmNode> },
     /// Leaf occupying the entire span.
     Leaf(SlotContent),
 }
@@ -50,10 +51,59 @@ impl RhythmMeasure {
         }
         let node = Self::get_mut(&mut self.root, path);
         match node {
-            Some(RhythmNode::Group { .. }) | Some(RhythmNode::Leaf(_)) => {
+            Some(RhythmNode::Weighted { .. }) | Some(RhythmNode::Leaf(_)) => {
                 let children = vec![RhythmNode::Leaf(init); n];
-                *node.unwrap() = RhythmNode::Group { n, children };
+                let weights = vec![1u32; n];
+                *node.unwrap() = RhythmNode::Weighted { weights, children };
                 true
+            }
+            None => false,
+        }
+    }
+
+    /// Facade: Insert an n-in-m tuplet over `m_units` adjacent unit-children starting at `start_idx` under the node at `parent_path`.
+    /// This rewrites the parent weighted group by replacing those children with a single child that spans `m_units` units,
+    /// whose subtree is an equal weighted group of `n_tuplet` leaves initialized with `init`.
+    pub fn insert_tuplet(
+        &mut self,
+        parent_path: &[usize],
+        start_idx: usize,
+        m_units: usize,
+        n_tuplet: u8,
+        init: SlotContent,
+    ) -> bool {
+        if m_units == 0 || n_tuplet == 0 {
+            return false;
+        }
+        // Navigate to the parent node
+        let parent_opt = Self::get_mut(&mut self.root, parent_path);
+        match parent_opt {
+            Some(RhythmNode::Weighted { weights, children }) => {
+                if start_idx >= children.len() { return false; }
+                // We will cover exactly m_units adjacent "unit" children, counted by number of children, not by weights.
+                // Require that the selected range exists and that each selected child has implied unit=1 in the parent.
+                // To keep the facade simple, enforce that the selected slice has total weight == m_units.
+                let end_idx = start_idx.saturating_add(m_units);
+                if end_idx > children.len() { return false; }
+                let slice_weight: u32 = weights[start_idx..end_idx].iter().copied().sum();
+                if slice_weight != m_units as u32 { return false; }
+
+                // Build inner tuplet group: equal n_tuplet leaves
+                let inner_children = vec![RhythmNode::Leaf(init); n_tuplet as usize];
+                let inner_weights = vec![1u32; n_tuplet as usize];
+                let tuplet_node = RhythmNode::Weighted { weights: inner_weights, children: inner_children };
+
+                // Splice: replace [start_idx..end_idx) with single child of weight m_units
+                children.splice(start_idx..end_idx, std::iter::once(tuplet_node));
+                weights.splice(start_idx..end_idx, std::iter::once(m_units as u32));
+
+                true
+            }
+            Some(RhythmNode::Leaf(_)) => {
+                // Parent is a leaf; cannot insert under a leaf. If path points to leaf, we can replace leaf with a group spanning 1 unit then insert?
+                // Minimal approach: turn the leaf into a weighted group of m_units units covering itself, then insert at index 0.
+                // But to keep changes minimal, return false for now.
+                false
             }
             None => false,
         }
@@ -65,7 +115,7 @@ impl RhythmMeasure {
             return Some(node);
         }
         match node {
-            RhythmNode::Group { n: _n, children } => {
+            RhythmNode::Weighted { weights: _w, children } => {
                 let idx = path[0];
                 children.get_mut(idx).and_then(|child| Self::get_mut(child, &path[1..]))
             }
@@ -89,14 +139,15 @@ impl RhythmMeasure {
         match node {
             RhythmNode::Leaf(SlotContent::Note) => Self::fill_span(out, span_ticks, true),
             RhythmNode::Leaf(SlotContent::Rest) => Self::fill_span(out, span_ticks, false),
-            RhythmNode::Group { n, children } => {
-                let n = *n as i32;
-                if span_ticks % n != 0 {
+            RhythmNode::Weighted { weights, children } => {
+                let sum_w: i32 = weights.iter().map(|&w| w as i32).sum();
+                if sum_w <= 0 || span_ticks % sum_w != 0 {
                     return false;
                 }
-                let slot = span_ticks / n;
-                for child in children {
-                    if !Self::flatten_node(child, slot, out) {
+                let unit = span_ticks / sum_w;
+                for (w, child) in weights.iter().zip(children.iter()) {
+                    let child_span = unit * (*w as i32);
+                    if !Self::flatten_node(child, child_span, out) {
                         return false;
                     }
                 }
@@ -225,4 +276,34 @@ mod tests {
         rm.subdivide(&[], 3, SlotContent::Note);
         assert_flattened(rm, vec![sx16(), sx16(), sx16()]);
     }
+
+    #[test]
+    fn build_three_eighth_triplets_plus_eighth() {
+        // 3/8 measure
+        let ts = TimeSignature { beats: 3, beat_unit: 8 };
+        let mut rm = RhythmMeasure::new(ts);
+
+        // Split root into 3 equal eighth slots: weights = [1,1,1]
+        assert!(rm.subdivide(&[], 3, SlotContent::Rest));
+
+        // Replace the first two slots with a 3-in-2 tuplet group (triplet-eighths)
+        // parent_path = [] (root), start_idx = 0, m_units = 2, n_tuplet = 3
+        assert!(rm.insert_tuplet(&[], 0, 2, 3, SlotContent::Rest));
+
+        // Paths after the rewrite:
+        // root children: [ 0: (tuplet group over 2 units), 1: (remaining 1 unit) ]
+        // Inside the tuplet child (index 0): three equal leaves at paths [0,0], [0,1], [0,2]
+
+        // Toggle the triplet leaves to Note
+        rm.toggle_leaf(&[0, 0]);
+        rm.toggle_leaf(&[0, 1]);
+        rm.toggle_leaf(&[0, 2]);
+
+        // Toggle the remaining eighth (root child index 1) to Note
+        rm.toggle_leaf(&[1]);
+
+        println!("{:?}", rm);
+        rm.flatten_to_measure().map(|m| println!("{}", m));
+    }
+
 }

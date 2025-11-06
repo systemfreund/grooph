@@ -176,7 +176,7 @@ impl Display for Measure {
                     Duration::Dotted { base: _base, dots } => {
                         write!(f, "{}", "\u{1D16D}".repeat(dots as usize))
                     }
-                    Duration::Tuplet { .. } => write!(f, "\u{0332}"),
+                    Duration::Tuplet { .. } => write!(f, "T"),
                 })
             })
         })
