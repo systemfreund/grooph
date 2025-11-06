@@ -36,6 +36,11 @@ impl TimeSignature {
         beat_unit: 8,
     };
 
+    pub const TWO_EIGHT: Self = Self {
+        beats: 2,
+        beat_unit: 8,
+    };
+
     pub const SEVEN_EIGHT: Self = Self {
         beats: 7,
         beat_unit: 8,

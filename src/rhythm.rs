@@ -144,7 +144,6 @@ mod tests {
     #[test]
     fn flatten_triplet_over_one_four() {
         let mut rm = RhythmMeasure::new(TimeSignature::ONE_FOUR);
-        // Subdivide root into 3 slots (triplet) and keep all as notes
         assert!(rm.subdivide(&[], 3, SlotContent::Rest));
         assert_flattened(rm, vec![TripletEighth, TripletEighth, TripletEighth]);
     }
@@ -156,9 +155,8 @@ mod tests {
     }
 
     #[test]
-    fn flatten_triplet_over_seven_eight() {
-        let mut rm = RhythmMeasure::new(TimeSignature::SEVEN_EIGHT);
-        // Subdivide root into 3 slots (triplet) and keep all as notes
+    fn flatten_triplet_over_two_eight() {
+        let mut rm = RhythmMeasure::new(TimeSignature::TWO_EIGHT);
         assert!(rm.subdivide(&[], 3, SlotContent::Rest));
         assert_flattened(rm, vec![TripletEighth, TripletEighth, TripletEighth]);
     }
@@ -167,7 +165,6 @@ mod tests {
     fn flatten_triplet_with_last_slot_subdivided_into_two() {
         let mut rm = RhythmMeasure::new(TimeSignature::ONE_FOUR);
         assert!(rm.subdivide(&[], 3, SlotContent::Rest));
-        // Subdivide third slot (index 2) into two and keep both as notes
         assert!(rm.subdivide(&[2], 2, SlotContent::Rest));
 
         // falsch?
@@ -185,7 +182,7 @@ mod tests {
     #[test]
     fn flatten_two_sixteenth_measure_with_several_subdivision() {
         let mut rm = RhythmMeasure::new(TimeSignature::TWO_SIXTEENTH);
-        assert_flattened(rm, vec![Sixteenth, Sixteenth]);
+        assert_flattened(rm, vec![Eighth]);
         // rm.subdivide(&[], 1, SlotContent::Note);
     }
 
