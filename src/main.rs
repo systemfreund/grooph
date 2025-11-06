@@ -5,7 +5,7 @@ mod fill;
 mod measure;
 mod rhythm;
 
-use duration::Duration;
+use duration::{Duration, NoteValue};
 use measure::TimeSignature;
 use rhythm::{RhythmMeasure, RhythmNode, SlotContent};
 
@@ -66,26 +66,22 @@ const GLYPH_FLAG_16TH_UP: char = '\u{E242}';
 const GLYPH_FLAG_32ND_UP: char = '\u{E244}';
 
 fn rest_glyph_for_duration(d: Duration) -> char {
-    match d {
-        Duration::Quarter => GLYPH_REST_QUARTER,
-        Duration::Eighth | Duration::TripletEighth => GLYPH_REST_EIGHTH,
-        Duration::Sixteenth
-        | Duration::QuintupletSixteenth
-        | Duration::SextupletSixteenth
-        | Duration::SeptupletSixteenth => GLYPH_REST_SIXTEENTH,
-        Duration::ThirtySecond | Duration::NonupletThirtySecond => GLYPH_REST_32ND,
+    match d.base_note() {
+        NoteValue::Quarter => GLYPH_REST_QUARTER,
+        NoteValue::Eighth => GLYPH_REST_EIGHTH,
+        NoteValue::Sixteenth => GLYPH_REST_SIXTEENTH,
+        NoteValue::ThirtySecond => GLYPH_REST_32ND,
+        NoteValue::Half | NoteValue::Whole => GLYPH_REST_QUARTER,
     }
 }
 
 fn flag_glyph_for_duration(d: Duration) -> Option<char> {
-    match d {
-        Duration::Quarter => None,
-        Duration::Eighth | Duration::TripletEighth => Some(GLYPH_FLAG_8TH_UP),
-        Duration::Sixteenth
-        | Duration::QuintupletSixteenth
-        | Duration::SextupletSixteenth
-        | Duration::SeptupletSixteenth => Some(GLYPH_FLAG_16TH_UP),
-        Duration::ThirtySecond | Duration::NonupletThirtySecond => Some(GLYPH_FLAG_32ND_UP),
+    match d.base_note() {
+        NoteValue::Quarter => None,
+        NoteValue::Eighth => Some(GLYPH_FLAG_8TH_UP),
+        NoteValue::Sixteenth => Some(GLYPH_FLAG_16TH_UP),
+        NoteValue::ThirtySecond => Some(GLYPH_FLAG_32ND_UP),
+        NoteValue::Half | NoteValue::Whole => None,
     }
 }
 
@@ -171,7 +167,9 @@ fn draw_slot_overlays(
             let total = sb.span_ticks as f32;
 
             for (j, d) in seq.iter().enumerate() {
-                acc_ticks += d.ticks() as f32;
+                // Use default dynamic grid to compute tick proportions
+                let grid = duration::default_grid();
+                acc_ticks += grid.ticks_of(d).unwrap() as f32;
                 let next_x = if j == seq.len() - 1 {
                     sb.rect.right()
                 } else {

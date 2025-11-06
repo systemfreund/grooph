@@ -122,8 +122,12 @@ impl RhythmMeasure {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::duration::Duration;
-    use crate::duration::Duration::{TripletEighth, SextupletSixteenth, Quarter, Eighth, Sixteenth};
+    use crate::duration::{Duration, NoteValue};
+    fn q() -> Duration { Duration::Simple(NoteValue::Quarter) }
+    fn e() -> Duration { Duration::Simple(NoteValue::Eighth) }
+    fn s16() -> Duration { Duration::Simple(NoteValue::Sixteenth) }
+    fn t8() -> Duration { Duration::Tuplet { n: 3, m: 2, base: NoteValue::Eighth } }
+    fn sx16() -> Duration { Duration::Tuplet { n: 6, m: 4, base: NoteValue::Sixteenth } }
 
     fn assert_flattened(rm: RhythmMeasure, expected_beat_durations: Vec<Duration>) {
         let m = rm.flatten_to_measure().unwrap();
@@ -138,27 +142,27 @@ mod tests {
     #[test]
     fn flatten_empty_measure_over_four_four() {
         let rm = RhythmMeasure::new(TimeSignature::FOUR_FOUR);
-        assert_flattened(rm, vec![Quarter, Quarter, Quarter, Quarter]);
+        assert_flattened(rm, vec![q(), q(), q(), q()]);
     }
 
     #[test]
     fn flatten_triplet_over_one_four() {
         let mut rm = RhythmMeasure::new(TimeSignature::ONE_FOUR);
         assert!(rm.subdivide(&[], 3, SlotContent::Rest));
-        assert_flattened(rm, vec![TripletEighth, TripletEighth, TripletEighth]);
+        assert_flattened(rm, vec![t8(), t8(), t8()]);
     }
 
     #[test]
     fn flatten_empty_measure_over_seven_eight() {
         let rm = RhythmMeasure::new(TimeSignature::SEVEN_EIGHT);
-        assert_flattened(rm, vec![Quarter, Quarter, Quarter, Eighth]);
+        assert_flattened(rm, vec![q(), q(), q(), e()]);
     }
 
     #[test]
     fn flatten_triplet_over_two_eight() {
         let mut rm = RhythmMeasure::new(TimeSignature::TWO_EIGHT);
         assert!(rm.subdivide(&[], 3, SlotContent::Rest));
-        assert_flattened(rm, vec![TripletEighth, TripletEighth, TripletEighth]);
+        assert_flattened(rm, vec![t8(), t8(), t8()]);
     }
 
     #[test]
@@ -171,10 +175,10 @@ mod tests {
         assert_flattened(
             rm,
             vec![
-                TripletEighth,
-                TripletEighth,
-                SextupletSixteenth,
-                SextupletSixteenth,
+                t8(),
+                t8(),
+                sx16(),
+                sx16(),
             ],
         );
     }
@@ -182,7 +186,7 @@ mod tests {
     #[test]
     fn flatten_two_sixteenth_measure_with_several_subdivision() {
         let mut rm = RhythmMeasure::new(TimeSignature::TWO_SIXTEENTH);
-        assert_flattened(rm, vec![Eighth]);
+        assert_flattened(rm, vec![e()]);
         // rm.subdivide(&[], 1, SlotContent::Note);
     }
 
@@ -198,6 +202,6 @@ mod tests {
     fn flatten_16th_triplets_over_two_sixteenth() {
         let mut rm = RhythmMeasure::new(TimeSignature::TWO_SIXTEENTH);
         rm.subdivide(&[], 3, SlotContent::Note);
-        assert_flattened(rm, vec![SextupletSixteenth, SextupletSixteenth, SextupletSixteenth]);
+        assert_flattened(rm, vec![sx16(), sx16(), sx16()]);
     }
 }

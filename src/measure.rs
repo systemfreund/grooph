@@ -1,5 +1,5 @@
 use std::fmt::{Display, Formatter};
-use crate::duration::Duration;
+use crate::duration::{Duration, NoteValue, Grid, COMMON_DURATIONS, default_grid};
 
 /// Represents a time signature (e.g., 4/4, 3/4, 6/8)
 #[derive(Debug, Clone)]
@@ -48,9 +48,9 @@ impl TimeSignature {
 
     /// Returns the total duration in integer ticks
     pub fn measure_duration_ticks(&self) -> i32 {
-        // number of whole-note fractions: beats / beat_unit of a whole note
-        // Convert to ticks: (beats * TICKS_PER_WHOLE) / beat_unit
-        ((self.beats as i32) * Duration::TICKS_PER_WHOLE) / (self.beat_unit as i32)
+        // Dynamic grid built from common durations, can be swapped to a fixed constant later
+        let grid = default_grid();
+        ((self.beats as i32) * grid.ticks_per_whole) / (self.beat_unit as i32)
     }
 }
 
@@ -84,16 +84,13 @@ impl Beat {
     }
 
     const fn to_glyph(beat: &Beat) -> (&'static str, &'static str) {
-        match beat.duration {
-            Duration::Quarter => ("𝅘𝅥", "𝄽"),
-            Duration::Eighth => ("𝅘𝅥𝅮", "𝄾"),
-            Duration::TripletEighth => ("𝅘𝅥𝅮", "𝄾"),
-            Duration::Sixteenth => ("𝅘𝅥𝅯", "𝄿"),
-            Duration::QuintupletSixteenth => ("𝅘𝅥𝅯", "𝄿"),
-            Duration::SextupletSixteenth => ("𝅘𝅥𝅯", "𝄿"),
-            Duration::SeptupletSixteenth => ("𝅘𝅥𝅯", "𝄿"),
-            Duration::ThirtySecond => ("𝅘𝅥𝅰", "𝅀"),
-            Duration::NonupletThirtySecond => ("𝅘𝅥𝅰", "𝅀"),
+        // Glyphs are determined by base note value only; tuplets/rests share the same shapes
+        match beat.duration.base_note() {
+            NoteValue::Quarter => ("𝅘𝅥", "𝄽"),
+            NoteValue::Eighth => ("𝅘𝅥𝅮", "𝄾"),
+            NoteValue::Sixteenth => ("𝅘𝅥𝅯", "𝄿"),
+            NoteValue::ThirtySecond => ("𝅘𝅥𝅰", "𝅀"),
+            NoteValue::Half | NoteValue::Whole => ("𝅝", "𝄻"), // fallback; not used yet
         }
     }
 }
@@ -138,7 +135,8 @@ impl Measure {
 
     /// Returns the current total duration in ticks (exact)
     fn current_ticks(&self) -> i32 {
-        self.beats.iter().map(|beat| beat.duration.ticks()).sum()
+        let grid = default_grid();
+        self.beats.iter().map(|beat| grid.ticks_of(&beat.duration).unwrap()).sum()
     }
 
     /// Returns true if the remaining ticks can be exactly filled using the available durations
@@ -146,9 +144,10 @@ impl Measure {
         if remaining_ticks == 0 { return true; }
         if remaining_ticks < 0 { return false; }
         // Build the available coin sizes (ticks) from the supported durations. Larger first helps pruning.
-        let mut coins: Vec<i32> = Duration::DURATIONS
+        let grid = default_grid();
+        let mut coins: Vec<i32> = COMMON_DURATIONS
             .iter()
-            .map(|&dur| Duration::TICKS_PER_WHOLE / Duration::denominator_of(dur))
+            .map(|dur| grid.ticks_of(dur).unwrap())
             .collect();
         coins.sort_unstable_by(|a, b| b.cmp(a));
 
@@ -178,22 +177,26 @@ impl Measure {
     /// - `Err(MeasureError::Overflow)` if adding the beat would exceed the measure's capacity
     /// - `Err(MeasureError::Unfillable)` if the addition leaves an unfillable remainder
     pub fn add_beat(&mut self, beat: Beat) -> Result<(), MeasureError> {
+        let grid = default_grid();
         let current_ticks = self.current_ticks();
         let max_ticks = self.time_signature.measure_duration_ticks();
-        let beat_ticks = beat.duration.ticks();
+        let beat_ticks = grid.ticks_of(&beat.duration).ok_or_else(|| {
+            // If beat cannot be represented on our default grid, treat as unfillable
+            MeasureError::Unfillable { attempted: 0.0, remaining: 0.0 }
+        })?;
         let new_total_ticks = current_ticks + beat_ticks;
 
         if new_total_ticks > max_ticks {
             let available_ticks = max_ticks - current_ticks;
-            let available = (available_ticks as f64) / (Duration::TICKS_PER_WHOLE as f64);
-            let attempted = (beat_ticks as f64) / (Duration::TICKS_PER_WHOLE as f64);
+            let available = (available_ticks as f64) / (grid.ticks_per_whole as f64);
+            let attempted = (beat_ticks as f64) / (grid.ticks_per_whole as f64);
             return Err(MeasureError::Overflow { attempted, available });
         }
 
         let remaining_ticks = max_ticks - new_total_ticks;
         if remaining_ticks != 0 && !Self::is_remainder_fillable(remaining_ticks) {
-            let remaining = (remaining_ticks as f64) / (Duration::TICKS_PER_WHOLE as f64);
-            let attempted = (beat_ticks as f64) / (Duration::TICKS_PER_WHOLE as f64);
+            let remaining = (remaining_ticks as f64) / (grid.ticks_per_whole as f64);
+            let attempted = (beat_ticks as f64) / (grid.ticks_per_whole as f64);
             return Err(MeasureError::Unfillable { attempted, remaining });
         }
 
@@ -217,13 +220,18 @@ impl Display for Measure {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::duration::Duration::{Eighth, Quarter, Sixteenth, ThirtySecond, TripletEighth};
+    use crate::duration::{Duration, NoteValue};
+    fn q() -> Duration { Duration::Simple(NoteValue::Quarter) }
+    fn e() -> Duration { Duration::Simple(NoteValue::Eighth) }
+    fn t8() -> Duration { Duration::Tuplet { n: 3, m: 2, base: NoteValue::Eighth } }
+    fn s16() -> Duration { Duration::Simple(NoteValue::Sixteenth) }
+    fn t32() -> Duration { Duration::Simple(NoteValue::ThirtySecond) }
 
     #[test]
     fn test_add_quarter_note_to_one_four_measure() {
         let mut measure = Measure::new(TimeSignature::ONE_FOUR);
 
-        let result = measure.add_beat(Beat::note(Quarter));
+        let result = measure.add_beat(Beat::note(q()));
 
         assert!(result.is_ok());
     }
@@ -232,11 +240,11 @@ mod tests {
     fn test_triplet() {
         let mut measure = Measure::new(TimeSignature::ONE_FOUR);
 
-        assert!(measure.add_beat(Beat::note(TripletEighth)).is_ok());
-        assert!(measure.add_beat(Beat::rest(TripletEighth)).is_ok());
-        assert!(measure.add_beat(Beat::note(Quarter)).is_err());
-        assert!(measure.add_beat(Beat::note(Eighth)).is_err());
-        assert!(measure.add_beat(Beat::note(Sixteenth)).is_err());
-        assert!(measure.add_beat(Beat::note(ThirtySecond)).is_err());
+        assert!(measure.add_beat(Beat::note(t8())).is_ok());
+        assert!(measure.add_beat(Beat::rest(t8())).is_ok());
+        assert!(measure.add_beat(Beat::note(q())).is_err());
+        assert!(measure.add_beat(Beat::note(e())).is_err());
+        assert!(measure.add_beat(Beat::note(s16())).is_err());
+        assert!(measure.add_beat(Beat::note(t32())).is_err());
     }
 }
