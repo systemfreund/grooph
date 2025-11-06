@@ -126,17 +126,29 @@ pub const COMMON_DURATIONS: [Duration; 9] = [
     Duration::Tuplet { n: 9, m: 8, base: NoteValue::ThirtySecond }, // nonuplet 32nd
 ];
 
-pub fn default_grid() -> Grid { Grid::from_durations(&COMMON_DURATIONS) }
+#[derive(Clone, Copy, Debug)]
+pub struct DurationSet {
+    pub durations: &'static [Duration],
+    pub grid: Grid,
+}
+
+pub fn default_duration_set() -> DurationSet {
+    let durs: &'static [Duration] = &COMMON_DURATIONS;
+    let grid = Grid::from_durations(durs);
+    DurationSet { durations: durs, grid }
+}
+
+pub fn default_grid() -> Grid { default_duration_set().grid }
 
 #[cfg(test)]
 mod tests {
-    use super::{COMMON_DURATIONS, Grid};
+    use super::default_duration_set;
 
     #[test]
     fn roundtrip_ticks_presence() {
-        let grid = Grid::from_durations(&COMMON_DURATIONS);
-        for d in COMMON_DURATIONS.iter() {
-            assert!(grid.ticks_of(d).is_some());
+        let set = default_duration_set();
+        for d in set.durations.iter() {
+            assert!(set.grid.ticks_of(d).is_some());
         }
     }
 }

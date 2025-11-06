@@ -1,4 +1,4 @@
-use crate::duration::{Duration, COMMON_DURATIONS, default_grid};
+use crate::duration::{Duration, default_duration_set};
 
 /// Compute the best exact spelling for a gap measured in ticks.
 /// Optimization priority:
@@ -9,14 +9,14 @@ pub(crate) fn best_fill_for_gap(gap_ticks: i32) -> Option<Vec<Duration>> {
     if gap_ticks < 0 { return None; }
     if gap_ticks == 0 { return Some(Vec::new()); }
 
-    let grid = default_grid();
+    let set = default_duration_set();
 
     // Build coin list: (ticks, duration, weight)
-    let mut coins: Vec<(i32, Duration, i32)> = COMMON_DURATIONS
+    let mut coins: Vec<(i32, Duration, i32)> = set.durations
         .iter()
         .filter_map(|d| {
             let den = d.denominator();
-            grid.ticks_of(d).map(|t| (t, *d, den))
+            set.grid.ticks_of(d).map(|t| (t, *d, den))
         })
         .collect();
     // Prefer smaller coin as the last step → small duration ends up at the end of the returned sequence

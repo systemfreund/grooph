@@ -167,9 +167,9 @@ fn draw_slot_overlays(
             let total = sb.span_ticks as f32;
 
             for (j, d) in seq.iter().enumerate() {
-                // Use default dynamic grid to compute tick proportions
-                let grid = duration::default_grid();
-                acc_ticks += grid.ticks_of(d).unwrap() as f32;
+                // Use the unified duration set/grid to compute tick proportions
+                let set = duration::default_duration_set();
+                acc_ticks += set.grid.ticks_of(d).unwrap() as f32;
                 let next_x = if j == seq.len() - 1 {
                     sb.rect.right()
                 } else {

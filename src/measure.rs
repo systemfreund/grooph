@@ -1,5 +1,5 @@
 use std::fmt::{Display, Formatter};
-use crate::duration::{Duration, NoteValue, Grid, COMMON_DURATIONS, default_grid};
+use crate::duration::{Duration, NoteValue, default_duration_set};
 
 /// Represents a time signature (e.g., 4/4, 3/4, 6/8)
 #[derive(Debug, Clone)]
@@ -48,9 +48,9 @@ impl TimeSignature {
 
     /// Returns the total duration in integer ticks
     pub fn measure_duration_ticks(&self) -> i32 {
-        // Dynamic grid built from common durations, can be swapped to a fixed constant later
-        let grid = default_grid();
-        ((self.beats as i32) * grid.ticks_per_whole) / (self.beat_unit as i32)
+        // Use the unified duration set to derive the grid.
+        let set = default_duration_set();
+        ((self.beats as i32) * set.grid.ticks_per_whole) / (self.beat_unit as i32)
     }
 }
 
@@ -135,8 +135,8 @@ impl Measure {
 
     /// Returns the current total duration in ticks (exact)
     fn current_ticks(&self) -> i32 {
-        let grid = default_grid();
-        self.beats.iter().map(|beat| grid.ticks_of(&beat.duration).unwrap()).sum()
+        let set = default_duration_set();
+        self.beats.iter().map(|beat| set.grid.ticks_of(&beat.duration).unwrap()).sum()
     }
 
     /// Returns true if the remaining ticks can be exactly filled using the available durations
@@ -144,10 +144,10 @@ impl Measure {
         if remaining_ticks == 0 { return true; }
         if remaining_ticks < 0 { return false; }
         // Build the available coin sizes (ticks) from the supported durations. Larger first helps pruning.
-        let grid = default_grid();
-        let mut coins: Vec<i32> = COMMON_DURATIONS
+        let set = default_duration_set();
+        let mut coins: Vec<i32> = set.durations
             .iter()
-            .map(|dur| grid.ticks_of(dur).unwrap())
+            .map(|dur| set.grid.ticks_of(dur).unwrap())
             .collect();
         coins.sort_unstable_by(|a, b| b.cmp(a));
 
@@ -177,10 +177,10 @@ impl Measure {
     /// - `Err(MeasureError::Overflow)` if adding the beat would exceed the measure's capacity
     /// - `Err(MeasureError::Unfillable)` if the addition leaves an unfillable remainder
     pub fn add_beat(&mut self, beat: Beat) -> Result<(), MeasureError> {
-        let grid = default_grid();
+        let set = default_duration_set();
         let current_ticks = self.current_ticks();
         let max_ticks = self.time_signature.measure_duration_ticks();
-        let beat_ticks = grid.ticks_of(&beat.duration).ok_or_else(|| {
+        let beat_ticks = set.grid.ticks_of(&beat.duration).ok_or_else(|| {
             // If beat cannot be represented on our default grid, treat as unfillable
             MeasureError::Unfillable { attempted: 0.0, remaining: 0.0 }
         })?;
@@ -188,15 +188,15 @@ impl Measure {
 
         if new_total_ticks > max_ticks {
             let available_ticks = max_ticks - current_ticks;
-            let available = (available_ticks as f64) / (grid.ticks_per_whole as f64);
-            let attempted = (beat_ticks as f64) / (grid.ticks_per_whole as f64);
+            let available = (available_ticks as f64) / (set.grid.ticks_per_whole as f64);
+            let attempted = (beat_ticks as f64) / (set.grid.ticks_per_whole as f64);
             return Err(MeasureError::Overflow { attempted, available });
         }
 
         let remaining_ticks = max_ticks - new_total_ticks;
         if remaining_ticks != 0 && !Self::is_remainder_fillable(remaining_ticks) {
-            let remaining = (remaining_ticks as f64) / (grid.ticks_per_whole as f64);
-            let attempted = (beat_ticks as f64) / (grid.ticks_per_whole as f64);
+            let remaining = (remaining_ticks as f64) / (set.grid.ticks_per_whole as f64);
+            let attempted = (beat_ticks as f64) / (set.grid.ticks_per_whole as f64);
             return Err(MeasureError::Unfillable { attempted, remaining });
         }
 
