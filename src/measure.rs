@@ -199,14 +199,13 @@ impl Measure {
 
 impl Display for Measure {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        for b in self.beats.iter() {
-            let (note, rest) = Beat::to_glyph(b);
-            let glyph = if b.kind == BeatKind::Note { note } else { rest };
-
-            write!(f, "{}", glyph).expect("formatting error");
-        }
-
-        Ok(())
+        self.beats.iter().fold(Ok(()), |result, b| {
+            result.and_then(|_| {
+                let (note, rest) = Beat::to_glyph(b);
+                let glyph = if b.kind == BeatKind::Note { note } else { rest };
+                write!(f, "{}", glyph)
+            })
+        })
     }
 }
 
