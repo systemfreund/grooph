@@ -218,4 +218,13 @@ mod tests {
         assert_eq!(beats[2].duration.ticks(), SextupletSixteenth.ticks());
         assert_eq!(beats[3].duration.ticks(), SextupletSixteenth.ticks());
     }
+
+    #[test]
+    fn cannot_flatten_triplets_over_one_sixteenth() {
+        let mut rm = RhythmMeasure::new(TimeSignature::ONE_SIXTEENTH);
+        rm.subdivide(&[], 3, SlotContent::Note);
+        // Cannot flatten this structure because we don't support triplets over 16th
+        let m = rm.flatten_to_measure();
+        println!("{:?}", m)
+    }
 }

@@ -9,12 +9,10 @@ use duration::Duration;
 use measure::TimeSignature;
 use rhythm::{RhythmMeasure, RhythmNode, SlotContent};
 
-use crate::fill::best_fill_for_gap;
 use eframe::egui::{Align2, Context, Id, Rangef, Sense, Stroke, pos2};
 use eframe::epaint::text::{FontInsert, InsertFontFamily};
 use eframe::epaint::{Color32, FontFamily, FontId, StrokeKind};
 use eframe::{App, CreationContext, egui};
-use eframe::emath::Pos2;
 use egui::containers::Frame;
 
 struct MyApp {
@@ -23,7 +21,7 @@ struct MyApp {
     measure: RhythmMeasure,
 }
 
-fn add_font(ctx: &egui::Context) {
+fn add_font(ctx: &Context) {
     ctx.add_font(FontInsert::new(
         "Bravura",
         egui::FontData::from_static(include_bytes!("/usr/share/fonts/OTF/Bravura.otf")),
@@ -38,9 +36,9 @@ impl MyApp {
     fn new(cc: &CreationContext) -> Self {
         add_font(&cc.egui_ctx);
         let ff = FontFamily::Name("music".into());
-        let mut measure = RhythmMeasure::new(TimeSignature::SEVEN_EIGHT);
-        measure.subdivide(&[1], 2, SlotContent::Note);
-        measure.subdivide(&[3], 3, SlotContent::Note);
+        let mut measure = RhythmMeasure::new(TimeSignature::ONE_SIXTEENTH);
+        println!("{}", measure.subdivide(&[], 4, SlotContent::Note));
+        println!("{:?}", measure);
         Self {
             font_family: ff.clone(),
             font_id: FontId::new(64.0, ff),
@@ -60,8 +58,8 @@ const GLYPH_REST_32ND: char = '\u{E4E8}';
 
 // Up-stem flags (SMuFL): U+E240..U+E242
 const GLYPH_FLAG_8TH_UP: char = '\u{E240}';
-const GLYPH_FLAG_16TH_UP: char = '\u{E241}';
-const GLYPH_FLAG_32ND_UP: char = '\u{E242}';
+const GLYPH_FLAG_16TH_UP: char = '\u{E242}';
+const GLYPH_FLAG_32ND_UP: char = '\u{E244}';
 
 fn rest_glyph_for_duration(d: Duration) -> char {
     match d {
@@ -165,11 +163,7 @@ fn draw_slot_overlays(
     }
 }
 
-fn draw_note(
-    painter: &egui::Painter,
-    font_id: &FontId,
-    sb: &SlotBox,
-) {
+fn draw_note(painter: &egui::Painter, font_id: &FontId, sb: &SlotBox) {
     let x = sb.rect.left();
     let next_x = sb.rect.left() + sb.rect.width();
     let mid = pos2(0.5 * (x + next_x), 0.5 * (sb.rect.top() + sb.rect.bottom()));
@@ -194,7 +188,7 @@ fn draw_note(
         // Stem positioning relative to notehead center.
         let stem_offset_x = font_id.size * 0.13; // tweak by eye for Bravura
         let stem_len = font_id.size * 0.9; // proportional stem length
-        let stem_thickness = 2.2;
+        let stem_thickness = 2.5;
         let start = pos2(mid.x + stem_offset_x, mid.y);
         let end = pos2(start.x, mid.y - stem_len);
         painter.line_segment([start, end], Stroke::new(stem_thickness, Color32::WHITE));
@@ -264,7 +258,7 @@ fn main() -> eframe::Result {
     };
 
     eframe::run_native(
-        "grooph",
+        "grooph.app",
         options,
         Box::new(|cc| Ok(Box::new(MyApp::new(cc)))),
     )
