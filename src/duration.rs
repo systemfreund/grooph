@@ -89,29 +89,6 @@ impl Duration {
         }
         None
     }
-
-    pub fn tuplet_cardinality(&self) -> Option<u8> {
-        use Duration::*;
-        match self {
-            TripletEighth => Some(3),
-            QuintupletSixteenth => Some(5),
-            SextupletSixteenth => Some(6),
-            SeptupletSixteenth => Some(7),
-            NonupletThirtySecond => Some(9),
-            _ => None,
-        }
-    }
-
-    // The canonical frame these tuplets belong to.
-    pub fn tuplet_group_frame(&self) -> Option<Duration> {
-        use Duration::*;
-        match self {
-            TripletEighth | QuintupletSixteenth | SextupletSixteenth | SeptupletSixteenth | NonupletThirtySecond => {
-                Some(Quarter) // quarter-note frame
-            }
-            _ => None,
-        }
-    }
 }
 
 #[cfg(test)]
