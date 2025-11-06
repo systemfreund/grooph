@@ -1,3 +1,5 @@
+pub type Ticks = i32;
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Duration {
     Quarter,
@@ -12,7 +14,7 @@ pub enum Duration {
 }
 
 // Compile-time utilities to compute GCD/LCM for integer constants
-const fn gcd(mut a: i32, mut b: i32) -> i32 {
+const fn gcd(mut a: Ticks, mut b: Ticks) -> Ticks {
     while b != 0 {
         let t = a % b;
         a = b;
@@ -21,7 +23,7 @@ const fn gcd(mut a: i32, mut b: i32) -> i32 {
     if a < 0 { -a } else { a }
 }
 
-const fn lcm(a: i32, b: i32) -> i32 {
+const fn lcm(a: Ticks, b: Ticks) -> Ticks {
     (a / gcd(a, b)) * b
 }
 
@@ -55,7 +57,7 @@ impl Duration {
     }
 
     /// Compute LCM of denominators of the provided durations (const-evaluable)
-    pub const fn lcm_durations(arr: &[Duration]) -> i32 {
+    pub const fn lcm_durations(arr: &[Duration]) -> Ticks {
         let mut i = 0;
         let mut result = 1;
         while i < arr.len() {
@@ -67,10 +69,10 @@ impl Duration {
     }
 
     /// Ticks per whole note. Computed at compile time as the LCM of all denominators.
-    pub const TICKS_PER_WHOLE: i32 = Self::lcm_durations(&Self::DURATIONS);
+    pub const TICKS_PER_WHOLE: Ticks = Self::lcm_durations(&Self::DURATIONS);
 
     /// Returns the duration in integer ticks (exact)
-    pub fn ticks(&self) -> i32 {
+    pub fn ticks(&self) -> Ticks {
         let denom = Self::denominator_of(*self);
         Self::TICKS_PER_WHOLE / denom
     }
@@ -78,7 +80,7 @@ impl Duration {
     /// Returns the Duration that exactly corresponds to the given tick count, if any.
     /// This performs an exact match; if the ticks value doesn't match a supported
     /// duration, None is returned.
-    pub fn from_ticks(ticks: i32) -> Option<Duration> {
+    pub fn from_ticks(ticks: Ticks) -> Option<Duration> {
         let mut i = 0;
         while i < Self::DURATIONS.len() {
             let d = Self::DURATIONS[i];
