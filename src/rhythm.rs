@@ -27,7 +27,10 @@ pub struct RhythmMeasure {
 
 impl RhythmMeasure {
     pub fn new(time_signature: TimeSignature) -> Self {
-        Self { time_signature, root: RhythmNode::Leaf(SlotContent::Rest) }
+        Self {
+            time_signature,
+            root: RhythmNode::Leaf(SlotContent::Rest),
+        }
     }
 
     pub fn toggle_leaf(&mut self, path: &[usize]) -> bool {
@@ -45,7 +48,9 @@ impl RhythmMeasure {
 
     /// Subdivide the node at `path` (empty path -> root) into `n` equal slots.
     pub fn subdivide(&mut self, path: &[usize], n: usize, init: SlotContent) -> bool {
-        if n == 0 { return false; }
+        if n == 0 {
+            return false;
+        }
         let node = Self::get_mut(&mut self.root, path);
         match node {
             Some(RhythmNode::Group { .. }) | Some(RhythmNode::Leaf(_)) => {
@@ -59,40 +64,50 @@ impl RhythmMeasure {
 
     /// Helper: traverse to mutable node at path.
     fn get_mut<'a>(node: &'a mut RhythmNode, path: &[usize]) -> Option<&'a mut RhythmNode> {
-        if path.is_empty() { return Some(node); }
+        if path.is_empty() {
+            return Some(node);
+        }
         match node {
             RhythmNode::Group { n: _n, children } => {
                 let idx = path[0];
-                children.get_mut(idx).and_then(|child| Self::get_mut(child, &path[1..]))
+                children
+                    .get_mut(idx)
+                    .and_then(|child| Self::get_mut(child, &path[1..]))
             }
             RhythmNode::Leaf(_) => None,
         }
     }
 
     /// Compute measure total ticks (delegates to time signature helper)
-    fn measure_ticks(&self) -> i32 { self.time_signature.measure_duration_ticks() }
+    fn measure_ticks(&self) -> i32 {
+        self.time_signature.measure_duration_ticks()
+    }
 
     /// Flatten this rhythm measure into a sequence of beats inside a Measure, preserving onsets implied by leaves with Note content.
     pub fn flatten_to_measure(&self) -> Option<Measure> {
         let mut out = Measure::new(self.time_signature.clone());
         let total = self.measure_ticks();
-        if Self::flatten_node(&self.root, total, &mut out) { Some(out) } else { None }
+        if Self::flatten_node(&self.root, total, &mut out) {
+            Some(out)
+        } else {
+            None
+        }
     }
 
     fn flatten_node(node: &RhythmNode, span_ticks: i32, out: &mut Measure) -> bool {
         match node {
-            RhythmNode::Leaf(SlotContent::Note) => {
-                Self::fill_span(out, span_ticks, true)
-            }
-            RhythmNode::Leaf(SlotContent::Rest) => {
-                Self::fill_span(out, span_ticks, false)
-            }
+            RhythmNode::Leaf(SlotContent::Note) => Self::fill_span(out, span_ticks, true),
+            RhythmNode::Leaf(SlotContent::Rest) => Self::fill_span(out, span_ticks, false),
             RhythmNode::Group { n, children } => {
                 let n = *n as i32;
-                if span_ticks % n != 0 { return false; }
+                if span_ticks % n != 0 {
+                    return false;
+                }
                 let slot = span_ticks / n;
                 for child in children {
-                    if !Self::flatten_node(child, slot, out) { return false; }
+                    if !Self::flatten_node(child, slot, out) {
+                        return false;
+                    }
                 }
                 true
             }
@@ -101,15 +116,27 @@ impl RhythmMeasure {
 
     /// Fill a span with minimal-token exact durations. If `first_is_note` then emit a Note for the first token and Rests after.
     fn fill_span(out: &mut Measure, ticks: i32, first_is_note: bool) -> bool {
-        if ticks <= 0 { return true; }
+        if ticks <= 0 {
+            return true;
+        }
         if let Some(seq) = best_fill_for_gap(ticks) {
             if first_is_note {
                 if let Some((first, rest)) = seq.split_first() {
-                    if out.add_beat(Beat::note(*first)).is_err() { return false; }
-                    for d in rest { if out.add_beat(Beat::rest(*d)).is_err() { return false; } }
+                    if out.add_beat(Beat::note(*first)).is_err() {
+                        return false;
+                    }
+                    for d in rest {
+                        if out.add_beat(Beat::rest(*d)).is_err() {
+                            return false;
+                        }
+                    }
                 }
             } else {
-                for d in seq { if out.add_beat(Beat::rest(d)).is_err() { return false; } }
+                for d in seq {
+                    if out.add_beat(Beat::rest(d)).is_err() {
+                        return false;
+                    }
+                }
             }
             true
         } else {
@@ -123,11 +150,29 @@ impl RhythmMeasure {
 mod tests {
     use super::*;
     use crate::duration::{Duration, NoteValue};
-    fn q() -> Duration { Duration::Simple(NoteValue::Quarter) }
-    fn e() -> Duration { Duration::Simple(NoteValue::Eighth) }
-    fn s16() -> Duration { Duration::Simple(NoteValue::Sixteenth) }
-    fn t8() -> Duration { Duration::Tuplet { n: 3, m: 2, base: NoteValue::Eighth } }
-    fn sx16() -> Duration { Duration::Tuplet { n: 6, m: 4, base: NoteValue::Sixteenth } }
+    fn q() -> Duration {
+        Duration::Simple(NoteValue::Quarter)
+    }
+    fn e() -> Duration {
+        Duration::Simple(NoteValue::Eighth)
+    }
+    fn s16() -> Duration {
+        Duration::Simple(NoteValue::Sixteenth)
+    }
+    fn t8() -> Duration {
+        Duration::Tuplet {
+            n: 3,
+            m: 2,
+            base: NoteValue::Eighth,
+        }
+    }
+    fn sx16() -> Duration {
+        Duration::Tuplet {
+            n: 6,
+            m: 4,
+            base: NoteValue::Sixteenth,
+        }
+    }
 
     fn assert_flattened(rm: RhythmMeasure, expected_beat_durations: Vec<Duration>) {
         let m = rm.flatten_to_measure().unwrap();
@@ -172,15 +217,7 @@ mod tests {
         assert!(rm.subdivide(&[2], 2, SlotContent::Rest));
 
         // falsch?
-        assert_flattened(
-            rm,
-            vec![
-                t8(),
-                t8(),
-                sx16(),
-                sx16(),
-            ],
-        );
+        assert_flattened(rm, vec![t8(), t8(), sx16(), sx16()]);
     }
 
     #[test]

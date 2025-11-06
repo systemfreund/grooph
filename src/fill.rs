@@ -6,13 +6,18 @@ use crate::duration::{Duration, default_duration_set};
 /// 2) Minimal total weight (sum of denominators) to prefer simpler durations
 /// 3) Prefer larger steps on ties for determinism
 pub(crate) fn best_fill_for_gap(gap_ticks: i32) -> Option<Vec<Duration>> {
-    if gap_ticks < 0 { return None; }
-    if gap_ticks == 0 { return Some(Vec::new()); }
+    if gap_ticks < 0 {
+        return None;
+    }
+    if gap_ticks == 0 {
+        return Some(Vec::new());
+    }
 
     let set = default_duration_set();
 
     // Build coin list: (ticks, duration, weight)
-    let mut coins: Vec<(i32, Duration, i32)> = set.durations
+    let mut coins: Vec<(i32, Duration, i32)> = set
+        .durations
         .iter()
         .filter_map(|d| {
             let den = d.denominator();
@@ -24,9 +29,19 @@ pub(crate) fn best_fill_for_gap(gap_ticks: i32) -> Option<Vec<Duration>> {
 
     let target = gap_ticks as usize;
     #[derive(Clone, Copy)]
-    struct Cell { len: u16, weight: i32, prev: i32, choice_idx: u8 }
+    struct Cell {
+        len: u16,
+        weight: i32,
+        prev: i32,
+        choice_idx: u8,
+    }
     let mut dp: Vec<Option<Cell>> = vec![None; target + 1];
-    dp[0] = Some(Cell { len: 0, weight: 0, prev: -1, choice_idx: 0 });
+    dp[0] = Some(Cell {
+        len: 0,
+        weight: 0,
+        prev: -1,
+        choice_idx: 0,
+    });
 
     for i in 1..=target {
         let mut best: Option<Cell> = None;
@@ -34,13 +49,25 @@ pub(crate) fn best_fill_for_gap(gap_ticks: i32) -> Option<Vec<Duration>> {
             let t = *ticks as usize;
             if t <= i {
                 if let Some(prev) = dp[i - t] {
-                    let cand = Cell { len: prev.len.saturating_add(1), weight: prev.weight + *w, prev: (i - t) as i32, choice_idx: idx as u8 };
+                    let cand = Cell {
+                        len: prev.len.saturating_add(1),
+                        weight: prev.weight + *w,
+                        prev: (i - t) as i32,
+                        choice_idx: idx as u8,
+                    };
                     best = match best {
                         None => Some(cand),
                         Some(cur) => {
-                            if cand.len < cur.len || (cand.len == cur.len && (cand.weight < cur.weight || (cand.weight == cur.weight && (cand.choice_idx as i32) < (cur.choice_idx as i32)))) {
+                            if cand.len < cur.len
+                                || (cand.len == cur.len
+                                    && (cand.weight < cur.weight
+                                        || (cand.weight == cur.weight
+                                            && (cand.choice_idx as i32) < (cur.choice_idx as i32))))
+                            {
                                 Some(cand)
-                            } else { Some(cur) }
+                            } else {
+                                Some(cur)
+                            }
                         }
                     };
                 }
@@ -49,7 +76,9 @@ pub(crate) fn best_fill_for_gap(gap_ticks: i32) -> Option<Vec<Duration>> {
         dp[i] = best;
     }
 
-    if dp[target].is_none() { return None; }
+    if dp[target].is_none() {
+        return None;
+    }
 
     // Reconstruct sequence
     let mut seq_idxs: Vec<usize> = Vec::new();
