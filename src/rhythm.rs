@@ -1,4 +1,3 @@
-use crate::duration::Duration;
 use crate::fill::best_fill_for_gap;
 use crate::measure::{Beat, Measure, TimeSignature};
 
@@ -115,51 +114,48 @@ impl RhythmMeasure {
     fn measure_ticks(&self) -> i32 { self.time_signature.measure_duration_ticks() }
 
     /// Flatten this rhythm measure into a sequence of beats inside a Measure, preserving onsets implied by leaves with Note content.
-    pub fn flatten_to_measure(&self) -> Measure {
+    pub fn flatten_to_measure(&self) -> Option<Measure> {
         let mut out = Measure::new(self.time_signature.clone());
         let total = self.measure_ticks();
-        Self::flatten_node(&self.root, total, &mut out);
-        out
+        if Self::flatten_node(&self.root, total, &mut out) { Some(out) } else { None }
     }
 
-    fn flatten_node(node: &RhythmNode, span_ticks: i32, out: &mut Measure) {
+    fn flatten_node(node: &RhythmNode, span_ticks: i32, out: &mut Measure) -> bool {
         match node {
             RhythmNode::Leaf(SlotContent::Note) => {
-                Self::fill_span(out, span_ticks, true);
+                Self::fill_span(out, span_ticks, true)
             }
             RhythmNode::Leaf(SlotContent::Rest) => {
-                Self::fill_span(out, span_ticks, false);
+                Self::fill_span(out, span_ticks, false)
             }
             RhythmNode::Group { n, children } => {
                 let n = *n as i32;
+                if span_ticks % n != 0 { return false; }
                 let slot = span_ticks / n;
-                // If not divisible, we still try to distribute; but the UI should avoid that.
                 for child in children {
-                    Self::flatten_node(child, slot, out);
+                    if !Self::flatten_node(child, slot, out) { return false; }
                 }
+                true
             }
         }
     }
 
     /// Fill a span with minimal-token exact durations. If `first_is_note` then emit a Note for the first token and Rests after.
-    fn fill_span(out: &mut Measure, ticks: i32, first_is_note: bool) {
-        if ticks <= 0 { return; }
+    fn fill_span(out: &mut Measure, ticks: i32, first_is_note: bool) -> bool {
+        if ticks <= 0 { return true; }
         if let Some(seq) = best_fill_for_gap(ticks) {
             if first_is_note {
                 if let Some((first, rest)) = seq.split_first() {
-                    let _ = out.add_beat(Beat::note(*first));
-                    for d in rest { let _ = out.add_beat(Beat::rest(*d)); }
+                    if out.add_beat(Beat::note(*first)).is_err() { return false; }
+                    for d in rest { if out.add_beat(Beat::rest(*d)).is_err() { return false; } }
                 }
             } else {
-                for d in seq { let _ = out.add_beat(Beat::rest(d)); }
+                for d in seq { if out.add_beat(Beat::rest(d)).is_err() { return false; } }
             }
+            true
         } else {
-            // Fallback: tile with the smallest duration
-            if let Some(&smallest) = Duration::DURATIONS.iter().min_by_key(|d| d.ticks()) {
-                let mut rem = ticks;
-                if first_is_note { let _ = out.add_beat(Beat::note(smallest)); rem -= smallest.ticks(); }
-                while rem > 0 { let _ = out.add_beat(Beat::rest(smallest)); rem -= smallest.ticks(); }
-            }
+            // No exact fill possible → fail
+            false
         }
     }
 }
@@ -172,7 +168,7 @@ mod tests {
     #[test]
     fn flatten_empty_measure_over_four_four() {
         let rm = RhythmMeasure::new(TimeSignature::FOUR_FOUR);
-        let m = rm.flatten_to_measure();
+        let m = rm.flatten_to_measure().unwrap();
         let beats = m.beats();
         assert_eq!(beats.len(), 4);
         for b in beats.iter() {
@@ -183,7 +179,7 @@ mod tests {
     #[test]
     fn flatten_empty_measure_over_seven_eight() {
         let rm = RhythmMeasure::new(TimeSignature::SEVEN_EIGHT);
-        let m = rm.flatten_to_measure();
+        let m = rm.flatten_to_measure().unwrap();
         let beats = m.beats();
         assert_eq!(beats.len(), 7);
         for b in beats.iter() {
@@ -196,7 +192,7 @@ mod tests {
         let mut rm = RhythmMeasure::new(TimeSignature::ONE_FOUR);
         // Subdivide root into 3 slots (triplet) and keep all as notes
         assert!(rm.subdivide(&[], 3, SlotContent::Rest));
-        let m = rm.flatten_to_measure();
+        let m = rm.flatten_to_measure().unwrap();
         let beats = m.beats();
         assert_eq!(beats.len(), 3);
         for b in beats {
@@ -210,7 +206,7 @@ mod tests {
         assert!(rm.subdivide(&[], 3, SlotContent::Rest));
         // Subdivide third slot (index 2) into two and keep both as notes
         assert!(rm.subdivide(&[2], 2, SlotContent::Rest));
-        let m = rm.flatten_to_measure();
+        let m = rm.flatten_to_measure().unwrap();
         let beats = m.beats();
         assert_eq!(beats.len(), 4);
         assert_eq!(beats[0].duration.ticks(), TripletEighth.ticks());
@@ -223,8 +219,17 @@ mod tests {
     fn cannot_flatten_triplets_over_one_sixteenth() {
         let mut rm = RhythmMeasure::new(TimeSignature::ONE_SIXTEENTH);
         rm.subdivide(&[], 3, SlotContent::Note);
-        // Cannot flatten this structure because we don't support triplets over 16th
-        let m = rm.flatten_to_measure();
-        println!("{:?}", m)
+        // Cannot flatten this structure because we don't support 32nd-triplets over 1/16 notes.
+        assert!(rm.flatten_to_measure().is_none());
     }
+
+    #[test]
+    fn cannot_flatten_triplets_over_two_sixteenth() {
+        let mut rm = RhythmMeasure::new(TimeSignature::TWO_SIXTEENTH);
+        rm.subdivide(&[], 3, SlotContent::Note);
+        // Cannot flatten this structure because we don't support 16th-triplets over 1/16 notes.
+        println!("{:?}", rm.flatten_to_measure());
+        assert!(rm.flatten_to_measure().is_none());
+    }
+
 }

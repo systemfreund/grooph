@@ -37,7 +37,7 @@ impl MyApp {
         add_font(&cc.egui_ctx);
         let ff = FontFamily::Name("music".into());
         let mut measure = RhythmMeasure::new(TimeSignature::ONE_SIXTEENTH);
-        println!("{}", measure.subdivide(&[], 4, SlotContent::Note));
+        // println!("{}", measure.subdivide(&[], 4, SlotContent::Note));
         println!("{:?}", measure);
         Self {
             font_family: ff.clone(),
