@@ -9,13 +9,13 @@ use duration::Duration;
 use measure::TimeSignature;
 use rhythm::{RhythmMeasure, RhythmNode, SlotContent};
 
+use crate::fill::best_fill_for_gap;
 use eframe::egui::{Align2, Context, Id, Rangef, Sense, Stroke, pos2};
+use eframe::emath::Pos2;
 use eframe::epaint::text::{FontInsert, InsertFontFamily};
 use eframe::epaint::{Color32, FontFamily, FontId, StrokeKind};
 use eframe::{App, CreationContext, egui};
-use eframe::emath::Pos2;
 use egui::containers::Frame;
-use crate::fill::best_fill_for_gap;
 
 struct MyApp {
     font_family: FontFamily,
@@ -41,9 +41,7 @@ impl MyApp {
         let mut measure = RhythmMeasure::new(TimeSignature::SEVEN_EIGHT);
         println!("{:?}", measure);
         // println!("{}", measure.subdivide(&[], 4, SlotContent::Note));
-        measure.flatten_to_measure().map(|m| {
-            println!("{}", m)
-        });
+        measure.flatten_to_measure().map(|m| println!("{}", m));
 
         Self {
             font_family: ff.clone(),
@@ -135,7 +133,12 @@ fn layout_rhythm_boxes(
     }
 }
 
-fn draw_slot_overlays(ui: &mut egui::Ui, font_id: &FontId, rm: &RhythmMeasure, inner_rect: egui::Rect) {
+fn draw_slot_overlays(
+    ui: &mut egui::Ui,
+    font_id: &FontId,
+    rm: &mut RhythmMeasure,
+    inner_rect: egui::Rect,
+) {
     let painter = ui.painter();
 
     let mut boxes = Vec::new();
@@ -148,6 +151,14 @@ fn draw_slot_overlays(ui: &mut egui::Ui, font_id: &FontId, rm: &RhythmMeasure, i
     let fill_b = Color32::from_rgba_unmultiplied(80, 255, 160, 24);
 
     for (idx, sb) in boxes.iter().enumerate() {
+        // Interactivity: toggle on click
+        let id = Id::new(("slot_box", &sb.path));
+        let resp = ui.interact(sb.rect, id, Sense::click());
+        if resp.clicked() {
+            // Toggle between Rest and Note at this slot path
+            rm.toggle_leaf(&sb.path);
+        }
+
         let fill = if idx % 2 == 0 { fill_a } else { fill_b };
         painter.rect_filled(sb.rect, 3.0, fill);
         painter.rect_stroke(sb.rect, 3.0, border, StrokeKind::Inside);
@@ -161,7 +172,11 @@ fn draw_slot_overlays(ui: &mut egui::Ui, font_id: &FontId, rm: &RhythmMeasure, i
 
             for (j, d) in seq.iter().enumerate() {
                 acc_ticks += d.ticks() as f32;
-                let next_x = if j == seq.len() - 1 { sb.rect.right() } else { sb.rect.left() + width * (acc_ticks / total) };
+                let next_x = if j == seq.len() - 1 {
+                    sb.rect.right()
+                } else {
+                    sb.rect.left() + width * (acc_ticks / total)
+                };
                 let mid = pos2(0.5 * (x + next_x), 0.5 * (sb.rect.top() + sb.rect.bottom()));
                 draw_note(painter, font_id, mid, *d, sb.content);
                 x = next_x;
@@ -170,7 +185,13 @@ fn draw_slot_overlays(ui: &mut egui::Ui, font_id: &FontId, rm: &RhythmMeasure, i
     }
 }
 
-fn draw_note(painter: &egui::Painter, font_id: &FontId, pos: Pos2, duration: Duration, slot_content: SlotContent) {
+fn draw_note(
+    painter: &egui::Painter,
+    font_id: &FontId,
+    pos: Pos2,
+    duration: Duration,
+    slot_content: SlotContent,
+) {
     let glyph = match slot_content {
         SlotContent::Note => GLYPH_NOTEHEAD_BLACK,
         SlotContent::Rest => rest_glyph_for_duration(duration),
