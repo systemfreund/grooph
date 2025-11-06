@@ -43,11 +43,7 @@ impl MyApp {
         // println!("{}", measure.subdivide(&[], 4, SlotContent::Note));
         measure.flatten_to_measure().map(|m| println!("{}", m));
 
-        Self {
-            font_family: ff.clone(),
-            font_id: FontId::new(64.0, ff),
-            measure,
-        }
+        Self { font_family: ff.clone(), font_id: FontId::new(64.0, ff), measure }
     }
 }
 
@@ -104,12 +100,7 @@ fn layout_rhythm_boxes(
 ) {
     match node {
         RhythmNode::Leaf(content) => {
-            out.push(SlotBox {
-                rect,
-                span_ticks,
-                content: *content,
-                path: path.clone(),
-            });
+            out.push(SlotBox { rect, span_ticks, content: *content, path: path.clone() });
         }
         RhythmNode::Group { n, children } => {
             let n_i = *n as i32;
@@ -196,13 +187,7 @@ fn draw_note(
     };
 
     // Draw the glyph (notehead or rest)
-    painter.text(
-        pos,
-        Align2::CENTER_CENTER,
-        glyph.to_string(),
-        font_id.clone(),
-        Color32::WHITE,
-    );
+    painter.text(pos, Align2::CENTER_CENTER, glyph.to_string(), font_id.clone(), Color32::WHITE);
 
     // If this is a Note, draw a simple upward stem next to the notehead,
     // and add a flag according to the duration (8th=1, 16th=2, 32nd=3; tuplets map similarly).
@@ -234,24 +219,12 @@ fn draw_measure(ui: &mut egui::Ui, font_id: &FontId, rm: &mut RhythmMeasure, rec
     let painter = ui.painter();
     let y = rect.center().y;
     // staff line
-    painter.hline(
-        Rangef::new(rect.left(), rect.right()),
-        y,
-        Stroke::new(1.0, Color32::WHITE),
-    );
+    painter.hline(Rangef::new(rect.left(), rect.right()), y, Stroke::new(1.0, Color32::WHITE));
 
     // barlines
     let bar_stroke = Stroke::new(2.0, Color32::WHITE);
-    painter.vline(
-        rect.left() + 16.0,
-        Rangef::new(y - 24.0, y + 24.0),
-        bar_stroke,
-    );
-    painter.vline(
-        rect.right() - 16.0,
-        Rangef::new(y - 24.0, y + 24.0),
-        bar_stroke,
-    );
+    painter.vline(rect.left() + 16.0, Rangef::new(y - 24.0, y + 24.0), bar_stroke);
+    painter.vline(rect.right() - 16.0, Rangef::new(y - 24.0, y + 24.0), bar_stroke);
 
     // layout area inside barlines
     let left = rect.left() + 24.0;
@@ -279,9 +252,5 @@ fn main() -> eframe::Result {
         ..Default::default()
     };
 
-    eframe::run_native(
-        "grooph.app",
-        options,
-        Box::new(|cc| Ok(Box::new(MyApp::new(cc)))),
-    )
+    eframe::run_native("grooph.app", options, Box::new(|cc| Ok(Box::new(MyApp::new(cc)))))
 }

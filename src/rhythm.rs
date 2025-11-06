@@ -27,10 +27,7 @@ pub struct RhythmMeasure {
 
 impl RhythmMeasure {
     pub fn new(time_signature: TimeSignature) -> Self {
-        Self {
-            time_signature,
-            root: RhythmNode::Leaf(SlotContent::Rest),
-        }
+        Self { time_signature, root: RhythmNode::Leaf(SlotContent::Rest) }
     }
 
     pub fn toggle_leaf(&mut self, path: &[usize]) -> bool {
@@ -70,9 +67,7 @@ impl RhythmMeasure {
         match node {
             RhythmNode::Group { n: _n, children } => {
                 let idx = path[0];
-                children
-                    .get_mut(idx)
-                    .and_then(|child| Self::get_mut(child, &path[1..]))
+                children.get_mut(idx).and_then(|child| Self::get_mut(child, &path[1..]))
             }
             RhythmNode::Leaf(_) => None,
         }
@@ -87,11 +82,7 @@ impl RhythmMeasure {
     pub fn flatten_to_measure(&self) -> Option<Measure> {
         let mut out = Measure::new(self.time_signature.clone());
         let total = self.measure_ticks();
-        if Self::flatten_node(&self.root, total, &mut out) {
-            Some(out)
-        } else {
-            None
-        }
+        if Self::flatten_node(&self.root, total, &mut out) { Some(out) } else { None }
     }
 
     fn flatten_node(node: &RhythmNode, span_ticks: i32, out: &mut Measure) -> bool {
@@ -160,22 +151,15 @@ mod tests {
         Duration::Simple(NoteValue::Sixteenth)
     }
     fn t8() -> Duration {
-        Duration::Tuplet {
-            n: 3,
-            m: 2,
-            base: NoteValue::Eighth,
-        }
+        Duration::Tuplet { n: 3, m: 2, base: NoteValue::Eighth }
     }
     fn sx16() -> Duration {
-        Duration::Tuplet {
-            n: 6,
-            m: 4,
-            base: NoteValue::Sixteenth,
-        }
+        Duration::Tuplet { n: 6, m: 4, base: NoteValue::Sixteenth }
     }
 
     fn assert_flattened(rm: RhythmMeasure, expected_beat_durations: Vec<Duration>) {
         let m = rm.flatten_to_measure().unwrap();
+        println!("{:?}", m);
         println!("{}", m);
         let beats = m.beats();
         assert_eq!(beats.len(), expected_beat_durations.len());

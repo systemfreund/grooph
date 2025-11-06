@@ -51,42 +51,27 @@ const fn lcm(a: i32, b: i32) -> i32 {
 
 const fn reduce(f: Frac) -> Frac {
     let g = gcd(f.num, f.den);
-    Frac {
-        num: f.num / g,
-        den: f.den / g,
-    }
+    Frac { num: f.num / g, den: f.den / g }
 }
 
 impl Duration {
     pub const fn as_fraction(&self) -> Frac {
         match *self {
-            Duration::Simple(base) => Frac {
-                num: 1,
-                den: base.denominator(),
-            },
+            Duration::Simple(base) => Frac { num: 1, den: base.denominator() },
             Duration::Dotted { base, dots } => {
                 let base_den = base.denominator();
                 let k = dots as i32;
                 if k == 0 {
-                    return Frac {
-                        num: 1,
-                        den: base_den,
-                    };
+                    return Frac { num: 1, den: base_den };
                 }
                 let two_pow_k = 1 << k; // 2^k
                 let num = two_pow_k - 1; // 2^k - 1
                 let den = two_pow_k >> 1; // 2^{k-1}
-                reduce(Frac {
-                    num,
-                    den: den * base_den,
-                })
+                reduce(Frac { num, den: den * base_den })
             }
             Duration::Tuplet { n, m, base } => {
                 let base_den = base.denominator();
-                reduce(Frac {
-                    num: m as i32,
-                    den: (n as i32) * base_den,
-                })
+                reduce(Frac { num: m as i32, den: (n as i32) * base_den })
             }
         }
     }
@@ -146,31 +131,11 @@ pub const COMMON_DURATIONS: [Duration; 9] = [
     Duration::Simple(NoteValue::Eighth),
     Duration::Simple(NoteValue::Sixteenth),
     Duration::Simple(NoteValue::ThirtySecond),
-    Duration::Tuplet {
-        n: 3,
-        m: 2,
-        base: NoteValue::Eighth,
-    }, // triplet eighth
-    Duration::Tuplet {
-        n: 5,
-        m: 4,
-        base: NoteValue::Sixteenth,
-    }, // quintuplet 16th
-    Duration::Tuplet {
-        n: 6,
-        m: 4,
-        base: NoteValue::Sixteenth,
-    }, // sextuplet 16th
-    Duration::Tuplet {
-        n: 7,
-        m: 4,
-        base: NoteValue::Sixteenth,
-    }, // septuplet 16th
-    Duration::Tuplet {
-        n: 9,
-        m: 8,
-        base: NoteValue::ThirtySecond,
-    }, // nonuplet 32nd
+    Duration::Tuplet { n: 3, m: 2, base: NoteValue::Eighth }, // triplet eighth
+    Duration::Tuplet { n: 5, m: 4, base: NoteValue::Sixteenth }, // quintuplet 16th
+    Duration::Tuplet { n: 6, m: 4, base: NoteValue::Sixteenth }, // sextuplet 16th
+    Duration::Tuplet { n: 7, m: 4, base: NoteValue::Sixteenth }, // septuplet 16th
+    Duration::Tuplet { n: 9, m: 8, base: NoteValue::ThirtySecond }, // nonuplet 32nd
 ];
 
 #[derive(Clone, Copy, Debug)]
@@ -182,10 +147,7 @@ pub struct DurationSet {
 pub fn default_duration_set() -> DurationSet {
     let durs: &'static [Duration] = &COMMON_DURATIONS;
     let grid = Grid::from_durations(durs);
-    DurationSet {
-        durations: durs,
-        grid,
-    }
+    DurationSet { durations: durs, grid }
 }
 
 pub fn default_grid() -> Grid {

@@ -36,12 +36,7 @@ pub(crate) fn best_fill_for_gap(gap_ticks: i32) -> Option<Vec<Duration>> {
         choice_idx: u8,
     }
     let mut dp: Vec<Option<Cell>> = vec![None; target + 1];
-    dp[0] = Some(Cell {
-        len: 0,
-        weight: 0,
-        prev: -1,
-        choice_idx: 0,
-    });
+    dp[0] = Some(Cell { len: 0, weight: 0, prev: -1, choice_idx: 0 });
 
     for i in 1..=target {
         let mut best: Option<Cell> = None;

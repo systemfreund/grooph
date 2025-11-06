@@ -11,40 +11,13 @@ pub struct TimeSignature {
 }
 
 impl TimeSignature {
-    pub const ONE_FOUR: Self = Self {
-        beats: 1,
-        beat_unit: 4,
-    };
-
-    pub const ONE_SIXTEENTH: Self = Self {
-        beats: 1,
-        beat_unit: 16,
-    };
-
-    pub const TWO_SIXTEENTH: Self = Self {
-        beats: 2,
-        beat_unit: 16,
-    };
-
-    pub const FOUR_FOUR: Self = Self {
-        beats: 4,
-        beat_unit: 4,
-    };
-
-    pub const FOUR_EIGHT: Self = Self {
-        beats: 4,
-        beat_unit: 8,
-    };
-
-    pub const TWO_EIGHT: Self = Self {
-        beats: 2,
-        beat_unit: 8,
-    };
-
-    pub const SEVEN_EIGHT: Self = Self {
-        beats: 7,
-        beat_unit: 8,
-    };
+    pub const ONE_FOUR: Self = Self { beats: 1, beat_unit: 4 };
+    pub const ONE_SIXTEENTH: Self = Self { beats: 1, beat_unit: 16 };
+    pub const TWO_SIXTEENTH: Self = Self { beats: 2, beat_unit: 16 };
+    pub const FOUR_FOUR: Self = Self { beats: 4, beat_unit: 4 };
+    pub const FOUR_EIGHT: Self = Self { beats: 4, beat_unit: 8 };
+    pub const TWO_EIGHT: Self = Self { beats: 2, beat_unit: 8 };
+    pub const SEVEN_EIGHT: Self = Self { beats: 7, beat_unit: 8 };
 
     /// Returns the total duration in integer ticks
     pub fn measure_duration_ticks(&self) -> i32 {
@@ -68,24 +41,14 @@ pub struct Beat {
 
 impl Beat {
     /// Creates a new note with the given duration
-    pub fn note(duration: Duration) -> Self {
-        Self {
-            duration,
-            kind: BeatKind::Note,
-        }
-    }
+    pub fn note(duration: Duration) -> Self { Self { duration, kind: BeatKind::Note } }
 
     /// Creates a new rest with the given duration
-    pub fn rest(duration: Duration) -> Self {
-        Self {
-            duration,
-            kind: BeatKind::Rest,
-        }
-    }
+    pub fn rest(duration: Duration) -> Self { Self { duration, kind: BeatKind::Rest } }
 
-    const fn to_glyph(beat: &Beat) -> (&'static str, &'static str) {
+    const fn to_glyph(&self) -> (&'static str, &'static str) {
         // Glyphs are determined by base note value only; tuplets/rests share the same shapes
-        match beat.duration.base_note() {
+        match self.duration.base_note() {
             NoteValue::Quarter => ("𝅘𝅥", "𝄽"),
             NoteValue::Eighth => ("𝅘𝅥𝅮", "𝄾"),
             NoteValue::Sixteenth => ("𝅘𝅥𝅯", "𝄿"),
@@ -124,25 +87,15 @@ pub struct Measure {
 
 impl Measure {
     /// Creates a new empty measure with the given time signature
-    pub fn new(time_signature: TimeSignature) -> Self {
-        Self {
-            beats: Vec::new(),
-            time_signature,
-        }
-    }
+    pub fn new(time_signature: TimeSignature) -> Self { Self { beats: Vec::new(), time_signature } }
 
     /// Expose a read-only view of beats (primarily for tests/inspection)
-    pub fn beats(&self) -> &Vec<Beat> {
-        &self.beats
-    }
+    pub fn beats(&self) -> &Vec<Beat> { &self.beats }
 
     /// Returns the current total duration in ticks (exact)
     fn current_ticks(&self) -> i32 {
         let set = default_duration_set();
-        self.beats
-            .iter()
-            .map(|beat| set.grid.ticks_of(&beat.duration).unwrap())
-            .sum()
+        self.beats.iter().map(|beat| set.grid.ticks_of(&beat.duration).unwrap()).sum()
     }
 
     /// Returns true if the remaining ticks can be exactly filled using the available durations
@@ -155,11 +108,8 @@ impl Measure {
         }
         // Build the available coin sizes (ticks) from the supported durations. Larger first helps pruning.
         let set = default_duration_set();
-        let mut coins: Vec<i32> = set
-            .durations
-            .iter()
-            .map(|dur| set.grid.ticks_of(dur).unwrap())
-            .collect();
+        let mut coins: Vec<i32> =
+            set.durations.iter().map(|dur| set.grid.ticks_of(dur).unwrap()).collect();
         coins.sort_unstable_by(|a, b| b.cmp(a));
 
         // Simple DP (unbounded knapsack reachability)
@@ -192,10 +142,7 @@ impl Measure {
         let max_ticks = self.time_signature.measure_duration_ticks();
         let beat_ticks = set.grid.ticks_of(&beat.duration).ok_or_else(|| {
             // If beat cannot be represented on our default grid, treat as unfillable
-            MeasureError::Unfillable {
-                attempted: 0.0,
-                remaining: 0.0,
-            }
+            MeasureError::Unfillable { attempted: 0.0, remaining: 0.0 }
         })?;
         let new_total_ticks = current_ticks + beat_ticks;
 
@@ -203,20 +150,14 @@ impl Measure {
             let available_ticks = max_ticks - current_ticks;
             let available = (available_ticks as f64) / (set.grid.ticks_per_whole as f64);
             let attempted = (beat_ticks as f64) / (set.grid.ticks_per_whole as f64);
-            return Err(MeasureError::Overflow {
-                attempted,
-                available,
-            });
+            return Err(MeasureError::Overflow { attempted, available });
         }
 
         let remaining_ticks = max_ticks - new_total_ticks;
         if remaining_ticks != 0 && !Self::is_remainder_fillable(remaining_ticks) {
             let remaining = (remaining_ticks as f64) / (set.grid.ticks_per_whole as f64);
             let attempted = (beat_ticks as f64) / (set.grid.ticks_per_whole as f64);
-            return Err(MeasureError::Unfillable {
-                attempted,
-                remaining,
-            });
+            return Err(MeasureError::Unfillable { attempted, remaining });
         }
 
         self.beats.push(beat);
@@ -228,9 +169,15 @@ impl Display for Measure {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         self.beats.iter().fold(Ok(()), |result, b| {
             result.and_then(|_| {
-                let (note, rest) = Beat::to_glyph(b);
+                let (note, rest) = b.to_glyph();
                 let glyph = if b.kind == BeatKind::Note { note } else { rest };
-                write!(f, "{}", glyph)
+                write!(f, "{}", glyph).and_then(|_| match b.duration {
+                    Duration::Simple(_) => Ok(()),
+                    Duration::Dotted { base: _base, dots } => {
+                        write!(f, "{}", "\u{1D16D}".repeat(dots as usize))
+                    }
+                    Duration::Tuplet { .. } => write!(f, "\u{0332}"),
+                })
             })
         })
     }
@@ -240,25 +187,11 @@ impl Display for Measure {
 mod tests {
     use super::*;
     use crate::duration::{Duration, NoteValue};
-    fn q() -> Duration {
-        Duration::Simple(NoteValue::Quarter)
-    }
-    fn e() -> Duration {
-        Duration::Simple(NoteValue::Eighth)
-    }
-    fn t8() -> Duration {
-        Duration::Tuplet {
-            n: 3,
-            m: 2,
-            base: NoteValue::Eighth,
-        }
-    }
-    fn s16() -> Duration {
-        Duration::Simple(NoteValue::Sixteenth)
-    }
-    fn t32() -> Duration {
-        Duration::Simple(NoteValue::ThirtySecond)
-    }
+    fn q() -> Duration { Duration::Simple(NoteValue::Quarter) }
+    fn e() -> Duration { Duration::Simple(NoteValue::Eighth) }
+    fn t8() -> Duration { Duration::Tuplet { n: 3, m: 2, base: NoteValue::Eighth } }
+    fn s16() -> Duration { Duration::Simple(NoteValue::Sixteenth) }
+    fn t32() -> Duration { Duration::Simple(NoteValue::ThirtySecond) }
 
     #[test]
     fn test_add_quarter_note_to_one_four_measure() {
