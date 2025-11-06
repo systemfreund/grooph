@@ -113,7 +113,7 @@ fn layout_rhythm_boxes(
             out.push(SlotBox {
                 rect,
                 span_ticks,
-                content: content.clone(),
+                content: *content,
                 path: path.clone(),
             });
         }

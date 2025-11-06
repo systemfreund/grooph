@@ -27,9 +27,7 @@ pub struct RhythmMeasure {
 
 impl RhythmMeasure {
     pub fn new(time_signature: TimeSignature) -> Self {
-        let mut result = Self { time_signature, root: RhythmNode::Leaf(SlotContent::Rest) };
-        // result.init_beat_grid();
-        result
+        Self { time_signature, root: RhythmNode::Leaf(SlotContent::Rest) }
     }
 
     pub fn toggle_leaf(&mut self, path: &[usize]) -> bool {
@@ -45,56 +43,17 @@ impl RhythmMeasure {
         }
     }
 
-    pub fn init_beat_grid(&mut self) -> bool {
-        // Split root into one box per beat (e.g. 7 for 7/8, 4 for 4/4)
-        let n = self.time_signature.beats as usize;
-        // Initialize all children as Rest
-        if self.subdivide(&[], n, SlotContent::Rest) {
-            true
-        } else {
-            false
-        }
-    }
-
     /// Subdivide the node at `path` (empty path -> root) into `n` equal slots.
     pub fn subdivide(&mut self, path: &[usize], n: usize, init: SlotContent) -> bool {
         if n == 0 { return false; }
         let node = Self::get_mut(&mut self.root, path);
         match node {
             Some(RhythmNode::Group { .. }) | Some(RhythmNode::Leaf(_)) => {
-                let children = vec![RhythmNode::Leaf(init.clone()); n];
+                let children = vec![RhythmNode::Leaf(init); n];
                 *node.unwrap() = RhythmNode::Group { n, children };
                 true
             }
             None => false,
-        }
-    }
-
-    pub fn unsplit(&mut self, path: &[usize]) -> bool {
-        match Self::get_mut(&mut self.root, path) {
-            Some(RhythmNode::Group { n: _, children }) => {
-                let mut any_note = false;
-                // let mut all_rest = true;
-                for ch in children.iter() {
-                    match ch {
-                        RhythmNode::Leaf(SlotContent::Note) => {
-                            any_note = true;
-                            // all_rest = false;
-                        }
-                        RhythmNode::Leaf(SlotContent::Rest) => {}
-                        RhythmNode::Group { .. } => {
-                            // nested groups -> policy: treat as note
-                            any_note = true;
-                            // all_rest = false;
-                        }
-                    }
-                }
-                let leaf = if any_note { SlotContent::Note } else { SlotContent::Rest };
-                *children = Vec::new();
-                *Self::get_mut(&mut self.root, path).unwrap() = RhythmNode::Leaf(leaf);
-                true
-            }
-            _ => false,
         }
     }
 
