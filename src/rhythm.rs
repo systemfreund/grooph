@@ -2,7 +2,7 @@ use crate::fill::best_fill_for_gap;
 use crate::measure::{Beat, Measure, TimeSignature};
 
 /// Authoritative rhythm representation: a tree of equal-time slots (groups) and leaves.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SlotContent {
     /// Click at the start of the span; remainder of the span is silent.
     Note,
@@ -28,7 +28,7 @@ pub struct RhythmMeasure {
 impl RhythmMeasure {
     pub fn new(time_signature: TimeSignature) -> Self {
         let mut result = Self { time_signature, root: RhythmNode::Leaf(SlotContent::Rest) };
-        result.init_beat_grid();
+        // result.init_beat_grid();
         result
     }
 
@@ -163,28 +163,23 @@ impl RhythmMeasure {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::duration::Duration::{TripletEighth, SextupletSixteenth, Quarter, Eighth};
+    use crate::duration::Duration;
+    use crate::duration::Duration::{TripletEighth, SextupletSixteenth, Quarter, Eighth, Sixteenth};
 
-    #[test]
-    fn flatten_empty_measure_over_four_four() {
-        let rm = RhythmMeasure::new(TimeSignature::FOUR_FOUR);
+    fn assert_flattened(rm: RhythmMeasure, expected_beat_durations: Vec<Duration>) {
         let m = rm.flatten_to_measure().unwrap();
+        println!("{}", m);
         let beats = m.beats();
-        assert_eq!(beats.len(), 4);
-        for b in beats.iter() {
-            assert_eq!(b.duration.ticks(), Quarter.ticks());
+        assert_eq!(beats.len(), expected_beat_durations.len());
+        for (idx, b) in beats.iter().enumerate() {
+            assert_eq!(b.duration, expected_beat_durations[idx]);
         }
     }
 
     #[test]
-    fn flatten_empty_measure_over_seven_eight() {
-        let rm = RhythmMeasure::new(TimeSignature::SEVEN_EIGHT);
-        let m = rm.flatten_to_measure().unwrap();
-        let beats = m.beats();
-        assert_eq!(beats.len(), 7);
-        for b in beats.iter() {
-            assert_eq!(b.duration.ticks(), Eighth.ticks());
-        }
+    fn flatten_empty_measure_over_four_four() {
+        let rm = RhythmMeasure::new(TimeSignature::FOUR_FOUR);
+        assert_flattened(rm, vec![Quarter, Quarter, Quarter, Quarter]);
     }
 
     #[test]
@@ -192,12 +187,21 @@ mod tests {
         let mut rm = RhythmMeasure::new(TimeSignature::ONE_FOUR);
         // Subdivide root into 3 slots (triplet) and keep all as notes
         assert!(rm.subdivide(&[], 3, SlotContent::Rest));
-        let m = rm.flatten_to_measure().unwrap();
-        let beats = m.beats();
-        assert_eq!(beats.len(), 3);
-        for b in beats {
-            assert_eq!(b.duration.ticks(), TripletEighth.ticks());
-        }
+        assert_flattened(rm, vec![TripletEighth, TripletEighth, TripletEighth]);
+    }
+
+    #[test]
+    fn flatten_empty_measure_over_seven_eight() {
+        let rm = RhythmMeasure::new(TimeSignature::SEVEN_EIGHT);
+        assert_flattened(rm, vec![Quarter, Quarter, Quarter, Eighth]);
+    }
+
+    #[test]
+    fn flatten_triplet_over_seven_eight() {
+        let mut rm = RhythmMeasure::new(TimeSignature::SEVEN_EIGHT);
+        // Subdivide root into 3 slots (triplet) and keep all as notes
+        assert!(rm.subdivide(&[], 3, SlotContent::Rest));
+        assert_flattened(rm, vec![TripletEighth, TripletEighth, TripletEighth]);
     }
 
     #[test]
@@ -206,13 +210,24 @@ mod tests {
         assert!(rm.subdivide(&[], 3, SlotContent::Rest));
         // Subdivide third slot (index 2) into two and keep both as notes
         assert!(rm.subdivide(&[2], 2, SlotContent::Rest));
-        let m = rm.flatten_to_measure().unwrap();
-        let beats = m.beats();
-        assert_eq!(beats.len(), 4);
-        assert_eq!(beats[0].duration.ticks(), TripletEighth.ticks());
-        assert_eq!(beats[1].duration.ticks(), TripletEighth.ticks());
-        assert_eq!(beats[2].duration.ticks(), SextupletSixteenth.ticks());
-        assert_eq!(beats[3].duration.ticks(), SextupletSixteenth.ticks());
+
+        // falsch?
+        assert_flattened(
+            rm,
+            vec![
+                TripletEighth,
+                TripletEighth,
+                SextupletSixteenth,
+                SextupletSixteenth,
+            ],
+        );
+    }
+
+    #[test]
+    fn flatten_two_sixteenth_measure_with_several_subdivision() {
+        let mut rm = RhythmMeasure::new(TimeSignature::TWO_SIXTEENTH);
+        assert_flattened(rm, vec![Sixteenth, Sixteenth]);
+        // rm.subdivide(&[], 1, SlotContent::Note);
     }
 
     #[test]
@@ -224,12 +239,9 @@ mod tests {
     }
 
     #[test]
-    fn cannot_flatten_triplets_over_two_sixteenth() {
+    fn flatten_16th_triplets_over_two_sixteenth() {
         let mut rm = RhythmMeasure::new(TimeSignature::TWO_SIXTEENTH);
         rm.subdivide(&[], 3, SlotContent::Note);
-        // Cannot flatten this structure because we don't support 16th-triplets over 1/16 notes.
-        println!("{:?}", rm.flatten_to_measure());
-        assert!(rm.flatten_to_measure().is_none());
+        assert_flattened(rm, vec![SextupletSixteenth, SextupletSixteenth, SextupletSixteenth]);
     }
-
 }

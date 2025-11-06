@@ -13,7 +13,9 @@ use eframe::egui::{Align2, Context, Id, Rangef, Sense, Stroke, pos2};
 use eframe::epaint::text::{FontInsert, InsertFontFamily};
 use eframe::epaint::{Color32, FontFamily, FontId, StrokeKind};
 use eframe::{App, CreationContext, egui};
+use eframe::emath::Pos2;
 use egui::containers::Frame;
+use crate::fill::best_fill_for_gap;
 
 struct MyApp {
     font_family: FontFamily,
@@ -36,9 +38,13 @@ impl MyApp {
     fn new(cc: &CreationContext) -> Self {
         add_font(&cc.egui_ctx);
         let ff = FontFamily::Name("music".into());
-        let mut measure = RhythmMeasure::new(TimeSignature::ONE_SIXTEENTH);
-        // println!("{}", measure.subdivide(&[], 4, SlotContent::Note));
+        let mut measure = RhythmMeasure::new(TimeSignature::SEVEN_EIGHT);
         println!("{:?}", measure);
+        // println!("{}", measure.subdivide(&[], 4, SlotContent::Note));
+        measure.flatten_to_measure().map(|m| {
+            println!("{}", m)
+        });
+
         Self {
             font_family: ff.clone(),
             font_id: FontId::new(64.0, ff),
@@ -129,12 +135,7 @@ fn layout_rhythm_boxes(
     }
 }
 
-fn draw_slot_overlays(
-    ui: &mut egui::Ui,
-    font_id: &FontId,
-    rm: &mut RhythmMeasure,
-    inner_rect: egui::Rect,
-) {
+fn draw_slot_overlays(ui: &mut egui::Ui, font_id: &FontId, rm: &RhythmMeasure, inner_rect: egui::Rect) {
     let painter = ui.painter();
 
     let mut boxes = Vec::new();
@@ -143,39 +144,41 @@ fn draw_slot_overlays(
     layout_rhythm_boxes(&rm.root, total_ticks, inner_rect, &mut path, &mut boxes);
 
     let border = Stroke::new(1.0, Color32::from_gray(170));
-    let fill = Color32::from_rgba_unmultiplied(80, 160, 255, 40);
+    let fill_a = Color32::from_rgba_unmultiplied(80, 160, 255, 40);
+    let fill_b = Color32::from_rgba_unmultiplied(80, 255, 160, 24);
 
-    for (_idx, sb) in boxes.iter().enumerate() {
-        // Interactivity: toggle on click
-        let id = Id::new(("slot_box", &sb.path));
-        let resp = ui.interact(sb.rect, id, Sense::click());
-        if resp.clicked() {
-            // Toggle between Rest and Note at this slot path
-            rm.toggle_leaf(&sb.path);
-        }
-
+    for (idx, sb) in boxes.iter().enumerate() {
+        let fill = if idx % 2 == 0 { fill_a } else { fill_b };
         painter.rect_filled(sb.rect, 3.0, fill);
         painter.rect_stroke(sb.rect, 3.0, border, StrokeKind::Inside);
 
         // Within each slot, draw the local minimal spelling.
-        //println!("{:?} - {} => {:?}", sb.path, sb.span_ticks, duration);
-        draw_note(painter, font_id, sb);
+        if let Some(seq) = best_fill_for_gap(sb.span_ticks) {
+            let mut x = sb.rect.left();
+            let width = sb.rect.width();
+            let mut acc_ticks = 0.0_f32;
+            let total = sb.span_ticks as f32;
+
+            for (j, d) in seq.iter().enumerate() {
+                acc_ticks += d.ticks() as f32;
+                let next_x = if j == seq.len() - 1 { sb.rect.right() } else { sb.rect.left() + width * (acc_ticks / total) };
+                let mid = pos2(0.5 * (x + next_x), 0.5 * (sb.rect.top() + sb.rect.bottom()));
+                draw_note(painter, font_id, mid, *d, sb.content);
+                x = next_x;
+            }
+        }
     }
 }
 
-fn draw_note(painter: &egui::Painter, font_id: &FontId, sb: &SlotBox) {
-    let x = sb.rect.left();
-    let next_x = sb.rect.left() + sb.rect.width();
-    let mid = pos2(0.5 * (x + next_x), 0.5 * (sb.rect.top() + sb.rect.bottom()));
-    let duration = Duration::from_ticks(sb.span_ticks).unwrap();
-    let glyph = match sb.content {
+fn draw_note(painter: &egui::Painter, font_id: &FontId, pos: Pos2, duration: Duration, slot_content: SlotContent) {
+    let glyph = match slot_content {
         SlotContent::Note => GLYPH_NOTEHEAD_BLACK,
         SlotContent::Rest => rest_glyph_for_duration(duration),
     };
 
     // Draw the glyph (notehead or rest)
     painter.text(
-        mid,
+        pos,
         Align2::CENTER_CENTER,
         glyph.to_string(),
         font_id.clone(),
@@ -184,13 +187,13 @@ fn draw_note(painter: &egui::Painter, font_id: &FontId, sb: &SlotBox) {
 
     // If this is a Note, draw a simple upward stem next to the notehead,
     // and add a flag according to the duration (8th=1, 16th=2, 32nd=3; tuplets map similarly).
-    if sb.content == SlotContent::Note {
+    if slot_content == SlotContent::Note {
         // Stem positioning relative to notehead center.
         let stem_offset_x = font_id.size * 0.13; // tweak by eye for Bravura
         let stem_len = font_id.size * 0.9; // proportional stem length
         let stem_thickness = 2.5;
-        let start = pos2(mid.x + stem_offset_x, mid.y);
-        let end = pos2(start.x, mid.y - stem_len);
+        let start = pos2(pos.x + stem_offset_x, pos.y);
+        let end = pos2(start.x, pos.y - stem_len);
         painter.line_segment([start, end], Stroke::new(stem_thickness, Color32::WHITE));
 
         // Flag glyph at the stem tip for short durations

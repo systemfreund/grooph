@@ -1,3 +1,4 @@
+use std::fmt::{Display, Formatter};
 use crate::duration::Duration;
 
 /// Represents a time signature (e.g., 4/4, 3/4, 6/8)
@@ -48,7 +49,7 @@ impl TimeSignature {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum BeatKind {
     Note,
     Rest,
@@ -77,6 +78,19 @@ impl Beat {
         }
     }
 
+    const fn to_glyph(beat: &Beat) -> (&'static str, &'static str) {
+        match beat.duration {
+            Duration::Quarter => ("𝅘𝅥", "𝄽"),
+            Duration::Eighth => ("𝅘𝅥𝅮", "𝄾"),
+            Duration::TripletEighth => ("𝅘𝅥𝅮", "𝄾"),
+            Duration::Sixteenth => ("𝅘𝅥𝅯", "𝄿"),
+            Duration::QuintupletSixteenth => ("𝅘𝅥𝅯", "𝄿"),
+            Duration::SextupletSixteenth => ("𝅘𝅥𝅯", "𝄿"),
+            Duration::SeptupletSixteenth => ("𝅘𝅥𝅯", "𝄿"),
+            Duration::ThirtySecond => ("𝅘𝅥𝅰", "𝅀"),
+            Duration::NonupletThirtySecond => ("𝅘𝅥𝅰", "𝅀"),
+        }
+    }
 }
 
 /// Errors that can occur when adding beats to a measure
@@ -179,6 +193,19 @@ impl Measure {
         }
 
         self.beats.push(beat);
+        Ok(())
+    }
+}
+
+impl Display for Measure {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        for b in self.beats.iter() {
+            let (note, rest) = Beat::to_glyph(b);
+            let glyph = if b.kind == BeatKind::Note { note } else { rest };
+
+            write!(f, "{}", glyph).expect("formatting error");
+        }
+
         Ok(())
     }
 }
