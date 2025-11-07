@@ -222,3 +222,70 @@ fn primary_boundaries(ts: &TimeSignature) -> Vec<i32> {
     }
     bounds
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::duration::{Duration, NoteValue};
+    use crate::measure::{Beat, Measure, TimeSignature};
+
+    fn e() -> Duration { Duration::Simple(NoteValue::Eighth) }
+    fn s() -> Duration { Duration::Simple(NoteValue::Sixteenth) }
+    fn t8() -> Duration { Duration::Tuplet { n: 3, m: 2, base: NoteValue::Eighth } }
+
+    #[test]
+    fn beaming_simple_eighths_group_by_quarters() {
+        // 4/4 with eight eighth notes -> 4 groups, each two notes
+        let mut m = Measure::new(TimeSignature::FOUR_FOUR);
+        for _ in 0..8 { m.add_beat(Beat::note(e())).unwrap(); }
+        let plan = m.beam_plan().unwrap();
+        assert_eq!(plan.groups.len(), 4, "expected 4 groups of eighths in 4/4");
+        for (gi, g) in plan.groups.iter().enumerate() {
+            assert_eq!(g.note_indices.len(), 2, "group {} should have 2 notes", gi);
+            assert_eq!(g.beam_counts, vec![1, 1]);
+            assert_eq!(g.continuity, vec![1]);
+        }
+    }
+
+    #[test]
+    fn beaming_rest_breaks_continuity_but_not_group() {
+        // Note 16th, Rest 16th, Note 16th, Rest 16th within the first quarter
+        let mut m = Measure::new(TimeSignature::FOUR_FOUR);
+        m.add_beat(Beat::note(s())).unwrap(); // idx 0
+        m.add_beat(Beat::rest(s())).unwrap(); // idx 1
+        m.add_beat(Beat::note(s())).unwrap(); // idx 2
+        m.add_beat(Beat::rest(s())).unwrap(); // idx 3
+        let plan = m.beam_plan().unwrap();
+        assert!(!plan.groups.is_empty());
+        let g0 = &plan.groups[0];
+        // Two sixteenth notes should be in the same group even though there is a rest between
+        assert_eq!(g0.note_indices, vec![0, 2]);
+        assert_eq!(g0.beam_counts, vec![2, 2]);
+        // Continuity should be 0 across the rest
+        assert_eq!(g0.continuity, vec![0]);
+    }
+
+    #[test]
+    fn beaming_tuplet_crosses_primary_boundary_as_single_group() {
+        // In 4/4: Eighth rest, then three eighth‑tuplets starting on the offbeat, which can span a quarter boundary.
+        // The three tuplet notes must remain in one BeamGroup even if a primary boundary lies between them.
+        let mut m = Measure::new(TimeSignature::FOUR_FOUR);
+        m.add_beat(Beat::rest(e())).unwrap(); // offset by an eighth
+        m.add_beat(Beat::note(t8())).unwrap(); // idx 1
+        m.add_beat(Beat::note(t8())).unwrap(); // idx 2
+        m.add_beat(Beat::note(t8())).unwrap(); // idx 3
+        m.add_beat(Beat::note(e())).unwrap();  // following context
+        let plan = m.beam_plan().unwrap();
+
+        // Find the group that contains note index 1 (first tuplet note)
+        let tuplet_group = plan.groups.iter().find(|g| g.note_indices.contains(&1)).expect("tuplet group");
+        // It must contain the three tuplet notes (indices 1,2,3) contiguously at the start of the group
+        assert!(tuplet_group.note_indices.starts_with(&[1, 2, 3]));
+        // Continuity should be full min beams (1) between the tuplet notes since there are no rests between them
+        assert!(tuplet_group.beam_counts.len() >= 3);
+        assert_eq!(&tuplet_group.beam_counts[0..3], &[1, 1, 1]);
+        assert!(tuplet_group.continuity.len() >= 2);
+        assert_eq!(&tuplet_group.continuity[0..2], &[1, 1]);
+    }
+}
