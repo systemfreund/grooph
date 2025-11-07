@@ -92,6 +92,9 @@ impl Measure {
     /// Expose a read-only view of beats (primarily for tests/inspection)
     pub fn beats(&self) -> &Vec<Beat> { &self.beats }
 
+    /// Expose the time signature (clone)
+    pub fn time_signature(&self) -> TimeSignature { self.time_signature.clone() }
+
     /// Returns the current total duration in ticks (exact)
     fn current_ticks(&self) -> i32 {
         let set = default_duration_set();
@@ -212,5 +215,20 @@ mod tests {
         assert!(measure.add_beat(Beat::note(e())).is_err());
         assert!(measure.add_beat(Beat::note(s16())).is_err());
         assert!(measure.add_beat(Beat::note(t32())).is_err());
+    }
+
+    #[test]
+    fn test_add_eighth_note_to_one_four_measure() {
+        let mut measure = Measure::new(TimeSignature::SEVEN_EIGHT);
+        let t8 = Duration::Tuplet { n: 3, m: 2, base: NoteValue::Eighth };
+        measure.add_beat(Beat::note(t8)).unwrap();
+        measure.add_beat(Beat::note(t8)).unwrap();
+        measure.add_beat(Beat::note(t8)).unwrap();
+
+        // measure.current_ticks()
+
+        // measure.add_beat(Beat::note(Duration::Simple(NoteValue::Eighth))).unwrap();
+
+        println!("{}", measure);
     }
 }

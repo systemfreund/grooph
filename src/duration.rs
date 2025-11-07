@@ -55,7 +55,7 @@ const fn reduce(f: Frac) -> Frac {
 }
 
 impl Duration {
-    pub const fn as_fraction(&self) -> Frac {
+    const fn as_fraction(&self) -> Frac {
         match *self {
             Duration::Simple(base) => Frac { num: 1, den: base.denominator() },
             Duration::Dotted { base, dots } => {

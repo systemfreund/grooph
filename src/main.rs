@@ -6,11 +6,12 @@ mod measure;
 mod rhythm;
 
 use duration::{Duration, NoteValue};
-use measure::TimeSignature;
+use measure::{Measure, TimeSignature};
 use rhythm::{RhythmMeasure, RhythmNode, SlotContent};
 
 use crate::fill::best_fill_for_gap;
-use eframe::egui::{Align2, Context, Id, Rangef, Sense, Stroke, pos2};
+use crate::measure::Beat;
+use eframe::egui::{Align2, Context, Rangef, Stroke, pos2};
 use eframe::emath::Pos2;
 use eframe::epaint::text::{FontInsert, InsertFontFamily};
 use eframe::epaint::{Color32, FontFamily, FontId, StrokeKind};
@@ -20,7 +21,7 @@ use egui::containers::Frame;
 struct MyApp {
     font_family: FontFamily,
     font_id: FontId,
-    measure: RhythmMeasure,
+    measure: Measure,
 }
 
 fn add_font(ctx: &Context) {
@@ -38,11 +39,12 @@ impl MyApp {
     fn new(cc: &CreationContext) -> Self {
         add_font(&cc.egui_ctx);
         let ff = FontFamily::Name("music".into());
-        let mut measure = RhythmMeasure::new(TimeSignature::SEVEN_EIGHT);
-        println!("{:?}", measure);
-        // println!("{}", measure.subdivide(&[], 4, SlotContent::Note));
-        measure.flatten_to_measure().map(|m| println!("{}", m));
-
+        let mut measure = Measure::new(TimeSignature::SEVEN_EIGHT);
+        let t8 = Duration::Tuplet { n: 3, m: 2, base: NoteValue::Eighth };
+        measure.add_beat(Beat::note(t8)).unwrap();
+        measure.add_beat(Beat::note(t8)).unwrap();
+        measure.add_beat(Beat::note(t8)).unwrap();
+        measure.add_beat(Beat::note(Duration::Simple(NoteValue::Eighth))).unwrap();
         Self { font_family: ff.clone(), font_id: FontId::new(64.0, ff), measure }
     }
 }
@@ -104,7 +106,9 @@ fn layout_rhythm_boxes(
         }
         RhythmNode::Weighted { weights, children } => {
             let sum_w: i32 = weights.iter().map(|&w| w as i32).sum();
-            if sum_w <= 0 { return; }
+            if sum_w <= 0 {
+                return;
+            }
             let unit_ticks = span_ticks / sum_w;
             let total_w = sum_w as f32;
             let mut acc_w = 0f32;
@@ -112,10 +116,8 @@ fn layout_rhythm_boxes(
                 let w_f = *w as f32;
                 let left = rect.left() + rect.width() * (acc_w / total_w);
                 let right = rect.left() + rect.width() * ((acc_w + w_f) / total_w);
-                let child_rect = egui::Rect::from_min_max(
-                    pos2(left, rect.top()),
-                    pos2(right, rect.bottom()),
-                );
+                let child_rect =
+                    egui::Rect::from_min_max(pos2(left, rect.top()), pos2(right, rect.bottom()));
                 let child_ticks = unit_ticks * (*w as i32);
                 path.push(i);
                 layout_rhythm_boxes(child, child_ticks, child_rect, path, out);
@@ -129,7 +131,7 @@ fn layout_rhythm_boxes(
 fn draw_slot_overlays(
     ui: &mut egui::Ui,
     font_id: &FontId,
-    rm: &mut RhythmMeasure,
+    rm: &RhythmMeasure,
     inner_rect: egui::Rect,
 ) {
     let painter = ui.painter();
@@ -144,14 +146,7 @@ fn draw_slot_overlays(
     let fill_b = Color32::from_rgba_unmultiplied(80, 255, 160, 24);
 
     for (idx, sb) in boxes.iter().enumerate() {
-        // Interactivity: toggle on click
-        let id = Id::new(("slot_box", &sb.path));
-        let resp = ui.interact(sb.rect, id, Sense::click());
-        if resp.clicked() {
-            // Toggle between Rest and Note at this slot path
-            rm.toggle_leaf(&sb.path);
-        }
-
+        // Interactivity (click) intentionally disabled in measure-first model; drawing only.
         let fill = if idx % 2 == 0 { fill_a } else { fill_b };
         painter.rect_filled(sb.rect, 3.0, fill);
         painter.rect_stroke(sb.rect, 3.0, border, StrokeKind::Inside);
@@ -221,7 +216,7 @@ fn draw_note(
     }
 }
 
-fn draw_measure(ui: &mut egui::Ui, font_id: &FontId, rm: &mut RhythmMeasure, rect: egui::Rect) {
+fn draw_measure(ui: &mut egui::Ui, font_id: &FontId, measure: &Measure, rect: egui::Rect) {
     let painter = ui.painter();
     let y = rect.center().y;
     // staff line
@@ -237,8 +232,9 @@ fn draw_measure(ui: &mut egui::Ui, font_id: &FontId, rm: &mut RhythmMeasure, rec
     let right = rect.right() - 24.0;
     let inner_rect = egui::Rect::from_min_max(pos2(left, y - 36.0), pos2(right, y + 36.0));
 
-    // Draw semi-transparent slot overlays containing local spelling
-    draw_slot_overlays(ui, font_id, rm, inner_rect);
+    if let Some(rm) = RhythmMeasure::derive_from_measure(measure) {
+        draw_slot_overlays(ui, font_id, &rm, inner_rect);
+    }
 }
 
 impl App for MyApp {
@@ -246,7 +242,7 @@ impl App for MyApp {
         egui::CentralPanel::default().show(ctx, |ui| {
             Frame::canvas(ui.style()).show(ui, |ui| {
                 let (_id, rect) = ui.allocate_space(ui.available_size());
-                draw_measure(ui, &self.font_id, &mut self.measure, rect);
+                draw_measure(ui, &self.font_id, &self.measure, rect);
             });
         });
     }
