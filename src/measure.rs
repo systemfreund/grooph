@@ -1,5 +1,6 @@
 use crate::duration::{Duration, NoteValue, default_duration_set};
 use crate::fill::best_fill_for_gap;
+use crate::beaming::{BeamPlan, compute_beam_plan};
 use std::fmt::{Display, Formatter};
 use std::fs::write;
 use std::vec;
@@ -40,14 +41,23 @@ pub enum BeatKind {
 pub struct Beat {
     pub duration: Duration,
     pub kind: BeatKind,
+    pub tremolo: Option<Tremolo>,
+}
+
+#[derive(Copy, Clone, Debug)]
+pub struct Tremolo {
+    /// Number of slashes (1..=3 typical)
+    pub slashes: u8,
+    /// If true, indicates measured tremolo; otherwise unmeasured (for future use)
+    pub measured: bool,
 }
 
 impl Beat {
     /// Creates a new note with the given duration
-    pub fn note(duration: Duration) -> Self { Self { duration, kind: BeatKind::Note } }
+    pub fn note(duration: Duration) -> Self { Self { duration, kind: BeatKind::Note, tremolo: None } }
 
     /// Creates a new rest with the given duration
-    pub fn rest(duration: Duration) -> Self { Self { duration, kind: BeatKind::Rest } }
+    pub fn rest(duration: Duration) -> Self { Self { duration, kind: BeatKind::Rest, tremolo: None } }
 }
 
 /// Errors that can occur when adding beats to a measure
@@ -74,17 +84,23 @@ pub enum MeasureError {
 pub struct Measure {
     beats: Vec<Beat>,
     time_signature: TimeSignature,
+    beam_plan: Option<BeamPlan>,
 }
 
 impl Measure {
     /// Creates a new empty measure with the given time signature
-    pub fn new(time_signature: TimeSignature) -> Self { Self { beats: Vec::new(), time_signature } }
+    pub fn new(time_signature: TimeSignature) -> Self {
+        Self { beats: Vec::new(), time_signature, beam_plan: Some(BeamPlan { groups: vec![] }) }
+    }
 
     /// Expose a read-only view of beats (primarily for tests/inspection)
     pub fn beats(&self) -> &Vec<Beat> { &self.beats }
 
     /// Expose the time signature (clone)
     pub fn time_signature(&self) -> TimeSignature { self.time_signature.clone() }
+
+    /// Expose the beaming plan for this measure
+    pub fn beam_plan(&self) -> Option<&BeamPlan> { self.beam_plan.as_ref() }
 
     /// Returns the current total duration in ticks (exact)
     fn current_ticks(&self) -> i32 {
@@ -163,7 +179,14 @@ impl Measure {
         }
 
         self.beats.push(beat);
+        // Recompute beaming plan after mutation
+        self.beam_plan = Some(compute_beam_plan(self));
         Ok(())
+    }
+
+    /// Recompute the beam plan explicitly (optional helper)
+    pub fn recompute_beams(&mut self) {
+        self.beam_plan = Some(crate::beaming::compute_beam_plan(self));
     }
 }
 

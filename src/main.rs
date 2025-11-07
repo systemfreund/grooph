@@ -3,6 +3,7 @@
 mod duration;
 mod fill;
 mod measure;
+mod beaming;
 
 use duration::{Duration, NoteValue};
 use measure::{Measure, TimeSignature};
