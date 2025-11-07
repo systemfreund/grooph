@@ -28,19 +28,6 @@ impl RhythmMeasure {
         Self { time_signature, root: RhythmNode::Leaf(SlotContent::Rest) }
     }
 
-    pub fn toggle_leaf(&mut self, path: &[usize]) -> bool {
-        match Self::get_mut(&mut self.root, path) {
-            Some(RhythmNode::Leaf(content)) => {
-                *content = match content {
-                    SlotContent::Note => SlotContent::Rest,
-                    SlotContent::Rest => SlotContent::Note,
-                };
-                true
-            }
-            _ => false,
-        }
-    }
-
     /// Subdivide the node at `path` (empty path -> root) into `n` equal slots.
     pub fn subdivide(&mut self, path: &[usize], n: usize, init: SlotContent) -> bool {
         if n == 0 {
@@ -381,35 +368,6 @@ mod tests {
         let mut rm = RhythmMeasure::new(TimeSignature::TWO_SIXTEENTH);
         rm.subdivide(&[], 3, SlotContent::Note);
         assert_flattened(rm, vec![sx16(), sx16(), sx16()]);
-    }
-
-    #[test]
-    fn build_three_eighth_triplets_plus_eighth() {
-        // 3/8 measure
-        let ts = TimeSignature { beats: 3, beat_unit: 8 };
-        let mut rm = RhythmMeasure::new(ts);
-
-        // Split root into 3 equal eighth slots: weights = [1,1,1]
-        assert!(rm.subdivide(&[], 3, SlotContent::Rest));
-
-        // Replace the first two slots with a 3-in-2 tuplet group (triplet-eighths)
-        // parent_path = [] (root), start_idx = 0, m_units = 2, n_tuplet = 3
-        assert!(rm.insert_tuplet(&[], 0, 2, 3, SlotContent::Rest));
-
-        // Paths after the rewrite:
-        // root children: [ 0: (tuplet group over 2 units), 1: (remaining 1 unit) ]
-        // Inside the tuplet child (index 0): three equal leaves at paths [0,0], [0,1], [0,2]
-
-        // Toggle the triplet leaves to Note
-        rm.toggle_leaf(&[0, 0]);
-        rm.toggle_leaf(&[0, 1]);
-        rm.toggle_leaf(&[0, 2]);
-
-        // Toggle the remaining eighth (root child index 1) to Note
-        rm.toggle_leaf(&[1]);
-
-        println!("{:?}", rm);
-        rm.flatten_to_measure().map(|m| println!("{}", m));
     }
 
     #[test]
