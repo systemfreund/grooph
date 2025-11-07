@@ -49,8 +49,9 @@ pub struct BeamGroup {
 
 /// Compute a default beaming plan for a single measure according to common rules:
 /// - Group by primary beat boundaries of the time signature
-/// - Tuplets (if contiguous) are treated like normal beamable notes (future: with explicit group id)
-/// - Rests inside a group do not break the group; continuity across a rest is 0 (broken beam/hooks)
+/// - Contiguous tuplets (same n, m, base; no intervening rests or non-matching notes) take precedence
+///   over primary boundaries and remain within a single BeamGroup
+/// - Rests inside a non-tuplet group do not break the group; continuity across a rest is 0 (broken beam/hooks)
 /// - Cross-measure beams are exposed via the `continues_*` flags but left as false here; a higher level
 ///   can link adjacent measures and set these appropriately.
 pub fn compute_beam_plan(measure: &Measure) -> BeamPlan {
@@ -92,9 +93,10 @@ pub fn compute_beam_plan(measure: &Measure) -> BeamPlan {
         let a_on = onsets[a];
         let b_on = onsets[b];
 
+        let boundary_between = boundaries.iter().any(|&bd| bd > a_on && bd <= b_on);
         let mut break_group = false;
-        // default: break if any primary boundary lies between these onsets (exclusive of a_on, inclusive of b_on)
-        if boundaries.iter().any(|&bd| bd > a_on && bd <= b_on) {
+        // By default we break at primary boundaries, unless a..b (inclusive) are within the same contiguous tuplet run.
+        if boundary_between && !is_contiguous_tuplet_run(&beats, a, b) {
             break_group = true;
         }
         // Check if any non-beamable NOTE exists between a..b (rests allowed)
@@ -155,6 +157,30 @@ fn has_rest_between(beats: &Vec<Beat>, i: usize, j: usize) -> bool {
         if beats[k].kind == BeatKind::Rest { return true; }
     }
     false
+}
+
+fn tuplet_spec(d: &Duration) -> Option<(u8, u8, NoteValue)> {
+    match *d {
+        Duration::Tuplet { n, m, base } => Some((n, m, base)),
+        _ => None,
+    }
+}
+
+fn is_contiguous_tuplet_run(beats: &Vec<Beat>, i: usize, j: usize) -> bool {
+    if j <= i { return false; }
+    let si = tuplet_spec(&beats[i].duration);
+    let sj = tuplet_spec(&beats[j].duration);
+    let Some(spec) = (match (si, sj) {
+        (Some(a), Some(b)) if a == b => Some(a),
+        _ => None,
+    }) else { return false; };
+
+    for k in (i + 1)..j {
+        let bk = &beats[k];
+        if bk.kind != BeatKind::Note { return false; }
+        if tuplet_spec(&bk.duration) != Some(spec) { return false; }
+    }
+    true
 }
 
 /// Compute the primary grouping stride in ticks for a time signature.
