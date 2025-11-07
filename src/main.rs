@@ -55,10 +55,32 @@ const GLYPH_REST_EIGHTH: char = '\u{E4E6}';
 const GLYPH_REST_SIXTEENTH: char = '\u{E4E7}';
 const GLYPH_REST_32ND: char = '\u{E4E8}';
 
-// Up-stem flags (SMuFL): U+E240..U+E242
+// Up-stem flags (SMuFL): U+E240..U+E244
 const GLYPH_FLAG_8TH_UP: char = '\u{E240}';
 const GLYPH_FLAG_16TH_UP: char = '\u{E242}';
 const GLYPH_FLAG_32ND_UP: char = '\u{E244}';
+
+// Clef and time signature digits
+const GLYPH_CLEF_PERCUSSION: char = '\u{E069}';
+const TS_DIGITS: [char; 10] = [
+    '\u{E080}', // 0
+    '\u{E081}', // 1
+    '\u{E082}', // 2
+    '\u{E083}', // 3
+    '\u{E084}', // 4
+    '\u{E085}', // 5
+    '\u{E086}', // 6
+    '\u{E087}', // 7
+    '\u{E088}', // 8
+    '\u{E089}', // 9
+];
+
+fn ts_glyphs(n: u32) -> Vec<char> {
+    n.to_string()
+        .chars()
+        .filter_map(|c| c.to_digit(10).map(|d| TS_DIGITS[d as usize]))
+        .collect()
+}
 
 fn rest_glyph_for_duration(d: Duration) -> char {
     match d.base_note() {
@@ -80,7 +102,7 @@ fn flag_glyph_for_duration(d: Duration) -> Option<char> {
     }
 }
 
-fn draw_beat(painter: &egui::Painter, font_id: &FontId, pos: Pos2, beat: Beat) {
+fn draw_beat(painter: &egui::Painter, font_id: &FontId, pos: Pos2, beat: Beat, color: Color32) {
     let duration = beat.duration;
     let glyph = match beat.kind {
         BeatKind::Note => GLYPH_NOTEHEAD_BLACK,
@@ -88,7 +110,7 @@ fn draw_beat(painter: &egui::Painter, font_id: &FontId, pos: Pos2, beat: Beat) {
     };
 
     // Draw the glyph (notehead or rest)
-    painter.text(pos, Align2::CENTER_CENTER, glyph.to_string(), font_id.clone(), Color32::WHITE);
+    painter.text(pos, Align2::CENTER_CENTER, glyph.to_string(), font_id.clone(), color);
 
     // If this is a Note, draw a simple upward stem next to the notehead,
     // and add a flag according to the duration (8th=1, 16th=2, 32nd=3; tuplets map similarly).
@@ -99,7 +121,7 @@ fn draw_beat(painter: &egui::Painter, font_id: &FontId, pos: Pos2, beat: Beat) {
         let stem_thickness = 2.5;
         let start = pos2(pos.x + stem_offset_x, pos.y);
         let end = pos2(start.x, pos.y - stem_len);
-        painter.line_segment([start, end], Stroke::new(stem_thickness, Color32::WHITE));
+        painter.line_segment([start, end], Stroke::new(stem_thickness, color));
 
         // Flag glyph at the stem tip for short durations
         if let Some(flag) = flag_glyph_for_duration(duration) {
@@ -110,7 +132,7 @@ fn draw_beat(painter: &egui::Painter, font_id: &FontId, pos: Pos2, beat: Beat) {
                 Align2::LEFT_CENTER,
                 flag.to_string(),
                 font_id.clone(),
-                Color32::WHITE,
+                color,
             );
         }
     }
@@ -132,7 +154,102 @@ fn draw_measure(ui: &mut egui::Ui, font_id: &FontId, measure: &Measure, rect: eg
     let right = rect.right() - 24.0;
     let inner_rect = egui::Rect::from_min_max(pos2(left, y - 36.0), pos2(right, y + 36.0));
 
-    todo!("draw measure")
+    // Derive font size from available height (scaled), keep family from provided font_id
+    let inner_h = inner_rect.height();
+    let target_size = (inner_h * 0.65).clamp(24.0, 96.0);
+    let music_font = FontId::new(target_size, font_id.family.clone());
+    let em = target_size;
+
+    // Left-side: percussion clef and stacked time signature
+    let clef_w = em * 0.9;      // reserved visual width for clef
+    let ts_digit_w = em * 0.7;  // width per time-signature digit column
+    let gap_w = em * 0.3;       // gap between blocks
+
+    // Draw clef
+    let clef_x = inner_rect.left() + clef_w * 0.5;
+    painter.text(
+        pos2(clef_x, y),
+        Align2::CENTER_CENTER,
+        GLYPH_CLEF_PERCUSSION.to_string(),
+        music_font.clone(),
+        Color32::WHITE,
+    );
+
+    // Time signature digits (SMuFL)
+    let ts = measure.time_signature();
+    let top_digits = ts_glyphs(ts.beats as u32);
+    let bot_digits = ts_glyphs(ts.beat_unit as u32);
+
+    let ts_cols = top_digits.len().max(bot_digits.len()) as f32;
+    let ts_w = ts_cols * ts_digit_w;
+    let ts_left = inner_rect.left() + clef_w + gap_w;
+
+    // Top row (beats)
+    for (i, ch) in top_digits.iter().enumerate() {
+        // center narrower row within max columns
+        let offset = (ts_cols - top_digits.len() as f32) * 0.5;
+        let cx = ts_left + (i as f32 + 0.5 + offset) * ts_digit_w;
+        painter.text(pos2(cx, y - em * 0.40), Align2::CENTER_CENTER, ch.to_string(), music_font.clone(), Color32::WHITE);
+    }
+    // Bottom row (beat unit)
+    for (i, ch) in bot_digits.iter().enumerate() {
+        let offset = (ts_cols - bot_digits.len() as f32) * 0.5;
+        let cx = ts_left + (i as f32 + 0.5 + offset) * ts_digit_w;
+        painter.text(pos2(cx, y + em * 0.40), Align2::CENTER_CENTER, ch.to_string(), music_font.clone(), Color32::WHITE);
+    }
+
+    // Content area after clef + time signature
+    let content_left = ts_left + ts_w + gap_w;
+    let content_right = inner_rect.right();
+    let content_w = (content_right - content_left).max(1.0);
+
+    // Compute ticks
+    let set = crate::duration::default_duration_set();
+    let cap_ticks = ts.measure_duration_ticks();
+    let used_ticks: i32 = measure
+        .beats()
+        .iter()
+        .map(|b| set.grid.ticks_of(&b.duration).unwrap_or(0))
+        .sum();
+
+    // Lay out existing beats proportionally
+    let mut run = 0.0_f32;
+    for beat in measure.beats().iter().copied() {
+        let t = set.grid.ticks_of(&beat.duration).unwrap_or(0) as f32;
+        if cap_ticks > 0 {
+            let w = content_w * (t / cap_ticks as f32);
+            let cx = content_left + run + w * 0.5;
+            draw_beat(&painter, &music_font, pos2(cx, y), beat, Color32::WHITE);
+            run += w;
+        }
+    }
+
+    // Cursor at current used position (does not consume width)
+    if cap_ticks > 0 {
+        let x_cursor = content_left + content_w * (used_ticks as f32 / cap_ticks as f32);
+        painter.vline(
+            x_cursor,
+            Rangef::new(y - em * 0.55, y + em * 0.55),
+            Stroke::new(1.5, Color32::from_white_alpha(180)),
+        );
+    }
+
+    // Remainder preview as faint rests filling the remaining space
+    let remaining = cap_ticks - used_ticks;
+    if remaining > 0 {
+        let remainder_durs = crate::fill::best_fill_for_gap(remaining).unwrap_or_default();
+        let ghost = Color32::from_white_alpha(100);
+        for d in remainder_durs {
+            let beat = Beat::rest(d);
+            let t = set.grid.ticks_of(&beat.duration).unwrap_or(0) as f32;
+            if cap_ticks > 0 {
+                let w = content_w * (t / cap_ticks as f32);
+                let cx = content_left + run + w * 0.5;
+                draw_beat(&painter, &music_font, pos2(cx, y), beat, ghost);
+                run += w;
+            }
+        }
+    }
 }
 
 impl App for MyApp {
