@@ -45,9 +45,7 @@ const fn gcd(mut a: i32, mut b: i32) -> i32 {
     if a < 0 { -a } else { a }
 }
 
-const fn lcm(a: i32, b: i32) -> i32 {
-    (a / gcd(a, b)) * b
-}
+const fn lcm(a: i32, b: i32) -> i32 { (a / gcd(a, b)) * b }
 
 const fn reduce(f: Frac) -> Frac {
     let g = gcd(f.num, f.den);
@@ -77,9 +75,7 @@ impl Duration {
     }
 
     /// Public helper for weight/grids: denominator of the reduced fraction relative to whole note.
-    pub const fn denominator(&self) -> i32 {
-        self.as_fraction().den
-    }
+    pub const fn denominator(&self) -> i32 { self.as_fraction().den }
 
     /// Convenience to get a base for glyph decisions (flags/rest shapes). Tuplets/dotted return their base.
     pub const fn base_note(&self) -> NoteValue {
@@ -163,9 +159,7 @@ pub fn default_duration_set() -> DurationSet {
     DurationSet { durations: durs, grid }
 }
 
-pub fn default_grid() -> Grid {
-    default_duration_set().grid
-}
+pub fn default_grid() -> Grid { default_duration_set().grid }
 
 #[cfg(test)]
 mod tests {

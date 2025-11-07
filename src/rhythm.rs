@@ -79,19 +79,26 @@ impl RhythmMeasure {
         let parent_opt = Self::get_mut(&mut self.root, parent_path);
         match parent_opt {
             Some(RhythmNode::Weighted { weights, children }) => {
-                if start_idx >= children.len() { return false; }
+                if start_idx >= children.len() {
+                    return false;
+                }
                 // We will cover exactly m_units adjacent "unit" children, counted by number of children, not by weights.
                 // Require that the selected range exists and that each selected child has implied unit=1 in the parent.
                 // To keep the facade simple, enforce that the selected slice has total weight == m_units.
                 let end_idx = start_idx.saturating_add(m_units);
-                if end_idx > children.len() { return false; }
+                if end_idx > children.len() {
+                    return false;
+                }
                 let slice_weight: u32 = weights[start_idx..end_idx].iter().copied().sum();
-                if slice_weight != m_units as u32 { return false; }
+                if slice_weight != m_units as u32 {
+                    return false;
+                }
 
                 // Build inner tuplet group: equal n_tuplet leaves
                 let inner_children = vec![RhythmNode::Leaf(init); n_tuplet as usize];
                 let inner_weights = vec![1u32; n_tuplet as usize];
-                let tuplet_node = RhythmNode::Weighted { weights: inner_weights, children: inner_children };
+                let tuplet_node =
+                    RhythmNode::Weighted { weights: inner_weights, children: inner_children };
 
                 // Splice: replace [start_idx..end_idx) with single child of weight m_units
                 children.splice(start_idx..end_idx, std::iter::once(tuplet_node));
@@ -124,9 +131,7 @@ impl RhythmMeasure {
     }
 
     /// Compute measure total ticks (delegates to time signature helper)
-    fn measure_ticks(&self) -> i32 {
-        self.time_signature.measure_duration_ticks()
-    }
+    fn measure_ticks(&self) -> i32 { self.time_signature.measure_duration_ticks() }
 
     /// Flatten this rhythm measure into a sequence of beats inside a Measure, preserving onsets implied by leaves with Note content.
     pub fn flatten_to_measure(&self) -> Option<Measure> {
@@ -218,9 +223,13 @@ impl RhythmMeasure {
             while i < beats.len() {
                 sum += beats[i].0;
                 i += 1;
-                if sum % unit_ticks == 0 { break; }
+                if sum % unit_ticks == 0 {
+                    break;
+                }
             }
-            if sum % unit_ticks != 0 { return None; }
+            if sum % unit_ticks != 0 {
+                return None;
+            }
             let weight = (sum / unit_ticks) as u32;
             root_weights.push(weight);
             let child = Self::build_cluster_subtree(&beats[start..i])?;
@@ -229,59 +238,84 @@ impl RhythmMeasure {
 
         // If there were no beats (empty measure), represent as a single Rest leaf
         if beats.is_empty() {
-            return Some(RhythmMeasure { time_signature: ts, root: RhythmNode::Leaf(SlotContent::Rest) });
+            return Some(RhythmMeasure {
+                time_signature: ts,
+                root: RhythmNode::Leaf(SlotContent::Rest),
+            });
         }
 
-        Some(RhythmMeasure { time_signature: ts, root: RhythmNode::Weighted { weights: root_weights, children: root_children } })
+        Some(RhythmMeasure {
+            time_signature: ts,
+            root: RhythmNode::Weighted { weights: root_weights, children: root_children },
+        })
     }
 
-    fn build_cluster_subtree(slice: &[(i32, SlotContent, crate::duration::Duration)]) -> Option<RhythmNode> {
+    fn build_cluster_subtree(
+        slice: &[(i32, SlotContent, crate::duration::Duration)],
+    ) -> Option<RhythmNode> {
         if let Some(node) = Self::try_uniform_tuplet(slice) {
             return Some(node);
         }
         // General proportional subgroup: weights from gcd of ticks
         let mut g = 0i32;
-        for (t, _, _) in slice.iter() { g = gcd_i32(g, *t); }
-        if g <= 0 { return None; }
+        for (t, _, _) in slice.iter() {
+            g = gcd_i32(g, *t);
+        }
+        if g <= 0 {
+            return None;
+        }
         let weights: Vec<u32> = slice.iter().map(|(t, _, _)| (*t / g) as u32).collect();
-        let children: Vec<RhythmNode> = slice.iter().map(|(_, sc, _)| RhythmNode::Leaf(*sc)).collect();
+        let children: Vec<RhythmNode> =
+            slice.iter().map(|(_, sc, _)| RhythmNode::Leaf(*sc)).collect();
         Some(RhythmNode::Weighted { weights, children })
     }
 
-    fn try_uniform_tuplet(slice: &[(i32, SlotContent, crate::duration::Duration)]) -> Option<RhythmNode> {
+    fn try_uniform_tuplet(
+        slice: &[(i32, SlotContent, crate::duration::Duration)],
+    ) -> Option<RhythmNode> {
         use crate::duration::Duration;
-        if slice.is_empty() { return None; }
+        if slice.is_empty() {
+            return None;
+        }
         let first_dur = slice[0].2;
-        let (n, _m, _base) = match first_dur { Duration::Tuplet { n, m, base } => (n as usize, m, base), _ => return None };
-        if slice.len() != n { return None; }
-        if !slice.iter().all(|(_, _, d)| *d == first_dur) { return None; }
+        let (n, _m, _base) = match first_dur {
+            Duration::Tuplet { n, m, base } => (n as usize, m, base),
+            _ => return None,
+        };
+        if slice.len() != n {
+            return None;
+        }
+        if !slice.iter().all(|(_, _, d)| *d == first_dur) {
+            return None;
+        }
         let weights = vec![1u32; n];
-        let children: Vec<RhythmNode> = slice.iter().map(|(_, sc, _)| RhythmNode::Leaf(*sc)).collect();
+        let children: Vec<RhythmNode> =
+            slice.iter().map(|(_, sc, _)| RhythmNode::Leaf(*sc)).collect();
         Some(RhythmNode::Weighted { weights, children })
     }
 }
 
-fn gcd_i32(mut a: i32, mut b: i32) -> i32 { if a == 0 { return b.abs(); } while b != 0 { let r = a % b; a = b; b = r; } a.abs() }
+fn gcd_i32(mut a: i32, mut b: i32) -> i32 {
+    if a == 0 {
+        return b.abs();
+    }
+    while b != 0 {
+        let r = a % b;
+        a = b;
+        b = r;
+    }
+    a.abs()
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::duration::{Duration, NoteValue};
-    fn q() -> Duration {
-        Duration::Simple(NoteValue::Quarter)
-    }
-    fn e() -> Duration {
-        Duration::Simple(NoteValue::Eighth)
-    }
-    fn s16() -> Duration {
-        Duration::Simple(NoteValue::Sixteenth)
-    }
-    fn t8() -> Duration {
-        Duration::Tuplet { n: 3, m: 2, base: NoteValue::Eighth }
-    }
-    fn sx16() -> Duration {
-        Duration::Tuplet { n: 6, m: 4, base: NoteValue::Sixteenth }
-    }
+    fn q() -> Duration { Duration::Simple(NoteValue::Quarter) }
+    fn e() -> Duration { Duration::Simple(NoteValue::Eighth) }
+    fn s16() -> Duration { Duration::Simple(NoteValue::Sixteenth) }
+    fn t8() -> Duration { Duration::Tuplet { n: 3, m: 2, base: NoteValue::Eighth } }
+    fn sx16() -> Duration { Duration::Tuplet { n: 6, m: 4, base: NoteValue::Sixteenth } }
 
     fn assert_flattened(rm: RhythmMeasure, expected_beat_durations: Vec<Duration>) {
         let m = rm.flatten_to_measure().unwrap();
@@ -400,9 +434,10 @@ mod tests {
 
         // Compare tick sequences for equality
         let set = default_duration_set();
-        let ticks1: Vec<i32> = m.beats().iter().map(|b| set.grid.ticks_of(&b.duration).unwrap()).collect();
-        let ticks2: Vec<i32> = m2.beats().iter().map(|b| set.grid.ticks_of(&b.duration).unwrap()).collect();
+        let ticks1: Vec<i32> =
+            m.beats().iter().map(|b| set.grid.ticks_of(&b.duration).unwrap()).collect();
+        let ticks2: Vec<i32> =
+            m2.beats().iter().map(|b| set.grid.ticks_of(&b.duration).unwrap()).collect();
         assert_eq!(ticks1, ticks2);
     }
-
 }
