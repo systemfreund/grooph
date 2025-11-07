@@ -182,12 +182,12 @@ fn draw_note(
     painter: &egui::Painter,
     font_id: &FontId,
     pos: Pos2,
-    duration: Duration,
+    span_duration: Duration,
     slot_content: SlotContent,
 ) {
     let glyph = match slot_content {
-        SlotContent::Note => GLYPH_NOTEHEAD_BLACK,
-        SlotContent::Rest => rest_glyph_for_duration(duration),
+        SlotContent::Note(_) => GLYPH_NOTEHEAD_BLACK,
+        SlotContent::Rest => rest_glyph_for_duration(span_duration),
     };
 
     // Draw the glyph (notehead or rest)
@@ -195,7 +195,7 @@ fn draw_note(
 
     // If this is a Note, draw a simple upward stem next to the notehead,
     // and add a flag according to the duration (8th=1, 16th=2, 32nd=3; tuplets map similarly).
-    if slot_content == SlotContent::Note {
+    if let SlotContent::Note(duration) = slot_content {
         // Stem positioning relative to notehead center.
         let stem_offset_x = font_id.size * 0.13; // tweak by eye for Bravura
         let stem_len = font_id.size * 0.9; // proportional stem length

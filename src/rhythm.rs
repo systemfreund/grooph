@@ -1,9 +1,10 @@
+use crate::duration::Duration;
 use crate::fill::best_fill_for_gap;
 use crate::measure::{Beat, Measure, TimeSignature};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SlotContent {
-    Note,
+    Note(Duration),
     Rest,
 }
 
@@ -126,7 +127,7 @@ impl RhythmMeasure {
 
     fn flatten_node(node: &RhythmNode, span_ticks: i32, out: &mut Measure) -> bool {
         match node {
-            RhythmNode::Leaf(SlotContent::Note) => Self::fill_span(out, span_ticks, true),
+            RhythmNode::Leaf(SlotContent::Note(_)) => Self::fill_span(out, span_ticks, true),
             RhythmNode::Leaf(SlotContent::Rest) => Self::fill_span(out, span_ticks, false),
             RhythmNode::Weighted { weights, children } => {
                 let sum_w: i32 = weights.iter().map(|&w| w as i32).sum();
@@ -187,11 +188,11 @@ impl RhythmMeasure {
         let unit_ticks = set.grid.ticks_per_whole / (ts.beat_unit as i32);
 
         // Pack beats as (ticks, content, duration)
-        let mut beats: Vec<(i32, SlotContent, crate::duration::Duration)> = Vec::new();
+        let mut beats: Vec<(i32, SlotContent, Duration)> = Vec::new();
         for b in m.beats().iter() {
             let t = set.grid.ticks_of(&b.duration)?;
             let sc = match b.kind {
-                crate::measure::BeatKind::Note => SlotContent::Note,
+                crate::measure::BeatKind::Note => SlotContent::Note(b.duration),
                 crate::measure::BeatKind::Rest => SlotContent::Rest,
             };
             beats.push((t, sc, b.duration));
@@ -235,7 +236,7 @@ impl RhythmMeasure {
     }
 
     fn build_cluster_subtree(
-        slice: &[(i32, SlotContent, crate::duration::Duration)],
+        slice: &[(i32, SlotContent, Duration)],
     ) -> Option<RhythmNode> {
         if let Some(node) = Self::try_uniform_tuplet(slice) {
             return Some(node);
@@ -255,7 +256,7 @@ impl RhythmMeasure {
     }
 
     fn try_uniform_tuplet(
-        slice: &[(i32, SlotContent, crate::duration::Duration)],
+        slice: &[(i32, SlotContent, Duration)],
     ) -> Option<RhythmNode> {
         use crate::duration::Duration;
         if slice.is_empty() {
@@ -358,7 +359,7 @@ mod tests {
     #[test]
     fn cannot_flatten_triplets_over_one_sixteenth() {
         let mut rm = RhythmMeasure::new(TimeSignature::ONE_SIXTEENTH);
-        rm.subdivide(&[], 3, SlotContent::Note);
+        rm.subdivide(&[], 3, SlotContent::Rest);
         // Cannot flatten this structure because we don't support 32nd-triplets over 1/16 notes.
         assert!(rm.flatten_to_measure().is_none());
     }
@@ -366,7 +367,7 @@ mod tests {
     #[test]
     fn flatten_16th_triplets_over_two_sixteenth() {
         let mut rm = RhythmMeasure::new(TimeSignature::TWO_SIXTEENTH);
-        rm.subdivide(&[], 3, SlotContent::Note);
+        rm.subdivide(&[], 3, SlotContent::Rest);
         assert_flattened(rm, vec![sx16(), sx16(), sx16()]);
     }
 
