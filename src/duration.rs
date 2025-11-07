@@ -89,6 +89,19 @@ impl Duration {
             Duration::Tuplet { base, .. } => base,
         }
     }
+
+    /// Mainly for debug/Display output
+    pub(crate) const fn to_glyph(&self) -> (&'static str, &'static str) {
+        // Glyphs are determined by base note value only; tuplets/rests share the same shapes
+        match self.base_note() {
+            NoteValue::Quarter => ("𝅘𝅥", "𝄽"),
+            NoteValue::Eighth => ("𝅘𝅥𝅮", "𝄾"),
+            NoteValue::Sixteenth => ("𝅘𝅥𝅯", "𝄿"),
+            NoteValue::ThirtySecond => ("𝅘𝅥𝅰", "𝅀"),
+            NoteValue::Half => ("𝅗𝅥", "𝄼"),
+            NoteValue::Whole => ("𝅝", "𝄻"),
+        }
+    }
 }
 
 /// A tick grid provider. Build dynamically from the set of durations you intend to use.

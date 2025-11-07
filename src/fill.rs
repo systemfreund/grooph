@@ -6,11 +6,8 @@ use crate::duration::{Duration, default_duration_set};
 /// 2) Minimal total weight (sum of denominators) to prefer simpler durations
 /// 3) Prefer larger steps on ties for determinism
 pub(crate) fn best_fill_for_gap(gap_ticks: i32) -> Option<Vec<Duration>> {
-    if gap_ticks < 0 {
+    if gap_ticks <= 0 {
         return None;
-    }
-    if gap_ticks == 0 {
-        return Some(Vec::new());
     }
 
     let set = default_duration_set();

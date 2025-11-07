@@ -1,5 +1,8 @@
 use crate::duration::{Duration, NoteValue, default_duration_set};
+use crate::fill::best_fill_for_gap;
 use std::fmt::{Display, Formatter};
+use std::fs::write;
+use std::vec;
 
 /// Represents a time signature (e.g., 4/4, 3/4, 6/8)
 #[derive(Debug, Clone)]
@@ -27,13 +30,13 @@ impl TimeSignature {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub enum BeatKind {
     Note,
     Rest,
 }
 
-#[derive(Debug)]
+#[derive(Copy, Clone, Debug)]
 pub struct Beat {
     pub duration: Duration,
     pub kind: BeatKind,
@@ -45,18 +48,6 @@ impl Beat {
 
     /// Creates a new rest with the given duration
     pub fn rest(duration: Duration) -> Self { Self { duration, kind: BeatKind::Rest } }
-
-    const fn to_glyph(&self) -> (&'static str, &'static str) {
-        // Glyphs are determined by base note value only; tuplets/rests share the same shapes
-        match self.duration.base_note() {
-            NoteValue::Quarter => ("𝅘𝅥", "𝄽"),
-            NoteValue::Eighth => ("𝅘𝅥𝅮", "𝄾"),
-            NoteValue::Sixteenth => ("𝅘𝅥𝅯", "𝄿"),
-            NoteValue::ThirtySecond => ("𝅘𝅥𝅰", "𝅀"),
-            NoteValue::Half => ("𝅗𝅥", "𝄼"),
-            NoteValue::Whole => ("𝅝", "𝄻"),
-        }
-    }
 }
 
 /// Errors that can occur when adding beats to a measure
@@ -99,6 +90,14 @@ impl Measure {
     fn current_ticks(&self) -> i32 {
         let set = default_duration_set();
         self.beats.iter().map(|beat| set.grid.ticks_of(&beat.duration).unwrap()).sum()
+    }
+
+    /// Returns the remaining number of ticks available in this measure
+    /// (never negative; 0 when the measure is full)
+    pub fn remaining_ticks(&self) -> i32 {
+        let max_ticks = self.time_signature.measure_duration_ticks();
+        let used = self.current_ticks();
+        (max_ticks - used).max(0)
     }
 
     /// Returns true if the remaining ticks can be exactly filled using the available durations
@@ -168,19 +167,41 @@ impl Measure {
     }
 }
 
+enum DisplayItem {
+    Beat(Beat),
+    Cursor,
+}
+
 impl Display for Measure {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        self.beats.iter().fold(Ok(()), |result, b| {
+        let remainder: Vec<_> = best_fill_for_gap(self.remaining_ticks())
+            .unwrap_or_default()
+            .iter()
+            .map(|d| DisplayItem::Beat(Beat::rest(*d)))
+            .collect();
+
+        let mut beats: Vec<_> = self.beats.iter()
+            .map(|b| DisplayItem::Beat(*b))
+            .collect();
+        beats.append(&mut vec![DisplayItem::Cursor]);
+        beats.extend(remainder);
+
+        beats.iter().fold(Ok(()), |result, b| {
             result.and_then(|_| {
-                let (note, rest) = b.to_glyph();
-                let glyph = if b.kind == BeatKind::Note { note } else { rest };
-                write!(f, "{}", glyph).and_then(|_| match b.duration {
-                    Duration::Simple(_) => Ok(()),
-                    Duration::Dotted { base: _base, dots } => {
-                        write!(f, "{}", "\u{1D16D}".repeat(dots as usize))
+                match b {
+                    DisplayItem::Beat(beat) => {
+                        let (note, rest) = beat.duration.to_glyph();
+                        let glyph = if beat.kind == BeatKind::Note { note } else { rest };
+                        write!(f, "{}", glyph).and_then(|_| match beat.duration {
+                            Duration::Simple(_) => Ok(()),
+                            Duration::Dotted { base: _base, dots } => {
+                                write!(f, "{}", "\u{1D16D}".repeat(dots as usize))
+                            }
+                            Duration::Tuplet { .. } => write!(f, "ᵀ"),
+                        })
                     }
-                    Duration::Tuplet { .. } => write!(f, "T"),
-                })
+                    DisplayItem::Cursor => { write!(f, "|") }
+                }
             })
         })
     }
@@ -190,6 +211,8 @@ impl Display for Measure {
 mod tests {
     use super::*;
     use crate::duration::{Duration, NoteValue};
+    use crate::fill::best_fill_for_gap;
+
     fn q() -> Duration { Duration::Simple(NoteValue::Quarter) }
     fn e() -> Duration { Duration::Simple(NoteValue::Eighth) }
     fn t8() -> Duration { Duration::Tuplet { n: 3, m: 2, base: NoteValue::Eighth } }
@@ -218,7 +241,7 @@ mod tests {
     }
 
     #[test]
-    fn test_add_eighth_note_to_one_four_measure() {
+    fn test_add_eighth_triplet_to_seven_eight_measure() {
         let mut measure = Measure::new(TimeSignature::SEVEN_EIGHT);
         let t8 = Duration::Tuplet { n: 3, m: 2, base: NoteValue::Eighth };
         measure.add_beat(Beat::note(t8)).unwrap();
@@ -229,6 +252,7 @@ mod tests {
 
         // measure.add_beat(Beat::note(Duration::Simple(NoteValue::Eighth))).unwrap();
 
+        println!("{}", measure.remaining_ticks());
         println!("{}", measure);
     }
 }
