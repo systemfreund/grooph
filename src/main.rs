@@ -7,15 +7,13 @@ mod rhythm;
 
 use duration::{Duration, NoteValue};
 use measure::{Measure, TimeSignature};
-use rhythm::{RhythmMeasure, RhythmNode, SlotContent};
+use rhythm::{RhythmNode, SlotContent};
 
-use crate::duration::default_grid;
-use crate::fill::best_fill_for_gap;
-use crate::measure::Beat;
+use crate::measure::{Beat, BeatKind};
 use eframe::egui::{Align2, Context, Rangef, Stroke, pos2};
 use eframe::emath::Pos2;
 use eframe::epaint::text::{FontInsert, InsertFontFamily};
-use eframe::epaint::{Color32, FontFamily, FontId, StrokeKind};
+use eframe::epaint::{Color32, FontFamily, FontId};
 use eframe::{App, CreationContext, egui};
 use egui::containers::Frame;
 
@@ -129,65 +127,11 @@ fn layout_rhythm_boxes(
     }
 }
 
-fn draw_slot_overlays(
-    ui: &mut egui::Ui,
-    font_id: &FontId,
-    rm: &RhythmMeasure,
-    inner_rect: egui::Rect,
-) {
-    let painter = ui.painter();
-
-    let mut boxes = Vec::new();
-    let total_ticks = rm.time_signature.measure_duration_ticks();
-    let mut path: Vec<usize> = Vec::new();
-    layout_rhythm_boxes(&rm.root, total_ticks, inner_rect, &mut path, &mut boxes);
-
-    let border = Stroke::new(1.0, Color32::from_gray(170));
-    let fill_a = Color32::from_rgba_unmultiplied(80, 160, 255, 40);
-    let fill_b = Color32::from_rgba_unmultiplied(80, 255, 160, 24);
-    let duration_set = duration::default_duration_set();
-
-    for (idx, sb) in boxes.iter().enumerate() {
-        // Interactivity (click) intentionally disabled in measure-first model; drawing only.
-        let fill = if idx % 2 == 0 { fill_a } else { fill_b };
-        painter.rect_filled(sb.rect, 3.0, fill);
-        painter.rect_stroke(sb.rect, 3.0, border, StrokeKind::Inside);
-
-        // Within each slot, draw the local minimal spelling.
-        println!("{:?}", sb);
-        let d = duration_set.grid.duration_from_ticks(sb.span_ticks);
-        println!("{:?}", d);
-        let mut x = sb.rect.left();
-        let width = sb.rect.width();
-        let mut acc_ticks = 0.0_f32;
-        let total = sb.span_ticks as f32;
-
-        // Use the unified duration set/grid to compute tick proportions
-        // acc_ticks += duration_set.grid.ticks_of(d).unwrap() as f32;
-        // acc_ticks += sb.span_ticks as f32;
-        let next_x = sb.rect.right();
-        // let next_x = if j == seq.len() - 1 {
-        //     sb.rect.right();
-        // } else {
-        //     sb.rect.left() + width * (acc_ticks / total)
-        // };
-        let mid = pos2(0.5 * (x + next_x), 0.5 * (sb.rect.top() + sb.rect.bottom()));
-        // draw_note(painter, font_id, mid, d, sb.content);
-        x = next_x;
-        // }
-    }
-}
-
-fn draw_note(
-    painter: &egui::Painter,
-    font_id: &FontId,
-    pos: Pos2,
-    span_duration: Duration,
-    slot_content: SlotContent,
-) {
-    let glyph = match slot_content {
-        SlotContent::Note(_) => GLYPH_NOTEHEAD_BLACK,
-        SlotContent::Rest => rest_glyph_for_duration(span_duration),
+fn draw_beat(painter: &egui::Painter, font_id: &FontId, pos: Pos2, beat: Beat) {
+    let duration = beat.duration;
+    let glyph = match beat.kind {
+        BeatKind::Note => GLYPH_NOTEHEAD_BLACK,
+        BeatKind::Rest => rest_glyph_for_duration(duration),
     };
 
     // Draw the glyph (notehead or rest)
@@ -195,7 +139,7 @@ fn draw_note(
 
     // If this is a Note, draw a simple upward stem next to the notehead,
     // and add a flag according to the duration (8th=1, 16th=2, 32nd=3; tuplets map similarly).
-    if let SlotContent::Note(duration) = slot_content {
+    if beat.kind == BeatKind::Note {
         // Stem positioning relative to notehead center.
         let stem_offset_x = font_id.size * 0.13; // tweak by eye for Bravura
         let stem_len = font_id.size * 0.9; // proportional stem length
@@ -235,9 +179,7 @@ fn draw_measure(ui: &mut egui::Ui, font_id: &FontId, measure: &Measure, rect: eg
     let right = rect.right() - 24.0;
     let inner_rect = egui::Rect::from_min_max(pos2(left, y - 36.0), pos2(right, y + 36.0));
 
-    if let Some(rm) = RhythmMeasure::derive_from_measure(measure) {
-        draw_slot_overlays(ui, font_id, &rm, inner_rect);
-    }
+    todo!("draw measure")
 }
 
 impl App for MyApp {
