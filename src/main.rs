@@ -367,14 +367,26 @@ fn draw_measure(ui: &mut egui::Ui, font_id: &FontId, measure: &Measure, rect: Re
         }
     }
 
-    // 5) Cursor at current used position (does not consume width)
+    // 5) Cursor at current used position (does not consume width) — blink over time
     if cap_ticks > 0 {
         let x_cursor = content_left + content_w * (used_ticks as f32 / cap_ticks as f32);
+        // Blink parameters
+        let blink_period = 1.0_f64; // seconds for a full on+off cycle
+        let duty = 0.5_f64; // visible fraction of the period
+        let t = ui.input(|i| i.time);
+        let phase = (t % blink_period) / blink_period; // 0..1
+        let visible = phase < duty;
+        // Smooth fade near edges optional; for now a simple square wave with two alpha levels
+        let alpha_on = 200u8;
+        let alpha_off = 30u8; // faint but still present; set to 0 to hide completely
+        let alpha = if visible { alpha_on } else { alpha_off };
         painter.vline(
             x_cursor,
             Rangef::new(y - em * 0.55, y + em * 0.55),
-            Stroke::new(1.5, Color32::from_white_alpha(180)),
+            Stroke::new(1.5, Color32::from_white_alpha(alpha)),
         );
+        // Ensure animation progresses even without input
+        ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
     }
 
     // 6) Remainder preview as faint rests filling the remaining space, continuing run
