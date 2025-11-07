@@ -177,12 +177,17 @@ fn draw_measure(ui: &mut egui::Ui, font_id: &FontId, measure: &Measure, rect: Re
     // staff line
     painter.hline(Rangef::new(rect.left(), rect.right()), y, Stroke::new(1.0, Color32::WHITE));
 
-    let y_offset = 60.0;
-    let inner_rect =
-        Rect::from_min_max(pos2(rect.left(), y - y_offset), pos2(rect.right(), y + y_offset));
+    // Make inner rect scale with available height: keep a small vertical padding fraction
+    let vpad = (rect.height() * 0.10).clamp(10.0, 200.0);
+    let inner_rect = Rect::from_min_max(pos2(rect.left(), rect.top() + vpad),
+                                        pos2(rect.right(), rect.bottom() - vpad));
 
     // Derive font size from available height (scaled), keep family from provided font_id
-    let target_size = (inner_rect.height() * 0.80).clamp(24.0, 96.0);
+    // Use a non-static clamp so the size scales with DPI and available height
+    let base_size = inner_rect.height() * 0.50;
+    let min_size = 14.0 * ui.ctx().pixels_per_point(); // avoid unreadably small glyphs on HiDPI
+    let max_size = inner_rect.height() * 0.80; // avoid overflowing inner rect, but not a fixed cap
+    let target_size = base_size.clamp(min_size, max_size);
     let music_font = FontId::new(target_size, font_id.family.clone());
     let em = target_size;
 
