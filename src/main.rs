@@ -36,7 +36,7 @@ impl MyApp {
     fn new(cc: &CreationContext) -> Self {
         add_font(&cc.egui_ctx);
         let ff = FontFamily::Name("music".into());
-        let mut measure = Measure::new(TimeSignature::TWO_EIGHT);
+        let mut measure = Measure::new(TimeSignature::SEVEN_EIGHT);
         let t8 = Duration::Tuplet { n: 3, m: 2, base: NoteValue::Eighth };
         measure.add_beat(Beat::note(t8)).unwrap();
         measure.add_beat(Beat::note(t8)).unwrap();
