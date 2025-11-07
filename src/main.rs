@@ -9,6 +9,7 @@ use duration::{Duration, NoteValue};
 use measure::{Measure, TimeSignature};
 use rhythm::{RhythmMeasure, RhythmNode, SlotContent};
 
+use crate::duration::default_grid;
 use crate::fill::best_fill_for_gap;
 use crate::measure::Beat;
 use eframe::egui::{Align2, Context, Rangef, Stroke, pos2};
@@ -39,12 +40,12 @@ impl MyApp {
     fn new(cc: &CreationContext) -> Self {
         add_font(&cc.egui_ctx);
         let ff = FontFamily::Name("music".into());
-        let mut measure = Measure::new(TimeSignature::SEVEN_EIGHT);
+        let mut measure = Measure::new(TimeSignature::TWO_EIGHT);
         let t8 = Duration::Tuplet { n: 3, m: 2, base: NoteValue::Eighth };
         measure.add_beat(Beat::note(t8)).unwrap();
         measure.add_beat(Beat::note(t8)).unwrap();
         measure.add_beat(Beat::note(t8)).unwrap();
-        measure.add_beat(Beat::note(Duration::Simple(NoteValue::Eighth))).unwrap();
+        // measure.add_beat(Beat::note(Duration::Simple(NoteValue::Eighth))).unwrap();
         Self { font_family: ff.clone(), font_id: FontId::new(64.0, ff), measure }
     }
 }
@@ -144,6 +145,7 @@ fn draw_slot_overlays(
     let border = Stroke::new(1.0, Color32::from_gray(170));
     let fill_a = Color32::from_rgba_unmultiplied(80, 160, 255, 40);
     let fill_b = Color32::from_rgba_unmultiplied(80, 255, 160, 24);
+    let duration_set = duration::default_duration_set();
 
     for (idx, sb) in boxes.iter().enumerate() {
         // Interactivity (click) intentionally disabled in measure-first model; drawing only.
@@ -152,26 +154,27 @@ fn draw_slot_overlays(
         painter.rect_stroke(sb.rect, 3.0, border, StrokeKind::Inside);
 
         // Within each slot, draw the local minimal spelling.
-        if let Some(seq) = best_fill_for_gap(sb.span_ticks) {
-            let mut x = sb.rect.left();
-            let width = sb.rect.width();
-            let mut acc_ticks = 0.0_f32;
-            let total = sb.span_ticks as f32;
+        println!("{:?}", sb);
+        let d = duration_set.grid.duration_from_ticks(sb.span_ticks);
+        println!("{:?}", d);
+        let mut x = sb.rect.left();
+        let width = sb.rect.width();
+        let mut acc_ticks = 0.0_f32;
+        let total = sb.span_ticks as f32;
 
-            for (j, d) in seq.iter().enumerate() {
-                // Use the unified duration set/grid to compute tick proportions
-                let set = duration::default_duration_set();
-                acc_ticks += set.grid.ticks_of(d).unwrap() as f32;
-                let next_x = if j == seq.len() - 1 {
-                    sb.rect.right()
-                } else {
-                    sb.rect.left() + width * (acc_ticks / total)
-                };
-                let mid = pos2(0.5 * (x + next_x), 0.5 * (sb.rect.top() + sb.rect.bottom()));
-                draw_note(painter, font_id, mid, *d, sb.content);
-                x = next_x;
-            }
-        }
+        // Use the unified duration set/grid to compute tick proportions
+        // acc_ticks += duration_set.grid.ticks_of(d).unwrap() as f32;
+        // acc_ticks += sb.span_ticks as f32;
+        let next_x = sb.rect.right();
+        // let next_x = if j == seq.len() - 1 {
+        //     sb.rect.right();
+        // } else {
+        //     sb.rect.left() + width * (acc_ticks / total)
+        // };
+        let mid = pos2(0.5 * (x + next_x), 0.5 * (sb.rect.top() + sb.rect.bottom()));
+        // draw_note(painter, font_id, mid, d, sb.content);
+        x = next_x;
+        // }
     }
 }
 

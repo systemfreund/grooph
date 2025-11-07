@@ -1,16 +1,13 @@
 use crate::fill::best_fill_for_gap;
 use crate::measure::{Beat, Measure, TimeSignature};
 
-/// Authoritative rhythm representation: a tree of weighted groups (internal) and leaves.
-/// Public façade exposes only equal subdivide and tuplet-insertion operations.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SlotContent {
-    /// Click at the start of the span; remainder of the span is silent.
     Note,
-    /// Entire span is silent unless subdivided further.
     Rest,
 }
 
+/// A tree of weighted groups and leaves.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RhythmNode {
     /// Weighted group: subdivide the current span proportionally to weights.
@@ -418,9 +415,7 @@ mod tests {
     #[test]
     fn derive_from_measure_triplet_then_eighth_in_3_8() {
         use crate::duration::default_duration_set;
-        let ts = TimeSignature { beats: 3, beat_unit: 8 };
-        // Build authoritative measure: 3 × triplet-eighth notes, then 1 × eighth note
-        let mut m = Measure::new(ts);
+        let mut m = Measure::new(TimeSignature { beats: 3, beat_unit: 8 });
         let t8 = Duration::Tuplet { n: 3, m: 2, base: NoteValue::Eighth };
         let e = Duration::Simple(NoteValue::Eighth);
         assert!(m.add_beat(Beat::note(t8)).is_ok());
@@ -431,6 +426,10 @@ mod tests {
         // Derive rhythm tree and flatten back to a measure
         let rm = RhythmMeasure::derive_from_measure(&m).expect("derive");
         let m2 = rm.flatten_to_measure().expect("flatten");
+
+        println!("{:?}", rm);
+        println!("{}", m);
+        println!("{}", m2);
 
         // Compare tick sequences for equality
         let set = default_duration_set();
