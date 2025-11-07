@@ -3,11 +3,9 @@
 mod duration;
 mod fill;
 mod measure;
-mod rhythm;
 
 use duration::{Duration, NoteValue};
 use measure::{Measure, TimeSignature};
-use rhythm::{RhythmNode, SlotContent};
 
 use crate::measure::{Beat, BeatKind};
 use eframe::egui::{Align2, Context, Rangef, Stroke, pos2};
@@ -79,51 +77,6 @@ fn flag_glyph_for_duration(d: Duration) -> Option<char> {
         NoteValue::Sixteenth => Some(GLYPH_FLAG_16TH_UP),
         NoteValue::ThirtySecond => Some(GLYPH_FLAG_32ND_UP),
         NoteValue::Half | NoteValue::Whole => None,
-    }
-}
-
-// Helper: choose rest glyph by duration already defined above
-
-#[derive(Clone, Debug)]
-struct SlotBox {
-    rect: egui::Rect,
-    span_ticks: i32,
-    content: SlotContent,
-    path: Vec<usize>,
-}
-
-fn layout_rhythm_boxes(
-    node: &RhythmNode,
-    span_ticks: i32,
-    rect: egui::Rect,
-    path: &mut Vec<usize>,
-    out: &mut Vec<SlotBox>,
-) {
-    match node {
-        RhythmNode::Leaf(content) => {
-            out.push(SlotBox { rect, span_ticks, content: *content, path: path.clone() });
-        }
-        RhythmNode::Weighted { weights, children } => {
-            let sum_w: i32 = weights.iter().map(|&w| w as i32).sum();
-            if sum_w <= 0 {
-                return;
-            }
-            let unit_ticks = span_ticks / sum_w;
-            let total_w = sum_w as f32;
-            let mut acc_w = 0f32;
-            for (i, (w, child)) in weights.iter().zip(children.iter()).enumerate() {
-                let w_f = *w as f32;
-                let left = rect.left() + rect.width() * (acc_w / total_w);
-                let right = rect.left() + rect.width() * ((acc_w + w_f) / total_w);
-                let child_rect =
-                    egui::Rect::from_min_max(pos2(left, rect.top()), pos2(right, rect.bottom()));
-                let child_ticks = unit_ticks * (*w as i32);
-                path.push(i);
-                layout_rhythm_boxes(child, child_ticks, child_rect, path, out);
-                path.pop();
-                acc_w += w_f;
-            }
-        }
     }
 }
 
