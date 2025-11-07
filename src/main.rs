@@ -128,7 +128,7 @@ fn draw_beat(
     if beat.kind == BeatKind::Note {
         // Stem positioning relative to notehead center.
         let stem_offset_x = font_id.size * 0.13; // tweak by eye for Bravura
-        let stem_thickness = 2.5;
+        let stem_thickness = font_id.size * 0.03;
         let start = pos2(pos.x + stem_offset_x, pos.y);
         let default_stem_len = font_id.size * 0.9; // proportional stem length
         let end_y = if let Some(y) = opts.stem_end_y { y } else { pos.y - default_stem_len };
@@ -220,7 +220,7 @@ fn draw_measure(ui: &mut egui::Ui, font_id: &FontId, measure: &Measure, rect: Re
         let offset = (ts_cols - top_digits.len() as f32) * 0.5;
         let cx = ts_left + (i as f32 + 0.5 + offset) * ts_digit_w;
         painter.text(
-            pos2(cx, y - em * 0.40),
+            pos2(cx, y - em * 0.25),
             Align2::CENTER_CENTER,
             ch.to_string(),
             music_font.clone(),
@@ -232,7 +232,7 @@ fn draw_measure(ui: &mut egui::Ui, font_id: &FontId, measure: &Measure, rect: Re
         let offset = (ts_cols - bot_digits.len() as f32) * 0.5;
         let cx = ts_left + (i as f32 + 0.5 + offset) * ts_digit_w;
         painter.text(
-            pos2(cx, y + em * 0.40),
+            pos2(cx, y + em * 0.25),
             Align2::CENTER_CENTER,
             ch.to_string(),
             music_font.clone(),
@@ -266,7 +266,7 @@ fn draw_measure(ui: &mut egui::Ui, font_id: &FontId, measure: &Measure, rect: Re
 
     // 2) Metrics for beams and stems
     let metrics = beam_metrics(em, y);
-    let stem_dx = music_font.size * 0.13; // keep in sync with draw_beat_with_opts
+    let stem_dx = music_font.size * 0.13; // keep in sync with draw_beat
 
     // 3) Pass: draw beats (noteheads/rests) with beam-aware stems (flags suppressed when in beam)
     let mut in_beam_flags: Vec<bool> = vec![false; measure.beats().len()];
