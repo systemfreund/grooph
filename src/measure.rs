@@ -200,6 +200,35 @@ impl Measure {
     pub fn recompute_beams(&mut self) {
         self.beam_plan = Some(crate::beaming::compute_beam_plan(self));
     }
+
+    /// Remove the beat at `idx`. If there is a following beat (i.e., not deleting the last one),
+    /// insert a sequence of rests whose total duration equals the removed beat so that the
+    /// absolute positions of subsequent beats remain unchanged. No-op if `idx` is out of bounds.
+    pub fn backspace_remove_and_fill(&mut self, idx: usize) {
+        if idx >= self.beats.len() { return; }
+        let set = default_duration_set();
+        let had_following = idx + 1 < self.beats.len();
+        let removed_ticks = self
+            .beats
+            .get(idx)
+            .and_then(|b| set.grid.ticks_of(&b.duration))
+            .unwrap_or(0);
+        // Remove the beat at idx
+        self.beats.remove(idx);
+
+        // If there was a following beat, fill the removed span with rests to preserve positions
+        if had_following && removed_ticks > 0 {
+            if let Some(fill) = best_fill_for_gap(removed_ticks) {
+                let mut insert_at = idx;
+                for d in fill {
+                    self.beats.insert(insert_at, Beat::rest(d));
+                    insert_at += 1;
+                }
+            }
+        }
+        // Recompute beams after mutation
+        self.recompute_beams();
+    }
 }
 
 enum DisplayItem {
@@ -289,5 +318,23 @@ mod tests {
 
         println!("{}", measure.remaining_ticks());
         println!("{}", measure);
+    }
+}
+
+
+impl Measure {
+    /// Toggle the beat kind at `idx` between Note and Rest while preserving duration.
+    /// No-op if `idx` is out of bounds.
+    pub fn toggle_beat_kind(&mut self, idx: usize) {
+        if let Some(b) = self.beats.get_mut(idx) {
+            // Clear tremolo in both cases to avoid invalid state on rests
+            b.tremolo = None;
+            b.kind = match b.kind {
+                BeatKind::Rest => BeatKind::Note,
+                BeatKind::Note => BeatKind::Rest,
+            };
+            // Beaming may change when toggling between note/rest
+            self.recompute_beams();
+        }
     }
 }

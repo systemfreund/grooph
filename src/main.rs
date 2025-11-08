@@ -506,6 +506,12 @@ impl App for Grooph {
                                 // Toggle between note and rest at cursor (preserve duration)
                                 self.measure.toggle_beat_kind(self.cursor_idx);
                             }
+                            if i.key_pressed(Key::Backspace) {
+                                // Remove beat at cursor; if there is a following beat, fill the gap so later beats keep positions
+                                self.measure.backspace_remove_and_fill(self.cursor_idx);
+                                // Move cursor left, like a text editor caret
+                                self.cursor_idx = self.cursor_idx.saturating_sub(1);
+                            }
                         }
                     });
                 }
