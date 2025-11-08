@@ -184,12 +184,17 @@ fn draw_measure(ui: &mut egui::Ui, font_id: &FontId, measure: &Measure, rect: Re
     let inner_rect = Rect::from_min_max(pos2(rect.left(), rect.top() + vpad),
                                         pos2(rect.right(), rect.bottom() - vpad));
 
-    // Derive font size from available height (scaled), keep family from provided font_id
-    // Use a non-static clamp so the size scales with DPI and available height
-    let base_size = inner_rect.height() * 0.50;
+    // Derive font size from available height and width (scaled), keep family from provided font_id
+    // Height-first sizing, modulated by window width so very narrow/wide windows adapt.
+    let baseline_w: f32 = 800.0; // points; heuristic baseline width
+    let width_factor = (rect.width() / baseline_w).powf(0.5).clamp(0.7, 1.3);
+    let base_size_h = inner_rect.height() * 0.50;
+    let base_size = base_size_h * width_factor;
     let min_size = 14.0 * ui.ctx().pixels_per_point(); // avoid unreadably small glyphs on HiDPI
+    // Also cap by an estimate from width to prevent overflow on very narrow windows.
+    let width_cap = (rect.width() * 0.12).max(min_size);
     let max_size = inner_rect.height() * 0.80; // avoid overflowing inner rect, but not a fixed cap
-    let target_size = base_size.clamp(min_size, max_size);
+    let target_size = base_size.clamp(min_size, max_size.min(width_cap));
     let music_font = FontId::new(target_size, font_id.family.clone());
     let em = target_size;
 
