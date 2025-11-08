@@ -16,6 +16,7 @@ use eframe::epaint::{Color32, FontFamily, FontId};
 use eframe::{App, CreationContext, egui};
 use egui::Rect;
 use egui::containers::Frame;
+use crate::duration::NoteValue::{Eighth, Quarter, Sixteenth};
 
 struct MyApp {
     font_family: FontFamily,
@@ -39,10 +40,14 @@ impl MyApp {
         add_font(&cc.egui_ctx);
         let ff = FontFamily::Name("music".into());
         let mut measure = Measure::new(TimeSignature::SEVEN_EIGHT);
-        let t8 = Duration::Tuplet { n: 3, m: 2, base: NoteValue::Eighth };
-        measure.add_beat(Beat::note(t8)).unwrap();
-        measure.add_beat(Beat::note(t8)).unwrap();
-        measure.add_beat(Beat::note(t8)).unwrap();
+        let t8 = Duration::Tuplet { n: 3, m: 2, base: Eighth };
+        measure.add_beat(Beat::note(Duration::Simple(Eighth))).unwrap();
+        measure.add_beat(Beat::rest(Duration::Simple(Eighth))).unwrap();
+        // measure.add_beat(Beat::note(t8)).unwrap();
+        // measure.add_beat(Beat::note(t8)).unwrap();
+        // measure.add_beat(Beat::note(t8)).unwrap();
+
+        // measure.add_beat(Beat::note(Duration::Simple())).unwrap();
         // measure.add_beat(Beat::note(Duration::Simple(NoteValue::Eighth))).unwrap();
         Self { font_family: ff.clone(), font_id: FontId::new(64.0, ff), measure }
     }
@@ -272,9 +277,13 @@ fn draw_measure(ui: &mut egui::Ui, font_id: &FontId, measure: &Measure, rect: Re
     let mut in_beam_flags: Vec<bool> = vec![false; measure.beats().len()];
     if let Some(bp) = measure.beam_plan() {
         for g in &bp.groups {
-            for &idx in &g.note_indices {
-                if idx < in_beam_flags.len() {
-                    in_beam_flags[idx] = true;
+            // Only consider groups with at least two notes as "beamed".
+            // Singleton groups should render with flags, not beams/hooks.
+            if g.note_indices.len() >= 2 {
+                for &idx in &g.note_indices {
+                    if idx < in_beam_flags.len() {
+                        in_beam_flags[idx] = true;
+                    }
                 }
             }
         }
@@ -315,52 +324,33 @@ fn draw_measure(ui: &mut egui::Ui, font_id: &FontId, measure: &Measure, rect: Re
                 }
             }
             // Hooks (partial beams) for extra levels not continued to neighbors
-            for (idx_in_group, &note_i) in group.note_indices.iter().enumerate() {
-                let bc = *group.beam_counts.get(idx_in_group).unwrap_or(&0);
-                if bc == 0 {
-                    continue;
-                }
-                let x_stem = x_centers[note_i] + stem_dx;
-                let cont_left = if idx_in_group == 0 {
-                    0
-                } else {
-                    *group.continuity.get(idx_in_group - 1).unwrap_or(&0)
-                };
-                let cont_right = if idx_in_group + 1 >= group.note_indices.len() {
-                    0
-                } else {
-                    *group.continuity.get(idx_in_group).unwrap_or(&0)
-                };
-                // Left hooks extend to the right for levels not continued from the left
-                if bc > cont_left {
-                    for lvl in cont_left..bc {
-                        let y_lvl =
-                            metrics.beam_y - (lvl as f32) * (metrics.thickness + metrics.gap);
-                        draw_hook(
-                            &painter,
-                            x_stem,
-                            y_lvl,
-                            metrics.thickness,
-                            metrics.hook_len,
-                            1.0,
-                            Color32::WHITE,
-                        );
+            // Skip hooks for singleton groups (len < 2)
+            if group.note_indices.len() >= 2 {
+                for (idx_in_group, &note_i) in group.note_indices.iter().enumerate() {
+                    let bc = *group.beam_counts.get(idx_in_group).unwrap_or(&0);
+                    if bc == 0 { continue; }
+                    let x_stem = x_centers[note_i] + stem_dx;
+
+                    let has_left = idx_in_group > 0;
+                    let has_right = idx_in_group + 1 < group.note_indices.len();
+
+                    let cont_left = if has_left { *group.continuity.get(idx_in_group - 1).unwrap_or(&0) } else { 0 };
+                    let cont_right = if has_right { *group.continuity.get(idx_in_group).unwrap_or(&0) } else { 0 };
+
+                    // Draw hooks toward the side where beams do NOT continue
+                    // Left side: draw left-facing hooks (dir = -1)
+                    if has_left && bc > cont_left {
+                        for lvl in cont_left..bc {
+                            let y_lvl = metrics.beam_y - (lvl as f32) * (metrics.thickness + metrics.gap);
+                            draw_hook(&painter, x_stem, y_lvl, metrics.thickness, metrics.hook_len, -1.0, Color32::WHITE);
+                        }
                     }
-                }
-                // Right hooks extend to the left for levels not continued to the right
-                if bc > cont_right {
-                    for lvl in cont_right..bc {
-                        let y_lvl =
-                            metrics.beam_y - (lvl as f32) * (metrics.thickness + metrics.gap);
-                        draw_hook(
-                            &painter,
-                            x_stem,
-                            y_lvl,
-                            metrics.thickness,
-                            metrics.hook_len,
-                            -1.0,
-                            Color32::WHITE,
-                        );
+                    // Right side: draw right-facing hooks (dir = +1)
+                    if has_right && bc > cont_right {
+                        for lvl in cont_right..bc {
+                            let y_lvl = metrics.beam_y - (lvl as f32) * (metrics.thickness + metrics.gap);
+                            draw_hook(&painter, x_stem, y_lvl, metrics.thickness, metrics.hook_len, 1.0, Color32::WHITE);
+                        }
                     }
                 }
             }
