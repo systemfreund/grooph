@@ -51,7 +51,7 @@ pub struct BeamGroup {
 /// - Group by primary beat boundaries of the time signature
 /// - Contiguous tuplets (same n, m, base; no intervening rests or non-matching notes) take precedence
 ///   over primary boundaries and remain within a single BeamGroup
-/// - Rests inside a non-tuplet group do not break the group; continuity across a rest is 0 (broken beam/hooks)
+/// - Rests break beams: any rest between two notes splits the BeamGroup (no broken beams/hooks over rests)
 /// - Cross-measure beams are exposed via the `continues_*` flags but left as false here; a higher level
 ///   can link adjacent measures and set these appropriately.
 pub fn compute_beam_plan(measure: &Measure) -> BeamPlan {
@@ -99,13 +99,19 @@ pub fn compute_beam_plan(measure: &Measure) -> BeamPlan {
         if boundary_between && !is_contiguous_tuplet_run(&beats, a, b) {
             break_group = true;
         }
-        // Check if any non-beamable NOTE exists between a..b (rests allowed)
+        // Check if any non-beamable NOTE exists between a..b
         if !break_group {
             for k in (a + 1)..b {
                 let bk = &beats[k];
-                if bk.kind == BeatKind::Note && beam_count(&bk.duration) == 0 {
-                    break_group = true;
-                    break;
+                match bk.kind {
+                    BeatKind::Note => if bk.kind == BeatKind::Note && beam_count(&bk.duration) == 0 {
+                        break_group = true;
+                        break;
+                    }
+                    BeatKind::Rest => {
+                        break_group = true;
+                        break;
+                    }
                 }
             }
         }
@@ -249,7 +255,7 @@ mod tests {
     }
 
     #[test]
-    fn beaming_rest_breaks_continuity_but_not_group() {
+    fn beaming_rest_breaks_group() {
         // Note 16th, Rest 16th, Note 16th, Rest 16th within the first quarter
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
         m.add_beat(Beat::note(s())).unwrap(); // idx 0
@@ -257,13 +263,15 @@ mod tests {
         m.add_beat(Beat::note(s())).unwrap(); // idx 2
         m.add_beat(Beat::rest(s())).unwrap(); // idx 3
         let plan = m.beam_plan().unwrap();
-        assert!(!plan.groups.is_empty());
+        assert_eq!(plan.groups.len(), 2, "rests should split into two singleton groups");
         let g0 = &plan.groups[0];
-        // Two sixteenth notes should be in the same group even though there is a rest between
-        assert_eq!(g0.note_indices, vec![0, 2]);
-        assert_eq!(g0.beam_counts, vec![2, 2]);
-        // Continuity should be 0 across the rest
-        assert_eq!(g0.continuity, vec![0]);
+        let g1 = &plan.groups[1];
+        assert_eq!(g0.note_indices, vec![0]);
+        assert_eq!(g1.note_indices, vec![2]);
+        assert_eq!(g0.beam_counts, vec![2]);
+        assert_eq!(g1.beam_counts, vec![2]);
+        assert!(g0.continuity.is_empty());
+        assert!(g1.continuity.is_empty());
     }
 
     #[test]
