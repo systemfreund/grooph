@@ -8,15 +8,15 @@ mod measure;
 use duration::{Duration, NoteValue};
 use measure::{Measure, TimeSignature};
 
+use crate::duration::NoteValue::{Eighth, Quarter, Sixteenth, ThirtySecond};
 use crate::measure::{Beat, BeatKind};
-use eframe::egui::{Align2, Context, Rangef, Stroke, pos2, Sense, Key};
+use eframe::egui::{Align2, Context, Key, Rangef, Sense, Stroke, pos2};
 use eframe::emath::Pos2;
 use eframe::epaint::text::{FontInsert, InsertFontFamily};
 use eframe::epaint::{Color32, FontFamily, FontId};
 use eframe::{App, CreationContext, egui};
 use egui::Rect;
 use egui::containers::Frame;
-use crate::duration::NoteValue::{Eighth, Quarter, Sixteenth, ThirtySecond};
 
 struct Grooph {
     font_family: FontFamily,
@@ -159,7 +159,13 @@ fn draw_beat(
     }
 }
 
-fn draw_measure(ui: &mut egui::Ui, font_id: &FontId, measure: &Measure, rect: Rect, cursor_idx: Option<usize>) {
+fn draw_measure(
+    ui: &mut egui::Ui,
+    font_id: &FontId,
+    measure: &Measure,
+    rect: Rect,
+    cursor_idx: Option<usize>,
+) {
     let painter = ui.painter();
     let y = rect.center().y;
     // staff line
@@ -167,8 +173,10 @@ fn draw_measure(ui: &mut egui::Ui, font_id: &FontId, measure: &Measure, rect: Re
 
     // Make inner rect scale with available height: keep a small vertical padding fraction
     let vpad = (rect.height() * 0.10).clamp(10.0, 200.0);
-    let inner_rect = Rect::from_min_max(pos2(rect.left(), rect.top() + vpad),
-                                        pos2(rect.right(), rect.bottom() - vpad));
+    let inner_rect = Rect::from_min_max(
+        pos2(rect.left(), rect.top() + vpad),
+        pos2(rect.right(), rect.bottom() - vpad),
+    );
 
     // Derive font size from available height and width (scaled), keep family from provided font_id
     // Height-first sizing, modulated by window width so very narrow/wide windows adapt.
@@ -258,7 +266,7 @@ fn draw_measure(ui: &mut egui::Ui, font_id: &FontId, measure: &Measure, rect: Re
     }
 
     // 2) Metrics for beams and stems
-    let metrics = beam_metrics(em, y);
+    let metrics = beam_metrics(em, y, Color32::WHITE);
     let stem_dx = music_font.size * 0.13; // keep in sync with draw_beat
     // Precompute stem x positions for all beats (noteheads + stem offset)
     let stem_xs: Vec<f32> = x_centers.iter().map(|&cx| cx + stem_dx).collect();
@@ -309,8 +317,7 @@ fn draw_measure(ui: &mut egui::Ui, font_id: &FontId, measure: &Measure, rect: Re
                 let x1 = stem_xs[i];
                 let x2 = stem_xs[j];
                 for lvl in 0..levels {
-                    let y_lvl = metrics.beam_y + (lvl as f32) * (metrics.thickness + metrics.gap);
-                    draw_full_beam(&painter, x1, x2, y_lvl, metrics.thickness, Color32::WHITE);
+                    draw_full_beam(&painter, x1, x2, lvl, &metrics);
                 }
             }
         }
@@ -320,25 +327,32 @@ fn draw_measure(ui: &mut egui::Ui, font_id: &FontId, measure: &Measure, rect: Re
     if let Some(bp) = measure.beam_plan() {
         let stub_len = em * 0.20; // tune by eye
         for group in &bp.groups {
-            if group.note_indices.is_empty() { continue; }
+            if group.note_indices.is_empty() {
+                continue;
+            }
 
             let note_idxs = &group.note_indices;
             let counts = &group.beam_counts; // per note
-            let cont = &group.continuity;    // between neighbors
+            let cont = &group.continuity; // between neighbors
 
             for (local_k, &global_i) in note_idxs.iter().enumerate() {
-                let count = *counts.get(local_k).unwrap_or(&0) as i32;
-                if count <= 0 { continue; }
+                let count = *counts.get(local_k).unwrap_or(&0);
+                if count <= 0 {
+                    continue;
+                }
 
-                let left_cont = if local_k > 0 { *cont.get(local_k - 1).unwrap_or(&0) as i32 } else { 0 };
-                let right_cont = if local_k + 1 < note_idxs.len() { *cont.get(local_k).unwrap_or(&0) as i32 } else { 0 };
+                let left_cont = if local_k > 0 { *cont.get(local_k - 1).unwrap_or(&0) } else { 0 };
+                let right_cont = if local_k + 1 < note_idxs.len() {
+                    *cont.get(local_k).unwrap_or(&0)
+                } else {
+                    0
+                };
 
                 let stem_x = stem_xs[global_i];
                 let is_first = local_k == 0;
                 let is_last = local_k + 1 == note_idxs.len();
 
                 for lvl in 0..count {
-                    let y_lvl = metrics.beam_y + (lvl as f32) * (metrics.thickness + metrics.gap);
                     let connects_left = lvl < left_cont;
                     let connects_right = lvl < right_cont;
 
@@ -361,13 +375,37 @@ fn draw_measure(ui: &mut egui::Ui, font_id: &FontId, measure: &Measure, rect: Re
                             // Never draw stubs on group edges; for interior notes choose side with higher continuity.
                             if !(is_first || is_last) {
                                 if left_cont > right_cont {
-                                    draw_full_beam(&painter, stem_x - stub_len, stem_x, y_lvl, metrics.thickness, Color32::WHITE);
+                                    draw_full_beam(
+                                        &painter,
+                                        stem_x - stub_len,
+                                        stem_x,
+                                        lvl,
+                                        &metrics,
+                                    );
                                 } else if right_cont > left_cont {
-                                    draw_full_beam(&painter, stem_x, stem_x + stub_len, y_lvl, metrics.thickness, Color32::WHITE);
+                                    draw_full_beam(
+                                        &painter,
+                                        stem_x,
+                                        stem_x + stub_len,
+                                        lvl,
+                                        &metrics,
+                                    );
                                 } else {
                                     // Equal continuity: draw both short stubs
-                                    draw_full_beam(&painter, stem_x - stub_len, stem_x, y_lvl, metrics.thickness, Color32::WHITE);
-                                    draw_full_beam(&painter, stem_x, stem_x + stub_len, y_lvl, metrics.thickness, Color32::WHITE);
+                                    draw_full_beam(
+                                        &painter,
+                                        stem_x - stub_len,
+                                        stem_x,
+                                        lvl,
+                                        &metrics,
+                                    );
+                                    draw_full_beam(
+                                        &painter,
+                                        stem_x,
+                                        stem_x + stub_len,
+                                        lvl,
+                                        &metrics,
+                                    );
                                 }
                             }
                         }
@@ -457,7 +495,11 @@ impl App for Grooph {
                         }
                     });
                 }
-                let idx_opt = if self.cursor_idx < self.measure.beats().len() { Some(self.cursor_idx) } else { None };
+                let idx_opt = if self.cursor_idx < self.measure.beats().len() {
+                    Some(self.cursor_idx)
+                } else {
+                    None
+                };
                 draw_measure(ui, &self.font_id, &self.measure, rect, idx_opt);
             });
         });
@@ -479,23 +521,32 @@ struct BeamMetrics {
     thickness: f32,
     gap: f32,
     beam_y: f32, // primary beam baseline (closest to notehead)
+    em: f32,
+    color: Color32,
 }
 
-fn beam_metrics(em: f32, y_center: f32) -> BeamMetrics {
+impl BeamMetrics {
+    fn get_y_level(&self, lvl: u8) -> f32 {
+        self.beam_y + (lvl as f32) * (self.thickness + self.gap)
+    }
+}
+
+fn beam_metrics(em: f32, y_center: f32, color: Color32) -> BeamMetrics {
     // Approximate staff space relative to font size for a single-line staff context
     let staff_space = em * 0.20; // tuned by eye
     let thickness = 0.5 * staff_space; // Bravura ~0.5 sp
     let gap = 0.3 * staff_space; // distance between beams
     let beam_y = y_center - 0.75 * em; // height above notehead center for stems up
-    BeamMetrics { thickness, gap, beam_y }
+    BeamMetrics { thickness, gap, beam_y, em, color }
 }
 
-fn draw_full_beam(p: &egui::Painter, x1: f32, x2: f32, y: f32, thickness: f32, color: Color32) {
-    let left = x1.min(x2);
-    let right = x1.max(x2);
-    let top = y - thickness;
+fn draw_full_beam(p: &egui::Painter, x1: f32, x2: f32, lvl: u8, metrics: &BeamMetrics) {
+    let left = x1.min(x2) - 0.015 * metrics.em;
+    let right = x1.max(x2) + 0.015 * metrics.em;
+    let y = metrics.get_y_level(lvl);
+    let top = y - metrics.thickness;
     let rect = Rect::from_min_max(pos2(left, top), pos2(right, y));
-    p.rect_filled(rect, 0.0, color);
+    p.rect_filled(rect, 0.0, metrics.color);
 }
 
 impl Grooph {
