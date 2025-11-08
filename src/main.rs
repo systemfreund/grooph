@@ -9,7 +9,7 @@ use duration::{Duration, NoteValue};
 use measure::{Measure, TimeSignature};
 
 use crate::measure::{Beat, BeatKind};
-use eframe::egui::{Align2, Context, Rangef, Stroke, pos2};
+use eframe::egui::{Align2, Context, Rangef, Stroke, pos2, Sense, Key};
 use eframe::emath::Pos2;
 use eframe::epaint::text::{FontInsert, InsertFontFamily};
 use eframe::epaint::{Color32, FontFamily, FontId};
@@ -22,6 +22,7 @@ struct Grooph {
     font_family: FontFamily,
     font_id: FontId,
     measure: Measure,
+    cursor_idx: usize,
 }
 
 fn add_font(ctx: &Context) {
@@ -158,7 +159,7 @@ fn draw_beat(
     }
 }
 
-fn draw_measure(ui: &mut egui::Ui, font_id: &FontId, measure: &Measure, rect: Rect) {
+fn draw_measure(ui: &mut egui::Ui, font_id: &FontId, measure: &Measure, rect: Rect, cursor_idx: Option<usize>) {
     let painter = ui.painter();
     let y = rect.center().y;
     // staff line
@@ -376,26 +377,29 @@ fn draw_measure(ui: &mut egui::Ui, font_id: &FontId, measure: &Measure, rect: Re
         }
     }
 
-    // 5) Cursor at current used position (does not consume width) — blink over time
-    if cap_ticks > 0 {
-        let x_cursor = content_left + content_w * (used_ticks as f32 / cap_ticks as f32);
-        // Blink parameters
-        let blink_period = 1.0_f64; // seconds for a full on+off cycle
-        let duty = 0.5_f64; // visible fraction of the period
-        let t = ui.input(|i| i.time);
-        let phase = (t % blink_period) / blink_period; // 0..1
-        let visible = phase < duty;
-        // Smooth fade near edges optional; for now a simple square wave with two alpha levels
-        let alpha_on = 200u8;
-        let alpha_off = 30u8; // faint but still present; set to 0 to hide completely
-        let alpha = if visible { alpha_on } else { alpha_off };
-        painter.vline(
-            x_cursor,
-            Rangef::new(y - em * 0.55, y + em * 0.55),
-            Stroke::new(1.5, Color32::from_white_alpha(alpha)),
-        );
-        // Ensure animation progresses even without input
-        ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
+    // 5) Cursor at current beat index (does not consume width) — blink over time
+    if let Some(idx) = cursor_idx {
+        if let Some(&x) = x_centers.get(idx) {
+            // Blink parameters
+            let blink_period = 1.0_f64; // seconds for a full on+off cycle
+            let duty = 0.5_f64; // visible fraction of the period
+            let t = ui.input(|i| i.time);
+            let phase = (t % blink_period) / blink_period; // 0..1
+            let visible = phase < duty;
+            // Smooth fade near edges optional; for now a simple square wave with two alpha levels
+            let alpha_on = 220u8;
+            let alpha_off = 40u8; // faint but still present; set to 0 to hide completely
+            let alpha = if visible { alpha_on } else { alpha_off };
+            let top = inner_rect.top();
+            let bottom = inner_rect.bottom();
+            painter.vline(
+                x,
+                Rangef::new(top, bottom),
+                Stroke::new(2.0, Color32::from_white_alpha(alpha)),
+            );
+            // Ensure animation progresses even without input
+            ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
+        }
     }
 
     // 6) Remainder preview as faint rests filling the remaining space, continuing run
@@ -426,8 +430,35 @@ impl App for Grooph {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         egui::CentralPanel::default().show(ctx, |ui| {
             Frame::canvas(ui.style()).show(ui, |ui| {
-                let (_id, rect) = ui.allocate_space(ui.available_size());
-                draw_measure(ui, &self.font_id, &self.measure, rect);
+                let (id, rect) = ui.allocate_space(ui.available_size());
+                let response = ui.interact(rect, id, Sense::click());
+                if response.clicked() {
+                    response.request_focus();
+                }
+                if response.has_focus() {
+                    ui.input(|i| {
+                        let len = self.measure.beats().len();
+                        if len > 0 {
+                            if i.key_pressed(Key::ArrowLeft) {
+                                self.cursor_idx = self.cursor_idx.saturating_sub(1);
+                            }
+                            if i.key_pressed(Key::ArrowRight) {
+                                let max_idx = len.saturating_sub(1);
+                                if self.cursor_idx < max_idx {
+                                    self.cursor_idx += 1;
+                                }
+                            }
+                            if i.key_pressed(Key::Home) {
+                                self.cursor_idx = 0;
+                            }
+                            if i.key_pressed(Key::End) {
+                                self.cursor_idx = len.saturating_sub(1);
+                            }
+                        }
+                    });
+                }
+                let idx_opt = if self.cursor_idx < self.measure.beats().len() { Some(self.cursor_idx) } else { None };
+                draw_measure(ui, &self.font_id, &self.measure, rect, idx_opt);
             });
         });
     }
@@ -479,6 +510,6 @@ impl Grooph {
         measure.add_beat(Beat::note(Duration::Simple(ThirtySecond))).unwrap();
         measure.add_beat(Beat::note(Duration::Simple(Eighth))).unwrap();
 
-        Self { font_family: ff.clone(), font_id: FontId::new(16.0, ff), measure }
+        Self { font_family: ff.clone(), font_id: FontId::new(16.0, ff), measure, cursor_idx: 0 }
     }
 }
