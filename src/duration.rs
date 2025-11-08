@@ -140,13 +140,17 @@ impl Grid {
     /// 2) Simple note values (whole, half, quarter, eighth, sixteenth, thirty-second)
     /// 3) Dotted forms of those simple bases with up to 3 dots
     pub fn duration_from_ticks(&self, ticks: i32) -> Option<Duration> {
-        if ticks <= 0 { return None; }
+        if ticks <= 0 {
+            return None;
+        }
         let f = reduce(Frac { num: ticks, den: self.ticks_per_whole });
 
         // 1) Try exact match against known common durations to preserve tuplets as authored
         for d in COMMON_DURATIONS.iter() {
             println!("f={:?} <--> d={:?}", f, d.as_fraction());
-            if d.as_fraction() == f { return Some(*d); }
+            if d.as_fraction() == f {
+                return Some(*d);
+            }
         }
 
         // 2) Try simple notes
@@ -160,7 +164,9 @@ impl Grid {
         ];
         for base in SIMPLE.iter() {
             let d = Duration::Simple(*base);
-            if d.as_fraction() == f { return Some(d); }
+            if d.as_fraction() == f {
+                return Some(d);
+            }
         }
 
         // 3) Try dotted forms (up to three dots which covers most practical usage)
@@ -168,7 +174,9 @@ impl Grid {
         while dots <= 3 {
             for base in SIMPLE.iter() {
                 let d = Duration::Dotted { base: *base, dots };
-                if d.as_fraction() == f { return Some(d); }
+                if d.as_fraction() == f {
+                    return Some(d);
+                }
             }
             dots += 1;
         }

@@ -372,8 +372,14 @@ fn draw_measure(
                         }
                         (false, false) => {
                             // Not connected on either side at this level.
-                            // Never draw stubs on group edges; for interior notes choose side with higher continuity.
-                            if !(is_first || is_last) {
+                            // On group edges, draw only the interior-facing stub; on interior notes, choose side by higher continuity (or both if equal).
+                            if is_first {
+                                // First note: interior faces right
+                                draw_full_beam(&painter, stem_x, stem_x + stub_len, lvl, &metrics);
+                            } else if is_last {
+                                // Last note: interior faces left
+                                draw_full_beam(&painter, stem_x - stub_len, stem_x, lvl, &metrics);
+                            } else {
                                 if left_cont > right_cont {
                                     draw_full_beam(
                                         &painter,
@@ -560,8 +566,8 @@ impl Grooph {
         let mut measure = Measure::new(TimeSignature::SEVEN_EIGHT);
         let t8 = Duration::Tuplet { n: 3, m: 2, base: Eighth };
         let t16 = Duration::Tuplet { n: 6, m: 4, base: NoteValue::Sixteenth };
-        measure.add_beat(Beat::rest(Duration::Simple(Eighth))).unwrap();
         measure.add_beat(Beat::rest(Duration::Simple(Sixteenth))).unwrap();
+        measure.add_beat(Beat::note(Duration::Simple(Sixteenth))).unwrap();
         measure.add_beat(Beat::note(Duration::Simple(ThirtySecond))).unwrap();
         measure.add_beat(Beat::note(Duration::Simple(Eighth))).unwrap();
 
