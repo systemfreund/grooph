@@ -41,12 +41,16 @@ impl MyApp {
         let ff = FontFamily::Name("music".into());
         let mut measure = Measure::new(TimeSignature::SEVEN_EIGHT);
         let t8 = Duration::Tuplet { n: 3, m: 2, base: Eighth };
+        let t16 = Duration::Tuplet { n: 6, m: 4, base: NoteValue::Sixteenth };
+        measure.add_beat(Beat::note(t16)).unwrap();
+        measure.add_beat(Beat::note(t16)).unwrap();
+        measure.add_beat(Beat::note(t16)).unwrap();
         measure.add_beat(Beat::note(Duration::Simple(Eighth))).unwrap();
-        measure.add_beat(Beat::rest(Duration::Simple(Eighth))).unwrap();
         measure.add_beat(Beat::note(Duration::Simple(Eighth))).unwrap();
-        // measure.add_beat(Beat::note(t8)).unwrap();
-        // measure.add_beat(Beat::note(t8)).unwrap();
-        // measure.add_beat(Beat::note(t8)).unwrap();
+        measure.add_beat(Beat::note(Duration::Simple(Eighth))).unwrap();
+        measure.add_beat(Beat::note(Duration::Simple(Eighth))).unwrap();
+        // measure.add_beat(Beat::note(Duration::Simple(Eighth))).unwrap();
+        // measure.add_beat(Beat::note(Duration::Simple(Eighth))).unwrap();
 
         // measure.add_beat(Beat::note(Duration::Simple())).unwrap();
         // measure.add_beat(Beat::note(Duration::Simple(NoteValue::Eighth))).unwrap();

@@ -17,19 +17,6 @@ pub struct BeamPlan {
     pub groups: Vec<BeamGroup>,
 }
 
-/// Link cross-measure beams between two adjacent measures by setting continuation flags on the
-/// outermost beam groups if both sides have at least one group. This is a simple default rule:
-/// if the previous measure ends with a beamable group and the next measure starts with a
-/// beamable group, we mark continuation across the barline.
-pub fn link_cross_measure_beams(prev: &Measure, next: &Measure, prev_plan: &mut BeamPlan, next_plan: &mut BeamPlan) {
-    if prev_plan.groups.is_empty() || next_plan.groups.is_empty() { return; }
-    let last_idx = prev_plan.groups.len() - 1;
-    let first_idx = 0;
-    // Since groups only contain beamable notes, it's safe to mark continuation directly.
-    prev_plan.groups[last_idx].continues_into_next = true;
-    next_plan.groups[first_idx].continues_from_previous = true;
-}
-
 #[derive(Debug, Clone)]
 pub struct BeamGroup {
     /// Stable id within the measure for selection
@@ -58,14 +45,15 @@ pub fn compute_beam_plan(measure: &Measure) -> BeamPlan {
     let set = default_duration_set();
     let beats = measure.beats();
     let ts = measure.time_signature();
-    let capacity = ts.measure_duration_ticks();
 
     // Compute onset tick for each beat
     let mut onsets: Vec<i32> = Vec::with_capacity(beats.len());
     let mut t = 0;
     for b in beats.iter() {
         onsets.push(t);
-        if let Some(dt) = set.grid.ticks_of(&b.duration) { t += dt; }
+        if let Some(dt) = set.grid.ticks_of(&b.duration) {
+            t += dt;
+        }
     }
 
     // Compute primary boundaries (tick positions inside the measure where groups should break by default)
@@ -104,9 +92,11 @@ pub fn compute_beam_plan(measure: &Measure) -> BeamPlan {
             for k in (a + 1)..b {
                 let bk = &beats[k];
                 match bk.kind {
-                    BeatKind::Note => if bk.kind == BeatKind::Note && beam_count(&bk.duration) == 0 {
-                        break_group = true;
-                        break;
+                    BeatKind::Note => {
+                        if bk.kind == BeatKind::Note && beam_count(&bk.duration) == 0 {
+                            break_group = true;
+                            break;
+                        }
                     }
                     BeatKind::Rest => {
                         break_group = true;
@@ -117,19 +107,34 @@ pub fn compute_beam_plan(measure: &Measure) -> BeamPlan {
         }
 
         if break_group {
-            finalize_group(&mut groups, &beats, &onsets, &cur);
+            finalize_group(&mut groups, &beats, &cur);
             cur = vec![b];
         } else {
             cur.push(b);
         }
     }
-    finalize_group(&mut groups, &beats, &onsets, &cur);
+    finalize_group(&mut groups, &beats, &cur);
 
-    BeamPlan { groups: groups.into_iter().enumerate().map(|(i, mut g)| { g.group_index = i; g }).collect() }
+    BeamPlan {
+        groups: groups
+            .into_iter()
+            .enumerate()
+            .map(|(i, mut g)| {
+                g.group_index = i;
+                g
+            })
+            .collect(),
+    }
 }
 
-fn finalize_group(groups: &mut Vec<BeamGroup>, beats: &Vec<Beat>, onsets: &Vec<i32>, cur: &Vec<usize>) {
-    if cur.is_empty() { return; }
+fn finalize_group(
+    groups: &mut Vec<BeamGroup>,
+    beats: &Vec<Beat>,
+    cur: &Vec<usize>,
+) {
+    if cur.is_empty() {
+        return;
+    }
     let mut beam_counts: Vec<u8> = Vec::with_capacity(cur.len());
     for &i in cur.iter() {
         beam_counts.push(beam_count(&beats[i].duration));
@@ -158,9 +163,13 @@ fn finalize_group(groups: &mut Vec<BeamGroup>, beats: &Vec<Beat>, onsets: &Vec<i
 }
 
 fn has_rest_between(beats: &Vec<Beat>, i: usize, j: usize) -> bool {
-    if j <= i + 1 { return false; }
+    if j <= i + 1 {
+        return false;
+    }
     for k in (i + 1)..j {
-        if beats[k].kind == BeatKind::Rest { return true; }
+        if beats[k].kind == BeatKind::Rest {
+            return true;
+        }
     }
     false
 }
@@ -173,18 +182,26 @@ fn tuplet_spec(d: &Duration) -> Option<(u8, u8, NoteValue)> {
 }
 
 fn is_contiguous_tuplet_run(beats: &Vec<Beat>, i: usize, j: usize) -> bool {
-    if j <= i { return false; }
+    if j <= i {
+        return false;
+    }
     let si = tuplet_spec(&beats[i].duration);
     let sj = tuplet_spec(&beats[j].duration);
     let Some(spec) = (match (si, sj) {
         (Some(a), Some(b)) if a == b => Some(a),
         _ => None,
-    }) else { return false; };
+    }) else {
+        return false;
+    };
 
     for k in (i + 1)..j {
         let bk = &beats[k];
-        if bk.kind != BeatKind::Note { return false; }
-        if tuplet_spec(&bk.duration) != Some(spec) { return false; }
+        if bk.kind != BeatKind::Note {
+            return false;
+        }
+        if tuplet_spec(&bk.duration) != Some(spec) {
+            return false;
+        }
     }
     true
 }
@@ -202,7 +219,9 @@ fn primary_boundaries(ts: &TimeSignature) -> Vec<i32> {
         // Simple meters: boundaries at each beat (exclude 0 and end)
         (b, 4) => {
             let stride = ticks_per_whole / 4;
-            for i in 1..b { bounds.push(i * stride); }
+            for i in 1..b {
+                bounds.push(i * stride);
+            }
         }
         // Compound meters by dotted quarter: 6/8, 9/8, 12/8
         (6, 8) | (9, 8) | (12, 8) => {
@@ -210,7 +229,10 @@ fn primary_boundaries(ts: &TimeSignature) -> Vec<i32> {
             let group = 3 * eighth; // dotted quarter
             let total = (ts.beats as i32) * eighth;
             let mut acc = group;
-            while acc < total { bounds.push(acc); acc += group; }
+            while acc < total {
+                bounds.push(acc);
+                acc += group;
+            }
         }
         // 7/8 default pattern 3+2+2 -> boundaries after 3 and 5 eighths
         (7, 8) => {
@@ -222,13 +244,14 @@ fn primary_boundaries(ts: &TimeSignature) -> Vec<i32> {
         (b, den) => {
             if den > 0 {
                 let stride = ticks_per_whole / den;
-                for i in 1..b { bounds.push(i * stride); }
+                for i in 1..b {
+                    bounds.push(i * stride);
+                }
             }
         }
     }
     bounds
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -236,15 +259,19 @@ mod tests {
     use crate::duration::{Duration, NoteValue};
     use crate::measure::{Beat, Measure, TimeSignature};
 
-    fn e() -> Duration { Duration::Simple(NoteValue::Eighth) }
-    fn s() -> Duration { Duration::Simple(NoteValue::Sixteenth) }
-    fn t8() -> Duration { Duration::Tuplet { n: 3, m: 2, base: NoteValue::Eighth } }
+    const fn q() -> Duration { Duration::Simple(NoteValue::Quarter) }
+    const fn e() -> Duration { Duration::Simple(NoteValue::Eighth) }
+    const fn s() -> Duration { Duration::Simple(NoteValue::Sixteenth) }
+    const fn t8() -> Duration { Duration::Tuplet { n: 3, m: 2, base: NoteValue::Eighth } }
+    const fn t16() -> Duration { Duration::Tuplet { n: 6, m: 4, base: NoteValue::Sixteenth } }
 
     #[test]
     fn beaming_simple_eighths_group_by_quarters() {
         // 4/4 with eight eighth notes -> 4 groups, each two notes
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
-        for _ in 0..8 { m.add_beat(Beat::note(e())).unwrap(); }
+        for _ in 0..8 {
+            m.add_beat(Beat::note(e())).unwrap();
+        }
         let plan = m.beam_plan().unwrap();
         assert_eq!(plan.groups.len(), 4, "expected 4 groups of eighths in 4/4");
         for (gi, g) in plan.groups.iter().enumerate() {
@@ -283,11 +310,12 @@ mod tests {
         m.add_beat(Beat::note(t8())).unwrap(); // idx 1
         m.add_beat(Beat::note(t8())).unwrap(); // idx 2
         m.add_beat(Beat::note(t8())).unwrap(); // idx 3
-        m.add_beat(Beat::note(e())).unwrap();  // following context
+        m.add_beat(Beat::note(e())).unwrap(); // following context
         let plan = m.beam_plan().unwrap();
 
         // Find the group that contains note index 1 (first tuplet note)
-        let tuplet_group = plan.groups.iter().find(|g| g.note_indices.contains(&1)).expect("tuplet group");
+        let tuplet_group =
+            plan.groups.iter().find(|g| g.note_indices.contains(&1)).expect("tuplet group");
         // It must contain the three tuplet notes (indices 1,2,3) contiguously at the start of the group
         assert!(tuplet_group.note_indices.starts_with(&[1, 2, 3]));
         // Continuity should be full min beams (1) between the tuplet notes since there are no rests between them
@@ -296,4 +324,100 @@ mod tests {
         assert!(tuplet_group.continuity.len() >= 2);
         assert_eq!(&tuplet_group.continuity[0..2], &[1, 1]);
     }
+
+    #[test]
+    fn beaming_by_3_2_2_pattern_in_7_8() {
+        let mut m = Measure::new(TimeSignature::SEVEN_EIGHT);
+        for _ in 0..7 {
+            m.add_beat(Beat::note(e())).unwrap();
+        }
+
+        let plan = m.beam_plan().unwrap();
+        assert_eq!(plan.groups.len(), 3);
+
+        let g0 = &plan.groups[0];
+        let g1 = &plan.groups[1];
+        let g2 = &plan.groups[2];
+
+        assert_eq!(g0.note_indices, vec![0, 1, 2]);
+        assert_eq!(g0.beam_counts, vec![1, 1, 1]);
+        assert_eq!(g0.continuity, vec![1, 1]);
+
+        assert_eq!(g1.note_indices, vec![3, 4]);
+        assert_eq!(g1.beam_counts, vec![1, 1]);
+        assert_eq!(g1.continuity, vec![1]);
+
+        assert_eq!(g2.note_indices, vec![5, 6]);
+        assert_eq!(g2.beam_counts, vec![1, 1]);
+        assert_eq!(g2.continuity, vec![1]);
+    }
+
+    #[test]
+    fn beaming_with_eighth_note_tuplet_precedence_in_seven_eight() {
+        // Expected primary beaming by 3+2+2 with tuplet precedence -> groups:
+        // [0,1,2], [3,4,5], [6,7]
+        let mut m = Measure::new(TimeSignature::SEVEN_EIGHT);
+        m.add_beat(Beat::note(e())).unwrap();
+        m.add_beat(Beat::note(e())).unwrap();
+        m.add_beat(Beat::note(e())).unwrap();
+        m.add_beat(Beat::note(t8())).unwrap();
+        m.add_beat(Beat::note(t8())).unwrap();
+        m.add_beat(Beat::note(t8())).unwrap();
+        m.add_beat(Beat::note(e())).unwrap();
+        m.add_beat(Beat::note(e())).unwrap();
+
+        let plan = m.beam_plan().unwrap();
+        assert_eq!(plan.groups.len(), 3);
+
+        let g0 = &plan.groups[0];
+        let g1 = &plan.groups[1];
+        let g2 = &plan.groups[2];
+
+        assert_eq!(g0.note_indices, vec![0, 1, 2]);
+        assert_eq!(g0.beam_counts, vec![1, 1, 1]);
+        assert_eq!(g0.continuity, vec![1, 1]);
+
+        assert_eq!(g1.note_indices, vec![3, 4, 5]);
+        assert_eq!(g1.beam_counts, vec![1, 1, 1]);
+        assert_eq!(g1.continuity, vec![1, 1]);
+
+        assert_eq!(g2.note_indices, vec![6, 7]);
+        assert_eq!(g2.beam_counts, vec![1, 1]);
+        assert_eq!(g2.continuity, vec![1]);
+    }
+
+    #[test]
+    fn beaming_with_sixteenth_note_tuplet_precedence_in_seven_eight() {
+        // The eighth notes are expected to be part of the first beam group, since the measure still
+        // fits the 3+2+2 pattern, despite the 16th-note triplet at the beginning.
+        let mut m = Measure::new(TimeSignature::SEVEN_EIGHT);
+        m.add_beat(Beat::note(t16())).unwrap();
+        m.add_beat(Beat::note(t16())).unwrap();
+        m.add_beat(Beat::note(t16())).unwrap();
+        m.add_beat(Beat::note(e())).unwrap();
+        m.add_beat(Beat::note(e())).unwrap();
+        m.add_beat(Beat::note(e())).unwrap();
+        m.add_beat(Beat::note(e())).unwrap();
+        m.add_beat(Beat::note(e())).unwrap();
+        m.add_beat(Beat::note(e())).unwrap();
+
+        let plan = m.beam_plan().unwrap();
+        assert_eq!(plan.groups.len(), 3);
+
+        let g0 = &plan.groups[0];
+        let g1 = &plan.groups[1];
+        let g2 = &plan.groups[2];
+
+        assert_eq!(g0.note_indices, vec![0, 1, 2, 3, 4]);
+        assert_eq!(g0.beam_counts, vec![2, 2, 2, 1, 1]);
+
+        assert_eq!(g1.note_indices, vec![5, 6]);
+        assert_eq!(g1.beam_counts, vec![1, 1]);
+        assert_eq!(g1.continuity, vec![1]);
+
+        assert_eq!(g2.note_indices, vec![7, 8]);
+        assert_eq!(g2.beam_counts, vec![1, 1]);
+        assert_eq!(g2.continuity, vec![1]);
+    }
+
 }
