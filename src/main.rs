@@ -502,6 +502,10 @@ impl App for Grooph {
                                 // Replace note with rest at cursor; no-op if already rest
                                 self.measure.set_beat_to_rest(self.cursor_idx);
                             }
+                            if i.key_pressed(Key::Space) {
+                                // Toggle between note and rest at cursor (preserve duration)
+                                self.measure.toggle_beat_kind(self.cursor_idx);
+                            }
                         }
                     });
                 }
