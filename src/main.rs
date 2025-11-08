@@ -43,6 +43,7 @@ impl MyApp {
         let t8 = Duration::Tuplet { n: 3, m: 2, base: Eighth };
         measure.add_beat(Beat::note(Duration::Simple(Eighth))).unwrap();
         measure.add_beat(Beat::rest(Duration::Simple(Eighth))).unwrap();
+        measure.add_beat(Beat::note(Duration::Simple(Eighth))).unwrap();
         // measure.add_beat(Beat::note(t8)).unwrap();
         // measure.add_beat(Beat::note(t8)).unwrap();
         // measure.add_beat(Beat::note(t8)).unwrap();
