@@ -16,7 +16,7 @@ use eframe::epaint::{Color32, FontFamily, FontId};
 use eframe::{App, CreationContext, egui};
 use egui::Rect;
 use egui::containers::Frame;
-use crate::duration::NoteValue::{Eighth, Quarter, Sixteenth};
+use crate::duration::NoteValue::{Eighth, Quarter, Sixteenth, ThirtySecond};
 
 struct MyApp {
     font_family: FontFamily,
@@ -42,11 +42,10 @@ impl MyApp {
         let mut measure = Measure::new(TimeSignature::SEVEN_EIGHT);
         let t8 = Duration::Tuplet { n: 3, m: 2, base: Eighth };
         let t16 = Duration::Tuplet { n: 6, m: 4, base: NoteValue::Sixteenth };
-        measure.add_beat(Beat::note(Duration::Simple(Eighth))).unwrap();
+        measure.add_beat(Beat::rest(Duration::Simple(Sixteenth))).unwrap();
         measure.add_beat(Beat::note(Duration::Simple(Sixteenth))).unwrap();
+        measure.add_beat(Beat::note(Duration::Simple(ThirtySecond))).unwrap();
 
-        // measure.add_beat(Beat::note(Duration::Simple())).unwrap();
-        // measure.add_beat(Beat::note(Duration::Simple(NoteValue::Eighth))).unwrap();
         Self { font_family: ff.clone(), font_id: FontId::new(64.0, ff), measure }
     }
 }
@@ -326,6 +325,64 @@ fn draw_measure(ui: &mut egui::Ui, font_id: &FontId, measure: &Measure, rect: Re
         }
     }
 
+    // 4b) Draw broken (partial) beams where a note's beam count exceeds continuity
+    if let Some(bp) = measure.beam_plan() {
+        let stub_len = em * 0.25; // tune by eye
+        for group in &bp.groups {
+            if group.note_indices.is_empty() { continue; }
+
+            let note_idxs = &group.note_indices;
+            let counts = &group.beam_counts; // per note
+            let cont = &group.continuity;    // between neighbors
+
+            for (local_k, &global_i) in note_idxs.iter().enumerate() {
+                let count = *counts.get(local_k).unwrap_or(&0) as i32;
+                if count <= 0 { continue; }
+
+                let left_cont = if local_k > 0 { *cont.get(local_k - 1).unwrap_or(&0) as i32 } else { 0 };
+                let right_cont = if local_k + 1 < note_idxs.len() { *cont.get(local_k).unwrap_or(&0) as i32 } else { 0 };
+
+                let stem_x = stem_xs[global_i];
+                let is_first = local_k == 0;
+                let is_last = local_k + 1 == note_idxs.len();
+
+                for lvl in 0..count {
+                    let y_lvl = metrics.beam_y + (lvl as f32) * (metrics.thickness + metrics.gap);
+                    let connects_left = lvl < left_cont;
+                    let connects_right = lvl < right_cont;
+
+                    match (connects_left, connects_right) {
+                        (true, true) => { /* fully connected at this level */ }
+                        (true, false) => {
+                            // Connected to left neighbor, missing to right
+                            // Suppress outer-edge stub on the last note to avoid extending beams to the group edge
+                            if !is_last {
+                                draw_full_beam(&painter, stem_x, stem_x + stub_len, y_lvl, metrics.thickness, Color32::WHITE);
+                            }
+                        }
+                        (false, true) => {
+                            // Connected to right neighbor, missing to left
+                            // Suppress outer-edge stub on the first note to avoid extending beams to the group edge
+                            if !is_first {
+                                draw_full_beam(&painter, stem_x - stub_len, stem_x, y_lvl, metrics.thickness, Color32::WHITE);
+                            }
+                        }
+                        (false, false) => {
+                            // Not connected on either side at this level
+                            // Never draw stubs on group edges: only draw towards the interior side(s)
+                            if !is_first {
+                                draw_full_beam(&painter, stem_x - stub_len, stem_x, y_lvl, metrics.thickness, Color32::WHITE);
+                            }
+                            if !is_last {
+                                draw_full_beam(&painter, stem_x, stem_x + stub_len, y_lvl, metrics.thickness, Color32::WHITE);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // 5) Cursor at current used position (does not consume width) — blink over time
     if cap_ticks > 0 {
         let x_cursor = content_left + content_w * (used_ticks as f32 / cap_ticks as f32);
@@ -404,7 +461,7 @@ fn beam_metrics(em: f32, y_center: f32) -> BeamMetrics {
     // Approximate staff space relative to font size for a single-line staff context
     let staff_space = em * 0.20; // tuned by eye
     let thickness = 0.5 * staff_space; // Bravura ~0.5 sp
-    let gap = 0.5 * staff_space; // distance between beams
+    let gap = 0.3 * staff_space; // distance between beams
     let beam_y = y_center - 0.75 * em; // height above notehead center for stems up
     BeamMetrics { thickness, gap, beam_y }
 }
