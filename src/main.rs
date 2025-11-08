@@ -18,7 +18,7 @@ use egui::Rect;
 use egui::containers::Frame;
 use crate::duration::NoteValue::{Eighth, Quarter, Sixteenth, ThirtySecond};
 
-struct MyApp {
+struct Grooph {
     font_family: FontFamily,
     font_id: FontId,
     measure: Measure,
@@ -33,21 +33,6 @@ fn add_font(ctx: &Context) {
             priority: egui::epaint::text::FontPriority::Highest,
         }],
     ));
-}
-
-impl MyApp {
-    fn new(cc: &CreationContext) -> Self {
-        add_font(&cc.egui_ctx);
-        let ff = FontFamily::Name("music".into());
-        let mut measure = Measure::new(TimeSignature::SEVEN_EIGHT);
-        let t8 = Duration::Tuplet { n: 3, m: 2, base: Eighth };
-        let t16 = Duration::Tuplet { n: 6, m: 4, base: NoteValue::Sixteenth };
-        measure.add_beat(Beat::rest(Duration::Simple(Sixteenth))).unwrap();
-        measure.add_beat(Beat::note(Duration::Simple(Sixteenth))).unwrap();
-        measure.add_beat(Beat::note(Duration::Simple(ThirtySecond))).unwrap();
-
-        Self { font_family: ff.clone(), font_id: FontId::new(64.0, ff), measure }
-    }
 }
 
 // SMuFL glyphs (Bravura)
@@ -332,7 +317,7 @@ fn draw_measure(ui: &mut egui::Ui, font_id: &FontId, measure: &Measure, rect: Re
 
     // 4b) Draw broken (partial) beams where a note's beam count exceeds continuity
     if let Some(bp) = measure.beam_plan() {
-        let stub_len = em * 0.25; // tune by eye
+        let stub_len = em * 0.20; // tune by eye
         for group in &bp.groups {
             if group.note_indices.is_empty() { continue; }
 
@@ -360,26 +345,29 @@ fn draw_measure(ui: &mut egui::Ui, font_id: &FontId, measure: &Measure, rect: Re
                         (true, true) => { /* fully connected at this level */ }
                         (true, false) => {
                             // Connected to left neighbor, missing to right
-                            // Suppress outer-edge stub on the last note to avoid extending beams to the group edge
-                            if !is_last {
-                                draw_full_beam(&painter, stem_x, stem_x + stub_len, y_lvl, metrics.thickness, Color32::WHITE);
-                            }
+                            // Interior notes: no right stub; full beam terminates cleanly at this stem.
+                            // Last note is an outer edge; we also suppress stubs there by policy.
+                            // => do nothing
                         }
                         (false, true) => {
                             // Connected to right neighbor, missing to left
-                            // Suppress outer-edge stub on the first note to avoid extending beams to the group edge
-                            if !is_first {
-                                draw_full_beam(&painter, stem_x - stub_len, stem_x, y_lvl, metrics.thickness, Color32::WHITE);
-                            }
+                            // Interior notes: no left stub; full beam terminates at this stem.
+                            // First note is an outer edge; stubs suppressed by policy.
+                            // => do nothing
                         }
                         (false, false) => {
-                            // Not connected on either side at this level
-                            // Never draw stubs on group edges: only draw towards the interior side(s)
-                            if !is_first {
-                                draw_full_beam(&painter, stem_x - stub_len, stem_x, y_lvl, metrics.thickness, Color32::WHITE);
-                            }
-                            if !is_last {
-                                draw_full_beam(&painter, stem_x, stem_x + stub_len, y_lvl, metrics.thickness, Color32::WHITE);
+                            // Not connected on either side at this level.
+                            // Never draw stubs on group edges; for interior notes choose side with higher continuity.
+                            if !(is_first || is_last) {
+                                if left_cont > right_cont {
+                                    draw_full_beam(&painter, stem_x - stub_len, stem_x, y_lvl, metrics.thickness, Color32::WHITE);
+                                } else if right_cont > left_cont {
+                                    draw_full_beam(&painter, stem_x, stem_x + stub_len, y_lvl, metrics.thickness, Color32::WHITE);
+                                } else {
+                                    // Equal continuity: draw both short stubs
+                                    draw_full_beam(&painter, stem_x - stub_len, stem_x, y_lvl, metrics.thickness, Color32::WHITE);
+                                    draw_full_beam(&painter, stem_x, stem_x + stub_len, y_lvl, metrics.thickness, Color32::WHITE);
+                                }
                             }
                         }
                     }
@@ -434,7 +422,7 @@ fn draw_measure(ui: &mut egui::Ui, font_id: &FontId, measure: &Measure, rect: Re
     }
 }
 
-impl App for MyApp {
+impl App for Grooph {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         egui::CentralPanel::default().show(ctx, |ui| {
             Frame::canvas(ui.style()).show(ui, |ui| {
@@ -451,7 +439,7 @@ fn main() -> eframe::Result {
         ..Default::default()
     };
 
-    eframe::run_native("grooph.app", options, Box::new(|cc| Ok(Box::new(MyApp::new(cc)))))
+    eframe::run_native("grooph.app", options, Box::new(|cc| Ok(Box::new(Grooph::new(cc)))))
 }
 
 // Beaming metrics and helpers
@@ -477,4 +465,20 @@ fn draw_full_beam(p: &egui::Painter, x1: f32, x2: f32, y: f32, thickness: f32, c
     let top = y - thickness;
     let rect = Rect::from_min_max(pos2(left, top), pos2(right, y));
     p.rect_filled(rect, 0.0, color);
+}
+
+impl Grooph {
+    fn new(cc: &CreationContext) -> Self {
+        add_font(&cc.egui_ctx);
+        let ff = FontFamily::Name("music".into());
+        let mut measure = Measure::new(TimeSignature::SEVEN_EIGHT);
+        let t8 = Duration::Tuplet { n: 3, m: 2, base: Eighth };
+        let t16 = Duration::Tuplet { n: 6, m: 4, base: NoteValue::Sixteenth };
+        measure.add_beat(Beat::rest(Duration::Simple(Sixteenth))).unwrap();
+        measure.add_beat(Beat::note(Duration::Simple(Sixteenth))).unwrap();
+        measure.add_beat(Beat::note(Duration::Simple(ThirtySecond))).unwrap();
+        measure.add_beat(Beat::note(Duration::Simple(Eighth))).unwrap();
+
+        Self { font_family: ff.clone(), font_id: FontId::new(16.0, ff), measure }
+    }
 }
