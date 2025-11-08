@@ -184,6 +184,18 @@ impl Measure {
         Ok(())
     }
 
+    /// Replace the beat at `idx` with a rest of the same duration. No-op if out of bounds or already a rest.
+    pub fn set_beat_to_rest(&mut self, idx: usize) {
+        if let Some(b) = self.beats.get_mut(idx) {
+            if b.kind != BeatKind::Rest {
+                b.kind = BeatKind::Rest;
+                b.tremolo = None; // rests have no tremolo
+                // Recompute beams since note/rest membership affects grouping visuals
+                self.recompute_beams();
+            }
+        }
+    }
+
     /// Recompute the beam plan explicitly (optional helper)
     pub fn recompute_beams(&mut self) {
         self.beam_plan = Some(crate::beaming::compute_beam_plan(self));

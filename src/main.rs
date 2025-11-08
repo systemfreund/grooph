@@ -492,6 +492,10 @@ impl App for Grooph {
                             if i.key_pressed(Key::End) {
                                 self.cursor_idx = len.saturating_sub(1);
                             }
+                            if i.key_pressed(Key::Delete) {
+                                // Replace note with rest at cursor; no-op if already rest
+                                self.measure.set_beat_to_rest(self.cursor_idx);
+                            }
                         }
                     });
                 }
@@ -556,8 +560,8 @@ impl Grooph {
         let mut measure = Measure::new(TimeSignature::SEVEN_EIGHT);
         let t8 = Duration::Tuplet { n: 3, m: 2, base: Eighth };
         let t16 = Duration::Tuplet { n: 6, m: 4, base: NoteValue::Sixteenth };
+        measure.add_beat(Beat::rest(Duration::Simple(Eighth))).unwrap();
         measure.add_beat(Beat::rest(Duration::Simple(Sixteenth))).unwrap();
-        measure.add_beat(Beat::note(Duration::Simple(Sixteenth))).unwrap();
         measure.add_beat(Beat::note(Duration::Simple(ThirtySecond))).unwrap();
         measure.add_beat(Beat::note(Duration::Simple(Eighth))).unwrap();
 
