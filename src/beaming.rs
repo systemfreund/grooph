@@ -38,7 +38,7 @@ pub struct BeamGroup {
 /// - Group by primary beat boundaries of the time signature
 /// - Contiguous tuplets (same n, m, base; no intervening rests or non-matching notes) take precedence
 ///   over primary boundaries and remain within a single BeamGroup
-/// - Rests break beams: any rest between two notes splits the BeamGroup (no broken beams/hooks over rests)
+/// - Rests break beams: any rest between two notes splits the BeamGroup
 /// - Cross-measure beams are exposed via the `continues_*` flags but left as false here; a higher level
 ///   can link adjacent measures and set these appropriately.
 pub fn compute_beam_plan(measure: &Measure) -> BeamPlan {

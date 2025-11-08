@@ -277,13 +277,15 @@ fn draw_measure(ui: &mut egui::Ui, font_id: &FontId, measure: &Measure, rect: Re
     // 2) Metrics for beams and stems
     let metrics = beam_metrics(em, y);
     let stem_dx = music_font.size * 0.13; // keep in sync with draw_beat
+    // Precompute stem x positions for all beats (noteheads + stem offset)
+    let stem_xs: Vec<f32> = x_centers.iter().map(|&cx| cx + stem_dx).collect();
 
     // 3) Pass: draw beats (noteheads/rests) with beam-aware stems (flags suppressed when in beam)
     let mut in_beam_flags: Vec<bool> = vec![false; measure.beats().len()];
     if let Some(bp) = measure.beam_plan() {
         for g in &bp.groups {
             // Only consider groups with at least two notes as "beamed".
-            // Singleton groups should render with flags, not beams/hooks.
+            // Singleton groups should render with flags, not beams.
             if g.note_indices.len() >= 2 {
                 for &idx in &g.note_indices {
                     if idx < in_beam_flags.len() {
@@ -310,7 +312,7 @@ fn draw_measure(ui: &mut egui::Ui, font_id: &FontId, measure: &Measure, rect: Re
         }
     }
 
-    // 4) Draw beams and hooks per group (horizontal beams for stems up)
+    // 4) Draw beams per group (horizontal beams for stems up)
     if let Some(bp) = measure.beam_plan() {
         for group in &bp.groups {
             // Full beams between adjacent stems according to continuity
@@ -321,42 +323,11 @@ fn draw_measure(ui: &mut egui::Ui, font_id: &FontId, measure: &Measure, rect: Re
                 if levels == 0 {
                     continue;
                 }
-                let x1 = x_centers[i] + stem_dx;
-                let x2 = x_centers[j] + stem_dx;
+                let x1 = stem_xs[i];
+                let x2 = stem_xs[j];
                 for lvl in 0..levels {
                     let y_lvl = metrics.beam_y - (lvl as f32) * (metrics.thickness + metrics.gap);
                     draw_full_beam(&painter, x1, x2, y_lvl, metrics.thickness, Color32::WHITE);
-                }
-            }
-            // Hooks (partial beams) for extra levels not continued to neighbors
-            // Skip hooks for singleton groups (len < 2)
-            if group.note_indices.len() >= 2 {
-                for (idx_in_group, &note_i) in group.note_indices.iter().enumerate() {
-                    let bc = *group.beam_counts.get(idx_in_group).unwrap_or(&0);
-                    if bc == 0 { continue; }
-                    let x_stem = x_centers[note_i] + stem_dx;
-
-                    let has_left = idx_in_group > 0;
-                    let has_right = idx_in_group + 1 < group.note_indices.len();
-
-                    let cont_left = if has_left { *group.continuity.get(idx_in_group - 1).unwrap_or(&0) } else { 0 };
-                    let cont_right = if has_right { *group.continuity.get(idx_in_group).unwrap_or(&0) } else { 0 };
-
-                    // Draw hooks toward the side where beams do NOT continue
-                    // Left side: draw left-facing hooks (dir = -1)
-                    if has_left && bc > cont_left {
-                        for lvl in cont_left..bc {
-                            let y_lvl = metrics.beam_y - (lvl as f32) * (metrics.thickness + metrics.gap);
-                            draw_hook(&painter, x_stem, y_lvl, metrics.thickness, metrics.hook_len, -1.0, Color32::WHITE);
-                        }
-                    }
-                    // Right side: draw right-facing hooks (dir = +1)
-                    if has_right && bc > cont_right {
-                        for lvl in cont_right..bc {
-                            let y_lvl = metrics.beam_y - (lvl as f32) * (metrics.thickness + metrics.gap);
-                            draw_hook(&painter, x_stem, y_lvl, metrics.thickness, metrics.hook_len, 1.0, Color32::WHITE);
-                        }
-                    }
                 }
             }
         }
@@ -433,7 +404,6 @@ fn main() -> eframe::Result {
 struct BeamMetrics {
     thickness: f32,
     gap: f32,
-    hook_len: f32,
     beam_y: f32, // primary beam baseline (closest to notehead)
 }
 
@@ -442,32 +412,13 @@ fn beam_metrics(em: f32, y_center: f32) -> BeamMetrics {
     let staff_space = em * 0.20; // tuned by eye
     let thickness = 0.5 * staff_space; // Bravura ~0.5 sp
     let gap = 0.5 * staff_space; // distance between beams
-    let hook_len = 0.6 * em; // horizontal extent of partial beams (hooks)
     let beam_y = y_center - 0.75 * em; // height above notehead center for stems up
-    BeamMetrics { thickness, gap, hook_len, beam_y }
+    BeamMetrics { thickness, gap, beam_y }
 }
 
 fn draw_full_beam(p: &egui::Painter, x1: f32, x2: f32, y: f32, thickness: f32, color: Color32) {
     let left = x1.min(x2);
     let right = x1.max(x2);
-    let top = y - thickness;
-    let rect = Rect::from_min_max(pos2(left, top), pos2(right, y));
-    p.rect_filled(rect, 0.0, color);
-}
-
-// dir: +1 => hook extends to right; -1 => hook extends to left
-fn draw_hook(
-    p: &egui::Painter,
-    x_stem: f32,
-    y: f32,
-    thickness: f32,
-    len: f32,
-    dir: f32,
-    color: Color32,
-) {
-    let x2 = x_stem + dir * len;
-    let left = x_stem.min(x2);
-    let right = x_stem.max(x2);
     let top = y - thickness;
     let rect = Rect::from_min_max(pos2(left, top), pos2(right, y));
     p.rect_filled(rect, 0.0, color);
