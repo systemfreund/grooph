@@ -285,10 +285,10 @@ mod tests {
     fn beaming_rest_breaks_group() {
         // Note 16th, Rest 16th, Note 16th, Rest 16th within the first quarter
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
-        m.add_beat(Beat::note(s())).unwrap(); // idx 0
-        m.add_beat(Beat::rest(s())).unwrap(); // idx 1
-        m.add_beat(Beat::note(s())).unwrap(); // idx 2
-        m.add_beat(Beat::rest(s())).unwrap(); // idx 3
+        m.add_beat(Beat::note(s())).unwrap();
+        m.add_beat(Beat::rest(s())).unwrap();
+        m.add_beat(Beat::note(s())).unwrap();
+        m.add_beat(Beat::rest(s())).unwrap();
         let plan = m.beam_plan().unwrap();
         assert_eq!(plan.groups.len(), 2, "rests should split into two singleton groups");
         let g0 = &plan.groups[0];
@@ -307,10 +307,10 @@ mod tests {
         // The three tuplet notes must remain in one BeamGroup even if a primary boundary lies between them.
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
         m.add_beat(Beat::rest(e())).unwrap(); // offset by an eighth
-        m.add_beat(Beat::note(t8())).unwrap(); // idx 1
-        m.add_beat(Beat::note(t8())).unwrap(); // idx 2
-        m.add_beat(Beat::note(t8())).unwrap(); // idx 3
-        m.add_beat(Beat::note(e())).unwrap(); // following context
+        m.add_beat(Beat::note(t8())).unwrap();
+        m.add_beat(Beat::note(t8())).unwrap();
+        m.add_beat(Beat::note(t8())).unwrap();
+        m.add_beat(Beat::note(e())).unwrap();
         let plan = m.beam_plan().unwrap();
 
         // Find the group that contains note index 1 (first tuplet note)

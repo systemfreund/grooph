@@ -42,15 +42,8 @@ impl MyApp {
         let mut measure = Measure::new(TimeSignature::SEVEN_EIGHT);
         let t8 = Duration::Tuplet { n: 3, m: 2, base: Eighth };
         let t16 = Duration::Tuplet { n: 6, m: 4, base: NoteValue::Sixteenth };
-        measure.add_beat(Beat::note(t16)).unwrap();
-        measure.add_beat(Beat::note(t16)).unwrap();
-        measure.add_beat(Beat::note(t16)).unwrap();
         measure.add_beat(Beat::note(Duration::Simple(Eighth))).unwrap();
-        measure.add_beat(Beat::note(Duration::Simple(Eighth))).unwrap();
-        measure.add_beat(Beat::note(Duration::Simple(Eighth))).unwrap();
-        measure.add_beat(Beat::note(Duration::Simple(Eighth))).unwrap();
-        // measure.add_beat(Beat::note(Duration::Simple(Eighth))).unwrap();
-        // measure.add_beat(Beat::note(Duration::Simple(Eighth))).unwrap();
+        measure.add_beat(Beat::note(Duration::Simple(Sixteenth))).unwrap();
 
         // measure.add_beat(Beat::note(Duration::Simple())).unwrap();
         // measure.add_beat(Beat::note(Duration::Simple(NoteValue::Eighth))).unwrap();
@@ -326,7 +319,7 @@ fn draw_measure(ui: &mut egui::Ui, font_id: &FontId, measure: &Measure, rect: Re
                 let x1 = stem_xs[i];
                 let x2 = stem_xs[j];
                 for lvl in 0..levels {
-                    let y_lvl = metrics.beam_y - (lvl as f32) * (metrics.thickness + metrics.gap);
+                    let y_lvl = metrics.beam_y + (lvl as f32) * (metrics.thickness + metrics.gap);
                     draw_full_beam(&painter, x1, x2, y_lvl, metrics.thickness, Color32::WHITE);
                 }
             }
