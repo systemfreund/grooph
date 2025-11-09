@@ -2,7 +2,6 @@ use crate::duration::{Duration, NoteValue, default_duration_set};
 use crate::fill::best_fill_for_gap;
 use crate::beaming::{BeamPlan, compute_beam_plan};
 use std::fmt::{Display, Formatter};
-use std::fs::write;
 use std::vec;
 
 /// Represents a time signature (e.g., 4/4, 3/4, 6/8)
@@ -198,7 +197,7 @@ impl Measure {
 
     /// Recompute the beam plan explicitly (optional helper)
     pub fn recompute_beams(&mut self) {
-        self.beam_plan = Some(crate::beaming::compute_beam_plan(self));
+        self.beam_plan = Some(compute_beam_plan(self));
     }
 
     /// Remove the beat at `idx`. If there is a following beat (i.e., not deleting the last one),
@@ -275,7 +274,6 @@ impl Display for Measure {
 mod tests {
     use super::*;
     use crate::duration::{Duration, NoteValue};
-    use crate::fill::best_fill_for_gap;
 
     fn q() -> Duration { Duration::Simple(NoteValue::Quarter) }
     fn e() -> Duration { Duration::Simple(NoteValue::Eighth) }
