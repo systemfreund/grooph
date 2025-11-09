@@ -493,47 +493,41 @@ impl App for Grooph {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         egui::CentralPanel::default().show(ctx, |ui| {
             Frame::canvas(ui.style()).show(ui, |ui| {
-                let (id, rect) = ui.allocate_space(ui.available_size());
-                let response = ui.interact(rect, id, Sense::click());
-                if response.clicked() {
-                    response.request_focus();
-                }
-                if response.has_focus() {
-                    ui.input(|i| {
-                        let len = self.measure.beats().len();
-                        if len > 0 {
-                            if i.key_pressed(Key::ArrowLeft) {
-                                self.cursor_idx = self.cursor_idx.saturating_sub(1);
-                            }
-                            if i.key_pressed(Key::ArrowRight) {
-                                let max_idx = len.saturating_sub(1);
-                                if self.cursor_idx < max_idx {
-                                    self.cursor_idx += 1;
-                                }
-                            }
-                            if i.key_pressed(Key::Home) {
-                                self.cursor_idx = 0;
-                            }
-                            if i.key_pressed(Key::End) {
-                                self.cursor_idx = len.saturating_sub(1);
-                            }
-                            if i.key_pressed(Key::Delete) {
-                                // Replace note with rest at cursor; no-op if already rest
-                                self.measure.set_beat_to_rest(self.cursor_idx);
-                            }
-                            if i.key_pressed(Key::Space) {
-                                // Toggle between note and rest at cursor (preserve duration)
-                                self.measure.toggle_beat_kind(self.cursor_idx);
-                            }
-                            if i.key_pressed(Key::Backspace) {
-                                // Remove beat at cursor; if there is a following beat, fill the gap so later beats keep positions
-                                self.measure.backspace_remove_and_fill(self.cursor_idx);
-                                // Move cursor left, like a text editor caret
-                                self.cursor_idx = self.cursor_idx.saturating_sub(1);
+                let (_id, rect) = ui.allocate_space(ui.available_size());
+                ui.input(|i| {
+                    let len = self.measure.beats().len();
+                    if len > 0 {
+                        if i.key_pressed(Key::ArrowLeft) {
+                            self.cursor_idx = self.cursor_idx.saturating_sub(1);
+                        }
+                        if i.key_pressed(Key::ArrowRight) {
+                            let max_idx = len.saturating_sub(1);
+                            if self.cursor_idx < max_idx {
+                                self.cursor_idx += 1;
                             }
                         }
-                    });
-                }
+                        if i.key_pressed(Key::Home) {
+                            self.cursor_idx = 0;
+                        }
+                        if i.key_pressed(Key::End) {
+                            self.cursor_idx = len.saturating_sub(1);
+                        }
+                        if i.key_pressed(Key::Delete) {
+                            // Replace note with rest at cursor; no-op if already rest
+                            self.measure.set_beat_to_rest(self.cursor_idx);
+                        }
+                        if i.key_pressed(Key::Space) {
+                            // Toggle between note and rest at cursor (preserve duration)
+                            self.measure.toggle_beat_kind(self.cursor_idx);
+                        }
+                        if i.key_pressed(Key::Backspace) {
+                            // Remove beat at cursor; if there is a following beat, fill the gap so later beats keep positions
+                            self.measure.backspace_remove_and_fill(self.cursor_idx);
+                            // Move cursor left, like a text editor caret
+                            self.cursor_idx = self.cursor_idx.saturating_sub(1);
+                        }
+                    }
+                });
                 let idx_opt = if self.cursor_idx < self.measure.beats().len() {
                     Some(self.cursor_idx)
                 } else {
