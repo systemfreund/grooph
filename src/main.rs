@@ -10,13 +10,13 @@ use measure::{Measure, TimeSignature};
 
 use crate::duration::NoteValue::*;
 use crate::measure::{Beat, BeatKind};
-use eframe::egui::{pos2, Align2, Context, Key, Rangef, Stroke};
+use eframe::egui::{Align2, Context, Key, Rangef, Stroke, pos2};
 use eframe::emath::Pos2;
 use eframe::epaint::text::{FontInsert, InsertFontFamily};
 use eframe::epaint::{Color32, FontFamily, FontId};
-use eframe::{egui, App, CreationContext};
-use egui::containers::Frame;
+use eframe::{App, CreationContext, egui};
 use egui::Rect;
+use egui::containers::Frame;
 
 struct Grooph {
     font_family: FontFamily,
@@ -178,24 +178,24 @@ fn draw_measure(
     // staff line
     painter.hline(Rangef::new(rect.left(), rect.right()), y, Stroke::new(1.0, COLOR));
 
+    let min_size = 14.0 * ui.ctx().pixels_per_point(); // avoid unreadably small glyphs on HiDPI
+
     // Make inner rect scale with available height: keep a small vertical padding fraction
     let vpad = (rect.height() * 0.10).clamp(10.0, 200.0);
+    let hpad = (rect.width() * 0.10).clamp(80.0, 120.0);
+    println!("{}", min_size);
     let inner_rect = Rect::from_min_max(
         pos2(rect.left(), rect.top() + vpad),
-        pos2(rect.right(), rect.bottom() - vpad),
+        pos2(rect.right() - hpad, rect.bottom() - vpad),
     );
 
     // Derive font size from available height and width (scaled), keep family from provided font_id
     // Height-first sizing, modulated by window width so very narrow/wide windows adapt.
-    let baseline_w: f32 = 800.0; // points; heuristic baseline width
-    let width_factor = (rect.width() / baseline_w).powf(0.5).clamp(0.7, 1.3);
     let base_size_h = inner_rect.height() * 0.50;
-    let base_size = base_size_h * width_factor;
-    let min_size = 14.0 * ui.ctx().pixels_per_point(); // avoid unreadably small glyphs on HiDPI
     // Also cap by an estimate from width to prevent overflow on very narrow windows.
-    let width_cap = (rect.width() * 0.12).max(min_size);
-    let max_size = inner_rect.height() * 0.80; // avoid overflowing inner rect, but not a fixed cap
-    let target_size = base_size.clamp(min_size, max_size.min(width_cap));
+    let width_cap = (rect.width() * 0.1).max(min_size);
+    let max_size = (inner_rect.height() * 0.80).max(min_size); // avoid overflowing inner rect, but not a fixed cap. also make sure it does not go below min_size
+    let target_size = base_size_h.clamp(min_size, max_size.min(width_cap));
     let font_id = FontId::new(target_size, font_id.family.clone());
     let em = target_size;
 
@@ -259,7 +259,7 @@ fn draw_measure(
     let used_ticks: i32 =
         measure.beats().iter().map(|b| set.grid.ticks_of(&b.duration).unwrap_or(0)).sum();
 
-    // Precompute remainder preview durations (ghost rests) for caret/navigation too
+    // Precompute remainder preview durations (virtual rests) for caret/navigation too
     let remaining = cap_ticks - used_ticks;
     let remainder_durs: Vec<Duration> = if remaining > 0 {
         fill::best_fill_for_gap(remaining).unwrap_or_default()
@@ -478,8 +478,8 @@ fn draw_measure(
 
     // 6) Remainder preview as faint rests filling the remaining space, continuing run
     if !remainder_durs.is_empty() && cap_ticks > 0 {
-        let ghost = Color32::from_white_alpha(100);
-        // We need a fresh run to draw ghosts, keeping continuity after real beats
+        let virt = Color32::from_white_alpha(100);
+        // We need a fresh run to draw virtuals, keeping continuity after real beats
         let mut run_draw = 0.0_f32;
         for (_i, beat) in measure.beats().iter().copied().enumerate() {
             let t = set.grid.ticks_of(&beat.duration).unwrap_or(0) as f32;
@@ -496,7 +496,7 @@ fn draw_measure(
                 &font_id,
                 pos2(cx, y),
                 beat,
-                NoteRenderOpts { color: ghost, in_beam: false, stem_offset_x, stem_thickness },
+                NoteRenderOpts { color: virt, in_beam: false, stem_offset_x, stem_thickness },
             );
             run_draw += w;
         }
@@ -511,12 +511,12 @@ impl App for Grooph {
                 ui.input(|i| {
                     let beats_len = self.measure.beats().len();
                     let rem_ticks = self.measure.remaining_ticks();
-                    let ghost_len = if rem_ticks > 0 {
+                    let virtual_len = if rem_ticks > 0 {
                         fill::best_fill_for_gap(rem_ticks).map(|v| v.len()).unwrap_or(0)
                     } else {
                         0
                     };
-                    let total_len = beats_len + ghost_len;
+                    let total_len = beats_len + virtual_len;
                     if total_len > 0 {
                         if i.key_pressed(Key::ArrowLeft) {
                             self.cursor_idx = self.cursor_idx.saturating_sub(1);
@@ -534,24 +534,24 @@ impl App for Grooph {
                             self.cursor_idx = total_len.saturating_sub(1);
                         }
                         if i.key_pressed(Key::Delete) {
-                            // Replace note with rest at cursor; only valid on real beats
-                            if self.cursor_idx < beats_len {
-                                self.measure.set_beat_to_rest(self.cursor_idx);
-                            }
+                            // Replace note with rest at cursor; commit 'virtual' if needed
+                            let idx = self.cursor_idx;
+                            self.measure.ensure_committed_position(idx);
+                            self.measure.set_beat_to_rest(idx);
                         }
                         if i.key_pressed(Key::Space) {
-                            // Toggle between note and rest at cursor (preserve duration) on real beats
-                            if self.cursor_idx < beats_len {
-                                self.measure.toggle_beat_kind(self.cursor_idx);
-                            }
+                            // Toggle between note and rest at cursor (preserve duration); commit 'virtual' if needed
+                            let idx = self.cursor_idx;
+                            self.measure.ensure_committed_position(idx);
+                            self.measure.toggle_beat_kind(idx);
                         }
                         if i.key_pressed(Key::Backspace) {
-                            // Remove beat at cursor (real beats only);
-                            if self.cursor_idx < beats_len {
-                                self.measure.backspace_remove_and_fill(self.cursor_idx);
-                                // Move cursor left, like a text editor caret
-                                self.cursor_idx = self.cursor_idx.saturating_sub(1);
-                            }
+                            // Remove beat at cursor; commit 'virtual' if needed then remove
+                            let idx = self.cursor_idx;
+                            self.measure.ensure_committed_position(idx);
+                            self.measure.backspace_remove_and_fill(idx);
+                            // Move cursor left, like a text editor caret
+                            self.cursor_idx = self.cursor_idx.saturating_sub(1);
                         }
                     }
                 });

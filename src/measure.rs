@@ -228,6 +228,29 @@ impl Measure {
         // Recompute beams after mutation
         self.recompute_beams();
     }
+
+    /// Ensure that an absolute position `pos` (0-based) is committed as a real beat.
+    /// If `pos` is already within committed beats, this is a no-op.
+    /// If `pos` lies within the remainder preview, commit the minimal prefix
+    /// of the remainder (as rests) so that `pos` becomes a valid index in `self.beats`.
+    pub fn ensure_committed_position(&mut self, pos: usize) {
+        let beats_len = self.beats.len();
+        if pos < beats_len {
+            return; // already committed
+        }
+        let remaining_ticks = self.remaining_ticks();
+        if remaining_ticks <= 0 {
+            return; // nothing to commit
+        }
+        let need = pos.saturating_add(1).saturating_sub(beats_len);
+        if let Some(fill) = best_fill_for_gap(remaining_ticks) {
+            let take = need.min(fill.len());
+            for d in fill.into_iter().take(take) {
+                self.beats.push(Beat::rest(d));
+            }
+            self.recompute_beams();
+        }
+    }
 }
 
 enum DisplayItem {
