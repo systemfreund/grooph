@@ -173,10 +173,11 @@ fn draw_measure(
     rect: Rect,
     cursor_idx: Option<usize>,
 ) {
+    const color: Color32 = Color32::WHITE;
     let painter = ui.painter();
     let y = rect.center().y;
     // staff line
-    painter.hline(Rangef::new(rect.left(), rect.right()), y, Stroke::new(1.0, Color32::WHITE));
+    painter.hline(Rangef::new(rect.left(), rect.right()), y, Stroke::new(1.0, color));
 
     // Make inner rect scale with available height: keep a small vertical padding fraction
     let vpad = (rect.height() * 0.10).clamp(10.0, 200.0);
@@ -210,7 +211,7 @@ fn draw_measure(
         Align2::CENTER_CENTER,
         GLYPH_CLEF_PERCUSSION.to_string(),
         music_font.clone(),
-        Color32::WHITE,
+        color,
     );
 
     // Time signature digits (SMuFL)
@@ -232,7 +233,7 @@ fn draw_measure(
             Align2::CENTER_CENTER,
             ch.to_string(),
             music_font.clone(),
-            Color32::WHITE,
+            color,
         );
     }
     // Bottom row (beat unit)
@@ -244,7 +245,7 @@ fn draw_measure(
             Align2::CENTER_CENTER,
             ch.to_string(),
             music_font.clone(),
-            Color32::WHITE,
+            color,
         );
     }
 
@@ -273,7 +274,7 @@ fn draw_measure(
     }
 
     // 2) Metrics for beams and stems
-    let metrics = beam_metrics(em, y, Color32::WHITE);
+    let beam_render_opts = bream_render_opts(em, y, color);
     let stem_dx = music_font.size * 0.13; // keep in sync with draw_beat
     // Precompute stem x positions for all beats (noteheads + stem offset)
     let stem_xs: Vec<f32> = x_centers.iter().map(|&cx| cx + stem_dx).collect();
@@ -298,12 +299,12 @@ fn draw_measure(
         let in_beam = *in_beam_flags.get(i).unwrap_or(&false);
         let opts = if in_beam {
             NoteRenderOpts {
-                color: Color32::WHITE,
+                color,
                 in_beam: true,
-                stem_end_y: Some(metrics.beam_y),
+                stem_end_y: Some(beam_render_opts.beam_y),
             }
         } else {
-            NoteRenderOpts { color: Color32::WHITE, in_beam: false, stem_end_y: None }
+            NoteRenderOpts { color, in_beam: false, stem_end_y: None }
         };
         if cap_ticks > 0 {
             draw_beat(&painter, &music_font, pos2(x_centers[i], y), beat, opts);
@@ -324,7 +325,7 @@ fn draw_measure(
                 let x1 = stem_xs[i];
                 let x2 = stem_xs[j];
                 for lvl in 0..levels {
-                    draw_full_beam(&painter, x1, x2, lvl, &metrics);
+                    draw_full_beam(&painter, x1, x2, lvl, &beam_render_opts);
                 }
             }
         }
@@ -386,10 +387,10 @@ fn draw_measure(
                             // On group edges, draw only the interior-facing stub; on interior notes, choose side by higher continuity (or both if equal).
                             if is_first {
                                 // First note: interior faces right
-                                draw_full_beam(&painter, stem_x, stem_x + stub_len, lvl, &metrics);
+                                draw_full_beam(&painter, stem_x, stem_x + stub_len, lvl, &beam_render_opts);
                             } else if is_last {
                                 // Last note: interior faces left
-                                draw_full_beam(&painter, stem_x - stub_len, stem_x, lvl, &metrics);
+                                draw_full_beam(&painter, stem_x - stub_len, stem_x, lvl, &beam_render_opts);
                             } else {
                                 if left_cont > right_cont {
                                     draw_full_beam(
@@ -397,7 +398,7 @@ fn draw_measure(
                                         stem_x - stub_len,
                                         stem_x,
                                         lvl,
-                                        &metrics,
+                                        &beam_render_opts,
                                     );
                                 } else if right_cont > left_cont {
                                     draw_full_beam(
@@ -405,7 +406,7 @@ fn draw_measure(
                                         stem_x,
                                         stem_x + stub_len,
                                         lvl,
-                                        &metrics,
+                                        &beam_render_opts,
                                     );
                                 } else {
                                     // Equal continuity: draw both short stubs
@@ -414,14 +415,14 @@ fn draw_measure(
                                         stem_x - stub_len,
                                         stem_x,
                                         lvl,
-                                        &metrics,
+                                        &beam_render_opts,
                                     );
                                     draw_full_beam(
                                         &painter,
                                         stem_x,
                                         stem_x + stub_len,
                                         lvl,
-                                        &metrics,
+                                        &beam_render_opts,
                                     );
                                 }
                             }
@@ -562,7 +563,7 @@ impl BeamRenderOpts {
     }
 }
 
-fn beam_metrics(em: f32, y_center: f32, color: Color32) -> BeamRenderOpts {
+fn bream_render_opts(em: f32, y_center: f32, color: Color32) -> BeamRenderOpts {
     // Approximate staff space relative to font size for a single-line staff context
     let staff_space = em * 0.20; // tuned by eye
     let thickness = 0.5 * staff_space; // Bravura ~0.5 sp
