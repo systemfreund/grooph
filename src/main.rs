@@ -582,7 +582,7 @@ impl App for Grooph {
                 ui.input(|i| {
                     let beats_len = self.measure.beats().len();
                     let rem_ticks = self.measure.remaining_ticks();
-                    let virtual_len = if rem_ticks > 0 {
+                    let virtual_len: usize = if rem_ticks > 0 {
                         fill::best_fill_for_gap(rem_ticks).map(|v| v.len()).unwrap_or(0)
                     } else {
                         0
@@ -620,7 +620,7 @@ impl App for Grooph {
                             // Remove beat at cursor; commit 'virtual' if needed then remove
                             let idx = self.cursor_idx;
                             self.measure.ensure_committed_position(idx);
-                            self.measure.backspace_remove_and_fill(idx);
+                            self.measure.remove(idx);
                             // Move cursor left, like a text editor caret
                             self.cursor_idx = self.cursor_idx.saturating_sub(1);
                         }

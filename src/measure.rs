@@ -1,6 +1,6 @@
+use crate::beaming::{BeamPlan, compute_beam_plan};
 use crate::duration::{Duration, NoteValue, default_duration_set};
 use crate::fill::best_fill_for_gap;
-use crate::beaming::{BeamPlan, compute_beam_plan};
 use std::fmt::{Display, Formatter};
 use std::vec;
 
@@ -53,10 +53,14 @@ pub struct Tremolo {
 
 impl Beat {
     /// Creates a new note with the given duration
-    pub fn note(duration: Duration) -> Self { Self { duration, kind: BeatKind::Note, tremolo: None } }
+    pub fn note(duration: Duration) -> Self {
+        Self { duration, kind: BeatKind::Note, tremolo: None }
+    }
 
     /// Creates a new rest with the given duration
-    pub fn rest(duration: Duration) -> Self { Self { duration, kind: BeatKind::Rest, tremolo: None } }
+    pub fn rest(duration: Duration) -> Self {
+        Self { duration, kind: BeatKind::Rest, tremolo: None }
+    }
 }
 
 /// Errors that can occur when adding beats to a measure
@@ -195,23 +199,20 @@ impl Measure {
         }
     }
 
-    /// Recompute the beam plan explicitly (optional helper)
-    pub fn recompute_beams(&mut self) {
-        self.beam_plan = Some(compute_beam_plan(self));
-    }
+    /// Recompute the beam plan explicitly
+    pub fn recompute_beams(&mut self) { self.beam_plan = Some(compute_beam_plan(self)); }
 
     /// Remove the beat at `idx`. If there is a following beat (i.e., not deleting the last one),
     /// insert a sequence of rests whose total duration equals the removed beat so that the
     /// absolute positions of subsequent beats remain unchanged. No-op if `idx` is out of bounds.
-    pub fn backspace_remove_and_fill(&mut self, idx: usize) {
-        if idx >= self.beats.len() { return; }
+    pub fn remove(&mut self, idx: usize) {
+        if idx >= self.beats.len() {
+            return;
+        }
         let set = default_duration_set();
         let had_following = idx + 1 < self.beats.len();
-        let removed_ticks = self
-            .beats
-            .get(idx)
-            .and_then(|b| set.grid.ticks_of(&b.duration))
-            .unwrap_or(0);
+        let removed_ticks =
+            self.beats.get(idx).and_then(|b| set.grid.ticks_of(&b.duration)).unwrap_or(0);
         // Remove the beat at idx
         self.beats.remove(idx);
 
@@ -238,13 +239,16 @@ impl Measure {
         if pos < beats_len {
             return; // already committed
         }
+        self.fill_measure(Some(pos.saturating_add(1).saturating_sub(beats_len)));
+    }
+
+    pub fn fill_measure(&mut self, need: Option<usize>) {
         let remaining_ticks = self.remaining_ticks();
         if remaining_ticks <= 0 {
             return; // nothing to commit
         }
-        let need = pos.saturating_add(1).saturating_sub(beats_len);
         if let Some(fill) = best_fill_for_gap(remaining_ticks) {
-            let take = need.min(fill.len());
+            let take = need.map_or(fill.len(), |n| n.min(fill.len()));
             for d in fill.into_iter().take(take) {
                 self.beats.push(Beat::rest(d));
             }
@@ -281,27 +285,25 @@ impl Display for Measure {
             .map(|d| DisplayItem::Beat(Beat::rest(*d)))
             .collect();
 
-        let mut beats: Vec<_> = self.beats.iter()
-            .map(|b| DisplayItem::Beat(*b))
-            .collect();
+        let mut beats: Vec<_> = self.beats.iter().map(|b| DisplayItem::Beat(*b)).collect();
         beats.append(&mut vec![DisplayItem::Cursor]);
         beats.extend(remainder);
 
         beats.iter().fold(Ok(()), |result, b| {
-            result.and_then(|_| {
-                match b {
-                    DisplayItem::Beat(beat) => {
-                        let (note, rest) = beat.duration.to_glyph();
-                        let glyph = if beat.kind == BeatKind::Note { note } else { rest };
-                        write!(f, "{}", glyph).and_then(|_| match beat.duration {
-                            Duration::Simple(_) => Ok(()),
-                            Duration::Dotted { base: _base, dots } => {
-                                write!(f, "{}", "\u{1D16D}".repeat(dots as usize))
-                            }
-                            Duration::Tuplet { .. } => write!(f, "ᵀ"),
-                        })
-                    }
-                    DisplayItem::Cursor => { write!(f, "|") }
+            result.and_then(|_| match b {
+                DisplayItem::Beat(beat) => {
+                    let (note, rest) = beat.duration.to_glyph();
+                    let glyph = if beat.kind == BeatKind::Note { note } else { rest };
+                    write!(f, "{}", glyph).and_then(|_| match beat.duration {
+                        Duration::Simple(_) => Ok(()),
+                        Duration::Dotted { base: _base, dots } => {
+                            write!(f, "{}", "\u{1D16D}".repeat(dots as usize))
+                        }
+                        Duration::Tuplet { .. } => write!(f, "ᵀ"),
+                    })
+                }
+                DisplayItem::Cursor => {
+                    write!(f, "|")
                 }
             })
         })
@@ -311,6 +313,7 @@ impl Display for Measure {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::duration::NoteValue::{Eighth, Sixteenth, ThirtySecond};
     use crate::duration::{Duration, NoteValue};
 
     fn q() -> Duration { Duration::Simple(NoteValue::Quarter) }
@@ -343,17 +346,9 @@ mod tests {
     #[test]
     fn test_add_eighth_triplet_to_seven_eight_measure() {
         let mut measure = Measure::new(TimeSignature::SEVEN_EIGHT);
-        let t8 = Duration::Tuplet { n: 3, m: 2, base: NoteValue::Eighth };
-        measure.add_beat(Beat::note(t8)).unwrap();
-        measure.add_beat(Beat::note(t8)).unwrap();
-        measure.add_beat(Beat::note(t8)).unwrap();
-
-        // measure.current_ticks()
-
-        // measure.add_beat(Beat::note(Duration::Simple(NoteValue::Eighth))).unwrap();
-
-        println!("{}", measure.remaining_ticks());
+        measure.add_beat(Beat::note(Duration::Dotted { base: Eighth, dots: 1 })).unwrap();
+        // measure.add_beat(Beat::note(e())).unwrap();
+        measure.fill_measure(None);
         println!("{}", measure);
     }
 }
-
