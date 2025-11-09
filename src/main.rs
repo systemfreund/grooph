@@ -39,6 +39,8 @@ fn add_font(ctx: &Context) {
 // SMuFL glyphs (Bravura)
 // Notehead black: U+E0A4
 const GLYPH_NOTEHEAD_BLACK: char = '\u{E0A4}';
+// Augmentation dot: U+E1E7
+const GLYPH_AUGMENTATION_DOT: char = '\u{E1E7}';
 // Rests: quarter..32nd: U+E4E5..U+E4E8
 const GLYPH_REST_QUARTER: char = '\u{E4E5}';
 const GLYPH_REST_EIGHTH: char = '\u{E4E6}';
@@ -89,6 +91,13 @@ fn flag_glyph_for_duration(d: Duration) -> Option<char> {
     }
 }
 
+fn dot_count_for_duration(d: Duration) -> u8 {
+    match d {
+        Duration::Dotted { dots, .. } => dots,
+        _ => 0,
+    }
+}
+
 // Beam-aware note rendering options
 struct NoteRenderOpts {
     color: Color32,
@@ -119,6 +128,24 @@ fn draw_beat(
 
     // Draw the glyph (notehead or rest)
     painter.text(pos, Align2::CENTER_CENTER, glyph.to_string(), font_id.clone(), opts.color);
+
+    // Draw augmentation dots for dotted durations (notes and rests)
+    let dots = dot_count_for_duration(duration);
+    if dots > 0 {
+        // Horizontal spacing tuned by eye relative to font size
+        let first_dx = font_id.size * 0.28;
+        let step_dx = font_id.size * 0.26;
+        for i in 0..dots {
+            let x = pos.x + first_dx + (i as f32) * step_dx;
+            painter.text(
+                pos2(x, pos.y - font_id.size * 0.1),
+                Align2::CENTER_CENTER,
+                GLYPH_AUGMENTATION_DOT.to_string(),
+                font_id.clone(),
+                opts.color,
+            );
+        }
+    }
 
     // If this is a Note, draw a stem and possibly flags/tremolo
     if beat.kind == BeatKind::Note {
