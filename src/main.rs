@@ -617,7 +617,7 @@ impl Grooph {
         let mut measure = Measure::new(TimeSignature::SEVEN_EIGHT);
         let t8 = Duration::Tuplet { n: 3, m: 2, base: Eighth };
         let t16 = Duration::Tuplet { n: 6, m: 4, base: NoteValue::Sixteenth };
-        measure.add_beat(Beat::rest(Duration::Simple(Sixteenth))).unwrap();
+        measure.add_beat(Beat::note(Duration::Dotted { base: NoteValue::Eighth, dots: 1 })).unwrap();
         measure.add_beat(Beat::note(Duration::Simple(Sixteenth))).unwrap();
         measure.add_beat(Beat::note(Duration::Simple(ThirtySecond))).unwrap();
         measure.add_beat(Beat::note(Duration::Simple(Eighth))).unwrap();

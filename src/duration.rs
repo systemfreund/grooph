@@ -133,63 +133,14 @@ impl Grid {
         let f = d.as_fraction();
         self.ticks_from_fraction(f.num, f.den)
     }
-
-    /// Inverse of `ticks_of`: try to reconstruct a Duration that exactly matches the given ticks.
-    /// Preference order:
-    /// 1) Known common durations (including tuplets) from COMMON_DURATIONS for exact structural match
-    /// 2) Simple note values (whole, half, quarter, eighth, sixteenth, thirty-second)
-    /// 3) Dotted forms of those simple bases with up to 3 dots
-    pub fn duration_from_ticks(&self, ticks: i32) -> Option<Duration> {
-        if ticks <= 0 {
-            return None;
-        }
-        let f = reduce(Frac { num: ticks, den: self.ticks_per_whole });
-
-        // 1) Try exact match against known common durations to preserve tuplets as authored
-        for d in COMMON_DURATIONS.iter() {
-            println!("f={:?} <--> d={:?}", f, d.as_fraction());
-            if d.as_fraction() == f {
-                return Some(*d);
-            }
-        }
-
-        // 2) Try simple notes
-        const SIMPLE: [NoteValue; 6] = [
-            NoteValue::Whole,
-            NoteValue::Half,
-            NoteValue::Quarter,
-            NoteValue::Eighth,
-            NoteValue::Sixteenth,
-            NoteValue::ThirtySecond,
-        ];
-        for base in SIMPLE.iter() {
-            let d = Duration::Simple(*base);
-            if d.as_fraction() == f {
-                return Some(d);
-            }
-        }
-
-        // 3) Try dotted forms (up to three dots which covers most practical usage)
-        let mut dots = 1u8;
-        while dots <= 3 {
-            for base in SIMPLE.iter() {
-                let d = Duration::Dotted { base: *base, dots };
-                if d.as_fraction() == f {
-                    return Some(d);
-                }
-            }
-            dots += 1;
-        }
-
-        None
-    }
 }
 
-pub const COMMON_DURATIONS: [Duration; 9] = [
+pub const COMMON_DURATIONS: [Duration; 10] = [
     Duration::Simple(NoteValue::Quarter),
     Duration::Simple(NoteValue::Eighth),
     Duration::Simple(NoteValue::Sixteenth),
     Duration::Simple(NoteValue::ThirtySecond),
+    Duration::Dotted { base: NoteValue::Eighth, dots: 1 }, // dotted eighth
     Duration::Tuplet { n: 3, m: 2, base: NoteValue::Eighth }, // triplet eighth
     Duration::Tuplet { n: 5, m: 4, base: NoteValue::Sixteenth }, // quintuplet 16th
     Duration::Tuplet { n: 6, m: 4, base: NoteValue::Sixteenth }, // sextuplet 16th
