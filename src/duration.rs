@@ -62,9 +62,10 @@ impl Duration {
                 if k == 0 {
                     return Frac { num: 1, den: base_den };
                 }
+                // Dotted: sum of geometric series -> (2^{k+1}-1)/2^k of the base note
                 let two_pow_k = 1 << k; // 2^k
-                let num = two_pow_k - 1; // 2^k - 1
-                let den = two_pow_k >> 1; // 2^{k-1}
+                let num = (two_pow_k << 1) - 1; // 2^{k+1} - 1
+                let den = two_pow_k; // 2^k
                 reduce(Frac { num, den: den * base_den })
             }
             Duration::Tuplet { n, m, base } => {
@@ -135,12 +136,15 @@ impl Grid {
     }
 }
 
-pub const COMMON_DURATIONS: [Duration; 10] = [
+pub const COMMON_DURATIONS: [Duration; 13] = [
     Duration::Simple(NoteValue::Quarter),
     Duration::Simple(NoteValue::Eighth),
     Duration::Simple(NoteValue::Sixteenth),
     Duration::Simple(NoteValue::ThirtySecond),
+    Duration::Dotted { base: NoteValue::Quarter, dots: 1 }, // dotted quarter
     Duration::Dotted { base: NoteValue::Eighth, dots: 1 }, // dotted eighth
+    Duration::Dotted { base: NoteValue::Sixteenth, dots: 1 }, // dotted 16th
+    Duration::Dotted { base: NoteValue::ThirtySecond, dots: 1 }, // dotted 32nd
     Duration::Tuplet { n: 3, m: 2, base: NoteValue::Eighth }, // triplet eighth
     Duration::Tuplet { n: 5, m: 4, base: NoteValue::Sixteenth }, // quintuplet 16th
     Duration::Tuplet { n: 6, m: 4, base: NoteValue::Sixteenth }, // sextuplet 16th
@@ -164,7 +168,8 @@ pub const fn default_grid() -> Grid { default_duration_set().grid }
 
 #[cfg(test)]
 mod tests {
-    use super::default_duration_set;
+    use crate::duration::NoteValue::{Eighth, Quarter};
+    use super::{default_duration_set, default_grid, Duration};
 
     #[test]
     fn roundtrip_ticks_presence() {
@@ -172,5 +177,12 @@ mod tests {
         for d in set.durations.iter() {
             assert!(set.grid.ticks_of(d).is_some());
         }
+    }
+
+    #[test]
+    fn dotted_eighth_ticks() {
+        let e_ticks = default_grid().ticks_of(&Duration::Simple(Eighth));
+        let e_dotted_ticks = default_grid().ticks_of(&Duration::Dotted { base: Eighth, dots: 1 });
+        assert_ne!(e_ticks, e_dotted_ticks);
     }
 }
