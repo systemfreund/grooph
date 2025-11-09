@@ -548,7 +548,7 @@ fn main() -> eframe::Result {
 
 // Beaming metrics and helpers
 #[derive(Copy, Clone)]
-struct BeamMetrics {
+struct BeamRenderOpts {
     thickness: f32,
     gap: f32,
     beam_y: f32, // primary beam baseline (closest to notehead)
@@ -556,22 +556,22 @@ struct BeamMetrics {
     color: Color32,
 }
 
-impl BeamMetrics {
+impl BeamRenderOpts {
     fn get_y_level(&self, lvl: u8) -> f32 {
         self.beam_y + (lvl as f32) * (self.thickness + self.gap)
     }
 }
 
-fn beam_metrics(em: f32, y_center: f32, color: Color32) -> BeamMetrics {
+fn beam_metrics(em: f32, y_center: f32, color: Color32) -> BeamRenderOpts {
     // Approximate staff space relative to font size for a single-line staff context
     let staff_space = em * 0.20; // tuned by eye
     let thickness = 0.5 * staff_space; // Bravura ~0.5 sp
     let gap = 0.3 * staff_space; // distance between beams
     let beam_y = y_center - 0.75 * em; // height above notehead center for stems up
-    BeamMetrics { thickness, gap, beam_y, em, color }
+    BeamRenderOpts { thickness, gap, beam_y, em, color }
 }
 
-fn draw_full_beam(p: &egui::Painter, x1: f32, x2: f32, lvl: u8, metrics: &BeamMetrics) {
+fn draw_full_beam(p: &egui::Painter, x1: f32, x2: f32, lvl: u8, metrics: &BeamRenderOpts) {
     let left = x1.min(x2) - 0.015 * metrics.em;
     let right = x1.max(x2) + 0.015 * metrics.em;
     let y = metrics.get_y_level(lvl);
