@@ -8,7 +8,7 @@ mod measure;
 use duration::{Duration, NoteValue};
 use measure::{Measure, TimeSignature};
 
-use crate::duration::NoteValue::{Eighth, Quarter, Sixteenth, ThirtySecond};
+use crate::duration::NoteValue::*;
 use crate::measure::{Beat, BeatKind};
 use eframe::egui::{Align2, Context, Key, Rangef, Sense, Stroke, pos2};
 use eframe::emath::Pos2;
@@ -71,21 +71,21 @@ fn ts_glyphs(n: u32) -> Vec<char> {
 
 fn rest_glyph_for_duration(d: Duration) -> char {
     match d.base_note() {
-        NoteValue::Quarter => GLYPH_REST_QUARTER,
-        NoteValue::Eighth => GLYPH_REST_EIGHTH,
-        NoteValue::Sixteenth => GLYPH_REST_SIXTEENTH,
-        NoteValue::ThirtySecond => GLYPH_REST_32ND,
-        NoteValue::Half | NoteValue::Whole => GLYPH_REST_QUARTER,
+        Quarter => GLYPH_REST_QUARTER,
+        Eighth => GLYPH_REST_EIGHTH,
+        Sixteenth => GLYPH_REST_SIXTEENTH,
+        ThirtySecond => GLYPH_REST_32ND,
+        Half | Whole => GLYPH_REST_QUARTER,
     }
 }
 
 fn flag_glyph_for_duration(d: Duration) -> Option<char> {
     match d.base_note() {
-        NoteValue::Quarter => None,
-        NoteValue::Eighth => Some(GLYPH_FLAG_8TH_UP),
-        NoteValue::Sixteenth => Some(GLYPH_FLAG_16TH_UP),
-        NoteValue::ThirtySecond => Some(GLYPH_FLAG_32ND_UP),
-        NoteValue::Half | NoteValue::Whole => None,
+        Quarter => None,
+        Eighth => Some(GLYPH_FLAG_8TH_UP),
+        Sixteenth => Some(GLYPH_FLAG_16TH_UP),
+        ThirtySecond => Some(GLYPH_FLAG_32ND_UP),
+        Half | Whole => None,
     }
 }
 
@@ -298,11 +298,7 @@ fn draw_measure(
     for (i, beat) in measure.beats().iter().copied().enumerate() {
         let in_beam = *in_beam_flags.get(i).unwrap_or(&false);
         let opts = if in_beam {
-            NoteRenderOpts {
-                color,
-                in_beam: true,
-                stem_end_y: Some(beam_render_opts.beam_y),
-            }
+            NoteRenderOpts { color, in_beam: true, stem_end_y: Some(beam_render_opts.beam_y) }
         } else {
             NoteRenderOpts { color, in_beam: false, stem_end_y: None }
         };
@@ -387,10 +383,22 @@ fn draw_measure(
                             // On group edges, draw only the interior-facing stub; on interior notes, choose side by higher continuity (or both if equal).
                             if is_first {
                                 // First note: interior faces right
-                                draw_full_beam(&painter, stem_x, stem_x + stub_len, lvl, &beam_render_opts);
+                                draw_full_beam(
+                                    &painter,
+                                    stem_x,
+                                    stem_x + stub_len,
+                                    lvl,
+                                    &beam_render_opts,
+                                );
                             } else if is_last {
                                 // Last note: interior faces left
-                                draw_full_beam(&painter, stem_x - stub_len, stem_x, lvl, &beam_render_opts);
+                                draw_full_beam(
+                                    &painter,
+                                    stem_x - stub_len,
+                                    stem_x,
+                                    lvl,
+                                    &beam_render_opts,
+                                );
                             } else {
                                 if left_cont > right_cont {
                                     draw_full_beam(
