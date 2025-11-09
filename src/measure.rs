@@ -251,6 +251,21 @@ impl Measure {
             self.recompute_beams();
         }
     }
+
+    /// Toggle the beat kind at `idx` between Note and Rest while preserving duration.
+    /// No-op if `idx` is out of bounds.
+    pub fn toggle_beat_kind(&mut self, idx: usize) {
+        if let Some(b) = self.beats.get_mut(idx) {
+            // Clear tremolo in both cases to avoid invalid state on rests
+            b.tremolo = None;
+            b.kind = match b.kind {
+                BeatKind::Rest => BeatKind::Note,
+                BeatKind::Note => BeatKind::Rest,
+            };
+            // Beaming may change when toggling between note/rest
+            self.recompute_beams();
+        }
+    }
 }
 
 enum DisplayItem {
@@ -342,20 +357,3 @@ mod tests {
     }
 }
 
-
-impl Measure {
-    /// Toggle the beat kind at `idx` between Note and Rest while preserving duration.
-    /// No-op if `idx` is out of bounds.
-    pub fn toggle_beat_kind(&mut self, idx: usize) {
-        if let Some(b) = self.beats.get_mut(idx) {
-            // Clear tremolo in both cases to avoid invalid state on rests
-            b.tremolo = None;
-            b.kind = match b.kind {
-                BeatKind::Rest => BeatKind::Note,
-                BeatKind::Note => BeatKind::Rest,
-            };
-            // Beaming may change when toggling between note/rest
-            self.recompute_beams();
-        }
-    }
-}
