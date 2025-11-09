@@ -259,11 +259,25 @@ fn draw_measure(
     let used_ticks: i32 =
         measure.beats().iter().map(|b| set.grid.ticks_of(&b.duration).unwrap_or(0)).sum();
 
-    // 1) Layout: compute x centers for each committed beat proportionally
-    let mut x_centers: Vec<f32> = vec![0.0; measure.beats().len()];
+    // Precompute remainder preview durations (ghost rests) for caret/navigation too
+    let remaining = cap_ticks - used_ticks;
+    let remainder_durs: Vec<Duration> = if remaining > 0 {
+        fill::best_fill_for_gap(remaining).unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+
+    // 1) Layout: compute x centers for each committed beat proportionally, and cache per-beat slot left/width
+    let mut x_centers: Vec<f32> = vec![0.0; measure.beats().len() + remainder_durs.len()];
     let mut run = 0.0_f32;
-    for (i, beat) in measure.beats().iter().copied().enumerate() {
-        let t = set.grid.ticks_of(&beat.duration).unwrap_or(0) as f32;
+    // TODO iterate thru measure beat durations and remaining_durs
+    let mut durations: Vec<_> = measure.beats().iter()
+        .map(|b| b.duration)
+        .collect();
+    durations.extend(remainder_durs.iter().copied());
+
+    for (i, duration) in durations.iter().enumerate() {
+        let t = set.grid.ticks_of(duration).unwrap_or(0) as f32;
         if cap_ticks > 0 {
             let w = content_w * (t / cap_ticks as f32);
             let cx = content_left + run + w * 0.5;
@@ -466,25 +480,28 @@ fn draw_measure(
     }
 
     // 6) Remainder preview as faint rests filling the remaining space, continuing run
-    let remaining = cap_ticks - used_ticks;
-    if remaining > 0 {
-        let remainder_durs = crate::fill::best_fill_for_gap(remaining).unwrap_or_default();
+    if !remainder_durs.is_empty() && cap_ticks > 0 {
         let ghost = Color32::from_white_alpha(100);
+        // We need a fresh run to draw ghosts, keeping continuity after real beats
+        let mut run_draw = 0.0_f32;
+        for (i, beat) in measure.beats().iter().copied().enumerate() {
+            let t = set.grid.ticks_of(&beat.duration).unwrap_or(0) as f32;
+            let w = content_w * (t / cap_ticks as f32);
+            run_draw += w;
+        }
         for d in remainder_durs {
             let beat = Beat::rest(d);
             let t = set.grid.ticks_of(&beat.duration).unwrap_or(0) as f32;
-            if cap_ticks > 0 {
-                let w = content_w * (t / cap_ticks as f32);
-                let cx = content_left + run + w * 0.5;
-                draw_beat(
-                    &painter,
-                    &font_id,
-                    pos2(cx, y),
-                    beat,
-                    NoteRenderOpts { color: ghost, in_beam: false, stem_offset_x, stem_thickness },
-                );
-                run += w;
-            }
+            let w = content_w * (t / cap_ticks as f32);
+            let cx = content_left + run_draw + w * 0.5;
+            draw_beat(
+                &painter,
+                &font_id,
+                pos2(cx, y),
+                beat,
+                NoteRenderOpts { color: ghost, in_beam: false, stem_offset_x, stem_thickness },
+            );
+            run_draw += w;
         }
     }
 }
@@ -493,46 +510,59 @@ impl App for Grooph {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         egui::CentralPanel::default().show(ctx, |ui| {
             Frame::canvas(ui.style()).show(ui, |ui| {
-                let (_id, rect) = ui.allocate_space(ui.available_size());
-                ui.input(|i| {
-                    let len = self.measure.beats().len();
-                    if len > 0 {
-                        if i.key_pressed(Key::ArrowLeft) {
-                            self.cursor_idx = self.cursor_idx.saturating_sub(1);
-                        }
-                        if i.key_pressed(Key::ArrowRight) {
-                            let max_idx = len.saturating_sub(1);
-                            if self.cursor_idx < max_idx {
-                                self.cursor_idx += 1;
+                let (id, rect) = ui.allocate_space(ui.available_size());
+                let response = ui.interact(rect, id, Sense::click());
+                if response.clicked() {
+                    response.request_focus();
+                }
+                if response.has_focus() {
+                    ui.input(|i| {
+                        let beats_len = self.measure.beats().len();
+                        let rem_ticks = self.measure.remaining_ticks();
+                        let ghost_len = if rem_ticks > 0 {
+                            crate::fill::best_fill_for_gap(rem_ticks).map(|v| v.len()).unwrap_or(0)
+                        } else { 0 };
+                        let total_len = beats_len + ghost_len;
+                        if total_len > 0 {
+                            if i.key_pressed(Key::ArrowLeft) {
+                                self.cursor_idx = self.cursor_idx.saturating_sub(1);
+                            }
+                            if i.key_pressed(Key::ArrowRight) {
+                                let max_idx = total_len.saturating_sub(1);
+                                if self.cursor_idx < max_idx {
+                                    self.cursor_idx += 1;
+                                }
+                            }
+                            if i.key_pressed(Key::Home) {
+                                self.cursor_idx = 0;
+                            }
+                            if i.key_pressed(Key::End) {
+                                self.cursor_idx = total_len.saturating_sub(1);
+                            }
+                            if i.key_pressed(Key::Delete) {
+                                // Replace note with rest at cursor; only valid on real beats
+                                if self.cursor_idx < beats_len {
+                                    self.measure.set_beat_to_rest(self.cursor_idx);
+                                }
+                            }
+                            if i.key_pressed(Key::Space) {
+                                // Toggle between note and rest at cursor (preserve duration) on real beats
+                                if self.cursor_idx < beats_len {
+                                    self.measure.toggle_beat_kind(self.cursor_idx);
+                                }
+                            }
+                            if i.key_pressed(Key::Backspace) {
+                                // Remove beat at cursor (real beats only);
+                                if self.cursor_idx < beats_len {
+                                    self.measure.backspace_remove_and_fill(self.cursor_idx);
+                                    // Move cursor left, like a text editor caret
+                                    self.cursor_idx = self.cursor_idx.saturating_sub(1);
+                                }
                             }
                         }
-                        if i.key_pressed(Key::Home) {
-                            self.cursor_idx = 0;
-                        }
-                        if i.key_pressed(Key::End) {
-                            self.cursor_idx = len.saturating_sub(1);
-                        }
-                        if i.key_pressed(Key::Delete) {
-                            // Replace note with rest at cursor; no-op if already rest
-                            self.measure.set_beat_to_rest(self.cursor_idx);
-                        }
-                        if i.key_pressed(Key::Space) {
-                            // Toggle between note and rest at cursor (preserve duration)
-                            self.measure.toggle_beat_kind(self.cursor_idx);
-                        }
-                        if i.key_pressed(Key::Backspace) {
-                            // Remove beat at cursor; if there is a following beat, fill the gap so later beats keep positions
-                            self.measure.backspace_remove_and_fill(self.cursor_idx);
-                            // Move cursor left, like a text editor caret
-                            self.cursor_idx = self.cursor_idx.saturating_sub(1);
-                        }
-                    }
-                });
-                let idx_opt = if self.cursor_idx < self.measure.beats().len() {
-                    Some(self.cursor_idx)
-                } else {
-                    None
-                };
+                    });
+                }
+                let idx_opt = Some(self.cursor_idx);
                 draw_measure(ui, &self.font_id, &self.measure, rect, idx_opt);
             });
         });
