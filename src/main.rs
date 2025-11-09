@@ -135,7 +135,10 @@ fn draw_beat(
         if !opts.in_beam {
             if let Some(flag) = flag_glyph {
                 painter.text(
-                    pos2(end.x - (opts.stem_thickness / 2.0), end.y),
+                    pos2(
+                        start.x - opts.stem_thickness * 0.5,
+                        pos.y - get_default_stem_length(font_id),
+                    ),
                     Align2::LEFT_CENTER,
                     flag.to_string(),
                     font_id.clone(),
@@ -183,7 +186,6 @@ fn draw_measure(
     // Make inner rect scale with available height: keep a small vertical padding fraction
     let vpad = (rect.height() * 0.10).clamp(10.0, 200.0);
     let hpad = (rect.width() * 0.10).clamp(80.0, 120.0);
-    println!("{}", min_size);
     let inner_rect = Rect::from_min_max(
         pos2(rect.left(), rect.top() + vpad),
         pos2(rect.right() - hpad, rect.bottom() - vpad),
