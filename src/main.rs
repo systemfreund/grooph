@@ -93,7 +93,8 @@ fn flag_glyph_for_duration(d: Duration) -> Option<char> {
 struct NoteRenderOpts {
     color: Color32,
     in_beam: bool,
-    stem_end_y: Option<f32>, // when Some, draw stem to this y and suppress flags
+    stem_offset_x: f32,
+    stem_thickness: f32,
 }
 
 fn draw_beat(
@@ -121,22 +122,20 @@ fn draw_beat(
 
     // If this is a Note, draw a stem and possibly flags/tremolo
     if beat.kind == BeatKind::Note {
-        // Stem positioning relative to notehead center.
-        let stem_offset_x = font_id.size * 0.13; // tweak by eye for Bravura
-        let stem_thickness = font_id.size * 0.03;
-        let start = pos2(pos.x + stem_offset_x, pos.y);
-        let default_stem_len = font_id.size * 0.9; // proportional stem length
-        let end_y = if let Some(y) = opts.stem_end_y { y } else { pos.y - default_stem_len };
-        let end = pos2(start.x, end_y);
-        painter.line_segment([start, end], Stroke::new(stem_thickness, opts.color));
+        let start = pos2(pos.x + opts.stem_offset_x, pos.y);
+        let flag_glyph = flag_glyph_for_duration(duration);
+        // It's visually more appealing to reduce the stem length a bit for notes that are neither
+        // in a beam nor flagged.
+        let stem_len_factor = if opts.in_beam || flag_glyph.is_some() { 1.0 } else { 0.85 };
+        let default_stem_len = get_default_stem_length(font_id) * stem_len_factor;
+        let end = pos2(start.x, pos.y - default_stem_len);
+        painter.line_segment([start, end], Stroke::new(opts.stem_thickness, opts.color));
 
         // Flag glyph at the stem tip for short durations, only if not in a beam
         if !opts.in_beam {
-            if let Some(flag) = flag_glyph_for_duration(duration) {
-                let fx = end.x + font_id.size * 0.00;
-                let fy = end.y + font_id.size * 0.00;
+            if let Some(flag) = flag_glyph {
                 painter.text(
-                    pos2(fx, fy),
+                    pos2(end.x - (opts.stem_thickness / 2.0), end.y),
                     Align2::LEFT_CENTER,
                     flag.to_string(),
                     font_id.clone(),
@@ -153,7 +152,7 @@ fn draw_beat(
                 let dy = font_id.size * 0.12; // spacing along stem
                 let ang = 0.6; // tilt factor (down-right)
                 for i in 0..sl {
-                    let y0 = end_y + (i as f32) * dy;
+                    let y0 = (pos.y - default_stem_len) + (i as f32) * dy;
                     let x0 = start.x + (i as f32) * dx;
                     let len = font_id.size * 0.45;
                     painter.line_segment(
@@ -173,11 +172,11 @@ fn draw_measure(
     rect: Rect,
     cursor_idx: Option<usize>,
 ) {
-    const color: Color32 = Color32::WHITE;
+    const COLOR: Color32 = Color32::WHITE;
     let painter = ui.painter();
     let y = rect.center().y;
     // staff line
-    painter.hline(Rangef::new(rect.left(), rect.right()), y, Stroke::new(1.0, color));
+    painter.hline(Rangef::new(rect.left(), rect.right()), y, Stroke::new(1.0, COLOR));
 
     // Make inner rect scale with available height: keep a small vertical padding fraction
     let vpad = (rect.height() * 0.10).clamp(10.0, 200.0);
@@ -197,7 +196,7 @@ fn draw_measure(
     let width_cap = (rect.width() * 0.12).max(min_size);
     let max_size = inner_rect.height() * 0.80; // avoid overflowing inner rect, but not a fixed cap
     let target_size = base_size.clamp(min_size, max_size.min(width_cap));
-    let music_font = FontId::new(target_size, font_id.family.clone());
+    let font_id = FontId::new(target_size, font_id.family.clone());
     let em = target_size;
 
     // Left-side: percussion clef and stacked time signature
@@ -210,8 +209,8 @@ fn draw_measure(
         pos2(clef_x, y),
         Align2::CENTER_CENTER,
         GLYPH_CLEF_PERCUSSION.to_string(),
-        music_font.clone(),
-        color,
+        font_id.clone(),
+        COLOR,
     );
 
     // Time signature digits (SMuFL)
@@ -232,8 +231,8 @@ fn draw_measure(
             pos2(cx, y - em * 0.25),
             Align2::CENTER_CENTER,
             ch.to_string(),
-            music_font.clone(),
-            color,
+            font_id.clone(),
+            COLOR,
         );
     }
     // Bottom row (beat unit)
@@ -244,8 +243,8 @@ fn draw_measure(
             pos2(cx, y + em * 0.25),
             Align2::CENTER_CENTER,
             ch.to_string(),
-            music_font.clone(),
-            color,
+            font_id.clone(),
+            COLOR,
         );
     }
 
@@ -255,7 +254,7 @@ fn draw_measure(
     let content_w = (content_right - content_left).max(1.0);
 
     // Compute ticks
-    let set = crate::duration::default_duration_set();
+    let set = duration::default_duration_set();
     let cap_ticks = ts.measure_duration_ticks();
     let used_ticks: i32 =
         measure.beats().iter().map(|b| set.grid.ticks_of(&b.duration).unwrap_or(0)).sum();
@@ -274,10 +273,13 @@ fn draw_measure(
     }
 
     // 2) Metrics for beams and stems
-    let beam_render_opts = bream_render_opts(em, y, color);
-    let stem_dx = music_font.size * 0.13; // keep in sync with draw_beat
+    let beam_render_opts = bream_render_opts(em, y, COLOR, &font_id);
+    let stem_dx = font_id.size * 0.13; // keep in sync with draw_beat
     // Precompute stem x positions for all beats (noteheads + stem offset)
     let stem_xs: Vec<f32> = x_centers.iter().map(|&cx| cx + stem_dx).collect();
+    // Stem positioning relative to notehead center.
+    let stem_offset_x = font_id.size * 0.13; // tweak by eye for Bravura
+    let stem_thickness = font_id.size * 0.03;
 
     // 3) Pass: draw beats (noteheads/rests) with beam-aware stems (flags suppressed when in beam)
     let mut in_beam_flags: Vec<bool> = vec![false; measure.beats().len()];
@@ -297,13 +299,9 @@ fn draw_measure(
 
     for (i, beat) in measure.beats().iter().copied().enumerate() {
         let in_beam = *in_beam_flags.get(i).unwrap_or(&false);
-        let opts = if in_beam {
-            NoteRenderOpts { color, in_beam: true, stem_end_y: Some(beam_render_opts.beam_y) }
-        } else {
-            NoteRenderOpts { color, in_beam: false, stem_end_y: None }
-        };
+        let opts = NoteRenderOpts { color: COLOR, in_beam, stem_offset_x, stem_thickness };
         if cap_ticks > 0 {
-            draw_beat(&painter, &music_font, pos2(x_centers[i], y), beat, opts);
+            draw_beat(&painter, &font_id, pos2(x_centers[i], y), beat, opts);
         }
     }
 
@@ -318,8 +316,9 @@ fn draw_measure(
                 if levels == 0 {
                     continue;
                 }
-                let x1 = stem_xs[i];
-                let x2 = stem_xs[j];
+                let stem_x_offset = stem_thickness / 3.0;
+                let x1 = stem_xs[i] - stem_x_offset;
+                let x2 = stem_xs[j] + stem_x_offset;
                 for lvl in 0..levels {
                     draw_full_beam(&painter, x1, x2, lvl, &beam_render_opts);
                 }
@@ -479,10 +478,10 @@ fn draw_measure(
                 let cx = content_left + run + w * 0.5;
                 draw_beat(
                     &painter,
-                    &music_font,
+                    &font_id,
                     pos2(cx, y),
                     beat,
-                    NoteRenderOpts { color: ghost, in_beam: false, stem_end_y: None },
+                    NoteRenderOpts { color: ghost, in_beam: false, stem_offset_x, stem_thickness },
                 );
                 run += w;
             }
@@ -561,7 +560,6 @@ struct BeamRenderOpts {
     thickness: f32,
     gap: f32,
     beam_y: f32, // primary beam baseline (closest to notehead)
-    em: f32,
     color: Color32,
 }
 
@@ -571,22 +569,26 @@ impl BeamRenderOpts {
     }
 }
 
-fn bream_render_opts(em: f32, y_center: f32, color: Color32) -> BeamRenderOpts {
+fn bream_render_opts(em: f32, y_center: f32, color: Color32, font_id: &FontId) -> BeamRenderOpts {
     // Approximate staff space relative to font size for a single-line staff context
     let staff_space = em * 0.25; // tuned by eye
     let thickness = 0.5 * staff_space; // Bravura ~0.5 sp
     let gap = 0.25 * staff_space; // distance between beams
-    let beam_y = y_center - 0.85 * em; // height above notehead center for stems up
-    BeamRenderOpts { thickness, gap, beam_y, em, color }
+    let beam_y = y_center - get_default_stem_length(font_id) + (thickness * 0.95);
+    BeamRenderOpts { thickness, gap, beam_y, color }
 }
 
-fn draw_full_beam(p: &egui::Painter, x1: f32, x2: f32, lvl: u8, metrics: &BeamRenderOpts) {
-    let left = x1.min(x2) - 0.015 * metrics.em;
-    let right = x1.max(x2) + 0.015 * metrics.em;
-    let y = metrics.get_y_level(lvl);
-    let top = y - metrics.thickness;
+fn draw_full_beam(p: &egui::Painter, x1: f32, x2: f32, lvl: u8, beam_opts: &BeamRenderOpts) {
+    let left = x1.min(x2);
+    let right = x1.max(x2);
+    let y = beam_opts.get_y_level(lvl);
+    let top = y - beam_opts.thickness;
     let rect = Rect::from_min_max(pos2(left, top), pos2(right, y));
-    p.rect_filled(rect, 0.0, metrics.color);
+    p.rect_filled(rect, 0.0, beam_opts.color);
+}
+
+fn get_default_stem_length(font_id: &FontId) -> f32 {
+    font_id.size * 0.9 // proportional stem length
 }
 
 impl Grooph {
