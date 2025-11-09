@@ -133,7 +133,11 @@ fn draw_beat(
     let dots = dot_count_for_duration(duration);
     if dots > 0 {
         // Horizontal spacing tuned by eye relative to font size
-        let first_dx = font_id.size * 0.28;
+        // If this is a flagged note (not in a beam), push dots a bit further right so they don't collide with the flag tail.
+        let has_flag_tail = beat.kind == BeatKind::Note
+            && !opts.in_beam
+            && flag_glyph_for_duration(duration).is_some();
+        let first_dx = if has_flag_tail { font_id.size * 0.5 } else { font_id.size * 0.28 };
         let step_dx = font_id.size * 0.26;
         for i in 0..dots {
             let x = pos.x + first_dx + (i as f32) * step_dx;
@@ -337,7 +341,13 @@ fn draw_measure(
         let dots = dot_count_for_duration(*duration) as i32;
         let mut e = 0.0_f32;
         if dots > 0 {
-            e += font_id.size * 0.28 + (dots as f32) * (font_id.size * 0.26) + font_id.size * 0.06;
+            // Match dot placement: if a flagged note (not beamed), push dots further right
+            let has_flag_tail = matches!(kinds[i], BeatKind::Note)
+                && (i < committed_len && !in_beam_flags[i])
+                && flag_glyph_for_duration(*duration).is_some();
+            let first_dx = if has_flag_tail { font_id.size * 0.40 } else { font_id.size * 0.28 };
+            let step_dx = font_id.size * 0.26;
+            e += first_dx + (dots as f32) * step_dx + font_id.size * 0.06;
         }
         match kinds[i] {
             BeatKind::Note => {
@@ -675,12 +685,15 @@ impl Grooph {
         let ff = FontFamily::Name("music".into());
         let mut measure = Measure::new(TimeSignature::SEVEN_EIGHT);
         let t8 = Duration::Tuplet { n: 3, m: 2, base: Eighth };
-        let t16 = Duration::Tuplet { n: 6, m: 4, base: NoteValue::Sixteenth };
-        measure.add_beat(Beat::note(Duration::Dotted { base: NoteValue::Eighth, dots: 1 })).unwrap();
-        measure.add_beat(Beat::note(Duration::Simple(Sixteenth))).unwrap();
+        let t16 = Duration::Tuplet { n: 6, m: 4, base: Sixteenth };
+        measure.add_beat(Beat::note(Duration::Dotted { base: Eighth, dots: 1 })).unwrap();
+        measure.add_beat(Beat::note((Duration::Dotted { base: Sixteenth, dots: 1 }))).unwrap();
         measure.add_beat(Beat::note(Duration::Simple(ThirtySecond))).unwrap();
+        measure.add_beat(Beat::note(Duration::Simple(Sixteenth))).unwrap();
         measure.add_beat(Beat::note(Duration::Simple(Eighth))).unwrap();
-        measure.add_beat(Beat::note(Duration::Simple(Quarter))).unwrap();
+        measure.add_beat(Beat::note(Duration::Simple(Sixteenth))).unwrap();
+        measure.add_beat(Beat::note((Duration::Dotted { base: ThirtySecond, dots: 1 }))).unwrap();
+        measure.add_beat(Beat::rest(Duration::Dotted { base: Eighth, dots: 1 })).unwrap();
 
         Self { font_family: ff.clone(), font_id: FontId::new(16.0, ff), measure, cursor_idx: 0 }
     }
