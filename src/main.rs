@@ -109,6 +109,13 @@ fn draw_beat(
         BeatKind::Rest => rest_glyph_for_duration(duration),
     };
 
+    // Render rests a bit smaller than notes
+    let font_id = if beat.kind == BeatKind::Rest {
+        &FontId::new(font_id.size * 0.7, font_id.family.clone())
+    } else {
+        font_id
+    };
+
     // Draw the glyph (notehead or rest)
     painter.text(pos, Align2::CENTER_CENTER, glyph.to_string(), font_id.clone(), opts.color);
 
@@ -332,6 +339,10 @@ fn draw_measure(
             }
 
             let note_idxs = &group.note_indices;
+            // Singleton notes should show flags only — no partial beam stubs.
+            if note_idxs.len() < 2 {
+                continue;
+            }
             let counts = &group.beam_counts; // per note
             let cont = &group.continuity; // between neighbors
 
@@ -580,6 +591,7 @@ impl Grooph {
         measure.add_beat(Beat::note(Duration::Simple(Sixteenth))).unwrap();
         measure.add_beat(Beat::note(Duration::Simple(ThirtySecond))).unwrap();
         measure.add_beat(Beat::note(Duration::Simple(Eighth))).unwrap();
+        measure.add_beat(Beat::note(Duration::Simple(Quarter))).unwrap();
 
         Self { font_family: ff.clone(), font_id: FontId::new(16.0, ff), measure, cursor_idx: 0 }
     }
