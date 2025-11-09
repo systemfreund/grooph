@@ -161,7 +161,7 @@ fn draw_beat(
         // Flag glyph at the stem tip for short durations, only if not in a beam
         if !opts.in_beam {
             if let Some(flag) = flag_glyph {
-                let flag_font = FontId::new(font_id.size * 0.8, font_id.family.clone());
+                let flag_font = FontId::new(font_id.size * 1.0, font_id.family.clone());
                 painter.text(
                     pos2(
                         start.x - opts.stem_thickness * 0.5,
@@ -297,31 +297,8 @@ fn draw_measure(
         Vec::new()
     };
 
-    // 1) Layout: compute x centers for each committed beat proportionally, and cache per-beat slot left/width
-    let mut x_centers: Vec<f32> = vec![0.0; measure.beats().len() + remainder_durs.len()];
-    let mut run = 0.0_f32;
-    let mut durations: Vec<_> = measure.beats().iter().map(|b| b.duration).collect();
-    durations.extend(remainder_durs.iter().copied());
-
-    for (i, duration) in durations.iter().enumerate() {
-        let t = set.grid.ticks_of(duration).unwrap_or(0) as f32;
-        if cap_ticks > 0 {
-            let w = content_w * (t / cap_ticks as f32);
-            x_centers[i] = (content_left + run + w * 0.5);
-            run += w;
-        }
-    }
-
-    // 2) Metrics for beams and stems
-    let beam_render_opts = bream_render_opts(em, y, COLOR, &font_id);
-    let stem_dx = font_id.size * 0.13; // keep in sync with draw_beat
-    // Precompute stem x positions for all beats (noteheads + stem offset)
-    let stem_xs: Vec<f32> = x_centers.iter().map(|&cx| cx + stem_dx).collect();
-    // Stem positioning relative to notehead center.
-    let stem_offset_x = font_id.size * 0.13; // tweak by eye for Bravura
-    let stem_thickness = font_id.size * 0.03;
-
-    // 3) Pass: draw beats (noteheads/rests) with beam-aware stems (flags suppressed when in beam)
+    // 1) Two-pass layout with per-beat extras (dots/flags/rest pad) and normalization
+    // Compute beaming flags first so we can budget extra width for flags only when not beamed
     let mut in_beam_flags: Vec<bool> = vec![false; measure.beats().len()];
     if let Some(bp) = measure.beam_plan() {
         for g in &bp.groups {
@@ -336,6 +313,70 @@ fn draw_measure(
             }
         }
     }
+
+    // Build flat lists for layout: durations and corresponding kinds (notes/rests)
+    let committed_len = measure.beats().len();
+    let mut durations: Vec<Duration> = measure.beats().iter().map(|b| b.duration).collect();
+    durations.extend(remainder_durs.iter().copied());
+    let mut kinds: Vec<BeatKind> = measure
+        .beats()
+        .iter()
+        .map(|b| b.kind)
+        .collect();
+    kinds.extend(std::iter::repeat(BeatKind::Rest).take(remainder_durs.len()));
+
+    // Pass 1: proportional widths and extras estimation
+    let mut w_prop: Vec<f32> = Vec::with_capacity(durations.len());
+    let mut extra: Vec<f32> = Vec::with_capacity(durations.len());
+    for (i, duration) in durations.iter().enumerate() {
+        let t = set.grid.ticks_of(duration).unwrap_or(0) as f32;
+        let w = if cap_ticks > 0 { content_w * (t / cap_ticks as f32) } else { 0.0 };
+        w_prop.push(w);
+
+        // Estimate extras: dots, flags (only for non-beamed notes), small pad for rests
+        let dots = dot_count_for_duration(*duration) as i32;
+        let mut e = 0.0_f32;
+        if dots > 0 {
+            e += font_id.size * 0.28 + (dots as f32) * (font_id.size * 0.26) + font_id.size * 0.06;
+        }
+        match kinds[i] {
+            BeatKind::Note => {
+                let in_beam = if i < committed_len { in_beam_flags[i] } else { false };
+                if !in_beam {
+                    e += font_id.size * 0.50; // heuristic for flag width
+                }
+            }
+            BeatKind::Rest => {
+                e += font_id.size * 0.10; // tiny pad so rests don't touch neighbors
+            }
+        }
+        extra.push(e.max(0.0));
+    }
+
+    // Normalize to fit the content box
+    let total: f32 = w_prop.iter().sum::<f32>() + extra.iter().sum::<f32>();
+    let scale = if total > 0.0 { content_w / total } else { 1.0 };
+
+    // Pass 2: compute centers using scaled proportional widths; advance by rhythmic+extra
+    let mut x_centers: Vec<f32> = vec![0.0; durations.len()];
+    let mut run = 0.0_f32;
+    for i in 0..durations.len() {
+        let cell_w = (w_prop[i] + extra[i]) * scale;
+        let prop_w = w_prop[i] * scale;
+        x_centers[i] = content_left + run + prop_w * 0.5;
+        run += cell_w;
+    }
+
+    // 2) Metrics for beams and stems
+    let beam_render_opts = bream_render_opts(em, y, COLOR, &font_id);
+    let stem_dx = font_id.size * 0.13; // keep in sync with draw_beat
+    // Precompute stem x positions for all beats (noteheads + stem offset)
+    let stem_xs: Vec<f32> = x_centers.iter().map(|&cx| cx + stem_dx).collect();
+    // Stem positioning relative to notehead center.
+    let stem_offset_x = font_id.size * 0.13; // tweak by eye for Bravura
+    let stem_thickness = font_id.size * 0.03;
+
+    // 3) Pass: draw beats (noteheads/rests) with beam-aware stems (flags suppressed when in beam)
 
     for (i, beat) in measure.beats().iter().copied().enumerate() {
         let in_beam = *in_beam_flags.get(i).unwrap_or(&false);
@@ -505,21 +546,13 @@ fn draw_measure(
         }
     }
 
-    // 6) Remainder preview as faint rests filling the remaining space, continuing run
+    // 6) Remainder preview as faint rests at their precomputed centers (already spaced with extras)
     if !remainder_durs.is_empty() && cap_ticks > 0 {
         let virt = Color32::from_white_alpha(100);
-        // We need a fresh run to draw virtuals, keeping continuity after real beats
-        let mut run_draw = 0.0_f32;
-        for (_i, beat) in measure.beats().iter().copied().enumerate() {
-            let t = set.grid.ticks_of(&beat.duration).unwrap_or(0) as f32;
-            let w = content_w * (t / cap_ticks as f32);
-            run_draw += w;
-        }
-        for d in remainder_durs {
+        let offset = committed_len;
+        for (k, d) in remainder_durs.iter().copied().enumerate() {
+            let cx = *x_centers.get(offset + k).unwrap_or(&content_right);
             let beat = Beat::rest(d);
-            let t = set.grid.ticks_of(&beat.duration).unwrap_or(0) as f32;
-            let w = content_w * (t / cap_ticks as f32);
-            let cx = content_left + run_draw + w * 0.5;
             draw_beat(
                 &painter,
                 &font_id,
@@ -527,7 +560,6 @@ fn draw_measure(
                 beat,
                 NoteRenderOpts { color: virt, in_beam: false, stem_offset_x, stem_thickness },
             );
-            run_draw += w;
         }
     }
 }
