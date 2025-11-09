@@ -161,6 +161,7 @@ fn draw_beat(
         // Flag glyph at the stem tip for short durations, only if not in a beam
         if !opts.in_beam {
             if let Some(flag) = flag_glyph {
+                let flag_font = FontId::new(font_id.size * 0.8, font_id.family.clone());
                 painter.text(
                     pos2(
                         start.x - opts.stem_thickness * 0.5,
@@ -168,7 +169,7 @@ fn draw_beat(
                     ),
                     Align2::LEFT_CENTER,
                     flag.to_string(),
-                    font_id.clone(),
+                    flag_font,
                     opts.color,
                 );
             }
@@ -306,8 +307,7 @@ fn draw_measure(
         let t = set.grid.ticks_of(duration).unwrap_or(0) as f32;
         if cap_ticks > 0 {
             let w = content_w * (t / cap_ticks as f32);
-            let cx = content_left + run + w * 0.5;
-            x_centers[i] = cx;
+            x_centers[i] = (content_left + run + w * 0.5);
             run += w;
         }
     }
