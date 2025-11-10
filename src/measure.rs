@@ -101,7 +101,7 @@ impl Measure {
             beam_plan: Some(BeamPlan { groups: vec![] }),
             position: 0,
         };
-        s.fill_measure(None);
+        s.fill_measure();
         s
     }
 
@@ -375,16 +375,17 @@ impl Measure {
             return;
         }
         self.beats.remove(idx);
-        self.fill_measure(None);
+        self.fill_measure();
+        self.minimize_remainder_rests_from(idx);
     }
 
-    pub fn fill_measure(&mut self, need: Option<usize>) {
+    pub fn fill_measure(&mut self) {
         let remaining_ticks = self.remaining_ticks();
         if remaining_ticks <= 0 {
             return; // nothing to commit
         }
         if let Some(fill) = best_fill_for_gap(remaining_ticks, &[]) {
-            let take = need.map_or(fill.len(), |n| n.min(fill.len()));
+            let take = fill.len();
             for d in fill.into_iter().take(take) {
                 self.beats.push(Beat::rest(d));
             }
@@ -467,6 +468,63 @@ impl Display for Measure {
                 }
             })
         })
+    }
+}
+
+impl Measure {
+    /// Minimize the number of rest beats in the trailing remainder of the measure.
+    ///
+    /// This collapses the contiguous suffix of rests at the end of the measure into
+    /// a minimal-count spelling that exactly matches the same total ticks. Musical
+    /// content (notes or interior rests between notes) before that suffix is left
+    /// untouched.
+    /// Minimize the number of rest beats in the trailing remainder of the measure,
+    /// starting from `start_idx`.
+    ///
+    /// Only the trailing suffix of rests that lies at or after `start_idx` is minimized.
+    /// Any rests prior to `start_idx` are left untouched even if they are part of an
+    /// earlier rest run. If there is no trailing rest suffix, this is a no-op.
+    pub fn minimize_remainder_rests_from(&mut self, start_idx: usize) {
+        if self.beats.is_empty() {
+            return;
+        }
+        // Find the global start index of the trailing rest suffix (if any)
+        let mut trailing_start = self.beats.len();
+        for i in (0..self.beats.len()).rev() {
+            if self.beats[i].kind == BeatKind::Rest {
+                trailing_start = i;
+            } else {
+                break;
+            }
+        }
+        if trailing_start >= self.beats.len() {
+            // No trailing rests at all
+            return;
+        }
+        // We only minimize starting at max(start_idx, trailing_start)
+        let start = start_idx.max(trailing_start);
+        if start >= self.beats.len() {
+            return;
+        }
+        // Sum ticks from `start` to end
+        let set = default_duration_set();
+        let mut total_ticks: u32 = 0;
+        for b in &self.beats[start..] {
+            if let Some(t) = set.grid.ticks_of(&b.duration) { total_ticks += t; }
+        }
+        if total_ticks == 0 {
+            return;
+        }
+        // Refill using the best (minimal-count) spelling
+        if let Some(fill) = best_fill_for_gap(total_ticks, &[]) {
+            // Remove old suffix starting at `start`
+            self.beats.truncate(start);
+            // Append new minimized rests
+            for d in fill {
+                self.beats.push(Beat::rest(d));
+            }
+            self.recompute_beams();
+        }
     }
 }
 
