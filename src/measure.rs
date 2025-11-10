@@ -96,7 +96,7 @@ impl Measure {
         Self { beats: Vec::new(), time_signature, beam_plan: Some(BeamPlan { groups: vec![] }) }
     }
 
-    /// Expose a read-only view of beats (primarily for tests/inspection)
+    /// Expose a read-only view of beats
     pub fn beats(&self) -> &Vec<Beat> { &self.beats }
 
     /// Split the beat at `idx` into two equal halves (by time), replacing it with two smaller beats.

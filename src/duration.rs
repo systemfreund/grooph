@@ -24,7 +24,6 @@ impl NoteValue {
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Duration {
     Simple(NoteValue),
-    // Dotted notes not currently used, but leave room for easy extension later.
     Dotted { base: NoteValue, dots: u8 },
     // Tuplet note: n in the time of m of the base note
     Tuplet { n: u8, m: u8, base: NoteValue },
