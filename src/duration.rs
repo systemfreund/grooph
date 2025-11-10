@@ -91,8 +91,6 @@ impl Duration {
     pub fn halve_simple(self) -> Option<Duration> {
         use NoteValue::*;
         match self {
-            Duration::Simple(Whole) => Some(Duration::Simple(Half)),
-            Duration::Simple(Half) => Some(Duration::Simple(Quarter)),
             Duration::Simple(Quarter) => Some(Duration::Simple(Eighth)),
             Duration::Simple(Eighth) => Some(Duration::Simple(Sixteenth)),
             Duration::Simple(Sixteenth) => Some(Duration::Simple(ThirtySecond)),
@@ -109,9 +107,6 @@ impl Duration {
             Duration::Simple(ThirtySecond) => Some(Duration::Simple(Sixteenth)),
             Duration::Simple(Sixteenth) => Some(Duration::Simple(Eighth)),
             Duration::Simple(Eighth) => Some(Duration::Simple(Quarter)),
-            Duration::Simple(Quarter) => Some(Duration::Simple(Half)),
-            Duration::Simple(Half) => Some(Duration::Simple(Whole)),
-            Duration::Simple(Whole) => None,
             _ => None,
         }
     }

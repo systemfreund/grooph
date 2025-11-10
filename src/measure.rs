@@ -88,7 +88,7 @@ pub struct Measure {
     beats: Vec<Beat>,
     time_signature: TimeSignature,
     beam_plan: Option<BeamPlan>,
-    /// Current internal position (cursor) for adding beats via add_beat()
+    /// Current cursor position
     position: usize,
 }
 
@@ -168,23 +168,36 @@ impl Measure {
         if left.kind == BeatKind::Rest {
             use crate::duration::default_duration_set;
             let set = default_duration_set();
-            let left_ticks = match set.grid.ticks_of(&left.duration) { Some(t) => t, None => return false };
+            let left_ticks = match set.grid.ticks_of(&left.duration) {
+                Some(t) => t,
+                None => return false,
+            };
 
             // Sum ticks of contiguous rests starting at idx+1
             let mut sum_ticks = 0u32;
             let mut k = idx + 1;
             while k < self.beats.len() {
                 let b = self.beats[k];
-                if b.kind != BeatKind::Rest { break; }
-                let t = match set.grid.ticks_of(&b.duration) { Some(t) => t, None => break };
+                if b.kind != BeatKind::Rest {
+                    break;
+                }
+                let t = match set.grid.ticks_of(&b.duration) {
+                    Some(t) => t,
+                    None => break,
+                };
                 sum_ticks += t;
-                if sum_ticks >= left_ticks { break; }
+                if sum_ticks >= left_ticks {
+                    break;
+                }
                 k += 1;
             }
             if sum_ticks >= left_ticks {
                 // Try to expand right into exactly left.duration by absorbing rests via set_beat_at
                 if self
-                    .set_beat_at(idx + 1, Beat { duration: left.duration, kind: BeatKind::Rest, tremolo: None })
+                    .set_beat_at(
+                        idx + 1,
+                        Beat { duration: left.duration, kind: BeatKind::Rest, tremolo: None },
+                    )
                     .is_ok()
                 {
                     // After successful expansion, durations should match: perform merge
@@ -222,10 +235,14 @@ impl Measure {
             let mut absorb_ticks = 0u32;
             while need > 0 && k < self.beats.len() {
                 let b = self.beats[k];
-                if b.kind != BeatKind::Rest { break; }
+                if b.kind != BeatKind::Rest {
+                    break;
+                }
                 let t = set.grid.ticks_of(&b.duration).unwrap_or(0);
                 absorb_ticks += t;
-                if absorb_ticks >= need { break; }
+                if absorb_ticks >= need {
+                    break;
+                }
                 k += 1;
             }
             if absorb_ticks >= need {
@@ -259,7 +276,7 @@ impl Measure {
                     }
                 }
                 self.recompute_beams();
-                return Ok(())
+                return Ok(());
             } else {
                 let available_ticks = (max_ticks - (current_ticks - old_ticks)).max(0);
                 let available = (available_ticks as f64) / (set.grid.ticks_per_whole as f64);
@@ -343,7 +360,8 @@ impl Measure {
         dp[target]
     }
 
-    /// Adds a beat to this measure if it doesn't exceed the time signature and remains completable
+    /// Adds a beat to this measure at the current position if it doesn't exceed the time signature
+    /// and remains fillable.
     ///
     /// # Returns
     /// - `Ok(())` if the beat was successfully added
@@ -510,7 +528,9 @@ impl Measure {
         let set = default_duration_set();
         let mut total_ticks: u32 = 0;
         for b in &self.beats[start..] {
-            if let Some(t) = set.grid.ticks_of(&b.duration) { total_ticks += t; }
+            if let Some(t) = set.grid.ticks_of(&b.duration) {
+                total_ticks += t;
+            }
         }
         if total_ticks == 0 {
             return;
@@ -598,6 +618,6 @@ mod tests {
         m.add_beat(Beat::rest(e)).unwrap();
         m.remove(1);
         assert_eq!(m.beats()[0].duration, q);
-        assert_eq!(m.beats()[1].duration, e);
+        assert_eq!(m.beats()[1].duration, q); // because of minimization remaining rests
     }
 }
