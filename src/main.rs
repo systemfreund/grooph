@@ -121,7 +121,7 @@ fn draw_beat(
 
     // Render rests a bit smaller than notes
     let font_id = if beat.kind == BeatKind::Rest {
-        &FontId::new(font_id.size * 0.7, font_id.family.clone())
+        &FontId::new(font_id.size * 0.8, font_id.family.clone())
     } else {
         font_id
     };
@@ -470,7 +470,7 @@ fn draw_measure(
                         }
                         (false, false) => {
                             // Not connected on either side at this level.
-                            // On group edges, draw only the interior-facing stub; on interior notes, choose side by higher continuity (or both if equal).
+                            // On group edges, draw only the interior-facing stub; on interior notes, choose side by higher continuity (or prefer left if equal).
                             if is_first {
                                 // First note: interior faces right
                                 draw_full_beam(
@@ -507,18 +507,11 @@ fn draw_measure(
                                         &beam_render_opts,
                                     );
                                 } else {
-                                    // Equal continuity: draw both short stubs
+                                    // Equal continuity: prefer left-facing stubs
                                     draw_full_beam(
                                         &painter,
                                         stem_x - stub_len,
                                         stem_x,
-                                        lvl,
-                                        &beam_render_opts,
-                                    );
-                                    draw_full_beam(
-                                        &painter,
-                                        stem_x,
-                                        stem_x + stub_len,
                                         lvl,
                                         &beam_render_opts,
                                     );
