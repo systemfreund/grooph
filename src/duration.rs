@@ -87,6 +87,36 @@ impl Duration {
         }
     }
 
+    /// Halve a simple duration (Whole→Half→Quarter→Eighth→Sixteenth→ThirtySecond).
+    /// Returns None for ThirtySecond or non-simple durations (dotted/tuplet).
+    pub fn halve_simple(self) -> Option<Duration> {
+        use NoteValue::*;
+        match self {
+            Duration::Simple(Whole) => Some(Duration::Simple(Half)),
+            Duration::Simple(Half) => Some(Duration::Simple(Quarter)),
+            Duration::Simple(Quarter) => Some(Duration::Simple(Eighth)),
+            Duration::Simple(Eighth) => Some(Duration::Simple(Sixteenth)),
+            Duration::Simple(Sixteenth) => Some(Duration::Simple(ThirtySecond)),
+            Duration::Simple(ThirtySecond) => None,
+            _ => None,
+        }
+    }
+
+    /// Double a simple duration (ThirtySecond→Sixteenth→Eighth→Quarter→Half→Whole).
+    /// Returns None for Whole or non-simple durations (dotted/tuplet).
+    pub fn double_simple(self) -> Option<Duration> {
+        use NoteValue::*;
+        match self {
+            Duration::Simple(ThirtySecond) => Some(Duration::Simple(Sixteenth)),
+            Duration::Simple(Sixteenth) => Some(Duration::Simple(Eighth)),
+            Duration::Simple(Eighth) => Some(Duration::Simple(Quarter)),
+            Duration::Simple(Quarter) => Some(Duration::Simple(Half)),
+            Duration::Simple(Half) => Some(Duration::Simple(Whole)),
+            Duration::Simple(Whole) => None,
+            _ => None,
+        }
+    }
+
     /// Mainly for debug/Display output
     pub(crate) const fn to_glyph(&self) -> (&'static str, &'static str) {
         // Glyphs are determined by base note value only; tuplets/rests share the same shapes

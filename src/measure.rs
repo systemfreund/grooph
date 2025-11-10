@@ -102,21 +102,9 @@ impl Measure {
     /// Split the beat at `idx` into two equal halves (by time), replacing it with two smaller beats.
     /// Only supported for simple durations down to Sixteenth; returns false if not possible.
     pub fn split_beat_by_two(&mut self, idx: usize) -> bool {
-        fn halve_duration(d: Duration) -> Option<Duration> {
-            use crate::duration::NoteValue::*;
-            match d {
-                Duration::Simple(Whole) => Some(Duration::Simple(Half)),
-                Duration::Simple(Half) => Some(Duration::Simple(Quarter)),
-                Duration::Simple(Quarter) => Some(Duration::Simple(Eighth)),
-                Duration::Simple(Eighth) => Some(Duration::Simple(Sixteenth)),
-                Duration::Simple(Sixteenth) => Some(Duration::Simple(ThirtySecond)),
-                Duration::Simple(ThirtySecond) => None,
-                _ => None,
-            }
-        }
         if idx >= self.beats.len() { return false; }
         let base = self.beats[idx];
-        let half = match halve_duration(base.duration) { Some(h) => h, None => return false };
+        let half = match base.duration.halve_simple() { Some(h) => h, None => return false };
         // Replace current with first half
         self.beats[idx].duration = half;
         self.beats[idx].tremolo = None;
@@ -130,25 +118,13 @@ impl Measure {
     /// Unsplit (merge) the beat at `idx` with the immediately following beat if both are equal simple durations.
     /// This is the inverse of `split_beat_by_two`, e.g., two eighths -> one quarter. Returns true if merged.
     pub fn unsplit_beat_by_two(&mut self, idx: usize) -> bool {
-        fn double_duration(d: Duration) -> Option<Duration> {
-            use crate::duration::NoteValue::*;
-            match d {
-                Duration::Simple(ThirtySecond) => Some(Duration::Simple(Sixteenth)),
-                Duration::Simple(Sixteenth) => Some(Duration::Simple(Eighth)),
-                Duration::Simple(Eighth) => Some(Duration::Simple(Quarter)),
-                Duration::Simple(Quarter) => Some(Duration::Simple(Half)),
-                Duration::Simple(Half) => Some(Duration::Simple(Whole)),
-                Duration::Simple(Whole) => None,
-                _ => None,
-            }
-        }
         if idx + 1 >= self.beats.len() { return false; }
         let left = self.beats[idx];
         let right = self.beats[idx + 1];
-        // Must be same kind, same duration, simple notes/rests, and no tremolo to merge cleanly
+        // Must be same kind and same duration to merge cleanly
         if left.kind != right.kind { return false; }
         if left.duration != right.duration { return false; }
-        let doubled = match double_duration(left.duration) { Some(d) => d, None => return false };
+        let doubled = match left.duration.double_simple() { Some(d) => d, None => return false };
         // Perform merge: set doubled duration at idx, clear tremolo, remove idx+1
         self.beats[idx].duration = doubled;
         self.beats[idx].tremolo = None;
