@@ -296,7 +296,7 @@ fn draw_measure(
     // Precompute remainder preview durations (virtual rests) for caret/navigation too
     let remaining = cap_ticks - used_ticks;
     let remainder_durs: Vec<Duration> = if remaining > 0 {
-        fill::best_fill_for_gap(remaining).unwrap_or_default()
+        fill::best_fill_for_gap(remaining, false).unwrap_or_default()
     } else {
         Vec::new()
     };
@@ -576,7 +576,7 @@ impl App for Grooph {
                     let beats_len = self.measure.beats().len();
                     let rem_ticks = self.measure.remaining_ticks();
                     let virtual_len: usize = if rem_ticks > 0 {
-                        fill::best_fill_for_gap(rem_ticks).map(|v| v.len()).unwrap_or(0)
+                        fill::best_fill_for_gap(rem_ticks, false).map(|v| v.len()).unwrap_or(0)
                     } else {
                         0
                     };

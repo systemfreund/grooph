@@ -187,18 +187,6 @@ impl Measure {
         Ok(())
     }
 
-    /// Replace the beat at `idx` with a rest of the same duration. No-op if out of bounds or already a rest.
-    pub fn set_beat_to_rest(&mut self, idx: usize) {
-        if let Some(b) = self.beats.get_mut(idx) {
-            if b.kind != BeatKind::Rest {
-                b.kind = BeatKind::Rest;
-                b.tremolo = None; // rests have no tremolo
-                // Recompute beams since note/rest membership affects grouping visuals
-                self.recompute_beams();
-            }
-        }
-    }
-
     /// Recompute the beam plan explicitly
     pub fn recompute_beams(&mut self) { self.beam_plan = Some(compute_beam_plan(self)); }
 
@@ -218,7 +206,7 @@ impl Measure {
 
         // If there was a following beat, fill the removed span with rests to preserve positions
         if had_following && removed_ticks > 0 {
-            if let Some(fill) = best_fill_for_gap(removed_ticks) {
+            if let Some(fill) = best_fill_for_gap(removed_ticks, false) {
                 let mut insert_at = idx;
                 for d in fill {
                     self.beats.insert(insert_at, Beat::rest(d));
@@ -257,7 +245,7 @@ impl Measure {
         if remaining_ticks <= 0 {
             return; // nothing to commit
         }
-        if let Some(fill) = best_fill_for_gap(remaining_ticks) {
+        if let Some(fill) = best_fill_for_gap(remaining_ticks, false) {
             let take = need.map_or(fill.len(), |n| n.min(fill.len()));
             for d in fill.into_iter().take(take) {
                 self.beats.push(Beat::rest(d));
@@ -289,7 +277,7 @@ enum DisplayItem {
 
 impl Display for Measure {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let remainder: Vec<_> = best_fill_for_gap(self.remaining_ticks())
+        let remainder: Vec<_> = best_fill_for_gap(self.remaining_ticks(), false)
             .unwrap_or_default()
             .iter()
             .map(|d| DisplayItem::Beat(Beat::rest(*d)))
