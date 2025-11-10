@@ -290,16 +290,6 @@ fn draw_measure(
     // Compute ticks
     let set = duration::default_duration_set();
     let cap_ticks = ts.measure_duration_ticks();
-    let used_ticks: i32 =
-        measure.beats().iter().map(|b| set.grid.ticks_of(&b.duration).unwrap_or(0)).sum();
-
-    // Precompute remainder preview durations (virtual rests) for caret/navigation too
-    let remaining = cap_ticks - used_ticks;
-    let remainder_durs: Vec<Duration> = if remaining > 0 {
-        fill::best_fill_for_gap(remaining, &[]).unwrap_or_default()
-    } else {
-        Vec::new()
-    };
 
     // 1) Two-pass layout with per-beat extras (dots/flags/rest pad) and normalization
     // Compute beaming flags first so we can budget extra width for flags only when not beamed
@@ -321,13 +311,7 @@ fn draw_measure(
     // Build flat lists for layout: durations and corresponding kinds (notes/rests)
     let committed_len = measure.beats().len();
     let mut durations: Vec<Duration> = measure.beats().iter().map(|b| b.duration).collect();
-    durations.extend(remainder_durs.iter().copied());
-    let mut kinds: Vec<BeatKind> = measure
-        .beats()
-        .iter()
-        .map(|b| b.kind)
-        .collect();
-    kinds.extend(std::iter::repeat(BeatKind::Rest).take(remainder_durs.len()));
+    let mut kinds: Vec<BeatKind> = measure.beats().iter().map(|b| b.kind).collect();
 
     // Pass 1: proportional widths and extras estimation
     let mut w_prop: Vec<f32> = Vec::with_capacity(durations.len());
@@ -548,23 +532,6 @@ fn draw_measure(
             ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
         }
     }
-
-    // 6) Remainder preview as faint rests at their precomputed centers (already spaced with extras)
-    if !remainder_durs.is_empty() && cap_ticks > 0 {
-        let virt = Color32::from_white_alpha(100);
-        let offset = committed_len;
-        for (k, d) in remainder_durs.iter().copied().enumerate() {
-            let cx = *x_centers.get(offset + k).unwrap_or(&content_right);
-            let beat = Beat::rest(d);
-            draw_beat(
-                &painter,
-                &font_id,
-                pos2(cx, y),
-                beat,
-                NoteRenderOpts { color: virt, in_beam: false, stem_offset_x, stem_thickness },
-            );
-        }
-    }
 }
 
 impl App for Grooph {
@@ -574,14 +541,9 @@ impl App for Grooph {
                 let (_id, rect) = ui.allocate_space(ui.available_size());
                 ui.input(|i| {
                     let beats_len = self.measure.beats().len();
-                    let rem_ticks = self.measure.remaining_ticks();
-                    let virtual_len: usize = if rem_ticks > 0 {
-                        fill::best_fill_for_gap(rem_ticks, &[]).map(|v| v.len()).unwrap_or(0)
-                    } else {
-                        0
-                    };
-                    let total_len = beats_len + virtual_len;
+                    let total_len = beats_len;
                     if total_len > 0 {
+                        // Navigation over committed beats only
                         if i.key_pressed(Key::ArrowLeft) {
                             self.cursor_idx = self.cursor_idx.saturating_sub(1);
                         }
@@ -597,50 +559,44 @@ impl App for Grooph {
                         if i.key_pressed(Key::End) {
                             self.cursor_idx = total_len.saturating_sub(1);
                         }
+
+                        // Edits apply only when cursor is on a committed beat
+                        let idx = self.cursor_idx.min(beats_len.saturating_sub(1));
                         if i.key_pressed(Key::Delete) {
-                            // Delete beat at cursor and shift subsequent beats left; commit 'virtual' if needed
-                            let idx = self.cursor_idx;
-                            self.measure.ensure_committed_position(idx);
+                            // Delete beat at cursor and shift subsequent beats left
                             self.measure.delete_shift_left(idx);
                             // Do not move cursor; it now points to the next beat (like text editors)
+                            self.cursor_idx =
+                                self.cursor_idx.min(self.measure.beats().len().saturating_sub(1));
                         }
                         if i.key_pressed(Key::Space) {
-                            // Toggle between note and rest at cursor (preserve duration); commit 'virtual' if needed
-                            let idx = self.cursor_idx;
-                            self.measure.ensure_committed_position(idx);
+                            // Toggle between note and rest at cursor (preserve duration)
                             self.measure.toggle_beat_kind(idx);
                         }
                         if i.key_pressed(Key::Backspace) {
-                            // Remove beat at cursor; commit 'virtual' if needed then remove
-                            let idx = self.cursor_idx;
-                            self.measure.ensure_committed_position(idx);
+                            // Remove beat at cursor
                             self.measure.remove(idx);
                             // Move cursor left, like a text editor caret
-                            self.cursor_idx = self.cursor_idx.saturating_sub(1);
+                            self.cursor_idx = self
+                                .cursor_idx
+                                .saturating_sub(1)
+                                .min(self.measure.beats().len().saturating_sub(1));
                         }
                         if i.key_pressed(Key::Q) {
                             // Set a quarter note at the current cursor position. If it cannot be set, ignore.
-                            let idx = self.cursor_idx;
-                            self.measure.ensure_committed_position(idx);
                             let quarter = Duration::Simple(NoteValue::Quarter);
                             let _ = self.measure.set_beat_at(idx, Beat::note(quarter));
                         }
                         if i.key_pressed(Key::Num2) {
                             // Split the beat at the current cursor into two halves (e.g., 1/4 -> 1/8 + 1/8). If not possible, ignore.
-                            let idx = self.cursor_idx;
-                            self.measure.ensure_committed_position(idx);
                             let _ = self.measure.split_beat_by_two(idx);
                         }
                         if i.key_pressed(Key::Num1) {
                             // Unsplit (merge) the beat at the current cursor with the next one if possible (inverse of split by two).
-                            let idx = self.cursor_idx;
-                            self.measure.ensure_committed_position(idx);
                             let _ = self.measure.unsplit_beat_by_two(idx);
                         }
                         if i.key_pressed(Key::Period) {
                             // Toggle dotted (1 dot) for the current beat. If it cannot be changed (would overflow or unfillable), ignore.
-                            let idx = self.cursor_idx;
-                            self.measure.ensure_committed_position(idx);
                             let _ = self.measure.toggle_dotted_at(idx);
                         }
                     }
