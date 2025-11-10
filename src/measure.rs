@@ -230,6 +230,16 @@ impl Measure {
         self.recompute_beams();
     }
 
+    /// Delete the beat at `idx` and shift all subsequent committed beats left (like the Delete key
+    /// in a text editor). No-op if `idx` is out of bounds.
+    pub fn delete_shift_left(&mut self, idx: usize) {
+        if idx >= self.beats.len() {
+            return;
+        }
+        self.beats.remove(idx);
+        self.recompute_beams();
+    }
+
     /// Ensure that an absolute position `pos` (0-based) is committed as a real beat.
     /// If `pos` is already within committed beats, this is a no-op.
     /// If `pos` lies within the remainder preview, commit the minimal prefix
@@ -357,5 +367,42 @@ mod tests {
         measure.add_beat(Beat::note((Duration::Dotted { base: ThirtySecond, dots: 1 }))).unwrap();
         measure.add_beat(Beat::rest(Duration::Dotted { base: Eighth, dots: 1 })).unwrap();
         println!("{}", measure);
+    }
+
+    #[test]
+    fn test_delete_shift_left_middle() {
+        // 4/4: q, e, e -> delete index 1 yields q, e
+        let mut m = Measure::new(TimeSignature::FOUR_FOUR);
+        let q = Duration::Simple(NoteValue::Quarter);
+        let e = Duration::Simple(NoteValue::Eighth);
+        m.add_beat(Beat::note(q)).unwrap();
+        m.add_beat(Beat::note(e)).unwrap();
+        m.add_beat(Beat::rest(e)).unwrap();
+        assert_eq!(m.beats().len(), 3);
+        m.delete_shift_left(1);
+        assert_eq!(m.beats().len(), 2);
+        assert_eq!(m.beats()[0].duration, q);
+        assert_eq!(m.beats()[1].duration, e);
+    }
+
+    #[test]
+    fn test_delete_at_ghost_commits_then_removes_committed_rest() {
+        // Start with one quarter note in 4/4, remainder is [q, q, q]
+        // Commit up to index 2, then delete at 2: result should be [q, r(q)]
+        let mut m = Measure::new(TimeSignature::FOUR_FOUR);
+        let q = Duration::Simple(NoteValue::Quarter);
+        m.add_beat(Beat::note(q)).unwrap();
+        m.ensure_committed_position(2);
+        assert_eq!(m.beats().len(), 3);
+        // The committed prefix should be [note(q), rest(q), rest(q)] now
+        assert_eq!(m.beats()[0].kind, BeatKind::Note);
+        assert_eq!(m.beats()[1].kind, BeatKind::Rest);
+        assert_eq!(m.beats()[2].kind, BeatKind::Rest);
+        m.delete_shift_left(2);
+        // After deletion, length is 2 and second is still a rest
+        assert_eq!(m.beats().len(), 2);
+        assert_eq!(m.beats()[0].kind, BeatKind::Note);
+        assert_eq!(m.beats()[1].kind, BeatKind::Rest);
+        // Duration of the rest depends on remainder spelling; do not assert exact value.
     }
 }

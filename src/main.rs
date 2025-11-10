@@ -598,10 +598,11 @@ impl App for Grooph {
                             self.cursor_idx = total_len.saturating_sub(1);
                         }
                         if i.key_pressed(Key::Delete) {
-                            // Replace note with rest at cursor; commit 'virtual' if needed
+                            // Delete beat at cursor and shift subsequent beats left; commit 'virtual' if needed
                             let idx = self.cursor_idx;
                             self.measure.ensure_committed_position(idx);
-                            self.measure.set_beat_to_rest(idx);
+                            self.measure.delete_shift_left(idx);
+                            // Do not move cursor; it now points to the next beat (like text editors)
                         }
                         if i.key_pressed(Key::Space) {
                             // Toggle between note and rest at cursor (preserve duration); commit 'virtual' if needed
