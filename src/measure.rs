@@ -99,6 +99,38 @@ impl Measure {
     /// Expose a read-only view of beats (primarily for tests/inspection)
     pub fn beats(&self) -> &Vec<Beat> { &self.beats }
 
+    /// Set (replace) the beat at index `idx` with `beat` if it fits and the remainder stays fillable.
+    /// Caller should ensure the position exists (e.g., via `ensure_committed_position`).
+    pub fn set_beat_at(&mut self, idx: usize, beat: Beat) -> Result<(), MeasureError> {
+        if idx >= self.beats.len() {
+            // Out of bounds after caller's ensure: treat as unfillable generically
+            return Err(MeasureError::Unfillable { attempted: 0.0, remaining: 0.0 });
+        }
+        let set = default_duration_set();
+        let current_ticks = self.current_ticks();
+        let max_ticks = self.time_signature.measure_duration_ticks();
+        let new_ticks = set.grid.ticks_of(&beat.duration).ok_or_else(|| {
+            MeasureError::Unfillable { attempted: 0.0, remaining: 0.0 }
+        })?;
+        let old_ticks = set.grid.ticks_of(&self.beats[idx].duration).unwrap_or(0);
+        let new_total_ticks = current_ticks - old_ticks + new_ticks;
+        if new_total_ticks > max_ticks {
+            let available_ticks = (max_ticks - (current_ticks - old_ticks)).max(0);
+            let available = (available_ticks as f64) / (set.grid.ticks_per_whole as f64);
+            let attempted = (new_ticks as f64) / (set.grid.ticks_per_whole as f64);
+            return Err(MeasureError::Overflow { attempted, available });
+        }
+        let remaining_ticks = max_ticks - new_total_ticks;
+        if remaining_ticks != 0 && !Self::is_remainder_fillable(remaining_ticks) {
+            let remaining = (remaining_ticks as f64) / (set.grid.ticks_per_whole as f64);
+            let attempted = (new_ticks as f64) / (set.grid.ticks_per_whole as f64);
+            return Err(MeasureError::Unfillable { attempted, remaining });
+        }
+        self.beats[idx] = beat;
+        self.recompute_beams();
+        Ok(())
+    }
+
     /// Expose the time signature (clone)
     pub fn time_signature(&self) -> TimeSignature { self.time_signature.clone() }
 

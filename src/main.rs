@@ -618,6 +618,13 @@ impl App for Grooph {
                             // Move cursor left, like a text editor caret
                             self.cursor_idx = self.cursor_idx.saturating_sub(1);
                         }
+                        if i.key_pressed(Key::Q) {
+                            // Set a quarter note at the current cursor position. If it cannot be set, ignore.
+                            let idx = self.cursor_idx;
+                            self.measure.ensure_committed_position(idx);
+                            let quarter = Duration::Simple(NoteValue::Quarter);
+                            let _ = self.measure.set_beat_at(idx, Beat::note(quarter));
+                        }
                     }
                 });
                 let idx_opt = Some(self.cursor_idx);
