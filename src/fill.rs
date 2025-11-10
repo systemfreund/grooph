@@ -5,7 +5,7 @@ use crate::duration::{Duration, default_duration_set};
 /// 1) Minimal number of tokens (durations)
 /// 2) Minimal total weight (sum of denominators) to prefer simpler durations
 /// 3) Prefer larger steps on ties for determinism
-pub(crate) fn best_fill_for_gap(gap_ticks: i32, allowed: &[Duration]) -> Option<Vec<Duration>> {
+pub(crate) fn best_fill_for_gap(gap_ticks: u32, allowed: &[Duration]) -> Option<Vec<Duration>> {
     if gap_ticks <= 0 {
         return None;
     }
@@ -13,7 +13,7 @@ pub(crate) fn best_fill_for_gap(gap_ticks: i32, allowed: &[Duration]) -> Option<
     let set = default_duration_set();
 
     // Build coin list: (ticks, duration, weight)
-    let mut coins: Vec<(i32, Duration, i32)> = set
+    let mut coins: Vec<(u32, Duration, u32)> = set
         .durations
         .iter()
         .filter(|d| (allowed.is_empty() && !matches!(d, Duration::Dotted { .. })) || allowed.contains(d))
@@ -29,7 +29,7 @@ pub(crate) fn best_fill_for_gap(gap_ticks: i32, allowed: &[Duration]) -> Option<
     #[derive(Clone, Copy)]
     struct Cell {
         len: u16,
-        weight: i32,
+        weight: u32,
         prev: i32,
         choice_idx: u8,
     }

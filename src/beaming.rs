@@ -47,7 +47,7 @@ pub fn compute_beam_plan(measure: &Measure) -> BeamPlan {
     let ts = measure.time_signature();
 
     // Compute onset tick for each beat
-    let mut onsets: Vec<i32> = Vec::with_capacity(beats.len());
+    let mut onsets: Vec<u32> = Vec::with_capacity(beats.len());
     let mut t = 0;
     for b in beats.iter() {
         onsets.push(t);
@@ -211,11 +211,11 @@ fn is_contiguous_tuplet_run(beats: &Vec<Beat>, i: usize, j: usize) -> bool {
 /// For 7/8 default to 3+2+2 pattern -> groups of 3, then 2, then 2 eighths. Here we return the smallest
 /// unit (in ticks) where primary breaks may occur frequently; we handle 7/8 specially by returning an eighth
 /// and letting the group builder break at pattern boundaries via onset comparisons.
-fn primary_boundaries(ts: &TimeSignature) -> Vec<i32> {
+fn primary_boundaries(ts: &TimeSignature) -> Vec<u32> {
     let set = default_duration_set();
-    let mut bounds: Vec<i32> = Vec::new();
+    let mut bounds: Vec<u32> = Vec::new();
     let ticks_per_whole = set.grid.ticks_per_whole;
-    match (ts.beats as i32, ts.beat_unit as i32) {
+    match (ts.beats as u32, ts.beat_unit as u32) {
         // Simple meters: boundaries at each beat (exclude 0 and end)
         (b, 4) => {
             let stride = ticks_per_whole / 4;
@@ -227,7 +227,7 @@ fn primary_boundaries(ts: &TimeSignature) -> Vec<i32> {
         (6, 8) | (9, 8) | (12, 8) => {
             let eighth = ticks_per_whole / 8;
             let group = 3 * eighth; // dotted quarter
-            let total = (ts.beats as i32) * eighth;
+            let total = (ts.beats as u32) * eighth;
             let mut acc = group;
             while acc < total {
                 bounds.push(acc);

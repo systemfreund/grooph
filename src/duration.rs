@@ -9,7 +9,7 @@ pub enum NoteValue {
 }
 
 impl NoteValue {
-    pub const fn denominator(self) -> i32 {
+    pub const fn denominator(self) -> u32 {
         match self {
             NoteValue::Whole => 1,
             NoteValue::Half => 2,
@@ -31,20 +31,20 @@ pub enum Duration {
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 struct Frac {
-    num: i32,
-    den: i32,
+    num: u32,
+    den: u32,
 }
 
-const fn gcd(mut a: i32, mut b: i32) -> i32 {
+const fn gcd(mut a: u32, mut b: u32) -> u32 {
     while b != 0 {
         let t = a % b;
         a = b;
         b = t;
     }
-    if a < 0 { -a } else { a }
+    a
 }
 
-const fn lcm(a: i32, b: i32) -> i32 { (a / gcd(a, b)) * b }
+const fn lcm(a: u32, b: u32) -> u32 { (a / gcd(a, b)) * b }
 
 const fn reduce(f: Frac) -> Frac {
     let g = gcd(f.num, f.den);
@@ -57,7 +57,7 @@ impl Duration {
             Duration::Simple(base) => Frac { num: 1, den: base.denominator() },
             Duration::Dotted { base, dots } => {
                 let base_den = base.denominator();
-                let k = dots as i32;
+                let k = dots as u32;
                 if k == 0 {
                     return Frac { num: 1, den: base_den };
                 }
@@ -69,13 +69,13 @@ impl Duration {
             }
             Duration::Tuplet { n, m, base } => {
                 let base_den = base.denominator();
-                reduce(Frac { num: m as i32, den: (n as i32) * base_den })
+                reduce(Frac { num: m as u32, den: (n as u32) * base_den })
             }
         }
     }
 
     /// Public helper for weight/grids: denominator of the reduced fraction relative to whole note.
-    pub const fn denominator(&self) -> i32 { self.as_fraction().den }
+    pub const fn denominator(&self) -> u32 { self.as_fraction().den }
 
     /// Convenience to get a base for glyph decisions (flags/rest shapes). Tuplets/dotted return their base.
     pub const fn base_note(&self) -> NoteValue {
@@ -133,13 +133,13 @@ impl Duration {
 /// A tick grid provider. Build dynamically from the set of supported durations.
 #[derive(Clone, Copy, Debug)]
 pub struct Grid {
-    pub ticks_per_whole: i32,
+    pub ticks_per_whole: u32,
 }
 
 impl Grid {
     /// Build a dynamic grid as the LCM of the denominators of the given durations.
     pub const fn from_durations(durs: &[Duration]) -> Grid {
-        let mut l = 1i32;
+        let mut l = 1u32;
         let mut i = 0usize;
         while i < durs.len() {
             let f = durs[i].as_fraction();
@@ -149,7 +149,7 @@ impl Grid {
         Grid { ticks_per_whole: l }
     }
 
-    pub fn ticks_from_fraction(&self, num: i32, den: i32) -> Option<i32> {
+    pub fn ticks_from_fraction(&self, num: u32, den: u32) -> Option<u32> {
         if den == 0 {
             return None;
         }
@@ -159,7 +159,7 @@ impl Grid {
         Some((self.ticks_per_whole / den) * num)
     }
 
-    pub fn ticks_of(&self, d: &Duration) -> Option<i32> {
+    pub fn ticks_of(&self, d: &Duration) -> Option<u32> {
         let f = d.as_fraction();
         self.ticks_from_fraction(f.num, f.den)
     }

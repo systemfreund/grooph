@@ -564,7 +564,7 @@ impl App for Grooph {
                         let idx = self.cursor_idx.min(beats_len.saturating_sub(1));
                         if i.key_pressed(Key::Delete) {
                             // Delete beat at cursor and shift subsequent beats left
-                            self.measure.delete_shift_left(idx);
+                            self.measure.remove(idx);
                             // Do not move cursor; it now points to the next beat (like text editors)
                             self.cursor_idx =
                                 self.cursor_idx.min(self.measure.beats().len().saturating_sub(1));
@@ -665,10 +665,10 @@ impl Grooph {
         measure.add_beat(Beat::note((Duration::Dotted { base: Sixteenth, dots: 1 }))).unwrap();
         measure.add_beat(Beat::note(Duration::Simple(ThirtySecond))).unwrap();
         measure.add_beat(Beat::note(Duration::Simple(Sixteenth))).unwrap();
-        measure.add_beat(Beat::note(Duration::Simple(Eighth))).unwrap();
-        measure.add_beat(Beat::note(Duration::Simple(Sixteenth))).unwrap();
-        measure.add_beat(Beat::note((Duration::Dotted { base: ThirtySecond, dots: 1 }))).unwrap();
-        measure.add_beat(Beat::rest(Duration::Dotted { base: Eighth, dots: 1 })).unwrap();
+        // measure.add_beat(Beat::note(Duration::Simple(Eighth))).unwrap();
+        // measure.add_beat(Beat::note(Duration::Simple(Sixteenth))).unwrap();
+        // measure.add_beat(Beat::note((Duration::Dotted { base: ThirtySecond, dots: 1 }))).unwrap();
+        // measure.add_beat(Beat::rest(Duration::Dotted { base: Eighth, dots: 1 })).unwrap();
 
         Self { font_family: ff.clone(), font_id: FontId::new(16.0, ff), measure, cursor_idx: 0 }
     }
