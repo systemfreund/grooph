@@ -637,6 +637,12 @@ impl App for Grooph {
                             self.measure.ensure_committed_position(idx);
                             let _ = self.measure.unsplit_beat_by_two(idx);
                         }
+                        if i.key_pressed(Key::Period) {
+                            // Toggle dotted (1 dot) for the current beat. If it cannot be changed (would overflow or unfillable), ignore.
+                            let idx = self.cursor_idx;
+                            self.measure.ensure_committed_position(idx);
+                            let _ = self.measure.toggle_dotted_at(idx);
+                        }
                     }
                 });
                 let idx_opt = Some(self.cursor_idx);

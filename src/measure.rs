@@ -334,6 +334,28 @@ impl Measure {
             self.recompute_beams();
         }
     }
+
+    /// Toggle dotted (one dot) for the beat at `idx`.
+    /// - Simple(base) -> Dotted { base, dots: 1 }
+    /// - Dotted { base, dots: 1 } -> Simple(base)
+    /// No-op for other cases (tuplets, multi-dot) or if replacement doesn't fit.
+    /// Returns true if the duration changed.
+    pub fn toggle_dotted_at(&mut self, idx: usize) -> bool {
+        if idx >= self.beats.len() { return false; }
+        let current = self.beats[idx];
+        let new_dur = match current.duration {
+            Duration::Simple(base) => Some(Duration::Dotted { base, dots: 1 }),
+            Duration::Dotted { base, dots } if dots == 1 => Some(Duration::Simple(base)),
+            _ => None,
+        };
+        if let Some(dur) = new_dur {
+            let new_beat = Beat { duration: dur, kind: current.kind, tremolo: None };
+            if self.set_beat_at(idx, new_beat).is_ok() {
+                return true;
+            }
+        }
+        false
+    }
 }
 
 enum DisplayItem {
