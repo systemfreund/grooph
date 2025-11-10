@@ -22,7 +22,6 @@ struct Grooph {
     font_family: FontFamily,
     font_id: FontId,
     measure: Measure,
-    cursor_idx: usize,
 }
 
 fn add_font(ctx: &Context) {
@@ -544,30 +543,33 @@ impl App for Grooph {
                     let total_len = beats_len;
                     if total_len > 0 {
                         // Navigation over committed beats only
+                        let mut pos = self.measure.position();
                         if i.key_pressed(Key::ArrowLeft) {
-                            self.cursor_idx = self.cursor_idx.saturating_sub(1);
+                            pos = pos.saturating_sub(1);
                         }
                         if i.key_pressed(Key::ArrowRight) {
                             let max_idx = total_len.saturating_sub(1);
-                            if self.cursor_idx < max_idx {
-                                self.cursor_idx += 1;
+                            if pos < max_idx {
+                                pos += 1;
                             }
                         }
                         if i.key_pressed(Key::Home) {
-                            self.cursor_idx = 0;
+                            pos = 0;
                         }
                         if i.key_pressed(Key::End) {
-                            self.cursor_idx = total_len.saturating_sub(1);
+                            pos = total_len.saturating_sub(1);
                         }
+                        self.measure.set_position(pos);
 
                         // Edits apply only when cursor is on a committed beat
-                        let idx = self.cursor_idx.min(beats_len.saturating_sub(1));
+                        let idx = self.measure.position().min(beats_len.saturating_sub(1));
                         if i.key_pressed(Key::Delete) {
                             // Delete beat at cursor and shift subsequent beats left
                             self.measure.remove(idx);
                             // Do not move cursor; it now points to the next beat (like text editors)
-                            self.cursor_idx =
-                                self.cursor_idx.min(self.measure.beats().len().saturating_sub(1));
+                            let new_len = self.measure.beats().len();
+                            let new_pos = self.measure.position().min(new_len.saturating_sub(1));
+                            self.measure.set_position(new_pos);
                         }
                         if i.key_pressed(Key::Space) {
                             // Toggle between note and rest at cursor (preserve duration)
@@ -577,10 +579,13 @@ impl App for Grooph {
                             // Remove beat at cursor
                             self.measure.remove(idx);
                             // Move cursor left, like a text editor caret
-                            self.cursor_idx = self
-                                .cursor_idx
+                            let new_len = self.measure.beats().len();
+                            let new_pos = self
+                                .measure
+                                .position()
                                 .saturating_sub(1)
-                                .min(self.measure.beats().len().saturating_sub(1));
+                                .min(new_len.saturating_sub(1));
+                            self.measure.set_position(new_pos);
                         }
                         if i.key_pressed(Key::Q) {
                             // Set a quarter note at the current cursor position. If it cannot be set, ignore.
@@ -601,7 +606,7 @@ impl App for Grooph {
                         }
                     }
                 });
-                let idx_opt = Some(self.cursor_idx);
+                let idx_opt = Some(self.measure.position());
                 draw_measure(ui, &self.font_id, &self.measure, rect, idx_opt);
             });
         });
@@ -670,6 +675,6 @@ impl Grooph {
         // measure.add_beat(Beat::note((Duration::Dotted { base: ThirtySecond, dots: 1 }))).unwrap();
         // measure.add_beat(Beat::rest(Duration::Dotted { base: Eighth, dots: 1 })).unwrap();
 
-        Self { font_family: ff.clone(), font_id: FontId::new(16.0, ff), measure, cursor_idx: 0 }
+        Self { font_family: ff.clone(), font_id: FontId::new(16.0, ff), measure }
     }
 }

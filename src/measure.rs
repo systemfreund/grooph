@@ -317,6 +317,12 @@ impl Measure {
     /// Expose the beaming plan for this measure
     pub fn beam_plan(&self) -> Option<&BeamPlan> { self.beam_plan.as_ref() }
 
+    /// Get current cursor position inside the measure model
+    pub fn position(&self) -> usize { self.position }
+
+    /// Set current cursor position inside the measure model (no clamping)
+    pub fn set_position(&mut self, pos: usize) { self.position = pos }
+
     /// Returns the current total duration in ticks (exact)
     fn current_ticks(&self) -> u32 {
         let set = default_duration_set();
