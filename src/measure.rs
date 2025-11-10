@@ -206,7 +206,7 @@ impl Measure {
 
         // If there was a following beat, fill the removed span with rests to preserve positions
         if had_following && removed_ticks > 0 {
-            if let Some(fill) = best_fill_for_gap(removed_ticks, false) {
+            if let Some(fill) = best_fill_for_gap(removed_ticks, &[]) {
                 let mut insert_at = idx;
                 for d in fill {
                     self.beats.insert(insert_at, Beat::rest(d));
@@ -245,7 +245,7 @@ impl Measure {
         if remaining_ticks <= 0 {
             return; // nothing to commit
         }
-        if let Some(fill) = best_fill_for_gap(remaining_ticks, false) {
+        if let Some(fill) = best_fill_for_gap(remaining_ticks, &[]) {
             let take = need.map_or(fill.len(), |n| n.min(fill.len()));
             for d in fill.into_iter().take(take) {
                 self.beats.push(Beat::rest(d));
@@ -277,7 +277,7 @@ enum DisplayItem {
 
 impl Display for Measure {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let remainder: Vec<_> = best_fill_for_gap(self.remaining_ticks(), false)
+        let remainder: Vec<_> = best_fill_for_gap(self.remaining_ticks(), &[])
             .unwrap_or_default()
             .iter()
             .map(|d| DisplayItem::Beat(Beat::rest(*d)))
