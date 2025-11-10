@@ -417,7 +417,7 @@ fn draw_measure(
         }
     }
 
-    // 4b) Draw broken (partial) beams where a note's beam count exceeds continuity
+    // 4b) Draw partial beams where a note's beam count exceeds continuity
     if let Some(bp) = measure.beam_plan() {
         let stub_len = em * 0.20; // tune by eye
         for group in &bp.groups {
