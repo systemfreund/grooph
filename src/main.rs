@@ -309,8 +309,8 @@ fn draw_measure(
 
     // Build flat lists for layout: durations and corresponding kinds (notes/rests)
     let committed_len = measure.beats().len();
-    let mut durations: Vec<Duration> = measure.beats().iter().map(|b| b.duration).collect();
-    let mut kinds: Vec<BeatKind> = measure.beats().iter().map(|b| b.kind).collect();
+    let durations: Vec<Duration> = measure.beats().iter().map(|b| b.duration).collect();
+    let kinds: Vec<BeatKind> = measure.beats().iter().map(|b| b.kind).collect();
 
     // Pass 1: proportional widths and extras estimation
     let mut w_prop: Vec<f32> = Vec::with_capacity(durations.len());
@@ -664,10 +664,8 @@ impl Grooph {
         add_font(&cc.egui_ctx);
         let ff = FontFamily::Name("music".into());
         let mut measure = Measure::new(TimeSignature::SEVEN_EIGHT);
-        let t8 = Duration::Tuplet { n: 3, m: 2, base: Eighth };
-        let t16 = Duration::Tuplet { n: 6, m: 4, base: Sixteenth };
         measure.add_beat(Beat::note(Duration::Dotted { base: Eighth, dots: 1 })).unwrap();
-        measure.add_beat(Beat::note((Duration::Dotted { base: Sixteenth, dots: 1 }))).unwrap();
+        measure.add_beat(Beat::note(Duration::Dotted { base: Sixteenth, dots: 1 })).unwrap();
         measure.add_beat(Beat::note(Duration::Simple(ThirtySecond))).unwrap();
         measure.add_beat(Beat::note(Duration::Simple(Sixteenth))).unwrap();
         // measure.add_beat(Beat::note(Duration::Simple(Eighth))).unwrap();

@@ -230,7 +230,7 @@ impl Measure {
         let new_total_ticks = current_ticks - old_ticks + new_ticks;
         if new_total_ticks > max_ticks {
             // Attempt to expand into subsequent contiguous rests to accommodate growth
-            let mut need = new_ticks - old_ticks; // extra ticks required
+            let need = new_ticks - old_ticks; // extra ticks required
             let mut k = idx + 1;
             let mut absorb_ticks = 0u32;
             while need > 0 && k < self.beats.len() {
@@ -245,12 +245,12 @@ impl Measure {
                 }
                 k += 1;
             }
-            if absorb_ticks >= need {
+            return if absorb_ticks >= need {
                 // We can grow by consuming rests from idx+1..=k
                 // First set the new beat at idx
                 self.beats[idx] = beat;
                 // Now consume 'need' ticks from the following rests
-                let mut p = idx + 1;
+                let p = idx + 1;
                 let mut remaining_to_consume = need;
                 while remaining_to_consume > 0 {
                     let b = self.beats[p];
@@ -276,12 +276,12 @@ impl Measure {
                     }
                 }
                 self.recompute_beams();
-                return Ok(());
+                Ok(())
             } else {
                 let available_ticks = (max_ticks - (current_ticks - old_ticks)).max(0);
                 let available = (available_ticks as f64) / (set.grid.ticks_per_whole as f64);
                 let attempted = (new_ticks as f64) / (set.grid.ticks_per_whole as f64);
-                return Err(MeasureError::Overflow { attempted, available });
+                Err(MeasureError::Overflow { attempted, available })
             }
         }
         let remaining_ticks = max_ticks - new_total_ticks;
@@ -561,10 +561,10 @@ mod tests {
     use crate::duration::{Duration, NoteValue};
 
     fn q() -> Duration { Duration::Simple(NoteValue::Quarter) }
-    fn e() -> Duration { Duration::Simple(NoteValue::Eighth) }
-    fn t8() -> Duration { Duration::Tuplet { n: 3, m: 2, base: NoteValue::Eighth } }
-    fn s16() -> Duration { Duration::Simple(NoteValue::Sixteenth) }
-    fn t32() -> Duration { Duration::Simple(NoteValue::ThirtySecond) }
+    fn e() -> Duration { Duration::Simple(Eighth) }
+    fn t8() -> Duration { Duration::Tuplet { n: 3, m: 2, base: Eighth } }
+    fn s16() -> Duration { Duration::Simple(Sixteenth) }
+    fn t32() -> Duration { Duration::Simple(ThirtySecond) }
 
     #[test]
     fn test_basic_measure_features() {
@@ -601,15 +601,13 @@ mod tests {
     #[test]
     fn test_add_eighth_triplet_to_seven_eight_measure() {
         let mut measure = Measure::new(TimeSignature::SEVEN_EIGHT);
-        let t8 = Duration::Tuplet { n: 3, m: 2, base: Eighth };
-        let t16 = Duration::Tuplet { n: 6, m: 4, base: Sixteenth };
         measure.add_beat(Beat::note(Duration::Dotted { base: Eighth, dots: 1 })).unwrap();
-        measure.add_beat(Beat::note((Duration::Dotted { base: Sixteenth, dots: 1 }))).unwrap();
+        measure.add_beat(Beat::note(Duration::Dotted { base: Sixteenth, dots: 1 })).unwrap();
         measure.add_beat(Beat::note(Duration::Simple(ThirtySecond))).unwrap();
         measure.add_beat(Beat::note(Duration::Simple(Sixteenth))).unwrap();
         measure.add_beat(Beat::note(Duration::Simple(Eighth))).unwrap();
         measure.add_beat(Beat::note(Duration::Simple(Sixteenth))).unwrap();
-        measure.add_beat(Beat::note((Duration::Dotted { base: ThirtySecond, dots: 1 }))).unwrap();
+        measure.add_beat(Beat::note(Duration::Dotted { base: ThirtySecond, dots: 1 })).unwrap();
         measure.add_beat(Beat::rest(Duration::Dotted { base: Eighth, dots: 1 })).unwrap();
     }
 
@@ -618,7 +616,7 @@ mod tests {
         // 4/4: q, e, e -> delete index 1 yields q, e
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
         let q = Duration::Simple(NoteValue::Quarter);
-        let e = Duration::Simple(NoteValue::Eighth);
+        let e = Duration::Simple(Eighth);
         m.add_beat(Beat::note(q)).unwrap();
         m.add_beat(Beat::note(e)).unwrap();
         m.add_beat(Beat::rest(e)).unwrap();
