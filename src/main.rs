@@ -625,6 +625,18 @@ impl App for Grooph {
                             let quarter = Duration::Simple(NoteValue::Quarter);
                             let _ = self.measure.set_beat_at(idx, Beat::note(quarter));
                         }
+                        if i.key_pressed(Key::Num2) {
+                            // Split the beat at the current cursor into two halves (e.g., 1/4 -> 1/8 + 1/8). If not possible, ignore.
+                            let idx = self.cursor_idx;
+                            self.measure.ensure_committed_position(idx);
+                            let _ = self.measure.split_beat_by_two(idx);
+                        }
+                        if i.key_pressed(Key::Num1) {
+                            // Unsplit (merge) the beat at the current cursor with the next one if possible (inverse of split by two).
+                            let idx = self.cursor_idx;
+                            self.measure.ensure_committed_position(idx);
+                            let _ = self.measure.unsplit_beat_by_two(idx);
+                        }
                     }
                 });
                 let idx_opt = Some(self.cursor_idx);
@@ -661,7 +673,7 @@ impl BeamRenderOpts {
 fn bream_render_opts(em: f32, y_center: f32, color: Color32, font_id: &FontId) -> BeamRenderOpts {
     // Approximate staff space relative to font size for a single-line staff context
     let staff_space = em * 0.25; // tuned by eye
-    let thickness = 0.5 * staff_space; // Bravura ~0.5 sp
+    let thickness = 0.4 * staff_space; // Bravura ~0.5 sp
     let gap = 0.25 * staff_space; // distance between beams
     let beam_y = y_center - get_default_stem_length(font_id) + (thickness * 0.95);
     BeamRenderOpts { thickness, gap, beam_y, color }
