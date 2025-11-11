@@ -7,6 +7,7 @@ use crate::app::glyphs::{
     GLYPH_AUGMENTATION_DOT, GLYPH_CLEF_PERCUSSION, GLYPH_NOTEHEAD_BLACK, flag_glyph_for_duration,
     rest_glyph_for_duration, ts_glyphs, tuplet_glyphs,
 };
+use crate::beaming::primary_boundaries;
 use crate::duration;
 use crate::duration::NoteValue::*;
 use crate::measure::{Beat, BeatKind};
@@ -17,7 +18,6 @@ use eframe::epaint::{Color32, FontFamily, FontId};
 use eframe::{App, CreationContext, egui};
 use egui::Rect;
 use egui::containers::Frame;
-use crate::beaming::primary_boundaries;
 
 pub struct Grooph {
     font_family: FontFamily,
@@ -407,18 +407,6 @@ fn draw_measure(
     let onsets = set.compute_onset_ticks(beats);
     let boundaries = primary_boundaries(set, &ts);
 
-    // Scan for contiguous tuplet runs with identical (n,m,base)
-    #[derive(Clone, Copy, PartialEq, Eq)]
-    enum TupSpec {
-        S { n: u8, m: u8, base: NoteValue },
-    }
-    fn spec_of(d: &Duration) -> Option<TupSpec> {
-        if let Duration::Tuplet { n, m, base } = *d {
-            Some(TupSpec::S { n, m, base })
-        } else {
-            None
-        }
-    }
     struct TupGroup {
         start: usize,
         end: usize,
@@ -430,30 +418,39 @@ fn draw_measure(
     let mut groups: Vec<TupGroup> = Vec::new();
     let mut i = 0usize;
     while i < beats.len() {
-        let Some(TupSpec::S { n, m, base }) = spec_of(&beats[i].duration) else {
+        let Duration::Tuplet { n, m, base } = beats[i].duration else {
             i += 1;
             continue;
         };
-        let mut j = i;
-        let mut has_rest = false;
-        while j < beats.len() {
-            if spec_of(&beats[j].duration) == Some(TupSpec::S { n, m, base }) {
-                if beats[j].kind == BeatKind::Rest {
-                    has_rest = true;
+        // Find maximal run of same-spec tuplets starting at i
+        let mut k = i;
+        while k < beats.len() {
+            match beats[k].duration {
+                Duration::Tuplet { n: nn, m: mm, base: bb } if nn == n && mm == m && bb == base => {
+                    k += 1;
                 }
-                j += 1;
-            } else {
-                break;
+                _ => break,
             }
         }
-        if j > i {
-            groups.push(TupGroup { start: i, end: j - 1, n, m, base, contains_rest: has_rest });
+        // Split the run [i..k) into consecutive groups of exactly n elements when possible
+        let group_size = n as usize;
+        let mut start = i;
+        while start < k {
+            let end = (start + group_size).min(k) - 1;
+            let mut has_rest = false;
+            for t in start..=end {
+                if beats[t].kind == BeatKind::Rest {
+                    has_rest = true;
+                    break;
+                }
+            }
+            groups.push(TupGroup { start, end, n, m, base, contains_rest: has_rest });
+            start = end + 1;
         }
-        i = j;
+        i = k;
     }
 
     if !groups.is_empty() {
-        // Optionally use existing BeamPlan for fully_beamed detection
         let beam_plan = measure.beam_plan();
         let staff_space = em * 0.25;
         let bracket_gap = 0.9 * staff_space;
@@ -520,33 +517,22 @@ fn draw_measure(
                 }
             }
 
-            // Auto policy: number-only when fully_beamed and no rest and no primary boundary crossing
-            let number_only = fully_beamed && !g.contains_rest && !spans_primary;
+            // Auto policy: number-only when fully_beamed and no rest (ignore primary boundary crossing for consistency)
+            let number_only = fully_beamed && !g.contains_rest;
 
             // Horizontal span
-            let (mut x_l, mut x_r) = if fully_beamed && !tup_note_idxs.is_empty() {
-                let left_idx = tup_note_idxs.first().copied().unwrap();
-                let right_idx = tup_note_idxs.last().copied().unwrap();
-                (stem_xs[left_idx], stem_xs[right_idx])
-            } else {
-                (x_centers[g.start], x_centers[g.end])
-            };
+            let (mut x_l, mut x_r) = (stem_xs[g.start], stem_xs[g.end]);
             // Add a small outward margin
-            let margin = em * 0.12;
+            let margin = em * 0.25;
             x_l -= margin;
             x_r += margin;
-            if x_r < x_l {
-                std::mem::swap(&mut x_l, &mut x_r);
-            }
 
-            // Vertical position above primary beam baseline
             let y_bracket = beam_render_opts.beam_y - beam_render_opts.thickness - bracket_gap;
-            let x_mid = 0.5 * (x_l + x_r);
 
             // Draw bracket if needed
             if !number_only {
-                let x1 = x_centers[g.start];
-                let x2 = x_centers[g.end];
+                let x1 = x_l;
+                let x2 = x_r;
                 painter.line_segment(
                     [pos2(x1, y_bracket), pos2(x2, y_bracket)],
                     Stroke::new(2.0, color),
@@ -563,23 +549,20 @@ fn draw_measure(
             }
 
             // Draw number (Bravura tuplet digits), centered
-            let digits = tuplet_glyphs(g.n as u32);
-            let cols = digits.len() as f32;
-            let digit_w = em * 0.50;
-            for (col, ch) in digits.iter().enumerate() {
-                // center within span
-                let offset = (cols - digits.len() as f32) * 0.5; // zero, but symmetrical with ts code
-                let cx = x_mid + ((col as f32 + 0.5 + offset) - cols * 0.5) * digit_w;
-                // Place slightly above bracket (or above beam line if number-only)
-                let y_num = if number_only { y_bracket } else { y_bracket - 0.30 * (em * 0.25) };
-                painter.text(
-                    pos2(cx, y_num),
-                    Align2::CENTER_CENTER,
-                    ch.to_string(),
-                    number_font.clone(),
-                    color,
-                );
-            }
+            let digits = tuplet_glyphs(g.n);
+            // Place slightly above bracket (or above beam line if number-only)
+            let y_num = if number_only {
+                y_bracket + 0.5 * (em * 0.25)
+            } else {
+                y_bracket - 0.50 * (em * 0.25)
+            };
+            painter.text(
+                pos2(0.5 * (x_l + x_r), y_num),
+                Align2::CENTER_CENTER,
+                digits,
+                number_font.clone(),
+                color,
+            );
         }
     }
 
@@ -614,7 +597,6 @@ fn calculate_x_centers(measure: &Measure, content_w: f32) -> Vec<f32> {
     let total: f32 = durations.len() as f32;
     let scale = if total > 0.0 { content_w / total } else { 1.0 };
 
-    // Pass 2: compute centers using scaled proportional widths; advance by rhythmic+extra
     let mut x_centers: Vec<f32> = vec![0.0; durations.len()];
     let mut run = 0.0_f32;
     for i in 0..durations.len() {
@@ -764,12 +746,20 @@ impl Grooph {
         let mut measure = Measure::new(TimeSignature::SEVEN_EIGHT);
         measure.add_beat(Beat::note(Duration::Tuplet { n: 3, m: 2, base: Eighth })).unwrap();
         measure.add_beat(Beat::note(Duration::Tuplet { n: 3, m: 2, base: Eighth })).unwrap();
-        measure.add_beat(Beat::note(Duration::Tuplet { n: 3, m: 2, base: Eighth })).unwrap();
+        measure.add_beat(Beat::note(Duration::Tuplet { n: 3, m: 2, base: Sixteenth })).unwrap();
+        measure.add_beat(Beat::rest(Duration::Tuplet { n: 3, m: 2, base: Sixteenth })).unwrap();
 
-        // measure.add_beat(Beat::note(Duration::Simple(Eighth))).unwrap();
-        // measure.add_beat(Beat::note(Duration::Simple(Eighth))).unwrap();
-        // measure.add_beat(Beat::note(Duration::Simple(Eighth))).unwrap();
-        // measure.add_beat(Beat::note(Duration::Simple(Eighth))).unwrap();
+        // measure.add_beat(Beat::note(Duration::Tuplet { n: 3, m: 2, base: Eighth })).unwrap();
+        // measure.add_beat(Beat::note(Duration::Tuplet { n: 3, m: 2, base: Eighth })).unwrap();
+        // measure.add_beat(Beat::note(Duration::Tuplet { n: 3, m: 2, base: Eighth })).unwrap();
+        //
+        // measure.add_beat(Beat::note(Duration::Tuplet { n: 3, m: 2, base: Eighth })).unwrap();
+        // measure.add_beat(Beat::note(Duration::Tuplet { n: 3, m: 2, base: Eighth })).unwrap();
+        // measure.add_beat(Beat::note(Duration::Tuplet { n: 3, m: 2, base: Eighth })).unwrap();
+        //
+        // measure.add_beat(Beat::note(Duration::Tuplet { n: 3, m: 2, base: Sixteenth })).unwrap();
+        // measure.add_beat(Beat::note(Duration::Tuplet { n: 3, m: 2, base: Sixteenth })).unwrap();
+        // measure.add_beat(Beat::note(Duration::Tuplet { n: 3, m: 2, base: Sixteenth })).unwrap();
 
         Self { font_family: ff.clone(), font_id: FontId::new(16.0, ff), measure }
     }

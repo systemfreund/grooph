@@ -70,7 +70,7 @@ const TUPLET_DIGITS: [char; 10] = [
     '\u{E889}', // 9
 ];
 
-pub(super) fn tuplet_glyphs(n: u32) -> Vec<char> {
+pub(super) fn tuplet_glyphs(n: u8) -> String {
     n.to_string()
         .chars()
         .filter_map(|c| c.to_digit(10).map(|d| TUPLET_DIGITS[d as usize]))
