@@ -56,3 +56,24 @@ pub(super) fn flag_glyph_for_duration(d: Duration) -> Option<char> {
     }
 }
 
+// Tuplet numeral digits (SMuFL): U+E880..U+E889
+const TUPLET_DIGITS: [char; 10] = [
+    '\u{E880}', // 0
+    '\u{E881}', // 1
+    '\u{E882}', // 2
+    '\u{E883}', // 3
+    '\u{E884}', // 4
+    '\u{E885}', // 5
+    '\u{E886}', // 6
+    '\u{E887}', // 7
+    '\u{E888}', // 8
+    '\u{E889}', // 9
+];
+
+pub(super) fn tuplet_glyphs(n: u32) -> Vec<char> {
+    n.to_string()
+        .chars()
+        .filter_map(|c| c.to_digit(10).map(|d| TUPLET_DIGITS[d as usize]))
+        .collect()
+}
+
