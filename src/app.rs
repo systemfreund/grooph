@@ -1,3 +1,5 @@
+mod glyphs;
+
 use crate::duration::Duration;
 use crate::measure::{Measure, TimeSignature};
 
@@ -11,6 +13,7 @@ use eframe::epaint::{Color32, FontFamily, FontId};
 use eframe::{App, CreationContext, egui};
 use egui::Rect;
 use egui::containers::Frame;
+use crate::app::glyphs::{flag_glyph_for_duration, rest_glyph_for_duration, ts_glyphs, GLYPH_AUGMENTATION_DOT, GLYPH_CLEF_PERCUSSION, GLYPH_NOTEHEAD_BLACK};
 
 pub struct Grooph {
     font_family: FontFamily,
@@ -27,61 +30,6 @@ fn add_font(ctx: &Context) {
             priority: egui::epaint::text::FontPriority::Highest,
         }],
     ));
-}
-
-// SMuFL glyphs (Bravura)
-// Notehead black: U+E0A4
-const GLYPH_NOTEHEAD_BLACK: char = '\u{E0A4}';
-// Augmentation dot: U+E1E7
-const GLYPH_AUGMENTATION_DOT: char = '\u{E1E7}';
-// Rests: quarter..32nd: U+E4E5..U+E4E8
-const GLYPH_REST_QUARTER: char = '\u{E4E5}';
-const GLYPH_REST_EIGHTH: char = '\u{E4E6}';
-const GLYPH_REST_SIXTEENTH: char = '\u{E4E7}';
-const GLYPH_REST_32ND: char = '\u{E4E8}';
-
-// Up-stem flags (SMuFL): U+E240..U+E244
-const GLYPH_FLAG_8TH_UP: char = '\u{E240}';
-const GLYPH_FLAG_16TH_UP: char = '\u{E242}';
-const GLYPH_FLAG_32ND_UP: char = '\u{E244}';
-
-// Clef and time signature digits
-const GLYPH_CLEF_PERCUSSION: char = '\u{E069}';
-const TS_DIGITS: [char; 10] = [
-    '\u{E080}', // 0
-    '\u{E081}', // 1
-    '\u{E082}', // 2
-    '\u{E083}', // 3
-    '\u{E084}', // 4
-    '\u{E085}', // 5
-    '\u{E086}', // 6
-    '\u{E087}', // 7
-    '\u{E088}', // 8
-    '\u{E089}', // 9
-];
-
-fn ts_glyphs(n: u32) -> Vec<char> {
-    n.to_string().chars().filter_map(|c| c.to_digit(10).map(|d| TS_DIGITS[d as usize])).collect()
-}
-
-fn rest_glyph_for_duration(d: Duration) -> char {
-    match d.base_note() {
-        Quarter => GLYPH_REST_QUARTER,
-        Eighth => GLYPH_REST_EIGHTH,
-        Sixteenth => GLYPH_REST_SIXTEENTH,
-        ThirtySecond => GLYPH_REST_32ND,
-        Half | Whole => GLYPH_REST_QUARTER,
-    }
-}
-
-fn flag_glyph_for_duration(d: Duration) -> Option<char> {
-    match d.base_note() {
-        Quarter => None,
-        Eighth => Some(GLYPH_FLAG_8TH_UP),
-        Sixteenth => Some(GLYPH_FLAG_16TH_UP),
-        ThirtySecond => Some(GLYPH_FLAG_32ND_UP),
-        Half | Whole => None,
-    }
 }
 
 fn dot_count_for_duration(d: Duration) -> u8 {
@@ -210,7 +158,7 @@ fn draw_measure(
 
     // Make inner rect scale with available height: keep a small vertical padding fraction
     let vpad = (rect.height() * 0.10).clamp(10.0, 200.0);
-    let hpad = (rect.width() * 0.10).clamp(80.0, 120.0);
+    let hpad = (rect.width() * 0.10).clamp(10.0, 30.0);
     let inner_rect = Rect::from_min_max(
         pos2(rect.left(), rect.top() + vpad),
         pos2(rect.right() - hpad, rect.bottom() - vpad),
@@ -529,6 +477,43 @@ fn draw_measure(
     }
 }
 
+// Beaming metrics and helpers
+#[derive(Copy, Clone)]
+struct BeamRenderOpts {
+    thickness: f32,
+    gap: f32,
+    beam_y: f32, // primary beam baseline (closest to notehead)
+    color: Color32,
+}
+
+impl BeamRenderOpts {
+    fn get_y_level(&self, lvl: u8) -> f32 {
+        self.beam_y + (lvl as f32) * (self.thickness + self.gap)
+    }
+}
+
+fn bream_render_opts(em: f32, y_center: f32, color: Color32, font_id: &FontId) -> BeamRenderOpts {
+    // Approximate staff space relative to font size for a single-line staff context
+    let staff_space = em * 0.25; // tuned by eye
+    let thickness = 0.4 * staff_space; // Bravura ~0.5 sp
+    let gap = 0.25 * staff_space; // distance between beams
+    let beam_y = y_center - get_default_stem_length(font_id) + (thickness * 0.95);
+    BeamRenderOpts { thickness, gap, beam_y, color }
+}
+
+fn draw_full_beam(p: &egui::Painter, x1: f32, x2: f32, lvl: u8, beam_opts: &BeamRenderOpts) {
+    let left = x1.min(x2);
+    let right = x1.max(x2);
+    let y = beam_opts.get_y_level(lvl);
+    let top = y - beam_opts.thickness;
+    let rect = Rect::from_min_max(pos2(left, top), pos2(right, y));
+    p.rect_filled(rect, 0.0, beam_opts.color);
+}
+
+fn get_default_stem_length(font_id: &FontId) -> f32 {
+    font_id.size * 0.9 // proportional stem length
+}
+
 impl App for Grooph {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -616,43 +601,6 @@ impl App for Grooph {
             });
         });
     }
-}
-
-// Beaming metrics and helpers
-#[derive(Copy, Clone)]
-struct BeamRenderOpts {
-    thickness: f32,
-    gap: f32,
-    beam_y: f32, // primary beam baseline (closest to notehead)
-    color: Color32,
-}
-
-impl BeamRenderOpts {
-    fn get_y_level(&self, lvl: u8) -> f32 {
-        self.beam_y + (lvl as f32) * (self.thickness + self.gap)
-    }
-}
-
-fn bream_render_opts(em: f32, y_center: f32, color: Color32, font_id: &FontId) -> BeamRenderOpts {
-    // Approximate staff space relative to font size for a single-line staff context
-    let staff_space = em * 0.25; // tuned by eye
-    let thickness = 0.4 * staff_space; // Bravura ~0.5 sp
-    let gap = 0.25 * staff_space; // distance between beams
-    let beam_y = y_center - get_default_stem_length(font_id) + (thickness * 0.95);
-    BeamRenderOpts { thickness, gap, beam_y, color }
-}
-
-fn draw_full_beam(p: &egui::Painter, x1: f32, x2: f32, lvl: u8, beam_opts: &BeamRenderOpts) {
-    let left = x1.min(x2);
-    let right = x1.max(x2);
-    let y = beam_opts.get_y_level(lvl);
-    let top = y - beam_opts.thickness;
-    let rect = Rect::from_min_max(pos2(left, top), pos2(right, y));
-    p.rect_filled(rect, 0.0, beam_opts.color);
-}
-
-fn get_default_stem_length(font_id: &FontId) -> f32 {
-    font_id.size * 0.9 // proportional stem length
 }
 
 impl Grooph {
