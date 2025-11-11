@@ -4,7 +4,7 @@ use crate::measure::{Measure, TimeSignature};
 use crate::duration;
 use crate::duration::NoteValue::*;
 use crate::measure::{Beat, BeatKind};
-use eframe::egui::{Align2, Context, Key, Rangef, Stroke, pos2};
+use eframe::egui::{Align2, Context, Key, Rangef, Stroke, global_theme_preference_buttons, pos2};
 use eframe::emath::Pos2;
 use eframe::epaint::text::{FontInsert, InsertFontFamily};
 use eframe::epaint::{Color32, FontFamily, FontId};
@@ -200,11 +200,11 @@ fn draw_measure(
     rect: Rect,
     cursor_idx: Option<usize>,
 ) {
-    const COLOR: Color32 = Color32::WHITE;
+    let color: Color32 = if ui.visuals().dark_mode { Color32::WHITE } else { Color32::BLACK };
     let painter = ui.painter();
     let y = rect.center().y;
     // staff line
-    painter.hline(Rangef::new(rect.left(), rect.right()), y, Stroke::new(1.0, COLOR));
+    painter.hline(Rangef::new(rect.left(), rect.right()), y, Stroke::new(1.0, color));
 
     let min_size = 14.0 * ui.ctx().pixels_per_point(); // avoid unreadably small glyphs on HiDPI
 
@@ -237,7 +237,7 @@ fn draw_measure(
         Align2::CENTER_CENTER,
         GLYPH_CLEF_PERCUSSION.to_string(),
         font_id.clone(),
-        COLOR,
+        color,
     );
 
     // Time signature digits (SMuFL)
@@ -259,7 +259,7 @@ fn draw_measure(
             Align2::CENTER_CENTER,
             ch.to_string(),
             font_id.clone(),
-            COLOR,
+            color,
         );
     }
     // Bottom row (beat unit)
@@ -271,7 +271,7 @@ fn draw_measure(
             Align2::CENTER_CENTER,
             ch.to_string(),
             font_id.clone(),
-            COLOR,
+            color,
         );
     }
 
@@ -355,7 +355,7 @@ fn draw_measure(
     }
 
     // 2) Metrics for beams and stems
-    let beam_render_opts = bream_render_opts(em, y, COLOR, &font_id);
+    let beam_render_opts = bream_render_opts(em, y, color, &font_id);
     let stem_dx = font_id.size * 0.13; // keep in sync with draw_beat
     // Precompute stem x positions for all beats (noteheads + stem offset)
     let stem_xs: Vec<f32> = x_centers.iter().map(|&cx| cx + stem_dx).collect();
@@ -367,7 +367,7 @@ fn draw_measure(
 
     for (i, beat) in measure.beats().iter().copied().enumerate() {
         let in_beam = *in_beam_flags.get(i).unwrap_or(&false);
-        let opts = NoteRenderOpts { color: COLOR, in_beam, stem_offset_x, stem_thickness };
+        let opts = NoteRenderOpts { color, in_beam, stem_offset_x, stem_thickness };
         if cap_ticks > 0 {
             draw_beat(&painter, &font_id, pos2(x_centers[i], y), beat, opts);
         }
@@ -516,10 +516,12 @@ fn draw_measure(
             let alpha = if visible { alpha_on } else { alpha_off };
             let top = inner_rect.top();
             let bottom = inner_rect.bottom();
+            let base = if ui.visuals().dark_mode { Color32::WHITE } else { Color32::BLACK };
+            let cursor_color = Color32::from_rgba_unmultiplied(base.r(), base.g(), base.b(), alpha);
             painter.vline(
                 x,
                 Rangef::new(top, bottom),
-                Stroke::new(2.0, Color32::from_white_alpha(alpha)),
+                Stroke::new(2.0, cursor_color),
             );
             // Ensure animation progresses even without input
             ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
@@ -531,6 +533,15 @@ impl App for Grooph {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         egui::CentralPanel::default().show(ctx, |ui| {
             Frame::canvas(ui.style()).show(ui, |ui| {
+                global_theme_preference_buttons(ui);
+                ui.label(
+                    "Keybindings: \n\
+                Arrow keys: Move cursor\n\
+                Del/Backspace: Remove note\n\
+                Space: Toggle between note and rest\n\
+                Num1/Num2: Split/merge note\n\
+                Period: Toggle dotted\n\
+                Q: Insert 1/4 note\n");
                 let (_id, rect) = ui.allocate_space(ui.available_size());
                 ui.input(|i| {
                     let beats_len = self.measure.beats().len();
