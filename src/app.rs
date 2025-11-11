@@ -3,6 +3,10 @@ mod glyphs;
 use crate::duration::{Duration, NoteValue};
 use crate::measure::{Measure, TimeSignature};
 
+use crate::app::glyphs::{
+    GLYPH_AUGMENTATION_DOT, GLYPH_CLEF_PERCUSSION, GLYPH_NOTEHEAD_BLACK, flag_glyph_for_duration,
+    rest_glyph_for_duration, ts_glyphs, tuplet_glyphs,
+};
 use crate::duration;
 use crate::duration::NoteValue::*;
 use crate::measure::{Beat, BeatKind};
@@ -13,7 +17,6 @@ use eframe::epaint::{Color32, FontFamily, FontId};
 use eframe::{App, CreationContext, egui};
 use egui::Rect;
 use egui::containers::Frame;
-use crate::app::glyphs::{flag_glyph_for_duration, rest_glyph_for_duration, ts_glyphs, tuplet_glyphs, GLYPH_AUGMENTATION_DOT, GLYPH_CLEF_PERCUSSION, GLYPH_NOTEHEAD_BLACK};
 
 pub struct Grooph {
     font_family: FontFamily,
@@ -249,73 +252,23 @@ fn draw_measure(
         }
     }
 
-    // Build flat lists for layout: durations and corresponding kinds (notes/rests)
-    let committed_len = measure.beats().len();
-    let durations: Vec<Duration> = measure.beats().iter().map(|b| b.duration).collect();
-    let kinds: Vec<BeatKind> = measure.beats().iter().map(|b| b.kind).collect();
-
-    // Pass 1: proportional widths and extras estimation
-    let mut w_prop: Vec<f32> = Vec::with_capacity(durations.len());
-    let mut extra: Vec<f32> = Vec::with_capacity(durations.len());
-    for (i, duration) in durations.iter().enumerate() {
-        let t = set.grid.ticks_of(duration).unwrap_or(0) as f32;
-        let w = if cap_ticks > 0 { content_w * (t / cap_ticks as f32) } else { 0.0 };
-        w_prop.push(w);
-
-        // Estimate extras: dots, flags (only for non-beamed notes), small pad for rests
-        let dots = dot_count_for_duration(*duration) as i32;
-        let mut e = 0.0_f32;
-        if dots > 0 {
-            // Match dot placement: if a flagged note (not beamed), push dots further right
-            let has_flag_tail = matches!(kinds[i], BeatKind::Note)
-                && (i < committed_len && !in_beam_flags[i])
-                && flag_glyph_for_duration(*duration).is_some();
-            let first_dx = if has_flag_tail { font_id.size * 0.40 } else { font_id.size * 0.28 };
-            let step_dx = font_id.size * 0.26;
-            e += first_dx + (dots as f32) * step_dx + font_id.size * 0.06;
-        }
-        match kinds[i] {
-            BeatKind::Note => {
-                let in_beam = if i < committed_len { in_beam_flags[i] } else { false };
-                if !in_beam {
-                    e += font_id.size * 0.50; // heuristic for flag width
-                }
-            }
-            BeatKind::Rest => {
-                e += font_id.size * 0.10; // tiny pad so rests don't touch neighbors
-            }
-        }
-        extra.push(e.max(0.0));
-    }
-
-    // Normalize to fit the content box
-    let total: f32 = w_prop.iter().sum::<f32>() + extra.iter().sum::<f32>();
-    let scale = if total > 0.0 { content_w / total } else { 1.0 };
-
-    // Pass 2: compute centers using scaled proportional widths; advance by rhythmic+extra
-    let mut x_centers: Vec<f32> = vec![0.0; durations.len()];
-    let mut run = 0.0_f32;
-    for i in 0..durations.len() {
-        let cell_w = (w_prop[i] + extra[i]) * scale;
-        let prop_w = w_prop[i] * scale;
-        x_centers[i] = content_left + run + prop_w * 0.5;
-        run += cell_w;
-    }
+    // Build flat lists for layout; offset each beat by content_left
+    let x_centers = calculate_x_centers(measure, content_w)
+        .iter()
+        .map(|&cx| cx + content_left)
+        .collect::<Vec<_>>();
 
     // 2) Metrics for beams and stems
     let beam_render_opts = bream_render_opts(em, y, color, &font_id);
-    let stem_dx = font_id.size * 0.13; // keep in sync with draw_beat
+    let stem_dx = font_id.size * 0.13;
     // Precompute stem x positions for all beats (noteheads + stem offset)
     let stem_xs: Vec<f32> = x_centers.iter().map(|&cx| cx + stem_dx).collect();
-    // Stem positioning relative to notehead center.
-    let stem_offset_x = font_id.size * 0.13; // tweak by eye for Bravura
     let stem_thickness = font_id.size * 0.03;
 
     // 3) Pass: draw beats (noteheads/rests) with beam-aware stems (flags suppressed when in beam)
-
     for (i, beat) in measure.beats().iter().copied().enumerate() {
         let in_beam = *in_beam_flags.get(i).unwrap_or(&false);
-        let opts = NoteRenderOpts { color, in_beam, stem_offset_x, stem_thickness };
+        let opts = NoteRenderOpts { color, in_beam, stem_offset_x: stem_dx, stem_thickness };
         if cap_ticks > 0 {
             draw_beat(&painter, &font_id, pos2(x_centers[i], y), beat, opts);
         }
@@ -332,9 +285,11 @@ fn draw_measure(
                 if levels == 0 {
                     continue;
                 }
-                let stem_x_offset = stem_thickness / 3.0;
-                let x1 = stem_xs[i] - stem_x_offset;
-                let x2 = stem_xs[j] + stem_x_offset;
+                // Extend the beam to the left and right a little bit such that it touches the stem
+                // on both sides, otherwise it looks off sometimes.
+                let offset = stem_thickness / 3.0;
+                let x1 = stem_xs[i] - offset;
+                let x2 = stem_xs[j] + offset;
                 for lvl in 0..levels {
                     draw_full_beam(&painter, x1, x2, lvl, &beam_render_opts);
                 }
@@ -458,22 +413,31 @@ fn draw_measure(
         // TODO extract function
         for b in beats.iter() {
             onsets.push(t_acc);
-            if let Some(dt) = set.grid.ticks_of(&b.duration) { t_acc += dt; }
+            if let Some(dt) = set.grid.ticks_of(&b.duration) {
+                t_acc += dt;
+            }
         }
         // Primary boundaries per time signature (mirror of beaming::primary_boundaries)
         let mut boundaries: Vec<u32> = Vec::new();
         let ticks_per_whole = set.grid.ticks_per_whole;
         match (ts.beats as u32, ts.beat_unit as u32) {
-            (b, 4) => { // simple meters: each quarter
+            (b, 4) => {
+                // simple meters: each quarter
                 let stride = ticks_per_whole / 4;
-                for i in 1..b { boundaries.push(i * stride); }
+                for i in 1..b {
+                    boundaries.push(i * stride);
+                }
             }
-            (6, 8) | (9, 8) | (12, 8) => { // compound: dotted quarters
+            (6, 8) | (9, 8) | (12, 8) => {
+                // compound: dotted quarters
                 let eighth = ticks_per_whole / 8;
                 let group = 3 * eighth;
                 let total = (ts.beats as u32) * eighth;
                 let mut acc = group;
-                while acc < total { boundaries.push(acc); acc += group; }
+                while acc < total {
+                    boundaries.push(acc);
+                    acc += group;
+                }
             }
             (7, 8) => {
                 let eighth = ticks_per_whole / 8;
@@ -483,31 +447,55 @@ fn draw_measure(
             (b, den) => {
                 if den > 0 {
                     let stride = ticks_per_whole / den;
-                    for i in 1..b { boundaries.push(i * stride); }
+                    for i in 1..b {
+                        boundaries.push(i * stride);
+                    }
                 }
             }
         }
 
         // Scan for contiguous tuplet runs with identical (n,m,base)
         #[derive(Clone, Copy, PartialEq, Eq)]
-        enum TupSpec { S{n:u8,m:u8,base:NoteValue} }
-        fn spec_of(d:&Duration)->Option<TupSpec>{
-            if let Duration::Tuplet{n,m,base} = *d { Some(TupSpec::S{n,m,base}) } else { None }
+        enum TupSpec {
+            S { n: u8, m: u8, base: NoteValue },
         }
-        struct TupGroup { start: usize, end: usize, n: u8, m: u8, base: NoteValue, contains_rest: bool }
+        fn spec_of(d: &Duration) -> Option<TupSpec> {
+            if let Duration::Tuplet { n, m, base } = *d {
+                Some(TupSpec::S { n, m, base })
+            } else {
+                None
+            }
+        }
+        struct TupGroup {
+            start: usize,
+            end: usize,
+            n: u8,
+            m: u8,
+            base: NoteValue,
+            contains_rest: bool,
+        }
         let mut groups: Vec<TupGroup> = Vec::new();
         let mut i = 0usize;
         while i < beats.len() {
-            let Some(TupSpec::S{n,m,base}) = spec_of(&beats[i].duration) else { i+=1; continue; };
+            let Some(TupSpec::S { n, m, base }) = spec_of(&beats[i].duration) else {
+                i += 1;
+                continue;
+            };
             let mut j = i;
             let mut has_rest = false;
             while j < beats.len() {
-                if spec_of(&beats[j].duration) == Some(TupSpec::S{n,m,base}) {
-                    if beats[j].kind == BeatKind::Rest { has_rest = true; }
+                if spec_of(&beats[j].duration) == Some(TupSpec::S { n, m, base }) {
+                    if beats[j].kind == BeatKind::Rest {
+                        has_rest = true;
+                    }
                     j += 1;
-                } else { break; }
+                } else {
+                    break;
+                }
             }
-            if j > i { groups.push(TupGroup{ start:i, end:j-1, n, m, base, contains_rest: has_rest }); }
+            if j > i {
+                groups.push(TupGroup { start: i, end: j - 1, n, m, base, contains_rest: has_rest });
+            }
             i = j;
         }
 
@@ -531,7 +519,9 @@ fn draw_measure(
                 // Collect note indices participating (exclude rests)
                 let mut tup_note_idxs: Vec<usize> = Vec::new();
                 for k in g.start..=g.end {
-                    if beats[k].kind == BeatKind::Note { tup_note_idxs.push(k); }
+                    if beats[k].kind == BeatKind::Note {
+                        tup_note_idxs.push(k);
+                    }
                 }
 
                 // Determine fully_beamed
@@ -543,7 +533,9 @@ fn draw_measure(
                             if tup_note_idxs.iter().all(|idx| bg.note_indices.contains(idx)) {
                                 // Build a map from note index to local position
                                 let mut pos_map = std::collections::HashMap::new();
-                                for (li, gi) in bg.note_indices.iter().enumerate() { pos_map.insert(*gi, li); }
+                                for (li, gi) in bg.note_indices.iter().enumerate() {
+                                    pos_map.insert(*gi, li);
+                                }
                                 // Verify continuity (>=1) along the chain between consecutive tuplet notes
                                 let mut ok = true;
                                 for pair in tup_note_idxs.windows(2) {
@@ -551,14 +543,25 @@ fn draw_measure(
                                     let b = pair[1];
                                     let la = *pos_map.get(&a).unwrap();
                                     let lb = *pos_map.get(&b).unwrap();
-                                    if la >= lb { ok = false; break; }
+                                    if la >= lb {
+                                        ok = false;
+                                        break;
+                                    }
                                     // Require continuity >=1 across every adjacent link from la..lb-1
                                     for cidx in la..lb {
-                                        if *bg.continuity.get(cidx).unwrap_or(&0) < 1 { ok = false; break; }
+                                        if *bg.continuity.get(cidx).unwrap_or(&0) < 1 {
+                                            ok = false;
+                                            break;
+                                        }
                                     }
-                                    if !ok { break; }
+                                    if !ok {
+                                        break;
+                                    }
                                 }
-                                if ok { fully_beamed = true; break 'outer; }
+                                if ok {
+                                    fully_beamed = true;
+                                    break 'outer;
+                                }
                             }
                         }
                     }
@@ -579,7 +582,9 @@ fn draw_measure(
                 let margin = em * 0.12;
                 x_l -= margin;
                 x_r += margin;
-                if x_r < x_l { std::mem::swap(&mut x_l, &mut x_r); }
+                if x_r < x_l {
+                    std::mem::swap(&mut x_l, &mut x_r);
+                }
 
                 // Vertical position above primary beam baseline
                 let y_bracket = beam_render_opts.beam_y - beam_render_opts.thickness - bracket_gap;
@@ -589,10 +594,19 @@ fn draw_measure(
                 if !number_only {
                     let x1 = x_centers[g.start];
                     let x2 = x_centers[g.end];
-                    painter.line_segment([pos2(x1, y_bracket), pos2(x2, y_bracket)], Stroke::new(2.0, color));
+                    painter.line_segment(
+                        [pos2(x1, y_bracket), pos2(x2, y_bracket)],
+                        Stroke::new(2.0, color),
+                    );
                     // Hooks (downwards toward notes)
-                    painter.line_segment([pos2(x1, y_bracket), pos2(x1, y_bracket + hook_dy)], Stroke::new(2.0, color));
-                    painter.line_segment([pos2(x2, y_bracket), pos2(x2, y_bracket + hook_dy)], Stroke::new(2.0, color));
+                    painter.line_segment(
+                        [pos2(x1, y_bracket), pos2(x1, y_bracket + hook_dy)],
+                        Stroke::new(2.0, color),
+                    );
+                    painter.line_segment(
+                        [pos2(x2, y_bracket), pos2(x2, y_bracket + hook_dy)],
+                        Stroke::new(2.0, color),
+                    );
                 }
 
                 // Draw number (Bravura tuplet digits), centered
@@ -604,8 +618,15 @@ fn draw_measure(
                     let offset = (cols - digits.len() as f32) * 0.5; // zero, but symmetrical with ts code
                     let cx = x_mid + ((col as f32 + 0.5 + offset) - cols * 0.5) * digit_w;
                     // Place slightly above bracket (or above beam line if number-only)
-                    let y_num = if number_only { y_bracket } else { y_bracket - 0.30 * (em * 0.25) };
-                    painter.text(pos2(cx, y_num), Align2::CENTER_CENTER, ch.to_string(), number_font.clone(), color);
+                    let y_num =
+                        if number_only { y_bracket } else { y_bracket - 0.30 * (em * 0.25) };
+                    painter.text(
+                        pos2(cx, y_num),
+                        Align2::CENTER_CENTER,
+                        ch.to_string(),
+                        number_font.clone(),
+                        color,
+                    );
                 }
             }
         }
@@ -628,15 +649,32 @@ fn draw_measure(
             let bottom = inner_rect.bottom();
             let base = if ui.visuals().dark_mode { Color32::WHITE } else { Color32::BLACK };
             let cursor_color = Color32::from_rgba_unmultiplied(base.r(), base.g(), base.b(), alpha);
-            painter.vline(
-                x,
-                Rangef::new(top, bottom),
-                Stroke::new(2.0, cursor_color),
-            );
+            painter.vline(x, Rangef::new(top, bottom), Stroke::new(2.0, cursor_color));
             // Ensure animation progresses even without input
             ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
         }
     }
+}
+
+fn calculate_x_centers(measure: &Measure, content_w: f32) -> Vec<f32> {
+    let content_left: f32;
+
+    let durations: Vec<Duration> = measure.beats().iter().map(|b| b.duration).collect();
+
+    // Normalize to fit the content box
+    let total: f32 = durations.len() as f32;
+    let scale = if total > 0.0 { content_w / total } else { 1.0 };
+
+    // Pass 2: compute centers using scaled proportional widths; advance by rhythmic+extra
+    let mut x_centers: Vec<f32> = vec![0.0; durations.len()];
+    let mut run = 0.0_f32;
+    for i in 0..durations.len() {
+        let density = 0.8; // lower for denser layout
+        let cell_w = density * scale;
+        x_centers[i] = run + cell_w * 0.5;
+        run += cell_w;
+    }
+    x_centers
 }
 
 // Beaming metrics and helpers
@@ -657,9 +695,13 @@ impl BeamRenderOpts {
 fn bream_render_opts(em: f32, y_center: f32, color: Color32, font_id: &FontId) -> BeamRenderOpts {
     // Approximate staff space relative to font size for a single-line staff context
     let staff_space = em * 0.25; // tuned by eye
-    let thickness = 0.4 * staff_space; // Bravura ~0.5 sp
+    let thickness = 0.5 * staff_space; // Bravura ~0.5 sp
     let gap = 0.25 * staff_space; // distance between beams
-    let beam_y = y_center - get_default_stem_length(font_id) + (thickness * 0.95);
+    // Offset the top beam such that its top edge aligns with the end of the stem.
+    // Because sometimes the beam's (left|right) edge does not perfectly align with the (left|right)
+    // stem's (right|left) edge, it looks a bit off:
+    let offset = thickness * 0.95;
+    let beam_y = y_center - get_default_stem_length(font_id) + offset;
     BeamRenderOpts { thickness, gap, beam_y, color }
 }
 
@@ -688,7 +730,8 @@ impl App for Grooph {
                 Space: Toggle between note and rest\n\
                 Num1/Num2: Split/merge note\n\
                 Period: Toggle dotted\n\
-                Q: Insert 1/4 note\n");
+                Q: Insert 1/4 note\n",
+                );
                 let (_id, rect) = ui.allocate_space(ui.available_size());
                 ui.input(|i| {
                     let beats_len = self.measure.beats().len();
@@ -773,6 +816,11 @@ impl Grooph {
         measure.add_beat(Beat::note(Duration::Tuplet { n: 3, m: 2, base: Eighth })).unwrap();
         measure.add_beat(Beat::note(Duration::Tuplet { n: 3, m: 2, base: Eighth })).unwrap();
         measure.add_beat(Beat::note(Duration::Tuplet { n: 3, m: 2, base: Eighth })).unwrap();
+
+        // measure.add_beat(Beat::note(Duration::Simple(Eighth))).unwrap();
+        // measure.add_beat(Beat::note(Duration::Simple(Eighth))).unwrap();
+        // measure.add_beat(Beat::note(Duration::Simple(Eighth))).unwrap();
+        // measure.add_beat(Beat::note(Duration::Simple(Eighth))).unwrap();
 
         Self { font_family: ff.clone(), font_id: FontId::new(16.0, ff), measure }
     }

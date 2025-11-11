@@ -6,7 +6,7 @@ use grooph::Grooph;
 fn main() -> eframe::Result {
     use eframe::egui;
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default().with_inner_size([800.0, 250.0]),
+        viewport: egui::ViewportBuilder::default().with_inner_size([800.0, 600.0]),
         ..Default::default()
     };
 
