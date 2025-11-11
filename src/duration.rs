@@ -1,3 +1,5 @@
+use crate::measure::{Beat, Measure};
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum NoteValue {
     Whole,
@@ -180,6 +182,20 @@ pub const COMMON_DURATIONS: [Duration; 13] = [
 pub struct DurationSet {
     pub durations: &'static [Duration],
     pub grid: Grid,
+}
+
+impl DurationSet {
+    pub fn compute_onset_ticks(&self, beats: &Vec<Beat>) -> Vec<u32> {
+        let mut onsets: Vec<u32> = Vec::with_capacity(beats.len());
+        let mut t = 0;
+        for b in beats.iter() {
+            onsets.push(t);
+            if let Some(dt) = self.grid.ticks_of(&b.duration) {
+                t += dt;
+            }
+        }
+        onsets
+    }
 }
 
 pub const fn default_duration_set() -> DurationSet {

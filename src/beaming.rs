@@ -1,4 +1,4 @@
-use crate::duration::{Duration, NoteValue, default_duration_set};
+use crate::duration::{Duration, NoteValue, default_duration_set, DurationSet};
 use crate::measure::{Beat, BeatKind, Measure, TimeSignature};
 
 /// Number of beams implied by a duration (eighth = 1, sixteenth = 2, 32nd = 3).
@@ -45,19 +45,10 @@ pub fn compute_beam_plan(measure: &Measure) -> BeamPlan {
     let set = default_duration_set();
     let beats = measure.beats();
     let ts = measure.time_signature();
-
-    // Compute onset tick for each beat
-    let mut onsets: Vec<u32> = Vec::with_capacity(beats.len());
-    let mut t = 0;
-    for b in beats.iter() {
-        onsets.push(t);
-        if let Some(dt) = set.grid.ticks_of(&b.duration) {
-            t += dt;
-        }
-    }
+    let onsets = set.compute_onset_ticks(beats);
 
     // Compute primary boundaries (tick positions inside the measure where groups should break by default)
-    let boundaries = primary_boundaries(&ts);
+    let boundaries = primary_boundaries(set, &ts);
 
     // Collect indices of beamable notes
     let mut note_idxs: Vec<usize> = Vec::new();
@@ -211,10 +202,9 @@ fn is_contiguous_tuplet_run(beats: &Vec<Beat>, i: usize, j: usize) -> bool {
 /// For 7/8 default to 3+2+2 pattern -> groups of 3, then 2, then 2 eighths. Here we return the smallest
 /// unit (in ticks) where primary breaks may occur frequently; we handle 7/8 specially by returning an eighth
 /// and letting the group builder break at pattern boundaries via onset comparisons.
-fn primary_boundaries(ts: &TimeSignature) -> Vec<u32> {
-    let set = default_duration_set();
+pub(super) fn primary_boundaries(ds: DurationSet, ts: &TimeSignature) -> Vec<u32> {
     let mut bounds: Vec<u32> = Vec::new();
-    let ticks_per_whole = set.grid.ticks_per_whole;
+    let ticks_per_whole = ds.grid.ticks_per_whole;
     match (ts.beats as u32, ts.beat_unit as u32) {
         // Simple meters: boundaries at each beat (exclude 0 and end)
         (b, 4) => {
