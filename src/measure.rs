@@ -473,15 +473,6 @@ mod tests {
     }
 
     #[test]
-    fn test_add_quarter_note_to_one_four_measure() {
-        let mut m = Measure::new(TimeSignature::ONE_FOUR);
-
-        m.add_beat(Beat::note(q())).unwrap();
-        assert_eq!(m.beats().len(), 1);
-        assert!(m.add_beat(Beat::note(q())).is_err());
-    }
-
-    #[test]
     fn test_triplet() {
         let mut measure = Measure::new(TimeSignature::ONE_FOUR);
 

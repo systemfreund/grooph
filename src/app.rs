@@ -8,6 +8,7 @@ use crate::app::glyphs::{
     rest_glyph_for_duration, ts_glyphs, tuplet_glyphs,
 };
 use crate::duration;
+use crate::duration::human_readable;
 use crate::duration::NoteValue::*;
 use crate::measure::{Beat, BeatKind};
 use eframe::egui::{Align2, Context, Key, Rangef, Stroke, global_theme_preference_buttons, pos2, Label};
@@ -836,7 +837,7 @@ impl App for Grooph {
                 });
                 let idx_opt = Some(self.cursor_idx);
 
-                // Top-right overlay label showing absolute beat position at the cursor
+                // Label showing absolute beat position at the cursor and human-readable duration/kind
                 let mut beat_text = String::from("-");
                 let idx = self.cursor_idx;
                 let positions = self.measure.beat_positions();
@@ -852,7 +853,14 @@ impl App for Grooph {
                     }
                     beat_text = s;
                 }
-                ui.add(Label::new(format!("Beat: {}", beat_text)));
+                let mut label = format!("Beat: {}", beat_text);
+                if idx < self.measure.beats().len() {
+                    let b = self.measure.beats()[idx];
+                    let desc = human_readable(&b.duration);
+                    let kind = match b.kind { BeatKind::Note => "note", BeatKind::Rest => "rest" };
+                    label = format!("Beat: {}, {} {}", beat_text, desc, kind);
+                }
+                ui.add(Label::new(label));
 
                 let (_id, rect) = ui.allocate_space(ui.available_size());
                 draw_measure(ui, &self.font_id, &self.measure, rect, idx_opt);

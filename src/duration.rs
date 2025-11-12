@@ -21,6 +21,17 @@ impl NoteValue {
             NoteValue::ThirtySecond => 32,
         }
     }
+
+    pub const fn name(self) -> &'static str {
+        match self {
+            NoteValue::Whole => "Whole",
+            NoteValue::Half => "Half",
+            NoteValue::Quarter => "Quarter",
+            NoteValue::Eighth => "Eighth",
+            NoteValue::Sixteenth => "Sixteenth",
+            NoteValue::ThirtySecond => "Thirty-second",
+        }
+    }
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -123,6 +134,51 @@ impl Duration {
             NoteValue::ThirtySecond => ("𝅘𝅥𝅰", "𝅀"),
             NoteValue::Half => ("𝅗𝅥", "𝄼"),
             NoteValue::Whole => ("𝅝", "𝄻"),
+        }
+    }
+}
+
+/// Human-readable description of a duration (without note/rest kind)
+/// Examples:
+/// - Simple(Eighth) -> "Eighth"
+/// - Dotted { base: Quarter, dots: 1 } -> "Dotted Quarter"
+/// - Tuplet { n: 3, m: 2, base: Eighth } -> "Triplet eighth"
+/// - Tuplet { n: 7, m: 4, base: Sixteenth } -> "Septuplet sixteenth"
+/// - Unknown tuplet n -> "Tuplet n:m <base-lower>"
+pub fn human_readable(d: &Duration) -> String {
+    match *d {
+        Duration::Simple(nv) => nv.name().to_string(),
+        Duration::Dotted { base, dots } => {
+            let prefix = match dots {
+                1 => "Dotted",
+                2 => "Double-dotted",
+                3 => "Triple-dotted",
+                _ => "Dotted",
+            };
+            format!("{} {}", prefix, base.name())
+        }
+        Duration::Tuplet { n, m, base } => {
+            let base_lower = match base {
+                NoteValue::Whole => "whole",
+                NoteValue::Half => "half",
+                NoteValue::Quarter => "quarter",
+                NoteValue::Eighth => "eighth",
+                NoteValue::Sixteenth => "sixteenth",
+                NoteValue::ThirtySecond => "thirty-second",
+            };
+            let name = match n {
+                3 => Some("Triplet"),
+                5 => Some("Quintuplet"),
+                6 => Some("Sextuplet"),
+                7 => Some("Septuplet"),
+                9 => Some("Nonuplet"),
+                _ => None,
+            };
+            if let Some(label) = name {
+                format!("{} {}", label, base_lower)
+            } else {
+                format!("Tuplet {}:{} {}", n, m, base_lower)
+            }
         }
     }
 }
