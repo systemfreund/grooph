@@ -11,7 +11,7 @@ use crate::beaming::primary_boundaries;
 use crate::duration;
 use crate::duration::NoteValue::*;
 use crate::measure::{Beat, BeatKind};
-use eframe::egui::{Align2, Context, Key, Rangef, Stroke, global_theme_preference_buttons, pos2};
+use eframe::egui::{Align2, Context, Key, Rangef, Stroke, global_theme_preference_buttons, pos2, Label};
 use eframe::emath::Pos2;
 use eframe::epaint::text::{FontInsert, InsertFontFamily};
 use eframe::epaint::{Color32, FontFamily, FontId};
@@ -663,7 +663,6 @@ impl App for Grooph {
                 Period: Toggle dotted\n\
                 Q: Insert 1/4 note\n",
                 );
-                let (_id, rect) = ui.allocate_space(ui.available_size());
                 ui.input(|i| {
                     let beats_len = self.measure.beats().len();
                     let total_len = beats_len;
@@ -733,6 +732,26 @@ impl App for Grooph {
                     }
                 });
                 let idx_opt = Some(self.measure.position());
+
+                // Top-right overlay label showing absolute beat position at the cursor
+                let mut beat_text = String::from("-");
+                let idx = self.measure.position();
+                let positions = self.measure.beat_positions();
+                if idx < positions.len() {
+                    let v = positions[idx] as f32;
+                    let mut s = format!("{:.3}", v);
+                    // Trim trailing zeros and optional dot for a cleaner look
+                    while s.ends_with('0') {
+                        s.pop();
+                    }
+                    if s.ends_with('.') {
+                        s.pop();
+                    }
+                    beat_text = s;
+                }
+                ui.add(Label::new(format!("Beat: {}", beat_text)));
+
+                let (_id, rect) = ui.allocate_space(ui.available_size());
                 draw_measure(ui, &self.font_id, &self.measure, rect, idx_opt);
             });
         });

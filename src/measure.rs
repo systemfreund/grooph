@@ -323,6 +323,22 @@ impl Measure {
     /// Set current cursor position inside the measure model (no clamping)
     pub fn set_position(&mut self, pos: usize) { self.position = pos }
 
+    /// Return a vector with the absolute position (1-based) of each beat as floats.
+    /// Examples:
+    /// - In 4/4 with four quarters: [1.0, 2.0, 3.0, 4.0]
+    /// - If the first three notes are 8th-note triplets in 4/4: [1.0, 1.3333..., 1.6666...]
+    /// Positions are computed from onset ticks relative to the measure's beat size (beat_unit).
+    pub fn beat_positions(&self) -> Vec<f32> {
+        let set = default_duration_set();
+        let onsets = set.compute_onset_ticks(&self.beats);
+        // one "beat" is a note of length 1/beat_unit of a whole note
+        let ticks_per_beat = set.grid.ticks_per_whole / (self.time_signature.beat_unit as u32);
+        onsets
+            .into_iter()
+            .map(|t| 1.0f32 + (t as f32) / (ticks_per_beat as f32))
+            .collect()
+    }
+
     /// Returns the current total duration in ticks (exact)
     fn current_ticks(&self) -> u32 {
         let set = default_duration_set();
@@ -623,5 +639,29 @@ mod tests {
         m.remove(1);
         assert_eq!(m.beats()[0].duration, q);
         assert_eq!(m.beats()[1].duration, q); // because of minimization remaining rests
+    }
+
+    #[test]
+    fn test_beat_positions_quarters() {
+        // Default 4/4 measure is filled with quarter rests by fill_measure
+        let m = Measure::new(TimeSignature::FOUR_FOUR);
+        let pos = m.beat_positions();
+        assert_eq!(pos, vec![1.0, 2.0, 3.0, 4.0]);
+    }
+
+    #[test]
+    fn test_beat_positions_triplet_eighths_start() {
+        let mut m = Measure::new(TimeSignature::FOUR_FOUR);
+        // Replace the first three beats with eighth-note triplets
+        m.set_beat_at(0, Beat::note(t8())).unwrap();
+        m.set_beat_at(1, Beat::note(t8())).unwrap();
+        m.set_beat_at(2, Beat::note(t8())).unwrap();
+        let pos = m.beat_positions();
+        // Expect positions: 1.0, 1 + 1/3, 1 + 2/3
+        let expect = [1.0f32, 1.0 + 1.0 / 3.0, 1.0 + 2.0 / 3.0];
+        let eps = 1e-4f32;
+        assert!((pos[0] - expect[0]).abs() < eps);
+        assert!((pos[1] - expect[1]).abs() < eps);
+        assert!((pos[2] - expect[2]).abs() < eps);
     }
 }
