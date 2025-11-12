@@ -1,4 +1,4 @@
 [build]
-public_url = "/grooph"
+public_url = "/"
 filehash = false
 release = true
