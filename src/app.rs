@@ -680,6 +680,7 @@ impl App for Grooph {
                 Arrow keys: Move cursor\n\
                 Del/Backspace: Remove note\n\
                 Space: Toggle between note and rest\n\
+                0: Toggle all beats to notes/rests (majority; tie uses first)\n\
                 1-4: Set duration (1=1/4, 2=1/8, 3=1/16, 4=1/32)\n\
                 Period: Toggle dotted\n",
                 );
@@ -719,6 +720,47 @@ impl App for Grooph {
                         if i.key_pressed(Key::Space) {
                             // Toggle between note and rest at cursor (preserve duration)
                             self.measure.toggle_beat_kind(idx);
+                        }
+                        if i.key_pressed(Key::Num0) {
+                            // Toggle ALL beats to either notes or rests based on current majority; tie resolved by first beat
+                            if beats_len > 0 {
+                                // Decide target kind using an immutable snapshot
+                                let (target_kind, durs, kinds) = {
+                                    let beats_view = self.measure.beats();
+                                    let mut notes = 0usize;
+                                    let mut rests = 0usize;
+                                    for b in beats_view.iter() {
+                                        match b.kind {
+                                            BeatKind::Note => notes += 1,
+                                            BeatKind::Rest => rests += 1,
+                                        }
+                                    }
+                                    let target = if notes > rests {
+                                        BeatKind::Rest
+                                    } else if rests > notes {
+                                        BeatKind::Note
+                                    } else {
+                                        // No majority: decide opposite of the first beat
+                                        match beats_view[0].kind {
+                                            BeatKind::Note => BeatKind::Rest,
+                                            BeatKind::Rest => BeatKind::Note,
+                                        }
+                                    };
+                                    let durs: Vec<_> = beats_view.iter().map(|b| b.duration).collect();
+                                    let kinds: Vec<_> = beats_view.iter().map(|b| b.kind).collect();
+                                    (target, durs, kinds)
+                                };
+                                // Apply changes using stored durations to avoid borrow conflicts
+                                for (bi, (&dur, &kind)) in durs.iter().zip(kinds.iter()).enumerate() {
+                                    if kind != target_kind {
+                                        let new_beat = match target_kind {
+                                            BeatKind::Note => Beat::note(dur),
+                                            BeatKind::Rest => Beat::rest(dur),
+                                        };
+                                        let _ = self.measure.set_beat_at(bi, new_beat);
+                                    }
+                                }
+                            }
                         }
                         if i.key_pressed(Key::Backspace) {
                             // Remove beat at cursor

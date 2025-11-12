@@ -108,115 +108,9 @@ impl Measure {
     /// Expose a read-only view of beats
     pub fn beats(&self) -> &Vec<Beat> { &self.beats }
 
-    /// Split the beat at `idx` into two equal halves (by time), replacing it with two smaller beats.
-    /// Only supported for simple durations down to Sixteenth; returns false if not possible.
-    pub fn split_beat_by_two(&mut self, idx: usize) -> bool {
-        if idx >= self.beats.len() {
-            return false;
-        }
-        let base = self.beats[idx];
-        let half = match base.duration.halve_simple() {
-            Some(h) => h,
-            None => return false,
-        };
-        // Replace current with first half
-        self.beats[idx].duration = half;
-        self.beats[idx].tremolo = None;
-        // Insert second half with same kind just after
-        let second = Beat { duration: half, kind: base.kind, tremolo: None };
-        self.beats.insert(idx + 1, second);
-        self.recompute_beams();
-        true
-    }
-
-    /// Unsplit (merge) the beat at `idx` with the immediately following beat if both are equal simple durations.
-    /// This is the inverse of `split_beat_by_two`, e.g., two eighths -> one quarter. Returns true if merged.
-    ///
-    /// Greedy behavior for rests: if `left` is a rest and `right` is also a rest but not the same
-    /// duration, attempt to greedily absorb subsequent contiguous rests into `right` until it matches
-    /// `left`'s duration, then perform the merge. This allows merging two eighth rests into a quarter
-    /// rest even if they are not already split symmetrically (e.g., 1/8 + 1/16 + 1/16 -> 1/4).
-    pub fn unsplit_beat_by_two(&mut self, idx: usize) -> bool {
-        if idx + 1 >= self.beats.len() {
-            return false;
-        }
-        let left = self.beats[idx];
-        let right = self.beats[idx + 1];
-
-        // Fast path: must be same kind to ever merge
-        if left.kind != right.kind {
-            return false;
-        }
-
-        // Only simple doubling is supported
-        let doubled = match left.duration.double_simple() {
-            Some(d) => d,
-            None => return false,
-        };
-
-        // If durations already equal, do the normal merge
-        if left.duration == right.duration {
-            self.beats[idx].duration = doubled;
-            self.beats[idx].tremolo = None;
-            self.beats.remove(idx + 1);
-            self.recompute_beams();
-            return true;
-        }
-
-        // Greedy rest merging: if left is a rest and right is a rest, try to grow right by
-        // consuming subsequent rests until it equals left's duration, then merge.
-        if left.kind == BeatKind::Rest {
-            use crate::duration::default_duration_set;
-            let set = default_duration_set();
-            let left_ticks = match set.grid.ticks_of(&left.duration) {
-                Some(t) => t,
-                None => return false,
-            };
-
-            // Sum ticks of contiguous rests starting at idx+1
-            let mut sum_ticks = 0u32;
-            let mut k = idx + 1;
-            while k < self.beats.len() {
-                let b = self.beats[k];
-                if b.kind != BeatKind::Rest {
-                    break;
-                }
-                let t = match set.grid.ticks_of(&b.duration) {
-                    Some(t) => t,
-                    None => break,
-                };
-                sum_ticks += t;
-                if sum_ticks >= left_ticks {
-                    break;
-                }
-                k += 1;
-            }
-            if sum_ticks >= left_ticks {
-                // Try to expand right into exactly left.duration by absorbing rests via set_beat_at
-                if self
-                    .set_beat_at(
-                        idx + 1,
-                        Beat { duration: left.duration, kind: BeatKind::Rest, tremolo: None },
-                    )
-                    .is_ok()
-                {
-                    // After successful expansion, durations should match: perform merge
-                    self.beats[idx].duration = doubled;
-                    self.beats[idx].tremolo = None;
-                    self.beats.remove(idx + 1);
-                    self.recompute_beams();
-                    return true;
-                }
-            }
-        }
-
-        false
-    }
-
     /// Replace the beat at index `idx` with `beat` if it fits and the remainder stays fillable.
     pub fn set_beat_at(&mut self, idx: usize, beat: Beat) -> Result<(), MeasureError> {
         if idx >= self.beats.len() {
-            // Out of bounds after caller's ensure: treat as unfillable generically
             return Err(MeasureError::Unfillable { attempted: 0.0, remaining: 0.0 });
         }
         let set = default_duration_set();
@@ -235,9 +129,6 @@ impl Measure {
             let mut absorb_ticks = 0u32;
             while need > 0 && k < self.beats.len() {
                 let b = self.beats[k];
-                if b.kind != BeatKind::Rest {
-                    break;
-                }
                 let t = set.grid.ticks_of(&b.duration).unwrap_or(0);
                 absorb_ticks += t;
                 if absorb_ticks >= need {
