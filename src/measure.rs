@@ -88,8 +88,8 @@ pub struct Measure {
     beats: Vec<Beat>,
     time_signature: TimeSignature,
     beam_plan: Option<BeamPlan>,
-    /// Current cursor position
-    position: usize,
+    // Internal insertion pointer for add_beat progression (not a UI cursor)
+    next_insert: usize,
 }
 
 impl Measure {
@@ -99,7 +99,7 @@ impl Measure {
             beats: Vec::new(),
             time_signature,
             beam_plan: Some(BeamPlan { groups: vec![] }),
-            position: 0,
+            next_insert: 0,
         };
         s.fill_measure();
         s
@@ -208,11 +208,6 @@ impl Measure {
     /// Expose the beaming plan for this measure
     pub fn beam_plan(&self) -> Option<&BeamPlan> { self.beam_plan.as_ref() }
 
-    /// Get current cursor position inside the measure model
-    pub fn position(&self) -> usize { self.position }
-
-    /// Set current cursor position inside the measure model (no clamping)
-    pub fn set_position(&mut self, pos: usize) { self.position = pos }
 
     /// Return a vector with the absolute position (1-based) of each beat as floats.
     /// Examples:
@@ -273,22 +268,17 @@ impl Measure {
         dp[target]
     }
 
-    /// Adds a beat to this measure at the current position if it doesn't exceed the time signature
-    /// and remains fillable.
-    ///
-    /// # Returns
-    /// - `Ok(())` if the beat was successfully added
-    /// - `Err(MeasureError::Overflow)` if adding the beat would exceed the measure's capacity
-    /// - `Err(MeasureError::Unfillable)` if the addition leaves an unfillable remainder
+    /// Adds a beat to this measure at the current internal insertion pointer (left-to-right
+    /// progression independent of UI). After a successful insertion, the pointer advances by 1
+    /// (clamped to the current length). This preserves existing tests that relied on sequential
+    /// addition without embedding a UI cursor in the model.
     pub fn add_beat(&mut self, beat: Beat) -> Result<(), MeasureError> {
-        // Attempt to set the beat at the current position
-        match self.set_beat_at(self.position, beat) {
+        // Clamp pointer to available range
+        let idx = self.next_insert.min(self.beats.len().saturating_sub(1));
+        match self.set_beat_at(idx, beat) {
             Ok(()) => {
-                // Advance internal position to the next index for subsequent insertions
                 let len = self.beats.len();
-                // Advance to the next logical index; allow pointing one past the last element
-                // so that the next add_beat() commits a new slot at the end.
-                self.position = self.position.saturating_add(1).min(len);
+                self.next_insert = self.next_insert.saturating_add(1).min(len);
                 Ok(())
             }
             Err(e) => Err(e),
@@ -477,10 +467,8 @@ mod tests {
     fn test_basic_measure_features() {
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
         assert_eq!(m.beats().len(), 4);
-        assert_eq!(m.position, 0);
-
+        // add_beat should fill from the first rest slot; measure stays length 4
         m.add_beat(Beat::note(q())).unwrap();
-        assert_eq!(m.position, 1);
         assert_eq!(m.beats().len(), 4);
     }
 

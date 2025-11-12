@@ -259,8 +259,8 @@ mod tests {
     fn beaming_simple_eighths_group_by_quarters() {
         // 4/4 with eight eighth notes -> 4 groups, each two notes
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
-        for _ in 0..8 {
-            m.add_beat(Beat::note(e())).unwrap();
+        for i in 0..8 {
+            m.set_beat_at(i, Beat::note(e())).unwrap();
         }
         let plan = m.beam_plan().unwrap();
         assert_eq!(plan.groups.len(), 4, "expected 4 groups of eighths in 4/4");
