@@ -7,7 +7,6 @@ use crate::app::glyphs::{
     GLYPH_AUGMENTATION_DOT, GLYPH_CLEF_PERCUSSION, GLYPH_NOTEHEAD_BLACK, flag_glyph_for_duration,
     rest_glyph_for_duration, ts_glyphs, tuplet_glyphs,
 };
-use crate::beaming::primary_boundaries;
 use crate::duration;
 use crate::duration::NoteValue::*;
 use crate::measure::{Beat, BeatKind};
@@ -404,8 +403,6 @@ fn draw_measure(
     // 4c) Tuplet indicators (number and optional bracket) — stems up only, no staggering
     // Helper: compute onset ticks per beat and primary boundaries (replicated logic)
     let beats = measure.beats();
-    let onsets = set.compute_onset_ticks(beats);
-    let boundaries = primary_boundaries(set, &ts);
 
     struct TupGroup {
         start: usize,
@@ -471,13 +468,6 @@ fn draw_measure(
         let number_font = FontId::new(font_id.size * 0.75, font_id.family.clone());
 
         for g in groups {
-            // Derive properties
-            // Span crosses primary boundary?
-            let start_on = *onsets.get(g.start).unwrap_or(&0);
-            let end_on = *onsets.get(g.end).unwrap_or(&start_on)
-                + set.grid.ticks_of(&beats[g.end].duration).unwrap_or(0);
-            let spans_primary = boundaries.iter().any(|&bd| bd > start_on && bd < end_on);
-
             // Collect note indices participating (exclude rests)
             let mut tup_note_idxs: Vec<usize> = Vec::new();
             for k in g.start..=g.end {
@@ -541,33 +531,52 @@ fn draw_measure(
 
             let y_bracket = beam_render_opts.beam_y - beam_render_opts.thickness - bracket_gap;
 
-            // Draw bracket if needed
+            // Prepare number glyphs and measure width to reserve a centered gap in the bracket
+            let digits = tuplet_glyphs(g.n);
+            // Approximate numeral width: ~0.6em per glyph (good enough for SMuFL digits), supports multi-digit tuplets
+            let num_chars = digits.chars().count() as f32;
+            let num_width = num_chars * 0.6 * em;
+            let pad = 0.25 * staff_space; // horizontal padding around digits inside the bracket gap
+            let xc = 0.5 * (x_l + x_r);
+            let mut gap_half = 0.5 * (num_width + 2.0 * pad);
+            // Ensure we don't exceed span; keep a minimal segment on each side if possible
+            let min_seg = 0.5 * staff_space;
+            let half_span = 0.5 * (x_r - x_l);
+            if gap_half > half_span - min_seg {
+                gap_half = (half_span - min_seg).max(0.0);
+            }
+
+            // Draw bracket if needed: split into left and right segments with a centered gap for the number
             if !number_only {
-                let x1 = x_l;
-                let x2 = x_r;
+                let x_gap_l = (xc - gap_half).max(x_l);
+                let x_gap_r = (xc + gap_half).min(x_r);
+                // Left segment
+                if x_gap_l > x_l {
+                    painter.line_segment(
+                        [pos2(x_l, y_bracket), pos2(x_gap_l, y_bracket)],
+                        Stroke::new(2.0, color),
+                    );
+                }
+                // Right segment
+                if x_r > x_gap_r {
+                    painter.line_segment(
+                        [pos2(x_gap_r, y_bracket), pos2(x_r, y_bracket)],
+                        Stroke::new(2.0, color),
+                    );
+                }
+                // Hooks (downwards toward notes) remain at full-span endpoints
                 painter.line_segment(
-                    [pos2(x1, y_bracket), pos2(x2, y_bracket)],
+                    [pos2(x_l, y_bracket), pos2(x_l, y_bracket + hook_dy)],
                     Stroke::new(2.0, color),
                 );
-                // Hooks (downwards toward notes)
                 painter.line_segment(
-                    [pos2(x1, y_bracket), pos2(x1, y_bracket + hook_dy)],
-                    Stroke::new(2.0, color),
-                );
-                painter.line_segment(
-                    [pos2(x2, y_bracket), pos2(x2, y_bracket + hook_dy)],
+                    [pos2(x_r, y_bracket), pos2(x_r, y_bracket + hook_dy)],
                     Stroke::new(2.0, color),
                 );
             }
 
-            // Draw number (Bravura tuplet digits), centered
-            let digits = tuplet_glyphs(g.n);
-            // Place slightly above bracket (or above beam line if number-only)
-            let y_num = if number_only {
-                y_bracket + 0.5 * (em * 0.25)
-            } else {
-                y_bracket - 0.50 * (em * 0.25)
-            };
+            // Draw number (Bravura tuplet digits), centered at the number-only position even when bracketed
+            let y_num = y_bracket + 0.5 * (em * 0.25);
             painter.text(
                 pos2(0.5 * (x_l + x_r), y_num),
                 Align2::CENTER_CENTER,
@@ -750,7 +759,7 @@ impl App for Grooph {
                 let idx = self.measure.position();
                 let positions = self.measure.beat_positions();
                 if idx < positions.len() {
-                    let v = positions[idx] as f32;
+                    let v = positions[idx];
                     let mut s = format!("{:.3}", v);
                     // Trim trailing zeros and optional dot for a cleaner look
                     while s.ends_with('0') {
