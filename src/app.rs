@@ -418,33 +418,45 @@ fn draw_measure(
     let mut groups: Vec<TupGroup> = Vec::new();
     let mut i = 0usize;
     while i < beats.len() {
-        let Duration::Tuplet { n, m, base } = beats[i].duration else {
+        let Duration::Tuplet { n, m, base: _ } = beats[i].duration else {
             i += 1;
             continue;
         };
-        // Find maximal run of same-spec tuplets starting at i
+        // Find maximal run of tuplets with the same ratio (n, m), ignoring base note value
         let mut k = i;
         while k < beats.len() {
             match beats[k].duration {
-                Duration::Tuplet { n: nn, m: mm, base: bb } if nn == n && mm == m && bb == base => {
+                Duration::Tuplet { n: nn, m: mm, base: _ } if nn == n && mm == m => {
                     k += 1;
                 }
                 _ => break,
             }
         }
-        // Split the run [i..k) into consecutive groups of exactly n elements when possible
-        let group_size = n as usize;
+        // Split the run [i..k) into logical tuplet groups by accumulating ticks
         let mut start = i;
         while start < k {
-            let end = (start + group_size).min(k) - 1;
+            let first_dur = beats[start].duration;
+            // One full tuplet group spans `n * ticks(first_element)` ticks.
+            let target_ticks: u32 = set.grid.ticks_of(&first_dur).unwrap_or(0).saturating_mul(n as u32);
+            let mut acc_ticks: u32 = 0;
+            let mut end = start;
             let mut has_rest = false;
-            for t in start..=end {
-                if beats[t].kind == BeatKind::Rest {
-                    has_rest = true;
-                    break;
-                }
+            while end < k {
+                if beats[end].kind == BeatKind::Rest { has_rest = true; }
+                let dt = set.grid.ticks_of(&beats[end].duration).unwrap_or(0);
+                acc_ticks = acc_ticks.saturating_add(dt);
+                if acc_ticks >= target_ticks { break; }
+                end += 1;
             }
-            groups.push(TupGroup { start, end, n, m, base, contains_rest: has_rest });
+            // Push the group [start..=end]. In well-formed rhythms acc_ticks should equal target_ticks.
+            groups.push(TupGroup {
+                start,
+                end,
+                n,
+                m,
+                base: beats[start].duration.base_note(),
+                contains_rest: has_rest,
+            });
             start = end + 1;
         }
         i = k;
