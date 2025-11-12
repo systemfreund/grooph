@@ -680,9 +680,8 @@ impl App for Grooph {
                 Arrow keys: Move cursor\n\
                 Del/Backspace: Remove note\n\
                 Space: Toggle between note and rest\n\
-                Num1/Num2: Split/merge note\n\
-                Period: Toggle dotted\n\
-                Q: Insert 1/4 note\n",
+                1-4: Set duration (1=1/4, 2=1/8, 3=1/16, 4=1/32)\n\
+                Period: Toggle dotted\n",
                 );
                 ui.input(|i| {
                     let beats_len = self.measure.beats().len();
@@ -733,18 +732,59 @@ impl App for Grooph {
                                 .min(new_len.saturating_sub(1));
                             self.measure.set_position(new_pos);
                         }
-                        if i.key_pressed(Key::Q) {
-                            // Set a quarter note at the current cursor position. If it cannot be set, ignore.
-                            let quarter = Duration::Simple(Quarter);
-                            let _ = self.measure.set_beat_at(idx, Beat::note(quarter));
+                        // Numeric duration assignment: 1=1/4, 2=1/8, 3=1/16, 4=1/32
+                        // Preserve BeatKind (note/rest). When current beat is a tuplet, preserve (n,m)
+                        // and only change base for keys 2–4; key 1 is ignored on tuplets (quarter-tuplets unsupported).
+                        if i.key_pressed(Key::Num1) {
+                            let cur = self.measure.beats()[idx];
+                            // If tuplet -> ignore (no quarter tuplet support)
+                            let new_dur_opt = match cur.duration {
+                                Duration::Tuplet { .. } => None,
+                                _ => Some(Duration::Simple(Quarter)),
+                            };
+                            if let Some(new_dur) = new_dur_opt {
+                                let new_beat = match cur.kind {
+                                    BeatKind::Note => Beat::note(new_dur),
+                                    BeatKind::Rest => Beat::rest(new_dur),
+                                };
+                                let _ = self.measure.set_beat_at(idx, new_beat);
+                            }
                         }
                         if i.key_pressed(Key::Num2) {
-                            // Split the beat at the current cursor into two halves (e.g., 1/4 -> 1/8 + 1/8). If not possible, ignore.
-                            let _ = self.measure.split_beat_by_two(idx);
+                            let cur = self.measure.beats()[idx];
+                            let new_dur = match cur.duration {
+                                Duration::Tuplet { n, m, base: _ } => Duration::Tuplet { n, m, base: Eighth },
+                                _ => Duration::Simple(Eighth),
+                            };
+                            let new_beat = match cur.kind {
+                                BeatKind::Note => Beat::note(new_dur),
+                                BeatKind::Rest => Beat::rest(new_dur),
+                            };
+                            let _ = self.measure.set_beat_at(idx, new_beat);
                         }
-                        if i.key_pressed(Key::Num1) {
-                            // Unsplit (merge) the beat at the current cursor with the next one if possible (inverse of split by two).
-                            let _ = self.measure.unsplit_beat_by_two(idx);
+                        if i.key_pressed(Key::Num3) {
+                            let cur = self.measure.beats()[idx];
+                            let new_dur = match cur.duration {
+                                Duration::Tuplet { n, m, base: _ } => Duration::Tuplet { n, m, base: Sixteenth },
+                                _ => Duration::Simple(Sixteenth),
+                            };
+                            let new_beat = match cur.kind {
+                                BeatKind::Note => Beat::note(new_dur),
+                                BeatKind::Rest => Beat::rest(new_dur),
+                            };
+                            let _ = self.measure.set_beat_at(idx, new_beat);
+                        }
+                        if i.key_pressed(Key::Num4) {
+                            let cur = self.measure.beats()[idx];
+                            let new_dur = match cur.duration {
+                                Duration::Tuplet { n, m, base: _ } => Duration::Tuplet { n, m, base: ThirtySecond },
+                                _ => Duration::Simple(ThirtySecond),
+                            };
+                            let new_beat = match cur.kind {
+                                BeatKind::Note => Beat::note(new_dur),
+                                BeatKind::Rest => Beat::rest(new_dur),
+                            };
+                            let _ = self.measure.set_beat_at(idx, new_beat);
                         }
                         if i.key_pressed(Key::Period) {
                             // Toggle dotted (1 dot) for the current beat. If it cannot be changed (would overflow or unfillable), ignore.
@@ -784,10 +824,10 @@ impl Grooph {
         add_font(&cc.egui_ctx);
         let ff = FontFamily::Name("music".into());
         let mut measure = Measure::new(TimeSignature::SEVEN_EIGHT);
-        measure.add_beat(Beat::note(Duration::Tuplet { n: 3, m: 2, base: Eighth })).unwrap();
-        measure.add_beat(Beat::note(Duration::Tuplet { n: 3, m: 2, base: Eighth })).unwrap();
-        measure.add_beat(Beat::note(Duration::Tuplet { n: 3, m: 2, base: Sixteenth })).unwrap();
-        measure.add_beat(Beat::rest(Duration::Tuplet { n: 3, m: 2, base: Sixteenth })).unwrap();
+        // measure.add_beat(Beat::note(Duration::Tuplet { n: 3, m: 2, base: Eighth })).unwrap();
+        // measure.add_beat(Beat::note(Duration::Tuplet { n: 3, m: 2, base: Eighth })).unwrap();
+        // measure.add_beat(Beat::note(Duration::Tuplet { n: 3, m: 2, base: Sixteenth })).unwrap();
+        // measure.add_beat(Beat::rest(Duration::Tuplet { n: 3, m: 2, base: Sixteenth })).unwrap();
 
         // measure.add_beat(Beat::note(Duration::Tuplet { n: 3, m: 2, base: Eighth })).unwrap();
         // measure.add_beat(Beat::note(Duration::Tuplet { n: 3, m: 2, base: Eighth })).unwrap();
