@@ -36,18 +36,11 @@ pub enum BeatKind {
     Rest,
 }
 
-#[derive(Copy, Clone, Debug, PartialEq)]
-pub enum Sticking {
-    Left,
-    Right,
-}
-
 #[derive(Copy, Clone, Debug)]
 pub struct Beat {
     pub duration: Duration,
     pub kind: BeatKind,
     pub tremolo: Option<Tremolo>,
-    pub sticking: Option<Sticking>,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -61,12 +54,12 @@ pub struct Tremolo {
 impl Beat {
     /// Creates a new note with the given duration
     pub fn note(duration: Duration) -> Self {
-        Self { duration, kind: BeatKind::Note, tremolo: None, sticking: None }
+        Self { duration, kind: BeatKind::Note, tremolo: None }
     }
 
     /// Creates a new rest with the given duration
     pub fn rest(duration: Duration) -> Self {
-        Self { duration, kind: BeatKind::Rest, tremolo: None, sticking: None }
+        Self { duration, kind: BeatKind::Rest, tremolo: None }
     }
 }
 
@@ -145,17 +138,8 @@ impl Measure {
             }
             return if absorb_ticks >= need {
                 // We can grow by consuming rests from idx+1..=k
-                // First set the new beat at idx (inherit sticking if replacing Note→Note and incoming sticking is None)
-                let incoming = beat;
-                let prev = self.beats[idx];
-                let final_sticking = match (incoming.kind, prev.kind) {
-                    (BeatKind::Note, BeatKind::Note) => incoming.sticking.or(prev.sticking),
-                    (BeatKind::Note, _) => incoming.sticking, // no inheritance from rests
-                    (BeatKind::Rest, _) => None,
-                };
-                let mut placed = incoming;
-                placed.sticking = final_sticking;
-                self.beats[idx] = placed;
+                // First set the new beat at idx
+                self.beats[idx] = beat;
                 // Now consume 'need' ticks from the following rests
                 let p = idx + 1;
                 let mut remaining_to_consume = need;
@@ -197,17 +181,8 @@ impl Measure {
             let attempted = (new_ticks as f64) / (set.grid.ticks_per_whole as f64);
             return Err(MeasureError::Unfillable { attempted, remaining });
         }
-        // Perform replacement at idx, inheriting/clearing sticking as needed
-        let incoming = beat;
-        let prev = self.beats[idx];
-        let final_sticking = match (incoming.kind, prev.kind) {
-            (BeatKind::Note, BeatKind::Note) => incoming.sticking.or(prev.sticking),
-            (BeatKind::Note, _) => incoming.sticking,
-            (BeatKind::Rest, _) => None,
-        };
-        let mut placed = incoming;
-        placed.sticking = final_sticking;
-        self.beats[idx] = placed;
+        // Perform replacement at idx
+        self.beats[idx] = beat;
 
         // If the new beat is shorter than the old one, split the leftover time
         // into concrete rest beats inserted immediately after idx so that subsequent
@@ -333,7 +308,7 @@ impl Measure {
         if let Some(fill) = best_fill_for_gap(remaining_ticks, &[]) {
             let take = fill.len();
             for duration in fill.into_iter().take(take) {
-                let beat = Beat { duration, kind, tremolo: None, sticking: None };
+                let beat = Beat { duration, kind, tremolo: None };
                 self.beats.push(beat);
             }
             self.recompute_beams();
@@ -350,10 +325,6 @@ impl Measure {
                 BeatKind::Rest => BeatKind::Note,
                 BeatKind::Note => BeatKind::Rest,
             };
-            // If it became a rest, clear sticking
-            if b.kind == BeatKind::Rest {
-                b.sticking = None;
-            }
             // Beaming may change when toggling between note/rest
             self.recompute_beams();
         }
@@ -375,8 +346,7 @@ impl Measure {
             _ => None,
         };
         if let Some(dur) = new_dur {
-            let sticking = if matches!(current.kind, BeatKind::Note) { current.sticking } else { None };
-            let new_beat = Beat { duration: dur, kind: current.kind, tremolo: None, sticking };
+            let new_beat = Beat { duration: dur, kind: current.kind, tremolo: None };
             if self.set_beat_at(idx, new_beat).is_ok() {
                 return true;
             }
