@@ -108,7 +108,7 @@ impl Measure {
             beam_plan: Some(BeamPlan { groups: vec![] }),
             next_insert: 0,
         };
-        s.fill_measure();
+        s.fill_measure(BeatKind::Note);
         s
     }
 
@@ -321,19 +321,20 @@ impl Measure {
             return;
         }
         self.beats.remove(idx);
-        self.fill_measure();
+        self.fill_measure(BeatKind::Rest);
         self.minimize_remainder_rests_from(idx);
     }
 
-    pub fn fill_measure(&mut self) {
+    pub fn fill_measure(&mut self, kind: BeatKind) {
         let remaining_ticks = self.remaining_ticks();
         if remaining_ticks <= 0 {
             return; // nothing to commit
         }
         if let Some(fill) = best_fill_for_gap(remaining_ticks, &[]) {
             let take = fill.len();
-            for d in fill.into_iter().take(take) {
-                self.beats.push(Beat::rest(d));
+            for duration in fill.into_iter().take(take) {
+                let beat = Beat { duration, kind, tremolo: None, sticking: None };
+                self.beats.push(beat);
             }
             self.recompute_beams();
         }

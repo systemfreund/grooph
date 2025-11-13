@@ -11,7 +11,7 @@ use crate::duration;
 use crate::duration::human_readable;
 use crate::duration::NoteValue::*;
 use crate::measure::{Beat, BeatKind};
-use eframe::egui::{Align2, Context, Key, Rangef, Stroke, global_theme_preference_buttons, pos2, Label};
+use eframe::egui::{Align2, Context, Key, Rangef, Stroke, global_theme_preference_buttons, pos2, Label, global_theme_preference_switch};
 use eframe::emath::Pos2;
 use eframe::epaint::text::{FontInsert, InsertFontFamily};
 use eframe::epaint::{Color32, FontFamily, FontId};
@@ -674,197 +674,202 @@ fn get_default_stem_length(font_id: &FontId) -> f32 {
 
 impl App for Grooph {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
-        egui::CentralPanel::default().show(ctx, |ui| {
-            Frame::canvas(ui.style()).show(ui, |ui| {
-                global_theme_preference_buttons(ui);
-                ui.label(
-                    "Keybindings: \n\
+        egui::TopBottomPanel::top("menu").show(ctx, |ui| {
+            global_theme_preference_switch(ui);
+        });
+
+        egui::TopBottomPanel::top("info").show(ctx, |ui| {
+            ui.label(
+                "Keybindings: \n\
                 Arrow keys: Move cursor\n\
                 Del/Backspace: Remove note\n\
                 Space: Toggle between note and rest\n\
                 0: Toggle all beats to notes/rests\n\
                 1-4: Set duration (1=1/4, 2=1/8, 3=1/16, 4=1/32)\n\
                 Period: Toggle dotted\n",
-                );
-                ui.input(|i| {
-                    let beats_len = self.measure.beats().len();
-                    let total_len = beats_len;
-                    if total_len > 0 {
-                        // Navigation over committed beats only
-                        let mut pos = self.cursor_idx;
-                        if i.key_pressed(Key::ArrowLeft) {
-                            pos = pos.saturating_sub(1);
-                        }
-                        if i.key_pressed(Key::ArrowRight) {
-                            let max_idx = total_len.saturating_sub(1);
-                            if pos < max_idx {
-                                pos += 1;
-                            }
-                        }
-                        if i.key_pressed(Key::Home) {
-                            pos = 0;
-                        }
-                        if i.key_pressed(Key::End) {
-                            pos = total_len.saturating_sub(1);
-                        }
-                        self.cursor_idx = pos;
+            );
 
-                        // Edits apply only when cursor is on a committed beat
-                        let idx = self.cursor_idx.min(beats_len.saturating_sub(1));
-                        if i.key_pressed(Key::Delete) {
-                            // Delete beat at cursor and shift subsequent beats left
-                            self.measure.remove(idx);
-                            // Do not move cursor; it now points to the next beat (like text editors)
-                            let new_len = self.measure.beats().len();
-                            let new_pos = self.cursor_idx.min(new_len.saturating_sub(1));
-                            self.cursor_idx = new_pos;
-                        }
-                        if i.key_pressed(Key::Space) {
-                            // Toggle between note and rest at cursor (preserve duration)
-                            self.measure.toggle_beat_kind(idx);
-                        }
-                        if i.key_pressed(Key::Num0) {
-                            // Toggle ALL beats to either notes or rests based on current majority; tie resolved by first beat
-                            if beats_len > 0 {
-                                // Decide target kind using an immutable snapshot
-                                let (target_kind, durs, kinds) = {
-                                    let beats_view = self.measure.beats();
-                                    let mut notes = 0usize;
-                                    let mut rests = 0usize;
-                                    for b in beats_view.iter() {
-                                        match b.kind {
-                                            BeatKind::Note => notes += 1,
-                                            BeatKind::Rest => rests += 1,
-                                        }
-                                    }
-                                    let target = if notes > rests {
-                                        BeatKind::Rest
-                                    } else if rests > notes {
-                                        BeatKind::Note
-                                    } else {
-                                        // No majority: decide opposite of the first beat
-                                        match beats_view[0].kind {
-                                            BeatKind::Note => BeatKind::Rest,
-                                            BeatKind::Rest => BeatKind::Note,
-                                        }
-                                    };
-                                    let durs: Vec<_> = beats_view.iter().map(|b| b.duration).collect();
-                                    let kinds: Vec<_> = beats_view.iter().map(|b| b.kind).collect();
-                                    (target, durs, kinds)
-                                };
-                                // Apply changes using stored durations to avoid borrow conflicts
-                                for (bi, (&dur, &kind)) in durs.iter().zip(kinds.iter()).enumerate() {
-                                    if kind != target_kind {
-                                        let new_beat = match target_kind {
-                                            BeatKind::Note => Beat::note(dur),
-                                            BeatKind::Rest => Beat::rest(dur),
-                                        };
-                                        let _ = self.measure.set_beat_at(bi, new_beat);
-                                    }
+            // Label showing absolute beat position at the cursor and human-readable duration/kind
+            let mut beat_text = String::from("-");
+            let idx = self.cursor_idx;
+            let positions = self.measure.beat_positions();
+            if idx < positions.len() {
+                let v = positions[idx];
+                let mut s = format!("{:.3}", v);
+                // Trim trailing zeros and optional dot for a cleaner look
+                while s.ends_with('0') {
+                    s.pop();
+                }
+                if s.ends_with('.') {
+                    s.pop();
+                }
+                beat_text = s;
+            }
+            let mut label = format!("Beat: {}", beat_text);
+            if idx < self.measure.beats().len() {
+                let b = self.measure.beats()[idx];
+                let desc = human_readable(&b.duration);
+                let kind = match b.kind { BeatKind::Note => "note", BeatKind::Rest => "rest" };
+                label = format!("Beat: {}, {} {}", beat_text, desc, kind);
+            }
+            ui.add(Label::new(label));
+        });
+
+        egui::CentralPanel::default().show(ctx, |ui| {
+            Frame::canvas(ui.style()).show(ui, |ui| {
+                let (_id, rect) = ui.allocate_space(ui.available_size());
+                draw_measure(ui, &self.font_id, &self.measure, rect, Some(self.cursor_idx));
+            });
+        });
+
+        ctx.input(|i| {
+            let beats_len = self.measure.beats().len();
+            let total_len = beats_len;
+            if total_len > 0 {
+                // Navigation over committed beats only
+                let mut pos = self.cursor_idx;
+                if i.key_pressed(Key::ArrowLeft) {
+                    pos = pos.saturating_sub(1);
+                }
+                if i.key_pressed(Key::ArrowRight) {
+                    let max_idx = total_len.saturating_sub(1);
+                    if pos < max_idx {
+                        pos += 1;
+                    }
+                }
+                if i.key_pressed(Key::Home) {
+                    pos = 0;
+                }
+                if i.key_pressed(Key::End) {
+                    pos = total_len.saturating_sub(1);
+                }
+                self.cursor_idx = pos;
+
+                // Edits apply only when cursor is on a committed beat
+                let idx = self.cursor_idx.min(beats_len.saturating_sub(1));
+                if i.key_pressed(Key::Delete) {
+                    // Delete beat at cursor and shift subsequent beats left
+                    self.measure.remove(idx);
+                    // Do not move cursor; it now points to the next beat (like text editors)
+                    let new_len = self.measure.beats().len();
+                    let new_pos = self.cursor_idx.min(new_len.saturating_sub(1));
+                    self.cursor_idx = new_pos;
+                }
+                if i.key_pressed(Key::Space) {
+                    // Toggle between note and rest at cursor (preserve duration)
+                    self.measure.toggle_beat_kind(idx);
+                }
+                if i.key_pressed(Key::Num0) {
+                    // Toggle ALL beats to either notes or rests based on current majority; tie resolved by first beat
+                    if beats_len > 0 {
+                        // Decide target kind using an immutable snapshot
+                        let (target_kind, durs, kinds) = {
+                            let beats_view = self.measure.beats();
+                            let mut notes = 0usize;
+                            let mut rests = 0usize;
+                            for b in beats_view.iter() {
+                                match b.kind {
+                                    BeatKind::Note => notes += 1,
+                                    BeatKind::Rest => rests += 1,
                                 }
                             }
-                        }
-                        if i.key_pressed(Key::Backspace) {
-                            // Remove beat at cursor
-                            self.measure.remove(idx);
-                            // Move cursor left, like a text editor caret
-                            let new_len = self.measure.beats().len();
-                            let new_pos = self
-                                .cursor_idx
-                                .saturating_sub(1)
-                                .min(new_len.saturating_sub(1));
-                            self.cursor_idx = new_pos;
-                        }
-                        // Numeric duration assignment: 1=1/4, 2=1/8, 3=1/16, 4=1/32
-                        // Preserve BeatKind (note/rest). When current beat is a tuplet, preserve (n,m)
-                        // and only change base for keys 2–4; key 1 is ignored on tuplets (quarter-tuplets unsupported).
-                        if i.key_pressed(Key::Num1) {
-                            let cur = self.measure.beats()[idx];
-                            // If tuplet -> ignore (no quarter tuplet support)
-                            let new_dur_opt = match cur.duration {
-                                Duration::Tuplet { .. } => None,
-                                _ => Some(Duration::Simple(Quarter)),
+                            let target = if notes > rests {
+                                BeatKind::Rest
+                            } else if rests > notes {
+                                BeatKind::Note
+                            } else {
+                                // No majority: decide opposite of the first beat
+                                match beats_view[0].kind {
+                                    BeatKind::Note => BeatKind::Rest,
+                                    BeatKind::Rest => BeatKind::Note,
+                                }
                             };
-                            if let Some(new_dur) = new_dur_opt {
-                                let new_beat = match cur.kind {
-                                    BeatKind::Note => Beat::note(new_dur),
-                                    BeatKind::Rest => Beat::rest(new_dur),
+                            let durs: Vec<_> = beats_view.iter().map(|b| b.duration).collect();
+                            let kinds: Vec<_> = beats_view.iter().map(|b| b.kind).collect();
+                            (target, durs, kinds)
+                        };
+                        // Apply changes using stored durations to avoid borrow conflicts
+                        for (bi, (&dur, &kind)) in durs.iter().zip(kinds.iter()).enumerate() {
+                            if kind != target_kind {
+                                let new_beat = match target_kind {
+                                    BeatKind::Note => Beat::note(dur),
+                                    BeatKind::Rest => Beat::rest(dur),
                                 };
-                                let _ = self.measure.set_beat_at(idx, new_beat);
+                                let _ = self.measure.set_beat_at(bi, new_beat);
                             }
                         }
-                        if i.key_pressed(Key::Num2) {
-                            let cur = self.measure.beats()[idx];
-                            let new_dur = match cur.duration {
-                                Duration::Tuplet { n, m, base: _ } => Duration::Tuplet { n, m, base: Eighth },
-                                _ => Duration::Simple(Eighth),
-                            };
-                            let new_beat = match cur.kind {
-                                BeatKind::Note => Beat::note(new_dur),
-                                BeatKind::Rest => Beat::rest(new_dur),
-                            };
-                            let _ = self.measure.set_beat_at(idx, new_beat);
-                        }
-                        if i.key_pressed(Key::Num3) {
-                            let cur = self.measure.beats()[idx];
-                            let new_dur = match cur.duration {
-                                Duration::Tuplet { n, m, base: _ } => Duration::Tuplet { n, m, base: Sixteenth },
-                                _ => Duration::Simple(Sixteenth),
-                            };
-                            let new_beat = match cur.kind {
-                                BeatKind::Note => Beat::note(new_dur),
-                                BeatKind::Rest => Beat::rest(new_dur),
-                            };
-                            let _ = self.measure.set_beat_at(idx, new_beat);
-                        }
-                        if i.key_pressed(Key::Num4) {
-                            let cur = self.measure.beats()[idx];
-                            let new_dur = match cur.duration {
-                                Duration::Tuplet { n, m, base: _ } => Duration::Tuplet { n, m, base: ThirtySecond },
-                                _ => Duration::Simple(ThirtySecond),
-                            };
-                            let new_beat = match cur.kind {
-                                BeatKind::Note => Beat::note(new_dur),
-                                BeatKind::Rest => Beat::rest(new_dur),
-                            };
-                            let _ = self.measure.set_beat_at(idx, new_beat);
-                        }
-                        if i.key_pressed(Key::Period) {
-                            // Toggle dotted (1 dot) for the current beat. If it cannot be changed (would overflow or unfillable), ignore.
-                            let _ = self.measure.toggle_dotted_at(idx);
-                        }
                     }
-                });
-                let idx_opt = Some(self.cursor_idx);
-
-                // Label showing absolute beat position at the cursor and human-readable duration/kind
-                let mut beat_text = String::from("-");
-                let idx = self.cursor_idx;
-                let positions = self.measure.beat_positions();
-                if idx < positions.len() {
-                    let v = positions[idx];
-                    let mut s = format!("{:.3}", v);
-                    // Trim trailing zeros and optional dot for a cleaner look
-                    while s.ends_with('0') {
-                        s.pop();
-                    }
-                    if s.ends_with('.') {
-                        s.pop();
-                    }
-                    beat_text = s;
                 }
-                let mut label = format!("Beat: {}", beat_text);
-                if idx < self.measure.beats().len() {
-                    let b = self.measure.beats()[idx];
-                    let desc = human_readable(&b.duration);
-                    let kind = match b.kind { BeatKind::Note => "note", BeatKind::Rest => "rest" };
-                    label = format!("Beat: {}, {} {}", beat_text, desc, kind);
+                if i.key_pressed(Key::Backspace) {
+                    // Remove beat at cursor
+                    self.measure.remove(idx);
+                    // Move cursor left, like a text editor caret
+                    let new_len = self.measure.beats().len();
+                    let new_pos = self
+                        .cursor_idx
+                        .saturating_sub(1)
+                        .min(new_len.saturating_sub(1));
+                    self.cursor_idx = new_pos;
                 }
-                ui.add(Label::new(label));
-
-                let (_id, rect) = ui.allocate_space(ui.available_size());
-                draw_measure(ui, &self.font_id, &self.measure, rect, idx_opt);
-            });
+                // Numeric duration assignment: 1=1/4, 2=1/8, 3=1/16, 4=1/32
+                // Preserve BeatKind (note/rest). When current beat is a tuplet, preserve (n,m)
+                // and only change base for keys 2–4; key 1 is ignored on tuplets (quarter-tuplets unsupported).
+                if i.key_pressed(Key::Num1) {
+                    let cur = self.measure.beats()[idx];
+                    // If tuplet -> ignore (no quarter tuplet support)
+                    let new_dur_opt = match cur.duration {
+                        Duration::Tuplet { .. } => None,
+                        _ => Some(Duration::Simple(Quarter)),
+                    };
+                    if let Some(new_dur) = new_dur_opt {
+                        let new_beat = match cur.kind {
+                            BeatKind::Note => Beat::note(new_dur),
+                            BeatKind::Rest => Beat::rest(new_dur),
+                        };
+                        let _ = self.measure.set_beat_at(idx, new_beat);
+                    }
+                }
+                if i.key_pressed(Key::Num2) {
+                    let cur = self.measure.beats()[idx];
+                    let new_dur = match cur.duration {
+                        Duration::Tuplet { n, m, base: _ } => Duration::Tuplet { n, m, base: Eighth },
+                        _ => Duration::Simple(Eighth),
+                    };
+                    let new_beat = match cur.kind {
+                        BeatKind::Note => Beat::note(new_dur),
+                        BeatKind::Rest => Beat::rest(new_dur),
+                    };
+                    let _ = self.measure.set_beat_at(idx, new_beat);
+                }
+                if i.key_pressed(Key::Num3) {
+                    let cur = self.measure.beats()[idx];
+                    let new_dur = match cur.duration {
+                        Duration::Tuplet { n, m, base: _ } => Duration::Tuplet { n, m, base: Sixteenth },
+                        _ => Duration::Simple(Sixteenth),
+                    };
+                    let new_beat = match cur.kind {
+                        BeatKind::Note => Beat::note(new_dur),
+                        BeatKind::Rest => Beat::rest(new_dur),
+                    };
+                    let _ = self.measure.set_beat_at(idx, new_beat);
+                }
+                if i.key_pressed(Key::Num4) {
+                    let cur = self.measure.beats()[idx];
+                    let new_dur = match cur.duration {
+                        Duration::Tuplet { n, m, base: _ } => Duration::Tuplet { n, m, base: ThirtySecond },
+                        _ => Duration::Simple(ThirtySecond),
+                    };
+                    let new_beat = match cur.kind {
+                        BeatKind::Note => Beat::note(new_dur),
+                        BeatKind::Rest => Beat::rest(new_dur),
+                    };
+                    let _ = self.measure.set_beat_at(idx, new_beat);
+                }
+                if i.key_pressed(Key::Period) {
+                    // Toggle dotted (1 dot) for the current beat. If it cannot be changed (would overflow or unfillable), ignore.
+                    let _ = self.measure.toggle_dotted_at(idx);
+                }
+            }
         });
     }
 }
