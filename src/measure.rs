@@ -424,8 +424,15 @@ impl Measure {
             // No trailing rests at all
             return;
         }
-        // We only minimize starting at max(start_idx, trailing_start)
-        let start = start_idx.max(trailing_start);
+        // Decide where to start minimizing:
+        // - If the deletion point `start_idx` currently points to a rest, include it in the minimization span
+        //   so adjacent rests merge even when there are non-rests earlier in the measure.
+        // - Otherwise, fall back to the computed `trailing_start`.
+        let start = if start_idx < self.beats.len() && self.beats[start_idx].kind == BeatKind::Rest {
+            start_idx
+        } else {
+            trailing_start
+        };
         if start >= self.beats.len() {
             return;
         }

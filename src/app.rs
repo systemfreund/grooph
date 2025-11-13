@@ -469,60 +469,92 @@ fn draw_measure(
         let hook_dy = hook_len * 0.85;
         let number_font = FontId::new(font_id.size * 0.75, font_id.family.clone());
 
-        for g in groups {
-            // Collect note indices participating (exclude rests)
-            let mut tup_note_idxs: Vec<usize> = Vec::new();
+        // Precompute per-group note indices and fully_beamed flags
+        let mut tup_note_idxs_vec: Vec<Vec<usize>> = Vec::with_capacity(groups.len());
+        for g in groups.iter() {
+            let mut idxs = Vec::new();
             for k in g.start..=g.end {
                 if beats[k].kind == BeatKind::Note {
-                    tup_note_idxs.push(k);
+                    idxs.push(k);
                 }
             }
-
-            // Determine fully_beamed
-            let mut fully_beamed = false;
-            if !g.contains_rest && tup_note_idxs.len() >= 2 {
-                if let Some(bp) = &beam_plan {
-                    'outer: for bg in &bp.groups {
-                        // All tuplet notes must be inside this beam group
-                        if tup_note_idxs.iter().all(|idx| bg.note_indices.contains(idx)) {
-                            // Build a map from note index to local position
-                            let mut pos_map = std::collections::HashMap::new();
-                            for (li, gi) in bg.note_indices.iter().enumerate() {
-                                pos_map.insert(*gi, li);
-                            }
-                            // Verify continuity (>=1) along the chain between consecutive tuplet notes
-                            let mut ok = true;
-                            for pair in tup_note_idxs.windows(2) {
-                                let a = pair[0];
-                                let b = pair[1];
-                                let la = *pos_map.get(&a).unwrap();
-                                let lb = *pos_map.get(&b).unwrap();
-                                if la >= lb {
-                                    ok = false;
-                                    break;
-                                }
-                                // Require continuity >=1 across every adjacent link from la..lb-1
-                                for cidx in la..lb {
-                                    if *bg.continuity.get(cidx).unwrap_or(&0) < 1 {
-                                        ok = false;
-                                        break;
-                                    }
-                                }
-                                if !ok {
-                                    break;
-                                }
-                            }
-                            if ok {
-                                fully_beamed = true;
-                                break 'outer;
-                            }
+            tup_note_idxs_vec.push(idxs);
+        }
+        let mut fully_beamed_vec: Vec<bool> = vec![false; groups.len()];
+        if let Some(bp) = &beam_plan {
+            for gi in 0..groups.len() {
+                let g = &groups[gi];
+                let idxs = &tup_note_idxs_vec[gi];
+                if g.contains_rest || idxs.len() < 2 { continue; }
+                'outer: for bg in &bp.groups {
+                    if idxs.iter().all(|idx| bg.note_indices.contains(idx)) {
+                        let mut pos_map = std::collections::HashMap::new();
+                        for (li, gi2) in bg.note_indices.iter().enumerate() {
+                            pos_map.insert(*gi2, li);
                         }
+                        let mut ok = true;
+                        for pair in idxs.windows(2) {
+                            let a = pair[0];
+                            let b = pair[1];
+                            let la = *pos_map.get(&a).unwrap();
+                            let lb = *pos_map.get(&b).unwrap();
+                            if la >= lb { ok = false; break; }
+                            for cidx in la..lb {
+                                if *bg.continuity.get(cidx).unwrap_or(&0) < 1 { ok = false; break; }
+                            }
+                            if !ok { break; }
+                        }
+                        if ok { fully_beamed_vec[gi] = true; break 'outer; }
                     }
                 }
             }
+        }
+        // Initial number-only per group
+        let mut number_only_vec: Vec<bool> = groups
+            .iter()
+            .enumerate()
+            .map(|(i, g)| fully_beamed_vec[i] && !g.contains_rest)
+            .collect();
+        // Second pass: if adjacent groups are beamed together continuously, force brackets for both
+        if let Some(bp) = &beam_plan {
+            for i in 0..(groups.len().saturating_sub(1)) {
+                let g_left = &groups[i];
+                let g_right = &groups[i + 1];
+                // If groups are immediately adjacent and beamed together, force brackets for both,
+                // regardless of whether one of them contains rests (the rest-containing group already
+                // brackets by default; this ensures the all-notes neighbor also brackets for clarity).
+                if g_left.end + 1 != g_right.start { continue; }
+                let left_idxs = &tup_note_idxs_vec[i];
+                let right_idxs = &tup_note_idxs_vec[i + 1];
+                if left_idxs.is_empty() || right_idxs.is_empty() { continue; }
+                let last_left = *left_idxs.last().unwrap();
+                let first_right = right_idxs[0];
+                let mut beamed_together = false;
+                'bgscan: for bg in &bp.groups {
+                    if bg.note_indices.contains(&last_left) && bg.note_indices.contains(&first_right) {
+                        // map to local positions
+                        let mut pos_map = std::collections::HashMap::new();
+                        for (li, gi2) in bg.note_indices.iter().enumerate() { pos_map.insert(*gi2, li); }
+                        let la = *pos_map.get(&last_left).unwrap();
+                        let lb = *pos_map.get(&first_right).unwrap();
+                        if la < lb {
+                            let mut ok = true;
+                            for cidx in la..lb {
+                                if *bg.continuity.get(cidx).unwrap_or(&0) < 1 { ok = false; break; }
+                            }
+                            if ok { beamed_together = true; break 'bgscan; }
+                        }
+                    }
+                }
+                if beamed_together {
+                    number_only_vec[i] = false;
+                    number_only_vec[i + 1] = false;
+                }
+            }
+        }
 
-            // Auto policy: number-only when fully_beamed and no rest (ignore primary boundary crossing for consistency)
-            let number_only = fully_beamed && !g.contains_rest;
+        for (gi, g) in groups.iter().enumerate() {
+            let number_only = number_only_vec[gi];
 
             // Horizontal span
             let (mut x_l, mut x_r) = (stem_xs[g.start], stem_xs[g.end]);
@@ -602,8 +634,8 @@ fn draw_measure(
             let alpha_on = 220u8;
             let alpha_off = 40u8; // faint but still present; set to 0 to hide completely
             let alpha = if visible { alpha_on } else { alpha_off };
-            let top = inner_rect.top();
-            let bottom = inner_rect.bottom();
+            let top = inner_rect.top() + 0.5 * em;
+            let bottom = inner_rect.bottom() - 0.5 * em;
             let base = if ui.visuals().dark_mode { Color32::WHITE } else { Color32::BLACK };
             let cursor_color = Color32::from_rgba_unmultiplied(base.r(), base.g(), base.b(), alpha);
             painter.vline(x, Rangef::new(top, bottom), Stroke::new(2.0, cursor_color));
@@ -877,6 +909,10 @@ impl Grooph {
         add_font(&cc.egui_ctx);
         let ff = FontFamily::Name("music".into());
         let mut measure = Measure::new(TimeSignature::SEVEN_EIGHT);
+        measure.add_beat(Beat::note(Duration::Tuplet { n: 3, m: 2, base: Eighth })).unwrap();
+        measure.add_beat(Beat::note(Duration::Tuplet { n: 3, m: 2, base: Eighth })).unwrap();
+        measure.add_beat(Beat::note(Duration::Tuplet { n: 3, m: 2, base: Eighth })).unwrap();
+
         measure.add_beat(Beat::note(Duration::Tuplet { n: 3, m: 2, base: Eighth })).unwrap();
         measure.add_beat(Beat::note(Duration::Tuplet { n: 3, m: 2, base: Eighth })).unwrap();
         measure.add_beat(Beat::note(Duration::Tuplet { n: 3, m: 2, base: Eighth })).unwrap();
