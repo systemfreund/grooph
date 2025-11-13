@@ -218,20 +218,22 @@ impl Grid {
     }
 }
 
-pub const COMMON_DURATIONS: [Duration; 13] = [
+pub const COMMON_DURATIONS: [Duration; 15] = [
     Duration::Simple(NoteValue::Quarter),
     Duration::Simple(NoteValue::Eighth),
     Duration::Simple(NoteValue::Sixteenth),
     Duration::Simple(NoteValue::ThirtySecond),
-    Duration::Dotted { base: NoteValue::Quarter, dots: 1 }, // dotted quarter
-    Duration::Dotted { base: NoteValue::Eighth, dots: 1 }, // dotted eighth
-    Duration::Dotted { base: NoteValue::Sixteenth, dots: 1 }, // dotted 16th
-    Duration::Dotted { base: NoteValue::ThirtySecond, dots: 1 }, // dotted 32nd
-    Duration::Tuplet { n: 3, m: 2, base: NoteValue::Eighth }, // triplet eighth
-    Duration::Tuplet { n: 5, m: 4, base: NoteValue::Sixteenth }, // quintuplet 16th
-    Duration::Tuplet { n: 6, m: 4, base: NoteValue::Sixteenth }, // sextuplet 16th
-    Duration::Tuplet { n: 7, m: 4, base: NoteValue::Sixteenth }, // septuplet 16th
-    Duration::Tuplet { n: 9, m: 8, base: NoteValue::ThirtySecond }, // nonuplet 32nd
+    Duration::Dotted { base: NoteValue::Quarter, dots: 1 }, // dotted 1/4
+    Duration::Dotted { base: NoteValue::Eighth, dots: 1 }, // dotted 1/8
+    Duration::Dotted { base: NoteValue::Sixteenth, dots: 1 }, // dotted 1/16
+    Duration::Dotted { base: NoteValue::ThirtySecond, dots: 1 }, // dotted 1/32
+    Duration::Tuplet { n: 3, m: 2, base: NoteValue::Eighth }, // triplet 1/8
+    Duration::Tuplet { n: 3, m: 2, base: NoteValue::Sixteenth }, // triplet 1/16
+    Duration::Tuplet { n: 3, m: 2, base: NoteValue::ThirtySecond }, // triplet 1/32
+    Duration::Tuplet { n: 5, m: 4, base: NoteValue::Sixteenth }, // quintuplet 1/16
+    Duration::Tuplet { n: 6, m: 4, base: NoteValue::Sixteenth }, // sextuplet 1/16
+    Duration::Tuplet { n: 7, m: 4, base: NoteValue::Sixteenth }, // septuplet 1/16
+    Duration::Tuplet { n: 9, m: 8, base: NoteValue::ThirtySecond }, // nonuplet 1/32
 ];
 
 #[derive(Clone, Copy, Debug)]

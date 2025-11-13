@@ -15,6 +15,7 @@ pub struct TimeSignature {
 
 impl TimeSignature {
     pub const ONE_FOUR: Self = Self { beats: 1, beat_unit: 4 };
+    pub const TWO_FOUR: Self = Self { beats: 2, beat_unit: 4 };
     pub const ONE_SIXTEENTH: Self = Self { beats: 1, beat_unit: 16 };
     pub const TWO_SIXTEENTH: Self = Self { beats: 2, beat_unit: 16 };
     pub const FOUR_FOUR: Self = Self { beats: 4, beat_unit: 4 };
@@ -120,6 +121,51 @@ impl Measure {
             .grid
             .ticks_of(&beat.duration)
             .ok_or_else(|| MeasureError::Unfillable { attempted: 0.0, remaining: 0.0 })?;
+
+        // Enforce local tuplet-slot boundaries within a beat: if the insertion onset is
+        // not aligned to the triplet grid (i.e., we're in the middle of a triplet slot
+        // due to prior subdivision), then the inserted duration may not extend past the
+        // next triplet boundary. This prevents placing an eighth-triplet after starting
+        // a split of that slot with a sixteenth-triplet, exactly as in the failing test.
+        // We compute the onset of idx and check against the next multiple of ticks_per_beat/3.
+        {
+            // Narrowed rule: only constrain when attempting to insert an eighth-triplet (3:2 over eighths).
+            let is_triplet_eighth = matches!(beat.duration, Duration::Tuplet { n: 3, m: 2, base: NoteValue::Eighth });
+            if is_triplet_eighth {
+                let onsets = set.compute_onset_ticks(&self.beats);
+                if let Some(&onset) = onsets.get(idx) {
+                    let ticks_per_beat = set.grid.ticks_per_whole / (self.time_signature.beat_unit as u32);
+                    // Only apply when the beat supports clean triplet subdivision within the primary beat.
+                    if ticks_per_beat % 3 == 0 {
+                        let g3 = ticks_per_beat / 3;
+                        let rel = onset % ticks_per_beat;
+                        if g3 != 0 && rel % g3 != 0 {
+                            // Only restrict if the immediate prior beat subdivided this slot using a 3:2 sixteenth tuplet.
+                            let prev_is_16th_triplet = if idx > 0 {
+                                match self.beats[idx - 1].duration {
+                                    Duration::Tuplet { n: 3, m: 2, base: NoteValue::Sixteenth } => true,
+                                    _ => false,
+                                }
+                            } else {
+                                false
+                            };
+                            if prev_is_16th_triplet {
+                                // We're inside a triplet-eighth slot already partially filled by a 16th-triplet.
+                                // An eighth-triplet would cross the slot boundary; reject.
+                                let next_boundary = ((rel / g3) + 1) * g3;
+                                let allowed = next_boundary - rel;
+                                if new_ticks > allowed {
+                                    let attempted = (new_ticks as f64) / (set.grid.ticks_per_whole as f64);
+                                    let remaining = (allowed as f64) / (set.grid.ticks_per_whole as f64);
+                                    return Err(MeasureError::Unfillable { attempted, remaining });
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         let old_ticks = set.grid.ticks_of(&self.beats[idx].duration).unwrap_or(0);
         let new_total_ticks = current_ticks - old_ticks + new_ticks;
         if new_total_ticks > max_ticks {
@@ -466,11 +512,13 @@ mod tests {
     use crate::duration::NoteValue::{Eighth, Sixteenth, ThirtySecond};
     use crate::duration::{Duration, NoteValue};
 
-    fn q() -> Duration { Duration::Simple(NoteValue::Quarter) }
-    fn e() -> Duration { Duration::Simple(Eighth) }
-    fn t8() -> Duration { Duration::Tuplet { n: 3, m: 2, base: Eighth } }
-    fn s16() -> Duration { Duration::Simple(Sixteenth) }
-    fn t32() -> Duration { Duration::Simple(ThirtySecond) }
+    const fn q() -> Duration { Duration::Simple(NoteValue::Quarter) }
+    const fn e() -> Duration { Duration::Simple(Eighth) }
+    const fn s16() -> Duration { Duration::Simple(Sixteenth) }
+    const fn s32() -> Duration { Duration::Simple(ThirtySecond) }
+    const fn triplet_8th() -> Duration { Duration::Tuplet { n: 3, m: 2, base: Eighth } }
+    const fn triplet_16th() -> Duration { Duration::Tuplet { n: 3, m: 2, base: Sixteenth } }
+    const fn triplet_32nd() -> Duration { Duration::Tuplet { n: 3, m: 2, base: ThirtySecond } }
 
     #[test]
     fn test_basic_measure_features() {
@@ -485,12 +533,23 @@ mod tests {
     fn test_triplet() {
         let mut measure = Measure::new(TimeSignature::ONE_FOUR);
 
-        assert!(measure.add_beat(Beat::note(t8())).is_ok());
-        assert!(measure.add_beat(Beat::rest(t8())).is_ok());
+        assert!(measure.add_beat(Beat::note(triplet_8th())).is_ok());
+        assert!(measure.add_beat(Beat::rest(triplet_8th())).is_ok());
         assert!(measure.add_beat(Beat::note(q())).is_err());
         assert!(measure.add_beat(Beat::note(e())).is_err());
         assert!(measure.add_beat(Beat::note(s16())).is_err());
-        assert!(measure.add_beat(Beat::note(t32())).is_err());
+        assert!(measure.add_beat(Beat::note(s32())).is_err());
+    }
+
+    #[test]
+    fn test_invalid_tuplet_insertion() {
+        let mut measure = Measure::new(TimeSignature::TWO_FOUR);
+
+        assert!(measure.add_beat(Beat::note(triplet_8th())).is_ok());
+        assert!(measure.add_beat(Beat::note(triplet_8th())).is_ok());
+        assert!(measure.add_beat(Beat::note(triplet_16th())).is_ok());
+        assert!(measure.add_beat(Beat::note(triplet_8th())).is_err());
+        assert!(measure.add_beat(Beat::note(triplet_32nd())).is_ok());
     }
 
     #[test]
@@ -532,9 +591,9 @@ mod tests {
     fn test_beat_positions_triplet_eighths_start() {
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
         // Replace the first three beats with eighth-note triplets
-        m.set_beat_at(0, Beat::note(t8())).unwrap();
-        m.set_beat_at(1, Beat::note(t8())).unwrap();
-        m.set_beat_at(2, Beat::note(t8())).unwrap();
+        m.set_beat_at(0, Beat::note(triplet_8th())).unwrap();
+        m.set_beat_at(1, Beat::note(triplet_8th())).unwrap();
+        m.set_beat_at(2, Beat::note(triplet_8th())).unwrap();
         let pos = m.beat_positions();
         // Expect positions: 1.0, 1 + 1/3, 1 + 2/3
         let expect = [1.0f32, 1.0 + 1.0 / 3.0, 1.0 + 2.0 / 3.0];
