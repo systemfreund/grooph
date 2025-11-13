@@ -618,13 +618,11 @@ fn calculate_x_centers(measure: &Measure, content_w: f32) -> Vec<f32> {
 
     // Normalize to fit the content box
     let total: f32 = durations.len() as f32;
-    let scale = if total > 0.0 { content_w / total } else { 1.0 };
+    let cell_w = if total > 0.0 { content_w / total } else { 1.0 };
 
     let mut x_centers: Vec<f32> = vec![0.0; durations.len()];
     let mut run = 0.0_f32;
     for i in 0..durations.len() {
-        let density = 0.8; // lower for denser layout
-        let cell_w = density * scale;
         x_centers[i] = run + cell_w * 0.5;
         run += cell_w;
     }
@@ -879,22 +877,13 @@ impl Grooph {
         add_font(&cc.egui_ctx);
         let ff = FontFamily::Name("music".into());
         let mut measure = Measure::new(TimeSignature::SEVEN_EIGHT);
-        // measure.add_beat(Beat::note(Duration::Tuplet { n: 3, m: 2, base: Eighth })).unwrap();
-        // measure.add_beat(Beat::note(Duration::Tuplet { n: 3, m: 2, base: Eighth })).unwrap();
-        // measure.add_beat(Beat::note(Duration::Tuplet { n: 3, m: 2, base: Sixteenth })).unwrap();
-        // measure.add_beat(Beat::rest(Duration::Tuplet { n: 3, m: 2, base: Sixteenth })).unwrap();
+        measure.add_beat(Beat::note(Duration::Tuplet { n: 3, m: 2, base: Eighth })).unwrap();
+        measure.add_beat(Beat::note(Duration::Tuplet { n: 3, m: 2, base: Eighth })).unwrap();
+        measure.add_beat(Beat::note(Duration::Tuplet { n: 3, m: 2, base: Eighth })).unwrap();
 
-        // measure.add_beat(Beat::note(Duration::Tuplet { n: 3, m: 2, base: Eighth })).unwrap();
-        // measure.add_beat(Beat::note(Duration::Tuplet { n: 3, m: 2, base: Eighth })).unwrap();
-        // measure.add_beat(Beat::note(Duration::Tuplet { n: 3, m: 2, base: Eighth })).unwrap();
-        //
-        // measure.add_beat(Beat::note(Duration::Tuplet { n: 3, m: 2, base: Eighth })).unwrap();
-        // measure.add_beat(Beat::note(Duration::Tuplet { n: 3, m: 2, base: Eighth })).unwrap();
-        // measure.add_beat(Beat::note(Duration::Tuplet { n: 3, m: 2, base: Eighth })).unwrap();
-        //
-        // measure.add_beat(Beat::note(Duration::Tuplet { n: 3, m: 2, base: Sixteenth })).unwrap();
-        // measure.add_beat(Beat::note(Duration::Tuplet { n: 3, m: 2, base: Sixteenth })).unwrap();
-        // measure.add_beat(Beat::note(Duration::Tuplet { n: 3, m: 2, base: Sixteenth })).unwrap();
+        measure.add_beat(Beat::note(Duration::Tuplet { n: 3, m: 2, base: Eighth })).unwrap();
+        measure.add_beat(Beat::note(Duration::Tuplet { n: 3, m: 2, base: Eighth })).unwrap();
+        measure.add_beat(Beat::note(Duration::Tuplet { n: 3, m: 2, base: Eighth })).unwrap();
 
         Self { font_family: ff.clone(), font_id: FontId::new(16.0, ff), measure, cursor_idx: 0 }
     }

@@ -348,6 +348,7 @@ impl Measure {
         if let Some(dur) = new_dur {
             let new_beat = Beat { duration: dur, kind: current.kind, tremolo: None };
             if self.set_beat_at(idx, new_beat).is_ok() {
+                self.minimize_remainder_rests_from(idx);
                 return true;
             }
         }
