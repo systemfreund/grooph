@@ -32,6 +32,17 @@ impl NoteValue {
             NoteValue::ThirtySecond => "Thirty-second",
         }
     }
+
+    pub const fn fraction(self) -> &'static str {
+        match self {
+            NoteValue::Whole => "1/1",
+            NoteValue::Half => "1/2",
+            NoteValue::Quarter => "1/4",
+            NoteValue::Eighth => "1/8",
+            NoteValue::Sixteenth => "1/16",
+            NoteValue::ThirtySecond => "1/32",
+        }
+    }
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -121,19 +132,6 @@ impl Duration {
             Duration::Simple(Sixteenth) => Some(Duration::Simple(Eighth)),
             Duration::Simple(Eighth) => Some(Duration::Simple(Quarter)),
             _ => None,
-        }
-    }
-
-    /// Mainly for debug/Display output
-    pub(crate) const fn to_glyph(&self) -> (&'static str, &'static str) {
-        // Glyphs are determined by base note value only; tuplets/rests share the same shapes
-        match self.base_note() {
-            NoteValue::Quarter => ("𝅘𝅥", "𝄽"),
-            NoteValue::Eighth => ("𝅘𝅥𝅮", "𝄾"),
-            NoteValue::Sixteenth => ("𝅘𝅥𝅯", "𝄿"),
-            NoteValue::ThirtySecond => ("𝅘𝅥𝅰", "𝅀"),
-            NoteValue::Half => ("𝅗𝅥", "𝄼"),
-            NoteValue::Whole => ("𝅝", "𝄻"),
         }
     }
 }

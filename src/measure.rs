@@ -1,7 +1,7 @@
 use crate::beaming::{BeamPlan, compute_beam_plan};
 use crate::duration::{Duration, NoteValue, default_duration_set};
 use crate::fill::best_fill_for_gap;
-use std::fmt::{Display, Formatter};
+use std::fmt::{write, Display, Formatter};
 use std::vec;
 
 /// Represents a time signature (e.g., 4/4, 3/4, 6/8)
@@ -130,11 +130,13 @@ impl Measure {
         // We compute the onset of idx and check against the next multiple of ticks_per_beat/3.
         {
             // Narrowed rule: only constrain when attempting to insert an eighth-triplet (3:2 over eighths).
-            let is_triplet_eighth = matches!(beat.duration, Duration::Tuplet { n: 3, m: 2, base: NoteValue::Eighth });
+            let is_triplet_eighth =
+                matches!(beat.duration, Duration::Tuplet { n: 3, m: 2, base: NoteValue::Eighth });
             if is_triplet_eighth {
                 let onsets = set.compute_onset_ticks(&self.beats);
                 if let Some(&onset) = onsets.get(idx) {
-                    let ticks_per_beat = set.grid.ticks_per_whole / (self.time_signature.beat_unit as u32);
+                    let ticks_per_beat =
+                        set.grid.ticks_per_whole / (self.time_signature.beat_unit as u32);
                     // Only apply when the beat supports clean triplet subdivision within the primary beat.
                     if ticks_per_beat % 3 == 0 {
                         let g3 = ticks_per_beat / 3;
@@ -143,7 +145,9 @@ impl Measure {
                             // Only restrict if the immediate prior beat subdivided this slot using a 3:2 sixteenth tuplet.
                             let prev_is_16th_triplet = if idx > 0 {
                                 match self.beats[idx - 1].duration {
-                                    Duration::Tuplet { n: 3, m: 2, base: NoteValue::Sixteenth } => true,
+                                    Duration::Tuplet { n: 3, m: 2, base: NoteValue::Sixteenth } => {
+                                        true
+                                    }
                                     _ => false,
                                 }
                             } else {
@@ -155,8 +159,10 @@ impl Measure {
                                 let next_boundary = ((rel / g3) + 1) * g3;
                                 let allowed = next_boundary - rel;
                                 if new_ticks > allowed {
-                                    let attempted = (new_ticks as f64) / (set.grid.ticks_per_whole as f64);
-                                    let remaining = (allowed as f64) / (set.grid.ticks_per_whole as f64);
+                                    let attempted =
+                                        (new_ticks as f64) / (set.grid.ticks_per_whole as f64);
+                                    let remaining =
+                                        (allowed as f64) / (set.grid.ticks_per_whole as f64);
                                     return Err(MeasureError::Unfillable { attempted, remaining });
                                 }
                             }
@@ -219,7 +225,7 @@ impl Measure {
                 let available = (available_ticks as f64) / (set.grid.ticks_per_whole as f64);
                 let attempted = (new_ticks as f64) / (set.grid.ticks_per_whole as f64);
                 Err(MeasureError::Overflow { attempted, available })
-            }
+            };
         }
         let remaining_ticks = max_ticks - new_total_ticks;
         if remaining_ticks != 0 && !Self::is_remainder_fillable(remaining_ticks) {
@@ -254,7 +260,6 @@ impl Measure {
     /// Expose the beaming plan for this measure
     pub fn beam_plan(&self) -> Option<&BeamPlan> { self.beam_plan.as_ref() }
 
-
     /// Return a vector with the absolute position (1-based) of each beat as floats.
     /// Examples:
     /// - In 4/4 with four quarters: [1.0, 2.0, 3.0, 4.0]
@@ -265,10 +270,7 @@ impl Measure {
         let onsets = set.compute_onset_ticks(&self.beats);
         // one "beat" is a note of length 1/beat_unit of a whole note
         let ticks_per_beat = set.grid.ticks_per_whole / (self.time_signature.beat_unit as u32);
-        onsets
-            .into_iter()
-            .map(|t| 1.0f32 + (t as f32) / (ticks_per_beat as f32))
-            .collect()
+        onsets.into_iter().map(|t| 1.0f32 + (t as f32) / (ticks_per_beat as f32)).collect()
     }
 
     /// Returns the current total duration in ticks (exact)
@@ -344,6 +346,7 @@ impl Measure {
         self.beats.remove(idx);
         self.fill_measure(BeatKind::Rest);
         self.minimize_remainder_rests_from(idx);
+        println!("{:#}", self)
     }
 
     pub fn fill_measure(&mut self, kind: BeatKind) {
@@ -402,39 +405,18 @@ impl Measure {
     }
 }
 
-enum DisplayItem {
-    Beat(Beat),
-    Cursor,
-}
-
 impl Display for Measure {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let remainder: Vec<_> = best_fill_for_gap(self.remaining_ticks(), &[])
-            .unwrap_or_default()
-            .iter()
-            .map(|d| DisplayItem::Beat(Beat::rest(*d)))
-            .collect();
-
-        let mut beats: Vec<_> = self.beats.iter().map(|b| DisplayItem::Beat(*b)).collect();
-        beats.append(&mut vec![DisplayItem::Cursor]);
-        beats.extend(remainder);
-
-        beats.iter().fold(Ok(()), |result, b| {
-            result.and_then(|_| match b {
-                DisplayItem::Beat(beat) => {
-                    let (note, rest) = beat.duration.to_glyph();
-                    let glyph = if beat.kind == BeatKind::Note { note } else { rest };
-                    write!(f, "{}", glyph).and_then(|_| match beat.duration {
-                        Duration::Simple(_) => Ok(()),
-                        Duration::Dotted { base: _base, dots } => {
-                            write!(f, "{}", "\u{1D16D}".repeat(dots as usize))
-                        }
-                        Duration::Tuplet { .. } => write!(f, "ᵀ"),
-                    })
-                }
-                DisplayItem::Cursor => {
-                    write!(f, "|")
-                }
+        self.beats.iter().fold(Ok(()), |result, beat| {
+            result.and_then(|_| {
+                let duration = beat.duration.base_note().fraction();
+                write!(f, "{}", duration).and_then(|_| match beat.duration {
+                    Duration::Simple(_) => Ok(()),
+                    Duration::Dotted { base: _base, dots } => {
+                        write!(f, "{}", ".".repeat(dots as usize))
+                    }
+                    Duration::Tuplet { .. } => write!(f, "ᵀ"),
+                }).and_then(|_| write!(f, " "))
             })
         })
     }
@@ -474,7 +456,8 @@ impl Measure {
         // - If the deletion point `start_idx` currently points to a rest, include it in the minimization span
         //   so adjacent rests merge even when there are non-rests earlier in the measure.
         // - Otherwise, fall back to the computed `trailing_start`.
-        let start = if start_idx < self.beats.len() && self.beats[start_idx].kind == BeatKind::Rest {
+        let start = if start_idx < self.beats.len() && self.beats[start_idx].kind == BeatKind::Rest
+        {
             start_idx
         } else {
             trailing_start
