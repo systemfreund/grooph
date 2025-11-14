@@ -158,10 +158,8 @@ impl Measure {
                                 let next_boundary = ((rel / g3) + 1) * g3;
                                 let allowed = next_boundary - rel;
                                 if new_ticks > allowed {
-                                    let attempted =
-                                        (new_ticks as f64) / (set.grid.ticks_per_whole as f64);
-                                    let remaining =
-                                        (allowed as f64) / (set.grid.ticks_per_whole as f64);
+                                    let attempted = set.grid.ticks_to_whole_notes(new_ticks);
+                                    let remaining = set.grid.ticks_to_whole_notes(allowed);
                                     return Err(MeasureError::Unfillable { attempted, remaining });
                                 }
                             }
@@ -171,25 +169,48 @@ impl Measure {
             }
         }
 
-        // Slot divisibility rule: if we're replacing an intact triplet-eighth slot, only allow
-        // durations whose tick length evenly divides that slot. This prevents inserting a simple
-        // sixteenth (1/16) into a 1/12 triplet slot, which would otherwise be "fillable" only by
-        // mixing incompatible grids (e.g., leaving a 1/48 triplet rest).
+        // Slot divisibility rule: if we're replacing an intact tuplet slot, only allow
+        // durations whose tick length evenly divides that slot. This prevents inserting invalid
+        // durations into tuplet slots.
         {
             let old_dur = self.beats[idx].duration;
-            if let Duration::Tuplet { n: 3, m: 2, base: NoteValue::Eighth } = old_dur {
-                // Triplet‑eighth items partition the span of two eighths (a quarter) into three equal slots.
-                // Each slot is 1/12 of a whole note, independent of the time signature’s primary beat.
-                let g3_slot = set.grid.ticks_per_whole / 12; // size of one triplet‑eighth slot
-                if g3_slot == 0 || new_ticks == 0 || g3_slot % new_ticks != 0 {
-                    let attempted = (new_ticks as f64) / (set.grid.ticks_per_whole as f64);
-                    let remaining = (g3_slot as f64) / (set.grid.ticks_per_whole as f64);
-                    return Err(MeasureError::Unfillable { attempted, remaining });
+            if let Duration::Tuplet { n: _, m: _, base: _ } = old_dur {
+                // Generic tuplet element slot: one note of n-in-the-time-of-m over base.
+                // Only when shrinking (replacing with a duration that is not longer than the slot),
+                // require that the new duration evenly divides this slot. This prevents mixing
+                // incompatible grids inside an intact tuplet element (e.g., placing a simple 1/16
+                // inside a 1/12 triplet-eighth slot), while still allowing legitimate growth that
+                // can consume following rests (needed for off-beat tuplet runs across boundaries).
+                if let Some(slot_ticks) = set.grid.ticks_of(&old_dur) {
+                    if slot_ticks == 0 || new_ticks == 0 {
+                        let attempted = set.grid.ticks_to_whole_notes(new_ticks);
+                        let remaining = set.grid.ticks_to_whole_notes(slot_ticks);
+                        return Err(MeasureError::Unfillable { attempted, remaining });
+                    }
+                    
+                    // Shrinking: new tick must divide slot
+                    // Growing: new tick must be an integer multiple of slot size to avoid fractional slot crossing
+                    let violates_divisibility = if new_ticks <= slot_ticks {
+                        slot_ticks % new_ticks != 0
+                    } else {
+                        new_ticks % slot_ticks != 0
+                    };
+
+                    if violates_divisibility {
+                        let attempted = set.grid.ticks_to_whole_notes(new_ticks);
+                        let remaining = set.grid.ticks_to_whole_notes(slot_ticks);
+                        return Err(MeasureError::Unfillable { attempted, remaining });
+                    }
+                } else {
+                    // If the grid cannot represent the old tuplet slot (should not happen), reject.
+                    let attempted = set.grid.ticks_to_whole_notes(new_ticks);
+                    return Err(MeasureError::Unfillable { attempted, remaining: 0.0 });
                 }
             }
         }
 
-        let old_ticks = set.grid.ticks_of(&self.beats[idx].duration).unwrap_or(0);
+        let old_dur_prev = self.beats[idx].duration;
+        let old_ticks = set.grid.ticks_of(&old_dur_prev).unwrap_or(0);
         let new_total_ticks = current_ticks - old_ticks + new_ticks;
         if new_total_ticks > max_ticks {
             // Attempt to expand into subsequent contiguous rests to accommodate growth
@@ -246,8 +267,8 @@ impl Measure {
         }
         let remaining_ticks = max_ticks - new_total_ticks;
         if remaining_ticks != 0 && !Self::is_remainder_fillable(remaining_ticks) {
-            let remaining = (remaining_ticks as f64) / (set.grid.ticks_per_whole as f64);
-            let attempted = (new_ticks as f64) / (set.grid.ticks_per_whole as f64);
+            let remaining = set.grid.ticks_to_whole_notes(remaining_ticks);
+            let attempted = set.grid.ticks_to_whole_notes(new_ticks);
             return Err(MeasureError::Unfillable { attempted, remaining });
         }
         // Perform replacement at idx
@@ -258,7 +279,25 @@ impl Measure {
         // positions exist (elegant progression for add_beat at idx+1).
         if new_ticks < old_ticks {
             let leftover = old_ticks - new_ticks;
-            if let Some(fill) = best_fill_for_gap(leftover, &[]) {
+            // If the original slot was a tuplet element, restrict the refill to divisors of that slot
+            // to keep the remainder within the same tuplet grid.
+            let allowed: Vec<Duration> = if let Duration::Tuplet { .. } = self.beats[idx].duration {
+                // Note: self.beats[idx] is still the old value here (we haven't assigned the new beat yet).
+                if let Some(slot_ticks) = set.grid.ticks_of(&self.beats[idx].duration) {
+                    default_duration_set()
+                        .durations
+                        .iter()
+                        .copied()
+                        .filter(|d| set.grid.ticks_of(d).map_or(false, |t| t > 0 && leftover % t == 0 && slot_ticks % t == 0))
+                        .collect()
+                } else {
+                    vec![]
+                }
+            } else {
+                vec![]
+            };
+            let allowed_slice: &[Duration] = if allowed.is_empty() { &[] } else { &allowed };
+            if let Some(fill) = best_fill_for_gap(leftover, allowed_slice) {
                 let mut insert_at = idx + 1;
                 for d in fill {
                     self.beats.insert(insert_at, Beat::rest(d));
@@ -618,3 +657,5 @@ mod tests {
         assert!((pos[2] - expect[2]).abs() < eps);
     }
 }
+
+// Appended tests for generalized tuplet slot divisibility across quintuplets, sextuplets, etc.

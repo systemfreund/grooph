@@ -200,7 +200,7 @@ impl Grid {
         Grid { ticks_per_whole: l }
     }
 
-    pub fn ticks_from_fraction(&self, num: u32, den: u32) -> Option<u32> {
+    pub const fn ticks_from_fraction(&self, num: u32, den: u32) -> Option<u32> {
         if den == 0 {
             return None;
         }
@@ -210,18 +210,22 @@ impl Grid {
         Some((self.ticks_per_whole / den) * num)
     }
 
-    pub fn ticks_of(&self, d: &Duration) -> Option<u32> {
+    pub const fn ticks_of(&self, d: &Duration) -> Option<u32> {
         let f = d.as_fraction();
         self.ticks_from_fraction(f.num, f.den)
     }
 
-    pub fn ticks_per_beat(&self, time_signature: &TimeSignature) -> u32 {
+    pub const fn ticks_per_beat(&self, time_signature: &TimeSignature) -> u32 {
         self.ticks_per_whole / (time_signature.beat_unit as u32)
     }
 
     /// Returns a measure's total duration in integer ticks
-    pub fn ticks_per_measure(&self, time_signature: &TimeSignature) -> u32 {
+    pub const fn ticks_per_measure(&self, time_signature: &TimeSignature) -> u32 {
         (time_signature.beats as u32) * self.ticks_per_beat(time_signature)
+    }
+
+    pub const fn ticks_to_whole_notes(&self, ticks: u32) -> f64 {
+        (ticks as f64) / (self.ticks_per_whole as f64)
     }
 }
 

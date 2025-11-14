@@ -908,7 +908,7 @@ impl Grooph {
     pub fn new(cc: &CreationContext) -> Self {
         add_font(&cc.egui_ctx);
         let ff = FontFamily::Name("music".into());
-        let mut measure = Measure::new(TimeSignature::FOUR_FOUR);
+        let mut measure = Measure::new(TimeSignature::SEVEN_EIGHT);
         measure.add_beat(Beat::note(Duration::Tuplet { n: 3, m: 2, base: Eighth })).unwrap();
         measure.add_beat(Beat::note(Duration::Tuplet { n: 3, m: 2, base: Eighth })).unwrap();
         measure.add_beat(Beat::note(Duration::Tuplet { n: 3, m: 2, base: Sixteenth })).unwrap();
