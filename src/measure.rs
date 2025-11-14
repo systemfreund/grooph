@@ -122,6 +122,41 @@ impl Measure {
             .ticks_of(&beat.duration)
             .ok_or_else(|| MeasureError::Unfillable { attempted: 0.0, remaining: 0.0 })?;
 
+        // Primary-beat-aligned tuplet group overflow safety:
+        // If we're inserting somewhere inside a primary beat window that already hosts a
+        // tuplet group whose full span equals exactly one primary beat (e.g., three eighth-triplets
+        // filling one quarter), then we must not allow the inserted duration to extend past the
+        // end of that primary beat window. This captures the musical constraint tested in
+        // `test_invalid_tuplet_insertion` where a partial tuplet group cannot be overfilled.
+        {
+            let onsets = set.compute_onset_ticks(&self.beats);
+            if let Some(&onset) = onsets.get(idx) {
+                let beat_ticks = set.grid.ticks_per_beat(&self.time_signature);
+                if beat_ticks > 0 {
+                    let rel_in_primary = onset % beat_ticks;
+                    if rel_in_primary != 0 {
+                        let window_start_tick = onset - rel_in_primary;
+                        if let Some(win_start_idx) = onsets.iter().position(|&t| t == window_start_tick) {
+                            if let Duration::Tuplet { n, .. } = self.beats[win_start_idx].duration {
+                                if let Some(elem_ticks) = set.grid.ticks_of(&self.beats[win_start_idx].duration) {
+                                    let group_ticks = elem_ticks.saturating_mul(n as u32);
+                                    // Only enforce when the tuplet group spans exactly one primary beat
+                                    if group_ticks == beat_ticks {
+                                        let allowed = beat_ticks - rel_in_primary;
+                                        if new_ticks > allowed {
+                                            let attempted = set.grid.ticks_to_whole_notes(new_ticks);
+                                            let remaining = set.grid.ticks_to_whole_notes(allowed);
+                                            return Err(MeasureError::Unfillable { attempted, remaining });
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // Tuplet slot boundary safety (contextual): if the current index sits inside an existing
         // tuplet element slot (because a prior beat subdivided this slot), then the new duration may
         // not extend past the end of that slot. This is the generalized form of the earlier narrow
@@ -562,6 +597,17 @@ mod tests {
         assert!(measure.add_beat(Beat::note(s32())).is_err());
 
         assert!(measure.add_beat(Beat::rest(triplet_8th())).is_ok());
+    }
+
+    #[test]
+    fn test_invalid_tuplet_insertion_1() {
+        let mut measure = Measure::new(TimeSignature::TWO_FOUR);
+
+        assert!(measure.add_beat(Beat::note(triplet_16th())).is_ok());
+        assert!(measure.add_beat(Beat::note(triplet_8th())).is_ok());
+        assert!(measure.add_beat(Beat::note(triplet_8th())).is_ok());
+        assert!(measure.add_beat(Beat::note(triplet_8th())).is_err());
+        assert!(measure.add_beat(Beat::note(triplet_16th())).is_ok());
     }
 
     #[test]
