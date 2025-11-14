@@ -1,7 +1,7 @@
 use crate::beaming::{BeamPlan, compute_beam_plan};
 use crate::duration::{Duration, NoteValue, default_duration_set};
 use crate::fill::best_fill_for_gap;
-use std::fmt::{write, Display, Formatter};
+use std::fmt::{Display, Formatter};
 use std::vec;
 
 /// Represents a time signature (e.g., 4/4, 3/4, 6/8)
@@ -116,7 +116,7 @@ impl Measure {
         }
         let set = default_duration_set();
         let current_ticks = self.current_ticks();
-        let max_ticks = self.time_signature.measure_duration_ticks();
+        let max_ticks = set.grid.ticks_per_measure(&self.time_signature);
         let new_ticks = set
             .grid
             .ticks_of(&beat.duration)
@@ -135,8 +135,7 @@ impl Measure {
             if is_triplet_eighth {
                 let onsets = set.compute_onset_ticks(&self.beats);
                 if let Some(&onset) = onsets.get(idx) {
-                    let ticks_per_beat =
-                        set.grid.ticks_per_whole / (self.time_signature.beat_unit as u32);
+                    let ticks_per_beat = set.grid.ticks_per_beat(&self.time_signature);
                     // Only apply when the beat supports clean triplet subdivision within the primary beat.
                     if ticks_per_beat % 3 == 0 {
                         let g3 = ticks_per_beat / 3;
@@ -179,7 +178,7 @@ impl Measure {
         {
             let old_dur = self.beats[idx].duration;
             if let Duration::Tuplet { n: 3, m: 2, base: NoteValue::Eighth } = old_dur {
-                let ticks_per_beat = set.grid.ticks_per_whole / (self.time_signature.beat_unit as u32);
+                let ticks_per_beat = set.grid.ticks_per_beat(&self.time_signature);
                 if ticks_per_beat % 3 == 0 {
                     let g3 = ticks_per_beat / 3; // one triplet-eighth slot size inside the beat
                     // Only allow replacements that are exact divisors of the slot size
@@ -288,8 +287,7 @@ impl Measure {
     pub fn beat_positions(&self) -> Vec<f32> {
         let set = default_duration_set();
         let onsets = set.compute_onset_ticks(&self.beats);
-        // one "beat" is a note of length 1/beat_unit of a whole note
-        let ticks_per_beat = set.grid.ticks_per_whole / (self.time_signature.beat_unit as u32);
+        let ticks_per_beat = set.grid.ticks_per_beat(&self.time_signature);
         onsets.into_iter().map(|t| 1.0f32 + (t as f32) / (ticks_per_beat as f32)).collect()
     }
 
@@ -302,7 +300,8 @@ impl Measure {
     /// Returns the remaining number of ticks available in this measure
     /// (never negative; 0 when the measure is full)
     pub fn remaining_ticks(&self) -> u32 {
-        let max_ticks = self.time_signature.measure_duration_ticks();
+        let set = default_duration_set();
+        let max_ticks = set.grid.ticks_per_measure(&self.time_signature);
         let used = self.current_ticks();
         (max_ticks - used).max(0)
     }
@@ -533,15 +532,22 @@ mod tests {
     }
 
     #[test]
-    fn test_triplet() {
+    fn test_triplet_in_one_four() {
         let mut measure = Measure::new(TimeSignature::ONE_FOUR);
 
         assert!(measure.add_beat(Beat::note(triplet_8th())).is_ok());
+        assert!(measure.add_beat(Beat::note(q())).is_err());
+        assert!(measure.add_beat(Beat::note(e())).is_err());
+        assert!(measure.add_beat(Beat::note(s16())).is_err());
+        assert!(measure.add_beat(Beat::note(s32())).is_err());
+
         assert!(measure.add_beat(Beat::rest(triplet_8th())).is_ok());
         assert!(measure.add_beat(Beat::note(q())).is_err());
         assert!(measure.add_beat(Beat::note(e())).is_err());
         assert!(measure.add_beat(Beat::note(s16())).is_err());
         assert!(measure.add_beat(Beat::note(s32())).is_err());
+
+        assert!(measure.add_beat(Beat::rest(triplet_8th())).is_ok());
     }
 
     #[test]
@@ -553,6 +559,14 @@ mod tests {
         assert!(measure.add_beat(Beat::note(triplet_16th())).is_ok());
         assert!(measure.add_beat(Beat::note(triplet_8th())).is_err());
         assert!(measure.add_beat(Beat::note(triplet_32nd())).is_ok());
+    }
+
+    #[test]
+    fn test_triplet_insertion_in_seven_eight() {
+        let mut measure = Measure::new(TimeSignature::SEVEN_EIGHT);
+        assert!(measure.add_beat(Beat::note(triplet_8th())).is_ok());
+        assert!(measure.add_beat(Beat::note(triplet_8th())).is_ok());
+        assert!(measure.add_beat(Beat::note(triplet_16th())).is_ok());
     }
 
     #[test]

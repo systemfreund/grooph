@@ -11,7 +11,7 @@ use crate::duration;
 use crate::duration::human_readable;
 use crate::duration::NoteValue::*;
 use crate::measure::{Beat, BeatKind};
-use eframe::egui::{Align2, Context, Key, Rangef, Stroke, global_theme_preference_buttons, pos2, Label, global_theme_preference_switch};
+use eframe::egui::{Align2, Context, Key, Rangef, Stroke, pos2, Label, global_theme_preference_switch};
 use eframe::emath::Pos2;
 use eframe::epaint::text::{FontInsert, InsertFontFamily};
 use eframe::epaint::{Color32, FontFamily, FontId};
@@ -230,7 +230,7 @@ fn draw_measure(
 
     // Compute ticks
     let set = duration::default_duration_set();
-    let cap_ticks = ts.measure_duration_ticks();
+    let cap_ticks = set.grid.ticks_per_measure(&ts);
 
     // 1) Two-pass layout with per-beat extras (dots/flags/rest pad) and normalization
     // Compute beaming flags first so we can budget extra width for flags only when not beamed
@@ -908,18 +908,20 @@ impl Grooph {
     pub fn new(cc: &CreationContext) -> Self {
         add_font(&cc.egui_ctx);
         let ff = FontFamily::Name("music".into());
-        let mut measure = Measure::new(TimeSignature::SEVEN_EIGHT);
+        let mut measure = Measure::new(TimeSignature::FOUR_FOUR);
         measure.add_beat(Beat::note(Duration::Tuplet { n: 3, m: 2, base: Eighth })).unwrap();
         measure.add_beat(Beat::note(Duration::Tuplet { n: 3, m: 2, base: Eighth })).unwrap();
-        measure.add_beat(Beat::note(Duration::Tuplet { n: 3, m: 2, base: Eighth })).unwrap();
+        measure.add_beat(Beat::note(Duration::Tuplet { n: 3, m: 2, base: Sixteenth })).unwrap();
+        measure.add_beat(Beat::note(Duration::Tuplet { n: 3, m: 2, base: ThirtySecond })).unwrap();
+        measure.add_beat(Beat::note(Duration::Tuplet { n: 3, m: 2, base: ThirtySecond })).unwrap();
 
-        measure.add_beat(Beat::note(Duration::Tuplet { n: 3, m: 2, base: Eighth })).unwrap();
-        measure.add_beat(Beat::note(Duration::Tuplet { n: 3, m: 2, base: Eighth })).unwrap();
-        measure.add_beat(Beat::note(Duration::Tuplet { n: 3, m: 2, base: Eighth })).unwrap();
-
-        measure.add_beat(Beat::note(Duration::Tuplet { n: 3, m: 2, base: Eighth })).unwrap();
-        measure.add_beat(Beat::note(Duration::Tuplet { n: 3, m: 2, base: Eighth })).unwrap();
-        measure.add_beat(Beat::note(Duration::Tuplet { n: 3, m: 2, base: Eighth })).unwrap();
+        // measure.add_beat(Beat::note(Duration::Tuplet { n: 3, m: 2, base: Eighth })).unwrap();
+        // measure.add_beat(Beat::note(Duration::Tuplet { n: 3, m: 2, base: Eighth })).unwrap();
+        // measure.add_beat(Beat::note(Duration::Tuplet { n: 3, m: 2, base: Eighth })).unwrap();
+        //
+        // measure.add_beat(Beat::note(Duration::Tuplet { n: 3, m: 2, base: Eighth })).unwrap();
+        // measure.add_beat(Beat::note(Duration::Tuplet { n: 3, m: 2, base: Eighth })).unwrap();
+        // measure.add_beat(Beat::note(Duration::Tuplet { n: 3, m: 2, base: Eighth })).unwrap();
 
         Self { font_family: ff.clone(), font_id: FontId::new(16.0, ff), measure, cursor_idx: 0 }
     }
