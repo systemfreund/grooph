@@ -168,6 +168,85 @@ impl Measure {
                             }
                         }
                     }
+
+                    // NEW: Multi-primary-beat tuplet group overflow safety.
+                    // Regardless of whether we are exactly on a primary boundary or mid-primary,
+                    // we might be inside a tuplet group that spans multiple primary beats (e.g.,
+                    // eighth‑triplet group spans two eighths). In that case, disallow inserting a
+                    // duration that would extend past the end of the active group window.
+                    // Algorithm: Walk backwards over primary beat boundaries up to a small bound and
+                    // look for a boundary that hosts a tuplet element establishing a primary‑beat‑
+                    // aligned n:m grid whose group length is an integer number of primary beats and
+                    // whose span covers the current onset.
+                    {
+                        // Start from the current primary boundary at or before onset
+                        let mut boundary_tick = onset - rel_in_primary; // <= onset
+                        let mut steps = 0u8;
+                        while boundary_tick < onset && steps < 8 {
+                            if let Some(start_idx) = onsets.iter().position(|&t| t == boundary_tick) {
+                                if let Duration::Tuplet { n, m, .. } = self.beats[start_idx].duration {
+                                    if n > 0 {
+                                        let beat_times_m = (beat_ticks as u64) * (m as u64);
+                                        if beat_times_m % (n as u64) == 0 {
+                                            let canonical_slot = (beat_times_m / (n as u64)) as u32; // beat_ticks * m / n
+                                            if let Some(elem_ticks) = set.grid.ticks_of(&self.beats[start_idx].duration) {
+                                                if elem_ticks > 0 && canonical_slot % elem_ticks == 0 {
+                                                    let group_ticks = canonical_slot.saturating_mul(n as u32); // == beat_ticks * m
+                                                    if onset > boundary_tick && onset < boundary_tick + group_ticks {
+                                                        let allowed = (boundary_tick + group_ticks) - onset;
+                                                        if new_ticks > allowed {
+                                                            let attempted = set.grid.ticks_to_whole_notes(new_ticks);
+                                                            let remaining = set.grid.ticks_to_whole_notes(allowed);
+                                                            return Err(MeasureError::Unfillable { attempted, remaining });
+                                                        }
+                                                        break; // we are inside this group; done.
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // If we've reached tick 0, stop; otherwise step one primary beat back.
+                            if boundary_tick < beat_ticks { break; }
+                            boundary_tick -= beat_ticks;
+                            steps += 1;
+                        }
+                    }
+
+                    // NEW: Insertion-driven group window safety for generic n:m tuplets.
+                    // If we're inserting a tuplet and our onset lies strictly inside an n:m
+                    // group window aligned to primary beats (period = beat_ticks * m), then the
+                    // inserted duration must not exceed the remaining ticks to that group end —
+                    // but only if such a group is actually active (i.e., started at the group
+                    // window start with a compatible tuplet).
+                    if let Duration::Tuplet { n: n_ins, m: m_ins, .. } = beat.duration {
+                        if n_ins > 0 && m_ins > 0 {
+                            let group_period = (beat_ticks as u64) * (m_ins as u64);
+                            let onset_u = onset as u64;
+                            if group_period > 0 {
+                                let r = onset_u % group_period;
+                                if r != 0 {
+                                    let group_start = (onset_u - r) as u32;
+                                    let group_end = (group_start as u64 + group_period) as u32;
+                                    // Verify the group is active: a tuplet with same n:m at group_start
+                                    if let Some(start_idx) = onsets.iter().position(|&t| t == group_start) {
+                                        if let Duration::Tuplet { n, m, .. } = self.beats[start_idx].duration {
+                                            if n as u64 == n_ins as u64 && m as u64 == m_ins as u64 {
+                                                let allowed = group_end - onset;
+                                                if new_ticks > allowed {
+                                                    let attempted = set.grid.ticks_to_whole_notes(new_ticks);
+                                                    let remaining = set.grid.ticks_to_whole_notes(allowed);
+                                                    return Err(MeasureError::Unfillable { attempted, remaining });
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -589,6 +668,7 @@ mod tests {
     const fn triplet_8th() -> Duration { Duration::Tuplet { n: 3, m: 2, base: Eighth } }
     const fn triplet_16th() -> Duration { Duration::Tuplet { n: 3, m: 2, base: Sixteenth } }
     const fn triplet_32nd() -> Duration { Duration::Tuplet { n: 3, m: 2, base: ThirtySecond } }
+    const fn quintuplet_16th() -> Duration { Duration::Tuplet { n: 5, m: 4, base: NoteValue::Sixteenth } }
 
     #[test]
     fn test_basic_measure_features() {
@@ -653,6 +733,33 @@ mod tests {
 
         // The next beat starts a new tuplet group, but we don't have enough space in our measure.
         assert!(measure.add_beat(Beat::note(triplet_32nd())).is_err());
+    }
+
+    #[test]
+    fn test_invalid_tuplet_insertion_2() {
+        let mut measure = Measure::new(TimeSignature::TWO_EIGHT);
+
+        assert!(measure.add_beat(Beat::note(triplet_8th())).is_ok());
+        assert!(measure.add_beat(Beat::note(triplet_16th())).is_ok());
+        assert!(measure.add_beat(Beat::note(triplet_8th())).is_ok());
+        // The next triplet 1/8 overfills this tuplet group, which has only space for one triplet
+        // 1/6 note left (or two triplet 1/32 subdivisions).
+        assert!(measure.add_beat(Beat::note(triplet_8th())).is_err());
+        assert!(measure.add_beat(Beat::note(triplet_32nd())).is_ok());
+        // Doesn't fit.
+        assert!(measure.add_beat(Beat::note(triplet_16th())).is_err());
+        assert!(measure.add_beat(Beat::note(triplet_32nd())).is_ok());
+
+        // The next beat starts a new tuplet group, but we don't have enough space in our measure.
+        assert!(measure.add_beat(Beat::note(triplet_32nd())).is_err());
+    }
+
+    #[test]
+    fn test_invalid_tuplet_insertion_3() {
+        let mut measure = Measure::new(TimeSignature::ONE_FOUR);
+
+        assert!(measure.add_beat(Beat::note(quintuplet_16th())).is_ok());
+        println!("{}", measure);
     }
 
     #[test]
@@ -726,5 +833,3 @@ mod tests {
         assert!((pos[2] - expect[2]).abs() < eps);
     }
 }
-
-// Appended tests for generalized tuplet slot divisibility across quintuplets, sextuplets, etc.

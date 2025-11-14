@@ -244,7 +244,7 @@ pub const COMMON_DURATIONS: [Duration; 15] = [
     Duration::Tuplet { n: 5, m: 4, base: NoteValue::Sixteenth }, // quintuplet 1/16
     Duration::Tuplet { n: 6, m: 4, base: NoteValue::Sixteenth }, // sextuplet 1/16
     Duration::Tuplet { n: 7, m: 4, base: NoteValue::Sixteenth }, // septuplet 1/16
-    Duration::Tuplet { n: 9, m: 8, base: NoteValue::ThirtySecond }, // nonuplet 1/32
+    Duration::Tuplet { n: 9, m: 8, base: NoteValue::Sixteenth }, // nonuplet 1/16
 ];
 
 #[derive(Clone, Copy, Debug)]
