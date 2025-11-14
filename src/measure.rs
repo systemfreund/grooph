@@ -172,6 +172,26 @@ impl Measure {
             }
         }
 
+        // Slot divisibility rule: if we're replacing an intact triplet-eighth slot, only allow
+        // durations whose tick length evenly divides that slot. This prevents inserting a simple
+        // sixteenth (1/16) into a 1/12 triplet slot, which would otherwise be "fillable" only by
+        // mixing incompatible grids (e.g., leaving a 1/48 triplet rest).
+        {
+            let old_dur = self.beats[idx].duration;
+            if let Duration::Tuplet { n: 3, m: 2, base: NoteValue::Eighth } = old_dur {
+                let ticks_per_beat = set.grid.ticks_per_whole / (self.time_signature.beat_unit as u32);
+                if ticks_per_beat % 3 == 0 {
+                    let g3 = ticks_per_beat / 3; // one triplet-eighth slot size inside the beat
+                    // Only allow replacements that are exact divisors of the slot size
+                    if new_ticks == 0 || g3 % new_ticks != 0 {
+                        let attempted = (new_ticks as f64) / (set.grid.ticks_per_whole as f64);
+                        let remaining = (g3 as f64) / (set.grid.ticks_per_whole as f64);
+                        return Err(MeasureError::Unfillable { attempted, remaining });
+                    }
+                }
+            }
+        }
+
         let old_ticks = set.grid.ticks_of(&self.beats[idx].duration).unwrap_or(0);
         let new_total_ticks = current_ticks - old_ticks + new_ticks;
         if new_total_ticks > max_ticks {
