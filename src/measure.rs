@@ -178,15 +178,13 @@ impl Measure {
         {
             let old_dur = self.beats[idx].duration;
             if let Duration::Tuplet { n: 3, m: 2, base: NoteValue::Eighth } = old_dur {
-                let ticks_per_beat = set.grid.ticks_per_beat(&self.time_signature);
-                if ticks_per_beat % 3 == 0 {
-                    let g3 = ticks_per_beat / 3; // one triplet-eighth slot size inside the beat
-                    // Only allow replacements that are exact divisors of the slot size
-                    if new_ticks == 0 || g3 % new_ticks != 0 {
-                        let attempted = (new_ticks as f64) / (set.grid.ticks_per_whole as f64);
-                        let remaining = (g3 as f64) / (set.grid.ticks_per_whole as f64);
-                        return Err(MeasureError::Unfillable { attempted, remaining });
-                    }
+                // Triplet‑eighth items partition the span of two eighths (a quarter) into three equal slots.
+                // Each slot is 1/12 of a whole note, independent of the time signature’s primary beat.
+                let g3_slot = set.grid.ticks_per_whole / 12; // size of one triplet‑eighth slot
+                if g3_slot == 0 || new_ticks == 0 || g3_slot % new_ticks != 0 {
+                    let attempted = (new_ticks as f64) / (set.grid.ticks_per_whole as f64);
+                    let remaining = (g3_slot as f64) / (set.grid.ticks_per_whole as f64);
+                    return Err(MeasureError::Unfillable { attempted, remaining });
                 }
             }
         }
