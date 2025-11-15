@@ -76,4 +76,3 @@ pub(super) fn tuplet_glyphs(n: u8) -> String {
         .filter_map(|c| c.to_digit(10).map(|d| TUPLET_DIGITS[d as usize]))
         .collect()
 }
-

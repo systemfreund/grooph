@@ -235,7 +235,7 @@ pub const COMMON_DURATIONS: [Duration; 15] = [
     Duration::Simple(NoteValue::Sixteenth),
     Duration::Simple(NoteValue::ThirtySecond),
     Duration::Dotted { base: NoteValue::Quarter, dots: 1 }, // dotted 1/4
-    Duration::Dotted { base: NoteValue::Eighth, dots: 1 }, // dotted 1/8
+    Duration::Dotted { base: NoteValue::Eighth, dots: 1 },  // dotted 1/8
     Duration::Dotted { base: NoteValue::Sixteenth, dots: 1 }, // dotted 1/16
     Duration::Dotted { base: NoteValue::ThirtySecond, dots: 1 }, // dotted 1/32
     Duration::Tuplet { n: 3, m: 2, base: NoteValue::Eighth }, // triplet 1/8
@@ -277,8 +277,8 @@ pub const fn default_grid() -> Grid { default_duration_set().grid }
 
 #[cfg(test)]
 mod tests {
+    use super::{Duration, default_duration_set, default_grid};
     use crate::duration::NoteValue::{Eighth, Quarter};
-    use super::{default_duration_set, default_grid, Duration};
 
     #[test]
     fn roundtrip_ticks_presence() {

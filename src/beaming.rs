@@ -1,4 +1,4 @@
-use crate::duration::{Duration, NoteValue, default_duration_set, DurationSet};
+use crate::duration::{Duration, DurationSet, NoteValue, default_duration_set};
 use crate::measure::{Beat, BeatKind, Measure, TimeSignature};
 
 /// Number of beams implied by a duration (eighth = 1, sixteenth = 2, 32nd = 3).
@@ -118,11 +118,7 @@ pub fn compute_beam_plan(measure: &Measure) -> BeamPlan {
     }
 }
 
-fn finalize_group(
-    groups: &mut Vec<BeamGroup>,
-    beats: &Vec<Beat>,
-    cur: &Vec<usize>,
-) {
+fn finalize_group(groups: &mut Vec<BeamGroup>, beats: &Vec<Beat>, cur: &Vec<usize>) {
     if cur.is_empty() {
         return;
     }
@@ -409,5 +405,4 @@ mod tests {
         assert_eq!(g2.beam_counts, vec![1, 1]);
         assert_eq!(g2.continuity, vec![1]);
     }
-
 }

@@ -8,10 +8,12 @@ use crate::app::glyphs::{
     rest_glyph_for_duration, ts_glyphs, tuplet_glyphs,
 };
 use crate::duration;
-use crate::duration::human_readable;
 use crate::duration::NoteValue::*;
+use crate::duration::human_readable;
 use crate::measure::{Beat, BeatKind};
-use eframe::egui::{Align2, Context, Key, Rangef, Stroke, pos2, Label, global_theme_preference_switch};
+use eframe::egui::{
+    Align2, Context, Key, Label, Rangef, Stroke, global_theme_preference_switch, pos2,
+};
 use eframe::emath::Pos2;
 use eframe::epaint::text::{FontInsert, InsertFontFamily};
 use eframe::epaint::{Color32, FontFamily, FontId};
@@ -436,15 +438,20 @@ fn draw_measure(
         while start < k {
             let first_dur = beats[start].duration;
             // One full tuplet group spans `n * ticks(first_element)` ticks.
-            let target_ticks: u32 = set.grid.ticks_of(&first_dur).unwrap_or(0).saturating_mul(n as u32);
+            let target_ticks: u32 =
+                set.grid.ticks_of(&first_dur).unwrap_or(0).saturating_mul(n as u32);
             let mut acc_ticks: u32 = 0;
             let mut end = start;
             let mut has_rest = false;
             while end < k {
-                if beats[end].kind == BeatKind::Rest { has_rest = true; }
+                if beats[end].kind == BeatKind::Rest {
+                    has_rest = true;
+                }
                 let dt = set.grid.ticks_of(&beats[end].duration).unwrap_or(0);
                 acc_ticks = acc_ticks.saturating_add(dt);
-                if acc_ticks >= target_ticks { break; }
+                if acc_ticks >= target_ticks {
+                    break;
+                }
                 end += 1;
             }
             // Push the group [start..=end]. In well-formed rhythms acc_ticks should equal target_ticks.
@@ -485,7 +492,9 @@ fn draw_measure(
             for gi in 0..groups.len() {
                 let g = &groups[gi];
                 let idxs = &tup_note_idxs_vec[gi];
-                if g.contains_rest || idxs.len() < 2 { continue; }
+                if g.contains_rest || idxs.len() < 2 {
+                    continue;
+                }
                 'outer: for bg in &bp.groups {
                     if idxs.iter().all(|idx| bg.note_indices.contains(idx)) {
                         let mut pos_map = std::collections::HashMap::new();
@@ -498,13 +507,24 @@ fn draw_measure(
                             let b = pair[1];
                             let la = *pos_map.get(&a).unwrap();
                             let lb = *pos_map.get(&b).unwrap();
-                            if la >= lb { ok = false; break; }
-                            for cidx in la..lb {
-                                if *bg.continuity.get(cidx).unwrap_or(&0) < 1 { ok = false; break; }
+                            if la >= lb {
+                                ok = false;
+                                break;
                             }
-                            if !ok { break; }
+                            for cidx in la..lb {
+                                if *bg.continuity.get(cidx).unwrap_or(&0) < 1 {
+                                    ok = false;
+                                    break;
+                                }
+                            }
+                            if !ok {
+                                break;
+                            }
                         }
-                        if ok { fully_beamed_vec[gi] = true; break 'outer; }
+                        if ok {
+                            fully_beamed_vec[gi] = true;
+                            break 'outer;
+                        }
                     }
                 }
             }
@@ -523,26 +543,40 @@ fn draw_measure(
                 // If groups are immediately adjacent and beamed together, force brackets for both,
                 // regardless of whether one of them contains rests (the rest-containing group already
                 // brackets by default; this ensures the all-notes neighbor also brackets for clarity).
-                if g_left.end + 1 != g_right.start { continue; }
+                if g_left.end + 1 != g_right.start {
+                    continue;
+                }
                 let left_idxs = &tup_note_idxs_vec[i];
                 let right_idxs = &tup_note_idxs_vec[i + 1];
-                if left_idxs.is_empty() || right_idxs.is_empty() { continue; }
+                if left_idxs.is_empty() || right_idxs.is_empty() {
+                    continue;
+                }
                 let last_left = *left_idxs.last().unwrap();
                 let first_right = right_idxs[0];
                 let mut beamed_together = false;
                 'bgscan: for bg in &bp.groups {
-                    if bg.note_indices.contains(&last_left) && bg.note_indices.contains(&first_right) {
+                    if bg.note_indices.contains(&last_left)
+                        && bg.note_indices.contains(&first_right)
+                    {
                         // map to local positions
                         let mut pos_map = std::collections::HashMap::new();
-                        for (li, gi2) in bg.note_indices.iter().enumerate() { pos_map.insert(*gi2, li); }
+                        for (li, gi2) in bg.note_indices.iter().enumerate() {
+                            pos_map.insert(*gi2, li);
+                        }
                         let la = *pos_map.get(&last_left).unwrap();
                         let lb = *pos_map.get(&first_right).unwrap();
                         if la < lb {
                             let mut ok = true;
                             for cidx in la..lb {
-                                if *bg.continuity.get(cidx).unwrap_or(&0) < 1 { ok = false; break; }
+                                if *bg.continuity.get(cidx).unwrap_or(&0) < 1 {
+                                    ok = false;
+                                    break;
+                                }
                             }
-                            if ok { beamed_together = true; break 'bgscan; }
+                            if ok {
+                                beamed_together = true;
+                                break 'bgscan;
+                            }
                         }
                     }
                 }
@@ -739,7 +773,10 @@ impl App for Grooph {
             if idx < self.measure.beats().len() {
                 let b = self.measure.beats()[idx];
                 let desc = human_readable(&b.duration);
-                let kind = match b.kind { BeatKind::Note => "note", BeatKind::Rest => "rest" };
+                let kind = match b.kind {
+                    BeatKind::Note => "note",
+                    BeatKind::Rest => "rest",
+                };
                 label = format!("Beat: {}, {} {}", beat_text, desc, kind);
             }
             ui.add(Label::new(label));
@@ -835,10 +872,7 @@ impl App for Grooph {
                     self.measure.remove(idx);
                     // Move cursor left, like a text editor caret
                     let new_len = self.measure.beats().len();
-                    let new_pos = self
-                        .cursor_idx
-                        .saturating_sub(1)
-                        .min(new_len.saturating_sub(1));
+                    let new_pos = self.cursor_idx.saturating_sub(1).min(new_len.saturating_sub(1));
                     self.cursor_idx = new_pos;
                 }
                 // Numeric duration assignment: 1=1/4, 2=1/8, 3=1/16, 4=1/32
@@ -862,7 +896,9 @@ impl App for Grooph {
                 if i.key_pressed(Key::Num2) {
                     let cur = self.measure.beats()[idx];
                     let new_dur = match cur.duration {
-                        Duration::Tuplet { n, m, base: _ } => Duration::Tuplet { n, m, base: Eighth },
+                        Duration::Tuplet { n, m, base: _ } => {
+                            Duration::Tuplet { n, m, base: Eighth }
+                        }
                         _ => Duration::Simple(Eighth),
                     };
                     let new_beat = match cur.kind {
@@ -874,7 +910,9 @@ impl App for Grooph {
                 if i.key_pressed(Key::Num3) {
                     let cur = self.measure.beats()[idx];
                     let new_dur = match cur.duration {
-                        Duration::Tuplet { n, m, base: _ } => Duration::Tuplet { n, m, base: Sixteenth },
+                        Duration::Tuplet { n, m, base: _ } => {
+                            Duration::Tuplet { n, m, base: Sixteenth }
+                        }
                         _ => Duration::Simple(Sixteenth),
                     };
                     let new_beat = match cur.kind {
@@ -886,7 +924,9 @@ impl App for Grooph {
                 if i.key_pressed(Key::Num4) {
                     let cur = self.measure.beats()[idx];
                     let new_dur = match cur.duration {
-                        Duration::Tuplet { n, m, base: _ } => Duration::Tuplet { n, m, base: ThirtySecond },
+                        Duration::Tuplet { n, m, base: _ } => {
+                            Duration::Tuplet { n, m, base: ThirtySecond }
+                        }
                         _ => Duration::Simple(ThirtySecond),
                     };
                     let new_beat = match cur.kind {

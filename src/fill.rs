@@ -16,7 +16,9 @@ pub(crate) fn best_fill_for_gap(gap_ticks: u32, allowed: &[Duration]) -> Option<
     let mut coins: Vec<(u32, Duration, u32)> = set
         .durations
         .iter()
-        .filter(|d| (allowed.is_empty() && !matches!(d, Duration::Dotted { .. })) || allowed.contains(d))
+        .filter(|d| {
+            (allowed.is_empty() && !matches!(d, Duration::Dotted { .. })) || allowed.contains(d)
+        })
         .filter_map(|d| {
             let den = d.denominator();
             set.grid.ticks_of(d).map(|t| (t, *d, den))

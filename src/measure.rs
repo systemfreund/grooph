@@ -183,21 +183,39 @@ impl Measure {
                         let mut boundary_tick = onset - rel_in_primary; // <= onset
                         let mut steps = 0u8;
                         while boundary_tick < onset && steps < 8 {
-                            if let Some(start_idx) = onsets.iter().position(|&t| t == boundary_tick) {
-                                if let Duration::Tuplet { n, m, .. } = self.beats[start_idx].duration {
+                            if let Some(start_idx) = onsets.iter().position(|&t| t == boundary_tick)
+                            {
+                                if let Duration::Tuplet { n, m, .. } =
+                                    self.beats[start_idx].duration
+                                {
                                     if n > 0 {
                                         let beat_times_m = (beat_ticks as u64) * (m as u64);
                                         if beat_times_m % (n as u64) == 0 {
                                             let canonical_slot = (beat_times_m / (n as u64)) as u32; // beat_ticks * m / n
-                                            if let Some(elem_ticks) = set.grid.ticks_of(&self.beats[start_idx].duration) {
-                                                if elem_ticks > 0 && canonical_slot % elem_ticks == 0 {
-                                                    let group_ticks = canonical_slot.saturating_mul(n as u32); // == beat_ticks * m
-                                                    if onset > boundary_tick && onset < boundary_tick + group_ticks {
-                                                        let allowed = (boundary_tick + group_ticks) - onset;
+                                            if let Some(elem_ticks) =
+                                                set.grid.ticks_of(&self.beats[start_idx].duration)
+                                            {
+                                                if elem_ticks > 0
+                                                    && canonical_slot % elem_ticks == 0
+                                                {
+                                                    let group_ticks =
+                                                        canonical_slot.saturating_mul(n as u32); // == beat_ticks * m
+                                                    if onset > boundary_tick
+                                                        && onset < boundary_tick + group_ticks
+                                                    {
+                                                        let allowed =
+                                                            (boundary_tick + group_ticks) - onset;
                                                         if new_ticks > allowed {
-                                                            let attempted = set.grid.ticks_to_whole_notes(new_ticks);
-                                                            let remaining = set.grid.ticks_to_whole_notes(allowed);
-                                                            return Err(MeasureError::Unfillable { attempted, remaining });
+                                                            let attempted = set
+                                                                .grid
+                                                                .ticks_to_whole_notes(new_ticks);
+                                                            let remaining = set
+                                                                .grid
+                                                                .ticks_to_whole_notes(allowed);
+                                                            return Err(MeasureError::Unfillable {
+                                                                attempted,
+                                                                remaining,
+                                                            });
                                                         }
                                                         break; // we are inside this group; done.
                                                     }
@@ -209,7 +227,9 @@ impl Measure {
                             }
 
                             // If we've reached tick 0, stop; otherwise step one primary beat back.
-                            if boundary_tick < beat_ticks { break; }
+                            if boundary_tick < beat_ticks {
+                                break;
+                            }
                             boundary_tick -= beat_ticks;
                             steps += 1;
                         }
@@ -231,14 +251,24 @@ impl Measure {
                                     let group_start = (onset_u - r) as u32;
                                     let group_end = (group_start as u64 + group_period) as u32;
                                     // Verify the group is active: a tuplet with same n:m at group_start
-                                    if let Some(start_idx) = onsets.iter().position(|&t| t == group_start) {
-                                        if let Duration::Tuplet { n, m, .. } = self.beats[start_idx].duration {
-                                            if n as u64 == n_ins as u64 && m as u64 == m_ins as u64 {
+                                    if let Some(start_idx) =
+                                        onsets.iter().position(|&t| t == group_start)
+                                    {
+                                        if let Duration::Tuplet { n, m, .. } =
+                                            self.beats[start_idx].duration
+                                        {
+                                            if n as u64 == n_ins as u64 && m as u64 == m_ins as u64
+                                            {
                                                 let allowed = group_end - onset;
                                                 if new_ticks > allowed {
-                                                    let attempted = set.grid.ticks_to_whole_notes(new_ticks);
-                                                    let remaining = set.grid.ticks_to_whole_notes(allowed);
-                                                    return Err(MeasureError::Unfillable { attempted, remaining });
+                                                    let attempted =
+                                                        set.grid.ticks_to_whole_notes(new_ticks);
+                                                    let remaining =
+                                                        set.grid.ticks_to_whole_notes(allowed);
+                                                    return Err(MeasureError::Unfillable {
+                                                        attempted,
+                                                        remaining,
+                                                    });
                                                 }
                                             }
                                         }
@@ -668,7 +698,9 @@ mod tests {
     const fn triplet_8th() -> Duration { Duration::Tuplet { n: 3, m: 2, base: Eighth } }
     const fn triplet_16th() -> Duration { Duration::Tuplet { n: 3, m: 2, base: Sixteenth } }
     const fn triplet_32nd() -> Duration { Duration::Tuplet { n: 3, m: 2, base: ThirtySecond } }
-    const fn quintuplet_16th() -> Duration { Duration::Tuplet { n: 5, m: 4, base: NoteValue::Sixteenth } }
+    const fn quintuplet_16th() -> Duration {
+        Duration::Tuplet { n: 5, m: 4, base: NoteValue::Sixteenth }
+    }
 
     #[test]
     fn test_basic_measure_features() {
