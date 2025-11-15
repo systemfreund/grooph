@@ -1,4 +1,4 @@
-mod grouping;
+pub(crate) mod grouping;
 
 use crate::beaming::{compute_beam_plan, BeamPlan};
 use crate::duration::NoteValue::{Eighth, Sixteenth, ThirtySecond};
@@ -144,10 +144,10 @@ impl Measure {
             .ok_or_else(|| MeasureError::Unfillable { attempted: 0.0, remaining: 0.0 })?;
 
         // Reject grid-incompatible replacement into a tuplet slot
-        if let Duration::Tuplet { n: n_old, base: base_old, .. } = dur_old {
+        if let Duration::Tuplet { n: n_old, m: m_old, .. } = dur_old {
             match beat.duration {
-                Duration::Tuplet { n: n_new, base: base_new, .. }
-                    if n_new == n_old && base_new == base_old =>
+                Duration::Tuplet { n: n_new, m: m_new, .. }
+                    if n_new == n_old && m_new == m_old =>
                 {
                     // ok: same tuplet grid
                 }
@@ -218,50 +218,12 @@ impl Measure {
                 Err(MeasureError::Overflow { attempted, available })
             };
         }
-        // Attempt-then-fill (Option B): do not modify the measure until we know we can
-        // spell the leftover exactly using a context-aware set of durations.
+
+        // Attempt-then-fill: do not modify the measure until we know we can spell the leftover
+        // exactly using a context-aware set of durations.
         if new_ticks < old_ticks {
             let leftover = old_ticks - new_ticks;
-            let mut allowed: Vec<Duration> = Vec::new();
-
-            // Case 1: Inserting a tuplet — fill remainder by repeating the same tuplet duration
-            if let Duration::Tuplet { .. } = beat.duration {
-                if let Some(unit_ticks) = set.grid.ticks_of(&beat.duration) {
-                    if unit_ticks > 0 && leftover % unit_ticks == 0 {
-                        // Allow only the same tuplet duration as the inserted one.
-                        // `best_fill_for_gap` will repeat it as many times as needed.
-                        allowed.push(beat.duration);
-                    }
-                }
-            }
-
-            // Case 2: If the old slot is a tuplet, also allow divisors of that slot (stay in its grid)
-            if let Duration::Tuplet { .. } = dur_old {
-                if let Some(slot_ticks) = set.grid.ticks_of(&dur_old) {
-                    for d in set.durations.iter().copied() {
-                        if let Some(t) = set.grid.ticks_of(&d) {
-                            if t > 0 && leftover % t == 0 && slot_ticks % t == 0 {
-                                if !allowed.contains(&d) {
-                                    allowed.push(d);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Case 3: Otherwise, let the global set participate, but only those that divide leftover
-            // if allowed.is_empty() {
-            //     for d in set.durations.iter().copied() {
-            //         if let Some(t) = set.grid.ticks_of(&d) {
-            //             if t > 0 && leftover % t == 0 {
-            //                 if !allowed.contains(&d) {
-            //                     allowed.push(d);
-            //                 }
-            //             }
-            //         }
-            //     }
-            // }
+            let allowed: Vec<Duration> = Vec::new();
 
             // Require an exact contextual spelling for the leftover
             if let Some(fill) = best_fill_for_gap(leftover, &allowed) {
@@ -275,12 +237,6 @@ impl Measure {
                 self.recompute_beams();
                 Ok(())
             } else {
-                #[cfg(test)]
-                eprintln!(
-                    "leftover fill failed: leftover_ticks={}, allowed_len={}",
-                    leftover,
-                    allowed.len()
-                );
                 let attempted = set.grid.ticks_to_whole_notes(new_ticks);
                 let remaining = set.grid.ticks_to_whole_notes(leftover);
                 Err(MeasureError::Unfillable { attempted, remaining })
@@ -289,7 +245,6 @@ impl Measure {
             // No leftover (equal or growth accommodated earlier). Just replace.
             self.beats[idx] = beat;
             self.recompute_beams();
-            //TODO revisit later. shouldn't the current_ticks() always be max_ticks? in that case we can remove max_ticks
             assert_eq!(self.current_ticks(), max_ticks);
             Ok(())
         }
@@ -484,7 +439,6 @@ mod tests {
             measure.add_beat(Beat::note(q())).is_err(),
             "simple 1/4 note must not fit in triplet 1/8 group"
         );
-        // TODO:
         assert!(
             measure.add_beat(Beat::note(e())).is_err(),
             "simple 1/8 note must not fit in triplet 1/8 group"
@@ -508,6 +462,7 @@ mod tests {
 
         assert!(measure.add_beat(Beat::note(t8())).is_ok());
         assert!(measure.add_beat(Beat::note(t8())).is_ok());
+        assert!(measure.add_beat(Beat::note(t16())).is_ok());
         assert!(measure.add_beat(Beat::note(t16())).is_ok());
         // The next triplet 1/8 overfills this tuplet group, which has only space for one triplet
         // 1/6 note left (or two triplet 1/32 subdivisions).
@@ -596,7 +551,6 @@ mod tests {
         measure.add_beat(Beat::note(Duration::Simple(Sixteenth))).unwrap();
         measure.add_beat(Beat::note(Duration::Simple(Eighth))).unwrap();
         measure.add_beat(Beat::note(Duration::Simple(Sixteenth))).unwrap();
-        measure.add_beat(Beat::note(Duration::Dotted { base: ThirtySecond, dots: 1 })).unwrap();
         measure.add_beat(Beat::rest(Duration::Dotted { base: Eighth, dots: 1 })).unwrap();
     }
 

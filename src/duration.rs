@@ -1,6 +1,7 @@
 use NoteValue::{Half, Quarter, Whole};
 use crate::duration::NoteValue::{Eighth, Sixteenth, ThirtySecond};
 use crate::measure::{Beat, TimeSignature};
+use crate::measure::grouping::default_groups_for;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum NoteValue {
@@ -229,9 +230,34 @@ impl Grid {
     pub const fn ticks_to_whole_notes(&self, ticks: u32) -> f64 {
         (ticks as f64) / (self.ticks_per_whole as f64)
     }
+
+    /// Compute the primary grouping stride in ticks for a time signature.
+    pub(super) fn primary_boundaries(&self, ts: &TimeSignature) -> Vec<u32> {
+        let subbeat = self.ticks_per_beat(ts); // ticks per beat_unit
+        let measure_ticks = self.ticks_per_measure(ts); // ticks per measure
+
+        let groups = default_groups_for(ts);
+
+        let beats_sum: u32 = groups.iter().map(|&g| g as u32).sum();
+        if beats_sum != ts.beats as u32 {
+            // Invalid grouping for ts; safe fallback: no in‑measure boundaries
+            return Vec::new();
+        }
+
+        let mut acc = 0u32;
+        let mut bounds = Vec::new();
+        for &cnt in &groups {
+            acc += (cnt as u32) * subbeat;
+            if acc < measure_ticks {
+                bounds.push(acc);
+            }
+        }
+        bounds
+    }
+
 }
 
-pub const COMMON_DURATIONS: [Duration; 16] = [
+pub const COMMON_DURATIONS: [Duration; 15] = [
     q(),
     e(),
     s(),
@@ -239,7 +265,6 @@ pub const COMMON_DURATIONS: [Duration; 16] = [
     Duration::Dotted { base: Quarter, dots: 1 }, // dotted 1/4
     Duration::Dotted { base: Eighth, dots: 1 },  // dotted 1/8
     Duration::Dotted { base: Sixteenth, dots: 1 }, // dotted 1/16
-    Duration::Dotted { base: ThirtySecond, dots: 1 }, // dotted 1/32
     t8(), // triplet 1/8
     t16(), // triplet 1/16
     t32(), // triplet 1/32
