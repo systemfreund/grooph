@@ -13,17 +13,27 @@ pub(crate) fn best_fill_for_gap(gap_ticks: u32, allowed: &[Duration]) -> Option<
     let set = default_duration_set();
 
     // Build coin list: (ticks, duration, weight)
-    let mut coins: Vec<(u32, Duration, u32)> = set
-        .durations
-        .iter()
-        .filter(|d| {
-            (allowed.is_empty() && !matches!(d, Duration::Dotted { .. })) || allowed.contains(d)
-        })
-        .filter_map(|d| {
-            let den = d.denominator();
-            set.grid.ticks_of(d).map(|t| (t, *d, den))
-        })
-        .collect();
+    let mut coins: Vec<(u32, Duration, u32)> = if !allowed.is_empty() {
+        allowed
+            .iter()
+            .copied()
+            .filter_map(|d| {
+                let den = d.denominator();
+                set.grid.ticks_of(&d).map(|t| (t, d, den))
+            })
+            .collect()
+    } else {
+        set
+            .durations
+            .iter()
+            .copied()
+            .filter(|d| !matches!(d, Duration::Dotted { .. }))
+            .filter_map(|d| {
+                let den = d.denominator();
+                set.grid.ticks_of(&d).map(|t| (t, d, den))
+            })
+            .collect()
+    };
     // Prefer smaller coin as the last step → small duration ends up at the end of the returned sequence
     coins.sort_unstable_by(|a, b| a.0.cmp(&b.0));
 
