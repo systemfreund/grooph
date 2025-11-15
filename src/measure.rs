@@ -1,5 +1,5 @@
-use crate::beaming::{compute_beam_plan, BeamPlan};
-use crate::duration::{default_duration_set, Duration, NoteValue};
+use crate::beaming::{BeamPlan, compute_beam_plan};
+use crate::duration::{Duration, NoteValue, default_duration_set};
 use crate::fill::best_fill_for_gap;
 use std::fmt::{Display, Formatter};
 use std::vec;
@@ -697,7 +697,7 @@ impl Measure {
 mod tests {
     use super::*;
     use crate::duration::NoteValue::{Eighth, Sixteenth, ThirtySecond};
-    use crate::duration::{e, q, qt16, s, t16, t32, t8, th, Duration, NoteValue};
+    use crate::duration::{Duration, NoteValue, e, q, qt16, s, t8, t16, t32, th};
 
     #[test]
     fn test_basic_measure_features() {
@@ -863,11 +863,18 @@ mod tests {
     }
 
     #[test]
-    fn test_measure_with_quintuplet_16th_followed_by_t8() {
+    fn test_tuplets_0() {
         let mut measure = Measure::new(TimeSignature::SEVEN_EIGHT);
 
         assert!(measure.add_beat(Beat::note(q())).is_ok());
         assert!(measure.add_beat(Beat::note(qt16())).is_ok());
         assert!(measure.add_beat(Beat::note(t8())).is_ok());
+        // Can't add non-tuplet notes in tuplet groups:
+        assert!(measure.add_beat(Beat::note(q())).is_err());
+        assert!(measure.add_beat(Beat::note(e())).is_err());
+        assert!(measure.add_beat(Beat::note(s())).is_err());
+        assert!(measure.add_beat(Beat::note(th())).is_err());
+        // Can add tuplet notes in tuplet groups when they are not overfilling:
+        assert!(measure.add_beat(Beat::note(t16())).is_ok());
     }
 }
