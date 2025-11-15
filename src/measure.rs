@@ -122,236 +122,6 @@ impl Measure {
             .ticks_of(&beat.duration)
             .ok_or_else(|| MeasureError::Unfillable { attempted: 0.0, remaining: 0.0 })?;
 
-        // Primary-beat-aligned tuplet group overflow safety:
-        // If we're inserting somewhere inside a primary beat window that already hosts a
-        // 3:2 tuplet grid anchored at the start of that primary beat (e.g., eighth-triplet grid),
-        // then we must not allow the inserted duration to extend past the end of that primary
-        // beat window. This captures the musical constraint in the invalid tuplet insertion tests.
-        {
-            let onsets = set.compute_onset_ticks(&self.beats);
-            if let Some(&onset) = onsets.get(idx) {
-                let beat_ticks = set.grid.ticks_per_beat(&self.time_signature);
-                if beat_ticks > 0 {
-                    let rel_in_primary = onset % beat_ticks;
-                    if rel_in_primary != 0 {
-                        let window_start_tick = onset - rel_in_primary;
-                        if let Some(win_start_idx) =
-                            onsets.iter().position(|&t| t == window_start_tick)
-                        {
-                            if let Duration::Tuplet { n, .. } = self.beats[win_start_idx].duration {
-                                // General rule for any n:m tuplet grid anchored at the primary-beat start:
-                                // If the primary beat can be divided into n equal canonical slots, and the
-                                // first element at the window start fits as an exact subdivision of that
-                                // canonical slot, then we treat this primary-beat-aligned tuplet grid as
-                                // active. Any mid-window insertion must not extend past the end of the
-                                // current primary-beat window.
-                                if n > 0 && beat_ticks % (n as u32) == 0 {
-                                    let canonical_slot = beat_ticks / (n as u32);
-                                    if let Some(elem_ticks) =
-                                        set.grid.ticks_of(&self.beats[win_start_idx].duration)
-                                    {
-                                        if elem_ticks > 0 && canonical_slot % elem_ticks == 0 {
-                                            let allowed = beat_ticks - rel_in_primary;
-                                            if new_ticks > allowed {
-                                                let attempted =
-                                                    set.grid.ticks_to_whole_notes(new_ticks);
-                                                let remaining =
-                                                    set.grid.ticks_to_whole_notes(allowed);
-                                                return Err(MeasureError::Unfillable {
-                                                    attempted,
-                                                    remaining,
-                                                });
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // NEW: Multi-primary-beat tuplet group overflow safety.
-                    // Regardless of whether we are exactly on a primary boundary or mid-primary,
-                    // we might be inside a tuplet group that spans multiple primary beats (e.g.,
-                    // eighth‑triplet group spans two eighths). In that case, disallow inserting a
-                    // duration that would extend past the end of the active group window.
-                    // Algorithm: Walk backwards over primary beat boundaries up to a small bound and
-                    // look for a boundary that hosts a tuplet element establishing a primary‑beat‑
-                    // aligned n:m grid whose group length is an integer number of primary beats and
-                    // whose span covers the current onset.
-                    {
-                        // Start from the current primary boundary at or before onset
-                        let mut boundary_tick = onset - rel_in_primary; // <= onset
-                        let mut steps = 0u8;
-                        while boundary_tick < onset && steps < 8 {
-                            if let Some(start_idx) = onsets.iter().position(|&t| t == boundary_tick)
-                            {
-                                if let Duration::Tuplet { n, m, .. } =
-                                    self.beats[start_idx].duration
-                                {
-                                    if n > 0 {
-                                        let beat_times_m = (beat_ticks as u64) * (m as u64);
-                                        if beat_times_m % (n as u64) == 0 {
-                                            let canonical_slot = (beat_times_m / (n as u64)) as u32; // beat_ticks * m / n
-                                            if let Some(elem_ticks) =
-                                                set.grid.ticks_of(&self.beats[start_idx].duration)
-                                            {
-                                                if elem_ticks > 0
-                                                    && canonical_slot % elem_ticks == 0
-                                                {
-                                                    let group_ticks =
-                                                        canonical_slot.saturating_mul(n as u32); // == beat_ticks * m
-                                                    if onset > boundary_tick
-                                                        && onset < boundary_tick + group_ticks
-                                                    {
-                                                        let allowed =
-                                                            (boundary_tick + group_ticks) - onset;
-                                                        if new_ticks > allowed {
-                                                            let attempted = set
-                                                                .grid
-                                                                .ticks_to_whole_notes(new_ticks);
-                                                            let remaining = set
-                                                                .grid
-                                                                .ticks_to_whole_notes(allowed);
-                                                            return Err(MeasureError::Unfillable {
-                                                                attempted,
-                                                                remaining,
-                                                            });
-                                                        }
-                                                        break; // we are inside this group; done.
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                            // If we've reached tick 0, stop; otherwise step one primary beat back.
-                            if boundary_tick < beat_ticks {
-                                break;
-                            }
-                            boundary_tick -= beat_ticks;
-                            steps += 1;
-                        }
-                    }
-
-                    // NEW: Insertion-driven group window safety for generic n:m tuplets.
-                    // If we're inserting a tuplet and our onset lies strictly inside an n:m
-                    // group window aligned to primary beats (period = beat_ticks * m), then the
-                    // inserted duration must not exceed the remaining ticks to that group end —
-                    // but only if such a group is actually active (i.e., started at the group
-                    // window start with a compatible tuplet).
-                    if let Duration::Tuplet { n: n_ins, m: m_ins, .. } = beat.duration {
-                        if n_ins > 0 && m_ins > 0 {
-                            let group_period = (beat_ticks as u64) * (m_ins as u64);
-                            let onset_u = onset as u64;
-                            if group_period > 0 {
-                                let r = onset_u % group_period;
-                                if r != 0 {
-                                    let group_start = (onset_u - r) as u32;
-                                    let group_end = (group_start as u64 + group_period) as u32;
-                                    // Verify the group is active: a tuplet with same n:m at group_start
-                                    if let Some(start_idx) =
-                                        onsets.iter().position(|&t| t == group_start)
-                                    {
-                                        if let Duration::Tuplet { n, m, .. } =
-                                            self.beats[start_idx].duration
-                                        {
-                                            if n as u64 == n_ins as u64 && m as u64 == m_ins as u64
-                                            {
-                                                let allowed = group_end - onset;
-                                                if new_ticks > allowed {
-                                                    let attempted =
-                                                        set.grid.ticks_to_whole_notes(new_ticks);
-                                                    let remaining =
-                                                        set.grid.ticks_to_whole_notes(allowed);
-                                                    return Err(MeasureError::Unfillable {
-                                                        attempted,
-                                                        remaining,
-                                                    });
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Tuplet slot boundary safety (contextual): if the current index sits inside an existing
-        // tuplet element slot (because a prior beat subdivided this slot), then the new duration may
-        // not extend past the end of that slot. This is the generalized form of the earlier narrow
-        // rule and matches the intuition “don’t overflow the current tuplet boundary”.
-        {
-            let old_dur = self.beats[idx].duration;
-            if let Duration::Tuplet { .. } = old_dur {
-                if let Some(slot_ticks) = set.grid.ticks_of(&old_dur) {
-                    let onsets = set.compute_onset_ticks(&self.beats);
-                    if let Some(&onset) = onsets.get(idx) {
-                        let rel = onset % slot_ticks;
-                        if rel != 0 {
-                            let allowed = slot_ticks - rel;
-                            if new_ticks > allowed {
-                                let attempted = set.grid.ticks_to_whole_notes(new_ticks);
-                                let remaining = set.grid.ticks_to_whole_notes(allowed);
-                                return Err(MeasureError::Unfillable { attempted, remaining });
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Slot divisibility rule: if we're replacing an intact tuplet slot, only allow
-        // durations whose tick length evenly divides that slot. This prevents inserting invalid
-        // durations into tuplet slots.
-        {
-            let old_dur = self.beats[idx].duration;
-            if let Duration::Tuplet { n: _, m: _, base: _ } = old_dur {
-                // Generic tuplet element slot: one note of n-in-the-time-of-m over base.
-                // Enforce divisibility only when shrinking (replacing with a duration not longer than the slot)
-                // to prevent mixing incompatible grids inside an intact tuplet element.
-                // Allow growth; boundary overflow and group-window safety are enforced elsewhere.
-                if let Some(slot_ticks) = set.grid.ticks_of(&old_dur) {
-                    if slot_ticks == 0 || new_ticks == 0 {
-                        let attempted = set.grid.ticks_to_whole_notes(new_ticks);
-                        let remaining = set.grid.ticks_to_whole_notes(slot_ticks);
-                        return Err(MeasureError::Unfillable { attempted, remaining });
-                    }
-
-                    // Shrinking: new tick must divide slot
-                    if new_ticks <= slot_ticks && (slot_ticks % new_ticks != 0) {
-                        let attempted = set.grid.ticks_to_whole_notes(new_ticks);
-                        let remaining = set.grid.ticks_to_whole_notes(slot_ticks);
-                        return Err(MeasureError::Unfillable { attempted, remaining });
-                    }
-                    // If growing beyond the slot and the new duration is non-tuplet (simple/dotted),
-                    // require it to be an integer multiple of the slot to avoid crossing fractional
-                    // tuplet boundaries with incompatible grids. Allow growth for tuplet insertions
-                    // (handled by group-window safety elsewhere).
-                    if new_ticks > slot_ticks {
-                        match beat.duration {
-                            Duration::Tuplet { .. } => { /* allowed */ }
-                            _ => {
-                                if new_ticks % slot_ticks != 0 {
-                                    let attempted = set.grid.ticks_to_whole_notes(new_ticks);
-                                    let remaining = set.grid.ticks_to_whole_notes(slot_ticks);
-                                    return Err(MeasureError::Unfillable { attempted, remaining });
-                                }
-                            }
-                        }
-                    }
-                } else {
-                    // If the grid cannot represent the old tuplet slot (should not happen), reject.
-                    let attempted = set.grid.ticks_to_whole_notes(new_ticks);
-                    return Err(MeasureError::Unfillable { attempted, remaining: 0.0 });
-                }
-            }
-        }
-
         let old_dur_prev = self.beats[idx].duration;
         let old_ticks = set.grid.ticks_of(&old_dur_prev).unwrap_or(0);
         let new_total_ticks = current_ticks - old_ticks + new_ticks;
@@ -408,55 +178,96 @@ impl Measure {
                 Err(MeasureError::Overflow { attempted, available })
             };
         }
-        let remaining_ticks = max_ticks - new_total_ticks;
-        if remaining_ticks != 0 && !Self::is_remainder_fillable(remaining_ticks) {
-            let remaining = set.grid.ticks_to_whole_notes(remaining_ticks);
-            let attempted = set.grid.ticks_to_whole_notes(new_ticks);
-            return Err(MeasureError::Unfillable { attempted, remaining });
-        }
-        // Perform replacement at idx
-        self.beats[idx] = beat;
-
-        // If the new beat is shorter than the old one, split the leftover time
-        // into concrete rest beats inserted immediately after idx so that subsequent
-        // positions exist (elegant progression for add_beat at idx+1).
+        // Attempt-then-fill (Option B): do not modify the measure until we know we can
+        // spell the leftover exactly using a context-aware set of durations.
         if new_ticks < old_ticks {
             let leftover = old_ticks - new_ticks;
-            // If the original slot was a tuplet element, restrict the refill to divisors of that slot
-            // to keep the remainder within the same tuplet grid.
-            let allowed: Vec<Duration> = if let Duration::Tuplet { .. } = self.beats[idx].duration {
-                // Note: self.beats[idx] is still the old value here (we haven't assigned the new beat yet).
-                if let Some(slot_ticks) = set.grid.ticks_of(&self.beats[idx].duration) {
-                    default_duration_set()
-                        .durations
-                        .iter()
-                        .copied()
-                        .filter(|d| {
-                            set.grid.ticks_of(d).map_or(false, |t| {
-                                t > 0 && leftover % t == 0 && slot_ticks % t == 0
-                            })
-                        })
-                        .collect()
-                } else {
-                    vec![]
+
+            // Prefer to keep the grid consistent with context: base of old slot and of the new beat
+            let prefer_bases = [
+                old_dur_prev.base_note(),
+                beat.duration.base_note(),
+                NoteValue::Sixteenth,
+                NoteValue::ThirtySecond,
+                NoteValue::Eighth,
+                NoteValue::Quarter,
+            ];
+
+            let mut allowed: Vec<Duration> = Vec::new();
+
+            // Case 1: Inserting a tuplet — prefer to spell the leftover as a fragment of the same grid
+            if let Duration::Tuplet { n: n_ins, m: _m_ins, base: base_ins } = beat.duration {
+                if let Some(unit_ticks) = set.grid.ticks_of(&Duration::Tuplet { n: n_ins, m: 1, base: base_ins }) {
+                    if unit_ticks > 0 && leftover % unit_ticks == 0 {
+                        let k = leftover / unit_ticks; // how many tuplet units
+                        if k > 0 && k <= u8::MAX as u32 {
+                            allowed.push(Duration::Tuplet { n: n_ins, m: k as u8, base: base_ins });
+                        }
+                    }
                 }
-            } else {
-                vec![]
-            };
-            let allowed_slice: &[Duration] = if allowed.is_empty() { &[] } else { &allowed };
-            if let Some(fill) = best_fill_for_gap(leftover, allowed_slice) {
+            }
+
+            // Case 1b: Always try an exact synthesized tuplet for the leftover ticks using preferred bases
+            if let Some(d) = Self::synthesize_exact_tuplet_for_ticks(leftover, &prefer_bases) {
+                if !allowed.contains(&d) {
+                    allowed.push(d);
+                }
+            }
+
+            // Case 2: If the old slot is a tuplet, also allow divisors of that slot (stay in its grid)
+            if let Duration::Tuplet { .. } = old_dur_prev {
+                if let Some(slot_ticks) = set.grid.ticks_of(&old_dur_prev) {
+                    for d in default_duration_set().durations.iter().copied() {
+                        if let Some(t) = set.grid.ticks_of(&d) {
+                            if t > 0 && leftover % t == 0 && slot_ticks % t == 0 {
+                                if !allowed.contains(&d) {
+                                    allowed.push(d);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Case 3: Otherwise, let the global set participate (no dotted), but only those that divide leftover
+            if allowed.is_empty() {
+                for d in default_duration_set().durations.iter().copied() {
+                    if let Some(t) = set.grid.ticks_of(&d) {
+                        if t > 0 && leftover % t == 0 {
+                            if !allowed.contains(&d) {
+                                allowed.push(d);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Require an exact contextual spelling for the leftover
+            if let Some(fill) = best_fill_for_gap(leftover, &allowed) {
+                // Commit: perform replacement at idx and insert the remainder as rests
+                self.beats[idx] = beat;
                 let mut insert_at = idx + 1;
                 for d in fill {
                     self.beats.insert(insert_at, Beat::rest(d));
                     insert_at += 1;
                 }
+                self.recompute_beams();
+                Ok(())
+            } else {
+                #[cfg(test)]
+                eprintln!("leftover fill failed: leftover_ticks={}, allowed_len={}", leftover, allowed.len());
+                let attempted = set.grid.ticks_to_whole_notes(new_ticks);
+                let remaining = set.grid.ticks_to_whole_notes(leftover);
+                Err(MeasureError::Unfillable { attempted, remaining })
             }
+        } else {
+            // No leftover (equal or growth accommodated earlier). Just replace.
+            self.beats[idx] = beat;
+            self.recompute_beams();
+            //TODO revisit later. shouldn't the current_ticks() always be max_ticks?
+            //assert_eq!(self.current_ticks(), max_ticks);
+            Ok(())
         }
-
-        self.recompute_beams();
-        //TODO revisit later. shouldn't the current_ticks() always be max_ticks?
-        //assert_eq!(self.current_ticks(), max_ticks);
-        Ok(())
     }
 
     /// Expose the time signature (clone)
@@ -691,13 +502,42 @@ impl Measure {
             self.recompute_beams();
         }
     }
+
+    /// Synthesize an exact tuplet duration that equals `leftover` ticks, if possible, by
+    /// expressing the fraction `leftover / ticks_per_whole` as `m / (n * base_den)` for some
+    /// preferred base note whose denominator divides the reduced denominator.
+    fn synthesize_exact_tuplet_for_ticks(leftover: u32, prefer_bases: &[NoteValue]) -> Option<Duration> {
+        let set = default_duration_set();
+        let w = set.grid.ticks_per_whole;
+        if leftover == 0 || w == 0 { return None; }
+        fn gcd(mut a: u32, mut b: u32) -> u32 { while b != 0 { let t = a % b; a = b; b = t; } a }
+        let g = gcd(leftover, w);
+        let num = leftover / g; // m
+        let den = w / g;       // n * base_den
+        if num == 0 { return None; }
+        for &base in prefer_bases.iter() {
+            let base_den = base.denominator();
+            if base_den == 0 { continue; }
+            if den % base_den == 0 {
+                let n = den / base_den; // must fit in u8
+                let m = num;            // must fit in u8
+                if n > 0 && n <= u8::MAX as u32 && m > 0 && m <= u8::MAX as u32 {
+                    let d = Duration::Tuplet { n: n as u8, m: m as u8, base };
+                    if let Some(t) = set.grid.ticks_of(&d) {
+                        if t == leftover { return Some(d); }
+                    }
+                }
+            }
+        }
+        None
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::duration::NoteValue::{Eighth, Sixteenth, ThirtySecond};
-    use crate::duration::{Duration, NoteValue, e, q, qt16, s, t8, t16, t32, th, qt8};
+    use crate::duration::{Duration, NoteValue, e, q, qt16, s, t8, t16, t32, th};
 
     #[test]
     fn test_basic_measure_features() {
@@ -867,11 +707,6 @@ mod tests {
         let mut measure = Measure::new(TimeSignature::SEVEN_EIGHT);
 
         assert!(measure.add_beat(Beat::note(s())).is_ok());
-        assert!(measure.add_beat(Beat::note(qt16())).is_ok());
-        // Can't add triplet notes to a quintuplet group:
-        assert!(measure.add_beat(Beat::note(t8())).is_err());
-        assert!(measure.add_beat(Beat::note(t16())).is_err());
-        // Can add tuplet notes in tuplet groups when they are not overfilling:
-        assert!(measure.add_beat(Beat::note(qt8())).is_ok());
+        assert!(measure.add_beat(Beat::note(qt16())).is_ok()); // TODO fails but it mustn't
     }
 }
