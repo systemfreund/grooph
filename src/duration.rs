@@ -13,7 +13,7 @@ pub enum NoteValue {
 }
 
 impl NoteValue {
-    pub const fn denominator(self) -> u32 {
+    pub const fn denominator(self) -> u8 {
         match self {
             Whole => 1,
             Half => 2,
@@ -80,22 +80,22 @@ const fn reduce(f: Frac) -> Frac {
 impl Duration {
     const fn as_fraction(&self) -> Frac {
         match *self {
-            Duration::Simple(base) => Frac { num: 1, den: base.denominator() },
+            Duration::Simple(base) => Frac { num: 1, den: base.denominator() as u32 },
             Duration::Dotted { base, dots } => {
                 let base_den = base.denominator();
                 let k = dots as u32;
                 if k == 0 {
-                    return Frac { num: 1, den: base_den };
+                    return Frac { num: 1, den: base_den as u32 };
                 }
                 // Dotted: sum of geometric series -> (2^{k+1}-1)/2^k of the base note
                 let two_pow_k = 1 << k; // 2^k
                 let num = (two_pow_k << 1) - 1; // 2^{k+1} - 1
                 let den = two_pow_k; // 2^k
-                reduce(Frac { num, den: den * base_den })
+                reduce(Frac { num, den: den * base_den as u32 })
             }
             Duration::Tuplet { n, m, base } => {
                 let base_den = base.denominator();
-                reduce(Frac { num: m as u32, den: (n as u32) * base_den })
+                reduce(Frac { num: m as u32, den: (n as u32) * base_den as u32 })
             }
         }
     }
@@ -290,7 +290,7 @@ pub const fn default_grid() -> Grid { default_duration_set().grid }
 
 #[cfg(test)]
 mod tests {
-    use super::{default_duration_set, default_grid, Duration};
+    use super::{default_duration_set, default_grid, e, q, t8, Duration};
     use crate::duration::NoteValue::Eighth;
 
     #[test]
@@ -306,5 +306,11 @@ mod tests {
         let e_ticks = default_grid().ticks_of(&Duration::Simple(Eighth));
         let e_dotted_ticks = default_grid().ticks_of(&Duration::Dotted { base: Eighth, dots: 1 });
         assert_ne!(e_ticks, e_dotted_ticks);
+    }
+
+    #[test]
+    fn ticks_test() {
+        println!("{}", default_duration_set().grid.ticks_of(&e()).unwrap());
+        println!("{}", default_duration_set().grid.ticks_of(&t8()).unwrap());
     }
 }
