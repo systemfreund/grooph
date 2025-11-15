@@ -1,4 +1,6 @@
-use crate::measure::{Beat, Measure, TimeSignature};
+use NoteValue::{Half, Quarter, Whole};
+use crate::duration::NoteValue::{Eighth, Sixteenth, ThirtySecond};
+use crate::measure::{Beat, TimeSignature};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum NoteValue {
@@ -13,34 +15,34 @@ pub enum NoteValue {
 impl NoteValue {
     pub const fn denominator(self) -> u32 {
         match self {
-            NoteValue::Whole => 1,
-            NoteValue::Half => 2,
-            NoteValue::Quarter => 4,
-            NoteValue::Eighth => 8,
-            NoteValue::Sixteenth => 16,
-            NoteValue::ThirtySecond => 32,
+            Whole => 1,
+            Half => 2,
+            Quarter => 4,
+            Eighth => 8,
+            Sixteenth => 16,
+            ThirtySecond => 32,
         }
     }
 
     pub const fn name(self) -> &'static str {
         match self {
-            NoteValue::Whole => "Whole",
-            NoteValue::Half => "Half",
-            NoteValue::Quarter => "Quarter",
-            NoteValue::Eighth => "Eighth",
-            NoteValue::Sixteenth => "Sixteenth",
-            NoteValue::ThirtySecond => "Thirty-second",
+            Whole => "Whole",
+            Half => "Half",
+            Quarter => "Quarter",
+            Eighth => "Eighth",
+            Sixteenth => "Sixteenth",
+            ThirtySecond => "Thirty-second",
         }
     }
 
     pub const fn fraction(self) -> &'static str {
         match self {
-            NoteValue::Whole => "1/1",
-            NoteValue::Half => "1/2",
-            NoteValue::Quarter => "1/4",
-            NoteValue::Eighth => "1/8",
-            NoteValue::Sixteenth => "1/16",
-            NoteValue::ThirtySecond => "1/32",
+            Whole => "1/1",
+            Half => "1/2",
+            Quarter => "1/4",
+            Eighth => "1/8",
+            Sixteenth => "1/16",
+            ThirtySecond => "1/32",
         }
     }
 }
@@ -157,12 +159,12 @@ pub fn human_readable(d: &Duration) -> String {
         }
         Duration::Tuplet { n, m, base } => {
             let base_lower = match base {
-                NoteValue::Whole => "whole",
-                NoteValue::Half => "half",
-                NoteValue::Quarter => "quarter",
-                NoteValue::Eighth => "eighth",
-                NoteValue::Sixteenth => "sixteenth",
-                NoteValue::ThirtySecond => "thirty-second",
+                Whole => "whole",
+                Half => "half",
+                Quarter => "quarter",
+                Eighth => "eighth",
+                Sixteenth => "sixteenth",
+                ThirtySecond => "thirty-second",
             };
             let name = match n {
                 3 => Some("Triplet"),
@@ -230,22 +232,31 @@ impl Grid {
 }
 
 pub const COMMON_DURATIONS: [Duration; 15] = [
-    Duration::Simple(NoteValue::Quarter),
-    Duration::Simple(NoteValue::Eighth),
-    Duration::Simple(NoteValue::Sixteenth),
-    Duration::Simple(NoteValue::ThirtySecond),
-    Duration::Dotted { base: NoteValue::Quarter, dots: 1 }, // dotted 1/4
-    Duration::Dotted { base: NoteValue::Eighth, dots: 1 },  // dotted 1/8
-    Duration::Dotted { base: NoteValue::Sixteenth, dots: 1 }, // dotted 1/16
-    Duration::Dotted { base: NoteValue::ThirtySecond, dots: 1 }, // dotted 1/32
-    Duration::Tuplet { n: 3, m: 2, base: NoteValue::Eighth }, // triplet 1/8
-    Duration::Tuplet { n: 3, m: 2, base: NoteValue::Sixteenth }, // triplet 1/16
-    Duration::Tuplet { n: 3, m: 2, base: NoteValue::ThirtySecond }, // triplet 1/32
-    Duration::Tuplet { n: 5, m: 4, base: NoteValue::Sixteenth }, // quintuplet 1/16
-    Duration::Tuplet { n: 6, m: 4, base: NoteValue::Sixteenth }, // sextuplet 1/16
-    Duration::Tuplet { n: 7, m: 4, base: NoteValue::Sixteenth }, // septuplet 1/16
-    Duration::Tuplet { n: 9, m: 8, base: NoteValue::Sixteenth }, // nonuplet 1/16
+    Duration::Simple(Quarter),
+    Duration::Simple(Eighth),
+    Duration::Simple(Sixteenth),
+    Duration::Simple(ThirtySecond),
+    Duration::Dotted { base: Quarter, dots: 1 }, // dotted 1/4
+    Duration::Dotted { base: Eighth, dots: 1 },  // dotted 1/8
+    Duration::Dotted { base: Sixteenth, dots: 1 }, // dotted 1/16
+    Duration::Dotted { base: ThirtySecond, dots: 1 }, // dotted 1/32
+    Duration::Tuplet { n: 3, m: 2, base: Eighth }, // triplet 1/8
+    Duration::Tuplet { n: 3, m: 2, base: Sixteenth }, // triplet 1/16
+    Duration::Tuplet { n: 3, m: 2, base: ThirtySecond }, // triplet 1/32
+    Duration::Tuplet { n: 5, m: 4, base: Sixteenth }, // quintuplet 1/16
+    Duration::Tuplet { n: 6, m: 4, base: Sixteenth }, // sextuplet 1/16
+    Duration::Tuplet { n: 7, m: 4, base: Sixteenth }, // septuplet 1/16
+    Duration::Tuplet { n: 9, m: 8, base: Sixteenth }, // nonuplet 1/16
 ];
+
+pub(crate) const fn q() -> Duration { Duration::Simple(Quarter) }
+pub(crate) const fn e() -> Duration { Duration::Simple(Eighth) }
+pub(crate) const fn s() -> Duration { Duration::Simple(Sixteenth) }
+pub(crate) const fn th() -> Duration { Duration::Simple(ThirtySecond) }
+pub(crate) const fn t8() -> Duration { Duration::Tuplet { n: 3, m: 2, base: Eighth } }
+pub(crate) const fn t16() -> Duration { Duration::Tuplet { n: 3, m: 2, base: Sixteenth } }
+pub(crate) const fn t32() -> Duration { Duration::Tuplet { n: 3, m: 2, base: ThirtySecond } }
+pub(crate) const fn qt16() -> Duration { Duration::Tuplet { n: 5, m: 4, base: Sixteenth } }
 
 #[derive(Clone, Copy, Debug)]
 pub struct DurationSet {
@@ -277,8 +288,8 @@ pub const fn default_grid() -> Grid { default_duration_set().grid }
 
 #[cfg(test)]
 mod tests {
-    use super::{Duration, default_duration_set, default_grid};
-    use crate::duration::NoteValue::{Eighth, Quarter};
+    use super::{default_duration_set, default_grid, Duration};
+    use crate::duration::NoteValue::Eighth;
 
     #[test]
     fn roundtrip_ticks_presence() {

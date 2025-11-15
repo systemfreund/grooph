@@ -242,14 +242,8 @@ pub(super) fn primary_boundaries(ds: DurationSet, ts: &TimeSignature) -> Vec<u32
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::duration::{Duration, NoteValue};
+    use crate::duration::{e, s, t8, t16};
     use crate::measure::{Beat, Measure, TimeSignature};
-
-    const fn q() -> Duration { Duration::Simple(NoteValue::Quarter) }
-    const fn e() -> Duration { Duration::Simple(NoteValue::Eighth) }
-    const fn s() -> Duration { Duration::Simple(NoteValue::Sixteenth) }
-    const fn t8() -> Duration { Duration::Tuplet { n: 3, m: 2, base: NoteValue::Eighth } }
-    const fn t16() -> Duration { Duration::Tuplet { n: 6, m: 4, base: NoteValue::Sixteenth } }
 
     #[test]
     fn beaming_simple_eighths_group_by_quarters() {
