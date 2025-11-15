@@ -1,6 +1,6 @@
 mod glyphs;
 
-use crate::duration::{e, s, Duration, NoteValue};
+use crate::duration::{e, s, t8, Duration, NoteValue};
 use crate::measure::{Measure, TimeSignature};
 
 use crate::app::glyphs::{
@@ -587,6 +587,106 @@ fn draw_measure(
             }
         }
 
+        // Third pass: if a tuplet group's boundary note is beamed to an external non-tuplet neighbor,
+        // force a bracket to visually separate from that neighbor (addresses the case where a preceding
+        // eighth note beams into the triplet group).
+        if let Some(bp) = &beam_plan {
+            for gi in 0..groups.len() {
+                if !number_only_vec[gi] {
+                    continue;
+                }
+                let g = &groups[gi];
+                let first_idx = g.start;
+                let last_idx = g.end;
+
+                let mut external_beam = false;
+                // Check left neighbor
+                if first_idx > 0 {
+                    let left_idx = first_idx - 1;
+                    // Only relevant if neighbor is a Note and not part of this tuplet group
+                    if beats[left_idx].kind == BeatKind::Note {
+                        // Ensure neighbor is not the same tuple group (it's outside by construction);
+                        // still, verify it isn't any tuplet with same (n,m) immediately preceding which
+                        // would have formed a group earlier (defensive check not strictly necessary).
+                        let is_same_tuplet = match beats[left_idx].duration {
+                            Duration::Tuplet { n, m, .. } => n == g.n && m == g.m,
+                            _ => false,
+                        };
+                        if !is_same_tuplet {
+                            'bgscan_l: for bg in &bp.groups {
+                                if bg.note_indices.contains(&left_idx)
+                                    && bg.note_indices.contains(&first_idx)
+                                {
+                                    // Map to local positions and check continuity between them
+                                    let mut pos_map = std::collections::HashMap::new();
+                                    for (li, gi2) in bg.note_indices.iter().enumerate() {
+                                        pos_map.insert(*gi2, li);
+                                    }
+                                    let la = *pos_map.get(&left_idx).unwrap();
+                                    let lb = *pos_map.get(&first_idx).unwrap();
+                                    if la < lb {
+                                        let mut ok = true;
+                                        for cidx in la..lb {
+                                            if *bg.continuity.get(cidx).unwrap_or(&0) < 1 {
+                                                ok = false;
+                                                break;
+                                            }
+                                        }
+                                        if ok {
+                                            external_beam = true;
+                                            break 'bgscan_l;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Check right neighbor if not already determined
+                if !external_beam && last_idx + 1 < beats.len() {
+                    let right_idx = last_idx + 1;
+                    if beats[right_idx].kind == BeatKind::Note {
+                        let is_same_tuplet = match beats[right_idx].duration {
+                            Duration::Tuplet { n, m, .. } => n == g.n && m == g.m,
+                            _ => false,
+                        };
+                        if !is_same_tuplet {
+                            'bgscan_r: for bg in &bp.groups {
+                                if bg.note_indices.contains(&last_idx)
+                                    && bg.note_indices.contains(&right_idx)
+                                {
+                                    let mut pos_map = std::collections::HashMap::new();
+                                    for (li, gi2) in bg.note_indices.iter().enumerate() {
+                                        pos_map.insert(*gi2, li);
+                                    }
+                                    let la = *pos_map.get(&last_idx).unwrap();
+                                    let lb = *pos_map.get(&right_idx).unwrap();
+                                    if la < lb {
+                                        let mut ok = true;
+                                        for cidx in la..lb {
+                                            if *bg.continuity.get(cidx).unwrap_or(&0) < 1 {
+                                                ok = false;
+                                                break;
+                                            }
+                                        }
+                                        if ok {
+                                            external_beam = true;
+                                            break 'bgscan_r;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if external_beam {
+                    number_only_vec[gi] = false;
+                }
+            }
+        }
+
         for (gi, g) in groups.iter().enumerate() {
             let number_only = number_only_vec[gi];
 
@@ -948,7 +1048,16 @@ impl Grooph {
     pub fn new(cc: &CreationContext) -> Self {
         add_font(&cc.egui_ctx);
         let ff = FontFamily::Name("music".into());
-        let measure = Measure::new(TimeSignature::SEVEN_EIGHT);
+        let mut measure = Measure::new(TimeSignature::SEVEN_EIGHT);
+        measure.add_beat(Beat::note(e())).unwrap();
+        measure.add_beat(Beat::note(e())).unwrap();
+        measure.add_beat(Beat::note(e())).unwrap();
+        measure.add_beat(Beat::note(t8())).unwrap();
+        measure.add_beat(Beat::note(t8())).unwrap();
+        measure.add_beat(Beat::note(t8())).unwrap();
+        measure.add_beat(Beat::note(e())).unwrap();
+        measure.add_beat(Beat::note(e())).unwrap();
+
         Self { font_family: ff.clone(), font_id: FontId::new(16.0, ff), measure, cursor_idx: 0 }
     }
 }
