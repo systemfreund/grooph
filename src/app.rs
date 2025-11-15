@@ -915,11 +915,18 @@ impl App for Grooph {
                 // Edits apply only when cursor is on a committed beat
                 let idx = self.cursor_idx.min(beats_len.saturating_sub(1));
                 if i.key_pressed(Key::Delete) {
-                    // Delete beat at cursor and shift subsequent beats left
+                    // Remove beat at cursor
                     self.measure.remove(idx);
-                    // Do not move cursor; it now points to the next beat (like text editors)
+                    // Move cursor right
+                    let new_pos = (self.measure.beats().len() - 1).min(self.cursor_idx + 1);
+                    self.cursor_idx = new_pos;
+                }
+                if i.key_pressed(Key::Backspace) {
+                    // Remove beat at cursor
+                    self.measure.remove(idx);
+                    // Move cursor left
                     let new_len = self.measure.beats().len();
-                    let new_pos = self.cursor_idx.min(new_len.saturating_sub(1));
+                    let new_pos = self.cursor_idx.saturating_sub(1).min(new_len - 1);
                     self.cursor_idx = new_pos;
                 }
                 if i.key_pressed(Key::Space) {
@@ -966,14 +973,6 @@ impl App for Grooph {
                             }
                         }
                     }
-                }
-                if i.key_pressed(Key::Backspace) {
-                    // Remove beat at cursor
-                    self.measure.remove(idx);
-                    // Move cursor left, like a text editor caret
-                    let new_len = self.measure.beats().len();
-                    let new_pos = self.cursor_idx.saturating_sub(1).min(new_len.saturating_sub(1));
-                    self.cursor_idx = new_pos;
                 }
                 // Numeric duration assignment: 1=1/4, 2=1/8, 3=1/16, 4=1/32
                 // Preserve BeatKind (note/rest). When current beat is a tuplet, preserve (n,m)
