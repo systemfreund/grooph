@@ -231,19 +231,20 @@ impl Grid {
     }
 }
 
-pub const COMMON_DURATIONS: [Duration; 15] = [
-    Duration::Simple(Quarter),
-    Duration::Simple(Eighth),
-    Duration::Simple(Sixteenth),
-    Duration::Simple(ThirtySecond),
+pub const COMMON_DURATIONS: [Duration; 16] = [
+    q(),
+    e(),
+    s(),
+    th(),
     Duration::Dotted { base: Quarter, dots: 1 }, // dotted 1/4
     Duration::Dotted { base: Eighth, dots: 1 },  // dotted 1/8
     Duration::Dotted { base: Sixteenth, dots: 1 }, // dotted 1/16
     Duration::Dotted { base: ThirtySecond, dots: 1 }, // dotted 1/32
-    Duration::Tuplet { n: 3, m: 2, base: Eighth }, // triplet 1/8
-    Duration::Tuplet { n: 3, m: 2, base: Sixteenth }, // triplet 1/16
-    Duration::Tuplet { n: 3, m: 2, base: ThirtySecond }, // triplet 1/32
-    Duration::Tuplet { n: 5, m: 4, base: Sixteenth }, // quintuplet 1/16
+    t8(), // triplet 1/8
+    t16(), // triplet 1/16
+    t32(), // triplet 1/32
+    qt8(), // quintuplet 1/8
+    qt16(), // quintuplet 1/16
     Duration::Tuplet { n: 6, m: 4, base: Sixteenth }, // sextuplet 1/16
     Duration::Tuplet { n: 7, m: 4, base: Sixteenth }, // septuplet 1/16
     Duration::Tuplet { n: 9, m: 8, base: Sixteenth }, // nonuplet 1/16
@@ -256,6 +257,7 @@ pub(crate) const fn th() -> Duration { Duration::Simple(ThirtySecond) }
 pub(crate) const fn t8() -> Duration { Duration::Tuplet { n: 3, m: 2, base: Eighth } }
 pub(crate) const fn t16() -> Duration { Duration::Tuplet { n: 3, m: 2, base: Sixteenth } }
 pub(crate) const fn t32() -> Duration { Duration::Tuplet { n: 3, m: 2, base: ThirtySecond } }
+pub(crate) const fn qt8() -> Duration { Duration::Tuplet { n: 5, m: 4, base: Eighth } }
 pub(crate) const fn qt16() -> Duration { Duration::Tuplet { n: 5, m: 4, base: Sixteenth } }
 
 #[derive(Clone, Copy, Debug)]

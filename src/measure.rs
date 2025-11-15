@@ -697,7 +697,7 @@ impl Measure {
 mod tests {
     use super::*;
     use crate::duration::NoteValue::{Eighth, Sixteenth, ThirtySecond};
-    use crate::duration::{Duration, NoteValue, e, q, qt16, s, t8, t16, t32, th};
+    use crate::duration::{Duration, NoteValue, e, q, qt16, s, t8, t16, t32, th, qt8};
 
     #[test]
     fn test_basic_measure_features() {
@@ -866,15 +866,12 @@ mod tests {
     fn test_tuplets_0() {
         let mut measure = Measure::new(TimeSignature::SEVEN_EIGHT);
 
-        assert!(measure.add_beat(Beat::note(q())).is_ok());
+        assert!(measure.add_beat(Beat::note(s())).is_ok());
         assert!(measure.add_beat(Beat::note(qt16())).is_ok());
-        assert!(measure.add_beat(Beat::note(t8())).is_ok());
-        // Can't add non-tuplet notes in tuplet groups:
-        assert!(measure.add_beat(Beat::note(q())).is_err());
-        assert!(measure.add_beat(Beat::note(e())).is_err());
-        assert!(measure.add_beat(Beat::note(s())).is_err());
-        assert!(measure.add_beat(Beat::note(th())).is_err());
+        // Can't add triplet notes to a quintuplet group:
+        assert!(measure.add_beat(Beat::note(t8())).is_err());
+        assert!(measure.add_beat(Beat::note(t16())).is_err());
         // Can add tuplet notes in tuplet groups when they are not overfilling:
-        assert!(measure.add_beat(Beat::note(t16())).is_ok());
+        assert!(measure.add_beat(Beat::note(qt8())).is_ok());
     }
 }
