@@ -1,6 +1,6 @@
 mod glyphs;
 
-use crate::duration::{e, qt16, t16, t8, Duration};
+use crate::duration::{e, qt16, t16, t32, t8, Duration};
 use crate::measure::{Measure, TimeSignature};
 use crate::render_plan::plan_measure;
 
@@ -757,18 +757,16 @@ impl Grooph {
     pub fn new(cc: &CreationContext) -> Self {
         add_font(&cc.egui_ctx);
         let ff = FontFamily::Name("music".into());
-        let mut measure = Measure::new_init(TimeSignature::FOUR_SIXTEENTH, BeatKind::Note);
-        // measure.add_beat(Beat::note(t8())).unwrap();
-        // measure.add_beat(Beat::note(t8())).unwrap();
-        // measure.add_beat(Beat::note(t8())).unwrap();
-        //measure.add_beat(Beat::note(e())).unwrap();
+        let mut measure = Measure::new(TimeSignature::TWO_FOUR);
 
-        //measure.add_beat(Beat::note(e())).unwrap();
-        measure.add_beat(Beat::note(qt16())).unwrap();
-        // measure.add_beat(Beat::note(t16())).unwrap();
-        // measure.add_beat(Beat::note(t16())).unwrap();
+        assert!(measure.add_beat(Beat::note(t8())).is_ok());
+        assert!(measure.add_beat(Beat::note(t16())).is_ok());
+        assert!(measure.add_beat(Beat::note(t16())).is_ok());
+        assert!(measure.add_beat(Beat::note(t8())).is_ok());
 
-        //measure.add_beat(Beat::rest(e())).unwrap();
+        assert!(measure.add_beat(Beat::note(t16())).is_ok());
+        assert!(measure.add_beat(Beat::note(t16())).is_ok());
+        assert!(measure.add_beat(Beat::note(t32())).is_ok());
 
         Self { font_family: ff.clone(), font_id: FontId::new(16.0, ff), measure, cursor_idx: 0 }
     }
