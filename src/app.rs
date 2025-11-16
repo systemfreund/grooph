@@ -2,6 +2,7 @@ mod glyphs;
 
 use crate::duration::{e, s, t8, Duration, NoteValue};
 use crate::measure::{Measure, TimeSignature};
+use crate::render_plan::plan_measure;
 
 use crate::app::glyphs::{
     GLYPH_AUGMENTATION_DOT, GLYPH_CLEF_PERCUSSION, GLYPH_NOTEHEAD_BLACK, flag_glyph_for_duration,
@@ -234,18 +235,17 @@ fn draw_measure(
     let set = duration::default_duration_set();
     let cap_ticks = set.grid.ticks_per_measure(&ts);
 
+    // Erzeuge den reinen Render-Plan (Planungslogik entkoppelt vom Zeichnen)
+    let plan = plan_measure(measure);
+
     // 1) Two-pass layout with per-beat extras (dots/flags/rest pad) and normalization
-    // Compute beaming flags first so we can budget extra width for flags only when not beamed
+    // In-Beam-Flags aus dem Plan ableiten
     let mut in_beam_flags: Vec<bool> = vec![false; measure.beats().len()];
-    if let Some(bp) = measure.beam_plan() {
-        for g in &bp.groups {
-            // Only consider groups with at least two notes as "beamed".
-            // Singleton groups should render with flags, not beams.
-            if g.note_indices.len() >= 2 {
-                for &idx in &g.note_indices {
-                    if idx < in_beam_flags.len() {
-                        in_beam_flags[idx] = true;
-                    }
+    for g in &plan.beams {
+        if g.note_indices.len() >= 2 {
+            for &idx in &g.note_indices {
+                if idx < in_beam_flags.len() {
+                    in_beam_flags[idx] = true;
                 }
             }
         }
@@ -274,33 +274,31 @@ fn draw_measure(
         }
     }
 
-    // 4) Draw beams per group (horizontal beams for stems up)
-    if let Some(bp) = measure.beam_plan() {
-        for group in &bp.groups {
-            // Full beams between adjacent stems according to continuity
-            for (pair_idx, win) in group.note_indices.windows(2).enumerate() {
-                let i = win[0];
-                let j = win[1];
-                let levels = *group.continuity.get(pair_idx).unwrap_or(&0);
-                if levels == 0 {
-                    continue;
-                }
-                // Extend the beam to the left and right a little bit such that it touches the stem
-                // on both sides, otherwise it looks off sometimes.
-                let offset = stem_thickness / 3.0;
-                let x1 = stem_xs[i] - offset;
-                let x2 = stem_xs[j] + offset;
-                for lvl in 0..levels {
-                    draw_full_beam(&painter, x1, x2, lvl, &beam_render_opts);
-                }
+    // 4) Draw beams per group (horizontal beams for stems up) — konsumiert nur den Plan
+    for group in &plan.beams {
+        // Full beams between adjacent stems according to continuity
+        for (pair_idx, win) in group.note_indices.windows(2).enumerate() {
+            let i = win[0];
+            let j = win[1];
+            let levels = *group.continuity.get(pair_idx).unwrap_or(&0);
+            if levels == 0 {
+                continue;
+            }
+            // Extend the beam to the left and right a little bit such that it touches the stem
+            // on both sides, otherwise it looks off sometimes.
+            let offset = stem_thickness / 3.0;
+            let x1 = stem_xs[i] - offset;
+            let x2 = stem_xs[j] + offset;
+            for lvl in 0..levels {
+                draw_full_beam(&painter, x1, x2, lvl, &beam_render_opts);
             }
         }
     }
 
     // 4b) Draw partial beams where a note's beam count exceeds continuity
-    if let Some(bp) = measure.beam_plan() {
+    {
         let stub_len = em * 0.20; // tune by eye
-        for group in &bp.groups {
+        for group in &plan.beams {
             if group.note_indices.is_empty() {
                 continue;
             }
@@ -404,335 +402,52 @@ fn draw_measure(
         }
     }
 
-    // 4c) Tuplet indicators (number and optional bracket) — stems up only, no staggering
-    // Helper: compute onset ticks per beat and primary boundaries (replicated logic)
-    let beats = measure.beats();
-
-    struct TupGroup {
-        start: usize,
-        end: usize,
-        n: u8,
-        m: u8,
-        base: NoteValue,
-        contains_rest: bool,
-    }
-    let mut groups: Vec<TupGroup> = Vec::new();
-    let mut i = 0usize;
-    while i < beats.len() {
-        let Duration::Tuplet { n, m, base: _ } = beats[i].duration else {
-            i += 1;
-            continue;
-        };
-        // Find maximal run of tuplets with the same ratio (n, m), ignoring base note value
-        let mut k = i;
-        while k < beats.len() {
-            match beats[k].duration {
-                Duration::Tuplet { n: nn, m: mm, base: _ } if nn == n && mm == m => {
-                    k += 1;
-                }
-                _ => break,
-            }
-        }
-        // Split the run [i..k) into logical tuplet groups by accumulating ticks
-        let mut start = i;
-        while start < k {
-            let first_dur = beats[start].duration;
-            // One full tuplet group spans `n * ticks(first_element)` ticks.
-            let target_ticks: u32 =
-                set.grid.ticks_of(&first_dur).unwrap_or(0).saturating_mul(n as u32);
-            let mut acc_ticks: u32 = 0;
-            let mut end = start;
-            let mut has_rest = false;
-            while end < k {
-                if beats[end].kind == BeatKind::Rest {
-                    has_rest = true;
-                }
-                let dt = set.grid.ticks_of(&beats[end].duration).unwrap_or(0);
-                acc_ticks = acc_ticks.saturating_add(dt);
-                if acc_ticks >= target_ticks {
-                    break;
-                }
-                end += 1;
-            }
-            // Push the group [start..=end]. In well-formed rhythms acc_ticks should equal target_ticks.
-            groups.push(TupGroup {
-                start,
-                end,
-                n,
-                m,
-                base: beats[start].duration.base_note(),
-                contains_rest: has_rest,
-            });
-            start = end + 1;
-        }
-        i = k;
-    }
-
-    if !groups.is_empty() {
-        let beam_plan = measure.beam_plan();
+    // 4c) Tuplet indicators (number and optional bracket) — konsumiert nur noch den Plan
+    if !plan.tuplets.is_empty() {
         let staff_space = em * 0.25;
         let bracket_gap = 0.9 * staff_space;
         let hook_len = 0.8 * staff_space;
         let hook_dy = hook_len * 0.85;
         let number_font = FontId::new(font_id.size * 0.75, font_id.family.clone());
 
-        // Precompute per-group note indices and fully_beamed flags
-        let mut tup_note_idxs_vec: Vec<Vec<usize>> = Vec::with_capacity(groups.len());
-        for g in groups.iter() {
-            let mut idxs = Vec::new();
-            for k in g.start..=g.end {
-                if beats[k].kind == BeatKind::Note {
-                    idxs.push(k);
-                }
-            }
-            tup_note_idxs_vec.push(idxs);
-        }
-        let mut fully_beamed_vec: Vec<bool> = vec![false; groups.len()];
-        if let Some(bp) = &beam_plan {
-            for gi in 0..groups.len() {
-                let g = &groups[gi];
-                let idxs = &tup_note_idxs_vec[gi];
-                if g.contains_rest || idxs.len() < 2 {
-                    continue;
-                }
-                'outer: for bg in &bp.groups {
-                    if idxs.iter().all(|idx| bg.note_indices.contains(idx)) {
-                        let mut pos_map = std::collections::HashMap::new();
-                        for (li, gi2) in bg.note_indices.iter().enumerate() {
-                            pos_map.insert(*gi2, li);
-                        }
-                        let mut ok = true;
-                        for pair in idxs.windows(2) {
-                            let a = pair[0];
-                            let b = pair[1];
-                            let la = *pos_map.get(&a).unwrap();
-                            let lb = *pos_map.get(&b).unwrap();
-                            if la >= lb {
-                                ok = false;
-                                break;
-                            }
-                            for cidx in la..lb {
-                                if *bg.continuity.get(cidx).unwrap_or(&0) < 1 {
-                                    ok = false;
-                                    break;
-                                }
-                            }
-                            if !ok {
-                                break;
-                            }
-                        }
-                        if ok {
-                            fully_beamed_vec[gi] = true;
-                            break 'outer;
-                        }
-                    }
-                }
-            }
-        }
-        // Initial number-only per group
-        let mut number_only_vec: Vec<bool> = groups
-            .iter()
-            .enumerate()
-            .map(|(i, g)| fully_beamed_vec[i] && !g.contains_rest)
-            .collect();
-        // Second pass: if adjacent groups are beamed together continuously, force brackets for both
-        if let Some(bp) = &beam_plan {
-            for i in 0..(groups.len().saturating_sub(1)) {
-                let g_left = &groups[i];
-                let g_right = &groups[i + 1];
-                // If groups are immediately adjacent and beamed together, force brackets for both,
-                // regardless of whether one of them contains rests (the rest-containing group already
-                // brackets by default; this ensures the all-notes neighbor also brackets for clarity).
-                if g_left.end + 1 != g_right.start {
-                    continue;
-                }
-                let left_idxs = &tup_note_idxs_vec[i];
-                let right_idxs = &tup_note_idxs_vec[i + 1];
-                if left_idxs.is_empty() || right_idxs.is_empty() {
-                    continue;
-                }
-                let last_left = *left_idxs.last().unwrap();
-                let first_right = right_idxs[0];
-                let mut beamed_together = false;
-                'bgscan: for bg in &bp.groups {
-                    if bg.note_indices.contains(&last_left)
-                        && bg.note_indices.contains(&first_right)
-                    {
-                        // map to local positions
-                        let mut pos_map = std::collections::HashMap::new();
-                        for (li, gi2) in bg.note_indices.iter().enumerate() {
-                            pos_map.insert(*gi2, li);
-                        }
-                        let la = *pos_map.get(&last_left).unwrap();
-                        let lb = *pos_map.get(&first_right).unwrap();
-                        if la < lb {
-                            let mut ok = true;
-                            for cidx in la..lb {
-                                if *bg.continuity.get(cidx).unwrap_or(&0) < 1 {
-                                    ok = false;
-                                    break;
-                                }
-                            }
-                            if ok {
-                                beamed_together = true;
-                                break 'bgscan;
-                            }
-                        }
-                    }
-                }
-                if beamed_together {
-                    number_only_vec[i] = false;
-                    number_only_vec[i + 1] = false;
-                }
-            }
-        }
+        for t in &plan.tuplets {
+            let number_only = t.fully_beamed && !t.contains_rest;
 
-        // Third pass: if a tuplet group's boundary note is beamed to an external non-tuplet neighbor,
-        // force a bracket to visually separate from that neighbor (addresses the case where a preceding
-        // eighth note beams into the triplet group).
-        if let Some(bp) = &beam_plan {
-            for gi in 0..groups.len() {
-                if !number_only_vec[gi] {
-                    continue;
-                }
-                let g = &groups[gi];
-                let first_idx = g.start;
-                let last_idx = g.end;
-
-                let mut external_beam = false;
-                // Check left neighbor
-                if first_idx > 0 {
-                    let left_idx = first_idx - 1;
-                    // Only relevant if neighbor is a Note and not part of this tuplet group
-                    if beats[left_idx].kind == BeatKind::Note {
-                        // Ensure neighbor is not the same tuple group (it's outside by construction);
-                        // still, verify it isn't any tuplet with same (n,m) immediately preceding which
-                        // would have formed a group earlier (defensive check not strictly necessary).
-                        let is_same_tuplet = match beats[left_idx].duration {
-                            Duration::Tuplet { n, m, .. } => n == g.n && m == g.m,
-                            _ => false,
-                        };
-                        if !is_same_tuplet {
-                            'bgscan_l: for bg in &bp.groups {
-                                if bg.note_indices.contains(&left_idx)
-                                    && bg.note_indices.contains(&first_idx)
-                                {
-                                    // Map to local positions and check continuity between them
-                                    let mut pos_map = std::collections::HashMap::new();
-                                    for (li, gi2) in bg.note_indices.iter().enumerate() {
-                                        pos_map.insert(*gi2, li);
-                                    }
-                                    let la = *pos_map.get(&left_idx).unwrap();
-                                    let lb = *pos_map.get(&first_idx).unwrap();
-                                    if la < lb {
-                                        let mut ok = true;
-                                        for cidx in la..lb {
-                                            if *bg.continuity.get(cidx).unwrap_or(&0) < 1 {
-                                                ok = false;
-                                                break;
-                                            }
-                                        }
-                                        if ok {
-                                            external_beam = true;
-                                            break 'bgscan_l;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Check right neighbor if not already determined
-                if !external_beam && last_idx + 1 < beats.len() {
-                    let right_idx = last_idx + 1;
-                    if beats[right_idx].kind == BeatKind::Note {
-                        let is_same_tuplet = match beats[right_idx].duration {
-                            Duration::Tuplet { n, m, .. } => n == g.n && m == g.m,
-                            _ => false,
-                        };
-                        if !is_same_tuplet {
-                            'bgscan_r: for bg in &bp.groups {
-                                if bg.note_indices.contains(&last_idx)
-                                    && bg.note_indices.contains(&right_idx)
-                                {
-                                    let mut pos_map = std::collections::HashMap::new();
-                                    for (li, gi2) in bg.note_indices.iter().enumerate() {
-                                        pos_map.insert(*gi2, li);
-                                    }
-                                    let la = *pos_map.get(&last_idx).unwrap();
-                                    let lb = *pos_map.get(&right_idx).unwrap();
-                                    if la < lb {
-                                        let mut ok = true;
-                                        for cidx in la..lb {
-                                            if *bg.continuity.get(cidx).unwrap_or(&0) < 1 {
-                                                ok = false;
-                                                break;
-                                            }
-                                        }
-                                        if ok {
-                                            external_beam = true;
-                                            break 'bgscan_r;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                if external_beam {
-                    number_only_vec[gi] = false;
-                }
-            }
-        }
-
-        for (gi, g) in groups.iter().enumerate() {
-            let number_only = number_only_vec[gi];
-
-            // Horizontal span
-            let (mut x_l, mut x_r) = (stem_xs[g.start], stem_xs[g.end]);
-            // Add a small outward margin
+            // Horizontal span in Pixeln
+            let (mut x_l, mut x_r) = (stem_xs[t.start], stem_xs[t.end]);
             let margin = em * 0.25;
             x_l -= margin;
             x_r += margin;
 
             let y_bracket = beam_render_opts.beam_y - beam_render_opts.thickness - bracket_gap;
 
-            // Prepare number glyphs and measure width to reserve a centered gap in the bracket
-            let digits = tuplet_glyphs(g.n);
-            // Approximate numeral width: ~0.6em per glyph (good enough for SMuFL digits), supports multi-digit tuplets
+            let digits = tuplet_glyphs(t.count);
             let num_chars = digits.chars().count() as f32;
             let num_width = num_chars * 0.6 * em;
             let pad = 0.25 * staff_space; // horizontal padding around digits inside the bracket gap
             let xc = 0.5 * (x_l + x_r);
             let mut gap_half = 0.5 * (num_width + 2.0 * pad);
-            // Ensure we don't exceed span; keep a minimal segment on each side if possible
             let min_seg = 0.5 * staff_space;
             let half_span = 0.5 * (x_r - x_l);
             if gap_half > half_span - min_seg {
                 gap_half = (half_span - min_seg).max(0.0);
             }
 
-            // Draw bracket if needed: split into left and right segments with a centered gap for the number
             if !number_only {
                 let x_gap_l = (xc - gap_half).max(x_l);
                 let x_gap_r = (xc + gap_half).min(x_r);
-                // Left segment
                 if x_gap_l > x_l {
                     painter.line_segment(
                         [pos2(x_l, y_bracket), pos2(x_gap_l, y_bracket)],
                         Stroke::new(2.0, color),
                     );
                 }
-                // Right segment
                 if x_r > x_gap_r {
                     painter.line_segment(
                         [pos2(x_gap_r, y_bracket), pos2(x_r, y_bracket)],
                         Stroke::new(2.0, color),
                     );
                 }
-                // Hooks (downwards toward notes) remain at full-span endpoints
                 painter.line_segment(
                     [pos2(x_l, y_bracket), pos2(x_l, y_bracket + hook_dy)],
                     Stroke::new(2.0, color),
@@ -743,7 +458,6 @@ fn draw_measure(
                 );
             }
 
-            // Draw number (Bravura tuplet digits), centered at the number-only position even when bracketed
             let y_num = y_bracket + 0.5 * (em * 0.25);
             painter.text(
                 pos2(0.5 * (x_l + x_r), y_num),
