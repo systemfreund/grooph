@@ -23,6 +23,7 @@ impl TimeSignature {
     pub const TWO_FOUR: Self = Self { beats: 2, beat_unit: 4 };
     pub const ONE_SIXTEENTH: Self = Self { beats: 1, beat_unit: 16 };
     pub const TWO_SIXTEENTH: Self = Self { beats: 2, beat_unit: 16 };
+    pub const FOUR_SIXTEENTH: Self = Self { beats: 4, beat_unit: 16 };
     pub const FOUR_FOUR: Self = Self { beats: 4, beat_unit: 4 };
     pub const TWO_EIGHT: Self = Self { beats: 2, beat_unit: 8 };
     pub const FOUR_EIGHT: Self = Self { beats: 4, beat_unit: 8 };

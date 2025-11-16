@@ -38,6 +38,29 @@ pub struct TupletPlan {
     pub fully_beamed: bool,
     /// true, wenn irgendeine Pause innerhalb der Gruppe liegt (dann immer Klammer)
     pub contains_rest: bool,
+    /// Verbindung der Tuplet-Gruppe nach außen über Balken
+    pub edge_connection: EdgeConnection,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EdgeConnection {
+    None,
+    Left,
+    Right,
+    Both,
+}
+
+impl TupletPlan {
+    pub fn is_externally_connected(&self) -> bool {
+        self.edge_connection != EdgeConnection::None
+    }
+
+    /// UI‑neutrale Entscheidungsregel: Nur Zahl (ohne Klammer) rendern?
+    /// Zahl‑only, wenn intern voll beamed, keine Pause enthalten,
+    /// und keine externe Balkenverbindung links oder rechts existiert.
+    pub fn number_only(&self) -> bool {
+        self.fully_beamed && !self.contains_rest && !self.is_externally_connected()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -187,6 +210,58 @@ fn discover_tuplets(measure: &Measure, beams: &Vec<BeamGroupPlan>) -> Vec<Tuplet
             ok_any
         };
 
+        // Externe Balkenverbindungen links/rechts an den Rändern feststellen
+        let mut ext_left = false;
+        let mut ext_right = false;
+        let first_note = note_idxs.first().copied();
+        let last_note = note_idxs.last().copied();
+
+        if let Some(fi) = first_note {
+            if fi > 0 && beats[fi - 1].kind == BeatKind::Note {
+                for bg in beams.iter() {
+                    let pos_prev = bg.note_indices.iter().position(|&x| x == fi - 1);
+                    let pos_cur = bg.note_indices.iter().position(|&x| x == fi);
+                    if let (Some(lp), Some(lc)) = (pos_prev, pos_cur) {
+                        // Adjacent in der Gruppe und continuity >=1 zwischen ihnen?
+                        let a = lp.min(lc);
+                        let b = lp.max(lc);
+                        if b == a + 1 {
+                            if *bg.continuity.get(a).unwrap_or(&0) >= 1 {
+                                ext_left = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if let Some(li) = last_note {
+            if li + 1 < beats.len() && beats[li + 1].kind == BeatKind::Note {
+                for bg in beams.iter() {
+                    let pos_cur = bg.note_indices.iter().position(|&x| x == li);
+                    let pos_next = bg.note_indices.iter().position(|&x| x == li + 1);
+                    if let (Some(lc), Some(ln)) = (pos_cur, pos_next) {
+                        let a = lc.min(ln);
+                        let b = lc.max(ln);
+                        if b == a + 1 {
+                            if *bg.continuity.get(a).unwrap_or(&0) >= 1 {
+                                ext_right = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        let edge_connection = match (ext_left, ext_right) {
+            (false, false) => EdgeConnection::None,
+            (true, false) => EdgeConnection::Left,
+            (false, true) => EdgeConnection::Right,
+            (true, true) => EdgeConnection::Both,
+        };
+
         out.push(TupletPlan {
             count: g.n,
             start: g.start,
@@ -194,6 +269,7 @@ fn discover_tuplets(measure: &Measure, beams: &Vec<BeamGroupPlan>) -> Vec<Tuplet
             base: g.base,
             fully_beamed: fully,
             contains_rest: g.contains_rest,
+            edge_connection,
         });
     }
 
@@ -257,7 +333,7 @@ mod tests {
     }
 
     #[test]
-    fn triplet_bracket_over_beats_when_preceding_beat_is_connected_to_triplet_with_beams() {
+    fn triplet_bracket_over_beats_when_preceding_beat_is_connected_to_triplet_with_beams_in_7_8() {
         let mut m = Measure::new_init(TimeSignature::SEVEN_EIGHT, Note);
         m.set_beat_at(3, Beat::note(t8())).unwrap();
         m.set_beat_at(4, Beat::note(t8())).unwrap();
@@ -271,6 +347,42 @@ mod tests {
 
         // We expect a bracket to be drawn over the triplets (3,4,5) to visually distinguish them
         // from the preceding beat.
-        assert!(!plan.tuplets[0].fully_beamed);
+        let t = plan
+            .tuplets
+            .iter()
+            .find(|t| t.count == 3 && t.start == 3 && t.end == 5)
+            .expect("expected triplet over beats 3..=5");
+
+        assert!(t.fully_beamed);
+        assert!(!t.contains_rest);
+        assert_eq!(t.edge_connection, EdgeConnection::Left);
+        assert!(!t.number_only());
+    }
+
+    #[test]
+    fn triplet_bracket_over_beats_when_following_beat_is_connected_to_triplet_with_beams_in_7_8() {
+        let mut m = Measure::new_init(TimeSignature::SEVEN_EIGHT, Note);
+        m.set_beat_at(2, Beat::note(t8())).unwrap();
+        m.set_beat_at(3, Beat::note(t8())).unwrap();
+        m.set_beat_at(4, Beat::note(t8())).unwrap();
+
+        let plan = plan_measure(&m);
+
+        // Beam connects the triplets (2,3,4) with the following beat (5).
+        // Expected because of the default 2+3+2 grouping in 7/8.
+        assert_eq!(plan.beams[1].note_indices, vec![2, 3, 4, 5]);
+
+        // We expect a bracket to be drawn over the triplets (3,4,5) to visually distinguish them
+        // from the preceding beat.
+        let t = plan
+            .tuplets
+            .iter()
+            .find(|t| t.count == 3 && t.start == 2 && t.end == 4)
+            .expect("expected triplet over beats 2..=4");
+
+        assert!(t.fully_beamed);
+        assert!(!t.contains_rest);
+        assert_eq!(t.edge_connection, EdgeConnection::Right);
+        assert!(!t.number_only());
     }
 }

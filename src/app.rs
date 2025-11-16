@@ -1,6 +1,6 @@
 mod glyphs;
 
-use crate::duration::{e, s, t8, Duration, NoteValue};
+use crate::duration::{e, qt16, t8, Duration};
 use crate::measure::{Measure, TimeSignature};
 use crate::render_plan::plan_measure;
 
@@ -179,7 +179,7 @@ fn draw_measure(
 
     // Left-side: percussion clef and stacked time signature
     let clef_w = em * 0.9; // reserved visual width for clef
-    let ts_digit_w = em * 0.7; // width per time-signature digit column
+    let ts_digit_w = em * 0.35; // width per time-signature digit column
 
     // Draw clef
     let clef_x = inner_rect.left() + clef_w * 0.4;
@@ -409,8 +409,6 @@ fn draw_measure(
         let number_font = FontId::new(font_id.size * 0.75, font_id.family.clone());
 
         for t in &plan.tuplets {
-            let number_only = t.fully_beamed && !t.contains_rest;
-
             // Horizontal span in Pixeln
             let (mut x_l, mut x_r) = (stem_xs[t.start], stem_xs[t.end]);
             let margin = em * 0.25;
@@ -431,7 +429,7 @@ fn draw_measure(
                 gap_half = (half_span - min_seg).max(0.0);
             }
 
-            if !number_only {
+            if !t.number_only() {
                 let x_gap_l = (xc - gap_half).max(x_l);
                 let x_gap_r = (xc + gap_half).min(x_r);
                 if x_gap_l > x_l {
@@ -759,15 +757,20 @@ impl Grooph {
     pub fn new(cc: &CreationContext) -> Self {
         add_font(&cc.egui_ctx);
         let ff = FontFamily::Name("music".into());
-        let mut measure = Measure::new(TimeSignature::SEVEN_EIGHT);
-        measure.add_beat(Beat::note(e())).unwrap();
-        measure.add_beat(Beat::note(e())).unwrap();
-        measure.add_beat(Beat::note(e())).unwrap();
-        measure.add_beat(Beat::note(t8())).unwrap();
-        measure.add_beat(Beat::note(t8())).unwrap();
-        measure.add_beat(Beat::note(t8())).unwrap();
-        measure.add_beat(Beat::note(e())).unwrap();
-        measure.add_beat(Beat::note(e())).unwrap();
+        let mut measure = Measure::new_init(TimeSignature::FOUR_SIXTEENTH, BeatKind::Note);
+        // measure.add_beat(Beat::note(t8())).unwrap();
+        // measure.add_beat(Beat::note(t8())).unwrap();
+        // measure.add_beat(Beat::note(t8())).unwrap();
+        //measure.add_beat(Beat::note(e())).unwrap();
+
+        //measure.add_beat(Beat::note(e())).unwrap();
+        // measure.add_beat(Beat::note(qt16())).unwrap();
+        // measure.add_beat(Beat::note(qt16())).unwrap();
+        // measure.add_beat(Beat::note(qt16())).unwrap();
+        // measure.add_beat(Beat::note(qt16())).unwrap();
+        // measure.add_beat(Beat::note(qt16())).unwrap();
+
+        //measure.add_beat(Beat::rest(e())).unwrap();
 
         Self { font_family: ff.clone(), font_id: FontId::new(16.0, ff), measure, cursor_idx: 0 }
     }
