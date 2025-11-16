@@ -1,6 +1,5 @@
 pub(crate) mod grouping;
 
-use crate::beaming::BeamPlan;
 use crate::duration::NoteValue::{Eighth, Sixteenth, ThirtySecond};
 use crate::duration::{Duration, NoteValue, default_duration_set};
 use crate::fill::best_fill_for_gap;
@@ -125,13 +124,10 @@ impl Measure {
 
     /// Replace the beat at index `idx` with `beat` if it fits and the remainder stays fillable.
     pub fn set_beat_at(&mut self, idx: usize, beat: Beat) -> Result<(), MeasureError> {
-        if idx >= self.beats.len() {
-            return Err(MeasureError::Unfillable { attempted: 0.0, remaining: 0.0 });
-        }
+        assert!(idx < self.beats.len());
         let set = default_duration_set();
-        let current_ticks = self.current_ticks();
         let dur_old = self.beats[idx].duration; // duration of the beat to be replaced
-        let max_ticks = set.grid.ticks_per_measure(&self.time_signature);
+        let max_ticks = self.max_ticks();
         let new_ticks = set
             .grid
             .ticks_of(&beat.duration)
@@ -145,18 +141,13 @@ impl Measure {
                 }
                 _ => {
                     // inserting a non-tuplet or different tuplet grid into a tuplet slot is invalid
-                    let set = default_duration_set();
-                    let attempted = set
-                        .grid
-                        .ticks_to_whole_notes(set.grid.ticks_of(&beat.duration).unwrap_or(0));
-                    let remaining = 0.0; // not strictly applicable here
-                    return Err(MeasureError::Unfillable { attempted, remaining });
+                    return self.unfillable_err(new_ticks, 0);
                 }
             }
         }
 
         let old_ticks = set.grid.ticks_of(&dur_old).unwrap();
-        let new_total_ticks = current_ticks - old_ticks + new_ticks;
+        let new_total_ticks = max_ticks - old_ticks + new_ticks;
         if new_total_ticks > max_ticks {
             // Attempt to expand into subsequent contiguous rests to accommodate growth
             let need = new_ticks - old_ticks; // extra ticks required
@@ -203,10 +194,7 @@ impl Measure {
                 }
                 Ok(())
             } else {
-                let available_ticks = (max_ticks - (current_ticks - old_ticks)).max(0);
-                let available = (available_ticks as f64) / (set.grid.ticks_per_whole as f64);
-                let attempted = (new_ticks as f64) / (set.grid.ticks_per_whole as f64);
-                Err(MeasureError::Overflow { attempted, available })
+                self.overflow_err(new_ticks, max_ticks - old_ticks)
             };
         }
 
@@ -231,14 +219,7 @@ impl Measure {
                     while consumed < group_span {
                         if k >= self.beats.len() {
                             // Not enough space in this measure to span the tuplet group
-                            let attempted = set.grid.ticks_to_whole_notes(new_ticks);
-                            let available_ticks = (set
-                                .grid
-                                .ticks_per_measure(&self.time_signature)
-                                .saturating_sub(current_ticks - old_ticks))
-                            .max(0);
-                            let available = set.grid.ticks_to_whole_notes(available_ticks);
-                            return Err(MeasureError::Overflow { attempted, available });
+                            return self.overflow_err(new_ticks, max_ticks - old_ticks);
                         }
                         let b = self.beats[k];
                         // If we encounter a tuplet of a different grid (different n/m), refuse
@@ -246,11 +227,7 @@ impl Measure {
                         // n/m define the grid equivalence here.
                         if let Duration::Tuplet { n: n2, m: m2, .. } = b.duration {
                             if !(n2 == n && m2 == m) {
-                                let attempted = set.grid.ticks_to_whole_notes(new_ticks);
-                                let remaining = set
-                                    .grid
-                                    .ticks_to_whole_notes(group_span.saturating_sub(consumed));
-                                return Err(MeasureError::Unfillable { attempted, remaining });
+                                return self.unfillable_err(new_ticks, group_span - consumed);
                             }
                         }
                         let t = set.grid.ticks_of(&b.duration).unwrap();
@@ -282,14 +259,10 @@ impl Measure {
                             }
                         } else {
                             // Should not happen with our common durations, but guard anyway
-                            let attempted = set.grid.ticks_to_whole_notes(new_ticks);
-                            let remaining = set.grid.ticks_to_whole_notes(overrun);
-                            return Err(MeasureError::Unfillable { attempted, remaining });
+                            return self.unfillable_err(new_ticks, overrun);
                         }
                     }
 
-                    // Sanity: total ticks must remain the same
-                    assert_eq!(self.current_ticks(), max_ticks);
                     return Ok(());
                 }
             }
@@ -311,12 +284,11 @@ impl Measure {
             } else {
                 let attempted = set.grid.ticks_to_whole_notes(new_ticks);
                 let remaining = set.grid.ticks_to_whole_notes(leftover);
-                Err(MeasureError::Unfillable { attempted, remaining })
+                self.unfillable_err(new_ticks, leftover)
             }
         } else {
             // No leftover (equal or growth accommodated earlier). Just replace.
             self.beats[idx] = beat;
-            assert_eq!(self.current_ticks(), max_ticks);
             Ok(())
         }
     }
@@ -336,19 +308,21 @@ impl Measure {
         onsets.into_iter().map(|t| 1.0f32 + (t as f32) / (ticks_per_beat as f32)).collect()
     }
 
-    /// Returns the current total duration in ticks (exact)
-    fn current_ticks(&self) -> u32 {
+    fn max_ticks(&self) -> u32 {
         let set = default_duration_set();
-        self.beats.iter().map(|beat| set.grid.ticks_of(&beat.duration).unwrap()).sum()
+        set.grid.ticks_per_measure(&self.time_signature)
     }
 
-    /// Returns the remaining number of ticks available in this measure
-    /// (never negative; 0 when the measure is full)
-    pub fn remaining_ticks(&self) -> u32 {
+    fn remaining_ticks(&self, idx: usize) -> u32 {
+        if idx >= self.beats.len() {
+            return 0;
+        }
         let set = default_duration_set();
-        let max_ticks = set.grid.ticks_per_measure(&self.time_signature);
-        let used = self.current_ticks();
-        (max_ticks - used).max(0)
+        let mut sum = 0u32;
+        for b in &self.beats[idx..] {
+            sum += set.grid.ticks_of(&b.duration).unwrap();
+        }
+        sum
     }
 
     /// Returns true if the remaining ticks can be exactly filled using the available durations
@@ -398,12 +372,12 @@ impl Measure {
         self.beats[idx].kind = Rest;
     }
 
-    pub fn fill_measure(&mut self, kind: BeatKind, allowed: &[Duration]) {
-        let remaining_ticks = self.remaining_ticks();
-        if remaining_ticks <= 0 {
-            return; // nothing to commit
+    fn fill_measure(&mut self, kind: BeatKind, allowed: &[Duration]) {
+        if !self.beats.is_empty() {
+            // currently we only support filling empty/uninitalized measures
+            return;
         }
-        if let Some(fill) = best_fill_for_gap(remaining_ticks, allowed) {
+        if let Some(fill) = best_fill_for_gap(self.max_ticks(), allowed) {
             let take = fill.len();
             for duration in fill.into_iter().take(take) {
                 let beat = Beat { duration, kind, tremolo: None };
@@ -447,6 +421,22 @@ impl Measure {
             }
         }
         false
+    }
+
+    fn unfillable_err(&self, attempted: u32, remaining: u32) -> Result<(), MeasureError> {
+        let set = default_duration_set();
+        Err(MeasureError::Unfillable {
+            attempted: set.grid.ticks_to_whole_notes(attempted),
+            remaining: set.grid.ticks_to_whole_notes(remaining),
+        })
+    }
+
+    fn overflow_err(&self, attempted: u32, remaining: u32) -> Result<(), MeasureError> {
+        let set = default_duration_set();
+        Err(MeasureError::Overflow {
+            attempted: set.grid.ticks_to_whole_notes(attempted),
+            available: set.grid.ticks_to_whole_notes(remaining),
+        })
     }
 }
 
@@ -518,14 +508,10 @@ mod tests {
     }
 
     #[test]
-    fn test_invalid_tuplet_insertion_0() {
+    fn test_triplet_insertions_0() {
         let mut measure = Measure::new(TimeSignature::TWO_FOUR);
 
-        assert!(measure.add_beat(Beat::note(t8())).is_ok());
-        assert!(measure.add_beat(Beat::note(t8())).is_ok());
-        assert!(measure.add_beat(Beat::note(t8())).is_ok());
-
-        /* IGNORE intra-group refinements for now
+        // First triplet group
         assert!(measure.add_beat(Beat::note(t16())).is_ok());
         assert!(measure.add_beat(Beat::note(t16())).is_ok());
         // The next triplet 1/8 overfills this tuplet group, which has only space for one triplet
@@ -540,7 +526,6 @@ mod tests {
 
         // The next beat starts a new tuplet group, so this is valid.
         assert!(measure.add_beat(Beat::note(t8())).is_ok());
-        */
     }
 
     #[test]
@@ -554,7 +539,7 @@ mod tests {
             "can't start a new triplet 1/8 group measure has only 1/8 space left"
         );
         assert!(measure.add_beat(Beat::note(e())).is_ok());
-        assert_eq!(measure.remaining_ticks(), 0);
+        assert_eq!(measure.remaining_ticks(measure.next_insert), 0);
     }
 
     #[test]
@@ -572,8 +557,14 @@ mod tests {
         assert!(measure.add_beat(Beat::note(t32())).is_ok());
         assert!(measure.add_beat(Beat::note(t32())).is_ok());
         assert!(measure.add_beat(Beat::note(t32())).is_ok());
+        assert!(measure.add_beat(Beat::note(t32())).is_ok());
 
-        assert_eq!(measure.remaining_ticks(), 0);
+        assert!(
+            measure.add_beat(Beat::note(t8())).is_err(),
+            "can't start a new triplet 1/8 group measure has only 1/8 space left"
+        );
+        assert!(measure.add_beat(Beat::note(e())).is_ok());
+        assert_eq!(measure.remaining_ticks(measure.next_insert), 0);
     }
 
     #[test]
@@ -592,7 +583,7 @@ mod tests {
         assert!(measure.add_beat(Beat::note(t32())).is_ok());
 
         // The next beat starts a new tuplet group, but we don't have enough space in our measure.
-        assert!(measure.add_beat(Beat::note(t32())).is_err());
+        assert_eq!(measure.remaining_ticks(measure.next_insert), 0);
     }
 
     #[test]
