@@ -1,12 +1,13 @@
 pub(crate) mod grouping;
 
-use crate::beaming::{compute_beam_plan, BeamPlan};
+use crate::beaming::BeamPlan;
 use crate::duration::NoteValue::{Eighth, Sixteenth, ThirtySecond};
 use crate::duration::{default_duration_set, Duration, NoteValue};
 use crate::fill::best_fill_for_gap;
 use crate::measure::BeatKind::Rest;
 use std::fmt::{Display, Formatter};
 use std::vec;
+use BeatKind::Note;
 
 /// Represents a time signature (e.g., 4/4, 3/4, 6/8)
 #[derive(Debug, Clone, Copy)]
@@ -75,12 +76,12 @@ pub struct Tremolo {
 impl Beat {
     /// Creates a new note with the given duration
     pub fn note(duration: Duration) -> Self {
-        Self { duration, kind: BeatKind::Note, tremolo: None }
+        Self { duration, kind: Note, tremolo: None }
     }
 
     /// Creates a new rest with the given duration
     pub fn rest(duration: Duration) -> Self {
-        Self { duration, kind: BeatKind::Rest, tremolo: None }
+        Self { duration, kind: Rest, tremolo: None }
     }
 }
 
@@ -104,11 +105,10 @@ pub enum MeasureError {
 }
 
 /// Represents a musical measure containing a sequence of beats
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Measure {
     beats: Vec<Beat>,
     time_signature: TimeSignature,
-    beam_plan: Option<BeamPlan>,
     // Internal insertion pointer for add_beat progression (not a UI cursor)
     next_insert: usize,
 }
@@ -116,13 +116,16 @@ pub struct Measure {
 impl Measure {
     /// Creates a new empty measure with the given time signature
     pub fn new(time_signature: TimeSignature) -> Self {
+        Self::new_init(time_signature, Rest)
+    }
+
+    pub fn new_init(time_signature: TimeSignature, init: BeatKind) -> Self {
         let mut s = Self {
             beats: Vec::new(),
             time_signature,
-            beam_plan: Some(BeamPlan { groups: vec![] }),
             next_insert: 0,
         };
-        s.fill_measure(Rest, &[Duration::Simple(time_signature.beat_note_value().unwrap())]);
+        s.fill_measure(init, &[Duration::Simple(time_signature.beat_note_value().unwrap())]);
         s
     }
 
@@ -209,7 +212,6 @@ impl Measure {
                         remaining_to_consume = 0;
                     }
                 }
-                self.recompute_beams();
                 Ok(())
             } else {
                 let available_ticks = (max_ticks - (current_ticks - old_ticks)).max(0);
@@ -234,7 +236,6 @@ impl Measure {
                     self.beats.insert(insert_at, Beat::rest(d));
                     insert_at += 1;
                 }
-                self.recompute_beams();
                 Ok(())
             } else {
                 let attempted = set.grid.ticks_to_whole_notes(new_ticks);
@@ -244,7 +245,6 @@ impl Measure {
         } else {
             // No leftover (equal or growth accommodated earlier). Just replace.
             self.beats[idx] = beat;
-            self.recompute_beams();
             assert_eq!(self.current_ticks(), max_ticks);
             Ok(())
         }
@@ -252,9 +252,6 @@ impl Measure {
 
     /// Expose the time signature (clone)
     pub fn time_signature(&self) -> TimeSignature { self.time_signature.clone() }
-
-    /// Expose the beaming plan for this measure
-    pub fn beam_plan(&self) -> Option<&BeamPlan> { self.beam_plan.as_ref() }
 
     /// Return a vector with the absolute position (1-based) of each beat as floats.
     /// Examples:
@@ -323,15 +320,11 @@ impl Measure {
         }
     }
 
-    /// Recompute the beam plan explicitly
-    pub fn recompute_beams(&mut self) { self.beam_plan = Some(compute_beam_plan(self)); }
-
     pub fn remove(&mut self, idx: usize) {
         if idx >= self.beats.len() {
             return;
         }
         self.beats[idx].kind = Rest;
-        self.recompute_beams();
     }
 
     pub fn fill_measure(&mut self, kind: BeatKind, allowed: &[Duration]) {
@@ -345,7 +338,6 @@ impl Measure {
                 let beat = Beat { duration, kind, tremolo: None };
                 self.beats.push(beat);
             }
-            self.recompute_beams();
         }
     }
 
@@ -356,11 +348,9 @@ impl Measure {
             // Clear tremolo in both cases to avoid invalid state on rests
             b.tremolo = None;
             b.kind = match b.kind {
-                BeatKind::Rest => BeatKind::Note,
-                BeatKind::Note => BeatKind::Rest,
+                Rest => Note,
+                Note => Rest,
             };
-            // Beaming may change when toggling between note/rest
-            self.recompute_beams();
         }
     }
 
@@ -430,10 +420,10 @@ mod tests {
         assert!(measure.add_beat(Beat::note(t8())).is_ok());
         let Beat { duration, kind, .. } = measure.beats()[1];
         assert_eq!(duration, t8());
-        assert_eq!(kind, BeatKind::Rest);
+        assert_eq!(kind, Rest);
         let Beat { duration, kind, .. } = measure.beats()[2];
         assert_eq!(duration, t8());
-        assert_eq!(kind, BeatKind::Rest);
+        assert_eq!(kind, Rest);
 
         assert!(
             measure.add_beat(Beat::note(q())).is_err(),

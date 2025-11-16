@@ -61,7 +61,6 @@ pub fn plan_measure(measure: &Measure) -> RenderPlan {
         });
     }
 
-    // Beaming aus existierender Logik übernehmen
     let BeamPlan { groups } = compute_beam_plan(measure);
     let beams: Vec<BeamGroupPlan> = groups
         .into_iter()
@@ -190,6 +189,7 @@ mod tests {
     use super::*;
     use crate::duration::{e, t8};
     use crate::measure::{Beat, Measure, TimeSignature};
+    use crate::measure::BeatKind::Note;
 
     #[test]
     fn beaming_group_within_primary_boundaries_in_seven_eight() {

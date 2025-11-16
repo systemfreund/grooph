@@ -235,11 +235,9 @@ fn draw_measure(
     let set = duration::default_duration_set();
     let cap_ticks = set.grid.ticks_per_measure(&ts);
 
-    // Erzeuge den reinen Render-Plan (Planungslogik entkoppelt vom Zeichnen)
     let plan = plan_measure(measure);
 
     // 1) Two-pass layout with per-beat extras (dots/flags/rest pad) and normalization
-    // In-Beam-Flags aus dem Plan ableiten
     let mut in_beam_flags: Vec<bool> = vec![false; measure.beats().len()];
     for g in &plan.beams {
         if g.note_indices.len() >= 2 {
@@ -274,7 +272,7 @@ fn draw_measure(
         }
     }
 
-    // 4) Draw beams per group (horizontal beams for stems up) — konsumiert nur den Plan
+    // 4) Draw beams per group (horizontal beams for stems up)
     for group in &plan.beams {
         // Full beams between adjacent stems according to continuity
         for (pair_idx, win) in group.note_indices.windows(2).enumerate() {
@@ -402,7 +400,7 @@ fn draw_measure(
         }
     }
 
-    // 4c) Tuplet indicators (number and optional bracket) — konsumiert nur noch den Plan
+    // 4c) Tuplet indicators (number and optional bracket)
     if !plan.tuplets.is_empty() {
         let staff_space = em * 0.25;
         let bracket_gap = 0.9 * staff_space;

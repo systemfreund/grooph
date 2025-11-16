@@ -206,7 +206,7 @@ mod tests {
         for i in 0..8 {
             m.set_beat_at(i, Beat::note(e())).unwrap();
         }
-        let plan = m.beam_plan().unwrap();
+        let plan = compute_beam_plan(&m);
         assert_eq!(plan.groups.len(), 4, "expected 4 groups of eighths in 4/4");
         for (gi, g) in plan.groups.iter().enumerate() {
             assert_eq!(g.note_indices.len(), 2, "group {} should have 2 notes", gi);
@@ -223,7 +223,7 @@ mod tests {
         m.add_beat(Beat::rest(s())).unwrap();
         m.add_beat(Beat::note(s())).unwrap();
         m.add_beat(Beat::rest(s())).unwrap();
-        let plan = m.beam_plan().unwrap();
+        let plan = compute_beam_plan(&m);
         assert_eq!(plan.groups.len(), 2, "rests should split into two singleton groups");
         let g0 = &plan.groups[0];
         let g1 = &plan.groups[1];
@@ -245,7 +245,7 @@ mod tests {
         m.add_beat(Beat::note(t8())).unwrap();
         m.add_beat(Beat::note(t8())).unwrap();
         m.add_beat(Beat::note(e())).unwrap();
-        let plan = m.beam_plan().unwrap();
+        let plan = compute_beam_plan(&m);
 
         // Find the group that contains note index 1 (first tuplet note)
         let tuplet_group =
@@ -266,7 +266,7 @@ mod tests {
             m.add_beat(Beat::note(e())).unwrap();
         }
 
-        let plan = m.beam_plan().unwrap();
+        let plan = compute_beam_plan(&m);
         assert_eq!(plan.groups.len(), 3);
 
         let g0 = &plan.groups[0];
@@ -300,7 +300,7 @@ mod tests {
         m.add_beat(Beat::note(e())).unwrap();
         m.add_beat(Beat::note(e())).unwrap();
 
-        let plan = m.beam_plan().unwrap();
+        let plan = compute_beam_plan(&m);
         assert_eq!(plan.groups.len(), 3);
 
         let g0 = &plan.groups[0];
@@ -335,7 +335,7 @@ mod tests {
         m.add_beat(Beat::note(e())).unwrap();
         m.add_beat(Beat::note(e())).unwrap();
 
-        let plan = m.beam_plan().unwrap();
+        let plan = compute_beam_plan(&m);
         assert_eq!(plan.groups.len(), 3);
 
         let g0 = &plan.groups[0];
