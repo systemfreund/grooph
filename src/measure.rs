@@ -152,26 +152,36 @@ impl Measure {
         if new_total_ticks > max_ticks {
             // Attempt to expand into subsequent contiguous rests to accommodate growth
             let need = new_ticks - old_ticks; // extra ticks required
+            assert!(need > 0);
 
-            // If we are inside a tuplet slot, limit absorption strictly to the bounds and grid of
-            // the current tuplet group (same n and m; base-agnostic to permit mixes per tests).
-            return if let Duration::Tuplet { n: n_old, m: m_old, .. } = dur_old {
-                let mut k = idx + 1;
-                let mut absorb_ticks = 0u32;
-                while k < self.beats.len() {
-                    match self.beats[k].duration {
-                        Duration::Tuplet { n, m, .. } if n == n_old && m == m_old => {
-                            let t = set.grid.ticks_of(&self.beats[k].duration).unwrap();
-                            absorb_ticks += t;
-                            if absorb_ticks >= need {
-                                break;
+            // Compute how many ticks we can absorb from following beats.
+            let mut k = idx + 1;
+            let mut absorb_ticks = 0u32;
+            while k < self.beats.len() {
+                let t = set.grid.ticks_of(&self.beats[k].duration).unwrap();
+                match dur_old {
+                    // If we are inside a tuplet slot, limit absorption strictly to the bounds and grid of
+                    // the current tuplet group (same n and m; base-agnostic to permit mixes per tests).
+                    Duration::Tuplet { n: n_old, m: m_old, .. } => {
+                        match self.beats[k].duration {
+                            Duration::Tuplet { n, m, .. } if n == n_old && m == m_old => {
+                                absorb_ticks += t;
                             }
-                            k += 1;
+                            _ => break, // Stop at group boundary or incompatible grid
                         }
-                        _ => break, // Stop at group boundary or incompatible grid
+                    }
+                    // Absorb from following beats freely if we are not inside a tuplet slot.
+                    _ => {
+                        absorb_ticks += t;
                     }
                 }
+                if absorb_ticks >= need {
+                    break;
+                }
+                k += 1;
+            }
 
+            return if let Duration::Tuplet { n: n_old, m: m_old, .. } = dur_old {
                 if absorb_ticks >= need {
                     // We can grow by consuming only within the active tuplet group
                     self.beats[idx] = beat;
@@ -224,17 +234,6 @@ impl Measure {
                 }
             } else {
                 // Legacy behavior for non-tuplet slots: absorb from following beats freely
-                let mut k = idx + 1;
-                let mut absorb_ticks = 0u32;
-                while need > 0 && k < self.beats.len() {
-                    let b = self.beats[k];
-                    let t = set.grid.ticks_of(&b.duration).unwrap();
-                    absorb_ticks += t;
-                    if absorb_ticks >= need {
-                        break;
-                    }
-                    k += 1;
-                }
                 if absorb_ticks >= need {
                     self.beats[idx] = beat;
                     let p = idx + 1;
@@ -262,7 +261,7 @@ impl Measure {
                 } else {
                     self.overflow_err(new_ticks, max_ticks - old_ticks)
                 }
-            }
+            };
         }
 
         // "Shrinking" branch
