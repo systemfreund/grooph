@@ -1,4 +1,4 @@
-use crate::beaming::{compute_beam_plan, BeamPlan};
+use crate::beaming::{BeamPlan, compute_beam_plan};
 use crate::duration::{Duration, NoteValue};
 use crate::measure::{Beat, BeatKind, Measure};
 
@@ -115,10 +115,14 @@ fn discover_tuplets(measure: &Measure, beams: &Vec<BeamGroupPlan>) -> Vec<Tuplet
             let mut end = start;
             let mut has_rest = false;
             while end < k {
-                if beats[end].kind == BeatKind::Rest { has_rest = true; }
+                if beats[end].kind == BeatKind::Rest {
+                    has_rest = true;
+                }
                 let dt = set.grid.ticks_of(&beats[end].duration).unwrap_or(0);
                 acc_ticks = acc_ticks.saturating_add(dt);
-                if acc_ticks >= target_ticks { break; }
+                if acc_ticks >= target_ticks {
+                    break;
+                }
                 end += 1;
             }
             tmp.push(TupGroupTmp {
@@ -138,10 +142,11 @@ fn discover_tuplets(measure: &Measure, beams: &Vec<BeamGroupPlan>) -> Vec<Tuplet
     // und alle benachbarten Paare continuity >= 1 haben.
     let mut out: Vec<TupletPlan> = Vec::with_capacity(tmp.len());
     for g in tmp.into_iter() {
-        let note_idxs: Vec<usize> = (g.start..=g.end)
-            .filter(|&ix| beats[ix].kind == BeatKind::Note)
-            .collect();
-        let fully = if g.contains_rest || note_idxs.len() < 2 { false } else {
+        let note_idxs: Vec<usize> =
+            (g.start..=g.end).filter(|&ix| beats[ix].kind == BeatKind::Note).collect();
+        let fully = if g.contains_rest || note_idxs.len() < 2 {
+            false
+        } else {
             // Prüfe gegen jede BeamGroup
             let mut ok_any = false;
             'bg: for bg in beams.iter() {
@@ -159,13 +164,24 @@ fn discover_tuplets(measure: &Measure, beams: &Vec<BeamGroupPlan>) -> Vec<Tuplet
                         let b = pair[1];
                         let la = *pos_map.get(&a).unwrap();
                         let lb = *pos_map.get(&b).unwrap();
-                        if la >= lb { ok = false; break; }
-                        for cidx in la..lb {
-                            if *bg.continuity.get(cidx).unwrap_or(&0) < 1 { ok = false; break; }
+                        if la >= lb {
+                            ok = false;
+                            break;
                         }
-                        if !ok { break; }
+                        for cidx in la..lb {
+                            if *bg.continuity.get(cidx).unwrap_or(&0) < 1 {
+                                ok = false;
+                                break;
+                            }
+                        }
+                        if !ok {
+                            break;
+                        }
                     }
-                    if ok { ok_any = true; break 'bg; }
+                    if ok {
+                        ok_any = true;
+                        break 'bg;
+                    }
                 }
             }
             ok_any
@@ -188,27 +204,36 @@ fn discover_tuplets(measure: &Measure, beams: &Vec<BeamGroupPlan>) -> Vec<Tuplet
 mod tests {
     use super::*;
     use crate::duration::{e, t8};
-    use crate::measure::{Beat, Measure, TimeSignature};
     use crate::measure::BeatKind::Note;
+    use crate::measure::{Beat, Measure, TimeSignature};
 
     #[test]
     fn beaming_group_within_primary_boundaries_in_seven_eight() {
         // 7/8 mit Achteln, Standardgruppierung 2+3+2.
         // Die mittlere Gruppe (Beats 2..=4, 0-basiert) sollte beamed sein.
         let mut m = Measure::new(TimeSignature::SEVEN_EIGHT);
-        for i in 0..7 { m.set_beat_at(i, Beat::note(e())).unwrap(); }
+        for i in 0..7 {
+            m.set_beat_at(i, Beat::note(e())).unwrap();
+        }
 
         let plan = plan_measure(&m);
         let has_group = plan.beams.iter().any(|g| {
             let idxs = &g.note_indices;
-            if !(idxs.contains(&2) && idxs.contains(&3) && idxs.contains(&4)) { return false; }
+            if !(idxs.contains(&2) && idxs.contains(&3) && idxs.contains(&4)) {
+                return false;
+            }
             let mut pos_map = std::collections::HashMap::new();
-            for (i, gi) in idxs.iter().enumerate() { pos_map.insert(*gi, i); }
+            for (i, gi) in idxs.iter().enumerate() {
+                pos_map.insert(*gi, i);
+            }
             let l2 = *pos_map.get(&2).unwrap();
             let l3 = *pos_map.get(&3).unwrap();
             let l4 = *pos_map.get(&4).unwrap();
-            if !(l2 < l3 && l3 < l4) { return false; }
-            g.continuity.get(l2).copied().unwrap_or(0) >= 1 && g.continuity.get(l3).copied().unwrap_or(0) >= 1
+            if !(l2 < l3 && l3 < l4) {
+                return false;
+            }
+            g.continuity.get(l2).copied().unwrap_or(0) >= 1
+                && g.continuity.get(l3).copied().unwrap_or(0) >= 1
         });
         assert!(has_group, "Beats 3-5 sollten in 7/8 beamed sein (2+3+2, mittlere Gruppe)");
     }
@@ -218,7 +243,9 @@ mod tests {
         // Konstruiere einen 4/4, in dem Beats 3..=5 (0-basiert) eine Triole bilden
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
         // Setze zunächst 6 Achtel, dann eine Triole über die nächsten 3 Achtel-Schlitze
-        for i in 0..3 { m.set_beat_at(i, Beat::note(e())).unwrap(); }
+        for i in 0..3 {
+            m.set_beat_at(i, Beat::note(e())).unwrap();
+        }
         // Drei Achtel-Triolett-Noten
         m.set_beat_at(3, Beat::note(t8())).unwrap();
         m.set_beat_at(4, Beat::note(t8())).unwrap();
@@ -227,5 +254,23 @@ mod tests {
         let plan = plan_measure(&m);
         let ok = plan.tuplets.iter().any(|t| t.count == 3 && t.start == 3 && t.end == 5);
         assert!(ok, "Triplet-Klammer sollte über Beats 4–6 (3..=5) liegen");
+    }
+
+    #[test]
+    fn triplet_bracket_over_beats_when_preceding_beat_is_connected_to_triplet_with_beams() {
+        let mut m = Measure::new_init(TimeSignature::SEVEN_EIGHT, Note);
+        m.set_beat_at(3, Beat::note(t8())).unwrap();
+        m.set_beat_at(4, Beat::note(t8())).unwrap();
+        m.set_beat_at(5, Beat::note(t8())).unwrap();
+
+        let plan = plan_measure(&m);
+
+        // Beam connects the triplets (3,4,5) with the preceding beat (2).
+        // Expected because of the default 2+3+2 grouping in 7/8.
+        assert_eq!(plan.beams[1].note_indices, vec![2, 3, 4, 5]);
+
+        // We expect a bracket to be drawn over the triplets (3,4,5) to visually distinguish them
+        // from the preceding beat.
+        assert!(!plan.tuplets[0].fully_beamed);
     }
 }
