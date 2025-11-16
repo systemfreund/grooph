@@ -1,6 +1,6 @@
 mod glyphs;
 
-use crate::duration::{e, qt16, t8, Duration};
+use crate::duration::{e, qt16, t16, t8, Duration};
 use crate::measure::{Measure, TimeSignature};
 use crate::render_plan::plan_measure;
 
@@ -764,11 +764,9 @@ impl Grooph {
         //measure.add_beat(Beat::note(e())).unwrap();
 
         //measure.add_beat(Beat::note(e())).unwrap();
-        // measure.add_beat(Beat::note(qt16())).unwrap();
-        // measure.add_beat(Beat::note(qt16())).unwrap();
-        // measure.add_beat(Beat::note(qt16())).unwrap();
-        // measure.add_beat(Beat::note(qt16())).unwrap();
-        // measure.add_beat(Beat::note(qt16())).unwrap();
+        measure.add_beat(Beat::note(qt16())).unwrap();
+        // measure.add_beat(Beat::note(t16())).unwrap();
+        // measure.add_beat(Beat::note(t16())).unwrap();
 
         //measure.add_beat(Beat::rest(e())).unwrap();
 

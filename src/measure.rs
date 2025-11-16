@@ -225,6 +225,84 @@ impl Measure {
         // Attempt-then-fill: do not modify the measure until we know we can spell the leftover
         // exactly using a context-aware set of durations.
         if new_ticks < old_ticks {
+            // Special handling for tuplets when starting a new tuplet group (old slot is non-tuplet):
+            // form a full tuplet group spanning m * base. If we're already inside a tuplet group,
+            // fall back to the generic leftover fill to allow intra-group refinements (e.g., t8 -> t16).
+            if let Duration::Tuplet { n, m, base } = beat.duration {
+                if matches!(dur_old, Duration::Tuplet { .. }) {
+                    // Do not span a new group when replacing within an existing tuplet grid.
+                    // Proceed to generic leftover handling below.
+                } else {
+                // Compute the total span this tuplet group should occupy
+                let base_ticks = set.grid.ticks_of(&Duration::Simple(base)).unwrap();
+                let group_span = (m as u32) * base_ticks;
+
+                // Collect ticks from idx forward until we cover group_span
+                let mut consumed = 0u32;
+                let mut k = idx; // exclusive end index for removal [idx, k)
+                while consumed < group_span {
+                    if k >= self.beats.len() {
+                        // Not enough space in this measure to span the tuplet group
+                        let attempted = set.grid.ticks_to_whole_notes(new_ticks);
+                        let available_ticks = (set.grid.ticks_per_measure(&self.time_signature)
+                            .saturating_sub(current_ticks - old_ticks))
+                            .max(0);
+                        let available = set.grid.ticks_to_whole_notes(available_ticks);
+                        return Err(MeasureError::Overflow { attempted, available });
+                    }
+                    let b = self.beats[k];
+                    // If we encounter a tuplet of a different grid (different n/m), refuse
+                    // (don't break existing groups). Base may differ (e.g., t8 vs t16) but
+                    // n/m define the grid equivalence here.
+                    if let Duration::Tuplet { n: n2, m: m2, .. } = b.duration {
+                        if !(n2 == n && m2 == m) {
+                            let attempted = set.grid.ticks_to_whole_notes(new_ticks);
+                            let remaining = set.grid.ticks_to_whole_notes(group_span.saturating_sub(consumed));
+                            return Err(MeasureError::Unfillable { attempted, remaining });
+                        }
+                    }
+                    let t = set.grid.ticks_of(&b.duration).unwrap_or(0);
+                    consumed += t;
+                    k += 1;
+                }
+
+                // We will replace [idx..k) with the tuplet group (n items). If we consumed
+                // more ticks than the group span, we owe back a remainder after the group.
+                let overrun = consumed - group_span;
+
+                // Remove the covered region first
+                self.beats.drain(idx..k);
+
+                // Insert the tuplet items: first the requested beat, then n-1 rests of same tuplet duration
+                self.beats.insert(idx, beat);
+                let mut insert_at = idx + 1;
+                for _ in 1..n {
+                    self.beats.insert(insert_at, Beat::rest(beat.duration));
+                    insert_at += 1;
+                }
+
+                // If there is an overrun (we consumed into the next original beat), reinsert its remainder as rests
+                if overrun > 0 {
+                    if let Some(fill) = best_fill_for_gap(overrun, &[]) {
+                        for d in fill {
+                            self.beats.insert(insert_at, Beat::rest(d));
+                            insert_at += 1;
+                        }
+                    } else {
+                        // Should not happen with our common durations, but guard anyway
+                        let attempted = set.grid.ticks_to_whole_notes(new_ticks);
+                        let remaining = set.grid.ticks_to_whole_notes(overrun);
+                        return Err(MeasureError::Unfillable { attempted, remaining });
+                    }
+                }
+
+                // Sanity: total ticks must remain the same
+                assert_eq!(self.current_ticks(), max_ticks);
+                return Ok(());
+                }
+            }
+
+            // Non-tuplet: try to fill leftover locally
             let leftover = old_ticks - new_ticks;
             let allowed: Vec<Duration> = Vec::new();
 
@@ -570,13 +648,10 @@ mod tests {
     }
 
     #[test]
-    fn test_tuplets_0() {
-        let mut measure = Measure::new(TimeSignature::SEVEN_EIGHT);
-
-        assert!(measure.add_beat(Beat::note(s())).is_ok());
-
+    fn test_quintuplets_0() {
+        let mut measure = Measure::new(TimeSignature::FOUR_SIXTEENTH);
         println!("{}", measure);
-        //measure.add_beat(Beat::note(qt16())).unwrap(); // TODO fails but it mustn't
+        measure.add_beat(Beat::note(qt16())).unwrap(); // TODO fails but it mustn't
     }
 
     #[test]
