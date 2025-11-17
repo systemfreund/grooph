@@ -425,37 +425,47 @@ mod tests {
     #[test]
     fn triplet_render_plan_0() {
         let mut m = Measure::new(TimeSignature::ONE_FOUR);
-        m.add_beat(Beat::note(t32())).unwrap();
-        m.add_beat(Beat::note(t32())).unwrap();
-        m.add_beat(Beat::note(t32())).unwrap();
+        m.set_beat_at(0, Beat::note(t16())).unwrap();
+        m.set_beat_at(1, Beat::note(t8())).unwrap();
+
+        let mut tuplets = plan_measure(&m).tuplets;
+        assert_eq!(tuplets.len(), 1);
+        // The number remains 3 (triplet), but the bracket spans only the two remaining slots
+        assert_eq!(tuplets[0].count, 3);
+        assert_eq!(tuplets[0].start, 0);
+        assert_eq!(tuplets[0].end, 1);
+
+        m.set_beat_at(2, Beat::note(t16())).unwrap();
+        tuplets = plan_measure(&m).tuplets;
+        assert_eq!(tuplets.len(), 2);
+        assert_eq!(tuplets[1].count, 3);
+        assert_eq!(tuplets[1].start, 2);
+        assert_eq!(tuplets[1].end, 4);
+    }
+
+    #[test]
+    fn triplet_render_plan_1() {
+        let mut m = Measure::new(TimeSignature::ONE_FOUR);
+        m.set_beat_at(0, Beat::note(t32())).unwrap();
         m.set_beat_at(0, Beat::note(t16())).unwrap();
 
         let mut tuplets = plan_measure(&m).tuplets;
         assert_eq!(tuplets.len(), 1, "first tuplet group not found");
         // The number remains 3 (dtriplet), but the bracket spans only the two remaining slots
         assert_eq!(tuplets[0].count, 3);
-        assert_eq!(tuplets[0].start, 0, "first tuplet group start mismatch");
-        assert_eq!(tuplets[0].end, 1, "first tuplet group end mismatch");
+        assert_eq!(tuplets[0].start, 0);
+        assert_eq!(tuplets[0].end, 1);
 
         // Start a new tuplet group with a t16 immediately after the t32-group.
         m.set_beat_at(2, Beat::rest(t16())).unwrap();
-        // Debug: dump beats after mutation
-        eprintln!("beats after rest@2:");
-        for (i, b) in m.beats().iter().enumerate() {
-            eprintln!("  {:2}: {:?} {:?}", i, b.duration, b.kind);
-        }
         // Now we expect to have two tuplet groups, and the very last beat must be a simple 1/16 note.
         tuplets = plan_measure(&m).tuplets;
         println!("{:?}", tuplets);
-        assert_eq!(tuplets.len(), 2, "second tuplet group not found");
+        assert_eq!(tuplets.len(), 2);
         tuplets = plan_measure(&m).tuplets;
 
         assert_eq!(tuplets[1].count, 3);
-        assert_eq!(tuplets[1].start, 2, "second tuplet group start mismatch");
-        assert_eq!(tuplets[1].end, 4, "second tuplet group end mismatch");
-
-        tuplets.iter()
-            .find(|t| t.count == 3 && t.start == 2 && t.end == 4)
-            .expect("expected triplet over beats 2..=4");
+        assert_eq!(tuplets[1].start, 2);
+        assert_eq!(tuplets[1].end, 4);
     }
 }
