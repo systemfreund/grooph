@@ -144,9 +144,9 @@ fn draw_beat(painter: &egui::Painter, pos: Pos2, beat: Beat, opts: NoteRenderOpt
     }
 
     if beat.accented && beat.kind == BeatKind::Note {
-        let accent_font = FontId::new(font_id.size * 0.9, font_id.family.clone());
+        let accent_font = FontId::new(font_id.size * 0.8, font_id.family.clone());
         painter.text(
-            pos2(pos.x, pos.y - font_id.size * 1.0),
+            pos2(pos.x, pos.y - font_id.size * 1.2),
             Align2::CENTER_CENTER,
             GLYPH_ACCENT_ABOVE.to_string(),
             accent_font,
@@ -414,7 +414,7 @@ fn draw_measure(
     // 4c) Tuplet indicators (number and optional bracket)
     if !plan.tuplets.is_empty() {
         let staff_space = em * 0.25;
-        let bracket_gap = 0.9 * staff_space;
+        let bracket_gap = 1.8 * staff_space;
         let hook_len = 0.8 * staff_space;
         let hook_dy = hook_len * 0.85;
         let number_font = FontId::new(font_id.size * 0.75, font_id.family.clone());
@@ -422,11 +422,23 @@ fn draw_measure(
         for t in &plan.tuplets {
             // Horizontal span in Pixeln
             let (mut x_l, mut x_r) = (stem_xs[t.start], stem_xs[t.end]);
-            let margin = em * 0.25;
+            let margin = em * 0.15;
             x_l -= margin;
             x_r += margin;
 
-            let y_bracket = beam_render_opts.beam_y - beam_render_opts.thickness - bracket_gap;
+            // If any beat within the tuplet is accented, raise the bracket further to avoid
+            // visual overlap with the accent mark rendered above notes.
+            let has_accent_in_group = measure
+                .beats()
+                .iter()
+                .enumerate()
+                .any(|(i, b)| i >= t.start && i <= t.end && b.kind == BeatKind::Note && b.accented);
+            // Extra clearance tuned relative to staff space. This keeps the tuplet number and bracket
+            // above the accent wedge without looking too detached when no accent is present.
+            let accent_clearance = (if has_accent_in_group { 1.4  } else { -0.4 }) * staff_space;
+
+            let y_bracket =
+                beam_render_opts.beam_y - beam_render_opts.thickness - bracket_gap - accent_clearance;
 
             let digits = tuplet_glyphs(t.count);
             let num_chars = digits.chars().count() as f32;
