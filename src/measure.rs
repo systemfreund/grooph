@@ -5,7 +5,7 @@ use crate::duration::{Duration, NoteValue, default_duration_set, duration_to_deb
 use crate::fill::best_fill_for_gap;
 use crate::measure::BeatKind::Rest;
 use BeatKind::Note;
-use std::fmt::{Display, Formatter};
+use std::fmt::{Debug, Display, Formatter};
 use std::vec;
 
 /// Represents a time signature (e.g., 4/4, 3/4, 6/8)
@@ -101,7 +101,7 @@ pub enum MeasureError {
 }
 
 /// Represents a musical measure containing a sequence of beats
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Measure {
     beats: Vec<Beat>,
     time_signature: TimeSignature,
@@ -524,10 +524,14 @@ impl Measure {
     }
 }
 
-impl Display for Measure {
+impl Debug for Measure {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        self.beats.iter().fold(Ok(()), |result, beat| {
-            result.and_then(|_| write!(f, "{} ", duration_to_debug_str(&beat.duration)))
+        self.beats.iter().enumerate().fold(Ok(()), |result, (idx, beat)| {
+            result
+                .and_then(|_| if beat.kind == Rest { write!(f, "(") } else { Ok(()) })
+                .and_then(|_| write!(f, "{}", duration_to_debug_str(&beat.duration)))
+                .and_then(|_| if beat.kind == Rest { write!(f, ")") } else { Ok(()) })
+                .and_then(|_| if idx < self.beats.len() - 1 { write!(f, " ") } else { Ok(()) })
         })
     }
 }
@@ -593,10 +597,7 @@ mod tests {
         assert!(m.add_beat(Beat::note(t16())).is_ok());
         // The next triplet 1/8 overfills this tuplet group, which has only space for one triplet
         // 1/6 note left (or two triplet 1/32 subdivisions).
-        assert!(
-            m.add_beat(Beat::note(t8())).is_err(),
-            "triplet 1/8 must not fit tuplet group"
-        );
+        assert!(m.add_beat(Beat::note(t8())).is_err(), "triplet 1/8 must not fit tuplet group");
     }
 
     #[test]
