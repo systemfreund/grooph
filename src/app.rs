@@ -733,65 +733,17 @@ impl App for Grooph {
                         }
                     }
                 }
-                // Numeric duration assignment: 1=1/4, 2=1/8, 3=1/16, 4=1/32
-                // Preserve BeatKind (note/rest). When current beat is a tuplet, preserve (n,m)
-                // and only change base for keys 2–4; key 1 is ignored on tuplets (quarter-tuplets unsupported).
                 if i.key_pressed(Key::Num1) {
-                    let cur = self.measure.beats()[idx];
-                    // If tuplet -> ignore (no quarter tuplet support)
-                    let new_dur_opt = match cur.duration {
-                        Duration::Tuplet { .. } => None,
-                        _ => Some(Duration::Simple(Quarter)),
-                    };
-                    if let Some(new_dur) = new_dur_opt {
-                        let new_beat = match cur.kind {
-                            BeatKind::Note => Beat::note(new_dur),
-                            BeatKind::Rest => Beat::rest(new_dur),
-                        };
-                        let _ = self.measure.set_beat_at(idx, new_beat);
-                    }
+                    self.apply_base_duration_key(idx, Quarter, false);
                 }
                 if i.key_pressed(Key::Num2) {
-                    let cur = self.measure.beats()[idx];
-                    let new_dur = match cur.duration {
-                        Duration::Tuplet { n, m, base: _ } => {
-                            Duration::Tuplet { n, m, base: Eighth }
-                        }
-                        _ => Duration::Simple(Eighth),
-                    };
-                    let new_beat = match cur.kind {
-                        BeatKind::Note => Beat::note(new_dur),
-                        BeatKind::Rest => Beat::rest(new_dur),
-                    };
-                    let _ = self.measure.set_beat_at(idx, new_beat);
+                    self.apply_base_duration_key(idx, Eighth, true);
                 }
                 if i.key_pressed(Key::Num3) {
-                    let cur = self.measure.beats()[idx];
-                    let new_dur = match cur.duration {
-                        Duration::Tuplet { n, m, base: _ } => {
-                            Duration::Tuplet { n, m, base: Sixteenth }
-                        }
-                        _ => Duration::Simple(Sixteenth),
-                    };
-                    let new_beat = match cur.kind {
-                        BeatKind::Note => Beat::note(new_dur),
-                        BeatKind::Rest => Beat::rest(new_dur),
-                    };
-                    let _ = self.measure.set_beat_at(idx, new_beat);
+                    self.apply_base_duration_key(idx, Sixteenth, true);
                 }
                 if i.key_pressed(Key::Num4) {
-                    let cur = self.measure.beats()[idx];
-                    let new_dur = match cur.duration {
-                        Duration::Tuplet { n, m, base: _ } => {
-                            Duration::Tuplet { n, m, base: ThirtySecond }
-                        }
-                        _ => Duration::Simple(ThirtySecond),
-                    };
-                    let new_beat = match cur.kind {
-                        BeatKind::Note => Beat::note(new_dur),
-                        BeatKind::Rest => Beat::rest(new_dur),
-                    };
-                    let _ = self.measure.set_beat_at(idx, new_beat);
+                    self.apply_base_duration_key(idx, ThirtySecond, true);
                 }
                 if i.key_pressed(Key::Period) {
                     // Toggle dotted (1 dot) for the current beat. If it cannot be changed (would overflow or unfillable), ignore.
@@ -807,6 +759,36 @@ impl App for Grooph {
 }
 
 impl Grooph {
+    /// Wendet eine Basis-Notenwert-Änderung (Num1–Num4) auf den Beat bei `idx` an.
+    ///
+    /// - `base` bestimmt den Ziel-Basiswert (Viertel, Achtel, Sechzehntel, Zweiunddreißigstel).
+    /// - `allow_on_tuplet`: Wenn `true`, wird bei Tuplets nur die Basis geändert und (n,m) beibehalten.
+    ///   Wenn `false`, werden Tuplets ignoriert (z. B. keine Viertel-Tuplets unterstützen).
+    fn apply_base_duration_key(
+        &mut self,
+        idx: usize,
+        base: duration::NoteValue,
+        allow_on_tuplet: bool,
+    ) {
+        let cur = self.measure.beats()[idx];
+        let new_dur_opt = match cur.duration {
+            Duration::Tuplet { n, m, base: _ } => {
+                if allow_on_tuplet {
+                    Some(Duration::Tuplet { n, m, base })
+                } else {
+                    None
+                }
+            }
+            _ => Some(Duration::Simple(base)),
+        };
+        if let Some(new_dur) = new_dur_opt {
+            let new_beat = match cur.kind {
+                BeatKind::Note => Beat::note(new_dur),
+                BeatKind::Rest => Beat::rest(new_dur),
+            };
+            let _ = self.measure.set_beat_at(idx, new_beat);
+        }
+    }
     pub fn new(cc: &CreationContext) -> Self {
         add_font(&cc.egui_ctx);
         let ff = FontFamily::Name("music".into());
