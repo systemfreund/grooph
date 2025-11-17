@@ -121,7 +121,7 @@ fn discover_tuplets(measure: &Measure, beams: &Vec<BeamGroupPlan>) -> Vec<Tuplet
             i += 1;
             continue;
         };
-        // Maximalen Lauf gleicher (n,m) finden
+        // Maximalen Lauf gleicher (n,m) finden (Basis darf variieren)
         let mut k = i;
         while k < beats.len() {
             match beats[k].duration {
@@ -129,11 +129,33 @@ fn discover_tuplets(measure: &Measure, beams: &Vec<BeamGroupPlan>) -> Vec<Tuplet
                 _ => break,
             }
         }
-        // Den Lauf in logische Gruppen nach Tick-Summe aufteilen
+
+        // Bestimme die kleinste Basisnote innerhalb des Laufs (feinste Unterteilung)
+        let mut run_min_base = beats[i].duration.base_note();
+        let mut run_min_ticks = set
+            .grid
+            .ticks_of(&Duration::Simple(run_min_base))
+            .unwrap_or(u32::MAX);
+        for idx in i..k {
+            let b = beats[idx].duration.base_note();
+            if let Some(t) = set.grid.ticks_of(&Duration::Simple(b)) {
+                if t < run_min_ticks {
+                    run_min_ticks = t;
+                    run_min_base = b;
+                }
+            }
+        }
+
+        // Den Lauf in logische Gruppen nach Ziel-Ticks aufteilen.
+        // Ziel: m * Ticks(Simple(run_min_base))
+        let target_per_group_ticks = set
+            .grid
+            .ticks_of(&Duration::Simple(run_min_base))
+            .unwrap_or(0)
+            .saturating_mul(m as u32);
+
         let mut start = i;
         while start < k {
-            let first_dur = beats[start].duration;
-            let target_ticks = set.grid.ticks_of(&first_dur).unwrap_or(0).saturating_mul(n as u32);
             let mut acc_ticks: u32 = 0;
             let mut end = start;
             let mut has_rest = false;
@@ -143,7 +165,7 @@ fn discover_tuplets(measure: &Measure, beams: &Vec<BeamGroupPlan>) -> Vec<Tuplet
                 }
                 let dt = set.grid.ticks_of(&beats[end].duration).unwrap_or(0);
                 acc_ticks = acc_ticks.saturating_add(dt);
-                if acc_ticks >= target_ticks {
+                if acc_ticks >= target_per_group_ticks {
                     break;
                 }
                 end += 1;
@@ -153,7 +175,7 @@ fn discover_tuplets(measure: &Measure, beams: &Vec<BeamGroupPlan>) -> Vec<Tuplet
                 end,
                 n,
                 m,
-                base: beats[start].duration.base_note(),
+                base: run_min_base,
                 contains_rest: has_rest,
             });
             start = end + 1;
@@ -263,6 +285,10 @@ fn discover_tuplets(measure: &Measure, beams: &Vec<BeamGroupPlan>) -> Vec<Tuplet
         };
 
         out.push(TupletPlan {
+            // Wichtig: Die dargestellte Tuplet-Zahl ist der Zähler n des (n,m)-Verhältnisses
+            // und NICHT die Anzahl der Slots im geschnittenen Segment. Das Segment kann kürzer
+            // sein (z. B. wenn der erste Slot zu einer größeren Basis „verschmilzt“), die
+            // semantische Tuplet bleibt aber eine „3“ (Triplet), „5“ (Quintuplet), etc.
             count: g.n,
             start: g.start,
             end: g.end,
@@ -279,7 +305,7 @@ fn discover_tuplets(measure: &Measure, beams: &Vec<BeamGroupPlan>) -> Vec<Tuplet
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::duration::{e, t8};
+    use crate::duration::{e, t16, t32, t8};
     use crate::measure::BeatKind::Note;
     use crate::measure::{Beat, Measure, TimeSignature};
 
@@ -385,4 +411,21 @@ mod tests {
         assert_eq!(t.edge_connection, EdgeConnection::Right);
         assert!(!t.number_only());
     }
+
+    #[test]
+    fn triplet_bracker_over_t32_triplet_with_merged_t16() {
+        let mut m = Measure::new(TimeSignature::ONE_FOUR);
+        m.add_beat(Beat::note(t32())).unwrap();
+        m.add_beat(Beat::note(t32())).unwrap();
+        m.add_beat(Beat::note(t32())).unwrap();
+        m.set_beat_at(0, Beat::note(t16())).unwrap();
+
+        plan_measure(&m)
+            .tuplets
+            .iter()
+            // Zahl bleibt 3 (Triplet), aber die Klammer spannt nur über die zwei verbleibenden Slots
+            .find(|t| t.count == 3 && t.start == 0 && t.end == 1)
+            .expect("expected triplet over beats 0..=1");
+    }
+
 }
