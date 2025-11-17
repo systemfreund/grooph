@@ -1,7 +1,7 @@
 pub(crate) mod grouping;
 
 use crate::duration::NoteValue::{Eighth, Sixteenth, ThirtySecond};
-use crate::duration::{Duration, NoteValue, default_duration_set};
+use crate::duration::{Duration, NoteValue, default_duration_set, duration_to_debug_str};
 use crate::fill::best_fill_for_gap;
 use crate::measure::BeatKind::Rest;
 use BeatKind::Note;
@@ -346,8 +346,6 @@ impl Measure {
                 }
                 Ok(())
             } else {
-                let attempted = set.grid.ticks_to_whole_notes(new_ticks);
-                let remaining = set.grid.ticks_to_whole_notes(leftover);
                 self.unfillable_err(new_ticks, leftover)
             }
         } else {
@@ -507,18 +505,7 @@ impl Measure {
 impl Display for Measure {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         self.beats.iter().fold(Ok(()), |result, beat| {
-            result.and_then(|_| {
-                let duration = beat.duration.base_note().fraction();
-                write!(f, "{}", duration)
-                    .and_then(|_| match beat.duration {
-                        Duration::Simple(_) => Ok(()),
-                        Duration::Dotted { base: _base, dots } => {
-                            write!(f, "{}", ".".repeat(dots as usize))
-                        }
-                        Duration::Tuplet { .. } => write!(f, "ᵀ"),
-                    })
-                    .and_then(|_| write!(f, " "))
-            })
+            result.and_then(|_| write!(f, "{} ", duration_to_debug_str(&beat.duration)))
         })
     }
 }
@@ -528,6 +515,10 @@ mod tests {
     use super::*;
     use crate::duration::NoteValue::{Eighth, Sixteenth, ThirtySecond};
     use crate::duration::{Duration, e, q, qt16, s, t8, t16, t32, th};
+
+    fn durations_of(measure: &Measure) -> Vec<Duration> {
+        measure.beats().iter().map(|b| b.duration).collect()
+    }
 
     #[test]
     fn test_basic_measure_features() {
@@ -626,7 +617,7 @@ mod tests {
     }
 
     #[test]
-    fn test_invalid_tuplet_insertion_2() {
+    fn test_triplet_insertions_3() {
         let mut measure = Measure::new(TimeSignature::TWO_EIGHT);
 
         assert!(measure.add_beat(Beat::note(t8())).is_ok());
@@ -645,14 +636,6 @@ mod tests {
     }
 
     #[test]
-    fn test_invalid_tuplet_insertion_3() {
-        let mut measure = Measure::new(TimeSignature::ONE_FOUR);
-
-        assert!(measure.add_beat(Beat::note(qt16())).is_ok());
-        println!("{}", measure);
-    }
-
-    #[test]
     fn test_triplet_insertion_in_seven_eight() {
         let mut measure = Measure::new(TimeSignature::SEVEN_EIGHT);
         assert!(measure.add_beat(Beat::note(t8())).is_ok());
@@ -661,15 +644,28 @@ mod tests {
     }
 
     #[test]
-    fn test_triplet_split_in_one_four() {
+    fn test_triplet_split_1() {
         let mut measure = Measure::new(TimeSignature::ONE_FOUR);
         assert!(measure.add_beat(Beat::note(t8())).is_ok());
         assert!(measure.add_beat(Beat::note(t8())).is_ok());
         assert!(measure.add_beat(Beat::note(t8())).is_ok());
 
-        println!("{}", measure);
-        assert!(measure.set_beat_at(2, Beat::note(t16())).is_ok());
-        println!("{}", measure);
+        assert!(measure.set_beat_at(1, Beat::note(t16())).is_ok());
+        assert_eq!(&durations_of(&measure), &[t8(), t16(), t16(), t8()]);
+
+        assert!(measure.set_beat_at(0, Beat::note(t16())).is_ok());
+        assert_eq!(&durations_of(&measure), &[t16(), t16(), t16(), t16(), t8()]);
+    }
+
+    #[test]
+    fn test_triplet_split_2() {
+        let mut measure = Measure::new(TimeSignature::ONE_FOUR);
+        assert!(measure.add_beat(Beat::note(t8())).is_ok());
+        assert!(measure.add_beat(Beat::note(t8())).is_ok());
+        assert!(measure.add_beat(Beat::note(t8())).is_ok());
+
+        assert!(measure.set_beat_at(2, Beat::note(t32())).is_ok());
+        assert_eq!(&durations_of(&measure), &[t8(), t8(), t32(), t32(), t16()]);
     }
 
     #[test]
@@ -711,8 +707,8 @@ mod tests {
     #[test]
     fn test_quintuplets_0() {
         let mut measure = Measure::new(TimeSignature::FOUR_SIXTEENTH);
-        println!("{}", measure);
-        measure.add_beat(Beat::note(qt16())).unwrap(); // TODO fails but it mustn't
+        measure.add_beat(Beat::note(qt16())).unwrap();
+        // TODO extend
     }
 
     #[test]

@@ -1,7 +1,8 @@
-use NoteValue::{Half, Quarter, Whole};
 use crate::duration::NoteValue::{Eighth, Sixteenth, ThirtySecond};
-use crate::measure::{Beat, TimeSignature};
 use crate::measure::grouping::default_groups_for;
+use crate::measure::{Beat, TimeSignature};
+use NoteValue::{Half, Quarter, Whole};
+use std::fmt::{Debug, Formatter, Pointer, format};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum NoteValue {
@@ -48,7 +49,7 @@ impl NoteValue {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, PartialEq, Eq)]
 pub enum Duration {
     Simple(NoteValue),
     Dotted { base: NoteValue, dots: u8 },
@@ -136,6 +137,23 @@ impl Duration {
             Duration::Simple(Eighth) => Some(Duration::Simple(Quarter)),
             _ => None,
         }
+    }
+}
+
+impl Debug for Duration {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_str(duration_to_debug_str(self).as_str())
+    }
+}
+
+pub(crate) fn duration_to_debug_str(duration: &Duration) -> String {
+    let duration_fr = duration.base_note().fraction();
+    match duration {
+        Duration::Simple(_) => duration_fr.to_string(),
+        Duration::Dotted { base: _base, dots } => {
+            format!("{}{}", duration_fr, ".".repeat(*dots as usize))
+        }
+        Duration::Tuplet { .. } => format!("{}ᵀ", duration_fr),
     }
 }
 
@@ -254,7 +272,6 @@ impl Grid {
         }
         bounds
     }
-
 }
 
 pub const COMMON_DURATIONS: [Duration; 14] = [
@@ -265,10 +282,10 @@ pub const COMMON_DURATIONS: [Duration; 14] = [
     Duration::Dotted { base: Quarter, dots: 1 }, // dotted 1/4
     Duration::Dotted { base: Eighth, dots: 1 },  // dotted 1/8
     Duration::Dotted { base: Sixteenth, dots: 1 }, // dotted 1/16
-    t8(), // triplet 1/8
-    t16(), // triplet 1/16
-    t32(), // triplet 1/32
-    qt16(), // quintuplet 1/16
+    t8(),                                        // triplet 1/8
+    t16(),                                       // triplet 1/16
+    t32(),                                       // triplet 1/32
+    qt16(),                                      // quintuplet 1/16
     Duration::Tuplet { n: 6, m: 4, base: Sixteenth }, // sextuplet 1/16
     Duration::Tuplet { n: 7, m: 4, base: Sixteenth }, // septuplet 1/16
     Duration::Tuplet { n: 9, m: 8, base: Sixteenth }, // nonuplet 1/16
@@ -313,7 +330,7 @@ pub const fn default_grid() -> Grid { default_duration_set().grid }
 
 #[cfg(test)]
 mod tests {
-    use super::{default_duration_set, default_grid, e, q, t8, Duration};
+    use super::{Duration, default_duration_set, default_grid, e, q, t8};
     use crate::duration::NoteValue::Eighth;
 
     #[test]

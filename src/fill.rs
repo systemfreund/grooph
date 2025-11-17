@@ -34,7 +34,6 @@ pub(crate) fn best_fill_for_gap(gap_ticks: u32, allowed: &[Duration]) -> Option<
             })
             .collect()
     };
-    // Prefer smaller coin as the last step → small duration ends up at the end of the returned sequence
     coins.sort_unstable_by(|a, b| b.0.cmp(&a.0));
 
     let target = gap_ticks as usize;

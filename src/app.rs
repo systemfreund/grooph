@@ -759,15 +759,20 @@ impl Grooph {
         let ff = FontFamily::Name("music".into());
         let mut measure = Measure::new(TimeSignature::TWO_FOUR);
 
-        assert!(measure.add_beat(Beat::note(t8())).is_ok());
         assert!(measure.add_beat(Beat::note(t16())).is_ok());
         assert!(measure.add_beat(Beat::note(t16())).is_ok());
-        assert!(measure.add_beat(Beat::note(t8())).is_ok());
+        // The next triplet 1/8 overfills this tuplet group, which has only space for one triplet
+        // 1/6 note left (or two triplet 1/32 subdivisions).
+        measure.add_beat(Beat::note(t8())).unwrap();
+        // assert!(measure.add_beat(Beat::note(t32())).is_ok());
+        // assert!(measure.add_beat(Beat::note(t32())).is_ok());
+        // The next triplet 1/16 overfills this tuplet group, which has only space for one triplet
+        // 1/32 note left.
+        // assert!(measure.add_beat(Beat::note(t16())).is_err());
+        // assert!(measure.add_beat(Beat::note(t32())).is_ok());
 
-        assert!(measure.add_beat(Beat::note(t16())).is_ok());
-        assert!(measure.add_beat(Beat::note(t16())).is_ok());
-        assert!(measure.add_beat(Beat::note(t32())).is_ok());
-
+        // The next beat starts a new tuplet group, so this is valid.
+        // assert!(measure.add_beat(Beat::note(t8())).is_ok());
         Self { font_family: ff.clone(), font_id: FontId::new(16.0, ff), measure, cursor_idx: 0 }
     }
 }
