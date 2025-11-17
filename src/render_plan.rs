@@ -142,32 +142,53 @@ fn discover_tuplets(measure: &Measure, beams: &Vec<BeamGroupPlan>) -> Vec<Tuplet
             }
         }
 
-        // Den Lauf in logische Gruppen nach Ziel-Ticks aufteilen.
-        // Ziel: m * Ticks(Simple(run_min_base))
-        let target_per_group_ticks = set
-            .grid
-            .ticks_of(&Duration::Simple(run_min_base))
-            .unwrap_or(0)
-            .saturating_mul(m as u32);
-
+        // Segment the run: each segment is oriented to the base of the first slot
+        // (not to the finest base of the entire run). This prevents phantom segments
+        // when a t16 group begins immediately after a t32 group.
         let mut start = i;
         while start < k {
+            // Ziel dynamisch anhand der feinsten Basis innerhalb des Segments bestimmen
+            let mut seg_min_base = beats[start].duration.base_note();
+            let mut seg_min_ticks = set.grid.ticks_of(&Duration::Simple(seg_min_base)).unwrap_or(0);
+
             let mut acc_ticks: u32 = 0;
             let mut end = start;
             let mut has_rest = false;
+            let mut reached_target = false;
             while end < k {
+                // Update minimaler Basiswert
+                let b = beats[end].duration.base_note();
+                if let Some(bt) = set.grid.ticks_of(&Duration::Simple(b)) {
+                    if bt < seg_min_ticks {
+                        seg_min_ticks = bt;
+                        seg_min_base = b;
+                    }
+                }
+
                 if beats[end].kind == BeatKind::Rest {
                     has_rest = true;
                 }
                 let dt = set.grid.ticks_of(&beats[end].duration).unwrap_or(0);
                 acc_ticks = acc_ticks.saturating_add(dt);
+                let target_per_group_ticks = seg_min_ticks.saturating_mul(m as u32);
                 if acc_ticks >= target_per_group_ticks {
+                    reached_target = true;
                     break;
                 }
                 end += 1;
             }
-            tmp.push(TupGroupTmp { start, end, n, m, base: run_min_base, contains_rest: has_rest });
-            start = end + 1;
+
+            // Wie viele Noten enthält [start..=end]? (nur für fully_beamed später relevant)
+            // Für die Segment-Erstellung selbst akzeptieren wir auch Segmente mit nur Rests,
+            // da Tuplet-Klammern über reine Pausen hinweg ebenfalls semantisch sinnvoll sind.
+            if reached_target {
+                // Wichtig: Bewahre die Slot‑Grenzen (inkl. evtl. Rests) — das entspricht der logischen Spannweite
+                tmp.push(TupGroupTmp { start, end, n, m, base: seg_min_base, contains_rest: has_rest });
+                start = end + 1;
+            } else {
+                // unvollständig/zu klein → versuche ab nächstem Slot erneut
+                start += 1;
+            }
         }
         i = k;
     }
@@ -410,23 +431,28 @@ mod tests {
         m.set_beat_at(0, Beat::note(t16())).unwrap();
 
         let mut tuplets = plan_measure(&m).tuplets;
-        assert_eq!(tuplets.len(), 1);
-        // The number remains 3 (Triplet), but the bracket spans only the two remaining slots
+        assert_eq!(tuplets.len(), 1, "first tuplet group not found");
+        // The number remains 3 (dtriplet), but the bracket spans only the two remaining slots
         assert_eq!(tuplets[0].count, 3);
-        assert_eq!(tuplets[0].start, 0);
-        assert_eq!(tuplets[0].end, 1);
+        assert_eq!(tuplets[0].start, 0, "first tuplet group start mismatch");
+        assert_eq!(tuplets[0].end, 1, "first tuplet group end mismatch");
 
         // Start a new tuplet group with a t16 immediately after the t32-group.
         m.set_beat_at(2, Beat::rest(t16())).unwrap();
+        // Debug: dump beats after mutation
+        eprintln!("beats after rest@2:");
+        for (i, b) in m.beats().iter().enumerate() {
+            eprintln!("  {:2}: {:?} {:?}", i, b.duration, b.kind);
+        }
         // Now we expect to have two tuplet groups, and the very last beat must be a simple 1/16 note.
         tuplets = plan_measure(&m).tuplets;
         println!("{:?}", tuplets);
-        assert_eq!(tuplets.len(), 2);
+        assert_eq!(tuplets.len(), 2, "second tuplet group not found");
         tuplets = plan_measure(&m).tuplets;
 
         assert_eq!(tuplets[1].count, 3);
-        assert_eq!(tuplets[1].start, 2);
-        assert_eq!(tuplets[1].end, 4);
+        assert_eq!(tuplets[1].start, 2, "second tuplet group start mismatch");
+        assert_eq!(tuplets[1].end, 4, "second tuplet group end mismatch");
 
         tuplets.iter()
             .find(|t| t.count == 3 && t.start == 2 && t.end == 4)
