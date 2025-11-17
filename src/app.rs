@@ -1,12 +1,12 @@
 mod glyphs;
 
-use crate::duration::{e, qt16, t16, t32, t8, Duration};
+use crate::duration::{s, t16, Duration};
 use crate::measure::{Measure, TimeSignature};
 use crate::render_plan::plan_measure;
 
 use crate::app::glyphs::{
-    GLYPH_AUGMENTATION_DOT, GLYPH_CLEF_PERCUSSION, GLYPH_NOTEHEAD_BLACK, flag_glyph_for_duration,
-    rest_glyph_for_duration, ts_glyphs, tuplet_glyphs,
+    GLYPH_ACCENT_ABOVE, GLYPH_AUGMENTATION_DOT, GLYPH_CLEF_PERCUSSION, GLYPH_NOTEHEAD_BLACK,
+    flag_glyph_for_duration, rest_glyph_for_duration, ts_glyphs, tuplet_glyphs,
 };
 use crate::duration;
 use crate::duration::NoteValue::*;
@@ -141,6 +141,17 @@ fn draw_beat(painter: &egui::Painter, pos: Pos2, beat: Beat, opts: NoteRenderOpt
                 }
             }
         }
+    }
+
+    if beat.accented && beat.kind == BeatKind::Note {
+        let accent_font = FontId::new(font_id.size * 0.9, font_id.family.clone());
+        painter.text(
+            pos2(pos.x, pos.y - font_id.size * 1.0),
+            Align2::CENTER_CENTER,
+            GLYPH_ACCENT_ABOVE.to_string(),
+            accent_font,
+            opts.color,
+        );
     }
 }
 
@@ -748,6 +759,10 @@ impl App for Grooph {
                     // Toggle dotted (1 dot) for the current beat. If it cannot be changed (would overflow or unfillable), ignore.
                     let _ = self.measure.toggle_dotted_at(idx);
                 }
+                if i.key_pressed(Key::A) {
+                    // Toggle user accent on the current beat
+                    self.measure.toggle_accent_at(idx);
+                }
             }
         });
     }
@@ -757,22 +772,9 @@ impl Grooph {
     pub fn new(cc: &CreationContext) -> Self {
         add_font(&cc.egui_ctx);
         let ff = FontFamily::Name("music".into());
-        let mut measure = Measure::new(TimeSignature::TWO_FOUR);
-
-        assert!(measure.add_beat(Beat::note(t16())).is_ok());
-        assert!(measure.add_beat(Beat::note(t16())).is_ok());
-        // The next triplet 1/8 overfills this tuplet group, which has only space for one triplet
-        // 1/6 note left (or two triplet 1/32 subdivisions).
-        measure.add_beat(Beat::note(t8())).unwrap();
-        // assert!(measure.add_beat(Beat::note(t32())).is_ok());
-        // assert!(measure.add_beat(Beat::note(t32())).is_ok());
-        // The next triplet 1/16 overfills this tuplet group, which has only space for one triplet
-        // 1/32 note left.
-        // assert!(measure.add_beat(Beat::note(t16())).is_err());
-        // assert!(measure.add_beat(Beat::note(t32())).is_ok());
-
-        // The next beat starts a new tuplet group, so this is valid.
-        // assert!(measure.add_beat(Beat::note(t8())).is_ok());
-        Self { font_family: ff.clone(), font_id: FontId::new(16.0, ff), measure, cursor_idx: 0 }
+        let mut m = Measure::new(TimeSignature::FOUR_FOUR);
+        m.set_beat_at(0, Beat::note(t16())).unwrap();
+        m.set_beat_at(3, Beat::note(s())).unwrap();
+        Self { font_family: ff.clone(), font_id: FontId::new(16.0, ff), measure: m, cursor_idx: 0 }
     }
 }

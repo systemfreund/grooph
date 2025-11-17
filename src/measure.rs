@@ -63,6 +63,7 @@ pub struct Beat {
     pub duration: Duration,
     pub kind: BeatKind,
     pub tremolo: Option<Tremolo>,
+    pub accented: bool,
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -75,10 +76,14 @@ pub struct Tremolo {
 
 impl Beat {
     /// Creates a new note with the given duration
-    pub fn note(duration: Duration) -> Self { Self { duration, kind: Note, tremolo: None } }
+    pub fn note(duration: Duration) -> Self {
+        Self { duration, kind: Note, tremolo: None, accented: false }
+    }
 
     /// Creates a new rest with the given duration
-    pub fn rest(duration: Duration) -> Self { Self { duration, kind: Rest, tremolo: None } }
+    pub fn rest(duration: Duration) -> Self {
+        Self { duration, kind: Rest, tremolo: None, accented: false }
+    }
 }
 
 /// Errors that can occur when adding beats to a measure
@@ -126,6 +131,7 @@ impl Measure {
     pub fn set_beat_at(&mut self, idx: usize, beat: Beat) -> Result<(), MeasureError> {
         assert!(idx < self.beats.len());
         let set = default_duration_set();
+        let old_accent = self.beats[idx].accented;
         let dur_old = self.beats[idx].duration; // duration of the beat to be replaced
         let max_ticks = self.max_ticks();
         let new_ticks = set
@@ -185,6 +191,7 @@ impl Measure {
                 if absorb_ticks >= need {
                     // We can grow by consuming only within the active tuplet group
                     self.beats[idx] = beat;
+                    self.beats[idx].accented = old_accent;
                     let p = idx + 1;
                     let mut remaining_to_consume = need;
                     while remaining_to_consume > 0 {
@@ -236,6 +243,7 @@ impl Measure {
                 // Legacy behavior for non-tuplet slots: absorb from following beats freely
                 if absorb_ticks >= need {
                     self.beats[idx] = beat;
+                    self.beats[idx].accented = old_accent;
                     let p = idx + 1;
                     let mut remaining_to_consume = need;
                     while remaining_to_consume > 0 {
@@ -309,6 +317,8 @@ impl Measure {
 
                     // Insert the tuplet items: first the requested beat, then n-1 rests of same tuplet duration
                     self.beats.insert(idx, beat);
+                    // Preserve the prior accent on the first inserted beat
+                    self.beats[idx].accented = old_accent;
                     let mut insert_at = idx + 1;
                     for _ in 1..n {
                         self.beats.insert(insert_at, Beat::rest(beat.duration));
@@ -361,6 +371,7 @@ impl Measure {
                 }
                 // Commit: perform replacement at idx and insert the remainder as rests
                 self.beats[idx] = beat;
+                self.beats[idx].accented = old_accent;
                 let mut insert_at = idx + 1;
                 for d in fill {
                     self.beats.insert(insert_at, Beat::rest(d));
@@ -373,6 +384,7 @@ impl Measure {
         } else {
             // No leftover (equal or growth accommodated earlier). Just replace.
             self.beats[idx] = beat;
+            self.beats[idx].accented = old_accent;
             Ok(())
         }
     }
@@ -464,7 +476,7 @@ impl Measure {
         if let Some(fill) = best_fill_for_gap(self.max_ticks(), allowed) {
             let take = fill.len();
             for duration in fill.into_iter().take(take) {
-                let beat = Beat { duration, kind, tremolo: None };
+                let beat = Beat { duration, kind, tremolo: None, accented: false };
                 self.beats.push(beat);
             }
         }
@@ -499,12 +511,31 @@ impl Measure {
             _ => None,
         };
         if let Some(dur) = new_dur {
-            let new_beat = Beat { duration: dur, kind: current.kind, tremolo: None };
+            let new_beat = Beat { duration: dur, kind: current.kind, tremolo: None, accented: current.accented };
             if self.set_beat_at(idx, new_beat).is_ok() {
                 return true;
             }
         }
         false
+    }
+
+    /// Set the user accent flag at index `idx`.
+    pub fn set_accent_at(&mut self, idx: usize, accented: bool) {
+        if let Some(b) = self.beats.get_mut(idx) {
+            b.accented = accented;
+        }
+    }
+
+    /// Toggle the user accent flag at index `idx`.
+    pub fn toggle_accent_at(&mut self, idx: usize) {
+        if let Some(b) = self.beats.get_mut(idx) {
+            b.accented = !b.accented;
+        }
+    }
+
+    /// Query the user accent flag at index `idx`.
+    pub fn is_accented_at(&self, idx: usize) -> bool {
+        self.beats.get(idx).map(|b| b.accented).unwrap_or(false)
     }
 
     fn unfillable_err(&self, attempted: u32, remaining: u32) -> Result<(), MeasureError> {
