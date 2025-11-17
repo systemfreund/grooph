@@ -332,11 +332,33 @@ impl Measure {
                 }
             }
 
-            // Non-tuplet: try to fill leftover locally
+            // Try to fill leftover locally. If we are inside a tuplet slot, constrain
+            // the filler to durations that belong to the same tuplet grid (same n,m).
             let leftover = old_ticks - new_ticks;
 
-            // Require an exact contextual spelling for the leftover
-            if let Some(fill) = best_fill_for_gap(leftover, &[]) {
+            let allowed: Vec<Duration> = match dur_old {
+                Duration::Tuplet { n: n_old, m: m_old, .. } => default_duration_set()
+                    .durations
+                    .iter()
+                    .cloned()
+                    .filter(|d| match d {
+                        Duration::Tuplet { n, m, .. } if *n == n_old && *m == m_old => true,
+                        _ => false,
+                    })
+                    .collect(),
+                _ => Vec::new(),
+            };
+
+            // Require an exact contextual spelling for the leftover using the allowed set
+            if let Some(mut fill) = best_fill_for_gap(leftover, &allowed) {
+                // Within a tuplet group, present smaller subdivisions first for cleaner beaming
+                if !allowed.is_empty() {
+                    fill.sort_by(|a, b| {
+                        let ta = set.grid.ticks_of(a).unwrap();
+                        let tb = set.grid.ticks_of(b).unwrap();
+                        ta.cmp(&tb) // ascending by tick length (smaller durations first)
+                    });
+                }
                 // Commit: perform replacement at idx and insert the remainder as rests
                 self.beats[idx] = beat;
                 let mut insert_at = idx + 1;
@@ -666,6 +688,18 @@ mod tests {
 
         assert!(measure.set_beat_at(2, Beat::note(t32())).is_ok());
         assert_eq!(&durations_of(&measure), &[t8(), t8(), t32(), t32(), t16()]);
+    }
+
+    #[test]
+    fn test_triplet_split_3() {
+        let mut measure = Measure::new(TimeSignature::ONE_FOUR);
+        assert!(measure.add_beat(Beat::note(t32())).is_ok());
+        assert!(measure.add_beat(Beat::note(t32())).is_ok());
+        assert!(measure.add_beat(Beat::note(t32())).is_ok());
+
+        assert!(measure.set_beat_at(0, Beat::note(t8())).is_err());
+        assert!(measure.set_beat_at(0, Beat::note(t16())).is_ok());
+        assert_eq!(&durations_of(&measure), &[t16(), t32(), s(), e()]);
     }
 
     #[test]

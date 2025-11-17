@@ -196,7 +196,7 @@ fn is_contiguous_tuplet_run(beats: &Vec<Beat>, i: usize, j: usize) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::duration::{e, s, t16, t8};
+    use crate::duration::{e, s, t16, t32, t8};
     use crate::measure::{Beat, Measure, TimeSignature};
 
     #[test]
@@ -353,4 +353,21 @@ mod tests {
         assert_eq!(g2.beam_counts, vec![1, 1]);
         assert_eq!(g2.continuity, vec![1]);
     }
+
+    #[test]
+    fn beaming_with_t32_triplet_with_merged_t16() {
+        let mut m = Measure::new(TimeSignature::ONE_FOUR);
+        m.add_beat(Beat::note(t32())).unwrap();
+        m.add_beat(Beat::note(t32())).unwrap();
+        m.add_beat(Beat::note(t32())).unwrap();
+        m.set_beat_at(0, Beat::note(t16())).unwrap();
+
+        let plan = compute_beam_plan(&m);
+        assert_eq!(plan.groups[0].note_indices, vec![0, 1]);
+        assert_eq!(plan.groups[0].beam_counts, vec![2, 3]);
+        assert_eq!(plan.groups[0].continuity, vec![2]);
+        assert_eq!(plan.groups[0].continues_from_previous, false);
+        assert_eq!(plan.groups[0].continues_into_next, false);
+    }
+
 }
