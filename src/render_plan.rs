@@ -51,9 +51,7 @@ pub enum EdgeConnection {
 }
 
 impl TupletPlan {
-    pub fn is_externally_connected(&self) -> bool {
-        self.edge_connection != EdgeConnection::None
-    }
+    pub fn is_externally_connected(&self) -> bool { self.edge_connection != EdgeConnection::None }
 
     /// UI‑neutrale Entscheidungsregel: Nur Zahl (ohne Klammer) rendern?
     /// Zahl‑only, wenn intern voll beamed, keine Pause enthalten,
@@ -132,10 +130,8 @@ fn discover_tuplets(measure: &Measure, beams: &Vec<BeamGroupPlan>) -> Vec<Tuplet
 
         // Bestimme die kleinste Basisnote innerhalb des Laufs (feinste Unterteilung)
         let mut run_min_base = beats[i].duration.base_note();
-        let mut run_min_ticks = set
-            .grid
-            .ticks_of(&Duration::Simple(run_min_base))
-            .unwrap_or(u32::MAX);
+        let mut run_min_ticks =
+            set.grid.ticks_of(&Duration::Simple(run_min_base)).unwrap_or(u32::MAX);
         for idx in i..k {
             let b = beats[idx].duration.base_note();
             if let Some(t) = set.grid.ticks_of(&Duration::Simple(b)) {
@@ -170,14 +166,7 @@ fn discover_tuplets(measure: &Measure, beams: &Vec<BeamGroupPlan>) -> Vec<Tuplet
                 }
                 end += 1;
             }
-            tmp.push(TupGroupTmp {
-                start,
-                end,
-                n,
-                m,
-                base: run_min_base,
-                contains_rest: has_rest,
-            });
+            tmp.push(TupGroupTmp { start, end, n, m, base: run_min_base, contains_rest: has_rest });
             start = end + 1;
         }
         i = k;
@@ -305,7 +294,7 @@ fn discover_tuplets(measure: &Measure, beams: &Vec<BeamGroupPlan>) -> Vec<Tuplet
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::duration::{e, t16, t32, t8};
+    use crate::duration::{e, t8, t16, t32};
     use crate::measure::BeatKind::Note;
     use crate::measure::{Beat, Measure, TimeSignature};
 
@@ -413,19 +402,34 @@ mod tests {
     }
 
     #[test]
-    fn triplet_bracker_over_t32_triplet_with_merged_t16() {
+    fn triplet_render_plan_0() {
         let mut m = Measure::new(TimeSignature::ONE_FOUR);
         m.add_beat(Beat::note(t32())).unwrap();
         m.add_beat(Beat::note(t32())).unwrap();
         m.add_beat(Beat::note(t32())).unwrap();
         m.set_beat_at(0, Beat::note(t16())).unwrap();
 
-        plan_measure(&m)
-            .tuplets
-            .iter()
-            // Zahl bleibt 3 (Triplet), aber die Klammer spannt nur über die zwei verbleibenden Slots
-            .find(|t| t.count == 3 && t.start == 0 && t.end == 1)
-            .expect("expected triplet over beats 0..=1");
-    }
+        let mut tuplets = plan_measure(&m).tuplets;
+        assert_eq!(tuplets.len(), 1);
+        // The number remains 3 (Triplet), but the bracket spans only the two remaining slots
+        assert_eq!(tuplets[0].count, 3);
+        assert_eq!(tuplets[0].start, 0);
+        assert_eq!(tuplets[0].end, 1);
 
+        // Start a new tuplet group with a t16 immediately after the t32-group.
+        m.set_beat_at(2, Beat::rest(t16())).unwrap();
+        // Now we expect to have two tuplet groups, and the very last beat must be a simple 1/16 note.
+        tuplets = plan_measure(&m).tuplets;
+        println!("{:?}", tuplets);
+        assert_eq!(tuplets.len(), 2);
+        tuplets = plan_measure(&m).tuplets;
+
+        assert_eq!(tuplets[1].count, 3);
+        assert_eq!(tuplets[1].start, 2);
+        assert_eq!(tuplets[1].end, 4);
+
+        tuplets.iter()
+            .find(|t| t.count == 3 && t.start == 2 && t.end == 4)
+            .expect("expected triplet over beats 2..=4");
+    }
 }

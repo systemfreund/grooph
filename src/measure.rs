@@ -700,6 +700,9 @@ mod tests {
         assert!(measure.set_beat_at(0, Beat::note(t8())).is_err());
         assert!(measure.set_beat_at(0, Beat::note(t16())).is_ok());
         assert_eq!(&durations_of(&measure), &[t16(), t32(), s(), e()]);
+
+        assert!(measure.set_beat_at(2, Beat::note(t16())).is_ok());
+        assert_eq!(&durations_of(&measure), &[t16(), t32(), t16(), t16(), t16(), s()]);
     }
 
     #[test]
