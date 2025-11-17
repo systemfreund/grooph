@@ -426,20 +426,7 @@ fn draw_measure(
             x_l -= margin;
             x_r += margin;
 
-            // If any beat within the tuplet is accented, raise the bracket further to avoid
-            // visual overlap with the accent mark rendered above notes.
-            let has_accent_in_group = measure
-                .beats()
-                .iter()
-                .enumerate()
-                .any(|(i, b)| i >= t.start && i <= t.end && b.kind == BeatKind::Note && b.accented);
-            // Extra clearance tuned relative to staff space. This keeps the tuplet number and bracket
-            // above the accent wedge without looking too detached when no accent is present.
-            let accent_clearance = (if has_accent_in_group { 1.4  } else { -0.4 }) * staff_space;
-
-            let y_bracket =
-                beam_render_opts.beam_y - beam_render_opts.thickness - bracket_gap - accent_clearance;
-
+            // Precompute number glyphs and basic metrics
             let digits = tuplet_glyphs(t.count);
             let num_chars = digits.chars().count() as f32;
             let num_width = num_chars * 0.6 * em;
@@ -452,7 +439,19 @@ fn draw_measure(
                 gap_half = (half_span - min_seg).max(0.0);
             }
 
+            // Base Y without any accent-specific clearance
+            let y_base = beam_render_opts.beam_y - beam_render_opts.thickness - bracket_gap;
+
             if !t.number_only() {
+                // Bracketed case: keep previous behavior – raise whole bracket+number if any accent exists in span.
+                let has_accent_in_group = measure
+                    .beats()
+                    .iter()
+                    .enumerate()
+                    .any(|(i, b)| i >= t.start && i <= t.end && b.kind == BeatKind::Note && b.accented);
+                let accent_clearance = (if has_accent_in_group { 1.4 } else { -0.4 }) * staff_space;
+                let y_bracket = y_base - accent_clearance;
+
                 let x_gap_l = (xc - gap_half).max(x_l);
                 let x_gap_r = (xc + gap_half).min(x_r);
                 if x_gap_l > x_l {
@@ -475,16 +474,43 @@ fn draw_measure(
                     [pos2(x_r, y_bracket), pos2(x_r, y_bracket + hook_dy)],
                     Stroke::new(2.0, color),
                 );
-            }
 
-            let y_num = y_bracket + 0.5 * (em * 0.25);
-            painter.text(
-                pos2(0.5 * (x_l + x_r), y_num),
-                Align2::CENTER_CENTER,
-                digits,
-                number_font.clone(),
-                color,
-            );
+                // Number sits slightly inside the bracket gap
+                let y_num = y_bracket + 0.5 * (em * 0.25);
+                painter.text(
+                    pos2(0.5 * (x_l + x_r), y_num),
+                    Align2::CENTER_CENTER,
+                    digits,
+                    number_font.clone(),
+                    color,
+                );
+            } else {
+                // Number-only case: only lift the number if it would actually collide with an accent horizontally.
+                let num_cx = 0.5 * (x_l + x_r);
+                let num_half_w = 0.5 * num_width;
+                let collides = (t.start..=t.end).any(|i| {
+                    let b = measure.beats()[i];
+                    b.kind == BeatKind::Note
+                        && b.accented
+                        && x_centers
+                            .get(i)
+                            .map(|&x| x >= num_cx - num_half_w && x <= num_cx + num_half_w)
+                            .unwrap_or(false)
+                });
+
+                // Choose vertical clearance based on potential collision
+                let close_clearance = -0.4 * staff_space; // closer to the beam
+                let raised_clearance = 1.4 * staff_space; // high enough to clear accent
+                let clearance = if collides { raised_clearance } else { close_clearance };
+                let y_num = (y_base - clearance) + 0.5 * (em * 0.25);
+                painter.text(
+                    pos2(0.5 * (x_l + x_r), y_num),
+                    Align2::CENTER_CENTER,
+                    digits,
+                    number_font.clone(),
+                    color,
+                );
+            }
         }
     }
 
