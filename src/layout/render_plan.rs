@@ -6,14 +6,7 @@ use eframe::egui::{FontId, Pos2, Rect};
 /// Logical Beat-Index within a measure (0-based)
 pub type BeatIdx = usize;
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct NoteLayout {
-    pub beat: BeatIdx,
-    /// einfache Raster-Position, aktuell = beat als f32 (UI skaliert das später)
-    pub x_logical: f32,
-    pub duration: Duration,
-    pub is_rest: bool,
-}
+// Removed legacy logical NoteLayout; geometries are derived directly at pixel level now.
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TupletPlan {
@@ -50,29 +43,15 @@ impl TupletPlan {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct RenderPlan {
-    pub notes: Vec<NoteLayout>,
     pub beams: Vec<BeamGroup>,
     pub tuplets: Vec<TupletPlan>,
 }
 
 pub fn plan_measure(measure: &Measure) -> RenderPlan {
-    let beats = measure.beats();
-
-    // Notes/Rest-Layouts mit trivialer logischer X-Position (Beat-Index)
-    let mut notes: Vec<NoteLayout> = Vec::with_capacity(beats.len());
-    for (i, b) in beats.iter().enumerate() {
-        notes.push(NoteLayout {
-            beat: i,
-            x_logical: i as f32,
-            duration: b.duration,
-            is_rest: b.kind == BeatKind::Rest,
-        });
-    }
-
     let BeamPlan { groups: beams } = compute_beam_plan(measure);
     let tuplets = discover_tuplets(measure, &beams);
 
-    RenderPlan { notes, beams, tuplets }
+    RenderPlan { beams, tuplets }
 }
 
 // ========================
