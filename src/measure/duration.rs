@@ -1,8 +1,8 @@
-use crate::duration::NoteValue::{Eighth, Sixteenth, ThirtySecond};
 use crate::measure::grouping::default_groups_for;
 use crate::measure::{Beat, TimeSignature};
+use NoteValue::{Eighth, Sixteenth, ThirtySecond};
 use NoteValue::{Half, Quarter, Whole};
-use std::fmt::{Debug, Formatter, Pointer, format};
+use std::fmt::{Debug, Formatter, Pointer};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum NoteValue {
@@ -250,7 +250,7 @@ impl Grid {
     }
 
     /// Compute the primary grouping stride in ticks for a time signature.
-    pub(super) fn primary_boundaries(&self, ts: &TimeSignature) -> Vec<u32> {
+    pub(crate) fn primary_boundaries(&self, ts: &TimeSignature) -> Vec<u32> {
         let subbeat = self.ticks_per_beat(ts); // ticks per beat_unit
         let measure_ticks = self.ticks_per_measure(ts); // ticks per measure
 
@@ -330,8 +330,8 @@ pub const fn default_grid() -> Grid { default_duration_set().grid }
 
 #[cfg(test)]
 mod tests {
-    use super::{Duration, default_duration_set, default_grid, e, q, t8};
-    use crate::duration::NoteValue::Eighth;
+    use super::{Duration, default_duration_set, default_grid, e, t8};
+    use crate::measure::duration::NoteValue::Eighth;
 
     #[test]
     fn roundtrip_ticks_presence() {

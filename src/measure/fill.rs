@@ -1,4 +1,4 @@
-use crate::duration::{Duration, default_duration_set};
+use crate::measure::duration::{Duration, default_duration_set};
 
 /// Compute the best exact spelling for a gap measured in ticks.
 /// Optimization priority:
@@ -23,8 +23,7 @@ pub(crate) fn best_fill_for_gap(gap_ticks: u32, allowed: &[Duration]) -> Option<
             })
             .collect()
     } else {
-        set
-            .durations
+        set.durations
             .iter()
             .copied()
             .filter(|d| !matches!(d, Duration::Dotted { .. }))

@@ -1,90 +1,18 @@
+mod beat;
+pub(crate) mod duration;
+mod fill;
 pub(crate) mod grouping;
+pub(crate) mod time_signature;
 
-use crate::duration::NoteValue::{Eighth, Sixteenth, ThirtySecond};
-use crate::duration::{Duration, NoteValue, default_duration_set, duration_to_debug_str};
-use crate::fill::best_fill_for_gap;
 use crate::measure::BeatKind::Rest;
+pub(crate) use crate::measure::beat::{Beat, BeatKind};
+use crate::measure::duration::NoteValue::{Eighth, Sixteenth, ThirtySecond};
+use crate::measure::duration::{Duration, default_duration_set, duration_to_debug_str};
+use crate::measure::fill::best_fill_for_gap;
+pub(crate) use crate::measure::time_signature::TimeSignature;
 use BeatKind::Note;
 use std::fmt::{Debug, Display, Formatter};
 use std::vec;
-
-/// Represents a time signature (e.g., 4/4, 3/4, 6/8)
-#[derive(Debug, Clone, Copy)]
-pub struct TimeSignature {
-    /// Number of beats per measure
-    pub beats: u8,
-    /// Note value that represents one beat (4 = quarter note, 8 = eighth note)
-    pub beat_unit: u8,
-}
-
-impl TimeSignature {
-    pub const ONE_FOUR: Self = Self { beats: 1, beat_unit: 4 };
-    pub const TWO_FOUR: Self = Self { beats: 2, beat_unit: 4 };
-    pub const ONE_SIXTEENTH: Self = Self { beats: 1, beat_unit: 16 };
-    pub const TWO_SIXTEENTH: Self = Self { beats: 2, beat_unit: 16 };
-    pub const FOUR_SIXTEENTH: Self = Self { beats: 4, beat_unit: 16 };
-    pub const FOUR_FOUR: Self = Self { beats: 4, beat_unit: 4 };
-    pub const TWO_EIGHT: Self = Self { beats: 2, beat_unit: 8 };
-    pub const FOUR_EIGHT: Self = Self { beats: 4, beat_unit: 8 };
-    pub const FIVE_EIGHT: Self = Self { beats: 5, beat_unit: 8 };
-    pub const SIX_EIGHT: Self = Self { beats: 6, beat_unit: 8 };
-    pub const SEVEN_EIGHT: Self = Self { beats: 7, beat_unit: 8 };
-    pub const NINE_EIGHT: Self = Self { beats: 9, beat_unit: 8 };
-    pub const TWELVE_EIGHT: Self = Self { beats: 12, beat_unit: 8 };
-
-    /// Returns the total duration in integer ticks
-    pub const fn measure_duration_ticks(&self) -> u32 {
-        // Use the unified duration set to derive the grid.
-        let set = default_duration_set();
-        ((self.beats as u32) * set.grid.ticks_per_whole) / (self.beat_unit as u32)
-    }
-
-    pub const fn beat_note_value(&self) -> Option<NoteValue> {
-        match self.beat_unit {
-            1 => Some(NoteValue::Whole),
-            2 => Some(NoteValue::Half),
-            4 => Some(NoteValue::Quarter),
-            8 => Some(NoteValue::Eighth),
-            16 => Some(NoteValue::Sixteenth),
-            32 => Some(NoteValue::ThirtySecond),
-            _ => None,
-        }
-    }
-}
-
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub enum BeatKind {
-    Note,
-    Rest,
-}
-
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub struct Beat {
-    pub duration: Duration,
-    pub kind: BeatKind,
-    pub tremolo: Option<Tremolo>,
-    pub accented: bool,
-}
-
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub struct Tremolo {
-    /// Number of slashes (1..=3 typical)
-    pub slashes: u8,
-    /// If true, indicates measured tremolo; otherwise unmeasured (for future use)
-    pub measured: bool,
-}
-
-impl Beat {
-    /// Creates a new note with the given duration
-    pub fn note(duration: Duration) -> Self {
-        Self { duration, kind: Note, tremolo: None, accented: false }
-    }
-
-    /// Creates a new rest with the given duration
-    pub fn rest(duration: Duration) -> Self {
-        Self { duration, kind: Rest, tremolo: None, accented: false }
-    }
-}
 
 /// Errors that can occur when adding beats to a measure
 #[derive(Debug, PartialEq)]
@@ -511,7 +439,12 @@ impl Measure {
             _ => None,
         };
         if let Some(dur) = new_dur {
-            let new_beat = Beat { duration: dur, kind: current.kind, tremolo: None, accented: current.accented };
+            let new_beat = Beat {
+                duration: dur,
+                kind: current.kind,
+                tremolo: None,
+                accented: current.accented,
+            };
             if self.set_beat_at(idx, new_beat).is_ok() {
                 return true;
             }
@@ -570,8 +503,8 @@ impl Debug for Measure {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::duration::NoteValue::{Eighth, Sixteenth, ThirtySecond};
-    use crate::duration::{Duration, e, q, qt16, s, t8, t16, t32, th};
+    use crate::measure::duration::NoteValue::{Eighth, Sixteenth, ThirtySecond};
+    use crate::measure::duration::{Duration, e, q, qt16, s, t8, t16, t32, th};
 
     fn durations_of(measure: &Measure) -> Vec<Duration> {
         measure.beats().iter().map(|b| b.duration).collect()

@@ -1,10 +1,8 @@
 #![allow(dead_code)]
 
 mod app;
-mod beaming;
-mod duration;
-mod fill;
+mod layout;
 mod measure;
-mod render_plan;
+mod render;
 
 pub use app::Grooph;

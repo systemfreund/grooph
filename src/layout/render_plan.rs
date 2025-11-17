@@ -1,8 +1,8 @@
-use crate::beaming::{BeamPlan, compute_beam_plan};
-use crate::duration::{Duration, NoteValue};
+use crate::layout::beam_plan::{BeamPlan, compute_beam_plan, BeamGroup};
+use crate::measure::duration::{Duration, NoteValue};
 use crate::measure::{Beat, BeatKind, Measure};
 
-/// Logische Beat-Index innerhalb eines Taktes (0-basiert)
+/// Logical Beat-Index within a measure (0-based)
 pub type BeatIdx = usize;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -12,17 +12,6 @@ pub struct NoteLayout {
     pub x_logical: f32,
     pub duration: Duration,
     pub is_rest: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BeamGroupPlan {
-    /// Indizes der Noten (keine Rests) in dieser Beam-Gruppe
-    pub note_indices: Vec<BeatIdx>,
-    /// Per-Note Anzahl der Beam-Ebenen (gleich lang wie note_indices)
-    pub beam_counts: Vec<u8>,
-    /// Für jedes benachbarte Paar (i->i+1) wie viele Beams durchgezogen werden
-    /// Länge = note_indices.len() - 1
-    pub continuity: Vec<u8>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -53,9 +42,6 @@ pub enum EdgeConnection {
 impl TupletPlan {
     pub fn is_externally_connected(&self) -> bool { self.edge_connection != EdgeConnection::None }
 
-    /// UI‑neutrale Entscheidungsregel: Nur Zahl (ohne Klammer) rendern?
-    /// Zahl‑only, wenn intern voll beamed, keine Pause enthalten,
-    /// und keine externe Balkenverbindung links oder rechts existiert.
     pub fn number_only(&self) -> bool {
         self.fully_beamed && !self.contains_rest && !self.is_externally_connected()
     }
@@ -64,7 +50,7 @@ impl TupletPlan {
 #[derive(Debug, Clone, PartialEq)]
 pub struct RenderPlan {
     pub notes: Vec<NoteLayout>,
-    pub beams: Vec<BeamGroupPlan>,
+    pub beams: Vec<BeamGroup>,
     pub tuplets: Vec<TupletPlan>,
 }
 
@@ -82,30 +68,20 @@ pub fn plan_measure(measure: &Measure) -> RenderPlan {
         });
     }
 
-    let BeamPlan { groups } = compute_beam_plan(measure);
-    let beams: Vec<BeamGroupPlan> = groups
-        .into_iter()
-        .map(|g| BeamGroupPlan {
-            note_indices: g.note_indices,
-            beam_counts: g.beam_counts,
-            continuity: g.continuity,
-        })
-        .collect();
-
-    // Tuplets bestimmen
+    let BeamPlan { groups: beams } = compute_beam_plan(measure);
     let tuplets = discover_tuplets(measure, &beams);
 
     RenderPlan { notes, beams, tuplets }
 }
 
-fn discover_tuplets(measure: &Measure, beams: &Vec<BeamGroupPlan>) -> Vec<TupletPlan> {
+fn discover_tuplets(measure: &Measure, beams: &Vec<BeamGroup>) -> Vec<TupletPlan> {
     let beats = measure.beats();
-    let set = crate::duration::default_duration_set();
+    let set = crate::measure::duration::default_duration_set();
 
     #[derive(Debug)]
     struct TupGroupTmp {
-        start: usize,
-        end: usize,
+        start: BeatIdx,
+        end: BeatIdx,
         n: u8,
         m: u8,
         base: NoteValue,
@@ -183,7 +159,14 @@ fn discover_tuplets(measure: &Measure, beams: &Vec<BeamGroupPlan>) -> Vec<Tuplet
             // da Tuplet-Klammern über reine Pausen hinweg ebenfalls semantisch sinnvoll sind.
             if reached_target {
                 // Wichtig: Bewahre die Slot‑Grenzen (inkl. evtl. Rests) — das entspricht der logischen Spannweite
-                tmp.push(TupGroupTmp { start, end, n, m, base: seg_min_base, contains_rest: has_rest });
+                tmp.push(TupGroupTmp {
+                    start,
+                    end,
+                    n,
+                    m,
+                    base: seg_min_base,
+                    contains_rest: has_rest,
+                });
                 start = end + 1;
             } else {
                 // unvollständig/zu klein → versuche ab nächstem Slot erneut
@@ -197,7 +180,7 @@ fn discover_tuplets(measure: &Measure, beams: &Vec<BeamGroupPlan>) -> Vec<Tuplet
     // und alle benachbarten Paare continuity >= 1 haben.
     let mut out: Vec<TupletPlan> = Vec::with_capacity(tmp.len());
     for g in tmp.into_iter() {
-        let note_idxs: Vec<usize> =
+        let note_idxs: Vec<BeatIdx> =
             (g.start..=g.end).filter(|&ix| beats[ix].kind == BeatKind::Note).collect();
         let fully = if g.contains_rest || note_idxs.len() < 2 {
             false
@@ -206,10 +189,10 @@ fn discover_tuplets(measure: &Measure, beams: &Vec<BeamGroupPlan>) -> Vec<Tuplet
             let mut ok_any = false;
             'bg: for bg in beams.iter() {
                 // Alle Noten enthalten?
-                if note_idxs.iter().all(|ix| bg.note_indices.contains(ix)) {
+                if note_idxs.iter().all(|ix| bg.beat_indices.contains(ix)) {
                     // Mappe BeatIndex -> Position in der BeamGroup
                     let mut pos_map = std::collections::HashMap::new();
-                    for (li, gi2) in bg.note_indices.iter().enumerate() {
+                    for (li, gi2) in bg.beat_indices.iter().enumerate() {
                         pos_map.insert(*gi2, li);
                     }
                     // Prüfe alle benachbarten Paare auf continuity >= 1
@@ -251,8 +234,8 @@ fn discover_tuplets(measure: &Measure, beams: &Vec<BeamGroupPlan>) -> Vec<Tuplet
         if let Some(fi) = first_note {
             if fi > 0 && beats[fi - 1].kind == BeatKind::Note {
                 for bg in beams.iter() {
-                    let pos_prev = bg.note_indices.iter().position(|&x| x == fi - 1);
-                    let pos_cur = bg.note_indices.iter().position(|&x| x == fi);
+                    let pos_prev = bg.beat_indices.iter().position(|&x| x == fi - 1);
+                    let pos_cur = bg.beat_indices.iter().position(|&x| x == fi);
                     if let (Some(lp), Some(lc)) = (pos_prev, pos_cur) {
                         // Adjacent in der Gruppe und continuity >=1 zwischen ihnen?
                         let a = lp.min(lc);
@@ -271,8 +254,8 @@ fn discover_tuplets(measure: &Measure, beams: &Vec<BeamGroupPlan>) -> Vec<Tuplet
         if let Some(li) = last_note {
             if li + 1 < beats.len() && beats[li + 1].kind == BeatKind::Note {
                 for bg in beams.iter() {
-                    let pos_cur = bg.note_indices.iter().position(|&x| x == li);
-                    let pos_next = bg.note_indices.iter().position(|&x| x == li + 1);
+                    let pos_cur = bg.beat_indices.iter().position(|&x| x == li);
+                    let pos_next = bg.beat_indices.iter().position(|&x| x == li + 1);
                     if let (Some(lc), Some(ln)) = (pos_cur, pos_next) {
                         let a = lc.min(ln);
                         let b = lc.max(ln);
@@ -315,8 +298,8 @@ fn discover_tuplets(measure: &Measure, beams: &Vec<BeamGroupPlan>) -> Vec<Tuplet
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::duration::{e, t8, t16, t32};
     use crate::measure::BeatKind::Note;
+    use crate::measure::duration::{e, t8, t16, t32};
     use crate::measure::{Beat, Measure, TimeSignature};
 
     #[test]
@@ -330,7 +313,7 @@ mod tests {
 
         let plan = plan_measure(&m);
         let has_group = plan.beams.iter().any(|g| {
-            let idxs = &g.note_indices;
+            let idxs = &g.beat_indices;
             if !(idxs.contains(&2) && idxs.contains(&3) && idxs.contains(&4)) {
                 return false;
             }
@@ -379,7 +362,7 @@ mod tests {
 
         // Beam connects the triplets (3,4,5) with the preceding beat (2).
         // Expected because of the default 2+3+2 grouping in 7/8.
-        assert_eq!(plan.beams[1].note_indices, vec![2, 3, 4, 5]);
+        assert_eq!(plan.beams[1].beat_indices, vec![2, 3, 4, 5]);
 
         // We expect a bracket to be drawn over the triplets (3,4,5) to visually distinguish them
         // from the preceding beat.
@@ -406,7 +389,7 @@ mod tests {
 
         // Beam connects the triplets (2,3,4) with the following beat (5).
         // Expected because of the default 2+3+2 grouping in 7/8.
-        assert_eq!(plan.beams[1].note_indices, vec![2, 3, 4, 5]);
+        assert_eq!(plan.beams[1].beat_indices, vec![2, 3, 4, 5]);
 
         // We expect a bracket to be drawn over the triplets (3,4,5) to visually distinguish them
         // from the preceding beat.

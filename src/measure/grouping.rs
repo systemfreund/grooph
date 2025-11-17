@@ -1,5 +1,5 @@
-use crate::duration::Grid;
 use crate::measure::TimeSignature;
+use crate::measure::duration::Grid;
 
 impl Grid {
     pub(super) fn is_primary_onset(
