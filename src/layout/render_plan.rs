@@ -6,8 +6,6 @@ use eframe::egui::{FontId, Pos2, Rect};
 /// Logical Beat-Index within a measure (0-based)
 pub type BeatIdx = usize;
 
-// Removed legacy logical NoteLayout; geometries are derived directly at pixel level now.
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TupletPlan {
     /// z. B. 3 für Triplet
@@ -41,12 +39,32 @@ impl TupletPlan {
     }
 }
 
+/// Logical, device-independent render plan derived from a `Measure`.
+///
+/// Purpose and scope:
+/// - Encodes musical layout decisions that do not depend on pixels, DPI, or fonts.
+/// - Contains only logical structures such as beaming groups and tuplet spans.
+/// - Carries no absolute coordinates, sizes, or stroke thicknesses.
+///
+/// Relationship to `MeasureLayoutPx`:
+/// - `RenderPlan` is consumed by `build_measure_layout_px(..)` together with the target
+///   `Rect`, `FontId`, and UI scaling to produce a pixel-resolved `MeasureLayoutPx`.
+/// - The renderer uses `MeasureLayoutPx` exclusively to draw; it makes no further
+///   geometry decisions.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RenderPlan {
+    /// Beaming groups with continuity per adjacent pair. This defines which neighboring notes
+    /// are connected at how many beam levels, purely logically (by beat indices).
     pub beams: Vec<BeamGroup>,
+    /// Tuplet runs (logical start..=end in beat indices). Whether the tuplet can be shown as
+    /// number-only or requires a bracket is decided here based on musical semantics, not pixels.
     pub tuplets: Vec<TupletPlan>,
 }
 
+/// Build the logical `RenderPlan` for a measure.
+///
+/// This step analyzes the musical content (meter-aware grouping, durations) and produces
+/// beaming groups and tuplet segments. No pixel geometry is computed here.
 pub fn plan_measure(measure: &Measure) -> RenderPlan {
     let BeamPlan { groups: beams } = compute_beam_plan(measure);
     let tuplets = discover_tuplets(measure, &beams);
@@ -98,6 +116,15 @@ pub struct NoteLayoutPx {
     pub accent_pos: Option<Pos2>,
 }
 
+/// Pixel-level layout for a measure.
+///
+/// This structure is produced by `build_measure_layout_px(..)` by combining:
+/// - the musical semantics (`Measure`),
+/// - the logical structures from `RenderPlan` (beaming and tuplets), and
+/// - the target device constraints (available `Rect`, `FontId`, scaling).
+///
+/// It contains absolute positions, sizes and stroke thicknesses for everything the renderer
+/// needs to draw, without performing any geometry computations at render time.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MeasureLayoutPx {
     pub inner_rect: Rect,
@@ -115,8 +142,17 @@ pub struct MeasureLayoutPx {
     pub content_right: f32,
 }
 
-/// Build a first-stage pixel layout: absolute x centers and beam segments.
-/// Note: This intentionally avoids any dependency on render/glyphs to keep the module graph acyclic.
+/// Build the pixel layout (`MeasureLayoutPx`) from a `Measure`.
+///
+/// Responsibilities:
+/// - Compute inner/content rectangles and font metrics for the current target rect.
+/// - Map logical beat indices to absolute x centers.
+/// - Expand `RenderPlan` beaming continuity into concrete `BeamSegmentPx` with y-levels and thickness.
+/// - Derive per-note geometry (stems, flags, dots, tremolo, accents) in pixels.
+/// - Compute positions for clef and stacked time signature digits.
+/// - Expand logical tuplets into bracket segments and number positions at pixel coordinates.
+///
+/// Note: This intentionally avoids any dependency on `render::glyphs` to keep the module graph acyclic.
 pub fn build_measure_layout_px(
     measure: &Measure,
     rect: Rect,
