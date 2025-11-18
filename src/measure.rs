@@ -7,7 +7,9 @@ pub(crate) mod time_signature;
 use crate::measure::BeatKind::Rest;
 pub(crate) use crate::measure::beat::{Beat, BeatKind};
 use crate::measure::duration::NoteValue::{Eighth, Sixteenth, ThirtySecond};
-use crate::measure::duration::{Duration, default_duration_set, duration_to_debug_str};
+use crate::measure::duration::{
+    Duration, DurationSet, default_duration_set, duration_to_debug_str,
+};
 use crate::measure::fill::best_fill_for_gap;
 pub(crate) use crate::measure::time_signature::TimeSignature;
 use BeatKind::Note;
@@ -95,7 +97,7 @@ impl Measure {
         if let Duration::Tuplet { n: n_old, m: m_old, .. } = dur_old {
             match beat.duration {
                 Duration::Tuplet { n: n_new, m: m_new, .. } if n_new == n_old && m_new == m_old => {
-                    // ok: same tuplet grid — inherit group id if present
+                    // ok: same tuplet grid - inherit group id if present
                     new_beat.tuplet_group_id = self.beats[idx].tuplet_group_id;
                 }
                 _ => {
@@ -108,48 +110,14 @@ impl Measure {
         let old_ticks = set.grid.ticks_of(&dur_old).unwrap();
         let new_total_ticks = max_ticks - old_ticks + new_ticks;
 
-        // "Growing" branch, i.e., when a larger one replaces a smaller beat
+        // "Growing" branch, i.e., when a larger beat replaces a smaller one.
         if new_total_ticks > max_ticks {
-            // Attempt to expand into subsequent contiguous rests to accommodate growth
             let need = new_ticks - old_ticks; // extra ticks required
             assert!(need > 0);
 
             // Compute how many ticks we can absorb from following beats.
-            let mut absorb_ticks = 0u32;
-            let mut k = idx + 1;
-            while k < self.beats.len() {
-                let t = set.grid.ticks_of(&self.beats[k].duration).unwrap();
-                // Respect tuplet id/group boundaries when growing
-                match dur_old {
-                    // If we are inside a tuplet slot, limit absorption strictly to the bounds and grid of
-                    // the current tuplet group.
-                    Duration::Tuplet { .. } => {
-                        // If current slot is part of an id-annotated group, never cross to a different id
-                        if let Some(cur_id) = self.beats[idx].tuplet_group_id
-                            && self.beats[k].tuplet_group_id == Some(cur_id)
-                        {
-                            absorb_ticks += t;
-                        } else {
-                            break;
-                        }
-                    }
-                    // Absorb from following beats freely if we are not inside a tuplet slot.
-                    _ => {
-                        // But do not cross into any tuplet group (protected region)
-                        if self.beats[k].tuplet_group_id.is_some() {
-                            break;
-                        }
-                        absorb_ticks += t;
-                    }
-                }
-                if absorb_ticks >= need {
-                    break;
-                }
-                k += 1;
-            }
-
-            // Legacy behavior for non-tuplet slots: absorb from following beats freely
-            if absorb_ticks >= need {
+            let absorb_ticks = self.compute_ticks_to_absorb(idx, &set, dur_old, need);
+            return if absorb_ticks >= need {
                 self.beats[idx] = new_beat;
                 self.beats[idx].accented = old_accent;
                 let p = idx + 1;
@@ -174,104 +142,98 @@ impl Measure {
                         remaining_to_consume = 0;
                     }
                 }
-                return Ok(());
+                Ok(())
             } else {
-                return self.overflow_err(new_ticks, max_ticks - old_ticks);
-            }
+                self.overflow_err(new_ticks, max_ticks - old_ticks)
+            };
         }
 
-        // "Shrinking" branch
+        // "Shrinking" branch, i.e., when a smaller beat replaces a larger one.
         if new_ticks < old_ticks {
-            // Special handling for tuplets when starting a new tuplet group (old slot is non-tuplet):
-            // form a full tuplet group spanning m * base. If we're already inside a tuplet group,
-            // fall back to the generic leftover fill to allow intra-group refinements (e.g., t8 -> t16).
-            if let Duration::Tuplet { n, m, base } = beat.duration {
-                if matches!(dur_old, Duration::Tuplet { .. }) {
-                    // Do not span a new group when replacing within an existing tuplet grid.
-                    // Proceed to generic leftover handling below.
-                } else {
-                    // Compute the total span this tuplet group should occupy
-                    let base_ticks = set.grid.ticks_of(&Duration::Simple(base)).unwrap();
-                    let group_span = (m as u32) * base_ticks;
+            // Are we replacing a non-tuplet beat with a tuplet beat?
+            if let Duration::Tuplet { n, m, base } = new_beat.duration
+                && !matches!(dur_old, Duration::Tuplet { .. })
+            {
+                // Compute the total span this tuplet group should occupy
+                let base_ticks = set.grid.ticks_of(&Duration::Simple(base)).unwrap();
+                let group_span = (m as u32) * base_ticks;
 
-                    // Collect ticks from idx forward until we cover group_span
-                    let mut consumed = 0u32;
-                    let mut k = idx; // exclusive end index for removal [idx, k)
-                    while consumed < group_span {
-                        if k >= self.beats.len() {
-                            // Not enough space in this measure to span the tuplet group
-                            return self.overflow_err(new_ticks, max_ticks - old_ticks);
-                        }
-                        let b = self.beats[k];
-                        // Never grow across an existing tuplet group boundary with different id
-                        if self.beats[k].tuplet_group_id.is_some() {
-                            return self.unfillable_err(group_span, 0);
-                        }
-                        // If we encounter a tuplet of a different grid (different n/m), refuse
-                        // (don't break existing groups). Base may differ (e.g., t8 vs t16) but
-                        // n/m define the grid equivalence here.
-                        if let Duration::Tuplet { n: n2, m: m2, .. } = b.duration
-                            && !(n2 == n && m2 == m)
-                        {
-                            return self.unfillable_err(new_ticks, group_span - consumed);
-                        }
-                        let t = set.grid.ticks_of(&b.duration).unwrap();
-                        consumed += t;
-                        k += 1;
+                // Collect ticks from idx forward until we cover group_span
+                let mut consumed = 0u32;
+                let mut k = idx; // exclusive end index for removal [idx, k)
+                while consumed < group_span {
+                    if k >= self.beats.len() {
+                        // Not enough space in this measure to span the tuplet group
+                        return self.overflow_err(new_ticks, max_ticks - old_ticks);
                     }
-
-                    // We will replace [idx..k) with the tuplet group (n items). If we consumed
-                    // more ticks than the group span, we owe back a remainder after the group.
-                    let overrun = consumed - group_span;
-
-                    // Remove the covered region first
-                    self.beats.drain(idx..k);
-
-                    // Allocate a stable id and register an anchor for this group
-                    let id = self.next_tuplet_id;
-                    self.next_tuplet_id = self.next_tuplet_id.saturating_add(1);
-                    let anchor =
-                        TupletAnchor { id, n, m, target_ticks: group_span, base_hint: base };
-                    self.tuplet_anchors.insert(id, anchor);
-
-                    // Insert the tuplet items: first the requested beat, then n-1 rests of same tuplet duration
-                    let mut first = beat;
-                    // ensure first inherits id
-                    first.tuplet_group_id = Some(id);
-                    self.beats.insert(idx, first);
-                    // Preserve the prior accent on the first inserted beat
-                    self.beats[idx].accented = old_accent;
-                    let mut insert_at = idx + 1;
-                    for _ in 1..n {
-                        let mut r = Beat::rest(beat.duration);
-                        r.tuplet_group_id = Some(id);
-                        self.beats.insert(insert_at, r);
-                        insert_at += 1;
+                    let b = self.beats[k];
+                    // Never grow across an existing tuplet group boundary with different id
+                    if self.beats[k].tuplet_group_id.is_some() {
+                        return self.unfillable_err(group_span, 0);
                     }
-
-                    // If there is an overrun (we consumed into the next original beat), reinsert its remainder as rests
-                    if overrun > 0 {
-                        if let Some(fill) = best_fill_for_gap(overrun, &[]) {
-                            for d in fill {
-                                let r = Beat::rest(d);
-                                // overrun lies after the group; no tuplet id assignment here
-                                self.beats.insert(insert_at, r);
-                                insert_at += 1;
-                            }
-                        } else {
-                            // Should not happen with our common durations, but guard anyway
-                            return self.unfillable_err(new_ticks, overrun);
-                        }
+                    // If we encounter a tuplet of a different grid (different n/m), refuse
+                    // (don't break existing groups). Base may differ (e.g., t8 vs t16) but
+                    // n/m define the grid equivalence here.
+                    if let Duration::Tuplet { n: n2, m: m2, .. } = b.duration
+                        && !(n2 == n && m2 == m)
+                    {
+                        return self.unfillable_err(new_ticks, group_span - consumed);
                     }
-
-                    return Ok(());
+                    let t = set.grid.ticks_of(&b.duration).unwrap();
+                    consumed += t;
+                    k += 1;
                 }
+
+                // We will replace [idx..k) with the tuplet group (n items). If we consumed
+                // more ticks than the group span, we owe back a remainder after the group.
+                let overrun = consumed - group_span;
+
+                // Remove the covered region first
+                self.beats.drain(idx..k);
+
+                // Allocate a stable id and register an anchor for this group
+                let id = self.next_tuplet_id;
+                self.next_tuplet_id = self.next_tuplet_id.saturating_add(1);
+                let anchor = TupletAnchor { id, n, m, target_ticks: group_span, base_hint: base };
+                self.tuplet_anchors.insert(id, anchor);
+
+                // Insert the tuplet items: first the requested beat, then n-1 rests of same tuplet duration
+                let mut first = beat;
+                // ensure first inherits id
+                first.tuplet_group_id = Some(id);
+                self.beats.insert(idx, first);
+                // Preserve the prior accent on the first inserted beat
+                self.beats[idx].accented = old_accent;
+                let mut insert_at = idx + 1;
+                for _ in 1..n {
+                    let mut r = Beat::rest(beat.duration);
+                    r.tuplet_group_id = Some(id);
+                    self.beats.insert(insert_at, r);
+                    insert_at += 1;
+                }
+
+                // If there is an overrun (we consumed into the next original beat), reinsert its remainder as rests
+                if overrun > 0 {
+                    if let Some(fill) = best_fill_for_gap(overrun, &[]) {
+                        for d in fill {
+                            let r = Beat::rest(d);
+                            // overrun lies after the group; no tuplet id assignment here
+                            self.beats.insert(insert_at, r);
+                            insert_at += 1;
+                        }
+                    } else {
+                        // Should not happen with our common durations, but guard anyway
+                        return self.unfillable_err(new_ticks, overrun);
+                    }
+                }
+
+                return Ok(());
             }
 
-            // Try to fill leftover locally. If we are inside a tuplet slot, constrain
-            // the filler to durations that belong to the same tuplet grid (same n,m).
             let leftover = old_ticks - new_ticks;
 
+            // If we are inside a tuplet slot, constrain the filler to durations that belong to the
+            // same tuplet grid (same n,m).
             let allowed: Vec<Duration> = match dur_old {
                 Duration::Tuplet { n: n_old, m: m_old, .. } => default_duration_set()
                     .durations
@@ -313,6 +275,48 @@ impl Measure {
             self.beats[idx].accented = old_accent;
             Ok(())
         }
+    }
+
+    fn compute_ticks_to_absorb(
+        &self,
+        idx: usize,
+        set: &DurationSet,
+        dur_old: Duration,
+        need: u32,
+    ) -> u32 {
+        let mut absorb_ticks = 0u32;
+        let mut k = idx + 1;
+        while k < self.beats.len() {
+            let t = set.grid.ticks_of(&self.beats[k].duration).unwrap();
+            // Respect tuplet id/group boundaries when growing
+            match dur_old {
+                // If we are inside a tuplet slot, limit absorption strictly to the bounds and grid of
+                // the current tuplet group.
+                Duration::Tuplet { .. } => {
+                    // If current slot is part of an id-annotated group, never cross to a different id
+                    if let Some(cur_id) = self.beats[idx].tuplet_group_id
+                        && self.beats[k].tuplet_group_id == Some(cur_id)
+                    {
+                        absorb_ticks += t;
+                    } else {
+                        break;
+                    }
+                }
+                // Absorb from following beats freely if we are not inside a tuplet slot.
+                _ => {
+                    // But do not cross into any tuplet group (protected region)
+                    if self.beats[k].tuplet_group_id.is_some() {
+                        break;
+                    }
+                    absorb_ticks += t;
+                }
+            }
+            if absorb_ticks >= need {
+                break;
+            }
+            k += 1;
+        }
+        absorb_ticks
     }
 
     pub fn time_signature(&self) -> TimeSignature { self.time_signature }
