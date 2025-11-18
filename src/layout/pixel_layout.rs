@@ -1,7 +1,7 @@
-use eframe::egui::{FontId, Pos2, Rect};
 use crate::layout::render_plan::plan_measure;
 use crate::measure::duration::{Duration, NoteValue};
 use crate::measure::{BeatKind, Measure};
+use eframe::egui::{FontId, Pos2, Rect};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BeamSegmentPx {
@@ -448,9 +448,9 @@ pub fn build_measure_layout_px(
                 b.kind == BeatKind::Note
                     && b.accented
                     && x_centers
-                    .get(i)
-                    .map(|&x| x >= num_cx - num_half_w && x <= num_cx + num_half_w)
-                    .unwrap_or(false)
+                        .get(i)
+                        .map(|&x| x >= num_cx - num_half_w && x <= num_cx + num_half_w)
+                        .unwrap_or(false)
             });
 
             // Choose vertical clearance based on potential collision

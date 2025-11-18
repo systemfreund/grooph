@@ -1,9 +1,9 @@
+use crate::layout::pixel_layout::build_measure_layout_px;
 use crate::measure::Measure;
-use crate::render::beat::draw_note_from_layout;
+use crate::render::beat::draw_beat;
 use crate::render::glyphs;
 use eframe::egui;
 use eframe::egui::{Align2, Color32, FontId, Rangef, Rect, Stroke, pos2};
-use crate::layout::pixel_layout::build_measure_layout_px;
 
 pub(crate) fn draw_measure(
     ui: &mut egui::Ui,
@@ -49,7 +49,7 @@ pub(crate) fn draw_measure(
 
     // 3) Draw beats using precomputed layout geometry (Phase B)
     for note in &layout_px.notes {
-        draw_note_from_layout(painter, note, &font_id, color);
+        draw_beat(painter, note, &font_id, color);
     }
 
     // 4) Draw beams from layout (horizontal rectangles at given y with thickness)

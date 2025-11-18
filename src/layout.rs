@@ -1,11 +1,12 @@
 mod beam_plan;
-pub(crate) mod render_plan;
 pub(crate) mod pixel_layout;
+mod render_plan;
+mod tuplet_plan;
 
-use crate::measure::Measure;
 use crate::measure::duration::Duration;
+use crate::measure::Measure;
 
-pub(crate) fn calculate_x_centers(measure: &Measure, content_w: f32) -> Vec<f32> {
+pub(super) fn calculate_x_centers(measure: &Measure, content_w: f32) -> Vec<f32> {
     let durations: Vec<Duration> = measure.beats().iter().map(|b| b.duration).collect();
 
     // Normalize to fit the content box
