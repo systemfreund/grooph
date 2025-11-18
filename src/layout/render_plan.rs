@@ -1,4 +1,4 @@
-use crate::layout::beam_plan::{BeamPlan, compute_beam_plan, BeamGroup};
+use crate::layout::beam_plan::{BeamGroup, BeamPlan, compute_beam_plan};
 use crate::measure::duration::{Duration, NoteValue};
 use crate::measure::{Beat, BeatKind, Measure};
 use eframe::egui::{FontId, Pos2, Rect};
@@ -250,7 +250,11 @@ pub fn build_measure_layout_px(
             let x2 = stem_xs[j] + offset;
             for lvl in 0..levels {
                 let y = y_level(lvl);
-                beams_out.push(BeamSegmentPx { p1: Pos2::new(x1, y), p2: Pos2::new(x2, y), thickness: beam_thickness });
+                beams_out.push(BeamSegmentPx {
+                    p1: Pos2::new(x1, y),
+                    p2: Pos2::new(x2, y),
+                    thickness: beam_thickness,
+                });
             }
         }
     }
@@ -258,16 +262,21 @@ pub fn build_measure_layout_px(
     // Partial beams (stubs) where a note's beam count exceeds continuity
     let stub_len = em * 0.20; // policy
     for group in &render_plan.beams {
-        if group.beat_indices.len() < 2 { continue; }
+        if group.beat_indices.len() < 2 {
+            continue;
+        }
         let note_idxs = &group.beat_indices;
         let counts = &group.beam_counts; // per note
         let cont = &group.continuity; // between neighbors
 
         for (local_k, &global_i) in note_idxs.iter().enumerate() {
             let count = *counts.get(local_k).unwrap_or(&0);
-            if count <= 0 { continue; }
+            if count == 0 {
+                continue;
+            }
             let left_cont = if local_k > 0 { *cont.get(local_k - 1).unwrap_or(&0) } else { 0 };
-            let right_cont = if local_k + 1 < note_idxs.len() { *cont.get(local_k).unwrap_or(&0) } else { 0 };
+            let right_cont =
+                if local_k + 1 < note_idxs.len() { *cont.get(local_k).unwrap_or(&0) } else { 0 };
             let stem_x = stem_xs[global_i];
             let is_first = local_k == 0;
             let is_last = local_k + 1 == note_idxs.len();
@@ -282,18 +291,30 @@ pub fn build_measure_layout_px(
                     (false, false) => {
                         let y = y_level(lvl);
                         if is_first {
-                            beams_out.push(BeamSegmentPx { p1: Pos2::new(stem_x, y), p2: Pos2::new(stem_x + stub_len, y), thickness: beam_thickness });
-                        } else if is_last {
-                            beams_out.push(BeamSegmentPx { p1: Pos2::new(stem_x - stub_len, y), p2: Pos2::new(stem_x, y), thickness: beam_thickness });
+                            beams_out.push(BeamSegmentPx {
+                                p1: Pos2::new(stem_x, y),
+                                p2: Pos2::new(stem_x + stub_len, y),
+                                thickness: beam_thickness,
+                            });
+                        } else if is_last || left_cont > right_cont {
+                            beams_out.push(BeamSegmentPx {
+                                p1: Pos2::new(stem_x - stub_len, y),
+                                p2: Pos2::new(stem_x, y),
+                                thickness: beam_thickness,
+                            });
+                        } else if right_cont > left_cont {
+                            beams_out.push(BeamSegmentPx {
+                                p1: Pos2::new(stem_x, y),
+                                p2: Pos2::new(stem_x + stub_len, y),
+                                thickness: beam_thickness,
+                            });
                         } else {
-                            if left_cont > right_cont {
-                                beams_out.push(BeamSegmentPx { p1: Pos2::new(stem_x - stub_len, y), p2: Pos2::new(stem_x, y), thickness: beam_thickness });
-                            } else if right_cont > left_cont {
-                                beams_out.push(BeamSegmentPx { p1: Pos2::new(stem_x, y), p2: Pos2::new(stem_x + stub_len, y), thickness: beam_thickness });
-                            } else {
-                                // equal continuity → prefer left by policy
-                                beams_out.push(BeamSegmentPx { p1: Pos2::new(stem_x - stub_len, y), p2: Pos2::new(stem_x, y), thickness: beam_thickness });
-                            }
+                            // equal continuity → prefer left by policy
+                            beams_out.push(BeamSegmentPx {
+                                p1: Pos2::new(stem_x - stub_len, y),
+                                p2: Pos2::new(stem_x, y),
+                                thickness: beam_thickness,
+                            });
                         }
                     }
                 }
@@ -325,10 +346,7 @@ pub fn build_measure_layout_px(
     // let staff_space = em * 0.25; // currently unused in Phase B metrics here
 
     fn requires_flag(d: Duration) -> bool {
-        match d.base_note() {
-            NoteValue::Eighth | NoteValue::Sixteenth | NoteValue::ThirtySecond => true,
-            _ => false,
-        }
+        matches!(d.base_note(), NoteValue::Eighth | NoteValue::Sixteenth | NoteValue::ThirtySecond)
     }
 
     let mut notes_out: Vec<NoteLayoutPx> = Vec::with_capacity(beats.len());
@@ -342,7 +360,9 @@ pub fn build_measure_layout_px(
             Duration::Dotted { dots, .. } => dots,
             _ => 0,
         };
-        let has_flag_tail = b.kind == BeatKind::Note && !in_beam_flags.get(i).copied().unwrap_or(false) && requires_flag(b.duration);
+        let has_flag_tail = b.kind == BeatKind::Note
+            && !in_beam_flags.get(i).copied().unwrap_or(false)
+            && requires_flag(b.duration);
         let first_dx = if has_flag_tail { font_id.size * 0.5 } else { font_id.size * 0.28 };
         let step_dx = font_id.size * 0.26;
         let mut dots: Vec<Pos2> = Vec::with_capacity(dot_count as usize);
@@ -381,22 +401,22 @@ pub fn build_measure_layout_px(
             }
 
             // Tremolo slashes (single-note measured tremolo)
-            if let Some(trem) = b.tremolo {
-                if trem.measured {
-                    let sl = trem.slashes.min(3);
-                    let dx = font_id.size * 0.12; // slight right offset per slash
-                    let dy = font_id.size * 0.12; // spacing along stem
-                    let ang = 0.6; // tilt factor (down-right)
-                    for s in 0..sl {
-                        let y0 = (cy - stem_len) + (s as f32) * dy;
-                        let x0 = start_x + (s as f32) * dx;
-                        let len = font_id.size * 0.45;
-                        tremolo.push(LinePx {
-                            p1: Pos2::new(x0, y0),
-                            p2: Pos2::new(x0 + len, y0 - len * ang),
-                            thickness: 2.0,
-                        });
-                    }
+            if let Some(trem) = b.tremolo
+                && trem.measured
+            {
+                let sl = trem.slashes.min(3);
+                let dx = font_id.size * 0.12; // slight right offset per slash
+                let dy = font_id.size * 0.12; // spacing along stem
+                let ang = 0.6; // tilt factor (down-right)
+                for s in 0..sl {
+                    let y0 = (cy - stem_len) + (s as f32) * dy;
+                    let x0 = start_x + (s as f32) * dx;
+                    let len = font_id.size * 0.45;
+                    tremolo.push(LinePx {
+                        p1: Pos2::new(x0, y0),
+                        p2: Pos2::new(x0 + len, y0 - len * ang),
+                        thickness: 2.0,
+                    });
                 }
             }
         }
@@ -458,9 +478,10 @@ pub fn build_measure_layout_px(
 
         if !t.number_only() {
             // Bracketed case: raise whole bracket+number if any accent exists in span.
-            let has_accent_in_group = beats.iter().enumerate().any(|(i, b)| {
-                i >= t.start && i <= t.end && b.kind == BeatKind::Note && b.accented
-            });
+            let has_accent_in_group = beats
+                .iter()
+                .enumerate()
+                .any(|(i, b)| i >= t.start && i <= t.end && b.kind == BeatKind::Note && b.accented);
             let accent_clearance = (if has_accent_in_group { 1.4 } else { -0.4 }) * staff_space;
             let y_bracket = y_base - accent_clearance;
 
@@ -469,16 +490,37 @@ pub fn build_measure_layout_px(
 
             let mut bracket: Vec<LinePx> = Vec::new();
             if x_gap_l > x_l {
-                bracket.push(LinePx { p1: Pos2::new(x_l, y_bracket), p2: Pos2::new(x_gap_l, y_bracket), thickness: 2.0 });
+                bracket.push(LinePx {
+                    p1: Pos2::new(x_l, y_bracket),
+                    p2: Pos2::new(x_gap_l, y_bracket),
+                    thickness: 2.0,
+                });
             }
             if x_r > x_gap_r {
-                bracket.push(LinePx { p1: Pos2::new(x_gap_r, y_bracket), p2: Pos2::new(x_r, y_bracket), thickness: 2.0 });
+                bracket.push(LinePx {
+                    p1: Pos2::new(x_gap_r, y_bracket),
+                    p2: Pos2::new(x_r, y_bracket),
+                    thickness: 2.0,
+                });
             }
-            bracket.push(LinePx { p1: Pos2::new(x_l, y_bracket), p2: Pos2::new(x_l, y_bracket + hook_dy), thickness: 2.0 });
-            bracket.push(LinePx { p1: Pos2::new(x_r, y_bracket), p2: Pos2::new(x_r, y_bracket + hook_dy), thickness: 2.0 });
+            bracket.push(LinePx {
+                p1: Pos2::new(x_l, y_bracket),
+                p2: Pos2::new(x_l, y_bracket + hook_dy),
+                thickness: 2.0,
+            });
+            bracket.push(LinePx {
+                p1: Pos2::new(x_r, y_bracket),
+                p2: Pos2::new(x_r, y_bracket + hook_dy),
+                thickness: 2.0,
+            });
 
             let y_num = y_bracket + 0.5 * staff_space;
-            tuplets_out.push(TupletLayoutPx { count: t.count, number_center: Pos2::new(0.5 * (x_l + x_r), y_num), number_font: number_font.clone(), bracket });
+            tuplets_out.push(TupletLayoutPx {
+                count: t.count,
+                number_center: Pos2::new(0.5 * (x_l + x_r), y_num),
+                number_font: number_font.clone(),
+                bracket,
+            });
         } else {
             // Number-only case: only lift the number if it would collide with an accent horizontally.
             let num_cx = 0.5 * (x_l + x_r);
@@ -498,21 +540,44 @@ pub fn build_measure_layout_px(
             let raised_clearance = 1.4 * staff_space; // high enough to clear accent
             let clearance = if collides { raised_clearance } else { close_clearance };
             let y_num = (y_base - clearance) + 0.5 * staff_space;
-            tuplets_out.push(TupletLayoutPx { count: t.count, number_center: Pos2::new(0.5 * (x_l + x_r), y_num), number_font: number_font.clone(), bracket: Vec::new() });
+            tuplets_out.push(TupletLayoutPx {
+                count: t.count,
+                number_center: Pos2::new(0.5 * (x_l + x_r), y_num),
+                number_font: number_font.clone(),
+                bracket: Vec::new(),
+            });
         }
     }
 
-    MeasureLayoutPx { inner_rect, em, font_id, x_centers, beams: beams_out, notes: notes_out, clef_pos, time_sig_top, time_sig_bottom, tuplets: tuplets_out, content_left, content_right }
+    MeasureLayoutPx {
+        inner_rect,
+        em,
+        font_id,
+        x_centers,
+        beams: beams_out,
+        notes: notes_out,
+        clef_pos,
+        time_sig_top,
+        time_sig_bottom,
+        tuplets: tuplets_out,
+        content_left,
+        content_right,
+    }
 }
 
 fn digit_count(mut n: u32) -> usize {
-    if n == 0 { return 1; }
+    if n == 0 {
+        return 1;
+    }
     let mut c = 0usize;
-    while n > 0 { c += 1; n /= 10; }
+    while n > 0 {
+        c += 1;
+        n /= 10;
+    }
     c
 }
 
-fn discover_tuplets(measure: &Measure, beams: &Vec<BeamGroup>) -> Vec<TupletPlan> {
+fn discover_tuplets(measure: &Measure, beams: &[BeamGroup]) -> Vec<TupletPlan> {
     let beats = measure.beats();
     let set = crate::measure::duration::default_duration_set();
 
@@ -546,13 +611,13 @@ fn discover_tuplets(measure: &Measure, beams: &Vec<BeamGroup>) -> Vec<TupletPlan
         let mut run_min_base = beats[i].duration.base_note();
         let mut run_min_ticks =
             set.grid.ticks_of(&Duration::Simple(run_min_base)).unwrap_or(u32::MAX);
-        for idx in i..k {
-            let b = beats[idx].duration.base_note();
-            if let Some(t) = set.grid.ticks_of(&Duration::Simple(b)) {
-                if t < run_min_ticks {
-                    run_min_ticks = t;
-                    run_min_base = b;
-                }
+        for beat in beats.iter().take(k).skip(i) {
+            let b = beat.duration.base_note();
+            if let Some(t) = set.grid.ticks_of(&Duration::Simple(b))
+                && t < run_min_ticks
+            {
+                run_min_ticks = t;
+                run_min_base = b;
             }
         }
 
@@ -572,11 +637,11 @@ fn discover_tuplets(measure: &Measure, beams: &Vec<BeamGroup>) -> Vec<TupletPlan
             while end < k {
                 // Update minimaler Basiswert
                 let b = beats[end].duration.base_note();
-                if let Some(bt) = set.grid.ticks_of(&Duration::Simple(b)) {
-                    if bt < seg_min_ticks {
-                        seg_min_ticks = bt;
-                        seg_min_base = b;
-                    }
+                if let Some(bt) = set.grid.ticks_of(&Duration::Simple(b))
+                    && bt < seg_min_ticks
+                {
+                    seg_min_ticks = bt;
+                    seg_min_base = b;
                 }
 
                 if beats[end].kind == BeatKind::Rest {
@@ -669,40 +734,38 @@ fn discover_tuplets(measure: &Measure, beams: &Vec<BeamGroup>) -> Vec<TupletPlan
         let first_note = note_idxs.first().copied();
         let last_note = note_idxs.last().copied();
 
-        if let Some(fi) = first_note {
-            if fi > 0 && beats[fi - 1].kind == BeatKind::Note {
-                for bg in beams.iter() {
-                    let pos_prev = bg.beat_indices.iter().position(|&x| x == fi - 1);
-                    let pos_cur = bg.beat_indices.iter().position(|&x| x == fi);
-                    if let (Some(lp), Some(lc)) = (pos_prev, pos_cur) {
-                        // Adjacent in der Gruppe und continuity >=1 zwischen ihnen?
-                        let a = lp.min(lc);
-                        let b = lp.max(lc);
-                        if b == a + 1 {
-                            if *bg.continuity.get(a).unwrap_or(&0) >= 1 {
-                                ext_left = true;
-                                break;
-                            }
-                        }
+        if let Some(fi) = first_note
+            && fi > 0
+            && beats[fi - 1].kind == BeatKind::Note
+        {
+            for bg in beams.iter() {
+                let pos_prev = bg.beat_indices.iter().position(|&x| x == fi - 1);
+                let pos_cur = bg.beat_indices.iter().position(|&x| x == fi);
+                if let (Some(lp), Some(lc)) = (pos_prev, pos_cur) {
+                    // Adjacent in der Gruppe und continuity >=1 zwischen ihnen?
+                    let a = lp.min(lc);
+                    let b = lp.max(lc);
+                    if b == a + 1 && *bg.continuity.get(a).unwrap_or(&0) >= 1 {
+                        ext_left = true;
+                        break;
                     }
                 }
             }
         }
 
-        if let Some(li) = last_note {
-            if li + 1 < beats.len() && beats[li + 1].kind == BeatKind::Note {
-                for bg in beams.iter() {
-                    let pos_cur = bg.beat_indices.iter().position(|&x| x == li);
-                    let pos_next = bg.beat_indices.iter().position(|&x| x == li + 1);
-                    if let (Some(lc), Some(ln)) = (pos_cur, pos_next) {
-                        let a = lc.min(ln);
-                        let b = lc.max(ln);
-                        if b == a + 1 {
-                            if *bg.continuity.get(a).unwrap_or(&0) >= 1 {
-                                ext_right = true;
-                                break;
-                            }
-                        }
+        if let Some(li) = last_note
+            && li + 1 < beats.len()
+            && beats[li + 1].kind == BeatKind::Note
+        {
+            for bg in beams.iter() {
+                let pos_cur = bg.beat_indices.iter().position(|&x| x == li);
+                let pos_next = bg.beat_indices.iter().position(|&x| x == li + 1);
+                if let (Some(lc), Some(ln)) = (pos_cur, pos_next) {
+                    let a = lc.min(ln);
+                    let b = lc.max(ln);
+                    if b == a + 1 && *bg.continuity.get(a).unwrap_or(&0) >= 1 {
+                        ext_right = true;
+                        break;
                     }
                 }
             }

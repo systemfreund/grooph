@@ -1,5 +1,5 @@
-pub(crate) mod render_plan;
 mod beam_plan;
+pub(crate) mod render_plan;
 
 use crate::measure::Measure;
 use crate::measure::duration::Duration;
@@ -13,8 +13,8 @@ pub(crate) fn calculate_x_centers(measure: &Measure, content_w: f32) -> Vec<f32>
 
     let mut x_centers: Vec<f32> = vec![0.0; durations.len()];
     let mut run = 0.0_f32;
-    for i in 0..durations.len() {
-        x_centers[i] = run + cell_w * 0.5;
+    for x_center in x_centers.iter_mut() {
+        *x_center = run + cell_w * 0.5;
         run += cell_w;
     }
     x_centers

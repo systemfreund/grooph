@@ -3,7 +3,7 @@ use crate::measure::Measure;
 use crate::render::beat::draw_note_from_layout;
 use crate::render::glyphs;
 use eframe::egui;
-use eframe::egui::{pos2, Align2, Color32, FontId, Rangef, Rect, Stroke};
+use eframe::egui::{Align2, Color32, FontId, Rangef, Rect, Stroke, pos2};
 
 pub(crate) fn draw_measure(
     ui: &mut egui::Ui,
@@ -38,10 +38,10 @@ pub(crate) fn draw_measure(
     let top_digits = glyphs::ts_glyphs(ts.beats as u32);
     let bot_digits = glyphs::ts_glyphs(ts.beat_unit as u32);
     for (p, ch) in layout_px.time_sig_top.iter().zip(top_digits.iter()) {
-      painter.text(*p, Align2::CENTER_CENTER, ch.to_string(), font_id.clone(), color);
+        painter.text(*p, Align2::CENTER_CENTER, ch.to_string(), font_id.clone(), color);
     }
     for (p, ch) in layout_px.time_sig_bottom.iter().zip(bot_digits.iter()) {
-      painter.text(*p, Align2::CENTER_CENTER, ch.to_string(), font_id.clone(), color);
+        painter.text(*p, Align2::CENTER_CENTER, ch.to_string(), font_id.clone(), color);
     }
 
     // Absolute x-centers provided by layout
@@ -49,7 +49,7 @@ pub(crate) fn draw_measure(
 
     // 3) Draw beats using precomputed layout geometry (Phase B)
     for note in &layout_px.notes {
-        draw_note_from_layout(&painter, note, &font_id, color);
+        draw_note_from_layout(painter, note, &font_id, color);
     }
 
     // 4) Draw beams from layout (horizontal rectangles at given y with thickness)
@@ -71,30 +71,36 @@ pub(crate) fn draw_measure(
             }
             // draw tuplet number at center
             let digits = glyphs::tuplet_glyphs(t.count);
-            painter.text(t.number_center, Align2::CENTER_CENTER, digits, t.number_font.clone(), color);
+            painter.text(
+                t.number_center,
+                Align2::CENTER_CENTER,
+                digits,
+                t.number_font.clone(),
+                color,
+            );
         }
     }
 
     // 5) Cursor at current beat index (does not consume width) — blink over time
-    if let Some(idx) = cursor_idx {
-        if let Some(&x) = x_centers.get(idx) {
-            // Blink parameters
-            let blink_period = 1.0_f64; // seconds for a full on+off cycle
-            let duty = 0.5_f64; // visible fraction of the period
-            let t = ui.input(|i| i.time);
-            let phase = (t % blink_period) / blink_period; // 0..1
-            let visible = phase < duty;
-            // Smooth fade near edges optional; for now a simple square wave with two alpha levels
-            let alpha_on = 220u8;
-            let alpha_off = 40u8; // faint but still present; set to 0 to hide completely
-            let alpha = if visible { alpha_on } else { alpha_off };
-            let top = inner_rect.top() + 0.5 * em;
-            let bottom = inner_rect.bottom() - 0.5 * em;
-            let base = if ui.visuals().dark_mode { Color32::WHITE } else { Color32::BLACK };
-            let cursor_color = Color32::from_rgba_unmultiplied(base.r(), base.g(), base.b(), alpha);
-            painter.vline(x, Rangef::new(top, bottom), Stroke::new(2.0, cursor_color));
-            // Ensure animation progresses even without input
-            ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
-        }
+    if let Some(idx) = cursor_idx
+        && let Some(&x) = x_centers.get(idx)
+    {
+        // Blink parameters
+        let blink_period = 1.0_f64; // seconds for a full on+off cycle
+        let duty = 0.5_f64; // visible fraction of the period
+        let t = ui.input(|i| i.time);
+        let phase = (t % blink_period) / blink_period; // 0..1
+        let visible = phase < duty;
+        // Smooth fade near edges optional; for now a simple square wave with two alpha levels
+        let alpha_on = 220u8;
+        let alpha_off = 40u8; // faint but still present; set to 0 to hide completely
+        let alpha = if visible { alpha_on } else { alpha_off };
+        let top = inner_rect.top() + 0.5 * em;
+        let bottom = inner_rect.bottom() - 0.5 * em;
+        let base = if ui.visuals().dark_mode { Color32::WHITE } else { Color32::BLACK };
+        let cursor_color = Color32::from_rgba_unmultiplied(base.r(), base.g(), base.b(), alpha);
+        painter.vline(x, Rangef::new(top, bottom), Stroke::new(2.0, cursor_color));
+        // Ensure animation progresses even without input
+        ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
     }
 }

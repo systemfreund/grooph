@@ -65,7 +65,7 @@ impl Measure {
         let new_ticks = set
             .grid
             .ticks_of(&beat.duration)
-            .ok_or_else(|| MeasureError::Unfillable { attempted: 0.0, remaining: 0.0 })?;
+            .ok_or(MeasureError::Unfillable { attempted: 0.0, remaining: 0.0 })?;
 
         // Reject grid-incompatible replacement into a tuplet slot
         if let Duration::Tuplet { n: n_old, m: m_old, .. } = dur_old {
@@ -226,10 +226,10 @@ impl Measure {
                         // If we encounter a tuplet of a different grid (different n/m), refuse
                         // (don't break existing groups). Base may differ (e.g., t8 vs t16) but
                         // n/m define the grid equivalence here.
-                        if let Duration::Tuplet { n: n2, m: m2, .. } = b.duration {
-                            if !(n2 == n && m2 == m) {
-                                return self.unfillable_err(new_ticks, group_span - consumed);
-                            }
+                        if let Duration::Tuplet { n: n2, m: m2, .. } = b.duration
+                            && !(n2 == n && m2 == m)
+                        {
+                            return self.unfillable_err(new_ticks, group_span - consumed);
                         }
                         let t = set.grid.ticks_of(&b.duration).unwrap();
                         consumed += t;
@@ -279,10 +279,7 @@ impl Measure {
                     .durations
                     .iter()
                     .cloned()
-                    .filter(|d| match d {
-                        Duration::Tuplet { n, m, .. } if *n == n_old && *m == m_old => true,
-                        _ => false,
-                    })
+                    .filter(|d| matches!(d, Duration::Tuplet { n, m, .. } if *n == n_old && *m == m_old))
                     .collect(),
                 _ => Vec::new(),
             };
@@ -317,13 +314,13 @@ impl Measure {
         }
     }
 
-    /// Expose the time signature (clone)
-    pub fn time_signature(&self) -> TimeSignature { self.time_signature.clone() }
+    pub fn time_signature(&self) -> TimeSignature { self.time_signature }
 
     /// Return a vector with the absolute position (1-based) of each beat as floats.
     /// Examples:
     /// - In 4/4 with four quarters: [1.0, 2.0, 3.0, 4.0]
     /// - If the first three notes are 8th-note triplets in 4/4: [1.0, 1.3333..., 1.6666...]
+    ///
     /// Positions are computed from onset ticks relative to the measure's beat size (beat_unit).
     pub fn beat_positions(&self) -> Vec<f32> {
         let set = default_duration_set();
@@ -426,6 +423,7 @@ impl Measure {
     /// Toggle dotted (one dot) for the beat at `idx`.
     /// - Simple(base) -> Dotted { base, dots: 1 }
     /// - Dotted { base, dots: 1 } -> Simple(base)
+    ///
     /// No-op for other cases (tuplets, multi-dot) or if replacement doesn't fit.
     /// Returns true if the duration changed.
     pub fn toggle_dotted_at(&mut self, idx: usize) -> bool {
@@ -435,7 +433,7 @@ impl Measure {
         let current = self.beats[idx];
         let new_dur = match current.duration {
             Duration::Simple(base) => Some(Duration::Dotted { base, dots: 1 }),
-            Duration::Dotted { base, dots } if dots == 1 => Some(Duration::Simple(base)),
+            Duration::Dotted { base, dots: 1 } => Some(Duration::Simple(base)),
             _ => None,
         };
         if let Some(dur) = new_dur {
@@ -490,12 +488,18 @@ impl Measure {
 
 impl Debug for Measure {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        self.beats.iter().enumerate().fold(Ok(()), |result, (idx, beat)| {
-            result
-                .and_then(|_| if beat.kind == Rest { write!(f, "(") } else { Ok(()) })
-                .and_then(|_| write!(f, "{}", duration_to_debug_str(&beat.duration)))
-                .and_then(|_| if beat.kind == Rest { write!(f, ")") } else { Ok(()) })
-                .and_then(|_| if idx < self.beats.len() - 1 { write!(f, " ") } else { Ok(()) })
+        self.beats.iter().enumerate().try_fold((), |_, (idx, beat)| {
+            if beat.kind == Rest {
+                write!(f, "(")?
+            }
+            write!(f, "{}", duration_to_debug_str(&beat.duration))?;
+            if beat.kind == Rest {
+                write!(f, ")")?
+            }
+            if idx < self.beats.len() - 1 {
+                write!(f, " ")?
+            }
+            Ok(())
         })
     }
 }

@@ -225,7 +225,7 @@ impl Grid {
         if den == 0 {
             return None;
         }
-        if self.ticks_per_whole % den != 0 {
+        if !self.ticks_per_whole.is_multiple_of(den) {
             return None;
         }
         Some((self.ticks_per_whole / den) * num)
@@ -307,7 +307,7 @@ pub struct DurationSet {
 }
 
 impl DurationSet {
-    pub fn compute_onset_ticks(&self, beats: &Vec<Beat>) -> Vec<u32> {
+    pub fn compute_onset_ticks(&self, beats: &[Beat]) -> Vec<u32> {
         let mut onsets: Vec<u32> = Vec::with_capacity(beats.len());
         let mut t = 0;
         for b in beats.iter() {

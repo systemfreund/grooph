@@ -1,7 +1,7 @@
+use crate::layout::render_plan::{LinePx, NoteLayoutPx};
 use crate::measure::duration::Duration;
 use crate::measure::{Beat, BeatKind};
 use crate::render::glyphs;
-use crate::layout::render_plan::{LinePx, NoteLayoutPx};
 use eframe::egui;
 use eframe::egui::{Align2, Color32, FontId, Pos2, Stroke, pos2};
 
@@ -72,38 +72,35 @@ pub(crate) fn draw_beat(painter: &egui::Painter, pos: Pos2, beat: Beat, opts: No
         painter.line_segment([start, end], Stroke::new(opts.stem_thickness, opts.color));
 
         // Flag glyph at the stem tip for short durations, only if not in a beam
-        if !opts.in_beam {
-            if let Some(flag) = flag_glyph {
-                let flag_font = FontId::new(font_id.size * 1.0, font_id.family.clone());
-                painter.text(
-                    pos2(
-                        start.x - opts.stem_thickness * 0.5,
-                        pos.y - get_default_stem_length(font_id), // TODO
-                    ),
-                    Align2::LEFT_CENTER,
-                    flag.to_string(),
-                    flag_font,
-                    opts.color,
-                );
-            }
+        if !opts.in_beam
+            && let Some(flag) = flag_glyph
+        {
+            let flag_font = FontId::new(font_id.size * 1.0, font_id.family.clone());
+            painter.text(
+                pos2(start.x - opts.stem_thickness * 0.5, pos.y - default_stem_len),
+                Align2::LEFT_CENTER,
+                flag.to_string(),
+                flag_font,
+                opts.color,
+            );
         }
 
         // Tremolo slashes (single-note measured tremolo)
-        if let Some(trem) = beat.tremolo {
-            if trem.measured {
-                let sl = trem.slashes.min(3);
-                let dx = font_id.size * 0.12; // slight right offset per slash
-                let dy = font_id.size * 0.12; // spacing along stem
-                let ang = 0.6; // tilt factor (down-right)
-                for i in 0..sl {
-                    let y0 = (pos.y - default_stem_len) + (i as f32) * dy;
-                    let x0 = start.x + (i as f32) * dx;
-                    let len = font_id.size * 0.45;
-                    painter.line_segment(
-                        [pos2(x0, y0), pos2(x0 + len, y0 - len * ang)],
-                        Stroke::new(2.0, opts.color),
-                    );
-                }
+        if let Some(trem) = beat.tremolo
+            && trem.measured
+        {
+            let sl = trem.slashes.min(3);
+            let dx = font_id.size * 0.12; // slight right offset per slash
+            let dy = font_id.size * 0.12; // spacing along stem
+            let ang = 0.6; // tilt factor (down-right)
+            for i in 0..sl {
+                let y0 = (pos.y - default_stem_len) + (i as f32) * dy;
+                let x0 = start.x + (i as f32) * dx;
+                let len = font_id.size * 0.45;
+                painter.line_segment(
+                    [pos2(x0, y0), pos2(x0 + len, y0 - len * ang)],
+                    Stroke::new(2.0, opts.color),
+                );
             }
         }
     }
@@ -146,7 +143,13 @@ pub(crate) fn draw_note_from_layout(
     // 4) Dots
     if !note.dots.is_empty() {
         for p in &note.dots {
-            painter.text(*p, Align2::CENTER_CENTER, glyphs::GLYPH_AUGMENTATION_DOT.to_string(), base_font.clone(), color);
+            painter.text(
+                *p,
+                Align2::CENTER_CENTER,
+                glyphs::GLYPH_AUGMENTATION_DOT.to_string(),
+                base_font.clone(),
+                color,
+            );
         }
     }
 
@@ -156,11 +159,11 @@ pub(crate) fn draw_note_from_layout(
     }
 
     // 6) Flagge (nur wenn vorhanden)
-    if let Some(pos) = note.flag_pos {
-        if let Some(flag) = glyphs::flag_glyph_for_duration(note.duration) {
-            let flag_font = FontId::new(base_font.size * 1.0, base_font.family.clone());
-            painter.text(pos, Align2::LEFT_CENTER, flag.to_string(), flag_font, color);
-        }
+    if let Some(pos) = note.flag_pos
+        && let Some(flag) = glyphs::flag_glyph_for_duration(note.duration)
+    {
+        let flag_font = FontId::new(base_font.size * 1.0, base_font.family.clone());
+        painter.text(pos, Align2::LEFT_CENTER, flag.to_string(), flag_font, color);
     }
 
     // 7) Tremolo-Linien
@@ -173,6 +176,12 @@ pub(crate) fn draw_note_from_layout(
     // 8) Akzent
     if let Some(p) = note.accent_pos {
         let accent_font = FontId::new(base_font.size * 0.8, base_font.family.clone());
-        painter.text(p, Align2::CENTER_CENTER, glyphs::GLYPH_ACCENT_ABOVE.to_string(), accent_font, color);
+        painter.text(
+            p,
+            Align2::CENTER_CENTER,
+            glyphs::GLYPH_ACCENT_ABOVE.to_string(),
+            accent_font,
+            color,
+        );
     }
 }

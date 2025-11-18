@@ -6,7 +6,7 @@ use crate::measure::duration::{Duration, default_duration_set};
 /// 2) Minimal total weight (sum of denominators) to prefer simpler durations
 /// 3) Prefer larger steps on ties for determinism
 pub(crate) fn best_fill_for_gap(gap_ticks: u32, allowed: &[Duration]) -> Option<Vec<Duration>> {
-    if gap_ticks <= 0 {
+    if gap_ticks == 0 {
         return None;
     }
 
@@ -50,38 +50,36 @@ pub(crate) fn best_fill_for_gap(gap_ticks: u32, allowed: &[Duration]) -> Option<
         let mut best: Option<Cell> = None;
         for (idx, (ticks, _d, w)) in coins.iter().enumerate() {
             let t = *ticks as usize;
-            if t <= i {
-                if let Some(prev) = dp[i - t] {
-                    let cand = Cell {
-                        len: prev.len.saturating_add(1),
-                        weight: prev.weight + *w,
-                        prev: (i - t) as i32,
-                        choice_idx: idx as u8,
-                    };
-                    best = match best {
-                        None => Some(cand),
-                        Some(cur) => {
-                            if cand.len < cur.len
-                                || (cand.len == cur.len
-                                    && (cand.weight < cur.weight
-                                        || (cand.weight == cur.weight
-                                            && (cand.choice_idx as i32) < (cur.choice_idx as i32))))
-                            {
-                                Some(cand)
-                            } else {
-                                Some(cur)
-                            }
+            if t <= i
+                && let Some(prev) = dp[i - t]
+            {
+                let cand = Cell {
+                    len: prev.len.saturating_add(1),
+                    weight: prev.weight + *w,
+                    prev: (i - t) as i32,
+                    choice_idx: idx as u8,
+                };
+                best = match best {
+                    None => Some(cand),
+                    Some(cur) => {
+                        if cand.len < cur.len
+                            || (cand.len == cur.len
+                                && (cand.weight < cur.weight
+                                    || (cand.weight == cur.weight
+                                        && (cand.choice_idx as i32) < (cur.choice_idx as i32))))
+                        {
+                            Some(cand)
+                        } else {
+                            Some(cur)
                         }
-                    };
-                }
+                    }
+                };
             }
         }
         dp[i] = best;
     }
 
-    if dp[target].is_none() {
-        return None;
-    }
+    dp[target]?;
 
     // Reconstruct sequence
     let mut seq_idxs: Vec<usize> = Vec::new();

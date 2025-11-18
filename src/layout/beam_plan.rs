@@ -76,16 +76,15 @@ pub(super) fn compute_beam_plan(measure: &Measure) -> BeamPlan {
         let boundary_between = boundaries.iter().any(|&bd| bd > a_on && bd <= b_on);
         let mut break_group = false;
         // By default we break at primary boundaries, unless a..b (inclusive) are within the same contiguous tuplet run.
-        if boundary_between && !is_contiguous_tuplet_run(&beats, a, b) {
+        if boundary_between && !is_contiguous_tuplet_run(beats, a, b) {
             break_group = true;
         }
         // Check if any non-beamable NOTE exists between a..b
         if !break_group {
-            for k in (a + 1)..b {
-                let bk = &beats[k];
-                match bk.kind {
+            for beat in beats.iter().take(b).skip(a + 1) {
+                match beat.kind {
                     BeatKind::Note => {
-                        if bk.kind == BeatKind::Note && beam_count(&bk.duration) == 0 {
+                        if beat.kind == BeatKind::Note && beam_count(&beat.duration) == 0 {
                             break_group = true;
                             break;
                         }
@@ -99,13 +98,13 @@ pub(super) fn compute_beam_plan(measure: &Measure) -> BeamPlan {
         }
 
         if break_group {
-            finalize_group(&mut groups, &beats, &cur);
+            finalize_group(&mut groups, beats, &cur);
             cur = vec![b];
         } else {
             cur.push(b);
         }
     }
-    finalize_group(&mut groups, &beats, &cur);
+    finalize_group(&mut groups, beats, &cur);
 
     BeamPlan {
         groups: groups
@@ -119,7 +118,7 @@ pub(super) fn compute_beam_plan(measure: &Measure) -> BeamPlan {
     }
 }
 
-fn finalize_group(groups: &mut Vec<BeamGroup>, beats: &Vec<Beat>, cur: &Vec<BeatIdx>) {
+fn finalize_group(groups: &mut Vec<BeamGroup>, beats: &[Beat], cur: &[BeatIdx]) {
     if cur.is_empty() {
         return;
     }
@@ -142,7 +141,7 @@ fn finalize_group(groups: &mut Vec<BeamGroup>, beats: &Vec<Beat>, cur: &Vec<Beat
 
     groups.push(BeamGroup {
         group_index: 0, // temporary; will be set by caller after push
-        beat_indices: cur.clone(),
+        beat_indices: cur.to_vec(),
         beam_counts,
         continuity,
         continues_from_previous: false,
@@ -150,12 +149,12 @@ fn finalize_group(groups: &mut Vec<BeamGroup>, beats: &Vec<Beat>, cur: &Vec<Beat
     });
 }
 
-fn has_rest_between(beats: &Vec<Beat>, i: BeatIdx, j: BeatIdx) -> bool {
+fn has_rest_between(beats: &[Beat], i: BeatIdx, j: BeatIdx) -> bool {
     if j <= i + 1 {
         return false;
     }
-    for k in (i + 1)..j {
-        if beats[k].kind == BeatKind::Rest {
+    for beat in beats.iter().take(j).skip(i + 1) {
+        if beat.kind == BeatKind::Rest {
             return true;
         }
     }
@@ -169,7 +168,7 @@ fn tuplet_spec(d: &Duration) -> Option<(u8, u8, NoteValue)> {
     }
 }
 
-fn is_contiguous_tuplet_run(beats: &Vec<Beat>, i: BeatIdx, j: BeatIdx) -> bool {
+fn is_contiguous_tuplet_run(beats: &[Beat], i: BeatIdx, j: BeatIdx) -> bool {
     if j <= i {
         return false;
     }
@@ -182,12 +181,11 @@ fn is_contiguous_tuplet_run(beats: &Vec<Beat>, i: BeatIdx, j: BeatIdx) -> bool {
         return false;
     };
 
-    for k in (i + 1)..j {
-        let bk = &beats[k];
-        if bk.kind != BeatKind::Note {
+    for beat in beats.iter().take(j).skip(i + 1) {
+        if beat.kind != BeatKind::Note {
             return false;
         }
-        if tuplet_spec(&bk.duration) != Some(spec) {
+        if tuplet_spec(&beat.duration) != Some(spec) {
             return false;
         }
     }
@@ -367,7 +365,7 @@ mod tests {
         assert_eq!(plan.groups[0].beat_indices, vec![0, 1]);
         assert_eq!(plan.groups[0].beam_counts, vec![2, 3]);
         assert_eq!(plan.groups[0].continuity, vec![2]);
-        assert_eq!(plan.groups[0].continues_from_previous, false);
-        assert_eq!(plan.groups[0].continues_into_next, false);
+        assert!(!plan.groups[0].continues_from_previous);
+        assert!(!plan.groups[0].continues_into_next);
     }
 }
