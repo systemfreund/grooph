@@ -187,7 +187,6 @@ mod tests {
         m.set_beat_at(2, Beat::rest(t16())).unwrap();
         // Now we expect to have two tuplet groups, and the very last beat must be a simple 1/16 note.
         tuplets = plan_measure(&m).tuplets;
-        println!("{:?}", tuplets);
         assert_eq!(tuplets.len(), 2);
         tuplets = plan_measure(&m).tuplets;
 
@@ -204,6 +203,20 @@ mod tests {
         m.set_beat_at(0, Beat::note(t16())).unwrap();
 
         let tuplets = plan_measure(&m).tuplets;
+        assert_eq!(tuplets[0].count, 3);
+        assert_eq!(tuplets[0].start, 0);
+        assert_eq!(tuplets[0].end, 3);
+    }
+
+    #[test]
+    fn triplet_render_plan_3() {
+        let mut m = Measure::new(TimeSignature::ONE_FOUR);
+        m.set_beat_at(0, Beat::note(t8())).unwrap();
+        // Subdivide second beat into two t16s.
+        m.set_beat_at(1, Beat::note(t16())).unwrap();
+
+        let plan = plan_measure(&m);
+        let tuplets = plan.tuplets;
         assert_eq!(tuplets[0].count, 3);
         assert_eq!(tuplets[0].start, 0);
         assert_eq!(tuplets[0].end, 3);

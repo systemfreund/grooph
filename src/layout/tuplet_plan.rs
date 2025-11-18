@@ -40,6 +40,131 @@ pub fn compute_tuplet_plan(measure: &Measure, beams: &[BeamGroup]) -> Vec<Tuplet
     let beats = measure.beats();
     let set = crate::measure::duration::default_duration_set();
 
+    // Primary path: if any beat carries a tuplet_group_id, group strictly by id
+    let has_ids = beats.iter().any(|b| b.tuplet_group_id.is_some());
+    if has_ids {
+        // Collect start..=end ranges per id
+        let mut ranges: std::collections::BTreeMap<u32, (usize, usize)> = Default::default();
+        for (ix, b) in beats.iter().enumerate() {
+            if let Some(id) = b.tuplet_group_id {
+                ranges
+                    .entry(id)
+                    .and_modify(|rng| {
+                        rng.0 = rng.0.min(ix);
+                        rng.1 = rng.1.max(ix);
+                    })
+                    .or_insert((ix, ix));
+            }
+        }
+
+        let mut out: Vec<TupletPlan> = Vec::with_capacity(ranges.len());
+        for (id, (start, end)) in ranges.into_iter() {
+            if let Some(anchor) = measure.tuplet_anchors.get(&id) {
+                // contains_rest?
+                let contains_rest = (start..=end).any(|i| beats[i].kind == BeatKind::Rest);
+
+                // fully_beamed: replicate logic from legacy path using note indices and beams
+                let note_idxs: Vec<usize> =
+                    (start..=end).filter(|&ix| beats[ix].kind == BeatKind::Note).collect();
+                let fully_beamed = if contains_rest || note_idxs.len() < 2 {
+                    false
+                } else {
+                    let mut ok_any = false;
+                    'bg: for bg in beams.iter() {
+                        if note_idxs.iter().all(|ix| bg.beat_indices.contains(ix)) {
+                            let mut pos_map = std::collections::HashMap::new();
+                            for (li, gi2) in bg.beat_indices.iter().enumerate() {
+                                pos_map.insert(*gi2, li);
+                            }
+                            let mut ok = true;
+                            for pair in note_idxs.windows(2) {
+                                let a = pair[0];
+                                let b = pair[1];
+                                let la = *pos_map.get(&a).unwrap();
+                                let lb = *pos_map.get(&b).unwrap();
+                                if la >= lb {
+                                    ok = false;
+                                    break;
+                                }
+                                for cidx in la..lb {
+                                    if *bg.continuity.get(cidx).unwrap_or(&0) < 1 {
+                                        ok = false;
+                                        break;
+                                    }
+                                }
+                                if !ok {
+                                    break;
+                                }
+                            }
+                            if ok {
+                                ok_any = true;
+                                break 'bg;
+                            }
+                        }
+                    }
+                    ok_any
+                };
+
+                // Edge connections
+                let mut ext_left = false;
+                let mut ext_right = false;
+                let first_note = note_idxs.first().copied();
+                let last_note = note_idxs.last().copied();
+                if let Some(fi) = first_note
+                    && fi > 0
+                    && beats[fi - 1].kind == BeatKind::Note
+                {
+                    for bg in beams.iter() {
+                        let pos_prev = bg.beat_indices.iter().position(|&x| x == fi - 1);
+                        let pos_cur = bg.beat_indices.iter().position(|&x| x == fi);
+                        if let (Some(lp), Some(lc)) = (pos_prev, pos_cur) {
+                            let a = lp.min(lc);
+                            let b = lp.max(lc);
+                            if b == a + 1 && *bg.continuity.get(a).unwrap_or(&0) >= 1 {
+                                ext_left = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+                if let Some(li) = last_note
+                    && li + 1 < beats.len()
+                    && beats[li + 1].kind == BeatKind::Note
+                {
+                    for bg in beams.iter() {
+                        let pos_cur = bg.beat_indices.iter().position(|&x| x == li);
+                        let pos_next = bg.beat_indices.iter().position(|&x| x == li + 1);
+                        if let (Some(lc), Some(ln)) = (pos_cur, pos_next) {
+                            let a = lc.min(ln);
+                            let b = lc.max(ln);
+                            if b == a + 1 && *bg.continuity.get(a).unwrap_or(&0) >= 1 {
+                                ext_right = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+                let edge_connection = match (ext_left, ext_right) {
+                    (false, false) => EdgeConnection::None,
+                    (true, false) => EdgeConnection::Left,
+                    (false, true) => EdgeConnection::Right,
+                    (true, true) => EdgeConnection::Both,
+                };
+
+                out.push(TupletPlan {
+                    count: anchor.n,
+                    start,
+                    end,
+                    base: anchor.base_hint,
+                    fully_beamed,
+                    contains_rest,
+                    edge_connection,
+                });
+            }
+        }
+        return out;
+    }
+
     #[derive(Debug)]
     struct TupGroupTmp {
         start: BeatIdx,

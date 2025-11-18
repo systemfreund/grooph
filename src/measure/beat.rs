@@ -13,6 +13,8 @@ pub struct Beat {
     pub kind: BeatKind,
     pub tremolo: Option<Tremolo>,
     pub accented: bool,
+    /// Identifier of a tuplet group this beat belongs to
+    pub tuplet_group_id: Option<u32>,
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -26,11 +28,11 @@ pub struct Tremolo {
 impl Beat {
     /// Creates a new note with the given duration
     pub fn note(duration: Duration) -> Self {
-        Self { duration, kind: Note, tremolo: None, accented: false }
+        Self { duration, kind: Note, tremolo: None, accented: false, tuplet_group_id: None }
     }
 
     /// Creates a new rest with the given duration
     pub fn rest(duration: Duration) -> Self {
-        Self { duration, kind: Rest, tremolo: None, accented: false }
+        Self { duration, kind: Rest, tremolo: None, accented: false, tuplet_group_id: None }
     }
 }
