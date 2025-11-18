@@ -66,17 +66,23 @@ pub fn compute_tuplet_plan(measure: &Measure, beams: &[BeamGroup]) -> Vec<Tuplet
             }
         }
 
-        // Bestimme die kleinste Basisnote innerhalb des Laufs (feinste Unterteilung)
+        // Bestimme feinste und gröbste Basisnote innerhalb des Laufs
         let mut run_min_base = beats[i].duration.base_note();
         let mut run_min_ticks =
             set.grid.ticks_of(&Duration::Simple(run_min_base)).unwrap_or(u32::MAX);
+        let mut run_max_base = run_min_base;
+        let mut run_max_ticks = set.grid.ticks_of(&Duration::Simple(run_max_base)).unwrap_or(0);
         for beat in beats.iter().take(k).skip(i) {
             let b = beat.duration.base_note();
-            if let Some(t) = set.grid.ticks_of(&Duration::Simple(b))
-                && t < run_min_ticks
-            {
-                run_min_ticks = t;
-                run_min_base = b;
+            if let Some(t) = set.grid.ticks_of(&Duration::Simple(b)) {
+                if t < run_min_ticks {
+                    run_min_ticks = t;
+                    run_min_base = b;
+                }
+                if t > run_max_ticks {
+                    run_max_ticks = t;
+                    run_max_base = b;
+                }
             }
         }
 
@@ -93,6 +99,11 @@ pub fn compute_tuplet_plan(measure: &Measure, beams: &[BeamGroup]) -> Vec<Tuplet
             let mut end = start;
             let mut has_rest = false;
             let mut reached_target = false;
+            // Heuristik: Wenn die Gruppe tatsächlich in eine feinere Untergruppe gesplittet hat,
+            // dann ist der nächste Slot von gleicher Basis wie der Start (z. B. t16,t16,…)
+            let start_base = beats[start].duration.base_note();
+            let next_same_base =
+                (start + 1) < k && beats[start + 1].duration.base_note() == start_base;
             while end < k {
                 // Update minimaler Basiswert
                 let b = beats[end].duration.base_note();
@@ -108,12 +119,34 @@ pub fn compute_tuplet_plan(measure: &Measure, beams: &[BeamGroup]) -> Vec<Tuplet
                 }
                 let dt = set.grid.ticks_of(&beats[end].duration).unwrap_or(0);
                 acc_ticks = acc_ticks.saturating_add(dt);
-                let target_per_group_ticks = seg_min_ticks.saturating_mul(m as u32);
+                // Zielgröße: Am Beginn eines Tuplet-Laufs orientieren wir uns an der
+                // feinsten Basis des gesamten Laufs. Dadurch umfasst die erste
+                // Klammer die vollständige logische Gruppe, auch wenn der erste
+                // Slot feiner unterteilt wurde (z. B. t16 statt t8 bei einem Triplet).
+                // Bei nachfolgenden Segmenten bleiben wir segmentlokal, um keine
+                // "Phantomsegmente" über eine unmittelbar vorausgehende feinere Gruppe
+                // hinweg zu erzeugen (siehe Tests).
+                let target_per_group_ticks = if start == i && next_same_base {
+                    // Wir starten innerhalb einer aufgespaltenen Einheit → volle logische Gruppe
+                    run_max_ticks.saturating_mul(m as u32)
+                } else {
+                    // Standard: segmentlokales Ziel (ermöglicht verkürzte Klammern)
+                    seg_min_ticks.saturating_mul(m as u32)
+                };
                 if acc_ticks >= target_per_group_ticks {
                     reached_target = true;
                     break;
                 }
                 end += 1;
+            }
+
+            // Fallback: Wenn das Ziel innerhalb des Runs nicht erreicht werden kann,
+            // bilde dennoch ein Segment bis zum Ende des Runs (verkürzte Klammer),
+            // sofern überhaupt etwas akkumuliert wurde.
+            if !reached_target && end >= start {
+                // Wir sind bis ans Run-Ende gelaufen → nutze den letzten verfügbaren Index
+                end = k.saturating_sub(1);
+                reached_target = end >= start;
             }
 
             // Wie viele Noten enthält [start..=end]? (nur für fully_beamed später relevant)
@@ -126,7 +159,9 @@ pub fn compute_tuplet_plan(measure: &Measure, beams: &[BeamGroup]) -> Vec<Tuplet
                     end,
                     n,
                     m,
-                    base: seg_min_base,
+                    // Basiswahl: wenn wir das logische Ziel verwendet haben, nutze run_max_base,
+                    // sonst seg_min_base.
+                    base: if start == i && next_same_base { run_max_base } else { seg_min_base },
                     contains_rest: has_rest,
                 });
                 start = end + 1;
