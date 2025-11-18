@@ -134,8 +134,12 @@ impl Measure {
                         if let Some(fill) = best_fill_for_gap(new_ticks_rest, &[]) {
                             let mut insert_at = p;
                             for d in fill {
-                                // Do not assign any tuplet id here as we're not in a group
-                                self.beats.insert(insert_at, Beat::rest(d));
+                                // If the current slot is part of a tuplet group,
+                                // the generated rest-overflow must carry the same ID
+                                // to maintain the consistency of the group.
+                                let mut r = Beat::rest(d);
+                                r.tuplet_group_id = self.beats[idx].tuplet_group_id;
+                                self.beats.insert(insert_at, r);
                                 insert_at += 1;
                             }
                         }
@@ -772,5 +776,23 @@ mod tests {
         assert_eq!(k1, Rest);
         assert_eq!(d2, t8());
         assert_eq!(k2, Rest);
+    }
+
+    #[test]
+    fn tuplet_group_0() {
+        let mut m = Measure::new(TimeSignature::ONE_FOUR);
+        m.set_beat_at(0, Beat::rest(t8())).unwrap();
+        // Subdivide 2nd t8 + 3rd t8 beat into two t16s each:
+        m.set_beat_at(1, Beat::rest(t16())).unwrap();
+        // Merge tuplet at the 'odd' position. This yields the measure: t8 t16 t8 t16
+        m.set_beat_at(2, Beat::rest(t8())).unwrap();
+
+        assert_eq!(&durations_of(&m), &[t8(), t16(), t8(), t16()]);
+        assert_eq!(
+            m.beats().iter().enumerate().find_map(|(idx, beat)| {
+                if !matches!(beat.tuplet_group_id, Some(1)) { Some(idx) } else { None }
+            }),
+            None
+        );
     }
 }
