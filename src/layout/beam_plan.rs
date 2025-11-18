@@ -368,4 +368,40 @@ mod tests {
         assert!(!plan.groups[0].continues_from_previous);
         assert!(!plan.groups[0].continues_into_next);
     }
+
+    #[test]
+    fn beaming_two_consecutive_eighth_tuplets_in_two_four_not_joined() {
+        // 2/4 with two consecutive 1/8 tuplet groups (triplet eighths).
+        // Expectation: No beam between note-idx 2 and 3; i.e., the two tuplet groups are not connected.
+        let mut m = Measure::new(TimeSignature::TWO_FOUR);
+        // First tuplet group (fills one quarter)
+        m.add_beat(Beat::note(t8())).unwrap();
+        m.add_beat(Beat::note(t8())).unwrap();
+        m.add_beat(Beat::note(t8())).unwrap();
+        // Second tuplet group (fills the second quarter)
+        m.add_beat(Beat::note(t8())).unwrap();
+        m.add_beat(Beat::note(t8())).unwrap();
+        m.add_beat(Beat::note(t8())).unwrap();
+
+        let plan = compute_beam_plan(&m);
+
+        // We expect two separate groups: [0,1,2] and [3,4,5]
+        assert_eq!(plan.groups.len(), 2, "zwei tuplet-gruppen sollten nicht verbunden werden");
+
+        let g0 = &plan.groups[0];
+        let g1 = &plan.groups[1];
+
+        assert_eq!(g0.beat_indices, vec![0, 1, 2]);
+        assert_eq!(g1.beat_indices, vec![3, 4, 5]);
+
+        // Each tuplet note is based on eighth -> 1 beam, continuity inside each group is [1,1]
+        assert_eq!(g0.beam_counts, vec![1, 1, 1]);
+        assert_eq!(g1.beam_counts, vec![1, 1, 1]);
+        assert_eq!(g0.continuity, vec![1, 1]);
+        assert_eq!(g1.continuity, vec![1, 1]);
+
+        // Explicitly ensure there is no beam between indices 2 and 3 by virtue of the group split
+        assert_eq!(g0.beat_indices.last(), Some(&2));
+        assert_eq!(g1.beat_indices.first(), Some(&3));
+    }
 }
