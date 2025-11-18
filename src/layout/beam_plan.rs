@@ -75,8 +75,10 @@ pub(super) fn compute_beam_plan(measure: &Measure) -> BeamPlan {
 
         let boundary_between = boundaries.iter().any(|&bd| bd > a_on && bd <= b_on);
         let mut break_group = false;
-        // By default we break at primary boundaries, unless a..b (inclusive) are within the same contiguous tuplet run.
-        if boundary_between && !is_contiguous_tuplet_run(beats, a, b) {
+        // By default we break at primary boundaries, unless a..b belong to the SAME logical tuplet group
+        // (e.g., inside the same triplet of 3 notes). Contiguous same-spec tuplets across a boundary should
+        // NOT be merged if they represent two adjacent tuplet groups (e.g., two triplets in 2/4).
+        if boundary_between && !is_same_tuplet_group(beats, a, b) {
             break_group = true;
         }
         // Check if any non-beamable NOTE exists between a..b
@@ -190,6 +192,55 @@ fn is_contiguous_tuplet_run(beats: &[Beat], i: BeatIdx, j: BeatIdx) -> bool {
         }
     }
     true
+}
+
+/// Returns true if both indices `i` and `j` are notes that belong to the SAME logical tuplet group
+/// (same (n, m, base) spec and within the same consecutive chunk of size `n`).
+/// Example: For triplet eighths (n=3), indices 0,1,2 are group 0; 3,4,5 are group 1.
+fn is_same_tuplet_group(beats: &[Beat], i: BeatIdx, j: BeatIdx) -> bool {
+    if j < i {
+        return false;
+    }
+    // Both must be notes with identical tuplet specs
+    let si = tuplet_spec(&beats[i].duration);
+    let sj = tuplet_spec(&beats[j].duration);
+    let Some(spec @ (n, _m, _base)) = (match (si, sj) { (Some(a), Some(b)) if a == b => Some(a), _ => None }) else {
+        return false;
+    };
+
+    // Find the start of the contiguous same-spec block that contains `i`
+    let mut start = i;
+    while start > 0 {
+        let b = &beats[start - 1];
+        if b.kind == BeatKind::Note && tuplet_spec(&b.duration) == Some(spec) {
+            start -= 1;
+        } else {
+            break;
+        }
+    }
+
+    // Ensure that the slice start..=j is a contiguous run of this spec
+    for k in start..=j {
+        if beats[k].kind != BeatKind::Note || tuplet_spec(&beats[k].duration) != Some(spec) {
+            return false;
+        }
+    }
+
+    // Compute zero-based positions within the block
+    let mut pos_i = 0usize;
+    let mut pos_j = 0usize;
+    for (idx, k) in (start..=j).enumerate() {
+        if start + k as usize == i {
+            pos_i = idx;
+        }
+        if start + k as usize == j {
+            pos_j = idx;
+        }
+    }
+
+    // Same tuplet group if floor(pos/n) equals
+    let n_usize = n as usize;
+    (pos_i / n_usize) == (pos_j / n_usize)
 }
 
 #[cfg(test)]
