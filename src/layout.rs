@@ -1,5 +1,6 @@
 mod beam_plan;
 pub(crate) mod render_plan;
+pub(crate) mod pixel_layout;
 
 use crate::measure::Measure;
 use crate::measure::duration::Duration;

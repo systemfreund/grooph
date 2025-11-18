@@ -1,9 +1,9 @@
-use crate::layout::render_plan::{LinePx, NoteLayoutPx};
 use crate::measure::duration::Duration;
 use crate::measure::{Beat, BeatKind};
 use crate::render::glyphs;
 use eframe::egui;
 use eframe::egui::{Align2, Color32, FontId, Pos2, Stroke, pos2};
+use crate::layout::pixel_layout::NoteLayoutPx;
 
 // Beam-aware note rendering options
 pub(crate) struct NoteRenderOpts {
