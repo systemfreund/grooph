@@ -170,30 +170,6 @@ fn tuplet_spec(d: &Duration) -> Option<(u8, u8, NoteValue)> {
     }
 }
 
-fn is_contiguous_tuplet_run(beats: &[Beat], i: BeatIdx, j: BeatIdx) -> bool {
-    if j <= i {
-        return false;
-    }
-    let si = tuplet_spec(&beats[i].duration);
-    let sj = tuplet_spec(&beats[j].duration);
-    let Some(spec) = (match (si, sj) {
-        (Some(a), Some(b)) if a == b => Some(a),
-        _ => None,
-    }) else {
-        return false;
-    };
-
-    for beat in beats.iter().take(j).skip(i + 1) {
-        if beat.kind != BeatKind::Note {
-            return false;
-        }
-        if tuplet_spec(&beat.duration) != Some(spec) {
-            return false;
-        }
-    }
-    true
-}
-
 /// Returns true if both indices `i` and `j` are notes that belong to the SAME logical tuplet group
 /// (same (n, m, base) spec and within the same consecutive chunk of size `n`).
 /// Example: For triplet eighths (n=3), indices 0,1,2 are group 0; 3,4,5 are group 1.
@@ -220,8 +196,8 @@ fn is_same_tuplet_group(beats: &[Beat], i: BeatIdx, j: BeatIdx) -> bool {
     }
 
     // Ensure that the slice start..=j is a contiguous run of this spec
-    for k in start..=j {
-        if beats[k].kind != BeatKind::Note || tuplet_spec(&beats[k].duration) != Some(spec) {
+    for beat in beats.iter().take(j).skip(start) {
+        if beat.kind != BeatKind::Note || tuplet_spec(&beat.duration) != Some(spec) {
             return false;
         }
     }
@@ -230,10 +206,10 @@ fn is_same_tuplet_group(beats: &[Beat], i: BeatIdx, j: BeatIdx) -> bool {
     let mut pos_i = 0usize;
     let mut pos_j = 0usize;
     for (idx, k) in (start..=j).enumerate() {
-        if start + k as usize == i {
+        if start + k == i {
             pos_i = idx;
         }
-        if start + k as usize == j {
+        if start + k == j {
             pos_j = idx;
         }
     }

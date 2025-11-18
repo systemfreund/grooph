@@ -1,4 +1,4 @@
-use crate::measure::duration::{Duration, s, t16, t8};
+use crate::measure::duration::{Duration, s, t16, t8, qt16};
 use crate::measure::{Measure, TimeSignature};
 
 use crate::measure::duration;
@@ -187,9 +187,9 @@ impl Grooph {
     pub fn new(cc: &CreationContext) -> Self {
         add_font(&cc.egui_ctx);
         let ff = FontFamily::Name("music".into());
-        let mut m = Measure::new(TimeSignature::FOUR_FOUR);
-        m.set_beat_at(0, Beat::note(t8())).unwrap();
-        // m.set_beat_at(3, Beat::note(s())).unwrap();
+        let mut m = Measure::new(TimeSignature::TWO_FOUR);
+        m.set_beat_at(0, Beat::note(qt16())).unwrap();
+        m.set_beat_at(5, Beat::note(qt16())).unwrap();
         Self { font_family: ff.clone(), font_id: FontId::new(16.0, ff), measure: m, cursor_idx: 0 }
     }
 }
