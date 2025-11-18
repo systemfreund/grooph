@@ -1,10 +1,9 @@
 use crate::layout::beam_plan::{BeamGroup, BeamPlan, compute_beam_plan};
-use crate::layout::tuplet_plan::{compute_tuplet_plan, TupletPlan};
+use crate::layout::tuplet_plan::{TupletPlan, compute_tuplet_plan};
 use crate::measure::{Beat, Measure};
 
 /// Logical Beat-Index within a measure (0-based)
 pub type BeatIdx = usize;
-
 
 /// Logical, device-independent render plan derived from a `Measure`.
 ///
@@ -41,8 +40,8 @@ pub fn plan_measure(measure: &Measure) -> RenderPlan {
 
 #[cfg(test)]
 mod tests {
-    use crate::layout::tuplet_plan::EdgeConnection;
     use super::*;
+    use crate::layout::tuplet_plan::EdgeConnection;
     use crate::measure::BeatKind::Note;
     use crate::measure::duration::{e, t8, t16, t32};
     use crate::measure::{Beat, Measure, TimeSignature};
@@ -176,6 +175,31 @@ mod tests {
         let mut m = Measure::new(TimeSignature::ONE_FOUR);
         m.set_beat_at(0, Beat::note(t32())).unwrap();
         m.set_beat_at(0, Beat::note(t16())).unwrap();
+
+        let mut tuplets = plan_measure(&m).tuplets;
+        assert_eq!(tuplets.len(), 1, "first tuplet group not found");
+        // The number remains 3 (dtriplet), but the bracket spans only the two remaining slots
+        assert_eq!(tuplets[0].count, 3);
+        assert_eq!(tuplets[0].start, 0);
+        assert_eq!(tuplets[0].end, 1);
+
+        // Start a new tuplet group with a t16 immediately after the t32-group.
+        m.set_beat_at(2, Beat::rest(t16())).unwrap();
+        // Now we expect to have two tuplet groups, and the very last beat must be a simple 1/16 note.
+        tuplets = plan_measure(&m).tuplets;
+        println!("{:?}", tuplets);
+        assert_eq!(tuplets.len(), 2);
+        tuplets = plan_measure(&m).tuplets;
+
+        assert_eq!(tuplets[1].count, 3);
+        assert_eq!(tuplets[1].start, 2);
+        assert_eq!(tuplets[1].end, 4);
+    }
+
+    #[test]
+    fn triplet_render_plan_2() {
+        let mut m = Measure::new(TimeSignature::ONE_FOUR);
+        m.set_beat_at(0, Beat::note(t8())).unwrap();
 
         let mut tuplets = plan_measure(&m).tuplets;
         assert_eq!(tuplets.len(), 1, "first tuplet group not found");
