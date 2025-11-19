@@ -1,5 +1,4 @@
 use crate::measure::duration::NoteValue;
-use crate::measure::grid::default_grid;
 
 /// Represents a time signature (e.g., 4/4, 3/4, 6/8)
 #[derive(Debug, Clone, Copy)]
@@ -24,13 +23,6 @@ impl TimeSignature {
     pub const SEVEN_EIGHT: Self = Self { beats: 7, beat_unit: 8 };
     pub const NINE_EIGHT: Self = Self { beats: 9, beat_unit: 8 };
     pub const TWELVE_EIGHT: Self = Self { beats: 12, beat_unit: 8 };
-
-    /// Returns the total duration in integer ticks
-    pub fn measure_duration_ticks(&self) -> u32 {
-        // Use the unified duration set to derive the grid.
-        let grid = default_grid();
-        ((self.beats as u32) * grid.ticks_per_whole) / (self.beat_unit as u32)
-    }
 
     pub const fn beat_note_value(&self) -> Option<NoteValue> {
         match self.beat_unit {

@@ -2,7 +2,6 @@ use crate::layout::beam_plan::BeamGroup;
 use crate::layout::render_plan::BeatIdx;
 use crate::measure::duration::{Duration, NoteValue};
 use crate::measure::{BeatKind, Measure};
-use crate::measure::grid::default_grid;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TupletPlan {
@@ -39,7 +38,6 @@ impl TupletPlan {
 
 pub fn compute_tuplet_plan(measure: &Measure, beams: &[BeamGroup]) -> Vec<TupletPlan> {
     let beats = measure.beats();
-    let grid = default_grid();
 
     // Primary path: if any beat carries a tuplet_group_id, group strictly by id
     let has_ids = beats.iter().any(|b| b.tuplet_group_id.is_some());
@@ -195,12 +193,12 @@ pub fn compute_tuplet_plan(measure: &Measure, beams: &[BeamGroup]) -> Vec<Tuplet
         // Bestimme feinste und gröbste Basisnote innerhalb des Laufs
         let mut run_min_base = beats[i].duration.base_note();
         let mut run_min_ticks =
-            grid.ticks_of(&Duration::Simple(run_min_base)).unwrap_or(u32::MAX);
+            measure.grid.ticks_of(&Duration::Simple(run_min_base)).unwrap_or(u32::MAX);
         let mut run_max_base = run_min_base;
-        let mut run_max_ticks = grid.ticks_of(&Duration::Simple(run_max_base)).unwrap_or(0);
+        let mut run_max_ticks = measure.grid.ticks_of(&Duration::Simple(run_max_base)).unwrap_or(0);
         for beat in beats.iter().take(k).skip(i) {
             let b = beat.duration.base_note();
-            if let Some(t) = grid.ticks_of(&Duration::Simple(b)) {
+            if let Some(t) = measure.grid.ticks_of(&Duration::Simple(b)) {
                 if t < run_min_ticks {
                     run_min_ticks = t;
                     run_min_base = b;
@@ -219,7 +217,8 @@ pub fn compute_tuplet_plan(measure: &Measure, beams: &[BeamGroup]) -> Vec<Tuplet
         while start < k {
             // Ziel dynamisch anhand der feinsten Basis innerhalb des Segments bestimmen
             let mut seg_min_base = beats[start].duration.base_note();
-            let mut seg_min_ticks = grid.ticks_of(&Duration::Simple(seg_min_base)).unwrap_or(0);
+            let mut seg_min_ticks =
+                measure.grid.ticks_of(&Duration::Simple(seg_min_base)).unwrap_or(0);
 
             let mut acc_ticks: u32 = 0;
             let mut end = start;
@@ -228,7 +227,7 @@ pub fn compute_tuplet_plan(measure: &Measure, beams: &[BeamGroup]) -> Vec<Tuplet
             while end < k {
                 // Update minimaler Basiswert
                 let b = beats[end].duration.base_note();
-                if let Some(bt) = grid.ticks_of(&Duration::Simple(b))
+                if let Some(bt) = measure.grid.ticks_of(&Duration::Simple(b))
                     && bt < seg_min_ticks
                 {
                     seg_min_ticks = bt;
@@ -238,7 +237,7 @@ pub fn compute_tuplet_plan(measure: &Measure, beams: &[BeamGroup]) -> Vec<Tuplet
                 if beats[end].kind == BeatKind::Rest {
                     has_rest = true;
                 }
-                let dt = grid.ticks_of(&beats[end].duration).unwrap_or(0);
+                let dt = measure.grid.ticks_of(&beats[end].duration).unwrap_or(0);
                 acc_ticks = acc_ticks.saturating_add(dt);
                 // Immer: volle logische Zielspanne für jede Gruppe in diesem Run
                 let target_per_group_ticks = run_max_ticks.saturating_mul(m as u32);

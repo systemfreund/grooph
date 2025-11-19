@@ -3,18 +3,18 @@ use crate::measure::grouping::default_groups_for;
 use crate::measure::{Beat, TimeSignature};
 use crate::measure::math::lcm;
 
-pub fn default_grid() -> Grid { Grid::from_durations(&COMMON_DURATIONS) }
+pub(crate) const DEFAULT_GRID: Grid = Grid::from_durations(&COMMON_DURATIONS);
 
 /// A tick grid provider. Build dynamically from the set of supported durations.
-#[derive(Clone, Debug)]
-pub struct Grid {
+#[derive(Debug)]
+pub struct Grid<'a> {
     pub ticks_per_whole: u32,
-    pub durations: Vec<Duration>,
+    pub durations: &'a [Duration],
 }
 
-impl Grid {
+impl Grid<'_> {
     /// Build a dynamic grid as the LCM of the denominators of the given durations.
-    pub fn from_durations(durs: &[Duration]) -> Grid {
+    pub const fn from_durations(durs: &[Duration]) -> Grid<'_> {
         let mut l = 1u32;
         let mut i = 0usize;
         while i < durs.len() {
@@ -22,7 +22,7 @@ impl Grid {
             l = lcm(l, f.den);
             i += 1;
         }
-        Grid { ticks_per_whole: l, durations: durs.to_vec() }
+        Grid { ticks_per_whole: l, durations: durs }
     }
 
     pub const fn ticks_from_fraction(&self, num: u32, den: u32) -> Option<u32> {

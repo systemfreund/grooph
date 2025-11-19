@@ -1,4 +1,4 @@
-use crate::measure::duration::{Duration, s, t16, t8, qt16};
+use crate::measure::duration::{Duration, s, t16, t8, qt16, st16, COMMON_DURATIONS};
 use crate::measure::{Measure, TimeSignature};
 
 use crate::measure::duration;
@@ -12,10 +12,10 @@ use eframe::epaint::{FontFamily, FontId};
 use eframe::{App, CreationContext, egui};
 use egui::containers::Frame;
 
-pub struct Grooph {
+pub struct Grooph<'a> {
     font_family: FontFamily,
     font_id: FontId,
-    measure: Measure,
+    measure: Measure<'a>,
     cursor_idx: usize,
 }
 
@@ -30,7 +30,7 @@ fn add_font(ctx: &Context) {
     ));
 }
 
-impl App for Grooph {
+impl App for Grooph<'_> {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         egui::TopBottomPanel::top("menu").show(ctx, |ui| {
             global_theme_preference_switch(ui);
@@ -152,7 +152,7 @@ impl App for Grooph {
     }
 }
 
-impl Grooph {
+impl Grooph<'_> {
     /// Wendet eine Basis-Notenwert-Änderung (Num1–Num4) auf den Beat bei `idx` an.
     ///
     /// - `base` bestimmt den Ziel-Basiswert (Viertel, Achtel, Sechzehntel, Zweiunddreißigstel).
@@ -188,8 +188,8 @@ impl Grooph {
         add_font(&cc.egui_ctx);
         let ff = FontFamily::Name("music".into());
         let mut m = Measure::new(TimeSignature::SEVEN_EIGHT);
-        m.set_beat_at(0, Beat::note(qt16())).unwrap();
-        m.set_beat_at(5, Beat::note(qt16())).unwrap();
+        m.set_beat_at(0, Beat::note(st16())).unwrap();
+        m.set_beat_at(6, Beat::note(qt16())).unwrap();
         Self { font_family: ff.clone(), font_id: FontId::new(16.0, ff), measure: m, cursor_idx: 0 }
     }
 }

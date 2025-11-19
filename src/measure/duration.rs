@@ -212,11 +212,11 @@ pub(crate) const fn st16() -> Duration { Duration::Tuplet { n: 6, m: 4, base: Si
 mod tests {
     use super::Duration;
     use crate::measure::duration::NoteValue::Eighth;
-    use crate::measure::grid::default_grid;
+    use crate::measure::grid::DEFAULT_GRID;
 
     #[test]
     fn roundtrip_ticks_presence() {
-        let grid = default_grid();
+        let grid = DEFAULT_GRID;
         for d in grid.durations.iter() {
             assert!(grid.ticks_of(d).is_some());
         }
@@ -224,8 +224,8 @@ mod tests {
 
     #[test]
     fn dotted_eighth_ticks() {
-        let e_ticks = default_grid().ticks_of(&Duration::Simple(Eighth));
-        let e_dotted_ticks = default_grid().ticks_of(&Duration::Dotted { base: Eighth, dots: 1 });
+        let e_ticks = DEFAULT_GRID.ticks_of(&Duration::Simple(Eighth));
+        let e_dotted_ticks = DEFAULT_GRID.ticks_of(&Duration::Dotted { base: Eighth, dots: 1 });
         assert_ne!(e_ticks, e_dotted_ticks);
     }
 }
