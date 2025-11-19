@@ -299,6 +299,116 @@ impl<'a> Measure<'a> {
 
     pub fn time_signature(&self) -> TimeSignature { self.time_signature }
 
+    /// Liefert für die Tuplet‑Gruppe, die bei `start_idx` beginnt, die relativen Onset‑Ticks
+    /// aller gesetzten Noten innerhalb der Gruppe. Jeder Eintrag enthält `(offset_ticks, accented)`.
+    /// Die Offsets sind relativ zum Gruppenstart, 0‑basiert, in Grid‑Ticks, und stets aufsteigend sortiert.
+    ///
+    /// Rückgabe `None`, wenn an `start_idx` keine Tuplet‑Gruppe beginnt.
+    pub fn tuplet_group_note_offsets(&self, start_idx: usize) -> Option<Vec<(u32, bool)>> {
+        if start_idx >= self.beats.len() { return None; }
+        let b0 = self.beats[start_idx];
+        let gid = b0.tuplet_group_id?;
+        // sicherstellen, dass start_idx wirklich der Gruppenanfang ist
+        if start_idx > 0 && self.beats[start_idx - 1].tuplet_group_id == Some(gid) {
+            return None;
+        }
+
+        let anchor = self.tuplet_anchors.get(&gid)?;
+        let span_ticks = anchor.target_ticks;
+        // Onsets der gesamten Measure berechnen und dann relative Offsets der Gruppe extrahieren
+        let onsets = self.grid.compute_onset_ticks(&self.beats);
+        let start_onset = onsets[start_idx];
+
+        let mut offsets: Vec<(u32, bool)> = Vec::new();
+        let mut idx = start_idx;
+        while idx < self.beats.len() && self.beats[idx].tuplet_group_id == Some(gid) {
+            if self.beats[idx].kind == Note {
+                let rel = onsets[idx] - start_onset;
+                // Kappen vorsichtshalber auf die Spanne (sollte nicht notwendig sein)
+                let rel = rel.min(span_ticks);
+                offsets.push((rel, self.beats[idx].accented));
+            }
+            idx += 1;
+        }
+        offsets.sort_by_key(|e| e.0);
+        Some(offsets)
+    }
+
+    /// Projiziert eine zuvor erfasste Notenbelegung (relative Onset‑Ticks innerhalb einer alten Tuplet‑Gruppe)
+    /// auf die neu erzeugte Tuplet‑Gruppe, die an `start_idx` beginnt.
+    ///
+    /// Algorithmus:
+    /// - Ermittelt die Onset‑Ticks der Slots der neuen Gruppe relativ zum Gruppenstart.
+    /// - Ordnet jede Quell‑Note dem nächstgelegenen freien Ziel‑Slot zu (bei Gleichstand kleinere Index‑Präferenz),
+    ///   sodass keine Duplikate entstehen (greedy Zuordnung).
+    /// - Setzt alle Slots standardmäßig auf Rest, die gemappten auf Note; Akzente werden pro Quell‑Note übertragen.
+    ///
+    /// Rückgabe: `true` bei Erfolg, `false` falls an `start_idx` keine Tuplet‑Gruppe beginnt.
+    pub fn apply_tuplet_projection_at(&mut self, start_idx: usize, source_offsets: &[(u32, bool)]) -> bool {
+        if start_idx >= self.beats.len() { return false; }
+        let b0 = self.beats[start_idx];
+        let gid = match b0.tuplet_group_id {
+            Some(id) => id,
+            None => return false,
+        };
+
+        // Grenzen der Gruppe bestimmen
+        let mut end = start_idx + 1;
+        while end < self.beats.len() && self.beats[end].tuplet_group_id == Some(gid) { end += 1; }
+
+        // n bestimmen (Anzahl Slots)
+        let n = match b0.duration {
+            Duration::Tuplet { n, .. } => n as usize,
+            _ => return false,
+        };
+
+        // Onsets der neuen Gruppe (relativ) berechnen
+        let onsets = self.grid.compute_onset_ticks(&self.beats);
+        let start_onset = onsets[start_idx];
+        let mut target_rel: Vec<(u32, usize)> = Vec::with_capacity(n);
+        let mut i = start_idx;
+        while i < end {
+            let rel = onsets[i] - start_onset;
+            target_rel.push((rel, i));
+            i += 1;
+        }
+        // Sicherheitsnetz: falls unerwartet mehr/ weniger Slots, weiter mit vorhandenen
+        target_rel.sort_by_key(|e| e.0);
+        let tlen = target_rel.len();
+        if tlen == 0 { return false; }
+
+        // Alle Slots zunächst auf Rest setzen und Akzent löschen; Tremolo löschen
+        for j in start_idx..end {
+            self.beats[j].kind = Rest;
+            self.beats[j].accented = false;
+            self.beats[j].tremolo = None;
+        }
+
+        // Greedy Zuordnung: für jede Quell‑Note den nächstgelegenen freien Ziel‑Slot suchen
+        let mut used = vec![false; tlen];
+        for &(src_rel, src_accent) in source_offsets.iter() {
+            // finde nächstgelegenen Index
+            let mut best_k: Option<usize> = None;
+            let mut best_dist: u32 = u32::MAX;
+            for (k, (trel, _tidx)) in target_rel.iter().enumerate() {
+                if used[k] { continue; }
+                let dist = if *trel > src_rel { *trel - src_rel } else { src_rel - *trel };
+                if dist < best_dist || (dist == best_dist && best_k.map(|x| k < x).unwrap_or(true)) {
+                    best_dist = dist;
+                    best_k = Some(k);
+                }
+            }
+            if let Some(k) = best_k {
+                let ti = target_rel[k].1;
+                self.beats[ti].kind = Note;
+                if src_accent { self.beats[ti].accented = true; }
+                used[k] = true;
+            }
+        }
+
+        true
+    }
+
     /// Return a vector with the absolute position (1-based) of each beat as floats.
     /// Examples:
     /// - In 4/4 with four quarters: [1.0, 2.0, 3.0, 4.0]
