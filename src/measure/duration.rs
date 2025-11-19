@@ -153,7 +153,7 @@ pub(crate) fn duration_to_debug_str(duration: &Duration) -> String {
         Duration::Dotted { base: _base, dots } => {
             format!("{}{}", duration_fr, ".".repeat(*dots as usize))
         }
-        Duration::Tuplet { .. } => format!("{}ᵀ", duration_fr),
+        Duration::Tuplet { n, m, .. } => format!("{}[{}:{}]", duration_fr, n, m),
     }
 }
 
@@ -274,7 +274,7 @@ impl Grid {
     }
 }
 
-pub const COMMON_DURATIONS: [Duration; 14] = [
+pub const COMMON_DURATIONS: [Duration; 15] = [
     q(),
     e(),
     s(),
@@ -286,7 +286,8 @@ pub const COMMON_DURATIONS: [Duration; 14] = [
     t16(),                                       // triplet 1/16
     t32(),                                       // triplet 1/32
     qt16(),                                      // quintuplet 1/16
-    Duration::Tuplet { n: 6, m: 4, base: Sixteenth }, // sextuplet 1/16
+    st8(),                                       // sextuplet 1/8
+    st16(),                                      // sextuplet 1/16
     Duration::Tuplet { n: 7, m: 4, base: Sixteenth }, // septuplet 1/16
     Duration::Tuplet { n: 9, m: 8, base: Sixteenth }, // nonuplet 1/16
 ];
@@ -299,6 +300,8 @@ pub(crate) const fn t8() -> Duration { Duration::Tuplet { n: 3, m: 2, base: Eigh
 pub(crate) const fn t16() -> Duration { Duration::Tuplet { n: 3, m: 2, base: Sixteenth } }
 pub(crate) const fn t32() -> Duration { Duration::Tuplet { n: 3, m: 2, base: ThirtySecond } }
 pub(crate) const fn qt16() -> Duration { Duration::Tuplet { n: 5, m: 4, base: Sixteenth } }
+pub(crate) const fn st8() -> Duration { Duration::Tuplet { n: 6, m: 4, base: Eighth } }
+pub(crate) const fn st16() -> Duration { Duration::Tuplet { n: 6, m: 4, base: Sixteenth } }
 
 #[derive(Clone, Copy, Debug)]
 pub struct DurationSet {

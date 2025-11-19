@@ -91,6 +91,12 @@ impl Measure {
             .ticks_of(&beat.duration)
             .ok_or(MeasureError::Unfillable { attempted: 0.0 })?;
 
+        // Additionally ensure the new duration is part of the configured DurationSet.
+        // The grid alone may accept more rational durations than we officially support.
+        if !set.durations.contains(&beat.duration) {
+            return self.unfillable_err(new_ticks);
+        }
+
         // Reject grid-incompatible replacement into a tuplet slot; also prepare id inheritance
         let mut new_beat = beat;
         if let Duration::Tuplet { n: n_old, m: m_old, .. } = dur_old {
@@ -130,7 +136,22 @@ impl Measure {
                     } else {
                         let new_ticks_rest = t - remaining_to_consume;
                         self.beats.remove(p);
-                        self.fill_at(p, new_ticks_rest, &[], Either::Left(self.beats[idx]))?;
+                        // When growing inside a tuplet slot, constrain the remainder to the same tuplet grid
+                        let allowed: Vec<Duration> = match dur_old {
+                            Duration::Tuplet { n: n_old, m: m_old, .. } => default_duration_set()
+                                .durations
+                                .iter()
+                                .cloned()
+                                .filter(|d| matches!(d, Duration::Tuplet { n, m, .. } if *n == n_old && *m == m_old))
+                                .collect(),
+                            _ => Vec::new(),
+                        };
+                        self.fill_at(
+                            p,
+                            new_ticks_rest,
+                            &allowed,
+                            Either::Left(self.beats[idx])
+                        )?;
                         remaining_to_consume = 0;
                     }
                 }
@@ -541,7 +562,7 @@ impl Debug for Measure {
 mod tests {
     use super::*;
     use crate::measure::duration::NoteValue::{Eighth, Sixteenth, ThirtySecond};
-    use crate::measure::duration::{Duration, e, q, qt16, s, t8, t16, t32, th};
+    use crate::measure::duration::{Duration, e, q, qt16, s, t8, t16, t32, th, st16, st8};
     // no layout imports here to avoid using private modules from this scope
 
     fn durations_of(measure: &Measure) -> Vec<Duration> {
@@ -733,6 +754,21 @@ mod tests {
         // Merge second note to t8. Must work because the remainder of the tuplet has enough space.
         assert!(m.set_beat_at(1, Beat::rest(t8())).is_ok());
         assert_eq!(&durations_of(&m), &[t16(), t8(), e()]);
+    }
+
+    #[test]
+    fn test_tuplet_split_5() {
+        let mut m = Measure::new(TimeSignature::ONE_FOUR);
+        m.set_beat_at(0, Beat::rest(st16())).unwrap();
+
+        // Merge 2nd+3rd st16 beats -> st8
+        m.set_beat_at(1, Beat::rest(st8())).unwrap();
+        assert_eq!(&durations_of(&m), &[st16(), st8(), st16(), st16(), st16()]);
+
+        // Merge 1st st16 beat -> st8
+        m.set_beat_at(0, Beat::rest(st8())).unwrap();
+        // TODO assertion fails because beat at idx=1 is an t16() instead of the expected st16():
+        assert_eq!(&durations_of(&m), &[st8(), st16(), st16(), st16(), st16()]);
     }
 
     #[test]
