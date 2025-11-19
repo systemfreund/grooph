@@ -114,6 +114,80 @@ impl<'a> Measure<'a> {
         }
 
         let old_ticks = self.grid.ticks_of(&dur_old).unwrap();
+
+        // Special case: turning a non-tuplet slot into a tuplet beat should always construct
+        // the entire tuplet group (n items spanning m·base), regardless of whether this is a
+        // net growth or shrink relative to the original slot. Handling it here ensures we
+        // don't create partial groups in the generic grow/shrink logic.
+        if let Duration::Tuplet { n, m, base } = new_beat.duration
+            && !matches!(dur_old, Duration::Tuplet { .. })
+        {
+            // Compute the total span this tuplet group should occupy
+            let base_ticks = self.grid.ticks_of(&Duration::Simple(base)).unwrap();
+            let group_span = (m as u32) * base_ticks;
+
+            // Collect ticks from idx forward until we cover group_span
+            let mut consumed = 0u32;
+            let mut k = idx; // exclusive end index for removal [idx, k)
+            while consumed < group_span {
+                if k >= self.beats.len() {
+                    // Not enough space in this measure to span the tuplet group
+                    return self.overflow_err(new_ticks, max_ticks - old_ticks);
+                }
+                let b = self.beats[k];
+                // Never grow across an existing tuplet group boundary with different id
+                if self.beats[k].tuplet_group_id.is_some() {
+                    return self.unfillable_err(group_span);
+                }
+                // If we encounter a tuplet of a different grid (different n/m), refuse
+                // (don't break existing groups). Base may differ (e.g., t8 vs t16) but
+                // n/m define the grid equivalence here.
+                if let Duration::Tuplet { n: n2, m: m2, .. } = b.duration
+                    && !(n2 == n && m2 == m)
+                {
+                    return self.unfillable_err(new_ticks);
+                }
+                let t = self.grid.ticks_of(&b.duration).unwrap();
+                consumed += t;
+                k += 1;
+            }
+
+            // We will replace [idx..k) with the tuplet group (n items). If we consumed
+            // more ticks than the group span, we owe back a remainder after the group.
+            let overrun = consumed - group_span;
+
+            // Remove the covered region first
+            self.beats.drain(idx..k);
+
+            // Allocate a stable id and register an anchor for this group
+            let id = self.next_tuplet_id;
+            self.next_tuplet_id = self.next_tuplet_id.saturating_add(1);
+            let anchor = TupletAnchor { id, n, m, target_ticks: group_span, base_hint: base };
+            self.tuplet_anchors.insert(id, anchor);
+
+            // Insert the tuplet items: first the requested beat, then n-1 rests of same tuplet duration
+            let mut first = beat;
+            // ensure first inherits id
+            first.tuplet_group_id = Some(id);
+            self.beats.insert(idx, first);
+            // Preserve the prior accent on the first inserted beat
+            self.beats[idx].accented = old_accent;
+            let mut insert_at = idx + 1;
+            for _ in 1..n {
+                let mut r = Beat::rest(beat.duration);
+                r.tuplet_group_id = Some(id);
+                self.beats.insert(insert_at, r);
+                insert_at += 1;
+            }
+
+            // If there is an overrun (we consumed into the next original beat), reinsert its remainder as rests
+            if overrun > 0 {
+                self.fill_at(insert_at, overrun, &[], Either::Right(Rest))?
+            }
+
+            return Ok(());
+        }
+
         let new_total_ticks = max_ticks - old_ticks + new_ticks;
 
         // "Growing" branch, i.e., when a larger beat replaces a smaller one.
@@ -159,76 +233,6 @@ impl<'a> Measure<'a> {
 
         // "Shrinking" branch, i.e., when a smaller beat replaces a larger one.
         if new_ticks < old_ticks {
-            // Are we replacing a non-tuplet beat with a tuplet beat?
-            if let Duration::Tuplet { n, m, base } = new_beat.duration
-                && !matches!(dur_old, Duration::Tuplet { .. })
-            {
-                // Compute the total span this tuplet group should occupy
-                let base_ticks = self.grid.ticks_of(&Duration::Simple(base)).unwrap();
-                let group_span = (m as u32) * base_ticks;
-
-                // Collect ticks from idx forward until we cover group_span
-                let mut consumed = 0u32;
-                let mut k = idx; // exclusive end index for removal [idx, k)
-                while consumed < group_span {
-                    if k >= self.beats.len() {
-                        // Not enough space in this measure to span the tuplet group
-                        return self.overflow_err(new_ticks, max_ticks - old_ticks);
-                    }
-                    let b = self.beats[k];
-                    // Never grow across an existing tuplet group boundary with different id
-                    if self.beats[k].tuplet_group_id.is_some() {
-                        return self.unfillable_err(group_span);
-                    }
-                    // If we encounter a tuplet of a different grid (different n/m), refuse
-                    // (don't break existing groups). Base may differ (e.g., t8 vs t16) but
-                    // n/m define the grid equivalence here.
-                    if let Duration::Tuplet { n: n2, m: m2, .. } = b.duration
-                        && !(n2 == n && m2 == m)
-                    {
-                        return self.unfillable_err(new_ticks);
-                    }
-                    let t = self.grid.ticks_of(&b.duration).unwrap();
-                    consumed += t;
-                    k += 1;
-                }
-
-                // We will replace [idx..k) with the tuplet group (n items). If we consumed
-                // more ticks than the group span, we owe back a remainder after the group.
-                let overrun = consumed - group_span;
-
-                // Remove the covered region first
-                self.beats.drain(idx..k);
-
-                // Allocate a stable id and register an anchor for this group
-                let id = self.next_tuplet_id;
-                self.next_tuplet_id = self.next_tuplet_id.saturating_add(1);
-                let anchor = TupletAnchor { id, n, m, target_ticks: group_span, base_hint: base };
-                self.tuplet_anchors.insert(id, anchor);
-
-                // Insert the tuplet items: first the requested beat, then n-1 rests of same tuplet duration
-                let mut first = beat;
-                // ensure first inherits id
-                first.tuplet_group_id = Some(id);
-                self.beats.insert(idx, first);
-                // Preserve the prior accent on the first inserted beat
-                self.beats[idx].accented = old_accent;
-                let mut insert_at = idx + 1;
-                for _ in 1..n {
-                    let mut r = Beat::rest(beat.duration);
-                    r.tuplet_group_id = Some(id);
-                    self.beats.insert(insert_at, r);
-                    insert_at += 1;
-                }
-
-                // If there is an overrun (we consumed into the next original beat), reinsert its remainder as rests
-                if overrun > 0 {
-                    self.fill_at(insert_at, overrun, &[], Either::Right(Rest))?
-                }
-
-                return Ok(());
-            }
-
             let leftover = old_ticks - new_ticks;
 
             // If we are inside a tuplet slot, constrain the filler to durations that belong to the
@@ -737,6 +741,15 @@ mod tests {
 
         // The next beat starts a new tuplet group, but we don't have enough space in our measure.
         assert_eq!(m.remaining_ticks(m.next_insert), 0);
+    }
+
+    #[test]
+    fn test_triplet_insertions_4() {
+        let mut m = Measure::new(TimeSignature::SEVEN_EIGHT);
+
+        assert!(m.set_beat_at(1, Beat::rest(s())).is_ok());
+        assert!(m.set_beat_at(1, Beat::rest(t8())).is_ok());
+        assert_eq!(&durations_of(&m), &[e(), t8(), t8(), t8(), e(), e(), e(), e()]);
     }
 
     #[test]
