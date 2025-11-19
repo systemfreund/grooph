@@ -500,7 +500,7 @@ impl<'a> Measure<'a> {
     /// - Wenn `idx` außerhalb liegt oder der Beat dort bereits ein Tuplet ist, passiert nichts und es wird `false` zurückgegeben.
     /// - Ansonsten wird versucht, den Beat durch einen Tuplet‑Beat gleicher Art (Note/Rest) zu ersetzen.
     ///   Die Methode delegiert an `set_beat_at`, welches die gesamte Gruppe inkl. Anchor anlegt und
-    ///   verbleibende Slots der Gruppe mit Rests auffüllt. Reicht der Platz im Takt nicht aus, bleibt
+    ///   verbleibende Slots der Gruppe auffüllt. Reicht der Platz im Takt nicht aus, bleibt
     ///   der Takt unverändert und die Funktion liefert `false`.
     pub fn convert_to_tuplet_at(
         &mut self,
@@ -520,7 +520,31 @@ impl<'a> Measure<'a> {
         let mut new_beat = Beat::new(new_duration, cur.kind);
         new_beat.accented = cur.accented;
         // tuplet_group_id wird von set_beat_at korrekt gesetzt
-        self.set_beat_at(idx, new_beat).is_ok()
+        if self.set_beat_at(idx, new_beat).is_ok() {
+            // Wenn der ursprüngliche Beat eine Note war, initialisieren wir die ganze neue Tuplet‑Gruppe als Noten
+            if cur.kind == Note {
+                if let Some(group_id) = self.beats[idx].tuplet_group_id {
+                    // Nach links ausdehnen (sollte i. d. R. nicht nötig sein, da set_beat_at an idx beginnt)
+                    let mut k = idx;
+                    while k > 0 && self.beats[k - 1].tuplet_group_id == Some(group_id) {
+                        k -= 1;
+                    }
+                    // Nach rechts gehen und alle Slots auf Note setzen (Akzente unangetastet lassen)
+                    let mut p = k;
+                    while p < self.beats.len()
+                        && self.beats[p].tuplet_group_id == Some(group_id)
+                    {
+                        self.beats[p].kind = Note;
+                        // Tremolo auf None, um Rest‑Artefakte zu vermeiden
+                        self.beats[p].tremolo = None;
+                        p += 1;
+                    }
+                }
+            }
+            true
+        } else {
+            false
+        }
     }
 }
 
@@ -871,5 +895,30 @@ mod tests {
         assert!(!changed, "Should not convert when already a tuplet");
         // Unverändert
         assert_eq!(format!("{:?}", before), format!("{:?}", m));
+    }
+
+    #[test]
+    fn convert_to_tuplet_initializes_notes_when_source_is_note() {
+        let mut m = Measure::new(TimeSignature::FOUR_FOUR);
+        // Stelle sicher, dass Quelle eine Note ist (nicht Rest)
+        m.set_beat_at(0, Beat::note(Duration::Simple(Eighth))).unwrap();
+        // Wandle an derselben Position in Triplet‑Achtel um
+        assert!(m.convert_to_tuplet_at(0, 3, 2, Eighth));
+
+        for i in 0..3 {
+            assert_eq!(m.beats()[i].duration, t8());
+            assert_eq!(m.beats()[i].kind, BeatKind::Note, "tuplet slot {} should be a note", i);
+        }
+    }
+
+    #[test]
+    fn convert_to_tuplet_initializes_rests_when_source_is_rest() {
+        let mut m = Measure::new(TimeSignature::FOUR_FOUR);
+        // Standard ist Rest an Index 0
+        assert!(m.convert_to_tuplet_at(0, 3, 2, Eighth));
+        for i in 0..3 {
+            assert_eq!(m.beats()[i].duration, t8());
+            assert_eq!(m.beats()[i].kind, BeatKind::Rest, "tuplet slot {} should be a rest", i);
+        }
     }
 }
