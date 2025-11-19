@@ -1,5 +1,4 @@
-use crate::measure::grouping::default_groups_for;
-use crate::measure::{Beat, TimeSignature};
+use crate::measure::math::{Frac, reduce};
 use NoteValue::{Eighth, Sixteenth, ThirtySecond};
 use NoteValue::{Half, Quarter, Whole};
 use std::fmt::{Debug, Formatter, Pointer};
@@ -57,30 +56,8 @@ pub enum Duration {
     Tuplet { n: u8, m: u8, base: NoteValue },
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-struct Frac {
-    num: u32,
-    den: u32,
-}
-
-const fn gcd(mut a: u32, mut b: u32) -> u32 {
-    while b != 0 {
-        let t = a % b;
-        a = b;
-        b = t;
-    }
-    a
-}
-
-const fn lcm(a: u32, b: u32) -> u32 { (a / gcd(a, b)) * b }
-
-const fn reduce(f: Frac) -> Frac {
-    let g = gcd(f.num, f.den);
-    Frac { num: f.num / g, den: f.den / g }
-}
-
 impl Duration {
-    const fn as_fraction(&self) -> Frac {
+    pub(super) const fn as_fraction(&self) -> Frac {
         match *self {
             Duration::Simple(base) => Frac { num: 1, den: base.denominator() as u32 },
             Duration::Dotted { base, dots } => {
@@ -202,78 +179,6 @@ pub fn human_readable(d: &Duration) -> String {
     }
 }
 
-/// A tick grid provider. Build dynamically from the set of supported durations.
-#[derive(Clone, Copy, Debug)]
-pub struct Grid {
-    pub ticks_per_whole: u32,
-}
-
-impl Grid {
-    /// Build a dynamic grid as the LCM of the denominators of the given durations.
-    pub const fn from_durations(durs: &[Duration]) -> Grid {
-        let mut l = 1u32;
-        let mut i = 0usize;
-        while i < durs.len() {
-            let f = durs[i].as_fraction();
-            l = lcm(l, f.den);
-            i += 1;
-        }
-        Grid { ticks_per_whole: l }
-    }
-
-    pub const fn ticks_from_fraction(&self, num: u32, den: u32) -> Option<u32> {
-        if den == 0 {
-            return None;
-        }
-        if !self.ticks_per_whole.is_multiple_of(den) {
-            return None;
-        }
-        Some((self.ticks_per_whole / den) * num)
-    }
-
-    pub const fn ticks_of(&self, d: &Duration) -> Option<u32> {
-        let f = d.as_fraction();
-        self.ticks_from_fraction(f.num, f.den)
-    }
-
-    pub const fn ticks_per_beat(&self, time_signature: &TimeSignature) -> u32 {
-        self.ticks_per_whole / (time_signature.beat_unit as u32)
-    }
-
-    /// Returns a measure's total duration in integer ticks
-    pub const fn ticks_per_measure(&self, time_signature: &TimeSignature) -> u32 {
-        (time_signature.beats as u32) * self.ticks_per_beat(time_signature)
-    }
-
-    pub const fn ticks_to_whole_notes(&self, ticks: u32) -> f64 {
-        (ticks as f64) / (self.ticks_per_whole as f64)
-    }
-
-    /// Compute the primary grouping stride in ticks for a time signature.
-    pub(crate) fn primary_boundaries(&self, ts: &TimeSignature) -> Vec<u32> {
-        let subbeat = self.ticks_per_beat(ts); // ticks per beat_unit
-        let measure_ticks = self.ticks_per_measure(ts); // ticks per measure
-
-        let groups = default_groups_for(ts);
-
-        let beats_sum: u32 = groups.iter().map(|&g| g as u32).sum();
-        if beats_sum != ts.beats as u32 {
-            // Invalid grouping for ts; safe fallback: no in‑measure boundaries
-            return Vec::new();
-        }
-
-        let mut acc = 0u32;
-        let mut bounds = Vec::new();
-        for &cnt in &groups {
-            acc += (cnt as u32) * subbeat;
-            if acc < measure_ticks {
-                bounds.push(acc);
-            }
-        }
-        bounds
-    }
-}
-
 pub const COMMON_DURATIONS: [Duration; 15] = [
     q(),
     e(),
@@ -303,44 +208,17 @@ pub(crate) const fn qt16() -> Duration { Duration::Tuplet { n: 5, m: 4, base: Si
 pub(crate) const fn st8() -> Duration { Duration::Tuplet { n: 6, m: 4, base: Eighth } }
 pub(crate) const fn st16() -> Duration { Duration::Tuplet { n: 6, m: 4, base: Sixteenth } }
 
-#[derive(Clone, Copy, Debug)]
-pub struct DurationSet {
-    pub durations: &'static [Duration],
-    pub grid: Grid,
-}
-
-impl DurationSet {
-    pub fn compute_onset_ticks(&self, beats: &[Beat]) -> Vec<u32> {
-        let mut onsets: Vec<u32> = Vec::with_capacity(beats.len());
-        let mut t = 0;
-        for b in beats.iter() {
-            onsets.push(t);
-            if let Some(dt) = self.grid.ticks_of(&b.duration) {
-                t += dt;
-            }
-        }
-        onsets
-    }
-}
-
-pub const fn default_duration_set() -> DurationSet {
-    let durs: &'static [Duration] = &COMMON_DURATIONS;
-    let grid = Grid::from_durations(durs);
-    DurationSet { durations: durs, grid }
-}
-
-pub const fn default_grid() -> Grid { default_duration_set().grid }
-
 #[cfg(test)]
 mod tests {
-    use super::{Duration, default_duration_set, default_grid, e, t8};
+    use super::Duration;
     use crate::measure::duration::NoteValue::Eighth;
+    use crate::measure::grid::default_grid;
 
     #[test]
     fn roundtrip_ticks_presence() {
-        let set = default_duration_set();
-        for d in set.durations.iter() {
-            assert!(set.grid.ticks_of(d).is_some());
+        let grid = default_grid();
+        for d in grid.durations.iter() {
+            assert!(grid.ticks_of(d).is_some());
         }
     }
 
@@ -349,11 +227,5 @@ mod tests {
         let e_ticks = default_grid().ticks_of(&Duration::Simple(Eighth));
         let e_dotted_ticks = default_grid().ticks_of(&Duration::Dotted { base: Eighth, dots: 1 });
         assert_ne!(e_ticks, e_dotted_ticks);
-    }
-
-    #[test]
-    fn ticks_test() {
-        println!("{}", default_duration_set().grid.ticks_of(&e()).unwrap());
-        println!("{}", default_duration_set().grid.ticks_of(&t8()).unwrap());
     }
 }

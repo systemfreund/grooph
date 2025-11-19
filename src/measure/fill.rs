@@ -1,4 +1,5 @@
-use crate::measure::duration::{Duration, default_duration_set};
+use crate::measure::duration::Duration;
+use crate::measure::grid::default_grid;
 
 pub enum SortOrder {
     Ascending,
@@ -15,7 +16,7 @@ pub(crate) fn best_fill_for_gap(gap_ticks: u32, allowed: &[Duration]) -> Option<
         return None;
     }
 
-    let set = default_duration_set();
+    let grid = default_grid();
 
     // Build coin list: (ticks, duration, weight)
     let mut coins: Vec<(u32, Duration, u32)> = if !allowed.is_empty() {
@@ -24,17 +25,17 @@ pub(crate) fn best_fill_for_gap(gap_ticks: u32, allowed: &[Duration]) -> Option<
             .copied()
             .filter_map(|d| {
                 let den = d.denominator();
-                set.grid.ticks_of(&d).map(|t| (t, d, den))
+                grid.ticks_of(&d).map(|t| (t, d, den))
             })
             .collect()
     } else {
-        set.durations
+        grid.durations
             .iter()
             .copied()
             .filter(|d| !matches!(d, Duration::Dotted { .. }))
             .filter_map(|d| {
                 let den = d.denominator();
-                set.grid.ticks_of(&d).map(|t| (t, d, den))
+                grid.ticks_of(&d).map(|t| (t, d, den))
             })
             .collect()
     };
@@ -98,8 +99,8 @@ pub(crate) fn best_fill_for_gap(gap_ticks: u32, allowed: &[Duration]) -> Option<
     seq_idxs.reverse();
     let mut result: Vec<Duration> = seq_idxs.into_iter().map(|ci| coins[ci].1).collect();
     result.sort_by(|a, b| {
-        let ta = set.grid.ticks_of(a).unwrap();
-        let tb = set.grid.ticks_of(b).unwrap();
+        let ta = grid.ticks_of(a).unwrap();
+        let tb = grid.ticks_of(b).unwrap();
         ta.cmp(&tb)
     });
     Some(result)

@@ -1,6 +1,7 @@
 use crate::layout::render_plan::BeatIdx;
-use crate::measure::duration::{Duration, NoteValue, default_duration_set};
+use crate::measure::duration::{Duration, NoteValue};
 use crate::measure::{Beat, BeatKind, Measure, TimeSignature};
+use crate::measure::grid::default_grid;
 
 /// Number of beams implied by a duration (eighth = 1, sixteenth = 2, 32nd = 3).
 /// Tuplets map to their base note value for beam count purposes.
@@ -43,13 +44,13 @@ pub struct BeamGroup {
 /// - Cross-measure beams are exposed via the `continues_*` flags but left as false here; a higher level
 ///   can link adjacent measures and set these appropriately.
 pub(super) fn compute_beam_plan(measure: &Measure) -> BeamPlan {
-    let set = default_duration_set();
+    let grid = default_grid();
     let beats = measure.beats();
     let ts = measure.time_signature();
-    let onsets = set.compute_onset_ticks(beats);
+    let onsets = grid.compute_onset_ticks(beats);
 
     // Compute primary boundaries (tick positions inside the measure where groups should break by default)
-    let boundaries = set.grid.primary_boundaries(&ts);
+    let boundaries = grid.primary_boundaries(&ts);
 
     // Collect indices of beamable notes
     let mut note_idxs: Vec<BeatIdx> = Vec::new();
