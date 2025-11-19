@@ -493,6 +493,35 @@ impl<'a> Measure<'a> {
         self.fill_at(start, span_ticks, &allowed, Either::Right(Rest)).unwrap();
         true
     }
+
+    /// Wandelt den Beat an `idx` in eine Tuplet‑Gruppe des Typs (n in der Zeit von m, Basis `base`) um.
+    ///
+    /// Bedingungen/Verhalten:
+    /// - Wenn `idx` außerhalb liegt oder der Beat dort bereits ein Tuplet ist, passiert nichts und es wird `false` zurückgegeben.
+    /// - Ansonsten wird versucht, den Beat durch einen Tuplet‑Beat gleicher Art (Note/Rest) zu ersetzen.
+    ///   Die Methode delegiert an `set_beat_at`, welches die gesamte Gruppe inkl. Anchor anlegt und
+    ///   verbleibende Slots der Gruppe mit Rests auffüllt. Reicht der Platz im Takt nicht aus, bleibt
+    ///   der Takt unverändert und die Funktion liefert `false`.
+    pub fn convert_to_tuplet_at(
+        &mut self,
+        idx: usize,
+        n: u8,
+        m: u8,
+        base: duration::NoteValue,
+    ) -> bool {
+        if idx >= self.beats.len() {
+            return false;
+        }
+        let cur = self.beats[idx];
+        if matches!(cur.duration, Duration::Tuplet { .. }) {
+            return false;
+        }
+        let new_duration = Duration::Tuplet { n, m, base };
+        let mut new_beat = Beat::new(new_duration, cur.kind);
+        new_beat.accented = cur.accented;
+        // tuplet_group_id wird von set_beat_at korrekt gesetzt
+        self.set_beat_at(idx, new_beat).is_ok()
+    }
 }
 
 impl Debug for Measure<'_> {
@@ -807,5 +836,40 @@ mod tests {
             }),
             None
         );
+    }
+
+    #[test]
+    fn convert_quarter_to_triplet_eighth_group_in_four_four() {
+        let mut m = Measure::new(TimeSignature::FOUR_FOUR);
+        // Standardfüllung: 4x Viertel Rests
+        let ok = m.convert_to_tuplet_at(0, 3, 2, Eighth);
+        assert!(ok, "Conversion to triplet should succeed");
+
+        // Erwartung: drei Triplet‑Achtel an den ersten drei Positionen mit gleicher group_id
+        let id0 = m.beats()[0].tuplet_group_id;
+        assert!(id0.is_some());
+        for i in 0..3 {
+            assert_eq!(m.beats()[i].duration, t8());
+            assert_eq!(m.beats()[i].tuplet_group_id, id0);
+        }
+
+        // Anchor‑Span entspricht einer Viertel‑Spanne
+        let gid = id0.unwrap();
+        let anchor = m.tuplet_anchors.get(&gid).expect("anchor must exist");
+        let base_quarter_ticks = m.grid.ticks_of(&Duration::Simple(Eighth)).unwrap() * 2;
+        assert_eq!(anchor.target_ticks, base_quarter_ticks);
+    }
+
+    #[test]
+    fn convert_noop_when_already_tuplet() {
+        let mut m = Measure::new(TimeSignature::FOUR_FOUR);
+        // Erzeuge zuerst ein Triplet an Position 0
+        m.set_beat_at(0, Beat::note(t8())).unwrap();
+
+        let before = m.clone();
+        let changed = m.convert_to_tuplet_at(0, 3, 2, Eighth);
+        assert!(!changed, "Should not convert when already a tuplet");
+        // Unverändert
+        assert_eq!(format!("{:?}", before), format!("{:?}", m));
     }
 }

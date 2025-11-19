@@ -38,14 +38,14 @@ impl App for Grooph<'_> {
 
         egui::TopBottomPanel::top("info").show(ctx, |ui| {
             ui.label(
-                "Keybindings: \n\
+            "Keybindings: \n\
                 Arrow keys: Move cursor\n\
                 Del/Backspace: Remove note\n\
                 Space: Toggle between note and rest\n\
                 A: Set/unset accent\n\
                 1-4: Set duration (1=1/4, 2=1/8, 3=1/16, 4=1/32)\n\
                 Period: Toggle dotted\n\
-                T: Dissolve tuplet group at cursor\n",
+                T: Tuplet toggle at cursor (create 1/8 triplet if none; dissolve if inside)\n",
             );
 
             // Label showing absolute beat position at the cursor and human-readable duration/kind
@@ -149,8 +149,18 @@ impl App for Grooph<'_> {
                     self.measure.toggle_accent_at(idx);
                 }
                 if i.key_pressed(Key::T) {
-                    // Dissolve the tuplet group at cursor (if any)
-                    if self.measure.dissolve_tuplet_group_at(idx) {
+                    // Toggle tuplet at cursor:
+                    // - If currently inside a tuplet group -> dissolve it
+                    // - Else convert current beat into an 1/8 triplet group (3 in the time of 2)
+                    let cur = self.measure.beats()[idx];
+                    let changed = if cur.tuplet_group_id.is_some() {
+                        self.measure.dissolve_tuplet_group_at(idx)
+                    } else {
+                        // Create triplet eighth group at cursor, preserve kind
+                        self.measure.convert_to_tuplet_at(idx, 3, 2, Eighth)
+                    };
+
+                    if changed {
                         // Cursor könnte jetzt außerhalb liegen (z. B. 3->1 Beats). Korrigieren.
                         let new_len = self.measure.beats().len();
                         if new_len > 0 {
