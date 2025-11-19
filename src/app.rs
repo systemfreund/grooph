@@ -149,9 +149,24 @@ impl App for Grooph<'_> {
                     self.measure.toggle_accent_at(idx);
                 }
                 if i.key_pressed(Key::T) {
-                    // Cycle tuplets:
+                    // Cycle tuplets with stable group start targeting:
                     // Non-tuplet -> 1/8 Triplet -> 1/16 Quintuplet -> 1/16 Sextuplet -> 1/16 Septuplet -> 1/16 Nonuplet -> Dissolve
-                    let cur_beat = self.measure.beats()[idx];
+                    // If the cursor is inside an existing tuplet group, always operate at the group's start index
+                    let beats = self.measure.beats();
+                    let gid_at_cursor = beats[idx].tuplet_group_id;
+                    let start_idx = if let Some(gid) = gid_at_cursor {
+                        // scan left to find the first index with the same group id
+                        let mut sidx = idx;
+                        while sidx > 0 && self.measure.beats()[sidx - 1].tuplet_group_id == Some(gid) {
+                            sidx -= 1;
+                        }
+                        sidx
+                    } else {
+                        idx
+                    };
+
+                    // Determine current state using the duration at the group start (or cursor if non-tuplet)
+                    let cur_beat = self.measure.beats()[start_idx];
                     let changed = match cur_beat.duration {
                         Duration::Tuplet { n, m, base } => {
                             let next_target = match (n, m, base) {
@@ -162,18 +177,18 @@ impl App for Grooph<'_> {
                                 _ => None,
                             };
 
-                            // Dissolve current group
-                            if self.measure.dissolve_tuplet_group_at(idx) {
-                                // Try to convert to next target if defined
+                            // Dissolve current group from its start
+                            if self.measure.dissolve_tuplet_group_at(start_idx) {
+                                // Try to convert to next target if defined, also at group start
                                 if let Some((tn, tm, tbase)) = next_target {
-                                    self.measure.convert_to_tuplet_at(idx, tn, tm, tbase);
+                                    self.measure.convert_to_tuplet_at(start_idx, tn, tm, tbase, false);
                                 }
                                 true
                             } else {
                                 false
                             }
                         }
-                        _ => self.measure.convert_to_tuplet_at(idx, 3, 2, Eighth),
+                        _ => self.measure.convert_to_tuplet_at(start_idx, 3, 2, Eighth, false),
                     };
 
                     if changed {
