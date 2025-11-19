@@ -44,7 +44,8 @@ impl App for Grooph<'_> {
                 Space: Toggle between note and rest\n\
                 A: Set/unset accent\n\
                 1-4: Set duration (1=1/4, 2=1/8, 3=1/16, 4=1/32)\n\
-                Period: Toggle dotted\n",
+                Period: Toggle dotted\n\
+                T: Dissolve tuplet group at cursor\n",
             );
 
             // Label showing absolute beat position at the cursor and human-readable duration/kind
@@ -147,6 +148,18 @@ impl App for Grooph<'_> {
                     // Toggle user accent on the current beat
                     self.measure.toggle_accent_at(idx);
                 }
+                if i.key_pressed(Key::T) {
+                    // Dissolve the tuplet group at cursor (if any)
+                    if self.measure.dissolve_tuplet_group_at(idx) {
+                        // Cursor könnte jetzt außerhalb liegen (z. B. 3->1 Beats). Korrigieren.
+                        let new_len = self.measure.beats().len();
+                        if new_len > 0 {
+                            self.cursor_idx = self.cursor_idx.min(new_len - 1);
+                        } else {
+                            self.cursor_idx = 0;
+                        }
+                    }
+                }
             }
         });
     }
@@ -189,7 +202,8 @@ impl Grooph<'_> {
         let ff = FontFamily::Name("music".into());
         let mut m = Measure::new(TimeSignature::SEVEN_EIGHT);
         m.set_beat_at(0, Beat::note(st16())).unwrap();
-        m.set_beat_at(6, Beat::note(qt16())).unwrap();
+        m.set_beat_at(6, Beat::note(t8())).unwrap();
+        // m.set_beat_at(6, Beat::note(qt16())).unwrap();
         Self { font_family: ff.clone(), font_id: FontId::new(16.0, ff), measure: m, cursor_idx: 0 }
     }
 }
