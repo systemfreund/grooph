@@ -535,6 +535,7 @@ impl<'a> Measure<'a> {
         n: u8,
         m: u8,
         base: duration::NoteValue,
+        overwrite: bool,
     ) -> bool {
         if idx >= self.beats.len() {
             return false;
@@ -543,6 +544,28 @@ impl<'a> Measure<'a> {
         if matches!(cur.duration, Duration::Tuplet { .. }) {
             return false;
         }
+
+        // Protection: Stop if we would absorb a note and overwrite is false
+        if !overwrite {
+            let base_ticks = self.grid.ticks_of(&Duration::Simple(base)).unwrap();
+            let group_span = (m as u32) * base_ticks;
+
+            let mut consumed = 0u32;
+            let mut k = idx;
+            while consumed < group_span {
+                if k >= self.beats.len() {
+                    // If we run out of beats, set_beat_at will handle the error.
+                    break;
+                }
+                // Check if we are about to absorb a subsequent beat that is a note
+                if k > idx && self.beats[k].kind == BeatKind::Note {
+                    return false;
+                }
+                consumed += self.grid.ticks_of(&self.beats[k].duration).unwrap();
+                k += 1;
+            }
+        }
+
         let new_duration = Duration::Tuplet { n, m, base };
         let mut new_beat = Beat::new(new_duration, cur.kind);
         new_beat.accented = cur.accented;
@@ -893,7 +916,7 @@ mod tests {
     fn convert_quarter_to_triplet_eighth_group_in_four_four() {
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
         // Standardfüllung: 4x Viertel Rests
-        let ok = m.convert_to_tuplet_at(0, 3, 2, Eighth);
+        let ok = m.convert_to_tuplet_at(0, 3, 2, Eighth, true);
         assert!(ok, "Conversion to triplet should succeed");
 
         // Erwartung: drei Triplet‑Achtel an den ersten drei Positionen mit gleicher group_id
@@ -918,7 +941,7 @@ mod tests {
         m.set_beat_at(0, Beat::note(t8())).unwrap();
 
         let before = m.clone();
-        let changed = m.convert_to_tuplet_at(0, 3, 2, Eighth);
+        let changed = m.convert_to_tuplet_at(0, 3, 2, Eighth, true);
         assert!(!changed, "Should not convert when already a tuplet");
         // Unverändert
         assert_eq!(format!("{:?}", before), format!("{:?}", m));
@@ -930,7 +953,7 @@ mod tests {
         // Stelle sicher, dass Quelle eine Note ist (nicht Rest)
         m.set_beat_at(0, Beat::note(Duration::Simple(Eighth))).unwrap();
         // Wandle an derselben Position in Triplet‑Achtel um
-        assert!(m.convert_to_tuplet_at(0, 3, 2, Eighth));
+        assert!(m.convert_to_tuplet_at(0, 3, 2, Eighth, true));
 
         for i in 0..3 {
             assert_eq!(m.beats()[i].duration, t8());
@@ -942,7 +965,7 @@ mod tests {
     fn convert_to_tuplet_initializes_rests_when_source_is_rest() {
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
         // Standard ist Rest an Index 0
-        assert!(m.convert_to_tuplet_at(0, 3, 2, Eighth));
+        assert!(m.convert_to_tuplet_at(0, 3, 2, Eighth, true));
         for i in 0..3 {
             assert_eq!(m.beats()[i].duration, t8());
             assert_eq!(m.beats()[i].kind, BeatKind::Rest, "tuplet slot {} should be a rest", i);
@@ -971,7 +994,7 @@ mod tests {
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
         // Erzeuge Triplet‑1/8 Gruppe als Rests: Standardzustand ist bereits Rest an 0
         // also direkt Triplet konvertieren aus einem Rest heraus
-        assert!(m.convert_to_tuplet_at(0, 3, 2, Eighth));
+        assert!(m.convert_to_tuplet_at(0, 3, 2, Eighth, true));
         // Sicherheitscheck: alle drei Slots sind Rests
         for i in 0..3 { assert_eq!(m.beats()[i].kind, BeatKind::Rest); }
 
@@ -980,5 +1003,43 @@ mod tests {
         assert!(m.beats()[0].tuplet_group_id.is_none());
         assert_eq!(m.beats()[0].kind, BeatKind::Rest);
         assert!(!m.beats()[0].accented);
+    }
+
+    #[test]
+    fn convert_absorbs_rests_ok() {
+        let mut m = Measure::new(TimeSignature::FOUR_FOUR);
+        // Setup: [Rest(e), Rest(e), Rest(q)...] by replacing first Q with E (fills remainder with E)
+        m.set_beat_at(0, Beat::rest(e())).unwrap();
+        // Now convert idx 0 (Rest(e)) to Triplet Eighths (span Q). Needs to absorb idx 1 (Rest(e)).
+        assert!(m.convert_to_tuplet_at(0, 3, 2, Eighth, false));
+        // Should have created a tuplet group at 0
+        assert!(m.beats()[0].tuplet_group_id.is_some());
+    }
+
+    #[test]
+    fn convert_aborts_on_note_if_no_overwrite() {
+        let mut m = Measure::new(TimeSignature::FOUR_FOUR);
+        // Setup: [Rest(e), Note(e), Rest(q)...]
+        m.set_beat_at(0, Beat::rest(e())).unwrap();
+        m.set_beat_at(1, Beat::note(e())).unwrap();
+
+        // Try convert idx 0 to Triplet Eighths (span Q). Needs to absorb idx 1 which is Note.
+        assert!(!m.convert_to_tuplet_at(0, 3, 2, Eighth, false));
+        // Verify state unchanged (idx 1 is still Note)
+        assert_eq!(m.beats()[1].kind, BeatKind::Note);
+        assert!(m.beats()[0].tuplet_group_id.is_none());
+    }
+
+    #[test]
+    fn convert_overwrites_note_if_overwrite_true() {
+        let mut m = Measure::new(TimeSignature::FOUR_FOUR);
+        // Setup: [Rest(e), Note(e), Rest(q)...]
+        m.set_beat_at(0, Beat::rest(e())).unwrap();
+        m.set_beat_at(1, Beat::note(e())).unwrap();
+
+        // Try convert idx 0 to Triplet Eighths (span Q). Overwrite=true.
+        assert!(m.convert_to_tuplet_at(0, 3, 2, Eighth, true));
+        // Verify tuplet created
+        assert!(m.beats()[0].tuplet_group_id.is_some());
     }
 }
