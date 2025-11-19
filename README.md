@@ -1,48 +1,82 @@
-# grooph — a flexible drummer’s metronome
+# Developer Guide for Coding Agents
 
-groops aims to be a highly flexible, drummer‑focused metronome and practice assistant. It combines a visual timeline with nuanced rhythmic building blocks (subdivisions, tuplets, stickings, rests) so you can design click tracks and exercises that match real‑world drumming needs.
+This guide is designed to help autonomous agents and human developers understand the `grooph` codebase, its architecture, and development workflows.
 
-## Features (planned)
+## Project Overview
 
-- Modular rhythm builder
-  - Time signatures (e.g., 4/4, 3/4, 6/8)
-  - Notes, rests, and stickings (R/L) per beat
-  - Common and odd subdivisions: 1/4, 1/8, triplets, 1/16, quintuplets, sextuplets, septuplets, 1/32, nonuplets
-- Audio engine
-  - Low‑latency click with different voices (rim, hat, bell, etc.) (roadmap)
-  - Polyrhythms and layered meters (roadmap)
-- Practice flows
-  - Tempo ramps, cycles, gaps, and “Time‑Feel” exercises (roadmap)
-  - Presets for rudiments, linear patterns, coordination drills (roadmap)
+**Grooph** is a flexible drummer's metronome and practice assistant. It focuses on building complex rhythmic patterns using a visual timeline.
 
-## Getting started
+### Key Features
+- **Modular Rhythm Builder**: Supports time signatures, stickings, and complex subdivisions (tuplets, dotted notes).
+- **Visual Timeline**: Renders measures and beats.
+- **Platform**: Built with Rust and `eframe` (egui), supporting both native and WASM targets.
 
-### Prerequisites
+## Architecture
 
-- Rust toolchain (stable). Install via https://rustup.rs
-- System dependencies for native eframe/egui apps (platform‑specific windowing deps).
+The project follows a Model-View separation, though currently tightly coupled within the crate.
 
-### Build & run
+### 1. Data Model (`src/measure`)
+This is the core domain logic.
+- **Measure (`src/measure.rs`)**: The container for a sequence of beats. It handles logic like `set_beat_at`, `convert_to_tuplet_at`, and ensuring the measure is "complete" (no gaps).
+- **Beat (`src/measure/beat.rs`)**: Represents a single rhythmic event (Note or Rest) with a `Duration`.
+- **Duration (`src/measure/duration.rs`)**: An enum (`Simple`, `Dotted`, `Tuplet`) representing the musical length.
+- **Grid (`src/measure/grid.rs`)**: Manages time resolution using integer "ticks". It calculates the Least Common Multiple (LCM) of all supported durations to ensure precise timing without floating-point errors.
 
-```bash
-# From project root
-cargo run
-```
+### 2. Application Logic (`src/app.rs`)
+- **Grooph Struct**: The main entry point for the `eframe` application.
+- **Update Loop**: The `update` method handles input events (keyboard shortcuts) and dispatches commands to the `Measure`.
 
-If compilation fails with a Bravura font error, see Fonts section below.
+### 3. Rendering (`src/layout`, `src/render`)
+- **Layout**: Calculates the visual position of beats based on their duration and the measure's width.
+- **Render**: Draws the calculated layout using `egui` primitives.
 
-### Run tests
+## Core Concepts & Rules
 
-```bash
-cargo test
-```
+### Measures & Auto-filling
+The `Measure` struct maintains a valid state. When a beat is inserted:
+- It ensures the total duration matches the time signature.
+- It "fills" gaps with rests automatically.
+- It handles tuplet grouping (e.g., inserting a triplet beat creates a group of 3 slots).
 
-## Roadmap
+### Tuplets
+Tuplets are handled as a group.
+- A beat inside a tuplet has a `tuplet_group_id`.
+- Operations on tuplets often affect the entire group (e.g., dissolving a tuplet).
 
-- Add audio back‑end with precise scheduling and low jitter.
-- Visual accents, subdivision markers, and per‑beat sticking overlays.
-- Pattern editor: build, save, and share exercises (JSON/TOML files).
-- Tempo automation: ramps, cycles, and gap‑clicks.
-- Polyrhythm layers and mixed meters.
-- Packaging: binaries for Linux/macOS/Windows.
+### Ticks
+Time is measured in "ticks".
+- `DEFAULT_GRID` provides the tick resolution.
+- `ticks_per_whole` is the LCM of all duration denominators.
 
+## Development Workflow
+
+### Build & Run
+- **Run**: `cargo run`
+- **Test**: `cargo test`
+- **WASM**: `trunk serve` (if using Trunk)
+
+### Testing Guidelines
+- **Unit Tests**: Place tests within the module (`#[cfg(test)] mod tests`) to access `pub(crate)` helpers.
+- **Helpers**: Use duration shortcuts from `src/measure/duration.rs`:
+    - `q()`: Quarter note
+    - `e()`: Eighth note
+    - `t8()`: Triplet eighth
+    - `Measure::new(TimeSignature::FOUR_FOUR)`: Standard 4/4 measure.
+- **Assertions**: Avoid direct `Beat` comparison if possible. Verify specific fields like `duration` and `kind`.
+
+### Common Tasks
+
+#### Adding a new Duration
+1.  Add the variant to `NoteValue` (if needed) or `Duration` helpers.
+2.  Update `COMMON_DURATIONS` in `src/measure/duration.rs` so it's included in the `Grid`.
+3.  Update `human_readable` for display.
+
+#### modifying Measure Logic
+1.  Modifications to `set_beat_at` or `fill_at` in `src/measure.rs` must preserve the invariant that the measure is fully filled.
+2.  Add a regression test for any edge case (especially crossing beat boundaries).
+
+## File Structure
+- `src/measure.rs`: **Start here**. Main logic.
+- `src/app.rs`: UI interaction code.
+- `src/layout/`: Visual calculations.
+- `src/render/`: Drawing code.
