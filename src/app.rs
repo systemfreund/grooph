@@ -169,6 +169,10 @@ impl App for Grooph<'_> {
                     let cur_beat = self.measure.beats()[start_idx];
                     let mut did_dissolve = false;
                     let mut did_recreate = false;
+                    // Falls wir uns in einer Tuplet‑Gruppe befinden und in die nächste Gruppe wechseln,
+                    // erfassen wir vorher die relative Notenbelegung, um sie nach der Rekreation
+                    // bestmöglich auf die neue Grid zu projizieren.
+                    let mut captured_offsets: Option<Vec<(u32, bool)>> = None;
                     let changed = match cur_beat.duration {
                         Duration::Tuplet { n, m, base } => {
                             let next_target = match (n, m, base) {
@@ -180,12 +184,20 @@ impl App for Grooph<'_> {
                             };
 
                             // Dissolve current group from its start
+                            // Vor dem Auflösen ggf. Noten‑Offsets erfassen, nur wenn wir ein nächstes Ziel haben
+                            if next_target.is_some() {
+                                captured_offsets = self.measure.tuplet_group_note_offsets(start_idx);
+                            }
                             if self.measure.dissolve_tuplet_group_at(start_idx) {
                                 did_dissolve = true;
                                 // Try to convert to next target if defined, also at group start
                                 if let Some((tn, tm, tbase)) = next_target {
                                     if self.measure.convert_to_tuplet_at(start_idx, tn, tm, tbase, false) {
                                         did_recreate = true;
+                                        // Nach erfolgreicher Rekreation ggf. Projektion anwenden
+                                        if let Some(ref src) = captured_offsets {
+                                            let _ = self.measure.apply_tuplet_projection_at(start_idx, src);
+                                        }
                                     }
                                 }
                                 true
