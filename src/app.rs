@@ -167,6 +167,8 @@ impl App for Grooph<'_> {
 
                     // Determine current state using the duration at the group start (or cursor if non-tuplet)
                     let cur_beat = self.measure.beats()[start_idx];
+                    let mut did_dissolve = false;
+                    let mut did_recreate = false;
                     let changed = match cur_beat.duration {
                         Duration::Tuplet { n, m, base } => {
                             let next_target = match (n, m, base) {
@@ -179,26 +181,29 @@ impl App for Grooph<'_> {
 
                             // Dissolve current group from its start
                             if self.measure.dissolve_tuplet_group_at(start_idx) {
+                                did_dissolve = true;
                                 // Try to convert to next target if defined, also at group start
                                 if let Some((tn, tm, tbase)) = next_target {
-                                    self.measure.convert_to_tuplet_at(start_idx, tn, tm, tbase, false);
+                                    if self.measure.convert_to_tuplet_at(start_idx, tn, tm, tbase, false) {
+                                        did_recreate = true;
+                                    }
                                 }
                                 true
                             } else {
                                 false
                             }
                         }
-                        _ => self.measure.convert_to_tuplet_at(start_idx, 3, 2, Eighth, false),
+                        _ => {
+                            let ok = self.measure.convert_to_tuplet_at(start_idx, 3, 2, Eighth, false);
+                            if ok { did_recreate = true; }
+                            ok
+                        }
                     };
 
-                    if changed {
-                        // Cursor könnte jetzt außerhalb liegen (z. B. 3->1 Beats). Korrigieren.
+                    // Cursor nur verschieben, wenn wir ausschließlich aufgelöst haben (kein direktes Re‑Create)
+                    if changed && did_dissolve && !did_recreate {
                         let new_len = self.measure.beats().len();
-                        if new_len > 0 {
-                            self.cursor_idx = self.cursor_idx.min(new_len - 1);
-                        } else {
-                            self.cursor_idx = 0;
-                        }
+                        if new_len > 0 { self.cursor_idx = start_idx.min(new_len - 1); } else { self.cursor_idx = 0; }
                     }
                 }
             }
