@@ -455,9 +455,13 @@ impl<'a> Measure<'a> {
 
     /// Löst die Tuplet‑Gruppe auf, in der sich `idx` befindet.
     ///
-    /// Ersetzt die gesamte Spanne der Gruppe durch eine einfache (nicht‑Tuplet) Auffüllung
-    /// mit Ruhezeichen, entfernt die `tuplet_group_id` und den verknüpften Anchor.
-    /// Rückgabe: `true` bei erfolgreicher Auflösung, sonst `false` (z. B. wenn kein Tuplet an `idx`).
+    /// Verhalten:
+    /// - Ersetzt die gesamte Spanne der Gruppe durch eine einfache (nicht‑Tuplet) Auffüllung.
+    /// - Initialisierung der neuen Beats: Standard sind Rests; wenn die aufgelöste Gruppe mindestens
+    ///   eine Note enthielt, wird der erste neu eingefügte Beat als Note angelegt.
+    /// - Ein vorhandener Akzent innerhalb der Gruppe wird auf den ersten neu eingefügten Beat übernommen.
+    /// - Entfernt die `tuplet_group_id` in diesem Bereich und löscht den verknüpften Anchor.
+    /// - Rückgabe: `true` bei erfolgreicher Auflösung, sonst `false` (z. B. wenn kein Tuplet an `idx`).
     pub fn dissolve_tuplet_group_at(&mut self, idx: usize) -> bool {
         if idx >= self.beats.len() {
             return false;
@@ -479,6 +483,14 @@ impl<'a> Measure<'a> {
             return false;
         }
 
+        // Merke, ob die Gruppe mindestens eine Note bzw. einen Akzent enthielt
+        let mut had_any_note = false;
+        let mut had_any_accent = false;
+        for b in &self.beats[start..end] {
+            if b.kind == Note { had_any_note = true; }
+            if b.accented { had_any_accent = true; }
+        }
+
         self.beats.drain(start..end);
 
         let allowed: Vec<Duration> = self
@@ -491,6 +503,21 @@ impl<'a> Measure<'a> {
 
         let span_ticks = self.tuplet_anchors.get(&group_id).unwrap().target_ticks;
         self.fill_at(start, span_ticks, &allowed, Either::Right(Rest)).unwrap();
+
+        // Post‑Processing: ersten neu eingefügten Beat ggf. als Note setzen und Akzent übernehmen
+        if start < self.beats.len() {
+            // Sicherheit: keine Tuplet‑ID und kein Tremolo
+            self.beats[start].tuplet_group_id = None;
+            self.beats[start].tremolo = None;
+            if had_any_note {
+                self.beats[start].kind = Note;
+            }
+            // Akzent übernehmen (falls irgendein Beat in der Gruppe akzentuiert war)
+            self.beats[start].accented = had_any_accent;
+        }
+
+        // Anchor entfernen, da die Gruppe aufgelöst wurde
+        self.tuplet_anchors.remove(&group_id);
         true
     }
 
@@ -920,5 +947,38 @@ mod tests {
             assert_eq!(m.beats()[i].duration, t8());
             assert_eq!(m.beats()[i].kind, BeatKind::Rest, "tuplet slot {} should be a rest", i);
         }
+    }
+
+    #[test]
+    fn dissolve_tuplet_initializes_note_when_group_contains_any_note_and_preserves_accent() {
+        let mut m = Measure::new(TimeSignature::FOUR_FOUR);
+        // Erzeuge Triplet‑1/8 am Anfang, erster Slot Note, restliche werden als Rests vorinitialisiert
+        m.set_beat_at(0, Beat::note(t8())).unwrap();
+        // Setze einen Akzent innerhalb der Gruppe (z. B. auf den dritten Slot)
+        m.set_accent_at(2, true);
+
+        // Auflösen der Gruppe (über mittleren Slot sicher in der Gruppe)
+        assert!(m.dissolve_tuplet_group_at(1));
+
+        // Erwartung: erster neu eingefügter Beat ist eine Note und akzentuiert
+        assert!(m.beats()[0].tuplet_group_id.is_none());
+        assert_eq!(m.beats()[0].kind, BeatKind::Note);
+        assert!(m.beats()[0].accented, "accent should be preserved on first replacement beat");
+    }
+
+    #[test]
+    fn dissolve_tuplet_all_rests_results_in_rest_and_no_accent() {
+        let mut m = Measure::new(TimeSignature::FOUR_FOUR);
+        // Erzeuge Triplet‑1/8 Gruppe als Rests: Standardzustand ist bereits Rest an 0
+        // also direkt Triplet konvertieren aus einem Rest heraus
+        assert!(m.convert_to_tuplet_at(0, 3, 2, Eighth));
+        // Sicherheitscheck: alle drei Slots sind Rests
+        for i in 0..3 { assert_eq!(m.beats()[i].kind, BeatKind::Rest); }
+
+        assert!(m.dissolve_tuplet_group_at(0));
+
+        assert!(m.beats()[0].tuplet_group_id.is_none());
+        assert_eq!(m.beats()[0].kind, BeatKind::Rest);
+        assert!(!m.beats()[0].accented);
     }
 }
