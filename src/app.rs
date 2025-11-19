@@ -45,7 +45,7 @@ impl App for Grooph<'_> {
                 A: Set/unset accent\n\
                 1-4: Set duration (1=1/4, 2=1/8, 3=1/16, 4=1/32)\n\
                 Period: Toggle dotted\n\
-                T: Tuplet toggle at cursor (create 1/8 triplet if none; dissolve if inside)\n",
+                T: Cycle tuplet (Tri -> Quint -> Sext -> Sept -> Non -> Dissolve)\n",
             );
 
             // Label showing absolute beat position at the cursor and human-readable duration/kind
@@ -149,15 +149,31 @@ impl App for Grooph<'_> {
                     self.measure.toggle_accent_at(idx);
                 }
                 if i.key_pressed(Key::T) {
-                    // Toggle tuplet at cursor:
-                    // - If currently inside a tuplet group -> dissolve it
-                    // - Else convert current beat into an 1/8 triplet group (3 in the time of 2)
-                    let cur = self.measure.beats()[idx];
-                    let changed = if cur.tuplet_group_id.is_some() {
-                        self.measure.dissolve_tuplet_group_at(idx)
-                    } else {
-                        // Create triplet eighth group at cursor, preserve kind
-                        self.measure.convert_to_tuplet_at(idx, 3, 2, Eighth)
+                    // Cycle tuplets:
+                    // Non-tuplet -> 1/8 Triplet -> 1/16 Quintuplet -> 1/16 Sextuplet -> 1/16 Septuplet -> 1/16 Nonuplet -> Dissolve
+                    let cur_beat = self.measure.beats()[idx];
+                    let changed = match cur_beat.duration {
+                        Duration::Tuplet { n, m, base } => {
+                            let next_target = match (n, m, base) {
+                                (3, 2, Eighth) => Some((5, 4, Sixteenth)),
+                                (5, 4, Sixteenth) => Some((6, 4, Sixteenth)),
+                                (6, 4, Sixteenth) => Some((7, 4, Sixteenth)),
+                                (7, 4, Sixteenth) => Some((9, 8, Sixteenth)),
+                                _ => None,
+                            };
+
+                            // Dissolve current group
+                            if self.measure.dissolve_tuplet_group_at(idx) {
+                                // Try to convert to next target if defined
+                                if let Some((tn, tm, tbase)) = next_target {
+                                    self.measure.convert_to_tuplet_at(idx, tn, tm, tbase);
+                                }
+                                true
+                            } else {
+                                false
+                            }
+                        }
+                        _ => self.measure.convert_to_tuplet_at(idx, 3, 2, Eighth),
                     };
 
                     if changed {
