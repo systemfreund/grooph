@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 eframe = "0.33.0"
+either = "1.15.0"
 log = "0.4.28"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]

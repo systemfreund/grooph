@@ -1,5 +1,10 @@
 use crate::measure::duration::{Duration, default_duration_set};
 
+pub enum SortOrder {
+    Ascending,
+    Descending,
+}
+
 /// Compute the best exact spelling for a gap measured in ticks.
 /// Optimization priority:
 /// 1) Minimal number of tokens (durations)
@@ -91,6 +96,11 @@ pub(crate) fn best_fill_for_gap(gap_ticks: u32, allowed: &[Duration]) -> Option<
         i = cell.prev;
     }
     seq_idxs.reverse();
-    let result: Vec<Duration> = seq_idxs.into_iter().map(|ci| coins[ci].1).collect();
+    let mut result: Vec<Duration> = seq_idxs.into_iter().map(|ci| coins[ci].1).collect();
+    result.sort_by(|a, b| {
+        let ta = set.grid.ticks_of(a).unwrap();
+        let tb = set.grid.ticks_of(b).unwrap();
+        ta.cmp(&tb)
+    });
     Some(result)
 }

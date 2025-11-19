@@ -8,11 +8,12 @@ use crate::measure::BeatKind::Rest;
 pub(crate) use crate::measure::beat::{Beat, BeatKind};
 use crate::measure::duration::NoteValue::{Eighth, Sixteenth, ThirtySecond};
 use crate::measure::duration::{
-    Duration, DurationSet, default_duration_set, duration_to_debug_str,
+    Duration, DurationSet, default_duration_set, duration_to_debug_str, qt16,
 };
 use crate::measure::fill::best_fill_for_gap;
 pub(crate) use crate::measure::time_signature::TimeSignature;
 use BeatKind::Note;
+use either::Either;
 use std::collections::HashMap;
 use std::fmt::{Debug, Display, Formatter};
 use std::vec;
@@ -30,9 +31,7 @@ pub enum MeasureError {
     /// The beat would leave a remainder that cannot be exactly filled with available durations
     Unfillable {
         /// Duration that was attempted to add (fraction of a whole note)
-        attempted: f64,
-        /// Remaining space after the attempted add (fraction of a whole note)
-        remaining: f64,
+        attempted: f64
     },
 }
 
@@ -90,7 +89,7 @@ impl Measure {
         let new_ticks = set
             .grid
             .ticks_of(&beat.duration)
-            .ok_or(MeasureError::Unfillable { attempted: 0.0, remaining: 0.0 })?;
+            .ok_or(MeasureError::Unfillable { attempted: 0.0 })?;
 
         // Reject grid-incompatible replacement into a tuplet slot; also prepare id inheritance
         let mut new_beat = beat;
@@ -102,7 +101,7 @@ impl Measure {
                 }
                 _ => {
                     // inserting a non-tuplet or different tuplet grid into a tuplet slot is invalid
-                    return self.unfillable_err(new_ticks, 0);
+                    return self.unfillable_err(new_ticks);
                 }
             }
         }
@@ -131,18 +130,7 @@ impl Measure {
                     } else {
                         let new_ticks_rest = t - remaining_to_consume;
                         self.beats.remove(p);
-                        if let Some(fill) = best_fill_for_gap(new_ticks_rest, &[]) {
-                            let mut insert_at = p;
-                            for d in fill {
-                                // If the current slot is part of a tuplet group,
-                                // the generated rest-overflow must carry the same ID
-                                // to maintain the consistency of the group.
-                                let mut r = Beat::rest(d);
-                                r.tuplet_group_id = self.beats[idx].tuplet_group_id;
-                                self.beats.insert(insert_at, r);
-                                insert_at += 1;
-                            }
-                        }
+                        self.fill_at(p, new_ticks_rest, &[], Either::Left(self.beats[idx]))?;
                         remaining_to_consume = 0;
                     }
                 }
@@ -173,7 +161,7 @@ impl Measure {
                     let b = self.beats[k];
                     // Never grow across an existing tuplet group boundary with different id
                     if self.beats[k].tuplet_group_id.is_some() {
-                        return self.unfillable_err(group_span, 0);
+                        return self.unfillable_err(group_span);
                     }
                     // If we encounter a tuplet of a different grid (different n/m), refuse
                     // (don't break existing groups). Base may differ (e.g., t8 vs t16) but
@@ -181,7 +169,7 @@ impl Measure {
                     if let Duration::Tuplet { n: n2, m: m2, .. } = b.duration
                         && !(n2 == n && m2 == m)
                     {
-                        return self.unfillable_err(new_ticks, group_span - consumed);
+                        return self.unfillable_err(new_ticks);
                     }
                     let t = set.grid.ticks_of(&b.duration).unwrap();
                     consumed += t;
@@ -218,17 +206,7 @@ impl Measure {
 
                 // If there is an overrun (we consumed into the next original beat), reinsert its remainder as rests
                 if overrun > 0 {
-                    if let Some(fill) = best_fill_for_gap(overrun, &[]) {
-                        for d in fill {
-                            let r = Beat::rest(d);
-                            // overrun lies after the group; no tuplet id assignment here
-                            self.beats.insert(insert_at, r);
-                            insert_at += 1;
-                        }
-                    } else {
-                        // Should not happen with our common durations, but guard anyway
-                        return self.unfillable_err(new_ticks, overrun);
-                    }
+                    self.fill_at(insert_at, overrun, &[], Either::Right(Rest))?
                 }
 
                 return Ok(());
@@ -249,36 +227,17 @@ impl Measure {
             };
 
             // Require an exact contextual spelling for the leftover using the allowed set
-            if let Some(mut fill) = best_fill_for_gap(leftover, &allowed) {
-                // Within a tuplet group, present smaller subdivisions first for cleaner beaming
-                if !allowed.is_empty() {
-                    fill.sort_by(|a, b| {
-                        let ta = set.grid.ticks_of(a).unwrap();
-                        let tb = set.grid.ticks_of(b).unwrap();
-                        ta.cmp(&tb) // ascending by tick length (smaller durations first)
-                    });
-                }
-                // Commit: perform replacement at idx and insert the remainder as rests
-                self.beats[idx] = new_beat;
-                self.beats[idx].accented = old_accent;
-                let mut insert_at = idx + 1;
-                for d in fill {
-                    let mut r = Beat::rest(d);
-                    // if we were inside a tuplet group, inherit its id for the filler rests
-                    r.tuplet_group_id = self.beats[idx].tuplet_group_id;
-                    self.beats.insert(insert_at, r);
-                    insert_at += 1;
-                }
-                Ok(())
-            } else {
-                self.unfillable_err(new_ticks, leftover)
-            }
-        } else {
-            // No leftover (equal or growth accommodated earlier). Just replace.
-            self.beats[idx] = new_beat;
-            self.beats[idx].accented = old_accent;
-            Ok(())
+            self.fill_at(
+                idx + 1,
+                leftover,
+                &allowed,
+                Either::Left(self.beats[idx].with_kind(Rest)),
+            )?;
         }
+
+        self.beats[idx] = new_beat;
+        self.beats[idx].accented = old_accent;
+        Ok(())
     }
 
     fn compute_ticks_to_absorb(
@@ -417,6 +376,32 @@ impl Measure {
         }
     }
 
+    fn fill_at(
+        &mut self,
+        idx: usize,
+        ticks: u32,
+        allowed: &[Duration],
+        init: Either<Beat, BeatKind>,
+    ) -> Result<(), MeasureError> {
+        if let Some(fill) = best_fill_for_gap(ticks, allowed) {
+            let mut insert_at = idx;
+            for d in fill {
+                let beat = init.either(
+                    |mut beat| {
+                        beat.duration = d;
+                        beat
+                    },
+                    |beat_kind| Beat::new(d, beat_kind),
+                );
+                self.beats.insert(insert_at, beat);
+                insert_at += 1;
+            }
+            Ok(())
+        } else {
+            self.unfillable_err(ticks)
+        }
+    }
+
     /// Toggle the beat kind at `idx` between Note and Rest while preserving duration.
     /// No-op if `idx` is out of bounds.
     pub fn toggle_beat_kind(&mut self, idx: usize) {
@@ -480,11 +465,10 @@ impl Measure {
         self.beats.get(idx).map(|b| b.accented).unwrap_or(false)
     }
 
-    fn unfillable_err(&self, attempted: u32, remaining: u32) -> Result<(), MeasureError> {
+    fn unfillable_err(&self, attempted: u32) -> Result<(), MeasureError> {
         let set = default_duration_set();
         Err(MeasureError::Unfillable {
-            attempted: set.grid.ticks_to_whole_notes(attempted),
-            remaining: set.grid.ticks_to_whole_notes(remaining),
+            attempted: set.grid.ticks_to_whole_notes(attempted)
         })
     }
 
@@ -494,6 +478,44 @@ impl Measure {
             attempted: set.grid.ticks_to_whole_notes(attempted),
             available: set.grid.ticks_to_whole_notes(remaining),
         })
+    }
+
+    /// Löst die Tuplet‑Gruppe auf, in der sich `idx` befindet.
+    ///
+    /// Ersetzt die gesamte Spanne der Gruppe durch eine einfache (nicht‑Tuplet) Auffüllung
+    /// mit Ruhezeichen, entfernt die `tuplet_group_id` und den verknüpften Anchor.
+    /// Rückgabe: `true` bei erfolgreicher Auflösung, sonst `false` (z. B. wenn kein Tuplet an `idx`).
+    pub fn dissolve_tuplet_group_at(&mut self, idx: usize) -> bool {
+        if idx >= self.beats.len() {
+            return false;
+        }
+        let Some(group_id) = self.beats[idx].tuplet_group_id else {
+            return false;
+        };
+
+        // Finde zusammenhängende Spanne gleicher group_id
+        let mut start = idx;
+        while start > 0 && self.beats[start - 1].tuplet_group_id == Some(group_id) {
+            start -= 1;
+        }
+        let mut end = idx + 1;
+        while end < self.beats.len() && self.beats[end].tuplet_group_id == Some(group_id) {
+            end += 1;
+        }
+        if start >= end {
+            return false;
+        }
+
+        let set = default_duration_set();
+
+        self.beats.drain(start..end);
+
+        let allowed: Vec<Duration> =
+            set.durations.iter().copied().filter(|d| matches!(d, Duration::Simple(_))).collect();
+
+        let span_ticks = self.tuplet_anchors.get(&group_id).unwrap().target_ticks;
+        self.fill_at(start, span_ticks, &allowed, Either::Right(Rest)).unwrap();
+        true
     }
 }
 

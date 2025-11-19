@@ -35,4 +35,18 @@ impl Beat {
     pub fn rest(duration: Duration) -> Self {
         Self { duration, kind: Rest, tremolo: None, accented: false, tuplet_group_id: None }
     }
+
+    pub fn new(duration: Duration, kind: BeatKind) -> Self {
+        Self { duration, kind, tremolo: None, accented: false, tuplet_group_id: None }
+    }
+
+    pub fn with_kind(&self, kind: BeatKind) -> Self {
+        Self {
+            duration: self.duration,
+            kind,
+            tremolo: self.tremolo,
+            accented: self.accented,
+            tuplet_group_id: self.tuplet_group_id,
+        }
+    }
 }
