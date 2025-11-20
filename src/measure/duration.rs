@@ -193,8 +193,8 @@ pub const COMMON_DURATIONS: [Duration; 15] = [
     qt16(),                                      // quintuplet 1/16
     st8(),                                       // sextuplet 1/8
     st16(),                                      // sextuplet 1/16
-    Duration::Tuplet { n: 7, m: 4, base: Sixteenth }, // septuplet 1/16
-    Duration::Tuplet { n: 9, m: 8, base: Sixteenth }, // nonuplet 1/16
+    spt16(),                                     // septuplet 1/16
+    nt16(),                                      // nonuplet 1/16
 ];
 
 pub(crate) const fn q() -> Duration { Duration::Simple(Quarter) }
@@ -207,6 +207,8 @@ pub(crate) const fn t32() -> Duration { Duration::Tuplet { n: 3, m: 2, base: Thi
 pub(crate) const fn qt16() -> Duration { Duration::Tuplet { n: 5, m: 4, base: Sixteenth } }
 pub(crate) const fn st8() -> Duration { Duration::Tuplet { n: 6, m: 4, base: Eighth } }
 pub(crate) const fn st16() -> Duration { Duration::Tuplet { n: 6, m: 4, base: Sixteenth } }
+pub(crate) const fn spt16() -> Duration { Duration::Tuplet { n: 7, m: 4, base: Sixteenth } }
+pub(crate) const fn nt16() -> Duration { Duration::Tuplet { n: 9, m: 8, base: Sixteenth } }
 
 #[cfg(test)]
 mod tests {

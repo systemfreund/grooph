@@ -6,11 +6,20 @@ use crate::measure::duration::NoteValue::{Eighth, Half, Quarter, Sixteenth, Thir
 pub(crate) const GLYPH_NOTEHEAD_BLACK: char = '\u{E0A4}';
 // Augmentation dot: U+E1E7
 pub(crate) const GLYPH_AUGMENTATION_DOT: char = '\u{E1E7}';
-// Rests: quarter..32nd: U+E4E5..U+E4E8
-const GLYPH_REST_QUARTER: char = '\u{E4E5}';
-const GLYPH_REST_EIGHTH: char = '\u{E4E6}';
-const GLYPH_REST_SIXTEENTH: char = '\u{E4E7}';
-const GLYPH_REST_32ND: char = '\u{E4E8}';
+// Rest symbols
+pub(crate) const GLYPH_REST_WHOLE: char = '\u{E4E3}';
+pub(crate) const GLYPH_REST_HALF: char = '\u{E4E4}';
+pub(crate) const GLYPH_REST_QUARTER: char = '\u{E4E5}';
+pub(crate) const GLYPH_REST_EIGHTH: char = '\u{E4E6}';
+pub(crate) const GLYPH_REST_SIXTEENTH: char = '\u{E4E7}';
+pub(crate) const GLYPH_REST_32ND: char = '\u{E4E8}';
+// Note symbols
+pub(crate) const GLYPH_NOTE_WHOLE: char = '\u{E1D2}';
+pub(crate) const GLYPH_NOTE_HALF: char = '\u{E1D3}';
+pub(crate) const GLYPH_NOTE_QUARTER: char = '\u{E1D5}';
+pub(crate) const GLYPH_NOTE_EIGHTH: char = '\u{E1D7}';
+pub(crate) const GLYPH_NOTE_SIXTEENTH: char = '\u{E1D9}';
+pub(crate) const GLYPH_NOTE_32ND: char = '\u{E1DB}';
 
 // Up-stem flags (SMuFL): U+E240..U+E244
 const GLYPH_FLAG_8TH_UP: char = '\u{E240}';

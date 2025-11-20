@@ -95,9 +95,10 @@ pub(crate) fn draw_measure(
         let alpha_on = 220u8;
         let alpha_off = 40u8; // faint but still present; set to 0 to hide completely
         let alpha = if visible { alpha_on } else { alpha_off };
-        let top = inner_rect.top() + 0.5 * em;
-        let bottom = inner_rect.bottom() - 0.5 * em;
-        let base = if ui.visuals().dark_mode { Color32::WHITE } else { Color32::BLACK };
+        let c = layout_px.notes[idx].center;
+        let top = c.y + 0.5 * em;
+        let bottom = c.y - 0.5 * em;
+        let base = if ui.visuals().dark_mode { Color32::YELLOW } else { Color32::BLUE };
         let cursor_color = Color32::from_rgba_unmultiplied(base.r(), base.g(), base.b(), alpha);
         painter.vline(x, Rangef::new(top, bottom), Stroke::new(2.0, cursor_color));
         // Ensure animation progresses even without input

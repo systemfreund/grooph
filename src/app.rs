@@ -1,12 +1,20 @@
-use crate::measure::duration::{Duration, s, t16, t8, qt16, st16, COMMON_DURATIONS};
+use crate::measure::duration::{COMMON_DURATIONS, Duration, NoteValue, qt16, s, st16, t8, t16};
 use crate::measure::{Measure, TimeSignature};
 
 use crate::measure::duration;
 use crate::measure::duration::NoteValue::*;
 use crate::measure::duration::human_readable;
 use crate::measure::{Beat, BeatKind};
+use crate::render::glyphs::{
+    GLYPH_NOTE_32ND, GLYPH_NOTE_EIGHTH, GLYPH_NOTE_HALF, GLYPH_NOTE_QUARTER, GLYPH_NOTE_SIXTEENTH,
+    GLYPH_NOTE_WHOLE, GLYPH_NOTEHEAD_BLACK, GLYPH_REST_32ND, GLYPH_REST_EIGHTH, GLYPH_REST_HALF,
+    GLYPH_REST_QUARTER, GLYPH_REST_WHOLE,
+};
 use crate::render::measure::draw_measure;
-use eframe::egui::{Context, Key, Label, global_theme_preference_switch};
+use crate::tools::{EditOp, MetaOp, Modifier, Tool, ToolGroup, ToolKind, all_tools};
+use eframe::egui::UiKind::ScrollArea;
+use eframe::egui::scroll_area::ScrollSource;
+use eframe::egui::{Context, Key, Label, TextStyle, global_theme_preference_switch};
 use eframe::epaint::text::{FontInsert, InsertFontFamily};
 use eframe::epaint::{FontFamily, FontId};
 use eframe::{App, CreationContext, egui};
@@ -30,6 +38,61 @@ fn add_font(ctx: &Context) {
     ));
 }
 
+/// Liefert ein symbolisches Icon pro Tool als Text sowie einen Hinweis,
+/// ob bevorzugt die Musik-Schriftart genutzt werden sollte.
+fn tool_icon_text(t: &Tool) -> (String, bool) {
+    match t.kind {
+        ToolKind::InsertBeat(beat) => {
+            match beat.duration {
+                Duration::Simple(base) => {
+                    let is_note = matches!(beat.kind, BeatKind::Note);
+                    if is_note {
+                        let s = match base {
+                            Quarter => GLYPH_NOTE_QUARTER,
+                            Eighth => GLYPH_NOTE_EIGHTH,
+                            Sixteenth => GLYPH_NOTE_SIXTEENTH,
+                            ThirtySecond => GLYPH_NOTE_32ND,
+                            Half => GLYPH_NOTE_HALF,
+                            Whole => GLYPH_NOTE_WHOLE,
+                        };
+                        (s.to_string(), true)
+                    } else {
+                        // Pausen als symbolisches "R" mit Basis
+                        let s = match base {
+                            Quarter => GLYPH_REST_QUARTER,
+                            Eighth => GLYPH_REST_EIGHTH,
+                            Sixteenth => GLYPH_REST_EIGHTH,
+                            ThirtySecond => GLYPH_REST_32ND,
+                            Half => GLYPH_REST_HALF,
+                            Whole => GLYPH_REST_WHOLE,
+                        };
+                        (s.to_string(), true)
+                    }
+                }
+                Duration::Tuplet { n, .. } => {
+                    // Tuplets: zeige nur die Zählzahl (3,5,6,7,9)
+                    (format!("{}", n), false)
+                }
+                Duration::Dotted { .. } => {
+                    // In der Palette aktuell nicht als Insert vorgesehen
+                    ("⋯".to_string(), false)
+                }
+            }
+        }
+        ToolKind::Modify(m) => match m {
+            Modifier::ToggleDotted { .. } => ("·".to_string(), false), // Punktierung
+            Modifier::ToggleAccent => (">".to_string(), false),
+            Modifier::ToggleRestNote => ("↔".to_string(), false),
+        },
+        ToolKind::Edit(op) => match op {
+            EditOp::Erase => ("⌫".to_string(), false),
+            EditOp::ReplaceOnApply => ("⇄".to_string(), false),
+            EditOp::FillToBoundary => ("⇥".to_string(), false),
+        },
+        ToolKind::Meta(_m) => ("TS".to_string(), false),
+    }
+}
+
 impl App for Grooph<'_> {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         egui::TopBottomPanel::top("menu").show(ctx, |ui| {
@@ -38,7 +101,7 @@ impl App for Grooph<'_> {
 
         egui::TopBottomPanel::top("info").show(ctx, |ui| {
             ui.label(
-            "Keybindings: \n\
+                "Keybindings: \n\
                 Arrow keys: Move cursor\n\
                 Del/Backspace: Remove note\n\
                 Space: Toggle between note and rest\n\
@@ -78,11 +141,68 @@ impl App for Grooph<'_> {
         });
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            Frame::canvas(ui.style()).show(ui, |ui| {
-                let (_id, rect) = ui.allocate_space(ui.available_size());
-                draw_measure(ui, &self.font_id, &self.measure, rect, Some(self.cursor_idx));
-            });
+            Frame::canvas(ui.style())
+                .fill(egui::Color32::TRANSPARENT)
+                .stroke(egui::Stroke::NONE)
+                .show(ui, |ui| {
+                    let (_id, rect) = ui.allocate_space(ui.available_size());
+                    draw_measure(ui, &self.font_id, &self.measure, rect, Some(self.cursor_idx));
+                });
         });
+
+        egui::TopBottomPanel::bottom("tool_palette")
+            .frame(
+                Frame::NONE
+                    .fill(egui::Color32::TRANSPARENT)
+                    .stroke(egui::Stroke::NONE)
+                    .inner_margin(egui::Vec2::splat(10.0)),
+            )
+            .resizable(false)
+            .max_height(120.0)
+            .min_height(120.0)
+            .show(ctx, |ui| {
+                let tools = all_tools();
+                let groups = [
+                    ToolGroup::Notes,
+                    ToolGroup::Rests,
+                    ToolGroup::Modifiers,
+                    ToolGroup::Tuplets,
+                    ToolGroup::Edit,
+                    ToolGroup::Meta,
+                ];
+
+                egui::ScrollArea::horizontal().scroll_source(ScrollSource::ALL).show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        for g in groups {
+                            let group_tools: Vec<_> =
+                                tools.iter().filter(|t| t.group == g).collect();
+                            if group_tools.is_empty() {
+                                continue;
+                            }
+
+                            // Quadrat-Kacheln nebeneinander, umbrechend
+                            let tile = 88.0; // Seitenlänge der Tool-Kacheln
+                            for t in group_tools {
+                                // Symbol + optional Shortcut im Tooltip
+                                let (icon_text, is_music_icon) = tool_icon_text(t);
+                                let mut rich = egui::RichText::new(icon_text)
+                                    .text_style(TextStyle::Button)
+                                    .size(20.0);
+                                if is_music_icon {
+                                    // Versuche, die Musik-Schriftart zu verwenden (Bravura, falls verfügbar)
+                                    rich = rich.family(self.font_family.clone());
+                                }
+                                let button = egui::Button::new(rich)
+                                    .corner_radius(10)
+                                    //.sense(egui::Sense::click_and_drag())
+                                    .min_size(egui::vec2(tile, tile));
+                                let resp = ui.add_sized([tile, tile], button);
+                                // Noch kein Klick/Drag-Verhalten – nur Darstellung
+                            }
+                        }
+                    })
+                });
+            });
 
         ctx.input(|i| {
             let beats_len = self.measure.beats().len();
@@ -157,7 +277,9 @@ impl App for Grooph<'_> {
                     let start_idx = if let Some(gid) = gid_at_cursor {
                         // scan left to find the first index with the same group id
                         let mut sidx = idx;
-                        while sidx > 0 && self.measure.beats()[sidx - 1].tuplet_group_id == Some(gid) {
+                        while sidx > 0
+                            && self.measure.beats()[sidx - 1].tuplet_group_id == Some(gid)
+                        {
                             sidx -= 1;
                         }
                         sidx
@@ -186,17 +308,23 @@ impl App for Grooph<'_> {
                             // Dissolve current group from its start
                             // Vor dem Auflösen ggf. Noten‑Offsets erfassen, nur wenn wir ein nächstes Ziel haben
                             if next_target.is_some() {
-                                captured_offsets = self.measure.tuplet_group_note_offsets(start_idx);
+                                captured_offsets =
+                                    self.measure.tuplet_group_note_offsets(start_idx);
                             }
                             if self.measure.dissolve_tuplet_group_at(start_idx) {
                                 did_dissolve = true;
                                 // Try to convert to next target if defined, also at group start
                                 if let Some((tn, tm, tbase)) = next_target {
-                                    if self.measure.convert_to_tuplet_at(start_idx, tn, tm, tbase, false) {
+                                    if self
+                                        .measure
+                                        .convert_to_tuplet_at(start_idx, tn, tm, tbase, false)
+                                    {
                                         did_recreate = true;
                                         // Nach erfolgreicher Rekreation ggf. Projektion anwenden
                                         if let Some(ref src) = captured_offsets {
-                                            let _ = self.measure.apply_tuplet_projection_at(start_idx, src);
+                                            let _ = self
+                                                .measure
+                                                .apply_tuplet_projection_at(start_idx, src);
                                         }
                                     }
                                 }
@@ -206,8 +334,11 @@ impl App for Grooph<'_> {
                             }
                         }
                         _ => {
-                            let ok = self.measure.convert_to_tuplet_at(start_idx, 3, 2, Eighth, false);
-                            if ok { did_recreate = true; }
+                            let ok =
+                                self.measure.convert_to_tuplet_at(start_idx, 3, 2, Eighth, false);
+                            if ok {
+                                did_recreate = true;
+                            }
                             ok
                         }
                     };
@@ -215,7 +346,11 @@ impl App for Grooph<'_> {
                     // Cursor nur verschieben, wenn wir ausschließlich aufgelöst haben (kein direktes Re‑Create)
                     if changed && did_dissolve && !did_recreate {
                         let new_len = self.measure.beats().len();
-                        if new_len > 0 { self.cursor_idx = start_idx.min(new_len - 1); } else { self.cursor_idx = 0; }
+                        if new_len > 0 {
+                            self.cursor_idx = start_idx.min(new_len - 1);
+                        } else {
+                            self.cursor_idx = 0;
+                        }
                     }
                 }
             }
@@ -229,12 +364,7 @@ impl Grooph<'_> {
     /// - `base` bestimmt den Ziel-Basiswert (Viertel, Achtel, Sechzehntel, Zweiunddreißigstel).
     /// - `allow_on_tuplet`: Wenn `true`, wird bei Tuplets nur die Basis geändert und (n,m) beibehalten.
     ///   Wenn `false`, werden Tuplets ignoriert (z. B. keine Viertel-Tuplets unterstützen).
-    fn apply_base_duration_key(
-        &mut self,
-        idx: usize,
-        base: duration::NoteValue,
-        allow_on_tuplet: bool,
-    ) {
+    fn apply_base_duration_key(&mut self, idx: usize, base: NoteValue, allow_on_tuplet: bool) {
         let cur = self.measure.beats()[idx];
         let new_dur_opt = match cur.duration {
             Duration::Tuplet { n, m, base: _ } => {
