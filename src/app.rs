@@ -13,7 +13,7 @@ use crate::render::glyphs::{
 use crate::render::measure::draw_measure;
 use crate::tools::{EditOp, MetaOp, Modifier, Tool, ToolGroup, ToolKind, all_tools};
 use eframe::egui::UiKind::ScrollArea;
-use eframe::egui::scroll_area::ScrollSource;
+use eframe::egui::scroll_area::{ScrollBarVisibility, ScrollSource};
 use eframe::egui::{Context, Key, Label, TextStyle, global_theme_preference_switch};
 use eframe::epaint::text::{FontInsert, InsertFontFamily};
 use eframe::epaint::{FontFamily, FontId};
@@ -25,6 +25,8 @@ pub struct Grooph<'a> {
     font_id: FontId,
     measure: Measure<'a>,
     cursor_idx: usize,
+    show_info: bool,
+    show_settings: bool,
 }
 
 fn add_font(ctx: &Context) {
@@ -96,49 +98,65 @@ fn tool_icon_text(t: &Tool) -> (String, bool) {
 impl App for Grooph<'_> {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         egui::TopBottomPanel::top("menu").show(ctx, |ui| {
-            global_theme_preference_switch(ui);
+            ui.horizontal(|ui| {
+                global_theme_preference_switch(ui);
+                ui.separator();
+                ui.toggle_value(&mut self.show_info, "?");
+                ui.toggle_value(&mut self.show_settings, "⚙");
+            });
         });
 
-        egui::TopBottomPanel::top("info").show(ctx, |ui| {
-            ui.label(
-                "Keybindings: \n\
-                Arrow keys: Move cursor\n\
-                Del/Backspace: Remove note\n\
-                Space: Toggle between note and rest\n\
-                A: Set/unset accent\n\
-                1-4: Set duration (1=1/4, 2=1/8, 3=1/16, 4=1/32)\n\
-                Period: Toggle dotted\n\
-                T: Cycle tuplet (Tri -> Quint -> Sext -> Sept -> Non -> Dissolve)\n",
-            );
+        if self.show_info {
+            egui::TopBottomPanel::top("info").show(ctx, |ui| {
+                ui.label(
+                    "Keybindings: \n\
+                    Arrow keys: Move cursor\n\
+                    Del/Backspace: Remove note\n\
+                    Space: Toggle between note and rest\n\
+                    A: Set/unset accent\n\
+                    1-4: Set duration (1=1/4, 2=1/8, 3=1/16, 4=1/32)\n\
+                    Period: Toggle dotted\n\
+                    T: Cycle tuplet (Tri -> Quint -> Sext -> Sept -> Non -> Dissolve)\n",
+                );
 
-            // Label showing absolute beat position at the cursor and human-readable duration/kind
-            let mut beat_text = String::from("-");
-            let idx = self.cursor_idx;
-            let positions = self.measure.beat_positions();
-            if idx < positions.len() {
-                let v = positions[idx];
-                let mut s = format!("{:.3}", v);
-                // Trim trailing zeros and optional dot for a cleaner look
-                while s.ends_with('0') {
-                    s.pop();
+                // Label showing absolute beat position at the cursor and human-readable duration/kind
+                let mut beat_text = String::from("-");
+                let idx = self.cursor_idx;
+                let positions = self.measure.beat_positions();
+                if idx < positions.len() {
+                    let v = positions[idx];
+                    let mut s = format!("{:.3}", v);
+                    // Trim trailing zeros and optional dot for a cleaner look
+                    while s.ends_with('0') {
+                        s.pop();
+                    }
+                    if s.ends_with('.') {
+                        s.pop();
+                    }
+                    beat_text = s;
                 }
-                if s.ends_with('.') {
-                    s.pop();
+                let mut label = format!("Beat: {}", beat_text);
+                if idx < self.measure.beats().len() {
+                    let b = self.measure.beats()[idx];
+                    let desc = human_readable(&b.duration);
+                    let kind = match b.kind {
+                        BeatKind::Note => "note",
+                        BeatKind::Rest => "rest",
+                    };
+                    label = format!("Beat: {}, {} {}", beat_text, desc, kind);
                 }
-                beat_text = s;
-            }
-            let mut label = format!("Beat: {}", beat_text);
-            if idx < self.measure.beats().len() {
-                let b = self.measure.beats()[idx];
-                let desc = human_readable(&b.duration);
-                let kind = match b.kind {
-                    BeatKind::Note => "note",
-                    BeatKind::Rest => "rest",
-                };
-                label = format!("Beat: {}, {} {}", beat_text, desc, kind);
-            }
-            ui.add(Label::new(label));
-        });
+                ui.add(Label::new(label));
+            });
+        }
+
+        if self.show_settings {
+            egui::TopBottomPanel::top("settings").show(ctx, |ui| {
+                let mut style = ui.ctx().style().spacing.scroll;
+                style.ui(ui);
+
+                ui.ctx().all_styles_mut(|s| s.spacing.scroll = style);
+            });
+        }
 
         egui::CentralPanel::default().show(ctx, |ui| {
             Frame::canvas(ui.style())
@@ -171,37 +189,40 @@ impl App for Grooph<'_> {
                     ToolGroup::Meta,
                 ];
 
-                egui::ScrollArea::horizontal().scroll_source(ScrollSource::ALL).show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        for g in groups {
-                            let group_tools: Vec<_> =
-                                tools.iter().filter(|t| t.group == g).collect();
-                            if group_tools.is_empty() {
-                                continue;
-                            }
-
-                            // Quadrat-Kacheln nebeneinander, umbrechend
-                            let tile = 88.0; // Seitenlänge der Tool-Kacheln
-                            for t in group_tools {
-                                // Symbol + optional Shortcut im Tooltip
-                                let (icon_text, is_music_icon) = tool_icon_text(t);
-                                let mut rich = egui::RichText::new(icon_text)
-                                    .text_style(TextStyle::Button)
-                                    .size(20.0);
-                                if is_music_icon {
-                                    // Versuche, die Musik-Schriftart zu verwenden (Bravura, falls verfügbar)
-                                    rich = rich.family(self.font_family.clone());
+                egui::ScrollArea::horizontal()
+                    .scroll_source(ScrollSource::ALL)
+                    .scroll_bar_visibility(ScrollBarVisibility::AlwaysVisible)
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            for g in groups {
+                                let group_tools: Vec<_> =
+                                    tools.iter().filter(|t| t.group == g).collect();
+                                if group_tools.is_empty() {
+                                    continue;
                                 }
-                                let button = egui::Button::new(rich)
-                                    .corner_radius(10)
-                                    //.sense(egui::Sense::click_and_drag())
-                                    .min_size(egui::vec2(tile, tile));
-                                let resp = ui.add_sized([tile, tile], button);
-                                // Noch kein Klick/Drag-Verhalten – nur Darstellung
+
+                                // Quadrat-Kacheln nebeneinander, umbrechend
+                                let tile = 88.0; // Seitenlänge der Tool-Kacheln
+                                for t in group_tools {
+                                    // Symbol + optional Shortcut im Tooltip
+                                    let (icon_text, is_music_icon) = tool_icon_text(t);
+                                    let mut rich = egui::RichText::new(icon_text)
+                                        .text_style(TextStyle::Button)
+                                        .size(20.0);
+                                    if is_music_icon {
+                                        // Versuche, die Musik-Schriftart zu verwenden (Bravura, falls verfügbar)
+                                        rich = rich.family(self.font_family.clone());
+                                    }
+                                    let button = egui::Button::new(rich)
+                                        .corner_radius(10)
+                                        //.sense(egui::Sense::click_and_drag())
+                                        .min_size(egui::vec2(tile, tile));
+                                    let resp = ui.add_sized([tile, tile], button);
+                                    // Noch kein Klick/Drag-Verhalten – nur Darstellung
+                                }
                             }
-                        }
-                    })
-                });
+                        })
+                    });
             });
 
         ctx.input(|i| {
@@ -392,6 +413,13 @@ impl Grooph<'_> {
         m.set_beat_at(0, Beat::note(st16())).unwrap();
         m.set_beat_at(6, Beat::note(t8())).unwrap();
         // m.set_beat_at(6, Beat::note(qt16())).unwrap();
-        Self { font_family: ff.clone(), font_id: FontId::new(16.0, ff), measure: m, cursor_idx: 0 }
+        Self {
+            font_family: ff.clone(),
+            font_id: FontId::new(16.0, ff),
+            measure: m,
+            cursor_idx: 0,
+            show_info: false,
+            show_settings: false,
+        }
     }
 }
