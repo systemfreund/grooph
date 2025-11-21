@@ -159,6 +159,56 @@ impl App for Grooph<'_> {
             });
         }
 
+        egui::TopBottomPanel::bottom("tool_palette")
+            .frame(
+                Frame::NONE
+                    .fill(egui::Color32::TRANSPARENT)
+                    .stroke(egui::Stroke::NONE)
+                    .inner_margin(egui::Vec2::splat(10.0)),
+            )
+            .resizable(false)
+            .max_height(120.0)
+            .min_height(120.0)
+            .show(ctx, |ui| {
+                let tools = all_tools();
+                let groups = [ToolGroup::Notes, ToolGroup::Rests];
+
+                egui::ScrollArea::horizontal()
+                    .scroll_source(ScrollSource::ALL)
+                    .scroll_bar_visibility(ScrollBarVisibility::AlwaysVisible)
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            for g in groups {
+                                let group_tools: Vec<_> =
+                                    tools.iter().filter(|t| t.group == g).collect();
+                                if group_tools.is_empty() {
+                                    continue;
+                                }
+
+                                // Quadrat-Kacheln nebeneinander, umbrechend
+                                let tile = 60.0; // Seitenlänge der Tool-Kacheln
+                                for t in group_tools {
+                                    // Symbol + optional Shortcut im Tooltip
+                                    let (icon_text, is_music_icon) = tool_icon_text(t);
+                                    let mut rich = egui::RichText::new(icon_text)
+                                        .text_style(TextStyle::Button)
+                                        .size(20.0);
+                                    if is_music_icon {
+                                        // Versuche, die Musik-Schriftart zu verwenden (Bravura, falls verfügbar)
+                                        rich = rich.family(self.font_family.clone());
+                                    }
+                                    let button = egui::Button::new(rich)
+                                        .corner_radius(10)
+                                        //.sense(egui::Sense::click_and_drag())
+                                        .min_size(egui::vec2(tile, tile));
+                                    let resp = ui.add_sized([tile, tile], button);
+                                    // Noch kein Klick/Drag-Verhalten – nur Darstellung
+                                }
+                            }
+                        })
+                    });
+            });
+
         egui::CentralPanel::default().show(ctx, |ui| {
             Frame::canvas(ui.style())
                 .fill(egui::Color32::TRANSPARENT)
@@ -209,63 +259,6 @@ impl App for Grooph<'_> {
                     }
                 });
         });
-
-        egui::TopBottomPanel::bottom("tool_palette")
-            .frame(
-                Frame::NONE
-                    .fill(egui::Color32::TRANSPARENT)
-                    .stroke(egui::Stroke::NONE)
-                    .inner_margin(egui::Vec2::splat(10.0)),
-            )
-            .resizable(false)
-            .max_height(120.0)
-            .min_height(120.0)
-            .show(ctx, |ui| {
-                let tools = all_tools();
-                let groups = [
-                    ToolGroup::Notes,
-                    ToolGroup::Rests,
-                    ToolGroup::Modifiers,
-                    ToolGroup::Tuplets,
-                    ToolGroup::Edit,
-                    ToolGroup::Meta,
-                ];
-
-                egui::ScrollArea::horizontal()
-                    .scroll_source(ScrollSource::ALL)
-                    .scroll_bar_visibility(ScrollBarVisibility::AlwaysVisible)
-                    .show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            for g in groups {
-                                let group_tools: Vec<_> =
-                                    tools.iter().filter(|t| t.group == g).collect();
-                                if group_tools.is_empty() {
-                                    continue;
-                                }
-
-                                // Quadrat-Kacheln nebeneinander, umbrechend
-                                let tile = 88.0; // Seitenlänge der Tool-Kacheln
-                                for t in group_tools {
-                                    // Symbol + optional Shortcut im Tooltip
-                                    let (icon_text, is_music_icon) = tool_icon_text(t);
-                                    let mut rich = egui::RichText::new(icon_text)
-                                        .text_style(TextStyle::Button)
-                                        .size(20.0);
-                                    if is_music_icon {
-                                        // Versuche, die Musik-Schriftart zu verwenden (Bravura, falls verfügbar)
-                                        rich = rich.family(self.font_family.clone());
-                                    }
-                                    let button = egui::Button::new(rich)
-                                        .corner_radius(10)
-                                        //.sense(egui::Sense::click_and_drag())
-                                        .min_size(egui::vec2(tile, tile));
-                                    let resp = ui.add_sized([tile, tile], button);
-                                    // Noch kein Klick/Drag-Verhalten – nur Darstellung
-                                }
-                            }
-                        })
-                    });
-            });
 
         ctx.input(|i| {
             let beats_len = self.measure.beats().len();
