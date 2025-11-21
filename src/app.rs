@@ -1,6 +1,7 @@
 use crate::measure::duration::{COMMON_DURATIONS, Duration, NoteValue, qt16, s, st16, t8, t16};
 use crate::measure::{Measure, TimeSignature};
 
+use crate::layout::pixel_layout::build_measure_layout_px;
 use crate::measure::duration;
 use crate::measure::duration::NoteValue::*;
 use crate::measure::duration::human_readable;
@@ -163,8 +164,49 @@ impl App for Grooph<'_> {
                 .fill(egui::Color32::TRANSPARENT)
                 .stroke(egui::Stroke::NONE)
                 .show(ui, |ui| {
-                    let (_id, rect) = ui.allocate_space(ui.available_size());
+                    // Interaktives Zeichenfeld: vollständige verfügbare Fläche als klickbares Rect
+                    let size = ui.available_size();
+                    let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::click_and_drag());
+
+                    // Render der Measure innerhalb des klickbaren Bereichs
                     draw_measure(ui, &self.font_id, &self.measure, rect, Some(self.cursor_idx));
+
+                    // Maus-/Touch-Klick: Cursor auf den nächstgelegenen Beat setzen
+                    if (resp.clicked() || resp.dragged())
+                        && let Some(pos) = resp.interact_pointer_pos()
+                    {
+                        // Layout erneut berechnen (Positionsdaten für Hit-Testing)
+                        let layout = build_measure_layout_px(
+                            &self.measure,
+                            rect,
+                            &self.font_id,
+                            ui.ctx().pixels_per_point(),
+                        );
+
+                        // Falls keine Beats vorhanden sind, nichts tun
+                        if !layout.x_centers.is_empty() {
+                            // Außerhalb des Inhalts: zum nächstliegenden Rand clampen
+                            let target_x = pos.x;
+                            let idx = if target_x <= layout.content_left {
+                                0
+                            } else if target_x >= layout.content_right {
+                                layout.x_centers.len() - 1
+                            } else {
+                                // Innerhalb: Index des nächstgelegenen x-Centers suchen
+                                let mut best_i = 0usize;
+                                let mut best_d = f32::MAX;
+                                for (i, &cx) in layout.x_centers.iter().enumerate() {
+                                    let d = (cx - target_x).abs();
+                                    if d < best_d {
+                                        best_d = d;
+                                        best_i = i;
+                                    }
+                                }
+                                best_i
+                            };
+                            self.cursor_idx = idx;
+                        }
+                    }
                 });
         });
 
