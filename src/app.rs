@@ -15,7 +15,10 @@ use crate::render::measure::draw_measure;
 use crate::tools::{EditOp, MetaOp, Modifier, Tool, ToolGroup, ToolKind, all_tools};
 use eframe::egui::UiKind::ScrollArea;
 use eframe::egui::scroll_area::{ScrollBarVisibility, ScrollSource};
-use eframe::egui::{Context, Key, Label, TextStyle, global_theme_preference_switch};
+use eframe::egui::{
+    Align, Context, Direction, Key, Label, Layout, TextStyle, WidgetText,
+    global_theme_preference_switch,
+};
 use eframe::epaint::text::{FontInsert, InsertFontFamily};
 use eframe::epaint::{FontFamily, FontId};
 use eframe::{App, CreationContext, egui};
@@ -39,38 +42,46 @@ fn add_font(ctx: &Context) {
             priority: egui::epaint::text::FontPriority::Highest,
         }],
     ));
+
+    ctx.add_font(FontInsert::new(
+        "Bravura Text",
+        egui::FontData::from_static(include_bytes!("../assets/fonts/BravuraText.otf")),
+        vec![InsertFontFamily {
+            family: FontFamily::Name("music-text".into()),
+            priority: egui::epaint::text::FontPriority::Highest,
+        }],
+    ))
 }
 
-/// Liefert ein symbolisches Icon pro Tool als Text sowie einen Hinweis,
-/// ob bevorzugt die Musik-Schriftart genutzt werden sollte.
-fn tool_icon_text(t: &Tool) -> (String, bool) {
+/// Liefert ein symbolisches Icon pro Tool als Text sowie true,
+/// wenn das Tool eine Noten darstellt, ansonsten false..
+fn tool_icon_glyph(t: &Tool) -> (String, bool) {
     match t.kind {
         ToolKind::InsertBeat(beat) => {
             match beat.duration {
                 Duration::Simple(base) => {
                     let is_note = matches!(beat.kind, BeatKind::Note);
-                    if is_note {
-                        let s = match base {
+                    let s = if is_note {
+                        match base {
                             Quarter => GLYPH_NOTE_QUARTER,
                             Eighth => GLYPH_NOTE_EIGHTH,
                             Sixteenth => GLYPH_NOTE_SIXTEENTH,
                             ThirtySecond => GLYPH_NOTE_32ND,
                             Half => GLYPH_NOTE_HALF,
                             Whole => GLYPH_NOTE_WHOLE,
-                        };
-                        (s.to_string(), true)
+                        }
                     } else {
-                        // Pausen als symbolisches "R" mit Basis
-                        let s = match base {
+                        match base {
                             Quarter => GLYPH_REST_QUARTER,
                             Eighth => GLYPH_REST_EIGHTH,
                             Sixteenth => GLYPH_REST_EIGHTH,
                             ThirtySecond => GLYPH_REST_32ND,
                             Half => GLYPH_REST_HALF,
                             Whole => GLYPH_REST_WHOLE,
-                        };
-                        (s.to_string(), true)
-                    }
+                        }
+                    };
+
+                    (s.to_string(), is_note)
                 }
                 Duration::Tuplet { n, .. } => {
                     // Tuplets: zeige nur die Zählzahl (3,5,6,7,9)
@@ -160,24 +171,21 @@ impl App for Grooph<'_> {
         }
 
         egui::TopBottomPanel::bottom("tool_palette")
-            .frame(
-                Frame::NONE
-                    .fill(egui::Color32::TRANSPARENT)
-                    .stroke(egui::Stroke::NONE)
-                    .inner_margin(egui::Vec2::splat(10.0)),
-            )
+            .frame(Frame::group(&ctx.style()).fill(ctx.style().visuals.panel_fill))
             .resizable(false)
-            .max_height(120.0)
-            .min_height(120.0)
             .show(ctx, |ui| {
                 let tools = all_tools();
                 let groups = [ToolGroup::Notes, ToolGroup::Rests];
 
                 egui::ScrollArea::horizontal()
                     .scroll_source(ScrollSource::ALL)
-                    .scroll_bar_visibility(ScrollBarVisibility::AlwaysVisible)
+                    .scroll_bar_visibility(ScrollBarVisibility::AlwaysHidden)
                     .show(ui, |ui| {
-                        ui.horizontal(|ui| {
+                        let layout = Layout::from_main_dir_and_cross_align(
+                            Direction::LeftToRight,
+                            Align::Center,
+                        );
+                        ui.with_layout(layout, |ui| {
                             for g in groups {
                                 let group_tools: Vec<_> =
                                     tools.iter().filter(|t| t.group == g).collect();
@@ -185,24 +193,21 @@ impl App for Grooph<'_> {
                                     continue;
                                 }
 
-                                // Quadrat-Kacheln nebeneinander, umbrechend
-                                let tile = 60.0; // Seitenlänge der Tool-Kacheln
+                                let tile = 80.0;
                                 for t in group_tools {
-                                    // Symbol + optional Shortcut im Tooltip
-                                    let (icon_text, is_music_icon) = tool_icon_text(t);
-                                    let mut rich = egui::RichText::new(icon_text)
-                                        .text_style(TextStyle::Button)
-                                        .size(20.0);
-                                    if is_music_icon {
-                                        // Versuche, die Musik-Schriftart zu verwenden (Bravura, falls verfügbar)
-                                        rich = rich.family(self.font_family.clone());
-                                    }
+                                    let (icon_text, is_note) = tool_icon_glyph(t);
+                                    let rich = egui::RichText::new(icon_text)
+                                        .family(FontFamily::Name("music-text".into()))
+                                        .line_height(Some(if is_note { 10.0 } else { 30.0 }))
+                                        .size(50.0);
                                     let button = egui::Button::new(rich)
                                         .corner_radius(10)
-                                        //.sense(egui::Sense::click_and_drag())
                                         .min_size(egui::vec2(tile, tile));
-                                    let resp = ui.add_sized([tile, tile], button);
-                                    // Noch kein Klick/Drag-Verhalten – nur Darstellung
+                                    let resp =
+                                        ui.add_sized([tile, tile], button).on_hover_text(t.label);
+                                    if resp.clicked() {
+                                        self.apply_tool(t);
+                                    }
                                 }
                             }
                         })
@@ -441,12 +446,46 @@ impl Grooph<'_> {
         }
     }
 
+    /// Wendet das geklickte Tool an der aktuellen Cursor-Position an.
+    ///
+    /// Für Insert-Tools (Note/Rest/Tuplet) wird der Beat via `set_beat_at` ersetzt.
+    /// Wenn die Operation erfolgreich ist, rückt der Cursor um eine Position nach rechts,
+    /// es sei denn, er steht bereits am letzten Index der aktuellen Measure.
+    fn apply_tool(&mut self, tool: &Tool) {
+        match tool.kind {
+            ToolKind::InsertBeat(template) => {
+                let beats_len = self.measure.beats().len();
+                if beats_len == 0 {
+                    return;
+                }
+                let idx = self.cursor_idx.min(beats_len - 1);
+                let beat = match template.kind {
+                    BeatKind::Note => Beat::note(template.duration),
+                    BeatKind::Rest => Beat::rest(template.duration),
+                };
+                if self.measure.set_beat_at(idx, beat).is_ok() {
+                    // Nach erfolgreicher Anwendung Cursor um 1 weiter, falls nicht am Ende
+                    let new_len = self.measure.beats().len();
+                    if new_len > 0 {
+                        let last = new_len - 1;
+                        if self.cursor_idx < last {
+                            self.cursor_idx += 1;
+                        }
+                    }
+                }
+            }
+            _ => {
+                // Andere Toolarten (Modifier/Edit/Meta) werden in einem späteren Schritt verdrahtet.
+            }
+        }
+    }
+
     pub fn new(cc: &CreationContext) -> Self {
         add_font(&cc.egui_ctx);
         let ff = FontFamily::Name("music".into());
         let mut m = Measure::new(TimeSignature::SEVEN_EIGHT);
-        m.set_beat_at(0, Beat::note(st16())).unwrap();
-        m.set_beat_at(6, Beat::note(t8())).unwrap();
+        // m.set_beat_at(0, Beat::note(st16())).unwrap();
+        // m.set_beat_at(6, Beat::note(t8())).unwrap();
         // m.set_beat_at(6, Beat::note(qt16())).unwrap();
         Self {
             font_family: ff.clone(),
