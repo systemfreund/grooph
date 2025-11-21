@@ -20,6 +20,9 @@ pub(crate) const GLYPH_NOTE_QUARTER: char = '\u{E1D5}';
 pub(crate) const GLYPH_NOTE_EIGHTH: char = '\u{E1D7}';
 pub(crate) const GLYPH_NOTE_SIXTEENTH: char = '\u{E1D9}';
 pub(crate) const GLYPH_NOTE_32ND: char = '\u{E1DB}';
+// Bracket sybols
+pub(crate) const GLYPH_LEFT_TUPLET_BRACKET: char = '\u{E1FE}';
+pub(crate) const GLYPH_RIGHT_TUPLET_BRACKET: char = '\u{E200}';
 
 // Up-stem flags (SMuFL): U+E240..U+E244
 const GLYPH_FLAG_8TH_UP: char = '\u{E240}';
@@ -68,7 +71,7 @@ pub(crate) fn flag_glyph_for_duration(d: Duration) -> Option<char> {
 }
 
 // Tuplet numeral digits (SMuFL): U+E880..U+E889
-const TUPLET_DIGITS: [char; 10] = [
+pub(crate) const TUPLET_DIGITS: [char; 10] = [
     '\u{E880}', // 0
     '\u{E881}', // 1
     '\u{E882}', // 2

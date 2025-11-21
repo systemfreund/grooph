@@ -1,33 +1,21 @@
-use crate::layout::pixel_layout::NoteLayoutPx;
+use crate::layout::pixel_layout::NoteLayout;
+use crate::measure::BeatKind;
 use crate::render::glyphs;
 use eframe::egui;
 use eframe::egui::{Align2, Color32, FontId, Stroke};
 
-// Beam-aware note rendering options
-pub(super) struct NoteRenderOpts {
-    pub font_id: FontId,
-    pub color: Color32,
-    pub in_beam: bool,
-    pub stem_dx: f32,
-    pub stem_thickness: f32,
-}
-
-pub(super) fn get_default_stem_length(font_id: &FontId) -> f32 {
-    font_id.size * 0.9 // proportional stem length
-}
-
-pub(super) fn draw_beat(
+pub(crate) fn draw_beat(
     painter: &egui::Painter,
-    note: &NoteLayoutPx,
+    note: &NoteLayout,
     base_font: &FontId,
     color: Color32,
 ) {
-    let glyph = match note.is_rest {
+    let glyph = match note.kind == BeatKind::Rest {
         true => glyphs::rest_glyph_for_duration(note.duration),
         false => glyphs::GLYPH_NOTEHEAD_BLACK,
     };
 
-    let glyph_font = if note.is_rest {
+    let glyph_font = if note.kind == BeatKind::Rest {
         FontId::new(base_font.size * 0.8, base_font.family.clone())
     } else {
         base_font.clone()

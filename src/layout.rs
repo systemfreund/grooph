@@ -4,10 +4,10 @@ mod render_plan;
 mod tuplet_plan;
 
 use crate::measure::duration::Duration;
-use crate::measure::Measure;
+use crate::measure::{Beat};
 
-pub(super) fn calculate_x_centers(measure: &Measure, content_w: f32) -> Vec<f32> {
-    let durations: Vec<Duration> = measure.beats().iter().map(|b| b.duration).collect();
+pub(super) fn calculate_x_centers(beats: &[Beat], content_w: f32) -> Vec<f32> {
+    let durations: Vec<Duration> = beats.iter().map(|b| b.duration).collect();
 
     // Normalize to fit the content box
     let total: f32 = durations.len() as f32;

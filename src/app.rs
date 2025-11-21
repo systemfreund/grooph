@@ -1,23 +1,22 @@
-use crate::measure::duration::{COMMON_DURATIONS, Duration, NoteValue, qt16, s, st16, t8, t16};
+use crate::measure::duration::{Duration, NoteValue};
 use crate::measure::{Measure, TimeSignature};
 
-use crate::layout::pixel_layout::build_measure_layout_px;
-use crate::measure::duration;
+use crate::layout::pixel_layout::{NoteLayout, build_measure_layout};
 use crate::measure::duration::NoteValue::*;
 use crate::measure::duration::human_readable;
 use crate::measure::{Beat, BeatKind};
+use crate::render::beat::draw_beat;
 use crate::render::glyphs::{
-    GLYPH_NOTE_32ND, GLYPH_NOTE_EIGHTH, GLYPH_NOTE_HALF, GLYPH_NOTE_QUARTER, GLYPH_NOTE_SIXTEENTH,
-    GLYPH_NOTE_WHOLE, GLYPH_NOTEHEAD_BLACK, GLYPH_REST_32ND, GLYPH_REST_EIGHTH, GLYPH_REST_HALF,
-    GLYPH_REST_QUARTER, GLYPH_REST_WHOLE,
+    GLYPH_LEFT_TUPLET_BRACKET, GLYPH_NOTE_32ND, GLYPH_NOTE_EIGHTH, GLYPH_NOTE_HALF,
+    GLYPH_NOTE_QUARTER, GLYPH_NOTE_SIXTEENTH, GLYPH_NOTE_WHOLE, GLYPH_REST_32ND, GLYPH_REST_EIGHTH,
+    GLYPH_REST_HALF, GLYPH_REST_QUARTER, GLYPH_REST_WHOLE, GLYPH_RIGHT_TUPLET_BRACKET,
+    TUPLET_DIGITS,
 };
 use crate::render::measure::draw_measure;
-use crate::tools::{EditOp, MetaOp, Modifier, Tool, ToolGroup, ToolKind, all_tools};
-use eframe::egui::UiKind::ScrollArea;
+use crate::tools::{EditOp, Modifier, Tool, ToolGroup, ToolKind, all_tools};
 use eframe::egui::scroll_area::{ScrollBarVisibility, ScrollSource};
 use eframe::egui::{
-    Align, Context, Direction, Key, Label, Layout, TextStyle, WidgetText,
-    global_theme_preference_switch,
+    Align, Atom, Context, Direction, Id, Key, Label, Layout, Vec2, global_theme_preference_switch,
 };
 use eframe::epaint::text::{FontInsert, InsertFontFamily};
 use eframe::epaint::{FontFamily, FontId};
@@ -85,7 +84,15 @@ fn tool_icon_glyph(t: &Tool) -> (String, bool) {
                 }
                 Duration::Tuplet { n, .. } => {
                     // Tuplets: zeige nur die Zählzahl (3,5,6,7,9)
-                    (format!("{}", n), false)
+                    (
+                        format!(
+                            "{}{}{}",
+                            GLYPH_LEFT_TUPLET_BRACKET,
+                            TUPLET_DIGITS[n as usize],
+                            GLYPH_RIGHT_TUPLET_BRACKET
+                        ),
+                        false,
+                    )
                 }
                 Duration::Dotted { .. } => {
                     // In der Palette aktuell nicht als Insert vorgesehen
@@ -162,96 +169,109 @@ impl App for Grooph<'_> {
         }
 
         if self.show_settings {
-            egui::TopBottomPanel::top("settings").show(ctx, |ui| {
-                let mut style = ui.ctx().style().spacing.scroll;
-                style.ui(ui);
-
-                ui.ctx().all_styles_mut(|s| s.spacing.scroll = style);
-            });
+            // egui::TopBottomPanel::top("settings").show(ctx, |ui| {
+            //     let mut style = ui.ctx().style().spacing.scroll;
+            //     style.ui(ui);
+            //
+            //     ui.ctx().all_styles_mut(|s| s.spacing.scroll = style);
+            // });
         }
 
-        egui::TopBottomPanel::bottom("tool_palette")
-            .frame(Frame::group(&ctx.style()).fill(ctx.style().visuals.panel_fill))
-            .resizable(false)
-            .show(ctx, |ui| {
-                let tools = all_tools();
-                let groups = [ToolGroup::Notes, ToolGroup::Rests];
-
-                egui::ScrollArea::horizontal()
-                    .scroll_source(ScrollSource::ALL)
-                    .scroll_bar_visibility(ScrollBarVisibility::AlwaysHidden)
-                    .show(ui, |ui| {
-                        let layout = Layout::from_main_dir_and_cross_align(
-                            Direction::LeftToRight,
-                            Align::Center,
-                        );
-                        ui.with_layout(layout, |ui| {
-                            for g in groups {
-                                let group_tools: Vec<_> =
-                                    tools.iter().filter(|t| t.group == g).collect();
-                                if group_tools.is_empty() {
-                                    continue;
-                                }
-
-                                let tile = 80.0;
-                                for t in group_tools {
-                                    let (icon_text, is_note) = tool_icon_glyph(t);
-                                    let rich = egui::RichText::new(icon_text)
-                                        .family(FontFamily::Name("music-text".into()))
-                                        .line_height(Some(if is_note { 10.0 } else { 30.0 }))
-                                        .size(50.0);
-                                    let button = egui::Button::new(rich)
-                                        .corner_radius(10)
-                                        .min_size(egui::vec2(tile, tile));
-                                    let resp =
-                                        ui.add_sized([tile, tile], button).on_hover_text(t.label);
-                                    if resp.clicked() {
-                                        self.apply_tool(t);
-                                    }
-                                }
-                            }
-                        })
-                    });
-            });
+        // egui::TopBottomPanel::bottom("tool_palette")
+        //     .frame(Frame::group(&ctx.style()).fill(ctx.style().visuals.panel_fill))
+        //     .resizable(false)
+        //     .show(ctx, |ui| {
+        //         let tools = all_tools();
+        //         let groups = [ToolGroup::Notes, ToolGroup::Rests, ToolGroup::Tuplets];
+        //
+        //         egui::ScrollArea::horizontal()
+        //             .scroll_source(ScrollSource::ALL)
+        //             .scroll_bar_visibility(ScrollBarVisibility::AlwaysHidden)
+        //             .show(ui, |ui| {
+        //                 let layout = Layout::from_main_dir_and_cross_align(
+        //                     Direction::LeftToRight,
+        //                     Align::Center,
+        //                 );
+        //                 ui.with_layout(layout, |ui| {
+        //                     for g in groups {
+        //                         let group_tools: Vec<_> =
+        //                             tools.iter().filter(|t| t.group == g).collect();
+        //                         if group_tools.is_empty() {
+        //                             continue;
+        //                         }
+        //
+        //                         for t in group_tools {
+        //                             match t.kind {
+        //                                 ToolKind::InsertBeat(template) => {
+        //                                     let symbol_id = Id::new(t.id);
+        //                                     let symbol = Atom::custom(symbol_id, Vec2::splat(80.0));
+        //                                     let button = egui::Button::new(symbol)
+        //                                         .corner_radius(10)
+        //                                         .atom_ui(ui);
+        //
+        //                                     if let Some(rect) = button.rect(symbol_id) {
+        //                                         let measure = Measure::new_init(
+        //                                             TimeSignature::ONE_FOUR,
+        //                                             template.kind,
+        //                                         );
+        //                                         let measure_layout = build_measure_layout_px(
+        //                                             &measure,
+        //                                             rect,
+        //                                             &self.font_id,
+        //                                             ui.ctx().pixels_per_point(),
+        //                                         );
+        //                                         let painter = &ui.painter_at(rect);
+        //                                         for note in &measure_layout.notes {
+        //                                             draw_beat(
+        //                                                 painter,
+        //                                                 note,
+        //                                                 &self.font_id,
+        //                                                 ui.style().visuals.text_color(),
+        //                                             );
+        //                                         }
+        //                                     }
+        //                                 }
+        //                                 _ => {}
+        //                             }
+        //                             // let resp =
+        //                             //     ui.add_sized([tile, tile], button).on_hover_text(t.label);
+        //                             // if resp.clicked() {
+        //                             //     self.apply_tool(t);
+        //                             // }
+        //                         }
+        //                     }
+        //                 })
+        //             });
+        //     });
 
         egui::CentralPanel::default().show(ctx, |ui| {
             Frame::canvas(ui.style())
                 .fill(egui::Color32::TRANSPARENT)
                 .stroke(egui::Stroke::NONE)
                 .show(ui, |ui| {
-                    // Interaktives Zeichenfeld: vollständige verfügbare Fläche als klickbares Rect
                     let size = ui.available_size();
                     let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::click_and_drag());
 
-                    // Render der Measure innerhalb des klickbaren Bereichs
-                    draw_measure(ui, &self.font_id, &self.measure, rect, Some(self.cursor_idx));
+                    let layout =
+                        draw_measure(ui, &self.font_id, &self.measure, rect, Some(self.cursor_idx));
 
-                    // Maus-/Touch-Klick: Cursor auf den nächstgelegenen Beat setzen
                     if (resp.clicked() || resp.dragged())
                         && let Some(pos) = resp.interact_pointer_pos()
                     {
-                        // Layout erneut berechnen (Positionsdaten für Hit-Testing)
-                        let layout = build_measure_layout_px(
-                            &self.measure,
-                            rect,
-                            &self.font_id,
-                            ui.ctx().pixels_per_point(),
-                        );
-
                         // Falls keine Beats vorhanden sind, nichts tun
-                        if !layout.x_centers.is_empty() {
+                        if !layout.notes.is_empty() {
                             // Außerhalb des Inhalts: zum nächstliegenden Rand clampen
                             let target_x = pos.x;
-                            let idx = if target_x <= layout.content_left {
+                            let idx = if target_x <= layout.content.left() {
                                 0
-                            } else if target_x >= layout.content_right {
-                                layout.x_centers.len() - 1
+                            } else if target_x >= layout.content.right() {
+                                layout.notes.len() - 1
                             } else {
                                 // Innerhalb: Index des nächstgelegenen x-Centers suchen
                                 let mut best_i = 0usize;
                                 let mut best_d = f32::MAX;
-                                for (i, &cx) in layout.x_centers.iter().enumerate() {
-                                    let d = (cx - target_x).abs();
+                                for (i, nl) in layout.notes.iter().enumerate() {
+                                    let d = (nl.center.x - target_x).abs();
                                     if d < best_d {
                                         best_d = d;
                                         best_i = i;
@@ -310,16 +330,16 @@ impl App for Grooph<'_> {
                     self.measure.toggle_beat_kind(idx);
                 }
                 if i.key_pressed(Key::Num1) {
-                    self.apply_base_duration_key(idx, Quarter, false);
+                    self.set_beat(idx, Quarter, false, None);
                 }
                 if i.key_pressed(Key::Num2) {
-                    self.apply_base_duration_key(idx, Eighth, true);
+                    self.set_beat(idx, Eighth, true, None);
                 }
                 if i.key_pressed(Key::Num3) {
-                    self.apply_base_duration_key(idx, Sixteenth, true);
+                    self.set_beat(idx, Sixteenth, true, None);
                 }
                 if i.key_pressed(Key::Num4) {
-                    self.apply_base_duration_key(idx, ThirtySecond, true);
+                    self.set_beat(idx, ThirtySecond, true, None);
                 }
                 if i.key_pressed(Key::Period) {
                     // Toggle dotted (1 dot) for the current beat. If it cannot be changed (would overflow or unfillable), ignore.
@@ -420,12 +440,13 @@ impl App for Grooph<'_> {
 }
 
 impl Grooph<'_> {
-    /// Wendet eine Basis-Notenwert-Änderung (Num1–Num4) auf den Beat bei `idx` an.
-    ///
-    /// - `base` bestimmt den Ziel-Basiswert (Viertel, Achtel, Sechzehntel, Zweiunddreißigstel).
-    /// - `allow_on_tuplet`: Wenn `true`, wird bei Tuplets nur die Basis geändert und (n,m) beibehalten.
-    ///   Wenn `false`, werden Tuplets ignoriert (z. B. keine Viertel-Tuplets unterstützen).
-    fn apply_base_duration_key(&mut self, idx: usize, base: NoteValue, allow_on_tuplet: bool) {
+    fn set_beat(
+        &mut self,
+        idx: usize,
+        base: NoteValue,
+        allow_on_tuplet: bool,
+        beat_kind: Option<BeatKind>,
+    ) -> bool {
         let cur = self.measure.beats()[idx];
         let new_dur_opt = match cur.duration {
             Duration::Tuplet { n, m, base: _ } => {
@@ -437,20 +458,31 @@ impl Grooph<'_> {
             }
             _ => Some(Duration::Simple(base)),
         };
-        if let Some(new_dur) = new_dur_opt {
-            let new_beat = match cur.kind {
+
+        let ok = if let Some(new_dur) = new_dur_opt {
+            let kind = if let Some(override_kind) = beat_kind { override_kind } else { cur.kind };
+            let new_beat = match kind {
                 BeatKind::Note => Beat::note(new_dur),
                 BeatKind::Rest => Beat::rest(new_dur),
             };
-            let _ = self.measure.set_beat_at(idx, new_beat);
+            self.measure.set_beat_at(idx, new_beat).is_ok()
+        } else {
+            false
+        };
+
+        if ok {
+            let new_len = self.measure.beats().len();
+            if new_len > 0 {
+                let last = new_len - 1;
+                if self.cursor_idx < last {
+                    self.cursor_idx += 1;
+                }
+            }
         }
+
+        ok
     }
 
-    /// Wendet das geklickte Tool an der aktuellen Cursor-Position an.
-    ///
-    /// Für Insert-Tools (Note/Rest/Tuplet) wird der Beat via `set_beat_at` ersetzt.
-    /// Wenn die Operation erfolgreich ist, rückt der Cursor um eine Position nach rechts,
-    /// es sei denn, er steht bereits am letzten Index der aktuellen Measure.
     fn apply_tool(&mut self, tool: &Tool) {
         match tool.kind {
             ToolKind::InsertBeat(template) => {
@@ -459,20 +491,7 @@ impl Grooph<'_> {
                     return;
                 }
                 let idx = self.cursor_idx.min(beats_len - 1);
-                let beat = match template.kind {
-                    BeatKind::Note => Beat::note(template.duration),
-                    BeatKind::Rest => Beat::rest(template.duration),
-                };
-                if self.measure.set_beat_at(idx, beat).is_ok() {
-                    // Nach erfolgreicher Anwendung Cursor um 1 weiter, falls nicht am Ende
-                    let new_len = self.measure.beats().len();
-                    if new_len > 0 {
-                        let last = new_len - 1;
-                        if self.cursor_idx < last {
-                            self.cursor_idx += 1;
-                        }
-                    }
-                }
+                self.set_beat(idx, template.duration.base_note(), true, Some(template.kind));
             }
             _ => {
                 // Andere Toolarten (Modifier/Edit/Meta) werden in einem späteren Schritt verdrahtet.
@@ -483,10 +502,7 @@ impl Grooph<'_> {
     pub fn new(cc: &CreationContext) -> Self {
         add_font(&cc.egui_ctx);
         let ff = FontFamily::Name("music".into());
-        let mut m = Measure::new(TimeSignature::SEVEN_EIGHT);
-        // m.set_beat_at(0, Beat::note(st16())).unwrap();
-        // m.set_beat_at(6, Beat::note(t8())).unwrap();
-        // m.set_beat_at(6, Beat::note(qt16())).unwrap();
+        let m = Measure::new(TimeSignature::SEVEN_EIGHT);
         Self {
             font_family: ff.clone(),
             font_id: FontId::new(16.0, ff),

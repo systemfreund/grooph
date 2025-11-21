@@ -944,7 +944,6 @@ mod tests {
 
         // Merge 1st st16 beat -> st8
         m.set_beat_at(0, Beat::rest(st8())).unwrap();
-        // TODO assertion fails because beat at idx=1 is an t16() instead of the expected st16():
         assert_eq!(&durations_of(&m), &[st8(), st16(), st16(), st16(), st16()]);
     }
 

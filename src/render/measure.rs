@@ -1,4 +1,4 @@
-use crate::layout::pixel_layout::build_measure_layout_px;
+use crate::layout::pixel_layout::{MeasureLayout, build_measure_layout, LayoutOpts};
 use crate::measure::Measure;
 use crate::render::beat::draw_beat;
 use crate::render::glyphs;
@@ -11,21 +11,20 @@ pub(crate) fn draw_measure(
     measure: &Measure,
     rect: Rect,
     cursor_idx: Option<usize>,
-) {
+) -> MeasureLayout {
     let color: Color32 = if ui.visuals().dark_mode { Color32::WHITE } else { Color32::BLACK };
     let painter = ui.painter();
     let y = rect.center().y;
     // staff line
     painter.hline(Rangef::new(rect.left(), rect.right()), y, Stroke::new(1.0, color));
 
-    // Build pixel layout (Phase A: x-centers + beam segments)
-    let layout_px = build_measure_layout_px(measure, rect, font_id, ui.ctx().pixels_per_point());
-    let inner_rect = layout_px.inner_rect;
-    let em = layout_px.em;
-    let font_id = layout_px.font_id.clone();
+    let opts = LayoutOpts { font_id: font_id.clone(), pixels_per_point: ui.ctx().pixels_per_point(), em: 0.0 };
+    let measure_layout = build_measure_layout(measure, rect, opts);
+    let em = measure_layout.em;
+    let font_id = measure_layout.font_id.clone();
 
     // Left block: Clef + stacked time signature from layout (Phase C)
-    if let Some(clef_pos) = layout_px.clef_pos {
+    if let Some(clef_pos) = measure_layout.clef_pos {
         painter.text(
             clef_pos,
             Align2::CENTER_CENTER,
@@ -37,23 +36,20 @@ pub(crate) fn draw_measure(
     let ts = measure.time_signature();
     let top_digits = glyphs::ts_glyphs(ts.beats as u32);
     let bot_digits = glyphs::ts_glyphs(ts.beat_unit as u32);
-    for (p, ch) in layout_px.time_sig_top.iter().zip(top_digits.iter()) {
+    for (p, ch) in measure_layout.time_signature.beats.iter().zip(top_digits.iter()) {
         painter.text(*p, Align2::CENTER_CENTER, ch.to_string(), font_id.clone(), color);
     }
-    for (p, ch) in layout_px.time_sig_bottom.iter().zip(bot_digits.iter()) {
+    for (p, ch) in measure_layout.time_signature.beat_unit.iter().zip(bot_digits.iter()) {
         painter.text(*p, Align2::CENTER_CENTER, ch.to_string(), font_id.clone(), color);
     }
-
-    // Absolute x-centers provided by layout
-    let x_centers = layout_px.x_centers.clone();
 
     // 3) Draw beats using precomputed layout geometry (Phase B)
-    for note in &layout_px.notes {
+    for note in &measure_layout.notes {
         draw_beat(painter, note, &font_id, color);
     }
 
     // 4) Draw beams from layout (horizontal rectangles at given y with thickness)
-    for seg in &layout_px.beams {
+    for seg in &measure_layout.beams {
         let left = seg.p1.x.min(seg.p2.x);
         let right = seg.p1.x.max(seg.p2.x);
         let yb = seg.p1.y; // bottom edge
@@ -63,8 +59,8 @@ pub(crate) fn draw_measure(
     }
 
     // 4c) Tuplets: draw from precomputed layout (Phase C)
-    if !layout_px.tuplets.is_empty() {
-        for t in &layout_px.tuplets {
+    if !measure_layout.tuplets.is_empty() {
+        for t in &measure_layout.tuplets {
             // draw bracket segments
             for seg in &t.bracket {
                 painter.line_segment([seg.p1, seg.p2], Stroke::new(seg.thickness, color));
@@ -83,7 +79,7 @@ pub(crate) fn draw_measure(
 
     // 5) Cursor at current beat index (does not consume width) — blink over time
     if let Some(idx) = cursor_idx
-        && let Some(&x) = x_centers.get(idx)
+        && let Some(nl) = measure_layout.notes.get(idx)
     {
         // Blink parameters
         let blink_period = 1.0_f64; // seconds for a full on+off cycle
@@ -95,13 +91,15 @@ pub(crate) fn draw_measure(
         let alpha_on = 220u8;
         let alpha_off = 40u8; // faint but still present; set to 0 to hide completely
         let alpha = if visible { alpha_on } else { alpha_off };
-        let c = layout_px.notes[idx].center;
+        let c = measure_layout.notes[idx].center;
         let top = c.y + 0.5 * em;
         let bottom = c.y - 0.5 * em;
         let base = if ui.visuals().dark_mode { Color32::YELLOW } else { Color32::BLUE };
         let cursor_color = Color32::from_rgba_unmultiplied(base.r(), base.g(), base.b(), alpha);
-        painter.vline(x, Rangef::new(top, bottom), Stroke::new(2.0, cursor_color));
+        painter.vline(nl.center.x, Rangef::new(top, bottom), Stroke::new(2.0, cursor_color));
         // Ensure animation progresses even without input
         ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
     }
+
+    measure_layout
 }
