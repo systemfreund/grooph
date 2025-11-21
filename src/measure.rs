@@ -171,7 +171,7 @@ impl<'a> Measure<'a> {
             first.tuplet_group_id = Some(id);
             self.beats.insert(idx, first);
             // Preserve the prior accent on the first inserted beat
-            self.beats[idx].accented = old_accent;
+            self.beats[idx].accented = old_accent && beat.kind == Note;
             let mut insert_at = idx + 1;
             for _ in 1..n {
                 let mut r = Beat::rest(beat.duration);
@@ -199,7 +199,7 @@ impl<'a> Measure<'a> {
             let absorb_ticks = self.compute_ticks_to_absorb(idx, dur_old, need);
             return if absorb_ticks >= need {
                 self.beats[idx] = new_beat;
-                self.beats[idx].accented = old_accent;
+                self.beats[idx].accented = old_accent && beat.kind == Note;
                 let p = idx + 1;
                 let mut remaining_to_consume = need;
                 while remaining_to_consume > 0 {
@@ -257,7 +257,7 @@ impl<'a> Measure<'a> {
         }
 
         self.beats[idx] = new_beat;
-        self.beats[idx].accented = old_accent;
+        self.beats[idx].accented = old_accent && beat.kind == Note;
         Ok(())
     }
 
@@ -503,6 +503,7 @@ impl<'a> Measure<'a> {
                 Rest => Note,
                 Note => Rest,
             };
+            b.accented = b.accented && b.kind == Note;
         }
     }
 
@@ -539,21 +540,16 @@ impl<'a> Measure<'a> {
 
     /// Set the user accent flag at index `idx`.
     pub fn set_accent_at(&mut self, idx: usize, accented: bool) {
-        if let Some(b) = self.beats.get_mut(idx) {
+        if let Some(b) = self.beats.get_mut(idx) && b.kind == Note {
             b.accented = accented;
         }
     }
 
     /// Toggle the user accent flag at index `idx`.
     pub fn toggle_accent_at(&mut self, idx: usize) {
-        if let Some(b) = self.beats.get_mut(idx) {
-            b.accented = !b.accented;
+        if let Some(b) = self.beats.get(idx) {
+            self.set_accent_at(idx, !b.accented);
         }
-    }
-
-    /// Query the user accent flag at index `idx`.
-    pub fn is_accented_at(&self, idx: usize) -> bool {
-        self.beats.get(idx).map(|b| b.accented).unwrap_or(false)
     }
 
     fn unfillable_err(&self, attempted: u32) -> Result<(), MeasureError> {

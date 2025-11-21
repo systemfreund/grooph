@@ -45,7 +45,7 @@ impl Beat {
             duration: self.duration,
             kind,
             tremolo: self.tremolo,
-            accented: self.accented,
+            accented: self.accented && kind == Note,
             tuplet_group_id: self.tuplet_group_id,
         }
     }
