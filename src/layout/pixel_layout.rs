@@ -249,7 +249,7 @@ fn build_note_layout(
             let in_beam = in_beam_flags.get(i).copied().unwrap_or(false);
             let stem_len_factor = if in_beam || needs_flag { 1.0 } else { 0.85 };
             let stem_len = opts.stem_length() * stem_len_factor;
-            let start = Pos2::new(start_x, cy);
+            let start = Pos2::new(start_x, cy - opts.em * 0.05);
             let end = Pos2::new(start_x, cy - stem_len);
             stem = Some(Line { p1: start, p2: end });
 

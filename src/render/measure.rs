@@ -36,7 +36,7 @@ pub(crate) fn draw_measure(
         layout_clef: true,
         layout_time_signature: true,
         y_offset: 0.0,
-        stem_length_factor: 1.0,
+        stem_length_factor: 0.9,
         stem_thickness_factor: 0.03,
     };
     let measure_layout = build_measure_layout(measure, &opts);
