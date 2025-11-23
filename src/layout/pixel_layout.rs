@@ -8,13 +8,13 @@ use eframe::egui::{FontId, Pos2, Rect};
 pub(crate) struct LayoutOpts {
     pub rect: Rect,
     pub font_id: FontId,
-    pub min_size: f32,
     pub em: f32,
     pub layout_clef: bool,
     pub layout_time_signature: bool,
 
     pub y_offset: f32,
     pub stem_length_factor: f32,
+    pub stem_thickness_factor: f32,
 }
 
 impl LayoutOpts {
@@ -22,7 +22,9 @@ impl LayoutOpts {
 
     const fn stem_length(&self) -> f32 { self.em * self.stem_length_factor }
 
-    pub(crate) const fn stem_thickness(&self) -> f32 { self.font_id.size * 0.03 }
+    pub(crate) const fn stem_thickness(&self) -> f32 {
+        self.font_id.size * self.stem_thickness_factor
+    }
 
     const fn stem_offset(&self) -> f32 { self.font_id.size * 0.13 }
 
@@ -83,7 +85,7 @@ pub struct MeasureLayout {
     pub notes: Vec<NoteLayout>,
     pub tuplets: Vec<TupletLayout>,
     pub clef_pos: Option<Pos2>,
-    pub time_signature: Option<TimeSignatureLayout>
+    pub time_signature: Option<TimeSignatureLayout>,
 }
 
 /// Build the pixel layout (`MeasureLayout`) from a `Measure`.
@@ -101,8 +103,7 @@ pub fn build_measure_layout(measure: &Measure, opts: &LayoutOpts) -> MeasureLayo
 
     // Time signature
     let time_signature_layout = if opts.layout_time_signature {
-        let ts_layout =
-            build_time_sig_layout(&measure.time_signature(), x_offset_acc, opts);
+        let ts_layout = build_time_sig_layout(&measure.time_signature(), x_offset_acc, opts);
         x_offset_acc += ts_layout.width;
         Some(ts_layout)
     } else {
@@ -110,7 +111,8 @@ pub fn build_measure_layout(measure: &Measure, opts: &LayoutOpts) -> MeasureLayo
     };
 
     // Notes
-    let note_rect = Rect::from_min_max(Pos2::new(x_offset_acc, opts.rect.top()), opts.rect.right_bottom());
+    let note_rect =
+        Rect::from_min_max(Pos2::new(x_offset_acc, opts.rect.top()), opts.rect.right_bottom());
     let render_plan = plan_measure(measure);
     let note_layout = build_note_layout(measure.beats(), &render_plan.beams, &note_rect, opts);
     let beam_layout = build_beam_layout(&note_layout, &render_plan.beams, opts);
@@ -122,7 +124,7 @@ pub fn build_measure_layout(measure: &Measure, opts: &LayoutOpts) -> MeasureLayo
         notes: note_layout,
         tuplets: tuplet_layout,
         clef_pos,
-        time_signature: time_signature_layout
+        time_signature: time_signature_layout,
     }
 }
 

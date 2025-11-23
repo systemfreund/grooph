@@ -3,7 +3,15 @@ use crate::measure::Measure;
 use crate::render::beat::draw_beat;
 use crate::render::glyphs;
 use eframe::egui;
-use eframe::egui::{Align2, Color32, FontId, Rangef, Rect, Stroke, pos2};
+use eframe::egui::{Align2, Color32, FontId, Painter, Rangef, Rect, Stroke, pos2};
+
+pub(crate) fn compute_em(rect: &Rect, width_cap_factor: f32, ui: &egui::Ui) -> f32 {
+    // Derive font size mainly from the available height, modulated by width caps
+    let min_size = 12.0 * ui.ctx().pixels_per_point();
+    let width_cap = (rect.width() * width_cap_factor).max(min_size);
+    let max_size = rect.height().max(min_size);
+    min_size.max(max_size.min(width_cap))
+}
 
 pub(crate) fn draw_measure(
     ui: &mut egui::Ui,
@@ -18,23 +26,18 @@ pub(crate) fn draw_measure(
     // staff line
     painter.hline(Rangef::new(rect.left(), rect.right()), y, Stroke::new(1.0, color));
 
-    let min_size = 24.0 * ui.ctx().pixels_per_point();
-
-    // Derive font size mainly from the available height, modulated by width caps
-    let width_cap = (rect.width() * 0.1).max(min_size);
-    let max_size = (rect.height() * 0.80).max(min_size);
-    let target_size = min_size.max(max_size.min(width_cap));
-    let font_id = FontId::new(target_size, font_id.family.clone());
+    let em = compute_em(&rect, 0.1, ui);
+    let font_id = FontId::new(em, font_id.family.clone());
 
     let opts = LayoutOpts {
         rect,
         font_id: font_id.clone(),
-        min_size,
-        em: target_size,
+        em,
         layout_clef: true,
         layout_time_signature: true,
         y_offset: 0.0,
         stem_length_factor: 1.0,
+        stem_thickness_factor: 0.03,
     };
     let measure_layout = build_measure_layout(measure, &opts);
 
@@ -61,40 +64,7 @@ pub(crate) fn draw_measure(
         }
     }
 
-    // 3) Draw beats using precomputed layout geometry (Phase B)
-    for note in &measure_layout.notes {
-        draw_beat(painter, note, &opts, color);
-    }
-
-    // 4) Draw beams from layout (horizontal rectangles at given y with thickness)
-    for seg in &measure_layout.beams {
-        let left = seg.p1.x.min(seg.p2.x);
-        let right = seg.p1.x.max(seg.p2.x);
-        let yb = seg.p1.y; // bottom edge
-        let top = yb - opts.beam_thickness();
-        let rect = Rect::from_min_max(pos2(left, top), pos2(right, yb));
-        painter.rect_filled(rect, 0.0, color);
-    }
-
-    // 4c) Tuplets: draw from precomputed layout (Phase C)
-    if !measure_layout.tuplets.is_empty() {
-        for t in &measure_layout.tuplets {
-            // draw bracket segments
-            for seg in &t.bracket {
-                painter
-                    .line_segment([seg.p1, seg.p2], Stroke::new(opts.bracket_thickness(), color));
-            }
-            // draw tuplet number at center
-            let digits = glyphs::tuplet_glyphs(t.count);
-            painter.text(
-                t.number_center,
-                Align2::CENTER_CENTER,
-                digits,
-                t.number_font.clone(),
-                color,
-            );
-        }
-    }
+    draw_notes(painter, &measure_layout, color, &opts);
 
     // 5) Cursor at current beat index (does not consume width) — blink over time
     if let Some(idx) = cursor_idx
@@ -121,4 +91,37 @@ pub(crate) fn draw_measure(
     }
 
     measure_layout
+}
+
+pub(crate) fn draw_notes(
+    painter: &Painter,
+    measure_layout: &MeasureLayout,
+    color: Color32,
+    opts: &LayoutOpts,
+) {
+    // Beats/notes
+    for note in &measure_layout.notes {
+        draw_beat(painter, note, &opts, color);
+    }
+
+    // Beams
+    for seg in &measure_layout.beams {
+        let left = seg.p1.x.min(seg.p2.x);
+        let right = seg.p1.x.max(seg.p2.x);
+        let yb = seg.p1.y; // bottom edge
+        let top = yb - opts.beam_thickness();
+        let rect = Rect::from_min_max(pos2(left, top), pos2(right, yb));
+        painter.rect_filled(rect, 0.0, color);
+    }
+
+    // Tuplets
+    for t in &measure_layout.tuplets {
+        // draw bracket segments
+        for seg in &t.bracket {
+            painter.line_segment([seg.p1, seg.p2], Stroke::new(opts.bracket_thickness(), color));
+        }
+        // draw tuplet number at center
+        let digits = glyphs::tuplet_glyphs(t.count);
+        painter.text(t.number_center, Align2::CENTER_CENTER, digits, t.number_font.clone(), color);
+    }
 }

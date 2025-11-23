@@ -5,19 +5,19 @@ use crate::layout::pixel_layout::{LayoutOpts, build_measure_layout};
 use crate::measure::duration::NoteValue::*;
 use crate::measure::duration::human_readable;
 use crate::measure::{Beat, BeatKind};
-use crate::render::beat::draw_beat;
 use crate::render::glyphs::{
     GLYPH_LEFT_TUPLET_BRACKET, GLYPH_NOTE_32ND, GLYPH_NOTE_EIGHTH, GLYPH_NOTE_HALF,
     GLYPH_NOTE_QUARTER, GLYPH_NOTE_SIXTEENTH, GLYPH_NOTE_WHOLE, GLYPH_REST_32ND, GLYPH_REST_EIGHTH,
     GLYPH_REST_HALF, GLYPH_REST_QUARTER, GLYPH_REST_WHOLE, GLYPH_RIGHT_TUPLET_BRACKET,
     TUPLET_DIGITS,
 };
-use crate::render::measure::draw_measure;
+use crate::render::measure::{compute_em, draw_measure, draw_notes};
 use crate::tools::{EditOp, Modifier, Tool, ToolKind};
 use crate::{ToolGroup, all_tools};
 use eframe::egui::scroll_area::{ScrollBarVisibility, ScrollSource};
 use eframe::egui::{
-    Align, Atom, Context, Direction, Id, Key, Label, Layout, Vec2, global_theme_preference_switch,
+    Align, Atom, Context, Direction, Id, Key, Label, Layout, Ui, Vec2,
+    global_theme_preference_switch,
 };
 use eframe::epaint::text::{FontInsert, InsertFontFamily};
 use eframe::epaint::{FontFamily, FontId};
@@ -181,7 +181,7 @@ impl App for Grooph<'_> {
             .resizable(false)
             .show(ctx, |ui| {
                 let tools = all_tools();
-                let groups = [ToolGroup::Notes, ToolGroup::Rests, ToolGroup::Tuplets];
+                let groups = [ToolGroup::Notes, ToolGroup::Tuplets, ToolGroup::Rests];
 
                 egui::ScrollArea::horizontal()
                     .scroll_source(ScrollSource::ALL)
@@ -192,60 +192,7 @@ impl App for Grooph<'_> {
                             Align::Center,
                         );
                         ui.with_layout(layout, |ui| {
-                            for g in groups {
-                                let group_tools: Vec<_> =
-                                    tools.iter().filter(|t| t.group == g).collect();
-                                if group_tools.is_empty() {
-                                    continue;
-                                }
-
-                                for t in group_tools {
-                                    match t.kind {
-                                        ToolKind::InsertBeat(template) => {
-                                            let tile = 80.0;
-                                            let symbol_id = Id::new(t.id);
-                                            let symbol = Atom::custom(symbol_id, Vec2::splat(tile));
-                                            let button = egui::Button::new(symbol)
-                                                .corner_radius(10)
-                                                .atom_ui(ui);
-
-                                            if let Some(rect) = button.rect(symbol_id) {
-                                                let measure = Measure::new_init(
-                                                    TimeSignature::ONE_FOUR,
-                                                    template.kind,
-                                                );
-                                                let opts = LayoutOpts {
-                                                    rect,
-                                                    font_id: FontId::new(tile * 0.5, self.font_id.family.clone()),
-                                                    min_size: 30.0,
-                                                    em: tile,
-                                                    layout_clef: false,
-                                                    layout_time_signature: false,
-                                                    y_offset: 20.0,
-                                                    stem_length_factor: 0.5,
-                                                };
-                                                let measure_layout =
-                                                    build_measure_layout(&measure, &opts);
-                                                let painter = &ui.painter_at(rect);
-                                                for note in &measure_layout.notes {
-                                                    draw_beat(
-                                                        painter,
-                                                        note,
-                                                        &opts,
-                                                        ui.style().visuals.text_color(),
-                                                    );
-                                                }
-                                            }
-                                        }
-                                        _ => {}
-                                    }
-                                    // let resp =
-                                    //     ui.add_sized([tile, tile], button).on_hover_text(t.label);
-                                    // if resp.clicked() {
-                                    //     self.apply_tool(t);
-                                    // }
-                                }
-                            }
+                            self.tool_palette(tools, groups.as_slice(), ui);
                         })
                     });
             });
@@ -514,6 +461,68 @@ impl Grooph<'_> {
             cursor_idx: 0,
             show_info: false,
             show_settings: false,
+        }
+    }
+
+    fn tool_palette(&mut self, tools: &[Tool], groups: &[ToolGroup], ui: &mut Ui) {
+        for g in groups {
+            let group_tools: Vec<_> = tools.iter().filter(|t| &t.group == g).collect();
+            if group_tools.is_empty() {
+                continue;
+            }
+
+            for t in group_tools {
+                match t.kind {
+                    ToolKind::InsertBeat(template) => {
+                        let tile = 80.0;
+                        let symbol_id = Id::new(t.id);
+                        let symbol = Atom::custom(symbol_id, Vec2::splat(tile));
+                        let button = egui::Button::new(symbol).corner_radius(10).atom_ui(ui);
+
+                        if let Some(rect) = button.rect(symbol_id) {
+                            let beat_count = if let Duration::Tuplet { m, .. } = template.duration {
+                                m
+                            } else {
+                                1
+                            };
+
+                            let mut measure = Measure::new_init(
+                                TimeSignature {
+                                    beats: beat_count,
+                                    beat_unit: template.duration.base_note().denominator(),
+                                },
+                                template.kind,
+                            );
+
+                            if let Duration::Tuplet { n, .. } = template.duration {
+                                for i in 0..n {
+                                    measure.set_beat_at(i as usize, Beat::note(template.duration)).unwrap();
+                                }
+                            }
+
+                            let em = compute_em(&rect, 0.4, ui);
+                            let opts = LayoutOpts {
+                                rect,
+                                font_id: FontId::new(em, self.font_id.family.clone()),
+                                em,
+                                layout_clef: false,
+                                layout_time_signature: false,
+                                y_offset: 18.0,
+                                stem_length_factor: 0.9,
+                                stem_thickness_factor: 0.03,
+                            };
+                            let measure_layout = build_measure_layout(&measure, &opts);
+                            let painter = &ui.painter_at(rect);
+                            draw_notes(painter, &measure_layout, ui.style().visuals.text_color(), &opts);
+                        }
+
+                        if button.response.clicked() {
+                            self.apply_tool(t);
+                        }
+                    }
+                    _ => {}
+                }
+            }
         }
     }
 }

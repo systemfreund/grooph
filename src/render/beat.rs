@@ -4,7 +4,7 @@ use crate::render::glyphs;
 use eframe::egui;
 use eframe::egui::{Align2, Color32, FontId, Stroke};
 
-pub(crate) fn draw_beat(
+pub(super) fn draw_beat(
     painter: &egui::Painter,
     note: &NoteLayout,
     opts: &LayoutOpts,
@@ -21,6 +21,19 @@ pub(crate) fn draw_beat(
         opts.font_id.clone()
     };
 
+    // Draw stem
+    if let Some(stem) = &note.stem {
+        painter.line_segment([stem.p1, stem.p2], Stroke::new(opts.stem_thickness(), color));
+    }
+
+    // Draw flag
+    if let Some(pos) = note.flag_pos
+        && let Some(flag) = glyphs::flag_glyph_for_duration(note.duration)
+    {
+        let flag_font = FontId::new(opts.font_id.size * 1.0, opts.font_id.family.clone());
+        painter.text(pos, Align2::LEFT_CENTER, flag.to_string(), flag_font, color);
+    }
+
     // Draw notehead
     painter.text(note.center, Align2::CENTER_CENTER, glyph.to_string(), glyph_font, color);
 
@@ -35,19 +48,6 @@ pub(crate) fn draw_beat(
                 color,
             );
         }
-    }
-
-    // Draw stem
-    if let Some(stem) = &note.stem {
-        painter.line_segment([stem.p1, stem.p2], Stroke::new(opts.stem_thickness(), color));
-    }
-
-    // Draw flag
-    if let Some(pos) = note.flag_pos
-        && let Some(flag) = glyphs::flag_glyph_for_duration(note.duration)
-    {
-        let flag_font = FontId::new(opts.font_id.size * 1.0, opts.font_id.family.clone());
-        painter.text(pos, Align2::LEFT_CENTER, flag.to_string(), flag_font, color);
     }
 
     // Draw tremolos
