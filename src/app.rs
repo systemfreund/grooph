@@ -23,6 +23,7 @@ use eframe::epaint::text::{FontInsert, InsertFontFamily};
 use eframe::epaint::{FontFamily, FontId};
 use eframe::{App, CreationContext, egui};
 use egui::containers::Frame;
+use crate::measure::BeatKind::Note;
 
 pub struct Grooph<'a> {
     font_family: FontFamily,
@@ -450,20 +451,6 @@ impl Grooph<'_> {
         }
     }
 
-    pub fn new(cc: &CreationContext) -> Self {
-        add_font(&cc.egui_ctx);
-        let ff = FontFamily::Name("music".into());
-        let m = Measure::new(TimeSignature::SEVEN_EIGHT);
-        Self {
-            font_family: ff.clone(),
-            font_id: FontId::new(16.0, ff),
-            measure: m,
-            cursor_idx: 0,
-            show_info: false,
-            show_settings: false,
-        }
-    }
-
     fn tool_palette(&mut self, tools: &[Tool], groups: &[ToolGroup], ui: &mut Ui) {
         for g in groups {
             let group_tools: Vec<_> = tools.iter().filter(|t| &t.group == g).collect();
@@ -507,7 +494,7 @@ impl Grooph<'_> {
                                 em,
                                 layout_clef: false,
                                 layout_time_signature: false,
-                                y_offset: 18.0,
+                                y_offset: if template.kind == Note { 18.0 } else { 5.0 },
                                 stem_length_factor: 0.9,
                                 stem_thickness_factor: 0.03,
                             };
@@ -525,4 +512,19 @@ impl Grooph<'_> {
             }
         }
     }
+
+    pub fn new(cc: &CreationContext) -> Self {
+        add_font(&cc.egui_ctx);
+        let ff = FontFamily::Name("music".into());
+        let m = Measure::new(TimeSignature { beats: 1, beat_unit: 2});
+        Self {
+            font_family: ff.clone(),
+            font_id: FontId::new(16.0, ff),
+            measure: m,
+            cursor_idx: 0,
+            show_info: false,
+            show_settings: false,
+        }
+    }
+
 }
