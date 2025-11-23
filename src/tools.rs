@@ -70,7 +70,7 @@ pub fn all_tools() -> &'static [Tool] {
     use BeatKind::*;
     use Duration::*;
 
-    static ALL: [Tool; 23] = [
+    static ALL: [Tool; 20] = [
         // Notes
         Tool {
             id: "insert.note.q",
@@ -163,41 +163,11 @@ pub fn all_tools() -> &'static [Tool] {
             shortcut: None,
         },
         Tool {
-            id: "insert.tuplet.t16",
-            label: "Triole (1/16)",
-            group: ToolGroup::Tuplets,
-            kind: ToolKind::InsertBeat(BeatTemplate {
-                duration: Tuplet { n: 3, m: 2, base: Sixteenth },
-                kind: Note,
-            }),
-            shortcut: None,
-        },
-        Tool {
-            id: "insert.tuplet.t32",
-            label: "Triole (1/32)",
-            group: ToolGroup::Tuplets,
-            kind: ToolKind::InsertBeat(BeatTemplate {
-                duration: Tuplet { n: 3, m: 2, base: ThirtySecond },
-                kind: Note,
-            }),
-            shortcut: None,
-        },
-        Tool {
             id: "insert.tuplet.qt16",
             label: "Quintole (1/16)",
             group: ToolGroup::Tuplets,
             kind: ToolKind::InsertBeat(BeatTemplate {
                 duration: Tuplet { n: 5, m: 4, base: Sixteenth },
-                kind: Note,
-            }),
-            shortcut: None,
-        },
-        Tool {
-            id: "insert.tuplet.st8",
-            label: "Sextole (1/8)",
-            group: ToolGroup::Tuplets,
-            kind: ToolKind::InsertBeat(BeatTemplate {
-                duration: Tuplet { n: 6, m: 4, base: Eighth },
                 kind: Note,
             }),
             shortcut: None,

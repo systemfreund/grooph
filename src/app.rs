@@ -474,7 +474,7 @@ impl Grooph<'_> {
             for t in group_tools {
                 match t.kind {
                     ToolKind::InsertBeat(template) => {
-                        let tile = 80.0;
+                        let tile = 90.0;
                         let symbol_id = Id::new(t.id);
                         let symbol = Atom::custom(symbol_id, Vec2::splat(tile));
                         let button = egui::Button::new(symbol).corner_radius(10).atom_ui(ui);
