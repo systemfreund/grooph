@@ -6,33 +6,50 @@ use crate::measure::{Beat, BeatKind, Measure, TimeSignature};
 use eframe::egui::{FontId, Pos2, Rect};
 
 pub(crate) struct LayoutOpts {
+    pub rect: Rect,
     pub font_id: FontId,
-    pub pixels_per_point: f32,
-    pub em: f32
+    pub min_size: f32,
+    pub em: f32,
+    pub layout_clef: bool,
+    pub layout_time_signature: bool,
+
+    pub y_offset: f32,
+    pub stem_length_factor: f32,
 }
 
 impl LayoutOpts {
-    const fn em(&self) -> f32 { self.em }
+    const fn staff_space(&self) -> f32 { self.em * 0.25 }
 
-    const fn stem_length(&self) -> f32 { self.em() * 0.9 }
+    const fn stem_length(&self) -> f32 { self.em * self.stem_length_factor }
 
-    const fn stem_thickness(&self) -> f32 { self.font_id.size * 0.03 }
+    pub(crate) const fn stem_thickness(&self) -> f32 { self.font_id.size * 0.03 }
 
     const fn stem_offset(&self) -> f32 { self.font_id.size * 0.13 }
+
+    pub(crate) const fn beam_thickness(&self) -> f32 {
+        // Bravura ~0.5 sp
+        0.5 * self.staff_space()
+    }
+
+    const fn beam_gap(&self) -> f32 { 0.25 * self.staff_space() }
+
+    const fn stub_length(&self) -> f32 { self.em * 0.20 }
+
+    pub(crate) const fn bracket_thickness(&self) -> f32 { self.font_id.size * 0.02 }
+
+    fn y_center(&self) -> f32 { self.rect.center().y + self.y_offset }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BeamLayout {
     pub p1: Pos2,
     pub p2: Pos2,
-    pub thickness: f32, // TODO move to 'render opts'?
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Line {
     pub p1: Pos2,
     pub p2: Pos2,
-    pub thickness: f32, // TODO move to 'render opts'?
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -62,74 +79,50 @@ pub struct NoteLayout {
 /// Pixel-level layout for a measure.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MeasureLayout {
-    pub em: f32,
-    pub font_id: FontId,
     pub beams: Vec<BeamLayout>,
     pub notes: Vec<NoteLayout>,
     pub tuplets: Vec<TupletLayout>,
     pub clef_pos: Option<Pos2>,
-    pub time_signature: TimeSignatureLayout,
-    pub content: Rect,
+    pub time_signature: Option<TimeSignatureLayout>
 }
 
 /// Build the pixel layout (`MeasureLayout`) from a `Measure`.
 /// Note: This intentionally avoids any dependency on `render::glyphs` to keep the module graph acyclic.
-pub fn build_measure_layout(measure: &Measure, rect: Rect, mut opts: LayoutOpts) -> MeasureLayout {
-    // 1) Inner rect and font metrics
-    let min_size = 24.0 * opts.pixels_per_point; // avoid unreadably small glyphs on HiDPI
+pub fn build_measure_layout(measure: &Measure, opts: &LayoutOpts) -> MeasureLayout {
+    let mut x_offset_acc = opts.rect.left();
 
-    // Keep a small vertical padding fraction
-    let vpad = (rect.height() * 0.10).clamp(10.0, 200.0);
-    let hpad = (rect.width() * 0.10).clamp(10.0, 30.0);
-    let inner_rect = Rect::from_min_max(
-        Pos2::new(rect.left(), rect.top() + vpad),
-        Pos2::new(rect.right() - hpad, rect.bottom() - vpad),
-    );
-
-    // Derive font size mainly from the available height, modulated by width caps
-    let base_size_h = inner_rect.height() * 0.50;
-    let width_cap = (inner_rect.width() * 0.1).max(min_size);
-    let max_size = (inner_rect.height() * 0.80).max(min_size);
-    let target_size = base_size_h.clamp(min_size, max_size.min(width_cap));
-    opts.font_id = FontId::new(target_size, opts.font_id.family.clone());
-    opts.em = target_size;
-
-    let y_center = inner_rect.center().y;
-
-    let clef_w = opts.em() * 0.9; // reserved width for percussion clef
-    let clef_pos = Some(Pos2::new(inner_rect.left() + clef_w * 0.4, y_center));
+    let clef_pos = if opts.layout_clef {
+        let clef_w = opts.em * 0.9; // reserved width for percussion clef
+        x_offset_acc += clef_w;
+        Some(Pos2::new(opts.rect.left() + clef_w * 0.4, opts.y_center()))
+    } else {
+        None
+    };
 
     // Time signature
-    let time_signature_layout =
-        build_time_sig_layout(measure.time_signature(), inner_rect.left() + clef_w, y_center, opts.em());
+    let time_signature_layout = if opts.layout_time_signature {
+        let ts_layout =
+            build_time_sig_layout(&measure.time_signature(), x_offset_acc, opts);
+        x_offset_acc += ts_layout.width;
+        Some(ts_layout)
+    } else {
+        None
+    };
 
     // Notes
-    let notes_left = inner_rect.left() + time_signature_layout.width + (opts.em() * 1.0);
-    let note_rect = Rect::from_min_max(
-        Pos2::new(inner_rect.left() + notes_left, inner_rect.top()),
-        inner_rect.right_bottom(),
-    );
+    let note_rect = Rect::from_min_max(Pos2::new(x_offset_acc, opts.rect.top()), opts.rect.right_bottom());
     let render_plan = plan_measure(measure);
-    let note_layout = build_note_layout(measure.beats(), &render_plan.beams, &note_rect, &opts);
-    let beam_layout = build_beam_layout(&note_layout, &render_plan.beams, y_center, &opts);
-    let tuplet_layout = build_tuplet_layout(
-        &measure.beats(),
-        &note_layout,
-        &render_plan.tuplets,
-        y_center,
-        opts.em(),
-        &opts.font_id,
-    );
+    let note_layout = build_note_layout(measure.beats(), &render_plan.beams, &note_rect, opts);
+    let beam_layout = build_beam_layout(&note_layout, &render_plan.beams, opts);
+    let tuplet_layout =
+        build_tuplet_layout(measure.beats(), &note_layout, &render_plan.tuplets, opts);
 
     MeasureLayout {
-        em: opts.em(),
-        font_id: opts.font_id,
         beams: beam_layout,
         notes: note_layout,
         tuplets: tuplet_layout,
         clef_pos,
-        time_signature: time_signature_layout,
-        content: inner_rect,
+        time_signature: time_signature_layout
     }
 }
 
@@ -150,12 +143,11 @@ pub struct TimeSignatureLayout {
 }
 
 fn build_time_sig_layout(
-    time_signature: TimeSignature,
+    time_signature: &TimeSignature,
     x: f32,
-    y_center: f32,
-    em: f32,
+    opts: &LayoutOpts,
 ) -> TimeSignatureLayout {
-    let ts_digit_w = em * 0.35; // per column
+    let ts_digit_w = opts.em * 0.35; // per column
     let top_digits = digit_count(time_signature.beats as u32);
     let bot_digits = digit_count(time_signature.beat_unit as u32);
     let ts_cols = top_digits.max(bot_digits) as f32;
@@ -167,14 +159,14 @@ fn build_time_sig_layout(
         let offset = (ts_cols - top_digits as f32) * 0.5;
         for i in 0..top_digits {
             let cx = x + ((i as f32) + 0.5 + offset) * ts_digit_w;
-            time_sig_top.push(Pos2::new(cx, y_center - em * 0.25));
+            time_sig_top.push(Pos2::new(cx, opts.y_center() - opts.em * 0.25));
         }
     }
     if bot_digits > 0 {
         let offset = (ts_cols - bot_digits as f32) * 0.5;
         for i in 0..bot_digits {
             let cx = x + ((i as f32) + 0.5 + offset) * ts_digit_w;
-            time_sig_bottom.push(Pos2::new(cx, y_center + em * 0.25));
+            time_sig_bottom.push(Pos2::new(cx, opts.y_center() + opts.em * 0.25));
         }
     }
 
@@ -195,7 +187,6 @@ fn build_note_layout(
         .into_iter()
         .map(|cx| cx + rect.left())
         .collect::<Vec<_>>();
-    let y_center = rect.center().y;
 
     // Determine which beats are inside any beamed group (for flag suppression)
     let mut in_beam_flags: Vec<bool> = vec![false; beats.len()];
@@ -216,7 +207,7 @@ fn build_note_layout(
     let mut note_layout: Vec<NoteLayout> = Vec::with_capacity(beats.len());
     for (i, b) in beats.iter().enumerate() {
         let cx = *x_centers.get(i).unwrap_or(&rect.center().x);
-        let cy = y_center;
+        let cy = opts.y_center();
         let center = Pos2::new(cx, cy);
 
         // Dots (apply to both notes and rests)
@@ -258,7 +249,7 @@ fn build_note_layout(
             let stem_len = opts.stem_length() * stem_len_factor;
             let start = Pos2::new(start_x, cy);
             let end = Pos2::new(start_x, cy - stem_len);
-            stem = Some(Line { p1: start, p2: end, thickness: opts.stem_thickness() });
+            stem = Some(Line { p1: start, p2: end });
 
             // Flag position at stem tip if not in a beam and duration requires a flag
             if !in_beam && needs_flag {
@@ -281,7 +272,6 @@ fn build_note_layout(
                     tremolo.push(Line {
                         p1: Pos2::new(x0, y0),
                         p2: Pos2::new(x0 + len, y0 - len * ang),
-                        thickness: 2.0,
                     });
                 }
             }
@@ -305,20 +295,15 @@ fn build_note_layout(
 fn build_beam_layout(
     note_layout: &[NoteLayout],
     beam_groups: &[BeamGroup],
-    y_center: f32,
     opts: &LayoutOpts,
 ) -> Vec<BeamLayout> {
-    // TODO move top opts all 3
-    let staff_space = opts.em() * 0.25; // tuned by eye; single-line context
-    let beam_thickness = 0.5 * staff_space; // Bravura ~0.5 sp
-    let gap = 0.25 * staff_space; // distance between beams
     // align top edge with stem tip ⇒ use bottom y with slight offset to hide seam
-    let base_y = y_center - opts.stem_length() + beam_thickness * 0.95;
-
+    let base_y = opts.y_center() - opts.stem_length() + opts.beam_thickness() * 0.95;
     let stem_xs: Vec<f32> = note_layout.iter().map(|nl| nl.center.x + opts.stem_offset()).collect();
 
     // Helper: compute y for level
-    let y_level = |lvl: u8| -> f32 { base_y + (lvl as f32) * (beam_thickness + gap) };
+    let y_level =
+        |lvl: u8| -> f32 { base_y + (lvl as f32) * (opts.beam_thickness() + opts.beam_gap()) };
 
     let mut beams_out: Vec<BeamLayout> = Vec::new();
 
@@ -336,20 +321,12 @@ fn build_beam_layout(
             let x2 = stem_xs[j] + offset;
             for lvl in 0..levels {
                 let y = y_level(lvl);
-                beams_out.push(BeamLayout {
-                    p1: Pos2::new(x1, y),
-                    p2: Pos2::new(x2, y),
-                    thickness: beam_thickness,
-                });
+                beams_out.push(BeamLayout { p1: Pos2::new(x1, y), p2: Pos2::new(x2, y) });
             }
         }
     }
 
-    // Helper: compute y for level
-    let y_level = |lvl: u8| -> f32 { base_y + (lvl as f32) * (beam_thickness + gap) };
-
     // Partial beams (stubs) where a note's beam count exceeds continuity
-    let stub_len = opts.em() * 0.20; // TODO move to opts?
     for group in beam_groups {
         if group.beat_indices.len() < 2 {
             continue;
@@ -382,27 +359,23 @@ fn build_beam_layout(
                         if is_first {
                             beams_out.push(BeamLayout {
                                 p1: Pos2::new(stem_x, y),
-                                p2: Pos2::new(stem_x + stub_len, y),
-                                thickness: beam_thickness,
+                                p2: Pos2::new(stem_x + opts.stub_length(), y),
                             });
                         } else if is_last || left_cont > right_cont {
                             beams_out.push(BeamLayout {
-                                p1: Pos2::new(stem_x - stub_len, y),
+                                p1: Pos2::new(stem_x - opts.stub_length(), y),
                                 p2: Pos2::new(stem_x, y),
-                                thickness: beam_thickness,
                             });
                         } else if right_cont > left_cont {
                             beams_out.push(BeamLayout {
                                 p1: Pos2::new(stem_x, y),
-                                p2: Pos2::new(stem_x + stub_len, y),
-                                thickness: beam_thickness,
+                                p2: Pos2::new(stem_x + opts.stub_length(), y),
                             });
                         } else {
                             // equal continuity → prefer left by policy
                             beams_out.push(BeamLayout {
-                                p1: Pos2::new(stem_x - stub_len, y),
+                                p1: Pos2::new(stem_x - opts.stub_length(), y),
                                 p2: Pos2::new(stem_x, y),
-                                thickness: beam_thickness,
                             });
                         }
                     }
@@ -418,18 +391,14 @@ fn build_tuplet_layout(
     beats: &[Beat],
     note_layout: &[NoteLayout],
     tuplet_plan: &[TupletPlan],
-    y_center: f32,
-    em: f32,
-    font_id: &FontId,
+    opts: &LayoutOpts,
 ) -> Vec<TupletLayout> {
-    let staff_space = em * 0.25;
-    let bracket_gap = 1.8 * staff_space;
-    let hook_len = 0.8 * staff_space;
+    let bracket_gap = 1.8 * opts.staff_space();
+    let hook_len = 0.8 * opts.staff_space();
     let hook_dy = hook_len * 0.85;
-    let number_font = FontId::new(font_id.size * 0.75, font_id.family.clone());
-    let default_stem_len = em * 0.9;
+    let digit_font = FontId::new(opts.font_id.size * 0.75, opts.font_id.family.clone());
     // Approximate baseline above stems
-    let y_base = y_center - default_stem_len - 0.5 * staff_space - bracket_gap;
+    let y_base = opts.y_center() - opts.stem_length() - 0.5 * opts.staff_space() - bracket_gap;
 
     let x_from_idx = |idx: usize| -> f32 {
         let n = note_layout.get(idx).unwrap();
@@ -443,17 +412,17 @@ fn build_tuplet_layout(
     for t in tuplet_plan {
         let mut x_l = x_from_idx(t.start);
         let mut x_r = x_from_idx(t.end);
-        let margin = em * 0.15;
+        let margin = opts.em * 0.15;
         x_l -= margin;
         x_r += margin;
 
         // Number width approximation in pixels based on em
         let num_chars = digit_len(t.count) as f32;
-        let num_width = num_chars * 0.6 * em;
-        let pad = 0.25 * staff_space; // horizontal padding around digits inside the bracket gap
+        let num_width = num_chars * 0.6 * opts.em;
+        let pad = 0.25 * opts.em; // horizontal padding around digits inside the bracket gap
         let xc = 0.5 * (x_l + x_r);
         let mut gap_half = 0.5 * (num_width + 2.0 * pad);
-        let min_seg = 0.5 * staff_space;
+        let min_seg = 0.5 * opts.staff_space();
         let half_span = 0.5 * (x_r - x_l);
         if gap_half > half_span - min_seg {
             gap_half = (half_span - min_seg).max(0.0);
@@ -465,7 +434,8 @@ fn build_tuplet_layout(
                 .iter()
                 .enumerate()
                 .any(|(i, b)| i >= t.start && i <= t.end && b.kind == BeatKind::Note && b.accented);
-            let accent_clearance = (if has_accent_in_group { 1.4 } else { -0.4 }) * staff_space;
+            let accent_clearance =
+                (if has_accent_in_group { 1.4 } else { -0.4 }) * opts.staff_space();
             let y_bracket = y_base - accent_clearance;
 
             let x_gap_l = (xc - gap_half).max(x_l);
@@ -476,32 +446,28 @@ fn build_tuplet_layout(
                 bracket.push(Line {
                     p1: Pos2::new(x_l, y_bracket),
                     p2: Pos2::new(x_gap_l, y_bracket),
-                    thickness: 2.0,
                 });
             }
             if x_r > x_gap_r {
                 bracket.push(Line {
                     p1: Pos2::new(x_gap_r, y_bracket),
                     p2: Pos2::new(x_r, y_bracket),
-                    thickness: 2.0,
                 });
             }
             bracket.push(Line {
                 p1: Pos2::new(x_l, y_bracket),
                 p2: Pos2::new(x_l, y_bracket + hook_dy),
-                thickness: 2.0,
             });
             bracket.push(Line {
                 p1: Pos2::new(x_r, y_bracket),
                 p2: Pos2::new(x_r, y_bracket + hook_dy),
-                thickness: 2.0,
             });
 
-            let y_num = y_bracket + 0.5 * staff_space;
+            let y_num = y_bracket + 0.5 * opts.staff_space();
             tuplets_out.push(TupletLayout {
                 count: t.count,
                 number_center: Pos2::new(0.5 * (x_l + x_r), y_num),
-                number_font: number_font.clone(),
+                number_font: digit_font.clone(),
                 bracket,
             });
         } else {
@@ -521,14 +487,14 @@ fn build_tuplet_layout(
             });
 
             // Choose vertical clearance based on potential collision
-            let close_clearance = -0.4 * staff_space; // closer to the beam
-            let raised_clearance = 1.4 * staff_space; // high enough to clear accent
+            let close_clearance = -opts.staff_space(); // closer to the beam
+            let raised_clearance = 1.4 * opts.staff_space(); // high enough to clear accent
             let clearance = if collides { raised_clearance } else { close_clearance };
-            let y_num = (y_base - clearance) + 0.5 * staff_space;
+            let y_num = (y_base - clearance) + 0.5 * opts.staff_space();
             tuplets_out.push(TupletLayout {
                 count: t.count,
                 number_center: Pos2::new(0.5 * (x_l + x_r), y_num),
-                number_font: number_font.clone(),
+                number_font: digit_font.clone(),
                 bracket: Vec::new(),
             });
         }

@@ -1,4 +1,4 @@
-use crate::layout::pixel_layout::NoteLayout;
+use crate::layout::pixel_layout::{LayoutOpts, NoteLayout};
 use crate::measure::BeatKind;
 use crate::render::glyphs;
 use eframe::egui;
@@ -7,7 +7,7 @@ use eframe::egui::{Align2, Color32, FontId, Stroke};
 pub(crate) fn draw_beat(
     painter: &egui::Painter,
     note: &NoteLayout,
-    base_font: &FontId,
+    opts: &LayoutOpts,
     color: Color32,
 ) {
     let glyph = match note.kind == BeatKind::Rest {
@@ -16,9 +16,9 @@ pub(crate) fn draw_beat(
     };
 
     let glyph_font = if note.kind == BeatKind::Rest {
-        FontId::new(base_font.size * 0.8, base_font.family.clone())
+        FontId::new(opts.font_id.size * 0.8, opts.font_id.family.clone())
     } else {
-        base_font.clone()
+        opts.font_id.clone()
     };
 
     // Draw notehead
@@ -31,7 +31,7 @@ pub(crate) fn draw_beat(
                 *p,
                 Align2::CENTER_CENTER,
                 glyphs::GLYPH_AUGMENTATION_DOT.to_string(),
-                base_font.clone(),
+                opts.font_id.clone(),
                 color,
             );
         }
@@ -39,27 +39,28 @@ pub(crate) fn draw_beat(
 
     // Draw stem
     if let Some(stem) = &note.stem {
-        painter.line_segment([stem.p1, stem.p2], Stroke::new(stem.thickness, color));
+        painter.line_segment([stem.p1, stem.p2], Stroke::new(opts.stem_thickness(), color));
     }
 
     // Draw flag
     if let Some(pos) = note.flag_pos
         && let Some(flag) = glyphs::flag_glyph_for_duration(note.duration)
     {
-        let flag_font = FontId::new(base_font.size * 1.0, base_font.family.clone());
+        let flag_font = FontId::new(opts.font_id.size * 1.0, opts.font_id.family.clone());
         painter.text(pos, Align2::LEFT_CENTER, flag.to_string(), flag_font, color);
     }
 
     // Draw tremolos
     if !note.tremolo.is_empty() {
         for seg in &note.tremolo {
-            painter.line_segment([seg.p1, seg.p2], Stroke::new(seg.thickness, color));
+            // TODO use the bravura glyphs for tremolos
+            painter.line_segment([seg.p1, seg.p2], Stroke::new(opts.stem_thickness(), color));
         }
     }
 
     // Draw accent
     if let Some(p) = note.accent_pos {
-        let accent_font = FontId::new(base_font.size * 0.8, base_font.family.clone());
+        let accent_font = FontId::new(opts.font_id.size * 0.8, opts.font_id.family.clone());
         painter.text(
             p,
             Align2::CENTER_CENTER,

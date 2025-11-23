@@ -1,4 +1,4 @@
-use crate::layout::pixel_layout::{MeasureLayout, build_measure_layout, LayoutOpts};
+use crate::layout::pixel_layout::{LayoutOpts, MeasureLayout, build_measure_layout};
 use crate::measure::Measure;
 use crate::render::beat::draw_beat;
 use crate::render::glyphs;
@@ -18,10 +18,25 @@ pub(crate) fn draw_measure(
     // staff line
     painter.hline(Rangef::new(rect.left(), rect.right()), y, Stroke::new(1.0, color));
 
-    let opts = LayoutOpts { font_id: font_id.clone(), pixels_per_point: ui.ctx().pixels_per_point(), em: 0.0 };
-    let measure_layout = build_measure_layout(measure, rect, opts);
-    let em = measure_layout.em;
-    let font_id = measure_layout.font_id.clone();
+    let min_size = 24.0 * ui.ctx().pixels_per_point();
+
+    // Derive font size mainly from the available height, modulated by width caps
+    let width_cap = (rect.width() * 0.1).max(min_size);
+    let max_size = (rect.height() * 0.80).max(min_size);
+    let target_size = min_size.max(max_size.min(width_cap));
+    let font_id = FontId::new(target_size, font_id.family.clone());
+
+    let opts = LayoutOpts {
+        rect,
+        font_id: font_id.clone(),
+        min_size,
+        em: target_size,
+        layout_clef: true,
+        layout_time_signature: true,
+        y_offset: 0.0,
+        stem_length_factor: 1.0,
+    };
+    let measure_layout = build_measure_layout(measure, &opts);
 
     // Left block: Clef + stacked time signature from layout (Phase C)
     if let Some(clef_pos) = measure_layout.clef_pos {
@@ -33,19 +48,22 @@ pub(crate) fn draw_measure(
             color,
         );
     }
-    let ts = measure.time_signature();
-    let top_digits = glyphs::ts_glyphs(ts.beats as u32);
-    let bot_digits = glyphs::ts_glyphs(ts.beat_unit as u32);
-    for (p, ch) in measure_layout.time_signature.beats.iter().zip(top_digits.iter()) {
-        painter.text(*p, Align2::CENTER_CENTER, ch.to_string(), font_id.clone(), color);
-    }
-    for (p, ch) in measure_layout.time_signature.beat_unit.iter().zip(bot_digits.iter()) {
-        painter.text(*p, Align2::CENTER_CENTER, ch.to_string(), font_id.clone(), color);
+
+    if let Some(ts_layout) = &measure_layout.time_signature {
+        let ts = measure.time_signature();
+        let top_digits = glyphs::ts_glyphs(ts.beats as u32);
+        let bot_digits = glyphs::ts_glyphs(ts.beat_unit as u32);
+        for (p, ch) in ts_layout.beats.iter().zip(top_digits.iter()) {
+            painter.text(*p, Align2::CENTER_CENTER, ch.to_string(), font_id.clone(), color);
+        }
+        for (p, ch) in ts_layout.beat_unit.iter().zip(bot_digits.iter()) {
+            painter.text(*p, Align2::CENTER_CENTER, ch.to_string(), font_id.clone(), color);
+        }
     }
 
     // 3) Draw beats using precomputed layout geometry (Phase B)
     for note in &measure_layout.notes {
-        draw_beat(painter, note, &font_id, color);
+        draw_beat(painter, note, &opts, color);
     }
 
     // 4) Draw beams from layout (horizontal rectangles at given y with thickness)
@@ -53,7 +71,7 @@ pub(crate) fn draw_measure(
         let left = seg.p1.x.min(seg.p2.x);
         let right = seg.p1.x.max(seg.p2.x);
         let yb = seg.p1.y; // bottom edge
-        let top = yb - seg.thickness;
+        let top = yb - opts.beam_thickness();
         let rect = Rect::from_min_max(pos2(left, top), pos2(right, yb));
         painter.rect_filled(rect, 0.0, color);
     }
@@ -63,7 +81,8 @@ pub(crate) fn draw_measure(
         for t in &measure_layout.tuplets {
             // draw bracket segments
             for seg in &t.bracket {
-                painter.line_segment([seg.p1, seg.p2], Stroke::new(seg.thickness, color));
+                painter
+                    .line_segment([seg.p1, seg.p2], Stroke::new(opts.bracket_thickness(), color));
             }
             // draw tuplet number at center
             let digits = glyphs::tuplet_glyphs(t.count);
@@ -92,8 +111,8 @@ pub(crate) fn draw_measure(
         let alpha_off = 40u8; // faint but still present; set to 0 to hide completely
         let alpha = if visible { alpha_on } else { alpha_off };
         let c = measure_layout.notes[idx].center;
-        let top = c.y + 0.5 * em;
-        let bottom = c.y - 0.5 * em;
+        let top = c.y + 0.5 * opts.em;
+        let bottom = c.y - 0.5 * opts.em;
         let base = if ui.visuals().dark_mode { Color32::YELLOW } else { Color32::BLUE };
         let cursor_color = Color32::from_rgba_unmultiplied(base.r(), base.g(), base.b(), alpha);
         painter.vline(nl.center.x, Rangef::new(top, bottom), Stroke::new(2.0, cursor_color));

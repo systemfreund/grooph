@@ -1,7 +1,7 @@
 use crate::measure::duration::{Duration, NoteValue};
 use crate::measure::{Measure, TimeSignature};
 
-use crate::layout::pixel_layout::{NoteLayout, build_measure_layout};
+use crate::layout::pixel_layout::{LayoutOpts, build_measure_layout};
 use crate::measure::duration::NoteValue::*;
 use crate::measure::duration::human_readable;
 use crate::measure::{Beat, BeatKind};
@@ -13,7 +13,8 @@ use crate::render::glyphs::{
     TUPLET_DIGITS,
 };
 use crate::render::measure::draw_measure;
-use crate::tools::{EditOp, Modifier, Tool, ToolGroup, ToolKind, all_tools};
+use crate::tools::{EditOp, Modifier, Tool, ToolKind};
+use crate::{ToolGroup, all_tools};
 use eframe::egui::scroll_area::{ScrollBarVisibility, ScrollSource};
 use eframe::egui::{
     Align, Atom, Context, Direction, Id, Key, Label, Layout, Vec2, global_theme_preference_switch,
@@ -125,10 +126,9 @@ impl App for Grooph<'_> {
             });
         });
 
-        if self.show_info {
-            egui::TopBottomPanel::top("info").show(ctx, |ui| {
-                ui.label(
-                    "Keybindings: \n\
+        egui::TopBottomPanel::top("info").show_animated(ctx, self.show_info, |ui| {
+            ui.label(
+                "Keybindings: \n\
                     Arrow keys: Move cursor\n\
                     Del/Backspace: Remove note\n\
                     Space: Toggle between note and rest\n\
@@ -136,37 +136,36 @@ impl App for Grooph<'_> {
                     1-4: Set duration (1=1/4, 2=1/8, 3=1/16, 4=1/32)\n\
                     Period: Toggle dotted\n\
                     T: Cycle tuplet (Tri -> Quint -> Sext -> Sept -> Non -> Dissolve)\n",
-                );
+            );
 
-                // Label showing absolute beat position at the cursor and human-readable duration/kind
-                let mut beat_text = String::from("-");
-                let idx = self.cursor_idx;
-                let positions = self.measure.beat_positions();
-                if idx < positions.len() {
-                    let v = positions[idx];
-                    let mut s = format!("{:.3}", v);
-                    // Trim trailing zeros and optional dot for a cleaner look
-                    while s.ends_with('0') {
-                        s.pop();
-                    }
-                    if s.ends_with('.') {
-                        s.pop();
-                    }
-                    beat_text = s;
+            // Label showing absolute beat position at the cursor and human-readable duration/kind
+            let mut beat_text = String::from("-");
+            let idx = self.cursor_idx;
+            let positions = self.measure.beat_positions();
+            if idx < positions.len() {
+                let v = positions[idx];
+                let mut s = format!("{:.3}", v);
+                // Trim trailing zeros and optional dot for a cleaner look
+                while s.ends_with('0') {
+                    s.pop();
                 }
-                let mut label = format!("Beat: {}", beat_text);
-                if idx < self.measure.beats().len() {
-                    let b = self.measure.beats()[idx];
-                    let desc = human_readable(&b.duration);
-                    let kind = match b.kind {
-                        BeatKind::Note => "note",
-                        BeatKind::Rest => "rest",
-                    };
-                    label = format!("Beat: {}, {} {}", beat_text, desc, kind);
+                if s.ends_with('.') {
+                    s.pop();
                 }
-                ui.add(Label::new(label));
-            });
-        }
+                beat_text = s;
+            }
+            let mut label = format!("Beat: {}", beat_text);
+            if idx < self.measure.beats().len() {
+                let b = self.measure.beats()[idx];
+                let desc = human_readable(&b.duration);
+                let kind = match b.kind {
+                    BeatKind::Note => "note",
+                    BeatKind::Rest => "rest",
+                };
+                label = format!("Beat: {}, {} {}", beat_text, desc, kind);
+            }
+            ui.add(Label::new(label));
+        });
 
         if self.show_settings {
             // egui::TopBottomPanel::top("settings").show(ctx, |ui| {
@@ -177,72 +176,79 @@ impl App for Grooph<'_> {
             // });
         }
 
-        // egui::TopBottomPanel::bottom("tool_palette")
-        //     .frame(Frame::group(&ctx.style()).fill(ctx.style().visuals.panel_fill))
-        //     .resizable(false)
-        //     .show(ctx, |ui| {
-        //         let tools = all_tools();
-        //         let groups = [ToolGroup::Notes, ToolGroup::Rests, ToolGroup::Tuplets];
-        //
-        //         egui::ScrollArea::horizontal()
-        //             .scroll_source(ScrollSource::ALL)
-        //             .scroll_bar_visibility(ScrollBarVisibility::AlwaysHidden)
-        //             .show(ui, |ui| {
-        //                 let layout = Layout::from_main_dir_and_cross_align(
-        //                     Direction::LeftToRight,
-        //                     Align::Center,
-        //                 );
-        //                 ui.with_layout(layout, |ui| {
-        //                     for g in groups {
-        //                         let group_tools: Vec<_> =
-        //                             tools.iter().filter(|t| t.group == g).collect();
-        //                         if group_tools.is_empty() {
-        //                             continue;
-        //                         }
-        //
-        //                         for t in group_tools {
-        //                             match t.kind {
-        //                                 ToolKind::InsertBeat(template) => {
-        //                                     let symbol_id = Id::new(t.id);
-        //                                     let symbol = Atom::custom(symbol_id, Vec2::splat(80.0));
-        //                                     let button = egui::Button::new(symbol)
-        //                                         .corner_radius(10)
-        //                                         .atom_ui(ui);
-        //
-        //                                     if let Some(rect) = button.rect(symbol_id) {
-        //                                         let measure = Measure::new_init(
-        //                                             TimeSignature::ONE_FOUR,
-        //                                             template.kind,
-        //                                         );
-        //                                         let measure_layout = build_measure_layout_px(
-        //                                             &measure,
-        //                                             rect,
-        //                                             &self.font_id,
-        //                                             ui.ctx().pixels_per_point(),
-        //                                         );
-        //                                         let painter = &ui.painter_at(rect);
-        //                                         for note in &measure_layout.notes {
-        //                                             draw_beat(
-        //                                                 painter,
-        //                                                 note,
-        //                                                 &self.font_id,
-        //                                                 ui.style().visuals.text_color(),
-        //                                             );
-        //                                         }
-        //                                     }
-        //                                 }
-        //                                 _ => {}
-        //                             }
-        //                             // let resp =
-        //                             //     ui.add_sized([tile, tile], button).on_hover_text(t.label);
-        //                             // if resp.clicked() {
-        //                             //     self.apply_tool(t);
-        //                             // }
-        //                         }
-        //                     }
-        //                 })
-        //             });
-        //     });
+        egui::TopBottomPanel::bottom("tool_palette")
+            .frame(Frame::group(&ctx.style()).fill(ctx.style().visuals.panel_fill))
+            .resizable(false)
+            .show(ctx, |ui| {
+                let tools = all_tools();
+                let groups = [ToolGroup::Notes, ToolGroup::Rests, ToolGroup::Tuplets];
+
+                egui::ScrollArea::horizontal()
+                    .scroll_source(ScrollSource::ALL)
+                    .scroll_bar_visibility(ScrollBarVisibility::AlwaysHidden)
+                    .show(ui, |ui| {
+                        let layout = Layout::from_main_dir_and_cross_align(
+                            Direction::LeftToRight,
+                            Align::Center,
+                        );
+                        ui.with_layout(layout, |ui| {
+                            for g in groups {
+                                let group_tools: Vec<_> =
+                                    tools.iter().filter(|t| t.group == g).collect();
+                                if group_tools.is_empty() {
+                                    continue;
+                                }
+
+                                for t in group_tools {
+                                    match t.kind {
+                                        ToolKind::InsertBeat(template) => {
+                                            let tile = 80.0;
+                                            let symbol_id = Id::new(t.id);
+                                            let symbol = Atom::custom(symbol_id, Vec2::splat(tile));
+                                            let button = egui::Button::new(symbol)
+                                                .corner_radius(10)
+                                                .atom_ui(ui);
+
+                                            if let Some(rect) = button.rect(symbol_id) {
+                                                let measure = Measure::new_init(
+                                                    TimeSignature::ONE_FOUR,
+                                                    template.kind,
+                                                );
+                                                let opts = LayoutOpts {
+                                                    rect,
+                                                    font_id: FontId::new(tile * 0.5, self.font_id.family.clone()),
+                                                    min_size: 30.0,
+                                                    em: tile,
+                                                    layout_clef: false,
+                                                    layout_time_signature: false,
+                                                    y_offset: 20.0,
+                                                    stem_length_factor: 0.5,
+                                                };
+                                                let measure_layout =
+                                                    build_measure_layout(&measure, &opts);
+                                                let painter = &ui.painter_at(rect);
+                                                for note in &measure_layout.notes {
+                                                    draw_beat(
+                                                        painter,
+                                                        note,
+                                                        &opts,
+                                                        ui.style().visuals.text_color(),
+                                                    );
+                                                }
+                                            }
+                                        }
+                                        _ => {}
+                                    }
+                                    // let resp =
+                                    //     ui.add_sized([tile, tile], button).on_hover_text(t.label);
+                                    // if resp.clicked() {
+                                    //     self.apply_tool(t);
+                                    // }
+                                }
+                            }
+                        })
+                    });
+            });
 
         egui::CentralPanel::default().show(ctx, |ui| {
             Frame::canvas(ui.style())
@@ -262,9 +268,9 @@ impl App for Grooph<'_> {
                         if !layout.notes.is_empty() {
                             // Außerhalb des Inhalts: zum nächstliegenden Rand clampen
                             let target_x = pos.x;
-                            let idx = if target_x <= layout.content.left() {
+                            let idx = if target_x <= rect.left() {
                                 0
-                            } else if target_x >= layout.content.right() {
+                            } else if target_x >= rect.right() {
                                 layout.notes.len() - 1
                             } else {
                                 // Innerhalb: Index des nächstgelegenen x-Centers suchen
@@ -395,18 +401,16 @@ impl App for Grooph<'_> {
                             if self.measure.dissolve_tuplet_group_at(start_idx) {
                                 did_dissolve = true;
                                 // Try to convert to next target if defined, also at group start
-                                if let Some((tn, tm, tbase)) = next_target {
-                                    if self
+                                if let Some((tn, tm, tbase)) = next_target
+                                    && self
                                         .measure
                                         .convert_to_tuplet_at(start_idx, tn, tm, tbase, false)
-                                    {
-                                        did_recreate = true;
-                                        // Nach erfolgreicher Rekreation ggf. Projektion anwenden
-                                        if let Some(ref src) = captured_offsets {
-                                            let _ = self
-                                                .measure
-                                                .apply_tuplet_projection_at(start_idx, src);
-                                        }
+                                {
+                                    did_recreate = true;
+                                    // Nach erfolgreicher Rekreation ggf. Projektion anwenden
+                                    if let Some(ref src) = captured_offsets {
+                                        let _ =
+                                            self.measure.apply_tuplet_projection_at(start_idx, src);
                                     }
                                 }
                                 true
