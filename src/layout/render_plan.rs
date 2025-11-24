@@ -52,7 +52,7 @@ mod tests {
         // Die mittlere Gruppe (Beats 2..=4, 0-basiert) sollte beamed sein.
         let mut m = Measure::new(TimeSignature::SEVEN_EIGHT);
         for i in 0..7 {
-            m.set_beat_at(i, Beat::note(e())).unwrap();
+            m.set_beat(i, Beat::note(e())).unwrap();
         }
 
         let plan = plan_measure(&m);
@@ -83,12 +83,12 @@ mod tests {
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
         // Setze zunächst 6 Achtel, dann eine Triole über die nächsten 3 Achtel-Schlitze
         for i in 0..3 {
-            m.set_beat_at(i, Beat::note(e())).unwrap();
+            m.set_beat(i, Beat::note(e())).unwrap();
         }
         // Drei Achtel-Triolett-Noten
-        m.set_beat_at(3, Beat::note(t8())).unwrap();
-        m.set_beat_at(4, Beat::note(t8())).unwrap();
-        m.set_beat_at(5, Beat::note(t8())).unwrap();
+        m.set_beat(3, Beat::note(t8())).unwrap();
+        m.set_beat(4, Beat::note(t8())).unwrap();
+        m.set_beat(5, Beat::note(t8())).unwrap();
 
         let plan = plan_measure(&m);
         let ok = plan.tuplets.iter().any(|t| t.count == 3 && t.start == 3 && t.end == 5);
@@ -98,9 +98,9 @@ mod tests {
     #[test]
     fn triplet_bracket_over_beats_when_preceding_beat_is_connected_to_triplet_with_beams_in_7_8() {
         let mut m = Measure::new_init(TimeSignature::SEVEN_EIGHT, Note);
-        m.set_beat_at(3, Beat::note(t8())).unwrap();
-        m.set_beat_at(4, Beat::note(t8())).unwrap();
-        m.set_beat_at(5, Beat::note(t8())).unwrap();
+        m.set_beat(3, Beat::note(t8())).unwrap();
+        m.set_beat(4, Beat::note(t8())).unwrap();
+        m.set_beat(5, Beat::note(t8())).unwrap();
 
         let plan = plan_measure(&m);
 
@@ -125,9 +125,9 @@ mod tests {
     #[test]
     fn triplet_bracket_over_beats_when_following_beat_is_connected_to_triplet_with_beams_in_7_8() {
         let mut m = Measure::new_init(TimeSignature::SEVEN_EIGHT, Note);
-        m.set_beat_at(2, Beat::note(t8())).unwrap();
-        m.set_beat_at(3, Beat::note(t8())).unwrap();
-        m.set_beat_at(4, Beat::note(t8())).unwrap();
+        m.set_beat(2, Beat::note(t8())).unwrap();
+        m.set_beat(3, Beat::note(t8())).unwrap();
+        m.set_beat(4, Beat::note(t8())).unwrap();
 
         let plan = plan_measure(&m);
 
@@ -152,8 +152,8 @@ mod tests {
     #[test]
     fn triplet_render_plan_0() {
         let mut m = Measure::new(TimeSignature::ONE_FOUR);
-        m.set_beat_at(0, Beat::note(t16())).unwrap();
-        m.set_beat_at(1, Beat::note(t8())).unwrap();
+        m.set_beat(0, Beat::note(t16())).unwrap();
+        m.set_beat(1, Beat::note(t8())).unwrap();
 
         let mut tuplets = plan_measure(&m).tuplets;
         assert_eq!(tuplets.len(), 1);
@@ -162,7 +162,7 @@ mod tests {
         assert_eq!(tuplets[0].start, 0);
         assert_eq!(tuplets[0].end, 1);
 
-        m.set_beat_at(2, Beat::note(t16())).unwrap();
+        m.set_beat(2, Beat::note(t16())).unwrap();
         tuplets = plan_measure(&m).tuplets;
         assert_eq!(tuplets.len(), 2);
         assert_eq!(tuplets[1].count, 3);
@@ -173,8 +173,8 @@ mod tests {
     #[test]
     fn triplet_render_plan_1() {
         let mut m = Measure::new(TimeSignature::ONE_FOUR);
-        m.set_beat_at(0, Beat::note(t32())).unwrap();
-        m.set_beat_at(0, Beat::note(t16())).unwrap();
+        m.set_beat(0, Beat::note(t32())).unwrap();
+        m.set_beat(0, Beat::note(t16())).unwrap();
 
         let mut tuplets = plan_measure(&m).tuplets;
         assert_eq!(tuplets.len(), 1, "first tuplet group not found");
@@ -184,7 +184,7 @@ mod tests {
         assert_eq!(tuplets[0].end, 1);
 
         // Start a new tuplet group with a t16 immediately after the t32-group.
-        m.set_beat_at(2, Beat::rest(t16())).unwrap();
+        m.set_beat(2, Beat::rest(t16())).unwrap();
         // Now we expect to have two tuplet groups, and the very last beat must be a simple 1/16 note.
         tuplets = plan_measure(&m).tuplets;
         assert_eq!(tuplets.len(), 2);
@@ -198,9 +198,9 @@ mod tests {
     #[test]
     fn triplet_render_plan_2() {
         let mut m = Measure::new(TimeSignature::ONE_FOUR);
-        m.set_beat_at(0, Beat::note(t8())).unwrap();
+        m.set_beat(0, Beat::note(t8())).unwrap();
         // Subdivide first beat into two t16s.
-        m.set_beat_at(0, Beat::note(t16())).unwrap();
+        m.set_beat(0, Beat::note(t16())).unwrap();
 
         let tuplets = plan_measure(&m).tuplets;
         assert_eq!(tuplets[0].count, 3);
@@ -211,9 +211,9 @@ mod tests {
     #[test]
     fn triplet_render_plan_3() {
         let mut m = Measure::new(TimeSignature::ONE_FOUR);
-        m.set_beat_at(0, Beat::note(t8())).unwrap();
+        m.set_beat(0, Beat::note(t8())).unwrap();
         // Subdivide second beat into two t16s.
-        m.set_beat_at(1, Beat::note(t16())).unwrap();
+        m.set_beat(1, Beat::note(t16())).unwrap();
 
         let plan = plan_measure(&m);
         let tuplets = plan.tuplets;

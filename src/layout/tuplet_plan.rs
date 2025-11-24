@@ -1,6 +1,6 @@
 use crate::layout::beam_plan::BeamGroup;
 use crate::layout::render_plan::BeatIdx;
-use crate::measure::duration::{Duration, NoteValue};
+use crate::measure::duration::{Duration, NoteValue, TupletSpec};
 use crate::measure::{BeatKind, Measure};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -177,7 +177,7 @@ pub fn compute_tuplet_plan(measure: &Measure, beams: &[BeamGroup]) -> Vec<Tuplet
     let mut tmp: Vec<TupGroupTmp> = Vec::new();
     let mut i = 0usize;
     while i < beats.len() {
-        let Duration::Tuplet { n, m, .. } = beats[i].duration else {
+        let Duration::Tuplet(TupletSpec { n, m, .. }) = beats[i].duration else {
             i += 1;
             continue;
         };
@@ -185,7 +185,7 @@ pub fn compute_tuplet_plan(measure: &Measure, beams: &[BeamGroup]) -> Vec<Tuplet
         let mut k = i;
         while k < beats.len() {
             match beats[k].duration {
-                Duration::Tuplet { n: nn, m: mm, .. } if nn == n && mm == m => k += 1,
+                Duration::Tuplet(TupletSpec { n: nn, m: mm, .. }) if nn == n && mm == m => k += 1,
                 _ => break,
             }
         }

@@ -1,3 +1,4 @@
+#![feature(assert_matches)]
 #![allow(dead_code)]
 
 mod app;

@@ -1,5 +1,5 @@
 use crate::layout::render_plan::BeatIdx;
-use crate::measure::duration::{Duration, NoteValue};
+use crate::measure::duration::{Duration, NoteValue, TupletSpec};
 use crate::measure::{Beat, BeatKind, Measure, TimeSignature};
 
 /// Number of beams implied by a duration (eighth = 1, sixteenth = 2, 32nd = 3).
@@ -162,9 +162,9 @@ fn has_rest_between(beats: &[Beat], i: BeatIdx, j: BeatIdx) -> bool {
     false
 }
 
-fn tuplet_spec(d: &Duration) -> Option<(u8, u8, NoteValue)> {
+fn tuplet_spec(d: &Duration) -> Option<TupletSpec> {
     match *d {
-        Duration::Tuplet { n, m, base } => Some((n, m, base)),
+        Duration::Tuplet(spec) => Some(spec),
         _ => None,
     }
 }
@@ -179,7 +179,7 @@ fn is_same_tuplet_group(beats: &[Beat], i: BeatIdx, j: BeatIdx) -> bool {
     // Both must be notes with identical tuplet specs
     let si = tuplet_spec(&beats[i].duration);
     let sj = tuplet_spec(&beats[j].duration);
-    let Some(spec @ (n, _m, _base)) = (match (si, sj) { (Some(a), Some(b)) if a == b => Some(a), _ => None }) else {
+    let Some(spec ) = (match (si, sj) { (Some(a), Some(b)) if a == b => Some(a), _ => None }) else {
         return false;
     };
 
@@ -214,7 +214,7 @@ fn is_same_tuplet_group(beats: &[Beat], i: BeatIdx, j: BeatIdx) -> bool {
     }
 
     // Same tuplet group if floor(pos/n) equals
-    let n_usize = n as usize;
+    let n_usize = spec.n as usize;
     (pos_i / n_usize) == (pos_j / n_usize)
 }
 
@@ -229,7 +229,7 @@ mod tests {
         // 4/4 with eight eighth notes -> 4 groups, each two notes
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
         for i in 0..8 {
-            m.set_beat_at(i, Beat::note(e())).unwrap();
+            m.set_beat(i, Beat::note(e())).unwrap();
         }
         let plan = compute_beam_plan(&m);
         assert_eq!(plan.groups.len(), 4, "expected 4 groups of eighths in 4/4");
@@ -385,7 +385,7 @@ mod tests {
         m.add_beat(Beat::note(t32())).unwrap();
         m.add_beat(Beat::note(t32())).unwrap();
         m.add_beat(Beat::note(t32())).unwrap();
-        m.set_beat_at(0, Beat::note(t16())).unwrap();
+        m.set_beat(0, Beat::note(t16())).unwrap();
 
         let plan = compute_beam_plan(&m);
         assert_eq!(plan.groups[0].beat_indices, vec![0, 1]);

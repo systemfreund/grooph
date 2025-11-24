@@ -53,7 +53,14 @@ pub enum Duration {
     Simple(NoteValue),
     Dotted { base: NoteValue, dots: u8 },
     // Tuplet note: n in the time of m of the base note
-    Tuplet { n: u8, m: u8, base: NoteValue },
+    Tuplet(TupletSpec),
+}
+
+#[derive(Debug, PartialEq, Clone, Copy, Eq)]
+pub struct TupletSpec {
+    pub n: u8,
+    pub m: u8,
+    pub base: NoteValue,
 }
 
 impl Duration {
@@ -72,7 +79,7 @@ impl Duration {
                 let den = two_pow_k; // 2^k
                 reduce(Frac { num, den: den * base_den as u32 })
             }
-            Duration::Tuplet { n, m, base } => {
+            Duration::Tuplet(TupletSpec { n, m, base }) => {
                 let base_den = base.denominator();
                 reduce(Frac { num: m as u32, den: (n as u32) * base_den as u32 })
             }
@@ -87,7 +94,7 @@ impl Duration {
         match *self {
             Duration::Simple(base) => base,
             Duration::Dotted { base, .. } => base,
-            Duration::Tuplet { base, .. } => base,
+            Duration::Tuplet(TupletSpec { base, .. }) => base,
         }
     }
 
@@ -130,7 +137,7 @@ pub(crate) fn duration_to_debug_str(duration: &Duration) -> String {
         Duration::Dotted { base: _base, dots } => {
             format!("{}{}", duration_fr, ".".repeat(*dots as usize))
         }
-        Duration::Tuplet { n, m, .. } => format!("{}[{}:{}]", duration_fr, n, m),
+        Duration::Tuplet(TupletSpec { n, m, .. }) => format!("{}[{}:{}]", duration_fr, n, m),
     }
 }
 
@@ -153,7 +160,7 @@ pub fn human_readable(d: &Duration) -> String {
             };
             format!("{} {}", prefix, base.name())
         }
-        Duration::Tuplet { n, m, base } => {
+        Duration::Tuplet(TupletSpec { n, m, base }) => {
             let base_lower = match base {
                 Whole => "whole",
                 Half => "half",
@@ -201,14 +208,14 @@ pub(crate) const fn q() -> Duration { Duration::Simple(Quarter) }
 pub(crate) const fn e() -> Duration { Duration::Simple(Eighth) }
 pub(crate) const fn s() -> Duration { Duration::Simple(Sixteenth) }
 pub(crate) const fn th() -> Duration { Duration::Simple(ThirtySecond) }
-pub(crate) const fn t8() -> Duration { Duration::Tuplet { n: 3, m: 2, base: Eighth } }
-pub(crate) const fn t16() -> Duration { Duration::Tuplet { n: 3, m: 2, base: Sixteenth } }
-pub(crate) const fn t32() -> Duration { Duration::Tuplet { n: 3, m: 2, base: ThirtySecond } }
-pub(crate) const fn qt16() -> Duration { Duration::Tuplet { n: 5, m: 4, base: Sixteenth } }
-pub(crate) const fn st8() -> Duration { Duration::Tuplet { n: 6, m: 4, base: Eighth } }
-pub(crate) const fn st16() -> Duration { Duration::Tuplet { n: 6, m: 4, base: Sixteenth } }
-pub(crate) const fn spt16() -> Duration { Duration::Tuplet { n: 7, m: 4, base: Sixteenth } }
-pub(crate) const fn nt16() -> Duration { Duration::Tuplet { n: 9, m: 8, base: Sixteenth } }
+pub(crate) const fn t8() -> Duration { Duration::Tuplet(TupletSpec { n: 3, m: 2, base: Eighth }) }
+pub(crate) const fn t16() -> Duration { Duration::Tuplet(TupletSpec { n: 3, m: 2, base: Sixteenth }) }
+pub(crate) const fn t32() -> Duration { Duration::Tuplet(TupletSpec { n: 3, m: 2, base: ThirtySecond }) }
+pub(crate) const fn qt16() -> Duration { Duration::Tuplet(TupletSpec { n: 5, m: 4, base: Sixteenth }) }
+pub(crate) const fn st8() -> Duration { Duration::Tuplet(TupletSpec { n: 6, m: 4, base: Eighth }) }
+pub(crate) const fn st16() -> Duration { Duration::Tuplet(TupletSpec { n: 6, m: 4, base: Sixteenth }) }
+pub(crate) const fn spt16() -> Duration { Duration::Tuplet(TupletSpec { n: 7, m: 4, base: Sixteenth }) }
+pub(crate) const fn nt16() -> Duration { Duration::Tuplet(TupletSpec { n: 9, m: 8, base: Sixteenth }) }
 
 #[cfg(test)]
 mod tests {

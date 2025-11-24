@@ -4,7 +4,7 @@
 //! can be rendered dynamically without hardcoding entries in `app.rs`.
 
 use crate::measure::BeatKind;
-use crate::measure::duration::Duration;
+use crate::measure::duration::{Duration, TupletSpec};
 use crate::measure::duration::NoteValue::{Eighth, Quarter, Sixteenth, ThirtySecond};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -157,7 +157,7 @@ pub fn all_tools() -> &'static [Tool] {
             label: "Triole (1/8)",
             group: ToolGroup::Tuplets,
             kind: ToolKind::InsertBeat(BeatTemplate {
-                duration: Tuplet { n: 3, m: 2, base: Eighth },
+                duration: Tuplet(TupletSpec { n: 3, m: 2, base: Eighth }),
                 kind: Note,
             }),
             shortcut: None,
@@ -167,7 +167,7 @@ pub fn all_tools() -> &'static [Tool] {
             label: "Quintole (1/16)",
             group: ToolGroup::Tuplets,
             kind: ToolKind::InsertBeat(BeatTemplate {
-                duration: Tuplet { n: 5, m: 4, base: Sixteenth },
+                duration: Tuplet(TupletSpec { n: 5, m: 4, base: Sixteenth }),
                 kind: Note,
             }),
             shortcut: None,
@@ -177,7 +177,7 @@ pub fn all_tools() -> &'static [Tool] {
             label: "Sextole (1/16)",
             group: ToolGroup::Tuplets,
             kind: ToolKind::InsertBeat(BeatTemplate {
-                duration: Tuplet { n: 6, m: 4, base: Sixteenth },
+                duration: Tuplet(TupletSpec { n: 6, m: 4, base: Sixteenth }),
                 kind: Note,
             }),
             shortcut: None,
@@ -187,7 +187,7 @@ pub fn all_tools() -> &'static [Tool] {
             label: "Septole (1/16)",
             group: ToolGroup::Tuplets,
             kind: ToolKind::InsertBeat(BeatTemplate {
-                duration: Tuplet { n: 7, m: 4, base: Sixteenth },
+                duration: Tuplet(TupletSpec { n: 7, m: 4, base: Sixteenth }),
                 kind: Note,
             }),
             shortcut: None,
@@ -197,7 +197,7 @@ pub fn all_tools() -> &'static [Tool] {
             label: "Nonole (1/16)",
             group: ToolGroup::Tuplets,
             kind: ToolKind::InsertBeat(BeatTemplate {
-                duration: Tuplet { n: 9, m: 8, base: Sixteenth },
+                duration: Tuplet(TupletSpec { n: 9, m: 8, base: Sixteenth }),
                 kind: Note,
             }),
             shortcut: None,

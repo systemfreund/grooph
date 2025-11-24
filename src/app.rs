@@ -1,9 +1,11 @@
-use crate::measure::duration::{Duration, NoteValue};
+use crate::measure::duration::{Duration, NoteValue, TupletSpec};
 use crate::measure::{Measure, TimeSignature};
 
 use crate::layout::pixel_layout::{LayoutOpts, build_measure_layout};
+use crate::measure::BeatKind::Note;
 use crate::measure::duration::NoteValue::*;
 use crate::measure::duration::human_readable;
+use crate::measure::editing::Modification;
 use crate::measure::{Beat, BeatKind};
 use crate::render::glyphs::{
     GLYPH_LEFT_TUPLET_BRACKET, GLYPH_NOTE_32ND, GLYPH_NOTE_EIGHTH, GLYPH_NOTE_HALF,
@@ -13,18 +15,17 @@ use crate::render::glyphs::{
 };
 use crate::render::measure::{compute_em, draw_measure, draw_notes};
 use crate::tools::{EditOp, Modifier, Tool, ToolKind};
-use crate::{ToolGroup, all_tools};
+use crate::{BeatTemplate, ToolGroup, all_tools};
+use BeatKind::Rest;
 use eframe::egui::scroll_area::{ScrollBarVisibility, ScrollSource};
 use eframe::egui::{
-    Align, Atom, Context, Direction, Id, Key, Label, Layout, Ui, Vec2,
+    Align, Atom, Context, Direction, Id, Key, Label, Layout, Response, Ui, Vec2,
     global_theme_preference_switch,
 };
 use eframe::epaint::text::{FontInsert, InsertFontFamily};
 use eframe::epaint::{FontFamily, FontId};
 use eframe::{App, CreationContext, egui};
 use egui::containers::Frame;
-use BeatKind::Rest;
-use crate::measure::BeatKind::Note;
 
 pub struct Grooph<'a> {
     font_family: FontFamily,
@@ -85,7 +86,7 @@ fn tool_icon_glyph(t: &Tool) -> (String, bool) {
 
                     (s.to_string(), is_note)
                 }
-                Duration::Tuplet { n, .. } => {
+                Duration::Tuplet(TupletSpec { n, .. }) => {
                     // Tuplets: zeige nur die Zählzahl (3,5,6,7,9)
                     (
                         format!(
@@ -263,17 +264,17 @@ impl App for Grooph<'_> {
                 }
                 self.cursor_idx = pos;
 
-                // Edits apply only when cursor is on a committed beat
+                // Edits apply only when the cursor is on a committed beat
                 let idx = self.cursor_idx.min(beats_len.saturating_sub(1));
                 if i.key_pressed(Key::Delete) {
-                    // Remove beat at cursor
+                    // Remove beat at the cursor
                     self.measure.remove(idx);
                     // Move cursor right
                     let new_pos = (self.measure.beats().len() - 1).min(self.cursor_idx + 1);
                     self.cursor_idx = new_pos;
                 }
                 if i.key_pressed(Key::Backspace) {
-                    // Remove beat at cursor
+                    // Remove beat at the cursor
                     self.measure.remove(idx);
                     // Move cursor left
                     let new_len = self.measure.beats().len();
@@ -281,111 +282,28 @@ impl App for Grooph<'_> {
                     self.cursor_idx = new_pos;
                 }
                 if i.key_pressed(Key::Space) {
-                    // Toggle between note and rest at cursor (preserve duration)
                     self.measure.toggle_beat_kind(idx);
                 }
                 if i.key_pressed(Key::Num1) {
-                    self.set_beat(idx, Quarter, false, None);
+                    self.set_beat(idx, Quarter, None);
                 }
                 if i.key_pressed(Key::Num2) {
-                    self.set_beat(idx, Eighth, true, None);
+                    self.set_beat(idx, Eighth, None);
                 }
                 if i.key_pressed(Key::Num3) {
-                    self.set_beat(idx, Sixteenth, true, None);
+                    self.set_beat(idx, Sixteenth, None);
                 }
                 if i.key_pressed(Key::Num4) {
-                    self.set_beat(idx, ThirtySecond, true, None);
+                    self.set_beat(idx, ThirtySecond, None);
                 }
                 if i.key_pressed(Key::Period) {
-                    // Toggle dotted (1 dot) for the current beat. If it cannot be changed (would overflow or unfillable), ignore.
-                    let _ = self.measure.toggle_dotted_at(idx);
+                    self.measure.toggle_dotted(idx);
                 }
                 if i.key_pressed(Key::A) {
-                    // Toggle user accent on the current beat
-                    self.measure.toggle_accent_at(idx);
+                    self.measure.toggle_accent(idx);
                 }
                 if i.key_pressed(Key::T) {
-                    // Cycle tuplets with stable group start targeting:
-                    // Non-tuplet -> 1/8 Triplet -> 1/16 Quintuplet -> 1/16 Sextuplet -> 1/16 Septuplet -> 1/16 Nonuplet -> Dissolve
-                    // If the cursor is inside an existing tuplet group, always operate at the group's start index
-                    let beats = self.measure.beats();
-                    let gid_at_cursor = beats[idx].tuplet_group_id;
-                    let start_idx = if let Some(gid) = gid_at_cursor {
-                        // scan left to find the first index with the same group id
-                        let mut sidx = idx;
-                        while sidx > 0
-                            && self.measure.beats()[sidx - 1].tuplet_group_id == Some(gid)
-                        {
-                            sidx -= 1;
-                        }
-                        sidx
-                    } else {
-                        idx
-                    };
-
-                    // Determine current state using the duration at the group start (or cursor if non-tuplet)
-                    let cur_beat = self.measure.beats()[start_idx];
-                    let mut did_dissolve = false;
-                    let mut did_recreate = false;
-                    // Falls wir uns in einer Tuplet‑Gruppe befinden und in die nächste Gruppe wechseln,
-                    // erfassen wir vorher die relative Notenbelegung, um sie nach der Rekreation
-                    // bestmöglich auf die neue Grid zu projizieren.
-                    let mut captured_offsets: Option<Vec<(u32, bool)>> = None;
-                    let changed = match cur_beat.duration {
-                        Duration::Tuplet { n, m, base } => {
-                            let next_target = match (n, m, base) {
-                                (3, 2, Eighth) => Some((5, 4, Sixteenth)),
-                                (5, 4, Sixteenth) => Some((6, 4, Sixteenth)),
-                                (6, 4, Sixteenth) => Some((7, 4, Sixteenth)),
-                                (7, 4, Sixteenth) => Some((9, 8, Sixteenth)),
-                                _ => None,
-                            };
-
-                            // Dissolve current group from its start
-                            // Vor dem Auflösen ggf. Noten‑Offsets erfassen, nur wenn wir ein nächstes Ziel haben
-                            if next_target.is_some() {
-                                captured_offsets =
-                                    self.measure.tuplet_group_note_offsets(start_idx);
-                            }
-                            if self.measure.dissolve_tuplet_group_at(start_idx) {
-                                did_dissolve = true;
-                                // Try to convert to next target if defined, also at group start
-                                if let Some((tn, tm, tbase)) = next_target
-                                    && self
-                                        .measure
-                                        .convert_to_tuplet_at(start_idx, tn, tm, tbase, false)
-                                {
-                                    did_recreate = true;
-                                    // Nach erfolgreicher Rekreation ggf. Projektion anwenden
-                                    if let Some(ref src) = captured_offsets {
-                                        let _ =
-                                            self.measure.apply_tuplet_projection_at(start_idx, src);
-                                    }
-                                }
-                                true
-                            } else {
-                                false
-                            }
-                        }
-                        _ => {
-                            let ok =
-                                self.measure.convert_to_tuplet_at(start_idx, 3, 2, Eighth, false);
-                            if ok {
-                                did_recreate = true;
-                            }
-                            ok
-                        }
-                    };
-
-                    // Cursor nur verschieben, wenn wir ausschließlich aufgelöst haben (kein direktes Re‑Create)
-                    if changed && did_dissolve && !did_recreate {
-                        let new_len = self.measure.beats().len();
-                        if new_len > 0 {
-                            self.cursor_idx = start_idx.min(new_len - 1);
-                        } else {
-                            self.cursor_idx = 0;
-                        }
-                    }
+                    self.set_tuplet(idx, None);
                 }
             }
         });
@@ -397,33 +315,10 @@ impl Grooph<'_> {
         &mut self,
         idx: usize,
         base: NoteValue,
-        allow_on_tuplet: bool,
         beat_kind: Option<BeatKind>,
-    ) -> bool {
-        let cur = self.measure.beats()[idx];
-        let new_dur_opt = match cur.duration {
-            Duration::Tuplet { n, m, base: _ } => {
-                if allow_on_tuplet {
-                    Some(Duration::Tuplet { n, m, base })
-                } else {
-                    None
-                }
-            }
-            _ => Some(Duration::Simple(base)),
-        };
-
-        let ok = if let Some(new_dur) = new_dur_opt {
-            let kind = if let Some(override_kind) = beat_kind { override_kind } else { cur.kind };
-            let new_beat = match kind {
-                Note => Beat::note(new_dur),
-                Rest => Beat::rest(new_dur),
-            };
-            self.measure.set_beat_at(idx, new_beat).is_ok()
-        } else {
-            false
-        };
-
-        if ok {
+    ) -> Option<Modification> {
+        let result = self.measure.modify_beat(idx, base, beat_kind);
+        if result.is_some() {
             let new_len = self.measure.beats().len();
             if new_len > 0 {
                 let last = new_len - 1;
@@ -433,7 +328,20 @@ impl Grooph<'_> {
             }
         }
 
-        ok
+        result
+    }
+
+    fn set_tuplet(&mut self, idx: usize, tuplet_spec: Option<TupletSpec>) -> Option<Modification> {
+        let result = self.measure.set_tuplet(idx, tuplet_spec, true);
+        if let Some(Modification::DissolveTuplet(tuplet_idx)) = result {
+            let new_len = self.measure.beats().len();
+            if new_len > 0 {
+                self.cursor_idx = tuplet_idx.min(new_len - 1);
+            } else {
+                self.cursor_idx = 0;
+            }
+        }
+        result
     }
 
     fn apply_tool(&mut self, tool: &Tool) {
@@ -444,12 +352,64 @@ impl Grooph<'_> {
                     return;
                 }
                 let idx = self.cursor_idx.min(beats_len - 1);
-                self.set_beat(idx, template.duration.base_note(), true, Some(template.kind));
+
+                let result = match template.duration {
+                    Duration::Simple(_) => {
+                        self.set_beat(idx, template.duration.base_note(), Some(template.kind))
+                    }
+                    Duration::Tuplet(spec) => self.set_tuplet(idx, Some(spec)),
+                    _ => None,
+                };
+
+                println!("{:?}", result);
             }
             _ => {
                 // Andere Toolarten (Modifier/Edit/Meta) werden in einem späteren Schritt verdrahtet.
             }
         }
+    }
+
+    fn note_button(&self, ui: &mut Ui, template: BeatTemplate, id: &str) -> Response {
+        let tile = 90.0;
+        let symbol_id = Id::new(id);
+        let symbol = Atom::custom(symbol_id, Vec2::splat(tile));
+        let button = egui::Button::new(symbol).corner_radius(10).atom_ui(ui);
+
+        if let Some(rect) = button.rect(symbol_id) {
+            let beat_count =
+                if let Duration::Tuplet(TupletSpec { m, .. }) = template.duration { m } else { 1 };
+
+            let mut measure = Measure::new_init(
+                TimeSignature {
+                    beats: beat_count,
+                    beat_unit: template.duration.base_note().denominator(),
+                },
+                template.kind,
+            );
+
+            if let Duration::Tuplet(TupletSpec { n, .. }) = template.duration {
+                for i in 0..n {
+                    measure.set_beat(i as usize, Beat::note(template.duration)).unwrap();
+                }
+            }
+
+            let em = compute_em(&rect, 0.4, ui);
+            let opts = LayoutOpts {
+                rect,
+                font_id: FontId::new(em, self.font_id.family.clone()),
+                em,
+                layout_clef: false,
+                layout_time_signature: false,
+                y_offset: if template.kind == Note { 18.0 } else { 5.0 },
+                stem_length_factor: 0.9,
+                stem_thickness_factor: 0.03,
+            };
+            let measure_layout = build_measure_layout(&measure, &opts);
+            let painter = &ui.painter_at(rect);
+            draw_notes(painter, &measure_layout, ui.style().visuals.text_color(), &opts);
+        }
+
+        button.response
     }
 
     fn tool_palette(&mut self, tools: &[Tool], groups: &[ToolGroup], ui: &mut Ui) {
@@ -460,55 +420,11 @@ impl Grooph<'_> {
             }
 
             for t in group_tools {
-                match t.kind {
-                    ToolKind::InsertBeat(template) => {
-                        let tile = 90.0;
-                        let symbol_id = Id::new(t.id);
-                        let symbol = Atom::custom(symbol_id, Vec2::splat(tile));
-                        let button = egui::Button::new(symbol).corner_radius(10).atom_ui(ui);
-
-                        if let Some(rect) = button.rect(symbol_id) {
-                            let beat_count = if let Duration::Tuplet { m, .. } = template.duration {
-                                m
-                            } else {
-                                1
-                            };
-
-                            let mut measure = Measure::new_init(
-                                TimeSignature {
-                                    beats: beat_count,
-                                    beat_unit: template.duration.base_note().denominator(),
-                                },
-                                template.kind,
-                            );
-
-                            if let Duration::Tuplet { n, .. } = template.duration {
-                                for i in 0..n {
-                                    measure.set_beat_at(i as usize, Beat::note(template.duration)).unwrap();
-                                }
-                            }
-
-                            let em = compute_em(&rect, 0.4, ui);
-                            let opts = LayoutOpts {
-                                rect,
-                                font_id: FontId::new(em, self.font_id.family.clone()),
-                                em,
-                                layout_clef: false,
-                                layout_time_signature: false,
-                                y_offset: if template.kind == Note { 18.0 } else { 5.0 },
-                                stem_length_factor: 0.9,
-                                stem_thickness_factor: 0.03,
-                            };
-                            let measure_layout = build_measure_layout(&measure, &opts);
-                            let painter = &ui.painter_at(rect);
-                            draw_notes(painter, &measure_layout, ui.style().visuals.text_color(), &opts);
-                        }
-
-                        if button.response.clicked() {
-                            self.apply_tool(t);
-                        }
+                if let ToolKind::InsertBeat(template) = t.kind {
+                    let button = self.note_button(ui, template, &t.id);
+                    if button.clicked() {
+                        self.apply_tool(t);
                     }
-                    _ => {}
                 }
             }
         }
@@ -517,7 +433,7 @@ impl Grooph<'_> {
     pub fn new(cc: &CreationContext) -> Self {
         add_font(&cc.egui_ctx);
         let ff = FontFamily::Name("music".into());
-        let m = Measure::new(TimeSignature { beats: 7, beat_unit: 8});
+        let m = Measure::new(TimeSignature { beats: 7, beat_unit: 8 });
         Self {
             font_family: ff.clone(),
             font_id: FontId::new(16.0, ff),
@@ -527,5 +443,4 @@ impl Grooph<'_> {
             show_settings: false,
         }
     }
-
 }

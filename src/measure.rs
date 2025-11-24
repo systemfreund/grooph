@@ -1,5 +1,6 @@
 mod beat;
 pub(crate) mod duration;
+pub(crate) mod editing;
 mod fill;
 pub(crate) mod grid;
 pub(super) mod grouping;
@@ -9,7 +10,7 @@ pub(crate) mod time_signature;
 use crate::measure::BeatKind::Rest;
 pub(crate) use crate::measure::beat::{Beat, BeatKind};
 use crate::measure::duration::NoteValue::{Eighth, Sixteenth, ThirtySecond};
-use crate::measure::duration::{Duration, duration_to_debug_str, qt16};
+use crate::measure::duration::{Duration, TupletSpec, duration_to_debug_str, qt16};
 use crate::measure::grid::{DEFAULT_GRID, Grid};
 pub(crate) use crate::measure::time_signature::TimeSignature;
 use BeatKind::Note;
@@ -82,7 +83,7 @@ impl<'a> Measure<'a> {
     pub fn beats(&self) -> &Vec<Beat> { &self.beats }
 
     /// Replace the beat at index `idx` with `beat` if it fits and the remainder stays fillable.
-    pub fn set_beat_at(&mut self, idx: usize, beat: Beat) -> Result<(), MeasureError> {
+    pub fn set_beat(&mut self, idx: usize, beat: Beat) -> Result<(), MeasureError> {
         assert!(idx < self.beats.len());
         let old_accent = self.beats[idx].accented;
         let dur_old = self.beats[idx].duration; // duration of the beat to be replaced
@@ -100,9 +101,11 @@ impl<'a> Measure<'a> {
 
         // Reject grid-incompatible replacement into a tuplet slot; also prepare id inheritance
         let mut new_beat = beat;
-        if let Duration::Tuplet { n: n_old, m: m_old, .. } = dur_old {
+        if let Duration::Tuplet(TupletSpec { n: n_old, m: m_old, .. }) = dur_old {
             match beat.duration {
-                Duration::Tuplet { n: n_new, m: m_new, .. } if n_new == n_old && m_new == m_old => {
+                Duration::Tuplet(TupletSpec { n: n_new, m: m_new, .. })
+                    if n_new == n_old && m_new == m_old =>
+                {
                     // ok: same tuplet grid - inherit group id if present
                     new_beat.tuplet_group_id = self.beats[idx].tuplet_group_id;
                 }
@@ -119,7 +122,7 @@ impl<'a> Measure<'a> {
         // the entire tuplet group (n items spanning m·base), regardless of whether this is a
         // net growth or shrink relative to the original slot. Handling it here ensures we
         // don't create partial groups in the generic grow/shrink logic.
-        if let Duration::Tuplet { n, m, base } = new_beat.duration
+        if let Duration::Tuplet(TupletSpec { n, m, base }) = new_beat.duration
             && !matches!(dur_old, Duration::Tuplet { .. })
         {
             // Compute the total span this tuplet group should occupy
@@ -142,7 +145,7 @@ impl<'a> Measure<'a> {
                 // If we encounter a tuplet of a different grid (different n/m), refuse
                 // (don't break existing groups). Base may differ (e.g., t8 vs t16) but
                 // n/m define the grid equivalence here.
-                if let Duration::Tuplet { n: n2, m: m2, .. } = b.duration
+                if let Duration::Tuplet(TupletSpec { n: n2, m: m2, .. }) = b.duration
                     && !(n2 == n && m2 == m)
                 {
                     return self.unfillable_err(new_ticks);
@@ -213,11 +216,11 @@ impl<'a> Measure<'a> {
                         self.beats.remove(p);
                         // When growing inside a tuplet slot, constrain the remainder to the same tuplet grid
                         let allowed: Vec<Duration> = match dur_old {
-                            Duration::Tuplet { n: n_old, m: m_old, .. } => self.grid
+                            Duration::Tuplet(TupletSpec { n: n_old, m: m_old, .. }) => self.grid
                                 .durations
                                 .iter()
                                 .cloned()
-                                .filter(|d| matches!(d, Duration::Tuplet { n, m, .. } if *n == n_old && *m == m_old))
+                                .filter(|d| matches!(d, Duration::Tuplet(TupletSpec { n, m, .. }) if *n == n_old && *m == m_old))
                                 .collect(),
                             _ => Vec::new(),
                         };
@@ -238,11 +241,11 @@ impl<'a> Measure<'a> {
             // If we are inside a tuplet slot, constrain the filler to durations that belong to the
             // same tuplet grid (same n,m).
             let allowed: Vec<Duration> = match dur_old {
-                Duration::Tuplet { n: n_old, m: m_old, .. } => self.grid
+                Duration::Tuplet(TupletSpec { n: n_old, m: m_old, .. }) => self.grid
                     .durations
                     .iter()
                     .cloned()
-                    .filter(|d| matches!(d, Duration::Tuplet { n, m, .. } if *n == n_old && *m == m_old))
+                    .filter(|d| matches!(d, Duration::Tuplet(TupletSpec { n, m, .. }) if *n == n_old && *m == m_old))
                     .collect(),
                 _ => Vec::new(),
             };
@@ -299,115 +302,6 @@ impl<'a> Measure<'a> {
 
     pub fn time_signature(&self) -> TimeSignature { self.time_signature }
 
-    /// Liefert für die Tuplet‑Gruppe, die bei `start_idx` beginnt, die relativen Onset‑Ticks
-    /// aller gesetzten Noten innerhalb der Gruppe. Jeder Eintrag enthält `(offset_ticks, accented)`.
-    /// Die Offsets sind relativ zum Gruppenstart, 0‑basiert, in Grid‑Ticks, und stets aufsteigend sortiert.
-    ///
-    /// Rückgabe `None`, wenn an `start_idx` keine Tuplet‑Gruppe beginnt.
-    pub fn tuplet_group_note_offsets(&self, start_idx: usize) -> Option<Vec<(u32, bool)>> {
-        if start_idx >= self.beats.len() { return None; }
-        let b0 = self.beats[start_idx];
-        let gid = b0.tuplet_group_id?;
-        // sicherstellen, dass start_idx wirklich der Gruppenanfang ist
-        if start_idx > 0 && self.beats[start_idx - 1].tuplet_group_id == Some(gid) {
-            return None;
-        }
-
-        let anchor = self.tuplet_anchors.get(&gid)?;
-        let span_ticks = anchor.target_ticks;
-        // Onsets der gesamten Measure berechnen und dann relative Offsets der Gruppe extrahieren
-        let onsets = self.grid.compute_onset_ticks(&self.beats);
-        let start_onset = onsets[start_idx];
-
-        let mut offsets: Vec<(u32, bool)> = Vec::new();
-        let mut idx = start_idx;
-        while idx < self.beats.len() && self.beats[idx].tuplet_group_id == Some(gid) {
-            if self.beats[idx].kind == Note {
-                let rel = onsets[idx] - start_onset;
-                // Kappen vorsichtshalber auf die Spanne (sollte nicht notwendig sein)
-                let rel = rel.min(span_ticks);
-                offsets.push((rel, self.beats[idx].accented));
-            }
-            idx += 1;
-        }
-        offsets.sort_by_key(|e| e.0);
-        Some(offsets)
-    }
-
-    /// Projiziert eine zuvor erfasste Notenbelegung (relative Onset‑Ticks innerhalb einer alten Tuplet‑Gruppe)
-    /// auf die neu erzeugte Tuplet‑Gruppe, die an `start_idx` beginnt.
-    ///
-    /// Algorithmus:
-    /// - Ermittelt die Onset‑Ticks der Slots der neuen Gruppe relativ zum Gruppenstart.
-    /// - Ordnet jede Quell‑Note dem nächstgelegenen freien Ziel‑Slot zu (bei Gleichstand kleinere Index‑Präferenz),
-    ///   sodass keine Duplikate entstehen (greedy Zuordnung).
-    /// - Setzt alle Slots standardmäßig auf Rest, die gemappten auf Note; Akzente werden pro Quell‑Note übertragen.
-    ///
-    /// Rückgabe: `true` bei Erfolg, `false` falls an `start_idx` keine Tuplet‑Gruppe beginnt.
-    pub fn apply_tuplet_projection_at(&mut self, start_idx: usize, source_offsets: &[(u32, bool)]) -> bool {
-        if start_idx >= self.beats.len() { return false; }
-        let b0 = self.beats[start_idx];
-        let gid = match b0.tuplet_group_id {
-            Some(id) => id,
-            None => return false,
-        };
-
-        // Grenzen der Gruppe bestimmen
-        let mut end = start_idx + 1;
-        while end < self.beats.len() && self.beats[end].tuplet_group_id == Some(gid) { end += 1; }
-
-        // n bestimmen (Anzahl Slots)
-        let n = match b0.duration {
-            Duration::Tuplet { n, .. } => n as usize,
-            _ => return false,
-        };
-
-        // Onsets der neuen Gruppe (relativ) berechnen
-        let onsets = self.grid.compute_onset_ticks(&self.beats);
-        let start_onset = onsets[start_idx];
-        let mut target_rel: Vec<(u32, usize)> = Vec::with_capacity(n);
-        let mut i = start_idx;
-        while i < end {
-            let rel = onsets[i] - start_onset;
-            target_rel.push((rel, i));
-            i += 1;
-        }
-        // Sicherheitsnetz: falls unerwartet mehr/ weniger Slots, weiter mit vorhandenen
-        target_rel.sort_by_key(|e| e.0);
-        let tlen = target_rel.len();
-        if tlen == 0 { return false; }
-
-        // Alle Slots zunächst auf Rest setzen und Akzent löschen; Tremolo löschen
-        for j in start_idx..end {
-            self.beats[j].kind = Rest;
-            self.beats[j].accented = false;
-        }
-
-        // Greedy Zuordnung: für jede Quell‑Note den nächstgelegenen freien Ziel‑Slot suchen
-        let mut used = vec![false; tlen];
-        for &(src_rel, src_accent) in source_offsets.iter() {
-            // finde nächstgelegenen Index
-            let mut best_k: Option<usize> = None;
-            let mut best_dist: u32 = u32::MAX;
-            for (k, (trel, _tidx)) in target_rel.iter().enumerate() {
-                if used[k] { continue; }
-                let dist = if *trel > src_rel { *trel - src_rel } else { src_rel - *trel };
-                if dist < best_dist || (dist == best_dist && best_k.map(|x| k < x).unwrap_or(true)) {
-                    best_dist = dist;
-                    best_k = Some(k);
-                }
-            }
-            if let Some(k) = best_k {
-                let ti = target_rel[k].1;
-                self.beats[ti].kind = Note;
-                if src_accent { self.beats[ti].accented = true; }
-                used[k] = true;
-            }
-        }
-
-        true
-    }
-
     /// Return a vector with the absolute position (1-based) of each beat as floats.
     /// Examples:
     /// - In 4/4 with four quarters: [1.0, 2.0, 3.0, 4.0]
@@ -435,7 +329,7 @@ impl<'a> Measure<'a> {
 
     /// Intended to be used by tests
     pub(crate) fn add_beat(&mut self, beat: Beat) -> Result<(), MeasureError> {
-        match self.set_beat_at(self.next_insert, beat) {
+        match self.set_beat(self.next_insert, beat) {
             Ok(()) => {
                 self.next_insert += 1;
                 Ok(())
@@ -459,8 +353,7 @@ impl<'a> Measure<'a> {
         if let Some(fill) = self.best_fill_for_gap(self.max_ticks(), allowed) {
             let take = fill.len();
             for duration in fill.into_iter().take(take) {
-                let beat =
-                    Beat { duration, kind, accented: false, tuplet_group_id: None };
+                let beat = Beat { duration, kind, accented: false, tuplet_group_id: None };
                 self.beats.push(beat);
             }
         }
@@ -504,50 +397,6 @@ impl<'a> Measure<'a> {
         }
     }
 
-    /// Toggle dotted (one dot) for the beat at `idx`.
-    /// - Simple(base) -> Dotted { base, dots: 1 }
-    /// - Dotted { base, dots: 1 } -> Simple(base)
-    ///
-    /// No-op for other cases (tuplets, multi-dot) or if replacement doesn't fit.
-    /// Returns true if the duration changed.
-    pub fn toggle_dotted_at(&mut self, idx: usize) -> bool {
-        if idx >= self.beats.len() {
-            return false;
-        }
-        let current = self.beats[idx];
-        let new_dur = match current.duration {
-            Duration::Simple(base) => Some(Duration::Dotted { base, dots: 1 }),
-            Duration::Dotted { base, dots: 1 } => Some(Duration::Simple(base)),
-            _ => None,
-        };
-        if let Some(dur) = new_dur {
-            let new_beat = Beat {
-                duration: dur,
-                kind: current.kind,
-                accented: current.accented,
-                tuplet_group_id: current.tuplet_group_id,
-            };
-            if self.set_beat_at(idx, new_beat).is_ok() {
-                return true;
-            }
-        }
-        false
-    }
-
-    /// Set the user accent flag at index `idx`.
-    pub fn set_accent_at(&mut self, idx: usize, accented: bool) {
-        if let Some(b) = self.beats.get_mut(idx) && b.kind == Note {
-            b.accented = accented;
-        }
-    }
-
-    /// Toggle the user accent flag at index `idx`.
-    pub fn toggle_accent_at(&mut self, idx: usize) {
-        if let Some(b) = self.beats.get(idx) {
-            self.set_accent_at(idx, !b.accented);
-        }
-    }
-
     fn unfillable_err(&self, attempted: u32) -> Result<(), MeasureError> {
         Err(MeasureError::Unfillable { attempted: self.grid.ticks_to_whole_notes(attempted) })
     }
@@ -557,147 +406,6 @@ impl<'a> Measure<'a> {
             attempted: self.grid.ticks_to_whole_notes(attempted),
             available: self.grid.ticks_to_whole_notes(remaining),
         })
-    }
-
-    /// Löst die Tuplet‑Gruppe auf, in der sich `idx` befindet.
-    ///
-    /// Verhalten:
-    /// - Ersetzt die gesamte Spanne der Gruppe durch eine einfache (nicht‑Tuplet) Auffüllung.
-    /// - Initialisierung der neuen Beats: Standard sind Rests; wenn die aufgelöste Gruppe mindestens
-    ///   eine Note enthielt, wird der erste neu eingefügte Beat als Note angelegt.
-    /// - Ein vorhandener Akzent innerhalb der Gruppe wird auf den ersten neu eingefügten Beat übernommen.
-    /// - Entfernt die `tuplet_group_id` in diesem Bereich und löscht den verknüpften Anchor.
-    /// - Rückgabe: `true` bei erfolgreicher Auflösung, sonst `false` (z. B. wenn kein Tuplet an `idx`).
-    pub fn dissolve_tuplet_group_at(&mut self, idx: usize) -> bool {
-        if idx >= self.beats.len() {
-            return false;
-        }
-        let Some(group_id) = self.beats[idx].tuplet_group_id else {
-            return false;
-        };
-
-        // Finde zusammenhängende Spanne gleicher group_id
-        let mut start = idx;
-        while start > 0 && self.beats[start - 1].tuplet_group_id == Some(group_id) {
-            start -= 1;
-        }
-        let mut end = idx + 1;
-        while end < self.beats.len() && self.beats[end].tuplet_group_id == Some(group_id) {
-            end += 1;
-        }
-        if start >= end {
-            return false;
-        }
-
-        // Merke, ob die Gruppe mindestens eine Note bzw. einen Akzent enthielt
-        let mut had_any_note = false;
-        let mut had_any_accent = false;
-        for b in &self.beats[start..end] {
-            if b.kind == Note { had_any_note = true; }
-            if b.accented { had_any_accent = true; }
-        }
-
-        self.beats.drain(start..end);
-
-        let allowed: Vec<Duration> = self
-            .grid
-            .durations
-            .iter()
-            .copied()
-            .filter(|d| matches!(d, Duration::Simple(_)))
-            .collect();
-
-        let span_ticks = self.tuplet_anchors.get(&group_id).unwrap().target_ticks;
-        self.fill_at(start, span_ticks, &allowed, Either::Right(Rest)).unwrap();
-
-        // Post‑Processing: ersten neu eingefügten Beat ggf. als Note setzen und Akzent übernehmen
-        if start < self.beats.len() {
-            // Sicherheit: keine Tuplet‑ID
-            self.beats[start].tuplet_group_id = None;
-            if had_any_note {
-                self.beats[start].kind = Note;
-            }
-            // Akzent übernehmen (falls irgendein Beat in der Gruppe akzentuiert war)
-            self.beats[start].accented = had_any_accent;
-        }
-
-        // Anchor entfernen, da die Gruppe aufgelöst wurde
-        self.tuplet_anchors.remove(&group_id);
-        true
-    }
-
-    /// Wandelt den Beat an `idx` in eine Tuplet‑Gruppe des Typs (n in der Zeit von m, Basis `base`) um.
-    ///
-    /// Bedingungen/Verhalten:
-    /// - Wenn `idx` außerhalb liegt oder der Beat dort bereits ein Tuplet ist, passiert nichts und es wird `false` zurückgegeben.
-    /// - Ansonsten wird versucht, den Beat durch einen Tuplet‑Beat gleicher Art (Note/Rest) zu ersetzen.
-    ///   Die Methode delegiert an `set_beat_at`, welches die gesamte Gruppe inkl. Anchor anlegt und
-    ///   verbleibende Slots der Gruppe auffüllt. Reicht der Platz im Takt nicht aus, bleibt
-    ///   der Takt unverändert und die Funktion liefert `false`.
-    pub fn convert_to_tuplet_at(
-        &mut self,
-        idx: usize,
-        n: u8,
-        m: u8,
-        base: duration::NoteValue,
-        overwrite: bool,
-    ) -> bool {
-        if idx >= self.beats.len() {
-            return false;
-        }
-        let cur = self.beats[idx];
-        if matches!(cur.duration, Duration::Tuplet { .. }) {
-            return false;
-        }
-
-        // Protection: Stop if we would absorb a note and overwrite is false
-        if !overwrite {
-            let base_ticks = self.grid.ticks_of(&Duration::Simple(base)).unwrap();
-            let group_span = (m as u32) * base_ticks;
-
-            let mut consumed = 0u32;
-            let mut k = idx;
-            while consumed < group_span {
-                if k >= self.beats.len() {
-                    // If we run out of beats, set_beat_at will handle the error.
-                    break;
-                }
-                // Check if we are about to absorb a subsequent beat that is a note
-                if k > idx && self.beats[k].kind == BeatKind::Note {
-                    return false;
-                }
-                consumed += self.grid.ticks_of(&self.beats[k].duration).unwrap();
-                k += 1;
-            }
-        }
-
-        let new_duration = Duration::Tuplet { n, m, base };
-        let mut new_beat = Beat::new(new_duration, cur.kind);
-        new_beat.accented = cur.accented;
-        // tuplet_group_id wird von set_beat_at korrekt gesetzt
-        if self.set_beat_at(idx, new_beat).is_ok() {
-            // Wenn der ursprüngliche Beat eine Note war, initialisieren wir die ganze neue Tuplet‑Gruppe als Noten
-            if cur.kind == Note {
-                if let Some(group_id) = self.beats[idx].tuplet_group_id {
-                    // Nach links ausdehnen (sollte i. d. R. nicht nötig sein, da set_beat_at an idx beginnt)
-                    let mut k = idx;
-                    while k > 0 && self.beats[k - 1].tuplet_group_id == Some(group_id) {
-                        k -= 1;
-                    }
-                    // Nach rechts gehen und alle Slots auf Note setzen (Akzente unangetastet lassen)
-                    let mut p = k;
-                    while p < self.beats.len()
-                        && self.beats[p].tuplet_group_id == Some(group_id)
-                    {
-                        self.beats[p].kind = Note;
-                        p += 1;
-                    }
-                }
-            }
-            true
-        } else {
-            false
-        }
     }
 }
 
@@ -724,7 +432,6 @@ mod tests {
     use super::*;
     use crate::measure::duration::NoteValue::{Eighth, Sixteenth, ThirtySecond};
     use crate::measure::duration::{Duration, e, q, qt16, s, st8, st16, t8, t16, t32, th};
-    // no layout imports here to avoid using private modules from this scope
 
     fn durations_of(measure: &Measure) -> Vec<Duration> {
         measure.beats().iter().map(|b| b.duration).collect()
@@ -846,8 +553,8 @@ mod tests {
     fn test_triplet_insertions_4() {
         let mut m = Measure::new(TimeSignature::SEVEN_EIGHT);
 
-        assert!(m.set_beat_at(1, Beat::rest(s())).is_ok());
-        assert!(m.set_beat_at(1, Beat::rest(t8())).is_ok());
+        assert!(m.set_beat(1, Beat::rest(s())).is_ok());
+        assert!(m.set_beat(1, Beat::rest(t8())).is_ok());
         assert_eq!(&durations_of(&m), &[e(), t8(), t8(), t8(), e(), e(), e(), e()]);
     }
 
@@ -866,10 +573,10 @@ mod tests {
         assert!(m.add_beat(Beat::note(t8())).is_ok());
         assert!(m.add_beat(Beat::note(t8())).is_ok());
 
-        assert!(m.set_beat_at(1, Beat::note(t16())).is_ok());
+        assert!(m.set_beat(1, Beat::note(t16())).is_ok());
         assert_eq!(&durations_of(&m), &[t8(), t16(), t16(), t8()]);
 
-        assert!(m.set_beat_at(0, Beat::note(t16())).is_ok());
+        assert!(m.set_beat(0, Beat::note(t16())).is_ok());
         assert_eq!(&durations_of(&m), &[t16(), t16(), t16(), t16(), t8()]);
     }
 
@@ -880,7 +587,7 @@ mod tests {
         assert!(m.add_beat(Beat::note(t8())).is_ok());
         assert!(m.add_beat(Beat::note(t8())).is_ok());
 
-        assert!(m.set_beat_at(2, Beat::note(t32())).is_ok());
+        assert!(m.set_beat(2, Beat::note(t32())).is_ok());
         assert_eq!(&durations_of(&m), &[t8(), t8(), t32(), t32(), t16()]);
     }
 
@@ -891,11 +598,11 @@ mod tests {
         assert!(m.add_beat(Beat::note(t32())).is_ok());
         assert!(m.add_beat(Beat::note(t32())).is_ok());
 
-        assert!(m.set_beat_at(0, Beat::note(t8())).is_err());
-        assert!(m.set_beat_at(0, Beat::note(t16())).is_ok());
+        assert!(m.set_beat(0, Beat::note(t8())).is_err());
+        assert!(m.set_beat(0, Beat::note(t16())).is_ok());
         assert_eq!(&durations_of(&m), &[t16(), t32(), s(), e()]);
 
-        assert!(m.set_beat_at(2, Beat::note(t16())).is_ok());
+        assert!(m.set_beat(2, Beat::note(t16())).is_ok());
         assert_eq!(&durations_of(&m), &[t16(), t32(), t16(), t16(), t16(), s()]);
     }
 
@@ -907,36 +614,36 @@ mod tests {
         assert!(m.add_beat(Beat::note(t16())).is_ok());
 
         // Cannot merge last note in the group (not enough space).
-        assert!(m.set_beat_at(2, Beat::note(t8())).is_err());
+        assert!(m.set_beat(2, Beat::note(t8())).is_err());
 
         // Merge t16 note in the middle.
-        assert!(m.set_beat_at(1, Beat::note(t8())).is_ok());
+        assert!(m.set_beat(1, Beat::note(t8())).is_ok());
         assert_eq!(&durations_of(&m), &[t16(), t8(), e()]);
 
         // Subdivide t8 note in the middle.
-        assert!(m.set_beat_at(1, Beat::rest(t16())).is_ok());
+        assert!(m.set_beat(1, Beat::rest(t16())).is_ok());
         assert_eq!(&durations_of(&m), &[t16(), t16(), t16(), e()]);
 
         // Subdivide third t16 note.
-        assert!(m.set_beat_at(2, Beat::rest(t32())).is_ok());
+        assert!(m.set_beat(2, Beat::rest(t32())).is_ok());
         assert_eq!(&durations_of(&m), &[t16(), t16(), t32(), t32(), e()]);
 
         // Merge second note to t8. Must work because the remainder of the tuplet has enough space.
-        assert!(m.set_beat_at(1, Beat::rest(t8())).is_ok());
+        assert!(m.set_beat(1, Beat::rest(t8())).is_ok());
         assert_eq!(&durations_of(&m), &[t16(), t8(), e()]);
     }
 
     #[test]
     fn test_tuplet_split_5() {
         let mut m = Measure::new(TimeSignature::ONE_FOUR);
-        m.set_beat_at(0, Beat::rest(st16())).unwrap();
+        m.set_beat(0, Beat::rest(st16())).unwrap();
 
         // Merge 2nd+3rd st16 beats -> st8
-        m.set_beat_at(1, Beat::rest(st8())).unwrap();
+        m.set_beat(1, Beat::rest(st8())).unwrap();
         assert_eq!(&durations_of(&m), &[st16(), st8(), st16(), st16(), st16()]);
 
         // Merge 1st st16 beat -> st8
-        m.set_beat_at(0, Beat::rest(st8())).unwrap();
+        m.set_beat(0, Beat::rest(st8())).unwrap();
         assert_eq!(&durations_of(&m), &[st8(), st16(), st16(), st16(), st16()]);
     }
 
@@ -964,9 +671,9 @@ mod tests {
     fn test_beat_positions_triplet_eighths_start() {
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
         // Replace the first three beats with eighth-note triplets
-        m.set_beat_at(0, Beat::note(t8())).unwrap();
-        m.set_beat_at(1, Beat::note(t8())).unwrap();
-        m.set_beat_at(2, Beat::note(t8())).unwrap();
+        m.set_beat(0, Beat::note(t8())).unwrap();
+        m.set_beat(1, Beat::note(t8())).unwrap();
+        m.set_beat(2, Beat::note(t8())).unwrap();
         let pos = m.beat_positions();
         // Expect positions: 1.0, 1 + 1/3, 1 + 2/3
         let expect = [1.0f32, 1.0 + 1.0 / 3.0, 1.0 + 2.0 / 3.0];
@@ -1008,11 +715,11 @@ mod tests {
     #[test]
     fn tuplet_group_0() {
         let mut m = Measure::new(TimeSignature::ONE_FOUR);
-        m.set_beat_at(0, Beat::rest(t8())).unwrap();
+        m.set_beat(0, Beat::rest(t8())).unwrap();
         // Subdivide 2nd t8 + 3rd t8 beat into two t16s each:
-        m.set_beat_at(1, Beat::rest(t16())).unwrap();
+        m.set_beat(1, Beat::rest(t16())).unwrap();
         // Merge tuplet at the 'odd' position. This yields the measure: t8 t16 t8 t16
-        m.set_beat_at(2, Beat::rest(t8())).unwrap();
+        m.set_beat(2, Beat::rest(t8())).unwrap();
 
         assert_eq!(&durations_of(&m), &[t8(), t16(), t8(), t16()]);
         assert_eq!(
@@ -1021,136 +728,5 @@ mod tests {
             }),
             None
         );
-    }
-
-    #[test]
-    fn convert_quarter_to_triplet_eighth_group_in_four_four() {
-        let mut m = Measure::new(TimeSignature::FOUR_FOUR);
-        // Standardfüllung: 4x Viertel Rests
-        let ok = m.convert_to_tuplet_at(0, 3, 2, Eighth, true);
-        assert!(ok, "Conversion to triplet should succeed");
-
-        // Erwartung: drei Triplet‑Achtel an den ersten drei Positionen mit gleicher group_id
-        let id0 = m.beats()[0].tuplet_group_id;
-        assert!(id0.is_some());
-        for i in 0..3 {
-            assert_eq!(m.beats()[i].duration, t8());
-            assert_eq!(m.beats()[i].tuplet_group_id, id0);
-        }
-
-        // Anchor‑Span entspricht einer Viertel‑Spanne
-        let gid = id0.unwrap();
-        let anchor = m.tuplet_anchors.get(&gid).expect("anchor must exist");
-        let base_quarter_ticks = m.grid.ticks_of(&Duration::Simple(Eighth)).unwrap() * 2;
-        assert_eq!(anchor.target_ticks, base_quarter_ticks);
-    }
-
-    #[test]
-    fn convert_noop_when_already_tuplet() {
-        let mut m = Measure::new(TimeSignature::FOUR_FOUR);
-        // Erzeuge zuerst ein Triplet an Position 0
-        m.set_beat_at(0, Beat::note(t8())).unwrap();
-
-        let before = m.clone();
-        let changed = m.convert_to_tuplet_at(0, 3, 2, Eighth, true);
-        assert!(!changed, "Should not convert when already a tuplet");
-        // Unverändert
-        assert_eq!(format!("{:?}", before), format!("{:?}", m));
-    }
-
-    #[test]
-    fn convert_to_tuplet_initializes_notes_when_source_is_note() {
-        let mut m = Measure::new(TimeSignature::FOUR_FOUR);
-        // Stelle sicher, dass Quelle eine Note ist (nicht Rest)
-        m.set_beat_at(0, Beat::note(Duration::Simple(Eighth))).unwrap();
-        // Wandle an derselben Position in Triplet‑Achtel um
-        assert!(m.convert_to_tuplet_at(0, 3, 2, Eighth, true));
-
-        for i in 0..3 {
-            assert_eq!(m.beats()[i].duration, t8());
-            assert_eq!(m.beats()[i].kind, BeatKind::Note, "tuplet slot {} should be a note", i);
-        }
-    }
-
-    #[test]
-    fn convert_to_tuplet_initializes_rests_when_source_is_rest() {
-        let mut m = Measure::new(TimeSignature::FOUR_FOUR);
-        // Standard ist Rest an Index 0
-        assert!(m.convert_to_tuplet_at(0, 3, 2, Eighth, true));
-        for i in 0..3 {
-            assert_eq!(m.beats()[i].duration, t8());
-            assert_eq!(m.beats()[i].kind, BeatKind::Rest, "tuplet slot {} should be a rest", i);
-        }
-    }
-
-    #[test]
-    fn dissolve_tuplet_initializes_note_when_group_contains_any_note_and_preserves_accent() {
-        let mut m = Measure::new(TimeSignature::FOUR_FOUR);
-        // Erzeuge Triplet‑1/8 am Anfang, erster Slot Note, restliche werden als Rests vorinitialisiert
-        m.set_beat_at(0, Beat::note(t8())).unwrap();
-        // Setze einen Akzent innerhalb der Gruppe (z. B. auf den dritten Slot)
-        m.set_accent_at(2, true);
-
-        // Auflösen der Gruppe (über mittleren Slot sicher in der Gruppe)
-        assert!(m.dissolve_tuplet_group_at(1));
-
-        // Erwartung: erster neu eingefügter Beat ist eine Note und akzentuiert
-        assert!(m.beats()[0].tuplet_group_id.is_none());
-        assert_eq!(m.beats()[0].kind, BeatKind::Note);
-        assert!(m.beats()[0].accented, "accent should be preserved on first replacement beat");
-    }
-
-    #[test]
-    fn dissolve_tuplet_all_rests_results_in_rest_and_no_accent() {
-        let mut m = Measure::new(TimeSignature::FOUR_FOUR);
-        // Erzeuge Triplet‑1/8 Gruppe als Rests: Standardzustand ist bereits Rest an 0
-        // also direkt Triplet konvertieren aus einem Rest heraus
-        assert!(m.convert_to_tuplet_at(0, 3, 2, Eighth, true));
-        // Sicherheitscheck: alle drei Slots sind Rests
-        for i in 0..3 { assert_eq!(m.beats()[i].kind, BeatKind::Rest); }
-
-        assert!(m.dissolve_tuplet_group_at(0));
-
-        assert!(m.beats()[0].tuplet_group_id.is_none());
-        assert_eq!(m.beats()[0].kind, BeatKind::Rest);
-        assert!(!m.beats()[0].accented);
-    }
-
-    #[test]
-    fn convert_absorbs_rests_ok() {
-        let mut m = Measure::new(TimeSignature::FOUR_FOUR);
-        // Setup: [Rest(e), Rest(e), Rest(q)...] by replacing first Q with E (fills remainder with E)
-        m.set_beat_at(0, Beat::rest(e())).unwrap();
-        // Now convert idx 0 (Rest(e)) to Triplet Eighths (span Q). Needs to absorb idx 1 (Rest(e)).
-        assert!(m.convert_to_tuplet_at(0, 3, 2, Eighth, false));
-        // Should have created a tuplet group at 0
-        assert!(m.beats()[0].tuplet_group_id.is_some());
-    }
-
-    #[test]
-    fn convert_aborts_on_note_if_no_overwrite() {
-        let mut m = Measure::new(TimeSignature::FOUR_FOUR);
-        // Setup: [Rest(e), Note(e), Rest(q)...]
-        m.set_beat_at(0, Beat::rest(e())).unwrap();
-        m.set_beat_at(1, Beat::note(e())).unwrap();
-
-        // Try convert idx 0 to Triplet Eighths (span Q). Needs to absorb idx 1 which is Note.
-        assert!(!m.convert_to_tuplet_at(0, 3, 2, Eighth, false));
-        // Verify state unchanged (idx 1 is still Note)
-        assert_eq!(m.beats()[1].kind, BeatKind::Note);
-        assert!(m.beats()[0].tuplet_group_id.is_none());
-    }
-
-    #[test]
-    fn convert_overwrites_note_if_overwrite_true() {
-        let mut m = Measure::new(TimeSignature::FOUR_FOUR);
-        // Setup: [Rest(e), Note(e), Rest(q)...]
-        m.set_beat_at(0, Beat::rest(e())).unwrap();
-        m.set_beat_at(1, Beat::note(e())).unwrap();
-
-        // Try convert idx 0 to Triplet Eighths (span Q). Overwrite=true.
-        assert!(m.convert_to_tuplet_at(0, 3, 2, Eighth, true));
-        // Verify tuplet created
-        assert!(m.beats()[0].tuplet_group_id.is_some());
     }
 }
