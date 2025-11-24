@@ -26,7 +26,7 @@ impl LayoutOpts {
         self.font_id.size * self.stem_thickness_factor
     }
 
-    const fn stem_offset(&self) -> f32 { self.font_id.size * 0.13 }
+    const fn stem_offset(&self) -> f32 { self.font_id.size * 0.135 }
 
     pub(crate) const fn beam_thickness(&self) -> f32 {
         // Bravura ~0.5 sp

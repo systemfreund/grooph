@@ -23,6 +23,7 @@ use eframe::epaint::text::{FontInsert, InsertFontFamily};
 use eframe::epaint::{FontFamily, FontId};
 use eframe::{App, CreationContext, egui};
 use egui::containers::Frame;
+use BeatKind::Rest;
 use crate::measure::BeatKind::Note;
 
 pub struct Grooph<'a> {
@@ -61,7 +62,7 @@ fn tool_icon_glyph(t: &Tool) -> (String, bool) {
         ToolKind::InsertBeat(beat) => {
             match beat.duration {
                 Duration::Simple(base) => {
-                    let is_note = matches!(beat.kind, BeatKind::Note);
+                    let is_note = matches!(beat.kind, Note);
                     let s = if is_note {
                         match base {
                             Quarter => GLYPH_NOTE_QUARTER,
@@ -160,8 +161,8 @@ impl App for Grooph<'_> {
                 let b = self.measure.beats()[idx];
                 let desc = human_readable(&b.duration);
                 let kind = match b.kind {
-                    BeatKind::Note => "note",
-                    BeatKind::Rest => "rest",
+                    Note => "note",
+                    Rest => "rest",
                 };
                 label = format!("Beat: {}, {} {}", beat_text, desc, kind);
             }
@@ -414,8 +415,8 @@ impl Grooph<'_> {
         let ok = if let Some(new_dur) = new_dur_opt {
             let kind = if let Some(override_kind) = beat_kind { override_kind } else { cur.kind };
             let new_beat = match kind {
-                BeatKind::Note => Beat::note(new_dur),
-                BeatKind::Rest => Beat::rest(new_dur),
+                Note => Beat::note(new_dur),
+                Rest => Beat::rest(new_dur),
             };
             self.measure.set_beat_at(idx, new_beat).is_ok()
         } else {
