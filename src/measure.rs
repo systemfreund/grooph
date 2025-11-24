@@ -381,7 +381,6 @@ impl<'a> Measure<'a> {
         for j in start_idx..end {
             self.beats[j].kind = Rest;
             self.beats[j].accented = false;
-            self.beats[j].tremolo = None;
         }
 
         // Greedy Zuordnung: für jede Quell‑Note den nächstgelegenen freien Ziel‑Slot suchen
@@ -461,7 +460,7 @@ impl<'a> Measure<'a> {
             let take = fill.len();
             for duration in fill.into_iter().take(take) {
                 let beat =
-                    Beat { duration, kind, tremolo: None, accented: false, tuplet_group_id: None };
+                    Beat { duration, kind, accented: false, tuplet_group_id: None };
                 self.beats.push(beat);
             }
         }
@@ -497,8 +496,6 @@ impl<'a> Measure<'a> {
     /// No-op if `idx` is out of bounds.
     pub fn toggle_beat_kind(&mut self, idx: usize) {
         if let Some(b) = self.beats.get_mut(idx) {
-            // Clear tremolo in both cases to avoid invalid state on rests
-            b.tremolo = None;
             b.kind = match b.kind {
                 Rest => Note,
                 Note => Rest,
@@ -527,7 +524,6 @@ impl<'a> Measure<'a> {
             let new_beat = Beat {
                 duration: dur,
                 kind: current.kind,
-                tremolo: None,
                 accented: current.accented,
                 tuplet_group_id: current.tuplet_group_id,
             };
@@ -616,9 +612,8 @@ impl<'a> Measure<'a> {
 
         // Post‑Processing: ersten neu eingefügten Beat ggf. als Note setzen und Akzent übernehmen
         if start < self.beats.len() {
-            // Sicherheit: keine Tuplet‑ID und kein Tremolo
+            // Sicherheit: keine Tuplet‑ID
             self.beats[start].tuplet_group_id = None;
-            self.beats[start].tremolo = None;
             if had_any_note {
                 self.beats[start].kind = Note;
             }
@@ -695,8 +690,6 @@ impl<'a> Measure<'a> {
                         && self.beats[p].tuplet_group_id == Some(group_id)
                     {
                         self.beats[p].kind = Note;
-                        // Tremolo auf None, um Rest‑Artefakte zu vermeiden
-                        self.beats[p].tremolo = None;
                         p += 1;
                     }
                 }

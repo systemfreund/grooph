@@ -516,7 +516,7 @@ impl Grooph<'_> {
     pub fn new(cc: &CreationContext) -> Self {
         add_font(&cc.egui_ctx);
         let ff = FontFamily::Name("music".into());
-        let m = Measure::new(TimeSignature { beats: 1, beat_unit: 2});
+        let m = Measure::new(TimeSignature { beats: 7, beat_unit: 8});
         Self {
             font_family: ff.clone(),
             font_id: FontId::new(16.0, ff),

@@ -50,14 +50,6 @@ pub(super) fn draw_beat(
         }
     }
 
-    // Draw tremolos
-    if !note.tremolo.is_empty() {
-        for seg in &note.tremolo {
-            // TODO use the bravura glyphs for tremolos
-            painter.line_segment([seg.p1, seg.p2], Stroke::new(opts.stem_thickness(), color));
-        }
-    }
-
     // Draw accent
     if let Some(p) = note.accent_pos {
         let accent_font = FontId::new(opts.font_id.size * 0.8, opts.font_id.family.clone());

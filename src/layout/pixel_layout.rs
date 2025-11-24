@@ -74,7 +74,6 @@ pub struct NoteLayout {
     pub dots: Vec<Pos2>,
     pub stem: Option<Line>,
     pub flag_pos: Option<Pos2>,
-    pub tremolo: Vec<Line>,
     pub accent_pos: Option<Pos2>,
 }
 
@@ -235,7 +234,6 @@ fn build_note_layout(
         // Stem (notes only)
         let mut stem: Option<Line> = None;
         let mut flag_pos: Option<Pos2> = None;
-        let mut tremolo: Vec<Line> = Vec::new();
         let mut accent_pos: Option<Pos2> = None;
 
         if b.kind == BeatKind::Note {
@@ -258,25 +256,6 @@ fn build_note_layout(
                 flag_pos =
                     Some(Pos2::new(start_x - opts.stem_thickness() * 0.5, cy - opts.stem_length()));
             }
-
-            // Tremolo slashes (single-note measured tremolo)
-            if let Some(trem) = b.tremolo
-                && trem.measured
-            {
-                let sl = trem.slashes.min(3);
-                let dx = opts.font_id.size * 0.12; // slight right offset per slash
-                let dy = opts.font_id.size * 0.12; // spacing along stem
-                let ang = 0.6; // tilt factor (down-right)
-                for s in 0..sl {
-                    let y0 = (cy - stem_len) + (s as f32) * dy;
-                    let x0 = start_x + (s as f32) * dx;
-                    let len = opts.font_id.size * 0.45;
-                    tremolo.push(Line {
-                        p1: Pos2::new(x0, y0),
-                        p2: Pos2::new(x0 + len, y0 - len * ang),
-                    });
-                }
-            }
         }
 
         note_layout.push(NoteLayout {
@@ -286,7 +265,6 @@ fn build_note_layout(
             dots,
             stem,
             flag_pos,
-            tremolo,
             accent_pos,
         });
     }
