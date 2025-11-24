@@ -186,7 +186,7 @@ pub fn human_readable(d: &Duration) -> String {
     }
 }
 
-pub const COMMON_DURATIONS: [Duration; 15] = [
+pub const COMMON_DURATIONS: [Duration; 16] = [
     q(),
     e(),
     s(),
@@ -194,6 +194,7 @@ pub const COMMON_DURATIONS: [Duration; 15] = [
     Duration::Dotted { base: Quarter, dots: 1 }, // dotted 1/4
     Duration::Dotted { base: Eighth, dots: 1 },  // dotted 1/8
     Duration::Dotted { base: Sixteenth, dots: 1 }, // dotted 1/16
+    Duration::Tuplet(TupletSpec { n: 3, m: 2, base: Quarter }),
     t8(),                                        // triplet 1/8
     t16(),                                       // triplet 1/16
     t32(),                                       // triplet 1/32
