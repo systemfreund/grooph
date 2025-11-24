@@ -5,15 +5,16 @@ use crate::measure::editing::Modification::{DissolveTuplet, ToggleAccent};
 use crate::measure::{Beat, BeatKind, Measure};
 use either::Either;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum Modification {
     SetBeat,
-    SetTuplet,
+    SetTuplet(GroupSpan),
     DissolveTuplet(usize),
     ToggleAccent(bool), // contains old state
     ToggleDotted(u8),   // contains old state
 }
 
+#[derive(Debug, PartialEq, Eq)]
 pub struct GroupSpan {
     pub id: u32,
     pub start_idx: usize,
@@ -140,9 +141,10 @@ impl Measure<'_> {
                 if let Some(DissolveTuplet(_)) = result {
                     // Try to convert to the next target if defined, also at group start
                     if let Some(tuplet_spec) = next_target
-                        && self.convert_to_tuplet(start_idx, *tuplet_spec, overwrite)
+                        && let Some(group_span) =
+                            self.convert_to_tuplet(start_idx, *tuplet_spec, overwrite)
                     {
-                        result = Some(Modification::SetTuplet);
+                        result = Some(Modification::SetTuplet(group_span));
                         // Nach erfolgreicher Rekreation ggf. Projektion anwenden
                         if let Some(ref src) = captured_offsets {
                             let _ = self.apply_tuplet_projection_at(start_idx, src);
@@ -157,9 +159,9 @@ impl Measure<'_> {
                     &CYCLE_TUPLET_SPECS[0]
                 };
 
-                let ok = self.convert_to_tuplet(start_idx, *next_target, overwrite);
-                if ok {
-                    result = Some(Modification::SetTuplet);
+                if let Some(group_span) = self.convert_to_tuplet(start_idx, *next_target, overwrite)
+                {
+                    result = Some(Modification::SetTuplet(group_span));
                 }
             }
         };
@@ -375,18 +377,23 @@ impl Measure<'_> {
     /// Wandelt den Beat an `idx` in eine Tuplet‑Gruppe des Typs (n in der Zeit von m, Basis `base`) um.
     ///
     /// Bedingungen/Verhalten:
-    /// - Wenn `idx` außerhalb liegt oder der Beat dort bereits ein Tuplet ist, passiert nichts und es wird `false` zurückgegeben.
+    /// - Wenn `idx` außerhalb liegt oder der Beat dort bereits ein Tuplet ist, passiert nichts und es wird `None` zurückgegeben.
     /// - Ansonsten wird versucht, den Beat durch einen Tuplet‑Beat gleicher Art (Note/Rest) zu ersetzen.
     ///   Die Methode delegiert an `set_beat_at`, welches die gesamte Gruppe inkl. Anchor anlegt und
     ///   verbleibende Slots der Gruppe auffüllt. Reicht der Platz im Takt nicht aus, bleibt
-    ///   der Takt unverändert und die Funktion liefert `false`.
-    fn convert_to_tuplet(&mut self, idx: usize, tuplet_spec: TupletSpec, overwrite: bool) -> bool {
+    ///   der Takt unverändert und die Funktion liefert `None`.
+    fn convert_to_tuplet(
+        &mut self,
+        idx: usize,
+        tuplet_spec: TupletSpec,
+        overwrite: bool,
+    ) -> Option<GroupSpan> {
         if idx >= self.beats.len() {
-            return false;
+            return None;
         }
         let cur = self.beats[idx];
         if matches!(cur.duration, Duration::Tuplet { .. }) {
-            return false;
+            return None;
         }
 
         // Protection: Stop if we would absorb a note and overwrite is false
@@ -403,7 +410,7 @@ impl Measure<'_> {
                 }
                 // Check if we are about to absorb a subsequent beat that is a note
                 if k > idx && self.beats[k].kind == Note {
-                    return false;
+                    return None;
                 }
                 consumed += self.grid.ticks_of(&self.beats[k].duration).unwrap();
                 k += 1;
@@ -413,27 +420,21 @@ impl Measure<'_> {
         let new_duration = Duration::Tuplet(tuplet_spec);
         let mut new_beat = Beat::new(new_duration, cur.kind);
         new_beat.accented = cur.accented;
-        // tuplet_group_id wird von set_beat_at korrekt gesetzt
         if self.set_beat(idx, new_beat).is_ok() {
+            let group_span = self.find_group_span(idx);
+
             // Wenn der ursprüngliche Beat eine Note war, initialisieren wir die ganze neue Tuplet‑Gruppe als Noten
-            if cur.kind == Note {
-                if let Some(group_id) = self.beats[idx].tuplet_group_id {
-                    // Nach links ausdehnen (sollte i. d. R. nicht nötig sein, da set_beat_at an idx beginnt)
-                    let mut k = idx;
-                    while k > 0 && self.beats[k - 1].tuplet_group_id == Some(group_id) {
-                        k -= 1;
-                    }
-                    // Nach rechts gehen und alle Slots auf Note setzen (Akzente unangetastet lassen)
-                    let mut p = k;
-                    while p < self.beats.len() && self.beats[p].tuplet_group_id == Some(group_id) {
-                        self.beats[p].kind = Note;
-                        p += 1;
-                    }
+            if cur.kind == Note
+                && let Some(group_span) = &group_span
+            {
+                for i in group_span.start_idx..group_span.end_idx {
+                    self.beats[i].kind = Note;
                 }
             }
-            true
+
+            group_span
         } else {
-            false
+            None
         }
     }
 }
@@ -468,7 +469,10 @@ mod tests {
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
         // Erzeuge Triplet‑1/8 Gruppe als Rests: Standardzustand ist bereits Rest an 0
         // also direkt Triplet konvertieren aus einem Rest heraus
-        assert!(m.convert_to_tuplet(0, TupletSpec { n: 3, m: 2, base: Eighth }, true));
+        assert_matches!(
+            m.convert_to_tuplet(0, TupletSpec { n: 3, m: 2, base: Eighth }, true),
+            Some(GroupSpan { start_idx: 0, end_idx: 3, id: _ })
+        );
         // Sicherheitscheck: alle drei Slots sind Rests
         for i in 0..3 {
             assert_eq!(m.beats()[i].kind, Rest);
@@ -485,8 +489,11 @@ mod tests {
     fn convert_quarter_to_triplet_eighth_group_in_four_four() {
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
         // Standardfüllung: 4x Viertel Rests
-        let ok = m.convert_to_tuplet(0, TupletSpec { n: 3, m: 2, base: Eighth }, true);
-        assert!(ok, "Conversion to triplet should succeed");
+        assert_matches!(
+            m.convert_to_tuplet(0, TupletSpec { n: 3, m: 2, base: Eighth }, true),
+            Some(GroupSpan { start_idx: 0, end_idx: 3, id: _ }),
+            "Conversion to triplet should succeed"
+        );
 
         // Erwartung: drei Triplet‑Achtel an den ersten drei Positionen mit gleicher group_id
         let id0 = m.beats()[0].tuplet_group_id;
@@ -510,8 +517,11 @@ mod tests {
         m.set_beat(0, Beat::note(t8())).unwrap();
 
         let before = m.clone();
-        let changed = m.convert_to_tuplet(0, TupletSpec { n: 3, m: 2, base: Eighth }, true);
-        assert!(!changed, "Should not convert when already a tuplet");
+        assert_matches!(
+            m.convert_to_tuplet(0, TupletSpec { n: 3, m: 2, base: Eighth }, true),
+            None,
+            "Should not convert when already a tuplet"
+        );
         // Unverändert
         assert_eq!(format!("{:?}", before), format!("{:?}", m));
     }
@@ -522,7 +532,10 @@ mod tests {
         // Stelle sicher, dass Quelle eine Note ist (nicht Rest)
         m.set_beat(0, Beat::note(Duration::Simple(Eighth))).unwrap();
         // Wandle an derselben Position in Triplet‑Achtel um
-        assert!(m.convert_to_tuplet(0, TupletSpec { n: 3, m: 2, base: Eighth }, true));
+        assert_matches!(
+            m.convert_to_tuplet(0, TupletSpec { n: 3, m: 2, base: Eighth }, true),
+            Some(GroupSpan { start_idx: 0, end_idx: 3, id: _ })
+        );
 
         for i in 0..3 {
             assert_eq!(m.beats()[i].duration, t8());
@@ -534,7 +547,10 @@ mod tests {
     fn convert_to_tuplet_initializes_rests_when_source_is_rest() {
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
         // Standard ist Rest an Index 0
-        assert!(m.convert_to_tuplet(0, TupletSpec { n: 3, m: 2, base: Eighth }, true));
+        assert_matches!(
+            m.convert_to_tuplet(0, TupletSpec { n: 3, m: 2, base: Eighth }, true),
+            Some(GroupSpan { start_idx: 0, end_idx: 3, id: _ }),
+        );
         for i in 0..3 {
             assert_eq!(m.beats()[i].duration, t8());
             assert_eq!(m.beats()[i].kind, Rest, "tuplet slot {} should be a rest", i);
@@ -547,7 +563,10 @@ mod tests {
         // Setup: [Rest(e), Rest(e), Rest(q)...] by replacing first Q with E (fills remainder with E)
         m.set_beat(0, Beat::rest(e())).unwrap();
         // Now convert idx 0 (Rest(e)) to Triplet Eighths (span Q). Needs to absorb idx 1 (Rest(e)).
-        assert!(m.convert_to_tuplet(0, TupletSpec { n: 3, m: 2, base: Eighth }, false));
+        assert_matches!(
+            m.convert_to_tuplet(0, TupletSpec { n: 3, m: 2, base: Eighth }, false),
+            Some(GroupSpan { start_idx: 0, end_idx: 3, id: _ }),
+        );
         // Should have created a tuplet group at 0
         assert!(m.beats()[0].tuplet_group_id.is_some());
     }
@@ -560,7 +579,10 @@ mod tests {
         m.set_beat(1, Beat::note(e())).unwrap();
 
         // Try convert idx 0 to Triplet Eighths (span Q). Needs to absorb idx 1 which is Note.
-        assert!(!m.convert_to_tuplet(0, TupletSpec { n: 3, m: 2, base: Eighth }, false));
+        assert_matches!(
+            m.convert_to_tuplet(0, TupletSpec { n: 3, m: 2, base: Eighth }, false),
+            None
+        );
         // Verify state unchanged (idx 1 is still Note)
         assert_eq!(m.beats()[1].kind, Note);
         assert!(m.beats()[0].tuplet_group_id.is_none());
@@ -574,7 +596,10 @@ mod tests {
         m.set_beat(1, Beat::note(e())).unwrap();
 
         // Try convert idx 0 to Triplet Eighths (span Q). Overwrite=true.
-        assert!(m.convert_to_tuplet(0, TupletSpec { n: 3, m: 2, base: Eighth }, true));
+        assert_matches!(
+            m.convert_to_tuplet(0, TupletSpec { n: 3, m: 2, base: Eighth }, true),
+            Some(GroupSpan { start_idx: 0, end_idx: 3, id: _ }),
+        );
         // Verify tuplet created
         assert!(m.beats()[0].tuplet_group_id.is_some());
     }
