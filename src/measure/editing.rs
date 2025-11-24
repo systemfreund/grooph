@@ -18,7 +18,7 @@ pub enum Modification {
 pub struct GroupSpan {
     pub id: u32,
     pub start_idx: usize,
-    pub end_idx: usize,
+    pub end_idx: usize, // inclusive
 }
 
 pub const CYCLE_TUPLET_SPECS: [TupletSpec; 5] = [
@@ -187,7 +187,7 @@ impl Measure<'_> {
             // Merke, ob die Gruppe mindestens eine Note bzw. einen Akzent enthielt
             let mut had_any_note = false;
             let mut had_any_accent = false;
-            for b in &self.beats[start_idx..end_idx] {
+            for b in &self.beats[start_idx..=end_idx] {
                 if b.kind == Note {
                     had_any_note = true;
                 }
@@ -196,7 +196,7 @@ impl Measure<'_> {
                 }
             }
 
-            self.beats.drain(start_idx..end_idx);
+            self.beats.drain(start_idx..=end_idx);
 
             let allowed: Vec<Duration> = self
                 .grid
@@ -241,11 +241,11 @@ impl Measure<'_> {
         while end_idx < self.beats.len() && self.beats[end_idx].tuplet_group_id == Some(id) {
             end_idx += 1;
         }
-        if start_idx >= end_idx {
+        if start_idx >= end_idx - 1 {
             return None;
         }
 
-        Some(GroupSpan { start_idx, end_idx, id })
+        Some(GroupSpan { start_idx, end_idx: end_idx - 1, id })
     }
 
     /// Liefert für die Tuplet‑Gruppe, die bei `start_idx` beginnt, die relativen Onset‑Ticks
@@ -427,7 +427,7 @@ impl Measure<'_> {
             if cur.kind == Note
                 && let Some(group_span) = &group_span
             {
-                for i in group_span.start_idx..group_span.end_idx {
+                for i in group_span.start_idx..=group_span.end_idx {
                     self.beats[i].kind = Note;
                 }
             }
@@ -471,7 +471,7 @@ mod tests {
         // also direkt Triplet konvertieren aus einem Rest heraus
         assert_matches!(
             m.convert_to_tuplet(0, TupletSpec { n: 3, m: 2, base: Eighth }, true),
-            Some(GroupSpan { start_idx: 0, end_idx: 3, id: _ })
+            Some(GroupSpan { start_idx: 0, end_idx: 2, id: _ })
         );
         // Sicherheitscheck: alle drei Slots sind Rests
         for i in 0..3 {
@@ -491,7 +491,7 @@ mod tests {
         // Standardfüllung: 4x Viertel Rests
         assert_matches!(
             m.convert_to_tuplet(0, TupletSpec { n: 3, m: 2, base: Eighth }, true),
-            Some(GroupSpan { start_idx: 0, end_idx: 3, id: _ }),
+            Some(GroupSpan { start_idx: 0, end_idx: 2, id: _ }),
             "Conversion to triplet should succeed"
         );
 
@@ -534,7 +534,7 @@ mod tests {
         // Wandle an derselben Position in Triplet‑Achtel um
         assert_matches!(
             m.convert_to_tuplet(0, TupletSpec { n: 3, m: 2, base: Eighth }, true),
-            Some(GroupSpan { start_idx: 0, end_idx: 3, id: _ })
+            Some(GroupSpan { start_idx: 0, end_idx: 2, id: _ })
         );
 
         for i in 0..3 {
@@ -549,7 +549,7 @@ mod tests {
         // Standard ist Rest an Index 0
         assert_matches!(
             m.convert_to_tuplet(0, TupletSpec { n: 3, m: 2, base: Eighth }, true),
-            Some(GroupSpan { start_idx: 0, end_idx: 3, id: _ }),
+            Some(GroupSpan { start_idx: 0, end_idx: 2, id: _ }),
         );
         for i in 0..3 {
             assert_eq!(m.beats()[i].duration, t8());
@@ -565,7 +565,7 @@ mod tests {
         // Now convert idx 0 (Rest(e)) to Triplet Eighths (span Q). Needs to absorb idx 1 (Rest(e)).
         assert_matches!(
             m.convert_to_tuplet(0, TupletSpec { n: 3, m: 2, base: Eighth }, false),
-            Some(GroupSpan { start_idx: 0, end_idx: 3, id: _ }),
+            Some(GroupSpan { start_idx: 0, end_idx: 2, id: _ }),
         );
         // Should have created a tuplet group at 0
         assert!(m.beats()[0].tuplet_group_id.is_some());
@@ -598,7 +598,7 @@ mod tests {
         // Try convert idx 0 to Triplet Eighths (span Q). Overwrite=true.
         assert_matches!(
             m.convert_to_tuplet(0, TupletSpec { n: 3, m: 2, base: Eighth }, true),
-            Some(GroupSpan { start_idx: 0, end_idx: 3, id: _ }),
+            Some(GroupSpan { start_idx: 0, end_idx: 2, id: _ }),
         );
         // Verify tuplet created
         assert!(m.beats()[0].tuplet_group_id.is_some());

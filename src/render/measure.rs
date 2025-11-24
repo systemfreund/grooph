@@ -41,7 +41,7 @@ pub(crate) fn draw_measure(
     };
     let measure_layout = build_measure_layout(measure, &opts);
 
-    // Left block: Clef + stacked time signature from layout (Phase C)
+    // Left block: Clef and stacked time signature from layout (Phase C)
     if let Some(clef_pos) = measure_layout.clef_pos {
         painter.text(
             clef_pos,
@@ -101,7 +101,7 @@ pub(crate) fn draw_notes(
 ) {
     // Beats/notes
     for note in &measure_layout.notes {
-        draw_beat(painter, note, &opts, color);
+        draw_beat(painter, note, opts, color);
     }
 
     // Beams

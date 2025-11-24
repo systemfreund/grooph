@@ -333,13 +333,19 @@ impl Grooph<'_> {
 
     fn set_tuplet(&mut self, idx: usize, tuplet_spec: Option<TupletSpec>) -> Option<Modification> {
         let result = self.measure.set_tuplet(idx, tuplet_spec, true);
-        if let Some(Modification::DissolveTuplet(tuplet_idx)) = result {
-            let new_len = self.measure.beats().len();
-            if new_len > 0 {
-                self.cursor_idx = tuplet_idx.min(new_len - 1);
-            } else {
-                self.cursor_idx = 0;
+        match &result {
+            Some(Modification::DissolveTuplet(tuplet_idx)) => {
+                let new_len = self.measure.beats().len();
+                if new_len > 0 {
+                    self.cursor_idx = *tuplet_idx.min(&(new_len - 1));
+                } else {
+                    self.cursor_idx = 0;
+                }
             }
+            Some(Modification::SetTuplet(group_span)) => {
+                self.cursor_idx = (group_span.end_idx + 1).min(self.measure.beats().len() - 1);
+            }
+            _ => {}
         }
         result
     }
@@ -421,7 +427,7 @@ impl Grooph<'_> {
 
             for t in group_tools {
                 if let ToolKind::InsertBeat(template) = t.kind {
-                    let button = self.note_button(ui, template, &t.id);
+                    let button = self.note_button(ui, template, t.id);
                     if button.clicked() {
                         self.apply_tool(t);
                     }
@@ -433,7 +439,7 @@ impl Grooph<'_> {
     pub fn new(cc: &CreationContext) -> Self {
         add_font(&cc.egui_ctx);
         let ff = FontFamily::Name("music".into());
-        let m = Measure::new(TimeSignature { beats: 7, beat_unit: 8 });
+        let m = Measure::new(TimeSignature::FOUR_FOUR);
         Self {
             font_family: ff.clone(),
             font_id: FontId::new(16.0, ff),
