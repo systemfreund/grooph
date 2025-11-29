@@ -54,8 +54,6 @@ pub struct Measure<'a> {
     pub(super) grid: &'a Grid<'a>,
     beats: Vec<Beat>,
     time_signature: TimeSignature,
-    // Internal insertion pointer for add_beat progression (not a UI cursor)
-    next_insert: usize,
     /// Tuplet anchor table keyed by stable id
     pub tuplet_anchors: HashMap<u32, TupletAnchor>,
     /// Next id to hand out when inserting a tuplet group
@@ -71,7 +69,6 @@ impl<'a> Measure<'a> {
             grid: &DEFAULT_GRID,
             beats: Vec::new(),
             time_signature,
-            next_insert: 0,
             tuplet_anchors: HashMap::new(),
             next_tuplet_id: 1,
         };
@@ -327,17 +324,6 @@ impl<'a> Measure<'a> {
         sum
     }
 
-    /// Intended to be used by tests
-    pub(crate) fn add_beat(&mut self, beat: Beat) -> Result<(), MeasureError> {
-        match self.set_beat(self.next_insert, beat) {
-            Ok(()) => {
-                self.next_insert += 1;
-                Ok(())
-            }
-            Err(e) => Err(e),
-        }
-    }
-
     pub fn remove(&mut self, idx: usize) {
         if idx >= self.beats.len() {
             return;
@@ -442,7 +428,7 @@ mod tests {
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
         assert_eq!(m.beats().len(), 4);
         // add_beat should fill from the first rest slot; measure stays length 4
-        m.add_beat(Beat::note(q())).unwrap();
+        m.set_beat(0, Beat::note(q())).unwrap();
         assert_eq!(m.beats().len(), 4);
     }
 
@@ -450,7 +436,7 @@ mod tests {
     fn test_triplet_in_one_four() {
         let mut m = Measure::new(TimeSignature::ONE_FOUR);
 
-        assert!(m.add_beat(Beat::note(t8())).is_ok());
+        assert!(m.set_beat(0, Beat::note(t8())).is_ok());
         let Beat { duration, kind, .. } = m.beats()[1];
         assert_eq!(duration, t8());
         assert_eq!(kind, Rest);
@@ -458,25 +444,13 @@ mod tests {
         assert_eq!(duration, t8());
         assert_eq!(kind, Rest);
 
-        assert!(
-            m.add_beat(Beat::note(q())).is_err(),
-            "simple 1/4 note must not fit in triplet 1/8 group"
-        );
-        assert!(
-            m.add_beat(Beat::note(e())).is_err(),
-            "simple 1/8 note must not fit in triplet 1/8 group"
-        );
-        assert!(
-            m.add_beat(Beat::note(s())).is_err(),
-            "simple 1/16 note must not fit in triplet 1/8 group"
-        );
-        assert!(
-            m.add_beat(Beat::note(th())).is_err(),
-            "simple 1/32 note must not fit in triplet 1/8 group"
-        );
+        assert!(m.set_beat(1, Beat::note(q())).is_err());
+        assert!(m.set_beat(1, Beat::note(e())).is_err());
+        assert!(m.set_beat(1, Beat::note(s())).is_err());
+        assert!(m.set_beat(1, Beat::note(th())).is_err());
 
-        assert!(m.add_beat(Beat::note(t8())).is_ok());
-        assert!(m.add_beat(Beat::rest(t8())).is_ok());
+        assert!(m.set_beat(1, Beat::note(t8())).is_ok());
+        assert!(m.set_beat(2, Beat::rest(t8())).is_ok());
     }
 
     #[test]
@@ -484,25 +458,26 @@ mod tests {
         let mut m = Measure::new(TimeSignature::TWO_FOUR);
 
         // First triplet group
-        assert!(m.add_beat(Beat::note(t16())).is_ok());
-        assert!(m.add_beat(Beat::note(t16())).is_ok());
+        assert!(m.set_beat(0, Beat::note(t16())).is_ok());
+        assert!(m.set_beat(1, Beat::note(t16())).is_ok());
         // The next triplet 1/8 overfills this tuplet group, which has only space for one triplet
         // 1/6 note left (or two triplet 1/32 subdivisions).
-        assert!(m.add_beat(Beat::note(t8())).is_err(), "triplet 1/8 must not fit tuplet group");
+        assert!(m.set_beat(2, Beat::note(t8())).is_err());
     }
 
     #[test]
     fn test_triplet_insertions_1() {
         let mut m = Measure::new(TimeSignature::ONE_FOUR);
 
-        assert!(m.add_beat(Beat::note(t16())).is_ok());
-        assert!(m.add_beat(Beat::note(t8())).is_ok());
+        assert!(m.set_beat(0, Beat::note(t16())).is_ok());
+        assert!(m.set_beat(1, Beat::note(t8())).is_ok());
         assert!(
-            m.add_beat(Beat::note(t8())).is_err(),
+            m.set_beat(2, Beat::note(t8())).is_err(),
             "can't start a new triplet 1/8 group measure has only 1/8 space left"
         );
-        assert!(m.add_beat(Beat::note(e())).is_ok());
-        assert_eq!(m.remaining_ticks(m.next_insert), 0);
+        assert!(m.set_beat(2, Beat::note(e())).is_ok());
+        assert_eq!(m.remaining_ticks(3), 0);
+
     }
 
     #[test]
@@ -510,43 +485,43 @@ mod tests {
         let mut m = Measure::new(TimeSignature::TWO_FOUR);
 
         // First triplet group
-        assert!(m.add_beat(Beat::note(t8())).is_ok());
-        assert!(m.add_beat(Beat::note(t16())).is_ok());
-        assert!(m.add_beat(Beat::note(t16())).is_ok());
-        assert!(m.add_beat(Beat::note(t8())).is_ok());
+        assert!(m.set_beat(0, Beat::note(t8())).is_ok());
+        assert!(m.set_beat(1, Beat::note(t16())).is_ok());
+        assert!(m.set_beat(2, Beat::note(t16())).is_ok());
+        assert!(m.set_beat(3,Beat::note(t8())).is_ok());
 
         // Second triplet group
-        assert!(m.add_beat(Beat::note(t16())).is_ok());
-        assert!(m.add_beat(Beat::note(t32())).is_ok());
-        assert!(m.add_beat(Beat::note(t32())).is_ok());
-        assert!(m.add_beat(Beat::note(t32())).is_ok());
-        assert!(m.add_beat(Beat::note(t32())).is_ok());
+        assert!(m.set_beat(4, Beat::note(t16())).is_ok());
+        assert!(m.set_beat(5, Beat::note(t32())).is_ok());
+        assert!(m.set_beat(6, Beat::note(t32())).is_ok());
+        assert!(m.set_beat(7, Beat::note(t32())).is_ok());
+        assert!(m.set_beat(8, Beat::note(t32())).is_ok());
 
         assert!(
-            m.add_beat(Beat::note(t8())).is_err(),
+            m.set_beat(9, Beat::note(t8())).is_err(),
             "can't start a new triplet 1/8 group measure has only 1/8 space left"
         );
-        assert!(m.add_beat(Beat::note(e())).is_ok());
-        assert_eq!(m.remaining_ticks(m.next_insert), 0);
+        assert!(m.set_beat(9, Beat::note(e())).is_ok());
+        assert_eq!(m.remaining_ticks(10), 0);
     }
 
     #[test]
     fn test_triplet_insertions_3() {
         let mut m = Measure::new(TimeSignature::TWO_EIGHT);
 
-        assert!(m.add_beat(Beat::note(t8())).is_ok());
-        assert!(m.add_beat(Beat::note(t16())).is_ok());
-        assert!(m.add_beat(Beat::note(t8())).is_ok());
+        assert!(m.set_beat(0, Beat::note(t8())).is_ok());
+        assert!(m.set_beat(1, Beat::note(t16())).is_ok());
+        assert!(m.set_beat(2, Beat::note(t8())).is_ok());
         // The next triplet 1/8 overfills this tuplet group, which has only space for one triplet
         // 1/6 note left (or two triplet 1/32 subdivisions).
-        assert!(m.add_beat(Beat::note(t8())).is_err());
-        assert!(m.add_beat(Beat::note(t32())).is_ok());
+        assert!(m.set_beat(3, Beat::note(t8())).is_err());
+        assert!(m.set_beat(3, Beat::note(t32())).is_ok());
         // Doesn't fit.
-        assert!(m.add_beat(Beat::note(t16())).is_err());
-        assert!(m.add_beat(Beat::note(t32())).is_ok());
+        assert!(m.set_beat(4, Beat::note(t16())).is_err());
+        assert!(m.set_beat(4, Beat::note(t32())).is_ok());
 
         // The next beat starts a new tuplet group, but we don't have enough space in our measure.
-        assert_eq!(m.remaining_ticks(m.next_insert), 0);
+        assert_eq!(m.remaining_ticks(5), 0);
     }
 
     #[test]
@@ -561,17 +536,17 @@ mod tests {
     #[test]
     fn test_triplet_insertion_in_seven_eight() {
         let mut m = Measure::new(TimeSignature::SEVEN_EIGHT);
-        assert!(m.add_beat(Beat::note(t8())).is_ok());
-        assert!(m.add_beat(Beat::note(t8())).is_ok());
-        assert!(m.add_beat(Beat::note(t16())).is_ok());
+        assert!(m.set_beat(0, Beat::note(t8())).is_ok());
+        assert!(m.set_beat(1, Beat::note(t8())).is_ok());
+        assert!(m.set_beat(2, Beat::note(t16())).is_ok());
     }
 
     #[test]
     fn test_triplet_split_1() {
         let mut m = Measure::new(TimeSignature::ONE_FOUR);
-        assert!(m.add_beat(Beat::note(t8())).is_ok());
-        assert!(m.add_beat(Beat::note(t8())).is_ok());
-        assert!(m.add_beat(Beat::note(t8())).is_ok());
+        assert!(m.set_beat(0, Beat::note(t8())).is_ok());
+        assert!(m.set_beat(1, Beat::note(t8())).is_ok());
+        assert!(m.set_beat(2, Beat::note(t8())).is_ok());
 
         assert!(m.set_beat(1, Beat::note(t16())).is_ok());
         assert_eq!(&durations_of(&m), &[t8(), t16(), t16(), t8()]);
@@ -583,9 +558,9 @@ mod tests {
     #[test]
     fn test_triplet_split_2() {
         let mut m = Measure::new(TimeSignature::ONE_FOUR);
-        assert!(m.add_beat(Beat::note(t8())).is_ok());
-        assert!(m.add_beat(Beat::note(t8())).is_ok());
-        assert!(m.add_beat(Beat::note(t8())).is_ok());
+        assert!(m.set_beat(0, Beat::note(t8())).is_ok());
+        assert!(m.set_beat(1, Beat::note(t8())).is_ok());
+        assert!(m.set_beat(2, Beat::note(t8())).is_ok());
 
         assert!(m.set_beat(2, Beat::note(t32())).is_ok());
         assert_eq!(&durations_of(&m), &[t8(), t8(), t32(), t32(), t16()]);
@@ -594,9 +569,9 @@ mod tests {
     #[test]
     fn test_triplet_split_3() {
         let mut m = Measure::new(TimeSignature::ONE_FOUR);
-        assert!(m.add_beat(Beat::note(t32())).is_ok());
-        assert!(m.add_beat(Beat::note(t32())).is_ok());
-        assert!(m.add_beat(Beat::note(t32())).is_ok());
+        assert!(m.set_beat(0, Beat::note(t32())).is_ok());
+        assert!(m.set_beat(1, Beat::note(t32())).is_ok());
+        assert!(m.set_beat(2, Beat::note(t32())).is_ok());
 
         assert!(m.set_beat(0, Beat::note(t8())).is_err());
         assert!(m.set_beat(0, Beat::note(t16())).is_ok());
@@ -609,9 +584,9 @@ mod tests {
     #[test]
     fn test_triplet_split_4() {
         let mut m = Measure::new(TimeSignature::ONE_FOUR);
-        assert!(m.add_beat(Beat::note(t16())).is_ok());
-        assert!(m.add_beat(Beat::note(t16())).is_ok());
-        assert!(m.add_beat(Beat::note(t16())).is_ok());
+        assert!(m.set_beat(0, Beat::note(t16())).is_ok());
+        assert!(m.set_beat(1, Beat::note(t16())).is_ok());
+        assert!(m.set_beat(2, Beat::note(t16())).is_ok());
 
         // Cannot merge last note in the group (not enough space).
         assert!(m.set_beat(2, Beat::note(t8())).is_err());
@@ -650,13 +625,13 @@ mod tests {
     #[test]
     fn test_add_eighth_triplet_to_seven_eight_measure() {
         let mut m = Measure::new(TimeSignature::SEVEN_EIGHT);
-        m.add_beat(Beat::note(Duration::Dotted { base: Eighth, dots: 1 })).unwrap();
-        m.add_beat(Beat::note(Duration::Dotted { base: Sixteenth, dots: 1 })).unwrap();
-        m.add_beat(Beat::note(Duration::Simple(ThirtySecond))).unwrap();
-        m.add_beat(Beat::note(Duration::Simple(Sixteenth))).unwrap();
-        m.add_beat(Beat::note(Duration::Simple(Eighth))).unwrap();
-        m.add_beat(Beat::note(Duration::Simple(Sixteenth))).unwrap();
-        m.add_beat(Beat::rest(Duration::Dotted { base: Eighth, dots: 1 })).unwrap();
+        m.set_beat(0, Beat::note(Duration::Dotted { base: Eighth, dots: 1 })).unwrap();
+        m.set_beat(1, Beat::note(Duration::Dotted { base: Sixteenth, dots: 1 })).unwrap();
+        m.set_beat(2, Beat::note(Duration::Simple(ThirtySecond))).unwrap();
+        m.set_beat(3, Beat::note(Duration::Simple(Sixteenth))).unwrap();
+        m.set_beat(4, Beat::note(Duration::Simple(Eighth))).unwrap();
+        m.set_beat(5, Beat::note(Duration::Simple(Sixteenth))).unwrap();
+        m.set_beat(6, Beat::rest(Duration::Dotted { base: Eighth, dots: 1 })).unwrap();
     }
 
     #[test]
@@ -684,17 +659,10 @@ mod tests {
     }
 
     #[test]
-    fn test_quintuplets_0() {
-        let mut measure = Measure::new(TimeSignature::FOUR_SIXTEENTH);
-        measure.add_beat(Beat::note(qt16())).unwrap();
-        // TODO extend
-    }
-
-    #[test]
     fn append_autofill_to_primary_boundary_simple() {
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
         // Insert one eighth at start; autofill up to the next quarter boundary
-        assert!(m.add_beat(Beat::note(e())).is_ok());
+        assert!(m.set_beat(0, Beat::note(e())).is_ok());
         // Expect: e() followed by an e() rest to reach the quarter boundary
         assert_eq!(m.beats()[1], Beat::rest(e()));
     }
@@ -702,7 +670,7 @@ mod tests {
     #[test]
     fn append_autofill_to_primary_boundary_triplet() {
         let mut m = Measure::new(TimeSignature::ONE_FOUR);
-        assert!(m.add_beat(Beat::note(t8())).is_ok());
+        assert!(m.set_beat(0, Beat::note(t8())).is_ok());
         // Expect two triplet-eighth rests to complete the triplet group
         let Beat { duration: d1, kind: k1, .. } = m.beats()[1];
         let Beat { duration: d2, kind: k2, .. } = m.beats()[2];
@@ -728,5 +696,18 @@ mod tests {
             }),
             None
         );
+    }
+
+    #[test]
+    fn set_bigger_beat_on_smaller_rest() {
+        /*
+        1/4:  0: rest 1/16
+              1: rest 1/8
+
+        set note @0 -> 1/8
+
+        expect: 0: 1/8
+                1: (1/16)
+         */
     }
 }

@@ -198,13 +198,6 @@ fn has_rest_between(beats: &[Beat], i: BeatIdx, j: BeatIdx) -> bool {
     false
 }
 
-fn tuplet_spec(d: &Duration) -> Option<TupletSpec> {
-    match *d {
-        Duration::Tuplet(spec) => Some(spec),
-        _ => None,
-    }
-}
-
 /// Returns true if both indices `i` and `j` are notes that belong to the SAME logical tuplet group
 /// (same (n, m, base) spec and within the same consecutive chunk of size `n`).
 /// Example: For triplet eighths (n=3), indices 0,1,2 are group 0; 3,4,5 are group 1.
@@ -258,10 +251,10 @@ mod tests {
     fn beaming_rest_breaks_group() {
         // Note 16th, Rest 16th, Note 16th, Rest 16th within the first quarter
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
-        m.add_beat(Beat::note(s())).unwrap();
-        m.add_beat(Beat::rest(s())).unwrap();
-        m.add_beat(Beat::note(s())).unwrap();
-        m.add_beat(Beat::rest(s())).unwrap();
+        m.set_beat(0, Beat::note(s())).unwrap();
+        m.set_beat(1, Beat::rest(s())).unwrap();
+        m.set_beat(2, Beat::note(s())).unwrap();
+        m.set_beat(3, Beat::rest(s())).unwrap();
         let plan = compute_beam_plan(&m);
         assert_eq!(plan.groups.len(), 2, "rests should split into two singleton groups");
         let g0 = &plan.groups[0];
@@ -429,9 +422,9 @@ mod tests {
     #[test]
     fn beaming_with_t32_triplet_with_merged_t16() {
         let mut m = Measure::new(TimeSignature::ONE_FOUR);
-        m.add_beat(Beat::note(t32())).unwrap();
-        m.add_beat(Beat::note(t32())).unwrap();
-        m.add_beat(Beat::note(t32())).unwrap();
+        m.set_beat(0, Beat::note(t32())).unwrap();
+        m.set_beat(1, Beat::note(t32())).unwrap();
+        m.set_beat(2, Beat::note(t32())).unwrap();
         m.set_beat(0, Beat::note(t16())).unwrap();
 
         let plan = compute_beam_plan(&m);
