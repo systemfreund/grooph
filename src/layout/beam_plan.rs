@@ -156,7 +156,8 @@ pub(super) fn compute_beam_plan(measure: &Measure) -> BeamPlan {
 }
 
 fn finalize_group(groups: &mut Vec<BeamGroup>, beats: &[Beat], cur: &[BeatIdx]) {
-    if cur.is_empty() {
+    if cur.len() <= 1 {
+        // No beamable notes in this group
         return;
     }
     let mut beam_counts: Vec<u8> = Vec::with_capacity(cur.len());
@@ -256,15 +257,7 @@ mod tests {
         m.set_beat(2, Beat::note(s())).unwrap();
         m.set_beat(3, Beat::rest(s())).unwrap();
         let plan = compute_beam_plan(&m);
-        assert_eq!(plan.groups.len(), 2, "rests should split into two singleton groups");
-        let g0 = &plan.groups[0];
-        let g1 = &plan.groups[1];
-        assert_eq!(g0.beat_indices, vec![0]);
-        assert_eq!(g1.beat_indices, vec![2]);
-        assert_eq!(g0.beam_counts, vec![2]);
-        assert_eq!(g1.beam_counts, vec![2]);
-        assert!(g0.continuity.is_empty());
-        assert!(g1.continuity.is_empty());
+        assert!(plan.groups.is_empty());
     }
 
     #[test]
