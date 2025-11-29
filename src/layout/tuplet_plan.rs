@@ -50,104 +50,39 @@ pub(crate) struct TupletSpan {
 pub(crate) fn detect_tuplet_spans(measure: &Measure) -> Vec<TupletSpan> {
     let beats = measure.beats();
 
-    // ID-gestützter Pfad zuerst
-    let has_ids = beats.iter().any(|b| b.tuplet_group_id.is_some());
-    if has_ids {
-        let mut ranges: std::collections::BTreeMap<u32, (usize, usize)> = Default::default();
-        for (ix, b) in beats.iter().enumerate() {
-            if let Some(id) = b.tuplet_group_id {
-                ranges
-                    .entry(id)
-                    .and_modify(|rng| {
-                        rng.0 = rng.0.min(ix);
-                        rng.1 = rng.1.max(ix);
-                    })
-                    .or_insert((ix, ix));
-            }
-        }
-
-        let mut out: Vec<TupletSpan> = Vec::with_capacity(ranges.len());
-        for (id, (start, end)) in ranges.into_iter() {
-            if let Some(anchor) = measure.tuplet_anchors.get(&id) {
-                let contains_rest = (start..=end).any(|i| beats[i].kind == BeatKind::Rest);
-                out.push(TupletSpan {
-                    count: anchor.n,
-                    start,
-                    end,
-                    base: anchor.base_hint,
-                    contains_rest,
-                });
-            }
-        }
-        return out;
+    if !beats.iter().any(|b| b.tuplet_group_id.is_some()) {
+        // No tuplets in this measure
+        return Vec::default();
     }
 
-    // Legacy-Erkennung: Runs gleicher (n,m) in Gruppen segmentieren
-    let mut spans: Vec<TupletSpan> = Vec::new();
-    let mut i = 0usize;
-    while i < beats.len() {
-        let Duration::Tuplet(TupletSpec { n, m, .. }) = beats[i].duration else {
-            i += 1;
-            continue;
-        };
-        // Maximalen Run gleicher (n,m) finden
-        let mut k = i;
-        while k < beats.len() {
-            match beats[k].duration {
-                Duration::Tuplet(TupletSpec { n: nn, m: mm, .. }) if nn == n && mm == m => k += 1,
-                _ => break,
-            }
+    let mut ranges: std::collections::BTreeMap<u32, (usize, usize)> = Default::default();
+    for (ix, b) in beats.iter().enumerate() {
+        if let Some(id) = b.tuplet_group_id {
+            ranges
+                .entry(id)
+                .and_modify(|rng| {
+                    rng.0 = rng.0.min(ix);
+                    rng.1 = rng.1.max(ix);
+                })
+                .or_insert((ix, ix));
         }
-
-        // Gröbste Basisnote im Run bestimmen (als Gruppenbasis)
-        let mut run_max_base = beats[i].duration.base_note();
-        let mut run_max_ticks = measure.grid.ticks_of(&Duration::Simple(run_max_base)).unwrap_or(0);
-        for beat in beats.iter().take(k).skip(i) {
-            let b = beat.duration.base_note();
-            if let Some(t) = measure.grid.ticks_of(&Duration::Simple(b)) {
-                if t > run_max_ticks {
-                    run_max_ticks = t;
-                    run_max_base = b;
-                }
-            }
-        }
-
-        // Run in logische Spans zerlegen: Ziel = m * (Ticks der gröbsten Basis)
-        let mut start = i;
-        while start < k {
-            let mut acc_ticks: u32 = 0;
-            let mut end = start;
-            let mut has_rest = false;
-            let mut reached = false;
-            while end < k {
-                if beats[end].kind == BeatKind::Rest { has_rest = true; }
-                let dt = measure.grid.ticks_of(&beats[end].duration).unwrap_or(0);
-                acc_ticks = acc_ticks.saturating_add(dt);
-                let target = run_max_ticks.saturating_mul(m as u32);
-                if acc_ticks >= target { reached = true; break; }
-                end += 1;
-            }
-            if !reached && end >= start {
-                end = k.saturating_sub(1);
-                reached = end >= start;
-            }
-            if reached {
-                spans.push(TupletSpan {
-                    count: n,
-                    start,
-                    end,
-                    base: run_max_base,
-                    contains_rest: has_rest,
-                });
-                start = end + 1;
-            } else {
-                start += 1;
-            }
-        }
-        i = k;
     }
 
-    spans
+    let mut out: Vec<TupletSpan> = Vec::with_capacity(ranges.len());
+    for (id, (start, end)) in ranges.into_iter() {
+        if let Some(anchor) = measure.tuplet_anchors.get(&id) {
+            let contains_rest = (start..=end).any(|i| beats[i].kind == BeatKind::Rest);
+            out.push(TupletSpan {
+                count: anchor.n,
+                start,
+                end,
+                base: anchor.base_hint,
+                contains_rest,
+            });
+        }
+    }
+
+    out
 }
 
 pub fn compute_tuplet_plan(measure: &Measure, beams: &[BeamGroup]) -> Vec<TupletPlan> {
@@ -156,9 +91,8 @@ pub fn compute_tuplet_plan(measure: &Measure, beams: &[BeamGroup]) -> Vec<Tuplet
 
     let mut out: Vec<TupletPlan> = Vec::with_capacity(spans.len());
     for g in spans.into_iter() {
-        let note_idxs: Vec<BeatIdx> = (g.start..=g.end)
-            .filter(|&ix| beats[ix].kind == BeatKind::Note)
-            .collect();
+        let note_idxs: Vec<BeatIdx> =
+            (g.start..=g.end).filter(|&ix| beats[ix].kind == BeatKind::Note).collect();
 
         let fully_beamed = if g.contains_rest || note_idxs.len() < 2 {
             false
@@ -176,13 +110,24 @@ pub fn compute_tuplet_plan(measure: &Measure, beams: &[BeamGroup]) -> Vec<Tuplet
                         let b = pair[1];
                         let la = *pos_map.get(&a).unwrap();
                         let lb = *pos_map.get(&b).unwrap();
-                        if la >= lb { ok = false; break; }
-                        for cidx in la..lb {
-                            if *bg.continuity.get(cidx).unwrap_or(&0) < 1 { ok = false; break; }
+                        if la >= lb {
+                            ok = false;
+                            break;
                         }
-                        if !ok { break; }
+                        for cidx in la..lb {
+                            if *bg.continuity.get(cidx).unwrap_or(&0) < 1 {
+                                ok = false;
+                                break;
+                            }
+                        }
+                        if !ok {
+                            break;
+                        }
                     }
-                    if ok { ok_any = true; break 'bg; }
+                    if ok {
+                        ok_any = true;
+                        break 'bg;
+                    }
                 }
             }
             ok_any
