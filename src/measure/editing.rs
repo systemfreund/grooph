@@ -2,23 +2,24 @@ use crate::measure::BeatKind::{Note, Rest};
 use crate::measure::duration::NoteValue::{Eighth, Sixteenth};
 use crate::measure::duration::{Duration, NoteValue, TupletSpec};
 use crate::measure::editing::Modification::{DissolveTuplet, ToggleAccent};
-use crate::measure::{Beat, BeatKind, Measure};
+use crate::measure::{Beat, BeatIdx, BeatKind, Measure, TupletAnchor};
 use either::Either;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Modification {
     SetBeat,
     SetTuplet(GroupSpan),
-    DissolveTuplet(usize),
-    ToggleAccent(bool), // contains old state
-    ToggleDotted(u8),   // contains old state
+    DissolveTuplet(BeatIdx, TupletAnchor), // contains old state
+    ToggleKind(BeatIdx, BeatKind),         // contains old state
+    ToggleAccent(BeatIdx, bool),           // contains old state
+    ToggleDotted(BeatIdx, u8),             // contains old state
 }
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct GroupSpan {
     pub id: u32,
-    pub start_idx: usize,
-    pub end_idx: usize, // inclusive
+    pub start_idx: BeatIdx,
+    pub end_idx: BeatIdx, // inclusive
 }
 
 pub const CYCLE_TUPLET_SPECS: [TupletSpec; 5] = [
@@ -31,7 +32,7 @@ pub const CYCLE_TUPLET_SPECS: [TupletSpec; 5] = [
 
 impl Measure<'_> {
     /// Toggle the user accent flag at index `idx`.
-    pub fn toggle_accent(&mut self, idx: usize) -> Option<Modification> {
+    pub fn toggle_accent(&mut self, idx: BeatIdx) -> Option<Modification> {
         if let Some(b) = self.beats.get(idx) {
             let old_state = b.accented;
             let accented = !old_state;
@@ -40,7 +41,7 @@ impl Measure<'_> {
             {
                 b.accented = accented;
             }
-            Some(ToggleAccent(old_state))
+            Some(ToggleAccent(idx, old_state))
         } else {
             None
         }
@@ -51,7 +52,7 @@ impl Measure<'_> {
     /// - Dotted { base, dots: 1 } -> Simple(base)
     ///
     /// No-op for other cases (tuplets, multi-dot) or if replacement doesn't fit.
-    pub fn toggle_dotted(&mut self, idx: usize) -> Option<Modification> {
+    pub fn toggle_dotted(&mut self, idx: BeatIdx) -> Option<Modification> {
         if idx >= self.beats.len() {
             return None;
         }
@@ -73,7 +74,7 @@ impl Measure<'_> {
                 tuplet_group_id: current.tuplet_group_id,
             };
             if self.set_beat(idx, new_beat).is_ok() {
-                return Some(Modification::ToggleDotted(old_dots));
+                return Some(Modification::ToggleDotted(idx, old_dots));
             }
         }
         None
@@ -81,7 +82,7 @@ impl Measure<'_> {
 
     pub fn modify_beat(
         &mut self,
-        idx: usize,
+        idx: BeatIdx,
         base: NoteValue,
         beat_kind: Option<BeatKind>,
     ) -> Option<Modification> {
@@ -107,7 +108,7 @@ impl Measure<'_> {
 
     pub fn set_tuplet(
         &mut self,
-        idx: usize,
+        idx: BeatIdx,
         tuplet_spec: Option<TupletSpec>,
         overwrite: bool,
     ) -> Option<Modification> {
@@ -178,7 +179,7 @@ impl Measure<'_> {
     /// - Ein vorhandener Akzent innerhalb der Gruppe wird auf den ersten neu eingefügten Beat übernommen.
     /// - Entfernt die `tuplet_group_id` in diesem Bereich und löscht den verknüpften Anchor.
     /// - Rückgabe: `true` bei erfolgreicher Auflösung, sonst `false` (z. B. wenn kein Tuplet an `idx`).
-    pub fn dissolve_tuplet_group(&mut self, idx: usize) -> Option<Modification> {
+    pub fn dissolve_tuplet_group(&mut self, idx: BeatIdx) -> Option<Modification> {
         if idx >= self.beats.len() {
             return None;
         }
@@ -206,7 +207,8 @@ impl Measure<'_> {
                 .filter(|d| matches!(d, Duration::Simple(_)))
                 .collect();
 
-            let span_ticks = self.tuplet_anchors.get(&group_id).unwrap().target_ticks;
+            let anchor = self.tuplet_anchors.get(&group_id).unwrap();
+            let span_ticks = anchor.target_ticks;
             self.fill_at(start_idx, span_ticks, &allowed, Either::Right(Rest)).unwrap();
 
             // Post‑Processing: ersten neu eingefügten Beat ggf. als Note setzen und Akzent übernehmen
@@ -220,9 +222,12 @@ impl Measure<'_> {
                 self.beats[start_idx].accented = had_any_accent;
             }
 
+            let a = anchor.clone();
+            
             // Anchor entfernen, da die Gruppe aufgelöst wurde
             self.tuplet_anchors.remove(&group_id);
-            Some(DissolveTuplet(start_idx))
+            
+            Some(DissolveTuplet(start_idx, a))
         } else {
             None
         }
@@ -230,7 +235,7 @@ impl Measure<'_> {
 
     /// Find the first and last index with the same tuplet group id as the beat at the given index.
     /// `None`, if the beat is not in a tuplet group.
-    fn find_group_span(&self, idx: usize) -> Option<GroupSpan> {
+    fn find_group_span(&self, idx: BeatIdx) -> Option<GroupSpan> {
         let id = self.beats[idx].tuplet_group_id?;
 
         let mut start_idx = idx;
@@ -253,7 +258,7 @@ impl Measure<'_> {
     /// Die Offsets sind relativ zum Gruppenstart, 0‑basiert, in Grid‑Ticks, und stets aufsteigend sortiert.
     ///
     /// Rückgabe `None`, wenn an `start_idx` keine Tuplet‑Gruppe beginnt.
-    fn tuplet_group_note_offsets(&self, start_idx: usize) -> Option<Vec<(u32, bool)>> {
+    fn tuplet_group_note_offsets(&self, start_idx: BeatIdx) -> Option<Vec<(u32, bool)>> {
         if start_idx >= self.beats.len() {
             return None;
         }
@@ -297,7 +302,7 @@ impl Measure<'_> {
     /// Rückgabe: `true` bei Erfolg, `false` falls an `start_idx` keine Tuplet‑Gruppe beginnt.
     fn apply_tuplet_projection_at(
         &mut self,
-        start_idx: usize,
+        start_idx: BeatIdx,
         source_offsets: &[(u32, bool)],
     ) -> bool {
         if start_idx >= self.beats.len() {
@@ -348,7 +353,7 @@ impl Measure<'_> {
         let mut used = vec![false; tlen];
         for &(src_rel, src_accent) in source_offsets.iter() {
             // finde nächstgelegenen Index
-            let mut best_k: Option<usize> = None;
+            let mut best_k: Option<BeatIdx> = None;
             let mut best_dist: u32 = u32::MAX;
             for (k, (trel, _tidx)) in target_rel.iter().enumerate() {
                 if used[k] {
@@ -408,7 +413,7 @@ impl Measure<'_> {
                     // If we run out of beats, set_beat_at will handle the error.
                     break;
                 }
-                // Check if we are about to absorb a subsequent beat that is a note
+                // Check if we are about to absorb the following beat that is a note
                 if k > idx && self.beats[k].kind == Note {
                     return None;
                 }
@@ -560,7 +565,7 @@ mod tests {
     #[test]
     fn convert_absorbs_rests_ok() {
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
-        // Setup: [Rest(e), Rest(e), Rest(q)...] by replacing first Q with E (fills remainder with E)
+        // Setup: [Rest(e), Rest(e), Rest(q)...] by replacing the first Q with E (fills the remainder with E)
         m.set_beat(0, Beat::rest(e())).unwrap();
         // Now convert idx 0 (Rest(e)) to Triplet Eighths (span Q). Needs to absorb idx 1 (Rest(e)).
         assert_matches!(
@@ -578,7 +583,7 @@ mod tests {
         m.set_beat(0, Beat::rest(e())).unwrap();
         m.set_beat(1, Beat::note(e())).unwrap();
 
-        // Try convert idx 0 to Triplet Eighths (span Q). Needs to absorb idx 1 which is Note.
+        // Try to convert idx 0 to Triplet Eighths (span Q). Needs to absorb idx 1, which is Note.
         assert_matches!(
             m.convert_to_tuplet(0, TupletSpec { n: 3, m: 2, base: Eighth }, false),
             None
@@ -595,7 +600,7 @@ mod tests {
         m.set_beat(0, Beat::rest(e())).unwrap();
         m.set_beat(1, Beat::note(e())).unwrap();
 
-        // Try convert idx 0 to Triplet Eighths (span Q). Overwrite=true.
+        // Try to convert idx 0 to Triplet Eighths (span Q). Overwrite=true.
         assert_matches!(
             m.convert_to_tuplet(0, TupletSpec { n: 3, m: 2, base: Eighth }, true),
             Some(GroupSpan { start_idx: 0, end_idx: 2, id: _ }),

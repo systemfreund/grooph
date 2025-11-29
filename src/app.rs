@@ -216,26 +216,15 @@ impl App for Grooph<'_> {
                     let new_pos = self.cursor_idx.saturating_sub(1).min(new_len - 1);
                     self.cursor_idx = new_pos;
                 }
-                if i.key_pressed(Key::Space) {
-                    self.measure.toggle_beat_kind(idx);
-                }
-                if i.key_pressed(Key::Num1) {
-                    self.set_beat(idx, Quarter, None);
-                }
-                if i.key_pressed(Key::Num2) {
-                    self.set_beat(idx, Eighth, None);
-                }
-                if i.key_pressed(Key::Num3) {
-                    self.set_beat(idx, Sixteenth, None);
-                }
-                if i.key_pressed(Key::Num4) {
-                    self.set_beat(idx, ThirtySecond, None);
-                }
-                if i.key_pressed(Key::Period) {
-                    self.measure.toggle_dotted(idx);
-                }
-                if i.key_pressed(Key::A) {
-                    self.measure.toggle_accent(idx);
+                // Keyboard input routed through tool shortcuts
+                for t in all_tools().iter().filter(|t| t.shortcut.is_some()) {
+                    let sc = t.shortcut.unwrap();
+                    if let Some(key) = Self::char_to_key(sc.key) {
+                        // Match exact shift requirement
+                        if i.key_pressed(key) && i.modifiers.shift == sc.with_shift {
+                            self.apply_tool(t);
+                        }
+                    }
                 }
                 if i.key_pressed(Key::T) {
                     self.set_tuplet(idx, None);
@@ -309,7 +298,7 @@ impl Grooph<'_> {
     }
 
     fn apply_tool(&mut self, tool: &Tool) {
-        match tool.kind {
+        let result = match tool.kind {
             ToolKind::InsertBeat(template) => {
                 let beats_len = self.measure.beats().len();
                 if beats_len == 0 {
@@ -317,20 +306,58 @@ impl Grooph<'_> {
                 }
                 let idx = self.cursor_idx.min(beats_len - 1);
 
-                let result = match template.duration {
+                match template.duration {
                     Duration::Simple(_) => {
                         self.set_beat(idx, template.duration.base_note(), Some(template.kind))
                     }
                     Duration::Tuplet(spec) => self.set_tuplet(idx, Some(spec)),
                     _ => None,
-                };
-
-                println!("{:?}", result);
+                }
+            }
+            ToolKind::Modify(modifier) => {
+                let beats_len = self.measure.beats().len();
+                if beats_len == 0 { return; }
+                let idx = self.cursor_idx.min(beats_len - 1);
+                match modifier {
+                    crate::tools::Modifier::ToggleDotted { dots: _ } => {
+                        self.measure.toggle_dotted(idx)
+                    }
+                    crate::tools::Modifier::ToggleAccent => {
+                        self.measure.toggle_accent(idx)
+                    }
+                    crate::tools::Modifier::ToggleRestNote => {
+                        self.measure.toggle_beat_kind(idx)
+                    }
+                }
             }
             _ => {
                 // Andere Toolarten (Modifier/Edit/Meta) werden in einem späteren Schritt verdrahtet.
+                None
             }
-        }
+        };
+
+        println!("{:?}", result);
+    }
+
+    fn char_to_key(c: char) -> Option<Key> {
+        use Key::*;
+        Some(match c {
+            '1' => Num1,
+            '2' => Num2,
+            '3' => Num3,
+            '4' => Num4,
+            '5' => Num5,
+            '6' => Num6,
+            '7' => Num7,
+            '8' => Num8,
+            '9' => Num9,
+            '0' => Num0,
+            '.' => Period,
+            ' ' => Space,
+            'a' | 'A' => A,
+            't' | 'T' => T,
+            _ => return None,
+        })
     }
 
     fn note_button(&self, ui: &mut Ui, template: BeatTemplate, id: &str) -> Response {

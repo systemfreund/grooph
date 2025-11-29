@@ -2,9 +2,6 @@ use crate::layout::beam_plan::{BeamGroup, BeamPlan, compute_beam_plan};
 use crate::layout::tuplet_plan::{TupletPlan, compute_tuplet_plan};
 use crate::measure::{Beat, Measure};
 
-/// Logical Beat-Index within a measure (0-based)
-pub type BeatIdx = usize;
-
 /// Logical, device-independent render plan derived from a `Measure`.
 ///
 /// Purpose and scope:

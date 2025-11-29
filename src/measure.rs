@@ -18,6 +18,10 @@ use either::Either;
 use std::collections::HashMap;
 use std::fmt::{Debug, Display, Formatter};
 use std::vec;
+use crate::measure::editing::Modification;
+
+/// Logical Beat-Index within a measure (0-based)
+pub type BeatIdx = usize;
 
 /// Errors that can occur when adding beats to a measure
 #[derive(Debug, PartialEq)]
@@ -37,7 +41,7 @@ pub enum MeasureError {
 }
 
 /// Stable anchor describing a tuplet group span and semantics
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TupletAnchor {
     pub id: u32,
     pub n: u8,
@@ -80,7 +84,7 @@ impl<'a> Measure<'a> {
     pub fn beats(&self) -> &Vec<Beat> { &self.beats }
 
     /// Replace the beat at index `idx` with `beat` if it fits and the remainder stays fillable.
-    pub fn set_beat(&mut self, idx: usize, beat: Beat) -> Result<(), MeasureError> {
+    pub fn set_beat(&mut self, idx: BeatIdx, beat: Beat) -> Result<(), MeasureError> {
         assert!(idx < self.beats.len());
         let old_accent = self.beats[idx].accented;
         let dur_old = self.beats[idx].duration; // duration of the beat to be replaced
@@ -270,7 +274,7 @@ impl<'a> Measure<'a> {
         Ok(())
     }
 
-    fn compute_ticks_to_absorb(&self, idx: usize, dur_old: Duration, need: u32) -> u32 {
+    fn compute_ticks_to_absorb(&self, idx: BeatIdx, dur_old: Duration, need: u32) -> u32 {
         let mut absorb_ticks = 0u32;
         let mut k = idx + 1;
         while k < self.beats.len() {
@@ -322,7 +326,7 @@ impl<'a> Measure<'a> {
 
     fn max_ticks(&self) -> u32 { self.grid.ticks_per_measure(&self.time_signature) }
 
-    fn remaining_ticks(&self, idx: usize) -> u32 {
+    fn remaining_ticks(&self, idx: BeatIdx) -> u32 {
         if idx >= self.beats.len() {
             return 0;
         }
@@ -333,7 +337,7 @@ impl<'a> Measure<'a> {
         sum
     }
 
-    pub fn remove(&mut self, idx: usize) {
+    pub fn remove(&mut self, idx: BeatIdx) {
         if idx >= self.beats.len() {
             return;
         }
@@ -356,7 +360,7 @@ impl<'a> Measure<'a> {
 
     fn fill_at(
         &mut self,
-        idx: usize,
+        idx: BeatIdx,
         ticks: u32,
         allowed: &[Duration],
         init: Either<Beat, BeatKind>,
@@ -382,13 +386,17 @@ impl<'a> Measure<'a> {
 
     /// Toggle the beat kind at `idx` between Note and Rest while preserving duration.
     /// No-op if `idx` is out of bounds.
-    pub fn toggle_beat_kind(&mut self, idx: usize) {
+    pub fn toggle_beat_kind(&mut self, idx: BeatIdx) -> Option<Modification> {
         if let Some(b) = self.beats.get_mut(idx) {
-            b.kind = match b.kind {
+            let old_kind = b.kind;
+            b.kind = match old_kind {
                 Rest => Note,
                 Note => Rest,
             };
             b.accented = b.accented && b.kind == Note;
+            Some(Modification::ToggleKind(idx, old_kind))
+        } else {
+            None
         }
     }
 

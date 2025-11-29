@@ -1,7 +1,6 @@
 use crate::layout::beam_plan::BeamGroup;
-use crate::layout::render_plan::BeatIdx;
-use crate::measure::duration::{Duration, NoteValue, TupletSpec};
-use crate::measure::{BeatKind, Measure};
+use crate::measure::duration::{Duration, NoteValue};
+use crate::measure::{BeatIdx, BeatKind, Measure};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TupletPlan {

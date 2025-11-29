@@ -1,7 +1,6 @@
-use crate::layout::render_plan::BeatIdx;
 use crate::layout::tuplet_plan::{TupletSpan, detect_tuplet_spans};
-use crate::measure::duration::{Duration, NoteValue, TupletSpec};
-use crate::measure::{Beat, BeatKind, Measure, TimeSignature};
+use crate::measure::duration::{Duration, NoteValue};
+use crate::measure::{Beat, BeatIdx, BeatKind, Measure, TimeSignature};
 
 /// Number of beams implied by a duration (eighth = 1, sixteenth = 2, 32nd = 3).
 /// Tuplets map to their base note value for beam count purposes.
@@ -73,7 +72,7 @@ pub(super) fn compute_beam_plan(measure: &Measure) -> BeamPlan {
         return BeamPlan { groups };
     }
 
-    // Build groups: start new when crossing primary boundary or encountering a non-beamable NOTE between
+    // Build groups: start new when crossing a primary boundary or encountering a non-beamable NOTE between
     let mut cur: Vec<BeatIdx> = vec![note_idxs[0]];
     for w in note_idxs.windows(2) {
         let a = w[0];
@@ -84,7 +83,7 @@ pub(super) fn compute_beam_plan(measure: &Measure) -> BeamPlan {
 
         let boundary_between = boundaries.iter().any(|&bd| bd > a_on && bd <= b_on);
         let mut break_group = false;
-        // By default we break at primary boundaries, unless a..b belong to the SAME logical tuplet group
+        // By default, we break at primary boundaries, unless a..b belong to the SAME logical tuplet group
         // (e.g., inside the same triplet of 3 notes). Contiguous same-spec tuplets across a boundary should
         // NOT be merged if they represent two adjacent tuplet groups (e.g., two triplets in 2/4).
         if !break_group && boundary_between && !is_same_tuplet_group(&span_of_idx, &spans, a, b) {
@@ -99,11 +98,11 @@ pub(super) fn compute_beam_plan(measure: &Measure) -> BeamPlan {
             && boundary_between
             && let Some(sa) = span_of_idx[a]
         {
-            // a must be the last index of its tuplet span
+            // `a` must be the last index of its tuplet span
             if a == spans[sa].end {
                 // b must NOT be a tuplet and must be beamable
                 if span_of_idx[b].is_none() && beam_count(&beats[b].duration) > 0 {
-                    // a must cross a primary boundary and end exactly at b's onset
+                    // `a` must cross a primary boundary and end exactly at b's onset
                     let a_end = onsets[a]
                         .saturating_add(measure.grid.ticks_of(&beats[a].duration).unwrap_or(0));
                     let b_on = onsets[b];
@@ -169,7 +168,8 @@ fn finalize_group(groups: &mut Vec<BeamGroup>, beats: &[Beat], cur: &[BeatIdx]) 
     for w in cur.windows(2) {
         let i = w[0];
         let j = w[1];
-        // Determine if there was any content between i and j; if any rest or other item exists, continuity can be reduced
+        // Determine if there was any content between `i` and `j`; if any rest or other item exists, 
+        // continuity can be reduced
         let min_beams = beam_count(&beats[i].duration).min(beam_count(&beats[j].duration));
         // Broken beams (rests between) -> continuity 0, otherwise full min_beams
         let between_has_rest = has_rest_between(beats, i, j);
@@ -401,7 +401,7 @@ mod tests {
     #[test]
     fn beaming_with_t8_triplet_where_all_beats_are_subdivided_in_t16() {
         let mut m = Measure::new(TimeSignature::ONE_FOUR);
-        // First create a t8 tuplet group
+        // First, create a t8 tuplet group
         m.set_beat(0, Beat::note(t8())).unwrap();
         // Subdivide all 8 eighths into 16th notes
         for i in 0..=5 {
@@ -472,7 +472,7 @@ mod tests {
         m.set_beat(1, Beat::note(t8())).unwrap();
         m.set_beat(2, Beat::note(t8())).unwrap();
 
-        // Next note is not a triplet
+        // The next note is not a triplet
         m.set_beat(3, Beat::note(e())).unwrap();
 
         let mut plan = compute_beam_plan(&m);
