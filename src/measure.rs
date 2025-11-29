@@ -221,7 +221,16 @@ impl<'a> Measure<'a> {
                                 .collect(),
                             _ => Vec::new(),
                         };
-                        self.fill_at(p, new_ticks_rest, &allowed, Either::Left(self.beats[idx]))?;
+                        // When growing, the consumed remainder after the enlarged beat
+                        // should be filled with rests (not notes). Use the current beat
+                        // as a template to preserve metadata (e.g., tuplet ids), but
+                        // switch kind to Rest.
+                        self.fill_at(
+                            p,
+                            new_ticks_rest,
+                            &allowed,
+                            Either::Left(self.beats[idx].with_kind(Rest)),
+                        )?;
                         remaining_to_consume = 0;
                     }
                 }
@@ -700,14 +709,17 @@ mod tests {
 
     #[test]
     fn set_bigger_beat_on_smaller_rest() {
-        /*
-        1/4:  0: rest 1/16
-              1: rest 1/8
+        let mut m = Measure::new(TimeSignature::ONE_FOUR);
 
-        set note @0 -> 1/8
+        // Arrange: create rests 1/16 at idx 0 and 1/8 at idx 1
+        m.set_beat(0, Beat::rest(s())).unwrap();
+        m.set_beat(1, Beat::rest(e())).unwrap();
 
-        expect: 0: 1/8
-                1: (1/16)
-         */
+        // Act: set a bigger note (1/8) at position 0
+        assert!(m.set_beat(0, Beat::note(e())).is_ok());
+
+        // Assert: index 0 becomes 1/8 note, index 1 becomes 1/16 rest
+        assert_eq!(m.beats()[0], Beat::note(e()));
+        assert_eq!(m.beats()[1], Beat::rest(s()));
     }
 }
