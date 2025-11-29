@@ -221,4 +221,51 @@ mod tests {
         assert_eq!(tuplets[0].start, 0);
         assert_eq!(tuplets[0].end, 3);
     }
+
+    #[test]
+    fn triplet_render_plan_4() {
+        let mut m = Measure::new(TimeSignature::TWO_FOUR);
+        m.set_beat(0, Beat::note(t8())).unwrap();
+        m.set_beat(1, Beat::note(t8())).unwrap();
+        m.set_beat(2, Beat::note(t8())).unwrap();
+        m.set_beat(3, Beat::note(t8())).unwrap();
+        m.set_beat(4, Beat::note(t8())).unwrap();
+        m.set_beat(5, Beat::note(t8())).unwrap();
+
+        let mut plan = plan_measure(&m);
+
+        let assert_1st_tuplet = |plan: &RenderPlan, fully_beamed: bool, edge: EdgeConnection| {
+            let tuplets = &plan.tuplets;
+            assert_eq!(tuplets[0].count, 3);
+            assert_eq!(tuplets[0].start, 0);
+            assert_eq!(tuplets[0].end, 2);
+            assert_eq!(tuplets[0].fully_beamed, fully_beamed);
+            assert_eq!(tuplets[0].edge_connection, edge);
+        };
+
+        let assert_2nd_tuplet = |plan: &RenderPlan, fully_beamed: bool, edge: EdgeConnection| {
+            let tuplets = &plan.tuplets;
+            assert_eq!(tuplets[1].count, 3);
+            assert_eq!(tuplets[1].start, 3);
+            assert_eq!(tuplets[1].end, 5);
+            assert_eq!(tuplets[1].fully_beamed, fully_beamed);
+            assert_eq!(tuplets[1].edge_connection, edge);
+        };
+
+        assert_1st_tuplet(&plan, true, EdgeConnection::None);
+        assert_2nd_tuplet(&plan, true, EdgeConnection::None);
+
+        // Last note of first tuplet is now a rest.
+        m.set_beat(2, Beat::rest(t8())).unwrap();
+        plan = plan_measure(&m);
+        assert_1st_tuplet(&plan, false, EdgeConnection::None);
+        assert_2nd_tuplet(&plan, true, EdgeConnection::None);
+
+        // Middle note of first tuplet is now a rest.
+        m.set_beat(2, Beat::note(t8())).unwrap();
+        m.set_beat(1, Beat::rest(t8())).unwrap();
+        plan = plan_measure(&m);
+        assert_1st_tuplet(&plan, false, EdgeConnection::None);
+        assert_2nd_tuplet(&plan, true, EdgeConnection::None);
+    }
 }

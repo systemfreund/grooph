@@ -112,6 +112,8 @@ pub fn compute_tuplet_plan(measure: &Measure, beams: &[BeamGroup]) -> Vec<Tuplet
                 if let Some(fi) = first_note
                     && fi > 0
                     && beats[fi - 1].kind == BeatKind::Note
+                    // Do not create an external edge if the neighbor is itself a tuplet slot.
+                    && !matches!(beats[fi - 1].duration, Duration::Tuplet(_))
                 {
                     for bg in beams.iter() {
                         let pos_prev = bg.beat_indices.iter().position(|&x| x == fi - 1);
@@ -129,6 +131,7 @@ pub fn compute_tuplet_plan(measure: &Measure, beams: &[BeamGroup]) -> Vec<Tuplet
                 if let Some(li) = last_note
                     && li + 1 < beats.len()
                     && beats[li + 1].kind == BeatKind::Note
+                    && !matches!(beats[li + 1].duration, Duration::Tuplet(_))
                 {
                     for bg in beams.iter() {
                         let pos_cur = bg.beat_indices.iter().position(|&x| x == li);
@@ -143,11 +146,17 @@ pub fn compute_tuplet_plan(measure: &Measure, beams: &[BeamGroup]) -> Vec<Tuplet
                         }
                     }
                 }
-                let edge_connection = match (ext_left, ext_right) {
-                    (false, false) => EdgeConnection::None,
-                    (true, false) => EdgeConnection::Left,
-                    (false, true) => EdgeConnection::Right,
-                    (true, true) => EdgeConnection::Both,
+                // If the group contains a rest, we never render an external edge connection for the bracket.
+                // This mirrors the visual convention that internal rests break beaming semantics for tuplets.
+                let edge_connection = if contains_rest {
+                    EdgeConnection::None
+                } else {
+                    match (ext_left, ext_right) {
+                        (false, false) => EdgeConnection::None,
+                        (true, false) => EdgeConnection::Left,
+                        (false, true) => EdgeConnection::Right,
+                        (true, true) => EdgeConnection::Both,
+                    }
                 };
 
                 out.push(TupletPlan {
@@ -373,11 +382,16 @@ pub fn compute_tuplet_plan(measure: &Measure, beams: &[BeamGroup]) -> Vec<Tuplet
             }
         }
 
-        let edge_connection = match (ext_left, ext_right) {
-            (false, false) => EdgeConnection::None,
-            (true, false) => EdgeConnection::Left,
-            (false, true) => EdgeConnection::Right,
-            (true, true) => EdgeConnection::Both,
+        // Internal rests suppress external edge connections for the tuplet bracket/number only decision.
+        let edge_connection = if g.contains_rest {
+            EdgeConnection::None
+        } else {
+            match (ext_left, ext_right) {
+                (false, false) => EdgeConnection::None,
+                (true, false) => EdgeConnection::Left,
+                (false, true) => EdgeConnection::Right,
+                (true, true) => EdgeConnection::Both,
+            }
         };
 
         out.push(TupletPlan {
