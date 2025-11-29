@@ -258,6 +258,7 @@ impl Grooph<'_> {
 
         measure
     }
+    
     fn set_beat(
         &mut self,
         idx: usize,
@@ -281,15 +282,15 @@ impl Grooph<'_> {
     fn set_tuplet(&mut self, idx: usize, tuplet_spec: Option<TupletSpec>) -> Option<Modification> {
         let result = self.measure.set_tuplet(idx, tuplet_spec, true);
         match &result {
-            Some(Modification::DissolveTuplet(tuplet_idx)) => {
+            Some(Modification::DissolveTuplet(tuplet_idx, _)) => {
                 let new_len = self.measure.beats().len();
                 if new_len > 0 {
-                    self.cursor_idx = *tuplet_idx.min(&(new_len - 1));
+                    self.cursor_idx = tuplet_idx.start_idx.min(new_len - 1);
                 } else {
                     self.cursor_idx = 0;
                 }
             }
-            Some(Modification::SetTuplet(group_span)) => {
+            Some(Modification::SetTuplet(group_span, ..)) => {
                 self.cursor_idx = (group_span.end_idx + 1).min(self.measure.beats().len() - 1);
             }
             _ => {}

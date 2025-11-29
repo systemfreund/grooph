@@ -388,13 +388,13 @@ impl<'a> Measure<'a> {
     /// No-op if `idx` is out of bounds.
     pub fn toggle_beat_kind(&mut self, idx: BeatIdx) -> Option<Modification> {
         if let Some(b) = self.beats.get_mut(idx) {
-            let old_kind = b.kind;
-            b.kind = match old_kind {
+            let new_kind = match b.kind {
                 Rest => Note,
                 Note => Rest,
             };
+            b.kind = new_kind;
             b.accented = b.accented && b.kind == Note;
-            Some(Modification::ToggleKind(idx, old_kind))
+            Some(Modification::ToggleKind(idx, new_kind))
         } else {
             None
         }

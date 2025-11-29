@@ -2,17 +2,17 @@ use crate::measure::BeatKind::{Note, Rest};
 use crate::measure::duration::NoteValue::{Eighth, Sixteenth};
 use crate::measure::duration::{Duration, NoteValue, TupletSpec};
 use crate::measure::editing::Modification::{DissolveTuplet, ToggleAccent};
-use crate::measure::{Beat, BeatIdx, BeatKind, Measure, TupletAnchor};
+use crate::measure::{Beat, BeatIdx, BeatKind, Measure};
 use either::Either;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Modification {
-    SetBeat,
-    SetTuplet(GroupSpan),
-    DissolveTuplet(BeatIdx, TupletAnchor), // contains old state
-    ToggleKind(BeatIdx, BeatKind),         // contains old state
-    ToggleAccent(BeatIdx, bool),           // contains old state
-    ToggleDotted(BeatIdx, u8),             // contains old state
+    SetBeat(BeatIdx, Beat),                // contains the new beat
+    SetTuplet(GroupSpan, TupletSpec),      // contains the new state
+    DissolveTuplet(GroupSpan, TupletSpec), // contains the dissolved tuplet spec
+    ToggleKind(BeatIdx, BeatKind),         // contains the new beat kind
+    ToggleAccent(BeatIdx, bool),           // contains the new accented state
+    ToggleDotted(BeatIdx, u8),             // contains the new dot count
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -34,14 +34,13 @@ impl Measure<'_> {
     /// Toggle the user accent flag at index `idx`.
     pub fn toggle_accent(&mut self, idx: BeatIdx) -> Option<Modification> {
         if let Some(b) = self.beats.get(idx) {
-            let old_state = b.accented;
-            let accented = !old_state;
+            let accented = !b.accented;
             if let Some(b) = self.beats.get_mut(idx)
                 && b.kind == Note
             {
                 b.accented = accented;
             }
-            Some(ToggleAccent(idx, old_state))
+            Some(ToggleAccent(idx, accented))
         } else {
             None
         }
@@ -57,13 +56,13 @@ impl Measure<'_> {
             return None;
         }
         let current = self.beats[idx];
-        let mut old_dots = 0u8;
+        let mut new_dots = 0u8;
         let new_dur = match current.duration {
-            Duration::Simple(base) => Some(Duration::Dotted { base, dots: 1 }),
-            Duration::Dotted { base, dots: 1 } => {
-                old_dots = 1;
-                Some(Duration::Simple(base))
+            Duration::Simple(base) => {
+                new_dots = 1;
+                Some(Duration::Dotted { base, dots: 1 })
             }
+            Duration::Dotted { base, dots: 1 } => Some(Duration::Simple(base)),
             _ => None,
         };
         if let Some(dur) = new_dur {
@@ -74,7 +73,7 @@ impl Measure<'_> {
                 tuplet_group_id: current.tuplet_group_id,
             };
             if self.set_beat(idx, new_beat).is_ok() {
-                return Some(Modification::ToggleDotted(idx, old_dots));
+                return Some(Modification::ToggleDotted(idx, new_dots));
             }
         }
         None
@@ -100,7 +99,9 @@ impl Measure<'_> {
                 Note => Beat::note(new_dur),
                 Rest => Beat::rest(new_dur),
             };
-            self.set_beat(idx, new_beat).map(|_| Some(Modification::SetBeat)).unwrap_or(None)
+            self.set_beat(idx, new_beat)
+                .map(|_| Some(Modification::SetBeat(idx, new_beat)))
+                .unwrap_or(None)
         } else {
             None
         }
@@ -139,13 +140,13 @@ impl Measure<'_> {
                     captured_offsets = self.tuplet_group_note_offsets(start_idx);
                 }
                 result = self.dissolve_tuplet_group(start_idx);
-                if let Some(DissolveTuplet(_)) = result {
+                if let Some(DissolveTuplet(..)) = result {
                     // Try to convert to the next target if defined, also at group start
                     if let Some(tuplet_spec) = next_target
                         && let Some(group_span) =
                             self.convert_to_tuplet(start_idx, *tuplet_spec, overwrite)
                     {
-                        result = Some(Modification::SetTuplet(group_span));
+                        result = Some(Modification::SetTuplet(group_span, *tuplet_spec));
                         // Nach erfolgreicher Rekreation ggf. Projektion anwenden
                         if let Some(ref src) = captured_offsets {
                             let _ = self.apply_tuplet_projection_at(start_idx, src);
@@ -162,7 +163,7 @@ impl Measure<'_> {
 
                 if let Some(group_span) = self.convert_to_tuplet(start_idx, *next_target, overwrite)
                 {
-                    result = Some(Modification::SetTuplet(group_span));
+                    result = Some(Modification::SetTuplet(group_span, *next_target));
                 }
             }
         };
@@ -213,21 +214,20 @@ impl Measure<'_> {
 
             // Post‑Processing: ersten neu eingefügten Beat ggf. als Note setzen und Akzent übernehmen
             if start_idx < self.beats.len() {
-                // Sicherheit: keine Tuplet‑ID
                 self.beats[start_idx].tuplet_group_id = None;
                 if had_any_note {
                     self.beats[start_idx].kind = Note;
                 }
-                // Akzent übernehmen (falls irgendein Beat in der Gruppe akzentuiert war)
                 self.beats[start_idx].accented = had_any_accent;
             }
 
-            let a = anchor.clone();
-            
             // Anchor entfernen, da die Gruppe aufgelöst wurde
-            self.tuplet_anchors.remove(&group_id);
-            
-            Some(DissolveTuplet(start_idx, a))
+            self.tuplet_anchors.remove(&group_id).map(|anchor| {
+                DissolveTuplet(
+                    GroupSpan { start_idx, end_idx, id: group_id },
+                    TupletSpec { n: anchor.n, m: anchor.m, base: anchor.base_hint },
+                )
+            })
         } else {
             None
         }
@@ -460,8 +460,13 @@ mod tests {
         m.set_beat(2, Beat::note(t8())).unwrap();
         m.toggle_accent(2);
 
-        // Auflösen der Gruppe (über mittleren Slot sicher in der Gruppe)
-        assert_matches!(m.dissolve_tuplet_group(1), Some(DissolveTuplet(0)));
+        assert_matches!(
+            m.dissolve_tuplet_group(1),
+            Some(DissolveTuplet(
+                GroupSpan { start_idx: 0, end_idx: 2, id: 1 },
+                TupletSpec { n: 3, m: 2, base: Eighth }
+            ))
+        );
 
         // Erwartung: erster neu eingefügter Beat ist eine Note und akzentuiert
         assert!(m.beats()[0].tuplet_group_id.is_none());
@@ -483,7 +488,13 @@ mod tests {
             assert_eq!(m.beats()[i].kind, Rest);
         }
 
-        assert_matches!(m.dissolve_tuplet_group(0), Some(DissolveTuplet(0)));
+        assert_matches!(
+            m.dissolve_tuplet_group(1),
+            Some(DissolveTuplet(
+                GroupSpan { start_idx: 0, end_idx: 2, id: 1 },
+                TupletSpec { n: 3, m: 2, base: Eighth }
+            ))
+        );
 
         assert!(m.beats()[0].tuplet_group_id.is_none());
         assert_eq!(m.beats()[0].kind, Rest);
