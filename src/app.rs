@@ -7,14 +7,8 @@ use crate::measure::duration::NoteValue::*;
 use crate::measure::duration::human_readable;
 use crate::measure::editing::Modification;
 use crate::measure::{Beat, BeatKind};
-use crate::render::glyphs::{
-    GLYPH_LEFT_TUPLET_BRACKET, GLYPH_NOTE_32ND, GLYPH_NOTE_EIGHTH, GLYPH_NOTE_HALF,
-    GLYPH_NOTE_QUARTER, GLYPH_NOTE_SIXTEENTH, GLYPH_NOTE_WHOLE, GLYPH_REST_32ND, GLYPH_REST_EIGHTH,
-    GLYPH_REST_HALF, GLYPH_REST_QUARTER, GLYPH_REST_WHOLE, GLYPH_RIGHT_TUPLET_BRACKET,
-    TUPLET_DIGITS,
-};
 use crate::render::measure::{compute_em, draw_measure, draw_notes};
-use crate::tools::{EditOp, Modifier, Tool, ToolKind};
+use crate::tools::{Tool, ToolKind};
 use crate::{BeatTemplate, ToolGroup, all_tools};
 use BeatKind::Rest;
 use eframe::egui::scroll_area::{ScrollBarVisibility, ScrollSource};
@@ -26,6 +20,7 @@ use eframe::epaint::text::{FontInsert, InsertFontFamily};
 use eframe::epaint::{FontFamily, FontId};
 use eframe::{App, CreationContext, egui};
 use egui::containers::Frame;
+use std::collections::HashMap;
 
 pub struct Grooph<'a> {
     font_family: FontFamily,
@@ -34,6 +29,8 @@ pub struct Grooph<'a> {
     cursor_idx: usize,
     show_info: bool,
     show_settings: bool,
+    // Prebuilt measures for note/rest/tuplet tool buttons to avoid per-frame reconstruction
+    button_measures: HashMap<&'static str, Measure<'static>>,
 }
 
 fn add_font(ctx: &Context) {
@@ -54,68 +51,6 @@ fn add_font(ctx: &Context) {
             priority: egui::epaint::text::FontPriority::Highest,
         }],
     ))
-}
-
-/// Liefert ein symbolisches Icon pro Tool als Text sowie true,
-/// wenn das Tool eine Noten darstellt, ansonsten false..
-fn tool_icon_glyph(t: &Tool) -> (String, bool) {
-    match t.kind {
-        ToolKind::InsertBeat(beat) => {
-            match beat.duration {
-                Duration::Simple(base) => {
-                    let is_note = matches!(beat.kind, Note);
-                    let s = if is_note {
-                        match base {
-                            Quarter => GLYPH_NOTE_QUARTER,
-                            Eighth => GLYPH_NOTE_EIGHTH,
-                            Sixteenth => GLYPH_NOTE_SIXTEENTH,
-                            ThirtySecond => GLYPH_NOTE_32ND,
-                            Half => GLYPH_NOTE_HALF,
-                            Whole => GLYPH_NOTE_WHOLE,
-                        }
-                    } else {
-                        match base {
-                            Quarter => GLYPH_REST_QUARTER,
-                            Eighth => GLYPH_REST_EIGHTH,
-                            Sixteenth => GLYPH_REST_EIGHTH,
-                            ThirtySecond => GLYPH_REST_32ND,
-                            Half => GLYPH_REST_HALF,
-                            Whole => GLYPH_REST_WHOLE,
-                        }
-                    };
-
-                    (s.to_string(), is_note)
-                }
-                Duration::Tuplet(TupletSpec { n, .. }) => {
-                    // Tuplets: zeige nur die Zählzahl (3,5,6,7,9)
-                    (
-                        format!(
-                            "{}{}{}",
-                            GLYPH_LEFT_TUPLET_BRACKET,
-                            TUPLET_DIGITS[n as usize],
-                            GLYPH_RIGHT_TUPLET_BRACKET
-                        ),
-                        false,
-                    )
-                }
-                Duration::Dotted { .. } => {
-                    // In der Palette aktuell nicht als Insert vorgesehen
-                    ("⋯".to_string(), false)
-                }
-            }
-        }
-        ToolKind::Modify(m) => match m {
-            Modifier::ToggleDotted { .. } => ("·".to_string(), false), // Punktierung
-            Modifier::ToggleAccent => (">".to_string(), false),
-            Modifier::ToggleRestNote => ("↔".to_string(), false),
-        },
-        ToolKind::Edit(op) => match op {
-            EditOp::Erase => ("⌫".to_string(), false),
-            EditOp::ReplaceOnApply => ("⇄".to_string(), false),
-            EditOp::FillToBoundary => ("⇥".to_string(), false),
-        },
-        ToolKind::Meta(_m) => ("TS".to_string(), false),
-    }
 }
 
 impl App for Grooph<'_> {
@@ -311,6 +246,29 @@ impl App for Grooph<'_> {
 }
 
 impl Grooph<'_> {
+    fn build_button_measure(template: BeatTemplate) -> Measure<'static> {
+        let beat_count = if let Duration::Tuplet(TupletSpec { m, .. }) = template.duration {
+            m
+        } else {
+            1
+        };
+
+        let mut measure = Measure::new_init(
+            TimeSignature {
+                beats: beat_count,
+                beat_unit: template.duration.base_note().denominator(),
+            },
+            template.kind,
+        );
+
+        if let Duration::Tuplet(TupletSpec { n, .. }) = template.duration {
+            for i in 0..n {
+                measure.set_beat(i as usize, Beat::note(template.duration)).unwrap();
+            }
+        }
+
+        measure
+    }
     fn set_beat(
         &mut self,
         idx: usize,
@@ -382,22 +340,11 @@ impl Grooph<'_> {
         let button = egui::Button::new(symbol).corner_radius(10).atom_ui(ui);
 
         if let Some(rect) = button.rect(symbol_id) {
-            let beat_count =
-                if let Duration::Tuplet(TupletSpec { m, .. }) = template.duration { m } else { 1 };
-
-            let mut measure = Measure::new_init(
-                TimeSignature {
-                    beats: beat_count,
-                    beat_unit: template.duration.base_note().denominator(),
-                },
-                template.kind,
-            );
-
-            if let Duration::Tuplet(TupletSpec { n, .. }) = template.duration {
-                for i in 0..n {
-                    measure.set_beat(i as usize, Beat::note(template.duration)).unwrap();
-                }
-            }
+            // Use a prebuilt measure for this button
+            let measure = self
+                .button_measures
+                .get(id)
+                .unwrap();
 
             let em = compute_em(&rect, 0.4, ui);
             let opts = LayoutOpts {
@@ -410,7 +357,7 @@ impl Grooph<'_> {
                 stem_length_factor: 0.9,
                 stem_thickness_factor: 0.03,
             };
-            let measure_layout = build_measure_layout(&measure, &opts);
+            let measure_layout = build_measure_layout(measure, &opts);
             let painter = &ui.painter_at(rect);
             draw_notes(painter, &measure_layout, ui.style().visuals.text_color(), &opts);
         }
@@ -440,6 +387,14 @@ impl Grooph<'_> {
         add_font(&cc.egui_ctx);
         let ff = FontFamily::Name("music".into());
         let m = Measure::new(TimeSignature::FOUR_FOUR);
+        // Precompute button measures for all insert-beat tools
+        let mut button_measures: HashMap<&'static str, Measure<'static>> = HashMap::new();
+        for t in all_tools() {
+            if let ToolKind::InsertBeat(template) = t.kind {
+                button_measures.insert(t.id, Self::build_button_measure(template));
+            }
+        }
+
         Self {
             font_family: ff.clone(),
             font_id: FontId::new(16.0, ff),
@@ -447,6 +402,7 @@ impl Grooph<'_> {
             cursor_idx: 0,
             show_info: false,
             show_settings: false,
+            button_measures,
         }
     }
 }
