@@ -97,6 +97,33 @@ pub(super) fn compute_beam_plan(measure: &Measure) -> BeamPlan {
         if !break_group && boundary_between && !is_same_tuplet_group(beats, a, b) {
             break_group = true;
         }
+
+        // Exception: Allow carrying the beam from the LAST note of a tuplet span across a primary boundary
+        // into a following non‑tuplet note IF the tuplet note extends across the boundary and its end aligns
+        // exactly with the onset of the following note, and there are no rests in between. This respects
+        // primary grouping while capturing the musical continuity described in the test comment.
+        if break_group && boundary_between {
+            if let Some(sa) = span_of_idx[a] {
+                // a must be the last index of its tuplet span
+                if a == spans[sa].end {
+                    // b must NOT be a tuplet and must be beamable
+                    if span_of_idx[b].is_none() && beam_count(&beats[b].duration) > 0 {
+                        // a must cross a primary boundary and end exactly at b's onset
+                        let a_end = onsets[a]
+                            .saturating_add(measure.grid.ticks_of(&beats[a].duration).unwrap_or(0));
+                        let b_on = onsets[b];
+                        // Check there exists a boundary strictly between a's onset and its end
+                        let crosses_boundary = boundaries
+                            .iter()
+                            .copied()
+                            .any(|bd| bd > onsets[a] && bd < a_end);
+                        if crosses_boundary && a_end == b_on && !has_rest_between(beats, a, b) {
+                            break_group = false;
+                        }
+                    }
+                }
+            }
+        }
         // Additionally: even without a primary boundary, never merge ACROSS a boundary between two
         // different tuplet groups. This prevents [1,2,3] beaming when 2 is the last of one triplet
         // and 3 the first of the next triplet within the same primary beat.
@@ -320,7 +347,9 @@ mod tests {
 
         // The last beat (t8 @ 3) of the tuplet group crosses the primary boundary,
         // because its absolute location+duration 1.917 + 0.333 = 2.25.
-        // The primary boundary is at 2.0, so the beam should connect the simple 1/8 at index 4, too.
+        // The first primary boundary for 4/4 measures is at 2.0. But the last t8's duration does
+        // not 'stop' before 2.0. In this particular case, we expect the beam to be connected with
+        // the simple 1/8 note at index 4 (absolute position 2.25), too.
         assert_eq!(plan.groups[0].beat_indices, vec![0, 1, 2, 3, 4]);
     }
 
