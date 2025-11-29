@@ -92,7 +92,7 @@ mod tests {
 
         let plan = plan_measure(&m);
         let ok = plan.tuplets.iter().any(|t| t.count == 3 && t.start == 3 && t.end == 5);
-        assert!(ok, "Triplet-Klammer sollte über Beats 4–6 (3..=5) liegen");
+        assert!(ok);
     }
 
     #[test]
