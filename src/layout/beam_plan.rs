@@ -1,4 +1,5 @@
 use crate::layout::render_plan::BeatIdx;
+use crate::layout::tuplet_plan::detect_tuplet_spans;
 use crate::measure::duration::{Duration, NoteValue, TupletSpec};
 use crate::measure::{Beat, BeatKind, Measure, TimeSignature};
 
@@ -50,6 +51,15 @@ pub(super) fn compute_beam_plan(measure: &Measure) -> BeamPlan {
     // Compute primary boundaries (tick positions inside the measure where groups should break by default)
     let boundaries = measure.grid.primary_boundaries(&ts);
 
+    // Build tuplet span map (beam-independent segmentation) for boundary decisions
+    let spans = detect_tuplet_spans(measure);
+    let mut span_of_idx: Vec<Option<usize>> = vec![None; beats.len()];
+    for (sid, s) in spans.iter().enumerate() {
+        for ix in span_of_idx.iter_mut().take(s.end + 1).skip(s.start) {
+            *ix = Some(sid);
+        }
+    }
+
     // Collect indices of beamable notes
     let mut note_idxs: Vec<BeatIdx> = Vec::new();
     for (i, b) in beats.iter().enumerate() {
@@ -74,10 +84,17 @@ pub(super) fn compute_beam_plan(measure: &Measure) -> BeamPlan {
 
         let boundary_between = boundaries.iter().any(|&bd| bd > a_on && bd <= b_on);
         let mut break_group = false;
+        // First: never merge across boundaries between two different tuplet spans
+        if let (Some(sa), Some(sb)) = (span_of_idx[a], span_of_idx[b])
+            && sa != sb
+        {
+            break_group = true;
+        }
+
         // By default we break at primary boundaries, unless a..b belong to the SAME logical tuplet group
         // (e.g., inside the same triplet of 3 notes). Contiguous same-spec tuplets across a boundary should
         // NOT be merged if they represent two adjacent tuplet groups (e.g., two triplets in 2/4).
-        if boundary_between && !is_same_tuplet_group(beats, a, b) {
+        if !break_group && boundary_between && !is_same_tuplet_group(beats, a, b) {
             break_group = true;
         }
         // Additionally: even without a primary boundary, never merge ACROSS a boundary between two
@@ -189,7 +206,10 @@ fn is_same_tuplet_group(beats: &[Beat], i: BeatIdx, j: BeatIdx) -> bool {
     // Both positions must have identical tuplet specs (same n,m,base)
     let si = tuplet_spec(&beats[i].duration);
     let sj = tuplet_spec(&beats[j].duration);
-    let Some(spec) = (match (si, sj) { (Some(a), Some(b)) if a == b => Some(a), _ => None }) else {
+    let Some(spec) = (match (si, sj) {
+        (Some(a), Some(b)) if a == b => Some(a),
+        _ => None,
+    }) else {
         return false;
     };
 
@@ -268,11 +288,11 @@ mod tests {
         // In 4/4: Eighth rest, then three eighth‑tuplets starting on the offbeat, which can span a quarter boundary.
         // The three tuplet notes must remain in one BeamGroup even if a primary boundary lies between them.
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
-        m.add_beat(Beat::rest(e())).unwrap(); // offset by an eighth
-        m.add_beat(Beat::note(t8())).unwrap();
-        m.add_beat(Beat::note(t8())).unwrap();
-        m.add_beat(Beat::note(t8())).unwrap();
-        m.add_beat(Beat::note(e())).unwrap();
+        m.set_beat(0, Beat::rest(e())).unwrap(); // offset by an eighth
+        m.set_beat(1, Beat::note(t8())).unwrap();
+        m.set_beat(2, Beat::note(t8())).unwrap();
+        m.set_beat(3, Beat::note(t8())).unwrap();
+        m.set_beat(4, Beat::note(e())).unwrap();
         let plan = compute_beam_plan(&m);
 
         // Find the group that contains note index 1 (first tuplet note)
@@ -288,10 +308,27 @@ mod tests {
     }
 
     #[test]
+    fn last_note_of_tuplet_crosses_primary_boundary() {
+        let mut m = Measure::new(TimeSignature::FOUR_FOUR);
+        m.set_beat(0, Beat::note(s())).unwrap(); // offset by a sixteenth
+        m.set_beat(1, Beat::note(t8())).unwrap();
+        m.set_beat(2, Beat::note(t8())).unwrap();
+        m.set_beat(3, Beat::note(t8())).unwrap();
+        m.set_beat(4, Beat::note(e())).unwrap();
+        m.set_beat(5, Beat::rest(e())).unwrap();
+        let plan = compute_beam_plan(&m);
+
+        // The last beat (t8 @ 3) of the tuplet group crosses the primary boundary,
+        // because its absolute location+duration 1.917 + 0.333 = 2.25.
+        // The primary boundary is at 2.0, so the beam should connect the simple 1/8 at index 4, too.
+        assert_eq!(plan.groups[0].beat_indices, vec![0, 1, 2, 3, 4]);
+    }
+
+    #[test]
     fn beaming_by_2_3_2_pattern_in_7_8() {
         let mut m = Measure::new(TimeSignature::SEVEN_EIGHT);
-        for _ in 0..7 {
-            m.add_beat(Beat::note(e())).unwrap();
+        for i in 0..7 {
+            m.set_beat(i, Beat::note(e())).unwrap();
         }
 
         let plan = compute_beam_plan(&m);
@@ -319,14 +356,14 @@ mod tests {
         // Expected primary beaming by 2+3+2 with tuplet precedence -> groups:
         // [0,1,2], [3,4,5], [6,7]
         let mut m = Measure::new(TimeSignature::SEVEN_EIGHT);
-        m.add_beat(Beat::note(e())).unwrap();
-        m.add_beat(Beat::note(e())).unwrap();
-        m.add_beat(Beat::note(e())).unwrap();
-        m.add_beat(Beat::note(t8())).unwrap();
-        m.add_beat(Beat::note(t8())).unwrap();
-        m.add_beat(Beat::note(t8())).unwrap();
-        m.add_beat(Beat::note(e())).unwrap();
-        m.add_beat(Beat::note(e())).unwrap();
+        m.set_beat(0, Beat::note(e())).unwrap();
+        m.set_beat(1, Beat::note(e())).unwrap();
+        m.set_beat(2, Beat::note(e())).unwrap();
+        m.set_beat(3, Beat::note(t8())).unwrap();
+        m.set_beat(4, Beat::note(t8())).unwrap();
+        m.set_beat(5, Beat::note(t8())).unwrap();
+        m.set_beat(6, Beat::note(e())).unwrap();
+        m.set_beat(7, Beat::note(e())).unwrap();
 
         let plan = compute_beam_plan(&m);
         assert_eq!(plan.groups.len(), 3);
@@ -353,15 +390,15 @@ mod tests {
         // The eighth notes are expected to be part of the first beam group, since the measure still
         // fits the 2+3+2 pattern, despite the 16th-note triplet at the beginning.
         let mut m = Measure::new(TimeSignature::SEVEN_EIGHT);
-        m.add_beat(Beat::note(t16())).unwrap();
-        m.add_beat(Beat::note(t16())).unwrap();
-        m.add_beat(Beat::note(t16())).unwrap();
-        m.add_beat(Beat::note(e())).unwrap();
-        m.add_beat(Beat::note(e())).unwrap();
-        m.add_beat(Beat::note(e())).unwrap();
-        m.add_beat(Beat::note(e())).unwrap();
-        m.add_beat(Beat::note(e())).unwrap();
-        m.add_beat(Beat::note(e())).unwrap();
+        m.set_beat(0, Beat::note(t16())).unwrap();
+        m.set_beat(1, Beat::note(t16())).unwrap();
+        m.set_beat(2, Beat::note(t16())).unwrap();
+        m.set_beat(3, Beat::note(e())).unwrap();
+        m.set_beat(4, Beat::note(e())).unwrap();
+        m.set_beat(5, Beat::note(e())).unwrap();
+        m.set_beat(6, Beat::note(e())).unwrap();
+        m.set_beat(7, Beat::note(e())).unwrap();
+        m.set_beat(8, Beat::note(e())).unwrap();
 
         let plan = compute_beam_plan(&m);
         assert_eq!(plan.groups.len(), 3);
