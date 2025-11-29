@@ -1,5 +1,5 @@
 use crate::layout::render_plan::BeatIdx;
-use crate::layout::tuplet_plan::detect_tuplet_spans;
+use crate::layout::tuplet_plan::{TupletSpan, detect_tuplet_spans};
 use crate::measure::duration::{Duration, NoteValue, TupletSpec};
 use crate::measure::{Beat, BeatKind, Measure, TimeSignature};
 
@@ -84,17 +84,10 @@ pub(super) fn compute_beam_plan(measure: &Measure) -> BeamPlan {
 
         let boundary_between = boundaries.iter().any(|&bd| bd > a_on && bd <= b_on);
         let mut break_group = false;
-        // First: never merge across boundaries between two different tuplet spans
-        if let (Some(sa), Some(sb)) = (span_of_idx[a], span_of_idx[b])
-            && sa != sb
-        {
-            break_group = true;
-        }
-
         // By default we break at primary boundaries, unless a..b belong to the SAME logical tuplet group
         // (e.g., inside the same triplet of 3 notes). Contiguous same-spec tuplets across a boundary should
         // NOT be merged if they represent two adjacent tuplet groups (e.g., two triplets in 2/4).
-        if !break_group && boundary_between && !is_same_tuplet_group(beats, a, b) {
+        if !break_group && boundary_between && !is_same_tuplet_group(&span_of_idx, &spans, a, b) {
             break_group = true;
         }
 
@@ -102,39 +95,28 @@ pub(super) fn compute_beam_plan(measure: &Measure) -> BeamPlan {
         // into a following non‑tuplet note IF the tuplet note extends across the boundary and its end aligns
         // exactly with the onset of the following note, and there are no rests in between. This respects
         // primary grouping while capturing the musical continuity described in the test comment.
-        if break_group && boundary_between {
-            if let Some(sa) = span_of_idx[a] {
-                // a must be the last index of its tuplet span
-                if a == spans[sa].end {
-                    // b must NOT be a tuplet and must be beamable
-                    if span_of_idx[b].is_none() && beam_count(&beats[b].duration) > 0 {
-                        // a must cross a primary boundary and end exactly at b's onset
-                        let a_end = onsets[a]
-                            .saturating_add(measure.grid.ticks_of(&beats[a].duration).unwrap_or(0));
-                        let b_on = onsets[b];
-                        // Check there exists a boundary strictly between a's onset and its end
-                        let crosses_boundary = boundaries
-                            .iter()
-                            .copied()
-                            .any(|bd| bd > onsets[a] && bd < a_end);
-                        if crosses_boundary && a_end == b_on && !has_rest_between(beats, a, b) {
-                            break_group = false;
-                        }
+        if break_group
+            && boundary_between
+            && let Some(sa) = span_of_idx[a]
+        {
+            // a must be the last index of its tuplet span
+            if a == spans[sa].end {
+                // b must NOT be a tuplet and must be beamable
+                if span_of_idx[b].is_none() && beam_count(&beats[b].duration) > 0 {
+                    // a must cross a primary boundary and end exactly at b's onset
+                    let a_end = onsets[a]
+                        .saturating_add(measure.grid.ticks_of(&beats[a].duration).unwrap_or(0));
+                    let b_on = onsets[b];
+                    // Check there exists a boundary strictly between a's onset and its end
+                    let crosses_boundary =
+                        boundaries.iter().copied().any(|bd| bd > onsets[a] && bd < a_end);
+                    if crosses_boundary && a_end == b_on && !has_rest_between(beats, a, b) {
+                        break_group = false;
                     }
                 }
             }
         }
-        // Additionally: even without a primary boundary, never merge ACROSS a boundary between two
-        // different tuplet groups. This prevents [1,2,3] beaming when 2 is the last of one triplet
-        // and 3 the first of the next triplet within the same primary beat.
-        if !break_group {
-            let ta = tuplet_spec(&beats[a].duration);
-            let tb = tuplet_spec(&beats[b].duration);
-            if matches!((ta, tb), (Some(_), Some(_))) && !is_same_tuplet_group(beats, a, b) {
-                break_group = true;
-            }
-        }
-        // Check if any non-beamable NOTE exists between a..b
+
         if !break_group {
             for beat in beats.iter().take(b).skip(a + 1) {
                 match beat.kind {
@@ -226,46 +208,28 @@ fn tuplet_spec(d: &Duration) -> Option<TupletSpec> {
 /// Returns true if both indices `i` and `j` are notes that belong to the SAME logical tuplet group
 /// (same (n, m, base) spec and within the same consecutive chunk of size `n`).
 /// Example: For triplet eighths (n=3), indices 0,1,2 are group 0; 3,4,5 are group 1.
-fn is_same_tuplet_group(beats: &[Beat], i: BeatIdx, j: BeatIdx) -> bool {
+fn is_same_tuplet_group(
+    span_of_idx: &[Option<usize>],
+    spans: &[TupletSpan],
+    i: BeatIdx,
+    j: BeatIdx,
+) -> bool {
     if j < i {
         return false;
     }
-    // Both positions must have identical tuplet specs (same n,m,base)
-    let si = tuplet_spec(&beats[i].duration);
-    let sj = tuplet_spec(&beats[j].duration);
-    let Some(spec) = (match (si, sj) {
-        (Some(a), Some(b)) if a == b => Some(a),
-        _ => None,
-    }) else {
-        return false;
-    };
-
-    // Find the start of the contiguous same-spec block that contains `i`.
-    // Important: contiguity is defined by duration spec, not by kind (Note/Rest),
-    // because tuplets can contain rests in their slots.
-    let mut start = i;
-    while start > 0 {
-        if tuplet_spec(&beats[start - 1].duration) == Some(spec) {
-            start -= 1;
-        } else {
-            break;
+    match (span_of_idx.get(i).copied().flatten(), span_of_idx.get(j).copied().flatten()) {
+        (Some(s1), Some(s2)) if s1 == s2 => {
+            let s = &spans[s1];
+            let n = s.count as usize;
+            if n == 0 {
+                return false;
+            }
+            let gi = (i - s.start) / n;
+            let gj = (j - s.start) / n;
+            gi == gj
         }
+        _ => false,
     }
-
-    // Ensure that the span start..=j is a contiguous run of this same tuplet spec
-    for beat in beats.iter().take(j).skip(start) {
-        if tuplet_spec(&beat.duration) != Some(spec) {
-            return false;
-        }
-    }
-
-    // Compute zero-based positions within the block
-    let pos_i = i - start;
-    let pos_j = j - start;
-
-    // Same tuplet group if floor(pos/n) equals
-    let n_usize = spec.n as usize;
-    (pos_i / n_usize) == (pos_j / n_usize)
 }
 
 #[cfg(test)]
@@ -448,21 +412,35 @@ mod tests {
         assert_eq!(g2.continuity, vec![1]);
     }
 
-    // #[test]
-    // fn beaming_with_t32_triplet_with_merged_t16() {
-    //     let mut m = Measure::new(TimeSignature::ONE_FOUR);
-    //     m.add_beat(Beat::note(t32())).unwrap();
-    //     m.add_beat(Beat::note(t32())).unwrap();
-    //     m.add_beat(Beat::note(t32())).unwrap();
-    //     m.set_beat(0, Beat::note(t16())).unwrap();
-    //
-    //     let plan = compute_beam_plan(&m);
-    //     assert_eq!(plan.groups[0].beat_indices, vec![0, 1]);
-    //     assert_eq!(plan.groups[0].beam_counts, vec![2, 3]);
-    //     assert_eq!(plan.groups[0].continuity, vec![2]);
-    //     assert!(!plan.groups[0].continues_from_previous);
-    //     assert!(!plan.groups[0].continues_into_next);
-    // }
+    #[test]
+    fn beaming_with_t8_triplet_where_all_beats_are_subdivided_in_t16() {
+        let mut m = Measure::new(TimeSignature::ONE_FOUR);
+        // First create a t8 tuplet group
+        m.set_beat(0, Beat::note(t8())).unwrap();
+        // Subdivide all 8 eighths into 16th notes
+        for i in 0..=5 {
+            m.set_beat(i, Beat::note(t16())).unwrap();
+        }
+
+        let plan = compute_beam_plan(&m);
+        assert_eq!(plan.groups[0].beat_indices, vec![0, 1, 2, 3, 4, 5]);
+    }
+
+    #[test]
+    fn beaming_with_t32_triplet_with_merged_t16() {
+        let mut m = Measure::new(TimeSignature::ONE_FOUR);
+        m.add_beat(Beat::note(t32())).unwrap();
+        m.add_beat(Beat::note(t32())).unwrap();
+        m.add_beat(Beat::note(t32())).unwrap();
+        m.set_beat(0, Beat::note(t16())).unwrap();
+
+        let plan = compute_beam_plan(&m);
+        assert_eq!(plan.groups[0].beat_indices, vec![0, 1]);
+        assert_eq!(plan.groups[0].beam_counts, vec![2, 3]);
+        assert_eq!(plan.groups[0].continuity, vec![2]);
+        assert!(!plan.groups[0].continues_from_previous);
+        assert!(!plan.groups[0].continues_into_next);
+    }
 
     #[test]
     fn beaming_two_consecutive_eighth_tuplets_not_joined() {
