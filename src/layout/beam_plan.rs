@@ -72,80 +72,13 @@ pub(super) fn compute_beam_plan(measure: &Measure) -> BeamPlan {
         return BeamPlan { groups };
     }
 
-    // Build groups: start new when crossing a primary boundary or encountering a non-beamable NOTE between
+    // Build groups based on a single decision function `should_break`
     let mut cur: Vec<BeatIdx> = vec![note_idxs[0]];
     for w in note_idxs.windows(2) {
         let a = w[0];
         let b = w[1];
-
-        let a_on = onsets[a];
-        let b_on = onsets[b];
-
-        let boundary_between = boundaries.iter().any(|&bd| bd > a_on && bd <= b_on);
-        let mut break_group = false;
-        // By default, we break at primary boundaries, unless a..b belong to the SAME logical tuplet group
-        // (e.g., inside the same triplet of 3 notes). Contiguous same-spec tuplets across a boundary should
-        // NOT be merged if they represent two adjacent tuplet groups (e.g., two triplets in 2/4).
-        if !break_group && boundary_between && !is_same_tuplet_group(&span_of_idx, &spans, a, b) {
-            break_group = true;
-        }
-
-        // General exception: If both notes lie within the SAME detected TupletSpan,
-        // and there are no rests in between, do NOT break at a primary boundary.
-        // Rationale: a fully subdivided tuplet (e.g., t8 subdivided into six t16 tuplets)
-        // should beam as one continuous figure across an internal primary boundary, as long as
-        // it remains within the same higher-level tuplet span.
-        if break_group
-            && boundary_between
-            && let (Some(sa), Some(sb)) = (span_of_idx[a], span_of_idx[b])
-            && sa == sb
-            && !has_rest_between(beats, a, b)
-        {
-            break_group = false;
-        }
-
-        // Exception: Allow carrying the beam from the LAST note of a tuplet span across a primary boundary
-        // into a following non‑tuplet note IF the tuplet note extends across the boundary and its end aligns
-        // exactly with the onset of the following note, and there are no rests in between. This respects
-        // primary grouping while capturing the musical continuity described in the test comment.
-        if break_group
-            && boundary_between
-            && let Some(sa) = span_of_idx[a]
-        {
-            // `a` must be the last index of its tuplet span
-            if a == spans[sa].end {
-                // b must NOT be a tuplet and must be beamable
-                if span_of_idx[b].is_none() && beam_count(&beats[b].duration) > 0 {
-                    // `a` must cross a primary boundary and end exactly at b's onset
-                    let a_end = onsets[a]
-                        .saturating_add(measure.grid.ticks_of(&beats[a].duration).unwrap_or(0));
-                    let b_on = onsets[b];
-                    // Check there exists a boundary strictly between a's onset and its end
-                    let crosses_boundary =
-                        boundaries.iter().copied().any(|bd| bd > onsets[a] && bd < a_end);
-                    if crosses_boundary && a_end == b_on && !has_rest_between(beats, a, b) {
-                        break_group = false;
-                    }
-                }
-            }
-        }
-
-        if !break_group {
-            for beat in beats.iter().take(b).skip(a + 1) {
-                match beat.kind {
-                    BeatKind::Note => {
-                        if beat.kind == BeatKind::Note && beam_count(&beat.duration) == 0 {
-                            break_group = true;
-                            break;
-                        }
-                    }
-                    BeatKind::Rest => {
-                        break_group = true;
-                        break;
-                    }
-                }
-            }
-        }
+        let break_group =
+            should_break(a, b, beats, &onsets, &boundaries, &span_of_idx, &spans, &measure);
 
         if break_group {
             finalize_group(&mut groups, beats, &cur);
@@ -182,7 +115,7 @@ fn finalize_group(groups: &mut Vec<BeamGroup>, beats: &[Beat], cur: &[BeatIdx]) 
     for w in cur.windows(2) {
         let i = w[0];
         let j = w[1];
-        // Determine if there was any content between `i` and `j`; if any rest or other item exists, 
+        // Determine if there was any content between `i` and `j`; if any rest or other item exists,
         // continuity can be reduced
         let min_beams = beam_count(&beats[i].duration).min(beam_count(&beats[j].duration));
         // Broken beams (rests between) -> continuity 0, otherwise full min_beams
@@ -210,6 +143,106 @@ fn has_rest_between(beats: &[Beat], i: BeatIdx, j: BeatIdx) -> bool {
             return true;
         }
     }
+    false
+}
+
+// Expanded version for grouping decisions: any rest OR non-beamable NOTE between two beamable notes
+fn has_rest_or_nonbeamable_between(beats: &[Beat], i: BeatIdx, j: BeatIdx) -> bool {
+    if j <= i + 1 {
+        return false;
+    }
+    for beat in beats.iter().take(j).skip(i + 1) {
+        match beat.kind {
+            BeatKind::Rest => return true,
+            BeatKind::Note => {
+                if beam_count(&beat.duration) == 0 {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
+fn is_primary_boundary_between(a_on: u32, b_on: u32, boundaries: &[u32]) -> bool {
+    boundaries.iter().any(|&bd| bd > a_on && bd <= b_on)
+}
+
+fn tuplet_last_note_crosses_into_non_tuplet(
+    a: BeatIdx,
+    b: BeatIdx,
+    beats: &[Beat],
+    onsets: &[u32],
+    boundaries: &[u32],
+    span_of_idx: &[Option<usize>],
+    spans: &[TupletSpan],
+    measure: &Measure,
+) -> bool {
+    let Some(sa) = span_of_idx[a] else {
+        return false;
+    };
+    // a must be the last index in its tuplet span
+    if a != spans[sa].end {
+        return false;
+    }
+    // b must not be a tuplet and must be beamable
+    if span_of_idx[b].is_some() || beam_count(&beats[b].duration) == 0 {
+        return false;
+    }
+
+    let a_end = onsets[a].saturating_add(measure.grid.ticks_of(&beats[a].duration).unwrap_or(0));
+    let b_on = onsets[b];
+    let crosses_boundary = boundaries.iter().copied().any(|bd| bd > onsets[a] && bd < a_end);
+    crosses_boundary && a_end == b_on && !has_rest_between(beats, a, b)
+}
+
+fn should_break(
+    a: BeatIdx,
+    b: BeatIdx,
+    beats: &[Beat],
+    onsets: &[u32],
+    boundaries: &[u32],
+    span_of_idx: &[Option<usize>],
+    spans: &[TupletSpan],
+    measure: &Measure,
+) -> bool {
+    // 1) Hard splits first
+    if has_rest_or_nonbeamable_between(beats, a, b) {
+        return true;
+    }
+    // Never merge across two different TupletSpans
+    match (span_of_idx[a], span_of_idx[b]) {
+        (Some(sa), Some(sb)) if sa != sb => return true,
+        _ => {}
+    }
+
+    let boundary_between = is_primary_boundary_between(onsets[a], onsets[b], boundaries);
+
+    if boundary_between {
+        // Exception 1: both in same TupletSpan and nothing in between → keep together
+        if let (Some(sa), Some(sb)) = (span_of_idx[a], span_of_idx[b])
+            && sa == sb
+            && !has_rest_between(beats, a, b)
+        {
+            return false;
+        }
+        // Exception 2: last tuplet note crosses into non‑tuplet that starts exactly at its end
+        if tuplet_last_note_crosses_into_non_tuplet(
+            a,
+            b,
+            beats,
+            onsets,
+            boundaries,
+            span_of_idx,
+            spans,
+            measure,
+        ) {
+            return false;
+        }
+        return true;
+    }
+
+    // No primary boundary and no hard split → keep together
     false
 }
 
@@ -530,5 +563,4 @@ mod tests {
         let plan = compute_beam_plan(&m);
         assert_eq!(plan.groups[0].beat_indices, vec![1, 2, 3, 4, 5, 6]);
     }
-
 }
