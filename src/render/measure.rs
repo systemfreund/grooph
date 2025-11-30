@@ -20,7 +20,7 @@ pub(crate) fn draw_measure(
     rect: Rect,
     cursor_idx: Option<usize>,
 ) -> MeasureLayout {
-    let color: Color32 = if ui.visuals().dark_mode { Color32::WHITE } else { Color32::BLACK };
+    let color: Color32 = ui.visuals().text_color();
     let painter = ui.painter();
     let y = rect.center().y;
     // staff line

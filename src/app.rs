@@ -1,5 +1,5 @@
 use crate::measure::duration::{Duration, NoteValue, TupletSpec};
-use crate::measure::{Measure, TimeSignature};
+use crate::measure::{BeatIdx, Measure, TimeSignature};
 
 use crate::layout::pixel_layout::{LayoutOpts, build_measure_layout};
 use crate::measure::BeatKind::Note;
@@ -26,11 +26,13 @@ pub struct Grooph<'a> {
     font_family: FontFamily,
     font_id: FontId,
     measure: Measure<'a>,
-    cursor_idx: usize,
+    cursor_idx: BeatIdx,
     show_info: bool,
     show_settings: bool,
     // Prebuilt measures for note/rest/tuplet tool buttons to avoid per-frame reconstruction
     button_measures: HashMap<&'static str, Measure<'static>>,
+    undo_stack: Vec<(Measure<'a>, BeatIdx)>,
+    redo_stack: Vec<(Measure<'a>, BeatIdx)>,
 }
 
 fn add_font(ctx: &Context) {
@@ -42,19 +44,13 @@ fn add_font(ctx: &Context) {
             priority: egui::epaint::text::FontPriority::Highest,
         }],
     ));
-
-    ctx.add_font(FontInsert::new(
-        "Bravura Text",
-        egui::FontData::from_static(include_bytes!("../assets/fonts/BravuraText.otf")),
-        vec![InsertFontFamily {
-            family: FontFamily::Name("music-text".into()),
-            priority: egui::epaint::text::FontPriority::Highest,
-        }],
-    ))
 }
 
 impl App for Grooph<'_> {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
+        ctx.style_mut(|style| {
+            // style
+        });
         egui::TopBottomPanel::top("menu").show(ctx, |ui| {
             ui.horizontal(|ui| {
                 global_theme_preference_switch(ui);
@@ -106,12 +102,15 @@ impl App for Grooph<'_> {
         });
 
         if self.show_settings {
-            // egui::TopBottomPanel::top("settings").show(ctx, |ui| {
-            //     let mut style = ui.ctx().style().spacing.scroll;
-            //     style.ui(ui);
-            //
-            //     ui.ctx().all_styles_mut(|s| s.spacing.scroll = style);
-            // });
+            egui::TopBottomPanel::top("settings").show(ctx, |ui| {
+                let mut visuals = ui.ctx().style().visuals.clone();
+                visuals.ui(ui);
+
+                // let mut debug = ui.ctx().style().interaction;
+                // debug.ui(ui);
+
+                ui.ctx().style_mut(|s| s.visuals = visuals.clone());
+            });
         }
 
         egui::TopBottomPanel::bottom("tool_palette")
@@ -177,9 +176,24 @@ impl App for Grooph<'_> {
         });
 
         ctx.input(|i| {
+            // Undo / Redo shortcuts: Ctrl/Cmd+Z (undo), Ctrl/Cmd+Shift+Z or Ctrl/Cmd+Y (redo)
+            let mut consumed_undo_redo = false;
+            let undo_combo = i.key_pressed(Key::Z) && (i.modifiers.command || i.modifiers.ctrl);
+            let redo_combo_z = i.key_pressed(Key::Z)
+                && (i.modifiers.command || i.modifiers.ctrl)
+                && i.modifiers.shift;
+            let redo_combo_y = i.key_pressed(Key::Y) && (i.modifiers.command || i.modifiers.ctrl);
+            if undo_combo && !i.modifiers.shift {
+                self.undo();
+                consumed_undo_redo = true;
+            } else if redo_combo_z || redo_combo_y {
+                self.redo();
+                consumed_undo_redo = true;
+            }
+
             let beats_len = self.measure.beats().len();
             let total_len = beats_len;
-            if total_len > 0 {
+            if total_len > 0 && !consumed_undo_redo {
                 // Navigation over committed beats only
                 let mut pos = self.cursor_idx;
                 if i.key_pressed(Key::ArrowLeft) {
@@ -203,18 +217,22 @@ impl App for Grooph<'_> {
                 let idx = self.cursor_idx.min(beats_len.saturating_sub(1));
                 if i.key_pressed(Key::Delete) {
                     // Remove beat at the cursor
+                    self.push_undo();
                     self.measure.remove(idx);
                     // Move cursor right
                     let new_pos = (self.measure.beats().len() - 1).min(self.cursor_idx + 1);
                     self.cursor_idx = new_pos;
+                    self.clear_redo();
                 }
                 if i.key_pressed(Key::Backspace) {
                     // Remove beat at the cursor
+                    self.push_undo();
                     self.measure.remove(idx);
                     // Move cursor left
                     let new_len = self.measure.beats().len();
                     let new_pos = self.cursor_idx.saturating_sub(1).min(new_len - 1);
                     self.cursor_idx = new_pos;
+                    self.clear_redo();
                 }
                 // Keyboard input routed through tool shortcuts
                 for t in all_tools().iter().filter(|t| t.shortcut.is_some()) {
@@ -227,7 +245,14 @@ impl App for Grooph<'_> {
                     }
                 }
                 if i.key_pressed(Key::T) {
-                    self.set_tuplet(idx, None);
+                    // Snapshot before attempting tuplet cycle via hotkey
+                    self.push_undo();
+                    let res = self.set_tuplet(idx, None);
+                    if res.is_some() {
+                        self.clear_redo();
+                    } else {
+                        let _ = self.undo_stack.pop();
+                    }
                 }
             }
         });
@@ -235,6 +260,29 @@ impl App for Grooph<'_> {
 }
 
 impl Grooph<'_> {
+    fn push_undo(&mut self) {
+        self.undo_stack.push((self.measure.clone(), self.cursor_idx));
+    }
+
+    fn clear_redo(&mut self) { self.redo_stack.clear(); }
+
+    fn undo(&mut self) {
+        if let Some((m, c)) = self.undo_stack.pop() {
+            // Move the current state to redo, replace it with the popped snapshot
+            let current = (std::mem::replace(&mut self.measure, m), self.cursor_idx);
+            self.cursor_idx = c;
+            self.redo_stack.push(current);
+        }
+    }
+
+    fn redo(&mut self) {
+        if let Some((m, c)) = self.redo_stack.pop() {
+            let current = (std::mem::replace(&mut self.measure, m), self.cursor_idx);
+            self.cursor_idx = c;
+            self.undo_stack.push(current);
+        }
+    }
+
     fn build_button_measure(template: BeatTemplate) -> Measure<'static> {
         let beat_count = if let Duration::Tuplet(TupletSpec { m, .. }) = template.duration {
             m
@@ -252,13 +300,13 @@ impl Grooph<'_> {
 
         if let Duration::Tuplet(TupletSpec { n, .. }) = template.duration {
             for i in 0..n {
-                measure.set_beat(i as usize, Beat::note(template.duration)).unwrap();
+                measure.set_beat(i as BeatIdx, Beat::note(template.duration)).unwrap();
             }
         }
 
         measure
     }
-    
+
     fn set_beat(
         &mut self,
         idx: usize,
@@ -299,10 +347,14 @@ impl Grooph<'_> {
     }
 
     fn apply_tool(&mut self, tool: &Tool) {
+        // Take a snapshot; if nothing changes, we'll drop it.
+        self.push_undo();
         let result = match tool.kind {
             ToolKind::InsertBeat(template) => {
                 let beats_len = self.measure.beats().len();
                 if beats_len == 0 {
+                    // No state change, drop the snapshot and return
+                    let _ = self.undo_stack.pop();
                     return;
                 }
                 let idx = self.cursor_idx.min(beats_len - 1);
@@ -317,7 +369,10 @@ impl Grooph<'_> {
             }
             ToolKind::Modify(modifier) => {
                 let beats_len = self.measure.beats().len();
-                if beats_len == 0 { return; }
+                if beats_len == 0 {
+                    let _ = self.undo_stack.pop();
+                    return;
+                }
                 let idx = self.cursor_idx.min(beats_len - 1);
                 match modifier {
                     crate::tools::Modifier::ToggleDotted { dots: _ } => {
@@ -336,6 +391,13 @@ impl Grooph<'_> {
                 None
             }
         };
+
+        // Clear redo for real changes; otherwise drop the snapshot we took before
+        if result.is_some() {
+            self.clear_redo();
+        } else {
+            let _ = self.undo_stack.pop();
+        }
 
         println!("{:?}", result);
     }
@@ -431,6 +493,8 @@ impl Grooph<'_> {
             show_info: false,
             show_settings: false,
             button_measures,
+            undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
         }
     }
 }
