@@ -12,7 +12,7 @@ use crate::tools::{Tool, ToolKind};
 use crate::{BeatTemplate, ToolGroup, all_tools};
 use BeatKind::Rest;
 use eframe::egui::scroll_area::{ScrollBarVisibility, ScrollSource};
-use eframe::egui::{Align, Atom, Context, Direction, Id, Key, Label, Layout, Response, Ui, Vec2, global_theme_preference_switch, Button, Widget};
+use eframe::egui::{Align, Atom, Context, Direction, Id, Key, Label, Layout, Response, Ui, Vec2, global_theme_preference_switch, Button, Widget, RichText};
 use eframe::epaint::text::{FontInsert, InsertFontFamily};
 use eframe::epaint::{FontFamily, FontId};
 use eframe::{App, CreationContext, egui};
@@ -437,7 +437,7 @@ impl Grooph<'_> {
         let tile = 90.0;
         let symbol_id = Id::new(id);
         let symbol = Atom::custom(symbol_id, Vec2::splat(tile));
-        let button = egui::Button::new(symbol).corner_radius(10).atom_ui(ui);
+        let button = Button::new(symbol).corner_radius(10).atom_ui(ui);
 
         if let Some(rect) = button.rect(symbol_id) {
             // Use a prebuilt measure for this button
@@ -446,15 +446,29 @@ impl Grooph<'_> {
                 .get(id)
                 .unwrap();
 
-            let em = compute_em(&rect, 0.4, ui);
+            let cap_factor = match template {
+                BeatTemplate { kind: Note, duration: Duration::Simple(..) } => 0.6,
+                BeatTemplate { kind: Note, duration: Duration::Tuplet(TupletSpec { n: 9, ..} ) } => 0.4,
+                BeatTemplate { kind: Rest, .. } => 0.6,
+                _ => 0.4
+            };
+
+            let em = compute_em(&rect, cap_factor, ui);
+
+            let y_offset = match template {
+                BeatTemplate { kind: Note, duration: Duration::Simple(..) } => 20.0,
+                BeatTemplate { kind: Note, duration: Duration::Tuplet(..) } => 18.0,
+                _ => { 2.0 }
+            };
+
             let opts = LayoutOpts {
                 rect,
                 font_id: FontId::new(em, self.font_id.family.clone()),
                 em,
                 layout_clef: false,
                 layout_time_signature: false,
-                y_offset: if template.kind == Note { 18.0 } else { 5.0 },
-                stem_length_factor: 0.9,
+                y_offset,
+                stem_length_factor: 0.8,
                 stem_thickness_factor: 0.03,
             };
             let measure_layout = build_measure_layout(measure, &opts);
@@ -482,7 +496,7 @@ impl Grooph<'_> {
                     }
                     _ => {
                         // Generic button for non-insert tools (e.g., Edit: Undo/Redo)
-                        let button = Button::new(t.label)
+                        let button = Button::new(RichText::new(t.label).size(24.0))
                             .corner_radius(10)
                             .min_size(Vec2::splat(90.0)).ui(ui);
                         if button.clicked() {

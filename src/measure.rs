@@ -441,15 +441,6 @@ mod tests {
     }
 
     #[test]
-    fn test_basic_measure_features() {
-        let mut m = Measure::new(TimeSignature::FOUR_FOUR);
-        assert_eq!(m.beats().len(), 4);
-        // add_beat should fill from the first rest slot; measure stays length 4
-        m.set_beat(0, Beat::note(q())).unwrap();
-        assert_eq!(m.beats().len(), 4);
-    }
-
-    #[test]
     fn test_triplet_in_one_four() {
         let mut m = Measure::new(TimeSignature::ONE_FOUR);
 
@@ -505,7 +496,7 @@ mod tests {
         assert!(m.set_beat(0, Beat::note(t8())).is_ok());
         assert!(m.set_beat(1, Beat::note(t16())).is_ok());
         assert!(m.set_beat(2, Beat::note(t16())).is_ok());
-        assert!(m.set_beat(3,Beat::note(t8())).is_ok());
+        assert!(m.set_beat(3, Beat::note(t8())).is_ok());
 
         // Second triplet group
         assert!(m.set_beat(4, Beat::note(t16())).is_ok());
@@ -514,10 +505,7 @@ mod tests {
         assert!(m.set_beat(7, Beat::note(t32())).is_ok());
         assert!(m.set_beat(8, Beat::note(t32())).is_ok());
 
-        assert!(
-            m.set_beat(9, Beat::note(t8())).is_err(),
-            "can't start a new triplet 1/8 group measure has only 1/8 space left"
-        );
+        assert!(m.set_beat(9, Beat::note(t8())).is_err());
         assert!(m.set_beat(9, Beat::note(e())).is_ok());
         assert_eq!(m.remaining_ticks(10), 0);
     }

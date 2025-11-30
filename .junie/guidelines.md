@@ -27,8 +27,7 @@ Testing: how to configure and run
 
 Writing new tests in this crate
 
-- Prefer internal unit tests in the same module as the code under test. Many useful helper functions are `pub(crate)`,
-  so they are accessible to unit tests in the crate, but not to integration tests under `tests/`.
+- Prefer internal unit tests in the same module as the code under test.
 - Common pattern: create a `Measure`, then add beats via helper duration constructors. The measure automatically fills
   gaps to primary boundaries or tuplet completeness when possible.
 - Shortcuts for common durations (defined in `src/measure/duration.rs`):
