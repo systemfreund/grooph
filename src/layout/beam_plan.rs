@@ -90,6 +90,20 @@ pub(super) fn compute_beam_plan(measure: &Measure) -> BeamPlan {
             break_group = true;
         }
 
+        // General exception: If both notes lie within the SAME detected TupletSpan,
+        // and there are no rests in between, do NOT break at a primary boundary.
+        // Rationale: a fully subdivided tuplet (e.g., t8 subdivided into six t16 tuplets)
+        // should beam as one continuous figure across an internal primary boundary, as long as
+        // it remains within the same higher-level tuplet span.
+        if break_group
+            && boundary_between
+            && let (Some(sa), Some(sb)) = (span_of_idx[a], span_of_idx[b])
+            && sa == sb
+            && !has_rest_between(beats, a, b)
+        {
+            break_group = false;
+        }
+
         // Exception: Allow carrying the beam from the LAST note of a tuplet span across a primary boundary
         // into a following non‑tuplet note IF the tuplet note extends across the boundary and its end aligns
         // exactly with the onset of the following note, and there are no rests in between. This respects
@@ -503,4 +517,18 @@ mod tests {
         // We expect the last two 8th notes of the first triplet not to be joined with the next triplet
         assert_eq!(plan.groups[0].beat_indices, vec![2, 3]);
     }
+
+    #[test]
+    fn fully_beamed_when_t8_triplet_is_completely_subdivided_into_t16() {
+        let mut m = Measure::new(TimeSignature::FOUR_FOUR);
+        m.set_beat(0, Beat::rest(e())).unwrap(); // offset by an eigth
+        m.set_beat(1, Beat::note(t8())).unwrap();
+        for i in 1..=6 {
+            m.set_beat(i, Beat::note(t16())).unwrap();
+        }
+
+        let plan = compute_beam_plan(&m);
+        assert_eq!(plan.groups[0].beat_indices, vec![1, 2, 3, 4, 5, 6]);
+    }
+
 }
