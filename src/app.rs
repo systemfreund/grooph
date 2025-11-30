@@ -1,4 +1,4 @@
-use crate::measure::duration::{Duration, NoteValue, TupletSpec};
+use crate::measure::duration::{e, s, t16, t8, Duration, NoteValue, TupletSpec};
 use crate::measure::{BeatIdx, Measure, TimeSignature};
 
 use crate::layout::pixel_layout::{LayoutOpts, build_measure_layout};
@@ -12,10 +12,7 @@ use crate::tools::{Tool, ToolKind};
 use crate::{BeatTemplate, ToolGroup, all_tools};
 use BeatKind::Rest;
 use eframe::egui::scroll_area::{ScrollBarVisibility, ScrollSource};
-use eframe::egui::{
-    Align, Atom, Context, Direction, Id, Key, Label, Layout, Response, Ui, Vec2,
-    global_theme_preference_switch,
-};
+use eframe::egui::{Align, Atom, Context, Direction, Id, Key, Label, Layout, Response, Ui, Vec2, global_theme_preference_switch, Button, Widget};
 use eframe::epaint::text::{FontInsert, InsertFontFamily};
 use eframe::epaint::{FontFamily, FontId};
 use eframe::{App, CreationContext, egui};
@@ -118,7 +115,8 @@ impl App for Grooph<'_> {
             .resizable(false)
             .show(ctx, |ui| {
                 let tools = all_tools();
-                let groups = [ToolGroup::Notes, ToolGroup::Tuplets, ToolGroup::Rests];
+                // Ensure Edit tools (Undo/Redo) are shown first in the palette
+                let groups = [ToolGroup::Edit, ToolGroup::Notes, ToolGroup::Tuplets, ToolGroup::Rests];
 
                 egui::ScrollArea::horizontal()
                     .scroll_source(ScrollSource::ALL)
@@ -367,6 +365,18 @@ impl Grooph<'_> {
                     _ => None,
                 }
             }
+            ToolKind::Edit(crate::tools::EditOp::Undo) => {
+                // Undo should not create a new snapshot; drop the one we took and perform undo
+                let _ = self.undo_stack.pop();
+                self.undo();
+                return;
+            }
+            ToolKind::Edit(crate::tools::EditOp::Redo) => {
+                // Redo should not create a new snapshot; drop the one we took and perform redo
+                let _ = self.undo_stack.pop();
+                self.redo();
+                return;
+            }
             ToolKind::Modify(modifier) => {
                 let beats_len = self.measure.beats().len();
                 if beats_len == 0 {
@@ -463,10 +473,21 @@ impl Grooph<'_> {
             }
 
             for t in group_tools {
-                if let ToolKind::InsertBeat(template) = t.kind {
-                    let button = self.note_button(ui, template, t.id);
-                    if button.clicked() {
-                        self.apply_tool(t);
+                match t.kind {
+                    ToolKind::InsertBeat(template) => {
+                        let button = self.note_button(ui, template, t.id);
+                        if button.clicked() {
+                            self.apply_tool(t);
+                        }
+                    }
+                    _ => {
+                        // Generic button for non-insert tools (e.g., Edit: Undo/Redo)
+                        let button = Button::new(t.label)
+                            .corner_radius(10)
+                            .min_size(Vec2::splat(90.0)).ui(ui);
+                        if button.clicked() {
+                            self.apply_tool(t);
+                        }
                     }
                 }
             }
@@ -476,7 +497,13 @@ impl Grooph<'_> {
     pub fn new(cc: &CreationContext) -> Self {
         add_font(&cc.egui_ctx);
         let ff = FontFamily::Name("music".into());
-        let m = Measure::new(TimeSignature::FOUR_FOUR);
+        let mut m = Measure::new(TimeSignature::FOUR_FOUR);
+        m.set_beat(0, Beat::rest(e())).unwrap(); // offset by an eigth
+        m.set_beat(1, Beat::note(t8())).unwrap();
+        for i in 1..=6 {
+            m.set_beat(i, Beat::note(t16())).unwrap();
+        }
+
         // Precompute button measures for all insert-beat tools
         let mut button_measures: HashMap<&'static str, Measure<'static>> = HashMap::new();
         for t in all_tools() {

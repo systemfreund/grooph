@@ -32,9 +32,8 @@ pub enum Modifier {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EditOp {
-    Erase,
-    ReplaceOnApply, // replace target with provided template (used when combined with Insert tools)
-    FillToBoundary,
+    Undo,
+    Redo,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -70,7 +69,21 @@ pub fn all_tools() -> &'static [Tool] {
     use BeatKind::*;
     use Duration::*;
 
-    static ALL: [Tool; 20] = [
+    static ALL: [Tool; 19] = [
+        Tool {
+            id: "edit.undo",
+            label: "⟲",
+            group: ToolGroup::Edit,
+            kind: ToolKind::Edit(EditOp::Undo),
+            shortcut: None,
+        },
+        Tool {
+            id: "edit.redo",
+            label: "⟳",
+            group: ToolGroup::Edit,
+            kind: ToolKind::Edit(EditOp::Redo),
+            shortcut: None,
+        },
         // Notes
         Tool {
             id: "insert.note.q",
@@ -200,28 +213,6 @@ pub fn all_tools() -> &'static [Tool] {
                 duration: Tuplet(TupletSpec { n: 9, m: 8, base: Sixteenth }),
                 kind: Note,
             }),
-            shortcut: None,
-        },
-        // Edit
-        Tool {
-            id: "edit.erase",
-            label: "Löschen",
-            group: ToolGroup::Edit,
-            kind: ToolKind::Edit(EditOp::Erase),
-            shortcut: None,
-        },
-        Tool {
-            id: "edit.replace",
-            label: "Ersetzen",
-            group: ToolGroup::Edit,
-            kind: ToolKind::Edit(EditOp::ReplaceOnApply),
-            shortcut: None,
-        },
-        Tool {
-            id: "edit.fill_to_boundary",
-            label: "Füllen bis Grenze",
-            group: ToolGroup::Edit,
-            kind: ToolKind::Edit(EditOp::FillToBoundary),
             shortcut: None,
         },
         // Meta (future; placeholder visible only when used)
