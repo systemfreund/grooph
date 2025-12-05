@@ -46,7 +46,7 @@ const TS_DIGITS: [char; 10] = [
 
 pub(crate) const GLYPH_ACCENT_ABOVE: char = '\u{E4A0}';
 
-pub(crate) fn ts_glyphs(n: u32) -> Vec<char> {
+pub(crate) fn ts_glyphs(n: u8) -> Vec<char> {
     n.to_string().chars().filter_map(|c| c.to_digit(10).map(|d| TS_DIGITS[d as usize])).collect()
 }
 

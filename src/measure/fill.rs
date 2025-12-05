@@ -31,7 +31,7 @@ impl Measure<'_> {
             self.grid.durations
                 .iter()
                 .copied()
-                .filter(|d| !matches!(d, Duration::Dotted { .. }))
+                .filter(|d| matches!(d, Duration::Simple { .. }))
                 .filter_map(|d| {
                     let den = d.denominator();
                     self.grid.ticks_of(&d).map(|t| (t, d, den))

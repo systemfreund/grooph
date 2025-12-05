@@ -93,7 +93,7 @@ pub fn build_measure_layout(measure: &Measure, opts: &LayoutOpts) -> MeasureLayo
     let mut x_offset_acc = opts.rect.left();
 
     let clef_pos = if opts.layout_clef {
-        let clef_w = opts.em * 0.9; // reserved width for percussion clef
+        let clef_w = opts.em * 1.1; // reserved width for percussion clef
         x_offset_acc += clef_w;
         Some(Pos2::new(opts.rect.left() + clef_w * 0.4, opts.y_center()))
     } else {
@@ -143,7 +143,7 @@ pub struct TimeSignatureLayout {
     pub width: f32,
 }
 
-fn build_time_sig_layout(
+pub(crate) fn build_time_sig_layout(
     time_signature: &TimeSignature,
     x: f32,
     opts: &LayoutOpts,
@@ -156,17 +156,20 @@ fn build_time_sig_layout(
     // Compute centered columns for both rows
     let mut time_sig_top: Vec<Pos2> = Vec::with_capacity(top_digits);
     let mut time_sig_bottom: Vec<Pos2> = Vec::with_capacity(bot_digits);
+
+    let x_offset = top_digits.max(bot_digits) as f32 * ts_digit_w / 2.0;
+
     if top_digits > 0 {
         let offset = (ts_cols - top_digits as f32) * 0.5;
         for i in 0..top_digits {
-            let cx = x + ((i as f32) + 0.5 + offset) * ts_digit_w;
+            let cx = x - x_offset + ((i as f32) + 0.5 + offset) * ts_digit_w;
             time_sig_top.push(Pos2::new(cx, opts.y_center() - opts.em * 0.25));
         }
     }
     if bot_digits > 0 {
         let offset = (ts_cols - bot_digits as f32) * 0.5;
         for i in 0..bot_digits {
-            let cx = x + ((i as f32) + 0.5 + offset) * ts_digit_w;
+            let cx = x - x_offset + ((i as f32) + 0.5 + offset) * ts_digit_w;
             time_sig_bottom.push(Pos2::new(cx, opts.y_center() + opts.em * 0.25));
         }
     }

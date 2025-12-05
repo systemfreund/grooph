@@ -54,8 +54,8 @@ pub(crate) fn draw_measure(
 
     if let Some(ts_layout) = &measure_layout.time_signature {
         let ts = measure.time_signature();
-        let top_digits = glyphs::ts_glyphs(ts.beats as u32);
-        let bot_digits = glyphs::ts_glyphs(ts.beat_unit as u32);
+        let top_digits = glyphs::ts_glyphs(ts.beats);
+        let bot_digits = glyphs::ts_glyphs(ts.beat_unit);
         for (p, ch) in ts_layout.beats.iter().zip(top_digits.iter()) {
             painter.text(*p, Align2::CENTER_CENTER, ch.to_string(), font_id.clone(), color);
         }

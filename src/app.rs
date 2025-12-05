@@ -1,18 +1,22 @@
-use crate::measure::duration::{e, s, t16, t8, Duration, NoteValue, TupletSpec};
+use crate::measure::duration::{Duration, NoteValue, TupletSpec, e, s, t8, t16};
 use crate::measure::{BeatIdx, Measure, TimeSignature};
 
-use crate::layout::pixel_layout::{LayoutOpts, build_measure_layout};
+use crate::layout::pixel_layout::{LayoutOpts, build_measure_layout, build_time_sig_layout};
 use crate::measure::BeatKind::Note;
 use crate::measure::duration::NoteValue::*;
 use crate::measure::duration::human_readable;
 use crate::measure::editing::Modification;
 use crate::measure::{Beat, BeatKind};
+use crate::render::glyphs;
 use crate::render::measure::{compute_em, draw_measure, draw_notes};
-use crate::tools::{Tool, ToolKind};
+use crate::tools::{MetaOp, Tool, ToolKind};
 use crate::{BeatTemplate, ToolGroup, all_tools};
 use BeatKind::Rest;
 use eframe::egui::scroll_area::{ScrollBarVisibility, ScrollSource};
-use eframe::egui::{Align, Atom, Context, Direction, Id, Key, Label, Layout, Response, Ui, Vec2, global_theme_preference_switch, Button, Widget, RichText};
+use eframe::egui::{
+    Align, Align2, Atom, Button, Context, Direction, Id, Key, Label, Layout, Response, RichText,
+    Ui, Vec2, Widget, global_theme_preference_switch,
+};
 use eframe::epaint::text::{FontInsert, InsertFontFamily};
 use eframe::epaint::{FontFamily, FontId};
 use eframe::{App, CreationContext, egui};
@@ -26,6 +30,10 @@ pub struct Grooph<'a> {
     cursor_idx: BeatIdx,
     show_info: bool,
     show_settings: bool,
+    // Time signature dialog state
+    show_ts_dialog: bool,
+    ts_beats: u8,
+    ts_unit: u8,
     // Prebuilt measures for note/rest/tuplet tool buttons to avoid per-frame reconstruction
     button_measures: HashMap<&'static str, Measure<'static>>,
     undo_stack: Vec<(Measure<'a>, BeatIdx)>,
@@ -116,7 +124,13 @@ impl App for Grooph<'_> {
             .show(ctx, |ui| {
                 let tools = all_tools();
                 // Ensure Edit tools (Undo/Redo) are shown first in the palette
-                let groups = [ToolGroup::Edit, ToolGroup::Notes, ToolGroup::Tuplets, ToolGroup::Rests];
+                let groups = [
+                    ToolGroup::Edit,
+                    ToolGroup::Meta,
+                    ToolGroup::Notes,
+                    ToolGroup::Tuplets,
+                    ToolGroup::Rests,
+                ];
 
                 egui::ScrollArea::horizontal()
                     .scroll_source(ScrollSource::ALL)
@@ -143,7 +157,9 @@ impl App for Grooph<'_> {
                     let layout =
                         draw_measure(ui, &self.font_id, &self.measure, rect, Some(self.cursor_idx));
 
-                    if (resp.clicked() || resp.dragged())
+                    // Block canvas interactions while the time signature dialog is open
+                    if !self.show_ts_dialog
+                        && (resp.clicked() || resp.dragged())
                         && let Some(pos) = resp.interact_pointer_pos()
                     {
                         // Falls keine Beats vorhanden sind, nichts tun
@@ -173,7 +189,70 @@ impl App for Grooph<'_> {
                 });
         });
 
+        // Modal dialog to change time signature
+        if self.show_ts_dialog {
+            egui::Window::new("Change time signature")
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+                .show(ctx, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.add(egui::DragValue::new(&mut self.ts_beats).clamp_range(1..=16));
+                        ui.label(" / ");
+                        egui::ComboBox::from_id_salt("beat_unit")
+                            .selected_text(format!("{}", self.ts_unit))
+                            .show_ui(ui, |ui| {
+                                for v in [4u8, 8, 16] {
+                                    ui.selectable_value(&mut self.ts_unit, v, format!("{}", v));
+                                }
+                            });
+                    });
+
+                    ui.separator();
+                    ui.horizontal(|ui| {
+                        if ui.button("Cancel").clicked() {
+                            self.show_ts_dialog = false;
+                        }
+                        if ui.button("Done").clicked() {
+                            // Prevent no-op undo entries
+                            let current = self.measure.time_signature();
+                            let new_ts =
+                                TimeSignature { beats: self.ts_beats, beat_unit: self.ts_unit };
+                            if new_ts == current {
+                                self.show_ts_dialog = false;
+                                return;
+                            }
+
+                            // Snapshot before change
+                            self.push_undo();
+                            let res = self.measure.set_time_signature(new_ts);
+                            match res {
+                                Ok(_) => {
+                                    self.clear_redo();
+                                    // Clamp cursor within bounds
+                                    let new_len = self.measure.beats().len();
+                                    if new_len > 0 {
+                                        self.cursor_idx = self.cursor_idx.min(new_len - 1);
+                                    } else {
+                                        self.cursor_idx = 0;
+                                    }
+                                    self.show_ts_dialog = false;
+                                }
+                                Err(_) => {
+                                    // Roll back snapshot if failed
+                                    let _ = self.undo_stack.pop();
+                                }
+                            }
+                        }
+                    });
+                });
+        }
+
         ctx.input(|i| {
+            // While the time signature dialog is open, ignore global keyboard shortcuts
+            if self.show_ts_dialog {
+                return;
+            }
             // Undo / Redo shortcuts: Ctrl/Cmd+Z (undo), Ctrl/Cmd+Shift+Z or Ctrl/Cmd+Y (redo)
             let mut consumed_undo_redo = false;
             let undo_combo = i.key_pressed(Key::Z) && (i.modifiers.command || i.modifiers.ctrl);
@@ -258,9 +337,7 @@ impl App for Grooph<'_> {
 }
 
 impl Grooph<'_> {
-    fn push_undo(&mut self) {
-        self.undo_stack.push((self.measure.clone(), self.cursor_idx));
-    }
+    fn push_undo(&mut self) { self.undo_stack.push((self.measure.clone(), self.cursor_idx)); }
 
     fn clear_redo(&mut self) { self.redo_stack.clear(); }
 
@@ -282,11 +359,8 @@ impl Grooph<'_> {
     }
 
     fn build_button_measure(template: BeatTemplate) -> Measure<'static> {
-        let beat_count = if let Duration::Tuplet(TupletSpec { m, .. }) = template.duration {
-            m
-        } else {
-            1
-        };
+        let beat_count =
+            if let Duration::Tuplet(TupletSpec { m, .. }) = template.duration { m } else { 1 };
 
         let mut measure = Measure::new_init(
             TimeSignature {
@@ -345,7 +419,11 @@ impl Grooph<'_> {
     }
 
     fn apply_tool(&mut self, tool: &Tool) {
-        // Take a snapshot; if nothing changes, we'll drop it.
+        // Block palette/tool actions while a modal dialog is open
+        if self.show_ts_dialog {
+            return;
+        }
+        // Take a snapshot for tools that change state; Meta tools like dialogs drop it.
         self.push_undo();
         let result = match tool.kind {
             ToolKind::InsertBeat(template) => {
@@ -364,6 +442,15 @@ impl Grooph<'_> {
                     Duration::Tuplet(spec) => self.set_tuplet(idx, Some(spec)),
                     _ => None,
                 }
+            }
+            ToolKind::Meta(MetaOp::ChangeTimeSignature) => {
+                // Opening a dialog is not a state mutation: drop snapshot, open dialog
+                let _ = self.undo_stack.pop();
+                let ts = self.measure.time_signature();
+                self.ts_beats = ts.beats;
+                self.ts_unit = ts.beat_unit;
+                self.show_ts_dialog = true;
+                return; // no further state change now
             }
             ToolKind::Edit(crate::tools::EditOp::Undo) => {
                 // Undo should not create a new snapshot; drop the one we took and perform undo
@@ -388,12 +475,8 @@ impl Grooph<'_> {
                     crate::tools::Modifier::ToggleDotted { dots: _ } => {
                         self.measure.toggle_dotted(idx)
                     }
-                    crate::tools::Modifier::ToggleAccent => {
-                        self.measure.toggle_accent(idx)
-                    }
-                    crate::tools::Modifier::ToggleRestNote => {
-                        self.measure.toggle_beat_kind(idx)
-                    }
+                    crate::tools::Modifier::ToggleAccent => self.measure.toggle_accent(idx),
+                    crate::tools::Modifier::ToggleRestNote => self.measure.toggle_beat_kind(idx),
                 }
             }
             _ => {
@@ -441,16 +524,16 @@ impl Grooph<'_> {
 
         if let Some(rect) = button.rect(symbol_id) {
             // Use a prebuilt measure for this button
-            let measure = self
-                .button_measures
-                .get(id)
-                .unwrap();
+            let measure = self.button_measures.get(id).unwrap();
 
             let cap_factor = match template {
                 BeatTemplate { kind: Note, duration: Duration::Simple(..) } => 0.6,
-                BeatTemplate { kind: Note, duration: Duration::Tuplet(TupletSpec { n: 9, ..} ) } => 0.4,
+                BeatTemplate {
+                    kind: Note,
+                    duration: Duration::Tuplet(TupletSpec { n: 9, .. }),
+                } => 0.4,
                 BeatTemplate { kind: Rest, .. } => 0.6,
-                _ => 0.4
+                _ => 0.4,
             };
 
             let em = compute_em(&rect, cap_factor, ui);
@@ -458,7 +541,7 @@ impl Grooph<'_> {
             let y_offset = match template {
                 BeatTemplate { kind: Note, duration: Duration::Simple(..) } => 20.0,
                 BeatTemplate { kind: Note, duration: Duration::Tuplet(..) } => 18.0,
-                _ => { 2.0 }
+                _ => 2.0,
             };
 
             let opts = LayoutOpts {
@@ -479,6 +562,58 @@ impl Grooph<'_> {
         button.response
     }
 
+    fn time_signature_button(&self, ui: &mut Ui, id: &str) -> Response {
+        let tile = 90.0;
+        let symbol_id = Id::new(id);
+        let symbol = Atom::custom(symbol_id, Vec2::splat(tile));
+        let button = Button::new(symbol).corner_radius(10).atom_ui(ui);
+
+        if let Some(rect) = button.rect(symbol_id) {
+            // Render a stacked 4/4 symbol using Bravura, similar to measure rendering
+            let painter = &ui.painter_at(rect);
+            let em = compute_em(&rect, 0.5, ui);
+            let font_id = FontId::new(em, self.font_id.family.clone());
+
+            // Build a minimal layout area for the time signature only
+            let opts = LayoutOpts {
+                rect,
+                font_id: font_id.clone(),
+                em,
+                layout_clef: false,
+                layout_time_signature: true,
+                y_offset: 0.0,
+                stem_length_factor: 0.9,
+                stem_thickness_factor: 0.03,
+            };
+
+            // Use a temporary measure just for layout width & positions
+            let ts = self.measure.time_signature();
+            let layout = build_time_sig_layout(&ts, rect.center().x, &opts);
+            let top = glyphs::ts_glyphs(ts.beats);
+            let bot = glyphs::ts_glyphs(ts.beat_unit);
+            for (p, ch) in layout.beats.iter().zip(top.iter()) {
+                painter.text(
+                    *p,
+                    Align2::CENTER_CENTER,
+                    ch.to_string(),
+                    font_id.clone(),
+                    ui.style().visuals.text_color(),
+                );
+            }
+            for (p, ch) in layout.beat_unit.iter().zip(bot.iter()) {
+                painter.text(
+                    *p,
+                    Align2::CENTER_CENTER,
+                    ch.to_string(),
+                    font_id.clone(),
+                    ui.style().visuals.text_color(),
+                );
+            }
+        }
+
+        button.response
+    }
+
     fn tool_palette(&mut self, tools: &[Tool], groups: &[ToolGroup], ui: &mut Ui) {
         for g in groups {
             let group_tools: Vec<_> = tools.iter().filter(|t| &t.group == g).collect();
@@ -494,11 +629,18 @@ impl Grooph<'_> {
                             self.apply_tool(t);
                         }
                     }
+                    ToolKind::Meta(MetaOp::ChangeTimeSignature) => {
+                        let button = self.time_signature_button(ui, t.id);
+                        if button.clicked() {
+                            self.apply_tool(t);
+                        }
+                    }
                     _ => {
                         // Generic button for non-insert tools (e.g., Edit: Undo/Redo)
                         let button = Button::new(RichText::new(t.label).size(24.0))
                             .corner_radius(10)
-                            .min_size(Vec2::splat(90.0)).ui(ui);
+                            .min_size(Vec2::splat(90.0))
+                            .ui(ui);
                         if button.clicked() {
                             self.apply_tool(t);
                         }
@@ -512,11 +654,11 @@ impl Grooph<'_> {
         add_font(&cc.egui_ctx);
         let ff = FontFamily::Name("music".into());
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
-        m.set_beat(0, Beat::rest(e())).unwrap(); // offset by an eigth
-        m.set_beat(1, Beat::note(t8())).unwrap();
-        for i in 1..=6 {
-            m.set_beat(i, Beat::note(t16())).unwrap();
-        }
+        // m.set_beat(0, Beat::rest(e())).unwrap();
+        // m.set_beat(1, Beat::note(t8())).unwrap();
+        // for i in 1..=6 {
+        //     m.set_beat(i, Beat::note(t16())).unwrap();
+        // }
 
         // Precompute button measures for all insert-beat tools
         let mut button_measures: HashMap<&'static str, Measure<'static>> = HashMap::new();
@@ -533,6 +675,9 @@ impl Grooph<'_> {
             cursor_idx: 0,
             show_info: false,
             show_settings: false,
+            show_ts_dialog: false,
+            ts_beats: TimeSignature::FOUR_FOUR.beats,
+            ts_unit: TimeSignature::FOUR_FOUR.beat_unit,
             button_measures,
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),

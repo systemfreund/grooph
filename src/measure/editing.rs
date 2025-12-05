@@ -2,10 +2,10 @@ use crate::measure::BeatKind::{Note, Rest};
 use crate::measure::duration::NoteValue::{Eighth, Sixteenth};
 use crate::measure::duration::{Duration, NoteValue, TupletSpec};
 use crate::measure::editing::Modification::{DissolveTuplet, ToggleAccent};
-use crate::measure::{Beat, BeatIdx, BeatKind, Measure};
+use crate::measure::{Beat, BeatIdx, BeatKind, Measure, TimeSignature};
 use either::Either;
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug)]
 pub enum Modification {
     SetBeat(BeatIdx, Beat),                // contains the new beat
     SetTuplet(GroupSpan, TupletSpec),      // contains the new state
@@ -13,6 +13,7 @@ pub enum Modification {
     ToggleKind(BeatIdx, BeatKind),         // contains the new beat kind
     ToggleAccent(BeatIdx, bool),           // contains the new accented state
     ToggleDotted(BeatIdx, u8),             // contains the new dot count
+    ChangeTimeSignature(TimeSignature, TimeSignature), // (old, new)
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -200,17 +201,9 @@ impl Measure<'_> {
 
             self.beats.drain(start_idx..=end_idx);
 
-            let allowed: Vec<Duration> = self
-                .grid
-                .durations
-                .iter()
-                .copied()
-                .filter(|d| matches!(d, Duration::Simple(_)))
-                .collect();
-
             let anchor = self.tuplet_anchors.get(&group_id).unwrap();
             let span_ticks = anchor.target_ticks;
-            self.fill_at(start_idx, span_ticks, &allowed, Either::Right(Rest)).unwrap();
+            self.fill_at(start_idx, span_ticks, &[], Either::Right(Rest)).unwrap();
 
             // Post‑Processing: ersten neu eingefügten Beat ggf. als Note setzen und Akzent übernehmen
             if start_idx < self.beats.len() {
@@ -221,7 +214,6 @@ impl Measure<'_> {
                 self.beats[start_idx].accented = had_any_accent;
             }
 
-            // Anchor entfernen, da die Gruppe aufgelöst wurde
             self.tuplet_anchors.remove(&group_id).map(|anchor| {
                 DissolveTuplet(
                     GroupSpan { start_idx, end_idx, id: group_id },
@@ -235,7 +227,7 @@ impl Measure<'_> {
 
     /// Find the first and last index with the same tuplet group id as the beat at the given index.
     /// `None`, if the beat is not in a tuplet group.
-    fn find_group_span(&self, idx: BeatIdx) -> Option<GroupSpan> {
+    pub(crate) fn find_group_span(&self, idx: BeatIdx) -> Option<GroupSpan> {
         let id = self.beats[idx].tuplet_group_id?;
 
         let mut start_idx = idx;

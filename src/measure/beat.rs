@@ -1,5 +1,6 @@
+use std::fmt::{Debug, Formatter};
 use crate::measure::beat::BeatKind::{Note, Rest};
-use crate::measure::duration::Duration;
+use crate::measure::duration::{duration_to_debug_str, Duration};
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum BeatKind {
@@ -7,7 +8,7 @@ pub enum BeatKind {
     Rest,
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Eq, PartialEq)]
 pub struct Beat {
     pub duration: Duration,
     pub kind: BeatKind,
@@ -38,5 +39,18 @@ impl Beat {
             accented: self.accented && kind == Note,
             tuplet_group_id: self.tuplet_group_id,
         }
+    }
+}
+
+impl Debug for Beat {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        if self.kind == Rest {
+            write!(f, "(")?
+        }
+        self.duration.fmt(f)?;
+        if self.kind == Rest {
+            write!(f, ")")?
+        }
+        Ok(())
     }
 }

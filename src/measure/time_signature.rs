@@ -1,7 +1,7 @@
 use crate::measure::duration::NoteValue;
 
 /// Represents a time signature (e.g., 4/4, 3/4, 6/8)
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TimeSignature {
     /// Number of beats per measure
     pub beats: u8,
@@ -12,6 +12,7 @@ pub struct TimeSignature {
 impl TimeSignature {
     pub const ONE_FOUR: Self = Self { beats: 1, beat_unit: 4 };
     pub const TWO_FOUR: Self = Self { beats: 2, beat_unit: 4 };
+    pub const THREE_FOUR: Self = Self { beats: 3, beat_unit: 4 };
     pub const ONE_SIXTEENTH: Self = Self { beats: 1, beat_unit: 16 };
     pub const TWO_SIXTEENTH: Self = Self { beats: 2, beat_unit: 16 };
     pub const FOUR_SIXTEENTH: Self = Self { beats: 4, beat_unit: 16 };

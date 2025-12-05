@@ -11,6 +11,7 @@ use crate::measure::BeatKind::Rest;
 pub(crate) use crate::measure::beat::{Beat, BeatKind};
 use crate::measure::duration::NoteValue::{Eighth, Sixteenth, ThirtySecond};
 use crate::measure::duration::{Duration, TupletSpec, duration_to_debug_str, qt16};
+use crate::measure::editing::{GroupSpan, Modification};
 use crate::measure::grid::{DEFAULT_GRID, Grid};
 pub(crate) use crate::measure::time_signature::TimeSignature;
 use BeatKind::Note;
@@ -18,7 +19,6 @@ use either::Either;
 use std::collections::HashMap;
 use std::fmt::{Debug, Display, Formatter};
 use std::vec;
-use crate::measure::editing::Modification;
 
 /// Logical Beat-Index within a measure (0-based)
 pub type BeatIdx = usize;
@@ -312,6 +312,69 @@ impl<'a> Measure<'a> {
 
     pub fn time_signature(&self) -> TimeSignature { self.time_signature }
 
+    /// Change the measure's time signature using the default policy:
+    /// - If the new measure is shorter: remove whole beats from the end; if a tuplet is touched,
+    ///   remove the entire tuplet group (no splitting).
+    /// - If the new measure is longer (or space remains after removals): pad with rests using the
+    ///   new signature's primary beat unit.
+    /// Returns a Modification describing the TS change. Undo/redo is expected to be snapshot-based
+    /// in the UI, but we still report a consolidated modification.
+    pub fn set_time_signature(
+        &mut self,
+        new_ts: TimeSignature,
+    ) -> Result<Modification, MeasureError> {
+        use crate::measure::editing::Modification;
+
+        let old_ts = self.time_signature;
+        if old_ts == new_ts {
+            return Ok(Modification::ChangeTimeSignature(old_ts, new_ts));
+        }
+
+        // Compute current used ticks and target capacity in ticks
+        let mut used: u32 =
+            self.beats.iter().map(|b| self.grid.ticks_of(&b.duration).unwrap_or(0)).sum();
+        let new_max = self.grid.ticks_per_measure(&new_ts);
+
+        // If we need to shrink: remove from the tail, whole beats or entire tuplet groups
+        if used > new_max {
+            let mut i: isize = self.beats.len() as isize - 1;
+            while i >= 0 && used > new_max {
+                let idx = i as usize;
+                let beat = self.beats[idx];
+                if let Some(GroupSpan { start_idx, end_idx, id: group_id }) =
+                    self.find_group_span(idx)
+                {
+                    // Sum ticks for the span and remove it
+                    let span_ticks: u32 = (start_idx..=end_idx)
+                        .map(|k| self.grid.ticks_of(&self.beats[k].duration).unwrap_or(0))
+                        .sum();
+                    // Remove anchor entry if present
+                    self.tuplet_anchors.remove(&group_id);
+                    self.beats.drain(start_idx..=end_idx);
+                    used = used.saturating_sub(span_ticks);
+                    i = start_idx as isize - 1;
+                } else {
+                    let removed = self.grid.ticks_of(&beat.duration).unwrap_or(0);
+                    self.beats.remove(idx);
+                    used = used.saturating_sub(removed);
+                    i -= 1;
+                }
+            }
+        }
+
+        // Apply the new time signature
+        self.time_signature = new_ts;
+
+        // If we have remaining space, pad with rests
+        if used < new_max {
+            let remaining = new_max - used;
+            let insert_at = self.beats.len();
+            self.fill_at(insert_at, remaining, &[], Either::Right(Rest))?;
+        }
+
+        Ok(Modification::ChangeTimeSignature(old_ts, new_ts))
+    }
+
     /// Return a vector with the absolute position (1-based) of each beat as floats.
     /// Examples:
     /// - In 4/4 with four quarters: [1.0, 2.0, 3.0, 4.0]
@@ -415,13 +478,7 @@ impl<'a> Measure<'a> {
 impl Debug for Measure<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         self.beats.iter().enumerate().try_fold((), |_, (idx, beat)| {
-            if beat.kind == Rest {
-                write!(f, "(")?
-            }
-            write!(f, "{}", duration_to_debug_str(&beat.duration))?;
-            if beat.kind == Rest {
-                write!(f, ")")?
-            }
+            beat.fmt(f)?;
             if idx < self.beats.len() - 1 {
                 write!(f, " ")?
             }
@@ -485,7 +542,6 @@ mod tests {
         );
         assert!(m.set_beat(2, Beat::note(e())).is_ok());
         assert_eq!(m.remaining_ticks(3), 0);
-
     }
 
     #[test]
@@ -717,5 +773,75 @@ mod tests {
         // Assert: index 0 becomes 1/8 note, index 1 becomes 1/16 rest
         assert_eq!(m.beats()[0], Beat::note(e()));
         assert_eq!(m.beats()[1], Beat::rest(s()));
+    }
+
+    #[test]
+    fn change_ts_removes_entire_final_triplet_group_on_shrink() {
+        // Arrange: 4/4 where the last quarter is a triplet of eighths
+        let mut m = Measure::new(TimeSignature::FOUR_FOUR);
+        // Replace the last quarter with an 1/8 triplet group (occupies exactly one quarter)
+        m.set_beat(3, Beat::note(t8())).unwrap();
+
+        // Act: shrink 4/4 -> 3/4
+        let modif = m.set_time_signature(TimeSignature::THREE_FOUR).unwrap();
+        match modif {
+            Modification::ChangeTimeSignature(old, new) => {
+                assert_eq!(old, TimeSignature::FOUR_FOUR);
+                assert_eq!(new, TimeSignature::THREE_FOUR);
+            }
+            _ => panic!("unexpected modification variant"),
+        }
+
+        // Should consist of three quarters (rests by default)
+        assert_eq!(m.beats.to_vec(), vec![Beat::rest(q()), Beat::rest(q()), Beat::rest(q())]);
+    }
+
+    #[test]
+    fn change_ts_keep_and_pad_on_extend() {
+        // Arrange: 3/4 with two eighths at the beginning
+        let mut m = Measure::new(TimeSignature::ONE_FOUR);
+        assert!(m.set_beat(0, Beat::note(e())).is_ok());
+        assert!(m.set_beat(1, Beat::note(e())).is_ok());
+
+        // Act: extend to 2/4
+        let _ = m.set_time_signature(TimeSignature::TWO_FOUR).unwrap();
+
+        // Assert: contents preserved; the measure is padded with one quarter rest at the end
+        assert_eq!(m.time_signature(), TimeSignature::TWO_FOUR);
+        assert_eq!(m.beats().to_vec(), vec![Beat::note(e()), Beat::note(e()), Beat::rest(q())])
+    }
+
+    #[test]
+    fn change_ts_shorten_non_tuplet_whole_beats() {
+        // Arrange: default 4/4 is four quarter rests
+        let mut m = Measure::new(TimeSignature::FOUR_FOUR);
+        m.set_beat(1, Beat::note(q())).unwrap();
+
+        // Act: shrink to 2/4
+        let _ = m.set_time_signature(TimeSignature::TWO_FOUR).unwrap();
+
+        // Assert: last two quarters removed; no splitting; exactly two quarter beats remain
+        assert_eq!(m.time_signature(), TimeSignature::TWO_FOUR);
+        assert_eq!(m.beats().to_vec(), vec![Beat::rest(q()), Beat::note(q())]);
+    }
+
+    #[test]
+    fn change_ts_removes_entire_offset_triplet_group_on_shrink() {
+        // Arrange: 4/4 where the last quarter is a triplet of eighths
+        let mut m = Measure::new(TimeSignature::FOUR_FOUR);
+        m.set_beat(0, Beat::note(e())).unwrap(); // offset triplet by an 1/8
+        m.set_beat(1, Beat::note(t8())).unwrap();
+
+        // Act: shrink 4/4 -> 1/4
+        let modif = m.set_time_signature(TimeSignature::ONE_FOUR).unwrap();
+        match modif {
+            Modification::ChangeTimeSignature(old, new) => {
+                assert_eq!(old, TimeSignature::FOUR_FOUR);
+                assert_eq!(new, TimeSignature::ONE_FOUR);
+            }
+            _ => panic!("unexpected modification variant"),
+        }
+
+        assert_eq!(m.beats().to_vec(), vec![Beat::note(e()), Beat::rest(e())]);
     }
 }
