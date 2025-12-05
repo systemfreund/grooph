@@ -13,10 +13,7 @@ use crate::tools::{MetaOp, Tool, ToolKind};
 use crate::{BeatTemplate, ToolGroup, all_tools};
 use BeatKind::Rest;
 use eframe::egui::scroll_area::{ScrollBarVisibility, ScrollSource};
-use eframe::egui::{
-    Align, Align2, Atom, Button, Context, Direction, Id, Key, Label, Layout, Response, RichText,
-    Ui, Vec2, Widget, global_theme_preference_switch,
-};
+use eframe::egui::{Align, Align2, Atom, Button, Context, Direction, Id, Key, Label, Layout, Response, RichText, TextStyle, Ui, Vec2, Widget, global_theme_preference_switch, Margin, global_theme_preference_buttons};
 use eframe::epaint::text::{FontInsert, InsertFontFamily};
 use eframe::epaint::{FontFamily, FontId};
 use eframe::{App, CreationContext, egui};
@@ -38,6 +35,11 @@ pub struct Grooph<'a> {
     button_measures: HashMap<&'static str, Measure<'static>>,
     undo_stack: Vec<(Measure<'a>, BeatIdx)>,
     redo_stack: Vec<(Measure<'a>, BeatIdx)>,
+    // Global UI font bump configuration and per-theme baselines (so bump applies to dark & light)
+    font_bump: f32,
+    // Store baselines as small vectors to avoid trait bounds on TextStyle (Ord/Hash)
+    baseline_dark: Option<Vec<(TextStyle, f32)>>,
+    baseline_light: Option<Vec<(TextStyle, f32)>>,
 }
 
 fn add_font(ctx: &Context) {
@@ -53,12 +55,53 @@ fn add_font(ctx: &Context) {
 
 impl App for Grooph<'_> {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
+        // Ensure the font-size bump applies for both dark and light themes by reapplying
+        // an idempotent adjustment relative to each theme's baseline sizes.
+        let is_dark = ctx.style().visuals.dark_mode;
         ctx.style_mut(|style| {
-            // style
+            // Capture baseline for current theme if not yet recorded
+            if is_dark {
+                if self.baseline_dark.is_none() {
+                    let mut v = Vec::new();
+                    for (ts, font) in style.text_styles.iter() {
+                        v.push((ts.clone(), font.size));
+                    }
+                    self.baseline_dark = Some(v);
+                }
+                if let Some(base) = &self.baseline_dark {
+                    for (ts, font) in style.text_styles.iter_mut() {
+                        if let Some((_, sz)) = base.iter().find(|(t, _)| t == ts) {
+                            font.size = *sz + self.font_bump;
+                        }
+                    }
+                }
+            } else {
+                if self.baseline_light.is_none() {
+                    let mut v = Vec::new();
+                    for (ts, font) in style.text_styles.iter() {
+                        v.push((ts.clone(), font.size));
+                    }
+                    self.baseline_light = Some(v);
+                }
+                if let Some(base) = &self.baseline_light {
+                    for (ts, font) in style.text_styles.iter_mut() {
+                        if let Some((_, sz)) = base.iter().find(|(t, _)| t == ts) {
+                            font.size = *sz + self.font_bump;
+                        }
+                    }
+                }
+            }
         });
+
+        // Global UI tweaks: increase button paddings across the app
+        ctx.style_mut(|style| {
+            style.spacing.button_padding = Vec2::new(10.0, 10.0);
+            style.spacing.window_margin = Margin::same(10);
+        });
+
         egui::TopBottomPanel::top("menu").show(ctx, |ui| {
             ui.horizontal(|ui| {
-                global_theme_preference_switch(ui);
+                global_theme_preference_buttons(ui);
                 ui.separator();
                 ui.toggle_value(&mut self.show_info, "?");
                 ui.toggle_value(&mut self.show_settings, "⚙");
@@ -189,61 +232,65 @@ impl App for Grooph<'_> {
                 });
         });
 
-        // Modal dialog to change time signature
         if self.show_ts_dialog {
             egui::Window::new("Change time signature")
                 .collapsible(false)
                 .resizable(false)
                 .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
                 .show(ctx, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.add(egui::DragValue::new(&mut self.ts_beats).clamp_range(1..=16));
-                        ui.label(" / ");
-                        egui::ComboBox::from_id_salt("beat_unit")
-                            .selected_text(format!("{}", self.ts_unit))
-                            .show_ui(ui, |ui| {
-                                for v in [4u8, 8, 16] {
-                                    ui.selectable_value(&mut self.ts_unit, v, format!("{}", v));
-                                }
-                            });
-                    });
-
-                    ui.separator();
-                    ui.horizontal(|ui| {
-                        if ui.button("Cancel").clicked() {
-                            self.show_ts_dialog = false;
-                        }
-                        if ui.button("Done").clicked() {
-                            // Prevent no-op undo entries
-                            let current = self.measure.time_signature();
-                            let new_ts =
-                                TimeSignature { beats: self.ts_beats, beat_unit: self.ts_unit };
-                            if new_ts == current {
-                                self.show_ts_dialog = false;
-                                return;
-                            }
-
-                            // Snapshot before change
-                            self.push_undo();
-                            let res = self.measure.set_time_signature(new_ts);
-                            match res {
-                                Ok(_) => {
-                                    self.clear_redo();
-                                    // Clamp cursor within bounds
-                                    let new_len = self.measure.beats().len();
-                                    if new_len > 0 {
-                                        self.cursor_idx = self.cursor_idx.min(new_len - 1);
-                                    } else {
-                                        self.cursor_idx = 0;
+                    ui.vertical(|ui| {
+                        ui.horizontal(|ui| {
+                            ui.add(egui::DragValue::new(&mut self.ts_beats).range(1..=16));
+                            ui.label(" / ");
+                            egui::ComboBox::from_id_salt("beat_unit")
+                                .selected_text(format!("{}", self.ts_unit))
+                                .show_ui(ui, |ui| {
+                                    for v in [4u8, 8, 16] {
+                                        ui.selectable_value(&mut self.ts_unit, v, format!("{}", v));
                                     }
+                                });
+                        });
+
+                        ui.add_space(8.0);
+                        ui.separator();
+                        ui.add_space(8.0);
+
+                        ui.horizontal(|ui| {
+                            if ui.button("Cancel").clicked() {
+                                self.show_ts_dialog = false;
+                            }
+                            if ui.button("Done").clicked() {
+                                // Prevent no-op undo entries
+                                let current = self.measure.time_signature();
+                                let new_ts =
+                                    TimeSignature { beats: self.ts_beats, beat_unit: self.ts_unit };
+                                if new_ts == current {
                                     self.show_ts_dialog = false;
+                                    return;
                                 }
-                                Err(_) => {
-                                    // Roll back snapshot if failed
-                                    let _ = self.undo_stack.pop();
+
+                                // Snapshot before change
+                                self.push_undo();
+                                let res = self.measure.set_time_signature(new_ts);
+                                match res {
+                                    Ok(_) => {
+                                        self.clear_redo();
+                                        // Clamp cursor within bounds
+                                        let new_len = self.measure.beats().len();
+                                        if new_len > 0 {
+                                            self.cursor_idx = self.cursor_idx.min(new_len - 1);
+                                        } else {
+                                            self.cursor_idx = 0;
+                                        }
+                                        self.show_ts_dialog = false;
+                                    }
+                                    Err(_) => {
+                                        // Roll back snapshot if failed
+                                        let _ = self.undo_stack.pop();
+                                    }
                                 }
                             }
-                        }
+                        });
                     });
                 });
         }
@@ -517,7 +564,7 @@ impl Grooph<'_> {
     }
 
     fn note_button(&self, ui: &mut Ui, template: BeatTemplate, id: &str) -> Response {
-        let tile = 90.0;
+        let tile = 80.0;
         let symbol_id = Id::new(id);
         let symbol = Atom::custom(symbol_id, Vec2::splat(tile));
         let button = Button::new(symbol).corner_radius(10).atom_ui(ui);
@@ -563,7 +610,7 @@ impl Grooph<'_> {
     }
 
     fn time_signature_button(&self, ui: &mut Ui, id: &str) -> Response {
-        let tile = 90.0;
+        let tile = 80.0;
         let symbol_id = Id::new(id);
         let symbol = Atom::custom(symbol_id, Vec2::splat(tile));
         let button = Button::new(symbol).corner_radius(10).atom_ui(ui);
@@ -639,7 +686,7 @@ impl Grooph<'_> {
                         // Generic button for non-insert tools (e.g., Edit: Undo/Redo)
                         let button = Button::new(RichText::new(t.label).size(24.0))
                             .corner_radius(10)
-                            .min_size(Vec2::splat(90.0))
+                            .min_size(Vec2::splat(80.0))
                             .ui(ui);
                         if button.clicked() {
                             self.apply_tool(t);
@@ -653,6 +700,7 @@ impl Grooph<'_> {
     pub fn new(cc: &CreationContext) -> Self {
         add_font(&cc.egui_ctx);
         let ff = FontFamily::Name("music".into());
+        // Initialize per-theme baselines on first update; font bump applied idempotently there.
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
         // m.set_beat(0, Beat::rest(e())).unwrap();
         // m.set_beat(1, Beat::note(t8())).unwrap();
@@ -681,6 +729,9 @@ impl Grooph<'_> {
             button_measures,
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
+            font_bump: 4.0,
+            baseline_dark: None,
+            baseline_light: None,
         }
     }
 }
