@@ -39,6 +39,7 @@ pub enum EditOp {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MetaOp {
     ChangeTimeSignature,
+    ResetMeasure,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -69,7 +70,7 @@ pub fn all_tools() -> &'static [Tool] {
     use BeatKind::*;
     use Duration::*;
 
-    static ALL: [Tool; 19] = [
+    static ALL: [Tool; 20] = [
         Tool {
             id: "edit.undo",
             label: "⟲",
@@ -215,10 +216,16 @@ pub fn all_tools() -> &'static [Tool] {
             }),
             shortcut: None,
         },
-        // Meta (future; placeholder visible only when used)
+        Tool {
+            id: "meta.reset_measure",
+            label: "🗑",
+            group: ToolGroup::Meta,
+            kind: ToolKind::Meta(MetaOp::ResetMeasure),
+            shortcut: None,
+        },
         Tool {
             id: "meta.change_time_signature",
-            label: "Taktmaß ändern",
+            label: "4/4",
             group: ToolGroup::Meta,
             kind: ToolKind::Meta(MetaOp::ChangeTimeSignature),
             shortcut: None,

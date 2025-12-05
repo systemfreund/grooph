@@ -507,6 +507,13 @@ impl Grooph<'_> {
                 self.show_ts_dialog = true;
                 return; // no further state change now
             }
+            ToolKind::Meta(MetaOp::ResetMeasure) => {
+                // Keep the snapshot we took before calling apply_tool
+                let ts = self.measure.time_signature();
+                self.measure = Measure::new_init(ts, Rest);
+                self.cursor_idx = 0;
+                Some(Modification::ChangeTimeSignature(ts, ts))
+            }
             ToolKind::Edit(crate::tools::EditOp::Undo) => {
                 // Undo should not create a new snapshot; drop the one we took and perform undo
                 let _ = self.undo_stack.pop();
