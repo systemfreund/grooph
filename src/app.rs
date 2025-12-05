@@ -238,9 +238,17 @@ impl App for Grooph<'_> {
                 .resizable(false)
                 .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
                 .show(ctx, |ui| {
-                    ui.vertical(|ui| {
-                        ui.horizontal(|ui| {
-                            ui.add(egui::DragValue::new(&mut self.ts_beats).range(1..=16));
+                    let layout = Layout::top_down(Align::Center).with_cross_align(Align::Center);
+                    ui.with_layout(layout, |ui| {
+                        let l2 = Layout::left_to_right(Align::Min);
+                        ui.with_layout(l2, |ui| {
+                            egui::ComboBox::from_id_salt("beats")
+                                .selected_text(format!("{}", self.ts_beats))
+                                .show_ui(ui, |ui| {
+                                    for v in 1u8..=16u8 {
+                                        ui.selectable_value(&mut self.ts_beats, v, format!("{}", v));
+                                    }
+                                });
                             ui.label(" / ");
                             egui::ComboBox::from_id_salt("beat_unit")
                                 .selected_text(format!("{}", self.ts_unit))
