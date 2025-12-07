@@ -68,7 +68,7 @@ pub(crate) fn draw_measure(
 
     draw_notes(painter, &measure_layout, color, &opts);
 
-    // 5) Edit cursor at current beat index (does not consume width) — blink over time
+    // 5) Edit cursor at current beat index
     if let Some(idx) = cursor_idx
         && let Some(nl) = measure_layout.notes.get(idx)
     {
@@ -87,7 +87,7 @@ pub(crate) fn draw_measure(
         let bottom = c.y - 0.5 * opts.em;
         let base = if ui.visuals().dark_mode { Color32::YELLOW } else { Color32::BLUE };
         let cursor_color = Color32::from_rgba_unmultiplied(base.r(), base.g(), base.b(), alpha);
-        painter.vline(nl.center.x, Rangef::new(top, bottom), Stroke::new(2.0, cursor_color));
+        painter.vline(nl.center.x, Rangef::new(top, bottom), Stroke::new(0.03 * em, cursor_color));
         // Ensure animation progresses even without input
         ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
     }
@@ -139,12 +139,11 @@ pub(crate) fn draw_measure(
                 }
             }
 
-            let top = rect.center().y + 0.5 * opts.em;
-            let bottom = rect.center().y - 0.5 * opts.em;
+            let top = rect.center().y + 0.7 * opts.em;
+            let bottom = rect.center().y - 0.7 * opts.em;
             let base = ui.visuals().selection.stroke.color;
             let cursor_color = Color32::from_rgba_unmultiplied(base.r(), base.g(), base.b(), 100);
-            painter.vline(x, Rangef::new(top, bottom), Stroke::new(8.0, cursor_color));
-            ui.ctx().request_repaint();
+            painter.vline(x, Rangef::new(top, bottom), Stroke::new(0.1 * opts.em, cursor_color));
         }
     }
 

@@ -1,3 +1,4 @@
+mod help;
 mod style;
 
 use crate::measure::duration::{Duration, NoteValue, TupletSpec, q};
@@ -49,13 +50,20 @@ pub struct Grooph {
     // Store baselines as small vectors to avoid trait bounds on TextStyle (Ord/Hash)
     baseline_dark: Option<Vec<(TextStyle, f32)>>,
     baseline_light: Option<Vec<(TextStyle, f32)>>,
-    is_running: bool,
+    player_state: PlayerState,
     bpm: u32,
     audio: Option<crate::audio::Audio>,
     // Playback smoothing state
     playback_smooth_tick: f64,
     playback_last_update: Option<f64>,
     playback_total_ticks: u32,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+enum PlayerState {
+    Playing,
+    Paused,
+    Stopped,
 }
 
 fn add_font(ctx: &Context) {
@@ -79,6 +87,38 @@ impl App for Grooph {
                     .with_cross_justify(true);
 
             ui.with_layout(layout, |ui| {
+                // Playback controls
+                let button_label =
+                    if self.player_state == PlayerState::Playing { "⏸" } else { "⏵" };
+                if Button::new(button_label)
+                    .selected(self.player_state == PlayerState::Playing)
+                    .ui(ui)
+                    .clicked()
+                {
+                    let old_running = self.player_state.clone();
+                    self.player_state = if old_running == PlayerState::Playing {
+                        PlayerState::Paused
+                    } else {
+                        PlayerState::Playing
+                    };
+                    if self.player_state == PlayerState::Playing && self.audio.is_none() {
+                        self.audio = crate::audio::Audio::new(self.bpm);
+                    }
+                }
+                if ui.button("⏹").clicked() {
+                    self.player_state = PlayerState::Stopped;
+                    if let Some(audio) = &mut self.audio {
+                        audio.stop();
+                    }
+                }
+                let bpm_editor =
+                    egui::DragValue::new(&mut self.bpm).prefix("BPM: ").range(20..=300).speed(0.03);
+                let bpm_editor_resp = bpm_editor.ui(ui);
+                if bpm_editor_resp.clicked() {
+                    ui.memory_mut(|mem| mem.surrender_focus(bpm_editor_resp.id))
+                }
+
+                ui.separator();
                 ui.selectable_label(
                     false,
                     Image::new(include_image!("../assets/metronome_dark.svg"))
@@ -88,75 +128,14 @@ impl App for Grooph {
                 ui.toggle_value(&mut self.edit_mode_enabled, "🖊");
                 ui.toggle_value(&mut self.show_info, "?");
                 ui.toggle_value(&mut self.show_settings, "⚙");
-
-                // Playback controls
-                ui.label("BPM");
-                let bpm_editor = egui::DragValue::new(&mut self.bpm).range(20..=300).speed(0.03);
-                let bpm_editor_resp = bpm_editor.ui(ui);
-                if bpm_editor_resp.clicked() {
-                    ui.memory_mut(|mem| mem.surrender_focus(bpm_editor_resp.id))
-                }
-                ui.separator();
-                if ui.button(if self.is_running { "⏸" } else { "⏵" }).clicked() {
-                    let old_running = self.is_running;
-                    self.is_running = !old_running;
-                    if self.is_running && self.audio.is_none() {
-                        self.audio = crate::audio::Audio::new(self.bpm);
-                    }
-                }
-                if ui.button("⏹").clicked() {
-                    self.is_running = false;
-                    if let Some(audio) = &mut self.audio {
-                        audio.stop();
-                    }
-                }
             });
         });
 
         if let Some(audio) = &mut self.audio {
-            audio.update(self.is_running, self.bpm, &self.measure);
+            audio.update(self.player_state == PlayerState::Playing, self.bpm, &self.measure);
         }
 
-        egui::TopBottomPanel::top("info").show_animated(ctx, self.show_info, |ui| {
-            ui.label(
-                "Keybindings: \n\
-                    Arrow keys: Move cursor\n\
-                    Del/Backspace: Remove note\n\
-                    Space: Toggle between note and rest\n\
-                    A: Set/unset accent\n\
-                    1-4: Set duration (1=1/4, 2=1/8, 3=1/16, 4=1/32)\n\
-                    Period: Toggle dotted\n\
-                    T: Cycle tuplet (Tri -> Quint -> Sext -> Sept -> Non -> Dissolve)\n",
-            );
-
-            // Label showing absolute beat position at the cursor and human-readable duration/kind
-            let mut beat_text = String::from("-");
-            let idx = self.cursor_idx;
-            let positions = self.measure.beat_positions();
-            if idx < positions.len() {
-                let v = positions[idx];
-                let mut s = format!("{:.3}", v);
-                // Trim trailing zeros and optional dot for a cleaner look
-                while s.ends_with('0') {
-                    s.pop();
-                }
-                if s.ends_with('.') {
-                    s.pop();
-                }
-                beat_text = s;
-            }
-            let mut label = format!("Beat: {}", beat_text);
-            if idx < self.measure.beats().len() {
-                let b = self.measure.beats()[idx];
-                let desc = human_readable(&b.duration);
-                let kind = match b.kind {
-                    Note => "note",
-                    Rest => "rest",
-                };
-                label = format!("Beat: {}, {} {}", beat_text, desc, kind);
-            }
-            ui.add(Label::new(label));
-        });
+        self.help(ctx);
 
         egui::TopBottomPanel::top("settings").show_animated(ctx, self.show_settings, |ui| {
             global_theme_preference_buttons(ui);
@@ -202,57 +181,64 @@ impl App for Grooph {
 
                     // Update playback smoothing
                     let mut playback_tick_to_draw = None;
-                    if self.is_running {
-                        let ts = self.measure.time_signature();
-                        let ticks_per_measure = DEFAULT_GRID.ticks_per_measure(&ts) as f64;
-                        let ticks_per_beat = DEFAULT_GRID.ticks_per_beat(&ts) as f64;
-                        let ticks_per_sec = (self.bpm as f64 / 60.0) * ticks_per_beat;
+                    match self.player_state {
+                        PlayerState::Playing => {
+                            let ts = self.measure.time_signature();
+                            let ticks_per_measure = DEFAULT_GRID.ticks_per_measure(&ts) as f64;
+                            let ticks_per_beat = DEFAULT_GRID.ticks_per_beat(&ts) as f64;
+                            let ticks_per_sec = (self.bpm as f64 / 60.0) * ticks_per_beat;
 
-                        let now = ui.input(|i| i.time);
-                        let last = self.playback_last_update.unwrap_or(now);
-                        let dt = now - last;
-                        self.playback_last_update = Some(now);
+                            let now = ui.input(|i| i.time);
+                            let last = self.playback_last_update.unwrap_or(now);
+                            let dt = now - last;
+                            self.playback_last_update = Some(now);
 
-                        // Advance predictor
-                        let mut next_tick = self.playback_smooth_tick + ticks_per_sec * dt;
+                            // Advance predictor
+                            let mut next_tick = self.playback_smooth_tick + ticks_per_sec * dt;
 
-                        // Sync with audio if available
-                        if let Some(audio) = &self.audio
-                            && let Some((audio_tick, audio_total)) = audio.playback_position()
-                        {
-                            let total = audio_total as f64;
-                            if total > 0.0 {
-                                let mut diff = audio_tick - next_tick;
-                                // Handle wrap-around (shortest path)
-                                if diff > total * 0.5 {
-                                    diff -= total;
-                                } else if diff < -total * 0.5 {
-                                    diff += total;
-                                }
+                            // Sync with audio if available
+                            if let Some(audio) = &self.audio
+                                && let Some((audio_tick, audio_total)) = audio.playback_position()
+                            {
+                                let total = audio_total as f64;
+                                if total > 0.0 {
+                                    let mut diff = audio_tick - next_tick;
+                                    // Handle wrap-around (shortest path)
+                                    if diff > total * 0.5 {
+                                        diff -= total;
+                                    } else if diff < -total * 0.5 {
+                                        diff += total;
+                                    }
 
-                                // Snap if far off (e.g. startup/seek), else smooth nudge
-                                if diff.abs() > ticks_per_beat * 0.5 {
-                                    next_tick = audio_tick;
-                                } else {
-                                    next_tick += diff * 0.1;
+                                    // Snap if far off (e.g. startup/seek), else smooth nudge
+                                    if diff.abs() > ticks_per_beat * 0.5 {
+                                        next_tick = audio_tick;
+                                    } else {
+                                        next_tick += diff * 0.1;
+                                    }
                                 }
                             }
-                        }
 
-                        // Wrap
-                        if ticks_per_measure > 0.0 {
-                            next_tick = next_tick.rem_euclid(ticks_per_measure);
-                        }
-                        self.playback_smooth_tick = next_tick;
-                        playback_tick_to_draw = Some(self.playback_smooth_tick);
+                            // Wrap
+                            if ticks_per_measure > 0.0 {
+                                next_tick = next_tick.rem_euclid(ticks_per_measure);
+                            }
+                            self.playback_smooth_tick = next_tick;
+                            playback_tick_to_draw = Some(self.playback_smooth_tick);
 
-                        // Keep animation loop running
-                        ui.ctx().request_repaint_after(std::time::Duration::from_millis(16));
-                    } else {
-                        // Paused: keep the last known playback position visible.
-                        // Do not advance the predictor; just stop the clock and draw the last value.
-                        self.playback_last_update = None;
-                        playback_tick_to_draw = Some(self.playback_smooth_tick);
+                            // Keep animation loop running
+                            ui.ctx().request_repaint_after(std::time::Duration::from_millis(16));
+                        }
+                        PlayerState::Paused => {
+                            // Paused: keep the last known playback position visible.
+                            // Do not advance the predictor; just stop the clock and draw the last value.
+                            self.playback_last_update = None;
+                            playback_tick_to_draw = Some(self.playback_smooth_tick);
+                        }
+                        PlayerState::Stopped => {
+                            self.playback_last_update = None;
+                            playback_tick_to_draw = None;
+                        }
                     }
 
                     let layout = draw_measure(
@@ -300,7 +286,7 @@ impl App for Grooph {
             egui::Window::new("Change time signature")
                 .collapsible(false)
                 .resizable(false)
-                .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+                .anchor(Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
                 .show(ctx, |ui| {
                     let layout = Layout::top_down(Align::Center).with_cross_align(Align::Center);
                     ui.with_layout(layout, |ui| {
@@ -379,6 +365,15 @@ impl App for Grooph {
             // Toggle edit mode with Escape
             if i.key_pressed(Key::Escape) {
                 self.edit_mode_enabled = !self.edit_mode_enabled;
+            }
+            // Toggle Play/Pause with Enter (Return)
+            if i.key_pressed(Key::Enter) {
+                let was_playing = self.player_state == PlayerState::Playing;
+                self.player_state =
+                    if was_playing { PlayerState::Paused } else { PlayerState::Playing };
+                if self.player_state == PlayerState::Playing && self.audio.is_none() {
+                    self.audio = crate::audio::Audio::new(self.bpm);
+                }
             }
             // Undo / Redo shortcuts: Ctrl/Cmd+Z (undo), Ctrl/Cmd+Shift+Z or Ctrl/Cmd+Y (redo)
             let mut consumed_undo_redo = false;
@@ -809,7 +804,7 @@ impl Grooph {
             music_font_id: FontId::new(16.0, ff),
             measure: m,
             cursor_idx: 0,
-            edit_mode_enabled: true,
+            edit_mode_enabled: false,
             show_info: false,
             show_settings: false,
             show_ts_dialog: false,
@@ -821,7 +816,7 @@ impl Grooph {
             font_bump: 8.0,
             baseline_dark: None,
             baseline_light: None,
-            is_running: false,
+            player_state: PlayerState::Stopped,
             bpm: 120,
             audio: None,
             playback_smooth_tick: 0.0,
