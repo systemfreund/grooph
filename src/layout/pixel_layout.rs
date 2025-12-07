@@ -85,6 +85,8 @@ pub struct MeasureLayout {
     pub tuplets: Vec<TupletLayout>,
     pub clef_pos: Option<Pos2>,
     pub time_signature: Option<TimeSignatureLayout>,
+    // Left boundary of the notes drawing area (excludes clef and time signature)
+    pub notes_left_edge: f32
 }
 
 /// Build the pixel layout (`MeasureLayout`) from a `Measure`.
@@ -110,8 +112,9 @@ pub fn build_measure_layout(measure: &Measure, opts: &LayoutOpts) -> MeasureLayo
     };
 
     // Notes
+    let notes_left_edge = x_offset_acc;
     let note_rect =
-        Rect::from_min_max(Pos2::new(x_offset_acc, opts.rect.top()), opts.rect.right_bottom());
+        Rect::from_min_max(Pos2::new(notes_left_edge, opts.rect.top()), opts.rect.right_bottom());
     let render_plan = plan_measure(measure);
     let note_layout = build_note_layout(measure.beats(), &render_plan.beams, &note_rect, opts);
     let beam_layout = build_beam_layout(&note_layout, &render_plan.beams, opts);
@@ -124,6 +127,7 @@ pub fn build_measure_layout(measure: &Measure, opts: &LayoutOpts) -> MeasureLayo
         tuplets: tuplet_layout,
         clef_pos,
         time_signature: time_signature_layout,
+        notes_left_edge
     }
 }
 

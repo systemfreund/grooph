@@ -115,13 +115,26 @@ pub(crate) fn draw_measure(
                 let end = start + dur_ticks;
                 if t >= start && t < end {
                     let x0 = measure_layout.notes[i].center.x;
-                    let x1 = if i + 1 < measure_layout.notes.len() {
-                        measure_layout.notes[i + 1].center.x
-                    } else {
-                        x0
-                    };
                     let frac = if dur_ticks > 0.0 { (t - start) / dur_ticks } else { 0.0 };
-                    x = x0 + ((x1 - x0) * (frac as f32));
+
+                    if i + 1 < measure_layout.notes.len() {
+                        let x1 = measure_layout.notes[i + 1].center.x;
+                        x = x0 + ((x1 - x0) * (frac as f32));
+                    } else {
+                        // Smooth wrap: split travel between "after last note" and "before first note".
+                        // First half of duration: travel right from last note.
+                        // Second half of duration: travel right towards first note (from left edge).
+                        let x_first = measure_layout.notes[0].center.x;
+                        let gap_after_last = rect.right() - x0;
+                        let gap_before_first = x_first - measure_layout.notes_left_edge;
+                        let total_dist = gap_after_last + gap_before_first;
+
+                        if frac < 0.5 {
+                            x = x0 + total_dist * (frac as f32);
+                        } else {
+                            x = x_first - total_dist * ((1.0 - frac) as f32);
+                        }
+                    }
                     break;
                 }
             }
