@@ -579,10 +579,6 @@ impl Grooph {
                     crate::tools::Modifier::ToggleRestNote => self.measure.toggle_beat_kind(idx),
                 }
             }
-            _ => {
-                // Andere Toolarten (Modifier/Edit/Meta) werden in einem späteren Schritt verdrahtet.
-                None
-            }
         };
 
         // Clear redo for real changes; otherwise drop the snapshot we took before

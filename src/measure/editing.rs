@@ -165,6 +165,10 @@ impl Measure {
 
                 if let Some(group_span) = self.convert_to_tuplet(start_idx, *next_target, overwrite)
                 {
+                    // Neue Tuplet‑Gruppe: alle Slots als Noten initialisieren (Issue: gewünschtes Default)
+                    for i in group_span.start_idx..=group_span.end_idx {
+                        self.beats[i].kind = Note;
+                    }
                     result = Some(Modification::SetTuplet(group_span, *next_target));
                 }
             }
@@ -419,18 +423,7 @@ impl Measure {
         let mut new_beat = Beat::new(new_duration, cur.kind);
         new_beat.accented = cur.accented;
         if self.set_beat(idx, new_beat).is_ok() {
-            let group_span = self.find_group_span(idx);
-
-            // Wenn der ursprüngliche Beat eine Note war, initialisieren wir die ganze neue Tuplet‑Gruppe als Noten
-            if cur.kind == Note
-                && let Some(group_span) = &group_span
-            {
-                for i in group_span.start_idx..=group_span.end_idx {
-                    self.beats[i].kind = Note;
-                }
-            }
-
-            group_span
+            self.find_group_span(idx)
         } else {
             None
         }
@@ -536,33 +529,18 @@ mod tests {
 
     #[test]
     fn convert_to_tuplet_initializes_notes_when_source_is_note() {
-        let mut m = Measure::new(TimeSignature::FOUR_FOUR);
-        // Stelle sicher, dass Quelle eine Note ist (nicht Rest)
+        let mut m = Measure::new(TimeSignature::ONE_FOUR);
         m.set_beat(0, Beat::note(Duration::Simple(Eighth))).unwrap();
-        // Wandle an derselben Position in Triplet‑Achtel um
-        assert_matches!(
-            m.convert_to_tuplet(0, TupletSpec { n: 3, m: 2, base: Eighth }, true),
-            Some(GroupSpan { start_idx: 0, end_idx: 2, id: _ })
-        );
+        m.set_tuplet(0, Some(TupletSpec { n: 3, m: 2, base: Eighth }), true).unwrap();
 
-        for i in 0..3 {
-            assert_eq!(m.beats()[i].duration, t8());
-            assert_eq!(m.beats()[i].kind, Note, "tuplet slot {} should be a note", i);
-        }
+        assert_eq!(m.beats().to_vec(), vec![Beat::note(t8()), Beat::note(t8()), Beat::note(t8())]);
     }
 
     #[test]
     fn convert_to_tuplet_initializes_rests_when_source_is_rest() {
-        let mut m = Measure::new(TimeSignature::FOUR_FOUR);
-        // Standard ist Rest an Index 0
-        assert_matches!(
-            m.convert_to_tuplet(0, TupletSpec { n: 3, m: 2, base: Eighth }, true),
-            Some(GroupSpan { start_idx: 0, end_idx: 2, id: _ }),
-        );
-        for i in 0..3 {
-            assert_eq!(m.beats()[i].duration, t8());
-            assert_eq!(m.beats()[i].kind, Rest, "tuplet slot {} should be a rest", i);
-        }
+        let mut m = Measure::new(TimeSignature::TWO_EIGHT);
+        m.set_tuplet(0, Some(TupletSpec { n: 3, m: 2, base: Eighth }), true).unwrap();
+        assert_eq!(m.beats().to_vec(), vec![Beat::note(t8()), Beat::note(t8()), Beat::note(t8())]);
     }
 
     #[test]

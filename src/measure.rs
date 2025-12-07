@@ -314,6 +314,7 @@ impl Measure {
     ///   remove the entire tuplet group (no splitting).
     /// - If the new measure is longer (or space remains after removals): pad with rests using the
     ///   new signature's primary beat unit.
+    ///
     /// Returns a Modification describing the TS change. Undo/redo is expected to be snapshot-based
     /// in the UI, but we still report a consolidated modification.
     pub fn set_time_signature(

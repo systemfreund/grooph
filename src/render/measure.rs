@@ -107,8 +107,8 @@ pub(crate) fn draw_measure(
             let onsets = DEFAULT_GRID.compute_onset_ticks(measure.beats());
             let mut x = measure_layout.notes[0].center.x;
 
-            for i in 0..onsets.len() {
-                let start = onsets[i] as f64;
+            for (i, &onset) in onsets.iter().enumerate() {
+                let start = onset as f64;
                 let dur_ticks = DEFAULT_GRID
                     .ticks_of(&measure.beats()[i].duration)
                     .unwrap_or(0) as f64;

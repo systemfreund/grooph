@@ -8,7 +8,7 @@ pub enum BeatKind {
     Rest,
 }
 
-#[derive(Copy, Clone, Eq, PartialEq)]
+#[derive(Copy, Clone, Eq)]
 pub struct Beat {
     pub duration: Duration,
     pub kind: BeatKind,
@@ -39,6 +39,15 @@ impl Beat {
             accented: self.accented && kind == Note,
             tuplet_group_id: self.tuplet_group_id,
         }
+    }
+}
+
+impl PartialEq for Beat {
+    fn eq(&self, other: &Self) -> bool {
+        // Excludes `tuplet_group_id` from the comparison
+        self.duration == other.duration
+            && self.kind == other.kind
+            && self.accented == other.accented
     }
 }
 
