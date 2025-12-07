@@ -147,6 +147,7 @@ struct MetronomeSource {
     cursor: f64,
     sample_rate: u32,
     current_beep: Option<(f32, SoundType)>,
+    samples_processed: usize,
 }
 
 impl MetronomeSource {
@@ -156,7 +157,14 @@ impl MetronomeSource {
             state.params.clone()
         };
 
-        Self { shared, local_params, cursor: 0.0, sample_rate: 44100, current_beep: None }
+        Self {
+            shared,
+            local_params,
+            cursor: 0.0,
+            sample_rate: 44100,
+            current_beep: None,
+            samples_processed: 0,
+        }
     }
 }
 
@@ -164,9 +172,11 @@ impl Iterator for MetronomeSource {
     type Item = f32;
 
     fn next(&mut self) -> Option<Self::Item> {
+        self.samples_processed += 1;
+
         // Periodic check for updates (e.g. every 256 samples ~5ms)
         let check_interval = 256;
-        let should_check = (self.cursor as u64).is_multiple_of(check_interval);
+        let should_check = (self.samples_processed % check_interval) == 0;
 
         if should_check
             && let Ok(mut state) = self.shared.try_lock()
@@ -214,10 +224,12 @@ impl Iterator for MetronomeSource {
             }
         }
 
-        // Try to publish playback cursor to shared state (best-effort)
-        if let Ok(mut state) = self.shared.try_lock() {
-            state.playback_tick = self.cursor;
-            state.total_ticks = self.local_params.ticks_per_measure;
+        // Try to publish playback cursor to shared state (periodically, to avoid contention)
+        if (self.samples_processed % 1024) == 0 {
+             if let Ok(mut state) = self.shared.try_lock() {
+                state.playback_tick = self.cursor;
+                state.total_ticks = self.local_params.ticks_per_measure;
+            }
         }
 
         if let Some(sound) = triggered_sound {

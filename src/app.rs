@@ -1,4 +1,5 @@
 use crate::measure::duration::{Duration, NoteValue, TupletSpec};
+use crate::measure::grid::DEFAULT_GRID;
 use crate::measure::{BeatIdx, Measure, TimeSignature};
 
 use crate::layout::pixel_layout::{LayoutOpts, build_measure_layout, build_time_sig_layout};
@@ -13,13 +14,16 @@ use crate::tools::{MetaOp, Tool, ToolKind};
 use crate::{BeatTemplate, ToolGroup, all_tools};
 use BeatKind::Rest;
 use eframe::egui::scroll_area::{ScrollBarVisibility, ScrollSource};
-use eframe::egui::{Align, Align2, Atom, Button, Context, Direction, Id, Key, Label, Layout, Response, RichText, TextStyle, Ui, Vec2, Widget, Margin, global_theme_preference_buttons};
+use eframe::egui::{
+    Align, Align2, Atom, Button, Context, Direction, Id, Key, Label, Layout, Margin, Response,
+    RichText, TextStyle, Ui, Vec2, Widget, global_theme_preference_buttons,
+};
 use eframe::epaint::text::{FontInsert, InsertFontFamily};
 use eframe::epaint::{FontFamily, FontId};
 use eframe::{App, CreationContext, egui};
 use egui::containers::Frame;
-use std::collections::HashMap;
 use log::info;
+use std::collections::HashMap;
 
 pub struct Grooph {
     font_family: FontFamily,
@@ -44,6 +48,10 @@ pub struct Grooph {
     is_running: bool,
     bpm: u32,
     audio: Option<crate::audio::Audio>,
+    // Playback smoothing state
+    playback_smooth_tick: f64,
+    playback_last_update: Option<f64>,
+    playback_total_ticks: u32,
 }
 
 fn add_font(ctx: &Context) {
@@ -127,7 +135,7 @@ impl App for Grooph {
                 }
             });
         });
-        
+
         if let Some(audio) = &mut self.audio {
             audio.update(self.is_running, self.bpm, &self.measure);
         }
@@ -215,11 +223,58 @@ impl App for Grooph {
                     let size = ui.available_size();
                     let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::click_and_drag());
 
-                    // Query playback position from audio (ticks)
-                    let playback_tick: Option<f64> = self
-                        .audio
-                        .as_ref()
-                        .and_then(|a| a.playback_position().map(|(t, _)| t));
+                    // Update playback smoothing
+                    let mut playback_tick_to_draw = None;
+                    if self.is_running {
+                        let ts = self.measure.time_signature();
+                        let ticks_per_measure = DEFAULT_GRID.ticks_per_measure(&ts) as f64;
+                        let ticks_per_beat = DEFAULT_GRID.ticks_per_beat(&ts) as f64;
+                        let ticks_per_sec = (self.bpm as f64 / 60.0) * ticks_per_beat;
+
+                        let now = ui.input(|i| i.time);
+                        let last = self.playback_last_update.unwrap_or(now);
+                        let dt = now - last;
+                        self.playback_last_update = Some(now);
+
+                        // Advance predictor
+                        let mut next_tick = self.playback_smooth_tick + ticks_per_sec * dt;
+
+                        // Sync with audio if available
+                        if let Some(audio) = &self.audio
+                            && let Some((audio_tick, audio_total)) = audio.playback_position()
+                        {
+                            let total = audio_total as f64;
+                            if total > 0.0 {
+                                let mut diff = audio_tick - next_tick;
+                                // Handle wrap-around (shortest path)
+                                if diff > total * 0.5 {
+                                    diff -= total;
+                                } else if diff < -total * 0.5 {
+                                    diff += total;
+                                }
+
+                                // Snap if far off (e.g. startup/seek), else smooth nudge
+                                if diff.abs() > ticks_per_beat * 0.5 {
+                                    next_tick = audio_tick;
+                                } else {
+                                    next_tick += diff * 0.1;
+                                }
+                            }
+                        }
+
+                        // Wrap
+                        if ticks_per_measure > 0.0 {
+                            next_tick = next_tick.rem_euclid(ticks_per_measure);
+                        }
+                        self.playback_smooth_tick = next_tick;
+                        playback_tick_to_draw = Some(self.playback_smooth_tick);
+
+                        // Keep animation loop running
+                        ui.ctx().request_repaint_after(std::time::Duration::from_millis(16));
+                    } else {
+                        self.playback_smooth_tick = 0.0;
+                        self.playback_last_update = None;
+                    }
 
                     let layout = draw_measure(
                         ui,
@@ -227,7 +282,7 @@ impl App for Grooph {
                         &self.measure,
                         rect,
                         Some(self.cursor_idx),
-                        playback_tick,
+                        playback_tick_to_draw,
                     );
 
                     // Block canvas interactions while the time signature dialog is open
@@ -276,7 +331,11 @@ impl App for Grooph {
                                 .selected_text(format!("{}", self.ts_beats))
                                 .show_ui(ui, |ui| {
                                     for v in 1u8..=16u8 {
-                                        ui.selectable_value(&mut self.ts_beats, v, format!("{}", v));
+                                        ui.selectable_value(
+                                            &mut self.ts_beats,
+                                            v,
+                                            format!("{}", v),
+                                        );
                                     }
                                 });
                             ui.label(" / ");
@@ -771,6 +830,9 @@ impl Grooph {
             is_running: false,
             bpm: 120,
             audio: None,
+            playback_smooth_tick: 0.0,
+            playback_last_update: None,
+            playback_total_ticks: 0,
         }
     }
 }
