@@ -1,4 +1,4 @@
-use crate::measure::duration::{Duration, NoteValue, TupletSpec, e, s, t8, t16};
+use crate::measure::duration::{Duration, NoteValue, TupletSpec};
 use crate::measure::{BeatIdx, Measure, TimeSignature};
 
 use crate::layout::pixel_layout::{LayoutOpts, build_measure_layout, build_time_sig_layout};
@@ -13,17 +13,17 @@ use crate::tools::{MetaOp, Tool, ToolKind};
 use crate::{BeatTemplate, ToolGroup, all_tools};
 use BeatKind::Rest;
 use eframe::egui::scroll_area::{ScrollBarVisibility, ScrollSource};
-use eframe::egui::{Align, Align2, Atom, Button, Context, Direction, Id, Key, Label, Layout, Response, RichText, TextStyle, Ui, Vec2, Widget, global_theme_preference_switch, Margin, global_theme_preference_buttons};
+use eframe::egui::{Align, Align2, Atom, Button, Context, Direction, Id, Key, Label, Layout, Response, RichText, TextStyle, Ui, Vec2, Widget, Margin, global_theme_preference_buttons};
 use eframe::epaint::text::{FontInsert, InsertFontFamily};
 use eframe::epaint::{FontFamily, FontId};
 use eframe::{App, CreationContext, egui};
 use egui::containers::Frame;
 use std::collections::HashMap;
 
-pub struct Grooph<'a> {
+pub struct Grooph {
     font_family: FontFamily,
     font_id: FontId,
-    measure: Measure<'a>,
+    measure: Measure,
     cursor_idx: BeatIdx,
     show_info: bool,
     show_settings: bool,
@@ -32,9 +32,9 @@ pub struct Grooph<'a> {
     ts_beats: u8,
     ts_unit: u8,
     // Prebuilt measures for note/rest/tuplet tool buttons to avoid per-frame reconstruction
-    button_measures: HashMap<&'static str, Measure<'static>>,
-    undo_stack: Vec<(Measure<'a>, BeatIdx)>,
-    redo_stack: Vec<(Measure<'a>, BeatIdx)>,
+    button_measures: HashMap<&'static str, Measure>,
+    undo_stack: Vec<(Measure, BeatIdx)>,
+    redo_stack: Vec<(Measure, BeatIdx)>,
     // Global UI font bump configuration and per-theme baselines (so bump applies to dark & light)
     font_bump: f32,
     // Store baselines as small vectors to avoid trait bounds on TextStyle (Ord/Hash)
@@ -56,7 +56,7 @@ fn add_font(ctx: &Context) {
     ));
 }
 
-impl App for Grooph<'_> {
+impl App for Grooph {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         // Ensure the font-size bump applies for both dark and light themes by reapplying
         // an idempotent adjustment relative to each theme's baseline sizes.
@@ -125,7 +125,6 @@ impl App for Grooph<'_> {
                 }
                 ui.separator();
                 ui.label("BPM");
-                let bpm_old = self.bpm;
                 ui.add(egui::DragValue::new(&mut self.bpm).range(20..=300).speed(0.03));
             });
         });
@@ -417,7 +416,7 @@ impl App for Grooph<'_> {
     }
 }
 
-impl Grooph<'_> {
+impl Grooph {
     fn push_undo(&mut self) { self.undo_stack.push((self.measure.clone(), self.cursor_idx)); }
 
     fn clear_redo(&mut self) { self.redo_stack.clear(); }
@@ -439,7 +438,7 @@ impl Grooph<'_> {
         }
     }
 
-    fn build_button_measure(template: BeatTemplate) -> Measure<'static> {
+    fn build_button_measure(template: BeatTemplate) -> Measure {
         let beat_count =
             if let Duration::Tuplet(TupletSpec { m, .. }) = template.duration { m } else { 1 };
 
@@ -745,7 +744,7 @@ impl Grooph<'_> {
         let m = Measure::new(TimeSignature::FOUR_FOUR);
 
         // Precompute button measures for all insert-beat tools
-        let mut button_measures: HashMap<&'static str, Measure<'static>> = HashMap::new();
+        let mut button_measures: HashMap<&'static str, Measure> = HashMap::new();
         for t in all_tools() {
             if let ToolKind::InsertBeat(template) = t.kind {
                 button_measures.insert(t.id, Self::build_button_measure(template));

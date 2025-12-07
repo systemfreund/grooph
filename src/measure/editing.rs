@@ -4,6 +4,7 @@ use crate::measure::duration::{Duration, NoteValue, TupletSpec};
 use crate::measure::editing::Modification::{DissolveTuplet, ToggleAccent};
 use crate::measure::{Beat, BeatIdx, BeatKind, Measure, TimeSignature};
 use either::Either;
+use crate::measure::grid::DEFAULT_GRID;
 
 #[derive(Debug)]
 pub enum Modification {
@@ -31,7 +32,7 @@ pub const CYCLE_TUPLET_SPECS: [TupletSpec; 5] = [
     TupletSpec { n: 9, m: 8, base: Sixteenth }, // nt16 - 1/16 nonuplets
 ];
 
-impl Measure<'_> {
+impl Measure {
     /// Toggle the user accent flag at index `idx`.
     pub fn toggle_accent(&mut self, idx: BeatIdx) -> Option<Modification> {
         if let Some(b) = self.beats.get(idx) {
@@ -264,7 +265,7 @@ impl Measure<'_> {
         let anchor = self.tuplet_anchors.get(&gid)?;
         let span_ticks = anchor.target_ticks;
         // Onsets der gesamten Measure berechnen und dann relative Offsets der Gruppe extrahieren
-        let onsets = self.grid.compute_onset_ticks(&self.beats);
+        let onsets = DEFAULT_GRID.compute_onset_ticks(&self.beats);
         let start_onset = onsets[start_idx];
 
         let mut offsets: Vec<(u32, bool)> = Vec::new();
@@ -319,7 +320,7 @@ impl Measure<'_> {
         };
 
         // Onsets der neuen Gruppe (relativ) berechnen
-        let onsets = self.grid.compute_onset_ticks(&self.beats);
+        let onsets = DEFAULT_GRID.compute_onset_ticks(&self.beats);
         let start_onset = onsets[start_idx];
         let mut target_rel: Vec<(u32, usize)> = Vec::with_capacity(n);
         let mut i = start_idx;
@@ -395,7 +396,7 @@ impl Measure<'_> {
 
         // Protection: Stop if we would absorb a note and overwrite is false
         if !overwrite {
-            let base_ticks = self.grid.ticks_of(&Duration::Simple(tuplet_spec.base)).unwrap();
+            let base_ticks = DEFAULT_GRID.ticks_of(&Duration::Simple(tuplet_spec.base)).unwrap();
             let group_span = (tuplet_spec.m as u32) * base_ticks;
 
             let mut consumed = 0u32;
@@ -409,7 +410,7 @@ impl Measure<'_> {
                 if k > idx && self.beats[k].kind == Note {
                     return None;
                 }
-                consumed += self.grid.ticks_of(&self.beats[k].duration).unwrap();
+                consumed += DEFAULT_GRID.ticks_of(&self.beats[k].duration).unwrap();
                 k += 1;
             }
         }
@@ -514,7 +515,7 @@ mod tests {
         // Anchor‑Span entspricht einer Viertel‑Spanne
         let gid = id0.unwrap();
         let anchor = m.tuplet_anchors.get(&gid).expect("anchor must exist");
-        let base_quarter_ticks = m.grid.ticks_of(&Duration::Simple(Eighth)).unwrap() * 2;
+        let base_quarter_ticks = DEFAULT_GRID.ticks_of(&Duration::Simple(Eighth)).unwrap() * 2;
         assert_eq!(anchor.target_ticks, base_quarter_ticks);
     }
 
@@ -530,7 +531,6 @@ mod tests {
             None,
             "Should not convert when already a tuplet"
         );
-        // Unverändert
         assert_eq!(format!("{:?}", before), format!("{:?}", m));
     }
 

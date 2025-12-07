@@ -1,6 +1,7 @@
 use crate::layout::tuplet_plan::{TupletSpan, detect_tuplet_spans};
 use crate::measure::duration::{Duration, NoteValue};
 use crate::measure::{Beat, BeatIdx, BeatKind, Measure, TimeSignature};
+use crate::measure::grid::DEFAULT_GRID;
 
 /// Number of beams implied by a duration (eighth = 1, sixteenth = 2, 32nd = 3).
 /// Tuplets map to their base note value for beam count purposes.
@@ -45,10 +46,10 @@ pub struct BeamGroup {
 pub(super) fn compute_beam_plan(measure: &Measure) -> BeamPlan {
     let beats = measure.beats();
     let ts = measure.time_signature();
-    let onsets = measure.grid.compute_onset_ticks(beats);
+    let onsets = DEFAULT_GRID.compute_onset_ticks(beats);
 
     // Compute primary boundaries (tick positions inside the measure where groups should break by default)
-    let boundaries = measure.grid.primary_boundaries(&ts);
+    let boundaries = DEFAULT_GRID.primary_boundaries(&ts);
 
     // Build tuplet span map (beam-independent segmentation) for boundary decisions
     let spans = detect_tuplet_spans(measure);
@@ -78,7 +79,7 @@ pub(super) fn compute_beam_plan(measure: &Measure) -> BeamPlan {
         let a = w[0];
         let b = w[1];
         let break_group =
-            should_break(a, b, beats, &onsets, &boundaries, &span_of_idx, &spans, &measure);
+            should_break(a, b, beats, &onsets, &boundaries, &span_of_idx, &spans);
 
         if break_group {
             finalize_group(&mut groups, beats, &cur);
@@ -175,8 +176,7 @@ fn tuplet_last_note_crosses_into_non_tuplet(
     onsets: &[u32],
     boundaries: &[u32],
     span_of_idx: &[Option<usize>],
-    spans: &[TupletSpan],
-    measure: &Measure,
+    spans: &[TupletSpan]
 ) -> bool {
     let Some(sa) = span_of_idx[a] else {
         return false;
@@ -190,7 +190,7 @@ fn tuplet_last_note_crosses_into_non_tuplet(
         return false;
     }
 
-    let a_end = onsets[a].saturating_add(measure.grid.ticks_of(&beats[a].duration).unwrap_or(0));
+    let a_end = onsets[a].saturating_add(DEFAULT_GRID.ticks_of(&beats[a].duration).unwrap_or(0));
     let b_on = onsets[b];
     let crosses_boundary = boundaries.iter().copied().any(|bd| bd > onsets[a] && bd < a_end);
     crosses_boundary && a_end == b_on && !has_rest_between(beats, a, b)
@@ -204,7 +204,6 @@ fn should_break(
     boundaries: &[u32],
     span_of_idx: &[Option<usize>],
     spans: &[TupletSpan],
-    measure: &Measure,
 ) -> bool {
     // 1) Hard splits first
     if has_rest_or_nonbeamable_between(beats, a, b) {
@@ -235,7 +234,6 @@ fn should_break(
             boundaries,
             span_of_idx,
             spans,
-            measure,
         ) {
             return false;
         }

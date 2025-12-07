@@ -1,4 +1,5 @@
 use crate::measure::duration::Duration;
+use crate::measure::grid::DEFAULT_GRID;
 use crate::measure::Measure;
 
 pub enum SortOrder {
@@ -6,7 +7,7 @@ pub enum SortOrder {
     Descending,
 }
 
-impl Measure<'_> {
+impl Measure {
     /// Compute the best exact spelling for a gap measured in ticks.
     /// Optimization priority:
     /// 1) Minimal number of tokens (durations)
@@ -24,17 +25,17 @@ impl Measure<'_> {
                 .copied()
                 .filter_map(|d| {
                     let den = d.denominator();
-                    self.grid.ticks_of(&d).map(|t| (t, d, den))
+                    DEFAULT_GRID.ticks_of(&d).map(|t| (t, d, den))
                 })
                 .collect()
         } else {
-            self.grid.durations
+            DEFAULT_GRID.durations
                 .iter()
                 .copied()
                 .filter(|d| matches!(d, Duration::Simple { .. }))
                 .filter_map(|d| {
                     let den = d.denominator();
-                    self.grid.ticks_of(&d).map(|t| (t, d, den))
+                    DEFAULT_GRID.ticks_of(&d).map(|t| (t, d, den))
                 })
                 .collect()
         };
@@ -98,8 +99,8 @@ impl Measure<'_> {
         seq_idxs.reverse();
         let mut result: Vec<Duration> = seq_idxs.into_iter().map(|ci| coins[ci].1).collect();
         result.sort_by(|a, b| {
-            let ta = self.grid.ticks_of(a).unwrap();
-            let tb = self.grid.ticks_of(b).unwrap();
+            let ta = DEFAULT_GRID.ticks_of(a).unwrap();
+            let tb = DEFAULT_GRID.ticks_of(b).unwrap();
             ta.cmp(&tb)
         });
         Some(result)

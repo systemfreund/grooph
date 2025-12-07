@@ -7,18 +7,18 @@ pub(super) mod grouping;
 mod math;
 pub(crate) mod time_signature;
 
-use crate::measure::BeatKind::Rest;
 pub(crate) use crate::measure::beat::{Beat, BeatKind};
 use crate::measure::duration::NoteValue::{Eighth, Sixteenth, ThirtySecond};
-use crate::measure::duration::{Duration, TupletSpec, duration_to_debug_str, qt16};
+use crate::measure::duration::{Duration, TupletSpec};
 use crate::measure::editing::{GroupSpan, Modification};
-use crate::measure::grid::{DEFAULT_GRID, Grid};
+use crate::measure::grid::DEFAULT_GRID;
 pub(crate) use crate::measure::time_signature::TimeSignature;
-use BeatKind::Note;
+use crate::measure::BeatKind::Rest;
 use either::Either;
 use std::collections::HashMap;
 use std::fmt::{Debug, Display, Formatter};
 use std::vec;
+use BeatKind::Note;
 
 /// Logical Beat-Index within a measure (0-based)
 pub type BeatIdx = usize;
@@ -54,8 +54,7 @@ pub struct TupletAnchor {
 
 /// Represents a musical measure containing a sequence of beats
 #[derive(Clone)]
-pub struct Measure<'a> {
-    pub(super) grid: &'a Grid<'a>,
+pub struct Measure {
     beats: Vec<Beat>,
     time_signature: TimeSignature,
     /// Tuplet anchor table keyed by stable id
@@ -64,13 +63,12 @@ pub struct Measure<'a> {
     pub next_tuplet_id: u32,
 }
 
-impl<'a> Measure<'a> {
+impl Measure {
     /// Creates a new empty measure with the given time signature
     pub fn new(time_signature: TimeSignature) -> Self { Self::new_init(time_signature, Rest) }
 
     pub fn new_init(time_signature: TimeSignature, init: BeatKind) -> Self {
         let mut s = Self {
-            grid: &DEFAULT_GRID,
             beats: Vec::new(),
             time_signature,
             tuplet_anchors: HashMap::new(),
@@ -89,14 +87,13 @@ impl<'a> Measure<'a> {
         let old_accent = self.beats[idx].accented;
         let dur_old = self.beats[idx].duration; // duration of the beat to be replaced
         let max_ticks = self.max_ticks();
-        let new_ticks = self
-            .grid
+        let new_ticks = DEFAULT_GRID
             .ticks_of(&beat.duration)
             .ok_or(MeasureError::Unfillable { attempted: 0.0 })?;
 
         // Additionally ensure the new duration is part of the configured DurationSet.
         // The grid alone may accept more rational durations than we officially support.
-        if !self.grid.durations.contains(&beat.duration) {
+        if !DEFAULT_GRID.durations.contains(&beat.duration) {
             return self.unfillable_err(new_ticks);
         }
 
@@ -117,7 +114,7 @@ impl<'a> Measure<'a> {
             }
         }
 
-        let old_ticks = self.grid.ticks_of(&dur_old).unwrap();
+        let old_ticks = DEFAULT_GRID.ticks_of(&dur_old).unwrap();
 
         // Special case: turning a non-tuplet slot into a tuplet beat should always construct
         // the entire tuplet group (n items spanning m·base), regardless of whether this is a
@@ -127,7 +124,7 @@ impl<'a> Measure<'a> {
             && !matches!(dur_old, Duration::Tuplet { .. })
         {
             // Compute the total span this tuplet group should occupy
-            let base_ticks = self.grid.ticks_of(&Duration::Simple(base)).unwrap();
+            let base_ticks = DEFAULT_GRID.ticks_of(&Duration::Simple(base)).unwrap();
             let group_span = (m as u32) * base_ticks;
 
             // Collect ticks from idx forward until we cover group_span
@@ -151,7 +148,7 @@ impl<'a> Measure<'a> {
                 {
                     return self.unfillable_err(new_ticks);
                 }
-                let t = self.grid.ticks_of(&b.duration).unwrap();
+                let t = DEFAULT_GRID.ticks_of(&b.duration).unwrap();
                 consumed += t;
                 k += 1;
             }
@@ -208,7 +205,7 @@ impl<'a> Measure<'a> {
                 let mut remaining_to_consume = need;
                 while remaining_to_consume > 0 {
                     let b = self.beats[p];
-                    let t = self.grid.ticks_of(&b.duration).unwrap();
+                    let t = DEFAULT_GRID.ticks_of(&b.duration).unwrap();
                     if t <= remaining_to_consume {
                         self.beats.remove(p);
                         remaining_to_consume -= t;
@@ -217,7 +214,7 @@ impl<'a> Measure<'a> {
                         self.beats.remove(p);
                         // When growing inside a tuplet slot, constrain the remainder to the same tuplet grid
                         let allowed: Vec<Duration> = match dur_old {
-                            Duration::Tuplet(TupletSpec { n: n_old, m: m_old, .. }) => self.grid
+                            Duration::Tuplet(TupletSpec { n: n_old, m: m_old, .. }) => DEFAULT_GRID
                                 .durations
                                 .iter()
                                 .cloned()
@@ -251,7 +248,7 @@ impl<'a> Measure<'a> {
             // If we are inside a tuplet slot, constrain the filler to durations that belong to the
             // same tuplet grid (same n,m).
             let allowed: Vec<Duration> = match dur_old {
-                Duration::Tuplet(TupletSpec { n: n_old, m: m_old, .. }) => self.grid
+                Duration::Tuplet(TupletSpec { n: n_old, m: m_old, .. }) => DEFAULT_GRID
                     .durations
                     .iter()
                     .cloned()
@@ -278,7 +275,7 @@ impl<'a> Measure<'a> {
         let mut absorb_ticks = 0u32;
         let mut k = idx + 1;
         while k < self.beats.len() {
-            let t = self.grid.ticks_of(&self.beats[k].duration).unwrap();
+            let t = DEFAULT_GRID.ticks_of(&self.beats[k].duration).unwrap();
             // Respect tuplet id/group boundaries when growing
             match dur_old {
                 // If we are inside a tuplet slot, limit absorption strictly to the bounds and grid of
@@ -332,8 +329,8 @@ impl<'a> Measure<'a> {
 
         // Compute current used ticks and target capacity in ticks
         let mut used: u32 =
-            self.beats.iter().map(|b| self.grid.ticks_of(&b.duration).unwrap_or(0)).sum();
-        let new_max = self.grid.ticks_per_measure(&new_ts);
+            self.beats.iter().map(|b| DEFAULT_GRID.ticks_of(&b.duration).unwrap_or(0)).sum();
+        let new_max = DEFAULT_GRID.ticks_per_measure(&new_ts);
 
         // If we need to shrink: remove from the tail, whole beats or entire tuplet groups
         if used > new_max {
@@ -346,7 +343,7 @@ impl<'a> Measure<'a> {
                 {
                     // Sum ticks for the span and remove it
                     let span_ticks: u32 = (start_idx..=end_idx)
-                        .map(|k| self.grid.ticks_of(&self.beats[k].duration).unwrap_or(0))
+                        .map(|k| DEFAULT_GRID.ticks_of(&self.beats[k].duration).unwrap_or(0))
                         .sum();
                     // Remove anchor entry if present
                     self.tuplet_anchors.remove(&group_id);
@@ -354,7 +351,7 @@ impl<'a> Measure<'a> {
                     used = used.saturating_sub(span_ticks);
                     i = start_idx as isize - 1;
                 } else {
-                    let removed = self.grid.ticks_of(&beat.duration).unwrap_or(0);
+                    let removed = DEFAULT_GRID.ticks_of(&beat.duration).unwrap_or(0);
                     self.beats.remove(idx);
                     used = used.saturating_sub(removed);
                     i -= 1;
@@ -382,12 +379,12 @@ impl<'a> Measure<'a> {
     ///
     /// Positions are computed from onset ticks relative to the measure's beat size (beat_unit).
     pub fn beat_positions(&self) -> Vec<f32> {
-        let onsets = self.grid.compute_onset_ticks(&self.beats);
-        let ticks_per_beat = self.grid.ticks_per_beat(&self.time_signature);
+        let onsets = DEFAULT_GRID.compute_onset_ticks(&self.beats);
+        let ticks_per_beat = DEFAULT_GRID.ticks_per_beat(&self.time_signature);
         onsets.into_iter().map(|t| 1.0f32 + (t as f32) / (ticks_per_beat as f32)).collect()
     }
 
-    fn max_ticks(&self) -> u32 { self.grid.ticks_per_measure(&self.time_signature) }
+    fn max_ticks(&self) -> u32 { DEFAULT_GRID.ticks_per_measure(&self.time_signature) }
 
     fn remaining_ticks(&self, idx: BeatIdx) -> u32 {
         if idx >= self.beats.len() {
@@ -395,7 +392,7 @@ impl<'a> Measure<'a> {
         }
         let mut sum = 0u32;
         for b in &self.beats[idx..] {
-            sum += self.grid.ticks_of(&b.duration).unwrap();
+            sum += DEFAULT_GRID.ticks_of(&b.duration).unwrap();
         }
         sum
     }
@@ -464,18 +461,18 @@ impl<'a> Measure<'a> {
     }
 
     fn unfillable_err(&self, attempted: u32) -> Result<(), MeasureError> {
-        Err(MeasureError::Unfillable { attempted: self.grid.ticks_to_whole_notes(attempted) })
+        Err(MeasureError::Unfillable { attempted: DEFAULT_GRID.ticks_to_whole_notes(attempted) })
     }
 
     fn overflow_err(&self, attempted: u32, remaining: u32) -> Result<(), MeasureError> {
         Err(MeasureError::Overflow {
-            attempted: self.grid.ticks_to_whole_notes(attempted),
-            available: self.grid.ticks_to_whole_notes(remaining),
+            attempted: DEFAULT_GRID.ticks_to_whole_notes(attempted),
+            available: DEFAULT_GRID.ticks_to_whole_notes(remaining),
         })
     }
 }
 
-impl Debug for Measure<'_> {
+impl Debug for Measure {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         self.beats.iter().enumerate().try_fold((), |_, (idx, beat)| {
             beat.fmt(f)?;
@@ -491,7 +488,7 @@ impl Debug for Measure<'_> {
 mod tests {
     use super::*;
     use crate::measure::duration::NoteValue::{Eighth, Sixteenth, ThirtySecond};
-    use crate::measure::duration::{Duration, e, q, qt16, s, st8, st16, t8, t16, t32, th};
+    use crate::measure::duration::{e, q, s, st16, st8, t16, t32, t8, th, Duration};
 
     fn durations_of(measure: &Measure) -> Vec<Duration> {
         measure.beats().iter().map(|b| b.duration).collect()
