@@ -272,8 +272,10 @@ impl App for Grooph {
                         // Keep animation loop running
                         ui.ctx().request_repaint_after(std::time::Duration::from_millis(16));
                     } else {
-                        self.playback_smooth_tick = 0.0;
+                        // Paused: keep the last known playback position visible.
+                        // Do not advance the predictor; just stop the clock and draw the last value.
                         self.playback_last_update = None;
+                        playback_tick_to_draw = Some(self.playback_smooth_tick);
                     }
 
                     let layout = draw_measure(
