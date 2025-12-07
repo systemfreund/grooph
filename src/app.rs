@@ -105,12 +105,13 @@ impl App for Grooph {
 
         egui::TopBottomPanel::top("menu").show(ctx, |ui| {
             ui.horizontal(|ui| {
-                global_theme_preference_buttons(ui);
-                ui.separator();
                 ui.toggle_value(&mut self.show_info, "?");
                 ui.toggle_value(&mut self.show_settings, "⚙");
 
                 // Playback controls
+                ui.label("BPM");
+                ui.add(egui::DragValue::new(&mut self.bpm).range(20..=300).speed(0.03));
+                ui.separator();
                 if ui.button(if self.is_running { "⏸" } else { "⏵" }).clicked() {
                     let old_running = self.is_running;
                     self.is_running = !old_running;
@@ -124,9 +125,6 @@ impl App for Grooph {
                         audio.stop();
                     }
                 }
-                ui.separator();
-                ui.label("BPM");
-                ui.add(egui::DragValue::new(&mut self.bpm).range(20..=300).speed(0.03));
             });
         });
         
@@ -177,13 +175,7 @@ impl App for Grooph {
 
         if self.show_settings {
             egui::TopBottomPanel::top("settings").show(ctx, |ui| {
-                let mut visuals = ui.ctx().style().visuals.clone();
-                visuals.ui(ui);
-
-                // let mut debug = ui.ctx().style().interaction;
-                // debug.ui(ui);
-
-                ui.ctx().style_mut(|s| s.visuals = visuals.clone());
+                global_theme_preference_buttons(ui);
             });
         }
 
