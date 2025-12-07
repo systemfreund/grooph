@@ -40,6 +40,8 @@ pub struct Grooph<'a> {
     // Store baselines as small vectors to avoid trait bounds on TextStyle (Ord/Hash)
     baseline_dark: Option<Vec<(TextStyle, f32)>>,
     baseline_light: Option<Vec<(TextStyle, f32)>>,
+    is_running: bool,
+    bpm: u32,
 }
 
 fn add_font(ctx: &Context) {
@@ -105,6 +107,22 @@ impl App for Grooph<'_> {
                 ui.separator();
                 ui.toggle_value(&mut self.show_info, "?");
                 ui.toggle_value(&mut self.show_settings, "⚙");
+
+                // Playback controls
+                if ui.button(if self.is_running { "⏸" } else { "⏵" }).clicked() {
+                    let old_running = self.is_running;
+                    self.is_running = !old_running;
+                }
+                if ui.button("⏹").clicked() {
+                    self.is_running = false;
+                }
+                ui.separator();
+                ui.label("BPM");
+                let bpm_old = self.bpm;
+                ui.add(egui::DragValue::new(&mut self.bpm).range(20..=300).speed(0.03));
+                if self.bpm != bpm_old {
+                    // TODO set bpmn
+                }
             });
         });
 
@@ -747,6 +765,8 @@ impl Grooph<'_> {
             font_bump: 4.0,
             baseline_dark: None,
             baseline_light: None,
+            is_running: false,
+            bpm: 120
         }
     }
 }
