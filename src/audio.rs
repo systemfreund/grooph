@@ -15,6 +15,9 @@ pub struct Audio {
 struct SharedState {
     params: PlaybackParams,
     dirty: bool,
+    // live playback cursor in ticks within current measure, and measure length in ticks
+    playback_tick: f64,
+    total_ticks: u32,
 }
 
 #[derive(Clone)]
@@ -50,7 +53,12 @@ impl Audio {
             reset_trigger: 0,
         };
 
-        let shared_state = Arc::new(Mutex::new(SharedState { params, dirty: false }));
+        let shared_state = Arc::new(Mutex::new(SharedState {
+            params,
+            dirty: false,
+            playback_tick: 0.0,
+            total_ticks: 0,
+        }));
 
         let sink = rodio::Sink::connect_new(stream.mixer());
         let source = MetronomeSource::new(shared_state.clone());
@@ -114,6 +122,22 @@ impl Audio {
         let mut state = self.shared_state.lock().unwrap();
         state.params.reset_trigger += 1;
         state.dirty = true;
+        state.playback_tick = 0.0;
+        state.total_ticks = state.params.ticks_per_measure;
+    }
+
+    pub fn playback_position(&self) -> Option<(f64, u32)> {
+        // Non-blocking try to avoid UI stalls; fall back to None if busy
+        if let Ok(state) = self.shared_state.try_lock() {
+            let total = if state.total_ticks != 0 {
+                state.total_ticks
+            } else {
+                state.params.ticks_per_measure
+            };
+            Some((state.playback_tick, total))
+        } else {
+            None
+        }
     }
 }
 
@@ -188,6 +212,12 @@ impl Iterator for MetronomeSource {
             {
                 triggered_sound = Some(sound);
             }
+        }
+
+        // Try to publish playback cursor to shared state (best-effort)
+        if let Ok(mut state) = self.shared.try_lock() {
+            state.playback_tick = self.cursor;
+            state.total_ticks = self.local_params.ticks_per_measure;
         }
 
         if let Some(sound) = triggered_sound {

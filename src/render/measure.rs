@@ -1,5 +1,6 @@
 use crate::layout::pixel_layout::{LayoutOpts, MeasureLayout, build_measure_layout};
 use crate::measure::Measure;
+use crate::measure::grid::DEFAULT_GRID;
 use crate::render::beat::draw_beat;
 use crate::render::glyphs;
 use eframe::egui;
@@ -19,6 +20,7 @@ pub(crate) fn draw_measure(
     measure: &Measure,
     rect: Rect,
     cursor_idx: Option<usize>,
+    playback_tick: Option<f64>,
 ) -> MeasureLayout {
     let color: Color32 = ui.visuals().text_color();
     let painter = ui.painter();
@@ -66,7 +68,7 @@ pub(crate) fn draw_measure(
 
     draw_notes(painter, &measure_layout, color, &opts);
 
-    // 5) Cursor at current beat index (does not consume width) — blink over time
+    // 5) Edit cursor at current beat index (does not consume width) — blink over time
     if let Some(idx) = cursor_idx
         && let Some(nl) = measure_layout.notes.get(idx)
     {
@@ -88,6 +90,49 @@ pub(crate) fn draw_measure(
         painter.vline(nl.center.x, Rangef::new(top, bottom), Stroke::new(2.0, cursor_color));
         // Ensure animation progresses even without input
         ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
+    }
+
+    // 6) Playback cursor — independent of edit cursor. Maps tick position to x via layout onsets.
+    if let Some(tick) = playback_tick {
+        let ts = measure.time_signature();
+        let total_ticks = DEFAULT_GRID.ticks_per_measure(&ts) as f64;
+        if total_ticks > 0.0 && !measure_layout.notes.is_empty() {
+            let t = if tick.is_sign_negative() {
+                0.0
+            } else {
+                let m = tick % total_ticks;
+                if m.is_nan() { 0.0 } else { m }
+            };
+
+            let onsets = DEFAULT_GRID.compute_onset_ticks(measure.beats());
+            let mut x = measure_layout.notes[0].center.x;
+
+            for i in 0..onsets.len() {
+                let start = onsets[i] as f64;
+                let dur_ticks = DEFAULT_GRID
+                    .ticks_of(&measure.beats()[i].duration)
+                    .unwrap_or(0) as f64;
+                let end = start + dur_ticks;
+                if t >= start && t < end {
+                    let x0 = measure_layout.notes[i].center.x;
+                    let x1 = if i + 1 < measure_layout.notes.len() {
+                        measure_layout.notes[i + 1].center.x
+                    } else {
+                        x0
+                    };
+                    let frac = if dur_ticks > 0.0 { (t - start) / dur_ticks } else { 0.0 };
+                    x = x0 + ((x1 - x0) * (frac as f32));
+                    break;
+                }
+            }
+
+            let top = rect.center().y + 0.5 * opts.em;
+            let bottom = rect.center().y - 0.5 * opts.em;
+            let base = ui.visuals().selection.stroke.color;
+            let cursor_color = Color32::from_rgba_unmultiplied(base.r(), base.g(), base.b(), 100);
+            painter.vline(x, Rangef::new(top, bottom), Stroke::new(8.0, cursor_color));
+            ui.ctx().request_repaint();
+        }
     }
 
     measure_layout

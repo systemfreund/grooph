@@ -19,6 +19,7 @@ use eframe::epaint::{FontFamily, FontId};
 use eframe::{App, CreationContext, egui};
 use egui::containers::Frame;
 use std::collections::HashMap;
+use log::info;
 
 pub struct Grooph {
     font_family: FontFamily,
@@ -222,8 +223,20 @@ impl App for Grooph {
                     let size = ui.available_size();
                     let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::click_and_drag());
 
-                    let layout =
-                        draw_measure(ui, &self.font_id, &self.measure, rect, Some(self.cursor_idx));
+                    // Query playback position from audio (ticks)
+                    let playback_tick: Option<f64> = self
+                        .audio
+                        .as_ref()
+                        .and_then(|a| a.playback_position().map(|(t, _)| t));
+
+                    let layout = draw_measure(
+                        ui,
+                        &self.font_id,
+                        &self.measure,
+                        rect,
+                        Some(self.cursor_idx),
+                        playback_tick,
+                    );
 
                     // Block canvas interactions while the time signature dialog is open
                     if !self.show_ts_dialog
@@ -579,7 +592,7 @@ impl Grooph {
             let _ = self.undo_stack.pop();
         }
 
-        println!("{:?}", result);
+        info!("edited: {:?}", result);
     }
 
     fn char_to_key(c: char) -> Option<Key> {
