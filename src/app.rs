@@ -1,4 +1,6 @@
-use crate::measure::duration::{Duration, NoteValue, TupletSpec};
+mod style;
+
+use crate::measure::duration::{Duration, NoteValue, TupletSpec, q};
 use crate::measure::grid::DEFAULT_GRID;
 use crate::measure::{BeatIdx, Measure, TimeSignature};
 
@@ -15,8 +17,9 @@ use crate::{BeatTemplate, ToolGroup, all_tools};
 use BeatKind::Rest;
 use eframe::egui::scroll_area::{ScrollBarVisibility, ScrollSource};
 use eframe::egui::{
-    Align, Align2, Atom, Button, Context, Direction, Id, Key, Label, Layout, Margin, Response,
-    RichText, TextStyle, Ui, Vec2, Widget, global_theme_preference_buttons,
+    Align, Align2, Atom, Button, Context, Direction, Id, Image, Key, Label, Layout, Margin,
+    Response, RichText, TextStyle, Ui, Vec2, Widget, global_theme_preference_buttons,
+    include_image,
 };
 use eframe::epaint::text::{FontInsert, InsertFontFamily};
 use eframe::epaint::{FontFamily, FontId};
@@ -26,8 +29,7 @@ use log::info;
 use std::collections::HashMap;
 
 pub struct Grooph {
-    font_family: FontFamily,
-    font_id: FontId,
+    music_font_id: FontId,
     measure: Measure,
     cursor_idx: BeatIdx,
     // Global edit mode toggle: when false, editing is disabled and UI edit affordances are hidden
@@ -69,59 +71,31 @@ fn add_font(ctx: &Context) {
 
 impl App for Grooph {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
-        // Ensure the font-size bump applies for both dark and light themes by reapplying
-        // an idempotent adjustment relative to each theme's baseline sizes.
-        let is_dark = ctx.style().visuals.dark_mode;
-        ctx.style_mut(|style| {
-            // Capture baseline for current theme if not yet recorded
-            if is_dark {
-                if self.baseline_dark.is_none() {
-                    let mut v = Vec::new();
-                    for (ts, font) in style.text_styles.iter() {
-                        v.push((ts.clone(), font.size));
-                    }
-                    self.baseline_dark = Some(v);
-                }
-                if let Some(base) = &self.baseline_dark {
-                    for (ts, font) in style.text_styles.iter_mut() {
-                        if let Some((_, sz)) = base.iter().find(|(t, _)| t == ts) {
-                            font.size = *sz + self.font_bump;
-                        }
-                    }
-                }
-            } else {
-                if self.baseline_light.is_none() {
-                    let mut v = Vec::new();
-                    for (ts, font) in style.text_styles.iter() {
-                        v.push((ts.clone(), font.size));
-                    }
-                    self.baseline_light = Some(v);
-                }
-                if let Some(base) = &self.baseline_light {
-                    for (ts, font) in style.text_styles.iter_mut() {
-                        if let Some((_, sz)) = base.iter().find(|(t, _)| t == ts) {
-                            font.size = *sz + self.font_bump;
-                        }
-                    }
-                }
-            }
-        });
+        self.apply_style(ctx);
 
-        // Global UI tweaks: increase button paddings across the app
-        ctx.style_mut(|style| {
-            style.spacing.button_padding = Vec2::new(10.0, 10.0);
-            style.spacing.window_margin = Margin::same(10);
-        });
+        egui::TopBottomPanel::top("menu").show_separator_line(false).show(ctx, |ui| {
+            let layout =
+                Layout::from_main_dir_and_cross_align(Direction::LeftToRight, Align::Center)
+                    .with_cross_justify(true);
 
-        egui::TopBottomPanel::top("menu").show(ctx, |ui| {
-            ui.horizontal(|ui| {
+            ui.with_layout(layout, |ui| {
+                ui.selectable_label(
+                    false,
+                    Image::new(include_image!("../assets/metronome_dark.svg"))
+                        .tint(ui.style().visuals.text_color()),
+                )
+                .clicked();
                 ui.toggle_value(&mut self.edit_mode_enabled, "🖊");
                 ui.toggle_value(&mut self.show_info, "?");
                 ui.toggle_value(&mut self.show_settings, "⚙");
 
                 // Playback controls
                 ui.label("BPM");
-                ui.add(egui::DragValue::new(&mut self.bpm).range(20..=300).speed(0.03));
+                let bpm_editor = egui::DragValue::new(&mut self.bpm).range(20..=300).speed(0.03);
+                let bpm_editor_resp = bpm_editor.ui(ui);
+                if bpm_editor_resp.clicked() {
+                    ui.memory_mut(|mem| mem.surrender_focus(bpm_editor_resp.id))
+                }
                 ui.separator();
                 if ui.button(if self.is_running { "⏸" } else { "⏵" }).clicked() {
                     let old_running = self.is_running;
@@ -184,41 +158,39 @@ impl App for Grooph {
             ui.add(Label::new(label));
         });
 
-        if self.show_settings {
-            egui::TopBottomPanel::top("settings").show(ctx, |ui| {
-                global_theme_preference_buttons(ui);
+        egui::TopBottomPanel::top("settings").show_animated(ctx, self.show_settings, |ui| {
+            global_theme_preference_buttons(ui);
+        });
+
+        egui::TopBottomPanel::bottom("tool_palette")
+            .show_separator_line(false)
+            .resizable(false)
+            .show_animated(ctx, self.edit_mode_enabled, |ui| {
+                let tools = all_tools();
+                // Ensure Edit tools (Undo/Redo) are shown first in the palette
+                let groups = [
+                    ToolGroup::Edit,
+                    ToolGroup::Meta,
+                    ToolGroup::Notes,
+                    ToolGroup::Tuplets,
+                    ToolGroup::Rests,
+                ];
+
+                egui::ScrollArea::horizontal()
+                    .scroll_source(ScrollSource::ALL)
+                    .scroll_bar_visibility(ScrollBarVisibility::AlwaysHidden)
+                    .show(ui, |ui| {
+                        let layout = Layout::from_main_dir_and_cross_align(
+                            Direction::LeftToRight,
+                            Align::Center,
+                        )
+                        .with_cross_justify(true);
+
+                        ui.with_layout(layout, |ui| {
+                            self.tool_palette(tools, groups.as_slice(), ui);
+                        })
+                    });
             });
-        }
-
-        if self.edit_mode_enabled {
-            egui::TopBottomPanel::bottom("tool_palette")
-                .frame(Frame::group(&ctx.style()).fill(ctx.style().visuals.panel_fill))
-                .resizable(false)
-                .show(ctx, |ui| {
-                    let tools = all_tools();
-                    // Ensure Edit tools (Undo/Redo) are shown first in the palette
-                    let groups = [
-                        ToolGroup::Edit,
-                        ToolGroup::Meta,
-                        ToolGroup::Notes,
-                        ToolGroup::Tuplets,
-                        ToolGroup::Rests,
-                    ];
-
-                    egui::ScrollArea::horizontal()
-                        .scroll_source(ScrollSource::ALL)
-                        .scroll_bar_visibility(ScrollBarVisibility::AlwaysHidden)
-                        .show(ui, |ui| {
-                            let layout = Layout::from_main_dir_and_cross_align(
-                                Direction::LeftToRight,
-                                Align::Center,
-                            );
-                            ui.with_layout(layout, |ui| {
-                                self.tool_palette(tools, groups.as_slice(), ui);
-                            })
-                        });
-                });
-        }
 
         egui::CentralPanel::default().show(ctx, |ui| {
             Frame::canvas(ui.style())
@@ -285,7 +257,7 @@ impl App for Grooph {
 
                     let layout = draw_measure(
                         ui,
-                        &self.font_id,
+                        &self.music_font_id,
                         &self.measure,
                         rect,
                         if self.edit_mode_enabled { Some(self.cursor_idx) } else { None },
@@ -684,7 +656,7 @@ impl Grooph {
         let tile = 80.0;
         let symbol_id = Id::new(id);
         let symbol = Atom::custom(symbol_id, Vec2::splat(tile));
-        let button = Button::new(symbol).corner_radius(10).atom_ui(ui);
+        let button = Button::new(symbol).corner_radius(5).atom_ui(ui);
 
         if let Some(rect) = button.rect(symbol_id) {
             // Use a prebuilt measure for this button
@@ -710,7 +682,7 @@ impl Grooph {
 
             let opts = LayoutOpts {
                 rect,
-                font_id: FontId::new(em, self.font_id.family.clone()),
+                font_id: FontId::new(em, self.music_font_id.family.clone()),
                 em,
                 layout_clef: false,
                 layout_time_signature: false,
@@ -730,13 +702,13 @@ impl Grooph {
         let tile = 80.0;
         let symbol_id = Id::new(id);
         let symbol = Atom::custom(symbol_id, Vec2::splat(tile));
-        let button = Button::new(symbol).corner_radius(10).atom_ui(ui);
+        let button = Button::new(symbol).corner_radius(5).atom_ui(ui);
 
         if let Some(rect) = button.rect(symbol_id) {
             // Render a stacked 4/4 symbol using Bravura, similar to measure rendering
             let painter = &ui.painter_at(rect);
             let em = compute_em(&rect, 0.5, ui);
-            let font_id = FontId::new(em, self.font_id.family.clone());
+            let font_id = FontId::new(em, self.music_font_id.family.clone());
 
             // Build a minimal layout area for the time signature only
             let opts = LayoutOpts {
@@ -802,7 +774,7 @@ impl Grooph {
                     _ => {
                         // Generic button for non-insert tools (e.g., Edit: Undo/Redo)
                         let button = Button::new(RichText::new(t.label).size(24.0))
-                            .corner_radius(10)
+                            .corner_radius(5)
                             .min_size(Vec2::splat(80.0))
                             .ui(ui);
                         if button.clicked() {
@@ -816,9 +788,14 @@ impl Grooph {
 
     pub fn new(cc: &CreationContext) -> Self {
         add_font(&cc.egui_ctx);
+        egui_extras::install_image_loaders(&cc.egui_ctx);
         let ff = FontFamily::Name("music".into());
         // Initialize per-theme baselines on first update; font bump applied idempotently there.
-        let m = Measure::new(TimeSignature::FOUR_FOUR);
+        let mut m = Measure::new(TimeSignature::FOUR_FOUR);
+        m.set_beat(0, Beat::note(q())).unwrap();
+        m.set_beat(1, Beat::note(q())).unwrap();
+        m.set_beat(2, Beat::note(q())).unwrap();
+        m.set_beat(3, Beat::note(q())).unwrap();
 
         // Precompute button measures for all insert-beat tools
         let mut button_measures: HashMap<&'static str, Measure> = HashMap::new();
@@ -829,8 +806,7 @@ impl Grooph {
         }
 
         Self {
-            font_family: ff.clone(),
-            font_id: FontId::new(16.0, ff),
+            music_font_id: FontId::new(16.0, ff),
             measure: m,
             cursor_idx: 0,
             edit_mode_enabled: true,
@@ -842,7 +818,7 @@ impl Grooph {
             button_measures,
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
-            font_bump: 4.0,
+            font_bump: 8.0,
             baseline_dark: None,
             baseline_light: None,
             is_running: false,

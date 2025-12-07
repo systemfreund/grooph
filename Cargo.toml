@@ -5,8 +5,9 @@ edition = "2024"
 
 [dependencies]
 eframe = "0.33.2"
+egui_extras = { version = "0.33.2", features = ["svg"] }
 either = "1.15.0"
-log = "0.4.28"
+log = "0.4.29"
 rodio = "0.21.1"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
