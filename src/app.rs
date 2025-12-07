@@ -42,6 +42,7 @@ pub struct Grooph<'a> {
     baseline_light: Option<Vec<(TextStyle, f32)>>,
     is_running: bool,
     bpm: u32,
+    audio: Option<crate::audio::Audio>,
 }
 
 fn add_font(ctx: &Context) {
@@ -112,19 +113,26 @@ impl App for Grooph<'_> {
                 if ui.button(if self.is_running { "⏸" } else { "⏵" }).clicked() {
                     let old_running = self.is_running;
                     self.is_running = !old_running;
+                    if self.is_running && self.audio.is_none() {
+                        self.audio = crate::audio::Audio::new(self.bpm);
+                    }
                 }
                 if ui.button("⏹").clicked() {
                     self.is_running = false;
+                    if let Some(audio) = &mut self.audio {
+                        audio.stop();
+                    }
                 }
                 ui.separator();
                 ui.label("BPM");
                 let bpm_old = self.bpm;
                 ui.add(egui::DragValue::new(&mut self.bpm).range(20..=300).speed(0.03));
-                if self.bpm != bpm_old {
-                    // TODO set bpmn
-                }
             });
         });
+        
+        if let Some(audio) = &mut self.audio {
+            audio.update(self.is_running, self.bpm, &self.measure);
+        }
 
         egui::TopBottomPanel::top("info").show_animated(ctx, self.show_info, |ui| {
             ui.label(
@@ -734,12 +742,7 @@ impl Grooph<'_> {
         add_font(&cc.egui_ctx);
         let ff = FontFamily::Name("music".into());
         // Initialize per-theme baselines on first update; font bump applied idempotently there.
-        let mut m = Measure::new(TimeSignature::FOUR_FOUR);
-        // m.set_beat(0, Beat::rest(e())).unwrap();
-        // m.set_beat(1, Beat::note(t8())).unwrap();
-        // for i in 1..=6 {
-        //     m.set_beat(i, Beat::note(t16())).unwrap();
-        // }
+        let m = Measure::new(TimeSignature::FOUR_FOUR);
 
         // Precompute button measures for all insert-beat tools
         let mut button_measures: HashMap<&'static str, Measure<'static>> = HashMap::new();
@@ -766,7 +769,8 @@ impl Grooph<'_> {
             baseline_dark: None,
             baseline_light: None,
             is_running: false,
-            bpm: 120
+            bpm: 120,
+            audio: None,
         }
     }
 }

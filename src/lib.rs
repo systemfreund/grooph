@@ -2,6 +2,7 @@
 #![allow(dead_code)]
 
 mod app;
+mod audio;
 mod layout;
 mod measure;
 mod render;
