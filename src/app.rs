@@ -30,6 +30,8 @@ pub struct Grooph {
     font_id: FontId,
     measure: Measure,
     cursor_idx: BeatIdx,
+    // Global edit mode toggle: when false, editing is disabled and UI edit affordances are hidden
+    edit_mode_enabled: bool,
     show_info: bool,
     show_settings: bool,
     // Time signature dialog state
@@ -113,6 +115,7 @@ impl App for Grooph {
 
         egui::TopBottomPanel::top("menu").show(ctx, |ui| {
             ui.horizontal(|ui| {
+                ui.toggle_value(&mut self.edit_mode_enabled, "🖊");
                 ui.toggle_value(&mut self.show_info, "?");
                 ui.toggle_value(&mut self.show_settings, "⚙");
 
@@ -187,33 +190,35 @@ impl App for Grooph {
             });
         }
 
-        egui::TopBottomPanel::bottom("tool_palette")
-            .frame(Frame::group(&ctx.style()).fill(ctx.style().visuals.panel_fill))
-            .resizable(false)
-            .show(ctx, |ui| {
-                let tools = all_tools();
-                // Ensure Edit tools (Undo/Redo) are shown first in the palette
-                let groups = [
-                    ToolGroup::Edit,
-                    ToolGroup::Meta,
-                    ToolGroup::Notes,
-                    ToolGroup::Tuplets,
-                    ToolGroup::Rests,
-                ];
+        if self.edit_mode_enabled {
+            egui::TopBottomPanel::bottom("tool_palette")
+                .frame(Frame::group(&ctx.style()).fill(ctx.style().visuals.panel_fill))
+                .resizable(false)
+                .show(ctx, |ui| {
+                    let tools = all_tools();
+                    // Ensure Edit tools (Undo/Redo) are shown first in the palette
+                    let groups = [
+                        ToolGroup::Edit,
+                        ToolGroup::Meta,
+                        ToolGroup::Notes,
+                        ToolGroup::Tuplets,
+                        ToolGroup::Rests,
+                    ];
 
-                egui::ScrollArea::horizontal()
-                    .scroll_source(ScrollSource::ALL)
-                    .scroll_bar_visibility(ScrollBarVisibility::AlwaysHidden)
-                    .show(ui, |ui| {
-                        let layout = Layout::from_main_dir_and_cross_align(
-                            Direction::LeftToRight,
-                            Align::Center,
-                        );
-                        ui.with_layout(layout, |ui| {
-                            self.tool_palette(tools, groups.as_slice(), ui);
-                        })
-                    });
-            });
+                    egui::ScrollArea::horizontal()
+                        .scroll_source(ScrollSource::ALL)
+                        .scroll_bar_visibility(ScrollBarVisibility::AlwaysHidden)
+                        .show(ui, |ui| {
+                            let layout = Layout::from_main_dir_and_cross_align(
+                                Direction::LeftToRight,
+                                Align::Center,
+                            );
+                            ui.with_layout(layout, |ui| {
+                                self.tool_palette(tools, groups.as_slice(), ui);
+                            })
+                        });
+                });
+        }
 
         egui::CentralPanel::default().show(ctx, |ui| {
             Frame::canvas(ui.style())
@@ -283,7 +288,7 @@ impl App for Grooph {
                         &self.font_id,
                         &self.measure,
                         rect,
-                        Some(self.cursor_idx),
+                        if self.edit_mode_enabled { Some(self.cursor_idx) } else { None },
                         playback_tick_to_draw,
                     );
 
@@ -399,6 +404,10 @@ impl App for Grooph {
             if self.show_ts_dialog {
                 return;
             }
+            // Toggle edit mode with Escape
+            if i.key_pressed(Key::Escape) {
+                self.edit_mode_enabled = !self.edit_mode_enabled;
+            }
             // Undo / Redo shortcuts: Ctrl/Cmd+Z (undo), Ctrl/Cmd+Shift+Z or Ctrl/Cmd+Y (redo)
             let mut consumed_undo_redo = false;
             let undo_combo = i.key_pressed(Key::Z) && (i.modifiers.command || i.modifiers.ctrl);
@@ -438,43 +447,45 @@ impl App for Grooph {
 
                 // Edits apply only when the cursor is on a committed beat
                 let idx = self.cursor_idx.min(beats_len.saturating_sub(1));
-                if i.key_pressed(Key::Delete) {
-                    // Remove beat at the cursor
-                    self.push_undo();
-                    self.measure.remove(idx);
-                    // Move cursor right
-                    let new_pos = (self.measure.beats().len() - 1).min(self.cursor_idx + 1);
-                    self.cursor_idx = new_pos;
-                    self.clear_redo();
-                }
-                if i.key_pressed(Key::Backspace) {
-                    // Remove beat at the cursor
-                    self.push_undo();
-                    self.measure.remove(idx);
-                    // Move cursor left
-                    let new_len = self.measure.beats().len();
-                    let new_pos = self.cursor_idx.saturating_sub(1).min(new_len - 1);
-                    self.cursor_idx = new_pos;
-                    self.clear_redo();
-                }
-                // Keyboard input routed through tool shortcuts
-                for t in all_tools().iter().filter(|t| t.shortcut.is_some()) {
-                    let sc = t.shortcut.unwrap();
-                    if let Some(key) = Self::char_to_key(sc.key) {
-                        // Match exact shift requirement
-                        if i.key_pressed(key) && i.modifiers.shift == sc.with_shift {
-                            self.apply_tool(t);
+                if self.edit_mode_enabled {
+                    if i.key_pressed(Key::Delete) {
+                        // Remove beat at the cursor
+                        self.push_undo();
+                        self.measure.remove(idx);
+                        // Move cursor right
+                        let new_pos = (self.measure.beats().len() - 1).min(self.cursor_idx + 1);
+                        self.cursor_idx = new_pos;
+                        self.clear_redo();
+                    }
+                    if i.key_pressed(Key::Backspace) {
+                        // Remove beat at the cursor
+                        self.push_undo();
+                        self.measure.remove(idx);
+                        // Move cursor left
+                        let new_len = self.measure.beats().len();
+                        let new_pos = self.cursor_idx.saturating_sub(1).min(new_len - 1);
+                        self.cursor_idx = new_pos;
+                        self.clear_redo();
+                    }
+                    // Keyboard input routed through tool shortcuts
+                    for t in all_tools().iter().filter(|t| t.shortcut.is_some()) {
+                        let sc = t.shortcut.unwrap();
+                        if let Some(key) = Self::char_to_key(sc.key) {
+                            // Match exact shift requirement
+                            if i.key_pressed(key) && i.modifiers.shift == sc.with_shift {
+                                self.apply_tool(t);
+                            }
                         }
                     }
-                }
-                if i.key_pressed(Key::T) {
-                    // Snapshot before attempting tuplet cycle via hotkey
-                    self.push_undo();
-                    let res = self.set_tuplet(idx, None);
-                    if res.is_some() {
-                        self.clear_redo();
-                    } else {
-                        let _ = self.undo_stack.pop();
+                    if i.key_pressed(Key::T) {
+                        // Snapshot before attempting tuplet cycle via hotkey
+                        self.push_undo();
+                        let res = self.set_tuplet(idx, None);
+                        if res.is_some() {
+                            self.clear_redo();
+                        } else {
+                            let _ = self.undo_stack.pop();
+                        }
                     }
                 }
             }
@@ -565,6 +576,10 @@ impl Grooph {
     }
 
     fn apply_tool(&mut self, tool: &Tool) {
+        // If edit mode is disabled, ignore all tool interactions
+        if !self.edit_mode_enabled {
+            return;
+        }
         // Block palette/tool actions while a modal dialog is open
         if self.show_ts_dialog {
             return;
@@ -818,6 +833,7 @@ impl Grooph {
             font_id: FontId::new(16.0, ff),
             measure: m,
             cursor_idx: 0,
+            edit_mode_enabled: true,
             show_info: false,
             show_settings: false,
             show_ts_dialog: false,
