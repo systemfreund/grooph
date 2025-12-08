@@ -6,7 +6,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
 
 <head>
-    <title>grooph – Web Metronome</title>
+    <title>grooph.app – Flexible Web Metronome</title>
 
     <meta name="description" content="grooph is a flexible web metronome. Set tempo (BPM) and time signature, then practice with a clear click and visual pulse — right in your browser.">
     <meta name="keywords" content="metronome, web metronome, click track, bpm, practice, drums, guitar, piano, time signature">
@@ -14,26 +14,26 @@
     <meta name="language" content="en">
     <meta name="author" content="grooph.app">
 
-    <!-- Open Graph / Social -->
     <meta property="og:type" content="website">
     <meta property="og:title" content="grooph – Flexible Metronome">
     <meta property="og:description" content="Practice with a precise click and visual pulse. Set BPM and time signature in your browser.">
     <meta property="og:locale" content="en_US">
     <meta property="og:site_name" content="grooph">
+    <meta property="og:image" content="assets/preview.png">
+    <meta property="og:image:alt" content="grooph web metronome preview">
+    <meta property="og:image:type" content="image/png">
 
-    <!-- Twitter Card -->
-    <meta name="twitter:card" content="summary">
+    <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="grooph – Flexible Metronome">
     <meta name="twitter:description" content="Flexible browser metronome with BPM and time signature controls.">
+    <meta name="twitter:image" content="assets/preview.png">
+    <meta name="twitter:image:alt" content="grooph web metronome preview">
 
-    <!-- config for our rust wasm binary. go to https://trunkrs.dev/assets/#rust for more customization -->
     <link data-trunk rel="rust" data-wasm-opt="4"/>
-    <!-- this is the base url relative to which other urls will be constructed. trunk will insert this from the public-url option -->
     <base data-trunk-public-url/>
 
-    <!--    <link data-trunk rel="icon" href="assets/favicon.ico">-->
-    <!--    <link data-trunk rel="copy-file" href="assets/sw.js"/>-->
-    <!--    <link data-trunk rel="copy-file" href="assets/manifest.json"/>-->
+    <link data-trunk rel="icon" href="assets/favicon.ico">
+    <link data-trunk rel="copy-file" href="assets/preview.png" data-target-path="assets"/>
     <!--    <link data-trunk rel="copy-file" href="assets/icon-1024.png" data-target-path="assets"/>-->
     <!--    <link data-trunk rel="copy-file" href="assets/icon-256.png" data-target-path="assets"/>-->
     <!--    <link data-trunk rel="copy-file" href="assets/icon_ios_touch_192.png" data-target-path="assets"/>-->
