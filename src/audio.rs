@@ -31,8 +31,8 @@ struct PlaybackParams {
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum SoundType {
-    High,
-    Low,
+    Downbeat,
+    PrimaryBeat,
 }
 
 impl Audio {
@@ -83,10 +83,10 @@ impl Audio {
 
         // Recompute schedule
         let mut schedule = BTreeMap::new();
-        schedule.insert(0, SoundType::High);
+        schedule.insert(0, SoundType::Downbeat);
 
         for t in DEFAULT_GRID.primary_boundaries(&ts) {
-            schedule.entry(t).or_insert(SoundType::Low);
+            schedule.entry(t).or_insert(SoundType::PrimaryBeat);
         }
 
         let onsets = DEFAULT_GRID.compute_onset_ticks(measure.beats());
@@ -94,7 +94,7 @@ impl Audio {
             if beat.accented
                 && let Some(&t) = onsets.get(i)
             {
-                schedule.insert(t, SoundType::High);
+                schedule.insert(t, SoundType::Downbeat);
             }
         }
 
@@ -233,8 +233,8 @@ impl Iterator for MetronomeSource {
 
         if let Some((phase, sound_type)) = self.current_beep {
             let freq = match sound_type {
-                SoundType::High => 1500.0,
-                SoundType::Low => 800.0,
+                SoundType::Downbeat => 1500.0,
+                SoundType::PrimaryBeat => 800.0,
             };
             let decay = 0.05;
             let dt = 1.0 / (self.sample_rate as f32);
