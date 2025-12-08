@@ -25,10 +25,11 @@ pub(crate) fn draw_measure(
     let color: Color32 = ui.visuals().text_color();
     let painter = ui.painter();
     let y = rect.center().y;
-    // staff line
-    painter.hline(Rangef::new(rect.left(), rect.right()), y, Stroke::new(1.0, color));
-
     let em = compute_em(&rect, 0.1, ui);
+
+    // staff line
+    painter.hline(Rangef::new(rect.left(), rect.right()), y, Stroke::new(0.02 * em, color));
+
     let font_id = FontId::new(em, font_id.family.clone());
 
     let opts = LayoutOpts {
