@@ -1,5 +1,5 @@
-use crate::measure::{BeatKind, Measure};
 use crate::measure::grid::DEFAULT_GRID;
+use crate::measure::{BeatKind, Measure};
 use log::{info, log};
 use rodio::Source;
 use std::collections::BTreeMap;
@@ -46,6 +46,8 @@ struct SharedState {
     // live playback cursor in ticks within current measure, and measure length in ticks
     playback_tick: f64,
     total_ticks: u32,
+    // Whether source currently produces absolute silence (no active voices and not playing)
+    is_silent: bool,
 }
 
 #[derive(Clone)]
@@ -56,6 +58,8 @@ struct PlaybackParams {
     schedule: BTreeMap<u32, SoundType>,
     reset_trigger: usize,
     mixer: MixerVolumes,
+    // Controls whether new tones are triggered and cursor advances
+    playing: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -63,7 +67,7 @@ enum SoundType {
     Downbeat,
     PrimaryBeat,
     AccentedBeat,
-    Beat
+    Beat,
 }
 
 impl Audio {
@@ -83,6 +87,7 @@ impl Audio {
             schedule: BTreeMap::new(),
             reset_trigger: 0,
             mixer: MixerVolumes::default(),
+            playing: false,
         };
 
         let shared_state = Arc::new(Mutex::new(SharedState {
@@ -90,6 +95,7 @@ impl Audio {
             dirty: false,
             playback_tick: 0.0,
             total_ticks: 0,
+            is_silent: true,
         }));
 
         let sink = rodio::Sink::connect_new(stream.mixer());
@@ -100,10 +106,20 @@ impl Audio {
         Some(Self { stream, sink, shared_state })
     }
 
-    pub fn update(&mut self, is_running: bool, bpm: u32, measure: &Measure) {
+    // Returns true if UI should repaint soon (while playing or while waiting for tail-out)
+    pub fn update(&mut self, is_running: bool, bpm: u32, measure: &Measure) -> bool {
+        // Playback start: ensure sink runs
         if is_running && self.sink.is_paused() {
             self.sink.play();
-        } else if !is_running && !self.sink.is_paused() {
+        }
+
+        // On stop: do not pause immediately; wait until source reports silence
+        if !is_running
+            && !self.sink.is_paused()
+            && let Ok(state) = self.shared_state.try_lock()
+            && state.is_silent
+        {
+            // Now it's safe to pause without pops
             self.sink.pause();
         }
 
@@ -123,12 +139,11 @@ impl Audio {
 
         let onsets = DEFAULT_GRID.compute_onset_ticks(measure.beats());
         for (i, beat) in measure.beats().iter().enumerate() {
-            if beat.kind == BeatKind::Note && let Some(&t) = onsets.get(i) {
-                let sound_type = if beat.accented {
-                    SoundType::AccentedBeat
-                } else {
-                    SoundType::Beat
-                };
+            if beat.kind == BeatKind::Note
+                && let Some(&t) = onsets.get(i)
+            {
+                let sound_type =
+                    if beat.accented { SoundType::AccentedBeat } else { SoundType::Beat };
 
                 schedule.insert(t, sound_type);
             }
@@ -139,13 +154,18 @@ impl Audio {
             || state.params.ticks_per_beat != ticks_per_beat
             || state.params.ticks_per_measure != ticks_per_measure
             || state.params.schedule != schedule
+            || state.params.playing != is_running
         {
             state.params.bpm = bpm;
             state.params.ticks_per_beat = ticks_per_beat;
             state.params.ticks_per_measure = ticks_per_measure;
             state.params.schedule = schedule;
+            state.params.playing = is_running;
             state.dirty = true;
         }
+
+        // Request repaint while tailing out awaiting pause
+        !is_running && !self.sink.is_paused()
     }
 
     pub fn set_mixer(&mut self, mixer: MixerVolumes) {
@@ -157,9 +177,7 @@ impl Audio {
         }
     }
 
-    // Optional: add explicit stop/reset method
     pub fn stop(&mut self) {
-        self.sink.pause();
         let mut state = self.shared_state.lock().unwrap();
         state.params.reset_trigger += 1;
         state.dirty = true;
@@ -193,6 +211,9 @@ struct MetronomeSource {
 }
 
 impl MetronomeSource {
+    // Voice cap used in multiple places
+    const MAX_VOICES: usize = 8;
+
     fn new(shared: Arc<Mutex<SharedState>>) -> Self {
         let local_params = {
             let state = shared.lock().unwrap();
@@ -208,21 +229,93 @@ impl MetronomeSource {
             samples_processed: 0,
         }
     }
-}
 
-impl Iterator for MetronomeSource {
-    type Item = f32;
+    fn add_triggered_sounds(
+        &mut self,
+        triggered_sounds: &mut Vec<SoundType>,
+        start: u32,
+        limit: f64,
+    ) {
+        let mut k = start;
+        while (k as f64) < limit {
+            if let Some(&sound) = self.local_params.schedule.get(&k) {
+                triggered_sounds.push(sound);
+            }
+            k += 1;
+        }
+    }
 
-    fn next(&mut self) -> Option<Self::Item> {
+    fn update_shared_state(&mut self) {
+        // Try to publish playback cursor to shared state (periodically, to avoid contention)
+        if self.samples_processed.is_multiple_of(1024)
+            && let Ok(mut state) = self.shared.try_lock()
+        {
+            state.playback_tick = self.cursor;
+            state.total_ticks = self.local_params.ticks_per_measure;
+            // Silent when not playing and no active voices left
+            let silent = !self.local_params.playing && self.active_beeps.is_empty();
+            state.is_silent = silent;
+        }
+    }
+
+    fn determine_triggered_sounds(&mut self) -> Vec<SoundType> {
+        let bpm = self.local_params.bpm as f64;
+        let total_ticks = self.local_params.ticks_per_measure as f64;
+        let ticks_per_beat = self.local_params.ticks_per_beat as f64;
+        let ticks_per_sample = (bpm / 60.0 * ticks_per_beat) / (self.sample_rate as f64);
+
+        let old_cursor = self.cursor;
+        let mut new_cursor = old_cursor + ticks_per_sample;
+
+        // Collect all triggers crossed by this sample advance using [old, new) interval
+        let mut triggered_sounds: Vec<SoundType> = Vec::with_capacity(Self::MAX_VOICES);
+        if self.local_params.playing {
+            if new_cursor >= total_ticks {
+                // 1. [old_cursor, total_ticks)
+                self.add_triggered_sounds(
+                    &mut triggered_sounds,
+                    old_cursor.ceil() as u32,
+                    total_ticks,
+                );
+
+                // Wrap
+                new_cursor -= total_ticks;
+
+                // 2. [0.0, new_cursor)
+                self.add_triggered_sounds(&mut triggered_sounds, 0, new_cursor);
+            } else {
+                // [old_cursor, new_cursor)
+                self.add_triggered_sounds(
+                    &mut triggered_sounds,
+                    old_cursor.ceil() as u32,
+                    new_cursor,
+                );
+            }
+
+            self.cursor = new_cursor;
+        }
+        triggered_sounds
+    }
+
+    fn enqueue_triggered_sounds(&mut self) {
+        let triggered_sounds = self.determine_triggered_sounds();
+        // Enqueue all triggered sounds as new voices (phase = 0)
+        if !triggered_sounds.is_empty() {
+            for sound in triggered_sounds {
+                if self.active_beeps.len() >= Self::MAX_VOICES {
+                    // drop the oldest to keep CPU bounded
+                    self.active_beeps.remove(0);
+                }
+                self.active_beeps.push((0.0, sound));
+            }
+        }
+    }
+
+    fn update_local_state(&mut self) {
         self.samples_processed += 1;
 
-        // Voice cap used in multiple places
-        const MAX_VOICES: usize = 8;
-
         // Periodic check for updates (e.g. every 256 samples ~5ms)
-        let should_check = self.samples_processed.is_multiple_of(256);
-
-        if should_check
+        if self.samples_processed.is_multiple_of(256)
             && let Ok(mut state) = self.shared.try_lock()
             && state.dirty
         {
@@ -233,84 +326,17 @@ impl Iterator for MetronomeSource {
             self.local_params = state.params.clone();
             state.dirty = false;
         }
+    }
 
-        let bpm = self.local_params.bpm as f64;
-        let ticks_per_beat = self.local_params.ticks_per_beat as f64;
-        let total_ticks = self.local_params.ticks_per_measure as f64;
-
-        if ticks_per_beat == 0.0 {
-            return Some(0.0);
-        }
-
-        let ticks_per_sample = (bpm / 60.0 * ticks_per_beat) / (self.sample_rate as f64);
-
-        let old_cursor = self.cursor;
-        let mut new_cursor = old_cursor + ticks_per_sample;
-
-        // Collect all triggers crossed by this sample advance using [old, new) interval
-        let mut triggered_sounds: Vec<SoundType> = Vec::with_capacity(4);
-
-        if new_cursor >= total_ticks {
-            // 1. [old_cursor, total_ticks)
-            let mut k = old_cursor.ceil() as u32;
-            let limit1 = total_ticks;
-            while (k as f64) < limit1 {
-                if let Some(&sound) = self.local_params.schedule.get(&k) {
-                    triggered_sounds.push(sound);
-                }
-                k += 1;
-            }
-
-            // Wrap
-            new_cursor -= total_ticks;
-            self.cursor = new_cursor;
-
-            // 2. [0.0, new_cursor)
-            let mut k2 = 0;
-            while (k2 as f64) < new_cursor {
-                if let Some(&sound) = self.local_params.schedule.get(&k2) {
-                    triggered_sounds.push(sound);
-                }
-                k2 += 1;
-            }
-        } else {
-            // [old_cursor, new_cursor)
-            let mut k = old_cursor.ceil() as u32;
-            while (k as f64) < new_cursor {
-                if let Some(&sound) = self.local_params.schedule.get(&k) {
-                    triggered_sounds.push(sound);
-                }
-                k += 1;
-            }
-            self.cursor = new_cursor;
-        }
-
-        // Try to publish playback cursor to shared state (periodically, to avoid contention)
-        if self.samples_processed.is_multiple_of(1024)
-            && let Ok(mut state) = self.shared.try_lock()
-        {
-            state.playback_tick = self.cursor;
-            state.total_ticks = self.local_params.ticks_per_measure;
-        }
-
-        // Enqueue all triggered sounds as new voices (phase = 0)
-        if !triggered_sounds.is_empty() {
-            for sound in triggered_sounds {
-                if self.active_beeps.len() >= MAX_VOICES {
-                    // drop the oldest to keep CPU bounded
-                    self.active_beeps.remove(0);
-                }
-                self.active_beeps.push((0.0, sound));
-            }
-        }
-
+    fn synthesize(&mut self) -> f32 {
         // Synthesize a sample by mixing all active voices with envelope
         let dt = 1.0 / (self.sample_rate as f32);
         const DECAY: f32 = 0.05; // ~50 ms
         const ATTACK: f32 = 0.001; // ~1 ms
 
         if self.active_beeps.is_empty() {
-            return Some(0.0);
+            // If not playing and no active voices, stay silent
+            return 0.0;
         }
 
         // Advance phases and compute sum
@@ -349,7 +375,18 @@ impl Iterator for MetronomeSource {
         }
 
         // Soft clip to avoid hard clipping when multiple voices overlap
-        Some(mixed.tanh())
+        mixed.tanh()
+    }
+}
+
+impl Iterator for MetronomeSource {
+    type Item = f32;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.update_local_state();
+        self.update_shared_state();
+        self.enqueue_triggered_sounds();
+        Some(self.synthesize())
     }
 }
 

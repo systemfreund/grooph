@@ -95,7 +95,9 @@ impl App for Grooph {
 
         if let Some(audio) = &mut self.audio {
             audio.set_mixer(self.mixer);
-            audio.update(self.player_state == PlayerState::Playing, self.bpm, &self.measure);
+            if audio.update(self.player_state == PlayerState::Playing, self.bpm, &self.measure) {
+                ctx.request_repaint();
+            }
         }
     }
 }
