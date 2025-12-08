@@ -6,6 +6,7 @@ mod style;
 mod time_signature_dialog;
 mod tool_palette;
 mod settings_panel;
+mod mixer_panel;
 
 use crate::measure::duration::{q, Duration, NoteValue, TupletSpec};
 use crate::measure::{BeatIdx, Measure, TimeSignature};
@@ -32,6 +33,7 @@ pub struct Grooph {
     edit_mode_enabled: bool,
     show_info: bool,
     show_settings: bool,
+    show_mixer: bool,
     // Time signature dialog state
     show_ts_dialog: bool,
     ts_beats: u8,
@@ -48,6 +50,9 @@ pub struct Grooph {
     player_state: PlayerState,
     bpm: u32,
     audio: Option<crate::audio::Audio>,
+    // Mixer volumes [0.0, 1.0]
+    mixer_vol_downbeat: f32,
+    mixer_vol_primary: f32,
     // Playback smoothing state
     playback_smooth_tick: f64,
     playback_last_update: Option<f64>,
@@ -78,6 +83,7 @@ impl App for Grooph {
         self.main_menu(ctx);
         self.help_panel(ctx);
         self.settings_panel(ctx);
+        self.mixer_panel(ctx);
         self.tool_palette_panel(ctx);
         self.measure_panel(ctx);
 
@@ -88,6 +94,7 @@ impl App for Grooph {
         self.handle_keyboard_input(ctx);
 
         if let Some(audio) = &mut self.audio {
+            audio.set_volumes(self.mixer_vol_downbeat, self.mixer_vol_primary);
             audio.update(self.player_state == PlayerState::Playing, self.bpm, &self.measure);
         }
     }
@@ -202,6 +209,7 @@ impl Grooph {
             edit_mode_enabled: false,
             show_info: false,
             show_settings: false,
+            show_mixer: false,
             show_ts_dialog: false,
             ts_beats: TimeSignature::FOUR_FOUR.beats,
             ts_unit: TimeSignature::FOUR_FOUR.beat_unit,
@@ -214,6 +222,8 @@ impl Grooph {
             player_state: PlayerState::Stopped,
             bpm: 120,
             audio: None,
+            mixer_vol_downbeat: 1.0,
+            mixer_vol_primary: 1.0,
             playback_smooth_tick: 0.0,
             playback_last_update: None,
             playback_total_ticks: 0,

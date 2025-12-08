@@ -1,7 +1,7 @@
-use eframe::egui;
-use eframe::egui::{include_image, Align, Button, Direction, Image, Layout, Widget};
-use crate::app::PlayerState;
 use crate::Grooph;
+use crate::app::PlayerState;
+use eframe::egui;
+use eframe::egui::{Align, Button, Direction, Image, Layout, RichText, Widget, include_image};
 
 impl Grooph {
     pub(super) fn main_menu(&mut self, ctx: &egui::Context) {
@@ -43,13 +43,14 @@ impl Grooph {
                     ui.memory_mut(|mem| mem.surrender_focus(bpm_editor_resp.id))
                 }
 
+                ui.toggle_value(&mut self.show_mixer, "🔈");
                 ui.separator();
                 ui.selectable_label(
                     false,
                     Image::new(include_image!("../../assets/metronome_dark.svg"))
                         .tint(ui.style().visuals.text_color()),
                 )
-                    .clicked();
+                .clicked();
                 ui.toggle_value(&mut self.edit_mode_enabled, "🖊");
                 ui.toggle_value(&mut self.show_info, "?");
                 ui.toggle_value(&mut self.show_settings, "⚙");

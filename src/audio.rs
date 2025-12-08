@@ -27,6 +27,9 @@ struct PlaybackParams {
     ticks_per_measure: u32,
     schedule: BTreeMap<u32, SoundType>,
     reset_trigger: usize,
+    // Per-sound-type volumes in range [0.0, 1.0]
+    vol_downbeat: f32,
+    vol_primary: f32,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -51,6 +54,8 @@ impl Audio {
             ticks_per_measure: 0,
             schedule: BTreeMap::new(),
             reset_trigger: 0,
+            vol_downbeat: 1.0,
+            vol_primary: 1.0,
         };
 
         let shared_state = Arc::new(Mutex::new(SharedState {
@@ -108,6 +113,19 @@ impl Audio {
             state.params.ticks_per_beat = ticks_per_beat;
             state.params.ticks_per_measure = ticks_per_measure;
             state.params.schedule = schedule;
+            state.dirty = true;
+        }
+    }
+
+    pub fn set_volumes(&mut self, downbeat: f32, primary: f32) {
+        let mut state = self.shared_state.lock().unwrap();
+        let d = downbeat.clamp(0.0, 1.0);
+        let p = primary.clamp(0.0, 1.0);
+        if (state.params.vol_downbeat - d).abs() > f32::EPSILON
+            || (state.params.vol_primary - p).abs() > f32::EPSILON
+        {
+            state.params.vol_downbeat = d;
+            state.params.vol_primary = p;
             state.dirty = true;
         }
     }
@@ -236,6 +254,10 @@ impl Iterator for MetronomeSource {
                 SoundType::Downbeat => 1500.0,
                 SoundType::PrimaryBeat => 800.0,
             };
+            let gain = match sound_type {
+                SoundType::Downbeat => self.local_params.vol_downbeat,
+                SoundType::PrimaryBeat => self.local_params.vol_primary,
+            };
             let decay = 0.05;
             let dt = 1.0 / (self.sample_rate as f32);
             let new_phase = phase + dt;
@@ -247,7 +269,7 @@ impl Iterator for MetronomeSource {
                 self.current_beep = Some((new_phase, sound_type));
                 let val = (new_phase * freq * 2.0 * std::f32::consts::PI).sin();
                 let amp = 1.0 - (new_phase / decay);
-                Some(val * amp * 0.5)
+                Some(val * amp * 0.5 * gain)
             };
         }
 
