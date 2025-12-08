@@ -30,12 +30,14 @@ struct PlaybackParams {
     // Per-sound-type volumes in range [0.0, 1.0]
     vol_downbeat: f32,
     vol_primary: f32,
+    vol_accent: f32,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum SoundType {
     Downbeat,
     PrimaryBeat,
+    AccentedBeat
 }
 
 impl Audio {
@@ -56,6 +58,7 @@ impl Audio {
             reset_trigger: 0,
             vol_downbeat: 1.0,
             vol_primary: 1.0,
+            vol_accent: 1.0,
         };
 
         let shared_state = Arc::new(Mutex::new(SharedState {
@@ -99,7 +102,7 @@ impl Audio {
             if beat.accented
                 && let Some(&t) = onsets.get(i)
             {
-                schedule.insert(t, SoundType::Downbeat);
+                schedule.insert(t, SoundType::AccentedBeat);
             }
         }
 
@@ -117,15 +120,18 @@ impl Audio {
         }
     }
 
-    pub fn set_volumes(&mut self, downbeat: f32, primary: f32) {
+    pub fn set_volumes(&mut self, downbeat: f32, primary: f32, accent: f32) {
         let mut state = self.shared_state.lock().unwrap();
         let d = downbeat.clamp(0.0, 1.0);
         let p = primary.clamp(0.0, 1.0);
+        let a = accent.clamp(0.0, 1.0);
         if (state.params.vol_downbeat - d).abs() > f32::EPSILON
             || (state.params.vol_primary - p).abs() > f32::EPSILON
+            || (state.params.vol_accent - a).abs() > f32::EPSILON
         {
             state.params.vol_downbeat = d;
             state.params.vol_primary = p;
+            state.params.vol_accent = a;
             state.dirty = true;
         }
     }
@@ -253,10 +259,12 @@ impl Iterator for MetronomeSource {
             let freq = match sound_type {
                 SoundType::Downbeat => 1500.0,
                 SoundType::PrimaryBeat => 800.0,
+                SoundType::AccentedBeat => 1000.0,
             };
             let gain = match sound_type {
                 SoundType::Downbeat => self.local_params.vol_downbeat,
                 SoundType::PrimaryBeat => self.local_params.vol_primary,
+                SoundType::AccentedBeat => self.local_params.vol_accent,
             };
             let decay = 0.05;
             let dt = 1.0 / (self.sample_rate as f32);

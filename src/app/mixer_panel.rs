@@ -18,6 +18,11 @@ impl Grooph {
                     .handle_shape(HandleShape::Rect { aspect_ratio: 1.5 })
                     .custom_formatter(formatter)
                     .text("Primary Beat"));
+                ui.add(egui::Slider::new(&mut self.mixer_vol_accent, 0.0..=1.0)
+                    .orientation(SliderOrientation::Vertical)
+                    .handle_shape(HandleShape::Rect { aspect_ratio: 1.5 })
+                    .custom_formatter(formatter)
+                    .text("Accented Beat"));
             });
         });
     }

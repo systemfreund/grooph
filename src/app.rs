@@ -53,6 +53,7 @@ pub struct Grooph {
     // Mixer volumes [0.0, 1.0]
     mixer_vol_downbeat: f32,
     mixer_vol_primary: f32,
+    mixer_vol_accent: f32,
     // Playback smoothing state
     playback_smooth_tick: f64,
     playback_last_update: Option<f64>,
@@ -94,7 +95,7 @@ impl App for Grooph {
         self.handle_keyboard_input(ctx);
 
         if let Some(audio) = &mut self.audio {
-            audio.set_volumes(self.mixer_vol_downbeat, self.mixer_vol_primary);
+            audio.set_volumes(self.mixer_vol_downbeat, self.mixer_vol_primary, self.mixer_vol_accent);
             audio.update(self.player_state == PlayerState::Playing, self.bpm, &self.measure);
         }
     }
@@ -224,6 +225,7 @@ impl Grooph {
             audio: None,
             mixer_vol_downbeat: 1.0,
             mixer_vol_primary: 1.0,
+            mixer_vol_accent: 1.0,
             playback_smooth_tick: 0.0,
             playback_last_update: None,
             playback_total_ticks: 0,
