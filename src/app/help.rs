@@ -5,7 +5,7 @@ use eframe::egui;
 use eframe::egui::{Label, RichText};
 
 impl Grooph {
-    pub(super) fn help(&mut self, ctx: &egui::Context) {
+    pub(super) fn help_panel(&mut self, ctx: &egui::Context) {
         egui::TopBottomPanel::top("info").show_animated(ctx, self.show_info, |ui| {
             ui.collapsing("Keybindings", |ui| {
                 let text = RichText::new(

@@ -1,10 +1,10 @@
 use crate::measure::Measure;
 use crate::measure::grid::DEFAULT_GRID;
+use log::{info, log};
 use rodio::Source;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use log::{info, log};
 
 pub struct Audio {
     stream: rodio::OutputStream,
@@ -73,14 +73,10 @@ impl Audio {
             self.sink.play();
         } else if !is_running && !self.sink.is_paused() {
             self.sink.pause();
-            // When stopping/pausing, we might want to reset cursor if it's a Stop.
-            // But here we only have is_running.
-            // We'll leave reset logic for now or add explicit "reset" method if needed.
-            // For now, pause just pauses.
         }
 
         let mut state = self.shared_state.lock().unwrap();
-        // Check if anything changed to avoid unnecessary dirtying (optimization)
+        // Check if anything changed to avoid unnecessary dirtying
         let ts = measure.time_signature();
         let ticks_per_beat = DEFAULT_GRID.ticks_per_beat(&ts);
         let ticks_per_measure = DEFAULT_GRID.ticks_per_measure(&ts);
@@ -175,8 +171,7 @@ impl Iterator for MetronomeSource {
         self.samples_processed += 1;
 
         // Periodic check for updates (e.g. every 256 samples ~5ms)
-        let check_interval = 256;
-        let should_check = (self.samples_processed % check_interval) == 0;
+        let should_check = self.samples_processed.is_multiple_of(256);
 
         if should_check
             && let Ok(mut state) = self.shared.try_lock()
@@ -225,11 +220,11 @@ impl Iterator for MetronomeSource {
         }
 
         // Try to publish playback cursor to shared state (periodically, to avoid contention)
-        if (self.samples_processed % 1024) == 0 {
-             if let Ok(mut state) = self.shared.try_lock() {
-                state.playback_tick = self.cursor;
-                state.total_ticks = self.local_params.ticks_per_measure;
-            }
+        if self.samples_processed.is_multiple_of(1024)
+            && let Ok(mut state) = self.shared.try_lock()
+        {
+            state.playback_tick = self.cursor;
+            state.total_ticks = self.local_params.ticks_per_measure;
         }
 
         if let Some(sound) = triggered_sound {

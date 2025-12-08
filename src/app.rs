@@ -1,39 +1,34 @@
 mod help;
+mod keyboard_input;
+mod main_menu;
+mod measure_panel;
 mod style;
+mod time_signature_dialog;
+mod tool_palette;
+mod settings_panel;
 
-use crate::measure::duration::{Duration, NoteValue, TupletSpec, q};
-use crate::measure::grid::DEFAULT_GRID;
+use crate::measure::duration::{q, Duration, NoteValue, TupletSpec};
 use crate::measure::{BeatIdx, Measure, TimeSignature};
 
-use crate::layout::pixel_layout::{LayoutOpts, build_measure_layout, build_time_sig_layout};
-use crate::measure::BeatKind::Note;
 use crate::measure::duration::NoteValue::*;
-use crate::measure::duration::human_readable;
 use crate::measure::editing::Modification;
 use crate::measure::{Beat, BeatKind};
-use crate::render::glyphs;
-use crate::render::measure::{compute_em, draw_measure, draw_notes};
-use crate::tools::{MetaOp, Tool, ToolKind};
-use crate::{BeatTemplate, ToolGroup, all_tools};
-use BeatKind::Rest;
-use eframe::egui::scroll_area::{ScrollBarVisibility, ScrollSource};
+use crate::tools::ToolKind;
+use crate::{all_tools, BeatTemplate};
 use eframe::egui::{
-    Align, Align2, Atom, Button, Context, Direction, Id, Image, Key, Label, Layout, Margin,
-    Response, RichText, TextStyle, Ui, Vec2, Widget, global_theme_preference_buttons,
-    include_image,
+    Context
+    , TextStyle, Widget
+    ,
 };
 use eframe::epaint::text::{FontInsert, InsertFontFamily};
 use eframe::epaint::{FontFamily, FontId};
-use eframe::{App, CreationContext, egui};
-use egui::containers::Frame;
-use log::info;
+use eframe::{egui, App, CreationContext};
 use std::collections::HashMap;
 
 pub struct Grooph {
     music_font_id: FontId,
     measure: Measure,
     cursor_idx: BeatIdx,
-    // Global edit mode toggle: when false, editing is disabled and UI edit affordances are hidden
     edit_mode_enabled: bool,
     show_info: bool,
     show_settings: bool,
@@ -80,383 +75,21 @@ fn add_font(ctx: &Context) {
 impl App for Grooph {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         self.apply_style(ctx);
+        self.main_menu(ctx);
+        self.help_panel(ctx);
+        self.settings_panel(ctx);
+        self.tool_palette_panel(ctx);
+        self.measure_panel(ctx);
 
-        egui::TopBottomPanel::top("menu").show_separator_line(false).show(ctx, |ui| {
-            let layout =
-                Layout::from_main_dir_and_cross_align(Direction::LeftToRight, Align::Center)
-                    .with_cross_justify(true);
+        if self.show_ts_dialog {
+            self.time_signature_dialog(ctx);
+        }
 
-            ui.with_layout(layout, |ui| {
-                // Playback controls
-                let button_label =
-                    if self.player_state == PlayerState::Playing { "⏸" } else { "⏵" };
-                if Button::new(button_label)
-                    .selected(self.player_state == PlayerState::Playing)
-                    .ui(ui)
-                    .clicked()
-                {
-                    let old_running = self.player_state.clone();
-                    self.player_state = if old_running == PlayerState::Playing {
-                        PlayerState::Paused
-                    } else {
-                        PlayerState::Playing
-                    };
-                    if self.player_state == PlayerState::Playing && self.audio.is_none() {
-                        self.audio = crate::audio::Audio::new(self.bpm);
-                    }
-                }
-                if ui.button("⏹").clicked() {
-                    self.player_state = PlayerState::Stopped;
-                    if let Some(audio) = &mut self.audio {
-                        audio.stop();
-                    }
-                }
-                let bpm_editor =
-                    egui::DragValue::new(&mut self.bpm).prefix("BPM: ").range(20..=300).speed(0.03);
-                let bpm_editor_resp = bpm_editor.ui(ui);
-                if bpm_editor_resp.clicked() {
-                    ui.memory_mut(|mem| mem.surrender_focus(bpm_editor_resp.id))
-                }
-
-                ui.separator();
-                ui.selectable_label(
-                    false,
-                    Image::new(include_image!("../assets/metronome_dark.svg"))
-                        .tint(ui.style().visuals.text_color()),
-                )
-                .clicked();
-                ui.toggle_value(&mut self.edit_mode_enabled, "🖊");
-                ui.toggle_value(&mut self.show_info, "?");
-                ui.toggle_value(&mut self.show_settings, "⚙");
-            });
-        });
+        self.handle_keyboard_input(ctx);
 
         if let Some(audio) = &mut self.audio {
             audio.update(self.player_state == PlayerState::Playing, self.bpm, &self.measure);
         }
-
-        self.help(ctx);
-
-        egui::TopBottomPanel::top("settings").show_animated(ctx, self.show_settings, |ui| {
-            global_theme_preference_buttons(ui);
-        });
-
-        egui::TopBottomPanel::bottom("tool_palette")
-            .show_separator_line(false)
-            .resizable(false)
-            .show_animated(ctx, self.edit_mode_enabled, |ui| {
-                let tools = all_tools();
-                // Ensure Edit tools (Undo/Redo) are shown first in the palette
-                let groups = [
-                    ToolGroup::Edit,
-                    ToolGroup::Meta,
-                    ToolGroup::Notes,
-                    ToolGroup::Tuplets,
-                    ToolGroup::Rests,
-                ];
-
-                egui::ScrollArea::horizontal()
-                    .scroll_source(ScrollSource::ALL)
-                    .scroll_bar_visibility(ScrollBarVisibility::AlwaysHidden)
-                    .show(ui, |ui| {
-                        let layout = Layout::from_main_dir_and_cross_align(
-                            Direction::LeftToRight,
-                            Align::Center,
-                        )
-                        .with_cross_justify(true);
-
-                        ui.with_layout(layout, |ui| {
-                            self.tool_palette(tools, groups.as_slice(), ui);
-                        })
-                    });
-            });
-
-        egui::CentralPanel::default().show(ctx, |ui| {
-            Frame::canvas(ui.style())
-                .fill(egui::Color32::TRANSPARENT)
-                .stroke(egui::Stroke::NONE)
-                .show(ui, |ui| {
-                    let size = ui.available_size();
-                    let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::click_and_drag());
-
-                    // Update playback smoothing
-                    let mut playback_tick_to_draw = None;
-                    match self.player_state {
-                        PlayerState::Playing => {
-                            let ts = self.measure.time_signature();
-                            let ticks_per_measure = DEFAULT_GRID.ticks_per_measure(&ts) as f64;
-                            let ticks_per_beat = DEFAULT_GRID.ticks_per_beat(&ts) as f64;
-                            let ticks_per_sec = (self.bpm as f64 / 60.0) * ticks_per_beat;
-
-                            let now = ui.input(|i| i.time);
-                            let last = self.playback_last_update.unwrap_or(now);
-                            let dt = now - last;
-                            self.playback_last_update = Some(now);
-
-                            // Advance predictor
-                            let mut next_tick = self.playback_smooth_tick + ticks_per_sec * dt;
-
-                            // Sync with audio if available
-                            if let Some(audio) = &self.audio
-                                && let Some((audio_tick, audio_total)) = audio.playback_position()
-                            {
-                                let total = audio_total as f64;
-                                if total > 0.0 {
-                                    let mut diff = audio_tick - next_tick;
-                                    // Handle wrap-around (shortest path)
-                                    if diff > total * 0.5 {
-                                        diff -= total;
-                                    } else if diff < -total * 0.5 {
-                                        diff += total;
-                                    }
-
-                                    // Snap if far off (e.g. startup/seek), else smooth nudge
-                                    if diff.abs() > ticks_per_beat * 0.5 {
-                                        next_tick = audio_tick;
-                                    } else {
-                                        next_tick += diff * 0.1;
-                                    }
-                                }
-                            }
-
-                            // Wrap
-                            if ticks_per_measure > 0.0 {
-                                next_tick = next_tick.rem_euclid(ticks_per_measure);
-                            }
-                            self.playback_smooth_tick = next_tick;
-                            playback_tick_to_draw = Some(self.playback_smooth_tick);
-
-                            // Keep animation loop running
-                            ui.ctx().request_repaint_after(std::time::Duration::from_millis(16));
-                        }
-                        PlayerState::Paused => {
-                            // Paused: keep the last known playback position visible.
-                            // Do not advance the predictor; just stop the clock and draw the last value.
-                            self.playback_last_update = None;
-                            playback_tick_to_draw = Some(self.playback_smooth_tick);
-                        }
-                        PlayerState::Stopped => {
-                            self.playback_last_update = None;
-                            playback_tick_to_draw = None;
-                        }
-                    }
-
-                    let layout = draw_measure(
-                        ui,
-                        &self.music_font_id,
-                        &self.measure,
-                        rect,
-                        if self.edit_mode_enabled { Some(self.cursor_idx) } else { None },
-                        playback_tick_to_draw,
-                    );
-
-                    // Block canvas interactions while the time signature dialog is open
-                    if !self.show_ts_dialog
-                        && (resp.clicked() || resp.dragged())
-                        && let Some(pos) = resp.interact_pointer_pos()
-                    {
-                        // Falls keine Beats vorhanden sind, nichts tun
-                        if !layout.notes.is_empty() {
-                            // Außerhalb des Inhalts: zum nächstliegenden Rand clampen
-                            let target_x = pos.x;
-                            let idx = if target_x <= rect.left() {
-                                0
-                            } else if target_x >= rect.right() {
-                                layout.notes.len() - 1
-                            } else {
-                                // Innerhalb: Index des nächstgelegenen x-Centers suchen
-                                let mut best_i = 0usize;
-                                let mut best_d = f32::MAX;
-                                for (i, nl) in layout.notes.iter().enumerate() {
-                                    let d = (nl.center.x - target_x).abs();
-                                    if d < best_d {
-                                        best_d = d;
-                                        best_i = i;
-                                    }
-                                }
-                                best_i
-                            };
-                            self.cursor_idx = idx;
-                        }
-                    }
-                });
-        });
-
-        if self.show_ts_dialog {
-            egui::Window::new("Change time signature")
-                .collapsible(false)
-                .resizable(false)
-                .anchor(Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
-                .show(ctx, |ui| {
-                    let layout = Layout::top_down(Align::Center).with_cross_align(Align::Center);
-                    ui.with_layout(layout, |ui| {
-                        let l2 = Layout::left_to_right(Align::Min);
-                        ui.with_layout(l2, |ui| {
-                            egui::ComboBox::from_id_salt("beats")
-                                .selected_text(format!("{}", self.ts_beats))
-                                .show_ui(ui, |ui| {
-                                    for v in 1u8..=16u8 {
-                                        ui.selectable_value(
-                                            &mut self.ts_beats,
-                                            v,
-                                            format!("{}", v),
-                                        );
-                                    }
-                                });
-                            ui.label(" / ");
-                            egui::ComboBox::from_id_salt("beat_unit")
-                                .selected_text(format!("{}", self.ts_unit))
-                                .show_ui(ui, |ui| {
-                                    for v in [4u8, 8, 16] {
-                                        ui.selectable_value(&mut self.ts_unit, v, format!("{}", v));
-                                    }
-                                });
-                        });
-
-                        ui.add_space(8.0);
-                        ui.separator();
-                        ui.add_space(8.0);
-
-                        ui.horizontal(|ui| {
-                            if ui.button("Cancel").clicked() {
-                                self.show_ts_dialog = false;
-                            }
-                            if ui.button("Done").clicked() {
-                                // Prevent no-op undo entries
-                                let current = self.measure.time_signature();
-                                let new_ts =
-                                    TimeSignature { beats: self.ts_beats, beat_unit: self.ts_unit };
-                                if new_ts == current {
-                                    self.show_ts_dialog = false;
-                                    return;
-                                }
-
-                                // Snapshot before change
-                                self.push_undo();
-                                let res = self.measure.set_time_signature(new_ts);
-                                match res {
-                                    Ok(_) => {
-                                        self.clear_redo();
-                                        // Clamp cursor within bounds
-                                        let new_len = self.measure.beats().len();
-                                        if new_len > 0 {
-                                            self.cursor_idx = self.cursor_idx.min(new_len - 1);
-                                        } else {
-                                            self.cursor_idx = 0;
-                                        }
-                                        self.show_ts_dialog = false;
-                                    }
-                                    Err(_) => {
-                                        // Roll back snapshot if failed
-                                        let _ = self.undo_stack.pop();
-                                    }
-                                }
-                            }
-                        });
-                    });
-                });
-        }
-
-        ctx.input(|i| {
-            // While the time signature dialog is open, ignore global keyboard shortcuts
-            if self.show_ts_dialog {
-                return;
-            }
-            // Toggle edit mode with Escape
-            if i.key_pressed(Key::Escape) {
-                self.edit_mode_enabled = !self.edit_mode_enabled;
-            }
-            // Toggle Play/Pause with Enter (Return)
-            if i.key_pressed(Key::Enter) {
-                let was_playing = self.player_state == PlayerState::Playing;
-                self.player_state =
-                    if was_playing { PlayerState::Paused } else { PlayerState::Playing };
-                if self.player_state == PlayerState::Playing && self.audio.is_none() {
-                    self.audio = crate::audio::Audio::new(self.bpm);
-                }
-            }
-            // Undo / Redo shortcuts: Ctrl/Cmd+Z (undo), Ctrl/Cmd+Shift+Z or Ctrl/Cmd+Y (redo)
-            let mut consumed_undo_redo = false;
-            let undo_combo = i.key_pressed(Key::Z) && (i.modifiers.command || i.modifiers.ctrl);
-            let redo_combo_z = i.key_pressed(Key::Z)
-                && (i.modifiers.command || i.modifiers.ctrl)
-                && i.modifiers.shift;
-            let redo_combo_y = i.key_pressed(Key::Y) && (i.modifiers.command || i.modifiers.ctrl);
-            if undo_combo && !i.modifiers.shift {
-                self.undo();
-                consumed_undo_redo = true;
-            } else if redo_combo_z || redo_combo_y {
-                self.redo();
-                consumed_undo_redo = true;
-            }
-
-            let beats_len = self.measure.beats().len();
-            let total_len = beats_len;
-            if total_len > 0 && !consumed_undo_redo {
-                // Navigation over committed beats only
-                let mut pos = self.cursor_idx;
-                if i.key_pressed(Key::ArrowLeft) {
-                    pos = pos.saturating_sub(1);
-                }
-                if i.key_pressed(Key::ArrowRight) {
-                    let max_idx = total_len.saturating_sub(1);
-                    if pos < max_idx {
-                        pos += 1;
-                    }
-                }
-                if i.key_pressed(Key::Home) {
-                    pos = 0;
-                }
-                if i.key_pressed(Key::End) {
-                    pos = total_len.saturating_sub(1);
-                }
-                self.cursor_idx = pos;
-
-                // Edits apply only when the cursor is on a committed beat
-                let idx = self.cursor_idx.min(beats_len.saturating_sub(1));
-                if self.edit_mode_enabled {
-                    if i.key_pressed(Key::Delete) {
-                        // Remove beat at the cursor
-                        self.push_undo();
-                        self.measure.remove(idx);
-                        // Move cursor right
-                        let new_pos = (self.measure.beats().len() - 1).min(self.cursor_idx + 1);
-                        self.cursor_idx = new_pos;
-                        self.clear_redo();
-                    }
-                    if i.key_pressed(Key::Backspace) {
-                        // Remove beat at the cursor
-                        self.push_undo();
-                        self.measure.remove(idx);
-                        // Move cursor left
-                        let new_len = self.measure.beats().len();
-                        let new_pos = self.cursor_idx.saturating_sub(1).min(new_len - 1);
-                        self.cursor_idx = new_pos;
-                        self.clear_redo();
-                    }
-                    // Keyboard input routed through tool shortcuts
-                    for t in all_tools().iter().filter(|t| t.shortcut.is_some()) {
-                        let sc = t.shortcut.unwrap();
-                        if let Some(key) = Self::char_to_key(sc.key) {
-                            // Match exact shift requirement
-                            if i.key_pressed(key) && i.modifiers.shift == sc.with_shift {
-                                self.apply_tool(t);
-                            }
-                        }
-                    }
-                    if i.key_pressed(Key::T) {
-                        // Snapshot before attempting tuplet cycle via hotkey
-                        self.push_undo();
-                        let res = self.set_tuplet(idx, None);
-                        if res.is_some() {
-                            self.clear_redo();
-                        } else {
-                            let _ = self.undo_stack.pop();
-                        }
-                    }
-                }
-            }
-        });
     }
 }
 
@@ -480,27 +113,6 @@ impl Grooph {
             self.cursor_idx = c;
             self.undo_stack.push(current);
         }
-    }
-
-    fn build_button_measure(template: BeatTemplate) -> Measure {
-        let beat_count =
-            if let Duration::Tuplet(TupletSpec { m, .. }) = template.duration { m } else { 1 };
-
-        let mut measure = Measure::new_init(
-            TimeSignature {
-                beats: beat_count,
-                beat_unit: template.duration.base_note().denominator(),
-            },
-            template.kind,
-        );
-
-        if let Duration::Tuplet(TupletSpec { n, .. }) = template.duration {
-            for i in 0..n {
-                measure.set_beat(i as BeatIdx, Beat::note(template.duration)).unwrap();
-            }
-        }
-
-        measure
     }
 
     fn set_beat(
@@ -542,250 +154,33 @@ impl Grooph {
         result
     }
 
-    fn apply_tool(&mut self, tool: &Tool) {
-        // If edit mode is disabled, ignore all tool interactions
-        if !self.edit_mode_enabled {
-            return;
-        }
-        // Block palette/tool actions while a modal dialog is open
-        if self.show_ts_dialog {
-            return;
-        }
-        // Take a snapshot for tools that change state; Meta tools like dialogs drop it.
-        self.push_undo();
-        let result = match tool.kind {
-            ToolKind::InsertBeat(template) => {
-                let beats_len = self.measure.beats().len();
-                if beats_len == 0 {
-                    // No state change, drop the snapshot and return
-                    let _ = self.undo_stack.pop();
-                    return;
-                }
-                let idx = self.cursor_idx.min(beats_len - 1);
+    fn build_button_measure(template: BeatTemplate) -> Measure {
+        let beat_count =
+            if let Duration::Tuplet(TupletSpec { m, .. }) = template.duration { m } else { 1 };
 
-                match template.duration {
-                    Duration::Simple(_) => {
-                        self.set_beat(idx, template.duration.base_note(), Some(template.kind))
-                    }
-                    Duration::Tuplet(spec) => self.set_tuplet(idx, Some(spec)),
-                    _ => None,
-                }
-            }
-            ToolKind::Meta(MetaOp::ChangeTimeSignature) => {
-                // Opening a dialog is not a state mutation: drop snapshot, open dialog
-                let _ = self.undo_stack.pop();
-                let ts = self.measure.time_signature();
-                self.ts_beats = ts.beats;
-                self.ts_unit = ts.beat_unit;
-                self.show_ts_dialog = true;
-                return; // no further state change now
-            }
-            ToolKind::Meta(MetaOp::ResetMeasure) => {
-                // Keep the snapshot we took before calling apply_tool
-                let ts = self.measure.time_signature();
-                self.measure = Measure::new_init(ts, Rest);
-                self.cursor_idx = 0;
-                Some(Modification::ChangeTimeSignature(ts, ts))
-            }
-            ToolKind::Edit(crate::tools::EditOp::Undo) => {
-                // Undo should not create a new snapshot; drop the one we took and perform undo
-                let _ = self.undo_stack.pop();
-                self.undo();
-                return;
-            }
-            ToolKind::Edit(crate::tools::EditOp::Redo) => {
-                // Redo should not create a new snapshot; drop the one we took and perform redo
-                let _ = self.undo_stack.pop();
-                self.redo();
-                return;
-            }
-            ToolKind::Modify(modifier) => {
-                let beats_len = self.measure.beats().len();
-                if beats_len == 0 {
-                    let _ = self.undo_stack.pop();
-                    return;
-                }
-                let idx = self.cursor_idx.min(beats_len - 1);
-                match modifier {
-                    crate::tools::Modifier::ToggleDotted { dots: _ } => {
-                        self.measure.toggle_dotted(idx)
-                    }
-                    crate::tools::Modifier::ToggleAccent => self.measure.toggle_accent(idx),
-                    crate::tools::Modifier::ToggleRestNote => self.measure.toggle_beat_kind(idx),
-                }
-            }
-        };
+        let mut measure = Measure::new_init(
+            TimeSignature {
+                beats: beat_count,
+                beat_unit: template.duration.base_note().denominator(),
+            },
+            template.kind,
+        );
 
-        // Clear redo for real changes; otherwise drop the snapshot we took before
-        if result.is_some() {
-            self.clear_redo();
-        } else {
-            let _ = self.undo_stack.pop();
-        }
-
-        info!("edited: {:?}", result);
-    }
-
-    fn char_to_key(c: char) -> Option<Key> {
-        use Key::*;
-        Some(match c {
-            '1' => Num1,
-            '2' => Num2,
-            '3' => Num3,
-            '4' => Num4,
-            '5' => Num5,
-            '6' => Num6,
-            '7' => Num7,
-            '8' => Num8,
-            '9' => Num9,
-            '0' => Num0,
-            '.' => Period,
-            ' ' => Space,
-            'a' | 'A' => A,
-            't' | 'T' => T,
-            _ => return None,
-        })
-    }
-
-    fn note_button(&self, ui: &mut Ui, template: BeatTemplate, id: &str) -> Response {
-        let tile = 80.0;
-        let symbol_id = Id::new(id);
-        let symbol = Atom::custom(symbol_id, Vec2::splat(tile));
-        let button = Button::new(symbol).corner_radius(5).atom_ui(ui);
-
-        if let Some(rect) = button.rect(symbol_id) {
-            // Use a prebuilt measure for this button
-            let measure = self.button_measures.get(id).unwrap();
-
-            let cap_factor = match template {
-                BeatTemplate { kind: Note, duration: Duration::Simple(..) } => 0.6,
-                BeatTemplate {
-                    kind: Note,
-                    duration: Duration::Tuplet(TupletSpec { n: 9, .. }),
-                } => 0.4,
-                BeatTemplate { kind: Rest, .. } => 0.6,
-                _ => 0.4,
-            };
-
-            let em = compute_em(&rect, cap_factor, ui);
-
-            let y_offset = match template {
-                BeatTemplate { kind: Note, duration: Duration::Simple(..) } => 20.0,
-                BeatTemplate { kind: Note, duration: Duration::Tuplet(..) } => 18.0,
-                _ => 2.0,
-            };
-
-            let opts = LayoutOpts {
-                rect,
-                font_id: FontId::new(em, self.music_font_id.family.clone()),
-                em,
-                layout_clef: false,
-                layout_time_signature: false,
-                y_offset,
-                stem_length_factor: 0.8,
-                stem_thickness_factor: 0.03,
-            };
-            let measure_layout = build_measure_layout(measure, &opts);
-            let painter = &ui.painter_at(rect);
-            draw_notes(painter, &measure_layout, ui.style().visuals.text_color(), &opts);
-        }
-
-        button.response
-    }
-
-    fn time_signature_button(&self, ui: &mut Ui, id: &str) -> Response {
-        let tile = 80.0;
-        let symbol_id = Id::new(id);
-        let symbol = Atom::custom(symbol_id, Vec2::splat(tile));
-        let button = Button::new(symbol).corner_radius(5).atom_ui(ui);
-
-        if let Some(rect) = button.rect(symbol_id) {
-            // Render a stacked 4/4 symbol using Bravura, similar to measure rendering
-            let painter = &ui.painter_at(rect);
-            let em = compute_em(&rect, 0.5, ui);
-            let font_id = FontId::new(em, self.music_font_id.family.clone());
-
-            // Build a minimal layout area for the time signature only
-            let opts = LayoutOpts {
-                rect,
-                font_id: font_id.clone(),
-                em,
-                layout_clef: false,
-                layout_time_signature: true,
-                y_offset: 0.0,
-                stem_length_factor: 0.9,
-                stem_thickness_factor: 0.03,
-            };
-
-            // Use a temporary measure just for layout width & positions
-            let ts = self.measure.time_signature();
-            let layout = build_time_sig_layout(&ts, rect.center().x, &opts);
-            let top = glyphs::ts_glyphs(ts.beats);
-            let bot = glyphs::ts_glyphs(ts.beat_unit);
-            for (p, ch) in layout.beats.iter().zip(top.iter()) {
-                painter.text(
-                    *p,
-                    Align2::CENTER_CENTER,
-                    ch.to_string(),
-                    font_id.clone(),
-                    ui.style().visuals.text_color(),
-                );
-            }
-            for (p, ch) in layout.beat_unit.iter().zip(bot.iter()) {
-                painter.text(
-                    *p,
-                    Align2::CENTER_CENTER,
-                    ch.to_string(),
-                    font_id.clone(),
-                    ui.style().visuals.text_color(),
-                );
+        if let Duration::Tuplet(TupletSpec { n, .. }) = template.duration {
+            for i in 0..n {
+                measure.set_beat(i as BeatIdx, Beat::note(template.duration)).unwrap();
             }
         }
 
-        button.response
-    }
-
-    fn tool_palette(&mut self, tools: &[Tool], groups: &[ToolGroup], ui: &mut Ui) {
-        for g in groups {
-            let group_tools: Vec<_> = tools.iter().filter(|t| &t.group == g).collect();
-            if group_tools.is_empty() {
-                continue;
-            }
-
-            for t in group_tools {
-                match t.kind {
-                    ToolKind::InsertBeat(template) => {
-                        let button = self.note_button(ui, template, t.id);
-                        if button.clicked() {
-                            self.apply_tool(t);
-                        }
-                    }
-                    ToolKind::Meta(MetaOp::ChangeTimeSignature) => {
-                        let button = self.time_signature_button(ui, t.id);
-                        if button.clicked() {
-                            self.apply_tool(t);
-                        }
-                    }
-                    _ => {
-                        // Generic button for non-insert tools (e.g., Edit: Undo/Redo)
-                        let button = Button::new(RichText::new(t.label).size(24.0))
-                            .corner_radius(5)
-                            .min_size(Vec2::splat(80.0))
-                            .ui(ui);
-                        if button.clicked() {
-                            self.apply_tool(t);
-                        }
-                    }
-                }
-            }
-        }
+        measure
     }
 
     pub fn new(cc: &CreationContext) -> Self {
         add_font(&cc.egui_ctx);
         egui_extras::install_image_loaders(&cc.egui_ctx);
         let ff = FontFamily::Name("music".into());
-        // Initialize per-theme baselines on first update; font bump applied idempotently there.
+
+        // Default measure
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
         m.set_beat(0, Beat::note(q())).unwrap();
         m.set_beat(1, Beat::note(q())).unwrap();
