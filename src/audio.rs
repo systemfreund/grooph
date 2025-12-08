@@ -187,7 +187,8 @@ struct MetronomeSource {
     local_params: PlaybackParams,
     cursor: f64,
     sample_rate: u32,
-    current_beep: Option<(f32, SoundType)>,
+    // Polyphonic: multiple short beeps may overlap
+    active_beeps: Vec<(f32, SoundType)>,
     samples_processed: usize,
 }
 
@@ -203,7 +204,7 @@ impl MetronomeSource {
             local_params,
             cursor: 0.0,
             sample_rate: 44100,
-            current_beep: None,
+            active_beeps: Vec::with_capacity(4),
             samples_processed: 0,
         }
     }
@@ -244,23 +245,52 @@ impl Iterator for MetronomeSource {
         self.cursor += ticks_per_sample;
         let new_cursor = self.cursor;
 
-        let mut triggered_sound = None;
+        // Collect all triggers crossed by this sample advance
+        let mut triggered_sounds: Vec<SoundType> = Vec::with_capacity(4);
 
         if new_cursor >= total_ticks {
-            self.cursor -= total_ticks;
-            // Wrapped
-            if self.local_params.schedule.contains_key(&0) {
-                triggered_sound = Some(self.local_params.schedule[&0]);
-            }
-        } else {
-            // Check schedule
-            // We use BTreeMap range.
+            // Range before wrap: (old_cursor, total_ticks]
+            let start_tick = old_cursor.floor() as u32 + 1;
+            let end_tick = total_ticks as u32; // inclusive
             for (&_tick, &sound) in self
                 .local_params
                 .schedule
-                .range((old_cursor.ceil() as u32)..(new_cursor.ceil() as u32))
+                .range(start_tick..=end_tick)
             {
-                triggered_sound = Some(sound);
+                triggered_sounds.push(sound);
+            }
+
+            // Wrap
+            self.cursor -= total_ticks;
+
+            // Include tick 0 if present
+            if let Some(&s) = self.local_params.schedule.get(&0) {
+                triggered_sounds.push(s);
+            }
+
+            // And early ticks after wrap: [0, self.cursor]
+            let post_wrap_end = self.cursor.floor() as u32;
+            if post_wrap_end >= 1 {
+                for (&_tick, &sound) in self
+                    .local_params
+                    .schedule
+                    .range(1..=post_wrap_end)
+                {
+                    triggered_sounds.push(sound);
+                }
+            }
+        } else {
+            // No wrap: (old_cursor, new_cursor]
+            let start_tick = old_cursor.floor() as u32 + 1;
+            let end_tick = new_cursor.floor() as u32; // inclusive
+            if start_tick <= end_tick {
+                for (&_tick, &sound) in self
+                    .local_params
+                    .schedule
+                    .range(start_tick..=end_tick)
+                {
+                    triggered_sounds.push(sound);
+                }
             }
         }
 
@@ -272,11 +302,40 @@ impl Iterator for MetronomeSource {
             state.total_ticks = self.local_params.ticks_per_measure;
         }
 
-        if let Some(sound) = triggered_sound {
-            self.current_beep = Some((0.0, sound));
+        // Enqueue all triggered sounds as new voices (phase = 0)
+        const MAX_VOICES: usize = 8;
+        if !triggered_sounds.is_empty() {
+            for sound in triggered_sounds {
+                if self.active_beeps.len() >= MAX_VOICES {
+                    // drop the oldest to keep CPU bounded
+                    self.active_beeps.remove(0);
+                }
+                self.active_beeps.push((0.0, sound));
+            }
         }
 
-        if let Some((phase, sound_type)) = self.current_beep {
+        // Synthesize a sample by mixing all active voices with envelope
+        let dt = 1.0 / (self.sample_rate as f32);
+        const DECAY: f32 = 0.05; // ~50 ms
+        const ATTACK: f32 = 0.001; // ~1 ms
+
+        if self.active_beeps.is_empty() {
+            return Some(0.0);
+        }
+
+        // Advance phases and compute sum
+        let mut mixed: f32 = 0.0;
+        let mut i = 0;
+        while i < self.active_beeps.len() {
+            let (ref mut phase, sound_type) = self.active_beeps[i];
+            *phase += dt;
+            let p = *phase;
+            if p > DECAY {
+                // Remove finished voice
+                self.active_beeps.remove(i);
+                continue;
+            }
+
             let freq = match sound_type {
                 SoundType::Downbeat => 1597.0,
                 SoundType::PrimaryBeat => 377.0,
@@ -289,22 +348,18 @@ impl Iterator for MetronomeSource {
                 SoundType::Beat => self.local_params.mixer.beat,
                 SoundType::AccentedBeat => self.local_params.mixer.accent,
             };
-            let decay = 0.05;
-            let dt = 1.0 / (self.sample_rate as f32);
-            let new_phase = phase + dt;
 
-            return if new_phase > decay {
-                self.current_beep = None;
-                Some(0.0)
-            } else {
-                self.current_beep = Some((new_phase, sound_type));
-                let val = (new_phase * freq * 2.0 * std::f32::consts::PI).sin();
-                let amp = 1.0 - (new_phase / decay);
-                Some(val * amp * 0.5 * gain)
-            };
+            let env_attack = (p / ATTACK).min(1.0);
+            let env_decay = 1.0 - (p / DECAY);
+            let env = env_attack * env_decay;
+            let val = (p * freq * 2.0 * std::f32::consts::PI).sin();
+            mixed += val * env * 0.6 * gain; // master gain 0.6 to leave headroom
+
+            i += 1;
         }
 
-        Some(0.0)
+        // Soft clip to avoid hard clipping when multiple voices overlap
+        Some(mixed.tanh())
     }
 }
 
