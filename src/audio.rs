@@ -216,6 +216,9 @@ impl Iterator for MetronomeSource {
     fn next(&mut self) -> Option<Self::Item> {
         self.samples_processed += 1;
 
+        // Voice cap used in multiple places
+        const MAX_VOICES: usize = 8;
+
         // Periodic check for updates (e.g. every 256 samples ~5ms)
         let should_check = self.samples_processed.is_multiple_of(256);
 
@@ -242,56 +245,44 @@ impl Iterator for MetronomeSource {
         let ticks_per_sample = (bpm / 60.0 * ticks_per_beat) / (self.sample_rate as f64);
 
         let old_cursor = self.cursor;
-        self.cursor += ticks_per_sample;
-        let new_cursor = self.cursor;
+        let mut new_cursor = old_cursor + ticks_per_sample;
 
-        // Collect all triggers crossed by this sample advance
+        // Collect all triggers crossed by this sample advance using [old, new) interval
         let mut triggered_sounds: Vec<SoundType> = Vec::with_capacity(4);
 
         if new_cursor >= total_ticks {
-            // Range before wrap: (old_cursor, total_ticks]
-            let start_tick = old_cursor.floor() as u32 + 1;
-            let end_tick = total_ticks as u32; // inclusive
-            for (&_tick, &sound) in self
-                .local_params
-                .schedule
-                .range(start_tick..=end_tick)
-            {
-                triggered_sounds.push(sound);
+            // 1. [old_cursor, total_ticks)
+            let mut k = old_cursor.ceil() as u32;
+            let limit1 = total_ticks;
+            while (k as f64) < limit1 {
+                if let Some(&sound) = self.local_params.schedule.get(&k) {
+                    triggered_sounds.push(sound);
+                }
+                k += 1;
             }
 
             // Wrap
-            self.cursor -= total_ticks;
+            new_cursor -= total_ticks;
+            self.cursor = new_cursor;
 
-            // Include tick 0 if present
-            if let Some(&s) = self.local_params.schedule.get(&0) {
-                triggered_sounds.push(s);
-            }
-
-            // And early ticks after wrap: [0, self.cursor]
-            let post_wrap_end = self.cursor.floor() as u32;
-            if post_wrap_end >= 1 {
-                for (&_tick, &sound) in self
-                    .local_params
-                    .schedule
-                    .range(1..=post_wrap_end)
-                {
+            // 2. [0.0, new_cursor)
+            let mut k2 = 0;
+            while (k2 as f64) < new_cursor {
+                if let Some(&sound) = self.local_params.schedule.get(&k2) {
                     triggered_sounds.push(sound);
                 }
+                k2 += 1;
             }
         } else {
-            // No wrap: (old_cursor, new_cursor]
-            let start_tick = old_cursor.floor() as u32 + 1;
-            let end_tick = new_cursor.floor() as u32; // inclusive
-            if start_tick <= end_tick {
-                for (&_tick, &sound) in self
-                    .local_params
-                    .schedule
-                    .range(start_tick..=end_tick)
-                {
+            // [old_cursor, new_cursor)
+            let mut k = old_cursor.ceil() as u32;
+            while (k as f64) < new_cursor {
+                if let Some(&sound) = self.local_params.schedule.get(&k) {
                     triggered_sounds.push(sound);
                 }
+                k += 1;
             }
+            self.cursor = new_cursor;
         }
 
         // Try to publish playback cursor to shared state (periodically, to avoid contention)
@@ -303,7 +294,6 @@ impl Iterator for MetronomeSource {
         }
 
         // Enqueue all triggered sounds as new voices (phase = 0)
-        const MAX_VOICES: usize = 8;
         if !triggered_sounds.is_empty() {
             for sound in triggered_sounds {
                 if self.active_beeps.len() >= MAX_VOICES {
