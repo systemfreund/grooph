@@ -1,10 +1,38 @@
-use crate::measure::Measure;
+use crate::measure::{BeatKind, Measure};
 use crate::measure::grid::DEFAULT_GRID;
 use log::{info, log};
 use rodio::Source;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct MixerVolumes {
+    pub downbeat: f32,
+    pub primary: f32,
+    pub accent: f32,
+    pub beat: f32,
+}
+
+impl Default for MixerVolumes {
+    fn default() -> Self { Self { downbeat: 1.0, primary: 0.0, accent: 1.0, beat: 1.0 } }
+}
+
+impl MixerVolumes {
+    pub fn new(downbeat: f32, primary: f32, accent: f32, beat: f32) -> Self {
+        let result = Self { downbeat, primary, accent, beat };
+        result.clamped();
+        result
+    }
+
+    pub fn clamped(mut self) -> Self {
+        self.downbeat = self.downbeat.clamp(0.0, 1.0);
+        self.primary = self.primary.clamp(0.0, 1.0);
+        self.accent = self.accent.clamp(0.0, 1.0);
+        self.beat = self.beat.clamp(0.0, 1.0);
+        self
+    }
+}
 
 pub struct Audio {
     stream: rodio::OutputStream,
@@ -27,17 +55,15 @@ struct PlaybackParams {
     ticks_per_measure: u32,
     schedule: BTreeMap<u32, SoundType>,
     reset_trigger: usize,
-    // Per-sound-type volumes in range [0.0, 1.0]
-    vol_downbeat: f32,
-    vol_primary: f32,
-    vol_accent: f32,
+    mixer: MixerVolumes,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum SoundType {
     Downbeat,
     PrimaryBeat,
-    AccentedBeat
+    AccentedBeat,
+    Beat
 }
 
 impl Audio {
@@ -56,9 +82,7 @@ impl Audio {
             ticks_per_measure: 0,
             schedule: BTreeMap::new(),
             reset_trigger: 0,
-            vol_downbeat: 1.0,
-            vol_primary: 1.0,
-            vol_accent: 1.0,
+            mixer: MixerVolumes::default(),
         };
 
         let shared_state = Arc::new(Mutex::new(SharedState {
@@ -99,10 +123,14 @@ impl Audio {
 
         let onsets = DEFAULT_GRID.compute_onset_ticks(measure.beats());
         for (i, beat) in measure.beats().iter().enumerate() {
-            if beat.accented
-                && let Some(&t) = onsets.get(i)
-            {
-                schedule.insert(t, SoundType::AccentedBeat);
+            if beat.kind == BeatKind::Note && let Some(&t) = onsets.get(i) {
+                let sound_type = if beat.accented {
+                    SoundType::AccentedBeat
+                } else {
+                    SoundType::Beat
+                };
+
+                schedule.insert(t, sound_type);
             }
         }
 
@@ -120,18 +148,11 @@ impl Audio {
         }
     }
 
-    pub fn set_volumes(&mut self, downbeat: f32, primary: f32, accent: f32) {
+    pub fn set_mixer(&mut self, mixer: MixerVolumes) {
         let mut state = self.shared_state.lock().unwrap();
-        let d = downbeat.clamp(0.0, 1.0);
-        let p = primary.clamp(0.0, 1.0);
-        let a = accent.clamp(0.0, 1.0);
-        if (state.params.vol_downbeat - d).abs() > f32::EPSILON
-            || (state.params.vol_primary - p).abs() > f32::EPSILON
-            || (state.params.vol_accent - a).abs() > f32::EPSILON
-        {
-            state.params.vol_downbeat = d;
-            state.params.vol_primary = p;
-            state.params.vol_accent = a;
+        let m = mixer.clamped();
+        if state.params.mixer != m {
+            state.params.mixer = m;
             state.dirty = true;
         }
     }
@@ -257,14 +278,16 @@ impl Iterator for MetronomeSource {
 
         if let Some((phase, sound_type)) = self.current_beep {
             let freq = match sound_type {
-                SoundType::Downbeat => 1500.0,
-                SoundType::PrimaryBeat => 800.0,
-                SoundType::AccentedBeat => 1000.0,
+                SoundType::Downbeat => 1597.0,
+                SoundType::PrimaryBeat => 377.0,
+                SoundType::Beat => 610.0,
+                SoundType::AccentedBeat => 987.0,
             };
             let gain = match sound_type {
-                SoundType::Downbeat => self.local_params.vol_downbeat,
-                SoundType::PrimaryBeat => self.local_params.vol_primary,
-                SoundType::AccentedBeat => self.local_params.vol_accent,
+                SoundType::Downbeat => self.local_params.mixer.downbeat,
+                SoundType::PrimaryBeat => self.local_params.mixer.primary,
+                SoundType::Beat => self.local_params.mixer.beat,
+                SoundType::AccentedBeat => self.local_params.mixer.accent,
             };
             let decay = 0.05;
             let dt = 1.0 / (self.sample_rate as f32);

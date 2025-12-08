@@ -25,6 +25,7 @@ use eframe::epaint::text::{FontInsert, InsertFontFamily};
 use eframe::epaint::{FontFamily, FontId};
 use eframe::{egui, App, CreationContext};
 use std::collections::HashMap;
+use crate::audio::MixerVolumes;
 
 pub struct Grooph {
     music_font_id: FontId,
@@ -51,9 +52,7 @@ pub struct Grooph {
     bpm: u32,
     audio: Option<crate::audio::Audio>,
     // Mixer volumes [0.0, 1.0]
-    mixer_vol_downbeat: f32,
-    mixer_vol_primary: f32,
-    mixer_vol_accent: f32,
+    mixer: MixerVolumes,
     // Playback smoothing state
     playback_smooth_tick: f64,
     playback_last_update: Option<f64>,
@@ -95,7 +94,7 @@ impl App for Grooph {
         self.handle_keyboard_input(ctx);
 
         if let Some(audio) = &mut self.audio {
-            audio.set_volumes(self.mixer_vol_downbeat, self.mixer_vol_primary, self.mixer_vol_accent);
+            audio.set_mixer(self.mixer);
             audio.update(self.player_state == PlayerState::Playing, self.bpm, &self.measure);
         }
     }
@@ -223,9 +222,7 @@ impl Grooph {
             player_state: PlayerState::Stopped,
             bpm: 120,
             audio: None,
-            mixer_vol_downbeat: 1.0,
-            mixer_vol_primary: 1.0,
-            mixer_vol_accent: 1.0,
+            mixer: MixerVolumes::default(),
             playback_smooth_tick: 0.0,
             playback_last_update: None,
             playback_total_ticks: 0,
