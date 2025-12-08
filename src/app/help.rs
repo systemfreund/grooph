@@ -7,18 +7,26 @@ use eframe::egui::{Label, RichText};
 impl Grooph {
     pub(super) fn help_panel(&mut self, ctx: &egui::Context) {
         egui::TopBottomPanel::top("info").show_animated(ctx, self.show_info, |ui| {
+            ui.label(
+                "This app is in early development. Please report any bugs or feature requests.",
+            );
+            ui.separator();
+            ui.hyperlink_to("Email: hello@grooph.app", "mailto:hello@grooph.app");
+            ui.separator();
             ui.collapsing("Keybindings", |ui| {
                 let text = RichText::new(
-                    "   Arrow keys: Move cursor
+                    "         Space: Play/pause
+    Arrow keys: Move cursor
+        Escape: Toggle between edit mode and playback mode
  Del/Backspace: Remove note
-         Space: Toggle between note and rest
+         Enter: Toggle between note and rest
              A: Set/unset accent
            1-4: Set duration (1=1/4, 2=1/8, 3=1/16, 4=1/32)
         Period: Toggle dotted
              T: Cycle tuplet",
                 )
-                    .monospace()
-                    .size(16.0);
+                .monospace()
+                .size(16.0);
                 ui.label(text);
             });
 
