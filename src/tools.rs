@@ -3,6 +3,7 @@
 //! This module defines data-only types (no UI/logic) so that the palette
 //! can be rendered dynamically without hardcoding entries in `app.rs`.
 
+use eframe::egui::Key;
 use crate::measure::BeatKind;
 use crate::measure::duration::{Duration, TupletSpec};
 use crate::measure::duration::NoteValue::{Eighth, Quarter, Sixteenth, ThirtySecond};
@@ -52,7 +53,7 @@ pub enum ToolKind {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Shortcut {
-    pub key: char,
+    pub key: Key,
     pub with_shift: bool,
 }
 
@@ -91,28 +92,28 @@ pub fn all_tools() -> &'static [Tool] {
             label: "Viertel",
             group: ToolGroup::Notes,
             kind: ToolKind::InsertBeat(BeatTemplate { duration: Simple(Quarter), kind: Note }),
-            shortcut: Some(Shortcut { key: '1', with_shift: false }),
+            shortcut: Some(Shortcut { key: Key::Num1, with_shift: false }),
         },
         Tool {
             id: "insert.note.e",
             label: "Achtel",
             group: ToolGroup::Notes,
             kind: ToolKind::InsertBeat(BeatTemplate { duration: Simple(Eighth), kind: Note }),
-            shortcut: Some(Shortcut { key: '2', with_shift: false }),
+            shortcut: Some(Shortcut { key: Key::Num2, with_shift: false }),
         },
         Tool {
             id: "insert.note.s",
             label: "Sechzehntel",
             group: ToolGroup::Notes,
             kind: ToolKind::InsertBeat(BeatTemplate { duration: Simple(Sixteenth), kind: Note }),
-            shortcut: Some(Shortcut { key: '3', with_shift: false }),
+            shortcut: Some(Shortcut { key: Key::Num3, with_shift: false }),
         },
         Tool {
             id: "insert.note.th",
             label: "Zweiunddreißigstel",
             group: ToolGroup::Notes,
             kind: ToolKind::InsertBeat(BeatTemplate { duration: Simple(ThirtySecond), kind: Note }),
-            shortcut: Some(Shortcut { key: '4', with_shift: false }),
+            shortcut: Some(Shortcut { key: Key::Num4, with_shift: false }),
         },
         // Rests
         Tool {
@@ -149,23 +150,22 @@ pub fn all_tools() -> &'static [Tool] {
             label: "Punktiert umschalten",
             group: ToolGroup::Modifiers,
             kind: ToolKind::Modify(Modifier::ToggleDotted { dots: 1 }),
-            shortcut: Some(Shortcut { key: '.', with_shift: false }),
+            shortcut: Some(Shortcut { key: Key::Period, with_shift: false }),
         },
         Tool {
             id: "modify.toggle.accent",
             label: "Akzent umschalten",
             group: ToolGroup::Modifiers,
             kind: ToolKind::Modify(Modifier::ToggleAccent),
-            shortcut: Some(Shortcut { key: 'a', with_shift: false }),
+            shortcut: Some(Shortcut { key: Key::A, with_shift: false }),
         },
         Tool {
             id: "modify.toggle.rest_note",
             label: "Note/Rest umschalten",
             group: ToolGroup::Modifiers,
             kind: ToolKind::Modify(Modifier::ToggleRestNote),
-            shortcut: Some(Shortcut { key: ' ', with_shift: false }),
+            shortcut: Some(Shortcut { key: Key::Enter, with_shift: false }),
         },
-        // Tuplets (explicit entries, no keyboard cycle)
         Tool {
             id: "insert.tuplet.t8",
             label: "Triole (1/8)",

@@ -1,7 +1,7 @@
+use crate::app::PlayerState;
+use crate::{Grooph, all_tools};
 use eframe::egui;
 use eframe::egui::Key;
-use crate::app::PlayerState;
-use crate::{all_tools, Grooph};
 
 impl Grooph {
     pub(super) fn handle_keyboard_input(&mut self, ctx: &egui::Context) {
@@ -15,8 +15,8 @@ impl Grooph {
                 self.edit_mode_enabled = !self.edit_mode_enabled;
             }
 
-            // Toggle Play/Pause with Enter (Return)
-            if i.key_pressed(Key::Enter) {
+            // Toggle Play/Pause with Space
+            if i.key_pressed(Key::Space) {
                 let was_playing = self.player_state == PlayerState::Playing;
                 self.player_state =
                     if was_playing { PlayerState::Paused } else { PlayerState::Playing };
@@ -91,11 +91,9 @@ impl Grooph {
                     // Keyboard input routed through tool shortcuts
                     for t in all_tools().iter().filter(|t| t.shortcut.is_some()) {
                         let sc = t.shortcut.unwrap();
-                        if let Some(key) = Self::char_to_key(sc.key) {
-                            // Match exact shift requirement
-                            if i.key_pressed(key) && i.modifiers.shift == sc.with_shift {
-                                self.apply_tool(t);
-                            }
+                        // Match exact shift requirement
+                        if i.key_pressed(sc.key) && i.modifiers.shift == sc.with_shift {
+                            self.apply_tool(t);
                         }
                     }
                     if i.key_pressed(Key::T) {
@@ -111,26 +109,5 @@ impl Grooph {
                 }
             }
         });
-    }
-
-    fn char_to_key(c: char) -> Option<Key> {
-        use Key::*;
-        Some(match c {
-            '1' => Num1,
-            '2' => Num2,
-            '3' => Num3,
-            '4' => Num4,
-            '5' => Num5,
-            '6' => Num6,
-            '7' => Num7,
-            '8' => Num8,
-            '9' => Num9,
-            '0' => Num0,
-            '.' => Period,
-            ' ' => Space,
-            'a' | 'A' => A,
-            't' | 'T' => T,
-            _ => return None,
-        })
     }
 }
