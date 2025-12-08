@@ -1,30 +1,62 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <meta http-equiv="Content-Type" content="text/html; charset=utf-8"/>
 
 <!-- Disable zooming: -->
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
 
 <head>
-    <!-- change this to your project name -->
-    <title>grooph</title>
+    <title>grooph – Web Metronome</title>
+
+    <meta name="description" content="grooph is a flexible web metronome. Set tempo (BPM) and time signature, then practice with a clear click and visual pulse — right in your browser.">
+    <meta name="keywords" content="metronome, web metronome, click track, bpm, practice, drums, guitar, piano, time signature">
+    <meta name="robots" content="index,follow">
+    <meta name="language" content="en">
+    <meta name="author" content="grooph.app">
+
+    <!-- Open Graph / Social -->
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="grooph – Flexible Metronome">
+    <meta property="og:description" content="Practice with a precise click and visual pulse. Set BPM and time signature in your browser.">
+    <meta property="og:locale" content="en_US">
+    <meta property="og:site_name" content="grooph">
+
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary">
+    <meta name="twitter:title" content="grooph – Flexible Metronome">
+    <meta name="twitter:description" content="Flexible browser metronome with BPM and time signature controls.">
 
     <!-- config for our rust wasm binary. go to https://trunkrs.dev/assets/#rust for more customization -->
-    <link data-trunk rel="rust" data-wasm-opt="2"/>
+    <link data-trunk rel="rust" data-wasm-opt="4"/>
     <!-- this is the base url relative to which other urls will be constructed. trunk will insert this from the public-url option -->
     <base data-trunk-public-url/>
 
-<!--    <link data-trunk rel="icon" href="assets/favicon.ico">-->
-<!--    <link data-trunk rel="copy-file" href="assets/sw.js"/>-->
-<!--    <link data-trunk rel="copy-file" href="assets/manifest.json"/>-->
-<!--    <link data-trunk rel="copy-file" href="assets/icon-1024.png" data-target-path="assets"/>-->
-<!--    <link data-trunk rel="copy-file" href="assets/icon-256.png" data-target-path="assets"/>-->
-<!--    <link data-trunk rel="copy-file" href="assets/icon_ios_touch_192.png" data-target-path="assets"/>-->
-<!--    <link data-trunk rel="copy-file" href="assets/maskable_icon_x512.png" data-target-path="assets"/>-->
-<!--    <link rel="manifest" href="manifest.json">-->
-<!--    <link rel="apple-touch-icon" href="assets/icon_ios_touch_192.png">-->
+    <!--    <link data-trunk rel="icon" href="assets/favicon.ico">-->
+    <!--    <link data-trunk rel="copy-file" href="assets/sw.js"/>-->
+    <!--    <link data-trunk rel="copy-file" href="assets/manifest.json"/>-->
+    <!--    <link data-trunk rel="copy-file" href="assets/icon-1024.png" data-target-path="assets"/>-->
+    <!--    <link data-trunk rel="copy-file" href="assets/icon-256.png" data-target-path="assets"/>-->
+    <!--    <link data-trunk rel="copy-file" href="assets/icon_ios_touch_192.png" data-target-path="assets"/>-->
+    <!--    <link data-trunk rel="copy-file" href="assets/maskable_icon_x512.png" data-target-path="assets"/>-->
+    <!--    <link rel="manifest" href="manifest.json">-->
+    <!--    <link rel="apple-touch-icon" href="assets/icon_ios_touch_192.png">-->
     <meta name="theme-color" media="(prefers-color-scheme: light)" content="white">
     <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#404040">
+
+    <!-- Structured Data: WebApplication -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebApplication",
+      "name": "grooph",
+      "applicationCategory": "MusicApplication",
+      "operatingSystem": "Web",
+      "inLanguage": "en",
+      "description": "A flexible web metronome. Set BPM and time signature and practice with a clear audio click and visual pulse.",
+      "url": "https://grooph.app",
+      "offers": {"@type": "Offer", "price": "0", "priceCurrency": "USD"}
+    }
+    </script>
 
     <style>
         html {
@@ -115,11 +147,8 @@
 </head>
 
 <body>
-<!-- The WASM code will resize the canvas dynamically -->
-<!-- the id is hardcoded in main.rs . so, make sure both match. -->
 <canvas id="grooph-canvas"></canvas>
 
-<!-- the loading spinner will be removed in main.rs -->
 <div class="centered" id="loading_text">
     <noscript>You need javascript to use this website</noscript>
     <p style="font-size:16px">
