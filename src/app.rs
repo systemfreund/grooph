@@ -13,7 +13,7 @@ mod web;
 use crate::measure::duration::{Duration, NoteValue, TupletSpec, q};
 use crate::measure::{BeatIdx, Measure, TimeSignature};
 
-use crate::audio::MixerVolumes;
+use crate::audio::{MixerVolumes, PlayerState};
 use crate::measure::duration::NoteValue::*;
 use crate::measure::editing::Modification;
 use crate::measure::{Beat, BeatKind};
@@ -24,6 +24,7 @@ use eframe::epaint::text::{FontInsert, InsertFontFamily};
 use eframe::epaint::{FontFamily, FontId};
 use eframe::{App, CreationContext, egui};
 use std::collections::HashMap;
+use log::{debug, info};
 
 pub struct Grooph {
     music_font_id: FontId,
@@ -54,18 +55,7 @@ pub struct Grooph {
     // Playback smoothing state
     playback_smooth_tick: f64,
     playback_last_update: Option<f64>,
-    playback_total_ticks: u32,
-    #[cfg(target_arch = "wasm32")]
-    web_last_visible: bool,
-    #[cfg(target_arch = "wasm32")]
-    web_was_playing_before_hide: bool,
-}
-
-#[derive(Clone, PartialEq, Eq)]
-enum PlayerState {
-    Playing,
-    Paused,
-    Stopped,
+    playback_total_ticks: u32
 }
 
 fn add_font(ctx: &Context) {
@@ -100,12 +90,13 @@ impl App for Grooph {
 
         // If we should be playing but have no audio engine, try to create it (works after user gesture on iOS)
         if self.player_state == PlayerState::Playing && self.audio.is_none() {
+            debug!("Creating audio engine.");
             self.audio = crate::audio::Audio::new(self.bpm);
         }
 
         if let Some(audio) = &mut self.audio {
             audio.set_mixer(self.mixer);
-            if audio.update(self.player_state == PlayerState::Playing, self.bpm, &self.measure) {
+            if audio.update(&self.player_state, self.bpm, &self.measure) {
                 ctx.request_repaint();
             }
         }
@@ -194,6 +185,16 @@ impl Grooph {
         measure
     }
 
+    pub fn toggle_playback(&mut self) {
+        let old_state = self.player_state.clone();
+        self.player_state = if old_state == PlayerState::Playing {
+            PlayerState::Stopped
+        } else {
+            PlayerState::Playing
+        };
+        info!("Toggle playback: {:?} -> {:?}", old_state, self.player_state);
+    }
+
     pub fn new(cc: &CreationContext) -> Self {
         add_font(&cc.egui_ctx);
         egui_extras::install_image_loaders(&cc.egui_ctx);
@@ -238,10 +239,6 @@ impl Grooph {
             playback_smooth_tick: 0.0,
             playback_last_update: None,
             playback_total_ticks: 0,
-            #[cfg(target_arch = "wasm32")]
-            web_last_visible: true,
-            #[cfg(target_arch = "wasm32")]
-            web_was_playing_before_hide: false,
         };
 
         // WASM: install visibilitychange/pageshow listeners once

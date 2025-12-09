@@ -1,7 +1,7 @@
 use crate::Grooph;
 use crate::app::{PlayerState, web};
 use eframe::egui::Context;
-use log::info;
+use log::{debug, info};
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU8, Ordering};
 use web_sys::wasm_bindgen::JsCast as _;
@@ -31,7 +31,7 @@ pub fn install_visibility_listeners(ctx: Context) {
     // Only install visibility listeners on mobile browsers. On desktop, keep audio running.
     let is_mobile = is_mobile_browser();
     if !is_mobile {
-        info!("Desktop browser detected – skipping visibility pause handlers");
+        debug!("Desktop browser detected – skipping visibility pause handlers");
         return;
     }
     if let Some(win) = web_sys::window()
@@ -51,7 +51,7 @@ pub fn install_visibility_listeners(ctx: Context) {
                 .map(|s| s == "visible")
                 .unwrap_or(true);
             PENDING.store(if visible_now { 2 } else { 1 }, Ordering::SeqCst);
-            info!("visibility change: {}", visible_now);
+            debug!("visibility change: {}", visible_now);
             ctx1.request_repaint();
         }) as Box<dyn FnMut()>);
         doc.add_event_listener_with_callback("visibilitychange", on_vis.as_ref().unchecked_ref())
@@ -78,22 +78,12 @@ impl Grooph {
             match ev {
                 VisibilityEvent::Hidden => {
                     // going hidden
-                    self.web_was_playing_before_hide = self.player_state == PlayerState::Playing;
-                    // Pause player state and stop audio cleanly
-                    self.player_state = PlayerState::Paused;
-                    if let Some(audio) = &mut self.audio {
-                        audio.stop();
-                    }
-                    self.web_last_visible = false;
+                    self.player_state = PlayerState::Stopped;
+                    self.audio = None;
                 }
                 VisibilityEvent::Visible | VisibilityEvent::PageShow => {
                     // returning visible: drop audio to force clean re-init
                     self.audio = None;
-                    if self.web_was_playing_before_hide {
-                        // restore playing state; creation may fail until next user gesture, we'll retry below
-                        self.player_state = PlayerState::Playing;
-                    }
-                    self.web_last_visible = true;
                 }
             }
         }
@@ -101,7 +91,6 @@ impl Grooph {
 }
 
 fn is_mobile_browser() -> bool {
-    return true;
     // Cached detection result
     *IS_MOBILE.get_or_init(|| {
         let Some(win) = web_sys::window() else { return false };

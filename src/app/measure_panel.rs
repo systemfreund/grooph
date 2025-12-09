@@ -65,14 +65,9 @@ impl Grooph {
 
                             Some(self.playback_smooth_tick)
                         }
-                        PlayerState::Paused => {
-                            // Paused: keep the last known playback position visible.
-                            // Do not advance the predictor; just stop the clock and draw the last value.
-                            self.playback_last_update = None;
-                            Some(self.playback_smooth_tick)
-                        }
                         PlayerState::Stopped => {
                             self.playback_last_update = None;
+                            self.playback_smooth_tick = 0.0;
                             None
                         }
                     };

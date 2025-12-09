@@ -15,14 +15,9 @@ impl Grooph {
                 self.edit_mode_enabled = !self.edit_mode_enabled;
             }
 
-            // Toggle Play/Pause with Space
+            // Toggle Play/Stop with Space
             if i.key_pressed(Key::Space) {
-                let was_playing = self.player_state == PlayerState::Playing;
-                self.player_state =
-                    if was_playing { PlayerState::Paused } else { PlayerState::Playing };
-                if self.player_state == PlayerState::Playing && self.audio.is_none() {
-                    self.audio = crate::audio::Audio::new(self.bpm);
-                }
+                self.toggle_playback();
             }
 
             if !self.edit_mode_enabled {

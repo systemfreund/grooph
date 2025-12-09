@@ -1,4 +1,5 @@
 [build]
 public_url = "/"
-filehash = false
+filehash = true
 release = true
+minify = "always"
