@@ -224,8 +224,8 @@ impl MetronomeSource {
             shared,
             local_params,
             cursor: 0.0,
-            sample_rate: 44100,
-            active_beeps: Vec::with_capacity(4),
+            sample_rate: device_sample_rate(),
+            active_beeps: Vec::with_capacity(Self::MAX_VOICES),
             samples_processed: 0,
         }
     }
@@ -400,4 +400,18 @@ impl Source for MetronomeSource {
     fn sample_rate(&self) -> u32 { self.sample_rate }
 
     fn total_duration(&self) -> Option<Duration> { None }
+}
+
+fn device_sample_rate() -> u32 {
+    use rodio::cpal::traits::{DeviceTrait, HostTrait};
+    let host = rodio::cpal::default_host();
+    if let Some(dev) = host.default_output_device()
+        && let Ok(cfg) = dev.default_output_config()
+    {
+        info!("Using default output device sample rate: {}", cfg.sample_rate().0);
+        return cfg.sample_rate().0;
+    }
+    // fallback
+    info!("Failed to get default output device config, falling back to default sample rate");
+    48000
 }
