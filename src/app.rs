@@ -7,6 +7,8 @@ mod settings_panel;
 mod style;
 mod time_signature_dialog;
 mod tool_palette;
+#[cfg(target_arch = "wasm32")]
+mod web;
 
 use crate::measure::duration::{Duration, NoteValue, TupletSpec, q};
 use crate::measure::{BeatIdx, Measure, TimeSignature};
@@ -93,43 +95,8 @@ impl App for Grooph {
 
         self.handle_keyboard_input(ctx);
 
-        // WASM: handle page visibility transitions to keep audio engine healthy
         #[cfg(target_arch = "wasm32")]
-        {
-            // Use re-exports from web_sys to avoid adding direct deps in Cargo.toml
-            use web_sys::js_sys::Reflect;
-            use web_sys::wasm_bindgen::JsCast as _;
-            use web_sys::wasm_bindgen::JsValue;
-            if let Some(win) = web_sys::window()
-                && let Some(doc) = win.document()
-            {
-                // Use JS interop to read document.visibilityState for broader web-sys compatibility
-                let doc_js: &JsValue = doc.as_ref();
-                let visible_now = Reflect::get(doc_js, &JsValue::from_str("visibilityState"))
-                    .ok()
-                    .and_then(|v: JsValue| v.as_string())
-                    .map(|s| s == "visible")
-                    .unwrap_or(true);
-                if !visible_now && self.web_last_visible {
-                    // going hidden
-                    self.web_was_playing_before_hide = self.player_state == PlayerState::Playing;
-                    // Pause player state and stop audio cleanly
-                    self.player_state = PlayerState::Paused;
-                    if let Some(audio) = &mut self.audio {
-                        audio.stop();
-                    }
-                    self.web_last_visible = false;
-                } else if visible_now && !self.web_last_visible {
-                    // returning visible: drop audio to force clean re-init
-                    self.audio = None;
-                    if self.web_was_playing_before_hide {
-                        // restore playing state; creation may fail until next user gesture, we'll retry below
-                        self.player_state = PlayerState::Playing;
-                    }
-                    self.web_last_visible = true;
-                }
-            }
-        }
+        self.handle_visibility_change();
 
         // If we should be playing but have no audio engine, try to create it (works after user gesture on iOS)
         if self.player_state == PlayerState::Playing && self.audio.is_none() {
@@ -247,7 +214,7 @@ impl Grooph {
             }
         }
 
-        Self {
+        let this = Self {
             music_font_id: FontId::new(16.0, ff),
             measure: m,
             cursor_idx: 0,
@@ -275,6 +242,14 @@ impl Grooph {
             web_last_visible: true,
             #[cfg(target_arch = "wasm32")]
             web_was_playing_before_hide: false,
+        };
+
+        // WASM: install visibilitychange/pageshow listeners once
+        #[cfg(target_arch = "wasm32")]
+        {
+            web::install_visibility_listeners(cc.egui_ctx.clone());
         }
+
+        this
     }
 }
