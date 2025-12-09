@@ -2,30 +2,26 @@ mod help;
 mod keyboard_input;
 mod main_menu;
 mod measure_panel;
+mod mixer_panel;
+mod settings_panel;
 mod style;
 mod time_signature_dialog;
 mod tool_palette;
-mod settings_panel;
-mod mixer_panel;
 
-use crate::measure::duration::{q, Duration, NoteValue, TupletSpec};
+use crate::measure::duration::{Duration, NoteValue, TupletSpec, q};
 use crate::measure::{BeatIdx, Measure, TimeSignature};
 
+use crate::audio::MixerVolumes;
 use crate::measure::duration::NoteValue::*;
 use crate::measure::editing::Modification;
 use crate::measure::{Beat, BeatKind};
 use crate::tools::ToolKind;
-use crate::{all_tools, BeatTemplate};
-use eframe::egui::{
-    Context
-    , TextStyle, Widget
-    ,
-};
+use crate::{BeatTemplate, all_tools};
+use eframe::egui::{Context, TextStyle, Widget};
 use eframe::epaint::text::{FontInsert, InsertFontFamily};
 use eframe::epaint::{FontFamily, FontId};
-use eframe::{egui, App, CreationContext};
+use eframe::{App, CreationContext, egui};
 use std::collections::HashMap;
-use crate::audio::MixerVolumes;
 
 pub struct Grooph {
     music_font_id: FontId,
@@ -57,6 +53,10 @@ pub struct Grooph {
     playback_smooth_tick: f64,
     playback_last_update: Option<f64>,
     playback_total_ticks: u32,
+    #[cfg(target_arch = "wasm32")]
+    web_last_visible: bool,
+    #[cfg(target_arch = "wasm32")]
+    web_was_playing_before_hide: bool,
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -92,6 +92,49 @@ impl App for Grooph {
         }
 
         self.handle_keyboard_input(ctx);
+
+        // WASM: handle page visibility transitions to keep audio engine healthy
+        #[cfg(target_arch = "wasm32")]
+        {
+            // Use re-exports from web_sys to avoid adding direct deps in Cargo.toml
+            use web_sys::js_sys::Reflect;
+            use web_sys::wasm_bindgen::JsCast as _;
+            use web_sys::wasm_bindgen::JsValue;
+            if let Some(win) = web_sys::window()
+                && let Some(doc) = win.document()
+            {
+                // Use JS interop to read document.visibilityState for broader web-sys compatibility
+                let doc_js: &JsValue = doc.as_ref();
+                let visible_now = Reflect::get(doc_js, &JsValue::from_str("visibilityState"))
+                    .ok()
+                    .and_then(|v: JsValue| v.as_string())
+                    .map(|s| s == "visible")
+                    .unwrap_or(true);
+                if !visible_now && self.web_last_visible {
+                    // going hidden
+                    self.web_was_playing_before_hide = self.player_state == PlayerState::Playing;
+                    // Pause player state and stop audio cleanly
+                    self.player_state = PlayerState::Paused;
+                    if let Some(audio) = &mut self.audio {
+                        audio.stop();
+                    }
+                    self.web_last_visible = false;
+                } else if visible_now && !self.web_last_visible {
+                    // returning visible: drop audio to force clean re-init
+                    self.audio = None;
+                    if self.web_was_playing_before_hide {
+                        // restore playing state; creation may fail until next user gesture, we'll retry below
+                        self.player_state = PlayerState::Playing;
+                    }
+                    self.web_last_visible = true;
+                }
+            }
+        }
+
+        // If we should be playing but have no audio engine, try to create it (works after user gesture on iOS)
+        if self.player_state == PlayerState::Playing && self.audio.is_none() {
+            self.audio = crate::audio::Audio::new(self.bpm);
+        }
 
         if let Some(audio) = &mut self.audio {
             audio.set_mixer(self.mixer);
@@ -228,6 +271,10 @@ impl Grooph {
             playback_smooth_tick: 0.0,
             playback_last_update: None,
             playback_total_ticks: 0,
+            #[cfg(target_arch = "wasm32")]
+            web_last_visible: true,
+            #[cfg(target_arch = "wasm32")]
+            web_was_playing_before_hide: false,
         }
     }
 }
