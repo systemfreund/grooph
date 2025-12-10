@@ -15,6 +15,8 @@ pub(crate) struct LayoutOpts {
     pub y_offset: f32,
     pub stem_length_factor: f32,
     pub stem_thickness_factor: f32,
+
+    pub accent_displacement: f32
 }
 
 impl LayoutOpts {
@@ -244,9 +246,8 @@ fn build_note_layout(
         let mut accent_pos: Option<Pos2> = None;
 
         if b.kind == BeatKind::Note {
-            // Accent position
             if b.accented {
-                accent_pos = Some(Pos2::new(cx, cy - opts.font_id.size * 1.2));
+                accent_pos = Some(Pos2::new(cx, cy - opts.em * opts.accent_displacement));
             }
 
             let start_x = cx + opts.stem_offset();

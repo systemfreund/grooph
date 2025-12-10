@@ -18,13 +18,13 @@ use crate::measure::duration::NoteValue::*;
 use crate::measure::editing::Modification;
 use crate::measure::{Beat, BeatKind};
 use crate::tools::ToolKind;
-use crate::{BeatTemplate, all_tools};
+use crate::{BeatTemplate, Modifier, all_tools};
 use eframe::egui::{Context, TextStyle, Widget};
 use eframe::epaint::text::{FontInsert, InsertFontFamily};
 use eframe::epaint::{FontFamily, FontId};
 use eframe::{App, CreationContext, egui};
-use std::collections::HashMap;
 use log::{debug, info};
+use std::collections::HashMap;
 
 #[derive(PartialEq, Eq)]
 enum Mode {
@@ -58,7 +58,7 @@ pub struct Grooph {
     // Playback smoothing state
     playback_smooth_tick: f64,
     playback_last_update: Option<f64>,
-    playback_total_ticks: u32
+    playback_total_ticks: u32,
 }
 
 fn add_font(ctx: &Context) {
@@ -169,7 +169,7 @@ impl Grooph {
 
     fn build_button_measure(template: BeatTemplate) -> Measure {
         let beat_count =
-            if let Duration::Tuplet(TupletSpec { m, .. }) = template.duration { m } else { 1 };
+            if let Duration::Tuplet(TupletSpec { m, .. }) = template.duration { m } else { 2 };
 
         let mut measure = Measure::new_init(
             TimeSignature {
@@ -183,6 +183,20 @@ impl Grooph {
             for i in 0..n {
                 measure.set_beat(i as BeatIdx, Beat::note(template.duration)).unwrap();
             }
+        }
+
+        if let Duration::Dotted { .. } = template.duration {
+            measure.toggle_dotted(0);
+        }
+
+        if let Duration::Simple(..) = template.duration && template.accented {
+            measure.toggle_accent(0);
+        }
+
+        if let Duration::Tuplet(..) = template.duration {
+            //
+        } else {
+            measure.delete_beat(1);
         }
 
         measure
@@ -221,8 +235,31 @@ impl Grooph {
         // Precompute button measures for all insert-beat tools
         let mut button_measures: HashMap<&'static str, Measure> = HashMap::new();
         for t in all_tools() {
-            if let ToolKind::InsertBeat(template) = t.kind {
-                button_measures.insert(t.id, Self::build_button_measure(template));
+            match t.kind {
+                ToolKind::InsertBeat(template) => {
+                    button_measures.insert(t.id, Self::build_button_measure(template));
+                }
+                ToolKind::Modify(Modifier::ToggleDotted { dots }) => {
+                    button_measures.insert(
+                        t.id,
+                        Self::build_button_measure(BeatTemplate {
+                            kind: BeatKind::Note,
+                            duration: Duration::Dotted { dots, base: Quarter },
+                            accented: false,
+                        }),
+                    );
+                }
+                ToolKind::Modify(Modifier::ToggleAccent) => {
+                    button_measures.insert(
+                        t.id,
+                        Self::build_button_measure(BeatTemplate {
+                            kind: BeatKind::Note,
+                            duration: Duration::Simple(Quarter),
+                            accented: true,
+                        }),
+                    );
+                }
+                _ => {}
             }
         }
 

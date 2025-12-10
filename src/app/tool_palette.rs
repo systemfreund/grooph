@@ -1,12 +1,12 @@
 use crate::app::Mode;
 use crate::layout::pixel_layout::{LayoutOpts, build_measure_layout, build_time_sig_layout};
 use crate::measure::BeatKind::{Note, Rest};
-use crate::measure::Measure;
 use crate::measure::duration::{Duration, TupletSpec};
 use crate::measure::editing::Modification;
+use crate::measure::{Beat, Measure};
 use crate::render::glyphs;
 use crate::render::measure::{compute_em, draw_notes};
-use crate::{BeatTemplate, Grooph, MetaOp, Tool, ToolGroup, ToolKind, all_tools};
+use crate::{BeatTemplate, Grooph, MetaOp, Modifier, Tool, ToolGroup, ToolKind, all_tools};
 use eframe::egui;
 use eframe::egui::scroll_area::{ScrollBarVisibility, ScrollSource};
 use eframe::egui::{
@@ -29,6 +29,7 @@ impl Grooph {
                     ToolGroup::Edit,
                     ToolGroup::Meta,
                     ToolGroup::Notes,
+                    ToolGroup::Modifiers,
                     ToolGroup::Tuplets,
                     ToolGroup::Rests,
                 ];
@@ -59,8 +60,20 @@ impl Grooph {
 
             for t in group_tools {
                 match t.kind {
-                    ToolKind::InsertBeat(template) => {
-                        let button = self.note_button(ui, template, t.id);
+                    ToolKind::InsertBeat(..) => {
+                        let button = self.note_button(ui, t.id);
+                        if button.clicked() {
+                            self.apply_tool(t);
+                        }
+                    }
+                    ToolKind::Modify(Modifier::ToggleDotted { .. }) => {
+                        let button = self.note_button(ui, t.id);
+                        if button.clicked() {
+                            self.apply_tool(t);
+                        }
+                    }
+                    ToolKind::Modify(Modifier::ToggleAccent) => {
+                        let button = self.note_button(ui, t.id);
                         if button.clicked() {
                             self.apply_tool(t);
                         }
@@ -74,21 +87,14 @@ impl Grooph {
                     _ => {
                         // Determine enabled state for specific tools (e.g., Undo/Redo)
                         let enabled = match t.kind {
-                            ToolKind::Edit(crate::tools::EditOp::Undo) => !self.undo_stack.is_empty(),
-                            ToolKind::Edit(crate::tools::EditOp::Redo) => !self.redo_stack.is_empty(),
+                            ToolKind::Edit(crate::tools::EditOp::Undo) => {
+                                !self.undo_stack.is_empty()
+                            }
+                            ToolKind::Edit(crate::tools::EditOp::Redo) => {
+                                !self.redo_stack.is_empty()
+                            }
                             _ => true,
                         };
-                        // Generic button
-                        // let symbol_id = Id::new(t.id);
-                        // let symbol = Atom::custom(symbol_id, Vec2::splat(TOOL_PALETTE_BUTTON_SIZE));
-                        // let button =
-                        //     Button::new(symbol).corner_radius(TOOL_PALETTE_BUTTON_CORNER_RADIUS).atom_ui(ui);
-                        //
-                        // if let Some(rect) = button.rect(symbol_id) {
-                        //     let painter = ui.painter_at(rect);
-                        //     painter.text(rect.center(), Align2::CENTER_CENTER, t.label, )
-                        //     add_sized(rect.size(), Label::new(t.label));
-                        // }
 
                         let button = ui
                             .add_enabled_ui(enabled, |ui| {
@@ -171,11 +177,9 @@ impl Grooph {
                 }
                 let idx = self.cursor_idx.min(beats_len - 1);
                 match modifier {
-                    crate::tools::Modifier::ToggleDotted { dots: _ } => {
-                        self.measure.toggle_dotted(idx)
-                    }
-                    crate::tools::Modifier::ToggleAccent => self.measure.toggle_accent(idx),
-                    crate::tools::Modifier::ToggleRestNote => self.measure.toggle_beat_kind(idx),
+                    Modifier::ToggleDotted { dots: _ } => self.measure.toggle_dotted(idx),
+                    Modifier::ToggleAccent => self.measure.toggle_accent(idx),
+                    Modifier::ToggleRestNote => self.measure.toggle_beat_kind(idx),
                 }
             }
         };
@@ -212,6 +216,7 @@ impl Grooph {
                 y_offset: 0.0,
                 stem_length_factor: 0.9,
                 stem_thickness_factor: 0.03,
+                accent_displacement: 0.0,
             };
 
             // Use a temporary measure just for layout width and positions
@@ -242,9 +247,11 @@ impl Grooph {
         button.response
     }
 
-    fn note_button(&self, ui: &mut Ui, template: BeatTemplate, id: &str) -> Response {
+    fn note_button(&self, ui: &mut Ui, id: &str) -> Response {
+        let measure = self.button_measures.get(id).unwrap();
+        let template = measure.beats().first().unwrap();
         let w_factor = match template {
-            BeatTemplate { kind: Note, duration: Duration::Tuplet(..) } => 1.5,
+            Beat { kind: Note, duration: Duration::Tuplet(..), .. } => 1.5,
             _ => 1.0,
         };
         let symbol_id = Id::new(id);
@@ -256,29 +263,18 @@ impl Grooph {
             Button::new(symbol).corner_radius(TOOL_PALETTE_BUTTON_CORNER_RADIUS).atom_ui(ui);
 
         if let Some(rect) = button.rect(symbol_id) {
-            // Use a prebuilt measure for this button
-            let measure = self.button_measures.get(id).unwrap();
-
             let cap_factor = match template {
-                BeatTemplate { kind: Rest, .. } => 0.8,
-                BeatTemplate { kind: Note, duration: Duration::Simple(..) } => 0.7,
-                // BeatTemplate {
-                //     kind: Note,
-                //     duration: Duration::Tuplet(TupletSpec { n: 9, .. }),
-                // } => 0.35,
-                _ => 0.4,
+                Beat { kind: Rest, .. } => 0.8,
+                Beat { kind: Note, duration: Duration::Tuplet(..), .. } => 0.4,
+                _ => 0.7,
             };
 
             let em = compute_em(&rect, cap_factor, ui);
 
             let y_offset = match template {
-                BeatTemplate { kind: Note, duration: Duration::Simple(..) } => 20.0,
-                // BeatTemplate {
-                //     kind: Note,
-                //     duration: Duration::Tuplet(TupletSpec { n: 9, .. }),
-                // } => 18.0,
-                BeatTemplate { kind: Note, duration: Duration::Tuplet(..) } => 22.0,
-                _ => 2.0,
+                Beat { kind: Rest, .. } => 2.0,
+                Beat { kind: Note, duration: Duration::Tuplet(..), .. } => 22.0,
+                _ => 20.0,
             };
 
             let opts = LayoutOpts {
@@ -290,6 +286,7 @@ impl Grooph {
                 y_offset,
                 stem_length_factor: 0.8,
                 stem_thickness_factor: 0.03,
+                accent_displacement: 0.8
             };
             let measure_layout = build_measure_layout(measure, &opts);
             let painter = &ui.painter_at(rect);

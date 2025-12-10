@@ -81,6 +81,10 @@ impl Measure {
     /// Expose a read-only view of beats
     pub fn beats(&self) -> &Vec<Beat> { &self.beats }
 
+    pub fn delete_beat(&mut self, idx: BeatIdx) {
+        self.beats.remove(idx);
+    }
+    
     /// Replace the beat at index `idx` with `beat` if it fits and the remainder stays fillable.
     pub fn set_beat(&mut self, idx: BeatIdx, beat: Beat) -> Result<(), MeasureError> {
         assert!(idx < self.beats.len());

@@ -22,6 +22,7 @@ pub enum ToolGroup {
 pub struct BeatTemplate {
     pub duration: Duration,
     pub kind: BeatKind,
+    pub accented: bool
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -91,28 +92,28 @@ pub fn all_tools() -> &'static [Tool] {
             id: "insert.note.q",
             label: "Viertel",
             group: ToolGroup::Notes,
-            kind: ToolKind::InsertBeat(BeatTemplate { duration: Simple(Quarter), kind: Note }),
+            kind: ToolKind::InsertBeat(BeatTemplate { duration: Simple(Quarter), kind: Note, accented: false }),
             shortcut: Some(Shortcut { key: Key::Num1, with_shift: false }),
         },
         Tool {
             id: "insert.note.e",
             label: "Achtel",
             group: ToolGroup::Notes,
-            kind: ToolKind::InsertBeat(BeatTemplate { duration: Simple(Eighth), kind: Note }),
+            kind: ToolKind::InsertBeat(BeatTemplate { duration: Simple(Eighth), kind: Note, accented: false }),
             shortcut: Some(Shortcut { key: Key::Num2, with_shift: false }),
         },
         Tool {
             id: "insert.note.s",
             label: "Sechzehntel",
             group: ToolGroup::Notes,
-            kind: ToolKind::InsertBeat(BeatTemplate { duration: Simple(Sixteenth), kind: Note }),
+            kind: ToolKind::InsertBeat(BeatTemplate { duration: Simple(Sixteenth), kind: Note, accented: false }),
             shortcut: Some(Shortcut { key: Key::Num3, with_shift: false }),
         },
         Tool {
             id: "insert.note.th",
             label: "Zweiunddreißigstel",
             group: ToolGroup::Notes,
-            kind: ToolKind::InsertBeat(BeatTemplate { duration: Simple(ThirtySecond), kind: Note }),
+            kind: ToolKind::InsertBeat(BeatTemplate { duration: Simple(ThirtySecond), kind: Note, accented: false }),
             shortcut: Some(Shortcut { key: Key::Num4, with_shift: false }),
         },
         // Rests
@@ -120,48 +121,48 @@ pub fn all_tools() -> &'static [Tool] {
             id: "insert.rest.q",
             label: "Viertelpause",
             group: ToolGroup::Rests,
-            kind: ToolKind::InsertBeat(BeatTemplate { duration: Simple(Quarter), kind: Rest }),
+            kind: ToolKind::InsertBeat(BeatTemplate { duration: Simple(Quarter), kind: Rest, accented: false }),
             shortcut: None,
         },
         Tool {
             id: "insert.rest.e",
             label: "Achtelpause",
             group: ToolGroup::Rests,
-            kind: ToolKind::InsertBeat(BeatTemplate { duration: Simple(Eighth), kind: Rest }),
+            kind: ToolKind::InsertBeat(BeatTemplate { duration: Simple(Eighth), kind: Rest, accented: false }),
             shortcut: None,
         },
         Tool {
             id: "insert.rest.s",
             label: "Sechzehntelpause",
             group: ToolGroup::Rests,
-            kind: ToolKind::InsertBeat(BeatTemplate { duration: Simple(Sixteenth), kind: Rest }),
+            kind: ToolKind::InsertBeat(BeatTemplate { duration: Simple(Sixteenth), kind: Rest, accented: false }),
             shortcut: None,
         },
         Tool {
             id: "insert.rest.th",
             label: "Zweiunddreißigstelpause",
             group: ToolGroup::Rests,
-            kind: ToolKind::InsertBeat(BeatTemplate { duration: Simple(ThirtySecond), kind: Rest }),
+            kind: ToolKind::InsertBeat(BeatTemplate { duration: Simple(ThirtySecond), kind: Rest, accented: false }),
             shortcut: None,
         },
         // Modifiers
         Tool {
             id: "modify.toggle.dotted",
-            label: "Punktiert umschalten",
+            label: "Toggle Dotted",
             group: ToolGroup::Modifiers,
             kind: ToolKind::Modify(Modifier::ToggleDotted { dots: 1 }),
             shortcut: Some(Shortcut { key: Key::Period, with_shift: false }),
         },
         Tool {
             id: "modify.toggle.accent",
-            label: "Akzent umschalten",
+            label: "Toggle Accent",
             group: ToolGroup::Modifiers,
             kind: ToolKind::Modify(Modifier::ToggleAccent),
             shortcut: Some(Shortcut { key: Key::A, with_shift: false }),
         },
         Tool {
             id: "modify.toggle.rest_note",
-            label: "Note/Rest umschalten",
+            label: "Toggle Note/Rest",
             group: ToolGroup::Modifiers,
             kind: ToolKind::Modify(Modifier::ToggleRestNote),
             shortcut: Some(Shortcut { key: Key::Enter, with_shift: false }),
@@ -173,6 +174,7 @@ pub fn all_tools() -> &'static [Tool] {
             kind: ToolKind::InsertBeat(BeatTemplate {
                 duration: Tuplet(TupletSpec { n: 3, m: 2, base: Eighth }),
                 kind: Note,
+                accented: false,
             }),
             shortcut: None,
         },
@@ -183,6 +185,7 @@ pub fn all_tools() -> &'static [Tool] {
             kind: ToolKind::InsertBeat(BeatTemplate {
                 duration: Tuplet(TupletSpec { n: 5, m: 4, base: Sixteenth }),
                 kind: Note,
+                accented: false,
             }),
             shortcut: None,
         },
@@ -193,6 +196,7 @@ pub fn all_tools() -> &'static [Tool] {
             kind: ToolKind::InsertBeat(BeatTemplate {
                 duration: Tuplet(TupletSpec { n: 6, m: 4, base: Sixteenth }),
                 kind: Note,
+                accented: false,
             }),
             shortcut: None,
         },
@@ -203,6 +207,7 @@ pub fn all_tools() -> &'static [Tool] {
             kind: ToolKind::InsertBeat(BeatTemplate {
                 duration: Tuplet(TupletSpec { n: 7, m: 4, base: Sixteenth }),
                 kind: Note,
+                accented: false,
             }),
             shortcut: None,
         },
@@ -213,6 +218,7 @@ pub fn all_tools() -> &'static [Tool] {
             kind: ToolKind::InsertBeat(BeatTemplate {
                 duration: Tuplet(TupletSpec { n: 9, m: 8, base: Sixteenth }),
                 kind: Note,
+                accented: false,
             }),
             shortcut: None,
         },
