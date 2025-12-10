@@ -8,11 +8,12 @@ use crate::app::Mode;
 impl Grooph {
     pub(super) fn help_panel(&mut self, ctx: &egui::Context) {
         egui::TopBottomPanel::bottom("info").show_animated(ctx, self.mode == Mode::Help, |ui| {
-            ui.label(
-                "This app is in early development. Please report any bugs or feature requests.",
-            );
-            ui.separator();
-            ui.hyperlink_to("Email: hello@grooph.app", "mailto:hello@grooph.app");
+            ui.horizontal_wrapped(|ui| {
+                ui.label(
+                    "This app is in early development. Please report any bugs or feature requests.",
+                );
+                ui.hyperlink_to("Email: hello@grooph.app", "mailto:hello@grooph.app");
+            });
             ui.separator();
             ui.collapsing("Keybindings", |ui| {
                 let text = RichText::new(
@@ -31,33 +32,17 @@ impl Grooph {
                 ui.label(text);
             });
 
-            // Label showing absolute beat position at the cursor and human-readable duration/kind
-            let mut beat_text = String::from("-");
-            let idx = self.cursor_idx;
-            let positions = self.measure.beat_positions();
-            if idx < positions.len() {
-                let v = positions[idx];
-                let mut s = format!("{:.3}", v);
-                // Trim trailing zeros and optional dot for a cleaner look
-                while s.ends_with('0') {
-                    s.pop();
-                }
-                if s.ends_with('.') {
-                    s.pop();
-                }
-                beat_text = s;
-            }
-            let mut label = format!("Beat: {}", beat_text);
-            if idx < self.measure.beats().len() {
-                let b = self.measure.beats()[idx];
-                let desc = human_readable(&b.duration);
-                let kind = match b.kind {
-                    Note => "note",
-                    Rest => "rest",
-                };
-                label = format!("Beat: {}, {} {}", beat_text, desc, kind);
-            }
-            ui.add(Label::new(label));
+            ui.collapsing("Mouse/Finger controls", |ui| {
+                let text = RichText::new(
+                    "       Click/Tap: Move cursor
+            Drag: Move cursor
+Double-click/Tap: Toggle Note/Rest",
+                )
+                .monospace()
+                .size(16.0);
+                ui.label(text);
+            });
+
         });
     }
 }
