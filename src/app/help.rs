@@ -6,7 +6,7 @@ use eframe::egui::{Label, RichText};
 
 impl Grooph {
     pub(super) fn help_panel(&mut self, ctx: &egui::Context) {
-        egui::TopBottomPanel::top("info").show_animated(ctx, self.show_info, |ui| {
+        egui::TopBottomPanel::bottom("info").show_animated(ctx, self.show_info, |ui| {
             ui.label(
                 "This app is in early development. Please report any bugs or feature requests.",
             );

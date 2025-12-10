@@ -5,7 +5,7 @@ use eframe::egui::style::HandleShape;
 
 impl Grooph {
     pub(super) fn mixer_panel(&mut self, ctx: &egui::Context) {
-        egui::TopBottomPanel::top("mixer").show_animated(ctx, self.show_mixer, |ui| {
+        egui::TopBottomPanel::bottom("mixer").show_animated(ctx, self.show_mixer, |ui| {
             ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                 let formatter = |value, _| format!("{:.0}%", value * 100.0);
                 ui.add(egui::Slider::new(&mut self.mixer.downbeat, 0.0..=1.0)

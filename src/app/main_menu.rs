@@ -6,7 +6,7 @@ use eframe::egui::{Align, Button, Direction, Image, Layout, Widget, include_imag
 
 impl Grooph {
     pub(super) fn main_menu(&mut self, ctx: &egui::Context) {
-        egui::TopBottomPanel::top("menu").show_separator_line(false).show(ctx, |ui| {
+        egui::TopBottomPanel::bottom("menu").show_separator_line(false).show(ctx, |ui| {
             egui::ScrollArea::horizontal()
                 .scroll_source(ScrollSource::ALL)
                 .scroll_bar_visibility(ScrollBarVisibility::AlwaysHidden)
