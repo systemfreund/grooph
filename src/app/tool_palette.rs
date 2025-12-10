@@ -22,7 +22,7 @@ impl Grooph {
     pub(super) fn tool_palette_panel(&mut self, ctx: &Context) {
         egui::TopBottomPanel::bottom("tool_palette")
             .show_separator_line(false)
-            .resizable(true)
+            .resizable(false)
             .show_animated(ctx, self.mode == Mode::Edit, |ui| {
                 let tools = all_tools();
                 let groups = [
@@ -41,7 +41,7 @@ impl Grooph {
                             Direction::LeftToRight,
                             Align::Center,
                         )
-                        .with_cross_justify(false);
+                        .with_cross_justify(true);
 
                         ui.with_layout(layout, |ui| {
                             self.tool_palette(tools, groups.as_slice(), ui);
@@ -72,6 +72,12 @@ impl Grooph {
                         }
                     }
                     _ => {
+                        // Determine enabled state for specific tools (e.g., Undo/Redo)
+                        let enabled = match t.kind {
+                            ToolKind::Edit(crate::tools::EditOp::Undo) => !self.undo_stack.is_empty(),
+                            ToolKind::Edit(crate::tools::EditOp::Redo) => !self.redo_stack.is_empty(),
+                            _ => true,
+                        };
                         // Generic button
                         // let symbol_id = Id::new(t.id);
                         // let symbol = Atom::custom(symbol_id, Vec2::splat(TOOL_PALETTE_BUTTON_SIZE));
@@ -84,11 +90,15 @@ impl Grooph {
                         //     add_sized(rect.size(), Label::new(t.label));
                         // }
 
-                        let button = ui.add_sized(
-                            Vec2::splat(TOOL_PALETTE_BUTTON_SIZE),
-                            Button::new(RichText::new(t.label).size(24.0))
-                                .corner_radius(TOOL_PALETTE_BUTTON_CORNER_RADIUS),
-                        );
+                        let button = ui
+                            .add_enabled_ui(enabled, |ui| {
+                                ui.add_sized(
+                                    Vec2::splat(TOOL_PALETTE_BUTTON_SIZE),
+                                    Button::new(RichText::new(t.label).size(24.0))
+                                        .corner_radius(TOOL_PALETTE_BUTTON_CORNER_RADIUS),
+                                )
+                            })
+                            .inner;
                         if button.clicked() {
                             self.apply_tool(t);
                         }
