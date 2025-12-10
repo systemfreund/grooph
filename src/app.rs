@@ -7,6 +7,7 @@ mod settings_panel;
 mod style;
 mod time_signature_dialog;
 mod tool_palette;
+pub mod tools;
 #[cfg(target_arch = "wasm32")]
 mod web;
 
@@ -17,8 +18,8 @@ use crate::audio::{MixerVolumes, PlayerState};
 use crate::measure::duration::NoteValue::*;
 use crate::measure::editing::Modification;
 use crate::measure::{Beat, BeatKind};
-use crate::tools::ToolKind;
-use crate::{BeatTemplate, Modifier, all_tools};
+use crate::app::tools::ToolKind;
+use crate::app::tools::{BeatTemplate, Modifier, all_tools};
 use eframe::egui::{Context, TextStyle, Widget};
 use eframe::epaint::text::{FontInsert, InsertFontFamily};
 use eframe::epaint::{FontFamily, FontId};
@@ -189,7 +190,9 @@ impl Grooph {
             measure.toggle_dotted(0);
         }
 
-        if let Duration::Simple(..) = template.duration && template.accented {
+        if let Duration::Simple(..) = template.duration
+            && template.accented
+        {
             measure.toggle_accent(0);
         }
 

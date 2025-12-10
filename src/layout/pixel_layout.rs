@@ -16,7 +16,8 @@ pub(crate) struct LayoutOpts {
     pub stem_length_factor: f32,
     pub stem_thickness_factor: f32,
 
-    pub accent_displacement: f32
+    pub accent_displacement: f32,
+    pub accent_below: bool,
 }
 
 impl LayoutOpts {
@@ -247,7 +248,9 @@ fn build_note_layout(
 
         if b.kind == BeatKind::Note {
             if b.accented {
-                accent_pos = Some(Pos2::new(cx, cy - opts.em * opts.accent_displacement));
+                let dy = opts.em * opts.accent_displacement;
+                let y = if opts.accent_below { cy + dy } else { cy - dy };
+                accent_pos = Some(Pos2::new(cx, y));
             }
 
             let start_x = cx + opts.stem_offset();
@@ -418,7 +421,7 @@ fn build_tuplet_layout(
 
         if !t.number_only() {
             // Bracketed case: raise whole bracket+number if any accent exists in span.
-            let has_accent_in_group = beats
+            let has_accent_in_group = !opts.accent_below && beats
                 .iter()
                 .enumerate()
                 .any(|(i, b)| i >= t.start && i <= t.end && b.kind == BeatKind::Note && b.accented);
@@ -462,7 +465,7 @@ fn build_tuplet_layout(
             // Number-only case: only lift the number if it would collide with an accent horizontally.
             let num_cx = 0.5 * (x_l + x_r);
             let num_half_w = 0.5 * num_width;
-            let collides = (t.start..=t.end).any(|i| {
+            let collides = !opts.accent_below && (t.start..=t.end).any(|i| {
                 let b = beats[i];
                 b.kind == BeatKind::Note
                     && b.accented
@@ -490,3 +493,4 @@ fn build_tuplet_layout(
 
     tuplets_out
 }
+

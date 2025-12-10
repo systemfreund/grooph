@@ -1,12 +1,13 @@
-use crate::app::Mode;
-use crate::layout::pixel_layout::{LayoutOpts, build_measure_layout, build_time_sig_layout};
-use crate::measure::BeatKind::{Note, Rest};
+use crate::app::tools::{all_tools, BeatTemplate, MetaOp, Modifier, Tool, ToolGroup, ToolKind};
+use crate::app::{tools, Mode};
+use crate::layout::pixel_layout::{build_measure_layout, build_time_sig_layout, LayoutOpts};
 use crate::measure::duration::{Duration, TupletSpec};
 use crate::measure::editing::Modification;
+use crate::measure::BeatKind::{Note, Rest};
 use crate::measure::{Beat, Measure};
 use crate::render::glyphs;
 use crate::render::measure::{compute_em, draw_notes};
-use crate::{BeatTemplate, Grooph, MetaOp, Modifier, Tool, ToolGroup, ToolKind, all_tools};
+use crate::Grooph;
 use eframe::egui;
 use eframe::egui::scroll_area::{ScrollBarVisibility, ScrollSource};
 use eframe::egui::{
@@ -14,6 +15,7 @@ use eframe::egui::{
     Ui, Vec2, Widget,
 };
 use log::info;
+use tools::EditOp;
 
 const TOOL_PALETTE_BUTTON_SIZE: f32 = 70.0;
 const TOOL_PALETTE_BUTTON_CORNER_RADIUS: f32 = 2.0;
@@ -87,10 +89,10 @@ impl Grooph {
                     _ => {
                         // Determine enabled state for specific tools (e.g., Undo/Redo)
                         let enabled = match t.kind {
-                            ToolKind::Edit(crate::tools::EditOp::Undo) => {
+                            ToolKind::Edit(EditOp::Undo) => {
                                 !self.undo_stack.is_empty()
                             }
-                            ToolKind::Edit(crate::tools::EditOp::Redo) => {
+                            ToolKind::Edit(EditOp::Redo) => {
                                 !self.redo_stack.is_empty()
                             }
                             _ => true,
@@ -157,13 +159,13 @@ impl Grooph {
                 self.cursor_idx = 0;
                 Some(Modification::ChangeTimeSignature(ts, ts))
             }
-            ToolKind::Edit(crate::tools::EditOp::Undo) => {
+            ToolKind::Edit(EditOp::Undo) => {
                 // Undo should not create a new snapshot; drop the one we took and perform undo
                 let _ = self.undo_stack.pop();
                 self.undo();
                 return;
             }
-            ToolKind::Edit(crate::tools::EditOp::Redo) => {
+            ToolKind::Edit(EditOp::Redo) => {
                 // Redo should not create a new snapshot; drop the one we took and perform redo
                 let _ = self.undo_stack.pop();
                 self.redo();
@@ -217,6 +219,7 @@ impl Grooph {
                 stem_length_factor: 0.9,
                 stem_thickness_factor: 0.03,
                 accent_displacement: 0.0,
+                accent_below: false,
             };
 
             // Use a temporary measure just for layout width and positions
@@ -286,7 +289,8 @@ impl Grooph {
                 y_offset,
                 stem_length_factor: 0.8,
                 stem_thickness_factor: 0.03,
-                accent_displacement: 0.8
+                accent_displacement: 0.8,
+                accent_below: false,
             };
             let measure_layout = build_measure_layout(measure, &opts);
             let painter = &ui.painter_at(rect);

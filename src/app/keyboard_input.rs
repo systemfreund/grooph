@@ -1,5 +1,6 @@
+use crate::app::tools::all_tools;
 use crate::app::Mode;
-use crate::{all_tools, Grooph};
+use crate::Grooph;
 use eframe::egui;
 use eframe::egui::Key;
 

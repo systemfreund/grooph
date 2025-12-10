@@ -41,7 +41,8 @@ pub(crate) fn draw_measure(
         y_offset: 0.0,
         stem_length_factor: 0.9,
         stem_thickness_factor: 0.03,
-        accent_displacement: 1.1
+        accent_displacement: 0.5,
+        accent_below: true,
     };
     let measure_layout = build_measure_layout(measure, &opts);
 
