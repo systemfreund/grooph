@@ -65,6 +65,7 @@ pub struct Tool {
     pub group: ToolGroup,
     pub kind: ToolKind,
     pub shortcut: Option<Shortcut>,
+    pub show_in_palette: bool,
 }
 
 /// Static registry of all tools shown in the palette.
@@ -79,6 +80,7 @@ pub fn all_tools() -> &'static [Tool] {
             group: ToolGroup::Edit,
             kind: ToolKind::Edit(EditOp::Undo),
             shortcut: None,
+            show_in_palette: true,
         },
         Tool {
             id: "edit.redo",
@@ -86,6 +88,7 @@ pub fn all_tools() -> &'static [Tool] {
             group: ToolGroup::Edit,
             kind: ToolKind::Edit(EditOp::Redo),
             shortcut: None,
+            show_in_palette: true,
         },
         // Notes
         Tool {
@@ -94,6 +97,7 @@ pub fn all_tools() -> &'static [Tool] {
             group: ToolGroup::Notes,
             kind: ToolKind::InsertBeat(BeatTemplate { duration: Simple(Quarter), kind: Note, accented: false }),
             shortcut: Some(Shortcut { key: Key::Num1, with_shift: false }),
+            show_in_palette: true,
         },
         Tool {
             id: "insert.note.e",
@@ -101,6 +105,7 @@ pub fn all_tools() -> &'static [Tool] {
             group: ToolGroup::Notes,
             kind: ToolKind::InsertBeat(BeatTemplate { duration: Simple(Eighth), kind: Note, accented: false }),
             shortcut: Some(Shortcut { key: Key::Num2, with_shift: false }),
+            show_in_palette: true,
         },
         Tool {
             id: "insert.note.s",
@@ -108,6 +113,7 @@ pub fn all_tools() -> &'static [Tool] {
             group: ToolGroup::Notes,
             kind: ToolKind::InsertBeat(BeatTemplate { duration: Simple(Sixteenth), kind: Note, accented: false }),
             shortcut: Some(Shortcut { key: Key::Num3, with_shift: false }),
+            show_in_palette: true,
         },
         Tool {
             id: "insert.note.th",
@@ -115,6 +121,7 @@ pub fn all_tools() -> &'static [Tool] {
             group: ToolGroup::Notes,
             kind: ToolKind::InsertBeat(BeatTemplate { duration: Simple(ThirtySecond), kind: Note, accented: false }),
             shortcut: Some(Shortcut { key: Key::Num4, with_shift: false }),
+            show_in_palette: true,
         },
         // Rests
         Tool {
@@ -123,6 +130,7 @@ pub fn all_tools() -> &'static [Tool] {
             group: ToolGroup::Rests,
             kind: ToolKind::InsertBeat(BeatTemplate { duration: Simple(Quarter), kind: Rest, accented: false }),
             shortcut: None,
+            show_in_palette: true,
         },
         Tool {
             id: "insert.rest.e",
@@ -130,6 +138,7 @@ pub fn all_tools() -> &'static [Tool] {
             group: ToolGroup::Rests,
             kind: ToolKind::InsertBeat(BeatTemplate { duration: Simple(Eighth), kind: Rest, accented: false }),
             shortcut: None,
+            show_in_palette: true,
         },
         Tool {
             id: "insert.rest.s",
@@ -137,6 +146,7 @@ pub fn all_tools() -> &'static [Tool] {
             group: ToolGroup::Rests,
             kind: ToolKind::InsertBeat(BeatTemplate { duration: Simple(Sixteenth), kind: Rest, accented: false }),
             shortcut: None,
+            show_in_palette: true,
         },
         Tool {
             id: "insert.rest.th",
@@ -144,6 +154,7 @@ pub fn all_tools() -> &'static [Tool] {
             group: ToolGroup::Rests,
             kind: ToolKind::InsertBeat(BeatTemplate { duration: Simple(ThirtySecond), kind: Rest, accented: false }),
             shortcut: None,
+            show_in_palette: true,
         },
         // Modifiers
         Tool {
@@ -152,6 +163,7 @@ pub fn all_tools() -> &'static [Tool] {
             group: ToolGroup::Modifiers,
             kind: ToolKind::Modify(Modifier::ToggleDotted { dots: 1 }),
             shortcut: Some(Shortcut { key: Key::Period, with_shift: false }),
+            show_in_palette: true,
         },
         Tool {
             id: "modify.toggle.accent",
@@ -159,6 +171,7 @@ pub fn all_tools() -> &'static [Tool] {
             group: ToolGroup::Modifiers,
             kind: ToolKind::Modify(Modifier::ToggleAccent),
             shortcut: Some(Shortcut { key: Key::A, with_shift: false }),
+            show_in_palette: true,
         },
         Tool {
             id: "modify.toggle.rest_note",
@@ -166,6 +179,7 @@ pub fn all_tools() -> &'static [Tool] {
             group: ToolGroup::Modifiers,
             kind: ToolKind::Modify(Modifier::ToggleRestNote),
             shortcut: Some(Shortcut { key: Key::Enter, with_shift: false }),
+            show_in_palette: false,
         },
         Tool {
             id: "insert.tuplet.t8",
@@ -177,6 +191,7 @@ pub fn all_tools() -> &'static [Tool] {
                 accented: false,
             }),
             shortcut: None,
+            show_in_palette: true,
         },
         Tool {
             id: "insert.tuplet.qt16",
@@ -188,6 +203,7 @@ pub fn all_tools() -> &'static [Tool] {
                 accented: false,
             }),
             shortcut: None,
+            show_in_palette: true,
         },
         Tool {
             id: "insert.tuplet.st16",
@@ -199,6 +215,7 @@ pub fn all_tools() -> &'static [Tool] {
                 accented: false,
             }),
             shortcut: None,
+            show_in_palette: true,
         },
         Tool {
             id: "insert.tuplet.spt16",
@@ -210,6 +227,7 @@ pub fn all_tools() -> &'static [Tool] {
                 accented: false,
             }),
             shortcut: None,
+            show_in_palette: true,
         },
         Tool {
             id: "insert.tuplet.nt16",
@@ -221,6 +239,7 @@ pub fn all_tools() -> &'static [Tool] {
                 accented: false,
             }),
             shortcut: None,
+            show_in_palette: true,
         },
         Tool {
             id: "meta.reset_measure",
@@ -228,6 +247,7 @@ pub fn all_tools() -> &'static [Tool] {
             group: ToolGroup::Meta,
             kind: ToolKind::Meta(MetaOp::ResetMeasure),
             shortcut: None,
+            show_in_palette: true,
         },
         Tool {
             id: "meta.change_time_signature",
@@ -235,6 +255,7 @@ pub fn all_tools() -> &'static [Tool] {
             group: ToolGroup::Meta,
             kind: ToolKind::Meta(MetaOp::ChangeTimeSignature),
             shortcut: None,
+            show_in_palette: true,
         },
     ];
 

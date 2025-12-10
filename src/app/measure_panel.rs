@@ -1,4 +1,5 @@
 use crate::Grooph;
+use crate::app::tools::{all_tools, Modifier, ToolKind};
 use crate::app::{Mode, PlayerState};
 use crate::measure::grid::DEFAULT_GRID;
 use crate::render::measure::draw_measure;
@@ -108,6 +109,15 @@ impl Grooph {
                                 best_i
                             };
                             self.cursor_idx = idx;
+
+                            if resp.double_clicked() {
+                                if let Some(tool) = all_tools()
+                                    .iter()
+                                    .find(|t| matches!(t.kind, ToolKind::Modify(Modifier::ToggleRestNote)))
+                                {
+                                    self.apply_tool(tool);
+                                }
+                            }
                         }
                     }
                 });

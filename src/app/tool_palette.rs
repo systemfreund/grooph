@@ -1,13 +1,13 @@
-use crate::app::tools::{all_tools, BeatTemplate, MetaOp, Modifier, Tool, ToolGroup, ToolKind};
-use crate::app::{tools, Mode};
-use crate::layout::pixel_layout::{build_measure_layout, build_time_sig_layout, LayoutOpts};
+use crate::Grooph;
+use crate::app::tools::{BeatTemplate, MetaOp, Modifier, Tool, ToolGroup, ToolKind, all_tools};
+use crate::app::{Mode, tools};
+use crate::layout::pixel_layout::{LayoutOpts, build_measure_layout, build_time_sig_layout};
+use crate::measure::BeatKind::{Note, Rest};
 use crate::measure::duration::{Duration, TupletSpec};
 use crate::measure::editing::Modification;
-use crate::measure::BeatKind::{Note, Rest};
 use crate::measure::{Beat, Measure};
 use crate::render::glyphs;
 use crate::render::measure::{compute_em, draw_notes};
-use crate::Grooph;
 use eframe::egui;
 use eframe::egui::scroll_area::{ScrollBarVisibility, ScrollSource};
 use eframe::egui::{
@@ -26,7 +26,7 @@ impl Grooph {
             .show_separator_line(false)
             .resizable(false)
             .show_animated(ctx, self.mode == Mode::Edit, |ui| {
-                let tools = all_tools();
+                let tools = all_tools().iter().filter(|t| t.show_in_palette).collect::<Vec<_>>();
                 let groups = [
                     ToolGroup::Edit,
                     ToolGroup::Meta,
@@ -47,13 +47,13 @@ impl Grooph {
                         .with_cross_justify(true);
 
                         ui.with_layout(layout, |ui| {
-                            self.tool_palette(tools, groups.as_slice(), ui);
+                            self.tool_palette(tools.to_vec(), groups.as_slice(), ui);
                         })
                     });
             });
     }
 
-    fn tool_palette(&mut self, tools: &[Tool], groups: &[ToolGroup], ui: &mut Ui) {
+    fn tool_palette(&mut self, tools: Vec<&Tool>, groups: &[ToolGroup], ui: &mut Ui) {
         for g in groups {
             let group_tools: Vec<_> = tools.iter().filter(|t| &t.group == g).collect();
             if group_tools.is_empty() {
@@ -89,12 +89,8 @@ impl Grooph {
                     _ => {
                         // Determine enabled state for specific tools (e.g., Undo/Redo)
                         let enabled = match t.kind {
-                            ToolKind::Edit(EditOp::Undo) => {
-                                !self.undo_stack.is_empty()
-                            }
-                            ToolKind::Edit(EditOp::Redo) => {
-                                !self.redo_stack.is_empty()
-                            }
+                            ToolKind::Edit(EditOp::Undo) => !self.undo_stack.is_empty(),
+                            ToolKind::Edit(EditOp::Redo) => !self.redo_stack.is_empty(),
                             _ => true,
                         };
 
