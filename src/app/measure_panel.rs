@@ -1,5 +1,5 @@
 use crate::Grooph;
-use crate::app::PlayerState;
+use crate::app::{Mode, PlayerState};
 use crate::measure::grid::DEFAULT_GRID;
 use crate::render::measure::draw_measure;
 use eframe::egui;
@@ -77,12 +77,12 @@ impl Grooph {
                         &self.music_font_id,
                         &self.measure,
                         rect,
-                        if self.edit_mode_enabled { Some(self.cursor_idx) } else { None },
+                        if self.mode == Mode::Edit { Some(self.cursor_idx) } else { None },
                         playback_tick_to_draw,
                     );
 
                     // Block canvas interactions while the time signature dialog is open
-                    if !self.show_ts_dialog
+                    if !matches!(self.mode, Mode::TimeSignature { .. })
                         && (resp.clicked() || resp.dragged())
                         && let Some(pos) = resp.interact_pointer_pos()
                     {

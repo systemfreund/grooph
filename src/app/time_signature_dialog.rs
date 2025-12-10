@@ -2,6 +2,7 @@ use crate::Grooph;
 use crate::measure::TimeSignature;
 use eframe::egui;
 use eframe::egui::{Align, Align2, Layout};
+use crate::app::Mode;
 
 impl Grooph {
     pub(super) fn time_signature_dialog(&mut self, ctx: &egui::Context) {
@@ -14,21 +15,23 @@ impl Grooph {
                 ui.with_layout(layout, |ui| {
                     let l2 = Layout::left_to_right(Align::Min);
                     ui.with_layout(l2, |ui| {
-                        egui::ComboBox::from_id_salt("beats")
-                            .selected_text(format!("{}", self.ts_beats))
-                            .show_ui(ui, |ui| {
-                                for v in 1u8..=16u8 {
-                                    ui.selectable_value(&mut self.ts_beats, v, format!("{}", v));
-                                }
-                            });
-                        ui.label(" / ");
-                        egui::ComboBox::from_id_salt("beat_unit")
-                            .selected_text(format!("{}", self.ts_unit))
-                            .show_ui(ui, |ui| {
-                                for v in [4u8, 8, 16] {
-                                    ui.selectable_value(&mut self.ts_unit, v, format!("{}", v));
-                                }
-                            });
+                        if let Mode::TimeSignature { beats, unit } = &mut self.mode {
+                            egui::ComboBox::from_id_salt("beats")
+                                .selected_text(format!("{}", *beats))
+                                .show_ui(ui, |ui| {
+                                    for v in 1u8..=17u8 {
+                                        ui.selectable_value(beats, v, format!("{}", v));
+                                    }
+                                });
+                            ui.label(" / ");
+                            egui::ComboBox::from_id_salt("beat_unit")
+                                .selected_text(format!("{}", *unit))
+                                .show_ui(ui, |ui| {
+                                    for v in [4u8, 8, 16] {
+                                        ui.selectable_value(unit, v, format!("{}", v));
+                                    }
+                                });
+                        }
                     });
 
                     ui.add_space(8.0);
@@ -37,15 +40,18 @@ impl Grooph {
 
                     ui.horizontal(|ui| {
                         if ui.button("Cancel").clicked() {
-                            self.show_ts_dialog = false;
+                            self.mode = Mode::Edit;
                         }
                         if ui.button("Done").clicked() {
                             // Prevent no-op undo entries
                             let current = self.measure.time_signature();
-                            let new_ts =
-                                TimeSignature { beats: self.ts_beats, beat_unit: self.ts_unit };
+                            let (beats, unit) = match &self.mode {
+                                Mode::TimeSignature { beats, unit } => (*beats, *unit),
+                                _ => (current.beats, current.beat_unit),
+                            };
+                            let new_ts = TimeSignature { beats, beat_unit: unit };
                             if new_ts == current {
-                                self.show_ts_dialog = false;
+                                self.mode = Mode::Edit;
                                 return;
                             }
 
@@ -62,7 +68,7 @@ impl Grooph {
                                     } else {
                                         self.cursor_idx = 0;
                                     }
-                                    self.show_ts_dialog = false;
+                                    self.mode = Mode::Edit;
                                 }
                                 Err(_) => {
                                     // Roll back the snapshot if failed

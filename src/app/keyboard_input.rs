@@ -1,5 +1,5 @@
-use crate::app::PlayerState;
-use crate::{Grooph, all_tools};
+use crate::app::Mode;
+use crate::{all_tools, Grooph};
 use eframe::egui;
 use eframe::egui::Key;
 
@@ -7,12 +7,12 @@ impl Grooph {
     pub(super) fn handle_keyboard_input(&mut self, ctx: &egui::Context) {
         ctx.input(|i| {
             // While the time signature dialog is open, ignore global keyboard shortcuts
-            if self.show_ts_dialog {
+            if matches!(self.mode, Mode::TimeSignature { .. }) {
                 return;
             }
             // Toggle edit mode with Escape
             if i.key_pressed(Key::Escape) {
-                self.edit_mode_enabled = !self.edit_mode_enabled;
+                self.toggle_mode(Mode::Edit);
             }
 
             // Toggle Play/Stop with Space
@@ -20,7 +20,7 @@ impl Grooph {
                 self.toggle_playback();
             }
 
-            if !self.edit_mode_enabled {
+            if self.mode != Mode::Edit {
                 return;
             }
 
@@ -63,43 +63,41 @@ impl Grooph {
 
                 // Edits apply only when the cursor is on a committed beat
                 let idx = self.cursor_idx.min(beats_len.saturating_sub(1));
-                if self.edit_mode_enabled {
-                    if i.key_pressed(Key::Delete) {
-                        // Remove beat at the cursor
-                        self.push_undo();
-                        self.measure.remove(idx);
-                        // Move cursor right
-                        let new_pos = (self.measure.beats().len() - 1).min(self.cursor_idx + 1);
-                        self.cursor_idx = new_pos;
+                if i.key_pressed(Key::Delete) {
+                    // Remove beat at the cursor
+                    self.push_undo();
+                    self.measure.remove(idx);
+                    // Move cursor right
+                    let new_pos = (self.measure.beats().len() - 1).min(self.cursor_idx + 1);
+                    self.cursor_idx = new_pos;
+                    self.clear_redo();
+                }
+                if i.key_pressed(Key::Backspace) {
+                    // Remove beat at the cursor
+                    self.push_undo();
+                    self.measure.remove(idx);
+                    // Move cursor left
+                    let new_len = self.measure.beats().len();
+                    let new_pos = self.cursor_idx.saturating_sub(1).min(new_len - 1);
+                    self.cursor_idx = new_pos;
+                    self.clear_redo();
+                }
+                // Keyboard input routed through tool shortcuts
+                for t in all_tools().iter().filter(|t| t.shortcut.is_some()) {
+                    let sc = t.shortcut.unwrap();
+                    // Match exact shift requirement
+                    if i.key_pressed(sc.key) && i.modifiers.shift == sc.with_shift {
+                        self.apply_tool(t);
+                    }
+                }
+                if i.key_pressed(Key::T) {
+                    // Snapshot before attempting tuplet cycle via hotkey
+                    self.push_undo();
+                    let res = self.set_tuplet(idx, None);
+                    if res.is_some() {
                         self.clear_redo();
-                    }
-                    if i.key_pressed(Key::Backspace) {
-                        // Remove beat at the cursor
-                        self.push_undo();
-                        self.measure.remove(idx);
-                        // Move cursor left
-                        let new_len = self.measure.beats().len();
-                        let new_pos = self.cursor_idx.saturating_sub(1).min(new_len - 1);
-                        self.cursor_idx = new_pos;
-                        self.clear_redo();
-                    }
-                    // Keyboard input routed through tool shortcuts
-                    for t in all_tools().iter().filter(|t| t.shortcut.is_some()) {
-                        let sc = t.shortcut.unwrap();
-                        // Match exact shift requirement
-                        if i.key_pressed(sc.key) && i.modifiers.shift == sc.with_shift {
-                            self.apply_tool(t);
-                        }
-                    }
-                    if i.key_pressed(Key::T) {
-                        // Snapshot before attempting tuplet cycle via hotkey
-                        self.push_undo();
-                        let res = self.set_tuplet(idx, None);
-                        if res.is_some() {
-                            self.clear_redo();
-                        } else {
-                            let _ = self.undo_stack.pop();
-                        }
+                    } else {
+                        let _ = self.undo_stack.pop();
                     }
                 }
             }

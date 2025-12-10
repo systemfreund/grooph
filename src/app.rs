@@ -26,18 +26,21 @@ use eframe::{App, CreationContext, egui};
 use std::collections::HashMap;
 use log::{debug, info};
 
+#[derive(PartialEq, Eq)]
+enum Mode {
+    Edit,
+    Playback,
+    Mixer,
+    Settings,
+    Help,
+    TimeSignature { beats: u8, unit: u8 },
+}
+
 pub struct Grooph {
+    mode: Mode,
     music_font_id: FontId,
     measure: Measure,
     cursor_idx: BeatIdx,
-    edit_mode_enabled: bool,
-    show_info: bool,
-    show_settings: bool,
-    show_mixer: bool,
-    // Time signature dialog state
-    show_ts_dialog: bool,
-    ts_beats: u8,
-    ts_unit: u8,
     // Prebuilt measures for note/rest/tuplet tool buttons to avoid per-frame reconstruction
     button_measures: HashMap<&'static str, Measure>,
     undo_stack: Vec<(Measure, BeatIdx)>,
@@ -79,7 +82,7 @@ impl App for Grooph {
         self.tool_palette_panel(ctx);
         self.measure_panel(ctx);
 
-        if self.show_ts_dialog {
+        if matches!(self.mode, Mode::TimeSignature { .. }) {
             self.time_signature_dialog(ctx);
         }
 
@@ -185,6 +188,14 @@ impl Grooph {
         measure
     }
 
+    fn toggle_mode(&mut self, mode: Mode) {
+        if self.mode == mode {
+            self.mode = Mode::Playback;
+        } else {
+            self.mode = mode
+        }
+    }
+
     pub fn toggle_playback(&mut self) {
         let old_state = self.player_state.clone();
         self.player_state = if old_state == PlayerState::Playing {
@@ -216,16 +227,10 @@ impl Grooph {
         }
 
         let this = Self {
+            mode: Mode::Playback,
             music_font_id: FontId::new(16.0, ff),
             measure: m,
             cursor_idx: 0,
-            edit_mode_enabled: false,
-            show_info: false,
-            show_settings: false,
-            show_mixer: false,
-            show_ts_dialog: false,
-            ts_beats: TimeSignature::FOUR_FOUR.beats,
-            ts_unit: TimeSignature::FOUR_FOUR.beat_unit,
             button_measures,
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),

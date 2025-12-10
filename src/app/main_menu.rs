@@ -1,8 +1,8 @@
 use crate::Grooph;
-use crate::app::PlayerState;
+use crate::app::{Mode, PlayerState};
 use eframe::egui;
 use eframe::egui::scroll_area::{ScrollBarVisibility, ScrollSource};
-use eframe::egui::{Align, Button, Direction, Image, Layout, Widget, include_image};
+use eframe::egui::{Align, Button, Direction, Layout, Widget};
 
 impl Grooph {
     pub(super) fn main_menu(&mut self, ctx: &egui::Context) {
@@ -18,8 +18,6 @@ impl Grooph {
                     .with_cross_justify(true);
 
                     ui.with_layout(layout, |ui| {
-                        ui.toggle_value(&mut self.edit_mode_enabled, "🖊");
-
                         // Playback controls
                         let button_label =
                             if self.player_state == PlayerState::Playing { "⏹" } else { "⏵" };
@@ -40,15 +38,24 @@ impl Grooph {
                         }
 
                         ui.separator();
+                        if ui.selectable_label(self.mode == Mode::Edit, "🖊").clicked() {
+                            self.toggle_mode(Mode::Edit);
+                        }
                         // ui.selectable_label(
                         //     false,
                         //     Image::new(include_image!("../../assets/metronome_dark.svg"))
                         //         .tint(ui.style().visuals.text_color()),
                         // )
                         // .clicked();
-                        ui.toggle_value(&mut self.show_mixer, "🔈");
-                        ui.toggle_value(&mut self.show_settings, "⚙");
-                        ui.toggle_value(&mut self.show_info, "?");
+                        if ui.selectable_label(self.mode == Mode::Mixer, "🔈").clicked() {
+                            self.toggle_mode(Mode::Mixer);
+                        }
+                        if ui.selectable_label(self.mode == Mode::Settings, "⚙").clicked() {
+                            self.toggle_mode(Mode::Settings);
+                        }
+                        if ui.selectable_label(self.mode == Mode::Help, "?").clicked() {
+                            self.toggle_mode(Mode::Help);
+                        }
                     });
                 });
         });

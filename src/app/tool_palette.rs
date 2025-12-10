@@ -13,13 +13,14 @@ use eframe::egui::{
     Vec2, Widget,
 };
 use log::info;
+use crate::app::Mode;
 
 impl Grooph {
     pub(super) fn tool_palette_panel(&mut self, ctx: &Context) {
         egui::TopBottomPanel::bottom("tool_palette")
             .show_separator_line(false)
             .resizable(false)
-            .show_animated(ctx, self.edit_mode_enabled, |ui| {
+            .show_animated(ctx, self.mode == Mode::Edit, |ui| {
                 let tools = all_tools();
                 let groups = [
                     ToolGroup::Edit,
@@ -84,11 +85,11 @@ impl Grooph {
 
     pub(super) fn apply_tool(&mut self, tool: &Tool) {
         // If edit mode is disabled, ignore all tool interactions
-        if !self.edit_mode_enabled {
+        if self.mode != Mode::Edit {
             return;
         }
         // Block palette/tool actions while a modal dialog is open
-        if self.show_ts_dialog {
+        if matches!(self.mode, Mode::TimeSignature { .. }) {
             return;
         }
         // Take a snapshot for tools that change state; Meta tools like dialogs drop it.
@@ -115,10 +116,8 @@ impl Grooph {
                 // Opening a dialog is not a state mutation: drop snapshot, open dialog
                 let _ = self.undo_stack.pop();
                 let ts = self.measure.time_signature();
-                self.ts_beats = ts.beats;
-                self.ts_unit = ts.beat_unit;
-                self.show_ts_dialog = true;
-                return; // no further state change now
+                self.mode = Mode::TimeSignature { beats: ts.beats, unit: ts.beat_unit };
+                return;
             }
             ToolKind::Meta(MetaOp::ResetMeasure) => {
                 // Keep the snapshot we took before calling apply_tool

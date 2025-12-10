@@ -3,10 +3,11 @@ use crate::measure::BeatKind::{Note, Rest};
 use crate::measure::duration::human_readable;
 use eframe::egui;
 use eframe::egui::{Label, RichText};
+use crate::app::Mode;
 
 impl Grooph {
     pub(super) fn help_panel(&mut self, ctx: &egui::Context) {
-        egui::TopBottomPanel::bottom("info").show_animated(ctx, self.show_info, |ui| {
+        egui::TopBottomPanel::bottom("info").show_animated(ctx, self.mode == Mode::Help, |ui| {
             ui.label(
                 "This app is in early development. Please report any bugs or feature requests.",
             );
