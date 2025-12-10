@@ -43,7 +43,7 @@ impl Grooph {
         });
 
         ctx.style_mut(|style| {
-            style.spacing.button_padding = Vec2::new(10.0, 10.0);
+            style.spacing.button_padding = Vec2::new(15.0, 15.0);
             style.spacing.window_margin = Margin::same(10);
         });
 

@@ -233,8 +233,15 @@ impl Grooph {
     }
 
     fn note_button(&self, ui: &mut Ui, template: BeatTemplate, id: &str) -> Response {
+        let w_factor = match template {
+            BeatTemplate { kind: Note, duration: Duration::Tuplet(..) } => 1.5,
+            _ => 1.0,
+        };
         let symbol_id = Id::new(id);
-        let symbol = Atom::custom(symbol_id, Vec2::splat(TOOL_PALETTE_BUTTON_SIZE));
+        let symbol = Atom::custom(
+            symbol_id,
+            Vec2::new(TOOL_PALETTE_BUTTON_SIZE * w_factor, TOOL_PALETTE_BUTTON_SIZE),
+        );
         let button =
             Button::new(symbol).corner_radius(TOOL_PALETTE_BUTTON_CORNER_RADIUS).atom_ui(ui);
 
@@ -245,21 +252,21 @@ impl Grooph {
             let cap_factor = match template {
                 BeatTemplate { kind: Rest, .. } => 0.8,
                 BeatTemplate { kind: Note, duration: Duration::Simple(..) } => 0.7,
-                BeatTemplate {
-                    kind: Note,
-                    duration: Duration::Tuplet(TupletSpec { n: 9, .. }),
-                } => 0.4,
-                _ => 0.5,
+                // BeatTemplate {
+                //     kind: Note,
+                //     duration: Duration::Tuplet(TupletSpec { n: 9, .. }),
+                // } => 0.35,
+                _ => 0.4,
             };
 
             let em = compute_em(&rect, cap_factor, ui);
 
             let y_offset = match template {
                 BeatTemplate { kind: Note, duration: Duration::Simple(..) } => 20.0,
-                BeatTemplate {
-                    kind: Note,
-                    duration: Duration::Tuplet(TupletSpec { n: 9, .. }),
-                } => 19.0,
+                // BeatTemplate {
+                //     kind: Note,
+                //     duration: Duration::Tuplet(TupletSpec { n: 9, .. }),
+                // } => 18.0,
                 BeatTemplate { kind: Note, duration: Duration::Tuplet(..) } => 22.0,
                 _ => 2.0,
             };
@@ -274,10 +281,7 @@ impl Grooph {
                 stem_length_factor: 0.8,
                 stem_thickness_factor: 0.03,
             };
-            let mut measure_layout = build_measure_layout(measure, &opts);
-            for tl in &mut measure_layout.tuplets {
-                tl.number_font.size = em
-            }
+            let measure_layout = build_measure_layout(measure, &opts);
             let painter = &ui.painter_at(rect);
             draw_notes(painter, &measure_layout, ui.style().visuals.text_color(), &opts);
         }
