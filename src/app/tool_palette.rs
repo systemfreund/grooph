@@ -1,25 +1,28 @@
-use crate::layout::pixel_layout::{build_measure_layout, build_time_sig_layout, LayoutOpts};
-use crate::measure::duration::{Duration, TupletSpec};
-use crate::measure::editing::Modification;
+use crate::app::Mode;
+use crate::layout::pixel_layout::{LayoutOpts, build_measure_layout, build_time_sig_layout};
 use crate::measure::BeatKind::{Note, Rest};
 use crate::measure::Measure;
+use crate::measure::duration::{Duration, TupletSpec};
+use crate::measure::editing::Modification;
 use crate::render::glyphs;
 use crate::render::measure::{compute_em, draw_notes};
-use crate::{all_tools, BeatTemplate, Grooph, MetaOp, Tool, ToolGroup, ToolKind};
+use crate::{BeatTemplate, Grooph, MetaOp, Tool, ToolGroup, ToolKind, all_tools};
 use eframe::egui;
 use eframe::egui::scroll_area::{ScrollBarVisibility, ScrollSource};
 use eframe::egui::{
-    Align, Align2, Atom, Button, Context, Direction, FontId, Id, Layout, Response, RichText, Ui,
-    Vec2, Widget,
+    Align, Align2, Atom, Button, Context, Direction, FontId, Id, Label, Layout, Response, RichText,
+    Ui, Vec2, Widget,
 };
 use log::info;
-use crate::app::Mode;
+
+const TOOL_PALETTE_BUTTON_SIZE: f32 = 70.0;
+const TOOL_PALETTE_BUTTON_CORNER_RADIUS: f32 = 2.0;
 
 impl Grooph {
     pub(super) fn tool_palette_panel(&mut self, ctx: &Context) {
         egui::TopBottomPanel::bottom("tool_palette")
             .show_separator_line(false)
-            .resizable(false)
+            .resizable(true)
             .show_animated(ctx, self.mode == Mode::Edit, |ui| {
                 let tools = all_tools();
                 let groups = [
@@ -38,7 +41,7 @@ impl Grooph {
                             Direction::LeftToRight,
                             Align::Center,
                         )
-                        .with_cross_justify(true);
+                        .with_cross_justify(false);
 
                         ui.with_layout(layout, |ui| {
                             self.tool_palette(tools, groups.as_slice(), ui);
@@ -69,11 +72,23 @@ impl Grooph {
                         }
                     }
                     _ => {
-                        // Generic button for non-insert tools (e.g., Edit: Undo/Redo)
-                        let button = Button::new(RichText::new(t.label).size(24.0))
-                            .corner_radius(5)
-                            .min_size(Vec2::splat(80.0))
-                            .ui(ui);
+                        // Generic button
+                        // let symbol_id = Id::new(t.id);
+                        // let symbol = Atom::custom(symbol_id, Vec2::splat(TOOL_PALETTE_BUTTON_SIZE));
+                        // let button =
+                        //     Button::new(symbol).corner_radius(TOOL_PALETTE_BUTTON_CORNER_RADIUS).atom_ui(ui);
+                        //
+                        // if let Some(rect) = button.rect(symbol_id) {
+                        //     let painter = ui.painter_at(rect);
+                        //     painter.text(rect.center(), Align2::CENTER_CENTER, t.label, )
+                        //     add_sized(rect.size(), Label::new(t.label));
+                        // }
+
+                        let button = ui.add_sized(
+                            Vec2::splat(TOOL_PALETTE_BUTTON_SIZE),
+                            Button::new(RichText::new(t.label).size(24.0))
+                                .corner_radius(TOOL_PALETTE_BUTTON_CORNER_RADIUS),
+                        );
                         if button.clicked() {
                             self.apply_tool(t);
                         }
@@ -166,15 +181,15 @@ impl Grooph {
     }
 
     fn time_signature_button(&self, ui: &mut Ui, id: &str) -> Response {
-        let tile = 80.0;
         let symbol_id = Id::new(id);
-        let symbol = Atom::custom(symbol_id, Vec2::splat(tile));
-        let button = Button::new(symbol).corner_radius(5).atom_ui(ui);
+        let symbol = Atom::custom(symbol_id, Vec2::splat(TOOL_PALETTE_BUTTON_SIZE));
+        let button =
+            Button::new(symbol).corner_radius(TOOL_PALETTE_BUTTON_CORNER_RADIUS).atom_ui(ui);
 
         if let Some(rect) = button.rect(symbol_id) {
             // Render a stacked 4/4 symbol using Bravura, similar to measure rendering
             let painter = &ui.painter_at(rect);
-            let em = compute_em(&rect, 0.5, ui);
+            let em = compute_em(&rect, 0.7, ui);
             let font_id = FontId::new(em, self.music_font_id.family.clone());
 
             // Build a minimal layout area for the time signature only
@@ -218,30 +233,34 @@ impl Grooph {
     }
 
     fn note_button(&self, ui: &mut Ui, template: BeatTemplate, id: &str) -> Response {
-        let tile = 80.0;
         let symbol_id = Id::new(id);
-        let symbol = Atom::custom(symbol_id, Vec2::splat(tile));
-        let button = Button::new(symbol).corner_radius(5).atom_ui(ui);
+        let symbol = Atom::custom(symbol_id, Vec2::splat(TOOL_PALETTE_BUTTON_SIZE));
+        let button =
+            Button::new(symbol).corner_radius(TOOL_PALETTE_BUTTON_CORNER_RADIUS).atom_ui(ui);
 
         if let Some(rect) = button.rect(symbol_id) {
             // Use a prebuilt measure for this button
             let measure = self.button_measures.get(id).unwrap();
 
             let cap_factor = match template {
-                BeatTemplate { kind: Note, duration: Duration::Simple(..) } => 0.6,
+                BeatTemplate { kind: Rest, .. } => 0.8,
+                BeatTemplate { kind: Note, duration: Duration::Simple(..) } => 0.7,
                 BeatTemplate {
                     kind: Note,
                     duration: Duration::Tuplet(TupletSpec { n: 9, .. }),
                 } => 0.4,
-                BeatTemplate { kind: Rest, .. } => 0.6,
-                _ => 0.4,
+                _ => 0.5,
             };
 
             let em = compute_em(&rect, cap_factor, ui);
 
             let y_offset = match template {
                 BeatTemplate { kind: Note, duration: Duration::Simple(..) } => 20.0,
-                BeatTemplate { kind: Note, duration: Duration::Tuplet(..) } => 18.0,
+                BeatTemplate {
+                    kind: Note,
+                    duration: Duration::Tuplet(TupletSpec { n: 9, .. }),
+                } => 19.0,
+                BeatTemplate { kind: Note, duration: Duration::Tuplet(..) } => 22.0,
                 _ => 2.0,
             };
 
@@ -255,7 +274,10 @@ impl Grooph {
                 stem_length_factor: 0.8,
                 stem_thickness_factor: 0.03,
             };
-            let measure_layout = build_measure_layout(measure, &opts);
+            let mut measure_layout = build_measure_layout(measure, &opts);
+            for tl in &mut measure_layout.tuplets {
+                tl.number_font.size = em
+            }
             let painter = &ui.painter_at(rect);
             draw_notes(painter, &measure_layout, ui.style().visuals.text_color(), &opts);
         }
