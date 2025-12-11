@@ -65,6 +65,9 @@ pub struct Grooph {
 
     #[cfg(target_arch = "wasm32")]
     wake_lock: Rc<RefCell<Option<web_sys::WakeLockSentinel>>>,
+    layout_width_cap_factor: f32,
+    layout_accent_below: bool,
+    layout_stem_length_factor: f32,
 }
 
 fn add_font(ctx: &Context) {
@@ -298,6 +301,9 @@ impl Grooph {
             playback_total_ticks: 0,
             #[cfg(target_arch = "wasm32")]
             wake_lock: Rc::new(RefCell::new(None)),
+            layout_width_cap_factor: 0.1,
+            layout_accent_below: true,
+            layout_stem_length_factor: 0.9,
         };
 
         // WASM: install visibilitychange/pageshow listeners once

@@ -74,7 +74,7 @@ impl Grooph {
                         }
                     };
 
-                    let em = compute_em(&rect, 0.1, ui);
+                    let em = compute_em(&rect, self.layout_width_cap_factor, ui);
                     let font_id = FontId::new(em, self.music_font_id.family.clone());
                     let opts = LayoutOpts {
                         rect,
@@ -84,10 +84,10 @@ impl Grooph {
                         layout_clef: true,
                         layout_time_signature: true,
                         y_offset: 0.0,
-                        stem_length_factor: 0.9,
+                        stem_length_factor: self.layout_stem_length_factor,
                         stem_thickness_factor: 0.04,
                         accent_displacement: 0.5,
-                        accent_below: true,
+                        accent_below: self.layout_accent_below,
                     };
 
                     let layout = draw_measure(
