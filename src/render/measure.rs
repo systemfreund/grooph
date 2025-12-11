@@ -40,7 +40,7 @@ pub(crate) fn draw_measure(
         layout_time_signature: true,
         y_offset: 0.0,
         stem_length_factor: 0.9,
-        stem_thickness_factor: 0.03,
+        stem_thickness_factor: 0.04,
         accent_displacement: 0.5,
         accent_below: true,
     };
@@ -164,10 +164,31 @@ pub(crate) fn draw_notes(
         draw_beat(painter, note, opts, color);
     }
 
+    // Pixel snapping helpers (mirrors logic in beat.rs)
+    let ppp = painter.ctx().pixels_per_point();
+    let snap_thickness = |t: f32| -> f32 { (t * ppp).round().max(1.0) / ppp };
+    let snap_x = |x: f32, thickness: f32| -> f32 {
+        let px_thickness = (thickness * ppp).round() as i32;
+        if px_thickness % 2 != 0 {
+            // Odd width: center on half-pixel
+            ((x * ppp).round() + 0.5) / ppp
+        } else {
+            // Even width: center on integer pixel
+            (x * ppp).round() / ppp
+        }
+    };
+
+    // Snapped stem thickness is needed because beam ends align with stems
+    let stem_width = snap_thickness(opts.stem_thickness());
+
     // Beams
     for seg in &measure_layout.beams {
-        let left = seg.p1.x.min(seg.p2.x);
-        let right = seg.p1.x.max(seg.p2.x);
+        // Snap x-coordinates to match stem alignment
+        let x1 = snap_x(seg.p1.x, stem_width);
+        let x2 = snap_x(seg.p2.x, stem_width);
+
+        let left = x1.min(x2);
+        let right = x1.max(x2);
         let yb = seg.p1.y; // bottom edge
         let top = yb - opts.beam_thickness();
         let rect = Rect::from_min_max(pos2(left, top), pos2(right, yb));

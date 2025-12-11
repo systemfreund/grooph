@@ -71,13 +71,17 @@ pub(super) fn draw_beat(
     }
 
     // Draw notehead
-    painter.text(note.center, Align2::CENTER_CENTER, glyph.to_string(), glyph_font, color);
+    let mut note_center = note.center;
+    note_center.x += stem_x_offset;
+    painter.text(note_center, Align2::CENTER_CENTER, glyph.to_string(), glyph_font, color);
 
     // Draw dots
     if !note.dots.is_empty() {
         for p in &note.dots {
+            let mut dot_pos = *p;
+            dot_pos.x += stem_x_offset;
             painter.text(
-                *p,
+                dot_pos,
                 Align2::CENTER_CENTER,
                 glyphs::GLYPH_AUGMENTATION_DOT.to_string(),
                 opts.font_id.clone(),
@@ -88,9 +92,11 @@ pub(super) fn draw_beat(
 
     // Draw accent
     if let Some(p) = note.accent_pos {
+        let mut accent_pos = p;
+        accent_pos.x += stem_x_offset;
         let accent_font = FontId::new(opts.font_id.size * 0.8, opts.font_id.family.clone());
         painter.text(
-            p,
+            accent_pos,
             Align2::CENTER_CENTER,
             glyphs::GLYPH_ACCENT_ABOVE.to_string(),
             accent_font,

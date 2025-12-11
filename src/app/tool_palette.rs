@@ -284,7 +284,7 @@ impl Grooph {
                 layout_time_signature: false,
                 y_offset,
                 stem_length_factor: 0.8,
-                stem_thickness_factor: 0.03,
+                stem_thickness_factor: 0.04,
                 accent_displacement: 0.8,
                 accent_below: false,
             };
