@@ -14,8 +14,9 @@ rodio = { version = "0.21.1", features = ["playback"] }
 env_logger = "0.11.8"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4.55"
-web-sys = "0.3.82"
+web-sys = { version = "0.3.83", features = ["WakeLock", "WakeLockSentinel", "WakeLockType", "Window", "Navigator"] }
 cpal = { version = "0.16.0", features = ["wasm-bindgen"] }
 
 [lints.rust]

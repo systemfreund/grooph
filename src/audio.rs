@@ -180,7 +180,7 @@ impl Audio {
         let mut schedule = BTreeMap::new();
         schedule.insert(0, SoundType::Downbeat);
 
-        for t in DEFAULT_GRID.primary_boundaries(&ts) {
+        for t in DEFAULT_GRID.primary_boundaries(ts) {
             schedule.entry(t).or_insert(SoundType::PrimaryBeat);
         }
 

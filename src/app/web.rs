@@ -1,9 +1,11 @@
 use crate::Grooph;
 use crate::app::{PlayerState, web};
 use eframe::egui::Context;
-use log::{debug, info};
+use log::{debug, error, info};
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU8, Ordering};
+use wasm_bindgen_futures::JsFuture;
+use web_sys::{WakeLockSentinel, WakeLockType};
 use web_sys::wasm_bindgen::JsCast as _;
 use web_sys::wasm_bindgen::closure::Closure;
 
@@ -86,6 +88,44 @@ impl Grooph {
                     self.audio = None;
                 }
             }
+        }
+    }
+
+    pub(super) fn acquire_wake_lock(&self) {
+        let wake_lock_store = self.wake_lock.clone();
+        if wake_lock_store.borrow().is_some() {
+            return;
+        }
+
+        wasm_bindgen_futures::spawn_local(async move {
+            let window = match web_sys::window() {
+                Some(w) => w,
+                None => return,
+            };
+            let navigator = window.navigator();
+            let wake_lock = navigator.wake_lock();
+
+            match JsFuture::from(wake_lock.request(WakeLockType::Screen)).await {
+                Ok(sentinel_js) => {
+                    use wasm_bindgen::JsCast;
+                    let sentinel: WakeLockSentinel = sentinel_js.unchecked_into();
+                    *wake_lock_store.borrow_mut() = Some(sentinel);
+                    debug!("Wake lock acquired");
+                }
+                Err(e) => {
+                    error!("Failed to request wake lock: {:?}", e);
+                }
+            }
+        });
+    }
+
+    pub(super) fn release_wake_lock(&self) {
+        let wake_lock_store = self.wake_lock.clone();
+        if let Some(sentinel) = wake_lock_store.borrow_mut().take() {
+            wasm_bindgen_futures::spawn_local(async move {
+                let _ = JsFuture::from(sentinel.release()).await;
+                debug!("Wake lock released");
+            });
         }
     }
 }

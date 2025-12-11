@@ -11,6 +11,7 @@ pub mod tools;
 #[cfg(target_arch = "wasm32")]
 mod web;
 
+use std::cell::RefCell;
 use crate::measure::duration::{Duration, NoteValue, TupletSpec, q};
 use crate::measure::{BeatIdx, Measure, TimeSignature};
 
@@ -26,6 +27,7 @@ use eframe::epaint::{FontFamily, FontId};
 use eframe::{App, CreationContext, egui};
 use log::{debug, info};
 use std::collections::HashMap;
+use std::rc::Rc;
 
 #[derive(PartialEq, Eq)]
 enum Mode {
@@ -60,6 +62,9 @@ pub struct Grooph {
     playback_smooth_tick: f64,
     playback_last_update: Option<f64>,
     playback_total_ticks: u32,
+
+    #[cfg(target_arch = "wasm32")]
+    wake_lock: Rc<RefCell<Option<web_sys::WakeLockSentinel>>>,
 }
 
 fn add_font(ctx: &Context) {
@@ -221,6 +226,13 @@ impl Grooph {
             PlayerState::Playing
         };
         info!("Toggle playback: {:?} -> {:?}", old_state, self.player_state);
+
+        #[cfg(target_arch = "wasm32")]
+        if self.player_state == PlayerState::Playing {
+            self.acquire_wake_lock();
+        } else {
+            self.release_wake_lock();
+        }
     }
 
     pub fn new(cc: &CreationContext) -> Self {
@@ -284,6 +296,8 @@ impl Grooph {
             playback_smooth_tick: 0.0,
             playback_last_update: None,
             playback_total_ticks: 0,
+            #[cfg(target_arch = "wasm32")]
+            wake_lock: Rc::new(RefCell::new(None)),
         };
 
         // WASM: install visibilitychange/pageshow listeners once
