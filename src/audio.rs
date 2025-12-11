@@ -350,8 +350,8 @@ impl MetronomeSource {
     fn synthesize(&mut self) -> f32 {
         // Synthesize a sample by mixing all active voices with envelope
         let dt = 1.0 / (self.sample_rate as f32);
-        const DECAY: f32 = 0.05; // ~50 ms
-        const ATTACK: f32 = 0.001; // ~1 ms
+        const DECAY: f32 = 0.025; // ~50 ms
+        const ATTACK: f32 = 0.0005; // ~1 ms
 
         if self.active_beeps.is_empty() {
             // If not playing and no active voices, stay silent
