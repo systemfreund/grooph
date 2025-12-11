@@ -9,7 +9,14 @@ impl Grooph {
             ctx,
             self.mode == Mode::Settings,
             |ui| {
-                global_theme_preference_buttons(ui);
+                ui.horizontal(|ui| {
+                    global_theme_preference_buttons(ui);
+                });
+                ui.separator();
+                ui.horizontal(|ui| {
+                    ui.label("Click Base Frequency:");
+                    ui.add(egui::Slider::new(&mut self.mixer.base_frequency, 220.0..=880.0).text("Hz"));
+                });
             },
         );
     }

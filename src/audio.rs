@@ -13,17 +13,31 @@ pub struct MixerVolumes {
     pub primary: f32,
     pub accent: f32,
     pub beat: f32,
+    pub base_frequency: f32,
 }
 
 impl Default for MixerVolumes {
-    fn default() -> Self { Self { downbeat: 1.0, primary: 0.0, accent: 1.0, beat: 1.0 } }
+    fn default() -> Self {
+        Self {
+            downbeat: 1.0,
+            primary: 0.0,
+            accent: 1.0,
+            beat: 1.0,
+            base_frequency: 440.0,
+        }
+    }
 }
 
 impl MixerVolumes {
-    pub fn new(downbeat: f32, primary: f32, accent: f32, beat: f32) -> Self {
-        let result = Self { downbeat, primary, accent, beat };
-        result.clamped();
-        result
+    pub fn new(downbeat: f32, primary: f32, accent: f32, beat: f32, base_frequency: f32) -> Self {
+        let result = Self {
+            downbeat,
+            primary,
+            accent,
+            beat,
+            base_frequency,
+        };
+        result.clamped()
     }
 
     pub fn clamped(mut self) -> Self {
@@ -31,6 +45,7 @@ impl MixerVolumes {
         self.primary = self.primary.clamp(0.0, 1.0);
         self.accent = self.accent.clamp(0.0, 1.0);
         self.beat = self.beat.clamp(0.0, 1.0);
+        self.base_frequency = self.base_frequency.clamp(20.0, 3000.0);
         self
     }
 }
@@ -371,11 +386,12 @@ impl MetronomeSource {
                 continue;
             }
 
+            let base = self.local_params.mixer.base_frequency;
             let freq = match sound_type {
-                SoundType::Downbeat => 1597.0,
-                SoundType::PrimaryBeat => 377.0,
-                SoundType::Beat => 610.0,
-                SoundType::AccentedBeat => 987.0,
+                SoundType::PrimaryBeat => base,
+                SoundType::Beat => base * 1.5,
+                SoundType::AccentedBeat => base * 2.25,
+                SoundType::Downbeat => base * 3.375,
             };
             let gain = match sound_type {
                 SoundType::Downbeat => self.local_params.mixer.downbeat,
