@@ -35,6 +35,7 @@ pub(crate) fn draw_measure(
     let opts = LayoutOpts {
         rect,
         font_id: font_id.clone(),
+        pixels_per_point: ui.ctx().pixels_per_point(),
         em,
         layout_clef: true,
         layout_time_signature: true,
@@ -81,7 +82,6 @@ pub(crate) fn draw_measure(
         let t = ui.input(|i| i.time);
         let phase = (t % blink_period) / blink_period; // 0..1
         let visible = phase < duty;
-        // Smooth fade near edges optional; for now a simple square wave with two alpha levels
         let alpha_on = 220u8;
         let alpha_off = 40u8; // faint but still present; set to 0 to hide completely
         let alpha = if visible { alpha_on } else { alpha_off };
@@ -164,35 +164,9 @@ pub(crate) fn draw_notes(
         draw_beat(painter, note, opts, color);
     }
 
-    // Pixel snapping helpers (mirrors logic in beat.rs)
-    let ppp = painter.ctx().pixels_per_point();
-    let snap_thickness = |t: f32| -> f32 { (t * ppp).round().max(1.0) / ppp };
-    let snap_x = |x: f32, thickness: f32| -> f32 {
-        let px_thickness = (thickness * ppp).round() as i32;
-        if px_thickness % 2 != 0 {
-            // Odd width: center on half-pixel
-            ((x * ppp).round() + 0.5) / ppp
-        } else {
-            // Even width: center on integer pixel
-            (x * ppp).round() / ppp
-        }
-    };
-
-    // Snapped stem thickness is needed because beam ends align with stems
-    let stem_width = snap_thickness(opts.stem_thickness());
-
     // Beams
     for seg in &measure_layout.beams {
-        // Snap x-coordinates to match stem alignment
-        let x1 = snap_x(seg.p1.x, stem_width);
-        let x2 = snap_x(seg.p2.x, stem_width);
-
-        let left = x1.min(x2);
-        let right = x1.max(x2);
-        let yb = seg.p1.y; // bottom edge
-        let top = yb - opts.beam_thickness();
-        let rect = Rect::from_min_max(pos2(left, top), pos2(right, yb));
-        painter.rect_filled(rect, 0.0, color);
+        painter.rect_filled(seg.rect, 0.0, color);
     }
 
     // Tuplets

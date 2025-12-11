@@ -208,6 +208,7 @@ impl Grooph {
             let opts = LayoutOpts {
                 rect,
                 font_id: font_id.clone(),
+                pixels_per_point: ui.ctx().pixels_per_point(),
                 em,
                 layout_clef: false,
                 layout_time_signature: true,
@@ -279,6 +280,7 @@ impl Grooph {
             let opts = LayoutOpts {
                 rect,
                 font_id: FontId::new(em, self.music_font_id.family.clone()),
+                pixels_per_point: ui.ctx().pixels_per_point(),
                 em,
                 layout_clef: false,
                 layout_time_signature: false,

@@ -8,6 +8,7 @@ use eframe::egui::{FontId, Pos2, Rect};
 pub(crate) struct LayoutOpts {
     pub rect: Rect,
     pub font_id: FontId,
+    pub pixels_per_point: f32,
     pub em: f32,
     pub layout_clef: bool,
     pub layout_time_signature: bool,
@@ -43,12 +44,28 @@ impl LayoutOpts {
     pub(crate) const fn bracket_thickness(&self) -> f32 { self.font_id.size * 0.02 }
 
     fn y_center(&self) -> f32 { self.rect.center().y + self.y_offset }
+
+    pub(crate) fn snap_thickness(&self, t: f32) -> f32 {
+        let ppp = self.pixels_per_point;
+        (t * ppp).round().max(1.0) / ppp
+    }
+
+    pub(crate) fn snap_x(&self, x: f32, thickness: f32) -> f32 {
+        let ppp = self.pixels_per_point;
+        let px_thickness = (thickness * ppp).round() as i32;
+        if px_thickness % 2 != 0 {
+            // Odd width: center on half-pixel
+            ((x * ppp).round() + 0.5) / ppp
+        } else {
+            // Even width: center on integer pixel
+            (x * ppp).round() / ppp
+        }
+    }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct BeamLayout {
-    pub p1: Pos2,
-    pub p2: Pos2,
+    pub rect: Rect,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -89,11 +106,10 @@ pub struct MeasureLayout {
     pub clef_pos: Option<Pos2>,
     pub time_signature: Option<TimeSignatureLayout>,
     // Left boundary of the notes drawing area (excludes clef and time signature)
-    pub notes_left_edge: f32
+    pub notes_left_edge: f32,
 }
 
 /// Build the pixel layout (`MeasureLayout`) from a `Measure`.
-/// Note: This intentionally avoids any dependency on `render::glyphs` to keep the module graph acyclic.
 pub fn build_measure_layout(measure: &Measure, opts: &LayoutOpts) -> MeasureLayout {
     let mut x_offset_acc = opts.rect.left();
 
@@ -130,7 +146,7 @@ pub fn build_measure_layout(measure: &Measure, opts: &LayoutOpts) -> MeasureLayo
         tuplets: tuplet_layout,
         clef_pos,
         time_signature: time_signature_layout,
-        notes_left_edge
+        notes_left_edge,
     }
 }
 
@@ -211,62 +227,76 @@ fn build_note_layout(
         }
     }
 
-    fn requires_flag(d: Duration) -> bool {
-        matches!(d.base_note(), NoteValue::Eighth | NoteValue::Sixteenth | NoteValue::ThirtySecond)
-    }
-
     let mut note_layout: Vec<NoteLayout> = Vec::with_capacity(beats.len());
     for (i, b) in beats.iter().enumerate() {
-        let cx = *x_centers.get(i).unwrap_or(&rect.center().x);
+        let ideal_cx = *x_centers.get(i).unwrap_or(&rect.center().x);
         let cy = opts.y_center();
-        let center = Pos2::new(cx, cy);
 
-        // Dots (apply to both notes and rests)
+        // 1. Calculate Stem (if any) and determining pixel-snapping offset
+        // We do this first because the notehead and dots must align with the snapped stem.
+        let mut stem: Option<Line> = None;
+        let mut stem_x_offset = 0.0;
+        let mut stem_width_snapped = 0.0;
+
+        let needs_flag = requires_flag(b.duration);
+        let in_beam = in_beam_flags.get(i).copied().unwrap_or(false);
+        let is_note = b.kind == BeatKind::Note;
+
+        if is_note {
+            let stem_len_factor = if in_beam || needs_flag { 1.0 } else { 0.85 };
+            let stem_len = opts.stem_length() * stem_len_factor;
+            let ideal_stem_x = ideal_cx + opts.stem_offset();
+
+            // Snap stem
+            stem_width_snapped = opts.snap_thickness(opts.stem_thickness());
+            let snapped_stem_x = opts.snap_x(ideal_stem_x, stem_width_snapped);
+            stem_x_offset = snapped_stem_x - ideal_stem_x;
+
+            let start = Pos2::new(snapped_stem_x, cy - opts.em * 0.05);
+            let end = Pos2::new(snapped_stem_x, cy - stem_len);
+            stem = Some(Line { p1: start, p2: end });
+        }
+
+        // 2. Adjust Notehead Center
+        let center = Pos2::new(ideal_cx + stem_x_offset, cy);
+
+        // 3. Dots
         let dot_count = match b.duration {
             Duration::Dotted { dots, .. } => dots,
             _ => 0,
         };
-        let has_flag_tail = b.kind == BeatKind::Note
-            && !in_beam_flags.get(i).copied().unwrap_or(false)
-            && requires_flag(b.duration);
-        let first_dx =
-            if has_flag_tail { opts.font_id.size * 0.5 } else { opts.font_id.size * 0.28 };
-        let step_dx = opts.font_id.size * 0.26;
         let mut dots: Vec<Pos2> = Vec::with_capacity(dot_count as usize);
         if dot_count > 0 {
+            let has_flag_tail = is_note && !in_beam && needs_flag;
+            let first_dx =
+                if has_flag_tail { opts.font_id.size * 0.5 } else { opts.font_id.size * 0.28 };
+            let step_dx = opts.font_id.size * 0.26;
+            // The dots start relative to the shifted center
             for d in 0..dot_count {
-                let x = cx + first_dx + (d as f32) * step_dx;
+                let x = center.x + first_dx + (d as f32) * step_dx;
                 let y = cy - opts.font_id.size * 0.1;
                 dots.push(Pos2::new(x, y));
             }
         }
 
-        // Stem (notes only)
-        let mut stem: Option<Line> = None;
+        // 4. Flag (if needed)
         let mut flag_pos: Option<Pos2> = None;
+        if is_note
+            && !in_beam
+            && needs_flag
+            && let Some(s) = &stem
+        {
+            // Align flag to the left edge of the snapped stem
+            let flag_x = s.p1.x - stem_width_snapped * 0.5;
+            flag_pos = Some(Pos2::new(flag_x, cy - opts.stem_length()));
+        }
+
+        // 5. Accent
         let mut accent_pos: Option<Pos2> = None;
-
-        if b.kind == BeatKind::Note {
-            if b.accented {
-                let dy = opts.em * opts.accent_displacement;
-                let y = if opts.accent_below { cy + dy } else { cy - dy };
-                accent_pos = Some(Pos2::new(cx, y));
-            }
-
-            let start_x = cx + opts.stem_offset();
-            let needs_flag = requires_flag(b.duration);
-            let in_beam = in_beam_flags.get(i).copied().unwrap_or(false);
-            let stem_len_factor = if in_beam || needs_flag { 1.0 } else { 0.85 };
-            let stem_len = opts.stem_length() * stem_len_factor;
-            let start = Pos2::new(start_x, cy - opts.em * 0.05);
-            let end = Pos2::new(start_x, cy - stem_len);
-            stem = Some(Line { p1: start, p2: end });
-
-            // Flag position at stem tip if not in a beam and duration requires a flag
-            if !in_beam && needs_flag {
-                flag_pos =
-                    Some(Pos2::new(start_x - opts.stem_thickness() * 0.5, cy - opts.stem_length()));
-            }
+        if is_note && b.accented {
+            let dy = opts.em * opts.accent_displacement;
+            let y = if opts.accent_below { cy + dy } else { cy - dy };
+            accent_pos = Some(Pos2::new(center.x, y));
         }
 
         note_layout.push(NoteLayout {
@@ -283,6 +313,10 @@ fn build_note_layout(
     note_layout
 }
 
+fn requires_flag(d: Duration) -> bool {
+    matches!(d.base_note(), NoteValue::Eighth | NoteValue::Sixteenth | NoteValue::ThirtySecond)
+}
+
 fn build_beam_layout(
     note_layout: &[NoteLayout],
     beam_groups: &[BeamGroup],
@@ -290,11 +324,22 @@ fn build_beam_layout(
 ) -> Vec<BeamLayout> {
     // align top edge with stem tip ⇒ use bottom y with slight offset to hide seam
     let base_y = opts.y_center() - opts.stem_length() + opts.beam_thickness() * 0.95;
-    let stem_xs: Vec<f32> = note_layout.iter().map(|nl| nl.center.x + opts.stem_offset()).collect();
+
+    // We can rely on note_layout having snapped stems now.
+    // Use stem center X if available, else fallback (though fallback shouldn't happen for beamed notes).
+    let stem_xs: Vec<f32> = note_layout
+        .iter()
+        .map(|nl| nl.stem.map(|s| s.p1.x).unwrap_or(nl.center.x + opts.stem_offset()))
+        .collect();
 
     // Helper: compute y for level
     let y_level =
         |lvl: u8| -> f32 { base_y + (lvl as f32) * (opts.beam_thickness() + opts.beam_gap()) };
+
+    let beam_h = opts.beam_thickness();
+    // To ensure beams cover the stems, we extend them by half the stem width.
+    let stem_w = opts.snap_thickness(opts.stem_thickness());
+    let half_stem = stem_w * 0.5;
 
     let mut beams_out: Vec<BeamLayout> = Vec::new();
 
@@ -307,12 +352,22 @@ fn build_beam_layout(
             if levels == 0 {
                 continue;
             }
-            let offset = opts.stem_thickness() / 3.0; // extend slightly to touch stems nicely
-            let x1 = stem_xs[i] - offset;
-            let x2 = stem_xs[j] + offset;
+
+            let x1 = stem_xs[i];
+            let x2 = stem_xs[j];
+            let left = x1.min(x2) - half_stem;
+            let right = x1.max(x2) + half_stem;
+
             for lvl in 0..levels {
-                let y = y_level(lvl);
-                beams_out.push(BeamLayout { p1: Pos2::new(x1, y), p2: Pos2::new(x2, y) });
+                let y = y_level(lvl); // This is the bottom Y of the beam?
+                // In original code: p1 = (x, y). Rect top = y - thickness.
+                // So y is the BOTTOM edge.
+                let top = y - beam_h;
+                let bottom = y;
+
+                beams_out.push(BeamLayout {
+                    rect: Rect::from_min_max(Pos2::new(left, top), Pos2::new(right, bottom)),
+                });
             }
         }
     }
@@ -335,41 +390,33 @@ fn build_beam_layout(
             let right_cont =
                 if local_k + 1 < note_idxs.len() { *cont.get(local_k).unwrap_or(&0) } else { 0 };
             let stem_x = stem_xs[global_i];
-            let is_first = local_k == 0;
-            let is_last = local_k + 1 == note_idxs.len();
 
             for lvl in 0..count {
                 let connects_left = lvl < left_cont;
                 let connects_right = lvl < right_cont;
-                match (connects_left, connects_right) {
-                    (true, true) => { /* fully connected at this level */ }
-                    (true, false) => { /* do nothing */ }
-                    (false, true) => { /* do nothing */ }
-                    (false, false) => {
-                        let y = y_level(lvl);
-                        if is_first {
-                            beams_out.push(BeamLayout {
-                                p1: Pos2::new(stem_x, y),
-                                p2: Pos2::new(stem_x + opts.stub_length(), y),
-                            });
-                        } else if is_last || left_cont > right_cont {
-                            beams_out.push(BeamLayout {
-                                p1: Pos2::new(stem_x - opts.stub_length(), y),
-                                p2: Pos2::new(stem_x, y),
-                            });
-                        } else if right_cont > left_cont {
-                            beams_out.push(BeamLayout {
-                                p1: Pos2::new(stem_x, y),
-                                p2: Pos2::new(stem_x + opts.stub_length(), y),
-                            });
-                        } else {
-                            // equal continuity → prefer left by policy
-                            beams_out.push(BeamLayout {
-                                p1: Pos2::new(stem_x - opts.stub_length(), y),
-                                p2: Pos2::new(stem_x, y),
-                            });
-                        }
-                    }
+
+                if !connects_left && !connects_right {
+                    let y = y_level(lvl);
+                    let top = y - beam_h;
+                    let bottom = y;
+
+                    let stub_right = if local_k == 0 {
+                        true
+                    } else if local_k + 1 == note_idxs.len() {
+                        false
+                    } else {
+                        right_cont > left_cont
+                    };
+
+                    let (left, right) = if stub_right {
+                        (stem_x - half_stem, stem_x + opts.stub_length())
+                    } else {
+                        (stem_x - opts.stub_length(), stem_x + half_stem)
+                    };
+
+                    beams_out.push(BeamLayout {
+                        rect: Rect::from_min_max(Pos2::new(left, top), Pos2::new(right, bottom)),
+                    });
                 }
             }
         }
@@ -421,10 +468,10 @@ fn build_tuplet_layout(
 
         if !t.number_only() {
             // Bracketed case: raise whole bracket+number if any accent exists in span.
-            let has_accent_in_group = !opts.accent_below && beats
-                .iter()
-                .enumerate()
-                .any(|(i, b)| i >= t.start && i <= t.end && b.kind == BeatKind::Note && b.accented);
+            let has_accent_in_group = !opts.accent_below
+                && beats.iter().enumerate().any(|(i, b)| {
+                    i >= t.start && i <= t.end && b.kind == BeatKind::Note && b.accented
+                });
             let accent_clearance =
                 (if has_accent_in_group { 1.4 } else { -0.4 }) * opts.staff_space();
             let y_bracket = y_base - accent_clearance;
@@ -465,17 +512,19 @@ fn build_tuplet_layout(
             // Number-only case: only lift the number if it would collide with an accent horizontally.
             let num_cx = 0.5 * (x_l + x_r);
             let num_half_w = 0.5 * num_width;
-            let collides = !opts.accent_below && (t.start..=t.end).any(|i| {
-                let b = beats[i];
-                b.kind == BeatKind::Note
-                    && b.accented
-                    && note_layout
-                        .get(i)
-                        .map(|nl| {
-                            nl.center.x >= num_cx - num_half_w && nl.center.x <= num_cx + num_half_w
-                        })
-                        .unwrap_or(false)
-            });
+            let collides = !opts.accent_below
+                && (t.start..=t.end).any(|i| {
+                    let b = beats[i];
+                    b.kind == BeatKind::Note
+                        && b.accented
+                        && note_layout
+                            .get(i)
+                            .map(|nl| {
+                                nl.center.x >= num_cx - num_half_w
+                                    && nl.center.x <= num_cx + num_half_w
+                            })
+                            .unwrap_or(false)
+                });
 
             // Choose vertical clearance based on potential collision
             let close_clearance = -opts.staff_space(); // closer to the beam
@@ -493,4 +542,3 @@ fn build_tuplet_layout(
 
     tuplets_out
 }
-
