@@ -17,6 +17,10 @@ impl Grooph {
                     ui.label("Click Base Frequency:");
                     ui.add(egui::Slider::new(&mut self.mixer.base_frequency, 220.0..=880.0).text("Hz"));
                 });
+                ui.horizontal(|ui| {
+                    ui.label("Click Decay:");
+                    ui.add(egui::Slider::new(&mut self.mixer.decay, 0.01..=0.5).text("s"));
+                });
             },
         );
     }

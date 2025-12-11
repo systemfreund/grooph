@@ -14,6 +14,7 @@ pub struct MixerVolumes {
     pub accent: f32,
     pub beat: f32,
     pub base_frequency: f32,
+    pub decay: f32,
 }
 
 impl Default for MixerVolumes {
@@ -24,18 +25,20 @@ impl Default for MixerVolumes {
             accent: 1.0,
             beat: 1.0,
             base_frequency: 440.0,
+            decay: 0.05,
         }
     }
 }
 
 impl MixerVolumes {
-    pub fn new(downbeat: f32, primary: f32, accent: f32, beat: f32, base_frequency: f32) -> Self {
+    pub fn new(downbeat: f32, primary: f32, accent: f32, beat: f32, base_frequency: f32, decay: f32) -> Self {
         let result = Self {
             downbeat,
             primary,
             accent,
             beat,
             base_frequency,
+            decay,
         };
         result.clamped()
     }
@@ -46,6 +49,7 @@ impl MixerVolumes {
         self.accent = self.accent.clamp(0.0, 1.0);
         self.beat = self.beat.clamp(0.0, 1.0);
         self.base_frequency = self.base_frequency.clamp(20.0, 3000.0);
+        self.decay = self.decay.clamp(0.005, 1.0);
         self
     }
 }
@@ -365,7 +369,7 @@ impl MetronomeSource {
     fn synthesize(&mut self) -> f32 {
         // Synthesize a sample by mixing all active voices with envelope
         let dt = 1.0 / (self.sample_rate as f32);
-        const DECAY: f32 = 0.025; // ~50 ms
+        let decay = self.local_params.mixer.decay;
         const ATTACK: f32 = 0.0005; // ~1 ms
 
         if self.active_beeps.is_empty() {
@@ -380,7 +384,7 @@ impl MetronomeSource {
             let (ref mut phase, sound_type) = self.active_beeps[i];
             *phase += dt;
             let p = *phase;
-            if p > DECAY {
+            if p > decay {
                 // Remove finished voice
                 self.active_beeps.remove(i);
                 continue;
@@ -401,7 +405,7 @@ impl MetronomeSource {
             };
 
             let env_attack = (p / ATTACK).min(1.0);
-            let env_decay = 1.0 - (p / DECAY);
+            let env_decay = 1.0 - (p / decay);
             let env = env_attack * env_decay;
             let val = (p * freq * 2.0 * std::f32::consts::PI).sin();
             mixed += val * env * 0.6 * gain; // master gain 0.6 to leave headroom
