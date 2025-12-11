@@ -227,14 +227,13 @@ impl Measure {
                             _ => Vec::new(),
                         };
                         // When growing, the consumed remainder after the enlarged beat
-                        // should be filled with rests (not notes). Use the current beat
-                        // as a template to preserve metadata (e.g., tuplet ids), but
-                        // switch kind to Rest.
+                        // should preserve the original beat's kind (Note vs Rest) and metadata
+                        // (e.g. tuplet ids), but adapt to the new duration.
                         self.fill_at(
                             p,
                             new_ticks_rest,
                             &allowed,
-                            Either::Left(self.beats[idx].with_kind(Rest)),
+                            Either::Left(b),
                         )?;
                         remaining_to_consume = 0;
                     }
@@ -775,6 +774,25 @@ mod tests {
         // Assert: index 0 becomes 1/8 note, index 1 becomes 1/16 rest
         assert_eq!(m.beats()[0], Beat::note(e()));
         assert_eq!(m.beats()[1], Beat::rest(s()));
+    }
+
+    #[test]
+    fn change_note_to_dotted_does_not_turn_overwritten_beat_to_rest() {
+        let mut m = Measure::new(TimeSignature::ONE_FOUR);
+
+        m.set_beat(0, Beat::note(e())).unwrap();
+        m.set_beat(1, Beat::rest(e())).unwrap();
+
+        let dotted_e = Beat::note(Duration::Dotted { base: Eighth, dots: 1 });
+        assert!(m.set_beat(0, dotted_e).is_ok());
+        assert_eq!(m.beats.to_vec(), vec![dotted_e, Beat::rest(s())]);
+
+        // Now try again where the second beat is not a rest
+        m.set_beat(0, Beat::note(e())).unwrap();
+        m.set_beat(1, Beat::note(e())).unwrap();
+
+        assert!(m.set_beat(0, dotted_e).is_ok());
+        assert_eq!(m.beats.to_vec(), vec![dotted_e, Beat::note(s())]);
     }
 
     #[test]
