@@ -245,8 +245,15 @@ struct MetronomeSource {
     cursor: f64,
     sample_rate: u32,
     // Polyphonic: multiple short beeps may overlap
-    active_beeps: Vec<(f32, SoundType)>,
+    active_beeps: Vec<ActiveVoice>,
     samples_processed: usize,
+}
+
+struct ActiveVoice {
+    phase: f32,
+    freq: f32,
+    gain: f32,
+    decay: f32,
 }
 
 impl MetronomeSource {
@@ -356,12 +363,34 @@ impl MetronomeSource {
         let triggered_sounds = self.determine_triggered_sounds();
         // Enqueue all triggered sounds as new voices (phase = 0)
         if !triggered_sounds.is_empty() {
-            for sound in triggered_sounds {
+            let base = self.local_params.mixer.base_frequency;
+            let current_decay = self.local_params.mixer.decay;
+
+            for sound_type in triggered_sounds {
                 if self.active_beeps.len() >= Self::MAX_VOICES {
                     // drop the oldest to keep CPU bounded
                     self.active_beeps.remove(0);
                 }
-                self.active_beeps.push((0.0, sound));
+
+                let freq = match sound_type {
+                    SoundType::PrimaryBeat => base,
+                    SoundType::Beat => base * 1.5,
+                    SoundType::AccentedBeat => base * 2.25,
+                    SoundType::Downbeat => base * 3.375,
+                };
+                let gain = match sound_type {
+                    SoundType::Downbeat => self.local_params.mixer.downbeat,
+                    SoundType::PrimaryBeat => self.local_params.mixer.primary,
+                    SoundType::Beat => self.local_params.mixer.beat,
+                    SoundType::AccentedBeat => self.local_params.mixer.accent,
+                };
+
+                self.active_beeps.push(ActiveVoice {
+                    phase: 0.0,
+                    freq,
+                    gain,
+                    decay: current_decay,
+                });
             }
         }
     }
@@ -369,7 +398,6 @@ impl MetronomeSource {
     fn synthesize(&mut self) -> f32 {
         // Synthesize a sample by mixing all active voices with envelope
         let dt = 1.0 / (self.sample_rate as f32);
-        let decay = self.local_params.mixer.decay;
         const ATTACK: f32 = 0.0005; // ~1 ms
 
         if self.active_beeps.is_empty() {
@@ -381,34 +409,20 @@ impl MetronomeSource {
         let mut mixed: f32 = 0.0;
         let mut i = 0;
         while i < self.active_beeps.len() {
-            let (ref mut phase, sound_type) = self.active_beeps[i];
-            *phase += dt;
-            let p = *phase;
-            if p > decay {
+            let voice = &mut self.active_beeps[i];
+            voice.phase += dt;
+            let p = voice.phase;
+            if p > voice.decay {
                 // Remove finished voice
                 self.active_beeps.remove(i);
                 continue;
             }
 
-            let base = self.local_params.mixer.base_frequency;
-            let freq = match sound_type {
-                SoundType::PrimaryBeat => base,
-                SoundType::Beat => base * 1.5,
-                SoundType::AccentedBeat => base * 2.25,
-                SoundType::Downbeat => base * 3.375,
-            };
-            let gain = match sound_type {
-                SoundType::Downbeat => self.local_params.mixer.downbeat,
-                SoundType::PrimaryBeat => self.local_params.mixer.primary,
-                SoundType::Beat => self.local_params.mixer.beat,
-                SoundType::AccentedBeat => self.local_params.mixer.accent,
-            };
-
             let env_attack = (p / ATTACK).min(1.0);
-            let env_decay = 1.0 - (p / decay);
+            let env_decay = 1.0 - (p / voice.decay);
             let env = env_attack * env_decay;
-            let val = (p * freq * 2.0 * std::f32::consts::PI).sin();
-            mixed += val * env * 0.6 * gain; // master gain 0.6 to leave headroom
+            let val = (p * voice.freq * 2.0 * std::f32::consts::PI).sin();
+            mixed += val * env * 0.6 * voice.gain; // master gain 0.6 to leave headroom
 
             i += 1;
         }
