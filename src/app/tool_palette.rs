@@ -1,13 +1,13 @@
 use crate::Grooph;
 use crate::app::tools::{BeatTemplate, MetaOp, Modifier, Tool, ToolGroup, ToolKind, all_tools};
 use crate::app::{Mode, tools};
-use crate::layout::pixel_layout::{LayoutOpts, build_measure_layout, build_time_sig_layout};
+use crate::layout::pixel_layout::{LayoutOpts, build_measure_layout, build_time_sig_layout, compute_em};
 use crate::measure::BeatKind::{Note, Rest};
 use crate::measure::duration::{Duration, TupletSpec};
 use crate::measure::editing::Modification;
 use crate::measure::{Beat, Measure};
 use crate::render::glyphs;
-use crate::render::measure::{compute_em, draw_notes};
+use crate::render::measure::draw_notes;
 use eframe::egui;
 use eframe::egui::scroll_area::{ScrollBarVisibility, ScrollSource};
 use eframe::egui::{

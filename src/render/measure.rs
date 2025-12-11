@@ -6,48 +6,24 @@ use crate::render::glyphs;
 use eframe::egui;
 use eframe::egui::{Align2, Color32, FontId, Painter, Rangef, Rect, Stroke, pos2};
 
-pub(crate) fn compute_em(rect: &Rect, width_cap_factor: f32, ui: &egui::Ui) -> f32 {
-    // Derive font size mainly from the available height, modulated by width caps
-    let min_size = 12.0 * ui.ctx().pixels_per_point();
-    let width_cap = (rect.width() * width_cap_factor).max(min_size);
-    let max_size = rect.height().max(min_size);
-    min_size.max(max_size.min(width_cap))
-}
-
 pub(crate) fn draw_measure(
     ui: &mut egui::Ui,
-    font_id: &FontId,
     measure: &Measure,
-    rect: Rect,
+    opts: &LayoutOpts,
     cursor_idx: Option<usize>,
     playback_tick: Option<f64>,
 ) -> MeasureLayout {
-    let color: Color32 = ui.visuals().text_color();
+    let color = ui.visuals().text_color();
     let painter = ui.painter();
-    let y = rect.center().y;
-    let em = compute_em(&rect, 0.1, ui);
+    let rect = opts.rect;
 
     // staff line
-    painter.hline(Rangef::new(rect.left(), rect.right()), y, Stroke::new(0.02 * em, color));
+    painter.hline(Rangef::new(rect.left(), rect.right()), rect.center().y, Stroke::new(0.02 * opts.em, color));
 
-    let font_id = FontId::new(em, font_id.family.clone());
+    let font_id = &opts.font_id;
+    let measure_layout = build_measure_layout(measure, opts);
 
-    let opts = LayoutOpts {
-        rect,
-        font_id: font_id.clone(),
-        pixels_per_point: ui.ctx().pixels_per_point(),
-        em,
-        layout_clef: true,
-        layout_time_signature: true,
-        y_offset: 0.0,
-        stem_length_factor: 0.9,
-        stem_thickness_factor: 0.04,
-        accent_displacement: 0.5,
-        accent_below: true,
-    };
-    let measure_layout = build_measure_layout(measure, &opts);
-
-    // Left block: Clef and stacked time signature from layout (Phase C)
+    // Left block: Clef and stacked time signature from layout
     if let Some(clef_pos) = measure_layout.clef_pos {
         painter.text(
             clef_pos,
@@ -70,9 +46,9 @@ pub(crate) fn draw_measure(
         }
     }
 
-    draw_notes(painter, &measure_layout, color, &opts);
+    draw_notes(painter, &measure_layout, color, opts);
 
-    // 5) Edit cursor at current beat index
+    // Edit cursor at current beat index
     if let Some(idx) = cursor_idx
         && let Some(nl) = measure_layout.notes.get(idx)
     {
@@ -90,12 +66,12 @@ pub(crate) fn draw_measure(
         let bottom = c.y - 0.5 * opts.em;
         let base = if ui.visuals().dark_mode { Color32::YELLOW } else { Color32::BLUE };
         let cursor_color = Color32::from_rgba_unmultiplied(base.r(), base.g(), base.b(), alpha);
-        painter.vline(nl.center.x, Rangef::new(top, bottom), Stroke::new(0.03 * em, cursor_color));
+        painter.vline(nl.center.x, Rangef::new(top, bottom), Stroke::new(0.03 * opts.em, cursor_color));
         // Ensure animation progresses even without input
         ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
     }
 
-    // 6) Playback cursor — independent of edit cursor. Maps tick position to x via layout onsets.
+    // Playback cursor
     if let Some(tick) = playback_tick {
         let ts = measure.time_signature();
         let total_ticks = DEFAULT_GRID.ticks_per_measure(&ts) as f64;

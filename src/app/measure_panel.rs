@@ -1,10 +1,11 @@
 use crate::Grooph;
-use crate::app::tools::{all_tools, Modifier, ToolKind};
+use crate::app::tools::{Modifier, ToolKind, all_tools};
 use crate::app::{Mode, PlayerState};
+use crate::layout::pixel_layout::{LayoutOpts, compute_em};
 use crate::measure::grid::DEFAULT_GRID;
 use crate::render::measure::draw_measure;
 use eframe::egui;
-use eframe::egui::{Context, Frame};
+use eframe::egui::{Context, FontId, Frame};
 
 impl Grooph {
     pub(super) fn measure_panel(&mut self, ctx: &Context) {
@@ -73,51 +74,60 @@ impl Grooph {
                         }
                     };
 
+                    let em = compute_em(&rect, 0.1, ui);
+                    let font_id = FontId::new(em, self.music_font_id.family.clone());
+                    let opts = LayoutOpts {
+                        rect,
+                        font_id: font_id.clone(),
+                        pixels_per_point: ui.ctx().pixels_per_point(),
+                        em,
+                        layout_clef: true,
+                        layout_time_signature: true,
+                        y_offset: 0.0,
+                        stem_length_factor: 0.9,
+                        stem_thickness_factor: 0.04,
+                        accent_displacement: 0.5,
+                        accent_below: true,
+                    };
+
                     let layout = draw_measure(
                         ui,
-                        &self.music_font_id,
                         &self.measure,
-                        rect,
+                        &opts,
                         if self.mode == Mode::Edit { Some(self.cursor_idx) } else { None },
                         playback_tick_to_draw,
                     );
 
-                    // Block canvas interactions while the time signature dialog is open
                     if !matches!(self.mode, Mode::TimeSignature { .. })
                         && (resp.clicked() || resp.dragged())
                         && let Some(pos) = resp.interact_pointer_pos()
+                        && !layout.notes.is_empty()
                     {
-                        // Falls keine Beats vorhanden sind, nichts tun
-                        if !layout.notes.is_empty() {
-                            // Außerhalb des Inhalts: zum nächstliegenden Rand clampen
-                            let target_x = pos.x;
-                            let idx = if target_x <= rect.left() {
-                                0
-                            } else if target_x >= rect.right() {
-                                layout.notes.len() - 1
-                            } else {
-                                // Innerhalb: Index des nächstgelegenen x-Centers suchen
-                                let mut best_i = 0usize;
-                                let mut best_d = f32::MAX;
-                                for (i, nl) in layout.notes.iter().enumerate() {
-                                    let d = (nl.center.x - target_x).abs();
-                                    if d < best_d {
-                                        best_d = d;
-                                        best_i = i;
-                                    }
-                                }
-                                best_i
-                            };
-                            self.cursor_idx = idx;
-
-                            if resp.double_clicked() {
-                                if let Some(tool) = all_tools()
-                                    .iter()
-                                    .find(|t| matches!(t.kind, ToolKind::Modify(Modifier::ToggleRestNote)))
-                                {
-                                    self.apply_tool(tool);
+                        let target_x = pos.x;
+                        let idx = if target_x <= rect.left() {
+                            0
+                        } else if target_x >= rect.right() {
+                            layout.notes.len() - 1
+                        } else {
+                            let mut best_i = 0usize;
+                            let mut best_d = f32::MAX;
+                            for (i, nl) in layout.notes.iter().enumerate() {
+                                let d = (nl.center.x - target_x).abs();
+                                if d < best_d {
+                                    best_d = d;
+                                    best_i = i;
                                 }
                             }
+                            best_i
+                        };
+                        self.cursor_idx = idx;
+
+                        if resp.double_clicked()
+                            && let Some(tool) = all_tools().iter().find(|t| {
+                                matches!(t.kind, ToolKind::Modify(Modifier::ToggleRestNote))
+                            })
+                        {
+                            self.apply_tool(tool);
                         }
                     }
                 });

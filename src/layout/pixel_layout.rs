@@ -3,7 +3,15 @@ use crate::layout::render_plan::plan_measure;
 use crate::layout::tuplet_plan::TupletPlan;
 use crate::measure::duration::{Duration, NoteValue};
 use crate::measure::{Beat, BeatKind, Measure, TimeSignature};
-use eframe::egui::{FontId, Pos2, Rect};
+use eframe::egui::{self, FontId, Pos2, Rect};
+
+pub fn compute_em(rect: &Rect, width_cap_factor: f32, ui: &egui::Ui) -> f32 {
+    // Derive font size mainly from the available height, modulated by width caps
+    let min_size = 12.0 * ui.ctx().pixels_per_point();
+    let width_cap = (rect.width() * width_cap_factor).max(min_size);
+    let max_size = rect.height().max(min_size);
+    min_size.max(max_size.min(width_cap))
+}
 
 pub(crate) struct LayoutOpts {
     pub rect: Rect,
