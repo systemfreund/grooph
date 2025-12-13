@@ -27,13 +27,25 @@ impl Grooph {
                                 Waveform::Triangle => "Triangle",
                                 Waveform::Square => "Square",
                                 Waveform::Sawtooth => "Sawtooth",
+                                Waveform::Noise => "Noise",
                             })
                             .show_ui(ui, |ui| {
                                 ui.selectable_value(&mut self.mixer.waveform, Waveform::Sine, "Sine");
                                 ui.selectable_value(&mut self.mixer.waveform, Waveform::Triangle, "Triangle");
                                 ui.selectable_value(&mut self.mixer.waveform, Waveform::Square, "Square");
                                 ui.selectable_value(&mut self.mixer.waveform, Waveform::Sawtooth, "Sawtooth");
+                                ui.selectable_value(&mut self.mixer.waveform, Waveform::Noise, "Noise");
                             });
+                        if matches!(self.mixer.waveform, Waveform::Noise) {
+                            ui.separator();
+                            ui.label("Noise High-Pass Cutoff:");
+                            ui.add(
+                                egui::DragValue::new(&mut self.mixer.noise_hpf_hz)
+                                    .range(2000.0..=6000.0)
+                                    .speed(10.0)
+                                    .suffix("Hz"),
+                            );
+                        }
                         ui.separator();
                         ui.label("Base Frequency (PrimaryBeat):");
                         ui.add(

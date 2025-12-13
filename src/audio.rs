@@ -2,6 +2,8 @@ use crate::measure::grid::DEFAULT_GRID;
 use crate::measure::{BeatKind, Measure, TimeSignature};
 use log::{debug, error, info, log, trace};
 use rodio::source::{Function as RodioFunction, SignalGenerator};
+use rodio::source::noise::WhiteUniform;
+use rodio::source::BltFilter;
 use rodio::Source;
 use std::collections::BTreeMap;
 use std::fmt::{Debug, Formatter, Write};
@@ -14,15 +16,17 @@ pub enum Waveform {
     Triangle,
     Square,
     Sawtooth,
+    Noise, // White noise (will be high-pass gefiltert)
 }
 
 impl Waveform {
-    fn to_rodio(self) -> RodioFunction {
+    fn to_rodio(self) -> Option<RodioFunction> {
         match self {
-            Waveform::Sine => RodioFunction::Sine,
-            Waveform::Triangle => RodioFunction::Triangle,
-            Waveform::Square => RodioFunction::Square,
-            Waveform::Sawtooth => RodioFunction::Sawtooth,
+            Waveform::Sine => Some(RodioFunction::Sine),
+            Waveform::Triangle => Some(RodioFunction::Triangle),
+            Waveform::Square => Some(RodioFunction::Square),
+            Waveform::Sawtooth => Some(RodioFunction::Sawtooth),
+            Waveform::Noise => None,
         }
     }
 }
@@ -36,6 +40,7 @@ pub struct MixerVolumes {
     pub base_frequency: f32,
     pub decay: f32,
     pub waveform: Waveform,
+    pub noise_hpf_hz: f32, // High-Pass-Cutoff für Noise (2-6 kHz)
 }
 
 impl Default for MixerVolumes {
@@ -48,6 +53,7 @@ impl Default for MixerVolumes {
             base_frequency: 440.0,
             decay: 0.05,
             waveform: Waveform::Sine,
+            noise_hpf_hz: 4000.0,
         }
     }
 }
@@ -62,6 +68,7 @@ impl MixerVolumes {
             base_frequency,
             decay,
             waveform: Waveform::Sine,
+            noise_hpf_hz: 4000.0,
         };
         result.clamped()
     }
@@ -73,6 +80,7 @@ impl MixerVolumes {
         self.beat = self.beat.clamp(0.0, 1.0);
         self.base_frequency = self.base_frequency.clamp(20.0, 3000.0);
         self.decay = self.decay.clamp(0.005, 1.0);
+        self.noise_hpf_hz = self.noise_hpf_hz.clamp(2000.0, 6000.0);
         self
     }
 }
@@ -390,7 +398,7 @@ impl MetronomeSource {
         if !triggered_sounds.is_empty() {
             let base = self.local_params.mixer.base_frequency;
             let current_decay = self.local_params.mixer.decay;
-            let waveform_fn = self.local_params.mixer.waveform.to_rodio();
+            let waveform_opt = self.local_params.mixer.waveform.to_rodio();
 
             for sound_type in triggered_sounds {
                 if self.active_beeps.len() >= Self::MAX_VOICES {
@@ -411,10 +419,27 @@ impl MetronomeSource {
                     SoundType::AccentedBeat => self.local_params.mixer.accent,
                 };
 
-                // Build rodio signal generator for this voice's frequency and selected waveform
-                let hz = freq.max(1.0) as f32;
-                let generator = SignalGenerator::new(self.sample_rate, hz, waveform_fn.clone());
-                let signal: Box<dyn Iterator<Item = f32> + Send> = Box::new(generator);
+                // Build Signal je nach Waveform
+                let signal: Box<dyn Iterator<Item = f32> + Send> = match (self.local_params.mixer.waveform, waveform_opt.clone()) {
+                    (Waveform::Noise, _) => {
+                        // Rodio-WhiteNoise + Hochpassfilter (2–6 kHz Bereich, per Mixer wählbar)
+                        let cutoff_hz_u32 = self.local_params.mixer.noise_hpf_hz as u32;
+                        let white = WhiteUniform::new(self.sample_rate);
+                        let hp = white.high_pass(cutoff_hz_u32);
+                        Box::new(hp)
+                    }
+                    (_, Some(func)) => {
+                        let hz = freq.max(1.0) as f32;
+                        let generator = SignalGenerator::new(self.sample_rate, hz, func);
+                        Box::new(generator)
+                    }
+                    // Fallback: Sine
+                    _ => {
+                        let hz = freq.max(1.0) as f32;
+                        let generator = SignalGenerator::new(self.sample_rate, hz, RodioFunction::Sine);
+                        Box::new(generator)
+                    }
+                };
 
                 self.active_beeps.push(ActiveVoice { signal, age: 0.0, gain, decay: current_decay });
             }
