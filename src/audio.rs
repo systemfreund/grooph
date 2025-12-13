@@ -1,6 +1,7 @@
 use crate::measure::grid::DEFAULT_GRID;
 use crate::measure::{BeatKind, Measure, TimeSignature};
 use log::{debug, error, info, log, trace};
+use rodio::source::SineWave;
 use rodio::Source;
 use std::collections::BTreeMap;
 use std::fmt::{Debug, Formatter, Write};
@@ -250,8 +251,10 @@ struct MetronomeSource {
 }
 
 struct ActiveVoice {
-    phase: f32,
-    freq: f32,
+    // Delegated signal generator (rodio). Keep it generic for future waveforms.
+    signal: Box<dyn Iterator<Item = f32> + Send>,
+    // Age of this voice in seconds to drive our envelope/decay bookkeeping
+    age: f32,
     gain: f32,
     decay: f32,
 }
@@ -385,12 +388,13 @@ impl MetronomeSource {
                     SoundType::AccentedBeat => self.local_params.mixer.accent,
                 };
 
-                self.active_beeps.push(ActiveVoice {
-                    phase: 0.0,
-                    freq,
-                    gain,
-                    decay: current_decay,
-                });
+                // Build rodio sine generator for this voice's frequency.
+                // SineWave::new expects frequency in Hz as f32
+                let hz = freq.max(1.0) as f32;
+                let sine = SineWave::new(hz);
+                let signal: Box<dyn Iterator<Item = f32> + Send> = Box::new(sine);
+
+                self.active_beeps.push(ActiveVoice { signal, age: 0.0, gain, decay: current_decay });
             }
         }
     }
@@ -410,8 +414,8 @@ impl MetronomeSource {
         let mut i = 0;
         while i < self.active_beeps.len() {
             let voice = &mut self.active_beeps[i];
-            voice.phase += dt;
-            let p = voice.phase;
+            voice.age += dt;
+            let p = voice.age;
             if p > voice.decay {
                 // Remove finished voice
                 self.active_beeps.remove(i);
@@ -421,8 +425,18 @@ impl MetronomeSource {
             let env_attack = (p / ATTACK).min(1.0);
             let env_decay = 1.0 - (p / voice.decay);
             let env = env_attack * env_decay;
-            let val = (p * voice.freq * 2.0 * std::f32::consts::PI).sin();
-            mixed += val * env * 0.6 * voice.gain; // master gain 0.6 to leave headroom
+
+            // Pull next sample from delegated generator
+            let sample = match voice.signal.next() {
+                Some(s) => s,
+                None => {
+                    // In practice, SineWave is infinite; if exhausted, drop voice
+                    self.active_beeps.remove(i);
+                    continue;
+                }
+            };
+
+            mixed += sample * env * 0.6 * voice.gain; // master gain 0.6 to leave headroom
 
             i += 1;
         }
