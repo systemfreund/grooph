@@ -1,3 +1,4 @@
+use crate::audio::Waveform;
 use crate::Grooph;
 use crate::app::Mode;
 use eframe::egui;
@@ -19,6 +20,20 @@ impl Grooph {
                                 .speed(0.001)
                                 .suffix("s"),
                         );
+                        ui.separator();
+                        egui::ComboBox::from_label("Waveform")
+                            .selected_text(match self.mixer.waveform {
+                                Waveform::Sine => "Sine",
+                                Waveform::Triangle => "Triangle",
+                                Waveform::Square => "Square",
+                                Waveform::Sawtooth => "Sawtooth",
+                            })
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(&mut self.mixer.waveform, Waveform::Sine, "Sine");
+                                ui.selectable_value(&mut self.mixer.waveform, Waveform::Triangle, "Triangle");
+                                ui.selectable_value(&mut self.mixer.waveform, Waveform::Square, "Square");
+                                ui.selectable_value(&mut self.mixer.waveform, Waveform::Sawtooth, "Sawtooth");
+                            });
                         ui.separator();
                         ui.label("Base Frequency (PrimaryBeat):");
                         ui.add(

@@ -1,12 +1,31 @@
 use crate::measure::grid::DEFAULT_GRID;
 use crate::measure::{BeatKind, Measure, TimeSignature};
 use log::{debug, error, info, log, trace};
-use rodio::source::SineWave;
+use rodio::source::{Function as RodioFunction, SignalGenerator};
 use rodio::Source;
 use std::collections::BTreeMap;
 use std::fmt::{Debug, Formatter, Write};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Waveform {
+    Sine,
+    Triangle,
+    Square,
+    Sawtooth,
+}
+
+impl Waveform {
+    fn to_rodio(self) -> RodioFunction {
+        match self {
+            Waveform::Sine => RodioFunction::Sine,
+            Waveform::Triangle => RodioFunction::Triangle,
+            Waveform::Square => RodioFunction::Square,
+            Waveform::Sawtooth => RodioFunction::Sawtooth,
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct MixerVolumes {
@@ -16,6 +35,7 @@ pub struct MixerVolumes {
     pub beat: f32,
     pub base_frequency: f32,
     pub decay: f32,
+    pub waveform: Waveform,
 }
 
 impl Default for MixerVolumes {
@@ -27,6 +47,7 @@ impl Default for MixerVolumes {
             beat: 1.0,
             base_frequency: 440.0,
             decay: 0.05,
+            waveform: Waveform::Sine,
         }
     }
 }
@@ -40,6 +61,7 @@ impl MixerVolumes {
             beat,
             base_frequency,
             decay,
+            waveform: Waveform::Sine,
         };
         result.clamped()
     }
@@ -368,6 +390,7 @@ impl MetronomeSource {
         if !triggered_sounds.is_empty() {
             let base = self.local_params.mixer.base_frequency;
             let current_decay = self.local_params.mixer.decay;
+            let waveform_fn = self.local_params.mixer.waveform.to_rodio();
 
             for sound_type in triggered_sounds {
                 if self.active_beeps.len() >= Self::MAX_VOICES {
@@ -388,11 +411,10 @@ impl MetronomeSource {
                     SoundType::AccentedBeat => self.local_params.mixer.accent,
                 };
 
-                // Build rodio sine generator for this voice's frequency.
-                // SineWave::new expects frequency in Hz as f32
+                // Build rodio signal generator for this voice's frequency and selected waveform
                 let hz = freq.max(1.0) as f32;
-                let sine = SineWave::new(hz);
-                let signal: Box<dyn Iterator<Item = f32> + Send> = Box::new(sine);
+                let generator = SignalGenerator::new(self.sample_rate, hz, waveform_fn.clone());
+                let signal: Box<dyn Iterator<Item = f32> + Send> = Box::new(generator);
 
                 self.active_beeps.push(ActiveVoice { signal, age: 0.0, gain, decay: current_decay });
             }
