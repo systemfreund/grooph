@@ -40,6 +40,7 @@ pub struct MixerVolumes {
     pub waveform: Waveform,
     pub noise_hpf_hz: f32, // High-Pass-Cutoff für Noise (2-6 kHz)
     pub noise_mix: f32,    // Anteil [0..1], der dem Basissignal beigemischt wird
+    pub noise_decay: f32,  // unabhängiger Decay nur für Noise-Anteil
 }
 
 impl Default for MixerVolumes {
@@ -54,6 +55,7 @@ impl Default for MixerVolumes {
             waveform: Waveform::Sine,
             noise_hpf_hz: 4000.0,
             noise_mix: 0.0,
+            noise_decay: 0.05,
         }
     }
 }
@@ -70,6 +72,7 @@ impl MixerVolumes {
             waveform: Waveform::Sine,
             noise_hpf_hz: 4000.0,
             noise_mix: 0.0,
+            noise_decay: 0.05,
         };
         result.clamped()
     }
@@ -83,6 +86,7 @@ impl MixerVolumes {
         self.decay = self.decay.clamp(0.005, 1.0);
         self.noise_hpf_hz = self.noise_hpf_hz.clamp(2000.0, 6000.0);
         self.noise_mix = self.noise_mix.clamp(0.0, 1.0);
+        self.noise_decay = self.noise_decay.clamp(0.005, 1.0);
         self
     }
 }
@@ -283,12 +287,14 @@ struct MetronomeSource {
 }
 
 struct ActiveVoice {
-    // Delegated signal generator (rodio). Keep it generic for future waveforms.
-    signal: Box<dyn Iterator<Item = f32> + Send>,
+    // Delegated signal generators (rodio). Basis + optional Noise getrennt.
+    base_signal: Box<dyn Iterator<Item = f32> + Send>,
+    noise_signal: Option<Box<dyn Iterator<Item = f32> + Send>>,
     // Age of this voice in seconds to drive our envelope/decay bookkeeping
     age: f32,
     gain: f32,
-    decay: f32,
+    tone_decay: f32,
+    noise_decay: f32,
 }
 
 impl MetronomeSource {
@@ -400,6 +406,7 @@ impl MetronomeSource {
         if !triggered_sounds.is_empty() {
             let base = self.local_params.mixer.base_frequency;
             let current_decay = self.local_params.mixer.decay;
+            let noise_decay = self.local_params.mixer.noise_decay;
 
             for sound_type in triggered_sounds {
                 if self.active_beeps.len() >= Self::MAX_VOICES {
@@ -425,20 +432,22 @@ impl MetronomeSource {
                 let base = SignalGenerator::new(self.sample_rate, hz, func);
 
                 let noise_mix = self.local_params.mixer.noise_mix;
-                let signal: Box<dyn Iterator<Item = f32> + Send> = if noise_mix > 0.0001 {
-                    // Rauschanteil erstellen und hochpassen
+                let noise_signal: Option<Box<dyn Iterator<Item = f32> + Send>> = if noise_mix > 0.0001 {
                     let cutoff_hz_u32 = self.local_params.mixer.noise_hpf_hz as u32;
                     let noise = WhiteUniform::new(self.sample_rate).high_pass(cutoff_hz_u32);
-                    // Skalieren: Basissignal (1-noise_mix), Noise (noise_mix) und mischen
-                    let base_amp = base.amplify(1.0 - noise_mix);
-                    let noise_amp = noise.amplify(noise_mix);
-                    let mixed = base_amp.mix(noise_amp);
-                    Box::new(mixed)
+                    Some(Box::new(noise))
                 } else {
-                    Box::new(base)
+                    None
                 };
 
-                self.active_beeps.push(ActiveVoice { signal, age: 0.0, gain, decay: current_decay });
+                self.active_beeps.push(ActiveVoice {
+                    base_signal: Box::new(base),
+                    noise_signal,
+                    age: 0.0,
+                    gain,
+                    tone_decay: current_decay,
+                    noise_decay,
+                });
             }
         }
     }
@@ -460,27 +469,36 @@ impl MetronomeSource {
             let voice = &mut self.active_beeps[i];
             voice.age += dt;
             let p = voice.age;
-            if p > voice.decay {
-                // Remove finished voice
+            // Voice bleibt aktiv bis beide Decays vorbei sind (Basis und ggf. Noise)
+            let tone_alive = p <= voice.tone_decay;
+            let noise_alive = p <= voice.noise_decay && voice.noise_signal.is_some();
+            if !tone_alive && !noise_alive {
                 self.active_beeps.remove(i);
                 continue;
             }
 
             let env_attack = (p / ATTACK).min(1.0);
-            let env_decay = 1.0 - (p / voice.decay);
-            let env = env_attack * env_decay;
+            let env_tone_decay = if voice.tone_decay > 0.0 { 1.0 - (p / voice.tone_decay) } else { 0.0 };
+            let env_noise_decay = if voice.noise_decay > 0.0 { 1.0 - (p / voice.noise_decay) } else { 0.0 };
+            let env_tone = (env_attack * env_tone_decay).clamp(0.0, 1.0);
+            let env_noise = (env_attack * env_noise_decay).clamp(0.0, 1.0);
 
-            // Pull next sample from delegated generator
-            let sample = match voice.signal.next() {
-                Some(s) => s,
-                None => {
-                    // In practice, SineWave is infinite; if exhausted, drop voice
-                    self.active_beeps.remove(i);
-                    continue;
-                }
-            };
+            // Samples ziehen
+            let base_sample = if tone_alive {
+                match voice.base_signal.next() { Some(s) => s, None => 0.0 }
+            } else { 0.0 };
 
-            mixed += sample * env * 0.6 * voice.gain; // master gain 0.6 to leave headroom
+            let noise_sample = if noise_alive {
+                if let Some(noise) = &mut voice.noise_signal {
+                    noise.next().unwrap_or(0.0)
+                } else { 0.0 }
+            } else { 0.0 };
+
+            let noise_mix = self.local_params.mixer.noise_mix;
+            let tone_contrib = base_sample * (1.0 - noise_mix) * env_tone;
+            let noise_contrib = noise_sample * noise_mix * env_noise;
+
+            mixed += (tone_contrib + noise_contrib) * 0.6 * voice.gain; // master gain 0.6 to leave headroom
 
             i += 1;
         }

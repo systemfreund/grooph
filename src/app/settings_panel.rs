@@ -6,7 +6,7 @@ use eframe::egui::{Align, Direction, Layout, Widget, global_theme_preference_but
 
 impl Grooph {
     pub(super) fn settings_panel(&mut self, ctx: &egui::Context) {
-        egui::TopBottomPanel::bottom("settings").show_animated(
+        egui::TopBottomPanel::bottom("settings").resizable(true).show_animated(
             ctx,
             self.mode == Mode::Settings,
             |ui| {
@@ -48,6 +48,14 @@ impl Grooph {
                                     .range(2000.0..=6000.0)
                                     .speed(10.0)
                                     .suffix(" Hz"),
+                            );
+                            ui.separator();
+                            ui.label("Noise Decay:");
+                            ui.add(
+                                egui::DragValue::new(&mut self.mixer.noise_decay)
+                                    .range(0.01..=0.5)
+                                    .speed(0.001)
+                                    .suffix("s"),
                             );
                         }
                         ui.separator();
