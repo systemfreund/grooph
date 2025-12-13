@@ -1,7 +1,7 @@
 use crate::Grooph;
 use crate::app::Mode;
 use eframe::egui;
-use eframe::egui::global_theme_preference_buttons;
+use eframe::egui::{Align, Direction, Layout, Widget, global_theme_preference_buttons};
 
 impl Grooph {
     pub(super) fn settings_panel(&mut self, ctx: &egui::Context) {
@@ -9,41 +9,65 @@ impl Grooph {
             ctx,
             self.mode == Mode::Settings,
             |ui| {
-                ui.horizontal(|ui| {
+                ui.set_min_height(300.0);
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    egui::CollapsingHeader::new("Click").default_open(false).show(ui, |ui| {
+                        ui.label("Decay:");
+                        ui.add(
+                            egui::DragValue::new(&mut self.mixer.decay)
+                                .range(0.01..=0.5)
+                                .speed(0.001)
+                                .suffix("s"),
+                        );
+                        ui.separator();
+                        ui.label("Base Frequency (PrimaryBeat):");
+                        ui.add(
+                            egui::DragValue::new(&mut self.mixer.base_frequency)
+                                .range(220.0..=880.0)
+                                .speed(0.1)
+                                .suffix("Hz"),
+                        );
+                    });
+
+                    egui::CollapsingHeader::new("Audio Latency").default_open(false).show(ui, |ui| {
+                        ui.checkbox(&mut self.audio_latency_enabled, "Enabled");
+                        ui.add_enabled_ui(self.audio_latency_enabled, |ui| {
+                            ui.label("Offset:");
+                            ui.add(
+                                egui::DragValue::new(&mut self.audio_offset)
+                                    .range(-0.5..=0.5)
+                                    .speed(0.001)
+                                    .suffix("s"),
+                            );
+                        });
+                        ui.label("Adjust if audio is out of sync with cursor.");
+                    });
+
+                    egui::CollapsingHeader::new("Developer settings").default_open(false).show(
+                        ui,
+                        |ui| {
+                            ui.label("Size:");
+                            ui.add(
+                                egui::DragValue::new(&mut self.layout_width_cap_factor)
+                                    .range(0.05..=0.5),
+                            );
+                            ui.separator();
+                            ui.label("Stem Length Factor:");
+                            ui.add(egui::DragValue::new(&mut self.layout_stem_length_factor).range(0.1..=2.0));
+                            ui.separator();
+                            ui.horizontal(|ui| {
+                                ui.label("Accents Position:");
+                                ui.radio_value(&mut self.layout_accent_below, true, "Below");
+                                ui.radio_value(&mut self.layout_accent_below, false, "Above");
+                            });
+                        },
+                    );
+
+                    ui.separator();
+                    ui.label("Theme:");
                     global_theme_preference_buttons(ui);
                 });
-                ui.separator();
 
-                egui::CollapsingHeader::new("Click")
-                    .default_open(false)
-                    .show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.label("Base Frequency (PrimaryBeat):");
-                            ui.add(egui::Slider::new(&mut self.mixer.base_frequency, 220.0..=880.0).text("Hz"));
-                        });
-                        ui.horizontal(|ui| {
-                            ui.label("Click Decay:");
-                            ui.add(egui::Slider::new(&mut self.mixer.decay, 0.01..=0.5).text("s"));
-                        });
-                    });
-
-                egui::CollapsingHeader::new("Developer settings")
-                    .default_open(false)
-                    .show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.label("Size:");
-                            ui.add(egui::Slider::new(&mut self.layout_width_cap_factor, 0.05..=0.5));
-                        });
-                        ui.horizontal(|ui| {
-                            ui.label("Stem Length Factor:");
-                            ui.add(egui::Slider::new(&mut self.layout_stem_length_factor, 0.1..=2.0));
-                        });
-                        ui.horizontal(|ui| {
-                            ui.label("Accents Position:");
-                            ui.radio_value(&mut self.layout_accent_below, true, "Below");
-                            ui.radio_value(&mut self.layout_accent_below, false, "Above");
-                        });
-                    });
             },
         );
     }

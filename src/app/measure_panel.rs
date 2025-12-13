@@ -35,10 +35,18 @@ impl Grooph {
 
                             // Sync with audio if available
                             if let Some(audio) = &self.audio
-                                && let Some((audio_tick, audio_total)) = audio.playback_position()
+                                && let Some((raw_audio_tick, audio_total)) = audio.playback_position()
                             {
                                 let total = audio_total as f64;
                                 if total > 0.0 {
+                                    // Adjust for user-configured audio offset (latency) if enabled
+                                    let offset_ticks = if self.audio_latency_enabled {
+                                        self.audio_offset as f64 * ticks_per_sec
+                                    } else {
+                                        0.0
+                                    };
+                                    let audio_tick = (raw_audio_tick - offset_ticks).rem_euclid(total);
+
                                     let mut diff = audio_tick - next_tick;
                                     // Handle wrap-around (shortest path)
                                     if diff > total * 0.5 {

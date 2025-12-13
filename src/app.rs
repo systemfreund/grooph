@@ -68,6 +68,8 @@ pub struct Grooph {
     layout_width_cap_factor: f32,
     layout_accent_below: bool,
     layout_stem_length_factor: f32,
+    audio_offset: f32,
+    audio_latency_enabled: bool,
 }
 
 fn add_font(ctx: &Context) {
@@ -304,6 +306,8 @@ impl Grooph {
             layout_width_cap_factor: 0.1,
             layout_accent_below: true,
             layout_stem_length_factor: 0.9,
+            audio_offset: 0.0,
+            audio_latency_enabled: true,
         };
 
         // WASM: install visibilitychange/pageshow listeners once
