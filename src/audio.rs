@@ -30,7 +30,7 @@ impl Waveform {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct MixerVolumes {
+pub struct AudioSettings {
     pub downbeat: f32,
     pub primary: f32,
     pub accent: f32,
@@ -43,7 +43,7 @@ pub struct MixerVolumes {
     pub noise_decay: f32,  // unabhängiger Decay nur für Noise-Anteil
 }
 
-impl Default for MixerVolumes {
+impl Default for AudioSettings {
     fn default() -> Self {
         Self {
             downbeat: 1.0,
@@ -51,16 +51,16 @@ impl Default for MixerVolumes {
             accent: 1.0,
             beat: 1.0,
             base_frequency: 440.0,
-            decay: 0.05,
-            waveform: Waveform::Sine,
-            noise_hpf_hz: 4000.0,
-            noise_mix: 0.0,
-            noise_decay: 0.05,
+            decay: 0.042,
+            waveform: Waveform::Triangle,
+            noise_hpf_hz: 4200.0,
+            noise_mix: 0.05,
+            noise_decay: 0.017,
         }
     }
 }
 
-impl MixerVolumes {
+impl AudioSettings {
     pub fn new(downbeat: f32, primary: f32, accent: f32, beat: f32, base_frequency: f32, decay: f32) -> Self {
         let result = Self {
             downbeat,
@@ -129,7 +129,7 @@ struct PlaybackParams {
     ticks_per_beat: u32,
     ticks_per_measure: u32,
     schedule: BTreeMap<u32, SoundType>,
-    mixer: MixerVolumes,
+    audio_settings: AudioSettings,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -147,7 +147,7 @@ impl Audio {
             ticks_per_beat: 0,
             ticks_per_measure: 0,
             schedule: BTreeMap::new(),
-            mixer: MixerVolumes::default(),
+            audio_settings: AudioSettings::default(),
         };
 
         let shared_state = Arc::new(Mutex::new(PlaybackState {
@@ -254,11 +254,11 @@ impl Audio {
         schedule
     }
 
-    pub fn set_mixer(&mut self, mixer: MixerVolumes) {
+    pub fn set_audio_settings(&mut self, settings: AudioSettings) {
         let mut shared_state = self.shared_state.lock().unwrap();
-        let m = mixer.clamped();
-        if shared_state.params.mixer != m {
-            shared_state.params.mixer = m;
+        let s = settings.clamped();
+        if shared_state.params.audio_settings != s {
+            shared_state.params.audio_settings = s;
             shared_state.is_dirty = true;
         }
     }
@@ -404,9 +404,9 @@ impl MetronomeSource {
         let triggered_sounds = self.determine_triggered_sounds();
         // Enqueue all triggered sounds as new voices (phase = 0)
         if !triggered_sounds.is_empty() {
-            let base = self.local_params.mixer.base_frequency;
-            let current_decay = self.local_params.mixer.decay;
-            let noise_decay = self.local_params.mixer.noise_decay;
+            let base = self.local_params.audio_settings.base_frequency;
+            let current_decay = self.local_params.audio_settings.decay;
+            let noise_decay = self.local_params.audio_settings.noise_decay;
 
             for sound_type in triggered_sounds {
                 if self.active_beeps.len() >= Self::MAX_VOICES {
@@ -421,19 +421,19 @@ impl MetronomeSource {
                     SoundType::Downbeat => base * 3.375,
                 };
                 let gain = match sound_type {
-                    SoundType::Downbeat => self.local_params.mixer.downbeat,
-                    SoundType::PrimaryBeat => self.local_params.mixer.primary,
-                    SoundType::Beat => self.local_params.mixer.beat,
-                    SoundType::AccentedBeat => self.local_params.mixer.accent,
+                    SoundType::Downbeat => self.local_params.audio_settings.downbeat,
+                    SoundType::PrimaryBeat => self.local_params.audio_settings.primary,
+                    SoundType::Beat => self.local_params.audio_settings.beat,
+                    SoundType::AccentedBeat => self.local_params.audio_settings.accent,
                 };
 
-                let func = self.local_params.mixer.waveform.to_rodio();
+                let func = self.local_params.audio_settings.waveform.to_rodio();
                 let hz = freq.max(1.0);
                 let base = SignalGenerator::new(self.sample_rate, hz, func);
 
-                let noise_mix = self.local_params.mixer.noise_mix;
+                let noise_mix = self.local_params.audio_settings.noise_mix;
                 let noise_signal: Option<Box<dyn Iterator<Item = f32> + Send>> = if noise_mix > 0.0001 {
-                    let cutoff_hz_u32 = self.local_params.mixer.noise_hpf_hz as u32;
+                    let cutoff_hz_u32 = self.local_params.audio_settings.noise_hpf_hz as u32;
                     let noise = WhiteUniform::new(self.sample_rate).high_pass(cutoff_hz_u32);
                     Some(Box::new(noise))
                 } else {
@@ -494,7 +494,7 @@ impl MetronomeSource {
                 } else { 0.0 }
             } else { 0.0 };
 
-            let noise_mix = self.local_params.mixer.noise_mix;
+            let noise_mix = self.local_params.audio_settings.noise_mix;
             let tone_contrib = base_sample * (1.0 - noise_mix) * env_tone;
             let noise_contrib = noise_sample * noise_mix * env_noise;
 

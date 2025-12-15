@@ -15,7 +15,7 @@ use std::cell::RefCell;
 use crate::measure::duration::{Duration, NoteValue, TupletSpec, q};
 use crate::measure::{BeatIdx, Measure, TimeSignature};
 
-use crate::audio::{MixerVolumes, PlayerState};
+use crate::audio::{AudioSettings, PlayerState};
 use crate::measure::duration::NoteValue::*;
 use crate::measure::editing::Modification;
 use crate::measure::{Beat, BeatKind};
@@ -57,7 +57,7 @@ pub struct Grooph {
     bpm: u32,
     audio: Option<crate::audio::Audio>,
     // Mixer volumes [0.0, 1.0]
-    mixer: MixerVolumes,
+    audio_settings: AudioSettings,
     // Playback smoothing state
     playback_smooth_tick: f64,
     playback_last_update: Option<f64>,
@@ -109,7 +109,7 @@ impl App for Grooph {
         }
 
         if let Some(audio) = &mut self.audio {
-            audio.set_mixer(self.mixer);
+            audio.set_audio_settings(self.audio_settings);
             if audio.update(&self.player_state, self.bpm, &self.measure) {
                 ctx.request_repaint();
             }
@@ -297,7 +297,7 @@ impl Grooph {
             player_state: PlayerState::Stopped,
             bpm: 120,
             audio: None,
-            mixer: MixerVolumes::default(),
+            audio_settings: AudioSettings::default(),
             playback_smooth_tick: 0.0,
             playback_last_update: None,
             playback_total_ticks: 0,

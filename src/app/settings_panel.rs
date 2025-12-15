@@ -15,36 +15,36 @@ impl Grooph {
                     egui::CollapsingHeader::new("Click").default_open(false).show(ui, |ui| {
                         ui.label("Decay:");
                         ui.add(
-                            egui::DragValue::new(&mut self.mixer.decay)
+                            egui::DragValue::new(&mut self.audio_settings.decay)
                                 .range(0.01..=0.5)
                                 .speed(0.001)
                                 .suffix("s"),
                         );
                         ui.separator();
                         egui::ComboBox::from_label("Waveform")
-                            .selected_text(match self.mixer.waveform {
+                            .selected_text(match self.audio_settings.waveform {
                                 Waveform::Sine => "Sine",
                                 Waveform::Triangle => "Triangle",
                                 Waveform::Square => "Square",
                                 Waveform::Sawtooth => "Sawtooth",
                             })
                             .show_ui(ui, |ui| {
-                                ui.selectable_value(&mut self.mixer.waveform, Waveform::Sine, "Sine");
-                                ui.selectable_value(&mut self.mixer.waveform, Waveform::Triangle, "Triangle");
-                                ui.selectable_value(&mut self.mixer.waveform, Waveform::Square, "Square");
-                                ui.selectable_value(&mut self.mixer.waveform, Waveform::Sawtooth, "Sawtooth");
+                                ui.selectable_value(&mut self.audio_settings.waveform, Waveform::Sine, "Sine");
+                                ui.selectable_value(&mut self.audio_settings.waveform, Waveform::Triangle, "Triangle");
+                                ui.selectable_value(&mut self.audio_settings.waveform, Waveform::Square, "Square");
+                                ui.selectable_value(&mut self.audio_settings.waveform, Waveform::Sawtooth, "Sawtooth");
                             });
                         ui.separator();
                         ui.label("Noise Mix:");
                         ui.add(
-                            egui::Slider::new(&mut self.mixer.noise_mix, 0.0..=1.0)
+                            egui::Slider::new(&mut self.audio_settings.noise_mix, 0.0..=1.0)
                                 .custom_formatter(|v, _| format!("{:.0}%", v * 100.0)),
                         );
-                        if self.mixer.noise_mix > 0.0 {
+                        if self.audio_settings.noise_mix > 0.0 {
                             ui.separator();
                             ui.label("Noise High-Pass Cutoff:");
                             ui.add(
-                                egui::DragValue::new(&mut self.mixer.noise_hpf_hz)
+                                egui::DragValue::new(&mut self.audio_settings.noise_hpf_hz)
                                     .range(2000.0..=6000.0)
                                     .speed(10.0)
                                     .suffix(" Hz"),
@@ -52,7 +52,7 @@ impl Grooph {
                             ui.separator();
                             ui.label("Noise Decay:");
                             ui.add(
-                                egui::DragValue::new(&mut self.mixer.noise_decay)
+                                egui::DragValue::new(&mut self.audio_settings.noise_decay)
                                     .range(0.01..=0.5)
                                     .speed(0.001)
                                     .suffix("s"),
@@ -61,7 +61,7 @@ impl Grooph {
                         ui.separator();
                         ui.label("Base Frequency (PrimaryBeat):");
                         ui.add(
-                            egui::DragValue::new(&mut self.mixer.base_frequency)
+                            egui::DragValue::new(&mut self.audio_settings.base_frequency)
                                 .range(220.0..=880.0)
                                 .speed(0.1)
                                 .suffix("Hz"),
