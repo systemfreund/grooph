@@ -218,6 +218,7 @@ fn build_note_layout(
     rect: &Rect,
     opts: &LayoutOpts,
 ) -> Vec<NoteLayout> {
+    // Basisverteilung (rhythmisch gleichmäßig über die verfügbare Breite)
     let x_centers = crate::layout::calculate_x_centers(beats, rect.width())
         .into_iter()
         .map(|cx| cx + rect.left())
@@ -235,9 +236,63 @@ fn build_note_layout(
         }
     }
 
+    // 1) Kollisionen vermeiden: heuristische Bounding-Box je Element und greedy nach rechts schieben
+    //    (nur X‑Richtung). Dadurch werden insbesondere Punkte (dotted) und Fahnen berücksichtigt.
+    let em = opts.em;
+    let head_half = 0.45 * em; // ~Notehead-Hälfte
+    let rest_half = 0.40 * em; // Restbreite (Heuristik)
+    let dot_half = 0.15 * em;  // Punkt-Hälfte
+    let min_gap = 0.12 * em;   // optischer Mindestabstand
+    let flag_overhang = 0.20 * em; // kleine Ausladung einer einzelnen Fahne
+
+    let mut shifted_centers: Vec<f32> = Vec::with_capacity(beats.len());
+    let mut prev_right: Option<f32> = None;
+
+    for (i, b) in beats.iter().enumerate() {
+        let base_cx = *x_centers.get(i).unwrap_or(&rect.center().x);
+
+        let needs_flag = requires_flag(b.duration);
+        let in_beam = in_beam_flags.get(i).copied().unwrap_or(false);
+        let is_note = b.kind == BeatKind::Note;
+
+        // Heuristische BBox relativ zur Center‑X
+        let mut left = if is_note { -head_half } else { -rest_half };
+        let mut right = if is_note { head_half } else { rest_half };
+
+        // Dots berücksichtigen (rechts vom Kopf)
+        let dot_count = match b.duration { Duration::Dotted { dots, .. } => dots, _ => 0 };
+        if dot_count > 0 {
+            let has_flag_tail = is_note && !in_beam && needs_flag;
+            // dieselben Abstände wie beim tatsächlichen Zeichnen
+            let first_dx = if has_flag_tail { opts.font_id.size * 0.5 } else { opts.font_id.size * 0.28 };
+            let step_dx = opts.font_id.size * 0.26;
+            // äußerster Punkt‑Rand
+            let dots_right = first_dx + (dot_count.saturating_sub(1) as f32) * step_dx + dot_half;
+            right = right.max(dots_right);
+        }
+
+        // Einzelfahne (nicht beamed) ragt leicht nach rechts
+        if is_note && !in_beam && needs_flag {
+            right += flag_overhang;
+        }
+
+        // Greedy-Verschiebung, um Mindestabstand zur vorherigen Box zu sichern
+        let mut cx = base_cx;
+        if let Some(prev_r) = prev_right {
+            let curr_left_abs = cx + left;
+            let overlap = (prev_r + min_gap) - curr_left_abs;
+            if overlap > 0.0 { cx += overlap; }
+        }
+
+        // Update rechter Rand dieser Box in absoluten Koordinaten
+        prev_right = Some(cx + right);
+        shifted_centers.push(cx);
+    }
+
     let mut note_layout: Vec<NoteLayout> = Vec::with_capacity(beats.len());
     for (i, b) in beats.iter().enumerate() {
-        let ideal_cx = *x_centers.get(i).unwrap_or(&rect.center().x);
+        // Benutze die kollisionsbereinigte Center‑X als Idealwert für das Rendering
+        let ideal_cx = *shifted_centers.get(i).unwrap_or(&rect.center().x);
         let cy = opts.y_center();
 
         // 1. Calculate Stem (if any) and determining pixel-snapping offset

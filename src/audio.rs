@@ -84,7 +84,7 @@ impl AudioSettings {
         self.beat = self.beat.clamp(0.0, 1.0);
         self.base_frequency = self.base_frequency.clamp(20.0, 3000.0);
         self.decay = self.decay.clamp(0.005, 1.0);
-        self.noise_hpf_hz = self.noise_hpf_hz.clamp(2000.0, 6000.0);
+        self.noise_hpf_hz = self.noise_hpf_hz.clamp(2000.0, 8000.0);
         self.noise_mix = self.noise_mix.clamp(0.0, 1.0);
         self.noise_decay = self.noise_decay.clamp(0.005, 1.0);
         self
