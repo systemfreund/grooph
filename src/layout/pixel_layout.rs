@@ -4,22 +4,24 @@ use crate::layout::tuplet_plan::TupletPlan;
 use crate::measure::duration::{Duration, NoteValue};
 use crate::measure::{Beat, BeatKind, Measure, TimeSignature};
 use crate::render::glyphs;
-use eframe::egui::{self, FontId, Pos2, Rect};
+use eframe::egui::{self, FontId, Pos2, Rect, Vec2};
 
 #[derive(Debug, Clone, Copy)]
 pub struct GlyphMetrics {
-    pub head_width: f32,
-    pub dot_width: f32,
-    pub flag_8th_width: f32,
-    pub flag_16th_width: f32,
-    pub flag_32nd_width: f32,
-    // Widths for Whole, Half, Quarter, Eighth, Sixteenth, 32nd
-    pub rest_widths: [f32; 6],
+    pub head_size: Vec2,
+    pub dot_size: Vec2,
+    pub accent_size: Vec2,
+    pub flag_8th_size: Vec2,
+    pub flag_16th_size: Vec2,
+    pub flag_32nd_size: Vec2,
+    pub rest_sizes: [Vec2; 6],
 }
 
 impl GlyphMetrics {
     pub fn measure(ui: &egui::Ui, font_id: &FontId) -> Self {
-        let measure_char = |c: char| -> f32 {
+        let em = font_id.size;
+        // Measure only width from font; use heuristics for height to avoid huge SMuFL bounding boxes
+        let measure_width = |c: char| -> f32 {
             ui.painter()
                 .layout_no_wrap(c.to_string(), font_id.clone(), egui::Color32::WHITE)
                 .rect
@@ -27,30 +29,33 @@ impl GlyphMetrics {
         };
 
         Self {
-            head_width: measure_char(glyphs::GLYPH_NOTEHEAD_BLACK),
-            dot_width: measure_char(glyphs::GLYPH_AUGMENTATION_DOT),
-            flag_8th_width: measure_char(glyphs::GLYPH_FLAG_8TH_UP),
-            flag_16th_width: measure_char(glyphs::GLYPH_FLAG_16TH_UP),
-            flag_32nd_width: measure_char(glyphs::GLYPH_FLAG_32ND_UP),
-            rest_widths: [
-                measure_char(glyphs::GLYPH_REST_WHOLE),
-                measure_char(glyphs::GLYPH_REST_HALF),
-                measure_char(glyphs::GLYPH_REST_QUARTER),
-                measure_char(glyphs::GLYPH_REST_EIGHTH),
-                measure_char(glyphs::GLYPH_REST_SIXTEENTH),
-                measure_char(glyphs::GLYPH_REST_32ND),
+            head_size: Vec2::new(measure_width(glyphs::GLYPH_NOTEHEAD_BLACK), 0.25 * em),
+            dot_size: Vec2::new(measure_width(glyphs::GLYPH_AUGMENTATION_DOT), 0.2 * em),
+            accent_size: Vec2::new(measure_width(glyphs::GLYPH_ACCENT_ABOVE), 0.1 * em),
+            flag_8th_size: Vec2::new(measure_width(glyphs::GLYPH_FLAG_8TH_UP), 0.2 * em),
+            flag_16th_size: Vec2::new(measure_width(glyphs::GLYPH_FLAG_16TH_UP), 0.2 * em),
+            flag_32nd_size: Vec2::new(measure_width(glyphs::GLYPH_FLAG_32ND_UP), 0.4 * em),
+            rest_sizes: [
+                Vec2::new(measure_width(glyphs::GLYPH_REST_WHOLE), 0.25 * em),
+                Vec2::new(measure_width(glyphs::GLYPH_REST_HALF), 0.25 * em),
+                Vec2::new(measure_width(glyphs::GLYPH_REST_QUARTER), 0.45 * em),
+                Vec2::new(measure_width(glyphs::GLYPH_REST_EIGHTH), 0.30 * em),
+                Vec2::new(measure_width(glyphs::GLYPH_REST_SIXTEENTH), 0.50 * em),
+                Vec2::new(measure_width(glyphs::GLYPH_REST_32ND), 0.55 * em),
             ],
         }
     }
 
     pub fn debug(em: f32) -> Self {
+        let default_size = Vec2::new(0.4 * em, 0.25 * em);
         Self {
-            head_width: 0.4 * em,
-            dot_width: 0.2 * em,
-            flag_8th_width: 0.3 * em,
-            flag_16th_width: 0.35 * em,
-            flag_32nd_width: 0.4 * em,
-            rest_widths: [0.4 * em; 6],
+            head_size: default_size,
+            dot_size: Vec2::new(0.2 * em, 0.2 * em),
+            accent_size: Vec2::new(0.4 * em, 0.2 * em),
+            flag_8th_size: Vec2::new(0.3 * em, 1.0 * em),
+            flag_16th_size: Vec2::new(0.35 * em, 1.2 * em),
+            flag_32nd_size: Vec2::new(0.4 * em, 1.4 * em),
+            rest_sizes: [default_size; 6],
         }
     }
 }
@@ -309,7 +314,7 @@ fn build_note_layout(
 
         // Basis-Box (Kopf oder Rest)
         let (left, mut right) = if is_note {
-            let h = m.head_width * 0.5;
+            let h = m.head_size.x * 0.5;
             (-h, h)
         } else {
             let idx = match b.duration.base_note() {
@@ -320,7 +325,7 @@ fn build_note_layout(
                 NoteValue::Sixteenth => 4,
                 NoteValue::ThirtySecond => 5,
             };
-            let w = m.rest_widths[idx];
+            let w = m.rest_sizes[idx].x;
             (-w * 0.5, w * 0.5)
         };
 
@@ -332,7 +337,7 @@ fn build_note_layout(
             let first_dx = if has_flag_tail { opts.font_id.size * 0.5 } else { opts.font_id.size * 0.26 };
             let step_dx = opts.font_id.size * 0.26;
             let last_dot_center_rel = first_dx + ((dot_count - 1) as f32) * step_dx;
-            let last_dot_right_rel = last_dot_center_rel + m.dot_width * 0.5;
+            let last_dot_right_rel = last_dot_center_rel + m.dot_size.x * 0.5;
 
             if last_dot_right_rel > right {
                 right = last_dot_right_rel;
@@ -347,10 +352,10 @@ fn build_note_layout(
             let flag_left_rel = stem_offset - stem_thick * 0.5;
 
             let fw = match b.duration.base_note() {
-                NoteValue::Eighth => m.flag_8th_width,
-                NoteValue::Sixteenth => m.flag_16th_width,
-                NoteValue::ThirtySecond => m.flag_32nd_width,
-                _ => m.flag_8th_width,
+                NoteValue::Eighth => m.flag_8th_size.x,
+                NoteValue::Sixteenth => m.flag_16th_size.x,
+                NoteValue::ThirtySecond => m.flag_32nd_size.x,
+                _ => m.flag_8th_size.x,
             };
             let flag_right_rel = flag_left_rel + fw;
             if flag_right_rel > right {
@@ -373,7 +378,6 @@ fn build_note_layout(
 
     let mut note_layout: Vec<NoteLayout> = Vec::with_capacity(beats.len());
     for (i, b) in beats.iter().enumerate() {
-        // Benutze die kollisionsbereinigte Center‑X als Idealwert für das Rendering
         let (ideal_cx, left_rel, right_rel) = *shifted_layout_info.get(i).unwrap_or(&(rect.center().x, -0.2 * em, 0.2 * em));
         let cy = opts.y_center();
 
@@ -445,13 +449,57 @@ fn build_note_layout(
         }
 
         let debug_bbox = if opts.debug_bbox {
-            let mut top = cy - em * 0.0;
-            let mut bottom = cy + em * 0.0;
+            let m = &opts.metrics;
+            // Base height from head or rest
+            let base_h = if is_note {
+                m.head_size.y * 0.5
+            } else {
+                let idx = match b.duration.base_note() {
+                    NoteValue::Whole => 0,
+                    NoteValue::Half => 1,
+                    NoteValue::Quarter => 2,
+                    NoteValue::Eighth => 3,
+                    NoteValue::Sixteenth => 4,
+                    NoteValue::ThirtySecond => 5,
+                };
+                m.rest_sizes[idx].y
+            };
+
+            let mut top = cy - base_h;
+            let mut bottom = cy + base_h;
 
             // Expand to include stem if present
             if let Some(s) = &stem {
                 top = top.min(s.p2.y).min(s.p1.y);
                 bottom = bottom.max(s.p2.y).max(s.p1.y);
+            }
+
+            // Expand for dots
+            if dot_count > 0 {
+                let dot_y = cy - opts.font_id.size * 0.1;
+                let h = m.dot_size.y * 0.5;
+                top = top.min(dot_y - h);
+                bottom = bottom.max(dot_y + h);
+            }
+
+            // Expand for flag
+            if let Some(fp) = flag_pos {
+                 let fs = match b.duration.base_note() {
+                    NoteValue::Eighth => m.flag_8th_size,
+                    NoteValue::Sixteenth => m.flag_16th_size,
+                    NoteValue::ThirtySecond => m.flag_32nd_size,
+                    _ => m.flag_8th_size,
+                 };
+                 // Flag is drawn at LEFT_CENTER.
+                 top = top.min(fp.y - fs.y * 0.5);
+                 bottom = bottom.max(fp.y + fs.y * 0.5);
+            }
+
+            // Expand for accent
+            if let Some(ap) = accent_pos {
+                let s = m.accent_size;
+                top = top.min(ap.y - s.y * 0.5);
+                bottom = bottom.max(ap.y + s.y * 0.5);
             }
 
             Some(Rect::from_min_max(
@@ -712,7 +760,7 @@ mod tests {
     use super::*;
     use crate::measure::{Measure, TimeSignature, Beat};
     use crate::measure::duration::q;
-    use eframe::egui::{Rect, Pos2, FontId, FontFamily};
+    use eframe::egui::{Rect, Pos2, FontId, FontFamily, Vec2};
 
     #[test]
     fn test_debug_bbox_includes_stem_length() {
@@ -781,7 +829,7 @@ mod tests {
 
         // 2. Mit Metrics (Large Head)
         opts.metrics = GlyphMetrics {
-            head_width: 5.0 * em, // Huge head
+            head_size: Vec2::new(5.0 * em, 1.0 * em), // Huge head
             ..GlyphMetrics::debug(em)
         };
 

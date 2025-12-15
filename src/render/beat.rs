@@ -15,12 +15,6 @@ pub(super) fn draw_beat(
         false => glyphs::GLYPH_NOTEHEAD_BLACK,
     };
 
-    let glyph_font = if note.kind == BeatKind::Rest {
-        FontId::new(opts.font_id.size * 0.8, opts.font_id.family.clone())
-    } else {
-        opts.font_id.clone()
-    };
-
     // Draw stem
     if let Some(stem) = &note.stem {
         let width = opts.snap_thickness(opts.stem_thickness());
@@ -36,7 +30,7 @@ pub(super) fn draw_beat(
     }
 
     // Draw notehead
-    painter.text(note.center, Align2::CENTER_CENTER, glyph.to_string(), glyph_font, color);
+    painter.text(note.center, Align2::CENTER_CENTER, glyph.to_string(), opts.font_id.clone(), color);
 
     // Draw dots
     if !note.dots.is_empty() {
