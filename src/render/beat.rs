@@ -54,13 +54,24 @@ pub(super) fn draw_beat(
         );
     }
 
-    if opts.debug_bbox && let Some(rect) = note.debug_bbox {
-        painter.rect(
-            rect,
-            0.0,
-            Color32::TRANSPARENT,
-            Stroke::new(1.0, Color32::RED),
-            egui::StrokeKind::Outside,
-        );
+    if opts.debug_bbox {
+        if let Some(rect) = note.debug_bbox {
+            painter.rect(
+                rect,
+                0.0,
+                Color32::TRANSPARENT,
+                Stroke::new(1.0, Color32::RED),
+                egui::StrokeKind::Outside,
+            );
+        }
+        if let Some(rect) = note.accent_debug_bbox {
+            painter.rect(
+                rect,
+                0.0,
+                Color32::TRANSPARENT,
+                Stroke::new(1.0, Color32::GREEN),
+                egui::StrokeKind::Outside,
+            );
+        }
     }
 }

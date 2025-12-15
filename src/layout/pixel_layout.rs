@@ -163,6 +163,7 @@ pub struct NoteLayout {
     pub flag_pos: Option<Pos2>,
     pub accent_pos: Option<Pos2>,
     pub debug_bbox: Option<Rect>,
+    pub accent_debug_bbox: Option<Rect>,
 }
 
 /// Pixel-level layout for a measure.
@@ -491,6 +492,8 @@ fn build_note_layout(
         };
 
         let mut accent_pos: Option<Pos2> = None;
+        let mut accent_debug_bbox: Option<Rect> = None;
+
         if is_note && b.accented {
             let displacement = opts.em * opts.accent_displacement;
             let accent_half_h = opts.metrics.accent_size.y;
@@ -501,22 +504,19 @@ fn build_note_layout(
                 content_top - displacement - accent_half_h
             };
             accent_pos = Some(Pos2::new(center.x, y));
+
+            if opts.debug_bbox {
+                accent_debug_bbox = Some(Rect::from_center_size(
+                    accent_pos.unwrap(),
+                    opts.metrics.accent_size,
+                ));
+            }
         }
 
         let debug_bbox = if opts.debug_bbox {
-            let mut top = content_top;
-            let mut bottom = content_bottom;
-
-            // Expand for accent
-            if let Some(ap) = accent_pos {
-                let s = opts.metrics.accent_size * 0.5;
-                top = top.min(ap.y - s.y );
-                bottom = bottom.max(ap.y + s.y );
-            }
-
             Some(Rect::from_min_max(
-                Pos2::new(ideal_cx + left_rel, top),
-                Pos2::new(ideal_cx + right_rel, bottom),
+                Pos2::new(ideal_cx + left_rel, content_top),
+                Pos2::new(ideal_cx + right_rel, content_bottom),
             ))
         } else {
             None
@@ -531,6 +531,7 @@ fn build_note_layout(
             flag_pos,
             accent_pos,
             debug_bbox,
+            accent_debug_bbox,
         });
     }
 
@@ -909,5 +910,48 @@ mod tests {
 
         // Accent should be below head bottom
         assert!(accent_pos_below.y > head_bottom, "Accent should be below note head");
+    }
+
+    #[test]
+    fn test_accent_debug_bbox_separate() {
+        use crate::measure::duration::q;
+        let mut m = Measure::new(TimeSignature::FOUR_FOUR);
+        let b = Beat::note(q());
+        m.set_beat(0, b).unwrap();
+        m.toggle_accent(0);
+
+        let em = 20.0;
+        let opts = LayoutOpts {
+            rect: Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(100.0, 100.0)),
+            font_id: FontId::new(em, FontFamily::Proportional),
+            pixels_per_point: 1.0,
+            em,
+            layout_clef: false,
+            layout_time_signature: false,
+            y_offset: 0.0,
+            stem_length_factor: 3.5,
+            stem_thickness_factor: 0.1,
+            accent_displacement: 0.5,
+            accent_below: false,
+            debug_bbox: true,
+            metrics: GlyphMetrics::debug(em),
+        };
+
+        let layout = build_measure_layout(&m, &opts);
+        let note = &layout.notes[0];
+
+        assert!(note.debug_bbox.is_some(), "Main debug bbox should be present");
+        assert!(note.accent_debug_bbox.is_some(), "Accent debug bbox should be present");
+
+        let main_bbox = note.debug_bbox.unwrap();
+        let accent_bbox = note.accent_debug_bbox.unwrap();
+
+        // Check accent bbox size matches metrics
+        let expected_size = opts.metrics.accent_size;
+        assert!((accent_bbox.width() - expected_size.x).abs() < 0.001);
+        assert!((accent_bbox.height() - expected_size.y).abs() < 0.001);
+
+        // Check they don't intersect (displacement ensures gap)
+        assert!(!main_bbox.intersects(accent_bbox), "BBoxes should be separate");
     }
 }
