@@ -31,7 +31,7 @@ impl GlyphMetrics {
         Self {
             head_size: Vec2::new(measure_width(glyphs::GLYPH_NOTEHEAD_BLACK), 0.25 * em),
             dot_size: Vec2::new(measure_width(glyphs::GLYPH_AUGMENTATION_DOT), 0.2 * em),
-            accent_size: Vec2::new(measure_width(glyphs::GLYPH_ACCENT_ABOVE), 0.1 * em),
+            accent_size: Vec2::new(measure_width(glyphs::GLYPH_ACCENT_ABOVE), 0.25 * em),
             flag_8th_size: Vec2::new(measure_width(glyphs::GLYPH_FLAG_8TH_UP), 0.2 * em),
             flag_16th_size: Vec2::new(measure_width(glyphs::GLYPH_FLAG_16TH_UP), 0.2 * em),
             flag_32nd_size: Vec2::new(measure_width(glyphs::GLYPH_FLAG_32ND_UP), 0.4 * em),
@@ -68,6 +68,7 @@ pub fn compute_em(rect: &Rect, width_cap_factor: f32, ui: &egui::Ui) -> f32 {
     min_size.max(max_size.min(width_cap))
 }
 
+#[derive(Clone)]
 pub(crate) struct LayoutOpts {
     pub rect: Rect,
     pub font_id: FontId,
@@ -335,8 +336,8 @@ fn build_note_layout(
         if dot_count > 0 {
             // Berechne rechte Kante basierend auf Rendering-Logik
             let has_flag_tail = is_note && !in_beam && needs_flag;
-            let first_dx = if has_flag_tail { opts.font_id.size * 0.5 } else { opts.font_id.size * 0.26 };
-            let step_dx = opts.font_id.size * 0.26;
+            let first_dx = if has_flag_tail { opts.em * 0.5 } else { opts.em * 0.26 };
+            let step_dx = opts.em * 0.26;
             let last_dot_center_rel = first_dx + ((dot_count - 1) as f32) * step_dx;
             let last_dot_right_rel = last_dot_center_rel + m.dot_size.x * 0.5;
 
@@ -416,13 +417,12 @@ fn build_note_layout(
         let mut dots: Vec<Pos2> = Vec::with_capacity(dot_count as usize);
         if dot_count > 0 {
             let has_flag_tail = is_note && !in_beam && needs_flag;
-            let first_dx =
-                if has_flag_tail { opts.font_id.size * 0.5 } else { opts.font_id.size * 0.26 };
-            let step_dx = opts.font_id.size * 0.26;
+            let first_dx = opts.em * if has_flag_tail { 0.5 } else { 0.26 };
+            let step_dx = opts.em * 0.26;
             // The dots start relative to the shifted center
             for d in 0..dot_count {
                 let x = center.x + first_dx + (d as f32) * step_dx;
-                let y = cy - opts.font_id.size * 0.1;
+                let y = cy - opts.em * 0.1;
                 dots.push(Pos2::new(x, y));
             }
         }
@@ -439,15 +439,9 @@ fn build_note_layout(
             flag_pos = Some(Pos2::new(flag_x, cy - opts.stem_length()));
         }
 
-        // 5. Accent
-        let mut accent_pos: Option<Pos2> = None;
-        if is_note && b.accented {
-            let dy = opts.em * opts.accent_displacement;
-            let y = if opts.accent_below { cy + dy } else { cy - dy };
-            accent_pos = Some(Pos2::new(center.x, y));
-        }
-
-        let debug_bbox = if opts.debug_bbox {
+        // 5. Accent and Debug Bounding Box
+        // We calculate the content bounding box first to position the accent relative to it.
+        let (content_top, content_bottom) = {
             let m = &opts.metrics;
             // Base height from head or rest
             let base_h = if is_note {
@@ -475,7 +469,7 @@ fn build_note_layout(
 
             // Expand for dots
             if dot_count > 0 {
-                let dot_y = cy - opts.font_id.size * 0.1;
+                let dot_y = cy - opts.em * 0.1;
                 let h = m.dot_size.y * 0.5;
                 top = top.min(dot_y - h);
                 bottom = bottom.max(dot_y + h);
@@ -493,12 +487,31 @@ fn build_note_layout(
                  top = top.min(fp.y - fs.y * 0.5);
                  bottom = bottom.max(fp.y + fs.y * 0.5);
             }
+            (top, bottom)
+        };
+
+        let mut accent_pos: Option<Pos2> = None;
+        if is_note && b.accented {
+            let displacement = opts.em * opts.accent_displacement;
+            let accent_half_h = opts.metrics.accent_size.y;
+
+            let y = if opts.accent_below {
+                content_bottom + displacement + accent_half_h
+            } else {
+                content_top - displacement - accent_half_h
+            };
+            accent_pos = Some(Pos2::new(center.x, y));
+        }
+
+        let debug_bbox = if opts.debug_bbox {
+            let mut top = content_top;
+            let mut bottom = content_bottom;
 
             // Expand for accent
             if let Some(ap) = accent_pos {
-                let s = m.accent_size;
-                top = top.min(ap.y - s.y * 0.5);
-                bottom = bottom.max(ap.y + s.y * 0.5);
+                let s = opts.metrics.accent_size * 0.5;
+                top = top.min(ap.y - s.y );
+                bottom = bottom.max(ap.y + s.y );
             }
 
             Some(Rect::from_min_max(
@@ -839,5 +852,62 @@ mod tests {
         assert!(width_metrics > width_std * 2.0, "Metrics-based width should be significantly larger");
         // Expect width roughly 5.0 * em
         assert!((width_metrics - 5.0 * em).abs() < 1.0);
+    }
+
+    #[test]
+    fn test_accent_positioning_relative_to_bbox() {
+        use crate::measure::duration::q;
+        let mut m = Measure::new(TimeSignature::FOUR_FOUR);
+        // Quarter note with accent
+        let b = Beat::note(q());
+        m.set_beat(0, b).unwrap();
+        m.toggle_accent(0);
+
+        let em = 20.0;
+        let displacement = 0.5; // 0.5 em gap
+        let opts = LayoutOpts {
+            rect: Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(100.0, 100.0)),
+            font_id: FontId::new(em, FontFamily::Proportional),
+            pixels_per_point: 1.0,
+            em,
+            layout_clef: false,
+            layout_time_signature: false,
+            y_offset: 0.0,
+            stem_length_factor: 3.5,
+            stem_thickness_factor: 0.1,
+            accent_displacement: displacement,
+            accent_below: false,
+            debug_bbox: true,
+            metrics: GlyphMetrics::debug(em),
+        };
+
+        // Case 1: Accent Above (default)
+        // Should be above the stem (since stem goes up)
+        let layout = build_measure_layout(&m, &opts);
+        let note = &layout.notes[0];
+        let accent_pos = note.accent_pos.expect("Accent should be present");
+        let stem = note.stem.expect("Stem should be present");
+
+        // Stem tip is the top-most point of the stem (smaller y)
+        let stem_top = stem.p2.y.min(stem.p1.y);
+
+        // Accent should be above stem top by (displacement * em) + half accent height
+        // y decreases upwards
+        let expected_y = stem_top - (displacement * em) - (opts.metrics.accent_size.y * 0.5);
+
+        assert!(accent_pos.y <= expected_y + 0.001, "Accent (y={}) should be above stem top (y={})", accent_pos.y, stem_top);
+
+        // Case 2: Accent Below
+        let mut opts_below = opts.clone();
+        opts_below.accent_below = true;
+        let layout_below = build_measure_layout(&m, &opts_below);
+        let note_below = &layout_below.notes[0];
+        let accent_pos_below = note_below.accent_pos.expect("Accent should be present");
+
+        // Note head bottom
+        let head_bottom = opts.y_center() + opts.metrics.head_size.y * 0.5;
+
+        // Accent should be below head bottom
+        assert!(accent_pos_below.y > head_bottom, "Accent should be below note head");
     }
 }

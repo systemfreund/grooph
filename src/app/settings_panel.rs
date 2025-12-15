@@ -115,7 +115,7 @@ impl Grooph {
                             ui.add(
                                 egui::DragValue::new(&mut self.layout_stem_length_factor)
                                     .speed(0.01)
-                                    .range(0.1..=2.0),
+                                    .range(0.7..=1.3),
                             );
                             ui.separator();
                             ui.checkbox(&mut self.layout_debug_bbox, "Show bounding boxes");

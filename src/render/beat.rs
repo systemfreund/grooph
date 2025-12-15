@@ -24,8 +24,7 @@ pub(super) fn draw_beat(
     if let Some(pos) = note.flag_pos
         && let Some(flag) = glyphs::flag_glyph_for_duration(note.duration)
     {
-        let flag_font = FontId::new(opts.font_id.size * 1.0, opts.font_id.family.clone());
-        painter.text(pos, Align2::LEFT_CENTER, flag.to_string(), flag_font, color);
+        painter.text(pos, Align2::LEFT_CENTER, flag.to_string(), opts.font_id.clone(), color);
     }
 
     // Draw notehead
@@ -46,12 +45,11 @@ pub(super) fn draw_beat(
 
     // Draw accent
     if let Some(p) = note.accent_pos {
-        let accent_font = FontId::new(opts.font_id.size * 0.8, opts.font_id.family.clone());
         painter.text(
             p,
             Align2::CENTER_CENTER,
             glyphs::GLYPH_ACCENT_ABOVE.to_string(),
-            accent_font,
+            opts.font_id.clone(),
             color,
         );
     }
