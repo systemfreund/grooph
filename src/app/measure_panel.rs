@@ -102,28 +102,7 @@ impl Grooph {
                     let em = compute_em(&rect, self.layout_width_cap_factor, ui);
                     let font_id = FontId::new(em, self.music_font_id.family.clone());
 
-                    let measure_char = |c: char| -> f32 {
-                        ui.painter()
-                            .layout_no_wrap(c.to_string(), font_id.clone(), egui::Color32::WHITE)
-                            .rect
-                            .width()
-                    };
-
-                    let metrics = GlyphMetrics {
-                        head_width: measure_char(glyphs::GLYPH_NOTEHEAD_BLACK),
-                        dot_width: measure_char(glyphs::GLYPH_AUGMENTATION_DOT),
-                        flag_8th_width: measure_char(glyphs::GLYPH_FLAG_8TH_UP),
-                        flag_16th_width: measure_char(glyphs::GLYPH_FLAG_16TH_UP),
-                        flag_32nd_width: measure_char(glyphs::GLYPH_FLAG_32ND_UP),
-                        rest_widths: [
-                            measure_char(glyphs::GLYPH_REST_WHOLE),
-                            measure_char(glyphs::GLYPH_REST_HALF),
-                            measure_char(glyphs::GLYPH_REST_QUARTER),
-                            measure_char(glyphs::GLYPH_REST_EIGHTH),
-                            measure_char(glyphs::GLYPH_REST_SIXTEENTH),
-                            measure_char(glyphs::GLYPH_REST_32ND),
-                        ],
-                    };
+                    let metrics = GlyphMetrics::measure(ui, &font_id);
 
                     let opts = LayoutOpts {
                         rect,
@@ -138,7 +117,7 @@ impl Grooph {
                         accent_displacement: 0.5,
                         accent_below: self.layout_accent_below,
                         debug_bbox: self.layout_debug_bbox,
-                        metrics: Some(metrics),
+                        metrics,
                     };
 
                     let layout = draw_measure(

@@ -1,7 +1,7 @@
 use crate::Grooph;
 use crate::app::tools::{BeatTemplate, MetaOp, Modifier, Tool, ToolGroup, ToolKind, all_tools};
 use crate::app::{Mode, tools};
-use crate::layout::pixel_layout::{LayoutOpts, build_measure_layout, build_time_sig_layout, compute_em};
+use crate::layout::pixel_layout::{LayoutOpts, build_measure_layout, build_time_sig_layout, compute_em, GlyphMetrics};
 use crate::measure::BeatKind::{Note, Rest};
 use crate::measure::duration::{Duration, TupletSpec};
 use crate::measure::editing::Modification;
@@ -218,7 +218,7 @@ impl Grooph {
                 accent_displacement: 0.0,
                 accent_below: false,
                 debug_bbox: false,
-                metrics: None,
+                metrics: GlyphMetrics::measure(ui, &font_id),
             };
 
             // Use a temporary measure just for layout width and positions
@@ -279,9 +279,11 @@ impl Grooph {
                 _ => 20.0,
             };
 
+            let font_id = FontId::new(em, self.music_font_id.family.clone());
+
             let opts = LayoutOpts {
                 rect,
-                font_id: FontId::new(em, self.music_font_id.family.clone()),
+                font_id: font_id.clone(),
                 pixels_per_point: ui.ctx().pixels_per_point(),
                 em,
                 layout_clef: false,
@@ -292,7 +294,7 @@ impl Grooph {
                 accent_displacement: 0.8,
                 accent_below: false,
                 debug_bbox: false,
-                metrics: None,
+                metrics: GlyphMetrics::measure(ui, &font_id),
             };
             let measure_layout = build_measure_layout(measure, &opts);
             let painter = &ui.painter_at(rect);

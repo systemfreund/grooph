@@ -3,6 +3,7 @@ use crate::layout::render_plan::plan_measure;
 use crate::layout::tuplet_plan::TupletPlan;
 use crate::measure::duration::{Duration, NoteValue};
 use crate::measure::{Beat, BeatKind, Measure, TimeSignature};
+use crate::render::glyphs;
 use eframe::egui::{self, FontId, Pos2, Rect};
 
 #[derive(Debug, Clone, Copy)]
@@ -14,6 +15,44 @@ pub struct GlyphMetrics {
     pub flag_32nd_width: f32,
     // Widths for Whole, Half, Quarter, Eighth, Sixteenth, 32nd
     pub rest_widths: [f32; 6],
+}
+
+impl GlyphMetrics {
+    pub fn measure(ui: &egui::Ui, font_id: &FontId) -> Self {
+        let measure_char = |c: char| -> f32 {
+            ui.painter()
+                .layout_no_wrap(c.to_string(), font_id.clone(), egui::Color32::WHITE)
+                .rect
+                .width()
+        };
+
+        Self {
+            head_width: measure_char(glyphs::GLYPH_NOTEHEAD_BLACK),
+            dot_width: measure_char(glyphs::GLYPH_AUGMENTATION_DOT),
+            flag_8th_width: measure_char(glyphs::GLYPH_FLAG_8TH_UP),
+            flag_16th_width: measure_char(glyphs::GLYPH_FLAG_16TH_UP),
+            flag_32nd_width: measure_char(glyphs::GLYPH_FLAG_32ND_UP),
+            rest_widths: [
+                measure_char(glyphs::GLYPH_REST_WHOLE),
+                measure_char(glyphs::GLYPH_REST_HALF),
+                measure_char(glyphs::GLYPH_REST_QUARTER),
+                measure_char(glyphs::GLYPH_REST_EIGHTH),
+                measure_char(glyphs::GLYPH_REST_SIXTEENTH),
+                measure_char(glyphs::GLYPH_REST_32ND),
+            ],
+        }
+    }
+
+    pub fn debug(em: f32) -> Self {
+        Self {
+            head_width: 0.4 * em,
+            dot_width: 0.2 * em,
+            flag_8th_width: 0.3 * em,
+            flag_16th_width: 0.35 * em,
+            flag_32nd_width: 0.4 * em,
+            rest_widths: [0.4 * em; 6],
+        }
+    }
 }
 
 pub fn compute_em(rect: &Rect, width_cap_factor: f32, ui: &egui::Ui) -> f32 {
@@ -39,7 +78,7 @@ pub(crate) struct LayoutOpts {
     pub accent_displacement: f32,
     pub accent_below: bool,
     pub debug_bbox: bool,
-    pub metrics: Option<GlyphMetrics>,
+    pub metrics: GlyphMetrics,
 }
 
 impl LayoutOpts {
@@ -250,16 +289,10 @@ fn build_note_layout(
         }
     }
 
-    // 1) Kollisionen vermeiden: heuristische oder metrik-basierte Bounding-Box je Element und greedy nach rechts schieben
+    // 1) Kollisionen vermeiden: metrik-basierte Bounding-Box je Element und greedy nach rechts schieben
     //    (nur X‑Richtung).
     let em = opts.em;
     let min_gap = 0.0 * em;   // optischer Mindestabstand
-
-    // Fallback-Konstanten (falls keine Metriken)
-    let fb_head_half = 0.2 * em;
-    let fb_rest_half = 0.2 * em;
-    let fb_dot_half = 0.15 * em;
-    let fb_flag_overhang = 0.20 * em;
 
     // (cx, left_rel, right_rel)
     let mut shifted_layout_info: Vec<(f32, f32, f32)> = Vec::with_capacity(beats.len());
@@ -272,68 +305,56 @@ fn build_note_layout(
         let in_beam = in_beam_flags.get(i).copied().unwrap_or(false);
         let is_note = b.kind == BeatKind::Note;
 
+        let m = &opts.metrics;
+
         // Basis-Box (Kopf oder Rest)
-        let (left, mut right) = if let Some(m) = &opts.metrics {
-            if is_note {
-                let h = m.head_width * 0.5;
-                (-h, h)
-            } else {
-                let idx = match b.duration.base_note() {
-                    NoteValue::Whole => 0,
-                    NoteValue::Half => 1,
-                    NoteValue::Quarter => 2,
-                    NoteValue::Eighth => 3,
-                    NoteValue::Sixteenth => 4,
-                    NoteValue::ThirtySecond => 5,
-                };
-                let w = m.rest_widths[idx];
-                (-w * 0.5, w * 0.5)
-            }
-        } else {
-            let h = if is_note { fb_head_half } else { fb_rest_half };
+        let (left, mut right) = if is_note {
+            let h = m.head_width * 0.5;
             (-h, h)
+        } else {
+            let idx = match b.duration.base_note() {
+                NoteValue::Whole => 0,
+                NoteValue::Half => 1,
+                NoteValue::Quarter => 2,
+                NoteValue::Eighth => 3,
+                NoteValue::Sixteenth => 4,
+                NoteValue::ThirtySecond => 5,
+            };
+            let w = m.rest_widths[idx];
+            (-w * 0.5, w * 0.5)
         };
 
         // Dots berücksichtigen (rechts vom Kopf)
         let dot_count = match b.duration { Duration::Dotted { dots, .. } => dots, _ => 0 };
         if dot_count > 0 {
-            if let Some(m) = &opts.metrics {
-                // Berechne rechte Kante basierend auf Rendering-Logik
-                let has_flag_tail = is_note && !in_beam && needs_flag;
-                let first_dx = if has_flag_tail { opts.font_id.size * 0.5 } else { opts.font_id.size * 0.26 };
-                let step_dx = opts.font_id.size * 0.26;
-                let last_dot_center_rel = first_dx + ((dot_count - 1) as f32) * step_dx;
-                let last_dot_right_rel = last_dot_center_rel + m.dot_width * 0.5;
+            // Berechne rechte Kante basierend auf Rendering-Logik
+            let has_flag_tail = is_note && !in_beam && needs_flag;
+            let first_dx = if has_flag_tail { opts.font_id.size * 0.5 } else { opts.font_id.size * 0.26 };
+            let step_dx = opts.font_id.size * 0.26;
+            let last_dot_center_rel = first_dx + ((dot_count - 1) as f32) * step_dx;
+            let last_dot_right_rel = last_dot_center_rel + m.dot_width * 0.5;
 
-                if last_dot_right_rel > right {
-                    right = last_dot_right_rel;
-                }
-            } else {
-                let dots_right = dot_count as f32 * fb_dot_half;
-                right += dots_right;
+            if last_dot_right_rel > right {
+                right = last_dot_right_rel;
             }
         }
 
         // Einzelfahne (nicht beamed) ragt leicht nach rechts
         if is_note && !in_beam && needs_flag {
-            if let Some(m) = &opts.metrics {
-                // Flag startet links vom Stem (stem_offset - halbe Dicke) und geht flag_width nach rechts
-                let stem_offset = opts.stem_offset();
-                let stem_thick = opts.stem_thickness();
-                let flag_left_rel = stem_offset - stem_thick * 0.5;
+            // Flag startet links vom Stem (stem_offset - halbe Dicke) und geht flag_width nach rechts
+            let stem_offset = opts.stem_offset();
+            let stem_thick = opts.stem_thickness();
+            let flag_left_rel = stem_offset - stem_thick * 0.5;
 
-                let fw = match b.duration.base_note() {
-                    NoteValue::Eighth => m.flag_8th_width,
-                    NoteValue::Sixteenth => m.flag_16th_width,
-                    NoteValue::ThirtySecond => m.flag_32nd_width,
-                    _ => m.flag_8th_width,
-                };
-                let flag_right_rel = flag_left_rel + fw;
-                if flag_right_rel > right {
-                    right = flag_right_rel;
-                }
-            } else {
-                right += fb_flag_overhang;
+            let fw = match b.duration.base_note() {
+                NoteValue::Eighth => m.flag_8th_width,
+                NoteValue::Sixteenth => m.flag_16th_width,
+                NoteValue::ThirtySecond => m.flag_32nd_width,
+                _ => m.flag_8th_width,
+            };
+            let flag_right_rel = flag_left_rel + fw;
+            if flag_right_rel > right {
+                right = flag_right_rel;
             }
         }
 
@@ -353,7 +374,7 @@ fn build_note_layout(
     let mut note_layout: Vec<NoteLayout> = Vec::with_capacity(beats.len());
     for (i, b) in beats.iter().enumerate() {
         // Benutze die kollisionsbereinigte Center‑X als Idealwert für das Rendering
-        let (ideal_cx, left_rel, right_rel) = *shifted_layout_info.get(i).unwrap_or(&(rect.center().x, -fb_head_half, fb_head_half));
+        let (ideal_cx, left_rel, right_rel) = *shifted_layout_info.get(i).unwrap_or(&(rect.center().x, -0.2 * em, 0.2 * em));
         let cy = opts.y_center();
 
         // 1. Calculate Stem (if any) and determining pixel-snapping offset
@@ -714,7 +735,7 @@ mod tests {
             accent_displacement: 0.0,
             accent_below: false,
             debug_bbox: true,
-            metrics: None,
+            metrics: GlyphMetrics::debug(em),
         };
 
         let layout = build_measure_layout(&m, &opts);
@@ -750,29 +771,25 @@ mod tests {
             accent_displacement: 0.0,
             accent_below: false,
             debug_bbox: true,
-            metrics: None,
+            metrics: GlyphMetrics::debug(em),
         };
 
-        // 1. Ohne Metrics (Fallback)
-        let layout_fallback = build_measure_layout(&m, &opts);
-        let bbox_fallback = layout_fallback.notes[0].debug_bbox.unwrap();
-        let width_fallback = bbox_fallback.width();
+        // 1. Standard Metrics (Debug defaults)
+        let layout_std = build_measure_layout(&m, &opts);
+        let bbox_std = layout_std.notes[0].debug_bbox.unwrap();
+        let width_std = bbox_std.width();
 
         // 2. Mit Metrics (Large Head)
-        opts.metrics = Some(GlyphMetrics {
+        opts.metrics = GlyphMetrics {
             head_width: 5.0 * em, // Huge head
-            dot_width: 0.0,
-            flag_8th_width: 0.0,
-            flag_16th_width: 0.0,
-            flag_32nd_width: 0.0,
-            rest_widths: [0.0; 6],
-        });
+            ..GlyphMetrics::debug(em)
+        };
 
         let layout_metrics = build_measure_layout(&m, &opts);
         let bbox_metrics = layout_metrics.notes[0].debug_bbox.unwrap();
         let width_metrics = bbox_metrics.width();
 
-        assert!(width_metrics > width_fallback * 2.0, "Metrics-based width should be significantly larger");
+        assert!(width_metrics > width_std * 2.0, "Metrics-based width should be significantly larger");
         // Expect width roughly 5.0 * em
         assert!((width_metrics - 5.0 * em).abs() < 1.0);
     }
