@@ -496,18 +496,19 @@ fn build_note_layout(
 
         if is_note && b.accented {
             let displacement = opts.em * opts.accent_displacement;
-            let accent_half_h = opts.metrics.accent_size.y;
+            let accent_half_h = opts.metrics.accent_size.y * 0.5;
 
-            let y = if opts.accent_below {
+            let logical_y = if opts.accent_below {
                 content_bottom + displacement + accent_half_h
             } else {
                 content_top - displacement - accent_half_h
             };
-            accent_pos = Some(Pos2::new(center.x, y));
+
+            accent_pos = Some(Pos2::new(center.x, logical_y + accent_half_h));
 
             if opts.debug_bbox {
                 accent_debug_bbox = Some(Rect::from_center_size(
-                    accent_pos.unwrap(),
+                    Pos2::new(center.x, logical_y),
                     opts.metrics.accent_size,
                 ));
             }
@@ -892,11 +893,15 @@ mod tests {
         // Stem tip is the top-most point of the stem (smaller y)
         let stem_top = stem.p2.y.min(stem.p1.y);
 
-        // Accent should be above stem top by (displacement * em) + half accent height
+        // Accent should be above stem top by (displacement * em) + half accent height (logical)
+        // PLUS visual offset (half accent height)
         // y decreases upwards
-        let expected_y = stem_top - (displacement * em) - (opts.metrics.accent_size.y * 0.5);
+        // expected_pos_y = logical_y + visual_offset
+        //                = (stem_top - displacement - half_h) + half_h
+        //                = stem_top - displacement
+        let expected_y = stem_top - (displacement * em);
 
-        assert!(accent_pos.y <= expected_y + 0.001, "Accent (y={}) should be above stem top (y={})", accent_pos.y, stem_top);
+        assert!((accent_pos.y - expected_y).abs() < 0.001, "Accent (y={}) should be exactly at expected (y={})", accent_pos.y, expected_y);
 
         // Case 2: Accent Below
         let mut opts_below = opts.clone();
