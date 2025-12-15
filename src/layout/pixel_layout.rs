@@ -302,6 +302,18 @@ fn build_note_layout(
     let em = opts.em;
     let min_gap = 0.0 * em;   // optischer Mindestabstand
 
+    // Map beat index to beam group index to detect connected notes
+    let mut beat_to_beam_group = vec![None; beats.len()];
+    for (g_idx, g) in beams.iter().enumerate() {
+        for &b_idx in &g.beat_indices {
+            if b_idx < beat_to_beam_group.len() {
+                beat_to_beam_group[b_idx] = Some(g_idx);
+            }
+        }
+    }
+    // Track shift per beat (cx - base_cx) to propagate within beam groups
+    let mut shifts = vec![0.0; beats.len()];
+
     // (cx, left_rel, right_rel)
     let mut shifted_layout_info: Vec<(f32, f32, f32)> = Vec::with_capacity(beats.len());
     let mut prev_right: Option<f32> = None;
@@ -368,11 +380,23 @@ fn build_note_layout(
 
         // Greedy-Verschiebung, um Mindestabstand zur vorherigen Box zu sichern
         let mut cx = base_cx;
+        
+        // Propagate shift if in same beam group as previous beat
+        if i > 0 {
+            if let Some(bg) = beat_to_beam_group[i] {
+                if beat_to_beam_group[i-1] == Some(bg) {
+                    cx += shifts[i-1];
+                }
+            }
+        }
+
         if let Some(prev_r) = prev_right {
             let curr_left_abs = cx + left;
             let overlap = (prev_r + min_gap) - curr_left_abs;
             if overlap > 0.0 { cx += overlap; }
         }
+
+        shifts[i] = cx - base_cx;
 
         // Update rechter Rand dieser Box in absoluten Koordinaten
         prev_right = Some(cx + right);
@@ -963,7 +987,8 @@ mod tests {
     #[test]
     fn test_beam_group_spacing_preservation() {
         use crate::measure::duration::{th, t8};
-        let mut m = Measure::new(TimeSignature::FOUR_FOUR);
+        // Use 2/4 to keep total duration small (matches our notes)
+        let mut m = Measure::new(TimeSignature::TWO_FOUR);
 
         // Group 1: 7x 32nd notes
         for i in 0..7 {
@@ -980,7 +1005,6 @@ mod tests {
         let em = 10.0;
         let rect = Rect::from_min_max(Pos2::ZERO, Pos2::new(50.0, 100.0));
         
-        // Force normal heads (4.0) but tight layout
         let opts = LayoutOpts {
             rect,
             font_id: FontId::new(em, FontFamily::Proportional),
@@ -1004,17 +1028,12 @@ mod tests {
         let n8 = &layout.notes[8];
         let n9 = &layout.notes[9];
 
-        println!("N7: cx={:.2} (base calc: {:.2})", n7.center.x, 23.33 + 4.44);
-        println!("N8: cx={:.2} (base calc: {:.2})", n8.center.x, 23.33 + 4.44 + 8.88);
-        println!("N9: cx={:.2} (base calc: {:.2})", n9.center.x, 23.33 + 4.44 + 8.88 + 8.88);
-
         let d1 = n8.center.x - n7.center.x;
         let d2 = n9.center.x - n8.center.x;
 
         println!("Triplet spacing: {:.2} vs {:.2}", d1, d2);
 
         // We expect d1 < d2 (compressed vs natural)
-        // d1 should be roughly 7.0, d2 roughly 8.9. Diff ~1.9.
         assert!((d1 - d2).abs() < 1.0, "Spacing in triplet group should be consistent. Got {:.2} vs {:.2}", d1, d2);
     }
 }
