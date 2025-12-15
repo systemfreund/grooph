@@ -17,8 +17,7 @@ pub(super) fn draw_beat(
 
     // Draw stem
     if let Some(stem) = &note.stem {
-        let width = opts.snap_thickness(opts.stem_thickness());
-        painter.line_segment([stem.p1, stem.p2], Stroke::new(width, color));
+        painter.line_segment([stem.p1, stem.p2], Stroke::new(opts.stem_thickness(), color));
     }
 
     // Draw flag

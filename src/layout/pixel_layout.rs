@@ -92,10 +92,11 @@ impl LayoutOpts {
     const fn stem_length(&self) -> f32 { self.em * self.stem_length_factor }
 
     pub(crate) const fn stem_thickness(&self) -> f32 {
-        self.font_id.size * self.stem_thickness_factor
+        self.snap_thickness(self.em * self.stem_thickness_factor)
     }
 
-    const fn stem_offset(&self) -> f32 { self.font_id.size * 0.129 }
+    // const fn stem_offset(&self) -> f32 { self.em * 0.129 }
+    const fn stem_offset(&self) -> f32 { self.metrics.head_size.x * 0.5 - self.stem_thickness() * 0.5 }
 
     pub(crate) const fn beam_thickness(&self) -> f32 {
         // Bravura ~0.5 sp
@@ -106,16 +107,16 @@ impl LayoutOpts {
 
     const fn stub_length(&self) -> f32 { self.em * 0.20 }
 
-    pub(crate) const fn bracket_thickness(&self) -> f32 { self.font_id.size * 0.02 }
+    pub(crate) const fn bracket_thickness(&self) -> f32 { self.em * 0.02 }
 
     fn y_center(&self) -> f32 { self.rect.center().y + self.y_offset }
 
-    pub(crate) fn snap_thickness(&self, t: f32) -> f32 {
+    const fn snap_thickness(&self, t: f32) -> f32 {
         let ppp = self.pixels_per_point;
         (t * ppp).round().max(1.0) / ppp
     }
 
-    pub(crate) fn snap_x(&self, x: f32, thickness: f32) -> f32 {
+    pub(crate) const fn snap_x(&self, x: f32, thickness: f32) -> f32 {
         let ppp = self.pixels_per_point;
         let px_thickness = (thickness * ppp).round() as i32;
         if px_thickness % 2 != 0 {
@@ -378,14 +379,13 @@ fn build_note_layout(
 
     let mut note_layout: Vec<NoteLayout> = Vec::with_capacity(beats.len());
     for (i, b) in beats.iter().enumerate() {
-        let (ideal_cx, left_rel, right_rel) = *shifted_layout_info.get(i).unwrap_or(&(rect.center().x, -0.2 * em, 0.2 * em));
+        let (ideal_cx, left_rel, right_rel) = *shifted_layout_info.get(i).unwrap();
         let cy = opts.y_center();
 
         // 1. Calculate Stem (if any) and determining pixel-snapping offset
         // We do this first because the notehead and dots must align with the snapped stem.
         let mut stem: Option<Line> = None;
         let mut stem_x_offset = 0.0;
-        let mut stem_width_snapped = 0.0;
 
         let needs_flag = requires_flag(b.duration);
         let in_beam = in_beam_flags.get(i).copied().unwrap_or(false);
@@ -397,8 +397,7 @@ fn build_note_layout(
             let ideal_stem_x = ideal_cx + opts.stem_offset();
 
             // Snap stem
-            stem_width_snapped = opts.snap_thickness(opts.stem_thickness());
-            let snapped_stem_x = opts.snap_x(ideal_stem_x, stem_width_snapped);
+            let snapped_stem_x = opts.snap_x(ideal_stem_x, opts.stem_thickness());
             stem_x_offset = snapped_stem_x - ideal_stem_x;
 
             let start = Pos2::new(snapped_stem_x, cy - opts.em * 0.05);
@@ -407,7 +406,7 @@ fn build_note_layout(
         }
 
         // 2. Adjust Notehead Center
-        let center = Pos2::new(ideal_cx + stem_x_offset, cy);
+        let center = Pos2::new(ideal_cx, cy);
 
         // 3. Dots
         let dot_count = match b.duration {
@@ -436,7 +435,7 @@ fn build_note_layout(
             && let Some(s) = &stem
         {
             // Align flag to the left edge of the snapped stem
-            let flag_x = s.p1.x - stem_width_snapped * 0.5;
+            let flag_x = s.p1.x - opts.stem_thickness() * 0.5;
             flag_pos = Some(Pos2::new(flag_x, cy - opts.stem_length()));
         }
 
@@ -550,7 +549,7 @@ fn build_beam_layout(
 
     let beam_h = opts.beam_thickness();
     // To ensure beams cover the stems, we extend them by half the stem width.
-    let stem_w = opts.snap_thickness(opts.stem_thickness());
+    let stem_w = opts.stem_thickness();
     let half_stem = stem_w * 0.5;
 
     let mut beams_out: Vec<BeamLayout> = Vec::new();
