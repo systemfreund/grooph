@@ -116,6 +116,7 @@ impl Grooph {
                         stem_thickness_factor: 0.04,
                         accent_displacement: 0.07,
                         accent_below: self.layout_accent_below,
+                        proportional_spacing: self.layout_proportional_spacing,
                         debug_bbox: self.layout_debug_bbox,
                         metrics,
                     };

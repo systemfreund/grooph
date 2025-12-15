@@ -83,6 +83,7 @@ pub(crate) struct LayoutOpts {
 
     pub accent_displacement: f32,
     pub accent_below: bool,
+    pub proportional_spacing: bool,
     pub debug_bbox: bool,
     pub metrics: GlyphMetrics,
 }
@@ -97,7 +98,9 @@ impl LayoutOpts {
     }
 
     // const fn stem_offset(&self) -> f32 { self.em * 0.129 }
-    const fn stem_offset(&self) -> f32 { self.metrics.head_size.x * 0.5 - self.stem_thickness() * 0.5 }
+    const fn stem_offset(&self) -> f32 {
+        self.metrics.head_size.x * 0.5 - self.stem_thickness() * 0.5
+    }
 
     pub(crate) const fn beam_thickness(&self) -> f32 {
         // Bravura ~0.5 sp
@@ -280,10 +283,11 @@ fn build_note_layout(
     opts: &LayoutOpts,
 ) -> Vec<NoteLayout> {
     // Basisverteilung (rhythmisch gleichmäßig über die verfügbare Breite)
-    let x_centers = crate::layout::calculate_x_centers(beats, rect.width())
-        .into_iter()
-        .map(|cx| cx + rect.left())
-        .collect::<Vec<_>>();
+    let x_centers =
+        crate::layout::calculate_x_centers(beats, rect.width(), opts.proportional_spacing)
+            .into_iter()
+            .map(|cx| cx + rect.left())
+            .collect::<Vec<_>>();
 
     // Determine which beats are inside any beamed group (for flag suppression)
     let mut in_beam_flags: Vec<bool> = vec![false; beats.len()];
@@ -300,7 +304,7 @@ fn build_note_layout(
     // 1) Kollisionen vermeiden: metrik-basierte Bounding-Box je Element und greedy nach rechts schieben
     //    (nur X‑Richtung).
     let em = opts.em;
-    let min_gap = 0.0 * em;   // optischer Mindestabstand
+    let min_gap = 0.0 * em; // optischer Mindestabstand
 
     // Map beat index to beam group index to detect connected notes
     let mut beat_to_beam_group = vec![None; beats.len()];
@@ -345,7 +349,10 @@ fn build_note_layout(
         };
 
         // Dots berücksichtigen (rechts vom Kopf)
-        let dot_count = match b.duration { Duration::Dotted { dots, .. } => dots, _ => 0 };
+        let dot_count = match b.duration {
+            Duration::Dotted { dots, .. } => dots,
+            _ => 0,
+        };
         if dot_count > 0 {
             // Berechne rechte Kante basierend auf Rendering-Logik
             let has_flag_tail = is_note && !in_beam && needs_flag;
@@ -380,20 +387,21 @@ fn build_note_layout(
 
         // Greedy-Verschiebung, um Mindestabstand zur vorherigen Box zu sichern
         let mut cx = base_cx;
-        
+
         // Propagate shift if in same beam group as previous beat
-        if i > 0 {
-            if let Some(bg) = beat_to_beam_group[i] {
-                if beat_to_beam_group[i-1] == Some(bg) {
-                    cx += shifts[i-1];
-                }
-            }
+        if i > 0
+            && let Some(bg) = beat_to_beam_group[i]
+            && beat_to_beam_group[i - 1] == Some(bg)
+        {
+            cx += shifts[i - 1];
         }
 
         if let Some(prev_r) = prev_right {
             let curr_left_abs = cx + left;
             let overlap = (prev_r + min_gap) - curr_left_abs;
-            if overlap > 0.0 { cx += overlap; }
+            if overlap > 0.0 {
+                cx += overlap;
+            }
         }
 
         shifts[i] = cx - base_cx;
@@ -411,7 +419,6 @@ fn build_note_layout(
         // 1. Calculate Stem (if any) and determining pixel-snapping offset
         // We do this first because the notehead and dots must align with the snapped stem.
         let mut stem: Option<Line> = None;
-        let mut stem_x_offset = 0.0;
 
         let needs_flag = requires_flag(b.duration);
         let in_beam = in_beam_flags.get(i).copied().unwrap_or(false);
@@ -421,10 +428,7 @@ fn build_note_layout(
             let stem_len_factor = if in_beam || needs_flag { 1.0 } else { 0.85 };
             let stem_len = opts.stem_length() * stem_len_factor;
             let ideal_stem_x = ideal_cx + opts.stem_offset();
-
-            // Snap stem
             let snapped_stem_x = opts.snap_x(ideal_stem_x, opts.stem_thickness());
-            stem_x_offset = snapped_stem_x - ideal_stem_x;
 
             let start = Pos2::new(snapped_stem_x, cy - opts.em * 0.05);
             let end = Pos2::new(snapped_stem_x, cy - stem_len);
@@ -502,15 +506,15 @@ fn build_note_layout(
 
             // Expand for flag
             if let Some(fp) = flag_pos {
-                 let fs = match b.duration.base_note() {
+                let fs = match b.duration.base_note() {
                     NoteValue::Eighth => m.flag_8th_size,
                     NoteValue::Sixteenth => m.flag_16th_size,
                     NoteValue::ThirtySecond => m.flag_32nd_size,
                     _ => m.flag_8th_size,
-                 };
-                 // Flag is drawn at LEFT_CENTER.
-                 top = top.min(fp.y - fs.y * 0.5);
-                 bottom = bottom.max(fp.y + fs.y * 0.5);
+                };
+                // Flag is drawn at LEFT_CENTER.
+                top = top.min(fp.y - fs.y * 0.5);
+                bottom = bottom.max(fp.y + fs.y * 0.5);
             }
             (top, bottom)
         };
@@ -796,9 +800,9 @@ fn build_tuplet_layout(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::measure::{Measure, TimeSignature, Beat};
     use crate::measure::duration::q;
-    use eframe::egui::{Rect, Pos2, FontId, FontFamily, Vec2};
+    use crate::measure::{Beat, Measure, TimeSignature};
+    use eframe::egui::{FontFamily, FontId, Pos2, Rect, Vec2};
 
     #[test]
     fn test_debug_bbox_includes_stem_length() {
@@ -820,6 +824,7 @@ mod tests {
             stem_thickness_factor: 0.1,
             accent_displacement: 0.0,
             accent_below: false,
+            proportional_spacing: true,
             debug_bbox: true,
             metrics: GlyphMetrics::debug(em),
         };
@@ -827,14 +832,18 @@ mod tests {
         let layout = build_measure_layout(&m, &opts);
         let note = &layout.notes[0];
         let bbox = note.debug_bbox.expect("Debug bbox should be present");
-        
+
         let cy = opts.rect.center().y; // 50.0
         let stem_len = em * opts.stem_length_factor; // 40.0 (factor 1.0 due to flag)
-        
+
         // Assert bbox top covers the stem
         // Allow small margin for snapping
-        assert!(bbox.min.y <= cy - stem_len + 1.0, 
-            "BBox top ({}) should cover stem top ({})", bbox.min.y, cy - stem_len);
+        assert!(
+            bbox.min.y <= cy - stem_len + 1.0,
+            "BBox top ({}) should cover stem top ({})",
+            bbox.min.y,
+            cy - stem_len
+        );
     }
 
     #[test]
@@ -856,6 +865,7 @@ mod tests {
             stem_thickness_factor: 0.1,
             accent_displacement: 0.0,
             accent_below: false,
+            proportional_spacing: true,
             debug_bbox: true,
             metrics: GlyphMetrics::debug(em),
         };
@@ -875,7 +885,10 @@ mod tests {
         let bbox_metrics = layout_metrics.notes[0].debug_bbox.unwrap();
         let width_metrics = bbox_metrics.width();
 
-        assert!(width_metrics > width_std * 2.0, "Metrics-based width should be significantly larger");
+        assert!(
+            width_metrics > width_std * 2.0,
+            "Metrics-based width should be significantly larger"
+        );
         // Expect width roughly 5.0 * em
         assert!((width_metrics - 5.0 * em).abs() < 1.0);
     }
@@ -903,6 +916,7 @@ mod tests {
             stem_thickness_factor: 0.1,
             accent_displacement: displacement,
             accent_below: false,
+            proportional_spacing: true,
             debug_bbox: true,
             metrics: GlyphMetrics::debug(em),
         };
@@ -925,7 +939,12 @@ mod tests {
         //                = stem_top - displacement
         let expected_y = stem_top - (displacement * em);
 
-        assert!((accent_pos.y - expected_y).abs() < 0.001, "Accent (y={}) should be exactly at expected (y={})", accent_pos.y, expected_y);
+        assert!(
+            (accent_pos.y - expected_y).abs() < 0.001,
+            "Accent (y={}) should be exactly at expected (y={})",
+            accent_pos.y,
+            expected_y
+        );
 
         // Case 2: Accent Below
         let mut opts_below = opts.clone();
@@ -962,6 +981,7 @@ mod tests {
             stem_thickness_factor: 0.1,
             accent_displacement: 0.5,
             accent_below: false,
+            proportional_spacing: true,
             debug_bbox: true,
             metrics: GlyphMetrics::debug(em),
         };
@@ -986,7 +1006,7 @@ mod tests {
 
     #[test]
     fn test_beam_group_spacing_preservation() {
-        use crate::measure::duration::{th, t8};
+        use crate::measure::duration::{t8, th};
         // Use 2/4 to keep total duration small (matches our notes)
         let mut m = Measure::new(TimeSignature::TWO_FOUR);
 
@@ -994,7 +1014,7 @@ mod tests {
         for i in 0..7 {
             m.set_beat(i, Beat::note(th())).unwrap();
         }
-        
+
         // Group 2: 3x triplet 8th
         // Indices 7, 8, 9
         for i in 0..3 {
@@ -1004,7 +1024,7 @@ mod tests {
         // Setup layout
         let em = 10.0;
         let rect = Rect::from_min_max(Pos2::ZERO, Pos2::new(50.0, 100.0));
-        
+
         let opts = LayoutOpts {
             rect,
             font_id: FontId::new(em, FontFamily::Proportional),
@@ -1017,6 +1037,7 @@ mod tests {
             stem_thickness_factor: 0.1,
             accent_displacement: 0.0,
             accent_below: false,
+            proportional_spacing: true,
             debug_bbox: true,
             metrics: GlyphMetrics::debug(em),
         };
@@ -1034,6 +1055,11 @@ mod tests {
         println!("Triplet spacing: {:.2} vs {:.2}", d1, d2);
 
         // We expect d1 < d2 (compressed vs natural)
-        assert!((d1 - d2).abs() < 1.0, "Spacing in triplet group should be consistent. Got {:.2} vs {:.2}", d1, d2);
+        assert!(
+            (d1 - d2).abs() < 1.0,
+            "Spacing in triplet group should be consistent. Got {:.2} vs {:.2}",
+            d1,
+            d2
+        );
     }
 }

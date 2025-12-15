@@ -217,6 +217,7 @@ impl Grooph {
                 stem_thickness_factor: 0.03,
                 accent_displacement: 0.0,
                 accent_below: false,
+                proportional_spacing: true,
                 debug_bbox: false,
                 metrics: GlyphMetrics::measure(ui, &font_id),
             };
@@ -293,6 +294,7 @@ impl Grooph {
                 stem_thickness_factor: 0.04,
                 accent_displacement: 0.8,
                 accent_below: false,
+                proportional_spacing: true,
                 debug_bbox: false,
                 metrics: GlyphMetrics::measure(ui, &font_id),
             };

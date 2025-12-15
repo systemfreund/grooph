@@ -71,6 +71,7 @@ pub struct Grooph {
     wake_lock: Rc<RefCell<Option<web_sys::WakeLockSentinel>>>,
     layout_width_cap_factor: f32,
     layout_accent_below: bool,
+    layout_proportional_spacing: bool,
     layout_stem_length_factor: f32,
     layout_debug_bbox: bool,
     audio_offset: f32,
@@ -312,8 +313,9 @@ impl Grooph {
             wake_lock: Rc::new(RefCell::new(None)),
             layout_width_cap_factor: 0.1,
             layout_accent_below: true,
+            layout_proportional_spacing: false,
             layout_stem_length_factor: 0.9,
-            layout_debug_bbox: true,
+            layout_debug_bbox: false,
             audio_offset: 0.0,
             audio_latency_enabled: true,
         };

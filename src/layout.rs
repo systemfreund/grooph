@@ -7,7 +7,7 @@ use crate::measure::duration::Duration;
 use crate::measure::{Beat};
 use crate::measure::grid::DEFAULT_GRID;
 
-pub(super) fn calculate_x_centers(beats: &[Beat], content_w: f32) -> Vec<f32> {
+pub(super) fn calculate_x_centers(beats: &[Beat], content_w: f32, proportional: bool) -> Vec<f32> {
     let durations: Vec<Duration> = beats.iter().map(|b| b.duration).collect();
 
     // Calculate total duration in ticks
@@ -18,8 +18,8 @@ pub(super) fn calculate_x_centers(beats: &[Beat], content_w: f32) -> Vec<f32> {
         t
     }).collect();
 
-    if total_ticks == 0 {
-        // Fallback to uniform if total ticks is 0
+    if !proportional {
+        // Fallback or explicit uniform spacing
         let total = durations.len() as f32;
         let cell_w = if total > 0.0 { content_w / total } else { 1.0 };
         let mut x_centers = vec![0.0; durations.len()];
@@ -59,11 +59,30 @@ mod tests {
             Beat::note(e()),
         ];
         let width = 100.0;
-        let centers = calculate_x_centers(&beats, width);
+        let centers = calculate_x_centers(&beats, width, true);
 
         assert_eq!(centers.len(), 3);
         assert!((centers[0] - 25.0).abs() < 1e-5, "Expected 25.0, got {}", centers[0]);
         assert!((centers[1] - 62.5).abs() < 1e-5, "Expected 62.5, got {}", centers[1]);
         assert!((centers[2] - 87.5).abs() < 1e-5, "Expected 87.5, got {}", centers[2]);
+    }
+
+    #[test]
+    fn test_uniform_spacing() {
+        let beats = vec![
+            Beat::note(q()),
+            Beat::note(e()),
+            Beat::note(e()),
+        ];
+        let width = 100.0;
+        let centers = calculate_x_centers(&beats, width, false);
+
+        assert_eq!(centers.len(), 3);
+        // Uniform spacing: 3 items over 100.0 width.
+        // Cell width = 100.0 / 3 = 33.33...
+        // Centers: 16.66, 50.0, 83.33
+        assert!((centers[0] - 16.66).abs() < 0.01, "Expected ~16.66, got {}", centers[0]);
+        assert!((centers[1] - 50.00).abs() < 0.01, "Expected ~50.00, got {}", centers[1]);
+        assert!((centers[2] - 83.33).abs() < 0.01, "Expected ~83.33, got {}", centers[2]);
     }
 }

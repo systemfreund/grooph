@@ -120,11 +120,13 @@ impl Grooph {
                             ui.separator();
                             ui.checkbox(&mut self.layout_debug_bbox, "Show bounding boxes");
                             ui.separator();
+                            ui.label("Accents Position:");
                             ui.horizontal(|ui| {
-                                ui.label("Accents Position:");
                                 ui.radio_value(&mut self.layout_accent_below, true, "Below");
                                 ui.radio_value(&mut self.layout_accent_below, false, "Above");
                             });
+                            ui.separator();
+                            ui.checkbox(&mut self.layout_proportional_spacing, "Proportional Spacing");
                         },
                     );
 

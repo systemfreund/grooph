@@ -483,9 +483,8 @@ impl MetronomeSource {
             let env_tone = (env_attack * env_tone_decay).clamp(0.0, 1.0);
             let env_noise = (env_attack * env_noise_decay).clamp(0.0, 1.0);
 
-            // Samples ziehen
             let base_sample = if tone_alive {
-                match voice.base_signal.next() { Some(s) => s, None => 0.0 }
+                voice.base_signal.next().unwrap_or(0.0)
             } else { 0.0 };
 
             let noise_sample = if noise_alive {
