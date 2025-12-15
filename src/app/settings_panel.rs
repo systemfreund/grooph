@@ -1,6 +1,6 @@
-use crate::audio::Waveform;
 use crate::Grooph;
 use crate::app::Mode;
+use crate::audio::Waveform;
 use eframe::egui;
 use eframe::egui::{Align, Direction, Layout, Widget, global_theme_preference_buttons};
 
@@ -29,10 +29,26 @@ impl Grooph {
                                 Waveform::Sawtooth => "Sawtooth",
                             })
                             .show_ui(ui, |ui| {
-                                ui.selectable_value(&mut self.audio_settings.waveform, Waveform::Sine, "Sine");
-                                ui.selectable_value(&mut self.audio_settings.waveform, Waveform::Triangle, "Triangle");
-                                ui.selectable_value(&mut self.audio_settings.waveform, Waveform::Square, "Square");
-                                ui.selectable_value(&mut self.audio_settings.waveform, Waveform::Sawtooth, "Sawtooth");
+                                ui.selectable_value(
+                                    &mut self.audio_settings.waveform,
+                                    Waveform::Sine,
+                                    "Sine",
+                                );
+                                ui.selectable_value(
+                                    &mut self.audio_settings.waveform,
+                                    Waveform::Triangle,
+                                    "Triangle",
+                                );
+                                ui.selectable_value(
+                                    &mut self.audio_settings.waveform,
+                                    Waveform::Square,
+                                    "Square",
+                                );
+                                ui.selectable_value(
+                                    &mut self.audio_settings.waveform,
+                                    Waveform::Sawtooth,
+                                    "Sawtooth",
+                                );
                             });
                         ui.separator();
                         ui.label("Noise Mix:");
@@ -68,19 +84,22 @@ impl Grooph {
                         );
                     });
 
-                    egui::CollapsingHeader::new("Audio Latency").default_open(false).show(ui, |ui| {
-                        ui.checkbox(&mut self.audio_latency_enabled, "Enabled");
-                        ui.add_enabled_ui(self.audio_latency_enabled, |ui| {
-                            ui.label("Offset:");
-                            ui.add(
-                                egui::DragValue::new(&mut self.audio_offset)
-                                    .range(-0.5..=0.5)
-                                    .speed(0.001)
-                                    .suffix("s"),
-                            );
-                        });
-                        ui.label("Adjust if audio is out of sync with cursor.");
-                    });
+                    egui::CollapsingHeader::new("Audio Latency").default_open(false).show(
+                        ui,
+                        |ui| {
+                            ui.checkbox(&mut self.audio_latency_enabled, "Enabled");
+                            ui.add_enabled_ui(self.audio_latency_enabled, |ui| {
+                                ui.label("Offset:");
+                                ui.add(
+                                    egui::DragValue::new(&mut self.audio_offset)
+                                        .range(-0.5..=0.5)
+                                        .speed(0.001)
+                                        .suffix("s"),
+                                );
+                            });
+                            ui.label("Adjust if audio is out of sync with cursor.");
+                        },
+                    );
 
                     egui::CollapsingHeader::new("Developer settings").default_open(false).show(
                         ui,
@@ -88,11 +107,16 @@ impl Grooph {
                             ui.label("Size:");
                             ui.add(
                                 egui::DragValue::new(&mut self.layout_width_cap_factor)
+                                    .speed(0.01)
                                     .range(0.05..=0.5),
                             );
                             ui.separator();
                             ui.label("Stem Length Factor:");
-                            ui.add(egui::DragValue::new(&mut self.layout_stem_length_factor).range(0.1..=2.0));
+                            ui.add(
+                                egui::DragValue::new(&mut self.layout_stem_length_factor)
+                                    .speed(0.01)
+                                    .range(0.1..=2.0),
+                            );
                             ui.separator();
                             ui.checkbox(&mut self.layout_debug_bbox, "Show bounding boxes");
                             ui.separator();
@@ -108,7 +132,6 @@ impl Grooph {
                     ui.label("Theme:");
                     global_theme_preference_buttons(ui);
                 });
-
             },
         );
     }

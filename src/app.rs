@@ -313,7 +313,7 @@ impl Grooph {
             layout_width_cap_factor: 0.1,
             layout_accent_below: true,
             layout_stem_length_factor: 0.9,
-            layout_debug_bbox: false,
+            layout_debug_bbox: true,
             audio_offset: 0.0,
             audio_latency_enabled: true,
         };

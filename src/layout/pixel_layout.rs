@@ -241,10 +241,10 @@ fn build_note_layout(
     // 1) Kollisionen vermeiden: heuristische Bounding-Box je Element und greedy nach rechts schieben
     //    (nur X‑Richtung). Dadurch werden insbesondere Punkte (dotted) und Fahnen berücksichtigt.
     let em = opts.em;
-    let head_half = 0.45 * em; // ~Notehead-Hälfte
-    let rest_half = 0.40 * em; // Restbreite (Heuristik)
+    let head_half = 0.2 * em; // ~Notehead-Hälfte
+    let rest_half = 0.2 * em; // Restbreite (Heuristik)
     let dot_half = 0.15 * em;  // Punkt-Hälfte
-    let min_gap = 0.12 * em;   // optischer Mindestabstand
+    let min_gap = 0.0 * em;   // optischer Mindestabstand
     let flag_overhang = 0.20 * em; // kleine Ausladung einer einzelnen Fahne
 
     // (cx, left_rel, right_rel)
@@ -265,13 +265,9 @@ fn build_note_layout(
         // Dots berücksichtigen (rechts vom Kopf)
         let dot_count = match b.duration { Duration::Dotted { dots, .. } => dots, _ => 0 };
         if dot_count > 0 {
-            let has_flag_tail = is_note && !in_beam && needs_flag;
-            // dieselben Abstände wie beim tatsächlichen Zeichnen
-            let first_dx = if has_flag_tail { opts.font_id.size * 0.5 } else { opts.font_id.size * 0.28 };
-            let step_dx = opts.font_id.size * 0.26;
             // äußerster Punkt‑Rand
-            let dots_right = first_dx + (dot_count.saturating_sub(1) as f32) * step_dx + dot_half;
-            right = right.max(dots_right);
+            let dots_right = dot_count as f32 * dot_half;
+            right += dots_right;
         }
 
         // Einzelfahne (nicht beamed) ragt leicht nach rechts
@@ -335,7 +331,7 @@ fn build_note_layout(
         if dot_count > 0 {
             let has_flag_tail = is_note && !in_beam && needs_flag;
             let first_dx =
-                if has_flag_tail { opts.font_id.size * 0.5 } else { opts.font_id.size * 0.28 };
+                if has_flag_tail { opts.font_id.size * 0.5 } else { opts.font_id.size * 0.26 };
             let step_dx = opts.font_id.size * 0.26;
             // The dots start relative to the shifted center
             for d in 0..dot_count {
@@ -366,9 +362,18 @@ fn build_note_layout(
         }
 
         let debug_bbox = if opts.debug_bbox {
+            let mut top = cy - em * 0.0;
+            let mut bottom = cy + em * 0.0;
+
+            // Expand to include stem if present
+            if let Some(s) = &stem {
+                top = top.min(s.p2.y).min(s.p1.y);
+                bottom = bottom.max(s.p2.y).max(s.p1.y);
+            }
+
             Some(Rect::from_min_max(
-                Pos2::new(ideal_cx + left_rel, cy - em * 0.7),
-                Pos2::new(ideal_cx + right_rel, cy + em * 0.7),
+                Pos2::new(ideal_cx + left_rel, top),
+                Pos2::new(ideal_cx + right_rel, bottom),
             ))
         } else {
             None
@@ -617,4 +622,48 @@ fn build_tuplet_layout(
     }
 
     tuplets_out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::measure::{Measure, TimeSignature, Beat};
+    use crate::measure::duration::q;
+    use eframe::egui::{Rect, Pos2, FontId, FontFamily};
+
+    #[test]
+    fn test_debug_bbox_includes_stem_length() {
+        use crate::measure::duration::e;
+        let mut m = Measure::new(TimeSignature::FOUR_FOUR);
+        // Add one eighth note (has flag -> stem_len_factor = 1.0)
+        m.set_beat(0, Beat::note(e())).unwrap();
+
+        let em = 20.0;
+        let opts = LayoutOpts {
+            rect: Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(100.0, 100.0)),
+            font_id: FontId::new(em, FontFamily::Proportional),
+            pixels_per_point: 1.0,
+            em,
+            layout_clef: false,
+            layout_time_signature: false,
+            y_offset: 0.0,
+            stem_length_factor: 2.0, // Long stem: 2.0 * 20.0 = 40.0
+            stem_thickness_factor: 0.1,
+            accent_displacement: 0.0,
+            accent_below: false,
+            debug_bbox: true,
+        };
+
+        let layout = build_measure_layout(&m, &opts);
+        let note = &layout.notes[0];
+        let bbox = note.debug_bbox.expect("Debug bbox should be present");
+        
+        let cy = opts.rect.center().y; // 50.0
+        let stem_len = em * opts.stem_length_factor; // 40.0 (factor 1.0 due to flag)
+        
+        // Assert bbox top covers the stem
+        // Allow small margin for snapping
+        assert!(bbox.min.y <= cy - stem_len + 1.0, 
+            "BBox top ({}) should cover stem top ({})", bbox.min.y, cy - stem_len);
+    }
 }
