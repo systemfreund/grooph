@@ -62,4 +62,14 @@ pub(super) fn draw_beat(
             color,
         );
     }
+
+    if opts.debug_bbox && let Some(rect) = note.debug_bbox {
+        painter.rect(
+            rect,
+            0.0,
+            Color32::TRANSPARENT,
+            Stroke::new(1.0, Color32::RED),
+            egui::StrokeKind::Outside,
+        );
+    }
 }

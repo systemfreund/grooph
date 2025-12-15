@@ -27,6 +27,7 @@ pub(crate) struct LayoutOpts {
 
     pub accent_displacement: f32,
     pub accent_below: bool,
+    pub debug_bbox: bool,
 }
 
 impl LayoutOpts {
@@ -103,6 +104,7 @@ pub struct NoteLayout {
     pub stem: Option<Line>,
     pub flag_pos: Option<Pos2>,
     pub accent_pos: Option<Pos2>,
+    pub debug_bbox: Option<Rect>,
 }
 
 /// Pixel-level layout for a measure.
@@ -245,7 +247,8 @@ fn build_note_layout(
     let min_gap = 0.12 * em;   // optischer Mindestabstand
     let flag_overhang = 0.20 * em; // kleine Ausladung einer einzelnen Fahne
 
-    let mut shifted_centers: Vec<f32> = Vec::with_capacity(beats.len());
+    // (cx, left_rel, right_rel)
+    let mut shifted_layout_info: Vec<(f32, f32, f32)> = Vec::with_capacity(beats.len());
     let mut prev_right: Option<f32> = None;
 
     for (i, b) in beats.iter().enumerate() {
@@ -256,7 +259,7 @@ fn build_note_layout(
         let is_note = b.kind == BeatKind::Note;
 
         // Heuristische BBox relativ zur Center‑X
-        let mut left = if is_note { -head_half } else { -rest_half };
+        let left = if is_note { -head_half } else { -rest_half };
         let mut right = if is_note { head_half } else { rest_half };
 
         // Dots berücksichtigen (rechts vom Kopf)
@@ -286,13 +289,13 @@ fn build_note_layout(
 
         // Update rechter Rand dieser Box in absoluten Koordinaten
         prev_right = Some(cx + right);
-        shifted_centers.push(cx);
+        shifted_layout_info.push((cx, left, right));
     }
 
     let mut note_layout: Vec<NoteLayout> = Vec::with_capacity(beats.len());
     for (i, b) in beats.iter().enumerate() {
         // Benutze die kollisionsbereinigte Center‑X als Idealwert für das Rendering
-        let ideal_cx = *shifted_centers.get(i).unwrap_or(&rect.center().x);
+        let (ideal_cx, left_rel, right_rel) = *shifted_layout_info.get(i).unwrap_or(&(rect.center().x, -head_half, head_half));
         let cy = opts.y_center();
 
         // 1. Calculate Stem (if any) and determining pixel-snapping offset
@@ -362,6 +365,15 @@ fn build_note_layout(
             accent_pos = Some(Pos2::new(center.x, y));
         }
 
+        let debug_bbox = if opts.debug_bbox {
+            Some(Rect::from_min_max(
+                Pos2::new(ideal_cx + left_rel, cy - em * 0.7),
+                Pos2::new(ideal_cx + right_rel, cy + em * 0.7),
+            ))
+        } else {
+            None
+        };
+
         note_layout.push(NoteLayout {
             center,
             duration: b.duration,
@@ -370,6 +382,7 @@ fn build_note_layout(
             stem,
             flag_pos,
             accent_pos,
+            debug_bbox,
         });
     }
 

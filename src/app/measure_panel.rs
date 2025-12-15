@@ -112,6 +112,7 @@ impl Grooph {
                         stem_thickness_factor: 0.04,
                         accent_displacement: 0.5,
                         accent_below: self.layout_accent_below,
+                        debug_bbox: self.layout_debug_bbox,
                     };
 
                     let layout = draw_measure(

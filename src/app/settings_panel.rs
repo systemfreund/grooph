@@ -94,6 +94,8 @@ impl Grooph {
                             ui.label("Stem Length Factor:");
                             ui.add(egui::DragValue::new(&mut self.layout_stem_length_factor).range(0.1..=2.0));
                             ui.separator();
+                            ui.checkbox(&mut self.layout_debug_bbox, "Show bounding boxes");
+                            ui.separator();
                             ui.horizontal(|ui| {
                                 ui.label("Accents Position:");
                                 ui.radio_value(&mut self.layout_accent_below, true, "Below");
