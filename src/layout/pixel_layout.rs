@@ -5,6 +5,17 @@ use crate::measure::duration::{Duration, NoteValue};
 use crate::measure::{Beat, BeatKind, Measure, TimeSignature};
 use eframe::egui::{self, FontId, Pos2, Rect};
 
+#[derive(Debug, Clone, Copy)]
+pub struct GlyphMetrics {
+    pub head_width: f32,
+    pub dot_width: f32,
+    pub flag_8th_width: f32,
+    pub flag_16th_width: f32,
+    pub flag_32nd_width: f32,
+    // Widths for Whole, Half, Quarter, Eighth, Sixteenth, 32nd
+    pub rest_widths: [f32; 6],
+}
+
 pub fn compute_em(rect: &Rect, width_cap_factor: f32, ui: &egui::Ui) -> f32 {
     // Derive font size mainly from the available height, modulated by width caps
     let min_size = 12.0 * ui.ctx().pixels_per_point();
@@ -28,6 +39,7 @@ pub(crate) struct LayoutOpts {
     pub accent_displacement: f32,
     pub accent_below: bool,
     pub debug_bbox: bool,
+    pub metrics: Option<GlyphMetrics>,
 }
 
 impl LayoutOpts {
@@ -238,14 +250,16 @@ fn build_note_layout(
         }
     }
 
-    // 1) Kollisionen vermeiden: heuristische Bounding-Box je Element und greedy nach rechts schieben
-    //    (nur X‑Richtung). Dadurch werden insbesondere Punkte (dotted) und Fahnen berücksichtigt.
+    // 1) Kollisionen vermeiden: heuristische oder metrik-basierte Bounding-Box je Element und greedy nach rechts schieben
+    //    (nur X‑Richtung).
     let em = opts.em;
-    let head_half = 0.2 * em; // ~Notehead-Hälfte
-    let rest_half = 0.2 * em; // Restbreite (Heuristik)
-    let dot_half = 0.15 * em;  // Punkt-Hälfte
     let min_gap = 0.0 * em;   // optischer Mindestabstand
-    let flag_overhang = 0.20 * em; // kleine Ausladung einer einzelnen Fahne
+
+    // Fallback-Konstanten (falls keine Metriken)
+    let fb_head_half = 0.2 * em;
+    let fb_rest_half = 0.2 * em;
+    let fb_dot_half = 0.15 * em;
+    let fb_flag_overhang = 0.20 * em;
 
     // (cx, left_rel, right_rel)
     let mut shifted_layout_info: Vec<(f32, f32, f32)> = Vec::with_capacity(beats.len());
@@ -258,21 +272,69 @@ fn build_note_layout(
         let in_beam = in_beam_flags.get(i).copied().unwrap_or(false);
         let is_note = b.kind == BeatKind::Note;
 
-        // Heuristische BBox relativ zur Center‑X
-        let left = if is_note { -head_half } else { -rest_half };
-        let mut right = if is_note { head_half } else { rest_half };
+        // Basis-Box (Kopf oder Rest)
+        let (left, mut right) = if let Some(m) = &opts.metrics {
+            if is_note {
+                let h = m.head_width * 0.5;
+                (-h, h)
+            } else {
+                let idx = match b.duration.base_note() {
+                    NoteValue::Whole => 0,
+                    NoteValue::Half => 1,
+                    NoteValue::Quarter => 2,
+                    NoteValue::Eighth => 3,
+                    NoteValue::Sixteenth => 4,
+                    NoteValue::ThirtySecond => 5,
+                };
+                let w = m.rest_widths[idx];
+                (-w * 0.5, w * 0.5)
+            }
+        } else {
+            let h = if is_note { fb_head_half } else { fb_rest_half };
+            (-h, h)
+        };
 
         // Dots berücksichtigen (rechts vom Kopf)
         let dot_count = match b.duration { Duration::Dotted { dots, .. } => dots, _ => 0 };
         if dot_count > 0 {
-            // äußerster Punkt‑Rand
-            let dots_right = dot_count as f32 * dot_half;
-            right += dots_right;
+            if let Some(m) = &opts.metrics {
+                // Berechne rechte Kante basierend auf Rendering-Logik
+                let has_flag_tail = is_note && !in_beam && needs_flag;
+                let first_dx = if has_flag_tail { opts.font_id.size * 0.5 } else { opts.font_id.size * 0.26 };
+                let step_dx = opts.font_id.size * 0.26;
+                let last_dot_center_rel = first_dx + ((dot_count - 1) as f32) * step_dx;
+                let last_dot_right_rel = last_dot_center_rel + m.dot_width * 0.5;
+
+                if last_dot_right_rel > right {
+                    right = last_dot_right_rel;
+                }
+            } else {
+                let dots_right = dot_count as f32 * fb_dot_half;
+                right += dots_right;
+            }
         }
 
         // Einzelfahne (nicht beamed) ragt leicht nach rechts
         if is_note && !in_beam && needs_flag {
-            right += flag_overhang;
+            if let Some(m) = &opts.metrics {
+                // Flag startet links vom Stem (stem_offset - halbe Dicke) und geht flag_width nach rechts
+                let stem_offset = opts.stem_offset();
+                let stem_thick = opts.stem_thickness();
+                let flag_left_rel = stem_offset - stem_thick * 0.5;
+
+                let fw = match b.duration.base_note() {
+                    NoteValue::Eighth => m.flag_8th_width,
+                    NoteValue::Sixteenth => m.flag_16th_width,
+                    NoteValue::ThirtySecond => m.flag_32nd_width,
+                    _ => m.flag_8th_width,
+                };
+                let flag_right_rel = flag_left_rel + fw;
+                if flag_right_rel > right {
+                    right = flag_right_rel;
+                }
+            } else {
+                right += fb_flag_overhang;
+            }
         }
 
         // Greedy-Verschiebung, um Mindestabstand zur vorherigen Box zu sichern
@@ -291,7 +353,7 @@ fn build_note_layout(
     let mut note_layout: Vec<NoteLayout> = Vec::with_capacity(beats.len());
     for (i, b) in beats.iter().enumerate() {
         // Benutze die kollisionsbereinigte Center‑X als Idealwert für das Rendering
-        let (ideal_cx, left_rel, right_rel) = *shifted_layout_info.get(i).unwrap_or(&(rect.center().x, -head_half, head_half));
+        let (ideal_cx, left_rel, right_rel) = *shifted_layout_info.get(i).unwrap_or(&(rect.center().x, -fb_head_half, fb_head_half));
         let cy = opts.y_center();
 
         // 1. Calculate Stem (if any) and determining pixel-snapping offset
@@ -652,6 +714,7 @@ mod tests {
             accent_displacement: 0.0,
             accent_below: false,
             debug_bbox: true,
+            metrics: None,
         };
 
         let layout = build_measure_layout(&m, &opts);
@@ -665,5 +728,52 @@ mod tests {
         // Allow small margin for snapping
         assert!(bbox.min.y <= cy - stem_len + 1.0, 
             "BBox top ({}) should cover stem top ({})", bbox.min.y, cy - stem_len);
+    }
+
+    #[test]
+    fn test_layout_uses_metrics_if_provided() {
+        use crate::measure::duration::q;
+        let mut m = Measure::new(TimeSignature::FOUR_FOUR);
+        m.set_beat(0, Beat::note(q())).unwrap();
+
+        let em = 20.0;
+        let mut opts = LayoutOpts {
+            rect: Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(100.0, 100.0)),
+            font_id: FontId::new(em, FontFamily::Proportional),
+            pixels_per_point: 1.0,
+            em,
+            layout_clef: false,
+            layout_time_signature: false,
+            y_offset: 0.0,
+            stem_length_factor: 1.0,
+            stem_thickness_factor: 0.1,
+            accent_displacement: 0.0,
+            accent_below: false,
+            debug_bbox: true,
+            metrics: None,
+        };
+
+        // 1. Ohne Metrics (Fallback)
+        let layout_fallback = build_measure_layout(&m, &opts);
+        let bbox_fallback = layout_fallback.notes[0].debug_bbox.unwrap();
+        let width_fallback = bbox_fallback.width();
+
+        // 2. Mit Metrics (Large Head)
+        opts.metrics = Some(GlyphMetrics {
+            head_width: 5.0 * em, // Huge head
+            dot_width: 0.0,
+            flag_8th_width: 0.0,
+            flag_16th_width: 0.0,
+            flag_32nd_width: 0.0,
+            rest_widths: [0.0; 6],
+        });
+
+        let layout_metrics = build_measure_layout(&m, &opts);
+        let bbox_metrics = layout_metrics.notes[0].debug_bbox.unwrap();
+        let width_metrics = bbox_metrics.width();
+
+        assert!(width_metrics > width_fallback * 2.0, "Metrics-based width should be significantly larger");
+        // Expect width roughly 5.0 * em
+        assert!((width_metrics - 5.0 * em).abs() < 1.0);
     }
 }

@@ -218,6 +218,7 @@ impl Grooph {
                 accent_displacement: 0.0,
                 accent_below: false,
                 debug_bbox: false,
+                metrics: None,
             };
 
             // Use a temporary measure just for layout width and positions
@@ -291,6 +292,7 @@ impl Grooph {
                 accent_displacement: 0.8,
                 accent_below: false,
                 debug_bbox: false,
+                metrics: None,
             };
             let measure_layout = build_measure_layout(measure, &opts);
             let painter = &ui.painter_at(rect);

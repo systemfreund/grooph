@@ -25,9 +25,9 @@ pub(crate) const GLYPH_LEFT_TUPLET_BRACKET: char = '\u{E1FE}';
 pub(crate) const GLYPH_RIGHT_TUPLET_BRACKET: char = '\u{E200}';
 
 // Up-stem flags (SMuFL): U+E240..U+E244
-const GLYPH_FLAG_8TH_UP: char = '\u{E240}';
-const GLYPH_FLAG_16TH_UP: char = '\u{E242}';
-const GLYPH_FLAG_32ND_UP: char = '\u{E244}';
+pub(crate) const GLYPH_FLAG_8TH_UP: char = '\u{E240}';
+pub(crate) const GLYPH_FLAG_16TH_UP: char = '\u{E242}';
+pub(crate) const GLYPH_FLAG_32ND_UP: char = '\u{E244}';
 
 // Clef and time signature digits
 pub(crate) const GLYPH_CLEF_PERCUSSION: char = '\u{E069}';
