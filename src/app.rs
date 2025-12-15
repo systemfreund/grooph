@@ -63,6 +63,10 @@ pub struct Grooph {
     playback_last_update: Option<f64>,
     playback_total_ticks: u32,
 
+    // Visual flash on primary beats
+    flash_intensity: f32,        // [0,1]
+    last_primary_beat: Option<u32>,
+
     #[cfg(target_arch = "wasm32")]
     wake_lock: Rc<RefCell<Option<web_sys::WakeLockSentinel>>>,
     layout_width_cap_factor: f32,
@@ -301,6 +305,8 @@ impl Grooph {
             playback_smooth_tick: 0.0,
             playback_last_update: None,
             playback_total_ticks: 0,
+            flash_intensity: 0.0,
+            last_primary_beat: None,
             #[cfg(target_arch = "wasm32")]
             wake_lock: Rc::new(RefCell::new(None)),
             layout_width_cap_factor: 0.1,

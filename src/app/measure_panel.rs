@@ -1,11 +1,11 @@
 use crate::Grooph;
 use crate::app::tools::{Modifier, ToolKind, all_tools};
 use crate::app::{Mode, PlayerState};
-use crate::layout::pixel_layout::{LayoutOpts, compute_em};
+use crate::layout::pixel_layout::{LayoutOpts, MeasureLayout, compute_em};
 use crate::measure::grid::DEFAULT_GRID;
 use crate::render::measure::draw_measure;
 use eframe::egui;
-use eframe::egui::{Context, FontId, Frame};
+use eframe::egui::{Context, FontId, Frame, Rect, Response};
 
 impl Grooph {
     pub(super) fn measure_panel(&mut self, ctx: &Context) {
@@ -17,7 +17,7 @@ impl Grooph {
                     let size = ui.available_size();
                     let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::click_and_drag());
 
-                    // Update playback smoothing
+                    // Update playback smoothing & primary-beat flash state
                     let playback_tick_to_draw = match self.player_state {
                         PlayerState::Playing => {
                             let ts = self.measure.time_signature();
@@ -35,7 +35,8 @@ impl Grooph {
 
                             // Sync with audio if available
                             if let Some(audio) = &self.audio
-                                && let Some((raw_audio_tick, audio_total)) = audio.playback_position()
+                                && let Some((raw_audio_tick, audio_total)) =
+                                    audio.playback_position()
                             {
                                 let total = audio_total as f64;
                                 if total > 0.0 {
@@ -45,7 +46,8 @@ impl Grooph {
                                     } else {
                                         0.0
                                     };
-                                    let audio_tick = (raw_audio_tick - offset_ticks).rem_euclid(total);
+                                    let audio_tick =
+                                        (raw_audio_tick - offset_ticks).rem_euclid(total);
 
                                     let mut diff = audio_tick - next_tick;
                                     // Handle wrap-around (shortest path)
@@ -70,6 +72,18 @@ impl Grooph {
                             }
                             self.playback_smooth_tick = next_tick;
 
+                            // Flash: trigger on primary beat change
+                            let current_primary_beat = (next_tick / ticks_per_beat).floor() as u32;
+                            if self.last_primary_beat != Some(current_primary_beat) {
+                                self.flash_intensity = 1.0;
+                                self.last_primary_beat = Some(current_primary_beat);
+                            }
+
+                            // Exponential decay towards 0
+                            let decay_per_sec = 10.0; // larger -> faster fade
+                            let decay = (-decay_per_sec * dt).exp();
+                            self.flash_intensity *= decay as f32;
+
                             // Keep animation loop running
                             ui.ctx().request_repaint_after(std::time::Duration::from_millis(16));
 
@@ -78,6 +92,8 @@ impl Grooph {
                         PlayerState::Stopped => {
                             self.playback_last_update = None;
                             self.playback_smooth_tick = 0.0;
+                            self.flash_intensity = 0.0;
+                            self.last_primary_beat = None;
                             None
                         }
                     };
@@ -106,39 +122,58 @@ impl Grooph {
                         playback_tick_to_draw,
                     );
 
-                    if !matches!(self.mode, Mode::TimeSignature { .. })
-                        && (resp.clicked() || resp.dragged())
-                        && let Some(pos) = resp.interact_pointer_pos()
-                        && !layout.notes.is_empty()
-                    {
-                        let target_x = pos.x;
-                        let idx = if target_x <= rect.left() {
-                            0
-                        } else if target_x >= rect.right() {
-                            layout.notes.len() - 1
-                        } else {
-                            let mut best_i = 0usize;
-                            let mut best_d = f32::MAX;
-                            for (i, nl) in layout.notes.iter().enumerate() {
-                                let d = (nl.center.x - target_x).abs();
-                                if d < best_d {
-                                    best_d = d;
-                                    best_i = i;
-                                }
-                            }
-                            best_i
-                        };
-                        self.cursor_idx = idx;
-
-                        if resp.double_clicked()
-                            && let Some(tool) = all_tools().iter().find(|t| {
-                                matches!(t.kind, ToolKind::Modify(Modifier::ToggleRestNote))
-                            })
-                        {
-                            self.apply_tool(tool);
-                        }
+                    // Draw flash overlay (white on dark, black on light) with decay
+                    if self.flash_intensity > 0.01 {
+                        let dark = ui.visuals().dark_mode;
+                        let base = if dark { egui::Color32::GREEN } else { egui::Color32::BLUE };
+                        let alpha = (0.8 * self.flash_intensity).clamp(0.0, 0.8);
+                        let color = egui::Color32::from_rgba_unmultiplied(
+                            base.r(),
+                            base.g(),
+                            base.b(),
+                            (alpha * 255.0) as u8,
+                        );
+                        ui.painter().rect_filled(rect, 0.0, color);
+                        ui.ctx().request_repaint();
                     }
+
+                    self.handle_input(rect, resp, layout);
                 });
         });
+    }
+
+    fn handle_input(&mut self, rect: Rect, resp: Response, layout: MeasureLayout) {
+        if !matches!(self.mode, Mode::TimeSignature { .. })
+            && (resp.clicked() || resp.dragged())
+            && let Some(pos) = resp.interact_pointer_pos()
+            && !layout.notes.is_empty()
+        {
+            let target_x = pos.x;
+            let idx = if target_x <= rect.left() {
+                0
+            } else if target_x >= rect.right() {
+                layout.notes.len() - 1
+            } else {
+                let mut best_i = 0usize;
+                let mut best_d = f32::MAX;
+                for (i, nl) in layout.notes.iter().enumerate() {
+                    let d = (nl.center.x - target_x).abs();
+                    if d < best_d {
+                        best_d = d;
+                        best_i = i;
+                    }
+                }
+                best_i
+            };
+            self.cursor_idx = idx;
+
+            if resp.double_clicked()
+                && let Some(tool) = all_tools()
+                    .iter()
+                    .find(|t| matches!(t.kind, ToolKind::Modify(Modifier::ToggleRestNote)))
+            {
+                self.apply_tool(tool);
+            }
+        }
     }
 }
