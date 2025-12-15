@@ -1,7 +1,9 @@
 use crate::Grooph;
 use crate::app::tools::{BeatTemplate, MetaOp, Modifier, Tool, ToolGroup, ToolKind, all_tools};
 use crate::app::{Mode, tools};
-use crate::layout::pixel_layout::{LayoutOpts, build_measure_layout, build_time_sig_layout, compute_em, GlyphMetrics};
+use crate::layout::pixel_layout::{
+    GlyphMetrics, LayoutOpts, build_measure_layout, build_time_sig_layout, compute_em,
+};
 use crate::measure::BeatKind::{Note, Rest};
 use crate::measure::duration::{Duration, TupletSpec};
 use crate::measure::editing::Modification;
@@ -268,6 +270,9 @@ impl Grooph {
         if let Some(rect) = button.rect(symbol_id) {
             let cap_factor = match template {
                 Beat { kind: Rest, .. } => 0.8,
+                Beat {
+                    kind: Note, duration: Duration::Tuplet(TupletSpec { n: 9, .. }), ..
+                } => 0.35,
                 Beat { kind: Note, duration: Duration::Tuplet(..), .. } => 0.4,
                 _ => 0.7,
             };
@@ -291,8 +296,8 @@ impl Grooph {
                 layout_time_signature: false,
                 y_offset,
                 stem_length_factor: 0.8,
-                stem_thickness_factor: 0.04,
-                accent_displacement: 0.8,
+                stem_thickness_factor: 0.06,
+                accent_displacement: 0.1,
                 accent_below: false,
                 proportional_spacing: true,
                 debug_bbox: false,

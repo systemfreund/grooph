@@ -313,7 +313,7 @@ impl Grooph {
             wake_lock: Rc::new(RefCell::new(None)),
             layout_width_cap_factor: 0.1,
             layout_accent_below: true,
-            layout_proportional_spacing: false,
+            layout_proportional_spacing: true,
             layout_stem_length_factor: 0.9,
             layout_debug_bbox: false,
             audio_offset: 0.0,

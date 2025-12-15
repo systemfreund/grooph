@@ -1,7 +1,8 @@
 use crate::layout::beam_plan::BeamGroup;
-use crate::layout::render_plan::plan_measure;
+use crate::layout::render_plan::{plan_measure, RenderPlan};
 use crate::layout::tuplet_plan::TupletPlan;
 use crate::measure::duration::{Duration, NoteValue};
+use crate::measure::grid::DEFAULT_GRID;
 use crate::measure::{Beat, BeatKind, Measure, TimeSignature};
 use crate::render::glyphs;
 use eframe::egui::{self, FontId, Pos2, Rect, Vec2};
@@ -207,7 +208,7 @@ pub fn build_measure_layout(measure: &Measure, opts: &LayoutOpts) -> MeasureLayo
     let note_rect =
         Rect::from_min_max(Pos2::new(notes_left_edge, opts.rect.top()), opts.rect.right_bottom());
     let render_plan = plan_measure(measure);
-    let note_layout = build_note_layout(measure.beats(), &render_plan.beams, &note_rect, opts);
+    let note_layout = build_note_layout(measure, &render_plan, &note_rect, opts);
     let beam_layout = build_beam_layout(&note_layout, &render_plan.beams, opts);
     let tuplet_layout =
         build_tuplet_layout(measure.beats(), &note_layout, &render_plan.tuplets, opts);
@@ -277,11 +278,14 @@ pub(crate) fn build_time_sig_layout(
 }
 
 fn build_note_layout(
-    beats: &[Beat],
-    beams: &[BeamGroup],
+    measure: &Measure,
+    render_plan: &RenderPlan,
     rect: &Rect,
     opts: &LayoutOpts,
 ) -> Vec<NoteLayout> {
+    let beats = measure.beats();
+    let beams = &render_plan.beams;
+
     // Basisverteilung (rhythmisch gleichmäßig über die verfügbare Breite)
     let x_centers =
         crate::layout::calculate_x_centers(beats, rect.width(), opts.proportional_spacing)
@@ -315,6 +319,11 @@ fn build_note_layout(
             }
         }
     }
+
+    // Primary group info
+    let onsets = DEFAULT_GRID.compute_onset_ticks(beats);
+    let boundaries = DEFAULT_GRID.primary_boundaries(&measure.time_signature());
+
     // Track shift per beat (cx - base_cx) to propagate within beam groups
     let mut shifts = vec![0.0; beats.len()];
 
@@ -388,11 +397,33 @@ fn build_note_layout(
         // Greedy-Verschiebung, um Mindestabstand zur vorherigen Box zu sichern
         let mut cx = base_cx;
 
-        // Propagate shift if in same beam group as previous beat
-        if i > 0
-            && let Some(bg) = beat_to_beam_group[i]
-            && beat_to_beam_group[i - 1] == Some(bg)
-        {
+        // Propagate shift if connected to previous beat
+        let mut connected = false;
+        if i > 0 {
+            // 1. Beam
+            if let Some(bg) = beat_to_beam_group[i]
+                && beat_to_beam_group[i - 1] == Some(bg)
+            {
+                connected = true;
+            }
+            // 2. Tuplet
+            else if render_plan
+                .tuplets
+                .iter()
+                .any(|t| t.start <= (i - 1) && t.end >= i)
+            {
+                connected = true;
+            }
+            // 3. Primary Group (only if proportional spacing is enabled)
+            else if opts.proportional_spacing {
+                let t = onsets[i];
+                if !boundaries.contains(&t) {
+                    connected = true;
+                }
+            }
+        }
+
+        if connected {
             cx += shifts[i - 1];
         }
 
@@ -1060,6 +1091,150 @@ mod tests {
             "Spacing in triplet group should be consistent. Got {:.2} vs {:.2}",
             d1,
             d2
+        );
+    }
+
+    #[test]
+    fn test_primary_group_spacing_preservation() {
+        use crate::measure::duration::{Duration, TupletSpec, NoteValue};
+        use crate::measure::{Beat, Measure, TimeSignature};
+        
+        let mut m = Measure::new(TimeSignature::FOUR_FOUR);
+
+        // Group 1: Insert many 32nd notes to force a shift
+        // 8 * 1/32 = 1/4 beat.
+        // We need enough to push the next beat.
+        // Let's just use a very wide previous element?
+        // Or simpler: Use a custom LayoutOpt with huge 'clef' or 'time signature' width?
+        // But 'clef' space is added to x_offset, which becomes the base for everything. It shifts everything equally.
+        // We need something that pushes specific notes.
+        // Greedy shifting happens when 'left' of current note overlaps 'right' of previous.
+        // So let's put a VERY WIDE note at beat 0.
+        // And then the triplet at beat 1?
+        // But beat 1 is a new primary group. If I push beat 0, beat 1 stays at its metric position unless it overlaps.
+        
+        // Let's try:
+        // Beat 0: Quarter note.
+        // Beat 1: Quarter note (start of next group).
+        // If Beat 0 is very wide, Beat 1 moves.
+        // Beat 2: Quarter note.
+        // Does Beat 2 move if Beat 1 moves?
+        // In "Primary Group" logic: Beat 1 and Beat 2 are separate groups (in 4/4). 
+        // So Beat 2 should NOT move just because Beat 1 moved (unless Beat 1 overlaps Beat 2).
+        
+        // Wait, the user wants "Equal spacing in primary groups".
+        // This means INSIDE a primary group.
+        // Example: Triplet of Quarters. (Spans 2 beats).
+        // This is a Tuplet Group.
+        // Example: 4 Eighths in 4/4 (2 beats).
+        // They are 2 primary groups (2 eighths + 2 eighths).
+        // If I shift 1st eighth. 2nd eighth should move.
+        // 3rd eighth (start of next beat) should NOT move (unless collision).
+        
+        // So let's test a Tuplet of Quarters (3 notes spanning 2 beats).
+        // If I shift Note 1, Note 2 should move.
+        
+        // Setup:
+        // Beat 0: A massive note (e.g. with huge 'head_size' metric override for just this note? No, metrics are global).
+        // Use a "Dotted" note with many dots?
+        // Or just many notes.
+        
+        // Let's use 4x 32nd notes at start (Beat 0.0 - 0.125).
+        // Then the Triplet Quarters.
+        // Wait, Tuplet Quarters are huge (0.66 beats).
+        
+        // Let's use Triplet Eighths (unbeamed).
+        // Beat 0: 3x Triplet Eighths. Unbeamed.
+        // If I shift the first one (e.g. by having a previous note collide), the others should shift.
+        
+        // Construct:
+        // Pushing element: Beat -1? No.
+        // Let's use a TimeSig/Clef that is huge?
+        // No, that shifts start position.
+        
+        // Let's use the same trick as 'test_beam_group_spacing_preservation'.
+        // Overflow from previous beats.
+        
+        // Beat 0: 8x 32nds. (Duration 1/4).
+        // Beat 1: 3x Triplet 8ths (Duration 1/4).
+        // If 32nds are wide enough, they push the first Triplet 8th.
+        
+        // Layout width very small.
+        let em = 10.0;
+        let t8 = Duration::Tuplet(TupletSpec { n: 3, m: 2, base: NoteValue::Eighth });
+        let th = Duration::Simple(NoteValue::ThirtySecond);
+        
+        // 8x 32nds
+        for i in 0..8 {
+             m.set_beat(i, Beat::note(th)).unwrap();
+        }
+        // 3x Triplet 8ths (Indices 8, 9, 10)
+        for i in 0..3 {
+             m.set_beat(8+i, Beat::note(t8)).unwrap();
+        }
+        
+        // Ensure they are NOT beamed. (Default might beam them depending on 'plan_measure' logic).
+        // In 4/4, 32nds might be beamed.
+        // We want the Triplets to be Unbeamed for this test.
+        // But 'plan_measure' usually auto-beams.
+        // We can break the beam by inserting a rest? 
+        // Or we just rely on the fact that we can force "primary group" logic even if beamed?
+        // No, if beamed, they are already handled.
+        // We need a case where they are NOT beamed but SHOULD be spaced evenly.
+        // Quarter notes are never beamed.
+        // Let's use Quarter Triplets.
+        
+        // Reset measure
+        m = Measure::new(TimeSignature::FOUR_FOUR);
+        // Beat 0: 4x 16th notes (to create crowding).
+        // Beat 1..2: 3x Quarter Triplets.
+        
+        // 4x 16th
+        let s = Duration::Simple(NoteValue::Sixteenth);
+        for i in 0..4 {
+            m.set_beat(i, Beat::note(s)).unwrap();
+        }
+        
+        // 3x Quarter Triplets
+        let tq = Duration::Tuplet(TupletSpec { n: 3, m: 2, base: NoteValue::Quarter });
+        m.set_beat(4, Beat::note(tq)).unwrap();
+        m.set_beat(5, Beat::note(tq)).unwrap();
+        m.set_beat(6, Beat::note(tq)).unwrap();
+        
+        // Layout
+        let opts = LayoutOpts {
+            rect: Rect::from_min_max(Pos2::ZERO, Pos2::new(50.0, 100.0)), // Very narrow width
+            font_id: FontId::new(em, FontFamily::Proportional),
+            pixels_per_point: 1.0,
+            em,
+            layout_clef: false,
+            layout_time_signature: false,
+            y_offset: 0.0,
+            stem_length_factor: 3.5,
+            stem_thickness_factor: 0.1,
+            accent_displacement: 0.0,
+            accent_below: false,
+            proportional_spacing: true,
+            debug_bbox: true,
+            metrics: GlyphMetrics::debug(em),
+        };
+        
+        let layout = build_measure_layout(&m, &opts);
+        
+        // Indices 4, 5, 6 are the triplet.
+        let n4 = &layout.notes[4];
+        let n5 = &layout.notes[5];
+        let n6 = &layout.notes[6];
+        
+        let d1 = n5.center.x - n4.center.x;
+        let d2 = n6.center.x - n5.center.x;
+        
+        // Without fix, n4 is pushed right (compressed against n5). So d1 < d2.
+        // With fix, n5 should move too. So d1 == d2.
+        assert!(
+            (d1 - d2).abs() < 0.1,
+            "Spacing in primary/tuplet group should be consistent. Got {:.2} vs {:.2}",
+            d1, d2
         );
     }
 }
