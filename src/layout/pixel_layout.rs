@@ -959,4 +959,62 @@ mod tests {
         // Check they don't intersect (displacement ensures gap)
         assert!(!main_bbox.intersects(accent_bbox), "BBoxes should be separate");
     }
+
+    #[test]
+    fn test_beam_group_spacing_preservation() {
+        use crate::measure::duration::{th, t8};
+        let mut m = Measure::new(TimeSignature::FOUR_FOUR);
+
+        // Group 1: 7x 32nd notes
+        for i in 0..7 {
+            m.set_beat(i, Beat::note(th())).unwrap();
+        }
+        
+        // Group 2: 3x triplet 8th
+        // Indices 7, 8, 9
+        for i in 0..3 {
+            m.set_beat(7 + i, Beat::note(t8())).unwrap();
+        }
+
+        // Setup layout
+        let em = 10.0;
+        let rect = Rect::from_min_max(Pos2::ZERO, Pos2::new(50.0, 100.0));
+        
+        // Force normal heads (4.0) but tight layout
+        let opts = LayoutOpts {
+            rect,
+            font_id: FontId::new(em, FontFamily::Proportional),
+            pixels_per_point: 1.0,
+            em,
+            layout_clef: false,
+            layout_time_signature: false,
+            y_offset: 0.0,
+            stem_length_factor: 3.5,
+            stem_thickness_factor: 0.1,
+            accent_displacement: 0.0,
+            accent_below: false,
+            debug_bbox: true,
+            metrics: GlyphMetrics::debug(em),
+        };
+
+        let layout = build_measure_layout(&m, &opts);
+
+        // Check triplets: indices 7, 8, 9
+        let n7 = &layout.notes[7];
+        let n8 = &layout.notes[8];
+        let n9 = &layout.notes[9];
+
+        println!("N7: cx={:.2} (base calc: {:.2})", n7.center.x, 23.33 + 4.44);
+        println!("N8: cx={:.2} (base calc: {:.2})", n8.center.x, 23.33 + 4.44 + 8.88);
+        println!("N9: cx={:.2} (base calc: {:.2})", n9.center.x, 23.33 + 4.44 + 8.88 + 8.88);
+
+        let d1 = n8.center.x - n7.center.x;
+        let d2 = n9.center.x - n8.center.x;
+
+        println!("Triplet spacing: {:.2} vs {:.2}", d1, d2);
+
+        // We expect d1 < d2 (compressed vs natural)
+        // d1 should be roughly 7.0, d2 roughly 8.9. Diff ~1.9.
+        assert!((d1 - d2).abs() < 1.0, "Spacing in triplet group should be consistent. Got {:.2} vs {:.2}", d1, d2);
+    }
 }
