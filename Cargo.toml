@@ -24,4 +24,6 @@ getrandom = { version = "0.3.3", features = ["wasm_js"] }
 unused_imports = "allow"
 
 [profile.release]
-opt-level = 2 # fast and small wasm
+opt-level = "z"
+lto = true
+
