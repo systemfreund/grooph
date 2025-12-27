@@ -50,7 +50,6 @@ pub struct Grooph {
     redo_stack: Vec<(Measure, BeatIdx)>,
     // Global UI font bump configuration and per-theme baselines (so bump applies to dark & light)
     font_bump: f32,
-    // Store baselines as small vectors to avoid trait bounds on TextStyle (Ord/Hash)
     baseline_dark: Option<Vec<(TextStyle, f32)>>,
     baseline_light: Option<Vec<(TextStyle, f32)>>,
     player_state: PlayerState,

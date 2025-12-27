@@ -172,7 +172,7 @@ impl Audio {
         let schedule = Self::compute_schedule(measure, &ts);
 
         // Check differences
-        if let Ok(mut shared_state) = self.shared_state.lock()
+        if let Ok(mut shared_state) = self.shared_state.try_lock()
             && (shared_state.params.bpm != bpm
                 || shared_state.params.ticks_per_beat != ticks_per_beat
                 || shared_state.params.ticks_per_measure != ticks_per_measure
