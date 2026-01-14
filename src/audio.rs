@@ -128,7 +128,7 @@ struct PlaybackParams {
     bpm: u32,
     ticks_per_beat: u32,
     ticks_per_measure: u32,
-    schedule: BTreeMap<u32, SoundType>,
+    schedule: BTreeMap<u32, Vec<SoundType>>,
     audio_settings: AudioSettings,
 }
 
@@ -232,12 +232,12 @@ impl Audio {
         }
     }
 
-    fn compute_schedule(measure: &Measure, ts: &TimeSignature) -> BTreeMap<u32, SoundType> {
-        let mut schedule = BTreeMap::new();
-        schedule.insert(0, SoundType::Downbeat);
+    fn compute_schedule(measure: &Measure, ts: &TimeSignature) -> BTreeMap<u32, Vec<SoundType>> {
+        let mut schedule: BTreeMap<u32, Vec<SoundType>> = BTreeMap::new();
+        schedule.entry(0).or_default().push(SoundType::Downbeat);
 
         for t in DEFAULT_GRID.primary_boundaries(ts) {
-            schedule.entry(t).or_insert(SoundType::PrimaryBeat);
+            schedule.entry(t).or_default().push(SoundType::PrimaryBeat);
         }
 
         let onsets = DEFAULT_GRID.compute_onset_ticks(measure.beats());
@@ -248,7 +248,7 @@ impl Audio {
                 let sound_type =
                     if beat.accented { SoundType::AccentedBeat } else { SoundType::Beat };
 
-                schedule.insert(t, sound_type);
+                schedule.entry(t).or_default().push(sound_type);
             }
         }
         schedule
@@ -326,8 +326,8 @@ impl MetronomeSource {
     ) {
         let mut k = start;
         while (k as f64) < limit {
-            if let Some(&sound) = self.local_params.schedule.get(&k) {
-                triggered_sounds.push(sound);
+            if let Some(sounds) = self.local_params.schedule.get(&k) {
+                triggered_sounds.extend_from_slice(sounds);
             }
             k += 1;
         }
