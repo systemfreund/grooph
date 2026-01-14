@@ -596,6 +596,15 @@ mod tests {
     }
 
     #[test]
+    fn test_triplet_insertions_5() {
+        let mut m = Measure::new(TimeSignature::TWO_FOUR);
+
+        assert!(m.set_beat(0, Beat::note(t16())).is_ok());
+
+        assert_eq!(&durations_of(&m), &[t16(), t16(), t16(), e(), q()]);
+    }
+
+    #[test]
     fn test_triplet_insertion_in_seven_eight() {
         let mut m = Measure::new(TimeSignature::SEVEN_EIGHT);
         assert!(m.set_beat(0, Beat::note(t8())).is_ok());

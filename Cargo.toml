@@ -4,11 +4,11 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-eframe = "0.33.2"
-egui_extras = { version = "0.33.2", features = ["svg"] }
+eframe = "0.33"
+egui_extras = { version = "0.33", features = ["svg"] }
 either = "1.15.0"
 log = "0.4.29"
-rodio = { version = "0.21.1", features = ["playback", "noise"] }
+rodio = { version = "0.21", features = ["playback", "noise"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 env_logger = "0.11.8"

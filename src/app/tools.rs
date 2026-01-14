@@ -73,7 +73,7 @@ pub fn all_tools() -> &'static [Tool] {
     use BeatKind::*;
     use Duration::*;
 
-    static ALL: [Tool; 20] = [
+    static ALL: [Tool; 21] = [
         Tool {
             id: "edit.undo",
             label: "⟲",
@@ -93,7 +93,7 @@ pub fn all_tools() -> &'static [Tool] {
         // Notes
         Tool {
             id: "insert.note.q",
-            label: "Viertel",
+            label: "Quarter",
             group: ToolGroup::Notes,
             kind: ToolKind::InsertBeat(BeatTemplate { duration: Simple(Quarter), kind: Note, accented: false }),
             shortcut: Some(Shortcut { key: Key::Num1, with_shift: false }),
@@ -101,7 +101,7 @@ pub fn all_tools() -> &'static [Tool] {
         },
         Tool {
             id: "insert.note.e",
-            label: "Achtel",
+            label: "Eighth",
             group: ToolGroup::Notes,
             kind: ToolKind::InsertBeat(BeatTemplate { duration: Simple(Eighth), kind: Note, accented: false }),
             shortcut: Some(Shortcut { key: Key::Num2, with_shift: false }),
@@ -109,7 +109,7 @@ pub fn all_tools() -> &'static [Tool] {
         },
         Tool {
             id: "insert.note.s",
-            label: "Sechzehntel",
+            label: "Sixteenth",
             group: ToolGroup::Notes,
             kind: ToolKind::InsertBeat(BeatTemplate { duration: Simple(Sixteenth), kind: Note, accented: false }),
             shortcut: Some(Shortcut { key: Key::Num3, with_shift: false }),
@@ -117,7 +117,7 @@ pub fn all_tools() -> &'static [Tool] {
         },
         Tool {
             id: "insert.note.th",
-            label: "Zweiunddreißigstel",
+            label: "Thirty-Second",
             group: ToolGroup::Notes,
             kind: ToolKind::InsertBeat(BeatTemplate { duration: Simple(ThirtySecond), kind: Note, accented: false }),
             shortcut: Some(Shortcut { key: Key::Num4, with_shift: false }),
@@ -126,7 +126,7 @@ pub fn all_tools() -> &'static [Tool] {
         // Rests
         Tool {
             id: "insert.rest.q",
-            label: "Viertelpause",
+            label: "Quarter rest",
             group: ToolGroup::Rests,
             kind: ToolKind::InsertBeat(BeatTemplate { duration: Simple(Quarter), kind: Rest, accented: false }),
             shortcut: None,
@@ -134,7 +134,7 @@ pub fn all_tools() -> &'static [Tool] {
         },
         Tool {
             id: "insert.rest.e",
-            label: "Achtelpause",
+            label: "Eighth rest",
             group: ToolGroup::Rests,
             kind: ToolKind::InsertBeat(BeatTemplate { duration: Simple(Eighth), kind: Rest, accented: false }),
             shortcut: None,
@@ -142,7 +142,7 @@ pub fn all_tools() -> &'static [Tool] {
         },
         Tool {
             id: "insert.rest.s",
-            label: "Sechzehntelpause",
+            label: "Sixteenth rest",
             group: ToolGroup::Rests,
             kind: ToolKind::InsertBeat(BeatTemplate { duration: Simple(Sixteenth), kind: Rest, accented: false }),
             shortcut: None,
@@ -150,7 +150,7 @@ pub fn all_tools() -> &'static [Tool] {
         },
         Tool {
             id: "insert.rest.th",
-            label: "Zweiunddreißigstelpause",
+            label: "Thirty-Second rest",
             group: ToolGroup::Rests,
             kind: ToolKind::InsertBeat(BeatTemplate { duration: Simple(ThirtySecond), kind: Rest, accented: false }),
             shortcut: None,
@@ -183,7 +183,7 @@ pub fn all_tools() -> &'static [Tool] {
         },
         Tool {
             id: "insert.tuplet.t8",
-            label: "Triole (1/8)",
+            label: "Triplet (1/8)",
             group: ToolGroup::Tuplets,
             kind: ToolKind::InsertBeat(BeatTemplate {
                 duration: Tuplet(TupletSpec { n: 3, m: 2, base: Eighth }),
@@ -194,8 +194,20 @@ pub fn all_tools() -> &'static [Tool] {
             show_in_palette: true,
         },
         Tool {
+            id: "insert.tuplet.t16",
+            label: "Triplet (1/16)",
+            group: ToolGroup::Tuplets,
+            kind: ToolKind::InsertBeat(BeatTemplate {
+                duration: Tuplet(TupletSpec { n: 3, m: 2, base: Sixteenth }),
+                kind: Note,
+                accented: false,
+            }),
+            shortcut: None,
+            show_in_palette: true,
+        },
+        Tool {
             id: "insert.tuplet.qt16",
-            label: "Quintole (1/16)",
+            label: "Quintuplet (1/16)",
             group: ToolGroup::Tuplets,
             kind: ToolKind::InsertBeat(BeatTemplate {
                 duration: Tuplet(TupletSpec { n: 5, m: 4, base: Sixteenth }),
@@ -207,7 +219,7 @@ pub fn all_tools() -> &'static [Tool] {
         },
         Tool {
             id: "insert.tuplet.st16",
-            label: "Sextole (1/16)",
+            label: "Sextuplet (1/16)",
             group: ToolGroup::Tuplets,
             kind: ToolKind::InsertBeat(BeatTemplate {
                 duration: Tuplet(TupletSpec { n: 6, m: 4, base: Sixteenth }),
@@ -219,7 +231,7 @@ pub fn all_tools() -> &'static [Tool] {
         },
         Tool {
             id: "insert.tuplet.spt16",
-            label: "Septole (1/16)",
+            label: "Septuplet (1/16)",
             group: ToolGroup::Tuplets,
             kind: ToolKind::InsertBeat(BeatTemplate {
                 duration: Tuplet(TupletSpec { n: 7, m: 4, base: Sixteenth }),
@@ -231,7 +243,7 @@ pub fn all_tools() -> &'static [Tool] {
         },
         Tool {
             id: "insert.tuplet.nt16",
-            label: "Nonole (1/16)",
+            label: "Nonuplet (1/16)",
             group: ToolGroup::Tuplets,
             kind: ToolKind::InsertBeat(BeatTemplate {
                 duration: Tuplet(TupletSpec { n: 9, m: 8, base: Sixteenth }),
