@@ -1,14 +1,15 @@
 use std::fmt::{Debug, Formatter};
 use crate::measure::beat::BeatKind::{Note, Rest};
 use crate::measure::duration::{duration_to_debug_str, Duration};
+use serde::{Deserialize, Serialize};
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum BeatKind {
     Note,
     Rest,
 }
 
-#[derive(Copy, Clone, Eq)]
+#[derive(Copy, Clone, Eq, Serialize, Deserialize)]
 pub struct Beat {
     pub duration: Duration,
     pub kind: BeatKind,

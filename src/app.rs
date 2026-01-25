@@ -26,6 +26,7 @@ use eframe::epaint::text::{FontInsert, InsertFontFamily};
 use eframe::epaint::{FontFamily, FontId};
 use eframe::{App, CreationContext, egui};
 use log::{debug, info};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -38,6 +39,8 @@ enum Mode {
     Help,
     TimeSignature { beats: u8, unit: u8 },
 }
+
+const APP_STATE_KEY: &str = "grooph_state";
 
 pub struct Grooph {
     mode: Mode,
@@ -75,6 +78,46 @@ pub struct Grooph {
     layout_debug_bbox: bool,
     audio_offset: f32,
     audio_latency_enabled: bool,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(default)]
+struct PersistedState {
+    version: u8,
+    measure: Measure,
+    cursor_idx: BeatIdx,
+    bpm: u32,
+    audio_settings: AudioSettings,
+    audio_latency_enabled: bool,
+    audio_offset: f32,
+}
+
+impl Default for PersistedState {
+    fn default() -> Self {
+        Self {
+            version: 1,
+            measure: Grooph::default_measure(),
+            cursor_idx: 0,
+            bpm: 120,
+            audio_settings: AudioSettings::default(),
+            audio_latency_enabled: true,
+            audio_offset: 0.0,
+        }
+    }
+}
+
+impl PersistedState {
+    fn from_app(app: &Grooph) -> Self {
+        Self {
+            version: 1,
+            measure: app.measure.clone(),
+            cursor_idx: app.cursor_idx,
+            bpm: app.bpm,
+            audio_settings: app.audio_settings,
+            audio_latency_enabled: app.audio_latency_enabled,
+            audio_offset: app.audio_offset,
+        }
+    }
 }
 
 fn add_font(ctx: &Context) {
@@ -119,6 +162,11 @@ impl App for Grooph {
                 ctx.request_repaint();
             }
         }
+    }
+
+    fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        let state = PersistedState::from_app(self);
+        eframe::set_value(storage, APP_STATE_KEY, &state);
     }
 }
 
@@ -245,17 +293,33 @@ impl Grooph {
         }
     }
 
-    pub fn new(cc: &CreationContext) -> Self {
-        add_font(&cc.egui_ctx);
-        egui_extras::install_image_loaders(&cc.egui_ctx);
-        let ff = FontFamily::Name("music".into());
-
-        // Default measure
+    fn default_measure() -> Measure {
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
         m.set_beat(0, Beat::note(q())).unwrap();
         m.set_beat(1, Beat::note(q())).unwrap();
         m.set_beat(2, Beat::note(q())).unwrap();
         m.set_beat(3, Beat::note(q())).unwrap();
+        m
+    }
+
+    pub fn new(cc: &CreationContext) -> Self {
+        add_font(&cc.egui_ctx);
+        egui_extras::install_image_loaders(&cc.egui_ctx);
+        let ff = FontFamily::Name("music".into());
+
+        let mut state = cc
+            .storage
+            .and_then(|storage| eframe::get_value::<PersistedState>(storage, APP_STATE_KEY))
+            .unwrap_or_default();
+
+        if state.measure.beats().is_empty() {
+            state.measure = Self::default_measure();
+            state.cursor_idx = 0;
+        } else {
+            state.cursor_idx = state.cursor_idx.min(state.measure.beats().len().saturating_sub(1));
+        }
+
+        state.audio_settings = state.audio_settings.clamped();
 
         // Precompute button measures for all insert-beat tools
         let mut button_measures: HashMap<&'static str, Measure> = HashMap::new();
@@ -291,8 +355,8 @@ impl Grooph {
         let this = Self {
             mode: Mode::Playback,
             music_font_id: FontId::new(16.0, ff),
-            measure: m,
-            cursor_idx: 0,
+            measure: state.measure,
+            cursor_idx: state.cursor_idx,
             button_measures,
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
@@ -300,9 +364,9 @@ impl Grooph {
             baseline_dark: None,
             baseline_light: None,
             player_state: PlayerState::Stopped,
-            bpm: 120,
+            bpm: state.bpm,
             audio: None,
-            audio_settings: AudioSettings::default(),
+            audio_settings: state.audio_settings,
             playback_smooth_tick: 0.0,
             playback_last_update: None,
             playback_total_ticks: 0,
@@ -315,8 +379,8 @@ impl Grooph {
             layout_proportional_spacing: true,
             layout_stem_length_factor: 0.9,
             layout_debug_bbox: false,
-            audio_offset: 0.0,
-            audio_latency_enabled: true,
+            audio_offset: state.audio_offset,
+            audio_latency_enabled: state.audio_latency_enabled,
         };
 
         // WASM: install visibilitychange/pageshow listeners once

@@ -1,7 +1,8 @@
 use crate::measure::duration::NoteValue;
+use serde::{Deserialize, Serialize};
 
 /// Represents a time signature (e.g., 4/4, 3/4, 6/8)
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TimeSignature {
     /// Number of beats per measure
     pub beats: u8,

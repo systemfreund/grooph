@@ -15,6 +15,7 @@ use crate::measure::grid::DEFAULT_GRID;
 pub(crate) use crate::measure::time_signature::TimeSignature;
 use crate::measure::BeatKind::Rest;
 use either::Either;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt::{Debug, Display, Formatter};
 use std::vec;
@@ -41,7 +42,7 @@ pub enum MeasureError {
 }
 
 /// Stable anchor describing a tuplet group span and semantics
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TupletAnchor {
     pub id: u32,
     pub n: u8,
@@ -53,7 +54,7 @@ pub struct TupletAnchor {
 }
 
 /// Represents a musical measure containing a sequence of beats
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Measure {
     beats: Vec<Beat>,
     time_signature: TimeSignature,

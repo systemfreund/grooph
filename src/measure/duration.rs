@@ -1,9 +1,10 @@
 use crate::measure::math::{Frac, reduce};
 use NoteValue::{Eighth, Sixteenth, ThirtySecond};
 use NoteValue::{Half, Quarter, Whole};
+use serde::{Deserialize, Serialize};
 use std::fmt::{Debug, Formatter, Pointer};
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum NoteValue {
     Whole,
     Half,
@@ -48,7 +49,7 @@ impl NoteValue {
     }
 }
 
-#[derive(Copy, Clone, PartialEq, Eq)]
+#[derive(Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Duration {
     Simple(NoteValue),
     Dotted { base: NoteValue, dots: u8 },
@@ -56,7 +57,7 @@ pub enum Duration {
     Tuplet(TupletSpec),
 }
 
-#[derive(Debug, PartialEq, Clone, Copy, Eq)]
+#[derive(Debug, PartialEq, Clone, Copy, Eq, Serialize, Deserialize)]
 pub struct TupletSpec {
     pub n: u8,
     pub m: u8,

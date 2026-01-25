@@ -5,12 +5,13 @@ use rodio::source::{Function as RodioFunction, SignalGenerator};
 use rodio::source::noise::WhiteUniform;
 use rodio::source::BltFilter;
 use rodio::Source;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt::{Debug, Formatter, Write};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Waveform {
     Sine,
     Triangle,
@@ -29,7 +30,7 @@ impl Waveform {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct AudioSettings {
     pub downbeat: f32,
     pub primary: f32,
