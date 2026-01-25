@@ -1,4 +1,5 @@
 mod beat;
+pub(crate) mod counting;
 pub(crate) mod duration;
 pub(crate) mod editing;
 mod fill;
