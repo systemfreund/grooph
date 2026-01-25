@@ -31,11 +31,15 @@ pub struct LabelPattern {
 }
 
 impl LabelPattern {
-    pub fn unds() -> Self {
+    pub fn single(token: LabelToken) -> Self {
+        Self { slots: vec![vec![token]] }
+    }
+
+    pub fn ands() -> Self {
         Self {
             slots: vec![
                 vec![LabelToken::BeatNum],
-                vec![LabelToken::Text("und".to_string())],
+                vec![LabelToken::Text("&".to_string())],
             ],
         }
     }
@@ -45,7 +49,7 @@ impl LabelPattern {
             slots: vec![
                 vec![LabelToken::BeatNum],
                 vec![LabelToken::Text("e".to_string())],
-                vec![LabelToken::Text("und".to_string())],
+                vec![LabelToken::Text("&".to_string())],
                 vec![LabelToken::Text("a".to_string())],
             ],
         }
@@ -59,6 +63,15 @@ impl LabelPattern {
                 vec![LabelToken::Text("let".to_string())],
             ],
         }
+    }
+
+    fn is_triplet(&self) -> bool {
+        if self.slots.len() != 3 {
+            return false;
+        }
+        matches!(self.slots.get(0).map(Vec::as_slice), Some([LabelToken::BeatNum]))
+            && matches!(self.slots.get(1).map(Vec::as_slice), Some([LabelToken::Text(s)]) if s == "trip")
+            && matches!(self.slots.get(2).map(Vec::as_slice), Some([LabelToken::Text(s)]) if s == "let")
     }
 }
 
@@ -364,7 +377,13 @@ fn push_slots_for_span(
         let group_num = group_num_for_tick(primary_groups, slot_start);
         let ctx = LabelContext { beat_num, group_num, sub_num: sub_idx + 1 };
         let label = if layer.show_labels {
-            layer.labels.as_ref().and_then(|p| label_for_slot(p, sub_idx, &ctx))
+            layer.labels.as_ref().and_then(|p| {
+                if tuplet_n.is_some() && p.is_triplet() && tuplet_n != Some(3) {
+                    label_from_tokens(&[LabelToken::SubNum], &ctx)
+                } else {
+                    label_for_slot(p, sub_idx, &ctx)
+                }
+            })
         } else {
             None
         };
@@ -409,11 +428,15 @@ fn label_for_slot(pattern: &LabelPattern, sub_idx: u8, ctx: &LabelContext) -> Op
         return None;
     }
     let slot = &pattern.slots[sub_idx as usize % pattern.slots.len()];
-    if slot.is_empty() {
+    label_from_tokens(slot, ctx)
+}
+
+fn label_from_tokens(tokens: &[LabelToken], ctx: &LabelContext) -> Option<String> {
+    if tokens.is_empty() {
         return None;
     }
     let mut out = String::new();
-    for token in slot {
+    for token in tokens {
         match token {
             LabelToken::BeatNum => out.push_str(&ctx.beat_num.to_string()),
             LabelToken::GroupNum => out.push_str(&ctx.group_num.to_string()),

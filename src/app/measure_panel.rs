@@ -121,12 +121,14 @@ impl Grooph {
                         metrics,
                     };
 
+                    let count_config = self.build_count_config();
                     let layout = draw_measure(
                         ui,
                         &self.measure,
                         &opts,
                         if self.mode == Mode::Edit { Some(self.cursor_idx) } else { None },
                         playback_tick_to_draw,
+                        count_config.as_ref(),
                     );
 
                     // Draw flash overlay (white on dark, black on light) with decay

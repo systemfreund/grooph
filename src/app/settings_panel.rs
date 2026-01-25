@@ -1,5 +1,5 @@
 use crate::Grooph;
-use crate::app::Mode;
+use crate::app::{CountingBase, Mode};
 use crate::audio::Waveform;
 use eframe::egui;
 use eframe::egui::{Align, Direction, Layout, Widget, global_theme_preference_buttons};
@@ -129,6 +129,46 @@ impl Grooph {
                             ui.checkbox(&mut self.layout_proportional_spacing, "Proportional Spacing");
                         },
                     );
+
+                    egui::CollapsingHeader::new("Counting").default_open(false).show(ui, |ui| {
+                        ui.checkbox(&mut self.counting.enabled, "Enable counting overlay");
+                        ui.add_enabled_ui(self.counting.enabled, |ui| {
+                            ui.checkbox(&mut self.counting.show_colors, "Show underlay colors");
+                            ui.checkbox(&mut self.counting.show_labels, "Show labels");
+                            ui.checkbox(&mut self.counting.show_tuplets, "Tuplet overlay");
+                            egui::ComboBox::from_label("Subdivision")
+                                .selected_text(match self.counting.base {
+                                    CountingBase::Off => "Off",
+                                    CountingBase::Primary => "Primary",
+                                    CountingBase::Ands => "Ands",
+                                    CountingBase::Sixteenth => "16th",
+                                    CountingBase::Triplet => "Triplet",
+                                })
+                                .show_ui(ui, |ui| {
+                                    ui.selectable_value(&mut self.counting.base, CountingBase::Off, "Off");
+                                    ui.selectable_value(
+                                        &mut self.counting.base,
+                                        CountingBase::Primary,
+                                        "Primary",
+                                    );
+                                    ui.selectable_value(
+                                        &mut self.counting.base,
+                                        CountingBase::Ands,
+                                        "1 & 2 & ...",
+                                    );
+                                    ui.selectable_value(
+                                        &mut self.counting.base,
+                                        CountingBase::Sixteenth,
+                                        "1 e & a ...",
+                                    );
+                                    ui.selectable_value(
+                                        &mut self.counting.base,
+                                        CountingBase::Triplet,
+                                        "1 trip let ...",
+                                    );
+                                });
+                        });
+                    });
 
                     ui.separator();
                     ui.label("Theme:");

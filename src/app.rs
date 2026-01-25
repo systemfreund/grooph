@@ -19,6 +19,10 @@ use crate::audio::{AudioSettings, PlayerState};
 use crate::measure::duration::NoteValue::*;
 use crate::measure::editing::Modification;
 use crate::measure::{Beat, BeatKind};
+use crate::measure::counting::{
+    ColorId, ColorMode, ColorPattern, CountConfig, CountLayer, CountScope, LabelPattern, LabelToken,
+    Subdiv,
+};
 use crate::app::tools::ToolKind;
 use crate::app::tools::{BeatTemplate, Modifier, all_tools};
 use eframe::egui::{Context, TextStyle, Widget};
@@ -78,6 +82,7 @@ pub struct Grooph {
     layout_debug_bbox: bool,
     audio_offset: f32,
     audio_latency_enabled: bool,
+    counting: CountingSettings,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -90,6 +95,7 @@ struct PersistedState {
     audio_settings: AudioSettings,
     audio_latency_enabled: bool,
     audio_offset: f32,
+    counting: CountingSettings,
 }
 
 impl Default for PersistedState {
@@ -102,6 +108,7 @@ impl Default for PersistedState {
             audio_settings: AudioSettings::default(),
             audio_latency_enabled: true,
             audio_offset: 0.0,
+            counting: CountingSettings::default(),
         }
     }
 }
@@ -116,6 +123,37 @@ impl PersistedState {
             audio_settings: app.audio_settings,
             audio_latency_enabled: app.audio_latency_enabled,
             audio_offset: app.audio_offset,
+            counting: app.counting,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+enum CountingBase {
+    Off,
+    Primary,
+    Ands,
+    Sixteenth,
+    Triplet,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy)]
+struct CountingSettings {
+    enabled: bool,
+    show_colors: bool,
+    show_labels: bool,
+    base: CountingBase,
+    show_tuplets: bool,
+}
+
+impl Default for CountingSettings {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            show_colors: false,
+            show_labels: true,
+            base: CountingBase::Ands,
+            show_tuplets: false,
         }
     }
 }
@@ -302,6 +340,75 @@ impl Grooph {
         m
     }
 
+    fn build_count_config(&self) -> Option<CountConfig> {
+        if !self.counting.enabled {
+            return None;
+        }
+        if !self.counting.show_colors && !self.counting.show_labels {
+            return None;
+        }
+
+        let palette: Vec<ColorId> = (0u8..6).map(ColorId).collect();
+        let color_pattern = if self.counting.show_colors {
+            Some(ColorPattern { palette: palette.clone(), mode: ColorMode::Scope })
+        } else {
+            None
+        };
+
+        let mut layers = Vec::new();
+        let mut next_id = 1u32;
+
+        let mut base_layer = match self.counting.base {
+            CountingBase::Off => None,
+            CountingBase::Primary => {
+                let mut layer = CountLayer::new(next_id, CountScope::PrimaryGroup, Subdiv::Fixed(1));
+                layer.labels = Some(LabelPattern {
+                    slots: vec![vec![LabelToken::GroupNum]],
+                });
+                Some(layer)
+            }
+            CountingBase::Ands => {
+                let mut layer = CountLayer::new(next_id, CountScope::BeatUnit, Subdiv::Fixed(2));
+                layer.labels = Some(LabelPattern::ands());
+                Some(layer)
+            }
+            CountingBase::Sixteenth => {
+                let mut layer = CountLayer::new(next_id, CountScope::BeatUnit, Subdiv::Fixed(4));
+                layer.labels = Some(LabelPattern::sixteenth());
+                Some(layer)
+            }
+            CountingBase::Triplet => {
+                let mut layer = CountLayer::new(next_id, CountScope::PrimaryGroup, Subdiv::Fixed(3));
+                layer.labels = Some(LabelPattern::triplet());
+                Some(layer)
+            }
+        };
+
+        if let Some(ref mut layer) = base_layer {
+            layer.show_labels = self.counting.show_labels;
+            layer.show_colors = self.counting.show_colors;
+            layer.colors = color_pattern.clone();
+            layers.push(layer.clone());
+            next_id = next_id.saturating_add(1);
+        }
+
+        if self.counting.show_tuplets {
+            let mut layer = CountLayer::new(next_id, CountScope::TupletAll, Subdiv::TupletN);
+            layer.labels = Some(LabelPattern::triplet());
+            layer.show_labels = self.counting.show_labels;
+            layer.show_colors = self.counting.show_colors;
+            layer.colors = color_pattern;
+            layer.priority = 10;
+            layers.push(layer);
+        }
+
+        if layers.is_empty() {
+            None
+        } else {
+            Some(CountConfig::new(layers))
+        }
+    }
+
     pub fn new(cc: &CreationContext) -> Self {
         add_font(&cc.egui_ctx);
         egui_extras::install_image_loaders(&cc.egui_ctx);
@@ -381,6 +488,7 @@ impl Grooph {
             layout_debug_bbox: false,
             audio_offset: state.audio_offset,
             audio_latency_enabled: state.audio_latency_enabled,
+            counting: state.counting,
         };
 
         // WASM: install visibilitychange/pageshow listeners once
