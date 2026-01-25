@@ -72,7 +72,7 @@ Time is measured in "ticks".
 3.  Update `human_readable` for display.
 
 #### modifying Measure Logic
-1.  Modifications to `set_beat_at` or `fill_at` in `src/measure.rs` must preserve the invariant that the measure is fully filled.
+1.  Modifications to `set_beat` or `fill_at` in `src/measure.rs` must preserve the invariant that the measure is fully filled.
 2.  Add a regression test for any edge case (especially crossing beat boundaries).
 
 ## File Structure

@@ -13,7 +13,6 @@ pub struct Beat {
     pub duration: Duration,
     pub kind: BeatKind,
     pub accented: bool,
-    /// Identifier of a tuplet group this beat belongs to
     pub tuplet_group_id: Option<u32>,
 }
 

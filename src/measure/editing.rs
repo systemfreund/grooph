@@ -381,7 +381,7 @@ impl Measure {
     /// Bedingungen/Verhalten:
     /// - Wenn `idx` außerhalb liegt oder der Beat dort bereits ein Tuplet ist, passiert nichts und es wird `None` zurückgegeben.
     /// - Ansonsten wird versucht, den Beat durch einen Tuplet‑Beat gleicher Art (Note/Rest) zu ersetzen.
-    ///   Die Methode delegiert an `set_beat_at`, welches die gesamte Gruppe inkl. Anchor anlegt und
+    ///   Die Methode delegiert an `set_beat`, welches die gesamte Gruppe inkl. Anchor anlegt und
     ///   verbleibende Slots der Gruppe auffüllt. Reicht der Platz im Takt nicht aus, bleibt
     ///   der Takt unverändert und die Funktion liefert `None`.
     fn convert_to_tuplet(
@@ -407,7 +407,7 @@ impl Measure {
             let mut k = idx;
             while consumed < group_span {
                 if k >= self.beats.len() {
-                    // If we run out of beats, set_beat_at will handle the error.
+                    // If we run out of beats, set_beat will handle the error.
                     break;
                 }
                 // Check if we are about to absorb the following beat that is a note
