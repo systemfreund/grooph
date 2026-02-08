@@ -20,9 +20,10 @@ serde = { version = "1.0", features = ["derive"] }
 env_logger = "0.11.8"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-wasm-bindgen = "0.2.100"
-wasm-bindgen-futures = "0.4.50"
-web-sys = { version = "0.3", features = ["Document", "Window", "VisibilityState"] }
+wasm-bindgen = "0.2.108"
+wasm-bindgen-futures = "0.4.56"
+web-sys = { version = "0.3", features = ["Document", "Navigator", "VisibilityState", "WakeLock", "WakeLockSentinel", "WakeLockType", "Window"] }
+getrandom = { version = "0.3.3", features = ["wasm_js"] }
 
 [lints.rust]
 unused_imports = "allow"

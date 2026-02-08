@@ -160,7 +160,7 @@ impl Default for CountingSettings {
 fn add_font(ctx: &Context) {
     ctx.add_font(FontInsert::new(
         "Bravura",
-        egui::FontData::from_static(include_bytes!("../../../assets/fonts/Bravura.otf")),
+        egui::FontData::from_static(include_bytes!("../assets/fonts/Bravura.otf")),
         vec![InsertFontFamily {
             family: FontFamily::Name("music".into()),
             priority: egui::epaint::text::FontPriority::Highest,

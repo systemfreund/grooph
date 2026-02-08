@@ -49,7 +49,7 @@ impl Grooph {
                             }
                             // ui.selectable_label(
                             //     false,
-                            //     Image::new(include_image!("../../assets/metronome_dark.svg"))
+                            //     Image::new(include_image!("../assets/metronome_dark.svg"))
                             //         .tint(ui.style().visuals.text_color()),
                             // )
                             // .clicked();
