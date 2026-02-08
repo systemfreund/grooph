@@ -16,7 +16,7 @@ use grooph_measure::duration::{Duration, NoteValue, TupletSpec, q};
 use grooph_measure::{BeatIdx, Measure, TimeSignature};
 
 use grooph_audio::{AudioSettings, PlayerState};
-use grooph_midi::MidiInput;
+use grooph_midi::{MidiInput, MidiInputEvent};
 use grooph_measure::duration::NoteValue::*;
 use grooph_measure::editing::Modification;
 use grooph_measure::{Beat, BeatKind};
@@ -190,6 +190,7 @@ impl App for Grooph {
         }
 
         self.handle_keyboard_input(ctx);
+        self.handle_midi_input_events();
 
         #[cfg(target_arch = "wasm32")]
         self.handle_visibility_change();
@@ -215,6 +216,24 @@ impl App for Grooph {
 }
 
 impl Grooph {
+    fn handle_midi_input_events(&mut self) {
+        let Some(midi_input) = self.midi_input.as_ref() else {
+            return;
+        };
+
+        for event in midi_input.drain_events() {
+            match event {
+                MidiInputEvent::NoteOn { channel, note, velocity } => {
+                    info!("MIDI NoteOn ch={} note={} vel={}", channel, note, velocity);
+                }
+                MidiInputEvent::NoteOff { channel, note, velocity } => {
+                    info!("MIDI NoteOff ch={} note={} vel={}", channel, note, velocity);
+                }
+                MidiInputEvent::ControlChange { .. } => {}
+            }
+        }
+    }
+
     fn push_undo(&mut self) { self.undo_stack.push((self.measure.clone(), self.cursor_idx)); }
 
     fn clear_redo(&mut self) { self.redo_stack.clear(); }
