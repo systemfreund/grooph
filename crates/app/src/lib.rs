@@ -81,7 +81,7 @@ pub struct Grooph {
     record_loop_index: u64,
     accuracy_start_time: Option<f64>,
     accuracy_stats: AccuracyStats,
-    accuracy_last_hit: Option<AccuracyHit>,
+    accuracy_by_beat: Vec<Option<f64>>,
     midi_input_offset_ms: f32,
 
     // Visual flash on primary beats
@@ -180,12 +180,6 @@ impl Default for CountingSettings {
             show_tuplets: false,
         }
     }
-}
-
-#[derive(Clone, Copy)]
-struct AccuracyHit {
-    beat_idx: usize,
-    delta_ticks: f64,
 }
 
 #[derive(Clone, Copy)]
@@ -346,6 +340,7 @@ impl Grooph {
                         && ticks_per_measure > 0.0
                         && !onsets.is_empty()
                     {
+                        self.ensure_accuracy_slots();
                         self.record_accuracy_hit(
                             timestamp,
                             ticks_per_sec,
@@ -368,13 +363,21 @@ impl Grooph {
             if self.accuracy_start_time.is_none() {
                 self.accuracy_start_time = Some(now_seconds);
                 self.accuracy_stats.reset();
-                self.accuracy_last_hit = None;
+                self.accuracy_by_beat.clear();
             }
             true
         } else {
             self.accuracy_start_time = None;
-            self.accuracy_last_hit = None;
+            self.accuracy_by_beat.clear();
             false
+        }
+    }
+
+    fn ensure_accuracy_slots(&mut self) {
+        let beats_len = self.measure.beats().len();
+        if self.accuracy_by_beat.len() != beats_len {
+            self.accuracy_by_beat.clear();
+            self.accuracy_by_beat.resize(beats_len, None);
         }
     }
 
@@ -473,7 +476,9 @@ impl Grooph {
         if let Some((beat_idx, diff_ticks)) = best {
             let delta_ms = (diff_ticks / ticks_per_sec) * 1000.0;
             self.accuracy_stats.push(delta_ms);
-            self.accuracy_last_hit = Some(AccuracyHit { beat_idx, delta_ticks: diff_ticks });
+            if beat_idx < self.accuracy_by_beat.len() {
+                self.accuracy_by_beat[beat_idx] = Some(diff_ticks);
+            }
         }
     }
 
@@ -605,7 +610,7 @@ impl Grooph {
         self.record_start_time = None;
         self.record_loop_index = 0;
         self.accuracy_stats.reset();
-        self.accuracy_last_hit = None;
+        self.accuracy_by_beat.clear();
         self.accuracy_start_time = self.midi_input.as_ref().and_then(|input| {
             if input.is_connected() {
                 Some(input.now_seconds())
@@ -627,7 +632,7 @@ impl Grooph {
         self.record_start_time = self.midi_input.as_ref().map(|input| input.now_seconds());
         self.record_loop_index = 0;
         self.accuracy_start_time = None;
-        self.accuracy_last_hit = None;
+        self.accuracy_by_beat.clear();
         self.reset_playback_state();
         self.push_undo();
         self.clear_redo();
@@ -646,7 +651,7 @@ impl Grooph {
         self.record_start_time = None;
         self.record_loop_index = 0;
         self.accuracy_start_time = None;
-        self.accuracy_last_hit = None;
+        self.accuracy_by_beat.clear();
         self.reset_playback_state();
 
         #[cfg(target_arch = "wasm32")]
@@ -844,7 +849,7 @@ impl Grooph {
             record_loop_index: 0,
             accuracy_start_time: None,
             accuracy_stats: AccuracyStats::default(),
-            accuracy_last_hit: None,
+            accuracy_by_beat: Vec::new(),
             midi_input_offset_ms: state.midi_input_offset_ms,
             flash_intensity: 0.0,
             last_primary_beat: None,

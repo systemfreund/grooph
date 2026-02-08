@@ -36,15 +36,15 @@ impl Grooph {
                             {
                                 self.toggle_playback();
                             }
-                            let record_label =
-                                RichText::new("⏺").color(Color32::from_rgb(220, 40, 40));
-                            if Button::new(record_label)
-                                .selected(is_recording)
-                                .ui(ui)
-                                .clicked()
-                            {
-                                self.toggle_recording();
-                            }
+                            // let record_label =
+                            //     RichText::new("⏺").color(Color32::from_rgb(220, 40, 40));
+                            // if Button::new(record_label)
+                            //     .selected(is_recording)
+                            //     .ui(ui)
+                            //     .clicked()
+                            // {
+                            //     self.toggle_recording();
+                            // }
                             let bpm_editor = egui::DragValue::new(&mut self.bpm)
                                 .prefix("BPM: ")
                                 .range(20..=300)

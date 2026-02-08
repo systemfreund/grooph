@@ -148,7 +148,7 @@ impl Grooph {
                     }
 
                     self.draw_accuracy_marker(ui, &layout, &opts.metrics);
-                    self.draw_accuracy_overlay(ui, rect);
+                    // self.draw_accuracy_overlay(ui, rect);
                     self.handle_input(rect, resp, layout);
                 });
         });
@@ -160,35 +160,45 @@ impl Grooph {
         layout: &MeasureLayout,
         metrics: &GlyphMetrics,
     ) {
+        let Some(midi_input) = self.midi_input.as_ref() else {
+            return;
+        };
+        if !midi_input.is_connected() {
+            return;
+        }
         if self.transport_state != TransportState::Playing {
             return;
         }
-        let Some(hit) = self.accuracy_last_hit else {
-            return;
-        };
-        let Some(note_layout) = layout.notes.get(hit.beat_idx) else {
-            return;
-        };
-        if note_layout.kind != grooph_measure::BeatKind::Note {
-            return;
-        }
         let onsets = DEFAULT_GRID.compute_onset_ticks(self.measure.beats());
-        let Some(px_per_tick) = self.local_pixels_per_tick(&onsets, layout, hit.beat_idx) else {
-            return;
-        };
-        let x = note_layout.center.x + (hit.delta_ticks * px_per_tick) as f32;
-        let y = note_layout.center.y + metrics.head_size.y * 0.65;
-        let h = metrics.head_size.y * 0.8;
-        let zero_start = egui::Pos2::new(note_layout.center.x, y);
-        let zero_end = egui::Pos2::new(note_layout.center.x, y + h);
-        ui.painter().line_segment(
-            [zero_start, zero_end],
-            Stroke::new(1.0, egui::Color32::from_gray(140)),
-        );
-        let start = egui::Pos2::new(x, y);
-        let end = egui::Pos2::new(x, y + h);
-        ui.painter()
-            .line_segment([start, end], Stroke::new(2.0, egui::Color32::RED));
+        for (idx, note_layout) in layout.notes.iter().enumerate() {
+            if note_layout.kind != grooph_measure::BeatKind::Note {
+                continue;
+            }
+            let y = note_layout.center.y + metrics.head_size.y * 0.65;
+            let h = metrics.head_size.y * 0.8;
+            let zero_start = egui::Pos2::new(note_layout.center.x, y);
+            let zero_end = egui::Pos2::new(note_layout.center.x, y + h);
+            ui.painter().line_segment(
+                [zero_start, zero_end],
+                Stroke::new(1.0, egui::Color32::from_gray(140)),
+            );
+            let Some(diff_ticks) = self.accuracy_by_beat.get(idx).and_then(|v| *v) else {
+                continue;
+            };
+            let Some(px_per_tick) = self.local_pixels_per_tick(&onsets, layout, idx) else {
+                continue;
+            };
+            let x = note_layout.center.x + (diff_ticks * px_per_tick) as f32;
+            let mid_y = y + h * 0.5;
+            let h_start = egui::Pos2::new(note_layout.center.x, mid_y);
+            let h_end = egui::Pos2::new(x, mid_y);
+            ui.painter()
+                .line_segment([h_start, h_end], Stroke::new(1.0, egui::Color32::from_gray(140)));
+            let start = egui::Pos2::new(x, y);
+            let end = egui::Pos2::new(x, y + h);
+            ui.painter()
+                .line_segment([start, end], Stroke::new(2.0, egui::Color32::RED));
+        }
     }
 
     fn local_pixels_per_tick(
