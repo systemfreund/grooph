@@ -20,7 +20,7 @@ impl Grooph {
 
                     // Update playback smoothing & primary-beat flash state
                     let playback_tick_to_draw = match self.transport_state {
-                        TransportState::Playing | TransportState::Recording => {
+                        TransportState::Playing => {
                             let ts = self.measure.time_signature();
                             let ticks_per_measure = DEFAULT_GRID.ticks_per_measure(&ts) as f64;
                             let ticks_per_beat = DEFAULT_GRID.ticks_per_beat(&ts) as f64;
@@ -34,7 +34,7 @@ impl Grooph {
                             // Advance predictor
                             let mut next_tick = self.playback_smooth_tick + ticks_per_sec * dt;
 
-                            // Sync with audio if available (only during playback, not recording)
+                            // Sync with audio if available
                             if self.transport_state == TransportState::Playing
                                 && let Some(audio) = &self.audio
                                 && let Some((raw_audio_tick, audio_total)) =

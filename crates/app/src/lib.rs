@@ -50,8 +50,7 @@ enum Mode {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum TransportState {
     Stopped,
-    Playing,
-    Recording,
+    Playing
 }
 
 const APP_STATE_KEY: &str = "grooph_state";
@@ -270,40 +269,6 @@ impl Grooph {
             None => return,
         };
 
-        if self.transport_state == TransportState::Recording {
-            let Some(start_time) = self.record_start_time else {
-                return;
-            };
-            let ts = self.measure.time_signature();
-            let ticks_per_measure = DEFAULT_GRID.ticks_per_measure(&ts) as f64;
-            let ticks_per_beat = DEFAULT_GRID.ticks_per_beat(&ts) as f64;
-            let ticks_per_sec = (self.bpm as f64 / 60.0) * ticks_per_beat;
-            if ticks_per_measure > 0.0 && ticks_per_sec > 0.0 {
-                let elapsed = now_seconds - start_time;
-                if elapsed >= 0.0 {
-                    let loop_idx = ((elapsed * ticks_per_sec) / ticks_per_measure).floor() as u64;
-                    if loop_idx != self.record_loop_index {
-                        self.record_loop_index = loop_idx;
-                        self.clear_measure_for_recording();
-                    }
-                }
-            }
-            let onsets = DEFAULT_GRID.compute_onset_ticks(self.measure.beats());
-
-            for event in events {
-                if let MidiInputEvent::NoteOn { timestamp, .. } = event {
-                    self.record_note_at(
-                        timestamp,
-                        start_time,
-                        ticks_per_sec,
-                        ticks_per_measure,
-                        &onsets,
-                    );
-                }
-            }
-            return;
-        }
-
         let accuracy_active = self.update_accuracy_state(is_connected, now_seconds);
         let (ticks_per_measure, ticks_per_sec, onsets) = if accuracy_active {
             let ts = self.measure.time_signature();
@@ -373,54 +338,6 @@ impl Grooph {
         self.accuracy_by_onset.clear();
         self.accuracy_hits_in_loop.clear();
         self.accuracy_last_tick = None;
-    }
-
-    fn clear_measure_for_recording(&mut self) {
-        let beats_len = self.measure.beats().len();
-        for idx in 0..beats_len {
-            let is_note = self.measure.beats()[idx].kind == BeatKind::Note;
-            if is_note {
-                let _ = self.measure.toggle_beat_kind(idx);
-            }
-        }
-    }
-
-    fn quantize_tick_to_index(&self, tick: f64, onsets: &[u32]) -> Option<usize> {
-        let mut best_idx = None;
-        let mut best_dist = f64::MAX;
-        for (i, onset) in onsets.iter().enumerate() {
-            let dist = (tick - (*onset as f64)).abs();
-            if dist < best_dist {
-                best_dist = dist;
-                best_idx = Some(i);
-            }
-        }
-        best_idx
-    }
-
-    fn record_note_at(
-        &mut self,
-        timestamp: f64,
-        record_start_time: f64,
-        ticks_per_sec: f64,
-        ticks_per_measure: f64,
-        onsets: &[u32],
-    ) {
-        if ticks_per_sec <= 0.0 || ticks_per_measure <= 0.0 || onsets.is_empty() {
-            return;
-        }
-        let elapsed = timestamp - record_start_time;
-        if elapsed < 0.0 {
-            return;
-        }
-        let tick = (elapsed * ticks_per_sec).rem_euclid(ticks_per_measure);
-        let Some(idx) = self.quantize_tick_to_index(tick, onsets) else {
-            return;
-        };
-        let is_rest = self.measure.beats()[idx].kind == BeatKind::Rest;
-        if is_rest {
-            let _ = self.measure.toggle_beat_kind(idx);
-        }
     }
 
     fn note_onsets(&self) -> Vec<AccuracyOnset> {
@@ -703,27 +620,6 @@ impl Grooph {
         self.acquire_wake_lock();
     }
 
-    fn start_recording(&mut self) {
-        if self.transport_state == TransportState::Recording {
-            return;
-        }
-        self.transport_state = TransportState::Recording;
-        self.record_start_time = self.midi_input.as_ref().map(|input| input.now_seconds());
-        self.record_loop_index = 0;
-        self.accuracy_start_time = None;
-        self.accuracy_by_onset.clear();
-        self.accuracy_hits_in_loop.clear();
-        self.accuracy_last_tick = None;
-        self.reset_playback_state();
-        self.push_undo();
-        self.clear_redo();
-        self.clear_measure_for_recording();
-        self.audio = None;
-
-        #[cfg(target_arch = "wasm32")]
-        self.acquire_wake_lock();
-    }
-
     fn stop_transport(&mut self) {
         if self.transport_state == TransportState::Stopped {
             return;
@@ -744,17 +640,9 @@ impl Grooph {
     pub fn toggle_playback(&mut self) {
         match self.transport_state {
             TransportState::Stopped => self.start_playback(),
-            TransportState::Playing | TransportState::Recording => self.stop_transport(),
+            TransportState::Playing => self.stop_transport(),
         }
         info!("Toggle playback: {:?}", self.transport_state);
-    }
-
-    pub fn toggle_recording(&mut self) {
-        match self.transport_state {
-            TransportState::Recording => self.stop_transport(),
-            TransportState::Stopped | TransportState::Playing => self.start_recording(),
-        }
-        info!("Toggle recording: {:?}", self.transport_state);
     }
 
     fn default_measure() -> Measure {
