@@ -16,6 +16,7 @@ use grooph_measure::duration::{Duration, NoteValue, TupletSpec, q};
 use grooph_measure::{BeatIdx, Measure, TimeSignature};
 
 use grooph_audio::{AudioSettings, PlayerState};
+use grooph_midi::MidiInput;
 use grooph_measure::duration::NoteValue::*;
 use grooph_measure::editing::Modification;
 use grooph_measure::{Beat, BeatKind};
@@ -29,7 +30,7 @@ use eframe::egui::{Context, TextStyle, Widget};
 use eframe::epaint::text::{FontInsert, InsertFontFamily};
 use eframe::epaint::{FontFamily, FontId};
 use eframe::{App, CreationContext, egui};
-use log::{debug, info};
+use log::{debug, info, warn};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -82,6 +83,9 @@ pub struct Grooph {
     audio_offset: f32,
     audio_latency_enabled: bool,
     counting: CountingSettings,
+    midi_input: Option<MidiInput>,
+    midi_input_ports: Vec<String>,
+    midi_selected_port: Option<usize>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -458,6 +462,17 @@ impl Grooph {
             }
         }
 
+        let (midi_input, midi_input_ports) = match MidiInput::new() {
+            Ok(mut input) => {
+                let ports = input.available_ports().unwrap_or_default();
+                (Some(input), ports)
+            }
+            Err(err) => {
+                warn!("Failed to initialize MIDI input: {:?}", err);
+                (None, Vec::new())
+            }
+        };
+
         let this = Self {
             mode: Mode::Playback,
             music_font_id: FontId::new(16.0, ff),
@@ -487,6 +502,9 @@ impl Grooph {
             audio_offset: state.audio_offset,
             audio_latency_enabled: state.audio_latency_enabled,
             counting: state.counting,
+            midi_input,
+            midi_input_ports,
+            midi_selected_port: None,
         };
 
         // WASM: install visibilitychange/pageshow listeners once

@@ -1641,6 +1641,7 @@ dependencies = [
  "grooph-audio",
  "grooph-layout",
  "grooph-measure",
+ "grooph-midi",
  "grooph-render",
  "log",
  "serde",
@@ -1680,12 +1681,8 @@ dependencies = [
 name = "grooph-midi"
 version = "0.1.0"
 dependencies = [
- "js-sys",
  "midir",
  "thiserror 2.0.17",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "web-sys",
 ]
 
 [[package]]

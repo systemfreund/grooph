@@ -1,8 +1,8 @@
 use crate::Grooph;
 use crate::{CountingBase, Mode};
-use grooph_audio::Waveform;
 use eframe::egui;
 use eframe::egui::{Align, Direction, Layout, Widget, global_theme_preference_buttons};
+use grooph_audio::Waveform;
 
 impl Grooph {
     pub(super) fn settings_panel(&mut self, ctx: &egui::Context) {
@@ -126,7 +126,10 @@ impl Grooph {
                                 ui.radio_value(&mut self.layout_accent_below, false, "Above");
                             });
                             ui.separator();
-                            ui.checkbox(&mut self.layout_proportional_spacing, "Proportional Spacing");
+                            ui.checkbox(
+                                &mut self.layout_proportional_spacing,
+                                "Proportional Spacing",
+                            );
                         },
                     );
 
@@ -145,7 +148,11 @@ impl Grooph {
                                     CountingBase::Triplet => "Triplet",
                                 })
                                 .show_ui(ui, |ui| {
-                                    ui.selectable_value(&mut self.counting.base, CountingBase::Off, "Off");
+                                    ui.selectable_value(
+                                        &mut self.counting.base,
+                                        CountingBase::Off,
+                                        "Off",
+                                    );
                                     ui.selectable_value(
                                         &mut self.counting.base,
                                         CountingBase::Primary,
@@ -170,11 +177,82 @@ impl Grooph {
                         });
                     });
 
+                    egui::CollapsingHeader::new("MIDI Input").default_open(false).show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            if ui.button("🔄").on_hover_text("Refresh MIDI input ports").clicked()
+                            {
+                                self.refresh_midi_input_ports();
+                            }
+
+                            let Some(midi_input) = self.midi_input.as_mut() else {
+                                ui.label("MIDI input unavailable.");
+                                return;
+                            };
+
+                            let connected = midi_input.is_connected();
+                            let selected_text = if connected {
+                                self.midi_selected_port
+                                    .and_then(|idx| self.midi_input_ports.get(idx))
+                                    .cloned()
+                                    .unwrap_or_else(|| "Connected".to_string())
+                            } else {
+                                "Disconnected".to_string()
+                            };
+
+                            let mut should_disconnect = false;
+                            let mut connect_port = None;
+
+                            egui::ComboBox::from_id_salt("midi_input_port")
+                                .selected_text(selected_text)
+                                .show_ui(ui, |ui| {
+                                    if connected {
+                                        if ui.selectable_label(false, "Disconnect").clicked() {
+                                            should_disconnect = true;
+                                        }
+                                    } else {
+                                        let _ = ui.selectable_label(false, "Disconnected");
+                                    }
+
+                                    for (idx, name) in self.midi_input_ports.iter().enumerate() {
+                                        if ui
+                                            .selectable_label(
+                                                self.midi_selected_port == Some(idx),
+                                                name,
+                                            )
+                                            .clicked()
+                                        {
+                                            connect_port = Some(idx);
+                                        }
+                                    }
+                                });
+
+                            if should_disconnect {
+                                let _ = midi_input.disconnect();
+                                self.midi_selected_port = None;
+                            } else if let Some(port_index) = connect_port
+                                && midi_input.connect(port_index).is_ok()
+                            {
+                                self.midi_selected_port = Some(port_index);
+                            }
+                        });
+                    });
+
                     ui.separator();
                     ui.label("Theme:");
                     global_theme_preference_buttons(ui);
                 });
             },
         );
+    }
+
+    fn refresh_midi_input_ports(&mut self) {
+        if let Some(ref mut input) = self.midi_input {
+            if let Err(e) = input.refresh_ports() {
+                log::warn!("Failed to refresh MIDI input ports: {}", e);
+            }
+            if let Ok(ports) = input.available_ports() {
+                self.midi_input_ports = ports;
+            }
+        }
     }
 }

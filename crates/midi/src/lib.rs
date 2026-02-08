@@ -7,16 +7,14 @@ mod error;
 mod input;
 
 pub use error::{Error, Result};
-pub use input::{MidiClockState, MidiInputEvent};
-
-#[cfg(not(target_arch = "wasm32"))]
-pub use input::NativeMidiInput;
-
-#[cfg(target_arch = "wasm32")]
-pub use input::WebMidiInput;
+pub use input::{MidiClockState, MidiInput, MidiInputEvent};
 
 /// MIDI note number type (0-127)
 pub type MidiNote = u8;
 
 /// MIDI velocity type (0-127)
 pub type MidiVelocity = u8;
+
+/// Backwards-compatible aliases for platform-specific names.
+pub type NativeMidiInput = MidiInput;
+pub type WebMidiInput = MidiInput;

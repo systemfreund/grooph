@@ -10,6 +10,7 @@ grooph-measure = { workspace = true }
 grooph-audio = { workspace = true }
 grooph-layout = { workspace = true }
 grooph-render = { workspace = true }
+grooph-midi = { workspace = true }
 eframe = { workspace = true }
 egui = { workspace = true }
 egui_extras = { workspace = true }
