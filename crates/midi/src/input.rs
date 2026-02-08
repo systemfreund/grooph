@@ -53,15 +53,28 @@ fn clock_interval_seconds(now: ClockInstant, last: ClockInstant) -> f32 {
     }
 }
 
+#[inline]
+fn clock_elapsed_seconds(now: ClockInstant, origin: ClockInstant) -> f64 {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        now.duration_since(origin).as_secs_f64()
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    {
+        (now - origin) as f64
+    }
+}
+
 /// MIDI input events for note handling
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum MidiInputEvent {
     /// Note On event (channel, note, velocity)
-    NoteOn { channel: u8, note: MidiNote, velocity: MidiVelocity },
+    NoteOn { channel: u8, note: MidiNote, velocity: MidiVelocity, timestamp: f64 },
     /// Note Off event (channel, note, velocity)
-    NoteOff { channel: u8, note: MidiNote, velocity: MidiVelocity },
+    NoteOff { channel: u8, note: MidiNote, velocity: MidiVelocity, timestamp: f64 },
     /// Control Change event (channel, controller, value)
-    ControlChange { channel: u8, controller: u8, value: u8 },
+    ControlChange { channel: u8, controller: u8, value: u8, timestamp: f64 },
 }
 
 /// Shared queue for MIDI input events
@@ -87,7 +100,7 @@ impl MidiInputEventQueue {
     }
 
     /// Process a MIDI message and queue note events
-    pub fn process_message(&self, message: &[u8]) -> bool {
+    pub fn process_message(&self, message: &[u8], timestamp: f64) -> bool {
         if message.len() < 3 {
             return false;
         }
@@ -99,16 +112,28 @@ impl MidiInputEventQueue {
         let channel = status & 0x0F;
 
         let event = match status & 0xF0 {
-            0x80 => Some(MidiInputEvent::NoteOff { channel, note: data1, velocity: data2 }),
+            0x80 => {
+                Some(MidiInputEvent::NoteOff { channel, note: data1, velocity: data2, timestamp })
+            }
             0x90 => {
                 if data2 == 0 {
-                    Some(MidiInputEvent::NoteOff { channel, note: data1, velocity: data2 })
+                    Some(MidiInputEvent::NoteOff {
+                        channel,
+                        note: data1,
+                        velocity: data2,
+                        timestamp,
+                    })
                 } else {
-                    Some(MidiInputEvent::NoteOn { channel, note: data1, velocity: data2 })
+                    Some(MidiInputEvent::NoteOn { channel, note: data1, velocity: data2, timestamp })
                 }
             }
             0xB0 => {
-                Some(MidiInputEvent::ControlChange { channel, controller: data1, value: data2 })
+                Some(MidiInputEvent::ControlChange {
+                    channel,
+                    controller: data1,
+                    value: data2,
+                    timestamp,
+                })
             }
             _ => None,
         };
@@ -253,6 +278,7 @@ pub struct MidiInput {
     clock_state: MidiClockState,
     event_queue: MidiInputEventQueue,
     event_notifier: Option<Arc<dyn Fn() + Send + Sync>>,
+    clock_origin: ClockInstant,
 }
 
 impl MidiInput {
@@ -275,6 +301,7 @@ impl MidiInput {
             clock_state: MidiClockState::new(),
             event_queue: MidiInputEventQueue::new(),
             event_notifier: None,
+            clock_origin: clock_now(),
         })
     }
 
@@ -312,13 +339,15 @@ impl MidiInput {
         let clock_state = self.clock_state.clone();
         let event_queue = self.event_queue.clone();
         let event_notifier = self.event_notifier.clone();
+        let clock_origin = self.clock_origin;
 
         let connection = match midi_in.connect(
             &port,
             "grooph-input",
             move |_timestamp, message, _| {
                 clock_state.process_message(message);
-                if event_queue.process_message(message)
+                let event_timestamp = clock_elapsed_seconds(clock_now(), clock_origin);
+                if event_queue.process_message(message, event_timestamp)
                     && let Some(ref notify) = event_notifier
                 {
                     notify();
@@ -358,6 +387,9 @@ impl MidiInput {
 
     /// Drain queued MIDI note events
     pub fn drain_events(&self) -> Vec<MidiInputEvent> { self.event_queue.drain() }
+
+    /// Current time in seconds relative to the MIDI input clock origin.
+    pub fn now_seconds(&self) -> f64 { clock_elapsed_seconds(clock_now(), self.clock_origin) }
 
     /// Set a callback to be invoked when note/control events are enqueued.
     pub fn set_event_notifier(&mut self, notifier: Option<Arc<dyn Fn() + Send + Sync>>) {

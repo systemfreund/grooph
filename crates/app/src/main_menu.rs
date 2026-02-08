@@ -1,8 +1,8 @@
 use crate::Grooph;
-use crate::{Mode, PlayerState};
+use crate::{Mode, TransportState};
 use eframe::egui;
 use eframe::egui::scroll_area::{ScrollBarVisibility, ScrollSource};
-use eframe::egui::{Align, Button, Direction, Frame, Layout, Margin, Widget};
+use eframe::egui::{Align, Button, Color32, Direction, Frame, Layout, Margin, RichText, Widget};
 
 impl Grooph {
     pub(super) fn main_menu(&mut self, ctx: &egui::Context) {
@@ -22,17 +22,28 @@ impl Grooph {
 
                         ui.with_layout(layout, |ui| {
                             // Playback controls
-                            let button_label = if self.player_state == PlayerState::Playing {
+                            let is_running = self.transport_state != TransportState::Stopped;
+                            let is_recording = self.transport_state == TransportState::Recording;
+                            let button_label = if is_running {
                                 "⏹"
                             } else {
                                 "⏵"
                             };
                             if Button::new(button_label)
-                                .selected(self.player_state == PlayerState::Playing)
+                                .selected(is_running)
                                 .ui(ui)
                                 .clicked()
                             {
                                 self.toggle_playback();
+                            }
+                            let record_label =
+                                RichText::new("⏺").color(Color32::from_rgb(220, 40, 40));
+                            if Button::new(record_label)
+                                .selected(is_recording)
+                                .ui(ui)
+                                .clicked()
+                            {
+                                self.toggle_recording();
                             }
                             let bpm_editor = egui::DragValue::new(&mut self.bpm)
                                 .prefix("BPM: ")

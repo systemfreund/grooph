@@ -1,5 +1,4 @@
 use crate::Grooph;
-use crate::{PlayerState, web};
 use eframe::egui::Context;
 use log::{debug, error, info};
 use std::sync::OnceLock;
@@ -80,7 +79,7 @@ impl Grooph {
             match ev {
                 VisibilityEvent::Hidden => {
                     // going hidden
-                    self.player_state = PlayerState::Stopped;
+                    self.stop_transport();
                     self.audio = None;
                 }
                 VisibilityEvent::Visible | VisibilityEvent::PageShow => {

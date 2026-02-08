@@ -14,6 +14,7 @@ mod web;
 use std::cell::RefCell;
 use grooph_measure::duration::{Duration, NoteValue, TupletSpec, q};
 use grooph_measure::{BeatIdx, Measure, TimeSignature};
+use grooph_measure::grid::DEFAULT_GRID;
 
 use grooph_audio::{AudioSettings, PlayerState};
 use grooph_midi::{MidiInput, MidiInputEvent};
@@ -46,6 +47,13 @@ enum Mode {
     TimeSignature { beats: u8, unit: u8 },
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TransportState {
+    Stopped,
+    Playing,
+    Recording,
+}
+
 const APP_STATE_KEY: &str = "grooph_state";
 
 pub struct Grooph {
@@ -61,7 +69,7 @@ pub struct Grooph {
     font_bump: f32,
     baseline_dark: Option<Vec<(TextStyle, f32)>>,
     baseline_light: Option<Vec<(TextStyle, f32)>>,
-    player_state: PlayerState,
+    transport_state: TransportState,
     bpm: u32,
     audio: Option<grooph_audio::Audio>,
     // Mixer volumes [0.0, 1.0]
@@ -69,6 +77,8 @@ pub struct Grooph {
     // Playback smoothing state
     playback_smooth_tick: f64,
     playback_last_update: Option<f64>,
+    record_start_time: Option<f64>,
+    record_loop_index: u64,
 
     // Visual flash on primary beats
     flash_intensity: f32,        // [0,1]
@@ -196,15 +206,17 @@ impl App for Grooph {
         #[cfg(target_arch = "wasm32")]
         self.handle_visibility_change();
 
-        // If we should be playing but have no audio engine, try to create it (works after user gesture on iOS)
-        if self.player_state == PlayerState::Playing && self.audio.is_none() {
+        let audio_state = self.audio_state();
+
+        // If we should be playing audio but have no audio engine, try to create it (works after user gesture on iOS)
+        if audio_state == PlayerState::Playing && self.audio.is_none() {
             debug!("Creating audio engine.");
             self.audio = grooph_audio::Audio::new(self.bpm);
         }
 
         if let Some(audio) = &mut self.audio {
             audio.set_audio_settings(self.audio_settings);
-            if audio.update(&self.player_state, self.bpm, &self.measure) {
+            if audio.update(&audio_state, self.bpm, &self.measure) {
                 ctx.request_repaint();
             }
         }
@@ -218,20 +230,103 @@ impl App for Grooph {
 
 impl Grooph {
     fn handle_midi_input_events(&mut self) {
-        let Some(midi_input) = self.midi_input.as_ref() else {
-            return;
+        let (events, now_seconds) = match self.midi_input.as_ref() {
+            Some(input) => (input.drain_events(), input.now_seconds()),
+            None => return,
         };
 
-        for event in midi_input.drain_events() {
+        if self.transport_state == TransportState::Recording {
+            let Some(start_time) = self.record_start_time else {
+                return;
+            };
+            let ts = self.measure.time_signature();
+            let ticks_per_measure = DEFAULT_GRID.ticks_per_measure(&ts) as f64;
+            let ticks_per_beat = DEFAULT_GRID.ticks_per_beat(&ts) as f64;
+            let ticks_per_sec = (self.bpm as f64 / 60.0) * ticks_per_beat;
+            if ticks_per_measure > 0.0 && ticks_per_sec > 0.0 {
+                let elapsed = now_seconds - start_time;
+                if elapsed >= 0.0 {
+                    let loop_idx = ((elapsed * ticks_per_sec) / ticks_per_measure).floor() as u64;
+                    if loop_idx != self.record_loop_index {
+                        self.record_loop_index = loop_idx;
+                        self.clear_measure_for_recording();
+                    }
+                }
+            }
+            let onsets = DEFAULT_GRID.compute_onset_ticks(self.measure.beats());
+
+            for event in events {
+                if let MidiInputEvent::NoteOn { timestamp, .. } = event {
+                    self.record_note_at(
+                        timestamp,
+                        start_time,
+                        ticks_per_sec,
+                        ticks_per_measure,
+                        &onsets,
+                    );
+                }
+            }
+            return;
+        }
+
+        for event in events {
             match event {
-                MidiInputEvent::NoteOn { channel, note, velocity } => {
+                MidiInputEvent::NoteOn { channel, note, velocity, .. } => {
                     info!("MIDI NoteOn ch={} note={} vel={}", channel, note, velocity);
                 }
-                MidiInputEvent::NoteOff { channel, note, velocity } => {
+                MidiInputEvent::NoteOff { channel, note, velocity, .. } => {
                     info!("MIDI NoteOff ch={} note={} vel={}", channel, note, velocity);
                 }
                 MidiInputEvent::ControlChange { .. } => {}
             }
+        }
+    }
+
+    fn clear_measure_for_recording(&mut self) {
+        let beats_len = self.measure.beats().len();
+        for idx in 0..beats_len {
+            let is_note = self.measure.beats()[idx].kind == BeatKind::Note;
+            if is_note {
+                let _ = self.measure.toggle_beat_kind(idx);
+            }
+        }
+    }
+
+    fn quantize_tick_to_index(&self, tick: f64, onsets: &[u32]) -> Option<usize> {
+        let mut best_idx = None;
+        let mut best_dist = f64::MAX;
+        for (i, onset) in onsets.iter().enumerate() {
+            let dist = (tick - (*onset as f64)).abs();
+            if dist < best_dist {
+                best_dist = dist;
+                best_idx = Some(i);
+            }
+        }
+        best_idx
+    }
+
+    fn record_note_at(
+        &mut self,
+        timestamp: f64,
+        record_start_time: f64,
+        ticks_per_sec: f64,
+        ticks_per_measure: f64,
+        onsets: &[u32],
+    ) {
+        if ticks_per_sec <= 0.0 || ticks_per_measure <= 0.0 || onsets.is_empty() {
+            return;
+        }
+        let elapsed = timestamp - record_start_time;
+        if elapsed < 0.0 {
+            return;
+        }
+        let tick = (elapsed * ticks_per_sec).rem_euclid(ticks_per_measure);
+        let Some(idx) = self.quantize_tick_to_index(tick, onsets) else {
+            return;
+        };
+        let is_rest = self.measure.beats()[idx].kind == BeatKind::Rest;
+        if is_rest {
+            let _ = self.measure.toggle_beat_kind(idx);
         }
     }
 
@@ -340,21 +435,78 @@ impl Grooph {
         }
     }
 
-    pub fn toggle_playback(&mut self) {
-        let old_state = self.player_state.clone();
-        self.player_state = if old_state == PlayerState::Playing {
-            PlayerState::Stopped
-        } else {
+    fn audio_state(&self) -> PlayerState {
+        if self.transport_state == TransportState::Playing {
             PlayerState::Playing
-        };
-        info!("Toggle playback: {:?} -> {:?}", old_state, self.player_state);
+        } else {
+            PlayerState::Stopped
+        }
+    }
+
+    fn reset_playback_state(&mut self) {
+        self.playback_last_update = None;
+        self.playback_smooth_tick = 0.0;
+        self.flash_intensity = 0.0;
+        self.last_primary_beat = None;
+    }
+
+    fn start_playback(&mut self) {
+        if self.transport_state == TransportState::Playing {
+            return;
+        }
+        self.transport_state = TransportState::Playing;
+        self.record_start_time = None;
+        self.record_loop_index = 0;
+        self.reset_playback_state();
 
         #[cfg(target_arch = "wasm32")]
-        if self.player_state == PlayerState::Playing {
-            self.acquire_wake_lock();
-        } else {
-            self.release_wake_lock();
+        self.acquire_wake_lock();
+    }
+
+    fn start_recording(&mut self) {
+        if self.transport_state == TransportState::Recording {
+            return;
         }
+        self.transport_state = TransportState::Recording;
+        self.record_start_time = self.midi_input.as_ref().map(|input| input.now_seconds());
+        self.record_loop_index = 0;
+        self.reset_playback_state();
+        self.push_undo();
+        self.clear_redo();
+        self.clear_measure_for_recording();
+        self.audio = None;
+
+        #[cfg(target_arch = "wasm32")]
+        self.acquire_wake_lock();
+    }
+
+    fn stop_transport(&mut self) {
+        if self.transport_state == TransportState::Stopped {
+            return;
+        }
+        self.transport_state = TransportState::Stopped;
+        self.record_start_time = None;
+        self.record_loop_index = 0;
+        self.reset_playback_state();
+
+        #[cfg(target_arch = "wasm32")]
+        self.release_wake_lock();
+    }
+
+    pub fn toggle_playback(&mut self) {
+        match self.transport_state {
+            TransportState::Stopped => self.start_playback(),
+            TransportState::Playing | TransportState::Recording => self.stop_transport(),
+        }
+        info!("Toggle playback: {:?}", self.transport_state);
+    }
+
+    pub fn toggle_recording(&mut self) {
+        match self.transport_state {
+            TransportState::Recording => self.stop_transport(),
+            TransportState::Stopped | TransportState::Playing => self.start_recording(),
+        }
+        info!("Toggle recording: {:?}", self.transport_state);
     }
 
     fn default_measure() -> Measure {
@@ -522,12 +674,14 @@ impl Grooph {
             font_bump: 8.0,
             baseline_dark: None,
             baseline_light: None,
-            player_state: PlayerState::Stopped,
+            transport_state: TransportState::Stopped,
             bpm: state.bpm,
             audio: None,
             audio_settings: state.audio_settings,
             playback_smooth_tick: 0.0,
             playback_last_update: None,
+            record_start_time: None,
+            record_loop_index: 0,
             flash_intensity: 0.0,
             last_primary_beat: None,
             #[cfg(target_arch = "wasm32")]

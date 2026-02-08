@@ -1,6 +1,6 @@
 use crate::Grooph;
 use crate::tools::{Modifier, ToolKind, all_tools};
-use crate::{Mode, PlayerState};
+use crate::{Mode, TransportState};
 use grooph_layout::pixel_layout::{LayoutOpts, MeasureLayout, compute_em, GlyphMetrics};
 use grooph_measure::grid::DEFAULT_GRID;
 use grooph_layout::glyphs;
@@ -19,8 +19,8 @@ impl Grooph {
                     let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::click_and_drag());
 
                     // Update playback smoothing & primary-beat flash state
-                    let playback_tick_to_draw = match self.player_state {
-                        PlayerState::Playing => {
+                    let playback_tick_to_draw = match self.transport_state {
+                        TransportState::Playing | TransportState::Recording => {
                             let ts = self.measure.time_signature();
                             let ticks_per_measure = DEFAULT_GRID.ticks_per_measure(&ts) as f64;
                             let ticks_per_beat = DEFAULT_GRID.ticks_per_beat(&ts) as f64;
@@ -34,8 +34,9 @@ impl Grooph {
                             // Advance predictor
                             let mut next_tick = self.playback_smooth_tick + ticks_per_sec * dt;
 
-                            // Sync with audio if available
-                            if let Some(audio) = &self.audio
+                            // Sync with audio if available (only during playback, not recording)
+                            if self.transport_state == TransportState::Playing
+                                && let Some(audio) = &self.audio
                                 && let Some((raw_audio_tick, audio_total)) =
                                     audio.playback_position()
                             {
@@ -90,7 +91,7 @@ impl Grooph {
 
                             Some(self.playback_smooth_tick)
                         }
-                        PlayerState::Stopped => {
+                        TransportState::Stopped => {
                             self.playback_last_update = None;
                             self.playback_smooth_tick = 0.0;
                             self.flash_intensity = 0.0;
