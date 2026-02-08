@@ -1,0 +1,13 @@
+[package]
+name = "grooph-measure"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+either = "1.15.0"
+serde = { version = "1.0", features = ["derive"] }
+
+[lints.rust]
+unused_imports = "allow"

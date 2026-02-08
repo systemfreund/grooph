@@ -1,0 +1,13 @@
+[package]
+name = "grooph-layout"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+grooph-measure = { workspace = true }
+egui = "0.33"
+
+[lints.rust]
+unused_imports = "allow"

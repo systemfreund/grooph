@@ -1,0 +1,13 @@
+[package]
+name = "grooph-render"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+grooph-measure = { workspace = true }
+grooph-layout = { workspace = true }
+eframe = "0.33"
+egui = "0.33"
+
+[lints.rust]
+unused_imports = "allow"
