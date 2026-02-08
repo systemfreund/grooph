@@ -239,6 +239,14 @@ impl Grooph {
                                 self.midi_selected_port_id = midi_input.port_id(port_index);
                             }
                         });
+                        ui.separator();
+                        ui.label("Input Offset:");
+                        ui.add(
+                            egui::DragValue::new(&mut self.midi_input_offset_ms)
+                                .range(-200.0..=200.0)
+                                .speed(0.1)
+                                .suffix(" ms"),
+                        );
                     });
 
                     ui.separator();

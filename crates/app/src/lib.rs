@@ -79,6 +79,9 @@ pub struct Grooph {
     playback_last_update: Option<f64>,
     record_start_time: Option<f64>,
     record_loop_index: u64,
+    accuracy_start_time: Option<f64>,
+    accuracy_stats: AccuracyStats,
+    midi_input_offset_ms: f32,
 
     // Visual flash on primary beats
     flash_intensity: f32,        // [0,1]
@@ -111,6 +114,7 @@ struct PersistedState {
     audio_offset: f32,
     counting: CountingSettings,
     midi_selected_port_id: Option<String>,
+    midi_input_offset_ms: f32,
 }
 
 impl Default for PersistedState {
@@ -125,6 +129,7 @@ impl Default for PersistedState {
             audio_offset: 0.0,
             counting: CountingSettings::default(),
             midi_selected_port_id: None,
+            midi_input_offset_ms: 0.0,
         }
     }
 }
@@ -141,6 +146,7 @@ impl PersistedState {
             audio_offset: app.audio_offset,
             counting: app.counting,
             midi_selected_port_id: app.midi_selected_port_id.clone(),
+            midi_input_offset_ms: app.midi_input_offset_ms,
         }
     }
 }
@@ -171,6 +177,45 @@ impl Default for CountingSettings {
             show_labels: true,
             base: CountingBase::Ands,
             show_tuplets: false,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Default)]
+struct AccuracyStats {
+    count: u64,
+    sum_ms: f64,
+    sum_abs_ms: f64,
+    sum_sq_ms: f64,
+    last_delta_ms: Option<f64>,
+}
+
+impl AccuracyStats {
+    fn reset(&mut self) { *self = Self::default(); }
+
+    fn push(&mut self, delta_ms: f64) {
+        self.count = self.count.saturating_add(1);
+        self.sum_ms += delta_ms;
+        self.sum_abs_ms += delta_ms.abs();
+        self.sum_sq_ms += delta_ms * delta_ms;
+        self.last_delta_ms = Some(delta_ms);
+    }
+
+    fn mean_ms(&self) -> Option<f64> {
+        if self.count > 0 { Some(self.sum_ms / self.count as f64) } else { None }
+    }
+
+    fn mean_abs_ms(&self) -> Option<f64> {
+        if self.count > 0 { Some(self.sum_abs_ms / self.count as f64) } else { None }
+    }
+
+    fn std_dev_ms(&self) -> Option<f64> {
+        if self.count > 0 {
+            let mean = self.sum_ms / self.count as f64;
+            let var = (self.sum_sq_ms / self.count as f64) - mean * mean;
+            Some(var.max(0.0).sqrt())
+        } else {
+            None
         }
     }
 }
@@ -230,8 +275,8 @@ impl App for Grooph {
 
 impl Grooph {
     fn handle_midi_input_events(&mut self) {
-        let (events, now_seconds) = match self.midi_input.as_ref() {
-            Some(input) => (input.drain_events(), input.now_seconds()),
+        let (events, now_seconds, is_connected) = match self.midi_input.as_ref() {
+            Some(input) => (input.drain_events(), input.now_seconds(), input.is_connected()),
             None => return,
         };
 
@@ -269,9 +314,32 @@ impl Grooph {
             return;
         }
 
+        let accuracy_active = self.update_accuracy_state(is_connected, now_seconds);
+        let (ticks_per_measure, ticks_per_sec, onsets) = if accuracy_active {
+            let ts = self.measure.time_signature();
+            let ticks_per_measure = DEFAULT_GRID.ticks_per_measure(&ts) as f64;
+            let ticks_per_beat = DEFAULT_GRID.ticks_per_beat(&ts) as f64;
+            let ticks_per_sec = (self.bpm as f64 / 60.0) * ticks_per_beat;
+            (ticks_per_measure, ticks_per_sec, self.note_onsets_ticks())
+        } else {
+            (0.0, 0.0, Vec::new())
+        };
+
         for event in events {
             match event {
-                MidiInputEvent::NoteOn { channel, note, velocity, .. } => {
+                MidiInputEvent::NoteOn { channel, note, velocity, timestamp } => {
+                    if accuracy_active
+                        && ticks_per_sec > 0.0
+                        && ticks_per_measure > 0.0
+                        && !onsets.is_empty()
+                    {
+                        self.record_accuracy_hit(
+                            timestamp,
+                            ticks_per_sec,
+                            ticks_per_measure,
+                            &onsets,
+                        );
+                    }
                     info!("MIDI NoteOn ch={} note={} vel={}", channel, note, velocity);
                 }
                 MidiInputEvent::NoteOff { channel, note, velocity, .. } => {
@@ -279,6 +347,19 @@ impl Grooph {
                 }
                 MidiInputEvent::ControlChange { .. } => {}
             }
+        }
+    }
+
+    fn update_accuracy_state(&mut self, is_connected: bool, now_seconds: f64) -> bool {
+        if self.transport_state == TransportState::Playing && is_connected {
+            if self.accuracy_start_time.is_none() {
+                self.accuracy_start_time = Some(now_seconds);
+                self.accuracy_stats.reset();
+            }
+            true
+        } else {
+            self.accuracy_start_time = None;
+            false
         }
     }
 
@@ -327,6 +408,54 @@ impl Grooph {
         let is_rest = self.measure.beats()[idx].kind == BeatKind::Rest;
         if is_rest {
             let _ = self.measure.toggle_beat_kind(idx);
+        }
+    }
+
+    fn note_onsets_ticks(&self) -> Vec<u32> {
+        let beats = self.measure.beats();
+        let onsets = DEFAULT_GRID.compute_onset_ticks(beats);
+        onsets
+            .into_iter()
+            .zip(beats.iter())
+            .filter_map(|(tick, beat)| (beat.kind == BeatKind::Note).then_some(tick))
+            .collect()
+    }
+
+    fn record_accuracy_hit(
+        &mut self,
+        timestamp: f64,
+        ticks_per_sec: f64,
+        ticks_per_measure: f64,
+        onsets: &[u32],
+    ) {
+        let Some(start_time) = self.accuracy_start_time else {
+            return;
+        };
+        if ticks_per_sec <= 0.0 || ticks_per_measure <= 0.0 || onsets.is_empty() {
+            return;
+        }
+        let offset_sec = (self.midi_input_offset_ms as f64) / 1000.0;
+        let elapsed = timestamp - start_time + offset_sec;
+        if elapsed < 0.0 {
+            return;
+        }
+        let hit_tick = (elapsed * ticks_per_sec).rem_euclid(ticks_per_measure);
+        let mut best_diff: Option<f64> = None;
+        for onset in onsets {
+            let onset_tick = *onset as f64;
+            let mut diff = hit_tick - onset_tick;
+            if diff > ticks_per_measure * 0.5 {
+                diff -= ticks_per_measure;
+            } else if diff < -ticks_per_measure * 0.5 {
+                diff += ticks_per_measure;
+            }
+            if best_diff.map_or(true, |best| diff.abs() < best.abs()) {
+                best_diff = Some(diff);
+            }
+        }
+        if let Some(diff_ticks) = best_diff {
+            let delta_ms = (diff_ticks / ticks_per_sec) * 1000.0;
+            self.accuracy_stats.push(delta_ms);
         }
     }
 
@@ -457,6 +586,14 @@ impl Grooph {
         self.transport_state = TransportState::Playing;
         self.record_start_time = None;
         self.record_loop_index = 0;
+        self.accuracy_stats.reset();
+        self.accuracy_start_time = self.midi_input.as_ref().and_then(|input| {
+            if input.is_connected() {
+                Some(input.now_seconds())
+            } else {
+                None
+            }
+        });
         self.reset_playback_state();
 
         #[cfg(target_arch = "wasm32")]
@@ -470,6 +607,7 @@ impl Grooph {
         self.transport_state = TransportState::Recording;
         self.record_start_time = self.midi_input.as_ref().map(|input| input.now_seconds());
         self.record_loop_index = 0;
+        self.accuracy_start_time = None;
         self.reset_playback_state();
         self.push_undo();
         self.clear_redo();
@@ -487,6 +625,7 @@ impl Grooph {
         self.transport_state = TransportState::Stopped;
         self.record_start_time = None;
         self.record_loop_index = 0;
+        self.accuracy_start_time = None;
         self.reset_playback_state();
 
         #[cfg(target_arch = "wasm32")]
@@ -682,6 +821,9 @@ impl Grooph {
             playback_last_update: None,
             record_start_time: None,
             record_loop_index: 0,
+            accuracy_start_time: None,
+            accuracy_stats: AccuracyStats::default(),
+            midi_input_offset_ms: state.midi_input_offset_ms,
             flash_intensity: 0.0,
             last_primary_beat: None,
             #[cfg(target_arch = "wasm32")]
