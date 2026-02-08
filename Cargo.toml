@@ -5,6 +5,7 @@ members = [
     "crates/audio",
     "crates/layout",
     "crates/measure",
+    "crates/midi",
     "crates/render",
 ]
 
@@ -18,6 +19,7 @@ license = "LGPL-2"
 grooph-audio = { path = "crates/audio" }
 grooph-layout = { path = "crates/layout" }
 grooph-measure = { path = "crates/measure" }
+grooph-midi = { path = "crates/midi" }
 grooph-render = { path = "crates/render" }
 cpal = { version = "0.17.1", features = ["wasm-bindgen"] }
 eframe = { version = "0.33", features = ["persistence"] }
@@ -26,9 +28,12 @@ egui_extras = { version = "0.33", features = ["image", "svg"] }
 either = "1.15.0"
 env_logger = "0.11.8"
 getrandom = { version = "0.3.3", features = ["wasm_js"] }
+js-sys = "0.3"
 log = "0.4.29"
+midir = "0.10"
 rodio = { version = "0.21", features = ["playback", "noise"] }
 serde = { version = "1.0", features = ["derive"] }
+thiserror = "2.0"
 wasm-bindgen = "0.2.108"
 wasm-bindgen-futures = "0.4.56"
 web-sys = { version = "0.3", features = ["Document", "Navigator", "VisibilityState", "WakeLock", "WakeLockSentinel", "WakeLockType", "Window"] }
