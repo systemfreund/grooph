@@ -85,7 +85,7 @@ pub struct Grooph {
     counting: CountingSettings,
     midi_input: Option<MidiInput>,
     midi_input_ports: Vec<String>,
-    midi_selected_port: Option<usize>,
+    midi_selected_port_id: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -99,6 +99,7 @@ struct PersistedState {
     audio_latency_enabled: bool,
     audio_offset: f32,
     counting: CountingSettings,
+    midi_selected_port_id: Option<String>,
 }
 
 impl Default for PersistedState {
@@ -112,6 +113,7 @@ impl Default for PersistedState {
             audio_latency_enabled: true,
             audio_offset: 0.0,
             counting: CountingSettings::default(),
+            midi_selected_port_id: None,
         }
     }
 }
@@ -127,6 +129,7 @@ impl PersistedState {
             audio_latency_enabled: app.audio_latency_enabled,
             audio_offset: app.audio_offset,
             counting: app.counting,
+            midi_selected_port_id: app.midi_selected_port_id.clone(),
         }
     }
 }
@@ -462,7 +465,7 @@ impl Grooph {
             }
         }
 
-        let (midi_input, midi_input_ports) = match MidiInput::new() {
+        let (mut midi_input, midi_input_ports) = match MidiInput::new() {
             Ok(mut input) => {
                 let ports = input.available_ports().unwrap_or_default();
                 (Some(input), ports)
@@ -472,6 +475,16 @@ impl Grooph {
                 (None, Vec::new())
             }
         };
+
+        let midi_selected_port_id = state.midi_selected_port_id.clone();
+
+        if let (Some(ref mut input), Some(ref port_id)) =
+            (midi_input.as_mut(), midi_selected_port_id.as_ref())
+        {
+            if let Some(idx) = input.find_port_index_by_id(port_id) {
+                let _ = input.connect(idx);
+            }
+        }
 
         let this = Self {
             mode: Mode::Playback,
@@ -504,7 +517,7 @@ impl Grooph {
             counting: state.counting,
             midi_input,
             midi_input_ports,
-            midi_selected_port: None,
+            midi_selected_port_id,
         };
 
         // WASM: install visibilitychange/pageshow listeners once

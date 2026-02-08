@@ -190,8 +190,12 @@ impl Grooph {
                             };
 
                             let connected = midi_input.is_connected();
+                            let selected_idx = self
+                                .midi_selected_port_id
+                                .as_ref()
+                                .and_then(|id| midi_input.find_port_index_by_id(id));
                             let selected_text = if connected {
-                                self.midi_selected_port
+                                selected_idx
                                     .and_then(|idx| self.midi_input_ports.get(idx))
                                     .cloned()
                                     .unwrap_or_else(|| "Connected".to_string())
@@ -216,7 +220,7 @@ impl Grooph {
                                     for (idx, name) in self.midi_input_ports.iter().enumerate() {
                                         if ui
                                             .selectable_label(
-                                                self.midi_selected_port == Some(idx),
+                                                selected_idx == Some(idx),
                                                 name,
                                             )
                                             .clicked()
@@ -228,11 +232,11 @@ impl Grooph {
 
                             if should_disconnect {
                                 let _ = midi_input.disconnect();
-                                self.midi_selected_port = None;
+                                self.midi_selected_port_id = None;
                             } else if let Some(port_index) = connect_port
                                 && midi_input.connect(port_index).is_ok()
                             {
-                                self.midi_selected_port = Some(port_index);
+                                self.midi_selected_port_id = midi_input.port_id(port_index);
                             }
                         });
                     });
@@ -250,8 +254,21 @@ impl Grooph {
             if let Err(e) = input.refresh_ports() {
                 log::warn!("Failed to refresh MIDI input ports: {}", e);
             }
-            if let Ok(ports) = input.available_ports() {
-                self.midi_input_ports = ports;
+            match input.available_ports() {
+                Ok(ports) => {
+                    self.midi_input_ports = ports;
+                }
+                Err(e) => {
+                    log::warn!("Failed to get MIDI input ports: {}", e);
+                }
+            }
+
+            if let Some(ref port_id) = self.midi_selected_port_id {
+                if let Some(idx) = input.find_port_index_by_id(port_id) {
+                    if !input.is_connected() {
+                        let _ = input.connect(idx);
+                    }
+                }
             }
         }
     }

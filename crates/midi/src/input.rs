@@ -344,6 +344,16 @@ impl MidiInput {
 
         Err(Error::NotConnected)
     }
+
+    /// Get the stable port identifier for a port index.
+    pub fn port_id(&self, port_index: usize) -> Option<String> {
+        self.ports.get(port_index).map(|port| port.id())
+    }
+
+    /// Find a port index by its stable identifier.
+    pub fn find_port_index_by_id(&self, id: &str) -> Option<usize> {
+        self.ports.iter().position(|port| port.id() == id)
+    }
 }
 
 impl Drop for MidiInput {
