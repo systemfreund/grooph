@@ -7,7 +7,7 @@ license.workspace = true
 
 [dependencies]
 grooph-measure = { workspace = true }
-egui = "0.33"
+egui = { workspace = true }
 
 [lints.rust]
 unused_imports = "allow"

@@ -19,6 +19,19 @@ grooph-audio = { path = "crates/audio" }
 grooph-layout = { path = "crates/layout" }
 grooph-measure = { path = "crates/measure" }
 grooph-render = { path = "crates/render" }
+cpal = { version = "0.17.1", features = ["wasm-bindgen"] }
+eframe = { version = "0.33", features = ["persistence"] }
+egui = "0.33"
+egui_extras = { version = "0.33", features = ["image", "svg"] }
+either = "1.15.0"
+env_logger = "0.11.8"
+getrandom = { version = "0.3.3", features = ["wasm_js"] }
+log = "0.4.29"
+rodio = { version = "0.21", features = ["playback", "noise"] }
+serde = { version = "1.0", features = ["derive"] }
+wasm-bindgen = "0.2.108"
+wasm-bindgen-futures = "0.4.56"
+web-sys = { version = "0.3", features = ["Document", "Navigator", "VisibilityState", "WakeLock", "WakeLockSentinel", "WakeLockType", "Window"] }
 
 [profile.release]
 opt-level = "z"

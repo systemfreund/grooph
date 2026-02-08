@@ -6,8 +6,8 @@ authors.workspace = true
 license.workspace = true
 
 [dependencies]
-either = "1.15.0"
-serde = { version = "1.0", features = ["derive"] }
+either = { workspace = true }
+serde = { workspace = true }
 
 [lints.rust]
 unused_imports = "allow"

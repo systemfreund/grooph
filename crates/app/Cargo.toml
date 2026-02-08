@@ -10,20 +10,20 @@ grooph-measure = { workspace = true }
 grooph-audio = { workspace = true }
 grooph-layout = { workspace = true }
 grooph-render = { workspace = true }
-eframe = { version = "0.33", features = ["persistence"] }
-egui = "0.33"
-egui_extras = { version = "0.33", features = ["image", "svg"] }
-log = "0.4.29"
-serde = { version = "1.0", features = ["derive"] }
+eframe = { workspace = true }
+egui = { workspace = true }
+egui_extras = { workspace = true }
+log = { workspace = true }
+serde = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-env_logger = "0.11.8"
+env_logger = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-wasm-bindgen = "0.2.108"
-wasm-bindgen-futures = "0.4.56"
-web-sys = { version = "0.3", features = ["Document", "Navigator", "VisibilityState", "WakeLock", "WakeLockSentinel", "WakeLockType", "Window"] }
-getrandom = { version = "0.3.3", features = ["wasm_js"] }
+wasm-bindgen = { workspace = true }
+wasm-bindgen-futures = { workspace = true }
+web-sys = { workspace = true }
+getrandom = { workspace = true }
 
 [lints.rust]
 unused_imports = "allow"
