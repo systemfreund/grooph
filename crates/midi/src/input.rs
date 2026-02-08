@@ -2,6 +2,7 @@
 
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::Instant;
 
 use midir::{Ignore, MidiInput as MidirInput, MidiInputConnection, MidiInputPort};
@@ -20,16 +21,36 @@ const MIDI_CONTINUE: u8 = 0xFB;
 /// Number of clock messages per beat (MIDI standard: 24 PPQN)
 const CLOCKS_PER_BEAT: u32 = 24;
 
+#[cfg(not(target_arch = "wasm32"))]
 type ClockInstant = Instant;
+
+#[cfg(target_arch = "wasm32")]
+type ClockInstant = f64;
 
 #[inline]
 fn clock_now() -> ClockInstant {
-    Instant::now()
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        Instant::now()
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    {
+        web_sys::js_sys::Date::now() / 1000.0
+    }
 }
 
 #[inline]
 fn clock_interval_seconds(now: ClockInstant, last: ClockInstant) -> f32 {
-    now.duration_since(last).as_secs_f32()
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        now.duration_since(last).as_secs_f32()
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    {
+        (now - last) as f32
+    }
 }
 
 /// MIDI input events for note handling
@@ -66,9 +87,9 @@ impl MidiInputEventQueue {
     }
 
     /// Process a MIDI message and queue note events
-    pub fn process_message(&self, message: &[u8]) {
+    pub fn process_message(&self, message: &[u8]) -> bool {
         if message.len() < 3 {
-            return;
+            return false;
         }
 
         let status = message[0];
@@ -95,7 +116,9 @@ impl MidiInputEventQueue {
         if let Some(event) = event {
             let mut queue = self.inner.lock().unwrap();
             queue.push_back(event);
+            return true;
         }
+        false
     }
 }
 
@@ -229,6 +252,7 @@ pub struct MidiInput {
     ports: Vec<MidiInputPort>,
     clock_state: MidiClockState,
     event_queue: MidiInputEventQueue,
+    event_notifier: Option<Arc<dyn Fn() + Send + Sync>>,
 }
 
 impl MidiInput {
@@ -250,6 +274,7 @@ impl MidiInput {
             ports,
             clock_state: MidiClockState::new(),
             event_queue: MidiInputEventQueue::new(),
+            event_notifier: None,
         })
     }
 
@@ -286,13 +311,18 @@ impl MidiInput {
 
         let clock_state = self.clock_state.clone();
         let event_queue = self.event_queue.clone();
+        let event_notifier = self.event_notifier.clone();
 
         let connection = match midi_in.connect(
             &port,
             "grooph-input",
             move |_timestamp, message, _| {
                 clock_state.process_message(message);
-                event_queue.process_message(message);
+                if event_queue.process_message(message)
+                    && let Some(ref notify) = event_notifier
+                {
+                    notify();
+                }
             },
             (),
         ) {
@@ -328,6 +358,11 @@ impl MidiInput {
 
     /// Drain queued MIDI note events
     pub fn drain_events(&self) -> Vec<MidiInputEvent> { self.event_queue.drain() }
+
+    /// Set a callback to be invoked when note/control events are enqueued.
+    pub fn set_event_notifier(&mut self, notifier: Option<Arc<dyn Fn() + Send + Sync>>) {
+        self.event_notifier = notifier;
+    }
 
     /// Refresh the list of available ports
     pub fn refresh_ports(&mut self) -> Result<()> {

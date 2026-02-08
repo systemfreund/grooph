@@ -1632,6 +1632,7 @@ version = "0.1.0"
 dependencies = [
  "midir",
  "thiserror 2.0.17",
+ "web-sys",
 ]
 
 [[package]]

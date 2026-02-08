@@ -34,6 +34,7 @@ use log::{debug, info, warn};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::sync::Arc;
 
 #[derive(PartialEq, Eq)]
 enum Mode {
@@ -494,6 +495,11 @@ impl Grooph {
                 (None, Vec::new())
             }
         };
+
+        if let Some(ref mut input) = midi_input {
+            let ctx = cc.egui_ctx.clone();
+            input.set_event_notifier(Some(Arc::new(move || ctx.request_repaint())));
+        }
 
         let midi_selected_port_id = state.midi_selected_port_id.clone();
 
