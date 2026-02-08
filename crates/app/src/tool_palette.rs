@@ -187,6 +187,7 @@ impl Grooph {
         // Clear redo for real changes; otherwise drop the snapshot we took before
         if result.is_some() {
             self.clear_redo();
+            self.clear_accuracy_for_edit();
         } else {
             let _ = self.undo_stack.pop();
         }

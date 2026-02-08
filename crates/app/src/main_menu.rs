@@ -23,7 +23,6 @@ impl Grooph {
                         ui.with_layout(layout, |ui| {
                             // Playback controls
                             let is_running = self.transport_state != TransportState::Stopped;
-                            let is_recording = self.transport_state == TransportState::Recording;
                             let button_label = if is_running {
                                 "⏹"
                             } else {

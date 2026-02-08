@@ -61,6 +61,7 @@ impl Grooph {
                             match res {
                                 Ok(_) => {
                                     self.clear_redo();
+                                    self.clear_accuracy_for_edit();
                                     // Clamp cursor within bounds
                                     let new_len = self.measure.beats().len();
                                     if new_len > 0 {

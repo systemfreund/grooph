@@ -6,7 +6,7 @@ use grooph_measure::grid::DEFAULT_GRID;
 use grooph_layout::glyphs;
 use grooph_render::measure::draw_measure;
 use eframe::egui;
-use eframe::egui::{Context, FontId, Frame, Rect, Response, RichText, Stroke};
+use eframe::egui::{Context, FontId, Frame, Rect, Response, Stroke};
 
 impl Grooph {
     pub(super) fn measure_panel(&mut self, ctx: &Context) {
@@ -148,7 +148,6 @@ impl Grooph {
                     }
 
                     self.draw_accuracy_marker(ui, &layout, &opts.metrics);
-                    // self.draw_accuracy_overlay(ui, rect);
                     self.handle_input(rect, resp, layout);
                 });
         });
@@ -182,7 +181,10 @@ impl Grooph {
                 [zero_start, zero_end],
                 Stroke::new(1.0, egui::Color32::from_gray(140)),
             );
-            let Some(diff_ticks) = self.accuracy_by_beat.get(idx).and_then(|v| *v) else {
+            let Some(onset_tick) = onsets.get(idx) else {
+                continue;
+            };
+            let Some(diff_ticks) = self.accuracy_by_onset.get(onset_tick).copied() else {
                 continue;
             };
             let Some(px_per_tick) = self.local_pixels_per_tick(&onsets, layout, idx) else {
@@ -226,51 +228,6 @@ impl Grooph {
         None
     }
 
-    fn draw_accuracy_overlay(&self, ui: &egui::Ui, rect: Rect) {
-        let Some(midi_input) = self.midi_input.as_ref() else {
-            return;
-        };
-        if !midi_input.is_connected() {
-            return;
-        }
-
-        let active =
-            self.transport_state == TransportState::Playing && self.accuracy_start_time.is_some();
-        let mut lines = Vec::new();
-        lines.push(if active { "Accuracy (live)" } else { "Accuracy (idle)" }.to_string());
-        if let Some(last) = self.accuracy_stats.last_delta_ms {
-            let label = if last < 0.0 { "early" } else { "late" };
-            lines.push(format!("Last: {:+.1} ms ({})", last, label));
-        } else {
-            lines.push("Last: --".to_string());
-        }
-        if let Some(mean_abs) = self.accuracy_stats.mean_abs_ms() {
-            lines.push(format!("Mean |Δ|: {:.1} ms", mean_abs));
-        }
-        if let Some(mean) = self.accuracy_stats.mean_ms() {
-            lines.push(format!("Bias: {:+.1} ms", mean));
-        }
-        if let Some(std) = self.accuracy_stats.std_dev_ms() {
-            lines.push(format!("StdDev: {:.1} ms", std));
-        }
-        lines.push(format!("Hits: {}", self.accuracy_stats.count));
-        lines.push(format!("Offset: {:+.1} ms", self.midi_input_offset_ms));
-
-        let anchor = rect.left_top() + egui::vec2(12.0, 12.0);
-        egui::Area::new(egui::Id::new("accuracy_overlay"))
-            .fixed_pos(anchor)
-            .show(ui.ctx(), |ui| {
-                Frame::group(ui.style())
-                    .fill(ui.visuals().extreme_bg_color)
-                    .stroke(Stroke::new(1.0, ui.visuals().widgets.noninteractive.bg_stroke.color))
-                    .show(ui, |ui| {
-                        ui.set_min_width(140.0);
-                        for line in lines {
-                            ui.label(RichText::new(line).monospace().size(12.0));
-                        }
-                    });
-            });
-    }
 
     fn handle_input(&mut self, rect: Rect, resp: Response, layout: MeasureLayout) {
         if !matches!(self.mode, Mode::TimeSignature { .. })

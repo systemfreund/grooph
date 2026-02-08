@@ -72,6 +72,7 @@ impl Grooph {
                     let new_pos = (self.measure.beats().len() - 1).min(self.cursor_idx + 1);
                     self.cursor_idx = new_pos;
                     self.clear_redo();
+                    self.clear_accuracy_for_edit();
                 }
                 if i.key_pressed(Key::Backspace) {
                     // Remove beat at the cursor
@@ -82,6 +83,7 @@ impl Grooph {
                     let new_pos = self.cursor_idx.saturating_sub(1).min(new_len - 1);
                     self.cursor_idx = new_pos;
                     self.clear_redo();
+                    self.clear_accuracy_for_edit();
                 }
                 // Keyboard input routed through tool shortcuts
                 for t in all_tools().iter().filter(|t| t.shortcut.is_some()) {
