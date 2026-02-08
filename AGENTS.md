@@ -1,9 +1,9 @@
-Project-specific development guidelines
+# Project-specific development guidelines
 
 This document captures build, test, and development practices tailored to this repository. It’s written for experienced
 Rust developers and focuses on crate-specific behaviors and APIs that matter when developing or debugging.
 
-Build and configuration
+## Build and configuration
 
 - Toolchain/edition: Rust edition 2024. The crate builds and tests cleanly with the default toolchain (no special flags
   required).
@@ -18,7 +18,7 @@ Build and configuration
       installed): `trunk serve` for dev, or `trunk build --release` to produce optimized WASM (release profile uses
       `opt-level = "z"` and `lto = true`; Trunk sets `release = true` and `minify = "always"`).
 
-Testing: how to configure and run
+## Testing: how to configure and run
 
 - Unit tests are colocated within modules (e.g., src/measure.rs, src/layout/*). Use standard cargo commands:
     - All tests: `cargo test`
@@ -26,7 +26,7 @@ Testing: how to configure and run
     - Single fully-qualified test: `cargo test measure::tests::append_autofill_to_primary_boundary_simple`
     - Show test output: add `-- --nocapture`
 
-Writing new tests in this crate
+## Writing new tests
 
 - Prefer internal unit tests in the same module as the code under test.
 - Common pattern: create a `Measure`, then add beats via helper duration constructors. The measure automatically fills
@@ -38,7 +38,7 @@ Writing new tests in this crate
 - Constructing beats: `Beat::note(duration)` or `Beat::rest(duration)`
 - Constructing measures: `Measure::new(TimeSignature::FOUR_FOUR)` etc. See `time_signature.rs` for variants.
 
-Important testing gotchas
+### Important testing gotchas
 
 - `Beat`'s `PartialEq` ignores `tuplet_group_id`. If tuplet grouping matters, compare `tuplet_group_id` explicitly.
 - When you insert a tuplet beat (e.g., `t8()`), the remaining tuplets in that group auto-fill as rests to complete the
@@ -74,20 +74,20 @@ fn demo_howto_test_measure_with_helpers() {
 }
 ```
 
-Running just this test:
-
-- If placed under `src/measure.rs`’s test module: `cargo test measure::tests::demo_howto_test_measure_with_helpers`
-
-Guidelines for adding further tests
+### Guidelines for adding further tests
 
 - Use `Measure::set_beat(idx, Beat::note/rest(..))` to surgically adjust a measure.
 - Duration grid utilities: `DEFAULT_GRID.ticks_of(..)` and `DEFAULT_GRID.compute_onset_ticks(..)` are useful for
   low-level assertions.
 
-Code style and conventions
+## Code style and conventions
 
 - Formatting: See `rustfmt.toml` at repo root. Run `cargo fmt` before committing.
 - Imports and module layout: mirror the existing test modules for import style (e.g., reusing
   `use crate::measure::duration::{..}` and avoiding cross-layer layout imports inside measure tests).
 - Debug/print helpers: `duration_to_debug_str` and `impl Debug` for `Measure` provide concise readable output for
   debugging failed tests.
+
+## Other notes
+
+- You are alread in the right working directory, so no need to `cd` into the repo root.
