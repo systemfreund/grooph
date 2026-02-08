@@ -147,10 +147,73 @@ impl Grooph {
                         ui.ctx().request_repaint();
                     }
 
+                    self.draw_accuracy_marker(ui, &layout, &opts.metrics);
                     self.draw_accuracy_overlay(ui, rect);
                     self.handle_input(rect, resp, layout);
                 });
         });
+    }
+
+    fn draw_accuracy_marker(
+        &self,
+        ui: &egui::Ui,
+        layout: &MeasureLayout,
+        metrics: &GlyphMetrics,
+    ) {
+        if self.transport_state != TransportState::Playing {
+            return;
+        }
+        let Some(hit) = self.accuracy_last_hit else {
+            return;
+        };
+        let Some(note_layout) = layout.notes.get(hit.beat_idx) else {
+            return;
+        };
+        if note_layout.kind != grooph_measure::BeatKind::Note {
+            return;
+        }
+        let onsets = DEFAULT_GRID.compute_onset_ticks(self.measure.beats());
+        let Some(px_per_tick) = self.local_pixels_per_tick(&onsets, layout, hit.beat_idx) else {
+            return;
+        };
+        let x = note_layout.center.x + (hit.delta_ticks * px_per_tick) as f32;
+        let y = note_layout.center.y + metrics.head_size.y * 0.65;
+        let h = metrics.head_size.y * 0.8;
+        let zero_start = egui::Pos2::new(note_layout.center.x, y);
+        let zero_end = egui::Pos2::new(note_layout.center.x, y + h);
+        ui.painter().line_segment(
+            [zero_start, zero_end],
+            Stroke::new(1.0, egui::Color32::from_gray(140)),
+        );
+        let start = egui::Pos2::new(x, y);
+        let end = egui::Pos2::new(x, y + h);
+        ui.painter()
+            .line_segment([start, end], Stroke::new(2.0, egui::Color32::RED));
+    }
+
+    fn local_pixels_per_tick(
+        &self,
+        onsets: &[u32],
+        layout: &MeasureLayout,
+        idx: usize,
+    ) -> Option<f64> {
+        if idx + 1 < onsets.len() {
+            let dt = (onsets[idx + 1] as i64 - onsets[idx] as i64) as f64;
+            if dt != 0.0 {
+                let x0 = layout.notes.get(idx)?.center.x as f64;
+                let x1 = layout.notes.get(idx + 1)?.center.x as f64;
+                return Some((x1 - x0) / dt);
+            }
+        }
+        if idx > 0 {
+            let dt = (onsets[idx] as i64 - onsets[idx - 1] as i64) as f64;
+            if dt != 0.0 {
+                let x0 = layout.notes.get(idx - 1)?.center.x as f64;
+                let x1 = layout.notes.get(idx)?.center.x as f64;
+                return Some((x1 - x0) / dt);
+            }
+        }
+        None
     }
 
     fn draw_accuracy_overlay(&self, ui: &egui::Ui, rect: Rect) {
