@@ -1,5 +1,6 @@
 # Project-specific development guidelines
 
+Read README.md first.
 This document captures build, test, and development practices tailored to this repository. It’s written for experienced
 Rust developers and focuses on crate-specific behaviors and APIs that matter when developing or debugging.
 
@@ -90,4 +91,4 @@ fn demo_howto_test_measure_with_helpers() {
 
 ## Other notes
 
-- You are alread in the right working directory, so no need to `cd` into the repo root.
+- You are already in the right working directory, so no need to `cd` into the repo root.
