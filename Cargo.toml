@@ -21,7 +21,7 @@ grooph-layout = { path = "crates/layout" }
 grooph-measure = { path = "crates/measure" }
 grooph-midi = { path = "crates/midi" }
 grooph-render = { path = "crates/render" }
-cpal = { version = "0.17.1", features = ["wasm-bindgen"] }
+cpal = { version = "0.16", features = ["wasm-bindgen"] }
 eframe = { version = "0.33", features = ["persistence"] }
 egui = "0.33"
 egui_extras = { version = "0.33", features = ["image", "svg"] }
