@@ -177,17 +177,6 @@ impl Grooph {
         if total_ticks <= 0.0 {
             return;
         }
-        let mut note_indices = Vec::new();
-        let mut note_pos_by_idx: Vec<Option<usize>> = vec![None; beats.len()];
-        for (idx, beat) in beats.iter().enumerate() {
-            if beat.kind == grooph_measure::BeatKind::Note {
-                note_pos_by_idx[idx] = Some(note_indices.len());
-                note_indices.push(idx);
-            }
-        }
-        if note_indices.is_empty() {
-            return;
-        }
         for (idx, note_layout) in layout.notes.iter().enumerate() {
             if note_layout.kind != grooph_measure::BeatKind::Note {
                 continue;
@@ -208,10 +197,7 @@ impl Grooph {
             };
             match mark {
                 crate::AccuracyMark::Hit(mut diff_ticks) => {
-                    let Some(note_pos) = note_pos_by_idx.get(idx).copied().flatten() else {
-                        continue;
-                    };
-                    if note_indices.len() == 1 {
+                    if beats.len() == 1 {
                         let half = total_ticks * 0.5;
                         if diff_ticks < -half {
                             diff_ticks = -half;
@@ -220,9 +206,8 @@ impl Grooph {
                         }
                     } else {
                         let cur_tick = *onset_tick as f64;
-                        let prev_idx =
-                            note_indices[(note_pos + note_indices.len() - 1) % note_indices.len()];
-                        let next_idx = note_indices[(note_pos + 1) % note_indices.len()];
+                        let prev_idx = (idx + beats.len() - 1) % beats.len();
+                        let next_idx = (idx + 1) % beats.len();
                         let prev_tick = onsets[prev_idx] as f64;
                         let next_tick = onsets[next_idx] as f64;
                         let dist_prev = if cur_tick >= prev_tick {
