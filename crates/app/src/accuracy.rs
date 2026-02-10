@@ -205,11 +205,15 @@ impl AccuracyTracker {
         if elapsed < 0.0 {
             return;
         }
-        let current_tick = (elapsed * ticks_per_sec).rem_euclid(ticks_per_measure);
+        let mut current_tick = (elapsed * ticks_per_sec).rem_euclid(ticks_per_measure);
         let Some(last_tick) = self.last_tick else {
             self.last_tick = Some(current_tick);
             return;
         };
+        let epsilon = ticks_per_measure.max(1.0) * 1e-9;
+        if current_tick + epsilon >= last_tick && current_tick < last_tick {
+            current_tick = last_tick;
+        }
 
         fn process_segment(
             beats: &[Beat],
