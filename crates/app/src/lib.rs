@@ -82,6 +82,7 @@ pub struct Grooph {
     record_start_time: Option<f64>,
     record_loop_index: u64,
     accuracy: AccuracyTracker,
+    accuracy_enabled: bool,
     midi_input_offset_ms: f32,
 
     // Visual flash on primary beats
@@ -116,6 +117,7 @@ struct PersistedState {
     counting: CountingSettings,
     midi_selected_port_id: Option<String>,
     midi_input_offset_ms: f32,
+    accuracy_enabled: bool,
 }
 
 impl Default for PersistedState {
@@ -131,6 +133,7 @@ impl Default for PersistedState {
             counting: CountingSettings::default(),
             midi_selected_port_id: None,
             midi_input_offset_ms: 0.0,
+            accuracy_enabled: true,
         }
     }
 }
@@ -148,6 +151,7 @@ impl PersistedState {
             counting: app.counting,
             midi_selected_port_id: app.midi_selected_port_id.clone(),
             midi_input_offset_ms: app.midi_input_offset_ms,
+            accuracy_enabled: app.accuracy_enabled,
         }
     }
 }
@@ -241,6 +245,10 @@ impl Grooph {
             Some(input) => (input.drain_events(), input.now_seconds(), input.is_connected()),
             None => return,
         };
+
+        if !self.accuracy_enabled {
+            return;
+        }
 
         let accuracy_active = self.accuracy.update_state(
             self.transport_state == TransportState::Playing,
@@ -437,7 +445,11 @@ impl Grooph {
             .midi_input
             .as_ref()
             .and_then(|input| if input.is_connected() { Some(input.now_seconds()) } else { None });
-        self.accuracy.on_playback_start(accuracy_start);
+        if self.accuracy_enabled {
+            self.accuracy.on_playback_start(accuracy_start);
+        } else {
+            self.accuracy.on_playback_stop();
+        }
         self.reset_playback_state();
 
         #[cfg(target_arch = "wasm32")]
@@ -464,6 +476,29 @@ impl Grooph {
             TransportState::Playing => self.stop_transport(),
         }
         info!("Toggle playback: {:?}", self.transport_state);
+    }
+
+    fn set_accuracy_enabled(&mut self, enabled: bool) {
+        if self.accuracy_enabled == enabled {
+            return;
+        }
+        self.accuracy_enabled = enabled;
+        if enabled {
+            if self.transport_state == TransportState::Playing {
+                let accuracy_start = self.midi_input.as_ref().and_then(|input| {
+                    if input.is_connected() {
+                        Some(input.now_seconds())
+                    } else {
+                        None
+                    }
+                });
+                self.accuracy.on_playback_start(accuracy_start);
+            } else {
+                self.clear_accuracy_for_edit();
+            }
+        } else {
+            self.accuracy.on_playback_stop();
+        }
     }
 
     fn default_measure() -> Measure {
@@ -635,6 +670,7 @@ impl Grooph {
             record_start_time: None,
             record_loop_index: 0,
             accuracy: AccuracyTracker::new(),
+            accuracy_enabled: state.accuracy_enabled,
             midi_input_offset_ms: state.midi_input_offset_ms,
             flash_intensity: 0.0,
             last_primary_beat: None,

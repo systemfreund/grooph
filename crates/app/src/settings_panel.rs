@@ -1,8 +1,8 @@
 use crate::Grooph;
-use crate::midi_input_widget::{MidiInputWidgetState, midi_input_widget};
+use crate::midi_input_widget::midi_input_widget;
 use crate::{CountingBase, Mode};
 use eframe::egui;
-use eframe::egui::{Align, Direction, Layout, Widget, global_theme_preference_buttons};
+use eframe::egui::global_theme_preference_buttons;
 use grooph_audio::Waveform;
 
 impl Grooph {
@@ -179,53 +179,14 @@ impl Grooph {
                     });
 
                     egui::CollapsingHeader::new("MIDI Input").default_open(false).show(ui, |ui| {
-                        let midi_available = self.midi_input.is_some();
-                        let (connected, selected_idx) = match self.midi_input.as_ref() {
-                            Some(midi_input) => {
-                                let connected = midi_input.is_connected();
-                                let selected_idx = self
-                                    .midi_selected_port_id
-                                    .as_ref()
-                                    .and_then(|id| midi_input.find_port_index_by_id(id));
-                                (connected, selected_idx)
-                            }
-                            None => (false, None),
-                        };
-
-                        let layout = Layout::from_main_dir_and_cross_align(
-                            Direction::LeftToRight,
-                            Align::Center,
-                        )
-                        .with_cross_justify(true);
-
-                        let response = ui.with_layout(layout, |ui| {
-                            midi_input_widget(
-                                ui,
-                                "settings_midi_input",
-                                "🔄",
-                                MidiInputWidgetState {
-                                    available: midi_available,
-                                    connected,
-                                    ports: &self.midi_input_ports,
-                                    selected_port_index: selected_idx,
-                                },
-                            )
-                        });
-
-                        if response.inner.refresh {
-                            self.refresh_midi_input_ports();
-                        }
-
-                        if let Some(midi_input) = self.midi_input.as_mut() {
-                            if response.inner.disconnect {
-                                let _ = midi_input.disconnect();
-                                self.midi_selected_port_id = None;
-                            } else if let Some(port_index) = response.inner.connect_port
-                                && midi_input.connect(port_index).is_ok()
-                            {
-                                self.midi_selected_port_id = midi_input.port_id(port_index);
-                            }
-                        }
+                        midi_input_widget(
+                            ui,
+                            "settings_midi_input",
+                            "🔄",
+                            &mut self.midi_input,
+                            &mut self.midi_input_ports,
+                            &mut self.midi_selected_port_id,
+                        );
                         ui.separator();
                         ui.label("Input Offset:");
                         ui.add(
@@ -244,27 +205,4 @@ impl Grooph {
         );
     }
 
-    fn refresh_midi_input_ports(&mut self) {
-        if let Some(ref mut input) = self.midi_input {
-            if let Err(e) = input.refresh_ports() {
-                log::warn!("Failed to refresh MIDI input ports: {}", e);
-            }
-            match input.available_ports() {
-                Ok(ports) => {
-                    self.midi_input_ports = ports;
-                }
-                Err(e) => {
-                    log::warn!("Failed to get MIDI input ports: {}", e);
-                }
-            }
-
-            if let Some(ref port_id) = self.midi_selected_port_id {
-                if let Some(idx) = input.find_port_index_by_id(port_id) {
-                    if !input.is_connected() {
-                        let _ = input.connect(idx);
-                    }
-                }
-            }
-        }
-    }
 }

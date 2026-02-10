@@ -159,6 +159,9 @@ impl Grooph {
         layout: &MeasureLayout,
         metrics: &GlyphMetrics,
     ) {
+        if !self.accuracy_enabled {
+            return;
+        }
         let Some(midi_input) = self.midi_input.as_ref() else {
             return;
         };

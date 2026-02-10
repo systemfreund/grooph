@@ -2,7 +2,8 @@ use crate::Grooph;
 use crate::{Mode, TransportState};
 use eframe::egui;
 use eframe::egui::scroll_area::{ScrollBarVisibility, ScrollSource};
-use eframe::egui::{Align, Button, Color32, Direction, Frame, Layout, Margin, RichText, Widget};
+use eframe::egui::{Align, Button, Direction, Frame, Layout, Margin};
+use egui::Widget;
 
 impl Grooph {
     pub(super) fn main_menu(&mut self, ctx: &egui::Context) {
@@ -59,6 +60,9 @@ impl Grooph {
                             }
                             if ui.selectable_label(self.mode == Mode::Settings, "⚙").clicked() {
                                 self.toggle_mode(Mode::Settings);
+                            }
+                            if ui.selectable_label(self.accuracy_enabled, "🎯").clicked() {
+                                self.set_accuracy_enabled(!self.accuracy_enabled);
                             }
                             if ui.selectable_label(self.mode == Mode::Help, "?").clicked() {
                                 self.toggle_mode(Mode::Help);
