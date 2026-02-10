@@ -83,7 +83,6 @@ pub struct Grooph {
     record_loop_index: u64,
     accuracy: AccuracyTracker,
     accuracy_enabled: bool,
-    midi_input_offset_ms: f32,
 
     // Visual flash on primary beats
     flash_intensity: f32, // [0,1]
@@ -116,7 +115,6 @@ struct PersistedState {
     audio_offset: f32,
     counting: CountingSettings,
     midi_selected_port_id: Option<String>,
-    midi_input_offset_ms: f32,
     accuracy_enabled: bool,
 }
 
@@ -132,7 +130,6 @@ impl Default for PersistedState {
             audio_offset: 0.0,
             counting: CountingSettings::default(),
             midi_selected_port_id: None,
-            midi_input_offset_ms: 0.0,
             accuracy_enabled: true,
         }
     }
@@ -150,7 +147,6 @@ impl PersistedState {
             audio_offset: app.audio_offset,
             counting: app.counting,
             midi_selected_port_id: app.midi_selected_port_id.clone(),
-            midi_input_offset_ms: app.midi_input_offset_ms,
             accuracy_enabled: app.accuracy_enabled,
         }
     }
@@ -250,6 +246,24 @@ impl Grooph {
             return;
         }
 
+        if self.transport_state == TransportState::Playing
+            && is_connected
+            && !self.accuracy.has_start_time()
+        {
+            let ts = self.measure.time_signature();
+            let ticks_per_beat = DEFAULT_GRID.ticks_per_beat(&ts) as f64;
+            let ticks_per_sec = (self.bpm as f64 / 60.0) * ticks_per_beat;
+            let (start_time, last_tick) = if ticks_per_sec > 0.0 {
+                (
+                    now_seconds - (self.playback_smooth_tick / ticks_per_sec),
+                    self.playback_smooth_tick,
+                )
+            } else {
+                (now_seconds, 0.0)
+            };
+            self.accuracy.on_playback_start_at(start_time, last_tick);
+        }
+
         let accuracy_active = self.accuracy.update_state(
             self.transport_state == TransportState::Playing,
             is_connected,
@@ -281,7 +295,6 @@ impl Grooph {
                             ticks_per_measure,
                             beats,
                             &beat_onsets,
-                            self.midi_input_offset_ms,
                             self.bpm,
                         );
                     }
@@ -304,8 +317,7 @@ impl Grooph {
                 ticks_per_sec,
                 ticks_per_measure,
                 beats,
-                &beat_onsets,
-                self.midi_input_offset_ms,
+                &beat_onsets
             );
         }
     }
@@ -485,20 +497,13 @@ impl Grooph {
         self.accuracy_enabled = enabled;
         if enabled {
             if self.transport_state == TransportState::Playing {
-                let accuracy_start = self.midi_input.as_ref().and_then(|input| {
-                    if input.is_connected() {
-                        Some(input.now_seconds())
-                    } else {
-                        None
-                    }
-                });
-                self.accuracy.on_playback_start(accuracy_start);
+                self.accuracy.on_playback_stop();
             } else {
                 self.clear_accuracy_for_edit();
             }
-        } else {
-            self.accuracy.on_playback_stop();
+            return;
         }
+        self.accuracy.on_playback_stop();
     }
 
     fn default_measure() -> Measure {
@@ -671,7 +676,6 @@ impl Grooph {
             record_loop_index: 0,
             accuracy: AccuracyTracker::new(),
             accuracy_enabled: state.accuracy_enabled,
-            midi_input_offset_ms: state.midi_input_offset_ms,
             flash_intensity: 0.0,
             last_primary_beat: None,
             #[cfg(target_arch = "wasm32")]

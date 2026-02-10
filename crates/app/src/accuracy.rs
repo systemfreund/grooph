@@ -43,6 +43,8 @@ pub(crate) struct AccuracyTracker {
 impl AccuracyTracker {
     pub(crate) fn new() -> Self { Self::default() }
 
+    pub(crate) fn has_start_time(&self) -> bool { self.start_time.is_some() }
+
     pub(crate) fn update_state(
         &mut self,
         playing: bool,
@@ -78,6 +80,15 @@ impl AccuracyTracker {
         }
     }
 
+    pub(crate) fn on_playback_start_at(&mut self, start_time: f64, last_tick: f64) {
+        self.stats.reset();
+        self.marks_by_onset.clear();
+        self.hits_in_loop.clear();
+        self.hits_next_loop.clear();
+        self.start_time = Some(start_time);
+        self.last_tick = Some(last_tick);
+    }
+
     pub(crate) fn on_playback_stop(&mut self) {
         self.start_time = None;
         self.marks_by_onset.clear();
@@ -105,7 +116,6 @@ impl AccuracyTracker {
         ticks_per_measure: f64,
         beats: &[Beat],
         beat_onsets: &[u32],
-        offset_ms: f32,
         bpm: u32,
     ) {
         let Some(start_time) = self.start_time else {
@@ -118,8 +128,7 @@ impl AccuracyTracker {
         {
             return;
         }
-        let offset_sec = (offset_ms as f64) / 1000.0;
-        let elapsed = timestamp - start_time + offset_sec;
+        let elapsed = timestamp - start_time;
         if elapsed < 0.0 {
             return;
         }
@@ -165,12 +174,11 @@ impl AccuracyTracker {
             self.hits_in_loop.insert(onset_tick);
         }
         info!(
-            "Accuracy hit: onset_tick={} hit_tick={:.2} delta_ms={:+.2} bpm={} offset_ms={:+.1}",
+            "Accuracy hit: onset_tick={} hit_tick={:.2} delta_ms={:+.2} bpm={}",
             onset_tick,
             hit_tick,
             delta_ms,
-            bpm,
-            offset_ms
+            bpm
         );
     }
 
@@ -180,8 +188,7 @@ impl AccuracyTracker {
         ticks_per_sec: f64,
         ticks_per_measure: f64,
         beats: &[Beat],
-        beat_onsets: &[u32],
-        offset_ms: f32,
+        beat_onsets: &[u32]
     ) {
         let Some(start_time) = self.start_time else {
             return;
@@ -189,8 +196,7 @@ impl AccuracyTracker {
         if beats.len() != beat_onsets.len() || beats.is_empty() {
             return;
         }
-        let offset_sec = (offset_ms as f64) / 1000.0;
-        let elapsed = now_seconds - start_time + offset_sec;
+        let elapsed = now_seconds - start_time;
         if elapsed < 0.0 {
             return;
         }
