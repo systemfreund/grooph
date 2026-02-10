@@ -183,11 +183,6 @@ impl Default for CountingSettings {
     }
 }
 
-#[derive(Clone, Copy)]
-struct AccuracyOnset {
-    tick: u32,
-}
-
 #[derive(Clone, Copy, Default)]
 struct AccuracyStats {
     count: u64,
@@ -276,12 +271,14 @@ impl Grooph {
         };
 
         let accuracy_active = self.update_accuracy_state(is_connected, now_seconds);
-        let (ticks_per_measure, ticks_per_sec, onsets) = if accuracy_active {
+        let (ticks_per_measure, ticks_per_sec, beat_onsets) = if accuracy_active {
             let ts = self.measure.time_signature();
             let ticks_per_measure = DEFAULT_GRID.ticks_per_measure(&ts) as f64;
             let ticks_per_beat = DEFAULT_GRID.ticks_per_beat(&ts) as f64;
             let ticks_per_sec = (self.bpm as f64 / 60.0) * ticks_per_beat;
-            (ticks_per_measure, ticks_per_sec, self.note_onsets())
+            let beats = self.measure.beats();
+            let beat_onsets = DEFAULT_GRID.compute_onset_ticks(beats);
+            (ticks_per_measure, ticks_per_sec, beat_onsets)
         } else {
             (0.0, 0.0, Vec::new())
         };
@@ -292,13 +289,13 @@ impl Grooph {
                     if accuracy_active
                         && ticks_per_sec > 0.0
                         && ticks_per_measure > 0.0
-                        && !onsets.is_empty()
+                        && !beat_onsets.is_empty()
                     {
                         self.record_accuracy_hit(
                             timestamp,
                             ticks_per_sec,
                             ticks_per_measure,
-                            &onsets,
+                            &beat_onsets,
                         );
                     }
                     debug!("MIDI NoteOn ch={} note={} vel={}", channel, note, velocity);
@@ -310,12 +307,16 @@ impl Grooph {
             }
         }
 
-        if accuracy_active && ticks_per_sec > 0.0 && ticks_per_measure > 0.0 && !onsets.is_empty() {
+        if accuracy_active
+            && ticks_per_sec > 0.0
+            && ticks_per_measure > 0.0
+            && !beat_onsets.is_empty()
+        {
             self.update_accuracy_progress(
                 now_seconds,
                 ticks_per_sec,
                 ticks_per_measure,
-                &onsets,
+                &beat_onsets,
             );
         }
     }
@@ -346,29 +347,22 @@ impl Grooph {
         self.accuracy_last_tick = None;
     }
 
-    fn note_onsets(&self) -> Vec<AccuracyOnset> {
-        let beats = self.measure.beats();
-        let onsets = DEFAULT_GRID.compute_onset_ticks(beats);
-        onsets
-            .into_iter()
-            .enumerate()
-            .filter_map(|(idx, tick)| {
-                (beats[idx].kind == BeatKind::Note).then_some(AccuracyOnset { tick })
-            })
-            .collect()
-    }
-
     fn record_accuracy_hit(
         &mut self,
         timestamp: f64,
         ticks_per_sec: f64,
         ticks_per_measure: f64,
-        onsets: &[AccuracyOnset],
+        beat_onsets: &[u32],
     ) {
         let Some(start_time) = self.accuracy_start_time else {
             return;
         };
-        if ticks_per_sec <= 0.0 || ticks_per_measure <= 0.0 || onsets.is_empty() {
+        let beats = self.measure.beats();
+        if ticks_per_sec <= 0.0
+            || ticks_per_measure <= 0.0
+            || beats.is_empty()
+            || beats.len() != beat_onsets.len()
+        {
             return;
         }
         let offset_sec = (self.midi_input_offset_ms as f64) / 1000.0;
@@ -377,9 +371,9 @@ impl Grooph {
             return;
         }
         let hit_tick = (elapsed * ticks_per_sec).rem_euclid(ticks_per_measure);
-        let mut best: Option<(u32, f64)> = None;
-        for onset in onsets {
-            let onset_tick = onset.tick as f64;
+        let mut best: Option<(usize, f64)> = None;
+        for (idx, &onset_tick_u32) in beat_onsets.iter().enumerate() {
+            let onset_tick = onset_tick_u32 as f64;
             let mut diff = hit_tick - onset_tick;
             if diff > ticks_per_measure * 0.5 {
                 diff -= ticks_per_measure;
@@ -387,10 +381,14 @@ impl Grooph {
                 diff += ticks_per_measure;
             }
             if best.map_or(true, |(_, best_diff)| diff.abs() < best_diff.abs()) {
-                best = Some((onset.tick, diff));
+                best = Some((idx, diff));
             }
         }
-        if let Some((onset_tick, diff_ticks)) = best {
+        if let Some((best_idx, diff_ticks)) = best {
+            if beats.get(best_idx).map_or(true, |b| b.kind != BeatKind::Note) {
+                return;
+            }
+            let onset_tick = beat_onsets[best_idx];
             if self.accuracy_hits_in_loop.contains(&onset_tick) {
                 return;
             }
@@ -415,11 +413,15 @@ impl Grooph {
         now_seconds: f64,
         ticks_per_sec: f64,
         ticks_per_measure: f64,
-        onsets: &[AccuracyOnset],
+        beat_onsets: &[u32],
     ) {
         let Some(start_time) = self.accuracy_start_time else {
             return;
         };
+        let beats = self.measure.beats();
+        if beats.len() != beat_onsets.len() || beats.is_empty() {
+            return;
+        }
         let offset_sec = (self.midi_input_offset_ms as f64) / 1000.0;
         let elapsed = now_seconds - start_time + offset_sec;
         if elapsed < 0.0 {
@@ -432,7 +434,8 @@ impl Grooph {
         };
 
         fn process_segment(
-            onsets: &[AccuracyOnset],
+            beats: &[Beat],
+            beat_onsets: &[u32],
             start: f64,
             end: f64,
             segment_offset: f64,
@@ -440,17 +443,21 @@ impl Grooph {
             accuracy_by_onset: &mut HashMap<u32, AccuracyMark>,
             accuracy_hits_in_loop: &mut HashSet<u32>,
         ) {
-            if onsets.is_empty() {
+            if beats.is_empty() || beat_onsets.is_empty() {
                 return;
             }
             let seg_start = segment_offset + start;
             let seg_end = segment_offset + end;
-            for (idx, onset) in onsets.iter().enumerate() {
-                let cur = onset.tick as f64;
-                let next = if idx + 1 < onsets.len() {
-                    onsets[idx + 1].tick as f64
+            for (idx, beat) in beats.iter().enumerate() {
+                if beat.kind != BeatKind::Note {
+                    continue;
+                }
+                let onset_tick = *beat_onsets.get(idx).unwrap_or(&0);
+                let cur = onset_tick as f64;
+                let next = if idx + 1 < beat_onsets.len() {
+                    beat_onsets[idx + 1] as f64
                 } else {
-                    onsets[0].tick as f64 + ticks_per_measure
+                    beat_onsets[0] as f64 + ticks_per_measure
                 };
                 let mut window_end = cur + (next - cur) * 0.5;
                 if window_end < segment_offset {
@@ -458,17 +465,18 @@ impl Grooph {
                 }
                 let in_range = window_end > seg_start && window_end <= seg_end;
                 if in_range {
-                    if !accuracy_hits_in_loop.contains(&onset.tick) {
-                        accuracy_by_onset.insert(onset.tick, AccuracyMark::Miss);
+                    if !accuracy_hits_in_loop.contains(&onset_tick) {
+                        accuracy_by_onset.insert(onset_tick, AccuracyMark::Miss);
                     }
-                    accuracy_hits_in_loop.remove(&onset.tick);
+                    accuracy_hits_in_loop.remove(&onset_tick);
                 }
             }
         }
 
         if current_tick >= last_tick {
             process_segment(
-                onsets,
+                beats,
+                beat_onsets,
                 last_tick,
                 current_tick,
                 0.0,
@@ -479,7 +487,8 @@ impl Grooph {
         } else {
             // wrapped
             process_segment(
-                onsets,
+                beats,
+                beat_onsets,
                 last_tick,
                 ticks_per_measure,
                 0.0,
@@ -489,7 +498,8 @@ impl Grooph {
             );
             self.accuracy_hits_in_loop.clear();
             process_segment(
-                onsets,
+                beats,
+                beat_onsets,
                 0.0,
                 current_tick,
                 ticks_per_measure,
