@@ -1,4 +1,5 @@
 use crate::Grooph;
+use crate::midi_input_widget::{MidiInputWidgetState, midi_input_widget};
 use crate::{CountingBase, Mode};
 use eframe::egui;
 use eframe::egui::{Align, Direction, Layout, Widget, global_theme_preference_buttons};
@@ -178,67 +179,53 @@ impl Grooph {
                     });
 
                     egui::CollapsingHeader::new("MIDI Input").default_open(false).show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            if ui.button("🔄").on_hover_text("Refresh MIDI input ports").clicked()
-                            {
-                                self.refresh_midi_input_ports();
+                        let midi_available = self.midi_input.is_some();
+                        let (connected, selected_idx) = match self.midi_input.as_ref() {
+                            Some(midi_input) => {
+                                let connected = midi_input.is_connected();
+                                let selected_idx = self
+                                    .midi_selected_port_id
+                                    .as_ref()
+                                    .and_then(|id| midi_input.find_port_index_by_id(id));
+                                (connected, selected_idx)
                             }
+                            None => (false, None),
+                        };
 
-                            let Some(midi_input) = self.midi_input.as_mut() else {
-                                ui.label("MIDI input unavailable.");
-                                return;
-                            };
+                        let layout = Layout::from_main_dir_and_cross_align(
+                            Direction::LeftToRight,
+                            Align::Center,
+                        )
+                        .with_cross_justify(true);
 
-                            let connected = midi_input.is_connected();
-                            let selected_idx = self
-                                .midi_selected_port_id
-                                .as_ref()
-                                .and_then(|id| midi_input.find_port_index_by_id(id));
-                            let selected_text = if connected {
-                                selected_idx
-                                    .and_then(|idx| self.midi_input_ports.get(idx))
-                                    .cloned()
-                                    .unwrap_or_else(|| "Connected".to_string())
-                            } else {
-                                "Disconnected".to_string()
-                            };
+                        let response = ui.with_layout(layout, |ui| {
+                            midi_input_widget(
+                                ui,
+                                "settings_midi_input",
+                                "🔄",
+                                MidiInputWidgetState {
+                                    available: midi_available,
+                                    connected,
+                                    ports: &self.midi_input_ports,
+                                    selected_port_index: selected_idx,
+                                },
+                            )
+                        });
 
-                            let mut should_disconnect = false;
-                            let mut connect_port = None;
+                        if response.inner.refresh {
+                            self.refresh_midi_input_ports();
+                        }
 
-                            egui::ComboBox::from_id_salt("midi_input_port")
-                                .selected_text(selected_text)
-                                .show_ui(ui, |ui| {
-                                    if connected {
-                                        if ui.selectable_label(false, "Disconnect").clicked() {
-                                            should_disconnect = true;
-                                        }
-                                    } else {
-                                        let _ = ui.selectable_label(false, "Disconnected");
-                                    }
-
-                                    for (idx, name) in self.midi_input_ports.iter().enumerate() {
-                                        if ui
-                                            .selectable_label(
-                                                selected_idx == Some(idx),
-                                                name,
-                                            )
-                                            .clicked()
-                                        {
-                                            connect_port = Some(idx);
-                                        }
-                                    }
-                                });
-
-                            if should_disconnect {
+                        if let Some(midi_input) = self.midi_input.as_mut() {
+                            if response.inner.disconnect {
                                 let _ = midi_input.disconnect();
                                 self.midi_selected_port_id = None;
-                            } else if let Some(port_index) = connect_port
+                            } else if let Some(port_index) = response.inner.connect_port
                                 && midi_input.connect(port_index).is_ok()
                             {
                                 self.midi_selected_port_id = midi_input.port_id(port_index);
                             }
-                        });
+                        }
                         ui.separator();
                         ui.label("Input Offset:");
                         ui.add(

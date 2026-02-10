@@ -1,38 +1,39 @@
+mod accuracy;
 mod help;
 mod keyboard_input;
 mod main_menu;
 mod measure_panel;
+mod midi_input_widget;
 mod mixer_panel;
 mod settings_panel;
 mod style;
 mod time_signature_dialog;
 mod tool_palette;
-mod accuracy;
 pub mod tools;
 #[cfg(target_arch = "wasm32")]
 mod web;
 
-use std::cell::RefCell;
 use grooph_measure::duration::{Duration, NoteValue, TupletSpec, q};
-use grooph_measure::{BeatIdx, Measure, TimeSignature};
 use grooph_measure::grid::DEFAULT_GRID;
+use grooph_measure::{BeatIdx, Measure, TimeSignature};
+use std::cell::RefCell;
 
-use grooph_audio::{AudioSettings, PlayerState};
-use grooph_midi::{MidiInput, MidiInputEvent};
-use grooph_measure::duration::NoteValue::*;
-use grooph_measure::editing::Modification;
-use grooph_measure::{Beat, BeatKind};
-use grooph_measure::counting::{
-    ColorId, ColorMode, ColorPattern, CountConfig, CountLayer, CountScope, LabelPattern, LabelToken,
-    Subdiv,
-};
-use crate::tools::ToolKind;
 use crate::accuracy::AccuracyTracker;
+use crate::tools::ToolKind;
 use crate::tools::{BeatTemplate, Modifier, all_tools};
 use eframe::egui::{Context, TextStyle, Widget};
 use eframe::epaint::text::{FontInsert, InsertFontFamily};
 use eframe::epaint::{FontFamily, FontId};
 use eframe::{App, CreationContext, egui};
+use grooph_audio::{AudioSettings, PlayerState};
+use grooph_measure::counting::{
+    ColorId, ColorMode, ColorPattern, CountConfig, CountLayer, CountScope, LabelPattern,
+    LabelToken, Subdiv,
+};
+use grooph_measure::duration::NoteValue::*;
+use grooph_measure::editing::Modification;
+use grooph_measure::{Beat, BeatKind};
+use grooph_midi::{MidiInput, MidiInputEvent};
 use log::{debug, info, warn};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -52,7 +53,7 @@ enum Mode {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum TransportState {
     Stopped,
-    Playing
+    Playing,
 }
 
 const APP_STATE_KEY: &str = "grooph_state";
@@ -84,7 +85,7 @@ pub struct Grooph {
     midi_input_offset_ms: f32,
 
     // Visual flash on primary beats
-    flash_intensity: f32,        // [0,1]
+    flash_intensity: f32, // [0,1]
     last_primary_beat: Option<u32>,
 
     #[cfg(target_arch = "wasm32")]
@@ -432,13 +433,10 @@ impl Grooph {
         self.transport_state = TransportState::Playing;
         self.record_start_time = None;
         self.record_loop_index = 0;
-        let accuracy_start = self.midi_input.as_ref().and_then(|input| {
-            if input.is_connected() {
-                Some(input.now_seconds())
-            } else {
-                None
-            }
-        });
+        let accuracy_start = self
+            .midi_input
+            .as_ref()
+            .and_then(|input| if input.is_connected() { Some(input.now_seconds()) } else { None });
         self.accuracy.on_playback_start(accuracy_start);
         self.reset_playback_state();
 
@@ -498,10 +496,9 @@ impl Grooph {
         let mut base_layer = match self.counting.base {
             CountingBase::Off => None,
             CountingBase::Primary => {
-                let mut layer = CountLayer::new(next_id, CountScope::PrimaryGroup, Subdiv::Fixed(1));
-                layer.labels = Some(LabelPattern {
-                    slots: vec![vec![LabelToken::GroupNum]],
-                });
+                let mut layer =
+                    CountLayer::new(next_id, CountScope::PrimaryGroup, Subdiv::Fixed(1));
+                layer.labels = Some(LabelPattern { slots: vec![vec![LabelToken::GroupNum]] });
                 Some(layer)
             }
             CountingBase::Ands => {
@@ -515,7 +512,8 @@ impl Grooph {
                 Some(layer)
             }
             CountingBase::Triplet => {
-                let mut layer = CountLayer::new(next_id, CountScope::PrimaryGroup, Subdiv::Fixed(3));
+                let mut layer =
+                    CountLayer::new(next_id, CountScope::PrimaryGroup, Subdiv::Fixed(3));
                 layer.labels = Some(LabelPattern::triplet());
                 Some(layer)
             }
@@ -539,11 +537,7 @@ impl Grooph {
             layers.push(layer);
         }
 
-        if layers.is_empty() {
-            None
-        } else {
-            Some(CountConfig::new(layers))
-        }
+        if layers.is_empty() { None } else { Some(CountConfig::new(layers)) }
     }
 
     pub fn new(cc: &CreationContext) -> Self {
@@ -614,12 +608,11 @@ impl Grooph {
 
         let midi_selected_port_id = state.midi_selected_port_id.clone();
 
-        if let (Some(ref mut input), Some(ref port_id)) =
+        if let (Some(input), Some(port_id)) =
             (midi_input.as_mut(), midi_selected_port_id.as_ref())
+            && let Some(idx) = input.find_port_index_by_id(port_id)
         {
-            if let Some(idx) = input.find_port_index_by_id(port_id) {
-                let _ = input.connect(idx);
-            }
+            let _ = input.connect(idx);
         }
 
         let this = Self {
