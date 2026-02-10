@@ -79,8 +79,6 @@ pub struct Grooph {
     // Playback smoothing state
     playback_smooth_tick: f64,
     playback_last_update: Option<f64>,
-    record_start_time: Option<f64>,
-    record_loop_index: u64,
     accuracy: AccuracyTracker,
     accuracy_enabled: bool,
 
@@ -451,8 +449,6 @@ impl Grooph {
             return;
         }
         self.transport_state = TransportState::Playing;
-        self.record_start_time = None;
-        self.record_loop_index = 0;
         let accuracy_start = self
             .midi_input
             .as_ref()
@@ -473,8 +469,6 @@ impl Grooph {
             return;
         }
         self.transport_state = TransportState::Stopped;
-        self.record_start_time = None;
-        self.record_loop_index = 0;
         self.accuracy.on_playback_stop();
         self.reset_playback_state();
 
@@ -697,8 +691,6 @@ impl Grooph {
             audio_settings: state.audio_settings,
             playback_smooth_tick: 0.0,
             playback_last_update: None,
-            record_start_time: None,
-            record_loop_index: 0,
             accuracy: AccuracyTracker::new(),
             accuracy_enabled: state.accuracy_enabled,
             flash_intensity: 0.0,
