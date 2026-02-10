@@ -89,6 +89,11 @@ impl AccuracyTracker {
         self.last_tick = Some(last_tick);
     }
 
+    pub(crate) fn realign_start_time(&mut self, start_time: f64, last_tick: f64) {
+        self.start_time = Some(start_time);
+        self.last_tick = Some(last_tick);
+    }
+
     pub(crate) fn on_playback_stop(&mut self) {
         self.start_time = None;
         self.marks_by_onset.clear();

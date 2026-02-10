@@ -44,6 +44,9 @@ impl Grooph {
                             if bpm_editor_resp.clicked() {
                                 ui.memory_mut(|mem| mem.surrender_focus(bpm_editor_resp.id))
                             }
+                            if bpm_editor_resp.changed() {
+                                self.handle_bpm_change();
+                            }
 
                             ui.separator();
                             if ui.selectable_label(self.mode == Mode::Edit, "🖊").clicked() {

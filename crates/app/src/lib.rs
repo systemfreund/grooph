@@ -317,7 +317,7 @@ impl Grooph {
                 ticks_per_sec,
                 ticks_per_measure,
                 beats,
-                &beat_onsets
+                &beat_onsets,
             );
         }
     }
@@ -506,6 +506,32 @@ impl Grooph {
         self.accuracy.on_playback_stop();
     }
 
+    fn handle_bpm_change(&mut self) {
+        if !self.accuracy_enabled {
+            return;
+        }
+        if self.transport_state != TransportState::Playing {
+            return;
+        }
+        let Some(input) = self.midi_input.as_ref() else {
+            return;
+        };
+        if !input.is_connected() {
+            return;
+        }
+
+        let ts = self.measure.time_signature();
+        let ticks_per_beat = DEFAULT_GRID.ticks_per_beat(&ts) as f64;
+        let ticks_per_sec = (self.bpm as f64 / 60.0) * ticks_per_beat;
+        if ticks_per_sec <= 0.0 {
+            return;
+        }
+
+        let now_seconds = input.now_seconds();
+        let start_time = now_seconds - (self.playback_smooth_tick / ticks_per_sec);
+        self.accuracy.realign_start_time(start_time, self.playback_smooth_tick);
+    }
+
     fn default_measure() -> Measure {
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
         m.set_beat(0, Beat::note(q())).unwrap();
@@ -648,8 +674,7 @@ impl Grooph {
 
         let midi_selected_port_id = state.midi_selected_port_id.clone();
 
-        if let (Some(input), Some(port_id)) =
-            (midi_input.as_mut(), midi_selected_port_id.as_ref())
+        if let (Some(input), Some(port_id)) = (midi_input.as_mut(), midi_selected_port_id.as_ref())
             && let Some(idx) = input.find_port_index_by_id(port_id)
         {
             let _ = input.connect(idx);
