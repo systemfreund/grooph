@@ -7,6 +7,7 @@ mod settings_panel;
 mod style;
 mod time_signature_dialog;
 mod tool_palette;
+mod accuracy;
 pub mod tools;
 #[cfg(target_arch = "wasm32")]
 mod web;
@@ -26,6 +27,7 @@ use grooph_measure::counting::{
     Subdiv,
 };
 use crate::tools::ToolKind;
+use crate::accuracy::AccuracyTracker;
 use crate::tools::{BeatTemplate, Modifier, all_tools};
 use eframe::egui::{Context, TextStyle, Widget};
 use eframe::epaint::text::{FontInsert, InsertFontFamily};
@@ -33,7 +35,7 @@ use eframe::epaint::{FontFamily, FontId};
 use eframe::{App, CreationContext, egui};
 use log::{debug, info, warn};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -78,12 +80,7 @@ pub struct Grooph {
     playback_last_update: Option<f64>,
     record_start_time: Option<f64>,
     record_loop_index: u64,
-    accuracy_start_time: Option<f64>,
-    accuracy_stats: AccuracyStats,
-    accuracy_by_onset: HashMap<u32, AccuracyMark>,
-    accuracy_hits_in_loop: HashSet<u32>,
-    accuracy_hits_next_loop: HashSet<u32>,
-    accuracy_last_tick: Option<f64>,
+    accuracy: AccuracyTracker,
     midi_input_offset_ms: f32,
 
     // Visual flash on primary beats
@@ -184,33 +181,6 @@ impl Default for CountingSettings {
     }
 }
 
-#[derive(Clone, Copy, Default)]
-struct AccuracyStats {
-    count: u64,
-    sum_ms: f64,
-    sum_abs_ms: f64,
-    sum_sq_ms: f64,
-    last_delta_ms: Option<f64>,
-}
-
-#[derive(Clone, Copy)]
-enum AccuracyMark {
-    Hit(f64),
-    Miss,
-}
-
-impl AccuracyStats {
-    fn reset(&mut self) { *self = Self::default(); }
-
-    fn push(&mut self, delta_ms: f64) {
-        self.count = self.count.saturating_add(1);
-        self.sum_ms += delta_ms;
-        self.sum_abs_ms += delta_ms.abs();
-        self.sum_sq_ms += delta_ms * delta_ms;
-        self.last_delta_ms = Some(delta_ms);
-    }
-}
-
 fn add_font(ctx: &Context) {
     ctx.add_font(FontInsert::new(
         "Bravura",
@@ -271,13 +241,17 @@ impl Grooph {
             None => return,
         };
 
-        let accuracy_active = self.update_accuracy_state(is_connected, now_seconds);
+        let accuracy_active = self.accuracy.update_state(
+            self.transport_state == TransportState::Playing,
+            is_connected,
+            now_seconds,
+        );
+        let beats = self.measure.beats();
         let (ticks_per_measure, ticks_per_sec, beat_onsets) = if accuracy_active {
             let ts = self.measure.time_signature();
             let ticks_per_measure = DEFAULT_GRID.ticks_per_measure(&ts) as f64;
             let ticks_per_beat = DEFAULT_GRID.ticks_per_beat(&ts) as f64;
             let ticks_per_sec = (self.bpm as f64 / 60.0) * ticks_per_beat;
-            let beats = self.measure.beats();
             let beat_onsets = DEFAULT_GRID.compute_onset_ticks(beats);
             (ticks_per_measure, ticks_per_sec, beat_onsets)
         } else {
@@ -292,11 +266,14 @@ impl Grooph {
                         && ticks_per_measure > 0.0
                         && !beat_onsets.is_empty()
                     {
-                        self.record_accuracy_hit(
+                        self.accuracy.record_hit(
                             timestamp,
                             ticks_per_sec,
                             ticks_per_measure,
+                            beats,
                             &beat_onsets,
+                            self.midi_input_offset_ms,
+                            self.bpm,
                         );
                     }
                     debug!("MIDI NoteOn ch={} note={} vel={}", channel, note, velocity);
@@ -313,219 +290,18 @@ impl Grooph {
             && ticks_per_measure > 0.0
             && !beat_onsets.is_empty()
         {
-            self.update_accuracy_progress(
+            self.accuracy.update_progress(
                 now_seconds,
                 ticks_per_sec,
                 ticks_per_measure,
+                beats,
                 &beat_onsets,
+                self.midi_input_offset_ms,
             );
         }
     }
 
-    fn update_accuracy_state(&mut self, is_connected: bool, now_seconds: f64) -> bool {
-        if self.transport_state == TransportState::Playing && is_connected {
-            if self.accuracy_start_time.is_none() {
-                self.accuracy_start_time = Some(now_seconds);
-                self.accuracy_stats.reset();
-                self.accuracy_by_onset.clear();
-                self.accuracy_hits_in_loop.clear();
-                self.accuracy_hits_next_loop.clear();
-                self.accuracy_last_tick = Some(0.0);
-            }
-            true
-        } else {
-            self.accuracy_start_time = None;
-            self.accuracy_by_onset.clear();
-            self.accuracy_hits_in_loop.clear();
-            self.accuracy_hits_next_loop.clear();
-            self.accuracy_last_tick = None;
-            false
-        }
-    }
-
-    fn clear_accuracy_for_edit(&mut self) {
-        self.accuracy_stats.reset();
-        self.accuracy_by_onset.clear();
-        self.accuracy_hits_in_loop.clear();
-        self.accuracy_hits_next_loop.clear();
-        self.accuracy_last_tick = None;
-    }
-
-    fn record_accuracy_hit(
-        &mut self,
-        timestamp: f64,
-        ticks_per_sec: f64,
-        ticks_per_measure: f64,
-        beat_onsets: &[u32],
-    ) {
-        let Some(start_time) = self.accuracy_start_time else {
-            return;
-        };
-        let beats = self.measure.beats();
-        if ticks_per_sec <= 0.0
-            || ticks_per_measure <= 0.0
-            || beats.is_empty()
-            || beats.len() != beat_onsets.len()
-        {
-            return;
-        }
-        let offset_sec = (self.midi_input_offset_ms as f64) / 1000.0;
-        let elapsed = timestamp - start_time + offset_sec;
-        if elapsed < 0.0 {
-            return;
-        }
-        let hit_tick = (elapsed * ticks_per_sec).rem_euclid(ticks_per_measure);
-        let mut best: Option<(usize, f64, f64)> = None;
-        for (idx, &onset_tick_u32) in beat_onsets.iter().enumerate() {
-            let onset_tick = onset_tick_u32 as f64;
-            let raw_diff = hit_tick - onset_tick;
-            let mut diff = raw_diff;
-            if diff > ticks_per_measure * 0.5 {
-                diff -= ticks_per_measure;
-            } else if diff < -ticks_per_measure * 0.5 {
-                diff += ticks_per_measure;
-            }
-            if best.map_or(true, |(_, best_diff, _)| diff.abs() < best_diff.abs()) {
-                best = Some((idx, diff, raw_diff));
-            }
-        }
-        if let Some((best_idx, diff_ticks, raw_diff)) = best {
-            if beats.get(best_idx).map_or(true, |b| b.kind != BeatKind::Note) {
-                return;
-            }
-            let onset_tick = beat_onsets[best_idx];
-            let wrap_next = raw_diff > ticks_per_measure * 0.5;
-            let wrap_prev = raw_diff < -ticks_per_measure * 0.5;
-            if wrap_next {
-                if self.accuracy_hits_next_loop.contains(&onset_tick) {
-                    return;
-                }
-            } else if !wrap_prev && self.accuracy_hits_in_loop.contains(&onset_tick) {
-                return;
-            }
-            let delta_ms = (diff_ticks / ticks_per_sec) * 1000.0;
-            self.accuracy_stats.push(delta_ms);
-            self.accuracy_by_onset
-                .insert(onset_tick, AccuracyMark::Hit(diff_ticks));
-            if wrap_next {
-                self.accuracy_hits_next_loop.insert(onset_tick);
-            } else if !wrap_prev {
-                self.accuracy_hits_in_loop.insert(onset_tick);
-            }
-            info!(
-                "Accuracy hit: onset_tick={} hit_tick={:.2} delta_ms={:+.2} bpm={} offset_ms={:+.1}",
-                onset_tick,
-                hit_tick,
-                delta_ms,
-                self.bpm,
-                self.midi_input_offset_ms
-            );
-        }
-    }
-
-    fn update_accuracy_progress(
-        &mut self,
-        now_seconds: f64,
-        ticks_per_sec: f64,
-        ticks_per_measure: f64,
-        beat_onsets: &[u32],
-    ) {
-        let Some(start_time) = self.accuracy_start_time else {
-            return;
-        };
-        let beats = self.measure.beats();
-        if beats.len() != beat_onsets.len() || beats.is_empty() {
-            return;
-        }
-        let offset_sec = (self.midi_input_offset_ms as f64) / 1000.0;
-        let elapsed = now_seconds - start_time + offset_sec;
-        if elapsed < 0.0 {
-            return;
-        }
-        let current_tick = (elapsed * ticks_per_sec).rem_euclid(ticks_per_measure);
-        let Some(last_tick) = self.accuracy_last_tick else {
-            self.accuracy_last_tick = Some(current_tick);
-            return;
-        };
-
-        fn process_segment(
-            beats: &[Beat],
-            beat_onsets: &[u32],
-            start: f64,
-            end: f64,
-            segment_offset: f64,
-            ticks_per_measure: f64,
-            accuracy_by_onset: &mut HashMap<u32, AccuracyMark>,
-            accuracy_hits_in_loop: &mut HashSet<u32>,
-        ) {
-            if beats.is_empty() || beat_onsets.is_empty() {
-                return;
-            }
-            let seg_start = segment_offset + start;
-            let seg_end = segment_offset + end;
-            for (idx, beat) in beats.iter().enumerate() {
-                if beat.kind != BeatKind::Note {
-                    continue;
-                }
-                let onset_tick = *beat_onsets.get(idx).unwrap_or(&0);
-                let cur = onset_tick as f64;
-                let next = if idx + 1 < beat_onsets.len() {
-                    beat_onsets[idx + 1] as f64
-                } else {
-                    beat_onsets[0] as f64 + ticks_per_measure
-                };
-                let mut window_end = cur + (next - cur) * 0.5;
-                if window_end < segment_offset {
-                    window_end += ticks_per_measure;
-                }
-                let in_range = window_end > seg_start && window_end <= seg_end;
-                if in_range {
-                    if !accuracy_hits_in_loop.contains(&onset_tick) {
-                        accuracy_by_onset.insert(onset_tick, AccuracyMark::Miss);
-                    }
-                    accuracy_hits_in_loop.remove(&onset_tick);
-                }
-            }
-        }
-
-        if current_tick >= last_tick {
-            process_segment(
-                beats,
-                beat_onsets,
-                last_tick,
-                current_tick,
-                0.0,
-                ticks_per_measure,
-                &mut self.accuracy_by_onset,
-                &mut self.accuracy_hits_in_loop,
-            );
-        } else {
-            // wrapped
-            process_segment(
-                beats,
-                beat_onsets,
-                last_tick,
-                ticks_per_measure,
-                0.0,
-                ticks_per_measure,
-                &mut self.accuracy_by_onset,
-                &mut self.accuracy_hits_in_loop,
-            );
-            self.accuracy_hits_in_loop = std::mem::take(&mut self.accuracy_hits_next_loop);
-            process_segment(
-                beats,
-                beat_onsets,
-                0.0,
-                current_tick,
-                ticks_per_measure,
-                ticks_per_measure,
-                &mut self.accuracy_by_onset,
-                &mut self.accuracy_hits_in_loop,
-            );
-        }
-
-        self.accuracy_last_tick = Some(current_tick);
-    }
+    fn clear_accuracy_for_edit(&mut self) { self.accuracy.clear_for_edit(); }
 
     fn push_undo(&mut self) { self.undo_stack.push((self.measure.clone(), self.cursor_idx)); }
 
@@ -656,21 +432,14 @@ impl Grooph {
         self.transport_state = TransportState::Playing;
         self.record_start_time = None;
         self.record_loop_index = 0;
-        self.accuracy_stats.reset();
-        self.accuracy_by_onset.clear();
-        self.accuracy_hits_in_loop.clear();
-        self.accuracy_hits_next_loop.clear();
-        self.accuracy_last_tick = None;
-        self.accuracy_start_time = self.midi_input.as_ref().and_then(|input| {
+        let accuracy_start = self.midi_input.as_ref().and_then(|input| {
             if input.is_connected() {
                 Some(input.now_seconds())
             } else {
                 None
             }
         });
-        if self.accuracy_start_time.is_some() {
-            self.accuracy_last_tick = Some(0.0);
-        }
+        self.accuracy.on_playback_start(accuracy_start);
         self.reset_playback_state();
 
         #[cfg(target_arch = "wasm32")]
@@ -684,11 +453,7 @@ impl Grooph {
         self.transport_state = TransportState::Stopped;
         self.record_start_time = None;
         self.record_loop_index = 0;
-        self.accuracy_start_time = None;
-        self.accuracy_by_onset.clear();
-        self.accuracy_hits_in_loop.clear();
-        self.accuracy_hits_next_loop.clear();
-        self.accuracy_last_tick = None;
+        self.accuracy.on_playback_stop();
         self.reset_playback_state();
 
         #[cfg(target_arch = "wasm32")]
@@ -876,12 +641,7 @@ impl Grooph {
             playback_last_update: None,
             record_start_time: None,
             record_loop_index: 0,
-            accuracy_start_time: None,
-            accuracy_stats: AccuracyStats::default(),
-            accuracy_by_onset: HashMap::new(),
-            accuracy_hits_in_loop: HashSet::new(),
-            accuracy_hits_next_loop: HashSet::new(),
-            accuracy_last_tick: None,
+            accuracy: AccuracyTracker::new(),
             midi_input_offset_ms: state.midi_input_offset_ms,
             flash_intensity: 0.0,
             last_primary_beat: None,

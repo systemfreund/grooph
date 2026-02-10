@@ -1,9 +1,9 @@
 use crate::Grooph;
+use crate::accuracy::{AccuracyMark, AccuracyTracker};
 use crate::tools::{Modifier, ToolKind, all_tools};
 use crate::{Mode, TransportState};
 use grooph_layout::pixel_layout::{LayoutOpts, MeasureLayout, compute_em, GlyphMetrics};
 use grooph_measure::grid::DEFAULT_GRID;
-use grooph_layout::glyphs;
 use grooph_render::measure::draw_measure;
 use eframe::egui;
 use eframe::egui::{Context, FontId, Frame, Rect, Response, Stroke};
@@ -192,42 +192,17 @@ impl Grooph {
             let Some(onset_tick) = onsets.get(idx) else {
                 continue;
             };
-            let Some(mark) = self.accuracy_by_onset.get(onset_tick).copied() else {
+            let Some(mark) = self.accuracy.mark_for_onset(*onset_tick) else {
                 continue;
             };
             match mark {
-                crate::AccuracyMark::Hit(mut diff_ticks) => {
-                    if beats.len() == 1 {
-                        let half = total_ticks * 0.5;
-                        if diff_ticks < -half {
-                            diff_ticks = -half;
-                        } else if diff_ticks > half {
-                            diff_ticks = half;
-                        }
-                    } else {
-                        let cur_tick = *onset_tick as f64;
-                        let prev_idx = (idx + beats.len() - 1) % beats.len();
-                        let next_idx = (idx + 1) % beats.len();
-                        let prev_tick = onsets[prev_idx] as f64;
-                        let next_tick = onsets[next_idx] as f64;
-                        let dist_prev = if cur_tick >= prev_tick {
-                            cur_tick - prev_tick
-                        } else {
-                            cur_tick + total_ticks - prev_tick
-                        };
-                        let dist_next = if next_tick >= cur_tick {
-                            next_tick - cur_tick
-                        } else {
-                            next_tick + total_ticks - cur_tick
-                        };
-                        let left = -dist_prev * 0.5;
-                        let right = dist_next * 0.5;
-                        if diff_ticks < left {
-                            diff_ticks = left;
-                        } else if diff_ticks > right {
-                            diff_ticks = right;
-                        }
-                    }
+                AccuracyMark::Hit(diff_ticks) => {
+                    let diff_ticks = AccuracyTracker::clamp_diff_to_beat_window(
+                        diff_ticks,
+                        idx,
+                        &onsets,
+                        total_ticks,
+                    );
                     let Some(px_per_tick) = self.local_pixels_per_tick(&onsets, layout, idx) else {
                         continue;
                     };
@@ -244,7 +219,7 @@ impl Grooph {
                     ui.painter()
                         .line_segment([start, end], Stroke::new(2.0, egui::Color32::RED));
                 }
-                crate::AccuracyMark::Miss => {
+                AccuracyMark::Miss => {
                     let mid_y = y + h * 0.5;
                     let half = h * 0.25;
                     let left = note_layout.center.x - half;
