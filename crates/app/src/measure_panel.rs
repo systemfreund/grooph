@@ -168,7 +168,26 @@ impl Grooph {
         if self.transport_state != TransportState::Playing {
             return;
         }
-        let onsets = DEFAULT_GRID.compute_onset_ticks(self.measure.beats());
+        let beats = self.measure.beats();
+        if beats.is_empty() {
+            return;
+        }
+        let onsets = DEFAULT_GRID.compute_onset_ticks(beats);
+        let total_ticks = DEFAULT_GRID.ticks_per_measure(&self.measure.time_signature()) as f64;
+        if total_ticks <= 0.0 {
+            return;
+        }
+        let mut note_indices = Vec::new();
+        let mut note_pos_by_idx: Vec<Option<usize>> = vec![None; beats.len()];
+        for (idx, beat) in beats.iter().enumerate() {
+            if beat.kind == grooph_measure::BeatKind::Note {
+                note_pos_by_idx[idx] = Some(note_indices.len());
+                note_indices.push(idx);
+            }
+        }
+        if note_indices.is_empty() {
+            return;
+        }
         for (idx, note_layout) in layout.notes.iter().enumerate() {
             if note_layout.kind != grooph_measure::BeatKind::Note {
                 continue;
@@ -188,7 +207,42 @@ impl Grooph {
                 continue;
             };
             match mark {
-                crate::AccuracyMark::Hit(diff_ticks) => {
+                crate::AccuracyMark::Hit(mut diff_ticks) => {
+                    let Some(note_pos) = note_pos_by_idx.get(idx).copied().flatten() else {
+                        continue;
+                    };
+                    if note_indices.len() == 1 {
+                        let half = total_ticks * 0.5;
+                        if diff_ticks < -half {
+                            diff_ticks = -half;
+                        } else if diff_ticks > half {
+                            diff_ticks = half;
+                        }
+                    } else {
+                        let cur_tick = *onset_tick as f64;
+                        let prev_idx =
+                            note_indices[(note_pos + note_indices.len() - 1) % note_indices.len()];
+                        let next_idx = note_indices[(note_pos + 1) % note_indices.len()];
+                        let prev_tick = onsets[prev_idx] as f64;
+                        let next_tick = onsets[next_idx] as f64;
+                        let dist_prev = if cur_tick >= prev_tick {
+                            cur_tick - prev_tick
+                        } else {
+                            cur_tick + total_ticks - prev_tick
+                        };
+                        let dist_next = if next_tick >= cur_tick {
+                            next_tick - cur_tick
+                        } else {
+                            next_tick + total_ticks - cur_tick
+                        };
+                        let left = -dist_prev * 0.5;
+                        let right = dist_next * 0.5;
+                        if diff_ticks < left {
+                            diff_ticks = left;
+                        } else if diff_ticks > right {
+                            diff_ticks = right;
+                        }
+                    }
                     let Some(px_per_tick) = self.local_pixels_per_tick(&onsets, layout, idx) else {
                         continue;
                     };

@@ -435,17 +435,28 @@ impl Grooph {
             onsets: &[AccuracyOnset],
             start: f64,
             end: f64,
+            segment_offset: f64,
             ticks_per_measure: f64,
             accuracy_by_onset: &mut HashMap<u32, AccuracyMark>,
             accuracy_hits_in_loop: &mut HashSet<u32>,
         ) {
+            if onsets.is_empty() {
+                return;
+            }
+            let seg_start = segment_offset + start;
+            let seg_end = segment_offset + end;
             for (idx, onset) in onsets.iter().enumerate() {
-                let window_end = if idx + 1 < onsets.len() {
+                let cur = onset.tick as f64;
+                let next = if idx + 1 < onsets.len() {
                     onsets[idx + 1].tick as f64
                 } else {
-                    ticks_per_measure
+                    onsets[0].tick as f64 + ticks_per_measure
                 };
-                let in_range = window_end > start && window_end <= end;
+                let mut window_end = cur + (next - cur) * 0.5;
+                if window_end < segment_offset {
+                    window_end += ticks_per_measure;
+                }
+                let in_range = window_end > seg_start && window_end <= seg_end;
                 if in_range {
                     if !accuracy_hits_in_loop.contains(&onset.tick) {
                         accuracy_by_onset.insert(onset.tick, AccuracyMark::Miss);
@@ -460,6 +471,7 @@ impl Grooph {
                 onsets,
                 last_tick,
                 current_tick,
+                0.0,
                 ticks_per_measure,
                 &mut self.accuracy_by_onset,
                 &mut self.accuracy_hits_in_loop,
@@ -470,6 +482,7 @@ impl Grooph {
                 onsets,
                 last_tick,
                 ticks_per_measure,
+                0.0,
                 ticks_per_measure,
                 &mut self.accuracy_by_onset,
                 &mut self.accuracy_hits_in_loop,
@@ -479,6 +492,7 @@ impl Grooph {
                 onsets,
                 0.0,
                 current_tick,
+                ticks_per_measure,
                 ticks_per_measure,
                 &mut self.accuracy_by_onset,
                 &mut self.accuracy_hits_in_loop,
