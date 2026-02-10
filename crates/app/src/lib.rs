@@ -80,7 +80,7 @@ pub struct Grooph {
     record_loop_index: u64,
     accuracy_start_time: Option<f64>,
     accuracy_stats: AccuracyStats,
-    accuracy_by_onset: HashMap<u32, f64>,
+    accuracy_by_onset: HashMap<u32, AccuracyMark>,
     accuracy_hits_in_loop: HashSet<u32>,
     accuracy_last_tick: Option<f64>,
     midi_input_offset_ms: f32,
@@ -195,6 +195,12 @@ struct AccuracyStats {
     sum_abs_ms: f64,
     sum_sq_ms: f64,
     last_delta_ms: Option<f64>,
+}
+
+#[derive(Clone, Copy)]
+enum AccuracyMark {
+    Hit(f64),
+    Miss,
 }
 
 impl AccuracyStats {
@@ -321,7 +327,7 @@ impl Grooph {
                 self.accuracy_stats.reset();
                 self.accuracy_by_onset.clear();
                 self.accuracy_hits_in_loop.clear();
-                self.accuracy_last_tick = None;
+                self.accuracy_last_tick = Some(0.0);
             }
             true
         } else {
@@ -385,9 +391,13 @@ impl Grooph {
             }
         }
         if let Some((onset_tick, diff_ticks)) = best {
+            if self.accuracy_hits_in_loop.contains(&onset_tick) {
+                return;
+            }
             let delta_ms = (diff_ticks / ticks_per_sec) * 1000.0;
             self.accuracy_stats.push(delta_ms);
-            self.accuracy_by_onset.insert(onset_tick, diff_ticks);
+            self.accuracy_by_onset
+                .insert(onset_tick, AccuracyMark::Hit(diff_ticks));
             self.accuracy_hits_in_loop.insert(onset_tick);
             info!(
                 "Accuracy hit: onset_tick={} hit_tick={:.2} delta_ms={:+.2} bpm={} offset_ms={:+.1}",
@@ -425,19 +435,20 @@ impl Grooph {
             onsets: &[AccuracyOnset],
             start: f64,
             end: f64,
-            accuracy_by_onset: &mut HashMap<u32, f64>,
+            ticks_per_measure: f64,
+            accuracy_by_onset: &mut HashMap<u32, AccuracyMark>,
             accuracy_hits_in_loop: &mut HashSet<u32>,
         ) {
-            for onset in onsets {
-                let t = onset.tick as f64;
-                let in_range = if start <= 0.0 {
-                    t >= start && t <= end
+            for (idx, onset) in onsets.iter().enumerate() {
+                let window_end = if idx + 1 < onsets.len() {
+                    onsets[idx + 1].tick as f64
                 } else {
-                    t > start && t <= end
+                    ticks_per_measure
                 };
+                let in_range = window_end > start && window_end <= end;
                 if in_range {
                     if !accuracy_hits_in_loop.contains(&onset.tick) {
-                        accuracy_by_onset.remove(&onset.tick);
+                        accuracy_by_onset.insert(onset.tick, AccuracyMark::Miss);
                     }
                     accuracy_hits_in_loop.remove(&onset.tick);
                 }
@@ -449,6 +460,7 @@ impl Grooph {
                 onsets,
                 last_tick,
                 current_tick,
+                ticks_per_measure,
                 &mut self.accuracy_by_onset,
                 &mut self.accuracy_hits_in_loop,
             );
@@ -458,6 +470,7 @@ impl Grooph {
                 onsets,
                 last_tick,
                 ticks_per_measure,
+                ticks_per_measure,
                 &mut self.accuracy_by_onset,
                 &mut self.accuracy_hits_in_loop,
             );
@@ -466,6 +479,7 @@ impl Grooph {
                 onsets,
                 0.0,
                 current_tick,
+                ticks_per_measure,
                 &mut self.accuracy_by_onset,
                 &mut self.accuracy_hits_in_loop,
             );
@@ -614,6 +628,9 @@ impl Grooph {
                 None
             }
         });
+        if self.accuracy_start_time.is_some() {
+            self.accuracy_last_tick = Some(0.0);
+        }
         self.reset_playback_state();
 
         #[cfg(target_arch = "wasm32")]
@@ -829,7 +846,7 @@ impl Grooph {
             #[cfg(target_arch = "wasm32")]
             wake_lock: Rc::new(RefCell::new(None)),
             layout_width_cap_factor: 0.1,
-            layout_accent_below: true,
+            layout_accent_below: false,
             layout_proportional_spacing: true,
             layout_stem_length_factor: 0.9,
             layout_debug_bbox: false,

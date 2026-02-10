@@ -184,22 +184,45 @@ impl Grooph {
             let Some(onset_tick) = onsets.get(idx) else {
                 continue;
             };
-            let Some(diff_ticks) = self.accuracy_by_onset.get(onset_tick).copied() else {
+            let Some(mark) = self.accuracy_by_onset.get(onset_tick).copied() else {
                 continue;
             };
-            let Some(px_per_tick) = self.local_pixels_per_tick(&onsets, layout, idx) else {
-                continue;
-            };
-            let x = note_layout.center.x + (diff_ticks * px_per_tick) as f32;
-            let mid_y = y + h * 0.5;
-            let h_start = egui::Pos2::new(note_layout.center.x, mid_y);
-            let h_end = egui::Pos2::new(x, mid_y);
-            ui.painter()
-                .line_segment([h_start, h_end], Stroke::new(1.0, egui::Color32::from_gray(140)));
-            let start = egui::Pos2::new(x, y);
-            let end = egui::Pos2::new(x, y + h);
-            ui.painter()
-                .line_segment([start, end], Stroke::new(2.0, egui::Color32::RED));
+            match mark {
+                crate::AccuracyMark::Hit(diff_ticks) => {
+                    let Some(px_per_tick) = self.local_pixels_per_tick(&onsets, layout, idx) else {
+                        continue;
+                    };
+                    let x = note_layout.center.x + (diff_ticks * px_per_tick) as f32;
+                    let mid_y = y + h * 0.5;
+                    let h_start = egui::Pos2::new(note_layout.center.x, mid_y);
+                    let h_end = egui::Pos2::new(x, mid_y);
+                    ui.painter().line_segment(
+                        [h_start, h_end],
+                        Stroke::new(1.0, egui::Color32::from_gray(140)),
+                    );
+                    let start = egui::Pos2::new(x, y);
+                    let end = egui::Pos2::new(x, y + h);
+                    ui.painter()
+                        .line_segment([start, end], Stroke::new(2.0, egui::Color32::RED));
+                }
+                crate::AccuracyMark::Miss => {
+                    let mid_y = y + h * 0.5;
+                    let half = h * 0.25;
+                    let left = note_layout.center.x - half;
+                    let right = note_layout.center.x + half;
+                    let top = mid_y - half;
+                    let bottom = mid_y + half;
+                    let stroke = Stroke::new(2.0, egui::Color32::RED);
+                    ui.painter().line_segment(
+                        [egui::Pos2::new(left, top), egui::Pos2::new(right, bottom)],
+                        stroke,
+                    );
+                    ui.painter().line_segment(
+                        [egui::Pos2::new(left, bottom), egui::Pos2::new(right, top)],
+                        stroke,
+                    );
+                }
+            }
         }
     }
 
