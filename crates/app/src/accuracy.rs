@@ -148,14 +148,14 @@ impl AccuracyTracker {
             } else if diff < -ticks_per_measure * 0.5 {
                 diff += ticks_per_measure;
             }
-            if best.map_or(true, |(_, best_diff, _)| diff.abs() < best_diff.abs()) {
+            if best.is_none_or(|(_, best_diff, _)| diff.abs() < best_diff.abs()) {
                 best = Some((idx, diff, raw_diff));
             }
         }
         let Some((best_idx, diff_ticks, raw_diff)) = best else {
             return;
         };
-        if beats.get(best_idx).map_or(true, |b| b.kind != BeatKind::Note) {
+        if beats.get(best_idx).is_none_or(|b| b.kind != BeatKind::Note) {
             return;
         }
         let onset_tick = beat_onsets[best_idx];
@@ -215,6 +215,7 @@ impl AccuracyTracker {
             current_tick = last_tick;
         }
 
+        #[allow(clippy::too_many_arguments)]
         fn process_segment(
             beats: &[Beat],
             beat_onsets: &[u32],

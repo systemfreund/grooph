@@ -69,7 +69,7 @@ impl LabelPattern {
         if self.slots.len() != 3 {
             return false;
         }
-        matches!(self.slots.get(0).map(Vec::as_slice), Some([LabelToken::BeatNum]))
+        matches!(self.slots.first().map(Vec::as_slice), Some([LabelToken::BeatNum]))
             && matches!(self.slots.get(1).map(Vec::as_slice), Some([LabelToken::Text(s)]) if s == "trip")
             && matches!(self.slots.get(2).map(Vec::as_slice), Some([LabelToken::Text(s)]) if s == "let")
     }
@@ -347,6 +347,7 @@ fn tuplet_spans(measure: &Measure, measure_ticks: u32) -> Vec<TupletSpan> {
     spans
 }
 
+#[allow(clippy::too_many_arguments)]
 fn push_slots_for_span(
     slots: &mut Vec<CountSlot>,
     layer: &CountLayer,
@@ -365,7 +366,7 @@ fn push_slots_for_span(
         return;
     }
     let subdiv_u32 = subdiv as u32;
-    if span_ticks % subdiv_u32 != 0 {
+    if !span_ticks.is_multiple_of(subdiv_u32) {
         return;
     }
     let step = span_ticks / subdiv_u32;

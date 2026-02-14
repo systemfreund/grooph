@@ -282,6 +282,7 @@ fn draw_count_underlay(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn draw_count_labels(
     painter: &Painter,
     measure: &Measure,
@@ -366,7 +367,7 @@ fn active_label_start(
     if t.is_sign_negative() {
         t = 0.0;
     } else {
-        t = t % total_ticks;
+        t %= total_ticks;
     }
 
     let mut best: Option<&CountSlot> = None;
