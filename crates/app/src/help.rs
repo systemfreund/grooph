@@ -1,9 +1,9 @@
 use crate::Grooph;
-use grooph_measure::BeatKind::{Note, Rest};
-use grooph_measure::duration::human_readable;
+use crate::Mode;
 use eframe::egui;
 use eframe::egui::{Label, RichText};
-use crate::Mode;
+use grooph_measure::BeatKind::{Note, Rest};
+use grooph_measure::duration::human_readable;
 
 impl Grooph {
     pub(super) fn help_panel(&mut self, ctx: &egui::Context) {
@@ -42,7 +42,6 @@ Double-click/Tap: Toggle Note/Rest",
                 .size(16.0);
                 ui.label(text);
             });
-
         });
     }
 }

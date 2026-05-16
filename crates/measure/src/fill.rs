@@ -1,6 +1,6 @@
+use crate::Measure;
 use crate::duration::Duration;
 use crate::grid::DEFAULT_GRID;
-use crate::Measure;
 
 impl Measure {
     /// Compute the best exact spelling for a gap measured in ticks.
@@ -8,7 +8,11 @@ impl Measure {
     /// 1) Minimal number of tokens (durations)
     /// 2) Minimal total weight (sum of denominators) to prefer simpler durations
     /// 3) Prefer larger steps on ties for determinism
-    pub(crate) fn best_fill_for_gap(&self, gap_ticks: u32, allowed: &[Duration]) -> Option<Vec<Duration>> {
+    pub(crate) fn best_fill_for_gap(
+        &self,
+        gap_ticks: u32,
+        allowed: &[Duration],
+    ) -> Option<Vec<Duration>> {
         if gap_ticks == 0 {
             return None;
         }
@@ -24,7 +28,8 @@ impl Measure {
                 })
                 .collect()
         } else {
-            DEFAULT_GRID.durations
+            DEFAULT_GRID
+                .durations
                 .iter()
                 .copied()
                 .filter(|d| matches!(d, Duration::Simple { .. }))
@@ -65,9 +70,9 @@ impl Measure {
                         Some(cur) => {
                             if cand.len < cur.len
                                 || (cand.len == cur.len
-                                && (cand.weight < cur.weight
-                                || (cand.weight == cur.weight
-                                && (cand.choice_idx as i32) < (cur.choice_idx as i32))))
+                                    && (cand.weight < cur.weight
+                                        || (cand.weight == cur.weight
+                                            && (cand.choice_idx as i32) < (cur.choice_idx as i32))))
                             {
                                 Some(cand)
                             } else {
@@ -99,7 +104,5 @@ impl Measure {
             ta.cmp(&tb)
         });
         Some(result)
-    }    
+    }
 }
-
-

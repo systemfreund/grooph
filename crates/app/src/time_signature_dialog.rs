@@ -1,8 +1,8 @@
 use crate::Grooph;
-use grooph_measure::TimeSignature;
+use crate::Mode;
 use eframe::egui;
 use eframe::egui::{Align, Align2, Layout};
-use crate::Mode;
+use grooph_measure::TimeSignature;
 
 impl Grooph {
     pub(super) fn time_signature_dialog(&mut self, ctx: &egui::Context) {

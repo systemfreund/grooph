@@ -1,9 +1,11 @@
 use std::collections::{HashMap, HashSet};
 
+use grooph_measure::grid::DEFAULT_GRID;
 use grooph_measure::{Beat, BeatKind};
 use log::info;
 
 use crate::TransportState;
+use crate::tempo::TempoMap;
 
 pub(crate) struct AccuracyState {
     pub(crate) tracker: AccuracyTracker,
@@ -141,29 +143,23 @@ impl AccuracyTracker {
         self.marks_by_onset.get(&onset_tick).copied()
     }
 
-    pub(crate) fn record_hit(
-        &mut self,
-        timestamp: f64,
-        ticks_per_sec: f64,
-        ticks_per_measure: f64,
-        beats: &[Beat],
-        beat_onsets: &[u32],
-        bpm: u32,
-    ) {
+    pub(crate) fn record_hit(&mut self, timestamp: f64, tempo: &TempoMap, beats: &[Beat]) {
         let Some(start_time) = self.start_time else {
             return;
         };
-        if ticks_per_sec <= 0.0
-            || ticks_per_measure <= 0.0
-            || beats.is_empty()
-            || beats.len() != beat_onsets.len()
-        {
+        if !tempo.valid() || beats.is_empty() {
+            return;
+        }
+        let beat_onsets = DEFAULT_GRID.compute_onset_ticks(beats);
+        if beats.len() != beat_onsets.len() {
             return;
         }
         let elapsed = timestamp - start_time;
         if elapsed < 0.0 {
             return;
         }
+        let ticks_per_measure = tempo.ticks_per_measure;
+        let ticks_per_sec = tempo.ticks_per_sec;
         let hit_tick = (elapsed * ticks_per_sec).rem_euclid(ticks_per_measure);
         let mut best: Option<(usize, f64, f64)> = None;
         for (idx, &onset_tick_u32) in beat_onsets.iter().enumerate() {
@@ -198,8 +194,7 @@ impl AccuracyTracker {
 
         let delta_ms = (diff_ticks / ticks_per_sec) * 1000.0;
         self.stats.push(delta_ms);
-        self.marks_by_onset
-            .insert(onset_tick, AccuracyMark::Hit(diff_ticks));
+        self.marks_by_onset.insert(onset_tick, AccuracyMark::Hit(diff_ticks));
         if wrap_next {
             self.hits_next_loop.insert(onset_tick);
         } else if !wrap_prev {
@@ -207,31 +202,27 @@ impl AccuracyTracker {
         }
         info!(
             "Accuracy hit: onset_tick={} hit_tick={:.2} delta_ms={:+.2} bpm={}",
-            onset_tick,
-            hit_tick,
-            delta_ms,
-            bpm
+            onset_tick, hit_tick, delta_ms, tempo.bpm
         );
     }
 
-    pub(crate) fn update_progress(
-        &mut self,
-        now_seconds: f64,
-        ticks_per_sec: f64,
-        ticks_per_measure: f64,
-        beats: &[Beat],
-        beat_onsets: &[u32]
-    ) {
+    pub(crate) fn update_progress(&mut self, now_seconds: f64, tempo: &TempoMap, beats: &[Beat]) {
         let Some(start_time) = self.start_time else {
             return;
         };
-        if beats.len() != beat_onsets.len() || beats.is_empty() {
+        if !tempo.valid() || beats.is_empty() {
+            return;
+        }
+        let beat_onsets = DEFAULT_GRID.compute_onset_ticks(beats);
+        if beats.len() != beat_onsets.len() {
             return;
         }
         let elapsed = now_seconds - start_time;
         if elapsed < 0.0 {
             return;
         }
+        let ticks_per_measure = tempo.ticks_per_measure;
+        let ticks_per_sec = tempo.ticks_per_sec;
         let mut current_tick = (elapsed * ticks_per_sec).rem_euclid(ticks_per_measure);
         let Some(last_tick) = self.last_tick else {
             self.last_tick = Some(current_tick);
@@ -286,7 +277,7 @@ impl AccuracyTracker {
         if current_tick >= last_tick {
             process_segment(
                 beats,
-                beat_onsets,
+                &beat_onsets,
                 last_tick,
                 current_tick,
                 0.0,
@@ -298,7 +289,7 @@ impl AccuracyTracker {
             // wrapped
             process_segment(
                 beats,
-                beat_onsets,
+                &beat_onsets,
                 last_tick,
                 ticks_per_measure,
                 0.0,
@@ -309,7 +300,7 @@ impl AccuracyTracker {
             self.hits_in_loop = std::mem::take(&mut self.hits_next_loop);
             process_segment(
                 beats,
-                beat_onsets,
+                &beat_onsets,
                 0.0,
                 current_tick,
                 ticks_per_measure,

@@ -19,4 +19,3 @@ pub(super) const fn reduce(f: Frac) -> Frac {
     let g = gcd(f.num, f.den);
     Frac { num: f.num / g, den: f.den / g }
 }
-

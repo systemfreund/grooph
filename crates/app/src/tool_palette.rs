@@ -1,20 +1,20 @@
 use crate::Grooph;
 use crate::tools::{DeleteOp, MetaOp, Modifier, NavOp, Tool, ToolGroup, ToolKind, all_tools};
 use crate::{Mode, tools};
-use grooph_layout::pixel_layout::{
-    GlyphMetrics, LayoutOpts, build_measure_layout, build_time_sig_layout, compute_em,
-};
-use grooph_measure::BeatKind::{Note, Rest};
-use grooph_measure::duration::{Duration, TupletSpec};
-use grooph_measure::{Beat, Measure};
-use grooph_layout::glyphs;
-use grooph_render::measure::draw_notes;
 use eframe::egui;
 use eframe::egui::scroll_area::{ScrollBarVisibility, ScrollSource};
 use eframe::egui::{
     Align, Align2, Atom, Button, Context, Direction, FontId, Id, Label, Layout, Response, RichText,
     Ui, Vec2, Widget,
 };
+use grooph_layout::glyphs;
+use grooph_layout::pixel_layout::{
+    GlyphMetrics, LayoutOpts, build_measure_layout, build_time_sig_layout, compute_em,
+};
+use grooph_measure::BeatKind::{Note, Rest};
+use grooph_measure::duration::{Duration, TupletSpec};
+use grooph_measure::{Beat, Measure};
+use grooph_render::measure::draw_notes;
 use log::info;
 use tools::EditOp;
 

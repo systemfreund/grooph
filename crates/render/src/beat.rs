@@ -1,8 +1,8 @@
-use grooph_layout::pixel_layout::{LayoutOpts, NoteLayout};
-use grooph_measure::BeatKind;
-use grooph_layout::glyphs;
 use eframe::egui;
 use eframe::egui::{Align2, Color32, FontId, Stroke};
+use grooph_layout::glyphs;
+use grooph_layout::pixel_layout::{LayoutOpts, NoteLayout};
+use grooph_measure::BeatKind;
 
 pub(super) fn draw_beat(
     painter: &egui::Painter,
@@ -28,7 +28,13 @@ pub(super) fn draw_beat(
     }
 
     // Draw notehead
-    painter.text(note.center, Align2::CENTER_CENTER, glyph.to_string(), opts.font_id.clone(), color);
+    painter.text(
+        note.center,
+        Align2::CENTER_CENTER,
+        glyph.to_string(),
+        opts.font_id.clone(),
+        color,
+    );
 
     // Draw dots
     if !note.dots.is_empty() {

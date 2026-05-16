@@ -1,12 +1,13 @@
 use crate::Grooph;
 use crate::accuracy::{AccuracyMark, AccuracyTracker};
+use crate::tempo::TempoMap;
 use crate::tools::{Modifier, ToolKind, all_tools};
 use crate::{Mode, TransportState};
-use grooph_layout::pixel_layout::{LayoutOpts, MeasureLayout, compute_em, GlyphMetrics};
-use grooph_measure::grid::DEFAULT_GRID;
-use grooph_render::measure::draw_measure;
 use eframe::egui;
 use eframe::egui::{Context, FontId, Frame, Rect, Response, Stroke};
+use grooph_layout::pixel_layout::{GlyphMetrics, LayoutOpts, MeasureLayout, compute_em};
+use grooph_measure::grid::DEFAULT_GRID;
+use grooph_render::measure::draw_measure;
 
 impl Grooph {
     pub(super) fn measure_panel(&mut self, ctx: &Context) {
@@ -21,10 +22,7 @@ impl Grooph {
                     // Update playback smoothing & primary-beat flash state
                     let playback_tick_to_draw = match self.transport_state {
                         TransportState::Playing => {
-                            let ts = self.measure.time_signature();
-                            let ticks_per_measure = DEFAULT_GRID.ticks_per_measure(&ts) as f64;
-                            let ticks_per_beat = DEFAULT_GRID.ticks_per_beat(&ts) as f64;
-                            let ticks_per_sec = (self.bpm as f64 / 60.0) * ticks_per_beat;
+                            let tempo = TempoMap::new(self.bpm, &self.measure.time_signature());
 
                             let now = ui.input(|i| i.time);
                             let last = self.playback.last_update.unwrap_or(now);
@@ -32,7 +30,8 @@ impl Grooph {
                             self.playback.last_update = Some(now);
 
                             // Advance predictor
-                            let mut next_tick = self.playback.smooth_tick + ticks_per_sec * dt;
+                            let mut next_tick =
+                                self.playback.smooth_tick + tempo.ticks_per_sec * dt;
 
                             // Sync with audio if available
                             if self.transport_state == TransportState::Playing
@@ -44,7 +43,7 @@ impl Grooph {
                                 if total > 0.0 {
                                     // Adjust for user-configured audio offset (latency) if enabled
                                     let offset_ticks = if self.audio_cfg.latency_enabled {
-                                        self.audio_cfg.offset as f64 * ticks_per_sec
+                                        self.audio_cfg.offset as f64 * tempo.ticks_per_sec
                                     } else {
                                         0.0
                                     };
@@ -60,7 +59,7 @@ impl Grooph {
                                     }
 
                                     // Snap if far off (e.g. startup/seek), else smooth nudge
-                                    if diff.abs() > ticks_per_beat * 0.5 {
+                                    if diff.abs() > tempo.ticks_per_beat * 0.5 {
                                         next_tick = audio_tick;
                                     } else {
                                         next_tick += diff * 0.1;
@@ -69,13 +68,14 @@ impl Grooph {
                             }
 
                             // Wrap
-                            if ticks_per_measure > 0.0 {
-                                next_tick = next_tick.rem_euclid(ticks_per_measure);
+                            if tempo.ticks_per_measure > 0.0 {
+                                next_tick = next_tick.rem_euclid(tempo.ticks_per_measure);
                             }
                             self.playback.smooth_tick = next_tick;
 
                             // Flash: trigger on primary beat change
-                            let current_primary_beat = (next_tick / ticks_per_beat).floor() as u32;
+                            let current_primary_beat =
+                                (next_tick / tempo.ticks_per_beat).floor() as u32;
                             if self.playback.last_primary_beat != Some(current_primary_beat) {
                                 self.playback.flash_intensity = 1.0;
                                 self.playback.last_primary_beat = Some(current_primary_beat);
@@ -150,12 +150,7 @@ impl Grooph {
         });
     }
 
-    fn draw_accuracy_marker(
-        &self,
-        ui: &egui::Ui,
-        layout: &MeasureLayout,
-        metrics: &GlyphMetrics,
-    ) {
+    fn draw_accuracy_marker(&self, ui: &egui::Ui, layout: &MeasureLayout, metrics: &GlyphMetrics) {
         if !self.accuracy.enabled {
             return;
         }
@@ -216,8 +211,7 @@ impl Grooph {
                     );
                     let start = egui::Pos2::new(x, y);
                     let end = egui::Pos2::new(x, y + h);
-                    ui.painter()
-                        .line_segment([start, end], Stroke::new(2.0, egui::Color32::RED));
+                    ui.painter().line_segment([start, end], Stroke::new(2.0, egui::Color32::RED));
                 }
                 AccuracyMark::Miss => {
                     let mid_y = y + h * 0.5;
@@ -264,7 +258,6 @@ impl Grooph {
         }
         None
     }
-
 
     fn handle_input(&mut self, rect: Rect, resp: Response, layout: MeasureLayout) {
         if !matches!(self.mode, Mode::TimeSignature { .. })

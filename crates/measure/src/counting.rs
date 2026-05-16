@@ -1,5 +1,5 @@
-use crate::grouping::default_groups_for;
 use crate::grid::DEFAULT_GRID;
+use crate::grouping::default_groups_for;
 use crate::{Measure, TimeSignature};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -31,17 +31,10 @@ pub struct LabelPattern {
 }
 
 impl LabelPattern {
-    pub fn single(token: LabelToken) -> Self {
-        Self { slots: vec![vec![token]] }
-    }
+    pub fn single(token: LabelToken) -> Self { Self { slots: vec![vec![token]] } }
 
     pub fn ands() -> Self {
-        Self {
-            slots: vec![
-                vec![LabelToken::BeatNum],
-                vec![LabelToken::Text("&".to_string())],
-            ],
-        }
+        Self { slots: vec![vec![LabelToken::BeatNum], vec![LabelToken::Text("&".to_string())]] }
     }
 
     pub fn sixteenth() -> Self {

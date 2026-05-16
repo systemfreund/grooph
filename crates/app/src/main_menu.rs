@@ -24,16 +24,8 @@ impl Grooph {
                         ui.with_layout(layout, |ui| {
                             // Playback controls
                             let is_running = self.transport_state != TransportState::Stopped;
-                            let button_label = if is_running {
-                                "⏹"
-                            } else {
-                                "⏵"
-                            };
-                            if Button::new(button_label)
-                                .selected(is_running)
-                                .ui(ui)
-                                .clicked()
-                            {
+                            let button_label = if is_running { "⏹" } else { "⏵" };
+                            if Button::new(button_label).selected(is_running).ui(ui).clicked() {
                                 self.toggle_playback();
                             }
                             let bpm_editor = egui::DragValue::new(&mut self.bpm)

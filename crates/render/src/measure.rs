@@ -1,11 +1,11 @@
-use grooph_layout::pixel_layout::{LayoutOpts, MeasureLayout, build_measure_layout};
-use grooph_measure::counting::{build_count_slots, ColorId, CountConfig, CountSlot};
-use grooph_measure::Measure;
-use grooph_measure::grid::DEFAULT_GRID;
 use crate::beat::draw_beat;
-use grooph_layout::glyphs;
 use eframe::egui;
 use eframe::egui::{Align2, Color32, FontFamily, FontId, Painter, Rangef, Rect, Stroke, pos2};
+use grooph_layout::glyphs;
+use grooph_layout::pixel_layout::{LayoutOpts, MeasureLayout, build_measure_layout};
+use grooph_measure::Measure;
+use grooph_measure::counting::{ColorId, CountConfig, CountSlot, build_count_slots};
+use grooph_measure::grid::DEFAULT_GRID;
 use std::collections::HashMap;
 
 pub fn draw_measure(
@@ -50,7 +50,11 @@ pub fn draw_measure(
     }
 
     // staff line
-    painter.hline(Rangef::new(rect.left(), rect.right()), rect.center().y, Stroke::new(0.02 * opts.em, color));
+    painter.hline(
+        Rangef::new(rect.left(), rect.right()),
+        rect.center().y,
+        Stroke::new(0.02 * opts.em, color),
+    );
 
     // Left block: Clef and stacked time signature from layout
     if let Some(clef_pos) = measure_layout.clef_pos {
@@ -95,7 +99,11 @@ pub fn draw_measure(
         let bottom = c.y - 0.5 * opts.em;
         let base = if ui.visuals().dark_mode { Color32::YELLOW } else { Color32::BLUE };
         let cursor_color = Color32::from_rgba_unmultiplied(base.r(), base.g(), base.b(), alpha);
-        painter.vline(nl.center.x, Rangef::new(top, bottom), Stroke::new(0.03 * opts.em, cursor_color));
+        painter.vline(
+            nl.center.x,
+            Rangef::new(top, bottom),
+            Stroke::new(0.03 * opts.em, cursor_color),
+        );
         // Ensure animation progresses even without input
         ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
     }
@@ -117,9 +125,8 @@ pub fn draw_measure(
 
             for (i, &onset) in onsets.iter().enumerate() {
                 let start = onset as f64;
-                let dur_ticks = DEFAULT_GRID
-                    .ticks_of(&measure.beats()[i].duration)
-                    .unwrap_or(0) as f64;
+                let dur_ticks =
+                    DEFAULT_GRID.ticks_of(&measure.beats()[i].duration).unwrap_or(0) as f64;
                 let end = start + dur_ticks;
                 if t >= start && t < end {
                     let x0 = measure_layout.notes[i].center.x;
@@ -200,11 +207,8 @@ impl TickMapper {
             i += 1;
         }
         let start_tick = self.onsets.get(i).copied().unwrap_or(0);
-        let end_tick = if i + 1 < self.onsets.len() {
-            self.onsets[i + 1]
-        } else {
-            self.total_ticks
-        };
+        let end_tick =
+            if i + 1 < self.onsets.len() { self.onsets[i + 1] } else { self.total_ticks };
         let x0 = *self.boundary_x.get(i).unwrap_or(&self.boundary_x[0]);
         let x1 = *self.boundary_x.get(i + 1).unwrap_or(&self.boundary_x[self.boundary_x.len() - 1]);
         let span = end_tick.saturating_sub(start_tick);
@@ -216,11 +220,7 @@ impl TickMapper {
     }
 }
 
-fn build_tick_mapper(
-    measure: &Measure,
-    layout: &MeasureLayout,
-    rect: Rect,
-) -> Option<TickMapper> {
+fn build_tick_mapper(measure: &Measure, layout: &MeasureLayout, rect: Rect) -> Option<TickMapper> {
     let beats = measure.beats();
     if beats.is_empty() || layout.notes.is_empty() {
         return None;
@@ -239,11 +239,7 @@ fn build_tick_mapper(
     }
     boundary_x.push(rect.right());
 
-    Some(TickMapper {
-        onsets,
-        boundary_x,
-        total_ticks,
-    })
+    Some(TickMapper { onsets, boundary_x, total_ticks })
 }
 
 fn draw_count_underlay(
@@ -307,7 +303,8 @@ fn draw_count_labels(
 
     let font = FontId::new(em * 0.4, FontFamily::Proportional);
     let label_y = (rect.center().y + 1.35 * em).min(rect.bottom() - 0.2 * em);
-    let label_color = Color32::from_rgba_unmultiplied(base_color.r(), base_color.g(), base_color.b(), 200);
+    let label_color =
+        Color32::from_rgba_unmultiplied(base_color.r(), base_color.g(), base_color.b(), 200);
     let highlight = Color32::from_rgba_unmultiplied(
         highlight_color.r(),
         highlight_color.g(),
@@ -318,11 +315,7 @@ fn draw_count_labels(
     for slot in selected {
         let Some(label) = &slot.label else { continue };
         let x = label_anchor_x(slot, &mapper, layout, rect);
-        let color = if active_start == Some(slot.start_tick) {
-            highlight
-        } else {
-            label_color
-        };
+        let color = if active_start == Some(slot.start_tick) { highlight } else { label_color };
         painter.text(pos2(x, label_y), Align2::CENTER_CENTER, label, font.clone(), color);
     }
 }
@@ -383,11 +376,7 @@ fn active_label_start(
                     } else if slot.priority == cur.priority {
                         let cur_span = cur.end_tick.saturating_sub(cur.start_tick);
                         let new_span = slot.end_tick.saturating_sub(slot.start_tick);
-                        if new_span < cur_span {
-                            Some(*slot)
-                        } else {
-                            Some(cur)
-                        }
+                        if new_span < cur_span { Some(*slot) } else { Some(cur) }
                     } else {
                         Some(cur)
                     }

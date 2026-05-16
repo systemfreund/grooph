@@ -9,6 +9,7 @@ mod platform;
 mod settings_panel;
 mod state;
 mod style;
+mod tempo;
 mod time_signature_dialog;
 mod tool_palette;
 pub mod tools;
@@ -16,12 +17,12 @@ pub mod tools;
 mod web;
 
 use grooph_measure::duration::{Duration, NoteValue, TupletSpec, q};
-use grooph_measure::grid::DEFAULT_GRID;
 use grooph_measure::{BeatIdx, Measure, TimeSignature};
 
 use crate::accuracy::AccuracyState;
 use crate::platform::{PlatformRuntime, VisibilityEvent};
 use crate::state::{AudioConfig, LayoutSettings, MidiState, PlaybackState};
+use crate::tempo::TempoMap;
 use crate::tools::ToolKind;
 use crate::tools::{BeatTemplate, Modifier, all_tools};
 use eframe::egui::{Context, TextStyle, Widget};
@@ -237,16 +238,15 @@ impl Grooph {
             return;
         }
 
+        let tempo = TempoMap::new(self.bpm, &self.measure.time_signature());
+
         if self.transport_state == TransportState::Playing
             && is_connected
             && !self.accuracy.tracker.has_start_time()
         {
-            let ts = self.measure.time_signature();
-            let ticks_per_beat = DEFAULT_GRID.ticks_per_beat(&ts) as f64;
-            let ticks_per_sec = (self.bpm as f64 / 60.0) * ticks_per_beat;
-            let (start_time, last_tick) = if ticks_per_sec > 0.0 {
+            let (start_time, last_tick) = if tempo.ticks_per_sec > 0.0 {
                 (
-                    now_seconds - (self.playback.smooth_tick / ticks_per_sec),
+                    now_seconds - (self.playback.smooth_tick / tempo.ticks_per_sec),
                     self.playback.smooth_tick,
                 )
             } else {
@@ -261,33 +261,13 @@ impl Grooph {
             now_seconds,
         );
         let beats = self.measure.beats();
-        let (ticks_per_measure, ticks_per_sec, beat_onsets) = if accuracy_active {
-            let ts = self.measure.time_signature();
-            let ticks_per_measure = DEFAULT_GRID.ticks_per_measure(&ts) as f64;
-            let ticks_per_beat = DEFAULT_GRID.ticks_per_beat(&ts) as f64;
-            let ticks_per_sec = (self.bpm as f64 / 60.0) * ticks_per_beat;
-            let beat_onsets = DEFAULT_GRID.compute_onset_ticks(beats);
-            (ticks_per_measure, ticks_per_sec, beat_onsets)
-        } else {
-            (0.0, 0.0, Vec::new())
-        };
+        let ready = accuracy_active && tempo.valid() && !beats.is_empty();
 
         for event in events {
             match event {
                 MidiInputEvent::NoteOn { channel, note, velocity, timestamp } => {
-                    if accuracy_active
-                        && ticks_per_sec > 0.0
-                        && ticks_per_measure > 0.0
-                        && !beat_onsets.is_empty()
-                    {
-                        self.accuracy.tracker.record_hit(
-                            timestamp,
-                            ticks_per_sec,
-                            ticks_per_measure,
-                            beats,
-                            &beat_onsets,
-                            self.bpm,
-                        );
+                    if ready {
+                        self.accuracy.tracker.record_hit(timestamp, &tempo, beats);
                     }
                     debug!("MIDI NoteOn ch={} note={} vel={}", channel, note, velocity);
                 }
@@ -298,18 +278,8 @@ impl Grooph {
             }
         }
 
-        if accuracy_active
-            && ticks_per_sec > 0.0
-            && ticks_per_measure > 0.0
-            && !beat_onsets.is_empty()
-        {
-            self.accuracy.tracker.update_progress(
-                now_seconds,
-                ticks_per_sec,
-                ticks_per_measure,
-                beats,
-                &beat_onsets,
-            );
+        if ready {
+            self.accuracy.tracker.update_progress(now_seconds, &tempo, beats);
         }
     }
 
@@ -452,11 +422,10 @@ impl Grooph {
             return;
         }
         self.transport_state = TransportState::Playing;
-        let accuracy_start = self
-            .midi
-            .input
-            .as_ref()
-            .and_then(|input| if input.is_connected() { Some(input.now_seconds()) } else { None });
+        let accuracy_start =
+            self.midi.input.as_ref().and_then(|input| {
+                if input.is_connected() { Some(input.now_seconds()) } else { None }
+            });
         if self.accuracy.enabled {
             self.accuracy.tracker.on_playback_start(accuracy_start);
         } else {
@@ -504,15 +473,13 @@ impl Grooph {
             return;
         }
 
-        let ts = self.measure.time_signature();
-        let ticks_per_beat = DEFAULT_GRID.ticks_per_beat(&ts) as f64;
-        let ticks_per_sec = (self.bpm as f64 / 60.0) * ticks_per_beat;
-        if ticks_per_sec <= 0.0 {
+        let tempo = TempoMap::new(self.bpm, &self.measure.time_signature());
+        if !tempo.valid() {
             return;
         }
 
         let now_seconds = input.now_seconds();
-        let start_time = now_seconds - (self.playback.smooth_tick / ticks_per_sec);
+        let start_time = now_seconds - (self.playback.smooth_tick / tempo.ticks_per_sec);
         self.accuracy.tracker.realign_start_time(start_time, self.playback.smooth_tick);
     }
 

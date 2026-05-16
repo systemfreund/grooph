@@ -22,7 +22,7 @@ pub enum ToolGroup {
 pub struct BeatTemplate {
     pub duration: Duration,
     pub kind: BeatKind,
-    pub accented: bool
+    pub accented: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -157,7 +157,11 @@ pub fn all_tools() -> &'static [Tool] {
             id: "insert.note.q",
             label: "Quarter",
             group: ToolGroup::Notes,
-            kind: ToolKind::InsertBeat(BeatTemplate { duration: Simple(Quarter), kind: Note, accented: false }),
+            kind: ToolKind::InsertBeat(BeatTemplate {
+                duration: Simple(Quarter),
+                kind: Note,
+                accented: false,
+            }),
             shortcuts: &[Shortcut::plain(Key::Num1)],
             show_in_palette: true,
         },
@@ -165,7 +169,11 @@ pub fn all_tools() -> &'static [Tool] {
             id: "insert.note.e",
             label: "Eighth",
             group: ToolGroup::Notes,
-            kind: ToolKind::InsertBeat(BeatTemplate { duration: Simple(Eighth), kind: Note, accented: false }),
+            kind: ToolKind::InsertBeat(BeatTemplate {
+                duration: Simple(Eighth),
+                kind: Note,
+                accented: false,
+            }),
             shortcuts: &[Shortcut::plain(Key::Num2)],
             show_in_palette: true,
         },
@@ -173,7 +181,11 @@ pub fn all_tools() -> &'static [Tool] {
             id: "insert.note.s",
             label: "Sixteenth",
             group: ToolGroup::Notes,
-            kind: ToolKind::InsertBeat(BeatTemplate { duration: Simple(Sixteenth), kind: Note, accented: false }),
+            kind: ToolKind::InsertBeat(BeatTemplate {
+                duration: Simple(Sixteenth),
+                kind: Note,
+                accented: false,
+            }),
             shortcuts: &[Shortcut::plain(Key::Num3)],
             show_in_palette: true,
         },
@@ -181,7 +193,11 @@ pub fn all_tools() -> &'static [Tool] {
             id: "insert.note.th",
             label: "Thirty-Second",
             group: ToolGroup::Notes,
-            kind: ToolKind::InsertBeat(BeatTemplate { duration: Simple(ThirtySecond), kind: Note, accented: false }),
+            kind: ToolKind::InsertBeat(BeatTemplate {
+                duration: Simple(ThirtySecond),
+                kind: Note,
+                accented: false,
+            }),
             shortcuts: &[Shortcut::plain(Key::Num4)],
             show_in_palette: true,
         },
@@ -190,7 +206,11 @@ pub fn all_tools() -> &'static [Tool] {
             id: "insert.rest.q",
             label: "Quarter rest",
             group: ToolGroup::Rests,
-            kind: ToolKind::InsertBeat(BeatTemplate { duration: Simple(Quarter), kind: Rest, accented: false }),
+            kind: ToolKind::InsertBeat(BeatTemplate {
+                duration: Simple(Quarter),
+                kind: Rest,
+                accented: false,
+            }),
             shortcuts: &[],
             show_in_palette: true,
         },
@@ -198,7 +218,11 @@ pub fn all_tools() -> &'static [Tool] {
             id: "insert.rest.e",
             label: "Eighth rest",
             group: ToolGroup::Rests,
-            kind: ToolKind::InsertBeat(BeatTemplate { duration: Simple(Eighth), kind: Rest, accented: false }),
+            kind: ToolKind::InsertBeat(BeatTemplate {
+                duration: Simple(Eighth),
+                kind: Rest,
+                accented: false,
+            }),
             shortcuts: &[],
             show_in_palette: true,
         },
@@ -206,7 +230,11 @@ pub fn all_tools() -> &'static [Tool] {
             id: "insert.rest.s",
             label: "Sixteenth rest",
             group: ToolGroup::Rests,
-            kind: ToolKind::InsertBeat(BeatTemplate { duration: Simple(Sixteenth), kind: Rest, accented: false }),
+            kind: ToolKind::InsertBeat(BeatTemplate {
+                duration: Simple(Sixteenth),
+                kind: Rest,
+                accented: false,
+            }),
             shortcuts: &[],
             show_in_palette: true,
         },
@@ -214,7 +242,11 @@ pub fn all_tools() -> &'static [Tool] {
             id: "insert.rest.th",
             label: "Thirty-Second rest",
             group: ToolGroup::Rests,
-            kind: ToolKind::InsertBeat(BeatTemplate { duration: Simple(ThirtySecond), kind: Rest, accented: false }),
+            kind: ToolKind::InsertBeat(BeatTemplate {
+                duration: Simple(ThirtySecond),
+                kind: Rest,
+                accented: false,
+            }),
             shortcuts: &[],
             show_in_palette: true,
         },

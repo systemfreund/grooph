@@ -209,14 +209,14 @@ pub const COMMON_DURATIONS: [Duration; 16] = [
     Duration::Dotted { base: Eighth, dots: 1 },  // dotted 1/8
     Duration::Dotted { base: Sixteenth, dots: 1 }, // dotted 1/16
     Duration::Tuplet(TupletSpec { n: 3, m: 2, base: Quarter }),
-    t8(),                                        // triplet 1/8
-    t16(),                                       // triplet 1/16
-    t32(),                                       // triplet 1/32
-    qt16(),                                      // quintuplet 1/16
-    st8(),                                       // sextuplet 1/8
-    st16(),                                      // sextuplet 1/16
-    spt16(),                                     // septuplet 1/16
-    nt16(),                                      // nonuplet 1/16
+    t8(),    // triplet 1/8
+    t16(),   // triplet 1/16
+    t32(),   // triplet 1/32
+    qt16(),  // quintuplet 1/16
+    st8(),   // sextuplet 1/8
+    st16(),  // sextuplet 1/16
+    spt16(), // septuplet 1/16
+    nt16(),  // nonuplet 1/16
 ];
 
 pub const fn q() -> Duration { Duration::Simple(Quarter) }

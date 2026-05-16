@@ -1,7 +1,7 @@
-use std::fmt::{Debug, Formatter};
 use crate::beat::BeatKind::{Note, Rest};
-use crate::duration::{duration_to_debug_str, Duration};
+use crate::duration::{Duration, duration_to_debug_str};
 use serde::{Deserialize, Serialize};
+use std::fmt::{Debug, Formatter};
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum BeatKind {

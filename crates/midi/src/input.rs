@@ -124,17 +124,20 @@ impl MidiInputEventQueue {
                         timestamp,
                     })
                 } else {
-                    Some(MidiInputEvent::NoteOn { channel, note: data1, velocity: data2, timestamp })
+                    Some(MidiInputEvent::NoteOn {
+                        channel,
+                        note: data1,
+                        velocity: data2,
+                        timestamp,
+                    })
                 }
             }
-            0xB0 => {
-                Some(MidiInputEvent::ControlChange {
-                    channel,
-                    controller: data1,
-                    value: data2,
-                    timestamp,
-                })
-            }
+            0xB0 => Some(MidiInputEvent::ControlChange {
+                channel,
+                controller: data1,
+                value: data2,
+                timestamp,
+            }),
             _ => None,
         };
 

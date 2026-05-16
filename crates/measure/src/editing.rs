@@ -2,18 +2,18 @@ use crate::BeatKind::{Note, Rest};
 use crate::duration::NoteValue::{Eighth, Sixteenth};
 use crate::duration::{Duration, NoteValue, TupletSpec};
 use crate::editing::Modification::{DissolveTuplet, ToggleAccent};
+use crate::grid::DEFAULT_GRID;
 use crate::{Beat, BeatIdx, BeatKind, Measure, TimeSignature};
 use either::Either;
-use crate::grid::DEFAULT_GRID;
 
 #[derive(Debug)]
 pub enum Modification {
-    SetBeat(BeatIdx, Beat),                // contains the new beat
-    SetTuplet(GroupSpan, TupletSpec),      // contains the new state
-    DissolveTuplet(GroupSpan, TupletSpec), // contains the dissolved tuplet spec
-    ToggleKind(BeatIdx, BeatKind),         // contains the new beat kind
-    ToggleAccent(BeatIdx, bool),           // contains the new accented state
-    ToggleDotted(BeatIdx, u8),             // contains the new dot count
+    SetBeat(BeatIdx, Beat),                            // contains the new beat
+    SetTuplet(GroupSpan, TupletSpec),                  // contains the new state
+    DissolveTuplet(GroupSpan, TupletSpec),             // contains the dissolved tuplet spec
+    ToggleKind(BeatIdx, BeatKind),                     // contains the new beat kind
+    ToggleAccent(BeatIdx, bool),                       // contains the new accented state
+    ToggleDotted(BeatIdx, u8),                         // contains the new dot count
     ChangeTimeSignature(TimeSignature, TimeSignature), // (old, new)
 }
 
@@ -278,9 +278,8 @@ impl Measure {
         // Onsets der neuen Gruppe (relativ) berechnen
         let onsets = DEFAULT_GRID.compute_onset_ticks(&self.beats);
         let start_onset = onsets[group.start_idx];
-        let mut target_rel: Vec<(u32, usize)> = (group.start_idx..=group.end_idx)
-            .map(|i| (onsets[i] - start_onset, i))
-            .collect();
+        let mut target_rel: Vec<(u32, usize)> =
+            (group.start_idx..=group.end_idx).map(|i| (onsets[i] - start_onset, i)).collect();
         // Sicherheitsnetz: falls unerwartet mehr/ weniger Slots, weiter mit vorhandenen
         target_rel.sort_by_key(|e| e.0);
         let tlen = target_rel.len();
@@ -370,11 +369,7 @@ impl Measure {
         let new_duration = Duration::Tuplet(tuplet_spec);
         let mut new_beat = Beat::new(new_duration, cur.kind);
         new_beat.accented = cur.accented;
-        if self.set_beat(idx, new_beat).is_ok() {
-            self.tuplet_group_at(idx)
-        } else {
-            None
-        }
+        if self.set_beat(idx, new_beat).is_ok() { self.tuplet_group_at(idx) } else { None }
     }
 }
 

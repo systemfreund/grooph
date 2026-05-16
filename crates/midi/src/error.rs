@@ -19,15 +19,11 @@ pub enum Error {
 }
 
 impl From<midir::InitError> for Error {
-    fn from(e: midir::InitError) -> Self {
-        Error::MidiError(e.to_string())
-    }
+    fn from(e: midir::InitError) -> Self { Error::MidiError(e.to_string()) }
 }
 
 impl From<midir::SendError> for Error {
-    fn from(e: midir::SendError) -> Self {
-        Error::SendFailed(e.to_string())
-    }
+    fn from(e: midir::SendError) -> Self { Error::SendFailed(e.to_string()) }
 }
 
 impl From<midir::ConnectError<midir::MidiOutput>> for Error {

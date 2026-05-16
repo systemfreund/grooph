@@ -10,19 +10,19 @@ pub(crate) mod grouping;
 mod math;
 pub mod time_signature;
 
+use BeatKind::Note;
+use BeatKind::Rest;
 pub use beat::{Beat, BeatKind};
 use duration::NoteValue::{Eighth, Sixteenth, ThirtySecond};
 use duration::{Duration, TupletSpec};
 use editing::{GroupSpan, Modification};
-use grid::DEFAULT_GRID;
-pub use time_signature::TimeSignature;
-use BeatKind::Rest;
 use either::Either;
+use grid::DEFAULT_GRID;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt::{Debug, Display, Formatter};
 use std::vec;
-use BeatKind::Note;
+pub use time_signature::TimeSignature;
 
 /// Logical Beat-Index within a measure (0-based)
 pub type BeatIdx = usize;
@@ -85,10 +85,8 @@ impl Measure {
     /// Expose a read-only view of beats
     pub fn beats(&self) -> &Vec<Beat> { &self.beats }
 
-    pub fn delete_beat(&mut self, idx: BeatIdx) {
-        self.beats.remove(idx);
-    }
-    
+    pub fn delete_beat(&mut self, idx: BeatIdx) { self.beats.remove(idx); }
+
     /// Replace the beat at index `idx` with `beat` if it fits and the remainder stays fillable.
     ///
     /// Routes to one of three sub-operations:
@@ -295,12 +293,7 @@ impl Measure {
             Duration::Tuplet(TupletSpec { n, m, .. }) => DEFAULT_GRID.tuplet_grid_durations(n, m),
             _ => Vec::new(),
         };
-        self.fill_at(
-            idx + 1,
-            leftover,
-            &allowed,
-            Either::Left(self.beats[idx].with_kind(Rest)),
-        )
+        self.fill_at(idx + 1, leftover, &allowed, Either::Left(self.beats[idx].with_kind(Rest)))
     }
 
     fn compute_ticks_to_absorb(&self, idx: BeatIdx, dur_old: Duration, need: u32) -> u32 {
@@ -565,7 +558,7 @@ impl Debug for Measure {
 mod tests {
     use super::*;
     use crate::duration::NoteValue::{Eighth, Sixteenth, ThirtySecond};
-    use crate::duration::{e, q, s, st16, st8, t16, t32, t8, th, Duration};
+    use crate::duration::{Duration, e, q, s, st8, st16, t8, t16, t32, th};
 
     fn durations_of(measure: &Measure) -> Vec<Duration> {
         measure.beats().iter().map(|b| b.duration).collect()

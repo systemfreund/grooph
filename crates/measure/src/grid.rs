@@ -1,7 +1,7 @@
-use crate::duration::{Duration, COMMON_DURATIONS, TupletSpec};
+use crate::duration::{COMMON_DURATIONS, Duration, TupletSpec};
 use crate::grouping::default_groups_for;
-use crate::{Beat, TimeSignature};
 use crate::math::lcm;
+use crate::{Beat, TimeSignature};
 
 pub const DEFAULT_GRID: Grid = Grid::from_durations(&COMMON_DURATIONS);
 
@@ -99,4 +99,3 @@ impl Grid<'_> {
         onsets
     }
 }
-

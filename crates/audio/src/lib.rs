@@ -1,12 +1,12 @@
 mod schedule;
 
-use grooph_measure::grid::DEFAULT_GRID;
 use grooph_measure::Measure;
+use grooph_measure::grid::DEFAULT_GRID;
 use log::{debug, error, info, trace};
-use rodio::source::{Function as RodioFunction, SignalGenerator};
-use rodio::source::noise::WhiteUniform;
-use rodio::source::BltFilter;
 use rodio::Source;
+use rodio::source::BltFilter;
+use rodio::source::noise::WhiteUniform;
+use rodio::source::{Function as RodioFunction, SignalGenerator};
 use schedule::{Schedule, SoundType};
 use serde::{Deserialize, Serialize};
 use std::fmt::{Debug, Formatter, Write};
@@ -64,7 +64,14 @@ impl Default for AudioSettings {
 }
 
 impl AudioSettings {
-    pub fn new(downbeat: f32, primary: f32, accent: f32, beat: f32, base_frequency: f32, decay: f32) -> Self {
+    pub fn new(
+        downbeat: f32,
+        primary: f32,
+        accent: f32,
+        beat: f32,
+        base_frequency: f32,
+        decay: f32,
+    ) -> Self {
         let result = Self {
             downbeat,
             primary,
@@ -382,13 +389,14 @@ impl MetronomeSource {
                 let base = SignalGenerator::new(self.sample_rate, hz, func);
 
                 let noise_mix = self.local_params.audio_settings.noise_mix;
-                let noise_signal: Option<Box<dyn Iterator<Item = f32> + Send>> = if noise_mix > 0.0001 {
-                    let cutoff_hz_u32 = self.local_params.audio_settings.noise_hpf_hz as u32;
-                    let noise = WhiteUniform::new(self.sample_rate).high_pass(cutoff_hz_u32);
-                    Some(Box::new(noise))
-                } else {
-                    None
-                };
+                let noise_signal: Option<Box<dyn Iterator<Item = f32> + Send>> =
+                    if noise_mix > 0.0001 {
+                        let cutoff_hz_u32 = self.local_params.audio_settings.noise_hpf_hz as u32;
+                        let noise = WhiteUniform::new(self.sample_rate).high_pass(cutoff_hz_u32);
+                        Some(Box::new(noise))
+                    } else {
+                        None
+                    };
 
                 self.active_beeps.push(ActiveVoice {
                     base_signal: Box::new(base),
@@ -428,20 +436,25 @@ impl MetronomeSource {
             }
 
             let env_attack = (p / ATTACK).min(1.0);
-            let env_tone_decay = if voice.tone_decay > 0.0 { 1.0 - (p / voice.tone_decay) } else { 0.0 };
-            let env_noise_decay = if voice.noise_decay > 0.0 { 1.0 - (p / voice.noise_decay) } else { 0.0 };
+            let env_tone_decay =
+                if voice.tone_decay > 0.0 { 1.0 - (p / voice.tone_decay) } else { 0.0 };
+            let env_noise_decay =
+                if voice.noise_decay > 0.0 { 1.0 - (p / voice.noise_decay) } else { 0.0 };
             let env_tone = (env_attack * env_tone_decay).clamp(0.0, 1.0);
             let env_noise = (env_attack * env_noise_decay).clamp(0.0, 1.0);
 
-            let base_sample = if tone_alive {
-                voice.base_signal.next().unwrap_or(0.0)
-            } else { 0.0 };
+            let base_sample =
+                if tone_alive { voice.base_signal.next().unwrap_or(0.0) } else { 0.0 };
 
             let noise_sample = if noise_alive {
                 if let Some(noise) = &mut voice.noise_signal {
                     noise.next().unwrap_or(0.0)
-                } else { 0.0 }
-            } else { 0.0 };
+                } else {
+                    0.0
+                }
+            } else {
+                0.0
+            };
 
             let noise_mix = self.local_params.audio_settings.noise_mix;
             let tone_contrib = base_sample * (1.0 - noise_mix) * env_tone;
