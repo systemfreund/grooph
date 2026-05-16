@@ -1,12 +1,11 @@
 use crate::Grooph;
-use crate::tools::{MetaOp, Modifier, Tool, ToolGroup, ToolKind, all_tools};
+use crate::tools::{DeleteOp, MetaOp, Modifier, NavOp, Tool, ToolGroup, ToolKind, all_tools};
 use crate::{Mode, tools};
 use grooph_layout::pixel_layout::{
     GlyphMetrics, LayoutOpts, build_measure_layout, build_time_sig_layout, compute_em,
 };
 use grooph_measure::BeatKind::{Note, Rest};
 use grooph_measure::duration::{Duration, TupletSpec};
-use grooph_measure::editing::Modification;
 use grooph_measure::{Beat, Measure};
 use grooph_layout::glyphs;
 use grooph_render::measure::draw_notes;
@@ -125,17 +124,19 @@ impl Grooph {
                 self.mode = Mode::TimeSignature { beats: ts.beats, unit: ts.beat_unit };
                 return;
             }
+            ToolKind::Navigate(op) => {
+                self.execute_navigation(op);
+                return;
+            }
             _ => {}
         }
 
         debug_assert!(tool.kind.is_mutating());
 
-        let mut result: Option<Modification> = None;
-        self.with_undo_snapshot(|g| {
-            result = g.execute_mutating_tool(tool);
-            result.is_some()
-        });
-        info!("edited: {:?}", result);
+        let committed = self.with_undo_snapshot(|g| g.execute_mutating_tool(tool));
+        if committed {
+            info!("applied tool: {}", tool.id);
+        }
     }
 
     /// Gate for any tool dispatch — single source of truth, regardless of trigger (palette / keyboard / panel).
@@ -145,45 +146,82 @@ impl Grooph {
         matches!(self.mode, Mode::Edit)
     }
 
-    /// Executes a tool that is known to be mutating. Returns the resulting modification, if any.
+    /// Moves the cursor according to `op`. Non-mutating; never produces an undo snapshot.
+    fn execute_navigation(&mut self, op: NavOp) {
+        let beats_len = self.measure.beats().len();
+        if beats_len == 0 {
+            return;
+        }
+        let max_idx = beats_len - 1;
+        self.cursor_idx = match op {
+            NavOp::Left => self.cursor_idx.saturating_sub(1),
+            NavOp::Right => (self.cursor_idx + 1).min(max_idx),
+            NavOp::Start => 0,
+            NavOp::End => max_idx,
+        };
+    }
+
+    /// Executes a tool that is known to be mutating. Returns whether a change was committed.
     /// Must only be called from within `with_undo_snapshot`.
-    fn execute_mutating_tool(&mut self, tool: &Tool) -> Option<Modification> {
+    fn execute_mutating_tool(&mut self, tool: &Tool) -> bool {
         let beats_len = self.measure.beats().len();
         match tool.kind {
             ToolKind::InsertBeat(template) => {
                 if beats_len == 0 {
-                    return None;
+                    return false;
                 }
                 let idx = self.cursor_idx.min(beats_len - 1);
-                match template.duration {
+                let result = match template.duration {
                     Duration::Simple(_) => {
                         self.set_beat(idx, template.duration.base_note(), Some(template.kind))
                     }
                     Duration::Tuplet(spec) => self.set_tuplet(idx, Some(spec)),
                     _ => None,
-                }
+                };
+                result.is_some()
             }
             ToolKind::Meta(MetaOp::ResetMeasure) => {
                 let ts = self.measure.time_signature();
                 self.measure = Measure::new_init(ts, Rest);
                 self.cursor_idx = 0;
-                Some(Modification::ChangeTimeSignature(ts, ts))
+                true
             }
             ToolKind::Modify(modifier) => {
                 if beats_len == 0 {
-                    return None;
+                    return false;
                 }
                 let idx = self.cursor_idx.min(beats_len - 1);
-                match modifier {
+                let result = match modifier {
                     Modifier::ToggleDotted { dots: _ } => self.measure.toggle_dotted(idx),
                     Modifier::ToggleAccent => self.measure.toggle_accent(idx),
                     Modifier::ToggleRestNote => self.measure.toggle_beat_kind(idx),
                     Modifier::CycleTuplet => self.set_tuplet(idx, None),
-                }
+                };
+                result.is_some()
             }
-            ToolKind::Edit(_) | ToolKind::Meta(MetaOp::ChangeTimeSignature) => {
+            ToolKind::Delete(op) => {
+                if beats_len == 0 {
+                    return false;
+                }
+                let idx = self.cursor_idx.min(beats_len - 1);
+                self.measure.remove(idx);
+                let new_len = self.measure.beats().len();
+                self.cursor_idx = if new_len == 0 {
+                    0
+                } else {
+                    let last = new_len - 1;
+                    match op {
+                        DeleteOp::Forward => (self.cursor_idx + 1).min(last),
+                        DeleteOp::Backward => self.cursor_idx.saturating_sub(1).min(last),
+                    }
+                };
+                true
+            }
+            ToolKind::Edit(_)
+            | ToolKind::Meta(MetaOp::ChangeTimeSignature)
+            | ToolKind::Navigate(_) => {
                 debug_assert!(false, "non-mutating tool reached execute_mutating_tool");
-                None
+                false
             }
         }
     }

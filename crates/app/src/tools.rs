@@ -46,23 +46,42 @@ pub enum MetaOp {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DeleteOp {
+    Forward,
+    Backward,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NavOp {
+    Left,
+    Right,
+    Start,
+    End,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ToolKind {
     InsertBeat(BeatTemplate),
     Modify(Modifier),
     Edit(EditOp),
     Meta(MetaOp),
+    Delete(DeleteOp),
+    Navigate(NavOp),
 }
 
 impl ToolKind {
     /// Whether this tool mutates the measure and therefore needs an undo snapshot.
     /// Undo/Redo manage their own stacks; opening the time-signature dialog is not a mutation.
+    /// Navigation only moves the cursor.
     pub fn is_mutating(&self) -> bool {
         match self {
             ToolKind::InsertBeat(..) => true,
             ToolKind::Modify(..) => true,
             ToolKind::Meta(MetaOp::ResetMeasure) => true,
+            ToolKind::Delete(_) => true,
             ToolKind::Edit(_) => false,
             ToolKind::Meta(MetaOp::ChangeTimeSignature) => false,
+            ToolKind::Navigate(_) => false,
         }
     }
 }
@@ -113,7 +132,7 @@ pub fn all_tools() -> &'static [Tool] {
     use BeatKind::*;
     use Duration::*;
 
-    static ALL: [Tool; 22] = [
+    static ALL: [Tool; 28] = [
         Tool {
             id: "edit.undo",
             label: "⟲",
@@ -319,6 +338,56 @@ pub fn all_tools() -> &'static [Tool] {
             kind: ToolKind::Meta(MetaOp::ChangeTimeSignature),
             shortcuts: &[],
             show_in_palette: true,
+        },
+        // Beat removal — keyboard-only
+        Tool {
+            id: "edit.delete.forward",
+            label: "Delete",
+            group: ToolGroup::Edit,
+            kind: ToolKind::Delete(DeleteOp::Forward),
+            shortcuts: &[Shortcut::plain(Key::Delete)],
+            show_in_palette: false,
+        },
+        Tool {
+            id: "edit.delete.backward",
+            label: "Backspace",
+            group: ToolGroup::Edit,
+            kind: ToolKind::Delete(DeleteOp::Backward),
+            shortcuts: &[Shortcut::plain(Key::Backspace)],
+            show_in_palette: false,
+        },
+        // Cursor navigation — keyboard-only
+        Tool {
+            id: "nav.left",
+            label: "←",
+            group: ToolGroup::Edit,
+            kind: ToolKind::Navigate(NavOp::Left),
+            shortcuts: &[Shortcut::plain(Key::ArrowLeft)],
+            show_in_palette: false,
+        },
+        Tool {
+            id: "nav.right",
+            label: "→",
+            group: ToolGroup::Edit,
+            kind: ToolKind::Navigate(NavOp::Right),
+            shortcuts: &[Shortcut::plain(Key::ArrowRight)],
+            show_in_palette: false,
+        },
+        Tool {
+            id: "nav.start",
+            label: "Home",
+            group: ToolGroup::Edit,
+            kind: ToolKind::Navigate(NavOp::Start),
+            shortcuts: &[Shortcut::plain(Key::Home)],
+            show_in_palette: false,
+        },
+        Tool {
+            id: "nav.end",
+            label: "End",
+            group: ToolGroup::Edit,
+            kind: ToolKind::Navigate(NavOp::End),
+            shortcuts: &[Shortcut::plain(Key::End)],
+            show_in_palette: false,
         },
     ];
 
