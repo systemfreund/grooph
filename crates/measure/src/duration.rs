@@ -47,6 +47,19 @@ impl NoteValue {
             ThirtySecond => "1/32",
         }
     }
+
+    /// Stable index into a 6-slot per-note-value array
+    /// (e.g. `GlyphMetrics::rest_sizes`). Order matches `denominator()` powers.
+    pub const fn rest_index(self) -> usize {
+        match self {
+            Whole => 0,
+            Half => 1,
+            Quarter => 2,
+            Eighth => 3,
+            Sixteenth => 4,
+            ThirtySecond => 5,
+        }
+    }
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
