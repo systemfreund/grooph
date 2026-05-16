@@ -196,11 +196,20 @@ pub fn draw_notes(
 struct TickMapper {
     onsets: Vec<u32>,
     boundary_x: Vec<f32>,
+    note_centers_x: Vec<f32>,
     total_ticks: u32,
 }
 
 impl TickMapper {
-    fn tick_to_x(&self, tick: u32) -> f32 {
+    fn tick_to_boundary_x(&self, tick: u32) -> f32 {
+        self.interpolate(&self.boundary_x, tick)
+    }
+
+    fn tick_to_center_x(&self, tick: u32) -> f32 {
+        self.interpolate(&self.note_centers_x, tick)
+    }
+
+    fn interpolate(&self, anchors: &[f32], tick: u32) -> f32 {
         let t = tick.min(self.total_ticks);
         let mut i = 0usize;
         while i + 1 < self.onsets.len() && t >= self.onsets[i + 1] {
@@ -209,8 +218,8 @@ impl TickMapper {
         let start_tick = self.onsets.get(i).copied().unwrap_or(0);
         let end_tick =
             if i + 1 < self.onsets.len() { self.onsets[i + 1] } else { self.total_ticks };
-        let x0 = *self.boundary_x.get(i).unwrap_or(&self.boundary_x[0]);
-        let x1 = *self.boundary_x.get(i + 1).unwrap_or(&self.boundary_x[self.boundary_x.len() - 1]);
+        let x0 = *anchors.get(i).unwrap_or(&anchors[0]);
+        let x1 = *anchors.get(i + 1).unwrap_or(&anchors[anchors.len() - 1]);
         let span = end_tick.saturating_sub(start_tick);
         if span == 0 {
             return x0;
@@ -230,7 +239,7 @@ fn build_tick_mapper(measure: &Measure, layout: &MeasureLayout, rect: Rect) -> O
     if total_ticks == 0 {
         return None;
     }
-    let mut boundary_x = Vec::with_capacity(onsets.len() + 1);
+    let mut boundary_x = Vec::with_capacity(layout.notes.len() + 1);
     boundary_x.push(layout.notes_left_edge);
     for i in 1..layout.notes.len() {
         let x_prev = layout.notes[i - 1].center.x;
@@ -239,7 +248,13 @@ fn build_tick_mapper(measure: &Measure, layout: &MeasureLayout, rect: Rect) -> O
     }
     boundary_x.push(rect.right());
 
-    Some(TickMapper { onsets, boundary_x, total_ticks })
+    let mut note_centers_x = Vec::with_capacity(layout.notes.len() + 1);
+    for note in &layout.notes {
+        note_centers_x.push(note.center.x);
+    }
+    note_centers_x.push(rect.right());
+
+    Some(TickMapper { onsets, boundary_x, note_centers_x, total_ticks })
 }
 
 fn draw_count_underlay(
@@ -267,8 +282,8 @@ fn draw_count_underlay(
 
     for slot in color_slots {
         let Some(color_id) = slot.color else { continue };
-        let x0 = mapper.tick_to_x(slot.start_tick);
-        let x1 = mapper.tick_to_x(slot.end_tick);
+        let x0 = mapper.tick_to_boundary_x(slot.start_tick);
+        let x1 = mapper.tick_to_boundary_x(slot.end_tick);
         if x1 <= x0 + 0.5 {
             continue;
         }
@@ -314,7 +329,7 @@ fn draw_count_labels(
 
     for slot in selected {
         let Some(label) = &slot.label else { continue };
-        let x = label_anchor_x(slot, &mapper, layout, rect);
+        let x = label_anchor_x(slot, &mapper, layout);
         let color = if active_start == Some(slot.start_tick) { highlight } else { label_color };
         painter.text(pos2(x, label_y), Align2::CENTER_CENTER, label, font.clone(), color);
     }
@@ -387,12 +402,7 @@ fn active_label_start(
     best.map(|s| s.start_tick)
 }
 
-fn label_anchor_x(
-    slot: &CountSlot,
-    mapper: &TickMapper,
-    layout: &MeasureLayout,
-    rect: Rect,
-) -> f32 {
+fn label_anchor_x(slot: &CountSlot, mapper: &TickMapper, layout: &MeasureLayout) -> f32 {
     let max_idx = mapper.onsets.len().min(layout.notes.len());
     for i in 0..max_idx {
         let onset = mapper.onsets[i];
@@ -400,32 +410,7 @@ fn label_anchor_x(
             return layout.notes[i].center.x;
         }
     }
-    label_fallback_x(slot.start_tick, mapper, layout, rect)
-}
-
-fn label_fallback_x(tick: u32, mapper: &TickMapper, layout: &MeasureLayout, rect: Rect) -> f32 {
-    let count = mapper.onsets.len().min(layout.notes.len());
-    if count == 0 {
-        return mapper.tick_to_x(tick);
-    }
-    let t = tick.min(mapper.total_ticks);
-    let mut i = 0usize;
-    while i + 1 < count && t >= mapper.onsets[i + 1] {
-        i += 1;
-    }
-    let start = mapper.onsets[i];
-    let x0 = layout.notes[i].center.x;
-    let (end, x1) = if i + 1 < count {
-        (mapper.onsets[i + 1], layout.notes[i + 1].center.x)
-    } else {
-        (mapper.total_ticks, rect.right())
-    };
-    let span = end.saturating_sub(start);
-    if span == 0 {
-        return x0;
-    }
-    let frac = (t - start) as f32 / span as f32;
-    x0 + (x1 - x0) * frac
+    mapper.tick_to_center_x(slot.start_tick)
 }
 
 fn count_color(id: ColorId, alpha: u8) -> Color32 {
