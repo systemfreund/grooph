@@ -16,14 +16,14 @@ impl Grooph {
                     egui::CollapsingHeader::new("Click").default_open(false).show(ui, |ui| {
                         ui.label("Decay:");
                         ui.add(
-                            egui::DragValue::new(&mut self.audio_settings.decay)
+                            egui::DragValue::new(&mut self.audio_cfg.settings.decay)
                                 .range(0.01..=0.5)
                                 .speed(0.001)
                                 .suffix("s"),
                         );
                         ui.separator();
                         egui::ComboBox::from_label("Waveform")
-                            .selected_text(match self.audio_settings.waveform {
+                            .selected_text(match self.audio_cfg.settings.waveform {
                                 Waveform::Sine => "Sine",
                                 Waveform::Triangle => "Triangle",
                                 Waveform::Square => "Square",
@@ -31,22 +31,22 @@ impl Grooph {
                             })
                             .show_ui(ui, |ui| {
                                 ui.selectable_value(
-                                    &mut self.audio_settings.waveform,
+                                    &mut self.audio_cfg.settings.waveform,
                                     Waveform::Sine,
                                     "Sine",
                                 );
                                 ui.selectable_value(
-                                    &mut self.audio_settings.waveform,
+                                    &mut self.audio_cfg.settings.waveform,
                                     Waveform::Triangle,
                                     "Triangle",
                                 );
                                 ui.selectable_value(
-                                    &mut self.audio_settings.waveform,
+                                    &mut self.audio_cfg.settings.waveform,
                                     Waveform::Square,
                                     "Square",
                                 );
                                 ui.selectable_value(
-                                    &mut self.audio_settings.waveform,
+                                    &mut self.audio_cfg.settings.waveform,
                                     Waveform::Sawtooth,
                                     "Sawtooth",
                                 );
@@ -54,14 +54,14 @@ impl Grooph {
                         ui.separator();
                         ui.label("Noise Mix:");
                         ui.add(
-                            egui::Slider::new(&mut self.audio_settings.noise_mix, 0.0..=1.0)
+                            egui::Slider::new(&mut self.audio_cfg.settings.noise_mix, 0.0..=1.0)
                                 .custom_formatter(|v, _| format!("{:.0}%", v * 100.0)),
                         );
-                        if self.audio_settings.noise_mix > 0.0 {
+                        if self.audio_cfg.settings.noise_mix > 0.0 {
                             ui.separator();
                             ui.label("Noise High-Pass Cutoff:");
                             ui.add(
-                                egui::DragValue::new(&mut self.audio_settings.noise_hpf_hz)
+                                egui::DragValue::new(&mut self.audio_cfg.settings.noise_hpf_hz)
                                     .range(2000.0..=6000.0)
                                     .speed(10.0)
                                     .suffix(" Hz"),
@@ -69,7 +69,7 @@ impl Grooph {
                             ui.separator();
                             ui.label("Noise Decay:");
                             ui.add(
-                                egui::DragValue::new(&mut self.audio_settings.noise_decay)
+                                egui::DragValue::new(&mut self.audio_cfg.settings.noise_decay)
                                     .range(0.01..=0.5)
                                     .speed(0.001)
                                     .suffix("s"),
@@ -78,7 +78,7 @@ impl Grooph {
                         ui.separator();
                         ui.label("Base Frequency (PrimaryBeat):");
                         ui.add(
-                            egui::DragValue::new(&mut self.audio_settings.base_frequency)
+                            egui::DragValue::new(&mut self.audio_cfg.settings.base_frequency)
                                 .range(220.0..=880.0)
                                 .speed(0.1)
                                 .suffix("Hz"),
@@ -88,11 +88,11 @@ impl Grooph {
                     egui::CollapsingHeader::new("Audio Latency").default_open(false).show(
                         ui,
                         |ui| {
-                            ui.checkbox(&mut self.audio_latency_enabled, "Enabled");
-                            ui.add_enabled_ui(self.audio_latency_enabled, |ui| {
+                            ui.checkbox(&mut self.audio_cfg.latency_enabled, "Enabled");
+                            ui.add_enabled_ui(self.audio_cfg.latency_enabled, |ui| {
                                 ui.label("Offset:");
                                 ui.add(
-                                    egui::DragValue::new(&mut self.audio_offset)
+                                    egui::DragValue::new(&mut self.audio_cfg.offset)
                                         .range(-0.5..=0.5)
                                         .speed(0.001)
                                         .suffix("s"),
@@ -107,28 +107,28 @@ impl Grooph {
                         |ui| {
                             ui.label("Size:");
                             ui.add(
-                                egui::DragValue::new(&mut self.layout_width_cap_factor)
+                                egui::DragValue::new(&mut self.layout.width_cap_factor)
                                     .speed(0.01)
                                     .range(0.05..=0.5),
                             );
                             ui.separator();
                             ui.label("Stem Length Factor:");
                             ui.add(
-                                egui::DragValue::new(&mut self.layout_stem_length_factor)
+                                egui::DragValue::new(&mut self.layout.stem_length_factor)
                                     .speed(0.01)
                                     .range(0.7..=1.3),
                             );
                             ui.separator();
-                            ui.checkbox(&mut self.layout_debug_bbox, "Show bounding boxes");
+                            ui.checkbox(&mut self.layout.debug_bbox, "Show bounding boxes");
                             ui.separator();
                             ui.label("Accents Position:");
                             ui.horizontal(|ui| {
-                                ui.radio_value(&mut self.layout_accent_below, true, "Below");
-                                ui.radio_value(&mut self.layout_accent_below, false, "Above");
+                                ui.radio_value(&mut self.layout.accent_below, true, "Below");
+                                ui.radio_value(&mut self.layout.accent_below, false, "Above");
                             });
                             ui.separator();
                             ui.checkbox(
-                                &mut self.layout_proportional_spacing,
+                                &mut self.layout.proportional_spacing,
                                 "Proportional Spacing",
                             );
                         },
@@ -183,9 +183,9 @@ impl Grooph {
                             ui,
                             "settings_midi_input",
                             "🔄",
-                            &mut self.midi_input,
-                            &mut self.midi_input_ports,
-                            &mut self.midi_selected_port_id,
+                            &mut self.midi.input,
+                            &mut self.midi.available_ports,
+                            &mut self.midi.selected_port_id,
                         );
                     });
 

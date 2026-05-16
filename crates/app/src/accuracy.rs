@@ -3,6 +3,33 @@ use std::collections::{HashMap, HashSet};
 use grooph_measure::{Beat, BeatKind};
 use log::info;
 
+use crate::TransportState;
+
+pub(crate) struct AccuracyState {
+    pub(crate) tracker: AccuracyTracker,
+    pub(crate) enabled: bool,
+}
+
+impl AccuracyState {
+    pub(crate) fn new(enabled: bool) -> Self { Self { tracker: AccuracyTracker::new(), enabled } }
+
+    pub(crate) fn set_enabled(&mut self, enabled: bool, transport: TransportState) {
+        if self.enabled == enabled {
+            return;
+        }
+        self.enabled = enabled;
+        if enabled {
+            if transport == TransportState::Playing {
+                self.tracker.on_playback_stop();
+            } else {
+                self.tracker.clear_for_edit();
+            }
+            return;
+        }
+        self.tracker.on_playback_stop();
+    }
+}
+
 #[derive(Clone, Copy)]
 pub(crate) enum AccuracyMark {
     Hit(f64),

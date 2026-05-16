@@ -5,7 +5,9 @@ mod main_menu;
 mod measure_panel;
 mod midi_input_widget;
 mod mixer_panel;
+mod platform;
 mod settings_panel;
+mod state;
 mod style;
 mod time_signature_dialog;
 mod tool_palette;
@@ -16,9 +18,10 @@ mod web;
 use grooph_measure::duration::{Duration, NoteValue, TupletSpec, q};
 use grooph_measure::grid::DEFAULT_GRID;
 use grooph_measure::{BeatIdx, Measure, TimeSignature};
-use std::cell::RefCell;
 
-use crate::accuracy::AccuracyTracker;
+use crate::accuracy::AccuracyState;
+use crate::platform::{PlatformRuntime, VisibilityEvent};
+use crate::state::{AudioConfig, LayoutSettings, MidiState, PlaybackState};
 use crate::tools::ToolKind;
 use crate::tools::{BeatTemplate, Modifier, all_tools};
 use eframe::egui::{Context, TextStyle, Widget};
@@ -37,7 +40,6 @@ use grooph_midi::{MidiInput, MidiInputEvent};
 use log::{debug, info, warn};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::rc::Rc;
 use std::sync::Arc;
 
 #[derive(PartialEq, Eq)]
@@ -51,7 +53,7 @@ enum Mode {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum TransportState {
+pub(crate) enum TransportState {
     Stopped,
     Playing,
 }
@@ -74,31 +76,13 @@ pub struct Grooph {
     transport_state: TransportState,
     bpm: u32,
     audio: Option<grooph_audio::Audio>,
-    // Mixer volumes [0.0, 1.0]
-    audio_settings: AudioSettings,
-    // Playback smoothing state
-    playback_smooth_tick: f64,
-    playback_last_update: Option<f64>,
-    accuracy: AccuracyTracker,
-    accuracy_enabled: bool,
-
-    // Visual flash on primary beats
-    flash_intensity: f32, // [0,1]
-    last_primary_beat: Option<u32>,
-
-    #[cfg(target_arch = "wasm32")]
-    wake_lock: Rc<RefCell<Option<web_sys::WakeLockSentinel>>>,
-    layout_width_cap_factor: f32,
-    layout_accent_below: bool,
-    layout_proportional_spacing: bool,
-    layout_stem_length_factor: f32,
-    layout_debug_bbox: bool,
-    audio_offset: f32,
-    audio_latency_enabled: bool,
+    pub(crate) audio_cfg: AudioConfig,
+    pub(crate) layout: LayoutSettings,
+    pub(crate) playback: PlaybackState,
+    pub(crate) accuracy: AccuracyState,
+    pub(crate) midi: MidiState,
     counting: CountingSettings,
-    midi_input: Option<MidiInput>,
-    midi_input_ports: Vec<String>,
-    midi_selected_port_id: Option<String>,
+    platform: PlatformRuntime,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -140,12 +124,12 @@ impl PersistedState {
             measure: app.measure.clone(),
             cursor_idx: app.cursor_idx,
             bpm: app.bpm,
-            audio_settings: app.audio_settings,
-            audio_latency_enabled: app.audio_latency_enabled,
-            audio_offset: app.audio_offset,
+            audio_settings: app.audio_cfg.settings,
+            audio_latency_enabled: app.audio_cfg.latency_enabled,
+            audio_offset: app.audio_cfg.offset,
             counting: app.counting,
-            midi_selected_port_id: app.midi_selected_port_id.clone(),
-            accuracy_enabled: app.accuracy_enabled,
+            midi_selected_port_id: app.midi.selected_port_id.clone(),
+            accuracy_enabled: app.accuracy.enabled,
         }
     }
 }
@@ -208,8 +192,17 @@ impl App for Grooph {
         self.handle_keyboard_input(ctx);
         self.handle_midi_input_events();
 
-        #[cfg(target_arch = "wasm32")]
-        self.handle_visibility_change();
+        if let Some(ev) = self.platform.take_visibility_event() {
+            match ev {
+                VisibilityEvent::Hidden => {
+                    self.stop_transport();
+                    self.audio = None;
+                }
+                VisibilityEvent::Visible | VisibilityEvent::PageShow => {
+                    self.audio = None;
+                }
+            }
+        }
 
         let audio_state = self.audio_state();
 
@@ -220,7 +213,7 @@ impl App for Grooph {
         }
 
         if let Some(audio) = &mut self.audio {
-            audio.set_audio_settings(self.audio_settings);
+            audio.set_audio_settings(self.audio_cfg.settings);
             if audio.update(&audio_state, self.bpm, &self.measure) {
                 ctx.request_repaint();
             }
@@ -235,34 +228,34 @@ impl App for Grooph {
 
 impl Grooph {
     fn handle_midi_input_events(&mut self) {
-        let (events, now_seconds, is_connected) = match self.midi_input.as_ref() {
+        let (events, now_seconds, is_connected) = match self.midi.input.as_ref() {
             Some(input) => (input.drain_events(), input.now_seconds(), input.is_connected()),
             None => return,
         };
 
-        if !self.accuracy_enabled {
+        if !self.accuracy.enabled {
             return;
         }
 
         if self.transport_state == TransportState::Playing
             && is_connected
-            && !self.accuracy.has_start_time()
+            && !self.accuracy.tracker.has_start_time()
         {
             let ts = self.measure.time_signature();
             let ticks_per_beat = DEFAULT_GRID.ticks_per_beat(&ts) as f64;
             let ticks_per_sec = (self.bpm as f64 / 60.0) * ticks_per_beat;
             let (start_time, last_tick) = if ticks_per_sec > 0.0 {
                 (
-                    now_seconds - (self.playback_smooth_tick / ticks_per_sec),
-                    self.playback_smooth_tick,
+                    now_seconds - (self.playback.smooth_tick / ticks_per_sec),
+                    self.playback.smooth_tick,
                 )
             } else {
                 (now_seconds, 0.0)
             };
-            self.accuracy.on_playback_start_at(start_time, last_tick);
+            self.accuracy.tracker.on_playback_start_at(start_time, last_tick);
         }
 
-        let accuracy_active = self.accuracy.update_state(
+        let accuracy_active = self.accuracy.tracker.update_state(
             self.transport_state == TransportState::Playing,
             is_connected,
             now_seconds,
@@ -287,7 +280,7 @@ impl Grooph {
                         && ticks_per_measure > 0.0
                         && !beat_onsets.is_empty()
                     {
-                        self.accuracy.record_hit(
+                        self.accuracy.tracker.record_hit(
                             timestamp,
                             ticks_per_sec,
                             ticks_per_measure,
@@ -310,7 +303,7 @@ impl Grooph {
             && ticks_per_measure > 0.0
             && !beat_onsets.is_empty()
         {
-            self.accuracy.update_progress(
+            self.accuracy.tracker.update_progress(
                 now_seconds,
                 ticks_per_sec,
                 ticks_per_measure,
@@ -320,7 +313,7 @@ impl Grooph {
         }
     }
 
-    fn clear_accuracy_for_edit(&mut self) { self.accuracy.clear_for_edit(); }
+    fn clear_accuracy_for_edit(&mut self) { self.accuracy.tracker.clear_for_edit(); }
 
     fn push_undo(&mut self) { self.undo_stack.push((self.measure.clone(), self.cursor_idx)); }
 
@@ -437,31 +430,24 @@ impl Grooph {
         }
     }
 
-    fn reset_playback_state(&mut self) {
-        self.playback_last_update = None;
-        self.playback_smooth_tick = 0.0;
-        self.flash_intensity = 0.0;
-        self.last_primary_beat = None;
-    }
-
     fn start_playback(&mut self) {
         if self.transport_state == TransportState::Playing {
             return;
         }
         self.transport_state = TransportState::Playing;
         let accuracy_start = self
-            .midi_input
+            .midi
+            .input
             .as_ref()
             .and_then(|input| if input.is_connected() { Some(input.now_seconds()) } else { None });
-        if self.accuracy_enabled {
-            self.accuracy.on_playback_start(accuracy_start);
+        if self.accuracy.enabled {
+            self.accuracy.tracker.on_playback_start(accuracy_start);
         } else {
-            self.accuracy.on_playback_stop();
+            self.accuracy.tracker.on_playback_stop();
         }
-        self.reset_playback_state();
+        self.playback.reset();
 
-        #[cfg(target_arch = "wasm32")]
-        self.acquire_wake_lock();
+        self.platform.acquire_wake_lock();
     }
 
     fn stop_transport(&mut self) {
@@ -469,11 +455,10 @@ impl Grooph {
             return;
         }
         self.transport_state = TransportState::Stopped;
-        self.accuracy.on_playback_stop();
-        self.reset_playback_state();
+        self.accuracy.tracker.on_playback_stop();
+        self.playback.reset();
 
-        #[cfg(target_arch = "wasm32")]
-        self.release_wake_lock();
+        self.platform.release_wake_lock();
     }
 
     pub fn toggle_playback(&mut self) {
@@ -485,29 +470,17 @@ impl Grooph {
     }
 
     fn set_accuracy_enabled(&mut self, enabled: bool) {
-        if self.accuracy_enabled == enabled {
-            return;
-        }
-        self.accuracy_enabled = enabled;
-        if enabled {
-            if self.transport_state == TransportState::Playing {
-                self.accuracy.on_playback_stop();
-            } else {
-                self.clear_accuracy_for_edit();
-            }
-            return;
-        }
-        self.accuracy.on_playback_stop();
+        self.accuracy.set_enabled(enabled, self.transport_state);
     }
 
     fn handle_bpm_change(&mut self) {
-        if !self.accuracy_enabled {
+        if !self.accuracy.enabled {
             return;
         }
         if self.transport_state != TransportState::Playing {
             return;
         }
-        let Some(input) = self.midi_input.as_ref() else {
+        let Some(input) = self.midi.input.as_ref() else {
             return;
         };
         if !input.is_connected() {
@@ -522,8 +495,8 @@ impl Grooph {
         }
 
         let now_seconds = input.now_seconds();
-        let start_time = now_seconds - (self.playback_smooth_tick / ticks_per_sec);
-        self.accuracy.realign_start_time(start_time, self.playback_smooth_tick);
+        let start_time = now_seconds - (self.playback.smooth_tick / ticks_per_sec);
+        self.accuracy.tracker.realign_start_time(start_time, self.playback.smooth_tick);
     }
 
     fn default_measure() -> Measure {
@@ -674,7 +647,10 @@ impl Grooph {
             let _ = input.connect(idx);
         }
 
-        let this = Self {
+        let platform = PlatformRuntime::new();
+        platform.install_listeners(cc.egui_ctx.clone());
+
+        Self {
             mode: Mode::Playback,
             music_font_id: FontId::new(16.0, ff),
             measure: state.measure,
@@ -688,34 +664,21 @@ impl Grooph {
             transport_state: TransportState::Stopped,
             bpm: state.bpm,
             audio: None,
-            audio_settings: state.audio_settings,
-            playback_smooth_tick: 0.0,
-            playback_last_update: None,
-            accuracy: AccuracyTracker::new(),
-            accuracy_enabled: state.accuracy_enabled,
-            flash_intensity: 0.0,
-            last_primary_beat: None,
-            #[cfg(target_arch = "wasm32")]
-            wake_lock: Rc::new(RefCell::new(None)),
-            layout_width_cap_factor: 0.1,
-            layout_accent_below: false,
-            layout_proportional_spacing: true,
-            layout_stem_length_factor: 0.9,
-            layout_debug_bbox: false,
-            audio_offset: state.audio_offset,
-            audio_latency_enabled: state.audio_latency_enabled,
+            audio_cfg: AudioConfig {
+                settings: state.audio_settings,
+                offset: state.audio_offset,
+                latency_enabled: state.audio_latency_enabled,
+            },
+            layout: LayoutSettings::default(),
+            playback: PlaybackState::default(),
+            accuracy: AccuracyState::new(state.accuracy_enabled),
+            midi: MidiState {
+                input: midi_input,
+                available_ports: midi_input_ports,
+                selected_port_id: midi_selected_port_id,
+            },
             counting: state.counting,
-            midi_input,
-            midi_input_ports,
-            midi_selected_port_id,
-        };
-
-        // WASM: install visibilitychange/pageshow listeners once
-        #[cfg(target_arch = "wasm32")]
-        {
-            web::install_visibility_listeners(cc.egui_ctx.clone());
+            platform,
         }
-
-        this
     }
 }

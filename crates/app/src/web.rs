@@ -1,23 +1,18 @@
-use crate::Grooph;
+use crate::platform::VisibilityEvent;
 use eframe::egui::Context;
-use log::{debug, error, info};
+use log::{debug, error};
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU8, Ordering};
 use wasm_bindgen_futures::JsFuture;
-use web_sys::{WakeLockSentinel, WakeLockType};
 use web_sys::wasm_bindgen::JsCast as _;
 use web_sys::wasm_bindgen::closure::Closure;
+use web_sys::{WakeLockSentinel, WakeLockType};
 
 // 0 = None, 1 = Hidden, 2 = Visible, 3 = PageShow
 static PENDING: AtomicU8 = AtomicU8::new(0);
 static IS_MOBILE: OnceLock<bool> = OnceLock::new();
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum VisibilityEvent {
-    Hidden,
-    Visible,
-    PageShow,
-}
 
 fn take_pending_visibility_event() -> Option<VisibilityEvent> {
     match PENDING.swap(0, Ordering::SeqCst) {
@@ -28,7 +23,7 @@ fn take_pending_visibility_event() -> Option<VisibilityEvent> {
     }
 }
 
-pub fn install_visibility_listeners(ctx: Context) {
+fn install_visibility_listeners(ctx: Context) {
     // Only install visibility listeners on mobile browsers. On desktop, keep audio running.
     let is_mobile = is_mobile_browser();
     if !is_mobile {
@@ -70,27 +65,23 @@ pub fn install_visibility_listeners(ctx: Context) {
     }
 }
 
-impl Grooph {
-    pub(super) fn handle_visibility_change(&mut self) {
+pub(crate) struct PlatformRuntime {
+    wake_lock: Rc<RefCell<Option<WakeLockSentinel>>>,
+}
+
+impl PlatformRuntime {
+    pub(crate) fn new() -> Self { Self { wake_lock: Rc::new(RefCell::new(None)) } }
+
+    pub(crate) fn install_listeners(&self, ctx: Context) { install_visibility_listeners(ctx); }
+
+    pub(crate) fn take_visibility_event(&self) -> Option<VisibilityEvent> {
         if !is_mobile_browser() {
-            return;
+            return None;
         }
-        if let Some(ev) = take_pending_visibility_event() {
-            match ev {
-                VisibilityEvent::Hidden => {
-                    // going hidden
-                    self.stop_transport();
-                    self.audio = None;
-                }
-                VisibilityEvent::Visible | VisibilityEvent::PageShow => {
-                    // returning visible: drop audio to force clean re-init
-                    self.audio = None;
-                }
-            }
-        }
+        take_pending_visibility_event()
     }
 
-    pub(super) fn acquire_wake_lock(&self) {
+    pub(crate) fn acquire_wake_lock(&self) {
         let wake_lock_store = self.wake_lock.clone();
         if wake_lock_store.borrow().is_some() {
             return;
@@ -118,7 +109,7 @@ impl Grooph {
         });
     }
 
-    pub(super) fn release_wake_lock(&self) {
+    pub(crate) fn release_wake_lock(&self) {
         let wake_lock_store = self.wake_lock.clone();
         if let Some(sentinel) = wake_lock_store.borrow_mut().take() {
             wasm_bindgen_futures::spawn_local(async move {

@@ -64,8 +64,8 @@ impl Grooph {
                             if ui.selectable_label(self.mode == Mode::Settings, "⚙").clicked() {
                                 self.toggle_mode(Mode::Settings);
                             }
-                            if ui.selectable_label(self.accuracy_enabled, "🎯").clicked() {
-                                self.set_accuracy_enabled(!self.accuracy_enabled);
+                            if ui.selectable_label(self.accuracy.enabled, "🎯").clicked() {
+                                self.set_accuracy_enabled(!self.accuracy.enabled);
                             }
                             if ui.selectable_label(self.mode == Mode::Help, "?").clicked() {
                                 self.toggle_mode(Mode::Help);

@@ -27,12 +27,12 @@ impl Grooph {
                             let ticks_per_sec = (self.bpm as f64 / 60.0) * ticks_per_beat;
 
                             let now = ui.input(|i| i.time);
-                            let last = self.playback_last_update.unwrap_or(now);
+                            let last = self.playback.last_update.unwrap_or(now);
                             let dt = now - last;
-                            self.playback_last_update = Some(now);
+                            self.playback.last_update = Some(now);
 
                             // Advance predictor
-                            let mut next_tick = self.playback_smooth_tick + ticks_per_sec * dt;
+                            let mut next_tick = self.playback.smooth_tick + ticks_per_sec * dt;
 
                             // Sync with audio if available
                             if self.transport_state == TransportState::Playing
@@ -43,8 +43,8 @@ impl Grooph {
                                 let total = audio_total as f64;
                                 if total > 0.0 {
                                     // Adjust for user-configured audio offset (latency) if enabled
-                                    let offset_ticks = if self.audio_latency_enabled {
-                                        self.audio_offset as f64 * ticks_per_sec
+                                    let offset_ticks = if self.audio_cfg.latency_enabled {
+                                        self.audio_cfg.offset as f64 * ticks_per_sec
                                     } else {
                                         0.0
                                     };
@@ -72,35 +72,32 @@ impl Grooph {
                             if ticks_per_measure > 0.0 {
                                 next_tick = next_tick.rem_euclid(ticks_per_measure);
                             }
-                            self.playback_smooth_tick = next_tick;
+                            self.playback.smooth_tick = next_tick;
 
                             // Flash: trigger on primary beat change
                             let current_primary_beat = (next_tick / ticks_per_beat).floor() as u32;
-                            if self.last_primary_beat != Some(current_primary_beat) {
-                                self.flash_intensity = 1.0;
-                                self.last_primary_beat = Some(current_primary_beat);
+                            if self.playback.last_primary_beat != Some(current_primary_beat) {
+                                self.playback.flash_intensity = 1.0;
+                                self.playback.last_primary_beat = Some(current_primary_beat);
                             }
 
                             // Exponential decay towards 0
                             let decay_per_sec = 10.0; // larger -> faster fade
                             let decay = (-decay_per_sec * dt).exp();
-                            self.flash_intensity *= decay as f32;
+                            self.playback.flash_intensity *= decay as f32;
 
                             // Keep animation loop running
                             ui.ctx().request_repaint_after(std::time::Duration::from_millis(16));
 
-                            Some(self.playback_smooth_tick)
+                            Some(self.playback.smooth_tick)
                         }
                         TransportState::Stopped => {
-                            self.playback_last_update = None;
-                            self.playback_smooth_tick = 0.0;
-                            self.flash_intensity = 0.0;
-                            self.last_primary_beat = None;
+                            self.playback.reset();
                             None
                         }
                     };
 
-                    let em = compute_em(&rect, self.layout_width_cap_factor, ui);
+                    let em = compute_em(&rect, self.layout.width_cap_factor, ui);
                     let font_id = FontId::new(em, self.music_font_id.family.clone());
 
                     let metrics = GlyphMetrics::measure(ui, &font_id);
@@ -113,12 +110,12 @@ impl Grooph {
                         layout_clef: true,
                         layout_time_signature: true,
                         y_offset: 0.0,
-                        stem_length_factor: self.layout_stem_length_factor,
+                        stem_length_factor: self.layout.stem_length_factor,
                         stem_thickness_factor: 0.04,
                         accent_displacement: 0.07,
-                        accent_below: self.layout_accent_below,
-                        proportional_spacing: self.layout_proportional_spacing,
-                        debug_bbox: self.layout_debug_bbox,
+                        accent_below: self.layout.accent_below,
+                        proportional_spacing: self.layout.proportional_spacing,
+                        debug_bbox: self.layout.debug_bbox,
                         metrics,
                     };
 
@@ -133,10 +130,10 @@ impl Grooph {
                     );
 
                     // Draw flash overlay (white on dark, black on light) with decay
-                    if self.flash_intensity > 0.01 {
+                    if self.playback.flash_intensity > 0.01 {
                         let dark = ui.visuals().dark_mode;
                         let base = if dark { egui::Color32::GREEN } else { egui::Color32::BLUE };
-                        let alpha = (0.8 * self.flash_intensity).clamp(0.0, 0.8);
+                        let alpha = (0.8 * self.playback.flash_intensity).clamp(0.0, 0.8);
                         let color = egui::Color32::from_rgba_unmultiplied(
                             base.r(),
                             base.g(),
@@ -159,10 +156,10 @@ impl Grooph {
         layout: &MeasureLayout,
         metrics: &GlyphMetrics,
     ) {
-        if !self.accuracy_enabled {
+        if !self.accuracy.enabled {
             return;
         }
-        let Some(midi_input) = self.midi_input.as_ref() else {
+        let Some(midi_input) = self.midi.input.as_ref() else {
             return;
         };
         if !midi_input.is_connected() {
@@ -195,7 +192,7 @@ impl Grooph {
             let Some(onset_tick) = onsets.get(idx) else {
                 continue;
             };
-            let Some(mark) = self.accuracy.mark_for_onset(*onset_tick) else {
+            let Some(mark) = self.accuracy.tracker.mark_for_onset(*onset_tick) else {
                 continue;
             };
             match mark {
