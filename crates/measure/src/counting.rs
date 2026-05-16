@@ -158,6 +158,98 @@ struct LabelContext {
     sub_num: u8,
 }
 
+#[derive(Clone, Copy)]
+struct ScopeSpan {
+    scope: CountScope,
+    scope_idx: u32,
+    start_tick: u32,
+    end_tick: u32,
+    tuplet_id: Option<u32>,
+    tuplet_n: Option<u8>,
+}
+
+impl ScopeSpan {
+    fn from_span(scope: CountScope, span: Span) -> Self {
+        Self {
+            scope,
+            scope_idx: span.idx,
+            start_tick: span.start_tick,
+            end_tick: span.end_tick,
+            tuplet_id: None,
+            tuplet_n: None,
+        }
+    }
+
+    fn from_tuplet(span: TupletSpan) -> Self {
+        Self {
+            scope: CountScope::Tuplet(span.id),
+            scope_idx: span.idx,
+            start_tick: span.start_tick,
+            end_tick: span.end_tick,
+            tuplet_id: Some(span.id),
+            tuplet_n: Some(span.n),
+        }
+    }
+}
+
+struct CountContext<'a> {
+    slots: &'a mut Vec<CountSlot>,
+    ticks_per_beat: u32,
+    primary_groups: &'a [Span],
+}
+
+impl<'a> CountContext<'a> {
+    fn push_slots(&mut self, layer: &CountLayer, span: ScopeSpan) {
+        let subdiv = resolve_subdiv(layer.subdiv, span.tuplet_n);
+        let span_ticks = span.end_tick.saturating_sub(span.start_tick);
+        if subdiv == 0 || span_ticks == 0 {
+            return;
+        }
+        let subdiv_u32 = subdiv as u32;
+        if !span_ticks.is_multiple_of(subdiv_u32) {
+            return;
+        }
+        let step = span_ticks / subdiv_u32;
+        for sub_idx in 0..subdiv {
+            let sub_idx_u32 = sub_idx as u32;
+            let slot_start = span.start_tick + step * sub_idx_u32;
+            let slot_end = slot_start + step;
+            let beat_num = (slot_start / self.ticks_per_beat) + 1;
+            let group_num = group_num_for_tick(self.primary_groups, slot_start);
+            let ctx = LabelContext { beat_num, group_num, sub_num: sub_idx + 1 };
+            let label = if layer.show_labels {
+                layer.labels.as_ref().and_then(|p| {
+                    let tuplet_kind = span.tuplet_n.map(TupletKind::from_n);
+                    if p.is_triplet() && tuplet_kind.is_some_and(|k| k != TupletKind::Triplet) {
+                        label_from_tokens(&[LabelToken::SubNum], &ctx)
+                    } else {
+                        label_for_slot(p, sub_idx, &ctx)
+                    }
+                })
+            } else {
+                None
+            };
+            let color = if layer.show_colors {
+                layer.colors.as_ref().and_then(|p| color_for_slot(p, span.scope_idx, sub_idx))
+            } else {
+                None
+            };
+            self.slots.push(CountSlot {
+                layer_id: layer.id,
+                scope: span.scope,
+                scope_idx: span.scope_idx,
+                sub_idx,
+                start_tick: slot_start,
+                end_tick: slot_end,
+                label,
+                color,
+                priority: layer.priority,
+                tuplet_id: span.tuplet_id,
+            });
+        }
+    }
+}
+
 pub fn build_count_slots(measure: &Measure, config: &CountConfig) -> Vec<CountSlot> {
     let ts = measure.time_signature();
     let ticks_per_beat = DEFAULT_GRID.ticks_per_beat(&ts);
@@ -172,88 +264,41 @@ pub fn build_count_slots(measure: &Measure, config: &CountConfig) -> Vec<CountSl
     let tuplets = tuplet_spans(measure, measure_ticks);
 
     let mut slots = Vec::new();
-    for layer in &config.layers {
-        if !layer.enabled {
-            continue;
-        }
-        match layer.scope {
-            CountScope::Measure => {
-                let span = Span { start_tick: 0, end_tick: measure_ticks, idx: 0 };
-                push_slots_for_span(
-                    &mut slots,
-                    layer,
-                    CountScope::Measure,
-                    span.idx,
-                    span.start_tick,
-                    span.end_tick,
-                    None,
-                    None,
-                    ticks_per_beat,
-                    &primary_groups,
-                );
+    {
+        let mut ctx =
+            CountContext { slots: &mut slots, ticks_per_beat, primary_groups: &primary_groups };
+
+        for layer in &config.layers {
+            if !layer.enabled {
+                continue;
             }
-            CountScope::PrimaryGroup => {
-                for span in &primary_groups {
-                    push_slots_for_span(
-                        &mut slots,
-                        layer,
-                        CountScope::PrimaryGroup,
-                        span.idx,
-                        span.start_tick,
-                        span.end_tick,
-                        None,
-                        None,
-                        ticks_per_beat,
-                        &primary_groups,
-                    );
+            match layer.scope {
+                CountScope::Measure => {
+                    let span = Span { start_tick: 0, end_tick: measure_ticks, idx: 0 };
+                    ctx.push_slots(layer, ScopeSpan::from_span(CountScope::Measure, span));
                 }
-            }
-            CountScope::BeatUnit => {
-                for span in &beat_units {
-                    push_slots_for_span(
-                        &mut slots,
-                        layer,
-                        CountScope::BeatUnit,
-                        span.idx,
-                        span.start_tick,
-                        span.end_tick,
-                        None,
-                        None,
-                        ticks_per_beat,
-                        &primary_groups,
-                    );
+                CountScope::PrimaryGroup => {
+                    for span in &primary_groups {
+                        ctx.push_slots(
+                            layer,
+                            ScopeSpan::from_span(CountScope::PrimaryGroup, *span),
+                        );
+                    }
                 }
-            }
-            CountScope::TupletAll => {
-                for span in &tuplets {
-                    push_slots_for_span(
-                        &mut slots,
-                        layer,
-                        CountScope::Tuplet(span.id),
-                        span.idx,
-                        span.start_tick,
-                        span.end_tick,
-                        Some(span.id),
-                        Some(span.n),
-                        ticks_per_beat,
-                        &primary_groups,
-                    );
+                CountScope::BeatUnit => {
+                    for span in &beat_units {
+                        ctx.push_slots(layer, ScopeSpan::from_span(CountScope::BeatUnit, *span));
+                    }
                 }
-            }
-            CountScope::Tuplet(id) => {
-                if let Some(span) = tuplets.iter().find(|s| s.id == id) {
-                    push_slots_for_span(
-                        &mut slots,
-                        layer,
-                        CountScope::Tuplet(id),
-                        span.idx,
-                        span.start_tick,
-                        span.end_tick,
-                        Some(span.id),
-                        Some(span.n),
-                        ticks_per_beat,
-                        &primary_groups,
-                    );
+                CountScope::TupletAll => {
+                    for span in &tuplets {
+                        ctx.push_slots(layer, ScopeSpan::from_tuplet(*span));
+                    }
+                }
+                CountScope::Tuplet(id) => {
+                    if let Some(span) = tuplets.iter().find(|s| s.id == id) {
+                        ctx.push_slots(layer, ScopeSpan::from_tuplet(*span));
+                    }
                 }
             }
         }
@@ -314,70 +359,6 @@ fn tuplet_spans(measure: &Measure, measure_ticks: u32) -> Vec<TupletSpan> {
             TupletSpan { id: group.id, idx: idx as u32, start_tick, end_tick, n: anchor.n }
         })
         .collect()
-}
-
-#[allow(clippy::too_many_arguments)]
-fn push_slots_for_span(
-    slots: &mut Vec<CountSlot>,
-    layer: &CountLayer,
-    scope: CountScope,
-    scope_idx: u32,
-    start_tick: u32,
-    end_tick: u32,
-    tuplet_id: Option<u32>,
-    tuplet_n: Option<u8>,
-    ticks_per_beat: u32,
-    primary_groups: &[Span],
-) {
-    let subdiv = resolve_subdiv(layer.subdiv, tuplet_n);
-    let span_ticks = end_tick.saturating_sub(start_tick);
-    if subdiv == 0 || span_ticks == 0 {
-        return;
-    }
-    let subdiv_u32 = subdiv as u32;
-    if !span_ticks.is_multiple_of(subdiv_u32) {
-        return;
-    }
-    let step = span_ticks / subdiv_u32;
-    for sub_idx in 0..subdiv {
-        let sub_idx_u32 = sub_idx as u32;
-        let slot_start = start_tick + step * sub_idx_u32;
-        let slot_end = slot_start + step;
-        let beat_num = (slot_start / ticks_per_beat) + 1;
-        let group_num = group_num_for_tick(primary_groups, slot_start);
-        let ctx = LabelContext { beat_num, group_num, sub_num: sub_idx + 1 };
-        let label = if layer.show_labels {
-            layer.labels.as_ref().and_then(|p| {
-                let tuplet_kind = tuplet_n.map(TupletKind::from_n);
-                if p.is_triplet()
-                    && tuplet_kind.is_some_and(|k| k != TupletKind::Triplet)
-                {
-                    label_from_tokens(&[LabelToken::SubNum], &ctx)
-                } else {
-                    label_for_slot(p, sub_idx, &ctx)
-                }
-            })
-        } else {
-            None
-        };
-        let color = if layer.show_colors {
-            layer.colors.as_ref().and_then(|p| color_for_slot(p, scope_idx, sub_idx))
-        } else {
-            None
-        };
-        slots.push(CountSlot {
-            layer_id: layer.id,
-            scope,
-            scope_idx,
-            sub_idx,
-            start_tick: slot_start,
-            end_tick: slot_end,
-            label,
-            color,
-            priority: layer.priority,
-            tuplet_id,
-        });
-    }
 }
 
 fn resolve_subdiv(subdiv: Subdiv, tuplet_n: Option<u8>) -> u8 {
