@@ -3,10 +3,10 @@
 //! This module defines data-only types (no UI/logic) so that the palette
 //! can be rendered dynamically without hardcoding entries in `app.rs`.
 
-use eframe::egui::Key;
+use eframe::egui::{InputState, Key};
 use grooph_measure::BeatKind;
-use grooph_measure::duration::{Duration, TupletSpec};
 use grooph_measure::duration::NoteValue::{Eighth, Quarter, Sixteenth, ThirtySecond};
+use grooph_measure::duration::{Duration, TupletSpec};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ToolGroup {
@@ -70,7 +70,21 @@ impl ToolKind {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Shortcut {
     pub key: Key,
-    pub with_shift: bool,
+    pub shift: bool,
+    /// Ctrl on Windows/Linux, Cmd on macOS — egui's `modifiers.command` plus raw `ctrl`.
+    pub command: bool,
+}
+
+impl Shortcut {
+    pub const fn plain(key: Key) -> Self { Self { key, shift: false, command: false } }
+
+    pub fn is_pressed(&self, i: &InputState) -> bool {
+        if !i.key_pressed(self.key) {
+            return false;
+        }
+        let command_pressed = i.modifiers.command || i.modifiers.ctrl;
+        i.modifiers.shift == self.shift && command_pressed == self.command
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -79,8 +93,19 @@ pub struct Tool {
     pub label: &'static str,
     pub group: ToolGroup,
     pub kind: ToolKind,
-    pub shortcut: Option<Shortcut>,
+    pub shortcuts: &'static [Shortcut],
     pub show_in_palette: bool,
+}
+
+impl Tool {
+    pub fn matches(&self, i: &InputState) -> bool {
+        self.shortcuts.iter().any(|sc| sc.is_pressed(i))
+    }
+}
+
+/// Returns the first tool whose shortcut matches the current input state.
+pub fn matching_tool(i: &InputState) -> Option<&'static Tool> {
+    all_tools().iter().find(|t| t.matches(i))
 }
 
 /// Static registry of all tools shown in the palette.
@@ -94,7 +119,7 @@ pub fn all_tools() -> &'static [Tool] {
             label: "⟲",
             group: ToolGroup::Edit,
             kind: ToolKind::Edit(EditOp::Undo),
-            shortcut: None,
+            shortcuts: &[Shortcut { key: Key::Z, shift: false, command: true }],
             show_in_palette: true,
         },
         Tool {
@@ -102,7 +127,10 @@ pub fn all_tools() -> &'static [Tool] {
             label: "⟳",
             group: ToolGroup::Edit,
             kind: ToolKind::Edit(EditOp::Redo),
-            shortcut: None,
+            shortcuts: &[
+                Shortcut { key: Key::Z, shift: true, command: true },
+                Shortcut { key: Key::Y, shift: false, command: true },
+            ],
             show_in_palette: true,
         },
         // Notes
@@ -111,7 +139,7 @@ pub fn all_tools() -> &'static [Tool] {
             label: "Quarter",
             group: ToolGroup::Notes,
             kind: ToolKind::InsertBeat(BeatTemplate { duration: Simple(Quarter), kind: Note, accented: false }),
-            shortcut: Some(Shortcut { key: Key::Num1, with_shift: false }),
+            shortcuts: &[Shortcut::plain(Key::Num1)],
             show_in_palette: true,
         },
         Tool {
@@ -119,7 +147,7 @@ pub fn all_tools() -> &'static [Tool] {
             label: "Eighth",
             group: ToolGroup::Notes,
             kind: ToolKind::InsertBeat(BeatTemplate { duration: Simple(Eighth), kind: Note, accented: false }),
-            shortcut: Some(Shortcut { key: Key::Num2, with_shift: false }),
+            shortcuts: &[Shortcut::plain(Key::Num2)],
             show_in_palette: true,
         },
         Tool {
@@ -127,7 +155,7 @@ pub fn all_tools() -> &'static [Tool] {
             label: "Sixteenth",
             group: ToolGroup::Notes,
             kind: ToolKind::InsertBeat(BeatTemplate { duration: Simple(Sixteenth), kind: Note, accented: false }),
-            shortcut: Some(Shortcut { key: Key::Num3, with_shift: false }),
+            shortcuts: &[Shortcut::plain(Key::Num3)],
             show_in_palette: true,
         },
         Tool {
@@ -135,7 +163,7 @@ pub fn all_tools() -> &'static [Tool] {
             label: "Thirty-Second",
             group: ToolGroup::Notes,
             kind: ToolKind::InsertBeat(BeatTemplate { duration: Simple(ThirtySecond), kind: Note, accented: false }),
-            shortcut: Some(Shortcut { key: Key::Num4, with_shift: false }),
+            shortcuts: &[Shortcut::plain(Key::Num4)],
             show_in_palette: true,
         },
         // Rests
@@ -144,7 +172,7 @@ pub fn all_tools() -> &'static [Tool] {
             label: "Quarter rest",
             group: ToolGroup::Rests,
             kind: ToolKind::InsertBeat(BeatTemplate { duration: Simple(Quarter), kind: Rest, accented: false }),
-            shortcut: None,
+            shortcuts: &[],
             show_in_palette: true,
         },
         Tool {
@@ -152,7 +180,7 @@ pub fn all_tools() -> &'static [Tool] {
             label: "Eighth rest",
             group: ToolGroup::Rests,
             kind: ToolKind::InsertBeat(BeatTemplate { duration: Simple(Eighth), kind: Rest, accented: false }),
-            shortcut: None,
+            shortcuts: &[],
             show_in_palette: true,
         },
         Tool {
@@ -160,7 +188,7 @@ pub fn all_tools() -> &'static [Tool] {
             label: "Sixteenth rest",
             group: ToolGroup::Rests,
             kind: ToolKind::InsertBeat(BeatTemplate { duration: Simple(Sixteenth), kind: Rest, accented: false }),
-            shortcut: None,
+            shortcuts: &[],
             show_in_palette: true,
         },
         Tool {
@@ -168,7 +196,7 @@ pub fn all_tools() -> &'static [Tool] {
             label: "Thirty-Second rest",
             group: ToolGroup::Rests,
             kind: ToolKind::InsertBeat(BeatTemplate { duration: Simple(ThirtySecond), kind: Rest, accented: false }),
-            shortcut: None,
+            shortcuts: &[],
             show_in_palette: true,
         },
         // Modifiers
@@ -177,7 +205,7 @@ pub fn all_tools() -> &'static [Tool] {
             label: "Toggle Dotted",
             group: ToolGroup::Modifiers,
             kind: ToolKind::Modify(Modifier::ToggleDotted { dots: 1 }),
-            shortcut: Some(Shortcut { key: Key::Period, with_shift: false }),
+            shortcuts: &[Shortcut::plain(Key::Period)],
             show_in_palette: true,
         },
         Tool {
@@ -185,7 +213,7 @@ pub fn all_tools() -> &'static [Tool] {
             label: "Toggle Accent",
             group: ToolGroup::Modifiers,
             kind: ToolKind::Modify(Modifier::ToggleAccent),
-            shortcut: Some(Shortcut { key: Key::A, with_shift: false }),
+            shortcuts: &[Shortcut::plain(Key::A)],
             show_in_palette: true,
         },
         Tool {
@@ -193,7 +221,7 @@ pub fn all_tools() -> &'static [Tool] {
             label: "Toggle Note/Rest",
             group: ToolGroup::Modifiers,
             kind: ToolKind::Modify(Modifier::ToggleRestNote),
-            shortcut: Some(Shortcut { key: Key::Enter, with_shift: false }),
+            shortcuts: &[Shortcut::plain(Key::Enter)],
             show_in_palette: false,
         },
         Tool {
@@ -201,7 +229,7 @@ pub fn all_tools() -> &'static [Tool] {
             label: "Cycle Tuplet",
             group: ToolGroup::Tuplets,
             kind: ToolKind::Modify(Modifier::CycleTuplet),
-            shortcut: Some(Shortcut { key: Key::T, with_shift: false }),
+            shortcuts: &[Shortcut::plain(Key::T)],
             show_in_palette: false,
         },
         Tool {
@@ -213,7 +241,7 @@ pub fn all_tools() -> &'static [Tool] {
                 kind: Note,
                 accented: false,
             }),
-            shortcut: None,
+            shortcuts: &[],
             show_in_palette: true,
         },
         Tool {
@@ -225,7 +253,7 @@ pub fn all_tools() -> &'static [Tool] {
                 kind: Note,
                 accented: false,
             }),
-            shortcut: None,
+            shortcuts: &[],
             show_in_palette: true,
         },
         Tool {
@@ -237,7 +265,7 @@ pub fn all_tools() -> &'static [Tool] {
                 kind: Note,
                 accented: false,
             }),
-            shortcut: None,
+            shortcuts: &[],
             show_in_palette: true,
         },
         Tool {
@@ -249,7 +277,7 @@ pub fn all_tools() -> &'static [Tool] {
                 kind: Note,
                 accented: false,
             }),
-            shortcut: None,
+            shortcuts: &[],
             show_in_palette: true,
         },
         Tool {
@@ -261,7 +289,7 @@ pub fn all_tools() -> &'static [Tool] {
                 kind: Note,
                 accented: false,
             }),
-            shortcut: None,
+            shortcuts: &[],
             show_in_palette: true,
         },
         Tool {
@@ -273,7 +301,7 @@ pub fn all_tools() -> &'static [Tool] {
                 kind: Note,
                 accented: false,
             }),
-            shortcut: None,
+            shortcuts: &[],
             show_in_palette: true,
         },
         Tool {
@@ -281,7 +309,7 @@ pub fn all_tools() -> &'static [Tool] {
             label: "🗑",
             group: ToolGroup::Meta,
             kind: ToolKind::Meta(MetaOp::ResetMeasure),
-            shortcut: None,
+            shortcuts: &[],
             show_in_palette: true,
         },
         Tool {
@@ -289,7 +317,7 @@ pub fn all_tools() -> &'static [Tool] {
             label: "4/4",
             group: ToolGroup::Meta,
             kind: ToolKind::Meta(MetaOp::ChangeTimeSignature),
-            shortcut: None,
+            shortcuts: &[],
             show_in_palette: true,
         },
     ];

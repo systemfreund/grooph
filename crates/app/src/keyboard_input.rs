@@ -1,6 +1,6 @@
 use crate::Grooph;
 use crate::Mode;
-use crate::tools::all_tools;
+use crate::tools::matching_tool;
 use eframe::egui;
 use eframe::egui::Key;
 
@@ -28,25 +28,8 @@ impl Grooph {
                 return;
             }
 
-            // Undo / Redo shortcuts: Ctrl/Cmd+Z (undo), Ctrl/Cmd+Shift+Z or Ctrl/Cmd+Y (redo).
-            // The Shortcut model does not yet carry Ctrl/Cmd, so these stay hard-coded for now.
-            let mut consumed_undo_redo = false;
-            let undo_combo = i.key_pressed(Key::Z) && (i.modifiers.command || i.modifiers.ctrl);
-            let redo_combo_z = i.key_pressed(Key::Z)
-                && (i.modifiers.command || i.modifiers.ctrl)
-                && i.modifiers.shift;
-            let redo_combo_y = i.key_pressed(Key::Y) && (i.modifiers.command || i.modifiers.ctrl);
-            if undo_combo && !i.modifiers.shift {
-                self.undo();
-                consumed_undo_redo = true;
-            } else if redo_combo_z || redo_combo_y {
-                self.redo();
-                consumed_undo_redo = true;
-            }
-
             let beats_len = self.measure.beats().len();
-            if beats_len > 0 && !consumed_undo_redo {
-                // Navigation over committed beats only
+            if beats_len > 0 {
                 let mut pos = self.cursor_idx;
                 if i.key_pressed(Key::ArrowLeft) {
                     pos = pos.saturating_sub(1);
@@ -71,14 +54,10 @@ impl Grooph {
                 if i.key_pressed(Key::Backspace) {
                     self.remove_at_cursor(CursorAdvance::Left);
                 }
+            }
 
-                // Keyboard input routed through tool shortcuts
-                for t in all_tools().iter().filter(|t| t.shortcut.is_some()) {
-                    let sc = t.shortcut.unwrap();
-                    if i.key_pressed(sc.key) && i.modifiers.shift == sc.with_shift {
-                        self.apply_tool(t);
-                    }
-                }
+            if let Some(tool) = matching_tool(i) {
+                self.apply_tool(tool);
             }
         });
     }

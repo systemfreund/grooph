@@ -1,5 +1,5 @@
 use crate::Grooph;
-use crate::tools::{BeatTemplate, MetaOp, Modifier, Tool, ToolGroup, ToolKind, all_tools};
+use crate::tools::{MetaOp, Modifier, Tool, ToolGroup, ToolKind, all_tools};
 use crate::{Mode, tools};
 use grooph_layout::pixel_layout::{
     GlyphMetrics, LayoutOpts, build_measure_layout, build_time_sig_layout, compute_em,
@@ -21,6 +21,25 @@ use tools::EditOp;
 
 const TOOL_PALETTE_BUTTON_SIZE: f32 = 70.0;
 const TOOL_PALETTE_BUTTON_CORNER_RADIUS: f32 = 2.0;
+
+enum ButtonKind {
+    /// Renders a miniature notation using `note_button`.
+    Note,
+    /// Renders a stacked time-signature glyph.
+    TimeSignature,
+    /// Plain text/symbol button with optional disabled state.
+    Plain,
+}
+
+fn button_kind(kind: &ToolKind) -> ButtonKind {
+    match kind {
+        ToolKind::InsertBeat(..)
+        | ToolKind::Modify(Modifier::ToggleDotted { .. })
+        | ToolKind::Modify(Modifier::ToggleAccent) => ButtonKind::Note,
+        ToolKind::Meta(MetaOp::ChangeTimeSignature) => ButtonKind::TimeSignature,
+        _ => ButtonKind::Plain,
+    }
+}
 
 impl Grooph {
     pub(super) fn tool_palette_panel(&mut self, ctx: &Context) {
@@ -57,61 +76,33 @@ impl Grooph {
 
     fn tool_palette(&mut self, tools: Vec<&Tool>, groups: &[ToolGroup], ui: &mut Ui) {
         for g in groups {
-            let group_tools: Vec<_> = tools.iter().filter(|t| &t.group == g).collect();
-            if group_tools.is_empty() {
-                continue;
-            }
-
-            for t in group_tools {
-                match t.kind {
-                    ToolKind::InsertBeat(..) => {
-                        let button = self.note_button(ui, t.id);
-                        if button.clicked() {
-                            self.apply_tool(t);
-                        }
-                    }
-                    ToolKind::Modify(Modifier::ToggleDotted { .. }) => {
-                        let button = self.note_button(ui, t.id);
-                        if button.clicked() {
-                            self.apply_tool(t);
-                        }
-                    }
-                    ToolKind::Modify(Modifier::ToggleAccent) => {
-                        let button = self.note_button(ui, t.id);
-                        if button.clicked() {
-                            self.apply_tool(t);
-                        }
-                    }
-                    ToolKind::Meta(MetaOp::ChangeTimeSignature) => {
-                        let button = self.time_signature_button(ui, t.id);
-                        if button.clicked() {
-                            self.apply_tool(t);
-                        }
-                    }
-                    _ => {
-                        // Determine enabled state for specific tools (e.g., Undo/Redo)
-                        let enabled = match t.kind {
-                            ToolKind::Edit(EditOp::Undo) => !self.undo_stack.is_empty(),
-                            ToolKind::Edit(EditOp::Redo) => !self.redo_stack.is_empty(),
-                            _ => true,
-                        };
-
-                        let button = ui
-                            .add_enabled_ui(enabled, |ui| {
-                                ui.add_sized(
-                                    Vec2::splat(TOOL_PALETTE_BUTTON_SIZE),
-                                    Button::new(RichText::new(t.label).size(24.0))
-                                        .corner_radius(TOOL_PALETTE_BUTTON_CORNER_RADIUS),
-                                )
-                            })
-                            .inner;
-                        if button.clicked() {
-                            self.apply_tool(t);
-                        }
-                    }
+            for t in tools.iter().filter(|t| &t.group == g) {
+                let response = match button_kind(&t.kind) {
+                    ButtonKind::Note => self.note_button(ui, t.id),
+                    ButtonKind::TimeSignature => self.time_signature_button(ui, t.id),
+                    ButtonKind::Plain => self.plain_tool_button(ui, t),
+                };
+                if response.clicked() {
+                    self.apply_tool(t);
                 }
             }
         }
+    }
+
+    fn plain_tool_button(&self, ui: &mut Ui, tool: &Tool) -> Response {
+        let enabled = match tool.kind {
+            ToolKind::Edit(EditOp::Undo) => !self.undo_stack.is_empty(),
+            ToolKind::Edit(EditOp::Redo) => !self.redo_stack.is_empty(),
+            _ => true,
+        };
+        ui.add_enabled_ui(enabled, |ui| {
+            ui.add_sized(
+                Vec2::splat(TOOL_PALETTE_BUTTON_SIZE),
+                Button::new(RichText::new(tool.label).size(24.0))
+                    .corner_radius(TOOL_PALETTE_BUTTON_CORNER_RADIUS),
+            )
+        })
+        .inner
     }
 
     pub(super) fn apply_tool(&mut self, tool: &Tool) {
