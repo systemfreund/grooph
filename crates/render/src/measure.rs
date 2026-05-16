@@ -140,58 +140,74 @@ pub(crate) fn render_measure_at(
     }
 
     // Playback cursor
-    if let Some(tick) = playback_tick {
-        let ts = measure.time_signature();
-        let total_ticks = DEFAULT_GRID.ticks_per_measure(&ts) as f64;
-        if total_ticks > 0.0 && !measure_layout.notes.is_empty() {
-            let t = if tick.is_sign_negative() {
-                0.0
+    if let Some(tick) = playback_tick
+        && let Some(x) = playback_cursor_x(measure, measure_layout, rect, tick)
+    {
+        let top = rect.center().y + 0.7 * opts.em;
+        let bottom = rect.center().y - 0.7 * opts.em;
+        let base = ui.visuals().selection.stroke.color;
+        let cursor_color = Color32::from_rgba_unmultiplied(base.r(), base.g(), base.b(), 100);
+        painter.vline(x, Rangef::new(top, bottom), Stroke::new(0.1 * opts.em, cursor_color));
+    }
+}
+
+/// Pixel-X of the playback cursor for a given tick inside a measure's layout.
+///
+/// Interpolates between consecutive note centers using the tick onsets and
+/// durations from `DEFAULT_GRID`. Returns `None` if the measure has no notes
+/// or zero total ticks (i.e. nothing to point at). The interpolation matches
+/// what `render_measure_at` draws, so callers (e.g. auto-scroll in the panel)
+/// see the same X position as the on-screen cursor.
+pub fn playback_cursor_x(
+    measure: &Measure,
+    measure_layout: &MeasureLayout,
+    rect: Rect,
+    tick: f64,
+) -> Option<f32> {
+    let ts = measure.time_signature();
+    let total_ticks = DEFAULT_GRID.ticks_per_measure(&ts) as f64;
+    if total_ticks <= 0.0 || measure_layout.notes.is_empty() {
+        return None;
+    }
+    let t = if tick.is_sign_negative() {
+        0.0
+    } else {
+        let m = tick % total_ticks;
+        if m.is_nan() { 0.0 } else { m }
+    };
+
+    let onsets = DEFAULT_GRID.compute_onset_ticks(measure.beats());
+    let mut x = measure_layout.notes[0].center.x;
+
+    for (i, &onset) in onsets.iter().enumerate() {
+        let start = onset as f64;
+        let dur_ticks =
+            DEFAULT_GRID.ticks_of(&measure.beats()[i].duration).unwrap_or(0) as f64;
+        let end = start + dur_ticks;
+        if t >= start && t < end {
+            let x0 = measure_layout.notes[i].center.x;
+            let frac = if dur_ticks > 0.0 { (t - start) / dur_ticks } else { 0.0 };
+
+            if i + 1 < measure_layout.notes.len() {
+                let x1 = measure_layout.notes[i + 1].center.x;
+                x = x0 + ((x1 - x0) * (frac as f32));
             } else {
-                let m = tick % total_ticks;
-                if m.is_nan() { 0.0 } else { m }
-            };
+                // Smooth wrap: split travel between "after last note" and "before first note".
+                let x_first = measure_layout.notes[0].center.x;
+                let gap_after_last = rect.right() - x0;
+                let gap_before_first = x_first - measure_layout.notes_left_edge;
+                let total_dist = gap_after_last + gap_before_first;
 
-            let onsets = DEFAULT_GRID.compute_onset_ticks(measure.beats());
-            let mut x = measure_layout.notes[0].center.x;
-
-            for (i, &onset) in onsets.iter().enumerate() {
-                let start = onset as f64;
-                let dur_ticks =
-                    DEFAULT_GRID.ticks_of(&measure.beats()[i].duration).unwrap_or(0) as f64;
-                let end = start + dur_ticks;
-                if t >= start && t < end {
-                    let x0 = measure_layout.notes[i].center.x;
-                    let frac = if dur_ticks > 0.0 { (t - start) / dur_ticks } else { 0.0 };
-
-                    if i + 1 < measure_layout.notes.len() {
-                        let x1 = measure_layout.notes[i + 1].center.x;
-                        x = x0 + ((x1 - x0) * (frac as f32));
-                    } else {
-                        // Smooth wrap: split travel between "after last note" and "before first note".
-                        // First half of duration: travel right from last note.
-                        // Second half of duration: travel right towards first note (from left edge).
-                        let x_first = measure_layout.notes[0].center.x;
-                        let gap_after_last = rect.right() - x0;
-                        let gap_before_first = x_first - measure_layout.notes_left_edge;
-                        let total_dist = gap_after_last + gap_before_first;
-
-                        if frac < 0.5 {
-                            x = x0 + total_dist * (frac as f32);
-                        } else {
-                            x = x_first - total_dist * ((1.0 - frac) as f32);
-                        }
-                    }
-                    break;
+                if frac < 0.5 {
+                    x = x0 + total_dist * (frac as f32);
+                } else {
+                    x = x_first - total_dist * ((1.0 - frac) as f32);
                 }
             }
-
-            let top = rect.center().y + 0.7 * opts.em;
-            let bottom = rect.center().y - 0.7 * opts.em;
-            let base = ui.visuals().selection.stroke.color;
-            let cursor_color = Color32::from_rgba_unmultiplied(base.r(), base.g(), base.b(), 100);
-            painter.vline(x, Rangef::new(top, bottom), Stroke::new(0.1 * opts.em, cursor_color));
+            break;
         }
     }
+    Some(x)
 }
 
 pub fn draw_notes(

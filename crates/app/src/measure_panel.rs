@@ -127,6 +127,27 @@ impl Grooph {
 
                     let staff = build_staff_layout(&self.score, &staff_opts);
 
+                    // Auto-scroll: keep the playback cursor centered in the viewport.
+                    if let Some(t) = playback_tick_to_draw
+                        && let Some(placed) = staff.placed(self.cursor.measure_idx)
+                        && let Some(x) = grooph_render::measure::playback_cursor_x(
+                            &self.score.measures[placed.measure_idx],
+                            &placed.layout,
+                            placed.rect,
+                            t,
+                        )
+                    {
+                        let cursor_rect = egui::Rect::from_min_size(
+                            egui::pos2(x, placed.rect.top()),
+                            egui::vec2(1.0, placed.rect.height()),
+                        );
+                        ui.scroll_to_rect_animation(
+                            cursor_rect,
+                            Some(egui::Align::Center),
+                            eframe::egui::style::ScrollAnimation::none(),
+                        );
+                    }
+
                     let (rect, resp) = ui.allocate_exact_size(
                         staff.total_size,
                         egui::Sense::click_and_drag(),
