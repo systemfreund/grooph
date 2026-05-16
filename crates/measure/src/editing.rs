@@ -115,7 +115,7 @@ impl Measure {
         tuplet_spec: Option<TupletSpec>,
         overwrite: bool,
     ) -> Option<Modification> {
-        let start_idx = self.find_group_span(idx).map_or(idx, |g| g.start_idx);
+        let start_idx = self.tuplet_group_at(idx).map_or(idx, |g| g.start_idx);
         let cur_beat = self.beats()[start_idx];
         let mut result: Option<Modification> = None;
         let mut captured_offsets: Option<Vec<(u32, bool)>> = None;
@@ -191,7 +191,7 @@ impl Measure {
             return None;
         }
 
-        if let Some(GroupSpan { start_idx, end_idx, id: group_id }) = self.find_group_span(idx) {
+        if let Some(GroupSpan { start_idx, end_idx, id: group_id }) = self.tuplet_group_at(idx) {
             // Merke, ob die Gruppe mindestens eine Note bzw. einen Akzent enthielt
             let mut had_any_note = false;
             let mut had_any_accent = false;
@@ -230,59 +230,25 @@ impl Measure {
         }
     }
 
-    /// Find the first and last index with the same tuplet group id as the beat at the given index.
-    /// `None`, if the beat is not in a tuplet group.
-    pub(crate) fn find_group_span(&self, idx: BeatIdx) -> Option<GroupSpan> {
-        let id = self.beats[idx].tuplet_group_id?;
-
-        let mut start_idx = idx;
-        while start_idx > 0 && self.beats[start_idx - 1].tuplet_group_id == Some(id) {
-            start_idx -= 1;
-        }
-        let mut end_idx = idx + 1;
-        while end_idx < self.beats.len() && self.beats[end_idx].tuplet_group_id == Some(id) {
-            end_idx += 1;
-        }
-        if start_idx >= end_idx - 1 {
-            return None;
-        }
-
-        Some(GroupSpan { start_idx, end_idx: end_idx - 1, id })
-    }
-
     /// Liefert für die Tuplet‑Gruppe, die bei `start_idx` beginnt, die relativen Onset‑Ticks
     /// aller gesetzten Noten innerhalb der Gruppe. Jeder Eintrag enthält `(offset_ticks, accented)`.
     /// Die Offsets sind relativ zum Gruppenstart, 0‑basiert, in Grid‑Ticks, und stets aufsteigend sortiert.
     ///
     /// Rückgabe `None`, wenn an `start_idx` keine Tuplet‑Gruppe beginnt.
     fn tuplet_group_note_offsets(&self, start_idx: BeatIdx) -> Option<Vec<(u32, bool)>> {
-        if start_idx >= self.beats.len() {
+        let group = self.tuplet_group_at(start_idx)?;
+        if group.start_idx != start_idx {
             return None;
         }
-        let b0 = self.beats[start_idx];
-        let gid = b0.tuplet_group_id?;
-        // sicherstellen, dass start_idx wirklich der Gruppenanfang ist
-        if start_idx > 0 && self.beats[start_idx - 1].tuplet_group_id == Some(gid) {
-            return None;
-        }
-
-        let anchor = self.tuplet_anchors.get(&gid)?;
+        let anchor = self.tuplet_anchors.get(&group.id)?;
         let span_ticks = anchor.target_ticks;
-        // Onsets der gesamten Measure berechnen und dann relative Offsets der Gruppe extrahieren
         let onsets = DEFAULT_GRID.compute_onset_ticks(&self.beats);
         let start_onset = onsets[start_idx];
 
-        let mut offsets: Vec<(u32, bool)> = Vec::new();
-        let mut idx = start_idx;
-        while idx < self.beats.len() && self.beats[idx].tuplet_group_id == Some(gid) {
-            if self.beats[idx].kind == Note {
-                let rel = onsets[idx] - start_onset;
-                // Kappen vorsichtshalber auf die Spanne (sollte nicht notwendig sein)
-                let rel = rel.min(span_ticks);
-                offsets.push((rel, self.beats[idx].accented));
-            }
-            idx += 1;
-        }
+        let mut offsets: Vec<(u32, bool)> = (group.start_idx..=group.end_idx)
+            .filter(|&i| self.beats[i].kind == Note)
+            .map(|i| ((onsets[i] - start_onset).min(span_ticks), self.beats[i].accented))
+            .collect();
         offsets.sort_by_key(|e| e.0);
         Some(offsets)
     }
@@ -302,37 +268,19 @@ impl Measure {
         start_idx: BeatIdx,
         source_offsets: &[(u32, bool)],
     ) -> bool {
-        if start_idx >= self.beats.len() {
+        let Some(group) = self.tuplet_group_at(start_idx) else {
+            return false;
+        };
+        if !matches!(self.beats[group.start_idx].duration, Duration::Tuplet { .. }) {
             return false;
         }
-        let b0 = self.beats[start_idx];
-        let gid = match b0.tuplet_group_id {
-            Some(id) => id,
-            None => return false,
-        };
-
-        // Grenzen der Gruppe bestimmen
-        let mut end = start_idx + 1;
-        while end < self.beats.len() && self.beats[end].tuplet_group_id == Some(gid) {
-            end += 1;
-        }
-
-        // n bestimmen (Anzahl Slots)
-        let n = match b0.duration {
-            Duration::Tuplet(TupletSpec { n, .. }) => n as usize,
-            _ => return false,
-        };
 
         // Onsets der neuen Gruppe (relativ) berechnen
         let onsets = DEFAULT_GRID.compute_onset_ticks(&self.beats);
-        let start_onset = onsets[start_idx];
-        let mut target_rel: Vec<(u32, usize)> = Vec::with_capacity(n);
-        let mut i = start_idx;
-        while i < end {
-            let rel = onsets[i] - start_onset;
-            target_rel.push((rel, i));
-            i += 1;
-        }
+        let start_onset = onsets[group.start_idx];
+        let mut target_rel: Vec<(u32, usize)> = (group.start_idx..=group.end_idx)
+            .map(|i| (onsets[i] - start_onset, i))
+            .collect();
         // Sicherheitsnetz: falls unerwartet mehr/ weniger Slots, weiter mit vorhandenen
         target_rel.sort_by_key(|e| e.0);
         let tlen = target_rel.len();
@@ -341,7 +289,7 @@ impl Measure {
         }
 
         // Alle Slots zunächst auf Rest setzen und Akzent löschen; Tremolo löschen
-        for j in start_idx..end {
+        for j in group.start_idx..=group.end_idx {
             self.beats[j].kind = Rest;
             self.beats[j].accented = false;
         }
@@ -423,7 +371,7 @@ impl Measure {
         let mut new_beat = Beat::new(new_duration, cur.kind);
         new_beat.accented = cur.accented;
         if self.set_beat(idx, new_beat).is_ok() {
-            self.find_group_span(idx)
+            self.tuplet_group_at(idx)
         } else {
             None
         }

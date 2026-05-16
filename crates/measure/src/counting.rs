@@ -309,42 +309,17 @@ fn tuplet_spans(measure: &Measure, measure_ticks: u32) -> Vec<TupletSpan> {
         return Vec::new();
     }
     let onsets = DEFAULT_GRID.compute_onset_ticks(beats);
-    let mut spans = Vec::new();
-    let mut i = 0usize;
-    let mut idx = 0u32;
-    while i < beats.len() {
-        let gid = match beats[i].tuplet_group_id {
-            Some(id) => id,
-            None => {
-                i += 1;
-                continue;
-            }
-        };
-        if i > 0 && beats[i - 1].tuplet_group_id == Some(gid) {
-            i += 1;
-            continue;
-        }
-        let anchor = match measure.tuplet_anchors.get(&gid) {
-            Some(a) => a,
-            None => {
-                i += 1;
-                continue;
-            }
-        };
-        let start_tick = onsets[i];
-        let mut end_tick = start_tick + anchor.target_ticks;
-        if end_tick > measure_ticks {
-            end_tick = measure_ticks;
-        }
-        spans.push(TupletSpan { id: gid, idx, start_tick, end_tick, n: anchor.n });
-        idx = idx.saturating_add(1);
-        let mut j = i + 1;
-        while j < beats.len() && beats[j].tuplet_group_id == Some(gid) {
-            j += 1;
-        }
-        i = j;
-    }
-    spans
+    measure
+        .tuplet_groups()
+        .into_iter()
+        .filter_map(|group| measure.tuplet_anchors.get(&group.id).map(|a| (group, a)))
+        .enumerate()
+        .map(|(idx, (group, anchor))| {
+            let start_tick = onsets[group.start_idx];
+            let end_tick = (start_tick + anchor.target_ticks).min(measure_ticks);
+            TupletSpan { id: group.id, idx: idx as u32, start_tick, end_tick, n: anchor.n }
+        })
+        .collect()
 }
 
 #[allow(clippy::too_many_arguments)]

@@ -341,6 +341,61 @@ impl Measure {
 
     pub fn time_signature(&self) -> TimeSignature { self.time_signature }
 
+    /// Inclusive index range of the tuplet group that contains the beat at `idx`,
+    /// together with the group's stable id.
+    ///
+    /// Returns `None` if the beat is not part of a tuplet group or if the group
+    /// has only a single beat (a degenerate state that callers treat as "no group").
+    pub fn tuplet_group_at(&self, idx: BeatIdx) -> Option<GroupSpan> {
+        let id = self.beats.get(idx)?.tuplet_group_id?;
+        let start_idx = self.tuplet_group_start(idx, id);
+        let end_exclusive = self.tuplet_group_end(idx, id);
+        if end_exclusive - start_idx < 2 {
+            return None;
+        }
+        Some(GroupSpan { start_idx, end_idx: end_exclusive - 1, id })
+    }
+
+    /// All tuplet groups in beat order. Singleton groups are skipped (see
+    /// [`Measure::tuplet_group_at`]).
+    pub fn tuplet_groups(&self) -> Vec<GroupSpan> {
+        let mut out = Vec::new();
+        let mut i = 0;
+        while i < self.beats.len() {
+            let Some(id) = self.beats[i].tuplet_group_id else {
+                i += 1;
+                continue;
+            };
+            // Only emit on the first beat of a group
+            if i > 0 && self.beats[i - 1].tuplet_group_id == Some(id) {
+                i += 1;
+                continue;
+            }
+            let end_exclusive = self.tuplet_group_end(i, id);
+            if end_exclusive - i >= 2 {
+                out.push(GroupSpan { start_idx: i, end_idx: end_exclusive - 1, id });
+            }
+            i = end_exclusive;
+        }
+        out
+    }
+
+    fn tuplet_group_start(&self, idx: BeatIdx, id: u32) -> BeatIdx {
+        let mut start = idx;
+        while start > 0 && self.beats[start - 1].tuplet_group_id == Some(id) {
+            start -= 1;
+        }
+        start
+    }
+
+    fn tuplet_group_end(&self, idx: BeatIdx, id: u32) -> BeatIdx {
+        let mut end = idx + 1;
+        while end < self.beats.len() && self.beats[end].tuplet_group_id == Some(id) {
+            end += 1;
+        }
+        end
+    }
+
     /// Change the measure's time signature using the default policy:
     /// - If the new measure is shorter: remove whole beats from the end; if a tuplet is touched,
     ///   remove the entire tuplet group (no splitting).
@@ -372,7 +427,7 @@ impl Measure {
                 let idx = i as usize;
                 let beat = self.beats[idx];
                 if let Some(GroupSpan { start_idx, end_idx, id: group_id }) =
-                    self.find_group_span(idx)
+                    self.tuplet_group_at(idx)
                 {
                     // Sum ticks for the span and remove it
                     let span_ticks: u32 = (start_idx..=end_idx)

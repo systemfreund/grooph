@@ -48,40 +48,22 @@ pub(crate) struct TupletSpan {
 /// Erkenne Tuplet-Spans ausschließlich aus dem Measure, ohne Beaming-Infos.
 pub(crate) fn detect_tuplet_spans(measure: &Measure) -> Vec<TupletSpan> {
     let beats = measure.beats();
-
-    if !beats.iter().any(|b| b.tuplet_group_id.is_some()) {
-        // No tuplets in this measure
-        return Vec::default();
-    }
-
-    let mut ranges: std::collections::BTreeMap<u32, (usize, usize)> = Default::default();
-    for (ix, b) in beats.iter().enumerate() {
-        if let Some(id) = b.tuplet_group_id {
-            ranges
-                .entry(id)
-                .and_modify(|rng| {
-                    rng.0 = rng.0.min(ix);
-                    rng.1 = rng.1.max(ix);
-                })
-                .or_insert((ix, ix));
-        }
-    }
-
-    let mut out: Vec<TupletSpan> = Vec::with_capacity(ranges.len());
-    for (id, (start, end)) in ranges.into_iter() {
-        if let Some(anchor) = measure.tuplet_anchors.get(&id) {
-            let contains_rest = (start..=end).any(|i| beats[i].kind == BeatKind::Rest);
-            out.push(TupletSpan {
+    measure
+        .tuplet_groups()
+        .into_iter()
+        .filter_map(|group| {
+            let anchor = measure.tuplet_anchors.get(&group.id)?;
+            let contains_rest =
+                (group.start_idx..=group.end_idx).any(|i| beats[i].kind == BeatKind::Rest);
+            Some(TupletSpan {
                 count: anchor.n,
-                start,
-                end,
+                start: group.start_idx,
+                end: group.end_idx,
                 base: anchor.base_hint,
                 contains_rest,
-            });
-        }
-    }
-
-    out
+            })
+        })
+        .collect()
 }
 
 pub fn compute_tuplet_plan(measure: &Measure, beams: &[BeamGroup]) -> Vec<TupletPlan> {
