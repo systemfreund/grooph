@@ -1,4 +1,4 @@
-use crate::duration::{Duration, COMMON_DURATIONS};
+use crate::duration::{Duration, COMMON_DURATIONS, TupletSpec};
 use crate::grouping::default_groups_for;
 use crate::{Beat, TimeSignature};
 use crate::math::lcm;
@@ -75,6 +75,16 @@ impl Grid<'_> {
             }
         }
         bounds
+    }
+
+    /// All supported durations on the tuplet grid identified by `(n, m)`.
+    /// Used to constrain fills that must stay inside an existing tuplet group.
+    pub fn tuplet_grid_durations(&self, n: u8, m: u8) -> Vec<Duration> {
+        self.durations
+            .iter()
+            .copied()
+            .filter(|d| matches!(d, Duration::Tuplet(TupletSpec { n: dn, m: dm, .. }) if *dn == n && *dm == m))
+            .collect()
     }
 
     pub fn compute_onset_ticks(&self, beats: &[Beat]) -> Vec<u32> {
