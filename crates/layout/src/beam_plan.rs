@@ -1,7 +1,7 @@
 use crate::tuplet_plan::{TupletSpan, detect_tuplet_spans};
 use grooph_measure::duration::{Duration, NoteValue};
-use grooph_measure::{Beat, BeatIdx, BeatKind, Measure, TimeSignature};
 use grooph_measure::grid::DEFAULT_GRID;
+use grooph_measure::{Beat, BeatIdx, BeatKind, Measure, TimeSignature};
 
 /// Number of beams implied by a duration (eighth = 1, sixteenth = 2, 32nd = 3).
 /// Tuplets map to their base note value for beam count purposes.
@@ -78,8 +78,7 @@ pub(super) fn compute_beam_plan(measure: &Measure) -> BeamPlan {
     for w in note_idxs.windows(2) {
         let a = w[0];
         let b = w[1];
-        let break_group =
-            should_break(a, b, beats, &onsets, &boundaries, &span_of_idx, &spans);
+        let break_group = should_break(a, b, beats, &onsets, &boundaries, &span_of_idx, &spans);
 
         if break_group {
             finalize_group(&mut groups, beats, &cur);
@@ -176,7 +175,7 @@ fn tuplet_last_note_crosses_into_non_tuplet(
     onsets: &[u32],
     boundaries: &[u32],
     span_of_idx: &[Option<usize>],
-    spans: &[TupletSpan]
+    spans: &[TupletSpan],
 ) -> bool {
     let Some(sa) = span_of_idx[a] else {
         return false;

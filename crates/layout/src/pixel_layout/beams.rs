@@ -1,4 +1,4 @@
-use super::{c, BeamLayout, LayoutOpts, NoteLayout};
+use super::{BeamLayout, LayoutOpts, NoteLayout, c};
 use crate::beam_plan::BeamGroup;
 use egui::{Pos2, Rect};
 

@@ -1,4 +1,4 @@
-use super::{c, requires_flag, Line, LayoutOpts, NoteLayout};
+use super::{LayoutOpts, Line, NoteLayout, c, requires_flag};
 use crate::render_plan::RenderPlan;
 use egui::{Pos2, Rect};
 use grooph_measure::duration::Duration;
@@ -15,12 +15,7 @@ const fn dot_count_of(duration: Duration) -> u8 {
 
 /// X offset of the first augmentation dot, relative to the note center.
 fn dot_first_dx(opts: &LayoutOpts, has_flag_tail: bool) -> f32 {
-    opts.em
-        * if has_flag_tail {
-            c::DOT_FIRST_DX_WITH_FLAG_EM
-        } else {
-            c::DOT_FIRST_DX_NO_FLAG_EM
-        }
+    opts.em * if has_flag_tail { c::DOT_FIRST_DX_WITH_FLAG_EM } else { c::DOT_FIRST_DX_NO_FLAG_EM }
 }
 
 /// Absolute screen positions of the augmentation dots for a note centered
@@ -131,11 +126,10 @@ pub(super) fn build_note_layout(
     let beams = &render_plan.beams;
 
     // Basisverteilung (rhythmisch gleichmäßig über die verfügbare Breite)
-    let x_centers =
-        crate::calculate_x_centers(beats, rect.width(), opts.proportional_spacing)
-            .into_iter()
-            .map(|cx| cx + rect.left())
-            .collect::<Vec<_>>();
+    let x_centers = crate::calculate_x_centers(beats, rect.width(), opts.proportional_spacing)
+        .into_iter()
+        .map(|cx| cx + rect.left())
+        .collect::<Vec<_>>();
 
     // Determine which beats are inside any beamed group (for flag suppression)
     let mut in_beam_flags: Vec<bool> = vec![false; beats.len()];
@@ -194,11 +188,7 @@ pub(super) fn build_note_layout(
                 connected = true;
             }
             // 2. Tuplet
-            else if render_plan
-                .tuplets
-                .iter()
-                .any(|t| t.start <= (i - 1) && t.end >= i)
-            {
+            else if render_plan.tuplets.iter().any(|t| t.start <= (i - 1) && t.end >= i) {
                 connected = true;
             }
             // 3. Primary Group (only if proportional spacing is enabled)

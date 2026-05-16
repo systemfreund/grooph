@@ -1,5 +1,5 @@
-use grooph_measure::duration::Duration;
 use grooph_measure::Beat;
+use grooph_measure::duration::Duration;
 use grooph_measure::grid::DEFAULT_GRID;
 
 pub fn calculate_x_centers(beats: &[Beat], content_w: f32, proportional: bool) -> Vec<f32> {
@@ -7,11 +7,14 @@ pub fn calculate_x_centers(beats: &[Beat], content_w: f32, proportional: bool) -
 
     // Calculate total duration in ticks
     let mut total_ticks = 0;
-    let ticks_vec: Vec<u32> = durations.iter().map(|d| {
-        let t = DEFAULT_GRID.ticks_of(d).unwrap_or(0);
-        total_ticks += t;
-        t
-    }).collect();
+    let ticks_vec: Vec<u32> = durations
+        .iter()
+        .map(|d| {
+            let t = DEFAULT_GRID.ticks_of(d).unwrap_or(0);
+            total_ticks += t;
+            t
+        })
+        .collect();
 
     if !proportional {
         // Fallback or explicit uniform spacing
@@ -43,16 +46,12 @@ pub fn calculate_x_centers(beats: &[Beat], content_w: f32, proportional: bool) -
 #[cfg(test)]
 mod tests {
     use super::*;
-    use grooph_measure::duration::{q, e};
     use grooph_measure::Beat;
+    use grooph_measure::duration::{e, q};
 
     #[test]
     fn test_proportional_spacing() {
-        let beats = vec![
-            Beat::note(q()),
-            Beat::note(e()),
-            Beat::note(e()),
-        ];
+        let beats = vec![Beat::note(q()), Beat::note(e()), Beat::note(e())];
         let width = 100.0;
         let centers = calculate_x_centers(&beats, width, true);
 
@@ -64,11 +63,7 @@ mod tests {
 
     #[test]
     fn test_uniform_spacing() {
-        let beats = vec![
-            Beat::note(q()),
-            Beat::note(e()),
-            Beat::note(e()),
-        ];
+        let beats = vec![Beat::note(q()), Beat::note(e()), Beat::note(e())];
         let width = 100.0;
         let centers = calculate_x_centers(&beats, width, false);
 

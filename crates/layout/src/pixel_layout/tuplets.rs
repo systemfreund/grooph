@@ -1,4 +1,4 @@
-use super::{c, digit_count, LayoutOpts, Line, NoteLayout, TupletLayout};
+use super::{LayoutOpts, Line, NoteLayout, TupletLayout, c, digit_count};
 use crate::tuplet_plan::TupletPlan;
 use egui::{FontId, Pos2};
 use grooph_measure::{Beat, BeatKind};
@@ -12,10 +12,8 @@ pub(super) fn build_tuplet_layout(
     let bracket_gap = c::TUPLET_BRACKET_GAP_SS * opts.staff_space();
     let hook_len = c::TUPLET_HOOK_LEN_SS * opts.staff_space();
     let hook_dy = hook_len * c::TUPLET_HOOK_DY_FACTOR;
-    let digit_font = FontId::new(
-        opts.font_id.size * c::TUPLET_DIGIT_FONT_FACTOR,
-        opts.font_id.family.clone(),
-    );
+    let digit_font =
+        FontId::new(opts.font_id.size * c::TUPLET_DIGIT_FONT_FACTOR, opts.font_id.family.clone());
     // Approximate baseline above stems
     let y_base = opts.y_center()
         - opts.stem_length()
