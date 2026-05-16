@@ -377,6 +377,43 @@ impl Grooph {
         result
     }
 
+    /// Append a new empty measure after the current one. The new measure
+    /// inherits the time signature of the active measure. Moves the cursor to
+    /// the start of the new measure.
+    pub(crate) fn append_measure(&mut self) {
+        self.with_undo_snapshot(|app| {
+            let ts = app.current_measure().time_signature();
+            let new_measure = Measure::new(ts);
+            let insert_at = app.cursor.measure_idx + 1;
+            app.score.measures.insert(insert_at, new_measure);
+            app.cursor.measure_idx = insert_at;
+            app.cursor.beat_idx = 0;
+            true
+        });
+    }
+
+    /// Remove the currently active measure. Does nothing if only one measure
+    /// remains (Score invariant: at least one measure).
+    pub(crate) fn remove_current_measure(&mut self) {
+        if self.score.len() <= 1 {
+            return;
+        }
+        self.with_undo_snapshot(|app| {
+            let idx = app.cursor.measure_idx;
+            app.score.measures.remove(idx);
+            if app.cursor.measure_idx >= app.score.len() {
+                app.cursor.measure_idx = app.score.len() - 1;
+            }
+            let new_len = app.score.measures[app.cursor.measure_idx].beats().len();
+            if new_len == 0 {
+                app.cursor.beat_idx = 0;
+            } else if app.cursor.beat_idx >= new_len {
+                app.cursor.beat_idx = new_len - 1;
+            }
+            true
+        });
+    }
+
     fn build_button_measure(template: BeatTemplate) -> Measure {
         let beat_count =
             if let Duration::Tuplet(TupletSpec { m, .. }) = template.duration { m } else { 2 };

@@ -62,6 +62,20 @@ impl Grooph {
                             if ui.selectable_label(self.mode == Mode::Help, "?").clicked() {
                                 self.toggle_mode(Mode::Help);
                             }
+
+                            ui.separator();
+                            let measure_label = format!(
+                                "{}/{}",
+                                self.cursor.measure_idx + 1,
+                                self.score.len()
+                            );
+                            ui.label(measure_label);
+                            if Button::new("➕").ui(ui).clicked() {
+                                self.append_measure();
+                            }
+                            if Button::new("➖").ui(ui).clicked() {
+                                self.remove_current_measure();
+                            }
                         });
                     });
             });

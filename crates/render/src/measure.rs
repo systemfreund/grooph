@@ -16,12 +16,42 @@ pub fn draw_measure(
     playback_tick: Option<f64>,
     count_config: Option<&CountConfig>,
 ) -> MeasureLayout {
+    let measure_layout = build_measure_layout(measure, opts);
+    render_measure_at(
+        ui,
+        measure,
+        &measure_layout,
+        opts,
+        cursor_idx,
+        playback_tick,
+        count_config,
+        true,
+    );
+    measure_layout
+}
+
+/// Render a measure given a pre-built `MeasureLayout`.
+///
+/// `draw_staff_line` controls whether the horizontal staff line is drawn —
+/// the multi-measure renderer turns it off and draws one continuous line per
+/// system instead. All cursor/playback drawing is scoped to this measure; the
+/// caller decides whether to forward `cursor_idx` / `playback_tick` based on
+/// the active measure.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn render_measure_at(
+    ui: &mut egui::Ui,
+    measure: &Measure,
+    measure_layout: &MeasureLayout,
+    opts: &LayoutOpts,
+    cursor_idx: Option<usize>,
+    playback_tick: Option<f64>,
+    count_config: Option<&CountConfig>,
+    draw_staff_line: bool,
+) {
     let color = ui.visuals().text_color();
     let painter = ui.painter();
     let rect = opts.rect;
-
     let font_id = &opts.font_id;
-    let measure_layout = build_measure_layout(measure, opts);
 
     if let Some(config) = count_config {
         let slots = build_count_slots(measure, config);
@@ -29,7 +59,7 @@ pub fn draw_measure(
             draw_count_underlay(
                 painter,
                 measure,
-                &measure_layout,
+                measure_layout,
                 rect,
                 opts.em,
                 ui.visuals().dark_mode,
@@ -38,7 +68,7 @@ pub fn draw_measure(
             draw_count_labels(
                 painter,
                 measure,
-                &measure_layout,
+                measure_layout,
                 rect,
                 opts.em,
                 ui.visuals().text_color(),
@@ -49,12 +79,13 @@ pub fn draw_measure(
         }
     }
 
-    // staff line
-    painter.hline(
-        Rangef::new(rect.left(), rect.right()),
-        rect.center().y,
-        Stroke::new(0.02 * opts.em, color),
-    );
+    if draw_staff_line {
+        painter.hline(
+            Rangef::new(rect.left(), rect.right()),
+            rect.center().y,
+            Stroke::new(0.02 * opts.em, color),
+        );
+    }
 
     // Left block: Clef and stacked time signature from layout
     if let Some(clef_pos) = measure_layout.clef_pos {
@@ -79,7 +110,7 @@ pub fn draw_measure(
         }
     }
 
-    draw_notes(painter, &measure_layout, color, opts);
+    draw_notes(painter, measure_layout, color, opts);
 
     // Edit cursor at current beat index
     if let Some(idx) = cursor_idx
@@ -161,8 +192,6 @@ pub fn draw_measure(
             painter.vline(x, Rangef::new(top, bottom), Stroke::new(0.1 * opts.em, cursor_color));
         }
     }
-
-    measure_layout
 }
 
 pub fn draw_notes(

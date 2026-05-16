@@ -5,9 +5,10 @@ use crate::tools::{Modifier, ToolKind, all_tools};
 use crate::{Mode, TransportState};
 use eframe::egui;
 use eframe::egui::{Context, FontId, Frame, Rect, Response, Stroke};
-use grooph_layout::pixel_layout::{GlyphMetrics, LayoutOpts, MeasureLayout, compute_em};
+use grooph_layout::pixel_layout::{GlyphMetrics, MeasureLayout, compute_em};
+use grooph_layout::staff_layout::{PlacedMeasure, StaffLayout, StaffOpts, build_staff_layout};
 use grooph_measure::grid::DEFAULT_GRID;
-use grooph_render::measure::draw_measure;
+use grooph_render::staff::draw_staff;
 
 impl Grooph {
     pub(super) fn measure_panel(&mut self, ctx: &Context) {
@@ -16,8 +17,10 @@ impl Grooph {
                 .fill(egui::Color32::TRANSPARENT)
                 .stroke(egui::Stroke::NONE)
                 .show(ui, |ui| {
-                    let size = ui.available_size();
-                    let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::click_and_drag());
+                    egui::ScrollArea::horizontal().show(ui, |ui| {
+                    let available = ui.available_size();
+                    let origin = ui.cursor().min;
+                    let viewport_rect = Rect::from_min_size(origin, available);
 
                     // Update playback smoothing & primary-beat flash state
                     let playback_tick_to_draw = match self.transport_state {
@@ -98,18 +101,16 @@ impl Grooph {
                         }
                     };
 
-                    let em = compute_em(&rect, self.layout.width_cap_factor, ui);
+                    let em = compute_em(&viewport_rect, self.layout.width_cap_factor, ui);
                     let font_id = FontId::new(em, self.music_font_id.family.clone());
 
                     let metrics = GlyphMetrics::measure(ui, &font_id);
 
-                    let opts = LayoutOpts {
-                        rect,
+                    let staff_opts = StaffOpts {
+                        rect: viewport_rect,
                         font_id: font_id.clone(),
                         pixels_per_point: ui.ctx().pixels_per_point(),
                         em,
-                        layout_clef: true,
-                        layout_time_signature: true,
                         y_offset: 0.0,
                         stem_length_factor: self.layout.stem_length_factor,
                         stem_thickness_factor: 0.04,
@@ -118,16 +119,32 @@ impl Grooph {
                         proportional_spacing: self.layout.proportional_spacing,
                         debug_bbox: self.layout.debug_bbox,
                         metrics,
+                        min_measure_width_em: 6.0,
+                        note_width_em: 0.6,
+                        system_spacing_em: 4.0,
+                        layout_clef_first: true,
                     };
 
+                    let staff = build_staff_layout(&self.score, &staff_opts);
+
+                    let (rect, resp) = ui.allocate_exact_size(
+                        staff.total_size,
+                        egui::Sense::click_and_drag(),
+                    );
+
                     let count_config = self.build_count_config();
-                    let layout = draw_measure(
+                    let cursor = if self.mode == Mode::Edit { Some(self.cursor) } else { None };
+                    let playback =
+                        playback_tick_to_draw.map(|t| (self.cursor.measure_idx, t));
+
+                    draw_staff(
                         ui,
-                        self.current_measure(),
-                        &opts,
-                        if self.mode == Mode::Edit { Some(self.cursor.beat_idx) } else { None },
-                        playback_tick_to_draw,
+                        &self.score,
+                        &staff,
+                        cursor,
+                        playback,
                         count_config.as_ref(),
+                        &staff_opts,
                     );
 
                     // Draw flash overlay (white on dark, black on light) with decay
@@ -145,13 +162,21 @@ impl Grooph {
                         ui.ctx().request_repaint();
                     }
 
-                    self.draw_accuracy_marker(ui, &layout, &opts.metrics);
-                    self.handle_input(rect, resp, layout);
+                    if let Some(active) = staff.placed(self.cursor.measure_idx) {
+                        self.draw_accuracy_marker(ui, active, &staff_opts.metrics);
+                    }
+                    self.handle_input(resp, &staff);
+                    });
                 });
         });
     }
 
-    fn draw_accuracy_marker(&self, ui: &egui::Ui, layout: &MeasureLayout, metrics: &GlyphMetrics) {
+    fn draw_accuracy_marker(
+        &self,
+        ui: &egui::Ui,
+        placed: &PlacedMeasure,
+        metrics: &GlyphMetrics,
+    ) {
         if !self.accuracy.enabled {
             return;
         }
@@ -164,16 +189,17 @@ impl Grooph {
         if self.transport_state != TransportState::Playing {
             return;
         }
-        let beats = self.current_measure().beats();
+        let measure = &self.score.measures[placed.measure_idx];
+        let beats = measure.beats();
         if beats.is_empty() {
             return;
         }
         let onsets = DEFAULT_GRID.compute_onset_ticks(beats);
-        let total_ticks =
-            DEFAULT_GRID.ticks_per_measure(&self.current_measure().time_signature()) as f64;
+        let total_ticks = DEFAULT_GRID.ticks_per_measure(&measure.time_signature()) as f64;
         if total_ticks <= 0.0 {
             return;
         }
+        let layout = &placed.layout;
         for (idx, note_layout) in layout.notes.iter().enumerate() {
             if note_layout.kind != grooph_measure::BeatKind::Note {
                 continue;
@@ -261,30 +287,15 @@ impl Grooph {
         None
     }
 
-    fn handle_input(&mut self, rect: Rect, resp: Response, layout: MeasureLayout) {
+    fn handle_input(&mut self, resp: Response, staff: &StaffLayout) {
         if !matches!(self.mode, Mode::TimeSignature { .. })
             && (resp.clicked() || resp.dragged())
             && let Some(pos) = resp.interact_pointer_pos()
-            && !layout.notes.is_empty()
+            && let Some((m_idx, b_idx)) =
+                grooph_layout::staff_layout::hit_test_staff(staff, pos.x)
         {
-            let target_x = pos.x;
-            let idx = if target_x <= rect.left() {
-                0
-            } else if target_x >= rect.right() {
-                layout.notes.len() - 1
-            } else {
-                let mut best_i = 0usize;
-                let mut best_d = f32::MAX;
-                for (i, nl) in layout.notes.iter().enumerate() {
-                    let d = (nl.center.x - target_x).abs();
-                    if d < best_d {
-                        best_d = d;
-                        best_i = i;
-                    }
-                }
-                best_i
-            };
-            self.cursor.beat_idx = idx;
+            self.cursor.measure_idx = m_idx;
+            self.cursor.beat_idx = b_idx;
 
             if resp.double_clicked()
                 && let Some(tool) = all_tools()
