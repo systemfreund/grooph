@@ -1,12 +1,14 @@
+mod schedule;
+
 use grooph_measure::grid::DEFAULT_GRID;
-use grooph_measure::{BeatKind, Measure, TimeSignature};
+use grooph_measure::Measure;
 use log::{debug, error, info, trace};
 use rodio::source::{Function as RodioFunction, SignalGenerator};
 use rodio::source::noise::WhiteUniform;
 use rodio::source::BltFilter;
 use rodio::Source;
+use schedule::{Schedule, SoundType};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
 use std::fmt::{Debug, Formatter, Write};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -129,16 +131,8 @@ struct PlaybackParams {
     bpm: u32,
     ticks_per_beat: u32,
     ticks_per_measure: u32,
-    schedule: BTreeMap<u32, Vec<SoundType>>,
+    schedule: Schedule,
     audio_settings: AudioSettings,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum SoundType {
-    Downbeat,
-    PrimaryBeat,
-    AccentedBeat,
-    Beat,
 }
 
 impl Audio {
@@ -147,7 +141,7 @@ impl Audio {
             bpm,
             ticks_per_beat: 0,
             ticks_per_measure: 0,
-            schedule: BTreeMap::new(),
+            schedule: Schedule::default(),
             audio_settings: AudioSettings::default(),
         };
 
@@ -170,7 +164,7 @@ impl Audio {
         let ticks_per_measure = DEFAULT_GRID.ticks_per_measure(&ts);
 
         // Recompute schedule
-        let schedule = Self::compute_schedule(measure, &ts);
+        let schedule = Schedule::build(measure, &ts);
 
         // Check differences
         if let Ok(mut shared_state) = self.shared_state.try_lock()
@@ -231,28 +225,6 @@ impl Audio {
             sink.play();
             self.sink = Some(sink);
         }
-    }
-
-    fn compute_schedule(measure: &Measure, ts: &TimeSignature) -> BTreeMap<u32, Vec<SoundType>> {
-        let mut schedule: BTreeMap<u32, Vec<SoundType>> = BTreeMap::new();
-        schedule.entry(0).or_default().push(SoundType::Downbeat);
-
-        for t in DEFAULT_GRID.primary_boundaries(ts) {
-            schedule.entry(t).or_default().push(SoundType::PrimaryBeat);
-        }
-
-        let onsets = DEFAULT_GRID.compute_onset_ticks(measure.beats());
-        for (i, beat) in measure.beats().iter().enumerate() {
-            if beat.kind == BeatKind::Note
-                && let Some(&t) = onsets.get(i)
-            {
-                let sound_type =
-                    if beat.accented { SoundType::AccentedBeat } else { SoundType::Beat };
-
-                schedule.entry(t).or_default().push(sound_type);
-            }
-        }
-        schedule
     }
 
     pub fn set_audio_settings(&mut self, settings: AudioSettings) {
@@ -319,21 +291,6 @@ impl MetronomeSource {
         }
     }
 
-    fn add_triggered_sounds(
-        &mut self,
-        triggered_sounds: &mut Vec<SoundType>,
-        start: u32,
-        limit: f64,
-    ) {
-        let mut k = start;
-        while (k as f64) < limit {
-            if let Some(sounds) = self.local_params.schedule.get(&k) {
-                triggered_sounds.extend_from_slice(sounds);
-            }
-            k += 1;
-        }
-    }
-
     fn update_shared_state(&mut self) {
         // Try to publish playback cursor to shared state (periodically, to avoid contention)
         if self.samples_processed.is_multiple_of(1024)
@@ -383,18 +340,19 @@ impl MetronomeSource {
 
         // Collect all triggers crossed by this sample advance using [old, new) interval
         let mut triggered_sounds: Vec<SoundType> = Vec::with_capacity(Self::MAX_VOICES);
+        let schedule = &self.local_params.schedule;
         if new_cursor >= total_ticks {
             // 1. [old_cursor, total_ticks)
-            self.add_triggered_sounds(&mut triggered_sounds, old_cursor.ceil() as u32, total_ticks);
+            schedule.collect_in_range(old_cursor.ceil() as u32, total_ticks, &mut triggered_sounds);
 
             // Wrap
             new_cursor -= total_ticks;
 
             // 2. [0.0, new_cursor)
-            self.add_triggered_sounds(&mut triggered_sounds, 0, new_cursor);
+            schedule.collect_in_range(0, new_cursor, &mut triggered_sounds);
         } else {
             // [old_cursor, new_cursor)
-            self.add_triggered_sounds(&mut triggered_sounds, old_cursor.ceil() as u32, new_cursor);
+            schedule.collect_in_range(old_cursor.ceil() as u32, new_cursor, &mut triggered_sounds);
         }
 
         self.cursor = new_cursor;
@@ -415,18 +373,9 @@ impl MetronomeSource {
                     self.active_beeps.remove(0);
                 }
 
-                let freq = match sound_type {
-                    SoundType::PrimaryBeat => base,
-                    SoundType::Beat => base * 1.5,
-                    SoundType::AccentedBeat => base * 2.25,
-                    SoundType::Downbeat => base * 3.375,
-                };
-                let gain = match sound_type {
-                    SoundType::Downbeat => self.local_params.audio_settings.downbeat,
-                    SoundType::PrimaryBeat => self.local_params.audio_settings.primary,
-                    SoundType::Beat => self.local_params.audio_settings.beat,
-                    SoundType::AccentedBeat => self.local_params.audio_settings.accent,
-                };
+                let profile = sound_type.profile(&self.local_params.audio_settings);
+                let freq = base * profile.freq_mult;
+                let gain = profile.gain;
 
                 let func = self.local_params.audio_settings.waveform.to_rodio();
                 let hz = freq.max(1.0);
