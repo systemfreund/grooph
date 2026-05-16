@@ -201,13 +201,9 @@ struct TickMapper {
 }
 
 impl TickMapper {
-    fn tick_to_boundary_x(&self, tick: u32) -> f32 {
-        self.interpolate(&self.boundary_x, tick)
-    }
+    fn tick_to_boundary_x(&self, tick: u32) -> f32 { self.interpolate(&self.boundary_x, tick) }
 
-    fn tick_to_center_x(&self, tick: u32) -> f32 {
-        self.interpolate(&self.note_centers_x, tick)
-    }
+    fn tick_to_center_x(&self, tick: u32) -> f32 { self.interpolate(&self.note_centers_x, tick) }
 
     fn interpolate(&self, anchors: &[f32], tick: u32) -> f32 {
         let t = tick.min(self.total_ticks);

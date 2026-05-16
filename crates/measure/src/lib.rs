@@ -8,6 +8,7 @@ mod fill;
 pub mod grid;
 pub(crate) mod grouping;
 mod math;
+pub mod score;
 pub mod time_signature;
 
 use BeatKind::Note;
@@ -18,6 +19,7 @@ use duration::{Duration, TupletSpec};
 use editing::{GroupSpan, Modification};
 use either::Either;
 use grid::DEFAULT_GRID;
+pub use score::{Cursor, MeasureIdx, Score};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt::{Debug, Display, Formatter};

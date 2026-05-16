@@ -44,7 +44,7 @@ impl Grooph {
                         }
                         if ui.button("Done").clicked() {
                             // Prevent no-op undo entries
-                            let current = self.measure.time_signature();
+                            let current = self.current_measure().time_signature();
                             let (beats, unit) = match &self.mode {
                                 Mode::TimeSignature { beats, unit } => (*beats, *unit),
                                 _ => (current.beats, current.beat_unit),
@@ -56,14 +56,14 @@ impl Grooph {
                             }
 
                             let committed = self.with_undo_snapshot(|g| {
-                                if g.measure.set_time_signature(new_ts).is_err() {
+                                if g.current_measure_mut().set_time_signature(new_ts).is_err() {
                                     return false;
                                 }
-                                let new_len = g.measure.beats().len();
+                                let new_len = g.current_measure().beats().len();
                                 if new_len > 0 {
-                                    g.cursor_idx = g.cursor_idx.min(new_len - 1);
+                                    g.cursor.beat_idx = g.cursor.beat_idx.min(new_len - 1);
                                 } else {
-                                    g.cursor_idx = 0;
+                                    g.cursor.beat_idx = 0;
                                 }
                                 true
                             });

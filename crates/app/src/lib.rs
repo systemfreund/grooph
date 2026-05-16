@@ -13,11 +13,12 @@ mod tempo;
 mod time_signature_dialog;
 mod tool_palette;
 pub mod tools;
+mod undo;
 #[cfg(target_arch = "wasm32")]
 mod web;
 
 use grooph_measure::duration::{Duration, NoteValue, TupletSpec, q};
-use grooph_measure::{BeatIdx, Measure, TimeSignature};
+use grooph_measure::{BeatIdx, Cursor, Measure, Score, TimeSignature};
 
 use crate::accuracy::AccuracyState;
 use crate::platform::{PlatformRuntime, VisibilityEvent};
@@ -25,6 +26,7 @@ use crate::state::{AudioConfig, LayoutSettings, MidiState, PlaybackState};
 use crate::tempo::TempoMap;
 use crate::tools::ToolKind;
 use crate::tools::{BeatTemplate, Modifier, all_tools};
+use crate::undo::{DEFAULT_UNDO_LIMIT, EditorSnapshot, UndoHistory};
 use eframe::egui::{Context, TextStyle, Widget};
 use eframe::epaint::text::{FontInsert, InsertFontFamily};
 use eframe::epaint::{FontFamily, FontId};
@@ -64,12 +66,11 @@ const APP_STATE_KEY: &str = "grooph_state";
 pub struct Grooph {
     mode: Mode,
     music_font_id: FontId,
-    measure: Measure,
-    cursor_idx: BeatIdx,
+    score: Score,
+    cursor: Cursor,
     // Prebuilt measures for note/rest/tuplet tool buttons to avoid per-frame reconstruction
     button_measures: HashMap<&'static str, Measure>,
-    undo_stack: Vec<(Measure, BeatIdx)>,
-    redo_stack: Vec<(Measure, BeatIdx)>,
+    history: UndoHistory,
     // Global UI font bump configuration and per-theme baselines (so bump applies to dark & light)
     font_bump: f32,
     baseline_dark: Option<Vec<(TextStyle, f32)>>,
@@ -86,12 +87,14 @@ pub struct Grooph {
     platform: PlatformRuntime,
 }
 
+const PERSISTED_STATE_VERSION: u8 = 2;
+
 #[derive(Serialize, Deserialize)]
 #[serde(default)]
 struct PersistedState {
     version: u8,
-    measure: Measure,
-    cursor_idx: BeatIdx,
+    score: Score,
+    cursor: Cursor,
     bpm: u32,
     audio_settings: AudioSettings,
     audio_latency_enabled: bool,
@@ -104,9 +107,9 @@ struct PersistedState {
 impl Default for PersistedState {
     fn default() -> Self {
         Self {
-            version: 1,
-            measure: Grooph::default_measure(),
-            cursor_idx: 0,
+            version: PERSISTED_STATE_VERSION,
+            score: Score::single(Grooph::default_measure()),
+            cursor: Cursor::start(),
             bpm: 120,
             audio_settings: AudioSettings::default(),
             audio_latency_enabled: true,
@@ -121,9 +124,9 @@ impl Default for PersistedState {
 impl PersistedState {
     fn from_app(app: &Grooph) -> Self {
         Self {
-            version: 1,
-            measure: app.measure.clone(),
-            cursor_idx: app.cursor_idx,
+            version: PERSISTED_STATE_VERSION,
+            score: app.score.clone(),
+            cursor: app.cursor,
             bpm: app.bpm,
             audio_settings: app.audio_cfg.settings,
             audio_latency_enabled: app.audio_cfg.latency_enabled,
@@ -215,7 +218,8 @@ impl App for Grooph {
 
         if let Some(audio) = &mut self.audio {
             audio.set_audio_settings(self.audio_cfg.settings);
-            if audio.update(&audio_state, self.bpm, &self.measure) {
+            let active_measure = &self.score.measures[self.cursor.measure_idx];
+            if audio.update(&audio_state, self.bpm, active_measure) {
                 ctx.request_repaint();
             }
         }
@@ -238,7 +242,7 @@ impl Grooph {
             return;
         }
 
-        let tempo = TempoMap::new(self.bpm, &self.measure.time_signature());
+        let tempo = TempoMap::new(self.bpm, &self.current_measure().time_signature());
 
         if self.transport_state == TransportState::Playing
             && is_connected
@@ -260,7 +264,7 @@ impl Grooph {
             is_connected,
             now_seconds,
         );
-        let beats = self.measure.beats();
+        let beats = self.score.measures[self.cursor.measure_idx].beats();
         let ready = accuracy_active && tempo.valid() && !beats.is_empty();
 
         for event in events {
@@ -285,42 +289,50 @@ impl Grooph {
 
     fn clear_accuracy_for_edit(&mut self) { self.accuracy.tracker.clear_for_edit(); }
 
-    fn push_undo(&mut self) { self.undo_stack.push((self.measure.clone(), self.cursor_idx)); }
+    pub(crate) fn current_measure(&self) -> &Measure { self.score.current(self.cursor.measure_idx) }
 
-    fn clear_redo(&mut self) { self.redo_stack.clear(); }
+    pub(crate) fn current_measure_mut(&mut self) -> &mut Measure {
+        self.score.current_mut(self.cursor.measure_idx)
+    }
 
-    /// Push an undo snapshot, run `op`, and commit/rollback based on whether it reports a change.
-    /// On commit, clears redo and accuracy edit state; on rollback, the snapshot is discarded.
+    fn current_snapshot(&self) -> EditorSnapshot {
+        EditorSnapshot { score: self.score.clone(), cursor: self.cursor }
+    }
+
+    pub(crate) fn can_undo(&self) -> bool { self.history.can_undo() }
+
+    pub(crate) fn can_redo(&self) -> bool { self.history.can_redo() }
+
+    /// Snapshot the current state, run `op`, and commit only if it reports a change.
+    /// On commit, clears redo and accuracy edit state. On no-op, the snapshot is discarded.
     pub(crate) fn with_undo_snapshot<F>(&mut self, op: F) -> bool
     where
         F: FnOnce(&mut Self) -> bool,
     {
-        self.push_undo();
+        let snap = self.current_snapshot();
         if op(self) {
-            self.clear_redo();
+            self.history.push(snap);
             self.clear_accuracy_for_edit();
             true
         } else {
-            let _ = self.undo_stack.pop();
             false
         }
     }
 
     fn undo(&mut self) {
-        if let Some((m, c)) = self.undo_stack.pop() {
-            // Move the current state to redo, replace it with the popped snapshot
-            let current = (std::mem::replace(&mut self.measure, m), self.cursor_idx);
-            self.cursor_idx = c;
-            self.redo_stack.push(current);
+        let current = self.current_snapshot();
+        if let Some(prev) = self.history.pop_undo(current) {
+            self.score = prev.score;
+            self.cursor = prev.cursor;
             self.clear_accuracy_for_edit();
         }
     }
 
     fn redo(&mut self) {
-        if let Some((m, c)) = self.redo_stack.pop() {
-            let current = (std::mem::replace(&mut self.measure, m), self.cursor_idx);
-            self.cursor_idx = c;
-            self.undo_stack.push(current);
+        let current = self.current_snapshot();
+        if let Some(next) = self.history.pop_redo(current) {
+            self.score = next.score;
+            self.cursor = next.cursor;
             self.clear_accuracy_for_edit();
         }
     }
@@ -331,13 +343,13 @@ impl Grooph {
         base: NoteValue,
         beat_kind: Option<BeatKind>,
     ) -> Option<Modification> {
-        let result = self.measure.modify_beat(idx, base, beat_kind);
+        let result = self.current_measure_mut().modify_beat(idx, base, beat_kind);
         if result.is_some() {
-            let new_len = self.measure.beats().len();
+            let new_len = self.current_measure().beats().len();
             if new_len > 0 {
                 let last = new_len - 1;
-                if self.cursor_idx < last {
-                    self.cursor_idx += 1;
+                if self.cursor.beat_idx < last {
+                    self.cursor.beat_idx += 1;
                 }
             }
         }
@@ -346,18 +358,19 @@ impl Grooph {
     }
 
     fn set_tuplet(&mut self, idx: usize, tuplet_spec: Option<TupletSpec>) -> Option<Modification> {
-        let result = self.measure.set_tuplet(idx, tuplet_spec, true);
+        let result = self.current_measure_mut().set_tuplet(idx, tuplet_spec, true);
         match &result {
             Some(Modification::DissolveTuplet(tuplet_idx, _)) => {
-                let new_len = self.measure.beats().len();
+                let new_len = self.current_measure().beats().len();
                 if new_len > 0 {
-                    self.cursor_idx = tuplet_idx.start_idx.min(new_len - 1);
+                    self.cursor.beat_idx = tuplet_idx.start_idx.min(new_len - 1);
                 } else {
-                    self.cursor_idx = 0;
+                    self.cursor.beat_idx = 0;
                 }
             }
             Some(Modification::SetTuplet(group_span, ..)) => {
-                self.cursor_idx = (group_span.end_idx + 1).min(self.measure.beats().len() - 1);
+                self.cursor.beat_idx =
+                    (group_span.end_idx + 1).min(self.current_measure().beats().len() - 1);
             }
             _ => {}
         }
@@ -473,7 +486,7 @@ impl Grooph {
             return;
         }
 
-        let tempo = TempoMap::new(self.bpm, &self.measure.time_signature());
+        let tempo = TempoMap::new(self.bpm, &self.current_measure().time_signature());
         if !tempo.valid() {
             return;
         }
@@ -565,13 +578,24 @@ impl Grooph {
         let mut state = cc
             .storage
             .and_then(|storage| eframe::get_value::<PersistedState>(storage, APP_STATE_KEY))
+            .filter(|s| s.version == PERSISTED_STATE_VERSION)
             .unwrap_or_default();
 
-        if state.measure.beats().is_empty() {
-            state.measure = Self::default_measure();
-            state.cursor_idx = 0;
+        if state.score.is_empty() {
+            state.score = Score::single(Self::default_measure());
+            state.cursor = Cursor::start();
         } else {
-            state.cursor_idx = state.cursor_idx.min(state.measure.beats().len().saturating_sub(1));
+            let measure_count = state.score.len();
+            if state.cursor.measure_idx >= measure_count {
+                state.cursor.measure_idx = measure_count - 1;
+            }
+            let beats_len = state.score.current(state.cursor.measure_idx).beats().len();
+            if beats_len == 0 {
+                state.score.measures[state.cursor.measure_idx] = Self::default_measure();
+                state.cursor.beat_idx = 0;
+            } else {
+                state.cursor.beat_idx = state.cursor.beat_idx.min(beats_len - 1);
+            }
         }
 
         state.audio_settings = state.audio_settings.clamped();
@@ -637,11 +661,10 @@ impl Grooph {
         Self {
             mode: Mode::Playback,
             music_font_id: FontId::new(16.0, ff),
-            measure: state.measure,
-            cursor_idx: state.cursor_idx,
+            score: state.score,
+            cursor: state.cursor,
             button_measures,
-            undo_stack: Vec::new(),
-            redo_stack: Vec::new(),
+            history: UndoHistory::new(DEFAULT_UNDO_LIMIT),
             font_bump: 8.0,
             baseline_dark: None,
             baseline_light: None,

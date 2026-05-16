@@ -90,8 +90,8 @@ impl Grooph {
 
     fn plain_tool_button(&self, ui: &mut Ui, tool: &Tool) -> Response {
         let enabled = match tool.kind {
-            ToolKind::Edit(EditOp::Undo) => !self.undo_stack.is_empty(),
-            ToolKind::Edit(EditOp::Redo) => !self.redo_stack.is_empty(),
+            ToolKind::Edit(EditOp::Undo) => self.can_undo(),
+            ToolKind::Edit(EditOp::Redo) => self.can_redo(),
             _ => true,
         };
         ui.add_enabled_ui(enabled, |ui| {
@@ -120,7 +120,7 @@ impl Grooph {
                 return;
             }
             ToolKind::Meta(MetaOp::ChangeTimeSignature) => {
-                let ts = self.measure.time_signature();
+                let ts = self.current_measure().time_signature();
                 self.mode = Mode::TimeSignature { beats: ts.beats, unit: ts.beat_unit };
                 return;
             }
@@ -148,14 +148,14 @@ impl Grooph {
 
     /// Moves the cursor according to `op`. Non-mutating; never produces an undo snapshot.
     fn execute_navigation(&mut self, op: NavOp) {
-        let beats_len = self.measure.beats().len();
+        let beats_len = self.current_measure().beats().len();
         if beats_len == 0 {
             return;
         }
         let max_idx = beats_len - 1;
-        self.cursor_idx = match op {
-            NavOp::Left => self.cursor_idx.saturating_sub(1),
-            NavOp::Right => (self.cursor_idx + 1).min(max_idx),
+        self.cursor.beat_idx = match op {
+            NavOp::Left => self.cursor.beat_idx.saturating_sub(1),
+            NavOp::Right => (self.cursor.beat_idx + 1).min(max_idx),
             NavOp::Start => 0,
             NavOp::End => max_idx,
         };
@@ -164,13 +164,13 @@ impl Grooph {
     /// Executes a tool that is known to be mutating. Returns whether a change was committed.
     /// Must only be called from within `with_undo_snapshot`.
     fn execute_mutating_tool(&mut self, tool: &Tool) -> bool {
-        let beats_len = self.measure.beats().len();
+        let beats_len = self.current_measure().beats().len();
         match tool.kind {
             ToolKind::InsertBeat(template) => {
                 if beats_len == 0 {
                     return false;
                 }
-                let idx = self.cursor_idx.min(beats_len - 1);
+                let idx = self.cursor.beat_idx.min(beats_len - 1);
                 let result = match template.duration {
                     Duration::Simple(_) => {
                         self.set_beat(idx, template.duration.base_note(), Some(template.kind))
@@ -181,20 +181,22 @@ impl Grooph {
                 result.is_some()
             }
             ToolKind::Meta(MetaOp::ResetMeasure) => {
-                let ts = self.measure.time_signature();
-                self.measure = Measure::new_init(ts, Rest);
-                self.cursor_idx = 0;
+                let ts = self.current_measure().time_signature();
+                *self.current_measure_mut() = Measure::new_init(ts, Rest);
+                self.cursor.beat_idx = 0;
                 true
             }
             ToolKind::Modify(modifier) => {
                 if beats_len == 0 {
                     return false;
                 }
-                let idx = self.cursor_idx.min(beats_len - 1);
+                let idx = self.cursor.beat_idx.min(beats_len - 1);
                 let result = match modifier {
-                    Modifier::ToggleDotted { dots: _ } => self.measure.toggle_dotted(idx),
-                    Modifier::ToggleAccent => self.measure.toggle_accent(idx),
-                    Modifier::ToggleRestNote => self.measure.toggle_beat_kind(idx),
+                    Modifier::ToggleDotted { dots: _ } => {
+                        self.current_measure_mut().toggle_dotted(idx)
+                    }
+                    Modifier::ToggleAccent => self.current_measure_mut().toggle_accent(idx),
+                    Modifier::ToggleRestNote => self.current_measure_mut().toggle_beat_kind(idx),
                     Modifier::CycleTuplet => self.set_tuplet(idx, None),
                 };
                 result.is_some()
@@ -203,16 +205,16 @@ impl Grooph {
                 if beats_len == 0 {
                     return false;
                 }
-                let idx = self.cursor_idx.min(beats_len - 1);
-                self.measure.remove(idx);
-                let new_len = self.measure.beats().len();
-                self.cursor_idx = if new_len == 0 {
+                let idx = self.cursor.beat_idx.min(beats_len - 1);
+                self.current_measure_mut().remove(idx);
+                let new_len = self.current_measure().beats().len();
+                self.cursor.beat_idx = if new_len == 0 {
                     0
                 } else {
                     let last = new_len - 1;
                     match op {
-                        DeleteOp::Forward => (self.cursor_idx + 1).min(last),
-                        DeleteOp::Backward => self.cursor_idx.saturating_sub(1).min(last),
+                        DeleteOp::Forward => (self.cursor.beat_idx + 1).min(last),
+                        DeleteOp::Backward => self.cursor.beat_idx.saturating_sub(1).min(last),
                     }
                 };
                 true
@@ -257,7 +259,7 @@ impl Grooph {
             };
 
             // Use a temporary measure just for layout width and positions
-            let ts = self.measure.time_signature();
+            let ts = self.current_measure().time_signature();
             let layout = build_time_sig_layout(&ts, rect.center().x, &opts);
             let top = glyphs::ts_glyphs(ts.beats);
             let bot = glyphs::ts_glyphs(ts.beat_unit);

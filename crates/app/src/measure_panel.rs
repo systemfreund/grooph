@@ -22,7 +22,8 @@ impl Grooph {
                     // Update playback smoothing & primary-beat flash state
                     let playback_tick_to_draw = match self.transport_state {
                         TransportState::Playing => {
-                            let tempo = TempoMap::new(self.bpm, &self.measure.time_signature());
+                            let tempo =
+                                TempoMap::new(self.bpm, &self.current_measure().time_signature());
 
                             let now = ui.input(|i| i.time);
                             let last = self.playback.last_update.unwrap_or(now);
@@ -122,9 +123,9 @@ impl Grooph {
                     let count_config = self.build_count_config();
                     let layout = draw_measure(
                         ui,
-                        &self.measure,
+                        self.current_measure(),
                         &opts,
-                        if self.mode == Mode::Edit { Some(self.cursor_idx) } else { None },
+                        if self.mode == Mode::Edit { Some(self.cursor.beat_idx) } else { None },
                         playback_tick_to_draw,
                         count_config.as_ref(),
                     );
@@ -163,12 +164,13 @@ impl Grooph {
         if self.transport_state != TransportState::Playing {
             return;
         }
-        let beats = self.measure.beats();
+        let beats = self.current_measure().beats();
         if beats.is_empty() {
             return;
         }
         let onsets = DEFAULT_GRID.compute_onset_ticks(beats);
-        let total_ticks = DEFAULT_GRID.ticks_per_measure(&self.measure.time_signature()) as f64;
+        let total_ticks =
+            DEFAULT_GRID.ticks_per_measure(&self.current_measure().time_signature()) as f64;
         if total_ticks <= 0.0 {
             return;
         }
@@ -282,7 +284,7 @@ impl Grooph {
                 }
                 best_i
             };
-            self.cursor_idx = idx;
+            self.cursor.beat_idx = idx;
 
             if resp.double_clicked()
                 && let Some(tool) = all_tools()
