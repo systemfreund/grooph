@@ -55,26 +55,20 @@ impl Grooph {
                                 return;
                             }
 
-                            // Snapshot before change
-                            self.push_undo();
-                            let res = self.measure.set_time_signature(new_ts);
-                            match res {
-                                Ok(_) => {
-                                    self.clear_redo();
-                                    self.clear_accuracy_for_edit();
-                                    // Clamp cursor within bounds
-                                    let new_len = self.measure.beats().len();
-                                    if new_len > 0 {
-                                        self.cursor_idx = self.cursor_idx.min(new_len - 1);
-                                    } else {
-                                        self.cursor_idx = 0;
-                                    }
-                                    self.mode = Mode::Edit;
+                            let committed = self.with_undo_snapshot(|g| {
+                                if g.measure.set_time_signature(new_ts).is_err() {
+                                    return false;
                                 }
-                                Err(_) => {
-                                    // Roll back the snapshot if failed
-                                    let _ = self.undo_stack.pop();
+                                let new_len = g.measure.beats().len();
+                                if new_len > 0 {
+                                    g.cursor_idx = g.cursor_idx.min(new_len - 1);
+                                } else {
+                                    g.cursor_idx = 0;
                                 }
+                                true
+                            });
+                            if committed {
+                                self.mode = Mode::Edit;
                             }
                         }
                     });

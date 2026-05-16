@@ -319,6 +319,23 @@ impl Grooph {
 
     fn clear_redo(&mut self) { self.redo_stack.clear(); }
 
+    /// Push an undo snapshot, run `op`, and commit/rollback based on whether it reports a change.
+    /// On commit, clears redo and accuracy edit state; on rollback, the snapshot is discarded.
+    pub(crate) fn with_undo_snapshot<F>(&mut self, op: F) -> bool
+    where
+        F: FnOnce(&mut Self) -> bool,
+    {
+        self.push_undo();
+        if op(self) {
+            self.clear_redo();
+            self.clear_accuracy_for_edit();
+            true
+        } else {
+            let _ = self.undo_stack.pop();
+            false
+        }
+    }
+
     fn undo(&mut self) {
         if let Some((m, c)) = self.undo_stack.pop() {
             // Move the current state to redo, replace it with the popped snapshot

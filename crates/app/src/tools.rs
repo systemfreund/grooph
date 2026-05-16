@@ -30,6 +30,7 @@ pub enum Modifier {
     ToggleDotted { dots: u8 },
     ToggleAccent,
     ToggleRestNote,
+    CycleTuplet,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -50,6 +51,20 @@ pub enum ToolKind {
     Modify(Modifier),
     Edit(EditOp),
     Meta(MetaOp),
+}
+
+impl ToolKind {
+    /// Whether this tool mutates the measure and therefore needs an undo snapshot.
+    /// Undo/Redo manage their own stacks; opening the time-signature dialog is not a mutation.
+    pub fn is_mutating(&self) -> bool {
+        match self {
+            ToolKind::InsertBeat(..) => true,
+            ToolKind::Modify(..) => true,
+            ToolKind::Meta(MetaOp::ResetMeasure) => true,
+            ToolKind::Edit(_) => false,
+            ToolKind::Meta(MetaOp::ChangeTimeSignature) => false,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -73,7 +88,7 @@ pub fn all_tools() -> &'static [Tool] {
     use BeatKind::*;
     use Duration::*;
 
-    static ALL: [Tool; 21] = [
+    static ALL: [Tool; 22] = [
         Tool {
             id: "edit.undo",
             label: "⟲",
@@ -179,6 +194,14 @@ pub fn all_tools() -> &'static [Tool] {
             group: ToolGroup::Modifiers,
             kind: ToolKind::Modify(Modifier::ToggleRestNote),
             shortcut: Some(Shortcut { key: Key::Enter, with_shift: false }),
+            show_in_palette: false,
+        },
+        Tool {
+            id: "modify.cycle_tuplet",
+            label: "Cycle Tuplet",
+            group: ToolGroup::Tuplets,
+            kind: ToolKind::Modify(Modifier::CycleTuplet),
+            shortcut: Some(Shortcut { key: Key::T, with_shift: false }),
             show_in_palette: false,
         },
         Tool {

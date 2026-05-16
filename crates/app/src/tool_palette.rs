@@ -115,26 +115,55 @@ impl Grooph {
     }
 
     pub(super) fn apply_tool(&mut self, tool: &Tool) {
-        // If edit mode is disabled, ignore all tool interactions
-        if self.mode != Mode::Edit {
+        if !self.tool_applicable(tool) {
             return;
         }
-        // Block palette/tool actions while a modal dialog is open
-        if matches!(self.mode, Mode::TimeSignature { .. }) {
-            return;
+
+        // Non-mutating tools have dedicated paths that manage their own state.
+        match tool.kind {
+            ToolKind::Edit(EditOp::Undo) => {
+                self.undo();
+                return;
+            }
+            ToolKind::Edit(EditOp::Redo) => {
+                self.redo();
+                return;
+            }
+            ToolKind::Meta(MetaOp::ChangeTimeSignature) => {
+                let ts = self.measure.time_signature();
+                self.mode = Mode::TimeSignature { beats: ts.beats, unit: ts.beat_unit };
+                return;
+            }
+            _ => {}
         }
-        // Take a snapshot for tools that change state; Meta tools like dialogs drop it.
-        self.push_undo();
-        let result = match tool.kind {
+
+        debug_assert!(tool.kind.is_mutating());
+
+        let mut result: Option<Modification> = None;
+        self.with_undo_snapshot(|g| {
+            result = g.execute_mutating_tool(tool);
+            result.is_some()
+        });
+        info!("edited: {:?}", result);
+    }
+
+    /// Gate for any tool dispatch — single source of truth, regardless of trigger (palette / keyboard / panel).
+    fn tool_applicable(&self, _tool: &Tool) -> bool {
+        // Tools only run in edit mode, and not while a modal dialog is open.
+        // Mode::TimeSignature is a sub-state of editing but blocks tool actions.
+        matches!(self.mode, Mode::Edit)
+    }
+
+    /// Executes a tool that is known to be mutating. Returns the resulting modification, if any.
+    /// Must only be called from within `with_undo_snapshot`.
+    fn execute_mutating_tool(&mut self, tool: &Tool) -> Option<Modification> {
+        let beats_len = self.measure.beats().len();
+        match tool.kind {
             ToolKind::InsertBeat(template) => {
-                let beats_len = self.measure.beats().len();
                 if beats_len == 0 {
-                    // No state change, drop the snapshot and return
-                    let _ = self.undo_stack.pop();
-                    return;
+                    return None;
                 }
                 let idx = self.cursor_idx.min(beats_len - 1);
-
                 match template.duration {
                     Duration::Simple(_) => {
                         self.set_beat(idx, template.duration.base_note(), Some(template.kind))
@@ -143,56 +172,29 @@ impl Grooph {
                     _ => None,
                 }
             }
-            ToolKind::Meta(MetaOp::ChangeTimeSignature) => {
-                // Opening a dialog is not a state mutation: drop snapshot, open dialog
-                let _ = self.undo_stack.pop();
-                let ts = self.measure.time_signature();
-                self.mode = Mode::TimeSignature { beats: ts.beats, unit: ts.beat_unit };
-                return;
-            }
             ToolKind::Meta(MetaOp::ResetMeasure) => {
-                // Keep the snapshot we took before calling apply_tool
                 let ts = self.measure.time_signature();
                 self.measure = Measure::new_init(ts, Rest);
                 self.cursor_idx = 0;
                 Some(Modification::ChangeTimeSignature(ts, ts))
             }
-            ToolKind::Edit(EditOp::Undo) => {
-                // Undo should not create a new snapshot; drop the one we took and perform undo
-                let _ = self.undo_stack.pop();
-                self.undo();
-                return;
-            }
-            ToolKind::Edit(EditOp::Redo) => {
-                // Redo should not create a new snapshot; drop the one we took and perform redo
-                let _ = self.undo_stack.pop();
-                self.redo();
-                return;
-            }
             ToolKind::Modify(modifier) => {
-                let beats_len = self.measure.beats().len();
                 if beats_len == 0 {
-                    let _ = self.undo_stack.pop();
-                    return;
+                    return None;
                 }
                 let idx = self.cursor_idx.min(beats_len - 1);
                 match modifier {
                     Modifier::ToggleDotted { dots: _ } => self.measure.toggle_dotted(idx),
                     Modifier::ToggleAccent => self.measure.toggle_accent(idx),
                     Modifier::ToggleRestNote => self.measure.toggle_beat_kind(idx),
+                    Modifier::CycleTuplet => self.set_tuplet(idx, None),
                 }
             }
-        };
-
-        // Clear redo for real changes; otherwise drop the snapshot we took before
-        if result.is_some() {
-            self.clear_redo();
-            self.clear_accuracy_for_edit();
-        } else {
-            let _ = self.undo_stack.pop();
+            ToolKind::Edit(_) | ToolKind::Meta(MetaOp::ChangeTimeSignature) => {
+                debug_assert!(false, "non-mutating tool reached execute_mutating_tool");
+                None
+            }
         }
-
-        info!("edited: {:?}", result);
     }
 
     fn time_signature_button(&self, ui: &mut Ui, id: &str) -> Response {

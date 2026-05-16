@@ -1,13 +1,13 @@
-use crate::tools::all_tools;
-use crate::Mode;
 use crate::Grooph;
+use crate::Mode;
+use crate::tools::all_tools;
 use eframe::egui;
 use eframe::egui::Key;
 
 impl Grooph {
     pub(super) fn handle_keyboard_input(&mut self, ctx: &egui::Context) {
         ctx.input(|i| {
-            // While the time signature dialog is open, ignore global keyboard shortcuts
+            // Modal dialogs swallow global shortcuts; their own UI provides Cancel/Confirm.
             if matches!(self.mode, Mode::TimeSignature { .. }) {
                 return;
             }
@@ -21,11 +21,15 @@ impl Grooph {
                 self.toggle_playback();
             }
 
+            // The hard-coded edits below (cursor navigation, Delete/Backspace) are not yet modelled
+            // as Tools, so they need their own mode gate. Tool shortcuts are gated centrally by
+            // apply_tool's tool_applicable check.
             if self.mode != Mode::Edit {
                 return;
             }
 
-            // Undo / Redo shortcuts: Ctrl/Cmd+Z (undo), Ctrl/Cmd+Shift+Z or Ctrl/Cmd+Y (redo)
+            // Undo / Redo shortcuts: Ctrl/Cmd+Z (undo), Ctrl/Cmd+Shift+Z or Ctrl/Cmd+Y (redo).
+            // The Shortcut model does not yet carry Ctrl/Cmd, so these stay hard-coded for now.
             let mut consumed_undo_redo = false;
             let undo_combo = i.key_pressed(Key::Z) && (i.modifiers.command || i.modifiers.ctrl);
             let redo_combo_z = i.key_pressed(Key::Z)
@@ -41,15 +45,14 @@ impl Grooph {
             }
 
             let beats_len = self.measure.beats().len();
-            let total_len = beats_len;
-            if total_len > 0 && !consumed_undo_redo {
+            if beats_len > 0 && !consumed_undo_redo {
                 // Navigation over committed beats only
                 let mut pos = self.cursor_idx;
                 if i.key_pressed(Key::ArrowLeft) {
                     pos = pos.saturating_sub(1);
                 }
                 if i.key_pressed(Key::ArrowRight) {
-                    let max_idx = total_len.saturating_sub(1);
+                    let max_idx = beats_len.saturating_sub(1);
                     if pos < max_idx {
                         pos += 1;
                     }
@@ -58,52 +61,52 @@ impl Grooph {
                     pos = 0;
                 }
                 if i.key_pressed(Key::End) {
-                    pos = total_len.saturating_sub(1);
+                    pos = beats_len.saturating_sub(1);
                 }
                 self.cursor_idx = pos;
 
-                // Edits apply only when the cursor is on a committed beat
-                let idx = self.cursor_idx.min(beats_len.saturating_sub(1));
                 if i.key_pressed(Key::Delete) {
-                    // Remove beat at the cursor
-                    self.push_undo();
-                    self.measure.remove(idx);
-                    // Move cursor right
-                    let new_pos = (self.measure.beats().len() - 1).min(self.cursor_idx + 1);
-                    self.cursor_idx = new_pos;
-                    self.clear_redo();
-                    self.clear_accuracy_for_edit();
+                    self.remove_at_cursor(CursorAdvance::Right);
                 }
                 if i.key_pressed(Key::Backspace) {
-                    // Remove beat at the cursor
-                    self.push_undo();
-                    self.measure.remove(idx);
-                    // Move cursor left
-                    let new_len = self.measure.beats().len();
-                    let new_pos = self.cursor_idx.saturating_sub(1).min(new_len - 1);
-                    self.cursor_idx = new_pos;
-                    self.clear_redo();
-                    self.clear_accuracy_for_edit();
+                    self.remove_at_cursor(CursorAdvance::Left);
                 }
+
                 // Keyboard input routed through tool shortcuts
                 for t in all_tools().iter().filter(|t| t.shortcut.is_some()) {
                     let sc = t.shortcut.unwrap();
-                    // Match exact shift requirement
                     if i.key_pressed(sc.key) && i.modifiers.shift == sc.with_shift {
                         self.apply_tool(t);
-                    }
-                }
-                if i.key_pressed(Key::T) {
-                    // Snapshot before attempting tuplet cycle via hotkey
-                    self.push_undo();
-                    let res = self.set_tuplet(idx, None);
-                    if res.is_some() {
-                        self.clear_redo();
-                    } else {
-                        let _ = self.undo_stack.pop();
                     }
                 }
             }
         });
     }
+
+    fn remove_at_cursor(&mut self, advance: CursorAdvance) {
+        let beats_len = self.measure.beats().len();
+        if beats_len == 0 {
+            return;
+        }
+        let idx = self.cursor_idx.min(beats_len - 1);
+        self.with_undo_snapshot(|g| {
+            g.measure.remove(idx);
+            let new_len = g.measure.beats().len();
+            if new_len == 0 {
+                g.cursor_idx = 0;
+            } else {
+                let new_pos = match advance {
+                    CursorAdvance::Right => (new_len - 1).min(g.cursor_idx + 1),
+                    CursorAdvance::Left => g.cursor_idx.saturating_sub(1).min(new_len - 1),
+                };
+                g.cursor_idx = new_pos;
+            }
+            true
+        });
+    }
+}
+
+enum CursorAdvance {
+    Left,
+    Right,
 }
