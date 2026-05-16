@@ -52,8 +52,8 @@ impl Grooph {
                     ToolGroup::Meta,
                     ToolGroup::Notes,
                     ToolGroup::Modifiers,
-                    ToolGroup::Tuplets,
                     ToolGroup::Rests,
+                    ToolGroup::Tuplets,
                 ];
 
                 egui::ScrollArea::horizontal()
