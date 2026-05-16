@@ -77,6 +77,63 @@ pub struct TupletSpec {
     pub base: NoteValue,
 }
 
+/// Named tuplet families derived from the numerator `n`.
+/// Construct via `TupletKind::from_n` or `TupletSpec::kind`.
+/// Direct construction of `Other(k)` for k ∈ {3,5,6,7,9} is non-canonical
+/// and will not equal the named variant.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum TupletKind {
+    Triplet,
+    Quintuplet,
+    Sextuplet,
+    Septuplet,
+    Nonuplet,
+    Other(u8),
+}
+
+impl TupletKind {
+    pub const fn from_n(n: u8) -> Self {
+        match n {
+            3 => Self::Triplet,
+            5 => Self::Quintuplet,
+            6 => Self::Sextuplet,
+            7 => Self::Septuplet,
+            9 => Self::Nonuplet,
+            _ => Self::Other(n),
+        }
+    }
+
+    pub const fn name(&self) -> Option<&'static str> {
+        match self {
+            Self::Triplet => Some("Triplet"),
+            Self::Quintuplet => Some("Quintuplet"),
+            Self::Sextuplet => Some("Sextuplet"),
+            Self::Septuplet => Some("Septuplet"),
+            Self::Nonuplet => Some("Nonuplet"),
+            Self::Other(_) => None,
+        }
+    }
+
+    pub const fn n(&self) -> u8 {
+        match *self {
+            Self::Triplet => 3,
+            Self::Quintuplet => 5,
+            Self::Sextuplet => 6,
+            Self::Septuplet => 7,
+            Self::Nonuplet => 9,
+            Self::Other(n) => n,
+        }
+    }
+}
+
+impl From<&TupletSpec> for TupletKind {
+    fn from(s: &TupletSpec) -> Self { Self::from_n(s.n) }
+}
+
+impl TupletSpec {
+    pub const fn kind(&self) -> TupletKind { TupletKind::from_n(self.n) }
+}
+
 impl Duration {
     pub(super) const fn as_fraction(&self) -> Frac {
         match *self {
@@ -174,7 +231,8 @@ pub fn human_readable(d: &Duration) -> String {
             };
             format!("{} {}", prefix, base.name())
         }
-        Duration::Tuplet(TupletSpec { n, m, base }) => {
+        Duration::Tuplet(spec) => {
+            let TupletSpec { n, m, base } = spec;
             let base_lower = match base {
                 Whole => "whole",
                 Half => "half",
@@ -183,15 +241,7 @@ pub fn human_readable(d: &Duration) -> String {
                 Sixteenth => "sixteenth",
                 ThirtySecond => "thirty-second",
             };
-            let name = match n {
-                3 => Some("Triplet"),
-                5 => Some("Quintuplet"),
-                6 => Some("Sextuplet"),
-                7 => Some("Septuplet"),
-                9 => Some("Nonuplet"),
-                _ => None,
-            };
-            if let Some(label) = name {
+            if let Some(label) = spec.kind().name() {
                 format!("{} {}", label, base_lower)
             } else {
                 format!("Tuplet {}:{} {}", n, m, base_lower)
@@ -234,7 +284,7 @@ pub const fn nt16() -> Duration { Duration::Tuplet(TupletSpec { n: 9, m: 8, base
 
 #[cfg(test)]
 mod tests {
-    use super::Duration;
+    use super::{Duration, NoteValue, TupletKind, TupletSpec};
     use crate::duration::NoteValue::Eighth;
     use crate::grid::DEFAULT_GRID;
 
@@ -251,5 +301,42 @@ mod tests {
         let e_ticks = DEFAULT_GRID.ticks_of(&Duration::Simple(Eighth));
         let e_dotted_ticks = DEFAULT_GRID.ticks_of(&Duration::Dotted { base: Eighth, dots: 1 });
         assert_ne!(e_ticks, e_dotted_ticks);
+    }
+
+    #[test]
+    fn tuplet_kind_known_values() {
+        assert_eq!(TupletKind::from_n(3), TupletKind::Triplet);
+        assert_eq!(TupletKind::from_n(5), TupletKind::Quintuplet);
+        assert_eq!(TupletKind::from_n(6), TupletKind::Sextuplet);
+        assert_eq!(TupletKind::from_n(7), TupletKind::Septuplet);
+        assert_eq!(TupletKind::from_n(9), TupletKind::Nonuplet);
+    }
+
+    #[test]
+    fn tuplet_kind_unknown_falls_back() {
+        assert_eq!(TupletKind::from_n(11), TupletKind::Other(11));
+        assert_eq!(TupletKind::from_n(0), TupletKind::Other(0));
+    }
+
+    #[test]
+    fn tuplet_kind_name_round_trip() {
+        for n in [3u8, 5, 6, 7, 9] {
+            assert!(TupletKind::from_n(n).name().is_some());
+        }
+        assert_eq!(TupletKind::from_n(11).name(), None);
+    }
+
+    #[test]
+    fn tuplet_kind_n_round_trip() {
+        for n in 0u8..=20 {
+            assert_eq!(TupletKind::from_n(n).n(), n);
+        }
+    }
+
+    #[test]
+    fn tuplet_spec_kind_consistent() {
+        let spec = TupletSpec { n: 7, m: 4, base: NoteValue::Eighth };
+        assert_eq!(spec.kind(), TupletKind::Septuplet);
+        assert_eq!(TupletKind::from(&spec), TupletKind::Septuplet);
     }
 }

@@ -1,3 +1,4 @@
+use crate::duration::TupletKind;
 use crate::grid::DEFAULT_GRID;
 use crate::grouping::default_groups_for;
 use crate::{Measure, TimeSignature};
@@ -347,7 +348,10 @@ fn push_slots_for_span(
         let ctx = LabelContext { beat_num, group_num, sub_num: sub_idx + 1 };
         let label = if layer.show_labels {
             layer.labels.as_ref().and_then(|p| {
-                if tuplet_n.is_some() && p.is_triplet() && tuplet_n != Some(3) {
+                let tuplet_kind = tuplet_n.map(TupletKind::from_n);
+                if p.is_triplet()
+                    && tuplet_kind.is_some_and(|k| k != TupletKind::Triplet)
+                {
                     label_from_tokens(&[LabelToken::SubNum], &ctx)
                 } else {
                     label_for_slot(p, sub_idx, &ctx)

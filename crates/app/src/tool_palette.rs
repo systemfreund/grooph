@@ -12,7 +12,7 @@ use grooph_layout::pixel_layout::{
     GlyphMetrics, LayoutOpts, build_measure_layout, build_time_sig_layout, compute_em,
 };
 use grooph_measure::BeatKind::{Note, Rest};
-use grooph_measure::duration::{Duration, TupletSpec};
+use grooph_measure::duration::{Duration, TupletKind};
 use grooph_measure::{Beat, Measure};
 use grooph_render::measure::draw_notes;
 use log::info;
@@ -302,9 +302,11 @@ impl Grooph {
         if let Some(rect) = button.rect(symbol_id) {
             let cap_factor = match template {
                 Beat { kind: Rest, .. } => 0.8,
-                Beat {
-                    kind: Note, duration: Duration::Tuplet(TupletSpec { n: 9, .. }), ..
-                } => 0.35,
+                Beat { kind: Note, duration: Duration::Tuplet(spec), .. }
+                    if matches!(spec.kind(), TupletKind::Nonuplet) =>
+                {
+                    0.35
+                }
                 Beat { kind: Note, duration: Duration::Tuplet(..), .. } => 0.4,
                 _ => 0.7,
             };
