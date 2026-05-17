@@ -15,7 +15,7 @@ impl Grooph {
                 ui.with_layout(layout, |ui| {
                     let l2 = Layout::left_to_right(Align::Min);
                     ui.with_layout(l2, |ui| {
-                        if let Mode::TimeSignature { beats, unit } = &mut self.mode {
+                        if let Mode::TimeSignature { beats, unit } = &mut self.ui.mode {
                             egui::ComboBox::from_id_salt("beats")
                                 .selected_text(format!("{}", *beats))
                                 .show_ui(ui, |ui| {
@@ -40,18 +40,18 @@ impl Grooph {
 
                     ui.horizontal(|ui| {
                         if ui.button("Cancel").clicked() {
-                            self.mode = Mode::Edit;
+                            self.ui.mode = Mode::Edit;
                         }
                         if ui.button("Done").clicked() {
                             // Prevent no-op undo entries
                             let current = self.current_measure().time_signature();
-                            let (beats, unit) = match &self.mode {
+                            let (beats, unit) = match &self.ui.mode {
                                 Mode::TimeSignature { beats, unit } => (*beats, *unit),
                                 _ => (current.beats, current.beat_unit),
                             };
                             let new_ts = TimeSignature { beats, beat_unit: unit };
                             if new_ts == current {
-                                self.mode = Mode::Edit;
+                                self.ui.mode = Mode::Edit;
                                 return;
                             }
 
@@ -61,14 +61,15 @@ impl Grooph {
                                 }
                                 let new_len = g.current_measure().beats().len();
                                 if new_len > 0 {
-                                    g.cursor.beat_idx = g.cursor.beat_idx.min(new_len - 1);
+                                    g.editor.cursor.beat_idx =
+                                        g.editor.cursor.beat_idx.min(new_len - 1);
                                 } else {
-                                    g.cursor.beat_idx = 0;
+                                    g.editor.cursor.beat_idx = 0;
                                 }
                                 true
                             });
                             if committed {
-                                self.mode = Mode::Edit;
+                                self.ui.mode = Mode::Edit;
                             }
                         }
                     });

@@ -23,12 +23,13 @@ impl Grooph {
 
                         ui.with_layout(layout, |ui| {
                             // Playback controls
-                            let is_running = self.transport_state != TransportState::Stopped;
+                            let is_running =
+                                self.playback_ctl.transport_state != TransportState::Stopped;
                             let button_label = if is_running { "⏹" } else { "⏵" };
                             if Button::new(button_label).selected(is_running).ui(ui).clicked() {
                                 self.toggle_playback();
                             }
-                            let bpm_editor = egui::DragValue::new(&mut self.bpm)
+                            let bpm_editor = egui::DragValue::new(&mut self.playback_ctl.bpm)
                                 .prefix("BPM: ")
                                 .range(20..=300)
                                 .speed(0.03);
@@ -41,7 +42,7 @@ impl Grooph {
                             }
 
                             ui.separator();
-                            if ui.selectable_label(self.mode == Mode::Edit, "🖊").clicked() {
+                            if ui.selectable_label(self.ui.mode == Mode::Edit, "🖊").clicked() {
                                 self.toggle_mode(Mode::Edit);
                             }
                             // ui.selectable_label(
@@ -50,24 +51,28 @@ impl Grooph {
                             //         .tint(ui.style().visuals.text_color()),
                             // )
                             // .clicked();
-                            if ui.selectable_label(self.mode == Mode::Mixer, "🔈").clicked() {
+                            if ui.selectable_label(self.ui.mode == Mode::Mixer, "🔈").clicked() {
                                 self.toggle_mode(Mode::Mixer);
                             }
-                            if ui.selectable_label(self.mode == Mode::Settings, "⚙").clicked() {
+                            if ui.selectable_label(self.ui.mode == Mode::Settings, "⚙").clicked()
+                            {
                                 self.toggle_mode(Mode::Settings);
                             }
-                            if ui.selectable_label(self.accuracy.enabled, "🎯").clicked() {
-                                self.set_accuracy_enabled(!self.accuracy.enabled);
+                            if ui
+                                .selectable_label(self.playback_ctl.accuracy.enabled, "🎯")
+                                .clicked()
+                            {
+                                self.set_accuracy_enabled(!self.playback_ctl.accuracy.enabled);
                             }
-                            if ui.selectable_label(self.mode == Mode::Help, "?").clicked() {
+                            if ui.selectable_label(self.ui.mode == Mode::Help, "?").clicked() {
                                 self.toggle_mode(Mode::Help);
                             }
 
                             ui.separator();
                             let measure_label = format!(
                                 "{}/{}",
-                                self.cursor.measure_idx + 1,
-                                self.score.len()
+                                self.editor.cursor.measure_idx + 1,
+                                self.editor.score.len()
                             );
                             ui.label(measure_label);
                             if Button::new("➕").ui(ui).clicked() {

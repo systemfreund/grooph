@@ -21,7 +21,10 @@ use grooph_measure::{BeatIdx, Cursor, Measure, Score, TimeSignature};
 
 use crate::accuracy::AccuracyState;
 use crate::platform::{PlatformRuntime, VisibilityEvent};
-use crate::state::{AudioConfig, LayoutSettings, MidiState, PlaybackState};
+use crate::state::{
+    AudioConfig, EditorState, LayoutSettings, MidiState, PlaybackController, PlaybackState,
+    UiShell,
+};
 use grooph_measure::tempo::ScoreTiming;
 use crate::tools::ToolKind;
 use crate::tools::{BeatTemplate, Modifier, all_tools};
@@ -45,7 +48,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 #[derive(PartialEq, Eq)]
-enum Mode {
+pub(crate) enum Mode {
     Edit,
     Playback,
     Mixer,
@@ -62,28 +65,18 @@ pub(crate) enum TransportState {
 
 const APP_STATE_KEY: &str = "grooph_state";
 
+/// Top-level app object. Holds three subsystems:
+/// - [`EditorState`] — score, cursor, undo history, button thumbnails.
+/// - [`PlaybackController`] — transport, audio, MIDI, accuracy.
+/// - [`UiShell`] — modes, fonts, layout knobs, counting overlay, platform glue.
+///
+/// `Grooph` itself is a facade: most methods coordinate across subsystems,
+/// which is why they stay attached to `Self` rather than moving onto the
+/// individual structs.
 pub struct Grooph {
-    mode: Mode,
-    music_font_id: FontId,
-    score: Score,
-    cursor: Cursor,
-    // Prebuilt measures for note/rest/tuplet tool buttons to avoid per-frame reconstruction
-    button_measures: HashMap<&'static str, Measure>,
-    history: UndoHistory,
-    // Global UI font bump configuration and per-theme baselines (so bump applies to dark & light)
-    font_bump: f32,
-    baseline_dark: Option<Vec<(TextStyle, f32)>>,
-    baseline_light: Option<Vec<(TextStyle, f32)>>,
-    transport_state: TransportState,
-    bpm: u32,
-    audio: Option<grooph_audio::Audio>,
-    pub(crate) audio_cfg: AudioConfig,
-    pub(crate) layout: LayoutSettings,
-    pub(crate) playback: PlaybackState,
-    pub(crate) accuracy: AccuracyState,
-    pub(crate) midi: MidiState,
-    counting: CountingSettings,
-    platform: PlatformRuntime,
+    pub(crate) editor: EditorState,
+    pub(crate) playback_ctl: PlaybackController,
+    pub(crate) ui: UiShell,
 }
 
 const PERSISTED_STATE_VERSION: u8 = 2;
@@ -124,15 +117,15 @@ impl PersistedState {
     fn from_app(app: &Grooph) -> Self {
         Self {
             version: PERSISTED_STATE_VERSION,
-            score: app.score.clone(),
-            cursor: app.cursor,
-            bpm: app.bpm,
-            audio_settings: app.audio_cfg.settings,
-            audio_latency_enabled: app.audio_cfg.latency_enabled,
-            audio_offset: app.audio_cfg.offset,
-            counting: app.counting,
-            midi_selected_port_id: app.midi.selected_port_id.clone(),
-            accuracy_enabled: app.accuracy.enabled,
+            score: app.editor.score.clone(),
+            cursor: app.editor.cursor,
+            bpm: app.playback_ctl.bpm,
+            audio_settings: app.playback_ctl.audio_cfg.settings,
+            audio_latency_enabled: app.playback_ctl.audio_cfg.latency_enabled,
+            audio_offset: app.playback_ctl.audio_cfg.offset,
+            counting: app.ui.counting,
+            midi_selected_port_id: app.playback_ctl.midi.selected_port_id.clone(),
+            accuracy_enabled: app.playback_ctl.accuracy.enabled,
         }
     }
 }
@@ -188,21 +181,21 @@ impl App for Grooph {
         self.tool_palette_panel(ui);
         self.measure_panel(ui);
 
-        if matches!(self.mode, Mode::TimeSignature { .. }) {
+        if matches!(self.ui.mode, Mode::TimeSignature { .. }) {
             self.time_signature_dialog(ui);
         }
 
         self.handle_keyboard_input(ui);
         self.handle_midi_input_events();
 
-        if let Some(ev) = self.platform.take_visibility_event() {
+        if let Some(ev) = self.ui.platform.take_visibility_event() {
             match ev {
                 VisibilityEvent::Hidden => {
                     self.stop_transport();
-                    self.audio = None;
+                    self.playback_ctl.audio = None;
                 }
                 VisibilityEvent::Visible | VisibilityEvent::PageShow => {
-                    self.audio = None;
+                    self.playback_ctl.audio = None;
                 }
             }
         }
@@ -210,14 +203,14 @@ impl App for Grooph {
         let audio_state = self.audio_state();
 
         // If we should be playing audio but have no audio engine, try to create it (works after user gesture on iOS)
-        if audio_state == PlayerState::Playing && self.audio.is_none() {
+        if audio_state == PlayerState::Playing && self.playback_ctl.audio.is_none() {
             debug!("Creating audio engine.");
-            self.audio = grooph_audio::Audio::new(self.bpm);
+            self.playback_ctl.audio = grooph_audio::Audio::new(self.playback_ctl.bpm);
         }
 
-        if let Some(audio) = &mut self.audio {
-            audio.set_audio_settings(self.audio_cfg.settings);
-            if audio.update(&audio_state, self.bpm, &self.score) {
+        if let Some(audio) = &mut self.playback_ctl.audio {
+            audio.set_audio_settings(self.playback_ctl.audio_cfg.settings);
+            if audio.update(&audio_state, self.playback_ctl.bpm, &self.editor.score) {
                 ui.ctx().request_repaint();
             }
         }
@@ -231,46 +224,52 @@ impl App for Grooph {
 
 impl Grooph {
     fn handle_midi_input_events(&mut self) {
-        let (events, now_seconds, is_connected) = match self.midi.input.as_ref() {
+        let (events, now_seconds, is_connected) = match self.playback_ctl.midi.input.as_ref() {
             Some(input) => (input.drain_events(), input.now_seconds(), input.is_connected()),
             None => return,
         };
 
-        if !self.accuracy.enabled {
+        if !self.playback_ctl.accuracy.enabled {
             return;
         }
 
-        let timing = ScoreTiming::from_score(&self.score, self.bpm);
+        let timing = ScoreTiming::from_score(&self.editor.score, self.playback_ctl.bpm);
         let total_loop_seconds = timing.total_loop_seconds();
 
-        if self.transport_state == TransportState::Playing
+        if self.playback_ctl.transport_state == TransportState::Playing
             && is_connected
-            && !self.accuracy.tracker.has_start_time()
+            && !self.playback_ctl.accuracy.tracker.has_start_time()
         {
             let (start_time, last_tick) = if total_loop_seconds > 0.0 {
                 (
-                    now_seconds - timing.global_tick_to_seconds(self.playback.smooth_tick),
-                    self.playback.smooth_tick,
+                    now_seconds
+                        - timing.global_tick_to_seconds(self.playback_ctl.playback.smooth_tick),
+                    self.playback_ctl.playback.smooth_tick,
                 )
             } else {
                 (now_seconds, 0.0)
             };
-            self.accuracy.tracker.on_playback_start_at(start_time, last_tick);
+            self.playback_ctl.accuracy.tracker.on_playback_start_at(start_time, last_tick);
         }
 
-        let accuracy_active = self.accuracy.tracker.update_state(
-            self.transport_state == TransportState::Playing,
+        let accuracy_active = self.playback_ctl.accuracy.tracker.update_state(
+            self.playback_ctl.transport_state == TransportState::Playing,
             is_connected,
             now_seconds,
         );
-        let ready =
-            accuracy_active && total_loop_seconds > 0.0 && !self.score.measures.is_empty();
+        let ready = accuracy_active
+            && total_loop_seconds > 0.0
+            && !self.editor.score.measures.is_empty();
 
         for event in events {
             match event {
                 MidiInputEvent::NoteOn { channel, note, velocity, timestamp } => {
                     if ready {
-                        self.accuracy.tracker.record_hit(timestamp, &timing, &self.score);
+                        self.playback_ctl.accuracy.tracker.record_hit(
+                            timestamp,
+                            &timing,
+                            &self.editor.score,
+                        );
                     }
                     debug!("MIDI NoteOn ch={} note={} vel={}", channel, note, velocity);
                 }
@@ -282,25 +281,33 @@ impl Grooph {
         }
 
         if ready {
-            self.accuracy.tracker.update_progress(now_seconds, &timing, &self.score);
+            self.playback_ctl.accuracy.tracker.update_progress(
+                now_seconds,
+                &timing,
+                &self.editor.score,
+            );
         }
     }
 
-    fn clear_accuracy_for_edit(&mut self) { self.accuracy.tracker.clear_for_edit(); }
+    fn clear_accuracy_for_edit(&mut self) {
+        self.playback_ctl.accuracy.tracker.clear_for_edit();
+    }
 
-    pub(crate) fn current_measure(&self) -> &Measure { self.score.current(self.cursor.measure_idx) }
+    pub(crate) fn current_measure(&self) -> &Measure {
+        self.editor.score.current(self.editor.cursor.measure_idx)
+    }
 
     pub(crate) fn current_measure_mut(&mut self) -> &mut Measure {
-        self.score.current_mut(self.cursor.measure_idx)
+        self.editor.score.current_mut(self.editor.cursor.measure_idx)
     }
 
     fn current_snapshot(&self) -> EditorSnapshot {
-        EditorSnapshot { score: self.score.clone(), cursor: self.cursor }
+        EditorSnapshot { score: self.editor.score.clone(), cursor: self.editor.cursor }
     }
 
-    pub(crate) fn can_undo(&self) -> bool { self.history.can_undo() }
+    pub(crate) fn can_undo(&self) -> bool { self.editor.history.can_undo() }
 
-    pub(crate) fn can_redo(&self) -> bool { self.history.can_redo() }
+    pub(crate) fn can_redo(&self) -> bool { self.editor.history.can_redo() }
 
     /// Snapshot the current state, run `op`, and commit only if it reports a change.
     /// On commit, clears redo and accuracy edit state. On no-op, the snapshot is discarded.
@@ -310,7 +317,7 @@ impl Grooph {
     {
         let snap = self.current_snapshot();
         if op(self) {
-            self.history.push(snap);
+            self.editor.history.push(snap);
             self.clear_accuracy_for_edit();
             true
         } else {
@@ -320,18 +327,18 @@ impl Grooph {
 
     fn undo(&mut self) {
         let current = self.current_snapshot();
-        if let Some(prev) = self.history.pop_undo(current) {
-            self.score = prev.score;
-            self.cursor = prev.cursor;
+        if let Some(prev) = self.editor.history.pop_undo(current) {
+            self.editor.score = prev.score;
+            self.editor.cursor = prev.cursor;
             self.clear_accuracy_for_edit();
         }
     }
 
     fn redo(&mut self) {
         let current = self.current_snapshot();
-        if let Some(next) = self.history.pop_redo(current) {
-            self.score = next.score;
-            self.cursor = next.cursor;
+        if let Some(next) = self.editor.history.pop_redo(current) {
+            self.editor.score = next.score;
+            self.editor.cursor = next.cursor;
             self.clear_accuracy_for_edit();
         }
     }
@@ -347,8 +354,8 @@ impl Grooph {
             let new_len = self.current_measure().beats().len();
             if new_len > 0 {
                 let last = new_len - 1;
-                if self.cursor.beat_idx < last {
-                    self.cursor.beat_idx += 1;
+                if self.editor.cursor.beat_idx < last {
+                    self.editor.cursor.beat_idx += 1;
                 }
             }
         }
@@ -362,13 +369,13 @@ impl Grooph {
             Some(Modification::DissolveTuplet(tuplet_idx, _)) => {
                 let new_len = self.current_measure().beats().len();
                 if new_len > 0 {
-                    self.cursor.beat_idx = tuplet_idx.start_idx.min(new_len - 1);
+                    self.editor.cursor.beat_idx = tuplet_idx.start_idx.min(new_len - 1);
                 } else {
-                    self.cursor.beat_idx = 0;
+                    self.editor.cursor.beat_idx = 0;
                 }
             }
             Some(Modification::SetTuplet(group_span, ..)) => {
-                self.cursor.beat_idx =
+                self.editor.cursor.beat_idx =
                     (group_span.end_idx + 1).min(self.current_measure().beats().len() - 1);
             }
             _ => {}
@@ -383,10 +390,10 @@ impl Grooph {
         self.with_undo_snapshot(|app| {
             let ts = app.current_measure().time_signature();
             let new_measure = Measure::new(ts);
-            let insert_at = app.cursor.measure_idx + 1;
-            app.score.measures.insert(insert_at, new_measure);
-            app.cursor.measure_idx = insert_at;
-            app.cursor.beat_idx = 0;
+            let insert_at = app.editor.cursor.measure_idx + 1;
+            app.editor.score.measures.insert(insert_at, new_measure);
+            app.editor.cursor.measure_idx = insert_at;
+            app.editor.cursor.beat_idx = 0;
             true
         });
     }
@@ -394,20 +401,21 @@ impl Grooph {
     /// Remove the currently active measure. Does nothing if only one measure
     /// remains (Score invariant: at least one measure).
     pub(crate) fn remove_current_measure(&mut self) {
-        if self.score.len() <= 1 {
+        if self.editor.score.len() <= 1 {
             return;
         }
         self.with_undo_snapshot(|app| {
-            let idx = app.cursor.measure_idx;
-            app.score.measures.remove(idx);
-            if app.cursor.measure_idx >= app.score.len() {
-                app.cursor.measure_idx = app.score.len() - 1;
+            let idx = app.editor.cursor.measure_idx;
+            app.editor.score.measures.remove(idx);
+            if app.editor.cursor.measure_idx >= app.editor.score.len() {
+                app.editor.cursor.measure_idx = app.editor.score.len() - 1;
             }
-            let new_len = app.score.measures[app.cursor.measure_idx].beats().len();
+            let new_len =
+                app.editor.score.measures[app.editor.cursor.measure_idx].beats().len();
             if new_len == 0 {
-                app.cursor.beat_idx = 0;
-            } else if app.cursor.beat_idx >= new_len {
-                app.cursor.beat_idx = new_len - 1;
+                app.editor.cursor.beat_idx = 0;
+            } else if app.editor.cursor.beat_idx >= new_len {
+                app.editor.cursor.beat_idx = new_len - 1;
             }
             true
         });
@@ -451,15 +459,15 @@ impl Grooph {
     }
 
     fn toggle_mode(&mut self, mode: Mode) {
-        if self.mode == mode {
-            self.mode = Mode::Playback;
+        if self.ui.mode == mode {
+            self.ui.mode = Mode::Playback;
         } else {
-            self.mode = mode
+            self.ui.mode = mode
         }
     }
 
     fn audio_state(&self) -> PlayerState {
-        if self.transport_state == TransportState::Playing {
+        if self.playback_ctl.transport_state == TransportState::Playing {
             PlayerState::Playing
         } else {
             PlayerState::Stopped
@@ -467,69 +475,74 @@ impl Grooph {
     }
 
     fn start_playback(&mut self) {
-        if self.transport_state == TransportState::Playing {
+        if self.playback_ctl.transport_state == TransportState::Playing {
             return;
         }
-        self.transport_state = TransportState::Playing;
+        self.playback_ctl.transport_state = TransportState::Playing;
         let accuracy_start =
-            self.midi.input.as_ref().and_then(|input| {
+            self.playback_ctl.midi.input.as_ref().and_then(|input| {
                 if input.is_connected() { Some(input.now_seconds()) } else { None }
             });
-        if self.accuracy.enabled {
-            self.accuracy.tracker.on_playback_start(accuracy_start);
+        if self.playback_ctl.accuracy.enabled {
+            self.playback_ctl.accuracy.tracker.on_playback_start(accuracy_start);
         } else {
-            self.accuracy.tracker.on_playback_stop();
+            self.playback_ctl.accuracy.tracker.on_playback_stop();
         }
-        self.playback.reset();
+        self.playback_ctl.playback.reset();
 
-        self.platform.acquire_wake_lock();
+        self.ui.platform.acquire_wake_lock();
     }
 
     fn stop_transport(&mut self) {
-        if self.transport_state == TransportState::Stopped {
+        if self.playback_ctl.transport_state == TransportState::Stopped {
             return;
         }
-        self.transport_state = TransportState::Stopped;
-        self.accuracy.tracker.on_playback_stop();
-        self.playback.reset();
+        self.playback_ctl.transport_state = TransportState::Stopped;
+        self.playback_ctl.accuracy.tracker.on_playback_stop();
+        self.playback_ctl.playback.reset();
 
-        self.platform.release_wake_lock();
+        self.ui.platform.release_wake_lock();
     }
 
     pub fn toggle_playback(&mut self) {
-        match self.transport_state {
+        match self.playback_ctl.transport_state {
             TransportState::Stopped => self.start_playback(),
             TransportState::Playing => self.stop_transport(),
         }
-        info!("Toggle playback: {:?}", self.transport_state);
+        info!("Toggle playback: {:?}", self.playback_ctl.transport_state);
     }
 
     fn set_accuracy_enabled(&mut self, enabled: bool) {
-        self.accuracy.set_enabled(enabled, self.transport_state);
+        let transport = self.playback_ctl.transport_state;
+        self.playback_ctl.accuracy.set_enabled(enabled, transport);
     }
 
     fn handle_bpm_change(&mut self) {
-        if !self.accuracy.enabled {
+        if !self.playback_ctl.accuracy.enabled {
             return;
         }
-        if self.transport_state != TransportState::Playing {
+        if self.playback_ctl.transport_state != TransportState::Playing {
             return;
         }
-        let Some(input) = self.midi.input.as_ref() else {
+        let Some(input) = self.playback_ctl.midi.input.as_ref() else {
             return;
         };
         if !input.is_connected() {
             return;
         }
 
-        let timing = ScoreTiming::from_score(&self.score, self.bpm);
+        let timing = ScoreTiming::from_score(&self.editor.score, self.playback_ctl.bpm);
         if timing.total_loop_seconds() <= 0.0 {
             return;
         }
 
         let now_seconds = input.now_seconds();
-        let start_time = now_seconds - timing.global_tick_to_seconds(self.playback.smooth_tick);
-        self.accuracy.tracker.realign_start_time(start_time, self.playback.smooth_tick);
+        let start_time =
+            now_seconds - timing.global_tick_to_seconds(self.playback_ctl.playback.smooth_tick);
+        self.playback_ctl
+            .accuracy
+            .tracker
+            .realign_start_time(start_time, self.playback_ctl.playback.smooth_tick);
     }
 
     fn default_measure() -> Measure {
@@ -542,15 +555,15 @@ impl Grooph {
     }
 
     fn build_count_config(&self) -> Option<CountConfig> {
-        if !self.counting.enabled {
+        if !self.ui.counting.enabled {
             return None;
         }
-        if !self.counting.show_colors && !self.counting.show_labels {
+        if !self.ui.counting.show_colors && !self.ui.counting.show_labels {
             return None;
         }
 
         let palette: Vec<ColorId> = (0u8..6).map(ColorId).collect();
-        let color_pattern = if self.counting.show_colors {
+        let color_pattern = if self.ui.counting.show_colors {
             Some(ColorPattern { palette: palette.clone(), mode: ColorMode::Scope })
         } else {
             None
@@ -559,7 +572,7 @@ impl Grooph {
         let mut layers = Vec::new();
         let mut next_id = 1u32;
 
-        let mut base_layer = match self.counting.base {
+        let mut base_layer = match self.ui.counting.base {
             CountingBase::Off => None,
             CountingBase::Primary => {
                 let mut layer =
@@ -586,18 +599,18 @@ impl Grooph {
         };
 
         if let Some(ref mut layer) = base_layer {
-            layer.show_labels = self.counting.show_labels;
-            layer.show_colors = self.counting.show_colors;
+            layer.show_labels = self.ui.counting.show_labels;
+            layer.show_colors = self.ui.counting.show_colors;
             layer.colors = color_pattern.clone();
             layers.push(layer.clone());
             next_id = next_id.saturating_add(1);
         }
 
-        if self.counting.show_tuplets {
+        if self.ui.counting.show_tuplets {
             let mut layer = CountLayer::new(next_id, CountScope::TupletAll, Subdiv::TupletN);
             layer.labels = Some(LabelPattern::triplet());
-            layer.show_labels = self.counting.show_labels;
-            layer.show_colors = self.counting.show_colors;
+            layer.show_labels = self.ui.counting.show_labels;
+            layer.show_colors = self.ui.counting.show_colors;
             layer.colors = color_pattern;
             layer.priority = 10;
             layers.push(layer);
@@ -695,33 +708,39 @@ impl Grooph {
         platform.install_listeners(cc.egui_ctx.clone());
 
         Self {
-            mode: Mode::Playback,
-            music_font_id: FontId::new(16.0, ff),
-            score: state.score,
-            cursor: state.cursor,
-            button_measures,
-            history: UndoHistory::new(DEFAULT_UNDO_LIMIT),
-            font_bump: 8.0,
-            baseline_dark: None,
-            baseline_light: None,
-            transport_state: TransportState::Stopped,
-            bpm: state.bpm,
-            audio: None,
-            audio_cfg: AudioConfig {
-                settings: state.audio_settings,
-                offset: state.audio_offset,
-                latency_enabled: state.audio_latency_enabled,
+            editor: EditorState {
+                score: state.score,
+                cursor: state.cursor,
+                history: UndoHistory::new(DEFAULT_UNDO_LIMIT),
+                button_measures,
             },
-            layout: LayoutSettings::default(),
-            playback: PlaybackState::default(),
-            accuracy: AccuracyState::new(state.accuracy_enabled),
-            midi: MidiState {
-                input: midi_input,
-                available_ports: midi_input_ports,
-                selected_port_id: midi_selected_port_id,
+            playback_ctl: PlaybackController {
+                transport_state: TransportState::Stopped,
+                bpm: state.bpm,
+                audio: None,
+                audio_cfg: AudioConfig {
+                    settings: state.audio_settings,
+                    offset: state.audio_offset,
+                    latency_enabled: state.audio_latency_enabled,
+                },
+                playback: PlaybackState::default(),
+                accuracy: AccuracyState::new(state.accuracy_enabled),
+                midi: MidiState {
+                    input: midi_input,
+                    available_ports: midi_input_ports,
+                    selected_port_id: midi_selected_port_id,
+                },
             },
-            counting: state.counting,
-            platform,
+            ui: UiShell {
+                mode: Mode::Playback,
+                music_font_id: FontId::new(16.0, ff),
+                font_bump: 8.0,
+                baseline_dark: None,
+                baseline_light: None,
+                layout: LayoutSettings::default(),
+                counting: state.counting,
+                platform,
+            },
         }
     }
 }

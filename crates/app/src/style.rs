@@ -7,15 +7,19 @@ impl Grooph {
         let ctx = ui.ctx();
         let is_dark = ctx.global_style().visuals.dark_mode;
         ctx.global_style_mut(|style| {
-            let baseline_opt =
-                if is_dark { &mut self.baseline_dark } else { &mut self.baseline_light };
+            let baseline_opt = if is_dark {
+                &mut self.ui.baseline_dark
+            } else {
+                &mut self.ui.baseline_light
+            };
+            let font_bump = self.ui.font_bump;
 
             // Capture baseline for the current theme if not yet recorded
             let baseline = baseline_opt.get_or_insert_with(|| {
                 style
                     .text_styles
                     .iter()
-                    .map(|(ts, font)| (ts.clone(), font.size + self.font_bump))
+                    .map(|(ts, font)| (ts.clone(), font.size + font_bump))
                     .collect()
             });
 

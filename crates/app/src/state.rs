@@ -1,5 +1,13 @@
-use grooph_audio::AudioSettings;
+use crate::accuracy::AccuracyState;
+use crate::platform::PlatformRuntime;
+use crate::undo::UndoHistory;
+use crate::{CountingSettings, Mode, TransportState};
+use eframe::egui::TextStyle;
+use eframe::epaint::FontId;
+use grooph_audio::{Audio, AudioSettings};
+use grooph_measure::{Cursor, Measure, Score};
 use grooph_midi::MidiInput;
+use std::collections::HashMap;
 
 pub(crate) struct AudioConfig {
     pub(crate) settings: AudioSettings,
@@ -54,4 +62,42 @@ pub(crate) struct MidiState {
     pub(crate) input: Option<MidiInput>,
     pub(crate) available_ports: Vec<String>,
     pub(crate) selected_port_id: Option<String>,
+}
+
+/// Score editing surface: the document, where the cursor sits, undo history,
+/// and pre-built button thumbnails. Mutated by tools and the time-signature
+/// dialog; read by the rendering pipeline.
+pub(crate) struct EditorState {
+    pub(crate) score: Score,
+    pub(crate) cursor: Cursor,
+    pub(crate) history: UndoHistory,
+    /// Prebuilt measures for note/rest/tuplet tool buttons to avoid per-frame
+    /// reconstruction.
+    pub(crate) button_measures: HashMap<&'static str, Measure>,
+}
+
+/// Realtime playback subsystem: transport, tempo, audio engine, MIDI input,
+/// and the accuracy tracker that ties hits to score onsets.
+pub(crate) struct PlaybackController {
+    pub(crate) transport_state: TransportState,
+    pub(crate) bpm: u32,
+    pub(crate) audio: Option<Audio>,
+    pub(crate) audio_cfg: AudioConfig,
+    pub(crate) playback: PlaybackState,
+    pub(crate) accuracy: AccuracyState,
+    pub(crate) midi: MidiState,
+}
+
+/// UI shell state: which panel is visible, font configuration, layout knobs,
+/// counting overlay settings, and the platform abstraction for visibility /
+/// wake-lock.
+pub(crate) struct UiShell {
+    pub(crate) mode: Mode,
+    pub(crate) music_font_id: FontId,
+    pub(crate) font_bump: f32,
+    pub(crate) baseline_dark: Option<Vec<(TextStyle, f32)>>,
+    pub(crate) baseline_light: Option<Vec<(TextStyle, f32)>>,
+    pub(crate) layout: LayoutSettings,
+    pub(crate) counting: CountingSettings,
+    pub(crate) platform: PlatformRuntime,
 }

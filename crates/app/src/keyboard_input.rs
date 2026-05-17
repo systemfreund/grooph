@@ -8,7 +8,7 @@ impl Grooph {
     pub(super) fn handle_keyboard_input(&mut self, ui: &mut egui::Ui) {
         ui.input(|i| {
             // Modal dialogs swallow global shortcuts; their own UI provides Cancel/Confirm.
-            if matches!(self.mode, Mode::TimeSignature { .. }) {
+            if matches!(self.ui.mode, Mode::TimeSignature { .. }) {
                 return;
             }
             // App-global shortcuts run regardless of edit mode; the tool registry handles the rest.

@@ -104,6 +104,41 @@ impl Shortcut {
         let command_pressed = i.modifiers.command || i.modifiers.ctrl;
         i.modifiers.shift == self.shift && command_pressed == self.command
     }
+
+    /// Friendly description suitable for help text, e.g. `Ctrl+Shift+Z`, `1`, `←`.
+    /// `Cmd` is the platform-agnostic name used in egui for the modifier key
+    /// that maps to Ctrl on Windows/Linux and Cmd on macOS.
+    pub fn label(&self) -> String {
+        let key = key_label(self.key);
+        match (self.command, self.shift) {
+            (true, true) => format!("Cmd+Shift+{key}"),
+            (true, false) => format!("Cmd+{key}"),
+            (false, true) => format!("Shift+{key}"),
+            (false, false) => key,
+        }
+    }
+}
+
+fn key_label(k: Key) -> String {
+    match k {
+        Key::ArrowLeft => "←".into(),
+        Key::ArrowRight => "→".into(),
+        Key::ArrowUp => "↑".into(),
+        Key::ArrowDown => "↓".into(),
+        Key::Backspace => "Backspace".into(),
+        Key::Delete => "Del".into(),
+        Key::Enter => "Enter".into(),
+        Key::Escape => "Esc".into(),
+        Key::Space => "Space".into(),
+        Key::Period => ".".into(),
+        Key::Home => "Home".into(),
+        Key::End => "End".into(),
+        Key::Num1 => "1".into(),
+        Key::Num2 => "2".into(),
+        Key::Num3 => "3".into(),
+        Key::Num4 => "4".into(),
+        _ => format!("{k:?}"),
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
