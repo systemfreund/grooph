@@ -147,18 +147,39 @@ impl Grooph {
     }
 
     /// Moves the cursor according to `op`. Non-mutating; never produces an undo snapshot.
+    /// Left/Right cross measure boundaries; Home/End jump to the very first/last beat in the score.
     fn execute_navigation(&mut self, op: NavOp) {
-        let beats_len = self.current_measure().beats().len();
-        if beats_len == 0 {
-            return;
+        let measure_count = self.score.len();
+        match op {
+            NavOp::Left => {
+                if self.cursor.beat_idx > 0 {
+                    self.cursor.beat_idx -= 1;
+                } else if self.cursor.measure_idx > 0 {
+                    self.cursor.measure_idx -= 1;
+                    let prev_len = self.current_measure().beats().len();
+                    self.cursor.beat_idx = prev_len.saturating_sub(1);
+                }
+            }
+            NavOp::Right => {
+                let beats_len = self.current_measure().beats().len();
+                let max_idx = beats_len.saturating_sub(1);
+                if self.cursor.beat_idx < max_idx {
+                    self.cursor.beat_idx += 1;
+                } else if self.cursor.measure_idx + 1 < measure_count {
+                    self.cursor.measure_idx += 1;
+                    self.cursor.beat_idx = 0;
+                }
+            }
+            NavOp::Start => {
+                self.cursor.measure_idx = 0;
+                self.cursor.beat_idx = 0;
+            }
+            NavOp::End => {
+                self.cursor.measure_idx = measure_count.saturating_sub(1);
+                let beats_len = self.current_measure().beats().len();
+                self.cursor.beat_idx = beats_len.saturating_sub(1);
+            }
         }
-        let max_idx = beats_len - 1;
-        self.cursor.beat_idx = match op {
-            NavOp::Left => self.cursor.beat_idx.saturating_sub(1),
-            NavOp::Right => (self.cursor.beat_idx + 1).min(max_idx),
-            NavOp::Start => 0,
-            NavOp::End => max_idx,
-        };
     }
 
     /// Executes a tool that is known to be mutating. Returns whether a change was committed.
