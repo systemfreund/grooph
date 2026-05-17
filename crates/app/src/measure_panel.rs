@@ -1,5 +1,5 @@
 use crate::Grooph;
-use crate::accuracy::{AccuracyMark, AccuracyTracker};
+use crate::accuracy::{AccuracyMark, clamp_diff_to_beat_window};
 use crate::tools::{Modifier, ToolKind, all_tools};
 use crate::{Mode, TransportState};
 use eframe::egui;
@@ -328,7 +328,7 @@ impl Grooph {
             match mark {
                 AccuracyMark::Hit(diff_ticks) => {
                     let global_idx = global_onsets_u64.binary_search(&global_onset).unwrap_or(0);
-                    let diff_ticks = AccuracyTracker::clamp_diff_to_beat_window(
+                    let diff_ticks = clamp_diff_to_beat_window(
                         diff_ticks,
                         global_idx,
                         global_onsets_u64,
