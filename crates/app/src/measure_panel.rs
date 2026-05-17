@@ -155,37 +155,24 @@ impl Grooph {
                     let playback_local =
                         playback_tick_to_draw.map(|global| timing.to_local(global));
 
-                    // Auto-scroll: keep the playback cursor centered in the viewport.
-                    // Mirror the renderer's cross-measure anchor so the auto-scroll
-                    // target matches what's drawn (especially during the last note
-                    // of a measure, when the cursor glides into the next one).
-                    if let Some((play_m, local_t)) = playback_local
-                        && let Some(placed) = staff.placed(play_m)
+                    // Auto-scroll follows the same visual cursor logic as the
+                    // renderer (incl. cross-measure wrap animation), so we use
+                    // the shared helper to find the cursor's actual home measure
+                    // and X for this frame.
+                    if let Some(playback) = playback_local
+                        && let Some((m_idx, x)) =
+                            grooph_render::staff::current_cursor_x(&self.score, &staff, playback)
+                        && let Some(placed) = staff.placed(m_idx)
                     {
-                        let next_anchor_x = staff
-                            .systems
-                            .iter()
-                            .flat_map(|s| s.measures.iter())
-                            .find(|p| p.measure_idx == play_m + 1)
-                            .and_then(|p| p.layout.notes.first().map(|n| n.center.x));
-
-                        if let Some(x) = grooph_render::measure::playback_cursor_x(
-                            &self.score.measures[placed.measure_idx],
-                            &placed.layout,
-                            placed.rect,
-                            local_t,
-                            next_anchor_x,
-                        ) {
-                            let cursor_rect = egui::Rect::from_min_size(
-                                egui::pos2(x, placed.rect.top()),
-                                egui::vec2(1.0, placed.rect.height()),
-                            );
-                            ui.scroll_to_rect_animation(
-                                cursor_rect,
-                                Some(egui::Align::Center),
-                                eframe::egui::style::ScrollAnimation::none(),
-                            );
-                        }
+                        let cursor_rect = egui::Rect::from_min_size(
+                            egui::pos2(x, placed.rect.top()),
+                            egui::vec2(1.0, placed.rect.height()),
+                        );
+                        ui.scroll_to_rect_animation(
+                            cursor_rect,
+                            Some(egui::Align::Center),
+                            eframe::egui::style::ScrollAnimation::none(),
+                        );
                     }
 
                     let (rect, resp) = ui.allocate_exact_size(

@@ -1,8 +1,11 @@
 //! Multi-measure rendering: walks a [`StaffLayout`] and renders each measure
 //! with the existing per-measure renderer. Adds cross-measure visuals
-//! (continuous staff line, barlines).
+//! (continuous staff line, barlines) and orchestrates the playback cursor
+//! wrap animation across measure boundaries.
 
-use crate::measure::render_measure_at;
+use crate::measure::{
+    last_note_entering_frac, playback_cursor_entering_x, playback_cursor_x, render_measure_at,
+};
 use eframe::egui;
 use eframe::egui::{Color32, Rangef, Stroke};
 use grooph_layout::staff_layout::{PlacedMeasure, StaffLayout, StaffOpts};
@@ -13,8 +16,9 @@ use grooph_measure::{Cursor, MeasureIdx, Score};
 ///
 /// `cursor` highlights the edit position; only the measure matching
 /// `cursor.measure_idx` gets a blinking cursor. `playback` is
-/// `Some((measure_idx, smooth_tick))` and similarly only animates inside
-/// its measure. `count_config` is applied per measure if set.
+/// `Some((measure_idx, local_tick))` referring to the **active** measure (the
+/// one currently being audibly played). The *visual* cursor may live in a
+/// different measure during the wrap animation — see [`current_cursor_x`].
 #[allow(clippy::too_many_arguments)]
 pub fn draw_staff(
     ui: &mut egui::Ui,
@@ -27,6 +31,11 @@ pub fn draw_staff(
 ) {
     let color = ui.visuals().text_color();
 
+    // Resolve the *visual* cursor location once per frame. Phase 1 of a
+    // measure's last note keeps the cursor in that measure; Phase 2 hands it
+    // off to the next one (wrapping at the score end).
+    let visual_cursor = playback.and_then(|p| current_cursor_x(score, staff, p));
+
     for system in &staff.systems {
         // One continuous staff line per system, so adjacent measures look joined.
         ui.painter().hline(
@@ -35,15 +44,10 @@ pub fn draw_staff(
             Stroke::new(0.02 * staff_opts.em, color),
         );
 
-        for (i, placed) in system.measures.iter().enumerate() {
-            // Anchor for cross-measure cursor interpolation: the first note X
-            // of the *next* measure in this system. `None` for the last one —
-            // the cursor then walks to the measure's right edge, and the
-            // score-wrap is rendered as a step on the next frame.
-            let next_anchor_x = system
-                .measures
-                .get(i + 1)
-                .and_then(|next| next.layout.notes.first().map(|n| n.center.x));
+        for placed in &system.measures {
+            let cursor_x = visual_cursor
+                .filter(|(idx, _)| *idx == placed.measure_idx)
+                .map(|(_, x)| x);
 
             render_placed_measure(
                 ui,
@@ -53,7 +57,7 @@ pub fn draw_staff(
                 cursor,
                 playback,
                 count_config,
-                next_anchor_x,
+                cursor_x,
             );
         }
 
@@ -61,6 +65,44 @@ pub fn draw_staff(
         // except after the last one (the right edge is the score end).
         draw_barlines(ui, system, staff_opts, color);
     }
+}
+
+/// Compute the X position of the playback cursor across the whole staff.
+///
+/// Implements the two-phase wrap animation:
+/// - Phase 1: cursor lives in the currently playing measure
+///   (`playback.0`). Returned as `(playback.0, x)`.
+/// - Phase 2 (last-note second half): cursor lives in
+///   `(playback.0 + 1) % score.len()`, entering from the left. Returned as
+///   that measure's index plus its entering X.
+///
+/// Returns `None` if there is no visible cursor (e.g. score empty, layout
+/// empty, or the relevant measure has no notes).
+pub fn current_cursor_x(
+    score: &Score,
+    staff: &StaffLayout,
+    playback: (MeasureIdx, f64),
+) -> Option<(MeasureIdx, f32)> {
+    let (play_idx, local_tick) = playback;
+    if score.is_empty() {
+        return None;
+    }
+
+    let active_measure = score.measures.get(play_idx)?;
+
+    // Phase 2 first: if we're in the second half of the active measure's last
+    // note, the cursor visually belongs to the *next* measure.
+    if let Some(entry_frac) = last_note_entering_frac(active_measure, local_tick) {
+        let next_idx = (play_idx + 1) % score.len();
+        let next_placed = staff.placed(next_idx)?;
+        let x = playback_cursor_entering_x(&next_placed.layout, next_placed.rect, entry_frac)?;
+        return Some((next_idx, x));
+    }
+
+    // Phase 1: cursor lives in the active measure.
+    let active_placed = staff.placed(play_idx)?;
+    let x = playback_cursor_x(active_measure, &active_placed.layout, active_placed.rect, local_tick)?;
+    Some((play_idx, x))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -72,11 +114,15 @@ fn render_placed_measure(
     cursor: Option<Cursor>,
     playback: Option<(MeasureIdx, f64)>,
     count_config: Option<&CountConfig>,
-    next_anchor_x: Option<f32>,
+    cursor_x: Option<f32>,
 ) {
     let cursor_idx = cursor
         .filter(|c| c.measure_idx == placed.measure_idx)
         .map(|c| c.beat_idx);
+    // `playback_tick` drives count-label highlighting (and only that, since
+    // the visual cursor is now passed as `cursor_x`). Restrict to the active
+    // measure so a wrap-in cursor doesn't light up labels in the next measure
+    // before its turn.
     let playback_tick = playback
         .filter(|(idx, _)| *idx == placed.measure_idx)
         .map(|(_, t)| t);
@@ -94,7 +140,7 @@ fn render_placed_measure(
         playback_tick,
         count_config,
         /* draw_staff_line = */ false,
-        next_anchor_x,
+        cursor_x,
     );
 }
 

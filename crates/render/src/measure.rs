@@ -39,11 +39,12 @@ pub fn draw_measure(
 /// caller decides whether to forward `cursor_idx` / `playback_tick` based on
 /// the active measure.
 ///
-/// `next_anchor_x` is the X position of the first note of the *following*
-/// measure (in the same coordinate space as `measure_layout`). When set, the
-/// playback cursor interpolates smoothly into the next measure during the last
-/// note — making the cross-measure transition seamless. Pass `None` for the
-/// last measure of the score (cursor walks to `rect.right()` instead).
+/// `cursor_x` is the pre-computed playback cursor X (in the same coordinate
+/// space as `measure_layout`). The cursor's home measure depends on the
+/// playback phase: during the first half of a measure's last note the cursor
+/// lives in *this* measure, during the second half it visually moves into the
+/// following measure. The caller (`draw_staff`) decides via `current_cursor_x`
+/// and passes `Some(x)` only to the measure that actually hosts the cursor.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn render_measure_at(
     ui: &mut egui::Ui,
@@ -54,7 +55,7 @@ pub(crate) fn render_measure_at(
     playback_tick: Option<f64>,
     count_config: Option<&CountConfig>,
     draw_staff_line: bool,
-    next_anchor_x: Option<f32>,
+    cursor_x: Option<f32>,
 ) {
     let color = ui.visuals().text_color();
     let painter = ui.painter();
@@ -147,10 +148,9 @@ pub(crate) fn render_measure_at(
         ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
     }
 
-    // Playback cursor
-    if let Some(tick) = playback_tick
-        && let Some(x) = playback_cursor_x(measure, measure_layout, rect, tick, next_anchor_x)
-    {
+    // Playback cursor (caller pre-computed the X position so cross-measure
+    // wrap animation works — see `staff::current_cursor_x`).
+    if let Some(x) = cursor_x {
         let top = rect.center().y + 0.7 * opts.em;
         let bottom = rect.center().y - 0.7 * opts.em;
         let base = ui.visuals().selection.stroke.color;
@@ -159,17 +159,16 @@ pub(crate) fn render_measure_at(
     }
 }
 
-/// Pixel-X of the playback cursor for a given tick inside a measure's layout.
+/// Phase 1 cursor X — cursor lives inside *this* measure at `tick`.
 ///
-/// Interpolates between consecutive note centers using the tick onsets and
-/// durations from `DEFAULT_GRID`. During the **last** note of the measure the
-/// cursor needs an anchor for its right-hand interpolation target:
-/// - `next_anchor_x = Some(x)`: interpolates linearly to `x`. Used by the
-///   multi-measure renderer with the first note X of the *following* measure,
-///   so the cursor glides seamlessly across the barline.
-/// - `next_anchor_x = None`: interpolates linearly to `rect.right()`. Used for
-///   the last measure in the score (next frame the cursor wraps to the first
-///   note of measure 0) and for single-measure preview rendering.
+/// - Inside notes (not last): linear interpolation between consecutive note
+///   centers (`notes[i].center.x` → `notes[i+1].center.x`).
+/// - Last note, `frac < 0.5`: linear from `notes[last].center.x` to
+///   `rect.right()` (cursor extends past the last note head, fading out).
+/// - Last note, `frac >= 0.5`: returns `None`. The cursor visually moves into
+///   the *following* measure — call [`playback_cursor_entering_x`] there.
+/// - Trailing gap (tick past every beat's end, i.e. an incomplete measure):
+///   `Some(rect.right())`. Cursor parks at the right edge.
 ///
 /// Returns `None` if the measure has no notes or zero total ticks.
 pub fn playback_cursor_x(
@@ -177,19 +176,13 @@ pub fn playback_cursor_x(
     measure_layout: &MeasureLayout,
     rect: Rect,
     tick: f64,
-    next_anchor_x: Option<f32>,
 ) -> Option<f32> {
     let ts = measure.time_signature();
     let total_ticks = DEFAULT_GRID.ticks_per_measure(&ts) as f64;
     if total_ticks <= 0.0 || measure_layout.notes.is_empty() {
         return None;
     }
-    let t = if tick.is_sign_negative() {
-        0.0
-    } else {
-        let m = tick % total_ticks;
-        if m.is_nan() { 0.0 } else { m }
-    };
+    let t = clamp_tick_to_measure(tick, total_ticks);
 
     let onsets = DEFAULT_GRID.compute_onset_ticks(measure.beats());
 
@@ -199,21 +192,90 @@ pub fn playback_cursor_x(
             DEFAULT_GRID.ticks_of(&measure.beats()[i].duration).unwrap_or(0) as f64;
         let end = start + dur_ticks;
         if t >= start && t < end {
-            let x0 = measure_layout.notes[i].center.x;
             let frac = if dur_ticks > 0.0 { (t - start) / dur_ticks } else { 0.0 };
-            let x1 = if i + 1 < measure_layout.notes.len() {
-                measure_layout.notes[i + 1].center.x
-            } else {
-                next_anchor_x.unwrap_or_else(|| rect.right())
-            };
-            return Some(x0 + ((x1 - x0) * frac as f32));
+            let x0 = measure_layout.notes[i].center.x;
+
+            if i + 1 < measure_layout.notes.len() {
+                // Normal note: interpolate to the next note in this measure.
+                let x1 = measure_layout.notes[i + 1].center.x;
+                return Some(x0 + ((x1 - x0) * frac as f32));
+            }
+
+            // Last note: split into two phases. Phase 1 covers frac in [0, 0.5)
+            // and walks from the note head to the measure's right edge over
+            // *half* of the note duration. Phase 2 (frac >= 0.5) renders in
+            // the following measure via `playback_cursor_entering_x`.
+            if frac < 0.5 {
+                let phase1_frac = (frac * 2.0) as f32;
+                return Some(x0 + (rect.right() - x0) * phase1_frac);
+            }
+            return None;
         }
     }
 
     // Trailing gap: tick lies past the last beat's end (incomplete measure).
-    // Hold the cursor at the measure's right edge — visually consistent with
-    // "this measure is done".
+    // Hold the cursor at the right edge — visually consistent with "done".
     Some(rect.right())
+}
+
+/// Phase 2 cursor X — cursor enters *this* measure from the left.
+///
+/// `entry_frac` is in `[0, 1]` and maps linearly to
+/// `[notes_left_edge, notes[0].center.x]`. Returns `None` if the measure has
+/// no notes (nothing to enter towards).
+///
+/// Called when the previous measure's last note is in its second half: the
+/// cursor visually re-appears in the Clef/TS area of the following measure
+/// and travels to its first note head. For a 1-measure score the "following"
+/// measure is the same measure, which reproduces the original single-measure
+/// wrap animation.
+pub fn playback_cursor_entering_x(
+    measure_layout: &MeasureLayout,
+    _rect: Rect,
+    entry_frac: f64,
+) -> Option<f32> {
+    let first = measure_layout.notes.first()?;
+    let left = measure_layout.notes_left_edge;
+    let right = first.center.x;
+    let f = entry_frac.clamp(0.0, 1.0) as f32;
+    Some(left + (right - left) * f)
+}
+
+/// If `local_tick` is in the last note's second half (frac >= 0.5), returns
+/// the entry fraction mapped into `[0, 1]` for [`playback_cursor_entering_x`].
+/// Returns `None` for everything else (cursor stays in the current measure or
+/// hasn't reached the wrap point yet).
+pub fn last_note_entering_frac(measure: &Measure, local_tick: f64) -> Option<f64> {
+    let ts = measure.time_signature();
+    let total_ticks = DEFAULT_GRID.ticks_per_measure(&ts) as f64;
+    if total_ticks <= 0.0 {
+        return None;
+    }
+    let beats = measure.beats();
+    let last_i = beats.len().checked_sub(1)?;
+    let onsets = DEFAULT_GRID.compute_onset_ticks(beats);
+    let start = *onsets.get(last_i)? as f64;
+    let dur_ticks = DEFAULT_GRID.ticks_of(&beats[last_i].duration).unwrap_or(0) as f64;
+    if dur_ticks <= 0.0 {
+        return None;
+    }
+    let t = clamp_tick_to_measure(local_tick, total_ticks);
+    if t < start || t >= start + dur_ticks {
+        return None;
+    }
+    let frac = (t - start) / dur_ticks;
+    if frac < 0.5 {
+        return None;
+    }
+    Some((frac - 0.5) * 2.0)
+}
+
+fn clamp_tick_to_measure(tick: f64, total_ticks: f64) -> f64 {
+    if tick.is_sign_negative() {
+        return 0.0;
+    }
+    let m = tick % total_ticks;
+    if m.is_nan() { 0.0 } else { m }
 }
 
 pub fn draw_notes(
