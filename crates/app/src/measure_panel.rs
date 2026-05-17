@@ -175,6 +175,27 @@ impl Grooph {
                         );
                     }
 
+                    // Keep the edit cursor in view while editing. `Align::None`
+                    // means "scroll just enough to make visible" — no fight with
+                    // manual horizontal scrolling as long as the cursor stays
+                    // on-screen. Gated on Stopped so it doesn't clobber the
+                    // playback re-centering above.
+                    if self.mode == Mode::Edit
+                        && self.transport_state == TransportState::Stopped
+                        && let Some(placed) = staff.placed(self.cursor.measure_idx)
+                        && let Some(note) = placed.layout.notes.get(self.cursor.beat_idx)
+                    {
+                        let cursor_rect = egui::Rect::from_min_size(
+                            egui::pos2(note.center.x, placed.rect.top()),
+                            egui::vec2(1.0, placed.rect.height()),
+                        );
+                        ui.scroll_to_rect_animation(
+                            cursor_rect,
+                            None,
+                            eframe::egui::style::ScrollAnimation::none(),
+                        );
+                    }
+
                     let (rect, resp) = ui.allocate_exact_size(
                         staff.total_size,
                         egui::Sense::click_and_drag(),
