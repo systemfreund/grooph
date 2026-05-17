@@ -35,7 +35,16 @@ pub fn draw_staff(
             Stroke::new(0.02 * staff_opts.em, color),
         );
 
-        for placed in &system.measures {
+        for (i, placed) in system.measures.iter().enumerate() {
+            // Anchor for cross-measure cursor interpolation: the first note X
+            // of the *next* measure in this system. `None` for the last one —
+            // the cursor then walks to the measure's right edge, and the
+            // score-wrap is rendered as a step on the next frame.
+            let next_anchor_x = system
+                .measures
+                .get(i + 1)
+                .and_then(|next| next.layout.notes.first().map(|n| n.center.x));
+
             render_placed_measure(
                 ui,
                 score,
@@ -44,6 +53,7 @@ pub fn draw_staff(
                 cursor,
                 playback,
                 count_config,
+                next_anchor_x,
             );
         }
 
@@ -53,6 +63,7 @@ pub fn draw_staff(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_placed_measure(
     ui: &mut egui::Ui,
     score: &Score,
@@ -61,6 +72,7 @@ fn render_placed_measure(
     cursor: Option<Cursor>,
     playback: Option<(MeasureIdx, f64)>,
     count_config: Option<&CountConfig>,
+    next_anchor_x: Option<f32>,
 ) {
     let cursor_idx = cursor
         .filter(|c| c.measure_idx == placed.measure_idx)
@@ -82,6 +94,7 @@ fn render_placed_measure(
         playback_tick,
         count_config,
         /* draw_staff_line = */ false,
+        next_anchor_x,
     );
 }
 

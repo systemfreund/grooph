@@ -26,6 +26,7 @@ pub fn draw_measure(
         playback_tick,
         count_config,
         true,
+        None,
     );
     measure_layout
 }
@@ -37,6 +38,12 @@ pub fn draw_measure(
 /// system instead. All cursor/playback drawing is scoped to this measure; the
 /// caller decides whether to forward `cursor_idx` / `playback_tick` based on
 /// the active measure.
+///
+/// `next_anchor_x` is the X position of the first note of the *following*
+/// measure (in the same coordinate space as `measure_layout`). When set, the
+/// playback cursor interpolates smoothly into the next measure during the last
+/// note — making the cross-measure transition seamless. Pass `None` for the
+/// last measure of the score (cursor walks to `rect.right()` instead).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn render_measure_at(
     ui: &mut egui::Ui,
@@ -47,6 +54,7 @@ pub(crate) fn render_measure_at(
     playback_tick: Option<f64>,
     count_config: Option<&CountConfig>,
     draw_staff_line: bool,
+    next_anchor_x: Option<f32>,
 ) {
     let color = ui.visuals().text_color();
     let painter = ui.painter();
@@ -141,7 +149,7 @@ pub(crate) fn render_measure_at(
 
     // Playback cursor
     if let Some(tick) = playback_tick
-        && let Some(x) = playback_cursor_x(measure, measure_layout, rect, tick)
+        && let Some(x) = playback_cursor_x(measure, measure_layout, rect, tick, next_anchor_x)
     {
         let top = rect.center().y + 0.7 * opts.em;
         let bottom = rect.center().y - 0.7 * opts.em;
@@ -154,15 +162,22 @@ pub(crate) fn render_measure_at(
 /// Pixel-X of the playback cursor for a given tick inside a measure's layout.
 ///
 /// Interpolates between consecutive note centers using the tick onsets and
-/// durations from `DEFAULT_GRID`. Returns `None` if the measure has no notes
-/// or zero total ticks (i.e. nothing to point at). The interpolation matches
-/// what `render_measure_at` draws, so callers (e.g. auto-scroll in the panel)
-/// see the same X position as the on-screen cursor.
+/// durations from `DEFAULT_GRID`. During the **last** note of the measure the
+/// cursor needs an anchor for its right-hand interpolation target:
+/// - `next_anchor_x = Some(x)`: interpolates linearly to `x`. Used by the
+///   multi-measure renderer with the first note X of the *following* measure,
+///   so the cursor glides seamlessly across the barline.
+/// - `next_anchor_x = None`: interpolates linearly to `rect.right()`. Used for
+///   the last measure in the score (next frame the cursor wraps to the first
+///   note of measure 0) and for single-measure preview rendering.
+///
+/// Returns `None` if the measure has no notes or zero total ticks.
 pub fn playback_cursor_x(
     measure: &Measure,
     measure_layout: &MeasureLayout,
     rect: Rect,
     tick: f64,
+    next_anchor_x: Option<f32>,
 ) -> Option<f32> {
     let ts = measure.time_signature();
     let total_ticks = DEFAULT_GRID.ticks_per_measure(&ts) as f64;
@@ -177,7 +192,6 @@ pub fn playback_cursor_x(
     };
 
     let onsets = DEFAULT_GRID.compute_onset_ticks(measure.beats());
-    let mut x = measure_layout.notes[0].center.x;
 
     for (i, &onset) in onsets.iter().enumerate() {
         let start = onset as f64;
@@ -187,27 +201,19 @@ pub fn playback_cursor_x(
         if t >= start && t < end {
             let x0 = measure_layout.notes[i].center.x;
             let frac = if dur_ticks > 0.0 { (t - start) / dur_ticks } else { 0.0 };
-
-            if i + 1 < measure_layout.notes.len() {
-                let x1 = measure_layout.notes[i + 1].center.x;
-                x = x0 + ((x1 - x0) * (frac as f32));
+            let x1 = if i + 1 < measure_layout.notes.len() {
+                measure_layout.notes[i + 1].center.x
             } else {
-                // Smooth wrap: split travel between "after last note" and "before first note".
-                let x_first = measure_layout.notes[0].center.x;
-                let gap_after_last = rect.right() - x0;
-                let gap_before_first = x_first - measure_layout.notes_left_edge;
-                let total_dist = gap_after_last + gap_before_first;
-
-                if frac < 0.5 {
-                    x = x0 + total_dist * (frac as f32);
-                } else {
-                    x = x_first - total_dist * ((1.0 - frac) as f32);
-                }
-            }
-            break;
+                next_anchor_x.unwrap_or_else(|| rect.right())
+            };
+            return Some(x0 + ((x1 - x0) * frac as f32));
         }
     }
-    Some(x)
+
+    // Trailing gap: tick lies past the last beat's end (incomplete measure).
+    // Hold the cursor at the measure's right edge — visually consistent with
+    // "this measure is done".
+    Some(rect.right())
 }
 
 pub fn draw_notes(
