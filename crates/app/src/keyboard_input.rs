@@ -5,8 +5,8 @@ use eframe::egui;
 use eframe::egui::Key;
 
 impl Grooph {
-    pub(super) fn handle_keyboard_input(&mut self, ctx: &egui::Context) {
-        ctx.input(|i| {
+    pub(super) fn handle_keyboard_input(&mut self, ui: &mut egui::Ui) {
+        ui.input(|i| {
             // Modal dialogs swallow global shortcuts; their own UI provides Cancel/Confirm.
             if matches!(self.mode, Mode::TimeSignature { .. }) {
                 return;

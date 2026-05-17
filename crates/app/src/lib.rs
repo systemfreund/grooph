@@ -27,7 +27,7 @@ use crate::tempo::TempoMap;
 use crate::tools::ToolKind;
 use crate::tools::{BeatTemplate, Modifier, all_tools};
 use crate::undo::{DEFAULT_UNDO_LIMIT, EditorSnapshot, UndoHistory};
-use eframe::egui::{Context, TextStyle, Widget};
+use eframe::egui::{Context, TextStyle, Ui, Widget};
 use eframe::epaint::text::{FontInsert, InsertFontFamily};
 use eframe::epaint::{FontFamily, FontId};
 use eframe::{App, CreationContext, egui};
@@ -180,20 +180,20 @@ fn add_font(ctx: &Context) {
 }
 
 impl App for Grooph {
-    fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
-        self.apply_style(ctx);
-        self.main_menu(ctx);
-        self.help_panel(ctx);
-        self.settings_panel(ctx);
-        self.mixer_panel(ctx);
-        self.tool_palette_panel(ctx);
-        self.measure_panel(ctx);
+    fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
+        self.apply_style(ui);
+        self.main_menu(ui);
+        self.help_panel(ui);
+        self.settings_panel(ui);
+        self.mixer_panel(ui);
+        self.tool_palette_panel(ui);
+        self.measure_panel(ui);
 
         if matches!(self.mode, Mode::TimeSignature { .. }) {
-            self.time_signature_dialog(ctx);
+            self.time_signature_dialog(ui);
         }
 
-        self.handle_keyboard_input(ctx);
+        self.handle_keyboard_input(ui);
         self.handle_midi_input_events();
 
         if let Some(ev) = self.platform.take_visibility_event() {
@@ -220,7 +220,7 @@ impl App for Grooph {
             audio.set_audio_settings(self.audio_cfg.settings);
             let active_measure = &self.score.measures[self.cursor.measure_idx];
             if audio.update(&audio_state, self.bpm, active_measure) {
-                ctx.request_repaint();
+                ui.ctx().request_repaint();
             }
         }
     }

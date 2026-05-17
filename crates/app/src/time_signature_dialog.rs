@@ -5,12 +5,12 @@ use eframe::egui::{Align, Align2, Layout};
 use grooph_measure::TimeSignature;
 
 impl Grooph {
-    pub(super) fn time_signature_dialog(&mut self, ctx: &egui::Context) {
+    pub(super) fn time_signature_dialog(&mut self, ui: &mut egui::Ui) {
         egui::Window::new("Change time signature")
             .collapsible(false)
             .resizable(false)
             .anchor(Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
-            .show(ctx, |ui| {
+            .show(ui.ctx(), |ui| {
                 let layout = Layout::top_down(Align::Center).with_cross_align(Align::Center);
                 ui.with_layout(layout, |ui| {
                     let l2 = Layout::left_to_right(Align::Min);

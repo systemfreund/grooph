@@ -4,15 +4,15 @@ use crate::tempo::TempoMap;
 use crate::tools::{Modifier, ToolKind, all_tools};
 use crate::{Mode, TransportState};
 use eframe::egui;
-use eframe::egui::{Context, FontId, Frame, Rect, Response, Stroke};
+use eframe::egui::{FontId, Frame, Rect, Response, Stroke};
 use grooph_layout::pixel_layout::{GlyphMetrics, MeasureLayout, compute_em};
 use grooph_layout::staff_layout::{PlacedMeasure, StaffLayout, StaffOpts, build_staff_layout};
 use grooph_measure::grid::DEFAULT_GRID;
 use grooph_render::staff::draw_staff;
 
 impl Grooph {
-    pub(super) fn measure_panel(&mut self, ctx: &Context) {
-        egui::CentralPanel::default().show(ctx, |ui| {
+    pub(super) fn measure_panel(&mut self, ui: &mut egui::Ui) {
+        egui::CentralPanel::default().show_inside(ui, |ui| {
             Frame::canvas(ui.style())
                 .fill(egui::Color32::TRANSPARENT)
                 .stroke(egui::Stroke::NONE)

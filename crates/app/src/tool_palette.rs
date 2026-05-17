@@ -4,8 +4,8 @@ use crate::{Mode, tools};
 use eframe::egui;
 use eframe::egui::scroll_area::{ScrollBarVisibility, ScrollSource};
 use eframe::egui::{
-    Align, Align2, Atom, Button, Context, Direction, FontId, Id, Label, Layout, Response, RichText,
-    Ui, Vec2, Widget,
+    Align, Align2, Atom, Button, Direction, FontId, Id, Label, Layout, Response, RichText, Ui,
+    Vec2, Widget,
 };
 use grooph_layout::glyphs;
 use grooph_layout::pixel_layout::{
@@ -41,11 +41,11 @@ fn button_kind(kind: &ToolKind) -> ButtonKind {
 }
 
 impl Grooph {
-    pub(super) fn tool_palette_panel(&mut self, ctx: &Context) {
-        egui::TopBottomPanel::bottom("tool_palette")
+    pub(super) fn tool_palette_panel(&mut self, ui: &mut Ui) {
+        egui::Panel::bottom("tool_palette")
             .show_separator_line(false)
             .resizable(false)
-            .show_animated(ctx, self.mode == Mode::Edit, |ui| {
+            .show_animated_inside(ui, self.mode == Mode::Edit, |ui| {
                 let tools = all_tools().iter().filter(|t| t.show_in_palette).collect::<Vec<_>>();
                 let groups = [
                     ToolGroup::Edit,

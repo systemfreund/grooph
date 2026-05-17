@@ -6,11 +6,11 @@ use eframe::egui::{Align, Button, Direction, Frame, Layout, Margin};
 use egui::Widget;
 
 impl Grooph {
-    pub(super) fn main_menu(&mut self, ctx: &egui::Context) {
-        egui::TopBottomPanel::bottom("menu")
-            .frame(Frame::side_top_panel(&ctx.style()).inner_margin(Margin::same(15)))
+    pub(super) fn main_menu(&mut self, ui: &mut egui::Ui) {
+        egui::Panel::bottom("menu")
+            .frame(Frame::side_top_panel(ui.style()).inner_margin(Margin::same(15)))
             .show_separator_line(false)
-            .show(ctx, |ui| {
+            .show_inside(ui, |ui| {
                 egui::ScrollArea::horizontal()
                     .scroll_source(ScrollSource::ALL)
                     .scroll_bar_visibility(ScrollBarVisibility::AlwaysHidden)

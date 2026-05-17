@@ -6,8 +6,8 @@ use grooph_measure::BeatKind::{Note, Rest};
 use grooph_measure::duration::human_readable;
 
 impl Grooph {
-    pub(super) fn help_panel(&mut self, ctx: &egui::Context) {
-        egui::TopBottomPanel::bottom("info").show_animated(ctx, self.mode == Mode::Help, |ui| {
+    pub(super) fn help_panel(&mut self, ui: &mut egui::Ui) {
+        egui::Panel::bottom("info").show_animated_inside(ui, self.mode == Mode::Help, |ui| {
             ui.horizontal_wrapped(|ui| {
                 ui.label(
                     "This app is in early development. Please report any bugs or feature requests.",

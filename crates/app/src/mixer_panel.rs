@@ -6,8 +6,8 @@ use eframe::egui::scroll_area::{ScrollBarVisibility, ScrollSource};
 use eframe::egui::style::HandleShape;
 
 impl Grooph {
-    pub(super) fn mixer_panel(&mut self, ctx: &egui::Context) {
-        egui::TopBottomPanel::bottom("mixer").show_animated(ctx, self.mode == Mode::Mixer, |ui| {
+    pub(super) fn mixer_panel(&mut self, ui: &mut egui::Ui) {
+        egui::Panel::bottom("mixer").show_animated_inside(ui, self.mode == Mode::Mixer, |ui| {
             egui::ScrollArea::horizontal()
                 .scroll_source(ScrollSource::ALL)
                 .scroll_bar_visibility(ScrollBarVisibility::AlwaysHidden)

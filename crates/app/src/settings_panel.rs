@@ -6,9 +6,9 @@ use eframe::egui::global_theme_preference_buttons;
 use grooph_audio::Waveform;
 
 impl Grooph {
-    pub(super) fn settings_panel(&mut self, ctx: &egui::Context) {
-        egui::TopBottomPanel::bottom("settings").resizable(true).show_animated(
-            ctx,
+    pub(super) fn settings_panel(&mut self, ui: &mut egui::Ui) {
+        egui::Panel::bottom("settings").resizable(true).show_animated_inside(
+            ui,
             self.mode == Mode::Settings,
             |ui| {
                 ui.set_min_height(300.0);

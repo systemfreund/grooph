@@ -22,9 +22,9 @@ grooph-measure = { path = "crates/measure" }
 grooph-midi = { path = "crates/midi" }
 grooph-render = { path = "crates/render" }
 cpal = { version = "0.16", features = ["wasm-bindgen"] }
-eframe = { version = "0.33", features = ["persistence"] }
-egui = "0.33"
-egui_extras = { version = "0.33", features = ["image", "svg"] }
+eframe = { version = "0.34", features = ["persistence"] }
+egui = "0.34"
+egui_extras = { version = "0.34", features = ["image", "svg"] }
 either = "1.15.0"
 env_logger = "0.11.8"
 getrandom = { version = "0.3.3", features = ["wasm_js"] }

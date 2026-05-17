@@ -3,9 +3,10 @@ use eframe::egui;
 use eframe::egui::{Margin, Vec2};
 
 impl Grooph {
-    pub(super) fn apply_style(&mut self, ctx: &egui::Context) {
-        let is_dark = ctx.style().visuals.dark_mode;
-        ctx.style_mut(|style| {
+    pub(super) fn apply_style(&mut self, ui: &mut egui::Ui) {
+        let ctx = ui.ctx();
+        let is_dark = ctx.global_style().visuals.dark_mode;
+        ctx.global_style_mut(|style| {
             let baseline_opt =
                 if is_dark { &mut self.baseline_dark } else { &mut self.baseline_light };
 
