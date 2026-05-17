@@ -222,24 +222,18 @@ impl Grooph {
                         ui.ctx().request_repaint();
                     }
 
-                    // TODO(midi-multi-measure): markers are drawn only for the
-                    // active (cursor-selected) measure. When MIDI becomes
-                    // multi-measure, iterate over *all* PlacedMeasures and
-                    // look up marks via the *global* onset tick
-                    // (`timing.measure_start_tick(placed.measure_idx) + onsets[i]`).
-                    if let Some(active) = staff.placed(self.cursor.measure_idx) {
-                        self.draw_accuracy_marker(ui, active, &staff_opts.metrics);
-                    }
+                    self.draw_accuracy_markers(ui, &staff, &timing, &staff_opts.metrics);
                     self.handle_input(resp, &staff);
                     });
                 });
         });
     }
 
-    fn draw_accuracy_marker(
+    fn draw_accuracy_markers(
         &self,
         ui: &egui::Ui,
-        placed: &PlacedMeasure,
+        staff: &StaffLayout,
+        timing: &ScoreTiming,
         metrics: &GlyphMetrics,
     ) {
         if !self.accuracy.enabled {
@@ -254,16 +248,47 @@ impl Grooph {
         if self.transport_state != TransportState::Playing {
             return;
         }
+        let total_loop_ticks = timing.total_loop_ticks();
+        if total_loop_ticks == 0 {
+            return;
+        }
+        // One flat list of global onsets across the whole score. Used by
+        // `clamp_diff_to_beat_window`, which needs the global neighbours of
+        // each note.
+        let global_beats = crate::accuracy::compute_global_beat_onsets(&self.score, timing);
+        let global_onsets_u64: Vec<u64> =
+            global_beats.iter().map(|gb| gb.onset_tick).collect();
+
+        for system in &staff.systems {
+            for placed in &system.measures {
+                self.draw_accuracy_markers_for_measure(
+                    ui,
+                    placed,
+                    timing,
+                    &global_onsets_u64,
+                    total_loop_ticks as f64,
+                    metrics,
+                );
+            }
+        }
+    }
+
+    fn draw_accuracy_markers_for_measure(
+        &self,
+        ui: &egui::Ui,
+        placed: &PlacedMeasure,
+        timing: &ScoreTiming,
+        global_onsets_u64: &[u64],
+        total_loop_ticks: f64,
+        metrics: &GlyphMetrics,
+    ) {
         let measure = &self.score.measures[placed.measure_idx];
         let beats = measure.beats();
         if beats.is_empty() {
             return;
         }
-        let onsets = DEFAULT_GRID.compute_onset_ticks(beats);
-        let total_ticks = DEFAULT_GRID.ticks_per_measure(&measure.time_signature()) as f64;
-        if total_ticks <= 0.0 {
-            return;
-        }
+        let local_onsets = DEFAULT_GRID.compute_onset_ticks(beats);
+        let measure_start = timing.measure_start_tick(placed.measure_idx);
         let layout = &placed.layout;
         for (idx, note_layout) in layout.notes.iter().enumerate() {
             if note_layout.kind != grooph_measure::BeatKind::Note {
@@ -277,21 +302,25 @@ impl Grooph {
                 [zero_start, zero_end],
                 Stroke::new(2.0, egui::Color32::from_gray(140)),
             );
-            let Some(onset_tick) = onsets.get(idx) else {
+            let Some(local_onset) = local_onsets.get(idx) else {
                 continue;
             };
-            let Some(mark) = self.accuracy.tracker.mark_for_onset(*onset_tick) else {
+            let global_onset = measure_start + *local_onset as u64;
+            let Some(mark) = self.accuracy.tracker.mark_for_onset(global_onset) else {
                 continue;
             };
             match mark {
                 AccuracyMark::Hit(diff_ticks) => {
+                    let global_idx = global_onsets_u64
+                        .binary_search(&global_onset)
+                        .unwrap_or(0);
                     let diff_ticks = AccuracyTracker::clamp_diff_to_beat_window(
                         diff_ticks,
-                        idx,
-                        &onsets,
-                        total_ticks,
+                        global_idx,
+                        global_onsets_u64,
+                        total_loop_ticks,
                     );
-                    let Some(px_per_tick) = self.local_pixels_per_tick(&onsets, layout, idx) else {
+                    let Some(px_per_tick) = self.local_pixels_per_tick(&local_onsets, layout, idx) else {
                         continue;
                     };
                     let x = note_layout.center.x + (diff_ticks * px_per_tick) as f32;
