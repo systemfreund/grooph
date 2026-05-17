@@ -3,6 +3,7 @@ use crate::duration::NoteValue::{Eighth, Sixteenth};
 use crate::duration::{Duration, NoteValue, TupletSpec};
 use crate::editing::Modification::{DissolveTuplet, ToggleAccent};
 use crate::grid::DEFAULT_GRID;
+use crate::tuplet::TupletGroupId;
 use crate::{Beat, BeatIdx, BeatKind, Measure, TimeSignature};
 use either::Either;
 
@@ -19,7 +20,7 @@ pub enum Modification {
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct GroupSpan {
-    pub id: u32,
+    pub id: TupletGroupId,
     pub start_idx: BeatIdx,
     pub end_idx: BeatIdx, // inclusive
 }
@@ -206,7 +207,7 @@ impl Measure {
 
             self.beats.drain(start_idx..=end_idx);
 
-            let anchor = self.tuplet_anchors.get(&group_id).unwrap();
+            let anchor = self.tuplets.get(group_id).unwrap();
             let span_ticks = anchor.target_ticks;
             self.fill_at(start_idx, span_ticks, &[], Either::Right(Rest)).unwrap();
 
@@ -219,7 +220,7 @@ impl Measure {
                 self.beats[start_idx].accented = had_any_accent;
             }
 
-            self.tuplet_anchors.remove(&group_id).map(|anchor| {
+            self.tuplets.unregister(group_id).map(|anchor| {
                 DissolveTuplet(
                     GroupSpan { start_idx, end_idx, id: group_id },
                     TupletSpec { n: anchor.n, m: anchor.m, base: anchor.base_hint },
@@ -240,7 +241,7 @@ impl Measure {
         if group.start_idx != start_idx {
             return None;
         }
-        let anchor = self.tuplet_anchors.get(&group.id)?;
+        let anchor = self.tuplets.get(group.id)?;
         let span_ticks = anchor.target_ticks;
         let onsets = DEFAULT_GRID.compute_onset_ticks(&self.beats);
         let start_onset = onsets[start_idx];
@@ -392,7 +393,7 @@ mod tests {
         assert_matches!(
             m.dissolve_tuplet_group(1),
             Some(DissolveTuplet(
-                GroupSpan { start_idx: 0, end_idx: 2, id: 1 },
+                GroupSpan { start_idx: 0, end_idx: 2, id: TupletGroupId(1) },
                 TupletSpec { n: 3, m: 2, base: Eighth }
             ))
         );
@@ -420,7 +421,7 @@ mod tests {
         assert_matches!(
             m.dissolve_tuplet_group(1),
             Some(DissolveTuplet(
-                GroupSpan { start_idx: 0, end_idx: 2, id: 1 },
+                GroupSpan { start_idx: 0, end_idx: 2, id: TupletGroupId(1) },
                 TupletSpec { n: 3, m: 2, base: Eighth }
             ))
         );
@@ -450,7 +451,7 @@ mod tests {
 
         // Anchor‑Span entspricht einer Viertel‑Spanne
         let gid = id0.unwrap();
-        let anchor = m.tuplet_anchors.get(&gid).expect("anchor must exist");
+        let anchor = m.tuplets().get(gid).expect("anchor must exist");
         let base_quarter_ticks = DEFAULT_GRID.ticks_of(&Duration::Simple(Eighth)).unwrap() * 2;
         assert_eq!(anchor.target_ticks, base_quarter_ticks);
     }

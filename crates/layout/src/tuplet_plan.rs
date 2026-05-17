@@ -52,7 +52,7 @@ pub(crate) fn detect_tuplet_spans(measure: &Measure) -> Vec<TupletSpan> {
         .tuplet_groups()
         .into_iter()
         .filter_map(|group| {
-            let anchor = measure.tuplet_anchors.get(&group.id)?;
+            let anchor = measure.tuplets().get(group.id)?;
             let contains_rest =
                 (group.start_idx..=group.end_idx).any(|i| beats[i].kind == BeatKind::Rest);
             Some(TupletSpan {

@@ -1,5 +1,6 @@
 use crate::beat::BeatKind::{Note, Rest};
 use crate::duration::{Duration, duration_to_debug_str};
+use crate::tuplet::TupletGroupId;
 use serde::{Deserialize, Serialize};
 use std::fmt::{Debug, Formatter};
 
@@ -14,7 +15,7 @@ pub struct Beat {
     pub duration: Duration,
     pub kind: BeatKind,
     pub accented: bool,
-    pub tuplet_group_id: Option<u32>,
+    pub tuplet_group_id: Option<TupletGroupId>,
 }
 
 impl Beat {

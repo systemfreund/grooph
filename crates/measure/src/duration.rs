@@ -132,6 +132,12 @@ impl From<&TupletSpec> for TupletKind {
 
 impl TupletSpec {
     pub const fn kind(&self) -> TupletKind { TupletKind::from_n(self.n) }
+
+    /// Two specs share a tuplet grid if their `(n, m)` matches.
+    /// `base` may differ (e.g. `t8` and `t16` live in the same `3:2` grid).
+    pub const fn same_grid(&self, other: &TupletSpec) -> bool {
+        self.n == other.n && self.m == other.m
+    }
 }
 
 impl Duration {
@@ -159,6 +165,17 @@ impl Duration {
 
     /// Public helper for weight/grids: denominator of the reduced fraction relative to whole note.
     pub const fn denominator(&self) -> u32 { self.as_fraction().den }
+
+    /// `true` iff this duration is a tuplet.
+    pub const fn is_tuplet(&self) -> bool { matches!(self, Duration::Tuplet(_)) }
+
+    /// Extract the tuplet spec, or `None` if not a tuplet.
+    pub const fn as_tuplet_spec(&self) -> Option<TupletSpec> {
+        match *self {
+            Duration::Tuplet(spec) => Some(spec),
+            _ => None,
+        }
+    }
 
     /// Convenience to get a base for glyph decisions (flags/rest shapes). Tuplets/dotted return their base.
     pub const fn base_note(&self) -> NoteValue {
