@@ -7,6 +7,7 @@ use std::time::Instant;
 
 use midir::{Ignore, MidiInput as MidirInput, MidiInputConnection, MidiInputPort};
 
+use crate::source::MidiMessageSource;
 use crate::{Error, MidiNote, MidiVelocity, Result};
 
 /// MIDI clock message byte
@@ -18,17 +19,14 @@ const MIDI_STOP: u8 = 0xFC;
 /// MIDI continue message byte
 const MIDI_CONTINUE: u8 = 0xFB;
 
-/// Number of clock messages per beat (MIDI standard: 24 PPQN)
-const CLOCKS_PER_BEAT: u32 = 24;
-
 #[cfg(not(target_arch = "wasm32"))]
-type ClockInstant = Instant;
+pub(crate) type ClockInstant = Instant;
 
 #[cfg(target_arch = "wasm32")]
-type ClockInstant = f64;
+pub(crate) type ClockInstant = f64;
 
 #[inline]
-fn clock_now() -> ClockInstant {
+pub(crate) fn clock_now() -> ClockInstant {
     #[cfg(not(target_arch = "wasm32"))]
     {
         Instant::now()
@@ -41,7 +39,7 @@ fn clock_now() -> ClockInstant {
 }
 
 #[inline]
-fn clock_interval_seconds(now: ClockInstant, last: ClockInstant) -> f32 {
+pub(crate) fn clock_interval_seconds(now: ClockInstant, last: ClockInstant) -> f32 {
     #[cfg(not(target_arch = "wasm32"))]
     {
         now.duration_since(last).as_secs_f32()
@@ -54,7 +52,7 @@ fn clock_interval_seconds(now: ClockInstant, last: ClockInstant) -> f32 {
 }
 
 #[inline]
-fn clock_elapsed_seconds(now: ClockInstant, origin: ClockInstant) -> f64 {
+pub(crate) fn clock_elapsed_seconds(now: ClockInstant, origin: ClockInstant) -> f64 {
     #[cfg(not(target_arch = "wasm32"))]
     {
         now.duration_since(origin).as_secs_f64()
@@ -154,25 +152,154 @@ impl Default for MidiInputEventQueue {
     fn default() -> Self { Self::new() }
 }
 
-/// Shared state for MIDI clock synchronization
+/// Tuning parameters for [`ClockSync`].
+///
+/// Values are exposed as named fields rather than embedded as literals so that
+/// different MIDI hosts (with looser jitter envelopes or different reporting
+/// rates) can be supported without touching the smoothing logic.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ClockSyncConfig {
+    /// Number of MIDI clock pulses that make up one quarter note (MIDI standard: 24 PPQN).
+    pub clocks_per_beat: u32,
+    /// BPM value used at startup and after [`ClockSync::reset`].
+    pub bpm_init: f32,
+    /// Lower bound for an accepted inter-clock interval (seconds). Below this
+    /// the pulse is treated as a duplicate/jitter and ignored.
+    pub interval_min_s: f32,
+    /// Upper bound for an accepted inter-clock interval (seconds). Above this
+    /// the pulse is treated as a stall (host paused, system stutter) and ignored.
+    pub interval_max_s: f32,
+    /// Lower BPM bound for an accepted freshly computed BPM. Used to drop
+    /// nonsense values (e.g. host sent intervals that briefly imply 5 BPM).
+    pub bpm_min: f32,
+    /// Upper BPM bound for an accepted freshly computed BPM.
+    pub bpm_max: f32,
+    /// Weight of a newly computed BPM in the EMA smoothing
+    /// (`bpm = bpm * (1 - smoothing) + new * smoothing`). Range `0.0..=1.0`.
+    pub smoothing: f32,
+}
+
+impl ClockSyncConfig {
+    pub const DEFAULT: Self = Self {
+        clocks_per_beat: 24,
+        bpm_init: 120.0,
+        interval_min_s: 0.005,
+        interval_max_s: 1.0,
+        bpm_min: 20.0,
+        bpm_max: 300.0,
+        smoothing: 0.3,
+    };
+}
+
+impl Default for ClockSyncConfig {
+    fn default() -> Self { Self::DEFAULT }
+}
+
+/// Pure BPM-smoothing state machine driven by MIDI clock pulses.
+///
+/// Holds no synchronisation primitives — it is wrapped by [`MidiClockState`]
+/// when used across the audio/UI thread boundary. The split makes the
+/// smoothing logic unit-testable with synthetic intervals (see
+/// [`ClockSync::observe_interval`]).
+#[derive(Clone, Debug)]
+pub struct ClockSync {
+    cfg: ClockSyncConfig,
+    bpm: f32,
+    last_clock_time: Option<ClockInstant>,
+    accumulated_interval: f32,
+    interval_count: u32,
+    clock_count: u32,
+}
+
+impl Default for ClockSync {
+    fn default() -> Self { Self::new() }
+}
+
+impl ClockSync {
+    pub fn new() -> Self { Self::with_config(ClockSyncConfig::DEFAULT) }
+
+    pub fn with_config(cfg: ClockSyncConfig) -> Self {
+        Self {
+            bpm: cfg.bpm_init,
+            cfg,
+            last_clock_time: None,
+            accumulated_interval: 0.0,
+            interval_count: 0,
+            clock_count: 0,
+        }
+    }
+
+    pub fn bpm(&self) -> f32 { self.bpm }
+
+    pub fn config(&self) -> &ClockSyncConfig { &self.cfg }
+
+    /// Reset only the interval accumulators (called on MIDI Start so that the
+    /// next pulse establishes a fresh time reference). BPM is left intact.
+    pub fn reset_intervals(&mut self) {
+        self.last_clock_time = None;
+        self.accumulated_interval = 0.0;
+        self.interval_count = 0;
+        self.clock_count = 0;
+    }
+
+    /// Full reset including BPM back to [`ClockSyncConfig::bpm_init`].
+    pub fn reset(&mut self) {
+        self.bpm = self.cfg.bpm_init;
+        self.reset_intervals();
+    }
+
+    /// Record a clock pulse arriving at `now`. The first call only seeds the
+    /// timestamp; subsequent calls derive an interval and forward it to
+    /// [`Self::observe_interval`].
+    pub fn on_clock(&mut self, now: ClockInstant) -> Option<f32> {
+        let out = if let Some(last) = self.last_clock_time {
+            self.observe_interval(clock_interval_seconds(now, last))
+        } else {
+            None
+        };
+        self.last_clock_time = Some(now);
+        self.clock_count += 1;
+        out
+    }
+
+    /// Feed a precomputed inter-pulse interval (seconds). Returns
+    /// `Some(new_bpm)` if this pulse completed a `clocks_per_beat` batch
+    /// and the resulting BPM passed the sanity gates.
+    pub fn observe_interval(&mut self, interval_s: f32) -> Option<f32> {
+        if interval_s <= self.cfg.interval_min_s || interval_s >= self.cfg.interval_max_s {
+            return None;
+        }
+        self.accumulated_interval += interval_s;
+        self.interval_count += 1;
+        if self.interval_count < self.cfg.clocks_per_beat {
+            return None;
+        }
+        let avg_interval = self.accumulated_interval / self.interval_count as f32;
+        let new_bpm = 60.0 / (avg_interval * self.cfg.clocks_per_beat as f32);
+        self.accumulated_interval = 0.0;
+        self.interval_count = 0;
+        if new_bpm <= self.cfg.bpm_min || new_bpm >= self.cfg.bpm_max {
+            return None;
+        }
+        let a = self.cfg.smoothing;
+        self.bpm = self.bpm * (1.0 - a) + new_bpm * a;
+        Some(self.bpm)
+    }
+}
+
+/// Shared state for MIDI clock synchronization.
+///
+/// Thin `Arc<Mutex<…>>` wrapper around a [`ClockSync`] plus a `running` flag,
+/// so the audio thread can publish updates and the UI thread can read BPM.
 #[derive(Clone)]
 pub struct MidiClockState {
     inner: Arc<Mutex<MidiClockStateInner>>,
 }
 
 struct MidiClockStateInner {
-    /// Calculated BPM from MIDI clock
-    bpm: f32,
-    /// Whether MIDI clock is currently running (received start/continue)
+    sync: ClockSync,
+    /// Whether MIDI clock is currently running (received start/continue).
     running: bool,
-    /// Last clock message timestamp
-    last_clock_time: Option<ClockInstant>,
-    /// Clock message counter for averaging
-    clock_count: u32,
-    /// Accumulated time between clocks for BPM calculation
-    accumulated_interval: f32,
-    /// Number of intervals accumulated
-    interval_count: u32,
 }
 
 impl Default for MidiClockState {
@@ -180,74 +307,39 @@ impl Default for MidiClockState {
 }
 
 impl MidiClockState {
-    /// Create a new MIDI clock state
-    pub fn new() -> Self {
+    /// Create a new MIDI clock state with the default smoothing config.
+    pub fn new() -> Self { Self::with_config(ClockSyncConfig::DEFAULT) }
+
+    /// Create a new MIDI clock state with a custom smoothing config.
+    pub fn with_config(cfg: ClockSyncConfig) -> Self {
         Self {
             inner: Arc::new(Mutex::new(MidiClockStateInner {
-                bpm: 120.0,
+                sync: ClockSync::with_config(cfg),
                 running: false,
-                last_clock_time: None,
-                clock_count: 0,
-                accumulated_interval: 0.0,
-                interval_count: 0,
             })),
         }
     }
 
-    /// Get the current BPM calculated from MIDI clock
-    pub fn bpm(&self) -> f32 { self.inner.lock().unwrap().bpm }
+    /// Get the current BPM calculated from MIDI clock.
+    pub fn bpm(&self) -> f32 { self.inner.lock().unwrap().sync.bpm() }
 
-    /// Check if MIDI clock is running (received start/continue, not stopped)
+    /// Check if MIDI clock is running (received start/continue, not stopped).
     pub fn is_running(&self) -> bool { self.inner.lock().unwrap().running }
 
-    /// Process a MIDI message and update clock state
+    /// Process a MIDI realtime message and update clock state.
     pub fn process_message(&self, message: &[u8]) {
-        if message.is_empty() {
+        let Some(&status) = message.first() else {
             return;
-        }
+        };
 
         let mut state = self.inner.lock().unwrap();
-
-        match message[0] {
+        match status {
             MIDI_CLOCK => {
-                let now = clock_now();
-
-                if let Some(last_time) = state.last_clock_time {
-                    let interval = clock_interval_seconds(now, last_time);
-
-                    // Accumulate intervals for averaging (ignore outliers)
-                    if interval > 0.005 && interval < 1.0 {
-                        state.accumulated_interval += interval;
-                        state.interval_count += 1;
-
-                        // Calculate BPM every 24 clocks (one beat)
-                        if state.interval_count >= CLOCKS_PER_BEAT {
-                            let avg_interval =
-                                state.accumulated_interval / state.interval_count as f32;
-                            // BPM = 60 / (interval * clocks_per_beat)
-                            let new_bpm = 60.0 / (avg_interval * CLOCKS_PER_BEAT as f32);
-
-                            // Smooth the BPM value to avoid jitter
-                            if new_bpm > 20.0 && new_bpm < 300.0 {
-                                state.bpm = state.bpm * 0.7 + new_bpm * 0.3;
-                            }
-
-                            // Reset accumulators
-                            state.accumulated_interval = 0.0;
-                            state.interval_count = 0;
-                        }
-                    }
-                }
-
-                state.last_clock_time = Some(now);
-                state.clock_count += 1;
+                state.sync.on_clock(clock_now());
             }
             MIDI_START => {
                 state.running = true;
-                state.clock_count = 0;
-                state.last_clock_time = None;
-                state.accumulated_interval = 0.0;
-                state.interval_count = 0;
+                state.sync.reset_intervals();
             }
             MIDI_CONTINUE => {
                 state.running = true;
@@ -259,15 +351,11 @@ impl MidiClockState {
         }
     }
 
-    /// Reset the clock state
+    /// Reset the clock state (BPM back to default, accumulators cleared).
     pub fn reset(&self) {
         let mut state = self.inner.lock().unwrap();
-        state.bpm = 120.0;
+        state.sync.reset();
         state.running = false;
-        state.last_clock_time = None;
-        state.clock_count = 0;
-        state.accumulated_interval = 0.0;
-        state.interval_count = 0;
     }
 }
 
@@ -428,4 +516,209 @@ impl MidiInput {
 
 impl Drop for MidiInput {
     fn drop(&mut self) { let _ = self.disconnect(); }
+}
+
+impl MidiMessageSource for MidiInput {
+    fn drain_events(&self) -> Vec<MidiInputEvent> { self.event_queue.drain() }
+
+    fn now_seconds(&self) -> f64 { Self::now_seconds(self) }
+
+    fn is_connected(&self) -> bool { Self::is_connected(self) }
+
+    fn clock_state(&self) -> &MidiClockState { Self::clock_state(self) }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::RefCell;
+
+    fn interval_for_bpm(bpm: f32, cpb: u32) -> f32 { 60.0 / (bpm * cpb as f32) }
+
+    #[test]
+    fn constant_60_bpm_converges() {
+        let mut cs = ClockSync::new();
+        let interval = interval_for_bpm(60.0, cs.config().clocks_per_beat);
+        // First batch shifts BPM by `smoothing` fraction toward 60.
+        for _ in 0..cs.config().clocks_per_beat {
+            cs.observe_interval(interval);
+        }
+        let expected_after_one = 120.0 * 0.7 + 60.0 * 0.3;
+        assert!(
+            (cs.bpm() - expected_after_one).abs() < 0.05,
+            "after one beat: {} vs expected {}",
+            cs.bpm(),
+            expected_after_one
+        );
+        // After many batches the BPM should converge close to 60.
+        for _ in 0..(50 * cs.config().clocks_per_beat) {
+            cs.observe_interval(interval);
+        }
+        assert!((cs.bpm() - 60.0).abs() < 0.5, "did not converge: bpm={}", cs.bpm());
+    }
+
+    #[test]
+    fn outlier_intervals_are_rejected() {
+        let mut cs = ClockSync::new();
+        let too_short = cs.config().interval_min_s * 0.5;
+        let too_long = cs.config().interval_max_s * 2.0;
+        for _ in 0..(2 * cs.config().clocks_per_beat) {
+            cs.observe_interval(too_short);
+            cs.observe_interval(too_long);
+        }
+        assert_eq!(cs.bpm(), cs.config().bpm_init, "outliers should not affect BPM");
+    }
+
+    #[test]
+    fn computed_bpm_above_bpm_max_is_dropped() {
+        let mut cs = ClockSync::new();
+        // Interval is within the outlier gate but yields a computed BPM well
+        // above bpm_max (300) — should leave bpm untouched.
+        let interval = 0.006_f32; // ≈ 417 BPM at 24 PPQN
+        for _ in 0..cs.config().clocks_per_beat {
+            cs.observe_interval(interval);
+        }
+        assert_eq!(cs.bpm(), 120.0);
+    }
+
+    #[test]
+    fn partial_batch_does_not_update_bpm() {
+        let mut cs = ClockSync::new();
+        let interval = interval_for_bpm(60.0, cs.config().clocks_per_beat);
+        // Feed cpb - 1 intervals: no full batch yet.
+        for _ in 0..(cs.config().clocks_per_beat - 1) {
+            assert_eq!(cs.observe_interval(interval), None);
+        }
+        assert_eq!(cs.bpm(), 120.0);
+        // The cpb-th interval completes a batch and returns the new BPM.
+        let updated = cs.observe_interval(interval).expect("batch completes");
+        assert!((updated - (120.0 * 0.7 + 60.0 * 0.3)).abs() < 0.05);
+    }
+
+    #[test]
+    fn reset_intervals_keeps_bpm_but_clears_accumulators() {
+        let mut cs = ClockSync::new();
+        let interval = interval_for_bpm(60.0, cs.config().clocks_per_beat);
+        for _ in 0..cs.config().clocks_per_beat {
+            cs.observe_interval(interval);
+        }
+        let after_first_batch = cs.bpm();
+        cs.reset_intervals();
+        assert_eq!(cs.bpm(), after_first_batch, "BPM survives reset_intervals");
+        // After reset, partial batch should not immediately update.
+        for _ in 0..(cs.config().clocks_per_beat - 1) {
+            cs.observe_interval(interval);
+        }
+        assert_eq!(cs.bpm(), after_first_batch);
+    }
+
+    #[test]
+    fn reset_restores_default_bpm() {
+        let mut cs = ClockSync::new();
+        let interval = interval_for_bpm(60.0, cs.config().clocks_per_beat);
+        for _ in 0..cs.config().clocks_per_beat {
+            cs.observe_interval(interval);
+        }
+        assert_ne!(cs.bpm(), 120.0);
+        cs.reset();
+        assert_eq!(cs.bpm(), 120.0);
+    }
+
+    #[test]
+    fn midi_clock_state_start_then_stop_flips_running() {
+        let state = MidiClockState::new();
+        assert!(!state.is_running());
+        state.process_message(&[MIDI_START]);
+        assert!(state.is_running());
+        state.process_message(&[MIDI_STOP]);
+        assert!(!state.is_running());
+        state.process_message(&[MIDI_CONTINUE]);
+        assert!(state.is_running());
+    }
+
+    #[test]
+    fn midi_clock_state_empty_message_is_noop() {
+        let state = MidiClockState::new();
+        state.process_message(&[]);
+        assert!(!state.is_running());
+        assert_eq!(state.bpm(), 120.0);
+    }
+
+    /// A minimal in-memory [`MidiMessageSource`] for tests. Demonstrates that
+    /// the trait surface is enough to drive an app-layer event loop without
+    /// touching `midir`.
+    struct MockMidiSource {
+        events: RefCell<Vec<MidiInputEvent>>,
+        clock_state: MidiClockState,
+        now: f64,
+        connected: bool,
+    }
+
+    impl MockMidiSource {
+        fn new() -> Self {
+            Self {
+                events: RefCell::new(Vec::new()),
+                clock_state: MidiClockState::new(),
+                now: 0.0,
+                connected: true,
+            }
+        }
+
+        fn enqueue(&self, ev: MidiInputEvent) { self.events.borrow_mut().push(ev); }
+    }
+
+    impl MidiMessageSource for MockMidiSource {
+        fn drain_events(&self) -> Vec<MidiInputEvent> {
+            std::mem::take(&mut *self.events.borrow_mut())
+        }
+        fn now_seconds(&self) -> f64 { self.now }
+        fn is_connected(&self) -> bool { self.connected }
+        fn clock_state(&self) -> &MidiClockState { &self.clock_state }
+    }
+
+    #[test]
+    fn mock_source_can_be_consumed_through_trait() {
+        let mock = MockMidiSource::new();
+        mock.enqueue(MidiInputEvent::NoteOn {
+            channel: 0,
+            note: 60,
+            velocity: 100,
+            timestamp: 0.0,
+        });
+
+        fn count_note_ons(src: &dyn MidiMessageSource) -> usize {
+            src.drain_events()
+                .into_iter()
+                .filter(|e| matches!(e, MidiInputEvent::NoteOn { .. }))
+                .count()
+        }
+
+        assert_eq!(count_note_ons(&mock), 1);
+        // Drain leaves the source empty.
+        assert_eq!(count_note_ons(&mock), 0);
+    }
+
+    #[test]
+    fn input_event_queue_routes_note_on_off_and_cc() {
+        let q = MidiInputEventQueue::new();
+        // Note On
+        assert!(q.process_message(&[0x90, 60, 100], 1.0));
+        // Note On with velocity 0 = Note Off
+        assert!(q.process_message(&[0x90, 60, 0], 2.0));
+        // Note Off
+        assert!(q.process_message(&[0x80, 60, 64], 3.0));
+        // Control Change
+        assert!(q.process_message(&[0xB0, 7, 127], 4.0));
+        // Unsupported status
+        assert!(!q.process_message(&[0xC0, 0, 0], 5.0));
+        let events = q.drain();
+        assert_eq!(events.len(), 4);
+        assert!(matches!(events[0], MidiInputEvent::NoteOn { note: 60, velocity: 100, .. }));
+        assert!(matches!(events[1], MidiInputEvent::NoteOff { note: 60, velocity: 0, .. }));
+        assert!(matches!(events[2], MidiInputEvent::NoteOff { note: 60, velocity: 64, .. }));
+        assert!(matches!(
+            events[3],
+            MidiInputEvent::ControlChange { controller: 7, value: 127, .. }
+        ));
+    }
 }

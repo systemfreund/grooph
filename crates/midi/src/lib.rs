@@ -5,9 +5,11 @@
 
 mod error;
 mod input;
+mod source;
 
 pub use error::{Error, Result};
-pub use input::{MidiClockState, MidiInput, MidiInputEvent};
+pub use input::{ClockSync, ClockSyncConfig, MidiClockState, MidiInput, MidiInputEvent};
+pub use source::MidiMessageSource;
 
 /// MIDI note number type (0-127)
 pub type MidiNote = u8;
