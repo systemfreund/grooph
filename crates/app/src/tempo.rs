@@ -1,21 +1,30 @@
-use grooph_measure::TimeSignature;
-use grooph_measure::grid::DEFAULT_GRID;
+use grooph_measure::tempo::ScoreTiming;
 
+/// Single-measure tempo view derived from a [`ScoreTiming`].
+///
+/// Reproduces the semantics of the former `TempoMap` (single-TS). Used by the
+/// MIDI/Accuracy pipeline which is still single-measure at `cursor.measure_idx`.
+///
+/// TODO(midi-multi-measure): once MIDI becomes multi-measure, callers should
+/// invoke `ScoreTiming` methods directly instead of going through this bridge.
+/// See `accuracy.rs` and `handle_midi_input_events` for the migration notes.
 #[derive(Clone, Copy)]
-pub(crate) struct TempoMap {
+pub(crate) struct LocalTempo {
     pub bpm: u32,
-    pub ticks_per_beat: f64,
     pub ticks_per_sec: f64,
     pub ticks_per_measure: f64,
 }
 
-impl TempoMap {
-    pub(crate) fn new(bpm: u32, ts: &TimeSignature) -> Self {
-        let ticks_per_beat = DEFAULT_GRID.ticks_per_beat(ts) as f64;
-        let ticks_per_measure = DEFAULT_GRID.ticks_per_measure(ts) as f64;
-        let ticks_per_sec = (bpm as f64 / 60.0) * ticks_per_beat;
-        Self { bpm, ticks_per_beat, ticks_per_sec, ticks_per_measure }
+impl LocalTempo {
+    pub(crate) fn from_score_timing(timing: &ScoreTiming, measure_idx: usize) -> Self {
+        Self {
+            bpm: timing.bpm(),
+            ticks_per_sec: timing.ticks_per_sec_in_measure(measure_idx),
+            ticks_per_measure: timing.ticks_per_measure(measure_idx) as f64,
+        }
     }
 
-    pub(crate) fn valid(&self) -> bool { self.ticks_per_sec > 0.0 && self.ticks_per_measure > 0.0 }
+    pub(crate) fn valid(&self) -> bool {
+        self.ticks_per_sec > 0.0 && self.ticks_per_measure > 0.0
+    }
 }

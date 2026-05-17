@@ -23,7 +23,8 @@ use grooph_measure::{BeatIdx, Cursor, Measure, Score, TimeSignature};
 use crate::accuracy::AccuracyState;
 use crate::platform::{PlatformRuntime, VisibilityEvent};
 use crate::state::{AudioConfig, LayoutSettings, MidiState, PlaybackState};
-use crate::tempo::TempoMap;
+use crate::tempo::LocalTempo;
+use grooph_measure::tempo::ScoreTiming;
 use crate::tools::ToolKind;
 use crate::tools::{BeatTemplate, Modifier, all_tools};
 use crate::undo::{DEFAULT_UNDO_LIMIT, EditorSnapshot, UndoHistory};
@@ -218,8 +219,7 @@ impl App for Grooph {
 
         if let Some(audio) = &mut self.audio {
             audio.set_audio_settings(self.audio_cfg.settings);
-            let active_measure = &self.score.measures[self.cursor.measure_idx];
-            if audio.update(&audio_state, self.bpm, active_measure) {
+            if audio.update(&audio_state, self.bpm, &self.score) {
                 ui.ctx().request_repaint();
             }
         }
@@ -242,12 +242,28 @@ impl Grooph {
             return;
         }
 
-        let tempo = TempoMap::new(self.bpm, &self.current_measure().time_signature());
+        // TODO(midi-multi-measure): currently single-measure at cursor.measure_idx.
+        // For multi-measure MIDI:
+        //   - Build `let timing = ScoreTiming::from_score(&self.score, self.bpm);`
+        //     and pass &timing instead of a per-measure LocalTempo to record_hit /
+        //     update_progress.
+        //   - start_time should derive from the global cursor:
+        //     start_time = now_seconds - timing.global_tick_to_seconds(smooth_tick).
+        //   - Incoming events: timing.seconds_to_global_tick(
+        //         (event.timestamp - start_time).rem_euclid(timing.total_loop_seconds()))
+        //     → timing.to_local(global) yields (measure_idx, local_tick) for marker storage.
+        let timing = ScoreTiming::from_score(&self.score, self.bpm);
+        let tempo = LocalTempo::from_score_timing(&timing, self.cursor.measure_idx);
 
         if self.transport_state == TransportState::Playing
             && is_connected
             && !self.accuracy.tracker.has_start_time()
         {
+            // TODO(midi-multi-measure): smooth_tick is *global* but here we
+            // divide by the active measure's ticks_per_sec, which is only
+            // correct when the playing measure == cursor.measure_idx AND the
+            // score has uniform tempo before that point. Replace with
+            // `timing.global_tick_to_seconds(self.playback.smooth_tick)`.
             let (start_time, last_tick) = if tempo.ticks_per_sec > 0.0 {
                 (
                     now_seconds - (self.playback.smooth_tick / tempo.ticks_per_sec),
@@ -523,7 +539,10 @@ impl Grooph {
             return;
         }
 
-        let tempo = TempoMap::new(self.bpm, &self.current_measure().time_signature());
+        // TODO(midi-multi-measure): same as in handle_midi_input_events —
+        // replace LocalTempo with timing.global_tick_to_seconds(smooth_tick).
+        let timing = ScoreTiming::from_score(&self.score, self.bpm);
+        let tempo = LocalTempo::from_score_timing(&timing, self.cursor.measure_idx);
         if !tempo.valid() {
             return;
         }

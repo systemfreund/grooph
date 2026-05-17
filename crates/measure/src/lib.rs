@@ -9,6 +9,7 @@ pub mod grid;
 pub(crate) mod grouping;
 mod math;
 pub mod score;
+pub mod tempo;
 pub mod time_signature;
 
 use BeatKind::Note;

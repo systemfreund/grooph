@@ -1,7 +1,7 @@
 mod schedule;
 
-use grooph_measure::Measure;
-use grooph_measure::grid::DEFAULT_GRID;
+use grooph_measure::Score;
+use grooph_measure::tempo::ScoreTiming;
 use log::{debug, error, info, trace};
 use rodio::Source;
 use rodio::source::BltFilter;
@@ -116,7 +116,7 @@ pub enum PlayerState {
 struct PlaybackState {
     params: PlaybackParams,
     is_dirty: bool,
-    // live playback cursor in ticks within current measure, and measure length in ticks
+    // Live playback cursor in global ticks across the whole score loop.
     playback_tick: f64,
     // Controls whether new tones are triggered and cursor advances
     playing_state: PlayerState,
@@ -136,8 +136,7 @@ impl Debug for PlaybackState {
 #[derive(Debug, Clone)]
 struct PlaybackParams {
     bpm: u32,
-    ticks_per_beat: u32,
-    ticks_per_measure: u32,
+    timing: ScoreTiming,
     schedule: Schedule,
     audio_settings: AudioSettings,
 }
@@ -146,8 +145,7 @@ impl Audio {
     pub fn new(bpm: u32) -> Option<Self> {
         let params = PlaybackParams {
             bpm,
-            ticks_per_beat: 0,
-            ticks_per_measure: 0,
+            timing: ScoreTiming::default(),
             schedule: Schedule::default(),
             audio_settings: AudioSettings::default(),
         };
@@ -164,26 +162,19 @@ impl Audio {
     }
 
     // Returns true if UI should repaint soon (while playing or while waiting for tail-out)
-    pub fn update(&mut self, player_state: &PlayerState, bpm: u32, measure: &Measure) -> bool {
-        // Check if anything changed to avoid unnecessary dirtying
-        let ts = measure.time_signature();
-        let ticks_per_beat = DEFAULT_GRID.ticks_per_beat(&ts);
-        let ticks_per_measure = DEFAULT_GRID.ticks_per_measure(&ts);
-
-        // Recompute schedule
-        let schedule = Schedule::build(measure, &ts);
+    pub fn update(&mut self, player_state: &PlayerState, bpm: u32, score: &Score) -> bool {
+        let timing = ScoreTiming::from_score(score, bpm);
+        let schedule = Schedule::build(score, &timing);
 
         // Check differences
         if let Ok(mut shared_state) = self.shared_state.try_lock()
             && (shared_state.params.bpm != bpm
-                || shared_state.params.ticks_per_beat != ticks_per_beat
-                || shared_state.params.ticks_per_measure != ticks_per_measure
+                || shared_state.params.timing != timing
                 || shared_state.params.schedule != schedule
                 || shared_state.playing_state != *player_state)
         {
             shared_state.params.bpm = bpm;
-            shared_state.params.ticks_per_beat = ticks_per_beat;
-            shared_state.params.ticks_per_measure = ticks_per_measure;
+            shared_state.params.timing = timing;
             shared_state.params.schedule = schedule;
             shared_state.playing_state = player_state.clone();
             shared_state.is_dirty = true;
@@ -243,10 +234,12 @@ impl Audio {
         }
     }
 
-    pub fn playback_position(&self) -> Option<(f64, u32)> {
+    /// Returns `(global_tick, total_loop_ticks)` where `global_tick` is the
+    /// current audio cursor over the whole score loop.
+    pub fn playback_position(&self) -> Option<(f64, u64)> {
         // Non-blocking try to avoid UI stalls; fall back to None if busy
         if let Ok(shared_state) = self.shared_state.try_lock() {
-            Some((shared_state.playback_tick, shared_state.params.ticks_per_measure))
+            Some((shared_state.playback_tick, shared_state.params.timing.total_loop_ticks()))
         } else {
             None
         }
@@ -337,29 +330,36 @@ impl MetronomeSource {
     }
 
     fn determine_triggered_sounds(&mut self) -> Vec<SoundType> {
-        let bpm = self.local_params.bpm as f64;
-        let total_ticks = self.local_params.ticks_per_measure as f64;
-        let ticks_per_beat = self.local_params.ticks_per_beat as f64;
-        let ticks_per_sample = (bpm / 60.0 * ticks_per_beat) / (self.sample_rate as f64);
-
+        let total_ticks = self.local_params.timing.total_loop_ticks() as f64;
+        if total_ticks <= 0.0 {
+            return Vec::new();
+        }
         let old_cursor = self.cursor;
+        // Pick the per-measure tempo at the current cursor position. Within one
+        // sample, the rate of the old measure is reused; the next sample picks
+        // up the new measure's rate. Max drift at a TS boundary is ~20 µs at
+        // 48 kHz and does not accumulate — schedule triggers are exact integer
+        // ticks and are picked up by `collect_in_range` precisely.
+        let measure_idx = self.local_params.timing.measure_at_global_tick(old_cursor);
+        let tps = self.local_params.timing.ticks_per_sec_in_measure(measure_idx);
+        let ticks_per_sample = tps / self.sample_rate as f64;
+
         let mut new_cursor = old_cursor + ticks_per_sample;
 
-        // Collect all triggers crossed by this sample advance using [old, new) interval
         let mut triggered_sounds: Vec<SoundType> = Vec::with_capacity(Self::MAX_VOICES);
         let schedule = &self.local_params.schedule;
         if new_cursor >= total_ticks {
             // 1. [old_cursor, total_ticks)
-            schedule.collect_in_range(old_cursor.ceil() as u32, total_ticks, &mut triggered_sounds);
+            schedule.collect_in_range(old_cursor.ceil() as u64, total_ticks, &mut triggered_sounds);
 
-            // Wrap
+            // Wrap at score end.
             new_cursor -= total_ticks;
 
             // 2. [0.0, new_cursor)
             schedule.collect_in_range(0, new_cursor, &mut triggered_sounds);
         } else {
             // [old_cursor, new_cursor)
-            schedule.collect_in_range(old_cursor.ceil() as u32, new_cursor, &mut triggered_sounds);
+            schedule.collect_in_range(old_cursor.ceil() as u64, new_cursor, &mut triggered_sounds);
         }
 
         self.cursor = new_cursor;

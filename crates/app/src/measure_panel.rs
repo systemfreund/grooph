@@ -1,6 +1,5 @@
 use crate::Grooph;
 use crate::accuracy::{AccuracyMark, AccuracyTracker};
-use crate::tempo::TempoMap;
 use crate::tools::{Modifier, ToolKind, all_tools};
 use crate::{Mode, TransportState};
 use eframe::egui;
@@ -8,6 +7,7 @@ use eframe::egui::{FontId, Frame, Rect, Response, Stroke};
 use grooph_layout::pixel_layout::{GlyphMetrics, MeasureLayout, compute_em};
 use grooph_layout::staff_layout::{PlacedMeasure, StaffLayout, StaffOpts, build_staff_layout};
 use grooph_measure::grid::DEFAULT_GRID;
+use grooph_measure::tempo::ScoreTiming;
 use grooph_render::staff::draw_staff;
 
 impl Grooph {
@@ -22,48 +22,63 @@ impl Grooph {
                     let origin = ui.cursor().min;
                     let viewport_rect = Rect::from_min_size(origin, available);
 
+                    // Build the multi-measure tempo backbone once per frame.
+                    // O(score.len()) — cheap for realistic score sizes.
+                    let timing = ScoreTiming::from_score(&self.score, self.bpm);
+
                     // Update playback smoothing & primary-beat flash state
                     let playback_tick_to_draw = match self.transport_state {
                         TransportState::Playing => {
-                            let tempo =
-                                TempoMap::new(self.bpm, &self.current_measure().time_signature());
-
                             let now = ui.input(|i| i.time);
                             let last = self.playback.last_update.unwrap_or(now);
                             let dt = now - last;
                             self.playback.last_update = Some(now);
 
-                            // Advance predictor
+                            let total = timing.total_loop_ticks() as f64;
+
+                            // Advance predictor at the current measure's rate.
+                            // smooth_tick is now a global tick across the whole loop.
+                            let current_m =
+                                timing.measure_at_global_tick(self.playback.smooth_tick);
+                            let current_tps = timing.ticks_per_sec_in_measure(current_m);
                             let mut next_tick =
-                                self.playback.smooth_tick + tempo.ticks_per_sec * dt;
+                                self.playback.smooth_tick + current_tps * dt;
 
                             // Sync with audio if available
-                            if self.transport_state == TransportState::Playing
-                                && let Some(audio) = &self.audio
+                            if let Some(audio) = &self.audio
                                 && let Some((raw_audio_tick, audio_total)) =
                                     audio.playback_position()
                             {
-                                let total = audio_total as f64;
-                                if total > 0.0 {
-                                    // Adjust for user-configured audio offset (latency) if enabled
+                                let audio_total_f = audio_total as f64;
+                                if audio_total_f > 0.0 {
+                                    // Adjust for user-configured audio offset (latency).
+                                    // Use the playing measure's rate (small offset, sub-tick
+                                    // approximation acceptable across TS boundaries).
+                                    let audio_m =
+                                        timing.measure_at_global_tick(raw_audio_tick);
+                                    let audio_tps =
+                                        timing.ticks_per_sec_in_measure(audio_m);
                                     let offset_ticks = if self.audio_cfg.latency_enabled {
-                                        self.audio_cfg.offset as f64 * tempo.ticks_per_sec
+                                        self.audio_cfg.offset as f64 * audio_tps
                                     } else {
                                         0.0
                                     };
                                     let audio_tick =
-                                        (raw_audio_tick - offset_ticks).rem_euclid(total);
+                                        (raw_audio_tick - offset_ticks).rem_euclid(audio_total_f);
 
                                     let mut diff = audio_tick - next_tick;
                                     // Handle wrap-around (shortest path)
-                                    if diff > total * 0.5 {
-                                        diff -= total;
-                                    } else if diff < -total * 0.5 {
-                                        diff += total;
+                                    if diff > audio_total_f * 0.5 {
+                                        diff -= audio_total_f;
+                                    } else if diff < -audio_total_f * 0.5 {
+                                        diff += audio_total_f;
                                     }
 
-                                    // Snap if far off (e.g. startup/seek), else smooth nudge
-                                    if diff.abs() > tempo.ticks_per_beat * 0.5 {
+                                    // Snap if far off, else smooth nudge. "Far" uses the
+                                    // playing measure's ticks_per_beat as a unit.
+                                    let tpb =
+                                        timing.ticks_per_beat_in_measure(audio_m) as f64;
+                                    if diff.abs() > tpb * 0.5 {
                                         next_tick = audio_tick;
                                     } else {
                                         next_tick += diff * 0.1;
@@ -71,18 +86,25 @@ impl Grooph {
                                 }
                             }
 
-                            // Wrap
-                            if tempo.ticks_per_measure > 0.0 {
-                                next_tick = next_tick.rem_euclid(tempo.ticks_per_measure);
+                            // Wrap at score end (not at any measure boundary).
+                            if total > 0.0 {
+                                next_tick = next_tick.rem_euclid(total);
                             }
                             self.playback.smooth_tick = next_tick;
 
-                            // Flash: trigger on primary beat change
-                            let current_primary_beat =
-                                (next_tick / tempo.ticks_per_beat).floor() as u32;
-                            if self.playback.last_primary_beat != Some(current_primary_beat) {
+                            // Flash: trigger on primary-beat change in the currently
+                            // playing measure. Key is (measure_idx, primary_beat_in_measure).
+                            let (m_idx, local_tick) = timing.to_local(next_tick);
+                            let tpb_m = timing.ticks_per_beat_in_measure(m_idx) as f64;
+                            let primary_beat_in_measure = if tpb_m > 0.0 {
+                                (local_tick / tpb_m).floor() as u32
+                            } else {
+                                0
+                            };
+                            let key = (m_idx, primary_beat_in_measure);
+                            if self.playback.last_primary_beat != Some(key) {
                                 self.playback.flash_intensity = 1.0;
-                                self.playback.last_primary_beat = Some(current_primary_beat);
+                                self.playback.last_primary_beat = Some(key);
                             }
 
                             // Exponential decay towards 0
@@ -127,14 +149,20 @@ impl Grooph {
 
                     let staff = build_staff_layout(&self.score, &staff_opts);
 
+                    // From the global tick, derive (playing_measure_idx, local_tick).
+                    // The playback cursor renders / auto-scrolls based on this — it
+                    // wanders through all measures, independent of cursor.measure_idx.
+                    let playback_local =
+                        playback_tick_to_draw.map(|global| timing.to_local(global));
+
                     // Auto-scroll: keep the playback cursor centered in the viewport.
-                    if let Some(t) = playback_tick_to_draw
-                        && let Some(placed) = staff.placed(self.cursor.measure_idx)
+                    if let Some((play_m, local_t)) = playback_local
+                        && let Some(placed) = staff.placed(play_m)
                         && let Some(x) = grooph_render::measure::playback_cursor_x(
                             &self.score.measures[placed.measure_idx],
                             &placed.layout,
                             placed.rect,
-                            t,
+                            local_t,
                         )
                     {
                         let cursor_rect = egui::Rect::from_min_size(
@@ -155,8 +183,7 @@ impl Grooph {
 
                     let count_config = self.build_count_config();
                     let cursor = if self.mode == Mode::Edit { Some(self.cursor) } else { None };
-                    let playback =
-                        playback_tick_to_draw.map(|t| (self.cursor.measure_idx, t));
+                    let playback = playback_local;
 
                     draw_staff(
                         ui,
@@ -183,6 +210,11 @@ impl Grooph {
                         ui.ctx().request_repaint();
                     }
 
+                    // TODO(midi-multi-measure): markers are drawn only for the
+                    // active (cursor-selected) measure. When MIDI becomes
+                    // multi-measure, iterate over *all* PlacedMeasures and
+                    // look up marks via the *global* onset tick
+                    // (`timing.measure_start_tick(placed.measure_idx) + onsets[i]`).
                     if let Some(active) = staff.placed(self.cursor.measure_idx) {
                         self.draw_accuracy_marker(ui, active, &staff_opts.metrics);
                     }

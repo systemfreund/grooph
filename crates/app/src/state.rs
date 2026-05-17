@@ -35,10 +35,14 @@ impl Default for LayoutSettings {
 
 #[derive(Default)]
 pub(crate) struct PlaybackState {
+    /// Cursor position in **global ticks** across the entire score loop.
     pub(crate) smooth_tick: f64,
     pub(crate) last_update: Option<f64>,
     pub(crate) flash_intensity: f32,
-    pub(crate) last_primary_beat: Option<u32>,
+    /// Last (measure_idx, primary_beat_in_measure) that fired the flash. Tracks
+    /// both axes so the flash fires once per primary beat in every measure, not
+    /// only when the beat number changes.
+    pub(crate) last_primary_beat: Option<(usize, u32)>,
 }
 
 impl PlaybackState {

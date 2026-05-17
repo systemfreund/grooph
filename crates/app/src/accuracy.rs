@@ -5,7 +5,7 @@ use grooph_measure::{Beat, BeatKind};
 use log::info;
 
 use crate::TransportState;
-use crate::tempo::TempoMap;
+use crate::tempo::LocalTempo;
 
 pub(crate) struct AccuracyState {
     pub(crate) tracker: AccuracyTracker,
@@ -63,6 +63,12 @@ impl AccuracyStats {
 pub(crate) struct AccuracyTracker {
     start_time: Option<f64>,
     stats: AccuracyStats,
+    // TODO(midi-multi-measure): keys are local onset ticks in the (single)
+    // active measure. For multi-measure MIDI, switch to u64 representing
+    // *global* onset ticks across the whole score
+    // (`ScoreTiming::measure_start_tick(idx) + local_onset`). hits_in_loop /
+    // hits_next_loop accordingly. The "loop" then refers to the full score
+    // loop, not a single-measure loop.
     marks_by_onset: HashMap<u32, AccuracyMark>,
     hits_in_loop: HashSet<u32>,
     hits_next_loop: HashSet<u32>,
@@ -143,7 +149,7 @@ impl AccuracyTracker {
         self.marks_by_onset.get(&onset_tick).copied()
     }
 
-    pub(crate) fn record_hit(&mut self, timestamp: f64, tempo: &TempoMap, beats: &[Beat]) {
+    pub(crate) fn record_hit(&mut self, timestamp: f64, tempo: &LocalTempo, beats: &[Beat]) {
         let Some(start_time) = self.start_time else {
             return;
         };
@@ -158,6 +164,13 @@ impl AccuracyTracker {
         if elapsed < 0.0 {
             return;
         }
+        // TODO(midi-multi-measure): replace the local rem_euclid below with a
+        // global lookup:
+        //   let global = timing.seconds_to_global_tick(elapsed.rem_euclid(timing.total_loop_seconds()));
+        //   let (m_idx, local) = timing.to_local(global);
+        // Onset-matching then iterates over the notes of *all* measures (each
+        // with `timing.measure_start_tick(idx) + onsets[i]` as its global tick)
+        // and finds the best-match modulo `total_loop_ticks`.
         let ticks_per_measure = tempo.ticks_per_measure;
         let ticks_per_sec = tempo.ticks_per_sec;
         let hit_tick = (elapsed * ticks_per_sec).rem_euclid(ticks_per_measure);
@@ -206,7 +219,7 @@ impl AccuracyTracker {
         );
     }
 
-    pub(crate) fn update_progress(&mut self, now_seconds: f64, tempo: &TempoMap, beats: &[Beat]) {
+    pub(crate) fn update_progress(&mut self, now_seconds: f64, tempo: &LocalTempo, beats: &[Beat]) {
         let Some(start_time) = self.start_time else {
             return;
         };
@@ -221,6 +234,12 @@ impl AccuracyTracker {
         if elapsed < 0.0 {
             return;
         }
+        // TODO(midi-multi-measure): rem_euclid(ticks_per_measure) only wraps at
+        // the active-measure boundary. For multi-measure MIDI this becomes
+        // rem_euclid(timing.total_loop_ticks() as f64), and the wrap-detection
+        // (`current_tick < last_tick`) fires only at the *score* boundary.
+        // process_segment must then iterate across all measures' onsets, using
+        // globals from `timing.measure_start_tick`.
         let ticks_per_measure = tempo.ticks_per_measure;
         let ticks_per_sec = tempo.ticks_per_sec;
         let mut current_tick = (elapsed * ticks_per_sec).rem_euclid(ticks_per_measure);
