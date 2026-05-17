@@ -1,6 +1,5 @@
-use crate::glyphs;
 use crate::render_plan::plan_measure;
-use egui::{self, FontId, Pos2, Rect, Vec2};
+use egui::{FontId, Pos2, Rect, Vec2};
 use grooph_measure::duration::{Duration, NoteValue};
 use grooph_measure::{BeatKind, Measure, TimeSignature};
 
@@ -51,34 +50,6 @@ pub struct GlyphMetrics {
 }
 
 impl GlyphMetrics {
-    pub fn measure(ui: &egui::Ui, font_id: &FontId) -> Self {
-        let em = font_id.size;
-        // Measure only width from font; use heuristics for height to avoid huge SMuFL bounding boxes
-        let measure_width = |c: char| -> f32 {
-            ui.painter()
-                .layout_no_wrap(c.to_string(), font_id.clone(), egui::Color32::WHITE)
-                .rect
-                .width()
-        };
-
-        Self {
-            head_size: Vec2::new(measure_width(glyphs::GLYPH_NOTEHEAD_BLACK), 0.25 * em),
-            dot_size: Vec2::new(measure_width(glyphs::GLYPH_AUGMENTATION_DOT), 0.2 * em),
-            accent_size: Vec2::new(measure_width(glyphs::GLYPH_ACCENT_ABOVE), 0.25 * em),
-            flag_8th_size: Vec2::new(measure_width(glyphs::GLYPH_FLAG_8TH_UP), 0.2 * em),
-            flag_16th_size: Vec2::new(measure_width(glyphs::GLYPH_FLAG_16TH_UP), 0.2 * em),
-            flag_32nd_size: Vec2::new(measure_width(glyphs::GLYPH_FLAG_32ND_UP), 0.4 * em),
-            rest_sizes: [
-                Vec2::new(measure_width(glyphs::GLYPH_REST_WHOLE), 0.25 * em),
-                Vec2::new(measure_width(glyphs::GLYPH_REST_HALF), 0.25 * em),
-                Vec2::new(measure_width(glyphs::GLYPH_REST_QUARTER), 0.45 * em),
-                Vec2::new(measure_width(glyphs::GLYPH_REST_EIGHTH), 0.30 * em),
-                Vec2::new(measure_width(glyphs::GLYPH_REST_SIXTEENTH), 0.50 * em),
-                Vec2::new(measure_width(glyphs::GLYPH_REST_32ND), 0.55 * em),
-            ],
-        }
-    }
-
     /// Size of the flag glyph for a note value. Falls back to the 8th flag
     /// for non-flagged note values (callers should already gate on
     /// `requires_flag`).

@@ -8,6 +8,7 @@ use grooph_layout::pixel_layout::{GlyphMetrics, MeasureLayout, compute_em};
 use grooph_layout::staff_layout::{PlacedMeasure, StaffLayout, StaffOpts, build_staff_layout};
 use grooph_measure::grid::DEFAULT_GRID;
 use grooph_measure::tempo::ScoreTiming;
+use grooph_render::measure_glyph_metrics;
 use grooph_render::staff::draw_staff;
 
 impl Grooph {
@@ -126,7 +127,7 @@ impl Grooph {
                     let em = compute_em(&viewport_rect, self.layout.width_cap_factor, ui);
                     let font_id = FontId::new(em, self.music_font_id.family.clone());
 
-                    let metrics = GlyphMetrics::measure(ui, &font_id);
+                    let metrics = measure_glyph_metrics(ui, &font_id);
 
                     let staff_opts = StaffOpts {
                         rect: viewport_rect,

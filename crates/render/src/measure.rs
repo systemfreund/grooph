@@ -2,7 +2,10 @@ use crate::beat::draw_beat;
 use eframe::egui;
 use eframe::egui::{Align2, Color32, FontFamily, FontId, Painter, Rangef, Rect, Stroke, pos2};
 use grooph_layout::glyphs;
-use grooph_layout::pixel_layout::{LayoutOpts, MeasureLayout, build_measure_layout};
+use grooph_layout::pixel_layout::{
+    BeamLayout, LayoutOpts, MeasureLayout, NoteLayout, TimeSignatureLayout, TupletLayout,
+    build_measure_layout,
+};
 use grooph_measure::Measure;
 use grooph_measure::counting::{ColorId, CountConfig, CountSlot, build_count_slots};
 use grooph_measure::grid::DEFAULT_GRID;
@@ -45,6 +48,11 @@ pub fn draw_measure(
 /// lives in *this* measure, during the second half it visually moves into the
 /// following measure. The caller (`draw_staff`) decides via `current_cursor_x`
 /// and passes `Some(x)` only to the measure that actually hosts the cursor.
+///
+/// The function orchestrates independent decoration phases — counting layer,
+/// staff line, clef + time signature, notes/beams/tuplets, edit cursor,
+/// playback cursor. Each phase is a small helper; reorder or extend by
+/// editing this function.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn render_measure_at(
     ui: &mut egui::Ui,
@@ -60,105 +68,147 @@ pub(crate) fn render_measure_at(
     let color = ui.visuals().text_color();
     let painter = ui.painter();
     let rect = opts.rect;
-    let font_id = &opts.font_id;
 
     if let Some(config) = count_config {
-        let slots = build_count_slots(measure, config);
-        if !slots.is_empty() {
-            let total_ticks = DEFAULT_GRID.ticks_per_measure(&measure.time_signature());
-            draw_count_underlay(
-                painter,
-                measure,
-                measure_layout,
-                rect,
-                opts.em,
-                ui.visuals().dark_mode,
-                &slots,
-            );
-            draw_count_labels(
-                painter,
-                measure,
-                measure_layout,
-                rect,
-                opts.em,
-                ui.visuals().text_color(),
-                ui.visuals().selection.stroke.color,
-                &slots,
-                playback_tick,
-                total_ticks,
-            );
-        }
-    }
-
-    if draw_staff_line {
-        painter.hline(
-            Rangef::new(rect.left(), rect.right()),
-            rect.center().y,
-            Stroke::new(0.02 * opts.em, color),
+        draw_count_layer(
+            painter,
+            measure,
+            measure_layout,
+            opts,
+            config,
+            ui.visuals().dark_mode,
+            ui.visuals().text_color(),
+            ui.visuals().selection.stroke.color,
+            playback_tick,
         );
     }
 
-    // Left block: Clef and stacked time signature from layout
-    if let Some(clef_pos) = measure_layout.clef_pos {
+    if draw_staff_line {
+        draw_staff_line_segment(painter, rect, opts.em, color);
+    }
+
+    draw_clef(painter, measure_layout.clef_pos, &opts.font_id, color);
+    draw_time_signature(
+        painter,
+        measure_layout.time_signature.as_ref(),
+        measure,
+        &opts.font_id,
+        color,
+    );
+
+    draw_notes(painter, measure_layout, color, opts);
+
+    if let Some(idx) = cursor_idx {
+        draw_edit_cursor(ui, painter, measure_layout, idx, opts);
+    }
+
+    if let Some(x) = cursor_x {
+        draw_playback_cursor(painter, rect, x, opts.em, ui.visuals().selection.stroke.color);
+    }
+}
+
+fn draw_staff_line_segment(painter: &Painter, rect: Rect, em: f32, color: Color32) {
+    painter.hline(
+        Rangef::new(rect.left(), rect.right()),
+        rect.center().y,
+        Stroke::new(0.02 * em, color),
+    );
+}
+
+fn draw_clef(painter: &Painter, clef_pos: Option<egui::Pos2>, font_id: &FontId, color: Color32) {
+    if let Some(pos) = clef_pos {
         painter.text(
-            clef_pos,
+            pos,
             Align2::CENTER_CENTER,
             glyphs::GLYPH_CLEF_PERCUSSION.to_string(),
             font_id.clone(),
             color,
         );
     }
+}
 
-    if let Some(ts_layout) = &measure_layout.time_signature {
-        let ts = measure.time_signature();
-        let top_digits = glyphs::ts_glyphs(ts.beats);
-        let bot_digits = glyphs::ts_glyphs(ts.beat_unit);
-        for (p, ch) in ts_layout.beats.iter().zip(top_digits.iter()) {
-            painter.text(*p, Align2::CENTER_CENTER, ch.to_string(), font_id.clone(), color);
-        }
-        for (p, ch) in ts_layout.beat_unit.iter().zip(bot_digits.iter()) {
-            painter.text(*p, Align2::CENTER_CENTER, ch.to_string(), font_id.clone(), color);
-        }
+fn draw_time_signature(
+    painter: &Painter,
+    ts_layout: Option<&TimeSignatureLayout>,
+    measure: &Measure,
+    font_id: &FontId,
+    color: Color32,
+) {
+    let Some(ts_layout) = ts_layout else { return };
+    let ts = measure.time_signature();
+    let top_digits = glyphs::ts_glyphs(ts.beats);
+    let bot_digits = glyphs::ts_glyphs(ts.beat_unit);
+    for (p, ch) in ts_layout.beats.iter().zip(top_digits.iter()) {
+        painter.text(*p, Align2::CENTER_CENTER, ch.to_string(), font_id.clone(), color);
     }
-
-    draw_notes(painter, measure_layout, color, opts);
-
-    // Edit cursor at current beat index
-    if let Some(idx) = cursor_idx
-        && let Some(nl) = measure_layout.notes.get(idx)
-    {
-        // Blink parameters
-        let blink_period = 1.0_f64; // seconds for a full on+off cycle
-        let duty = 0.5_f64; // visible fraction of the period
-        let t = ui.input(|i| i.time);
-        let phase = (t % blink_period) / blink_period; // 0..1
-        let visible = phase < duty;
-        let alpha_on = 220u8;
-        let alpha_off = 40u8; // faint but still present; set to 0 to hide completely
-        let alpha = if visible { alpha_on } else { alpha_off };
-        let c = measure_layout.notes[idx].center;
-        let top = c.y + 0.5 * opts.em;
-        let bottom = c.y - 0.5 * opts.em;
-        let base = if ui.visuals().dark_mode { Color32::YELLOW } else { Color32::BLUE };
-        let cursor_color = Color32::from_rgba_unmultiplied(base.r(), base.g(), base.b(), alpha);
-        painter.vline(
-            nl.center.x,
-            Rangef::new(top, bottom),
-            Stroke::new(0.03 * opts.em, cursor_color),
-        );
-        // Ensure animation progresses even without input
-        ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
+    for (p, ch) in ts_layout.beat_unit.iter().zip(bot_digits.iter()) {
+        painter.text(*p, Align2::CENTER_CENTER, ch.to_string(), font_id.clone(), color);
     }
+}
 
-    // Playback cursor (caller pre-computed the X position so cross-measure
-    // wrap animation works — see `staff::current_cursor_x`).
-    if let Some(x) = cursor_x {
-        let top = rect.center().y + 0.7 * opts.em;
-        let bottom = rect.center().y - 0.7 * opts.em;
-        let base = ui.visuals().selection.stroke.color;
-        let cursor_color = Color32::from_rgba_unmultiplied(base.r(), base.g(), base.b(), 100);
-        painter.vline(x, Rangef::new(top, bottom), Stroke::new(0.1 * opts.em, cursor_color));
+fn draw_edit_cursor(
+    ui: &egui::Ui,
+    painter: &Painter,
+    measure_layout: &MeasureLayout,
+    idx: usize,
+    opts: &LayoutOpts,
+) {
+    let Some(nl) = measure_layout.notes.get(idx) else { return };
+
+    // Blink: full on/off cycle with 50% duty.
+    let blink_period = 1.0_f64;
+    let duty = 0.5_f64;
+    let t = ui.input(|i| i.time);
+    let visible = (t % blink_period) / blink_period < duty;
+    let alpha = if visible { 220u8 } else { 40u8 };
+
+    let c = measure_layout.notes[idx].center;
+    let top = c.y + 0.5 * opts.em;
+    let bottom = c.y - 0.5 * opts.em;
+    let base = if ui.visuals().dark_mode { Color32::YELLOW } else { Color32::BLUE };
+    let cursor_color = Color32::from_rgba_unmultiplied(base.r(), base.g(), base.b(), alpha);
+    painter.vline(nl.center.x, Rangef::new(top, bottom), Stroke::new(0.03 * opts.em, cursor_color));
+    // Drive animation between input events.
+    ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
+}
+
+fn draw_playback_cursor(painter: &Painter, rect: Rect, x: f32, em: f32, base: Color32) {
+    let top = rect.center().y + 0.7 * em;
+    let bottom = rect.center().y - 0.7 * em;
+    let cursor_color = Color32::from_rgba_unmultiplied(base.r(), base.g(), base.b(), 100);
+    painter.vline(x, Rangef::new(top, bottom), Stroke::new(0.1 * em, cursor_color));
+}
+
+#[allow(clippy::too_many_arguments)]
+fn draw_count_layer(
+    painter: &Painter,
+    measure: &Measure,
+    measure_layout: &MeasureLayout,
+    opts: &LayoutOpts,
+    config: &CountConfig,
+    dark_mode: bool,
+    text_color: Color32,
+    highlight_color: Color32,
+    playback_tick: Option<f64>,
+) {
+    let slots = build_count_slots(measure, config);
+    if slots.is_empty() {
+        return;
     }
+    let total_ticks = DEFAULT_GRID.ticks_per_measure(&measure.time_signature());
+    draw_count_underlay(painter, measure, measure_layout, opts.rect, opts.em, dark_mode, &slots);
+    draw_count_labels(
+        painter,
+        measure,
+        measure_layout,
+        opts.rect,
+        opts.em,
+        text_color,
+        highlight_color,
+        &slots,
+        playback_tick,
+        total_ticks,
+    );
 }
 
 /// Phase 1 cursor X — cursor lives inside *this* measure at `tick`.
@@ -190,8 +240,7 @@ pub fn playback_cursor_x(
 
     for (i, &onset) in onsets.iter().enumerate() {
         let start = onset as f64;
-        let dur_ticks =
-            DEFAULT_GRID.ticks_of(&measure.beats()[i].duration).unwrap_or(0) as f64;
+        let dur_ticks = DEFAULT_GRID.ticks_of(&measure.beats()[i].duration).unwrap_or(0) as f64;
         let end = start + dur_ticks;
         if t >= start && t < end {
             let frac = if dur_ticks > 0.0 { (t - start) / dur_ticks } else { 0.0 };
@@ -280,29 +329,50 @@ fn clamp_tick_to_measure(tick: f64, total_ticks: f64) -> f64 {
     if m.is_nan() { 0.0 } else { m }
 }
 
+/// Draw all foreground decorations (notes, beams, tuplets) in their canonical
+/// stacking order. Coordinates each phase by reading `measure_layout`; phases
+/// can be invoked individually if a caller needs to reorder or skip layers.
 pub fn draw_notes(
     painter: &Painter,
     measure_layout: &MeasureLayout,
     color: Color32,
     opts: &LayoutOpts,
 ) {
-    // Beats/notes
-    for note in &measure_layout.notes {
+    draw_note_glyphs(painter, &measure_layout.notes, opts, color);
+    draw_beams(painter, &measure_layout.beams, color);
+    draw_tuplets(painter, &measure_layout.tuplets, opts, color);
+}
+
+/// Per-note glyphs: head, stem, flag, dots, accent, optional debug boxes.
+pub fn draw_note_glyphs(
+    painter: &Painter,
+    notes: &[NoteLayout],
+    opts: &LayoutOpts,
+    color: Color32,
+) {
+    for note in notes {
         draw_beat(painter, note, opts, color);
     }
+}
 
-    // Beams
-    for seg in &measure_layout.beams {
+/// Beam rectangles between stems.
+pub fn draw_beams(painter: &Painter, beams: &[BeamLayout], color: Color32) {
+    for seg in beams {
         painter.rect_filled(seg.rect, 0.0, color);
     }
+}
 
-    // Tuplets
-    for t in &measure_layout.tuplets {
-        // draw bracket segments
+/// Tuplet brackets and centered count digits.
+pub fn draw_tuplets(
+    painter: &Painter,
+    tuplets: &[TupletLayout],
+    opts: &LayoutOpts,
+    color: Color32,
+) {
+    for t in tuplets {
         for seg in &t.bracket {
             painter.line_segment([seg.p1, seg.p2], Stroke::new(opts.bracket_thickness(), color));
         }
-        // draw tuplet number at center
         let digits = glyphs::tuplet_glyphs(t.count);
         painter.text(t.number_center, Align2::CENTER_CENTER, digits, t.number_font.clone(), color);
     }
@@ -535,9 +605,11 @@ fn compute_label_xs(
 ) -> Vec<f32> {
     let content_w = rect.right() - layout.notes_left_edge;
     let slot_center = |s: &CountSlot| (s.start_tick + s.end_tick) as f32 * 0.5;
-    let proportional = |center: f32| layout.notes_left_edge + center / total_ticks as f32 * content_w;
+    let proportional =
+        |center: f32| layout.notes_left_edge + center / total_ticks as f32 * content_w;
 
-    let fallback = || -> Vec<f32> { selected.iter().map(|s| proportional(slot_center(s))).collect() };
+    let fallback =
+        || -> Vec<f32> { selected.iter().map(|s| proportional(slot_center(s))).collect() };
 
     if total_ticks == 0 || selected.is_empty() {
         return fallback();
@@ -618,9 +690,7 @@ mod tests {
     use super::*;
     use eframe::egui::{FontFamily, FontId, Pos2};
     use grooph_layout::pixel_layout::GlyphMetrics;
-    use grooph_measure::counting::{
-        CountLayer, CountScope, LabelPattern, LabelToken, Subdiv,
-    };
+    use grooph_measure::counting::{CountLayer, CountScope, LabelPattern, LabelToken, Subdiv};
     use grooph_measure::duration::{e, q, s};
     use grooph_measure::{Beat, Measure, TimeSignature};
 
@@ -658,7 +728,12 @@ mod tests {
 
     /// Collect per-label x positions in slot-start-tick order, using the same
     /// pipeline as `draw_count_labels` (with `select_label_slots`).
-    fn label_xs(measure: &Measure, layout: &MeasureLayout, rect: Rect, config: &CountConfig) -> Vec<f32> {
+    fn label_xs(
+        measure: &Measure,
+        layout: &MeasureLayout,
+        rect: Rect,
+        config: &CountConfig,
+    ) -> Vec<f32> {
         let slots = build_count_slots(measure, config);
         let label_slots: Vec<&CountSlot> = slots.iter().filter(|s| s.label.is_some()).collect();
         let selected = select_label_slots(&label_slots);
@@ -689,10 +764,7 @@ mod tests {
         let l = layout.notes_left_edge;
         let expected = [l + w / 4.0, l + w / 2.0, l + 3.0 * w / 4.0, l + w];
         for (i, (got, exp)) in xs.iter().zip(expected.iter()).enumerate() {
-            assert!(
-                (got - exp).abs() < 0.5,
-                "label {i}: got {got}, expected {exp}",
-            );
+            assert!((got - exp).abs() < 0.5, "label {i}: got {got}, expected {exp}",);
         }
 
         // `1` and `2` align with the rest centers.
@@ -702,11 +774,7 @@ mod tests {
         // Uniform spacing across the full set.
         let gaps: Vec<f32> = xs.windows(2).map(|w| w[1] - w[0]).collect();
         for g in &gaps {
-            assert!(
-                (g - gaps[0]).abs() < 0.5,
-                "non-uniform spacing: {:?}",
-                gaps
-            );
+            assert!((g - gaps[0]).abs() < 0.5, "non-uniform spacing: {:?}", gaps);
         }
     }
 
@@ -825,7 +893,10 @@ mod tests {
         // `1` over the quarter rest, `2` and last `&` over the two 8ths.
         assert!((xs[0] - layout.notes[0].center.x).abs() < 0.5, "`1` should sit over quarter rest");
         assert!((xs[2] - layout.notes[1].center.x).abs() < 0.5, "`2` should sit over first 8th");
-        assert!((xs[3] - layout.notes[2].center.x).abs() < 0.5, "last `&` should sit over second 8th");
+        assert!(
+            (xs[3] - layout.notes[2].center.x).abs() < 0.5,
+            "last `&` should sit over second 8th"
+        );
 
         // The first `&` lies between `1` and `2` (interpolated, not anchored).
         assert!(xs[1] > xs[0] && xs[1] < xs[2], "first `&` between `1` and `2`: {:?}", xs);
@@ -849,11 +920,7 @@ mod tests {
 
         let gaps: Vec<f32> = xs.windows(2).map(|w| w[1] - w[0]).collect();
         for g in &gaps {
-            assert!(
-                (g - gaps[0]).abs() < 0.5,
-                "non-uniform spacing in 3/4: {:?}",
-                gaps
-            );
+            assert!((g - gaps[0]).abs() < 0.5, "non-uniform spacing in 3/4: {:?}", gaps);
         }
     }
 }

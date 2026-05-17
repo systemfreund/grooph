@@ -9,12 +9,13 @@ use eframe::egui::{
 };
 use grooph_layout::glyphs;
 use grooph_layout::pixel_layout::{
-    GlyphMetrics, LayoutOpts, build_measure_layout, build_time_sig_layout, compute_em,
+    LayoutOpts, build_measure_layout, build_time_sig_layout, compute_em,
 };
 use grooph_measure::BeatKind::{Note, Rest};
 use grooph_measure::duration::{Duration, TupletKind};
 use grooph_measure::{Beat, Measure};
 use grooph_render::measure::draw_notes;
+use grooph_render::measure_glyph_metrics;
 use log::info;
 use tools::EditOp;
 
@@ -276,7 +277,7 @@ impl Grooph {
                 accent_below: false,
                 proportional_spacing: true,
                 debug_bbox: false,
-                metrics: GlyphMetrics::measure(ui, &font_id),
+                metrics: measure_glyph_metrics(ui, &font_id),
             };
 
             // Use a temporary measure just for layout width and positions
@@ -358,7 +359,7 @@ impl Grooph {
                 accent_below: false,
                 proportional_spacing: true,
                 debug_bbox: false,
-                metrics: GlyphMetrics::measure(ui, &font_id),
+                metrics: measure_glyph_metrics(ui, &font_id),
             };
             let measure_layout = build_measure_layout(measure, &opts);
             let painter = &ui.painter_at(rect);

@@ -9,11 +9,12 @@ use grooph_measure::{Beat, Measure};
 /// - Contains only logical structures such as beaming groups and tuplet spans.
 /// - Carries no absolute coordinates, sizes, or stroke thicknesses.
 ///
-/// Relationship to `MeasureLayoutPx`:
-/// - `RenderPlan` is consumed by `build_measure_layout_px(..)` together with the target
-///   `Rect`, `FontId`, and UI scaling to produce a pixel-resolved `MeasureLayoutPx`.
-/// - The renderer uses `MeasureLayoutPx` exclusively to draw; it makes no further
-///   geometry decisions.
+/// Relationship to [`crate::pixel_layout::MeasureLayout`]:
+/// - `RenderPlan` is consumed by [`crate::pixel_layout::build_measure_layout`]
+///   together with the target `Rect`, `FontId`, and `GlyphMetrics` to produce
+///   a pixel-resolved `MeasureLayout`.
+/// - The renderer (`grooph_render`) uses `MeasureLayout` exclusively to draw;
+///   it makes no further geometry decisions.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RenderPlan {
     /// Beaming groups with continuity per adjacent pair. This defines which neighboring notes
