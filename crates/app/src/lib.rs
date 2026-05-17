@@ -22,10 +22,8 @@ use grooph_measure::{BeatIdx, Cursor, Measure, Score, TimeSignature};
 use crate::accuracy::AccuracyState;
 use crate::platform::{PlatformRuntime, VisibilityEvent};
 use crate::state::{
-    AudioConfig, EditorState, LayoutSettings, MidiState, PlaybackController, PlaybackState,
-    UiShell,
+    AudioConfig, EditorState, LayoutSettings, MidiState, PlaybackController, PlaybackState, UiShell,
 };
-use grooph_measure::tempo::ScoreTiming;
 use crate::tools::ToolKind;
 use crate::tools::{BeatTemplate, Modifier, all_tools};
 use crate::undo::{DEFAULT_UNDO_LIMIT, EditorSnapshot, UndoHistory};
@@ -40,6 +38,7 @@ use grooph_measure::counting::{
 };
 use grooph_measure::duration::NoteValue::*;
 use grooph_measure::editing::Modification;
+use grooph_measure::tempo::ScoreTiming;
 use grooph_measure::{Beat, BeatKind};
 use grooph_midi::{MidiInput, MidiInputEvent};
 use log::{debug, info, warn};
@@ -257,9 +256,8 @@ impl Grooph {
             is_connected,
             now_seconds,
         );
-        let ready = accuracy_active
-            && total_loop_seconds > 0.0
-            && !self.editor.score.measures.is_empty();
+        let ready =
+            accuracy_active && total_loop_seconds > 0.0 && !self.editor.score.measures.is_empty();
 
         for event in events {
             match event {
@@ -289,9 +287,7 @@ impl Grooph {
         }
     }
 
-    fn clear_accuracy_for_edit(&mut self) {
-        self.playback_ctl.accuracy.tracker.clear_for_edit();
-    }
+    fn clear_accuracy_for_edit(&mut self) { self.playback_ctl.accuracy.tracker.clear_for_edit(); }
 
     pub(crate) fn current_measure(&self) -> &Measure {
         self.editor.score.current(self.editor.cursor.measure_idx)
@@ -410,8 +406,7 @@ impl Grooph {
             if app.editor.cursor.measure_idx >= app.editor.score.len() {
                 app.editor.cursor.measure_idx = app.editor.score.len() - 1;
             }
-            let new_len =
-                app.editor.score.measures[app.editor.cursor.measure_idx].beats().len();
+            let new_len = app.editor.score.measures[app.editor.cursor.measure_idx].beats().len();
             if new_len == 0 {
                 app.editor.cursor.beat_idx = 0;
             } else if app.editor.cursor.beat_idx >= new_len {

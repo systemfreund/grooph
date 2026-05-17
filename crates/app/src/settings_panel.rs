@@ -54,41 +54,53 @@ impl Grooph {
                         ui.separator();
                         ui.label("Noise Mix:");
                         ui.add(
-                            egui::Slider::new(&mut self.playback_ctl.audio_cfg.settings.noise_mix, 0.0..=1.0)
-                                .custom_formatter(|v, _| format!("{:.0}%", v * 100.0)),
+                            egui::Slider::new(
+                                &mut self.playback_ctl.audio_cfg.settings.noise_mix,
+                                0.0..=1.0,
+                            )
+                            .custom_formatter(|v, _| format!("{:.0}%", v * 100.0)),
                         );
                         if self.playback_ctl.audio_cfg.settings.noise_mix > 0.0 {
                             ui.separator();
                             ui.label("Noise High-Pass Cutoff:");
                             ui.add(
-                                egui::DragValue::new(&mut self.playback_ctl.audio_cfg.settings.noise_hpf_hz)
-                                    .range(2000.0..=6000.0)
-                                    .speed(10.0)
-                                    .suffix(" Hz"),
+                                egui::DragValue::new(
+                                    &mut self.playback_ctl.audio_cfg.settings.noise_hpf_hz,
+                                )
+                                .range(2000.0..=6000.0)
+                                .speed(10.0)
+                                .suffix(" Hz"),
                             );
                             ui.separator();
                             ui.label("Noise Decay:");
                             ui.add(
-                                egui::DragValue::new(&mut self.playback_ctl.audio_cfg.settings.noise_decay)
-                                    .range(0.01..=0.5)
-                                    .speed(0.001)
-                                    .suffix("s"),
+                                egui::DragValue::new(
+                                    &mut self.playback_ctl.audio_cfg.settings.noise_decay,
+                                )
+                                .range(0.01..=0.5)
+                                .speed(0.001)
+                                .suffix("s"),
                             );
                         }
                         ui.separator();
                         ui.label("Base Frequency (PrimaryBeat):");
                         ui.add(
-                            egui::DragValue::new(&mut self.playback_ctl.audio_cfg.settings.base_frequency)
-                                .range(220.0..=880.0)
-                                .speed(0.1)
-                                .suffix("Hz"),
+                            egui::DragValue::new(
+                                &mut self.playback_ctl.audio_cfg.settings.base_frequency,
+                            )
+                            .range(220.0..=880.0)
+                            .speed(0.1)
+                            .suffix("Hz"),
                         );
                     });
 
                     egui::CollapsingHeader::new("Audio Latency").default_open(false).show(
                         ui,
                         |ui| {
-                            ui.checkbox(&mut self.playback_ctl.audio_cfg.latency_enabled, "Enabled");
+                            ui.checkbox(
+                                &mut self.playback_ctl.audio_cfg.latency_enabled,
+                                "Enabled",
+                            );
                             ui.add_enabled_ui(self.playback_ctl.audio_cfg.latency_enabled, |ui| {
                                 ui.label("Offset:");
                                 ui.add(

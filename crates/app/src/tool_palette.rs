@@ -236,7 +236,9 @@ impl Grooph {
                     let last = new_len - 1;
                     match op {
                         DeleteOp::Forward => (self.editor.cursor.beat_idx + 1).min(last),
-                        DeleteOp::Backward => self.editor.cursor.beat_idx.saturating_sub(1).min(last),
+                        DeleteOp::Backward => {
+                            self.editor.cursor.beat_idx.saturating_sub(1).min(last)
+                        }
                     }
                 };
                 true

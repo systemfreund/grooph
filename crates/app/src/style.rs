@@ -7,11 +7,8 @@ impl Grooph {
         let ctx = ui.ctx();
         let is_dark = ctx.global_style().visuals.dark_mode;
         ctx.global_style_mut(|style| {
-            let baseline_opt = if is_dark {
-                &mut self.ui.baseline_dark
-            } else {
-                &mut self.ui.baseline_light
-            };
+            let baseline_opt =
+                if is_dark { &mut self.ui.baseline_dark } else { &mut self.ui.baseline_light };
             let font_bump = self.ui.font_bump;
 
             // Capture baseline for the current theme if not yet recorded

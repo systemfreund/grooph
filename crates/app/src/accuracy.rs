@@ -191,12 +191,7 @@ impl AccuracyTracker {
     /// nearest note onset across the whole score (shortest signed distance on
     /// the loop). The delta is converted to milliseconds using the onset
     /// measure's tempo.
-    pub(crate) fn record_hit(
-        &mut self,
-        timestamp: f64,
-        timing: &ScoreTiming,
-        score: &Score,
-    ) {
+    pub(crate) fn record_hit(&mut self, timestamp: f64, timing: &ScoreTiming, score: &Score) {
         let Some(start_time) = self.start_time else {
             return;
         };

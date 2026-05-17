@@ -101,10 +101,7 @@ pub struct StaffLayout {
 impl StaffLayout {
     /// Find the placed measure for a given measure index across all systems.
     pub fn placed(&self, measure_idx: MeasureIdx) -> Option<&PlacedMeasure> {
-        self.systems
-            .iter()
-            .flat_map(|s| s.measures.iter())
-            .find(|m| m.measure_idx == measure_idx)
+        self.systems.iter().flat_map(|s| s.measures.iter()).find(|m| m.measure_idx == measure_idx)
     }
 }
 
@@ -161,9 +158,7 @@ pub fn build_staff_layout(score: &Score, opts: &StaffOpts) -> StaffLayout {
     assert!(!score.is_empty(), "Score must have at least one measure");
 
     // 1. show-flags: clef only on first, TS on first + every change.
-    let show_clef: Vec<bool> = (0..score.len())
-        .map(|i| i == 0 && opts.layout_clef_first)
-        .collect();
+    let show_clef: Vec<bool> = (0..score.len()).map(|i| i == 0 && opts.layout_clef_first).collect();
     let show_ts: Vec<bool> = (0..score.len())
         .map(|i| {
             if i == 0 {
@@ -180,11 +175,7 @@ pub fn build_staff_layout(score: &Score, opts: &StaffOpts) -> StaffLayout {
         .collect();
     let total_min: f32 = widths_min.iter().sum();
     let available = opts.rect.width().max(0.0);
-    let scale = if total_min > 0.0 && total_min < available {
-        available / total_min
-    } else {
-        1.0
-    };
+    let scale = if total_min > 0.0 && total_min < available { available / total_min } else { 1.0 };
     let widths: Vec<f32> = widths_min.iter().map(|w| w * scale).collect();
 
     // 3. lay out left-to-right.
@@ -207,20 +198,15 @@ pub fn build_staff_layout(score: &Score, opts: &StaffOpts) -> StaffLayout {
         x_acc += widths[i];
     }
 
-    let system_rect = Rect::from_min_size(
-        pos2(opts.rect.left(), top),
-        vec2(x_acc - opts.rect.left(), height),
-    );
+    let system_rect =
+        Rect::from_min_size(pos2(opts.rect.left(), top), vec2(x_acc - opts.rect.left(), height));
     let system = SystemLayout {
         y_baseline: opts.rect.center().y + opts.y_offset,
         rect: system_rect,
         measures,
     };
 
-    StaffLayout {
-        total_size: vec2(x_acc - opts.rect.left(), height),
-        systems: vec![system],
-    }
+    StaffLayout { total_size: vec2(x_acc - opts.rect.left(), height), systems: vec![system] }
 }
 
 /// Find `(measure_idx, beat_idx)` of the beat closest to `x`. `x` is the

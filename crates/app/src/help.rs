@@ -1,8 +1,6 @@
 use crate::Grooph;
 use crate::Mode;
-use crate::tools::{
-    DeleteOp, EditOp, MetaOp, NavOp, Tool, ToolKind, all_tools,
-};
+use crate::tools::{DeleteOp, EditOp, MetaOp, NavOp, Tool, ToolKind, all_tools};
 use eframe::egui;
 use eframe::egui::RichText;
 
@@ -41,10 +39,7 @@ fn keybindings_text() -> String {
     // App-global shortcuts that don't live in the tool registry (handled directly
     // in `keyboard_input.rs`).
     entries.push(("Space".to_string(), "Play/pause".to_string()));
-    entries.push((
-        "Esc".to_string(),
-        "Toggle between edit mode and playback mode".to_string(),
-    ));
+    entries.push(("Esc".to_string(), "Toggle between edit mode and playback mode".to_string()));
 
     for tool in all_tools() {
         for shortcut in tool.shortcuts {

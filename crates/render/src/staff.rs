@@ -45,9 +45,8 @@ pub fn draw_staff(
         );
 
         for placed in &system.measures {
-            let cursor_x = visual_cursor
-                .filter(|(idx, _)| *idx == placed.measure_idx)
-                .map(|(_, x)| x);
+            let cursor_x =
+                visual_cursor.filter(|(idx, _)| *idx == placed.measure_idx).map(|(_, x)| x);
 
             render_placed_measure(
                 ui,
@@ -101,7 +100,8 @@ pub fn current_cursor_x(
 
     // Phase 1: cursor lives in the active measure.
     let active_placed = staff.placed(play_idx)?;
-    let x = playback_cursor_x(active_measure, &active_placed.layout, active_placed.rect, local_tick)?;
+    let x =
+        playback_cursor_x(active_measure, &active_placed.layout, active_placed.rect, local_tick)?;
     Some((play_idx, x))
 }
 
@@ -116,16 +116,12 @@ fn render_placed_measure(
     count_config: Option<&CountConfig>,
     cursor_x: Option<f32>,
 ) {
-    let cursor_idx = cursor
-        .filter(|c| c.measure_idx == placed.measure_idx)
-        .map(|c| c.beat_idx);
+    let cursor_idx = cursor.filter(|c| c.measure_idx == placed.measure_idx).map(|c| c.beat_idx);
     // `playback_tick` drives count-label highlighting (and only that, since
     // the visual cursor is now passed as `cursor_x`). Restrict to the active
     // measure so a wrap-in cursor doesn't light up labels in the next measure
     // before its turn.
-    let playback_tick = playback
-        .filter(|(idx, _)| *idx == placed.measure_idx)
-        .map(|(_, t)| t);
+    let playback_tick = playback.filter(|(idx, _)| *idx == placed.measure_idx).map(|(_, t)| t);
 
     // Build a per-measure LayoutOpts from the placed rect/flags so the cursor
     // and playback drawing get the right viewport.

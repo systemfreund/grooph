@@ -1,7 +1,7 @@
+use grooph_measure::BeatKind;
 use grooph_measure::Score;
 use grooph_measure::grid::DEFAULT_GRID;
 use grooph_measure::tempo::ScoreTiming;
-use grooph_measure::BeatKind;
 use std::collections::BTreeMap;
 
 use crate::AudioSettings;
@@ -56,8 +56,7 @@ impl Schedule {
                 if beat.kind == BeatKind::Note
                     && let Some(&t) = onsets.get(i)
                 {
-                    let s =
-                        if beat.accented { SoundType::AccentedBeat } else { SoundType::Beat };
+                    let s = if beat.accented { SoundType::AccentedBeat } else { SoundType::Beat };
                     map.entry(start + t as u64).or_default().push(s);
                 }
             }
