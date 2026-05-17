@@ -1,12 +1,14 @@
 mod schedule;
+mod tick_source;
+mod voices;
 
+use crate::tick_source::TickSource;
+use crate::voices::VoiceMixer;
 use grooph_measure::Score;
 use grooph_measure::tempo::ScoreTiming;
 use log::{debug, error, info, trace};
 use rodio::Source;
-use rodio::source::BltFilter;
-use rodio::source::noise::WhiteUniform;
-use rodio::source::{Function as RodioFunction, SignalGenerator};
+use rodio::source::Function as RodioFunction;
 use schedule::{Schedule, SoundType};
 use serde::{Deserialize, Serialize};
 use std::fmt::{Debug, Formatter, Write};
@@ -22,7 +24,7 @@ pub enum Waveform {
 }
 
 impl Waveform {
-    fn to_rodio(self) -> RodioFunction {
+    pub(crate) fn to_rodio(self) -> RodioFunction {
         match self {
             Waveform::Sine => RodioFunction::Sine,
             Waveform::Triangle => RodioFunction::Triangle,
@@ -246,47 +248,35 @@ impl Audio {
     }
 }
 
+/// Audio source that drives the metronome: a small orchestrator wiring a
+/// [`TickSource`] (timing) and a [`VoiceMixer`] (synthesis) together with
+/// the shared `PlaybackState` for cross-thread communication with the app.
 struct MetronomeSource {
     shared_state: Arc<Mutex<PlaybackState>>,
     local_params: PlaybackParams,
     player_state: PlayerState,
 
-    // Local state: cursor in ticks within current measure
-    cursor: f64,
+    tick_source: TickSource,
+    voices: VoiceMixer,
     sample_rate: u32,
-    // Polyphonic: multiple short beeps may overlap
-    active_beeps: Vec<ActiveVoice>,
     samples_processed: usize,
 }
 
-struct ActiveVoice {
-    // Delegated signal generators (rodio). Basis + optional Noise getrennt.
-    base_signal: Box<dyn Iterator<Item = f32> + Send>,
-    noise_signal: Option<Box<dyn Iterator<Item = f32> + Send>>,
-    // Age of this voice in seconds to drive our envelope/decay bookkeeping
-    age: f32,
-    gain: f32,
-    tone_decay: f32,
-    noise_decay: f32,
-}
-
 impl MetronomeSource {
-    // Voice cap used in multiple places
-    const MAX_VOICES: usize = 8;
-
     fn new(shared: Arc<Mutex<PlaybackState>>) -> Self {
         let (local_params, is_playing) = {
             let state = shared.lock().unwrap();
             (state.params.clone(), state.playing_state.clone())
         };
 
+        let sample_rate = device_sample_rate();
         Self {
             shared_state: shared,
             local_params,
             player_state: is_playing,
-            cursor: 0.0,
-            sample_rate: device_sample_rate(),
-            active_beeps: Vec::with_capacity(Self::MAX_VOICES),
+            tick_source: TickSource::new(sample_rate),
+            voices: VoiceMixer::new(sample_rate),
+            sample_rate,
             samples_processed: 0,
         }
     }
@@ -296,8 +286,8 @@ impl MetronomeSource {
         if self.samples_processed.is_multiple_of(1024)
             && let Ok(mut shared_state) = self.shared_state.try_lock()
         {
-            shared_state.playback_tick = self.cursor;
-            shared_state.is_silent = self.active_beeps.is_empty();
+            shared_state.playback_tick = self.tick_source.cursor();
+            shared_state.is_silent = self.voices.is_silent();
 
             trace!(
                 "Updating shared state. playback_tick={:?} is_silent={}",
@@ -314,7 +304,9 @@ impl MetronomeSource {
         {
             debug!(
                 "samples={} cursor={}. Updating local state from {:?}",
-                self.samples_processed, self.cursor, shared_state
+                self.samples_processed,
+                self.tick_source.cursor(),
+                shared_state
             );
 
             if self.player_state != shared_state.playing_state
@@ -328,146 +320,6 @@ impl MetronomeSource {
             shared_state.is_dirty = false;
         }
     }
-
-    fn determine_triggered_sounds(&mut self) -> Vec<SoundType> {
-        let total_ticks = self.local_params.timing.total_loop_ticks() as f64;
-        if total_ticks <= 0.0 {
-            return Vec::new();
-        }
-        let old_cursor = self.cursor;
-        // Pick the per-measure tempo at the current cursor position. Within one
-        // sample, the rate of the old measure is reused; the next sample picks
-        // up the new measure's rate. Max drift at a TS boundary is ~20 µs at
-        // 48 kHz and does not accumulate — schedule triggers are exact integer
-        // ticks and are picked up by `collect_in_range` precisely.
-        let measure_idx = self.local_params.timing.measure_at_global_tick(old_cursor);
-        let tps = self.local_params.timing.ticks_per_sec_in_measure(measure_idx);
-        let ticks_per_sample = tps / self.sample_rate as f64;
-
-        let mut new_cursor = old_cursor + ticks_per_sample;
-
-        let mut triggered_sounds: Vec<SoundType> = Vec::with_capacity(Self::MAX_VOICES);
-        let schedule = &self.local_params.schedule;
-        if new_cursor >= total_ticks {
-            // 1. [old_cursor, total_ticks)
-            schedule.collect_in_range(old_cursor.ceil() as u64, total_ticks, &mut triggered_sounds);
-
-            // Wrap at score end.
-            new_cursor -= total_ticks;
-
-            // 2. [0.0, new_cursor)
-            schedule.collect_in_range(0, new_cursor, &mut triggered_sounds);
-        } else {
-            // [old_cursor, new_cursor)
-            schedule.collect_in_range(old_cursor.ceil() as u64, new_cursor, &mut triggered_sounds);
-        }
-
-        self.cursor = new_cursor;
-        triggered_sounds
-    }
-
-    fn enqueue_triggered_sounds(&mut self) {
-        let triggered_sounds = self.determine_triggered_sounds();
-        // Enqueue all triggered sounds as new voices (phase = 0)
-        if !triggered_sounds.is_empty() {
-            let base = self.local_params.audio_settings.base_frequency;
-            let current_decay = self.local_params.audio_settings.decay;
-            let noise_decay = self.local_params.audio_settings.noise_decay;
-
-            for sound_type in triggered_sounds {
-                if self.active_beeps.len() >= Self::MAX_VOICES {
-                    // drop the oldest to keep CPU bounded
-                    self.active_beeps.remove(0);
-                }
-
-                let profile = sound_type.profile(&self.local_params.audio_settings);
-                let freq = base * profile.freq_mult;
-                let gain = profile.gain;
-
-                let func = self.local_params.audio_settings.waveform.to_rodio();
-                let hz = freq.max(1.0);
-                let base = SignalGenerator::new(self.sample_rate, hz, func);
-
-                let noise_mix = self.local_params.audio_settings.noise_mix;
-                let noise_signal: Option<Box<dyn Iterator<Item = f32> + Send>> =
-                    if noise_mix > 0.0001 {
-                        let cutoff_hz_u32 = self.local_params.audio_settings.noise_hpf_hz as u32;
-                        let noise = WhiteUniform::new(self.sample_rate).high_pass(cutoff_hz_u32);
-                        Some(Box::new(noise))
-                    } else {
-                        None
-                    };
-
-                self.active_beeps.push(ActiveVoice {
-                    base_signal: Box::new(base),
-                    noise_signal,
-                    age: 0.0,
-                    gain,
-                    tone_decay: current_decay,
-                    noise_decay,
-                });
-            }
-        }
-    }
-
-    fn synthesize(&mut self) -> f32 {
-        // Synthesize a sample by mixing all active voices with envelope
-        let dt = 1.0 / (self.sample_rate as f32);
-        const ATTACK: f32 = 0.0005; // ~1 ms
-
-        if self.active_beeps.is_empty() {
-            // If not playing and no active voices, stay silent
-            return 0.0;
-        }
-
-        // Advance phases and compute sum
-        let mut mixed: f32 = 0.0;
-        let mut i = 0;
-        while i < self.active_beeps.len() {
-            let voice = &mut self.active_beeps[i];
-            voice.age += dt;
-            let p = voice.age;
-            // Voice bleibt aktiv bis beide Decays vorbei sind (Basis und ggf. Noise)
-            let tone_alive = p <= voice.tone_decay;
-            let noise_alive = p <= voice.noise_decay && voice.noise_signal.is_some();
-            if !tone_alive && !noise_alive {
-                self.active_beeps.remove(i);
-                continue;
-            }
-
-            let env_attack = (p / ATTACK).min(1.0);
-            let env_tone_decay =
-                if voice.tone_decay > 0.0 { 1.0 - (p / voice.tone_decay) } else { 0.0 };
-            let env_noise_decay =
-                if voice.noise_decay > 0.0 { 1.0 - (p / voice.noise_decay) } else { 0.0 };
-            let env_tone = (env_attack * env_tone_decay).clamp(0.0, 1.0);
-            let env_noise = (env_attack * env_noise_decay).clamp(0.0, 1.0);
-
-            let base_sample =
-                if tone_alive { voice.base_signal.next().unwrap_or(0.0) } else { 0.0 };
-
-            let noise_sample = if noise_alive {
-                if let Some(noise) = &mut voice.noise_signal {
-                    noise.next().unwrap_or(0.0)
-                } else {
-                    0.0
-                }
-            } else {
-                0.0
-            };
-
-            let noise_mix = self.local_params.audio_settings.noise_mix;
-            let tone_contrib = base_sample * (1.0 - noise_mix) * env_tone;
-            let noise_contrib = noise_sample * noise_mix * env_noise;
-
-            mixed += (tone_contrib + noise_contrib) * 0.6 * voice.gain; // master gain 0.6 to leave headroom
-
-            i += 1;
-        }
-
-        // Soft clip to avoid hard clipping when multiple voices overlap
-        mixed.tanh()
-    }
 }
 
 impl Iterator for MetronomeSource {
@@ -476,8 +328,18 @@ impl Iterator for MetronomeSource {
     fn next(&mut self) -> Option<Self::Item> {
         self.update_local_state();
         self.update_shared_state();
+
         if self.player_state == PlayerState::Playing {
-            self.enqueue_triggered_sounds()
+            // Same allocation pattern as before — fresh small Vec per sample.
+            let mut triggered: Vec<SoundType> = Vec::with_capacity(VoiceMixer::MAX_VOICES);
+            self.tick_source.advance_one_sample(
+                &self.local_params.timing,
+                &self.local_params.schedule,
+                &mut triggered,
+            );
+            for sound in triggered {
+                self.voices.trigger(sound, &self.local_params.audio_settings);
+            }
         } else if self.samples_processed.is_multiple_of(8192) {
             debug!(
                 "Metronome state={:?}, samples processed: {}",
@@ -485,10 +347,8 @@ impl Iterator for MetronomeSource {
             )
         }
 
-        // debug!("cursor={} state={:?}", self.cursor, self.player_state);
-
         self.samples_processed += 1;
-        Some(self.synthesize())
+        Some(self.voices.next_sample(self.local_params.audio_settings.noise_mix))
     }
 }
 
