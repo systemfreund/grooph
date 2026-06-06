@@ -58,6 +58,10 @@ impl Grooph {
                             {
                                 self.toggle_mode(Mode::Settings);
                             }
+                            if ui.selectable_label(self.ui.mode == Mode::Library, "📁").clicked()
+                            {
+                                self.toggle_mode(Mode::Library);
+                            }
                             if ui
                                 .selectable_label(self.playback_ctl.accuracy.enabled, "🎯")
                                 .clicked()

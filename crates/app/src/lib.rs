@@ -1,6 +1,8 @@
 mod accuracy;
 mod help;
 mod keyboard_input;
+mod library;
+mod library_panel;
 mod main_menu;
 mod measure_panel;
 mod midi_input_widget;
@@ -20,6 +22,7 @@ use grooph_measure::duration::{Duration, NoteValue, TupletSpec, q};
 use grooph_measure::{BeatIdx, Cursor, Measure, Score, TimeSignature};
 
 use crate::accuracy::AccuracyState;
+use crate::library::PatternLibrary;
 use crate::platform::{PlatformRuntime, VisibilityEvent};
 use crate::state::{
     AudioConfig, EditorState, LayoutSettings, MidiState, PlaybackController, PlaybackState, UiShell,
@@ -53,6 +56,7 @@ pub(crate) enum Mode {
     Mixer,
     Settings,
     Help,
+    Library,
     TimeSignature { beats: u8, unit: u8 },
 }
 
@@ -93,6 +97,7 @@ struct PersistedState {
     counting: CountingSettings,
     midi_selected_port_id: Option<String>,
     accuracy_enabled: bool,
+    library: PatternLibrary,
 }
 
 impl Default for PersistedState {
@@ -108,6 +113,7 @@ impl Default for PersistedState {
             counting: CountingSettings::default(),
             midi_selected_port_id: None,
             accuracy_enabled: true,
+            library: PatternLibrary::default(),
         }
     }
 }
@@ -125,6 +131,7 @@ impl PersistedState {
             counting: app.ui.counting,
             midi_selected_port_id: app.playback_ctl.midi.selected_port_id.clone(),
             accuracy_enabled: app.playback_ctl.accuracy.enabled,
+            library: app.editor.library.clone(),
         }
     }
 }
@@ -177,6 +184,7 @@ impl App for Grooph {
         self.help_panel(ui);
         self.settings_panel(ui);
         self.mixer_panel(ui);
+        self.library_panel(ui);
         self.tool_palette_panel(ui);
         self.measure_panel(ui);
 
@@ -415,6 +423,48 @@ impl Grooph {
             true
         });
     }
+
+    /// Save the current score + tempo under `name` into the pattern library.
+    /// An empty name falls back to a numbered default.
+    pub(crate) fn save_current_pattern(&mut self, name: String) {
+        let name = if name.trim().is_empty() {
+            format!("Takt {}", self.editor.library.patterns.len() + 1)
+        } else {
+            name.trim().to_string()
+        };
+        let score = self.editor.score.clone();
+        let bpm = self.playback_ctl.bpm;
+        self.editor.library.add(name, score, bpm);
+    }
+
+    /// Replace the current score + tempo with the saved pattern `id`. The score
+    /// swap is undoable; the tempo change is applied directly (tempo is not part
+    /// of the undo snapshot). Transport is stopped so playback restarts cleanly.
+    pub(crate) fn load_pattern(&mut self, id: u64) {
+        let Some(pattern) = self.editor.library.get(id) else {
+            return;
+        };
+        let score = pattern.score.clone();
+        let bpm = pattern.bpm;
+
+        self.stop_transport();
+        self.with_undo_snapshot(|app| {
+            app.editor.score = score;
+            // measure_idx 0 is valid by Score's non-empty invariant; start at the
+            // beginning and clamp the beat index to the first measure.
+            let mut cursor = Cursor::start();
+            let beats_len = app.editor.score.current(0).beats().len();
+            if beats_len > 0 {
+                cursor.beat_idx = cursor.beat_idx.min(beats_len - 1);
+            }
+            app.editor.cursor = cursor;
+            true
+        });
+        self.playback_ctl.bpm = bpm;
+        self.playback_ctl.playback.reset();
+    }
+
+    pub(crate) fn delete_pattern(&mut self, id: u64) { self.editor.library.remove(id); }
 
     fn build_button_measure(template: BeatTemplate) -> Measure {
         let beat_count =
@@ -708,6 +758,7 @@ impl Grooph {
                 cursor: state.cursor,
                 history: UndoHistory::new(DEFAULT_UNDO_LIMIT),
                 button_measures,
+                library: state.library,
             },
             playback_ctl: PlaybackController {
                 transport_state: TransportState::Stopped,
@@ -735,6 +786,7 @@ impl Grooph {
                 layout: LayoutSettings::default(),
                 counting: state.counting,
                 platform,
+                save_name_buffer: String::new(),
             },
         }
     }

@@ -1,4 +1,5 @@
 use crate::accuracy::AccuracyState;
+use crate::library::PatternLibrary;
 use crate::platform::PlatformRuntime;
 use crate::undo::UndoHistory;
 use crate::{CountingSettings, Mode, TransportState};
@@ -74,6 +75,8 @@ pub(crate) struct EditorState {
     /// Prebuilt measures for note/rest/tuplet tool buttons to avoid per-frame
     /// reconstruction.
     pub(crate) button_measures: HashMap<&'static str, Measure>,
+    /// User-saved, named patterns (score + tempo). Persisted across sessions.
+    pub(crate) library: PatternLibrary,
 }
 
 /// Realtime playback subsystem: transport, tempo, audio engine, MIDI input,
@@ -100,4 +103,7 @@ pub(crate) struct UiShell {
     pub(crate) layout: LayoutSettings,
     pub(crate) counting: CountingSettings,
     pub(crate) platform: PlatformRuntime,
+    /// Transient text buffer for the "save current pattern" name input. Not
+    /// persisted.
+    pub(crate) save_name_buffer: String,
 }
