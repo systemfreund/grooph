@@ -38,6 +38,7 @@ impl Grooph {
                                 ui.memory_mut(|mem| mem.surrender_focus(bpm_editor_resp.id))
                             }
                             if bpm_editor_resp.changed() {
+                                self.editor.dirty = true;
                                 self.handle_bpm_change();
                             }
 

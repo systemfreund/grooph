@@ -98,6 +98,8 @@ struct PersistedState {
     midi_selected_port_id: Option<String>,
     accuracy_enabled: bool,
     library: PatternLibrary,
+    active_pattern_id: Option<u64>,
+    dirty: bool,
 }
 
 impl Default for PersistedState {
@@ -114,6 +116,8 @@ impl Default for PersistedState {
             midi_selected_port_id: None,
             accuracy_enabled: true,
             library: PatternLibrary::default(),
+            active_pattern_id: None,
+            dirty: false,
         }
     }
 }
@@ -132,6 +136,8 @@ impl PersistedState {
             midi_selected_port_id: app.playback_ctl.midi.selected_port_id.clone(),
             accuracy_enabled: app.playback_ctl.accuracy.enabled,
             library: app.editor.library.clone(),
+            active_pattern_id: app.editor.active_pattern_id,
+            dirty: app.editor.dirty,
         }
     }
 }
@@ -190,6 +196,10 @@ impl App for Grooph {
 
         if matches!(self.ui.mode, Mode::TimeSignature { .. }) {
             self.time_signature_dialog(ui);
+        }
+
+        if self.ui.pending_load.is_some() {
+            self.load_confirm_dialog(ui);
         }
 
         self.handle_keyboard_input(ui);
@@ -323,6 +333,7 @@ impl Grooph {
         if op(self) {
             self.editor.history.push(snap);
             self.clear_accuracy_for_edit();
+            self.editor.dirty = true;
             true
         } else {
             false
@@ -335,6 +346,7 @@ impl Grooph {
             self.editor.score = prev.score;
             self.editor.cursor = prev.cursor;
             self.clear_accuracy_for_edit();
+            self.editor.dirty = true;
         }
     }
 
@@ -344,6 +356,7 @@ impl Grooph {
             self.editor.score = next.score;
             self.editor.cursor = next.cursor;
             self.clear_accuracy_for_edit();
+            self.editor.dirty = true;
         }
     }
 
@@ -424,17 +437,45 @@ impl Grooph {
         });
     }
 
-    /// Save the current score + tempo under `name` into the pattern library.
-    /// An empty name falls back to a numbered default.
-    pub(crate) fn save_current_pattern(&mut self, name: String) {
-        let name = if name.trim().is_empty() {
-            format!("Takt {}", self.editor.library.patterns.len() + 1)
-        } else {
-            name.trim().to_string()
-        };
+    /// "Save": if a pattern is active, overwrite its score + tempo in place
+    /// (keeping id and name). Otherwise create a new entry from `name` and make
+    /// it active. An empty name falls back to a numbered default.
+    pub(crate) fn save_active_pattern(&mut self, name: String) {
         let score = self.editor.score.clone();
         let bpm = self.playback_ctl.bpm;
-        self.editor.library.add(name, score, bpm);
+        match self.editor.active_pattern_id {
+            Some(id) if self.editor.library.contains(id) => {
+                self.editor.library.update(id, score, bpm);
+            }
+            _ => {
+                let id = self.editor.library.add(
+                    Self::pattern_name_or_default(&name, &self.editor.library),
+                    score,
+                    bpm,
+                );
+                self.editor.active_pattern_id = Some(id);
+            }
+        }
+        self.editor.dirty = false;
+    }
+
+    /// "Save as": always create a new library entry from `name` and make it the
+    /// active pattern. An empty name falls back to a numbered default.
+    pub(crate) fn save_pattern_as(&mut self, name: String) {
+        let score = self.editor.score.clone();
+        let bpm = self.playback_ctl.bpm;
+        let name = Self::pattern_name_or_default(&name, &self.editor.library);
+        let id = self.editor.library.add(name, score, bpm);
+        self.editor.active_pattern_id = Some(id);
+        self.editor.dirty = false;
+    }
+
+    fn pattern_name_or_default(name: &str, library: &PatternLibrary) -> String {
+        if name.trim().is_empty() {
+            format!("Takt {}", library.patterns.len() + 1)
+        } else {
+            name.trim().to_string()
+        }
     }
 
     /// Replace the current score + tempo with the saved pattern `id`. The score
@@ -462,9 +503,32 @@ impl Grooph {
         });
         self.playback_ctl.bpm = bpm;
         self.playback_ctl.playback.reset();
+        self.editor.active_pattern_id = Some(id);
+        self.editor.dirty = false;
     }
 
-    pub(crate) fn delete_pattern(&mut self, id: u64) { self.editor.library.remove(id); }
+    /// Entry point for the load button: if the working score has unsaved changes,
+    /// defer to the confirmation dialog; otherwise load immediately.
+    pub(crate) fn request_load_pattern(&mut self, id: u64) {
+        if self.editor.active_pattern_id == Some(id) && !self.editor.dirty {
+            return; // already loaded and unchanged
+        }
+        if self.editor.dirty {
+            self.ui.pending_load = Some(id);
+        } else {
+            self.load_pattern(id);
+        }
+    }
+
+    pub(crate) fn delete_pattern(&mut self, id: u64) {
+        self.editor.library.remove(id);
+        if self.editor.active_pattern_id == Some(id) {
+            self.editor.active_pattern_id = None;
+        }
+        if self.ui.pending_load == Some(id) {
+            self.ui.pending_load = None;
+        }
+    }
 
     fn build_button_measure(template: BeatTemplate) -> Measure {
         let beat_count =
@@ -758,6 +822,8 @@ impl Grooph {
                 cursor: state.cursor,
                 history: UndoHistory::new(DEFAULT_UNDO_LIMIT),
                 button_measures,
+                active_pattern_id: state.active_pattern_id.filter(|id| state.library.contains(*id)),
+                dirty: state.dirty,
                 library: state.library,
             },
             playback_ctl: PlaybackController {
@@ -787,6 +853,7 @@ impl Grooph {
                 counting: state.counting,
                 platform,
                 save_name_buffer: String::new(),
+                pending_load: None,
             },
         }
     }

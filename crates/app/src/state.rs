@@ -77,6 +77,13 @@ pub(crate) struct EditorState {
     pub(crate) button_measures: HashMap<&'static str, Measure>,
     /// User-saved, named patterns (score + tempo). Persisted across sessions.
     pub(crate) library: PatternLibrary,
+    /// Id of the saved pattern the working score was loaded from, if any. Drives
+    /// "save" (overwrite) vs "save as" (new entry) and the active-row highlight.
+    /// `None` means the working score is unsaved / not tied to any entry.
+    pub(crate) active_pattern_id: Option<u64>,
+    /// Whether the working score/tempo has been edited since the last save or
+    /// load. Used to warn before discarding changes when loading another pattern.
+    pub(crate) dirty: bool,
 }
 
 /// Realtime playback subsystem: transport, tempo, audio engine, MIDI input,
@@ -106,4 +113,7 @@ pub(crate) struct UiShell {
     /// Transient text buffer for the "save current pattern" name input. Not
     /// persisted.
     pub(crate) save_name_buffer: String,
+    /// Pending pattern id awaiting the "discard unsaved changes?" confirmation
+    /// before loading. `Some` shows the confirm dialog. Not persisted.
+    pub(crate) pending_load: Option<u64>,
 }

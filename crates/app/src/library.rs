@@ -28,12 +28,28 @@ impl PatternLibrary {
         id
     }
 
+    /// Overwrite the score + tempo of an existing pattern, keeping its id and
+    /// name. Returns `true` if a matching pattern was found and updated.
+    pub fn update(&mut self, id: u64, score: Score, bpm: u32) -> bool {
+        if let Some(p) = self.patterns.iter_mut().find(|p| p.id == id) {
+            p.score = score;
+            p.bpm = bpm;
+            true
+        } else {
+            false
+        }
+    }
+
     /// Remove the pattern with the given id, if present.
     pub fn remove(&mut self, id: u64) { self.patterns.retain(|p| p.id != id); }
 
     pub fn get(&self, id: u64) -> Option<&SavedPattern> {
         self.patterns.iter().find(|p| p.id == id)
     }
+
+    pub fn contains(&self, id: u64) -> bool { self.patterns.iter().any(|p| p.id == id) }
+
+    pub fn name_of(&self, id: u64) -> Option<&str> { self.get(id).map(|p| p.name.as_str()) }
 }
 
 #[cfg(test)]
