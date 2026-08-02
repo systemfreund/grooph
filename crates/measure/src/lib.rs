@@ -1,5 +1,3 @@
-#![feature(assert_matches)]
-
 mod beat;
 pub mod counting;
 pub mod duration;

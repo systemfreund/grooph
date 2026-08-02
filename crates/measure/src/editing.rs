@@ -380,7 +380,7 @@ mod tests {
     use crate::duration::NoteValue::Eighth;
     use crate::duration::{e, t8};
     use crate::{Beat, TimeSignature};
-    use std::assert_matches::assert_matches;
+    use std::assert_matches;
 
     #[test]
     fn dissolve_tuplet_initializes_note_when_group_contains_any_note_and_preserves_accent() {
