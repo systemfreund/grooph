@@ -190,8 +190,8 @@ pub const LEGIBILITY_FLOOR_EM: f32 = 48.0;
 /// above, and rests/accents below, so adjacent rows sit as close together as
 /// legibility allows rather than leaving dead space.
 fn row_height_em(opts: &StaffOpts) -> f32 {
-    let above = opts.stem_length_factor + 1.5;
-    let below = 1.0;
+    let above = opts.stem_length_factor + 0.75;
+    let below = 0.5;
     2.0 * above.max(below)
 }
 
@@ -409,7 +409,7 @@ mod tests {
             metrics: GlyphMetrics::debug(em),
             min_measure_width_em: 6.0,
             note_width_em: 0.6,
-            system_spacing_em: 1.0,
+            system_spacing_em: 0.5,
             layout_clef_first: true,
         }
     }
