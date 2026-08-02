@@ -1,5 +1,7 @@
 # Project-specific development guidelines
 
+Repository: https://github.com/systemfreund/grooph — remote `origin`, default branch `main`.
+
 Read README.md first.
 This document captures build, test, and development practices tailored to this repository. It’s written for experienced
 Rust developers and focuses on crate-specific behaviors and APIs that matter when developing or debugging.
