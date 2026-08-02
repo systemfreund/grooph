@@ -145,7 +145,7 @@ impl Grooph {
                             metrics,
                             min_measure_width_em: 6.0,
                             note_width_em: 0.6,
-                            system_spacing_em: 4.0,
+                            system_spacing_em: 0.5,
                             layout_clef_first: true,
                         };
 
