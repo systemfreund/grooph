@@ -18,7 +18,7 @@ impl Grooph {
                 .fill(egui::Color32::TRANSPARENT)
                 .stroke(egui::Stroke::NONE)
                 .show(ui, |ui| {
-                    egui::ScrollArea::horizontal().show(ui, |ui| {
+                    egui::ScrollArea::both().show(ui, |ui| {
                         let available = ui.available_size();
                         let origin = ui.cursor().min;
                         let viewport_rect = Rect::from_min_size(origin, available);
@@ -150,6 +150,10 @@ impl Grooph {
                         };
 
                         let staff = build_staff_layout(&self.editor.score, &staff_opts);
+                        // Rows may render at a different em than the baseline `staff_opts`
+                        // (grow-to-fill / shrink-toward-floor) — rescale font/metrics to
+                        // match before drawing, so glyph size agrees with `staff`'s positions.
+                        let render_opts = staff_opts.rescaled(staff.scale);
 
                         // From the global tick, derive (playing_measure_idx, local_tick).
                         // The playback cursor renders / auto-scrolls based on this — it
@@ -219,7 +223,7 @@ impl Grooph {
                             cursor,
                             playback,
                             count_config.as_ref(),
-                            &staff_opts,
+                            &render_opts,
                         );
 
                         // Draw flash overlay (white on dark, black on light) with decay
@@ -239,7 +243,7 @@ impl Grooph {
                             ui.ctx().request_repaint();
                         }
 
-                        self.draw_accuracy_markers(ui, &staff, &timing, &staff_opts.metrics);
+                        self.draw_accuracy_markers(ui, &staff, &timing, &render_opts.metrics);
                         self.handle_input(resp, &staff);
                     });
                 });
@@ -400,7 +404,7 @@ impl Grooph {
         if !matches!(self.ui.mode, Mode::TimeSignature { .. })
             && (resp.clicked() || resp.dragged())
             && let Some(pos) = resp.interact_pointer_pos()
-            && let Some((m_idx, b_idx)) = grooph_layout::staff_layout::hit_test_staff(staff, pos.x)
+            && let Some((m_idx, b_idx)) = grooph_layout::staff_layout::hit_test_staff(staff, pos)
         {
             self.editor.cursor.measure_idx = m_idx;
             self.editor.cursor.beat_idx = b_idx;

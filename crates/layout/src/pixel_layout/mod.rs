@@ -73,6 +73,21 @@ impl GlyphMetrics {
             rest_sizes: [default_size; 6],
         }
     }
+
+    /// Scale every glyph metric by `factor`. Used when a layout shrinks or
+    /// grows toward the legibility floor without a live `egui::Ui` to
+    /// re-measure the font — vector-font metrics scale ~linearly with size.
+    pub fn scaled(&self, factor: f32) -> Self {
+        Self {
+            head_size: self.head_size * factor,
+            dot_size: self.dot_size * factor,
+            accent_size: self.accent_size * factor,
+            flag_8th_size: self.flag_8th_size * factor,
+            flag_16th_size: self.flag_16th_size * factor,
+            flag_32nd_size: self.flag_32nd_size * factor,
+            rest_sizes: self.rest_sizes.map(|v| v * factor),
+        }
+    }
 }
 
 pub fn compute_em(rect: &Rect, width_cap_factor: f32, ui: &egui::Ui) -> f32 {
