@@ -65,6 +65,15 @@ Important root files:
 - Reading mode lays out with `MeasureWidthPolicy::TimeSignature`: measure
   width depends only on the meter (as if filled with sixteenths), so swapping
   measures never reflows the staff. The editor keeps `Content` widths.
+- Ghost notes (`grooph_measure::ghost::ghost_onsets`): quiet hits on every free
+  slot of the generator subdivision (per beat: 8ths=2, 16ths=4, triplets=3;
+  mixed = triplets in tuplet beats, else 16ths). Scheduled as `SoundType::Ghost`,
+  volume via the mixer's "Ghost" slider (`AudioSettings::ghost`).
+- Count-in (`PlaybackOptions::count_in`): `TickSource` plays one bar of
+  `SoundType::CountIn` clicks (downbeat + primary beats of the first measure)
+  before the score; `Audio::playback_position` is negative meanwhile. The UI
+  holds the cursor at 0 (`CountInState`) and re-anchors MIDI accuracy when the
+  count-in ends.
 
 ## Input/tools
 

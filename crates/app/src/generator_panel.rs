@@ -112,6 +112,17 @@ impl Grooph {
                         );
                     });
 
+                    setting(ui, "Ghost Notes", |ui| {
+                        ui.checkbox(&mut gen_state.ghost_notes, "").on_hover_text(
+                            "Play quiet hits on every slot of the subdivision without a note",
+                        );
+                    });
+
+                    setting(ui, "Count In", |ui| {
+                        ui.checkbox(&mut self.playback_ctl.audio_cfg.count_in, "")
+                            .on_hover_text("Count one bar in before playback starts");
+                    });
+
                     ui.separator();
                     if ui.button("🎲 New").on_hover_text("Generate a new rhythm").clicked() {
                         roll = true;

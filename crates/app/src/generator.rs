@@ -17,6 +17,8 @@ pub(crate) struct GeneratorState {
     pub(crate) settings: GeneratorSettings,
     /// Replace each measure with a new one right after it has been played.
     pub(crate) reading_mode: bool,
+    /// Play quiet ghost notes on the free slots of the generator subdivision.
+    pub(crate) ghost_notes: bool,
     rng: Rng,
     /// Measure the playback cursor was in during the last frame (reading mode).
     last_playing_measure: Option<MeasureIdx>,
@@ -26,10 +28,11 @@ pub(crate) struct GeneratorState {
 }
 
 impl GeneratorState {
-    pub(crate) fn new(settings: GeneratorSettings, reading_mode: bool) -> Self {
+    pub(crate) fn new(settings: GeneratorSettings, reading_mode: bool, ghost_notes: bool) -> Self {
         Self {
             settings,
             reading_mode,
+            ghost_notes,
             rng: Rng::new(random_seed()),
             last_playing_measure: None,
             pending_regeneration: None,

@@ -15,11 +15,18 @@ pub(crate) struct AudioConfig {
     pub(crate) settings: AudioSettings,
     pub(crate) offset: f32,
     pub(crate) latency_enabled: bool,
+    /// Play one bar of clicks before playback starts.
+    pub(crate) count_in: bool,
 }
 
 impl Default for AudioConfig {
     fn default() -> Self {
-        Self { settings: AudioSettings::default(), offset: 0.0, latency_enabled: true }
+        Self {
+            settings: AudioSettings::default(),
+            offset: 0.0,
+            latency_enabled: true,
+            count_in: false,
+        }
     }
 }
 
@@ -43,6 +50,23 @@ impl Default for LayoutSettings {
     }
 }
 
+/// Whether the audio engine is playing the count-in bar, as seen by the UI.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) enum CountInState {
+    /// No count-in: the score is playing.
+    #[default]
+    Off,
+    /// Playback started with count-in enabled; waiting for the audio engine to
+    /// report the count-in (negative position). `since` is the UI time.
+    Waiting { since: f64 },
+    /// Audio reports the count-in bar.
+    Active,
+}
+
+/// Give up waiting for the audio engine to report a count-in after this long
+/// (no audio device, engine failed to start).
+pub(crate) const COUNT_IN_WAIT_TIMEOUT_S: f64 = 0.5;
+
 #[derive(Default)]
 pub(crate) struct PlaybackState {
     /// Cursor position in **global ticks** across the entire score loop.
@@ -53,10 +77,14 @@ pub(crate) struct PlaybackState {
     /// both axes so the flash fires once per primary beat in every measure, not
     /// only when the beat number changes.
     pub(crate) last_primary_beat: Option<(usize, u32)>,
+    pub(crate) count_in: CountInState,
 }
 
 impl PlaybackState {
     pub(crate) fn reset(&mut self) { *self = Self::default(); }
+
+    /// The score hasn't started yet (count-in pending or playing).
+    pub(crate) fn counting_in(&self) -> bool { self.count_in != CountInState::Off }
 }
 
 #[derive(Default)]

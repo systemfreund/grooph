@@ -28,7 +28,7 @@ use crate::generator::GeneratorState;
 use crate::library::PatternLibrary;
 use crate::platform::{PlatformRuntime, VisibilityEvent};
 use crate::state::{
-    AudioConfig, EditorState, LayoutSettings, MidiState, PlaybackController, PlaybackState, UiShell,
+    AudioConfig, CountInState, EditorState, LayoutSettings, MidiState, PlaybackController, PlaybackState, UiShell,
 };
 use crate::tools::ToolKind;
 use crate::tools::{BeatTemplate, Modifier, all_tools};
@@ -37,7 +37,7 @@ use eframe::egui::{Context, TextStyle, Ui, Widget};
 use eframe::epaint::text::{FontInsert, InsertFontFamily};
 use eframe::epaint::{FontFamily, FontId};
 use eframe::{App, CreationContext, egui};
-use grooph_audio::{AudioSettings, PlayerState};
+use grooph_audio::{AudioSettings, PlaybackOptions, PlayerState};
 use grooph_measure::counting::{
     ColorId, ColorMode, ColorPattern, CountConfig, CountLayer, CountScope, LabelPattern,
     LabelToken, Subdiv,
@@ -107,6 +107,8 @@ struct PersistedState {
     dirty: bool,
     generator_settings: GeneratorSettings,
     reading_mode: bool,
+    ghost_notes: bool,
+    count_in: bool,
 }
 
 impl Default for PersistedState {
@@ -127,6 +129,8 @@ impl Default for PersistedState {
             dirty: false,
             generator_settings: GeneratorSettings::default(),
             reading_mode: false,
+            ghost_notes: false,
+            count_in: false,
         }
     }
 }
@@ -149,6 +153,8 @@ impl PersistedState {
             dirty: app.editor.dirty,
             generator_settings: app.editor.generator.settings,
             reading_mode: app.editor.generator.reading_mode,
+            ghost_notes: app.editor.generator.ghost_notes,
+            count_in: app.playback_ctl.audio_cfg.count_in,
         }
     }
 }
@@ -238,8 +244,10 @@ impl App for Grooph {
             self.playback_ctl.audio = grooph_audio::Audio::new(self.playback_ctl.bpm);
         }
 
+        let playback_options = self.playback_options();
         if let Some(audio) = &mut self.playback_ctl.audio {
             audio.set_audio_settings(self.playback_ctl.audio_cfg.settings);
+            audio.set_playback_options(playback_options);
             if audio.update(&audio_state, self.playback_ctl.bpm, &self.editor.score) {
                 ui.ctx().request_repaint();
             }
@@ -260,6 +268,16 @@ impl Grooph {
         };
 
         if !self.playback_ctl.accuracy.enabled {
+            return;
+        }
+
+        // The score hasn't started yet: keep re-anchoring the session at "now"
+        // and ignore hits; `realign_accuracy_clock` fixes the anchor exactly
+        // when the count-in ends.
+        if self.playback_ctl.playback.counting_in() {
+            if is_connected && self.playback_ctl.transport_state == TransportState::Playing {
+                self.playback_ctl.accuracy.tracker.on_playback_start_at(now_seconds, 0.0);
+            }
             return;
         }
 
@@ -315,6 +333,14 @@ impl Grooph {
                 &timing,
                 &self.editor.score,
             );
+        }
+    }
+
+    fn playback_options(&self) -> PlaybackOptions {
+        let generator = &self.editor.generator;
+        PlaybackOptions {
+            count_in: self.playback_ctl.audio_cfg.count_in,
+            ghost_notes: generator.ghost_notes.then_some(generator.settings.subdivision),
         }
     }
 
@@ -611,6 +637,11 @@ impl Grooph {
             self.playback_ctl.accuracy.tracker.on_playback_stop();
         }
         self.playback_ctl.playback.reset();
+        // Mark the count-in as pending until the UI clock is known (first
+        // frame of the measure panel fills in `since`).
+        if self.playback_ctl.audio_cfg.count_in {
+            self.playback_ctl.playback.count_in = CountInState::Waiting { since: f64::NAN };
+        }
 
         self.ui.platform.acquire_wake_lock();
     }
@@ -639,7 +670,11 @@ impl Grooph {
         self.playback_ctl.accuracy.set_enabled(enabled, transport);
     }
 
-    fn handle_bpm_change(&mut self) {
+    fn handle_bpm_change(&mut self) { self.realign_accuracy_clock(); }
+
+    /// Re-anchor the accuracy session to the current playback position, e.g.
+    /// after a tempo change or when the count-in bar ends.
+    pub(crate) fn realign_accuracy_clock(&mut self) {
         if !self.playback_ctl.accuracy.enabled {
             return;
         }
@@ -838,7 +873,11 @@ impl Grooph {
                 active_pattern_id: state.active_pattern_id.filter(|id| state.library.contains(*id)),
                 dirty: state.dirty,
                 library: state.library,
-                generator: GeneratorState::new(state.generator_settings, state.reading_mode),
+                generator: GeneratorState::new(
+                    state.generator_settings,
+                    state.reading_mode,
+                    state.ghost_notes,
+                ),
             },
             playback_ctl: PlaybackController {
                 transport_state: TransportState::Stopped,
@@ -848,6 +887,7 @@ impl Grooph {
                     settings: state.audio_settings,
                     offset: state.audio_offset,
                     latency_enabled: state.audio_latency_enabled,
+                    count_in: state.count_in,
                 },
                 playback: PlaybackState::default(),
                 accuracy: AccuracyState::new(state.accuracy_enabled),

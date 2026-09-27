@@ -1,6 +1,7 @@
 use crate::Grooph;
 use crate::accuracy::{AccuracyMark, clamp_diff_to_beat_window};
 use crate::tools::{Modifier, ToolKind, all_tools};
+use crate::state::{COUNT_IN_WAIT_TIMEOUT_S, CountInState};
 use crate::{Mode, TransportState};
 use eframe::egui;
 use eframe::egui::{FontId, Frame, Rect, Response, Stroke};
@@ -48,10 +49,23 @@ impl Grooph {
                                 let mut next_tick =
                                     self.playback_ctl.playback.smooth_tick + current_tps * dt;
 
+                                let audio_pos = self
+                                    .playback_ctl
+                                    .audio
+                                    .as_ref()
+                                    .and_then(|audio| audio.playback_position());
+                                let was_counting_in = self.playback_ctl.playback.counting_in();
+                                self.update_count_in_state(now, audio_pos, &timing);
+                                let counting_in = self.playback_ctl.playback.counting_in();
+                                if counting_in {
+                                    // Hold the cursor on the first downbeat until the
+                                    // count-in bar is over.
+                                    next_tick = 0.0;
+                                }
+
                                 // Sync with audio if available
-                                if let Some(audio) = &self.playback_ctl.audio
-                                    && let Some((raw_audio_tick, audio_total)) =
-                                        audio.playback_position()
+                                if !counting_in
+                                    && let Some((raw_audio_tick, audio_total)) = audio_pos
                                 {
                                     let audio_total_f = audio_total as f64;
                                     if audio_total_f > 0.0 {
@@ -94,6 +108,9 @@ impl Grooph {
                                     next_tick = next_tick.rem_euclid(total);
                                 }
                                 self.playback_ctl.playback.smooth_tick = next_tick;
+                                if was_counting_in && !counting_in {
+                                    self.realign_accuracy_clock();
+                                }
 
                                 // Flash: trigger on primary-beat change in the currently
                                 // playing measure. Key is (measure_idx, primary_beat_in_measure).
@@ -257,6 +274,40 @@ impl Grooph {
                     });
                 });
         });
+    }
+
+    /// Advance the UI view of the count-in: `Waiting` until the audio engine
+    /// reports a negative position, `Active` while the latency-adjusted
+    /// position is still before the first downbeat, then `Off`.
+    fn update_count_in_state(
+        &mut self,
+        now: f64,
+        audio_pos: Option<(f64, u64)>,
+        timing: &ScoreTiming,
+    ) {
+        let offset_s = if self.playback_ctl.audio_cfg.latency_enabled {
+            self.playback_ctl.audio_cfg.offset as f64
+        } else {
+            0.0
+        };
+        let tps = if timing.measure_count() > 0 { timing.ticks_per_sec_in_measure(0) } else { 0.0 };
+        let playback = &mut self.playback_ctl.playback;
+        playback.count_in = match playback.count_in {
+            CountInState::Off => CountInState::Off,
+            CountInState::Waiting { since } => {
+                let since = if since.is_nan() { now } else { since };
+                match audio_pos {
+                    Some((tick, _)) if tick < 0.0 => CountInState::Active,
+                    _ if now - since > COUNT_IN_WAIT_TIMEOUT_S => CountInState::Off,
+                    _ => CountInState::Waiting { since },
+                }
+            }
+            CountInState::Active => match audio_pos {
+                Some((tick, _)) if tick - offset_s * tps >= 0.0 => CountInState::Off,
+                // Busy engine (None) or still counting in: stay.
+                _ => CountInState::Active,
+            },
+        };
     }
 
     fn draw_accuracy_markers(
