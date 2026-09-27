@@ -9,6 +9,7 @@ pub mod grid;
 pub(crate) mod grouping;
 mod math;
 pub mod score;
+pub mod swing;
 pub mod tempo;
 pub mod time_signature;
 pub mod tuplet;

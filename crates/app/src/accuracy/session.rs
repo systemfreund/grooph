@@ -38,7 +38,10 @@ impl AccuracyStats {
 /// increasing in `onset_tick`.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct GlobalBeatOnset {
+    /// Written onset; keys the accuracy marks.
     pub onset_tick: u64,
+    /// Onset as heard, i.e. with swing applied. Hit windows use this.
+    pub performed_tick: u64,
     pub is_note: bool,
 }
 
@@ -57,6 +60,7 @@ pub(crate) fn compute_global_beat_onsets(
             if let Some(&local) = local_onsets.get(i) {
                 out.push(GlobalBeatOnset {
                     onset_tick: start + local as u64,
+                    performed_tick: timing.performed_global_tick(m_idx, local),
                     is_note: beat.kind == BeatKind::Note,
                 });
             }

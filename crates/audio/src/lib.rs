@@ -6,6 +6,7 @@ use crate::tick_source::{CountInPlan, TickSource};
 use crate::voices::VoiceMixer;
 use grooph_measure::Score;
 use grooph_measure::generator::Subdivision;
+use grooph_measure::swing::Swing;
 use grooph_measure::grid::DEFAULT_GRID;
 use grooph_measure::tempo::ScoreTiming;
 use log::{debug, error, info, trace};
@@ -120,6 +121,8 @@ pub struct PlaybackOptions {
     pub count_in: bool,
     /// Fill free slots of this grid with quiet ghost notes.
     pub ghost_notes: Option<Subdivision>,
+    /// Swing feel for notes and ghost notes.
+    pub swing: Swing,
 }
 
 pub struct Audio {
@@ -187,7 +190,7 @@ impl Audio {
 
     // Returns true if UI should repaint soon (while playing or while waiting for tail-out)
     pub fn update(&mut self, player_state: &PlayerState, bpm: u32, score: &Score) -> bool {
-        let timing = ScoreTiming::from_score(score, bpm);
+        let timing = ScoreTiming::from_score(score, bpm).with_swing(self.options.swing);
         let schedule = Schedule::build(score, &timing, self.options.ghost_notes);
         let count_in = if self.options.count_in { count_in_plan(score) } else { None };
 

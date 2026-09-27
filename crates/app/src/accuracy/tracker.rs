@@ -200,4 +200,31 @@ mod tests {
             .expect("expected miss mark at first note of measure 1");
         assert!(matches!(mark, AccuracyMark::Miss));
     }
+
+    #[test]
+    fn record_hit_measures_against_swung_onset() {
+        use grooph_measure::duration::e;
+        use grooph_measure::swing::{Swing, SwingUnit};
+        let mut m = Measure::new(TimeSignature::FOUR_FOUR);
+        for i in 0..8 {
+            m.set_beat(i, Beat::note(e())).unwrap();
+        }
+        let score = Score::single(m);
+        let swing = Swing { unit: SwingUnit::Eighths, percent: 75 };
+        let timing = ScoreTiming::from_score(&score, 120).with_swing(swing);
+        let mut tracker = AccuracyTracker::new();
+        tracker.on_playback_start_at(0.0, 0.0);
+
+        // Hit exactly where the first "&" sounds (dotted-eighth position).
+        let written = DEFAULT_GRID.ticks_of(&e()).unwrap();
+        let performed = timing.performed_global_tick(0, written);
+        assert_ne!(performed, written as u64);
+        tracker.record_hit(timing.global_tick_to_seconds(performed as f64), &timing, &score);
+
+        // The mark belongs to the written note and is dead on.
+        match tracker.mark_for_onset(written as u64).expect("hit on the swung note") {
+            AccuracyMark::Hit(diff) => assert!(diff.abs() < 1e-6, "diff={diff}"),
+            _ => panic!("expected hit"),
+        }
+    }
 }

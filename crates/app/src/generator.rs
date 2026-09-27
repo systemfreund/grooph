@@ -89,7 +89,7 @@ impl Grooph {
             return;
         }
 
-        let timing = ScoreTiming::from_score(&self.editor.score, self.playback_ctl.bpm);
+        let timing = self.score_timing();
         let current = timing.measure_at_global_tick(self.playback_ctl.playback.smooth_tick);
         let previous = self.editor.generator.last_playing_measure.replace(current);
         if let Some(left) = previous

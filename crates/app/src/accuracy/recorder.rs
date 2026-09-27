@@ -8,7 +8,8 @@ use super::session::{AccuracyMark, RecordingData};
 
 /// Record an incoming MIDI hit at `timestamp` (seconds, MIDI clock). The hit
 /// is mapped to a global tick via `timing`, then matched against the nearest
-/// note onset across the whole score (shortest signed distance on the loop).
+/// note onset across the whole score (shortest signed distance on the loop),
+/// taking swing into account.
 /// The delta is converted to milliseconds using the onset measure's tempo.
 pub(super) fn record_hit(
     data: &mut RecordingData,
@@ -90,7 +91,8 @@ fn best_match(
                 continue;
             };
             let global_onset = measure_start + local as u64;
-            let raw_diff = hit_global - global_onset as f64;
+            // Compare against where the note is heard (swing), key by where it is written.
+            let raw_diff = hit_global - timing.performed_global_tick(m_idx, local) as f64;
             let mut diff = raw_diff;
             if diff > total * 0.5 {
                 diff -= total;

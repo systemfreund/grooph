@@ -26,8 +26,7 @@ impl Grooph {
 
                         // Build the multi-measure tempo backbone once per frame.
                         // O(score.len()) — cheap for realistic score sizes.
-                        let timing =
-                            ScoreTiming::from_score(&self.editor.score, self.playback_ctl.bpm);
+                        let timing = self.score_timing();
 
                         // Update playback smoothing & primary-beat flash state
                         let playback_tick_to_draw = match self.playback_ctl.transport_state {
@@ -175,8 +174,10 @@ impl Grooph {
                         // From the global tick, derive (playing_measure_idx, local_tick).
                         // The playback cursor renders / auto-scrolls based on this — it
                         // wanders through all measures, independent of cursor.measure_idx.
-                        let playback_local =
-                            playback_tick_to_draw.map(|global| timing.to_local(global));
+                        // With swing the cursor follows the written positions, so it
+                        // reaches a swung note exactly when it sounds.
+                        let playback_local = playback_tick_to_draw
+                            .map(|global| timing.to_local(timing.written_global_tick(global)));
 
                         // Auto-scroll follows the same visual cursor logic as the
                         // renderer (incl. cross-measure wrap animation), so we use
