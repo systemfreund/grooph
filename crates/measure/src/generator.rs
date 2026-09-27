@@ -171,13 +171,13 @@ const CELLS: &[Cell] = &[
     Cell { level: 4, family: CellFamily::Sixteenth, beats: &[(de(), N), (s(), N)] },
     Cell { level: 4, family: CellFamily::Sixteenth, beats: &[(s(), N), (s(), N), (e(), R)] },
     Cell { level: 4, family: CellFamily::Sixteenth, beats: &[(e(), R), (s(), N), (s(), N)] },
+    Cell { level: 4, family: CellFamily::Sixteenth, beats: &[(s(), N), (e(), N), (s(), N)] },
     // Level 5: notes on "e" and "a".
     Cell { level: 5, family: CellFamily::Sixteenth, beats: &[(s(), R), (s(), N), (e(), N)] },
     Cell { level: 5, family: CellFamily::Sixteenth, beats: &[(de(), R), (s(), N)] },
     Cell { level: 5, family: CellFamily::Sixteenth, beats: &[(s(), R), (s(), N), (s(), N), (s(), N)] },
-    Cell { level: 5, family: CellFamily::Sixteenth, beats: &[(s(), N), (e(), N), (s(), N)] },
     Cell { level: 5, family: CellFamily::Sixteenth, beats: &[(s(), R), (e(), N), (s(), N)] },
-    Cell { level: 5, family: CellFamily::Sixteenth, beats: &[(s(), R), (s(), N), (e(), R)] },
+    Cell { level: 5, family: CellFamily::Sixteenth, beats: &[(s(), R), (de(), N)] },
     // Triplets (eighth-note triplets per quarter).
     Cell { level: 1, family: CellFamily::Triplet, beats: &[(t8(), N), (t8(), N), (t8(), N)] },
     Cell { level: 2, family: CellFamily::Triplet, beats: &[(t8(), N), (t8(), R), (t8(), N)] },
@@ -485,6 +485,35 @@ mod tests {
         assert_eq!(unique.len(), all.len(), "duplicate rhythms: {all:?}");
         // All 16 four-slot rhythms, the empty one being the quarter rest.
         assert_eq!(unique.len(), 16, "all 4-slot rhythms: {unique:?}");
+    }
+
+    #[test]
+    fn sixteenth_levels_match_reference_groupings() {
+        // Reference app "Custom Groupings", unlocked cumulatively per level.
+        fn onsets(c: &Cell) -> String {
+            let sx = DEFAULT_GRID.ticks_of(&s()).unwrap();
+            let mut slots = ['-'; 4];
+            let mut t = 0;
+            for &(d, n) in c.beats {
+                if n {
+                    slots[(t / sx) as usize] = 'x';
+                }
+                t += DEFAULT_GRID.ticks_of(&d).unwrap();
+            }
+            slots.iter().collect()
+        }
+        let at = |level: u8| -> std::collections::BTreeSet<String> {
+            candidates(Subdivision::Sixteenths, level)
+                .into_iter()
+                .filter(|c| c.level == level)
+                .map(onsets)
+                .collect()
+        };
+        assert_eq!(at(1), set(&["----", "x---", "x-x-"]));
+        assert_eq!(at(2), set(&["--x-"]));
+        assert_eq!(at(3), set(&["xxxx", "x-xx", "xxx-"]));
+        assert_eq!(at(4), set(&["xx-x", "x--x", "--xx", "xx--"]));
+        assert_eq!(at(5), set(&["-xx-", "-xxx", "-x-x", "-x--", "---x"]));
     }
 
     #[test]
