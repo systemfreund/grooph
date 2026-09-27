@@ -45,6 +45,11 @@ impl Grooph {
 
                 egui::ScrollArea::horizontal().id_salt("gen_settings_scroll").show(ui, |ui| {
                     ui.horizontal(|ui| {
+                        if ui.button("🎲 New").on_hover_text("Generate a new rhythm").clicked() {
+                            roll = true;
+                        }
+                        ui.separator();
+
                         let gen_state = &mut self.editor.generator;
                         let settings = &mut gen_state.settings;
 
@@ -134,15 +139,6 @@ impl Grooph {
                                 "Play quiet hits on every slot of the subdivision without a note",
                             );
                         });
-
-                        ui.separator();
-                        if ui.button("🎲 New").on_hover_text("Generate a new rhythm").clicked() {
-                            roll = true;
-                        }
-                        if ui.button("🖊 Edit").on_hover_text("Edit the generated rhythm").clicked()
-                        {
-                            self.ui.mode = Mode::Edit;
-                        }
                     });
                 });
 
