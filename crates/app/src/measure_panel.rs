@@ -6,9 +6,7 @@ use crate::{Mode, TransportState};
 use eframe::egui;
 use eframe::egui::{FontId, Frame, Rect, Response, Stroke};
 use grooph_layout::pixel_layout::{GlyphMetrics, MeasureLayout, compute_em};
-use grooph_layout::staff_layout::{
-    MeasureWidthPolicy, PlacedMeasure, StaffLayout, StaffOpts, build_staff_layout,
-};
+use grooph_layout::staff_layout::{PlacedMeasure, StaffLayout, StaffOpts, build_staff_layout};
 use grooph_measure::grid::DEFAULT_GRID;
 use grooph_measure::tempo::ScoreTiming;
 use grooph_render::measure_glyph_metrics;
@@ -166,13 +164,6 @@ impl Grooph {
                             note_width_em: 0.6,
                             system_spacing_em: 0.5,
                             layout_clef_first: true,
-                            // Endless mode swaps measures during playback; keep their
-                            // widths content-independent so the staff doesn't reflow.
-                            width_policy: if self.editor.generator.endless {
-                                MeasureWidthPolicy::TimeSignature
-                            } else {
-                                MeasureWidthPolicy::Content
-                            },
                         };
 
                         let staff = build_staff_layout(&self.editor.score, &staff_opts);

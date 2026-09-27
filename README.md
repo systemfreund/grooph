@@ -62,9 +62,10 @@ Important root files:
   both the visible cursor and the audio cursor have left it; the replacement
   keeps the measure's time signature so loop timing stays stable. Needs at
   least 2 bars.
-- Endless mode lays out with `MeasureWidthPolicy::TimeSignature`: measure
-  width depends only on the meter (as if filled with sixteenths), so swapping
-  measures never reflows the staff. The editor keeps `Content` widths.
+- Measure widths (`staff_layout::min_measure_width`) are sized for at least a
+  measure full of sixteenths, so up to that density they depend only on the
+  meter: editing or swapping measures (endless mode) never reflows the staff.
+  Denser measures (32nds, big tuplets) grow with their beat count.
 - Groupings: every one-beat figure has a stable `GroupingId` (bit index in
   `GroupingSet`; never renumber, it is persisted). The catalog order follows
   the reference app's "Custom Groupings" screen. A complexity level is a preset
