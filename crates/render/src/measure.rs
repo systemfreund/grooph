@@ -1,4 +1,5 @@
 use crate::beat::draw_beat;
+use crate::glyph_weight::draw_weighted_text;
 use eframe::egui;
 use eframe::egui::{Align2, Color32, FontFamily, FontId, Painter, Rangef, Rect, Stroke, pos2};
 use grooph_layout::glyphs;
@@ -83,16 +84,17 @@ pub(crate) fn render_measure_at(
     }
 
     if draw_staff_line {
-        draw_staff_line_segment(painter, rect, opts.em, color);
+        draw_staff_line_segment(painter, rect, opts.staff_line_thickness(), color);
     }
 
-    draw_clef(painter, measure_layout.clef_pos, &opts.font_id, color);
+    draw_clef(painter, measure_layout.clef_pos, &opts.font_id, color, opts.notation_weight);
     draw_time_signature(
         painter,
         measure_layout.time_signature.as_ref(),
         measure,
         &opts.font_id,
         color,
+        opts.notation_weight,
     );
 
     draw_notes(painter, measure_layout, color, opts);
@@ -106,22 +108,30 @@ pub(crate) fn render_measure_at(
     }
 }
 
-fn draw_staff_line_segment(painter: &Painter, rect: Rect, em: f32, color: Color32) {
+fn draw_staff_line_segment(painter: &Painter, rect: Rect, thickness: f32, color: Color32) {
     painter.hline(
         Rangef::new(rect.left(), rect.right()),
         rect.center().y,
-        Stroke::new(0.02 * em, color),
+        Stroke::new(thickness, color),
     );
 }
 
-fn draw_clef(painter: &Painter, clef_pos: Option<egui::Pos2>, font_id: &FontId, color: Color32) {
+fn draw_clef(
+    painter: &Painter,
+    clef_pos: Option<egui::Pos2>,
+    font_id: &FontId,
+    color: Color32,
+    notation_weight: f32,
+) {
     if let Some(pos) = clef_pos {
-        painter.text(
+        draw_weighted_text(
+            painter,
             pos,
             Align2::CENTER_CENTER,
-            glyphs::GLYPH_CLEF_PERCUSSION.to_string(),
+            &glyphs::GLYPH_CLEF_PERCUSSION.to_string(),
             font_id.clone(),
             color,
+            notation_weight,
         );
     }
 }
@@ -132,16 +142,33 @@ fn draw_time_signature(
     measure: &Measure,
     font_id: &FontId,
     color: Color32,
+    notation_weight: f32,
 ) {
     let Some(ts_layout) = ts_layout else { return };
     let ts = measure.time_signature();
     let top_digits = glyphs::ts_glyphs(ts.beats);
     let bot_digits = glyphs::ts_glyphs(ts.beat_unit);
     for (p, ch) in ts_layout.beats.iter().zip(top_digits.iter()) {
-        painter.text(*p, Align2::CENTER_CENTER, ch.to_string(), font_id.clone(), color);
+        draw_weighted_text(
+            painter,
+            *p,
+            Align2::CENTER_CENTER,
+            &ch.to_string(),
+            font_id.clone(),
+            color,
+            notation_weight,
+        );
     }
     for (p, ch) in ts_layout.beat_unit.iter().zip(bot_digits.iter()) {
-        painter.text(*p, Align2::CENTER_CENTER, ch.to_string(), font_id.clone(), color);
+        draw_weighted_text(
+            painter,
+            *p,
+            Align2::CENTER_CENTER,
+            &ch.to_string(),
+            font_id.clone(),
+            color,
+            notation_weight,
+        );
     }
 }
 
@@ -371,7 +398,15 @@ pub fn draw_tuplets(
             painter.line_segment([seg.p1, seg.p2], Stroke::new(opts.bracket_thickness(), color));
         }
         let digits = glyphs::tuplet_glyphs(t.count);
-        painter.text(t.number_center, Align2::CENTER_CENTER, digits, t.number_font.clone(), color);
+        draw_weighted_text(
+            painter,
+            t.number_center,
+            Align2::CENTER_CENTER,
+            &digits,
+            t.number_font.clone(),
+            color,
+            opts.notation_weight,
+        );
     }
 }
 
@@ -555,6 +590,7 @@ mod tests {
             y_offset: 0.0,
             stem_length_factor: 3.5,
             stem_thickness_factor: 0.1,
+            notation_weight: 1.0,
             accent_displacement: 0.0,
             accent_below: false,
             proportional_spacing: true,

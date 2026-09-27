@@ -34,6 +34,7 @@ pub struct StaffOpts {
 
     pub stem_length_factor: f32,
     pub stem_thickness_factor: f32,
+    pub notation_weight: f32,
     pub accent_displacement: f32,
     pub accent_below: bool,
     pub proportional_spacing: bool,
@@ -68,6 +69,7 @@ impl StaffOpts {
             y_offset: self.y_offset,
             stem_length_factor: self.stem_length_factor,
             stem_thickness_factor: self.stem_thickness_factor,
+            notation_weight: self.notation_weight,
             accent_displacement: self.accent_displacement,
             accent_below: self.accent_below,
             proportional_spacing: self.proportional_spacing,
@@ -331,6 +333,7 @@ mod tests {
             y_offset: 0.0,
             stem_length_factor: 3.5,
             stem_thickness_factor: 0.1,
+            notation_weight: 1.0,
             accent_displacement: 0.0,
             accent_below: false,
             proportional_spacing: true,

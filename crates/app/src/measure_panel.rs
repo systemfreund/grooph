@@ -170,6 +170,7 @@ impl Grooph {
                             y_offset: 0.0,
                             stem_length_factor: self.ui.layout.stem_length_factor,
                             stem_thickness_factor: 0.04,
+                            notation_weight: self.ui.layout.notation_weight,
                             accent_displacement: 0.07,
                             accent_below: self.ui.layout.accent_below,
                             proportional_spacing: self.ui.layout.proportional_spacing,

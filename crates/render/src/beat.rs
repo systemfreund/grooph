@@ -1,3 +1,4 @@
+use crate::glyph_weight::draw_weighted_text;
 use eframe::egui;
 use eframe::egui::{Align2, Color32, FontId, Stroke};
 use grooph_layout::glyphs;
@@ -24,39 +25,53 @@ pub(super) fn draw_beat(
     if let Some(pos) = note.flag_pos
         && let Some(flag) = glyphs::flag_glyph_for_duration(note.duration)
     {
-        painter.text(pos, Align2::LEFT_CENTER, flag.to_string(), opts.font_id.clone(), color);
+        draw_weighted_text(
+            painter,
+            pos,
+            Align2::LEFT_CENTER,
+            &flag.to_string(),
+            opts.font_id.clone(),
+            color,
+            opts.notation_weight,
+        );
     }
 
     // Draw notehead
-    painter.text(
+    draw_weighted_text(
+        painter,
         note.center,
         Align2::CENTER_CENTER,
-        glyph.to_string(),
+        &glyph.to_string(),
         opts.font_id.clone(),
         color,
+        opts.notation_weight,
     );
 
     // Draw dots
     if !note.dots.is_empty() {
         for p in &note.dots {
-            painter.text(
+            draw_weighted_text(
+                painter,
                 *p,
                 Align2::CENTER_CENTER,
-                glyphs::GLYPH_AUGMENTATION_DOT.to_string(),
+                &glyphs::GLYPH_AUGMENTATION_DOT.to_string(),
                 opts.font_id.clone(),
                 color,
+                opts.notation_weight,
             );
         }
     }
 
     // Draw accent
     if let Some(p) = note.accent_pos {
-        painter.text(
+        draw_weighted_text(
+            painter,
             p,
             Align2::CENTER_CENTER,
-            glyphs::GLYPH_ACCENT_ABOVE.to_string(),
+            &glyphs::GLYPH_ACCENT_ABOVE.to_string(),
             opts.font_id.clone(),
             color,
+            opts.notation_weight,
         );
     }
 

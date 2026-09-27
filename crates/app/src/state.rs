@@ -40,6 +40,11 @@ pub(crate) struct LayoutSettings {
     pub(crate) proportional_spacing: bool,
     pub(crate) stem_length_factor: f32,
     pub(crate) debug_bbox: bool,
+    /// Multiplier for stems, staff line, tuplet brackets, beams and note
+    /// glyphs (via faked bold). >1.0 makes notation bolder — mainly useful
+    /// on small/high-DPI (mobile) screens, where the default weight can look
+    /// thin and hard to read.
+    pub(crate) notation_weight: f32,
 }
 
 impl Default for LayoutSettings {
@@ -50,6 +55,7 @@ impl Default for LayoutSettings {
             proportional_spacing: true,
             stem_length_factor: 0.9,
             debug_bbox: false,
+            notation_weight: 1.0,
         }
     }
 }

@@ -41,7 +41,7 @@ pub fn draw_staff(
         ui.painter().hline(
             Rangef::new(system.rect.left(), system.rect.right()),
             system.y_baseline,
-            Stroke::new(0.02 * staff_opts.em, color),
+            Stroke::new(0.02 * staff_opts.em * staff_opts.notation_weight, color),
         );
 
         for placed in &system.measures {

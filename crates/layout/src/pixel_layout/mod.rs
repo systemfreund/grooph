@@ -110,6 +110,12 @@ pub struct LayoutOpts {
     pub y_offset: f32,
     pub stem_length_factor: f32,
     pub stem_thickness_factor: f32,
+    /// Multiplier applied to every notation stroke/glyph weight (stems,
+    /// staff line, tuplet brackets, beams, and note glyphs via faked bold).
+    /// 1.0 reproduces the original, thinner look; >1.0 draws everything
+    /// bolder — mainly useful on small/high-DPI (mobile) screens where thin
+    /// strokes and glyphs are hard to make out.
+    pub notation_weight: f32,
 
     pub accent_displacement: f32,
     pub accent_below: bool,
@@ -124,7 +130,7 @@ impl LayoutOpts {
     pub(super) const fn stem_length(&self) -> f32 { self.em * self.stem_length_factor }
 
     pub const fn stem_thickness(&self) -> f32 {
-        self.snap_thickness(self.em * self.stem_thickness_factor)
+        self.snap_thickness(self.em * self.stem_thickness_factor * self.notation_weight)
     }
 
     pub(super) const fn stem_offset(&self) -> f32 {
@@ -133,14 +139,16 @@ impl LayoutOpts {
 
     pub const fn beam_thickness(&self) -> f32 {
         // Bravura ~0.5 sp
-        0.5 * self.staff_space()
+        0.5 * self.staff_space() * self.notation_weight
     }
 
     pub(super) const fn beam_gap(&self) -> f32 { 0.25 * self.staff_space() }
 
     pub(super) const fn stub_length(&self) -> f32 { self.em * 0.20 }
 
-    pub const fn bracket_thickness(&self) -> f32 { self.em * 0.02 }
+    pub const fn bracket_thickness(&self) -> f32 { self.em * 0.02 * self.notation_weight }
+
+    pub const fn staff_line_thickness(&self) -> f32 { self.em * 0.02 * self.notation_weight }
 
     pub(super) fn y_center(&self) -> f32 { self.rect.center().y + self.y_offset }
 
@@ -348,6 +356,7 @@ mod tests {
             y_offset: 0.0,
             stem_length_factor: 2.0,
             stem_thickness_factor: 0.1,
+            notation_weight: 1.0,
             accent_displacement: 0.0,
             accent_below: false,
             proportional_spacing: true,
@@ -381,6 +390,7 @@ mod tests {
             y_offset: 0.0,
             stem_length_factor: 2.0, // Long stem: 2.0 * 20.0 = 40.0
             stem_thickness_factor: 0.1,
+            notation_weight: 1.0,
             accent_displacement: 0.0,
             accent_below: false,
             proportional_spacing: true,
@@ -422,6 +432,7 @@ mod tests {
             y_offset: 0.0,
             stem_length_factor: 1.0,
             stem_thickness_factor: 0.1,
+            notation_weight: 1.0,
             accent_displacement: 0.0,
             accent_below: false,
             proportional_spacing: true,
@@ -473,6 +484,7 @@ mod tests {
             y_offset: 0.0,
             stem_length_factor: 3.5,
             stem_thickness_factor: 0.1,
+            notation_weight: 1.0,
             accent_displacement: displacement,
             accent_below: false,
             proportional_spacing: true,
@@ -527,6 +539,7 @@ mod tests {
             y_offset: 0.0,
             stem_length_factor: 3.5,
             stem_thickness_factor: 0.1,
+            notation_weight: 1.0,
             accent_displacement: 0.5,
             accent_below: false,
             proportional_spacing: true,
@@ -578,6 +591,7 @@ mod tests {
             y_offset: 0.0,
             stem_length_factor: 3.5,
             stem_thickness_factor: 0.1,
+            notation_weight: 1.0,
             accent_displacement: 0.0,
             accent_below: false,
             proportional_spacing: true,
@@ -633,6 +647,7 @@ mod tests {
             y_offset: 0.0,
             stem_length_factor: 3.5,
             stem_thickness_factor: 0.1,
+            notation_weight: 1.0,
             accent_displacement: 0.0,
             accent_below: false,
             proportional_spacing: true,

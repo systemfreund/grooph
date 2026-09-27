@@ -135,6 +135,13 @@ impl Grooph {
                                     .range(0.7..=1.3),
                             );
                             ui.separator();
+                            ui.label("Notation Weight:");
+                            ui.add(
+                                egui::Slider::new(&mut self.ui.layout.notation_weight, 1.0..=3.0)
+                                    .custom_formatter(|v, _| format!("{v:.1}x")),
+                            );
+                            ui.label("Bolder stems/beams/glyphs — helps on small screens.");
+                            ui.separator();
                             ui.checkbox(&mut self.ui.layout.debug_bbox, "Show bounding boxes");
                             ui.separator();
                             ui.label("Accents Position:");
