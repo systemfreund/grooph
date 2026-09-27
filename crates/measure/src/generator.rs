@@ -9,7 +9,7 @@
 //! changes the result, while easier cells stay in the mix.
 //!
 //! Level ladder for 8th/16th subdivisions (derived from reference examples):
-//! 1. quarters and on-beat eighths, no rests
+//! 1. quarters, on-beat eighths and (16th subdivision) four sixteenths, no rests
 //! 2. eighths on the "and" (first syncopations)
 //! 3. sixteenth figures starting on the beat, no rests inside the beat
 //! 4. dotted figures and rests inside the beat
@@ -160,23 +160,23 @@ const CELLS: &[Cell] = &[
     // Level 2: eighth syncopation. (Eighth + eighth rest is left out on
     // purpose: rhythmically it is the same single hit as a quarter note.)
     Cell { level: 2, family: CellFamily::Eighth, beats: &[(e(), R), (e(), N)] },
+    // Sixteenths (onsets on 1 e & a; one spelling per rhythm).
+    // Level 1: the full sixteenth run.
+    Cell { level: 1, family: CellFamily::Sixteenth, beats: &[(s(), N), (s(), N), (s(), N), (s(), N)] },
     // Level 3: sixteenth figures on the beat, no inner rests.
-    Cell { level: 3, family: CellFamily::Sixteenth, beats: &[(s(), N), (s(), N), (s(), N), (s(), N)] },
     Cell { level: 3, family: CellFamily::Sixteenth, beats: &[(s(), N), (s(), N), (e(), N)] },
     Cell { level: 3, family: CellFamily::Sixteenth, beats: &[(e(), N), (s(), N), (s(), N)] },
     // Level 4: dotted figures, rests inside the beat.
     Cell { level: 4, family: CellFamily::Sixteenth, beats: &[(de(), N), (s(), N)] },
     Cell { level: 4, family: CellFamily::Sixteenth, beats: &[(s(), N), (s(), N), (e(), R)] },
     Cell { level: 4, family: CellFamily::Sixteenth, beats: &[(e(), R), (s(), N), (s(), N)] },
-    Cell { level: 4, family: CellFamily::Sixteenth, beats: &[(e(), N), (s(), R), (s(), N)] },
     // Level 5: notes on "e" and "a".
     Cell { level: 5, family: CellFamily::Sixteenth, beats: &[(s(), R), (s(), N), (e(), N)] },
     Cell { level: 5, family: CellFamily::Sixteenth, beats: &[(de(), R), (s(), N)] },
     Cell { level: 5, family: CellFamily::Sixteenth, beats: &[(s(), R), (s(), N), (s(), N), (s(), N)] },
     Cell { level: 5, family: CellFamily::Sixteenth, beats: &[(s(), N), (e(), N), (s(), N)] },
-    Cell { level: 5, family: CellFamily::Sixteenth, beats: &[(s(), N), (de(), N)] },
     Cell { level: 5, family: CellFamily::Sixteenth, beats: &[(s(), R), (e(), N), (s(), N)] },
-    Cell { level: 5, family: CellFamily::Sixteenth, beats: &[(s(), N), (s(), N), (s(), R), (s(), N)] },
+    Cell { level: 5, family: CellFamily::Sixteenth, beats: &[(s(), R), (s(), N), (e(), R)] },
     // Triplets (eighth-note triplets per quarter).
     Cell { level: 1, family: CellFamily::Triplet, beats: &[(t8(), N), (t8(), N), (t8(), N)] },
     Cell { level: 2, family: CellFamily::Triplet, beats: &[(t8(), N), (t8(), R), (t8(), N)] },
@@ -450,6 +450,33 @@ mod tests {
         assert_eq!(patterns(1), set(&["x", "xx"]));
         assert_eq!(patterns(2), set(&["x", "xx", "-x"]));
         assert_eq!(patterns(5), patterns(2));
+    }
+
+    #[test]
+    fn sixteenth_ladder_covers_every_rhythm_once() {
+        // Onsets on the 16th grid (x = note start). Quarter "x" = x---,
+        // 8-8 "xx" = x-x-, 8-rest + 8 "-x" = --x-.
+        fn onsets(c: &Cell) -> String {
+            let sx = DEFAULT_GRID.ticks_of(&s()).unwrap();
+            let mut slots = ['-'; 4];
+            let mut t = 0;
+            for &(d, n) in c.beats {
+                if n {
+                    slots[(t / sx) as usize] = 'x';
+                }
+                t += DEFAULT_GRID.ticks_of(&d).unwrap();
+            }
+            slots.iter().collect()
+        }
+        let pool = |level| {
+            candidates(Subdivision::Sixteenths, level).into_iter().map(onsets).collect::<Vec<_>>()
+        };
+        let l1 = pool(1);
+        assert!(l1.contains(&"xxxx".to_string()), "level 1 must include sixteenths: {l1:?}");
+        let all = pool(5);
+        let unique: std::collections::BTreeSet<_> = all.iter().cloned().collect();
+        assert_eq!(unique.len(), all.len(), "duplicate rhythms: {all:?}");
+        assert_eq!(unique.len(), 15, "all non-empty 4-slot rhythms: {unique:?}");
     }
 
     #[test]
