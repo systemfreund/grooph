@@ -4,6 +4,7 @@ use eframe::egui;
 use eframe::egui::scroll_area::{ScrollBarVisibility, ScrollSource};
 use eframe::egui::{Align, Button, Direction, Frame, Layout, Margin};
 use egui::Widget;
+use grooph_measure::swing::{MAX_SWING_PERCENT, MIN_SWING_PERCENT, SwingUnit};
 
 impl Grooph {
     pub(super) fn main_menu(&mut self, ui: &mut egui::Ui) {
@@ -41,6 +42,7 @@ impl Grooph {
                                 self.editor.dirty = true;
                                 self.handle_bpm_change();
                             }
+                            self.swing_editor(ui);
 
                             ui.separator();
                             if ui.selectable_label(self.ui.mode == Mode::Edit, "🖊").clicked() {
@@ -96,5 +98,49 @@ impl Grooph {
                         });
                     });
             });
+    }
+
+    /// Swing amount and the swung note value. Applies to all playback, the
+    /// editor as well as the generator.
+    fn swing_editor(&mut self, ui: &mut egui::Ui) {
+        let swing = &mut self.playback_ctl.audio_cfg.swing;
+        let resp = egui::DragValue::new(&mut swing.percent)
+            .range(MIN_SWING_PERCENT..=MAX_SWING_PERCENT)
+            .speed(0.05)
+            .custom_formatter(|v, _| {
+                if v <= MIN_SWING_PERCENT as f64 {
+                    "Swing: off".to_owned()
+                } else {
+                    format!("Swing: {v:.0}%")
+                }
+            })
+            .custom_parser(|s| {
+                let s = s.trim().trim_start_matches("Swing:").trim().trim_end_matches('%');
+                if s.eq_ignore_ascii_case("off") {
+                    Some(MIN_SWING_PERCENT as f64)
+                } else {
+                    s.trim().parse().ok()
+                }
+            })
+            .ui(ui)
+            .on_hover_text(
+                "Delays every second note of a pair: 50% is straight, 66% triplet feel, 75% dotted",
+            );
+        if resp.clicked() {
+            ui.memory_mut(|mem| mem.surrender_focus(resp.id));
+        }
+        if !swing.is_straight() {
+            let next = match swing.unit {
+                SwingUnit::Eighths => SwingUnit::Sixteenths,
+                SwingUnit::Sixteenths => SwingUnit::Eighths,
+            };
+            if Button::new(swing.unit.label())
+                .ui(ui)
+                .on_hover_text("Swung note value (click to switch)")
+                .clicked()
+            {
+                swing.unit = next;
+            }
+        }
     }
 }

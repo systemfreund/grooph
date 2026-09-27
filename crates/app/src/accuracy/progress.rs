@@ -97,11 +97,11 @@ fn process_segment(
         if !gb.is_note {
             continue;
         }
-        let cur = gb.onset_tick as f64;
+        let cur = gb.performed_tick as f64;
         let next = if i + 1 < global_beats.len() {
-            global_beats[i + 1].onset_tick as f64
+            global_beats[i + 1].performed_tick as f64
         } else {
-            global_beats[0].onset_tick as f64 + total_loop_ticks
+            global_beats[0].performed_tick as f64 + total_loop_ticks
         };
         let mut window_end = cur + (next - cur) * 0.5;
         if window_end < segment_offset {

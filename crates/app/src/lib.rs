@@ -45,6 +45,7 @@ use grooph_measure::counting::{
 use grooph_measure::duration::NoteValue::*;
 use grooph_measure::editing::Modification;
 use grooph_measure::generator::GeneratorSettings;
+use grooph_measure::swing::Swing;
 use grooph_measure::tempo::ScoreTiming;
 use grooph_measure::{Beat, BeatKind};
 use grooph_midi::{MidiInput, MidiInputEvent};
@@ -109,6 +110,7 @@ struct PersistedState {
     endless: bool,
     ghost_notes: bool,
     count_in: bool,
+    swing: Swing,
 }
 
 impl Default for PersistedState {
@@ -131,6 +133,7 @@ impl Default for PersistedState {
             endless: false,
             ghost_notes: false,
             count_in: false,
+            swing: Swing::default(),
         }
     }
 }
@@ -155,6 +158,7 @@ impl PersistedState {
             endless: app.editor.generator.endless,
             ghost_notes: app.editor.generator.ghost_notes,
             count_in: app.playback_ctl.audio_cfg.count_in,
+            swing: app.playback_ctl.audio_cfg.swing,
         }
     }
 }
@@ -281,7 +285,7 @@ impl Grooph {
             return;
         }
 
-        let timing = ScoreTiming::from_score(&self.editor.score, self.playback_ctl.bpm);
+        let timing = self.score_timing();
         let total_loop_seconds = timing.total_loop_seconds();
 
         if self.playback_ctl.transport_state == TransportState::Playing
@@ -341,7 +345,15 @@ impl Grooph {
         PlaybackOptions {
             count_in: self.playback_ctl.audio_cfg.count_in,
             ghost_notes: generator.ghost_notes.then_some(generator.settings.subdivision),
+            swing: self.playback_ctl.audio_cfg.swing,
         }
+    }
+
+    /// Tempo backbone of the working score, including swing. Must agree with
+    /// the timing the audio engine builds from [`Self::playback_options`].
+    pub(crate) fn score_timing(&self) -> ScoreTiming {
+        ScoreTiming::from_score(&self.editor.score, self.playback_ctl.bpm)
+            .with_swing(self.playback_ctl.audio_cfg.swing)
     }
 
     fn clear_accuracy_for_edit(&mut self) { self.playback_ctl.accuracy.tracker.clear_for_edit(); }
@@ -688,7 +700,7 @@ impl Grooph {
             return;
         }
 
-        let timing = ScoreTiming::from_score(&self.editor.score, self.playback_ctl.bpm);
+        let timing = self.score_timing();
         if timing.total_loop_seconds() <= 0.0 {
             return;
         }
@@ -888,6 +900,7 @@ impl Grooph {
                     offset: state.audio_offset,
                     latency_enabled: state.audio_latency_enabled,
                     count_in: state.count_in,
+                    swing: state.swing,
                 },
                 playback: PlaybackState::default(),
                 accuracy: AccuracyState::new(state.accuracy_enabled),

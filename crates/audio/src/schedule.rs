@@ -49,6 +49,8 @@ impl Schedule {
     /// Build a schedule covering the entire score. Keys are global ticks across
     /// the score loop; per-measure offsets come from `timing.measure_start_tick`.
     /// `ghost_notes` adds [`SoundType::Ghost`] on the free slots of that grid.
+    /// Notes and ghost notes sound at their swung position (see
+    /// [`ScoreTiming::performed_global_tick`]).
     pub(crate) fn build(
         score: &Score,
         timing: &ScoreTiming,
@@ -72,13 +74,15 @@ impl Schedule {
                     && let Some(&t) = onsets.get(i)
                 {
                     let s = if beat.accented { SoundType::AccentedBeat } else { SoundType::Beat };
-                    map.entry(start + t as u64).or_default().push(s);
+                    map.entry(timing.performed_global_tick(idx, t)).or_default().push(s);
                 }
             }
 
             if let Some(subdivision) = ghost_notes {
                 for t in ghost_onsets(measure, subdivision) {
-                    map.entry(start + t as u64).or_default().push(SoundType::Ghost);
+                    map.entry(timing.performed_global_tick(idx, t))
+                        .or_default()
+                        .push(SoundType::Ghost);
                 }
             }
         }
@@ -170,6 +174,33 @@ mod tests {
         // 16 sixteenth slots minus 4 quarter-note onsets.
         assert_eq!(ghosts(&with), 12);
         assert!(!with.map[&0].contains(&SoundType::Ghost));
+    }
+
+    #[test]
+    fn swing_delays_offbeat_notes_and_ghosts() {
+        use grooph_measure::duration::e;
+        use grooph_measure::swing::{Swing, SwingUnit};
+        let mut m = Measure::new(TimeSignature::FOUR_FOUR);
+        for i in 0..8 {
+            m.set_beat(i, Beat::note(e())).unwrap();
+        }
+        let score = Score { measures: vec![m] };
+        let swing = Swing { unit: SwingUnit::Eighths, percent: 75 };
+        let timing = ScoreTiming::from_score(&score, 120).with_swing(swing);
+        let s = Schedule::build(&score, &timing, Some(Subdivision::Sixteenths));
+
+        let tpq = DEFAULT_GRID.ticks_of(&q()).unwrap() as u64;
+        let tpe = tpq / 2;
+        let tps = tpq / 4;
+        for beat in 0..4 {
+            let on = beat * tpq;
+            assert!(s.map[&on].contains(&SoundType::Beat));
+            // The "&" moves to the fourth sixteenth; nothing is left straight.
+            assert!(s.map[&(on + 3 * tps)].contains(&SoundType::Beat));
+            assert!(!s.map.contains_key(&(on + tpe)));
+            // Ghost "e" is stretched along with the first half of the pair.
+            assert!(s.map[&(on + tps * 3 / 2)].contains(&SoundType::Ghost));
+        }
     }
 
     #[test]

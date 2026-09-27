@@ -53,6 +53,13 @@ Important root files:
   (Downbeat/Primary/Accent/Beat) and uses `DEFAULT_GRID`.
 - The playback cursor is smoothed in the UI, audio offset for latency is optional.
 - Counting overlay comes from `grooph_measure::counting`.
+- Swing (`grooph_measure::swing::Swing`, global, main menu next to BPM): 50%
+  (off) to 75% (dotted), swung unit 8ths or 16ths. Notation stays straight;
+  `ScoreTiming::with_swing` carries it. `performed_global_tick` moves notes and
+  ghost notes in the schedule and is the reference for accuracy hits/misses;
+  `written_global_tick` maps the audio position back so the cursor reaches a
+  swung note when it sounds. Pairs start at the downbeat, tuplet onsets and a
+  trailing incomplete pair stay straight. Not stored with library patterns.
 
 ## Generator / endless mode
 

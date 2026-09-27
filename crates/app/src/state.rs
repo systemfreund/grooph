@@ -7,6 +7,7 @@ use crate::{CountingSettings, Mode, TransportState};
 use eframe::egui::TextStyle;
 use eframe::epaint::FontId;
 use grooph_audio::{Audio, AudioSettings};
+use grooph_measure::swing::Swing;
 use grooph_measure::{Cursor, Measure, Score};
 use grooph_midi::MidiInput;
 use std::collections::HashMap;
@@ -17,6 +18,8 @@ pub(crate) struct AudioConfig {
     pub(crate) latency_enabled: bool,
     /// Play one bar of clicks before playback starts.
     pub(crate) count_in: bool,
+    /// Swing feel of the playback (notation stays straight).
+    pub(crate) swing: Swing,
 }
 
 impl Default for AudioConfig {
@@ -26,6 +29,7 @@ impl Default for AudioConfig {
             offset: 0.0,
             latency_enabled: true,
             count_in: false,
+            swing: Swing::default(),
         }
     }
 }

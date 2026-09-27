@@ -15,6 +15,7 @@
 
 use crate::Score;
 use crate::grid::DEFAULT_GRID;
+use crate::swing::Swing;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ScoreTiming {
@@ -33,6 +34,9 @@ pub struct ScoreTiming {
     seconds_per_tick: Vec<f64>,
     total_loop_ticks: u64,
     total_loop_seconds: f64,
+    /// Swing feel applied to performed onsets. The tick axis itself stays
+    /// straight: swing only moves where notes sound.
+    swing: Swing,
 }
 
 impl Default for ScoreTiming {
@@ -49,6 +53,7 @@ impl Default for ScoreTiming {
             seconds_per_tick: Vec::new(),
             total_loop_ticks: 0,
             total_loop_seconds: 0.0,
+            swing: Swing::default(),
         }
     }
 }
@@ -93,7 +98,33 @@ impl ScoreTiming {
             seconds_per_tick,
             total_loop_ticks: tick_acc,
             total_loop_seconds: sec_acc,
+            swing: Swing::default(),
         }
+    }
+
+    pub fn with_swing(mut self, swing: Swing) -> Self {
+        self.swing = swing;
+        self
+    }
+
+    pub fn swing(&self) -> Swing { self.swing }
+
+    /// Global tick at which a note written at `(measure_idx, local_tick)` is
+    /// heard, i.e. with swing applied.
+    pub fn performed_global_tick(&self, measure_idx: usize, local_tick: u32) -> u64 {
+        let local = self.swing.performed_tick(local_tick, self.measure_ticks[measure_idx]);
+        self.to_global_tick(measure_idx, local)
+    }
+
+    /// Inverse of [`Self::performed_global_tick`] for a continuous audio
+    /// position: the written global tick the playback cursor should show.
+    pub fn written_global_tick(&self, global_tick: f64) -> f64 {
+        if self.swing.is_straight() || self.total_loop_ticks == 0 {
+            return global_tick;
+        }
+        let (idx, local) = self.to_local(global_tick);
+        let written = self.swing.written_tick(local, self.measure_ticks[idx]);
+        self.measure_starts[idx] as f64 + written
     }
 
     pub fn bpm(&self) -> u32 { self.bpm }
@@ -301,6 +332,24 @@ mod tests {
         let (idx, local) = t.to_local(total);
         assert_eq!(idx, 0);
         assert!(local.abs() < 1e-9);
+    }
+
+    #[test]
+    fn swing_moves_performed_onsets_not_measures() {
+        use crate::duration::{e, q};
+        use crate::swing::{SwingUnit, Swing};
+        let s = score_of(&[TimeSignature::FOUR_FOUR, TimeSignature::FOUR_FOUR]);
+        let straight = ScoreTiming::from_score(&s, 120);
+        let t = straight.clone().with_swing(Swing { unit: SwingUnit::Eighths, percent: 75 });
+        assert_eq!(t.total_loop_ticks(), straight.total_loop_ticks());
+        assert_eq!(t.measure_start_tick(1), straight.measure_start_tick(1));
+
+        let e = DEFAULT_GRID.ticks_of(&e()).unwrap();
+        let q = DEFAULT_GRID.ticks_of(&q()).unwrap();
+        let performed = t.performed_global_tick(1, e);
+        assert_eq!(performed, t.measure_start_tick(1) + (q * 3 / 4) as u64);
+        let written = t.written_global_tick(performed as f64);
+        assert!((written - t.to_global_tick(1, e) as f64).abs() < 1e-9);
     }
 
     #[test]
