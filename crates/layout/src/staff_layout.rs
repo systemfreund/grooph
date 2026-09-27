@@ -191,21 +191,9 @@ fn min_measure_width(
 }
 
 /// Legibility floor: minimum `em` a measure may be rendered at before it
-/// overflows its row instead of shrinking further, used when the baseline
-/// `em` starts out above it. 48 is a deliberately generous margin above
-/// [`MIN_LEGIBLE_EM`], the actually-measured illegibility threshold, chosen
-/// for the desktop-sized baselines `compute_em` typically produces there.
-pub const LEGIBILITY_FLOOR_EM: f32 = 48.0;
-
-/// Absolute legibility floor: the prototype behind this found glyphs stop
-/// reading as distinct shapes below ~9em. On narrow viewports (phones)
-/// `compute_em` picks a baseline already at or below [`LEGIBILITY_FLOOR_EM`]
-/// from available height/width alone, before content is considered — there
-/// that floor has no headroom left to enforce, so this lower, actually-
-/// illegible threshold takes over instead, letting a measure shrink to fit
-/// its row rather than permanently overflowing it (the common case on
-/// mobile, not an exceptional one).
-pub const MIN_LEGIBLE_EM: f32 = 9.0;
+/// overflows its row instead of shrinking further. The prototype behind this
+/// found glyphs stop reading as distinct shapes below ~9em.
+pub const LEGIBILITY_FLOOR_EM: f32 = 9.0;
 
 /// Vertical budget (in em) for one row's content, symmetric around the
 /// baseline (per-measure note positioning is center-based — see
@@ -224,11 +212,8 @@ fn row_height_em(opts: &StaffOpts) -> f32 {
 ///
 /// Every measure gets its own row (system), stacked top-to-bottom, and is
 /// stretched to fill `opts.rect.width()`. Glyph size is shared by all rows:
-/// it shrinks as needed for the widest measure to fit — never below
-/// [`LEGIBILITY_FLOOR_EM`] if the baseline `em` started out above it, or
-/// below the lower [`MIN_LEGIBLE_EM`] otherwise (typically on narrow/mobile
-/// viewports, where the baseline already starts at or below
-/// `LEGIBILITY_FLOOR_EM`). A measure that doesn't fit even fully shrunk
+/// it shrinks as needed for the widest measure to fit, never below
+/// [`LEGIBILITY_FLOOR_EM`]. A measure that doesn't fit even fully shrunk
 /// overflows its row (the caller is expected to host the result in a
 /// scrollable area) — the rare, genuinely too-dense case, not the common one.
 pub fn build_staff_layout(score: &Score, opts: &StaffOpts) -> StaffLayout {
@@ -253,21 +238,11 @@ pub fn build_staff_layout(score: &Score, opts: &StaffOpts) -> StaffLayout {
     let available = opts.rect.width().max(0.0);
 
     // 3. One glyph scale for all rows: shrink just enough for the widest
-    // measure to fit, but never below a legibility floor. Widths scale
+    // measure to fit, but never below the legibility floor. Widths scale
     // linearly with em, so a measure's minimum width at this scale is
     // `w * em_scale`.
-    //
-    // Which floor applies depends on where the baseline `em` started: above
-    // `LEGIBILITY_FLOOR_EM`, shrinking stops there, with plenty of margin to
-    // spare (the common desktop case). At or below it — the common case on
-    // narrow viewports (phones), where `compute_em` already picks a small
-    // baseline from available height/width alone — that floor has no
-    // headroom left to enforce, so the true, lower `MIN_LEGIBLE_EM`
-    // threshold takes over instead: it still lets a measure shrink to fit
-    // its row rather than permanently overflowing it, while keeping a real
-    // floor for the rare, genuinely too-dense measure.
-    let floor_em = if opts.em > LEGIBILITY_FLOOR_EM { LEGIBILITY_FLOOR_EM } else { MIN_LEGIBLE_EM };
-    let shrink_floor_scale = if opts.em > 0.0 { (floor_em / opts.em).min(1.0) } else { 1.0 };
+    let shrink_floor_scale =
+        if opts.em > 0.0 { (LEGIBILITY_FLOOR_EM / opts.em).min(1.0) } else { 1.0 };
     let widest = widths_min.iter().copied().fold(0.0f32, f32::max);
     let em_scale =
         if widest > 0.0 { (available / widest).clamp(shrink_floor_scale, 1.0) } else { 1.0 };
@@ -506,10 +481,11 @@ mod tests {
 
     #[test]
     fn staff_layout_shrinks_to_fit_above_floor() {
-        // em=96 is double the legibility floor (48), so glyphs may shrink to
-        // half size. The first measure (with clef + TS, the widest) doesn't
-        // fit at the baseline em but does above the floor: everything shrinks
-        // just enough for it to fill the row exactly, nothing overflows.
+        // em=96 is well above the legibility floor, so glyphs may shrink a
+        // lot before hitting it. The first measure (with clef + TS, the
+        // widest) doesn't fit at the baseline em but does once shrunk:
+        // everything shrinks just enough for it to fill the row exactly,
+        // nothing overflows.
         let em = 96.0;
         let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(1200.0, 100.0));
         let staff_opts = opts(em, rect);
@@ -532,14 +508,14 @@ mod tests {
     }
 
     #[test]
-    fn staff_layout_shrinks_to_fit_below_floor() {
-        // Mimics a narrow phone viewport: `compute_em` picks a baseline em
-        // (20) that's already below the legibility floor (48) purely from
-        // available height/width, well before content is considered. The
-        // measure's natural width at that baseline doesn't fit the row —
-        // this must still shrink to fit (even past the floor) rather than
-        // permanently overflowing into forced horizontal scroll, which is
-        // the common case on mobile, not an exceptional one.
+    fn staff_layout_shrinks_to_fit_from_small_mobile_baseline() {
+        // Mimics a narrow phone viewport: `compute_em` picks a small
+        // baseline em (20) purely from available height/width, well before
+        // content is considered. The measure's natural width at that
+        // baseline doesn't fit the row — this must still shrink to fit
+        // rather than permanently overflowing into forced horizontal
+        // scroll, which is the common case on mobile, not an exceptional
+        // one.
         let em = 20.0;
         let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(200.0, 400.0));
         let staff_opts = opts(em, rect);
@@ -568,9 +544,11 @@ mod tests {
         let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(400.0, 100.0));
         let staff_opts = opts(em, rect);
 
-        // A 20/4 measure gives 20 valid quarter-note slots (a plain 4/4
-        // measure only has 4 — indexing beyond that panics).
-        let score = Score::single(measure_with_quarters(TimeSignature { beats: 20, beat_unit: 4 }));
+        // A 64/4 measure gives 64 valid quarter-note slots (a plain 4/4
+        // measure only has 4 — indexing beyond that panics). Needs to be
+        // this dense for the floor (a low, absolute legibility limit) to
+        // actually be reached before the measure fits.
+        let score = Score::single(measure_with_quarters(TimeSignature { beats: 64, beat_unit: 4 }));
 
         let staff = build_staff_layout(&score, &staff_opts);
         assert_eq!(staff.systems.len(), 1);
@@ -633,11 +611,10 @@ mod tests {
     #[test]
     fn measures_denser_than_sixteenths_overflow() {
         // A measure so dense (32nds packed into a wide 16/4 bar — four times
-        // a 4/4 bar's worth) that even shrinking all the way to
-        // `MIN_LEGIBLE_EM` (the floor that applies here, since em=20 already
-        // starts below `LEGIBILITY_FLOOR_EM`) can't make it fit: it widens
-        // past the row instead of cramping its notes further, while the
-        // plain sixteenth measure still just fills the row.
+        // a 4/4 bar's worth) that even shrinking all the way to the
+        // legibility floor can't make it fit: it widens past the row
+        // instead of cramping its notes further, while the plain sixteenth
+        // measure still just fills the row.
         use grooph_measure::duration::th;
         let rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(400.0, 400.0));
         let o = opts(20.0, rect);
