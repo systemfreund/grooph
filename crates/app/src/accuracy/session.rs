@@ -21,7 +21,9 @@ pub(super) struct AccuracyStats {
 }
 
 impl AccuracyStats {
-    fn reset(&mut self) { *self = Self::default(); }
+    fn reset(&mut self) {
+        *self = Self::default();
+    }
 
     pub(super) fn push(&mut self, delta_ms: f64) {
         self.count = self.count.saturating_add(1);
@@ -117,9 +119,13 @@ impl RecordingSession {
         *self = Self::Recording(Box::new(RecordingData::new(start_time, last_tick)));
     }
 
-    pub(super) fn stop(&mut self) { *self = Self::Idle; }
+    pub(super) fn stop(&mut self) {
+        *self = Self::Idle;
+    }
 
-    pub(super) fn is_recording(&self) -> bool { matches!(self, Self::Recording(_)) }
+    pub(super) fn is_recording(&self) -> bool {
+        matches!(self, Self::Recording(_))
+    }
 
     pub(super) fn data(&self) -> Option<&RecordingData> {
         match self {

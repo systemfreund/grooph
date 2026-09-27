@@ -14,11 +14,15 @@ pub(crate) struct PlatformRuntime;
 
 #[cfg(not(target_arch = "wasm32"))]
 impl PlatformRuntime {
-    pub(crate) fn new() -> Self { Self }
+    pub(crate) fn new() -> Self {
+        Self
+    }
 
     pub(crate) fn install_listeners(&self, _ctx: eframe::egui::Context) {}
 
-    pub(crate) fn take_visibility_event(&self) -> Option<VisibilityEvent> { None }
+    pub(crate) fn take_visibility_event(&self) -> Option<VisibilityEvent> {
+        None
+    }
 
     pub(crate) fn acquire_wake_lock(&self) {}
 
@@ -28,7 +32,9 @@ impl PlatformRuntime {
 /// Seed for the rhythm generator. Uses the browser's crypto RNG on the web
 /// and the system clock natively.
 #[cfg(target_arch = "wasm32")]
-pub(crate) fn random_seed() -> u64 { getrandom::u64().unwrap_or(0x5EED) }
+pub(crate) fn random_seed() -> u64 {
+    getrandom::u64().unwrap_or(0x5EED)
+}
 
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn random_seed() -> u64 {

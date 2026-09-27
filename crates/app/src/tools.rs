@@ -95,7 +95,9 @@ pub struct Shortcut {
 }
 
 impl Shortcut {
-    pub const fn plain(key: Key) -> Self { Self { key, shift: false, command: false } }
+    pub const fn plain(key: Key) -> Self {
+        Self { key, shift: false, command: false }
+    }
 
     pub fn is_pressed(&self, i: &InputState) -> bool {
         if !i.key_pressed(self.key) {

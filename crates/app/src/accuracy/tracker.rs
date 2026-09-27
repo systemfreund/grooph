@@ -15,9 +15,13 @@ pub(crate) struct AccuracyTracker {
 }
 
 impl AccuracyTracker {
-    pub(crate) fn new() -> Self { Self::default() }
+    pub(crate) fn new() -> Self {
+        Self::default()
+    }
 
-    pub(crate) fn has_start_time(&self) -> bool { self.session.is_recording() }
+    pub(crate) fn has_start_time(&self) -> bool {
+        self.session.is_recording()
+    }
 
     pub(crate) fn update_state(
         &mut self,
@@ -53,9 +57,13 @@ impl AccuracyTracker {
         self.session.realign(start_time, last_tick);
     }
 
-    pub(crate) fn on_playback_stop(&mut self) { self.session.stop(); }
+    pub(crate) fn on_playback_stop(&mut self) {
+        self.session.stop();
+    }
 
-    pub(crate) fn clear_for_edit(&mut self) { self.session.clear_marks(); }
+    pub(crate) fn clear_for_edit(&mut self) {
+        self.session.clear_marks();
+    }
 
     /// Look up the accuracy mark for a score-global onset tick.
     pub(crate) fn mark_for_onset(&self, global_onset_tick: u64) -> Option<AccuracyMark> {

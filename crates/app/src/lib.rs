@@ -28,7 +28,8 @@ use crate::generator::GeneratorState;
 use crate::library::PatternLibrary;
 use crate::platform::{PlatformRuntime, VisibilityEvent};
 use crate::state::{
-    AudioConfig, CountInState, EditorState, LayoutSettings, MidiState, PlaybackController, PlaybackState, UiShell,
+    AudioConfig, CountInState, EditorState, LayoutSettings, MidiState, PlaybackController,
+    PlaybackState, UiShell,
 };
 use crate::tools::ToolKind;
 use crate::tools::{BeatTemplate, Modifier, all_tools};
@@ -184,12 +185,7 @@ struct CountingSettings {
 
 impl Default for CountingSettings {
     fn default() -> Self {
-        Self {
-            enabled: true,
-            show_labels: true,
-            base: CountingBase::Ands,
-            show_tuplets: false,
-        }
+        Self { enabled: true, show_labels: true, base: CountingBase::Ands, show_tuplets: false }
     }
 }
 
@@ -356,7 +352,9 @@ impl Grooph {
             .with_swing(self.playback_ctl.audio_cfg.swing)
     }
 
-    fn clear_accuracy_for_edit(&mut self) { self.playback_ctl.accuracy.tracker.clear_for_edit(); }
+    fn clear_accuracy_for_edit(&mut self) {
+        self.playback_ctl.accuracy.tracker.clear_for_edit();
+    }
 
     pub(crate) fn current_measure(&self) -> &Measure {
         self.editor.score.current(self.editor.cursor.measure_idx)
@@ -370,9 +368,13 @@ impl Grooph {
         EditorSnapshot { score: self.editor.score.clone(), cursor: self.editor.cursor }
     }
 
-    pub(crate) fn can_undo(&self) -> bool { self.editor.history.can_undo() }
+    pub(crate) fn can_undo(&self) -> bool {
+        self.editor.history.can_undo()
+    }
 
-    pub(crate) fn can_redo(&self) -> bool { self.editor.history.can_redo() }
+    pub(crate) fn can_redo(&self) -> bool {
+        self.editor.history.can_redo()
+    }
 
     /// Snapshot the current state, run `op`, and commit only if it reports a change.
     /// On commit, clears redo and accuracy edit state. On no-op, the snapshot is discarded.
@@ -682,7 +684,9 @@ impl Grooph {
         self.playback_ctl.accuracy.set_enabled(enabled, transport);
     }
 
-    fn handle_bpm_change(&mut self) { self.realign_accuracy_clock(); }
+    fn handle_bpm_change(&mut self) {
+        self.realign_accuracy_clock();
+    }
 
     /// Re-anchor the accuracy session to the current playback position, e.g.
     /// after a tempo change or when the count-in bar ends.

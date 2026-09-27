@@ -41,15 +41,21 @@ impl PatternLibrary {
     }
 
     /// Remove the pattern with the given id, if present.
-    pub fn remove(&mut self, id: u64) { self.patterns.retain(|p| p.id != id); }
+    pub fn remove(&mut self, id: u64) {
+        self.patterns.retain(|p| p.id != id);
+    }
 
     pub fn get(&self, id: u64) -> Option<&SavedPattern> {
         self.patterns.iter().find(|p| p.id == id)
     }
 
-    pub fn contains(&self, id: u64) -> bool { self.patterns.iter().any(|p| p.id == id) }
+    pub fn contains(&self, id: u64) -> bool {
+        self.patterns.iter().any(|p| p.id == id)
+    }
 
-    pub fn name_of(&self, id: u64) -> Option<&str> { self.get(id).map(|p| p.name.as_str()) }
+    pub fn name_of(&self, id: u64) -> Option<&str> {
+        self.get(id).map(|p| p.name.as_str())
+    }
 }
 
 #[cfg(test)]

@@ -85,10 +85,14 @@ pub(crate) struct PlaybackState {
 }
 
 impl PlaybackState {
-    pub(crate) fn reset(&mut self) { *self = Self::default(); }
+    pub(crate) fn reset(&mut self) {
+        *self = Self::default();
+    }
 
     /// The score hasn't started yet (count-in pending or playing).
-    pub(crate) fn counting_in(&self) -> bool { self.count_in != CountInState::Off }
+    pub(crate) fn counting_in(&self) -> bool {
+        self.count_in != CountInState::Off
+    }
 }
 
 #[derive(Default)]

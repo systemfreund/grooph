@@ -10,7 +10,9 @@ pub(crate) struct AccuracyState {
 }
 
 impl AccuracyState {
-    pub(crate) fn new(enabled: bool) -> Self { Self { tracker: AccuracyTracker::new(), enabled } }
+    pub(crate) fn new(enabled: bool) -> Self {
+        Self { tracker: AccuracyTracker::new(), enabled }
+    }
 
     pub(crate) fn set_enabled(&mut self, enabled: bool, transport: TransportState) {
         if self.enabled == enabled {
