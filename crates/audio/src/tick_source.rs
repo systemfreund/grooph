@@ -10,15 +10,47 @@
 use crate::schedule::{Schedule, SoundType};
 use grooph_measure::tempo::ScoreTiming;
 
+/// One bar of clicks played before the score starts. Ticks are in the first
+/// measure's tick scale and run at its tempo.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct CountInPlan {
+    pub(crate) ticks: u32,
+    /// Click positions within `0..ticks` (downbeat plus primary beats).
+    pub(crate) clicks: Vec<u32>,
+}
+
+struct CountInProgress {
+    plan: CountInPlan,
+    pos: f64,
+}
+
 pub(crate) struct TickSource {
     cursor: f64,
     sample_rate: u32,
+    count_in: Option<CountInProgress>,
 }
 
 impl TickSource {
-    pub(crate) fn new(sample_rate: u32) -> Self { Self { cursor: 0.0, sample_rate } }
+    pub(crate) fn new(sample_rate: u32) -> Self {
+        Self { cursor: 0.0, sample_rate, count_in: None }
+    }
 
-    pub(crate) fn cursor(&self) -> f64 { self.cursor }
+    /// Cursor for display: global score tick, or a negative tick counting up
+    /// to 0 while the count-in bar plays.
+    pub(crate) fn cursor(&self) -> f64 {
+        match &self.count_in {
+            Some(ci) => ci.pos - ci.plan.ticks as f64,
+            None => self.cursor,
+        }
+    }
+
+    /// Start playback from the top of the score, optionally after a count-in.
+    pub(crate) fn restart(&mut self, count_in: Option<&CountInPlan>) {
+        self.cursor = 0.0;
+        self.count_in = count_in
+            .filter(|p| p.ticks > 0)
+            .map(|plan| CountInProgress { plan: plan.clone(), pos: 0.0 });
+    }
 
     /// Advance the cursor by one audio sample using the per-measure tempo at
     /// the current cursor position, and append every schedule trigger
@@ -36,6 +68,32 @@ impl TickSource {
         if total_ticks <= 0.0 {
             return;
         }
+
+        if let Some(ci) = &mut self.count_in {
+            let step = timing.ticks_per_sec_in_measure(0) / self.sample_rate as f64;
+            let old_pos = ci.pos;
+            let new_pos = old_pos + step;
+            let end = ci.plan.ticks as f64;
+            for &c in &ci.plan.clicks {
+                let c = c as f64;
+                if c >= old_pos.ceil() && c < new_pos.min(end) {
+                    out.push(SoundType::CountIn);
+                }
+            }
+            if new_pos < end {
+                ci.pos = new_pos;
+                return;
+            }
+            // Count-in finished within this sample: carry the remainder into
+            // the score so the first downbeat lands exactly one bar later.
+            self.count_in = None;
+            self.cursor = 0.0;
+            let leftover = new_pos - end;
+            schedule.collect_in_range(0, leftover, out);
+            self.cursor = leftover;
+            return;
+        }
+
         let old_cursor = self.cursor;
         // Pick the per-measure tempo at the current cursor position. Within one
         // sample, the rate of the old measure is reused; the next sample picks
@@ -95,7 +153,7 @@ mod tests {
     fn first_sample_picks_up_downbeat() {
         let score = score_4_4_quarters();
         let timing = ScoreTiming::from_score(&score, 120);
-        let schedule = Schedule::build(&score, &timing);
+        let schedule = Schedule::build(&score, &timing, None);
         let mut src = TickSource::new(48000);
         let mut out = Vec::new();
         src.advance_one_sample(&timing, &schedule, &mut out);
@@ -108,7 +166,7 @@ mod tests {
     fn cursor_stays_within_loop_and_score_repeats() {
         let score = score_4_4_quarters();
         let timing = ScoreTiming::from_score(&score, 120);
-        let schedule = Schedule::build(&score, &timing);
+        let schedule = Schedule::build(&score, &timing, None);
         let total = timing.total_loop_ticks() as f64;
         let mut src = TickSource::new(48000);
         let mut out = Vec::new();
@@ -121,5 +179,59 @@ mod tests {
             assert!(src.cursor() < total, "cursor escaped loop: {}", src.cursor());
         }
         assert!(downbeats >= 2, "expected score to loop; got {downbeats} downbeats");
+    }
+
+    fn count_in_4_4() -> CountInPlan {
+        let tpb = grooph_measure::grid::DEFAULT_GRID.ticks_per_beat(&TimeSignature::FOUR_FOUR);
+        CountInPlan { ticks: 4 * tpb, clicks: vec![0, tpb, 2 * tpb, 3 * tpb] }
+    }
+
+    #[test]
+    fn count_in_plays_one_bar_before_the_first_downbeat() {
+        let score = score_4_4_quarters();
+        let timing = ScoreTiming::from_score(&score, 120);
+        let schedule = Schedule::build(&score, &timing, None);
+        let mut src = TickSource::new(48000);
+        src.restart(Some(&count_in_4_4()));
+        let mut out = Vec::new();
+        let mut count_in_clicks = Vec::new();
+        let mut first_downbeat = None;
+        // 120 bpm 4/4: count-in bar lasts 2 s; run 2.5 s.
+        for sample in 0..(48_000 * 5 / 2) {
+            src.advance_one_sample(&timing, &schedule, &mut out);
+            for s in out.drain(..) {
+                match s {
+                    SoundType::CountIn => count_in_clicks.push(sample),
+                    SoundType::Downbeat if first_downbeat.is_none() => {
+                        first_downbeat = Some(sample)
+                    }
+                    _ => {}
+                }
+            }
+            if sample < 48_000 * 2 - 1 {
+                assert!(src.cursor() < 0.0, "cursor must be negative during count-in");
+            }
+        }
+        assert_eq!(count_in_clicks.len(), 4);
+        // Clicks every half second, downbeat after two seconds (±1 sample).
+        for (i, s) in count_in_clicks.iter().enumerate() {
+            assert!((*s as i64 - i as i64 * 24_000).abs() <= 1, "click {i} at sample {s}");
+        }
+        let db = first_downbeat.expect("score must start after count-in") as i64;
+        assert!((db - 96_000).abs() <= 1, "first downbeat at sample {db}");
+    }
+
+    #[test]
+    fn restart_without_count_in_starts_at_zero() {
+        let score = score_4_4_quarters();
+        let timing = ScoreTiming::from_score(&score, 120);
+        let schedule = Schedule::build(&score, &timing, None);
+        let mut src = TickSource::new(48000);
+        let mut out = Vec::new();
+        for _ in 0..10_000 {
+            src.advance_one_sample(&timing, &schedule, &mut out);
+        }
+        src.restart(None);
+        assert_eq!(src.cursor(), 0.0);
     }
 }

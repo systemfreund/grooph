@@ -54,14 +54,33 @@ Important root files:
 - The playback cursor is smoothed in the UI, audio offset for latency is optional.
 - Counting overlay comes from `grooph_measure::counting`.
 
-## Generator / reading mode
+## Generator / endless mode
 
 - Panel: `crates/app/src/generator_panel.rs` (🎲 in the main menu). Changing a
   setting regenerates the score (undoable); "Edit" switches to the editor.
-- App glue: `crates/app/src/generator.rs`. Reading mode replaces a measure once
+- App glue: `crates/app/src/generator.rs`. Endless mode replaces a measure once
   both the visible cursor and the audio cursor have left it; the replacement
   keeps the measure's time signature so loop timing stays stable. Needs at
   least 2 bars.
+- Endless mode lays out with `MeasureWidthPolicy::TimeSignature`: measure
+  width depends only on the meter (as if filled with sixteenths), so swapping
+  measures never reflows the staff. The editor keeps `Content` widths.
+- Groupings: every one-beat figure has a stable `GroupingId` (bit index in
+  `GroupingSet`; never renumber, it is persisted). The catalog order follows
+  the reference app's "Custom Groupings" screen. A complexity level is a preset
+  subset (`complexity_groupings`); `custom_groupings(_enabled)` in
+  `GeneratorSettings` replaces it with a hand-picked subset (drawn uniformly;
+  an empty selection falls back to complexity). Picker UI: "Groupings" in the
+  generator panel, tiles via `tool_palette::notation_button`.
+- Ghost notes (`grooph_measure::ghost::ghost_onsets`): quiet hits on every free
+  slot of the generator subdivision (per beat: 8ths=2, 16ths=4, triplets=3;
+  mixed = triplets in tuplet beats, else 16ths). Scheduled as `SoundType::Ghost`,
+  volume via the mixer's "Ghost" slider (`AudioSettings::ghost`).
+- Count-in (`PlaybackOptions::count_in`): `TickSource` plays one bar of
+  `SoundType::CountIn` clicks (downbeat + primary beats of the first measure)
+  before the score; `Audio::playback_position` is negative meanwhile. The UI
+  holds the cursor at 0 (`CountInState`) and re-anchors MIDI accuracy when the
+  count-in ends.
 
 ## Input/tools
 

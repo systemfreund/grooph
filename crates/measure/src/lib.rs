@@ -4,6 +4,7 @@ pub mod duration;
 pub mod editing;
 mod fill;
 pub mod generator;
+pub mod ghost;
 pub mod grid;
 pub(crate) mod grouping;
 mod math;

@@ -2,9 +2,11 @@ mod schedule;
 mod tick_source;
 mod voices;
 
-use crate::tick_source::TickSource;
+use crate::tick_source::{CountInPlan, TickSource};
 use crate::voices::VoiceMixer;
 use grooph_measure::Score;
+use grooph_measure::generator::Subdivision;
+use grooph_measure::grid::DEFAULT_GRID;
 use grooph_measure::tempo::ScoreTiming;
 use log::{debug, error, info, trace};
 use rodio::Source;
@@ -46,7 +48,12 @@ pub struct AudioSettings {
     pub noise_hpf_hz: f32, // High-Pass-Cutoff für Noise (2-6 kHz)
     pub noise_mix: f32,    // Anteil [0..1], der dem Basissignal beigemischt wird
     pub noise_decay: f32,  // unabhängiger Decay nur für Noise-Anteil
+    /// Volume of ghost notes. Defaulted so older persisted settings still load.
+    #[serde(default = "default_ghost_gain")]
+    pub ghost: f32,
 }
+
+fn default_ghost_gain() -> f32 { 0.25 }
 
 impl Default for AudioSettings {
     fn default() -> Self {
@@ -61,6 +68,7 @@ impl Default for AudioSettings {
             noise_hpf_hz: 4200.0,
             noise_mix: 0.05,
             noise_decay: 0.017,
+            ghost: default_ghost_gain(),
         }
     }
 }
@@ -85,6 +93,7 @@ impl AudioSettings {
             noise_hpf_hz: 4000.0,
             noise_mix: 0.0,
             noise_decay: 0.05,
+            ghost: default_ghost_gain(),
         };
         result.clamped()
     }
@@ -99,14 +108,25 @@ impl AudioSettings {
         self.noise_hpf_hz = self.noise_hpf_hz.clamp(2000.0, 8000.0);
         self.noise_mix = self.noise_mix.clamp(0.0, 1.0);
         self.noise_decay = self.noise_decay.clamp(0.005, 1.0);
+        self.ghost = self.ghost.clamp(0.0, 1.0);
         self
     }
+}
+
+/// Playback extras that are not part of the click sound design.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PlaybackOptions {
+    /// Play one bar of clicks before the score starts.
+    pub count_in: bool,
+    /// Fill free slots of this grid with quiet ghost notes.
+    pub ghost_notes: Option<Subdivision>,
 }
 
 pub struct Audio {
     stream: Option<rodio::OutputStream>,
     sink: Option<rodio::Sink>,
     shared_state: Arc<Mutex<PlaybackState>>,
+    options: PlaybackOptions,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -141,6 +161,7 @@ struct PlaybackParams {
     timing: ScoreTiming,
     schedule: Schedule,
     audio_settings: AudioSettings,
+    count_in: Option<CountInPlan>,
 }
 
 impl Audio {
@@ -150,6 +171,7 @@ impl Audio {
             timing: ScoreTiming::default(),
             schedule: Schedule::default(),
             audio_settings: AudioSettings::default(),
+            count_in: None,
         };
 
         let shared_state = Arc::new(Mutex::new(PlaybackState {
@@ -160,24 +182,27 @@ impl Audio {
             is_silent: true,
         }));
 
-        Some(Self { stream: None, sink: None, shared_state })
+        Some(Self { stream: None, sink: None, shared_state, options: PlaybackOptions::default() })
     }
 
     // Returns true if UI should repaint soon (while playing or while waiting for tail-out)
     pub fn update(&mut self, player_state: &PlayerState, bpm: u32, score: &Score) -> bool {
         let timing = ScoreTiming::from_score(score, bpm);
-        let schedule = Schedule::build(score, &timing);
+        let schedule = Schedule::build(score, &timing, self.options.ghost_notes);
+        let count_in = if self.options.count_in { count_in_plan(score) } else { None };
 
         // Check differences
         if let Ok(mut shared_state) = self.shared_state.try_lock()
             && (shared_state.params.bpm != bpm
                 || shared_state.params.timing != timing
                 || shared_state.params.schedule != schedule
+                || shared_state.params.count_in != count_in
                 || shared_state.playing_state != *player_state)
         {
             shared_state.params.bpm = bpm;
             shared_state.params.timing = timing;
             shared_state.params.schedule = schedule;
+            shared_state.params.count_in = count_in;
             shared_state.playing_state = player_state.clone();
             shared_state.is_dirty = true;
 
@@ -236,11 +261,14 @@ impl Audio {
         }
     }
 
+    pub fn set_playback_options(&mut self, options: PlaybackOptions) { self.options = options; }
+
     /// Whether an output stream is running, i.e. `playback_position` advances.
     pub fn is_running(&self) -> bool { self.sink.is_some() }
 
     /// Returns `(global_tick, total_loop_ticks)` where `global_tick` is the
-    /// current audio cursor over the whole score loop.
+    /// current audio cursor over the whole score loop. It is negative while
+    /// the count-in bar plays and reaches 0 on the score's first downbeat.
     pub fn playback_position(&self) -> Option<(f64, u64)> {
         // Non-blocking try to avoid UI stalls; fall back to None if busy
         if let Ok(shared_state) = self.shared_state.try_lock() {
@@ -249,6 +277,16 @@ impl Audio {
             None
         }
     }
+}
+
+/// Count-in bar for `score`: the first measure's length with a click on the
+/// downbeat and each primary beat (so 6/8 counts in two, 4/4 in four).
+fn count_in_plan(score: &Score) -> Option<CountInPlan> {
+    let ts = score.measures.first()?.time_signature();
+    let ticks = DEFAULT_GRID.ticks_per_measure(&ts);
+    let mut clicks = vec![0];
+    clicks.extend(DEFAULT_GRID.primary_boundaries(&ts));
+    Some(CountInPlan { ticks, clicks })
 }
 
 /// Audio source that drives the metronome: a small orchestrator wiring a
@@ -273,11 +311,15 @@ impl MetronomeSource {
         };
 
         let sample_rate = device_sample_rate();
+        let mut tick_source = TickSource::new(sample_rate);
+        if is_playing == PlayerState::Playing {
+            tick_source.restart(local_params.count_in.as_ref());
+        }
         Self {
             shared_state: shared,
             local_params,
             player_state: is_playing,
-            tick_source: TickSource::new(sample_rate),
+            tick_source,
             voices: VoiceMixer::new(sample_rate),
             sample_rate,
             samples_processed: 0,
@@ -312,15 +354,17 @@ impl MetronomeSource {
                 shared_state
             );
 
-            if self.player_state != shared_state.playing_state
-                && shared_state.playing_state == PlayerState::Playing
-            {
-                info!("Starting playback.")
-            }
+            let starting = self.player_state != shared_state.playing_state
+                && shared_state.playing_state == PlayerState::Playing;
 
             self.player_state = shared_state.playing_state.clone();
             self.local_params = shared_state.params.clone();
             shared_state.is_dirty = false;
+
+            if starting {
+                info!("Starting playback.");
+                self.tick_source.restart(self.local_params.count_in.as_ref());
+            }
         }
     }
 }

@@ -8,15 +8,28 @@
 //! be drawn; the highest allowed level is favoured so a higher setting audibly
 //! changes the result, while easier cells stay in the mix.
 //!
-//! Level ladder (derived from reference examples, 16th subdivision):
-//! 1. quarters and on-beat eighths, quarter rests
+//! Level ladder for 8th/16th subdivisions (derived from reference examples):
+//! 1. quarters, on-beat eighths and quarter rests
 //! 2. eighths on the "and" (first syncopations)
 //! 3. sixteenth figures starting on the beat, no rests inside the beat
 //! 4. dotted figures and rests inside the beat
 //! 5. figures starting with a sixteenth rest (notes on "e" / "a")
 //!
-//! [`GeneratorSettings::space`] adds whole-beat rests on top of the drawn
-//! cells. Every generated measure keeps at least one note.
+//! Level ladder for triplets (per the reference app, `x` = note, `-` = rest):
+//! 1. `xxx`, quarter note or quarter rest
+//! 2. + `x-x`
+//! 3. + `--x`
+//! 4. + `xx-`, `-xx`
+//! 5. + `-x-`
+//!
+//! With the mixed subdivision the triplet ladder is reversed: 1 `-x-`,
+//! 2 + `--x`, 3 + `x-x`, 4 + `xx-`, `-xx`, 5 + `xxx`. Straight figures keep
+//! their levels.
+//!
+//! Besides the level-1 quarter rest, [`GeneratorSettings::space`] adds
+//! whole-beat rests: it replaces entire beats (never part of a figure, so a
+//! triplet is always complete) with a quarter rest. At
+//! maximum space a measure may consist of rests only.
 //!
 //! Only time signatures whose beat unit is a quarter (`x/4`) are supported for
 //! now; cells are written for a quarter-note beat.
@@ -49,6 +62,12 @@ pub struct GeneratorSettings {
     pub time_signature: TimeSignature,
     /// 0.0..=1.0 — the higher, the more (and longer) rests between notes.
     pub space: f32,
+    /// Draw from [`Self::custom_groupings`] instead of the complexity level.
+    #[serde(default)]
+    pub custom_groupings_enabled: bool,
+    /// Hand-picked groupings; kept while custom groupings are switched off.
+    #[serde(default)]
+    pub custom_groupings: GroupingSet,
 }
 
 impl Default for GeneratorSettings {
@@ -59,8 +78,67 @@ impl Default for GeneratorSettings {
             bars: 1,
             time_signature: TimeSignature::FOUR_FOUR,
             space: 0.0,
+            custom_groupings_enabled: false,
+            custom_groupings: GroupingSet::default(),
         }
     }
+}
+
+/// Stable identifier of a grouping (one-beat figure) in the catalog.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct GroupingId(pub u8);
+
+/// A set of groupings, stored as a bit mask over [`GroupingId`]s.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GroupingSet(u32);
+
+impl GroupingSet {
+    pub fn contains(&self, id: GroupingId) -> bool { self.0 & (1 << id.0) != 0 }
+    pub fn insert(&mut self, id: GroupingId) {
+        self.0 |= 1 << id.0;
+    }
+    pub fn remove(&mut self, id: GroupingId) {
+        self.0 &= !(1 << id.0);
+    }
+    pub fn toggle(&mut self, id: GroupingId) {
+        self.0 ^= 1 << id.0;
+    }
+    pub fn is_empty(&self) -> bool { self.0 == 0 }
+}
+
+/// One entry of the grouping catalog, for display and selection.
+#[derive(Clone, Copy, Debug)]
+pub struct Grouping {
+    pub id: GroupingId,
+    /// Complexity level that unlocks this grouping.
+    pub level: u8,
+    cell: &'static Cell,
+}
+
+impl Grouping {
+    /// The grouping written into a one-beat (1/4) measure, e.g. for a thumbnail.
+    pub fn measure(&self) -> Measure {
+        build_measure(TimeSignature::ONE_FOUR, &[self.cell])
+            .expect("library cells always fit one beat")
+    }
+}
+
+/// All groupings available with `subdivision`, in display order.
+pub fn groupings(subdivision: Subdivision) -> Vec<Grouping> {
+    catalog(subdivision)
+        .into_iter()
+        .map(|cell| Grouping { id: cell.id, level: cell.level_in(subdivision), cell })
+        .collect()
+}
+
+/// The groupings a complexity level unlocks: the level is a preset subset of
+/// the catalog.
+pub fn complexity_groupings(subdivision: Subdivision, complexity: u8) -> GroupingSet {
+    let mut set = GroupingSet::default();
+    for c in candidates(subdivision, complexity.clamp(1, MAX_COMPLEXITY)) {
+        set.insert(c.id);
+    }
+    set
 }
 
 #[derive(Debug, PartialEq)]
@@ -83,7 +161,9 @@ pub struct Rng {
 }
 
 impl Rng {
-    pub fn new(seed: u64) -> Self { Self { state: seed } }
+    pub fn new(seed: u64) -> Self {
+        Self { state: seed }
+    }
 
     pub fn next_u64(&mut self) -> u64 {
         self.state = self.state.wrapping_add(0x9E37_79B9_7F4A_7C15);
@@ -104,8 +184,10 @@ impl Rng {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CellFamily {
-    /// Quarters and eighths; available to every subdivision.
-    Basic,
+    /// A plain quarter note or quarter rest; available to every subdivision.
+    Quarter,
+    /// Straight eighths; not used with the triplet subdivision.
+    Eighth,
     Sixteenth,
     Triplet,
 }
@@ -113,7 +195,8 @@ enum CellFamily {
 impl CellFamily {
     fn allowed_in(self, subdivision: Subdivision) -> bool {
         match self {
-            CellFamily::Basic => true,
+            CellFamily::Quarter => true,
+            CellFamily::Eighth => subdivision != Subdivision::Triplets,
             CellFamily::Sixteenth => {
                 matches!(subdivision, Subdivision::Sixteenths | Subdivision::Mixed)
             }
@@ -127,72 +210,112 @@ impl CellFamily {
 /// A figure spanning exactly one quarter-note beat.
 #[derive(Clone, Copy, Debug)]
 struct Cell {
+    /// Stable grouping id (bit index in [`GroupingSet`]); persisted, never reuse.
+    id: GroupingId,
     level: u8,
     family: CellFamily,
     beats: &'static [(Duration, bool)],
 }
 
-const fn de() -> Duration { Duration::Dotted { base: NoteValue::Eighth, dots: 1 } }
+const fn de() -> Duration {
+    Duration::Dotted { base: NoteValue::Eighth, dots: 1 }
+}
 
 const N: bool = true;
 const R: bool = false;
 
-/// Quarter rest — used by the "space" setting and as the no-note fallback.
-const QUARTER_REST: Cell = Cell { level: 1, family: CellFamily::Basic, beats: &[(q(), R)] };
+/// Whole-beat rest inserted by the "space" setting; not part of the library.
+static QUARTER_REST: Cell =
+    Cell { id: g(0), level: 1, family: CellFamily::Quarter, beats: &[(q(), R)] };
 
+const fn g(id: u8) -> GroupingId { GroupingId(id) }
+
+/// Groupings in the reference app's display order ("Custom Groupings"
+/// screen, read left to right). Complexity N unlocks every grouping whose
+/// level is at most N.
 #[rustfmt::skip]
 const CELLS: &[Cell] = &[
-    // Level 1: quarters and on-beat eighths.
-    Cell { level: 1, family: CellFamily::Basic, beats: &[(q(), N)] },
-    QUARTER_REST,
-    Cell { level: 1, family: CellFamily::Basic, beats: &[(e(), N), (e(), N)] },
-    // Level 2: eighth syncopation.
-    Cell { level: 2, family: CellFamily::Basic, beats: &[(e(), R), (e(), N)] },
-    Cell { level: 2, family: CellFamily::Basic, beats: &[(e(), N), (e(), R)] },
+    // Level 1: quarter rest, quarter, two eighths.
+    Cell { id: g(0), level: 1, family: CellFamily::Quarter, beats: &[(q(), R)] },
+    Cell { id: g(1), level: 1, family: CellFamily::Quarter, beats: &[(q(), N)] },
+    Cell { id: g(2), level: 1, family: CellFamily::Eighth, beats: &[(e(), N), (e(), N)] },
+    // Level 2: eighth syncopation. (Eighth + eighth rest is left out on
+    // purpose: rhythmically it is the same single hit as a quarter note.)
+    Cell { id: g(3), level: 2, family: CellFamily::Eighth, beats: &[(e(), R), (e(), N)] },
+    // Sixteenths (onsets on 1 e & a; one spelling per rhythm).
     // Level 3: sixteenth figures on the beat, no inner rests.
-    Cell { level: 3, family: CellFamily::Sixteenth, beats: &[(s(), N), (s(), N), (s(), N), (s(), N)] },
-    Cell { level: 3, family: CellFamily::Sixteenth, beats: &[(s(), N), (s(), N), (e(), N)] },
-    Cell { level: 3, family: CellFamily::Sixteenth, beats: &[(e(), N), (s(), N), (s(), N)] },
+    Cell { id: g(4), level: 3, family: CellFamily::Sixteenth, beats: &[(s(), N), (s(), N), (s(), N), (s(), N)] },
+    Cell { id: g(5), level: 3, family: CellFamily::Sixteenth, beats: &[(e(), N), (s(), N), (s(), N)] },
+    Cell { id: g(6), level: 3, family: CellFamily::Sixteenth, beats: &[(s(), N), (s(), N), (e(), N)] },
     // Level 4: dotted figures, rests inside the beat.
-    Cell { level: 4, family: CellFamily::Sixteenth, beats: &[(de(), N), (s(), N)] },
-    Cell { level: 4, family: CellFamily::Sixteenth, beats: &[(s(), N), (s(), N), (e(), R)] },
-    Cell { level: 4, family: CellFamily::Sixteenth, beats: &[(e(), R), (s(), N), (s(), N)] },
-    Cell { level: 4, family: CellFamily::Sixteenth, beats: &[(e(), N), (s(), R), (s(), N)] },
+    Cell { id: g(7), level: 4, family: CellFamily::Sixteenth, beats: &[(s(), N), (e(), N), (s(), N)] },
+    Cell { id: g(8), level: 4, family: CellFamily::Sixteenth, beats: &[(de(), N), (s(), N)] },
+    Cell { id: g(9), level: 4, family: CellFamily::Sixteenth, beats: &[(e(), R), (s(), N), (s(), N)] },
+    Cell { id: g(10), level: 4, family: CellFamily::Sixteenth, beats: &[(s(), N), (s(), N), (e(), R)] },
     // Level 5: notes on "e" and "a".
-    Cell { level: 5, family: CellFamily::Sixteenth, beats: &[(s(), R), (s(), N), (e(), N)] },
-    Cell { level: 5, family: CellFamily::Sixteenth, beats: &[(de(), R), (s(), N)] },
-    Cell { level: 5, family: CellFamily::Sixteenth, beats: &[(s(), R), (s(), N), (s(), N), (s(), N)] },
-    Cell { level: 5, family: CellFamily::Sixteenth, beats: &[(s(), N), (e(), N), (s(), N)] },
-    Cell { level: 5, family: CellFamily::Sixteenth, beats: &[(s(), N), (de(), N)] },
-    Cell { level: 5, family: CellFamily::Sixteenth, beats: &[(s(), R), (e(), N), (s(), N)] },
-    Cell { level: 5, family: CellFamily::Sixteenth, beats: &[(s(), N), (s(), N), (s(), R), (s(), N)] },
+    Cell { id: g(11), level: 5, family: CellFamily::Sixteenth, beats: &[(s(), R), (s(), N), (e(), N)] },
+    Cell { id: g(12), level: 5, family: CellFamily::Sixteenth, beats: &[(s(), R), (s(), N), (s(), N), (s(), N)] },
+    Cell { id: g(13), level: 5, family: CellFamily::Sixteenth, beats: &[(s(), R), (e(), N), (s(), N)] },
+    Cell { id: g(14), level: 5, family: CellFamily::Sixteenth, beats: &[(s(), R), (de(), N)] },
+    Cell { id: g(15), level: 5, family: CellFamily::Sixteenth, beats: &[(de(), R), (s(), N)] },
     // Triplets (eighth-note triplets per quarter).
-    Cell { level: 2, family: CellFamily::Triplet, beats: &[(t8(), N), (t8(), N), (t8(), N)] },
-    Cell { level: 3, family: CellFamily::Triplet, beats: &[(t8(), N), (t8(), R), (t8(), N)] },
-    Cell { level: 3, family: CellFamily::Triplet, beats: &[(t8(), N), (t8(), N), (t8(), R)] },
-    Cell { level: 4, family: CellFamily::Triplet, beats: &[(t8(), R), (t8(), N), (t8(), N)] },
-    Cell { level: 5, family: CellFamily::Triplet, beats: &[(t8(), R), (t8(), N), (t8(), R)] },
-    Cell { level: 5, family: CellFamily::Triplet, beats: &[(t8(), R), (t8(), R), (t8(), N)] },
+    Cell { id: g(16), level: 1, family: CellFamily::Triplet, beats: &[(t8(), N), (t8(), N), (t8(), N)] },
+    Cell { id: g(17), level: 2, family: CellFamily::Triplet, beats: &[(t8(), N), (t8(), R), (t8(), N)] },
+    Cell { id: g(18), level: 3, family: CellFamily::Triplet, beats: &[(t8(), R), (t8(), R), (t8(), N)] },
+    Cell { id: g(19), level: 4, family: CellFamily::Triplet, beats: &[(t8(), N), (t8(), N), (t8(), R)] },
+    Cell { id: g(20), level: 4, family: CellFamily::Triplet, beats: &[(t8(), R), (t8(), N), (t8(), N)] },
+    Cell { id: g(21), level: 5, family: CellFamily::Triplet, beats: &[(t8(), R), (t8(), N), (t8(), R)] },
 ];
+
+/// Triplet levels with the mixed subdivision (reference app): the offbeat
+/// figures come first, the full triplet last.
+const MIXED_TRIPLET_LEVELS: &[(GroupingId, u8)] =
+    &[(g(21), 1), (g(18), 2), (g(17), 3), (g(19), 4), (g(20), 4), (g(16), 5)];
+
+impl Cell {
+    /// Complexity level that unlocks this cell with `subdivision`.
+    fn level_in(&self, subdivision: Subdivision) -> u8 {
+        if subdivision == Subdivision::Mixed && self.family == CellFamily::Triplet {
+            MIXED_TRIPLET_LEVELS
+                .iter()
+                .find(|(id, _)| *id == self.id)
+                .map_or(self.level, |&(_, level)| level)
+        } else {
+            self.level
+        }
+    }
+}
 
 /// Weight of the highest allowed level relative to each easier level.
 const TOP_LEVEL_WEIGHT: usize = 3;
 
-/// Probability of a whole-beat rest at `space == 1.0`.
-const MAX_SPACE_REST_PROBABILITY: f32 = 0.6;
+/// Probability of a whole-beat rest at `space == 1.0` (a 4/4 measure is then
+/// entirely rests about a third of the time).
+const MAX_SPACE_REST_PROBABILITY: f32 = 0.75;
 
-impl Cell {
-    fn has_note(&self) -> bool { self.beats.iter().any(|&(_, is_note)| is_note) }
+/// Library cells usable with `subdivision`, one per grouping id (the first in
+/// catalog order wins, so a shared id keeps its lowest unlock level).
+fn catalog(subdivision: Subdivision) -> Vec<&'static Cell> {
+    let mut seen = GroupingSet::default();
+    CELLS
+        .iter()
+        .filter(|c| c.family.allowed_in(subdivision))
+        .filter(|c| {
+            let new = !seen.contains(c.id);
+            seen.insert(c.id);
+            new
+        })
+        .collect()
 }
 
 fn candidates(subdivision: Subdivision, max_level: u8) -> Vec<&'static Cell> {
-    CELLS.iter().filter(|c| c.family.allowed_in(subdivision) && c.level <= max_level).collect()
+    catalog(subdivision).into_iter().filter(|c| c.level_in(subdivision) <= max_level).collect()
 }
 
 /// Draw one cell: pick a level (favouring the highest one available), then a
 /// cell of that level uniformly.
-fn pick_cell(pool: &[&'static Cell], rng: &mut Rng) -> &'static Cell {
-    let mut levels: Vec<u8> = pool.iter().map(|c| c.level).collect();
+fn pick_cell(pool: &[&'static Cell], subdivision: Subdivision, rng: &mut Rng) -> &'static Cell {
+    let mut levels: Vec<u8> = pool.iter().map(|c| c.level_in(subdivision)).collect();
     levels.sort_unstable();
     levels.dedup();
     let top = *levels.last().expect("cell pool is never empty");
@@ -209,33 +332,42 @@ fn pick_cell(pool: &[&'static Cell], rng: &mut Rng) -> &'static Cell {
         roll -= w;
     }
 
-    let at_level: Vec<&'static Cell> = pool.iter().copied().filter(|c| c.level == level).collect();
+    let at_level: Vec<&'static Cell> =
+        pool.iter().copied().filter(|c| c.level_in(subdivision) == level).collect();
     at_level[rng.below(at_level.len())]
 }
 
 fn pick_cells(settings: &GeneratorSettings, rng: &mut Rng) -> Vec<&'static Cell> {
     let complexity = settings.complexity.clamp(1, MAX_COMPLEXITY);
     let space = settings.space.clamp(0.0, 1.0);
-    let pool = candidates(settings.subdivision, complexity);
+    let custom: Vec<&'static Cell> = if settings.custom_groupings_enabled {
+        catalog(settings.subdivision)
+            .into_iter()
+            .filter(|c| settings.custom_groupings.contains(c.id))
+            .collect()
+    } else {
+        Vec::new()
+    };
+    // Custom groupings are drawn uniformly; an empty selection falls back to
+    // the complexity level so the generator never runs dry.
+    let (pool, weighted) = if custom.is_empty() {
+        (candidates(settings.subdivision, complexity), true)
+    } else {
+        (custom, false)
+    };
     let beat_count = settings.time_signature.beats as usize;
 
-    let mut cells: Vec<&'static Cell> = (0..beat_count)
+    (0..beat_count)
         .map(|_| {
             if rng.chance(space * MAX_SPACE_REST_PROBABILITY) {
                 &QUARTER_REST
+            } else if weighted {
+                pick_cell(&pool, settings.subdivision, rng)
             } else {
-                pick_cell(&pool, rng)
+                pool[rng.below(pool.len())]
             }
         })
-        .collect();
-
-    if !cells.iter().any(|c| c.has_note()) && beat_count > 0 {
-        let with_notes: Vec<&'static Cell> =
-            pool.iter().copied().filter(|c| c.has_note()).collect();
-        let idx = rng.below(beat_count);
-        cells[idx] = with_notes[rng.below(with_notes.len())];
-    }
-    cells
+        .collect()
 }
 
 /// Write `cells` (one per beat) into a fresh measure via `set_beat`, so the
@@ -379,7 +511,11 @@ mod tests {
         for complexity in 1..=MAX_COMPLEXITY {
             let st = settings(Subdivision::Mixed, complexity);
             for _ in 0..200 {
-                assert!(pick_cells(&st, &mut rng).iter().all(|c| c.level <= complexity));
+                assert!(
+                    pick_cells(&st, &mut rng)
+                        .iter()
+                        .all(|c| c.level_in(Subdivision::Mixed) <= complexity)
+                );
             }
         }
     }
@@ -409,33 +545,267 @@ mod tests {
         }
     }
 
+    /// Triplet-cell patterns (`x` = note, `-` = rest) drawn at `complexity`.
+    fn triplet_patterns(complexity: u8) -> std::collections::BTreeSet<String> {
+        let mut rng = Rng::new(21);
+        let st = settings(Subdivision::Triplets, complexity);
+        (0..500)
+            .flat_map(|_| pick_cells(&st, &mut rng))
+            .map(|c| c.beats.iter().map(|&(_, n)| if n { 'x' } else { '-' }).collect())
+            .collect()
+    }
+
+    fn set(items: &[&str]) -> std::collections::BTreeSet<String> {
+        items.iter().map(|s| s.to_string()).collect()
+    }
+
     #[test]
-    fn low_complexity_matches_reference_vocabulary() {
-        // Level 1 with 16th subdivision: only quarters and on-beat eighth pairs.
-        let mut rng = Rng::new(5);
-        let st = settings(Subdivision::Sixteenths, 1);
-        for _ in 0..200 {
+    fn triplet_ladder_matches_reference_app() {
+        // "x" alone is the quarter note, "-" alone the quarter rest.
+        assert_eq!(triplet_patterns(1), set(&["x", "-", "xxx"]));
+        assert_eq!(triplet_patterns(2), set(&["x", "-", "xxx", "x-x"]));
+        assert_eq!(triplet_patterns(3), set(&["x", "-", "xxx", "x-x", "--x"]));
+        assert_eq!(triplet_patterns(4), set(&["x", "-", "xxx", "x-x", "--x", "xx-", "-xx"]));
+        assert_eq!(triplet_patterns(5), set(&["x", "-", "xxx", "x-x", "--x", "xx-", "-xx", "-x-"]));
+    }
+
+    #[test]
+    fn eighth_ladder_is_rhythmically_distinct() {
+        // Onset patterns per beat on an eighth grid: level 1 = x- (quarter)
+        // and xx; level 2 adds -x. No cell repeats another's onsets.
+        fn patterns(complexity: u8) -> std::collections::BTreeSet<String> {
+            let mut rng = Rng::new(3);
+            let st = settings(Subdivision::Eighths, complexity);
+            (0..300)
+                .flat_map(|_| pick_cells(&st, &mut rng))
+                .map(|c| c.beats.iter().map(|&(_, n)| if n { 'x' } else { '-' }).collect())
+                .collect()
+        }
+        // "-" alone is the quarter rest.
+        assert_eq!(patterns(1), set(&["x", "xx", "-"]));
+        assert_eq!(patterns(2), set(&["x", "xx", "-", "-x"]));
+        assert_eq!(patterns(5), patterns(2));
+    }
+
+    #[test]
+    fn sixteenth_ladder_covers_every_rhythm_once() {
+        // Onsets on the 16th grid (x = note start). Quarter "x" = x---,
+        // 8-8 "xx" = x-x-, 8-rest + 8 "-x" = --x-.
+        fn onsets(c: &Cell) -> String {
+            let sx = DEFAULT_GRID.ticks_of(&s()).unwrap();
+            let mut slots = ['-'; 4];
+            let mut t = 0;
+            for &(d, n) in c.beats {
+                if n {
+                    slots[(t / sx) as usize] = 'x';
+                }
+                t += DEFAULT_GRID.ticks_of(&d).unwrap();
+            }
+            slots.iter().collect()
+        }
+        let pool = |level| {
+            candidates(Subdivision::Sixteenths, level).into_iter().map(onsets).collect::<Vec<_>>()
+        };
+        // Levels 1-2 match the eighth subdivision; sixteenths start at 3.
+        for level in [1, 2] {
+            let eighths: Vec<String> =
+                candidates(Subdivision::Eighths, level).into_iter().map(onsets).collect();
+            assert_eq!(pool(level), eighths);
+        }
+        assert!(pool(3).contains(&"xxxx".to_string()));
+        let all = pool(5);
+        let unique: std::collections::BTreeSet<_> = all.iter().cloned().collect();
+        assert_eq!(unique.len(), all.len(), "duplicate rhythms: {all:?}");
+        // All 16 four-slot rhythms, the empty one being the quarter rest.
+        assert_eq!(unique.len(), 16, "all 4-slot rhythms: {unique:?}");
+    }
+
+    #[test]
+    fn sixteenth_levels_match_reference_groupings() {
+        // Reference app "Custom Groupings", unlocked cumulatively per level.
+        fn onsets(c: &Cell) -> String {
+            let sx = DEFAULT_GRID.ticks_of(&s()).unwrap();
+            let mut slots = ['-'; 4];
+            let mut t = 0;
+            for &(d, n) in c.beats {
+                if n {
+                    slots[(t / sx) as usize] = 'x';
+                }
+                t += DEFAULT_GRID.ticks_of(&d).unwrap();
+            }
+            slots.iter().collect()
+        }
+        let at = |level: u8| -> std::collections::BTreeSet<String> {
+            candidates(Subdivision::Sixteenths, level)
+                .into_iter()
+                .filter(|c| c.level == level)
+                .map(onsets)
+                .collect()
+        };
+        assert_eq!(at(1), set(&["----", "x---", "x-x-"]));
+        assert_eq!(at(2), set(&["--x-"]));
+        assert_eq!(at(3), set(&["xxxx", "x-xx", "xxx-"]));
+        assert_eq!(at(4), set(&["xx-x", "x--x", "--xx", "xx--"]));
+        assert_eq!(at(5), set(&["-xx-", "-xxx", "-x-x", "-x--", "---x"]));
+    }
+
+    #[test]
+    fn mixed_reverses_the_triplet_ladder() {
+        fn triplets_at(level: u8) -> std::collections::BTreeSet<String> {
+            candidates(Subdivision::Mixed, level)
+                .into_iter()
+                .filter(|c| c.family == CellFamily::Triplet)
+                .map(|c| c.beats.iter().map(|&(_, n)| if n { 'x' } else { '-' }).collect())
+                .collect()
+        }
+        assert_eq!(triplets_at(1), set(&["-x-"]));
+        assert_eq!(triplets_at(2), set(&["-x-", "--x"]));
+        assert_eq!(triplets_at(3), set(&["-x-", "--x", "x-x"]));
+        assert_eq!(triplets_at(4), set(&["-x-", "--x", "x-x", "xx-", "-xx"]));
+        assert_eq!(triplets_at(5), set(&["-x-", "--x", "x-x", "xx-", "-xx", "xxx"]));
+        // Straight figures keep their levels in mixed.
+        let straight = |sub| {
+            candidates(sub, 3)
+                .into_iter()
+                .filter(|c| c.family != CellFamily::Triplet)
+                .map(|c| c.id)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(straight(Subdivision::Mixed), straight(Subdivision::Sixteenths));
+        // The triplet subdivision itself is unaffected.
+        assert_eq!(triplet_patterns(1), set(&["x", "-", "xxx"]));
+    }
+
+    #[test]
+    fn space_only_replaces_whole_beats() {
+        // With space, every beat is either a complete library cell or a
+        // quarter rest; triplets are never cut apart.
+        let mut rng = Rng::new(13);
+        let st = GeneratorSettings { space: 1.0, ..settings(Subdivision::Triplets, 1) };
+        for _ in 0..300 {
             for cell in pick_cells(&st, &mut rng) {
-                assert_eq!(cell.level, 1);
+                let whole_rest = cell.beats == [(q(), R)];
+                assert!(whole_rest || cell.beats.iter().all(|&(_, n)| n), "{:?}", cell.beats);
             }
         }
     }
 
     #[test]
-    fn space_increases_rests_and_keeps_a_note() {
+    fn space_increases_rests() {
         fn rest_ratio(space: f32) -> f32 {
             let mut rng = Rng::new(9);
             let st = GeneratorSettings { space, ..settings(Subdivision::Sixteenths, 3) };
             let mut rest_beats = 0;
             for _ in 0..300 {
                 let m = generate_measure(&st, &mut rng).unwrap();
-                assert!(m.beats().iter().any(|b| b.kind == Note), "measure without notes");
                 rest_beats +=
                     m.beats().iter().filter(|b| b.kind == Rest && b.duration == q()).count();
             }
             rest_beats as f32 / (300.0 * 4.0)
         }
-        assert!(rest_ratio(1.0) > rest_ratio(0.0) + 0.3);
+        assert!(rest_ratio(1.0) > rest_ratio(0.0) + 0.5);
+    }
+
+    #[test]
+    fn full_space_can_produce_an_empty_measure() {
+        let mut rng = Rng::new(17);
+        let st = GeneratorSettings { space: 1.0, ..settings(Subdivision::Sixteenths, 3) };
+        let empty = (0..100)
+            .map(|_| generate_measure(&st, &mut rng).unwrap())
+            .filter(|m| m.beats().iter().all(|b| b.kind == Rest))
+            .count();
+        assert!(empty > 0, "expected some all-rest measures at maximum space");
+    }
+
+    #[test]
+    fn grouping_ids_are_unique_per_subdivision() {
+        for sub in [
+            Subdivision::Eighths,
+            Subdivision::Sixteenths,
+            Subdivision::Triplets,
+            Subdivision::Mixed,
+        ] {
+            let ids: Vec<_> = groupings(sub).iter().map(|g| g.id).collect();
+            let unique: std::collections::HashSet<_> = ids.iter().collect();
+            assert_eq!(ids.len(), unique.len(), "{sub:?}");
+            assert!(ids.iter().all(|id| id.0 < 32));
+        }
+        assert_eq!(groupings(Subdivision::Sixteenths).len(), 16);
+        assert_eq!(groupings(Subdivision::Eighths).len(), 4);
+        // Triplets: rest, quarter and six triplet figures; the rest comes
+        // first in every subdivision.
+        assert_eq!(groupings(Subdivision::Triplets).len(), 8);
+        for sub in [Subdivision::Eighths, Subdivision::Sixteenths, Subdivision::Triplets] {
+            let first = groupings(sub)[0].measure();
+            assert!(first.beats().iter().all(|b| b.kind == Rest), "{sub:?}");
+        }
+    }
+
+    #[test]
+    fn complexity_is_a_growing_subset_of_the_catalog() {
+        let sub = Subdivision::Sixteenths;
+        let mut prev = GroupingSet::default();
+        for level in 1..=MAX_COMPLEXITY {
+            let set = complexity_groupings(sub, level);
+            assert_eq!(set.0 & prev.0, prev.0, "level {level} must contain level {}", level - 1);
+            prev = set;
+        }
+        let all = groupings(sub).iter().fold(GroupingSet::default(), |mut s, g| {
+            s.insert(g.id);
+            s
+        });
+        assert_eq!(prev, all);
+    }
+
+    #[test]
+    fn custom_groupings_restrict_the_pool() {
+        let mut custom = GroupingSet::default();
+        let pick = groupings(Subdivision::Sixteenths)[8]; // dotted eighth + sixteenth
+        custom.insert(pick.id);
+        let st = GeneratorSettings {
+            custom_groupings_enabled: true,
+            custom_groupings: custom,
+            ..settings(Subdivision::Sixteenths, 1)
+        };
+        let mut rng = Rng::new(4);
+        for _ in 0..100 {
+            let m = generate_measure(&st, &mut rng).unwrap();
+            let expected: Vec<Beat> =
+                std::iter::repeat_n(pick.measure().beats().clone(), 4).flatten().collect();
+            assert_eq!(m.beats(), &expected);
+        }
+    }
+
+    #[test]
+    fn empty_or_disabled_custom_selection_uses_complexity() {
+        let mut custom = GroupingSet::default();
+        custom.insert(groupings(Subdivision::Sixteenths)[15].id);
+        let off =
+            GeneratorSettings { custom_groupings: custom, ..settings(Subdivision::Sixteenths, 1) };
+        let empty = GeneratorSettings {
+            custom_groupings_enabled: true,
+            ..settings(Subdivision::Sixteenths, 1)
+        };
+        let mut rng = Rng::new(8);
+        for st in [off, empty] {
+            for _ in 0..100 {
+                assert!(pick_cells(&st, &mut rng).iter().all(|c| c.level == 1));
+            }
+        }
+    }
+
+    #[test]
+    fn custom_selection_outside_subdivision_is_ignored() {
+        // A triplet grouping selected while generating sixteenths: falls back.
+        let mut custom = GroupingSet::default();
+        custom.insert(groupings(Subdivision::Triplets).iter().find(|g| g.level == 5).unwrap().id);
+        let st = GeneratorSettings {
+            custom_groupings_enabled: true,
+            custom_groupings: custom,
+            ..settings(Subdivision::Sixteenths, 2)
+        };
+        let mut rng = Rng::new(2);
+        assert!(pick_cells(&st, &mut rng).iter().all(|c| c.level <= 2));
     }
 
     #[test]
