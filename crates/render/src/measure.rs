@@ -643,7 +643,7 @@ mod tests {
     use eframe::egui::{FontFamily, FontId, Pos2};
     use grooph_layout::pixel_layout::GlyphMetrics;
     use grooph_measure::counting::{CountLayer, CountScope, LabelPattern, LabelToken, Subdiv};
-    use grooph_measure::duration::{Duration, NoteValue, e, q, s};
+    use grooph_measure::duration::{Duration, NoteValue, e, q, s, t8};
     use grooph_measure::{Beat, Measure, TimeSignature};
 
     fn opts_for(rect: Rect) -> LayoutOpts {
@@ -908,6 +908,27 @@ mod tests {
         assert_eq!(xs.len(), 2);
         let (x0, x1) = (layout.notes[0].center.x, layout.notes[1].center.x);
         let expected = x0 + (x1 - x0) * 2.0 / 3.0;
+        assert!((xs[1] - expected).abs() < 0.5, "got {}, expected {expected}", xs[1]);
+    }
+
+    #[test]
+    fn and_over_eighth_triplets_falls_between_second_and_third_note() {
+        // The `&` (half a beat) lies inside the 2nd triplet eighth (1/3..2/3),
+        // halfway between the 2nd and 3rd note heads; it is not the 3rd note.
+        let mut m = Measure::new(TimeSignature::ONE_FOUR);
+        for i in 0..3 {
+            m.set_beat(i, Beat::note(t8())).unwrap();
+        }
+
+        let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(300.0, 100.0));
+        let opts = opts_for(rect);
+        let layout = build_measure_layout(&m, &opts);
+
+        let xs = label_xs(&m, &layout, rect, &ands_config());
+        assert_eq!(xs.len(), 2);
+        assert!((xs[0] - layout.notes[0].center.x).abs() < 0.5);
+        let (x1, x2) = (layout.notes[1].center.x, layout.notes[2].center.x);
+        let expected = (x1 + x2) / 2.0;
         assert!((xs[1] - expected).abs() < 0.5, "got {}, expected {expected}", xs[1]);
     }
 }
