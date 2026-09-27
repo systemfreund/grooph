@@ -23,7 +23,10 @@ fn subdivision_label(s: Subdivision) -> &'static str {
 /// One labelled setting: caption above the control, like RhythmBot's header.
 fn setting(ui: &mut egui::Ui, label: &str, add_control: impl FnOnce(&mut egui::Ui)) {
     ui.vertical(|ui| {
-        ui.weak(label);
+        ui.add(
+            egui::Label::new(egui::RichText::new(label).weak())
+                .wrap_mode(egui::TextWrapMode::Extend),
+        );
         add_control(ui);
     });
 }
