@@ -9,7 +9,7 @@
 //! changes the result, while easier cells stay in the mix.
 //!
 //! Level ladder for 8th/16th subdivisions (derived from reference examples):
-//! 1. quarters and on-beat eighths, no rests
+//! 1. quarters, on-beat eighths and quarter rests
 //! 2. eighths on the "and" (first syncopations)
 //! 3. sixteenth figures starting on the beat, no rests inside the beat
 //! 4. dotted figures and rests inside the beat
@@ -22,8 +22,8 @@
 //! 4. + `xx-`, `-xx`
 //! 5. + `-x-`
 //!
-//! Apart from the triplet level-2 quarter rest, whole-beat rests come only
-//! from [`GeneratorSettings::space`], which replaces entire beats (never part
+//! Besides these library quarter rests (level 1 for 8ths/16ths, level 2 for
+//! triplets), [`GeneratorSettings::space`] adds whole-beat rests, which replaces entire beats (never part
 //! of a figure, so a triplet is always complete) with a quarter rest. At
 //! maximum space a measure may consist of rests only.
 //!
@@ -157,6 +157,7 @@ const CELLS: &[Cell] = &[
     // Level 1: quarters and on-beat eighths.
     Cell { level: 1, family: CellFamily::Quarter, beats: &[(q(), N)] },
     Cell { level: 1, family: CellFamily::Eighth, beats: &[(e(), N), (e(), N)] },
+    Cell { level: 1, family: CellFamily::Eighth, beats: &[(q(), R)] },
     // Level 2: eighth syncopation. (Eighth + eighth rest is left out on
     // purpose: rhythmically it is the same single hit as a quarter note.)
     Cell { level: 2, family: CellFamily::Eighth, beats: &[(e(), R), (e(), N)] },
@@ -447,8 +448,9 @@ mod tests {
                 .map(|c| c.beats.iter().map(|&(_, n)| if n { 'x' } else { '-' }).collect())
                 .collect()
         }
-        assert_eq!(patterns(1), set(&["x", "xx"]));
-        assert_eq!(patterns(2), set(&["x", "xx", "-x"]));
+        // "-" alone is the quarter rest.
+        assert_eq!(patterns(1), set(&["x", "xx", "-"]));
+        assert_eq!(patterns(2), set(&["x", "xx", "-", "-x"]));
         assert_eq!(patterns(5), patterns(2));
     }
 
@@ -481,18 +483,14 @@ mod tests {
         let all = pool(5);
         let unique: std::collections::BTreeSet<_> = all.iter().cloned().collect();
         assert_eq!(unique.len(), all.len(), "duplicate rhythms: {all:?}");
-        assert_eq!(unique.len(), 15, "all non-empty 4-slot rhythms: {unique:?}");
+        // All 16 four-slot rhythms, the empty one being the quarter rest.
+        assert_eq!(unique.len(), 16, "all 4-slot rhythms: {unique:?}");
     }
 
     #[test]
-    fn level_one_without_space_has_no_rests() {
+    fn triplet_level_one_without_space_has_no_rests() {
         let mut rng = Rng::new(5);
-        for sub in [
-            Subdivision::Eighths,
-            Subdivision::Sixteenths,
-            Subdivision::Triplets,
-            Subdivision::Mixed,
-        ] {
+        for sub in [Subdivision::Triplets] {
             for _ in 0..200 {
                 let m = generate_measure(&settings(sub, 1), &mut rng).unwrap();
                 assert!(m.beats().iter().all(|b| b.kind == Note), "{sub:?}: {m:?}");
@@ -527,8 +525,7 @@ mod tests {
             }
             rest_beats as f32 / (300.0 * 4.0)
         }
-        assert_eq!(rest_ratio(0.0), 0.0);
-        assert!(rest_ratio(1.0) > 0.6);
+        assert!(rest_ratio(1.0) > rest_ratio(0.0) + 0.5);
     }
 
     #[test]
