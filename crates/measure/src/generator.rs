@@ -1,0 +1,449 @@
+//! Random rhythm generator for sight-reading practice.
+//!
+//! A measure is generated beat by beat: for every beat of the time signature
+//! one *cell* (a figure spanning exactly one beat, e.g. `16-16-8` or
+//! `8-rest + 8`) is drawn from a library. Each cell belongs to a
+//! [`CellFamily`] (which [`Subdivision`] settings may use it) and has a
+//! difficulty level. [`GeneratorSettings::complexity`] caps the level that may
+//! be drawn; the highest allowed level is favoured so a higher setting audibly
+//! changes the result, while easier cells stay in the mix.
+//!
+//! Level ladder (derived from reference examples, 16th subdivision):
+//! 1. quarters and on-beat eighths, quarter rests
+//! 2. eighths on the "and" (first syncopations)
+//! 3. sixteenth figures starting on the beat, no rests inside the beat
+//! 4. dotted figures and rests inside the beat
+//! 5. figures starting with a sixteenth rest (notes on "e" / "a")
+//!
+//! [`GeneratorSettings::space`] adds whole-beat rests on top of the drawn
+//! cells. Every generated measure keeps at least one note.
+//!
+//! Only time signatures whose beat unit is a quarter (`x/4`) are supported for
+//! now; cells are written for a quarter-note beat.
+
+use crate::BeatKind::{Note, Rest};
+use crate::duration::{Duration, NoteValue, e, q, s, t8};
+use crate::{Beat, Measure, MeasureError, Score, TimeSignature};
+use serde::{Deserialize, Serialize};
+
+/// Highest supported complexity level.
+pub const MAX_COMPLEXITY: u8 = 5;
+
+/// Finest grid the generator may use.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Subdivision {
+    Eighths,
+    Sixteenths,
+    Triplets,
+    /// Eighths, sixteenths and triplets combined.
+    Mixed,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct GeneratorSettings {
+    pub subdivision: Subdivision,
+    /// 1..=[`MAX_COMPLEXITY`]; out-of-range values are clamped.
+    pub complexity: u8,
+    /// Number of measures in a generated score (at least 1).
+    pub bars: usize,
+    pub time_signature: TimeSignature,
+    /// 0.0..=1.0 — the higher, the more (and longer) rests between notes.
+    pub space: f32,
+}
+
+impl Default for GeneratorSettings {
+    fn default() -> Self {
+        Self {
+            subdivision: Subdivision::Sixteenths,
+            complexity: 1,
+            bars: 1,
+            time_signature: TimeSignature::FOUR_FOUR,
+            space: 0.0,
+        }
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub enum GeneratorError {
+    /// The generator only knows cells for quarter-note beats (`x/4`).
+    UnsupportedTimeSignature(TimeSignature),
+    /// Writing a cell into the measure failed (library bug).
+    Measure(MeasureError),
+}
+
+impl From<MeasureError> for GeneratorError {
+    fn from(err: MeasureError) -> Self { GeneratorError::Measure(err) }
+}
+
+/// Small deterministic PRNG (SplitMix64). Seedable so generated rhythms are
+/// reproducible in tests; the app seeds it from the clock.
+#[derive(Clone, Debug)]
+pub struct Rng {
+    state: u64,
+}
+
+impl Rng {
+    pub fn new(seed: u64) -> Self { Self { state: seed } }
+
+    pub fn next_u64(&mut self) -> u64 {
+        self.state = self.state.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        let mut z = self.state;
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        z ^ (z >> 31)
+    }
+
+    /// Uniform integer in `0..n`. `n` must be non-zero.
+    pub fn below(&mut self, n: usize) -> usize { (self.next_u64() % n as u64) as usize }
+
+    /// Uniform float in `[0, 1)`.
+    pub fn unit(&mut self) -> f32 { (self.next_u64() >> 40) as f32 / (1u64 << 24) as f32 }
+
+    pub fn chance(&mut self, p: f32) -> bool { self.unit() < p }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CellFamily {
+    /// Quarters and eighths; available to every subdivision.
+    Basic,
+    Sixteenth,
+    Triplet,
+}
+
+impl CellFamily {
+    fn allowed_in(self, subdivision: Subdivision) -> bool {
+        match self {
+            CellFamily::Basic => true,
+            CellFamily::Sixteenth => {
+                matches!(subdivision, Subdivision::Sixteenths | Subdivision::Mixed)
+            }
+            CellFamily::Triplet => {
+                matches!(subdivision, Subdivision::Triplets | Subdivision::Mixed)
+            }
+        }
+    }
+}
+
+/// A figure spanning exactly one quarter-note beat.
+#[derive(Clone, Copy, Debug)]
+struct Cell {
+    level: u8,
+    family: CellFamily,
+    beats: &'static [(Duration, bool)],
+}
+
+const fn de() -> Duration { Duration::Dotted { base: NoteValue::Eighth, dots: 1 } }
+
+const N: bool = true;
+const R: bool = false;
+
+/// Quarter rest — used by the "space" setting and as the no-note fallback.
+const QUARTER_REST: Cell = Cell { level: 1, family: CellFamily::Basic, beats: &[(q(), R)] };
+
+#[rustfmt::skip]
+const CELLS: &[Cell] = &[
+    // Level 1: quarters and on-beat eighths.
+    Cell { level: 1, family: CellFamily::Basic, beats: &[(q(), N)] },
+    QUARTER_REST,
+    Cell { level: 1, family: CellFamily::Basic, beats: &[(e(), N), (e(), N)] },
+    // Level 2: eighth syncopation.
+    Cell { level: 2, family: CellFamily::Basic, beats: &[(e(), R), (e(), N)] },
+    Cell { level: 2, family: CellFamily::Basic, beats: &[(e(), N), (e(), R)] },
+    // Level 3: sixteenth figures on the beat, no inner rests.
+    Cell { level: 3, family: CellFamily::Sixteenth, beats: &[(s(), N), (s(), N), (s(), N), (s(), N)] },
+    Cell { level: 3, family: CellFamily::Sixteenth, beats: &[(s(), N), (s(), N), (e(), N)] },
+    Cell { level: 3, family: CellFamily::Sixteenth, beats: &[(e(), N), (s(), N), (s(), N)] },
+    // Level 4: dotted figures, rests inside the beat.
+    Cell { level: 4, family: CellFamily::Sixteenth, beats: &[(de(), N), (s(), N)] },
+    Cell { level: 4, family: CellFamily::Sixteenth, beats: &[(s(), N), (s(), N), (e(), R)] },
+    Cell { level: 4, family: CellFamily::Sixteenth, beats: &[(e(), R), (s(), N), (s(), N)] },
+    Cell { level: 4, family: CellFamily::Sixteenth, beats: &[(e(), N), (s(), R), (s(), N)] },
+    // Level 5: notes on "e" and "a".
+    Cell { level: 5, family: CellFamily::Sixteenth, beats: &[(s(), R), (s(), N), (e(), N)] },
+    Cell { level: 5, family: CellFamily::Sixteenth, beats: &[(de(), R), (s(), N)] },
+    Cell { level: 5, family: CellFamily::Sixteenth, beats: &[(s(), R), (s(), N), (s(), N), (s(), N)] },
+    Cell { level: 5, family: CellFamily::Sixteenth, beats: &[(s(), N), (e(), N), (s(), N)] },
+    Cell { level: 5, family: CellFamily::Sixteenth, beats: &[(s(), N), (de(), N)] },
+    Cell { level: 5, family: CellFamily::Sixteenth, beats: &[(s(), R), (e(), N), (s(), N)] },
+    Cell { level: 5, family: CellFamily::Sixteenth, beats: &[(s(), N), (s(), N), (s(), R), (s(), N)] },
+    // Triplets (eighth-note triplets per quarter).
+    Cell { level: 2, family: CellFamily::Triplet, beats: &[(t8(), N), (t8(), N), (t8(), N)] },
+    Cell { level: 3, family: CellFamily::Triplet, beats: &[(t8(), N), (t8(), R), (t8(), N)] },
+    Cell { level: 3, family: CellFamily::Triplet, beats: &[(t8(), N), (t8(), N), (t8(), R)] },
+    Cell { level: 4, family: CellFamily::Triplet, beats: &[(t8(), R), (t8(), N), (t8(), N)] },
+    Cell { level: 5, family: CellFamily::Triplet, beats: &[(t8(), R), (t8(), N), (t8(), R)] },
+    Cell { level: 5, family: CellFamily::Triplet, beats: &[(t8(), R), (t8(), R), (t8(), N)] },
+];
+
+/// Weight of the highest allowed level relative to each easier level.
+const TOP_LEVEL_WEIGHT: usize = 3;
+
+/// Probability of a whole-beat rest at `space == 1.0`.
+const MAX_SPACE_REST_PROBABILITY: f32 = 0.6;
+
+impl Cell {
+    fn has_note(&self) -> bool { self.beats.iter().any(|&(_, is_note)| is_note) }
+}
+
+fn candidates(subdivision: Subdivision, max_level: u8) -> Vec<&'static Cell> {
+    CELLS.iter().filter(|c| c.family.allowed_in(subdivision) && c.level <= max_level).collect()
+}
+
+/// Draw one cell: pick a level (favouring the highest one available), then a
+/// cell of that level uniformly.
+fn pick_cell(pool: &[&'static Cell], rng: &mut Rng) -> &'static Cell {
+    let mut levels: Vec<u8> = pool.iter().map(|c| c.level).collect();
+    levels.sort_unstable();
+    levels.dedup();
+    let top = *levels.last().expect("cell pool is never empty");
+
+    let total: usize = levels.iter().map(|&l| if l == top { TOP_LEVEL_WEIGHT } else { 1 }).sum();
+    let mut roll = rng.below(total);
+    let mut level = top;
+    for &l in &levels {
+        let w = if l == top { TOP_LEVEL_WEIGHT } else { 1 };
+        if roll < w {
+            level = l;
+            break;
+        }
+        roll -= w;
+    }
+
+    let at_level: Vec<&'static Cell> = pool.iter().copied().filter(|c| c.level == level).collect();
+    at_level[rng.below(at_level.len())]
+}
+
+fn pick_cells(settings: &GeneratorSettings, rng: &mut Rng) -> Vec<&'static Cell> {
+    let complexity = settings.complexity.clamp(1, MAX_COMPLEXITY);
+    let space = settings.space.clamp(0.0, 1.0);
+    let pool = candidates(settings.subdivision, complexity);
+    let beat_count = settings.time_signature.beats as usize;
+
+    let mut cells: Vec<&'static Cell> = (0..beat_count)
+        .map(|_| {
+            if rng.chance(space * MAX_SPACE_REST_PROBABILITY) {
+                &QUARTER_REST
+            } else {
+                pick_cell(&pool, rng)
+            }
+        })
+        .collect();
+
+    if !cells.iter().any(|c| c.has_note()) && beat_count > 0 {
+        let with_notes: Vec<&'static Cell> =
+            pool.iter().copied().filter(|c| c.has_note()).collect();
+        let idx = rng.below(beat_count);
+        cells[idx] = with_notes[rng.below(with_notes.len())];
+    }
+    cells
+}
+
+/// Write `cells` (one per beat) into a fresh measure via `set_beat`, so the
+/// result carries the same invariants (tuplet groups, anchors) as an edited one.
+fn build_measure(ts: TimeSignature, cells: &[&Cell]) -> Result<Measure, MeasureError> {
+    let mut measure = Measure::new(ts);
+    let mut idx = 0;
+    for cell in cells {
+        for &(duration, is_note) in cell.beats {
+            let beat = Beat::new(duration, if is_note { Note } else { Rest });
+            measure.set_beat(idx, beat)?;
+            idx += 1;
+        }
+    }
+    Ok(measure)
+}
+
+fn check_time_signature(ts: TimeSignature) -> Result<(), GeneratorError> {
+    if ts.beat_unit == 4 && ts.beats > 0 {
+        Ok(())
+    } else {
+        Err(GeneratorError::UnsupportedTimeSignature(ts))
+    }
+}
+
+/// Generate a single measure according to `settings`.
+pub fn generate_measure(
+    settings: &GeneratorSettings,
+    rng: &mut Rng,
+) -> Result<Measure, GeneratorError> {
+    check_time_signature(settings.time_signature)?;
+    let cells = pick_cells(settings, rng);
+    Ok(build_measure(settings.time_signature, &cells)?)
+}
+
+/// Generate a score of `settings.bars` measures.
+pub fn generate_score(
+    settings: &GeneratorSettings,
+    rng: &mut Rng,
+) -> Result<Score, GeneratorError> {
+    let measures = (0..settings.bars.max(1))
+        .map(|_| generate_measure(settings, rng))
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(Score { measures })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::duration::{e, q, s, t8};
+    use crate::grid::DEFAULT_GRID;
+
+    fn settings(subdivision: Subdivision, complexity: u8) -> GeneratorSettings {
+        GeneratorSettings { subdivision, complexity, ..GeneratorSettings::default() }
+    }
+
+    fn expected_beats(cells: &[&Cell]) -> Vec<Beat> {
+        cells
+            .iter()
+            .flat_map(|c| c.beats.iter())
+            .map(|&(d, is_note)| Beat::new(d, if is_note { Note } else { Rest }))
+            .collect()
+    }
+
+    #[test]
+    fn every_cell_spans_exactly_one_quarter() {
+        let quarter = DEFAULT_GRID.ticks_of(&q()).unwrap();
+        for cell in CELLS {
+            let ticks: u32 =
+                cell.beats.iter().map(|(d, _)| DEFAULT_GRID.ticks_of(d).unwrap()).sum();
+            assert_eq!(ticks, quarter, "cell {:?}", cell.beats);
+        }
+    }
+
+    #[test]
+    fn every_cell_is_written_verbatim_at_every_beat_position() {
+        for cell in CELLS {
+            let cells = [cell; 4];
+            let m = build_measure(TimeSignature::FOUR_FOUR, &cells).expect("cell must build");
+            assert_eq!(m.beats(), &expected_beats(&cells), "cell {:?}", cell.beats);
+        }
+    }
+
+    #[test]
+    fn mixed_neighbours_are_written_verbatim() {
+        // Every ordered pair of cells, so fills from one cell never leak into the next.
+        for a in CELLS {
+            for b in CELLS {
+                let cells = [a, b, b, a];
+                let m = build_measure(TimeSignature::FOUR_FOUR, &cells).expect("pair must build");
+                assert_eq!(m.beats(), &expected_beats(&cells));
+            }
+        }
+    }
+
+    #[test]
+    fn triplet_cells_form_one_group_per_beat() {
+        let triplets = CELLS.iter().find(|c| c.family == CellFamily::Triplet).unwrap();
+        let m = build_measure(TimeSignature::TWO_FOUR, &[triplets, triplets]).unwrap();
+        assert_eq!(m.tuplet_groups().len(), 2);
+        assert_ne!(m.beats()[0].tuplet_group_id, m.beats()[3].tuplet_group_id);
+    }
+
+    #[test]
+    fn same_seed_gives_same_score() {
+        let st = GeneratorSettings { bars: 4, ..settings(Subdivision::Mixed, 5) };
+        let a = generate_score(&st, &mut Rng::new(42)).unwrap();
+        let b = generate_score(&st, &mut Rng::new(42)).unwrap();
+        for (ma, mb) in a.measures.iter().zip(&b.measures) {
+            assert_eq!(ma.beats(), mb.beats());
+        }
+    }
+
+    #[test]
+    fn score_has_requested_bars_and_time_signature() {
+        let st = GeneratorSettings {
+            bars: 3,
+            time_signature: TimeSignature::THREE_FOUR,
+            ..settings(Subdivision::Sixteenths, 3)
+        };
+        let score = generate_score(&st, &mut Rng::new(1)).unwrap();
+        assert_eq!(score.len(), 3);
+        assert!(score.measures.iter().all(|m| m.time_signature() == TimeSignature::THREE_FOUR));
+    }
+
+    #[test]
+    fn unsupported_time_signature_is_rejected() {
+        let st = GeneratorSettings {
+            time_signature: TimeSignature::SIX_EIGHT,
+            ..GeneratorSettings::default()
+        };
+        assert_eq!(
+            generate_measure(&st, &mut Rng::new(1)).unwrap_err(),
+            GeneratorError::UnsupportedTimeSignature(TimeSignature::SIX_EIGHT)
+        );
+    }
+
+    #[test]
+    fn complexity_caps_the_cell_level() {
+        let mut rng = Rng::new(7);
+        for complexity in 1..=MAX_COMPLEXITY {
+            let st = settings(Subdivision::Mixed, complexity);
+            for _ in 0..200 {
+                assert!(pick_cells(&st, &mut rng).iter().all(|c| c.level <= complexity));
+            }
+        }
+    }
+
+    #[test]
+    fn highest_level_is_actually_used() {
+        let mut rng = Rng::new(11);
+        let st = settings(Subdivision::Sixteenths, 5);
+        let top = (0..200).flat_map(|_| pick_cells(&st, &mut rng)).filter(|c| c.level == 5).count();
+        // 4 beats * 200 measures; the top level carries 3/7 of the weight.
+        assert!(top > 200, "top-level cells drawn: {top}");
+    }
+
+    #[test]
+    fn subdivision_restricts_durations() {
+        let mut rng = Rng::new(3);
+        for _ in 0..200 {
+            let eighths = generate_measure(&settings(Subdivision::Eighths, 5), &mut rng).unwrap();
+            assert!(eighths.beats().iter().all(|b| b.duration == q() || b.duration == e()));
+
+            let triplets = generate_measure(&settings(Subdivision::Triplets, 5), &mut rng).unwrap();
+            assert!(triplets.beats().iter().all(|b| b.duration != s() && b.duration != de()));
+
+            let sixteenths =
+                generate_measure(&settings(Subdivision::Sixteenths, 5), &mut rng).unwrap();
+            assert!(sixteenths.beats().iter().all(|b| b.duration != t8()));
+        }
+    }
+
+    #[test]
+    fn low_complexity_matches_reference_vocabulary() {
+        // Level 1 with 16th subdivision: only quarters and on-beat eighth pairs.
+        let mut rng = Rng::new(5);
+        let st = settings(Subdivision::Sixteenths, 1);
+        for _ in 0..200 {
+            for cell in pick_cells(&st, &mut rng) {
+                assert_eq!(cell.level, 1);
+            }
+        }
+    }
+
+    #[test]
+    fn space_increases_rests_and_keeps_a_note() {
+        fn rest_ratio(space: f32) -> f32 {
+            let mut rng = Rng::new(9);
+            let st = GeneratorSettings { space, ..settings(Subdivision::Sixteenths, 3) };
+            let mut rest_beats = 0;
+            for _ in 0..300 {
+                let m = generate_measure(&st, &mut rng).unwrap();
+                assert!(m.beats().iter().any(|b| b.kind == Note), "measure without notes");
+                rest_beats +=
+                    m.beats().iter().filter(|b| b.kind == Rest && b.duration == q()).count();
+            }
+            rest_beats as f32 / (300.0 * 4.0)
+        }
+        assert!(rest_ratio(1.0) > rest_ratio(0.0) + 0.3);
+    }
+
+    #[test]
+    fn rng_unit_stays_in_range() {
+        let mut rng = Rng::new(0);
+        for _ in 0..10_000 {
+            let u = rng.unit();
+            assert!((0.0..1.0).contains(&u));
+        }
+    }
+}

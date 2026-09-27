@@ -32,6 +32,11 @@ Important root files:
   - A tuplet beat automatically creates the remaining beats of the group.
   - Groups are tracked via `tuplet_group_id` and `tuplet_anchors`.
   - `set_beat` can absorb/fill following beats to keep the measure consistent.
+- Generator (`grooph_measure::generator`): builds random measures for
+  sight-reading from per-beat cells. `GeneratorSettings` = subdivision,
+  complexity (1-5, caps the cell level), bars, time signature (x/4 only),
+  space (extra whole-beat rests). Measures are written via `set_beat`, so
+  they obey the same invariants as edited ones. Seed `Rng` for reproducibility.
 - Note: `Beat` `PartialEq` ignores `tuplet_group_id`. Compare the field explicitly
   if grouping matters.
 
