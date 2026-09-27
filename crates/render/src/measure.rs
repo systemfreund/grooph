@@ -585,17 +585,19 @@ fn active_label_start(
 /// slot still anchor to the first 16th in the slot — which is the one that
 /// musically *is* the `&`.
 ///
-/// **Filling the gaps.** With ≥2 anchors we treat them as keypoints in a
-/// piecewise-linear map from `slot.center_tick` to X, and:
-/// - interpolate unanchored slots between surrounding anchors,
-/// - extrapolate unanchored slots beyond the last anchor using the slope of
-///   the last two anchors. In the common 2/4 + two-quarter-rests + ands case
-///   this puts the trailing `&` exactly at the barline — visually the
-///   midpoint between `2` of this measure and `1` of the next.
+/// **Filling the gaps.** An unanchored slot's center tick is mapped to X the
+/// same way the playback cursor maps ticks (see [`playback_cursor_x`]):
+/// interpolate between the center of the beat containing that tick and the
+/// center of the *next* beat, or `rect.right()` when the tick falls in the
+/// last beat. This mirrors the actual (non-linear-in-ticks) note spacing
+/// instead of a global linear/slope fit, so a label can never drift or
+/// overshoot past the measure — the trailing `&` after a rest or long final
+/// note lands somewhere before the barline instead of past it.
 ///
-/// **Fallback.** With fewer than 2 anchors (e.g. a whole-note slot covering
-/// the entire measure) we cannot determine a meaningful slope, so we fall
-/// back to a uniform proportional mapping (`slot_center_tick / total_ticks`).
+/// **Fallback.** With fewer than 2 anchors overall (e.g. a whole-note slot
+/// covering the entire measure) there isn't enough anchor information to
+/// place labels meaningfully relative to notes, so we fall back to a uniform
+/// proportional mapping (`slot_center_tick / total_ticks`).
 fn compute_label_xs(
     selected: &[&CountSlot],
     measure: &Measure,
@@ -620,56 +622,62 @@ fn compute_label_xs(
     }
     let onsets = DEFAULT_GRID.compute_onset_ticks(beats);
 
-    // (slot_index_in_selected, slot_center_tick, anchor_x)
-    let mut anchors: Vec<(usize, f32, f32)> = Vec::new();
-    for (i, slot) in selected.iter().enumerate() {
-        for (note_i, &onset) in onsets.iter().enumerate() {
-            if onset >= slot.end_tick {
-                break;
-            }
-            if onset >= slot.start_tick && note_i < layout.notes.len() {
-                anchors.push((i, slot_center(slot), layout.notes[note_i].center.x));
-                break;
-            }
-        }
-    }
+    let anchor_for = |slot: &CountSlot| -> Option<usize> {
+        onsets
+            .iter()
+            .position(|&onset| onset >= slot.start_tick && onset < slot.end_tick)
+            .filter(|&note_i| note_i < layout.notes.len())
+    };
 
-    if anchors.len() < 2 {
+    let anchor_count = selected.iter().filter(|s| anchor_for(s).is_some()).count();
+    if anchor_count < 2 {
         return fallback();
     }
 
+    let left = layout.notes_left_edge;
+    let right = rect.right();
+
     selected
         .iter()
-        .enumerate()
-        .map(|(i, slot)| {
-            let sc = slot_center(slot);
-            if let Some(&(_, _, x)) = anchors.iter().find(|(idx, _, _)| *idx == i) {
-                return x;
+        .map(|slot| {
+            if let Some(note_i) = anchor_for(slot) {
+                return layout.notes[note_i].center.x;
             }
-            let before = anchors.iter().rev().find(|(_, t, _)| *t < sc).copied();
-            let after = anchors.iter().find(|(_, t, _)| *t > sc).copied();
-            match (before, after) {
-                (Some((_, t1, x1)), Some((_, t2, x2))) => {
-                    let frac = (sc - t1) / (t2 - t1);
-                    x1 + (x2 - x1) * frac
-                }
-                (Some((_, t1, x1)), None) => {
-                    let n = anchors.len();
-                    let (_, ta, xa) = anchors[n - 2];
-                    let (_, tb, xb) = anchors[n - 1];
-                    let slope = (xb - xa) / (tb - ta);
-                    x1 + slope * (sc - t1)
-                }
-                (None, Some((_, t1, x1))) => {
-                    let (_, ta, xa) = anchors[0];
-                    let (_, tb, xb) = anchors[1];
-                    let slope = (xb - xa) / (tb - ta);
-                    x1 - slope * (t1 - sc)
-                }
-                (None, None) => proportional(sc),
-            }
+            tick_to_beat_x(&onsets, &layout.notes, total_ticks, right, slot_center(slot))
+                .clamp(left.min(right), left.max(right))
         })
         .collect()
+}
+
+/// Maps a tick to X by interpolating between the note centers of the beats
+/// surrounding it — the same scheme [`playback_cursor_x`] uses for the
+/// playback cursor. The tick range of the last beat maps onto
+/// `[notes[last].center.x, rect_right]`, so a tick anywhere in the measure
+/// (including its very last instant) resolves to an X at or before
+/// `rect_right`, never past it.
+fn tick_to_beat_x(
+    onsets: &[u32],
+    notes: &[NoteLayout],
+    total_ticks: u32,
+    rect_right: f32,
+    tick: f32,
+) -> f32 {
+    if notes.is_empty() {
+        return rect_right;
+    }
+    let t = tick.clamp(0.0, total_ticks as f32);
+    for (i, &onset) in onsets.iter().enumerate() {
+        let start = onset as f32;
+        let end = if i + 1 < onsets.len() { onsets[i + 1] as f32 } else { total_ticks as f32 };
+        if t >= start && t <= end {
+            let x0 = notes[i].center.x;
+            let x1 = if i + 1 < notes.len() { notes[i + 1].center.x } else { rect_right };
+            let span = end - start;
+            let frac = if span > 0.0 { (t - start) / span } else { 0.0 };
+            return x0 + (x1 - x0) * frac;
+        }
+    }
+    rect_right
 }
 
 fn count_color(id: ColorId, alpha: u8) -> Color32 {
@@ -745,10 +753,10 @@ mod tests {
     fn two_quarter_rests_two_four_ands_anchor_to_notes() {
         // 2/4 + two quarter rests + "Ands" subdivision.
         // The numeric labels `1` and `2` are anchored to the quarter-rest
-        // centers (W/4 and 3W/4 with proportional spacing). The `&`s land
-        // halfway between adjacent anchors — the trailing `&` extrapolates
-        // to the barline, which is the visual midpoint between `2` of this
-        // measure and `1` of the next.
+        // centers. The `&`s are unanchored and are placed by interpolating
+        // between the surrounding beat centers (see #13) instead of a global
+        // linear/slope fit, so they must stay strictly inside the measure and
+        // in increasing tick order.
         let mut m = Measure::new(TimeSignature::TWO_FOUR);
         m.set_beat(0, Beat::rest(q())).unwrap();
         m.set_beat(1, Beat::rest(q())).unwrap();
@@ -760,22 +768,26 @@ mod tests {
         let xs = label_xs(&m, &layout, rect, &ands_config());
         assert_eq!(xs.len(), 4, "expected 1 & 2 &");
 
-        let w = rect.right() - layout.notes_left_edge;
-        let l = layout.notes_left_edge;
-        let expected = [l + w / 4.0, l + w / 2.0, l + 3.0 * w / 4.0, l + w];
-        for (i, (got, exp)) in xs.iter().zip(expected.iter()).enumerate() {
-            assert!((got - exp).abs() < 0.5, "label {i}: got {got}, expected {exp}",);
-        }
-
         // `1` and `2` align with the rest centers.
         assert!((xs[0] - layout.notes[0].center.x).abs() < 0.5);
         assert!((xs[2] - layout.notes[1].center.x).abs() < 0.5);
 
-        // Uniform spacing across the full set.
-        let gaps: Vec<f32> = xs.windows(2).map(|w| w[1] - w[0]).collect();
-        for g in &gaps {
-            assert!((g - gaps[0]).abs() < 0.5, "non-uniform spacing: {:?}", gaps);
+        // Labels increase monotonically and never leave the measure.
+        for w in xs.windows(2) {
+            assert!(w[1] > w[0], "labels must increase with tick: {:?}", xs);
         }
+        for &x in &xs {
+            assert!(
+                x >= layout.notes_left_edge && x <= rect.right(),
+                "label x {x} outside measure [{}, {}]: {:?}",
+                layout.notes_left_edge,
+                rect.right(),
+                xs
+            );
+        }
+
+        // The trailing `&` no longer overshoots past the barline.
+        assert!(xs[3] < rect.right(), "trailing `&` should stay before the barline: {}", xs[3]);
     }
 
     #[test]
@@ -903,9 +915,11 @@ mod tests {
     }
 
     #[test]
-    fn three_quarter_rests_three_four_ands_uniform() {
-        // 3/4 with three quarter rests + Ands → six labels "1 & 2 & 3 &",
-        // uniform W/6 spacing. Same bug pattern as 2/4.
+    fn three_quarter_rests_three_four_ands_bounded() {
+        // 3/4 with three quarter rests + Ands → six labels "1 & 2 & 3 &".
+        // Spacing is no longer perfectly uniform (that relied on unbounded
+        // slope extrapolation, see #13); every label must still stay inside
+        // the measure and increase monotonically with tick.
         let mut m = Measure::new(TimeSignature::THREE_FOUR);
         for i in 0..3 {
             m.set_beat(i, Beat::rest(q())).unwrap();
@@ -918,9 +932,52 @@ mod tests {
         let xs = label_xs(&m, &layout, rect, &ands_config());
         assert_eq!(xs.len(), 6);
 
-        let gaps: Vec<f32> = xs.windows(2).map(|w| w[1] - w[0]).collect();
-        for g in &gaps {
-            assert!((g - gaps[0]).abs() < 0.5, "non-uniform spacing in 3/4: {:?}", gaps);
+        for w in xs.windows(2) {
+            assert!(w[1] > w[0], "labels must increase with tick: {:?}", xs);
+        }
+        for &x in &xs {
+            assert!(
+                x >= layout.notes_left_edge && x <= rect.right(),
+                "label x {x} outside measure [{}, {}]: {:?}",
+                layout.notes_left_edge,
+                rect.right(),
+                xs
+            );
+        }
+    }
+
+    #[test]
+    fn rest_on_last_beat_labels_stay_in_bounds_and_increasing() {
+        // 4/4: eighth-eighth, quarter rest, eighth-eighth, quarter rest.
+        // Regression test for #13: the trailing `&` after the final rest
+        // must not be drawn past the barline, and every label must increase
+        // monotonically with tick.
+        let mut m = Measure::new(TimeSignature::FOUR_FOUR);
+        m.set_beat(0, Beat::note(e())).unwrap();
+        m.set_beat(1, Beat::note(e())).unwrap();
+        m.set_beat(2, Beat::rest(q())).unwrap();
+        m.set_beat(3, Beat::note(e())).unwrap();
+        m.set_beat(4, Beat::note(e())).unwrap();
+        m.set_beat(5, Beat::rest(q())).unwrap();
+
+        let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(500.0, 100.0));
+        let opts = opts_for(rect);
+        let layout = build_measure_layout(&m, &opts);
+
+        let xs = label_xs(&m, &layout, rect, &ands_config());
+        assert!(!xs.is_empty());
+
+        for w in xs.windows(2) {
+            assert!(w[1] > w[0], "labels must increase with tick: {:?}", xs);
+        }
+        for &x in &xs {
+            assert!(
+                x >= layout.notes_left_edge && x <= rect.right(),
+                "label x {x} outside measure [{}, {}]: {:?}",
+                layout.notes_left_edge,
+                rect.right(),
+                xs
+            );
         }
     }
 }
