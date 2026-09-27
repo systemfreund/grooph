@@ -19,19 +19,25 @@ impl Grooph {
                 .fill(egui::Color32::TRANSPARENT)
                 .stroke(egui::Stroke::NONE)
                 .show(ui, |ui| {
-                    // Measured on the frame's own `ui`, *before* entering the
-                    // `ScrollArea`: because the area scrolls both axes, its
-                    // inner `ui.available_size()` reports an unbounded
+                    // Size measured on the frame's own `ui`, *before* entering
+                    // the `ScrollArea`: because the area scrolls both axes,
+                    // its inner `ui.available_size()` reports an unbounded
                     // (scrollable) extent rather than the actual visible
                     // viewport, which would make the staff size itself (and
                     // pick its em) against a phantom width — overflowing the
                     // real, narrower screen (e.g. on mobile) instead of
                     // shrinking a measure to fit it fully in one row.
                     let available = ui.available_size();
-                    let origin = ui.cursor().min;
-                    let viewport_rect = Rect::from_min_size(origin, available);
 
                     egui::ScrollArea::both().show(ui, |ui| {
+                        // `origin`, unlike `available`, must come from the
+                        // *inner* ui: egui bakes the current scroll offset
+                        // into its cursor position, which is what makes
+                        // content laid out from here actually move as the
+                        // user scrolls (the outer ui's cursor is fixed).
+                        let origin = ui.cursor().min;
+                        let viewport_rect = Rect::from_min_size(origin, available);
+
                         // Build the multi-measure tempo backbone once per frame.
                         // O(score.len()) — cheap for realistic score sizes.
                         let timing = self.score_timing();
