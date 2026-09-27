@@ -12,8 +12,8 @@
 //! * [`pixel_layout::MeasureLayout`] (built via [`pixel_layout::build_measure_layout`])
 //!   is the *pixel* stage. It internally calls `plan_measure` and turns the result
 //!   plus a `Rect`, `FontId`, and `GlyphMetrics` into concrete coordinates.
-//! * [`staff_layout::StaffLayout`] arranges multiple `MeasureLayout`s along a
-//!   horizontal staff (clef/TS repeat rules, scrolling width).
+//! * [`staff_layout::StaffLayout`] stacks the `MeasureLayout`s of a score one
+//!   per row (clef/TS repeat rules, row width, scroll size).
 //!
 //! The renderer (`grooph_render`) consumes `MeasureLayout` / `StaffLayout` and
 //! makes no further geometry decisions. `GlyphMetrics::measure` lives in
