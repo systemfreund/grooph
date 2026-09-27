@@ -40,103 +40,112 @@ impl Grooph {
                 let endless_before = self.editor.generator.endless;
                 let mut roll = false;
 
-                ui.horizontal_wrapped(|ui| {
-                    let gen_state = &mut self.editor.generator;
-                    let settings = &mut gen_state.settings;
+                egui::ScrollArea::horizontal().id_salt("gen_settings_scroll").show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        let gen_state = &mut self.editor.generator;
+                        let settings = &mut gen_state.settings;
 
-                    setting(ui, "Subdivision", |ui| {
-                        egui::ComboBox::from_id_salt("gen_subdivision")
-                            .selected_text(subdivision_label(settings.subdivision))
-                            .show_ui(ui, |ui| {
-                                for s in [
-                                    Subdivision::Eighths,
-                                    Subdivision::Sixteenths,
-                                    Subdivision::Triplets,
-                                    Subdivision::Mixed,
-                                ] {
-                                    ui.selectable_value(
-                                        &mut settings.subdivision,
-                                        s,
-                                        subdivision_label(s),
-                                    );
-                                }
-                            });
-                    });
-
-                    let custom_on = settings.custom_groupings_enabled;
-                    setting(ui, "Complexity", |ui| {
-                        ui.add_enabled_ui(!custom_on, |ui| {
-                            egui::ComboBox::from_id_salt("gen_complexity")
-                                .selected_text(format!("Level {}", settings.complexity))
+                        setting(ui, "Subdivision", |ui| {
+                            egui::ComboBox::from_id_salt("gen_subdivision")
+                                .selected_text(subdivision_label(settings.subdivision))
                                 .show_ui(ui, |ui| {
-                                    for level in 1..=MAX_COMPLEXITY {
+                                    for s in [
+                                        Subdivision::Eighths,
+                                        Subdivision::Sixteenths,
+                                        Subdivision::Triplets,
+                                        Subdivision::Mixed,
+                                    ] {
                                         ui.selectable_value(
-                                            &mut settings.complexity,
-                                            level,
-                                            format!("Level {level}"),
+                                            &mut settings.subdivision,
+                                            s,
+                                            subdivision_label(s),
                                         );
                                     }
                                 });
-                        })
-                        .response
-                        .on_disabled_hover_text("Custom groupings are active");
-                    });
+                        });
 
-                    setting(ui, "Bars", |ui| {
-                        let min_bars = if gen_state.endless { ENDLESS_MIN_BARS } else { 1 };
-                        settings.bars = settings.bars.clamp(min_bars, MAX_BARS);
-                        egui::ComboBox::from_id_salt("gen_bars")
-                            .selected_text(settings.bars.to_string())
-                            .show_ui(ui, |ui| {
-                                for bars in min_bars..=MAX_BARS {
-                                    ui.selectable_value(&mut settings.bars, bars, bars.to_string());
-                                }
-                            });
-                    });
+                        let custom_on = settings.custom_groupings_enabled;
+                        setting(ui, "Complexity", |ui| {
+                            ui.add_enabled_ui(!custom_on, |ui| {
+                                egui::ComboBox::from_id_salt("gen_complexity")
+                                    .selected_text(format!("Level {}", settings.complexity))
+                                    .show_ui(ui, |ui| {
+                                        for level in 1..=MAX_COMPLEXITY {
+                                            ui.selectable_value(
+                                                &mut settings.complexity,
+                                                level,
+                                                format!("Level {level}"),
+                                            );
+                                        }
+                                    });
+                            })
+                            .response
+                            .on_disabled_hover_text("Custom groupings are active");
+                        });
 
-                    setting(ui, "Time Signature", |ui| {
-                        egui::ComboBox::from_id_salt("gen_time_signature")
-                            .selected_text(format!("{}/4", settings.time_signature.beats))
-                            .show_ui(ui, |ui| {
-                                for beats in 1..=MAX_BEATS {
-                                    ui.selectable_value(
-                                        &mut settings.time_signature,
-                                        TimeSignature { beats, beat_unit: 4 },
-                                        format!("{beats}/4"),
-                                    );
-                                }
-                            });
-                    });
+                        setting(ui, "Bars", |ui| {
+                            let min_bars = if gen_state.endless { ENDLESS_MIN_BARS } else { 1 };
+                            settings.bars = settings.bars.clamp(min_bars, MAX_BARS);
+                            egui::ComboBox::from_id_salt("gen_bars")
+                                .selected_text(settings.bars.to_string())
+                                .show_ui(ui, |ui| {
+                                    for bars in min_bars..=MAX_BARS {
+                                        ui.selectable_value(
+                                            &mut settings.bars,
+                                            bars,
+                                            bars.to_string(),
+                                        );
+                                    }
+                                });
+                        });
 
-                    setting(ui, "Space", |ui| {
-                        ui.add(egui::Slider::new(&mut settings.space, 0.0..=1.0).show_value(false))
+                        setting(ui, "Time Signature", |ui| {
+                            egui::ComboBox::from_id_salt("gen_time_signature")
+                                .selected_text(format!("{}/4", settings.time_signature.beats))
+                                .show_ui(ui, |ui| {
+                                    for beats in 1..=MAX_BEATS {
+                                        ui.selectable_value(
+                                            &mut settings.time_signature,
+                                            TimeSignature { beats, beat_unit: 4 },
+                                            format!("{beats}/4"),
+                                        );
+                                    }
+                                });
+                        });
+
+                        setting(ui, "Space", |ui| {
+                            ui.add(
+                                egui::Slider::new(&mut settings.space, 0.0..=1.0).show_value(false),
+                            )
                             .on_hover_text(format!("{:.0}%", settings.space * 100.0));
-                    });
+                        });
 
-                    setting(ui, "Endless", |ui| {
-                        ui.checkbox(&mut gen_state.endless, "").on_hover_text(
-                            "Replace every bar with a new one right after it was played",
-                        );
-                    });
+                        setting(ui, "Endless", |ui| {
+                            ui.checkbox(&mut gen_state.endless, "").on_hover_text(
+                                "Replace every bar with a new one right after it was played",
+                            );
+                        });
 
-                    setting(ui, "Ghost Notes", |ui| {
-                        ui.checkbox(&mut gen_state.ghost_notes, "").on_hover_text(
-                            "Play quiet hits on every slot of the subdivision without a note",
-                        );
-                    });
+                        setting(ui, "Ghost Notes", |ui| {
+                            ui.checkbox(&mut gen_state.ghost_notes, "").on_hover_text(
+                                "Play quiet hits on every slot of the subdivision without a note",
+                            );
+                        });
 
-                    setting(ui, "Count In", |ui| {
-                        ui.checkbox(&mut self.playback_ctl.audio_cfg.count_in, "")
-                            .on_hover_text("Count one bar in before playback starts");
-                    });
+                        setting(ui, "Count In", |ui| {
+                            ui.checkbox(&mut self.playback_ctl.audio_cfg.count_in, "")
+                                .on_hover_text("Count one bar in before playback starts");
+                        });
 
-                    ui.separator();
-                    if ui.button("🎲 New").on_hover_text("Generate a new rhythm").clicked() {
-                        roll = true;
-                    }
-                    if ui.button("🖊 Edit").on_hover_text("Edit the generated rhythm").clicked() {
-                        self.ui.mode = Mode::Edit;
-                    }
+                        ui.separator();
+                        if ui.button("🎲 New").on_hover_text("Generate a new rhythm").clicked() {
+                            roll = true;
+                        }
+                        if ui.button("🖊 Edit").on_hover_text("Edit the generated rhythm").clicked()
+                        {
+                            self.ui.mode = Mode::Edit;
+                        }
+                    });
                 });
 
                 egui::CollapsingHeader::new("Groupings")
