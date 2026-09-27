@@ -18,17 +18,6 @@ use grooph_measure::duration::s;
 use grooph_measure::grid::DEFAULT_GRID;
 use grooph_measure::{BeatIdx, MeasureIdx, Score, TimeSignature};
 
-/// How a measure's natural width is derived.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum MeasureWidthPolicy {
-    /// Grow with the number of beats written in the measure (editing).
-    Content,
-    /// Depend only on the time signature: every measure is as wide as one
-    /// filled with sixteenths. Row packing and scale then stay the same when
-    /// measures are replaced by others of the same meter (endless mode).
-    TimeSignature,
-}
-
 /// Configuration for laying out an entire [`Score`].
 ///
 /// Mirrors the per-measure fields of [`LayoutOpts`], plus the cross-measure
@@ -59,7 +48,6 @@ pub struct StaffOpts {
     pub system_spacing_em: f32,
     /// Whether to show the clef on the first measure of each system.
     pub layout_clef_first: bool,
-    pub width_policy: MeasureWidthPolicy,
 }
 
 impl StaffOpts {
@@ -180,6 +168,12 @@ fn sixteenth_slots(ts: &TimeSignature) -> f32 {
 
 /// Minimum natural width (px) for a measure given its content and which
 /// header glyphs (clef / time signature) it will draw.
+///
+/// The body is sized for at least a measure full of sixteenths, so up to
+/// that density the width depends only on the time signature: editing notes
+/// or swapping measures (endless mode) never reflows the staff. Denser
+/// measures (32nds, large tuplets) grow with their beat count so nothing
+/// collides.
 fn min_measure_width(
     score: &Score,
     measure_idx: MeasureIdx,
@@ -188,10 +182,7 @@ fn min_measure_width(
     opts: &StaffOpts,
 ) -> f32 {
     let m = &score.measures[measure_idx];
-    let beats = match opts.width_policy {
-        MeasureWidthPolicy::Content => m.beats().len().max(1) as f32,
-        MeasureWidthPolicy::TimeSignature => sixteenth_slots(&m.time_signature()),
-    };
+    let beats = (m.beats().len() as f32).max(sixteenth_slots(&m.time_signature()));
     let body = (opts.min_measure_width_em + beats * opts.note_width_em) * opts.em;
     let clef = if show_clef { CLEF_WIDTH_EM * opts.em } else { 0.0 };
     let ts = if show_ts { time_sig_width_em(&m.time_signature()) * opts.em } else { 0.0 };
@@ -435,7 +426,6 @@ mod tests {
             note_width_em: 0.6,
             system_spacing_em: 0.5,
             layout_clef_first: true,
-            width_policy: MeasureWidthPolicy::Content,
         }
     }
 
@@ -577,8 +567,10 @@ mod tests {
         // half size before wrapping. A row holds measure 0 (with clef+TS,
         // wider) plus measure 1 within that shrink budget, but a third
         // measure would drop the row below the floor — it starts a new row.
+        // Measures are sized for sixteenth density (see `min_measure_width`),
+        // hence the wide rect.
         let em = 96.0;
-        let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(1000.0, 100.0));
+        let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(2000.0, 100.0));
         let staff_opts = opts(em, rect);
 
         let score = Score {
@@ -644,11 +636,11 @@ mod tests {
     }
 
     #[test]
-    fn time_signature_width_policy_ignores_note_density() {
-        // Two scores in the same meter, one sparse and one dense: with the
-        // time-signature policy both get identical rows and measure rects.
+    fn width_ignores_note_density_up_to_sixteenths() {
+        // Two scores in the same meter, one sparse and one dense (sixteenths):
+        // both get identical rows and measure rects.
         let rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(600.0, 400.0));
-        let o = StaffOpts { width_policy: MeasureWidthPolicy::TimeSignature, ..opts(20.0, rect) };
+        let o = opts(20.0, rect);
         let sparse = Score {
             measures: vec![
                 measure_with_quarters(TimeSignature::FOUR_FOUR),
@@ -676,20 +668,29 @@ mod tests {
     }
 
     #[test]
-    fn content_width_policy_grows_with_note_density() {
-        // Guards the behaviour the time-signature policy exists to avoid.
-        let rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(600.0, 400.0));
+    fn measures_denser_than_sixteenths_grow() {
+        // 32nds exceed the sixteenth baseline, so the measure widens instead
+        // of cramping its notes.
+        use grooph_measure::duration::th;
+        let rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(4000.0, 400.0));
         let o = opts(20.0, rect);
+        let mut thirty_seconds = Measure::new(TimeSignature::FOUR_FOUR);
+        let mut idx = 0;
+        while idx < thirty_seconds.beats().len() {
+            thirty_seconds.set_beat(idx, Beat::note(th())).unwrap();
+            idx += 1;
+        }
         let score = Score {
             measures: vec![
-                measure_with_quarters(TimeSignature::FOUR_FOUR),
                 measure_with_sixteenths(TimeSignature::FOUR_FOUR),
+                measure_with_sixteenths(TimeSignature::FOUR_FOUR),
+                thirty_seconds,
             ],
         };
         let staff = build_staff_layout(&score, &o);
-        let w0 = staff.placed(0).unwrap().rect.width();
         let w1 = staff.placed(1).unwrap().rect.width();
-        assert!(w1 > w0, "dense measure should be wider: {w0} vs {w1}");
+        let w2 = staff.placed(2).unwrap().rect.width();
+        assert!(w2 > w1, "32nd measure should be wider: {w1} vs {w2}");
     }
 
     #[test]
@@ -731,7 +732,7 @@ mod tests {
         // should hit measure 2, even though its X also lies under row 1's
         // measures (rows can differ in width).
         let em = 96.0;
-        let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(1000.0, 100.0));
+        let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(2000.0, 100.0));
         let staff_opts = opts(em, rect);
 
         let score = Score {
