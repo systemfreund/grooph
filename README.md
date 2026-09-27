@@ -54,6 +54,15 @@ Important root files:
 - The playback cursor is smoothed in the UI, audio offset for latency is optional.
 - Counting overlay comes from `grooph_measure::counting`.
 
+## Generator / reading mode
+
+- Panel: `crates/app/src/generator_panel.rs` (🎲 in the main menu). Changing a
+  setting regenerates the score (undoable); "Edit" switches to the editor.
+- App glue: `crates/app/src/generator.rs`. Reading mode replaces a measure once
+  both the visible cursor and the audio cursor have left it; the replacement
+  keeps the measure's time signature so loop timing stays stable. Needs at
+  least 2 bars.
+
 ## Input/tools
 
 - Tool registry: `crates/app/src/tools.rs` (ToolKind, Modifier, shortcuts).
