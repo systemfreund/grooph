@@ -7,7 +7,7 @@ use grooph_layout::pixel_layout::{
     build_measure_layout,
 };
 use grooph_measure::Measure;
-use grooph_measure::counting::{ColorId, CountConfig, CountSlot, build_count_slots};
+use grooph_measure::counting::{CountConfig, CountSlot, build_count_slots};
 use grooph_measure::grid::DEFAULT_GRID;
 use std::collections::HashMap;
 
@@ -76,7 +76,6 @@ pub(crate) fn render_measure_at(
             measure_layout,
             opts,
             config,
-            ui.visuals().dark_mode,
             ui.visuals().text_color(),
             ui.visuals().selection.stroke.color,
             playback_tick,
@@ -186,7 +185,6 @@ fn draw_count_layer(
     measure_layout: &MeasureLayout,
     opts: &LayoutOpts,
     config: &CountConfig,
-    dark_mode: bool,
     text_color: Color32,
     highlight_color: Color32,
     playback_tick: Option<f64>,
@@ -196,7 +194,6 @@ fn draw_count_layer(
         return;
     }
     let total_ticks = DEFAULT_GRID.ticks_per_measure(&measure.time_signature());
-    draw_count_underlay(painter, measure, measure_layout, opts.rect, opts.em, dark_mode, &slots);
     draw_count_labels(
         painter,
         measure,
@@ -378,93 +375,6 @@ pub fn draw_tuplets(
     }
 }
 
-struct TickMapper {
-    onsets: Vec<u32>,
-    boundary_x: Vec<f32>,
-    total_ticks: u32,
-}
-
-impl TickMapper {
-    fn tick_to_boundary_x(&self, tick: u32) -> f32 { self.interpolate(&self.boundary_x, tick) }
-
-    fn interpolate(&self, anchors: &[f32], tick: u32) -> f32 {
-        let t = tick.min(self.total_ticks);
-        let mut i = 0usize;
-        while i + 1 < self.onsets.len() && t >= self.onsets[i + 1] {
-            i += 1;
-        }
-        let start_tick = self.onsets.get(i).copied().unwrap_or(0);
-        let end_tick =
-            if i + 1 < self.onsets.len() { self.onsets[i + 1] } else { self.total_ticks };
-        let x0 = *anchors.get(i).unwrap_or(&anchors[0]);
-        let x1 = *anchors.get(i + 1).unwrap_or(&anchors[anchors.len() - 1]);
-        let span = end_tick.saturating_sub(start_tick);
-        if span == 0 {
-            return x0;
-        }
-        let frac = (t - start_tick) as f32 / span as f32;
-        x0 + (x1 - x0) * frac
-    }
-}
-
-fn build_tick_mapper(measure: &Measure, layout: &MeasureLayout, rect: Rect) -> Option<TickMapper> {
-    let beats = measure.beats();
-    if beats.is_empty() || layout.notes.is_empty() {
-        return None;
-    }
-    let onsets = DEFAULT_GRID.compute_onset_ticks(beats);
-    let total_ticks = DEFAULT_GRID.ticks_per_measure(&measure.time_signature());
-    if total_ticks == 0 {
-        return None;
-    }
-    let mut boundary_x = Vec::with_capacity(layout.notes.len() + 1);
-    boundary_x.push(layout.notes_left_edge);
-    for i in 1..layout.notes.len() {
-        let x_prev = layout.notes[i - 1].center.x;
-        let x_cur = layout.notes[i].center.x;
-        boundary_x.push((x_prev + x_cur) * 0.5);
-    }
-    boundary_x.push(rect.right());
-
-    Some(TickMapper { onsets, boundary_x, total_ticks })
-}
-
-fn draw_count_underlay(
-    painter: &Painter,
-    measure: &Measure,
-    layout: &MeasureLayout,
-    rect: Rect,
-    em: f32,
-    dark_mode: bool,
-    slots: &[CountSlot],
-) {
-    let mapper = match build_tick_mapper(measure, layout, rect) {
-        Some(mapper) => mapper,
-        None => return,
-    };
-    let mut color_slots: Vec<&CountSlot> = slots.iter().filter(|s| s.color.is_some()).collect();
-    if color_slots.is_empty() {
-        return;
-    }
-    color_slots.sort_by(|a, b| a.priority.cmp(&b.priority));
-
-    let y0 = rect.center().y - 0.85 * em;
-    let y1 = rect.center().y + 0.85 * em;
-    let alpha = if dark_mode { 85 } else { 65 };
-
-    for slot in color_slots {
-        let Some(color_id) = slot.color else { continue };
-        let x0 = mapper.tick_to_boundary_x(slot.start_tick);
-        let x1 = mapper.tick_to_boundary_x(slot.end_tick);
-        if x1 <= x0 + 0.5 {
-            continue;
-        }
-        let color = count_color(color_id, alpha);
-        let r = Rect::from_min_max(pos2(x0, y0), pos2(x1, y1));
-        painter.rect_filled(r, 0.0, color);
-    }
-}
-
 #[allow(clippy::too_many_arguments)]
 fn draw_count_labels(
     painter: &Painter,
@@ -622,19 +532,6 @@ fn compute_label_xs(
         x0 + (x1 - x0) * frac
     };
     selected.iter().map(|s| x_at(s.start_tick).clamp(left, right)).collect()
-}
-
-fn count_color(id: ColorId, alpha: u8) -> Color32 {
-    let palette = [
-        Color32::from_rgb(255, 231, 173),
-        Color32::from_rgb(205, 233, 255),
-        Color32::from_rgb(206, 245, 220),
-        Color32::from_rgb(255, 215, 202),
-        Color32::from_rgb(230, 240, 210),
-        Color32::from_rgb(235, 235, 235),
-    ];
-    let base = palette[id.0 as usize % palette.len()];
-    Color32::from_rgba_unmultiplied(base.r(), base.g(), base.b(), alpha)
 }
 
 #[cfg(test)]

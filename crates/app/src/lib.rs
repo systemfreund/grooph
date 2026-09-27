@@ -39,8 +39,7 @@ use eframe::epaint::{FontFamily, FontId};
 use eframe::{App, CreationContext, egui};
 use grooph_audio::{AudioSettings, PlaybackOptions, PlayerState};
 use grooph_measure::counting::{
-    ColorId, ColorMode, ColorPattern, CountConfig, CountLayer, CountScope, LabelPattern,
-    LabelToken, Subdiv,
+    CountConfig, CountLayer, CountScope, LabelPattern, LabelToken, Subdiv,
 };
 use grooph_measure::duration::NoteValue::*;
 use grooph_measure::editing::Modification;
@@ -175,7 +174,6 @@ enum CountingBase {
 #[derive(Serialize, Deserialize, Clone, Copy)]
 struct CountingSettings {
     enabled: bool,
-    show_colors: bool,
     show_labels: bool,
     base: CountingBase,
     show_tuplets: bool,
@@ -185,7 +183,6 @@ impl Default for CountingSettings {
     fn default() -> Self {
         Self {
             enabled: true,
-            show_colors: false,
             show_labels: true,
             base: CountingBase::Ands,
             show_tuplets: false,
@@ -727,16 +724,9 @@ impl Grooph {
         if !self.ui.counting.enabled {
             return None;
         }
-        if !self.ui.counting.show_colors && !self.ui.counting.show_labels {
+        if !self.ui.counting.show_labels {
             return None;
         }
-
-        let palette: Vec<ColorId> = (0u8..6).map(ColorId).collect();
-        let color_pattern = if self.ui.counting.show_colors {
-            Some(ColorPattern { palette: palette.clone(), mode: ColorMode::Scope })
-        } else {
-            None
-        };
 
         let mut layers = Vec::new();
         let mut next_id = 1u32;
@@ -769,8 +759,6 @@ impl Grooph {
 
         if let Some(ref mut layer) = base_layer {
             layer.show_labels = self.ui.counting.show_labels;
-            layer.show_colors = self.ui.counting.show_colors;
-            layer.colors = color_pattern.clone();
             layers.push(layer.clone());
             next_id = next_id.saturating_add(1);
         }
@@ -779,8 +767,6 @@ impl Grooph {
             let mut layer = CountLayer::new(next_id, CountScope::TupletAll, Subdiv::TupletN);
             layer.labels = Some(LabelPattern::triplet());
             layer.show_labels = self.ui.counting.show_labels;
-            layer.show_colors = self.ui.counting.show_colors;
-            layer.colors = color_pattern;
             layer.priority = 10;
             layers.push(layer);
         }

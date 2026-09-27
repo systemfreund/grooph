@@ -3,21 +3,6 @@ use crate::grid::DEFAULT_GRID;
 use crate::grouping::default_groups_for;
 use crate::{Measure, TimeSignature};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ColorId(pub u8);
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ColorMode {
-    Scope,
-    Sub,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ColorPattern {
-    pub palette: Vec<ColorId>,
-    pub mode: ColorMode,
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LabelToken {
     BeatNum,
@@ -92,8 +77,6 @@ pub struct CountLayer {
     pub subdiv: Subdiv,
     pub labels: Option<LabelPattern>,
     pub show_labels: bool,
-    pub colors: Option<ColorPattern>,
-    pub show_colors: bool,
     pub priority: u8,
 }
 
@@ -106,8 +89,6 @@ impl CountLayer {
             subdiv,
             labels: None,
             show_labels: true,
-            colors: None,
-            show_colors: true,
             priority: 0,
         }
     }
@@ -131,7 +112,6 @@ pub struct CountSlot {
     pub start_tick: u32,
     pub end_tick: u32,
     pub label: Option<String>,
-    pub color: Option<ColorId>,
     pub priority: u8,
     pub tuplet_id: Option<u32>,
 }
@@ -229,11 +209,6 @@ impl<'a> CountContext<'a> {
             } else {
                 None
             };
-            let color = if layer.show_colors {
-                layer.colors.as_ref().and_then(|p| color_for_slot(p, span.scope_idx, sub_idx))
-            } else {
-                None
-            };
             self.slots.push(CountSlot {
                 layer_id: layer.id,
                 scope: span.scope,
@@ -242,7 +217,6 @@ impl<'a> CountContext<'a> {
                 start_tick: slot_start,
                 end_tick: slot_end,
                 label,
-                color,
                 priority: layer.priority,
                 tuplet_id: span.tuplet_id,
             });
@@ -399,15 +373,4 @@ fn label_from_tokens(tokens: &[LabelToken], ctx: &LabelContext) -> Option<String
         }
     }
     Some(out)
-}
-
-fn color_for_slot(pattern: &ColorPattern, scope_idx: u32, sub_idx: u8) -> Option<ColorId> {
-    if pattern.palette.is_empty() {
-        return None;
-    }
-    let idx = match pattern.mode {
-        ColorMode::Scope => scope_idx as usize,
-        ColorMode::Sub => sub_idx as usize,
-    };
-    Some(pattern.palette[idx % pattern.palette.len()])
 }

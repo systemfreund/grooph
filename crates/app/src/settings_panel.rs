@@ -149,7 +149,6 @@ impl Grooph {
                     egui::CollapsingHeader::new("Counting").default_open(false).show(ui, |ui| {
                         ui.checkbox(&mut self.ui.counting.enabled, "Enable counting overlay");
                         ui.add_enabled_ui(self.ui.counting.enabled, |ui| {
-                            ui.checkbox(&mut self.ui.counting.show_colors, "Show underlay colors");
                             ui.checkbox(&mut self.ui.counting.show_labels, "Show labels");
                             ui.checkbox(&mut self.ui.counting.show_tuplets, "Tuplet overlay");
                             egui::ComboBox::from_label("Subdivision")
