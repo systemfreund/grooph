@@ -1,6 +1,6 @@
 use crate::Grooph;
 use crate::Mode;
-use crate::generator::READING_MODE_MIN_BARS;
+use crate::generator::ENDLESS_MIN_BARS;
 use crate::tool_palette::notation_button;
 use eframe::egui;
 use grooph_measure::TimeSignature;
@@ -37,7 +37,7 @@ impl Grooph {
             self.ui.mode == Mode::Generator,
             |ui| {
                 let before = self.editor.generator.settings;
-                let reading_before = self.editor.generator.reading_mode;
+                let endless_before = self.editor.generator.endless;
                 let mut roll = false;
 
                 ui.horizontal_wrapped(|ui| {
@@ -83,8 +83,7 @@ impl Grooph {
                     });
 
                     setting(ui, "Bars", |ui| {
-                        let min_bars =
-                            if gen_state.reading_mode { READING_MODE_MIN_BARS } else { 1 };
+                        let min_bars = if gen_state.endless { ENDLESS_MIN_BARS } else { 1 };
                         settings.bars = settings.bars.clamp(min_bars, MAX_BARS);
                         egui::ComboBox::from_id_salt("gen_bars")
                             .selected_text(settings.bars.to_string())
@@ -114,8 +113,8 @@ impl Grooph {
                             .on_hover_text(format!("{:.0}%", settings.space * 100.0));
                     });
 
-                    setting(ui, "Reading Mode", |ui| {
-                        ui.checkbox(&mut gen_state.reading_mode, "").on_hover_text(
+                    setting(ui, "Endless", |ui| {
+                        ui.checkbox(&mut gen_state.endless, "").on_hover_text(
                             "Replace every bar with a new one right after it was played",
                         );
                     });
@@ -144,11 +143,11 @@ impl Grooph {
                     .id_salt("gen_groupings")
                     .show(ui, |ui| self.groupings_picker(ui));
 
-                let reading_turned_on = !reading_before && self.editor.generator.reading_mode;
-                let too_short_for_reading = self.editor.score.len() < READING_MODE_MIN_BARS;
+                let endless_turned_on = !endless_before && self.editor.generator.endless;
+                let too_short_for_endless = self.editor.score.len() < ENDLESS_MIN_BARS;
                 if roll
                     || self.editor.generator.settings != before
-                    || (reading_turned_on && too_short_for_reading)
+                    || (endless_turned_on && too_short_for_endless)
                 {
                     self.generate_new_score();
                 }

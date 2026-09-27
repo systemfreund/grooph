@@ -1,5 +1,5 @@
 //! App-side glue for the rhythm generator: settings, "generate" action and
-//! the reading mode that keeps replacing already-played measures with fresh
+//! the endless mode that keeps replacing already-played measures with fresh
 //! ones while the transport runs.
 
 use crate::platform::random_seed;
@@ -9,18 +9,18 @@ use grooph_measure::tempo::ScoreTiming;
 use grooph_measure::{Cursor, MeasureIdx};
 use log::warn;
 
-/// Minimum score length for reading mode: one measure is read while the other
+/// Minimum score length for endless mode: one measure is read while the other
 /// one is being replaced.
-pub(crate) const READING_MODE_MIN_BARS: usize = 2;
+pub(crate) const ENDLESS_MIN_BARS: usize = 2;
 
 pub(crate) struct GeneratorState {
     pub(crate) settings: GeneratorSettings,
     /// Replace each measure with a new one right after it has been played.
-    pub(crate) reading_mode: bool,
+    pub(crate) endless: bool,
     /// Play quiet ghost notes on the free slots of the generator subdivision.
     pub(crate) ghost_notes: bool,
     rng: Rng,
-    /// Measure the playback cursor was in during the last frame (reading mode).
+    /// Measure the playback cursor was in during the last frame (endless mode).
     last_playing_measure: Option<MeasureIdx>,
     /// Measure the visible cursor has left but the audio engine may still be
     /// sounding (latency offset); replaced once audio has left it too.
@@ -28,10 +28,10 @@ pub(crate) struct GeneratorState {
 }
 
 impl GeneratorState {
-    pub(crate) fn new(settings: GeneratorSettings, reading_mode: bool, ghost_notes: bool) -> Self {
+    pub(crate) fn new(settings: GeneratorSettings, endless: bool, ghost_notes: bool) -> Self {
         Self {
             settings,
-            reading_mode,
+            endless,
             ghost_notes,
             rng: Rng::new(random_seed()),
             last_playing_measure: None,
@@ -39,10 +39,10 @@ impl GeneratorState {
         }
     }
 
-    /// Bars to generate: reading mode needs at least [`READING_MODE_MIN_BARS`].
+    /// Bars to generate: endless mode needs at least [`ENDLESS_MIN_BARS`].
     pub(crate) fn effective_bars(&self) -> usize {
-        if self.reading_mode {
-            self.settings.bars.max(READING_MODE_MIN_BARS)
+        if self.endless {
+            self.settings.bars.max(ENDLESS_MIN_BARS)
         } else {
             self.settings.bars.max(1)
         }
@@ -73,18 +73,16 @@ impl Grooph {
         self.editor.generator.pending_regeneration = None;
     }
 
-    /// Reading mode: once the playback cursor leaves a measure, regenerate
+    /// Endless mode: once the playback cursor leaves a measure, regenerate
     /// that measure so it is new by the time the loop comes back to it.
     ///
     /// The replacement keeps the measure's time signature, so the loop length
     /// and the global tick of the playing measure stay unchanged; changed
     /// generator settings for bars/time signature apply on the next
     /// [`Self::generate_new_score`].
-    pub(crate) fn update_reading_mode(&mut self) {
+    pub(crate) fn update_endless(&mut self) {
         let playing = self.playback_ctl.transport_state == TransportState::Playing;
-        if !self.editor.generator.reading_mode
-            || !playing
-            || self.editor.score.len() < READING_MODE_MIN_BARS
+        if !self.editor.generator.endless || !playing || self.editor.score.len() < ENDLESS_MIN_BARS
         {
             self.editor.generator.last_playing_measure = None;
             self.editor.generator.pending_regeneration = None;
@@ -136,7 +134,7 @@ impl Grooph {
         let measure = match generate_measure(&settings, &mut self.editor.generator.rng) {
             Ok(measure) => measure,
             Err(err) => {
-                warn!("Reading mode: cannot regenerate measure {idx}: {err:?}");
+                warn!("Endless mode: cannot regenerate measure {idx}: {err:?}");
                 return;
             }
         };

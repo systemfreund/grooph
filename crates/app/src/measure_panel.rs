@@ -166,9 +166,9 @@ impl Grooph {
                             note_width_em: 0.6,
                             system_spacing_em: 0.5,
                             layout_clef_first: true,
-                            // Reading mode swaps measures during playback; keep their
+                            // Endless mode swaps measures during playback; keep their
                             // widths content-independent so the staff doesn't reflow.
-                            width_policy: if self.editor.generator.reading_mode {
+                            width_policy: if self.editor.generator.endless {
                                 MeasureWidthPolicy::TimeSignature
                             } else {
                                 MeasureWidthPolicy::Content

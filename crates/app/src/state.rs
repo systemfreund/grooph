@@ -113,7 +113,7 @@ pub(crate) struct EditorState {
     /// Whether the working score/tempo has been edited since the last save or
     /// load. Used to warn before discarding changes when loading another pattern.
     pub(crate) dirty: bool,
-    /// Rhythm generator settings and reading-mode state.
+    /// Rhythm generator settings and endless-mode state.
     pub(crate) generator: GeneratorState,
 }
 

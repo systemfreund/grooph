@@ -25,7 +25,7 @@ pub enum MeasureWidthPolicy {
     Content,
     /// Depend only on the time signature: every measure is as wide as one
     /// filled with sixteenths. Row packing and scale then stay the same when
-    /// measures are replaced by others of the same meter (reading mode).
+    /// measures are replaced by others of the same meter (endless mode).
     TimeSignature,
 }
 

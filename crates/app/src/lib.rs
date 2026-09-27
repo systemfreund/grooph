@@ -106,7 +106,7 @@ struct PersistedState {
     active_pattern_id: Option<u64>,
     dirty: bool,
     generator_settings: GeneratorSettings,
-    reading_mode: bool,
+    endless: bool,
     ghost_notes: bool,
     count_in: bool,
 }
@@ -128,7 +128,7 @@ impl Default for PersistedState {
             active_pattern_id: None,
             dirty: false,
             generator_settings: GeneratorSettings::default(),
-            reading_mode: false,
+            endless: false,
             ghost_notes: false,
             count_in: false,
         }
@@ -152,7 +152,7 @@ impl PersistedState {
             active_pattern_id: app.editor.active_pattern_id,
             dirty: app.editor.dirty,
             generator_settings: app.editor.generator.settings,
-            reading_mode: app.editor.generator.reading_mode,
+            endless: app.editor.generator.endless,
             ghost_notes: app.editor.generator.ghost_notes,
             count_in: app.playback_ctl.audio_cfg.count_in,
         }
@@ -211,7 +211,7 @@ impl App for Grooph {
         self.generator_panel(ui);
         self.tool_palette_panel(ui);
         self.measure_panel(ui);
-        self.update_reading_mode();
+        self.update_endless();
 
         if matches!(self.ui.mode, Mode::TimeSignature { .. }) {
             self.time_signature_dialog(ui);
@@ -875,7 +875,7 @@ impl Grooph {
                 library: state.library,
                 generator: GeneratorState::new(
                     state.generator_settings,
-                    state.reading_mode,
+                    state.endless,
                     state.ghost_notes,
                 ),
             },

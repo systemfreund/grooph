@@ -54,15 +54,15 @@ Important root files:
 - The playback cursor is smoothed in the UI, audio offset for latency is optional.
 - Counting overlay comes from `grooph_measure::counting`.
 
-## Generator / reading mode
+## Generator / endless mode
 
 - Panel: `crates/app/src/generator_panel.rs` (🎲 in the main menu). Changing a
   setting regenerates the score (undoable); "Edit" switches to the editor.
-- App glue: `crates/app/src/generator.rs`. Reading mode replaces a measure once
+- App glue: `crates/app/src/generator.rs`. Endless mode replaces a measure once
   both the visible cursor and the audio cursor have left it; the replacement
   keeps the measure's time signature so loop timing stays stable. Needs at
   least 2 bars.
-- Reading mode lays out with `MeasureWidthPolicy::TimeSignature`: measure
+- Endless mode lays out with `MeasureWidthPolicy::TimeSignature`: measure
   width depends only on the meter (as if filled with sixteenths), so swapping
   measures never reflows the staff. The editor keeps `Content` widths.
 - Groupings: every one-beat figure has a stable `GroupingId` (bit index in
