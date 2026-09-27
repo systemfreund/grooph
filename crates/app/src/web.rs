@@ -70,9 +70,13 @@ pub(crate) struct PlatformRuntime {
 }
 
 impl PlatformRuntime {
-    pub(crate) fn new() -> Self { Self { wake_lock: Rc::new(RefCell::new(None)) } }
+    pub(crate) fn new() -> Self {
+        Self { wake_lock: Rc::new(RefCell::new(None)) }
+    }
 
-    pub(crate) fn install_listeners(&self, ctx: Context) { install_visibility_listeners(ctx); }
+    pub(crate) fn install_listeners(&self, ctx: Context) {
+        install_visibility_listeners(ctx);
+    }
 
     pub(crate) fn take_visibility_event(&self) -> Option<VisibilityEvent> {
         if !is_mobile_browser() {

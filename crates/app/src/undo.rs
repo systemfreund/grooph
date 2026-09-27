@@ -15,7 +15,9 @@ pub(crate) struct UndoHistory {
 }
 
 impl UndoHistory {
-    pub fn new(limit: usize) -> Self { Self { past: VecDeque::new(), future: Vec::new(), limit } }
+    pub fn new(limit: usize) -> Self {
+        Self { past: VecDeque::new(), future: Vec::new(), limit }
+    }
 
     pub fn push(&mut self, snap: EditorSnapshot) {
         if self.past.len() >= self.limit {
@@ -37,9 +39,13 @@ impl UndoHistory {
         Some(next)
     }
 
-    pub fn can_undo(&self) -> bool { !self.past.is_empty() }
+    pub fn can_undo(&self) -> bool {
+        !self.past.is_empty()
+    }
 
-    pub fn can_redo(&self) -> bool { !self.future.is_empty() }
+    pub fn can_redo(&self) -> bool {
+        !self.future.is_empty()
+    }
 }
 
 #[cfg(test)]
@@ -54,7 +60,9 @@ mod tests {
         EditorSnapshot { score: Score::single(m), cursor: Cursor::at(0, beat_idx) }
     }
 
-    fn beat_at(snap: &EditorSnapshot) -> usize { snap.cursor.beat_idx }
+    fn beat_at(snap: &EditorSnapshot) -> usize {
+        snap.cursor.beat_idx
+    }
 
     #[test]
     fn push_then_undo_restores_previous_snapshot() {
