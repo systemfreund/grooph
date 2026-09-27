@@ -1,16 +1,16 @@
 //! Multi-measure layout layer.
 //!
-//! Sits above [`crate::pixel_layout::build_measure_layout`] and arranges multiple
-//! [`Measure`]s across one or more rows ("systems"). Cross-measure concerns
-//! (per-measure width allocation, clef/time-signature repeat rules, row
-//! packing, grow/shrink/wrap policy, total size for the host's scroll area)
-//! live here; per-measure pixel geometry stays in `MeasureLayout`.
+//! Sits above [`crate::pixel_layout::build_measure_layout`] and arranges the
+//! [`Measure`]s of a score top-to-bottom, one measure per row ("system") —
+//! the app targets phones, where a predictable one-bar-per-line layout reads
+//! best. Cross-measure concerns (per-measure width allocation, clef/time-
+//! signature repeat rules, grow/shrink policy, total size for the host's
+//! scroll area) live here; per-measure pixel geometry stays in `MeasureLayout`.
 //!
-//! Measures grow to fill a row, shrink toward [`LEGIBILITY_FLOOR_EM`] before
-//! that, and wrap into a new row (`StaffLayout.systems`) once a row can't fit
-//! more measures even at the floor. A single measure that alone doesn't fit
-//! at the floor is left to overflow its row — the caller is expected to host
-//! the result in a horizontally scrollable area for that case.
+//! Each measure grows to fill the row. If a measure doesn't fit, glyphs shrink
+//! toward [`LEGIBILITY_FLOOR_EM`]; a measure that doesn't fit even at the floor
+//! overflows its row — the caller is expected to host the result in a
+//! horizontally scrollable area for that case.
 
 use crate::pixel_layout::{GlyphMetrics, LayoutOpts, MeasureLayout, build_measure_layout};
 use egui::{FontId, Pos2, Rect, Vec2, pos2, vec2};
@@ -44,7 +44,7 @@ pub struct StaffOpts {
     pub min_measure_width_em: f32,
     /// Width added per beat in em, to grow dense measures.
     pub note_width_em: f32,
-    /// Vertical spacing between systems in em (reserved for line-wrap mode).
+    /// Vertical spacing between systems (rows) in em.
     pub system_spacing_em: f32,
     /// Whether to show the clef on the first measure of each system.
     pub layout_clef_first: bool,
@@ -103,7 +103,7 @@ pub struct PlacedMeasure {
     pub show_time_signature: bool,
 }
 
-/// One system (row/line of music).
+/// One system (row/line of music). Currently always holds exactly one measure.
 #[derive(Debug, Clone)]
 pub struct SystemLayout {
     pub y_baseline: f32,
@@ -119,8 +119,9 @@ pub struct StaffLayout {
     pub total_size: Vec2,
     /// The factor `opts.em` was scaled by to produce this layout — 1.0 means
     /// unscaled. Only ever `<= 1.0`: shrinking toward the legibility floor
-    /// scales glyph size down, but growing to fill a row only stretches note
-    /// spacing, not glyph size (growing never threatens legibility). Callers
+    /// scales glyph size down (shared by all rows, governed by the widest
+    /// measure), but growing to fill a row only stretches note spacing, not
+    /// glyph size (growing never threatens legibility). Callers
     /// that render the layout need to rescale their own `StaffOpts` by this
     /// same factor (see [`StaffOpts::rescaled`]) so glyph size matches what
     /// was used to compute positions here.
@@ -189,8 +190,8 @@ fn min_measure_width(
     body + clef + ts
 }
 
-/// Legibility floor: minimum `em` a measure may be rendered at before the
-/// layout wraps to a new row instead of shrinking further. The prototype
+/// Legibility floor: minimum `em` a measure may be rendered at before it
+/// overflows its row instead of shrinking further. The prototype
 /// behind the original 24 found glyphs stop reading as distinct shapes below
 /// ~9em; 48 is a deliberately larger margin than that measurement alone
 /// implies, above the em `compute_em` typically produces in normal use
@@ -212,16 +213,12 @@ fn row_height_em(opts: &StaffOpts) -> f32 {
 
 /// Build the pixel layout for an entire score.
 ///
-/// Measures are packed into rows (systems) left-to-right, greedily: a
-/// measure joins the current row as long as the row could still be scaled to
-/// fit `opts.rect.width()` without dropping below [`LEGIBILITY_FLOOR_EM`];
-/// otherwise it starts a new row (a row always gets at least one measure,
-/// even one that alone can't fit at the floor). One scale factor — governed
-/// by the most tightly-packed row — is then shared by every row and measure,
-/// so rows grow to fill the available width, shrink toward the floor before
-/// that, and only overflow (the caller is expected to host the result in a
-/// scrollable area) when a single measure alone doesn't fit even at the
-/// floor.
+/// Every measure gets its own row (system), stacked top-to-bottom, and is
+/// stretched to fill `opts.rect.width()`. Glyph size is shared by all rows:
+/// it only shrinks (never below [`LEGIBILITY_FLOOR_EM`]) when the widest
+/// measure wouldn't fit at the baseline `em`; a measure that doesn't fit even
+/// at the floor overflows its row (the caller is expected to host the result
+/// in a scrollable area).
 pub fn build_staff_layout(score: &Score, opts: &StaffOpts) -> StaffLayout {
     assert!(!score.is_empty(), "Score must have at least one measure");
 
@@ -243,90 +240,43 @@ pub fn build_staff_layout(score: &Score, opts: &StaffOpts) -> StaffLayout {
         .collect();
     let available = opts.rect.width().max(0.0);
 
-    // 3. Greedy row assignment. `shrink_floor_scale` is the smallest scale
-    // factor a row may ever be asked for: it protects the legibility floor
-    // when shrinking, and is 1.0 (no shrink permitted at all) if the
-    // baseline em is already at or below the floor.
+    // 3. One glyph scale for all rows: shrink just enough for the widest
+    // measure to fit, but never below the legibility floor (and not at all if
+    // the baseline em is already at or below it). Widths scale linearly with
+    // em, so a measure's minimum width at this scale is `w * em_scale`.
     let shrink_floor_scale =
         if opts.em > 0.0 { (LEGIBILITY_FLOOR_EM / opts.em).min(1.0) } else { 1.0 };
-    let row_capacity =
-        if shrink_floor_scale > 0.0 { available / shrink_floor_scale } else { f32::INFINITY };
-
-    let mut rows: Vec<Vec<usize>> = Vec::new();
-    let mut current: Vec<usize> = Vec::new();
-    let mut current_total = 0.0f32;
-    for i in 0..score.len() {
-        let w = widths_min[i];
-        if !current.is_empty() && current_total + w > row_capacity {
-            rows.push(std::mem::take(&mut current));
-            current_total = 0.0;
-        }
-        current.push(i);
-        current_total += w;
-    }
-    if !current.is_empty() {
-        rows.push(current);
-    }
-
-    // 4. One global (width) scale, governed by the row that needs the most
-    // shrinking (or least growth) to exactly fill `available` — clamped so
-    // no row is ever asked to shrink past the floor, even one that can't fit
-    // at all. Growth (`global_scale > 1`) only ever stretches note spacing —
-    // realized below purely as extra measure width, glyph size unaffected —
-    // since growing never threatens legibility the way shrinking does.
-    // Shrinking scales glyph size (`em`) down together with width, since a
-    // narrower measure with full-size glyphs would just collide instead.
-    let row_totals: Vec<f32> =
-        rows.iter().map(|r| r.iter().map(|&i| widths_min[i]).sum::<f32>()).collect();
-    let min_required_scale = row_totals
-        .iter()
-        .filter(|&&t| t > 0.0)
-        .map(|&t| available / t)
-        .fold(f32::INFINITY, f32::min);
-    let global_scale = if min_required_scale.is_finite() {
-        min_required_scale.max(shrink_floor_scale)
-    } else {
-        1.0
-    };
-    let em_scale = global_scale.min(1.0);
-
+    let widest = widths_min.iter().copied().fold(0.0f32, f32::max);
+    let em_scale =
+        if widest > 0.0 { (available / widest).clamp(shrink_floor_scale, 1.0) } else { 1.0 };
     let effective_opts = opts.rescaled(em_scale);
-    let widths: Vec<f32> = widths_min.iter().map(|w| w * global_scale).collect();
 
-    // 5. Stack rows top-to-bottom, laying out each left-to-right.
+    // 4. Stack one measure per row, each stretched to fill `available`.
     let row_height = row_height_em(opts) * effective_opts.em;
     let spacing = opts.system_spacing_em * effective_opts.em;
     let left = opts.rect.left();
     let mut y_acc = opts.rect.top();
-    let mut systems: Vec<SystemLayout> = Vec::with_capacity(rows.len());
+    let mut systems: Vec<SystemLayout> = Vec::with_capacity(score.len());
     let mut max_row_width = 0.0f32;
 
-    for row in &rows {
-        let row_top = y_acc;
-        let mut x_acc = left;
-        let mut measures: Vec<PlacedMeasure> = Vec::with_capacity(row.len());
-        for &i in row {
-            let rect = Rect::from_min_size(pos2(x_acc, row_top), vec2(widths[i], row_height));
-            let per_opts = effective_opts.measure_opts(rect, show_clef[i], show_ts[i]);
-            let layout = build_measure_layout(&score.measures[i], &per_opts);
-            measures.push(PlacedMeasure {
+    for i in 0..score.len() {
+        let width = (widths_min[i] * em_scale).max(available);
+        let rect = Rect::from_min_size(pos2(left, y_acc), vec2(width, row_height));
+        let per_opts = effective_opts.measure_opts(rect, show_clef[i], show_ts[i]);
+        let layout = build_measure_layout(&score.measures[i], &per_opts);
+        max_row_width = max_row_width.max(width);
+        systems.push(SystemLayout {
+            y_baseline: rect.center().y + opts.y_offset,
+            rect,
+            measures: vec![PlacedMeasure {
                 measure_idx: i,
                 rect,
                 layout,
                 show_clef: show_clef[i],
                 show_time_signature: show_ts[i],
-            });
-            x_acc += widths[i];
-        }
-        let row_width = x_acc - left;
-        max_row_width = max_row_width.max(row_width);
-        let system_rect = Rect::from_min_size(pos2(left, row_top), vec2(row_width, row_height));
-        systems.push(SystemLayout {
-            y_baseline: system_rect.center().y + opts.y_offset,
-            rect: system_rect,
-            measures,
+            }],
         });
-        y_acc = row_top + row_height + spacing;
+        y_acc += row_height + spacing;
     }
 
     let total_height = (y_acc - spacing - opts.rect.top()).max(row_height);
@@ -335,47 +285,14 @@ pub fn build_staff_layout(score: &Score, opts: &StaffOpts) -> StaffLayout {
 
 /// Find `(measure_idx, beat_idx)` of the beat closest to `pos`. `pos` is in
 /// the same coordinate space as `staff` (i.e. the inner space of the
-/// ScrollArea content). The row (system) is picked by `pos.y` first, then
-/// the measure within that row by `pos.x`; both clamp to the nearest edge
-/// when `pos` falls outside every row/measure. Returns `None` if the score
-/// has no notes anywhere.
+/// ScrollArea content). The row — and with it the measure, one per row — is
+/// picked by `pos.y` (clamped to the first/last row), then the beat by
+/// `pos.x`. Returns `None` if the score has no notes anywhere.
 pub fn hit_test_staff(staff: &StaffLayout, pos: Pos2) -> Option<(MeasureIdx, BeatIdx)> {
-    if staff.systems.is_empty() {
-        return None;
-    }
-    let last_system = staff.systems.len() - 1;
-    let system = if pos.y <= staff.systems[0].rect.top() {
-        &staff.systems[0]
-    } else if pos.y >= staff.systems[last_system].rect.bottom() {
-        &staff.systems[last_system]
-    } else {
-        staff
-            .systems
-            .iter()
-            .find(|s| pos.y < s.rect.bottom())
-            .unwrap_or(&staff.systems[last_system])
-    };
-
-    let placed = &system.measures;
-    if placed.is_empty() {
-        return None;
-    }
-
+    let system =
+        staff.systems.iter().find(|s| pos.y < s.rect.bottom()).or_else(|| staff.systems.last())?;
+    let target = system.measures.first()?;
     let x = pos.x;
-    let target = if x <= placed[0].rect.left() {
-        &placed[0]
-    } else if x >= placed[placed.len() - 1].rect.right() {
-        &placed[placed.len() - 1]
-    } else {
-        let mut found = &placed[placed.len() - 1];
-        for p in placed {
-            if x < p.rect.right() {
-                found = p;
-                break;
-            }
-        }
-        found
-    };
 
     let notes = &target.layout.notes;
     if notes.is_empty() {
@@ -484,7 +401,7 @@ mod tests {
 
         let staff = build_staff_layout(&score, &staff_opts);
         let flags: Vec<bool> =
-            staff.systems[0].measures.iter().map(|m| m.show_time_signature).collect();
+            staff.systems.iter().flat_map(|s| &s.measures).map(|m| m.show_time_signature).collect();
         assert_eq!(flags, vec![true, false, true, false]);
     }
 
@@ -503,12 +420,15 @@ mod tests {
         };
 
         let staff = build_staff_layout(&score, &staff_opts);
-        let flags: Vec<bool> = staff.systems[0].measures.iter().map(|m| m.show_clef).collect();
+        let flags: Vec<bool> =
+            staff.systems.iter().flat_map(|s| &s.measures).map(|m| m.show_clef).collect();
         assert_eq!(flags, vec![true, false, false]);
     }
 
     #[test]
-    fn staff_layout_measures_placed_horizontally() {
+    fn staff_layout_one_measure_per_row() {
+        // Plenty of width for all three measures side by side — they still
+        // each get their own row, stacked top-to-bottom without overlap.
         let em = 20.0;
         let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(4000.0, 100.0));
         let staff_opts = opts(em, rect);
@@ -522,24 +442,25 @@ mod tests {
         };
 
         let staff = build_staff_layout(&score, &staff_opts);
-        let placed = &staff.systems[0].measures;
-        for w in placed.windows(2) {
+        assert_eq!(staff.systems.len(), 3);
+        for (i, system) in staff.systems.iter().enumerate() {
+            assert_eq!(system.measures.len(), 1);
+            assert_eq!(system.measures[0].measure_idx, i);
+        }
+        for w in staff.systems.windows(2) {
             assert!(
-                w[0].rect.right() <= w[1].rect.left() + 0.01,
-                "measure {} overlaps {}: {} > {}",
-                w[0].measure_idx,
-                w[1].measure_idx,
-                w[0].rect.right(),
-                w[1].rect.left(),
+                w[0].rect.bottom() < w[1].rect.top(),
+                "rows overlap: {} >= {}",
+                w[0].rect.bottom(),
+                w[1].rect.top(),
             );
         }
     }
 
     #[test]
-    fn staff_layout_fits_one_row_grows_to_fill() {
-        // Content comfortably narrower than the available width: stays a
-        // single system, scaled up to fill it exactly — matches the
-        // pre-wrap single-system grow-to-fill behavior.
+    fn staff_layout_each_measure_fills_row() {
+        // Measures narrower than the available width stretch to fill it —
+        // including the first one, which carries clef + time signature.
         let em = 20.0;
         let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(4000.0, 100.0));
         let staff_opts = opts(em, rect);
@@ -553,24 +474,22 @@ mod tests {
         };
 
         let staff = build_staff_layout(&score, &staff_opts);
-        assert_eq!(staff.systems.len(), 1);
-        assert!(
-            (staff.total_size.x - rect.width()).abs() < 0.5,
-            "should grow to exactly fill the available width: {}",
-            staff.total_size.x
-        );
+        assert_eq!(staff.scale, 1.0, "growing never scales glyphs");
+        for system in &staff.systems {
+            let w = system.measures[0].rect.width();
+            assert!((w - rect.width()).abs() < 0.5, "measure should fill the row: {w}");
+        }
+        assert!((staff.total_size.x - rect.width()).abs() < 0.5);
     }
 
     #[test]
-    fn staff_layout_wraps_into_multiple_rows() {
-        // em=96 is double the legibility floor (48), so rows may shrink to
-        // half size before wrapping. A row holds measure 0 (with clef+TS,
-        // wider) plus measure 1 within that shrink budget, but a third
-        // measure would drop the row below the floor — it starts a new row.
-        // Measures are sized for sixteenth density (see `min_measure_width`),
-        // hence the wide rect.
+    fn staff_layout_shrinks_to_fit_above_floor() {
+        // em=96 is double the legibility floor (48), so glyphs may shrink to
+        // half size. The first measure (with clef + TS, the widest) doesn't
+        // fit at the baseline em but does above the floor: everything shrinks
+        // just enough for it to fill the row exactly, nothing overflows.
         let em = 96.0;
-        let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(2000.0, 100.0));
+        let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(1200.0, 100.0));
         let staff_opts = opts(em, rect);
 
         let score = Score {
@@ -582,18 +501,12 @@ mod tests {
         };
 
         let staff = build_staff_layout(&score, &staff_opts);
-        assert_eq!(staff.systems.len(), 2, "expected content to wrap into 2 rows");
-        assert_eq!(staff.systems[0].measures.len(), 2);
-        assert_eq!(staff.systems[1].measures.len(), 1);
-        assert_eq!(staff.systems[1].measures[0].measure_idx, 2);
-
-        // The floor was never actually needed here — the governing row's
-        // required scale was already above it.
         let floor_scale = LEGIBILITY_FLOOR_EM / em;
-        assert!(staff.scale > floor_scale);
-
-        // Second row sits below the first, separated by system_spacing_em.
-        assert!(staff.systems[1].rect.top() > staff.systems[0].rect.bottom());
+        assert!(staff.scale < 1.0 && staff.scale > floor_scale, "scale: {}", staff.scale);
+        for system in &staff.systems {
+            let w = system.measures[0].rect.width();
+            assert!((w - rect.width()).abs() < 0.5, "measure should fill the row: {w}");
+        }
     }
 
     #[test]
@@ -668,11 +581,13 @@ mod tests {
     }
 
     #[test]
-    fn measures_denser_than_sixteenths_grow() {
-        // 32nds exceed the sixteenth baseline, so the measure widens instead
-        // of cramping its notes.
+    fn measures_denser_than_sixteenths_overflow() {
+        // 32nds exceed the sixteenth baseline, so the measure widens past the
+        // row instead of cramping its notes (em=20 is below the legibility
+        // floor, so glyphs can't shrink), while the sixteenth measure still
+        // just fills the row.
         use grooph_measure::duration::th;
-        let rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(4000.0, 400.0));
+        let rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(400.0, 400.0));
         let o = opts(20.0, rect);
         let mut thirty_seconds = Measure::new(TimeSignature::FOUR_FOUR);
         let mut idx = 0;
@@ -690,7 +605,9 @@ mod tests {
         let staff = build_staff_layout(&score, &o);
         let w1 = staff.placed(1).unwrap().rect.width();
         let w2 = staff.placed(2).unwrap().rect.width();
+        assert!((w1 - rect.width()).abs() < 0.5, "16th measure should fill the row: {w1}");
         assert!(w2 > w1, "32nd measure should be wider: {w1} vs {w2}");
+        assert!((staff.total_size.x - w2).abs() < 0.5);
     }
 
     #[test]
@@ -709,30 +626,21 @@ mod tests {
         let staff = build_staff_layout(&score, &staff_opts);
         let y = staff.systems[0].rect.center().y;
 
-        // far left -> first beat of first measure
+        // far left -> first beat of the row's measure
         assert_eq!(hit_test_staff(&staff, Pos2::new(-100.0, y)), Some((0, 0)));
-        // far right -> last beat of last measure (3 quarters -> beats=4, last_idx=3)
-        let last = staff.systems[0].measures.last().unwrap();
-        assert_eq!(
-            hit_test_staff(&staff, Pos2::new(1e6, y)),
-            Some((last.measure_idx, last.layout.notes.len() - 1))
-        );
-
-        // click in the middle of measure 1 should hit measure 1
-        let m1 = &staff.systems[0].measures[1];
-        let hit_pos = Pos2::new(m1.rect.center().x, y);
-        let hit = hit_test_staff(&staff, hit_pos).expect("should hit");
-        assert_eq!(hit.0, 1);
+        // far right -> last beat of the row's measure
+        let m0 = &staff.systems[0].measures[0];
+        assert_eq!(hit_test_staff(&staff, Pos2::new(1e6, y)), Some((0, m0.layout.notes.len() - 1)));
+        // above/below every row clamps to the first/last row
+        assert_eq!(hit_test_staff(&staff, Pos2::new(0.0, -1e6)).map(|h| h.0), Some(0));
+        assert_eq!(hit_test_staff(&staff, Pos2::new(0.0, 1e6)).map(|h| h.0), Some(2));
     }
 
     #[test]
     fn hit_test_staff_picks_row_by_y() {
-        // Same wrap scenario as staff_layout_wraps_into_multiple_rows: 3
-        // measures, 2 rows. A click within the second row's vertical span
-        // should hit measure 2, even though its X also lies under row 1's
-        // measures (rows can differ in width).
-        let em = 96.0;
-        let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(2000.0, 100.0));
+        // All rows span the same X range, so only `pos.y` tells them apart.
+        let em = 20.0;
+        let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(4000.0, 100.0));
         let staff_opts = opts(em, rect);
 
         let score = Score {
@@ -743,11 +651,10 @@ mod tests {
             ],
         };
         let staff = build_staff_layout(&score, &staff_opts);
-        assert_eq!(staff.systems.len(), 2);
-
-        let row1_y = staff.systems[1].rect.center().y;
-        let x = staff.systems[1].measures[0].rect.center().x;
-        let hit = hit_test_staff(&staff, Pos2::new(x, row1_y)).expect("should hit");
-        assert_eq!(hit.0, 2);
+        let x = rect.center().x;
+        for (i, system) in staff.systems.iter().enumerate() {
+            let hit = hit_test_staff(&staff, Pos2::new(x, system.rect.center().y));
+            assert_eq!(hit.map(|h| h.0), Some(i));
+        }
     }
 }
