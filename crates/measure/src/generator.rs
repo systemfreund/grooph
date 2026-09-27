@@ -22,6 +22,10 @@
 //! 4. + `xx-`, `-xx`
 //! 5. + `-x-`
 //!
+//! With the mixed subdivision the triplet ladder is reversed: 1 `-x-`,
+//! 2 + `--x`, 3 + `x-x`, 4 + `xx-`, `-xx`, 5 + `xxx`. Straight figures keep
+//! their levels.
+//!
 //! Besides the level-1 quarter rest, [`GeneratorSettings::space`] adds
 //! whole-beat rests: it replaces entire beats (never part of a figure, so a
 //! triplet is always complete) with a quarter rest. At
@@ -123,7 +127,7 @@ impl Grouping {
 pub fn groupings(subdivision: Subdivision) -> Vec<Grouping> {
     catalog(subdivision)
         .into_iter()
-        .map(|cell| Grouping { id: cell.id, level: cell.level, cell })
+        .map(|cell| Grouping { id: cell.id, level: cell.level_in(subdivision), cell })
         .collect()
 }
 
@@ -263,6 +267,25 @@ const CELLS: &[Cell] = &[
     Cell { id: g(21), level: 5, family: CellFamily::Triplet, beats: &[(t8(), R), (t8(), N), (t8(), R)] },
 ];
 
+/// Triplet levels with the mixed subdivision (reference app): the offbeat
+/// figures come first, the full triplet last.
+const MIXED_TRIPLET_LEVELS: &[(GroupingId, u8)] =
+    &[(g(21), 1), (g(18), 2), (g(17), 3), (g(19), 4), (g(20), 4), (g(16), 5)];
+
+impl Cell {
+    /// Complexity level that unlocks this cell with `subdivision`.
+    fn level_in(&self, subdivision: Subdivision) -> u8 {
+        if subdivision == Subdivision::Mixed && self.family == CellFamily::Triplet {
+            MIXED_TRIPLET_LEVELS
+                .iter()
+                .find(|(id, _)| *id == self.id)
+                .map_or(self.level, |&(_, level)| level)
+        } else {
+            self.level
+        }
+    }
+}
+
 /// Weight of the highest allowed level relative to each easier level.
 const TOP_LEVEL_WEIGHT: usize = 3;
 
@@ -286,13 +309,13 @@ fn catalog(subdivision: Subdivision) -> Vec<&'static Cell> {
 }
 
 fn candidates(subdivision: Subdivision, max_level: u8) -> Vec<&'static Cell> {
-    catalog(subdivision).into_iter().filter(|c| c.level <= max_level).collect()
+    catalog(subdivision).into_iter().filter(|c| c.level_in(subdivision) <= max_level).collect()
 }
 
 /// Draw one cell: pick a level (favouring the highest one available), then a
 /// cell of that level uniformly.
-fn pick_cell(pool: &[&'static Cell], rng: &mut Rng) -> &'static Cell {
-    let mut levels: Vec<u8> = pool.iter().map(|c| c.level).collect();
+fn pick_cell(pool: &[&'static Cell], subdivision: Subdivision, rng: &mut Rng) -> &'static Cell {
+    let mut levels: Vec<u8> = pool.iter().map(|c| c.level_in(subdivision)).collect();
     levels.sort_unstable();
     levels.dedup();
     let top = *levels.last().expect("cell pool is never empty");
@@ -309,7 +332,8 @@ fn pick_cell(pool: &[&'static Cell], rng: &mut Rng) -> &'static Cell {
         roll -= w;
     }
 
-    let at_level: Vec<&'static Cell> = pool.iter().copied().filter(|c| c.level == level).collect();
+    let at_level: Vec<&'static Cell> =
+        pool.iter().copied().filter(|c| c.level_in(subdivision) == level).collect();
     at_level[rng.below(at_level.len())]
 }
 
@@ -338,7 +362,7 @@ fn pick_cells(settings: &GeneratorSettings, rng: &mut Rng) -> Vec<&'static Cell>
             if rng.chance(space * MAX_SPACE_REST_PROBABILITY) {
                 &QUARTER_REST
             } else if weighted {
-                pick_cell(&pool, rng)
+                pick_cell(&pool, settings.subdivision, rng)
             } else {
                 pool[rng.below(pool.len())]
             }
@@ -487,7 +511,11 @@ mod tests {
         for complexity in 1..=MAX_COMPLEXITY {
             let st = settings(Subdivision::Mixed, complexity);
             for _ in 0..200 {
-                assert!(pick_cells(&st, &mut rng).iter().all(|c| c.level <= complexity));
+                assert!(
+                    pick_cells(&st, &mut rng)
+                        .iter()
+                        .all(|c| c.level_in(Subdivision::Mixed) <= complexity)
+                );
             }
         }
     }
@@ -619,6 +647,33 @@ mod tests {
         assert_eq!(at(3), set(&["xxxx", "x-xx", "xxx-"]));
         assert_eq!(at(4), set(&["xx-x", "x--x", "--xx", "xx--"]));
         assert_eq!(at(5), set(&["-xx-", "-xxx", "-x-x", "-x--", "---x"]));
+    }
+
+    #[test]
+    fn mixed_reverses_the_triplet_ladder() {
+        fn triplets_at(level: u8) -> std::collections::BTreeSet<String> {
+            candidates(Subdivision::Mixed, level)
+                .into_iter()
+                .filter(|c| c.family == CellFamily::Triplet)
+                .map(|c| c.beats.iter().map(|&(_, n)| if n { 'x' } else { '-' }).collect())
+                .collect()
+        }
+        assert_eq!(triplets_at(1), set(&["-x-"]));
+        assert_eq!(triplets_at(2), set(&["-x-", "--x"]));
+        assert_eq!(triplets_at(3), set(&["-x-", "--x", "x-x"]));
+        assert_eq!(triplets_at(4), set(&["-x-", "--x", "x-x", "xx-", "-xx"]));
+        assert_eq!(triplets_at(5), set(&["-x-", "--x", "x-x", "xx-", "-xx", "xxx"]));
+        // Straight figures keep their levels in mixed.
+        let straight = |sub| {
+            candidates(sub, 3)
+                .into_iter()
+                .filter(|c| c.family != CellFamily::Triplet)
+                .map(|c| c.id)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(straight(Subdivision::Mixed), straight(Subdivision::Sixteenths));
+        // The triplet subdivision itself is unaffected.
+        assert_eq!(triplet_patterns(1), set(&["x", "-", "xxx"]));
     }
 
     #[test]
