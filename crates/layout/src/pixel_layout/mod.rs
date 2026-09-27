@@ -224,8 +224,13 @@ pub fn build_measure_layout(measure: &Measure, opts: &LayoutOpts) -> MeasureLayo
 
     // Time signature
     let time_signature_layout = if opts.layout_time_signature {
-        let ts_layout = build_time_sig_layout(&measure.time_signature(), x_offset_acc, opts);
-        x_offset_acc += ts_layout.width;
+        // `build_time_sig_layout` centers on `x`; center it in its reserved
+        // slot so it doesn't hang over the measure's left edge (clipped at the
+        // start of a row when no clef precedes it).
+        let ts = measure.time_signature();
+        let ts_width = time_sig_width(&ts, opts.em);
+        let ts_layout = build_time_sig_layout(&ts, x_offset_acc + ts_width / 2.0, opts);
+        x_offset_acc += ts_width;
         Some(ts_layout)
     } else {
         None
@@ -267,12 +272,23 @@ pub struct TimeSignatureLayout {
     pub width: f32,
 }
 
+/// Per-column width of a time-signature digit in em.
+const TS_DIGIT_WIDTH_EM: f32 = 0.35;
+
+/// Horizontal space reserved for `time_signature` at `em`.
+fn time_sig_width(time_signature: &TimeSignature, em: f32) -> f32 {
+    let cols =
+        digit_count(time_signature.beats as u32).max(digit_count(time_signature.beat_unit as u32));
+    cols as f32 * TS_DIGIT_WIDTH_EM * em
+}
+
+/// Lay out time-signature digits horizontally centered on `x`.
 pub fn build_time_sig_layout(
     time_signature: &TimeSignature,
     x: f32,
     opts: &LayoutOpts,
 ) -> TimeSignatureLayout {
-    let ts_digit_w = opts.em * 0.35; // per column
+    let ts_digit_w = opts.em * TS_DIGIT_WIDTH_EM; // per column
     let top_digits = digit_count(time_signature.beats as u32);
     let bot_digits = digit_count(time_signature.beat_unit as u32);
     let ts_cols = top_digits.max(bot_digits) as f32;
@@ -314,6 +330,38 @@ mod tests {
     use super::*;
     use egui::{FontFamily, FontId, Pos2, Rect, Vec2};
     use grooph_measure::{Beat, Measure, TimeSignature};
+
+    #[test]
+    fn time_signature_without_clef_stays_inside_measure() {
+        // A measure starting a row with a time signature but no clef (e.g. a
+        // meter change): the digits sit inside its reserved slot, between
+        // the measure's left edge and the notes, instead of straddling the
+        // left edge.
+        let em = 20.0;
+        let opts = LayoutOpts {
+            rect: Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(200.0, 100.0)),
+            font_id: FontId::new(em, FontFamily::Proportional),
+            pixels_per_point: 1.0,
+            em,
+            layout_clef: false,
+            layout_time_signature: true,
+            y_offset: 0.0,
+            stem_length_factor: 2.0,
+            stem_thickness_factor: 0.1,
+            accent_displacement: 0.0,
+            accent_below: false,
+            proportional_spacing: true,
+            debug_bbox: false,
+            metrics: GlyphMetrics::debug(em),
+        };
+        let layout = build_measure_layout(&Measure::new(TimeSignature::THREE_FOUR), &opts);
+        let ts = layout.time_signature.expect("time signature laid out");
+        let half_digit = TS_DIGIT_WIDTH_EM * em / 2.0;
+        for p in ts.beats.iter().chain(ts.beat_unit.iter()) {
+            assert!(p.x - half_digit >= opts.rect.left() - 0.01, "digit at {} clipped", p.x);
+            assert!(p.x + half_digit <= layout.notes_left_edge + 0.01);
+        }
+    }
 
     #[test]
     fn test_debug_bbox_includes_stem_length() {
