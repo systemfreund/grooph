@@ -8,15 +8,24 @@
 //! be drawn; the highest allowed level is favoured so a higher setting audibly
 //! changes the result, while easier cells stay in the mix.
 //!
-//! Level ladder (derived from reference examples, 16th subdivision):
-//! 1. quarters and on-beat eighths, quarter rests
+//! Level ladder for 8th/16th subdivisions (derived from reference examples):
+//! 1. quarters and on-beat eighths, no rests
 //! 2. eighths on the "and" (first syncopations)
 //! 3. sixteenth figures starting on the beat, no rests inside the beat
 //! 4. dotted figures and rests inside the beat
 //! 5. figures starting with a sixteenth rest (notes on "e" / "a")
 //!
-//! [`GeneratorSettings::space`] adds whole-beat rests on top of the drawn
-//! cells. Every generated measure keeps at least one note.
+//! Level ladder for triplets (per the reference app, `x` = note, `-` = rest):
+//! 1. `xxx` or a quarter note, no rests
+//! 2. + `x-x`
+//! 3. + `--x`
+//! 4. + `xx-`, `-xx`
+//! 5. + `-x-`
+//!
+//! Cells never contain whole-beat rests. Those come only from
+//! [`GeneratorSettings::space`], which replaces entire beats (never part of a
+//! figure, so a triplet is always complete) with a quarter rest. At maximum
+//! space a measure may consist of rests only.
 //!
 //! Only time signatures whose beat unit is a quarter (`x/4`) are supported for
 //! now; cells are written for a quarter-note beat.
@@ -104,8 +113,10 @@ impl Rng {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CellFamily {
-    /// Quarters and eighths; available to every subdivision.
-    Basic,
+    /// A plain quarter note; available to every subdivision.
+    Quarter,
+    /// Straight eighths; not used with the triplet subdivision.
+    Eighth,
     Sixteenth,
     Triplet,
 }
@@ -113,7 +124,8 @@ enum CellFamily {
 impl CellFamily {
     fn allowed_in(self, subdivision: Subdivision) -> bool {
         match self {
-            CellFamily::Basic => true,
+            CellFamily::Quarter => true,
+            CellFamily::Eighth => subdivision != Subdivision::Triplets,
             CellFamily::Sixteenth => {
                 matches!(subdivision, Subdivision::Sixteenths | Subdivision::Mixed)
             }
@@ -137,18 +149,17 @@ const fn de() -> Duration { Duration::Dotted { base: NoteValue::Eighth, dots: 1 
 const N: bool = true;
 const R: bool = false;
 
-/// Quarter rest — used by the "space" setting and as the no-note fallback.
-const QUARTER_REST: Cell = Cell { level: 1, family: CellFamily::Basic, beats: &[(q(), R)] };
+/// Whole-beat rest inserted by the "space" setting; not part of the library.
+static QUARTER_REST: Cell = Cell { level: 1, family: CellFamily::Quarter, beats: &[(q(), R)] };
 
 #[rustfmt::skip]
 const CELLS: &[Cell] = &[
     // Level 1: quarters and on-beat eighths.
-    Cell { level: 1, family: CellFamily::Basic, beats: &[(q(), N)] },
-    QUARTER_REST,
-    Cell { level: 1, family: CellFamily::Basic, beats: &[(e(), N), (e(), N)] },
+    Cell { level: 1, family: CellFamily::Quarter, beats: &[(q(), N)] },
+    Cell { level: 1, family: CellFamily::Eighth, beats: &[(e(), N), (e(), N)] },
     // Level 2: eighth syncopation.
-    Cell { level: 2, family: CellFamily::Basic, beats: &[(e(), R), (e(), N)] },
-    Cell { level: 2, family: CellFamily::Basic, beats: &[(e(), N), (e(), R)] },
+    Cell { level: 2, family: CellFamily::Eighth, beats: &[(e(), R), (e(), N)] },
+    Cell { level: 2, family: CellFamily::Eighth, beats: &[(e(), N), (e(), R)] },
     // Level 3: sixteenth figures on the beat, no inner rests.
     Cell { level: 3, family: CellFamily::Sixteenth, beats: &[(s(), N), (s(), N), (s(), N), (s(), N)] },
     Cell { level: 3, family: CellFamily::Sixteenth, beats: &[(s(), N), (s(), N), (e(), N)] },
@@ -167,23 +178,20 @@ const CELLS: &[Cell] = &[
     Cell { level: 5, family: CellFamily::Sixteenth, beats: &[(s(), R), (e(), N), (s(), N)] },
     Cell { level: 5, family: CellFamily::Sixteenth, beats: &[(s(), N), (s(), N), (s(), R), (s(), N)] },
     // Triplets (eighth-note triplets per quarter).
-    Cell { level: 2, family: CellFamily::Triplet, beats: &[(t8(), N), (t8(), N), (t8(), N)] },
-    Cell { level: 3, family: CellFamily::Triplet, beats: &[(t8(), N), (t8(), R), (t8(), N)] },
-    Cell { level: 3, family: CellFamily::Triplet, beats: &[(t8(), N), (t8(), N), (t8(), R)] },
+    Cell { level: 1, family: CellFamily::Triplet, beats: &[(t8(), N), (t8(), N), (t8(), N)] },
+    Cell { level: 2, family: CellFamily::Triplet, beats: &[(t8(), N), (t8(), R), (t8(), N)] },
+    Cell { level: 3, family: CellFamily::Triplet, beats: &[(t8(), R), (t8(), R), (t8(), N)] },
+    Cell { level: 4, family: CellFamily::Triplet, beats: &[(t8(), N), (t8(), N), (t8(), R)] },
     Cell { level: 4, family: CellFamily::Triplet, beats: &[(t8(), R), (t8(), N), (t8(), N)] },
     Cell { level: 5, family: CellFamily::Triplet, beats: &[(t8(), R), (t8(), N), (t8(), R)] },
-    Cell { level: 5, family: CellFamily::Triplet, beats: &[(t8(), R), (t8(), R), (t8(), N)] },
 ];
 
 /// Weight of the highest allowed level relative to each easier level.
 const TOP_LEVEL_WEIGHT: usize = 3;
 
-/// Probability of a whole-beat rest at `space == 1.0`.
-const MAX_SPACE_REST_PROBABILITY: f32 = 0.6;
-
-impl Cell {
-    fn has_note(&self) -> bool { self.beats.iter().any(|&(_, is_note)| is_note) }
-}
+/// Probability of a whole-beat rest at `space == 1.0` (a 4/4 measure is then
+/// entirely rests about a third of the time).
+const MAX_SPACE_REST_PROBABILITY: f32 = 0.75;
 
 fn candidates(subdivision: Subdivision, max_level: u8) -> Vec<&'static Cell> {
     CELLS.iter().filter(|c| c.family.allowed_in(subdivision) && c.level <= max_level).collect()
@@ -219,7 +227,7 @@ fn pick_cells(settings: &GeneratorSettings, rng: &mut Rng) -> Vec<&'static Cell>
     let pool = candidates(settings.subdivision, complexity);
     let beat_count = settings.time_signature.beats as usize;
 
-    let mut cells: Vec<&'static Cell> = (0..beat_count)
+    (0..beat_count)
         .map(|_| {
             if rng.chance(space * MAX_SPACE_REST_PROBABILITY) {
                 &QUARTER_REST
@@ -227,15 +235,7 @@ fn pick_cells(settings: &GeneratorSettings, rng: &mut Rng) -> Vec<&'static Cell>
                 pick_cell(&pool, rng)
             }
         })
-        .collect();
-
-    if !cells.iter().any(|c| c.has_note()) && beat_count > 0 {
-        let with_notes: Vec<&'static Cell> =
-            pool.iter().copied().filter(|c| c.has_note()).collect();
-        let idx = rng.below(beat_count);
-        cells[idx] = with_notes[rng.below(with_notes.len())];
-    }
-    cells
+        .collect()
 }
 
 /// Write `cells` (one per beat) into a fresh measure via `set_beat`, so the
@@ -409,33 +409,86 @@ mod tests {
         }
     }
 
+    /// Triplet-cell patterns (`x` = note, `-` = rest) drawn at `complexity`.
+    fn triplet_patterns(complexity: u8) -> std::collections::BTreeSet<String> {
+        let mut rng = Rng::new(21);
+        let st = settings(Subdivision::Triplets, complexity);
+        (0..500)
+            .flat_map(|_| pick_cells(&st, &mut rng))
+            .map(|c| c.beats.iter().map(|&(_, n)| if n { 'x' } else { '-' }).collect())
+            .collect()
+    }
+
+    fn set(items: &[&str]) -> std::collections::BTreeSet<String> {
+        items.iter().map(|s| s.to_string()).collect()
+    }
+
     #[test]
-    fn low_complexity_matches_reference_vocabulary() {
-        // Level 1 with 16th subdivision: only quarters and on-beat eighth pairs.
+    fn triplet_ladder_matches_reference_app() {
+        // "x" alone is the quarter note.
+        assert_eq!(triplet_patterns(1), set(&["x", "xxx"]));
+        assert_eq!(triplet_patterns(2), set(&["x", "xxx", "x-x"]));
+        assert_eq!(triplet_patterns(3), set(&["x", "xxx", "x-x", "--x"]));
+        assert_eq!(triplet_patterns(4), set(&["x", "xxx", "x-x", "--x", "xx-", "-xx"]));
+        assert_eq!(triplet_patterns(5), set(&["x", "xxx", "x-x", "--x", "xx-", "-xx", "-x-"]));
+    }
+
+    #[test]
+    fn level_one_without_space_has_no_rests() {
         let mut rng = Rng::new(5);
-        let st = settings(Subdivision::Sixteenths, 1);
-        for _ in 0..200 {
-            for cell in pick_cells(&st, &mut rng) {
-                assert_eq!(cell.level, 1);
+        for sub in [
+            Subdivision::Eighths,
+            Subdivision::Sixteenths,
+            Subdivision::Triplets,
+            Subdivision::Mixed,
+        ] {
+            for _ in 0..200 {
+                let m = generate_measure(&settings(sub, 1), &mut rng).unwrap();
+                assert!(m.beats().iter().all(|b| b.kind == Note), "{sub:?}: {m:?}");
             }
         }
     }
 
     #[test]
-    fn space_increases_rests_and_keeps_a_note() {
+    fn space_only_replaces_whole_beats() {
+        // With space, every beat is either a complete library cell or a
+        // quarter rest; triplets are never cut apart.
+        let mut rng = Rng::new(13);
+        let st = GeneratorSettings { space: 1.0, ..settings(Subdivision::Triplets, 1) };
+        for _ in 0..300 {
+            for cell in pick_cells(&st, &mut rng) {
+                let is_space = std::ptr::eq(cell, &QUARTER_REST);
+                assert!(is_space || cell.beats.iter().all(|&(_, n)| n), "{:?}", cell.beats);
+            }
+        }
+    }
+
+    #[test]
+    fn space_increases_rests() {
         fn rest_ratio(space: f32) -> f32 {
             let mut rng = Rng::new(9);
             let st = GeneratorSettings { space, ..settings(Subdivision::Sixteenths, 3) };
             let mut rest_beats = 0;
             for _ in 0..300 {
                 let m = generate_measure(&st, &mut rng).unwrap();
-                assert!(m.beats().iter().any(|b| b.kind == Note), "measure without notes");
                 rest_beats +=
                     m.beats().iter().filter(|b| b.kind == Rest && b.duration == q()).count();
             }
             rest_beats as f32 / (300.0 * 4.0)
         }
-        assert!(rest_ratio(1.0) > rest_ratio(0.0) + 0.3);
+        assert_eq!(rest_ratio(0.0), 0.0);
+        assert!(rest_ratio(1.0) > 0.6);
+    }
+
+    #[test]
+    fn full_space_can_produce_an_empty_measure() {
+        let mut rng = Rng::new(17);
+        let st = GeneratorSettings { space: 1.0, ..settings(Subdivision::Sixteenths, 3) };
+        let empty = (0..100)
+            .map(|_| generate_measure(&st, &mut rng).unwrap())
+            .filter(|m| m.beats().iter().all(|b| b.kind == Rest))
+            .count();
+        assert!(empty > 0, "expected some all-rest measures at maximum space");
     }
 
     #[test]
