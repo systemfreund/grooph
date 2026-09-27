@@ -14,7 +14,20 @@
 
 use crate::pixel_layout::{GlyphMetrics, LayoutOpts, MeasureLayout, build_measure_layout};
 use egui::{FontId, Pos2, Rect, Vec2, pos2, vec2};
+use grooph_measure::duration::s;
+use grooph_measure::grid::DEFAULT_GRID;
 use grooph_measure::{BeatIdx, MeasureIdx, Score, TimeSignature};
+
+/// How a measure's natural width is derived.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MeasureWidthPolicy {
+    /// Grow with the number of beats written in the measure (editing).
+    Content,
+    /// Depend only on the time signature: every measure is as wide as one
+    /// filled with sixteenths. Row packing and scale then stay the same when
+    /// measures are replaced by others of the same meter (reading mode).
+    TimeSignature,
+}
 
 /// Configuration for laying out an entire [`Score`].
 ///
@@ -46,6 +59,7 @@ pub struct StaffOpts {
     pub system_spacing_em: f32,
     /// Whether to show the clef on the first measure of each system.
     pub layout_clef_first: bool,
+    pub width_policy: MeasureWidthPolicy,
 }
 
 impl StaffOpts {
@@ -157,6 +171,13 @@ fn time_sig_width_em(ts: &TimeSignature) -> f32 {
     top.max(bot) as f32 * TS_DIGIT_WIDTH_EM
 }
 
+/// Number of sixteenth notes that fit into a measure of `ts` (at least 1).
+fn sixteenth_slots(ts: &TimeSignature) -> f32 {
+    let per_measure = DEFAULT_GRID.ticks_per_measure(ts);
+    let per_sixteenth = DEFAULT_GRID.ticks_of(&s()).unwrap_or(1).max(1);
+    (per_measure / per_sixteenth).max(1) as f32
+}
+
 /// Minimum natural width (px) for a measure given its content and which
 /// header glyphs (clef / time signature) it will draw.
 fn min_measure_width(
@@ -167,7 +188,10 @@ fn min_measure_width(
     opts: &StaffOpts,
 ) -> f32 {
     let m = &score.measures[measure_idx];
-    let beats = m.beats().len().max(1) as f32;
+    let beats = match opts.width_policy {
+        MeasureWidthPolicy::Content => m.beats().len().max(1) as f32,
+        MeasureWidthPolicy::TimeSignature => sixteenth_slots(&m.time_signature()),
+    };
     let body = (opts.min_measure_width_em + beats * opts.note_width_em) * opts.em;
     let clef = if show_clef { CLEF_WIDTH_EM * opts.em } else { 0.0 };
     let ts = if show_ts { time_sig_width_em(&m.time_signature()) * opts.em } else { 0.0 };
@@ -411,6 +435,7 @@ mod tests {
             note_width_em: 0.6,
             system_spacing_em: 0.5,
             layout_clef_first: true,
+            width_policy: MeasureWidthPolicy::Content,
         }
     }
 
@@ -605,6 +630,66 @@ mod tests {
         // Pinned at the floor, not shrunk further.
         let floor_scale = LEGIBILITY_FLOOR_EM / em;
         assert!((staff.scale - floor_scale).abs() < 1e-4, "expected scale pinned at the floor");
+    }
+
+    fn measure_with_sixteenths(ts: TimeSignature) -> Measure {
+        use grooph_measure::duration::s;
+        let mut m = Measure::new(ts);
+        let mut idx = 0;
+        while idx < m.beats().len() {
+            m.set_beat(idx, Beat::note(s())).unwrap();
+            idx += 1;
+        }
+        m
+    }
+
+    #[test]
+    fn time_signature_width_policy_ignores_note_density() {
+        // Two scores in the same meter, one sparse and one dense: with the
+        // time-signature policy both get identical rows and measure rects.
+        let rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(600.0, 400.0));
+        let o = StaffOpts { width_policy: MeasureWidthPolicy::TimeSignature, ..opts(20.0, rect) };
+        let sparse = Score {
+            measures: vec![
+                measure_with_quarters(TimeSignature::FOUR_FOUR),
+                measure_with_quarters(TimeSignature::FOUR_FOUR),
+            ],
+        };
+        let dense = Score {
+            measures: vec![
+                measure_with_quarters(TimeSignature::FOUR_FOUR),
+                measure_with_sixteenths(TimeSignature::FOUR_FOUR),
+            ],
+        };
+        let a = build_staff_layout(&sparse, &o);
+        let b = build_staff_layout(&dense, &o);
+        assert_eq!(a.systems.len(), b.systems.len());
+        assert_eq!(a.scale, b.scale);
+        for (pa, pb) in a
+            .systems
+            .iter()
+            .flat_map(|s| &s.measures)
+            .zip(b.systems.iter().flat_map(|s| &s.measures))
+        {
+            assert_eq!(pa.rect, pb.rect);
+        }
+    }
+
+    #[test]
+    fn content_width_policy_grows_with_note_density() {
+        // Guards the behaviour the time-signature policy exists to avoid.
+        let rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(600.0, 400.0));
+        let o = opts(20.0, rect);
+        let score = Score {
+            measures: vec![
+                measure_with_quarters(TimeSignature::FOUR_FOUR),
+                measure_with_sixteenths(TimeSignature::FOUR_FOUR),
+            ],
+        };
+        let staff = build_staff_layout(&score, &o);
+        let w0 = staff.placed(0).unwrap().rect.width();
+        let w1 = staff.placed(1).unwrap().rect.width();
+        assert!(w1 > w0, "dense measure should be wider: {w0} vs {w1}");
     }
 
     #[test]

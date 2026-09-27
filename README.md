@@ -62,6 +62,9 @@ Important root files:
   both the visible cursor and the audio cursor have left it; the replacement
   keeps the measure's time signature so loop timing stays stable. Needs at
   least 2 bars.
+- Reading mode lays out with `MeasureWidthPolicy::TimeSignature`: measure
+  width depends only on the meter (as if filled with sixteenths), so swapping
+  measures never reflows the staff. The editor keeps `Content` widths.
 
 ## Input/tools
 
