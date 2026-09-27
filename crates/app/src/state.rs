@@ -144,6 +144,8 @@ pub(crate) struct UiShell {
     pub(crate) baseline_light: Option<Vec<(TextStyle, f32)>>,
     pub(crate) layout: LayoutSettings,
     pub(crate) counting: CountingSettings,
+    /// Whether the playback panel flashes on every primary beat. Off by default.
+    pub(crate) flash_enabled: bool,
     pub(crate) platform: PlatformRuntime,
     /// Transient text buffer for the "save current pattern" name input. Not
     /// persisted.

@@ -114,6 +114,10 @@ impl Grooph {
                         },
                     );
 
+                    egui::CollapsingHeader::new("Playback").default_open(false).show(ui, |ui| {
+                        ui.checkbox(&mut self.ui.flash_enabled, "Flash on primary beat");
+                    });
+
                     egui::CollapsingHeader::new("Developer settings").default_open(false).show(
                         ui,
                         |ui| {
