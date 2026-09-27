@@ -16,15 +16,15 @@
 //! 5. figures starting with a sixteenth rest (notes on "e" / "a")
 //!
 //! Level ladder for triplets (per the reference app, `x` = note, `-` = rest):
-//! 1. `xxx` or a quarter note, no rests
-//! 2. + `x-x`, quarter rest
+//! 1. `xxx`, quarter note or quarter rest
+//! 2. + `x-x`
 //! 3. + `--x`
 //! 4. + `xx-`, `-xx`
 //! 5. + `-x-`
 //!
-//! Besides these library quarter rests (level 1 for 8ths/16ths, level 2 for
-//! triplets), [`GeneratorSettings::space`] adds whole-beat rests, which replaces entire beats (never part
-//! of a figure, so a triplet is always complete) with a quarter rest. At
+//! Besides the level-1 quarter rest, [`GeneratorSettings::space`] adds
+//! whole-beat rests: it replaces entire beats (never part of a figure, so a
+//! triplet is always complete) with a quarter rest. At
 //! maximum space a measure may consist of rests only.
 //!
 //! Only time signatures whose beat unit is a quarter (`x/4`) are supported for
@@ -180,7 +180,7 @@ impl Rng {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CellFamily {
-    /// A plain quarter note; available to every subdivision.
+    /// A plain quarter note or quarter rest; available to every subdivision.
     Quarter,
     /// Straight eighths; not used with the triplet subdivision.
     Eighth,
@@ -232,7 +232,7 @@ const fn g(id: u8) -> GroupingId { GroupingId(id) }
 #[rustfmt::skip]
 const CELLS: &[Cell] = &[
     // Level 1: quarter rest, quarter, two eighths.
-    Cell { id: g(0), level: 1, family: CellFamily::Eighth, beats: &[(q(), R)] },
+    Cell { id: g(0), level: 1, family: CellFamily::Quarter, beats: &[(q(), R)] },
     Cell { id: g(1), level: 1, family: CellFamily::Quarter, beats: &[(q(), N)] },
     Cell { id: g(2), level: 1, family: CellFamily::Eighth, beats: &[(e(), N), (e(), N)] },
     // Level 2: eighth syncopation. (Eighth + eighth rest is left out on
@@ -254,11 +254,9 @@ const CELLS: &[Cell] = &[
     Cell { id: g(13), level: 5, family: CellFamily::Sixteenth, beats: &[(s(), R), (e(), N), (s(), N)] },
     Cell { id: g(14), level: 5, family: CellFamily::Sixteenth, beats: &[(s(), R), (de(), N)] },
     Cell { id: g(15), level: 5, family: CellFamily::Sixteenth, beats: &[(de(), R), (s(), N)] },
-    // Triplets (eighth-note triplets per quarter). The quarter rest shares
-    // id 0 with the straight one but unlocks at level 2 here.
+    // Triplets (eighth-note triplets per quarter).
     Cell { id: g(16), level: 1, family: CellFamily::Triplet, beats: &[(t8(), N), (t8(), N), (t8(), N)] },
     Cell { id: g(17), level: 2, family: CellFamily::Triplet, beats: &[(t8(), N), (t8(), R), (t8(), N)] },
-    Cell { id: g(0), level: 2, family: CellFamily::Triplet, beats: &[(q(), R)] },
     Cell { id: g(18), level: 3, family: CellFamily::Triplet, beats: &[(t8(), R), (t8(), R), (t8(), N)] },
     Cell { id: g(19), level: 4, family: CellFamily::Triplet, beats: &[(t8(), N), (t8(), N), (t8(), R)] },
     Cell { id: g(20), level: 4, family: CellFamily::Triplet, beats: &[(t8(), R), (t8(), N), (t8(), N)] },
@@ -535,9 +533,8 @@ mod tests {
 
     #[test]
     fn triplet_ladder_matches_reference_app() {
-        // "x" alone is the quarter note.
-        assert_eq!(triplet_patterns(1), set(&["x", "xxx"]));
-        // "-" alone is the quarter rest.
+        // "x" alone is the quarter note, "-" alone the quarter rest.
+        assert_eq!(triplet_patterns(1), set(&["x", "-", "xxx"]));
         assert_eq!(triplet_patterns(2), set(&["x", "-", "xxx", "x-x"]));
         assert_eq!(triplet_patterns(3), set(&["x", "-", "xxx", "x-x", "--x"]));
         assert_eq!(triplet_patterns(4), set(&["x", "-", "xxx", "x-x", "--x", "xx-", "-xx"]));
@@ -625,17 +622,6 @@ mod tests {
     }
 
     #[test]
-    fn triplet_level_one_without_space_has_no_rests() {
-        let mut rng = Rng::new(5);
-        for sub in [Subdivision::Triplets] {
-            for _ in 0..200 {
-                let m = generate_measure(&settings(sub, 1), &mut rng).unwrap();
-                assert!(m.beats().iter().all(|b| b.kind == Note), "{sub:?}: {m:?}");
-            }
-        }
-    }
-
-    #[test]
     fn space_only_replaces_whole_beats() {
         // With space, every beat is either a complete library cell or a
         // quarter rest; triplets are never cut apart.
@@ -643,8 +629,8 @@ mod tests {
         let st = GeneratorSettings { space: 1.0, ..settings(Subdivision::Triplets, 1) };
         for _ in 0..300 {
             for cell in pick_cells(&st, &mut rng) {
-                let is_space = std::ptr::eq(cell, &QUARTER_REST);
-                assert!(is_space || cell.beats.iter().all(|&(_, n)| n), "{:?}", cell.beats);
+                let whole_rest = cell.beats == [(q(), R)];
+                assert!(whole_rest || cell.beats.iter().all(|&(_, n)| n), "{:?}", cell.beats);
             }
         }
     }
@@ -691,8 +677,13 @@ mod tests {
         }
         assert_eq!(groupings(Subdivision::Sixteenths).len(), 16);
         assert_eq!(groupings(Subdivision::Eighths).len(), 4);
-        // Triplets: quarter, rest and six triplet figures.
+        // Triplets: rest, quarter and six triplet figures; the rest comes
+        // first in every subdivision.
         assert_eq!(groupings(Subdivision::Triplets).len(), 8);
+        for sub in [Subdivision::Eighths, Subdivision::Sixteenths, Subdivision::Triplets] {
+            let first = groupings(sub)[0].measure();
+            assert!(first.beats().iter().all(|b| b.kind == Rest), "{sub:?}");
+        }
     }
 
     #[test]
