@@ -20,26 +20,23 @@ impl Grooph {
                 ui.horizontal(|ui| {
                     match &active_name {
                         Some(name) => {
-                            ui.label("Aktiv:");
+                            ui.label("Active:");
                             ui.strong(name);
                         }
                         None => {
-                            ui.weak("Nicht gespeichert");
+                            ui.weak("Not saved");
                         }
                     }
                     if dirty {
-                        ui.label("•").on_hover_text("Ungespeicherte Änderungen");
+                        ui.label("•").on_hover_text("Unsaved changes");
                     }
                 });
 
                 ui.horizontal(|ui| {
                     // "Save" overwrites the active pattern in place, or creates a
                     // new one (using the name field) when nothing is active.
-                    let save_label = if active_name.is_some() {
-                        "💾 Speichern"
-                    } else {
-                        "💾 Speichern (neu)"
-                    };
+                    let save_label =
+                        if active_name.is_some() { "💾 Save" } else { "💾 Save (new)" };
                     if ui.button(save_label).clicked() {
                         let name = std::mem::take(&mut self.ui.save_name_buffer);
                         self.save_active_pattern(name);
@@ -50,11 +47,11 @@ impl Grooph {
                     // "Save as" always creates a new entry from the name field.
                     let resp = ui.add(
                         egui::TextEdit::singleline(&mut self.ui.save_name_buffer)
-                            .hint_text("Neuer Name…")
+                            .hint_text("New name…")
                             .desired_width(160.0),
                     );
                     let submit = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                    if ui.button("➕ Speichern als").clicked() || submit {
+                    if ui.button("➕ Save as").clicked() || submit {
                         let name = std::mem::take(&mut self.ui.save_name_buffer);
                         self.save_pattern_as(name);
                     }
@@ -63,7 +60,7 @@ impl Grooph {
                 ui.separator();
 
                 if self.editor.library.patterns.is_empty() {
-                    ui.weak("Noch keine gespeicherten Takte.");
+                    ui.weak("No saved measures yet.");
                     return;
                 }
 
@@ -78,7 +75,7 @@ impl Grooph {
                         let is_active = active_id == Some(pattern.id);
                         let mut row = |ui: &mut egui::Ui| {
                             ui.horizontal(|ui| {
-                                if ui.button("▶ Laden").clicked() {
+                                if ui.button("▶ Load").clicked() {
                                     to_load = Some(pattern.id);
                                 }
                                 ui.add(
@@ -86,8 +83,8 @@ impl Grooph {
                                         .desired_width(160.0),
                                 );
                                 let measures = pattern.score.len();
-                                ui.weak(format!("{} Takt(e) · {} BPM", measures, pattern.bpm));
-                                if ui.button("🗑").on_hover_text("Löschen").clicked() {
+                                ui.weak(format!("{} measure(s) · {} BPM", measures, pattern.bpm));
+                                if ui.button("🗑").on_hover_text("Delete").clicked() {
                                     to_delete = Some(pattern.id);
                                 }
                             });
@@ -125,30 +122,28 @@ impl Grooph {
             return;
         };
 
-        egui::Window::new("Ungespeicherte Änderungen")
+        egui::Window::new("Unsaved changes")
             .collapsible(false)
             .resizable(false)
             .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
             .show(ui.ctx(), |ui| {
-                ui.label(
-                    "Der aktuelle Takt hat ungespeicherte Änderungen. Vor dem Laden speichern?",
-                );
+                ui.label("The current measure has unsaved changes. Save before loading?");
                 ui.add_space(8.0);
                 ui.separator();
                 ui.add_space(8.0);
 
                 ui.horizontal(|ui| {
-                    if ui.button("Speichern & Laden").clicked() {
+                    if ui.button("Save & Load").clicked() {
                         let name = std::mem::take(&mut self.ui.save_name_buffer);
                         self.save_active_pattern(name);
                         self.ui.pending_load = None;
                         self.load_pattern(target_id);
                     }
-                    if ui.button("Verwerfen & Laden").clicked() {
+                    if ui.button("Discard & Load").clicked() {
                         self.ui.pending_load = None;
                         self.load_pattern(target_id);
                     }
-                    if ui.button("Abbrechen").clicked() {
+                    if ui.button("Cancel").clicked() {
                         self.ui.pending_load = None;
                     }
                 });
