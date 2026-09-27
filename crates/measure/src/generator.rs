@@ -157,9 +157,9 @@ const CELLS: &[Cell] = &[
     // Level 1: quarters and on-beat eighths.
     Cell { level: 1, family: CellFamily::Quarter, beats: &[(q(), N)] },
     Cell { level: 1, family: CellFamily::Eighth, beats: &[(e(), N), (e(), N)] },
-    // Level 2: eighth syncopation.
+    // Level 2: eighth syncopation. (Eighth + eighth rest is left out on
+    // purpose: rhythmically it is the same single hit as a quarter note.)
     Cell { level: 2, family: CellFamily::Eighth, beats: &[(e(), R), (e(), N)] },
-    Cell { level: 2, family: CellFamily::Eighth, beats: &[(e(), N), (e(), R)] },
     // Level 3: sixteenth figures on the beat, no inner rests.
     Cell { level: 3, family: CellFamily::Sixteenth, beats: &[(s(), N), (s(), N), (s(), N), (s(), N)] },
     Cell { level: 3, family: CellFamily::Sixteenth, beats: &[(s(), N), (s(), N), (e(), N)] },
@@ -433,6 +433,23 @@ mod tests {
         assert_eq!(triplet_patterns(3), set(&["x", "-", "xxx", "x-x", "--x"]));
         assert_eq!(triplet_patterns(4), set(&["x", "-", "xxx", "x-x", "--x", "xx-", "-xx"]));
         assert_eq!(triplet_patterns(5), set(&["x", "-", "xxx", "x-x", "--x", "xx-", "-xx", "-x-"]));
+    }
+
+    #[test]
+    fn eighth_ladder_is_rhythmically_distinct() {
+        // Onset patterns per beat on an eighth grid: level 1 = x- (quarter)
+        // and xx; level 2 adds -x. No cell repeats another's onsets.
+        fn patterns(complexity: u8) -> std::collections::BTreeSet<String> {
+            let mut rng = Rng::new(3);
+            let st = settings(Subdivision::Eighths, complexity);
+            (0..300)
+                .flat_map(|_| pick_cells(&st, &mut rng))
+                .map(|c| c.beats.iter().map(|&(_, n)| if n { 'x' } else { '-' }).collect())
+                .collect()
+        }
+        assert_eq!(patterns(1), set(&["x", "xx"]));
+        assert_eq!(patterns(2), set(&["x", "xx", "-x"]));
+        assert_eq!(patterns(5), patterns(2));
     }
 
     #[test]
