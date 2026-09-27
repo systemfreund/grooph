@@ -30,6 +30,14 @@ impl Grooph {
                             if Button::new(button_label).selected(is_running).ui(ui).clicked() {
                                 self.toggle_playback();
                             }
+                            if ui
+                                .selectable_label(self.playback_ctl.audio_cfg.count_in, "🔢")
+                                .on_hover_text("Count one bar in before playback starts")
+                                .clicked()
+                            {
+                                self.playback_ctl.audio_cfg.count_in =
+                                    !self.playback_ctl.audio_cfg.count_in;
+                            }
                             let bpm_editor = egui::DragValue::new(&mut self.playback_ctl.bpm)
                                 .prefix("BPM: ")
                                 .range(20..=300)
