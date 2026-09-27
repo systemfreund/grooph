@@ -59,6 +59,13 @@ impl Grooph {
                             {
                                 self.toggle_mode(Mode::Settings);
                             }
+                            if ui
+                                .selectable_label(self.ui.mode == Mode::Generator, "🎲")
+                                .on_hover_text("Rhythm generator")
+                                .clicked()
+                            {
+                                self.toggle_mode(Mode::Generator);
+                            }
                             if ui.selectable_label(self.ui.mode == Mode::Library, "📁").clicked()
                             {
                                 self.toggle_mode(Mode::Library);

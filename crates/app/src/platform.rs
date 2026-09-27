@@ -24,3 +24,14 @@ impl PlatformRuntime {
 
     pub(crate) fn release_wake_lock(&self) {}
 }
+
+/// Seed for the rhythm generator. Uses the browser's crypto RNG on the web
+/// and the system clock natively.
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn random_seed() -> u64 { getrandom::u64().unwrap_or(0x5EED) }
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn random_seed() -> u64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(0x5EED)
+}

@@ -1,4 +1,6 @@
 mod accuracy;
+mod generator;
+mod generator_panel;
 mod help;
 mod keyboard_input;
 mod library;
@@ -22,6 +24,7 @@ use grooph_measure::duration::{Duration, NoteValue, TupletSpec, q};
 use grooph_measure::{BeatIdx, Cursor, Measure, Score, TimeSignature};
 
 use crate::accuracy::AccuracyState;
+use crate::generator::GeneratorState;
 use crate::library::PatternLibrary;
 use crate::platform::{PlatformRuntime, VisibilityEvent};
 use crate::state::{
@@ -41,6 +44,7 @@ use grooph_measure::counting::{
 };
 use grooph_measure::duration::NoteValue::*;
 use grooph_measure::editing::Modification;
+use grooph_measure::generator::GeneratorSettings;
 use grooph_measure::tempo::ScoreTiming;
 use grooph_measure::{Beat, BeatKind};
 use grooph_midi::{MidiInput, MidiInputEvent};
@@ -57,6 +61,7 @@ pub(crate) enum Mode {
     Settings,
     Help,
     Library,
+    Generator,
     TimeSignature { beats: u8, unit: u8 },
 }
 
@@ -100,6 +105,8 @@ struct PersistedState {
     library: PatternLibrary,
     active_pattern_id: Option<u64>,
     dirty: bool,
+    generator_settings: GeneratorSettings,
+    reading_mode: bool,
 }
 
 impl Default for PersistedState {
@@ -118,6 +125,8 @@ impl Default for PersistedState {
             library: PatternLibrary::default(),
             active_pattern_id: None,
             dirty: false,
+            generator_settings: GeneratorSettings::default(),
+            reading_mode: false,
         }
     }
 }
@@ -138,6 +147,8 @@ impl PersistedState {
             library: app.editor.library.clone(),
             active_pattern_id: app.editor.active_pattern_id,
             dirty: app.editor.dirty,
+            generator_settings: app.editor.generator.settings,
+            reading_mode: app.editor.generator.reading_mode,
         }
     }
 }
@@ -191,8 +202,10 @@ impl App for Grooph {
         self.settings_panel(ui);
         self.mixer_panel(ui);
         self.library_panel(ui);
+        self.generator_panel(ui);
         self.tool_palette_panel(ui);
         self.measure_panel(ui);
+        self.update_reading_mode();
 
         if matches!(self.ui.mode, Mode::TimeSignature { .. }) {
             self.time_signature_dialog(ui);
@@ -825,6 +838,7 @@ impl Grooph {
                 active_pattern_id: state.active_pattern_id.filter(|id| state.library.contains(*id)),
                 dirty: state.dirty,
                 library: state.library,
+                generator: GeneratorState::new(state.generator_settings, state.reading_mode),
             },
             playback_ctl: PlaybackController {
                 transport_state: TransportState::Stopped,

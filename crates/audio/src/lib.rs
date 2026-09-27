@@ -236,6 +236,9 @@ impl Audio {
         }
     }
 
+    /// Whether an output stream is running, i.e. `playback_position` advances.
+    pub fn is_running(&self) -> bool { self.sink.is_some() }
+
     /// Returns `(global_tick, total_loop_ticks)` where `global_tick` is the
     /// current audio cursor over the whole score loop.
     pub fn playback_position(&self) -> Option<(f64, u64)> {

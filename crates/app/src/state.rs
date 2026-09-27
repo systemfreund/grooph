@@ -1,4 +1,5 @@
 use crate::accuracy::AccuracyState;
+use crate::generator::GeneratorState;
 use crate::library::PatternLibrary;
 use crate::platform::PlatformRuntime;
 use crate::undo::UndoHistory;
@@ -84,6 +85,8 @@ pub(crate) struct EditorState {
     /// Whether the working score/tempo has been edited since the last save or
     /// load. Used to warn before discarding changes when loading another pattern.
     pub(crate) dirty: bool,
+    /// Rhythm generator settings and reading-mode state.
+    pub(crate) generator: GeneratorState,
 }
 
 /// Realtime playback subsystem: transport, tempo, audio engine, MIDI input,
