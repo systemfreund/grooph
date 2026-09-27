@@ -9,7 +9,7 @@
 //! changes the result, while easier cells stay in the mix.
 //!
 //! Level ladder for 8th/16th subdivisions (derived from reference examples):
-//! 1. quarters, on-beat eighths and (16th subdivision) four sixteenths, no rests
+//! 1. quarters and on-beat eighths, no rests
 //! 2. eighths on the "and" (first syncopations)
 //! 3. sixteenth figures starting on the beat, no rests inside the beat
 //! 4. dotted figures and rests inside the beat
@@ -161,9 +161,9 @@ const CELLS: &[Cell] = &[
     // purpose: rhythmically it is the same single hit as a quarter note.)
     Cell { level: 2, family: CellFamily::Eighth, beats: &[(e(), R), (e(), N)] },
     // Sixteenths (onsets on 1 e & a; one spelling per rhythm).
-    // Level 1: the full sixteenth run.
-    Cell { level: 1, family: CellFamily::Sixteenth, beats: &[(s(), N), (s(), N), (s(), N), (s(), N)] },
+    // Levels 1-2 use the eighth cells only (same as the eighth subdivision).
     // Level 3: sixteenth figures on the beat, no inner rests.
+    Cell { level: 3, family: CellFamily::Sixteenth, beats: &[(s(), N), (s(), N), (s(), N), (s(), N)] },
     Cell { level: 3, family: CellFamily::Sixteenth, beats: &[(s(), N), (s(), N), (e(), N)] },
     Cell { level: 3, family: CellFamily::Sixteenth, beats: &[(e(), N), (s(), N), (s(), N)] },
     // Level 4: dotted figures, rests inside the beat.
@@ -471,8 +471,13 @@ mod tests {
         let pool = |level| {
             candidates(Subdivision::Sixteenths, level).into_iter().map(onsets).collect::<Vec<_>>()
         };
-        let l1 = pool(1);
-        assert!(l1.contains(&"xxxx".to_string()), "level 1 must include sixteenths: {l1:?}");
+        // Levels 1-2 match the eighth subdivision; sixteenths start at 3.
+        for level in [1, 2] {
+            let eighths: Vec<String> =
+                candidates(Subdivision::Eighths, level).into_iter().map(onsets).collect();
+            assert_eq!(pool(level), eighths);
+        }
+        assert!(pool(3).contains(&"xxxx".to_string()));
         let all = pool(5);
         let unique: std::collections::BTreeSet<_> = all.iter().cloned().collect();
         assert_eq!(unique.len(), all.len(), "duplicate rhythms: {all:?}");
