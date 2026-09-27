@@ -576,26 +576,18 @@ fn active_label_start(
 
 /// Compute X positions for all selected count labels.
 ///
-/// **Anchor rule.** A slot is *anchored* to the **first** note whose onset
-/// falls in `[slot.start_tick, slot.end_tick)`. The anchor's X is that note's
-/// `center.x` — so the label sits directly above the note that begins on the
-/// slot's musical position, regardless of the spacing scheme (proportional or
-/// uniform). Slots that no onset touches (covered by a longer sustaining
-/// note) are left unanchored. Sub-slot subdivisions like 16ths inside an `&`
-/// slot still anchor to the first 16th in the slot — which is the one that
-/// musically *is* the `&`.
+/// A label marks the musical position `slot.start_tick`. It is placed where
+/// the playback cursor would be at that tick:
+/// - a note or rest starting exactly there: over its center, so labels sit
+///   above the notes they count, whatever the spacing scheme;
+/// - otherwise inside the beat that covers the tick, interpolated by tick
+///   between that beat's center and the next one's, or the barline
+///   (`rect.right()`) after the last beat. A label therefore never leaves its
+///   measure: the `&` of a closing quarter sits between the quarter and the
+///   barline, not in front of the next measure's `1`.
 ///
-/// **Filling the gaps.** With ≥2 anchors we treat them as keypoints in a
-/// piecewise-linear map from `slot.center_tick` to X, and:
-/// - interpolate unanchored slots between surrounding anchors,
-/// - extrapolate unanchored slots beyond the last anchor using the slope of
-///   the last two anchors. In the common 2/4 + two-quarter-rests + ands case
-///   this puts the trailing `&` exactly at the barline — visually the
-///   midpoint between `2` of this measure and `1` of the next.
-///
-/// **Fallback.** With fewer than 2 anchors (e.g. a whole-note slot covering
-/// the entire measure) we cannot determine a meaningful slope, so we fall
-/// back to a uniform proportional mapping (`slot_center_tick / total_ticks`).
+/// Measures without laid-out notes fall back to a uniform proportional
+/// mapping of the tick over the content area.
 fn compute_label_xs(
     selected: &[&CountSlot],
     measure: &Measure,
@@ -603,73 +595,33 @@ fn compute_label_xs(
     rect: Rect,
     total_ticks: u32,
 ) -> Vec<f32> {
-    let content_w = rect.right() - layout.notes_left_edge;
-    let slot_center = |s: &CountSlot| (s.start_tick + s.end_tick) as f32 * 0.5;
-    let proportional =
-        |center: f32| layout.notes_left_edge + center / total_ticks as f32 * content_w;
-
-    let fallback =
-        || -> Vec<f32> { selected.iter().map(|s| proportional(slot_center(s))).collect() };
-
-    if total_ticks == 0 || selected.is_empty() {
-        return fallback();
-    }
+    let left = layout.notes_left_edge;
+    let right = rect.right();
     let beats = measure.beats();
-    if beats.is_empty() || layout.notes.is_empty() {
-        return fallback();
+    if total_ticks == 0 || beats.is_empty() || layout.notes.len() < beats.len() {
+        let content_w = right - left;
+        return selected
+            .iter()
+            .map(|s| left + s.start_tick as f32 / total_ticks.max(1) as f32 * content_w)
+            .collect();
     }
     let onsets = DEFAULT_GRID.compute_onset_ticks(beats);
-
-    // (slot_index_in_selected, slot_center_tick, anchor_x)
-    let mut anchors: Vec<(usize, f32, f32)> = Vec::new();
-    for (i, slot) in selected.iter().enumerate() {
-        for (note_i, &onset) in onsets.iter().enumerate() {
-            if onset >= slot.end_tick {
-                break;
-            }
-            if onset >= slot.start_tick && note_i < layout.notes.len() {
-                anchors.push((i, slot_center(slot), layout.notes[note_i].center.x));
-                break;
-            }
+    let x_at = |tick: u32| -> f32 {
+        // Last beat starting at or before `tick`; the first beat starts at 0.
+        let i = onsets.iter().rposition(|&o| o <= tick).unwrap_or(0);
+        let x0 = layout.notes[i].center.x;
+        let (next_tick, x1) = match onsets.get(i + 1) {
+            Some(&t) => (t, layout.notes[i + 1].center.x),
+            None => (total_ticks, right),
+        };
+        let span = next_tick.saturating_sub(onsets[i]);
+        if span == 0 || tick <= onsets[i] {
+            return x0;
         }
-    }
-
-    if anchors.len() < 2 {
-        return fallback();
-    }
-
-    selected
-        .iter()
-        .enumerate()
-        .map(|(i, slot)| {
-            let sc = slot_center(slot);
-            if let Some(&(_, _, x)) = anchors.iter().find(|(idx, _, _)| *idx == i) {
-                return x;
-            }
-            let before = anchors.iter().rev().find(|(_, t, _)| *t < sc).copied();
-            let after = anchors.iter().find(|(_, t, _)| *t > sc).copied();
-            match (before, after) {
-                (Some((_, t1, x1)), Some((_, t2, x2))) => {
-                    let frac = (sc - t1) / (t2 - t1);
-                    x1 + (x2 - x1) * frac
-                }
-                (Some((_, t1, x1)), None) => {
-                    let n = anchors.len();
-                    let (_, ta, xa) = anchors[n - 2];
-                    let (_, tb, xb) = anchors[n - 1];
-                    let slope = (xb - xa) / (tb - ta);
-                    x1 + slope * (sc - t1)
-                }
-                (None, Some((_, t1, x1))) => {
-                    let (_, ta, xa) = anchors[0];
-                    let (_, tb, xb) = anchors[1];
-                    let slope = (xb - xa) / (tb - ta);
-                    x1 - slope * (t1 - sc)
-                }
-                (None, None) => proportional(sc),
-            }
-        })
-        .collect()
+        let frac = (tick - onsets[i]).min(span) as f32 / span as f32;
+        x0 + (x1 - x0) * frac
+    };
+    selected.iter().map(|s| x_at(s.start_tick).clamp(left, right)).collect()
 }
 
 fn count_color(id: ColorId, alpha: u8) -> Color32 {
@@ -691,7 +643,7 @@ mod tests {
     use eframe::egui::{FontFamily, FontId, Pos2};
     use grooph_layout::pixel_layout::GlyphMetrics;
     use grooph_measure::counting::{CountLayer, CountScope, LabelPattern, LabelToken, Subdiv};
-    use grooph_measure::duration::{e, q, s};
+    use grooph_measure::duration::{Duration, NoteValue, e, q, s};
     use grooph_measure::{Beat, Measure, TimeSignature};
 
     fn opts_for(rect: Rect) -> LayoutOpts {
@@ -742,13 +694,11 @@ mod tests {
     }
 
     #[test]
-    fn two_quarter_rests_two_four_ands_anchor_to_notes() {
-        // 2/4 + two quarter rests + "Ands" subdivision.
-        // The numeric labels `1` and `2` are anchored to the quarter-rest
-        // centers (W/4 and 3W/4 with proportional spacing). The `&`s land
-        // halfway between adjacent anchors — the trailing `&` extrapolates
-        // to the barline, which is the visual midpoint between `2` of this
-        // measure and `1` of the next.
+    fn two_quarter_rests_two_four_ands_stay_inside_the_measure() {
+        // 2/4 + two quarter rests + "Ands" subdivision. `1` and `2` sit over
+        // the rests (W/4 and 3W/4 with proportional spacing). The first `&`
+        // is halfway between the rests; the trailing `&` halfway between the
+        // last rest and the barline, not on it (#13).
         let mut m = Measure::new(TimeSignature::TWO_FOUR);
         m.set_beat(0, Beat::rest(q())).unwrap();
         m.set_beat(1, Beat::rest(q())).unwrap();
@@ -760,21 +710,10 @@ mod tests {
         let xs = label_xs(&m, &layout, rect, &ands_config());
         assert_eq!(xs.len(), 4, "expected 1 & 2 &");
 
-        let w = rect.right() - layout.notes_left_edge;
-        let l = layout.notes_left_edge;
-        let expected = [l + w / 4.0, l + w / 2.0, l + 3.0 * w / 4.0, l + w];
+        let (r0, r1) = (layout.notes[0].center.x, layout.notes[1].center.x);
+        let expected = [r0, (r0 + r1) / 2.0, r1, (r1 + rect.right()) / 2.0];
         for (i, (got, exp)) in xs.iter().zip(expected.iter()).enumerate() {
             assert!((got - exp).abs() < 0.5, "label {i}: got {got}, expected {exp}",);
-        }
-
-        // `1` and `2` align with the rest centers.
-        assert!((xs[0] - layout.notes[0].center.x).abs() < 0.5);
-        assert!((xs[2] - layout.notes[1].center.x).abs() < 0.5);
-
-        // Uniform spacing across the full set.
-        let gaps: Vec<f32> = xs.windows(2).map(|w| w[1] - w[0]).collect();
-        for g in &gaps {
-            assert!((g - gaps[0]).abs() < 0.5, "non-uniform spacing: {:?}", gaps);
         }
     }
 
@@ -803,9 +742,9 @@ mod tests {
     }
 
     #[test]
-    fn whole_measure_primary_label_at_midpoint() {
-        // 4/4 with a single `1` label spanning the whole measure — slot
-        // center tick = T/2 → label at the midpoint of the content area.
+    fn whole_measure_primary_label_on_the_downbeat() {
+        // 4/4 with a single `1` label spanning the whole measure: it counts
+        // the downbeat, so it sits over the first beat.
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
         for i in 0..4 {
             m.set_beat(i, Beat::rest(q())).unwrap();
@@ -817,8 +756,7 @@ mod tests {
 
         let xs = label_xs(&m, &layout, rect, &primary_config());
         assert_eq!(xs.len(), 1);
-        let expected = (layout.notes_left_edge + rect.right()) * 0.5;
-        assert!((xs[0] - expected).abs() < 0.5);
+        assert!((xs[0] - layout.notes[0].center.x).abs() < 0.5);
     }
 
     #[test]
@@ -903,9 +841,9 @@ mod tests {
     }
 
     #[test]
-    fn three_quarter_rests_three_four_ands_uniform() {
-        // 3/4 with three quarter rests + Ands → six labels "1 & 2 & 3 &",
-        // uniform W/6 spacing. Same bug pattern as 2/4.
+    fn three_quarter_rests_three_four_ands_between_rests() {
+        // 3/4 with three quarter rests + Ands → "1 & 2 & 3 &". Numbers over
+        // the rests, every `&` halfway to the next rest or the barline.
         let mut m = Measure::new(TimeSignature::THREE_FOUR);
         for i in 0..3 {
             m.set_beat(i, Beat::rest(q())).unwrap();
@@ -917,10 +855,59 @@ mod tests {
 
         let xs = label_xs(&m, &layout, rect, &ands_config());
         assert_eq!(xs.len(), 6);
-
-        let gaps: Vec<f32> = xs.windows(2).map(|w| w[1] - w[0]).collect();
-        for g in &gaps {
-            assert!((g - gaps[0]).abs() < 0.5, "non-uniform spacing in 3/4: {:?}", gaps);
+        let rests: Vec<f32> = layout.notes.iter().map(|n| n.center.x).collect();
+        let ends = [rests[1], rests[2], rect.right()];
+        for beat in 0..3 {
+            assert!((xs[2 * beat] - rests[beat]).abs() < 0.5, "{xs:?}");
+            let and = (rests[beat] + ends[beat]) / 2.0;
+            assert!((xs[2 * beat + 1] - and).abs() < 0.5, "{xs:?}");
         }
+    }
+
+    #[test]
+    fn closing_rest_keeps_its_and_before_the_barline() {
+        // Regression for #13: 8ths are laid out tighter than quarter rests, so
+        // extrapolating the spacing of the 8ths pushed the `&` of a closing
+        // quarter rest past the barline, right in front of the next `1`.
+        let mut m = Measure::new(TimeSignature::FOUR_FOUR);
+        m.set_beat(0, Beat::note(e())).unwrap();
+        m.set_beat(1, Beat::note(e())).unwrap();
+        m.set_beat(2, Beat::rest(q())).unwrap();
+        m.set_beat(3, Beat::note(e())).unwrap();
+        m.set_beat(4, Beat::note(e())).unwrap();
+        m.set_beat(5, Beat::rest(q())).unwrap();
+
+        let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(500.0, 100.0));
+        let opts = opts_for(rect);
+        let mut layout = build_measure_layout(&m, &opts);
+        // Squeeze the last rest towards the barline, as the stable staff
+        // layout does with a short measure tail.
+        let last = layout.notes.len() - 1;
+        layout.notes[last].center.x = rect.right() - 30.0;
+
+        let xs = label_xs(&m, &layout, rect, &ands_config());
+        assert_eq!(xs.len(), 8);
+        assert!(xs.windows(2).all(|w| w[0] < w[1]), "labels out of order: {xs:?}");
+        let rest_x = layout.notes[last].center.x;
+        assert!(xs[7] > rest_x && xs[7] < rect.right(), "trailing `&` at {}: {xs:?}", xs[7]);
+    }
+
+    #[test]
+    fn and_inside_a_dotted_eighth_is_not_put_on_the_sixteenth() {
+        // Dotted 8th + 16th: the `&` falls inside the dotted 8th. It belongs
+        // between the two notes, not over the 16th (which is the "a").
+        let mut m = Measure::new(TimeSignature::ONE_FOUR);
+        m.set_beat(0, Beat::note(Duration::Dotted { base: NoteValue::Eighth, dots: 1 })).unwrap();
+        m.set_beat(1, Beat::note(s())).unwrap();
+
+        let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(300.0, 100.0));
+        let opts = opts_for(rect);
+        let layout = build_measure_layout(&m, &opts);
+
+        let xs = label_xs(&m, &layout, rect, &ands_config());
+        assert_eq!(xs.len(), 2);
+        let (x0, x1) = (layout.notes[0].center.x, layout.notes[1].center.x);
+        let expected = x0 + (x1 - x0) * 2.0 / 3.0;
+        assert!((xs[1] - expected).abs() < 0.5, "got {}, expected {expected}", xs[1]);
     }
 }
