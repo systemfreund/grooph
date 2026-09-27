@@ -65,6 +65,13 @@ Important root files:
 - Reading mode lays out with `MeasureWidthPolicy::TimeSignature`: measure
   width depends only on the meter (as if filled with sixteenths), so swapping
   measures never reflows the staff. The editor keeps `Content` widths.
+- Groupings: every one-beat figure has a stable `GroupingId` (bit index in
+  `GroupingSet`; never renumber, it is persisted). The catalog order follows
+  the reference app's "Custom Groupings" screen. A complexity level is a preset
+  subset (`complexity_groupings`); `custom_groupings(_enabled)` in
+  `GeneratorSettings` replaces it with a hand-picked subset (drawn uniformly;
+  an empty selection falls back to complexity). Picker UI: "Groupings" in the
+  generator panel, tiles via `tool_palette::notation_button`.
 - Ghost notes (`grooph_measure::ghost::ghost_onsets`): quiet hits on every free
   slot of the generator subdivision (per beat: 8ths=2, 16ths=4, triplets=3;
   mixed = triplets in tuplet beats, else 16ths). Scheduled as `SoundType::Ghost`,

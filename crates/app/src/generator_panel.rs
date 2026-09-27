@@ -1,9 +1,12 @@
 use crate::Grooph;
 use crate::Mode;
 use crate::generator::READING_MODE_MIN_BARS;
+use crate::tool_palette::notation_button;
 use eframe::egui;
 use grooph_measure::TimeSignature;
-use grooph_measure::generator::{MAX_COMPLEXITY, Subdivision};
+use grooph_measure::generator::{
+    GroupingSet, MAX_COMPLEXITY, Subdivision, complexity_groupings, groupings,
+};
 
 const MAX_BARS: usize = 8;
 const MAX_BEATS: u8 = 7;
@@ -60,18 +63,23 @@ impl Grooph {
                             });
                     });
 
+                    let custom_on = settings.custom_groupings_enabled;
                     setting(ui, "Complexity", |ui| {
-                        egui::ComboBox::from_id_salt("gen_complexity")
-                            .selected_text(format!("Level {}", settings.complexity))
-                            .show_ui(ui, |ui| {
-                                for level in 1..=MAX_COMPLEXITY {
-                                    ui.selectable_value(
-                                        &mut settings.complexity,
-                                        level,
-                                        format!("Level {level}"),
-                                    );
-                                }
-                            });
+                        ui.add_enabled_ui(!custom_on, |ui| {
+                            egui::ComboBox::from_id_salt("gen_complexity")
+                                .selected_text(format!("Level {}", settings.complexity))
+                                .show_ui(ui, |ui| {
+                                    for level in 1..=MAX_COMPLEXITY {
+                                        ui.selectable_value(
+                                            &mut settings.complexity,
+                                            level,
+                                            format!("Level {level}"),
+                                        );
+                                    }
+                                });
+                        })
+                        .response
+                        .on_disabled_hover_text("Custom groupings are active");
                     });
 
                     setting(ui, "Bars", |ui| {
@@ -132,6 +140,10 @@ impl Grooph {
                     }
                 });
 
+                egui::CollapsingHeader::new("Groupings")
+                    .id_salt("gen_groupings")
+                    .show(ui, |ui| self.groupings_picker(ui));
+
                 let reading_turned_on = !reading_before && self.editor.generator.reading_mode;
                 let too_short_for_reading = self.editor.score.len() < READING_MODE_MIN_BARS;
                 if roll
@@ -142,5 +154,53 @@ impl Grooph {
                 }
             },
         );
+    }
+
+    /// Grouping picker (reference app: "Custom Groupings"). While custom
+    /// groupings are off, the tiles show which groupings the complexity level
+    /// unlocks; picking a tile switches to a custom selection seeded from it.
+    fn groupings_picker(&mut self, ui: &mut egui::Ui) {
+        let family = self.ui.music_font_id.family.clone();
+        let settings = &mut self.editor.generator.settings;
+        let preset = complexity_groupings(settings.subdivision, settings.complexity);
+
+        let mut enabled = settings.custom_groupings_enabled;
+        if ui.checkbox(&mut enabled, "Custom groupings").changed() {
+            if enabled && settings.custom_groupings.is_empty() {
+                settings.custom_groupings = preset;
+            }
+            settings.custom_groupings_enabled = enabled;
+        }
+
+        let active: GroupingSet =
+            if settings.custom_groupings_enabled { settings.custom_groupings } else { preset };
+        let available = groupings(settings.subdivision);
+        if settings.custom_groupings_enabled
+            && !available.iter().any(|g| settings.custom_groupings.contains(g.id))
+        {
+            ui.weak("No grouping selected for this subdivision, using the complexity level.");
+        } else if !settings.custom_groupings_enabled {
+            ui.weak(format!(
+                "Level {} uses the highlighted groupings. Pick one to customise.",
+                settings.complexity
+            ));
+        }
+
+        ui.horizontal_wrapped(|ui| {
+            for grouping in available {
+                let measure = grouping.measure();
+                let id = egui::Id::new(("grouping", grouping.id.0));
+                let tile =
+                    notation_button(ui, id, &measure, family.clone(), active.contains(grouping.id))
+                        .on_hover_text(format!("Unlocked at level {}", grouping.level));
+                if tile.clicked() {
+                    if !settings.custom_groupings_enabled {
+                        settings.custom_groupings = preset;
+                        settings.custom_groupings_enabled = true;
+                    }
+                    settings.custom_groupings.toggle(grouping.id);
+                }
+            }
+        });
     }
 }

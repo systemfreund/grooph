@@ -4,8 +4,8 @@ use crate::{Mode, tools};
 use eframe::egui;
 use eframe::egui::scroll_area::{ScrollBarVisibility, ScrollSource};
 use eframe::egui::{
-    Align, Align2, Atom, Button, Direction, FontId, Id, Label, Layout, Response, RichText, Ui,
-    Vec2, Widget,
+    Align, Align2, Atom, Button, Direction, FontFamily, FontId, Id, Label, Layout, Response,
+    RichText, Ui, Vec2, Widget,
 };
 use grooph_layout::glyphs;
 use grooph_layout::pixel_layout::{
@@ -312,62 +312,77 @@ impl Grooph {
 
     fn note_button(&self, ui: &mut Ui, id: &str) -> Response {
         let measure = self.editor.button_measures.get(id).unwrap();
-        let template = measure.beats().first().unwrap();
-        let w_factor = match template {
-            Beat { kind: Note, duration: Duration::Tuplet(..), .. } => 1.5,
-            _ => 1.0,
-        };
-        let symbol_id = Id::new(id);
-        let symbol = Atom::custom(
-            symbol_id,
-            Vec2::new(TOOL_PALETTE_BUTTON_SIZE * w_factor, TOOL_PALETTE_BUTTON_SIZE),
-        );
-        let button =
-            Button::new(symbol).corner_radius(TOOL_PALETTE_BUTTON_CORNER_RADIUS).atom_ui(ui);
-
-        if let Some(rect) = button.rect(symbol_id) {
-            let cap_factor = match template {
-                Beat { kind: Rest, .. } => 0.8,
-                Beat { kind: Note, duration: Duration::Tuplet(spec), .. }
-                    if matches!(spec.kind(), TupletKind::Nonuplet) =>
-                {
-                    0.35
-                }
-                Beat { kind: Note, duration: Duration::Tuplet(..), .. } => 0.4,
-                _ => 0.7,
-            };
-
-            let em = compute_em(&rect, cap_factor, ui);
-
-            let y_offset = match template {
-                Beat { kind: Rest, .. } => 2.0,
-                Beat { kind: Note, duration: Duration::Tuplet(..), .. } => 22.0,
-                _ => 20.0,
-            };
-
-            let font_id = FontId::new(em, self.ui.music_font_id.family.clone());
-
-            let opts = LayoutOpts {
-                rect,
-                font_id: font_id.clone(),
-                pixels_per_point: ui.ctx().pixels_per_point(),
-                em,
-                layout_clef: false,
-                layout_time_signature: false,
-                y_offset,
-                stem_length_factor: 0.8,
-                stem_thickness_factor: 0.06,
-                accent_displacement: 0.1,
-                accent_below: false,
-                proportional_spacing: true,
-                debug_bbox: false,
-                metrics: measure_glyph_metrics(ui, &font_id),
-            };
-            let measure_layout = build_measure_layout(measure, &opts);
-            let painter = &ui.painter_at(rect);
-            draw_notes(painter, &measure_layout, ui.style().visuals.text_color(), &opts);
-        }
-
-        button.response
+        notation_button(ui, Id::new(id), measure, self.ui.music_font_id.family.clone(), false)
     }
+}
+
+/// A button showing `measure` as miniature notation (tool palette, grouping
+/// picker). `selected` renders it in the highlighted state.
+pub(crate) fn notation_button(
+    ui: &mut Ui,
+    symbol_id: Id,
+    measure: &Measure,
+    family: FontFamily,
+    selected: bool,
+) -> Response {
+    // Size the glyphs by the first note; rest-only measures use rest sizing.
+    let first = measure.beats().first().unwrap();
+    let template = measure.beats().iter().find(|b| b.kind == Note).unwrap_or(first);
+    let w_factor = match template {
+        Beat { kind: Note, duration: Duration::Tuplet(..), .. } => 1.5,
+        _ => 1.0,
+    };
+    let symbol = Atom::custom(
+        symbol_id,
+        Vec2::new(TOOL_PALETTE_BUTTON_SIZE * w_factor, TOOL_PALETTE_BUTTON_SIZE),
+    );
+    let button = Button::new(symbol)
+        .corner_radius(TOOL_PALETTE_BUTTON_CORNER_RADIUS)
+        .selected(selected)
+        .atom_ui(ui);
+
+    if let Some(rect) = button.rect(symbol_id) {
+        let cap_factor = match template {
+            Beat { kind: Rest, .. } => 0.8,
+            Beat { kind: Note, duration: Duration::Tuplet(spec), .. }
+                if matches!(spec.kind(), TupletKind::Nonuplet) =>
+            {
+                0.35
+            }
+            Beat { kind: Note, duration: Duration::Tuplet(..), .. } => 0.4,
+            _ => 0.7,
+        };
+
+        let em = compute_em(&rect, cap_factor, ui);
+
+        let y_offset = match template {
+            Beat { kind: Rest, .. } => 2.0,
+            Beat { kind: Note, duration: Duration::Tuplet(..), .. } => 22.0,
+            _ => 20.0,
+        };
+
+        let font_id = FontId::new(em, family);
+
+        let opts = LayoutOpts {
+            rect,
+            font_id: font_id.clone(),
+            pixels_per_point: ui.ctx().pixels_per_point(),
+            em,
+            layout_clef: false,
+            layout_time_signature: false,
+            y_offset,
+            stem_length_factor: 0.8,
+            stem_thickness_factor: 0.06,
+            accent_displacement: 0.1,
+            accent_below: false,
+            proportional_spacing: true,
+            debug_bbox: false,
+            metrics: measure_glyph_metrics(ui, &font_id),
+        };
+        let measure_layout = build_measure_layout(measure, &opts);
+        let painter = &ui.painter_at(rect);
+        draw_notes(painter, &measure_layout, ui.style().visuals.text_color(), &opts);
+    }
+
+    button.response
 }
