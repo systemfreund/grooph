@@ -4,8 +4,8 @@ use crate::{Mode, tools};
 use eframe::egui;
 use eframe::egui::scroll_area::{ScrollBarVisibility, ScrollSource};
 use eframe::egui::{
-    Align, Align2, Atom, Button, Direction, FontFamily, FontId, Id, Label, Layout, Rect, Response,
-    RichText, Ui, Vec2, Widget,
+    Align, Align2, Atom, Button, Direction, FontFamily, FontId, Id, Label, Layout, Pos2, Rect,
+    Response, RichText, Ui, Vec2, Widget,
 };
 use grooph_layout::glyphs;
 use grooph_layout::pixel_layout::{
@@ -385,32 +385,31 @@ pub(crate) fn notation_button(
         // template beat, then measure the actual rendered content (note
         // glyphs incl. flags, and tuplet brackets/numbers) instead of
         // trusting the fixed factors above. A trailing unbeamed flagged
-        // note, or a wide tuplet number squeezed near the tile edge, can
-        // overhang the nominal layout width; shrink and recenter to fit.
+        // note can overhang the nominal layout width, and a tuplet number
+        // sitting close to the top of the tile can overhang its height;
+        // shrink and recenter to fit whichever axis overflows.
         let probe_opts = make_opts(em, rect, true);
         let probe_layout = build_measure_layout(measure, &probe_opts);
-        let (content_min_x, content_max_x) = content_x_bounds(ui, &probe_layout);
+        let content = content_bounds(ui, &probe_layout);
 
         let pad = em * 0.08;
-        let avail_left = rect.left() + pad;
-        let avail_right = rect.right() - pad;
-        let content_width = (content_max_x - content_min_x).max(1.0);
-        let avail_width = (avail_right - avail_left).max(1.0);
+        let avail = rect.shrink(pad);
+        let content_size = Vec2::new((content.width()).max(1.0), (content.height()).max(1.0));
 
-        let (final_em, final_rect) = if content_width > avail_width
-            || content_min_x < avail_left
-            || content_max_x > avail_right
+        let (final_em, final_rect) = if content_size.x > avail.width()
+            || content_size.y > avail.height()
+            || !avail.contains_rect(content)
         {
-            let scale = (avail_width / content_width).min(1.0);
+            let scale =
+                (avail.width() / content_size.x).min(avail.height() / content_size.y).min(1.0);
             let shrunk_em = em * scale;
             // Re-measure at the shrunk size (glyph widths don't scale
             // perfectly linearly) and recenter the content in the tile.
             let probe2_opts = make_opts(shrunk_em, rect, true);
             let probe2_layout = build_measure_layout(measure, &probe2_opts);
-            let (min2, max2) = content_x_bounds(ui, &probe2_layout);
-            let content_center = 0.5 * (min2 + max2);
-            let shift = rect.center().x - content_center;
-            (shrunk_em, rect.translate(Vec2::new(shift, 0.0)))
+            let content2 = content_bounds(ui, &probe2_layout);
+            let shift = rect.center() - content2.center();
+            (shrunk_em, rect.translate(shift))
         } else {
             (em, rect)
         };
@@ -424,41 +423,54 @@ pub(crate) fn notation_button(
     button.response
 }
 
-/// Horizontal extent (in the same pixel space as `LayoutOpts::rect`) of
+/// Bounding rect (in the same pixel space as `LayoutOpts::rect`) of
 /// everything a measure actually draws: note glyph bounding boxes (heads,
 /// dots, stems, flags) and tuplet bracket/number geometry. Used to detect
 /// when the fixed sizing factors in [`notation_button`] under- or
-/// over-shoot the tile, e.g. a trailing unbeamed flag or a tuplet number
-/// that would otherwise be clipped by the tile edge.
-fn content_x_bounds(ui: &Ui, layout: &MeasureLayout) -> (f32, f32) {
-    let mut min_x = f32::INFINITY;
-    let mut max_x = f32::NEG_INFINITY;
+/// over-shoot the tile, e.g. a trailing unbeamed flag overhanging the
+/// right edge, or a tuplet number sitting close enough to the top of the
+/// tile that its glyph gets clipped.
+fn content_bounds(ui: &Ui, layout: &MeasureLayout) -> Rect {
+    let mut min = Pos2::new(f32::INFINITY, f32::INFINITY);
+    let mut max = Pos2::new(f32::NEG_INFINITY, f32::NEG_INFINITY);
+    let mut grow = |p: Pos2| {
+        min.x = min.x.min(p.x);
+        min.y = min.y.min(p.y);
+        max.x = max.x.max(p.x);
+        max.y = max.y.max(p.y);
+    };
 
     for note in &layout.notes {
         if let Some(bbox) = note.debug_bbox {
-            min_x = min_x.min(bbox.min.x);
-            max_x = max_x.max(bbox.max.x);
+            grow(bbox.min);
+            grow(bbox.max);
         }
         if let Some(bbox) = note.accent_debug_bbox {
-            min_x = min_x.min(bbox.min.x);
-            max_x = max_x.max(bbox.max.x);
+            grow(bbox.min);
+            grow(bbox.max);
         }
     }
 
     for tuplet in &layout.tuplets {
         for seg in &tuplet.bracket {
-            min_x = min_x.min(seg.p1.x.min(seg.p2.x));
-            max_x = max_x.max(seg.p1.x.max(seg.p2.x));
+            grow(seg.p1);
+            grow(seg.p2);
         }
         let digits = glyphs::tuplet_glyphs(tuplet.count);
-        let width = ui
+        let text_rect = ui
             .painter()
             .layout_no_wrap(digits, tuplet.number_font.clone(), egui::Color32::WHITE)
-            .rect
-            .width();
-        min_x = min_x.min(tuplet.number_center.x - width * 0.5);
-        max_x = max_x.max(tuplet.number_center.x + width * 0.5);
+            .rect;
+        // `number_center` is the text's on-screen center (see draw_tuplets'
+        // Align2::CENTER_CENTER), so build the glyph's bounds around it
+        // rather than treating number_center as a baseline.
+        grow(tuplet.number_center - text_rect.size() * 0.5);
+        grow(tuplet.number_center + text_rect.size() * 0.5);
     }
 
-    if !min_x.is_finite() || !max_x.is_finite() { (0.0, 0.0) } else { (min_x, max_x) }
+    if !min.x.is_finite() || !max.x.is_finite() {
+        Rect::from_min_size(Pos2::ZERO, Vec2::ZERO)
+    } else {
+        Rect::from_min_max(min, max)
+    }
 }
