@@ -119,7 +119,9 @@ impl Grooph {
                                     0
                                 };
                                 let key = (m_idx, primary_beat_in_measure);
-                                if self.playback_ctl.playback.last_primary_beat != Some(key) {
+                                if self.ui.flash_enabled
+                                    && self.playback_ctl.playback.last_primary_beat != Some(key)
+                                {
                                     self.playback_ctl.playback.flash_intensity = 1.0;
                                     self.playback_ctl.playback.last_primary_beat = Some(key);
                                 }
