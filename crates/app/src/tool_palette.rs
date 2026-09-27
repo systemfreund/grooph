@@ -21,6 +21,11 @@ use tools::EditOp;
 
 const TOOL_PALETTE_BUTTON_SIZE: f32 = 70.0;
 const TOOL_PALETTE_BUTTON_CORNER_RADIUS: f32 = 2.0;
+/// Approximate visible cap height of the tuplet count digits, as a
+/// fraction of their font size. The SMuFL numeral glyphs sit tight in a
+/// much taller line box (ascent + descent), so the galley's own rect
+/// overstates how much vertical room they actually need.
+const TUPLET_NUMBER_CAP_HEIGHT_FACTOR: f32 = 0.55;
 
 enum ButtonKind {
     /// Renders a miniature notation using `note_button`.
@@ -457,15 +462,24 @@ fn content_bounds(ui: &Ui, layout: &MeasureLayout) -> Rect {
             grow(seg.p2);
         }
         let digits = glyphs::tuplet_glyphs(tuplet.count);
-        let text_rect = ui
+        let text_width = ui
             .painter()
             .layout_no_wrap(digits, tuplet.number_font.clone(), egui::Color32::WHITE)
-            .rect;
+            .rect
+            .width();
+        // The galley's own rect is the font's full line box (ascent +
+        // descent), which for these SMuFL numeral glyphs is much taller
+        // than the visible ink; using it here would force needless
+        // shrinking. Approximate the drawn glyph height instead, the same
+        // way `render::glyph_metrics` heuristically sizes other SMuFL
+        // glyphs off the em rather than off font-metrics height.
+        let text_height = tuplet.number_font.size * TUPLET_NUMBER_CAP_HEIGHT_FACTOR;
+        let text_size = Vec2::new(text_width, text_height);
         // `number_center` is the text's on-screen center (see draw_tuplets'
         // Align2::CENTER_CENTER), so build the glyph's bounds around it
         // rather than treating number_center as a baseline.
-        grow(tuplet.number_center - text_rect.size() * 0.5);
-        grow(tuplet.number_center + text_rect.size() * 0.5);
+        grow(tuplet.number_center - text_size * 0.5);
+        grow(tuplet.number_center + text_size * 0.5);
     }
 
     if !min.x.is_finite() || !max.x.is_finite() {
