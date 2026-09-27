@@ -17,15 +17,15 @@
 //!
 //! Level ladder for triplets (per the reference app, `x` = note, `-` = rest):
 //! 1. `xxx` or a quarter note, no rests
-//! 2. + `x-x`
+//! 2. + `x-x`, quarter rest
 //! 3. + `--x`
 //! 4. + `xx-`, `-xx`
 //! 5. + `-x-`
 //!
-//! Cells never contain whole-beat rests. Those come only from
-//! [`GeneratorSettings::space`], which replaces entire beats (never part of a
-//! figure, so a triplet is always complete) with a quarter rest. At maximum
-//! space a measure may consist of rests only.
+//! Apart from the triplet level-2 quarter rest, whole-beat rests come only
+//! from [`GeneratorSettings::space`], which replaces entire beats (never part
+//! of a figure, so a triplet is always complete) with a quarter rest. At
+//! maximum space a measure may consist of rests only.
 //!
 //! Only time signatures whose beat unit is a quarter (`x/4`) are supported for
 //! now; cells are written for a quarter-note beat.
@@ -180,6 +180,7 @@ const CELLS: &[Cell] = &[
     // Triplets (eighth-note triplets per quarter).
     Cell { level: 1, family: CellFamily::Triplet, beats: &[(t8(), N), (t8(), N), (t8(), N)] },
     Cell { level: 2, family: CellFamily::Triplet, beats: &[(t8(), N), (t8(), R), (t8(), N)] },
+    Cell { level: 2, family: CellFamily::Triplet, beats: &[(q(), R)] },
     Cell { level: 3, family: CellFamily::Triplet, beats: &[(t8(), R), (t8(), R), (t8(), N)] },
     Cell { level: 4, family: CellFamily::Triplet, beats: &[(t8(), N), (t8(), N), (t8(), R)] },
     Cell { level: 4, family: CellFamily::Triplet, beats: &[(t8(), R), (t8(), N), (t8(), N)] },
@@ -427,10 +428,11 @@ mod tests {
     fn triplet_ladder_matches_reference_app() {
         // "x" alone is the quarter note.
         assert_eq!(triplet_patterns(1), set(&["x", "xxx"]));
-        assert_eq!(triplet_patterns(2), set(&["x", "xxx", "x-x"]));
-        assert_eq!(triplet_patterns(3), set(&["x", "xxx", "x-x", "--x"]));
-        assert_eq!(triplet_patterns(4), set(&["x", "xxx", "x-x", "--x", "xx-", "-xx"]));
-        assert_eq!(triplet_patterns(5), set(&["x", "xxx", "x-x", "--x", "xx-", "-xx", "-x-"]));
+        // "-" alone is the quarter rest.
+        assert_eq!(triplet_patterns(2), set(&["x", "-", "xxx", "x-x"]));
+        assert_eq!(triplet_patterns(3), set(&["x", "-", "xxx", "x-x", "--x"]));
+        assert_eq!(triplet_patterns(4), set(&["x", "-", "xxx", "x-x", "--x", "xx-", "-xx"]));
+        assert_eq!(triplet_patterns(5), set(&["x", "-", "xxx", "x-x", "--x", "xx-", "-xx", "-x-"]));
     }
 
     #[test]
