@@ -1,6 +1,7 @@
 use crate::accuracy::AccuracyState;
 use crate::generator::GeneratorState;
 use crate::library::PatternLibrary;
+use crate::link::SharedLink;
 use crate::platform::PlatformRuntime;
 use crate::undo::UndoHistory;
 use crate::{CountingSettings, Mode, TransportState};
@@ -154,7 +155,17 @@ pub(crate) struct UiShell {
     /// Transient text buffer for the "save current pattern" name input. Not
     /// persisted.
     pub(crate) save_name_buffer: String,
-    /// Pending pattern id awaiting the "discard unsaved changes?" confirmation
-    /// before loading. `Some` shows the confirm dialog. Not persisted.
-    pub(crate) pending_load: Option<u64>,
+    /// Load awaiting the "discard unsaved changes?" confirmation. `Some` shows
+    /// the confirm dialog. Not persisted.
+    pub(crate) pending_load: Option<PendingLoad>,
+    /// Why a shared link could not be opened; `Some` shows an error dialog.
+    pub(crate) link_error: Option<String>,
+    /// UI time of the last "copy link" click, for a short confirmation.
+    pub(crate) link_copied_at: Option<f64>,
+}
+
+/// Something that replaces the working score once unsaved changes are dealt with.
+pub(crate) enum PendingLoad {
+    Pattern(u64),
+    Link(SharedLink),
 }

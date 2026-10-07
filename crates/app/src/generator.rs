@@ -73,6 +73,13 @@ impl Grooph {
         self.editor.generator.pending_regeneration = None;
     }
 
+    /// Like [`Self::generate_new_score`], but reseeds the generator first so
+    /// the same settings and seed always give the same rhythm (shared links).
+    pub(crate) fn generate_new_score_with_seed(&mut self, seed: Option<u64>) {
+        self.editor.generator.rng = Rng::new(seed.unwrap_or_else(random_seed));
+        self.generate_new_score();
+    }
+
     /// Endless mode: once the playback cursor leaves a measure, regenerate
     /// that measure so it is new by the time the loop comes back to it.
     ///

@@ -8,6 +8,7 @@ pub mod ghost;
 pub mod grid;
 pub(crate) mod grouping;
 mod math;
+pub mod notation;
 pub mod score;
 pub mod swing;
 pub mod tempo;
@@ -26,7 +27,7 @@ pub use score::{Cursor, MeasureIdx, Score};
 use serde::{Deserialize, Serialize};
 use std::fmt::{Debug, Display, Formatter};
 use std::vec;
-pub use time_signature::TimeSignature;
+pub use time_signature::{ParseTimeSignatureError, TimeSignature};
 pub use tuplet::{TupletAnchor, TupletGroupId, TupletRegistry};
 
 /// Logical Beat-Index within a measure (0-based)

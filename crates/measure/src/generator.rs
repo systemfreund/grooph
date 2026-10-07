@@ -42,6 +42,9 @@ use serde::{Deserialize, Serialize};
 /// Highest supported complexity level.
 pub const MAX_COMPLEXITY: u8 = 5;
 
+/// Most bars the generator offers.
+pub const MAX_BARS: usize = 8;
+
 /// Finest grid the generator may use.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Subdivision {

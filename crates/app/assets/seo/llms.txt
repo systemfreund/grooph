@@ -2,7 +2,34 @@
 
 > grooph (https://grooph.app) is a free browser metronome and rhythm trainer. Besides a plain click at any tempo and time signature, it plays written rhythms in standard notation, generates random rhythms for sight-reading practice, and can score your timing via a MIDI drum pad or keyboard. It runs in the browser (WebAssembly); no account or installation is needed.
 
-The app draws its whole interface into a single canvas, so the page has no readable text or form controls. Agents cannot operate it through the DOM; point people to https://grooph.app and describe the steps below instead. There are no URL parameters yet for opening a specific rhythm or tempo.
+The app draws its whole interface into a single canvas, so the page has no readable text or form controls and cannot be operated through the DOM. Instead, build a link: URL parameters open grooph with a specific rhythm, a generated exercise or a metronome setting (see below).
+
+## Links
+
+Query parameters on https://grooph.app/ (all optional, unknown ones are ignored):
+
+- `bpm`: tempo, 20-300.
+- `r`: a rhythm in the text notation below. Spaces may be written as `+`.
+- `ts`: time signature, e.g. `3/4` or `7/8` (1-17 beats over 4, 8 or 16). With `r` it is the default meter; on its own it opens a one-measure metronome in that meter.
+- Generator (a random sight-reading rhythm): `sub` = `8`, `16`, `3` (triplets) or `mix`; `lvl` = complexity 1-5; `bars` = 1-8; `space` = amount of rests 0-1; `seed` = any whole number. The same parameters and seed always give the same rhythm; without a seed every visit draws a new one. Only x/4 time signatures. Do not combine with `r`.
+
+Examples:
+
+- Metronome, 7/8 at 140 BPM: https://grooph.app/?bpm=140&ts=7/8
+- Written rhythm with a triplet: https://grooph.app/?bpm=90&r=4/4+q+e+e+t8+t8+t8+r:q+|+q.+e+q+q
+- Sixteenth-note sight-reading exercise, level 3, 4 bars: https://grooph.app/?bpm=80&sub=16&lvl=3&bars=4&seed=42
+
+If the user has unsaved changes, grooph asks before replacing them. Invalid links show an error message that names the problem.
+
+## Rhythm notation
+
+- Tokens are separated by spaces; `|` separates measures (a trailing `|` is fine).
+- Durations: `q` quarter, `e` eighth, `s` sixteenth, `th` thirty-second; dotted `q.` `e.` `s.`.
+- Tuplets (write every note of the group): `t4` `t8` `t16` `t32` triplets (3 in the time of 2), `qt16` quintuplet sixteenths (5:4), `st8` `st16` sextuplets (6:4), `spt16` septuplet sixteenths (7:4), `nt16` nonuplet sixteenths (9:8).
+- Rest: prefix `r:` (e.g. `r:q`, `r:t8`). Accent: prefix `>` (e.g. `>e`).
+- A time signature such as `3/4` may start a measure; it applies until the next one. Default is 4/4.
+- Each measure must add up exactly to its time signature; there are no half or whole notes, use quarters instead.
+- In 4/4: `q q e e q` is quarter, quarter, two eighths, quarter. `s s s s q t8 t8 t8 r:q` is four sixteenths, a quarter, an eighth-note triplet and a quarter rest.
 
 ## Features
 
@@ -17,6 +44,7 @@ The app draws its whole interface into a single canvas, so the page has no reada
 ## How to use
 
 - Play/pause: Space key or the play button. Esc switches between edit and playback mode.
+- Share: the library (folder) panel has a "Copy link" button that copies a link to the current rhythm and tempo.
 - Generator: open the dice (🎲) menu, choose subdivision, complexity, bars and rests; every change creates a new rhythm.
 - Editor: pick a note, rest or tuplet from the palette and click a position in the measure; double-click toggles note/rest.
 

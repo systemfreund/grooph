@@ -19,7 +19,7 @@ impl Grooph {
                             egui::ComboBox::from_id_salt("beats")
                                 .selected_text(format!("{}", *beats))
                                 .show_ui(ui, |ui| {
-                                    for v in 1u8..=17u8 {
+                                    for v in 1..=TimeSignature::MAX_BEATS {
                                         ui.selectable_value(beats, v, format!("{}", v));
                                     }
                                 });
@@ -27,7 +27,7 @@ impl Grooph {
                             egui::ComboBox::from_id_salt("beat_unit")
                                 .selected_text(format!("{}", *unit))
                                 .show_ui(ui, |ui| {
-                                    for v in [4u8, 8, 16] {
+                                    for v in TimeSignature::BEAT_UNITS {
                                         ui.selectable_value(unit, v, format!("{}", v));
                                     }
                                 });

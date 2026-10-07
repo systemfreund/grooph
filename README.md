@@ -61,6 +61,24 @@ Important root files:
   swung note when it sounds. Pairs start at the downbeat, tuplet onsets and a
   trailing incomplete pair stay straight. Not stored with library patterns.
 
+## Text notation and shareable links
+
+- `grooph_measure::notation`: `parse_score` / `format_score` for a compact
+  text notation (`4/4 q e e >s s s s t8 t8 r:t8 | q. e r:q q`). Duration
+  codes match the helpers in `duration.rs`; `r:` = rest, `>` = accent, `|` =
+  bar line, a leading `N/D` sets the time signature. Parsing goes through
+  `set_beat`; each measure must be filled exactly, errors name the measure
+  and token. Formatting returns `None` for durations without a code.
+- `crates/app/src/link.rs`: query parameters `bpm`, `r`, `ts` and the
+  generator's `sub`, `lvl`, `bars`, `space`, `seed` (seeded `Rng`, so a link
+  reproduces the same exercise). Read once at startup
+  (`Grooph::open_link_from_url`), then removed from the address bar. A link
+  that replaces the score goes through `PendingLoad::Link` and the
+  unsaved-changes dialog. "Copy link" in the library panel builds a link via
+  `link::share_url`.
+- The link format is documented for AI agents in
+  `crates/app/assets/seo/llms.txt` (served at `/llms.txt`); keep it in sync.
+
 ## Generator / endless mode
 
 - Panel: `crates/app/src/generator_panel.rs` (🎲 in the main menu). Changing a

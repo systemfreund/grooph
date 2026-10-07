@@ -17,6 +17,11 @@ use crate::Score;
 use crate::grid::DEFAULT_GRID;
 use crate::swing::Swing;
 
+/// Slowest tempo the app offers, in BPM.
+pub const MIN_BPM: u32 = 20;
+/// Fastest tempo the app offers, in BPM.
+pub const MAX_BPM: u32 = 300;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ScoreTiming {
     bpm: u32,
