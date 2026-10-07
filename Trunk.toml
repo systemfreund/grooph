@@ -4,3 +4,9 @@ public_url = "/"
 filehash = true
 release = true
 minify = "always"
+
+# Write the guide pages, sitemap.xml and llms.txt into the build (crates/site).
+[[hooks]]
+stage = "post_build"
+command = "cargo"
+command_arguments = ["run", "--quiet", "--package", "grooph-site"]

@@ -1,0 +1,9 @@
+[package]
+name = "grooph-link"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+grooph-measure = { workspace = true }

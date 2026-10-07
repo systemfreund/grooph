@@ -1,5 +1,5 @@
 use crate::state::PendingLoad;
-use crate::{Grooph, Mode, link, platform};
+use crate::{Grooph, Mode, platform};
 use eframe::egui;
 use log::warn;
 
@@ -206,7 +206,7 @@ impl Grooph {
     /// Copy a link to the working score and tempo to the clipboard.
     fn copy_share_link(&mut self, ui: &egui::Ui) {
         let base = platform::share_base_url();
-        match link::share_url(&base, &self.editor.score, self.playback_ctl.bpm) {
+        match grooph_link::share_url(&base, &self.editor.score, self.playback_ctl.bpm) {
             Some(url) => {
                 ui.ctx().copy_text(url);
                 self.ui.link_copied_at = Some(ui.input(|i| i.time));

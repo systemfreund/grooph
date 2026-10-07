@@ -1,0 +1,155 @@
+:root {
+  --bg: #f7f7f7;
+  --surface: #ffffff;
+  --text: #2f2f2f;
+  --muted: #6b6b6b;
+  --line: #d9d9d9;
+  --accent: #1f6fb2;
+  --accent-bg: #dcefff;
+  --note: #3a3a3a;
+  --rest: #b5b5b5;
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #2b2b2b;
+    --surface: #363636;
+    --text: #e8e8e8;
+    --muted: #a9a9a9;
+    --line: #4d4d4d;
+    --accent: #8cc8ff;
+    --accent-bg: #2f4a63;
+    --note: #ececec;
+    --rest: #777777;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 17px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, Ubuntu, sans-serif;
+}
+
+a { color: var(--accent); }
+
+.top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 20px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.brand { font-weight: 700; font-size: 20px; color: var(--text); text-decoration: none; }
+.main-nav { display: flex; flex-wrap: wrap; gap: 4px 16px; flex: 1; }
+.main-nav a { color: var(--text); text-decoration: none; }
+.main-nav a:hover { color: var(--accent); }
+
+.cta, .button {
+  display: inline-block;
+  padding: 6px 14px;
+  border-radius: 6px;
+  background: var(--accent-bg);
+  color: var(--text);
+  text-decoration: none;
+  font-weight: 600;
+}
+.cta:hover, .button:hover { outline: 2px solid var(--accent); }
+
+main { max-width: 760px; margin: 0 auto; padding: 16px 16px 48px; }
+.crumbs { font-size: 14px; color: var(--muted); }
+.crumbs a { color: var(--muted); }
+h1 { font-size: 32px; line-height: 1.25; margin: 12px 0 16px; }
+h2 { font-size: 23px; margin-top: 36px; }
+h3 { font-size: 18px; margin-top: 24px; }
+
+table { border-collapse: collapse; width: 100%; font-size: 15px; }
+th, td { border-bottom: 1px solid var(--line); padding: 6px 8px; text-align: left; vertical-align: top; }
+code { font-size: 0.9em; }
+
+.open { margin: 12px 0; }
+
+.pages { list-style: none; padding: 0; }
+.pages li { margin: 10px 0; }
+.pages span { color: var(--muted); font-size: 15px; }
+
+/* Rhythm grid: one row per measure, cell widths follow the durations. */
+.rhythm {
+  margin: 20px 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+.measures { display: flex; flex-direction: column; gap: 10px; }
+.measure { display: flex; align-items: flex-end; gap: 8px; }
+.ts {
+  font-weight: 700;
+  line-height: 1.05;
+  text-align: center;
+  min-width: 1.4em;
+  padding-bottom: 2px;
+}
+.cells { display: flex; align-items: flex-end; flex: 1; min-width: 0; border-left: 2px solid var(--line); border-right: 2px solid var(--line); }
+.tuplet { display: flex; flex-direction: column; min-width: 0; }
+.tuplet .bracket {
+  font-size: 12px;
+  font-style: italic;
+  text-align: center;
+  border: 1px solid var(--muted);
+  border-bottom: none;
+  margin: 0 4px 2px;
+  height: 12px;
+  line-height: 10px;
+  color: var(--muted);
+}
+.tuplet .inner { display: flex; }
+.cell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 0;
+  padding: 0 2px;
+  border-left: 1px solid transparent;
+}
+.cell.beat { border-left-color: var(--line); }
+.cell i {
+  display: block;
+  width: 14px;
+  height: 14px;
+  margin: 4px 0;
+  border-radius: 50%;
+  background: var(--note);
+}
+.cell.rest i { width: 12px; height: 3px; margin: 10px 1px 9px; border-radius: 1px; background: var(--rest); }
+.cell.accent i { box-shadow: 0 0 0 3px var(--accent-bg), 0 0 0 4px var(--accent); }
+.cell b { font-weight: 500; font-size: 14px; white-space: nowrap; }
+.cell.rest b { color: var(--rest); font-weight: 400; }
+.cell.beat b { font-weight: 700; }
+.rhythm figcaption { margin-top: 10px; font-size: 15px; color: var(--muted); }
+.play { font-weight: 600; white-space: nowrap; }
+
+footer {
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+  padding: 16px;
+  font-size: 15px;
+  color: var(--muted);
+}
+footer .groups { display: flex; flex-wrap: wrap; gap: 8px 40px; max-width: 760px; margin: 0 auto; }
+footer h2 { font-size: 15px; margin: 8px 0 4px; color: var(--text); }
+footer ul { list-style: none; padding: 0; margin: 0; }
+footer p { max-width: 760px; margin: 16px auto 0; }
+
+@media (max-width: 640px) {
+  .main-nav { order: 3; flex-basis: 100%; }
+  h1 { font-size: 27px; }
+  .rhythm { padding: 10px 8px; }
+  .cell b { font-size: 12px; }
+}

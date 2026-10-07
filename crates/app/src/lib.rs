@@ -5,7 +5,6 @@ mod help;
 mod keyboard_input;
 mod library;
 mod library_panel;
-mod link;
 mod main_menu;
 mod measure_panel;
 mod midi_input_widget;
@@ -27,7 +26,6 @@ use grooph_measure::{BeatIdx, Cursor, Measure, Score, TimeSignature};
 use crate::accuracy::AccuracyState;
 use crate::generator::GeneratorState;
 use crate::library::PatternLibrary;
-use crate::link::{LinkContent, SharedLink};
 use crate::platform::{PlatformRuntime, VisibilityEvent};
 use crate::state::{
     AudioConfig, CountInState, EditorState, LayoutSettings, MidiState, PendingLoad,
@@ -41,6 +39,7 @@ use eframe::epaint::text::{FontInsert, InsertFontFamily};
 use eframe::epaint::{FontFamily, FontId};
 use eframe::{App, CreationContext, egui};
 use grooph_audio::{AudioSettings, PlaybackOptions, PlayerState};
+use grooph_link::{LinkContent, SharedLink};
 use grooph_measure::counting::{
     CountConfig, CountLayer, CountScope, LabelPattern, LabelToken, Subdiv,
 };
@@ -601,14 +600,9 @@ impl Grooph {
 
     pub(crate) fn apply_link(&mut self, link: SharedLink) {
         match link.content {
-            Some(LinkContent::Score(score)) => {
-                self.stop_transport();
-                self.with_undo_snapshot(|app| {
-                    app.editor.score = score;
-                    app.editor.cursor = Cursor::start();
-                    true
-                });
-                self.editor.active_pattern_id = None;
+            Some(LinkContent::Score(score)) => self.replace_score_from_link(score),
+            Some(LinkContent::Metronome(ts)) => {
+                self.replace_score_from_link(Score::single(Measure::new_init(ts, BeatKind::Note)))
             }
             Some(LinkContent::Generator { settings, seed }) => {
                 self.stop_transport();
@@ -625,9 +619,22 @@ impl Grooph {
             self.playback_ctl.bpm = bpm;
             self.handle_bpm_change();
         }
+        if let Some(swing) = link.swing {
+            self.playback_ctl.audio_cfg.swing = swing;
+        }
         self.playback_ctl.playback.reset();
         // The content is reproducible from the link, so it is not "unsaved".
         self.editor.dirty = false;
+    }
+
+    fn replace_score_from_link(&mut self, score: Score) {
+        self.stop_transport();
+        self.with_undo_snapshot(|app| {
+            app.editor.score = score;
+            app.editor.cursor = Cursor::start();
+            true
+        });
+        self.editor.active_pattern_id = None;
     }
 
     /// Run a pending load after the unsaved-changes dialog.
@@ -984,7 +991,7 @@ impl Grooph {
         let Some(query) = platform::link_query() else {
             return;
         };
-        match link::parse_query(&query) {
+        match grooph_link::parse_query(&query) {
             Ok(None) => return,
             Ok(Some(link)) => self.open_link(link),
             Err(err) => {

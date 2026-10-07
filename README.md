@@ -15,6 +15,8 @@ files, and invariants so changes can be made with confidence.
 - `crates/render`: Draws the layout with egui (notes, beams, tuplets, cursor).
 - `crates/audio`: Metronome synth (rodio), scheduling based on the measure.
 - `crates/midi`: MIDI input abstraction (midir).
+- `crates/link`: Shareable links (URL query parameters <-> score/generator/metronome).
+- `crates/site`: Static guide pages for grooph.app, generated from Markdown at build time.
 
 Important root files:
 - `Cargo.toml` (workspace + dependencies, edition 2024)
@@ -69,15 +71,32 @@ Important root files:
   bar line, a leading `N/D` sets the time signature. Parsing goes through
   `set_beat`; each measure must be filled exactly, errors name the measure
   and token. Formatting returns `None` for durations without a code.
-- `crates/app/src/link.rs`: query parameters `bpm`, `r`, `ts` and the
-  generator's `sub`, `lvl`, `bars`, `space`, `seed` (seeded `Rng`, so a link
-  reproduces the same exercise). Read once at startup
-  (`Grooph::open_link_from_url`), then removed from the address bar. A link
+- `grooph_link` (`crates/link`): query parameters `bpm`, `r`, `ts`, `swing`,
+  `su` and the generator's `sub`, `lvl`, `bars`, `space`, `seed` (seeded
+  `Rng`, so a link reproduces the same exercise). `parse_query` reads them,
+  `SharedLink::to_url` writes them. The app reads the link once at startup
+  (`Grooph::open_link_from_url`), then removes it from the address bar. A link
   that replaces the score goes through `PendingLoad::Link` and the
   unsaved-changes dialog. "Copy link" in the library panel builds a link via
-  `link::share_url`.
+  `grooph_link::share_url`.
 - The link format is documented for AI agents in
-  `crates/app/assets/seo/llms.txt` (served at `/llms.txt`); keep it in sync.
+  `crates/app/assets/seo/llms.txt`; keep it in sync.
+
+## Guide pages (crates/site)
+
+- Markdown under `crates/site/content/` becomes static pages on grooph.app
+  (`content/learn/x.md` -> `/learn/x/`). Front matter: `title`,
+  `description`, `section` (Metronome, Sight-reading, Learn, Features),
+  optional `heading` and `order`.
+- Fenced blocks: ` ```rhythm bpm=90 swing=66 | Caption ` (text notation,
+  rendered as a grid with counting syllables and a play link), ` ```open |
+  Label ` (link query, rendered as a button), ` ```pages ` (list of a
+  section). `## FAQ` with `### Question` headings becomes FAQPage data.
+- Runs as a Trunk `post_build` hook (see `Trunk.toml`), so `trunk build`
+  writes the pages, `site.css`, `sitemap.xml` and `llms.txt` (base file plus
+  a list of guides) into `dist/`. By hand: `cargo run -p grooph-site -- dist`.
+- `cargo test -p grooph-site` builds all content and checks every rhythm and
+  every link (app links through `grooph_link::parse_query`).
 
 ## Generator / endless mode
 

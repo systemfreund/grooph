@@ -36,8 +36,9 @@
     <link data-trunk rel="icon" href="assets/favicon.ico">
     <link data-trunk rel="copy-file" href="assets/preview.png" data-target-path="assets"/>
     <link data-trunk rel="copy-file" href="assets/seo/robots.txt"/>
-    <link data-trunk rel="copy-file" href="assets/seo/sitemap.xml"/>
-    <link data-trunk rel="copy-file" href="assets/seo/llms.txt"/>
+    <!-- Unhashed copy for the guide pages and browsers that ask for /favicon.ico. -->
+    <link data-trunk rel="copy-file" href="assets/favicon.ico"/>
+    <!-- sitemap.xml, llms.txt and the guide pages are written by crates/site (Trunk post_build hook). -->
     <!--    <link data-trunk rel="copy-file" href="assets/icon-1024.png" data-target-path="assets"/>-->
     <!--    <link data-trunk rel="copy-file" href="assets/icon-256.png" data-target-path="assets"/>-->
     <!--    <link data-trunk rel="copy-file" href="assets/icon_ios_touch_192.png" data-target-path="assets"/>-->
@@ -173,6 +174,11 @@
         <p style="font-size:16px">grooph is a free browser metronome and rhythm trainer: play written rhythms with
             triplets and other tuplets, generate random rhythms for sight-reading practice, add swing and a count-in,
             and check your timing with a MIDI drum pad or keyboard.</p>
+        <p style="font-size:16px">Guides:
+            <a href="/metronome/">Online metronome</a> ·
+            <a href="/rhythm-generator/">Rhythm generator</a> ·
+            <a href="/sight-reading/">Sight-reading exercises</a> ·
+            <a href="/learn/">Learn to count rhythms</a></p>
     </noscript>
     <p style="font-size:16px">
         Loading…
