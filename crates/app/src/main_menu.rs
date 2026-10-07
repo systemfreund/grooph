@@ -1,11 +1,11 @@
 use crate::Grooph;
-use crate::link::{MAX_BPM, MIN_BPM};
 use crate::{Mode, TransportState};
 use eframe::egui;
 use eframe::egui::scroll_area::{ScrollBarVisibility, ScrollSource};
 use eframe::egui::{Align, Button, Direction, Frame, Layout, Margin};
 use egui::Widget;
 use grooph_measure::swing::{MAX_SWING_PERCENT, MIN_SWING_PERCENT, SwingUnit};
+use grooph_measure::tempo::{MAX_BPM, MIN_BPM};
 
 impl Grooph {
     pub(super) fn main_menu(&mut self, ui: &mut egui::Ui) {

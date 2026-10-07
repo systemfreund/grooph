@@ -15,13 +15,10 @@
 //! Any of `sub`, `lvl`, `bars`, `space` or `seed` selects the generator;
 //! unknown parameters are ignored.
 
-use grooph_measure::generator::{GeneratorSettings, MAX_COMPLEXITY, Subdivision};
+use grooph_measure::generator::{GeneratorSettings, MAX_BARS, MAX_COMPLEXITY, Subdivision};
 use grooph_measure::notation::{format_score, parse_score};
+use grooph_measure::tempo::{MAX_BPM, MIN_BPM};
 use grooph_measure::{BeatKind, Measure, Score, TimeSignature};
-
-pub(crate) const MIN_BPM: u32 = 20;
-pub(crate) const MAX_BPM: u32 = 300;
-pub(crate) const MAX_BARS: usize = 8;
 
 /// What a link opens. `bpm` and `content` are both optional; a link with only
 /// `bpm` just sets the tempo.
@@ -57,7 +54,13 @@ pub(crate) fn parse_query(query: &str) -> Result<Option<SharedLink>, String> {
         match key {
             "bpm" => bpm = Some(parse_bpm(&value)?),
             "r" => rhythm = Some(value),
-            "ts" => ts = Some(parse_time_signature(&value)?),
+            "ts" => {
+                ts = Some(
+                    value
+                        .parse::<TimeSignature>()
+                        .map_err(|e| format!("time signature '{value}': {e}"))?,
+                )
+            }
             "sub" => sub = Some(parse_subdivision(&value)?),
             "lvl" => lvl = Some(parse_in_range("lvl", &value, 1, MAX_COMPLEXITY)?),
             "bars" => bars = Some(parse_in_range("bars", &value, 1, MAX_BARS)?),
@@ -77,7 +80,7 @@ pub(crate) fn parse_query(query: &str) -> Result<Option<SharedLink>, String> {
         }
         // A leading time signature in `r` overrides `ts`.
         let text = match ts {
-            Some(ts) => format!("{}/{} {text}", ts.beats, ts.beat_unit),
+            Some(ts) => format!("{ts} {text}"),
             None => text,
         };
         Some(LinkContent::Score(parse_score(&text).map_err(|e| format!("rhythm: {e}"))?))
@@ -115,9 +118,7 @@ pub(crate) fn share_url(base: &str, score: &Score, bpm: u32) -> Option<String> {
     Some(format!("{base}?bpm={bpm}&r={}", percent_encode(&rhythm)))
 }
 
-fn parse_bpm(value: &str) -> Result<u32, String> {
-    parse_in_range("bpm", value, MIN_BPM, MAX_BPM)
-}
+fn parse_bpm(value: &str) -> Result<u32, String> { parse_in_range("bpm", value, MIN_BPM, MAX_BPM) }
 
 fn parse_in_range<T>(name: &str, value: &str, min: T, max: T) -> Result<T, String>
 where
@@ -126,17 +127,6 @@ where
     match value.parse::<T>() {
         Ok(v) if v >= min && v <= max => Ok(v),
         _ => Err(format!("{name} must be a number from {min} to {max}, got '{value}'")),
-    }
-}
-
-fn parse_time_signature(value: &str) -> Result<TimeSignature, String> {
-    let invalid = || format!("unsupported time signature '{value}' (1-17 beats over 4, 8 or 16)");
-    let (beats, unit) = value.split_once('/').ok_or_else(invalid)?;
-    match (beats.parse::<u8>(), unit.parse::<u8>()) {
-        (Ok(beats @ 1..=17), Ok(beat_unit @ (4 | 8 | 16))) => {
-            Ok(TimeSignature { beats, beat_unit })
-        }
-        _ => Err(invalid()),
     }
 }
 
@@ -204,9 +194,7 @@ mod tests {
     use grooph_measure::duration::{e, q};
     use grooph_measure::{Beat, generator::Subdivision};
 
-    fn parse(query: &str) -> SharedLink {
-        parse_query(query).unwrap().unwrap()
-    }
+    fn parse(query: &str) -> SharedLink { parse_query(query).unwrap().unwrap() }
 
     #[test]
     fn query_without_link_parameters_is_ignored() {

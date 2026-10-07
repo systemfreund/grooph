@@ -1,12 +1,11 @@
 use crate::Grooph;
 use crate::Mode;
 use crate::generator::ENDLESS_MIN_BARS;
-use crate::link::MAX_BARS;
 use crate::tool_palette::notation_button;
 use eframe::egui;
 use grooph_measure::TimeSignature;
 use grooph_measure::generator::{
-    GroupingSet, MAX_COMPLEXITY, Subdivision, complexity_groupings, groupings,
+    GroupingSet, MAX_BARS, MAX_COMPLEXITY, Subdivision, complexity_groupings, groupings,
 };
 
 const MAX_BEATS: u8 = 7;

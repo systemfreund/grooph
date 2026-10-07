@@ -24,7 +24,7 @@ use crate::BeatKind::{Note, Rest};
 use crate::duration::NoteValue::{Eighth, Quarter, Sixteenth, ThirtySecond};
 use crate::duration::{Duration, NoteValue, TupletSpec};
 use crate::grid::DEFAULT_GRID;
-use crate::{Beat, Measure, MeasureError, Score, TimeSignature};
+use crate::{Beat, Measure, MeasureError, ParseTimeSignatureError, Score, TimeSignature};
 use std::fmt::{Display, Formatter};
 
 /// Upper bound for the number of measures in a parsed score.
@@ -39,7 +39,7 @@ pub enum NotationError {
     /// A token that is not a duration, rest, accent or time signature.
     UnknownToken { measure: usize, token: String },
     /// A time signature that is malformed or not supported.
-    InvalidTimeSignature { measure: usize, token: String },
+    InvalidTimeSignature { measure: usize, token: String, reason: ParseTimeSignatureError },
     /// A time signature in the middle of a measure.
     MisplacedTimeSignature { measure: usize, token: String },
     /// `>` on a rest.
@@ -65,10 +65,9 @@ impl Display for NotationError {
                 f,
                 "measure {measure}: unknown token '{token}' (expected e.g. q, e, s, th, q., t8, qt16, r:q, >e or 4/4)"
             ),
-            InvalidTimeSignature { measure, token } => write!(
-                f,
-                "measure {measure}: unsupported time signature '{token}' (1-17 beats over 4, 8 or 16)"
-            ),
+            InvalidTimeSignature { measure, token, reason } => {
+                write!(f, "measure {measure}: time signature '{token}': {reason}")
+            }
             MisplacedTimeSignature { measure, token } => write!(
                 f,
                 "measure {measure}: time signature '{token}' must come before the first beat of the measure"
@@ -96,9 +95,7 @@ impl std::error::Error for NotationError {}
 /// Durations with a notation code, in the order of [`crate::duration::COMMON_DURATIONS`].
 const CODES: [(&str, Duration); 16] = {
     use crate::duration::{e, nt16, q, qt16, s, spt16, st8, st16, t8, t16, t32, th};
-    const fn dotted(base: NoteValue) -> Duration {
-        Duration::Dotted { base, dots: 1 }
-    }
+    const fn dotted(base: NoteValue) -> Duration { Duration::Dotted { base, dots: 1 } }
     [
         ("q", q()),
         ("e", e()),
@@ -125,17 +122,6 @@ fn duration_from_code(code: &str) -> Option<Duration> {
 
 fn code_of(duration: &Duration) -> Option<&'static str> {
     CODES.iter().find(|(_, d)| d == duration).map(|(c, _)| *c)
-}
-
-fn parse_time_signature(token: &str) -> Option<Result<TimeSignature, ()>> {
-    let (beats, unit) = token.split_once('/')?;
-    let parsed = match (beats.parse::<u8>(), unit.parse::<u8>()) {
-        (Ok(beats @ 1..=17), Ok(beat_unit @ (4 | 8 | 16))) => {
-            Ok(TimeSignature { beats, beat_unit })
-        }
-        _ => Err(()),
-    };
-    Some(parsed)
 }
 
 fn parse_beat(token: &str, measure: usize) -> Result<Beat, NotationError> {
@@ -216,13 +202,15 @@ pub fn parse_score(input: &str) -> Result<Score, NotationError> {
         let measure = i + 1;
         let mut beats: Vec<(&str, Beat)> = Vec::new();
         for token in chunk.split_whitespace() {
-            if let Some(parsed) = parse_time_signature(token) {
-                let Ok(new_ts) = parsed else {
-                    return Err(NotationError::InvalidTimeSignature {
+            // Duration codes never contain '/', so any token with one is a meter.
+            if token.contains('/') {
+                let new_ts = token.parse::<TimeSignature>().map_err(|reason| {
+                    NotationError::InvalidTimeSignature {
                         measure,
                         token: token.to_string(),
-                    });
-                };
+                        reason,
+                    }
+                })?;
                 if !beats.is_empty() {
                     return Err(NotationError::MisplacedTimeSignature {
                         measure,
@@ -255,7 +243,7 @@ pub fn format_score(score: &Score) -> Option<String> {
         }
         let ts = m.time_signature();
         if prev_ts != Some(ts) {
-            out.push_str(&format!("{}/{} ", ts.beats, ts.beat_unit));
+            out.push_str(&format!("{ts} "));
             prev_ts = Some(ts);
         }
         let tokens: Option<Vec<String>> = m
@@ -283,6 +271,20 @@ mod tests {
 
     fn beats_of(score: &Score, measure: usize) -> Vec<Beat> {
         score.measures[measure].beats().clone()
+    }
+
+    /// Which beats share a tuplet group, independent of the group ids: each
+    /// beat maps to the index of the first beat in its group (`None` outside
+    /// tuplets).
+    fn group_partition(m: &Measure) -> Vec<Option<usize>> {
+        let beats = m.beats();
+        beats
+            .iter()
+            .map(|b| {
+                let id = b.tuplet_group_id?;
+                beats.iter().position(|other| other.tuplet_group_id == Some(id))
+            })
+            .collect()
     }
 
     #[test]
@@ -424,9 +426,12 @@ mod tests {
                 let score = generate_score(&settings, &mut Rng::new(complexity as u64)).unwrap();
                 let text = format_score(&score).unwrap();
                 let parsed = parse_score(&text).unwrap();
+                assert_eq!(score.len(), parsed.len(), "{text}");
                 for (a, b) in score.measures.iter().zip(&parsed.measures) {
                     assert_eq!(a.beats(), b.beats(), "{text}");
                     assert_eq!(a.time_signature(), b.time_signature());
+                    // `Beat`'s `PartialEq` ignores tuplet groups; compare them too.
+                    assert_eq!(group_partition(a), group_partition(b), "{text}");
                 }
             }
         }
