@@ -1,0 +1,5 @@
+# grooph.app – crawlers and AI agents are welcome.
+User-agent: *
+Allow: /
+
+Sitemap: https://grooph.app/sitemap.xml
