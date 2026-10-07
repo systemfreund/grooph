@@ -1,39 +1,43 @@
 <!DOCTYPE html>
 <html lang="en">
-<meta http-equiv="Content-Type" content="text/html; charset=utf-8"/>
-
-<!-- Disable zooming: -->
-<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-
 <head>
-    <title>grooph.app – Flexible Web Metronome</title>
+    <meta charset="utf-8"/>
+    <!-- Disable zooming: -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
 
-    <meta name="description" content="grooph is a flexible web metronome. Set tempo (BPM) and time signature, then practice with a clear click and visual pulse — right in your browser.">
-    <meta name="keywords" content="metronome, web metronome, click track, bpm, practice, drums, guitar, piano, time signature">
+    <title>grooph – Metronome &amp; Rhythm Trainer with Sight-Reading Generator</title>
+
+    <meta name="description" content="Free browser metronome and rhythm trainer: play written rhythms with triplets and other tuplets, generate random sight-reading exercises, add swing and count-in, and check your timing with a MIDI pad.">
     <meta name="robots" content="index,follow">
-    <meta name="language" content="en">
     <meta name="author" content="grooph.app">
+    <link rel="canonical" href="https://grooph.app/">
 
     <meta property="og:type" content="website">
-    <meta property="og:title" content="grooph – Flexible Metronome">
-    <meta property="og:description" content="Practice with a precise click and visual pulse. Set BPM and time signature in your browser.">
+    <meta property="og:url" content="https://grooph.app/">
+    <meta property="og:title" content="grooph – Metronome &amp; Rhythm Trainer">
+    <meta property="og:description" content="Play written rhythms, generate sight-reading exercises, add swing and check your timing – free in the browser.">
     <meta property="og:locale" content="en_US">
     <meta property="og:site_name" content="grooph">
-    <meta property="og:image" content="assets/preview.png">
-    <meta property="og:image:alt" content="grooph web metronome preview">
+    <meta property="og:image" content="https://grooph.app/assets/preview.png">
+    <meta property="og:image:width" content="579">
+    <meta property="og:image:height" content="350">
+    <meta property="og:image:alt" content="grooph showing a rhythm in standard notation with playback controls">
     <meta property="og:image:type" content="image/png">
 
     <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:title" content="grooph – Flexible Metronome">
-    <meta name="twitter:description" content="Flexible browser metronome with BPM and time signature controls.">
-    <meta name="twitter:image" content="assets/preview.png">
-    <meta name="twitter:image:alt" content="grooph web metronome preview">
+    <meta name="twitter:title" content="grooph – Metronome &amp; Rhythm Trainer">
+    <meta name="twitter:description" content="Play written rhythms, generate sight-reading exercises, add swing and check your timing – free in the browser.">
+    <meta name="twitter:image" content="https://grooph.app/assets/preview.png">
+    <meta name="twitter:image:alt" content="grooph showing a rhythm in standard notation with playback controls">
 
     <link data-trunk rel="rust" data-bin="grooph-app" data-package="grooph-app" data-wasm-opt="4"/>
     <base data-trunk-public-url/>
 
     <link data-trunk rel="icon" href="assets/favicon.ico">
     <link data-trunk rel="copy-file" href="assets/preview.png" data-target-path="assets"/>
+    <link data-trunk rel="copy-file" href="assets/seo/robots.txt"/>
+    <link data-trunk rel="copy-file" href="assets/seo/sitemap.xml"/>
+    <link data-trunk rel="copy-file" href="assets/seo/llms.txt"/>
     <!--    <link data-trunk rel="copy-file" href="assets/icon-1024.png" data-target-path="assets"/>-->
     <!--    <link data-trunk rel="copy-file" href="assets/icon-256.png" data-target-path="assets"/>-->
     <!--    <link data-trunk rel="copy-file" href="assets/icon_ios_touch_192.png" data-target-path="assets"/>-->
@@ -49,11 +53,26 @@
       "@context": "https://schema.org",
       "@type": "WebApplication",
       "name": "grooph",
+      "url": "https://grooph.app/",
       "applicationCategory": "MusicApplication",
       "operatingSystem": "Web",
+      "browserRequirements": "Requires JavaScript and WebAssembly",
       "inLanguage": "en",
-      "description": "A flexible web metronome. Set BPM and time signature and practice with a clear audio click and visual pulse.",
-      "url": "https://grooph.app"
+      "isAccessibleForFree": true,
+      "offers": { "@type": "Offer", "price": "0", "priceCurrency": "EUR" },
+      "description": "Free browser metronome and rhythm trainer. Play written rhythms in standard notation, generate random rhythms for sight-reading practice, add swing and a count-in, and check your timing with a MIDI device.",
+      "image": "https://grooph.app/assets/preview.png",
+      "screenshot": "https://grooph.app/assets/preview.png",
+      "featureList": [
+        "Metronome with adjustable tempo (BPM) and time signatures such as 3/4, 4/4, 5/8, 7/8 and 12/8",
+        "Rhythm editor in standard notation with dotted notes, accents and tuplets (triplets, quintuplets, sextuplets, septuplets, nonuplets)",
+        "Random rhythm generator for sight-reading with five complexity levels and custom groupings",
+        "Endless mode that keeps generating new bars",
+        "Swing feel for eighths or sixteenths",
+        "Count-in bar, counting overlay and ghost notes",
+        "Timing accuracy feedback via MIDI input",
+        "Pattern library to save rhythms with their tempo"
+      ]
     }
     </script>
 
@@ -149,7 +168,12 @@
 <canvas id="grooph-canvas"></canvas>
 
 <div class="centered" id="loading_text">
-    <noscript>You need javascript to use this website</noscript>
+    <noscript>
+        <p>You need JavaScript to use this website.</p>
+        <p style="font-size:16px">grooph is a free browser metronome and rhythm trainer: play written rhythms with
+            triplets and other tuplets, generate random rhythms for sight-reading practice, add swing and a count-in,
+            and check your timing with a MIDI drum pad or keyboard.</p>
+    </noscript>
     <p style="font-size:16px">
         Loading…
     </p>

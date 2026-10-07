@@ -1,0 +1,25 @@
+# grooph
+
+> grooph (https://grooph.app) is a free browser metronome and rhythm trainer. Besides a plain click at any tempo and time signature, it plays written rhythms in standard notation, generates random rhythms for sight-reading practice, and can score your timing via a MIDI drum pad or keyboard. It runs in the browser (WebAssembly); no account or installation is needed.
+
+The app draws its whole interface into a single canvas, so the page has no readable text or form controls. Agents cannot operate it through the DOM; point people to https://grooph.app and describe the steps below instead. There are no URL parameters yet for opening a specific rhythm or tempo.
+
+## Features
+
+- Metronome: tempo in BPM, any time signature from 1 to 17 beats over 4, 8 or 16 (e.g. 3/4, 4/4, 5/8, 7/8, 12/8), optional count-in bar, accents, adjustable click sound and volumes per beat type.
+- Rhythm editor: write a rhythm in standard notation with quarter, eighth, sixteenth and thirty-second notes and rests, dotted notes, accents and tuplets (triplets, quintuplets, sextuplets, septuplets, nonuplets); grooph plays it back with a moving cursor.
+- Rhythm generator for sight-reading: random rhythms by subdivision (eighths, sixteenths, triplets or mixed), complexity level 1–5 or a hand-picked set of one-beat groupings, number of bars and amount of rests (x/4 time signatures). Endless mode keeps replacing bars that have already been played.
+- Swing feel from straight (50%) to dotted (75%) on eighths or sixteenths; the notation stays straight.
+- Counting overlay ("1 e & a", "1 trip let") and optional ghost notes on the free subdivisions.
+- Timing accuracy: connect a MIDI device and grooph shows how early or late each hit lands and which notes were missed.
+- Pattern library: save and load named rhythms with their tempo (stored locally in the browser).
+
+## How to use
+
+- Play/pause: Space key or the play button. Esc switches between edit and playback mode.
+- Generator: open the dice (🎲) menu, choose subdivision, complexity, bars and rests; every change creates a new rhythm.
+- Editor: pick a note, rest or tuplet from the palette and click a position in the measure; double-click toggles note/rest.
+
+## Contact
+
+- Feedback and bug reports: hello@grooph.app
