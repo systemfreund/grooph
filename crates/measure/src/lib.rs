@@ -8,6 +8,7 @@ pub mod ghost;
 pub mod grid;
 pub(crate) mod grouping;
 mod math;
+pub mod notation;
 pub mod score;
 pub mod swing;
 pub mod tempo;

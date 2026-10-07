@@ -1,6 +1,10 @@
-use crate::Grooph;
-use crate::Mode;
+use crate::state::PendingLoad;
+use crate::{Grooph, Mode, link, platform};
 use eframe::egui;
+use log::warn;
+
+/// How long "Link copied" stays visible.
+const LINK_COPIED_NOTICE_S: f64 = 2.0;
 
 impl Grooph {
     pub(super) fn library_panel(&mut self, ui: &mut egui::Ui) {
@@ -54,6 +58,25 @@ impl Grooph {
                     if ui.button("➕ Save as").clicked() || submit {
                         let name = std::mem::take(&mut self.ui.save_name_buffer);
                         self.save_pattern_as(name);
+                    }
+                });
+
+                ui.horizontal(|ui| {
+                    if ui
+                        .button("Copy link")
+                        .on_hover_text("Copy a link that opens this rhythm at the current tempo")
+                        .clicked()
+                    {
+                        self.copy_share_link(ui);
+                    }
+                    let now = ui.input(|i| i.time);
+                    if let Some(at) = self.ui.link_copied_at {
+                        if now - at < LINK_COPIED_NOTICE_S {
+                            ui.weak("Link copied");
+                            ui.ctx().request_repaint_after_secs(0.5);
+                        } else {
+                            self.ui.link_copied_at = None;
+                        }
                     }
                 });
 
@@ -115,11 +138,19 @@ impl Grooph {
         );
     }
 
-    /// Modal shown when loading a pattern would discard unsaved changes. Offers
-    /// to save first, discard, or cancel. Reads/clears `ui.pending_load`.
+    /// Modal shown when loading a pattern or opening a shared link would
+    /// discard unsaved changes. Offers to save first, discard, or cancel.
+    /// Reads/clears `ui.pending_load`.
     pub(super) fn load_confirm_dialog(&mut self, ui: &mut egui::Ui) {
-        let Some(target_id) = self.ui.pending_load else {
-            return;
+        let (message, action) = match &self.ui.pending_load {
+            None => return,
+            Some(PendingLoad::Pattern(_)) => {
+                ("The current measure has unsaved changes. Save before loading?", "Load")
+            }
+            Some(PendingLoad::Link(_)) => (
+                "The link replaces the current measure, which has unsaved changes. Save first?",
+                "Open link",
+            ),
         };
 
         egui::Window::new("Unsaved changes")
@@ -127,26 +158,60 @@ impl Grooph {
             .resizable(false)
             .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
             .show(ui.ctx(), |ui| {
-                ui.label("The current measure has unsaved changes. Save before loading?");
+                ui.label(message);
                 ui.add_space(8.0);
                 ui.separator();
                 ui.add_space(8.0);
 
                 ui.horizontal(|ui| {
-                    if ui.button("Save & Load").clicked() {
+                    if ui.button(format!("Save & {action}")).clicked() {
                         let name = std::mem::take(&mut self.ui.save_name_buffer);
                         self.save_active_pattern(name);
-                        self.ui.pending_load = None;
-                        self.load_pattern(target_id);
+                        if let Some(pending) = self.ui.pending_load.take() {
+                            self.finish_pending_load(pending);
+                        }
                     }
-                    if ui.button("Discard & Load").clicked() {
-                        self.ui.pending_load = None;
-                        self.load_pattern(target_id);
+                    if ui.button(format!("Discard & {action}")).clicked()
+                        && let Some(pending) = self.ui.pending_load.take()
+                    {
+                        self.finish_pending_load(pending);
                     }
                     if ui.button("Cancel").clicked() {
                         self.ui.pending_load = None;
                     }
                 });
             });
+    }
+
+    /// Shown when the app was opened with a link it cannot read.
+    pub(super) fn link_error_dialog(&mut self, ui: &mut egui::Ui) {
+        let Some(err) = &self.ui.link_error else {
+            return;
+        };
+        let mut close = false;
+        egui::Window::new("Link could not be opened")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+            .show(ui.ctx(), |ui| {
+                ui.label(err);
+                ui.add_space(8.0);
+                close = ui.button("OK").clicked();
+            });
+        if close {
+            self.ui.link_error = None;
+        }
+    }
+
+    /// Copy a link to the working score and tempo to the clipboard.
+    fn copy_share_link(&mut self, ui: &egui::Ui) {
+        let base = platform::share_base_url();
+        match link::share_url(&base, &self.editor.score, self.playback_ctl.bpm) {
+            Some(url) => {
+                ui.ctx().copy_text(url);
+                self.ui.link_copied_at = Some(ui.input(|i| i.time));
+            }
+            None => warn!("The score cannot be written as a link"),
+        }
     }
 }

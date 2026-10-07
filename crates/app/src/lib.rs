@@ -5,6 +5,7 @@ mod help;
 mod keyboard_input;
 mod library;
 mod library_panel;
+mod link;
 mod main_menu;
 mod measure_panel;
 mod midi_input_widget;
@@ -26,10 +27,11 @@ use grooph_measure::{BeatIdx, Cursor, Measure, Score, TimeSignature};
 use crate::accuracy::AccuracyState;
 use crate::generator::GeneratorState;
 use crate::library::PatternLibrary;
+use crate::link::{LinkContent, SharedLink};
 use crate::platform::{PlatformRuntime, VisibilityEvent};
 use crate::state::{
-    AudioConfig, CountInState, EditorState, LayoutSettings, MidiState, PlaybackController,
-    PlaybackState, UiShell,
+    AudioConfig, CountInState, EditorState, LayoutSettings, MidiState, PendingLoad,
+    PlaybackController, PlaybackState, UiShell,
 };
 use crate::tools::ToolKind;
 use crate::tools::{BeatTemplate, Modifier, all_tools};
@@ -219,6 +221,10 @@ impl App for Grooph {
 
         if self.ui.pending_load.is_some() {
             self.load_confirm_dialog(ui);
+        }
+
+        if self.ui.link_error.is_some() {
+            self.link_error_dialog(ui);
         }
 
         self.handle_keyboard_input(ui);
@@ -567,7 +573,7 @@ impl Grooph {
             return; // already loaded and unchanged
         }
         if self.editor.dirty {
-            self.ui.pending_load = Some(id);
+            self.ui.pending_load = Some(PendingLoad::Pattern(id));
         } else {
             self.load_pattern(id);
         }
@@ -578,8 +584,57 @@ impl Grooph {
         if self.editor.active_pattern_id == Some(id) {
             self.editor.active_pattern_id = None;
         }
-        if self.ui.pending_load == Some(id) {
+        if matches!(self.ui.pending_load, Some(PendingLoad::Pattern(p)) if p == id) {
             self.ui.pending_load = None;
+        }
+    }
+
+    /// Open a shared link. Replacing the working score asks first if it has
+    /// unsaved changes; a tempo-only link applies right away.
+    pub(crate) fn open_link(&mut self, link: SharedLink) {
+        if link.content.is_some() && self.editor.dirty {
+            self.ui.pending_load = Some(PendingLoad::Link(link));
+        } else {
+            self.apply_link(link);
+        }
+    }
+
+    pub(crate) fn apply_link(&mut self, link: SharedLink) {
+        match link.content {
+            Some(LinkContent::Score(score)) => {
+                self.stop_transport();
+                self.with_undo_snapshot(|app| {
+                    app.editor.score = score;
+                    app.editor.cursor = Cursor::start();
+                    true
+                });
+                self.editor.active_pattern_id = None;
+            }
+            Some(LinkContent::Generator { settings, seed }) => {
+                self.stop_transport();
+                self.editor.generator.settings = GeneratorSettings {
+                    custom_groupings: self.editor.generator.settings.custom_groupings,
+                    ..settings
+                };
+                self.generate_new_score_with_seed(seed);
+                self.ui.mode = Mode::Generator;
+            }
+            None => {}
+        }
+        if let Some(bpm) = link.bpm {
+            self.playback_ctl.bpm = bpm;
+            self.handle_bpm_change();
+        }
+        self.playback_ctl.playback.reset();
+        // The content is reproducible from the link, so it is not "unsaved".
+        self.editor.dirty = false;
+    }
+
+    /// Run a pending load after the unsaved-changes dialog.
+    pub(crate) fn finish_pending_load(&mut self, pending: PendingLoad) {
+        match pending {
+            PendingLoad::Pattern(id) => self.load_pattern(id),
+            PendingLoad::Link(link) => self.apply_link(link),
         }
     }
 
@@ -869,7 +924,7 @@ impl Grooph {
         let platform = PlatformRuntime::new();
         platform.install_listeners(cc.egui_ctx.clone());
 
-        Self {
+        let mut app = Self {
             editor: EditorState {
                 score: state.score,
                 cursor: state.cursor,
@@ -915,7 +970,28 @@ impl Grooph {
                 platform,
                 save_name_buffer: String::new(),
                 pending_load: None,
+                link_error: None,
+                link_copied_at: None,
             },
+        };
+        app.open_link_from_url();
+        app
+    }
+
+    /// Open the link the app was started with (web only) and drop its
+    /// parameters from the address bar, so a reload keeps later edits.
+    fn open_link_from_url(&mut self) {
+        let Some(query) = platform::link_query() else {
+            return;
+        };
+        match link::parse_query(&query) {
+            Ok(None) => return,
+            Ok(Some(link)) => self.open_link(link),
+            Err(err) => {
+                warn!("Cannot open link: {err}");
+                self.ui.link_error = Some(err);
+            }
         }
+        platform::clear_link_query();
     }
 }

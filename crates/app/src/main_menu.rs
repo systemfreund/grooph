@@ -1,4 +1,5 @@
 use crate::Grooph;
+use crate::link::{MAX_BPM, MIN_BPM};
 use crate::{Mode, TransportState};
 use eframe::egui;
 use eframe::egui::scroll_area::{ScrollBarVisibility, ScrollSource};
@@ -40,7 +41,7 @@ impl Grooph {
                             }
                             let bpm_editor = egui::DragValue::new(&mut self.playback_ctl.bpm)
                                 .prefix("BPM: ")
-                                .range(20..=300)
+                                .range(MIN_BPM..=MAX_BPM)
                                 .speed(0.03);
                             let bpm_editor_resp = bpm_editor.ui(ui);
                             if bpm_editor_resp.clicked() {
