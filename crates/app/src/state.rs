@@ -1,13 +1,13 @@
 use crate::accuracy::AccuracyState;
 use crate::generator::GeneratorState;
 use crate::library::PatternLibrary;
-use crate::link::SharedLink;
 use crate::platform::PlatformRuntime;
 use crate::undo::UndoHistory;
 use crate::{CountingSettings, Mode, TransportState};
 use eframe::egui::TextStyle;
 use eframe::epaint::FontId;
 use grooph_audio::{Audio, AudioSettings};
+use grooph_link::SharedLink;
 use grooph_measure::swing::Swing;
 use grooph_measure::{Cursor, Measure, Score};
 use grooph_midi::MidiInput;

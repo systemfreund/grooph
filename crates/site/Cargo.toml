@@ -1,0 +1,11 @@
+[package]
+name = "grooph-site"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+grooph-link = { workspace = true }
+grooph-measure = { workspace = true }
+pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }

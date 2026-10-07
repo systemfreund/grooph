@@ -9,6 +9,7 @@ license.workspace = true
 grooph-measure = { workspace = true }
 grooph-audio = { workspace = true }
 grooph-layout = { workspace = true }
+grooph-link = { workspace = true }
 grooph-render = { workspace = true }
 grooph-midi = { workspace = true }
 eframe = { workspace = true }
