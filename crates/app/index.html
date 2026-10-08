@@ -36,6 +36,10 @@
     <link data-trunk rel="icon" href="assets/favicon.ico">
     <link data-trunk rel="copy-file" href="assets/preview.png" data-target-path="assets"/>
     <link data-trunk rel="copy-file" href="assets/seo/robots.txt"/>
+    <!-- API catalog (RFC 9727) describing the link parameters; _headers sets its media type on Cloudflare Pages. -->
+    <link data-trunk rel="copy-file" href="assets/seo/api-catalog" data-target-path=".well-known"/>
+    <link data-trunk rel="copy-file" href="assets/seo/openapi.json"/>
+    <link data-trunk rel="copy-file" href="assets/seo/_headers"/>
     <!-- Unhashed copy for the guide pages and browsers that ask for /favicon.ico. -->
     <link data-trunk rel="copy-file" href="assets/favicon.ico"/>
     <!-- sitemap.xml, llms.txt and the guide pages are written by crates/site (Trunk post_build hook). -->

@@ -1,0 +1,19 @@
+{
+  "linkset": [
+    {
+      "anchor": "https://grooph.app/",
+      "service-desc": [
+        {
+          "href": "https://grooph.app/openapi.json",
+          "type": "application/vnd.oai.openapi+json;version=3.1"
+        }
+      ],
+      "service-doc": [
+        {
+          "href": "https://grooph.app/llms.txt",
+          "type": "text/markdown"
+        }
+      ]
+    }
+  ]
+}

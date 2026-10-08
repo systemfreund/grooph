@@ -6,7 +6,7 @@ The app draws its whole interface into a single canvas, so the page has no reada
 
 ## Links
 
-Query parameters on https://grooph.app/ (all optional, unknown ones are ignored):
+Query parameters on https://grooph.app/ (all optional, unknown ones are ignored; also described as OpenAPI at https://grooph.app/openapi.json and listed in the API catalog at https://grooph.app/.well-known/api-catalog):
 
 - `bpm`: tempo, 20-300.
 - `r`: a rhythm in the text notation below. Spaces may be written as `+`.
