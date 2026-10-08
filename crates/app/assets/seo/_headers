@@ -1,0 +1,12 @@
+# Cloudflare Pages response headers.
+
+/
+  Link: </.well-known/api-catalog>; rel="api-catalog"
+
+/.well-known/api-catalog
+  Content-Type: application/linkset+json; profile="https://www.rfc-editor.org/info/rfc9727"
+  Access-Control-Allow-Origin: *
+
+/openapi.json
+  Content-Type: application/vnd.oai.openapi+json;version=3.1
+  Access-Control-Allow-Origin: *

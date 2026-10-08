@@ -1,0 +1,92 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "grooph links",
+    "version": "1.0.0",
+    "summary": "Open grooph with a rhythm, a generated sight-reading exercise or a metronome setting.",
+    "description": "grooph is a browser metronome and rhythm trainer. It draws its interface into a canvas, so it cannot be operated through the DOM; instead, build a link with the query parameters below. All parameters are optional and unknown ones are ignored. Invalid links open the app with an error message that names the problem. See https://grooph.app/llms.txt for the rhythm notation.",
+    "contact": { "email": "hello@grooph.app" }
+  },
+  "externalDocs": { "url": "https://grooph.app/llms.txt" },
+  "servers": [{ "url": "https://grooph.app" }],
+  "paths": {
+    "/": {
+      "get": {
+        "operationId": "openGrooph",
+        "summary": "Open the app with the given rhythm, exercise or metronome setting",
+        "description": "Combine `r` (a written rhythm) or the generator parameters (`sub`, `lvl`, `bars`, `space`, `seed`), not both. `ts` on its own opens a one-measure metronome in that meter.",
+        "parameters": [
+          {
+            "name": "bpm",
+            "in": "query",
+            "description": "Tempo in beats per minute.",
+            "schema": { "type": "integer", "minimum": 20, "maximum": 300 },
+            "example": 90
+          },
+          {
+            "name": "r",
+            "in": "query",
+            "description": "A rhythm in grooph's text notation: space-separated duration tokens (`q`, `e`, `s`, `th`, dotted `q.`, tuplets such as `t8`), `r:` prefix for rests, `>` prefix for accents, `|` between measures, optional time signature at the start of a measure. Spaces may be written as `+`.",
+            "schema": { "type": "string" },
+            "example": "4/4 q e e t8 t8 t8 r:q | q. e q q"
+          },
+          {
+            "name": "ts",
+            "in": "query",
+            "description": "Time signature, 1-17 beats over 4, 8 or 16. With `r` it is the default meter; on its own it opens a one-measure metronome.",
+            "schema": { "type": "string", "pattern": "^[0-9]{1,2}/(4|8|16)$" },
+            "example": "7/8"
+          },
+          {
+            "name": "sub",
+            "in": "query",
+            "description": "Generator: subdivision of the random rhythm (`3` = triplets).",
+            "schema": { "type": "string", "enum": ["8", "16", "3", "mix"] }
+          },
+          {
+            "name": "lvl",
+            "in": "query",
+            "description": "Generator: complexity level.",
+            "schema": { "type": "integer", "minimum": 1, "maximum": 5 }
+          },
+          {
+            "name": "bars",
+            "in": "query",
+            "description": "Generator: number of bars.",
+            "schema": { "type": "integer", "minimum": 1, "maximum": 8 }
+          },
+          {
+            "name": "space",
+            "in": "query",
+            "description": "Generator: amount of rests.",
+            "schema": { "type": "number", "minimum": 0, "maximum": 1 }
+          },
+          {
+            "name": "seed",
+            "in": "query",
+            "description": "Generator: random seed. The same parameters and seed always give the same rhythm; without a seed every visit draws a new one.",
+            "schema": { "type": "integer", "minimum": 0 }
+          },
+          {
+            "name": "swing",
+            "in": "query",
+            "description": "Swing feel in percent, 50 (straight) to 75 (dotted); 66 is the triplet feel.",
+            "schema": { "type": "integer", "minimum": 50, "maximum": 75 }
+          },
+          {
+            "name": "su",
+            "in": "query",
+            "description": "Swing unit: `16` swings sixteenths instead of eighths.",
+            "schema": { "type": "string", "enum": ["8", "16"] }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The grooph web app, opened with the requested setting.",
+            "content": { "text/html": {} }
+          }
+        }
+      }
+    }
+  }
+}
