@@ -6,7 +6,10 @@ use crate::{Mode, TransportState};
 use eframe::egui;
 use eframe::egui::{FontId, Frame, Rect, Response, Stroke};
 use grooph_layout::pixel_layout::{GlyphMetrics, MeasureLayout, compute_em};
-use grooph_layout::staff_layout::{PlacedMeasure, StaffLayout, StaffOpts, build_staff_layout};
+use grooph_layout::staff_layout::{
+    PlacedMeasure, ROOM_BELOW_EM, ROOM_BELOW_WITH_LABELS_EM, StaffLayout, StaffOpts,
+    build_staff_layout,
+};
 use grooph_measure::grid::DEFAULT_GRID;
 use grooph_measure::TimeSignature;
 use grooph_measure::tempo::ScoreTiming;
@@ -191,6 +194,11 @@ impl Grooph {
                             system_spacing_em: 0.5,
                             // Narrow screens: no clef, so the notes get the width.
                             layout_clef_first: !compact,
+                            room_below_em: if self.build_count_config().is_some() {
+                                ROOM_BELOW_WITH_LABELS_EM
+                            } else {
+                                ROOM_BELOW_EM
+                            },
                         };
 
                         let staff = build_staff_layout(&self.editor.score, &staff_opts);

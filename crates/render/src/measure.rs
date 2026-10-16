@@ -83,7 +83,7 @@ pub(crate) fn render_measure_at(
     }
 
     if draw_staff_line {
-        draw_staff_line_segment(painter, rect, opts.em, color);
+        draw_staff_line_segment(painter, rect, opts.y_center(), opts.em, color);
     }
 
     draw_clef(painter, measure_layout.clef_pos, &opts.font_id, color);
@@ -102,14 +102,15 @@ pub(crate) fn render_measure_at(
     }
 
     if let Some(x) = cursor_x {
-        draw_playback_cursor(painter, rect, x, opts.em, ui.visuals().selection.stroke.color);
+        let color = ui.visuals().selection.stroke.color;
+        draw_playback_cursor(painter, opts.y_center(), x, opts.em, color);
     }
 }
 
-fn draw_staff_line_segment(painter: &Painter, rect: Rect, em: f32, color: Color32) {
+fn draw_staff_line_segment(painter: &Painter, rect: Rect, y: f32, em: f32, color: Color32) {
     painter.hline(
         Rangef::new(rect.left(), rect.right()),
-        rect.center().y,
+        y,
         Stroke::new(0.02 * em, color),
     );
 }
@@ -171,9 +172,9 @@ fn draw_edit_cursor(
     ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
 }
 
-fn draw_playback_cursor(painter: &Painter, rect: Rect, x: f32, em: f32, base: Color32) {
-    let top = rect.center().y + 0.7 * em;
-    let bottom = rect.center().y - 0.7 * em;
+fn draw_playback_cursor(painter: &Painter, y: f32, x: f32, em: f32, base: Color32) {
+    let top = y + 0.7 * em;
+    let bottom = y - 0.7 * em;
     let cursor_color = Color32::from_rgba_unmultiplied(base.r(), base.g(), base.b(), 100);
     painter.vline(x, Rangef::new(top, bottom), Stroke::new(0.1 * em, cursor_color));
 }
@@ -199,6 +200,7 @@ fn draw_count_layer(
         measure,
         measure_layout,
         opts.rect,
+        opts.y_center(),
         opts.em,
         text_color,
         highlight_color,
@@ -381,6 +383,7 @@ fn draw_count_labels(
     measure: &Measure,
     layout: &MeasureLayout,
     rect: Rect,
+    baseline_y: f32,
     em: f32,
     base_color: Color32,
     highlight_color: Color32,
@@ -400,7 +403,7 @@ fn draw_count_labels(
     let xs = compute_label_xs(&selected, measure, layout, rect, total_ticks);
 
     let font = FontId::new(em * 0.4, FontFamily::Proportional);
-    let label_y = (rect.center().y + 1.35 * em).min(rect.bottom() - 0.2 * em);
+    let label_y = (baseline_y + 1.35 * em).min(rect.bottom() - 0.2 * em);
     let label_color =
         Color32::from_rgba_unmultiplied(base_color.r(), base_color.g(), base_color.b(), 200);
     let highlight = Color32::from_rgba_unmultiplied(

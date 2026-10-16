@@ -48,6 +48,9 @@ pub struct StaffOpts {
     pub system_spacing_em: f32,
     /// Whether to show the clef on the first measure of each system.
     pub layout_clef_first: bool,
+    /// Room below the staff line in em: rests, accents and timing marks need
+    /// [`ROOM_BELOW_EM`], count labels [`ROOM_BELOW_WITH_LABELS_EM`].
+    pub room_below_em: f32,
 }
 
 impl StaffOpts {
@@ -65,7 +68,7 @@ impl StaffOpts {
             em: self.em,
             layout_clef: show_clef,
             layout_time_signature: show_ts,
-            y_offset: self.y_offset,
+            y_offset: self.y_offset + self.baseline_shift(),
             stem_length_factor: self.stem_length_factor,
             stem_thickness_factor: self.stem_thickness_factor,
             accent_displacement: self.accent_displacement,
@@ -81,6 +84,12 @@ impl StaffOpts {
     /// `font_id`'s original size and would otherwise no longer match it.
     /// Vector-font metrics scale ~linearly with size, close enough to avoid
     /// needing a live `egui::Ui` to re-measure.
+    /// Distance from a row's center down to its staff line: rows are taller
+    /// above the line (stems, beams, tuplets) than below it.
+    fn baseline_shift(&self) -> f32 {
+        (room_above_em(self) - self.room_below_em) * 0.5 * self.em
+    }
+
     pub fn rescaled(&self, factor: f32) -> StaffOpts {
         let mut font_id = self.font_id.clone();
         font_id.size *= factor;
@@ -195,17 +204,23 @@ fn min_measure_width(
 /// found glyphs stop reading as distinct shapes below ~9em.
 pub const LEGIBILITY_FLOOR_EM: f32 = 9.0;
 
-/// Vertical budget (in em) for one row's content, symmetric around the
-/// baseline (per-measure note positioning is center-based — see
-/// `LayoutOpts::y_center` — so the budget can't be asymmetric without also
-/// shifting where notes render) — just enough headroom for stems
-/// (`stem_length_factor` is user configurable), flags, and tuplet brackets
-/// above, and rests/accents below, so adjacent rows sit as close together as
-/// legibility allows rather than leaving dead space.
+/// Room below the staff line for rests, accents and timing marks, in em.
+pub const ROOM_BELOW_EM: f32 = 0.65;
+/// Room below the staff line when count labels are drawn under the notes.
+pub const ROOM_BELOW_WITH_LABELS_EM: f32 = 1.65;
+
+/// Headroom above the staff line, in em: stems (`stem_length_factor` is user
+/// configurable), flags and tuplet brackets.
+fn room_above_em(opts: &StaffOpts) -> f32 {
+    opts.stem_length_factor + 0.75
+}
+
+/// Vertical budget (in em) for one row's content: the headroom above the
+/// staff line plus the room below it, so adjacent rows sit as close together
+/// as legibility allows rather than leaving dead space. The staff line sits
+/// off-center accordingly (see [`StaffOpts::baseline_shift`]).
 fn row_height_em(opts: &StaffOpts) -> f32 {
-    let above = opts.stem_length_factor + 0.75;
-    let below = 0.5;
-    2.0 * above.max(below)
+    room_above_em(opts) + opts.room_below_em
 }
 
 /// Build the pixel layout for an entire score.
@@ -263,7 +278,7 @@ pub fn build_staff_layout(score: &Score, opts: &StaffOpts) -> StaffLayout {
         let layout = build_measure_layout(&score.measures[i], &per_opts);
         max_row_width = max_row_width.max(width);
         systems.push(SystemLayout {
-            y_baseline: rect.center().y + opts.y_offset,
+            y_baseline: rect.center().y + effective_opts.y_offset + effective_opts.baseline_shift(),
             rect,
             measures: vec![PlacedMeasure {
                 measure_idx: i,
@@ -340,6 +355,7 @@ mod tests {
             note_width_em: 0.6,
             system_spacing_em: 0.5,
             layout_clef_first: true,
+            room_below_em: ROOM_BELOW_EM,
         }
     }
 
@@ -685,6 +701,32 @@ mod tests {
         for (i, system) in staff.systems.iter().enumerate() {
             let hit = hit_test_staff(&staff, Pos2::new(x, system.rect.center().y));
             assert_eq!(hit.map(|h| h.0), Some(i));
+        }
+    }
+
+    #[test]
+    fn staff_line_sits_on_note_heads_with_off_center_rows() {
+        let em = 20.0;
+        let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(4000.0, 100.0));
+        let score = Score {
+            measures: vec![
+                measure_with_quarters(TimeSignature::FOUR_FOUR),
+                measure_with_quarters(TimeSignature::FOUR_FOUR),
+            ],
+        };
+        for below in [ROOM_BELOW_EM, ROOM_BELOW_WITH_LABELS_EM] {
+            let staff_opts = StaffOpts { room_below_em: below, ..opts(em, rect) };
+            let staff = build_staff_layout(&score, &staff_opts);
+            for system in &staff.systems {
+                let placed = &system.measures[0];
+                let note_y = placed.layout.notes[0].center.y;
+                assert!((note_y - system.y_baseline).abs() < 0.01);
+                let below_px = system.rect.bottom() - system.y_baseline;
+                assert!((below_px - below * em).abs() < 0.01);
+                // The renderer rebuilds the opts from the placed rect.
+                let render_opts = staff_opts.measure_opts_for(placed);
+                assert!((render_opts.y_center() - system.y_baseline).abs() < 0.01);
+            }
         }
     }
 }

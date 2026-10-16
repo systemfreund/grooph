@@ -142,7 +142,8 @@ impl LayoutOpts {
 
     pub const fn bracket_thickness(&self) -> f32 { self.em * 0.02 }
 
-    pub(super) fn y_center(&self) -> f32 { self.rect.center().y + self.y_offset }
+    /// Y of the staff line (note heads sit on it).
+    pub fn y_center(&self) -> f32 { self.rect.center().y + self.y_offset }
 
     const fn snap_thickness(&self, t: f32) -> f32 {
         let ppp = self.pixels_per_point;
