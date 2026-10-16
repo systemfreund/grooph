@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use grooph_app::Grooph;
 
 #[cfg(not(target_arch = "wasm32"))]

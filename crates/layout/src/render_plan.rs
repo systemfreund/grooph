@@ -1,6 +1,6 @@
 use crate::beam_plan::{BeamGroup, BeamPlan, compute_beam_plan};
 use crate::tuplet_plan::{TupletPlan, compute_tuplet_plan};
-use grooph_measure::{Beat, Measure};
+use grooph_measure::Measure;
 
 /// Logical, device-independent render plan derived from a `Measure`.
 ///

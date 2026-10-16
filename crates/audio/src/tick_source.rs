@@ -49,9 +49,13 @@ impl TickSource {
 
     /// Bars started since the score's first downbeat (0 = first bar). Keeps
     /// counting across loops.
-    pub(crate) fn bars(&self) -> u64 { self.bars }
+    pub(crate) fn bars(&self) -> u64 {
+        self.bars
+    }
 
-    pub(crate) fn in_count_in(&self) -> bool { self.count_in.is_some() }
+    pub(crate) fn in_count_in(&self) -> bool {
+        self.count_in.is_some()
+    }
 
     /// Start playback from the top of the score, optionally after a count-in.
     pub(crate) fn restart(&mut self, count_in: Option<&CountInPlan>) {

@@ -12,8 +12,8 @@ use crate::presets::{self, PresetId};
 use crate::{Grooph, Mode, TransportState, platform};
 use eframe::egui;
 use eframe::egui::{
-    Align2, Button, Color32, CornerRadius, FontId, Frame, Id, Margin, Modal, Painter, Rect,
-    Response, RichText, Sense, Shape, Stroke, Ui, Vec2, pos2, vec2,
+    Align2, Button, Color32, FontId, Frame, Id, Margin, Modal, Painter, Rect, Response, RichText,
+    Sense, Shape, Stroke, Ui, Vec2, pos2, vec2,
 };
 use grooph_link::{LinkContent, SharedLink};
 use grooph_measure::generator::{MAX_BARS, MAX_COMPLEXITY, Subdivision, effective_subdivision};
@@ -240,7 +240,7 @@ fn paint_play_icon(painter: &Painter, rect: Rect, color: Color32, playing: bool)
 pub(crate) fn paint_share_icon(painter: &Painter, rect: Rect, color: Color32) {
     let c = rect.center() + vec2(0.0, rect.height() * 0.03);
     let s = rect.width() * 0.14;
-    let stroke = Stroke::new(2.5, color);
+    let stroke = Stroke::new(2.5_f32, color);
     let box_top = c.y - 0.3 * s;
     let box_bottom = c.y + 1.2 * s;
     painter.add(Shape::line(

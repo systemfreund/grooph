@@ -17,12 +17,18 @@ use std::collections::HashMap;
 pub struct TupletGroupId(pub u32);
 
 impl TupletGroupId {
-    pub const fn new(id: u32) -> Self { Self(id) }
-    pub const fn as_u32(self) -> u32 { self.0 }
+    pub const fn new(id: u32) -> Self {
+        Self(id)
+    }
+    pub const fn as_u32(self) -> u32 {
+        self.0
+    }
 }
 
 impl From<u32> for TupletGroupId {
-    fn from(id: u32) -> Self { Self(id) }
+    fn from(id: u32) -> Self {
+        Self(id)
+    }
 }
 
 /// Stable anchor describing a tuplet group span and semantics.
@@ -55,11 +61,15 @@ pub struct TupletRegistry {
 }
 
 impl Default for TupletRegistry {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl TupletRegistry {
-    pub fn new() -> Self { Self { anchors: HashMap::new(), next: 1 } }
+    pub fn new() -> Self {
+        Self { anchors: HashMap::new(), next: 1 }
+    }
 
     /// Allocate a fresh id and store an anchor for it. Returns the new id.
     pub fn register(
@@ -81,9 +91,15 @@ impl TupletRegistry {
     }
 
     /// Look up the anchor for `id`.
-    pub fn get(&self, id: TupletGroupId) -> Option<&TupletAnchor> { self.anchors.get(&id.0) }
+    pub fn get(&self, id: TupletGroupId) -> Option<&TupletAnchor> {
+        self.anchors.get(&id.0)
+    }
 
-    pub fn is_empty(&self) -> bool { self.anchors.is_empty() }
+    pub fn is_empty(&self) -> bool {
+        self.anchors.is_empty()
+    }
 
-    pub fn len(&self) -> usize { self.anchors.len() }
+    pub fn len(&self) -> usize {
+        self.anchors.len()
+    }
 }

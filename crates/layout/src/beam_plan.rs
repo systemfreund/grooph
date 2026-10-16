@@ -1,7 +1,7 @@
 use crate::tuplet_plan::{TupletSpan, detect_tuplet_spans};
 use grooph_measure::duration::{Duration, NoteValue};
 use grooph_measure::grid::DEFAULT_GRID;
-use grooph_measure::{Beat, BeatIdx, BeatKind, Measure, TimeSignature};
+use grooph_measure::{Beat, BeatIdx, BeatKind, Measure};
 
 /// Number of beams implied by a duration (eighth = 1, sixteenth = 2, 32nd = 3).
 /// Tuplets map to their base note value for beam count purposes.

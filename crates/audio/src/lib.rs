@@ -14,15 +14,15 @@ use crate::voices::VoiceMixer;
 use grooph_measure::Score;
 use grooph_measure::click::ClickPatterns;
 use grooph_measure::generator::Subdivision;
-use grooph_measure::swing::Swing;
 use grooph_measure::grid::DEFAULT_GRID;
+use grooph_measure::swing::Swing;
 use grooph_measure::tempo::ScoreTiming;
 use log::{debug, error, info, trace};
 use rodio::Source;
 use rodio::source::Function as RodioFunction;
 use schedule::{Schedule, SoundType};
 use serde::{Deserialize, Serialize};
-use std::fmt::{Debug, Formatter, Write};
+use std::fmt::{Debug, Formatter};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -84,11 +84,17 @@ pub struct AudioSettings {
     pub rhythm_muted: bool,
 }
 
-pub(crate) fn default_ghost_gain() -> f32 { 0.25 }
+pub(crate) fn default_ghost_gain() -> f32 {
+    0.25
+}
 
-fn default_count_in_gain() -> f32 { 1.0 }
+fn default_count_in_gain() -> f32 {
+    1.0
+}
 
-fn default_soft_gain() -> f32 { 0.35 }
+fn default_soft_gain() -> f32 {
+    0.35
+}
 
 impl Default for AudioSettings {
     fn default() -> Self {
@@ -360,10 +366,14 @@ impl Audio {
         }
     }
 
-    pub fn set_playback_options(&mut self, options: PlaybackOptions) { self.options = options; }
+    pub fn set_playback_options(&mut self, options: PlaybackOptions) {
+        self.options = options;
+    }
 
     /// Whether an output stream is running, i.e. `playback_position` advances.
-    pub fn is_running(&self) -> bool { self.sink.is_some() }
+    pub fn is_running(&self) -> bool {
+        self.sink.is_some()
+    }
 
     /// Bar the engine is playing; `None` while stopped or counting in. While
     /// the audio thread holds its lock, the last known bar is returned.
@@ -555,11 +565,17 @@ impl Source for MetronomeSource {
         None // Infinite
     }
 
-    fn channels(&self) -> u16 { 1 }
+    fn channels(&self) -> u16 {
+        1
+    }
 
-    fn sample_rate(&self) -> u32 { self.sample_rate }
+    fn sample_rate(&self) -> u32 {
+        self.sample_rate
+    }
 
-    fn total_duration(&self) -> Option<Duration> { None }
+    fn total_duration(&self) -> Option<Duration> {
+        None
+    }
 }
 
 fn device_sample_rate() -> u32 {

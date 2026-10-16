@@ -8,6 +8,8 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  # Pinned so a new Trunk release cannot change or break the web build.
+  TRUNK_VERSION: v0.21.14
 
 jobs:
   build:
@@ -16,17 +18,51 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        components: rustfmt, clippy
+    - uses: Swatinem/rust-cache@v2
     - name: Install system dependencies
       run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+    - name: Check formatting
+      run: cargo fmt --all -- --check
+    - name: Clippy
+      run: cargo clippy --workspace --all-targets -- -D warnings
     - name: Build
       run: cargo build --verbose
     - name: Run tests
       run: cargo test --verbose
 
+  web:
+    # Build the web app on every push and pull request, so a WASM-only
+    # break shows up before merging. The deploy publishes this build.
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install Rust (wasm32 target)
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: wasm32-unknown-unknown
+    - uses: Swatinem/rust-cache@v2
+    - name: Install Trunk
+      run: |
+        wget -qO- "https://github.com/trunk-rs/trunk/releases/download/${TRUNK_VERSION}/trunk-x86_64-unknown-linux-gnu.tar.gz" | tar -xzf- -C ~/.cargo/bin
+        trunk --version
+    - name: Build web app
+      run: trunk build --release
+    - name: Keep the build for the deploy
+      uses: actions/upload-artifact@v4
+      with:
+        name: web-dist
+        path: dist
+        retention-days: 7
+
   deploy:
     # Publish the web app to Cloudflare Pages after every push to main,
-    # once build and tests have passed.
-    needs: build
+    # once the native checks and the web build have passed.
+    needs: [build, web]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     concurrency:
@@ -38,17 +74,11 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
-    - name: Install Rust (wasm32 target)
-      uses: dtolnay/rust-toolchain@stable
+    - name: Fetch the web build
+      uses: actions/download-artifact@v4
       with:
-        targets: wasm32-unknown-unknown
-    - uses: Swatinem/rust-cache@v2
-    - name: Install Trunk
-      run: |
-        wget -qO- https://github.com/trunk-rs/trunk/releases/latest/download/trunk-x86_64-unknown-linux-gnu.tar.gz | tar -xzf- -C ~/.cargo/bin
-        trunk --version
-    - name: Build web app
-      run: trunk build --release
+        name: web-dist
+        path: dist
     - name: Deploy to Cloudflare Pages
       uses: cloudflare/wrangler-action@v3
       with:

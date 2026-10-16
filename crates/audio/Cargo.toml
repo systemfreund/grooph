@@ -14,5 +14,3 @@ serde = { workspace = true }
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 cpal = { workspace = true }
 
-[lints.rust]
-unused_imports = "allow"

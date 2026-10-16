@@ -21,7 +21,7 @@
 //! errors name the measure and token so the input can be corrected.
 
 use crate::BeatKind::{Note, Rest};
-use crate::duration::NoteValue::{Eighth, Quarter, Sixteenth, ThirtySecond};
+use crate::duration::NoteValue::{Eighth, Quarter, Sixteenth};
 use crate::duration::{Duration, NoteValue, TupletSpec};
 use crate::grid::DEFAULT_GRID;
 use crate::{Beat, Measure, MeasureError, ParseTimeSignatureError, Score, TimeSignature};
@@ -95,7 +95,9 @@ impl std::error::Error for NotationError {}
 /// Durations with a notation code, in the order of [`crate::duration::COMMON_DURATIONS`].
 const CODES: [(&str, Duration); 16] = {
     use crate::duration::{e, nt16, q, qt16, s, spt16, st8, st16, t8, t16, t32, th};
-    const fn dotted(base: NoteValue) -> Duration { Duration::Dotted { base, dots: 1 } }
+    const fn dotted(base: NoteValue) -> Duration {
+        Duration::Dotted { base, dots: 1 }
+    }
     [
         ("q", q()),
         ("e", e()),

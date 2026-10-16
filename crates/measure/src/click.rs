@@ -42,7 +42,9 @@ impl ClickLevel {
         }
     }
 
-    pub fn from_code(c: char) -> Option<Self> { Self::ALL.into_iter().find(|l| l.code() == c) }
+    pub fn from_code(c: char) -> Option<Self> {
+        Self::ALL.into_iter().find(|l| l.code() == c)
+    }
 
     /// The next level when tapping through them: strong, medium, soft, off.
     pub fn next(self) -> Self {
@@ -68,9 +70,13 @@ impl ClickPattern {
     }
 
     /// Whether the pattern has one level per group of `ts`.
-    pub fn fits(&self, ts: TimeSignature) -> bool { self.0.len() == ts.groups().len() }
+    pub fn fits(&self, ts: TimeSignature) -> bool {
+        self.0.len() == ts.groups().len()
+    }
 
-    pub fn levels(&self) -> &[ClickLevel] { &self.0 }
+    pub fn levels(&self) -> &[ClickLevel] {
+        &self.0
+    }
 }
 
 impl Display for ClickPattern {

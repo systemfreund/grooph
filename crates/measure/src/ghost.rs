@@ -81,7 +81,9 @@ mod tests {
     use crate::duration::{e, q, s, t8};
     use crate::{Beat, TimeSignature};
 
-    fn tick(d: crate::duration::Duration) -> u32 { DEFAULT_GRID.ticks_of(&d).unwrap() }
+    fn tick(d: crate::duration::Duration) -> u32 {
+        DEFAULT_GRID.ticks_of(&d).unwrap()
+    }
 
     #[test]
     fn quarter_notes_get_sixteenth_ghosts_in_between() {

@@ -62,11 +62,15 @@ pub struct Swing {
 }
 
 impl Default for Swing {
-    fn default() -> Self { Self { unit: SwingUnit::Eighths, percent: MIN_SWING_PERCENT } }
+    fn default() -> Self {
+        Self { unit: SwingUnit::Eighths, percent: MIN_SWING_PERCENT }
+    }
 }
 
 impl Swing {
-    pub fn is_straight(&self) -> bool { self.percent <= MIN_SWING_PERCENT }
+    pub fn is_straight(&self) -> bool {
+        self.percent <= MIN_SWING_PERCENT
+    }
 
     fn ratio(&self) -> f64 {
         self.percent.clamp(MIN_SWING_PERCENT, MAX_SWING_PERCENT) as f64 / 100.0
@@ -127,11 +131,17 @@ mod tests {
     use crate::TimeSignature;
     use crate::duration::{s, t8};
 
-    fn ticks(d: crate::duration::Duration) -> u32 { DEFAULT_GRID.ticks_of(&d).unwrap() }
+    fn ticks(d: crate::duration::Duration) -> u32 {
+        DEFAULT_GRID.ticks_of(&d).unwrap()
+    }
 
-    fn four_four() -> u32 { DEFAULT_GRID.ticks_per_measure(&TimeSignature::FOUR_FOUR) }
+    fn four_four() -> u32 {
+        DEFAULT_GRID.ticks_per_measure(&TimeSignature::FOUR_FOUR)
+    }
 
-    fn swing(unit: SwingUnit, percent: u8) -> Swing { Swing { unit, percent } }
+    fn swing(unit: SwingUnit, percent: u8) -> Swing {
+        Swing { unit, percent }
+    }
 
     #[test]
     fn straight_swing_changes_nothing() {

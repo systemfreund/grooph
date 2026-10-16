@@ -108,7 +108,9 @@ pub struct GroupingId(pub u8);
 pub struct GroupingSet(u64);
 
 impl GroupingSet {
-    pub fn contains(&self, id: GroupingId) -> bool { self.0 & (1 << id.0) != 0 }
+    pub fn contains(&self, id: GroupingId) -> bool {
+        self.0 & (1 << id.0) != 0
+    }
     pub fn insert(&mut self, id: GroupingId) {
         self.0 |= 1 << id.0;
     }
@@ -118,7 +120,9 @@ impl GroupingSet {
     pub fn toggle(&mut self, id: GroupingId) {
         self.0 ^= 1 << id.0;
     }
-    pub fn is_empty(&self) -> bool { self.0 == 0 }
+    pub fn is_empty(&self) -> bool {
+        self.0 == 0
+    }
 }
 
 /// Length of one generator beat: a quarter (`x/4` beats and two-eighth
@@ -226,7 +230,9 @@ pub fn beat_groups(ts: TimeSignature) -> Option<Vec<BeatSpan>> {
 }
 
 /// Whether the generator can write measures in `ts`.
-pub fn supports_time_signature(ts: TimeSignature) -> bool { beat_groups(ts).is_some() }
+pub fn supports_time_signature(ts: TimeSignature) -> bool {
+    beat_groups(ts).is_some()
+}
 
 /// All groupings available with `subdivision` in `ts`, in display order: only
 /// the beat spans `ts` uses (quarter-beat figures first).
@@ -270,7 +276,9 @@ pub enum GeneratorError {
 }
 
 impl From<MeasureError> for GeneratorError {
-    fn from(err: MeasureError) -> Self { GeneratorError::Measure(err) }
+    fn from(err: MeasureError) -> Self {
+        GeneratorError::Measure(err)
+    }
 }
 
 /// Small deterministic PRNG (SplitMix64). Seedable so generated rhythms are
@@ -294,12 +302,18 @@ impl Rng {
     }
 
     /// Uniform integer in `0..n`. `n` must be non-zero.
-    pub fn below(&mut self, n: usize) -> usize { (self.next_u64() % n as u64) as usize }
+    pub fn below(&mut self, n: usize) -> usize {
+        (self.next_u64() % n as u64) as usize
+    }
 
     /// Uniform float in `[0, 1)`.
-    pub fn unit(&mut self) -> f32 { (self.next_u64() >> 40) as f32 / (1u64 << 24) as f32 }
+    pub fn unit(&mut self) -> f32 {
+        (self.next_u64() >> 40) as f32 / (1u64 << 24) as f32
+    }
 
-    pub fn chance(&mut self, p: f32) -> bool { self.unit() < p }
+    pub fn chance(&mut self, p: f32) -> bool {
+        self.unit() < p
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -385,7 +399,9 @@ static EIGHTH_REST: Cell =
 static DOTTED_EIGHTH_REST: Cell =
     Cell { id: g(45), level: 1, family: CellFamily::SixteenthTriple, beats: &[(de(), R)] };
 
-const fn g(id: u8) -> GroupingId { GroupingId(id) }
+const fn g(id: u8) -> GroupingId {
+    GroupingId(id)
+}
 
 /// Groupings in the reference app's display order ("Custom Groupings"
 /// screen, read left to right). Complexity N unlocks every grouping whose
@@ -485,7 +501,9 @@ impl Cell {
         table.iter().find(|(id, _)| *id == self.id).map_or(self.level, |&(_, level)| level)
     }
 
-    fn span(&self) -> BeatSpan { self.family.span() }
+    fn span(&self) -> BeatSpan {
+        self.family.span()
+    }
 }
 
 /// Weight of the highest allowed level relative to each easier level.
@@ -660,7 +678,9 @@ mod tests {
         CELLS.iter().filter(move |c| c.span() == span)
     }
 
-    fn ts(beats: u8, beat_unit: u8) -> TimeSignature { TimeSignature::new(beats, beat_unit) }
+    fn ts(beats: u8, beat_unit: u8) -> TimeSignature {
+        TimeSignature::new(beats, beat_unit)
+    }
 
     #[test]
     fn every_cell_spans_exactly_one_beat() {
@@ -824,7 +844,9 @@ mod tests {
     }
 
     /// Onsets of a three-eighth cell on the eighth grid.
-    fn eighth_onsets(c: &Cell) -> String { sixteenth_onsets(c).chars().step_by(2).collect() }
+    fn eighth_onsets(c: &Cell) -> String {
+        sixteenth_onsets(c).chars().step_by(2).collect()
+    }
 
     #[test]
     fn compound_meters_generate_in_dotted_quarter_groups() {
@@ -1062,7 +1084,9 @@ mod tests {
         }
     }
 
-    fn g_id(id: u8) -> GroupingId { GroupingId(id) }
+    fn g_id(id: u8) -> GroupingId {
+        GroupingId(id)
+    }
 
     #[test]
     fn complexity_caps_the_cell_level() {

@@ -108,11 +108,7 @@ pub(crate) fn render_measure_at(
 }
 
 fn draw_staff_line_segment(painter: &Painter, rect: Rect, y: f32, em: f32, color: Color32) {
-    painter.hline(
-        Rangef::new(rect.left(), rect.right()),
-        y,
-        Stroke::new(0.02 * em, color),
-    );
+    painter.hline(Rangef::new(rect.left(), rect.right()), y, Stroke::new(0.02 * em, color));
 }
 
 fn draw_clef(painter: &Painter, clef_pos: Option<egui::Pos2>, font_id: &FontId, color: Color32) {
@@ -315,8 +311,7 @@ pub fn last_note_split(
     rect: Rect,
     next_layout: &MeasureLayout,
 ) -> f64 {
-    let (Some(last), Some(first)) = (measure_layout.notes.last(), next_layout.notes.first())
-    else {
+    let (Some(last), Some(first)) = (measure_layout.notes.last(), next_layout.notes.first()) else {
         return 0.5;
     };
     let out = (rect.right() - last.center.x).max(0.0);
@@ -476,7 +471,7 @@ fn select_label_slots<'a>(slots: &'a [&'a CountSlot]) -> Vec<&'a CountSlot> {
             .or_insert(i);
     }
     let mut out: Vec<&CountSlot> = best.values().map(|idx| slots[*idx]).collect();
-    out.sort_by(|a, b| a.start_tick.cmp(&b.start_tick));
+    out.sort_by_key(|a| a.start_tick);
     out
 }
 

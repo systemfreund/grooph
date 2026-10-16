@@ -1,7 +1,6 @@
 use crate::state::PendingLoad;
-use crate::{Grooph, Mode, platform};
+use crate::{Grooph, Mode};
 use eframe::egui;
-use log::warn;
 
 /// How long "Link copied" stays visible.
 pub(crate) const LINK_COPIED_NOTICE_S: f64 = 2.0;

@@ -26,7 +26,7 @@
 //! A `## FAQ` section with `### Question` headings becomes FAQPage
 //! structured data. Invalid rhythms or links fail the build, naming the file.
 
-use grooph_link::{LinkContent, SharedLink, parse_query};
+use grooph_link::{LinkContent, SharedLink, parse_query_current};
 use grooph_measure::grid::DEFAULT_GRID;
 use grooph_measure::notation::parse_score;
 use grooph_measure::swing::{Swing, SwingUnit};
@@ -58,7 +58,9 @@ pub struct Page {
 }
 
 /// Directory with the Markdown sources.
-pub fn content_dir() -> PathBuf { Path::new(env!("CARGO_MANIFEST_DIR")).join("content") }
+pub fn content_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("content")
+}
 
 /// Load every page under `dir`, sorted by section and order.
 pub fn load_pages(dir: &Path) -> Result<Vec<Page>, String> {
@@ -449,7 +451,7 @@ fn parse_attrs(attrs: &str) -> Result<(Option<u32>, Option<Swing>), String> {
         }
         query.push(attr);
     }
-    let link = parse_query(&query.join("&"))?.unwrap_or_default();
+    let link = parse_query_current(&query.join("&"))?.unwrap_or_default();
     Ok((link.bpm, link.swing))
 }
 
@@ -539,7 +541,9 @@ fn measure_grid(measure: &Measure) -> String {
     out
 }
 
-fn ticks_of(beat: &Beat) -> u32 { DEFAULT_GRID.ticks_of(&beat.duration).unwrap_or(0) }
+fn ticks_of(beat: &Beat) -> u32 {
+    DEFAULT_GRID.ticks_of(&beat.duration).unwrap_or(0)
+}
 
 fn cell(beat: &Beat, onset: u32, ts: TimeSignature) -> String {
     let class = match (beat.kind, beat.accented) {
@@ -547,7 +551,7 @@ fn cell(beat: &Beat, onset: u32, ts: TimeSignature) -> String {
         (BeatKind::Note, true) => "cell note accent",
         (BeatKind::Note, false) => "cell note",
     };
-    let on_beat = onset % DEFAULT_GRID.ticks_per_beat(&ts) == 0;
+    let on_beat = onset.is_multiple_of(DEFAULT_GRID.ticks_per_beat(&ts));
     format!(
         "<span class=\"{class}{}\" style=\"flex:{}\"><i></i><b>{}</b></span>",
         if on_beat { " beat" } else { "" },
@@ -572,8 +576,9 @@ pub fn count_syllable(onset: u32, ts: TimeSignature) -> String {
     }
 }
 
+/// The query is written for the current app: `bpm` counts quarters.
 fn open_block(query: &str, label: &str) -> Result<String, String> {
-    let link = parse_query(query)
+    let link = parse_query_current(query)
         .map_err(|e| format!("link '{query}': {e}"))?
         .ok_or_else(|| format!("link '{query}' has no grooph parameters"))?;
     let href = link.to_url("/").ok_or_else(|| format!("link '{query}' has no URL form"))?;

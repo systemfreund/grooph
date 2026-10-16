@@ -1,4 +1,6 @@
-pub(super) const fn lcm(a: u32, b: u32) -> u32 { (a / gcd(a, b)) * b }
+pub(super) const fn lcm(a: u32, b: u32) -> u32 {
+    (a / gcd(a, b)) * b
+}
 
 pub(super) const fn gcd(mut a: u32, mut b: u32) -> u32 {
     while b != 0 {

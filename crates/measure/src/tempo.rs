@@ -115,7 +115,9 @@ impl ScoreTiming {
         self
     }
 
-    pub fn swing(&self) -> Swing { self.swing }
+    pub fn swing(&self) -> Swing {
+        self.swing
+    }
 
     /// Global tick at which a note written at `(measure_idx, local_tick)` is
     /// heard, i.e. with swing applied.
@@ -135,20 +137,38 @@ impl ScoreTiming {
         self.measure_starts[idx] as f64 + written
     }
 
-    pub fn bpm(&self) -> u32 { self.bpm }
-    pub fn measure_count(&self) -> usize { self.measure_ticks.len() }
-    pub fn total_loop_ticks(&self) -> u64 { self.total_loop_ticks }
-    pub fn total_loop_seconds(&self) -> f64 { self.total_loop_seconds }
+    pub fn bpm(&self) -> u32 {
+        self.bpm
+    }
+    pub fn measure_count(&self) -> usize {
+        self.measure_ticks.len()
+    }
+    pub fn total_loop_ticks(&self) -> u64 {
+        self.total_loop_ticks
+    }
+    pub fn total_loop_seconds(&self) -> f64 {
+        self.total_loop_seconds
+    }
 
-    pub fn ticks_per_beat_in_measure(&self, idx: usize) -> u32 { self.ticks_per_beat[idx] }
-    pub fn ticks_per_measure(&self, idx: usize) -> u32 { self.measure_ticks[idx] }
+    pub fn ticks_per_beat_in_measure(&self, idx: usize) -> u32 {
+        self.ticks_per_beat[idx]
+    }
+    pub fn ticks_per_measure(&self, idx: usize) -> u32 {
+        self.measure_ticks[idx]
+    }
     pub fn ticks_per_sec_in_measure(&self, idx: usize) -> f64 {
         let spt = self.seconds_per_tick[idx];
         if spt > 0.0 { 1.0 / spt } else { 0.0 }
     }
-    pub fn seconds_per_tick_in_measure(&self, idx: usize) -> f64 { self.seconds_per_tick[idx] }
-    pub fn measure_start_tick(&self, idx: usize) -> u64 { self.measure_starts[idx] }
-    pub fn measure_start_seconds(&self, idx: usize) -> f64 { self.measure_seconds_starts[idx] }
+    pub fn seconds_per_tick_in_measure(&self, idx: usize) -> f64 {
+        self.seconds_per_tick[idx]
+    }
+    pub fn measure_start_tick(&self, idx: usize) -> u64 {
+        self.measure_starts[idx]
+    }
+    pub fn measure_start_seconds(&self, idx: usize) -> f64 {
+        self.measure_seconds_starts[idx]
+    }
 
     /// Forward: `(measure_idx, local_tick) → global_tick`.
     pub fn to_global_tick(&self, measure_idx: usize, local_tick: u32) -> u64 {
@@ -351,7 +371,7 @@ mod tests {
     #[test]
     fn swing_moves_performed_onsets_not_measures() {
         use crate::duration::{e, q};
-        use crate::swing::{SwingUnit, Swing};
+        use crate::swing::{Swing, SwingUnit};
         let s = score_of(&[TimeSignature::FOUR_FOUR, TimeSignature::FOUR_FOUR]);
         let straight = ScoreTiming::from_score(&s, 120);
         let t = straight.clone().with_swing(Swing { unit: SwingUnit::Eighths, percent: 75 });

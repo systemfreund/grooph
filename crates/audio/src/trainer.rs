@@ -72,7 +72,9 @@ pub(crate) struct GapDecider {
 }
 
 impl GapDecider {
-    pub(crate) fn new(seed: u64) -> Self { Self { rng: seed | 1, bar: None, muted: false } }
+    pub(crate) fn new(seed: u64) -> Self {
+        Self { rng: seed | 1, bar: None, muted: false }
+    }
 
     /// Forget the current bar and reseed for a new run.
     pub(crate) fn reset(&mut self, seed: u64) {

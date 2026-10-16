@@ -27,8 +27,6 @@ wasm-bindgen-futures = { workspace = true }
 web-sys = { workspace = true }
 getrandom = { workspace = true }
 
-[lints.rust]
-unused_imports = "allow"
 
 [dev-dependencies]
 ron = "0.12"

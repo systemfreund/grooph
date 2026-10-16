@@ -12,15 +12,25 @@ pub struct Score {
 }
 
 impl Score {
-    pub fn single(measure: Measure) -> Self { Self { measures: vec![measure] } }
+    pub fn single(measure: Measure) -> Self {
+        Self { measures: vec![measure] }
+    }
 
-    pub fn current(&self, idx: MeasureIdx) -> &Measure { &self.measures[idx] }
+    pub fn current(&self, idx: MeasureIdx) -> &Measure {
+        &self.measures[idx]
+    }
 
-    pub fn current_mut(&mut self, idx: MeasureIdx) -> &mut Measure { &mut self.measures[idx] }
+    pub fn current_mut(&mut self, idx: MeasureIdx) -> &mut Measure {
+        &mut self.measures[idx]
+    }
 
-    pub fn len(&self) -> usize { self.measures.len() }
+    pub fn len(&self) -> usize {
+        self.measures.len()
+    }
 
-    pub fn is_empty(&self) -> bool { self.measures.is_empty() }
+    pub fn is_empty(&self) -> bool {
+        self.measures.is_empty()
+    }
 }
 
 /// Position within a score: which measure, and which beat within that measure.
@@ -31,13 +41,19 @@ pub struct Cursor {
 }
 
 impl Cursor {
-    pub fn start() -> Self { Self { measure_idx: 0, beat_idx: 0 } }
+    pub fn start() -> Self {
+        Self { measure_idx: 0, beat_idx: 0 }
+    }
 
-    pub fn at(measure_idx: MeasureIdx, beat_idx: BeatIdx) -> Self { Self { measure_idx, beat_idx } }
+    pub fn at(measure_idx: MeasureIdx, beat_idx: BeatIdx) -> Self {
+        Self { measure_idx, beat_idx }
+    }
 }
 
 impl Default for Cursor {
-    fn default() -> Self { Self::start() }
+    fn default() -> Self {
+        Self::start()
+    }
 }
 
 #[cfg(test)]

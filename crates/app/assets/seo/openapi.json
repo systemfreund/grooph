@@ -17,9 +17,16 @@
         "description": "Combine `r` (a written rhythm) or the generator parameters (`sub`, `lvl`, `bars`, `space`, `seed`), not both. `ts` on its own opens a one-measure metronome in that meter.",
         "parameters": [
           {
+            "name": "v",
+            "in": "query",
+            "description": "Link version. Use 2: `bpm` then counts quarter notes in every time signature. Without `v` (version 1), `bpm` counts the meter's beat unit (eighths in x/8, sixteenths in x/16) and is converted to quarters.",
+            "schema": { "type": "integer", "minimum": 1, "maximum": 2 },
+            "example": 2
+          },
+          {
             "name": "bpm",
             "in": "query",
-            "description": "Tempo in beats per minute.",
+            "description": "Tempo in quarter notes per minute (with `v=2`).",
             "schema": { "type": "integer", "minimum": 20, "maximum": 300 },
             "example": 90
           },

@@ -4,8 +4,8 @@ use crate::{Mode, tools};
 use eframe::egui;
 use eframe::egui::scroll_area::{ScrollBarVisibility, ScrollSource};
 use eframe::egui::{
-    Align, Align2, Atom, Button, Direction, FontFamily, FontId, Id, Label, Layout, Pos2, Rect,
-    Response, RichText, Ui, Vec2, Widget,
+    Align, Align2, Atom, Button, Direction, FontFamily, FontId, Id, Layout, Pos2, Rect, Response,
+    RichText, Ui, Vec2,
 };
 use grooph_layout::glyphs;
 use grooph_layout::pixel_layout::{
