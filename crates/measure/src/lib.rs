@@ -18,15 +18,13 @@ pub mod tuplet;
 use BeatKind::Note;
 use BeatKind::Rest;
 pub use beat::{Beat, BeatKind};
-use duration::NoteValue::{Eighth, Sixteenth, ThirtySecond};
 use duration::{Duration, TupletSpec};
 use editing::{GroupSpan, Modification};
 use either::Either;
 use grid::DEFAULT_GRID;
 pub use score::{Cursor, MeasureIdx, Score};
 use serde::{Deserialize, Serialize};
-use std::fmt::{Debug, Display, Formatter};
-use std::vec;
+use std::fmt::{Debug, Formatter};
 pub use time_signature::{ParseTimeSignatureError, TimeSignature};
 pub use tuplet::{TupletAnchor, TupletGroupId, TupletRegistry};
 
@@ -76,7 +74,9 @@ pub struct Measure {
 
 impl Measure {
     /// Creates a new empty measure with the given time signature
-    pub fn new(time_signature: TimeSignature) -> Self { Self::new_init(time_signature, Rest) }
+    pub fn new(time_signature: TimeSignature) -> Self {
+        Self::new_init(time_signature, Rest)
+    }
 
     pub fn new_init(time_signature: TimeSignature, init: BeatKind) -> Self {
         let mut s = Self { beats: Vec::new(), time_signature, tuplets: TupletRegistry::new() };
@@ -85,12 +85,18 @@ impl Measure {
     }
 
     /// Read-only access to the tuplet anchor registry.
-    pub fn tuplets(&self) -> &TupletRegistry { &self.tuplets }
+    pub fn tuplets(&self) -> &TupletRegistry {
+        &self.tuplets
+    }
 
     /// Expose a read-only view of beats
-    pub fn beats(&self) -> &Vec<Beat> { &self.beats }
+    pub fn beats(&self) -> &Vec<Beat> {
+        &self.beats
+    }
 
-    pub fn delete_beat(&mut self, idx: BeatIdx) { self.beats.remove(idx); }
+    pub fn delete_beat(&mut self, idx: BeatIdx) {
+        self.beats.remove(idx);
+    }
 
     /// Replace the beat at index `idx` with `beat` if it fits and the remainder stays fillable.
     ///
@@ -364,7 +370,9 @@ impl Measure {
         absorb_ticks
     }
 
-    pub fn time_signature(&self) -> TimeSignature { self.time_signature }
+    pub fn time_signature(&self) -> TimeSignature {
+        self.time_signature
+    }
 
     /// Inclusive index range of the tuplet group that contains the beat at `idx`,
     /// together with the group's stable id.
@@ -497,7 +505,9 @@ impl Measure {
         onsets.into_iter().map(|t| 1.0f32 + (t as f32) / (ticks_per_beat as f32)).collect()
     }
 
-    fn max_ticks(&self) -> u32 { DEFAULT_GRID.ticks_per_measure(&self.time_signature) }
+    fn max_ticks(&self) -> u32 {
+        DEFAULT_GRID.ticks_per_measure(&self.time_signature)
+    }
 
     pub fn remove(&mut self, idx: BeatIdx) {
         if idx >= self.beats.len() {

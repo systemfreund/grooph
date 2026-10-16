@@ -58,7 +58,9 @@ pub struct Page {
 }
 
 /// Directory with the Markdown sources.
-pub fn content_dir() -> PathBuf { Path::new(env!("CARGO_MANIFEST_DIR")).join("content") }
+pub fn content_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("content")
+}
 
 /// Load every page under `dir`, sorted by section and order.
 pub fn load_pages(dir: &Path) -> Result<Vec<Page>, String> {
@@ -538,7 +540,9 @@ fn measure_grid(measure: &Measure) -> String {
     out
 }
 
-fn ticks_of(beat: &Beat) -> u32 { DEFAULT_GRID.ticks_of(&beat.duration).unwrap_or(0) }
+fn ticks_of(beat: &Beat) -> u32 {
+    DEFAULT_GRID.ticks_of(&beat.duration).unwrap_or(0)
+}
 
 fn cell(beat: &Beat, onset: u32, ts: TimeSignature) -> String {
     let class = match (beat.kind, beat.accented) {

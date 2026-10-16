@@ -18,9 +18,13 @@ pub(crate) enum WavError {
     Truncated,
 }
 
-fn u16_at(b: &[u8], i: usize) -> Option<u16> { Some(u16::from_le_bytes(b.get(i..i + 2)?.try_into().ok()?)) }
+fn u16_at(b: &[u8], i: usize) -> Option<u16> {
+    Some(u16::from_le_bytes(b.get(i..i + 2)?.try_into().ok()?))
+}
 
-fn u32_at(b: &[u8], i: usize) -> Option<u32> { Some(u32::from_le_bytes(b.get(i..i + 4)?.try_into().ok()?)) }
+fn u32_at(b: &[u8], i: usize) -> Option<u32> {
+    Some(u32::from_le_bytes(b.get(i..i + 4)?.try_into().ok()?))
+}
 
 pub(crate) fn decode(bytes: &[u8]) -> Result<SampleData, WavError> {
     if bytes.get(0..4) != Some(b"RIFF") || bytes.get(8..12) != Some(b"WAVE") {
@@ -60,7 +64,12 @@ pub(crate) fn decode(bytes: &[u8]) -> Result<SampleData, WavError> {
     Err(WavError::Truncated)
 }
 
-fn decode_frames(data: &[u8], format: u16, channels: usize, bits: u16) -> Result<Vec<f32>, WavError> {
+fn decode_frames(
+    data: &[u8],
+    format: u16,
+    channels: usize,
+    bits: u16,
+) -> Result<Vec<f32>, WavError> {
     let width = (bits as usize).div_ceil(8);
     let read: fn(&[u8]) -> f32 = match (format, bits) {
         (1, 8) => |b| (b[0] as f32 - 128.0) / 128.0,

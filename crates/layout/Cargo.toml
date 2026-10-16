@@ -9,5 +9,3 @@ license.workspace = true
 grooph-measure = { workspace = true }
 egui = { workspace = true }
 
-[lints.rust]
-unused_imports = "allow"

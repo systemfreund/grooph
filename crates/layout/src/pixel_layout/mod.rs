@@ -122,9 +122,13 @@ pub struct LayoutOpts {
 }
 
 impl LayoutOpts {
-    pub(super) const fn staff_space(&self) -> f32 { self.em * 0.25 }
+    pub(super) const fn staff_space(&self) -> f32 {
+        self.em * 0.25
+    }
 
-    pub(super) const fn stem_length(&self) -> f32 { self.em * self.stem_length_factor }
+    pub(super) const fn stem_length(&self) -> f32 {
+        self.em * self.stem_length_factor
+    }
 
     pub const fn stem_thickness(&self) -> f32 {
         self.snap_thickness(self.em * self.stem_thickness_factor)
@@ -139,14 +143,22 @@ impl LayoutOpts {
         0.5 * self.staff_space()
     }
 
-    pub(super) const fn beam_gap(&self) -> f32 { 0.25 * self.staff_space() }
+    pub(super) const fn beam_gap(&self) -> f32 {
+        0.25 * self.staff_space()
+    }
 
-    pub(super) const fn stub_length(&self) -> f32 { self.em * 0.20 }
+    pub(super) const fn stub_length(&self) -> f32 {
+        self.em * 0.20
+    }
 
-    pub const fn bracket_thickness(&self) -> f32 { self.em * 0.02 }
+    pub const fn bracket_thickness(&self) -> f32 {
+        self.em * 0.02
+    }
 
     /// Y of the staff line (note heads sit on it).
-    pub fn y_center(&self) -> f32 { self.rect.center().y + self.y_offset }
+    pub fn y_center(&self) -> f32 {
+        self.rect.center().y + self.y_offset
+    }
 
     const fn snap_thickness(&self, t: f32) -> f32 {
         let ppp = self.pixels_per_point;

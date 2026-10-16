@@ -1,5 +1,5 @@
 use crate::beat::BeatKind::{Note, Rest};
-use crate::duration::{Duration, duration_to_debug_str};
+use crate::duration::Duration;
 use crate::tuplet::TupletGroupId;
 use serde::{Deserialize, Serialize};
 use std::fmt::{Debug, Formatter};

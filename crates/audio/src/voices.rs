@@ -92,7 +92,9 @@ impl VoiceMixer {
 
     /// `true` when no voice is currently sounding. Used by the orchestrator to
     /// decide when it is safe to pause the audio sink without a click.
-    pub(crate) fn is_silent(&self) -> bool { self.voices.is_empty() }
+    pub(crate) fn is_silent(&self) -> bool {
+        self.voices.is_empty()
+    }
 
     /// Spawn a voice playing `patch`. If the polyphony cap is reached the
     /// oldest voice is dropped first.
@@ -105,11 +107,8 @@ impl VoiceMixer {
         let voice = match patch {
             Patch::Click { tone, noise, gain } => {
                 let hz = tone.hz.max(1.0);
-                let tone_signal: Signal = Box::new(SignalGenerator::new(
-                    self.sample_rate,
-                    hz,
-                    tone.waveform.to_rodio(),
-                ));
+                let tone_signal: Signal =
+                    Box::new(SignalGenerator::new(self.sample_rate, hz, tone.waveform.to_rodio()));
                 let noise = noise.map(|n| {
                     let signal: Signal =
                         Box::new(WhiteUniform::new(self.sample_rate).high_pass(n.hpf_hz as u32));
@@ -163,7 +162,11 @@ mod tests {
     }
 
     fn sample(frames: Vec<f32>, rate: u32, playback_rate: f32) -> Patch {
-        Patch::Sample { data: Arc::new(SampleData { rate, frames }), rate: playback_rate, gain: 1.0 }
+        Patch::Sample {
+            data: Arc::new(SampleData { rate, frames }),
+            rate: playback_rate,
+            gain: 1.0,
+        }
     }
 
     #[test]
@@ -241,7 +244,8 @@ mod tests {
     fn higher_playback_rate_shortens_the_sample() {
         let mut mixer = VoiceMixer::new(48000);
         mixer.trigger(sample(vec![0.5; 100], 48000, 2.0));
-        let samples = std::iter::from_fn(|| (!mixer.is_silent()).then(|| mixer.next_sample())).count();
+        let samples =
+            std::iter::from_fn(|| (!mixer.is_silent()).then(|| mixer.next_sample())).count();
         // 50 output samples plus the one that drops the finished voice.
         assert_eq!(samples, 51);
     }

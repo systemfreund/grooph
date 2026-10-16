@@ -9,8 +9,8 @@ mod keyboard_input;
 mod library;
 mod library_panel;
 mod main_menu;
-mod metronome_trainer;
 mod measure_panel;
+mod metronome_trainer;
 mod midi_input_widget;
 mod mixer_panel;
 mod platform;
@@ -44,7 +44,7 @@ use crate::state::{
 use crate::tools::ToolKind;
 use crate::tools::{BeatTemplate, Modifier, all_tools};
 use crate::undo::{DEFAULT_UNDO_LIMIT, EditorSnapshot, UndoHistory};
-use eframe::egui::{Context, TextStyle, Ui, Widget};
+use eframe::egui::{Context, Ui};
 use eframe::epaint::text::{FontInsert, InsertFontFamily};
 use eframe::epaint::{FontFamily, FontId};
 use eframe::{App, CreationContext, egui};
@@ -59,7 +59,7 @@ use grooph_measure::generator::GeneratorSettings;
 use grooph_measure::swing::Swing;
 use grooph_measure::tempo::ScoreTiming;
 use grooph_measure::{Beat, BeatKind};
-use grooph_midi::{MidiInput, MidiInputEvent};
+use grooph_midi::MidiInput;
 use log::{debug, info, warn};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -254,7 +254,9 @@ struct StoredCountingSettings {
     show_tuplets: bool,
 }
 
-fn yes() -> bool { true }
+fn yes() -> bool {
+    true
+}
 
 impl From<StoredCountingSettings> for CountingSettings {
     fn from(s: StoredCountingSettings) -> Self {

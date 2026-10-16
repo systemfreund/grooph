@@ -1,7 +1,7 @@
 use crate::Grooph;
 use crate::accuracy::{AccuracyMark, HitGrade, clamp_diff_to_beat_window};
-use crate::tools::{Modifier, ToolKind, all_tools};
 use crate::state::{COUNT_IN_WAIT_TIMEOUT_S, CountInState};
+use crate::tools::{Modifier, ToolKind, all_tools};
 use crate::{Mode, TransportState};
 use eframe::egui;
 use eframe::egui::{FontId, Frame, Rect, Response, Stroke};
@@ -10,8 +10,8 @@ use grooph_layout::staff_layout::{
     PlacedMeasure, ROOM_BELOW_EM, ROOM_BELOW_WITH_LABELS_EM, StaffLayout, StaffOpts,
     build_staff_layout,
 };
-use grooph_measure::grid::DEFAULT_GRID;
 use grooph_measure::TimeSignature;
+use grooph_measure::grid::DEFAULT_GRID;
 use grooph_measure::tempo::ScoreTiming;
 use grooph_render::measure_glyph_metrics;
 use grooph_render::staff::draw_staff;
@@ -579,4 +579,3 @@ mod tests {
         assert_eq!(primary_beat_index(&ts, tick(3)), 1);
     }
 }
-

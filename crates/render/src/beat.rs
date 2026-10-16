@@ -1,5 +1,5 @@
 use eframe::egui;
-use eframe::egui::{Align2, Color32, FontId, Stroke};
+use eframe::egui::{Align2, Color32, Stroke};
 use grooph_layout::glyphs;
 use grooph_layout::pixel_layout::{LayoutOpts, NoteLayout};
 use grooph_measure::BeatKind;

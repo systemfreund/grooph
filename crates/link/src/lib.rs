@@ -278,7 +278,9 @@ mod tests {
     use grooph_measure::Beat;
     use grooph_measure::duration::{e, q};
 
-    fn parse(query: &str) -> SharedLink { parse_query(query).unwrap().unwrap() }
+    fn parse(query: &str) -> SharedLink {
+        parse_query(query).unwrap().unwrap()
+    }
 
     #[test]
     fn query_without_link_parameters_is_ignored() {

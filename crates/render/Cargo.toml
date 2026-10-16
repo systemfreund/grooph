@@ -11,5 +11,3 @@ grooph-layout = { workspace = true }
 eframe = { workspace = true }
 egui = { workspace = true }
 
-[lints.rust]
-unused_imports = "allow"

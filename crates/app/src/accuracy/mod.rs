@@ -11,4 +11,3 @@ pub(crate) use session::{
     compute_global_beat_onsets,
 };
 pub(crate) use state::AccuracyState;
-pub(crate) use tracker::AccuracyTracker;

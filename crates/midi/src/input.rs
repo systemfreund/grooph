@@ -83,7 +83,9 @@ pub struct MidiInputEventQueue {
 
 impl MidiInputEventQueue {
     /// Create a new MIDI input event queue
-    pub fn new() -> Self { Self { inner: Arc::new(Mutex::new(VecDeque::new())) } }
+    pub fn new() -> Self {
+        Self { inner: Arc::new(Mutex::new(VecDeque::new())) }
+    }
 
     /// Drain all queued events
     pub fn drain(&self) -> Vec<MidiInputEvent> {
@@ -149,7 +151,9 @@ impl MidiInputEventQueue {
 }
 
 impl Default for MidiInputEventQueue {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 /// Tuning parameters for [`ClockSync`].
@@ -192,7 +196,9 @@ impl ClockSyncConfig {
 }
 
 impl Default for ClockSyncConfig {
-    fn default() -> Self { Self::DEFAULT }
+    fn default() -> Self {
+        Self::DEFAULT
+    }
 }
 
 /// Pure BPM-smoothing state machine driven by MIDI clock pulses.
@@ -212,11 +218,15 @@ pub struct ClockSync {
 }
 
 impl Default for ClockSync {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl ClockSync {
-    pub fn new() -> Self { Self::with_config(ClockSyncConfig::DEFAULT) }
+    pub fn new() -> Self {
+        Self::with_config(ClockSyncConfig::DEFAULT)
+    }
 
     pub fn with_config(cfg: ClockSyncConfig) -> Self {
         Self {
@@ -229,9 +239,13 @@ impl ClockSync {
         }
     }
 
-    pub fn bpm(&self) -> f32 { self.bpm }
+    pub fn bpm(&self) -> f32 {
+        self.bpm
+    }
 
-    pub fn config(&self) -> &ClockSyncConfig { &self.cfg }
+    pub fn config(&self) -> &ClockSyncConfig {
+        &self.cfg
+    }
 
     /// Reset only the interval accumulators (called on MIDI Start so that the
     /// next pulse establishes a fresh time reference). BPM is left intact.
@@ -303,12 +317,16 @@ struct MidiClockStateInner {
 }
 
 impl Default for MidiClockState {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl MidiClockState {
     /// Create a new MIDI clock state with the default smoothing config.
-    pub fn new() -> Self { Self::with_config(ClockSyncConfig::DEFAULT) }
+    pub fn new() -> Self {
+        Self::with_config(ClockSyncConfig::DEFAULT)
+    }
 
     /// Create a new MIDI clock state with a custom smoothing config.
     pub fn with_config(cfg: ClockSyncConfig) -> Self {
@@ -321,10 +339,14 @@ impl MidiClockState {
     }
 
     /// Get the current BPM calculated from MIDI clock.
-    pub fn bpm(&self) -> f32 { self.inner.lock().unwrap().sync.bpm() }
+    pub fn bpm(&self) -> f32 {
+        self.inner.lock().unwrap().sync.bpm()
+    }
 
     /// Check if MIDI clock is running (received start/continue, not stopped).
-    pub fn is_running(&self) -> bool { self.inner.lock().unwrap().running }
+    pub fn is_running(&self) -> bool {
+        self.inner.lock().unwrap().running
+    }
 
     /// Process a MIDI realtime message and update clock state.
     pub fn process_message(&self, message: &[u8]) {
@@ -471,16 +493,24 @@ impl MidiInput {
     }
 
     /// Check if connected to a MIDI input port
-    pub fn is_connected(&self) -> bool { self.connection.is_some() }
+    pub fn is_connected(&self) -> bool {
+        self.connection.is_some()
+    }
 
     /// Get the shared clock state for reading BPM
-    pub fn clock_state(&self) -> &MidiClockState { &self.clock_state }
+    pub fn clock_state(&self) -> &MidiClockState {
+        &self.clock_state
+    }
 
     /// Drain queued MIDI note events
-    pub fn drain_events(&self) -> Vec<MidiInputEvent> { self.event_queue.drain() }
+    pub fn drain_events(&self) -> Vec<MidiInputEvent> {
+        self.event_queue.drain()
+    }
 
     /// Current time in seconds relative to the MIDI input clock origin.
-    pub fn now_seconds(&self) -> f64 { clock_elapsed_seconds(clock_now(), self.clock_origin) }
+    pub fn now_seconds(&self) -> f64 {
+        clock_elapsed_seconds(clock_now(), self.clock_origin)
+    }
 
     /// Set a callback to be invoked when note/control events are enqueued.
     pub fn set_event_notifier(&mut self, notifier: Option<Arc<dyn Fn() + Send + Sync>>) {
@@ -515,17 +545,27 @@ impl MidiInput {
 }
 
 impl Drop for MidiInput {
-    fn drop(&mut self) { let _ = self.disconnect(); }
+    fn drop(&mut self) {
+        let _ = self.disconnect();
+    }
 }
 
 impl MidiMessageSource for MidiInput {
-    fn drain_events(&self) -> Vec<MidiInputEvent> { self.event_queue.drain() }
+    fn drain_events(&self) -> Vec<MidiInputEvent> {
+        self.event_queue.drain()
+    }
 
-    fn now_seconds(&self) -> f64 { Self::now_seconds(self) }
+    fn now_seconds(&self) -> f64 {
+        Self::now_seconds(self)
+    }
 
-    fn is_connected(&self) -> bool { Self::is_connected(self) }
+    fn is_connected(&self) -> bool {
+        Self::is_connected(self)
+    }
 
-    fn clock_state(&self) -> &MidiClockState { Self::clock_state(self) }
+    fn clock_state(&self) -> &MidiClockState {
+        Self::clock_state(self)
+    }
 }
 
 #[cfg(test)]
@@ -533,7 +573,9 @@ mod tests {
     use super::*;
     use std::cell::RefCell;
 
-    fn interval_for_bpm(bpm: f32, cpb: u32) -> f32 { 60.0 / (bpm * cpb as f32) }
+    fn interval_for_bpm(bpm: f32, cpb: u32) -> f32 {
+        60.0 / (bpm * cpb as f32)
+    }
 
     #[test]
     fn constant_60_bpm_converges() {
@@ -664,16 +706,24 @@ mod tests {
             }
         }
 
-        fn enqueue(&self, ev: MidiInputEvent) { self.events.borrow_mut().push(ev); }
+        fn enqueue(&self, ev: MidiInputEvent) {
+            self.events.borrow_mut().push(ev);
+        }
     }
 
     impl MidiMessageSource for MockMidiSource {
         fn drain_events(&self) -> Vec<MidiInputEvent> {
             std::mem::take(&mut *self.events.borrow_mut())
         }
-        fn now_seconds(&self) -> f64 { self.now }
-        fn is_connected(&self) -> bool { self.connected }
-        fn clock_state(&self) -> &MidiClockState { &self.clock_state }
+        fn now_seconds(&self) -> f64 {
+            self.now
+        }
+        fn is_connected(&self) -> bool {
+            self.connected
+        }
+        fn clock_state(&self) -> &MidiClockState {
+            &self.clock_state
+        }
     }
 
     #[test]

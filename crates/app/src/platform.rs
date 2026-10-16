@@ -72,7 +72,9 @@ pub(crate) fn link_query() -> Option<String> {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn link_query() -> Option<String> { None }
+pub(crate) fn link_query() -> Option<String> {
+    None
+}
 
 /// Remove the query string from the address bar without reloading.
 #[cfg(target_arch = "wasm32")]
@@ -105,7 +107,9 @@ pub(crate) fn share_base_url() -> String {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn share_base_url() -> String { "https://grooph.app/".into() }
+pub(crate) fn share_base_url() -> String {
+    "https://grooph.app/".into()
+}
 
 /// Open the system share sheet for `url` (Web Share API). Returns `false`
 /// where there is none (most desktop browsers, native), so the caller can
@@ -117,9 +121,8 @@ pub(crate) fn open_share_sheet(url: &str) -> bool {
 
     let Some(window) = web_sys::window() else { return false };
     let navigator: JsValue = window.navigator().into();
-    let Some(share) = Reflect::get(&navigator, &"share".into())
-        .ok()
-        .and_then(|f| f.dyn_into::<Function>().ok())
+    let Some(share) =
+        Reflect::get(&navigator, &"share".into()).ok().and_then(|f| f.dyn_into::<Function>().ok())
     else {
         return false;
     };
@@ -142,4 +145,6 @@ pub(crate) fn open_share_sheet(url: &str) -> bool {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn open_share_sheet(_url: &str) -> bool { false }
+pub(crate) fn open_share_sheet(_url: &str) -> bool {
+    false
+}

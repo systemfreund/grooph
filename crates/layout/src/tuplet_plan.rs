@@ -28,7 +28,9 @@ pub enum EdgeConnection {
 }
 
 impl TupletPlan {
-    pub fn is_externally_connected(&self) -> bool { self.edge_connection != EdgeConnection::None }
+    pub fn is_externally_connected(&self) -> bool {
+        self.edge_connection != EdgeConnection::None
+    }
 
     pub fn number_only(&self) -> bool {
         self.fully_beamed && !self.contains_rest && !self.is_externally_connected()

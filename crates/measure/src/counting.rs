@@ -17,7 +17,9 @@ pub struct LabelPattern {
 }
 
 impl LabelPattern {
-    pub fn single(token: LabelToken) -> Self { Self { slots: vec![vec![token]] } }
+    pub fn single(token: LabelToken) -> Self {
+        Self { slots: vec![vec![token]] }
+    }
 
     pub fn ands() -> Self {
         Self { slots: vec![vec![LabelToken::BeatNum], vec![LabelToken::Text("&".to_string())]] }
@@ -82,15 +84,7 @@ pub struct CountLayer {
 
 impl CountLayer {
     pub fn new(id: u32, scope: CountScope, subdiv: Subdiv) -> Self {
-        Self {
-            id,
-            enabled: true,
-            scope,
-            subdiv,
-            labels: None,
-            show_labels: true,
-            priority: 0,
-        }
+        Self { id, enabled: true, scope, subdiv, labels: None, show_labels: true, priority: 0 }
     }
 
     /// Whether the layer counts sensibly in `ts`: a beat-unit layer never
@@ -116,7 +110,9 @@ pub struct CountConfig {
 }
 
 impl CountConfig {
-    pub fn new(layers: Vec<CountLayer>) -> Self { Self { layers } }
+    pub fn new(layers: Vec<CountLayer>) -> Self {
+        Self { layers }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

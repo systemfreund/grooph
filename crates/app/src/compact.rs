@@ -12,8 +12,8 @@ use crate::presets::{self, PresetId};
 use crate::{Grooph, Mode, TransportState, platform};
 use eframe::egui;
 use eframe::egui::{
-    Align2, Button, Color32, CornerRadius, FontId, Frame, Id, Margin, Modal, Painter, Rect,
-    Response, RichText, Sense, Shape, Stroke, Ui, Vec2, pos2, vec2,
+    Align2, Button, Color32, FontId, Frame, Id, Margin, Modal, Painter, Rect, Response, RichText,
+    Sense, Shape, Stroke, Ui, Vec2, pos2, vec2,
 };
 use grooph_link::{LinkContent, SharedLink};
 use grooph_measure::generator::{MAX_BARS, MAX_COMPLEXITY, Subdivision, effective_subdivision};

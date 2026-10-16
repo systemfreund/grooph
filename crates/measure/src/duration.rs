@@ -2,7 +2,7 @@ use crate::math::{Frac, reduce};
 use NoteValue::{Eighth, Sixteenth, ThirtySecond};
 use NoteValue::{Half, Quarter, Whole};
 use serde::{Deserialize, Serialize};
-use std::fmt::{Debug, Formatter, Pointer};
+use std::fmt::{Debug, Formatter};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum NoteValue {
@@ -127,11 +127,15 @@ impl TupletKind {
 }
 
 impl From<&TupletSpec> for TupletKind {
-    fn from(s: &TupletSpec) -> Self { Self::from_n(s.n) }
+    fn from(s: &TupletSpec) -> Self {
+        Self::from_n(s.n)
+    }
 }
 
 impl TupletSpec {
-    pub const fn kind(&self) -> TupletKind { TupletKind::from_n(self.n) }
+    pub const fn kind(&self) -> TupletKind {
+        TupletKind::from_n(self.n)
+    }
 
     /// Two specs share a tuplet grid if their `(n, m)` matches.
     /// `base` may differ (e.g. `t8` and `t16` live in the same `3:2` grid).
@@ -164,10 +168,14 @@ impl Duration {
     }
 
     /// Public helper for weight/grids: denominator of the reduced fraction relative to whole note.
-    pub const fn denominator(&self) -> u32 { self.as_fraction().den }
+    pub const fn denominator(&self) -> u32 {
+        self.as_fraction().den
+    }
 
     /// `true` iff this duration is a tuplet.
-    pub const fn is_tuplet(&self) -> bool { matches!(self, Duration::Tuplet(_)) }
+    pub const fn is_tuplet(&self) -> bool {
+        matches!(self, Duration::Tuplet(_))
+    }
 
     /// Extract the tuplet spec, or `None` if not a tuplet.
     pub const fn as_tuplet_spec(&self) -> Option<TupletSpec> {
@@ -286,18 +294,42 @@ pub const COMMON_DURATIONS: [Duration; 16] = [
     nt16(),  // nonuplet 1/16
 ];
 
-pub const fn q() -> Duration { Duration::Simple(Quarter) }
-pub const fn e() -> Duration { Duration::Simple(Eighth) }
-pub const fn s() -> Duration { Duration::Simple(Sixteenth) }
-pub const fn th() -> Duration { Duration::Simple(ThirtySecond) }
-pub const fn t8() -> Duration { Duration::Tuplet(TupletSpec { n: 3, m: 2, base: Eighth }) }
-pub const fn t16() -> Duration { Duration::Tuplet(TupletSpec { n: 3, m: 2, base: Sixteenth }) }
-pub const fn t32() -> Duration { Duration::Tuplet(TupletSpec { n: 3, m: 2, base: ThirtySecond }) }
-pub const fn qt16() -> Duration { Duration::Tuplet(TupletSpec { n: 5, m: 4, base: Sixteenth }) }
-pub const fn st8() -> Duration { Duration::Tuplet(TupletSpec { n: 6, m: 4, base: Eighth }) }
-pub const fn st16() -> Duration { Duration::Tuplet(TupletSpec { n: 6, m: 4, base: Sixteenth }) }
-pub const fn spt16() -> Duration { Duration::Tuplet(TupletSpec { n: 7, m: 4, base: Sixteenth }) }
-pub const fn nt16() -> Duration { Duration::Tuplet(TupletSpec { n: 9, m: 8, base: Sixteenth }) }
+pub const fn q() -> Duration {
+    Duration::Simple(Quarter)
+}
+pub const fn e() -> Duration {
+    Duration::Simple(Eighth)
+}
+pub const fn s() -> Duration {
+    Duration::Simple(Sixteenth)
+}
+pub const fn th() -> Duration {
+    Duration::Simple(ThirtySecond)
+}
+pub const fn t8() -> Duration {
+    Duration::Tuplet(TupletSpec { n: 3, m: 2, base: Eighth })
+}
+pub const fn t16() -> Duration {
+    Duration::Tuplet(TupletSpec { n: 3, m: 2, base: Sixteenth })
+}
+pub const fn t32() -> Duration {
+    Duration::Tuplet(TupletSpec { n: 3, m: 2, base: ThirtySecond })
+}
+pub const fn qt16() -> Duration {
+    Duration::Tuplet(TupletSpec { n: 5, m: 4, base: Sixteenth })
+}
+pub const fn st8() -> Duration {
+    Duration::Tuplet(TupletSpec { n: 6, m: 4, base: Eighth })
+}
+pub const fn st16() -> Duration {
+    Duration::Tuplet(TupletSpec { n: 6, m: 4, base: Sixteenth })
+}
+pub const fn spt16() -> Duration {
+    Duration::Tuplet(TupletSpec { n: 7, m: 4, base: Sixteenth })
+}
+pub const fn nt16() -> Duration {
+    Duration::Tuplet(TupletSpec { n: 9, m: 8, base: Sixteenth })
+}
 
 #[cfg(test)]
 mod tests {

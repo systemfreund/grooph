@@ -18,7 +18,9 @@ pub struct TimeSignature {
     pub grouping: u8,
 }
 
-fn is_zero(v: &u8) -> bool { *v == 0 }
+fn is_zero(v: &u8) -> bool {
+    *v == 0
+}
 
 impl TimeSignature {
     /// Most beats per measure the app offers (over any beat unit).
@@ -42,18 +44,26 @@ impl TimeSignature {
     pub const TWELVE_EIGHT: Self = Self::new(12, 8);
 
     /// `beats/beat_unit` in its usual grouping.
-    pub const fn new(beats: u8, beat_unit: u8) -> Self { Self { beats, beat_unit, grouping: 0 } }
+    pub const fn new(beats: u8, beat_unit: u8) -> Self {
+        Self { beats, beat_unit, grouping: 0 }
+    }
 
     /// The same meter in grouping `grouping` (see [`Self::groupings`]).
-    pub const fn with_grouping(self, grouping: u8) -> Self { Self { grouping, ..self } }
+    pub const fn with_grouping(self, grouping: u8) -> Self {
+        Self { grouping, ..self }
+    }
 
     /// The groupings offered for this meter, the usual one first; e.g. 7/8 as
     /// 2+3+2, 2+2+3 and 3+2+2. Only the odd x/8 and x/16 meters (5, 7, 8, 10
     /// and 11 beats) offer more than one.
-    pub fn groupings(&self) -> Vec<Vec<u8>> { grouping::groupings(self.beats, self.beat_unit) }
+    pub fn groupings(&self) -> Vec<Vec<u8>> {
+        grouping::groupings(self.beats, self.beat_unit)
+    }
 
     /// The beat groups of this meter in beat units, e.g. `[2, 2, 3]`.
-    pub fn groups(&self) -> Vec<u8> { grouping::default_groups_for(self) }
+    pub fn groups(&self) -> Vec<u8> {
+        grouping::default_groups_for(self)
+    }
 
     /// Beats per measure the app offers over `beat_unit`: 1-7 quarters,
     /// 3-13 eighths, 5-19 sixteenths. `None` for other beat units.
