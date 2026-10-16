@@ -234,17 +234,14 @@ fn row_height_em(opts: &StaffOpts) -> f32 {
 pub fn build_staff_layout(score: &Score, opts: &StaffOpts) -> StaffLayout {
     assert!(!score.is_empty(), "Score must have at least one measure");
 
-    // 1. show-flags: clef only on first, TS on first + every change.
+    // 1. show-flags: clef only on first. The time signature only shows when
+    // the score mixes meters, then on the first measure + every change.
     let show_clef: Vec<bool> = (0..score.len()).map(|i| i == 0 && opts.layout_clef_first).collect();
-    let show_ts: Vec<bool> = (0..score.len())
-        .map(|i| {
-            if i == 0 {
-                true
-            } else {
-                score.measures[i].time_signature() != score.measures[i - 1].time_signature()
-            }
-        })
-        .collect();
+    let meter_changes_at =
+        |i: usize| score.measures[i].time_signature() != score.measures[i - 1].time_signature();
+    let mixed_meters = (1..score.len()).any(meter_changes_at);
+    let show_ts: Vec<bool> =
+        (0..score.len()).map(|i| mixed_meters && (i == 0 || meter_changes_at(i))).collect();
 
     // 2. natural widths at the baseline em.
     let widths_min: Vec<f32> = (0..score.len())
@@ -384,7 +381,7 @@ mod tests {
         assert_eq!(staff.systems[0].measures.len(), 1);
 
         let placed = &staff.systems[0].measures[0];
-        let direct = build_measure_layout(&m, &staff_opts.measure_opts(rect, true, true));
+        let direct = build_measure_layout(&m, &staff_opts.measure_opts(rect, true, false));
 
         assert_eq!(placed.layout.notes.len(), direct.notes.len());
         for (a, b) in placed.layout.notes.iter().zip(direct.notes.iter()) {
@@ -416,6 +413,24 @@ mod tests {
         let flags: Vec<bool> =
             staff.systems.iter().flat_map(|s| &s.measures).map(|m| m.show_time_signature).collect();
         assert_eq!(flags, vec![true, false, true, false]);
+    }
+
+    #[test]
+    fn staff_layout_hides_time_signature_for_single_meter() {
+        let em = 20.0;
+        let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(4000.0, 100.0));
+        let staff_opts = opts(em, rect);
+
+        let score = Score {
+            measures: vec![
+                measure_with_quarters(TimeSignature::THREE_FOUR),
+                measure_with_quarters(TimeSignature::THREE_FOUR),
+            ],
+        };
+
+        let staff = build_staff_layout(&score, &staff_opts);
+        let placed: Vec<_> = staff.systems.iter().flat_map(|s| &s.measures).collect();
+        assert!(placed.iter().all(|m| !m.show_time_signature && m.layout.time_signature.is_none()));
     }
 
     #[test]
