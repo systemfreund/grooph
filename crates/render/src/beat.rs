@@ -66,7 +66,7 @@ pub(super) fn draw_beat(
                 rect,
                 0.0,
                 Color32::TRANSPARENT,
-                Stroke::new(1.0, Color32::RED),
+                Stroke::new(1.0_f32, Color32::RED),
                 egui::StrokeKind::Outside,
             );
         }
@@ -75,7 +75,7 @@ pub(super) fn draw_beat(
                 rect,
                 0.0,
                 Color32::TRANSPARENT,
-                Stroke::new(1.0, Color32::GREEN),
+                Stroke::new(1.0_f32, Color32::GREEN),
                 egui::StrokeKind::Outside,
             );
         }

@@ -412,7 +412,7 @@ impl Grooph {
             let zero_end = egui::Pos2::new(note_layout.center.x, y + h);
             ui.painter().line_segment(
                 [zero_start, zero_end],
-                Stroke::new(2.0, egui::Color32::from_gray(140)),
+                Stroke::new(2.0_f32, egui::Color32::from_gray(140)),
             );
             let Some(local_onset) = local_onsets.get(idx) else {
                 continue;
@@ -440,12 +440,12 @@ impl Grooph {
                     let h_end = egui::Pos2::new(x, mid_y);
                     ui.painter().line_segment(
                         [h_start, h_end],
-                        Stroke::new(2.0, egui::Color32::from_gray(140)),
+                        Stroke::new(2.0_f32, egui::Color32::from_gray(140)),
                     );
                     let start = egui::Pos2::new(x, y);
                     let end = egui::Pos2::new(x, y + h);
                     ui.painter()
-                        .line_segment([start, end], Stroke::new(2.0, grade_color(grade, dark)));
+                        .line_segment([start, end], Stroke::new(2.0_f32, grade_color(grade, dark)));
                 }
                 AccuracyMark::Miss => {
                     let mid_y = y + h * 0.5;
@@ -454,7 +454,7 @@ impl Grooph {
                     let right = note_layout.center.x + half;
                     let top = mid_y - half;
                     let bottom = mid_y + half;
-                    let stroke = Stroke::new(2.0, grade_color(HitGrade::Off, dark));
+                    let stroke = Stroke::new(2.0_f32, grade_color(HitGrade::Off, dark));
                     ui.painter().line_segment(
                         [egui::Pos2::new(left, top), egui::Pos2::new(right, bottom)],
                         stroke,
