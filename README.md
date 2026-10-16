@@ -133,6 +133,19 @@ Important root files:
   holds the cursor at 0 (`CountInState`) and re-anchors the accuracy session
   when the count-in ends.
 
+## Sounds
+
+- Two voices (`crates/audio/src/sounds.rs`): the rhythm (`Beat`, `AccentedBeat`,
+  `Ghost`) uses `AudioSettings::rhythm_sound`, the metronome (`Downbeat`,
+  `PrimaryBeat`, `CountIn`) `AudioSettings::metronome_sound`. `SoundType::patch`
+  turns a hit into a `Patch`: the configurable `Click` (waveform, frequency, noise)
+  or an embedded WAV sample, both with the mixer gain of that sound type.
+- Samples live in `crates/audio/samples/` and are listed in `SAMPLES`
+  (`include_bytes!`, decoded once by the small decoder in `wav.rs`).
+  `MetronomeSound::Claves` (default) plays `claves3.wav` on the downbeat and
+  `claves4.wav` on the other primary beats and the count-in.
+- `VoiceMixer` (`voices.rs`) plays samples resampled to the device rate.
+
 ## Metronome trainer
 
 - `grooph_audio::{GapClick, TempoRamp}` (`crates/audio/src/trainer.rs`), carried in

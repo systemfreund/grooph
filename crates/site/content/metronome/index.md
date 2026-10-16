@@ -90,8 +90,10 @@ mute web audio while the ringer switch is set to silent.
 
 ### Can I change the click sound?
 
-Yes. The mixer (speaker icon) sets the volume of the downbeat, normal beats, accents and
-ghost notes. The settings let you pick the waveform of the click.
+Yes. By default the metronome plays claves: a high hit on the downbeat and a lower one on
+the other main beats. Under Settings → Sounds you can switch the metronome to a plain
+click, whose waveform you can change. The mixer (speaker icon) sets the volume of the
+downbeat, main beats, accents, notes and ghost notes.
 
 ### Can it keep a steady pulse for odd meters?
 

@@ -4,7 +4,7 @@ use crate::play_along::{HitSource, MAX_INPUT_OFFSET_MS, TapKey};
 use crate::{CountingBase, Mode};
 use eframe::egui;
 use eframe::egui::global_theme_preference_buttons;
-use grooph_audio::Waveform;
+use grooph_audio::{MetronomeSound, RhythmSound, Waveform};
 
 impl Grooph {
     pub(super) fn settings_panel(&mut self, ui: &mut egui::Ui) {
@@ -14,6 +14,32 @@ impl Grooph {
             |ui| {
                 ui.set_min_height(300.0);
                 egui::ScrollArea::vertical().show(ui, |ui| {
+                    egui::CollapsingHeader::new("Sounds").default_open(false).show(ui, |ui| {
+                        let settings = &mut self.playback_ctl.audio_cfg.settings;
+                        egui::ComboBox::from_label("Metronome")
+                            .selected_text(settings.metronome_sound.label())
+                            .show_ui(ui, |ui| {
+                                for sound in MetronomeSound::ALL {
+                                    ui.selectable_value(
+                                        &mut settings.metronome_sound,
+                                        sound,
+                                        sound.label(),
+                                    );
+                                }
+                            });
+                        egui::ComboBox::from_label("Rhythm")
+                            .selected_text(settings.rhythm_sound.label())
+                            .show_ui(ui, |ui| {
+                                for sound in RhythmSound::ALL {
+                                    ui.selectable_value(
+                                        &mut settings.rhythm_sound,
+                                        sound,
+                                        sound.label(),
+                                    );
+                                }
+                            });
+                    });
+
                     egui::CollapsingHeader::new("Click").default_open(false).show(ui, |ui| {
                         ui.label("Decay:");
                         ui.add(

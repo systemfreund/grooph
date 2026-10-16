@@ -1,8 +1,11 @@
 mod schedule;
+mod sounds;
 mod tick_source;
 mod trainer;
 mod voices;
+mod wav;
 
+pub use sounds::{MetronomeSound, RhythmSound};
 pub use trainer::{GapClick, GapMode, GapMute, RampEnd, RampUnit, TempoRamp};
 
 use crate::tick_source::{CountInPlan, TickSource};
@@ -56,6 +59,12 @@ pub struct AudioSettings {
     /// Volume of ghost notes. Defaulted so older persisted settings still load.
     #[serde(default = "default_ghost_gain")]
     pub ghost: f32,
+    /// Sound of notes, accents and ghost notes.
+    #[serde(default)]
+    pub rhythm_sound: RhythmSound,
+    /// Sound of downbeat, primary beats and count-in.
+    #[serde(default)]
+    pub metronome_sound: MetronomeSound,
 }
 
 fn default_ghost_gain() -> f32 { 0.25 }
@@ -74,6 +83,8 @@ impl Default for AudioSettings {
             noise_mix: 0.05,
             noise_decay: 0.017,
             ghost: default_ghost_gain(),
+            rhythm_sound: RhythmSound::default(),
+            metronome_sound: MetronomeSound::default(),
         }
     }
 }
@@ -99,6 +110,8 @@ impl AudioSettings {
             noise_mix: 0.0,
             noise_decay: 0.05,
             ghost: default_ghost_gain(),
+            rhythm_sound: RhythmSound::default(),
+            metronome_sound: MetronomeSound::default(),
         };
         result.clamped()
     }
@@ -482,7 +495,7 @@ impl Iterator for MetronomeSource {
                 if muted && sound.muted_by(mute) {
                     continue;
                 }
-                self.voices.trigger(sound, &self.local_params.audio_settings);
+                self.voices.trigger(sound.patch(&self.local_params.audio_settings));
             }
         } else if self.samples_processed.is_multiple_of(8192) {
             debug!(
@@ -492,7 +505,7 @@ impl Iterator for MetronomeSource {
         }
 
         self.samples_processed += 1;
-        Some(self.voices.next_sample(self.local_params.audio_settings.noise_mix))
+        Some(self.voices.next_sample())
     }
 }
 
