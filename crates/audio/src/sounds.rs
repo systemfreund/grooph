@@ -204,6 +204,7 @@ fn click(sound: SoundType, settings: &AudioSettings) -> Patch {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use grooph_measure::click::ClickPatterns;
 
     #[test]
     fn click_patch_matches_the_sound_settings() {
@@ -282,7 +283,7 @@ mod tests {
         let score = Score { measures: vec![Measure::new(TimeSignature::FOUR_FOUR)] };
         let timing = ScoreTiming::from_score(&score, 120);
         let mut sounds = Vec::new();
-        Schedule::build(&score, &timing, None).collect_in_range(
+        Schedule::build(&score, &timing, None, &ClickPatterns::default()).collect_in_range(
             0,
             timing.total_loop_ticks() as f64,
             &mut sounds,

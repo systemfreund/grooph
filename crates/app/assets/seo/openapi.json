@@ -78,6 +78,12 @@
             "in": "query",
             "description": "Swing unit: `16` swings sixteenths instead of eighths.",
             "schema": { "type": "string", "enum": ["8", "16"] }
+          },
+          {
+            "name": "click",
+            "in": "query",
+            "description": "Click pattern of the meter of `r` (its first measure) or `ts`: one letter per beat group, `S` strong, `M` medium, `L` soft, `-` off. 7/8 (2+3+2) has three groups, e.g. `S-L`. Default: strong on the first group, medium on the others.",
+            "schema": { "type": "string", "pattern": "^[SML-]+$" }
           }
         ],
         "responses": {

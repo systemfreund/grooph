@@ -50,6 +50,7 @@ use eframe::epaint::{FontFamily, FontId};
 use eframe::{App, CreationContext, egui};
 use grooph_audio::{AudioSettings, GapClick, PlaybackOptions, PlayerState, TempoRamp};
 use grooph_link::{LinkContent, SharedLink};
+use grooph_measure::click::ClickPatterns;
 use grooph_measure::counting::{
     CountConfig, CountLayer, CountScope, LabelPattern, LabelToken, Subdiv,
 };
@@ -127,6 +128,7 @@ struct PersistedState {
     gap_click: GapClick,
     tempo_ramp: TempoRamp,
     presets: PresetLibrary,
+    click_patterns: ClickPatterns,
 }
 
 impl Default for PersistedState {
@@ -155,6 +157,7 @@ impl Default for PersistedState {
             gap_click: GapClick::default(),
             tempo_ramp: TempoRamp::default(),
             presets: PresetLibrary::default(),
+            click_patterns: ClickPatterns::default(),
         }
     }
 }
@@ -189,6 +192,7 @@ impl PersistedState {
             gap_click: stash.map_or(app.playback_ctl.audio_cfg.gap, |s| s.gap),
             tempo_ramp: stash.map_or(app.playback_ctl.audio_cfg.ramp, |s| s.ramp),
             presets: app.editor.presets.clone(),
+            click_patterns: app.playback_ctl.audio_cfg.click.clone(),
         }
     }
 }
@@ -362,6 +366,12 @@ impl Grooph {
             swing: self.playback_ctl.audio_cfg.swing,
             gap: self.playback_ctl.audio_cfg.gap,
             ramp: self.playback_ctl.audio_cfg.ramp,
+            // Calibration clicks every beat, whatever the user's patterns.
+            click: if self.calibration_stash().is_some() {
+                ClickPatterns::default()
+            } else {
+                self.playback_ctl.audio_cfg.click.clone()
+            },
         }
     }
 
@@ -642,6 +652,11 @@ impl Grooph {
         }
         if let Some(swing) = link.swing {
             self.playback_ctl.audio_cfg.swing = swing;
+        }
+        if let Some(click) = link.click
+            && let Some(ts) = self.editor.score.measures.first().map(|m| m.time_signature())
+        {
+            self.playback_ctl.audio_cfg.click.set(ts, click);
         }
         self.playback_ctl.playback.reset();
         // The content is reproducible from the link, so it is not "unsaved".
@@ -954,6 +969,7 @@ impl Grooph {
                     swing: state.swing,
                     gap: state.gap_click,
                     ramp: state.tempo_ramp,
+                    click: state.click_patterns,
                 },
                 playback: PlaybackState::default(),
                 accuracy: AccuracyState::new(state.accuracy_enabled),

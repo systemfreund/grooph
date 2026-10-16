@@ -167,12 +167,21 @@ Important root files:
   see `crates/audio/samples/CREDITS.md`; add a row there with every new sample.
 - `VoiceMixer` (`voices.rs`) plays samples resampled to the device rate.
 - Mixer (`mixer_panel.rs`): a "Metronome" group (`downbeat`, `primary` as
-  "Beats", `pulse`, `count_in`) and a "Rhythm" group (`beat` as "Notes", `accent`,
+  "Beats", `soft`, `pulse`, `count_in`) and a "Rhythm" group (`beat` as "Notes", `accent`,
   `ghost`), each with a mute (`metronome_muted` / `rhythm_muted`, applied in
   `SoundType::profile`). The metronome mute leaves the count-in audible.
   `pulse` (default 0, off) clicks every beat unit between the primary beats
   (`SoundType::Pulse`, e.g. the eighths inside the groups of 7/8); sounds
   with zero gain are not triggered at all.
+- Click patterns (`grooph_measure::click`): one `ClickLevel` (strong, medium,
+  soft, off) per beat group of a meter. `ClickPatterns` (in `AudioConfig`,
+  persisted) keeps the ones that differ from the default (strong, then
+  medium), keyed by the whole `TimeSignature` including its grouping.
+  `Schedule::build` plays strong as `Downbeat`, medium as `PrimaryBeat`, soft
+  as `SoftBeat` (mixer "Soft"); off groups get no click, their pulse clicks
+  stay. The count-in and calibration ignore the patterns. Link parameter
+  `click` (`S`, `M`, `L`, `-` per group) sets the pattern of the link's first
+  meter; shared links carry it when it is not the default.
 
 ## Metronome trainer
 

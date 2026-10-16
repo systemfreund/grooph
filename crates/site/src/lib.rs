@@ -456,7 +456,8 @@ fn parse_attrs(attrs: &str) -> Result<(Option<u32>, Option<Swing>), String> {
 fn rhythm_block(notation: &str, attrs: &str, caption: &str) -> Result<String, String> {
     let score = parse_score(notation).map_err(|e| format!("rhythm '{notation}': {e}"))?;
     let (bpm, swing) = parse_attrs(attrs)?;
-    let link = SharedLink { bpm, swing, content: Some(LinkContent::Score(score.clone())) };
+    let link =
+        SharedLink { bpm, swing, content: Some(LinkContent::Score(score.clone())), click: None };
     let href = link.to_url("/").ok_or_else(|| format!("rhythm '{notation}' has no link form"))?;
 
     let mut out = String::from("<figure class=\"rhythm\">\n<div class=\"measures\">");

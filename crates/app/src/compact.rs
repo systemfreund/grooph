@@ -608,15 +608,20 @@ impl Grooph {
         }
     }
 
-    /// Share a link to the working score with tempo and swing: the system
-    /// share sheet where the browser has one, else the clipboard.
-    /// Link that opens the working score at the current tempo and swing.
+    /// Link that opens the working score at the current tempo and swing, with
+    /// the click pattern of its first meter if that is not the default.
     pub(crate) fn share_link_url(&self) -> Option<String> {
         let swing = self.playback_ctl.audio_cfg.swing;
         let link = SharedLink {
             bpm: Some(self.playback_ctl.bpm),
             swing: (!swing.is_straight()).then_some(swing),
             content: Some(LinkContent::Score(self.editor.score.clone())),
+            click: self
+                .editor
+                .score
+                .measures
+                .first()
+                .and_then(|m| self.playback_ctl.audio_cfg.click.custom_for(m.time_signature())),
         };
         let url = link.to_url(&platform::share_base_url());
         if url.is_none() {

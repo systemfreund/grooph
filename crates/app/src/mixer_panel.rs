@@ -57,6 +57,9 @@ impl Grooph {
                             |ui| {
                                 volume_slider(ui, &mut settings.downbeat, "Downbeat");
                                 volume_slider(ui, &mut settings.primary, "Beats");
+                                volume_slider(ui, &mut settings.soft, "Soft").on_hover_text(
+                                    "Beats the click pattern of the meter sets to soft",
+                                );
                                 volume_slider(ui, &mut settings.pulse, "Pulse").on_hover_text(
                                     "Clicks on every beat unit between the beats, e.g. all \
                                      seven eighths in 7/8. Set it to the Beats volume to \
