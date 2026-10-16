@@ -177,13 +177,7 @@ pub(crate) fn builtin_presets() -> Vec<(&'static str, PresetSettings)> {
         (
             "7/8 groove",
             PresetSettings {
-                generator: generator(
-                    Subdivision::Sixteenths,
-                    2,
-                    4,
-                    TimeSignature { beats: 7, beat_unit: 8 },
-                    0.2,
-                ),
+                generator: generator(Subdivision::Sixteenths, 2, 4, TimeSignature::new(7, 8), 0.2),
                 // BPM counts quarters: the eighths run at 100 per minute.
                 bpm: 50,
                 ..base

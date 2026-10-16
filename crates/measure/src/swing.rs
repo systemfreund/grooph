@@ -192,7 +192,7 @@ mod tests {
 
     #[test]
     fn trailing_incomplete_pair_stays_straight() {
-        let ts = TimeSignature { beats: 7, beat_unit: 8 };
+        let ts = TimeSignature::new(7, 8);
         let tpm = DEFAULT_GRID.ticks_per_measure(&ts);
         let sw = swing(SwingUnit::Eighths, 75);
         // Offbeat of the third full pair is swung ...

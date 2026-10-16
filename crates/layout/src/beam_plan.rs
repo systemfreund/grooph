@@ -348,6 +348,17 @@ mod tests {
     }
 
     #[test]
+    fn beaming_follows_the_picked_grouping_in_7_8() {
+        let mut m = Measure::new(TimeSignature::SEVEN_EIGHT.with_grouping(1));
+        for i in 0..7 {
+            m.set_beat(i, Beat::note(e())).unwrap();
+        }
+        let plan = compute_beam_plan(&m);
+        let groups: Vec<_> = plan.groups.iter().map(|g| g.beat_indices.clone()).collect();
+        assert_eq!(groups, [vec![0, 1], vec![2, 3], vec![4, 5, 6]]);
+    }
+
+    #[test]
     fn beaming_with_eighth_note_tuplet_precedence_in_seven_eight() {
         // Expected primary beaming by 2+3+2 with tuplet precedence -> groups:
         // [0,1,2], [3,4,5], [6,7]

@@ -308,7 +308,7 @@ mod tests {
         let s = score_of(&[
             TimeSignature::FOUR_FOUR,
             TimeSignature::FOUR_EIGHT,
-            TimeSignature { beats: 4, beat_unit: 16 },
+            TimeSignature::new(4, 16),
         ]);
         let t = ScoreTiming::from_score(&s, 120);
         let tps0 = t.ticks_per_sec_in_measure(0);

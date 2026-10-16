@@ -144,7 +144,7 @@ impl BeatSpan {
             BeatSpan::Eighth => (2, 16),
             BeatSpan::DottedEighth => (3, 16),
         };
-        TimeSignature { beats, beat_unit }
+        TimeSignature::new(beats, beat_unit)
     }
 
     /// Length of the span in beats of `beat_unit`, e.g. 2 for a quarter in
@@ -660,7 +660,7 @@ mod tests {
         CELLS.iter().filter(move |c| c.span() == span)
     }
 
-    fn ts(beats: u8, beat_unit: u8) -> TimeSignature { TimeSignature { beats, beat_unit } }
+    fn ts(beats: u8, beat_unit: u8) -> TimeSignature { TimeSignature::new(beats, beat_unit) }
 
     #[test]
     fn every_cell_spans_exactly_one_beat() {
@@ -856,9 +856,12 @@ mod tests {
     #[test]
     fn every_x8_and_x16_meter_respects_its_beat_groups() {
         // No note or rest crosses a primary boundary (beam group / click).
-        let meters = [8, 16].into_iter().flat_map(|unit| {
-            TimeSignature::beat_range(unit).unwrap().map(move |beats| ts(beats, unit))
-        });
+        let meters = [8, 16]
+            .into_iter()
+            .flat_map(|unit| {
+                TimeSignature::beat_range(unit).unwrap().map(move |beats| ts(beats, unit))
+            })
+            .flat_map(|ts| (0..ts.groupings().len() as u8).map(move |g| ts.with_grouping(g)));
         for meter in meters {
             let beats = meter.beats;
             let bounds = DEFAULT_GRID.primary_boundaries(&meter);

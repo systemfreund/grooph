@@ -135,7 +135,7 @@ mod tests {
         assert_eq!(ghost_onsets(&m, Subdivision::Triplets).len(), 5);
         assert_eq!(ghost_onsets(&m, Subdivision::Mixed).len(), 11);
         // 7/16: a ghost on every sixteenth.
-        let m = Measure::new(TimeSignature { beats: 7, beat_unit: 16 });
+        let m = Measure::new(TimeSignature::new(7, 16));
         assert_eq!(ghost_onsets(&m, Subdivision::Eighths).len(), 7);
     }
 }

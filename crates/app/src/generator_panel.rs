@@ -1,16 +1,18 @@
 use crate::Grooph;
 use crate::Mode;
 use crate::generator::ENDLESS_MIN_BARS;
+use crate::time_signature_dialog::groups_label;
 use crate::tool_palette::notation_button;
 use eframe::egui;
 use grooph_measure::TimeSignature;
 use grooph_measure::generator::{
-    BeatSpan, GeneratorSettings, GroupingSet, MAX_BARS, MAX_COMPLEXITY, Subdivision, beat_groups,
+    BeatSpan, GeneratorSettings, GroupingSet, MAX_BARS, MAX_COMPLEXITY, Subdivision,
     complexity_groupings, effective_subdivision, groupings, supports_time_signature,
 };
 
-/// Time signatures in the picker: every meter the editor offers (x/8 and
-/// x/16 are written in beat groups, e.g. 6/8 = 3+3, 7/16 = 2+3+2).
+/// Time signatures in the picker: every meter the editor offers in each of
+/// its groupings (x/8 and x/16 are written in beat groups, e.g. 6/8 = 3+3,
+/// 7/16 = 2+3+2 or 2+2+3).
 pub(crate) fn time_signatures() -> Vec<TimeSignature> {
     TimeSignature::BEAT_UNITS
         .into_iter()
@@ -18,20 +20,21 @@ pub(crate) fn time_signatures() -> Vec<TimeSignature> {
             TimeSignature::beat_range(beat_unit)
                 .into_iter()
                 .flatten()
-                .map(move |beats| TimeSignature { beats, beat_unit })
+                .map(move |beats| TimeSignature::new(beats, beat_unit))
         })
+        .flat_map(|ts| (0..ts.groupings().len() as u8).map(move |g| ts.with_grouping(g)))
         .filter(|ts| supports_time_signature(*ts))
         .collect()
 }
 
 /// Beat groups shown next to an x/8 or x/16 meter, e.g. "7/8 (2+3+2)".
 pub(crate) fn time_signature_label(ts: TimeSignature) -> String {
-    let groups = beat_groups(ts).unwrap_or_default();
+    let meter = format!("{}/{}", ts.beats, ts.beat_unit);
+    let groups = ts.groups();
     if ts.beat_unit == 4 || groups.len() < 2 {
-        return ts.to_string();
+        return meter;
     }
-    let sizes: Vec<String> = groups.iter().map(|g| g.beats_of(ts.beat_unit).to_string()).collect();
-    format!("{ts} ({})", sizes.join("+"))
+    format!("{meter} ({})", groups_label(&groups))
 }
 
 pub(crate) fn subdivision_label(s: Subdivision) -> &'static str {

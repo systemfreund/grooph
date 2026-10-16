@@ -396,6 +396,14 @@ mod tests {
             ..SharedLink::default()
         };
         assert_eq!(metronome.to_url("/").unwrap(), "/?bpm=140&ts=7/8");
+        let grouped = TimeSignature::SEVEN_EIGHT.with_grouping(2);
+        let metronome =
+            SharedLink { content: Some(LinkContent::Metronome(grouped)), ..SharedLink::default() };
+        let url = metronome.to_url("/").unwrap();
+        assert_eq!(url, "/?ts=3%2B2%2B2/8");
+        assert!(
+            matches!(parse(&url[2..]).content, Some(LinkContent::Metronome(ts)) if ts == grouped)
+        );
         assert_eq!(SharedLink::default().to_url("/").unwrap(), "/");
     }
 
@@ -408,7 +416,11 @@ mod tests {
 
     #[test]
     fn generator_link_accepts_x8_and_x16_meters() {
-        for (query, meter) in [("ts=7/8&sub=16&seed=3", "7/8"), ("ts=11/16&sub=16", "11/16")] {
+        for (query, meter) in [
+            ("ts=7/8&sub=16&seed=3", "7/8"),
+            ("ts=11/16&sub=16", "11/16"),
+            ("ts=2%2B2%2B3/8&sub=8", "2+2+3/8"),
+        ] {
             let link = parse_query(query).unwrap().unwrap();
             let Some(LinkContent::Generator { settings, .. }) = link.content else {
                 panic!("expected generator content");

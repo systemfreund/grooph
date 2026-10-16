@@ -408,6 +408,16 @@ mod tests {
     }
 
     #[test]
+    fn groupings_carry_over_and_change_like_meters() {
+        let text = "7/8 q e q q | 2+2+3/8 q q e q | q q q e";
+        let score = parse_score(text).unwrap();
+        let ts: Vec<_> = score.measures.iter().map(|m| m.time_signature()).collect();
+        let grouped = TimeSignature::SEVEN_EIGHT.with_grouping(1);
+        assert_eq!(ts, [TimeSignature::SEVEN_EIGHT, grouped, grouped]);
+        assert_eq!(format_score(&score).unwrap(), text);
+    }
+
+    #[test]
     fn round_trip_of_generated_scores() {
         for subdivision in [
             Subdivision::Eighths,

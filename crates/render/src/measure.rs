@@ -144,6 +144,17 @@ fn draw_time_signature(
     for (p, ch) in ts_layout.beat_unit.iter().zip(bot_digits.iter()) {
         painter.text(*p, Align2::CENTER_CENTER, ch.to_string(), font_id.clone(), color);
     }
+    // A grouping other than the usual one is written above the meter, e.g.
+    // "2+2+3" over 7/8.
+    if ts.grouping != 0
+        && let (Some(first), Some(last)) = (ts_layout.beats.first(), ts_layout.beats.last())
+    {
+        let groups: Vec<String> = ts.groups().iter().map(|g| g.to_string()).collect();
+        let em = font_id.size;
+        let pos = egui::pos2((first.x + last.x) / 2.0, first.y - 0.4 * em);
+        let font = FontId::proportional(0.28 * em);
+        painter.text(pos, Align2::CENTER_BOTTOM, groups.join("+"), font, color);
+    }
 }
 
 fn draw_edit_cursor(

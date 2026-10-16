@@ -74,7 +74,7 @@ pub(crate) enum Mode {
     Help,
     Library,
     Generator,
-    TimeSignature { beats: u8, unit: u8 },
+    TimeSignature { beats: u8, unit: u8, grouping: u8 },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -620,10 +620,7 @@ impl Grooph {
             if let Duration::Tuplet(TupletSpec { m, .. }) = template.duration { m } else { 2 };
 
         let mut measure = Measure::new_init(
-            TimeSignature {
-                beats: beat_count,
-                beat_unit: template.duration.base_note().denominator(),
-            },
+            TimeSignature::new(beat_count, template.duration.base_note().denominator()),
             template.kind,
         );
 

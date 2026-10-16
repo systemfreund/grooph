@@ -127,7 +127,11 @@ impl Grooph {
             }
             ToolKind::Meta(MetaOp::ChangeTimeSignature) => {
                 let ts = self.current_measure().time_signature();
-                self.ui.mode = Mode::TimeSignature { beats: ts.beats, unit: ts.beat_unit };
+                self.ui.mode = Mode::TimeSignature {
+                    beats: ts.beats,
+                    unit: ts.beat_unit,
+                    grouping: ts.grouping,
+                };
                 return;
             }
             ToolKind::Navigate(op) => {

@@ -564,7 +564,7 @@ mod tests {
         // measure only has 4 — indexing beyond that panics). Needs to be
         // this dense for the floor (a low, absolute legibility limit) to
         // actually be reached before the measure fits.
-        let score = Score::single(measure_with_quarters(TimeSignature { beats: 64, beat_unit: 4 }));
+        let score = Score::single(measure_with_quarters(TimeSignature::new(64, 4)));
 
         let staff = build_staff_layout(&score, &staff_opts);
         assert_eq!(staff.systems.len(), 1);
@@ -634,7 +634,7 @@ mod tests {
         use grooph_measure::duration::th;
         let rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(400.0, 400.0));
         let o = opts(20.0, rect);
-        let dense_ts = TimeSignature { beats: 16, beat_unit: 4 };
+        let dense_ts = TimeSignature::new(16, 4);
         let mut thirty_seconds = Measure::new(dense_ts);
         let mut idx = 0;
         while idx < thirty_seconds.beats().len() {
@@ -728,5 +728,23 @@ mod tests {
                 assert!((render_opts.y_center() - system.y_baseline).abs() < 0.01);
             }
         }
+    }
+
+    #[test]
+    fn staff_layout_counts_a_grouping_change_as_a_meter_change() {
+        let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(4000.0, 100.0));
+        let grouped = TimeSignature::SEVEN_EIGHT.with_grouping(1);
+        let score = Score {
+            measures: vec![
+                Measure::new(TimeSignature::SEVEN_EIGHT),
+                Measure::new(grouped),
+                Measure::new(grouped),
+            ],
+        };
+
+        let staff = build_staff_layout(&score, &opts(20.0, rect));
+        let flags: Vec<bool> =
+            staff.systems.iter().flat_map(|s| &s.measures).map(|m| m.show_time_signature).collect();
+        assert_eq!(flags, vec![true, true, false]);
     }
 }

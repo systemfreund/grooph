@@ -186,8 +186,10 @@ mod tests {
             (count(SoundType::PrimaryBeat), count(SoundType::Pulse))
         };
         // 7/8 (2+3+2): downbeat, 2 primary beats and 4 pulses = all 7 eighths.
-        assert_eq!(pulses(TimeSignature { beats: 7, beat_unit: 8 }), (2, 4));
+        assert_eq!(pulses(TimeSignature::new(7, 8)), (2, 4));
         assert_eq!(pulses(TimeSignature::SIX_EIGHT), (1, 4));
+        // 5/8 as 2+3 still clicks one primary beat.
+        assert_eq!(pulses(TimeSignature::FIVE_EIGHT.with_grouping(1)), (1, 3));
         // In x/4 every beat unit is already a primary beat.
         assert_eq!(pulses(TimeSignature::FOUR_FOUR), (3, 0));
     }

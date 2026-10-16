@@ -557,6 +557,11 @@ mod tests {
     fn primary_beat_index_follows_metronome_groups() {
         assert_eq!(flashes(TimeSignature::FOUR_FOUR), [0, 1, 2, 3]);
         assert_eq!(flashes(TimeSignature::SIX_EIGHT), [0, 1]);
-        assert_eq!(flashes(TimeSignature { beats: 7, beat_unit: 8 }), [0, 1, 2]);
+        assert_eq!(flashes(TimeSignature::new(7, 8)), [0, 1, 2]);
+        // 3+2+2: the second flash comes on the fourth eighth.
+        let ts = TimeSignature::SEVEN_EIGHT.with_grouping(2);
+        let tick = |eighth: u32| (eighth * DEFAULT_GRID.ticks_per_beat(&ts)) as f64;
+        assert_eq!(primary_beat_index(&ts, tick(2)), 0);
+        assert_eq!(primary_beat_index(&ts, tick(3)), 1);
     }
 }
