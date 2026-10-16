@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use grooph_measure::Score;
 use grooph_measure::tempo::ScoreTiming;
 
@@ -14,6 +16,9 @@ pub(crate) struct AccuracyTracker {
     session: RecordingSession,
     /// Evaluation of the last finished run with at least one hit.
     last_summary: Option<RunSummary>,
+    /// Marks of that run, kept on the staff after stopping until the next
+    /// run starts or the score is edited.
+    last_marks: HashMap<u64, AccuracyMark>,
 }
 
 impl AccuracyTracker {
@@ -41,6 +46,7 @@ impl AccuracyTracker {
 
     pub(crate) fn on_playback_start(&mut self, now_seconds: Option<f64>) {
         self.last_summary = None;
+        self.last_marks.clear();
         match now_seconds {
             Some(t) => self.session.start(t, Some(0.0)),
             None => self.session.stop(),
@@ -67,8 +73,11 @@ impl AccuracyTracker {
     }
 
     fn end_session(&mut self) {
-        if let Some(summary) = self.session.data().and_then(|d| d.summary()) {
+        if let Some(data) = self.session.data()
+            && let Some(summary) = data.summary()
+        {
             self.last_summary = Some(summary);
+            self.last_marks = data.marks_by_onset.clone();
         }
         self.session.stop();
     }
@@ -88,11 +97,23 @@ impl AccuracyTracker {
 
     pub(crate) fn clear_for_edit(&mut self) {
         self.session.clear_marks();
+        self.last_marks.clear();
     }
 
-    /// Look up the accuracy mark for a score-global onset tick.
+    /// Whether there are marks to draw: a running session, or the marks a
+    /// finished run left behind.
+    pub(crate) fn has_marks(&self) -> bool {
+        self.session.is_recording() || !self.last_marks.is_empty()
+    }
+
+    /// Look up the accuracy mark for a score-global onset tick: the running
+    /// session's, else the last finished run's.
     pub(crate) fn mark_for_onset(&self, global_onset_tick: u64) -> Option<AccuracyMark> {
-        self.session.data()?.marks_by_onset.get(&global_onset_tick).copied()
+        let marks = match self.session.data() {
+            Some(data) => &data.marks_by_onset,
+            None => &self.last_marks,
+        };
+        marks.get(&global_onset_tick).copied()
     }
 
     /// Returns the hit's deviation in ms if it was matched to a note.
@@ -170,7 +191,7 @@ mod tests {
 
         let mark = tracker.mark_for_onset(m1_start_tick).expect("expected a hit");
         match mark {
-            AccuracyMark::Hit(diff) => assert!(diff.abs() < 1e-6, "diff={diff}"),
+            AccuracyMark::Hit { diff_ticks: diff, .. } => assert!(diff.abs() < 1e-6, "diff={diff}"),
             _ => panic!("expected a hit"),
         }
     }
@@ -211,7 +232,7 @@ mod tests {
         tracker.record_hit(onset_seconds + 0.001, &timing, &score);
         let mark = tracker.mark_for_onset(0).expect("first hit recorded");
         match mark {
-            AccuracyMark::Hit(diff) => assert!(diff.abs() < 1e-6, "diff={diff}"),
+            AccuracyMark::Hit { diff_ticks: diff, .. } => assert!(diff.abs() < 1e-6, "diff={diff}"),
             _ => panic!("expected hit"),
         }
     }
@@ -260,7 +281,7 @@ mod tests {
 
         // The mark belongs to the written note and is dead on.
         match tracker.mark_for_onset(written as u64).expect("hit on the swung note") {
-            AccuracyMark::Hit(diff) => assert!(diff.abs() < 1e-6, "diff={diff}"),
+            AccuracyMark::Hit { diff_ticks: diff, .. } => assert!(diff.abs() < 1e-6, "diff={diff}"),
             _ => panic!("expected hit"),
         }
     }
@@ -293,6 +314,73 @@ mod tests {
         assert_eq!(tracker.last_summary(), Some(live));
         tracker.dismiss_summary();
         assert!(tracker.last_summary().is_none());
+    }
+
+    #[test]
+    fn marks_stay_after_stop_until_next_run_or_edit() {
+        let score = score_of_quarters(&[TimeSignature::FOUR_FOUR]);
+        let timing = ScoreTiming::from_score(&score, 120);
+        let tpb = DEFAULT_GRID.ticks_per_beat(&TimeSignature::FOUR_FOUR) as u64;
+        let beat_s = timing.global_tick_to_seconds(tpb as f64);
+        let mut tracker = AccuracyTracker::new();
+        tracker.on_playback_start_at(0.0, 0.0);
+        tracker.record_hit(0.0, &timing, &score);
+        tracker.update_progress(beat_s * 1.9, &timing, &score);
+        tracker.on_playback_stop();
+
+        assert!(tracker.has_marks());
+        assert!(matches!(tracker.mark_for_onset(0), Some(AccuracyMark::Hit { .. })));
+        assert!(matches!(tracker.mark_for_onset(tpb), Some(AccuracyMark::Miss)));
+        // Closing the summary keeps the marks on the staff.
+        tracker.dismiss_summary();
+        assert!(tracker.has_marks());
+
+        tracker.clear_for_edit();
+        assert!(!tracker.has_marks());
+        assert!(tracker.mark_for_onset(0).is_none());
+    }
+
+    #[test]
+    fn next_run_starts_without_old_marks() {
+        let score = score_of_quarters(&[TimeSignature::FOUR_FOUR]);
+        let timing = ScoreTiming::from_score(&score, 120);
+        let mut tracker = AccuracyTracker::new();
+        tracker.on_playback_start_at(0.0, 0.0);
+        tracker.record_hit(0.0, &timing, &score);
+        tracker.on_playback_stop();
+        assert!(tracker.mark_for_onset(0).is_some());
+
+        tracker.on_playback_start(None);
+        assert!(!tracker.has_marks());
+        assert!(tracker.mark_for_onset(0).is_none());
+    }
+
+    #[test]
+    fn fast_notes_grade_with_narrower_windows() {
+        use super::super::session::HitGrade;
+        use grooph_measure::duration::s;
+        // 16ths at 160 BPM are ~94 ms apart; a 40 ms late hit is no longer "good".
+        let mut m = Measure::new(TimeSignature::FOUR_FOUR);
+        for i in 0..16 {
+            m.set_beat(i, Beat::note(s())).unwrap();
+        }
+        let score = Score::single(m);
+        let timing = ScoreTiming::from_score(&score, 160);
+        let sixteenth = DEFAULT_GRID.ticks_of(&s()).unwrap() as f64;
+        let mut tracker = AccuracyTracker::new();
+        tracker.on_playback_start_at(0.0, 0.0);
+        tracker.record_hit(0.040, &timing, &score);
+        let second = timing.global_tick_to_seconds(sixteenth);
+        tracker.record_hit(second + 0.030, &timing, &score);
+
+        let grade = |tick: u64| match tracker.mark_for_onset(tick) {
+            Some(AccuracyMark::Hit { grade, .. }) => grade,
+            _ => panic!("expected a hit at {tick}"),
+        };
+        assert_eq!(grade(0), HitGrade::Off);
+        assert_eq!(grade(sixteenth as u64), HitGrade::Good);
+        let summary = tracker.live_summary().unwrap();
+        assert_eq!((summary.perfect, summary.good, summary.off()), (0, 1, 1));
     }
 
     #[test]

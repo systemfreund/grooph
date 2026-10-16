@@ -4,7 +4,9 @@ use grooph_measure::tempo::ScoreTiming;
 use grooph_measure::{BeatKind, MeasureIdx};
 use log::info;
 
-use super::session::{AccuracyMark, RecordingData};
+use super::session::{
+    AccuracyMark, HitWindows, RecordingData, compute_global_beat_onsets, neighbour_gap_ticks,
+};
 
 /// Record an incoming MIDI hit at `timestamp` (seconds, MIDI clock). The hit
 /// is mapped to a global tick via `timing`, then matched against the nearest
@@ -52,9 +54,12 @@ pub(super) fn record_hit(
     let tps = timing.ticks_per_sec_in_measure(onset_m_idx);
     let delta_ms = if tps > 0.0 { (diff_ticks / tps) * 1000.0 } else { 0.0 };
 
+    let windows = HitWindows::for_gap_ms(note_gap_ms(global_onset, onset_m_idx, timing, score));
+    let grade = windows.grade(delta_ms);
+
     data.stats.push(delta_ms);
-    data.counters.push_hit(delta_ms);
-    data.marks_by_onset.insert(global_onset, AccuracyMark::Hit(diff_ticks));
+    data.counters.push_hit(grade);
+    data.marks_by_onset.insert(global_onset, AccuracyMark::Hit { diff_ticks, grade });
     if wrap_next {
         data.hits_next_loop.insert(global_onset);
     } else if !wrap_prev {
@@ -68,6 +73,19 @@ pub(super) fn record_hit(
         timing.bpm()
     );
     Some(delta_ms)
+}
+
+/// Gap in ms from the note at `global_onset` to its closest neighbouring onset
+/// as heard, which narrows the grading windows for fast notes.
+fn note_gap_ms(global_onset: u64, m_idx: MeasureIdx, timing: &ScoreTiming, score: &Score) -> f64 {
+    let beats = compute_global_beat_onsets(score, timing);
+    let total = timing.total_loop_ticks() as f64;
+    let gap_ticks = match beats.iter().position(|b| b.onset_tick == global_onset) {
+        Some(idx) => neighbour_gap_ticks(&beats, idx, total),
+        None => total,
+    };
+    let tps = timing.ticks_per_sec_in_measure(m_idx);
+    if tps > 0.0 { gap_ticks / tps * 1000.0 } else { f64::INFINITY }
 }
 
 /// Walk every note beat in every measure and find the closest onset to

@@ -7,8 +7,20 @@ use grooph_measure::tempo::ScoreTiming;
 
 #[derive(Clone, Copy)]
 pub(crate) enum AccuracyMark {
-    Hit(f64),
+    /// Deviation in ticks (negative = early) and how well it landed.
+    Hit {
+        diff_ticks: f64,
+        grade: HitGrade,
+    },
     Miss,
+}
+
+/// Which timing window a hit landed in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum HitGrade {
+    Perfect,
+    Good,
+    Off,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -49,6 +61,38 @@ impl AccuracyStats {
 pub(crate) const PERFECT_WINDOW_MS: f64 = 25.0;
 /// Hits within this distance (but outside the perfect window) count as "good".
 pub(crate) const GOOD_WINDOW_MS: f64 = 60.0;
+/// Fast notes narrow the windows to these shares of the gap to the closest
+/// neighbouring onset, so "good" stays well inside the note's own hit window.
+const PERFECT_GAP_SHARE: f64 = 0.2;
+const GOOD_GAP_SHARE: f64 = 0.4;
+
+/// Perfect/good windows of one note.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct HitWindows {
+    pub perfect_ms: f64,
+    pub good_ms: f64,
+}
+
+impl HitWindows {
+    /// Windows for a note whose closest neighbouring onset is `gap_ms` away.
+    pub(super) fn for_gap_ms(gap_ms: f64) -> Self {
+        Self {
+            perfect_ms: PERFECT_WINDOW_MS.min(gap_ms * PERFECT_GAP_SHARE),
+            good_ms: GOOD_WINDOW_MS.min(gap_ms * GOOD_GAP_SHARE),
+        }
+    }
+
+    pub(super) fn grade(&self, delta_ms: f64) -> HitGrade {
+        let d = delta_ms.abs();
+        if d <= self.perfect_ms {
+            HitGrade::Perfect
+        } else if d <= self.good_ms {
+            HitGrade::Good
+        } else {
+            HitGrade::Off
+        }
+    }
+}
 
 /// Hit/miss tallies of one recording session, beyond the raw delta stats.
 #[derive(Clone, Copy, Default)]
@@ -61,12 +105,11 @@ pub(super) struct RunCounters {
 }
 
 impl RunCounters {
-    pub(super) fn push_hit(&mut self, delta_ms: f64) {
-        let d = delta_ms.abs();
-        if d <= PERFECT_WINDOW_MS {
-            self.perfect += 1;
-        } else if d <= GOOD_WINDOW_MS {
-            self.good += 1;
+    pub(super) fn push_hit(&mut self, grade: HitGrade) {
+        match grade {
+            HitGrade::Perfect => self.perfect += 1,
+            HitGrade::Good => self.good += 1,
+            HitGrade::Off => {}
         }
     }
 }
@@ -137,6 +180,20 @@ pub(crate) fn compute_global_beat_onsets(
         }
     }
     out
+}
+
+/// Distance in performed ticks from the beat at `idx` to the closer of its
+/// neighbouring onsets (notes or rests) on the score loop.
+pub(super) fn neighbour_gap_ticks(beats: &[GlobalBeatOnset], idx: usize, total: f64) -> f64 {
+    if beats.len() < 2 || idx >= beats.len() {
+        return total;
+    }
+    let cur = beats[idx].performed_tick as f64;
+    let prev = beats[(idx + beats.len() - 1) % beats.len()].performed_tick as f64;
+    let next = beats[(idx + 1) % beats.len()].performed_tick as f64;
+    let before = (cur - prev).rem_euclid(total);
+    let after = (next - cur).rem_euclid(total);
+    before.min(after)
 }
 
 /// State of a hit-recording session.
@@ -265,12 +322,47 @@ mod tests {
     }
 
     #[test]
-    fn counters_sort_hits_into_windows() {
+    fn windows_sort_hits_into_grades() {
+        let w = HitWindows::for_gap_ms(500.0);
+        let grades: Vec<HitGrade> =
+            [0.0, -PERFECT_WINDOW_MS, PERFECT_WINDOW_MS + 1.0, -GOOD_WINDOW_MS, 100.0]
+                .into_iter()
+                .map(|d| w.grade(d))
+                .collect();
+        use HitGrade::*;
+        assert_eq!(grades, vec![Perfect, Perfect, Good, Good, Off]);
+
         let mut c = RunCounters::default();
-        for d in [0.0, -PERFECT_WINDOW_MS, PERFECT_WINDOW_MS + 1.0, -GOOD_WINDOW_MS, 100.0] {
-            c.push_hit(d);
+        for g in grades {
+            c.push_hit(g);
         }
         assert_eq!((c.perfect, c.good), (2, 2));
+    }
+
+    #[test]
+    fn windows_narrow_for_fast_notes() {
+        // Slow notes keep the fixed windows.
+        assert_eq!(
+            HitWindows::for_gap_ms(250.0),
+            HitWindows { perfect_ms: PERFECT_WINDOW_MS, good_ms: GOOD_WINDOW_MS }
+        );
+        // 16ths at 160 BPM are ~94 ms apart: good must stay well inside the
+        // ~47 ms half-gap that separates this note from its neighbour.
+        let w = HitWindows::for_gap_ms(93.75);
+        assert!((w.perfect_ms - 18.75).abs() < 1e-9);
+        assert!((w.good_ms - 37.5).abs() < 1e-9);
+        assert_eq!(w.grade(30.0), HitGrade::Good);
+        assert_eq!(w.grade(40.0), HitGrade::Off);
+    }
+
+    #[test]
+    fn neighbour_gap_wraps_around_the_loop() {
+        let beat = |t: u64| GlobalBeatOnset { onset_tick: t, performed_tick: t, is_note: true };
+        let beats = [beat(0), beat(10), beat(40)];
+        // First beat: previous neighbour is the last beat, 60 ticks back across the wrap.
+        assert_eq!(neighbour_gap_ticks(&beats, 0, 100.0), 10.0);
+        assert_eq!(neighbour_gap_ticks(&beats, 2, 100.0), 30.0);
+        assert_eq!(neighbour_gap_ticks(&beats[..1], 0, 100.0), 100.0);
     }
 
     #[test]

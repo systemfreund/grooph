@@ -44,12 +44,16 @@ subtracted from your hits. Tap and MIDI have separate offsets.
 ## Reading the result
 
 Each written note gets a marker. A marker left of the note means you played early, right
-of it late. Notes you did not play are shown as misses. Try to keep the markers close to
-the notes for a whole exercise before you raise the tempo.
+of it late. Green markers are perfect, amber ones good and red ones off; notes you did not
+play are shown as red misses. The markers stay on the staff after you stop, so you can see
+where the run went wrong, until you play again or edit the rhythm. Try to keep the markers
+close to the notes for a whole exercise before you raise the tempo.
 
 When you stop, grooph sums up the run: a score in percent, how many hits were perfect
 (within 25 ms), good (within 60 ms) or off, missed notes, extra hits, your average deviation
-and the spread. While you play, the score and the average deviation are shown next to the
+and the spread. Fast notes get tighter windows, at most a fifth (perfect) and two fifths
+(good) of the gap to the neighbouring note, so a hit can't be "good" when it is nearly on
+the next note. While you play, the score and the average deviation are shown next to the
 target icon, which is handy in endless mode.
 
 ## Exercises

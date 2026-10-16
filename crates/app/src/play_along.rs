@@ -301,10 +301,14 @@ fn summary_grid(ui: &mut egui::Ui, summary: &RunSummary) {
         ui.label("Hits");
         ui.label(summary.hits.to_string());
         ui.end_row();
-        ui.label(format!("  Perfect (≤ {PERFECT_WINDOW_MS:.0} ms)"));
+        ui.label("  Perfect").on_hover_text(format!(
+            "Within {PERFECT_WINDOW_MS:.0} ms of the note; fast notes get a fifth of the gap to their neighbour"
+        ));
         ui.label(summary.perfect.to_string());
         ui.end_row();
-        ui.label(format!("  Good (≤ {GOOD_WINDOW_MS:.0} ms)"));
+        ui.label("  Good").on_hover_text(format!(
+            "Within {GOOD_WINDOW_MS:.0} ms of the note; fast notes get two fifths of the gap to their neighbour"
+        ));
         ui.label(summary.good.to_string());
         ui.end_row();
         ui.label("  Off");

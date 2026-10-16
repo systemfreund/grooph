@@ -1,5 +1,5 @@
 use crate::Grooph;
-use crate::accuracy::{AccuracyMark, clamp_diff_to_beat_window};
+use crate::accuracy::{AccuracyMark, HitGrade, clamp_diff_to_beat_window};
 use crate::tools::{Modifier, ToolKind, all_tools};
 use crate::state::{COUNT_IN_WAIT_TIMEOUT_S, CountInState};
 use crate::{Mode, TransportState};
@@ -355,10 +355,8 @@ impl Grooph {
         if !self.playback_ctl.accuracy.enabled && self.calibration_source().is_none() {
             return;
         }
-        if !self.playback_ctl.accuracy.tracker.has_start_time() {
-            return;
-        }
-        if self.playback_ctl.transport_state != TransportState::Playing {
+        // Marks stay on the staff after stopping, until the next run or an edit.
+        if !self.playback_ctl.accuracy.tracker.has_marks() {
             return;
         }
         let total_loop_ticks = timing.total_loop_ticks();
@@ -402,6 +400,7 @@ impl Grooph {
         let local_onsets = DEFAULT_GRID.compute_onset_ticks(beats);
         let measure_start = timing.measure_start_tick(placed.measure_idx);
         let layout = &placed.layout;
+        let dark = ui.visuals().dark_mode;
         for (idx, note_layout) in layout.notes.iter().enumerate() {
             if note_layout.kind != grooph_measure::BeatKind::Note {
                 continue;
@@ -422,7 +421,7 @@ impl Grooph {
                 continue;
             };
             match mark {
-                AccuracyMark::Hit(diff_ticks) => {
+                AccuracyMark::Hit { diff_ticks, grade } => {
                     let global_idx = global_onsets_u64.binary_search(&global_onset).unwrap_or(0);
                     let diff_ticks = clamp_diff_to_beat_window(
                         diff_ticks,
@@ -444,7 +443,8 @@ impl Grooph {
                     );
                     let start = egui::Pos2::new(x, y);
                     let end = egui::Pos2::new(x, y + h);
-                    ui.painter().line_segment([start, end], Stroke::new(2.0, egui::Color32::RED));
+                    ui.painter()
+                        .line_segment([start, end], Stroke::new(2.0, grade_color(grade, dark)));
                 }
                 AccuracyMark::Miss => {
                     let mid_y = y + h * 0.5;
@@ -453,7 +453,7 @@ impl Grooph {
                     let right = note_layout.center.x + half;
                     let top = mid_y - half;
                     let bottom = mid_y + half;
-                    let stroke = Stroke::new(2.0, egui::Color32::RED);
+                    let stroke = Stroke::new(2.0, grade_color(HitGrade::Off, dark));
                     ui.painter().line_segment(
                         [egui::Pos2::new(left, top), egui::Pos2::new(right, bottom)],
                         stroke,
@@ -540,6 +540,19 @@ fn primary_beat_index(ts: &TimeSignature, local_tick: f64) -> u32 {
         as u32
 }
 
+/// Marker colour of a hit: green when perfect, amber when good, red when off
+/// (also used for misses).
+fn grade_color(grade: HitGrade, dark: bool) -> egui::Color32 {
+    match (grade, dark) {
+        (HitGrade::Perfect, true) => egui::Color32::from_rgb(90, 200, 110),
+        (HitGrade::Perfect, false) => egui::Color32::from_rgb(30, 140, 60),
+        (HitGrade::Good, true) => egui::Color32::from_rgb(230, 180, 60),
+        (HitGrade::Good, false) => egui::Color32::from_rgb(190, 130, 0),
+        (HitGrade::Off, true) => egui::Color32::from_rgb(235, 80, 80),
+        (HitGrade::Off, false) => egui::Color32::from_rgb(200, 40, 40),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -565,3 +578,4 @@ mod tests {
         assert_eq!(primary_beat_index(&ts, tick(3)), 1);
     }
 }
+

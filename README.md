@@ -198,7 +198,11 @@ Important root files:
 - While tap capture is active, staff presses are hits, not edits.
 - The session (`accuracy::AccuracyTracker`) runs while MIDI is connected or
   after the first tap of a run. Stopping keeps a `RunSummary` (hits, perfect/
-  good/off windows, misses, extra hits, mean, spread) for the "Your run" window.
+  good/off windows, misses, extra hits, mean, spread) for the "Your run" window
+  and the run's marks, drawn on the staff until the next run or an edit.
+- Grading (`accuracy::session::HitWindows`): perfect ≤ 25 ms, good ≤ 60 ms,
+  narrowed to 1/5 and 2/5 of the gap to the closest neighbouring onset (as
+  heard) for fast notes. Markers are coloured by grade.
 - Calibration (`crates/app/src/calibration.rs`): stashes the score and playback
   options, plays 4 quarters at 100 BPM, takes the median of the hits after a
   warm-up as the source's offset and restores the stash on stop. Persistence

@@ -7,7 +7,8 @@ mod tracker;
 
 pub(crate) use display::clamp_diff_to_beat_window;
 pub(crate) use session::{
-    AccuracyMark, GOOD_WINDOW_MS, PERFECT_WINDOW_MS, RunSummary, compute_global_beat_onsets,
+    AccuracyMark, GOOD_WINDOW_MS, HitGrade, PERFECT_WINDOW_MS, RunSummary,
+    compute_global_beat_onsets,
 };
 pub(crate) use state::AccuracyState;
 pub(crate) use tracker::AccuracyTracker;
