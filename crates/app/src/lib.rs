@@ -202,17 +202,42 @@ enum CountingBase {
     Triplet,
 }
 
+/// The counting overlay: a subdivision to count in (or `Off`) plus an
+/// optional tuplet layer. `Off` without tuplets hides the overlay.
 #[derive(Serialize, Deserialize, Clone, Copy)]
+#[serde(from = "StoredCountingSettings")]
 struct CountingSettings {
-    enabled: bool,
-    show_labels: bool,
     base: CountingBase,
     show_tuplets: bool,
 }
 
 impl Default for CountingSettings {
     fn default() -> Self {
-        Self { enabled: false, show_labels: true, base: CountingBase::Ands, show_tuplets: false }
+        Self { base: CountingBase::Off, show_tuplets: false }
+    }
+}
+
+/// Saved form, still reading the `enabled` and `show_labels` switches that
+/// older versions stored next to `base`: either one off hid the overlay.
+#[derive(Deserialize)]
+struct StoredCountingSettings {
+    #[serde(default = "yes")]
+    enabled: bool,
+    #[serde(default = "yes")]
+    show_labels: bool,
+    base: CountingBase,
+    show_tuplets: bool,
+}
+
+fn yes() -> bool { true }
+
+impl From<StoredCountingSettings> for CountingSettings {
+    fn from(s: StoredCountingSettings) -> Self {
+        if s.enabled && s.show_labels {
+            Self { base: s.base, show_tuplets: s.show_tuplets }
+        } else {
+            Self::default()
+        }
     }
 }
 
@@ -769,17 +794,10 @@ impl Grooph {
     }
 
     fn build_count_config(&self) -> Option<CountConfig> {
-        if !self.ui.counting.enabled {
-            return None;
-        }
-        if !self.ui.counting.show_labels {
-            return None;
-        }
-
         let mut layers = Vec::new();
         let mut next_id = 1u32;
 
-        let mut base_layer = match self.ui.counting.base {
+        let base_layer = match self.ui.counting.base {
             CountingBase::Off => None,
             CountingBase::Primary => {
                 let mut layer =
@@ -805,16 +823,14 @@ impl Grooph {
             }
         };
 
-        if let Some(ref mut layer) = base_layer {
-            layer.show_labels = self.ui.counting.show_labels;
-            layers.push(layer.clone());
+        if let Some(layer) = base_layer {
+            layers.push(layer);
             next_id = next_id.saturating_add(1);
         }
 
         if self.ui.counting.show_tuplets {
             let mut layer = CountLayer::new(next_id, CountScope::TupletAll, Subdiv::TupletN);
             layer.labels = Some(LabelPattern::triplet());
-            layer.show_labels = self.ui.counting.show_labels;
             layer.priority = 10;
             layers.push(layer);
         }
@@ -988,5 +1004,40 @@ impl Grooph {
             }
         }
         platform::clear_link_query();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{CountingBase, CountingSettings};
+
+    fn load(saved: &str) -> CountingSettings {
+        ron::from_str(saved).unwrap()
+    }
+
+    #[test]
+    fn counting_overlay_is_off_by_default() {
+        let c = CountingSettings::default();
+        assert!(c.base == CountingBase::Off && !c.show_tuplets);
+    }
+
+    #[test]
+    fn counting_settings_round_trip() {
+        let c = CountingSettings { base: CountingBase::Sixteenth, show_tuplets: true };
+        let back = load(&ron::to_string(&c).unwrap());
+        assert!(back.base == CountingBase::Sixteenth && back.show_tuplets);
+    }
+
+    #[test]
+    fn older_counting_switches_still_hide_the_overlay() {
+        let on = load("(enabled: true, show_labels: true, base: Ands, show_tuplets: true)");
+        assert!(on.base == CountingBase::Ands && on.show_tuplets);
+        for hidden in [
+            "(enabled: false, show_labels: true, base: Ands, show_tuplets: true)",
+            "(enabled: true, show_labels: false, base: Ands, show_tuplets: true)",
+        ] {
+            let c = load(hidden);
+            assert!(c.base == CountingBase::Off && !c.show_tuplets, "{hidden}");
+        }
     }
 }

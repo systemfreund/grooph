@@ -186,46 +186,42 @@ impl Grooph {
                     );
 
                     egui::CollapsingHeader::new("Counting").default_open(false).show(ui, |ui| {
-                        ui.checkbox(&mut self.ui.counting.enabled, "Enable counting overlay");
-                        ui.add_enabled_ui(self.ui.counting.enabled, |ui| {
-                            ui.checkbox(&mut self.ui.counting.show_labels, "Show labels");
-                            ui.checkbox(&mut self.ui.counting.show_tuplets, "Tuplet overlay");
-                            egui::ComboBox::from_label("Subdivision")
-                                .selected_text(match self.ui.counting.base {
-                                    CountingBase::Off => "Off",
-                                    CountingBase::Primary => "Primary",
-                                    CountingBase::Ands => "Ands",
-                                    CountingBase::Sixteenth => "16th",
-                                    CountingBase::Triplet => "Triplet",
-                                })
-                                .show_ui(ui, |ui| {
-                                    ui.selectable_value(
-                                        &mut self.ui.counting.base,
-                                        CountingBase::Off,
-                                        "Off",
-                                    );
-                                    ui.selectable_value(
-                                        &mut self.ui.counting.base,
-                                        CountingBase::Primary,
-                                        "Primary",
-                                    );
-                                    ui.selectable_value(
-                                        &mut self.ui.counting.base,
-                                        CountingBase::Ands,
-                                        "1 & 2 & ...",
-                                    );
-                                    ui.selectable_value(
-                                        &mut self.ui.counting.base,
-                                        CountingBase::Sixteenth,
-                                        "1 e & a ...",
-                                    );
-                                    ui.selectable_value(
-                                        &mut self.ui.counting.base,
-                                        CountingBase::Triplet,
-                                        "1 trip let ...",
-                                    );
-                                });
-                        });
+                        egui::ComboBox::from_label("Count")
+                            .selected_text(match self.ui.counting.base {
+                                CountingBase::Off => "Off",
+                                CountingBase::Primary => "Primary",
+                                CountingBase::Ands => "Ands",
+                                CountingBase::Sixteenth => "16th",
+                                CountingBase::Triplet => "Triplet",
+                            })
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(
+                                    &mut self.ui.counting.base,
+                                    CountingBase::Off,
+                                    "Off",
+                                );
+                                ui.selectable_value(
+                                    &mut self.ui.counting.base,
+                                    CountingBase::Primary,
+                                    "Primary",
+                                );
+                                ui.selectable_value(
+                                    &mut self.ui.counting.base,
+                                    CountingBase::Ands,
+                                    "1 & 2 & ...",
+                                );
+                                ui.selectable_value(
+                                    &mut self.ui.counting.base,
+                                    CountingBase::Sixteenth,
+                                    "1 e & a ...",
+                                );
+                                ui.selectable_value(
+                                    &mut self.ui.counting.base,
+                                    CountingBase::Triplet,
+                                    "1 trip let ...",
+                                );
+                            });
+                        ui.checkbox(&mut self.ui.counting.show_tuplets, "Tuplet overlay");
                     });
 
                     egui::CollapsingHeader::new("MIDI Input").default_open(false).show(ui, |ui| {
