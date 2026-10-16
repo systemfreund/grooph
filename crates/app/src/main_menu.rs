@@ -1,4 +1,6 @@
 use crate::Grooph;
+use crate::compact::{paint_share_icon, record_tap};
+use crate::library_panel::LINK_COPIED_NOTICE_S;
 use crate::{Mode, TransportState};
 use eframe::egui;
 use eframe::egui::scroll_area::{ScrollBarVisibility, ScrollSource};
@@ -31,6 +33,24 @@ impl Grooph {
                             if Button::new(button_label).selected(is_running).ui(ui).clicked() {
                                 self.toggle_playback();
                             }
+                            if Button::new("🎲").ui(ui).on_hover_text("New rhythm").clicked() {
+                                self.generate_new_score();
+                            }
+                            if share_button(ui)
+                                .on_hover_text("Share a link to this rhythm")
+                                .clicked()
+                            {
+                                self.share_link(ui);
+                            }
+                            let now = ui.input(|i| i.time);
+                            if self
+                                .ui
+                                .link_copied_at
+                                .is_some_and(|at| now - at < LINK_COPIED_NOTICE_S)
+                            {
+                                ui.ctx().request_repaint_after_secs(0.5);
+                                ui.weak("Link copied");
+                            }
                             if ui
                                 .selectable_label(self.playback_ctl.audio_cfg.count_in, "🔢")
                                 .on_hover_text("Count one bar in before playback starts")
@@ -47,7 +67,19 @@ impl Grooph {
                             if bpm_editor_resp.clicked() {
                                 ui.memory_mut(|mem| mem.surrender_focus(bpm_editor_resp.id))
                             }
-                            if bpm_editor_resp.changed() {
+                            let tap = Button::new("Tap")
+                                .ui(ui)
+                                .on_hover_text("Tap the tempo: click twice or more in time");
+                            let tapped = tap
+                                .clicked()
+                                .then(|| {
+                                    record_tap(&mut self.ui.compact.taps, ui.input(|i| i.time))
+                                })
+                                .flatten();
+                            if let Some(bpm) = tapped {
+                                self.playback_ctl.bpm = bpm;
+                            }
+                            if bpm_editor_resp.changed() || tapped.is_some() {
                                 self.editor.dirty = true;
                                 self.handle_bpm_change();
                             }
@@ -72,8 +104,8 @@ impl Grooph {
                                 self.toggle_mode(Mode::Settings);
                             }
                             if ui
-                                .selectable_label(self.ui.mode == Mode::Generator, "🎲")
-                                .on_hover_text("Rhythm generator")
+                                .selectable_label(self.ui.mode == Mode::Generator, "🎼")
+                                .on_hover_text("Rhythm generator settings")
                                 .clicked()
                             {
                                 self.toggle_mode(Mode::Generator);
@@ -159,4 +191,13 @@ impl Grooph {
             }
         }
     }
+}
+
+/// Button with the share symbol of the compact layout, as tall as a text button.
+fn share_button(ui: &mut egui::Ui) -> egui::Response {
+    let resp = Button::new("   ").ui(ui);
+    let side = resp.rect.height().min(resp.rect.width());
+    let icon = egui::Rect::from_center_size(resp.rect.center(), egui::Vec2::splat(side * 1.2));
+    paint_share_icon(ui.painter(), icon, ui.style().interact(&resp).fg_stroke.color);
+    resp
 }

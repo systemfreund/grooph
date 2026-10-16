@@ -267,6 +267,7 @@ impl App for Grooph {
             self.generator_panel(ui);
             self.tool_palette_panel(ui);
             self.measure_panel(ui);
+            self.compact_picker(ui);
         }
         self.update_metronome_trainer();
         self.update_endless();

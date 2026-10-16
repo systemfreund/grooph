@@ -63,7 +63,7 @@ pub(crate) struct CompactState {
     /// The options sheet only shows its handle and the transport buttons.
     pub(crate) options_collapsed: bool,
     /// UI times of recent tap-tempo taps.
-    taps: Vec<f64>,
+    pub(crate) taps: Vec<f64>,
 }
 
 fn subdivision_short_label(s: Subdivision) -> &'static str {
@@ -80,10 +80,14 @@ fn swing_label(percent: u8) -> String {
 }
 
 /// Fill of cards and sheets: a step off the panel background.
-fn card_fill(ui: &Ui) -> Color32 { ui.visuals().widgets.inactive.weak_bg_fill }
+fn card_fill(ui: &Ui) -> Color32 {
+    ui.visuals().widgets.inactive.weak_bg_fill
+}
 
 /// Text in the accent color (selected tab, values).
-fn accent_text(ui: &Ui) -> Color32 { ui.visuals().selection.stroke.color }
+fn accent_text(ui: &Ui) -> Color32 {
+    ui.visuals().selection.stroke.color
+}
 
 /// Text that is as wide as `max_width` at most: shrinks the font if needed.
 fn fitted_text(
@@ -233,7 +237,7 @@ fn paint_play_icon(painter: &Painter, rect: Rect, color: Color32, playing: bool)
 }
 
 /// The iOS share symbol: an open box with an arrow pointing up out of it.
-fn paint_share_icon(painter: &Painter, rect: Rect, color: Color32) {
+pub(crate) fn paint_share_icon(painter: &Painter, rect: Rect, color: Color32) {
     let c = rect.center() + vec2(0.0, rect.height() * 0.03);
     let s = rect.width() * 0.14;
     let stroke = Stroke::new(2.5, color);
@@ -300,7 +304,7 @@ fn wide_button(ui: &mut Ui, label: &str, size: f32, height: f32) -> Response {
 
 /// Add a tap at UI time `now` and return the tempo of the recent taps, once
 /// there are two. A pause longer than [`TAP_RESET_S`] starts over.
-fn record_tap(taps: &mut Vec<f64>, now: f64) -> Option<u32> {
+pub(crate) fn record_tap(taps: &mut Vec<f64>, now: f64) -> Option<u32> {
     const MAX_TAPS: usize = 8;
     if taps.last().is_some_and(|&last| now - last > TAP_RESET_S) {
         taps.clear();
@@ -606,15 +610,25 @@ impl Grooph {
 
     /// Share a link to the working score with tempo and swing: the system
     /// share sheet where the browser has one, else the clipboard.
-    fn share_link(&mut self, ui: &Ui) {
+    /// Link that opens the working score at the current tempo and swing.
+    pub(crate) fn share_link_url(&self) -> Option<String> {
         let swing = self.playback_ctl.audio_cfg.swing;
         let link = SharedLink {
             bpm: Some(self.playback_ctl.bpm),
             swing: (!swing.is_straight()).then_some(swing),
             content: Some(LinkContent::Score(self.editor.score.clone())),
         };
-        let Some(url) = link.to_url(&platform::share_base_url()) else {
+        let url = link.to_url(&platform::share_base_url());
+        if url.is_none() {
             warn!("The score cannot be written as a link");
+        }
+        url
+    }
+
+    /// Open the share sheet with a link to the score, or copy the link where
+    /// there is no share sheet.
+    pub(crate) fn share_link(&mut self, ui: &Ui) {
+        let Some(url) = self.share_link_url() else {
             return;
         };
         if !platform::open_share_sheet(&url) {
@@ -721,7 +735,8 @@ impl Grooph {
     }
 
     /// Dialog for the setting tapped in the card or the options sheet.
-    fn compact_picker(&mut self, ui: &mut Ui) {
+    /// Picker dialog; the desktop layout opens it for the time signature.
+    pub(crate) fn compact_picker(&mut self, ui: &mut Ui) {
         let Some(picker) = self.ui.compact.picker else {
             return;
         };
@@ -839,6 +854,14 @@ impl Grooph {
             settings.complexity = level;
             settings.custom_groupings_enabled = false;
         }
+        ui.add_space(8.0);
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("Space").size(18.0));
+            ui.label(RichText::new(format!("{:.0}%", settings.space * 100.0)).size(18.0).weak());
+        });
+        ui.spacing_mut().slider_width = ui.available_width();
+        ui.add(egui::Slider::new(&mut settings.space, 0.0..=1.0).show_value(false))
+            .on_hover_text("More rests in the rhythm");
         ui.add_space(8.0);
         egui::CollapsingHeader::new(RichText::new("Groupings").size(18.0))
             .id_salt("compact_groupings")

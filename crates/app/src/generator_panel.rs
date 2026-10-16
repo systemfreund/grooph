@@ -1,5 +1,6 @@
 use crate::Grooph;
 use crate::Mode;
+use crate::compact::Picker;
 use crate::generator::ENDLESS_MIN_BARS;
 use crate::time_signature_dialog::groups_label;
 use crate::tool_palette::notation_button;
@@ -74,7 +75,7 @@ fn setting(ui: &mut egui::Ui, label: &str, add_control: impl FnOnce(&mut egui::U
 
 impl Grooph {
     /// Generator settings (RhythmBot-style). Any change regenerates the score;
-    /// "New rhythm" rolls again with unchanged settings.
+    /// the 🎲 button in the main menu rolls again with unchanged settings.
     pub(super) fn generator_panel(&mut self, ui: &mut egui::Ui) {
         egui::Panel::bottom("generator").resizable(true).show_animated_inside(
             ui,
@@ -82,16 +83,10 @@ impl Grooph {
             |ui| {
                 let before = self.editor.generator.settings;
                 let endless_before = self.editor.generator.endless;
-                let mut roll = false;
                 let mut preset = None;
 
                 egui::ScrollArea::horizontal().id_salt("gen_settings_scroll").show(ui, |ui| {
                     ui.horizontal(|ui| {
-                        if ui.button("🎲 New").on_hover_text("Generate a new rhythm").clicked() {
-                            roll = true;
-                        }
-                        ui.separator();
-
                         setting(ui, "Preset", |ui| preset = self.preset_combo(ui));
 
                         let gen_state = &mut self.editor.generator;
@@ -151,19 +146,19 @@ impl Grooph {
                                 });
                         });
 
+                        let mut pick_time_signature = false;
                         setting(ui, "Time Signature", |ui| {
-                            egui::ComboBox::from_id_salt("gen_time_signature")
-                                .selected_text(time_signature_label(settings.time_signature))
-                                .show_ui(ui, |ui| {
-                                    for ts in time_signatures() {
-                                        ui.selectable_value(
-                                            &mut settings.time_signature,
-                                            ts,
-                                            time_signature_label(ts),
-                                        );
-                                    }
-                                });
+                            // Same grid of meters and groupings as the compact layout.
+                            pick_time_signature = ui
+                                .button(format!(
+                                    "{} ⏷",
+                                    time_signature_label(settings.time_signature)
+                                ))
+                                .clicked();
                         });
+                        if pick_time_signature {
+                            self.ui.compact.picker = Some(Picker::TimeSignature);
+                        }
 
                         setting(ui, "Space", |ui| {
                             ui.add(
@@ -196,7 +191,7 @@ impl Grooph {
                     }
                 });
 
-                self.finish_generator_change(before, endless_before, roll);
+                self.finish_generator_change(before, endless_before, false);
                 if let Some(id) = preset {
                     self.apply_preset(id);
                 }

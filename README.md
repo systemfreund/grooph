@@ -105,8 +105,11 @@ Important root files:
 
 ## Generator / endless mode
 
-- Panel: `crates/app/src/generator_panel.rs` (🎲 in the main menu). Changing a
-  setting regenerates the score (undoable); "Edit" switches to the editor.
+- Panel: `crates/app/src/generator_panel.rs` (🎼 in the main menu; 🎲 next to
+  play rolls a new rhythm). Changing a setting regenerates the score
+  (undoable); "Edit" switches to the editor. The time signature opens the
+  compact layout's picker grid (`compact_picker`), so both layouts offer the
+  same meters and groupings.
 - App glue: `crates/app/src/generator.rs`. Endless mode replaces a measure once
   both the visible cursor and the audio cursor have left it; the replacement
   keeps the measure's time signature so loop timing stays stable. Needs at
@@ -214,6 +217,8 @@ Important root files:
 - Share (right of play, and in the edit bar) builds a score link with tempo
   and swing; on the web it opens the system share sheet
   (`platform::open_share_sheet`, Web Share API), else copies the link.
+- Shared with the desktop main menu: share (`share_link`) and tap tempo
+  (`record_tap`).
 
 
 - Tool registry: `crates/app/src/tools.rs` (ToolKind, Modifier, shortcuts).

@@ -203,15 +203,11 @@ impl Grooph {
         }
     }
 
-    /// Copy a link to the working score and tempo to the clipboard.
+    /// Copy a link to the working score, tempo and swing to the clipboard.
     fn copy_share_link(&mut self, ui: &egui::Ui) {
-        let base = platform::share_base_url();
-        match grooph_link::share_url(&base, &self.editor.score, self.playback_ctl.bpm) {
-            Some(url) => {
-                ui.ctx().copy_text(url);
-                self.ui.link_copied_at = Some(ui.input(|i| i.time));
-            }
-            None => warn!("The score cannot be written as a link"),
+        if let Some(url) = self.share_link_url() {
+            ui.ctx().copy_text(url);
+            self.ui.link_copied_at = Some(ui.input(|i| i.time));
         }
     }
 }
