@@ -1,4 +1,6 @@
 mod accuracy;
+mod calibration;
+mod clock;
 mod generator;
 mod generator_panel;
 mod help;
@@ -10,6 +12,7 @@ mod measure_panel;
 mod midi_input_widget;
 mod mixer_panel;
 mod platform;
+mod play_along;
 mod settings_panel;
 mod state;
 mod style;
@@ -27,6 +30,7 @@ use crate::accuracy::AccuracyState;
 use crate::generator::GeneratorState;
 use crate::library::PatternLibrary;
 use crate::platform::{PlatformRuntime, VisibilityEvent};
+use crate::play_along::{PlayAlongSettings, PlayAlongState};
 use crate::state::{
     AudioConfig, CountInState, EditorState, LayoutSettings, MidiState, PendingLoad,
     PlaybackController, PlaybackState, UiShell,
@@ -113,6 +117,7 @@ struct PersistedState {
     ghost_notes: bool,
     count_in: bool,
     swing: Swing,
+    play_along: PlayAlongSettings,
 }
 
 impl Default for PersistedState {
@@ -137,17 +142,22 @@ impl Default for PersistedState {
             ghost_notes: false,
             count_in: false,
             swing: Swing::default(),
+            play_along: PlayAlongSettings::default(),
         }
     }
 }
 
 impl PersistedState {
     fn from_app(app: &Grooph) -> Self {
+        // A running calibration has swapped in its click score: save what it
+        // will restore instead.
+        let stash = app.calibration_stash();
+        let generator = &app.editor.generator;
         Self {
             version: PERSISTED_STATE_VERSION,
-            score: app.editor.score.clone(),
-            cursor: app.editor.cursor,
-            bpm: app.playback_ctl.bpm,
+            score: stash.map_or(&app.editor.score, |s| &s.score).clone(),
+            cursor: stash.map_or(app.editor.cursor, |s| s.cursor),
+            bpm: stash.map_or(app.playback_ctl.bpm, |s| s.bpm),
             audio_settings: app.playback_ctl.audio_cfg.settings,
             audio_latency_enabled: app.playback_ctl.audio_cfg.latency_enabled,
             audio_offset: app.playback_ctl.audio_cfg.offset,
@@ -156,13 +166,14 @@ impl PersistedState {
             midi_selected_port_id: app.playback_ctl.midi.selected_port_id.clone(),
             accuracy_enabled: app.playback_ctl.accuracy.enabled,
             library: app.editor.library.clone(),
-            active_pattern_id: app.editor.active_pattern_id,
-            dirty: app.editor.dirty,
-            generator_settings: app.editor.generator.settings,
-            endless: app.editor.generator.endless,
-            ghost_notes: app.editor.generator.ghost_notes,
-            count_in: app.playback_ctl.audio_cfg.count_in,
-            swing: app.playback_ctl.audio_cfg.swing,
+            active_pattern_id: stash.map_or(app.editor.active_pattern_id, |s| s.active_pattern_id),
+            dirty: stash.map_or(app.editor.dirty, |s| s.dirty),
+            generator_settings: generator.settings,
+            endless: stash.map_or(generator.endless, |s| s.endless),
+            ghost_notes: stash.map_or(generator.ghost_notes, |s| s.ghost_notes),
+            count_in: stash.map_or(app.playback_ctl.audio_cfg.count_in, |s| s.count_in),
+            swing: stash.map_or(app.playback_ctl.audio_cfg.swing, |s| s.swing),
+            play_along: app.playback_ctl.play_along.settings,
         }
     }
 }
@@ -213,6 +224,8 @@ impl App for Grooph {
         self.tool_palette_panel(ui);
         self.measure_panel(ui);
         self.update_endless();
+        self.run_summary_window(ui);
+        self.calibration_window(ui);
 
         if matches!(self.ui.mode, Mode::TimeSignature { .. }) {
             self.time_signature_dialog(ui);
@@ -227,7 +240,7 @@ impl App for Grooph {
         }
 
         self.handle_keyboard_input(ui);
-        self.handle_midi_input_events();
+        self.handle_play_along_input(ui);
 
         if let Some(ev) = self.ui.platform.take_visibility_event() {
             match ev {
@@ -266,81 +279,6 @@ impl App for Grooph {
 }
 
 impl Grooph {
-    fn handle_midi_input_events(&mut self) {
-        let (events, now_seconds, is_connected) = match self.playback_ctl.midi.input.as_ref() {
-            Some(input) => (input.drain_events(), input.now_seconds(), input.is_connected()),
-            None => return,
-        };
-
-        if !self.playback_ctl.accuracy.enabled {
-            return;
-        }
-
-        // The score hasn't started yet: keep re-anchoring the session at "now"
-        // and ignore hits; `realign_accuracy_clock` fixes the anchor exactly
-        // when the count-in ends.
-        if self.playback_ctl.playback.counting_in() {
-            if is_connected && self.playback_ctl.transport_state == TransportState::Playing {
-                self.playback_ctl.accuracy.tracker.on_playback_start_at(now_seconds, 0.0);
-            }
-            return;
-        }
-
-        let timing = self.score_timing();
-        let total_loop_seconds = timing.total_loop_seconds();
-
-        if self.playback_ctl.transport_state == TransportState::Playing
-            && is_connected
-            && !self.playback_ctl.accuracy.tracker.has_start_time()
-        {
-            let (start_time, last_tick) = if total_loop_seconds > 0.0 {
-                (
-                    now_seconds
-                        - timing.global_tick_to_seconds(self.playback_ctl.playback.smooth_tick),
-                    self.playback_ctl.playback.smooth_tick,
-                )
-            } else {
-                (now_seconds, 0.0)
-            };
-            self.playback_ctl.accuracy.tracker.on_playback_start_at(start_time, last_tick);
-        }
-
-        let accuracy_active = self.playback_ctl.accuracy.tracker.update_state(
-            self.playback_ctl.transport_state == TransportState::Playing,
-            is_connected,
-            now_seconds,
-        );
-        let ready =
-            accuracy_active && total_loop_seconds > 0.0 && !self.editor.score.measures.is_empty();
-
-        for event in events {
-            match event {
-                MidiInputEvent::NoteOn { channel, note, velocity, timestamp } => {
-                    if ready {
-                        self.playback_ctl.accuracy.tracker.record_hit(
-                            timestamp,
-                            &timing,
-                            &self.editor.score,
-                        );
-                    }
-                    debug!("MIDI NoteOn ch={} note={} vel={}", channel, note, velocity);
-                }
-                MidiInputEvent::NoteOff { channel, note, velocity, .. } => {
-                    debug!("MIDI NoteOff ch={} note={} vel={}", channel, note, velocity);
-                }
-                MidiInputEvent::ControlChange { .. } => {}
-            }
-        }
-
-        if ready {
-            self.playback_ctl.accuracy.tracker.update_progress(
-                now_seconds,
-                &timing,
-                &self.editor.score,
-            );
-        }
-    }
-
     fn playback_options(&self) -> PlaybackOptions {
         let generator = &self.editor.generator;
         PlaybackOptions {
@@ -703,10 +641,11 @@ impl Grooph {
             return;
         }
         self.playback_ctl.transport_state = TransportState::Playing;
-        let accuracy_start =
-            self.playback_ctl.midi.input.as_ref().and_then(|input| {
-                if input.is_connected() { Some(input.now_seconds()) } else { None }
-            });
+        let midi_connected =
+            self.playback_ctl.midi.input.as_ref().is_some_and(|input| input.is_connected());
+        let accuracy_start = midi_connected.then(clock::now_seconds);
+        self.playback_ctl.play_along.engaged = false;
+        self.playback_ctl.accuracy.tracker.dismiss_summary();
         if self.playback_ctl.accuracy.enabled {
             self.playback_ctl.accuracy.tracker.on_playback_start(accuracy_start);
         } else {
@@ -727,8 +666,14 @@ impl Grooph {
             return;
         }
         self.playback_ctl.transport_state = TransportState::Stopped;
-        self.playback_ctl.accuracy.tracker.on_playback_stop();
+        if self.playback_ctl.play_along.calibration.is_some() {
+            self.playback_ctl.accuracy.tracker.discard_session();
+        } else {
+            self.playback_ctl.accuracy.tracker.on_playback_stop();
+        }
+        self.playback_ctl.play_along.engaged = false;
         self.playback_ctl.playback.reset();
+        self.end_calibration_run();
 
         self.ui.platform.release_wake_lock();
     }
@@ -753,16 +698,10 @@ impl Grooph {
     /// Re-anchor the accuracy session to the current playback position, e.g.
     /// after a tempo change or when the count-in bar ends.
     pub(crate) fn realign_accuracy_clock(&mut self) {
-        if !self.playback_ctl.accuracy.enabled {
-            return;
-        }
         if self.playback_ctl.transport_state != TransportState::Playing {
             return;
         }
-        let Some(input) = self.playback_ctl.midi.input.as_ref() else {
-            return;
-        };
-        if !input.is_connected() {
+        if !self.playback_ctl.accuracy.tracker.has_start_time() {
             return;
         }
 
@@ -771,7 +710,7 @@ impl Grooph {
             return;
         }
 
-        let now_seconds = input.now_seconds();
+        let now_seconds = clock::now_seconds();
         let start_time =
             now_seconds - timing.global_tick_to_seconds(self.playback_ctl.playback.smooth_tick);
         self.playback_ctl
@@ -964,6 +903,7 @@ impl Grooph {
                     available_ports: midi_input_ports,
                     selected_port_id: midi_selected_port_id,
                 },
+                play_along: PlayAlongState { settings: state.play_along, ..Default::default() },
             },
             ui: UiShell {
                 mode: Mode::Playback,

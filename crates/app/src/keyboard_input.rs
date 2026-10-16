@@ -11,6 +11,14 @@ impl Grooph {
             if matches!(self.ui.mode, Mode::TimeSignature { .. }) {
                 return;
             }
+            // Calibration swaps in its own click score: no editing, but Space
+            // still stops (= cancels) it.
+            if self.playback_ctl.play_along.calibration.is_some() {
+                if i.key_pressed(Key::Space) {
+                    self.stop_transport();
+                }
+                return;
+            }
             // App-global shortcuts run regardless of edit mode; the tool registry handles the rest.
             if i.key_pressed(Key::Escape) {
                 self.toggle_mode(Mode::Edit);

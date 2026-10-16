@@ -2,6 +2,7 @@ use crate::accuracy::AccuracyState;
 use crate::generator::GeneratorState;
 use crate::library::PatternLibrary;
 use crate::platform::PlatformRuntime;
+use crate::play_along::PlayAlongState;
 use crate::undo::UndoHistory;
 use crate::{CountingSettings, Mode, TransportState};
 use eframe::egui::TextStyle;
@@ -127,7 +128,7 @@ pub(crate) struct EditorState {
 }
 
 /// Realtime playback subsystem: transport, tempo, audio engine, MIDI input,
-/// and the accuracy tracker that ties hits to score onsets.
+/// tap input, and the accuracy tracker that ties hits to score onsets.
 pub(crate) struct PlaybackController {
     pub(crate) transport_state: TransportState,
     pub(crate) bpm: u32,
@@ -136,6 +137,7 @@ pub(crate) struct PlaybackController {
     pub(crate) playback: PlaybackState,
     pub(crate) accuracy: AccuracyState,
     pub(crate) midi: MidiState,
+    pub(crate) play_along: PlayAlongState,
 }
 
 /// UI shell state: which panel is visible, font configuration, layout knobs,

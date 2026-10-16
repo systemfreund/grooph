@@ -29,6 +29,28 @@ impl PlatformRuntime {
     pub(crate) fn release_wake_lock(&self) {}
 }
 
+/// What produced a tap, for looking up its precise event time.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+pub(crate) enum TapKind {
+    /// A key, as lowercased `KeyboardEvent.key` (e.g. `"j"`).
+    Key(&'static str),
+    Pointer,
+}
+
+/// Time of a tap on the [`crate::clock`] timeline. The web uses the DOM event
+/// timestamp; natively egui exposes no event times, so the tap is stamped when
+/// the frame handles it (up to one frame late).
+pub(crate) fn tap_time(kind: TapKind) -> f64 {
+    let now = crate::clock::now_seconds();
+    #[cfg(target_arch = "wasm32")]
+    if let Some(time) = crate::web::take_press_time(kind, now) {
+        return time.min(now);
+    }
+    let _ = kind;
+    now
+}
+
 /// Seed for the rhythm generator. Uses the browser's crypto RNG on the web
 /// and the system clock natively.
 #[cfg(target_arch = "wasm32")]

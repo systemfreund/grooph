@@ -3,7 +3,7 @@ use grooph_measure::tempo::ScoreTiming;
 
 use super::progress::update_progress;
 use super::recorder::record_hit;
-use super::session::{AccuracyMark, RecordingSession};
+use super::session::{AccuracyMark, RecordingSession, RunSummary};
 
 /// Coordinates the accuracy-recording session. Holds a `RecordingSession`
 /// that is either `Idle` (no playback) or `Recording` (playback active with
@@ -12,6 +12,8 @@ use super::session::{AccuracyMark, RecordingSession};
 #[derive(Default)]
 pub(crate) struct AccuracyTracker {
     session: RecordingSession,
+    /// Evaluation of the last finished run with at least one hit.
+    last_summary: Option<RunSummary>,
 }
 
 impl AccuracyTracker {
@@ -23,32 +25,30 @@ impl AccuracyTracker {
         self.session.is_recording()
     }
 
-    pub(crate) fn update_state(
-        &mut self,
-        playing: bool,
-        is_connected: bool,
-        now_seconds: f64,
-    ) -> bool {
-        if playing && is_connected {
+    /// Keep the session running while `active` (playing with an input
+    /// source), end it otherwise.
+    pub(crate) fn update_state(&mut self, active: bool, now_seconds: f64) -> bool {
+        if active {
             if !self.session.is_recording() {
                 self.session.start(now_seconds, Some(0.0));
             }
             true
         } else {
-            if self.session.is_recording() {
-                self.session.stop();
-            }
+            self.end_session();
             false
         }
     }
 
     pub(crate) fn on_playback_start(&mut self, now_seconds: Option<f64>) {
+        self.last_summary = None;
         match now_seconds {
             Some(t) => self.session.start(t, Some(0.0)),
             None => self.session.stop(),
         }
     }
 
+    /// (Re)start the session anchored at `start_time`. Drops any data of a
+    /// session already running, e.g. one re-anchored during the count-in.
     pub(crate) fn on_playback_start_at(&mut self, start_time: f64, last_tick: f64) {
         self.session.start(start_time, Some(last_tick));
     }
@@ -58,7 +58,32 @@ impl AccuracyTracker {
     }
 
     pub(crate) fn on_playback_stop(&mut self) {
+        self.end_session();
+    }
+
+    /// Stop recording without keeping a summary (calibration runs).
+    pub(crate) fn discard_session(&mut self) {
         self.session.stop();
+    }
+
+    fn end_session(&mut self) {
+        if let Some(summary) = self.session.data().and_then(|d| d.summary()) {
+            self.last_summary = Some(summary);
+        }
+        self.session.stop();
+    }
+
+    /// Running evaluation of the current session.
+    pub(crate) fn live_summary(&self) -> Option<RunSummary> {
+        self.session.data()?.summary()
+    }
+
+    pub(crate) fn last_summary(&self) -> Option<RunSummary> {
+        self.last_summary
+    }
+
+    pub(crate) fn dismiss_summary(&mut self) {
+        self.last_summary = None;
     }
 
     pub(crate) fn clear_for_edit(&mut self) {
@@ -70,10 +95,14 @@ impl AccuracyTracker {
         self.session.data()?.marks_by_onset.get(&global_onset_tick).copied()
     }
 
-    pub(crate) fn record_hit(&mut self, timestamp: f64, timing: &ScoreTiming, score: &Score) {
-        if let Some(data) = self.session.data_mut() {
-            record_hit(data, timestamp, timing, score);
-        }
+    /// Returns the hit's deviation in ms if it was matched to a note.
+    pub(crate) fn record_hit(
+        &mut self,
+        timestamp: f64,
+        timing: &ScoreTiming,
+        score: &Score,
+    ) -> Option<f64> {
+        record_hit(self.session.data_mut()?, timestamp, timing, score)
     }
 
     pub(crate) fn update_progress(
@@ -234,5 +263,57 @@ mod tests {
             AccuracyMark::Hit(diff) => assert!(diff.abs() < 1e-6, "diff={diff}"),
             _ => panic!("expected hit"),
         }
+    }
+
+    #[test]
+    fn summary_counts_hits_misses_and_extra_hits() {
+        let score = score_of_quarters(&[TimeSignature::FOUR_FOUR]);
+        let timing = ScoreTiming::from_score(&score, 120);
+        let tpb = DEFAULT_GRID.ticks_per_beat(&TimeSignature::FOUR_FOUR) as f64;
+        let beat_s = timing.global_tick_to_seconds(tpb);
+        let mut tracker = AccuracyTracker::new();
+        tracker.on_playback_start_at(0.0, 0.0);
+        assert!(tracker.live_summary().is_none());
+
+        // Beat 1 dead on, beat 2 played twice (10 ms late, then again),
+        // beats 3 and 4 skipped.
+        tracker.record_hit(0.0, &timing, &score);
+        assert_eq!(tracker.record_hit(beat_s + 0.010, &timing, &score).map(f64::round), Some(10.0));
+        assert_eq!(tracker.record_hit(beat_s + 0.050, &timing, &score), None);
+        tracker.update_progress(beat_s * 3.9, &timing, &score);
+
+        let live = tracker.live_summary().expect("hits recorded");
+        assert_eq!(live.hits, 2);
+        assert_eq!(live.perfect, 2);
+        assert_eq!(live.extra, 1);
+        assert_eq!(live.misses, 2);
+        assert!((live.mean_ms - 5.0).abs() < 1e-6);
+
+        tracker.on_playback_stop();
+        assert_eq!(tracker.last_summary(), Some(live));
+        tracker.dismiss_summary();
+        assert!(tracker.last_summary().is_none());
+    }
+
+    #[test]
+    fn run_without_hits_leaves_no_summary() {
+        let score = score_of_quarters(&[TimeSignature::FOUR_FOUR]);
+        let timing = ScoreTiming::from_score(&score, 120);
+        let mut tracker = AccuracyTracker::new();
+        tracker.on_playback_start_at(0.0, 0.0);
+        tracker.update_progress(1.9, &timing, &score);
+        tracker.on_playback_stop();
+        assert!(tracker.last_summary().is_none());
+    }
+
+    #[test]
+    fn discarded_session_leaves_no_summary() {
+        let score = score_of_quarters(&[TimeSignature::FOUR_FOUR]);
+        let timing = ScoreTiming::from_score(&score, 120);
+        let mut tracker = AccuracyTracker::new();
+        tracker.on_playback_start_at(0.0, 0.0);
+        tracker.record_hit(0.0, &timing, &score);
+        tracker.discard_session();
+        assert!(tracker.last_summary().is_none());
     }
 }

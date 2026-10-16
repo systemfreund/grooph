@@ -1,5 +1,6 @@
 use crate::Grooph;
 use crate::midi_input_widget::midi_input_widget;
+use crate::play_along::{HitSource, MAX_INPUT_OFFSET_MS, TapKey};
 use crate::{CountingBase, Mode};
 use eframe::egui;
 use eframe::egui::global_theme_preference_buttons;
@@ -204,11 +205,71 @@ impl Grooph {
                         );
                     });
 
+                    egui::CollapsingHeader::new("Play Along").default_open(false).show(ui, |ui| {
+                        self.play_along_settings(ui);
+                    });
+
                     ui.separator();
                     ui.label("Theme:");
                     global_theme_preference_buttons(ui);
                 });
             },
         );
+    }
+
+    fn play_along_settings(&mut self, ui: &mut egui::Ui) {
+        let midi_connected =
+            self.playback_ctl.midi.input.as_ref().is_some_and(|input| input.is_connected());
+        let settings = &mut self.playback_ctl.play_along.settings;
+        ui.checkbox(&mut settings.tap_enabled, "Tap input")
+            .on_hover_text("Practise without MIDI: press the tap key or touch the staff");
+        ui.add_enabled_ui(settings.tap_enabled, |ui| {
+            egui::ComboBox::from_label("Tap key").selected_text(settings.tap_key.label()).show_ui(
+                ui,
+                |ui| {
+                    for key in TapKey::ALL {
+                        ui.selectable_value(&mut settings.tap_key, key, key.label());
+                    }
+                },
+            );
+        });
+        ui.separator();
+        let mut calibrate = None;
+        let range = -MAX_INPUT_OFFSET_MS..=MAX_INPUT_OFFSET_MS;
+        ui.label("Input latency (subtracted from your hits):");
+        ui.horizontal(|ui| {
+            ui.label("Tap:");
+            ui.add(
+                egui::DragValue::new(&mut settings.tap_offset_ms)
+                    .range(range.clone())
+                    .speed(0.5)
+                    .suffix(" ms"),
+            );
+            if ui.add_enabled(settings.tap_enabled, egui::Button::new("Calibrate…")).clicked() {
+                calibrate = Some(HitSource::Tap);
+            }
+        });
+        ui.horizontal(|ui| {
+            ui.label("MIDI:");
+            ui.add(
+                egui::DragValue::new(&mut settings.midi_offset_ms)
+                    .range(range)
+                    .speed(0.5)
+                    .suffix(" ms"),
+            );
+            if ui
+                .add_enabled(midi_connected, egui::Button::new("Calibrate…"))
+                .on_disabled_hover_text("Choose a MIDI input first")
+                .clicked()
+            {
+                calibrate = Some(HitSource::Midi);
+            }
+        });
+        ui.label(
+            "Calibrate by playing along with a click; the median deviation becomes the offset.",
+        );
+        if let Some(source) = calibrate {
+            self.start_calibration(source);
+        }
     }
 }

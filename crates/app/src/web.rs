@@ -1,7 +1,9 @@
+use crate::platform::TapKind;
 use crate::platform::VisibilityEvent;
 use eframe::egui::Context;
 use log::{debug, error};
 use std::cell::RefCell;
+use std::collections::VecDeque;
 use std::rc::Rc;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU8, Ordering};
@@ -65,6 +67,66 @@ fn install_visibility_listeners(ctx: Context) {
     }
 }
 
+/// A raw key or pointer press with its DOM timestamp (seconds, same timeline
+/// as `performance.now()`).
+struct RawPress {
+    /// Lowercased `KeyboardEvent.key`; `None` for pointer presses.
+    key: Option<String>,
+    time: f64,
+}
+
+/// Presses older than this are dropped; egui sees a press within a frame or two.
+const RAW_PRESS_MAX_AGE_S: f64 = 0.5;
+
+thread_local! {
+    static RAW_PRESSES: RefCell<VecDeque<RawPress>> = const { RefCell::new(VecDeque::new()) };
+}
+
+fn push_raw_press(key: Option<String>, time: f64) {
+    RAW_PRESSES.with(|q| {
+        let mut q = q.borrow_mut();
+        q.push_back(RawPress { key, time });
+        while q.len() > 32 {
+            q.pop_front();
+        }
+    });
+}
+
+/// Record key and pointer presses with their event timestamps. egui only sees
+/// them at the next frame, which would add up to a frame of jitter to taps.
+fn install_press_listeners() {
+    let Some(win) = web_sys::window() else { return };
+    let on_key = Closure::wrap(Box::new(move |e: web_sys::KeyboardEvent| {
+        if !e.repeat() {
+            push_raw_press(Some(e.key().to_lowercase()), e.time_stamp() / 1000.0);
+        }
+    }) as Box<dyn FnMut(_)>);
+    win.add_event_listener_with_callback("keydown", on_key.as_ref().unchecked_ref()).ok();
+    on_key.forget();
+
+    let on_pointer = Closure::wrap(Box::new(move |e: web_sys::Event| {
+        push_raw_press(None, e.time_stamp() / 1000.0);
+    }) as Box<dyn FnMut(_)>);
+    win.add_event_listener_with_callback("pointerdown", on_pointer.as_ref().unchecked_ref()).ok();
+    on_pointer.forget();
+}
+
+/// DOM timestamp of the latest press matching `kind`; older presses of that
+/// kind are consumed with it.
+pub(crate) fn take_press_time(kind: TapKind, now: f64) -> Option<f64> {
+    RAW_PRESSES.with(|q| {
+        let mut q = q.borrow_mut();
+        q.retain(|p| now - p.time <= RAW_PRESS_MAX_AGE_S);
+        let matches = |p: &RawPress| match kind {
+            TapKind::Key(key) => p.key.as_deref() == Some(key),
+            TapKind::Pointer => p.key.is_none(),
+        };
+        let time = q.iter().rev().find(|p| matches(p)).map(|p| p.time)?;
+        q.retain(|p| !matches(p));
+        Some(time)
+    })
+}
+
 pub(crate) struct PlatformRuntime {
     wake_lock: Rc<RefCell<Option<WakeLockSentinel>>>,
 }
@@ -76,6 +138,7 @@ impl PlatformRuntime {
 
     pub(crate) fn install_listeners(&self, ctx: Context) {
         install_visibility_listeners(ctx);
+        install_press_listeners();
     }
 
     pub(crate) fn take_visibility_event(&self) -> Option<VisibilityEvent> {

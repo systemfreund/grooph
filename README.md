@@ -124,8 +124,24 @@ Important root files:
 - Count-in (`PlaybackOptions::count_in`): `TickSource` plays one bar of
   `SoundType::CountIn` clicks (downbeat + primary beats of the first measure)
   before the score; `Audio::playback_position` is negative meanwhile. The UI
-  holds the cursor at 0 (`CountInState`) and re-anchors MIDI accuracy when the
-  count-in ends.
+  holds the cursor at 0 (`CountInState`) and re-anchors the accuracy session
+  when the count-in ends.
+
+## Play along (accuracy)
+
+- Hit sources (`crates/app/src/play_along.rs`): MIDI NoteOns and taps (tap key,
+  default `J`, or a press on the staff while playing). All hits are stamped on
+  one clock (`crates/app/src/clock.rs`); MIDI timestamps are moved onto it by
+  their age. On the web taps use the DOM event `timeStamp` (`web.rs`), natively
+  the frame time. Each source has its own input offset (`PlayAlongSettings`).
+- While tap capture is active, staff presses are hits, not edits.
+- The session (`accuracy::AccuracyTracker`) runs while MIDI is connected or
+  after the first tap of a run. Stopping keeps a `RunSummary` (hits, perfect/
+  good/off windows, misses, extra hits, mean, spread) for the "Your run" window.
+- Calibration (`crates/app/src/calibration.rs`): stashes the score and playback
+  options, plays 4 quarters at 100 BPM, takes the median of the hits after a
+  warm-up as the source's offset and restores the stash on stop. Persistence
+  reads the stash while a calibration runs.
 
 ## Input/tools
 

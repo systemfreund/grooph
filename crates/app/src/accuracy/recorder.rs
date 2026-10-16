@@ -11,37 +11,39 @@ use super::session::{AccuracyMark, RecordingData};
 /// note onset across the whole score (shortest signed distance on the loop),
 /// taking swing into account.
 /// The delta is converted to milliseconds using the onset measure's tempo.
+///
+/// Returns the delta in ms when the hit was matched to a note; a second hit
+/// on an already hit note counts as extra and returns `None`.
 pub(super) fn record_hit(
     data: &mut RecordingData,
     timestamp: f64,
     timing: &ScoreTiming,
     score: &Score,
-) {
+) -> Option<f64> {
     let total_ticks = timing.total_loop_ticks();
     if total_ticks == 0 || timing.total_loop_seconds() <= 0.0 {
-        return;
+        return None;
     }
     let elapsed = timestamp - data.start_time;
     if elapsed < 0.0 {
-        return;
+        return None;
     }
     let total = total_ticks as f64;
     let hit_global = timing.seconds_to_global_tick(elapsed);
 
-    let Some((global_onset, onset_m_idx, diff_ticks, raw_diff)) =
-        best_match(hit_global, total, score, timing)
-    else {
-        return;
-    };
+    let (global_onset, onset_m_idx, diff_ticks, raw_diff) =
+        best_match(hit_global, total, score, timing)?;
 
     let wrap_next = raw_diff > total * 0.5;
     let wrap_prev = raw_diff < -total * 0.5;
-    if wrap_next {
-        if data.hits_next_loop.contains(&global_onset) {
-            return;
-        }
-    } else if !wrap_prev && data.hits_in_loop.contains(&global_onset) {
-        return;
+    let already_hit = if wrap_next {
+        data.hits_next_loop.contains(&global_onset)
+    } else {
+        !wrap_prev && data.hits_in_loop.contains(&global_onset)
+    };
+    if already_hit {
+        data.counters.extra += 1;
+        return None;
     }
 
     // Convert tick delta to ms using the onset measure's local rate. Since
@@ -51,6 +53,7 @@ pub(super) fn record_hit(
     let delta_ms = if tps > 0.0 { (diff_ticks / tps) * 1000.0 } else { 0.0 };
 
     data.stats.push(delta_ms);
+    data.counters.push_hit(delta_ms);
     data.marks_by_onset.insert(global_onset, AccuracyMark::Hit(diff_ticks));
     if wrap_next {
         data.hits_next_loop.insert(global_onset);
@@ -64,6 +67,7 @@ pub(super) fn record_hit(
         delta_ms,
         timing.bpm()
     );
+    Some(delta_ms)
 }
 
 /// Walk every note beat in every measure and find the closest onset to

@@ -83,10 +83,16 @@ impl Grooph {
                             }
                             if ui
                                 .selectable_label(self.playback_ctl.accuracy.enabled, "🎯")
+                                .on_hover_text(format!(
+                                    "Timing feedback: play along on a MIDI device, press {} or \
+                                     tap the staff",
+                                    self.playback_ctl.play_along.settings.tap_key.label()
+                                ))
                                 .clicked()
                             {
                                 self.set_accuracy_enabled(!self.playback_ctl.accuracy.enabled);
                             }
+                            self.live_accuracy_label(ui);
                             if ui.selectable_label(self.ui.mode == Mode::Help, "?").clicked() {
                                 self.toggle_mode(Mode::Help);
                             }

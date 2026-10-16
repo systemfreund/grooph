@@ -325,13 +325,10 @@ impl Grooph {
         timing: &ScoreTiming,
         metrics: &GlyphMetrics,
     ) {
-        if !self.playback_ctl.accuracy.enabled {
+        if !self.playback_ctl.accuracy.enabled && self.calibration_source().is_none() {
             return;
         }
-        let Some(midi_input) = self.playback_ctl.midi.input.as_ref() else {
-            return;
-        };
-        if !midi_input.is_connected() {
+        if !self.playback_ctl.accuracy.tracker.has_start_time() {
             return;
         }
         if self.playback_ctl.transport_state != TransportState::Playing {
@@ -469,6 +466,13 @@ impl Grooph {
     }
 
     fn handle_input(&mut self, resp: Response, staff: &StaffLayout) {
+        // While playing along, a touch or click on the staff is a hit, not an edit.
+        if self.tap_capture_active() {
+            if resp.contains_pointer() && resp.ctx.input(|i| i.pointer.any_pressed()) {
+                self.push_pointer_tap();
+            }
+            return;
+        }
         if !matches!(self.ui.mode, Mode::TimeSignature { .. })
             && (resp.clicked() || resp.dragged())
             && let Some(pos) = resp.interact_pointer_pos()

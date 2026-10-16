@@ -51,6 +51,7 @@ pub(super) fn update_progress(
             total,
             &mut data.marks_by_onset,
             &mut data.hits_in_loop,
+            &mut data.counters.misses,
         );
     } else {
         // Score-loop wrapped.
@@ -62,6 +63,7 @@ pub(super) fn update_progress(
             total,
             &mut data.marks_by_onset,
             &mut data.hits_in_loop,
+            &mut data.counters.misses,
         );
         data.hits_in_loop = std::mem::take(&mut data.hits_next_loop);
         process_segment(
@@ -72,6 +74,7 @@ pub(super) fn update_progress(
             total,
             &mut data.marks_by_onset,
             &mut data.hits_in_loop,
+            &mut data.counters.misses,
         );
     }
 
@@ -87,6 +90,7 @@ fn process_segment(
     total_loop_ticks: f64,
     marks_by_onset: &mut HashMap<u64, AccuracyMark>,
     hits_in_loop: &mut HashSet<u64>,
+    misses: &mut u64,
 ) {
     if global_beats.is_empty() {
         return;
@@ -111,6 +115,7 @@ fn process_segment(
         if in_range {
             if !hits_in_loop.contains(&gb.onset_tick) {
                 marks_by_onset.insert(gb.onset_tick, AccuracyMark::Miss);
+                *misses += 1;
             }
             hits_in_loop.remove(&gb.onset_tick);
         }
