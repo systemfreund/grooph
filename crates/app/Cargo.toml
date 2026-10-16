@@ -29,3 +29,6 @@ getrandom = { workspace = true }
 
 [lints.rust]
 unused_imports = "allow"
+
+[dev-dependencies]
+ron = "0.12"

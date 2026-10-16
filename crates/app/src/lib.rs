@@ -15,6 +15,8 @@ mod midi_input_widget;
 mod mixer_panel;
 mod platform;
 mod play_along;
+mod preset_panel;
+mod presets;
 mod settings_panel;
 mod state;
 mod style;
@@ -34,6 +36,7 @@ use crate::generator::GeneratorState;
 use crate::library::PatternLibrary;
 use crate::platform::{PlatformRuntime, VisibilityEvent};
 use crate::play_along::{PlayAlongSettings, PlayAlongState};
+use crate::presets::PresetLibrary;
 use crate::state::{
     AudioConfig, CountInState, EditorState, LayoutSettings, MidiState, PendingLoad,
     PlaybackController, PlaybackState, UiShell,
@@ -123,6 +126,7 @@ struct PersistedState {
     play_along: PlayAlongSettings,
     gap_click: GapClick,
     tempo_ramp: TempoRamp,
+    presets: PresetLibrary,
 }
 
 impl Default for PersistedState {
@@ -150,6 +154,7 @@ impl Default for PersistedState {
             play_along: PlayAlongSettings::default(),
             gap_click: GapClick::default(),
             tempo_ramp: TempoRamp::default(),
+            presets: PresetLibrary::default(),
         }
     }
 }
@@ -183,6 +188,7 @@ impl PersistedState {
             play_along: app.playback_ctl.play_along.settings,
             gap_click: stash.map_or(app.playback_ctl.audio_cfg.gap, |s| s.gap),
             tempo_ramp: stash.map_or(app.playback_ctl.audio_cfg.ramp, |s| s.ramp),
+            presets: app.editor.presets.clone(),
         }
     }
 }
@@ -913,6 +919,8 @@ impl Grooph {
                 active_pattern_id: state.active_pattern_id.filter(|id| state.library.contains(*id)),
                 dirty: state.dirty,
                 library: state.library,
+                presets: state.presets,
+                active_preset: None,
                 generator: GeneratorState::new(
                     state.generator_settings,
                     state.endless,
@@ -952,6 +960,7 @@ impl Grooph {
                 flash_enabled: state.flash_enabled,
                 platform,
                 save_name_buffer: String::new(),
+                preset_name_buffer: String::new(),
                 pending_load: None,
                 link_error: None,
                 link_copied_at: None,
@@ -959,6 +968,7 @@ impl Grooph {
                 compact: CompactState::default(),
             },
         };
+        app.editor.active_preset = app.matching_preset();
         app.open_link_from_url();
         app
     }

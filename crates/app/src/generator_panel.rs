@@ -80,6 +80,7 @@ impl Grooph {
                 let before = self.editor.generator.settings;
                 let endless_before = self.editor.generator.endless;
                 let mut roll = false;
+                let mut preset = None;
 
                 egui::ScrollArea::horizontal().id_salt("gen_settings_scroll").show(ui, |ui| {
                     ui.horizontal(|ui| {
@@ -87,6 +88,8 @@ impl Grooph {
                             roll = true;
                         }
                         ui.separator();
+
+                        setting(ui, "Preset", |ui| preset = self.preset_combo(ui));
 
                         let gen_state = &mut self.editor.generator;
                         let settings = &mut gen_state.settings;
@@ -184,7 +187,16 @@ impl Grooph {
                     .id_salt("gen_groupings")
                     .show(ui, |ui| self.groupings_picker(ui));
 
+                egui::CollapsingHeader::new("Presets").id_salt("gen_presets").show(ui, |ui| {
+                    if let Some(id) = self.preset_manager(ui) {
+                        preset = Some(id);
+                    }
+                });
+
                 self.finish_generator_change(before, endless_before, roll);
+                if let Some(id) = preset {
+                    self.apply_preset(id);
+                }
             },
         );
     }

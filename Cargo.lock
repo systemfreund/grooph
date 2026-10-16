@@ -1612,6 +1612,7 @@ dependencies = [
  "grooph-midi",
  "grooph-render",
  "log",
+ "ron",
  "serde",
  "wasm-bindgen",
  "wasm-bindgen-futures",

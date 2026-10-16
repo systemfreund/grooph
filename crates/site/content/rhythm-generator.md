@@ -27,6 +27,16 @@ Open the generator with the dice icon. Every change creates a new rhythm.
 | **Groupings** | Instead of a level, pick exactly which one-beat figures may appear. |
 | **Endless** | Keeps replacing bars you have already played, so the exercise never repeats. |
 | **Ghost notes** | Quiet clicks on every free slot of the subdivision, to hear the grid. |
+| **Preset** | Recall a saved exercise. |
+
+## Presets
+
+A preset stores the generator settings together with everything you practise with them:
+tempo, swing, ghost notes, count-in, endless mode, gap click, tempo ramp and the sounds.
+Pick one from the **Preset** list to restore all of it at once. Under **Presets** you save
+the current settings as a new preset, overwrite the active one, rename or delete your own.
+A few built-in presets get you started, for example "16th funk" or "Speed builder"; they
+cannot be changed, but you can save a copy under a new name.
 
 ## How the levels work
 

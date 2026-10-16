@@ -8,6 +8,7 @@ use crate::generator_panel::{
     offered_subdivisions, subdivision_label, time_signature_label, time_signatures,
 };
 use crate::library_panel::LINK_COPIED_NOTICE_S;
+use crate::presets::{self, PresetId};
 use crate::{Grooph, Mode, TransportState, platform};
 use eframe::egui;
 use eframe::egui::{
@@ -50,6 +51,7 @@ pub(crate) enum Picker {
     Bars,
     Bpm,
     Swing,
+    Preset,
 }
 
 /// UI state of the compact layout. Not persisted.
@@ -78,14 +80,10 @@ fn swing_label(percent: u8) -> String {
 }
 
 /// Fill of cards and sheets: a step off the panel background.
-fn card_fill(ui: &Ui) -> Color32 {
-    ui.visuals().widgets.inactive.weak_bg_fill
-}
+fn card_fill(ui: &Ui) -> Color32 { ui.visuals().widgets.inactive.weak_bg_fill }
 
 /// Text in the accent color (selected tab, values).
-fn accent_text(ui: &Ui) -> Color32 {
-    ui.visuals().selection.stroke.color
-}
+fn accent_text(ui: &Ui) -> Color32 { ui.visuals().selection.stroke.color }
 
 /// Text that is as wide as `max_width` at most: shrinks the font if needed.
 fn fitted_text(
@@ -498,6 +496,9 @@ impl Grooph {
     }
 
     fn compact_option_rows(&mut self, ui: &mut Ui) {
+        if value_row(ui, "Preset", &self.active_preset_label()).clicked() {
+            self.ui.compact.picker = Some(Picker::Preset);
+        }
         let generator = &mut self.editor.generator;
         switch_row(ui, "Endless", &mut generator.endless);
         switch_row(ui, "Ghost notes", &mut generator.ghost_notes);
@@ -727,6 +728,7 @@ impl Grooph {
         let before = self.editor.generator.settings;
         let endless_before = self.editor.generator.endless;
         let width = (ui.ctx().content_rect().width() - 48.0).clamp(200.0, 380.0);
+        let mut preset = None;
 
         let modal = Modal::new(Id::new("compact_picker")).show(ui.ctx(), |ui| {
             ui.set_width(width);
@@ -737,6 +739,7 @@ impl Grooph {
                 Picker::Bars => "Bars",
                 Picker::Bpm => "Tempo",
                 Picker::Swing => "Swing",
+                Picker::Preset => "Preset",
             };
             ui.heading(title);
             ui.add_space(8.0);
@@ -753,6 +756,10 @@ impl Grooph {
                     self.swing_choices(ui);
                     false
                 }
+                Picker::Preset => {
+                    preset = self.preset_choices(ui);
+                    preset.is_some()
+                }
             };
             ui.add_space(12.0);
             picked || wide_button(ui, "Done", 19.0, ROW_HEIGHT).clicked()
@@ -763,6 +770,34 @@ impl Grooph {
         }
 
         self.finish_generator_change(before, endless_before, false);
+        if let Some(id) = preset {
+            self.apply_preset(id);
+        }
+    }
+
+    /// Presets to load, and saving the current settings as a new one.
+    fn preset_choices(&mut self, ui: &mut Ui) -> Option<PresetId> {
+        let options: Vec<_> =
+            presets::all(&self.editor.presets).into_iter().map(|(id, n)| (Some(id), n)).collect();
+        let current = self.editor.active_preset;
+        let picked = egui::ScrollArea::vertical()
+            .max_height(320.0)
+            .show(ui, |ui| choice_grid(ui, &options, current, 1))
+            .inner
+            .flatten();
+        ui.add_space(8.0);
+        ui.horizontal(|ui| {
+            ui.add(
+                egui::TextEdit::singleline(&mut self.ui.preset_name_buffer)
+                    .hint_text("Name")
+                    .desired_width(ui.available_width() - 80.0),
+            );
+            if ui.add(Button::new("Save").min_size(vec2(72.0, 32.0))).clicked() {
+                let name = std::mem::take(&mut self.ui.preset_name_buffer);
+                self.save_preset_as(&name);
+            }
+        });
+        picked
     }
 
     fn time_signature_choices(&mut self, ui: &mut Ui) -> bool {

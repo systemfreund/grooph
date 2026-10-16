@@ -4,6 +4,7 @@ use crate::generator::GeneratorState;
 use crate::library::PatternLibrary;
 use crate::platform::PlatformRuntime;
 use crate::play_along::PlayAlongState;
+use crate::presets::{PresetId, PresetLibrary};
 use crate::undo::UndoHistory;
 use crate::{CountingSettings, Mode, TransportState};
 use eframe::egui::TextStyle;
@@ -136,6 +137,11 @@ pub(crate) struct EditorState {
     pub(crate) dirty: bool,
     /// Rhythm generator settings and endless-mode state.
     pub(crate) generator: GeneratorState,
+    /// User-saved generator presets. Persisted across sessions.
+    pub(crate) presets: PresetLibrary,
+    /// Preset last loaded or saved; "Save" overwrites it when it is a user
+    /// preset. Not persisted.
+    pub(crate) active_preset: Option<PresetId>,
 }
 
 /// Realtime playback subsystem: transport, tempo, audio engine, MIDI input,
@@ -168,6 +174,8 @@ pub(crate) struct UiShell {
     /// Transient text buffer for the "save current pattern" name input. Not
     /// persisted.
     pub(crate) save_name_buffer: String,
+    /// Name input for "save preset as". Not persisted.
+    pub(crate) preset_name_buffer: String,
     /// Load awaiting the "discard unsaved changes?" confirmation. `Some` shows
     /// the confirm dialog. Not persisted.
     pub(crate) pending_load: Option<PendingLoad>,

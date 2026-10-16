@@ -133,6 +133,14 @@ Important root files:
   holds the cursor at 0 (`CountInState`) and re-anchors the accuracy session
   when the count-in ends.
 
+- Presets (`crates/app/src/presets.rs`, UI and apply/snapshot in
+  `preset_panel.rs`): `PresetSettings` = `GeneratorSettings` + BPM, swing, ghost
+  notes, count-in, endless, gap click, tempo ramp and both voice sounds. Built-in
+  presets are code (`builtin_presets`, addressed as `PresetId::BuiltIn(index)`),
+  never stored; user presets live in `PresetLibrary` in `PersistedState`.
+  `active_preset` is not persisted; at startup it is the first preset equal to
+  the current settings. Applying a preset regenerates the score.
+
 ## Sounds
 
 - Two voices (`crates/audio/src/sounds.rs`): the rhythm (`Beat`, `AccentedBeat`,
