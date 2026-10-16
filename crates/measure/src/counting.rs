@@ -474,7 +474,7 @@ mod tests {
         assert_eq!(labels(seven_sixteen, triplets()), ["1", "&", "2", "la", "li", "3", "&"]);
         // The count follows the picked grouping.
         let two_two_three = TimeSignature::SEVEN_EIGHT.with_grouping(1);
-        assert_eq!(two_two_three.groups(), [2, 2, 3]);
+        assert_eq!(*two_two_three.groups(), [2, 2, 3]);
         assert_eq!(labels(two_two_three, triplets()), ["1", "&", "2", "&", "3", "la", "li"]);
     }
 

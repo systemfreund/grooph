@@ -1,4 +1,4 @@
-use crate::render_plan::plan_measure;
+use crate::render_plan::{RenderPlan, plan_measure};
 use egui::{FontId, Pos2, Rect, Vec2};
 use grooph_measure::duration::{Duration, NoteValue};
 use grooph_measure::{BeatKind, Measure, TimeSignature};
@@ -229,12 +229,24 @@ pub struct MeasureLayout {
 /// Narrowest note area (px, excluding clef and time signature) in which
 /// `measure`'s notes, placed by duration, don't overlap each other or the
 /// barline.
-pub fn min_note_area_width(measure: &Measure, opts: &LayoutOpts) -> f32 {
-    notes::min_note_area_width(measure, &plan_measure(measure), opts)
+///
+/// `plan` is [`plan_measure`] of `measure`, shared with
+/// [`build_measure_layout_with_plan`] so a staff plans each measure once.
+pub fn min_note_area_width(measure: &Measure, plan: &RenderPlan, opts: &LayoutOpts) -> f32 {
+    notes::min_note_area_width(measure, plan, opts)
 }
 
 /// Build the pixel layout (`MeasureLayout`) from a `Measure`.
 pub fn build_measure_layout(measure: &Measure, opts: &LayoutOpts) -> MeasureLayout {
+    build_measure_layout_with_plan(measure, &plan_measure(measure), opts)
+}
+
+/// [`build_measure_layout`] with the measure's [`plan_measure`] already made.
+pub fn build_measure_layout_with_plan(
+    measure: &Measure,
+    render_plan: &RenderPlan,
+    opts: &LayoutOpts,
+) -> MeasureLayout {
     let mut x_offset_acc = opts.rect.left();
 
     let clef_pos = if opts.layout_clef {
@@ -263,8 +275,7 @@ pub fn build_measure_layout(measure: &Measure, opts: &LayoutOpts) -> MeasureLayo
     let notes_left_edge = x_offset_acc;
     let note_rect =
         Rect::from_min_max(Pos2::new(notes_left_edge, opts.rect.top()), opts.rect.right_bottom());
-    let render_plan = plan_measure(measure);
-    let note_layout = notes::build_note_layout(measure, &render_plan, &note_rect, opts);
+    let note_layout = notes::build_note_layout(measure, render_plan, &note_rect, opts);
     let beam_layout = beams::build_beam_layout(&note_layout, &render_plan.beams, opts);
     let tuplet_layout =
         tuplets::build_tuplet_layout(measure.beats(), &note_layout, &render_plan.tuplets, opts);

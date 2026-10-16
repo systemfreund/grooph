@@ -1,11 +1,10 @@
 use grooph_measure::Score;
-use grooph_measure::grid::DEFAULT_GRID;
 use grooph_measure::tempo::ScoreTiming;
-use grooph_measure::{BeatKind, MeasureIdx};
 use log::info;
 
 use super::session::{
-    AccuracyMark, HitWindows, RecordingData, compute_global_beat_onsets, neighbour_gap_ticks,
+    AccuracyMark, GlobalBeatOnset, HitWindows, RecordingData, compute_global_beat_onsets,
+    neighbour_gap_ticks,
 };
 
 /// Record an incoming MIDI hit at `timestamp` (seconds, MIDI clock). The hit
@@ -33,8 +32,12 @@ pub(super) fn record_hit(
     let total = total_ticks as f64;
     let hit_global = timing.seconds_to_global_tick(elapsed);
 
-    let (global_onset, onset_m_idx, diff_ticks, raw_diff) =
-        best_match(hit_global, total, score, timing)?;
+    // One pass over the score's onsets serves the match and the gap to the
+    // neighbouring notes.
+    let beats = compute_global_beat_onsets(score, timing);
+    let (beat_idx, diff_ticks, raw_diff) = best_match(hit_global, total, &beats)?;
+    let global_onset = beats[beat_idx].onset_tick;
+    let onset_m_idx = beats[beat_idx].measure_idx;
 
     let wrap_next = raw_diff > total * 0.5;
     let wrap_prev = raw_diff < -total * 0.5;
@@ -54,7 +57,11 @@ pub(super) fn record_hit(
     let tps = timing.ticks_per_sec_in_measure(onset_m_idx);
     let delta_ms = if tps > 0.0 { (diff_ticks / tps) * 1000.0 } else { 0.0 };
 
-    let windows = HitWindows::for_gap_ms(note_gap_ms(global_onset, onset_m_idx, timing, score));
+    // The gap to the closest neighbouring onset, as heard, narrows the
+    // grading windows for fast notes.
+    let gap_ticks = neighbour_gap_ticks(&beats, beat_idx, total);
+    let gap_ms = if tps > 0.0 { gap_ticks / tps * 1000.0 } else { f64::INFINITY };
+    let windows = HitWindows::for_gap_ms(gap_ms);
     let grade = windows.grade(delta_ms);
 
     data.stats.push(delta_ms);
@@ -75,55 +82,25 @@ pub(super) fn record_hit(
     Some(delta_ms)
 }
 
-/// Gap in ms from the note at `global_onset` to its closest neighbouring onset
-/// as heard, which narrows the grading windows for fast notes.
-fn note_gap_ms(global_onset: u64, m_idx: MeasureIdx, timing: &ScoreTiming, score: &Score) -> f64 {
-    let beats = compute_global_beat_onsets(score, timing);
-    let total = timing.total_loop_ticks() as f64;
-    let gap_ticks = match beats.iter().position(|b| b.onset_tick == global_onset) {
-        Some(idx) => neighbour_gap_ticks(&beats, idx, total),
-        None => total,
-    };
-    let tps = timing.ticks_per_sec_in_measure(m_idx);
-    if tps > 0.0 { gap_ticks / tps * 1000.0 } else { f64::INFINITY }
-}
-
-/// Walk every note beat in every measure and find the closest onset to
-/// `hit_global` on the score-loop circle.
+/// Find the note onset closest to `hit_global` on the score-loop circle,
+/// comparing against where each note is heard (swing).
 ///
-/// Returns `(global_onset, measure_idx, signed_diff_on_loop, raw_diff)`.
-fn best_match(
-    hit_global: f64,
-    total: f64,
-    score: &Score,
-    timing: &ScoreTiming,
-) -> Option<(u64, MeasureIdx, f64, f64)> {
-    let mut best: Option<(u64, MeasureIdx, f64, f64)> = None;
-    for (m_idx, measure) in score.measures.iter().enumerate() {
-        if measure.beats().is_empty() {
+/// Returns `(index into beats, signed_diff_on_loop, raw_diff)`.
+fn best_match(hit_global: f64, total: f64, beats: &[GlobalBeatOnset]) -> Option<(usize, f64, f64)> {
+    let mut best: Option<(usize, f64, f64)> = None;
+    for (idx, beat) in beats.iter().enumerate() {
+        if !beat.is_note {
             continue;
         }
-        let measure_start = timing.measure_start_tick(m_idx);
-        let local_onsets = DEFAULT_GRID.compute_onset_ticks(measure.beats());
-        for (i, beat) in measure.beats().iter().enumerate() {
-            if beat.kind != BeatKind::Note {
-                continue;
-            }
-            let Some(&local) = local_onsets.get(i) else {
-                continue;
-            };
-            let global_onset = measure_start + local as u64;
-            // Compare against where the note is heard (swing), key by where it is written.
-            let raw_diff = hit_global - timing.performed_global_tick(m_idx, local) as f64;
-            let mut diff = raw_diff;
-            if diff > total * 0.5 {
-                diff -= total;
-            } else if diff < -total * 0.5 {
-                diff += total;
-            }
-            if best.is_none_or(|(_, _, best_diff, _)| diff.abs() < best_diff.abs()) {
-                best = Some((global_onset, m_idx, diff, raw_diff));
-            }
+        let raw_diff = hit_global - beat.performed_tick as f64;
+        let mut diff = raw_diff;
+        if diff > total * 0.5 {
+            diff -= total;
+        } else if diff < -total * 0.5 {
+            diff += total;
+        }
+        if best.is_none_or(|(_, best_diff, _)| diff.abs() < best_diff.abs()) {
+            best = Some((idx, diff, raw_diff));
         }
     }
     best

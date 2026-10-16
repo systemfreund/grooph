@@ -68,7 +68,7 @@ impl Grid<'_> {
 
         let mut acc = 0u32;
         let mut bounds = Vec::new();
-        for &cnt in &groups {
+        for &cnt in groups.iter() {
             acc += (cnt as u32) * subbeat;
             if acc < measure_ticks {
                 bounds.push(acc);

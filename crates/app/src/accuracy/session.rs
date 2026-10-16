@@ -1,9 +1,9 @@
 use std::collections::{HashMap, HashSet};
 
-use grooph_measure::BeatKind;
 use grooph_measure::Score;
 use grooph_measure::grid::DEFAULT_GRID;
 use grooph_measure::tempo::ScoreTiming;
+use grooph_measure::{BeatKind, MeasureIdx};
 
 #[derive(Clone, Copy)]
 pub(crate) enum AccuracyMark {
@@ -156,6 +156,7 @@ pub(crate) struct GlobalBeatOnset {
     /// Onset as heard, i.e. with swing applied. Hit windows use this.
     pub performed_tick: u64,
     pub is_note: bool,
+    pub measure_idx: MeasureIdx,
 }
 
 /// Flatten every beat of every measure into a vector of score-global onset
@@ -175,6 +176,7 @@ pub(crate) fn compute_global_beat_onsets(
                     onset_tick: start + local as u64,
                     performed_tick: timing.performed_global_tick(m_idx, local),
                     is_note: beat.kind == BeatKind::Note,
+                    measure_idx: m_idx,
                 });
             }
         }
@@ -357,7 +359,12 @@ mod tests {
 
     #[test]
     fn neighbour_gap_wraps_around_the_loop() {
-        let beat = |t: u64| GlobalBeatOnset { onset_tick: t, performed_tick: t, is_note: true };
+        let beat = |t: u64| GlobalBeatOnset {
+            onset_tick: t,
+            performed_tick: t,
+            is_note: true,
+            measure_idx: 0,
+        };
         let beats = [beat(0), beat(10), beat(40)];
         // First beat: previous neighbour is the last beat, 60 ticks back across the wrap.
         assert_eq!(neighbour_gap_ticks(&beats, 0, 100.0), 10.0);

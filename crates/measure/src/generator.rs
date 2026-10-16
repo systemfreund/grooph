@@ -233,7 +233,7 @@ pub fn beat_groups(ts: TimeSignature) -> Option<Vec<BeatSpan>> {
         _ => return None,
     };
     let mut spans = Vec::new();
-    for size in default_groups_for(&ts) {
+    for &size in default_groups_for(&ts).iter() {
         if size < 2 {
             return None;
         }

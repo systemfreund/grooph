@@ -13,8 +13,9 @@
 //! horizontally scrollable area for that case.
 
 use crate::pixel_layout::{
-    GlyphMetrics, LayoutOpts, MeasureLayout, build_measure_layout, min_note_area_width,
+    GlyphMetrics, LayoutOpts, MeasureLayout, build_measure_layout_with_plan, min_note_area_width,
 };
+use crate::render_plan::{RenderPlan, plan_measure};
 use egui::{FontId, Pos2, Rect, Vec2, pos2, vec2};
 use grooph_measure::duration::s;
 use grooph_measure::grid::DEFAULT_GRID;
@@ -190,6 +191,7 @@ fn sixteenth_slots(ts: &TimeSignature) -> f32 {
 fn min_measure_width(
     score: &Score,
     measure_idx: MeasureIdx,
+    plan: &RenderPlan,
     show_clef: bool,
     show_ts: bool,
     opts: &StaffOpts,
@@ -199,7 +201,7 @@ fn min_measure_width(
     let body = (opts.min_measure_width_em + beats * opts.note_width_em) * opts.em;
     // Short notes next to long ones (e.g. 32nds among eighths) get little
     // space when spaced by duration: widen until no glyph overlaps the next.
-    let body = body.max(min_note_area_width(m, &opts.measure_opts(opts.rect, false, false)));
+    let body = body.max(min_note_area_width(m, plan, &opts.measure_opts(opts.rect, false, false)));
     let clef = if show_clef { CLEF_WIDTH_EM * opts.em } else { 0.0 };
     let ts = if show_ts { time_sig_width_em(&m.time_signature()) * opts.em } else { 0.0 };
     body + clef + ts
@@ -249,9 +251,11 @@ pub fn build_staff_layout(score: &Score, opts: &StaffOpts) -> StaffLayout {
     let show_ts: Vec<bool> =
         (0..score.len()).map(|i| mixed_meters && (i == 0 || meter_changes_at(i))).collect();
 
-    // 2. natural widths at the baseline em.
+    // 2. natural widths at the baseline em. Each measure is planned (beams,
+    // tuplets) once, for its width and its layout.
+    let plans: Vec<RenderPlan> = score.measures.iter().map(plan_measure).collect();
     let widths_min: Vec<f32> = (0..score.len())
-        .map(|i| min_measure_width(score, i, show_clef[i], show_ts[i], opts))
+        .map(|i| min_measure_width(score, i, &plans[i], show_clef[i], show_ts[i], opts))
         .collect();
     let available = opts.rect.width().max(0.0);
 
@@ -278,7 +282,7 @@ pub fn build_staff_layout(score: &Score, opts: &StaffOpts) -> StaffLayout {
         let width = (widths_min[i] * em_scale).max(available);
         let rect = Rect::from_min_size(pos2(left, y_acc), vec2(width, row_height));
         let per_opts = effective_opts.measure_opts(rect, show_clef[i], show_ts[i]);
-        let layout = build_measure_layout(&score.measures[i], &per_opts);
+        let layout = build_measure_layout_with_plan(&score.measures[i], &plans[i], &per_opts);
         max_row_width = max_row_width.max(width);
         systems.push(SystemLayout {
             y_baseline: rect.center().y + effective_opts.y_offset + effective_opts.baseline_shift(),
@@ -387,7 +391,10 @@ mod tests {
         assert_eq!(staff.systems[0].measures.len(), 1);
 
         let placed = &staff.systems[0].measures[0];
-        let direct = build_measure_layout(&m, &staff_opts.measure_opts(rect, true, false));
+        let direct = crate::pixel_layout::build_measure_layout(
+            &m,
+            &staff_opts.measure_opts(rect, true, false),
+        );
 
         assert_eq!(placed.layout.notes.len(), direct.notes.len());
         for (a, b) in placed.layout.notes.iter().zip(direct.notes.iter()) {

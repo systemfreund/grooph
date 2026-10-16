@@ -65,6 +65,7 @@ impl Grooph {
                         let font_id = FontId::new(em, self.ui.music_font_id.family.clone());
 
                         let metrics = measure_glyph_metrics(ui, &font_id);
+                        let count_config = self.build_count_config();
 
                         // Tighter spacing on narrow screens makes the glyphs
                         // bigger: the staff shrinks its em until a measure
@@ -91,7 +92,7 @@ impl Grooph {
                             // No percussion clef: on a single line it says nothing
                             // the line doesn't, and every row starts alike.
                             layout_clef_first: false,
-                            room_below_em: if self.build_count_config().is_some() {
+                            room_below_em: if count_config.is_some() {
                                 ROOM_BELOW_WITH_LABELS_EM
                             } else {
                                 ROOM_BELOW_EM
@@ -159,7 +160,6 @@ impl Grooph {
                         let (rect, resp) =
                             ui.allocate_exact_size(staff.total_size, egui::Sense::click_and_drag());
 
-                        let count_config = self.build_count_config();
                         let cursor = if self.ui.mode == Mode::Edit {
                             Some(self.editor.cursor)
                         } else {

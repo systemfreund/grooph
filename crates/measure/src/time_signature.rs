@@ -1,6 +1,7 @@
 use crate::duration::NoteValue;
 use crate::grouping;
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 use std::fmt::{Display, Formatter};
 use std::ops::RangeInclusive;
 use std::str::FromStr;
@@ -61,7 +62,7 @@ impl TimeSignature {
     }
 
     /// The beat groups of this meter in beat units, e.g. `[2, 2, 3]`.
-    pub fn groups(&self) -> Vec<u8> {
+    pub fn groups(&self) -> Cow<'static, [u8]> {
         grouping::default_groups_for(self)
     }
 
@@ -197,7 +198,7 @@ mod tests {
     fn parses_and_formats_groupings() {
         let ts: TimeSignature = "2+2+3/8".parse().unwrap();
         assert_eq!(ts, TimeSignature::SEVEN_EIGHT.with_grouping(1));
-        assert_eq!(ts.groups(), [2, 2, 3]);
+        assert_eq!(*ts.groups(), [2, 2, 3]);
         assert_eq!(ts.to_string(), "2+2+3/8");
         // The usual grouping is written as a plain meter.
         assert_eq!("2+3+2/8".parse(), Ok(TimeSignature::SEVEN_EIGHT));
