@@ -8,12 +8,16 @@ pub(super) fn default_groups_for(ts: &TimeSignature) -> Vec<u8> {
 
         (2, 8) => vec![2],
         (3, 8) => vec![3],
-        (4, 8) => vec![4],
+        (4, 8) => vec![2, 2],
         (5, 8) => vec![3, 2], // 5/8 → default 3+2 (other feel 2+3 is possible)
         (6, 8) => vec![3, 3], // 6/8 → 2 big beats
         (7, 8) => vec![2, 3, 2], // 7/8 → default 2+3+2 (other feels 2+2+3, 2+3+2)
+        (8, 8) => vec![3, 3, 2], // 8/8 → 3+3+2
         (9, 8) => vec![3, 3, 3], // 9/8 → 3 big beats
+        (10, 8) => vec![3, 3, 2, 2],
+        (11, 8) => vec![3, 3, 3, 2],
         (12, 8) => vec![3, 3, 3, 3], // 12/8 → 4 big beats
+        (13, 8) => vec![3, 3, 3, 2, 2],
         (n, 8) => vec![n],
         (n, 16) => vec![n],
 

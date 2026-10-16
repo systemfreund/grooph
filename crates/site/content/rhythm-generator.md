@@ -22,7 +22,7 @@ Open the generator with the dice icon. Every change creates a new rhythm.
 | **Subdivision** | The finest note value: 8th notes, 16th notes, triplets, or mixed (16ths and triplets together). Eighth-note meters offer 8ths and 16ths. |
 | **Complexity** | Level 1 to 5. Higher levels add syncopations, rests inside the beat and offbeat figures. |
 | **Bars** | 1 to 8 measures per exercise. |
-| **Time signature** | Quarter-note meters from 1/4 to 7/4, and eighth-note meters: 3/8, 5/8, 6/8, 7/8, 9/8 and 12/8. |
+| **Time signature** | Quarter-note meters from 1/4 to 7/4 and eighth-note meters from 3/8 to 13/8. |
 | **Space** | Adds whole-beat rests, from none to a lot. Good for practicing silence. |
 | **Groupings** | Instead of a level, pick exactly which one-beat figures may appear. |
 | **Endless** | Keeps replacing bars you have already played, so the exercise never repeats. |
@@ -60,7 +60,8 @@ ladder: three eighths first, then quarter + eighth, then figures that start late
 6/8 e e e q e
 ```
 
-Odd meters mix groups of two and three eighths: 5/8 is counted 3+2 and 7/8 2+3+2. Each
+Odd meters mix groups of two and three eighths: 5/8 is counted 3+2, 7/8 2+3+2, 8/8
+3+3+2, 10/8 3+3+2+2, 11/8 3+3+3+2 and 13/8 3+3+3+2+2. Each
 group of two gets the same figures as a quarter-note beat, each group of three the
 dotted-quarter figures.
 
@@ -96,5 +97,5 @@ Not yet. You can share them as links or save them in the library.
 
 ### Which time signatures does the generator use?
 
-Quarter-note meters from 1/4 up to 7/4, and the eighth-note meters 3/8, 5/8, 6/8, 7/8,
-9/8 and 12/8, written in their usual groups of two and three eighths.
+Quarter-note meters from 1/4 up to 7/4, and eighth-note meters from 3/8 up to 13/8,
+written in their usual groups of two and three eighths.

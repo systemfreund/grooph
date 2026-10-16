@@ -714,9 +714,14 @@ mod tests {
         assert_eq!(beat_groups(TimeSignature::SEVEN_EIGHT), Some(vec![Q, D, Q]));
         assert_eq!(beat_groups(ts(3, 8)), Some(vec![D]));
         assert_eq!(beat_groups(TimeSignature::FOUR_EIGHT), Some(vec![Q, Q]));
-        // A single group of eight or eleven: twos, then a three if odd.
-        assert_eq!(beat_groups(ts(8, 8)), Some(vec![Q, Q, Q, Q]));
-        assert_eq!(beat_groups(ts(11, 8)), Some(vec![Q, Q, Q, Q, D]));
+        assert_eq!(beat_groups(ts(8, 8)), Some(vec![D, D, Q]));
+        assert_eq!(beat_groups(ts(10, 8)), Some(vec![D, D, Q, Q]));
+        assert_eq!(beat_groups(ts(11, 8)), Some(vec![D, D, D, Q]));
+        assert_eq!(beat_groups(ts(13, 8)), Some(vec![D, D, D, Q, Q]));
+        // Every x/8 meter the app offers can be generated.
+        for beats in TimeSignature::beat_range(8).unwrap() {
+            assert!(supports_time_signature(ts(beats, 8)), "{beats}/8");
+        }
     }
 
     /// Onsets of a cell on the sixteenth grid (`x` = note start).
@@ -759,6 +764,27 @@ mod tests {
                         assert_eq!(t / (3 * eighth), (end - 1) / (3 * eighth), "{m:?}");
                         assert!(!b.duration.is_tuplet());
                     }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn every_x8_meter_respects_its_beat_groups() {
+        // No note or rest crosses a primary boundary (beam group / click).
+        for beats in TimeSignature::beat_range(8).unwrap() {
+            let meter = ts(beats, 8);
+            let bounds = DEFAULT_GRID.primary_boundaries(&meter);
+            let st = GeneratorSettings {
+                bars: 8,
+                time_signature: meter,
+                ..settings(Subdivision::Sixteenths, MAX_COMPLEXITY)
+            };
+            for m in generate_score(&st, &mut Rng::new(beats as u64)).unwrap().measures {
+                let onsets = DEFAULT_GRID.compute_onset_ticks(m.beats());
+                for (b, &t) in m.beats().iter().zip(&onsets) {
+                    let end = t + DEFAULT_GRID.ticks_of(&b.duration).unwrap();
+                    assert!(bounds.iter().all(|&x| x <= t || x >= end), "{meter}: {m:?}");
                 }
             }
         }

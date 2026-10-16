@@ -6,26 +6,24 @@ use eframe::egui;
 use grooph_measure::TimeSignature;
 use grooph_measure::generator::{
     BeatSpan, GroupingSet, MAX_BARS, MAX_COMPLEXITY, Subdivision, beat_groups,
-    complexity_groupings, effective_subdivision, groupings,
+    complexity_groupings, effective_subdivision, groupings, supports_time_signature,
 };
 
-/// Time signatures in the picker: quarter-note meters, then eighth-note
-/// meters (written in beat groups, e.g. 6/8 = 3+3, 7/8 = 2+3+2).
-const TIME_SIGNATURES: [TimeSignature; 13] = [
-    TimeSignature::ONE_FOUR,
-    TimeSignature::TWO_FOUR,
-    TimeSignature::THREE_FOUR,
-    TimeSignature::FOUR_FOUR,
-    TimeSignature { beats: 5, beat_unit: 4 },
-    TimeSignature { beats: 6, beat_unit: 4 },
-    TimeSignature { beats: 7, beat_unit: 4 },
-    TimeSignature { beats: 3, beat_unit: 8 },
-    TimeSignature::FIVE_EIGHT,
-    TimeSignature::SIX_EIGHT,
-    TimeSignature::SEVEN_EIGHT,
-    TimeSignature::NINE_EIGHT,
-    TimeSignature::TWELVE_EIGHT,
-];
+/// Time signatures in the picker: every quarter-note and eighth-note meter
+/// the editor offers (eighth-note meters are written in beat groups, e.g.
+/// 6/8 = 3+3, 7/8 = 2+3+2).
+fn time_signatures() -> Vec<TimeSignature> {
+    [4, 8]
+        .into_iter()
+        .flat_map(|beat_unit| {
+            TimeSignature::beat_range(beat_unit)
+                .into_iter()
+                .flatten()
+                .map(move |beats| TimeSignature { beats, beat_unit })
+        })
+        .filter(|ts| supports_time_signature(*ts))
+        .collect()
+}
 
 /// Beat groups shown next to an eighth-note meter, e.g. "7/8 (2+3+2)".
 fn time_signature_label(ts: TimeSignature) -> String {
@@ -152,7 +150,7 @@ impl Grooph {
                             egui::ComboBox::from_id_salt("gen_time_signature")
                                 .selected_text(time_signature_label(settings.time_signature))
                                 .show_ui(ui, |ui| {
-                                    for ts in TIME_SIGNATURES {
+                                    for ts in time_signatures() {
                                         ui.selectable_value(
                                             &mut settings.time_signature,
                                             ts,
