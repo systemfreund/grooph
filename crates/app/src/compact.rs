@@ -32,8 +32,6 @@ pub(crate) enum CompactTab {
 /// UI state of the compact layout. Not persisted.
 #[derive(Default)]
 pub(crate) struct CompactState {
-    /// "More" tab is showing its list (mode stays `Playback` there).
-    pub(crate) more_menu: bool,
     /// The options sheet only shows its handle and the transport buttons.
     pub(crate) options_collapsed: bool,
 }
@@ -210,23 +208,18 @@ impl Grooph {
     pub(crate) fn compact_tab(&self) -> CompactTab {
         match self.ui.mode {
             Mode::Edit | Mode::TimeSignature(_) => CompactTab::Edit,
-            Mode::Mixer | Mode::Settings | Mode::Help | Mode::Library => CompactTab::More,
-            Mode::Playback | Mode::Generator => {
-                if self.ui.compact.more_menu {
-                    CompactTab::More
-                } else {
-                    CompactTab::Practice
-                }
+            Mode::MoreMenu | Mode::Mixer | Mode::Settings | Mode::Help | Mode::Library => {
+                CompactTab::More
             }
+            Mode::Playback | Mode::Generator => CompactTab::Practice,
         }
     }
 
     fn select_compact_tab(&mut self, tab: CompactTab) {
-        self.ui.compact.more_menu = tab == CompactTab::More;
         self.ui.mode = match tab {
             CompactTab::Practice => Mode::Generator,
             CompactTab::Edit => Mode::Edit,
-            CompactTab::More => Mode::Playback,
+            CompactTab::More => Mode::MoreMenu,
         };
     }
 
@@ -548,7 +541,7 @@ impl Grooph {
             (Mode::Settings, "⚙", "Settings"),
             (Mode::Help, "?", "Help"),
         ];
-        if self.ui.mode == Mode::Playback {
+        if self.ui.mode == Mode::MoreMenu {
             egui::Panel::bottom("compact_more")
                 .frame(Frame::new().fill(ui.visuals().panel_fill).inner_margin(Margin::same(12)))
                 .show_separator_line(false)
@@ -578,7 +571,7 @@ impl Grooph {
             .show_inside(ui, |ui| {
                 ui.horizontal(|ui| {
                     if ui.button("‹ Back").clicked() {
-                        self.ui.mode = Mode::Playback;
+                        self.ui.mode = Mode::MoreMenu;
                     }
                     ui.strong(title);
                 });

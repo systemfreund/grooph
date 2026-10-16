@@ -76,6 +76,8 @@ pub(crate) enum Mode {
     Help,
     Library,
     Generator,
+    /// The compact layout's "More" list of panels.
+    MoreMenu,
     /// The time signature dialog, holding the meter being picked.
     TimeSignature(TimeSignature),
 }
