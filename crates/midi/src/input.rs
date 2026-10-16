@@ -60,7 +60,7 @@ pub(crate) fn clock_elapsed_seconds(now: ClockInstant, origin: ClockInstant) -> 
 
     #[cfg(target_arch = "wasm32")]
     {
-        (now - origin) as f64
+        now - origin
     }
 }
 

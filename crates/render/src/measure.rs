@@ -471,7 +471,7 @@ fn select_label_slots<'a>(slots: &'a [&'a CountSlot]) -> Vec<&'a CountSlot> {
             .or_insert(i);
     }
     let mut out: Vec<&CountSlot> = best.values().map(|idx| slots[*idx]).collect();
-    out.sort_by(|a, b| a.start_tick.cmp(&b.start_tick));
+    out.sort_by_key(|a| a.start_tick);
     out
 }
 

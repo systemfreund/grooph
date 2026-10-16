@@ -538,8 +538,7 @@ impl Measure {
         init: Either<Beat, BeatKind>,
     ) -> Result<(), MeasureError> {
         if let Some(fill) = self.best_fill_for_gap(ticks, allowed) {
-            let mut insert_at = idx;
-            for d in fill {
+            for (insert_at, d) in (idx..).zip(fill) {
                 let beat = init.either(
                     |mut beat| {
                         beat.duration = d;
@@ -548,7 +547,6 @@ impl Measure {
                     |beat_kind| Beat::new(d, beat_kind),
                 );
                 self.beats.insert(insert_at, beat);
-                insert_at += 1;
             }
             Ok(())
         } else {

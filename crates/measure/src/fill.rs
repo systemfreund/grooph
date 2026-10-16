@@ -39,7 +39,7 @@ impl Measure {
                 })
                 .collect()
         };
-        coins.sort_unstable_by(|a, b| b.0.cmp(&a.0));
+        coins.sort_unstable_by_key(|c| std::cmp::Reverse(c.0));
 
         let target = gap_ticks as usize;
         #[derive(Clone, Copy)]

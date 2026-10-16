@@ -550,7 +550,7 @@ fn cell(beat: &Beat, onset: u32, ts: TimeSignature) -> String {
         (BeatKind::Note, true) => "cell note accent",
         (BeatKind::Note, false) => "cell note",
     };
-    let on_beat = onset % DEFAULT_GRID.ticks_per_beat(&ts) == 0;
+    let on_beat = onset.is_multiple_of(DEFAULT_GRID.ticks_per_beat(&ts));
     format!(
         "<span class=\"{class}{}\" style=\"flex:{}\"><i></i><b>{}</b></span>",
         if on_beat { " beat" } else { "" },
