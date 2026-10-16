@@ -190,6 +190,70 @@
     <div class="lds-dual-ring"></div>
 </div>
 
+<!-- iOS plays Web Audio in the "ambient" session category, which the ring/silent switch mutes.
+     <audio> and <video> elements play as "playback" and ignore the switch, which is why video sites
+     stay audible. Ask for "playback" so the metronome is heard with the switch on silent. -->
+<script>
+    (function () {
+        // Safari 17+ exposes the session category directly.
+        if (navigator.audioSession) {
+            try {
+                navigator.audioSession.type = "playback";
+            } catch (e) {
+            }
+            return;
+        }
+        // Older iOS: playing an <audio> element from a user gesture switches the page's session to
+        // "playback", and Web Audio follows. Play a looping silent WAV on the first tap or key press.
+        var isIos = /iphone|ipad|ipod/i.test(navigator.userAgent) ||
+            (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+        if (!isIos) return;
+
+        function silentWavUrl() {
+            var rate = 8000, samples = 800; // 0.1 s of 8-bit mono silence
+            var buf = new ArrayBuffer(44 + samples), v = new DataView(buf), o = 0;
+            function str(s) { for (var i = 0; i < s.length; i++) v.setUint8(o++, s.charCodeAt(i)); }
+            function u32(n) { v.setUint32(o, n, true); o += 4; }
+            function u16(n) { v.setUint16(o, n, true); o += 2; }
+            str("RIFF"); u32(36 + samples); str("WAVE");
+            str("fmt "); u32(16); u16(1); u16(1); u32(rate); u32(rate); u16(1); u16(8);
+            str("data"); u32(samples);
+            for (var i = 0; i < samples; i++) v.setUint8(o++, 128); // 8-bit PCM silence is 128
+            return URL.createObjectURL(new Blob([buf], {type: "audio/wav"}));
+        }
+
+        var audio = null;
+        function unlock() {
+            if (!audio) {
+                audio = document.createElement("audio");
+                audio.setAttribute("x-webkit-airplay", "deny");
+                audio.preload = "auto";
+                audio.loop = true;
+                audio.src = silentWavUrl();
+            }
+            var p = audio.play();
+            if (p && p.then) p.then(function () { listen(false); }, function () {});
+        }
+        // Only these events count as a user gesture for play() on touch screens (not pointerdown).
+        function listen(on) {
+            ["touchend", "pointerup", "click", "keydown"].forEach(function (type) {
+                if (on) window.addEventListener(type, unlock, true);
+                else window.removeEventListener(type, unlock, true);
+            });
+        }
+        listen(true);
+        // Release the element while hidden so it does not hold the session; replay on return.
+        document.addEventListener("visibilitychange", function () {
+            if (!audio) return;
+            if (document.visibilityState === "hidden") {
+                audio.pause();
+            } else {
+                listen(true);
+            }
+        });
+    })();
+</script>
+
 <!--Register Service Worker. this will cache the wasm / js scripts for offline use (for PWA functionality). -->
 <!-- Force refresh (Ctrl + F5) to load the latest files instead of cached files  -->
 <script>
