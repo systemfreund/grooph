@@ -44,8 +44,9 @@ subtracted from your hits. Tap and MIDI have separate offsets.
 ## Reading the result
 
 Each written note gets a marker. A marker left of the note means you played early, right
-of it late. Green markers are perfect, amber ones good and red ones off; notes you did not
-play are shown as red misses. The markers stay on the staff after you stop, so you can see
+of it late. Blue markers are perfect and orange ones good; hits that are off are purple and
+get an arrow pointing the way you were off. Notes you did not play get a purple cross. The
+colours are chosen to stay apart with colour vision deficiencies. The markers stay on the staff after you stop, so you can see
 where the run went wrong, until you play again or edit the rhythm. Try to keep the markers
 close to the notes for a whole exercise before you raise the tempo.
 

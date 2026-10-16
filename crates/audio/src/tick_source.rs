@@ -15,8 +15,9 @@ use grooph_measure::tempo::ScoreTiming;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct CountInPlan {
     pub(crate) ticks: u32,
-    /// Click positions within `0..ticks` (downbeat plus primary beats).
-    pub(crate) clicks: Vec<u32>,
+    /// Click positions within `0..ticks` (downbeat plus primary beats) and
+    /// their sound ([`SoundType::CountIn`] or [`SoundType::CountInPulse`]).
+    pub(crate) clicks: Vec<(u32, SoundType)>,
 }
 
 struct CountInProgress {
@@ -89,10 +90,10 @@ impl TickSource {
             let old_pos = ci.pos;
             let new_pos = old_pos + step;
             let end = ci.plan.ticks as f64;
-            for &c in &ci.plan.clicks {
+            for &(c, sound) in &ci.plan.clicks {
                 let c = c as f64;
                 if c >= old_pos.ceil() && c < new_pos.min(end) {
-                    out.push(SoundType::CountIn);
+                    out.push(sound);
                 }
             }
             if new_pos < end {
@@ -202,7 +203,8 @@ mod tests {
 
     fn count_in_4_4() -> CountInPlan {
         let tpb = grooph_measure::grid::DEFAULT_GRID.ticks_per_beat(&TimeSignature::FOUR_FOUR);
-        CountInPlan { ticks: 4 * tpb, clicks: vec![0, tpb, 2 * tpb, 3 * tpb] }
+        let clicks = (0..4).map(|i| (i * tpb, SoundType::CountIn)).collect();
+        CountInPlan { ticks: 4 * tpb, clicks }
     }
 
     #[test]
