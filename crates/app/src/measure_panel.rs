@@ -8,6 +8,7 @@ use eframe::egui::{FontId, Frame, Rect, Response, Stroke};
 use grooph_layout::pixel_layout::{GlyphMetrics, MeasureLayout, compute_em};
 use grooph_layout::staff_layout::{PlacedMeasure, StaffLayout, StaffOpts, build_staff_layout};
 use grooph_measure::grid::DEFAULT_GRID;
+use grooph_measure::TimeSignature;
 use grooph_measure::tempo::ScoreTiming;
 use grooph_render::measure_glyph_metrics;
 use grooph_render::staff::draw_staff;
@@ -126,12 +127,10 @@ impl Grooph {
                                 // Flash: trigger on primary-beat change in the currently
                                 // playing measure. Key is (measure_idx, primary_beat_in_measure).
                                 let (m_idx, local_tick) = timing.to_local(next_tick);
-                                let tpb_m = timing.ticks_per_beat_in_measure(m_idx) as f64;
-                                let primary_beat_in_measure = if tpb_m > 0.0 {
-                                    (local_tick / tpb_m).floor() as u32
-                                } else {
-                                    0
-                                };
+                                let primary_beat_in_measure =
+                                    self.editor.score.measures.get(m_idx).map_or(0, |m| {
+                                        primary_beat_index(&m.time_signature(), local_tick)
+                                    });
                                 let key = (m_idx, primary_beat_in_measure);
                                 if self.ui.flash_enabled
                                     && self.playback_ctl.playback.last_primary_beat != Some(key)
@@ -524,4 +523,32 @@ fn draw_muted_bar(ui: &egui::Ui, rect: Rect) {
         FontId::proportional(16.0),
         ui.visuals().weak_text_color(),
     );
+}
+
+/// Index of the primary beat (the metronome's click group) that
+/// `local_tick` falls in, e.g. 0..=2 in 7/8 (2+2+3), not one per eighth.
+fn primary_beat_index(ts: &TimeSignature, local_tick: f64) -> u32 {
+    DEFAULT_GRID.primary_boundaries(ts).iter().take_while(|&&b| b as f64 <= local_tick).count()
+        as u32
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn flashes(ts: TimeSignature) -> Vec<u32> {
+        let tpm = DEFAULT_GRID.ticks_per_measure(&ts);
+        let step = DEFAULT_GRID.ticks_per_beat(&ts);
+        let mut keys: Vec<u32> =
+            (0..tpm).step_by(step as usize).map(|t| primary_beat_index(&ts, t as f64)).collect();
+        keys.dedup();
+        keys
+    }
+
+    #[test]
+    fn primary_beat_index_follows_metronome_groups() {
+        assert_eq!(flashes(TimeSignature::FOUR_FOUR), [0, 1, 2, 3]);
+        assert_eq!(flashes(TimeSignature::SIX_EIGHT), [0, 1]);
+        assert_eq!(flashes(TimeSignature { beats: 7, beat_unit: 8 }), [0, 1, 2]);
+    }
 }
