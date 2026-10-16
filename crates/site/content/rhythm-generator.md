@@ -76,7 +76,7 @@ group of two gets the same figures as a quarter-note beat, each group of three t
 dotted-quarter figures.
 
 ```open | Generate a 7/8 rhythm with sixteenths (level 3)
-bpm=90&ts=7/8&sub=16&lvl=3&bars=2
+bpm=45&ts=7/8&sub=16&lvl=3&bars=2
 ```
 
 Sixteenth-note meters such as 7/16 or 11/16 work the same way one note value down: groups

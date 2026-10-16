@@ -39,12 +39,12 @@ bpm=60&ts=4/4
 bpm=120&ts=3/4
 ```
 
-```open | 90 BPM in 6/8
-bpm=90&ts=6/8
+```open | 45 BPM in 6/8
+bpm=45&ts=6/8
 ```
 
-```open | 140 BPM in 7/8
-bpm=140&ts=7/8
+```open | 70 BPM in 7/8
+bpm=70&ts=7/8
 ```
 
 More meters such as 5/4, 5/8 and 7/8 are explained on the page about

@@ -184,7 +184,8 @@ pub(crate) fn builtin_presets() -> Vec<(&'static str, PresetSettings)> {
                     TimeSignature { beats: 7, beat_unit: 8 },
                     0.2,
                 ),
-                bpm: 100,
+                // BPM counts quarters: the eighths run at 100 per minute.
+                bpm: 50,
                 ..base
             },
         ),

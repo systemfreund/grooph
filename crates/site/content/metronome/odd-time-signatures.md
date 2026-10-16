@@ -16,16 +16,16 @@ hear exactly the grouping you want.
 bpm=120&ts=5/4
 ```
 
-```open | 5/8 at 160 BPM
-bpm=160&ts=5/8
+```open | 5/8 at 80 BPM
+bpm=80&ts=5/8
 ```
 
-```open | 7/8 at 180 BPM
-bpm=180&ts=7/8
+```open | 7/8 at 90 BPM
+bpm=90&ts=7/8
 ```
 
-```open | 11/8 at 200 BPM
-bpm=200&ts=11/8
+```open | 11/8 at 100 BPM
+bpm=100&ts=11/8
 ```
 
 ## Counting in twos and threes
@@ -46,15 +46,15 @@ grooph draws 5/8 as 3+2 and 7/8 as 2+3+2 by default. To practice another groupin
 accents on the first note of each group. The click for an accented note is higher, so you
 hear the grouping:
 
-```rhythm bpm=180 | 7/8 grouped 2+2+3
+```rhythm bpm=90 | 7/8 grouped 2+2+3
 7/8 >e e >e e >e e e
 ```
 
-```rhythm bpm=180 | 7/8 grouped 3+2+2
+```rhythm bpm=90 | 7/8 grouped 3+2+2
 7/8 >e e e >e e >e e
 ```
 
-```rhythm bpm=160 | 5/8 grouped 2+3
+```rhythm bpm=80 | 5/8 grouped 2+3
 5/8 >e e >e e e
 ```
 
@@ -70,8 +70,8 @@ followed by a short bar of two.
 ## How to practice odd meters
 
 1. **Clap the groups first.** Say "1 2, 1 2, 1 2 3" while clapping only on every "1".
-2. **Use a slow tempo.** In eighth-note meters set the metronome so that one click is one
-   eighth note, then speed up.
+2. **Use a slow tempo.** The BPM always counts quarter notes, so 90 BPM in 7/8 plays the
+   eighths at 180 per minute. Start where the eighths feel easy, then speed up.
 3. **Write your own figures.** Open the editor in grooph, change the time signature and
    fill the measure with the rhythm of your piece.
 
