@@ -156,7 +156,7 @@ fn parse_query_with_default_version(
             bars: bars.unwrap_or(defaults.bars),
             time_signature,
             space: space.unwrap_or(defaults.space),
-            custom_groupings_enabled: false,
+            custom_figures_enabled: false,
             ..defaults
         };
         Some(LinkContent::Generator { settings, seed })
@@ -392,7 +392,7 @@ mod tests {
         assert_eq!(settings.bars, 4);
         assert_eq!(settings.space, 0.25);
         assert_eq!(settings.time_signature, TimeSignature::THREE_FOUR);
-        assert!(!settings.custom_groupings_enabled);
+        assert!(!settings.custom_figures_enabled);
         assert_eq!(seed, Some(1234));
     }
 

@@ -77,12 +77,13 @@ pub struct GeneratorSettings {
     pub time_signature: TimeSignature,
     /// 0.0..=1.0 — the higher, the more (and longer) rests between notes.
     pub space: f32,
-    /// Draw from [`Self::custom_groupings`] instead of the complexity level.
-    #[serde(default)]
-    pub custom_groupings_enabled: bool,
-    /// Hand-picked groupings; kept while custom groupings are switched off.
-    #[serde(default)]
-    pub custom_groupings: GroupingSet,
+    /// Draw from [`Self::custom_figures`] instead of the complexity level.
+    /// (Stored as `custom_groupings_enabled` before the rename.)
+    #[serde(default, alias = "custom_groupings_enabled")]
+    pub custom_figures_enabled: bool,
+    /// Hand-picked figures; kept while custom figures are switched off.
+    #[serde(default, alias = "custom_groupings")]
+    pub custom_figures: FigureSet,
 }
 
 impl Default for GeneratorSettings {
@@ -93,31 +94,31 @@ impl Default for GeneratorSettings {
             bars: 1,
             time_signature: TimeSignature::FOUR_FOUR,
             space: 0.0,
-            custom_groupings_enabled: false,
-            custom_groupings: GroupingSet::default(),
+            custom_figures_enabled: false,
+            custom_figures: FigureSet::default(),
         }
     }
 }
 
-/// Stable identifier of a grouping (one-beat figure) in the catalog.
+/// Stable identifier of a one-beat figure in the catalog.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct GroupingId(pub u8);
+pub struct FigureId(pub u8);
 
-/// A set of groupings, stored as a bit mask over [`GroupingId`]s.
+/// A set of figures, stored as a bit mask over [`FigureId`]s.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct GroupingSet(u64);
+pub struct FigureSet(u64);
 
-impl GroupingSet {
-    pub fn contains(&self, id: GroupingId) -> bool {
+impl FigureSet {
+    pub fn contains(&self, id: FigureId) -> bool {
         self.0 & (1 << id.0) != 0
     }
-    pub fn insert(&mut self, id: GroupingId) {
+    pub fn insert(&mut self, id: FigureId) {
         self.0 |= 1 << id.0;
     }
-    pub fn remove(&mut self, id: GroupingId) {
+    pub fn remove(&mut self, id: FigureId) {
         self.0 &= !(1 << id.0);
     }
-    pub fn toggle(&mut self, id: GroupingId) {
+    pub fn toggle(&mut self, id: FigureId) {
         self.0 ^= 1 << id.0;
     }
     pub fn is_empty(&self) -> bool {
@@ -174,18 +175,18 @@ impl BeatSpan {
     }
 }
 
-/// One entry of the grouping catalog, for display and selection.
+/// One entry of the figure catalog, for display and selection.
 #[derive(Clone, Copy, Debug)]
-pub struct Grouping {
-    pub id: GroupingId,
-    /// Complexity level that unlocks this grouping.
+pub struct Figure {
+    pub id: FigureId,
+    /// Complexity level that unlocks this figure.
     pub level: u8,
     pub span: BeatSpan,
     cell: &'static Cell,
 }
 
-impl Grouping {
-    /// The grouping written into a one-beat measure (1/4, or 3/8 for a
+impl Figure {
+    /// The figure written into a one-beat measure (1/4, or 3/8 for a
     /// three-eighth group), e.g. for a thumbnail.
     pub fn measure(&self) -> Measure {
         build_measure(self.span.time_signature(), &[self.cell])
@@ -249,15 +250,15 @@ pub fn supports_time_signature(ts: TimeSignature) -> bool {
     beat_groups(ts).is_some()
 }
 
-/// All groupings available with `subdivision` in `ts`, in display order: only
+/// All figures available with `subdivision` in `ts`, in display order: only
 /// the beat spans `ts` uses (quarter-beat figures first).
-pub fn groupings(subdivision: Subdivision, ts: TimeSignature) -> Vec<Grouping> {
+pub fn figures(subdivision: Subdivision, ts: TimeSignature) -> Vec<Figure> {
     let subdivision = effective_subdivision(subdivision, ts);
     let spans = beat_groups(ts).unwrap_or_default();
     catalog(subdivision)
         .into_iter()
         .filter(|cell| spans.contains(&cell.span()))
-        .map(|cell| Grouping {
+        .map(|cell| Figure {
             id: cell.id,
             level: cell.level_in(subdivision),
             span: cell.span(),
@@ -266,16 +267,16 @@ pub fn groupings(subdivision: Subdivision, ts: TimeSignature) -> Vec<Grouping> {
         .collect()
 }
 
-/// The groupings a complexity level unlocks in `ts`: the level is a preset
+/// The figures a complexity level unlocks in `ts`: the level is a preset
 /// subset of the catalog.
-pub fn complexity_groupings(
+pub fn complexity_figures(
     subdivision: Subdivision,
     ts: TimeSignature,
     complexity: u8,
-) -> GroupingSet {
+) -> FigureSet {
     let complexity = complexity.clamp(1, MAX_COMPLEXITY);
-    let mut set = GroupingSet::default();
-    for g in groupings(subdivision, ts).into_iter().filter(|g| g.level <= complexity) {
+    let mut set = FigureSet::default();
+    for g in figures(subdivision, ts).into_iter().filter(|g| g.level <= complexity) {
         set.insert(g.id);
     }
     set
@@ -382,8 +383,8 @@ impl CellFamily {
 /// A figure spanning exactly one generator beat ([`BeatSpan`]).
 #[derive(Clone, Copy, Debug)]
 struct Cell {
-    /// Stable grouping id (bit index in [`GroupingSet`]); persisted, never reuse.
-    id: GroupingId,
+    /// Stable figure id (bit index in [`FigureSet`]); persisted, never reuse.
+    id: FigureId,
     level: u8,
     family: CellFamily,
     beats: &'static [(Duration, bool)],
@@ -404,22 +405,22 @@ const R: bool = false;
 static QUARTER_REST: Cell =
     Cell { id: g(0), level: 1, family: CellFamily::Quarter, beats: &[(q(), R)] };
 
-/// Whole-group rest for three-eighth groups; same as grouping 22.
+/// Whole-group rest for three-eighth groups; same as figure 22.
 static DOTTED_QUARTER_REST: Cell =
     Cell { id: g(22), level: 1, family: CellFamily::CompoundEighth, beats: &[(dq(), R)] };
 
-/// Whole-group rests for two- and three-sixteenth groups (groupings 41, 45).
+/// Whole-group rests for two- and three-sixteenth groups (figures 41, 45).
 static EIGHTH_REST: Cell =
     Cell { id: g(41), level: 1, family: CellFamily::SixteenthPair, beats: &[(e(), R)] };
 static DOTTED_EIGHTH_REST: Cell =
     Cell { id: g(45), level: 1, family: CellFamily::SixteenthTriple, beats: &[(de(), R)] };
 
-const fn g(id: u8) -> GroupingId {
-    GroupingId(id)
+const fn g(id: u8) -> FigureId {
+    FigureId(id)
 }
 
-/// Groupings in the reference app's display order ("Custom Groupings"
-/// screen, read left to right). Complexity N unlocks every grouping whose
+/// Figures in the reference app's display order (its "Custom Groupings"
+/// screen, read left to right). Complexity N unlocks every figure whose
 /// level is at most N.
 #[rustfmt::skip]
 const CELLS: &[Cell] = &[
@@ -496,13 +497,13 @@ const CELLS: &[Cell] = &[
 
 /// Triplet levels with the mixed subdivision (reference app): the offbeat
 /// figures come first, the full triplet last.
-const MIXED_TRIPLET_LEVELS: &[(GroupingId, u8)] =
+const MIXED_TRIPLET_LEVELS: &[(FigureId, u8)] =
     &[(g(21), 1), (g(18), 2), (g(17), 3), (g(19), 4), (g(20), 4), (g(16), 5)];
 
 /// Levels of the three-eighth eighth figures with the sixteenth subdivision:
 /// like the quarter-beat ladder, eighths take levels 1-2 and only the
 /// figures starting with a rest come later.
-const COMPOUND_SIXTEENTH_LEVELS: &[(GroupingId, u8)] =
+const COMPOUND_SIXTEENTH_LEVELS: &[(FigureId, u8)] =
     &[(g(25), 2), (g(26), 2), (g(27), 2), (g(28), 4), (g(29), 5)];
 
 impl Cell {
@@ -528,10 +529,10 @@ const TOP_LEVEL_WEIGHT: usize = 3;
 /// entirely rests about a third of the time).
 const MAX_SPACE_REST_PROBABILITY: f32 = 0.75;
 
-/// Library cells usable with `subdivision`, one per grouping id (the first in
+/// Library cells usable with `subdivision`, one per figure id (the first in
 /// catalog order wins, so a shared id keeps its lowest unlock level).
 fn catalog(subdivision: Subdivision) -> Vec<&'static Cell> {
-    let mut seen = GroupingSet::default();
+    let mut seen = FigureSet::default();
     CELLS
         .iter()
         .filter(|c| c.family.allowed_in(subdivision))
@@ -578,21 +579,21 @@ fn pick_cell(pool: &[&'static Cell], subdivision: Subdivision, rng: &mut Rng) ->
 /// Where cells of one span are drawn from.
 struct Pool {
     cells: Vec<&'static Cell>,
-    /// Weighted by level (complexity) or uniform (custom groupings).
+    /// Weighted by level (complexity) or uniform (custom figures).
     weighted: bool,
 }
 
 impl Pool {
     fn new(settings: &GeneratorSettings, subdivision: Subdivision, span: BeatSpan) -> Self {
-        let custom: Vec<&'static Cell> = if settings.custom_groupings_enabled {
+        let custom: Vec<&'static Cell> = if settings.custom_figures_enabled {
             catalog(subdivision)
                 .into_iter()
-                .filter(|c| c.span() == span && settings.custom_groupings.contains(c.id))
+                .filter(|c| c.span() == span && settings.custom_figures.contains(c.id))
                 .collect()
         } else {
             Vec::new()
         };
-        // Custom groupings are drawn uniformly; an empty selection falls back
+        // Custom figures are drawn uniformly; an empty selection falls back
         // to the complexity level so the generator never runs dry.
         if custom.is_empty() {
             let complexity = settings.complexity.clamp(1, MAX_COMPLEXITY);
@@ -953,7 +954,7 @@ mod tests {
                 assert!(m.beats().iter().all(|b| allowed.contains(&b.duration)), "{m:?}");
             }
         }
-        let spans = groupings(Subdivision::Sixteenths, ts(7, 16))
+        let spans = figures(Subdivision::Sixteenths, ts(7, 16))
             .iter()
             .map(|g| g.span)
             .collect::<std::collections::HashSet<_>>();
@@ -1072,9 +1073,9 @@ mod tests {
     }
 
     #[test]
-    fn groupings_list_only_the_spans_of_the_meter() {
+    fn figures_list_only_the_spans_of_the_meter() {
         let spans = |meter| {
-            groupings(Subdivision::Sixteenths, meter)
+            figures(Subdivision::Sixteenths, meter)
                 .iter()
                 .map(|g| g.span)
                 .collect::<std::collections::HashSet<_>>()
@@ -1087,28 +1088,28 @@ mod tests {
         );
         // Two-eighth groups never offer triplets, even with mixed selected.
         assert!(
-            groupings(Subdivision::Mixed, TimeSignature::FIVE_EIGHT)
+            figures(Subdivision::Mixed, TimeSignature::FIVE_EIGHT)
                 .iter()
                 .all(|g| g.cell.family != CellFamily::Triplet)
         );
-        for g in groupings(Subdivision::Sixteenths, TimeSignature::SIX_EIGHT) {
+        for g in figures(Subdivision::Sixteenths, TimeSignature::SIX_EIGHT) {
             assert_eq!(g.measure().time_signature(), ts(3, 8));
         }
     }
 
     #[test]
-    fn custom_groupings_apply_per_group_size() {
-        // Only a three-eighth grouping picked: 5/8 uses it for the three
+    fn custom_figures_apply_per_group_size() {
+        // Only a three-eighth figure picked: 5/8 uses it for the three
         // and falls back to the complexity level for the two.
-        let pick = groupings(Subdivision::Eighths, TimeSignature::SIX_EIGHT)
+        let pick = figures(Subdivision::Eighths, TimeSignature::SIX_EIGHT)
             .into_iter()
             .find(|g| g.cell.id == g_id(25))
             .unwrap();
-        let mut custom = GroupingSet::default();
+        let mut custom = FigureSet::default();
         custom.insert(pick.id);
         let st = GeneratorSettings {
-            custom_groupings_enabled: true,
-            custom_groupings: custom,
+            custom_figures_enabled: true,
+            custom_figures: custom,
             time_signature: TimeSignature::FIVE_EIGHT,
             ..settings(Subdivision::Eighths, 1)
         };
@@ -1121,8 +1122,8 @@ mod tests {
         }
     }
 
-    fn g_id(id: u8) -> GroupingId {
-        GroupingId(id)
+    fn g_id(id: u8) -> FigureId {
+        FigureId(id)
     }
 
     #[test]
@@ -1246,7 +1247,7 @@ mod tests {
     }
 
     #[test]
-    fn sixteenth_levels_match_reference_groupings() {
+    fn sixteenth_levels_match_reference_figures() {
         // Reference app "Custom Groupings", unlocked cumulatively per level.
         fn onsets(c: &Cell) -> String {
             let sx = DEFAULT_GRID.ticks_of(&s()).unwrap();
@@ -1343,26 +1344,25 @@ mod tests {
     }
 
     #[test]
-    fn grouping_ids_are_unique_per_subdivision() {
+    fn figure_ids_are_unique_per_subdivision() {
         for sub in [
             Subdivision::Eighths,
             Subdivision::Sixteenths,
             Subdivision::Triplets,
             Subdivision::Mixed,
         ] {
-            let ids: Vec<_> =
-                groupings(sub, TimeSignature::FOUR_FOUR).iter().map(|g| g.id).collect();
+            let ids: Vec<_> = figures(sub, TimeSignature::FOUR_FOUR).iter().map(|g| g.id).collect();
             let unique: std::collections::HashSet<_> = ids.iter().collect();
             assert_eq!(ids.len(), unique.len(), "{sub:?}");
             assert!(ids.iter().all(|id| id.0 < 64));
         }
-        assert_eq!(groupings(Subdivision::Sixteenths, TimeSignature::FOUR_FOUR).len(), 16);
-        assert_eq!(groupings(Subdivision::Eighths, TimeSignature::FOUR_FOUR).len(), 4);
+        assert_eq!(figures(Subdivision::Sixteenths, TimeSignature::FOUR_FOUR).len(), 16);
+        assert_eq!(figures(Subdivision::Eighths, TimeSignature::FOUR_FOUR).len(), 4);
         // Triplets: rest, quarter and six triplet figures; the rest comes
         // first in every subdivision.
-        assert_eq!(groupings(Subdivision::Triplets, TimeSignature::FOUR_FOUR).len(), 8);
+        assert_eq!(figures(Subdivision::Triplets, TimeSignature::FOUR_FOUR).len(), 8);
         for sub in [Subdivision::Eighths, Subdivision::Sixteenths, Subdivision::Triplets] {
-            let first = groupings(sub, TimeSignature::FOUR_FOUR)[0].measure();
+            let first = figures(sub, TimeSignature::FOUR_FOUR)[0].measure();
             assert!(first.beats().iter().all(|b| b.kind == Rest), "{sub:?}");
         }
     }
@@ -1370,30 +1370,28 @@ mod tests {
     #[test]
     fn complexity_is_a_growing_subset_of_the_catalog() {
         let sub = Subdivision::Sixteenths;
-        let mut prev = GroupingSet::default();
+        let mut prev = FigureSet::default();
         for level in 1..=MAX_COMPLEXITY {
-            let set = complexity_groupings(sub, TimeSignature::FOUR_FOUR, level);
+            let set = complexity_figures(sub, TimeSignature::FOUR_FOUR, level);
             assert_eq!(set.0 & prev.0, prev.0, "level {level} must contain level {}", level - 1);
             prev = set;
         }
-        let all = groupings(sub, TimeSignature::FOUR_FOUR).iter().fold(
-            GroupingSet::default(),
-            |mut s, g| {
+        let all =
+            figures(sub, TimeSignature::FOUR_FOUR).iter().fold(FigureSet::default(), |mut s, g| {
                 s.insert(g.id);
                 s
-            },
-        );
+            });
         assert_eq!(prev, all);
     }
 
     #[test]
-    fn custom_groupings_restrict_the_pool() {
-        let mut custom = GroupingSet::default();
-        let pick = groupings(Subdivision::Sixteenths, TimeSignature::FOUR_FOUR)[8]; // dotted eighth + sixteenth
+    fn custom_figures_restrict_the_pool() {
+        let mut custom = FigureSet::default();
+        let pick = figures(Subdivision::Sixteenths, TimeSignature::FOUR_FOUR)[8]; // dotted eighth + sixteenth
         custom.insert(pick.id);
         let st = GeneratorSettings {
-            custom_groupings_enabled: true,
-            custom_groupings: custom,
+            custom_figures_enabled: true,
+            custom_figures: custom,
             ..settings(Subdivision::Sixteenths, 1)
         };
         let mut rng = Rng::new(4);
@@ -1407,12 +1405,12 @@ mod tests {
 
     #[test]
     fn empty_or_disabled_custom_selection_uses_complexity() {
-        let mut custom = GroupingSet::default();
-        custom.insert(groupings(Subdivision::Sixteenths, TimeSignature::FOUR_FOUR)[15].id);
+        let mut custom = FigureSet::default();
+        custom.insert(figures(Subdivision::Sixteenths, TimeSignature::FOUR_FOUR)[15].id);
         let off =
-            GeneratorSettings { custom_groupings: custom, ..settings(Subdivision::Sixteenths, 1) };
+            GeneratorSettings { custom_figures: custom, ..settings(Subdivision::Sixteenths, 1) };
         let empty = GeneratorSettings {
-            custom_groupings_enabled: true,
+            custom_figures_enabled: true,
             ..settings(Subdivision::Sixteenths, 1)
         };
         let mut rng = Rng::new(8);
@@ -1425,18 +1423,18 @@ mod tests {
 
     #[test]
     fn custom_selection_outside_subdivision_is_ignored() {
-        // A triplet grouping selected while generating sixteenths: falls back.
-        let mut custom = GroupingSet::default();
+        // A triplet figure selected while generating sixteenths: falls back.
+        let mut custom = FigureSet::default();
         custom.insert(
-            groupings(Subdivision::Triplets, TimeSignature::FOUR_FOUR)
+            figures(Subdivision::Triplets, TimeSignature::FOUR_FOUR)
                 .iter()
                 .find(|g| g.level == 5)
                 .unwrap()
                 .id,
         );
         let st = GeneratorSettings {
-            custom_groupings_enabled: true,
-            custom_groupings: custom,
+            custom_figures_enabled: true,
+            custom_figures: custom,
             ..settings(Subdivision::Sixteenths, 2)
         };
         let mut rng = Rng::new(2);

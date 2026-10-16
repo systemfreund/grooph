@@ -194,12 +194,12 @@ impl Grooph {
     /// picker below lets the user hand-pick instead.
     fn complexity_choices(&mut self, ui: &mut Ui) -> bool {
         let settings = &mut self.editor.generator.settings;
-        let current = if settings.custom_groupings_enabled { 0 } else { settings.complexity };
+        let current = if settings.custom_figures_enabled { 0 } else { settings.complexity };
         let options: Vec<_> = (1..=MAX_COMPLEXITY).map(|l| (l, l.to_string())).collect();
         let picked = choice_grid(ui, &options, current, MAX_COMPLEXITY as usize);
         if let Some(level) = picked {
             settings.complexity = level;
-            settings.custom_groupings_enabled = false;
+            settings.custom_figures_enabled = false;
         }
         ui.add_space(8.0);
         ui.horizontal(|ui| {
@@ -214,7 +214,7 @@ impl Grooph {
             .id_salt("compact_groupings")
             .show(ui, |ui| {
                 egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
-                    self.groupings_picker(ui);
+                    self.figures_picker(ui);
                 });
             });
         picked.is_some()

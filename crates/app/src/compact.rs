@@ -292,7 +292,7 @@ impl Grooph {
     fn compact_settings_card(&mut self, ui: &mut Ui) {
         let settings = &self.editor.generator.settings;
         let subdivision = effective_subdivision(settings.subdivision, settings.time_signature);
-        let level = if settings.custom_groupings_enabled {
+        let level = if settings.custom_figures_enabled {
             "Custom".to_owned()
         } else {
             settings.complexity.to_string()

@@ -6,8 +6,8 @@ use crate::tool_palette::notation_button;
 use eframe::egui;
 use grooph_measure::TimeSignature;
 use grooph_measure::generator::{
-    BeatSpan, GeneratorSettings, GroupingSet, MAX_BARS, MAX_COMPLEXITY, Subdivision,
-    complexity_groupings, effective_subdivision, groupings, offered_subdivisions,
+    BeatSpan, FigureSet, GeneratorSettings, MAX_BARS, MAX_COMPLEXITY, Subdivision,
+    complexity_figures, effective_subdivision, figures, offered_subdivisions,
     supports_time_signature,
 };
 
@@ -95,7 +95,7 @@ impl Grooph {
                                 });
                         });
 
-                        let custom_on = settings.custom_groupings_enabled;
+                        let custom_on = settings.custom_figures_enabled;
                         setting(ui, "Complexity", |ui| {
                             ui.add_enabled_ui(!custom_on, |ui| {
                                 egui::ComboBox::from_id_salt("gen_complexity")
@@ -167,7 +167,7 @@ impl Grooph {
 
                 egui::CollapsingHeader::new("Groupings")
                     .id_salt("gen_groupings")
-                    .show(ui, |ui| self.groupings_picker(ui));
+                    .show(ui, |ui| self.figures_picker(ui));
 
                 egui::CollapsingHeader::new("Presets").id_salt("gen_presets").show(ui, |ui| {
                     if let Some(id) = self.preset_manager(ui) {
@@ -202,31 +202,31 @@ impl Grooph {
         }
     }
 
-    /// Grouping picker (reference app: "Custom Groupings"). While custom
-    /// groupings are off, the tiles show which groupings the complexity level
-    /// unlocks; picking a tile switches to a custom selection seeded from it.
-    pub(crate) fn groupings_picker(&mut self, ui: &mut egui::Ui) {
+    /// Figure picker, labelled "Groupings" like the reference app's "Custom
+    /// Groupings". While custom figures are off, the tiles show which figures
+    /// the complexity level unlocks; picking a tile switches to a custom selection seeded from it.
+    pub(crate) fn figures_picker(&mut self, ui: &mut egui::Ui) {
         let family = self.ui.music_font_id.family.clone();
         let settings = &mut self.editor.generator.settings;
         let ts = settings.time_signature;
-        let preset = complexity_groupings(settings.subdivision, ts, settings.complexity);
+        let preset = complexity_figures(settings.subdivision, ts, settings.complexity);
 
-        let mut enabled = settings.custom_groupings_enabled;
+        let mut enabled = settings.custom_figures_enabled;
         if ui.checkbox(&mut enabled, "Custom groupings").changed() {
-            if enabled && settings.custom_groupings.is_empty() {
-                settings.custom_groupings = preset;
+            if enabled && settings.custom_figures.is_empty() {
+                settings.custom_figures = preset;
             }
-            settings.custom_groupings_enabled = enabled;
+            settings.custom_figures_enabled = enabled;
         }
 
-        let active: GroupingSet =
-            if settings.custom_groupings_enabled { settings.custom_groupings } else { preset };
-        let available = groupings(settings.subdivision, ts);
-        if settings.custom_groupings_enabled
-            && !available.iter().any(|g| settings.custom_groupings.contains(g.id))
+        let active: FigureSet =
+            if settings.custom_figures_enabled { settings.custom_figures } else { preset };
+        let available = figures(settings.subdivision, ts);
+        if settings.custom_figures_enabled
+            && !available.iter().any(|g| settings.custom_figures.contains(g.id))
         {
             ui.weak("No grouping selected for this subdivision, using the complexity level.");
-        } else if !settings.custom_groupings_enabled {
+        } else if !settings.custom_figures_enabled {
             ui.weak(format!(
                 "Level {} uses the highlighted groupings. Pick one to customise.",
                 settings.complexity
@@ -249,23 +249,23 @@ impl Grooph {
                 });
             }
             ui.horizontal_wrapped(|ui| {
-                for grouping in of_span {
-                    let measure = grouping.measure();
-                    let id = egui::Id::new(("grouping", grouping.id.0));
+                for figure in of_span {
+                    let measure = figure.measure();
+                    let id = egui::Id::new(("figure", figure.id.0));
                     let tile = notation_button(
                         ui,
                         id,
                         &measure,
                         family.clone(),
-                        active.contains(grouping.id),
+                        active.contains(figure.id),
                     )
-                    .on_hover_text(format!("Unlocked at level {}", grouping.level));
+                    .on_hover_text(format!("Unlocked at level {}", figure.level));
                     if tile.clicked() {
-                        if !settings.custom_groupings_enabled {
-                            settings.custom_groupings = preset;
-                            settings.custom_groupings_enabled = true;
+                        if !settings.custom_figures_enabled {
+                            settings.custom_figures = preset;
+                            settings.custom_figures_enabled = true;
                         }
-                        settings.custom_groupings.toggle(grouping.id);
+                        settings.custom_figures.toggle(figure.id);
                     }
                 }
             });
