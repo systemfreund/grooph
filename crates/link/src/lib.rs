@@ -110,7 +110,7 @@ pub fn parse_query(query: &str) -> Result<Option<SharedLink>, String> {
         let defaults = GeneratorSettings::default();
         let time_signature = ts.unwrap_or(defaults.time_signature);
         if !supports_time_signature(time_signature) {
-            return Err("the generator supports x/4 and x/8 time signatures (from 2/8)".into());
+            return Err("the generator supports x/4 and x/8 time signatures".into());
         }
         let settings = GeneratorSettings {
             subdivision: sub.unwrap_or(defaults.subdivision),
@@ -420,7 +420,7 @@ mod tests {
         assert!(parse_query("bpm=500").unwrap_err().contains("bpm"));
         assert!(parse_query("lvl=9").unwrap_err().contains("lvl"));
         assert!(parse_query("sub=4").unwrap_err().contains("sub"));
-        assert!(parse_query("ts=4/16&sub=16").unwrap_err().contains("x/8"));
+        assert!(parse_query("ts=5/16&sub=16").unwrap_err().contains("x/8"));
         assert!(parse_query("r=q+q+q").unwrap_err().contains("too short"));
         assert!(parse_query("r=q+q+q+q&seed=1").unwrap_err().contains("not both"));
     }

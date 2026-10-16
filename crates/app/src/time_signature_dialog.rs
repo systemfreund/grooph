@@ -16,14 +16,17 @@ impl Grooph {
                     let l2 = Layout::left_to_right(Align::Min);
                     ui.with_layout(l2, |ui| {
                         if let Mode::TimeSignature { beats, unit } = &mut self.ui.mode {
+                            let range = TimeSignature::beat_range(*unit)
+                                .unwrap_or(1..=TimeSignature::MAX_BEATS);
                             egui::ComboBox::from_id_salt("beats")
                                 .selected_text(format!("{}", *beats))
                                 .show_ui(ui, |ui| {
-                                    for v in 1..=TimeSignature::MAX_BEATS {
+                                    for v in range {
                                         ui.selectable_value(beats, v, format!("{}", v));
                                     }
                                 });
                             ui.label(" / ");
+                            let unit_before = *unit;
                             egui::ComboBox::from_id_salt("beat_unit")
                                 .selected_text(format!("{}", *unit))
                                 .show_ui(ui, |ui| {
@@ -31,6 +34,12 @@ impl Grooph {
                                         ui.selectable_value(unit, v, format!("{}", v));
                                     }
                                 });
+                            // Keep the beats within what the new unit offers.
+                            if *unit != unit_before
+                                && let Some(range) = TimeSignature::beat_range(*unit)
+                            {
+                                *beats = (*beats).clamp(*range.start(), *range.end());
+                            }
                         }
                     });
 

@@ -18,8 +18,9 @@ bpm=100&ts=4/4
 1. **Set the tempo.** Drag the **BPM** field left or right, or click it and type a number.
    Any tempo from 20 to 300 beats per minute works.
 2. **Choose a time signature.** Open the editor (pen icon) and use the time signature
-   button (it shows the current meter, e.g. "4/4"). You can use 1 to 17 beats over a quarter, eighth or
-   sixteenth note, so 3/4, 6/8, 7/8 and 12/8 are all possible.
+   button (it shows the current meter, e.g. "4/4"). You can use 1 to 7 beats over a quarter,
+   3 to 13 over an eighth or 5 to 19 over a sixteenth note, so 3/4, 6/8, 7/8 and 12/8 are
+   all possible.
 3. **Press play** (or the space bar). A moving cursor shows where you are in the measure.
 4. **Optional:** switch on the **count-in** (the button next to play) to hear one bar of
    clicks before the music starts, or add a **swing** feel next to the tempo.
@@ -94,5 +95,6 @@ ghost notes. The settings let you pick the waveform of the click.
 
 ### Can it keep a steady pulse for odd meters?
 
-Yes. Any meter from 1 to 17 beats over 4, 8 or 16 works, for example 5/4, 7/8 or 11/16.
+Yes. Meters from 1/4 to 7/4, 3/8 to 13/8 and 5/16 to 19/16 work, for example 5/4, 7/8
+or 11/16.
 See [odd time signatures](/metronome/odd-time-signatures/).

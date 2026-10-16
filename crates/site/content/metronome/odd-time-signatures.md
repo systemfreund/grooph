@@ -7,8 +7,8 @@ order: 2
 ---
 Odd time signatures – meters such as 5/4, 7/8 or 11/8 – feel unusual because their beats do
 not split into equal halves. The trick is to think of them as short groups of **twos and
-threes**. grooph lets you set any meter from 1 to 17 beats over a quarter, eighth or
-sixteenth note and hear exactly the grouping you want.
+threes**. grooph lets you set meters from 1/4 to 7/4, 3/8 to 13/8 and 5/16 to 19/16 and
+hear exactly the grouping you want.
 
 ## Quick links
 
@@ -84,6 +84,6 @@ as two dotted quarters (3+3).
 
 ### Which meters does grooph support?
 
-Any meter from 1 to 17 beats over a quarter, eighth or sixteenth note. The random rhythm
-generator writes exercises in quarter-note meters up to 7/4 and in 5/8, 6/8, 7/8, 9/8
-and 12/8, grouped 3+2, 3+3, 2+3+2 and so on.
+1 to 7 beats over a quarter note, 3 to 13 over an eighth and 5 to 19 over a sixteenth. The
+random rhythm generator writes exercises in quarter-note meters up to 7/4 and in 3/8, 5/8,
+6/8, 7/8, 9/8 and 12/8, grouped 3+2, 3+3, 2+3+2 and so on.
