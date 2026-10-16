@@ -558,7 +558,7 @@ impl Grooph {
 
     fn pattern_name_or_default(name: &str, library: &PatternLibrary) -> String {
         if name.trim().is_empty() {
-            format!("Takt {}", library.patterns.len() + 1)
+            format!("Pattern {}", library.patterns.len() + 1)
         } else {
             name.trim().to_string()
         }

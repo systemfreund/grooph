@@ -8,25 +8,46 @@ Rust developers and focuses on crate-specific behaviors and APIs that matter whe
 
 ## Build and configuration
 
-- Toolchain/edition: Rust edition 2024. The crate builds and tests cleanly with the default toolchain (no special flags
-  required).
-- Crate layout: Binary + library (unit tests run under the lib target). GUI/frontend uses eframe; WebAssembly support is
-  gated behind cfg(target_arch = "wasm32").
-- Dependencies: eframe, egui_extras (svg), rodio (audio), either, log; env_logger for native only. WASM adds
-  wasm-bindgen, wasm-bindgen-futures, web-sys, cpal, getrandom. See Cargo.toml for versions.
+- Toolchain/edition: Rust edition 2024 on stable. The workspace builds and tests cleanly with the default toolchain
+  (no special flags required). Native builds need the ALSA headers (`libasound2-dev` on Debian/Ubuntu).
+- Workspace layout (`crates/`, shared versions in the root Cargo.toml under `[workspace.dependencies]`):
+    - `measure` (grooph-measure): the music model: durations, beats, measures, scores, time signatures, the
+      generator, counting, swing, tempo. No GUI dependencies.
+    - `layout` (grooph-layout): turns measures into render plans and pixel layouts.
+    - `render` (grooph-render): draws the layouts with egui.
+    - `audio` (grooph-audio): click sounds and scheduling (rodio; cpal on WASM).
+    - `midi` (grooph-midi): MIDI input.
+    - `link` (grooph-link): shareable links (`?v=2&bpm=..&r=..`) and the text notation for scores.
+    - `app` (grooph-app): the eframe app, binary + library. WebAssembly code is gated behind
+      `cfg(target_arch = "wasm32")`.
+    - `site` (grooph-site): static guide pages, written into the web build by a Trunk `post_build` hook.
 - Running locally:
     - Native run: `cargo run`
-    - Tests: `cargo test`
-    - WASM build (optional): the repo includes Trunk.toml for web builds. Typical commands (if you have trunk
-      installed): `trunk serve` for dev, or `trunk build --release` to produce optimized WASM (release profile uses
-      `opt-level = "z"` and `lto = true`; Trunk sets `release = true` and `minify = "always"`).
+    - Tests: `cargo test --workspace`
+    - WASM build (optional): Trunk.toml at the repo root drives web builds. `trunk serve` for dev, or
+      `trunk build --release` to produce optimized WASM (release profile uses `opt-level = "z"` and `lto = true`;
+      Trunk sets `release = true` and `minify = "always"`). CI pins Trunk (see `.github/workflows/rust.yml`).
+
+## CI
+
+`.github/workflows/rust.yml` runs on every push and pull request to `main`; run the same checks locally before pushing:
+
+- `cargo fmt --all -- --check`
+- `cargo clippy --workspace --all-targets -- -D warnings` (unused imports and dead code are errors)
+- `cargo build` and `cargo test`
+- `trunk build --release` (the web job). To check the WASM target without Trunk:
+  `cargo clippy -p grooph-app --target wasm32-unknown-unknown -- -D warnings`
+
+Pushes to `main` deploy the web build to Cloudflare Pages once both jobs pass.
 
 ## Testing: how to configure and run
 
-- Unit tests are colocated within modules (e.g., src/measure.rs, src/layout/*). Use standard cargo commands:
-    - All tests: `cargo test`
-    - Filter by module/name: `cargo test measure::tests` or `cargo test test_triplet_insertions_1`
-    - Single fully-qualified test: `cargo test measure::tests::append_autofill_to_primary_boundary_simple`
+- Unit tests are colocated within modules (e.g., crates/measure/src/lib.rs, crates/layout/src/*). Use standard cargo
+  commands:
+    - All tests: `cargo test --workspace`
+    - One crate: `cargo test -p grooph-measure`
+    - Filter by name: `cargo test -p grooph-measure test_triplet_insertions_1`
+    - Single fully-qualified test: `cargo test -p grooph-measure tests::append_autofill_to_primary_boundary_simple`
     - Show test output: add `-- --nocapture`
 
 ## Writing new tests
@@ -34,7 +55,7 @@ Rust developers and focuses on crate-specific behaviors and APIs that matter whe
 - Prefer internal unit tests in the same module as the code under test.
 - Common pattern: create a `Measure`, then add beats via helper duration constructors. The measure automatically fills
   gaps to primary boundaries or tuplet completeness when possible.
-- Shortcuts for common durations (defined in `src/measure/duration.rs`):
+- Shortcuts for common durations (defined in `crates/measure/src/duration.rs`):
     - Simple: `q()` (quarter), `e()` (eighth), `s()` (sixteenth), `th()` (thirty-second)
     - Triplets: `t8()`, `t16()`, `t32()`
     - Quintuplet: `qt16()` (5 in the time of 4, sixteenth base)
@@ -49,15 +70,15 @@ Rust developers and focuses on crate-specific behaviors and APIs that matter whe
 - `set_beat` may absorb/fill following beats to keep the measure valid (including auto-filling rests).
 
 Minimal example test (verified)
-Place this inside an existing `#[cfg(test)] mod tests { .. }` in `src/measure.rs` or another internal module. Imports
-mirror existing tests so helper functions are visible.
+Place this inside an existing `#[cfg(test)] mod tests { .. }` in `crates/measure/src/lib.rs` or another module of the
+measure crate. Imports mirror existing tests so helper functions are visible.
 
 ```
 #[test]
 fn demo_howto_test_measure_with_helpers() {
-    use crate::measure::duration::{e, t8};
-    use crate::measure::{Beat, Measure, TimeSignature};
-    use crate::measure::BeatKind::Rest;
+    use crate::BeatKind::Rest;
+    use crate::duration::{e, t8};
+    use crate::{Beat, Measure, TimeSignature};
 
     // 4/4: insert eighth note; auto-fill adds an eighth rest to complete the quarter boundary
     let mut m = Measure::new(TimeSignature::FOUR_FOUR);
@@ -87,7 +108,7 @@ fn demo_howto_test_measure_with_helpers() {
 
 - Formatting: See `rustfmt.toml` at repo root. Run `cargo fmt` before committing.
 - Imports and module layout: mirror the existing test modules for import style (e.g., reusing
-  `use crate::measure::duration::{..}` and avoiding cross-layer layout imports inside measure tests).
+  `use crate::duration::{..}`; the measure crate does not depend on layout or render).
 - Debug/print helpers: `duration_to_debug_str` and `impl Debug` for `Measure` provide concise readable output for
   debugging failed tests.
 

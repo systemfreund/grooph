@@ -53,9 +53,9 @@ pub struct AudioSettings {
     pub base_frequency: f32,
     pub decay: f32,
     pub waveform: Waveform,
-    pub noise_hpf_hz: f32, // High-Pass-Cutoff für Noise (2-6 kHz)
-    pub noise_mix: f32,    // Anteil [0..1], der dem Basissignal beigemischt wird
-    pub noise_decay: f32,  // unabhängiger Decay nur für Noise-Anteil
+    pub noise_hpf_hz: f32, // High-pass cutoff for the noise (2-6 kHz)
+    pub noise_mix: f32,    // Share [0..1] of noise mixed into the tone
+    pub noise_decay: f32,  // Separate decay for the noise only
     /// Volume of ghost notes. Defaulted so older persisted settings still load.
     #[serde(default = "default_ghost_gain")]
     pub ghost: f32,
