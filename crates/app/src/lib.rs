@@ -206,7 +206,7 @@ struct CountingSettings {
 
 impl Default for CountingSettings {
     fn default() -> Self {
-        Self { enabled: true, show_labels: true, base: CountingBase::Ands, show_tuplets: false }
+        Self { enabled: false, show_labels: true, base: CountingBase::Ands, show_tuplets: false }
     }
 }
 
