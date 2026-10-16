@@ -11,6 +11,7 @@ use eframe::egui::{
     Align2, Color32, FontId, Frame, Id, Margin, Painter, Rect, Response, RichText, Sense, Shape,
     Stroke, Ui, UiBuilder, Vec2, pos2, vec2,
 };
+use grooph_measure::click::ClickSubdivision;
 use grooph_measure::generator::{Subdivision, effective_subdivision};
 
 /// Windows narrower than this (in points) count as phone-sized: the staff
@@ -451,6 +452,17 @@ impl Grooph {
                         .corner_radius(CARD_RADIUS)
                         .inner_margin(Margin::same(12))
                         .show(ui, |ui| {
+                            let ts = self.metronome_meter();
+                            let subdivision = self.playback_ctl.audio_cfg.subdivision;
+                            // A split the meter cannot take plays as off.
+                            let label = if subdivision.fits(&ts) {
+                                subdivision.label(&ts)
+                            } else {
+                                ClickSubdivision::Off.label(&ts)
+                            };
+                            if value_row(ui, "Subdivision", &label).clicked() {
+                                self.ui.picker = Some(Picker::ClickSubdivision);
+                            }
                             switch_row(ui, "Count-in", &mut self.playback_ctl.audio_cfg.count_in);
                             switch_row(
                                 ui,

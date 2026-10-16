@@ -11,6 +11,7 @@
 //! (low), `-` off. 7/8 as 2+3+2 with the middle group soft is `SLM`.
 
 use crate::TimeSignature;
+use crate::grid::DEFAULT_GRID;
 use serde::{Deserialize, Serialize};
 use std::fmt::{Display, Formatter};
 use std::str::FromStr;
@@ -139,10 +140,101 @@ impl ClickPatterns {
     }
 }
 
+/// Extra clicks between the counted beats: each beat unit (the quarter in
+/// 4/4, the eighth in 7/8) split into this many equal parts.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ClickSubdivision {
+    /// Only the beats click.
+    #[default]
+    Off,
+    /// Two per beat: eighths in 4/4.
+    Two,
+    /// Three per beat: triplets.
+    Three,
+    /// Four per beat: sixteenths in 4/4.
+    Four,
+}
+
+impl ClickSubdivision {
+    pub const ALL: [ClickSubdivision; 4] = [
+        ClickSubdivision::Off,
+        ClickSubdivision::Two,
+        ClickSubdivision::Three,
+        ClickSubdivision::Four,
+    ];
+
+    /// Parts per beat unit; 1 when off.
+    pub const fn parts(self) -> u32 {
+        match self {
+            ClickSubdivision::Off => 1,
+            ClickSubdivision::Two => 2,
+            ClickSubdivision::Three => 3,
+            ClickSubdivision::Four => 4,
+        }
+    }
+
+    /// Ticks within a bar of `ts` that get a subdivision click: every part
+    /// of every beat unit, without the beat units themselves. Empty when off
+    /// or when the tick grid cannot split the beat unit evenly.
+    pub fn ticks(self, ts: &TimeSignature) -> Vec<u32> {
+        let unit = DEFAULT_GRID.ticks_per_beat(ts);
+        let parts = self.parts();
+        if parts < 2 || unit == 0 || !unit.is_multiple_of(parts) {
+            return Vec::new();
+        }
+        (0..DEFAULT_GRID.ticks_per_measure(ts))
+            .step_by((unit / parts) as usize)
+            .filter(|t| !t.is_multiple_of(unit))
+            .collect()
+    }
+
+    /// Whether `ts` can be split this way (the grid has the ticks for it).
+    pub fn fits(self, ts: &TimeSignature) -> bool {
+        self == ClickSubdivision::Off || !self.ticks(ts).is_empty()
+    }
+
+    /// Name of the parts in `ts`, e.g. "8ths" for two per beat in 4/4 and
+    /// "16ths" in 7/8.
+    pub fn label(self, ts: &TimeSignature) -> String {
+        let unit = ts.beat_unit as u32;
+        match self {
+            ClickSubdivision::Off => "Off".to_owned(),
+            ClickSubdivision::Two => format!("{}ths", unit * 2),
+            ClickSubdivision::Three if unit == 4 => "Triplets".to_owned(),
+            ClickSubdivision::Three => format!("{}th triplets", unit * 2),
+            ClickSubdivision::Four => format!("{}ths", unit * 4),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::ClickLevel::{Medium, Off, Soft, Strong};
     use super::*;
+
+    #[test]
+    fn subdivision_clicks_sit_between_the_beats() {
+        let ts = TimeSignature::FOUR_FOUR;
+        let quarter = DEFAULT_GRID.ticks_per_beat(&ts);
+        assert_eq!(ClickSubdivision::Off.ticks(&ts), Vec::<u32>::new());
+        let eighths = ClickSubdivision::Two.ticks(&ts);
+        assert_eq!(eighths.len(), 4);
+        assert_eq!(eighths[0], quarter / 2);
+        // Triplets: two clicks between each pair of beats.
+        assert_eq!(ClickSubdivision::Three.ticks(&ts).len(), 8);
+        assert_eq!(ClickSubdivision::Four.ticks(&ts).len(), 12);
+        // 7/8: sixteenths between the seven eighths.
+        assert_eq!(ClickSubdivision::Two.ticks(&TimeSignature::SEVEN_EIGHT).len(), 7);
+    }
+
+    #[test]
+    fn subdivision_labels_follow_the_beat_unit() {
+        assert_eq!(ClickSubdivision::Two.label(&TimeSignature::FOUR_FOUR), "8ths");
+        assert_eq!(ClickSubdivision::Four.label(&TimeSignature::FOUR_FOUR), "16ths");
+        assert_eq!(ClickSubdivision::Three.label(&TimeSignature::FOUR_FOUR), "Triplets");
+        assert_eq!(ClickSubdivision::Two.label(&TimeSignature::SEVEN_EIGHT), "16ths");
+        assert_eq!(ClickSubdivision::Three.label(&TimeSignature::SEVEN_EIGHT), "16th triplets");
+    }
 
     #[test]
     fn default_is_strong_then_medium_per_group() {

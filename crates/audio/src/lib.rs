@@ -12,7 +12,7 @@ use crate::tick_source::{CountInPlan, TickSource};
 use crate::trainer::GapDecider;
 use crate::voices::VoiceMixer;
 use grooph_measure::Score;
-use grooph_measure::click::ClickPatterns;
+use grooph_measure::click::{ClickPatterns, ClickSubdivision};
 use grooph_measure::generator::Subdivision;
 use grooph_measure::grid::DEFAULT_GRID;
 use grooph_measure::swing::Swing;
@@ -76,6 +76,10 @@ pub struct AudioSettings {
     /// Volume of the beat groups a click pattern sets to soft.
     #[serde(default = "default_soft_gain")]
     pub soft: f32,
+    /// Volume of the clicks between the beats when the metronome subdivides
+    /// them.
+    #[serde(default = "default_subdivision_gain")]
+    pub subdivision: f32,
     /// Silence downbeat and primary beats (the count-in still sounds).
     #[serde(default)]
     pub metronome_muted: bool,
@@ -94,6 +98,10 @@ fn default_count_in_gain() -> f32 {
 
 fn default_soft_gain() -> f32 {
     0.35
+}
+
+fn default_subdivision_gain() -> f32 {
+    0.3
 }
 
 impl Default for AudioSettings {
@@ -115,6 +123,7 @@ impl Default for AudioSettings {
             count_in: default_count_in_gain(),
             pulse: 0.0,
             soft: default_soft_gain(),
+            subdivision: default_subdivision_gain(),
             metronome_muted: false,
             rhythm_muted: false,
         }
@@ -147,6 +156,7 @@ impl AudioSettings {
             count_in: default_count_in_gain(),
             pulse: 0.0,
             soft: default_soft_gain(),
+            subdivision: default_subdivision_gain(),
             metronome_muted: false,
             rhythm_muted: false,
         };
@@ -166,6 +176,7 @@ impl AudioSettings {
         self.ghost = self.ghost.clamp(0.0, 1.0);
         self.count_in = self.count_in.clamp(0.0, 1.0);
         self.soft = self.soft.clamp(0.0, 1.0);
+        self.subdivision = self.subdivision.clamp(0.0, 1.0);
         self
     }
 }
@@ -185,6 +196,8 @@ pub struct PlaybackOptions {
     pub ramp: TempoRamp,
     /// How loud the metronome clicks each beat group, per meter.
     pub click: ClickPatterns,
+    /// Clicks between the beats.
+    pub subdivision: ClickSubdivision,
 }
 
 /// The bar the audio engine is playing, as counted since the score started.
@@ -280,8 +293,13 @@ impl Audio {
     // Returns true if UI should repaint soon (while playing or while waiting for tail-out)
     pub fn update(&mut self, player_state: &PlayerState, bpm: u32, score: &Score) -> bool {
         let timing = ScoreTiming::from_score(score, bpm).with_swing(self.options.swing);
-        let schedule =
-            Schedule::build(score, &timing, self.options.ghost_notes, &self.options.click);
+        let schedule = Schedule::build_with(
+            score,
+            &timing,
+            self.options.ghost_notes,
+            &self.options.click,
+            self.options.subdivision,
+        );
         let count_in = if self.options.count_in { count_in_plan(score) } else { None };
 
         // Check differences

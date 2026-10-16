@@ -182,6 +182,13 @@ Important root files:
   stay. The count-in and calibration ignore the patterns. Link parameter
   `click` (`S`, `M`, `L`, `-` per group) sets the pattern of the link's first
   meter; shared links carry it when it is not the default.
+- Subdivision (`ClickSubdivision`, same file): each beat unit split into 2, 3
+  or 4 parts (`ticks`; a split the tick grid cannot take, like 4 per 16th,
+  does not `fit` and plays as off). Set in the Metronome tab, stored in
+  `AudioConfig::subdivision`, applies to all playback except the count-in
+  and calibration. `Schedule::build_with` adds `SoundType::Subdivision`
+  (mixer "Subdiv.") on those ticks and on the pulse ticks, which then no
+  longer click as `Pulse`.
 
 ## Metronome trainer
 

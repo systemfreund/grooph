@@ -52,7 +52,7 @@ use eframe::epaint::{FontFamily, FontId};
 use eframe::{App, CreationContext, egui};
 use grooph_audio::{AudioSettings, GapClick, PlaybackOptions, PlayerState, TempoRamp};
 use grooph_link::{LinkContent, SharedLink};
-use grooph_measure::click::ClickPatterns;
+use grooph_measure::click::{ClickPatterns, ClickSubdivision};
 use grooph_measure::counting::{
     CountConfig, CountLayer, CountScope, LabelPattern, LabelToken, Subdiv,
 };
@@ -136,6 +136,7 @@ struct PersistedState {
     tempo_ramp: TempoRamp,
     presets: PresetLibrary,
     click_patterns: ClickPatterns,
+    click_subdivision: ClickSubdivision,
 }
 
 impl Default for PersistedState {
@@ -165,6 +166,7 @@ impl Default for PersistedState {
             tempo_ramp: TempoRamp::default(),
             presets: PresetLibrary::default(),
             click_patterns: ClickPatterns::default(),
+            click_subdivision: ClickSubdivision::Off,
         }
     }
 }
@@ -200,6 +202,7 @@ impl PersistedState {
             tempo_ramp: stash.map_or(app.playback_ctl.audio_cfg.ramp, |s| s.ramp),
             presets: app.editor.presets.clone(),
             click_patterns: app.playback_ctl.audio_cfg.click.clone(),
+            click_subdivision: app.playback_ctl.audio_cfg.subdivision,
         }
     }
 }
@@ -362,6 +365,7 @@ impl App for Grooph {
 impl Grooph {
     fn playback_options(&self) -> PlaybackOptions {
         let generator = &self.editor.generator;
+        let calibrating = self.calibration_stash().is_some();
         PlaybackOptions {
             count_in: self.playback_ctl.audio_cfg.count_in,
             ghost_notes: (generator.ghost_notes && !self.metronome_mode())
@@ -370,10 +374,15 @@ impl Grooph {
             gap: self.playback_ctl.audio_cfg.gap,
             ramp: self.playback_ctl.audio_cfg.ramp,
             // Calibration clicks every beat, whatever the user's patterns.
-            click: if self.calibration_stash().is_some() {
+            click: if calibrating {
                 ClickPatterns::default()
             } else {
                 self.playback_ctl.audio_cfg.click.clone()
+            },
+            subdivision: if calibrating {
+                ClickSubdivision::Off
+            } else {
+                self.playback_ctl.audio_cfg.subdivision
             },
         }
     }
@@ -974,6 +983,7 @@ impl Grooph {
                     gap: state.gap_click,
                     ramp: state.tempo_ramp,
                     click: state.click_patterns,
+                    subdivision: state.click_subdivision,
                 },
                 playback: PlaybackState::default(),
                 accuracy: AccuracyState::new(state.accuracy_enabled),

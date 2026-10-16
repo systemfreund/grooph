@@ -1,7 +1,7 @@
 use grooph_measure::BeatKind;
 use grooph_measure::Score;
 use grooph_measure::TimeSignature;
-use grooph_measure::click::{ClickLevel, ClickPatterns};
+use grooph_measure::click::{ClickLevel, ClickPatterns, ClickSubdivision};
 use grooph_measure::generator::Subdivision;
 use grooph_measure::ghost::ghost_onsets;
 use grooph_measure::grid::DEFAULT_GRID;
@@ -24,6 +24,9 @@ pub(crate) enum SoundType {
     Beat,
     /// Quiet subdivision hit where no note is written.
     Ghost,
+    /// Click between the beats when the metronome subdivides them
+    /// ([`ClickSubdivision`]); also takes the place of [`SoundType::Pulse`].
+    Subdivision,
     /// Click of the count-in bar before playback starts.
     CountIn,
     /// [`SoundType::Pulse`] inside the count-in bar, at the pulse volume
@@ -44,7 +47,8 @@ impl SoundType {
             SoundType::Downbeat
             | SoundType::PrimaryBeat
             | SoundType::SoftBeat
-            | SoundType::Pulse => true,
+            | SoundType::Pulse
+            | SoundType::Subdivision => true,
             SoundType::AccentedBeat | SoundType::Beat | SoundType::Ghost => {
                 mute == GapMute::Everything
             }
@@ -56,7 +60,8 @@ impl SoundType {
             SoundType::Downbeat
             | SoundType::PrimaryBeat
             | SoundType::SoftBeat
-            | SoundType::Pulse => settings.metronome_muted,
+            | SoundType::Pulse
+            | SoundType::Subdivision => settings.metronome_muted,
             SoundType::AccentedBeat | SoundType::Beat | SoundType::Ghost => settings.rhythm_muted,
             SoundType::CountIn | SoundType::CountInPulse => false,
         };
@@ -65,6 +70,7 @@ impl SoundType {
             SoundType::PrimaryBeat => SoundProfile { freq_mult: 1.0, gain: settings.primary },
             SoundType::Pulse => SoundProfile { freq_mult: 1.0, gain: settings.pulse },
             SoundType::SoftBeat => SoundProfile { freq_mult: 1.0, gain: settings.soft },
+            SoundType::Subdivision => SoundProfile { freq_mult: 1.0, gain: settings.subdivision },
             SoundType::AccentedBeat => SoundProfile { freq_mult: 2.25, gain: settings.accent },
             SoundType::Beat => SoundProfile { freq_mult: 1.5, gain: settings.beat },
             SoundType::Ghost => SoundProfile { freq_mult: 1.5, gain: settings.ghost },
@@ -101,11 +107,25 @@ impl Schedule {
     /// [`ScoreTiming::performed_global_tick`]). `click` sets the sound of
     /// each beat group: strong is the downbeat click, medium the primary
     /// beat click.
+    #[cfg(test)]
     pub(crate) fn build(
         score: &Score,
         timing: &ScoreTiming,
         ghost_notes: Option<Subdivision>,
         click: &ClickPatterns,
+    ) -> Self {
+        Self::build_with(score, timing, ghost_notes, click, ClickSubdivision::Off)
+    }
+
+    /// [`Self::build`] with `subdivision` clicks between the beats. Where the
+    /// meter can be subdivided they replace the pulse clicks, so every click
+    /// between the group starts sounds alike.
+    pub(crate) fn build_with(
+        score: &Score,
+        timing: &ScoreTiming,
+        ghost_notes: Option<Subdivision>,
+        click: &ClickPatterns,
+        subdivision: ClickSubdivision,
     ) -> Self {
         let mut map: BTreeMap<u64, Vec<SoundType>> = BTreeMap::new();
 
@@ -123,8 +143,15 @@ impl Schedule {
                 };
                 map.entry(start + t as u64).or_default().push(sound);
             }
-            for t in pulse_ticks(&ts) {
-                map.entry(start + t as u64).or_default().push(SoundType::Pulse);
+            let between = subdivision.ticks(&ts);
+            if between.is_empty() {
+                for t in pulse_ticks(&ts) {
+                    map.entry(start + t as u64).or_default().push(SoundType::Pulse);
+                }
+            } else {
+                for t in pulse_ticks(&ts).into_iter().chain(between) {
+                    map.entry(start + t as u64).or_default().push(SoundType::Subdivision);
+                }
             }
 
             let onsets = DEFAULT_GRID.compute_onset_ticks(measure.beats());
@@ -255,6 +282,26 @@ mod tests {
                 (3 * quarter, SoundType::SoftBeat)
             ]
         );
+    }
+
+    #[test]
+    fn subdivision_clicks_fill_the_beats_and_replace_the_pulse() {
+        let count = |ts: TimeSignature, sub: ClickSubdivision, t: SoundType| {
+            let score = Score { measures: vec![Measure::new(ts)] };
+            let timing = ScoreTiming::from_score(&score, 120);
+            let s = Schedule::build_with(&score, &timing, None, &ClickPatterns::default(), sub);
+            s.map.values().flatten().filter(|&&x| x == t).count()
+        };
+        let four = TimeSignature::FOUR_FOUR;
+        assert_eq!(count(four, ClickSubdivision::Off, SoundType::Subdivision), 0);
+        assert_eq!(count(four, ClickSubdivision::Two, SoundType::Subdivision), 4);
+        assert_eq!(count(four, ClickSubdivision::Three, SoundType::Subdivision), 8);
+        // 7/8 (2+3+2): 7 sixteenths between the eighths plus the 4 eighths
+        // between the groups, which no longer click as pulse.
+        let seven = TimeSignature::SEVEN_EIGHT;
+        assert_eq!(count(seven, ClickSubdivision::Two, SoundType::Subdivision), 11);
+        assert_eq!(count(seven, ClickSubdivision::Two, SoundType::Pulse), 0);
+        assert_eq!(count(seven, ClickSubdivision::Off, SoundType::Pulse), 4);
     }
 
     #[test]

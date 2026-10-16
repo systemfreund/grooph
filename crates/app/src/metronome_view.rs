@@ -191,15 +191,20 @@ impl Grooph {
                 }
             }
 
-            // A dot for every counted beat, inside the ring.
+            // A dot for every counted beat inside the ring, smaller ones for
+            // the subdivision clicks between them.
             let beats = ts.groups().iter().map(|&g| g as usize).sum::<usize>().max(1);
+            let subdivision = self.playback_ctl.audio_cfg.subdivision;
+            let parts = if subdivision.fits(&ts) { subdivision.parts() as usize } else { 1 };
+            let dots = beats * parts;
             let dot_radius = (0.025 * radius).max(2.5);
-            let beat_now = current_turn.map(|t| (t * beats as f32) as usize);
-            for beat in 0..beats {
-                let pos = at_turn(center, 0.72 * radius, beat as f32 / beats as f32);
+            let dot_now = current_turn.map(|t| (t * dots as f32) as usize);
+            for dot in 0..dots {
+                let pos = at_turn(center, 0.72 * radius, dot as f32 / dots as f32);
                 let color =
-                    if beat_now == Some(beat) && !muted { lit } else { visuals.weak_text_color() };
-                painter.circle_filled(pos, dot_radius, color);
+                    if dot_now == Some(dot) && !muted { lit } else { visuals.weak_text_color() };
+                let r = if dot % parts == 0 { dot_radius } else { 0.6 * dot_radius };
+                painter.circle_filled(pos, r, color);
             }
 
             // Middle: the bar number while playing, else the meter.

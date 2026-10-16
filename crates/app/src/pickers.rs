@@ -10,6 +10,7 @@ use crate::tool_palette::notation_button;
 use eframe::egui;
 use eframe::egui::{Button, Color32, FontId, Id, Modal, Response, RichText, Ui, vec2};
 use grooph_measure::TimeSignature;
+use grooph_measure::click::ClickSubdivision;
 use grooph_measure::generator::{
     BeatSpan, FigureSet, MAX_BARS, MAX_COMPLEXITY, Subdivision, complexity_figures,
     effective_subdivision, figures, offered_subdivisions, supports_time_signature,
@@ -33,6 +34,8 @@ pub(crate) enum Picker {
     Bpm,
     Swing,
     Preset,
+    /// Metronome clicks between the beats.
+    ClickSubdivision,
 }
 
 pub(crate) fn swing_label(percent: u8) -> String {
@@ -138,6 +141,7 @@ impl Grooph {
                 Picker::Bpm => "Tempo",
                 Picker::Swing => "Swing",
                 Picker::Preset => "Preset",
+                Picker::ClickSubdivision => "Subdivision",
             };
             ui.heading(title);
             ui.add_space(8.0);
@@ -158,6 +162,7 @@ impl Grooph {
                     preset = self.preset_choices(ui);
                     preset.is_some()
                 }
+                Picker::ClickSubdivision => self.click_subdivision_choices(ui),
             };
             ui.add_space(12.0);
             picked || wide_button(ui, "Done", 19.0, ROW_HEIGHT).clicked()
@@ -383,6 +388,23 @@ impl Grooph {
             self.editor.dirty = true;
             self.handle_bpm_change();
         }
+    }
+
+    /// Clicks between the beats of the metronome meter; only the splits the
+    /// meter allows. Returns whether one was picked.
+    fn click_subdivision_choices(&mut self, ui: &mut Ui) -> bool {
+        let ts = self.metronome_meter();
+        let options: Vec<_> = ClickSubdivision::ALL
+            .into_iter()
+            .filter(|s| s.fits(&ts))
+            .map(|s| (s, s.label(&ts)))
+            .collect();
+        let current = &mut self.playback_ctl.audio_cfg.subdivision;
+        let picked = choice_grid(ui, &options, *current, 2);
+        if let Some(s) = picked {
+            *current = s;
+        }
+        picked.is_some()
     }
 
     fn swing_choices(&mut self, ui: &mut Ui) {
