@@ -213,6 +213,8 @@ mod tests {
         let (low, gain) = sample(SoundType::PrimaryBeat);
         assert_eq!(low, SampleId::CLAVES_LOW.data());
         assert_eq!(gain, settings.primary);
+        // Both claves are audible out of the box.
+        assert!(settings.downbeat > 0.0 && settings.primary > 0.0);
         assert_eq!(sample(SoundType::CountIn).0, low);
         // The rhythm keeps its own sound.
         assert!(matches!(SoundType::Beat.patch(&settings), Patch::Click { .. }));

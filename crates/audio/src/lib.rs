@@ -73,7 +73,7 @@ impl Default for AudioSettings {
     fn default() -> Self {
         Self {
             downbeat: 1.0,
-            primary: 0.0,
+            primary: 0.7,
             accent: 1.0,
             beat: 1.0,
             base_frequency: 440.0,
