@@ -152,6 +152,12 @@ Important root files:
   (`include_bytes!`, decoded once by the small decoder in `wav.rs`).
   `MetronomeSound::Claves` (default) plays `claves3.wav` on the downbeat and
   `claves4.wav` on the other primary beats and the count-in.
+  `RhythmSound::Snare` (default) plays its own recording per dynamic:
+  `snare-normal.wav` for notes, `snare-accent.wav` for accents and
+  `snare-ghost.wav` for ghost notes. A ghost sample is recorded quietly, so its
+  gain is divided by the default ghost volume (the default plays it as recorded).
+  Samples are stored as 16-bit mono WAV, trimmed after the decay, to keep the
+  WASM build small.
   Samples keep their own license (claves: altemark on freesound.org, CC BY-NC),
   see `crates/audio/samples/CREDITS.md`; add a row there with every new sample.
 - `VoiceMixer` (`voices.rs`) plays samples resampled to the device rate.

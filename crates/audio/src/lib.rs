@@ -80,7 +80,7 @@ pub struct AudioSettings {
     pub rhythm_muted: bool,
 }
 
-fn default_ghost_gain() -> f32 { 0.25 }
+pub(crate) fn default_ghost_gain() -> f32 { 0.25 }
 
 fn default_count_in_gain() -> f32 { 1.0 }
 

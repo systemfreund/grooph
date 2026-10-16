@@ -9,35 +9,45 @@
 //! frequency, decay, noise), pitched per sound type as before. Every other
 //! sound plays short WAV samples embedded in the binary (see [`SampleId`]),
 //! one per sound type where the sound has several, with the volume of the
-//! mixer.
+//! mixer. Rhythm sounds have their own recordings for notes, accents and
+//! ghost notes, so the dynamics come from the samples.
 
 use crate::schedule::SoundType;
 use crate::wav::{self, SampleData};
-use crate::{AudioSettings, Waveform};
+use crate::{AudioSettings, Waveform, default_ghost_gain};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, OnceLock};
 
 /// Sound of the written rhythm.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RhythmSound {
-    /// The click from the sound settings.
+    /// Snare drum, recorded at three dynamics.
     #[default]
+    Snare,
+    /// The click from the sound settings.
     Click,
 }
 
 impl RhythmSound {
-    pub const ALL: [RhythmSound; 1] = [RhythmSound::Click];
+    pub const ALL: [RhythmSound; 2] = [RhythmSound::Snare, RhythmSound::Click];
 
     pub fn label(self) -> &'static str {
         match self {
+            RhythmSound::Snare => "Snare",
             RhythmSound::Click => "Click",
         }
     }
 
-    fn sample(self, _sound: SoundType) -> Option<SampleId> {
-        match self {
-            RhythmSound::Click => None,
-        }
+    fn sample(self, sound: SoundType) -> Option<SampleId> {
+        let (normal, accent, ghost) = match self {
+            RhythmSound::Snare => (SampleId::SNARE, SampleId::SNARE_ACCENT, SampleId::SNARE_GHOST),
+            RhythmSound::Click => return None,
+        };
+        Some(match sound {
+            SoundType::AccentedBeat => accent,
+            SoundType::Ghost => ghost,
+            _ => normal,
+        })
     }
 }
 
@@ -81,6 +91,9 @@ struct SampleFile {
 const SAMPLES: &[SampleFile] = &[
     SampleFile { name: "claves3.wav", bytes: include_bytes!("../samples/claves3.wav") },
     SampleFile { name: "claves4.wav", bytes: include_bytes!("../samples/claves4.wav") },
+    SampleFile { name: "snare-normal.wav", bytes: include_bytes!("../samples/snare-normal.wav") },
+    SampleFile { name: "snare-accent.wav", bytes: include_bytes!("../samples/snare-accent.wav") },
+    SampleFile { name: "snare-ghost.wav", bytes: include_bytes!("../samples/snare-ghost.wav") },
 ];
 
 /// An embedded sample, decoded on first use.
@@ -90,6 +103,9 @@ pub(crate) struct SampleId(usize);
 impl SampleId {
     const CLAVES_HIGH: SampleId = SampleId(0);
     const CLAVES_LOW: SampleId = SampleId(1);
+    const SNARE: SampleId = SampleId(2);
+    const SNARE_ACCENT: SampleId = SampleId(3);
+    const SNARE_GHOST: SampleId = SampleId(4);
 
     /// The decoded sample; an unreadable file becomes silence (logged once).
     fn data(self) -> Arc<SampleData> {
@@ -156,7 +172,12 @@ impl SoundType {
         } else {
             settings.metronome_sound.sample(self)
         };
-        let gain = self.profile(settings).gain;
+        let mut gain = self.profile(settings).gain;
+        // A ghost-note sample is already recorded quietly; scale it so the
+        // default ghost volume plays it as recorded.
+        if sample.is_some() && self == SoundType::Ghost {
+            gain /= default_ghost_gain();
+        }
         match sample {
             Some(id) => Patch::Sample { data: id.data(), rate: 1.0, gain },
             None => click(self, settings),
@@ -186,8 +207,11 @@ mod tests {
 
     #[test]
     fn click_patch_matches_the_sound_settings() {
-        let settings =
-            AudioSettings { metronome_sound: MetronomeSound::Click, ..AudioSettings::default() };
+        let settings = AudioSettings {
+            metronome_sound: MetronomeSound::Click,
+            rhythm_sound: RhythmSound::Click,
+            ..AudioSettings::default()
+        };
         assert!(matches!(SoundType::Downbeat.patch(&settings), Patch::Click { .. }));
         let Patch::Click { tone, noise, gain } = SoundType::Beat.patch(&settings) else {
             panic!("click expected");
@@ -217,7 +241,36 @@ mod tests {
         assert!(settings.downbeat > 0.0 && settings.primary > 0.0);
         assert_eq!(sample(SoundType::CountIn).0, low);
         // The rhythm keeps its own sound.
-        assert!(matches!(SoundType::Beat.patch(&settings), Patch::Click { .. }));
+        assert_ne!(sample(SoundType::Beat).0, low);
+    }
+
+    #[test]
+    fn snare_plays_its_own_sample_for_notes_accents_and_ghost_notes() {
+        let settings = AudioSettings::default();
+        assert_eq!(settings.rhythm_sound, RhythmSound::Snare);
+        let sample = |sound: SoundType| match sound.patch(&settings) {
+            Patch::Sample { data, gain, .. } => (data, gain),
+            other => panic!("sample expected, got {other:?}"),
+        };
+        assert_eq!(sample(SoundType::Beat), (SampleId::SNARE.data(), settings.beat));
+        assert_eq!(
+            sample(SoundType::AccentedBeat),
+            (SampleId::SNARE_ACCENT.data(), settings.accent)
+        );
+        // The ghost sample is quiet already: the default volume plays it as recorded.
+        assert_eq!(sample(SoundType::Ghost), (SampleId::SNARE_GHOST.data(), 1.0));
+        let louder = AudioSettings { ghost: 0.5, ..settings };
+        assert!(matches!(SoundType::Ghost.patch(&louder), Patch::Sample { gain: 2.0, .. }));
+    }
+
+    #[test]
+    fn snare_dynamics_get_louder_from_ghost_to_accent() {
+        let peak = |id: SampleId| id.data().frames.iter().fold(0.0f32, |m, x| m.max(x.abs()));
+        let (ghost, normal, accent) =
+            (peak(SampleId::SNARE_GHOST), peak(SampleId::SNARE), peak(SampleId::SNARE_ACCENT));
+        assert!(ghost < normal && normal < accent, "{ghost} {normal} {accent}");
+        // Even at full ghost volume the ghost note does not clip.
+        assert!(ghost / default_ghost_gain() < 1.0);
     }
 
     #[test]

@@ -153,10 +153,14 @@ impl VoiceMixer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::AudioSettings;
     use crate::schedule::SoundType;
+    use crate::{AudioSettings, RhythmSound};
 
-    fn beat() -> Patch { SoundType::Beat.patch(&AudioSettings::default()) }
+    fn beat() -> Patch {
+        let settings =
+            AudioSettings { rhythm_sound: RhythmSound::Click, ..AudioSettings::default() };
+        SoundType::Beat.patch(&settings)
+    }
 
     fn sample(frames: Vec<f32>, rate: u32, playback_rate: f32) -> Patch {
         Patch::Sample { data: Arc::new(SampleData { rate, frames }), rate: playback_rate, gain: 1.0 }
