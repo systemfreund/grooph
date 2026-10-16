@@ -202,6 +202,31 @@ enum CountingBase {
     Triplet,
 }
 
+impl CountingBase {
+    /// The overlay layer counting in this subdivision, `None` for `Off`.
+    fn layer(self, id: u32) -> Option<CountLayer> {
+        let (scope, subdiv, labels) = match self {
+            Self::Off => return None,
+            Self::Primary => (
+                CountScope::PrimaryGroup,
+                1,
+                LabelPattern { slots: vec![vec![LabelToken::GroupNum]] },
+            ),
+            Self::Ands => (CountScope::BeatUnit, 2, LabelPattern::ands()),
+            Self::Sixteenth => (CountScope::BeatUnit, 4, LabelPattern::sixteenth()),
+            Self::Triplet => (CountScope::PrimaryGroup, 3, LabelPattern::triplet()),
+        };
+        let mut layer = CountLayer::new(id, scope, Subdiv::Fixed(subdiv));
+        layer.labels = Some(labels);
+        Some(layer)
+    }
+
+    /// Whether the subdivision counts sensibly in some measure of `score`.
+    fn fits(self, score: &Score) -> bool {
+        self.layer(0).is_none_or(|l| score.measures.iter().any(|m| l.fits(&m.time_signature())))
+    }
+}
+
 /// The counting overlay: a subdivision to count in (or `Off`) plus an
 /// optional tuplet layer. `Off` without tuplets hides the overlay.
 #[derive(Serialize, Deserialize, Clone, Copy)]
@@ -794,31 +819,7 @@ impl Grooph {
         let mut layers = Vec::new();
         let mut next_id = 1u32;
 
-        let base_layer = match self.ui.counting.base {
-            CountingBase::Off => None,
-            CountingBase::Primary => {
-                let mut layer =
-                    CountLayer::new(next_id, CountScope::PrimaryGroup, Subdiv::Fixed(1));
-                layer.labels = Some(LabelPattern { slots: vec![vec![LabelToken::GroupNum]] });
-                Some(layer)
-            }
-            CountingBase::Ands => {
-                let mut layer = CountLayer::new(next_id, CountScope::BeatUnit, Subdiv::Fixed(2));
-                layer.labels = Some(LabelPattern::ands());
-                Some(layer)
-            }
-            CountingBase::Sixteenth => {
-                let mut layer = CountLayer::new(next_id, CountScope::BeatUnit, Subdiv::Fixed(4));
-                layer.labels = Some(LabelPattern::sixteenth());
-                Some(layer)
-            }
-            CountingBase::Triplet => {
-                let mut layer =
-                    CountLayer::new(next_id, CountScope::PrimaryGroup, Subdiv::Fixed(3));
-                layer.labels = Some(LabelPattern::triplet());
-                Some(layer)
-            }
-        };
+        let base_layer = self.ui.counting.base.layer(next_id);
 
         if let Some(layer) = base_layer {
             layers.push(layer);

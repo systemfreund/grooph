@@ -195,31 +195,19 @@ impl Grooph {
                                 CountingBase::Triplet => "Triplet",
                             })
                             .show_ui(ui, |ui| {
-                                ui.selectable_value(
-                                    &mut self.ui.counting.base,
-                                    CountingBase::Off,
-                                    "Off",
-                                );
-                                ui.selectable_value(
-                                    &mut self.ui.counting.base,
-                                    CountingBase::Primary,
-                                    "Primary",
-                                );
-                                ui.selectable_value(
-                                    &mut self.ui.counting.base,
-                                    CountingBase::Ands,
-                                    "1 & 2 & ...",
-                                );
-                                ui.selectable_value(
-                                    &mut self.ui.counting.base,
-                                    CountingBase::Sixteenth,
-                                    "1 e & a ...",
-                                );
-                                ui.selectable_value(
-                                    &mut self.ui.counting.base,
-                                    CountingBase::Triplet,
-                                    "1 trip let ...",
-                                );
+                                for (base, label) in [
+                                    (CountingBase::Off, "Off"),
+                                    (CountingBase::Primary, "Primary"),
+                                    (CountingBase::Ands, "1 & 2 & ..."),
+                                    (CountingBase::Sixteenth, "1 e & a ..."),
+                                    (CountingBase::Triplet, "1 trip let ..."),
+                                ] {
+                                    ui.add_enabled_ui(base.fits(&self.editor.score), |ui| {
+                                        ui.selectable_value(&mut self.ui.counting.base, base, label)
+                                    })
+                                    .inner
+                                    .on_disabled_hover_text("Too fine for this time signature");
+                                }
                             });
                         ui.checkbox(&mut self.ui.counting.show_tuplets, "Tuplet overlay");
                     });

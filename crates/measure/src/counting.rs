@@ -44,12 +44,12 @@ impl LabelPattern {
         }
     }
 
+    /// A "number trip let" pattern, whichever number it starts with.
     fn is_triplet(&self) -> bool {
         if self.slots.len() != 3 {
             return false;
         }
-        matches!(self.slots.first().map(Vec::as_slice), Some([LabelToken::BeatNum]))
-            && matches!(self.slots.get(1).map(Vec::as_slice), Some([LabelToken::Text(s)]) if s == "trip")
+        matches!(self.slots.get(1).map(Vec::as_slice), Some([LabelToken::Text(s)]) if s == "trip")
             && matches!(self.slots.get(2).map(Vec::as_slice), Some([LabelToken::Text(s)]) if s == "let")
     }
 }
@@ -91,6 +91,22 @@ impl CountLayer {
             show_labels: true,
             priority: 0,
         }
+    }
+
+    /// Whether the layer counts sensibly in `ts`: a beat-unit layer never
+    /// counts finer than sixteenths (no "1 e & a" on 32nds in 6/8).
+    pub fn fits(&self, ts: &TimeSignature) -> bool {
+        match (self.scope, self.subdiv) {
+            (CountScope::BeatUnit, Subdiv::Fixed(n)) => (ts.beat_unit as u32) * (n as u32) <= 16,
+            _ => true,
+        }
+    }
+
+    /// A triplet count of the primary groups ("1 trip let 2 trip let").
+    fn is_group_triplet(&self) -> bool {
+        self.scope == CountScope::PrimaryGroup
+            && self.subdiv == Subdiv::Fixed(3)
+            && self.labels.as_ref().is_some_and(LabelPattern::is_triplet)
     }
 }
 
@@ -224,6 +240,39 @@ impl<'a> CountContext<'a> {
     }
 }
 
+impl CountContext<'_> {
+    /// Count a group of eighths or sixteenths by its own units: the group
+    /// number, then "&" in a group of two and "la li" in a group of three,
+    /// so 6/8 reads "1 la li 2 la li" and 7/8 "1 & 2 la li 3 &".
+    fn push_group_units(&mut self, layer: &CountLayer, span: Span) {
+        let units = span.end_tick.saturating_sub(span.start_tick) / self.ticks_per_beat;
+        let texts: &[&str] = match units {
+            2 => &["&"],
+            3 => &["la", "li"],
+            4 => &["e", "&", "a"],
+            _ => &[],
+        };
+        for sub_idx in 0..units.min(u8::MAX as u32) as u8 {
+            let start_tick = span.start_tick + self.ticks_per_beat * sub_idx as u32;
+            let label = match sub_idx {
+                0 => Some((span.idx + 1).to_string()),
+                i => texts.get(i as usize - 1).map(|t| t.to_string()),
+            };
+            self.slots.push(CountSlot {
+                layer_id: layer.id,
+                scope: CountScope::PrimaryGroup,
+                scope_idx: span.idx,
+                sub_idx,
+                start_tick,
+                end_tick: start_tick + self.ticks_per_beat,
+                label: if layer.show_labels { label } else { None },
+                priority: layer.priority,
+                tuplet_id: None,
+            });
+        }
+    }
+}
+
 pub fn build_count_slots(measure: &Measure, config: &CountConfig) -> Vec<CountSlot> {
     let ts = measure.time_signature();
     let ticks_per_beat = DEFAULT_GRID.ticks_per_beat(&ts);
@@ -242,11 +291,18 @@ pub fn build_count_slots(measure: &Measure, config: &CountConfig) -> Vec<CountSl
         let mut ctx =
             CountContext { slots: &mut slots, ticks_per_beat, primary_groups: &primary_groups };
 
+        // In x/8 and x/16 the beat units themselves are the subdivision.
+        let unit_groups = ts.beat_unit >= 8;
         for layer in &config.layers {
-            if !layer.enabled {
+            if !layer.enabled || !layer.fits(&ts) {
                 continue;
             }
             match layer.scope {
+                CountScope::PrimaryGroup if unit_groups && layer.is_group_triplet() => {
+                    for span in &primary_groups {
+                        ctx.push_group_units(layer, *span);
+                    }
+                }
                 CountScope::Measure => {
                     let span = Span { start_tick: 0, end_tick: measure_ticks, idx: 0 };
                     ctx.push_slots(layer, ScopeSpan::from_span(CountScope::Measure, span));
@@ -373,4 +429,68 @@ fn label_from_tokens(tokens: &[LabelToken], ctx: &LabelContext) -> Option<String
         }
     }
     Some(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn labels(ts: TimeSignature, layer: CountLayer) -> Vec<String> {
+        let slots = build_count_slots(&Measure::new(ts), &CountConfig::new(vec![layer]));
+        slots.into_iter().map(|s| s.label.unwrap_or_default()).collect()
+    }
+
+    fn triplets() -> CountLayer {
+        let mut layer = CountLayer::new(1, CountScope::PrimaryGroup, Subdiv::Fixed(3));
+        layer.labels = Some(LabelPattern::triplet());
+        layer
+    }
+
+    fn sixteenths() -> CountLayer {
+        let mut layer = CountLayer::new(1, CountScope::BeatUnit, Subdiv::Fixed(4));
+        layer.labels = Some(LabelPattern::sixteenth());
+        layer
+    }
+
+    fn ands() -> CountLayer {
+        let mut layer = CountLayer::new(1, CountScope::BeatUnit, Subdiv::Fixed(2));
+        layer.labels = Some(LabelPattern::ands());
+        layer
+    }
+
+    #[test]
+    fn triplets_in_simple_meters() {
+        assert_eq!(
+            labels(TimeSignature::THREE_FOUR, triplets()),
+            ["1", "trip", "let", "2", "trip", "let", "3", "trip", "let"]
+        );
+    }
+
+    #[test]
+    fn eighth_meters_count_their_groups() {
+        assert_eq!(
+            labels(TimeSignature::SIX_EIGHT, triplets()),
+            ["1", "la", "li", "2", "la", "li"]
+        );
+        assert_eq!(
+            labels(TimeSignature::SEVEN_EIGHT, triplets()),
+            ["1", "&", "2", "la", "li", "3", "&"]
+        );
+        let seven_sixteen = TimeSignature::new(7, 16);
+        assert_eq!(labels(seven_sixteen, triplets()), ["1", "&", "2", "la", "li", "3", "&"]);
+        // The count follows the picked grouping.
+        let two_two_three = TimeSignature::SEVEN_EIGHT.with_grouping(1);
+        assert_eq!(two_two_three.groups(), [2, 2, 3]);
+        assert_eq!(labels(two_two_three, triplets()), ["1", "&", "2", "&", "3", "la", "li"]);
+    }
+
+    #[test]
+    fn nothing_finer_than_sixteenths() {
+        assert!(sixteenths().fits(&TimeSignature::FOUR_FOUR));
+        assert!(!sixteenths().fits(&TimeSignature::SIX_EIGHT));
+        assert!(labels(TimeSignature::SIX_EIGHT, sixteenths()).is_empty());
+        assert!(ands().fits(&TimeSignature::SIX_EIGHT));
+        assert!(!ands().fits(&TimeSignature::FOUR_SIXTEENTH));
+        assert_eq!(labels(TimeSignature::TWO_EIGHT, ands()), ["1", "&", "2", "&"]);
+    }
 }
