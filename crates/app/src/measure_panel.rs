@@ -192,8 +192,9 @@ impl Grooph {
                             min_measure_width_em,
                             note_width_em,
                             system_spacing_em: 0.3,
-                            // Narrow screens: no clef, so the notes get the width.
-                            layout_clef_first: !compact,
+                            // No percussion clef: on a single line it says nothing
+                            // the line doesn't, and every row starts alike.
+                            layout_clef_first: false,
                             room_below_em: if self.build_count_config().is_some() {
                                 ROOM_BELOW_WITH_LABELS_EM
                             } else {
