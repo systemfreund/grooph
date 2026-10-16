@@ -440,7 +440,7 @@ fn draw_count_labels(
     let xs = compute_label_xs(&selected, measure, layout, rect, total_ticks);
 
     let font = FontId::new(em * 0.4, FontFamily::Proportional);
-    let label_y = (baseline_y + 0.95 * em).min(rect.bottom() - 0.2 * em);
+    let label_y = (baseline_y + 0.62 * em).min(rect.bottom() - 0.2 * em);
     let label_color =
         Color32::from_rgba_unmultiplied(base_color.r(), base_color.g(), base_color.b(), 200);
     let highlight = Color32::from_rgba_unmultiplied(
