@@ -1,5 +1,6 @@
 use grooph_measure::BeatKind;
 use grooph_measure::Score;
+use grooph_measure::TimeSignature;
 use grooph_measure::generator::Subdivision;
 use grooph_measure::ghost::ghost_onsets;
 use grooph_measure::grid::DEFAULT_GRID;
@@ -22,6 +23,9 @@ pub(crate) enum SoundType {
     Ghost,
     /// Click of the count-in bar before playback starts.
     CountIn,
+    /// [`SoundType::Pulse`] inside the count-in bar, at the pulse volume
+    /// scaled by the count-in volume.
+    CountInPulse,
 }
 
 pub(crate) struct SoundProfile {
@@ -33,7 +37,7 @@ impl SoundType {
     /// Whether a muted bar with `mute` silences this sound.
     pub(crate) fn muted_by(self, mute: GapMute) -> bool {
         match self {
-            SoundType::CountIn => false,
+            SoundType::CountIn | SoundType::CountInPulse => false,
             SoundType::Downbeat | SoundType::PrimaryBeat | SoundType::Pulse => true,
             SoundType::AccentedBeat | SoundType::Beat | SoundType::Ghost => {
                 mute == GapMute::Everything
@@ -47,7 +51,7 @@ impl SoundType {
                 settings.metronome_muted
             }
             SoundType::AccentedBeat | SoundType::Beat | SoundType::Ghost => settings.rhythm_muted,
-            SoundType::CountIn => false,
+            SoundType::CountIn | SoundType::CountInPulse => false,
         };
         let profile = match self {
             SoundType::Downbeat => SoundProfile { freq_mult: 3.375, gain: settings.downbeat },
@@ -57,9 +61,23 @@ impl SoundType {
             SoundType::Beat => SoundProfile { freq_mult: 1.5, gain: settings.beat },
             SoundType::Ghost => SoundProfile { freq_mult: 1.5, gain: settings.ghost },
             SoundType::CountIn => SoundProfile { freq_mult: 2.25, gain: settings.count_in },
+            SoundType::CountInPulse => {
+                SoundProfile { freq_mult: 1.0, gain: settings.pulse * settings.count_in }
+            }
         };
         if muted { SoundProfile { gain: 0.0, ..profile } } else { profile }
     }
+}
+
+/// Ticks within a bar of `ts` that get a [`SoundType::Pulse`]: every beat
+/// unit that is neither the downbeat nor a primary beat.
+pub(crate) fn pulse_ticks(ts: &TimeSignature) -> Vec<u32> {
+    let primaries = DEFAULT_GRID.primary_boundaries(ts);
+    let unit = DEFAULT_GRID.ticks_per_beat(ts);
+    (unit..DEFAULT_GRID.ticks_per_measure(ts))
+        .step_by(unit.max(1) as usize)
+        .filter(|t| !primaries.contains(t))
+        .collect()
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
@@ -90,11 +108,8 @@ impl Schedule {
             for &t in &primaries {
                 map.entry(start + t as u64).or_default().push(SoundType::PrimaryBeat);
             }
-            let unit = DEFAULT_GRID.ticks_per_beat(&ts);
-            for t in (unit..DEFAULT_GRID.ticks_per_measure(&ts)).step_by(unit.max(1) as usize) {
-                if !primaries.contains(&t) {
-                    map.entry(start + t as u64).or_default().push(SoundType::Pulse);
-                }
+            for t in pulse_ticks(&ts) {
+                map.entry(start + t as u64).or_default().push(SoundType::Pulse);
             }
 
             let onsets = DEFAULT_GRID.compute_onset_ticks(measure.beats());
