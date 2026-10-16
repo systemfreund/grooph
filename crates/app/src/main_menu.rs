@@ -6,6 +6,7 @@ use eframe::egui::scroll_area::{ScrollBarVisibility, ScrollSource};
 use eframe::egui::{Align, Button, Direction, Frame, Layout, Margin};
 use egui::Widget;
 use grooph_measure::swing::{MAX_SWING_PERCENT, MIN_SWING_PERCENT, SwingUnit};
+use grooph_measure::tap_tempo::tap_pulse;
 use grooph_measure::tempo::{MAX_BPM, MIN_BPM};
 
 impl Grooph {
@@ -60,12 +61,14 @@ impl Grooph {
                             if bpm_editor_resp.clicked() {
                                 ui.memory_mut(|mem| mem.surrender_focus(bpm_editor_resp.id))
                             }
-                            let tap = Button::new("Tap")
-                                .ui(ui)
-                                .on_hover_text("Tap the tempo: click twice or more in time");
+                            let pulse = tap_pulse(self.current_measure().time_signature());
+                            let tap = Button::new("Tap").ui(ui).on_hover_text(format!(
+                                "Tap the tempo: click twice or more in time, in {}",
+                                pulse.name()
+                            ));
                             let tapped = tap
                                 .clicked()
-                                .then(|| self.ui.tap_tempo.tap(ui.input(|i| i.time)))
+                                .then(|| self.ui.tap_tempo.tap(ui.input(|i| i.time), pulse))
                                 .flatten();
                             if let Some(bpm) = tapped {
                                 self.playback_ctl.bpm = bpm;

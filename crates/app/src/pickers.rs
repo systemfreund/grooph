@@ -13,6 +13,7 @@ use grooph_measure::generator::{
     MAX_BARS, MAX_COMPLEXITY, effective_subdivision, offered_subdivisions,
 };
 use grooph_measure::swing::{MAX_SWING_PERCENT, MIN_SWING_PERCENT, SwingUnit};
+use grooph_measure::tap_tempo::{TapPulse, tap_pulse};
 use grooph_measure::tempo::{MAX_BPM, MIN_BPM};
 
 /// Height of a touch-friendly row or button.
@@ -255,9 +256,13 @@ impl Grooph {
         ui.add(egui::Slider::new(&mut bpm, MIN_BPM..=MAX_BPM).show_value(false));
         ui.add_space(4.0);
 
+        let pulse = tap_pulse(self.current_measure().time_signature());
         let tap = wide_button(ui, "Tap", 22.0, 72.0);
+        if pulse != TapPulse::Quarter {
+            ui.vertical_centered(|ui| ui.weak(format!("Tap in {}", pulse.name())));
+        }
         if tap.clicked()
-            && let Some(tapped) = self.ui.tap_tempo.tap(ui.input(|i| i.time))
+            && let Some(tapped) = self.ui.tap_tempo.tap(ui.input(|i| i.time), pulse)
         {
             bpm = tapped;
         }
