@@ -408,11 +408,11 @@ impl Grooph {
             }
             let y = note_layout.center.y + metrics.head_size.y * 0.65;
             let h = metrics.head_size.y * 0.8;
-            let zero_start = egui::Pos2::new(note_layout.center.x, y);
-            let zero_end = egui::Pos2::new(note_layout.center.x, y + h);
+            let width = (metrics.head_size.y * MARK_WIDTH_PER_HEAD).max(MARK_MIN_WIDTH);
+            let note_x = note_layout.center.x;
             ui.painter().line_segment(
-                [zero_start, zero_end],
-                Stroke::new(2.0, egui::Color32::from_gray(140)),
+                [egui::pos2(note_x, y), egui::pos2(note_x, y + h)],
+                Stroke::new(width * 0.5, reference_color(dark)),
             );
             let Some(local_onset) = local_onsets.get(idx) else {
                 continue;
@@ -434,36 +434,10 @@ impl Grooph {
                     else {
                         continue;
                     };
-                    let x = note_layout.center.x + (diff_ticks * px_per_tick) as f32;
-                    let mid_y = y + h * 0.5;
-                    let h_start = egui::Pos2::new(note_layout.center.x, mid_y);
-                    let h_end = egui::Pos2::new(x, mid_y);
-                    ui.painter().line_segment(
-                        [h_start, h_end],
-                        Stroke::new(2.0, egui::Color32::from_gray(140)),
-                    );
-                    let start = egui::Pos2::new(x, y);
-                    let end = egui::Pos2::new(x, y + h);
-                    ui.painter()
-                        .line_segment([start, end], Stroke::new(2.0, grade_color(grade, dark)));
+                    let x = note_x + (diff_ticks * px_per_tick) as f32;
+                    paint_hit_mark(ui.painter(), note_x, x, y, h, width, grade, dark);
                 }
-                AccuracyMark::Miss => {
-                    let mid_y = y + h * 0.5;
-                    let half = h * 0.25;
-                    let left = note_layout.center.x - half;
-                    let right = note_layout.center.x + half;
-                    let top = mid_y - half;
-                    let bottom = mid_y + half;
-                    let stroke = Stroke::new(2.0, grade_color(HitGrade::Off, dark));
-                    ui.painter().line_segment(
-                        [egui::Pos2::new(left, top), egui::Pos2::new(right, bottom)],
-                        stroke,
-                    );
-                    ui.painter().line_segment(
-                        [egui::Pos2::new(left, bottom), egui::Pos2::new(right, top)],
-                        stroke,
-                    );
-                }
+                AccuracyMark::Miss => paint_miss_mark(ui.painter(), note_x, y, h, width, dark),
             }
         }
     }
@@ -541,17 +515,77 @@ fn primary_beat_index(ts: &TimeSignature, local_tick: f64) -> u32 {
         as u32
 }
 
-/// Marker colour of a hit: green when perfect, amber when good, red when off
-/// (also used for misses).
+/// Accuracy marks scale with the note head, but never get thinner than this (px).
+const MARK_MIN_WIDTH: f32 = 3.0;
+const MARK_WIDTH_PER_HEAD: f32 = 0.25;
+
+/// Marker colour of a grade (misses use `Off`): blue, orange/yellow and
+/// purple stay apart for red-green and blue-yellow colour vision deficiencies
+/// and differ in lightness. No red/green pair. The grade is shown by shape as
+/// well (off hits get an arrowhead, misses a cross), so colour is never the
+/// only cue.
 fn grade_color(grade: HitGrade, dark: bool) -> egui::Color32 {
     match (grade, dark) {
-        (HitGrade::Perfect, true) => egui::Color32::from_rgb(90, 200, 110),
-        (HitGrade::Perfect, false) => egui::Color32::from_rgb(30, 140, 60),
-        (HitGrade::Good, true) => egui::Color32::from_rgb(230, 180, 60),
-        (HitGrade::Good, false) => egui::Color32::from_rgb(190, 130, 0),
-        (HitGrade::Off, true) => egui::Color32::from_rgb(235, 80, 80),
-        (HitGrade::Off, false) => egui::Color32::from_rgb(200, 40, 40),
+        (HitGrade::Perfect, false) => egui::Color32::from_rgb(51, 102, 204),
+        (HitGrade::Perfect, true) => egui::Color32::from_rgb(102, 204, 238),
+        (HitGrade::Good, false) => egui::Color32::from_rgb(215, 140, 0),
+        (HitGrade::Good, true) => egui::Color32::from_rgb(240, 228, 66),
+        (HitGrade::Off, false) => egui::Color32::from_rgb(153, 0, 102),
+        (HitGrade::Off, true) => egui::Color32::from_rgb(200, 80, 255),
     }
+}
+
+/// The note's zero line and the connector to the hit.
+fn reference_color(dark: bool) -> egui::Color32 {
+    if dark { egui::Color32::from_gray(150) } else { egui::Color32::from_gray(120) }
+}
+
+/// A hit: a bar where it landed, joined to the note's zero line. Perfect and
+/// good are plain bars; an off hit also gets an arrowhead pointing the way it
+/// was off (left = early, right = late).
+#[allow(clippy::too_many_arguments)]
+fn paint_hit_mark(
+    painter: &egui::Painter,
+    note_x: f32,
+    x: f32,
+    y: f32,
+    h: f32,
+    width: f32,
+    grade: HitGrade,
+    dark: bool,
+) {
+    let color = grade_color(grade, dark);
+    let mid_y = y + h * 0.5;
+    painter.line_segment(
+        [egui::pos2(note_x, mid_y), egui::pos2(x, mid_y)],
+        Stroke::new(width * 0.5, reference_color(dark)),
+    );
+    painter.line_segment([egui::pos2(x, y), egui::pos2(x, y + h)], Stroke::new(width, color));
+    if grade == HitGrade::Off {
+        let dir = if x < note_x { -1.0 } else { 1.0 };
+        let tip_x = x - dir * width * 0.5;
+        let base_x = tip_x - dir * width * 2.0;
+        let half = width * 1.4;
+        painter.add(egui::Shape::convex_polygon(
+            vec![
+                egui::pos2(tip_x, mid_y),
+                egui::pos2(base_x, mid_y - half),
+                egui::pos2(base_x, mid_y + half),
+            ],
+            color,
+            Stroke::NONE,
+        ));
+    }
+}
+
+/// A missed note: a cross on the zero line.
+fn paint_miss_mark(painter: &egui::Painter, note_x: f32, y: f32, h: f32, width: f32, dark: bool) {
+    let stroke = Stroke::new(width, grade_color(HitGrade::Off, dark));
+    let mid_y = y + h * 0.5;
+    let half = h * 0.35;
+    let (left, right, top, bottom) = (note_x - half, note_x + half, mid_y - half, mid_y + half);
+    painter.line_segment([egui::pos2(left, top), egui::pos2(right, bottom)], stroke);
+    painter.line_segment([egui::pos2(left, bottom), egui::pos2(right, top)], stroke);
 }
 
 #[cfg(test)]
