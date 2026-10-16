@@ -1,5 +1,6 @@
 mod accuracy;
 mod calibration;
+mod click_row;
 mod clock;
 mod compact;
 mod generator;
@@ -398,7 +399,11 @@ impl Grooph {
     }
 
     fn current_snapshot(&self) -> EditorSnapshot {
-        EditorSnapshot { score: self.editor.score.clone(), cursor: self.editor.cursor }
+        EditorSnapshot {
+            score: self.editor.score.clone(),
+            cursor: self.editor.cursor,
+            click: self.playback_ctl.audio_cfg.click.clone(),
+        }
     }
 
     pub(crate) fn can_undo(&self) -> bool {
@@ -431,6 +436,7 @@ impl Grooph {
         if let Some(prev) = self.editor.history.pop_undo(current) {
             self.editor.score = prev.score;
             self.editor.cursor = prev.cursor;
+            self.playback_ctl.audio_cfg.click = prev.click;
             self.clear_accuracy_for_edit();
             self.editor.dirty = true;
         }
@@ -441,6 +447,7 @@ impl Grooph {
         if let Some(next) = self.editor.history.pop_redo(current) {
             self.editor.score = next.score;
             self.editor.cursor = next.cursor;
+            self.playback_ctl.audio_cfg.click = next.click;
             self.clear_accuracy_for_edit();
             self.editor.dirty = true;
         }

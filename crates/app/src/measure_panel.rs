@@ -1,5 +1,6 @@
 use crate::Grooph;
 use crate::accuracy::{AccuracyMark, HitGrade, clamp_diff_to_beat_window};
+use crate::click_row::CLICK_ROW_EM;
 use crate::playback_clock::{advance_tick, next_count_in};
 use crate::tools::{Modifier, ToolKind, all_tools};
 use crate::{Mode, TransportState};
@@ -92,11 +93,12 @@ impl Grooph {
                             // No percussion clef: on a single line it says nothing
                             // the line doesn't, and every row starts alike.
                             layout_clef_first: false,
-                            room_below_em: if count_config.is_some() {
-                                ROOM_BELOW_WITH_LABELS_EM
-                            } else {
-                                ROOM_BELOW_EM
-                            },
+                            room_below_em: CLICK_ROW_EM
+                                + if count_config.is_some() {
+                                    ROOM_BELOW_WITH_LABELS_EM
+                                } else {
+                                    ROOM_BELOW_EM
+                                },
                         };
 
                         let staff = build_staff_layout(&self.editor.score, &staff_opts);
@@ -202,6 +204,9 @@ impl Grooph {
                         }
 
                         self.draw_accuracy_markers(ui, &staff, &timing, &render_opts.metrics);
+                        let playing =
+                            playback_local.filter(|_| !self.playback_ctl.playback.counting_in());
+                        self.click_row(ui, &staff, render_opts.em, playing);
                         self.handle_input(resp, &staff);
                     });
                 });

@@ -1,3 +1,4 @@
+use grooph_measure::click::ClickPatterns;
 use grooph_measure::{Cursor, Score};
 use std::collections::VecDeque;
 
@@ -6,6 +7,8 @@ pub(crate) const DEFAULT_UNDO_LIMIT: usize = 200;
 pub(crate) struct EditorSnapshot {
     pub score: Score,
     pub cursor: Cursor,
+    /// Click patterns are edited on the staff, so they undo with it.
+    pub click: ClickPatterns,
 }
 
 pub(crate) struct UndoHistory {
@@ -57,7 +60,11 @@ mod tests {
     fn snap(beat_idx: usize) -> EditorSnapshot {
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
         m.set_beat(0, Beat::note(q())).unwrap();
-        EditorSnapshot { score: Score::single(m), cursor: Cursor::at(0, beat_idx) }
+        EditorSnapshot {
+            score: Score::single(m),
+            cursor: Cursor::at(0, beat_idx),
+            click: ClickPatterns::default(),
+        }
     }
 
     fn beat_at(snap: &EditorSnapshot) -> usize {
@@ -128,7 +135,11 @@ mod tests {
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
         m.set_beat(0, Beat::note(q())).unwrap();
         let mut score = Score::single(m);
-        let snap = EditorSnapshot { score: score.clone(), cursor: Cursor::start() };
+        let snap = EditorSnapshot {
+            score: score.clone(),
+            cursor: Cursor::start(),
+            click: ClickPatterns::default(),
+        };
 
         let mut h = UndoHistory::new(10);
         h.push(snap);
@@ -137,7 +148,13 @@ mod tests {
         score.current_mut(0).set_beat(1, Beat::note(q())).unwrap();
 
         // restored snapshot retains original beat count (before mutation)
-        let restored = h.pop_undo(EditorSnapshot { score, cursor: Cursor::start() }).unwrap();
+        let restored = h
+            .pop_undo(EditorSnapshot {
+                score,
+                cursor: Cursor::start(),
+                click: ClickPatterns::default(),
+            })
+            .unwrap();
         // the mutation added a beat to the *source* score but the snapshot is independent
         // we just check that pop returns something with a distinct measure state
         assert_eq!(restored.score.current(0).beats().len(), 4); // original 4/4 default beats

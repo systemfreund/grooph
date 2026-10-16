@@ -182,6 +182,13 @@ Important root files:
   stay. The count-in and calibration ignore the patterns. Link parameter
   `click` (`S`, `M`, `L`, `-` per group) sets the pattern of the link's first
   meter; shared links carry it when it is not the default.
+- Click row (`crates/app/src/click_row.rs`): under every measure one dot per
+  beat group at the group's first tick (size = level, an outline = off). A tap
+  moves the group to the next level for every measure in that meter; the
+  patterns are part of `EditorSnapshot`, so undo/redo cover them. The staff
+  reserves `CLICK_ROW_EM` below the line for it. While playing, the group
+  being played is drawn in the accent color; during tap capture the dots
+  don't react (taps are hits).
 
 ## Metronome trainer
 
