@@ -191,7 +191,7 @@ impl Grooph {
                             metrics,
                             min_measure_width_em,
                             note_width_em,
-                            system_spacing_em: 0.5,
+                            system_spacing_em: 0.3,
                             // Narrow screens: no clef, so the notes get the width.
                             layout_clef_first: !compact,
                             room_below_em: if self.build_count_config().is_some() {
