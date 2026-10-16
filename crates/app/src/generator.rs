@@ -108,7 +108,10 @@ impl Grooph {
     /// [`Self::generate_new_score`].
     pub(crate) fn update_endless(&mut self) {
         let playing = self.playback_ctl.transport_state == TransportState::Playing;
-        if !self.editor.generator.endless || !playing || self.editor.score.len() < ENDLESS_MIN_BARS
+        if !self.editor.generator.endless
+            || !playing
+            || self.metronome_mode()
+            || self.editor.score.len() < ENDLESS_MIN_BARS
         {
             self.editor.generator.last_playing_measure = None;
             self.editor.generator.pending_regeneration = None;

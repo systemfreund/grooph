@@ -197,6 +197,15 @@ Important root files:
   `score_timing()` via `PlaybackState::ramp_bpm` and re-anchors the accuracy
   session on every change.
 
+- Metronome tab (`crates/app/src/metronome_view.rs`, `Mode::Metronome`): the
+  audio engine gets one silent bar in the generator's meter
+  (`metronome_score`) instead of the rhythm, so only the clicks sound; ghost
+  notes, endless mode and play along are off there. A ring shows the meter's
+  click pattern, one segment per beat group as long as the group, thickness by
+  level; a tap cycles the level. While playing, the group and beat being heard
+  light up and the middle shows the bar number. Switching into or out of the
+  tab stops playback.
+
 ## Play along (accuracy)
 
 - Hit sources (`crates/app/src/play_along.rs`): MIDI NoteOns and taps (tap key,
@@ -223,7 +232,8 @@ Important root files:
   (`crates/app/src/compact.rs`). On windows wider than 720 pt the controls stay
   a centered column; the staff and the tool palette use the full width.
 - Tabs: Practice (generator card with Meter/Notes/Level/Bars/BPM, options
-  sheet, big "new rhythm" + play buttons), Edit (tool palette + edit bar),
+  sheet, big "new rhythm" + play buttons), Metronome (see below), Edit (tool
+  palette + edit bar),
   More (Library, Mixer, Settings, Help reuse their panels). The tab is derived
   from `Mode` (`compact_tab`), so modes set elsewhere land on the right tab.
 - Settings open in a `Modal` picker (`settings_picker`); generator changes go

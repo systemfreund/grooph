@@ -3,7 +3,7 @@
 //! buttons and a tab bar at the bottom. On wide windows the controls stay a
 //! centered column and the staff gets the full width.
 
-use crate::pickers::{Picker, ROW_HEIGHT, swing_label};
+use crate::pickers::{Picker, ROW_HEIGHT, swing_label, time_signature_label};
 use crate::share::paint_share_icon;
 use crate::{Grooph, Mode, TransportState};
 use eframe::egui;
@@ -28,6 +28,7 @@ const CARD_RADIUS: u8 = 16;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CompactTab {
     Practice,
+    Metronome,
     Edit,
     More,
 }
@@ -227,12 +228,18 @@ impl Grooph {
                 CompactTab::More
             }
             Mode::Playback | Mode::Generator => CompactTab::Practice,
+            Mode::Metronome => CompactTab::Metronome,
         }
     }
 
     fn select_compact_tab(&mut self, tab: CompactTab) {
+        // Into or out of the metronome the played score changes: stop first.
+        if (tab == CompactTab::Metronome) != self.metronome_mode() {
+            self.stop_transport();
+        }
         self.ui.mode = match tab {
             CompactTab::Practice => Mode::Generator,
+            CompactTab::Metronome => Mode::Metronome,
             CompactTab::Edit => Mode::Edit,
             CompactTab::More => Mode::MoreMenu,
         };
@@ -250,15 +257,24 @@ impl Grooph {
                 self.tool_palette_panel(ui);
                 self.compact_edit_bar(ui);
             }
+            CompactTab::Metronome => {
+                self.compact_metronome_sheet(ui);
+                self.compact_metronome_card(ui);
+            }
             CompactTab::More => self.compact_more(ui),
         }
-        self.measure_panel(ui);
+        if tab == CompactTab::Metronome {
+            self.metronome_panel(ui);
+        } else {
+            self.measure_panel(ui);
+        }
         self.settings_picker(ui);
     }
 
     fn compact_tab_bar(&mut self, ui: &mut Ui, current: CompactTab) {
-        const TABS: [(CompactTab, &str, &str); 3] = [
+        const TABS: [(CompactTab, &str, &str); 4] = [
             (CompactTab::Practice, "🎲", "Practice"),
+            (CompactTab::Metronome, "⏱", "Metronome"),
             (CompactTab::Edit, "🖊", "Edit"),
             (CompactTab::More, "☰", "More"),
         ];
@@ -326,6 +342,23 @@ impl Grooph {
             },
         ];
 
+        self.compact_card(ui, &cells);
+    }
+
+    /// Meter and tempo of the metronome tab, in the same card as Practice.
+    fn compact_metronome_card(&mut self, ui: &mut Ui) {
+        let cells = [
+            (Picker::TimeSignature, "Meter", time_signature_label(self.metronome_meter())),
+            match self.playback_ctl.playback.ramp_bpm {
+                Some(bpm) => (Picker::Bpm, "BPM now", bpm.to_string()),
+                None => (Picker::Bpm, "BPM", self.playback_ctl.bpm.to_string()),
+            },
+        ];
+        self.compact_card(ui, &cells);
+    }
+
+    /// Card of labelled values on top; a tap opens the value's picker.
+    fn compact_card(&mut self, ui: &mut Ui, cells: &[(Picker, &str, String)]) {
         let mut picked = None;
         egui::Panel::top("compact_card")
             .frame(Frame::new().fill(ui.visuals().panel_fill).inner_margin(Margin {
@@ -343,7 +376,7 @@ impl Grooph {
                         .inner_margin(Margin::symmetric(4, 6))
                         .show(ui, |ui| {
                             ui.columns(cells.len(), |cols| {
-                                for (col, (picker, label, value)) in cols.iter_mut().zip(&cells) {
+                                for (col, (picker, label, value)) in cols.iter_mut().zip(cells) {
                                     if card_cell(col, label, value).clicked() {
                                         picked = Some(*picker);
                                     }
@@ -404,6 +437,52 @@ impl Grooph {
             });
 
         self.finish_generator_change(before, endless_before, roll);
+    }
+
+    /// Metronome options and the play button.
+    fn compact_metronome_sheet(&mut self, ui: &mut Ui) {
+        egui::Panel::bottom("compact_metronome")
+            .frame(Frame::new().fill(ui.visuals().panel_fill).inner_margin(Margin::same(12)))
+            .show_separator_line(false)
+            .show_inside(ui, |ui| {
+                centered_column(ui, |ui| {
+                    Frame::new()
+                        .fill(card_fill(ui))
+                        .corner_radius(CARD_RADIUS)
+                        .inner_margin(Margin::same(12))
+                        .show(ui, |ui| {
+                            switch_row(ui, "Count-in", &mut self.playback_ctl.audio_cfg.count_in);
+                            switch_row(
+                                ui,
+                                "Mute bars",
+                                &mut self.playback_ctl.audio_cfg.gap.enabled,
+                            );
+                            ui.add_space(8.0);
+                            let playing =
+                                self.playback_ctl.transport_state == TransportState::Playing;
+                            let (row, _) = ui.allocate_exact_size(
+                                vec2(ui.available_width(), PLAY_BUTTON_SIZE),
+                                Sense::hover(),
+                            );
+                            let fill = ui.visuals().selection.bg_fill;
+                            let icon = ui.visuals().selection.stroke.color;
+                            if round_button_at(
+                                ui,
+                                Rect::from_center_size(row.center(), Vec2::splat(PLAY_BUTTON_SIZE)),
+                                Id::new("metronome_play"),
+                                fill,
+                                icon,
+                                |painter, rect, color| {
+                                    paint_play_icon(painter, rect, color, playing)
+                                },
+                            )
+                            .clicked()
+                            {
+                                self.toggle_playback();
+                            }
+                        });
+                });
+            });
     }
 
     fn compact_option_rows(&mut self, ui: &mut Ui) {

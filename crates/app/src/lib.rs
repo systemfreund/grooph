@@ -9,6 +9,7 @@ mod library;
 mod library_panel;
 mod measure_panel;
 mod metronome_trainer;
+mod metronome_view;
 mod midi_input_widget;
 mod mixer_panel;
 mod pickers;
@@ -78,6 +79,8 @@ pub(crate) enum Mode {
     Generator,
     /// The compact layout's "More" list of panels.
     MoreMenu,
+    /// The metronome tab: only the clicks sound, shown as a ring.
+    Metronome,
     /// The time signature dialog, holding the meter being picked.
     TimeSignature(TimeSignature),
 }
@@ -339,10 +342,12 @@ impl App for Grooph {
         }
 
         let playback_options = self.playback_options();
+        let metronome = self.metronome_mode().then(|| self.metronome_score());
+        let score = metronome.as_ref().unwrap_or(&self.editor.score);
         if let Some(audio) = &mut self.playback_ctl.audio {
             audio.set_audio_settings(self.playback_ctl.audio_cfg.settings);
             audio.set_playback_options(playback_options);
-            if audio.update(&audio_state, self.playback_ctl.bpm, &self.editor.score) {
+            if audio.update(&audio_state, self.playback_ctl.bpm, score) {
                 ui.ctx().request_repaint();
             }
         }
@@ -359,7 +364,8 @@ impl Grooph {
         let generator = &self.editor.generator;
         PlaybackOptions {
             count_in: self.playback_ctl.audio_cfg.count_in,
-            ghost_notes: generator.ghost_notes.then_some(generator.settings.subdivision),
+            ghost_notes: (generator.ghost_notes && !self.metronome_mode())
+                .then_some(generator.settings.subdivision),
             swing: self.playback_ctl.audio_cfg.swing,
             gap: self.playback_ctl.audio_cfg.gap,
             ramp: self.playback_ctl.audio_cfg.ramp,
@@ -738,7 +744,8 @@ impl Grooph {
         let accuracy_start = midi_connected.then(clock::now_seconds);
         self.playback_ctl.play_along.engaged = false;
         self.playback_ctl.accuracy.tracker.dismiss_summary();
-        if self.playback_ctl.accuracy.enabled {
+        // The metronome plays no rhythm to play along with.
+        if self.playback_ctl.accuracy.enabled && !self.metronome_mode() {
             self.playback_ctl.accuracy.tracker.on_playback_start(accuracy_start);
         } else {
             self.playback_ctl.accuracy.tracker.on_playback_stop();

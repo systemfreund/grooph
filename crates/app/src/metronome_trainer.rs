@@ -17,8 +17,9 @@ impl Grooph {
         };
         let ramp = self.playback_ctl.audio_cfg.ramp;
         let bpm = self.playback_ctl.bpm;
+        let bars = self.played_bars();
         let ramp_bpm = (playing && ramp.enabled).then(|| match bar {
-            Some(b) => ramp.bpm_for_bar(bpm, b.bar, self.editor.score.len()),
+            Some(b) => ramp.bpm_for_bar(bpm, b.bar, bars),
             None => bpm,
         });
         self.playback_ctl.playback.bar_muted = bar.is_some_and(|b| b.muted);

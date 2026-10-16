@@ -115,7 +115,8 @@ impl Grooph {
     /// Whether taps are captured right now. Touches on the staff then count
     /// as hits instead of moving the cursor.
     pub(crate) fn tap_capture_active(&self) -> bool {
-        if self.playback_ctl.transport_state != TransportState::Playing {
+        // In the metronome there is no rhythm to play along with; taps edit the ring.
+        if self.playback_ctl.transport_state != TransportState::Playing || self.metronome_mode() {
             return false;
         }
         match self.calibration_source() {
