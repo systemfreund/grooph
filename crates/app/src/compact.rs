@@ -197,9 +197,23 @@ fn round_button(
     icon_color: Color32,
     icon: impl FnOnce(&Painter, Rect, Color32),
 ) -> Response {
-    let (rect, resp) = ui.allocate_exact_size(Vec2::splat(size), Sense::click());
+    let (rect, _) = ui.allocate_exact_size(Vec2::splat(size), Sense::hover());
+    let id = ui.auto_id_with("round_button");
+    round_button_at(ui, rect, id, fill, icon_color, icon)
+}
+
+/// [`round_button`] filling `rect`, for buttons placed by hand.
+fn round_button_at(
+    ui: &mut Ui,
+    rect: Rect,
+    id: Id,
+    fill: Color32,
+    icon_color: Color32,
+    icon: impl FnOnce(&Painter, Rect, Color32),
+) -> Response {
+    let resp = ui.interact(rect, id, Sense::click());
     let fill = if resp.is_pointer_button_down_on() { fill.gamma_multiply(0.8) } else { fill };
-    ui.painter().circle_filled(rect.center(), size / 2.0, fill);
+    ui.painter().circle_filled(rect.center(), rect.width() / 2.0, fill);
     icon(ui.painter(), rect, icon_color);
     resp
 }
@@ -471,49 +485,59 @@ impl Grooph {
     /// Centered "new rhythm" and play buttons. Returns whether "new" was tapped.
     fn compact_transport(&mut self, ui: &mut Ui) -> bool {
         let playing = self.playback_ctl.transport_state == TransportState::Playing;
-        let spacing = 20.0;
-        let total = SIDE_BUTTON_SIZE + spacing + PLAY_BUTTON_SIZE + spacing + SIDE_BUTTON_SIZE;
-        let mut roll = false;
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = spacing;
-            ui.add_space(((ui.available_width() - total) / 2.0).max(0.0));
-            let side_fill = ui.visuals().extreme_bg_color;
-            let text = ui.visuals().strong_text_color();
-            roll = round_button(ui, SIDE_BUTTON_SIZE, side_fill, text, |painter, rect, color| {
+        let (row, _) =
+            ui.allocate_exact_size(vec2(ui.available_width(), PLAY_BUTTON_SIZE), Sense::hover());
+        let size = Vec2::splat(PLAY_BUTTON_SIZE);
+        let new_rect = Rect::from_min_size(row.min, size);
+        let play_rect = Rect::from_center_size(row.center(), size);
+        let score_rect = Rect::from_min_size(row.right_top() - vec2(PLAY_BUTTON_SIZE, 0.0), size);
+
+        let side_fill = ui.visuals().extreme_bg_color;
+        let text = ui.visuals().strong_text_color();
+        let roll = round_button_at(
+            ui,
+            new_rect,
+            Id::new("compact_new"),
+            side_fill,
+            text,
+            |painter, rect, color| {
                 painter.text(
                     rect.center(),
                     Align2::CENTER_CENTER,
                     "🎲",
-                    FontId::proportional(26.0),
+                    FontId::proportional(32.0),
                     color,
                 );
-            })
-            .on_hover_text("New rhythm")
-            .clicked();
+            },
+        )
+        .on_hover_text("New rhythm")
+        .clicked();
 
-            let fill = ui.visuals().selection.bg_fill;
-            let icon = ui.visuals().selection.stroke.color;
-            if round_button(ui, PLAY_BUTTON_SIZE, fill, icon, |painter, rect, color| {
-                paint_play_icon(painter, rect, color, playing)
-            })
-            .clicked()
-            {
-                self.toggle_playback();
-            }
+        let fill = ui.visuals().selection.bg_fill;
+        let icon = ui.visuals().selection.stroke.color;
+        if round_button_at(
+            ui,
+            play_rect,
+            Id::new("compact_play"),
+            fill,
+            icon,
+            |painter, rect, color| paint_play_icon(painter, rect, color, playing),
+        )
+        .clicked()
+        {
+            self.toggle_playback();
+        }
 
-            // Live timing score while playing along, else a spacer that keeps
-            // the play button centered.
-            let (rect, _) = ui.allocate_exact_size(Vec2::splat(SIDE_BUTTON_SIZE), Sense::hover());
-            if let Some(summary) = self.playback_ctl.accuracy.tracker.live_summary() {
-                ui.painter().text(
-                    rect.center(),
-                    Align2::CENTER_CENTER,
-                    format!("{:.0}%", summary.score_percent()),
-                    FontId::proportional(20.0),
-                    text,
-                );
-            }
-        });
+        // Live timing score while playing along.
+        if let Some(summary) = self.playback_ctl.accuracy.tracker.live_summary() {
+            ui.painter().text(
+                score_rect.center(),
+                Align2::CENTER_CENTER,
+                format!("{:.0}%", summary.score_percent()),
+                FontId::proportional(20.0),
+                text,
+            );
+        }
         roll
     }
 
