@@ -3,7 +3,8 @@
 //!
 //! | Parameter | Meaning |
 //! |-----------|---------|
-//! | `bpm`     | Tempo, 20-300 |
+//! | `v`       | Link version, see below; [`SharedLink::to_url`] always writes the current one |
+//! | `bpm`     | Tempo in quarter notes per minute, 20-300 |
 //! | `r`       | Rhythm in the text notation of [`grooph_measure::notation`] |
 //! | `ts`      | Time signature, e.g. `7/8`; default for `r`, the generator's meter, or on its own a one-measure metronome |
 //! | `sub`     | Generator subdivision: `8`, `16`, `3` (triplets) or `mix` |
@@ -17,6 +18,16 @@
 //! Any of `sub`, `lvl`, `bars`, `space` or `seed` selects the generator;
 //! unknown parameters are ignored. [`SharedLink::to_url`] is the inverse of
 //! [`parse_query`].
+//!
+//! ## Versions
+//!
+//! - Version 1 (links without `v`): `bpm` counted the meter's beat unit, so
+//!   in x/8 eighths and in x/16 sixteenths per minute.
+//! - Version 2 (`v=2`, [`LINK_VERSION`]): `bpm` always counts quarters.
+//!
+//! [`parse_query`] converts the tempo of a version 1 link to quarters, so an
+//! old 7/8 link at `bpm=140` opens at 70 and plays as fast as it used to. A
+//! score mixing beat units is converted by its first measure.
 
 use grooph_measure::generator::{
     GeneratorSettings, MAX_BARS, MAX_COMPLEXITY, Subdivision, supports_time_signature,
@@ -25,6 +36,9 @@ use grooph_measure::notation::{format_score, parse_score};
 use grooph_measure::swing::{MAX_SWING_PERCENT, MIN_SWING_PERCENT, Swing, SwingUnit};
 use grooph_measure::tempo::{MAX_BPM, MIN_BPM};
 use grooph_measure::{Score, TimeSignature};
+
+/// Version [`SharedLink::to_url`] writes as `v`.
+pub const LINK_VERSION: u32 = 2;
 
 /// What a link opens. Every part is optional; a link with only `bpm` just
 /// sets the tempo.
@@ -46,8 +60,23 @@ pub enum LinkContent {
 }
 
 /// Parse a URL query string (with or without the leading `?`). Returns
-/// `Ok(None)` if it contains none of the link parameters.
+/// `Ok(None)` if it contains none of the link parameters. A query without
+/// `v` is a version 1 link (see the [crate docs](crate)).
 pub fn parse_query(query: &str) -> Result<Option<SharedLink>, String> {
+    parse_query_with_default_version(query, 1)
+}
+
+/// [`parse_query`] for queries that count `bpm` in quarters even without
+/// `v`, such as links written by hand for the current app.
+pub fn parse_query_current(query: &str) -> Result<Option<SharedLink>, String> {
+    parse_query_with_default_version(query, LINK_VERSION)
+}
+
+fn parse_query_with_default_version(
+    query: &str,
+    default_version: u32,
+) -> Result<Option<SharedLink>, String> {
+    let mut version = default_version;
     let mut bpm = None;
     let mut rhythm = None;
     let mut ts = None;
@@ -63,6 +92,7 @@ pub fn parse_query(query: &str) -> Result<Option<SharedLink>, String> {
         let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
         let value = percent_decode(value);
         match key {
+            "v" => version = parse_in_range("v", &value, 1, LINK_VERSION)?,
             "bpm" => bpm = Some(parse_in_range("bpm", &value, MIN_BPM, MAX_BPM)?),
             "r" => rhythm = Some(value),
             "ts" => {
@@ -126,6 +156,13 @@ pub fn parse_query(query: &str) -> Result<Option<SharedLink>, String> {
         ts.map(LinkContent::Metronome)
     };
 
+    if version == 1
+        && let Some(tempo) = bpm
+        && let Some(ts) = content.as_ref().and_then(LinkContent::first_time_signature)
+    {
+        bpm = Some(quarter_bpm(tempo, ts));
+    }
+
     if bpm.is_none() && swing.is_none() && content.is_none() {
         Ok(None)
     } else {
@@ -133,11 +170,29 @@ pub fn parse_query(query: &str) -> Result<Option<SharedLink>, String> {
     }
 }
 
+/// Quarter notes per minute for a version 1 tempo of `bpm` beat units of
+/// `ts` per minute, kept within the tempo range.
+fn quarter_bpm(bpm: u32, ts: TimeSignature) -> u32 {
+    let units_per_quarter = (ts.beat_unit as u32 / 4).max(1);
+    ((bpm as f64 / units_per_quarter as f64).round() as u32).clamp(MIN_BPM, MAX_BPM)
+}
+
+impl LinkContent {
+    /// Meter the content starts in.
+    fn first_time_signature(&self) -> Option<TimeSignature> {
+        match self {
+            LinkContent::Score(score) => score.measures.first().map(|m| m.time_signature()),
+            LinkContent::Metronome(ts) => Some(*ts),
+            LinkContent::Generator { settings, .. } => Some(settings.time_signature),
+        }
+    }
+}
+
 impl SharedLink {
     /// URL that [`parse_query`] reads back as this link, or `None` if the
     /// score cannot be written in the text notation.
     pub fn to_url(&self, base: &str) -> Option<String> {
-        let mut params: Vec<(&str, String)> = Vec::new();
+        let mut params: Vec<(&str, String)> = vec![("v", LINK_VERSION.to_string())];
         if let Some(bpm) = self.bpm {
             params.push(("bpm", bpm.to_string()));
         }
@@ -166,13 +221,13 @@ impl SharedLink {
                 params.push(("su", "16".into()));
             }
         }
+        // The version alone opens nothing.
+        if params.len() == 1 {
+            return Some(base.to_string());
+        }
         let query: Vec<String> =
             params.iter().map(|(k, v)| format!("{k}={}", percent_encode(v))).collect();
-        Some(if query.is_empty() {
-            base.to_string()
-        } else {
-            format!("{base}?{}", query.join("&"))
-        })
+        Some(format!("{base}?{}", query.join("&")))
     }
 }
 
@@ -378,7 +433,7 @@ mod tests {
         let url = generator.to_url("https://grooph.app/").unwrap();
         assert_eq!(
             url,
-            "https://grooph.app/?bpm=80&ts=3/4&sub=3&lvl=4&bars=2&space=0.25&seed=7&swing=58&su=16"
+            "https://grooph.app/?v=2&bpm=80&ts=3/4&sub=3&lvl=4&bars=2&space=0.25&seed=7&swing=58&su=16"
         );
         let back = parse(url.split_once('?').unwrap().1);
         assert_eq!(back.bpm, generator.bpm);
@@ -397,16 +452,53 @@ mod tests {
             content: Some(LinkContent::Metronome(TimeSignature::SEVEN_EIGHT)),
             ..SharedLink::default()
         };
-        assert_eq!(metronome.to_url("/").unwrap(), "/?bpm=140&ts=7/8");
+        assert_eq!(metronome.to_url("/").unwrap(), "/?v=2&bpm=140&ts=7/8");
         let grouped = TimeSignature::SEVEN_EIGHT.with_grouping(2);
         let metronome =
             SharedLink { content: Some(LinkContent::Metronome(grouped)), ..SharedLink::default() };
         let url = metronome.to_url("/").unwrap();
-        assert_eq!(url, "/?ts=3%2B2%2B2/8");
+        assert_eq!(url, "/?v=2&ts=3%2B2%2B2/8");
         assert!(
             matches!(parse(&url[2..]).content, Some(LinkContent::Metronome(ts)) if ts == grouped)
         );
         assert_eq!(SharedLink::default().to_url("/").unwrap(), "/");
+    }
+
+    #[test]
+    fn version_1_tempo_counts_the_beat_unit() {
+        // Without `v`, bpm counted eighths in x/8 and sixteenths in x/16.
+        for (query, bpm) in [
+            ("bpm=140&ts=7/8", 70),
+            ("bpm=120&ts=11/16&sub=16", 30),
+            ("bpm=90&r=6/8+e+e+e+e+e+e", 45),
+            ("bpm=90&ts=3/4", 90),
+            // The tempo stays within range.
+            ("bpm=60&ts=5/16", MIN_BPM),
+        ] {
+            assert_eq!(parse(query).bpm, Some(bpm), "{query}");
+        }
+        // Without content there is no meter to convert by.
+        assert_eq!(parse("bpm=140").bpm, Some(140));
+    }
+
+    #[test]
+    fn version_2_tempo_counts_quarters() {
+        assert_eq!(parse("v=2&bpm=70&ts=7/8").bpm, Some(70));
+        assert_eq!(parse_query_current("bpm=70&ts=7/8").unwrap().unwrap().bpm, Some(70));
+        // An explicit v=1 is converted even where v=2 is the default.
+        assert_eq!(parse_query_current("v=1&bpm=140&ts=7/8").unwrap().unwrap().bpm, Some(70));
+        assert!(parse_query("v=3&bpm=70").unwrap_err().contains("v must"));
+    }
+
+    #[test]
+    fn written_links_reopen_at_the_same_tempo() {
+        let link = SharedLink {
+            bpm: Some(70),
+            content: Some(LinkContent::Metronome(TimeSignature::SEVEN_EIGHT)),
+            ..SharedLink::default()
+        };
+        let url = link.to_url("/").unwrap();
+        assert_eq!(parse(&url[2..]).bpm, Some(70));
     }
 
     #[test]
@@ -444,7 +536,7 @@ mod tests {
     fn share_url_round_trips() {
         let score = parse_score("3/4 >q t8 t8 r:t8 e e | e. s q r:q").unwrap();
         let url = share_url("https://grooph.app/", &score, 96).unwrap();
-        assert_eq!(url, "https://grooph.app/?bpm=96&r=3/4+%3Eq+t8+t8+r:t8+e+e+%7C+e.+s+q+r:q");
+        assert_eq!(url, "https://grooph.app/?v=2&bpm=96&r=3/4+%3Eq+t8+t8+r:t8+e+e+%7C+e.+s+q+r:q");
         let link = parse(url.split_once('?').unwrap().1);
         assert_eq!(link.bpm, Some(96));
         let Some(LinkContent::Score(parsed)) = link.content else { panic!("expected a score") };

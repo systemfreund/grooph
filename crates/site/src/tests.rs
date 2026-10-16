@@ -1,4 +1,5 @@
 use super::*;
+use grooph_link::parse_query;
 
 fn page(path: &str, section: &str, markdown: &str) -> Page {
     Page {
@@ -98,10 +99,18 @@ fn open_block_normalizes_the_link() {
     let md = "```open | Level 3\nseed=42&lvl=3&sub=16&bpm=80\n```\n";
     let (html, _) = render_markdown(md, &[], "/").unwrap();
     assert!(
-        html.contains("href=\"/?bpm=80&amp;sub=16&amp;lvl=3&amp;bars=1&amp;seed=42\""),
+        html.contains("href=\"/?v=2&amp;bpm=80&amp;sub=16&amp;lvl=3&amp;bars=1&amp;seed=42\""),
         "{html}"
     );
     assert!(html.contains("▶ Level 3"));
+}
+
+#[test]
+fn open_block_tempo_counts_quarters() {
+    // Site queries are written for the current app, so 7/8 at 45 stays 45.
+    let md = "```open\nbpm=45&ts=7/8&sub=16&lvl=3&bars=2\n```\n";
+    let (html, _) = render_markdown(md, &[], "/").unwrap();
+    assert!(html.contains("href=\"/?v=2&amp;bpm=45&amp;ts=7/8"), "{html}");
 }
 
 #[test]

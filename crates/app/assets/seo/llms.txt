@@ -8,7 +8,8 @@ The app draws its whole interface into a single canvas, so the page has no reada
 
 Query parameters on https://grooph.app/ (all optional, unknown ones are ignored; also described as OpenAPI at https://grooph.app/openapi.json and listed in the API catalog at https://grooph.app/.well-known/api-catalog):
 
-- `bpm`: tempo, 20-300.
+- `v`: link version; write `v=2`. Without it (version 1), `bpm` counts the meter's beat unit, i.e. eighths in x/8 and sixteenths in x/16, and grooph converts it to quarters.
+- `bpm`: tempo in quarter notes per minute, 20-300 (with `v=2`), in every time signature: 7/8 at `bpm=70` plays 140 eighths per minute.
 - `r`: a rhythm in the text notation below. Spaces may be written as `+`.
 - `ts`: time signature, e.g. `3/4` or `7/8` (1-17 beats over 4, 8 or 16). With `r` it is the default meter; on its own it opens a one-measure metronome in that meter.
 - Generator (a random sight-reading rhythm): `sub` = `8`, `16`, `3` (triplets) or `mix`; `lvl` = complexity 1-5; `bars` = 1-8; `space` = amount of rests 0-1; `seed` = any whole number. The same parameters and seed always give the same rhythm; without a seed every visit draws a new one. Only x/4 time signatures. Do not combine with `r`.
@@ -16,10 +17,10 @@ Query parameters on https://grooph.app/ (all optional, unknown ones are ignored;
 
 Examples:
 
-- Metronome, 7/8 at 140 BPM: https://grooph.app/?bpm=140&ts=7/8
-- Written rhythm with a triplet: https://grooph.app/?bpm=90&r=4/4+q+e+e+t8+t8+t8+r:q+|+q.+e+q+q
-- Sixteenth-note sight-reading exercise, level 3, 4 bars: https://grooph.app/?bpm=80&sub=16&lvl=3&bars=4&seed=42
-- Swing click with triplet feel: https://grooph.app/?bpm=120&ts=4/4&swing=66
+- Metronome, 7/8 with 140 eighths per minute: https://grooph.app/?v=2&bpm=70&ts=7/8
+- Written rhythm with a triplet: https://grooph.app/?v=2&bpm=90&r=4/4+q+e+e+t8+t8+t8+r:q+|+q.+e+q+q
+- Sixteenth-note sight-reading exercise, level 3, 4 bars: https://grooph.app/?v=2&bpm=80&sub=16&lvl=3&bars=4&seed=42
+- Swing click with triplet feel: https://grooph.app/?v=2&bpm=120&ts=4/4&swing=66
 
 If the user has unsaved changes, grooph asks before replacing them. Invalid links show an error message that names the problem.
 
