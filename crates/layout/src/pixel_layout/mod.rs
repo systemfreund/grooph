@@ -214,6 +214,13 @@ pub struct MeasureLayout {
     pub notes_left_edge: f32,
 }
 
+/// Narrowest note area (px, excluding clef and time signature) in which
+/// `measure`'s notes, placed by duration, don't overlap each other or the
+/// barline.
+pub fn min_note_area_width(measure: &Measure, opts: &LayoutOpts) -> f32 {
+    notes::min_note_area_width(measure, &plan_measure(measure), opts)
+}
+
 /// Build the pixel layout (`MeasureLayout`) from a `Measure`.
 pub fn build_measure_layout(measure: &Measure, opts: &LayoutOpts) -> MeasureLayout {
     let mut x_offset_acc = opts.rect.left();

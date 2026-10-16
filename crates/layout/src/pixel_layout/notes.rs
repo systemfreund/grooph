@@ -116,6 +116,47 @@ fn compute_vertical_extents(
     (top, bottom)
 }
 
+/// Whether each beat sits in a beamed group of two or more (no flag).
+fn in_beam_flags(beats: &[Beat], render_plan: &RenderPlan) -> Vec<bool> {
+    let mut flags = vec![false; beats.len()];
+    for g in &render_plan.beams {
+        if g.beat_indices.len() >= 2 {
+            for &idx in &g.beat_indices {
+                if idx < flags.len() {
+                    flags[idx] = true;
+                }
+            }
+        }
+    }
+    flags
+}
+
+/// Least distance (px) each beat needs to the next note head, or to the
+/// barline for the last one, so their glyphs don't overlap.
+fn min_advances(beats: &[Beat], in_beam: &[bool], opts: &LayoutOpts) -> Vec<f32> {
+    let extents: Vec<(f32, f32)> =
+        beats.iter().zip(in_beam).map(|(b, &ib)| compute_x_extents(b, ib, opts)).collect();
+    let gap = c::COLLISION_MIN_GAP_EM * opts.em;
+    (0..beats.len())
+        .map(|i| match extents.get(i + 1) {
+            Some(&(next_left, _)) => extents[i].1 + gap - next_left,
+            None => extents[i].1,
+        })
+        .collect()
+}
+
+/// Narrowest note area in which no glyph overlaps the next one or the
+/// barline (see [`crate::calculate_x_centers`]'s `min_advance`).
+pub(super) fn min_note_area_width(
+    measure: &Measure,
+    render_plan: &RenderPlan,
+    opts: &LayoutOpts,
+) -> f32 {
+    let beats = measure.beats();
+    let in_beam = in_beam_flags(beats, render_plan);
+    c::NOTE_LEAD_EM * opts.em + min_advances(beats, &in_beam, opts).iter().sum::<f32>()
+}
+
 pub(super) fn build_note_layout(
     measure: &Measure,
     render_plan: &RenderPlan,
@@ -126,24 +167,21 @@ pub(super) fn build_note_layout(
     let beams = &render_plan.beams;
 
     // Basisverteilung (rhythmisch gleichmäßig über die verfügbare Breite)
-    let lead = c::NOTE_LEAD_EM * opts.em;
-    let x_centers =
-        crate::calculate_x_centers(beats, rect.width(), opts.proportional_spacing, lead)
-            .into_iter()
-            .map(|cx| cx + rect.left())
-            .collect::<Vec<_>>();
-
     // Determine which beats are inside any beamed group (for flag suppression)
-    let mut in_beam_flags: Vec<bool> = vec![false; beats.len()];
-    for g in beams {
-        if g.beat_indices.len() >= 2 {
-            for &idx in &g.beat_indices {
-                if idx < in_beam_flags.len() {
-                    in_beam_flags[idx] = true;
-                }
-            }
-        }
-    }
+    let in_beam_flags = in_beam_flags(beats, render_plan);
+
+    let lead = c::NOTE_LEAD_EM * opts.em;
+    let min_advance = min_advances(beats, &in_beam_flags, opts);
+    let x_centers = crate::calculate_x_centers(
+        beats,
+        rect.width(),
+        opts.proportional_spacing,
+        lead,
+        &min_advance,
+    )
+    .into_iter()
+    .map(|cx| cx + rect.left())
+    .collect::<Vec<_>>();
 
     // 1) Kollisionen vermeiden: metrik-basierte Bounding-Box je Element und
     //    greedy nach rechts schieben (nur X‑Richtung).

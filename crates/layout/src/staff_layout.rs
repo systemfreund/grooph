@@ -12,7 +12,9 @@
 //! overflows its row — the caller is expected to host the result in a
 //! horizontally scrollable area for that case.
 
-use crate::pixel_layout::{GlyphMetrics, LayoutOpts, MeasureLayout, build_measure_layout};
+use crate::pixel_layout::{
+    GlyphMetrics, LayoutOpts, MeasureLayout, build_measure_layout, min_note_area_width,
+};
 use egui::{FontId, Pos2, Rect, Vec2, pos2, vec2};
 use grooph_measure::duration::s;
 use grooph_measure::grid::DEFAULT_GRID;
@@ -180,10 +182,11 @@ fn sixteenth_slots(ts: &TimeSignature) -> f32 {
 /// header glyphs (clef / time signature) it will draw.
 ///
 /// The body is sized for at least a measure full of sixteenths, so up to
-/// that density the width depends only on the time signature: editing notes
-/// or swapping measures (endless mode) never reflows the staff. Denser
-/// measures (32nds, large tuplets) grow with their beat count so nothing
-/// collides.
+/// that density the width usually depends only on the time signature:
+/// editing notes or swapping measures (endless mode) rarely reflows the
+/// staff. Denser measures (32nds, large tuplets) grow with their beat count,
+/// and measures mixing very short and long notes grow until the short ones,
+/// spaced by duration, no longer collide.
 fn min_measure_width(
     score: &Score,
     measure_idx: MeasureIdx,
@@ -194,6 +197,9 @@ fn min_measure_width(
     let m = &score.measures[measure_idx];
     let beats = (m.beats().len() as f32).max(sixteenth_slots(&m.time_signature()));
     let body = (opts.min_measure_width_em + beats * opts.note_width_em) * opts.em;
+    // Short notes next to long ones (e.g. 32nds among eighths) get little
+    // space when spaced by duration: widen until no glyph overlaps the next.
+    let body = body.max(min_note_area_width(m, &opts.measure_opts(opts.rect, false, false)));
     let clef = if show_clef { CLEF_WIDTH_EM * opts.em } else { 0.0 };
     let ts = if show_ts { time_sig_width_em(&m.time_signature()) * opts.em } else { 0.0 };
     body + clef + ts
