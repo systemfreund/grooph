@@ -225,10 +225,13 @@ fn draw_count_layer(
 ///
 /// - Inside notes (not last): linear interpolation between consecutive note
 ///   centers (`notes[i].center.x` → `notes[i+1].center.x`).
-/// - Last note, `frac < 0.5`: linear from `notes[last].center.x` to
+/// - Last note, `frac < split`: linear from `notes[last].center.x` to
 ///   `rect.right()` (cursor extends past the last note head, fading out).
-/// - Last note, `frac >= 0.5`: returns `None`. The cursor visually moves into
-///   the *following* measure — call [`playback_cursor_entering_x`] there.
+/// - Last note, `frac >= split`: returns `None`. The cursor visually moves
+///   into the *following* measure — call [`playback_cursor_entering_x`] there.
+///
+/// `split` (see [`last_note_split`]) is the share of the last note's duration
+/// spent before the barline.
 /// - Trailing gap (tick past every beat's end, i.e. an incomplete measure):
 ///   `Some(rect.right())`. Cursor parks at the right edge.
 ///
@@ -238,6 +241,7 @@ pub fn playback_cursor_x(
     measure_layout: &MeasureLayout,
     rect: Rect,
     tick: f64,
+    split: f64,
 ) -> Option<f32> {
     let ts = measure.time_signature();
     let total_ticks = DEFAULT_GRID.ticks_per_measure(&ts) as f64;
@@ -262,12 +266,12 @@ pub fn playback_cursor_x(
                 return Some(x0 + ((x1 - x0) * frac as f32));
             }
 
-            // Last note: split into two phases. Phase 1 covers frac in [0, 0.5)
-            // and walks from the note head to the measure's right edge over
-            // *half* of the note duration. Phase 2 (frac >= 0.5) renders in
-            // the following measure via `playback_cursor_entering_x`.
-            if frac < 0.5 {
-                let phase1_frac = (frac * 2.0) as f32;
+            // Last note: split into two phases. Phase 1 covers frac in
+            // [0, split) and walks from the note head to the measure's right
+            // edge. Phase 2 (frac >= split) renders in the following measure
+            // via `playback_cursor_entering_x`.
+            if frac < split {
+                let phase1_frac = (frac / split) as f32;
                 return Some(x0 + (rect.right() - x0) * phase1_frac);
             }
             return None;
@@ -302,11 +306,30 @@ pub fn playback_cursor_entering_x(
     Some(left + (right - left) * f)
 }
 
-/// If `local_tick` is in the last note's second half (frac >= 0.5), returns
-/// the entry fraction mapped into `[0, 1]` for [`playback_cursor_entering_x`].
+/// Share of the last note's duration the cursor spends before the barline:
+/// its distance from the last note head to the barline, out of that plus the
+/// following measure's distance from its left edge to its first note head.
+/// The cursor then moves at an even speed across the barline.
+pub fn last_note_split(
+    measure_layout: &MeasureLayout,
+    rect: Rect,
+    next_layout: &MeasureLayout,
+) -> f64 {
+    let (Some(last), Some(first)) = (measure_layout.notes.last(), next_layout.notes.first())
+    else {
+        return 0.5;
+    };
+    let out = (rect.right() - last.center.x).max(0.0);
+    let into = (first.center.x - next_layout.notes_left_edge).max(0.0);
+    if out + into <= 0.0 { 0.5 } else { (out / (out + into)) as f64 }
+}
+
+/// If `local_tick` is in the last note past `split` (see [`last_note_split`]),
+/// returns the entry fraction mapped into `[0, 1]` for
+/// [`playback_cursor_entering_x`].
 /// Returns `None` for everything else (cursor stays in the current measure or
 /// hasn't reached the wrap point yet).
-pub fn last_note_entering_frac(measure: &Measure, local_tick: f64) -> Option<f64> {
+pub fn last_note_entering_frac(measure: &Measure, local_tick: f64, split: f64) -> Option<f64> {
     let ts = measure.time_signature();
     let total_ticks = DEFAULT_GRID.ticks_per_measure(&ts) as f64;
     if total_ticks <= 0.0 {
@@ -325,10 +348,13 @@ pub fn last_note_entering_frac(measure: &Measure, local_tick: f64) -> Option<f64
         return None;
     }
     let frac = (t - start) / dur_ticks;
-    if frac < 0.5 {
+    if frac < split {
         return None;
     }
-    Some((frac - 0.5) * 2.0)
+    if split >= 1.0 {
+        return Some(1.0);
+    }
+    Some((frac - split) / (1.0 - split))
 }
 
 fn clamp_tick_to_measure(tick: f64, total_ticks: f64) -> f64 {
@@ -607,7 +633,7 @@ mod tests {
     #[test]
     fn two_quarter_rests_two_four_ands_stay_inside_the_measure() {
         // 2/4 + two quarter rests + "Ands" subdivision. `1` and `2` sit over
-        // the rests (W/4 and 3W/4 with proportional spacing). The first `&`
+        // the rests (at their onsets with proportional spacing). The first `&`
         // is halfway between the rests; the trailing `&` halfway between the
         // last rest and the barline, not on it (#13).
         let mut m = Measure::new(TimeSignature::TWO_FOUR);
@@ -625,6 +651,33 @@ mod tests {
         let expected = [r0, (r0 + r1) / 2.0, r1, (r1 + rect.right()) / 2.0];
         for (i, (got, exp)) in xs.iter().zip(expected.iter()).enumerate() {
             assert!((got - exp).abs() < 0.5, "label {i}: got {got}, expected {exp}",);
+        }
+    }
+
+    #[test]
+    fn sixteenth_labels_are_evenly_spaced_up_to_the_barline() {
+        // Quarter, two eighths, quarter, quarter: notes sit at their onsets,
+        // so every sixteenth label is the same distance from the next, also
+        // after the first quarter and in the last beat before the barline.
+        let mut m = Measure::new(TimeSignature::FOUR_FOUR);
+        m.set_beat(0, Beat::note(q())).unwrap();
+        m.set_beat(1, Beat::note(e())).unwrap();
+        m.set_beat(2, Beat::note(e())).unwrap();
+        m.set_beat(3, Beat::note(q())).unwrap();
+        m.set_beat(4, Beat::note(q())).unwrap();
+
+        let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(400.0, 100.0));
+        let opts = opts_for(rect);
+        let layout = build_measure_layout(&m, &opts);
+
+        let mut layer = CountLayer::new(0, CountScope::BeatUnit, Subdiv::Fixed(4));
+        layer.labels = Some(LabelPattern::sixteenth());
+        let xs = label_xs(&m, &layout, rect, &CountConfig::new(vec![layer]));
+        assert_eq!(xs.len(), 16);
+        let step = (rect.right() - xs[0]) / 16.0;
+        for (i, w) in xs.windows(2).enumerate() {
+            let gap = w[1] - w[0];
+            assert!((gap - step).abs() < 0.5, "gap after label {i}: {gap}, expected {step}");
         }
     }
 

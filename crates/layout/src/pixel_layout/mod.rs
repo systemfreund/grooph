@@ -20,6 +20,9 @@ mod c {
     // Collision pipeline
     pub const COLLISION_MIN_GAP_EM: f32 = 0.00;
 
+    /// Space from the start of the note area to the first note head.
+    pub const NOTE_LEAD_EM: f32 = 0.45;
+
     // Tuplet bracket / number
     pub const TUPLET_BRACKET_GAP_SS: f32 = 1.80;
     pub const TUPLET_HOOK_LEN_SS: f32 = 0.80;

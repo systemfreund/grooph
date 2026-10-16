@@ -126,10 +126,12 @@ pub(super) fn build_note_layout(
     let beams = &render_plan.beams;
 
     // Basisverteilung (rhythmisch gleichmäßig über die verfügbare Breite)
-    let x_centers = crate::calculate_x_centers(beats, rect.width(), opts.proportional_spacing)
-        .into_iter()
-        .map(|cx| cx + rect.left())
-        .collect::<Vec<_>>();
+    let lead = c::NOTE_LEAD_EM * opts.em;
+    let x_centers =
+        crate::calculate_x_centers(beats, rect.width(), opts.proportional_spacing, lead)
+            .into_iter()
+            .map(|cx| cx + rect.left())
+            .collect::<Vec<_>>();
 
     // Determine which beats are inside any beamed group (for flag suppression)
     let mut in_beam_flags: Vec<bool> = vec![false; beats.len()];

@@ -4,7 +4,8 @@
 //! wrap animation across measure boundaries.
 
 use crate::measure::{
-    last_note_entering_frac, playback_cursor_entering_x, playback_cursor_x, render_measure_at,
+    last_note_entering_frac, last_note_split, playback_cursor_entering_x, playback_cursor_x,
+    render_measure_at,
 };
 use eframe::egui;
 use eframe::egui::{Color32, Rangef, Stroke};
@@ -71,7 +72,7 @@ pub fn draw_staff(
 /// Implements the two-phase wrap animation:
 /// - Phase 1: cursor lives in the currently playing measure
 ///   (`playback.0`). Returned as `(playback.0, x)`.
-/// - Phase 2 (last-note second half): cursor lives in
+/// - Phase 2 (end of the last note, see [`last_note_split`]): cursor lives in
 ///   `(playback.0 + 1) % score.len()`, entering from the left. Returned as
 ///   that measure's index plus its entering X.
 ///
@@ -88,20 +89,26 @@ pub fn current_cursor_x(
     }
 
     let active_measure = score.measures.get(play_idx)?;
+    let active_placed = staff.placed(play_idx)?;
+    let next_idx = (play_idx + 1) % score.len();
+    let next_placed = staff.placed(next_idx)?;
+    let split = last_note_split(&active_placed.layout, active_placed.rect, &next_placed.layout);
 
-    // Phase 2 first: if we're in the second half of the active measure's last
+    // Phase 2 first: if we're past the split of the active measure's last
     // note, the cursor visually belongs to the *next* measure.
-    if let Some(entry_frac) = last_note_entering_frac(active_measure, local_tick) {
-        let next_idx = (play_idx + 1) % score.len();
-        let next_placed = staff.placed(next_idx)?;
+    if let Some(entry_frac) = last_note_entering_frac(active_measure, local_tick, split) {
         let x = playback_cursor_entering_x(&next_placed.layout, next_placed.rect, entry_frac)?;
         return Some((next_idx, x));
     }
 
     // Phase 1: cursor lives in the active measure.
-    let active_placed = staff.placed(play_idx)?;
-    let x =
-        playback_cursor_x(active_measure, &active_placed.layout, active_placed.rect, local_tick)?;
+    let x = playback_cursor_x(
+        active_measure,
+        &active_placed.layout,
+        active_placed.rect,
+        local_tick,
+        split,
+    )?;
     Some((play_idx, x))
 }
 
