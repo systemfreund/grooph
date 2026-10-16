@@ -7,15 +7,18 @@ use crate::generator::ENDLESS_MIN_BARS;
 use crate::generator_panel::{
     offered_subdivisions, subdivision_label, time_signature_label, time_signatures,
 };
-use crate::{Grooph, Mode, TransportState};
+use crate::library_panel::LINK_COPIED_NOTICE_S;
+use crate::{Grooph, Mode, TransportState, platform};
 use eframe::egui;
 use eframe::egui::{
     Align2, Button, Color32, CornerRadius, FontId, Frame, Id, Margin, Modal, Painter, Rect,
     Response, RichText, Sense, Shape, Stroke, Ui, Vec2, pos2, vec2,
 };
+use grooph_link::{LinkContent, SharedLink};
 use grooph_measure::generator::{MAX_BARS, MAX_COMPLEXITY, Subdivision, effective_subdivision};
 use grooph_measure::swing::{MAX_SWING_PERCENT, MIN_SWING_PERCENT, SwingUnit};
 use grooph_measure::tempo::{MAX_BPM, MIN_BPM};
+use log::warn;
 
 /// Windows narrower than this (in points) get the compact layout.
 pub(crate) const COMPACT_MAX_WIDTH: f32 = 600.0;
@@ -229,6 +232,30 @@ fn paint_play_icon(painter: &Painter, rect: Rect, color: Color32, playing: bool)
         let points = vec![c + vec2(-s, -1.15 * s), c + vec2(1.3 * s, 0.0), c + vec2(-s, 1.15 * s)];
         painter.add(Shape::convex_polygon(points, color, Stroke::NONE));
     }
+}
+
+/// The iOS share symbol: an open box with an arrow pointing up out of it.
+fn paint_share_icon(painter: &Painter, rect: Rect, color: Color32) {
+    let c = rect.center() + vec2(0.0, rect.height() * 0.03);
+    let s = rect.width() * 0.14;
+    let stroke = Stroke::new(2.5, color);
+    let box_top = c.y - 0.3 * s;
+    let box_bottom = c.y + 1.2 * s;
+    painter.add(Shape::line(
+        vec![
+            pos2(c.x - 0.45 * s, box_top),
+            pos2(c.x - s, box_top),
+            pos2(c.x - s, box_bottom),
+            pos2(c.x + s, box_bottom),
+            pos2(c.x + s, box_top),
+            pos2(c.x + 0.45 * s, box_top),
+        ],
+        stroke,
+    ));
+    let tip = pos2(c.x, c.y - 1.6 * s);
+    painter.line_segment([pos2(c.x, c.y + 0.4 * s), tip], stroke);
+    painter.line_segment([tip, tip + vec2(-0.5 * s, 0.5 * s)], stroke);
+    painter.line_segment([tip, tip + vec2(0.5 * s, 0.5 * s)], stroke);
 }
 
 /// Grid of option buttons; returns the one that was tapped.
@@ -493,12 +520,13 @@ impl Grooph {
     /// Centered "new rhythm" and play buttons. Returns whether "new" was tapped.
     fn compact_transport(&mut self, ui: &mut Ui) -> bool {
         let playing = self.playback_ctl.transport_state == TransportState::Playing;
+        self.compact_status_line(ui);
         let (row, _) =
             ui.allocate_exact_size(vec2(ui.available_width(), PLAY_BUTTON_SIZE), Sense::hover());
         let size = Vec2::splat(PLAY_BUTTON_SIZE);
         let new_rect = Rect::from_min_size(row.min, size);
         let play_rect = Rect::from_center_size(row.center(), size);
-        let score_rect = Rect::from_min_size(row.right_top() - vec2(PLAY_BUTTON_SIZE, 0.0), size);
+        let share_rect = Rect::from_min_size(row.right_top() - vec2(PLAY_BUTTON_SIZE, 0.0), size);
 
         let side_fill = ui.visuals().extreme_bg_color;
         let text = ui.visuals().strong_text_color();
@@ -536,17 +564,62 @@ impl Grooph {
             self.toggle_playback();
         }
 
-        // Live timing score while playing along.
-        if let Some(summary) = self.playback_ctl.accuracy.tracker.live_summary() {
-            ui.painter().text(
-                score_rect.center(),
-                Align2::CENTER_CENTER,
-                format!("{:.0}%", summary.score_percent()),
-                FontId::proportional(20.0),
-                text,
-            );
+        if round_button_at(
+            ui,
+            share_rect,
+            Id::new("compact_share"),
+            side_fill,
+            text,
+            paint_share_icon,
+        )
+        .on_hover_text("Share a link to this rhythm")
+        .clicked()
+        {
+            self.share_link(ui);
         }
         roll
+    }
+
+    /// One line above the transport buttons: the live timing score while
+    /// playing along, or a short note after a link was copied.
+    fn compact_status_line(&mut self, ui: &mut Ui) {
+        let now = ui.input(|i| i.time);
+        let copied = self.ui.link_copied_at.is_some_and(|at| now - at < LINK_COPIED_NOTICE_S);
+        let text = if copied {
+            ui.ctx().request_repaint_after_secs(0.5);
+            Some("Link copied".to_owned())
+        } else {
+            self.playback_ctl
+                .accuracy
+                .tracker
+                .live_summary()
+                .map(|summary| format!("Timing {:.0}%", summary.score_percent()))
+        };
+        if let Some(text) = text {
+            ui.vertical_centered(|ui| {
+                ui.label(RichText::new(text).size(16.0).weak());
+            });
+            ui.add_space(4.0);
+        }
+    }
+
+    /// Share a link to the working score with tempo and swing: the system
+    /// share sheet where the browser has one, else the clipboard.
+    fn share_link(&mut self, ui: &Ui) {
+        let swing = self.playback_ctl.audio_cfg.swing;
+        let link = SharedLink {
+            bpm: Some(self.playback_ctl.bpm),
+            swing: (!swing.is_straight()).then_some(swing),
+            content: Some(LinkContent::Score(self.editor.score.clone())),
+        };
+        let Some(url) = link.to_url(&platform::share_base_url()) else {
+            warn!("The score cannot be written as a link");
+            return;
+        };
+        if !platform::open_share_sheet(&url) {
+            ui.ctx().copy_text(url);
+            self.ui.link_copied_at = Some(ui.input(|i| i.time));
+        }
     }
 
     /// Play button and measure controls above the tool palette.
@@ -570,7 +643,7 @@ impl Grooph {
                     }
                     ui.add_space(8.0);
                     ui.label(format!(
-                        "Bar {}/{}",
+                        "{}/{}",
                         self.editor.cursor.measure_idx + 1,
                         self.editor.score.len()
                     ));
@@ -580,6 +653,22 @@ impl Grooph {
                     if ui.button("➖").on_hover_text("Remove this bar").clicked() {
                         self.remove_current_measure();
                     }
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let fill = ui.visuals().extreme_bg_color;
+                        let text = ui.visuals().strong_text_color();
+                        if round_button(ui, SIDE_BUTTON_SIZE, fill, text, paint_share_icon)
+                            .on_hover_text("Share a link to this rhythm")
+                            .clicked()
+                        {
+                            self.share_link(ui);
+                        }
+                        let now = ui.input(|i| i.time);
+                        if self.ui.link_copied_at.is_some_and(|at| now - at < LINK_COPIED_NOTICE_S)
+                        {
+                            ui.ctx().request_repaint_after_secs(0.5);
+                            ui.weak("Copied");
+                        }
+                    });
                 });
             });
     }

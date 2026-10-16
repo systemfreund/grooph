@@ -106,3 +106,40 @@ pub(crate) fn share_base_url() -> String {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn share_base_url() -> String { "https://grooph.app/".into() }
+
+/// Open the system share sheet for `url` (Web Share API). Returns `false`
+/// where there is none (most desktop browsers, native), so the caller can
+/// copy the link instead.
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn open_share_sheet(url: &str) -> bool {
+    use web_sys::js_sys::{Function, Object, Promise, Reflect};
+    use web_sys::wasm_bindgen::{JsCast as _, JsValue};
+
+    let Some(window) = web_sys::window() else { return false };
+    let navigator: JsValue = window.navigator().into();
+    let Some(share) = Reflect::get(&navigator, &"share".into())
+        .ok()
+        .and_then(|f| f.dyn_into::<Function>().ok())
+    else {
+        return false;
+    };
+    let data = Object::new();
+    if Reflect::set(&data, &"url".into(), &url.into()).is_err() {
+        return false;
+    }
+    match share.call1(&navigator, &data).map(|p| p.dyn_into::<Promise>()) {
+        Ok(Ok(promise)) => {
+            // Closing the sheet without sharing rejects the promise; nothing to do.
+            wasm_bindgen_futures::spawn_local(async move {
+                if let Err(err) = wasm_bindgen_futures::JsFuture::from(promise).await {
+                    log::debug!("Share sheet closed: {err:?}");
+                }
+            });
+            true
+        }
+        _ => false,
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn open_share_sheet(_url: &str) -> bool { false }

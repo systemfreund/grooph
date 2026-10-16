@@ -4,7 +4,7 @@ use eframe::egui;
 use log::warn;
 
 /// How long "Link copied" stays visible.
-const LINK_COPIED_NOTICE_S: f64 = 2.0;
+pub(crate) const LINK_COPIED_NOTICE_S: f64 = 2.0;
 
 impl Grooph {
     pub(super) fn library_panel(&mut self, ui: &mut egui::Ui) {

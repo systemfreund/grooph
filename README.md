@@ -175,6 +175,9 @@ Important root files:
 - Settings open in a `Modal` picker; generator changes go through
   `finish_generator_change`, shared with the desktop generator panel.
 - The staff uses tighter spacing and no clef there, so glyphs are bigger.
+- Share (right of play, and in the edit bar) builds a score link with tempo
+  and swing; on the web it opens the system share sheet
+  (`platform::open_share_sheet`, Web Share API), else copies the link.
 
 
 - Tool registry: `crates/app/src/tools.rs` (ToolKind, Modifier, shortcuts).
