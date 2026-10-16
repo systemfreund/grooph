@@ -207,7 +207,7 @@ pub const LEGIBILITY_FLOOR_EM: f32 = 9.0;
 /// Room below the staff line for rests, accents and timing marks, in em.
 pub const ROOM_BELOW_EM: f32 = 0.65;
 /// Room below the staff line when count labels are drawn under the notes.
-pub const ROOM_BELOW_WITH_LABELS_EM: f32 = 0.9;
+pub const ROOM_BELOW_WITH_LABELS_EM: f32 = 1.0;
 
 /// Headroom above the staff line, in em: stems (`stem_length_factor` is user
 /// configurable), flags and tuplet brackets.
