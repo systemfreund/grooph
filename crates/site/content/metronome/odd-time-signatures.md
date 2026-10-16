@@ -85,5 +85,5 @@ as two dotted quarters (3+3).
 ### Which meters does grooph support?
 
 1 to 7 beats over a quarter note, 3 to 13 over an eighth and 5 to 19 over a sixteenth. The
-random rhythm generator writes exercises in quarter-note meters up to 7/4 and in
-eighth-note meters from 3/8 to 13/8, grouped 3+2, 3+3, 2+3+2 and so on.
+random rhythm generator writes exercises in all of them, grouped 3+2, 3+3, 2+3+2 and so
+on.

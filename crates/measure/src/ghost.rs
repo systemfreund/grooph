@@ -6,8 +6,8 @@
 //! eighths = 2 slots, sixteenths = 4, triplets = 3. `Mixed` uses a triplet
 //! grid in beats that contain a tuplet and sixteenths otherwise. Beat units
 //! other than a quarter (e.g. `x/8`) get a straight grid of the subdivision's
-//! note value: triplets fall back to eighths and mixed to sixteenths, as in
-//! the generator.
+//! note value: triplets fall back to eighths and mixed to sixteenths, and
+//! `x/16` always uses sixteenths, as in the generator.
 
 use crate::BeatKind::Note;
 use crate::Measure;
@@ -37,6 +37,8 @@ pub fn ghost_onsets(measure: &Measure, subdivision: Subdivision) -> Vec<u32> {
 
     if ts.beat_unit != 4 {
         let unit = match subdivision {
+            // x/16 is always generated in sixteenths.
+            _ if ts.beat_unit == 16 => s(),
             Subdivision::Eighths | Subdivision::Triplets => e(),
             Subdivision::Sixteenths | Subdivision::Mixed => s(),
         };
@@ -132,5 +134,8 @@ mod tests {
         // Triplets and mixed fall back to straight grids, like the generator.
         assert_eq!(ghost_onsets(&m, Subdivision::Triplets).len(), 5);
         assert_eq!(ghost_onsets(&m, Subdivision::Mixed).len(), 11);
+        // 7/16: a ghost on every sixteenth.
+        let m = Measure::new(TimeSignature { beats: 7, beat_unit: 16 });
+        assert_eq!(ghost_onsets(&m, Subdivision::Eighths).len(), 7);
     }
 }

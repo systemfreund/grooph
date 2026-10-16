@@ -40,6 +40,10 @@
 //! sixteenth figures start at level 3. Triplets and mixed are not offered in
 //! `x/8`; they fall back to eighths and sixteenths (see
 //! [`effective_subdivision`]).
+//!
+//! `x/16` works the same way one note value down and always in sixteenths:
+//! two-sixteenth groups (an eighth: `x-`, `xx`, then `-x`) and
+//! three-sixteenth groups (a dotted eighth) with the triplet ladder.
 
 use crate::BeatKind::{Note, Rest};
 use crate::duration::{Duration, NoteValue, e, q, s, t8};
@@ -118,19 +122,50 @@ impl GroupingSet {
 }
 
 /// Length of one generator beat: a quarter (`x/4` beats and two-eighth
-/// groups in `x/8`) or a dotted quarter (three-eighth groups).
+/// groups in `x/8`), a dotted quarter (three-eighth groups), an eighth or a
+/// dotted eighth (two- and three-sixteenth groups in `x/16`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum BeatSpan {
     Quarter,
     DottedQuarter,
+    Eighth,
+    DottedEighth,
 }
 
 impl BeatSpan {
+    pub const ALL: [BeatSpan; 4] =
+        [BeatSpan::Quarter, BeatSpan::DottedQuarter, BeatSpan::Eighth, BeatSpan::DottedEighth];
+
     /// The span written as its own measure, e.g. for a thumbnail.
     pub fn time_signature(self) -> TimeSignature {
+        let (beats, beat_unit) = match self {
+            BeatSpan::Quarter => (1, 4),
+            BeatSpan::DottedQuarter => (3, 8),
+            BeatSpan::Eighth => (2, 16),
+            BeatSpan::DottedEighth => (3, 16),
+        };
+        TimeSignature { beats, beat_unit }
+    }
+
+    /// Length of the span in beats of `beat_unit`, e.g. 2 for a quarter in
+    /// `x/8` or 3 for a dotted eighth in `x/16`.
+    pub fn beats_of(self, beat_unit: u8) -> u32 {
+        let sixteenths: u32 = match self {
+            BeatSpan::Quarter => 4,
+            BeatSpan::DottedQuarter => 6,
+            BeatSpan::Eighth => 2,
+            BeatSpan::DottedEighth => 3,
+        };
+        sixteenths * beat_unit as u32 / 16
+    }
+
+    /// Whole-span rest for the "space" setting.
+    fn rest(self) -> &'static Cell {
         match self {
-            BeatSpan::Quarter => TimeSignature::ONE_FOUR,
-            BeatSpan::DottedQuarter => TimeSignature { beats: 3, beat_unit: 8 },
+            BeatSpan::Quarter => &QUARTER_REST,
+            BeatSpan::DottedQuarter => &DOTTED_QUARTER_REST,
+            BeatSpan::Eighth => &EIGHTH_REST,
+            BeatSpan::DottedEighth => &DOTTED_EIGHTH_REST,
         }
     }
 }
@@ -155,39 +190,39 @@ impl Grouping {
 }
 
 /// Subdivision actually used in `ts`: triplets and mixed have no cells for
-/// `x/8` beat groups and fall back to eighths and sixteenths.
+/// `x/8` beat groups and fall back to eighths and sixteenths; `x/16` is
+/// always written in sixteenths.
 pub fn effective_subdivision(subdivision: Subdivision, ts: TimeSignature) -> Subdivision {
     match (ts.beat_unit, subdivision) {
         (8, Subdivision::Triplets) => Subdivision::Eighths,
         (8, Subdivision::Mixed) => Subdivision::Sixteenths,
+        (16, _) => Subdivision::Sixteenths,
         _ => subdivision,
     }
 }
 
 /// Generator beats of `ts`, in order: one quarter per beat in `x/4`, the
-/// meter's beat groups in `x/8` (groups longer than three eighths are split
-/// into twos, with a three at the end for an odd length). `None` if the
-/// generator has no cells for `ts`.
+/// meter's beat groups in `x/8` and `x/16` (groups longer than three are
+/// split into twos, with a three at the end for an odd length). `None` if
+/// the generator has no cells for `ts`.
 pub fn beat_groups(ts: TimeSignature) -> Option<Vec<BeatSpan>> {
-    match ts.beat_unit {
-        4 if ts.beats > 0 => Some(vec![BeatSpan::Quarter; ts.beats as usize]),
-        8 if ts.beats >= 2 => {
-            let mut spans = Vec::new();
-            for size in default_groups_for(&ts) {
-                match size {
-                    0 | 1 => return None,
-                    n => {
-                        let threes = n % 2;
-                        let twos = (n - 3 * threes) / 2;
-                        spans.extend(std::iter::repeat_n(BeatSpan::Quarter, twos as usize));
-                        spans.extend(std::iter::repeat_n(BeatSpan::DottedQuarter, threes as usize));
-                    }
-                }
-            }
-            Some(spans)
+    let (two, three) = match ts.beat_unit {
+        4 if ts.beats > 0 => return Some(vec![BeatSpan::Quarter; ts.beats as usize]),
+        8 if ts.beats >= 2 => (BeatSpan::Quarter, BeatSpan::DottedQuarter),
+        16 if ts.beats >= 2 => (BeatSpan::Eighth, BeatSpan::DottedEighth),
+        _ => return None,
+    };
+    let mut spans = Vec::new();
+    for size in default_groups_for(&ts) {
+        if size < 2 {
+            return None;
         }
-        _ => None,
+        let threes = size % 2;
+        let twos = (size - 3 * threes) / 2;
+        spans.extend(std::iter::repeat_n(two, twos as usize));
+        spans.extend(std::iter::repeat_n(three, threes as usize));
     }
+    Some(spans)
 }
 
 /// Whether the generator can write measures in `ts`.
@@ -279,6 +314,10 @@ enum CellFamily {
     CompoundEighth,
     /// Sixteenth figures over a three-eighth group.
     CompoundSixteenth,
+    /// Figures over a two-sixteenth group (an eighth) in `x/16`.
+    SixteenthPair,
+    /// Figures over a three-sixteenth group (a dotted eighth) in `x/16`.
+    SixteenthTriple,
 }
 
 impl CellFamily {
@@ -295,13 +334,17 @@ impl CellFamily {
             CellFamily::CompoundEighth => {
                 matches!(subdivision, Subdivision::Eighths | Subdivision::Sixteenths)
             }
-            CellFamily::CompoundSixteenth => subdivision == Subdivision::Sixteenths,
+            CellFamily::CompoundSixteenth
+            | CellFamily::SixteenthPair
+            | CellFamily::SixteenthTriple => subdivision == Subdivision::Sixteenths,
         }
     }
 
     fn span(self) -> BeatSpan {
         match self {
             CellFamily::CompoundEighth | CellFamily::CompoundSixteenth => BeatSpan::DottedQuarter,
+            CellFamily::SixteenthPair => BeatSpan::Eighth,
+            CellFamily::SixteenthTriple => BeatSpan::DottedEighth,
             _ => BeatSpan::Quarter,
         }
     }
@@ -335,6 +378,12 @@ static QUARTER_REST: Cell =
 /// Whole-group rest for three-eighth groups; same as grouping 22.
 static DOTTED_QUARTER_REST: Cell =
     Cell { id: g(22), level: 1, family: CellFamily::CompoundEighth, beats: &[(dq(), R)] };
+
+/// Whole-group rests for two- and three-sixteenth groups (groupings 41, 45).
+static EIGHTH_REST: Cell =
+    Cell { id: g(41), level: 1, family: CellFamily::SixteenthPair, beats: &[(e(), R)] };
+static DOTTED_EIGHTH_REST: Cell =
+    Cell { id: g(45), level: 1, family: CellFamily::SixteenthTriple, beats: &[(de(), R)] };
 
 const fn g(id: u8) -> GroupingId { GroupingId(id) }
 
@@ -398,6 +447,20 @@ const CELLS: &[Cell] = &[
     Cell { id: g(38), level: 5, family: CellFamily::CompoundSixteenth, beats: &[(s(), R), (s(), N), (e(), N), (e(), N)] },
     Cell { id: g(39), level: 5, family: CellFamily::CompoundSixteenth, beats: &[(e(), R), (s(), N), (s(), N), (e(), N)] },
     Cell { id: g(40), level: 5, family: CellFamily::CompoundSixteenth, beats: &[(de(), N), (s(), N), (s(), N), (s(), N)] },
+    // Two-sixteenth groups in x/16 (an eighth).
+    Cell { id: g(41), level: 1, family: CellFamily::SixteenthPair, beats: &[(e(), R)] },
+    Cell { id: g(42), level: 1, family: CellFamily::SixteenthPair, beats: &[(e(), N)] },
+    Cell { id: g(43), level: 1, family: CellFamily::SixteenthPair, beats: &[(s(), N), (s(), N)] },
+    Cell { id: g(44), level: 2, family: CellFamily::SixteenthPair, beats: &[(s(), R), (s(), N)] },
+    // Three-sixteenth groups in x/16 (a dotted eighth), triplet ladder.
+    Cell { id: g(45), level: 1, family: CellFamily::SixteenthTriple, beats: &[(de(), R)] },
+    Cell { id: g(46), level: 1, family: CellFamily::SixteenthTriple, beats: &[(de(), N)] },
+    Cell { id: g(47), level: 1, family: CellFamily::SixteenthTriple, beats: &[(s(), N), (s(), N), (s(), N)] },
+    Cell { id: g(48), level: 2, family: CellFamily::SixteenthTriple, beats: &[(e(), N), (s(), N)] },
+    Cell { id: g(49), level: 3, family: CellFamily::SixteenthTriple, beats: &[(e(), R), (s(), N)] },
+    Cell { id: g(50), level: 4, family: CellFamily::SixteenthTriple, beats: &[(s(), N), (e(), N)] },
+    Cell { id: g(51), level: 4, family: CellFamily::SixteenthTriple, beats: &[(s(), R), (s(), N), (s(), N)] },
+    Cell { id: g(52), level: 5, family: CellFamily::SixteenthTriple, beats: &[(s(), R), (e(), N)] },
 ];
 
 /// Triplet levels with the mixed subdivision (reference app): the offbeat
@@ -514,18 +577,14 @@ fn pick_cells(settings: &GeneratorSettings, rng: &mut Rng) -> Vec<&'static Cell>
     };
     let subdivision = effective_subdivision(settings.subdivision, ts);
     let space = settings.space.clamp(0.0, 1.0);
-    let quarter = Pool::new(settings, subdivision, BeatSpan::Quarter);
-    let dotted = Pool::new(settings, subdivision, BeatSpan::DottedQuarter);
+    let pools = BeatSpan::ALL.map(|span| Pool::new(settings, subdivision, span));
 
     spans
         .into_iter()
         .map(|span| {
-            let (pool, rest) = match span {
-                BeatSpan::Quarter => (&quarter, &QUARTER_REST),
-                BeatSpan::DottedQuarter => (&dotted, &DOTTED_QUARTER_REST),
-            };
+            let pool = &pools[BeatSpan::ALL.iter().position(|&s| s == span).unwrap()];
             if rng.chance(space * MAX_SPACE_REST_PROBABILITY) {
-                rest
+                span.rest()
             } else if pool.weighted {
                 pick_cell(&pool.cells, subdivision, rng)
             } else {
@@ -625,6 +684,17 @@ mod tests {
             let m = build_measure(TimeSignature::TWELVE_EIGHT, &cells).expect("cell must build");
             assert_eq!(m.beats(), &expected_beats(&cells), "cell {:?}", cell.beats);
         }
+        // 12/16 = 3+3+3+3, 10/16 = 3+3+2+2.
+        for three in cells_of(BeatSpan::DottedEighth) {
+            let cells = [three; 4];
+            let m = build_measure(ts(12, 16), &cells).expect("cell must build");
+            assert_eq!(m.beats(), &expected_beats(&cells), "cell {:?}", three.beats);
+            for two in cells_of(BeatSpan::Eighth) {
+                let cells = [three, three, two, two];
+                let m = build_measure(ts(10, 16), &cells).expect("cell must build");
+                assert_eq!(m.beats(), &expected_beats(&cells));
+            }
+        }
     }
 
     #[test]
@@ -694,7 +764,7 @@ mod tests {
 
     #[test]
     fn unsupported_time_signature_is_rejected() {
-        for bad in [ts(1, 8), TimeSignature::FOUR_SIXTEENTH, ts(0, 4)] {
+        for bad in [ts(1, 8), TimeSignature::ONE_SIXTEENTH, ts(0, 4), ts(2, 2)] {
             let st = GeneratorSettings { time_signature: bad, ..GeneratorSettings::default() };
             assert_eq!(
                 generate_measure(&st, &mut Rng::new(1)).unwrap_err(),
@@ -718,9 +788,23 @@ mod tests {
         assert_eq!(beat_groups(ts(10, 8)), Some(vec![D, D, Q, Q]));
         assert_eq!(beat_groups(ts(11, 8)), Some(vec![D, D, D, Q]));
         assert_eq!(beat_groups(ts(13, 8)), Some(vec![D, D, D, Q, Q]));
-        // Every x/8 meter the app offers can be generated.
-        for beats in TimeSignature::beat_range(8).unwrap() {
-            assert!(supports_time_signature(ts(beats, 8)), "{beats}/8");
+        // Every x/8 and x/16 meter the app offers can be generated.
+        for unit in [4, 8, 16] {
+            for beats in TimeSignature::beat_range(unit).unwrap() {
+                assert!(supports_time_signature(ts(beats, unit)), "{beats}/{unit}");
+            }
+        }
+        use BeatSpan::{DottedEighth as DE, Eighth as E};
+        assert_eq!(beat_groups(ts(5, 16)), Some(vec![DE, E]));
+        assert_eq!(beat_groups(ts(7, 16)), Some(vec![E, DE, E]));
+        assert_eq!(beat_groups(ts(12, 16)), Some(vec![DE, DE, DE, DE]));
+        // Spans add up to the measure.
+        for unit in [4, 8, 16] {
+            for beats in TimeSignature::beat_range(unit).unwrap() {
+                let spans = beat_groups(ts(beats, unit)).unwrap();
+                let sum: u32 = spans.iter().map(|g| g.beats_of(unit)).sum();
+                assert_eq!(sum, beats as u32, "{beats}/{unit}");
+            }
         }
     }
 
@@ -770,10 +854,13 @@ mod tests {
     }
 
     #[test]
-    fn every_x8_meter_respects_its_beat_groups() {
+    fn every_x8_and_x16_meter_respects_its_beat_groups() {
         // No note or rest crosses a primary boundary (beam group / click).
-        for beats in TimeSignature::beat_range(8).unwrap() {
-            let meter = ts(beats, 8);
+        let meters = [8, 16].into_iter().flat_map(|unit| {
+            TimeSignature::beat_range(unit).unwrap().map(move |beats| ts(beats, unit))
+        });
+        for meter in meters {
+            let beats = meter.beats;
             let bounds = DEFAULT_GRID.primary_boundaries(&meter);
             let st = GeneratorSettings {
                 bars: 8,
@@ -788,6 +875,48 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn sixteenth_meters_use_sixteenth_groups() {
+        // x/16 is always written in sixteenths: only 16ths, 8ths and dotted
+        // 8ths, whatever subdivision is selected.
+        let allowed = [s(), e(), de()];
+        let mut rng = Rng::new(16);
+        for sub in [Subdivision::Eighths, Subdivision::Triplets, Subdivision::Mixed] {
+            let st =
+                GeneratorSettings { time_signature: ts(7, 16), ..settings(sub, MAX_COMPLEXITY) };
+            for _ in 0..50 {
+                let m = generate_measure(&st, &mut rng).unwrap();
+                assert!(m.beats().iter().all(|b| allowed.contains(&b.duration)), "{m:?}");
+            }
+        }
+        let spans = groupings(Subdivision::Sixteenths, ts(7, 16))
+            .iter()
+            .map(|g| g.span)
+            .collect::<std::collections::HashSet<_>>();
+        assert_eq!(spans, [BeatSpan::Eighth, BeatSpan::DottedEighth].into());
+    }
+
+    #[test]
+    fn three_sixteenth_ladder_follows_the_triplet_ladder() {
+        let at = |level: u8| -> std::collections::BTreeSet<String> {
+            candidates(Subdivision::Sixteenths, BeatSpan::DottedEighth, level)
+                .into_iter()
+                .map(sixteenth_onsets)
+                .collect()
+        };
+        assert_eq!(at(1), set(&["---", "x--", "xxx"]));
+        assert_eq!(at(2), set(&["---", "x--", "xxx", "x-x"]));
+        assert_eq!(at(3), set(&["---", "x--", "xxx", "x-x", "--x"]));
+        assert_eq!(at(4), set(&["---", "x--", "xxx", "x-x", "--x", "xx-", "-xx"]));
+        assert_eq!(at(5).len(), 8);
+        let pairs: std::collections::BTreeSet<String> =
+            candidates(Subdivision::Sixteenths, BeatSpan::Eighth, 5)
+                .into_iter()
+                .map(sixteenth_onsets)
+                .collect();
+        assert_eq!(pairs, set(&["--", "x-", "xx", "-x"]));
     }
 
     #[test]
