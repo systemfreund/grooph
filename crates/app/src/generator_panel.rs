@@ -9,11 +9,10 @@ use grooph_measure::generator::{
     complexity_groupings, effective_subdivision, groupings, supports_time_signature,
 };
 
-/// Time signatures in the picker: every quarter-note and eighth-note meter
-/// the editor offers (eighth-note meters are written in beat groups, e.g.
-/// 6/8 = 3+3, 7/8 = 2+3+2).
+/// Time signatures in the picker: every meter the editor offers (x/8 and
+/// x/16 are written in beat groups, e.g. 6/8 = 3+3, 7/16 = 2+3+2).
 pub(crate) fn time_signatures() -> Vec<TimeSignature> {
-    [4, 8]
+    TimeSignature::BEAT_UNITS
         .into_iter()
         .flat_map(|beat_unit| {
             TimeSignature::beat_range(beat_unit)
@@ -25,19 +24,13 @@ pub(crate) fn time_signatures() -> Vec<TimeSignature> {
         .collect()
 }
 
-/// Beat groups shown next to an eighth-note meter, e.g. "7/8 (2+3+2)".
+/// Beat groups shown next to an x/8 or x/16 meter, e.g. "7/8 (2+3+2)".
 pub(crate) fn time_signature_label(ts: TimeSignature) -> String {
     let groups = beat_groups(ts).unwrap_or_default();
-    if ts.beat_unit != 8 || groups.len() < 2 {
+    if ts.beat_unit == 4 || groups.len() < 2 {
         return ts.to_string();
     }
-    let sizes: Vec<&str> = groups
-        .iter()
-        .map(|g| match g {
-            BeatSpan::Quarter => "2",
-            BeatSpan::DottedQuarter => "3",
-        })
-        .collect();
+    let sizes: Vec<String> = groups.iter().map(|g| g.beats_of(ts.beat_unit).to_string()).collect();
     format!("{ts} ({})", sizes.join("+"))
 }
 
@@ -51,12 +44,17 @@ pub(crate) fn subdivision_label(s: Subdivision) -> &'static str {
 }
 
 /// Subdivisions the generator offers for `ts`: triplets and mixed have no x/8
-/// cells.
+/// cells, x/16 is always written in sixteenths.
 pub(crate) fn offered_subdivisions(ts: TimeSignature) -> &'static [Subdivision] {
-    if ts.beat_unit == 8 {
-        &[Subdivision::Eighths, Subdivision::Sixteenths]
-    } else {
-        &[Subdivision::Eighths, Subdivision::Sixteenths, Subdivision::Triplets, Subdivision::Mixed]
+    match ts.beat_unit {
+        8 => &[Subdivision::Eighths, Subdivision::Sixteenths],
+        16 => &[Subdivision::Sixteenths],
+        _ => &[
+            Subdivision::Eighths,
+            Subdivision::Sixteenths,
+            Subdivision::Triplets,
+            Subdivision::Mixed,
+        ],
     }
 }
 
@@ -94,7 +92,7 @@ impl Grooph {
                         let settings = &mut gen_state.settings;
 
                         // Triplets and mixed have no x/8 cells; the generator
-                        // falls back to 8ths / 16ths there.
+                        // falls back to 8ths / 16ths there. x/16 is always 16ths.
                         let shown =
                             effective_subdivision(settings.subdivision, settings.time_signature);
                         let offered = offered_subdivisions(settings.time_signature);
@@ -243,7 +241,7 @@ impl Grooph {
 
         // Meters with both group sizes (5/8, 7/8) get one row per size.
         let mixed_spans = available.iter().any(|g| g.span != available[0].span);
-        for span in [BeatSpan::Quarter, BeatSpan::DottedQuarter] {
+        for span in BeatSpan::ALL {
             let of_span: Vec<_> = available.iter().filter(|g| g.span == span).collect();
             if of_span.is_empty() {
                 continue;
@@ -252,6 +250,8 @@ impl Grooph {
                 ui.weak(match span {
                     BeatSpan::Quarter => "Groups of two eighths",
                     BeatSpan::DottedQuarter => "Groups of three eighths",
+                    BeatSpan::Eighth => "Groups of two sixteenths",
+                    BeatSpan::DottedEighth => "Groups of three sixteenths",
                 });
             }
             ui.horizontal_wrapped(|ui| {

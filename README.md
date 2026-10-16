@@ -36,12 +36,13 @@ Important root files:
   - `set_beat` can absorb/fill following beats to keep the measure consistent.
 - Generator (`grooph_measure::generator`): builds random measures for
   sight-reading from per-beat cells. `GeneratorSettings` = subdivision,
-  complexity (1-5, caps the cell level), bars, time signature (x/4, or x/8
-  from 2/8), space (extra whole-beat rests). In x/8 the generator beats are
-  the meter's beat groups (`beat_groups`: 6/8 = 3+3, 7/8 = 2+3+2, longer
-  single groups split into twos plus a final three); two-eighth groups use the
-  quarter-beat cells, three-eighth groups their own `Compound*` cells.
-  Triplets/mixed fall back to 8ths/16ths there (`effective_subdivision`). Measures are written via `set_beat`, so
+  complexity (1-5, caps the cell level), bars, time signature (x/4, x/8,
+  x/16), space (extra whole-beat rests). In x/8 and x/16 the generator beats
+  are the meter's beat groups (`beat_groups`, from `default_groups_for`:
+  6/8 = 3+3, 7/8 = 2+3+2, the same for x/16). Two-eighth groups use the
+  quarter-beat cells, three-eighth groups their own `Compound*` cells, x/16
+  groups `SixteenthPair` / `SixteenthTriple`. Triplets/mixed fall back to
+  8ths/16ths in x/8, x/16 is always 16ths (`effective_subdivision`). Measures are written via `set_beat`, so
   they obey the same invariants as edited ones. Seed `Rng` for reproducibility.
 - Note: `Beat` `PartialEq` ignores `tuplet_group_id`. Compare the field explicitly
   if grouping matters.

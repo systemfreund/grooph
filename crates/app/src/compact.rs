@@ -244,7 +244,15 @@ fn choice_grid<T: Copy + PartialEq>(
     for row in options.chunks(columns) {
         ui.horizontal(|ui| {
             for (value, label) in row {
-                let button = Button::new(RichText::new(label).size(18.0))
+                // Long labels (e.g. "13/16 (3+3+3+2+2)") shrink to fit the cell.
+                let text_width = ui
+                    .painter()
+                    .layout_no_wrap(label.clone(), FontId::proportional(18.0), Color32::WHITE)
+                    .size()
+                    .x;
+                let room = width - 2.0 * ui.spacing().button_padding.x;
+                let size = if text_width > room { 18.0 * room / text_width } else { 18.0 };
+                let button = Button::new(RichText::new(label).size(size))
                     .selected(*value == current)
                     .min_size(vec2(width, ROW_HEIGHT));
                 if ui.add(button).clicked() {

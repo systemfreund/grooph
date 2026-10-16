@@ -19,10 +19,10 @@ Open the generator with the dice icon. Every change creates a new rhythm.
 
 | Setting | What it does |
 |---|---|
-| **Subdivision** | The finest note value: 8th notes, 16th notes, triplets, or mixed (16ths and triplets together). Eighth-note meters offer 8ths and 16ths. |
+| **Subdivision** | The finest note value: 8th notes, 16th notes, triplets, or mixed (16ths and triplets together). Eighth-note meters offer 8ths and 16ths, sixteenth-note meters 16ths. |
 | **Complexity** | Level 1 to 5. Higher levels add syncopations, rests inside the beat and offbeat figures. |
 | **Bars** | 1 to 8 measures per exercise. |
-| **Time signature** | Quarter-note meters from 1/4 to 7/4 and eighth-note meters from 3/8 to 13/8. |
+| **Time signature** | Quarter-note meters from 1/4 to 7/4, eighth-note meters from 3/8 to 13/8 and sixteenth-note meters from 5/16 to 19/16. |
 | **Space** | Adds whole-beat rests, from none to a lot. Good for practicing silence. |
 | **Groupings** | Instead of a level, pick exactly which one-beat figures may appear. |
 | **Endless** | Keeps replacing bars you have already played, so the exercise never repeats. |
@@ -69,6 +69,10 @@ dotted-quarter figures.
 bpm=90&ts=7/8&sub=16&lvl=3&bars=2
 ```
 
+Sixteenth-note meters such as 7/16 or 11/16 work the same way one note value down: groups
+of two sixteenths (an eighth) and three sixteenths (a dotted eighth), always written in
+sixteenths.
+
 The guides for [eighth notes](/sight-reading/eighth-notes/),
 [sixteenth notes](/sight-reading/sixteenth-notes/) and [triplets](/sight-reading/triplets/)
 list every level in detail.
@@ -97,5 +101,5 @@ Not yet. You can share them as links or save them in the library.
 
 ### Which time signatures does the generator use?
 
-Quarter-note meters from 1/4 up to 7/4, and eighth-note meters from 3/8 up to 13/8,
-written in their usual groups of two and three eighths.
+Every meter the editor offers: 1/4 to 7/4, 3/8 to 13/8 and 5/16 to 19/16. Eighth- and
+sixteenth-note meters are written in their usual groups of two and three.
