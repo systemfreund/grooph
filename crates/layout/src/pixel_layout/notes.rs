@@ -45,7 +45,10 @@ fn compute_x_extents(beat: &Beat, in_beam: bool, opts: &LayoutOpts) -> (f32, f32
     let is_note = beat.kind == BeatKind::Note;
     let needs_flag = requires_flag(beat.duration);
 
-    let (left, mut right) = if is_note {
+    let (left, mut right) = if is_note && beat.soft {
+        let h = m.head_size.x * 0.5 + opts.em * (c::SOFT_PAREN_EM + c::SOFT_PAREN_GAP_EM);
+        (-h, h)
+    } else if is_note {
         let h = m.head_size.x * 0.5;
         (-h, h)
     } else {
@@ -137,10 +140,19 @@ fn min_advances(beats: &[Beat], in_beam: &[bool], opts: &LayoutOpts) -> Vec<f32>
     let extents: Vec<(f32, f32)> =
         beats.iter().zip(in_beam).map(|(b, &ib)| compute_x_extents(b, ib, opts)).collect();
     let gap = c::COLLISION_MIN_GAP_EM * opts.em;
-    (0..beats.len())
+    let needs: Vec<f32> = (0..beats.len())
         .map(|i| match extents.get(i + 1) {
             Some(&(next_left, _)) => extents[i].1 + gap - next_left,
             None => extents[i].1,
+        })
+        .collect();
+    // Notes of the same length get the same room, so a wide neighbour (a
+    // soft note's parentheses) doesn't make the plain ones look shorter.
+    let ticks: Vec<_> = beats.iter().map(|b| DEFAULT_GRID.ticks_of(&b.duration)).collect();
+    ticks
+        .iter()
+        .map(|t| {
+            ticks.iter().zip(&needs).filter(|(u, _)| *u == t).map(|(_, &n)| n).fold(0.0, f32::max)
         })
         .collect()
 }
@@ -350,6 +362,7 @@ pub(super) fn build_note_layout(
             stem,
             flag_pos,
             accent_pos,
+            soft: is_note && b.soft,
             debug_bbox,
             accent_debug_bbox,
         });

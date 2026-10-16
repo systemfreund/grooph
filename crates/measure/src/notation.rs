@@ -14,7 +14,8 @@
 //!   (`q.` `e.` `s.`), tuplets `t4` `t8` `t16` `t32` (triplets), `qt16`
 //!   (quintuplet), `st8` `st16` (sextuplets), `spt16` (septuplet) and `nt16`
 //!   (nonuplet). Every note of a tuplet group is written out.
-//! - `r:` makes a rest (`r:q`), `>` accents a note (`>e`).
+//! - `r:` makes a rest (`r:q`), `>` accents a note (`>e`), parentheses make
+//!   it a soft (ghost) note (`(e)`).
 //!
 //! Parsing goes through [`Measure::set_beat`], so a parsed score obeys the
 //! same invariants as an edited one. Every measure must be filled exactly;
@@ -44,6 +45,8 @@ pub enum NotationError {
     MisplacedTimeSignature { measure: usize, token: String },
     /// `>` on a rest.
     AccentedRest { measure: usize, token: String },
+    /// A soft note that is also a rest or accented, e.g. `(r:q)` or `>(e)`.
+    InvalidSoft { measure: usize, token: String },
     /// A measure without beats (e.g. `q q q q | | q q q q`).
     EmptyMeasure { measure: usize },
     /// The beats exceed the measure length.
@@ -75,6 +78,10 @@ impl Display for NotationError {
             AccentedRest { measure, token } => {
                 write!(f, "measure {measure}: '{token}' - rests cannot be accented")
             }
+            InvalidSoft { measure, token } => write!(
+                f,
+                "measure {measure}: '{token}' - a soft note is written (e) and cannot be a rest or accented"
+            ),
             EmptyMeasure { measure } => write!(f, "measure {measure} has no beats"),
             TooLong { measure, token } => {
                 write!(f, "measure {measure} is too long: '{token}' does not fit anymore")
@@ -118,7 +125,7 @@ const CODES: [(&str, Duration); 16] = {
     ]
 };
 
-fn duration_from_code(code: &str) -> Option<Duration> {
+pub(crate) fn duration_of_code(code: &str) -> Option<Duration> {
     CODES.iter().find(|(c, _)| *c == code).map(|(_, d)| *d)
 }
 
@@ -127,6 +134,14 @@ fn code_of(duration: &Duration) -> Option<&'static str> {
 }
 
 fn parse_beat(token: &str, measure: usize) -> Result<Beat, NotationError> {
+    if let Some(inner) = token.strip_prefix('(').and_then(|t| t.strip_suffix(')')) {
+        let mut beat = parse_beat(inner, measure)?;
+        if beat.kind == Rest || beat.accented {
+            return Err(NotationError::InvalidSoft { measure, token: token.to_string() });
+        }
+        beat.soft = true;
+        return Ok(beat);
+    }
     let (accented, rest_of) = match token.strip_prefix('>') {
         Some(t) => (true, t),
         None => (false, token),
@@ -135,7 +150,7 @@ fn parse_beat(token: &str, measure: usize) -> Result<Beat, NotationError> {
         Some(t) => (Rest, t),
         None => (Note, rest_of),
     };
-    let duration = duration_from_code(code)
+    let duration = duration_of_code(code)
         .ok_or_else(|| NotationError::UnknownToken { measure, token: token.to_string() })?;
     if accented && kind == Rest {
         return Err(NotationError::AccentedRest { measure, token: token.to_string() });
@@ -173,6 +188,9 @@ fn build_measure(
         // `set_beat` keeps the accent of the slot it overwrites; apply ours.
         if m.beats()[idx].accented != beat.accented {
             m.toggle_accent(idx);
+        }
+        if m.beats()[idx].soft != beat.soft {
+            m.toggle_soft(idx);
         }
     }
     if m.beats().len() > tokens.len() {
@@ -253,10 +271,11 @@ pub fn format_score(score: &Score) -> Option<String> {
             .iter()
             .map(|b| {
                 let code = code_of(&b.duration)?;
-                Some(match (b.kind, b.accented) {
-                    (Rest, _) => format!("r:{code}"),
-                    (Note, true) => format!(">{code}"),
-                    (Note, false) => code.to_string(),
+                Some(match (b.kind, b.accented, b.soft) {
+                    (Rest, ..) => format!("r:{code}"),
+                    (Note, true, _) => format!(">{code}"),
+                    (Note, false, true) => format!("({code})"),
+                    (Note, false, false) => code.to_string(),
                 })
             })
             .collect();
@@ -323,6 +342,18 @@ mod tests {
             ts,
             vec![TimeSignature::THREE_FOUR, TimeSignature::THREE_FOUR, TimeSignature::SEVEN_EIGHT]
         );
+    }
+
+    #[test]
+    fn soft_notes_are_written_in_parentheses() {
+        let score = parse_score("4/4 q (q) >q (e) e").unwrap();
+        let beats = beats_of(&score, 0);
+        assert!(beats[1].soft && !beats[1].accented);
+        assert!(beats[2].accented && !beats[2].soft);
+        assert!(beats[3].soft);
+        assert_eq!(format_score(&score).unwrap(), "4/4 q (q) >q (e) e");
+        assert!(matches!(parse_score("(r:q) q q q"), Err(NotationError::InvalidSoft { .. })));
+        assert!(parse_score(">(q) q q q").is_err());
     }
 
     #[test]

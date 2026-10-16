@@ -1,31 +1,32 @@
-//! Click patterns: how loud the metronome clicks each beat group of a meter.
+//! Click bars: what the metronome plays in each meter, written as a measure.
 //!
-//! A [`ClickPattern`] holds one [`ClickLevel`] per group of
-//! [`TimeSignature::groups`] (7/8 as 2+3+2 has three). The default is
-//! [`ClickLevel::Strong`] on the first group and [`ClickLevel::Medium`] on
-//! the others, which is the downbeat and primary beats as they always
-//! sounded. [`ClickPatterns`] keeps the patterns that differ from it, one per
-//! meter, so every measure in that meter clicks the same way.
+//! Every note of a meter's click bar is a click; its level comes from the
+//! note: accented is [`ClickLevel::Strong`], plain [`ClickLevel::Medium`],
+//! soft (a ghost note) [`ClickLevel::Soft`], and a rest is no click
+//! ([`ClickLevel::Off`]). Tuplets and dotted notes work like in any rhythm,
+//! so "eighth, then a triplet without its middle note" is just a bar.
 //!
-//! The text form is one letter per group: `S` strong, `M` medium, `L` soft
-//! (low), `-` off. 7/8 as 2+3+2 with the middle group soft is `SLM`.
+//! The default bar has one note per beat group of [`TimeSignature::groups`],
+//! as long as the group, the first one accented: the downbeat and primary
+//! beats as they always sounded. [`ClickBars`] keeps the bars that differ
+//! from it, one per meter, so every measure in that meter clicks the same.
 
-use crate::TimeSignature;
+use crate::BeatKind::{Note, Rest};
 use crate::grid::DEFAULT_GRID;
+use crate::notation::parse_score;
+use crate::{Beat, BeatIdx, Measure, TimeSignature};
 use serde::{Deserialize, Serialize};
-use std::fmt::{Display, Formatter};
-use std::str::FromStr;
 
-/// How loud the click on one beat group sounds.
+/// How loud one click sounds.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ClickLevel {
-    /// The downbeat click.
+    /// The downbeat click: an accented note.
     Strong,
-    /// The click on the other primary beats.
+    /// The click on the other primary beats: a plain note.
     Medium,
-    /// A quieter click.
+    /// A quieter click: a soft note.
     Soft,
-    /// No click.
+    /// No click: a rest.
     Off,
 }
 
@@ -33,18 +34,14 @@ impl ClickLevel {
     pub const ALL: [ClickLevel; 4] =
         [ClickLevel::Strong, ClickLevel::Medium, ClickLevel::Soft, ClickLevel::Off];
 
-    /// Letter of the text form.
-    pub const fn code(self) -> char {
-        match self {
-            ClickLevel::Strong => 'S',
-            ClickLevel::Medium => 'M',
-            ClickLevel::Soft => 'L',
-            ClickLevel::Off => '-',
+    /// The level a beat of a click bar plays at.
+    pub fn of(beat: &Beat) -> Self {
+        match (beat.kind, beat.accented, beat.soft) {
+            (Rest, ..) => ClickLevel::Off,
+            (Note, true, _) => ClickLevel::Strong,
+            (Note, false, true) => ClickLevel::Soft,
+            (Note, false, false) => ClickLevel::Medium,
         }
-    }
-
-    pub fn from_code(c: char) -> Option<Self> {
-        Self::ALL.into_iter().find(|l| l.code() == c)
     }
 
     /// The next level when tapping through them: strong, medium, soft, off.
@@ -54,208 +51,174 @@ impl ClickLevel {
     }
 }
 
-/// One [`ClickLevel`] per beat group of a meter.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+impl Measure {
+    /// Give the beat at `idx` the note, accent and soft flag of `level`. The
+    /// duration stays, so the measure stays valid.
+    pub fn set_click_level(&mut self, idx: BeatIdx, level: ClickLevel) {
+        let Some(b) = self.beats.get_mut(idx) else {
+            return;
+        };
+        b.kind = if level == ClickLevel::Off { Rest } else { Note };
+        b.accented = level == ClickLevel::Strong;
+        b.soft = level == ClickLevel::Soft;
+    }
+}
+
+/// Notation code of the plain or dotted note `ticks` long, if there is one.
+fn code_for_ticks(ticks: u32) -> Option<&'static str> {
+    const CODES: [&str; 7] = ["q.", "q", "e.", "e", "s.", "s", "th"];
+    CODES.into_iter().find(|code| {
+        crate::notation::duration_of_code(code).and_then(|d| DEFAULT_GRID.ticks_of(&d))
+            == Some(ticks)
+    })
+}
+
+/// Code of one beat unit of `ts` split into `parts` equal notes.
+fn part_code(ts: &TimeSignature, parts: u32) -> Option<&'static str> {
+    Some(match (ts.beat_unit, parts) {
+        (4, 1) => "q",
+        (4, 2) | (8, 1) => "e",
+        (4, 3) => "t8",
+        (4, 4) | (8, 2) | (16, 1) => "s",
+        (8, 3) => "t16",
+        (8, 4) | (16, 2) => "th",
+        (16, 3) => "t32",
+        _ => return None,
+    })
+}
+
+fn parse_bar(ts: &TimeSignature, tokens: &[String]) -> Option<Measure> {
+    let text = format!("{ts} {}", tokens.join(" "));
+    parse_score(&text).ok()?.measures.into_iter().next()
+}
+
+/// The default click bar of `ts`: one note per beat group, as long as the
+/// group, the first accented. A group with no single note value (e.g. four
+/// eighths) gets a note on its first beat unit and rests after it.
+pub fn default_click_bar(ts: TimeSignature) -> Measure {
+    let unit = DEFAULT_GRID.ticks_per_beat(&ts);
+    let unit_code = part_code(&ts, 1);
+    let mut tokens = Vec::new();
+    for (i, &beats) in ts.groups().iter().enumerate() {
+        let accent = if i == 0 { ">" } else { "" };
+        match (code_for_ticks(beats as u32 * unit), unit_code) {
+            (Some(code), _) => tokens.push(format!("{accent}{code}")),
+            (None, Some(code)) => {
+                tokens.push(format!("{accent}{code}"));
+                tokens.extend((1..beats).map(|_| format!("r:{code}")));
+            }
+            (None, None) => {}
+        }
+    }
+    parse_bar(&ts, &tokens).unwrap_or_else(|| Measure::new(ts))
+}
+
+/// Click bar of `ts` with every beat unit split into `parts` notes (2, 3 or
+/// 4; 1 is one note per beat unit). Group starts keep the level of the
+/// default bar (first strong, others medium), all other clicks are soft.
+/// `None` if the meter cannot be split that way.
+pub fn subdivided_click_bar(ts: TimeSignature, parts: u32) -> Option<Measure> {
+    let code = part_code(&ts, parts)?;
+    let mut group_starts = vec![0usize];
+    for &g in ts.groups().iter() {
+        group_starts.push(group_starts.last().unwrap() + g as usize);
+    }
+    let mut tokens = Vec::new();
+    for unit in 0..ts.beats as usize {
+        for part in 0..parts {
+            tokens.push(match (unit, part) {
+                (0, 0) => format!(">{code}"),
+                (u, 0) if group_starts.contains(&u) => code.to_string(),
+                _ => format!("({code})"),
+            });
+        }
+    }
+    parse_bar(&ts, &tokens)
+}
+
+/// Whether two bars hold the same meter and beats.
+fn same_bar(a: &Measure, b: &Measure) -> bool {
+    a.time_signature() == b.time_signature() && a.beats() == b.beats()
+}
+
+/// The click bar of every meter: the default unless one was set.
+#[derive(Clone, Default, Serialize, Deserialize)]
 #[serde(transparent)]
-pub struct ClickPattern(pub Vec<ClickLevel>);
+pub struct ClickBars {
+    /// Bars that differ from the default, at most one per meter.
+    custom: Vec<Measure>,
+}
 
-impl ClickPattern {
-    /// Strong on the first group, medium on the others.
-    pub fn default_for(ts: TimeSignature) -> Self {
-        let groups = ts.groups().len();
-        Self(
-            (0..groups)
-                .map(|i| if i == 0 { ClickLevel::Strong } else { ClickLevel::Medium })
-                .collect(),
-        )
-    }
-
-    /// Whether the pattern has one level per group of `ts`.
-    pub fn fits(&self, ts: TimeSignature) -> bool {
-        self.0.len() == ts.groups().len()
-    }
-
-    pub fn levels(&self) -> &[ClickLevel] {
-        &self.0
+impl std::fmt::Debug for ClickBars {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_list().entries(self.custom.iter().map(|m| m.time_signature())).finish()
     }
 }
 
-impl Display for ClickPattern {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        self.0.iter().try_for_each(|l| write!(f, "{}", l.code()))
+impl PartialEq for ClickBars {
+    fn eq(&self, other: &Self) -> bool {
+        self.custom.len() == other.custom.len()
+            && self.custom.iter().zip(&other.custom).all(|(a, b)| same_bar(a, b))
     }
 }
 
-impl FromStr for ClickPattern {
-    type Err = String;
+impl Eq for ClickBars {}
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        s.chars()
-            .map(|c| {
-                ClickLevel::from_code(c).ok_or_else(|| {
-                    format!("'{c}' is not a click level (S strong, M medium, L soft, - off)")
-                })
-            })
-            .collect::<Result<Vec<_>, _>>()
-            .map(Self)
-    }
-}
-
-/// The click pattern of every meter: the default unless one was set.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct ClickPatterns {
-    /// Patterns that differ from the default, at most one per meter.
-    /// `TimeSignature` has no ordering or hash, and a JSON map needs string
-    /// keys, so this is a list.
-    custom: Vec<(TimeSignature, ClickPattern)>,
-}
-
-impl ClickPatterns {
-    /// The pattern `ts` clicks. A stored pattern that no longer fits (its
-    /// meter has a different number of groups) falls back to the default.
-    pub fn for_meter(&self, ts: TimeSignature) -> ClickPattern {
-        self.custom
-            .iter()
-            .find(|(t, p)| *t == ts && p.fits(ts))
-            .map_or_else(|| ClickPattern::default_for(ts), |(_, p)| p.clone())
+impl ClickBars {
+    /// The bar `ts` clicks.
+    pub fn for_meter(&self, ts: TimeSignature) -> Measure {
+        self.custom_for(ts).cloned().unwrap_or_else(|| default_click_bar(ts))
     }
 
-    /// Set the pattern of `ts`. Returns `false` and changes nothing if it
-    /// does not fit the meter; the default pattern is not stored.
-    pub fn set(&mut self, ts: TimeSignature, pattern: ClickPattern) -> bool {
-        if !pattern.fits(ts) {
-            return false;
-        }
-        self.custom.retain(|(t, _)| *t != ts);
-        if pattern != ClickPattern::default_for(ts) {
-            self.custom.push((ts, pattern));
-        }
-        true
+    /// The bar of `ts` if it is not the default.
+    pub fn custom_for(&self, ts: TimeSignature) -> Option<&Measure> {
+        self.custom.iter().find(|m| m.time_signature() == ts)
     }
 
-    /// The pattern of `ts` if it is not the default.
-    pub fn custom_for(&self, ts: TimeSignature) -> Option<ClickPattern> {
-        Some(self.for_meter(ts)).filter(|p| *p != ClickPattern::default_for(ts))
-    }
-}
-
-/// Extra clicks between the counted beats: each beat unit (the quarter in
-/// 4/4, the eighth in 7/8) split into this many equal parts.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ClickSubdivision {
-    /// Only the beats click.
-    #[default]
-    Off,
-    /// Two per beat: eighths in 4/4.
-    Two,
-    /// Three per beat: triplets.
-    Three,
-    /// Four per beat: sixteenths in 4/4.
-    Four,
-}
-
-impl ClickSubdivision {
-    pub const ALL: [ClickSubdivision; 4] = [
-        ClickSubdivision::Off,
-        ClickSubdivision::Two,
-        ClickSubdivision::Three,
-        ClickSubdivision::Four,
-    ];
-
-    /// Parts per beat unit; 1 when off.
-    pub const fn parts(self) -> u32 {
-        match self {
-            ClickSubdivision::Off => 1,
-            ClickSubdivision::Two => 2,
-            ClickSubdivision::Three => 3,
-            ClickSubdivision::Four => 4,
-        }
-    }
-
-    /// Ticks within a bar of `ts` that get a subdivision click: every part
-    /// of every beat unit, without the beat units themselves. Empty when off
-    /// or when the tick grid cannot split the beat unit evenly.
-    pub fn ticks(self, ts: &TimeSignature) -> Vec<u32> {
-        let unit = DEFAULT_GRID.ticks_per_beat(ts);
-        let parts = self.parts();
-        if parts < 2 || unit == 0 || !unit.is_multiple_of(parts) {
-            return Vec::new();
-        }
-        (0..DEFAULT_GRID.ticks_per_measure(ts))
-            .step_by((unit / parts) as usize)
-            .filter(|t| !t.is_multiple_of(unit))
-            .collect()
-    }
-
-    /// Whether `ts` can be split this way (the grid has the ticks for it).
-    pub fn fits(self, ts: &TimeSignature) -> bool {
-        self == ClickSubdivision::Off || !self.ticks(ts).is_empty()
-    }
-
-    /// Name of the parts in `ts`, e.g. "8ths" for two per beat in 4/4 and
-    /// "16ths" in 7/8.
-    pub fn label(self, ts: &TimeSignature) -> String {
-        let unit = ts.beat_unit as u32;
-        match self {
-            ClickSubdivision::Off => "Off".to_owned(),
-            ClickSubdivision::Two => format!("{}ths", unit * 2),
-            ClickSubdivision::Three if unit == 4 => "Triplets".to_owned(),
-            ClickSubdivision::Three => format!("{}th triplets", unit * 2),
-            ClickSubdivision::Four => format!("{}ths", unit * 4),
+    /// Set the bar of its meter; the default bar is not stored.
+    pub fn set(&mut self, bar: Measure) {
+        let ts = bar.time_signature();
+        self.custom.retain(|m| m.time_signature() != ts);
+        if !same_bar(&bar, &default_click_bar(ts)) {
+            self.custom.push(bar);
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::ClickLevel::{Medium, Off, Soft, Strong};
     use super::*;
+    use crate::notation::format_score;
+    use crate::{Score, TimeSignature};
 
-    #[test]
-    fn subdivision_clicks_sit_between_the_beats() {
-        let ts = TimeSignature::FOUR_FOUR;
-        let quarter = DEFAULT_GRID.ticks_per_beat(&ts);
-        assert_eq!(ClickSubdivision::Off.ticks(&ts), Vec::<u32>::new());
-        let eighths = ClickSubdivision::Two.ticks(&ts);
-        assert_eq!(eighths.len(), 4);
-        assert_eq!(eighths[0], quarter / 2);
-        // Triplets: two clicks between each pair of beats.
-        assert_eq!(ClickSubdivision::Three.ticks(&ts).len(), 8);
-        assert_eq!(ClickSubdivision::Four.ticks(&ts).len(), 12);
-        // 7/8: sixteenths between the seven eighths.
-        assert_eq!(ClickSubdivision::Two.ticks(&TimeSignature::SEVEN_EIGHT).len(), 7);
+    fn text(m: &Measure) -> String {
+        format_score(&Score::single(m.clone())).unwrap()
     }
 
     #[test]
-    fn subdivision_labels_follow_the_beat_unit() {
-        assert_eq!(ClickSubdivision::Two.label(&TimeSignature::FOUR_FOUR), "8ths");
-        assert_eq!(ClickSubdivision::Four.label(&TimeSignature::FOUR_FOUR), "16ths");
-        assert_eq!(ClickSubdivision::Three.label(&TimeSignature::FOUR_FOUR), "Triplets");
-        assert_eq!(ClickSubdivision::Two.label(&TimeSignature::SEVEN_EIGHT), "16ths");
-        assert_eq!(ClickSubdivision::Three.label(&TimeSignature::SEVEN_EIGHT), "16th triplets");
+    fn default_bar_has_one_note_per_group() {
+        assert_eq!(text(&default_click_bar(TimeSignature::FOUR_FOUR)), "4/4 >q q q q");
+        assert_eq!(text(&default_click_bar(TimeSignature::SIX_EIGHT)), "6/8 >q. q.");
+        // 7/8 as 2+3+2.
+        assert_eq!(text(&default_click_bar(TimeSignature::SEVEN_EIGHT)), "7/8 >q q. q");
     }
 
     #[test]
-    fn default_is_strong_then_medium_per_group() {
-        assert_eq!(
-            ClickPattern::default_for(TimeSignature::FOUR_FOUR).levels(),
-            [Strong, Medium, Medium, Medium]
-        );
-        assert_eq!(ClickPattern::default_for(TimeSignature::SIX_EIGHT).levels(), [Strong, Medium]);
-        assert_eq!(ClickPattern::default_for(TimeSignature::SEVEN_EIGHT).to_string(), "SMM");
-    }
-
-    #[test]
-    fn text_form_round_trips() {
-        let p: ClickPattern = "SL-M".parse().unwrap();
-        assert_eq!(p.levels(), [Strong, Soft, Off, Medium]);
-        assert_eq!(p.to_string(), "SL-M");
-        assert!("SX".parse::<ClickPattern>().is_err());
+    fn levels_follow_the_notes() {
+        let mut bar = default_click_bar(TimeSignature::FOUR_FOUR);
+        let levels = |m: &Measure| m.beats().iter().map(ClickLevel::of).collect::<Vec<_>>();
+        use ClickLevel::*;
+        assert_eq!(levels(&bar), [Strong, Medium, Medium, Medium]);
+        bar.set_click_level(1, Soft);
+        bar.set_click_level(2, Off);
+        bar.set_click_level(3, Strong);
+        assert_eq!(levels(&bar), [Strong, Soft, Off, Strong]);
+        assert_eq!(text(&bar), "4/4 >q (q) r:q >q");
     }
 
     #[test]
     fn next_cycles_through_all_levels() {
+        use ClickLevel::*;
         assert_eq!(Strong.next(), Medium);
         assert_eq!(Medium.next(), Soft);
         assert_eq!(Soft.next(), Off);
@@ -263,31 +226,28 @@ mod tests {
     }
 
     #[test]
-    fn patterns_are_kept_per_meter() {
-        let mut patterns = ClickPatterns::default();
+    fn subdivided_bars_split_every_beat_unit() {
+        let four = TimeSignature::FOUR_FOUR;
+        assert_eq!(text(&subdivided_click_bar(four, 2).unwrap()), "4/4 >e (e) e (e) e (e) e (e)");
+        assert_eq!(subdivided_click_bar(four, 3).unwrap().beats().len(), 12);
+        let seven = subdivided_click_bar(TimeSignature::SEVEN_EIGHT, 2).unwrap();
+        assert_eq!(text(&seven), "7/8 >s (s) (s) (s) s (s) (s) (s) (s) (s) s (s) (s) (s)");
+        assert!(subdivided_click_bar(TimeSignature::new(7, 16), 4).is_none());
+    }
+
+    #[test]
+    fn bars_are_kept_per_meter() {
+        let mut bars = ClickBars::default();
         let seven = TimeSignature::SEVEN_EIGHT;
-        assert!(patterns.set(seven, "S-L".parse().unwrap()));
-        assert_eq!(patterns.for_meter(seven).to_string(), "S-L");
+        let mut bar = default_click_bar(seven);
+        bar.set_click_level(1, ClickLevel::Off);
+        bars.set(bar);
+        assert_eq!(text(&bars.for_meter(seven)), "7/8 >q r:q. q");
         // Another grouping of 7/8 is another meter.
-        assert_eq!(patterns.for_meter(seven.with_grouping(1)).to_string(), "SMM");
-        assert_eq!(patterns.for_meter(TimeSignature::FOUR_FOUR).to_string(), "SMMM");
-    }
-
-    #[test]
-    fn patterns_that_do_not_fit_are_refused() {
-        let mut patterns = ClickPatterns::default();
-        assert!(!patterns.set(TimeSignature::SIX_EIGHT, "SMM".parse().unwrap()));
-        assert_eq!(patterns, ClickPatterns::default());
-    }
-
-    #[test]
-    fn setting_the_default_forgets_the_custom_pattern() {
-        let mut patterns = ClickPatterns::default();
-        let ts = TimeSignature::FOUR_FOUR;
-        patterns.set(ts, "SLML".parse().unwrap());
-        assert!(patterns.custom_for(ts).is_some());
-        patterns.set(ts, ClickPattern::default_for(ts));
-        assert_eq!(patterns, ClickPatterns::default());
-        assert_eq!(patterns.custom_for(ts), None);
+        assert_eq!(text(&bars.for_meter(seven.with_grouping(1))), "2+2+3/8 >q q q.");
+        assert_eq!(text(&bars.for_meter(TimeSignature::FOUR_FOUR)), "4/4 >q q q q");
+        // Setting the default forgets the custom bar.
+        bars.set(default_click_bar(seven));
+        assert_eq!(bars, ClickBars::default());
     }
 }

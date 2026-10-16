@@ -526,7 +526,8 @@ impl Measure {
         if let Some(fill) = self.best_fill_for_gap(self.max_ticks(), allowed) {
             let take = fill.len();
             for duration in fill.into_iter().take(take) {
-                let beat = Beat { duration, kind, accented: false, tuplet_group_id: None };
+                let beat =
+                    Beat { duration, kind, accented: false, soft: false, tuplet_group_id: None };
                 self.beats.push(beat);
             }
         }

@@ -55,16 +55,13 @@ impl Grooph {
                             &mut settings.metronome_muted,
                             "Silence downbeat and beats; the count-in still sounds",
                             |ui| {
-                                volume_slider(ui, &mut settings.downbeat, "Downbeat");
-                                volume_slider(ui, &mut settings.primary, "Beats");
+                                volume_slider(ui, &mut settings.downbeat, "Downbeat")
+                                    .on_hover_text("Accented clicks of the click bar");
+                                volume_slider(ui, &mut settings.primary, "Beats")
+                                    .on_hover_text("Plain clicks of the click bar");
                                 volume_slider(ui, &mut settings.soft, "Soft").on_hover_text(
-                                    "Beats the click pattern of the meter sets to soft",
+                                    "Soft clicks of the click bar (notes in parentheses)",
                                 );
-                                volume_slider(ui, &mut settings.subdivision, "Subdiv.")
-                                    .on_hover_text(
-                                        "Clicks between the beats when the metronome \
-                                         subdivides them (Metronome tab)",
-                                    );
                                 volume_slider(ui, &mut settings.pulse, "Pulse").on_hover_text(
                                     "Clicks on every beat unit between the beats, e.g. all \
                                      seven eighths in 7/8. Set it to the Beats volume to \

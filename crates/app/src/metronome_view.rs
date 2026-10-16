@@ -1,24 +1,58 @@
-//! Metronome tab: the rhythm is silent and a ring shows the click pattern of
-//! the meter (see [`grooph_measure::click`]), one segment per beat group, as
-//! long as the group. The segment's thickness shows how loud it clicks; a tap
-//! moves it to the next level. While playing, the group being played lights
-//! up and the middle shows the bar number.
+//! Metronome tab: its own meter, whose click bar (see
+//! [`grooph_measure::click`]) is shown as a one-line staff above a ring.
+//!
+//! While the tab is open the click bar takes the working score's place, so
+//! the staff, the tool palette and undo edit it like any rhythm; the rhythm is
+//! put aside and comes back when the tab closes. Every frame the bar is
+//! written back to the click bars of its meter. What plays is a silent bar of
+//! the meter: only the clicks sound.
+//!
+//! The ring has one segment per note or rest of the click bar, as long as it.
+//! The segment's thickness shows how loud it clicks; a tap moves it to the
+//! next level. While playing, the click being played lights up and the middle
+//! shows the bar number.
 
-use crate::{Grooph, Mode, TransportState};
+use crate::undo::{DEFAULT_UNDO_LIMIT, UndoHistory};
+use crate::{Grooph, TransportState};
 use eframe::egui;
 use eframe::egui::epaint::PathShape;
 use eframe::egui::{Align2, FontId, Pos2, Sense, Shape, Stroke, Ui, vec2};
-use grooph_measure::click::{ClickLevel, ClickPattern};
+use grooph_measure::click::{ClickLevel, default_click_bar, subdivided_click_bar};
+use grooph_measure::duration::Duration;
 use grooph_measure::grid::DEFAULT_GRID;
 use grooph_measure::score::Score;
 use grooph_measure::tempo::ScoreTiming;
-use grooph_measure::{Measure, TimeSignature};
+use grooph_measure::{Cursor, Measure, TimeSignature};
 use std::f32::consts::{FRAC_PI_2, TAU};
 
 /// Gap between two segments, as a share of the full turn.
 const SEGMENT_GAP: f32 = 0.012;
 /// Points per radian on the ring's arcs, so they look round at any size.
 const ARC_STEP: f32 = 0.05;
+
+/// The rhythm the metronome tab put aside, back when it closes.
+pub(crate) struct RhythmStash {
+    pub(crate) score: Score,
+    pub(crate) cursor: Cursor,
+    history: UndoHistory,
+    pub(crate) dirty: bool,
+    pub(crate) active_pattern_id: Option<u64>,
+}
+
+pub(crate) struct MetronomeState {
+    /// Meter the metronome clicks, separate from the rhythm's.
+    pub(crate) meter: TimeSignature,
+    /// `Some` while the tab is open.
+    stash: Option<RhythmStash>,
+    /// Undo of the click bar edits while the tab is closed.
+    history: UndoHistory,
+}
+
+impl MetronomeState {
+    pub(crate) fn new(meter: TimeSignature) -> Self {
+        Self { meter, stash: None, history: UndoHistory::new(DEFAULT_UNDO_LIMIT) }
+    }
+}
 
 /// Thickness of a segment of `level`, as a share of the ring radius. Off is
 /// an outline of the medium thickness.
@@ -30,25 +64,19 @@ fn thickness(level: ClickLevel) -> f32 {
     }
 }
 
-/// Where each beat group of `ts` sits on the ring: start and end as a share
-/// of the full turn, from the top clockwise, proportional to its beats.
-fn group_spans(ts: &TimeSignature) -> Vec<(f32, f32)> {
-    let groups = ts.groups();
-    let total = groups.iter().map(|&g| g as f32).sum::<f32>().max(1.0);
-    let mut start = 0.0;
-    groups
-        .iter()
-        .map(|&g| {
-            let end = start + g as f32 / total;
-            let span = (start, end);
-            start = end;
-            span
-        })
-        .collect()
+/// Where each beat of `bar` sits on the ring: start and end as a share of
+/// the full turn, from the top clockwise, proportional to its length.
+fn beat_spans(bar: &Measure) -> Vec<(f32, f32)> {
+    let ts = bar.time_signature();
+    let total = DEFAULT_GRID.ticks_per_measure(&ts).max(1) as f32;
+    let onsets = DEFAULT_GRID.compute_onset_ticks(bar.beats());
+    let mut ends: Vec<f32> = onsets.iter().skip(1).map(|&t| t as f32 / total).collect();
+    ends.push(1.0);
+    onsets.iter().zip(ends).map(|(&start, end)| (start as f32 / total, end)).collect()
 }
 
-/// Index of the group at `turn` (share of the full turn from the top).
-fn group_at_turn(spans: &[(f32, f32)], turn: f32) -> Option<usize> {
+/// Index of the beat at `turn` (share of the full turn from the top).
+fn beat_at_turn(spans: &[(f32, f32)], turn: f32) -> Option<usize> {
     spans.iter().position(|&(start, end)| (start..end).contains(&turn))
 }
 
@@ -67,15 +95,48 @@ fn arc(center: Pos2, radius: f32, start: f32, end: f32) -> Vec<Pos2> {
         .collect()
 }
 
+/// Ready-made click bars of `ts`: the default, then every beat unit split
+/// into 1 to 4 clicks, each with a name. Bars alike are offered once.
+pub(crate) fn click_fills(ts: TimeSignature) -> Vec<(Measure, String)> {
+    let mut fills = vec![(default_click_bar(ts), "Beats".to_owned())];
+    for parts in 1..=4 {
+        let Some(bar) = subdivided_click_bar(ts, parts) else {
+            continue;
+        };
+        if fills.iter().any(|(m, _)| same_bar(m, &bar)) {
+            continue;
+        }
+        let name = bar.beats().first().map_or_else(String::new, |b| fill_name(b.duration));
+        fills.push((bar, name));
+    }
+    fills
+}
+
+fn fill_name(d: Duration) -> String {
+    let base = d.base_note().name();
+    if d.is_tuplet() { format!("{base} triplets") } else { format!("{base}s") }
+}
+
+/// Whether two bars hold the same meter and beats.
+pub(crate) fn same_bar(a: &Measure, b: &Measure) -> bool {
+    a.time_signature() == b.time_signature() && a.beats() == b.beats()
+}
+
 impl Grooph {
-    /// Whether the metronome tab is open: the rhythm is silent then.
+    /// Whether the metronome tab is open: the click bar is being edited and
+    /// the rhythm is silent.
     pub(crate) fn metronome_mode(&self) -> bool {
-        self.ui.mode == Mode::Metronome
+        self.editor.metronome.stash.is_some()
     }
 
-    /// Meter the metronome clicks: the one the rhythms are generated in.
+    /// The rhythm put aside while the metronome tab is open.
+    pub(crate) fn metronome_stash(&self) -> Option<&RhythmStash> {
+        self.editor.metronome.stash.as_ref()
+    }
+
+    /// Meter the metronome tab clicks.
     pub(crate) fn metronome_meter(&self) -> TimeSignature {
-        self.editor.generator.settings.time_signature
+        self.editor.metronome.meter
     }
 
     /// The silent bar the metronome plays: only its clicks sound.
@@ -88,14 +149,106 @@ impl Grooph {
         if self.metronome_mode() { 1 } else { self.editor.score.len() }
     }
 
-    /// Move one group of `ts` to its next click level.
-    fn cycle_click_level(&mut self, ts: TimeSignature, group: usize) {
-        let mut levels = self.playback_ctl.audio_cfg.click.for_meter(ts).levels().to_vec();
-        let Some(level) = levels.get_mut(group) else {
+    /// Put the rhythm aside and edit the click bar of the metronome meter.
+    pub(crate) fn open_metronome(&mut self) {
+        if self.metronome_mode() {
+            return;
+        }
+        let bar = self.playback_ctl.audio_cfg.click.for_meter(self.metronome_meter());
+        let editor = &mut self.editor;
+        let history = std::mem::replace(
+            &mut editor.history,
+            std::mem::replace(&mut editor.metronome.history, UndoHistory::new(0)),
+        );
+        editor.metronome.stash = Some(RhythmStash {
+            score: std::mem::replace(&mut editor.score, Score::single(bar)),
+            cursor: std::mem::replace(&mut editor.cursor, Cursor::start()),
+            history,
+            dirty: editor.dirty,
+            active_pattern_id: editor.active_pattern_id,
+        });
+    }
+
+    /// Store the click bar and bring the rhythm back.
+    pub(crate) fn close_metronome(&mut self) {
+        self.sync_click_bar();
+        let editor = &mut self.editor;
+        let Some(stash) = editor.metronome.stash.take() else {
             return;
         };
-        *level = level.next();
-        self.playback_ctl.audio_cfg.click.set(ts, ClickPattern(levels));
+        editor.metronome.history = std::mem::replace(&mut editor.history, stash.history);
+        editor.score = stash.score;
+        editor.cursor = stash.cursor;
+        editor.dirty = stash.dirty;
+        editor.active_pattern_id = stash.active_pattern_id;
+    }
+
+    /// While the tab is open: the edited bar is the click bar of its meter,
+    /// and its meter the metronome's (undo can bring back another one).
+    pub(crate) fn sync_click_bar(&mut self) {
+        if !self.metronome_mode() {
+            return;
+        }
+        let editor = &mut self.editor;
+        editor.score.measures.truncate(1);
+        editor.cursor.measure_idx = 0;
+        let bar = &editor.score.measures[0];
+        editor.cursor.beat_idx = editor.cursor.beat_idx.min(bar.beats().len().saturating_sub(1));
+        editor.metronome.meter = bar.time_signature();
+        if self.playback_ctl.audio_cfg.click.for_meter(bar.time_signature()).beats() != bar.beats()
+        {
+            self.playback_ctl.audio_cfg.click.set(bar.clone());
+        }
+    }
+
+    /// Edit the click bar of `ts` from now on. Undoable, like a bar change.
+    pub(crate) fn set_metronome_meter(&mut self, ts: TimeSignature) {
+        if ts == self.metronome_meter() {
+            return;
+        }
+        if !self.metronome_mode() {
+            self.editor.metronome.meter = ts;
+            return;
+        }
+        self.sync_click_bar();
+        let bar = self.playback_ctl.audio_cfg.click.for_meter(ts);
+        self.replace_click_bar(bar);
+    }
+
+    /// Replace the click bar being edited, undoably.
+    pub(crate) fn replace_click_bar(&mut self, bar: Measure) {
+        if !self.metronome_mode() || same_bar(&bar, &self.editor.score.measures[0]) {
+            return;
+        }
+        self.with_undo_snapshot(|app| {
+            app.editor.score = Score::single(bar);
+            app.editor.cursor = Cursor::start();
+            true
+        });
+        self.sync_click_bar();
+    }
+
+    /// Name of the click bar being edited if it is a ready-made one, else
+    /// "Custom".
+    pub(crate) fn click_fill_label(&self) -> String {
+        let bar = &self.editor.score.measures[0];
+        click_fills(bar.time_signature())
+            .into_iter()
+            .find(|(m, _)| same_bar(m, bar))
+            .map_or_else(|| "Custom".to_owned(), |(_, name)| name)
+    }
+
+    /// Move the click at `idx` to its next level.
+    fn cycle_click_level(&mut self, idx: usize) {
+        self.with_undo_snapshot(|app| {
+            let bar = &mut app.editor.score.measures[0];
+            let Some(level) = bar.beats().get(idx).map(ClickLevel::of) else {
+                return false;
+            };
+            bar.set_click_level(idx, level.next());
+            app.editor.cursor = Cursor::at(0, idx);
+            true
+        });
     }
 
     /// Tick within the bar being heard (latency taken off), if playing.
@@ -111,136 +264,139 @@ impl Grooph {
         Some(heard.rem_euclid(bar_ticks.max(1.0)))
     }
 
-    /// The ring with the click pattern of the metronome meter, filling the
-    /// space left between the panels.
-    pub(crate) fn metronome_panel(&mut self, ui: &mut Ui) {
-        egui::CentralPanel::default().show_inside(ui, |ui| {
-            let ts = self.metronome_meter();
-            let pattern = self.playback_ctl.audio_cfg.click.for_meter(ts);
-            let spans = group_spans(&ts);
-            let tick = self.metronome_tick(&ts);
-            let bar_ticks = DEFAULT_GRID.ticks_per_measure(&ts).max(1) as f64;
-            let current_turn = tick.map(|t| (t / bar_ticks) as f32);
-            let current = current_turn.and_then(|t| group_at_turn(&spans, t));
-            let bar = match self.playback_ctl.audio.as_mut() {
-                Some(audio) if tick.is_some() => audio.bar_state(),
-                _ => None,
-            };
-            if tick.is_some() {
-                ui.ctx().request_repaint();
+    /// The ring with the click bar, `height` tall at the bottom of the space
+    /// left between the panels.
+    pub(crate) fn metronome_ring(&mut self, ui: &mut Ui, height: f32) {
+        egui::Panel::bottom("metronome_ring")
+            .exact_size(height)
+            .resizable(false)
+            .show_separator_line(false)
+            .frame(egui::Frame::new().fill(ui.visuals().panel_fill))
+            .show_inside(ui, |ui| self.ring(ui));
+    }
+
+    fn ring(&mut self, ui: &mut Ui) {
+        let bar = self.editor.score.measures[0].clone();
+        let ts = bar.time_signature();
+        let spans = beat_spans(&bar);
+        let tick = self.metronome_tick(&ts);
+        let bar_ticks = DEFAULT_GRID.ticks_per_measure(&ts).max(1) as f64;
+        let current_turn = tick.map(|t| (t / bar_ticks) as f32);
+        let current = current_turn.and_then(|t| beat_at_turn(&spans, t));
+        let bar_state = match self.playback_ctl.audio.as_mut() {
+            Some(audio) if tick.is_some() => audio.bar_state(),
+            _ => None,
+        };
+        if tick.is_some() {
+            ui.ctx().request_repaint();
+        }
+
+        let area = ui.available_rect_before_wrap();
+        let (rect, resp) = ui.allocate_exact_size(area.size(), Sense::click());
+        let radius = 0.4 * rect.width().min(rect.height());
+        if radius < 20.0 {
+            return;
+        }
+        let center = rect.center();
+
+        let visuals = ui.visuals();
+        let muted = self.playback_ctl.playback.bar_muted;
+        let base = if muted { visuals.weak_text_color() } else { visuals.text_color() };
+        let lit = visuals.selection.stroke.color;
+        let soft_dim = if visuals.dark_mode { 0.6 } else { 0.5 };
+        let painter = ui.painter();
+
+        // Tapped or hovered click: from the pointer's angle, if it is on the ring.
+        let on_ring = |pos: Pos2| {
+            let d = pos - center;
+            let band = (0.3 * radius).max(24.0);
+            if (d.length() - radius).abs() > band {
+                return None;
             }
+            let turn = ((d.y.atan2(d.x) + FRAC_PI_2) / TAU).rem_euclid(1.0);
+            beat_at_turn(&spans, turn)
+        };
+        let hovered = resp.hover_pos().and_then(on_ring);
 
-            let area = ui.available_rect_before_wrap();
-            let (rect, resp) = ui.allocate_exact_size(area.size(), Sense::click());
-            let radius = 0.4 * rect.width().min(rect.height());
-            if radius < 20.0 {
-                return;
-            }
-            let center = rect.center();
-
-            let visuals = ui.visuals();
-            let muted = self.playback_ctl.playback.bar_muted;
-            let base = if muted { visuals.weak_text_color() } else { visuals.text_color() };
-            let lit = visuals.selection.stroke.color;
-            let soft_dim = if visuals.dark_mode { 0.6 } else { 0.5 };
-            let painter = ui.painter();
-
-            // Tapped or hovered group: from the pointer's angle, if it is on the ring.
-            let on_ring = |pos: Pos2| {
-                let d = pos - center;
-                let band = (0.3 * radius).max(24.0);
-                if (d.length() - radius).abs() > band {
-                    return None;
+        for (idx, (&(start, end), beat)) in spans.iter().zip(bar.beats()).enumerate() {
+            let level = ClickLevel::of(beat);
+            let gap = SEGMENT_GAP.min(0.3 * (end - start)) / 2.0;
+            let (start, end) = (start + gap, end - gap);
+            let width = thickness(level) * radius;
+            let color = if current == Some(idx) && !muted { lit } else { base };
+            match level {
+                ClickLevel::Off => {
+                    let mut points = arc(center, radius + width / 2.0, start, end);
+                    points.extend(arc(center, radius - width / 2.0, start, end).into_iter().rev());
+                    painter.add(PathShape::closed_line(points, Stroke::new(2.0_f32, color)));
                 }
-                let turn = ((d.y.atan2(d.x) + FRAC_PI_2) / TAU).rem_euclid(1.0);
-                group_at_turn(&spans, turn)
-            };
-            let hovered = resp.hover_pos().and_then(on_ring);
-
-            for (group, (&(start, end), &level)) in spans.iter().zip(pattern.levels()).enumerate() {
-                let gap = SEGMENT_GAP / 2.0;
-                let (start, end) = (start + gap, end - gap);
-                let width = thickness(level) * radius;
-                let color = if current == Some(group) && !muted { lit } else { base };
-                match level {
-                    ClickLevel::Off => {
-                        let mut points = arc(center, radius + width / 2.0, start, end);
-                        points.extend(
-                            arc(center, radius - width / 2.0, start, end).into_iter().rev(),
-                        );
-                        painter.add(PathShape::closed_line(points, Stroke::new(2.0_f32, color)));
-                    }
-                    _ => {
-                        let color = if level == ClickLevel::Soft {
-                            color.gamma_multiply(soft_dim)
-                        } else {
-                            color
-                        };
-                        painter.add(Shape::line(
-                            arc(center, radius, start, end),
-                            Stroke::new(width, color),
-                        ));
-                    }
-                }
-                if hovered == Some(group) {
-                    let outer = radius + thickness(ClickLevel::Strong) * radius / 2.0 + 6.0;
+                _ => {
+                    let color = if level == ClickLevel::Soft {
+                        color.gamma_multiply(soft_dim)
+                    } else {
+                        color
+                    };
                     painter.add(Shape::line(
-                        arc(center, outer, start, end),
-                        Stroke::new(2.0_f32, visuals.weak_text_color()),
+                        arc(center, radius, start, end),
+                        Stroke::new(width, color),
                     ));
                 }
             }
-
-            // A dot for every counted beat inside the ring, smaller ones for
-            // the subdivision clicks between them.
-            let beats = ts.groups().iter().map(|&g| g as usize).sum::<usize>().max(1);
-            let subdivision = self.playback_ctl.audio_cfg.subdivision;
-            let parts = if subdivision.fits(&ts) { subdivision.parts() as usize } else { 1 };
-            let dots = beats * parts;
-            let dot_radius = (0.025 * radius).max(2.5);
-            let dot_now = current_turn.map(|t| (t * dots as f32) as usize);
-            for dot in 0..dots {
-                let pos = at_turn(center, 0.72 * radius, dot as f32 / dots as f32);
-                let color =
-                    if dot_now == Some(dot) && !muted { lit } else { visuals.weak_text_color() };
-                let r = if dot % parts == 0 { dot_radius } else { 0.6 * dot_radius };
-                painter.circle_filled(pos, r, color);
+            if hovered == Some(idx) {
+                let outer = radius + thickness(ClickLevel::Strong) * radius / 2.0 + 6.0;
+                painter.add(Shape::line(
+                    arc(center, outer, start, end),
+                    Stroke::new(2.0_f32, visuals.weak_text_color()),
+                ));
             }
+        }
 
-            // Middle: the bar number while playing, else the meter.
-            let (big, small) = match bar {
-                Some(b) => {
-                    ((b.bar + 1).to_string(), if muted { "muted" } else { "bar" }.to_owned())
-                }
-                None => (format!("{}/{}", ts.beats, ts.beat_unit), meter_caption(&ts)),
-            };
-            let big_size = 0.42 * radius;
-            painter.text(
-                center - vec2(0.0, 0.08 * radius),
-                Align2::CENTER_CENTER,
-                big,
-                FontId::proportional(big_size),
-                visuals.strong_text_color(),
-            );
-            painter.text(
-                center + vec2(0.0, 0.26 * radius),
-                Align2::CENTER_CENTER,
-                small,
-                FontId::proportional((0.14 * radius).clamp(13.0, 22.0)),
-                visuals.weak_text_color(),
-            );
+        // A dot for every beat unit inside the ring, bigger ones where a beat
+        // group starts.
+        let units = ts.beats.max(1) as usize;
+        let mut group_starts = vec![0usize];
+        for &g in ts.groups().iter() {
+            group_starts.push(group_starts.last().copied().unwrap_or(0) + g as usize);
+        }
+        let dot_radius = (0.025 * radius).max(2.5);
+        let dot_now = current_turn.map(|t| (t * units as f32) as usize);
+        for dot in 0..units {
+            let pos = at_turn(center, 0.72 * radius, dot as f32 / units as f32);
+            let color =
+                if dot_now == Some(dot) && !muted { lit } else { visuals.weak_text_color() };
+            let r = if group_starts.contains(&dot) { dot_radius } else { 0.6 * dot_radius };
+            painter.circle_filled(pos, r, color);
+        }
 
-            if let Some(group) = hovered {
-                let level = pattern.levels().get(group).copied().unwrap_or(ClickLevel::Medium);
-                resp.clone()
-                    .on_hover_text(format!("Click: {} (tap to change)", level_label(level)));
-            }
-            if resp.clicked()
-                && let Some(group) = resp.interact_pointer_pos().and_then(on_ring)
-            {
-                self.cycle_click_level(ts, group);
-            }
-        });
+        // Middle: the bar number while playing, else the meter.
+        let (big, small) = match bar_state {
+            Some(b) => ((b.bar + 1).to_string(), if muted { "muted" } else { "bar" }.to_owned()),
+            None => (format!("{}/{}", ts.beats, ts.beat_unit), meter_caption(&ts)),
+        };
+        painter.text(
+            center - vec2(0.0, 0.08 * radius),
+            Align2::CENTER_CENTER,
+            big,
+            FontId::proportional(0.42 * radius),
+            visuals.strong_text_color(),
+        );
+        painter.text(
+            center + vec2(0.0, 0.26 * radius),
+            Align2::CENTER_CENTER,
+            small,
+            FontId::proportional((0.14 * radius).clamp(13.0, 22.0)),
+            visuals.weak_text_color(),
+        );
+
+        if let Some(idx) = hovered {
+            let level = bar.beats().get(idx).map_or(ClickLevel::Medium, ClickLevel::of);
+            resp.clone().on_hover_text(format!("Click: {} (tap to change)", level_label(level)));
+        }
+        if resp.clicked()
+            && let Some(idx) = resp.interact_pointer_pos().and_then(on_ring)
+        {
+            self.cycle_click_level(idx);
+        }
     }
 }
 
@@ -261,23 +417,46 @@ fn level_label(level: ClickLevel) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use grooph_measure::notation::parse_score;
+
+    fn bar(text: &str) -> Measure {
+        parse_score(text).unwrap().measures.remove(0)
+    }
 
     #[test]
-    fn segments_are_as_long_as_their_groups() {
+    fn segments_are_as_long_as_their_clicks() {
         // 7/8 as 2+3+2.
-        let spans = group_spans(&TimeSignature::SEVEN_EIGHT);
+        let spans = beat_spans(&default_click_bar(TimeSignature::SEVEN_EIGHT));
         assert_eq!(spans.len(), 3);
         assert!((spans[0].1 - 2.0 / 7.0).abs() < 1e-6);
         assert!((spans[1].1 - 5.0 / 7.0).abs() < 1e-6);
         assert!((spans[2].1 - 1.0).abs() < 1e-6);
+        // A triplet without its middle click still has three segments.
+        let spans = beat_spans(&bar("1/4 t8 r:t8 t8"));
+        assert_eq!(spans.len(), 3);
+        assert!((spans[1].0 - 1.0 / 3.0).abs() < 1e-6);
     }
 
     #[test]
-    fn group_at_turn_finds_the_segment() {
-        let spans = group_spans(&TimeSignature::FOUR_FOUR);
-        assert_eq!(group_at_turn(&spans, 0.0), Some(0));
-        assert_eq!(group_at_turn(&spans, 0.3), Some(1));
-        assert_eq!(group_at_turn(&spans, 0.99), Some(3));
+    fn beat_at_turn_finds_the_segment() {
+        let spans = beat_spans(&default_click_bar(TimeSignature::FOUR_FOUR));
+        assert_eq!(beat_at_turn(&spans, 0.0), Some(0));
+        assert_eq!(beat_at_turn(&spans, 0.3), Some(1));
+        assert_eq!(beat_at_turn(&spans, 0.99), Some(3));
+    }
+
+    #[test]
+    fn fills_name_each_split_once() {
+        let names = |ts| click_fills(ts).into_iter().map(|(_, n)| n).collect::<Vec<_>>();
+        // One click per quarter is the default bar already.
+        assert_eq!(
+            names(TimeSignature::FOUR_FOUR),
+            ["Beats", "Eighths", "Eighth triplets", "Sixteenths"]
+        );
+        assert_eq!(
+            names(TimeSignature::SIX_EIGHT),
+            ["Beats", "Eighths", "Sixteenths", "Sixteenth triplets", "Thirty-seconds"]
+        );
     }
 
     #[test]

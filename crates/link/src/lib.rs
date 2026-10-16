@@ -14,7 +14,7 @@
 //! | `seed`    | Generator seed; the same parameters and seed give the same rhythm |
 //! | `swing`   | Swing in percent, 50 (straight) to 75 (dotted); 66 is a triplet feel |
 //! | `su`      | Swung note value: `8` (default) or `16`; needs `swing` |
-//! | `click`   | Click pattern of the meter of `r` (its first measure) or `ts`: one letter per beat group, `S` strong, `M` medium, `L` soft, `-` off |
+//! | `click`   | Click bar of the meter of `r` (its first measure) or `ts`: one measure in the text notation, without the time signature (`>` strong, plain medium, `(e)` soft, rest off) |
 //!
 //! Any of `sub`, `lvl`, `bars`, `space` or `seed` selects the generator;
 //! unknown parameters are ignored. [`SharedLink::to_url`] is the inverse of
@@ -30,14 +30,13 @@
 //! old 7/8 link at `bpm=140` opens at 70 and plays as fast as it used to. A
 //! score mixing beat units is converted by its first measure.
 
-use grooph_measure::click::ClickPattern;
 use grooph_measure::generator::{
     GeneratorSettings, MAX_BARS, MAX_COMPLEXITY, Subdivision, supports_time_signature,
 };
 use grooph_measure::notation::{format_score, parse_score};
 use grooph_measure::swing::{MAX_SWING_PERCENT, MIN_SWING_PERCENT, Swing, SwingUnit};
 use grooph_measure::tempo::{MAX_BPM, MIN_BPM};
-use grooph_measure::{Score, TimeSignature};
+use grooph_measure::{Measure, Score, TimeSignature};
 
 /// Version [`SharedLink::to_url`] writes as `v`.
 pub const LINK_VERSION: u32 = 2;
@@ -49,8 +48,8 @@ pub struct SharedLink {
     pub bpm: Option<u32>,
     pub swing: Option<Swing>,
     pub content: Option<LinkContent>,
-    /// Click pattern of the content's meter (the first measure's meter).
-    pub click: Option<ClickPattern>,
+    /// Click bar of the content's meter (the first measure's meter).
+    pub click: Option<Measure>,
 }
 
 #[derive(Clone, Debug)]
@@ -119,9 +118,7 @@ fn parse_query_with_default_version(
                     Some(parse_in_range("swing", &value, MIN_SWING_PERCENT, MAX_SWING_PERCENT)?)
             }
             "su" => swing_unit = Some(parse_swing_unit(&value)?),
-            "click" => {
-                click = Some(value.parse::<ClickPattern>().map_err(|e| format!("click: {e}"))?)
-            }
+            "click" => click = Some(value),
             _ => {}
         }
     }
@@ -164,17 +161,20 @@ fn parse_query_with_default_version(
         ts.map(LinkContent::Metronome)
     };
 
-    if let Some(pattern) = &click {
-        let Some(ts) = content.as_ref().and_then(LinkContent::first_time_signature) else {
-            return Err("click needs a rhythm (r) or a time signature (ts)".into());
-        };
-        if !pattern.fits(ts) {
-            return Err(format!(
-                "click needs one letter per beat group, {ts} has {}",
-                ts.groups().len()
-            ));
+    let click = match click {
+        None => None,
+        Some(text) => {
+            let Some(ts) = content.as_ref().and_then(LinkContent::first_time_signature) else {
+                return Err("click needs a rhythm (r) or a time signature (ts)".into());
+            };
+            let mut bar =
+                parse_score(&format!("{ts} {text}")).map_err(|e| format!("click: {e}"))?.measures;
+            if bar.len() != 1 {
+                return Err("click must be a single measure".into());
+            }
+            bar.pop()
         }
-    }
+    };
 
     if version == 1
         && let Some(tempo) = bpm
@@ -241,8 +241,10 @@ impl SharedLink {
                 params.push(("su", "16".into()));
             }
         }
-        if let Some(click) = &self.click {
-            params.push(("click", click.to_string()));
+        if let Some(bar) = &self.click {
+            let text = format_score(&Score::single(bar.clone()))?;
+            let ts = bar.time_signature().to_string();
+            params.push(("click", text.strip_prefix(&ts)?.trim_start().to_string()));
         }
         // The version alone opens nothing.
         if params.len() == 1 {
@@ -479,15 +481,17 @@ mod tests {
 
     #[test]
     fn click_link() {
-        let link = parse("v=2&bpm=70&ts=7/8&click=S-L");
-        assert_eq!(link.click, Some("S-L".parse().unwrap()));
-        assert_eq!(link.to_url("/").unwrap(), "/?v=2&bpm=70&ts=7/8&click=S-L");
+        let link = parse("v=2&bpm=70&ts=7/8&click=>q+r:q.+(q)");
+        let bar = link.click.as_ref().unwrap();
+        assert_eq!(bar.time_signature(), TimeSignature::SEVEN_EIGHT);
+        assert!(bar.beats()[0].accented && bar.beats()[2].soft);
+        assert_eq!(link.to_url("/").unwrap(), "/?v=2&bpm=70&ts=7/8&click=%3Eq+r:q.+%28q%29");
         // The pattern belongs to the first measure of a rhythm.
-        let link = parse("r=6/8+q.+q.+|+3/4+q+q+q&click=SL");
-        assert_eq!(link.click, Some("SL".parse().unwrap()));
-        assert!(parse_query("ts=7/8&click=SM").unwrap_err().contains("7/8 has 3"));
-        assert!(parse_query("ts=7/8&click=SXM").unwrap_err().contains("click"));
-        assert!(parse_query("bpm=90&click=SMMM").unwrap_err().contains("needs a rhythm"));
+        let link = parse("r=6/8+q.+q.+|+3/4+q+q+q&click=q.+>q.");
+        assert_eq!(link.click.unwrap().time_signature(), TimeSignature::SIX_EIGHT);
+        assert!(parse_query("ts=7/8&click=q+q").unwrap_err().contains("click"));
+        assert!(parse_query("ts=7/8&click=q+q.+q+|+q+q.+q").unwrap_err().contains("single"));
+        assert!(parse_query("bpm=90&click=q+q+q+q").unwrap_err().contains("needs a rhythm"));
     }
 
     #[test]

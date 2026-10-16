@@ -6,6 +6,9 @@ use grooph_measure::duration::NoteValue::{Eighth, Half, Quarter, Sixteenth, Thir
 pub const GLYPH_NOTEHEAD_BLACK: char = '\u{E0A4}';
 // Augmentation dot: U+E1E7
 pub const GLYPH_AUGMENTATION_DOT: char = '\u{E1E7}';
+/// Parentheses around a soft (ghost) notehead.
+pub const GLYPH_NOTEHEAD_PAREN_LEFT: char = '\u{E0F5}';
+pub const GLYPH_NOTEHEAD_PAREN_RIGHT: char = '\u{E0F6}';
 // Rest symbols
 pub const GLYPH_REST_WHOLE: char = '\u{E4E3}';
 pub const GLYPH_REST_HALF: char = '\u{E4E4}';

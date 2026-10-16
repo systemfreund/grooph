@@ -1,4 +1,5 @@
 use crate::Grooph;
+use crate::pickers::Picker;
 use crate::tools::{DeleteOp, MetaOp, Modifier, NavOp, Tool, ToolGroup, ToolKind, all_tools};
 use crate::{Mode, tools};
 use eframe::egui;
@@ -40,7 +41,7 @@ fn button_kind(kind: &ToolKind) -> ButtonKind {
     match kind {
         ToolKind::InsertBeat(..)
         | ToolKind::Modify(Modifier::ToggleDotted { .. })
-        | ToolKind::Modify(Modifier::ToggleAccent) => ButtonKind::Note,
+        | ToolKind::Modify(Modifier::ToggleAccent | Modifier::ToggleSoft) => ButtonKind::Note,
         ToolKind::Meta(MetaOp::ChangeTimeSignature) => ButtonKind::TimeSignature,
         _ => ButtonKind::Plain,
     }
@@ -123,6 +124,11 @@ impl Grooph {
             }
             ToolKind::Edit(EditOp::Redo) => {
                 self.redo();
+                return;
+            }
+            // The click bar's meter is the metronome's: pick it there.
+            ToolKind::Meta(MetaOp::ChangeTimeSignature) if self.metronome_mode() => {
+                self.ui.picker = Some(Picker::MetronomeMeter);
                 return;
             }
             ToolKind::Meta(MetaOp::ChangeTimeSignature) => {
@@ -222,6 +228,7 @@ impl Grooph {
                         self.current_measure_mut().toggle_dotted(idx)
                     }
                     Modifier::ToggleAccent => self.current_measure_mut().toggle_accent(idx),
+                    Modifier::ToggleSoft => self.current_measure_mut().toggle_soft(idx),
                     Modifier::ToggleRestNote => self.current_measure_mut().toggle_beat_kind(idx),
                     Modifier::CycleTuplet => self.set_tuplet(idx, None),
                 };

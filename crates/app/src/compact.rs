@@ -11,7 +11,6 @@ use eframe::egui::{
     Align2, Color32, FontId, Frame, Id, Margin, Painter, Rect, Response, RichText, Sense, Shape,
     Stroke, Ui, UiBuilder, Vec2, pos2, vec2,
 };
-use grooph_measure::click::ClickSubdivision;
 use grooph_measure::generator::{Subdivision, effective_subdivision};
 
 /// Windows narrower than this (in points) count as phone-sized: the staff
@@ -24,6 +23,8 @@ const TAB_HEIGHT: f32 = 56.0;
 const CARD_CELL_HEIGHT: f32 = 64.0;
 const PLAY_BUTTON_SIZE: f32 = 68.0;
 const SIDE_BUTTON_SIZE: f32 = 52.0;
+/// Room the metronome tab keeps for the click bar's staff above the ring.
+const METRONOME_STAFF_HEIGHT: f32 = 130.0;
 const CARD_RADIUS: u8 = 16;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -223,24 +224,32 @@ impl Grooph {
     /// Tab shown in the compact layout, derived from the mode so modes set
     /// elsewhere (links, time signature dialog) land on the right tab.
     pub(crate) fn compact_tab(&self) -> CompactTab {
+        if self.metronome_mode() {
+            return CompactTab::Metronome;
+        }
         match self.ui.mode {
             Mode::Edit | Mode::TimeSignature(_) => CompactTab::Edit,
             Mode::MoreMenu | Mode::Mixer | Mode::Settings | Mode::Help | Mode::Library => {
                 CompactTab::More
             }
             Mode::Playback | Mode::Generator => CompactTab::Practice,
-            Mode::Metronome => CompactTab::Metronome,
         }
     }
 
     fn select_compact_tab(&mut self, tab: CompactTab) {
         // Into or out of the metronome the played score changes: stop first.
-        if (tab == CompactTab::Metronome) != self.metronome_mode() {
+        let metronome = tab == CompactTab::Metronome;
+        if metronome != self.metronome_mode() {
             self.stop_transport();
+            if metronome {
+                self.open_metronome();
+            } else {
+                self.close_metronome();
+            }
         }
         self.ui.mode = match tab {
             CompactTab::Practice => Mode::Generator,
-            CompactTab::Metronome => Mode::Metronome,
+            CompactTab::Metronome => Mode::Playback,
             CompactTab::Edit => Mode::Edit,
             CompactTab::More => Mode::MoreMenu,
         };
@@ -258,17 +267,23 @@ impl Grooph {
                 self.tool_palette_panel(ui);
                 self.compact_edit_bar(ui);
             }
+            CompactTab::Metronome if self.ui.mode == Mode::Edit => {
+                self.tool_palette_panel(ui);
+                self.metronome_edit_bar(ui);
+                self.compact_metronome_card(ui);
+            }
             CompactTab::Metronome => {
                 self.compact_metronome_sheet(ui);
                 self.compact_metronome_card(ui);
+                // The ring takes what the staff above it leaves.
+                let height = (ui.available_height() - METRONOME_STAFF_HEIGHT)
+                    .min(ui.available_width())
+                    .max(0.0);
+                self.metronome_ring(ui, height);
             }
             CompactTab::More => self.compact_more(ui),
         }
-        if tab == CompactTab::Metronome {
-            self.metronome_panel(ui);
-        } else {
-            self.measure_panel(ui);
-        }
+        self.measure_panel(ui);
         self.settings_picker(ui);
     }
 
@@ -349,7 +364,7 @@ impl Grooph {
     /// Meter and tempo of the metronome tab, in the same card as Practice.
     fn compact_metronome_card(&mut self, ui: &mut Ui) {
         let cells = [
-            (Picker::TimeSignature, "Meter", time_signature_label(self.metronome_meter())),
+            (Picker::MetronomeMeter, "Meter", time_signature_label(self.metronome_meter())),
             match self.playback_ctl.playback.ramp_bpm {
                 Some(bpm) => (Picker::Bpm, "BPM now", bpm.to_string()),
                 None => (Picker::Bpm, "BPM", self.playback_ctl.bpm.to_string()),
@@ -452,16 +467,11 @@ impl Grooph {
                         .corner_radius(CARD_RADIUS)
                         .inner_margin(Margin::same(12))
                         .show(ui, |ui| {
-                            let ts = self.metronome_meter();
-                            let subdivision = self.playback_ctl.audio_cfg.subdivision;
-                            // A split the meter cannot take plays as off.
-                            let label = if subdivision.fits(&ts) {
-                                subdivision.label(&ts)
-                            } else {
-                                ClickSubdivision::Off.label(&ts)
-                            };
-                            if value_row(ui, "Subdivision", &label).clicked() {
-                                self.ui.picker = Some(Picker::ClickSubdivision);
+                            if value_row(ui, "Clicks", &self.click_fill_label()).clicked() {
+                                self.ui.picker = Some(Picker::ClickFill);
+                            }
+                            if value_row(ui, "Edit clicks", "✏").clicked() {
+                                self.ui.mode = Mode::Edit;
                             }
                             switch_row(ui, "Count-in", &mut self.playback_ctl.audio_cfg.count_in);
                             switch_row(
@@ -644,6 +654,37 @@ impl Grooph {
                         }
                         if self.link_copied_recently(ui) {
                             ui.weak("Copied");
+                        }
+                    });
+                });
+            });
+    }
+
+    /// Play button and a way back to the ring above the tool palette, while
+    /// the click bar is edited note by note.
+    fn metronome_edit_bar(&mut self, ui: &mut Ui) {
+        egui::Panel::bottom("metronome_edit_bar")
+            .frame(
+                Frame::new().fill(ui.visuals().panel_fill).inner_margin(Margin::symmetric(12, 6)),
+            )
+            .show_separator_line(false)
+            .show_inside(ui, |ui| {
+                ui.horizontal(|ui| {
+                    let playing = self.playback_ctl.transport_state == TransportState::Playing;
+                    let fill = ui.visuals().selection.bg_fill;
+                    let icon = ui.visuals().selection.stroke.color;
+                    if round_button(ui, SIDE_BUTTON_SIZE, fill, icon, |painter, rect, color| {
+                        paint_play_icon(painter, rect, color, playing)
+                    })
+                    .clicked()
+                    {
+                        self.toggle_playback();
+                    }
+                    ui.add_space(8.0);
+                    ui.label("Click bar");
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button(RichText::new("Done").size(18.0)).clicked() {
+                            self.ui.mode = Mode::Playback;
                         }
                     });
                 });

@@ -28,7 +28,8 @@ Important root files:
 ## Data model and invariants
 
 - Core object: `grooph_measure::Measure` with `Vec<Beat>` and `TimeSignature`.
-- `Beat` has `duration`, `kind` (Note/Rest), `accented`, `tuplet_group_id`.
+- `Beat` has `duration`, `kind` (Note/Rest), `accented`, `soft` (a ghost note,
+  head in parentheses; never with `accented`), `tuplet_group_id`.
 - `Duration` is `Simple`, `Dotted`, or `Tuplet(TupletSpec { n, m, base })`.
 - `Measure::set_beat` guarantees a valid measure length and fills gaps.
 - `DEFAULT_GRID` defines the valid duration grid and tick calculations.
@@ -74,7 +75,8 @@ Important root files:
 
 - `grooph_measure::notation`: `parse_score` / `format_score` for a compact
   text notation (`4/4 q e e >s s s s t8 t8 r:t8 | q. e r:q q`). Duration
-  codes match the helpers in `duration.rs`; `r:` = rest, `>` = accent, `|` =
+  codes match the helpers in `duration.rs`; `r:` = rest, `>` = accent, `(e)` =
+  soft note, `|` =
   bar line, a leading `N/D` sets the time signature. Parsing goes through
   `set_beat`; each measure must be filled exactly, errors name the measure
   and token. Formatting returns `None` for durations without a code.
@@ -173,22 +175,21 @@ Important root files:
   `pulse` (default 0, off) clicks every beat unit between the primary beats
   (`SoundType::Pulse`, e.g. the eighths inside the groups of 7/8); sounds
   with zero gain are not triggered at all.
-- Click patterns (`grooph_measure::click`): one `ClickLevel` (strong, medium,
-  soft, off) per beat group of a meter. `ClickPatterns` (in `AudioConfig`,
-  persisted) keeps the ones that differ from the default (strong, then
-  medium), keyed by the whole `TimeSignature` including its grouping.
-  `Schedule::build` plays strong as `Downbeat`, medium as `PrimaryBeat`, soft
-  as `SoftBeat` (mixer "Soft"); off groups get no click, their pulse clicks
-  stay. The count-in and calibration ignore the patterns. Link parameter
-  `click` (`S`, `M`, `L`, `-` per group) sets the pattern of the link's first
-  meter; shared links carry it when it is not the default.
-- Subdivision (`ClickSubdivision`, same file): each beat unit split into 2, 3
-  or 4 parts (`ticks`; a split the tick grid cannot take, like 4 per 16th,
-  does not `fit` and plays as off). Set in the Metronome tab, stored in
-  `AudioConfig::subdivision`, applies to all playback except the count-in
-  and calibration. `Schedule::build_with` adds `SoundType::Subdivision`
-  (mixer "Subdiv.") on those ticks and on the pulse ticks, which then no
-  longer click as `Pulse`.
+- Click bars (`grooph_measure::click`): what the metronome clicks in a meter
+  is a measure, the meter's click bar. Each note is a click, its `ClickLevel`
+  from the note: accented = strong, plain = medium, soft = soft, a rest = no
+  click; tuplets and dotted notes work as in any rhythm. The default bar
+  (`default_click_bar`) has one note per beat group, as long as the group,
+  the first accented; `subdivided_click_bar` splits every beat unit into 1 to
+  4 clicks (group starts keep their level, the rest are soft). `ClickBars`
+  (in `AudioConfig`, persisted) keeps the bars that differ from the default,
+  keyed by the whole `TimeSignature` including its grouping, and applies to
+  all playback in that meter. `Schedule::build` plays strong as `Downbeat`,
+  medium as `PrimaryBeat`, soft as `SoftBeat` (mixer "Soft"), at the swung
+  position of each note; pulse clicks stay. The count-in and calibration
+  ignore the click bars. Link parameter `click` is the click bar of the
+  link's first meter in text notation without the time signature (e.g.
+  `>q r:q. (q)`); shared links carry it when it is not the default.
 
 ## Metronome trainer
 
@@ -204,14 +205,21 @@ Important root files:
   `score_timing()` via `PlaybackState::ramp_bpm` and re-anchors the accuracy
   session on every change.
 
-- Metronome tab (`crates/app/src/metronome_view.rs`, `Mode::Metronome`): the
-  audio engine gets one silent bar in the generator's meter
-  (`metronome_score`) instead of the rhythm, so only the clicks sound; ghost
-  notes, endless mode and play along are off there. A ring shows the meter's
-  click pattern, one segment per beat group as long as the group, thickness by
-  level; a tap cycles the level. While playing, the group and beat being heard
-  light up and the middle shows the bar number. Switching into or out of the
-  tab stops playback.
+- Metronome tab (`crates/app/src/metronome_view.rs`): its own meter
+  (`MetronomeState::meter`, persisted, picked in the tab's card), separate
+  from the generator's. Opening the tab puts the rhythm (score, cursor, undo,
+  dirty flag) aside in `MetronomeState` and edits the meter's click bar in its
+  place, so the staff, tool palette and undo work on it; `sync_click_bar`
+  writes it back to `ClickBars` every frame, and closing the tab brings the
+  rhythm back (persistence saves the rhythm, not the bar). The audio engine
+  gets one silent bar of the meter (`metronome_score`), so only the clicks
+  sound; ghost notes, endless mode and play along are off there. Below the
+  staff a ring shows one segment per note or rest of the bar, as long as it,
+  thickness by level; a tap cycles strong, medium, soft, off (undoable). The
+  "Clicks" picker offers the ready-made bars (`click_fills`), "Edit clicks"
+  shows the tool palette. While playing, the click and beat being heard light
+  up and the middle shows the bar number. Switching into or out of the tab
+  stops playback.
 
 ## Play along (accuracy)
 
@@ -242,7 +250,9 @@ Important root files:
   sheet, big "new rhythm" + play buttons), Metronome (see below), Edit (tool
   palette + edit bar),
   More (Library, Mixer, Settings, Help reuse their panels). The tab is derived
-  from `Mode` (`compact_tab`), so modes set elsewhere land on the right tab.
+  from `Mode` (`compact_tab`), so modes set elsewhere land on the right tab;
+  the Metronome tab is open while `metronome_mode()`, in `Mode::Playback`
+  (ring) or `Mode::Edit` (tool palette).
 - Settings open in a `Modal` picker (`settings_picker`); generator changes go
   through `finish_generator_change`.
 - Windows narrower than `NARROW_MAX_WIDTH` (600 pt, `UiShell::narrow_screen`)

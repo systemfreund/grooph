@@ -147,7 +147,7 @@ impl TickSource {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use grooph_measure::click::ClickPatterns;
+    use grooph_measure::click::ClickBars;
     use grooph_measure::duration::q;
     use grooph_measure::{Beat, Measure, Score, TimeSignature};
 
@@ -174,7 +174,7 @@ mod tests {
     fn first_sample_picks_up_downbeat() {
         let score = score_4_4_quarters();
         let timing = ScoreTiming::from_score(&score, 120);
-        let schedule = Schedule::build(&score, &timing, None, &ClickPatterns::default());
+        let schedule = Schedule::build(&score, &timing, None, &ClickBars::default());
         let mut src = TickSource::new(48000);
         let mut out = Vec::new();
         src.advance_one_sample(&timing, &schedule, 1.0, &mut out);
@@ -187,7 +187,7 @@ mod tests {
     fn cursor_stays_within_loop_and_score_repeats() {
         let score = score_4_4_quarters();
         let timing = ScoreTiming::from_score(&score, 120);
-        let schedule = Schedule::build(&score, &timing, None, &ClickPatterns::default());
+        let schedule = Schedule::build(&score, &timing, None, &ClickBars::default());
         let total = timing.total_loop_ticks() as f64;
         let mut src = TickSource::new(48000);
         let mut out = Vec::new();
@@ -212,7 +212,7 @@ mod tests {
     fn count_in_plays_one_bar_before_the_first_downbeat() {
         let score = score_4_4_quarters();
         let timing = ScoreTiming::from_score(&score, 120);
-        let schedule = Schedule::build(&score, &timing, None, &ClickPatterns::default());
+        let schedule = Schedule::build(&score, &timing, None, &ClickBars::default());
         let mut src = TickSource::new(48000);
         src.restart(Some(&count_in_4_4()));
         let mut out = Vec::new();
@@ -247,7 +247,7 @@ mod tests {
     fn restart_without_count_in_starts_at_zero() {
         let score = score_4_4_quarters();
         let timing = ScoreTiming::from_score(&score, 120);
-        let schedule = Schedule::build(&score, &timing, None, &ClickPatterns::default());
+        let schedule = Schedule::build(&score, &timing, None, &ClickBars::default());
         let mut src = TickSource::new(48000);
         let mut out = Vec::new();
         for _ in 0..10_000 {
@@ -264,7 +264,7 @@ mod tests {
         let mut score = score_4_4_quarters();
         score.measures.push(m2);
         let timing = ScoreTiming::from_score(&score, 120);
-        let schedule = Schedule::build(&score, &timing, None, &ClickPatterns::default());
+        let schedule = Schedule::build(&score, &timing, None, &ClickBars::default());
         let mut src = TickSource::new(48000);
         let mut out = Vec::new();
         // 120 bpm 4/4: a bar lasts 2 s. After 5 s the third bar (second loop) plays.
@@ -280,7 +280,7 @@ mod tests {
     fn tempo_scale_speeds_up_the_cursor() {
         let score = score_4_4_quarters();
         let timing = ScoreTiming::from_score(&score, 120);
-        let schedule = Schedule::build(&score, &timing, None, &ClickPatterns::default());
+        let schedule = Schedule::build(&score, &timing, None, &ClickBars::default());
         let mut normal = TickSource::new(48000);
         let mut fast = TickSource::new(48000);
         let mut out = Vec::new();

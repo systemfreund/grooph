@@ -15,22 +15,26 @@ pub struct Beat {
     pub duration: Duration,
     pub kind: BeatKind,
     pub accented: bool,
+    /// A soft (ghost) note, written with its head in parentheses. Never
+    /// together with `accented`.
+    #[serde(default)]
+    pub soft: bool,
     pub tuplet_group_id: Option<TupletGroupId>,
 }
 
 impl Beat {
     /// Creates a new note with the given duration
     pub fn note(duration: Duration) -> Self {
-        Self { duration, kind: Note, accented: false, tuplet_group_id: None }
+        Self { duration, kind: Note, accented: false, soft: false, tuplet_group_id: None }
     }
 
     /// Creates a new rest with the given duration
     pub fn rest(duration: Duration) -> Self {
-        Self { duration, kind: Rest, accented: false, tuplet_group_id: None }
+        Self { duration, kind: Rest, accented: false, soft: false, tuplet_group_id: None }
     }
 
     pub fn new(duration: Duration, kind: BeatKind) -> Self {
-        Self { duration, kind, accented: false, tuplet_group_id: None }
+        Self { duration, kind, accented: false, soft: false, tuplet_group_id: None }
     }
 
     pub fn with_kind(&self, kind: BeatKind) -> Self {
@@ -38,6 +42,7 @@ impl Beat {
             duration: self.duration,
             kind,
             accented: self.accented && kind == Note,
+            soft: self.soft && kind == Note,
             tuplet_group_id: self.tuplet_group_id,
         }
     }
@@ -49,6 +54,7 @@ impl PartialEq for Beat {
         self.duration == other.duration
             && self.kind == other.kind
             && self.accented == other.accented
+            && self.soft == other.soft
     }
 }
 

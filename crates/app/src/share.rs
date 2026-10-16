@@ -35,7 +35,7 @@ pub(crate) fn paint_share_icon(painter: &Painter, rect: Rect, color: Color32) {
 
 impl Grooph {
     /// Link that opens the working score at the current tempo and swing, with
-    /// the click pattern of its first meter if that is not the default.
+    /// the click bar of its first meter if that is not the default.
     pub(crate) fn share_link_url(&self) -> Option<String> {
         let swing = self.playback_ctl.audio_cfg.swing;
         let link = SharedLink {
@@ -47,7 +47,8 @@ impl Grooph {
                 .score
                 .measures
                 .first()
-                .and_then(|m| self.playback_ctl.audio_cfg.click.custom_for(m.time_signature())),
+                .and_then(|m| self.playback_ctl.audio_cfg.click.custom_for(m.time_signature()))
+                .cloned(),
         };
         let url = link.to_url(&platform::share_base_url());
         if url.is_none() {

@@ -5,12 +5,12 @@
 
 use crate::Grooph;
 use crate::generator::ENDLESS_MIN_BARS;
+use crate::metronome_view::{click_fills, same_bar};
 use crate::presets::{self, PresetId};
 use crate::tool_palette::notation_button;
 use eframe::egui;
 use eframe::egui::{Button, Color32, FontId, Id, Modal, Response, RichText, Ui, vec2};
 use grooph_measure::TimeSignature;
-use grooph_measure::click::ClickSubdivision;
 use grooph_measure::generator::{
     BeatSpan, FigureSet, MAX_BARS, MAX_COMPLEXITY, Subdivision, complexity_figures,
     effective_subdivision, figures, offered_subdivisions, supports_time_signature,
@@ -34,8 +34,10 @@ pub(crate) enum Picker {
     Bpm,
     Swing,
     Preset,
-    /// Metronome clicks between the beats.
-    ClickSubdivision,
+    /// The metronome tab's meter.
+    MetronomeMeter,
+    /// A ready-made click bar for the metronome meter.
+    ClickFill,
 }
 
 pub(crate) fn swing_label(percent: u8) -> String {
@@ -46,6 +48,11 @@ pub(crate) fn swing_label(percent: u8) -> String {
 /// its groupings (x/8 and x/16 are written in beat groups, e.g. 6/8 = 3+3,
 /// 7/16 = 2+3+2 or 2+2+3).
 pub(crate) fn time_signatures() -> Vec<TimeSignature> {
+    all_time_signatures().into_iter().filter(|ts| supports_time_signature(*ts)).collect()
+}
+
+/// Every meter the editor offers, in each of its groupings.
+pub(crate) fn all_time_signatures() -> Vec<TimeSignature> {
     TimeSignature::BEAT_UNITS
         .into_iter()
         .flat_map(|beat_unit| {
@@ -55,7 +62,6 @@ pub(crate) fn time_signatures() -> Vec<TimeSignature> {
                 .map(move |beats| TimeSignature::new(beats, beat_unit))
         })
         .flat_map(|ts| (0..ts.groupings().len() as u8).map(move |g| ts.with_grouping(g)))
-        .filter(|ts| supports_time_signature(*ts))
         .collect()
 }
 
@@ -141,7 +147,8 @@ impl Grooph {
                 Picker::Bpm => "Tempo",
                 Picker::Swing => "Swing",
                 Picker::Preset => "Preset",
-                Picker::ClickSubdivision => "Subdivision",
+                Picker::MetronomeMeter => "Time signature",
+                Picker::ClickFill => "Clicks",
             };
             ui.heading(title);
             ui.add_space(8.0);
@@ -162,7 +169,8 @@ impl Grooph {
                     preset = self.preset_choices(ui);
                     preset.is_some()
                 }
-                Picker::ClickSubdivision => self.click_subdivision_choices(ui),
+                Picker::MetronomeMeter => self.metronome_meter_choices(ui),
+                Picker::ClickFill => self.click_fill_choices(ui),
             };
             ui.add_space(12.0);
             picked || wide_button(ui, "Done", 19.0, ROW_HEIGHT).clicked()
@@ -390,19 +398,33 @@ impl Grooph {
         }
     }
 
-    /// Clicks between the beats of the metronome meter; only the splits the
-    /// meter allows. Returns whether one was picked.
-    fn click_subdivision_choices(&mut self, ui: &mut Ui) -> bool {
-        let ts = self.metronome_meter();
-        let options: Vec<_> = ClickSubdivision::ALL
-            .into_iter()
-            .filter(|s| s.fits(&ts))
-            .map(|s| (s, s.label(&ts)))
-            .collect();
-        let current = &mut self.playback_ctl.audio_cfg.subdivision;
-        let picked = choice_grid(ui, &options, *current, 2);
-        if let Some(s) = picked {
-            *current = s;
+    /// Meter of the metronome tab: any the editor offers. Returns whether
+    /// one was picked.
+    fn metronome_meter_choices(&mut self, ui: &mut Ui) -> bool {
+        let options: Vec<_> =
+            all_time_signatures().into_iter().map(|ts| (ts, time_signature_label(ts))).collect();
+        let current = self.metronome_meter();
+        let picked = egui::ScrollArea::vertical()
+            .max_height(360.0)
+            .show(ui, |ui| choice_grid(ui, &options, current, 2))
+            .inner;
+        if let Some(ts) = picked {
+            self.set_metronome_meter(ts);
+        }
+        picked.is_some()
+    }
+
+    /// Ready-made click bars of the metronome meter. Returns whether one was
+    /// picked.
+    fn click_fill_choices(&mut self, ui: &mut Ui) -> bool {
+        let fills = click_fills(self.metronome_meter());
+        let bar = &self.editor.score.measures[0];
+        let current = fills.iter().position(|(m, _)| same_bar(m, bar));
+        let options: Vec<_> =
+            fills.iter().enumerate().map(|(i, (_, name))| (Some(i), name.clone())).collect();
+        let picked = choice_grid(ui, &options, current, 2).flatten();
+        if let Some(i) = picked {
+            self.replace_click_bar(fills[i].0.clone());
         }
         picked.is_some()
     }

@@ -54,6 +54,9 @@ pub struct StaffOpts {
     /// Room below the staff line in em: rests, accents and timing marks need
     /// [`ROOM_BELOW_EM`], count labels [`ROOM_BELOW_WITH_LABELS_EM`].
     pub room_below_em: f32,
+    /// Headroom above the stems in em beyond the usual: see
+    /// [`extra_room_above_em`].
+    pub room_above_extra_em: f32,
 }
 
 impl StaffOpts {
@@ -220,7 +223,17 @@ pub const ROOM_BELOW_WITH_LABELS_EM: f32 = 1.0;
 /// Headroom above the staff line, in em: stems (`stem_length_factor` is user
 /// configurable), flags and tuplet brackets.
 fn room_above_em(opts: &StaffOpts) -> f32 {
-    opts.stem_length_factor + 0.75
+    opts.stem_length_factor + 0.75 + opts.room_above_extra_em
+}
+
+/// Extra headroom `score` needs above the usual (for
+/// [`StaffOpts::room_above_extra_em`]): a tuplet bracket rises over the
+/// accents above its notes.
+pub fn extra_room_above_em(score: &Score, accent_below: bool) -> f32 {
+    let accented_tuplet = score.measures.iter().flat_map(|m| m.beats()).any(|b| {
+        b.kind == grooph_measure::BeatKind::Note && b.accented && b.tuplet_group_id.is_some()
+    });
+    if accented_tuplet && !accent_below { 0.5 } else { 0.0 }
 }
 
 /// Vertical budget (in em) for one row's content: the headroom above the
@@ -363,6 +376,7 @@ mod tests {
             system_spacing_em: 0.5,
             layout_clef_first: true,
             room_below_em: ROOM_BELOW_EM,
+            room_above_extra_em: 0.0,
         }
     }
 

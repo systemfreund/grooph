@@ -36,6 +36,7 @@ use crate::accuracy::AccuracyState;
 use crate::compact::CompactState;
 use crate::generator::GeneratorState;
 use crate::library::PatternLibrary;
+use crate::metronome_view::MetronomeState;
 use crate::platform::{PlatformRuntime, VisibilityEvent};
 use crate::play_along::{PlayAlongSettings, PlayAlongState};
 use crate::presets::PresetLibrary;
@@ -52,7 +53,7 @@ use eframe::epaint::{FontFamily, FontId};
 use eframe::{App, CreationContext, egui};
 use grooph_audio::{AudioSettings, GapClick, PlaybackOptions, PlayerState, TempoRamp};
 use grooph_link::{LinkContent, SharedLink};
-use grooph_measure::click::{ClickPatterns, ClickSubdivision};
+use grooph_measure::click::ClickBars;
 use grooph_measure::counting::{
     CountConfig, CountLayer, CountScope, LabelPattern, LabelToken, Subdiv,
 };
@@ -79,8 +80,6 @@ pub(crate) enum Mode {
     Generator,
     /// The compact layout's "More" list of panels.
     MoreMenu,
-    /// The metronome tab: only the clicks sound, shown as a ring.
-    Metronome,
     /// The time signature dialog, holding the meter being picked.
     TimeSignature(TimeSignature),
 }
@@ -135,8 +134,8 @@ struct PersistedState {
     gap_click: GapClick,
     tempo_ramp: TempoRamp,
     presets: PresetLibrary,
-    click_patterns: ClickPatterns,
-    click_subdivision: ClickSubdivision,
+    click_bars: ClickBars,
+    metronome_meter: TimeSignature,
 }
 
 impl Default for PersistedState {
@@ -165,22 +164,25 @@ impl Default for PersistedState {
             gap_click: GapClick::default(),
             tempo_ramp: TempoRamp::default(),
             presets: PresetLibrary::default(),
-            click_patterns: ClickPatterns::default(),
-            click_subdivision: ClickSubdivision::Off,
+            click_bars: ClickBars::default(),
+            metronome_meter: TimeSignature::FOUR_FOUR,
         }
     }
 }
 
 impl PersistedState {
     fn from_app(app: &Grooph) -> Self {
-        // A running calibration has swapped in its click score: save what it
-        // will restore instead.
+        // A running calibration has swapped in its click score, the metronome
+        // tab its click bar: save what they will restore instead.
         let stash = app.calibration_stash();
+        let rhythm = app.metronome_stash();
         let generator = &app.editor.generator;
         Self {
             version: PERSISTED_STATE_VERSION,
-            score: stash.map_or(&app.editor.score, |s| &s.score).clone(),
-            cursor: stash.map_or(app.editor.cursor, |s| s.cursor),
+            score: stash
+                .map_or(rhythm.map_or(&app.editor.score, |r| &r.score), |s| &s.score)
+                .clone(),
+            cursor: stash.map_or(rhythm.map_or(app.editor.cursor, |r| r.cursor), |s| s.cursor),
             bpm: stash.map_or(app.playback_ctl.bpm, |s| s.bpm),
             audio_settings: app.playback_ctl.audio_cfg.settings,
             audio_latency_enabled: app.playback_ctl.audio_cfg.latency_enabled,
@@ -190,8 +192,11 @@ impl PersistedState {
             midi_selected_port_id: app.playback_ctl.midi.selected_port_id.clone(),
             accuracy_enabled: app.playback_ctl.accuracy.enabled,
             library: app.editor.library.clone(),
-            active_pattern_id: stash.map_or(app.editor.active_pattern_id, |s| s.active_pattern_id),
-            dirty: stash.map_or(app.editor.dirty, |s| s.dirty),
+            active_pattern_id: stash.map_or(
+                rhythm.map_or(app.editor.active_pattern_id, |r| r.active_pattern_id),
+                |s| s.active_pattern_id,
+            ),
+            dirty: stash.map_or(rhythm.map_or(app.editor.dirty, |r| r.dirty), |s| s.dirty),
             generator_settings: generator.settings,
             endless: stash.map_or(generator.endless, |s| s.endless),
             ghost_notes: stash.map_or(generator.ghost_notes, |s| s.ghost_notes),
@@ -201,8 +206,8 @@ impl PersistedState {
             gap_click: stash.map_or(app.playback_ctl.audio_cfg.gap, |s| s.gap),
             tempo_ramp: stash.map_or(app.playback_ctl.audio_cfg.ramp, |s| s.ramp),
             presets: app.editor.presets.clone(),
-            click_patterns: app.playback_ctl.audio_cfg.click.clone(),
-            click_subdivision: app.playback_ctl.audio_cfg.subdivision,
+            click_bars: app.playback_ctl.audio_cfg.click.clone(),
+            metronome_meter: app.editor.metronome.meter,
         }
     }
 }
@@ -301,6 +306,7 @@ impl App for Grooph {
         self.apply_style(ui);
         self.ui.narrow_screen = ui.available_width() < compact::NARROW_MAX_WIDTH;
         self.compact_ui(ui);
+        self.sync_click_bar();
         self.update_metronome_trainer();
         self.update_endless();
         self.run_summary_window(ui);
@@ -373,16 +379,11 @@ impl Grooph {
             swing: self.playback_ctl.audio_cfg.swing,
             gap: self.playback_ctl.audio_cfg.gap,
             ramp: self.playback_ctl.audio_cfg.ramp,
-            // Calibration clicks every beat, whatever the user's patterns.
+            // Calibration clicks every beat, whatever the user's click bars.
             click: if calibrating {
-                ClickPatterns::default()
+                ClickBars::default()
             } else {
                 self.playback_ctl.audio_cfg.click.clone()
-            },
-            subdivision: if calibrating {
-                ClickSubdivision::Off
-            } else {
-                self.playback_ctl.audio_cfg.subdivision
             },
         }
     }
@@ -642,6 +643,12 @@ impl Grooph {
     }
 
     pub(crate) fn apply_link(&mut self, link: SharedLink) {
+        // A link is about the rhythm: put the metronome's click bar away first.
+        if self.metronome_mode() {
+            self.stop_transport();
+            self.close_metronome();
+            self.ui.mode = Mode::Playback;
+        }
         match link.content {
             Some(LinkContent::Score(score)) => self.replace_score_from_link(score),
             Some(LinkContent::Metronome(ts)) => {
@@ -665,10 +672,8 @@ impl Grooph {
         if let Some(swing) = link.swing {
             self.playback_ctl.audio_cfg.swing = swing;
         }
-        if let Some(click) = link.click
-            && let Some(ts) = self.editor.score.measures.first().map(|m| m.time_signature())
-        {
-            self.playback_ctl.audio_cfg.click.set(ts, click);
+        if let Some(bar) = link.click {
+            self.playback_ctl.audio_cfg.click.set(bar);
         }
         self.playback_ctl.playback.reset();
         // The content is reproducible from the link, so it is not "unsaved".
@@ -716,6 +721,12 @@ impl Grooph {
             && template.accented
         {
             measure.toggle_accent(0);
+        }
+
+        if let Duration::Simple(..) = template.duration
+            && template.soft
+        {
+            measure.toggle_soft(0);
         }
 
         if let Duration::Tuplet(..) = template.duration {
@@ -909,6 +920,7 @@ impl Grooph {
                             kind: BeatKind::Note,
                             duration: Duration::Dotted { dots, base: Quarter },
                             accented: false,
+                            soft: false,
                         }),
                     );
                 }
@@ -919,6 +931,18 @@ impl Grooph {
                             kind: BeatKind::Note,
                             duration: Duration::Simple(Quarter),
                             accented: true,
+                            soft: false,
+                        }),
+                    );
+                }
+                ToolKind::Modify(Modifier::ToggleSoft) => {
+                    button_measures.insert(
+                        t.id,
+                        Self::build_button_measure(BeatTemplate {
+                            kind: BeatKind::Note,
+                            duration: Duration::Simple(Quarter),
+                            accented: false,
+                            soft: true,
                         }),
                     );
                 }
@@ -964,6 +988,7 @@ impl Grooph {
                 library: state.library,
                 presets: state.presets,
                 active_preset: None,
+                metronome: MetronomeState::new(state.metronome_meter),
                 generator: GeneratorState::new(
                     state.generator_settings,
                     state.endless,
@@ -982,8 +1007,7 @@ impl Grooph {
                     swing: state.swing,
                     gap: state.gap_click,
                     ramp: state.tempo_ramp,
-                    click: state.click_patterns,
-                    subdivision: state.click_subdivision,
+                    click: state.click_bars,
                 },
                 playback: PlaybackState::default(),
                 accuracy: AccuracyState::new(state.accuracy_enabled),

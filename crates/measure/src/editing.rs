@@ -14,6 +14,7 @@ pub enum Modification {
     DissolveTuplet(GroupSpan, TupletSpec),             // contains the dissolved tuplet spec
     ToggleKind(BeatIdx, BeatKind),                     // contains the new beat kind
     ToggleAccent(BeatIdx, bool),                       // contains the new accented state
+    ToggleSoft(BeatIdx, bool),                         // contains the new soft state
     ToggleDotted(BeatIdx, u8),                         // contains the new dot count
     ChangeTimeSignature(TimeSignature, TimeSignature), // (old, new)
 }
@@ -42,11 +43,24 @@ impl Measure {
                 && b.kind == Note
             {
                 b.accented = accented;
+                b.soft &= !accented;
             }
             Some(ToggleAccent(idx, accented))
         } else {
             None
         }
+    }
+
+    /// Toggle the soft (ghost note) flag at index `idx`; a soft note loses
+    /// its accent. No change on a rest.
+    pub fn toggle_soft(&mut self, idx: BeatIdx) -> Option<Modification> {
+        let b = self.beats.get_mut(idx)?;
+        let soft = !b.soft;
+        if b.kind == Note {
+            b.soft = soft;
+            b.accented &= !soft;
+        }
+        Some(Modification::ToggleSoft(idx, soft))
     }
 
     /// Toggle dotted (one dot) for the beat at `idx`.
@@ -73,6 +87,7 @@ impl Measure {
                 duration: dur,
                 kind: current.kind,
                 accented: current.accented,
+                soft: current.soft,
                 tuplet_group_id: current.tuplet_group_id,
             };
             if self.set_beat(idx, new_beat).is_ok() {
@@ -291,6 +306,7 @@ impl Measure {
         for j in group.start_idx..=group.end_idx {
             self.beats[j].kind = Rest;
             self.beats[j].accented = false;
+            self.beats[j].soft = false;
         }
 
         // Greedy: give each source note the nearest free slot
@@ -370,6 +386,7 @@ impl Measure {
         let new_duration = Duration::Tuplet(tuplet_spec);
         let mut new_beat = Beat::new(new_duration, cur.kind);
         new_beat.accented = cur.accented;
+        new_beat.soft = cur.soft;
         if self.set_beat(idx, new_beat).is_ok() { self.tuplet_group_at(idx) } else { None }
     }
 }

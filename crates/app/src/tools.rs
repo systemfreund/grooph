@@ -23,12 +23,14 @@ pub struct BeatTemplate {
     pub duration: Duration,
     pub kind: BeatKind,
     pub accented: bool,
+    pub soft: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Modifier {
     ToggleDotted { dots: u8 },
     ToggleAccent,
+    ToggleSoft,
     ToggleRestNote,
     CycleTuplet,
 }
@@ -169,7 +171,7 @@ pub fn all_tools() -> &'static [Tool] {
     use BeatKind::*;
     use Duration::*;
 
-    static ALL: [Tool; 28] = [
+    static ALL: [Tool; 29] = [
         Tool {
             id: "edit.undo",
             label: "⟲",
@@ -198,6 +200,7 @@ pub fn all_tools() -> &'static [Tool] {
                 duration: Simple(Quarter),
                 kind: Note,
                 accented: false,
+                soft: false,
             }),
             shortcuts: &[Shortcut::plain(Key::Num1)],
             show_in_palette: true,
@@ -210,6 +213,7 @@ pub fn all_tools() -> &'static [Tool] {
                 duration: Simple(Eighth),
                 kind: Note,
                 accented: false,
+                soft: false,
             }),
             shortcuts: &[Shortcut::plain(Key::Num2)],
             show_in_palette: true,
@@ -222,6 +226,7 @@ pub fn all_tools() -> &'static [Tool] {
                 duration: Simple(Sixteenth),
                 kind: Note,
                 accented: false,
+                soft: false,
             }),
             shortcuts: &[Shortcut::plain(Key::Num3)],
             show_in_palette: true,
@@ -234,6 +239,7 @@ pub fn all_tools() -> &'static [Tool] {
                 duration: Simple(ThirtySecond),
                 kind: Note,
                 accented: false,
+                soft: false,
             }),
             shortcuts: &[Shortcut::plain(Key::Num4)],
             show_in_palette: true,
@@ -247,6 +253,7 @@ pub fn all_tools() -> &'static [Tool] {
                 duration: Simple(Quarter),
                 kind: Rest,
                 accented: false,
+                soft: false,
             }),
             shortcuts: &[],
             show_in_palette: true,
@@ -259,6 +266,7 @@ pub fn all_tools() -> &'static [Tool] {
                 duration: Simple(Eighth),
                 kind: Rest,
                 accented: false,
+                soft: false,
             }),
             shortcuts: &[],
             show_in_palette: true,
@@ -271,6 +279,7 @@ pub fn all_tools() -> &'static [Tool] {
                 duration: Simple(Sixteenth),
                 kind: Rest,
                 accented: false,
+                soft: false,
             }),
             shortcuts: &[],
             show_in_palette: true,
@@ -283,6 +292,7 @@ pub fn all_tools() -> &'static [Tool] {
                 duration: Simple(ThirtySecond),
                 kind: Rest,
                 accented: false,
+                soft: false,
             }),
             shortcuts: &[],
             show_in_palette: true,
@@ -302,6 +312,14 @@ pub fn all_tools() -> &'static [Tool] {
             group: ToolGroup::Modifiers,
             kind: ToolKind::Modify(Modifier::ToggleAccent),
             shortcuts: &[Shortcut::plain(Key::A)],
+            show_in_palette: true,
+        },
+        Tool {
+            id: "modify.toggle.soft",
+            label: "Toggle Soft",
+            group: ToolGroup::Modifiers,
+            kind: ToolKind::Modify(Modifier::ToggleSoft),
+            shortcuts: &[Shortcut::plain(Key::G)],
             show_in_palette: true,
         },
         Tool {
@@ -328,6 +346,7 @@ pub fn all_tools() -> &'static [Tool] {
                 duration: Tuplet(TupletSpec { n: 3, m: 2, base: Eighth }),
                 kind: Note,
                 accented: false,
+                soft: false,
             }),
             shortcuts: &[],
             show_in_palette: true,
@@ -340,6 +359,7 @@ pub fn all_tools() -> &'static [Tool] {
                 duration: Tuplet(TupletSpec { n: 3, m: 2, base: Sixteenth }),
                 kind: Note,
                 accented: false,
+                soft: false,
             }),
             shortcuts: &[],
             show_in_palette: true,
@@ -352,6 +372,7 @@ pub fn all_tools() -> &'static [Tool] {
                 duration: Tuplet(TupletSpec { n: 5, m: 4, base: Sixteenth }),
                 kind: Note,
                 accented: false,
+                soft: false,
             }),
             shortcuts: &[],
             show_in_palette: true,
@@ -364,6 +385,7 @@ pub fn all_tools() -> &'static [Tool] {
                 duration: Tuplet(TupletSpec { n: 6, m: 4, base: Sixteenth }),
                 kind: Note,
                 accented: false,
+                soft: false,
             }),
             shortcuts: &[],
             show_in_palette: true,
@@ -376,6 +398,7 @@ pub fn all_tools() -> &'static [Tool] {
                 duration: Tuplet(TupletSpec { n: 7, m: 4, base: Sixteenth }),
                 kind: Note,
                 accented: false,
+                soft: false,
             }),
             shortcuts: &[],
             show_in_palette: true,
@@ -388,6 +411,7 @@ pub fn all_tools() -> &'static [Tool] {
                 duration: Tuplet(TupletSpec { n: 9, m: 8, base: Sixteenth }),
                 kind: Note,
                 accented: false,
+                soft: false,
             }),
             shortcuts: &[],
             show_in_palette: true,

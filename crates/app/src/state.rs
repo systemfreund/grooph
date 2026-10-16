@@ -2,6 +2,7 @@ use crate::accuracy::AccuracyState;
 use crate::compact::CompactState;
 use crate::generator::GeneratorState;
 use crate::library::PatternLibrary;
+use crate::metronome_view::MetronomeState;
 use crate::pickers::Picker;
 use crate::platform::PlatformRuntime;
 use crate::play_along::PlayAlongState;
@@ -12,7 +13,7 @@ use eframe::egui::TextStyle;
 use eframe::epaint::FontId;
 use grooph_audio::{Audio, AudioSettings, GapClick, TempoRamp};
 use grooph_link::SharedLink;
-use grooph_measure::click::{ClickPatterns, ClickSubdivision};
+use grooph_measure::click::ClickBars;
 use grooph_measure::swing::Swing;
 use grooph_measure::tap_tempo::TapTempo;
 use grooph_measure::{Cursor, Measure, Score};
@@ -31,10 +32,8 @@ pub(crate) struct AudioConfig {
     pub(crate) gap: GapClick,
     /// Metronome trainer: stepwise tempo change from `bpm`.
     pub(crate) ramp: TempoRamp,
-    /// How loud the metronome clicks each beat group, per meter.
-    pub(crate) click: ClickPatterns,
-    /// Metronome clicks between the beats.
-    pub(crate) subdivision: ClickSubdivision,
+    /// What the metronome clicks in each meter.
+    pub(crate) click: ClickBars,
 }
 
 impl AudioConfig {
@@ -54,8 +53,7 @@ impl Default for AudioConfig {
             swing: Swing::default(),
             gap: GapClick::default(),
             ramp: TempoRamp::default(),
-            click: ClickPatterns::default(),
-            subdivision: ClickSubdivision::Off,
+            click: ClickBars::default(),
         }
     }
 }
@@ -158,6 +156,9 @@ pub(crate) struct EditorState {
     /// Preset last loaded or saved; "Save" overwrites it when it is a user
     /// preset. Not persisted.
     pub(crate) active_preset: Option<PresetId>,
+    /// The metronome tab's meter, and the rhythm it put aside while it edits
+    /// the click bar in the score's place.
+    pub(crate) metronome: MetronomeState,
 }
 
 /// Realtime playback subsystem: transport, tempo, audio engine, MIDI input,

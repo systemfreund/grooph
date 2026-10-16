@@ -37,6 +37,10 @@ mod c {
     pub const TUPLET_NUMBER_BASELINE_LIFT_SS: f32 = 0.50;
     pub const TUPLET_MIN_SEG_SS: f32 = 0.50;
 
+    // Parentheses of a soft note: width of one and gap to the head
+    pub const SOFT_PAREN_EM: f32 = 0.3;
+    pub const SOFT_PAREN_GAP_EM: f32 = 0.04;
+
     // Beam alignment
     pub const BEAM_BASELINE_OFFSET: f32 = 0.95; // × beam_thickness
 }
@@ -210,6 +214,8 @@ pub struct NoteLayout {
     pub stem: Option<Line>,
     pub flag_pos: Option<Pos2>,
     pub accent_pos: Option<Pos2>,
+    /// A soft (ghost) note: its head is drawn in parentheses.
+    pub soft: bool,
     pub debug_bbox: Option<Rect>,
     pub accent_debug_bbox: Option<Rect>,
 }
@@ -689,5 +695,41 @@ mod tests {
             d1,
             d2
         );
+    }
+
+    #[test]
+    fn soft_notes_dont_squeeze_plain_ones_of_the_same_length() {
+        use grooph_measure::notation::parse_score;
+        let m = parse_score("4/4 >t8 t8 (t8) t8 (t8) (t8) t8 (t8) (t8) t8 (t8) (t8)")
+            .unwrap()
+            .measures
+            .remove(0);
+        let em = 20.0;
+        let mut opts = LayoutOpts {
+            rect: Rect::from_min_max(Pos2::ZERO, Pos2::new(100.0, 100.0)),
+            font_id: FontId::new(em, FontFamily::Proportional),
+            pixels_per_point: 1.0,
+            em,
+            layout_clef: false,
+            layout_time_signature: false,
+            y_offset: 0.0,
+            stem_length_factor: 3.5,
+            stem_thickness_factor: 0.1,
+            accent_displacement: 0.0,
+            accent_below: false,
+            proportional_spacing: true,
+            debug_bbox: false,
+            metrics: GlyphMetrics::debug(em),
+        };
+        let plan = crate::render_plan::plan_measure(&m);
+        let width = min_note_area_width(&m, &plan, &opts);
+        opts.rect = Rect::from_min_max(Pos2::ZERO, Pos2::new(width, 100.0));
+        let layout = build_measure_layout(&m, &opts);
+        let xs: Vec<f32> = layout.notes.iter().map(|n| n.center.x).collect();
+        // Equal triplets, equally spaced, even where the measure is tight.
+        let steps: Vec<f32> = xs.windows(2).map(|p| p[1] - p[0]).collect();
+        for step in &steps {
+            assert!((step - steps[0]).abs() < 0.5, "{xs:?}");
+        }
     }
 }

@@ -8,7 +8,7 @@ use eframe::egui::{FontId, Frame, Rect, Response, Stroke};
 use grooph_layout::pixel_layout::{GlyphMetrics, MeasureLayout, compute_em};
 use grooph_layout::staff_layout::{
     PlacedMeasure, ROOM_BELOW_EM, ROOM_BELOW_WITH_LABELS_EM, StaffLayout, StaffOpts,
-    build_staff_layout,
+    build_staff_layout, extra_room_above_em,
 };
 use grooph_measure::TimeSignature;
 use grooph_measure::grid::DEFAULT_GRID;
@@ -97,6 +97,10 @@ impl Grooph {
                             } else {
                                 ROOM_BELOW_EM
                             },
+                            room_above_extra_em: extra_room_above_em(
+                                &self.editor.score,
+                                self.ui.layout.accent_below,
+                            ),
                         };
 
                         let staff = build_staff_layout(&self.editor.score, &staff_opts);
