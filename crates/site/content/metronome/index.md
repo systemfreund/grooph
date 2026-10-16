@@ -96,6 +96,9 @@ click, whose waveform you can change. The mixer (speaker icon) has two groups: t
 metronome (downbeat, beats, count-in) and the rhythm (notes, accents, ghost notes). Each
 group can be muted, for example to hear only the written rhythm.
 
+The claves samples are by [altemark](https://freesound.org/people/altemark/packs/11638/)
+on freesound.org, licensed under Creative Commons Attribution-NonCommercial (CC BY-NC).
+
 ### Can it keep a steady pulse for odd meters?
 
 Yes. Meters from 1/4 to 7/4, 3/8 to 13/8 and 5/16 to 19/16 work, for example 5/4, 7/8

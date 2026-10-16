@@ -152,6 +152,8 @@ Important root files:
   (`include_bytes!`, decoded once by the small decoder in `wav.rs`).
   `MetronomeSound::Claves` (default) plays `claves3.wav` on the downbeat and
   `claves4.wav` on the other primary beats and the count-in.
+  Samples keep their own license (claves: altemark on freesound.org, CC BY-NC),
+  see `crates/audio/samples/CREDITS.md`; add a row there with every new sample.
 - `VoiceMixer` (`voices.rs`) plays samples resampled to the device rate.
 - Mixer (`mixer_panel.rs`): a "Metronome" group (`downbeat`, `primary` as
   "Beats", `count_in`) and a "Rhythm" group (`beat` as "Notes", `accent`,
