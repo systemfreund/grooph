@@ -5,7 +5,7 @@
 //! |-----------|---------|
 //! | `bpm`     | Tempo, 20-300 |
 //! | `r`       | Rhythm in the text notation of [`grooph_measure::notation`] |
-//! | `ts`      | Time signature, e.g. `7/8`; default for `r`, the generator's meter (x/4 only), or on its own a one-measure metronome |
+//! | `ts`      | Time signature, e.g. `7/8`; default for `r`, the generator's meter (x/4 or x/8), or on its own a one-measure metronome |
 //! | `sub`     | Generator subdivision: `8`, `16`, `3` (triplets) or `mix` |
 //! | `lvl`     | Generator complexity 1-5 |
 //! | `bars`    | Generator bars 1-8 |
@@ -18,7 +18,9 @@
 //! unknown parameters are ignored. [`SharedLink::to_url`] is the inverse of
 //! [`parse_query`].
 
-use grooph_measure::generator::{GeneratorSettings, MAX_BARS, MAX_COMPLEXITY, Subdivision};
+use grooph_measure::generator::{
+    GeneratorSettings, MAX_BARS, MAX_COMPLEXITY, Subdivision, supports_time_signature,
+};
 use grooph_measure::notation::{format_score, parse_score};
 use grooph_measure::swing::{MAX_SWING_PERCENT, MIN_SWING_PERCENT, Swing, SwingUnit};
 use grooph_measure::tempo::{MAX_BPM, MIN_BPM};
@@ -107,8 +109,8 @@ pub fn parse_query(query: &str) -> Result<Option<SharedLink>, String> {
     } else if generator {
         let defaults = GeneratorSettings::default();
         let time_signature = ts.unwrap_or(defaults.time_signature);
-        if time_signature.beat_unit != 4 {
-            return Err("the generator supports only x/4 time signatures".into());
+        if !supports_time_signature(time_signature) {
+            return Err("the generator supports x/4 and x/8 time signatures (from 2/8)".into());
         }
         let settings = GeneratorSettings {
             subdivision: sub.unwrap_or(defaults.subdivision),
@@ -405,11 +407,20 @@ mod tests {
     }
 
     #[test]
+    fn generator_link_accepts_x8_meters() {
+        let link = parse_query("ts=7/8&sub=16&seed=3").unwrap().unwrap();
+        let Some(LinkContent::Generator { settings, .. }) = link.content else {
+            panic!("expected generator content");
+        };
+        assert_eq!(settings.time_signature, TimeSignature::SEVEN_EIGHT);
+    }
+
+    #[test]
     fn invalid_parameters_are_reported() {
         assert!(parse_query("bpm=500").unwrap_err().contains("bpm"));
         assert!(parse_query("lvl=9").unwrap_err().contains("lvl"));
         assert!(parse_query("sub=4").unwrap_err().contains("sub"));
-        assert!(parse_query("ts=7/8&sub=16").unwrap_err().contains("x/4"));
+        assert!(parse_query("ts=4/16&sub=16").unwrap_err().contains("x/8"));
         assert!(parse_query("r=q+q+q").unwrap_err().contains("too short"));
         assert!(parse_query("r=q+q+q+q&seed=1").unwrap_err().contains("not both"));
     }

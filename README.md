@@ -36,8 +36,12 @@ Important root files:
   - `set_beat` can absorb/fill following beats to keep the measure consistent.
 - Generator (`grooph_measure::generator`): builds random measures for
   sight-reading from per-beat cells. `GeneratorSettings` = subdivision,
-  complexity (1-5, caps the cell level), bars, time signature (x/4 only),
-  space (extra whole-beat rests). Measures are written via `set_beat`, so
+  complexity (1-5, caps the cell level), bars, time signature (x/4, or x/8
+  from 2/8), space (extra whole-beat rests). In x/8 the generator beats are
+  the meter's beat groups (`beat_groups`: 6/8 = 3+3, 7/8 = 2+3+2, longer
+  single groups split into twos plus a final three); two-eighth groups use the
+  quarter-beat cells, three-eighth groups their own `Compound*` cells.
+  Triplets/mixed fall back to 8ths/16ths there (`effective_subdivision`). Measures are written via `set_beat`, so
   they obey the same invariants as edited ones. Seed `Rng` for reproducibility.
 - Note: `Beat` `PartialEq` ignores `tuplet_group_id`. Compare the field explicitly
   if grouping matters.
@@ -119,7 +123,8 @@ Important root files:
   generator panel, tiles via `tool_palette::notation_button`.
 - Ghost notes (`grooph_measure::ghost::ghost_onsets`): quiet hits on every free
   slot of the generator subdivision (per beat: 8ths=2, 16ths=4, triplets=3;
-  mixed = triplets in tuplet beats, else 16ths). Scheduled as `SoundType::Ghost`,
+  mixed = triplets in tuplet beats, else 16ths). Other beat units get a straight
+  8th or 16th grid (triplets → 8ths, mixed → 16ths). Scheduled as `SoundType::Ghost`,
   volume via the mixer's "Ghost" slider (`AudioSettings::ghost`).
 - Count-in (`PlaybackOptions::count_in`): `TickSource` plays one bar of
   `SoundType::CountIn` clicks (downbeat + primary beats of the first measure)

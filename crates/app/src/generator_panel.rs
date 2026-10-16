@@ -5,10 +5,43 @@ use crate::tool_palette::notation_button;
 use eframe::egui;
 use grooph_measure::TimeSignature;
 use grooph_measure::generator::{
-    GroupingSet, MAX_BARS, MAX_COMPLEXITY, Subdivision, complexity_groupings, groupings,
+    BeatSpan, GroupingSet, MAX_BARS, MAX_COMPLEXITY, Subdivision, beat_groups,
+    complexity_groupings, effective_subdivision, groupings,
 };
 
-const MAX_BEATS: u8 = 7;
+/// Time signatures in the picker: quarter-note meters, then eighth-note
+/// meters (written in beat groups, e.g. 6/8 = 3+3, 7/8 = 2+3+2).
+const TIME_SIGNATURES: [TimeSignature; 13] = [
+    TimeSignature::ONE_FOUR,
+    TimeSignature::TWO_FOUR,
+    TimeSignature::THREE_FOUR,
+    TimeSignature::FOUR_FOUR,
+    TimeSignature { beats: 5, beat_unit: 4 },
+    TimeSignature { beats: 6, beat_unit: 4 },
+    TimeSignature { beats: 7, beat_unit: 4 },
+    TimeSignature { beats: 3, beat_unit: 8 },
+    TimeSignature::FIVE_EIGHT,
+    TimeSignature::SIX_EIGHT,
+    TimeSignature::SEVEN_EIGHT,
+    TimeSignature::NINE_EIGHT,
+    TimeSignature::TWELVE_EIGHT,
+];
+
+/// Beat groups shown next to an eighth-note meter, e.g. "7/8 (2+3+2)".
+fn time_signature_label(ts: TimeSignature) -> String {
+    let groups = beat_groups(ts).unwrap_or_default();
+    if ts.beat_unit != 8 || groups.len() < 2 {
+        return ts.to_string();
+    }
+    let sizes: Vec<&str> = groups
+        .iter()
+        .map(|g| match g {
+            BeatSpan::Quarter => "2",
+            BeatSpan::DottedQuarter => "3",
+        })
+        .collect();
+    format!("{ts} ({})", sizes.join("+"))
+}
 
 fn subdivision_label(s: Subdivision) -> &'static str {
     match s {
@@ -52,16 +85,25 @@ impl Grooph {
                         let gen_state = &mut self.editor.generator;
                         let settings = &mut gen_state.settings;
 
+                        // Triplets and mixed have no x/8 cells; the generator
+                        // falls back to 8ths / 16ths there.
+                        let shown =
+                            effective_subdivision(settings.subdivision, settings.time_signature);
+                        let offered: &[Subdivision] = if settings.time_signature.beat_unit == 8 {
+                            &[Subdivision::Eighths, Subdivision::Sixteenths]
+                        } else {
+                            &[
+                                Subdivision::Eighths,
+                                Subdivision::Sixteenths,
+                                Subdivision::Triplets,
+                                Subdivision::Mixed,
+                            ]
+                        };
                         setting(ui, "Subdivision", |ui| {
                             egui::ComboBox::from_id_salt("gen_subdivision")
-                                .selected_text(subdivision_label(settings.subdivision))
+                                .selected_text(subdivision_label(shown))
                                 .show_ui(ui, |ui| {
-                                    for s in [
-                                        Subdivision::Eighths,
-                                        Subdivision::Sixteenths,
-                                        Subdivision::Triplets,
-                                        Subdivision::Mixed,
-                                    ] {
+                                    for &s in offered {
                                         ui.selectable_value(
                                             &mut settings.subdivision,
                                             s,
@@ -108,13 +150,13 @@ impl Grooph {
 
                         setting(ui, "Time Signature", |ui| {
                             egui::ComboBox::from_id_salt("gen_time_signature")
-                                .selected_text(format!("{}/4", settings.time_signature.beats))
+                                .selected_text(time_signature_label(settings.time_signature))
                                 .show_ui(ui, |ui| {
-                                    for beats in 1..=MAX_BEATS {
+                                    for ts in TIME_SIGNATURES {
                                         ui.selectable_value(
                                             &mut settings.time_signature,
-                                            TimeSignature { beats, beat_unit: 4 },
-                                            format!("{beats}/4"),
+                                            ts,
+                                            time_signature_label(ts),
                                         );
                                     }
                                 });
@@ -163,7 +205,8 @@ impl Grooph {
     fn groupings_picker(&mut self, ui: &mut egui::Ui) {
         let family = self.ui.music_font_id.family.clone();
         let settings = &mut self.editor.generator.settings;
-        let preset = complexity_groupings(settings.subdivision, settings.complexity);
+        let ts = settings.time_signature;
+        let preset = complexity_groupings(settings.subdivision, ts, settings.complexity);
 
         let mut enabled = settings.custom_groupings_enabled;
         if ui.checkbox(&mut enabled, "Custom groupings").changed() {
@@ -175,7 +218,7 @@ impl Grooph {
 
         let active: GroupingSet =
             if settings.custom_groupings_enabled { settings.custom_groupings } else { preset };
-        let available = groupings(settings.subdivision);
+        let available = groupings(settings.subdivision, ts);
         if settings.custom_groupings_enabled
             && !available.iter().any(|g| settings.custom_groupings.contains(g.id))
         {
@@ -187,21 +230,40 @@ impl Grooph {
             ));
         }
 
-        ui.horizontal_wrapped(|ui| {
-            for grouping in available {
-                let measure = grouping.measure();
-                let id = egui::Id::new(("grouping", grouping.id.0));
-                let tile =
-                    notation_button(ui, id, &measure, family.clone(), active.contains(grouping.id))
-                        .on_hover_text(format!("Unlocked at level {}", grouping.level));
-                if tile.clicked() {
-                    if !settings.custom_groupings_enabled {
-                        settings.custom_groupings = preset;
-                        settings.custom_groupings_enabled = true;
-                    }
-                    settings.custom_groupings.toggle(grouping.id);
-                }
+        // Meters with both group sizes (5/8, 7/8) get one row per size.
+        let mixed_spans = available.iter().any(|g| g.span != available[0].span);
+        for span in [BeatSpan::Quarter, BeatSpan::DottedQuarter] {
+            let of_span: Vec<_> = available.iter().filter(|g| g.span == span).collect();
+            if of_span.is_empty() {
+                continue;
             }
-        });
+            if mixed_spans {
+                ui.weak(match span {
+                    BeatSpan::Quarter => "Groups of two eighths",
+                    BeatSpan::DottedQuarter => "Groups of three eighths",
+                });
+            }
+            ui.horizontal_wrapped(|ui| {
+                for grouping in of_span {
+                    let measure = grouping.measure();
+                    let id = egui::Id::new(("grouping", grouping.id.0));
+                    let tile = notation_button(
+                        ui,
+                        id,
+                        &measure,
+                        family.clone(),
+                        active.contains(grouping.id),
+                    )
+                    .on_hover_text(format!("Unlocked at level {}", grouping.level));
+                    if tile.clicked() {
+                        if !settings.custom_groupings_enabled {
+                            settings.custom_groupings = preset;
+                            settings.custom_groupings_enabled = true;
+                        }
+                        settings.custom_groupings.toggle(grouping.id);
+                    }
+                }
+            });
+        }
     }
 }

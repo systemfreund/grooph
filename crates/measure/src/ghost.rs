@@ -4,10 +4,14 @@
 //!
 //! The grid is laid per beat (the time signature's beat unit):
 //! eighths = 2 slots, sixteenths = 4, triplets = 3. `Mixed` uses a triplet
-//! grid in beats that contain a tuplet and sixteenths otherwise.
+//! grid in beats that contain a tuplet and sixteenths otherwise. Beat units
+//! other than a quarter (e.g. `x/8`) get a straight grid of the subdivision's
+//! note value: triplets fall back to eighths and mixed to sixteenths, as in
+//! the generator.
 
 use crate::BeatKind::Note;
 use crate::Measure;
+use crate::duration::{e, s};
 use crate::generator::Subdivision;
 use crate::grid::DEFAULT_GRID;
 
@@ -30,6 +34,18 @@ pub fn ghost_onsets(measure: &Measure, subdivision: Subdivision) -> Vec<u32> {
             .zip(&onsets)
             .any(|(b, &t)| b.duration.is_tuplet() && t >= beat_start && t < beat_start + beat_ticks)
     };
+
+    if ts.beat_unit != 4 {
+        let unit = match subdivision {
+            Subdivision::Eighths | Subdivision::Triplets => e(),
+            Subdivision::Sixteenths | Subdivision::Mixed => s(),
+        };
+        let step = DEFAULT_GRID.ticks_of(&unit).expect("straight value on the default grid");
+        return (0..measure_ticks)
+            .step_by(step as usize)
+            .filter(|t| !note_onsets.contains(t))
+            .collect();
+    }
 
     let mut out = Vec::new();
     let mut beat_start = 0;
@@ -107,9 +123,14 @@ mod tests {
     }
 
     #[test]
-    fn compound_meter_uses_beat_unit() {
-        let m = Measure::new(TimeSignature::SIX_EIGHT);
-        // 6 eighth beats * 2 slots each.
-        assert_eq!(ghost_onsets(&m, Subdivision::Eighths).len(), 12);
+    fn x8_meters_use_the_subdivision_note_value() {
+        let mut m = Measure::new(TimeSignature::SIX_EIGHT);
+        m.set_beat(0, Beat::note(e())).unwrap();
+        // Eighths: the five free eighths; sixteenths: eleven free sixteenths.
+        assert_eq!(ghost_onsets(&m, Subdivision::Eighths).len(), 5);
+        assert_eq!(ghost_onsets(&m, Subdivision::Sixteenths).len(), 11);
+        // Triplets and mixed fall back to straight grids, like the generator.
+        assert_eq!(ghost_onsets(&m, Subdivision::Triplets).len(), 5);
+        assert_eq!(ghost_onsets(&m, Subdivision::Mixed).len(), 11);
     }
 }
