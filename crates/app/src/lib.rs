@@ -16,6 +16,7 @@ mod mixer_panel;
 mod pickers;
 mod platform;
 mod play_along;
+mod playback_clock;
 mod preset_panel;
 mod presets;
 mod settings_panel;

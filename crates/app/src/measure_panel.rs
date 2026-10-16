@@ -1,6 +1,6 @@
 use crate::Grooph;
 use crate::accuracy::{AccuracyMark, HitGrade, clamp_diff_to_beat_window};
-use crate::state::{COUNT_IN_WAIT_TIMEOUT_S, CountInState};
+use crate::playback_clock::{advance_tick, next_count_in};
 use crate::tools::{Modifier, ToolKind, all_tools};
 use crate::{Mode, TransportState};
 use eframe::egui;
@@ -48,111 +48,7 @@ impl Grooph {
 
                         // Update playback smoothing & primary-beat flash state
                         let playback_tick_to_draw = match self.playback_ctl.transport_state {
-                            TransportState::Playing => {
-                                let now = ui.input(|i| i.time);
-                                let last = self.playback_ctl.playback.last_update.unwrap_or(now);
-                                let dt = now - last;
-                                self.playback_ctl.playback.last_update = Some(now);
-
-                                let total = timing.total_loop_ticks() as f64;
-
-                                // Advance predictor at the current measure's rate.
-                                // smooth_tick is now a global tick across the whole loop.
-                                let current_m = timing
-                                    .measure_at_global_tick(self.playback_ctl.playback.smooth_tick);
-                                let current_tps = timing.ticks_per_sec_in_measure(current_m);
-                                let mut next_tick =
-                                    self.playback_ctl.playback.smooth_tick + current_tps * dt;
-
-                                let audio_pos = self
-                                    .playback_ctl
-                                    .audio
-                                    .as_ref()
-                                    .and_then(|audio| audio.playback_position());
-                                let was_counting_in = self.playback_ctl.playback.counting_in();
-                                self.update_count_in_state(now, audio_pos, &timing);
-                                let counting_in = self.playback_ctl.playback.counting_in();
-                                if counting_in {
-                                    // Hold the cursor on the first downbeat until the
-                                    // count-in bar is over.
-                                    next_tick = 0.0;
-                                }
-
-                                // Sync with audio if available
-                                if !counting_in
-                                    && let Some((raw_audio_tick, audio_total)) = audio_pos
-                                {
-                                    let audio_total_f = audio_total as f64;
-                                    if audio_total_f > 0.0 {
-                                        // Adjust for user-configured audio offset (latency).
-                                        // Use the playing measure's rate (small offset, sub-tick
-                                        // approximation acceptable across TS boundaries).
-                                        let audio_m = timing.measure_at_global_tick(raw_audio_tick);
-                                        let audio_tps = timing.ticks_per_sec_in_measure(audio_m);
-                                        let offset_ticks =
-                                            if self.playback_ctl.audio_cfg.latency_enabled {
-                                                self.playback_ctl.audio_cfg.offset as f64
-                                                    * audio_tps
-                                            } else {
-                                                0.0
-                                            };
-                                        let audio_tick = (raw_audio_tick - offset_ticks)
-                                            .rem_euclid(audio_total_f);
-
-                                        let mut diff = audio_tick - next_tick;
-                                        // Handle wrap-around (shortest path)
-                                        if diff > audio_total_f * 0.5 {
-                                            diff -= audio_total_f;
-                                        } else if diff < -audio_total_f * 0.5 {
-                                            diff += audio_total_f;
-                                        }
-
-                                        // Snap if far off, else smooth nudge. "Far" uses the
-                                        // playing measure's ticks_per_beat as a unit.
-                                        let tpb = timing.ticks_per_beat_in_measure(audio_m) as f64;
-                                        if diff.abs() > tpb * 0.5 {
-                                            next_tick = audio_tick;
-                                        } else {
-                                            next_tick += diff * 0.1;
-                                        }
-                                    }
-                                }
-
-                                // Wrap at score end (not at any measure boundary).
-                                if total > 0.0 {
-                                    next_tick = next_tick.rem_euclid(total);
-                                }
-                                self.playback_ctl.playback.smooth_tick = next_tick;
-                                if was_counting_in && !counting_in {
-                                    self.realign_accuracy_clock();
-                                }
-
-                                // Flash: trigger on primary-beat change in the currently
-                                // playing measure. Key is (measure_idx, primary_beat_in_measure).
-                                let (m_idx, local_tick) = timing.to_local(next_tick);
-                                let primary_beat_in_measure =
-                                    self.editor.score.measures.get(m_idx).map_or(0, |m| {
-                                        primary_beat_index(&m.time_signature(), local_tick)
-                                    });
-                                let key = (m_idx, primary_beat_in_measure);
-                                if self.ui.flash_enabled
-                                    && self.playback_ctl.playback.last_primary_beat != Some(key)
-                                {
-                                    self.playback_ctl.playback.flash_intensity = 1.0;
-                                    self.playback_ctl.playback.last_primary_beat = Some(key);
-                                }
-
-                                // Exponential decay towards 0
-                                let decay_per_sec = 10.0; // larger -> faster fade
-                                let decay = (-decay_per_sec * dt).exp();
-                                self.playback_ctl.playback.flash_intensity *= decay as f32;
-
-                                // Keep animation loop running
-                                ui.ctx()
-                                    .request_repaint_after(std::time::Duration::from_millis(16));
-
-                                Some(self.playback_ctl.playback.smooth_tick)
-                            }
+                            TransportState::Playing => Some(self.advance_playback(ui, &timing)),
                             TransportState::Stopped => {
                                 self.playback_ctl.playback.reset();
                                 None
@@ -312,38 +208,49 @@ impl Grooph {
         });
     }
 
-    /// Advance the UI view of the count-in: `Waiting` until the audio engine
-    /// reports a negative position, `Active` while the latency-adjusted
-    /// position is still before the first downbeat, then `Off`.
-    fn update_count_in_state(
-        &mut self,
-        now: f64,
-        audio_pos: Option<(f64, u64)>,
-        timing: &ScoreTiming,
-    ) {
-        let offset_s = if self.playback_ctl.audio_cfg.latency_enabled {
-            self.playback_ctl.audio_cfg.offset as f64
-        } else {
-            0.0
-        };
-        let tps = if timing.measure_count() > 0 { timing.ticks_per_sec_in_measure(0) } else { 0.0 };
+    /// Move the playback cursor to this frame (see [`advance_tick`]), track
+    /// the count-in and fire the primary-beat flash. Returns the cursor's
+    /// global tick.
+    fn advance_playback(&mut self, ui: &egui::Ui, timing: &ScoreTiming) -> f64 {
+        let now = ui.input(|i| i.time);
+        let latency_s = self.playback_ctl.audio_cfg.latency_s();
+        let audio_pos =
+            self.playback_ctl.audio.as_ref().and_then(|audio| audio.playback_position());
         let playback = &mut self.playback_ctl.playback;
-        playback.count_in = match playback.count_in {
-            CountInState::Off => CountInState::Off,
-            CountInState::Waiting { since } => {
-                let since = if since.is_nan() { now } else { since };
-                match audio_pos {
-                    Some((tick, _)) if tick < 0.0 => CountInState::Active,
-                    _ if now - since > COUNT_IN_WAIT_TIMEOUT_S => CountInState::Off,
-                    _ => CountInState::Waiting { since },
-                }
-            }
-            CountInState::Active => match audio_pos {
-                Some((tick, _)) if tick - offset_s * tps >= 0.0 => CountInState::Off,
-                // Busy engine (None) or still counting in: stay.
-                _ => CountInState::Active,
-            },
-        };
+        let dt = now - playback.last_update.unwrap_or(now);
+        playback.last_update = Some(now);
+
+        let was_counting_in = playback.counting_in();
+        playback.count_in = next_count_in(playback.count_in, now, audio_pos, latency_s, timing);
+        let counting_in = playback.counting_in();
+        let tick =
+            advance_tick(playback.smooth_tick, dt, audio_pos, latency_s, counting_in, timing);
+        playback.smooth_tick = tick;
+        if was_counting_in && !counting_in {
+            self.realign_accuracy_clock();
+        }
+
+        // Flash once per primary beat of the playing measure.
+        let (m_idx, local_tick) = timing.to_local(tick);
+        let primary_beat_in_measure = self
+            .editor
+            .score
+            .measures
+            .get(m_idx)
+            .map_or(0, |m| primary_beat_index(&m.time_signature(), local_tick));
+        let key = (m_idx, primary_beat_in_measure);
+        let playback = &mut self.playback_ctl.playback;
+        if self.ui.flash_enabled && playback.last_primary_beat != Some(key) {
+            playback.flash_intensity = 1.0;
+            playback.last_primary_beat = Some(key);
+        }
+        // Exponential decay towards 0; larger -> faster fade.
+        let decay_per_sec = 10.0;
+        playback.flash_intensity *= (-decay_per_sec * dt).exp() as f32;
+
+        // Keep the animation running.
+        ui.ctx().request_repaint_after(std::time::Duration::from_millis(16));
+        tick
     }
 
     fn draw_accuracy_markers(

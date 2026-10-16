@@ -35,6 +35,13 @@ pub(crate) struct AudioConfig {
     pub(crate) click: ClickPatterns,
 }
 
+impl AudioConfig {
+    /// The latency offset in seconds, 0 while switched off.
+    pub(crate) fn latency_s(&self) -> f64 {
+        if self.latency_enabled { self.offset as f64 } else { 0.0 }
+    }
+}
+
 impl Default for AudioConfig {
     fn default() -> Self {
         Self {
