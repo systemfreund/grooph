@@ -11,6 +11,7 @@ mod math;
 pub mod notation;
 pub mod score;
 pub mod swing;
+pub mod tap_tempo;
 pub mod tempo;
 pub mod time_signature;
 pub mod tuplet;

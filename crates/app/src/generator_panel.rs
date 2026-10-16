@@ -1,7 +1,7 @@
 use crate::Grooph;
 use crate::Mode;
-use crate::compact::Picker;
 use crate::generator::ENDLESS_MIN_BARS;
+use crate::pickers::Picker;
 use crate::time_signature_dialog::groups_label;
 use crate::tool_palette::notation_button;
 use eframe::egui;
@@ -157,7 +157,7 @@ impl Grooph {
                                 .clicked();
                         });
                         if pick_time_signature {
-                            self.ui.compact.picker = Some(Picker::TimeSignature);
+                            self.ui.picker = Some(Picker::TimeSignature);
                         }
 
                         setting(ui, "Space", |ui| {

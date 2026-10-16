@@ -3,37 +3,24 @@
 //! transport buttons and a tab bar at the bottom. Picked every frame from the
 //! window width, so the desktop layout is unchanged.
 
-use crate::generator::ENDLESS_MIN_BARS;
-use crate::generator_panel::{
-    offered_subdivisions, subdivision_label, time_signature_label, time_signatures,
-};
-use crate::library_panel::LINK_COPIED_NOTICE_S;
-use crate::presets::{self, PresetId};
-use crate::{Grooph, Mode, TransportState, platform};
+use crate::pickers::{Picker, ROW_HEIGHT, swing_label};
+use crate::share::paint_share_icon;
+use crate::{Grooph, Mode, TransportState};
 use eframe::egui;
 use eframe::egui::{
-    Align2, Button, Color32, FontId, Frame, Id, Margin, Modal, Painter, Rect, Response, RichText,
-    Sense, Shape, Stroke, Ui, Vec2, pos2, vec2,
+    Align2, Color32, FontId, Frame, Id, Margin, Painter, Rect, Response, RichText, Sense, Shape,
+    Stroke, Ui, Vec2, pos2, vec2,
 };
-use grooph_link::{LinkContent, SharedLink};
-use grooph_measure::generator::{MAX_BARS, MAX_COMPLEXITY, Subdivision, effective_subdivision};
-use grooph_measure::swing::{MAX_SWING_PERCENT, MIN_SWING_PERCENT, SwingUnit};
-use grooph_measure::tempo::{MAX_BPM, MIN_BPM};
-use log::warn;
+use grooph_measure::generator::{Subdivision, effective_subdivision};
 
 /// Windows narrower than this (in points) get the compact layout.
 pub(crate) const COMPACT_MAX_WIDTH: f32 = 600.0;
 
-const ROW_HEIGHT: f32 = 44.0;
 const TAB_HEIGHT: f32 = 56.0;
 const CARD_CELL_HEIGHT: f32 = 64.0;
 const PLAY_BUTTON_SIZE: f32 = 68.0;
 const SIDE_BUTTON_SIZE: f32 = 52.0;
 const CARD_RADIUS: u8 = 16;
-/// Taps further apart than this start a new tap-tempo measurement.
-const TAP_RESET_S: f64 = 2.0;
-/// Swing amounts offered in the swing picker (percent of a pair).
-const SWING_PRESETS: [u8; 6] = [MIN_SWING_PERCENT, 55, 60, 66, 70, MAX_SWING_PERCENT];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CompactTab {
@@ -42,28 +29,13 @@ pub(crate) enum CompactTab {
     More,
 }
 
-/// Setting edited in the picker dialog.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Picker {
-    TimeSignature,
-    Subdivision,
-    Complexity,
-    Bars,
-    Bpm,
-    Swing,
-    Preset,
-}
-
 /// UI state of the compact layout. Not persisted.
 #[derive(Default)]
 pub(crate) struct CompactState {
     /// "More" tab is showing its list (mode stays `Playback` there).
     pub(crate) more_menu: bool,
-    pub(crate) picker: Option<Picker>,
     /// The options sheet only shows its handle and the transport buttons.
     pub(crate) options_collapsed: bool,
-    /// UI times of recent tap-tempo taps.
-    pub(crate) taps: Vec<f64>,
 }
 
 fn subdivision_short_label(s: Subdivision) -> &'static str {
@@ -73,10 +45,6 @@ fn subdivision_short_label(s: Subdivision) -> &'static str {
         Subdivision::Triplets => "Trips",
         Subdivision::Mixed => "Mixed",
     }
-}
-
-fn swing_label(percent: u8) -> String {
-    if percent <= MIN_SWING_PERCENT { "Off".to_owned() } else { format!("{percent}%") }
 }
 
 /// Fill of cards and sheets: a step off the panel background.
@@ -236,88 +204,6 @@ fn paint_play_icon(painter: &Painter, rect: Rect, color: Color32, playing: bool)
     }
 }
 
-/// The iOS share symbol: an open box with an arrow pointing up out of it.
-pub(crate) fn paint_share_icon(painter: &Painter, rect: Rect, color: Color32) {
-    let c = rect.center() + vec2(0.0, rect.height() * 0.03);
-    let s = rect.width() * 0.14;
-    let stroke = Stroke::new(2.5_f32, color);
-    let box_top = c.y - 0.3 * s;
-    let box_bottom = c.y + 1.2 * s;
-    painter.add(Shape::line(
-        vec![
-            pos2(c.x - 0.45 * s, box_top),
-            pos2(c.x - s, box_top),
-            pos2(c.x - s, box_bottom),
-            pos2(c.x + s, box_bottom),
-            pos2(c.x + s, box_top),
-            pos2(c.x + 0.45 * s, box_top),
-        ],
-        stroke,
-    ));
-    let tip = pos2(c.x, c.y - 1.6 * s);
-    painter.line_segment([pos2(c.x, c.y + 0.4 * s), tip], stroke);
-    painter.line_segment([tip, tip + vec2(-0.5 * s, 0.5 * s)], stroke);
-    painter.line_segment([tip, tip + vec2(0.5 * s, 0.5 * s)], stroke);
-}
-
-/// Grid of option buttons; returns the one that was tapped.
-fn choice_grid<T: Copy + PartialEq>(
-    ui: &mut Ui,
-    options: &[(T, String)],
-    current: T,
-    columns: usize,
-) -> Option<T> {
-    let mut picked = None;
-    let spacing = ui.spacing().item_spacing.x;
-    let width = (ui.available_width() - spacing * (columns as f32 - 1.0)) / columns as f32;
-    for row in options.chunks(columns) {
-        ui.horizontal(|ui| {
-            for (value, label) in row {
-                // Long labels (e.g. "13/16 (3+3+3+2+2)") shrink to fit the cell.
-                let text_width = ui
-                    .painter()
-                    .layout_no_wrap(label.clone(), FontId::proportional(18.0), Color32::WHITE)
-                    .size()
-                    .x;
-                let room = width - 2.0 * ui.spacing().button_padding.x;
-                let size = if text_width > room { 18.0 * room / text_width } else { 18.0 };
-                let button = Button::new(RichText::new(label).size(size))
-                    .selected(*value == current)
-                    .min_size(vec2(width, ROW_HEIGHT));
-                if ui.add(button).clicked() {
-                    picked = Some(*value);
-                }
-            }
-        });
-    }
-    picked
-}
-
-/// Full-width button with a centered label.
-fn wide_button(ui: &mut Ui, label: &str, size: f32, height: f32) -> Response {
-    let width = ui.available_width();
-    ui.horizontal(|ui| {
-        ui.add(Button::new(RichText::new(label).size(size)).min_size(vec2(width, height)))
-    })
-    .inner
-}
-
-/// Add a tap at UI time `now` and return the tempo of the recent taps, once
-/// there are two. A pause longer than [`TAP_RESET_S`] starts over.
-pub(crate) fn record_tap(taps: &mut Vec<f64>, now: f64) -> Option<u32> {
-    const MAX_TAPS: usize = 8;
-    if taps.last().is_some_and(|&last| now - last > TAP_RESET_S) {
-        taps.clear();
-    }
-    taps.push(now);
-    if taps.len() > MAX_TAPS {
-        taps.remove(0);
-    }
-    let (first, last) = (*taps.first()?, *taps.last()?);
-    let interval = (last - first) / (taps.len() - 1).max(1) as f64;
-    (interval > 0.0).then(|| ((60.0 / interval).round() as u32).clamp(MIN_BPM, MAX_BPM))
-}
-
 impl Grooph {
     /// Tab shown in the compact layout, derived from the mode so modes set
     /// elsewhere (links, time signature dialog) land on the right tab.
@@ -359,7 +245,7 @@ impl Grooph {
             CompactTab::More => self.compact_more(ui),
         }
         self.measure_panel(ui);
-        self.compact_picker(ui);
+        self.settings_picker(ui);
     }
 
     fn compact_tab_bar(&mut self, ui: &mut Ui, current: CompactTab) {
@@ -451,7 +337,7 @@ impl Grooph {
                     });
             });
         if picked.is_some() {
-            self.ui.compact.picker = picked;
+            self.ui.picker = picked;
         }
     }
 
@@ -501,7 +387,7 @@ impl Grooph {
 
     fn compact_option_rows(&mut self, ui: &mut Ui) {
         if value_row(ui, "Preset", &self.active_preset_label()).clicked() {
-            self.ui.compact.picker = Some(Picker::Preset);
+            self.ui.picker = Some(Picker::Preset);
         }
         let generator = &mut self.editor.generator;
         switch_row(ui, "Endless", &mut generator.endless);
@@ -514,7 +400,7 @@ impl Grooph {
             format!("{} {}", swing_label(swing.percent), swing.unit.label())
         };
         if value_row(ui, "Swing", &swing_value).clicked() {
-            self.ui.compact.picker = Some(Picker::Swing);
+            self.ui.picker = Some(Picker::Swing);
         }
         let mut accuracy = self.playback_ctl.accuracy.enabled;
         if switch_row(ui, "Timing feedback", &mut accuracy) {
@@ -588,10 +474,7 @@ impl Grooph {
     /// One line above the transport buttons: the live timing score while
     /// playing along, or a short note after a link was copied.
     fn compact_status_line(&mut self, ui: &mut Ui) {
-        let now = ui.input(|i| i.time);
-        let copied = self.ui.link_copied_at.is_some_and(|at| now - at < LINK_COPIED_NOTICE_S);
-        let text = if copied {
-            ui.ctx().request_repaint_after_secs(0.5);
+        let text = if self.link_copied_recently(ui) {
             Some("Link copied".to_owned())
         } else {
             self.playback_ctl
@@ -605,35 +488,6 @@ impl Grooph {
                 ui.label(RichText::new(text).size(16.0).weak());
             });
             ui.add_space(4.0);
-        }
-    }
-
-    /// Share a link to the working score with tempo and swing: the system
-    /// share sheet where the browser has one, else the clipboard.
-    /// Link that opens the working score at the current tempo and swing.
-    pub(crate) fn share_link_url(&self) -> Option<String> {
-        let swing = self.playback_ctl.audio_cfg.swing;
-        let link = SharedLink {
-            bpm: Some(self.playback_ctl.bpm),
-            swing: (!swing.is_straight()).then_some(swing),
-            content: Some(LinkContent::Score(self.editor.score.clone())),
-        };
-        let url = link.to_url(&platform::share_base_url());
-        if url.is_none() {
-            warn!("The score cannot be written as a link");
-        }
-        url
-    }
-
-    /// Open the share sheet with a link to the score, or copy the link where
-    /// there is no share sheet.
-    pub(crate) fn share_link(&mut self, ui: &Ui) {
-        let Some(url) = self.share_link_url() else {
-            return;
-        };
-        if !platform::open_share_sheet(&url) {
-            ui.ctx().copy_text(url);
-            self.ui.link_copied_at = Some(ui.input(|i| i.time));
         }
     }
 
@@ -677,10 +531,7 @@ impl Grooph {
                         {
                             self.share_link(ui);
                         }
-                        let now = ui.input(|i| i.time);
-                        if self.ui.link_copied_at.is_some_and(|at| now - at < LINK_COPIED_NOTICE_S)
-                        {
-                            ui.ctx().request_repaint_after_secs(0.5);
+                        if self.link_copied_recently(ui) {
                             ui.weak("Copied");
                         }
                     });
@@ -732,250 +583,5 @@ impl Grooph {
                     ui.strong(title);
                 });
             });
-    }
-
-    /// Dialog for the setting tapped in the card or the options sheet.
-    /// Picker dialog; the desktop layout opens it for the time signature.
-    pub(crate) fn compact_picker(&mut self, ui: &mut Ui) {
-        let Some(picker) = self.ui.compact.picker else {
-            return;
-        };
-        let before = self.editor.generator.settings;
-        let endless_before = self.editor.generator.endless;
-        let width = (ui.ctx().content_rect().width() - 48.0).clamp(200.0, 380.0);
-        let mut preset = None;
-
-        let modal = Modal::new(Id::new("compact_picker")).show(ui.ctx(), |ui| {
-            ui.set_width(width);
-            let title = match picker {
-                Picker::TimeSignature => "Time signature",
-                Picker::Subdivision => "Notes",
-                Picker::Complexity => "Level",
-                Picker::Bars => "Bars",
-                Picker::Bpm => "Tempo",
-                Picker::Swing => "Swing",
-                Picker::Preset => "Preset",
-            };
-            ui.heading(title);
-            ui.add_space(8.0);
-            let picked = match picker {
-                Picker::TimeSignature => self.time_signature_choices(ui),
-                Picker::Subdivision => self.subdivision_choices(ui),
-                Picker::Complexity => self.complexity_choices(ui),
-                Picker::Bars => self.bars_choices(ui),
-                Picker::Bpm => {
-                    self.bpm_editor(ui);
-                    false
-                }
-                Picker::Swing => {
-                    self.swing_choices(ui);
-                    false
-                }
-                Picker::Preset => {
-                    preset = self.preset_choices(ui);
-                    preset.is_some()
-                }
-            };
-            ui.add_space(12.0);
-            picked || wide_button(ui, "Done", 19.0, ROW_HEIGHT).clicked()
-        });
-        if modal.inner || modal.should_close() {
-            self.ui.compact.picker = None;
-            self.ui.compact.taps.clear();
-        }
-
-        self.finish_generator_change(before, endless_before, false);
-        if let Some(id) = preset {
-            self.apply_preset(id);
-        }
-    }
-
-    /// Presets to load, and saving the current settings as a new one.
-    fn preset_choices(&mut self, ui: &mut Ui) -> Option<PresetId> {
-        let options: Vec<_> =
-            presets::all(&self.editor.presets).into_iter().map(|(id, n)| (Some(id), n)).collect();
-        let current = self.editor.active_preset;
-        let picked = egui::ScrollArea::vertical()
-            .max_height(320.0)
-            .show(ui, |ui| choice_grid(ui, &options, current, 1))
-            .inner
-            .flatten();
-        ui.add_space(8.0);
-        ui.horizontal(|ui| {
-            ui.add(
-                egui::TextEdit::singleline(&mut self.ui.preset_name_buffer)
-                    .hint_text("Name")
-                    .desired_width(ui.available_width() - 80.0),
-            );
-            if ui.add(Button::new("Save").min_size(vec2(72.0, 32.0))).clicked() {
-                let name = std::mem::take(&mut self.ui.preset_name_buffer);
-                self.save_preset_as(&name);
-            }
-        });
-        picked
-    }
-
-    fn time_signature_choices(&mut self, ui: &mut Ui) -> bool {
-        let settings = &mut self.editor.generator.settings;
-        let options: Vec<_> =
-            time_signatures().into_iter().map(|ts| (ts, time_signature_label(ts))).collect();
-        let picked = egui::ScrollArea::vertical()
-            .max_height(360.0)
-            .show(ui, |ui| choice_grid(ui, &options, settings.time_signature, 2))
-            .inner;
-        if let Some(ts) = picked {
-            settings.time_signature = ts;
-        }
-        picked.is_some()
-    }
-
-    fn subdivision_choices(&mut self, ui: &mut Ui) -> bool {
-        let settings = &mut self.editor.generator.settings;
-        let shown = effective_subdivision(settings.subdivision, settings.time_signature);
-        let options: Vec<_> = offered_subdivisions(settings.time_signature)
-            .iter()
-            .map(|&s| (s, subdivision_label(s).to_owned()))
-            .collect();
-        let picked = choice_grid(ui, &options, shown, 2);
-        if let Some(s) = picked {
-            settings.subdivision = s;
-        }
-        picked.is_some()
-    }
-
-    /// Complexity levels; picking one turns custom groupings off. The grouping
-    /// picker below lets the user hand-pick instead.
-    fn complexity_choices(&mut self, ui: &mut Ui) -> bool {
-        let settings = &mut self.editor.generator.settings;
-        let current = if settings.custom_groupings_enabled { 0 } else { settings.complexity };
-        let options: Vec<_> = (1..=MAX_COMPLEXITY).map(|l| (l, l.to_string())).collect();
-        let picked = choice_grid(ui, &options, current, MAX_COMPLEXITY as usize);
-        if let Some(level) = picked {
-            settings.complexity = level;
-            settings.custom_groupings_enabled = false;
-        }
-        ui.add_space(8.0);
-        ui.horizontal(|ui| {
-            ui.label(RichText::new("Space").size(18.0));
-            ui.label(RichText::new(format!("{:.0}%", settings.space * 100.0)).size(18.0).weak());
-        });
-        ui.spacing_mut().slider_width = ui.available_width();
-        ui.add(egui::Slider::new(&mut settings.space, 0.0..=1.0).show_value(false))
-            .on_hover_text("More rests in the rhythm");
-        ui.add_space(8.0);
-        egui::CollapsingHeader::new(RichText::new("Groupings").size(18.0))
-            .id_salt("compact_groupings")
-            .show(ui, |ui| {
-                egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
-                    self.groupings_picker(ui);
-                });
-            });
-        picked.is_some()
-    }
-
-    fn bars_choices(&mut self, ui: &mut Ui) -> bool {
-        let generator = &mut self.editor.generator;
-        let min_bars = if generator.endless { ENDLESS_MIN_BARS } else { 1 };
-        let options: Vec<_> = (min_bars..=MAX_BARS).map(|b| (b, b.to_string())).collect();
-        let picked = choice_grid(ui, &options, generator.effective_bars(), 4);
-        if let Some(bars) = picked {
-            generator.settings.bars = bars;
-        }
-        picked.is_some()
-    }
-
-    /// Big tempo display with steppers, a slider and tap tempo.
-    fn bpm_editor(&mut self, ui: &mut Ui) {
-        let mut bpm = self.playback_ctl.bpm;
-        ui.vertical_centered(|ui| {
-            ui.label(RichText::new(bpm.to_string()).size(56.0).strong());
-        });
-
-        let steps: [i32; 4] = [-5, -1, 1, 5];
-        let spacing = ui.spacing().item_spacing.x;
-        let width = (ui.available_width() - spacing * 3.0) / 4.0;
-        ui.horizontal(|ui| {
-            for step in steps {
-                let label = if step > 0 { format!("+{step}") } else { format!("−{}", -step) };
-                let button =
-                    Button::new(RichText::new(label).size(20.0)).min_size(vec2(width, ROW_HEIGHT));
-                if ui.add(button).clicked() {
-                    bpm = (bpm as i32 + step).clamp(MIN_BPM as i32, MAX_BPM as i32) as u32;
-                }
-            }
-        });
-        ui.add_space(4.0);
-        ui.spacing_mut().slider_width = ui.available_width();
-        ui.add(egui::Slider::new(&mut bpm, MIN_BPM..=MAX_BPM).show_value(false));
-        ui.add_space(4.0);
-
-        let tap = wide_button(ui, "Tap", 22.0, 72.0);
-        if tap.clicked()
-            && let Some(tapped) = record_tap(&mut self.ui.compact.taps, ui.input(|i| i.time))
-        {
-            bpm = tapped;
-        }
-
-        if bpm != self.playback_ctl.bpm {
-            self.playback_ctl.bpm = bpm;
-            self.editor.dirty = true;
-            self.handle_bpm_change();
-        }
-    }
-
-    fn swing_choices(&mut self, ui: &mut Ui) {
-        let swing = &mut self.playback_ctl.audio_cfg.swing;
-        let options: Vec<_> = SWING_PRESETS.iter().map(|&p| (p, swing_label(p))).collect();
-        if let Some(percent) = choice_grid(ui, &options, swing.percent, 3) {
-            swing.percent = percent;
-        }
-        ui.add_space(4.0);
-        ui.spacing_mut().slider_width = ui.available_width();
-        ui.add(
-            egui::Slider::new(&mut swing.percent, MIN_SWING_PERCENT..=MAX_SWING_PERCENT)
-                .show_value(false),
-        );
-        if !swing.is_straight() {
-            ui.add_space(8.0);
-            ui.label("Swung note value");
-            let units: Vec<_> = SwingUnit::ALL.iter().map(|&u| (u, u.label().to_owned())).collect();
-            if let Some(unit) = choice_grid(ui, &units, swing.unit, 2) {
-                swing.unit = unit;
-            }
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn tap_tempo_needs_two_taps() {
-        let mut taps = Vec::new();
-        assert_eq!(record_tap(&mut taps, 10.0), None);
-        assert_eq!(record_tap(&mut taps, 10.5), Some(120));
-        assert_eq!(record_tap(&mut taps, 11.0), Some(120));
-    }
-
-    #[test]
-    fn tap_tempo_averages_and_restarts_after_a_pause() {
-        let mut taps = Vec::new();
-        for t in [0.0, 0.6, 1.2, 1.8] {
-            record_tap(&mut taps, t);
-        }
-        assert_eq!(taps.len(), 4);
-        // 0.6 s per beat = 100 BPM.
-        assert_eq!(record_tap(&mut taps, 2.4), Some(100));
-        // A long pause starts a new measurement.
-        assert_eq!(record_tap(&mut taps, 10.0), None);
-        assert_eq!(taps, vec![10.0]);
-    }
-
-    #[test]
-    fn tap_tempo_is_clamped() {
-        let mut taps = Vec::new();
-        record_tap(&mut taps, 0.0);
-        assert_eq!(record_tap(&mut taps, 0.01), Some(MAX_BPM));
     }
 }

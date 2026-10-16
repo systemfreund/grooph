@@ -13,11 +13,13 @@ mod measure_panel;
 mod metronome_trainer;
 mod midi_input_widget;
 mod mixer_panel;
+mod pickers;
 mod platform;
 mod play_along;
 mod preset_panel;
 mod presets;
 mod settings_panel;
+mod share;
 mod state;
 mod style;
 mod time_signature_dialog;
@@ -294,7 +296,7 @@ impl App for Grooph {
             self.generator_panel(ui);
             self.tool_palette_panel(ui);
             self.measure_panel(ui);
-            self.compact_picker(ui);
+            self.settings_picker(ui);
         }
         self.update_metronome_trainer();
         self.update_endless();
@@ -983,6 +985,8 @@ impl Grooph {
                 link_copied_at: None,
                 compact_layout: false,
                 compact: CompactState::default(),
+                picker: None,
+                tap_tempo: Default::default(),
             },
         };
         app.editor.active_preset = app.matching_preset();
