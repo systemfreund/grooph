@@ -1,9 +1,9 @@
 //! Bidirectional tempo backbone for a [`Score`].
 //!
 //! Translates between global position (seconds, global ticks) and local
-//! position (`measure_idx`, local ticks). The tick axis is **piecewise
-//! linear**: each measure has its own `ticks_per_sec` because
-//! `DEFAULT_GRID.ticks_per_beat` depends on `time_signature.beat_unit`.
+//! position (`measure_idx`, local ticks). BPM always counts quarter notes,
+//! whatever the time signature's beat unit, so a note value lasts equally
+//! long in every measure (an eighth in 7/8 as long as one in 4/4).
 //!
 //! Forward direction (audio, schedule): given a measure index and local tick,
 //! compute the global tick or seconds. Used to build the audio schedule and
@@ -72,6 +72,7 @@ impl ScoreTiming {
         let mut ticks_per_beat: Vec<u32> = Vec::with_capacity(n);
         let mut seconds_per_tick: Vec<f64> = Vec::with_capacity(n);
 
+        let ticks_per_quarter = DEFAULT_GRID.ticks_per_whole / 4;
         let mut tick_acc: u64 = 0;
         let mut sec_acc: f64 = 0.0;
         measure_starts.push(0);
@@ -81,7 +82,9 @@ impl ScoreTiming {
             let ts = m.time_signature();
             let tpb = DEFAULT_GRID.ticks_per_beat(&ts);
             let tpm = DEFAULT_GRID.ticks_per_measure(&ts);
-            let tps = (bpm as f64 / 60.0) * tpb as f64;
+            // BPM counts quarters, not the beat unit: otherwise x/8 measures
+            // would play at half and x/16 at a quarter of the speed.
+            let tps = (bpm as f64 / 60.0) * ticks_per_quarter as f64;
             let spt = if tps > 0.0 { 1.0 / tps } else { 0.0 };
 
             measure_ticks.push(tpm);
@@ -299,17 +302,23 @@ mod tests {
     }
 
     #[test]
-    fn mixed_ts_ticks_per_sec_differs_per_measure() {
-        // 4/4 (beat_unit = quarter) vs. 4/8 (beat_unit = eighth):
-        // at the same BPM, ticks_per_sec differs because ticks_per_beat differs.
-        let s = score_of(&[TimeSignature::FOUR_FOUR, TimeSignature::FOUR_EIGHT]);
+    fn bpm_counts_quarters_in_every_time_signature() {
+        // 4/4, 4/8 and 4/16 at 120 BPM: a quarter lasts 0.5 s in each, so
+        // note values keep their length and the bars last 2 s, 1 s, 0.5 s.
+        let s = score_of(&[
+            TimeSignature::FOUR_FOUR,
+            TimeSignature::FOUR_EIGHT,
+            TimeSignature { beats: 4, beat_unit: 16 },
+        ]);
         let t = ScoreTiming::from_score(&s, 120);
         let tps0 = t.ticks_per_sec_in_measure(0);
-        let tps1 = t.ticks_per_sec_in_measure(1);
-        assert!(
-            (tps0 - tps1).abs() > 1e-6,
-            "expected different ticks_per_sec, got {tps0} and {tps1}"
-        );
+        for i in 1..t.measure_count() {
+            assert!((t.ticks_per_sec_in_measure(i) - tps0).abs() < 1e-9);
+        }
+        let starts: Vec<f64> = (0..=3).map(|i| t.measure_start_seconds(i)).collect();
+        for (got, want) in starts.iter().zip([0.0, 2.0, 3.0, 3.5]) {
+            assert!((got - want).abs() < 1e-9, "starts {starts:?}");
+        }
     }
 
     #[test]
