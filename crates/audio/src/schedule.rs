@@ -39,16 +39,20 @@ impl SoundType {
     }
 
     pub(crate) fn profile(self, settings: &AudioSettings) -> SoundProfile {
-        match self {
+        let muted = match self {
+            SoundType::Downbeat | SoundType::PrimaryBeat => settings.metronome_muted,
+            SoundType::AccentedBeat | SoundType::Beat | SoundType::Ghost => settings.rhythm_muted,
+            SoundType::CountIn => false,
+        };
+        let profile = match self {
             SoundType::Downbeat => SoundProfile { freq_mult: 3.375, gain: settings.downbeat },
             SoundType::PrimaryBeat => SoundProfile { freq_mult: 1.0, gain: settings.primary },
             SoundType::AccentedBeat => SoundProfile { freq_mult: 2.25, gain: settings.accent },
             SoundType::Beat => SoundProfile { freq_mult: 1.5, gain: settings.beat },
             SoundType::Ghost => SoundProfile { freq_mult: 1.5, gain: settings.ghost },
-            SoundType::CountIn => {
-                SoundProfile { freq_mult: 2.25, gain: settings.downbeat.max(settings.beat) }
-            }
-        }
+            SoundType::CountIn => SoundProfile { freq_mult: 2.25, gain: settings.count_in },
+        };
+        if muted { SoundProfile { gain: 0.0, ..profile } } else { profile }
     }
 }
 
@@ -134,6 +138,29 @@ mod tests {
                 })
                 .collect(),
         }
+    }
+
+    #[test]
+    fn voice_mutes_silence_their_sounds_but_not_the_count_in() {
+        let settings = AudioSettings {
+            metronome_muted: true,
+            rhythm_muted: true,
+            count_in: 0.8,
+            ..AudioSettings::default()
+        };
+        for sound in [
+            SoundType::Downbeat,
+            SoundType::PrimaryBeat,
+            SoundType::AccentedBeat,
+            SoundType::Beat,
+            SoundType::Ghost,
+        ] {
+            assert_eq!(sound.profile(&settings).gain, 0.0, "{sound:?}");
+        }
+        assert_eq!(SoundType::CountIn.profile(&settings).gain, 0.8);
+        let only_rhythm = AudioSettings { rhythm_muted: true, ..AudioSettings::default() };
+        assert_eq!(SoundType::Downbeat.profile(&only_rhythm).gain, only_rhythm.downbeat);
+        assert_eq!(SoundType::Beat.profile(&only_rhythm).gain, 0.0);
     }
 
     #[test]

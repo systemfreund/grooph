@@ -126,7 +126,7 @@ Important root files:
   slot of the generator subdivision (per beat: 8ths=2, 16ths=4, triplets=3;
   mixed = triplets in tuplet beats, else 16ths). Other beat units get a straight
   8th or 16th grid (triplets → 8ths, mixed → 16ths). Scheduled as `SoundType::Ghost`,
-  volume via the mixer's "Ghost" slider (`AudioSettings::ghost`).
+  volume via the mixer's "Ghost notes" slider (`AudioSettings::ghost`).
 - Count-in (`PlaybackOptions::count_in`): `TickSource` plays one bar of
   `SoundType::CountIn` clicks (downbeat + primary beats of the first measure)
   before the score; `Audio::playback_position` is negative meanwhile. The UI
@@ -153,6 +153,10 @@ Important root files:
   `MetronomeSound::Claves` (default) plays `claves3.wav` on the downbeat and
   `claves4.wav` on the other primary beats and the count-in.
 - `VoiceMixer` (`voices.rs`) plays samples resampled to the device rate.
+- Mixer (`mixer_panel.rs`): a "Metronome" group (`downbeat`, `primary` as
+  "Beats", `count_in`) and a "Rhythm" group (`beat` as "Notes", `accent`,
+  `ghost`), each with a mute (`metronome_muted` / `rhythm_muted`, applied in
+  `SoundType::profile`). The metronome mute leaves the count-in audible.
 
 ## Metronome trainer
 

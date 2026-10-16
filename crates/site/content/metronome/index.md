@@ -92,8 +92,9 @@ mute web audio while the ringer switch is set to silent.
 
 Yes. By default the metronome plays claves: a high hit on the downbeat and a lower one on
 the other main beats. Under Settings → Sounds you can switch the metronome to a plain
-click, whose waveform you can change. The mixer (speaker icon) sets the volume of the
-downbeat, main beats, accents, notes and ghost notes.
+click, whose waveform you can change. The mixer (speaker icon) has two groups: the
+metronome (downbeat, beats, count-in) and the rhythm (notes, accents, ghost notes). Each
+group can be muted, for example to hear only the written rhythm.
 
 ### Can it keep a steady pulse for odd meters?
 

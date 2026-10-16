@@ -65,9 +65,20 @@ pub struct AudioSettings {
     /// Sound of downbeat, primary beats and count-in.
     #[serde(default)]
     pub metronome_sound: MetronomeSound,
+    /// Volume of the count-in bar.
+    #[serde(default = "default_count_in_gain")]
+    pub count_in: f32,
+    /// Silence downbeat and primary beats (the count-in still sounds).
+    #[serde(default)]
+    pub metronome_muted: bool,
+    /// Silence notes, accents and ghost notes.
+    #[serde(default)]
+    pub rhythm_muted: bool,
 }
 
 fn default_ghost_gain() -> f32 { 0.25 }
+
+fn default_count_in_gain() -> f32 { 1.0 }
 
 impl Default for AudioSettings {
     fn default() -> Self {
@@ -85,6 +96,9 @@ impl Default for AudioSettings {
             ghost: default_ghost_gain(),
             rhythm_sound: RhythmSound::default(),
             metronome_sound: MetronomeSound::default(),
+            count_in: default_count_in_gain(),
+            metronome_muted: false,
+            rhythm_muted: false,
         }
     }
 }
@@ -112,6 +126,9 @@ impl AudioSettings {
             ghost: default_ghost_gain(),
             rhythm_sound: RhythmSound::default(),
             metronome_sound: MetronomeSound::default(),
+            count_in: default_count_in_gain(),
+            metronome_muted: false,
+            rhythm_muted: false,
         };
         result.clamped()
     }
@@ -127,6 +144,7 @@ impl AudioSettings {
         self.noise_mix = self.noise_mix.clamp(0.0, 1.0);
         self.noise_decay = self.noise_decay.clamp(0.005, 1.0);
         self.ghost = self.ghost.clamp(0.0, 1.0);
+        self.count_in = self.count_in.clamp(0.0, 1.0);
         self
     }
 }
