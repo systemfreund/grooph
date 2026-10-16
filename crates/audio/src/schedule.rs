@@ -13,6 +13,9 @@ use crate::trainer::GapMute;
 pub(crate) enum SoundType {
     Downbeat,
     PrimaryBeat,
+    /// Click on a beat unit between the primary beats, e.g. the eighths
+    /// inside the 2+2+3 groups of 7/8. Silent unless its volume is raised.
+    Pulse,
     AccentedBeat,
     Beat,
     /// Quiet subdivision hit where no note is written.
@@ -31,7 +34,7 @@ impl SoundType {
     pub(crate) fn muted_by(self, mute: GapMute) -> bool {
         match self {
             SoundType::CountIn => false,
-            SoundType::Downbeat | SoundType::PrimaryBeat => true,
+            SoundType::Downbeat | SoundType::PrimaryBeat | SoundType::Pulse => true,
             SoundType::AccentedBeat | SoundType::Beat | SoundType::Ghost => {
                 mute == GapMute::Everything
             }
@@ -40,13 +43,16 @@ impl SoundType {
 
     pub(crate) fn profile(self, settings: &AudioSettings) -> SoundProfile {
         let muted = match self {
-            SoundType::Downbeat | SoundType::PrimaryBeat => settings.metronome_muted,
+            SoundType::Downbeat | SoundType::PrimaryBeat | SoundType::Pulse => {
+                settings.metronome_muted
+            }
             SoundType::AccentedBeat | SoundType::Beat | SoundType::Ghost => settings.rhythm_muted,
             SoundType::CountIn => false,
         };
         let profile = match self {
             SoundType::Downbeat => SoundProfile { freq_mult: 3.375, gain: settings.downbeat },
             SoundType::PrimaryBeat => SoundProfile { freq_mult: 1.0, gain: settings.primary },
+            SoundType::Pulse => SoundProfile { freq_mult: 1.0, gain: settings.pulse },
             SoundType::AccentedBeat => SoundProfile { freq_mult: 2.25, gain: settings.accent },
             SoundType::Beat => SoundProfile { freq_mult: 1.5, gain: settings.beat },
             SoundType::Ghost => SoundProfile { freq_mult: 1.5, gain: settings.ghost },
@@ -80,8 +86,15 @@ impl Schedule {
 
             map.entry(start).or_default().push(SoundType::Downbeat);
 
-            for t in DEFAULT_GRID.primary_boundaries(&ts) {
+            let primaries = DEFAULT_GRID.primary_boundaries(&ts);
+            for &t in &primaries {
                 map.entry(start + t as u64).or_default().push(SoundType::PrimaryBeat);
+            }
+            let unit = DEFAULT_GRID.ticks_per_beat(&ts);
+            for t in (unit..DEFAULT_GRID.ticks_per_measure(&ts)).step_by(unit.max(1) as usize) {
+                if !primaries.contains(&t) {
+                    map.entry(start + t as u64).or_default().push(SoundType::Pulse);
+                }
             }
 
             let onsets = DEFAULT_GRID.compute_onset_ticks(measure.beats());
@@ -161,6 +174,22 @@ mod tests {
         let only_rhythm = AudioSettings { rhythm_muted: true, ..AudioSettings::default() };
         assert_eq!(SoundType::Downbeat.profile(&only_rhythm).gain, only_rhythm.downbeat);
         assert_eq!(SoundType::Beat.profile(&only_rhythm).gain, 0.0);
+    }
+
+    #[test]
+    fn pulse_fills_the_beat_units_between_primary_beats() {
+        let pulses = |ts: TimeSignature| {
+            let score = Score { measures: vec![Measure::new(ts)] };
+            let timing = ScoreTiming::from_score(&score, 120);
+            let s = Schedule::build(&score, &timing, None);
+            let count = |t: SoundType| s.map.values().flatten().filter(|&&x| x == t).count();
+            (count(SoundType::PrimaryBeat), count(SoundType::Pulse))
+        };
+        // 7/8 (2+3+2): downbeat, 2 primary beats and 4 pulses = all 7 eighths.
+        assert_eq!(pulses(TimeSignature { beats: 7, beat_unit: 8 }), (2, 4));
+        assert_eq!(pulses(TimeSignature::SIX_EIGHT), (1, 4));
+        // In x/4 every beat unit is already a primary beat.
+        assert_eq!(pulses(TimeSignature::FOUR_FOUR), (3, 0));
     }
 
     #[test]

@@ -93,8 +93,10 @@ mute web audio while the ringer switch is set to silent.
 Yes. By default the metronome plays claves: a high hit on the downbeat and a lower one on
 the other main beats. Under Settings → Sounds you can switch the metronome to a plain
 click, whose waveform you can change. The mixer (speaker icon) has two groups: the
-metronome (downbeat, beats, count-in) and the rhythm (notes, accents, ghost notes). Each
-group can be muted, for example to hear only the written rhythm.
+metronome (downbeat, beats, pulse, count-in) and the rhythm (notes, accents, ghost notes).
+Each group can be muted, for example to hear only the written rhythm. The metronome clicks
+on the main beats, so 7/8 gets three clicks per bar; raise **Pulse** to also hear the
+eighths in between, as loud as **Beats** to click all seven equally.
 
 The claves samples are by [altemark](https://freesound.org/people/altemark/packs/11638/)
 on freesound.org, licensed under Creative Commons Attribution-NonCommercial (CC BY-NC).

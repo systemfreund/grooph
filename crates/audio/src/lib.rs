@@ -68,6 +68,10 @@ pub struct AudioSettings {
     /// Volume of the count-in bar.
     #[serde(default = "default_count_in_gain")]
     pub count_in: f32,
+    /// Volume of the clicks on every beat unit between the primary beats
+    /// (the eighths inside the groups of 7/8). 0 turns them off.
+    #[serde(default)]
+    pub pulse: f32,
     /// Silence downbeat and primary beats (the count-in still sounds).
     #[serde(default)]
     pub metronome_muted: bool,
@@ -97,6 +101,7 @@ impl Default for AudioSettings {
             rhythm_sound: RhythmSound::default(),
             metronome_sound: MetronomeSound::default(),
             count_in: default_count_in_gain(),
+            pulse: 0.0,
             metronome_muted: false,
             rhythm_muted: false,
         }
@@ -127,6 +132,7 @@ impl AudioSettings {
             rhythm_sound: RhythmSound::default(),
             metronome_sound: MetronomeSound::default(),
             count_in: default_count_in_gain(),
+            pulse: 0.0,
             metronome_muted: false,
             rhythm_muted: false,
         };
@@ -510,7 +516,8 @@ impl Iterator for MetronomeSource {
             let muted = self.current_bar().is_some_and(|b| b.muted);
             let mute = self.local_params.gap.mute;
             for sound in triggered {
-                if muted && sound.muted_by(mute) {
+                let settings = &self.local_params.audio_settings;
+                if (muted && sound.muted_by(mute)) || sound.profile(settings).gain <= 0.0 {
                     continue;
                 }
                 self.voices.trigger(sound.patch(&self.local_params.audio_settings));

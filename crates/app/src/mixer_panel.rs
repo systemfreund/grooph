@@ -6,14 +6,14 @@ use eframe::egui::scroll_area::{ScrollBarVisibility, ScrollSource};
 use eframe::egui::style::HandleShape;
 
 /// One vertical volume slider shown in percent.
-fn volume_slider(ui: &mut egui::Ui, value: &mut f32, label: &str) {
+fn volume_slider(ui: &mut egui::Ui, value: &mut f32, label: &str) -> egui::Response {
     ui.add(
         egui::Slider::new(value, 0.0..=1.0)
             .orientation(SliderOrientation::Vertical)
             .handle_shape(HandleShape::Rect { aspect_ratio: 1.5 })
             .custom_formatter(|value, _| format!("{:.0}%", value * 100.0))
             .text(label),
-    );
+    )
 }
 
 /// A group of sliders under a title with a mute toggle. `muted_sliders` are
@@ -57,8 +57,15 @@ impl Grooph {
                             |ui| {
                                 volume_slider(ui, &mut settings.downbeat, "Downbeat");
                                 volume_slider(ui, &mut settings.primary, "Beats");
+                                volume_slider(ui, &mut settings.pulse, "Pulse").on_hover_text(
+                                    "Clicks on every beat unit between the beats, e.g. all \
+                                     seven eighths in 7/8. Set it to the Beats volume to \
+                                     hear every eighth equally loud; 0% turns it off.",
+                                );
                             },
-                            |ui| volume_slider(ui, &mut settings.count_in, "Count-in"),
+                            |ui| {
+                                volume_slider(ui, &mut settings.count_in, "Count-in");
+                            },
                         );
                         ui.separator();
                         voice_group(

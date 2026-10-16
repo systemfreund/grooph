@@ -156,9 +156,12 @@ Important root files:
   see `crates/audio/samples/CREDITS.md`; add a row there with every new sample.
 - `VoiceMixer` (`voices.rs`) plays samples resampled to the device rate.
 - Mixer (`mixer_panel.rs`): a "Metronome" group (`downbeat`, `primary` as
-  "Beats", `count_in`) and a "Rhythm" group (`beat` as "Notes", `accent`,
+  "Beats", `pulse`, `count_in`) and a "Rhythm" group (`beat` as "Notes", `accent`,
   `ghost`), each with a mute (`metronome_muted` / `rhythm_muted`, applied in
   `SoundType::profile`). The metronome mute leaves the count-in audible.
+  `pulse` (default 0, off) clicks every beat unit between the primary beats
+  (`SoundType::Pulse`, e.g. the eighths inside the groups of 7/8); sounds
+  with zero gain are not triggered at all.
 
 ## Metronome trainer
 
