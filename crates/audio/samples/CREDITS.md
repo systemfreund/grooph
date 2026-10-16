@@ -8,7 +8,7 @@ their own license, listed here.
 | `claves3.wav` | claves, high (downbeat) | [altemark](https://freesound.org/people/altemark/) | [freesound #184539](https://freesound.org/people/altemark/sounds/184539/) | [CC BY-NC](https://creativecommons.org/licenses/by-nc/) |
 | `claves4.wav` | claves, low (other beats) | [altemark](https://freesound.org/people/altemark/) | [freesound #184538](https://freesound.org/people/altemark/sounds/184538/) | [CC BY-NC](https://creativecommons.org/licenses/by-nc/) |
 | `snare-normal.wav` | snare, normal note | MusicRadar | [MusicRadar SampleRadar](https://www.musicradar.com/news/drums/1000-free-drum-samples) | royalty-free, no redistribution (see below) |
-| `snare-accent.wav` | snare, accent | MusicRadar | [MusicRadar SampleRadar](https://www.musicradar.com/news/drums/1000-free-drum-samples) | royalty-free, no redistribution (see below) |
+| `snare-accent.wav` | snare, accent (`CYCdh_LudSnrB-05.wav`) | MusicRadar | [MusicRadar SampleRadar](https://www.musicradar.com/news/drums/1000-free-drum-samples) | royalty-free, no redistribution (see below) |
 | `snare-ghost.wav` | snare, ghost note | MusicRadar | [MusicRadar SampleRadar](https://www.musicradar.com/news/drums/1000-free-drum-samples) | royalty-free, no redistribution (see below) |
 
 The snare samples come from MusicRadar's free drum sample pack "1000 free drum
