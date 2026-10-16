@@ -15,16 +15,18 @@ bpm=80&sub=16&lvl=3&bars=4
 
 ## Settings
 
-Open the generator with the dice icon. Every change creates a new rhythm.
+The generator is the **Practice** tab. The card at the top shows meter, notes, level, bars
+and tempo; tap a value to change it. Every change creates a new rhythm, and the dice button
+rolls a new one with the same settings.
 
 | Setting | What it does |
 |---|---|
-| **Subdivision** | The finest note value: 8th notes, 16th notes, triplets, or mixed (16ths and triplets together). Eighth-note meters offer 8ths and 16ths, sixteenth-note meters 16ths. |
-| **Complexity** | Level 1 to 5. Higher levels add syncopations, rests inside the beat and offbeat figures. |
+| **Notes** | The finest note value: 8th notes, 16th notes, triplets, or mixed (16ths and triplets together). Eighth-note meters offer 8ths and 16ths, sixteenth-note meters 16ths. |
+| **Level** | Level 1 to 5. Higher levels add syncopations, rests inside the beat and offbeat figures. |
 | **Bars** | 1 to 8 measures per exercise. |
-| **Time signature** | Quarter-note meters from 1/4 to 7/4, eighth-note meters from 3/8 to 13/8 and sixteenth-note meters from 5/16 to 19/16. |
-| **Space** | Adds whole-beat rests, from none to a lot. Good for practicing silence. |
-| **Groupings** | Instead of a level, pick exactly which one-beat figures may appear. |
+| **Meter** | Quarter-note meters from 1/4 to 7/4, eighth-note meters from 3/8 to 13/8 and sixteenth-note meters from 5/16 to 19/16. |
+| **Space** | Adds whole-beat rests, from none to a lot. Good for practicing silence. In the **Level** dialog. |
+| **Groupings** | Instead of a level, pick exactly which one-beat figures may appear. In the **Level** dialog. |
 | **Endless** | Keeps replacing bars you have already played, so the exercise never repeats. |
 | **Ghost notes** | Quiet clicks on every free slot of the subdivision, to hear the grid. |
 | **Preset** | Recall a saved exercise. |
@@ -33,8 +35,9 @@ Open the generator with the dice icon. Every change creates a new rhythm.
 
 A preset stores the generator settings together with everything you practise with them:
 tempo, swing, ghost notes, count-in, endless mode, gap click, tempo ramp and the sounds.
-Pick one from the **Preset** list to restore all of it at once. Under **Presets** you save
-the current settings as a new preset, overwrite the active one, rename or delete your own.
+Tap **Preset** and pick one to restore all of it at once. In the same dialog you save the
+current settings as a new preset, update the active one, and rename or delete your own with
+the pencil button.
 A few built-in presets get you started, for example "16th funk" or "Speed builder"; they
 cannot be changed, but you can save a copy under a new name.
 
@@ -96,7 +99,7 @@ rhythm, so a teacher can send the same exercise to a whole class:
 bpm=72&sub=3&lvl=2&bars=2&seed=2024
 ```
 
-In the library panel, **Copy link** copies a link to whatever is on the screen, including
+In the library (**More → Library**), **Copy link** copies a link to whatever is on the screen, including
 rhythms you wrote yourself.
 
 ## FAQ

@@ -50,6 +50,25 @@ impl GeneratorState {
 }
 
 impl Grooph {
+    /// Regenerate the score after the generator settings were shown: on
+    /// "New rhythm" (`roll`), on any changed setting, and when endless mode
+    /// was turned on for a score too short for it.
+    pub(crate) fn finish_generator_change(
+        &mut self,
+        before: GeneratorSettings,
+        endless_before: bool,
+        roll: bool,
+    ) {
+        let endless_turned_on = !endless_before && self.editor.generator.endless;
+        let too_short_for_endless = self.editor.score.len() < ENDLESS_MIN_BARS;
+        if roll
+            || self.editor.generator.settings != before
+            || (endless_turned_on && too_short_for_endless)
+        {
+            self.generate_new_score();
+        }
+    }
+
     /// Replace the working score with a freshly generated one (undoable).
     pub(crate) fn generate_new_score(&mut self) {
         let settings = GeneratorSettings {

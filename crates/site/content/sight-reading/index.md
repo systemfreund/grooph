@@ -8,7 +8,7 @@ order: 0
 Sight-reading rhythms means reading a figure once and playing it in time, without
 practicing it first. The best way to get there is a lot of fresh material at the right
 difficulty. grooph writes that material for you: pick a note value and a level, and every
-click on **New rhythm** gives you a new exercise.
+tap on the dice (**New rhythm**) gives you a new exercise.
 
 ## Choose a topic
 

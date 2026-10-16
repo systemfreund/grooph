@@ -7,7 +7,7 @@ order: 4
 ---
 A metronome that always clicks can carry you without you noticing. grooph has two trainer
 modes that make you keep the time yourself or push your tempo bit by bit. Both are in the
-settings (gear icon) and work with any rhythm, the [rhythm generator](/rhythm-generator/)
+settings (**More → Settings**) and work with any rhythm, the [rhythm generator](/rhythm-generator/)
 and its endless mode included.
 
 ## Gap click: muted bars
@@ -29,9 +29,9 @@ so the result shows how well you kept the time on your own.
 ## Tempo ramp: speed trainer
 
 Under **Tempo Ramp**, switch on **Change the tempo while playing**. The ramp starts at the
-BPM in the main menu and goes towards the target tempo in steps, for example 5 BPM every
+BPM at the top and goes towards the target tempo in steps, for example 5 BPM every
 4 bars or every loop of the rhythm. The tempo only changes at the start of a bar, and the
-tempo being played is shown next to the BPM field.
+tempo being played is shown at the top as **BPM now**.
 
 At the target the ramp can **hold** the tempo, **start over** from the beginning or go
 **back down** and up again. Tick **Keep the reached tempo after stopping** if the next run

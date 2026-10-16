@@ -254,18 +254,6 @@ impl Grooph {
         self.advance_calibration();
     }
 
-    /// Compact running score next to the 🎯 toggle while a run is recorded.
-    pub(crate) fn live_accuracy_label(&self, ui: &mut egui::Ui) {
-        if self.calibration_source().is_some() {
-            return;
-        }
-        let Some(summary) = self.playback_ctl.accuracy.tracker.live_summary() else {
-            return;
-        };
-        ui.label(format!("{:.0}% {}", summary.score_percent(), signed_ms(summary.mean_ms)))
-            .on_hover_text("Score of this run and your average deviation");
-    }
-
     /// Evaluation of the last run, shown once playback has stopped.
     pub(crate) fn run_summary_window(&mut self, ui: &mut egui::Ui) {
         if self.playback_ctl.transport_state != TransportState::Stopped
@@ -327,10 +315,6 @@ fn summary_grid(ui: &mut egui::Ui, summary: &RunSummary) {
         ui.label(format!("± {:.0} ms", summary.spread_ms));
         ui.end_row();
     });
-}
-
-fn signed_ms(ms: f64) -> String {
-    format!("{:+.0} ms", ms)
 }
 
 fn early_late(ms: f64) -> String {

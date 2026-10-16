@@ -103,11 +103,4 @@ impl Grooph {
             ui.checkbox(&mut ramp.keep_reached, "Keep the reached tempo after stopping");
         });
     }
-
-    /// Ramp tempo next to the BPM field while it differs from the setting.
-    pub(crate) fn ramp_bpm_label(&self, ui: &mut egui::Ui) {
-        if let Some(bpm) = self.playback_ctl.playback.ramp_bpm {
-            ui.label(format!("now {bpm}")).on_hover_text("Tempo ramp: tempo being played");
-        }
-    }
 }

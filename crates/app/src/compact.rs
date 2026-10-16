@@ -1,7 +1,7 @@
-//! Compact layout for narrow screens (phones): a card with the generator
-//! settings on top, the staff in the middle, an options sheet with big
-//! transport buttons and a tab bar at the bottom. Picked every frame from the
-//! window width, so the desktop layout is unchanged.
+//! The app's layout, made for touch first: a card with the generator settings
+//! on top, the staff in the middle, an options sheet with big transport
+//! buttons and a tab bar at the bottom. On wide windows the controls stay a
+//! centered column and the staff gets the full width.
 
 use crate::pickers::{Picker, ROW_HEIGHT, swing_label};
 use crate::share::paint_share_icon;
@@ -9,12 +9,15 @@ use crate::{Grooph, Mode, TransportState};
 use eframe::egui;
 use eframe::egui::{
     Align2, Color32, FontId, Frame, Id, Margin, Painter, Rect, Response, RichText, Sense, Shape,
-    Stroke, Ui, Vec2, pos2, vec2,
+    Stroke, Ui, UiBuilder, Vec2, pos2, vec2,
 };
 use grooph_measure::generator::{Subdivision, effective_subdivision};
 
-/// Windows narrower than this (in points) get the compact layout.
-pub(crate) const COMPACT_MAX_WIDTH: f32 = 600.0;
+/// Windows narrower than this (in points) count as phone-sized: the staff
+/// packs its notes tighter there.
+pub(crate) const NARROW_MAX_WIDTH: f32 = 600.0;
+/// Widest the controls get; wider windows center them.
+const COLUMN_MAX_WIDTH: f32 = 720.0;
 
 const TAB_HEIGHT: f32 = 56.0;
 const CARD_CELL_HEIGHT: f32 = 64.0;
@@ -29,7 +32,7 @@ pub(crate) enum CompactTab {
     More,
 }
 
-/// UI state of the compact layout. Not persisted.
+/// UI state of the layout. Not persisted.
 #[derive(Default)]
 pub(crate) struct CompactState {
     /// The options sheet only shows its handle and the transport buttons.
@@ -43,6 +46,18 @@ fn subdivision_short_label(s: Subdivision) -> &'static str {
         Subdivision::Triplets => "Trips",
         Subdivision::Mixed => "Mixed",
     }
+}
+
+/// Lay out `add` in a column at most [`COLUMN_MAX_WIDTH`] wide, centered in
+/// the space left.
+fn centered_column<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
+    let avail = ui.available_rect_before_wrap();
+    let width = avail.width().min(COLUMN_MAX_WIDTH);
+    let rect = Rect::from_min_size(
+        pos2(avail.center().x - width / 2.0, avail.top()),
+        vec2(width, avail.height()),
+    );
+    ui.scope_builder(UiBuilder::new().max_rect(rect), add).inner
 }
 
 /// Fill of cards and sheets: a step off the panel background.
@@ -251,36 +266,38 @@ impl Grooph {
         egui::Panel::bottom("compact_tabs")
             .frame(Frame::side_top_panel(ui.style()).inner_margin(Margin::symmetric(0, 4)))
             .show_inside(ui, |ui| {
-                ui.columns(TABS.len(), |cols| {
-                    for (col, (tab, icon, label)) in cols.iter_mut().zip(TABS) {
-                        let (rect, resp) = col.allocate_exact_size(
-                            vec2(col.available_width(), TAB_HEIGHT),
-                            Sense::click(),
-                        );
-                        let color = if tab == current {
-                            accent_text(col)
-                        } else {
-                            col.visuals().weak_text_color()
-                        };
-                        let painter = col.painter();
-                        painter.text(
-                            rect.center_top() + vec2(0.0, 4.0),
-                            Align2::CENTER_TOP,
-                            icon,
-                            FontId::proportional(24.0),
-                            color,
-                        );
-                        painter.text(
-                            rect.center_bottom() - vec2(0.0, 2.0),
-                            Align2::CENTER_BOTTOM,
-                            label,
-                            FontId::proportional(14.0),
-                            color,
-                        );
-                        if resp.clicked() {
-                            picked = Some(tab);
+                centered_column(ui, |ui| {
+                    ui.columns(TABS.len(), |cols| {
+                        for (col, (tab, icon, label)) in cols.iter_mut().zip(TABS) {
+                            let (rect, resp) = col.allocate_exact_size(
+                                vec2(col.available_width(), TAB_HEIGHT),
+                                Sense::click(),
+                            );
+                            let color = if tab == current {
+                                accent_text(col)
+                            } else {
+                                col.visuals().weak_text_color()
+                            };
+                            let painter = col.painter();
+                            painter.text(
+                                rect.center_top() + vec2(0.0, 4.0),
+                                Align2::CENTER_TOP,
+                                icon,
+                                FontId::proportional(24.0),
+                                color,
+                            );
+                            painter.text(
+                                rect.center_bottom() - vec2(0.0, 2.0),
+                                Align2::CENTER_BOTTOM,
+                                label,
+                                FontId::proportional(14.0),
+                                color,
+                            );
+                            if resp.clicked() {
+                                picked = Some(tab);
+                            }
                         }
-                    }
+                    });
                 });
             });
         if let Some(tab) = picked {
@@ -302,7 +319,11 @@ impl Grooph {
             (Picker::Subdivision, "Notes", subdivision_short_label(subdivision).to_owned()),
             (Picker::Complexity, "Level", level),
             (Picker::Bars, "Bars", self.editor.generator.effective_bars().to_string()),
-            (Picker::Bpm, "BPM", self.playback_ctl.bpm.to_string()),
+            // While a tempo ramp runs: the tempo being played.
+            match self.playback_ctl.playback.ramp_bpm {
+                Some(bpm) => (Picker::Bpm, "BPM now", bpm.to_string()),
+                None => (Picker::Bpm, "BPM", self.playback_ctl.bpm.to_string()),
+            },
         ];
 
         let mut picked = None;
@@ -315,19 +336,21 @@ impl Grooph {
             }))
             .show_separator_line(false)
             .show_inside(ui, |ui| {
-                Frame::new()
-                    .fill(card_fill(ui))
-                    .corner_radius(CARD_RADIUS)
-                    .inner_margin(Margin::symmetric(4, 6))
-                    .show(ui, |ui| {
-                        ui.columns(cells.len(), |cols| {
-                            for (col, (picker, label, value)) in cols.iter_mut().zip(&cells) {
-                                if card_cell(col, label, value).clicked() {
-                                    picked = Some(*picker);
+                centered_column(ui, |ui| {
+                    Frame::new()
+                        .fill(card_fill(ui))
+                        .corner_radius(CARD_RADIUS)
+                        .inner_margin(Margin::symmetric(4, 6))
+                        .show(ui, |ui| {
+                            ui.columns(cells.len(), |cols| {
+                                for (col, (picker, label, value)) in cols.iter_mut().zip(&cells) {
+                                    if card_cell(col, label, value).clicked() {
+                                        picked = Some(*picker);
+                                    }
                                 }
-                            }
+                            });
                         });
-                    });
+                });
             });
         if picked.is_some() {
             self.ui.picker = picked;
@@ -349,30 +372,35 @@ impl Grooph {
             }))
             .show_separator_line(false)
             .show_inside(ui, |ui| {
-                Frame::new()
-                    .fill(card_fill(ui))
-                    .corner_radius(CARD_RADIUS)
-                    .inner_margin(Margin { left: 12, right: 12, top: 0, bottom: 12 })
-                    .show(ui, |ui| {
-                        // Handle: tap to fold the options away.
-                        let (rect, resp) = ui
-                            .allocate_exact_size(vec2(ui.available_width(), 22.0), Sense::click());
-                        ui.painter().rect_filled(
-                            Rect::from_center_size(rect.center(), vec2(40.0, 5.0)),
-                            3,
-                            ui.visuals().weak_text_color(),
-                        );
-                        if resp.clicked() {
-                            self.ui.compact.options_collapsed = !self.ui.compact.options_collapsed;
-                        }
+                centered_column(ui, |ui| {
+                    Frame::new()
+                        .fill(card_fill(ui))
+                        .corner_radius(CARD_RADIUS)
+                        .inner_margin(Margin { left: 12, right: 12, top: 0, bottom: 12 })
+                        .show(ui, |ui| {
+                            // Handle: tap to fold the options away.
+                            let (rect, resp) = ui.allocate_exact_size(
+                                vec2(ui.available_width(), 22.0),
+                                Sense::click(),
+                            );
+                            ui.painter().rect_filled(
+                                Rect::from_center_size(rect.center(), vec2(40.0, 5.0)),
+                                3,
+                                ui.visuals().weak_text_color(),
+                            );
+                            if resp.clicked() {
+                                self.ui.compact.options_collapsed =
+                                    !self.ui.compact.options_collapsed;
+                            }
 
-                        if !self.ui.compact.options_collapsed {
-                            self.compact_option_rows(ui);
-                            ui.add_space(8.0);
-                        }
+                            if !self.ui.compact.options_collapsed {
+                                self.compact_option_rows(ui);
+                                ui.add_space(8.0);
+                            }
 
-                        roll = self.compact_transport(ui);
-                    });
+                            roll = self.compact_transport(ui);
+                        });
+                });
             });
 
         self.finish_generator_change(before, endless_before, roll);
@@ -464,17 +492,16 @@ impl Grooph {
         roll
     }
 
-    /// One line above the transport buttons: the live timing score while
-    /// playing along, or a short note after a link was copied.
+    /// One line above the transport buttons: the live timing score and the
+    /// average deviation while playing along, or a short note after a link
+    /// was copied.
     fn compact_status_line(&mut self, ui: &mut Ui) {
         let text = if self.link_copied_recently(ui) {
             Some("Link copied".to_owned())
         } else {
-            self.playback_ctl
-                .accuracy
-                .tracker
-                .live_summary()
-                .map(|summary| format!("Timing {:.0}%", summary.score_percent()))
+            self.playback_ctl.accuracy.tracker.live_summary().map(|summary| {
+                format!("Timing {:.0}%  {:+.0} ms", summary.score_percent(), summary.mean_ms)
+            })
         };
         if let Some(text) = text {
             ui.vertical_centered(|ui| {
@@ -484,7 +511,7 @@ impl Grooph {
         }
     }
 
-    /// Play button and measure controls above the tool palette.
+    /// Play button and measure controls above the tool palette, as wide as it.
     fn compact_edit_bar(&mut self, ui: &mut Ui) {
         egui::Panel::bottom("compact_edit_bar")
             .frame(
@@ -546,17 +573,19 @@ impl Grooph {
                 .frame(Frame::new().fill(ui.visuals().panel_fill).inner_margin(Margin::same(12)))
                 .show_separator_line(false)
                 .show_inside(ui, |ui| {
-                    Frame::new()
-                        .fill(card_fill(ui))
-                        .corner_radius(CARD_RADIUS)
-                        .inner_margin(Margin::symmetric(12, 4))
-                        .show(ui, |ui| {
-                            for (mode, icon, label) in ENTRIES {
-                                if value_row(ui, &format!("{icon}   {label}"), "").clicked() {
-                                    self.ui.mode = mode;
+                    centered_column(ui, |ui| {
+                        Frame::new()
+                            .fill(card_fill(ui))
+                            .corner_radius(CARD_RADIUS)
+                            .inner_margin(Margin::symmetric(12, 4))
+                            .show(ui, |ui| {
+                                for (mode, icon, label) in ENTRIES {
+                                    if value_row(ui, &format!("{icon}   {label}"), "").clicked() {
+                                        self.ui.mode = mode;
+                                    }
                                 }
-                            }
-                        });
+                            });
+                    });
                 });
             return;
         }

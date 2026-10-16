@@ -1,8 +1,8 @@
-//! Sharing the working score as a link: the share button and icon, the
+//! Sharing the working score as a link: the share icon, the
 //! system share sheet or clipboard, and the short "Link copied" notice.
 
 use crate::{Grooph, platform};
-use eframe::egui::{self, Button, Color32, Painter, Rect, Shape, Stroke, Ui, Widget, pos2, vec2};
+use eframe::egui::{Color32, Painter, Rect, Shape, Stroke, Ui, pos2, vec2};
 use grooph_link::{LinkContent, SharedLink};
 use log::warn;
 
@@ -31,15 +31,6 @@ pub(crate) fn paint_share_icon(painter: &Painter, rect: Rect, color: Color32) {
     painter.line_segment([pos2(c.x, c.y + 0.4 * s), tip], stroke);
     painter.line_segment([tip, tip + vec2(-0.5 * s, 0.5 * s)], stroke);
     painter.line_segment([tip, tip + vec2(0.5 * s, 0.5 * s)], stroke);
-}
-
-/// Text button with the share symbol, as tall as the other text buttons.
-pub(crate) fn share_button(ui: &mut Ui) -> egui::Response {
-    let resp = Button::new("   ").ui(ui);
-    let side = resp.rect.height().min(resp.rect.width());
-    let icon = Rect::from_center_size(resp.rect.center(), egui::Vec2::splat(side * 1.2));
-    paint_share_icon(ui.painter(), icon, ui.style().interact(&resp).fg_stroke.color);
-    resp
 }
 
 impl Grooph {

@@ -6,6 +6,10 @@ use eframe::egui::Key;
 
 impl Grooph {
     pub(super) fn handle_keyboard_input(&mut self, ui: &mut egui::Ui) {
+        // Keys typed into a text field (preset or pattern name) are text.
+        if ui.ctx().text_edit_focused() {
+            return;
+        }
         ui.input(|i| {
             // Modal dialogs swallow global shortcuts; their own UI provides Cancel/Confirm.
             if matches!(self.ui.mode, Mode::TimeSignature(_)) {

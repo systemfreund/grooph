@@ -107,11 +107,11 @@ Important root files:
 
 ## Generator / endless mode
 
-- Panel: `crates/app/src/generator_panel.rs` (🎼 in the main menu; 🎲 next to
-  play rolls a new rhythm). Changing a setting regenerates the score
-  (undoable); "Edit" switches to the editor. The time signature opens the
-  compact layout's picker grid (`compact_picker`), so both layouts offer the
-  same meters and groupings.
+- UI: the Practice tab of the layout (`crates/app/src/compact.rs`). The
+  settings card opens a picker per setting (`crates/app/src/pickers.rs`);
+  changing a setting regenerates the score (undoable), 🎲 rolls a new rhythm
+  with the same settings. Space and the grouping picker live in the Level
+  picker, presets (load, save, update, rename, delete) in the Preset picker.
 - App glue: `crates/app/src/generator.rs`. Endless mode replaces a measure once
   both the visible cursor and the audio cursor have left it; the replacement
   keeps the measure's time signature so loop timing stays stable. Needs at
@@ -217,23 +217,24 @@ Important root files:
   warm-up as the source's offset and restores the stash on stop. Persistence
   reads the stash while a calibration runs.
 
-## Compact layout (phones)
+## Layout
 
-- `crates/app/src/compact.rs`: windows narrower than `COMPACT_MAX_WIDTH`
-  (600 pt) get a phone layout instead of the bottom panels; checked every
-  frame (`UiShell::compact_layout`), so the desktop layout is unchanged.
+- One layout for every window size, made for touch first
+  (`crates/app/src/compact.rs`). On windows wider than 720 pt the controls stay
+  a centered column; the staff and the tool palette use the full width.
 - Tabs: Practice (generator card with Meter/Notes/Level/Bars/BPM, options
   sheet, big "new rhythm" + play buttons), Edit (tool palette + edit bar),
   More (Library, Mixer, Settings, Help reuse their panels). The tab is derived
   from `Mode` (`compact_tab`), so modes set elsewhere land on the right tab.
-- Settings open in a `Modal` picker; generator changes go through
-  `finish_generator_change`, shared with the desktop generator panel.
-- The staff uses tighter spacing and no clef there, so glyphs are bigger.
+- Settings open in a `Modal` picker (`settings_picker`); generator changes go
+  through `finish_generator_change`.
+- Windows narrower than `NARROW_MAX_WIDTH` (600 pt, `UiShell::narrow_screen`)
+  get tighter staff spacing, so glyphs are bigger on phones.
+- While a tempo ramp runs, the card shows the tempo being played ("BPM now").
 - Share (right of play, and in the edit bar) builds a score link with tempo
   and swing; on the web it opens the system share sheet
   (`platform::open_share_sheet`, Web Share API), else copies the link.
-- Shared with the desktop main menu: share (`share_link`) and tap tempo
-  (`record_tap`).
+- Keyboard shortcuts are ignored while a text field has the focus.
 
 
 - Tool registry: `crates/app/src/tools.rs` (ToolKind, Modifier, shortcuts).

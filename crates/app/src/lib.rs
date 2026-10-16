@@ -3,12 +3,10 @@ mod calibration;
 mod clock;
 mod compact;
 mod generator;
-mod generator_panel;
 mod help;
 mod keyboard_input;
 mod library;
 mod library_panel;
-mod main_menu;
 mod measure_panel;
 mod metronome_trainer;
 mod midi_input_widget;
@@ -295,20 +293,8 @@ fn add_font(ctx: &Context) {
 impl App for Grooph {
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
         self.apply_style(ui);
-        self.ui.compact_layout = ui.available_width() < compact::COMPACT_MAX_WIDTH;
-        if self.ui.compact_layout {
-            self.compact_ui(ui);
-        } else {
-            self.main_menu(ui);
-            self.help_panel(ui);
-            self.settings_panel(ui);
-            self.mixer_panel(ui);
-            self.library_panel(ui);
-            self.generator_panel(ui);
-            self.tool_palette_panel(ui);
-            self.measure_panel(ui);
-            self.settings_picker(ui);
-        }
+        self.ui.narrow_screen = ui.available_width() < compact::NARROW_MAX_WIDTH;
+        self.compact_ui(ui);
         self.update_metronome_trainer();
         self.update_endless();
         self.run_summary_window(ui);
@@ -1003,10 +989,11 @@ impl Grooph {
                 platform,
                 save_name_buffer: String::new(),
                 preset_name_buffer: String::new(),
+                renaming_preset: None,
                 pending_load: None,
                 link_error: None,
                 link_copied_at: None,
-                compact_layout: false,
+                narrow_screen: false,
                 compact: CompactState::default(),
                 picker: None,
                 tap_tempo: Default::default(),

@@ -189,6 +189,8 @@ pub(crate) struct UiShell {
     pub(crate) save_name_buffer: String,
     /// Name input for "save preset as". Not persisted.
     pub(crate) preset_name_buffer: String,
+    /// User preset whose row in the preset picker is being renamed. Not persisted.
+    pub(crate) renaming_preset: Option<u64>,
     /// Load awaiting the "discard unsaved changes?" confirmation. `Some` shows
     /// the confirm dialog. Not persisted.
     pub(crate) pending_load: Option<PendingLoad>,
@@ -196,12 +198,13 @@ pub(crate) struct UiShell {
     pub(crate) link_error: Option<String>,
     /// UI time of the last "copy link" click, for a short confirmation.
     pub(crate) link_copied_at: Option<f64>,
-    /// The window is narrow: show the compact (phone) layout. Set every frame.
-    pub(crate) compact_layout: bool,
+    /// The window is phone-sized: the staff packs its notes tighter. Set
+    /// every frame.
+    pub(crate) narrow_screen: bool,
     pub(crate) compact: CompactState,
-    /// Setting whose picker dialog is open, in either layout.
+    /// Setting whose picker dialog is open.
     pub(crate) picker: Option<Picker>,
-    /// Taps of the tap-tempo buttons (desktop toolbar, tempo picker).
+    /// Taps of the tap-tempo buttons (tempo picker).
     pub(crate) tap_tempo: TapTempo,
 }
 

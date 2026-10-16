@@ -1,16 +1,18 @@
 //! Picker dialogs for single settings (meter, notes, level, bars, tempo,
-//! swing, preset): a grid of big buttons that works by touch. The compact
-//! layout opens them from its settings card and options sheet, the desktop
-//! layout for the time signature.
+//! swing, preset): a grid of big buttons that works by touch, opened from the
+//! settings card and the options sheet. Also the grouping picker of the level
+//! dialog.
 
 use crate::Grooph;
 use crate::generator::ENDLESS_MIN_BARS;
-use crate::generator_panel::{subdivision_label, time_signature_label, time_signatures};
 use crate::presets::{self, PresetId};
+use crate::tool_palette::notation_button;
 use eframe::egui;
 use eframe::egui::{Button, Color32, FontId, Id, Modal, Response, RichText, Ui, vec2};
+use grooph_measure::TimeSignature;
 use grooph_measure::generator::{
-    MAX_BARS, MAX_COMPLEXITY, effective_subdivision, offered_subdivisions,
+    BeatSpan, FigureSet, MAX_BARS, MAX_COMPLEXITY, Subdivision, complexity_figures,
+    effective_subdivision, figures, offered_subdivisions, supports_time_signature,
 };
 use grooph_measure::swing::{MAX_SWING_PERCENT, MIN_SWING_PERCENT, SwingUnit};
 use grooph_measure::tap_tempo::{TapPulse, tap_pulse};
@@ -35,6 +37,41 @@ pub(crate) enum Picker {
 
 pub(crate) fn swing_label(percent: u8) -> String {
     if percent <= MIN_SWING_PERCENT { "Off".to_owned() } else { format!("{percent}%") }
+}
+
+/// Time signatures in the picker: every meter the editor offers in each of
+/// its groupings (x/8 and x/16 are written in beat groups, e.g. 6/8 = 3+3,
+/// 7/16 = 2+3+2 or 2+2+3).
+pub(crate) fn time_signatures() -> Vec<TimeSignature> {
+    TimeSignature::BEAT_UNITS
+        .into_iter()
+        .flat_map(|beat_unit| {
+            TimeSignature::beat_range(beat_unit)
+                .into_iter()
+                .flatten()
+                .map(move |beats| TimeSignature::new(beats, beat_unit))
+        })
+        .flat_map(|ts| (0..ts.groupings().len() as u8).map(move |g| ts.with_grouping(g)))
+        .filter(|ts| supports_time_signature(*ts))
+        .collect()
+}
+
+/// Beat groups shown next to an x/8 or x/16 meter, e.g. "7/8 (2+3+2)".
+pub(crate) fn time_signature_label(ts: TimeSignature) -> String {
+    let meter = format!("{}/{}", ts.beats, ts.beat_unit);
+    if ts.beat_unit == 4 || ts.groups().len() < 2 {
+        return meter;
+    }
+    format!("{meter} ({})", ts.groups_label())
+}
+
+pub(crate) fn subdivision_label(s: Subdivision) -> &'static str {
+    match s {
+        Subdivision::Eighths => "8th Notes",
+        Subdivision::Sixteenths => "16th Notes",
+        Subdivision::Triplets => "Triplets",
+        Subdivision::Mixed => "Mixed",
+    }
 }
 
 /// Grid of option buttons; returns the one that was tapped.
@@ -80,9 +117,8 @@ fn wide_button(ui: &mut Ui, label: &str, size: f32, height: f32) -> Response {
 }
 
 impl Grooph {
-    /// Dialog for the setting in [`crate::state::UiShell::picker`]: opened
-    /// from the compact layout's card and options sheet, and from the
-    /// desktop generator panel for the time signature.
+    /// Dialog for the setting in [`crate::state::UiShell::picker`], opened
+    /// from the settings card and the options sheet.
     pub(crate) fn settings_picker(&mut self, ui: &mut Ui) {
         let Some(picker) = self.ui.picker else {
             return;
@@ -129,6 +165,7 @@ impl Grooph {
         if modal.inner || modal.should_close() {
             self.ui.picker = None;
             self.ui.tap_tempo.reset();
+            self.ui.renaming_preset = None;
         }
 
         self.finish_generator_change(before, endless_before, false);
@@ -137,17 +174,91 @@ impl Grooph {
         }
     }
 
-    /// Presets to load, and saving the current settings as a new one.
+    /// Presets to load; saving, updating, renaming and deleting the user's own.
     fn preset_choices(&mut self, ui: &mut Ui) -> Option<PresetId> {
-        let options: Vec<_> =
-            presets::all(&self.editor.presets).into_iter().map(|(id, n)| (Some(id), n)).collect();
         let current = self.editor.active_preset;
-        let picked = egui::ScrollArea::vertical()
-            .max_height(320.0)
-            .show(ui, |ui| choice_grid(ui, &options, current, 1))
-            .inner
-            .flatten();
+        let builtin: Vec<_> = presets::builtin_presets()
+            .into_iter()
+            .enumerate()
+            .map(|(i, (name, _))| (Some(PresetId::BuiltIn(i)), name.to_owned()))
+            .collect();
+        let mut picked = None;
+        egui::ScrollArea::vertical().id_salt("preset_list").max_height(320.0).show(ui, |ui| {
+            // The user's own presets first: they are the ones picked most.
+            for preset in &self.editor.presets.presets {
+                let id = PresetId::User(preset.id);
+                ui.horizontal(|ui| {
+                    let name_width =
+                        ui.available_width() - ROW_HEIGHT - ui.spacing().item_spacing.x - 4.0;
+                    let name = Button::new(RichText::new(&preset.name).size(18.0))
+                        .selected(current == Some(id))
+                        .truncate();
+                    if ui.add_sized(vec2(name_width, ROW_HEIGHT), name).clicked() {
+                        picked = Some(id);
+                    }
+                    let edit = Button::new(RichText::new("✏").size(18.0))
+                        .selected(self.ui.renaming_preset == Some(preset.id))
+                        .min_size(vec2(ROW_HEIGHT, ROW_HEIGHT));
+                    if ui.add(edit).on_hover_text("Rename or delete").clicked() {
+                        self.ui.renaming_preset = Some(preset.id);
+                    }
+                });
+            }
+            if let Some(id) = choice_grid(ui, &builtin, current, 1).flatten() {
+                picked = Some(id);
+            }
+        });
         ui.add_space(8.0);
+
+        let renaming = self.ui.renaming_preset;
+        if let Some(preset) =
+            renaming.and_then(|id| self.editor.presets.presets.iter_mut().find(|p| p.id == id))
+        {
+            let mut delete = false;
+            let mut done = false;
+            ui.horizontal(|ui| {
+                let field_width =
+                    ui.available_width() - 2.0 * (ROW_HEIGHT + ui.spacing().item_spacing.x) - 16.0;
+                let field = ui.add(
+                    egui::TextEdit::singleline(&mut preset.name)
+                        .id(Id::new("rename_preset"))
+                        .desired_width(field_width),
+                );
+                // Typing goes to the name while nothing else has the focus.
+                if ui.memory(|m| m.focused().is_none()) {
+                    field.request_focus();
+                }
+                let submit = field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                let size = vec2(ROW_HEIGHT, 32.0);
+                delete = ui.add(Button::new("🗑").min_size(size)).on_hover_text("Delete").clicked();
+                let valid = !preset.name.trim().is_empty();
+                done = ui.add_enabled(valid, Button::new("✔").min_size(size)).clicked()
+                    || (submit && valid);
+            });
+            if done {
+                preset.name = preset.name.trim().to_owned();
+                self.ui.renaming_preset = None;
+            }
+            if delete {
+                let id = preset.id;
+                self.delete_preset(id);
+                self.ui.renaming_preset = None;
+            }
+            return picked;
+        }
+
+        if let Some(PresetId::User(id)) = current
+            && let Some(preset) = self.editor.presets.get(id)
+            && preset.settings != self.preset_snapshot()
+        {
+            let label = format!("Update \u{201c}{}\u{201d}", preset.name);
+            if wide_button(ui, &label, 18.0, ROW_HEIGHT)
+                .on_hover_text("Store the current settings in this preset")
+                .clicked()
+            {
+                self.editor.presets.update(id, self.preset_snapshot());
+            }
+        }
         ui.horizontal(|ui| {
             ui.add(
                 egui::TextEdit::singleline(&mut self.ui.preset_name_buffer)
@@ -293,6 +404,76 @@ impl Grooph {
             if let Some(unit) = choice_grid(ui, &units, swing.unit, 2) {
                 swing.unit = unit;
             }
+        }
+    }
+
+    /// Figure picker, labelled "Groupings" like the reference app's "Custom
+    /// Groupings". While custom figures are off, the tiles show which figures
+    /// the complexity level unlocks; picking a tile switches to a custom selection seeded from it.
+    pub(crate) fn figures_picker(&mut self, ui: &mut egui::Ui) {
+        let family = self.ui.music_font_id.family.clone();
+        let settings = &mut self.editor.generator.settings;
+        let ts = settings.time_signature;
+        let preset = complexity_figures(settings.subdivision, ts, settings.complexity);
+
+        let mut enabled = settings.custom_figures_enabled;
+        if ui.checkbox(&mut enabled, "Custom groupings").changed() {
+            if enabled && settings.custom_figures.is_empty() {
+                settings.custom_figures = preset;
+            }
+            settings.custom_figures_enabled = enabled;
+        }
+
+        let active: FigureSet =
+            if settings.custom_figures_enabled { settings.custom_figures } else { preset };
+        let available = figures(settings.subdivision, ts);
+        if settings.custom_figures_enabled
+            && !available.iter().any(|g| settings.custom_figures.contains(g.id))
+        {
+            ui.weak("No grouping selected for this subdivision, using the complexity level.");
+        } else if !settings.custom_figures_enabled {
+            ui.weak(format!(
+                "Level {} uses the highlighted groupings. Pick one to customise.",
+                settings.complexity
+            ));
+        }
+
+        // Meters with both group sizes (5/8, 7/8) get one row per size.
+        let mixed_spans = available.iter().any(|g| g.span != available[0].span);
+        for span in BeatSpan::ALL {
+            let of_span: Vec<_> = available.iter().filter(|g| g.span == span).collect();
+            if of_span.is_empty() {
+                continue;
+            }
+            if mixed_spans {
+                ui.weak(match span {
+                    BeatSpan::Quarter => "Groups of two eighths",
+                    BeatSpan::DottedQuarter => "Groups of three eighths",
+                    BeatSpan::Eighth => "Groups of two sixteenths",
+                    BeatSpan::DottedEighth => "Groups of three sixteenths",
+                });
+            }
+            ui.horizontal_wrapped(|ui| {
+                for figure in of_span {
+                    let measure = figure.measure();
+                    let id = egui::Id::new(("figure", figure.id.0));
+                    let tile = notation_button(
+                        ui,
+                        id,
+                        &measure,
+                        family.clone(),
+                        active.contains(figure.id),
+                    )
+                    .on_hover_text(format!("Unlocked at level {}", figure.level));
+                    if tile.clicked() {
+                        if !settings.custom_figures_enabled {
+                            settings.custom_figures = preset;
+                            settings.custom_figures_enabled = true;
+                        }
+                        settings.custom_figures.toggle(figure.id);
+                    }
+                }
+            });
         }
     }
 }
