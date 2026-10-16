@@ -227,6 +227,9 @@ impl CountingBase {
         };
         let mut layer = CountLayer::new(id, scope, Subdiv::Fixed(subdiv));
         layer.labels = Some(labels);
+        // Triplets of a group of eighths are the eighths themselves: count
+        // them as "1 la li" in x/8 and x/16.
+        layer.group_units = self == Self::Triplet;
         Some(layer)
     }
 

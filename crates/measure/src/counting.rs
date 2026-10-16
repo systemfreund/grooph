@@ -1,4 +1,3 @@
-use crate::duration::TupletKind;
 use crate::grid::DEFAULT_GRID;
 use crate::grouping::default_groups_for;
 use crate::{Measure, TimeSignature};
@@ -45,15 +44,6 @@ impl LabelPattern {
             ],
         }
     }
-
-    /// A "number trip let" pattern, whichever number it starts with.
-    fn is_triplet(&self) -> bool {
-        if self.slots.len() != 3 {
-            return false;
-        }
-        matches!(self.slots.get(1).map(Vec::as_slice), Some([LabelToken::Text(s)]) if s == "trip")
-            && matches!(self.slots.get(2).map(Vec::as_slice), Some([LabelToken::Text(s)]) if s == "let")
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -80,11 +70,24 @@ pub struct CountLayer {
     pub labels: Option<LabelPattern>,
     pub show_labels: bool,
     pub priority: u8,
+    /// In x/8 and x/16, count each primary group by its own beat units
+    /// ("1 la li 2 la li" in 6/8) instead of applying `subdiv` and `labels`.
+    /// Only meaningful for `CountScope::PrimaryGroup`.
+    pub group_units: bool,
 }
 
 impl CountLayer {
     pub fn new(id: u32, scope: CountScope, subdiv: Subdiv) -> Self {
-        Self { id, enabled: true, scope, subdiv, labels: None, show_labels: true, priority: 0 }
+        Self {
+            id,
+            enabled: true,
+            scope,
+            subdiv,
+            labels: None,
+            show_labels: true,
+            priority: 0,
+            group_units: false,
+        }
     }
 
     /// Whether the layer counts sensibly in `ts`: a beat-unit layer never
@@ -94,13 +97,6 @@ impl CountLayer {
             (CountScope::BeatUnit, Subdiv::Fixed(n)) => (ts.beat_unit as u32) * (n as u32) <= 16,
             _ => true,
         }
-    }
-
-    /// A triplet count of the primary groups ("1 trip let 2 trip let").
-    fn is_group_triplet(&self) -> bool {
-        self.scope == CountScope::PrimaryGroup
-            && self.subdiv == Subdiv::Fixed(3)
-            && self.labels.as_ref().is_some_and(LabelPattern::is_triplet)
     }
 }
 
@@ -211,8 +207,9 @@ impl<'a> CountContext<'a> {
             let ctx = LabelContext { beat_num, group_num, sub_num: sub_idx + 1 };
             let label = if layer.show_labels {
                 layer.labels.as_ref().and_then(|p| {
-                    let tuplet_kind = span.tuplet_n.map(TupletKind::from_n);
-                    if p.is_triplet() && tuplet_kind.is_some_and(|k| k != TupletKind::Triplet) {
+                    // A tuplet the pattern does not fit (a quintuplet under
+                    // "1 trip let") is counted by number instead.
+                    if span.tuplet_n.is_some() && p.slots.len() != subdiv as usize {
                         label_from_tokens(&[LabelToken::SubNum], &ctx)
                     } else {
                         label_for_slot(p, sub_idx, &ctx)
@@ -294,7 +291,7 @@ pub fn build_count_slots(measure: &Measure, config: &CountConfig) -> Vec<CountSl
                 continue;
             }
             match layer.scope {
-                CountScope::PrimaryGroup if unit_groups && layer.is_group_triplet() => {
+                CountScope::PrimaryGroup if unit_groups && layer.group_units => {
                     for span in &primary_groups {
                         ctx.push_group_units(layer, *span);
                     }
@@ -439,6 +436,7 @@ mod tests {
     fn triplets() -> CountLayer {
         let mut layer = CountLayer::new(1, CountScope::PrimaryGroup, Subdiv::Fixed(3));
         layer.labels = Some(LabelPattern::triplet());
+        layer.group_units = true;
         layer
     }
 
@@ -478,6 +476,27 @@ mod tests {
         let two_two_three = TimeSignature::SEVEN_EIGHT.with_grouping(1);
         assert_eq!(two_two_three.groups(), [2, 2, 3]);
         assert_eq!(labels(two_two_three, triplets()), ["1", "&", "2", "&", "3", "la", "li"]);
+    }
+
+    #[test]
+    fn group_units_is_explicit() {
+        // Without the flag, a triplet pattern on primary groups counts triplets
+        // even in 6/8; with it, renamed labels still count the group's units.
+        let mut plain = triplets();
+        plain.group_units = false;
+        assert_eq!(
+            labels(TimeSignature::SIX_EIGHT, plain),
+            ["1", "trip", "let", "4", "trip", "let"]
+        );
+        let mut renamed = triplets();
+        renamed.labels = Some(LabelPattern {
+            slots: vec![
+                vec![LabelToken::BeatNum],
+                vec![LabelToken::Text("ta".to_string())],
+                vec![LabelToken::Text("ki".to_string())],
+            ],
+        });
+        assert_eq!(labels(TimeSignature::SIX_EIGHT, renamed), ["1", "la", "li", "2", "la", "li"]);
     }
 
     #[test]
