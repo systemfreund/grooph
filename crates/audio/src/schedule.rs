@@ -7,6 +7,7 @@ use grooph_measure::tempo::ScoreTiming;
 use std::collections::BTreeMap;
 
 use crate::AudioSettings;
+use crate::trainer::GapMute;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum SoundType {
@@ -26,6 +27,17 @@ pub(crate) struct SoundProfile {
 }
 
 impl SoundType {
+    /// Whether a muted bar with `mute` silences this sound.
+    pub(crate) fn muted_by(self, mute: GapMute) -> bool {
+        match self {
+            SoundType::CountIn => false,
+            SoundType::Downbeat | SoundType::PrimaryBeat => true,
+            SoundType::AccentedBeat | SoundType::Beat | SoundType::Ghost => {
+                mute == GapMute::Everything
+            }
+        }
+    }
+
     pub(crate) fn profile(self, settings: &AudioSettings) -> SoundProfile {
         match self {
             SoundType::Downbeat => SoundProfile { freq_mult: 3.375, gain: settings.downbeat },

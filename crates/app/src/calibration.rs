@@ -9,6 +9,7 @@
 use crate::play_along::{HitSource, MAX_INPUT_OFFSET_MS};
 use crate::{Grooph, TransportState};
 use eframe::egui;
+use grooph_audio::{GapClick, TempoRamp};
 use grooph_measure::swing::Swing;
 use grooph_measure::{Cursor, Score};
 
@@ -30,6 +31,8 @@ pub(crate) struct CalibrationStash {
     pub(crate) count_in: bool,
     pub(crate) endless: bool,
     pub(crate) ghost_notes: bool,
+    pub(crate) gap: GapClick,
+    pub(crate) ramp: TempoRamp,
     pub(crate) dirty: bool,
     pub(crate) active_pattern_id: Option<u64>,
 }
@@ -117,6 +120,8 @@ impl Grooph {
             count_in: std::mem::replace(&mut self.playback_ctl.audio_cfg.count_in, true),
             endless: std::mem::replace(&mut generator.endless, false),
             ghost_notes: std::mem::replace(&mut generator.ghost_notes, false),
+            gap: std::mem::take(&mut self.playback_ctl.audio_cfg.gap),
+            ramp: std::mem::take(&mut self.playback_ctl.audio_cfg.ramp),
             dirty: self.editor.dirty,
             active_pattern_id: self.editor.active_pattern_id,
         };
@@ -161,6 +166,8 @@ impl Grooph {
             self.playback_ctl.audio_cfg.count_in = stash.count_in;
             self.editor.generator.endless = stash.endless;
             self.editor.generator.ghost_notes = stash.ghost_notes;
+            self.playback_ctl.audio_cfg.gap = stash.gap;
+            self.playback_ctl.audio_cfg.ramp = stash.ramp;
             self.editor.dirty = stash.dirty;
             self.editor.active_pattern_id = stash.active_pattern_id;
         }

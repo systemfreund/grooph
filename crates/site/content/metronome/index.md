@@ -73,6 +73,8 @@ If you would rather read something new every time, the
   own notes. If you hear it clearly, you are early or late.
 - **Use a half-time click** for fast pieces: set the metronome to half the tempo and feel
   each click as beats one and three.
+- **Let the metronome drop out or speed up.** The [metronome trainer](/metronome/trainer/)
+  mutes bars so you keep the time yourself, or raises the tempo step by step.
 
 ## FAQ
 

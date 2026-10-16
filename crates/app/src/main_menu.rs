@@ -51,6 +51,7 @@ impl Grooph {
                                 self.editor.dirty = true;
                                 self.handle_bpm_change();
                             }
+                            self.ramp_bpm_label(ui);
                             self.swing_editor(ui);
 
                             ui.separator();

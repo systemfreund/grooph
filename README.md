@@ -127,6 +127,20 @@ Important root files:
   holds the cursor at 0 (`CountInState`) and re-anchors the accuracy session
   when the count-in ends.
 
+## Metronome trainer
+
+- `grooph_audio::{GapClick, TempoRamp}` (`crates/audio/src/trainer.rs`), carried in
+  `PlaybackOptions`. Both depend only on the bar count since the score started
+  (`TickSource::bars`, across loops), so nothing rebuilds the schedule.
+- Gap click: the audio thread decides per bar (`GapDecider`, random mode seeded via
+  `Audio::set_seed`) and filters triggers (`SoundType::muted_by`). The count-in is
+  never muted. `Audio::bar_state` publishes bar + muted flag; the measure panel
+  dims the muted bar.
+- Tempo ramp: `TempoRamp::bpm_for_bar` from the BPM setting; the audio thread
+  scales ticks per sample, the UI (`metronome_trainer.rs`) uses the same tempo in
+  `score_timing()` via `PlaybackState::ramp_bpm` and re-anchors the accuracy
+  session on every change.
+
 ## Play along (accuracy)
 
 - Hit sources (`crates/app/src/play_along.rs`): MIDI NoteOns and taps (tap key,

@@ -1,8 +1,12 @@
 mod schedule;
 mod tick_source;
+mod trainer;
 mod voices;
 
+pub use trainer::{GapClick, GapMode, GapMute, RampEnd, RampUnit, TempoRamp};
+
 use crate::tick_source::{CountInPlan, TickSource};
+use crate::trainer::GapDecider;
 use crate::voices::VoiceMixer;
 use grooph_measure::Score;
 use grooph_measure::generator::Subdivision;
@@ -123,6 +127,19 @@ pub struct PlaybackOptions {
     pub ghost_notes: Option<Subdivision>,
     /// Swing feel for notes and ghost notes.
     pub swing: Swing,
+    /// Muted bars.
+    pub gap: GapClick,
+    /// Stepwise tempo change, starting at the score tempo.
+    pub ramp: TempoRamp,
+}
+
+/// The bar the audio engine is playing, as counted since the score started.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BarState {
+    /// Bars started since the first downbeat (0 = first bar), across loops.
+    pub bar: u64,
+    /// The gap click silences this bar.
+    pub muted: bool,
 }
 
 pub struct Audio {
@@ -130,6 +147,8 @@ pub struct Audio {
     sink: Option<rodio::Sink>,
     shared_state: Arc<Mutex<PlaybackState>>,
     options: PlaybackOptions,
+    /// Last bar read from the audio thread, kept while its lock is busy.
+    last_bar: Option<BarState>,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -147,6 +166,8 @@ struct PlaybackState {
     playing_state: PlayerState,
     // Whether source currently produces absolute silence (no active voices and not playing)
     is_silent: bool,
+    // Bar being played; `None` before the score starts (stopped, count-in).
+    bar: Option<BarState>,
 }
 
 impl Debug for PlaybackState {
@@ -165,6 +186,10 @@ struct PlaybackParams {
     schedule: Schedule,
     audio_settings: AudioSettings,
     count_in: Option<CountInPlan>,
+    gap: GapClick,
+    ramp: TempoRamp,
+    /// Seed for random gap bars.
+    seed: u64,
 }
 
 impl Audio {
@@ -175,6 +200,9 @@ impl Audio {
             schedule: Schedule::default(),
             audio_settings: AudioSettings::default(),
             count_in: None,
+            gap: GapClick::default(),
+            ramp: TempoRamp::default(),
+            seed: 1,
         };
 
         let shared_state = Arc::new(Mutex::new(PlaybackState {
@@ -183,9 +211,16 @@ impl Audio {
             playback_tick: 0.0,
             playing_state: PlayerState::Stopped,
             is_silent: true,
+            bar: None,
         }));
 
-        Some(Self { stream: None, sink: None, shared_state, options: PlaybackOptions::default() })
+        Some(Self {
+            stream: None,
+            sink: None,
+            shared_state,
+            options: PlaybackOptions::default(),
+            last_bar: None,
+        })
     }
 
     // Returns true if UI should repaint soon (while playing or while waiting for tail-out)
@@ -200,12 +235,16 @@ impl Audio {
                 || shared_state.params.timing != timing
                 || shared_state.params.schedule != schedule
                 || shared_state.params.count_in != count_in
+                || shared_state.params.gap != self.options.gap
+                || shared_state.params.ramp != self.options.ramp
                 || shared_state.playing_state != *player_state)
         {
             shared_state.params.bpm = bpm;
             shared_state.params.timing = timing;
             shared_state.params.schedule = schedule;
             shared_state.params.count_in = count_in;
+            shared_state.params.gap = self.options.gap;
+            shared_state.params.ramp = self.options.ramp;
             shared_state.playing_state = player_state.clone();
             shared_state.is_dirty = true;
 
@@ -223,6 +262,7 @@ impl Audio {
             debug!("Pausing sink. {:?}", shared_state);
             self.sink = None;
             shared_state.playback_tick = 0.0;
+            shared_state.bar = None;
         }
 
         // Playback start: ensure sink runs
@@ -264,10 +304,28 @@ impl Audio {
         }
     }
 
+    /// Seed for randomly muted bars (gap click in random mode).
+    pub fn set_seed(&mut self, seed: u64) {
+        if let Ok(mut shared_state) = self.shared_state.lock() {
+            shared_state.params.seed = seed;
+        }
+    }
+
     pub fn set_playback_options(&mut self, options: PlaybackOptions) { self.options = options; }
 
     /// Whether an output stream is running, i.e. `playback_position` advances.
     pub fn is_running(&self) -> bool { self.sink.is_some() }
+
+    /// Bar the engine is playing; `None` while stopped or counting in. While
+    /// the audio thread holds its lock, the last known bar is returned.
+    pub fn bar_state(&mut self) -> Option<BarState> {
+        if !self.is_running() {
+            self.last_bar = None;
+        } else if let Ok(shared_state) = self.shared_state.try_lock() {
+            self.last_bar = shared_state.bar;
+        }
+        self.last_bar
+    }
 
     /// Returns `(global_tick, total_loop_ticks)` where `global_tick` is the
     /// current audio cursor over the whole score loop. It is negative while
@@ -301,6 +359,7 @@ struct MetronomeSource {
     player_state: PlayerState,
 
     tick_source: TickSource,
+    gap: GapDecider,
     voices: VoiceMixer,
     sample_rate: u32,
     samples_processed: usize,
@@ -313,6 +372,7 @@ impl MetronomeSource {
             (state.params.clone(), state.playing_state.clone())
         };
 
+        let seed = local_params.seed;
         let sample_rate = device_sample_rate();
         let mut tick_source = TickSource::new(sample_rate);
         if is_playing == PlayerState::Playing {
@@ -323,6 +383,7 @@ impl MetronomeSource {
             local_params,
             player_state: is_playing,
             tick_source,
+            gap: GapDecider::new(seed),
             voices: VoiceMixer::new(sample_rate),
             sample_rate,
             samples_processed: 0,
@@ -331,11 +392,14 @@ impl MetronomeSource {
 
     fn update_shared_state(&mut self) {
         // Try to publish playback cursor to shared state (periodically, to avoid contention)
-        if self.samples_processed.is_multiple_of(1024)
-            && let Ok(mut shared_state) = self.shared_state.try_lock()
-        {
+        if !self.samples_processed.is_multiple_of(1024) {
+            return;
+        }
+        let bar = self.current_bar();
+        if let Ok(mut shared_state) = self.shared_state.try_lock() {
             shared_state.playback_tick = self.tick_source.cursor();
             shared_state.is_silent = self.voices.is_silent();
+            shared_state.bar = bar;
 
             trace!(
                 "Updating shared state. playback_tick={:?} is_silent={}",
@@ -367,8 +431,31 @@ impl MetronomeSource {
             if starting {
                 info!("Starting playback.");
                 self.tick_source.restart(self.local_params.count_in.as_ref());
+                self.gap.reset(self.local_params.seed ^ self.samples_processed as u64);
             }
         }
+    }
+}
+
+impl MetronomeSource {
+    /// Bar being played, with the gap click decision for it.
+    fn current_bar(&mut self) -> Option<BarState> {
+        if self.player_state != PlayerState::Playing || self.tick_source.in_count_in() {
+            return None;
+        }
+        let bar = self.tick_source.bars();
+        Some(BarState { bar, muted: self.gap.muted(&self.local_params.gap, bar) })
+    }
+
+    /// Ratio of the ramp tempo of the current bar to the score tempo.
+    fn tempo_scale(&self) -> f64 {
+        let params = &self.local_params;
+        if !params.ramp.enabled || params.bpm == 0 || self.tick_source.in_count_in() {
+            return 1.0;
+        }
+        let bars = params.timing.measure_count();
+        params.ramp.bpm_for_bar(params.bpm, self.tick_source.bars(), bars) as f64
+            / params.bpm as f64
     }
 }
 
@@ -382,12 +469,19 @@ impl Iterator for MetronomeSource {
         if self.player_state == PlayerState::Playing {
             // Same allocation pattern as before — fresh small Vec per sample.
             let mut triggered: Vec<SoundType> = Vec::with_capacity(VoiceMixer::MAX_VOICES);
+            let tempo_scale = self.tempo_scale();
             self.tick_source.advance_one_sample(
                 &self.local_params.timing,
                 &self.local_params.schedule,
+                tempo_scale,
                 &mut triggered,
             );
+            let muted = self.current_bar().is_some_and(|b| b.muted);
+            let mute = self.local_params.gap.mute;
             for sound in triggered {
+                if muted && sound.muted_by(mute) {
+                    continue;
+                }
                 self.voices.trigger(sound, &self.local_params.audio_settings);
             }
         } else if self.samples_processed.is_multiple_of(8192) {

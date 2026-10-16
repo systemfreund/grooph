@@ -8,6 +8,7 @@ mod keyboard_input;
 mod library;
 mod library_panel;
 mod main_menu;
+mod metronome_trainer;
 mod measure_panel;
 mod midi_input_widget;
 mod mixer_panel;
@@ -42,7 +43,7 @@ use eframe::egui::{Context, TextStyle, Ui, Widget};
 use eframe::epaint::text::{FontInsert, InsertFontFamily};
 use eframe::epaint::{FontFamily, FontId};
 use eframe::{App, CreationContext, egui};
-use grooph_audio::{AudioSettings, PlaybackOptions, PlayerState};
+use grooph_audio::{AudioSettings, GapClick, PlaybackOptions, PlayerState, TempoRamp};
 use grooph_link::{LinkContent, SharedLink};
 use grooph_measure::counting::{
     CountConfig, CountLayer, CountScope, LabelPattern, LabelToken, Subdiv,
@@ -118,6 +119,8 @@ struct PersistedState {
     count_in: bool,
     swing: Swing,
     play_along: PlayAlongSettings,
+    gap_click: GapClick,
+    tempo_ramp: TempoRamp,
 }
 
 impl Default for PersistedState {
@@ -143,6 +146,8 @@ impl Default for PersistedState {
             count_in: false,
             swing: Swing::default(),
             play_along: PlayAlongSettings::default(),
+            gap_click: GapClick::default(),
+            tempo_ramp: TempoRamp::default(),
         }
     }
 }
@@ -174,6 +179,8 @@ impl PersistedState {
             count_in: stash.map_or(app.playback_ctl.audio_cfg.count_in, |s| s.count_in),
             swing: stash.map_or(app.playback_ctl.audio_cfg.swing, |s| s.swing),
             play_along: app.playback_ctl.play_along.settings,
+            gap_click: stash.map_or(app.playback_ctl.audio_cfg.gap, |s| s.gap),
+            tempo_ramp: stash.map_or(app.playback_ctl.audio_cfg.ramp, |s| s.ramp),
         }
     }
 }
@@ -223,6 +230,7 @@ impl App for Grooph {
         self.generator_panel(ui);
         self.tool_palette_panel(ui);
         self.measure_panel(ui);
+        self.update_metronome_trainer();
         self.update_endless();
         self.run_summary_window(ui);
         self.calibration_window(ui);
@@ -260,6 +268,9 @@ impl App for Grooph {
         if audio_state == PlayerState::Playing && self.playback_ctl.audio.is_none() {
             debug!("Creating audio engine.");
             self.playback_ctl.audio = grooph_audio::Audio::new(self.playback_ctl.bpm);
+            if let Some(audio) = &mut self.playback_ctl.audio {
+                audio.set_seed(crate::platform::random_seed());
+            }
         }
 
         let playback_options = self.playback_options();
@@ -285,14 +296,22 @@ impl Grooph {
             count_in: self.playback_ctl.audio_cfg.count_in,
             ghost_notes: generator.ghost_notes.then_some(generator.settings.subdivision),
             swing: self.playback_ctl.audio_cfg.swing,
+            gap: self.playback_ctl.audio_cfg.gap,
+            ramp: self.playback_ctl.audio_cfg.ramp,
         }
     }
 
     /// Tempo backbone of the working score, including swing. Must agree with
-    /// the timing the audio engine builds from [`Self::playback_options`].
+    /// the timing the audio engine builds from [`Self::playback_options`],
+    /// including the tempo ramp of the bar being played.
     pub(crate) fn score_timing(&self) -> ScoreTiming {
-        ScoreTiming::from_score(&self.editor.score, self.playback_ctl.bpm)
+        ScoreTiming::from_score(&self.editor.score, self.current_bpm())
             .with_swing(self.playback_ctl.audio_cfg.swing)
+    }
+
+    /// Tempo being played: the ramp tempo while a ramp runs, else the BPM setting.
+    pub(crate) fn current_bpm(&self) -> u32 {
+        self.playback_ctl.playback.ramp_bpm.unwrap_or(self.playback_ctl.bpm)
     }
 
     fn clear_accuracy_for_edit(&mut self) {
@@ -666,6 +685,14 @@ impl Grooph {
             return;
         }
         self.playback_ctl.transport_state = TransportState::Stopped;
+        if self.playback_ctl.audio_cfg.ramp.keep_reached
+            && let Some(bpm) = self.playback_ctl.playback.ramp_bpm
+            && bpm != self.playback_ctl.bpm
+            && self.playback_ctl.play_along.calibration.is_none()
+        {
+            self.playback_ctl.bpm = bpm;
+            self.editor.dirty = true;
+        }
         if self.playback_ctl.play_along.calibration.is_some() {
             self.playback_ctl.accuracy.tracker.discard_session();
         } else {
@@ -895,6 +922,8 @@ impl Grooph {
                     latency_enabled: state.audio_latency_enabled,
                     count_in: state.count_in,
                     swing: state.swing,
+                    gap: state.gap_click,
+                    ramp: state.tempo_ramp,
                 },
                 playback: PlaybackState::default(),
                 accuracy: AccuracyState::new(state.accuracy_enabled),

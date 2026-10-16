@@ -28,11 +28,13 @@ pub(crate) struct TickSource {
     cursor: f64,
     sample_rate: u32,
     count_in: Option<CountInProgress>,
+    /// Bars started since the score's first downbeat, across loops.
+    bars: u64,
 }
 
 impl TickSource {
     pub(crate) fn new(sample_rate: u32) -> Self {
-        Self { cursor: 0.0, sample_rate, count_in: None }
+        Self { cursor: 0.0, sample_rate, count_in: None, bars: 0 }
     }
 
     /// Cursor for display: global score tick, or a negative tick counting up
@@ -44,9 +46,16 @@ impl TickSource {
         }
     }
 
+    /// Bars started since the score's first downbeat (0 = first bar). Keeps
+    /// counting across loops.
+    pub(crate) fn bars(&self) -> u64 { self.bars }
+
+    pub(crate) fn in_count_in(&self) -> bool { self.count_in.is_some() }
+
     /// Start playback from the top of the score, optionally after a count-in.
     pub(crate) fn restart(&mut self, count_in: Option<&CountInPlan>) {
         self.cursor = 0.0;
+        self.bars = 0;
         self.count_in = count_in
             .filter(|p| p.ticks > 0)
             .map(|plan| CountInProgress { plan: plan.clone(), pos: 0.0 });
@@ -57,11 +66,13 @@ impl TickSource {
     /// crossed during this step to `out`.
     ///
     /// Wraps the cursor at the end of the score loop so the metronome loops
-    /// indefinitely.
+    /// indefinitely. `tempo_scale` speeds the score up (> 1) or slows it down
+    /// relative to `timing`; it does not apply to the count-in.
     pub(crate) fn advance_one_sample(
         &mut self,
         timing: &ScoreTiming,
         schedule: &Schedule,
+        tempo_scale: f64,
         out: &mut Vec<SoundType>,
     ) {
         let total_ticks = timing.total_loop_ticks() as f64;
@@ -101,12 +112,13 @@ impl TickSource {
         // 48 kHz and does not accumulate — schedule triggers are exact integer
         // ticks and are picked up by `collect_in_range` precisely.
         let measure_idx = timing.measure_at_global_tick(old_cursor);
-        let tps = timing.ticks_per_sec_in_measure(measure_idx);
+        let tps = timing.ticks_per_sec_in_measure(measure_idx) * tempo_scale;
         let ticks_per_sample = tps / self.sample_rate as f64;
 
         let mut new_cursor = old_cursor + ticks_per_sample;
 
-        if new_cursor >= total_ticks {
+        let wrapped = new_cursor >= total_ticks;
+        if wrapped {
             // 1. [old_cursor, total_ticks)
             schedule.collect_in_range(old_cursor.ceil() as u64, total_ticks, out);
 
@@ -120,6 +132,9 @@ impl TickSource {
             schedule.collect_in_range(old_cursor.ceil() as u64, new_cursor, out);
         }
 
+        if wrapped || timing.measure_at_global_tick(new_cursor) != measure_idx {
+            self.bars += 1;
+        }
         self.cursor = new_cursor;
     }
 }
@@ -144,7 +159,7 @@ mod tests {
         let schedule = Schedule::default();
         let mut src = TickSource::new(48000);
         let mut out = Vec::new();
-        src.advance_one_sample(&timing, &schedule, &mut out);
+        src.advance_one_sample(&timing, &schedule, 1.0, &mut out);
         assert!(out.is_empty());
         assert_eq!(src.cursor(), 0.0);
     }
@@ -156,7 +171,7 @@ mod tests {
         let schedule = Schedule::build(&score, &timing, None);
         let mut src = TickSource::new(48000);
         let mut out = Vec::new();
-        src.advance_one_sample(&timing, &schedule, &mut out);
+        src.advance_one_sample(&timing, &schedule, 1.0, &mut out);
         // Downbeat at tick 0 lies in [ceil(0), new_cursor) once new_cursor > 0.
         assert!(out.contains(&SoundType::Downbeat));
         assert!(src.cursor() > 0.0);
@@ -173,7 +188,7 @@ mod tests {
         let mut downbeats = 0usize;
         // 3 s of playback at 120 bpm in 4/4 → score loop (2 s) wraps once.
         for _ in 0..(48_000 * 3) {
-            src.advance_one_sample(&timing, &schedule, &mut out);
+            src.advance_one_sample(&timing, &schedule, 1.0, &mut out);
             downbeats += out.iter().filter(|s| **s == SoundType::Downbeat).count();
             out.clear();
             assert!(src.cursor() < total, "cursor escaped loop: {}", src.cursor());
@@ -198,7 +213,7 @@ mod tests {
         let mut first_downbeat = None;
         // 120 bpm 4/4: count-in bar lasts 2 s; run 2.5 s.
         for sample in 0..(48_000 * 5 / 2) {
-            src.advance_one_sample(&timing, &schedule, &mut out);
+            src.advance_one_sample(&timing, &schedule, 1.0, &mut out);
             for s in out.drain(..) {
                 match s {
                     SoundType::CountIn => count_in_clicks.push(sample),
@@ -229,9 +244,43 @@ mod tests {
         let mut src = TickSource::new(48000);
         let mut out = Vec::new();
         for _ in 0..10_000 {
-            src.advance_one_sample(&timing, &schedule, &mut out);
+            src.advance_one_sample(&timing, &schedule, 1.0, &mut out);
         }
         src.restart(None);
         assert_eq!(src.cursor(), 0.0);
+    }
+
+    #[test]
+    fn bars_count_measures_across_loops() {
+        let mut m2 = Measure::new(TimeSignature::FOUR_FOUR);
+        m2.set_beat(0, Beat::note(q())).unwrap();
+        let mut score = score_4_4_quarters();
+        score.measures.push(m2);
+        let timing = ScoreTiming::from_score(&score, 120);
+        let schedule = Schedule::build(&score, &timing, None);
+        let mut src = TickSource::new(48000);
+        let mut out = Vec::new();
+        // 120 bpm 4/4: a bar lasts 2 s. After 5 s the third bar (second loop) plays.
+        for _ in 0..(48_000 * 5) {
+            src.advance_one_sample(&timing, &schedule, 1.0, &mut out);
+        }
+        assert_eq!(src.bars(), 2);
+        src.restart(None);
+        assert_eq!(src.bars(), 0);
+    }
+
+    #[test]
+    fn tempo_scale_speeds_up_the_cursor() {
+        let score = score_4_4_quarters();
+        let timing = ScoreTiming::from_score(&score, 120);
+        let schedule = Schedule::build(&score, &timing, None);
+        let mut normal = TickSource::new(48000);
+        let mut fast = TickSource::new(48000);
+        let mut out = Vec::new();
+        for _ in 0..24_000 {
+            normal.advance_one_sample(&timing, &schedule, 1.0, &mut out);
+            fast.advance_one_sample(&timing, &schedule, 1.5, &mut out);
+        }
+        assert!((fast.cursor() / normal.cursor() - 1.5).abs() < 1e-6);
     }
 }

@@ -277,6 +277,13 @@ impl Grooph {
                             ui.ctx().request_repaint();
                         }
 
+                        if self.playback_ctl.playback.bar_muted
+                            && let Some((m_idx, _)) = playback_local
+                            && let Some(placed) = staff.placed(m_idx)
+                        {
+                            draw_muted_bar(ui, placed.rect);
+                        }
+
                         self.draw_accuracy_markers(ui, &staff, &timing, &render_opts.metrics);
                         self.handle_input(resp, &staff);
                     });
@@ -490,4 +497,18 @@ impl Grooph {
             }
         }
     }
+}
+
+/// Dim a bar silenced by the gap click, so the silence reads as intended.
+fn draw_muted_bar(ui: &egui::Ui, rect: Rect) {
+    let bg = ui.visuals().panel_fill;
+    let veil = egui::Color32::from_rgba_unmultiplied(bg.r(), bg.g(), bg.b(), 150);
+    ui.painter().rect_filled(rect, 4.0, veil);
+    ui.painter().text(
+        rect.right_top() + egui::vec2(-6.0, 6.0),
+        egui::Align2::RIGHT_TOP,
+        "🔇",
+        FontId::proportional(16.0),
+        ui.visuals().weak_text_color(),
+    );
 }

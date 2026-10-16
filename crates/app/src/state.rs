@@ -7,7 +7,7 @@ use crate::undo::UndoHistory;
 use crate::{CountingSettings, Mode, TransportState};
 use eframe::egui::TextStyle;
 use eframe::epaint::FontId;
-use grooph_audio::{Audio, AudioSettings};
+use grooph_audio::{Audio, AudioSettings, GapClick, TempoRamp};
 use grooph_link::SharedLink;
 use grooph_measure::swing::Swing;
 use grooph_measure::{Cursor, Measure, Score};
@@ -22,6 +22,10 @@ pub(crate) struct AudioConfig {
     pub(crate) count_in: bool,
     /// Swing feel of the playback (notation stays straight).
     pub(crate) swing: Swing,
+    /// Metronome trainer: muted bars.
+    pub(crate) gap: GapClick,
+    /// Metronome trainer: stepwise tempo change from `bpm`.
+    pub(crate) ramp: TempoRamp,
 }
 
 impl Default for AudioConfig {
@@ -32,6 +36,8 @@ impl Default for AudioConfig {
             latency_enabled: true,
             count_in: false,
             swing: Swing::default(),
+            gap: GapClick::default(),
+            ramp: TempoRamp::default(),
         }
     }
 }
@@ -84,6 +90,10 @@ pub(crate) struct PlaybackState {
     /// only when the beat number changes.
     pub(crate) last_primary_beat: Option<(usize, u32)>,
     pub(crate) count_in: CountInState,
+    /// Tempo the ramp reached in the bar being played; `None` without a ramp.
+    pub(crate) ramp_bpm: Option<u32>,
+    /// The gap click silences the bar being played.
+    pub(crate) bar_muted: bool,
 }
 
 impl PlaybackState {
