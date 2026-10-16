@@ -46,8 +46,8 @@ mod tests {
 
     #[test]
     fn beaming_group_within_primary_boundaries_in_seven_eight() {
-        // 7/8 mit Achteln, Standardgruppierung 2+3+2.
-        // Die mittlere Gruppe (Beats 2..=4, 0-basiert) sollte beamed sein.
+        // 7/8 in eighths, usual grouping 2+3+2.
+        // The middle group (beats 2..=4, 0-based) should be beamed.
         let mut m = Measure::new(TimeSignature::SEVEN_EIGHT);
         for i in 0..7 {
             m.set_beat(i, Beat::note(e())).unwrap();
@@ -77,13 +77,13 @@ mod tests {
 
     #[test]
     fn triplet_bracket_over_beats_4_to_6() {
-        // Konstruiere einen 4/4, in dem Beats 3..=5 (0-basiert) eine Triole bilden
+        // Build a 4/4 measure where beats 3..=5 (0-based) form a triplet
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
-        // Setze zunächst 6 Achtel, dann eine Triole über die nächsten 3 Achtel-Schlitze
+        // First six eighths, then a triplet over the next three eighth slots
         for i in 0..3 {
             m.set_beat(i, Beat::note(e())).unwrap();
         }
-        // Drei Achtel-Triolett-Noten
+        // Three triplet eighth notes
         m.set_beat(3, Beat::note(t8())).unwrap();
         m.set_beat(4, Beat::note(t8())).unwrap();
         m.set_beat(5, Beat::note(t8())).unwrap();

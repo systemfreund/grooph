@@ -191,13 +191,13 @@ pub struct Line {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct TupletLayout {
-    /// Ziffer (z. B. 3 für Triole)
+    /// The number, e.g. 3 for a triplet
     pub count: u8,
-    /// Zentrum der Zahl in Pixelkoordinaten
+    /// Center of the number in pixels
     pub number_center: Pos2,
-    /// Font für die Zahl (vom Layout vorgegeben)
+    /// Font of the number, set by the layout
     pub number_font: FontId,
-    /// Klammersegmente inkl. Haken; leer bei number-only Fall
+    /// Bracket segments including hooks; empty when only the number shows
     pub bracket: Vec<Line>,
 }
 

@@ -2,9 +2,6 @@ use crate::state::PendingLoad;
 use crate::{Grooph, Mode};
 use eframe::egui;
 
-/// How long "Link copied" stays visible.
-pub(crate) const LINK_COPIED_NOTICE_S: f64 = 2.0;
-
 impl Grooph {
     pub(super) fn library_panel(&mut self, ui: &mut egui::Ui) {
         egui::Panel::bottom("library").resizable(true).show_animated_inside(
@@ -68,14 +65,8 @@ impl Grooph {
                     {
                         self.copy_share_link(ui);
                     }
-                    let now = ui.input(|i| i.time);
-                    if let Some(at) = self.ui.link_copied_at {
-                        if now - at < LINK_COPIED_NOTICE_S {
-                            ui.weak("Link copied");
-                            ui.ctx().request_repaint_after_secs(0.5);
-                        } else {
-                            self.ui.link_copied_at = None;
-                        }
+                    if self.link_copied_recently(ui) {
+                        ui.weak("Link copied");
                     }
                 });
 
@@ -199,14 +190,6 @@ impl Grooph {
             });
         if close {
             self.ui.link_error = None;
-        }
-    }
-
-    /// Copy a link to the working score, tempo and swing to the clipboard.
-    fn copy_share_link(&mut self, ui: &egui::Ui) {
-        if let Some(url) = self.share_link_url() {
-            ui.ctx().copy_text(url);
-            self.ui.link_copied_at = Some(ui.input(|i| i.time));
         }
     }
 }

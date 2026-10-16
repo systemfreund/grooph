@@ -166,7 +166,7 @@ pub(super) fn build_note_layout(
     let beats = measure.beats();
     let beams = &render_plan.beams;
 
-    // Basisverteilung (rhythmisch gleichmäßig über die verfügbare Breite)
+    // Base positions, spread evenly by rhythm over the available width
     // Determine which beats are inside any beamed group (for flag suppression)
     let in_beam_flags = in_beam_flags(beats, render_plan);
 
@@ -183,8 +183,8 @@ pub(super) fn build_note_layout(
     .map(|cx| cx + rect.left())
     .collect::<Vec<_>>();
 
-    // 1) Kollisionen vermeiden: metrik-basierte Bounding-Box je Element und
-    //    greedy nach rechts schieben (nur X‑Richtung).
+    // 1) Avoid collisions: a metrics-based bounding box per element, pushed
+    //    right greedily (x only).
     let em = opts.em;
     let min_gap = c::COLLISION_MIN_GAP_EM * em;
 
@@ -215,7 +215,7 @@ pub(super) fn build_note_layout(
         let in_beam = in_beam_flags.get(i).copied().unwrap_or(false);
         let (left, right) = compute_x_extents(b, in_beam, opts);
 
-        // Greedy-Verschiebung, um Mindestabstand zur vorherigen Box zu sichern
+        // Push right to keep the minimum gap to the previous box
         let mut cx = base_cx;
 
         // Propagate shift if connected to previous beat

@@ -4,18 +4,18 @@ use grooph_measure::{BeatIdx, BeatKind, Measure};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TupletPlan {
-    /// z. B. 3 für Triplet
+    /// E.g. 3 for a triplet
     pub count: u8,
-    /// inklusive Endindex (geschlossenes Intervall): start..=end
+    /// Inclusive span: start..=end
     pub start: BeatIdx,
     pub end: BeatIdx,
-    /// Basis-Notenwert (für ggf. spätere Darstellungen nützlich)
+    /// Base note value
     pub base: NoteValue,
-    /// true, wenn die Gruppe vollständig mit Balken verbunden ist (keine Klammer nötig)
+    /// The whole group is beamed together (no bracket needed)
     pub fully_beamed: bool,
-    /// true, wenn irgendeine Pause innerhalb der Gruppe liegt (dann immer Klammer)
+    /// The group contains a rest (always bracketed)
     pub contains_rest: bool,
-    /// Verbindung der Tuplet-Gruppe nach außen über Balken
+    /// How the group's beams connect to its neighbours
     pub edge_connection: EdgeConnection,
 }
 
@@ -37,17 +37,17 @@ impl TupletPlan {
     }
 }
 
-/// Beam-unabhängiger, konsolidierter Typ für erkannte Tuplet-Spans
+/// A tuplet span found in a measure, independent of beaming
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct TupletSpan {
     pub count: u8,
     pub start: BeatIdx,
-    pub end: BeatIdx, // inklusiv
+    pub end: BeatIdx, // inclusive
     pub base: NoteValue,
     pub contains_rest: bool,
 }
 
-/// Erkenne Tuplet-Spans ausschließlich aus dem Measure, ohne Beaming-Infos.
+/// Finds tuplet spans from the measure alone, without beaming information.
 pub(crate) fn detect_tuplet_spans(measure: &Measure) -> Vec<TupletSpan> {
     let beats = measure.beats();
     measure

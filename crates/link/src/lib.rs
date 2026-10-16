@@ -254,18 +254,6 @@ impl SharedLink {
     }
 }
 
-/// Link that opens `score` at `bpm`, or `None` if the score cannot be written
-/// in the text notation.
-pub fn share_url(base: &str, score: &Score, bpm: u32) -> Option<String> {
-    let link = SharedLink {
-        bpm: Some(bpm),
-        swing: None,
-        content: Some(LinkContent::Score(score.clone())),
-        click: None,
-    };
-    link.to_url(base)
-}
-
 fn parse_in_range<T>(name: &str, value: &str, min: T, max: T) -> Result<T, String>
 where
     T: std::str::FromStr + PartialOrd + std::fmt::Display,
@@ -571,9 +559,15 @@ mod tests {
     }
 
     #[test]
-    fn share_url_round_trips() {
+    fn score_link_round_trips() {
         let score = parse_score("3/4 >q t8 t8 r:t8 e e | e. s q r:q").unwrap();
-        let url = share_url("https://grooph.app/", &score, 96).unwrap();
+        let link = SharedLink {
+            bpm: Some(96),
+            swing: None,
+            content: Some(LinkContent::Score(score.clone())),
+            click: None,
+        };
+        let url = link.to_url("https://grooph.app/").unwrap();
         assert_eq!(url, "https://grooph.app/?v=2&bpm=96&r=3/4+%3Eq+t8+t8+r:t8+e+e+%7C+e.+s+q+r:q");
         let link = parse(url.split_once('?').unwrap().1);
         assert_eq!(link.bpm, Some(96));

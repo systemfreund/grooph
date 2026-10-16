@@ -4,8 +4,8 @@ use crate::{Mode, tools};
 use eframe::egui;
 use eframe::egui::scroll_area::{ScrollBarVisibility, ScrollSource};
 use eframe::egui::{
-    Align, Align2, Atom, Button, Direction, FontFamily, FontId, Id, Layout, Pos2, Rect, Response,
-    RichText, Ui, Vec2,
+    Align, Atom, Button, Direction, FontFamily, FontId, Id, Layout, Pos2, Rect, Response, RichText,
+    Ui, Vec2,
 };
 use grooph_layout::glyphs;
 use grooph_layout::pixel_layout::{
@@ -14,7 +14,7 @@ use grooph_layout::pixel_layout::{
 use grooph_measure::BeatKind::{Note, Rest};
 use grooph_measure::duration::{Duration, TupletKind};
 use grooph_measure::{Beat, Measure};
-use grooph_render::measure::draw_notes;
+use grooph_render::measure::{draw_notes, draw_time_signature};
 use grooph_render::measure_glyph_metrics;
 use log::info;
 use tools::EditOp;
@@ -126,12 +126,7 @@ impl Grooph {
                 return;
             }
             ToolKind::Meta(MetaOp::ChangeTimeSignature) => {
-                let ts = self.current_measure().time_signature();
-                self.ui.mode = Mode::TimeSignature {
-                    beats: ts.beats,
-                    unit: ts.beat_unit,
-                    grouping: ts.grouping,
-                };
+                self.ui.mode = Mode::TimeSignature(self.current_measure().time_signature());
                 return;
             }
             ToolKind::Navigate(op) => {
@@ -294,26 +289,7 @@ impl Grooph {
             // Use a temporary measure just for layout width and positions
             let ts = self.current_measure().time_signature();
             let layout = build_time_sig_layout(&ts, rect.center().x, &opts);
-            let top = glyphs::ts_glyphs(ts.beats);
-            let bot = glyphs::ts_glyphs(ts.beat_unit);
-            for (p, ch) in layout.beats.iter().zip(top.iter()) {
-                painter.text(
-                    *p,
-                    Align2::CENTER_CENTER,
-                    ch.to_string(),
-                    font_id.clone(),
-                    ui.style().visuals.text_color(),
-                );
-            }
-            for (p, ch) in layout.beat_unit.iter().zip(bot.iter()) {
-                painter.text(
-                    *p,
-                    Align2::CENTER_CENTER,
-                    ch.to_string(),
-                    font_id.clone(),
-                    ui.style().visuals.text_color(),
-                );
-            }
+            draw_time_signature(painter, &layout, ts, &font_id, ui.style().visuals.text_color());
         }
 
         button.response

@@ -2,6 +2,7 @@ use crate::accuracy::AccuracyState;
 use crate::compact::CompactState;
 use crate::generator::GeneratorState;
 use crate::library::PatternLibrary;
+use crate::pickers::Picker;
 use crate::platform::PlatformRuntime;
 use crate::play_along::PlayAlongState;
 use crate::presets::{PresetId, PresetLibrary};
@@ -13,6 +14,7 @@ use grooph_audio::{Audio, AudioSettings, GapClick, TempoRamp};
 use grooph_link::SharedLink;
 use grooph_measure::click::ClickPatterns;
 use grooph_measure::swing::Swing;
+use grooph_measure::tap_tempo::TapTempo;
 use grooph_measure::{Cursor, Measure, Score};
 use grooph_midi::MidiInput;
 use std::collections::HashMap;
@@ -190,6 +192,10 @@ pub(crate) struct UiShell {
     /// The window is narrow: show the compact (phone) layout. Set every frame.
     pub(crate) compact_layout: bool,
     pub(crate) compact: CompactState,
+    /// Setting whose picker dialog is open, in either layout.
+    pub(crate) picker: Option<Picker>,
+    /// Taps of the tap-tempo buttons (desktop toolbar, tempo picker).
+    pub(crate) tap_tempo: TapTempo,
 }
 
 /// Something that replaces the working score once unsaved changes are dealt with.

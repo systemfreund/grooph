@@ -138,7 +138,7 @@ impl Measure {
                 };
 
                 // Dissolve current group from its start
-                // Vor dem Auflösen ggf. Noten‑Offsets erfassen, nur wenn wir ein nächstes Ziel haben
+                // Remember where the notes sit, but only when there is a next target
                 if next_target.is_some() {
                     captured_offsets = self.tuplet_group_note_offsets(start_idx);
                 }
@@ -150,7 +150,7 @@ impl Measure {
                             self.convert_to_tuplet(start_idx, *tuplet_spec, overwrite)
                     {
                         result = Some(Modification::SetTuplet(group_span, *tuplet_spec));
-                        // Nach erfolgreicher Rekreation ggf. Projektion anwenden
+                        // Carry the remembered notes over to the new group
                         if let Some(ref src) = captured_offsets {
                             let _ = self.apply_tuplet_projection_at(start_idx, src);
                         }
@@ -166,7 +166,7 @@ impl Measure {
 
                 if let Some(group_span) = self.convert_to_tuplet(start_idx, *next_target, overwrite)
                 {
-                    // Neue Tuplet‑Gruppe: alle Slots als Noten initialisieren (Issue: gewünschtes Default)
+                    // A new tuplet group starts with every slot as a note
                     for i in group_span.start_idx..=group_span.end_idx {
                         self.beats[i].kind = Note;
                     }
@@ -178,22 +178,21 @@ impl Measure {
         result
     }
 
-    /// Löst die Tuplet‑Gruppe auf, in der sich `idx` befindet.
+    /// Dissolves the tuplet group containing `idx`.
     ///
-    /// Verhalten:
-    /// - Ersetzt die gesamte Spanne der Gruppe durch eine einfache (nicht‑Tuplet) Auffüllung.
-    /// - Initialisierung der neuen Beats: Standard sind Rests; wenn die aufgelöste Gruppe mindestens
-    ///   eine Note enthielt, wird der erste neu eingefügte Beat als Note angelegt.
-    /// - Ein vorhandener Akzent innerhalb der Gruppe wird auf den ersten neu eingefügten Beat übernommen.
-    /// - Entfernt die `tuplet_group_id` in diesem Bereich und löscht den verknüpften Anchor.
-    /// - Rückgabe: `true` bei erfolgreicher Auflösung, sonst `false` (z. B. wenn kein Tuplet an `idx`).
+    /// - Replaces the group's whole span with plain (non-tuplet) rests.
+    /// - If the group held a note, the first new beat becomes a note; an
+    ///   accent anywhere in the group moves to the first new beat.
+    /// - Clears `tuplet_group_id` in the span and unregisters the anchor.
+    /// - Returns the dissolved span and spec, or `None` if `idx` is not in a
+    ///   tuplet.
     pub fn dissolve_tuplet_group(&mut self, idx: BeatIdx) -> Option<Modification> {
         if idx >= self.beats.len() {
             return None;
         }
 
         if let Some(GroupSpan { start_idx, end_idx, id: group_id }) = self.tuplet_group_at(idx) {
-            // Merke, ob die Gruppe mindestens eine Note bzw. einen Akzent enthielt
+            // Whether the group held at least one note or accent
             let mut had_any_note = false;
             let mut had_any_accent = false;
             for b in &self.beats[start_idx..=end_idx] {
@@ -211,7 +210,7 @@ impl Measure {
             let span_ticks = anchor.target_ticks;
             self.fill_at(start_idx, span_ticks, &[], Either::Right(Rest)).unwrap();
 
-            // Post‑Processing: ersten neu eingefügten Beat ggf. als Note setzen und Akzent übernehmen
+            // Make the first new beat a note and carry the accent over
             if start_idx < self.beats.len() {
                 self.beats[start_idx].tuplet_group_id = None;
                 if had_any_note {
@@ -231,11 +230,11 @@ impl Measure {
         }
     }
 
-    /// Liefert für die Tuplet‑Gruppe, die bei `start_idx` beginnt, die relativen Onset‑Ticks
-    /// aller gesetzten Noten innerhalb der Gruppe. Jeder Eintrag enthält `(offset_ticks, accented)`.
-    /// Die Offsets sind relativ zum Gruppenstart, 0‑basiert, in Grid‑Ticks, und stets aufsteigend sortiert.
+    /// Onsets of the notes in the tuplet group starting at `start_idx`, as
+    /// `(offset_ticks, accented)`: grid ticks from the group start, sorted
+    /// ascending.
     ///
-    /// Rückgabe `None`, wenn an `start_idx` keine Tuplet‑Gruppe beginnt.
+    /// `None` if no tuplet group starts at `start_idx`.
     fn tuplet_group_note_offsets(&self, start_idx: BeatIdx) -> Option<Vec<(u32, bool)>> {
         let group = self.tuplet_group_at(start_idx)?;
         if group.start_idx != start_idx {
@@ -254,16 +253,16 @@ impl Measure {
         Some(offsets)
     }
 
-    /// Projiziert eine zuvor erfasste Notenbelegung (relative Onset‑Ticks innerhalb einer alten Tuplet‑Gruppe)
-    /// auf die neu erzeugte Tuplet‑Gruppe, die an `start_idx` beginnt.
+    /// Maps notes captured from an old tuplet group (offsets from
+    /// [`Self::tuplet_group_note_offsets`]) onto the new group starting at
+    /// `start_idx`.
     ///
-    /// Algorithmus:
-    /// - Ermittelt die Onset‑Ticks der Slots der neuen Gruppe relativ zum Gruppenstart.
-    /// - Ordnet jede Quell‑Note dem nächstgelegenen freien Ziel‑Slot zu (bei Gleichstand kleinere Index‑Präferenz),
-    ///   sodass keine Duplikate entstehen (greedy Zuordnung).
-    /// - Setzt alle Slots standardmäßig auf Rest, die gemappten auf Note; Akzente werden pro Quell‑Note übertragen.
+    /// - Computes the new group's slot onsets relative to its start.
+    /// - Greedily assigns each source note to the nearest free slot (the lower
+    ///   index wins a tie), so no slot gets two notes.
+    /// - All other slots become rests; accents follow their source note.
     ///
-    /// Rückgabe: `true` bei Erfolg, `false` falls an `start_idx` keine Tuplet‑Gruppe beginnt.
+    /// Returns `false` if no tuplet group starts at `start_idx`.
     fn apply_tuplet_projection_at(
         &mut self,
         start_idx: BeatIdx,
@@ -276,28 +275,28 @@ impl Measure {
             return false;
         }
 
-        // Onsets der neuen Gruppe (relativ) berechnen
+        // Onsets of the new group, relative to its start
         let onsets = DEFAULT_GRID.compute_onset_ticks(&self.beats);
         let start_onset = onsets[group.start_idx];
         let mut target_rel: Vec<(u32, usize)> =
             (group.start_idx..=group.end_idx).map(|i| (onsets[i] - start_onset, i)).collect();
-        // Sicherheitsnetz: falls unerwartet mehr/ weniger Slots, weiter mit vorhandenen
+        // Work with whatever slots the group has, even if the count is unexpected
         target_rel.sort_by_key(|e| e.0);
         let tlen = target_rel.len();
         if tlen == 0 {
             return false;
         }
 
-        // Alle Slots zunächst auf Rest setzen und Akzent löschen; Tremolo löschen
+        // Start with every slot a rest without an accent
         for j in group.start_idx..=group.end_idx {
             self.beats[j].kind = Rest;
             self.beats[j].accented = false;
         }
 
-        // Greedy Zuordnung: für jede Quell‑Note den nächstgelegenen freien Ziel‑Slot suchen
+        // Greedy: give each source note the nearest free slot
         let mut used = vec![false; tlen];
         for &(src_rel, src_accent) in source_offsets.iter() {
-            // finde nächstgelegenen Index
+            // Find the nearest free slot
             let mut best_k: Option<BeatIdx> = None;
             let mut best_dist: u32 = u32::MAX;
             for (k, (trel, _tidx)) in target_rel.iter().enumerate() {
@@ -324,14 +323,15 @@ impl Measure {
         true
     }
 
-    /// Wandelt den Beat an `idx` in eine Tuplet‑Gruppe des Typs (n in der Zeit von m, Basis `base`) um.
+    /// Turns the beat at `idx` into a tuplet group (`n` in the time of `m`,
+    /// on `base`).
     ///
-    /// Bedingungen/Verhalten:
-    /// - Wenn `idx` außerhalb liegt oder der Beat dort bereits ein Tuplet ist, passiert nichts und es wird `None` zurückgegeben.
-    /// - Ansonsten wird versucht, den Beat durch einen Tuplet‑Beat gleicher Art (Note/Rest) zu ersetzen.
-    ///   Die Methode delegiert an `set_beat`, welches die gesamte Gruppe inkl. Anchor anlegt und
-    ///   verbleibende Slots der Gruppe auffüllt. Reicht der Platz im Takt nicht aus, bleibt
-    ///   der Takt unverändert und die Funktion liefert `None`.
+    /// - Returns `None` without changes if `idx` is out of range or already
+    ///   in a tuplet.
+    /// - Otherwise replaces the beat with a tuplet beat of the same kind
+    ///   (note or rest) via `set_beat`, which registers the anchor and fills
+    ///   the rest of the group. If the measure has no room, it stays
+    ///   unchanged and this returns `None`.
     fn convert_to_tuplet(
         &mut self,
         idx: usize,
@@ -385,7 +385,7 @@ mod tests {
     #[test]
     fn dissolve_tuplet_initializes_note_when_group_contains_any_note_and_preserves_accent() {
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
-        // Erzeuge Triplet‑1/8 am Anfang, erster Slot Note, restliche werden als Rests vorinitialisiert
+        // A triplet eighth at the start: the first slot a note, the others prefilled as rests
         m.set_beat(0, Beat::note(t8())).unwrap();
         m.set_beat(2, Beat::note(t8())).unwrap();
         m.toggle_accent(2);
@@ -398,7 +398,7 @@ mod tests {
             ))
         );
 
-        // Erwartung: erster neu eingefügter Beat ist eine Note und akzentuiert
+        // The first new beat is an accented note
         assert!(m.beats()[0].tuplet_group_id.is_none());
         assert_eq!(m.beats()[0].kind, Note);
         assert!(m.beats()[0].accented, "accent should be preserved on first replacement beat");
@@ -407,13 +407,13 @@ mod tests {
     #[test]
     fn dissolve_tuplet_all_rests_results_in_rest_and_no_accent() {
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
-        // Erzeuge Triplet‑1/8 Gruppe als Rests: Standardzustand ist bereits Rest an 0
-        // also direkt Triplet konvertieren aus einem Rest heraus
+        // Make a triplet eighth group of rests: position 0 is already a rest,
+        // so convert straight from it
         assert_matches!(
             m.convert_to_tuplet(0, TupletSpec { n: 3, m: 2, base: Eighth }, true),
             Some(GroupSpan { start_idx: 0, end_idx: 2, id: _ })
         );
-        // Sicherheitscheck: alle drei Slots sind Rests
+        // All three slots are rests
         for i in 0..3 {
             assert_eq!(m.beats()[i].kind, Rest);
         }
@@ -434,14 +434,14 @@ mod tests {
     #[test]
     fn convert_quarter_to_triplet_eighth_group_in_four_four() {
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
-        // Standardfüllung: 4x Viertel Rests
+        // Default fill: four quarter rests
         assert_matches!(
             m.convert_to_tuplet(0, TupletSpec { n: 3, m: 2, base: Eighth }, true),
             Some(GroupSpan { start_idx: 0, end_idx: 2, id: _ }),
             "Conversion to triplet should succeed"
         );
 
-        // Erwartung: drei Triplet‑Achtel an den ersten drei Positionen mit gleicher group_id
+        // Three triplet eighths at the first three positions, sharing a group id
         let id0 = m.beats()[0].tuplet_group_id;
         assert!(id0.is_some());
         for i in 0..3 {
@@ -449,7 +449,7 @@ mod tests {
             assert_eq!(m.beats()[i].tuplet_group_id, id0);
         }
 
-        // Anchor‑Span entspricht einer Viertel‑Spanne
+        // The anchor spans one quarter
         let gid = id0.unwrap();
         let anchor = m.tuplets().get(gid).expect("anchor must exist");
         let base_quarter_ticks = DEFAULT_GRID.ticks_of(&Duration::Simple(Eighth)).unwrap() * 2;
@@ -459,7 +459,7 @@ mod tests {
     #[test]
     fn convert_noop_when_already_tuplet() {
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
-        // Erzeuge zuerst ein Triplet an Position 0
+        // First make a triplet at position 0
         m.set_beat(0, Beat::note(t8())).unwrap();
 
         let before = m.clone();

@@ -65,6 +65,11 @@ impl TimeSignature {
         grouping::default_groups_for(self)
     }
 
+    /// The beat groups joined with `+`, e.g. `2+2+3`.
+    pub fn groups_label(&self) -> String {
+        self.groups().iter().map(|g| g.to_string()).collect::<Vec<_>>().join("+")
+    }
+
     /// Beats per measure the app offers over `beat_unit`: 1-7 quarters,
     /// 3-13 eighths, 5-19 sixteenths. `None` for other beat units.
     pub const fn beat_range(beat_unit: u8) -> Option<RangeInclusive<u8>> {
@@ -170,8 +175,7 @@ impl Display for TimeSignature {
         if self.grouping == 0 {
             return write!(f, "{}/{}", self.beats, self.beat_unit);
         }
-        let groups: Vec<String> = self.groups().iter().map(|g| g.to_string()).collect();
-        write!(f, "{}/{}", groups.join("+"), self.beat_unit)
+        write!(f, "{}/{}", self.groups_label(), self.beat_unit)
     }
 }
 

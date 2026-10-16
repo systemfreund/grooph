@@ -1,6 +1,5 @@
 use crate::Grooph;
-use crate::compact::{paint_share_icon, record_tap};
-use crate::library_panel::LINK_COPIED_NOTICE_S;
+use crate::share::share_button;
 use crate::{Mode, TransportState};
 use eframe::egui;
 use eframe::egui::scroll_area::{ScrollBarVisibility, ScrollSource};
@@ -42,13 +41,7 @@ impl Grooph {
                             {
                                 self.share_link(ui);
                             }
-                            let now = ui.input(|i| i.time);
-                            if self
-                                .ui
-                                .link_copied_at
-                                .is_some_and(|at| now - at < LINK_COPIED_NOTICE_S)
-                            {
-                                ui.ctx().request_repaint_after_secs(0.5);
+                            if self.link_copied_recently(ui) {
                                 ui.weak("Link copied");
                             }
                             if ui
@@ -72,9 +65,7 @@ impl Grooph {
                                 .on_hover_text("Tap the tempo: click twice or more in time");
                             let tapped = tap
                                 .clicked()
-                                .then(|| {
-                                    record_tap(&mut self.ui.compact.taps, ui.input(|i| i.time))
-                                })
+                                .then(|| self.ui.tap_tempo.tap(ui.input(|i| i.time)))
                                 .flatten();
                             if let Some(bpm) = tapped {
                                 self.playback_ctl.bpm = bpm;
@@ -191,13 +182,4 @@ impl Grooph {
             }
         }
     }
-}
-
-/// Button with the share symbol of the compact layout, as tall as a text button.
-fn share_button(ui: &mut egui::Ui) -> egui::Response {
-    let resp = Button::new("   ").ui(ui);
-    let side = resp.rect.height().min(resp.rect.width());
-    let icon = egui::Rect::from_center_size(resp.rect.center(), egui::Vec2::splat(side * 1.2));
-    paint_share_icon(ui.painter(), icon, ui.style().interact(&resp).fg_stroke.color);
-    resp
 }

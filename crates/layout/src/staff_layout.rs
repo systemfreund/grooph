@@ -81,17 +81,17 @@ impl StaffOpts {
         }
     }
 
-    /// Return a copy of these options scaled by `factor` — `em`, `font_id`
-    /// size, and `metrics` move together, since `metrics` is measured against
-    /// `font_id`'s original size and would otherwise no longer match it.
-    /// Vector-font metrics scale ~linearly with size, close enough to avoid
-    /// needing a live `egui::Ui` to re-measure.
     /// Distance from a row's center down to its staff line: rows are taller
     /// above the line (stems, beams, tuplets) than below it.
     fn baseline_shift(&self) -> f32 {
         (room_above_em(self) - self.room_below_em) * 0.5 * self.em
     }
 
+    /// Return a copy of these options scaled by `factor` — `em`, `font_id`
+    /// size, and `metrics` move together, since `metrics` is measured against
+    /// `font_id`'s original size and would otherwise no longer match it.
+    /// Vector-font metrics scale ~linearly with size, close enough to avoid
+    /// needing a live `egui::Ui` to re-measure.
     pub fn rescaled(&self, factor: f32) -> StaffOpts {
         let mut font_id = self.font_id.clone();
         font_id.size *= factor;

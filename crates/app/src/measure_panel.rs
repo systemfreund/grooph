@@ -475,7 +475,7 @@ impl Grooph {
             }
             return;
         }
-        if !matches!(self.ui.mode, Mode::TimeSignature { .. })
+        if !matches!(self.ui.mode, Mode::TimeSignature(_))
             && (resp.clicked() || resp.dragged())
             && let Some(pos) = resp.interact_pointer_pos()
             && let Some((m_idx, b_idx)) = grooph_layout::staff_layout::hit_test_staff(staff, pos)
