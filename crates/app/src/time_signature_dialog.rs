@@ -15,7 +15,12 @@ impl Grooph {
                 ui.with_layout(layout, |ui| {
                     let l2 = Layout::left_to_right(Align::Min);
                     ui.with_layout(l2, |ui| {
-                        if let Mode::TimeSignature { beats, unit, grouping } = &mut self.ui.mode {
+                        if let Mode::TimeSignature(TimeSignature {
+                            beats,
+                            beat_unit: unit,
+                            grouping,
+                        }) = &mut self.ui.mode
+                        {
                             let range = TimeSignature::beat_range(*unit)
                                 .unwrap_or(1..=TimeSignature::MAX_BEATS);
                             egui::ComboBox::from_id_salt("beats")
@@ -44,16 +49,16 @@ impl Grooph {
                             if (*beats, *unit) != before {
                                 *grouping = 0;
                             }
-                            let groupings = TimeSignature::new(*beats, *unit).groupings();
-                            if groupings.len() > 1 {
+                            let meter = TimeSignature::new(*beats, *unit);
+                            let count = meter.groupings().len() as u8;
+                            if count > 1 {
                                 ui.label("  ");
                                 egui::ComboBox::from_id_salt("grouping")
-                                    .selected_text(groups_label(
-                                        groupings.get(*grouping as usize).unwrap_or(&groupings[0]),
-                                    ))
+                                    .selected_text(meter.with_grouping(*grouping).groups_label())
                                     .show_ui(ui, |ui| {
-                                        for (i, g) in groupings.iter().enumerate() {
-                                            ui.selectable_value(grouping, i as u8, groups_label(g));
+                                        for i in 0..count {
+                                            let label = meter.with_grouping(i).groups_label();
+                                            ui.selectable_value(grouping, i, label);
                                         }
                                     })
                                     .response
@@ -74,9 +79,7 @@ impl Grooph {
                             // Prevent no-op undo entries
                             let current = self.current_measure().time_signature();
                             let new_ts = match &self.ui.mode {
-                                Mode::TimeSignature { beats, unit, grouping } => {
-                                    TimeSignature::new(*beats, *unit).with_grouping(*grouping)
-                                }
+                                Mode::TimeSignature(ts) => *ts,
                                 _ => current,
                             };
                             if new_ts == current {
@@ -105,9 +108,4 @@ impl Grooph {
                 });
             });
     }
-}
-
-/// Beat groups written as `2+2+3`.
-pub(crate) fn groups_label(groups: &[u8]) -> String {
-    groups.iter().map(|g| g.to_string()).collect::<Vec<_>>().join("+")
 }

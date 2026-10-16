@@ -6,9 +6,9 @@ use grooph_layout::pixel_layout::{
     BeamLayout, LayoutOpts, MeasureLayout, NoteLayout, TimeSignatureLayout, TupletLayout,
     build_measure_layout,
 };
-use grooph_measure::Measure;
 use grooph_measure::counting::{CountConfig, CountSlot, build_count_slots};
 use grooph_measure::grid::DEFAULT_GRID;
+use grooph_measure::{Measure, TimeSignature};
 use std::collections::HashMap;
 
 pub fn draw_measure(
@@ -87,13 +87,9 @@ pub(crate) fn render_measure_at(
     }
 
     draw_clef(painter, measure_layout.clef_pos, &opts.font_id, color);
-    draw_time_signature(
-        painter,
-        measure_layout.time_signature.as_ref(),
-        measure,
-        &opts.font_id,
-        color,
-    );
+    if let Some(ts_layout) = &measure_layout.time_signature {
+        draw_time_signature(painter, ts_layout, measure.time_signature(), &opts.font_id, color);
+    }
 
     draw_notes(painter, measure_layout, color, opts);
 
@@ -123,15 +119,15 @@ fn draw_clef(painter: &Painter, clef_pos: Option<egui::Pos2>, font_id: &FontId, 
     }
 }
 
-fn draw_time_signature(
+/// Draws the meter digits at the laid-out positions, with a grouping other
+/// than the usual one written above them.
+pub fn draw_time_signature(
     painter: &Painter,
-    ts_layout: Option<&TimeSignatureLayout>,
-    measure: &Measure,
+    ts_layout: &TimeSignatureLayout,
+    ts: TimeSignature,
     font_id: &FontId,
     color: Color32,
 ) {
-    let Some(ts_layout) = ts_layout else { return };
-    let ts = measure.time_signature();
     let top_digits = glyphs::ts_glyphs(ts.beats);
     let bot_digits = glyphs::ts_glyphs(ts.beat_unit);
     for (p, ch) in ts_layout.beats.iter().zip(top_digits.iter()) {
@@ -145,11 +141,10 @@ fn draw_time_signature(
     if ts.grouping != 0
         && let (Some(first), Some(last)) = (ts_layout.beats.first(), ts_layout.beats.last())
     {
-        let groups: Vec<String> = ts.groups().iter().map(|g| g.to_string()).collect();
         let em = font_id.size;
         let pos = egui::pos2((first.x + last.x) / 2.0, first.y - 0.4 * em);
         let font = FontId::proportional(0.28 * em);
-        painter.text(pos, Align2::CENTER_BOTTOM, groups.join("+"), font, color);
+        painter.text(pos, Align2::CENTER_BOTTOM, ts.groups_label(), font, color);
     }
 }
 

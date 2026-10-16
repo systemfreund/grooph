@@ -5,13 +5,13 @@
 
 use crate::Grooph;
 use crate::generator::ENDLESS_MIN_BARS;
-use crate::generator_panel::{
-    offered_subdivisions, subdivision_label, time_signature_label, time_signatures,
-};
+use crate::generator_panel::{subdivision_label, time_signature_label, time_signatures};
 use crate::presets::{self, PresetId};
 use eframe::egui;
 use eframe::egui::{Button, Color32, FontId, Id, Modal, Response, RichText, Ui, vec2};
-use grooph_measure::generator::{MAX_BARS, MAX_COMPLEXITY, effective_subdivision};
+use grooph_measure::generator::{
+    MAX_BARS, MAX_COMPLEXITY, effective_subdivision, offered_subdivisions,
+};
 use grooph_measure::swing::{MAX_SWING_PERCENT, MIN_SWING_PERCENT, SwingUnit};
 use grooph_measure::tempo::{MAX_BPM, MIN_BPM};
 

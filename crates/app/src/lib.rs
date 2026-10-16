@@ -76,7 +76,8 @@ pub(crate) enum Mode {
     Help,
     Library,
     Generator,
-    TimeSignature { beats: u8, unit: u8, grouping: u8 },
+    /// The time signature dialog, holding the meter being picked.
+    TimeSignature(TimeSignature),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -303,7 +304,7 @@ impl App for Grooph {
         self.run_summary_window(ui);
         self.calibration_window(ui);
 
-        if matches!(self.ui.mode, Mode::TimeSignature { .. }) {
+        if matches!(self.ui.mode, Mode::TimeSignature(_)) {
             self.time_signature_dialog(ui);
         }
 

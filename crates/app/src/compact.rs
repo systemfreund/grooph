@@ -209,7 +209,7 @@ impl Grooph {
     /// elsewhere (links, time signature dialog) land on the right tab.
     pub(crate) fn compact_tab(&self) -> CompactTab {
         match self.ui.mode {
-            Mode::Edit | Mode::TimeSignature { .. } => CompactTab::Edit,
+            Mode::Edit | Mode::TimeSignature(_) => CompactTab::Edit,
             Mode::Mixer | Mode::Settings | Mode::Help | Mode::Library => CompactTab::More,
             Mode::Playback | Mode::Generator => {
                 if self.ui.compact.more_menu {

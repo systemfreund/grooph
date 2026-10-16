@@ -2,13 +2,13 @@ use crate::Grooph;
 use crate::Mode;
 use crate::generator::ENDLESS_MIN_BARS;
 use crate::pickers::Picker;
-use crate::time_signature_dialog::groups_label;
 use crate::tool_palette::notation_button;
 use eframe::egui;
 use grooph_measure::TimeSignature;
 use grooph_measure::generator::{
     BeatSpan, GeneratorSettings, GroupingSet, MAX_BARS, MAX_COMPLEXITY, Subdivision,
-    complexity_groupings, effective_subdivision, groupings, supports_time_signature,
+    complexity_groupings, effective_subdivision, groupings, offered_subdivisions,
+    supports_time_signature,
 };
 
 /// Time signatures in the picker: every meter the editor offers in each of
@@ -31,11 +31,10 @@ pub(crate) fn time_signatures() -> Vec<TimeSignature> {
 /// Beat groups shown next to an x/8 or x/16 meter, e.g. "7/8 (2+3+2)".
 pub(crate) fn time_signature_label(ts: TimeSignature) -> String {
     let meter = format!("{}/{}", ts.beats, ts.beat_unit);
-    let groups = ts.groups();
-    if ts.beat_unit == 4 || groups.len() < 2 {
+    if ts.beat_unit == 4 || ts.groups().len() < 2 {
         return meter;
     }
-    format!("{meter} ({})", groups_label(&groups))
+    format!("{meter} ({})", ts.groups_label())
 }
 
 pub(crate) fn subdivision_label(s: Subdivision) -> &'static str {
@@ -44,21 +43,6 @@ pub(crate) fn subdivision_label(s: Subdivision) -> &'static str {
         Subdivision::Sixteenths => "16th Notes",
         Subdivision::Triplets => "Triplets",
         Subdivision::Mixed => "Mixed",
-    }
-}
-
-/// Subdivisions the generator offers for `ts`: triplets and mixed have no x/8
-/// cells, x/16 is always written in sixteenths.
-pub(crate) fn offered_subdivisions(ts: TimeSignature) -> &'static [Subdivision] {
-    match ts.beat_unit {
-        8 => &[Subdivision::Eighths, Subdivision::Sixteenths],
-        16 => &[Subdivision::Sixteenths],
-        _ => &[
-            Subdivision::Eighths,
-            Subdivision::Sixteenths,
-            Subdivision::Triplets,
-            Subdivision::Mixed,
-        ],
     }
 }
 

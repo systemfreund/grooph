@@ -205,6 +205,21 @@ pub fn effective_subdivision(subdivision: Subdivision, ts: TimeSignature) -> Sub
     }
 }
 
+/// Subdivisions the generator offers for `ts`: triplets and mixed have no x/8
+/// cells, x/16 is always written in sixteenths.
+pub fn offered_subdivisions(ts: TimeSignature) -> &'static [Subdivision] {
+    match ts.beat_unit {
+        8 => &[Subdivision::Eighths, Subdivision::Sixteenths],
+        16 => &[Subdivision::Sixteenths],
+        _ => &[
+            Subdivision::Eighths,
+            Subdivision::Sixteenths,
+            Subdivision::Triplets,
+            Subdivision::Mixed,
+        ],
+    }
+}
+
 /// Generator beats of `ts`, in order: one quarter per beat in `x/4`, the
 /// meter's beat groups in `x/8` and `x/16` (groups longer than three are
 /// split into twos, with a three at the end for an odd length). `None` if
@@ -661,6 +676,28 @@ mod tests {
     use super::*;
     use crate::duration::{e, q, s, t8};
     use crate::grid::DEFAULT_GRID;
+
+    #[test]
+    fn effective_subdivision_is_always_offered() {
+        let all = [
+            Subdivision::Eighths,
+            Subdivision::Sixteenths,
+            Subdivision::Triplets,
+            Subdivision::Mixed,
+        ];
+        for beat_unit in TimeSignature::BEAT_UNITS {
+            for beats in TimeSignature::beat_range(beat_unit).into_iter().flatten() {
+                let ts = TimeSignature::new(beats, beat_unit);
+                if !supports_time_signature(ts) {
+                    continue;
+                }
+                for s in all {
+                    let used = effective_subdivision(s, ts);
+                    assert!(offered_subdivisions(ts).contains(&used), "{s:?} in {ts}");
+                }
+            }
+        }
+    }
 
     fn settings(subdivision: Subdivision, complexity: u8) -> GeneratorSettings {
         GeneratorSettings { subdivision, complexity, ..GeneratorSettings::default() }
