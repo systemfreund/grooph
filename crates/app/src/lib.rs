@@ -1,6 +1,7 @@
 mod accuracy;
 mod calibration;
 mod clock;
+mod compact;
 mod generator;
 mod generator_panel;
 mod help;
@@ -28,6 +29,7 @@ use grooph_measure::duration::{Duration, NoteValue, TupletSpec, q};
 use grooph_measure::{BeatIdx, Cursor, Measure, Score, TimeSignature};
 
 use crate::accuracy::AccuracyState;
+use crate::compact::CompactState;
 use crate::generator::GeneratorState;
 use crate::library::PatternLibrary;
 use crate::platform::{PlatformRuntime, VisibilityEvent};
@@ -222,14 +224,19 @@ fn add_font(ctx: &Context) {
 impl App for Grooph {
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
         self.apply_style(ui);
-        self.main_menu(ui);
-        self.help_panel(ui);
-        self.settings_panel(ui);
-        self.mixer_panel(ui);
-        self.library_panel(ui);
-        self.generator_panel(ui);
-        self.tool_palette_panel(ui);
-        self.measure_panel(ui);
+        self.ui.compact_layout = ui.available_width() < compact::COMPACT_MAX_WIDTH;
+        if self.ui.compact_layout {
+            self.compact_ui(ui);
+        } else {
+            self.main_menu(ui);
+            self.help_panel(ui);
+            self.settings_panel(ui);
+            self.mixer_panel(ui);
+            self.library_panel(ui);
+            self.generator_panel(ui);
+            self.tool_palette_panel(ui);
+            self.measure_panel(ui);
+        }
         self.update_metronome_trainer();
         self.update_endless();
         self.run_summary_window(ui);
@@ -948,6 +955,8 @@ impl Grooph {
                 pending_load: None,
                 link_error: None,
                 link_copied_at: None,
+                compact_layout: false,
+                compact: CompactState::default(),
             },
         };
         app.open_link_from_url();

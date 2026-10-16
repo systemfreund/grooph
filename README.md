@@ -162,7 +162,19 @@ Important root files:
   warm-up as the source's offset and restores the stash on stop. Persistence
   reads the stash while a calibration runs.
 
-## Input/tools
+## Compact layout (phones)
+
+- `crates/app/src/compact.rs`: windows narrower than `COMPACT_MAX_WIDTH`
+  (600 pt) get a phone layout instead of the bottom panels; checked every
+  frame (`UiShell::compact_layout`), so the desktop layout is unchanged.
+- Tabs: Practice (generator card with Meter/Notes/Level/Bars/BPM, options
+  sheet, big "new rhythm" + play buttons), Edit (tool palette + edit bar),
+  More (Library, Mixer, Settings, Help reuse their panels). The tab is derived
+  from `Mode` (`compact_tab`), so modes set elsewhere land on the right tab.
+- Settings open in a `Modal` picker; generator changes go through
+  `finish_generator_change`, shared with the desktop generator panel.
+- The staff uses tighter spacing and no clef there, so glyphs are bigger.
+
 
 - Tool registry: `crates/app/src/tools.rs` (ToolKind, Modifier, shortcuts).
 - Keyboard handling: `crates/app/src/keyboard_input.rs`.

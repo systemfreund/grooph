@@ -157,11 +157,23 @@ impl Grooph {
                             }
                         };
 
-                        let em = compute_em(&viewport_rect, self.ui.layout.width_cap_factor, ui);
+                        let width_cap_factor = if self.ui.compact_layout {
+                            // Let the measure width alone decide the size.
+                            self.ui.layout.width_cap_factor.max(0.2)
+                        } else {
+                            self.ui.layout.width_cap_factor
+                        };
+                        let em = compute_em(&viewport_rect, width_cap_factor, ui);
                         let font_id = FontId::new(em, self.ui.music_font_id.family.clone());
 
                         let metrics = measure_glyph_metrics(ui, &font_id);
 
+                        // Tighter spacing on narrow screens makes the glyphs
+                        // bigger: the staff shrinks its em until a measure
+                        // full of sixteenths fits the width.
+                        let compact = self.ui.compact_layout;
+                        let (min_measure_width_em, note_width_em) =
+                            if compact { (2.0, 0.36) } else { (6.0, 0.6) };
                         let staff_opts = StaffOpts {
                             rect: viewport_rect,
                             font_id: font_id.clone(),
@@ -175,10 +187,11 @@ impl Grooph {
                             proportional_spacing: self.ui.layout.proportional_spacing,
                             debug_bbox: self.ui.layout.debug_bbox,
                             metrics,
-                            min_measure_width_em: 6.0,
-                            note_width_em: 0.6,
+                            min_measure_width_em,
+                            note_width_em,
                             system_spacing_em: 0.5,
-                            layout_clef_first: true,
+                            // Narrow screens: no clef, so the notes get the width.
+                            layout_clef_first: !compact,
                         };
 
                         let staff = build_staff_layout(&self.editor.score, &staff_opts);

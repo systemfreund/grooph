@@ -5,14 +5,14 @@ use crate::tool_palette::notation_button;
 use eframe::egui;
 use grooph_measure::TimeSignature;
 use grooph_measure::generator::{
-    BeatSpan, GroupingSet, MAX_BARS, MAX_COMPLEXITY, Subdivision, beat_groups,
+    BeatSpan, GeneratorSettings, GroupingSet, MAX_BARS, MAX_COMPLEXITY, Subdivision, beat_groups,
     complexity_groupings, effective_subdivision, groupings, supports_time_signature,
 };
 
 /// Time signatures in the picker: every quarter-note and eighth-note meter
 /// the editor offers (eighth-note meters are written in beat groups, e.g.
 /// 6/8 = 3+3, 7/8 = 2+3+2).
-fn time_signatures() -> Vec<TimeSignature> {
+pub(crate) fn time_signatures() -> Vec<TimeSignature> {
     [4, 8]
         .into_iter()
         .flat_map(|beat_unit| {
@@ -26,7 +26,7 @@ fn time_signatures() -> Vec<TimeSignature> {
 }
 
 /// Beat groups shown next to an eighth-note meter, e.g. "7/8 (2+3+2)".
-fn time_signature_label(ts: TimeSignature) -> String {
+pub(crate) fn time_signature_label(ts: TimeSignature) -> String {
     let groups = beat_groups(ts).unwrap_or_default();
     if ts.beat_unit != 8 || groups.len() < 2 {
         return ts.to_string();
@@ -41,12 +41,22 @@ fn time_signature_label(ts: TimeSignature) -> String {
     format!("{ts} ({})", sizes.join("+"))
 }
 
-fn subdivision_label(s: Subdivision) -> &'static str {
+pub(crate) fn subdivision_label(s: Subdivision) -> &'static str {
     match s {
         Subdivision::Eighths => "8th Notes",
         Subdivision::Sixteenths => "16th Notes",
         Subdivision::Triplets => "Triplets",
         Subdivision::Mixed => "Mixed",
+    }
+}
+
+/// Subdivisions the generator offers for `ts`: triplets and mixed have no x/8
+/// cells.
+pub(crate) fn offered_subdivisions(ts: TimeSignature) -> &'static [Subdivision] {
+    if ts.beat_unit == 8 {
+        &[Subdivision::Eighths, Subdivision::Sixteenths]
+    } else {
+        &[Subdivision::Eighths, Subdivision::Sixteenths, Subdivision::Triplets, Subdivision::Mixed]
     }
 }
 
@@ -87,16 +97,7 @@ impl Grooph {
                         // falls back to 8ths / 16ths there.
                         let shown =
                             effective_subdivision(settings.subdivision, settings.time_signature);
-                        let offered: &[Subdivision] = if settings.time_signature.beat_unit == 8 {
-                            &[Subdivision::Eighths, Subdivision::Sixteenths]
-                        } else {
-                            &[
-                                Subdivision::Eighths,
-                                Subdivision::Sixteenths,
-                                Subdivision::Triplets,
-                                Subdivision::Mixed,
-                            ]
-                        };
+                        let offered = offered_subdivisions(settings.time_signature);
                         setting(ui, "Subdivision", |ui| {
                             egui::ComboBox::from_id_salt("gen_subdivision")
                                 .selected_text(subdivision_label(shown))
@@ -185,22 +186,34 @@ impl Grooph {
                     .id_salt("gen_groupings")
                     .show(ui, |ui| self.groupings_picker(ui));
 
-                let endless_turned_on = !endless_before && self.editor.generator.endless;
-                let too_short_for_endless = self.editor.score.len() < ENDLESS_MIN_BARS;
-                if roll
-                    || self.editor.generator.settings != before
-                    || (endless_turned_on && too_short_for_endless)
-                {
-                    self.generate_new_score();
-                }
+                self.finish_generator_change(before, endless_before, roll);
             },
         );
+    }
+
+    /// Regenerate the score after the generator settings were shown: on
+    /// "New rhythm" (`roll`), on any changed setting, and when endless mode
+    /// was turned on for a score too short for it.
+    pub(crate) fn finish_generator_change(
+        &mut self,
+        before: GeneratorSettings,
+        endless_before: bool,
+        roll: bool,
+    ) {
+        let endless_turned_on = !endless_before && self.editor.generator.endless;
+        let too_short_for_endless = self.editor.score.len() < ENDLESS_MIN_BARS;
+        if roll
+            || self.editor.generator.settings != before
+            || (endless_turned_on && too_short_for_endless)
+        {
+            self.generate_new_score();
+        }
     }
 
     /// Grouping picker (reference app: "Custom Groupings"). While custom
     /// groupings are off, the tiles show which groupings the complexity level
     /// unlocks; picking a tile switches to a custom selection seeded from it.
-    fn groupings_picker(&mut self, ui: &mut egui::Ui) {
+    pub(crate) fn groupings_picker(&mut self, ui: &mut egui::Ui) {
         let family = self.ui.music_font_id.family.clone();
         let settings = &mut self.editor.generator.settings;
         let ts = settings.time_signature;

@@ -1,4 +1,5 @@
 use crate::accuracy::AccuracyState;
+use crate::compact::CompactState;
 use crate::generator::GeneratorState;
 use crate::library::PatternLibrary;
 use crate::platform::PlatformRuntime;
@@ -174,6 +175,9 @@ pub(crate) struct UiShell {
     pub(crate) link_error: Option<String>,
     /// UI time of the last "copy link" click, for a short confirmation.
     pub(crate) link_copied_at: Option<f64>,
+    /// The window is narrow: show the compact (phone) layout. Set every frame.
+    pub(crate) compact_layout: bool,
+    pub(crate) compact: CompactState,
 }
 
 /// Something that replaces the working score once unsaved changes are dealt with.
