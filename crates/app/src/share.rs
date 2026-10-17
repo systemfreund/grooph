@@ -1,4 +1,4 @@
-//! Sharing the working score as a link: the share icon, the
+//! Sharing the working score or the metronome as a link: the share icon, the
 //! system share sheet or clipboard, and the short "Link copied" notice.
 
 use crate::{Grooph, platform};
@@ -34,21 +34,24 @@ pub(crate) fn paint_share_icon(painter: &Painter, rect: Rect, color: Color32) {
 }
 
 impl Grooph {
-    /// Link that opens the working score at the current tempo and swing, with
-    /// the click bar of its first meter if that is not the default.
+    /// Link to what is on screen: in the metronome its meter, tempo and click
+    /// bar; else the working score at the current tempo and swing, with the
+    /// click bar of its first meter if that is not the default.
     pub(crate) fn share_link_url(&self) -> Option<String> {
         let swing = self.playback_ctl.audio_cfg.swing;
+        let click = &self.playback_ctl.audio_cfg.click;
+        let (content, meter) = if self.metronome_mode() {
+            (LinkContent::Metronome(self.metronome_meter()), Some(self.metronome_meter()))
+        } else {
+            let score = &self.editor.score;
+            let meter = score.measures.first().map(|m| m.time_signature());
+            (LinkContent::Score(score.clone()), meter)
+        };
         let link = SharedLink {
             bpm: Some(self.playback_ctl.bpm),
             swing: (!swing.is_straight()).then_some(swing),
-            content: Some(LinkContent::Score(self.editor.score.clone())),
-            click: self
-                .editor
-                .score
-                .measures
-                .first()
-                .and_then(|m| self.playback_ctl.audio_cfg.click.custom_for(m.time_signature()))
-                .cloned(),
+            content: Some(content),
+            click: meter.and_then(|ts| click.custom_for(ts)).cloned(),
         };
         let url = link.to_url(&platform::share_base_url());
         if url.is_none() {

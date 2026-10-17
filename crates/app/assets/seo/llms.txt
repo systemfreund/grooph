@@ -11,10 +11,10 @@ Query parameters on https://grooph.app/ (all optional, unknown ones are ignored;
 - `v`: link version; write `v=2`. Without it (version 1), `bpm` counts the meter's beat unit, i.e. eighths in x/8 and sixteenths in x/16, and grooph converts it to quarters.
 - `bpm`: tempo in quarter notes per minute, 20-300 (with `v=2`), in every time signature: 7/8 at `bpm=70` plays 140 eighths per minute.
 - `r`: a rhythm in the text notation below. Spaces may be written as `+`.
-- `ts`: time signature, e.g. `3/4` or `7/8` (1-17 beats over 4, 8 or 16). With `r` it is the default meter; on its own it opens a one-measure metronome in that meter.
+- `ts`: time signature, e.g. `3/4` or `7/8` (1-17 beats over 4, 8 or 16). With `r` it is the default meter; on its own it opens the metronome tab in that meter.
 - Generator (a random sight-reading rhythm): `sub` = `8`, `16`, `3` (triplets) or `mix`; `lvl` = complexity 1-5; `bars` = 1-8; `space` = amount of rests 0-1; `seed` = any whole number. The same parameters and seed always give the same rhythm; without a seed every visit draws a new one. Only x/4 time signatures. Do not combine with `r`.
 - `swing`: swing feel in percent, 50 (straight) to 75 (dotted); 66 is the triplet feel. `su=16` swings sixteenths instead of eighths.
-- `click`: how loud the metronome clicks each beat group of the meter of `ts` (or of the first measure of `r`), one letter per group: `S` strong, `M` medium, `L` soft, `-` off. 4/4 has four groups, 6/8 two, 7/8 three (2+3+2). Default: `S` then `M`.
+- `click`: what the metronome clicks in the meter of `ts` (or of the first measure of `r`): one measure in the rhythm notation below, without the time signature. An accented note (`>q`) clicks strong, a plain note medium, a ghost note (`(q)`) soft, a rest not at all. Default: one click per beat group, the first one strong (4/4 has four groups, 6/8 two, 7/8 three: 2+3+2).
 
 Examples:
 
@@ -22,7 +22,7 @@ Examples:
 - Written rhythm with a triplet: https://grooph.app/?v=2&bpm=90&r=4/4+q+e+e+t8+t8+t8+r:q+|+q.+e+q+q
 - Sixteenth-note sight-reading exercise, level 3, 4 bars: https://grooph.app/?v=2&bpm=80&sub=16&lvl=3&bars=4&seed=42
 - Swing click with triplet feel: https://grooph.app/?v=2&bpm=120&ts=4/4&swing=66
-- 7/8 click with the middle group silent and the last one soft: https://grooph.app/?v=2&bpm=70&ts=7/8&click=S-L
+- 7/8 click with the middle group silent and the last one soft: https://grooph.app/?v=2&bpm=70&ts=7/8&click=>q+r:q.+(q)
 
 If the user has unsaved changes, grooph asks before replacing them. Invalid links show an error message that names the problem.
 

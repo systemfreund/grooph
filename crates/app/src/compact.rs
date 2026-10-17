@@ -500,31 +500,51 @@ impl Grooph {
                                 self.compact_metronome_rows(ui);
                                 ui.add_space(8.0);
                             }
-                            let playing =
-                                self.playback_ctl.transport_state == TransportState::Playing;
-                            let (row, _) = ui.allocate_exact_size(
-                                vec2(ui.available_width(), PLAY_BUTTON_SIZE),
-                                Sense::hover(),
-                            );
-                            let fill = ui.visuals().selection.bg_fill;
-                            let icon = ui.visuals().selection.stroke.color;
-                            if round_button_at(
-                                ui,
-                                Rect::from_center_size(row.center(), Vec2::splat(PLAY_BUTTON_SIZE)),
-                                Id::new("metronome_play"),
-                                fill,
-                                icon,
-                                |painter, rect, color| {
-                                    paint_play_icon(painter, rect, color, playing)
-                                },
-                            )
-                            .clicked()
-                            {
-                                self.toggle_playback();
-                            }
+                            self.metronome_transport(ui);
                         });
                 });
             });
+    }
+
+    /// Centered play button, with share on the right.
+    fn metronome_transport(&mut self, ui: &mut Ui) {
+        if self.link_copied_recently(ui) {
+            ui.vertical_centered(|ui| {
+                ui.label(RichText::new("Link copied").size(16.0).weak());
+            });
+            ui.add_space(4.0);
+        }
+        let playing = self.playback_ctl.transport_state == TransportState::Playing;
+        let (row, _) =
+            ui.allocate_exact_size(vec2(ui.available_width(), PLAY_BUTTON_SIZE), Sense::hover());
+        let size = Vec2::splat(PLAY_BUTTON_SIZE);
+        let fill = ui.visuals().selection.bg_fill;
+        let icon = ui.visuals().selection.stroke.color;
+        if round_button_at(
+            ui,
+            Rect::from_center_size(row.center(), size),
+            Id::new("metronome_play"),
+            fill,
+            icon,
+            |painter, rect, color| paint_play_icon(painter, rect, color, playing),
+        )
+        .clicked()
+        {
+            self.toggle_playback();
+        }
+        if round_button_at(
+            ui,
+            Rect::from_min_size(row.right_top() - vec2(PLAY_BUTTON_SIZE, 0.0), size),
+            Id::new("metronome_share"),
+            ui.visuals().extreme_bg_color,
+            ui.visuals().strong_text_color(),
+            paint_share_icon,
+        )
+        .on_hover_text("Share a link to this metronome")
+        .clicked()
+        {
+            self.share_link(ui);
+        }
     }
 
     fn compact_option_rows(&mut self, ui: &mut Ui) {

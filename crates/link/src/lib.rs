@@ -6,7 +6,7 @@
 //! | `v`       | Link version, see below; [`SharedLink::to_url`] always writes the current one |
 //! | `bpm`     | Tempo in quarter notes per minute, 20-300 |
 //! | `r`       | Rhythm in the text notation of [`grooph_measure::notation`] |
-//! | `ts`      | Time signature, e.g. `7/8`; default for `r`, the generator's meter, or on its own a one-measure metronome |
+//! | `ts`      | Time signature, e.g. `7/8`; default for `r`, the generator's meter, or on its own the metronome in that meter (the rhythm stays) |
 //! | `sub`     | Generator subdivision: `8`, `16`, `3` (triplets) or `mix` |
 //! | `lvl`     | Generator complexity 1-5 |
 //! | `bars`    | Generator bars 1-8 |

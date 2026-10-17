@@ -638,7 +638,10 @@ impl Grooph {
     /// Open a shared link. Replacing the working score asks first if it has
     /// unsaved changes; a tempo-only link applies right away.
     pub(crate) fn open_link(&mut self, link: SharedLink) {
-        if link.content.is_some() && self.editor.dirty {
+        // A metronome link leaves the rhythm alone: nothing to lose.
+        let replaces_rhythm =
+            link.content.as_ref().is_some_and(|c| !matches!(c, LinkContent::Metronome(_)));
+        if replaces_rhythm && self.editor.dirty {
             self.ui.pending_load = Some(PendingLoad::Link(link));
         } else {
             self.apply_link(link);
@@ -646,16 +649,19 @@ impl Grooph {
     }
 
     pub(crate) fn apply_link(&mut self, link: SharedLink) {
-        // A link is about the rhythm: put the metronome's click bar away first.
+        // A rhythm link puts the metronome's click bar away first; a
+        // metronome link reopens it below with its meter and click bar.
         if self.metronome_mode() {
             self.stop_transport();
             self.close_metronome();
             self.ui.mode = Mode::Playback;
         }
+        let metronome = matches!(link.content, Some(LinkContent::Metronome(_)));
         match link.content {
             Some(LinkContent::Score(score)) => self.replace_score_from_link(score),
             Some(LinkContent::Metronome(ts)) => {
-                self.replace_score_from_link(Score::single(Measure::new_init(ts, BeatKind::Note)))
+                self.stop_transport();
+                self.editor.metronome.meter = ts;
             }
             Some(LinkContent::Generator { settings, seed }) => {
                 self.stop_transport();
@@ -679,8 +685,13 @@ impl Grooph {
             self.playback_ctl.audio_cfg.click.set(bar);
         }
         self.playback_ctl.playback.reset();
-        // The content is reproducible from the link, so it is not "unsaved".
-        self.editor.dirty = false;
+        if metronome {
+            self.open_metronome();
+            self.ui.mode = Mode::Playback;
+        } else {
+            // The content is reproducible from the link, so it is not "unsaved".
+            self.editor.dirty = false;
+        }
     }
 
     fn replace_score_from_link(&mut self, score: Score) {
