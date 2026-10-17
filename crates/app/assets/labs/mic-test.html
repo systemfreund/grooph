@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>grooph Mikrofontest</title>
+<style>
+  :root { --bg: #fff; --fg: #1a1a1a; --muted: #666; --panel: #f3f3f3; --accent: #2f6fde; --ok: #1d8a3a; --bad: #c0392b; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #151515; --fg: #eee; --muted: #999; --panel: #242424; --accent: #6b9bff; --ok: #4cc06a; --bad: #ff6b5b; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 16px; background: var(--bg); color: var(--fg); font: 16px/1.4 -apple-system, system-ui, sans-serif; max-width: 640px; margin-inline: auto; }
+  h1 { font-size: 1.3em; margin: 0 0 4px; }
+  h2 { font-size: 1.05em; margin: 0 0 8px; }
+  p { margin: 0 0 8px; }
+  .muted { color: var(--muted); font-size: 0.9em; }
+  section { background: var(--panel); border-radius: 10px; padding: 12px; margin: 12px 0; }
+  button { font: inherit; padding: 10px 14px; border-radius: 8px; border: 0; background: var(--accent); color: #fff; margin: 4px 4px 4px 0; }
+  button:disabled { opacity: 0.4; }
+  select, input[type=range] { font: inherit; width: 100%; }
+  label { display: block; margin: 6px 0; }
+  .meter { height: 14px; background: var(--bg); border-radius: 7px; overflow: hidden; position: relative; }
+  .meter > div { height: 100%; background: var(--ok); width: 0; }
+  .meter > span { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--bad); }
+  .flash { display: inline-block; width: 14px; height: 14px; border-radius: 50%; background: var(--muted); vertical-align: middle; }
+  .flash.on { background: var(--ok); }
+  pre { white-space: pre-wrap; font-size: 0.8em; background: var(--bg); padding: 8px; border-radius: 6px; }
+</style>
+</head>
+<body>
+<h1>grooph Mikrofontest</h1>
+<p class="muted">Prüft, ob Schläge über das Mikrofon auf diesem Gerät zuverlässig erkannt werden, ohne dass der Klick leiser wird. Bitte in Safari öffnen und für jede Situation einmal durchlaufen: Lautsprecher, Kabelkopfhörer, Bluetooth-Kopfhörer.</p>
+
+<section>
+  <h2>Einstellungen</h2>
+  <label>Situation
+    <select id="scenario">
+      <option>Lautsprecher</option>
+      <option>Kabelkopfhörer</option>
+      <option>Bluetooth-Kopfhörer</option>
+    </select>
+  </label>
+  <label>Audio-Session (iOS)
+    <select id="session">
+      <option value="">nicht setzen</option>
+      <option value="play-and-record">play-and-record</option>
+      <option value="playback">playback</option>
+      <option value="auto">auto</option>
+    </select>
+  </label>
+  <label>Klicklautstärke <input id="volume" type="range" min="0" max="1" step="0.05" value="0.8"></label>
+</section>
+
+<section>
+  <h2>Schritt 1: Klick ohne Mikrofon</h2>
+  <p>Klick starten und Lautstärke merken. Dann bei laufendem Klick das Mikrofon einschalten und darauf achten, ob der Klick leiser wird oder plötzlich aus der Hörmuschel kommt.</p>
+  <button id="clickToggle">Klick starten</button>
+  <button id="micStart">Mikrofon einschalten</button>
+  <p class="muted" id="micInfo"></p>
+  <label>Wurde der Klick nach dem Einschalten leiser oder kam er aus der Hörmuschel?
+    <select id="louder">
+      <option value="">noch nicht beurteilt</option>
+      <option value="nein">nein, unverändert</option>
+      <option value="leiser">ja, leiser</option>
+      <option value="hoermuschel">ja, Hörmuschel</option>
+    </select>
+  </label>
+</section>
+
+<section>
+  <h2>Pegel</h2>
+  <div class="meter"><div id="meterBar"></div><span id="thrMark"></span></div>
+  <p class="muted"><span id="flash" class="flash"></span> <span id="peakText">–</span></p>
+  <label>Schwelle <span id="thrText"></span> <input id="threshold" type="range" min="-50" max="-3" step="1" value="-24"></label>
+  <p class="muted">Die rote Marke ist die Schwelle. Sticks sollten deutlich darüber liegen, der Klick allein darunter.</p>
+</section>
+
+<section>
+  <h2>Schritt 2: Rückkopplung</h2>
+  <p>Acht Klicks, dabei <b>nicht</b> schlagen. Zählt, wie oft das Mikrofon den eigenen Klick für einen Schlag hält.</p>
+  <button id="runFeedback" disabled>Rückkopplung testen</button>
+  <p id="feedbackResult"></p>
+</section>
+
+<section>
+  <h2>Schritt 3: Mitschlagen</h2>
+  <p>Vier Klicks Vorzähler, dann 16 Klicks lang auf jeden Klick die Sticks aufeinanderschlagen.</p>
+  <button id="runPlay" disabled>Mitschlagen starten</button>
+  <p id="playResult"></p>
+</section>
+
+<section>
+  <h2>Ergebnis</h2>
+  <p>Nach allen Situationen kopieren und in den Thread einfügen.</p>
+  <button id="copy">Ergebnis kopieren</button>
+  <pre id="log"></pre>
+</section>
+
+<script>
+'use strict';
+const BPM = 100;
+const BEAT = 60 / BPM;
+const REFRACTORY_S = 0.04;
+
+const $ = (id) => document.getElementById(id);
+const dbToLin = (db) => Math.pow(10, db / 20);
+const linToDb = (x) => (x > 0 ? 20 * Math.log10(x) : -Infinity);
+const fmt = (x, d = 1) => (Number.isFinite(x) ? x.toFixed(d) : '–');
+
+let ctx = null;
+let master = null;
+let micNode = null;
+let micTrack = null;
+let worklet = null;
+let clickTimer = null;
+let nextClick = 0;
+let clickIndex = 0;
+let run = null; // { kind, start, end, warmup, hits: [] }
+const results = [];
+
+const WORKLET = `
+class Onset extends AudioWorkletProcessor {
+  constructor() {
+    super();
+    this.thr = ${dbToLin(-24)};
+    this.hold = 0;
+    this.peak = 0;
+    this.count = 0;
+    this.refr = Math.round(sampleRate * ${REFRACTORY_S});
+    this.port.onmessage = (e) => { this.thr = e.data.thr; };
+  }
+  process(inputs) {
+    const ch = inputs[0] && inputs[0][0];
+    if (!ch) return true;
+    for (let i = 0; i < ch.length; i++) {
+      const x = Math.abs(ch[i]);
+      if (x > this.peak) this.peak = x;
+      if (this.hold > 0) { this.hold--; continue; }
+      if (x >= this.thr) {
+        this.port.postMessage({ hit: (currentFrame + i) / sampleRate, level: x });
+        this.hold = this.refr;
+      }
+    }
+    this.count += ch.length;
+    if (this.count >= 2048) {
+      this.port.postMessage({ peak: this.peak });
+      this.peak = 0;
+      this.count = 0;
+    }
+    return true;
+  }
+}
+registerProcessor('onset', Onset);
+`;
+
+function applySession() {
+  const type = $('session').value;
+  if (type && navigator.audioSession) navigator.audioSession.type = type;
+}
+
+async function ensureContext() {
+  if (!ctx) {
+    applySession();
+    ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'interactive' });
+    master = ctx.createGain();
+    master.gain.value = Number($('volume').value);
+    master.connect(ctx.destination);
+  }
+  if (ctx.state !== 'running') await ctx.resume();
+}
+
+function scheduleClick(time, accent) {
+  const osc = ctx.createOscillator();
+  const env = ctx.createGain();
+  osc.frequency.value = accent ? 1500 : 1000;
+  env.gain.setValueAtTime(1, time);
+  env.gain.exponentialRampToValueAtTime(0.001, time + 0.04);
+  osc.connect(env).connect(master);
+  osc.start(time);
+  osc.stop(time + 0.05);
+}
+
+function startClick(firstAccentBeats = 0) {
+  stopClick();
+  nextClick = ctx.currentTime + 0.15;
+  clickIndex = 0;
+  const tick = () => {
+    while (nextClick < ctx.currentTime + 0.12) {
+      scheduleClick(nextClick, clickIndex < firstAccentBeats || clickIndex % 4 === 0);
+      nextClick += BEAT;
+      clickIndex++;
+    }
+  };
+  tick();
+  clickTimer = setInterval(tick, 25);
+  return ctx.currentTime + 0.15;
+}
+
+function stopClick() {
+  if (clickTimer) clearInterval(clickTimer);
+  clickTimer = null;
+  $('clickToggle').textContent = 'Klick starten';
+}
+
+$('clickToggle').onclick = async () => {
+  await ensureContext();
+  if (clickTimer) { stopClick(); return; }
+  run = null;
+  startClick();
+  $('clickToggle').textContent = 'Klick stoppen';
+};
+
+$('volume').oninput = () => { if (master) master.gain.value = Number($('volume').value); };
+$('session').onchange = applySession;
+
+function setThreshold() {
+  const db = Number($('threshold').value);
+  $('thrText').textContent = db + ' dB';
+  $('thrMark').style.left = Math.max(0, Math.min(100, (db + 60) / 60 * 100)) + '%';
+  if (worklet) worklet.port.postMessage({ thr: dbToLin(db) });
+}
+$('threshold').oninput = setThreshold;
+setThreshold();
+
+$('micStart').onclick = async () => {
+  try {
+    await ensureContext();
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+    });
+    micTrack = stream.getAudioTracks()[0];
+    const url = URL.createObjectURL(new Blob([WORKLET], { type: 'application/javascript' }));
+    await ctx.audioWorklet.addModule(url);
+    micNode = ctx.createMediaStreamSource(stream);
+    worklet = new AudioWorkletNode(ctx, 'onset', { numberOfInputs: 1, numberOfOutputs: 0 });
+    micNode.connect(worklet);
+    worklet.port.onmessage = onWorkletMessage;
+    setThreshold();
+    $('micStart').disabled = true;
+    $('runFeedback').disabled = false;
+    $('runPlay').disabled = false;
+    $('micInfo').textContent = 'Mikrofon: ' + (micTrack.label || 'unbekannt') + ' · ' + JSON.stringify(trackSettings());
+  } catch (e) {
+    $('micInfo').textContent = 'Fehler: ' + e.message;
+  }
+};
+
+function trackSettings() {
+  if (!micTrack) return {};
+  const s = micTrack.getSettings();
+  return {
+    echoCancellation: s.echoCancellation,
+    noiseSuppression: s.noiseSuppression,
+    autoGainControl: s.autoGainControl,
+    sampleRate: s.sampleRate,
+    latency: s.latency,
+  };
+}
+
+let peakHold = 0;
+let flashTimer = null;
+function onWorkletMessage(e) {
+  const d = e.data;
+  if (d.peak !== undefined) {
+    const db = linToDb(d.peak);
+    $('meterBar').style.width = Math.max(0, Math.min(100, (db + 60) / 60 * 100)) + '%';
+    peakHold = Math.max(peakHold * 0.98, d.peak);
+    $('peakText').textContent = 'Spitze ' + fmt(linToDb(peakHold)) + ' dB';
+    if (run) run.maxLevel = Math.max(run.maxLevel, d.peak);
+    return;
+  }
+  $('flash').classList.add('on');
+  clearTimeout(flashTimer);
+  flashTimer = setTimeout(() => $('flash').classList.remove('on'), 80);
+  if (run && d.hit >= run.start - BEAT / 2 && d.hit <= run.end + BEAT / 2) run.hits.push(d);
+}
+
+
+function median(xs) {
+  const s = [...xs].sort((a, b) => a - b);
+  const m = Math.floor(s.length / 2);
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+}
+
+function startRun(kind, warmup, measured, button) {
+  const total = warmup + measured;
+  const t0 = startClick(warmup);
+  run = { kind, start: t0 + warmup * BEAT, end: t0 + (total - 1) * BEAT, warmup, measured, hits: [], maxLevel: 0 };
+  $('clickToggle').textContent = 'Klick stoppen';
+  button.disabled = true;
+  const r = run;
+  setTimeout(() => {
+    stopClick();
+    button.disabled = false;
+    finishRun(r);
+  }, ((total + 1) * BEAT + 0.4) * 1000);
+}
+
+$('runFeedback').onclick = () => startRun('feedback', 0, 8, $('runFeedback'));
+$('runPlay').onclick = () => startRun('play', 4, 16, $('runPlay'));
+
+function finishRun(r) {
+  if (run === r) run = null;
+  const base = {
+    situation: $('scenario').value,
+    session: $('session').value || 'nicht gesetzt',
+    klickVeraendert: $('louder').value || 'nicht beurteilt',
+    schwelleDb: Number($('threshold').value),
+  };
+  if (r.kind === 'feedback') {
+    const res = { test: 'Rückkopplung', ...base, fehlausloesungen: r.hits.length, klicks: r.measured, maxPegelDb: Number(fmt(linToDb(r.maxLevel))) };
+    $('feedbackResult').textContent = r.hits.length + ' Fehlauslösungen bei ' + r.measured + ' Klicks, lautester Pegel ' + fmt(linToDb(r.maxLevel)) + ' dB';
+    results.push(res);
+  } else {
+    // Each measured click takes at most one hit, the closest; the rest are extra.
+    const best = new Map();
+    for (const h of r.hits) {
+      const k = Math.round((h.hit - r.start) / BEAT);
+      if (k < 0 || k >= r.measured) continue;
+      const d = h.hit - (r.start + k * BEAT);
+      if (!best.has(k) || Math.abs(d) < Math.abs(best.get(k))) best.set(k, d);
+    }
+    const deltas = [...best.values()].map((d) => d * 1000);
+    const extra = r.hits.length - deltas.length;
+    const med = deltas.length ? median(deltas) : NaN;
+    const spread = deltas.length ? median(deltas.map((d) => Math.abs(d - med))) : NaN;
+    const res = { test: 'Mitschlagen', ...base, erkannt: deltas.length, erwartet: r.measured, extra, medianVersatzMs: Number(fmt(med)), streuungMs: Number(fmt(spread)), maxPegelDb: Number(fmt(linToDb(r.maxLevel))) };
+    $('playResult').textContent = deltas.length + ' von ' + r.measured + ' Schlägen erkannt (' + extra + ' zusätzlich), Versatz ' + fmt(med) + ' ms, Streuung ±' + fmt(spread) + ' ms';
+    results.push(res);
+  }
+  renderLog();
+}
+
+function deviceInfo() {
+  return {
+    userAgent: navigator.userAgent,
+    audioSessionApi: !!navigator.audioSession,
+    sampleRate: ctx && ctx.sampleRate,
+    baseLatencyMs: ctx && ctx.baseLatency !== undefined ? Number(fmt(ctx.baseLatency * 1000)) : null,
+    outputLatencyMs: ctx && ctx.outputLatency !== undefined ? Number(fmt(ctx.outputLatency * 1000)) : null,
+    mikrofon: micTrack ? micTrack.label : null,
+    mikrofonEinstellungen: trackSettings(),
+  };
+}
+
+function renderLog() {
+  $('log').textContent = JSON.stringify({ geraet: deviceInfo(), ergebnisse: results }, null, 1);
+}
+
+$('copy').onclick = async () => {
+  renderLog();
+  try {
+    await navigator.clipboard.writeText($('log').textContent);
+    $('copy').textContent = 'Kopiert';
+  } catch {
+    $('copy').textContent = 'Bitte Text unten markieren';
+  }
+};
+</script>
+</body>
+</html>
