@@ -54,6 +54,8 @@ type MessageHandler = Closure<dyn FnMut(MessageEvent)>;
 #[derive(Default)]
 struct Inner {
     closed: Cell<bool>,
+    /// Whether the iOS audio session was switched for recording.
+    session_changed: Cell<bool>,
     ctx: RefCell<Option<AudioContext>>,
     stream: RefCell<Option<MediaStream>>,
     nodes: RefCell<Vec<AudioNode>>,
@@ -72,6 +74,9 @@ impl Inner {
         }
         if let Some(ctx) = self.ctx.borrow_mut().take() {
             let _ = ctx.close();
+        }
+        if self.session_changed.take() {
+            set_session_type("playback");
         }
         if let Some(on_gesture) = self.on_gesture.borrow_mut().take()
             && let Some(window) = web_sys::window()
@@ -116,6 +121,10 @@ impl Drop for Backend {
 async fn start(shared: Arc<Shared>, inner: &Inner) -> Result<(), JsValue> {
     let window = web_sys::window().ok_or("No window")?;
     let media = window.navigator().media_devices()?;
+    // The page asks for "playback" so the click ignores the silent switch
+    // (index.html), but that category cannot record. "play-and-record" can,
+    // and is not muted by the switch either.
+    inner.session_changed.set(set_session_type("play-and-record"));
     let mut stream = user_media(&media, None).await?;
     if inner.closed.get() {
         stop(&stream);
@@ -265,6 +274,20 @@ fn track_label(stream: &MediaStream) -> String {
 
 fn stop(stream: &MediaStream) {
     tracks(stream).iter().for_each(|t| t.stop());
+}
+
+/// Sets `navigator.audioSession.type` where it exists (Safari 17+); returns
+/// whether it did.
+fn set_session_type(kind: &str) -> bool {
+    let Some(window) = web_sys::window() else {
+        return false;
+    };
+    match Reflect::get(&window.navigator(), &"audioSession".into()) {
+        Ok(session) if session.is_object() => {
+            Reflect::set(&session, &"type".into(), &kind.into()).unwrap_or(false)
+        }
+        _ => false,
+    }
 }
 
 fn describe(err: &JsValue) -> String {
