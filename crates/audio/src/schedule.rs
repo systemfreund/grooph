@@ -22,7 +22,13 @@ pub(crate) enum SoundType {
     Ghost,
     /// Click of the count-in bar before playback starts.
     CountIn,
+    /// Count-in click on a beat unit inside a beat group (the eighths
+    /// between the group starts of 7/8), quieter than [`SoundType::CountIn`].
+    CountInSoft,
 }
+
+/// Volume of [`SoundType::CountInSoft`] relative to the count-in volume.
+const COUNT_IN_SOFT_GAIN: f32 = 0.6;
 
 pub(crate) struct SoundProfile {
     pub(crate) freq_mult: f32,
@@ -33,7 +39,7 @@ impl SoundType {
     /// Whether a muted bar with `mute` silences this sound.
     pub(crate) fn muted_by(self, mute: GapMute) -> bool {
         match self {
-            SoundType::CountIn => false,
+            SoundType::CountIn | SoundType::CountInSoft => false,
             SoundType::Downbeat | SoundType::PrimaryBeat | SoundType::SoftBeat => true,
             SoundType::AccentedBeat | SoundType::Beat | SoundType::Ghost => {
                 mute == GapMute::Everything
@@ -47,7 +53,7 @@ impl SoundType {
                 settings.metronome_muted
             }
             SoundType::AccentedBeat | SoundType::Beat | SoundType::Ghost => settings.rhythm_muted,
-            SoundType::CountIn => false,
+            SoundType::CountIn | SoundType::CountInSoft => false,
         };
         let profile = match self {
             SoundType::Downbeat => SoundProfile { freq_mult: 3.375, gain: settings.downbeat },
@@ -57,6 +63,9 @@ impl SoundType {
             SoundType::Beat => SoundProfile { freq_mult: 1.5, gain: settings.beat },
             SoundType::Ghost => SoundProfile { freq_mult: 1.5, gain: settings.ghost },
             SoundType::CountIn => SoundProfile { freq_mult: 2.25, gain: settings.count_in },
+            SoundType::CountInSoft => {
+                SoundProfile { freq_mult: 1.0, gain: COUNT_IN_SOFT_GAIN * settings.count_in }
+            }
         };
         if muted { SoundProfile { gain: 0.0, ..profile } } else { profile }
     }

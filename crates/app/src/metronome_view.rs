@@ -98,7 +98,7 @@ fn arc(center: Pos2, radius: f32, start: f32, end: f32) -> Vec<Pos2> {
 /// Ready-made click bars of `ts`: the default, then every beat unit split
 /// into 1 to 4 clicks, each with a name. Bars alike are offered once.
 pub(crate) fn click_fills(ts: TimeSignature) -> Vec<(Measure, String)> {
-    let mut fills = vec![(default_click_bar(ts), "Beats".to_owned())];
+    let mut fills = vec![(default_click_bar(ts), "Main beats".to_owned())];
     for parts in 1..=4 {
         let Some(bar) = subdivided_click_bar(ts, parts) else {
             continue;
@@ -473,11 +473,11 @@ mod tests {
         // One click per quarter is the default bar already.
         assert_eq!(
             names(TimeSignature::FOUR_FOUR),
-            ["Beats", "Eighths", "Eighth triplets", "Sixteenths"]
+            ["Main beats", "Eighths", "Eighth triplets", "Sixteenths"]
         );
         assert_eq!(
             names(TimeSignature::SIX_EIGHT),
-            ["Beats", "Eighths", "Sixteenths", "Sixteenth triplets", "Thirty-seconds"]
+            ["Main beats", "Eighths", "Sixteenths", "Sixteenth triplets", "Thirty-seconds"]
         );
     }
 
