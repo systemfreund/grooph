@@ -232,9 +232,8 @@ fn room_above_em(opts: &StaffOpts) -> f32 {
 /// notes, tuplet brackets and numbers, and a tuplet bracket rising over the
 /// accents above its notes. Rows stay free of space nothing in the score uses.
 pub fn extra_room_above_em(score: &Score, accent_below: bool) -> f32 {
-    let notes = || {
-        score.measures.iter().flat_map(|m| m.beats()).filter(|b| b.kind == BeatKind::Note)
-    };
+    let notes =
+        || score.measures.iter().flat_map(|m| m.beats()).filter(|b| b.kind == BeatKind::Note);
     let accents_above = !accent_below && notes().any(|b| b.accented);
     let tuplets =
         score.measures.iter().flat_map(|m| m.beats()).any(|b| b.tuplet_group_id.is_some());
