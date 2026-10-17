@@ -177,7 +177,8 @@ fn content_builds_and_links_resolve() {
                 );
             } else if href.starts_with('/') {
                 let ok = known.contains(&href.as_str())
-                    || ["/site.css", "/favicon.ico"].contains(&href.as_str());
+                    || ["/site.css", "/favicon.ico", "/favicon-32.png", "/apple-touch-icon.png"]
+                        .contains(&href.as_str());
                 assert!(ok, "{}: link to missing page {href}", page.path);
             } else {
                 assert!(

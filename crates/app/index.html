@@ -43,13 +43,17 @@
     <link data-trunk rel="copy-file" href="assets/labs/mic-test.html" data-target-path="labs"/>
     <!-- Unhashed copy for the guide pages and browsers that ask for /favicon.ico. -->
     <link data-trunk rel="copy-file" href="assets/favicon.ico"/>
+    <!-- Safari (tab bar, compact address bar, home screen) ignores the .ico: give it PNGs at fixed root paths. -->
+    <link data-trunk rel="copy-file" href="assets/favicon-32.png"/>
+    <link data-trunk rel="copy-file" href="assets/apple-touch-icon.png"/>
+    <link data-trunk rel="copy-file" href="assets/icon-256.png"/>
+    <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
+    <link rel="apple-touch-icon" href="apple-touch-icon.png">
     <!-- sitemap.xml, llms.txt and the guide pages are written by crates/site (Trunk post_build hook). -->
     <!--    <link data-trunk rel="copy-file" href="assets/icon-1024.png" data-target-path="assets"/>-->
-    <!--    <link data-trunk rel="copy-file" href="assets/icon-256.png" data-target-path="assets"/>-->
     <!--    <link data-trunk rel="copy-file" href="assets/icon_ios_touch_192.png" data-target-path="assets"/>-->
     <!--    <link data-trunk rel="copy-file" href="assets/maskable_icon_x512.png" data-target-path="assets"/>-->
     <!--    <link rel="manifest" href="manifest.json">-->
-    <!--    <link rel="apple-touch-icon" href="assets/icon_ios_touch_192.png">-->
     <meta name="theme-color" media="(prefers-color-scheme: light)" content="white">
     <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#404040">
 
@@ -190,6 +194,24 @@
     </p>
     <div class="lds-dual-ring"></div>
 </div>
+
+<!-- iOS shows the page as "now playing" (Dynamic Island, lock screen) while the click plays; without
+     media session metadata that spot stays blank. -->
+<script>
+    if ("mediaSession" in navigator && typeof MediaMetadata === "function") {
+        try {
+            navigator.mediaSession.metadata = new MediaMetadata({
+                title: "grooph",
+                artist: "Metronome & Rhythm Trainer",
+                artwork: [
+                    {src: "apple-touch-icon.png", sizes: "180x180", type: "image/png"},
+                    {src: "icon-256.png", sizes: "256x256", type: "image/png"}
+                ]
+            });
+        } catch (e) {
+        }
+    }
+</script>
 
 <!-- iOS plays Web Audio in the "ambient" session category, which the ring/silent switch mutes.
      <audio> and <video> elements play as "playback" and ignore the switch, which is why video sites
