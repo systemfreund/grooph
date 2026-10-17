@@ -53,11 +53,11 @@ impl Grooph {
                             ui,
                             "Metronome",
                             &mut settings.metronome_muted,
-                            "Silence downbeat and beats; the count-in still sounds",
+                            "Silence the metronome clicks; the count-in still sounds",
                             |ui| {
                                 volume_slider(ui, &mut settings.downbeat, "Downbeat")
                                     .on_hover_text("Accented clicks of the click bar");
-                                volume_slider(ui, &mut settings.primary, "Beats")
+                                volume_slider(ui, &mut settings.primary, "Medium")
                                     .on_hover_text("Plain clicks of the click bar");
                                 volume_slider(ui, &mut settings.soft, "Soft").on_hover_text(
                                     "Soft clicks of the click bar (notes in parentheses)",
