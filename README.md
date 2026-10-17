@@ -220,7 +220,10 @@ Important root files:
   "Clicks" picker offers the ready-made bars (`click_fills`), "Edit clicks"
   shows the tool palette. A meter picked there without a click bar of its
   own starts with `meter_click_bar`: beats in x/4, every eighth or
-  sixteenth in x/8 and x/16 (stored as the meter's click bar). The staff gets a share of the free height
+  sixteenth in x/8 and x/16 (stored as the meter's click bar). A meter picked
+  for the rhythm (Practice's meter picker, Edit's time signature dialog)
+  becomes the metronome's too (`follow_meter`), with the click bar it
+  already has; the metronome's meter never changes the rhythm. The staff gets a share of the free height
   (`METRONOME_STAFF_SHARE`), the ring the rest; the options sheet folds away
   like Practice's (shared `options_collapsed`). While playing, the click and beat being heard light
   up and the middle shows the bar number. Switching into or out of the tab

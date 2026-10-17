@@ -296,6 +296,7 @@ impl Grooph {
             .inner;
         if let Some(ts) = picked {
             settings.time_signature = ts;
+            self.follow_meter(ts);
         }
         picked.is_some()
     }

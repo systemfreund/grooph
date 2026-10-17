@@ -228,6 +228,15 @@ impl Grooph {
         self.replace_click_bar(bar);
     }
 
+    /// A meter picked for the rhythm (Practice or Edit) becomes the
+    /// metronome's too, with the click bar that meter already has. Not the
+    /// other way round: the metronome's meter leaves the rhythm alone.
+    pub(crate) fn follow_meter(&mut self, ts: TimeSignature) {
+        if !self.metronome_mode() {
+            self.editor.metronome.meter = ts;
+        }
+    }
+
     /// Replace the click bar being edited, undoably.
     pub(crate) fn replace_click_bar(&mut self, bar: Measure) {
         if !self.metronome_mode() || same_bar(&bar, &self.editor.score.measures[0]) {
