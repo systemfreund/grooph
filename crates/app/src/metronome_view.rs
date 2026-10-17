@@ -112,6 +112,16 @@ pub(crate) fn click_fills(ts: TimeSignature) -> Vec<(Measure, String)> {
     fills
 }
 
+/// Click bar a meter picked in the metronome starts with: x/4 clicks its
+/// beats, x/8 and x/16 every eighth or sixteenth.
+pub(crate) fn meter_click_bar(ts: TimeSignature) -> Measure {
+    if ts.beat_unit > 4 {
+        subdivided_click_bar(ts, 1).unwrap_or_else(|| default_click_bar(ts))
+    } else {
+        default_click_bar(ts)
+    }
+}
+
 fn fill_name(d: Duration) -> String {
     let base = d.base_note().name();
     if d.is_tuplet() { format!("{base} triplets") } else { format!("{base}s") }
@@ -201,17 +211,20 @@ impl Grooph {
         }
     }
 
-    /// Edit the click bar of `ts` from now on. Undoable, like a bar change.
+    /// Edit the click bar of `ts` from now on: its own one, or else
+    /// `meter_click_bar`. Undoable, like a bar change.
     pub(crate) fn set_metronome_meter(&mut self, ts: TimeSignature) {
         if ts == self.metronome_meter() {
             return;
         }
+        self.sync_click_bar();
+        let click = &self.playback_ctl.audio_cfg.click;
+        let bar = click.custom_for(ts).cloned().unwrap_or_else(|| meter_click_bar(ts));
         if !self.metronome_mode() {
             self.editor.metronome.meter = ts;
+            self.playback_ctl.audio_cfg.click.set(bar);
             return;
         }
-        self.sync_click_bar();
-        let bar = self.playback_ctl.audio_cfg.click.for_meter(ts);
         self.replace_click_bar(bar);
     }
 
@@ -457,6 +470,21 @@ mod tests {
             names(TimeSignature::SIX_EIGHT),
             ["Beats", "Eighths", "Sixteenths", "Sixteenth triplets", "Thirty-seconds"]
         );
+    }
+
+    #[test]
+    fn picked_meters_click_their_beat_unit() {
+        let ts = TimeSignature::FOUR_FOUR;
+        assert!(same_bar(&meter_click_bar(ts), &default_click_bar(ts)));
+        let ts = TimeSignature::SEVEN_EIGHT;
+        assert!(same_bar(&meter_click_bar(ts), &bar("7/8 >e (e) e (e) (e) e (e)")));
+        let ts: TimeSignature = "5/16".parse().unwrap();
+        assert_eq!(meter_click_bar(ts).beats().len(), 5);
+        // Its name in the Clicks picker.
+        let fills = click_fills(TimeSignature::SEVEN_EIGHT);
+        let name =
+            fills.iter().find(|(m, _)| same_bar(m, &meter_click_bar(TimeSignature::SEVEN_EIGHT)));
+        assert_eq!(name.map(|(_, n)| n.as_str()), Some("Eighths"));
     }
 
     #[test]
