@@ -23,8 +23,11 @@ const TAB_HEIGHT: f32 = 56.0;
 const CARD_CELL_HEIGHT: f32 = 64.0;
 const PLAY_BUTTON_SIZE: f32 = 68.0;
 const SIDE_BUTTON_SIZE: f32 = 52.0;
-/// Room the metronome tab keeps for the click bar's staff above the ring.
-const METRONOME_STAFF_HEIGHT: f32 = 130.0;
+/// Share of the metronome tab's free height the click bar's staff gets, and
+/// its bounds; the ring below takes the rest.
+const METRONOME_STAFF_SHARE: f32 = 0.35;
+const METRONOME_STAFF_MIN: f32 = 100.0;
+const METRONOME_STAFF_MAX: f32 = 220.0;
 const CARD_RADIUS: u8 = 16;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -207,6 +210,18 @@ fn round_button_at(
     resp
 }
 
+/// Handle on top of an options sheet: tap to fold the options away.
+/// Returns whether it was tapped.
+fn sheet_handle(ui: &mut Ui) -> bool {
+    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 22.0), Sense::click());
+    ui.painter().rect_filled(
+        Rect::from_center_size(rect.center(), vec2(40.0, 5.0)),
+        3,
+        ui.visuals().weak_text_color(),
+    );
+    resp.clicked()
+}
+
 fn paint_play_icon(painter: &Painter, rect: Rect, color: Color32, playing: bool) {
     let c = rect.center();
     let s = rect.width() * 0.17;
@@ -275,10 +290,12 @@ impl Grooph {
             CompactTab::Metronome => {
                 self.compact_metronome_sheet(ui);
                 self.compact_metronome_card(ui);
-                // The ring takes what the staff above it leaves.
-                let height = (ui.available_height() - METRONOME_STAFF_HEIGHT)
-                    .min(ui.available_width())
-                    .max(0.0);
+                // The staff above takes a share of the room, the ring the rest.
+                let room = ui.available_height().max(0.0);
+                let staff = (METRONOME_STAFF_SHARE * room)
+                    .clamp(METRONOME_STAFF_MIN, METRONOME_STAFF_MAX)
+                    .min(room);
+                let height = (room - staff).min(ui.available_width());
                 self.metronome_ring(ui, height);
             }
             CompactTab::More => self.compact_more(ui),
@@ -427,17 +444,7 @@ impl Grooph {
                         .corner_radius(CARD_RADIUS)
                         .inner_margin(Margin { left: 12, right: 12, top: 0, bottom: 12 })
                         .show(ui, |ui| {
-                            // Handle: tap to fold the options away.
-                            let (rect, resp) = ui.allocate_exact_size(
-                                vec2(ui.available_width(), 22.0),
-                                Sense::click(),
-                            );
-                            ui.painter().rect_filled(
-                                Rect::from_center_size(rect.center(), vec2(40.0, 5.0)),
-                                3,
-                                ui.visuals().weak_text_color(),
-                            );
-                            if resp.clicked() {
+                            if sheet_handle(ui) {
                                 self.ui.compact.options_collapsed =
                                     !self.ui.compact.options_collapsed;
                             }
@@ -455,6 +462,17 @@ impl Grooph {
         self.finish_generator_change(before, endless_before, roll);
     }
 
+    fn compact_metronome_rows(&mut self, ui: &mut Ui) {
+        if value_row(ui, "Clicks", &self.click_fill_label()).clicked() {
+            self.ui.picker = Some(Picker::ClickFill);
+        }
+        if value_row(ui, "Edit clicks", "✏").clicked() {
+            self.ui.mode = Mode::Edit;
+        }
+        switch_row(ui, "Count-in", &mut self.playback_ctl.audio_cfg.count_in);
+        switch_row(ui, "Mute bars", &mut self.playback_ctl.audio_cfg.gap.enabled);
+    }
+
     /// Metronome options and the play button.
     fn compact_metronome_sheet(&mut self, ui: &mut Ui) {
         egui::Panel::bottom("compact_metronome")
@@ -465,21 +483,17 @@ impl Grooph {
                     Frame::new()
                         .fill(card_fill(ui))
                         .corner_radius(CARD_RADIUS)
-                        .inner_margin(Margin::same(12))
+                        .inner_margin(Margin { left: 12, right: 12, top: 0, bottom: 12 })
                         .show(ui, |ui| {
-                            if value_row(ui, "Clicks", &self.click_fill_label()).clicked() {
-                                self.ui.picker = Some(Picker::ClickFill);
+                            // Folds with the Practice options: one sheet setting.
+                            if sheet_handle(ui) {
+                                self.ui.compact.options_collapsed =
+                                    !self.ui.compact.options_collapsed;
                             }
-                            if value_row(ui, "Edit clicks", "✏").clicked() {
-                                self.ui.mode = Mode::Edit;
+                            if !self.ui.compact.options_collapsed {
+                                self.compact_metronome_rows(ui);
+                                ui.add_space(8.0);
                             }
-                            switch_row(ui, "Count-in", &mut self.playback_ctl.audio_cfg.count_in);
-                            switch_row(
-                                ui,
-                                "Mute bars",
-                                &mut self.playback_ctl.audio_cfg.gap.enabled,
-                            );
-                            ui.add_space(8.0);
                             let playing =
                                 self.playback_ctl.transport_state == TransportState::Playing;
                             let (row, _) = ui.allocate_exact_size(

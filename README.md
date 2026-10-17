@@ -217,7 +217,9 @@ Important root files:
   staff a ring shows one segment per note or rest of the bar, as long as it,
   thickness by level; a tap cycles strong, medium, soft, off (undoable). The
   "Clicks" picker offers the ready-made bars (`click_fills`), "Edit clicks"
-  shows the tool palette. While playing, the click and beat being heard light
+  shows the tool palette. The staff gets a share of the free height
+  (`METRONOME_STAFF_SHARE`), the ring the rest; the options sheet folds away
+  like Practice's (shared `options_collapsed`). While playing, the click and beat being heard light
   up and the middle shows the bar number. Switching into or out of the tab
   stops playback.
 
@@ -255,6 +257,8 @@ Important root files:
   (ring) or `Mode::Edit` (tool palette).
 - Settings open in a `Modal` picker (`settings_picker`); generator changes go
   through `finish_generator_change`.
+- The staff's em is capped so one row (with accents and count labels) fits
+  the panel's height (`row_height_em`).
 - Windows narrower than `NARROW_MAX_WIDTH` (600 pt, `UiShell::narrow_screen`)
   get tighter staff spacing, so glyphs are bigger on phones.
 - While a tempo ramp runs, the card shows the tempo being played ("BPM now").

@@ -7,8 +7,8 @@ use eframe::egui;
 use eframe::egui::{FontId, Frame, Rect, Response, Stroke};
 use grooph_layout::pixel_layout::{GlyphMetrics, MeasureLayout, compute_em};
 use grooph_layout::staff_layout::{
-    PlacedMeasure, ROOM_BELOW_EM, ROOM_BELOW_WITH_LABELS_EM, StaffLayout, StaffOpts,
-    build_staff_layout, extra_room_above_em,
+    LEGIBILITY_FLOOR_EM, PlacedMeasure, ROOM_BELOW_EM, ROOM_BELOW_WITH_LABELS_EM, StaffLayout,
+    StaffOpts, build_staff_layout, extra_room_above_em, row_height_em,
 };
 use grooph_measure::TimeSignature;
 use grooph_measure::grid::DEFAULT_GRID;
@@ -101,6 +101,16 @@ impl Grooph {
                                 &self.editor.score,
                                 self.ui.layout.accent_below,
                             ),
+                        };
+                        // One row fits the height, so nothing above or below
+                        // the staff (accents, count labels) is cut off on a
+                        // short, wide panel.
+                        let row_height = row_height_em(&staff_opts) * em;
+                        let staff_opts = if row_height > available.y && available.y > 0.0 {
+                            let floor = LEGIBILITY_FLOOR_EM / em;
+                            staff_opts.rescaled((available.y / row_height).max(floor.min(1.0)))
+                        } else {
+                            staff_opts
                         };
 
                         let staff = build_staff_layout(&self.editor.score, &staff_opts);

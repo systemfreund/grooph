@@ -293,7 +293,7 @@ impl Grooph {
 
         let area = ui.available_rect_before_wrap();
         let (rect, resp) = ui.allocate_exact_size(area.size(), Sense::click());
-        let radius = 0.4 * rect.width().min(rect.height());
+        let radius = 0.44 * rect.width().min(rect.height());
         if radius < 20.0 {
             return;
         }

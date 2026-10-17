@@ -240,7 +240,7 @@ pub fn extra_room_above_em(score: &Score, accent_below: bool) -> f32 {
 /// staff line plus the room below it, so adjacent rows sit as close together
 /// as legibility allows rather than leaving dead space. The staff line sits
 /// off-center accordingly (see [`StaffOpts::baseline_shift`]).
-fn row_height_em(opts: &StaffOpts) -> f32 {
+pub fn row_height_em(opts: &StaffOpts) -> f32 {
     room_above_em(opts) + opts.room_below_em
 }
 
