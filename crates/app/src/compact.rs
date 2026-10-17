@@ -39,10 +39,16 @@ pub(crate) enum CompactTab {
 }
 
 /// UI state of the layout. Not persisted.
-#[derive(Default)]
 pub(crate) struct CompactState {
     /// The options sheet only shows its handle and the transport buttons.
+    /// Folded at start, so the staff and the ring get the room.
     pub(crate) options_collapsed: bool,
+}
+
+impl Default for CompactState {
+    fn default() -> Self {
+        Self { options_collapsed: true }
+    }
 }
 
 fn subdivision_short_label(s: Subdivision) -> &'static str {
