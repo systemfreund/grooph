@@ -171,12 +171,11 @@ Important root files:
   see `crates/audio/samples/CREDITS.md`; add a row there with every new sample.
 - `VoiceMixer` (`voices.rs`) plays samples resampled to the device rate.
 - Mixer (`mixer_panel.rs`): a "Metronome" group (`downbeat`, `primary` as
-  "Beats", `soft`, `pulse`, `count_in`) and a "Rhythm" group (`beat` as "Notes", `accent`,
+  "Beats", `soft`, `count_in`) and a "Rhythm" group (`beat` as "Notes", `accent`,
   `ghost`), each with a mute (`metronome_muted` / `rhythm_muted`, applied in
   `SoundType::profile`). The metronome mute leaves the count-in audible.
-  `pulse` (default 0, off) clicks every beat unit between the primary beats
-  (`SoundType::Pulse`, e.g. the eighths inside the groups of 7/8); sounds
-  with zero gain are not triggered at all.
+  Sounds with zero gain are not triggered at all. Clicks between the beats
+  (e.g. every eighth of 7/8) come from the click bar, not from the mixer.
 - Click bars (`grooph_measure::click`): what the metronome clicks in a meter
   is a measure, the meter's click bar. Each note is a click, its `ClickLevel`
   from the note: accented = strong, plain = medium, soft = soft, a rest = no
@@ -188,7 +187,7 @@ Important root files:
   keyed by the whole `TimeSignature` including its grouping, and applies to
   all playback in that meter. `Schedule::build` plays strong as `Downbeat`,
   medium as `PrimaryBeat`, soft as `SoftBeat` (mixer "Soft"), at the swung
-  position of each note; pulse clicks stay. The count-in and calibration
+  position of each note. The count-in and calibration
   ignore the click bars. Link parameter `click` is the click bar of the
   link's first meter in text notation without the time signature (e.g.
   `>q r:q. (q)`); shared links carry it when it is not the default.

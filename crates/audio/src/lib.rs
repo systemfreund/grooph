@@ -69,10 +69,6 @@ pub struct AudioSettings {
     /// Volume of the count-in bar.
     #[serde(default = "default_count_in_gain")]
     pub count_in: f32,
-    /// Volume of the clicks on every beat unit between the primary beats
-    /// (the eighths inside the groups of 7/8). 0 turns them off.
-    #[serde(default)]
-    pub pulse: f32,
     /// Volume of the beat groups a click pattern sets to soft.
     #[serde(default = "default_soft_gain")]
     pub soft: f32,
@@ -113,7 +109,6 @@ impl Default for AudioSettings {
             rhythm_sound: RhythmSound::default(),
             metronome_sound: MetronomeSound::default(),
             count_in: default_count_in_gain(),
-            pulse: 0.0,
             soft: default_soft_gain(),
             metronome_muted: false,
             rhythm_muted: false,
@@ -145,7 +140,6 @@ impl AudioSettings {
             rhythm_sound: RhythmSound::default(),
             metronome_sound: MetronomeSound::default(),
             count_in: default_count_in_gain(),
-            pulse: 0.0,
             soft: default_soft_gain(),
             metronome_muted: false,
             rhythm_muted: false,
@@ -400,16 +394,13 @@ impl Audio {
 }
 
 /// Count-in bar for `score`: the first measure's length with a click on the
-/// downbeat and each primary beat (so 6/8 counts in two, 4/4 in four), plus
-/// the pulse clicks between them like in the score's bars.
+/// downbeat and each primary beat (so 6/8 counts in two, 4/4 in four).
 fn count_in_plan(score: &Score) -> Option<CountInPlan> {
     let ts = score.measures.first()?.time_signature();
     let ticks = DEFAULT_GRID.ticks_per_measure(&ts);
     let mut clicks = vec![(0, SoundType::CountIn)];
     let primaries = DEFAULT_GRID.primary_boundaries(&ts);
     clicks.extend(primaries.into_iter().map(|t| (t, SoundType::CountIn)));
-    clicks.extend(schedule::pulse_ticks(&ts).into_iter().map(|t| (t, SoundType::CountInPulse)));
-    clicks.sort_by_key(|&(t, _)| t);
     Some(CountInPlan { ticks, clicks })
 }
 
@@ -603,11 +594,11 @@ mod tests {
     }
 
     #[test]
-    fn count_in_plays_the_pulse_between_the_beats() {
-        use SoundType::{CountIn as C, CountInPulse as P};
-        // 7/8 (2+3+2): every eighth clicks, the pulses between the beats.
-        assert_eq!(count_in_of(TimeSignature::new(7, 8)), [C, P, C, P, P, C, P]);
-        assert_eq!(count_in_of(TimeSignature::SIX_EIGHT), [C, P, P, C, P, P]);
+    fn count_in_clicks_the_beats() {
+        use SoundType::CountIn as C;
+        // 7/8 (2+3+2) counts in three, 6/8 two, 4/4 four.
+        assert_eq!(count_in_of(TimeSignature::new(7, 8)), [C, C, C]);
+        assert_eq!(count_in_of(TimeSignature::SIX_EIGHT), [C, C]);
         assert_eq!(count_in_of(TimeSignature::FOUR_FOUR), [C, C, C, C]);
     }
 }

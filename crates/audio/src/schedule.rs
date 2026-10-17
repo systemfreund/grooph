@@ -1,6 +1,5 @@
 use grooph_measure::BeatKind;
 use grooph_measure::Score;
-use grooph_measure::TimeSignature;
 use grooph_measure::click::{ClickBars, ClickLevel};
 use grooph_measure::generator::Subdivision;
 use grooph_measure::ghost::ghost_onsets;
@@ -15,9 +14,6 @@ use crate::trainer::GapMute;
 pub(crate) enum SoundType {
     Downbeat,
     PrimaryBeat,
-    /// Click on a beat unit between the primary beats, e.g. the eighths
-    /// inside the 2+2+3 groups of 7/8. Silent unless its volume is raised.
-    Pulse,
     /// Primary beat that the click pattern sets to [`ClickLevel::Soft`].
     SoftBeat,
     AccentedBeat,
@@ -26,9 +22,6 @@ pub(crate) enum SoundType {
     Ghost,
     /// Click of the count-in bar before playback starts.
     CountIn,
-    /// [`SoundType::Pulse`] inside the count-in bar, at the pulse volume
-    /// scaled by the count-in volume.
-    CountInPulse,
 }
 
 pub(crate) struct SoundProfile {
@@ -40,11 +33,8 @@ impl SoundType {
     /// Whether a muted bar with `mute` silences this sound.
     pub(crate) fn muted_by(self, mute: GapMute) -> bool {
         match self {
-            SoundType::CountIn | SoundType::CountInPulse => false,
-            SoundType::Downbeat
-            | SoundType::PrimaryBeat
-            | SoundType::SoftBeat
-            | SoundType::Pulse => true,
+            SoundType::CountIn => false,
+            SoundType::Downbeat | SoundType::PrimaryBeat | SoundType::SoftBeat => true,
             SoundType::AccentedBeat | SoundType::Beat | SoundType::Ghost => {
                 mute == GapMute::Everything
             }
@@ -53,39 +43,23 @@ impl SoundType {
 
     pub(crate) fn profile(self, settings: &AudioSettings) -> SoundProfile {
         let muted = match self {
-            SoundType::Downbeat
-            | SoundType::PrimaryBeat
-            | SoundType::SoftBeat
-            | SoundType::Pulse => settings.metronome_muted,
+            SoundType::Downbeat | SoundType::PrimaryBeat | SoundType::SoftBeat => {
+                settings.metronome_muted
+            }
             SoundType::AccentedBeat | SoundType::Beat | SoundType::Ghost => settings.rhythm_muted,
-            SoundType::CountIn | SoundType::CountInPulse => false,
+            SoundType::CountIn => false,
         };
         let profile = match self {
             SoundType::Downbeat => SoundProfile { freq_mult: 3.375, gain: settings.downbeat },
             SoundType::PrimaryBeat => SoundProfile { freq_mult: 1.0, gain: settings.primary },
-            SoundType::Pulse => SoundProfile { freq_mult: 1.0, gain: settings.pulse },
             SoundType::SoftBeat => SoundProfile { freq_mult: 1.0, gain: settings.soft },
             SoundType::AccentedBeat => SoundProfile { freq_mult: 2.25, gain: settings.accent },
             SoundType::Beat => SoundProfile { freq_mult: 1.5, gain: settings.beat },
             SoundType::Ghost => SoundProfile { freq_mult: 1.5, gain: settings.ghost },
             SoundType::CountIn => SoundProfile { freq_mult: 2.25, gain: settings.count_in },
-            SoundType::CountInPulse => {
-                SoundProfile { freq_mult: 1.0, gain: settings.pulse * settings.count_in }
-            }
         };
         if muted { SoundProfile { gain: 0.0, ..profile } } else { profile }
     }
-}
-
-/// Ticks within a bar of `ts` that get a [`SoundType::Pulse`]: every beat
-/// unit that is neither the downbeat nor a primary beat.
-pub(crate) fn pulse_ticks(ts: &TimeSignature) -> Vec<u32> {
-    let primaries = DEFAULT_GRID.primary_boundaries(ts);
-    let unit = DEFAULT_GRID.ticks_per_beat(ts);
-    (unit..DEFAULT_GRID.ticks_per_measure(ts))
-        .step_by(unit.max(1) as usize)
-        .filter(|t| !primaries.contains(t))
-        .collect()
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
@@ -112,7 +86,6 @@ impl Schedule {
 
         for (idx, measure) in score.measures.iter().enumerate() {
             let ts = measure.time_signature();
-            let start = timing.measure_start_tick(idx);
 
             let bar = click.for_meter(ts);
             let bar_onsets = DEFAULT_GRID.compute_onset_ticks(bar.beats());
@@ -124,9 +97,6 @@ impl Schedule {
                     ClickLevel::Off => continue,
                 };
                 map.entry(timing.performed_global_tick(idx, t)).or_default().push(sound);
-            }
-            for t in pulse_ticks(&ts) {
-                map.entry(start + t as u64).or_default().push(SoundType::Pulse);
             }
 
             let onsets = DEFAULT_GRID.compute_onset_ticks(measure.beats());
@@ -283,24 +253,6 @@ mod tests {
         let settings = AudioSettings { soft: 0.3, ..AudioSettings::default() };
         assert_eq!(SoundType::SoftBeat.profile(&settings).gain, 0.3);
         assert!(SoundType::SoftBeat.muted_by(GapMute::Metronome));
-    }
-
-    #[test]
-    fn pulse_fills_the_beat_units_between_primary_beats() {
-        let pulses = |ts: TimeSignature| {
-            let score = Score { measures: vec![Measure::new(ts)] };
-            let timing = ScoreTiming::from_score(&score, 120);
-            let s = Schedule::build(&score, &timing, None, &ClickBars::default());
-            let count = |t: SoundType| s.map.values().flatten().filter(|&&x| x == t).count();
-            (count(SoundType::PrimaryBeat), count(SoundType::Pulse))
-        };
-        // 7/8 (2+3+2): downbeat, 2 primary beats and 4 pulses = all 7 eighths.
-        assert_eq!(pulses(TimeSignature::new(7, 8)), (2, 4));
-        assert_eq!(pulses(TimeSignature::SIX_EIGHT), (1, 4));
-        // 5/8 as 2+3 still clicks one primary beat.
-        assert_eq!(pulses(TimeSignature::FIVE_EIGHT.with_grouping(1)), (1, 3));
-        // In x/4 every beat unit is already a primary beat.
-        assert_eq!(pulses(TimeSignature::FOUR_FOUR), (3, 0));
     }
 
     #[test]

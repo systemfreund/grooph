@@ -62,11 +62,6 @@ impl Grooph {
                                 volume_slider(ui, &mut settings.soft, "Soft").on_hover_text(
                                     "Soft clicks of the click bar (notes in parentheses)",
                                 );
-                                volume_slider(ui, &mut settings.pulse, "Pulse").on_hover_text(
-                                    "Clicks on every beat unit between the beats, e.g. all \
-                                     seven eighths in 7/8. Set it to the Beats volume to \
-                                     hear every eighth equally loud; 0% turns it off.",
-                                );
                             },
                             |ui| {
                                 volume_slider(ui, &mut settings.count_in, "Count-in");

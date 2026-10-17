@@ -94,11 +94,11 @@ Yes. By default the metronome plays claves: a high hit on the downbeat and a low
 the other main beats, and the rhythm plays a snare drum with its own recordings for
 normal notes, accents and ghost notes. Under Settings → Sounds you can switch the
 metronome or the rhythm to a plain click, whose waveform you can change. The mixer
-(speaker icon) has two groups: the metronome (downbeat, beats, pulse, count-in) and the
-rhythm (notes, accents, ghost notes). Each group can be muted, for example to hear only
-the written rhythm. The metronome clicks on the main beats, so 7/8 gets three clicks per
-bar; raise **Pulse** to also hear the eighths in between, as loud as **Beats** to click
-all seven equally.
+(speaker icon) has two groups: the metronome (downbeat, beats, soft clicks, count-in) and
+the rhythm (notes, accents, ghost notes). Each group can be muted, for example to hear
+only the written rhythm. What the metronome clicks is set per time signature in the
+Metronome tab under **Clicks**: **Beats** gives 7/8 three clicks per bar, **Eighths** all
+seven, with the eighths between the beats played soft.
 
 The claves samples are by [altemark](https://freesound.org/people/altemark/packs/11638/)
 on freesound.org, licensed under Creative Commons Attribution-NonCommercial (CC BY-NC).
