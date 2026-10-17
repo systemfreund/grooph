@@ -17,6 +17,7 @@ files, and invariants so changes can be made with confidence.
 - `crates/render`: Draws the layout with egui (notes, beams, tuplets, cursor).
 - `crates/audio`: Metronome synth (rodio), scheduling based on the measure.
 - `crates/midi`: MIDI input abstraction (midir).
+- `crates/mic`: Microphone hit detection (cpal natively, `getUserMedia` + AudioWorklet on the web).
 - `crates/link`: Shareable links (URL query parameters <-> score/generator/metronome).
 - `crates/site`: Static guide pages for grooph.app, generated from Markdown at build time.
 
@@ -231,14 +232,22 @@ Important root files:
 
 ## Play along (accuracy)
 
-- Hit sources (`crates/app/src/play_along.rs`): MIDI NoteOns and taps (tap key,
-  default `J`, or a press on the staff while playing). All hits are stamped on
-  one clock (`crates/app/src/clock.rs`); MIDI timestamps are moved onto it by
-  their age. On the web taps use the DOM event `timeStamp` (`web.rs`), natively
+- Hit sources (`crates/app/src/play_along.rs`): MIDI NoteOns, microphone hits
+  and taps (tap key, default `J`, or a press on the staff while playing). All
+  hits are stamped on one clock (`crates/app/src/clock.rs`); MIDI and
+  microphone timestamps are moved onto it by their age. On the web taps use the DOM event `timeStamp` (`web.rs`), natively
   the frame time. Each source has its own input offset (`PlayAlongSettings`).
 - While tap capture is active, staff presses are hits, not edits.
+- Microphone (`crates/mic`): a hit starts where the first sample crosses the
+  threshold; 40 ms after it are ignored. On the web an AudioWorklet forwards
+  1024-frame blocks to the page, whose context time is mapped onto
+  `performance.now()`; natively cpal's capture timestamp is used. The
+  microphone is open only while a run with it plays, a microphone calibration
+  runs or the settings show its level meter, because phones change audio
+  routing while recording. On iOS the built-in microphone is chosen over a
+  headset's, which filters out hits.
 - The session (`accuracy::AccuracyTracker`) runs while MIDI is connected or
-  after the first tap of a run. Stopping keeps a `RunSummary` (hits, perfect/
+  after the first tap or microphone hit of a run. Stopping keeps a `RunSummary` (hits, perfect/
   good/off windows, misses, extra hits, mean, spread) for the "Your run" window
   and the run's marks, drawn on the staff until the next run or an edit.
 - Grading (`accuracy::session::HitWindows`): perfect ≤ 25 ms, good ≤ 60 ms,
@@ -308,6 +317,7 @@ If you add new tools/shortcuts, remember:
 - Drawing: `crates/render/src/measure.rs`, `beat.rs`.
 - Audio: `crates/audio/src/lib.rs`.
 - MIDI: `crates/midi/src/input.rs`.
+- Microphone: `crates/mic/src/` (detector, `native.rs`, `web.rs`).
 
 ## Notes for LLM agents
 

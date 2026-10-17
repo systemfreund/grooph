@@ -18,6 +18,7 @@ use grooph_measure::click::ClickBars;
 use grooph_measure::swing::Swing;
 use grooph_measure::tap_tempo::TapTempo;
 use grooph_measure::{Cursor, Measure, Score};
+use grooph_mic::MicInput;
 use grooph_midi::MidiInput;
 use std::collections::HashMap;
 
@@ -185,6 +186,18 @@ pub(crate) struct MidiState {
     pub(crate) selected_port_id: Option<String>,
 }
 
+/// Microphone hit input. Open only while it is needed: in use, the
+/// microphone changes how phones route and play audio.
+#[derive(Default)]
+pub(crate) struct MicState {
+    pub(crate) input: Option<MicInput>,
+    /// The settings show the level meter: keep listening until then (clock
+    /// seconds).
+    pub(crate) monitor_until: f64,
+    /// Level shown by the meter (dBFS); falls back slowly after a peak.
+    pub(crate) level_db: f32,
+}
+
 /// Score editing surface: the document, where the cursor sits, undo history,
 /// and pre-built button thumbnails. Mutated by tools and the time-signature
 /// dialog; read by the rendering pipeline.
@@ -217,7 +230,7 @@ pub(crate) struct EditorState {
 }
 
 /// Realtime playback subsystem: transport, tempo, audio engine, MIDI input,
-/// tap input, and the accuracy tracker that ties hits to score onsets.
+/// microphone and tap input, and the accuracy tracker that ties hits to score onsets.
 pub(crate) struct PlaybackController {
     pub(crate) transport_state: TransportState,
     pub(crate) bpm: u32,
@@ -226,6 +239,7 @@ pub(crate) struct PlaybackController {
     pub(crate) playback: PlaybackState,
     pub(crate) accuracy: AccuracyState,
     pub(crate) midi: MidiState,
+    pub(crate) mic: MicState,
     pub(crate) play_along: PlayAlongState,
 }
 

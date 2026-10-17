@@ -17,6 +17,7 @@ Rust developers and focuses on crate-specific behaviors and APIs that matter whe
     - `render` (grooph-render): draws the layouts with egui.
     - `audio` (grooph-audio): click sounds and scheduling (rodio; cpal on WASM).
     - `midi` (grooph-midi): MIDI input.
+    - `mic` (grooph-mic): microphone hit detection (cpal natively; `getUserMedia` and an AudioWorklet on the web).
     - `link` (grooph-link): shareable links (`?v=2&bpm=..&r=..`) and the text notation for scores.
     - `app` (grooph-app): the eframe app, binary + library. WebAssembly code is gated behind
       `cfg(target_arch = "wasm32")`.

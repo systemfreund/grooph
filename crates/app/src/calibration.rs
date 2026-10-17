@@ -198,6 +198,7 @@ impl Grooph {
             let title = match source {
                 HitSource::Tap => "Calibrate tap latency",
                 HitSource::Midi => "Calibrate MIDI latency",
+                HitSource::Mic => "Calibrate microphone latency",
             };
             ui.heading(title);
             ui.add_space(8.0);
@@ -210,6 +211,9 @@ impl Grooph {
                         ),
                         HitSource::Midi => {
                             "Play along with the click on every beat on your MIDI device.".into()
+                        }
+                        HitSource::Mic => {
+                            "Hit along with the click on every beat; the microphone listens.".into()
                         }
                     };
                     ui.label(how);
