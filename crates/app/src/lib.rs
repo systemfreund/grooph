@@ -152,7 +152,7 @@ impl Default for PersistedState {
             counting: CountingSettings::default(),
             flash_enabled: false,
             midi_selected_port_id: None,
-            accuracy_enabled: true,
+            accuracy_enabled: false,
             library: PatternLibrary::default(),
             active_pattern_id: None,
             dirty: false,
@@ -1069,7 +1069,7 @@ impl Grooph {
 
 #[cfg(test)]
 mod tests {
-    use super::{CountingBase, CountingSettings};
+    use super::{CountingBase, CountingSettings, PersistedState};
 
     fn load(saved: &str) -> CountingSettings {
         ron::from_str(saved).unwrap()
@@ -1079,6 +1079,13 @@ mod tests {
     fn counting_overlay_is_off_by_default() {
         let c = CountingSettings::default();
         assert!(c.base == CountingBase::Off && !c.show_tuplets);
+    }
+
+    #[test]
+    fn fresh_practice_has_no_space_and_no_timing_feedback() {
+        let s = PersistedState::default();
+        assert_eq!(s.generator_settings.space, 0.0);
+        assert!(!s.accuracy_enabled);
     }
 
     #[test]
