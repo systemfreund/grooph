@@ -52,6 +52,9 @@ jobs:
         trunk --version
     - name: Build web app
       run: trunk build --release
+      env:
+        # Baked into the app and written to version.txt, so the app notices new deploys.
+        GROOPH_BUILD: ${{ github.sha }}
     - name: Keep the build for the deploy
       uses: actions/upload-artifact@v4
       with:

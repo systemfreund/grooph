@@ -26,6 +26,7 @@ mod time_signature_dialog;
 mod tool_palette;
 pub mod tools;
 mod undo;
+mod update_check;
 #[cfg(target_arch = "wasm32")]
 mod web;
 
@@ -297,7 +298,7 @@ fn add_font(ctx: &Context) {
 }
 
 impl App for Grooph {
-    fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut Ui, frame: &mut eframe::Frame) {
         self.apply_style(ui);
         self.ui.narrow_screen = ui.available_width() < compact::NARROW_MAX_WIDTH;
         self.compact_ui(ui);
@@ -317,6 +318,8 @@ impl App for Grooph {
         if self.ui.link_error.is_some() {
             self.link_error_dialog(ui);
         }
+
+        self.update_notice(ui, frame);
 
         self.handle_keyboard_input(ui);
         self.handle_play_along_input(ui);
@@ -952,6 +955,7 @@ impl Grooph {
 
         let platform = PlatformRuntime::new();
         platform.install_listeners(cc.egui_ctx.clone());
+        update_check::start(cc.egui_ctx.clone());
 
         let mut app = Self {
             editor: EditorState {

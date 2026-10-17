@@ -10,3 +10,7 @@
 /openapi.json
   Content-Type: application/vnd.oai.openapi+json;version=3.1
   Access-Control-Allow-Origin: *
+
+# Polled by the app to notice a new deploy; always ask the server.
+/version.txt
+  Cache-Control: no-cache

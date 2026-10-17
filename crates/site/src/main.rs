@@ -1,6 +1,7 @@
 //! Writes the guide pages into the web build. Run as a Trunk `post_build`
 //! hook (output directory from `TRUNK_STAGING_DIR`) or by hand with the
-//! output directory as the only argument.
+//! output directory as the only argument. When `GROOPH_BUILD` is set (CI),
+//! also writes it to `version.txt`, which the app polls to notice new deploys.
 
 use std::path::{Path, PathBuf};
 
@@ -18,7 +19,12 @@ fn main() {
         .map_err(|e| format!("{}: {e}", llms_base.display()))
         .and_then(|base| {
             let pages = grooph_site::load_pages(&grooph_site::content_dir())?;
-            grooph_site::build(&out, &pages, &base)
+            let pages = grooph_site::build(&out, &pages, &base)?;
+            if let Ok(build) = std::env::var("GROOPH_BUILD") {
+                let path = out.join("version.txt");
+                std::fs::write(&path, build).map_err(|e| format!("{}: {e}", path.display()))?;
+            }
+            Ok(pages)
         });
     match result {
         Ok(pages) => eprintln!("grooph-site: wrote {} pages to {}", pages.len(), out.display()),
