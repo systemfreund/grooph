@@ -358,7 +358,7 @@ impl Grooph {
         for &g in ts.groups().iter() {
             group_starts.push(group_starts.last().copied().unwrap_or(0) + g as usize);
         }
-        let dot_radius = (0.025 * radius).max(2.5);
+        let dot_radius = (0.0375 * radius).max(3.75);
         let dot_now = current_turn.map(|t| (t * units as f32) as usize);
         for dot in 0..units {
             let pos = at_turn(center, 0.72 * radius, dot as f32 / units as f32);
