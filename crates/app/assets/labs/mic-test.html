@@ -59,6 +59,9 @@
   <button id="clickToggle">Klick starten</button>
   <button id="micStart">Mikrofon einschalten</button>
   <p class="muted" id="micInfo"></p>
+  <label id="micPickLabel" hidden>Mikrofon
+    <select id="micPick"></select>
+  </label>
   <label>Wurde der Klick nach dem Einschalten leiser oder kam er aus der Hörmuschel?
     <select id="louder">
       <option value="">noch nicht beurteilt</option>
@@ -224,24 +227,55 @@ function setThreshold() {
 $('threshold').oninput = setThreshold;
 setThreshold();
 
+async function openMic(deviceId) {
+  const audio = { echoCancellation: false, noiseSuppression: false, autoGainControl: false };
+  if (deviceId) audio.deviceId = { exact: deviceId };
+  const stream = await navigator.mediaDevices.getUserMedia({ audio });
+  if (micTrack) micTrack.stop();
+  if (micNode) micNode.disconnect();
+  micTrack = stream.getAudioTracks()[0];
+  if (!worklet) {
+    const url = URL.createObjectURL(new Blob([WORKLET], { type: 'application/javascript' }));
+    await ctx.audioWorklet.addModule(url);
+    worklet = new AudioWorkletNode(ctx, 'onset', { numberOfInputs: 1, numberOfOutputs: 0 });
+    worklet.port.onmessage = onWorkletMessage;
+  }
+  micNode = ctx.createMediaStreamSource(stream);
+  micNode.connect(worklet);
+  setThreshold();
+  $('micInfo').textContent = 'Mikrofon: ' + (micTrack.label || 'unbekannt') + ' · ' + JSON.stringify(trackSettings());
+}
+
+// Device labels are only known once the mic is allowed.
+async function listMics() {
+  const inputs = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'audioinput');
+  const current = micTrack && micTrack.getSettings().deviceId;
+  $('micPick').replaceChildren(...inputs.map((d) => {
+    const o = document.createElement('option');
+    o.value = d.deviceId;
+    o.textContent = d.label || 'Mikrofon';
+    o.selected = d.deviceId === current;
+    return o;
+  }));
+  $('micPickLabel').hidden = inputs.length < 2;
+}
+
 $('micStart').onclick = async () => {
   try {
     await ensureContext();
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
-    });
-    micTrack = stream.getAudioTracks()[0];
-    const url = URL.createObjectURL(new Blob([WORKLET], { type: 'application/javascript' }));
-    await ctx.audioWorklet.addModule(url);
-    micNode = ctx.createMediaStreamSource(stream);
-    worklet = new AudioWorkletNode(ctx, 'onset', { numberOfInputs: 1, numberOfOutputs: 0 });
-    micNode.connect(worklet);
-    worklet.port.onmessage = onWorkletMessage;
-    setThreshold();
+    await openMic(null);
+    await listMics();
     $('micStart').disabled = true;
     $('runFeedback').disabled = false;
     $('runPlay').disabled = false;
-    $('micInfo').textContent = 'Mikrofon: ' + (micTrack.label || 'unbekannt') + ' · ' + JSON.stringify(trackSettings());
+  } catch (e) {
+    $('micInfo').textContent = 'Fehler: ' + e.message;
+  }
+};
+
+$('micPick').onchange = async () => {
+  try {
+    await openMic($('micPick').value);
   } catch (e) {
     $('micInfo').textContent = 'Fehler: ' + e.message;
   }
@@ -304,6 +338,7 @@ $('runPlay').onclick = () => startRun('play', 4, 16, $('runPlay'));
 function finishRun(r) {
   if (run === r) run = null;
   const base = {
+    mikrofon: micTrack ? micTrack.label : null,
     situation: $('scenario').value,
     session: $('session').value || 'nicht gesetzt',
     klickVeraendert: $('louder').value || 'nicht beurteilt',
