@@ -15,8 +15,8 @@ use grooph_measure::tempo::ScoreTiming;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct CountInPlan {
     pub(crate) ticks: u32,
-    /// Click positions within `0..ticks` (downbeat plus primary beats) and
-    /// their sound ([`SoundType::CountIn`]).
+    /// Click positions within `0..ticks` (every beat unit) and
+    /// their sound ([`SoundType::CountIn`] or [`SoundType::CountInSoft`]).
     pub(crate) clicks: Vec<(u32, SoundType)>,
 }
 

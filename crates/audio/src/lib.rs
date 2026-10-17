@@ -394,13 +394,20 @@ impl Audio {
 }
 
 /// Count-in bar for `score`: the first measure's length with a click on the
-/// downbeat and each primary beat (so 6/8 counts in two, 4/4 in four).
+/// downbeat and each primary beat, and a softer one on every other beat unit
+/// (so 7/8 clicks all seven eighths, the group starts louder).
 fn count_in_plan(score: &Score) -> Option<CountInPlan> {
     let ts = score.measures.first()?.time_signature();
     let ticks = DEFAULT_GRID.ticks_per_measure(&ts);
-    let mut clicks = vec![(0, SoundType::CountIn)];
     let primaries = DEFAULT_GRID.primary_boundaries(&ts);
-    clicks.extend(primaries.into_iter().map(|t| (t, SoundType::CountIn)));
+    let unit = DEFAULT_GRID.ticks_per_beat(&ts).max(1);
+    let clicks = (0..ticks)
+        .step_by(unit as usize)
+        .map(|t| {
+            let start = t == 0 || primaries.contains(&t);
+            (t, if start { SoundType::CountIn } else { SoundType::CountInSoft })
+        })
+        .collect();
     Some(CountInPlan { ticks, clicks })
 }
 
@@ -594,11 +601,11 @@ mod tests {
     }
 
     #[test]
-    fn count_in_clicks_the_beats() {
-        use SoundType::CountIn as C;
-        // 7/8 (2+3+2) counts in three, 6/8 two, 4/4 four.
-        assert_eq!(count_in_of(TimeSignature::new(7, 8)), [C, C, C]);
-        assert_eq!(count_in_of(TimeSignature::SIX_EIGHT), [C, C]);
+    fn count_in_clicks_every_beat_unit() {
+        use SoundType::{CountIn as C, CountInSoft as S};
+        // 7/8 (2+3+2): all seven eighths, the group starts louder.
+        assert_eq!(count_in_of(TimeSignature::new(7, 8)), [C, S, C, S, S, C, S]);
+        assert_eq!(count_in_of(TimeSignature::SIX_EIGHT), [C, S, S, C, S, S]);
         assert_eq!(count_in_of(TimeSignature::FOUR_FOUR), [C, C, C, C]);
     }
 }
