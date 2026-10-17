@@ -16,7 +16,7 @@ use crate::undo::{DEFAULT_UNDO_LIMIT, UndoHistory};
 use crate::{Grooph, TransportState};
 use eframe::egui;
 use eframe::egui::epaint::PathShape;
-use eframe::egui::{Align2, FontId, Pos2, Sense, Shape, Stroke, Ui, vec2};
+use eframe::egui::{Align2, Color32, FontId, Pos2, Sense, Shape, Stroke, Ui, vec2};
 use grooph_measure::click::{ClickLevel, default_click_bar, subdivided_click_bar};
 use grooph_measure::duration::Duration;
 use grooph_measure::grid::DEFAULT_GRID;
@@ -51,6 +51,17 @@ pub(crate) struct MetronomeState {
 impl MetronomeState {
     pub(crate) fn new(meter: TimeSignature) -> Self {
         Self { meter, stash: None, history: UndoHistory::new(DEFAULT_UNDO_LIMIT) }
+    }
+}
+
+/// The ring's idle and lit colours. The idle segments sit between the
+/// background and the lit one, and the lit one is a saturated blue, so the
+/// click being played stands out by lightness and by hue.
+fn ring_colors(dark_mode: bool) -> (Color32, Color32) {
+    if dark_mode {
+        (Color32::from_gray(90), Color32::from_rgb(100, 175, 255))
+    } else {
+        (Color32::from_gray(175), Color32::from_rgb(25, 118, 210))
     }
 }
 
@@ -323,9 +334,9 @@ impl Grooph {
 
         let visuals = ui.visuals();
         let muted = self.playback_ctl.playback.bar_muted;
-        let base = if muted { visuals.weak_text_color() } else { visuals.text_color() };
-        let lit = visuals.selection.stroke.color;
-        let soft_dim = if visuals.dark_mode { 0.6 } else { 0.5 };
+        let (idle, lit) = ring_colors(visuals.dark_mode);
+        let base = if muted { idle.gamma_multiply(0.5) } else { idle };
+        let soft_dim = 0.6;
         let painter = ui.painter();
 
         // Tapped or hovered click: from the pointer's angle, if it is on the ring.
