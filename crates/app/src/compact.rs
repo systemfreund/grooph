@@ -32,8 +32,8 @@ const CARD_RADIUS: u8 = 16;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CompactTab {
-    Practice,
     Metronome,
+    Practice,
     Edit,
     More,
 }
@@ -312,8 +312,8 @@ impl Grooph {
 
     fn compact_tab_bar(&mut self, ui: &mut Ui, current: CompactTab) {
         const TABS: [(CompactTab, &str, &str); 4] = [
-            (CompactTab::Practice, "🎲", "Practice"),
             (CompactTab::Metronome, "⏱", "Metronome"),
+            (CompactTab::Practice, "🎲", "Practice"),
             (CompactTab::Edit, "🖊", "Edit"),
             (CompactTab::More, "☰", "More"),
         ];

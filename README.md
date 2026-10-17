@@ -248,9 +248,9 @@ Important root files:
 - One layout for every window size, made for touch first
   (`crates/app/src/compact.rs`). On windows wider than 720 pt the controls stay
   a centered column; the staff and the tool palette use the full width.
-- Tabs: Practice (generator card with Meter/Notes/Level/Bars/BPM, options
-  sheet, big "new rhythm" + play buttons), Metronome (see below), Edit (tool
-  palette + edit bar),
+- Tabs: Metronome (see below), Practice (generator card with
+  Meter/Notes/Level/Bars/BPM, options sheet, big "new rhythm" + play
+  buttons), Edit (tool palette + edit bar),
   More (Library, Mixer, Settings, Help reuse their panels). The tab is derived
   from `Mode` (`compact_tab`), so modes set elsewhere land on the right tab;
   the Metronome tab is open while `metronome_mode()`, in `Mode::Playback`
