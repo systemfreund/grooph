@@ -42,7 +42,7 @@ use crate::platform::{PlatformRuntime, VisibilityEvent};
 use crate::play_along::{PlayAlongSettings, PlayAlongState};
 use crate::presets::PresetLibrary;
 use crate::state::{
-    AudioConfig, CountInState, EditorState, LayoutSettings, MidiState, PendingLoad,
+    AudioConfig, CountInState, EditorState, LayoutSettings, MicState, MidiState, PendingLoad,
     PlaybackController, PlaybackState, UiShell,
 };
 use crate::tools::ToolKind;
@@ -1035,6 +1035,7 @@ impl Grooph {
                     available_ports: midi_input_ports,
                     selected_port_id: midi_selected_port_id,
                 },
+                mic: MicState::default(),
                 play_along: PlayAlongState { settings: state.play_along, ..Default::default() },
             },
             ui: UiShell {

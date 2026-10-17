@@ -1,5 +1,5 @@
-//! Play-along input: hits from MIDI and from taps (keyboard or touch on the
-//! staff) feed the accuracy tracker on the shared [`crate::clock`] timeline.
+//! Play-along input: hits from MIDI, the microphone and taps (keyboard or
+//! touch on the staff) feed the accuracy tracker on the shared [`crate::clock`] timeline.
 //! Also the run summary shown after playback and the settings section.
 
 use crate::accuracy::{GOOD_WINDOW_MS, PERFECT_WINDOW_MS, RunSummary};
@@ -7,15 +7,18 @@ use crate::calibration::Calibration;
 use crate::platform::{TapKind, tap_time};
 use crate::{Grooph, TransportState, clock};
 use eframe::egui;
+use grooph_mic::{DEFAULT_THRESHOLD_DB, MicInput};
 use grooph_midi::MidiInputEvent;
 use log::debug;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 /// Where a hit came from. Each source has its own input latency.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum HitSource {
     Midi,
     Tap,
+    Mic,
 }
 
 /// Keys offered for tapping. Space is play/stop and the tool shortcuts are
@@ -72,11 +75,25 @@ pub(crate) struct PlayAlongSettings {
     pub(crate) tap_offset_ms: f32,
     /// Input latency subtracted from MIDI hits (ms).
     pub(crate) midi_offset_ms: f32,
+    /// Listen for hits (sticks, a pad, claps) on the microphone.
+    pub(crate) mic_enabled: bool,
+    /// Sounds louder than this count as hits (dBFS).
+    pub(crate) mic_threshold_db: f32,
+    /// Input latency subtracted from microphone hits (ms).
+    pub(crate) mic_offset_ms: f32,
 }
 
 impl Default for PlayAlongSettings {
     fn default() -> Self {
-        Self { tap_enabled: true, tap_key: TapKey::J, tap_offset_ms: 0.0, midi_offset_ms: 0.0 }
+        Self {
+            tap_enabled: true,
+            tap_key: TapKey::J,
+            tap_offset_ms: 0.0,
+            midi_offset_ms: 0.0,
+            mic_enabled: false,
+            mic_threshold_db: DEFAULT_THRESHOLD_DB,
+            mic_offset_ms: 0.0,
+        }
     }
 }
 
@@ -85,6 +102,7 @@ impl PlayAlongSettings {
         match source {
             HitSource::Midi => self.midi_offset_ms,
             HitSource::Tap => self.tap_offset_ms,
+            HitSource::Mic => self.mic_offset_ms,
         }
     }
 
@@ -92,6 +110,7 @@ impl PlayAlongSettings {
         match source {
             HitSource::Midi => &mut self.midi_offset_ms,
             HitSource::Tap => &mut self.tap_offset_ms,
+            HitSource::Mic => &mut self.mic_offset_ms,
         }
     }
 }
@@ -102,8 +121,8 @@ pub(crate) const MAX_INPUT_OFFSET_MS: f32 = 300.0;
 #[derive(Default)]
 pub(crate) struct PlayAlongState {
     pub(crate) settings: PlayAlongSettings,
-    /// A tap arrived during this run: taps keep the accuracy session alive
-    /// even without MIDI. Without it, a run nobody plays along to would only
+    /// A tap or microphone hit arrived during this run: these keep the
+    /// accuracy session alive even without MIDI. Without it, a run nobody plays along to would only
     /// collect misses.
     pub(crate) engaged: bool,
     /// Taps on the staff collected by the measure panel this frame.
@@ -159,6 +178,47 @@ impl Grooph {
         hits
     }
 
+    /// Whether the microphone should listen: during a run that uses it, or
+    /// while the settings show its level.
+    fn mic_wanted(&self, now: f64) -> bool {
+        let playing = self.playback_ctl.transport_state == TransportState::Playing;
+        match self.calibration_source() {
+            Some(source) => playing && source == HitSource::Mic,
+            None => {
+                self.playback_ctl.play_along.settings.mic_enabled
+                    && (now < self.playback_ctl.mic.monitor_until
+                        || playing && self.playback_ctl.accuracy.enabled && !self.metronome_mode())
+            }
+        }
+    }
+
+    /// Open or close the microphone as needed and keep its threshold current.
+    fn sync_mic(&mut self, ctx: &egui::Context, now: f64) {
+        let wanted = self.mic_wanted(now);
+        let threshold_db = self.playback_ctl.play_along.settings.mic_threshold_db;
+        let mic = &mut self.playback_ctl.mic;
+        match (&mic.input, wanted) {
+            (None, true) => {
+                let ctx = ctx.clone();
+                let notifier = Arc::new(move || ctx.request_repaint());
+                mic.input = Some(MicInput::open(threshold_db, Some(notifier)));
+                mic.level_db = f32::NEG_INFINITY;
+            }
+            (Some(_), false) => mic.input = None,
+            (Some(input), true) => input.set_threshold_db(threshold_db),
+            (None, false) => {}
+        }
+    }
+
+    /// Microphone hits, stamped on the shared clock.
+    fn drain_mic_hits(&mut self, now: f64) -> Vec<f64> {
+        let Some(input) = self.playback_ctl.mic.input.as_ref() else {
+            return Vec::new();
+        };
+        let mic_now = input.now_seconds();
+        input.drain_hits().into_iter().map(|t| now - (mic_now - t).max(0.0)).collect()
+    }
+
     fn drain_key_taps(&mut self, ui: &egui::Ui) -> Vec<f64> {
         let tap_key = self.playback_ctl.play_along.settings.tap_key;
         if !self.tap_capture_active() || ui.ctx().egui_wants_keyboard_input() {
@@ -180,7 +240,9 @@ impl Grooph {
     /// accuracy tracker; drives the session lifecycle and calibration.
     pub(crate) fn handle_play_along_input(&mut self, ui: &egui::Ui) {
         let now = clock::now_seconds();
+        self.sync_mic(ui.ctx(), now);
         let midi_hits = self.drain_midi_hits(now);
+        let mic_hits = self.drain_mic_hits(now);
         let mut tap_hits = std::mem::take(&mut self.playback_ctl.play_along.pending_taps);
         tap_hits.extend(self.drain_key_taps(ui));
 
@@ -196,6 +258,7 @@ impl Grooph {
         let midi_connected = self.midi_connected();
         let use_midi = calibrating.is_none_or(|s| s == HitSource::Midi);
         let use_taps = calibrating.map_or(settings.tap_enabled, |s| s == HitSource::Tap);
+        let use_mic = calibrating.map_or(settings.mic_enabled, |s| s == HitSource::Mic);
         let mut hits: Vec<(HitSource, f64)> = Vec::new();
         if use_midi {
             hits.extend(midi_hits.into_iter().map(|t| (HitSource::Midi, t)));
@@ -203,7 +266,10 @@ impl Grooph {
         if use_taps {
             hits.extend(tap_hits.into_iter().map(|t| (HitSource::Tap, t)));
         }
-        if hits.iter().any(|(s, _)| *s == HitSource::Tap) {
+        if use_mic {
+            hits.extend(mic_hits.into_iter().map(|t| (HitSource::Mic, t)));
+        }
+        if hits.iter().any(|(s, _)| *s != HitSource::Midi) {
             self.playback_ctl.play_along.engaged = true;
         }
         let active = calibrating.is_some()

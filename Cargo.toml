@@ -6,6 +6,7 @@ members = [
     "crates/layout",
     "crates/link",
     "crates/measure",
+    "crates/mic",
     "crates/midi",
     "crates/render",
     "crates/site",
@@ -22,6 +23,7 @@ grooph-audio = { path = "crates/audio" }
 grooph-layout = { path = "crates/layout" }
 grooph-link = { path = "crates/link" }
 grooph-measure = { path = "crates/measure" }
+grooph-mic = { path = "crates/mic" }
 grooph-midi = { path = "crates/midi" }
 grooph-render = { path = "crates/render" }
 cpal = { version = "0.16", features = ["wasm-bindgen"] }
@@ -31,6 +33,7 @@ egui_extras = { version = "0.34", features = ["image", "svg"] }
 either = "1.15.0"
 env_logger = "0.11.8"
 getrandom = { version = "0.3.3", features = ["wasm_js"] }
+js-sys = "0.3.85"
 log = "0.4.29"
 midir = "0.10"
 rodio = { version = "0.21", features = ["playback", "noise"] }

@@ -12,6 +12,7 @@ grooph-layout = { workspace = true }
 grooph-link = { workspace = true }
 grooph-render = { workspace = true }
 grooph-midi = { workspace = true }
+grooph-mic = { workspace = true }
 eframe = { workspace = true }
 egui = { workspace = true }
 egui_extras = { workspace = true }
