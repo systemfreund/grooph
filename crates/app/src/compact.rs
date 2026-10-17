@@ -12,6 +12,7 @@ use eframe::egui::{
     Stroke, Ui, UiBuilder, Vec2, pos2, vec2,
 };
 use grooph_measure::generator::{Subdivision, effective_subdivision};
+use serde::{Deserialize, Serialize};
 
 /// Windows narrower than this (in points) count as phone-sized: the staff
 /// packs its notes tighter there.
@@ -30,7 +31,7 @@ const METRONOME_STAFF_MIN: f32 = 100.0;
 const METRONOME_STAFF_MAX: f32 = 220.0;
 const CARD_RADIUS: u8 = 16;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) enum CompactTab {
     Metronome,
     Practice,
@@ -257,7 +258,7 @@ impl Grooph {
         }
     }
 
-    fn select_compact_tab(&mut self, tab: CompactTab) {
+    pub(crate) fn select_compact_tab(&mut self, tab: CompactTab) {
         // Into or out of the metronome the played score changes: stop first.
         let metronome = tab == CompactTab::Metronome;
         if metronome != self.metronome_mode() {

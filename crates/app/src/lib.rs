@@ -34,7 +34,7 @@ use grooph_measure::duration::{Duration, NoteValue, TupletSpec, q};
 use grooph_measure::{BeatIdx, Cursor, Measure, Score, TimeSignature};
 
 use crate::accuracy::AccuracyState;
-use crate::compact::CompactState;
+use crate::compact::{CompactState, CompactTab};
 use crate::generator::GeneratorState;
 use crate::library::PatternLibrary;
 use crate::metronome_view::MetronomeState;
@@ -137,6 +137,8 @@ struct PersistedState {
     presets: PresetLibrary,
     click_bars: ClickBars,
     metronome_meter: TimeSignature,
+    /// Tab open when the state was saved, reopened at the next start.
+    tab: CompactTab,
 }
 
 impl Default for PersistedState {
@@ -167,6 +169,7 @@ impl Default for PersistedState {
             presets: PresetLibrary::default(),
             click_bars: ClickBars::default(),
             metronome_meter: TimeSignature::FOUR_FOUR,
+            tab: CompactTab::Practice,
         }
     }
 }
@@ -209,6 +212,7 @@ impl PersistedState {
             presets: app.editor.presets.clone(),
             click_bars: app.playback_ctl.audio_cfg.click.clone(),
             metronome_meter: app.editor.metronome.meter,
+            tab: app.compact_tab(),
         }
     }
 }
@@ -1056,6 +1060,8 @@ impl Grooph {
             },
         };
         app.editor.active_preset = app.matching_preset();
+        // A link opens after the saved tab, so its tab wins.
+        app.select_compact_tab(state.tab);
         app.open_link_from_url();
         app
     }
@@ -1081,6 +1087,7 @@ impl Grooph {
 #[cfg(test)]
 mod tests {
     use super::{CountingBase, CountingSettings, PersistedState};
+    use crate::compact::CompactTab;
 
     fn load(saved: &str) -> CountingSettings {
         ron::from_str(saved).unwrap()
@@ -1097,6 +1104,15 @@ mod tests {
         let s = PersistedState::default();
         assert_eq!(s.generator_settings.space, 0.0);
         assert!(!s.accuracy_enabled);
+    }
+
+    #[test]
+    fn saved_tab_round_trips_and_older_states_open_practice() {
+        let s = PersistedState { tab: CompactTab::Metronome, ..Default::default() };
+        let back: PersistedState = ron::from_str(&ron::to_string(&s).unwrap()).unwrap();
+        assert_eq!(back.tab, CompactTab::Metronome);
+        let older: PersistedState = ron::from_str("(version: 2)").unwrap();
+        assert_eq!(older.tab, CompactTab::Practice);
     }
 
     #[test]
