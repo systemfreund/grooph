@@ -228,6 +228,8 @@ fn render_page(page: &Page, all: &[Page]) -> Result<Rendered, String> {
 <meta property="og:image" content="{SITE_URL}/assets/preview.png">
 <meta name="twitter:card" content="summary_large_image">
 <link rel="icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <link rel="stylesheet" href="/site.css">
 <script type="application/ld+json">{json_ld}</script>
 </head>
