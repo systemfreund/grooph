@@ -396,8 +396,12 @@ pub fn draw_tuplets(
     color: Color32,
 ) {
     for t in tuplets {
+        let thickness = opts.bracket_thickness();
         for seg in &t.bracket {
-            painter.line_segment([seg.p1, seg.p2], Stroke::new(opts.bracket_thickness(), color));
+            // Square ends: the line and its hook overlap at the corner, so it
+            // stays closed however the ends are rounded to pixels.
+            let half = (seg.p2 - seg.p1).normalized() * thickness * 0.5;
+            painter.line_segment([seg.p1 - half, seg.p2 + half], Stroke::new(thickness, color));
         }
         let digits = glyphs::tuplet_glyphs(t.count);
         painter.text(t.number_center, Align2::CENTER_CENTER, digits, t.number_font.clone(), color);
