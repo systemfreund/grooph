@@ -19,7 +19,7 @@ use crate::render_plan::{RenderPlan, plan_measure};
 use egui::{FontId, Pos2, Rect, Vec2, pos2, vec2};
 use grooph_measure::duration::s;
 use grooph_measure::grid::DEFAULT_GRID;
-use grooph_measure::{BeatIdx, MeasureIdx, Score, TimeSignature};
+use grooph_measure::{BeatIdx, BeatKind, MeasureIdx, Score, TimeSignature};
 
 /// Configuration for laying out an entire [`Score`].
 ///
@@ -221,19 +221,35 @@ pub const ROOM_BELOW_EM: f32 = 0.65;
 pub const ROOM_BELOW_WITH_LABELS_EM: f32 = 1.0;
 
 /// Headroom above the staff line, in em: stems (`stem_length_factor` is user
-/// configurable), flags and tuplet brackets.
+/// configurable) and flags, plus what the score puts above them (see
+/// [`extra_room_above_em`]).
 fn room_above_em(opts: &StaffOpts) -> f32 {
-    opts.stem_length_factor + 0.75 + opts.room_above_extra_em
+    opts.stem_length_factor + 0.15 + opts.room_above_extra_em
 }
 
-/// Extra headroom `score` needs above the usual (for
-/// [`StaffOpts::room_above_extra_em`]): a tuplet bracket rises over the
-/// accents above its notes.
+/// Headroom `score` needs above its stems and beams (for
+/// [`StaffOpts::room_above_extra_em`]), in em: accents written above the
+/// notes, tuplet brackets and numbers, and a tuplet bracket rising over the
+/// accents above its notes. Rows stay free of space nothing in the score uses.
 pub fn extra_room_above_em(score: &Score, accent_below: bool) -> f32 {
-    let accented_tuplet = score.measures.iter().flat_map(|m| m.beats()).any(|b| {
-        b.kind == grooph_measure::BeatKind::Note && b.accented && b.tuplet_group_id.is_some()
-    });
-    if accented_tuplet && !accent_below { 0.5 } else { 0.0 }
+    let notes = || {
+        score.measures.iter().flat_map(|m| m.beats()).filter(|b| b.kind == BeatKind::Note)
+    };
+    let accents_above = !accent_below && notes().any(|b| b.accented);
+    let tuplets =
+        score.measures.iter().flat_map(|m| m.beats()).any(|b| b.tuplet_group_id.is_some());
+    let accented_tuplet =
+        !accent_below && notes().any(|b| b.accented && b.tuplet_group_id.is_some());
+    let mut extra = 0.0;
+    if tuplets {
+        extra += 0.5;
+    } else if accents_above {
+        extra += 0.25;
+    }
+    if accented_tuplet {
+        extra += 0.5;
+    }
+    extra
 }
 
 /// Vertical budget (in em) for one row's content: the headroom above the
@@ -788,5 +804,23 @@ mod tests {
         let flags: Vec<bool> =
             staff.systems.iter().flat_map(|s| &s.measures).map(|m| m.show_time_signature).collect();
         assert_eq!(flags, vec![true, true, false]);
+    }
+
+    #[test]
+    fn headroom_only_for_what_the_score_puts_above_the_stems() {
+        use grooph_measure::duration::t8;
+        let plain = Score { measures: vec![measure_with_quarters(TimeSignature::FOUR_FOUR)] };
+        assert_eq!(extra_room_above_em(&plain, false), 0.0);
+
+        let mut accented = measure_with_quarters(TimeSignature::FOUR_FOUR);
+        accented.toggle_accent(0).unwrap();
+        let accented = Score { measures: vec![accented] };
+        assert_eq!(extra_room_above_em(&accented, false), 0.25);
+        assert_eq!(extra_room_above_em(&accented, true), 0.0);
+
+        let mut triplet = measure_with_quarters(TimeSignature::FOUR_FOUR);
+        triplet.set_beat(0, Beat::note(t8())).unwrap();
+        let triplet = Score { measures: vec![triplet] };
+        assert_eq!(extra_room_above_em(&triplet, false), 0.5);
     }
 }
