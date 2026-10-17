@@ -139,8 +139,22 @@ impl Grooph {
                             )
                             && let Some(placed) = staff.placed(m_idx)
                         {
-                            let cursor_rect = egui::Rect::from_min_size(
-                                egui::pos2(x, placed.rect.top()),
+                            // The row is centred vertically, but the offset
+                            // eases to it, so the rows glide up when the cursor
+                            // wraps rather than jump. The tween runs on the
+                            // offset egui will clamp to, so it never stalls at
+                            // the top or bottom of the score.
+                            let view_height = ui.clip_rect().height();
+                            let max_offset = (staff.total_size.y - view_height).max(0.0);
+                            let row_offset =
+                                (placed.rect.center().y - origin.y - view_height / 2.0)
+                                    .clamp(0.0, max_offset);
+                            let now = ui.input(|i| i.time);
+                            let offset = self.playback_ctl.playback.scroll.update(row_offset, now);
+                            // Centring this rect scrolls to exactly `offset`;
+                            // horizontally it follows the cursor at once.
+                            let cursor_rect = egui::Rect::from_center_size(
+                                egui::pos2(x, origin.y + offset + view_height / 2.0),
                                 egui::vec2(1.0, placed.rect.height()),
                             );
                             ui.scroll_to_rect_animation(

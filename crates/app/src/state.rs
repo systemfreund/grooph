@@ -10,6 +10,7 @@ use crate::presets::{PresetId, PresetLibrary};
 use crate::undo::UndoHistory;
 use crate::{CountingSettings, Mode, TransportState};
 use eframe::egui::TextStyle;
+use eframe::egui::emath::{ease_in_ease_out, lerp};
 use eframe::epaint::FontId;
 use grooph_audio::{Audio, AudioSettings, GapClick, TempoRamp};
 use grooph_link::SharedLink;
@@ -110,6 +111,8 @@ pub(crate) struct PlaybackState {
     pub(crate) ramp_bpm: Option<u32>,
     /// The gap click silences the bar being played.
     pub(crate) bar_muted: bool,
+    /// Vertical scroll that follows the playback cursor from row to row.
+    pub(crate) scroll: ScrollTween,
 }
 
 impl PlaybackState {
@@ -120,6 +123,58 @@ impl PlaybackState {
     /// The score hasn't started yet (count-in pending or playing).
     pub(crate) fn counting_in(&self) -> bool {
         self.count_in != CountInState::Off
+    }
+}
+
+/// How long the score takes to scroll one row further while playing; a
+/// longer jump (back to the top on a loop) takes up to [`SCROLL_TWEEN_MAX_S`].
+const SCROLL_TWEEN_MIN_S: f64 = 0.35;
+const SCROLL_TWEEN_MAX_S: f64 = 0.6;
+/// Scroll speed (points per second) past which a jump takes longer than the
+/// minimum.
+const SCROLL_TWEEN_POINTS_PER_S: f32 = 1000.0;
+
+/// Eases the scroll offset toward the playing row instead of jumping there,
+/// so the rows glide up when the cursor wraps to the next one.
+#[derive(Default)]
+pub(crate) struct ScrollTween {
+    /// `None` until playback first scrolls: the first offset is taken as is.
+    state: Option<TweenState>,
+}
+
+#[derive(Clone, Copy)]
+struct TweenState {
+    from: f32,
+    to: f32,
+    start: f64,
+    duration: f64,
+}
+
+impl TweenState {
+    fn value_at(&self, now: f64) -> f32 {
+        if self.duration <= 0.0 {
+            return self.to;
+        }
+        let t = ((now - self.start) / self.duration).clamp(0.0, 1.0) as f32;
+        lerp(self.from..=self.to, ease_in_ease_out(t))
+    }
+}
+
+impl ScrollTween {
+    /// The offset to show at `now` while heading for `target`. A new target
+    /// starts a fresh tween from wherever the scroll is right now.
+    pub(crate) fn update(&mut self, target: f32, now: f64) -> f32 {
+        let Some(state) = &mut self.state else {
+            self.state = Some(TweenState { from: target, to: target, start: now, duration: 0.0 });
+            return target;
+        };
+        if (state.to - target).abs() > 0.5 {
+            let from = state.value_at(now);
+            let duration = f64::from((target - from).abs() / SCROLL_TWEEN_POINTS_PER_S)
+                .clamp(SCROLL_TWEEN_MIN_S, SCROLL_TWEEN_MAX_S);
+            *state = TweenState { from, to: target, start: now, duration };
+        }
+        state.value_at(now)
     }
 }
 
@@ -216,4 +271,47 @@ pub(crate) struct UiShell {
 pub(crate) enum PendingLoad {
     Pattern(u64),
     Link(SharedLink),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scroll_tween_takes_the_first_offset_as_is() {
+        let mut tween = ScrollTween::default();
+        assert_eq!(tween.update(120.0, 0.0), 120.0);
+        assert_eq!(tween.update(120.0, 1.0), 120.0);
+    }
+
+    #[test]
+    fn scroll_tween_glides_to_the_next_row() {
+        let mut tween = ScrollTween::default();
+        tween.update(0.0, 0.0);
+        // The next row starts the tween where the scroll is now.
+        assert_eq!(tween.update(100.0, 1.0), 0.0);
+        let mid = tween.update(100.0, 1.0 + SCROLL_TWEEN_MIN_S / 2.0);
+        assert!((mid - 50.0).abs() < 0.01, "halfway at {mid}");
+        assert_eq!(tween.update(100.0, 1.0 + SCROLL_TWEEN_MIN_S), 100.0);
+        assert_eq!(tween.update(100.0, 5.0), 100.0);
+    }
+
+    #[test]
+    fn scroll_tween_retargets_from_where_it_is() {
+        let mut tween = ScrollTween::default();
+        tween.update(0.0, 0.0);
+        tween.update(100.0, 0.0);
+        let mid = tween.update(100.0, SCROLL_TWEEN_MIN_S / 2.0);
+        // Heading back mid-way continues from the current offset, no jump.
+        assert_eq!(tween.update(0.0, SCROLL_TWEEN_MIN_S / 2.0), mid);
+    }
+
+    #[test]
+    fn scroll_tween_takes_longer_for_a_long_jump() {
+        let mut tween = ScrollTween::default();
+        tween.update(2000.0, 0.0);
+        tween.update(0.0, 0.0);
+        assert!(tween.update(0.0, SCROLL_TWEEN_MIN_S) > 0.0);
+        assert_eq!(tween.update(0.0, SCROLL_TWEEN_MAX_S), 0.0);
+    }
 }
