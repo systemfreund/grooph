@@ -7,9 +7,9 @@ use eframe::egui;
 use eframe::egui::{FontId, Frame, Rect, Response, Stroke};
 use grooph_layout::pixel_layout::{GlyphMetrics, MeasureLayout, compute_em};
 use grooph_layout::staff_layout::{
-    LEGIBILITY_FLOOR_EM, PlacedMeasure, ROOM_BELOW_EM, ROOM_BELOW_WITH_LABELS_EM, StaffLayout,
-    StaffOpts, build_staff_layout_with_lower, extra_room_above_em, lower_voice_room_below_em,
-    row_height_em,
+    LEGIBILITY_FLOOR_EM, LOWER_VOICE_LABEL_ROOM_EM, PlacedMeasure, ROOM_BELOW_EM,
+    ROOM_BELOW_WITH_LABELS_EM, StaffLayout, StaffOpts, build_staff_layout_with_lower,
+    extra_room_above_em, lower_voice_room_below_em, row_height_em,
 };
 use grooph_measure::TimeSignature;
 use grooph_measure::grid::DEFAULT_GRID;
@@ -108,9 +108,15 @@ impl Grooph {
                             ),
                         };
                         if let Some(counter) = &counter {
+                            // Count labels go under the lower voice.
+                            let labels = if count_config.is_some() {
+                                LOWER_VOICE_LABEL_ROOM_EM
+                            } else {
+                                0.0
+                            };
                             staff_opts.room_below_em = staff_opts
                                 .room_below_em
-                                .max(lower_voice_room_below_em(counter, &staff_opts));
+                                .max(lower_voice_room_below_em(counter, &staff_opts) + labels);
                         }
                         // One row fits the height, so nothing above or below
                         // the staff (accents, count labels) is cut off on a

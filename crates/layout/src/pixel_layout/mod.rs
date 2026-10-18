@@ -304,7 +304,8 @@ pub fn build_measure_layout_with_plan(
 }
 
 /// Mirror what hangs off the stems (stems, flags, beams, tuplets, accents)
-/// to below the staff line. Heads, rests and dots stay where they are.
+/// to below the staff line, and lower the rests a staff space, clear of an
+/// upper voice's. Heads and dots stay where they are.
 fn flip_down(layout: &mut MeasureLayout, opts: &LayoutOpts) {
     let cy = opts.y_center();
     let y = |y: f32| 2.0 * cy - y;
@@ -312,6 +313,9 @@ fn flip_down(layout: &mut MeasureLayout, opts: &LayoutOpts) {
     let rect = |r: Rect| Rect::from_two_pos(pos(r.min), pos(r.max));
     let accent_half_h = opts.metrics.accent_size.y * 0.5;
     for note in &mut layout.notes {
+        if note.kind == BeatKind::Rest {
+            note.center.y += opts.staff_space();
+        }
         if let Some(stem) = &mut note.stem {
             *stem = Line { p1: pos(stem.p1), p2: pos(stem.p2) };
         }

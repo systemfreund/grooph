@@ -75,6 +75,7 @@ pub(crate) fn render_measure_at(
             measure,
             measure_layout,
             opts,
+            opts.y_center(),
             config,
             ui.visuals().text_color(),
             ui.visuals().selection.stroke.color,
@@ -190,12 +191,14 @@ pub(crate) fn draw_playback_cursor_span(
     painter.vline(x, ys, Stroke::new(0.1 * em, cursor_color));
 }
 
+/// The count labels of `measure`, under the line at `baseline_y`.
 #[allow(clippy::too_many_arguments)]
-fn draw_count_layer(
+pub(crate) fn draw_count_layer(
     painter: &Painter,
     measure: &Measure,
     measure_layout: &MeasureLayout,
     opts: &LayoutOpts,
+    baseline_y: f32,
     config: &CountConfig,
     text_color: Color32,
     highlight_color: Color32,
@@ -211,7 +214,7 @@ fn draw_count_layer(
         measure,
         measure_layout,
         opts.rect,
-        opts.y_center(),
+        baseline_y,
         opts.em,
         text_color,
         highlight_color,

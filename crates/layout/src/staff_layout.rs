@@ -277,9 +277,12 @@ pub fn extra_room_above_em(score: &Score, accent_below: bool) -> f32 {
     extra
 }
 
-/// Distance from the staff line down to the lower voice's line, in em: room
-/// for the rests of both voices between them.
-pub const LOWER_VOICE_GAP_EM: f32 = 1.4;
+/// Distance from the staff line down to the lower voice's line, in em: three
+/// staff spaces, about two lines of a five-line staff apart. The lower
+/// voice's rests hang below its line to clear the upper voice's.
+pub const LOWER_VOICE_GAP_EM: f32 = 0.75;
+/// Room below a lower voice for count labels, in em.
+pub const LOWER_VOICE_LABEL_ROOM_EM: f32 = 0.5;
 
 /// Room below the staff line a lower voice `lower` needs (for
 /// [`StaffOpts::room_below_em`]), in em: down to its line, then its stems

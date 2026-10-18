@@ -4,8 +4,8 @@
 //! wrap animation across measure boundaries.
 
 use crate::measure::{
-    draw_notes, draw_playback_cursor_span, last_note_entering_frac, last_note_split,
-    playback_cursor_entering_x, playback_cursor_x, render_measure_at,
+    draw_count_layer, draw_notes, draw_playback_cursor_span, last_note_entering_frac,
+    last_note_split, playback_cursor_entering_x, playback_cursor_x, render_measure_at,
 };
 use eframe::egui;
 use eframe::egui::{Color32, Rangef, Stroke};
@@ -72,6 +72,11 @@ pub fn draw_staff(
                 }
             }
 
+            // With a lower voice the count labels go under the whole staff.
+            let (count_config, lower_counts) = match system.lower_baseline {
+                Some(_) => (None, count_config),
+                None => (count_config, None),
+            };
             render_placed_measure(
                 ui,
                 score,
@@ -82,6 +87,21 @@ pub fn draw_staff(
                 count_config,
                 cursor_x,
             );
+            if let Some(config) = lower_counts {
+                let playback_tick =
+                    playback.filter(|(idx, _)| *idx == placed.measure_idx).map(|(_, t)| t);
+                draw_count_layer(
+                    ui.painter(),
+                    &score.measures[placed.measure_idx],
+                    &placed.layout,
+                    &staff_opts.measure_opts_for(placed),
+                    placed.rect.bottom(),
+                    config,
+                    color,
+                    ui.visuals().selection.stroke.color,
+                    playback_tick,
+                );
+            }
         }
 
         // Barlines between measures: vertical stroke at each measure boundary
