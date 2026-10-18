@@ -61,7 +61,7 @@ fn parens_at(center: Pos2, opts: &LayoutOpts) -> Vec<PlacedGlyph> {
 }
 
 /// The flag of a note of `duration` on `stem`, its end at the stem's tip.
-pub(super) fn flag_at(
+fn flag_at(
     duration: Duration,
     stem: &Line,
     stem_down: bool,
@@ -153,7 +153,7 @@ fn compute_x_extents(beat: &Beat, in_beam: bool, opts: &LayoutOpts) -> (f32, f32
 /// Post-layout vertical extents in absolute screen coordinates, from the
 /// already-placed glyphs and stem.
 /// Top and bottom of a note's head, stem, flag and dots.
-pub(super) fn content_extents(note: &NoteLayout) -> (f32, f32) {
+fn content_extents(note: &NoteLayout) -> (f32, f32) {
     let mut ink = note.head.ink();
     for g in note.flag.iter().chain(&note.dots) {
         ink = ink.union(g.ink());
@@ -166,7 +166,7 @@ pub(super) fn content_extents(note: &NoteLayout) -> (f32, f32) {
 
 /// Put an accent above the note's head, stem, flag and dots (below them
 /// when `below`), replacing any accent it had.
-pub(super) fn place_accent(note: &mut NoteLayout, below: bool, opts: &LayoutOpts) {
+fn place_accent(note: &mut NoteLayout, below: bool, opts: &LayoutOpts) {
     let (content_top, content_bottom) = content_extents(note);
     let displacement = opts.em * opts.accent_displacement;
     let mut glyph = PlacedGlyph::centered(glyphs::ACCENT_ABOVE, note.center.x, 0.0, opts.em);
@@ -349,15 +349,18 @@ pub(super) fn build_note_layout(
         if is_note {
             let stem_len_factor = if in_beam || needs_flag { 1.0 } else { 0.85 };
             let stem_len = opts.stem_length() * stem_len_factor;
-            // Down stems hang off the head's left side (flipped later, see
-            // `flip_down`).
+            // Down stems hang off the head's left side.
             let stem_dx = if opts.stem_down { -opts.stem_offset() } else { opts.stem_offset() };
             let ideal_stem_x = ideal_cx + stem_dx;
             let snapped_stem_x = opts.snap_x(ideal_stem_x, opts.stem_thickness());
 
-            let attach = glyphs::NOTEHEAD_BLACK_STEM_UP_SE[1] * ss;
-            let start = Pos2::new(snapped_stem_x, cy - attach);
-            let end = Pos2::new(snapped_stem_x, cy - stem_len);
+            let attach = if opts.stem_down {
+                glyphs::NOTEHEAD_BLACK_STEM_DOWN_NW[1]
+            } else {
+                glyphs::NOTEHEAD_BLACK_STEM_UP_SE[1]
+            };
+            let start = Pos2::new(snapped_stem_x, cy - attach * ss);
+            let end = Pos2::new(snapped_stem_x, cy + opts.stem_dir() * stem_len);
             stem = Some(Line { p1: start, p2: end });
         }
 
@@ -385,10 +388,9 @@ pub(super) fn build_note_layout(
         // 3. Dots
         let dots = dot_glyphs(b, in_beam, center.x, cy, dot_count_of(b.duration), opts);
 
-        // 4. Flag (if needed). The stem still points up here, so it gets an
-        // up flag; `flip_down` swaps in the down flag.
+        // 4. Flag (if needed)
         let flag = match &stem {
-            Some(s) if !in_beam && needs_flag => flag_at(b.duration, s, false, opts),
+            Some(s) if !in_beam && needs_flag => flag_at(b.duration, s, opts.stem_down, opts),
             _ => None,
         };
 
@@ -407,7 +409,7 @@ pub(super) fn build_note_layout(
 
         // 5. Accent, around the head, stem, flag and dots.
         if is_note && b.accented {
-            place_accent(&mut note, opts.accent_below, opts);
+            place_accent(&mut note, opts.accents_below(), opts);
         }
 
         note_layout.push(note);

@@ -14,6 +14,8 @@ pub(super) fn build_tuplet_layout(
     let hook_len = c::TUPLET_HOOK_LEN_SS * opts.staff_space();
     let hook_dy = hook_len * c::TUPLET_HOOK_DY_FACTOR;
     let digit_size = opts.em * c::TUPLET_DIGIT_FONT_FACTOR;
+    // Away from the heads, past the stem tips.
+    let out = opts.stem_dir();
 
     // A bracket spans from the left edge of its first head or rest to the
     // right edge of its last, whichever side the stems are on.
@@ -28,15 +30,15 @@ pub(super) fn build_tuplet_layout(
         x_l -= margin;
         x_r += margin;
 
-        // The bracket line above the stems of the highest note, which the
+        // The bracket line past the stems of the outermost note, which the
         // number is centered on. Rests don't count: a lower voice's hang
         // below the line.
-        let top = (t.start..=t.end)
-            .filter(|&i| note_layout[i].kind == BeatKind::Note)
-            .map(|i| note_layout[i].staff_pos)
-            .max()
-            .unwrap_or(0);
-        let y_base = opts.stem_tip_y(top) - bracket_gap;
+        let outermost = opts.outermost(
+            (t.start..=t.end)
+                .filter(|&i| note_layout[i].kind == BeatKind::Note)
+                .map(|i| note_layout[i].staff_pos),
+        );
+        let y_base = opts.stem_tip_y(outermost.unwrap_or(0)) + out * bracket_gap;
 
         let xc = 0.5 * (x_l + x_r);
         let digits = glyphs::tuplet_glyphs(t.count);
@@ -60,7 +62,7 @@ pub(super) fn build_tuplet_layout(
             } else {
                 c::TUPLET_ACCENT_LOWER_SS
             }) * opts.staff_space();
-            let y_bracket = y_base - accent_clearance;
+            let y_bracket = y_base + out * accent_clearance;
 
             let x_gap_l = (xc - gap_half).max(x_l);
             let x_gap_r = (xc + gap_half).min(x_r);
@@ -80,11 +82,11 @@ pub(super) fn build_tuplet_layout(
             }
             bracket.push(Line {
                 p1: Pos2::new(x_l, y_bracket),
-                p2: Pos2::new(x_l, y_bracket + hook_dy),
+                p2: Pos2::new(x_l, y_bracket - out * hook_dy),
             });
             bracket.push(Line {
                 p1: Pos2::new(x_r, y_bracket),
-                p2: Pos2::new(x_r, y_bracket + hook_dy),
+                p2: Pos2::new(x_r, y_bracket - out * hook_dy),
             });
 
             tuplets_out.push(TupletLayout {
@@ -108,7 +110,7 @@ pub(super) fn build_tuplet_layout(
             let clearance = if collides { raised_clearance } else { close_clearance };
             tuplets_out.push(TupletLayout {
                 count: t.count,
-                number: number_at(y_base - clearance),
+                number: number_at(y_base + out * clearance),
                 bracket: Vec::new(),
             });
         }

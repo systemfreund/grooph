@@ -2,16 +2,17 @@ use super::{BeamLayout, LayoutOpts, NoteLayout, c};
 use crate::beam_plan::BeamGroup;
 use egui::{Pos2, Rect};
 
-/// Y coordinate of the bottom edge of a beam level (`lvl == 0` is the
-/// outermost/topmost beam, closest to the stem tip).
-fn beam_y_level(lvl: u8, base_y: f32, opts: &LayoutOpts) -> f32 {
-    base_y + (lvl as f32) * (opts.beam_thickness() + opts.beam_gap())
-}
-
-/// Construct a beam rectangle from its bottom edge `y` and horizontal span.
-fn beam_rect(left: f32, right: f32, bottom_y: f32, opts: &LayoutOpts) -> BeamLayout {
-    let top = bottom_y - opts.beam_thickness();
-    BeamLayout { rect: Rect::from_min_max(Pos2::new(left, top), Pos2::new(right, bottom_y)) }
+/// The rectangle of beam level `lvl` (0 is the outermost, at the stem tips)
+/// over `left..right`. The beams stack from the tips `tip_y` toward the
+/// heads; the outermost reaches a little past the tips to hide the
+/// stem/beam seam.
+fn beam_rect(left: f32, right: f32, lvl: u8, tip_y: f32, opts: &LayoutOpts) -> BeamLayout {
+    let d = opts.stem_dir();
+    let step = opts.beam_thickness() + opts.beam_gap();
+    let inner =
+        tip_y - d * (opts.beam_thickness() * c::BEAM_BASELINE_OFFSET + f32::from(lvl) * step);
+    let outer = inner + d * opts.beam_thickness();
+    BeamLayout { rect: Rect::from_two_pos(Pos2::new(left, inner), Pos2::new(right, outer)) }
 }
 
 /// Emit full beams between adjacent stems of a beam group, one rectangle
@@ -19,7 +20,7 @@ fn beam_rect(left: f32, right: f32, bottom_y: f32, opts: &LayoutOpts) -> BeamLay
 fn emit_full_beams(
     group: &BeamGroup,
     stem_xs: &[f32],
-    base_y: f32,
+    tip_y: f32,
     half_stem: f32,
     opts: &LayoutOpts,
     out: &mut Vec<BeamLayout>,
@@ -34,7 +35,7 @@ fn emit_full_beams(
         let left = x1.min(x2) - half_stem;
         let right = x1.max(x2) + half_stem;
         for lvl in 0..levels {
-            out.push(beam_rect(left, right, beam_y_level(lvl, base_y, opts), opts));
+            out.push(beam_rect(left, right, lvl, tip_y, opts));
         }
     }
 }
@@ -44,7 +45,7 @@ fn emit_full_beams(
 fn emit_stub_beams(
     group: &BeamGroup,
     stem_xs: &[f32],
-    base_y: f32,
+    tip_y: f32,
     half_stem: f32,
     opts: &LayoutOpts,
     out: &mut Vec<BeamLayout>,
@@ -86,7 +87,7 @@ fn emit_stub_beams(
             } else {
                 (stem_x - opts.stub_length(), stem_x + half_stem)
             };
-            out.push(beam_rect(left, right, beam_y_level(lvl, base_y, opts), opts));
+            out.push(beam_rect(left, right, lvl, tip_y, opts));
         }
     }
 }
@@ -96,11 +97,10 @@ pub(super) fn build_beam_layout(
     beam_groups: &[BeamGroup],
     opts: &LayoutOpts,
 ) -> Vec<BeamLayout> {
-    // Align the top edge with the stem tip of the group's highest head; a
-    // small downward offset hides the stem/beam seam.
-    let base_y = |g: &BeamGroup| {
-        let top = g.beat_indices.iter().map(|&i| note_layout[i].staff_pos).max().unwrap_or(0);
-        opts.stem_tip_y(top) + opts.beam_thickness() * c::BEAM_BASELINE_OFFSET
+    // The beams hang off the stem tips of the group's outermost head.
+    let tip_y = |g: &BeamGroup| {
+        let positions = g.beat_indices.iter().map(|&i| note_layout[i].staff_pos);
+        opts.stem_tip_y(opts.outermost(positions).unwrap_or(0))
     };
 
     // Stems are already snapped in `note_layout`; fall back for un-stemmed
@@ -113,10 +113,10 @@ pub(super) fn build_beam_layout(
 
     let mut out: Vec<BeamLayout> = Vec::new();
     for g in beam_groups {
-        emit_full_beams(g, &stem_xs, base_y(g), half_stem, opts, &mut out);
+        emit_full_beams(g, &stem_xs, tip_y(g), half_stem, opts, &mut out);
     }
     for g in beam_groups {
-        emit_stub_beams(g, &stem_xs, base_y(g), half_stem, opts, &mut out);
+        emit_stub_beams(g, &stem_xs, tip_y(g), half_stem, opts, &mut out);
     }
     out
 }
