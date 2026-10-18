@@ -100,13 +100,6 @@ fn shift_y(glyphs: &mut [PlacedGlyph], dy: f32) {
     }
 }
 
-/// Move `glyphs` as a whole to where their ink, mirrored about `cy`, is.
-fn mirror_ink(glyphs: &mut [PlacedGlyph], cy: f32) {
-    if let Some(ink) = ink_of(glyphs) {
-        shift_y(glyphs, (2.0 * cy - ink.bottom()) - ink.top());
-    }
-}
-
 pub fn compute_em(rect: &Rect, width_cap_factor: f32, ui: &egui::Ui) -> f32 {
     // Derive font size mainly from the available height, modulated by width caps
     let min_size = 12.0 * ui.ctx().pixels_per_point();
@@ -186,10 +179,26 @@ impl LayoutOpts {
         self.y_center() - f32::from(pos) * self.staff_space() * 0.5
     }
 
-    /// Y of the stem tips of notes up to staff position `pos`, before
-    /// `flip_down`.
+    /// Which way the stems point on screen: -1 up, 1 down.
+    pub(super) const fn stem_dir(&self) -> f32 {
+        if self.stem_down { 1.0 } else { -1.0 }
+    }
+
+    /// The outermost of `positions` along the stems: the highest for up
+    /// stems, the lowest for down stems.
+    pub(super) fn outermost(&self, positions: impl Iterator<Item = i8>) -> Option<i8> {
+        if self.stem_down { positions.min() } else { positions.max() }
+    }
+
+    /// Y of the stem tips of notes reaching from staff position `pos`.
     pub(super) fn stem_tip_y(&self, pos: i8) -> f32 {
-        self.y_of(pos) - self.stem_length()
+        self.y_of(pos) + self.stem_dir() * self.stem_length()
+    }
+
+    /// Whether accents go below the notes. `accent_below` puts them on the
+    /// heads' side, away from the stems.
+    pub(super) const fn accents_below(&self) -> bool {
+        self.accent_below != self.stem_down
     }
 
     const fn snap_thickness(&self, t: f32) -> f32 {
@@ -354,50 +363,13 @@ pub fn build_measure_layout_with_plan(
     let tuplet_layout =
         tuplets::build_tuplet_layout(measure.beats(), &note_layout, &render_plan.tuplets, opts);
 
-    let mut layout = MeasureLayout {
+    MeasureLayout {
         beams: beam_layout,
         notes: note_layout,
         tuplets: tuplet_layout,
         clef,
         time_signature: time_signature_layout,
         notes_left_edge,
-    };
-    if opts.stem_down {
-        flip_down(&mut layout, opts);
-    }
-    layout
-}
-
-/// Mirror what hangs off the stems (stems, flags, beams, tuplets, accents)
-/// to below the staff line. Heads, rests and dots stay at their staff
-/// positions.
-fn flip_down(layout: &mut MeasureLayout, opts: &LayoutOpts) {
-    let cy = opts.y_center();
-    let y = |y: f32| 2.0 * cy - y;
-    let pos = |p: Pos2| Pos2::new(p.x, y(p.y));
-    let rect = |r: Rect| Rect::from_two_pos(pos(r.min), pos(r.max));
-    for note in &mut layout.notes {
-        if let Some(stem) = &mut note.stem {
-            *stem = Line { p1: pos(stem.p1), p2: pos(stem.p2) };
-            if let Some(flag) = &mut note.flag {
-                *flag = notes::flag_at(note.duration, stem, true, opts).unwrap_or(*flag);
-            }
-        }
-        // Placed again rather than mirrored: the down flag is not the up
-        // flag's mirror image.
-        if note.accent.is_some() {
-            notes::place_accent(note, !opts.accent_below, opts);
-        }
-    }
-    for beam in &mut layout.beams {
-        beam.rect = rect(beam.rect);
-    }
-    for tuplet in &mut layout.tuplets {
-        // The number moves as a whole, its ink on the mirrored bracket line.
-        mirror_ink(&mut tuplet.number, cy);
-        for line in &mut tuplet.bracket {
-            *line = Line { p1: pos(line.p1), p2: pos(line.p2) };
-        }
     }
 }
 
@@ -683,7 +655,7 @@ mod tests {
     }
 
     #[test]
-    fn down_stems_mirror_what_hangs_off_them() {
+    fn down_stems_hang_below_what_up_stems_hang_above() {
         use grooph_measure::notation::parse_score;
         let m = parse_score("4/4 >t8 t8 t8 e e q q").unwrap().measures.remove(0);
         let em = 20.0;
@@ -714,8 +686,18 @@ mod tests {
             }
         }
         assert!(b.notes[0].accent.unwrap().ink().top() > cy);
-        assert!(b.beams.iter().all(|r| r.rect.min.y > cy));
-        // The number's ink is mirrored as a whole: centered on its bracket.
+        // Beams and brackets are the up stems' mirrored about the line.
+        let mirrored = |y: f32| 2.0 * cy - y;
+        assert_eq!(a.beams.len(), b.beams.len());
+        for (u, d) in a.beams.iter().zip(&b.beams) {
+            assert!((d.rect.min.y - mirrored(u.rect.max.y)).abs() < 0.01);
+            assert!((d.rect.max.y - mirrored(u.rect.min.y)).abs() < 0.01);
+        }
+        for (u, d) in a.tuplets[0].bracket.iter().zip(&b.tuplets[0].bracket) {
+            assert!((d.p1.y - mirrored(u.p1.y)).abs() < 0.01);
+            assert!((d.p2.y - mirrored(u.p2.y)).abs() < 0.01);
+        }
+        // The number's ink is centered on its bracket.
         let ink = |l: &MeasureLayout| ink_of(&l.tuplets[0].number).unwrap();
         assert!(ink(&b).top() > cy);
         assert!((ink(&b).center().y - cy - (cy - ink(&a).center().y)).abs() < 0.01);
