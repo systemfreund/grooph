@@ -34,9 +34,10 @@ pub(crate) fn paint_share_icon(painter: &Painter, rect: Rect, color: Color32) {
 }
 
 impl Grooph {
-    /// Link to what is on screen: in the metronome its meter, tempo and click
-    /// bar; else the working score at the current tempo and swing, with the
-    /// click bar of its first meter if that is not the default.
+    /// Link to what is on screen: in the metronome its meter, tempo, click
+    /// bar and counter rhythm; else the working score at the current tempo
+    /// and swing, with the click bar of its first meter if that is not the
+    /// default.
     pub(crate) fn share_link_url(&self) -> Option<String> {
         let swing = self.playback_ctl.audio_cfg.swing;
         let click = &self.playback_ctl.audio_cfg.click;
@@ -52,6 +53,7 @@ impl Grooph {
             swing: (!swing.is_straight()).then_some(swing),
             content: Some(content),
             click: meter.and_then(|ts| click.custom_for(ts)).cloned(),
+            counter: self.metronome_mode().then(|| self.counter_bar().cloned()).flatten(),
         };
         let url = link.to_url(&platform::share_base_url());
         if url.is_none() {

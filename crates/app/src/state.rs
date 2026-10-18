@@ -288,7 +288,7 @@ pub(crate) struct UiShell {
 /// Something that replaces the working score once unsaved changes are dealt with.
 pub(crate) enum PendingLoad {
     Pattern(u64),
-    Link(SharedLink),
+    Link(Box<SharedLink>),
 }
 
 #[cfg(test)]
