@@ -4,19 +4,20 @@
 //! wrap animation across measure boundaries.
 
 use crate::measure::{
-    draw_count_layer, draw_notes, draw_playback_cursor_span, last_note_entering_frac,
-    last_note_split, playback_cursor_entering_x, playback_cursor_x, render_measure_at,
+    draw_count_layer, draw_edit_cursor, draw_notes, draw_playback_cursor_span,
+    last_note_entering_frac, last_note_split, playback_cursor_entering_x, playback_cursor_x,
+    render_measure_at,
 };
 use eframe::egui;
 use eframe::egui::{Color32, Rangef, Stroke};
-use grooph_layout::staff_layout::{PlacedMeasure, StaffLayout, StaffOpts};
+use grooph_layout::staff_layout::{PlacedMeasure, StaffLayout, StaffOpts, Voice};
 use grooph_measure::counting::CountConfig;
 use grooph_measure::{Cursor, MeasureIdx, Score};
 
 /// Render a full score described by `staff` to `ui`.
 ///
-/// `cursor` highlights the edit position; only the measure matching
-/// `cursor.measure_idx` gets a blinking cursor. `playback` is
+/// `cursor` highlights the edit position in `cursor_voice`; only the measure
+/// matching `cursor.measure_idx` gets a blinking cursor. `playback` is
 /// `Some((measure_idx, local_tick))` referring to the **active** measure (the
 /// one currently being audibly played). The *visual* cursor may live in a
 /// different measure during the wrap animation — see [`current_cursor_x`].
@@ -26,10 +27,15 @@ pub fn draw_staff(
     score: &Score,
     staff: &StaffLayout,
     cursor: Option<Cursor>,
+    cursor_voice: Voice,
     playback: Option<(MeasureIdx, f64)>,
     count_config: Option<&CountConfig>,
     staff_opts: &StaffOpts,
 ) {
+    let (cursor, lower_cursor) = match cursor_voice {
+        Voice::Upper => (cursor, None),
+        Voice::Lower => (None, cursor),
+    };
     let color = ui.visuals().text_color();
 
     // Resolve the *visual* cursor location once per frame. Phase 1 of a
@@ -61,7 +67,11 @@ pub fn draw_staff(
             // The lower voice's notes, with the playback cursor reaching down
             // over its line.
             if let (Some(lower), Some(y)) = (&placed.lower, system.lower_baseline) {
-                draw_notes(ui.painter(), lower, color, &staff_opts.lower_opts_for(placed));
+                let lower_opts = staff_opts.lower_opts_for(placed);
+                draw_notes(ui.painter(), lower, color, &lower_opts);
+                if let Some(c) = lower_cursor.filter(|c| c.measure_idx == placed.measure_idx) {
+                    draw_edit_cursor(ui, ui.painter(), lower, c.beat_idx, &lower_opts);
+                }
                 if let Some(x) = cursor_x {
                     let ys = Rangef::new(
                         system.y_baseline + 0.7 * staff_opts.em,

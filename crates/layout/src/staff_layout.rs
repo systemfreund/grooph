@@ -405,38 +405,62 @@ pub fn build_staff_layout_with_lower(
     StaffLayout { total_size: vec2(max_row_width, total_height), systems, scale: em_scale }
 }
 
+/// One of the staff's two voices: the upper one on the staff line, or the
+/// lower one on its own line below.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Voice {
+    #[default]
+    Upper,
+    Lower,
+}
+
 /// Find `(measure_idx, beat_idx)` of the beat closest to `pos`. `pos` is in
 /// the same coordinate space as `staff` (i.e. the inner space of the
 /// ScrollArea content). The row — and with it the measure, one per row — is
 /// picked by `pos.y` (clamped to the first/last row), then the beat by
 /// `pos.x`. Returns `None` if the score has no notes anywhere.
 pub fn hit_test_staff(staff: &StaffLayout, pos: Pos2) -> Option<(MeasureIdx, BeatIdx)> {
+    hit_test_voice(staff, pos).map(|(_, m, b)| (m, b))
+}
+
+/// Like [`hit_test_staff`], with the voice whose line is nearer `pos`: on a
+/// staff with a lower voice, below halfway between the two lines picks the
+/// lower one and the beat among its notes.
+pub fn hit_test_voice(staff: &StaffLayout, pos: Pos2) -> Option<(Voice, MeasureIdx, BeatIdx)> {
     let system =
         staff.systems.iter().find(|s| pos.y < s.rect.bottom()).or_else(|| staff.systems.last())?;
     let target = system.measures.first()?;
-    let x = pos.x;
+    if let (Some(lower), Some(y)) = (&target.lower, system.lower_baseline)
+        && pos.y > (system.y_baseline + y) / 2.0
+        && !lower.notes.is_empty()
+    {
+        return Some((Voice::Lower, target.measure_idx, nearest_note(lower, pos.x)));
+    }
 
-    let notes = &target.layout.notes;
-    if notes.is_empty() {
+    if target.layout.notes.is_empty() {
         // Try any measure, in any row, with notes.
         let with_notes = staff
             .systems
             .iter()
             .flat_map(|s| s.measures.iter())
             .find(|p| !p.layout.notes.is_empty())?;
-        return Some((with_notes.measure_idx, 0));
+        return Some((Voice::Upper, with_notes.measure_idx, 0));
     }
+    Some((Voice::Upper, target.measure_idx, nearest_note(&target.layout, pos.x)))
+}
 
+/// Index of the note of `layout` nearest `x`.
+fn nearest_note(layout: &MeasureLayout, x: f32) -> BeatIdx {
     let mut best_i = 0usize;
     let mut best_d = f32::MAX;
-    for (i, nl) in notes.iter().enumerate() {
+    for (i, nl) in layout.notes.iter().enumerate() {
         let d = (nl.center.x - x).abs();
         if d < best_d {
             best_d = d;
             best_i = i;
         }
     }
-    Some((target.measure_idx, best_i))
+    best_i
 }
 
 #[cfg(test)]
@@ -533,6 +557,31 @@ mod tests {
         let stem_end = below.notes[0].stem.unwrap().p2.y;
         assert!(stem_end > system.lower_baseline.unwrap() && stem_end < placed.rect.bottom());
         assert!(build_staff_layout(&upper, &opts(em, rect)).systems[0].lower_baseline.is_none());
+    }
+
+    #[test]
+    fn hit_test_picks_the_nearer_voice() {
+        use grooph_measure::notation::parse_score;
+        let em = 20.0;
+        let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(400.0, 100.0));
+        let upper = parse_score("4/4 >q q q q").unwrap();
+        let lower = parse_score("4/4 t4 r:t4 (t4) r:t4 (t4) r:t4").unwrap();
+        let mut staff_opts = opts(em, rect);
+        staff_opts.room_below_em = lower_voice_room_below_em(&lower, &staff_opts);
+        let staff = build_staff_layout_with_lower(&upper, Some(&lower), &staff_opts);
+        let system = &staff.systems[0];
+        let below = system.measures[0].lower.as_ref().unwrap();
+        let x = below.notes[3].center.x;
+        let lower_y = system.lower_baseline.unwrap();
+        assert_eq!(hit_test_voice(&staff, Pos2::new(x, lower_y)), Some((Voice::Lower, 0, 3)));
+        assert_eq!(
+            hit_test_voice(&staff, Pos2::new(x, system.y_baseline)),
+            Some((Voice::Upper, 0, 2))
+        );
+        // Without a lower voice everything hits the upper one.
+        let single = build_staff_layout(&upper, &opts(em, rect));
+        let y = single.systems[0].rect.bottom() - 1.0;
+        assert_eq!(hit_test_voice(&single, Pos2::new(x, y)).map(|h| h.0), Some(Voice::Upper));
     }
 
     #[test]
