@@ -83,9 +83,9 @@ jobs:
           -keyalg RSA -keysize 2048 -validity 10000 -storepass android -keypass android \
           -dname "CN=grooph prototype"
     - name: Build APK
-      run: cargo apk build -p grooph-android --release
+      # ANDROID_NDK_LATEST_HOME is set by the runner image, not the env context.
+      run: ANDROID_NDK_ROOT="$ANDROID_NDK_LATEST_HOME" cargo apk build -p grooph-android --release
       env:
-        ANDROID_NDK_ROOT: ${{ env.ANDROID_NDK_LATEST_HOME }}
         CARGO_APK_RELEASE_KEYSTORE: ${{ runner.temp }}/grooph.keystore
         CARGO_APK_RELEASE_KEYSTORE_PASSWORD: android
     - name: Keep the APK
