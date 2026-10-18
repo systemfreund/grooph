@@ -457,8 +457,11 @@ impl Grooph {
         });
     }
 
-    /// Tick within the bar being heard (latency taken off), if playing.
-    fn metronome_tick(&self, ts: &TimeSignature) -> Option<f64> {
+    /// Tick within the bar being heard (latency taken off) at `now`, if
+    /// playing. Follows the staff's smoothed playback cursor, carried on to
+    /// this frame, so the ring moves as evenly as the cursor; the audio
+    /// position alone only moves once per audio buffer.
+    fn metronome_tick(&self, ts: &TimeSignature, now: f64) -> Option<f64> {
         if self.playback_ctl.transport_state != TransportState::Playing {
             return None;
         }
@@ -466,7 +469,13 @@ impl Grooph {
         let bar_ticks = DEFAULT_GRID.ticks_per_measure(ts) as f64;
         let ticks_per_sec = ScoreTiming::from_score(&self.metronome_score(), self.current_bpm())
             .ticks_per_sec_in_measure(0);
-        let heard = tick - self.playback_ctl.audio_cfg.latency_s() * ticks_per_sec;
+        let playback = &self.playback_ctl.playback;
+        let heard = match playback.last_update {
+            Some(last) if !playback.counting_in() => {
+                playback.smooth_tick + (now - last).max(0.0) * ticks_per_sec
+            }
+            _ => tick - self.playback_ctl.audio_cfg.latency_s() * ticks_per_sec,
+        };
         Some(heard.rem_euclid(bar_ticks.max(1.0)))
     }
 
@@ -487,7 +496,7 @@ impl Grooph {
         let spans = beat_spans(&bar);
         let counter = self.counter_bar().cloned();
         let counter_spans = counter.as_ref().map(counter_spans).unwrap_or_default();
-        let tick = self.metronome_tick(&ts);
+        let tick = self.metronome_tick(&ts, ui.input(|i| i.time));
         let bar_ticks = DEFAULT_GRID.ticks_per_measure(&ts).max(1) as f64;
         let current_turn = tick.map(|t| (t / bar_ticks) as f32);
         let current = current_turn.and_then(|t| beat_at_turn(&spans, t));
