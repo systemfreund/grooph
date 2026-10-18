@@ -480,6 +480,19 @@ impl Grooph {
         Some(heard.rem_euclid(bar_ticks.max(1.0)))
     }
 
+    /// Whether the count-in's first click has been heard yet. Until then,
+    /// with output latency, the ring's turn still wraps to the bar's end.
+    fn count_in_click_heard(&self, ts: &TimeSignature) -> bool {
+        let Some((tick, _)) = self.playback_ctl.audio.as_ref().and_then(|a| a.playback_position())
+        else {
+            return false;
+        };
+        let bar_ticks = DEFAULT_GRID.ticks_per_measure(ts) as f64;
+        let ticks_per_sec = ScoreTiming::from_score(&self.metronome_score(), self.current_bpm())
+            .ticks_per_sec_in_measure(0);
+        tick - self.playback_ctl.audio_cfg.latency_s() * ticks_per_sec >= -bar_ticks
+    }
+
     /// The ring with the click bar, `height` tall at the bottom of the space
     /// left between the panels.
     pub(crate) fn metronome_ring(&mut self, ui: &mut Ui, height: f32) {
@@ -604,7 +617,7 @@ impl Grooph {
         // while playing, else the meter (and the counter rhythm's ratio).
         let count_in_beat = current_turn
             .filter(|_| self.playback_ctl.playback.count_in == CountInState::Active)
-            .map(|t| count_in_beat(t, &ts));
+            .map(|t| if self.count_in_click_heard(&ts) { count_in_beat(t, &ts) } else { 1 });
         let caption = match counter.as_ref().and_then(ratio_of) {
             Some(ratio) => ratio.to_string(),
             None if counter.is_some() => "custom".to_owned(),
