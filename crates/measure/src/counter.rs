@@ -223,6 +223,19 @@ mod tests {
     }
 
     #[test]
+    fn every_offered_ratio_reads_back_as_itself() {
+        for unit in [2, 4, 8, 16] {
+            for beats in 1..=16 {
+                let Ok(ts) = format!("{beats}/{unit}").parse::<TimeSignature>() else { continue };
+                for ratio in counter_ratios(ts) {
+                    let bar = counter_bar(ts, ratio).unwrap();
+                    assert_eq!(ratio_of(&bar), Some(ratio), "{ratio} in {ts}");
+                }
+            }
+        }
+    }
+
+    #[test]
     fn ratios_with_the_same_note_values_tell_apart() {
         // 3:4 and 3:2 in 4/4 are both six quarter triplets.
         let ts = TimeSignature::FOUR_FOUR;
