@@ -179,7 +179,7 @@ impl Grooph {
         let width = (ui.ctx().content_rect().width() - 48.0).clamp(200.0, 380.0);
         let mut preset = None;
 
-        let modal = Modal::new(Id::new("settings_picker")).show(ui.ctx(), |ui| {
+        let modal = Modal::new(Id::unique("settings_picker")).show(ui.ctx(), |ui| {
             ui.set_width(width);
             let title = match picker {
                 Picker::TimeSignature => "Time signature",
@@ -278,7 +278,7 @@ impl Grooph {
                     ui.available_width() - 2.0 * (ROW_HEIGHT + ui.spacing().item_spacing.x) - 16.0;
                 let field = ui.add(
                     egui::TextEdit::singleline(&mut preset.name)
-                        .id(Id::new("rename_preset"))
+                        .id(Id::unique("rename_preset"))
                         .desired_width(field_width),
                 );
                 // Typing goes to the name while nothing else has the focus.
@@ -588,7 +588,7 @@ impl Grooph {
             ui.horizontal_wrapped(|ui| {
                 for figure in of_span {
                     let measure = figure.measure();
-                    let id = egui::Id::new(("figure", figure.id.0));
+                    let id = egui::IdSalt::new(("figure", figure.id.0));
                     let tile = notation_button(
                         ui,
                         id,

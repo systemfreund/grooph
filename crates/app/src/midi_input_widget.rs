@@ -6,7 +6,7 @@ use log::warn;
 
 pub(crate) fn midi_input_widget(
     ui: &mut egui::Ui,
-    id_source: impl std::hash::Hash,
+    id_source: impl std::hash::Hash + std::fmt::Debug,
     refresh_label: &str,
     midi_input: &mut Option<MidiInput>,
     midi_input_ports: &mut Vec<String>,

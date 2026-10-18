@@ -487,7 +487,7 @@ impl Grooph {
             .resizable(false)
             .show_separator_line(false)
             .frame(egui::Frame::new().fill(ui.visuals().panel_fill))
-            .show_inside(ui, |ui| self.ring(ui));
+            .show(ui, |ui| self.ring(ui));
     }
 
     fn ring(&mut self, ui: &mut Ui) {
