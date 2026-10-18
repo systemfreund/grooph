@@ -26,16 +26,18 @@ mod c {
 
     // Tuplet bracket / number
     /// From the stem tips to the bracket line, the number's middle.
-    pub const TUPLET_BRACKET_GAP_SS: f32 = 2.30;
+    pub const TUPLET_BRACKET_GAP_SS: f32 = 1.90;
+    /// From the stem tips to the middle of a number without a bracket.
+    pub const TUPLET_NUMBER_GAP_SS: f32 = 1.30;
+    /// Least space between the notes' ink (accents, flags, beams) and a
+    /// tuplet's number, bracket line or hooks, across and along.
+    pub const TUPLET_INK_GAP_SS: f32 = 0.60;
     pub const TUPLET_HOOK_LEN_SS: f32 = 0.80;
     pub const TUPLET_HOOK_DY_FACTOR: f32 = 0.85;
     pub const TUPLET_DIGIT_FONT_FACTOR: f32 = 0.75;
     pub const TUPLET_MARGIN_EM: f32 = 0.05;
     /// Space between the number's ink and the bracket on either side.
     pub const TUPLET_NUMBER_CLEARANCE_SS: f32 = 1.75;
-    pub const TUPLET_ACCENT_RAISE_SS: f32 = 1.40;
-    pub const TUPLET_ACCENT_LOWER_SS: f32 = -0.40;
-    pub const TUPLET_NUMBER_CLOSE_SS: f32 = -1.00;
     pub const TUPLET_MIN_SEG_SS: f32 = 0.50;
 
     /// Space between a soft note's head and the ink of its parentheses.
@@ -361,7 +363,7 @@ pub fn build_measure_layout_with_plan(
     let note_layout = notes::build_note_layout(measure, render_plan, &note_rect, opts);
     let beam_layout = beams::build_beam_layout(&note_layout, &render_plan.beams, opts);
     let tuplet_layout =
-        tuplets::build_tuplet_layout(measure.beats(), &note_layout, &render_plan.tuplets, opts);
+        tuplets::build_tuplet_layout(&note_layout, &beam_layout, &render_plan.tuplets, opts);
 
     MeasureLayout {
         beams: beam_layout,
@@ -694,7 +696,7 @@ mod tests {
             assert!((d.rect.max.y - mirrored(u.rect.min.y)).abs() < 0.01);
         }
         // A rest in the triplet gives it a bracket.
-        let r = parse_score("4/4 >t8 r:t8 t8 q h").unwrap().measures.remove(0);
+        let r = parse_score("4/4 t8 r:t8 t8 q h").unwrap().measures.remove(0);
         let (ra, rb) = (build_measure_layout(&r, &up), build_measure_layout(&r, &down));
         let (ub, db) = (&ra.tuplets[0].bracket, &rb.tuplets[0].bracket);
         assert!(!ub.is_empty());
@@ -707,6 +709,65 @@ mod tests {
         let ink = |l: &MeasureLayout| ink_of(&l.tuplets[0].number).unwrap();
         assert!(ink(&b).top() > cy);
         assert!((ink(&b).center().y - cy - (cy - ink(&a).center().y)).abs() < 0.01);
+    }
+
+    #[test]
+    fn tuplets_clear_the_accents_under_them_by_their_ink() {
+        use grooph_measure::notation::parse_score;
+        let em = 20.0;
+        let up = LayoutOpts {
+            rect: Rect::from_min_max(Pos2::ZERO, Pos2::new(300.0, 200.0)),
+            font_id: FontId::new(em, FontFamily::Proportional),
+            pixels_per_point: 1.0,
+            em,
+            layout_clef: false,
+            layout_time_signature: false,
+            y_offset: 0.0,
+            stem_length_factor: 0.9,
+            stem_thickness_factor: 0.1,
+            accent_displacement: 0.07,
+            accent_below: false,
+            stem_down: false,
+            proportional_spacing: true,
+        };
+        let ss = up.staff_space();
+        let gap = c::TUPLET_INK_GAP_SS * ss;
+        let tip = up.stem_tip_y(0);
+        let lay_out = |s: &str, opts: &LayoutOpts| {
+            build_measure_layout(&parse_score(s).unwrap().measures.remove(0), opts)
+        };
+        let line_of = |l: &MeasureLayout| l.tuplets[0].bracket[0].p1.y;
+        let number_of = |l: &MeasureLayout| ink_of(&l.tuplets[0].number).unwrap();
+
+        // Without accents the bracket and the number keep their distance
+        // from the stem tips.
+        let plain = lay_out("4/4 t8 r:t8 t8 q h", &up);
+        assert!((line_of(&plain) - (tip - c::TUPLET_BRACKET_GAP_SS * ss)).abs() < 0.01);
+        let beamed = lay_out("4/4 t8 t8 t8 q h", &up);
+        assert!(
+            (number_of(&beamed).center().y - (tip - c::TUPLET_NUMBER_GAP_SS * ss)).abs() < 0.01
+        );
+
+        // An accent under the number lifts it just clear of the accent.
+        let l = lay_out("4/4 t8 >t8 t8 q h", &up);
+        let accent = l.notes[1].accent.unwrap().ink();
+        assert!((number_of(&l).bottom() - (accent.top() - gap)).abs() < 0.01);
+        // An accent under a hook lifts the bracket so the hook clears it.
+        let l = lay_out("4/4 >t8 r:t8 t8 q h", &up);
+        let accent = l.notes[0].accent.unwrap().ink();
+        let hook_end = l.tuplets[0].bracket.iter().map(|b| b.p2.y).fold(f32::MIN, f32::max);
+        assert!((hook_end - (accent.top() - gap)).abs() < 0.01);
+        assert!(number_of(&l).bottom() < accent.top() - gap);
+        // A quarter's accent sits low enough to leave the bracket nearly
+        // where it is without one.
+        let l = lay_out("4/4 >t4 t4 t4 h", &up);
+        assert!(line_of(&l) > tip - 2.1 * ss);
+
+        // Down stems hang the same below the notes.
+        let down = LayoutOpts { stem_down: true, ..up.clone() };
+        let (a, b) = (lay_out("4/4 t8 >t8 t8 q h", &up), lay_out("4/4 t8 >t8 t8 q h", &down));
+        let cy = up.y_center();
+        assert!((number_of(&b).center().y - cy - (cy - number_of(&a).center().y)).abs() < 0.01);
     }
 
     #[test]
