@@ -37,8 +37,7 @@ mod c {
     pub const TUPLET_NUMBER_BASELINE_LIFT_SS: f32 = 0.50;
     pub const TUPLET_MIN_SEG_SS: f32 = 0.50;
 
-    // Parentheses of a soft note: width of one and gap to the head
-    pub const SOFT_PAREN_EM: f32 = 0.3;
+    // Parentheses of a soft note: gap to the head
     pub const SOFT_PAREN_GAP_EM: f32 = 0.04;
 
     // Beam alignment
@@ -54,6 +53,8 @@ pub struct GlyphMetrics {
     pub flag_16th_size: Vec2,
     pub flag_32nd_size: Vec2,
     pub rest_sizes: [Vec2; 6],
+    /// Width of one parenthesis around a soft note's head.
+    pub paren_width: f32,
 }
 
 impl GlyphMetrics {
@@ -78,6 +79,7 @@ impl GlyphMetrics {
             flag_16th_size: Vec2::new(0.35 * em, 1.2 * em),
             flag_32nd_size: Vec2::new(0.4 * em, 1.4 * em),
             rest_sizes: [default_size; 6],
+            paren_width: 0.3 * em,
         }
     }
 
@@ -93,6 +95,7 @@ impl GlyphMetrics {
             flag_16th_size: self.flag_16th_size * factor,
             flag_32nd_size: self.flag_32nd_size * factor,
             rest_sizes: self.rest_sizes.map(|v| v * factor),
+            paren_width: self.paren_width * factor,
         }
     }
 }
@@ -120,6 +123,9 @@ pub struct LayoutOpts {
 
     pub accent_displacement: f32,
     pub accent_below: bool,
+    /// Stems point down, with beams, flags, tuplets and accents below the
+    /// notes: the lower voice of a staff with two.
+    pub stem_down: bool,
     pub proportional_spacing: bool,
     pub debug_bbox: bool,
     pub metrics: GlyphMetrics,
@@ -286,13 +292,51 @@ pub fn build_measure_layout_with_plan(
     let tuplet_layout =
         tuplets::build_tuplet_layout(measure.beats(), &note_layout, &render_plan.tuplets, opts);
 
-    MeasureLayout {
+    let mut layout = MeasureLayout {
         beams: beam_layout,
         notes: note_layout,
         tuplets: tuplet_layout,
         clef_pos,
         time_signature: time_signature_layout,
         notes_left_edge,
+    };
+    if opts.stem_down {
+        flip_down(&mut layout, opts);
+    }
+    layout
+}
+
+/// Mirror what hangs off the stems (stems, flags, beams, tuplets, accents)
+/// to below the staff line, and lower the rests a staff space, clear of an
+/// upper voice's. Heads and dots stay where they are.
+fn flip_down(layout: &mut MeasureLayout, opts: &LayoutOpts) {
+    let cy = opts.y_center();
+    let y = |y: f32| 2.0 * cy - y;
+    let pos = |p: Pos2| Pos2::new(p.x, y(p.y));
+    let rect = |r: Rect| Rect::from_two_pos(pos(r.min), pos(r.max));
+    let accent_half_h = opts.metrics.accent_size.y * 0.5;
+    for note in &mut layout.notes {
+        if note.kind == BeatKind::Rest {
+            note.center.y += opts.staff_space();
+        }
+        if let Some(stem) = &mut note.stem {
+            *stem = Line { p1: pos(stem.p1), p2: pos(stem.p2) };
+        }
+        note.flag_pos = note.flag_pos.map(pos);
+        // The accent glyph is placed half its height below its middle.
+        note.accent_pos =
+            note.accent_pos.map(|p| Pos2::new(p.x, y(p.y - accent_half_h) + accent_half_h));
+        note.debug_bbox = note.debug_bbox.map(rect);
+        note.accent_debug_bbox = note.accent_debug_bbox.map(rect);
+    }
+    for beam in &mut layout.beams {
+        beam.rect = rect(beam.rect);
+    }
+    for tuplet in &mut layout.tuplets {
+        tuplet.number_center = pos(tuplet.number_center);
+        for line in &mut tuplet.bracket {
+            *line = Line { p1: pos(line.p1), p2: pos(line.p2) };
+        }
     }
 }
 
@@ -390,6 +434,7 @@ mod tests {
             stem_thickness_factor: 0.1,
             accent_displacement: 0.0,
             accent_below: false,
+            stem_down: false,
             proportional_spacing: true,
             debug_bbox: false,
             metrics: GlyphMetrics::debug(em),
@@ -423,6 +468,7 @@ mod tests {
             stem_thickness_factor: 0.1,
             accent_displacement: 0.0,
             accent_below: false,
+            stem_down: false,
             proportional_spacing: true,
             debug_bbox: true,
             metrics: GlyphMetrics::debug(em),
@@ -464,6 +510,7 @@ mod tests {
             stem_thickness_factor: 0.1,
             accent_displacement: 0.0,
             accent_below: false,
+            stem_down: false,
             proportional_spacing: true,
             debug_bbox: true,
             metrics: GlyphMetrics::debug(em),
@@ -515,6 +562,7 @@ mod tests {
             stem_thickness_factor: 0.1,
             accent_displacement: displacement,
             accent_below: false,
+            stem_down: false,
             proportional_spacing: true,
             debug_bbox: true,
             metrics: GlyphMetrics::debug(em),
@@ -569,6 +617,7 @@ mod tests {
             stem_thickness_factor: 0.1,
             accent_displacement: 0.5,
             accent_below: false,
+            stem_down: false,
             proportional_spacing: true,
             debug_bbox: true,
             metrics: GlyphMetrics::debug(em),
@@ -620,6 +669,7 @@ mod tests {
             stem_thickness_factor: 0.1,
             accent_displacement: 0.0,
             accent_below: false,
+            stem_down: false,
             proportional_spacing: true,
             debug_bbox: true,
             metrics: GlyphMetrics::debug(em),
@@ -675,6 +725,7 @@ mod tests {
             stem_thickness_factor: 0.1,
             accent_displacement: 0.0,
             accent_below: false,
+            stem_down: false,
             proportional_spacing: true,
             debug_bbox: true,
             metrics: GlyphMetrics::debug(em),
@@ -698,6 +749,80 @@ mod tests {
     }
 
     #[test]
+    fn down_stems_mirror_what_hangs_off_them() {
+        use grooph_measure::notation::parse_score;
+        let m = parse_score("4/4 >t8 t8 t8 e e q q").unwrap().measures.remove(0);
+        let em = 20.0;
+        let up = LayoutOpts {
+            rect: Rect::from_min_max(Pos2::ZERO, Pos2::new(300.0, 200.0)),
+            font_id: FontId::new(em, FontFamily::Proportional),
+            pixels_per_point: 1.0,
+            em,
+            layout_clef: false,
+            layout_time_signature: false,
+            y_offset: 0.0,
+            stem_length_factor: 3.5,
+            stem_thickness_factor: 0.1,
+            accent_displacement: 0.1,
+            accent_below: false,
+            stem_down: false,
+            proportional_spacing: true,
+            debug_bbox: false,
+            metrics: GlyphMetrics::debug(em),
+        };
+        let down = LayoutOpts { stem_down: true, ..up.clone() };
+        let (a, b) = (build_measure_layout(&m, &up), build_measure_layout(&m, &down));
+        let cy = up.y_center();
+        for (u, d) in a.notes.iter().zip(&b.notes) {
+            // Same heads, the stem on the other side and below the line.
+            assert_eq!(u.center, d.center);
+            if let (Some(us), Some(ds)) = (u.stem, d.stem) {
+                assert!(us.p1.x > u.center.x && ds.p1.x < d.center.x);
+                assert!((ds.p2.y - cy - (cy - us.p2.y)).abs() < 0.01);
+            }
+        }
+        assert!(b.notes[0].accent_pos.unwrap().y > cy);
+        assert!(b.beams.iter().all(|r| r.rect.min.y > cy));
+        assert!(b.tuplets[0].number_center.y > cy);
+    }
+
+    #[test]
+    fn dots_sit_right_of_parentheses_and_clear_of_down_flags() {
+        use grooph_measure::notation::parse_score;
+        let m = parse_score("3/4 e. (e.) (e.) e.").unwrap().measures.remove(0);
+        let em = 20.0;
+        let up = LayoutOpts {
+            rect: Rect::from_min_max(Pos2::ZERO, Pos2::new(400.0, 200.0)),
+            font_id: FontId::new(em, FontFamily::Proportional),
+            pixels_per_point: 1.0,
+            em,
+            layout_clef: false,
+            layout_time_signature: false,
+            y_offset: 0.0,
+            stem_length_factor: 0.9,
+            stem_thickness_factor: 0.1,
+            accent_displacement: 0.0,
+            accent_below: false,
+            stem_down: false,
+            proportional_spacing: true,
+            debug_bbox: false,
+            metrics: GlyphMetrics::debug(em),
+        };
+        let down = LayoutOpts { stem_down: true, ..up.clone() };
+        let dx = |l: &MeasureLayout, i: usize| l.notes[i].dots[0].x - l.notes[i].center.x;
+        let (u, d) = (build_measure_layout(&m, &up), build_measure_layout(&m, &down));
+        let plain = c::DOT_FIRST_DX_NO_FLAG_EM * em;
+        // Beamed: right after the head, or after the parentheses.
+        assert!((dx(&u, 0) - plain).abs() < 0.01);
+        let paren_right =
+            up.metrics.head_size.x * 0.5 + up.metrics.paren_width + c::SOFT_PAREN_GAP_EM * em;
+        assert!(dx(&u, 1) > paren_right);
+        // A down-stem flag hangs below the dots: they stay at the head.
+        assert!((dx(&d, 3) - plain).abs() < 0.01);
+        assert!(dx(&d, 2) > paren_right && dx(&d, 2) < dx(&u, 2) + 0.01);
+    }
+
+    #[test]
     fn soft_notes_dont_squeeze_plain_ones_of_the_same_length() {
         use grooph_measure::notation::parse_score;
         let m = parse_score("4/4 >t8 t8 (t8) t8 (t8) (t8) t8 (t8) (t8) t8 (t8) (t8)")
@@ -717,6 +842,7 @@ mod tests {
             stem_thickness_factor: 0.1,
             accent_displacement: 0.0,
             accent_below: false,
+            stem_down: false,
             proportional_spacing: true,
             debug_bbox: false,
             metrics: GlyphMetrics::debug(em),

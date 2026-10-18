@@ -54,5 +54,6 @@ pub fn measure_glyph_metrics(ui: &egui::Ui, font_id: &FontId) -> GlyphMetrics {
             Vec2::new(w(glyphs::GLYPH_REST_SIXTEENTH), h::REST_SIXTEENTH * em),
             Vec2::new(w(glyphs::GLYPH_REST_32ND), h::REST_32ND * em),
         ],
+        paren_width: w(glyphs::GLYPH_NOTEHEAD_PAREN_RIGHT),
     }
 }

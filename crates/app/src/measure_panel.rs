@@ -7,18 +7,15 @@ use eframe::egui;
 use eframe::egui::{FontId, Frame, Rect, Response, Stroke};
 use grooph_layout::pixel_layout::{GlyphMetrics, MeasureLayout, compute_em};
 use grooph_layout::staff_layout::{
-    LEGIBILITY_FLOOR_EM, PlacedMeasure, ROOM_BELOW_EM, ROOM_BELOW_WITH_LABELS_EM, StaffLayout,
-    StaffOpts, build_staff_layout, extra_room_above_em, row_height_em,
+    LEGIBILITY_FLOOR_EM, LOWER_VOICE_LABEL_ROOM_EM, PlacedMeasure, ROOM_BELOW_EM,
+    ROOM_BELOW_WITH_LABELS_EM, StaffLayout, StaffOpts, build_staff_layout_with_lower,
+    extra_room_above_em, lower_voice_room_below_em, row_height_em,
 };
 use grooph_measure::TimeSignature;
 use grooph_measure::grid::DEFAULT_GRID;
-use grooph_measure::score::Score;
 use grooph_measure::tempo::ScoreTiming;
 use grooph_render::measure_glyph_metrics;
 use grooph_render::staff::draw_staff;
-
-/// Gap between the click bar and the counter rhythm below it, in em.
-const COUNTER_GAP_EM: f32 = 0.2;
 
 impl Grooph {
     pub(super) fn measure_panel(&mut self, ui: &mut egui::Ui) {
@@ -46,7 +43,8 @@ impl Grooph {
                         let origin = ui.cursor().min;
                         let viewport_rect = Rect::from_min_size(origin, available);
 
-                        // The metronome's counter rhythm, drawn below its click bar.
+                        // The metronome's counter rhythm, the lower voice
+                        // under its click bar.
                         let counter = self.counter_staff_score();
 
                         // Build the multi-measure tempo backbone once per frame.
@@ -80,7 +78,7 @@ impl Grooph {
                         let compact = self.ui.narrow_screen;
                         let (min_measure_width_em, note_width_em) =
                             if compact { (2.0, 0.36) } else { (6.0, 0.6) };
-                        let staff_opts = StaffOpts {
+                        let mut staff_opts = StaffOpts {
                             rect: viewport_rect,
                             font_id: font_id.clone(),
                             pixels_per_point: ui.ctx().pixels_per_point(),
@@ -107,57 +105,35 @@ impl Grooph {
                             room_above_extra_em: extra_room_above_em(
                                 &self.editor.score,
                                 self.ui.layout.accent_below,
-                            )
-                            .max(counter.as_ref().map_or(0.0, |c| {
-                                extra_room_above_em(c, self.ui.layout.accent_below)
-                            })),
+                            ),
                         };
+                        if let Some(counter) = &counter {
+                            // Count labels go under the lower voice.
+                            let labels = if count_config.is_some() {
+                                LOWER_VOICE_LABEL_ROOM_EM
+                            } else {
+                                0.0
+                            };
+                            staff_opts.room_below_em = staff_opts
+                                .room_below_em
+                                .max(lower_voice_room_below_em(counter, &staff_opts) + labels);
+                        }
                         // One row fits the height, so nothing above or below
                         // the staff (accents, count labels) is cut off on a
-                        // short, wide panel. With the counter rhythm, two rows.
-                        let gap = COUNTER_GAP_EM * em;
-                        let row_room = match counter {
-                            Some(_) => (available.y - gap) / 2.0,
-                            None => available.y,
-                        };
+                        // short, wide panel.
                         let row_height = row_height_em(&staff_opts) * em;
-                        let staff_opts = if row_height > row_room && row_room > 0.0 {
+                        let staff_opts = if row_height > available.y && available.y > 0.0 {
                             let floor = LEGIBILITY_FLOOR_EM / em;
-                            staff_opts.rescaled((row_room / row_height).max(floor.min(1.0)))
+                            staff_opts.rescaled((available.y / row_height).max(floor.min(1.0)))
                         } else {
                             staff_opts
                         };
 
-                        // The counter rhythm in a row of its own below, at the
-                        // same glyph size and width, so clicks at the same time
-                        // line up.
-                        let score = &self.editor.score;
-                        let stack = |opts: &StaffOpts, counter: &Score| {
-                            let staff = build_staff_layout(score, opts);
-                            let mut below = opts.clone();
-                            below.rect = below
-                                .rect
-                                .translate(egui::vec2(0.0, staff.total_size.y + gap * staff.scale));
-                            let counter_staff = build_staff_layout(counter, &below);
-                            (staff, counter_staff)
-                        };
-                        let (staff_opts, staff, counter_staff) = match &counter {
-                            Some(counter) => {
-                                let (staff, counter_staff) = stack(&staff_opts, counter);
-                                let scale = staff.scale.min(counter_staff.scale);
-                                if scale < staff.scale.max(counter_staff.scale) {
-                                    let opts = staff_opts.rescaled(scale);
-                                    let (staff, counter_staff) = stack(&opts, counter);
-                                    (opts, staff, Some(counter_staff))
-                                } else {
-                                    (staff_opts, staff, Some(counter_staff))
-                                }
-                            }
-                            None => {
-                                let staff = build_staff_layout(score, &staff_opts);
-                                (staff_opts, staff, None)
-                            }
-                        };
+                        let staff = build_staff_layout_with_lower(
+                            &self.editor.score,
+                            counter.as_ref(),
+                            &staff_opts,
+                        );
                         // Rows may render at a different em than the baseline `staff_opts`
                         // (grow-to-fill / shrink-toward-floor) — rescale font/metrics to
                         // match before drawing, so glyph size agrees with `staff`'s positions.
@@ -229,17 +205,8 @@ impl Grooph {
                             );
                         }
 
-                        let total_size = match &counter_staff {
-                            Some(c) => egui::vec2(
-                                staff.total_size.x.max(c.total_size.x),
-                                c.systems.last().map_or(staff.total_size.y, |s| {
-                                    s.rect.bottom() - staff_opts.rect.top()
-                                }),
-                            ),
-                            None => staff.total_size,
-                        };
                         let (rect, resp) =
-                            ui.allocate_exact_size(total_size, egui::Sense::click_and_drag());
+                            ui.allocate_exact_size(staff.total_size, egui::Sense::click_and_drag());
 
                         let cursor = if self.ui.mode == Mode::Edit {
                             Some(self.editor.cursor)
@@ -257,17 +224,6 @@ impl Grooph {
                             count_config.as_ref(),
                             &render_opts,
                         );
-                        if let (Some(counter), Some(counter_staff)) = (&counter, &counter_staff) {
-                            draw_staff(
-                                ui,
-                                counter,
-                                counter_staff,
-                                None,
-                                playback,
-                                None,
-                                &staff_opts.rescaled(counter_staff.scale),
-                            );
-                        }
 
                         // Draw flash overlay (white on dark, black on light) with decay
                         if self.playback_ctl.playback.flash_intensity > 0.01 {
@@ -290,11 +246,7 @@ impl Grooph {
                             && let Some((m_idx, _)) = playback_local
                             && let Some(placed) = staff.placed(m_idx)
                         {
-                            let counter_rect = counter_staff
-                                .as_ref()
-                                .and_then(|c| c.placed(0))
-                                .map_or(placed.rect, |c| placed.rect.union(c.rect));
-                            draw_muted_bar(ui, counter_rect);
+                            draw_muted_bar(ui, placed.rect);
                         }
 
                         self.draw_accuracy_markers(ui, &staff, &timing, &render_opts.metrics);

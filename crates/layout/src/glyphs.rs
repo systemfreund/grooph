@@ -31,6 +31,10 @@ pub const GLYPH_RIGHT_TUPLET_BRACKET: char = '\u{E200}';
 pub const GLYPH_FLAG_8TH_UP: char = '\u{E240}';
 pub const GLYPH_FLAG_16TH_UP: char = '\u{E242}';
 pub const GLYPH_FLAG_32ND_UP: char = '\u{E244}';
+// Down-stem flags (SMuFL): U+E241..U+E245
+pub const GLYPH_FLAG_8TH_DOWN: char = '\u{E241}';
+pub const GLYPH_FLAG_16TH_DOWN: char = '\u{E243}';
+pub const GLYPH_FLAG_32ND_DOWN: char = '\u{E245}';
 
 // Clef and time signature digits
 pub const GLYPH_CLEF_PERCUSSION: char = '\u{E069}';
@@ -63,13 +67,15 @@ pub fn rest_glyph_for_duration(d: Duration) -> char {
     }
 }
 
-pub fn flag_glyph_for_duration(d: Duration) -> Option<char> {
-    match d.base_note() {
-        Quarter => None,
-        Eighth => Some(GLYPH_FLAG_8TH_UP),
-        Sixteenth => Some(GLYPH_FLAG_16TH_UP),
-        ThirtySecond => Some(GLYPH_FLAG_32ND_UP),
-        Half | Whole => None,
+pub fn flag_glyph_for_duration(d: Duration, stem_down: bool) -> Option<char> {
+    match (d.base_note(), stem_down) {
+        (Eighth, false) => Some(GLYPH_FLAG_8TH_UP),
+        (Sixteenth, false) => Some(GLYPH_FLAG_16TH_UP),
+        (ThirtySecond, false) => Some(GLYPH_FLAG_32ND_UP),
+        (Eighth, true) => Some(GLYPH_FLAG_8TH_DOWN),
+        (Sixteenth, true) => Some(GLYPH_FLAG_16TH_DOWN),
+        (ThirtySecond, true) => Some(GLYPH_FLAG_32ND_DOWN),
+        (Quarter | Half | Whole, _) => None,
     }
 }
 

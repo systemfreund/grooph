@@ -4,8 +4,8 @@
 //! wrap animation across measure boundaries.
 
 use crate::measure::{
-    last_note_entering_frac, last_note_split, playback_cursor_entering_x, playback_cursor_x,
-    render_measure_at,
+    draw_count_layer, draw_notes, draw_playback_cursor_span, last_note_entering_frac,
+    last_note_split, playback_cursor_entering_x, playback_cursor_x, render_measure_at,
 };
 use eframe::egui;
 use eframe::egui::{Color32, Rangef, Stroke};
@@ -45,10 +45,38 @@ pub fn draw_staff(
             Stroke::new(0.02 * staff_opts.em, color),
         );
 
+        // The lower voice's line below, if any.
+        if let Some(y) = system.lower_baseline {
+            ui.painter().hline(
+                Rangef::new(system.rect.left(), system.rect.right()),
+                y,
+                Stroke::new(0.02 * staff_opts.em, color),
+            );
+        }
+
         for placed in &system.measures {
             let cursor_x =
                 visual_cursor.filter(|(idx, _)| *idx == placed.measure_idx).map(|(_, x)| x);
 
+            // The lower voice's notes, with the playback cursor reaching down
+            // over its line.
+            if let (Some(lower), Some(y)) = (&placed.lower, system.lower_baseline) {
+                draw_notes(ui.painter(), lower, color, &staff_opts.lower_opts_for(placed));
+                if let Some(x) = cursor_x {
+                    let ys = Rangef::new(
+                        system.y_baseline + 0.7 * staff_opts.em,
+                        y + 0.7 * staff_opts.em,
+                    );
+                    let base = ui.visuals().selection.stroke.color;
+                    draw_playback_cursor_span(ui.painter(), ys, x, staff_opts.em, base);
+                }
+            }
+
+            // With a lower voice the count labels go under the whole staff.
+            let (count_config, lower_counts) = match system.lower_baseline {
+                Some(_) => (None, count_config),
+                None => (count_config, None),
+            };
             render_placed_measure(
                 ui,
                 score,
@@ -59,6 +87,21 @@ pub fn draw_staff(
                 count_config,
                 cursor_x,
             );
+            if let Some(config) = lower_counts {
+                let playback_tick =
+                    playback.filter(|(idx, _)| *idx == placed.measure_idx).map(|(_, t)| t);
+                draw_count_layer(
+                    ui.painter(),
+                    &score.measures[placed.measure_idx],
+                    &placed.layout,
+                    &staff_opts.measure_opts_for(placed),
+                    placed.rect.bottom(),
+                    config,
+                    color,
+                    ui.visuals().selection.stroke.color,
+                    playback_tick,
+                );
+            }
         }
 
         // Barlines between measures: vertical stroke at each measure boundary
@@ -154,7 +197,7 @@ fn draw_barlines(
     color: Color32,
 ) {
     let top = system.y_baseline - 0.5 * staff_opts.em;
-    let bottom = system.y_baseline + 0.5 * staff_opts.em;
+    let bottom = system.lower_baseline.unwrap_or(system.y_baseline) + 0.5 * staff_opts.em;
     let stroke = Stroke::new(0.04 * staff_opts.em, color);
     // Inner barlines: between adjacent measures.
     for w in system.measures.windows(2) {

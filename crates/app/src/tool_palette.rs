@@ -288,6 +288,7 @@ impl Grooph {
                 stem_thickness_factor: 0.03,
                 accent_displacement: 0.0,
                 accent_below: false,
+                stem_down: false,
                 proportional_spacing: true,
                 debug_bbox: false,
                 metrics: measure_glyph_metrics(ui, &font_id),
@@ -368,6 +369,7 @@ pub(crate) fn notation_button(
                 stem_thickness_factor: 0.06,
                 accent_displacement: 0.1,
                 accent_below: false,
+                stem_down: false,
                 proportional_spacing: true,
                 debug_bbox,
             }
