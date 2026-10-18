@@ -199,14 +199,27 @@ impl Grooph {
         let mic = &mut self.playback_ctl.mic;
         match (&mic.input, wanted) {
             (None, true) => {
+                // On Android the user has to allow the microphone first.
+                if let Some(host) = &self.ui.host
+                    && !host.mic_permitted()
+                {
+                    if !mic.permission_asked {
+                        host.request_mic();
+                        mic.permission_asked = true;
+                    }
+                    return;
+                }
                 let ctx = ctx.clone();
                 let notifier = Arc::new(move || ctx.request_repaint());
                 mic.input = Some(MicInput::open(threshold_db, Some(notifier)));
                 mic.level_db = f32::NEG_INFINITY;
             }
-            (Some(_), false) => mic.input = None,
+            (Some(_), false) => {
+                mic.input = None;
+                mic.permission_asked = false;
+            }
             (Some(input), true) => input.set_threshold_db(threshold_db),
-            (None, false) => {}
+            (None, false) => mic.permission_asked = false,
         }
     }
 

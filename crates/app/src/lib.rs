@@ -4,6 +4,7 @@ mod clock;
 mod compact;
 mod generator;
 mod help;
+mod host;
 mod keyboard_input;
 mod library;
 mod library_panel;
@@ -30,10 +31,13 @@ mod update_check;
 #[cfg(target_arch = "wasm32")]
 mod web;
 
+pub use host::Host;
+
 use grooph_measure::duration::{Duration, NoteValue, TupletSpec, q};
 use grooph_measure::{BeatIdx, Cursor, Measure, Score, TimeSignature};
 
 use crate::accuracy::AccuracyState;
+use crate::calibration::CalibrationPhase;
 use crate::compact::{CompactState, CompactTab};
 use crate::generator::GeneratorState;
 use crate::library::PatternLibrary;
@@ -71,7 +75,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-#[derive(PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub(crate) enum Mode {
     Edit,
     Playback,
@@ -340,10 +344,7 @@ impl App for Grooph {
 
         if let Some(ev) = self.ui.platform.take_visibility_event() {
             match ev {
-                VisibilityEvent::Hidden => {
-                    self.stop_transport();
-                    self.playback_ctl.audio = None;
-                }
+                VisibilityEvent::Hidden => self.hidden(),
                 VisibilityEvent::Visible | VisibilityEvent::PageShow => {
                     self.playback_ctl.audio = None;
                 }
@@ -789,6 +790,71 @@ impl Grooph {
         measure
     }
 
+    /// Give the app a host's share sheet and permissions (Android).
+    pub fn set_host(&mut self, host: Box<dyn Host>) {
+        self.ui.host = Some(host);
+    }
+
+    /// The system back button: close what is open on top, one step at a
+    /// time. `false` when nothing is, so the host can leave the app.
+    pub fn back(&mut self) -> bool {
+        // Calibration and the run summary float above every page.
+        if let Some(cal) = &self.playback_ctl.play_along.calibration {
+            if matches!(cal.phase, CalibrationPhase::Done { .. }) {
+                self.playback_ctl.play_along.calibration = None;
+            } else {
+                // Cancel, which also puts the score back.
+                self.stop_transport();
+            }
+            return true;
+        }
+        if self.playback_ctl.transport_state == TransportState::Stopped
+            && self.playback_ctl.accuracy.tracker.last_summary().is_some()
+        {
+            self.playback_ctl.accuracy.tracker.dismiss_summary();
+            return true;
+        }
+        let practice_page = self.compact_tab() == CompactTab::Practice;
+        let metronome = self.metronome_mode();
+        let ui = &mut self.ui;
+        if ui.link_error.take().is_some()
+            || ui.pending_load.take().is_some()
+            || ui.renaming_preset.take().is_some()
+        {
+            return true;
+        }
+        if ui.picker.take().is_some() {
+            // As when the picker closes itself.
+            ui.tap_tempo.reset();
+            return true;
+        }
+        ui.mode = match ui.mode {
+            Mode::TimeSignature(_) => Mode::Edit,
+            Mode::Mixer | Mode::Settings | Mode::Help | Mode::Library if ui.narrow_screen => {
+                Mode::MoreMenu
+            }
+            Mode::Mixer | Mode::Settings | Mode::Help | Mode::Library => Mode::Playback,
+            // The metronome's click bar editor ("Done").
+            Mode::Edit if metronome => Mode::Playback,
+            // The practice page's options sheet, when unfolded.
+            _ if ui.narrow_screen && practice_page && !ui.compact.options_collapsed => {
+                ui.compact.options_collapsed = true;
+                return true;
+            }
+            _ => return false,
+        };
+        true
+    }
+
+    /// The app went to the background: stop playing and let go of the audio
+    /// device, as the web page does when its tab is hidden, and of the
+    /// microphone, which no frame would close while hidden.
+    pub fn hidden(&mut self) {
+        self.stop_transport();
+        self.playback_ctl.audio = None;
+        self.playback_ctl.mic.input = None;
+    }
+
     fn toggle_mode(&mut self, mode: Mode) {
         if self.ui.mode == mode {
             self.ui.mode = Mode::Playback;
@@ -1092,6 +1158,7 @@ impl Grooph {
                 compact: CompactState::default(),
                 picker: None,
                 tap_tempo: Default::default(),
+                host: None,
             },
         };
         app.editor.active_preset = app.matching_preset();
@@ -1123,6 +1190,34 @@ impl Grooph {
 mod tests {
     use super::{CountingBase, CountingSettings, PersistedState};
     use crate::compact::CompactTab;
+
+    #[test]
+    fn back_closes_one_layer_at_a_time() {
+        use super::{Grooph, Mode};
+        use crate::pickers::Picker;
+
+        let cc = eframe::CreationContext::_new_kittest(eframe::egui::Context::default());
+        let mut app = Grooph::new(&cc);
+        app.ui.narrow_screen = true;
+        app.select_compact_tab(CompactTab::More);
+        app.ui.mode = Mode::Settings;
+        app.ui.picker = Some(Picker::Bpm);
+        assert!(app.back());
+        assert_eq!(app.ui.picker, None);
+        assert_eq!(app.ui.mode, Mode::Settings);
+        assert!(app.back());
+        assert_eq!(app.ui.mode, Mode::MoreMenu);
+        // Nothing left to close: the host leaves the app. The practice
+        // options sheet is not on this page, so it does not count.
+        app.ui.compact.options_collapsed = false;
+        assert!(!app.back());
+        assert_eq!(app.ui.mode, Mode::MoreMenu);
+        // On the practice page, back folds the sheet first.
+        app.select_compact_tab(CompactTab::Practice);
+        assert!(app.back());
+        assert!(app.ui.compact.options_collapsed);
+        assert!(!app.back());
+    }
 
     fn load(saved: &str) -> CountingSettings {
         ron::from_str(saved).unwrap()
