@@ -302,7 +302,9 @@ If you add new tools/shortcuts, remember:
 - Tests: `cargo test`
 - WASM (optional): `trunk serve` or `trunk build --release`
 - Android (prototype): `cargo apk build -p grooph-android --release` with
-  `cargo install cargo-apk`, the `aarch64-linux-android` Rust target and
+  `cargo install cargo-apk`, the `aarch64-linux-android` and
+  `x86_64-linux-android` Rust targets (one APK holds both: phones, and
+  emulators and Chromebooks) and
   `ANDROID_HOME` / `ANDROID_NDK_ROOT` set. CI builds the APK on every push
   (job `android`, artifact `grooph-android`, signed with a throwaway key).
   The workspace eframe leaves out accesskit (NativeActivity cannot use it);

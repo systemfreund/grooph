@@ -22,7 +22,7 @@ winit = { workspace = true, features = ["android-native-activity"] }
 [package.metadata.android]
 package = "app.grooph"
 apk_name = "grooph"
-build_targets = ["aarch64-linux-android"]
+build_targets = ["aarch64-linux-android", "x86_64-linux-android"]
 
 [package.metadata.android.sdk]
 # 29: midir needs AMidi (libamidi), which Android 10 added.
