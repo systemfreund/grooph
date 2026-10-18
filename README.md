@@ -274,8 +274,9 @@ Important root files:
   (ring) or `Mode::Edit` (tool palette).
 - Settings open in a `Modal` picker (`settings_picker`); generator changes go
   through `finish_generator_change`.
-- The staff's em is capped so one row (with accents and count labels) fits
-  the panel's height (`row_height_em`).
+- The staff's em is capped so one row fits the panel's height. The row's
+  height is measured from its laid-out notes (`StaffLayout::room`,
+  `RowRoom::height`).
 - Windows narrower than `NARROW_MAX_WIDTH` (600 pt, `UiShell::narrow_screen`)
   get tighter staff spacing, so glyphs are bigger on phones.
 - While a tempo ramp runs, the card shows the tempo being played ("BPM now").
