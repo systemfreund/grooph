@@ -5,14 +5,14 @@
 
 use crate::Grooph;
 use crate::generator::ENDLESS_MIN_BARS;
-use crate::metronome_view::{click_fills, same_bar};
+use crate::metronome_view::{click_fills, counter_ratio, ratio_label, same_bar};
 use crate::presets::{self, PresetId};
 use crate::tool_palette::notation_button;
 use eframe::egui;
 use eframe::egui::{Button, Color32, FontId, Id, Modal, Response, RichText, Ui, vec2};
 use grooph_audio::CounterSound;
 use grooph_measure::TimeSignature;
-use grooph_measure::counter::{Ratio, own_ratios, ratio_of, step_clicks, step_span};
+use grooph_measure::counter::{Ratio, own_ratios, step_clicks, step_span};
 use grooph_measure::generator::{
     BeatSpan, FigureSet, MAX_BARS, MAX_COMPLEXITY, Subdivision, complexity_figures,
     effective_subdivision, figures, offered_subdivisions, supports_time_signature,
@@ -478,9 +478,15 @@ impl Grooph {
     /// time of M beats, then one of one's own, then the sound they play
     /// with.
     fn polyrhythm_choices(&mut self, ui: &mut Ui) -> bool {
-        let current = self.counter_bar().and_then(ratio_of);
+        let counter = self.counter_bar().and_then(counter_ratio);
+        let current = counter.map(|(r, _)| r);
+        let edited = counter.filter(|&(_, edited)| edited).map(|(r, _)| r);
         let mut options = vec![(None, "Off".to_owned())];
-        options.extend(self.counter_choices().into_iter().map(|r| (Some(r), r.to_string())));
+        options.extend(
+            self.counter_choices()
+                .into_iter()
+                .map(|r| (Some(r), ratio_label((r, edited == Some(r))))),
+        );
         // A custom counter bar is none of the choices: highlight none.
         let shown = if self.counter_bar().is_some() && current.is_none() {
             Some(Ratio { n: 0, span: 0 })
@@ -488,6 +494,11 @@ impl Grooph {
             current
         };
         let picked = choice_grid(ui, &options, shown, 3);
+        // Picking the ratio again starts its clicks over.
+        if let Some(ratio) = edited {
+            ui.add_space(4.0);
+            ui.label(format!("Clicks edited. Tap {ratio} to reset them."));
+        }
         if let Some(ratio) = picked {
             self.set_counter_ratio(ratio);
         }
