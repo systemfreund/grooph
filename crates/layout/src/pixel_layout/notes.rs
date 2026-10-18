@@ -164,13 +164,6 @@ pub(super) fn content_extents(note: &NoteLayout) -> (f32, f32) {
     (ink.top(), ink.bottom())
 }
 
-/// The debug box of `note`: from `left` to `right`, and over its head, stem,
-/// flag and dots.
-pub(super) fn debug_bbox(note: &NoteLayout, left: f32, right: f32) -> Rect {
-    let (top, bottom) = content_extents(note);
-    Rect::from_min_max(Pos2::new(left, top), Pos2::new(right, bottom))
-}
-
 /// Put an accent above the note's head, stem, flag and dots (below them
 /// when `below`), replacing any accent it had.
 pub(super) fn place_accent(note: &mut NoteLayout, below: bool, opts: &LayoutOpts) {
@@ -184,7 +177,6 @@ pub(super) fn place_accent(note: &mut NoteLayout, below: bool, opts: &LayoutOpts
         content_top - displacement - ink.bottom()
     };
     note.accent = Some(glyph);
-    note.accent_debug_bbox = opts.debug_bbox.then(|| glyph.ink());
 }
 
 /// Whether each beat sits in a beamed group of two or more (no flag).
@@ -285,8 +277,7 @@ pub(super) fn build_note_layout(
     // Track shift per beat (cx - base_cx) to propagate within beam groups
     let mut shifts = vec![0.0; beats.len()];
 
-    // (cx, left_rel, right_rel)
-    let mut shifted_layout_info: Vec<(f32, f32, f32)> = Vec::with_capacity(beats.len());
+    let mut shifted_cxs: Vec<f32> = Vec::with_capacity(beats.len());
     let mut prev_right: Option<f32> = None;
 
     for (i, b) in beats.iter().enumerate() {
@@ -336,13 +327,13 @@ pub(super) fn build_note_layout(
 
         // Update rechter Rand dieser Box in absoluten Koordinaten
         prev_right = Some(cx + right);
-        shifted_layout_info.push((cx, left, right));
+        shifted_cxs.push(cx);
     }
 
     let mut note_layout: Vec<NoteLayout> = Vec::with_capacity(beats.len());
     let ss = opts.staff_space();
     for (i, b) in beats.iter().enumerate() {
-        let (ideal_cx, left_rel, right_rel) = *shifted_layout_info.get(i).unwrap();
+        let ideal_cx = shifted_cxs[i];
         let staff_pos = staff_pos_of(b, opts);
         let cy = opts.y_of(staff_pos);
 
@@ -412,16 +403,11 @@ pub(super) fn build_note_layout(
             stem,
             flag,
             accent: None,
-            debug_bbox: None,
-            accent_debug_bbox: None,
         };
 
-        // 5. Accent and Debug Bounding Box, around the head, stem, flag and dots.
+        // 5. Accent, around the head, stem, flag and dots.
         if is_note && b.accented {
             place_accent(&mut note, opts.accent_below, opts);
-        }
-        if opts.debug_bbox {
-            note.debug_bbox = Some(debug_bbox(&note, ideal_cx + left_rel, ideal_cx + right_rel));
         }
 
         note_layout.push(note);

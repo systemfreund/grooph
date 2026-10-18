@@ -135,7 +135,6 @@ pub struct LayoutOpts {
     /// notes: the lower voice of a staff with two.
     pub stem_down: bool,
     pub proportional_spacing: bool,
-    pub debug_bbox: bool,
 }
 
 impl LayoutOpts {
@@ -249,8 +248,6 @@ pub struct NoteLayout {
     pub stem: Option<Line>,
     pub flag: Option<PlacedGlyph>,
     pub accent: Option<PlacedGlyph>,
-    pub debug_bbox: Option<Rect>,
-    pub accent_debug_bbox: Option<Rect>,
 }
 
 impl NoteLayout {
@@ -386,9 +383,6 @@ fn flip_down(layout: &mut MeasureLayout, opts: &LayoutOpts) {
                 *flag = notes::flag_at(note.duration, stem, true, opts).unwrap_or(*flag);
             }
         }
-        if let Some(bbox) = note.debug_bbox {
-            note.debug_bbox = Some(notes::debug_bbox(note, bbox.left(), bbox.right()));
-        }
         // Placed again rather than mirrored: the down flag is not the up
         // flag's mirror image.
         if note.accent.is_some() {
@@ -480,7 +474,6 @@ mod tests {
             accent_below: false,
             stem_down: false,
             proportional_spacing: true,
-            debug_bbox: false,
         };
         let layout = build_measure_layout(&Measure::new(TimeSignature::THREE_FOUR), &opts);
         let ts = layout.time_signature.expect("time signature laid out");
@@ -489,48 +482,6 @@ mod tests {
             assert!(ink.left() >= opts.rect.left() - 0.01, "digit at {} clipped", ink.left());
             assert!(ink.right() <= layout.notes_left_edge + 0.01);
         }
-    }
-
-    #[test]
-    fn test_debug_bbox_includes_stem_length() {
-        use grooph_measure::duration::e;
-        let mut m = Measure::new(TimeSignature::FOUR_FOUR);
-        // Add one eighth note (has flag -> stem_len_factor = 1.0)
-        m.set_beat(0, Beat::note(e())).unwrap();
-
-        let em = 20.0;
-        let opts = LayoutOpts {
-            rect: Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(100.0, 100.0)),
-            font_id: FontId::new(em, FontFamily::Proportional),
-            pixels_per_point: 1.0,
-            em,
-            layout_clef: false,
-            layout_time_signature: false,
-            y_offset: 0.0,
-            stem_length_factor: 2.0, // Long stem: 2.0 * 20.0 = 40.0
-            stem_thickness_factor: 0.1,
-            accent_displacement: 0.0,
-            accent_below: false,
-            stem_down: false,
-            proportional_spacing: true,
-            debug_bbox: true,
-        };
-
-        let layout = build_measure_layout(&m, &opts);
-        let note = &layout.notes[0];
-        let bbox = note.debug_bbox.expect("Debug bbox should be present");
-
-        let cy = opts.rect.center().y; // 50.0
-        let stem_len = em * opts.stem_length_factor; // 40.0 (factor 1.0 due to flag)
-
-        // Assert bbox top covers the stem
-        // Allow small margin for snapping
-        assert!(
-            bbox.min.y <= cy - stem_len + 1.0,
-            "BBox top ({}) should cover stem top ({})",
-            bbox.min.y,
-            cy - stem_len
-        );
     }
 
     #[test]
@@ -558,7 +509,6 @@ mod tests {
             accent_below: false,
             stem_down: false,
             proportional_spacing: true,
-            debug_bbox: true,
         };
 
         // Case 1: Accent Above (default)
@@ -612,7 +562,6 @@ mod tests {
             accent_below: false,
             stem_down: true,
             proportional_spacing: true,
-            debug_bbox: false,
         };
         let layout = build_measure_layout(&m, &opts);
         let note = &layout.notes[0];
@@ -626,48 +575,6 @@ mod tests {
             accent.top(),
             content_bottom
         );
-    }
-
-    #[test]
-    fn test_accent_debug_bbox_separate() {
-        use grooph_measure::duration::q;
-        let mut m = Measure::new(TimeSignature::FOUR_FOUR);
-        let b = Beat::note(q());
-        m.set_beat(0, b).unwrap();
-        m.toggle_accent(0);
-
-        let em = 20.0;
-        let opts = LayoutOpts {
-            rect: Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(100.0, 100.0)),
-            font_id: FontId::new(em, FontFamily::Proportional),
-            pixels_per_point: 1.0,
-            em,
-            layout_clef: false,
-            layout_time_signature: false,
-            y_offset: 0.0,
-            stem_length_factor: 3.5,
-            stem_thickness_factor: 0.1,
-            accent_displacement: 0.5,
-            accent_below: false,
-            stem_down: false,
-            proportional_spacing: true,
-            debug_bbox: true,
-        };
-
-        let layout = build_measure_layout(&m, &opts);
-        let note = &layout.notes[0];
-
-        assert!(note.debug_bbox.is_some(), "Main debug bbox should be present");
-        assert!(note.accent_debug_bbox.is_some(), "Accent debug bbox should be present");
-
-        let main_bbox = note.debug_bbox.unwrap();
-        let accent_bbox = note.accent_debug_bbox.unwrap();
-
-        let expected_size = note.accent.unwrap().ink().size();
-        assert!((accent_bbox.width() - expected_size.x).abs() < 0.001);
-        assert!((accent_bbox.height() - expected_size.y).abs() < 0.001);
-
-        assert!(!main_bbox.intersects(accent_bbox), "BBoxes should be separate");
     }
 
     #[test]
@@ -702,7 +609,6 @@ mod tests {
             accent_below: false,
             stem_down: false,
             proportional_spacing: true,
-            debug_bbox: true,
         };
 
         let layout = build_measure_layout(&m, &opts);
@@ -757,7 +663,6 @@ mod tests {
             accent_below: false,
             stem_down: false,
             proportional_spacing: true,
-            debug_bbox: true,
         };
 
         let layout = build_measure_layout(&m, &opts);
@@ -796,7 +701,6 @@ mod tests {
             accent_below: false,
             stem_down: false,
             proportional_spacing: true,
-            debug_bbox: false,
         };
         let down = LayoutOpts { stem_down: true, ..up.clone() };
         let (a, b) = (build_measure_layout(&m, &up), build_measure_layout(&m, &down));
@@ -837,7 +741,6 @@ mod tests {
             accent_below: false,
             stem_down: true,
             proportional_spacing: true,
-            debug_bbox: false,
         };
         let cy = down.y_center();
         let quarter_rest = &build_measure_layout(&m, &down).notes[1];
@@ -866,7 +769,6 @@ mod tests {
             accent_below: false,
             stem_down: false,
             proportional_spacing: true,
-            debug_bbox: false,
         };
         let down = LayoutOpts { stem_down: true, ..up.clone() };
         let dx =
@@ -904,7 +806,6 @@ mod tests {
             accent_below: false,
             stem_down: false,
             proportional_spacing: true,
-            debug_bbox: false,
         };
         let plan = crate::render_plan::plan_measure(&m);
         let width = min_note_area_width(&m, &plan, &opts);

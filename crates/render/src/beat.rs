@@ -16,25 +16,4 @@ pub(super) fn draw_beat(
     for glyph in note.glyphs() {
         draw_glyph(painter, glyph, &opts.font_id.family, color);
     }
-
-    if opts.debug_bbox {
-        if let Some(rect) = note.debug_bbox {
-            painter.rect(
-                rect,
-                0.0,
-                Color32::TRANSPARENT,
-                Stroke::new(1.0_f32, Color32::RED),
-                egui::StrokeKind::Outside,
-            );
-        }
-        if let Some(rect) = note.accent_debug_bbox {
-            painter.rect(
-                rect,
-                0.0,
-                Color32::TRANSPARENT,
-                Stroke::new(1.0_f32, Color32::GREEN),
-                egui::StrokeKind::Outside,
-            );
-        }
-    }
 }

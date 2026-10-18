@@ -94,7 +94,6 @@ impl Grooph {
                             accent_displacement: 0.07,
                             accent_below: self.ui.layout.accent_below,
                             proportional_spacing: self.ui.layout.proportional_spacing,
-                            debug_bbox: self.ui.layout.debug_bbox,
                             min_measure_width_em,
                             note_width_em,
                             system_spacing_em: 0.2,

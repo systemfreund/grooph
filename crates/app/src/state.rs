@@ -69,7 +69,6 @@ pub(crate) struct LayoutSettings {
     pub(crate) accent_below: bool,
     pub(crate) proportional_spacing: bool,
     pub(crate) stem_length_factor: f32,
-    pub(crate) debug_bbox: bool,
 }
 
 impl Default for LayoutSettings {
@@ -79,7 +78,6 @@ impl Default for LayoutSettings {
             accent_below: false,
             proportional_spacing: true,
             stem_length_factor: 0.9,
-            debug_bbox: false,
         }
     }
 }

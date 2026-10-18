@@ -46,7 +46,6 @@ pub struct StaffOpts {
     pub accent_displacement: f32,
     pub accent_below: bool,
     pub proportional_spacing: bool,
-    pub debug_bbox: bool,
 
     /// Minimum width of a measure in em, before per-beat additions.
     pub min_measure_width_em: f32,
@@ -102,7 +101,6 @@ impl StaffOpts {
             accent_below: self.accent_below,
             stem_down: false,
             proportional_spacing: self.proportional_spacing,
-            debug_bbox: self.debug_bbox,
         }
     }
 
@@ -453,7 +451,6 @@ mod tests {
             accent_displacement: 0.0,
             accent_below: false,
             proportional_spacing: true,
-            debug_bbox: false,
             min_measure_width_em: 6.0,
             note_width_em: 0.6,
             system_spacing_em: 0.5,

@@ -182,8 +182,6 @@ impl Grooph {
                                     .range(0.7..=1.3),
                             );
                             ui.separator();
-                            ui.checkbox(&mut self.ui.layout.debug_bbox, "Show bounding boxes");
-                            ui.separator();
                             ui.label("Accents Position:");
                             ui.horizontal(|ui| {
                                 ui.radio_value(&mut self.ui.layout.accent_below, true, "Below");
