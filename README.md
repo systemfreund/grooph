@@ -20,6 +20,7 @@ files, and invariants so changes can be made with confidence.
 - `crates/mic`: Microphone hit detection (cpal natively, `getUserMedia` + AudioWorklet on the web).
 - `crates/link`: Shareable links (URL query parameters <-> score/generator/metronome).
 - `crates/site`: Static guide pages for grooph.app, generated from Markdown at build time.
+- `crates/android`: Android entry point (`android_main`, NativeActivity) around `crates/app`.
 
 Important root files:
 - `Cargo.toml` (workspace + dependencies, edition 2024)
@@ -300,6 +301,15 @@ If you add new tools/shortcuts, remember:
 - Native: `cargo run`
 - Tests: `cargo test`
 - WASM (optional): `trunk serve` or `trunk build --release`
+- Android (prototype): `cargo apk build -p grooph-android --release` with
+  `cargo install cargo-apk`, the `aarch64-linux-android` Rust target and
+  `ANDROID_HOME` / `ANDROID_NDK_ROOT` set. CI builds the APK on every push
+  (job `android`, artifact `grooph-android`, signed with a throwaway key).
+  The workspace eframe leaves out accesskit (NativeActivity cannot use it);
+  `crates/app` adds it back on every other target. Settings are stored in the
+  app's internal storage (`persistence_path`). Not handled yet: stopping
+  audio when the app goes to the background, the share sheet and links
+  (Android intents), the back button and the on-screen keyboard.
 
 ## Test notes (measure)
 

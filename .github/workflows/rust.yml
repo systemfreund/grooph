@@ -62,6 +62,39 @@ jobs:
         path: dist
         retention-days: 7
 
+  android:
+    # Build the Android app (APK) with cargo-apk. The runner image ships the
+    # Android SDK and NDK. The APK is signed with a throwaway key, so it is
+    # for trying out only; download it from the run's artifacts.
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install Rust (Android target)
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: aarch64-linux-android
+    - uses: Swatinem/rust-cache@v2
+    - name: Install cargo-apk
+      run: cargo install cargo-apk --locked
+    - name: Create a throwaway signing key
+      run: |
+        keytool -genkeypair -v -keystore "$RUNNER_TEMP/grooph.keystore" -alias androiddebugkey \
+          -keyalg RSA -keysize 2048 -validity 10000 -storepass android -keypass android \
+          -dname "CN=grooph prototype"
+    - name: Build APK
+      run: cargo apk build -p grooph-android --release
+      env:
+        ANDROID_NDK_ROOT: ${{ env.ANDROID_NDK_LATEST_HOME }}
+        CARGO_APK_RELEASE_KEYSTORE: ${{ runner.temp }}/grooph.keystore
+        CARGO_APK_RELEASE_KEYSTORE_PASSWORD: android
+    - name: Keep the APK
+      uses: actions/upload-artifact@v4
+      with:
+        name: grooph-android
+        path: target/release/apk/grooph.apk
+        retention-days: 14
+
   deploy:
     # Publish the web app to Cloudflare Pages after every push to main,
     # once the native checks and the web build have passed.

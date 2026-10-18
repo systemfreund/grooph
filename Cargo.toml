@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/android",
     "crates/app",
     "crates/audio",
     "crates/layout",
@@ -27,7 +28,22 @@ grooph-mic = { path = "crates/mic" }
 grooph-midi = { path = "crates/midi" }
 grooph-render = { path = "crates/render" }
 cpal = { version = "0.16", features = ["wasm-bindgen"] }
-eframe = { version = "0.37", features = ["persistence"] }
+# eframe's defaults without accesskit, which NativeActivity on Android cannot
+# use; the app crate turns accesskit back on everywhere else.
+eframe = { version = "0.37", default-features = false, features = [
+    "clipboard",
+    "default_fonts",
+    "links",
+    "persistence",
+    "system_fonts",
+    "wayland",
+    "web_screen_reader",
+    "wgpu",
+    "x11",
+] }
+# What eframe's `winit/default` adds (Wayland loaded at runtime, window
+# decorations); turned on by the app crate on Linux and the other desktops.
+winit = "0.30"
 egui = "0.37"
 egui_extras = { version = "0.37", features = ["image", "svg"] }
 either = "1.15.0"
