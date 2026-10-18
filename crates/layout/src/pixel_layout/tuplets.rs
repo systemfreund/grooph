@@ -14,8 +14,6 @@ pub(super) fn build_tuplet_layout(
     let hook_len = c::TUPLET_HOOK_LEN_SS * opts.staff_space();
     let hook_dy = hook_len * c::TUPLET_HOOK_DY_FACTOR;
     let digit_size = opts.em * c::TUPLET_DIGIT_FONT_FACTOR;
-    // The bracket line above the stems, which the number is centered on
-    let y_base = opts.y_center() - opts.stem_length() - bracket_gap;
 
     // A bracket spans from the left edge of its first head or rest to the
     // right edge of its last, whichever side the stems are on.
@@ -29,6 +27,16 @@ pub(super) fn build_tuplet_layout(
         let margin = opts.em * c::TUPLET_MARGIN_EM;
         x_l -= margin;
         x_r += margin;
+
+        // The bracket line above the stems of the highest note, which the
+        // number is centered on. Rests don't count: a lower voice's hang
+        // below the line.
+        let top = (t.start..=t.end)
+            .filter(|&i| note_layout[i].kind == BeatKind::Note)
+            .map(|i| note_layout[i].staff_pos)
+            .max()
+            .unwrap_or(0);
+        let y_base = opts.stem_tip_y(top) - bracket_gap;
 
         let xc = 0.5 * (x_l + x_r);
         let digits = glyphs::tuplet_glyphs(t.count);

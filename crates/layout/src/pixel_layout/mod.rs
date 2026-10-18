@@ -181,6 +181,18 @@ impl LayoutOpts {
         self.rect.center().y + self.y_offset
     }
 
+    /// Y of staff position `pos`, counted in half staff spaces up from the
+    /// staff line: 0 on the line, 1 just above it, -2 a staff space below.
+    pub fn y_of(&self, pos: i8) -> f32 {
+        self.y_center() - f32::from(pos) * self.staff_space() * 0.5
+    }
+
+    /// Y of the stem tips of notes up to staff position `pos`, before
+    /// `flip_down`.
+    pub(super) fn stem_tip_y(&self, pos: i8) -> f32 {
+        self.y_of(pos) - self.stem_length()
+    }
+
     const fn snap_thickness(&self, t: f32) -> f32 {
         let ppp = self.pixels_per_point;
         (t * ppp).round().max(1.0) / ppp
@@ -222,8 +234,11 @@ pub struct TupletLayout {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct NoteLayout {
-    /// Middle of the head or rest, on the staff line.
+    /// Middle of the head or rest, at `staff_pos`.
     pub center: Pos2,
+    /// Where the head or rest sits, in half staff spaces up from the staff
+    /// line (see [`LayoutOpts::y_of`]).
+    pub staff_pos: i8,
     pub duration: Duration,
     pub kind: BeatKind,
     /// The note head, or the rest.
@@ -357,29 +372,23 @@ pub fn build_measure_layout_with_plan(
 }
 
 /// Mirror what hangs off the stems (stems, flags, beams, tuplets, accents)
-/// to below the staff line, and lower the rests a staff space, clear of an
-/// upper voice's. Heads and dots stay where they are, and so do half and
-/// whole rests: they are told apart only by sitting on the line or hanging
-/// from it.
+/// to below the staff line. Heads, rests and dots stay at their staff
+/// positions.
 fn flip_down(layout: &mut MeasureLayout, opts: &LayoutOpts) {
     let cy = opts.y_center();
     let y = |y: f32| 2.0 * cy - y;
     let pos = |p: Pos2| Pos2::new(p.x, y(p.y));
     let rect = |r: Rect| Rect::from_two_pos(pos(r.min), pos(r.max));
     for note in &mut layout.notes {
-        if note.kind == BeatKind::Rest
-            && !matches!(note.duration.base_note(), NoteValue::Half | NoteValue::Whole)
-        {
-            note.center.y += opts.staff_space();
-            note.head.origin.y += opts.staff_space();
-        }
         if let Some(stem) = &mut note.stem {
             *stem = Line { p1: pos(stem.p1), p2: pos(stem.p2) };
             if let Some(flag) = &mut note.flag {
                 *flag = notes::flag_at(note.duration, stem, true, opts).unwrap_or(*flag);
             }
         }
-        note.debug_bbox = note.debug_bbox.map(rect);
+        if let Some(bbox) = note.debug_bbox {
+            note.debug_bbox = Some(notes::debug_bbox(note, bbox.left(), bbox.right()));
+        }
         // Placed again rather than mirrored: the down flag is not the up
         // flag's mirror image.
         if note.accent.is_some() {
@@ -831,8 +840,10 @@ mod tests {
             debug_bbox: false,
         };
         let cy = down.y_center();
-        let quarter_rest = build_measure_layout(&m, &down).notes[1].center.y;
-        assert!((quarter_rest - cy - down.staff_space()).abs() < 0.01);
+        let quarter_rest = &build_measure_layout(&m, &down).notes[1];
+        assert_eq!(quarter_rest.staff_pos, -2);
+        assert!((quarter_rest.center.y - cy - down.staff_space()).abs() < 0.01);
+        assert_eq!(quarter_rest.center.y, down.y_of(-2));
         assert_eq!(build_measure_layout(&h, &down).notes[1].center.y, cy);
     }
 

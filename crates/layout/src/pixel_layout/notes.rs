@@ -2,7 +2,7 @@ use super::{LayoutOpts, Line, NoteLayout, PlacedGlyph, c, requires_flag};
 use crate::glyphs;
 use crate::render_plan::RenderPlan;
 use egui::{Pos2, Rect};
-use grooph_measure::duration::Duration;
+use grooph_measure::duration::{Duration, NoteValue};
 use grooph_measure::grid::DEFAULT_GRID;
 use grooph_measure::{Beat, BeatKind, Measure};
 
@@ -10,6 +10,18 @@ use grooph_measure::{Beat, BeatKind, Measure};
 const fn dot_count_of(duration: Duration) -> u8 {
     match duration {
         Duration::Dotted { dots, .. } => dots,
+        _ => 0,
+    }
+}
+
+/// Where `beat` sits, in half staff spaces up from the staff line. Notes are
+/// on the line. In the lower voice a rest hangs a staff space lower, clear of
+/// an upper voice's, except half and whole rests: they are told apart only by
+/// sitting on the line or hanging from it.
+fn staff_pos_of(beat: &Beat, opts: &LayoutOpts) -> i8 {
+    let keeps_line = matches!(beat.duration.base_note(), NoteValue::Half | NoteValue::Whole);
+    match beat.kind {
+        BeatKind::Rest if opts.stem_down && !keeps_line => -2,
         _ => 0,
     }
 }
@@ -150,6 +162,13 @@ pub(super) fn content_extents(note: &NoteLayout) -> (f32, f32) {
         ink = ink.union(Rect::from_two_pos(s.p1, s.p2));
     }
     (ink.top(), ink.bottom())
+}
+
+/// The debug box of `note`: from `left` to `right`, and over its head, stem,
+/// flag and dots.
+pub(super) fn debug_bbox(note: &NoteLayout, left: f32, right: f32) -> Rect {
+    let (top, bottom) = content_extents(note);
+    Rect::from_min_max(Pos2::new(left, top), Pos2::new(right, bottom))
 }
 
 /// Put an accent above the note's head, stem, flag and dots (below them
@@ -324,7 +343,8 @@ pub(super) fn build_note_layout(
     let ss = opts.staff_space();
     for (i, b) in beats.iter().enumerate() {
         let (ideal_cx, left_rel, right_rel) = *shifted_layout_info.get(i).unwrap();
-        let cy = opts.y_center();
+        let staff_pos = staff_pos_of(b, opts);
+        let cy = opts.y_of(staff_pos);
 
         // 1. Calculate Stem (if any) and determining pixel-snapping offset.
         // We do this first because the notehead and dots must align with
@@ -383,6 +403,7 @@ pub(super) fn build_note_layout(
 
         let mut note = NoteLayout {
             center,
+            staff_pos,
             duration: b.duration,
             kind: b.kind,
             head,
@@ -400,11 +421,7 @@ pub(super) fn build_note_layout(
             place_accent(&mut note, opts.accent_below, opts);
         }
         if opts.debug_bbox {
-            let (content_top, content_bottom) = content_extents(&note);
-            note.debug_bbox = Some(Rect::from_min_max(
-                Pos2::new(ideal_cx + left_rel, content_top),
-                Pos2::new(ideal_cx + right_rel, content_bottom),
-            ));
+            note.debug_bbox = Some(debug_bbox(&note, ideal_cx + left_rel, ideal_cx + right_rel));
         }
 
         note_layout.push(note);
