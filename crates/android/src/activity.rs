@@ -119,13 +119,56 @@ impl Activity {
         });
     }
 
-    /// Open or close the on-screen keyboard.
+    /// Open or close the on-screen keyboard through the InputMethodManager.
+    /// NativeActivity's own call (`ANativeActivity_showSoftInput`) does
+    /// nothing on current Android versions.
     pub(crate) fn soft_keyboard(&self, open: bool) {
-        if open {
-            self.app.show_soft_input(false);
-        } else {
-            self.app.hide_soft_input(false);
-        }
+        let done = with_activity(&self.app, |env, activity| {
+            let service = env.new_string("input_method")?;
+            let imm = env
+                .call_method(
+                    activity,
+                    "getSystemService",
+                    "(Ljava/lang/String;)Ljava/lang/Object;",
+                    &[(&service).into()],
+                )?
+                .l()?;
+            // The view with the focus is NativeActivity's content view, the
+            // one the input method serves.
+            let mut view =
+                env.call_method(activity, "getCurrentFocus", "()Landroid/view/View;", &[])?.l()?;
+            if view.is_null() {
+                view = decor_view(env, activity)?;
+            }
+            if !open {
+                let token =
+                    env.call_method(&view, "getWindowToken", "()Landroid/os/IBinder;", &[])?.l()?;
+                return env
+                    .call_method(
+                        &imm,
+                        "hideSoftInputFromWindow",
+                        "(Landroid/os/IBinder;I)Z",
+                        &[(&token).into(), 0.into()],
+                    )?
+                    .z();
+            }
+            let shown = env
+                .call_method(
+                    &imm,
+                    "showSoftInput",
+                    "(Landroid/view/View;I)Z",
+                    &[(&view).into(), 0.into()],
+                )?
+                .z()?;
+            if !shown {
+                // The view is not a text editor, so the input method may
+                // turn the request down; toggling still opens it.
+                // InputMethodManager.SHOW_FORCED
+                env.call_method(&imm, "toggleSoftInput", "(II)V", &[2.into(), 0.into()])?;
+            }
+            Ok(shown)
+        });
+        log::info!("Keyboard {}: {done:?}", if open { "open" } else { "close" });
     }
 
     /// Whether the activity's window is hidden (`View.getWindowVisibility()`

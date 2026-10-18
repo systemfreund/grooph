@@ -70,9 +70,9 @@ impl eframe::App for AndroidApp {
             self.app.ui(ui, frame);
         });
 
-        // winit asks for the keyboard "implicitly", which Android ignores;
-        // ask outright when a text field gets the focus, and again on a tap
-        // into it after the keyboard was closed with the back button.
+        // winit's request for the keyboard does nothing; open it when a text
+        // field gets the focus, and again on a tap into it after the
+        // keyboard was closed with the back button.
         let typing = ui.ctx().output(|o| o.ime.is_some());
         let tapped = ui.input(|i| i.pointer.any_released());
         if typing != self.typing || typing && tapped {

@@ -333,9 +333,10 @@ If you add new tools/shortcuts, remember:
     with nothing open the app moves to the background. eframe's save when
     the window goes away is the only sign of going to the background, so
     the save checks whether the window is hidden and calls `Grooph::hidden`
-    (stops playback, audio and microphone). winit only asks for the
-    on-screen keyboard implicitly, which Android ignores, so the wrapper
-    opens it while egui wants text input and follows the insets (which
+    (stops playback, audio and microphone). NativeActivity's own request
+    for the on-screen keyboard does nothing on current Android versions, so
+    the wrapper opens it through the InputMethodManager while egui wants
+    text input (logged as `Keyboard open`) and follows the insets (which
     include the keyboard) closely while it slides. Not handled yet: opening
     shared links in the app (Android intents).
 
