@@ -167,7 +167,7 @@ impl LayoutOpts {
     }
 
     pub const fn bracket_thickness(&self) -> f32 {
-        self.em * 0.02
+        self.snap_thickness(self.em * 0.02)
     }
 
     /// Y of the staff line (note heads sit on it).
@@ -206,6 +206,12 @@ impl LayoutOpts {
     const fn snap_thickness(&self, t: f32) -> f32 {
         let ppp = self.pixels_per_point;
         (t * ppp).round().max(1.0) / ppp
+    }
+
+    /// `p` moved to where a line `thickness` wide through it covers whole
+    /// pixels, on both axes.
+    pub const fn snap_pos(&self, p: Pos2, thickness: f32) -> Pos2 {
+        Pos2::new(self.snap_x(p.x, thickness), self.snap_x(p.y, thickness))
     }
 
     pub(crate) const fn snap_x(&self, x: f32, thickness: f32) -> f32 {
