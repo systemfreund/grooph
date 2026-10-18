@@ -28,7 +28,7 @@ mod c {
     pub const TUPLET_HOOK_LEN_SS: f32 = 0.80;
     pub const TUPLET_HOOK_DY_FACTOR: f32 = 0.85;
     pub const TUPLET_DIGIT_FONT_FACTOR: f32 = 0.75;
-    pub const TUPLET_MARGIN_EM: f32 = 0.15;
+    pub const TUPLET_MARGIN_EM: f32 = 0.05;
     pub const TUPLET_NUM_WIDTH_EM: f32 = 0.60;
     pub const TUPLET_NUM_PAD_EM: f32 = 0.25;
     pub const TUPLET_ACCENT_RAISE_SS: f32 = 1.40;
