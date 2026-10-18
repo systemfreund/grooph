@@ -25,7 +25,7 @@ use crate::render_plan::{RenderPlan, plan_measure};
 use egui::{FontId, Pos2, Rect, Vec2, pos2, vec2};
 use grooph_measure::duration::s;
 use grooph_measure::grid::DEFAULT_GRID;
-use grooph_measure::{BeatIdx, BeatKind, MeasureIdx, Score, TimeSignature};
+use grooph_measure::{BeatIdx, MeasureIdx, Score, TimeSignature};
 
 /// Configuration for laying out an entire [`Score`].
 ///
@@ -55,25 +55,30 @@ pub struct StaffOpts {
     pub system_spacing_em: f32,
     /// Whether to show the clef on the first measure of each system.
     pub layout_clef_first: bool,
-    /// Room below the staff line in em: rests, accents and timing marks need
-    /// [`ROOM_BELOW_EM`], count labels [`ROOM_BELOW_WITH_LABELS_EM`].
+    /// Room below the staff line in em, at least: rests, accents and timing
+    /// marks need [`ROOM_BELOW_EM`], count labels
+    /// [`ROOM_BELOW_WITH_LABELS_EM`].
     pub room_below_em: f32,
-    /// Headroom above the stems in em beyond the usual: see
-    /// [`extra_room_above_em`].
-    pub room_above_extra_em: f32,
+    /// Room under a lower voice's notes in em, for count labels: 0 or
+    /// [`LOWER_VOICE_LABEL_ROOM_EM`].
+    pub lower_label_room_em: f32,
 }
 
 impl StaffOpts {
     /// Build per-measure [`LayoutOpts`] for a placed measure (renderer entry).
     pub fn measure_opts_for(&self, placed: &PlacedMeasure) -> LayoutOpts {
-        self.measure_opts(placed.rect, placed.show_clef, placed.show_time_signature)
+        self.measure_opts(
+            placed.rect,
+            placed.y_offset,
+            placed.show_clef,
+            placed.show_time_signature,
+        )
     }
 
     /// Per-measure [`LayoutOpts`] of the lower voice of a placed measure:
     /// on its own line [`LOWER_VOICE_GAP_EM`] below, stems down.
     pub fn lower_opts_for(&self, placed: &PlacedMeasure) -> LayoutOpts {
-        let opts = self.measure_opts(placed.rect, placed.show_clef, placed.show_time_signature);
-        Self::lower_of(opts)
+        Self::lower_of(self.measure_opts_for(placed))
     }
 
     fn lower_of(opts: LayoutOpts) -> LayoutOpts {
@@ -85,8 +90,15 @@ impl StaffOpts {
         }
     }
 
-    /// Build per-measure [`LayoutOpts`] with a measure-local rect and clef/TS flags.
-    fn measure_opts(&self, rect: Rect, show_clef: bool, show_ts: bool) -> LayoutOpts {
+    /// Build per-measure [`LayoutOpts`] with a measure-local rect, the staff
+    /// line `y_offset` below its center, and clef/TS flags.
+    fn measure_opts(
+        &self,
+        rect: Rect,
+        y_offset: f32,
+        show_clef: bool,
+        show_ts: bool,
+    ) -> LayoutOpts {
         LayoutOpts {
             rect,
             font_id: self.font_id.clone(),
@@ -94,7 +106,7 @@ impl StaffOpts {
             em: self.em,
             layout_clef: show_clef,
             layout_time_signature: show_ts,
-            y_offset: self.y_offset + self.baseline_shift(),
+            y_offset,
             stem_length_factor: self.stem_length_factor,
             stem_thickness_factor: self.stem_thickness_factor,
             accent_displacement: self.accent_displacement,
@@ -102,12 +114,6 @@ impl StaffOpts {
             stem_down: false,
             proportional_spacing: self.proportional_spacing,
         }
-    }
-
-    /// Distance from a row's center down to its staff line: rows are taller
-    /// above the line (stems, beams, tuplets) than below it.
-    fn baseline_shift(&self) -> f32 {
-        (room_above_em(self) - self.room_below_em) * 0.5 * self.em
     }
 
     /// Distance between two lines of a five-line staff: a quarter of `em`.
@@ -129,6 +135,8 @@ impl StaffOpts {
 pub struct PlacedMeasure {
     pub measure_idx: MeasureIdx,
     pub rect: Rect,
+    /// How far the staff line sits below the center of `rect`.
+    pub y_offset: f32,
     pub layout: MeasureLayout,
     /// The lower voice's measure, if the staff has one.
     pub lower: Option<MeasureLayout>,
@@ -161,6 +169,8 @@ pub struct StaffLayout {
     /// same factor (see [`StaffOpts::rescaled`]) so glyph size matches what
     /// was used to compute positions here.
     pub scale: f32,
+    /// How far every row reaches above and below its staff line.
+    pub room: RowRoom,
 }
 
 impl StaffLayout {
@@ -199,7 +209,8 @@ fn min_measure_width(
     let body = (opts.min_measure_width_em + beats * opts.note_width_em) * opts.em;
     // Short notes next to long ones (e.g. 32nds among eighths) get little
     // space when spaced by duration: widen until no glyph overlaps the next.
-    let body = body.max(min_note_area_width(m, plan, &opts.measure_opts(opts.rect, false, false)));
+    let body =
+        body.max(min_note_area_width(m, plan, &opts.measure_opts(opts.rect, 0.0, false, false)));
     let clef = if show_clef { clef_width(opts.em) } else { 0.0 };
     let ts = if show_ts { time_sig_width(&m.time_signature(), opts.em) } else { 0.0 };
     body + clef + ts
@@ -215,36 +226,11 @@ pub const ROOM_BELOW_EM: f32 = 0.65;
 /// Room below the staff line when count labels are drawn under the notes.
 pub const ROOM_BELOW_WITH_LABELS_EM: f32 = 1.0;
 
-/// Headroom above the staff line, in em: stems (`stem_length_factor` is user
-/// configurable) and flags, plus what the score puts above them (see
-/// [`extra_room_above_em`]).
-fn room_above_em(opts: &StaffOpts) -> f32 {
-    opts.stem_length_factor + 0.15 + opts.room_above_extra_em
-}
-
-/// Headroom `score` needs above its stems and beams (for
-/// [`StaffOpts::room_above_extra_em`]), in em: accents written above the
-/// notes, tuplet brackets and numbers, and a tuplet bracket rising over the
-/// accents above its notes. Rows stay free of space nothing in the score uses.
-pub fn extra_room_above_em(score: &Score, accent_below: bool) -> f32 {
-    let notes =
-        || score.measures.iter().flat_map(|m| m.beats()).filter(|b| b.kind == BeatKind::Note);
-    let accents_above = !accent_below && notes().any(|b| b.accented);
-    let tuplets =
-        score.measures.iter().flat_map(|m| m.beats()).any(|b| b.tuplet_group_id.is_some());
-    let accented_tuplet =
-        !accent_below && notes().any(|b| b.accented && b.tuplet_group_id.is_some());
-    let mut extra = 0.0;
-    if tuplets {
-        extra += 0.5;
-    } else if accents_above {
-        extra += 0.25;
-    }
-    if accented_tuplet {
-        extra += 0.5;
-    }
-    extra
-}
+/// Room past the tips of full-length stems, in em: enough for the beams and
+/// flags at the tips.
+const STEM_MARGIN_EM: f32 = 0.15;
+/// Space kept between the notes' ink and the edge of a row, in em.
+const INK_MARGIN_EM: f32 = 0.1;
 
 /// Distance from the staff line down to the lower voice's line, in em: three
 /// staff spaces, about two lines of a five-line staff apart. The lower
@@ -253,23 +239,53 @@ pub const LOWER_VOICE_GAP_EM: f32 = 0.75;
 /// Room below a lower voice for count labels, in em.
 pub const LOWER_VOICE_LABEL_ROOM_EM: f32 = 0.5;
 
-/// Room below the staff line a lower voice `lower` needs (for
-/// [`StaffOpts::room_below_em`]), in em: down to its line, then its stems
-/// and what hangs below them.
-pub fn lower_voice_room_below_em(lower: &Score, opts: &StaffOpts) -> f32 {
-    LOWER_VOICE_GAP_EM
-        + room_above_em(&StaffOpts {
-            room_above_extra_em: extra_room_above_em(lower, false),
-            ..opts.clone()
-        })
+/// How far the rows of a staff reach above and below the staff line, in em.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RowRoom {
+    pub above: f32,
+    pub below: f32,
 }
 
-/// Vertical budget (in em) for one row's content: the headroom above the
-/// staff line plus the room below it, so adjacent rows sit as close together
-/// as legibility allows rather than leaving dead space. The staff line sits
-/// off-center accordingly (see [`StaffOpts::baseline_shift`]).
-pub fn row_height_em(opts: &StaffOpts) -> f32 {
-    room_above_em(opts) + opts.room_below_em
+impl RowRoom {
+    /// The height of a row, in em.
+    pub fn height(&self) -> f32 {
+        self.above + self.below
+    }
+}
+
+impl RowRoom {
+    const NONE: RowRoom = RowRoom { above: 0.0, below: 0.0 };
+
+    fn max(self, other: RowRoom) -> RowRoom {
+        RowRoom { above: self.above.max(other.above), below: self.below.max(other.below) }
+    }
+}
+
+/// How far the notes of `layout` reach above and below the line of its
+/// voice, in em.
+fn ink_reach_em(layout: &MeasureLayout, opts: &LayoutOpts) -> RowRoom {
+    layout.notes_ink().map_or(RowRoom::NONE, |ink| {
+        let y = opts.y_center();
+        RowRoom { above: (y - ink.top()) / opts.em, below: (ink.bottom() - y) / opts.em }
+    })
+}
+
+/// The room the rows of a staff need, from how far each measure's notes
+/// reach above and below their line ([`ink_reach_em`]), with the lower
+/// voice's if the staff has one. Every row gets the same room, so rows don't
+/// shift from one to the next. It always has room for full-length stems
+/// (`stem_length_factor` is user configurable) and `opts.room_below_em`, and
+/// grows for whatever reaches further: accents, tuplet brackets and numbers.
+fn row_room(reaches: &[(RowRoom, Option<RowRoom>)], opts: &StaffOpts) -> RowRoom {
+    let past_stems =
+        |reach: f32| (opts.stem_length_factor + STEM_MARGIN_EM).max(reach + INK_MARGIN_EM);
+    let upper = reaches.iter().map(|r| r.0).fold(RowRoom::NONE, RowRoom::max);
+    let mut room_below = opts.room_below_em.max(upper.below + INK_MARGIN_EM);
+    if let Some(lower) = reaches.iter().filter_map(|r| r.1).reduce(RowRoom::max) {
+        room_below =
+            room_below.max(LOWER_VOICE_GAP_EM + past_stems(lower.below) + opts.lower_label_room_em);
+    }
+    RowRoom { above: past_stems(upper.above), below: room_below }
 }
 
 /// Build the pixel layout for an entire score.
@@ -285,8 +301,8 @@ pub fn build_staff_layout(score: &Score, opts: &StaffOpts) -> StaffLayout {
 }
 
 /// [`build_staff_layout`] with a lower voice: `lower`'s measures under the
-/// score's, one per row, each as wide as the wider of the two. The rows need
-/// [`lower_voice_room_below_em`] in [`StaffOpts::room_below_em`].
+/// score's, one per row, each as wide as the wider of the two. The rows grow
+/// below the staff line to hold it.
 pub fn build_staff_layout_with_lower(
     score: &Score,
     lower: Option<&Score>,
@@ -334,33 +350,50 @@ pub fn build_staff_layout_with_lower(
         if widest > 0.0 { (available / widest).clamp(shrink_floor_scale, 1.0) } else { 1.0 };
     let effective_opts = opts.rescaled(em_scale);
 
-    // 4. Stack one measure per row, each stretched to fill `available`.
-    let row_height = row_height_em(opts) * effective_opts.em;
-    let spacing = opts.system_spacing_em * effective_opts.em;
+    // 4. Lay out every measure once to measure the room the rows need, which
+    // places the staff line in its row, then again in its row. Nothing is
+    // snapped vertically, so the second layout only moves the first.
     let left = opts.rect.left();
+    let widths: Vec<f32> = widths_min.iter().map(|w| (w * em_scale).max(available)).collect();
+    let lay_out = |i: usize, rect: Rect, y_offset: f32| {
+        let per_opts = effective_opts.measure_opts(rect, y_offset, show_clef[i], show_ts[i]);
+        let layout = build_measure_layout_with_plan(&score.measures[i], &plans[i], &per_opts);
+        let lower_opts = StaffOpts::lower_of(per_opts.clone());
+        let lower = lower_measures(i)
+            .zip(lower_plans[i].as_ref())
+            .map(|(m, plan)| build_measure_layout_with_plan(m, plan, &lower_opts));
+        (layout, per_opts, lower, lower_opts)
+    };
+    let reaches: Vec<(RowRoom, Option<RowRoom>)> = (0..score.len())
+        .map(|i| {
+            let rect = Rect::from_min_size(pos2(left, 0.0), vec2(widths[i], 0.0));
+            let (layout, per_opts, lower, lower_opts) = lay_out(i, rect, 0.0);
+            (ink_reach_em(&layout, &per_opts), lower.map(|l| ink_reach_em(&l, &lower_opts)))
+        })
+        .collect();
+    let room = row_room(&reaches, opts);
+
+    // 5. Stack one measure per row, each stretched to fill `available`.
+    let row_height = room.height() * effective_opts.em;
+    // Rows are taller above the line (stems, beams, tuplets) than below it.
+    let y_offset = effective_opts.y_offset + (room.above - room.below) * 0.5 * effective_opts.em;
+    let spacing = opts.system_spacing_em * effective_opts.em;
     let mut y_acc = opts.rect.top();
     let mut systems: Vec<SystemLayout> = Vec::with_capacity(score.len());
     let mut max_row_width = 0.0f32;
 
-    for i in 0..score.len() {
-        let width = (widths_min[i] * em_scale).max(available);
+    for (i, &width) in widths.iter().enumerate() {
         let rect = Rect::from_min_size(pos2(left, y_acc), vec2(width, row_height));
-        let per_opts = effective_opts.measure_opts(rect, show_clef[i], show_ts[i]);
-        let layout = build_measure_layout_with_plan(&score.measures[i], &plans[i], &per_opts);
-        let lower_opts = StaffOpts::lower_of(per_opts);
-        let lower_layout = lower_measures(i)
-            .zip(lower_plans[i].as_ref())
-            .map(|(m, plan)| build_measure_layout_with_plan(m, plan, &lower_opts));
+        let (layout, _, lower_layout, lower_opts) = lay_out(i, rect, y_offset);
         max_row_width = max_row_width.max(width);
-        let y_baseline =
-            rect.center().y + effective_opts.y_offset + effective_opts.baseline_shift();
         systems.push(SystemLayout {
-            y_baseline,
+            y_baseline: rect.center().y + y_offset,
             lower_baseline: lower_layout.as_ref().map(|_| lower_opts.y_center()),
             rect,
             measures: vec![PlacedMeasure {
                 measure_idx: i,
                 rect,
+                y_offset,
                 layout,
                 lower: lower_layout,
                 show_clef: show_clef[i],
@@ -371,7 +404,7 @@ pub fn build_staff_layout_with_lower(
     }
 
     let total_height = (y_acc - spacing - opts.rect.top()).max(row_height);
-    StaffLayout { total_size: vec2(max_row_width, total_height), systems, scale: em_scale }
+    StaffLayout { total_size: vec2(max_row_width, total_height), systems, scale: em_scale, room }
 }
 
 /// One of the staff's two voices: the upper one on the staff line, or the
@@ -456,7 +489,7 @@ mod tests {
             system_spacing_em: 0.5,
             layout_clef_first: true,
             room_below_em: ROOM_BELOW_EM,
-            room_above_extra_em: 0.0,
+            lower_label_room_em: 0.0,
         }
     }
 
@@ -487,7 +520,7 @@ mod tests {
         let placed = &staff.systems[0].measures[0];
         let direct = crate::pixel_layout::build_measure_layout(
             &m,
-            &staff_opts.measure_opts(rect, true, false),
+            &staff_opts.measure_opts(rect, 0.0, true, false),
         );
 
         assert_eq!(placed.layout.notes.len(), direct.notes.len());
@@ -508,8 +541,7 @@ mod tests {
         let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(400.0, 100.0));
         let upper = parse_score("4/4 >q q q q").unwrap();
         let lower = parse_score("4/4 t4 r:t4 (t4) r:t4 (t4) r:t4").unwrap();
-        let mut staff_opts = opts(em, rect);
-        staff_opts.room_below_em = lower_voice_room_below_em(&lower, &staff_opts);
+        let staff_opts = opts(em, rect);
         let staff = build_staff_layout_with_lower(&upper, Some(&lower), &staff_opts);
         let system = &staff.systems[0];
         let gap = system.lower_baseline.unwrap() - system.y_baseline;
@@ -532,8 +564,7 @@ mod tests {
         let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(400.0, 100.0));
         let upper = parse_score("4/4 >q q q q").unwrap();
         let lower = parse_score("4/4 t4 r:t4 (t4) r:t4 (t4) r:t4").unwrap();
-        let mut staff_opts = opts(em, rect);
-        staff_opts.room_below_em = lower_voice_room_below_em(&lower, &staff_opts);
+        let staff_opts = opts(em, rect);
         let staff = build_staff_layout_with_lower(&upper, Some(&lower), &staff_opts);
         let system = &staff.systems[0];
         let below = system.measures[0].lower.as_ref().unwrap();
@@ -920,20 +951,45 @@ mod tests {
     }
 
     #[test]
-    fn headroom_only_for_what_the_score_puts_above_the_stems() {
-        use grooph_measure::duration::t8;
-        let plain = Score { measures: vec![measure_with_quarters(TimeSignature::FOUR_FOUR)] };
-        assert_eq!(extra_room_above_em(&plain, false), 0.0);
+    fn rows_make_room_for_what_reaches_past_the_stems() {
+        use grooph_measure::notation::parse_score;
+        let em = 20.0;
+        let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(400.0, 100.0));
+        let room = |text: &str, accent_below: bool| {
+            let score = parse_score(text).unwrap();
+            build_staff_layout(&score, &StaffOpts { accent_below, ..opts(em, rect) }).room
+        };
+        // Full-length stems and the room below, whatever the notes.
+        let plain = room("4/4 q q q q", false);
+        assert!((plain.above - (3.5 + STEM_MARGIN_EM)).abs() < 1e-4);
+        assert_eq!(room("4/4 s s s s s s s s s s s s s s s s", false), plain);
+        assert!((plain.below - ROOM_BELOW_EM).abs() < 1e-4);
+        // Accents above, and more for a tuplet over them.
+        let accented = room("4/4 >e e e e e e e e", false);
+        assert!(accented.above > plain.above);
+        assert_eq!(room("4/4 >e e e e e e e e", true).above, plain.above);
+        let tuplet = room("4/4 >t8 r:t8 t8 q q q", false);
+        assert!(tuplet.above > accented.above);
+        // Each measured to its ink.
+        let staff =
+            build_staff_layout(&parse_score("4/4 >t8 r:t8 t8 q q q").unwrap(), &opts(em, rect));
+        let system = &staff.systems[0];
+        let ink = system.measures[0].layout.notes_ink().unwrap();
+        assert!((system.y_baseline - ink.top() - (tuplet.above - INK_MARGIN_EM) * em).abs() < 0.01);
+        assert!((ink.top() - system.rect.top() - INK_MARGIN_EM * em).abs() < 0.01);
+    }
 
-        let mut accented = measure_with_quarters(TimeSignature::FOUR_FOUR);
-        accented.toggle_accent(0).unwrap();
-        let accented = Score { measures: vec![accented] };
-        assert_eq!(extra_room_above_em(&accented, false), 0.25);
-        assert_eq!(extra_room_above_em(&accented, true), 0.0);
-
-        let mut triplet = measure_with_quarters(TimeSignature::FOUR_FOUR);
-        triplet.set_beat(0, Beat::note(t8())).unwrap();
-        let triplet = Score { measures: vec![triplet] };
-        assert_eq!(extra_room_above_em(&triplet, false), 0.5);
+    #[test]
+    fn rows_with_a_lower_voice_hold_its_stems_and_labels() {
+        use grooph_measure::notation::parse_score;
+        let em = 20.0;
+        let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(400.0, 100.0));
+        let upper = parse_score("4/4 q q q q").unwrap();
+        let lower = parse_score("4/4 e e e e e e e e").unwrap();
+        let without = build_staff_layout_with_lower(&upper, Some(&lower), &opts(em, rect)).room;
+        assert!((without.below - (LOWER_VOICE_GAP_EM + 3.5 + STEM_MARGIN_EM)).abs() < 1e-4);
+        let labels = StaffOpts { lower_label_room_em: LOWER_VOICE_LABEL_ROOM_EM, ..opts(em, rect) };
+        let with = build_staff_layout_with_lower(&upper, Some(&lower), &labels).room;
+        assert!((with.below - without.below - LOWER_VOICE_LABEL_ROOM_EM).abs() < 1e-4);
     }
 }
