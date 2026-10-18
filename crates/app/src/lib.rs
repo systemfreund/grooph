@@ -430,6 +430,8 @@ impl Grooph {
             score: self.editor.score.clone(),
             cursor: self.editor.cursor,
             counter: self.metronome_mode().then(|| self.playback_ctl.audio_cfg.counter.clone()),
+            click: self.metronome_mode().then(|| self.playback_ctl.audio_cfg.click.clone()),
+            voice: self.edited_voice(),
         }
     }
 
@@ -459,12 +461,19 @@ impl Grooph {
     }
 
     fn undo(&mut self) {
+        // The bar being edited goes back to its voice first: the restored
+        // snapshot may hold the other one.
+        self.sync_click_bar();
         let current = self.current_snapshot();
         if let Some(prev) = self.editor.history.pop_undo(current) {
             self.editor.score = prev.score;
             self.editor.cursor = prev.cursor;
             if let Some(counter) = prev.counter {
                 self.playback_ctl.audio_cfg.counter = counter;
+                self.editor.metronome.voice = prev.voice;
+            }
+            if let Some(click) = prev.click {
+                self.playback_ctl.audio_cfg.click = click;
             }
             self.clear_accuracy_for_edit();
             self.editor.dirty = true;
@@ -472,12 +481,19 @@ impl Grooph {
     }
 
     fn redo(&mut self) {
+        // The bar being edited goes back to its voice first: the restored
+        // snapshot may hold the other one.
+        self.sync_click_bar();
         let current = self.current_snapshot();
         if let Some(next) = self.editor.history.pop_redo(current) {
             self.editor.score = next.score;
             self.editor.cursor = next.cursor;
             if let Some(counter) = next.counter {
                 self.playback_ctl.audio_cfg.counter = counter;
+                self.editor.metronome.voice = next.voice;
+            }
+            if let Some(click) = next.click {
+                self.playback_ctl.audio_cfg.click = click;
             }
             self.clear_accuracy_for_edit();
             self.editor.dirty = true;

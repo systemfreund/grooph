@@ -149,7 +149,8 @@ pub fn draw_time_signature(
     }
 }
 
-fn draw_edit_cursor(
+/// The blinking edit cursor at note `idx`.
+pub(crate) fn draw_edit_cursor(
     ui: &egui::Ui,
     painter: &Painter,
     measure_layout: &MeasureLayout,

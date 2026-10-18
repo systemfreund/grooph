@@ -8,8 +8,8 @@ use eframe::egui::{FontId, Frame, Rect, Response, Stroke};
 use grooph_layout::pixel_layout::{GlyphMetrics, MeasureLayout, compute_em};
 use grooph_layout::staff_layout::{
     LEGIBILITY_FLOOR_EM, LOWER_VOICE_LABEL_ROOM_EM, PlacedMeasure, ROOM_BELOW_EM,
-    ROOM_BELOW_WITH_LABELS_EM, StaffLayout, StaffOpts, build_staff_layout_with_lower,
-    extra_room_above_em, lower_voice_room_below_em, row_height_em,
+    ROOM_BELOW_WITH_LABELS_EM, StaffLayout, StaffOpts, Voice, build_staff_layout_with_lower,
+    extra_room_above_em, hit_test_voice, lower_voice_room_below_em, row_height_em,
 };
 use grooph_measure::TimeSignature;
 use grooph_measure::grid::DEFAULT_GRID;
@@ -44,8 +44,15 @@ impl Grooph {
                         let viewport_rect = Rect::from_min_size(origin, available);
 
                         // The metronome's counter rhythm, the lower voice
-                        // under its click bar.
-                        let counter = self.counter_staff_score();
+                        // under its click bar. The editor holds one of the
+                        // two (the one being edited), the other comes from
+                        // the audio settings.
+                        let voice = self.edited_voice();
+                        let other = self.other_voice_score();
+                        let (upper, counter) = match voice {
+                            Voice::Upper => (None, other),
+                            Voice::Lower => (other, Some(self.editor.score.clone())),
+                        };
 
                         // Build the multi-measure tempo backbone once per frame.
                         // O(score.len()) — cheap for realistic score sizes.
@@ -103,7 +110,7 @@ impl Grooph {
                                 ROOM_BELOW_EM
                             },
                             room_above_extra_em: extra_room_above_em(
-                                &self.editor.score,
+                                upper.as_ref().unwrap_or(&self.editor.score),
                                 self.ui.layout.accent_below,
                             ),
                         };
@@ -129,11 +136,9 @@ impl Grooph {
                             staff_opts
                         };
 
-                        let staff = build_staff_layout_with_lower(
-                            &self.editor.score,
-                            counter.as_ref(),
-                            &staff_opts,
-                        );
+                        let upper = upper.as_ref().unwrap_or(&self.editor.score);
+                        let staff =
+                            build_staff_layout_with_lower(upper, counter.as_ref(), &staff_opts);
                         // Rows may render at a different em than the baseline `staff_opts`
                         // (grow-to-fill / shrink-toward-floor) — rescale font/metrics to
                         // match before drawing, so glyph size agrees with `staff`'s positions.
@@ -192,7 +197,11 @@ impl Grooph {
                         if self.ui.mode == Mode::Edit
                             && self.playback_ctl.transport_state == TransportState::Stopped
                             && let Some(placed) = staff.placed(self.editor.cursor.measure_idx)
-                            && let Some(note) = placed.layout.notes.get(self.editor.cursor.beat_idx)
+                            && let Some(layout) = match voice {
+                                Voice::Upper => Some(&placed.layout),
+                                Voice::Lower => placed.lower.as_ref(),
+                            }
+                            && let Some(note) = layout.notes.get(self.editor.cursor.beat_idx)
                         {
                             let cursor_rect = egui::Rect::from_min_size(
                                 egui::pos2(note.center.x, placed.rect.top()),
@@ -217,9 +226,10 @@ impl Grooph {
 
                         draw_staff(
                             ui,
-                            &self.editor.score,
+                            upper,
                             &staff,
                             cursor,
+                            voice,
                             playback,
                             count_config.as_ref(),
                             &render_opts,
@@ -433,8 +443,10 @@ impl Grooph {
         if !matches!(self.ui.mode, Mode::TimeSignature(_))
             && (resp.clicked() || resp.dragged())
             && let Some(pos) = resp.interact_pointer_pos()
-            && let Some((m_idx, b_idx)) = grooph_layout::staff_layout::hit_test_staff(staff, pos)
+            && let Some((voice, m_idx, b_idx)) = hit_test_voice(staff, pos)
         {
+            // A tap on the other voice's line edits that voice from now on.
+            self.select_voice(voice);
             self.editor.cursor.measure_idx = m_idx;
             self.editor.cursor.beat_idx = b_idx;
 

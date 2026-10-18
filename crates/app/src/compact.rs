@@ -8,9 +8,10 @@ use crate::share::paint_share_icon;
 use crate::{Grooph, Mode, TransportState};
 use eframe::egui;
 use eframe::egui::{
-    Align2, Color32, FontId, Frame, Id, Margin, Painter, Rect, Response, RichText, Sense, Shape,
-    Stroke, Ui, UiBuilder, Vec2, pos2, vec2,
+    Align2, Button, Color32, FontId, Frame, Id, Margin, Painter, Rect, Response, RichText, Sense,
+    Shape, Stroke, Ui, UiBuilder, Vec2, pos2, vec2,
 };
+use grooph_layout::staff_layout::Voice;
 use grooph_measure::generator::{Subdivision, effective_subdivision};
 use serde::{Deserialize, Serialize};
 
@@ -731,7 +732,20 @@ impl Grooph {
                         self.toggle_playback();
                     }
                     ui.add_space(8.0);
-                    ui.label("Click bar");
+                    // With a counter rhythm: which of the two voices the
+                    // palette edits (a tap on its line picks it too).
+                    if self.counter_bar().is_some() {
+                        let voice = self.edited_voice();
+                        for (v, label) in [(Voice::Upper, "Clicks"), (Voice::Lower, "Counter")] {
+                            let button =
+                                Button::new(RichText::new(label).size(16.0)).selected(voice == v);
+                            if ui.add(button).clicked() {
+                                self.select_voice(v);
+                            }
+                        }
+                    } else {
+                        ui.label("Click bar");
+                    }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui.button(RichText::new("Done").size(18.0)).clicked() {
                             self.ui.mode = Mode::Playback;
