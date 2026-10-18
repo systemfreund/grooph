@@ -18,7 +18,8 @@
 //! horizontally scrollable area for that case.
 
 use crate::pixel_layout::{
-    GlyphMetrics, LayoutOpts, MeasureLayout, build_measure_layout_with_plan, min_note_area_width,
+    LayoutOpts, MeasureLayout, build_measure_layout_with_plan, clef_width, min_note_area_width,
+    time_sig_width,
 };
 use crate::render_plan::{RenderPlan, plan_measure};
 use egui::{FontId, Pos2, Rect, Vec2, pos2, vec2};
@@ -46,7 +47,6 @@ pub struct StaffOpts {
     pub accent_below: bool,
     pub proportional_spacing: bool,
     pub debug_bbox: bool,
-    pub metrics: GlyphMetrics,
 
     /// Minimum width of a measure in em, before per-beat additions.
     pub min_measure_width_em: f32,
@@ -103,7 +103,6 @@ impl StaffOpts {
             stem_down: false,
             proportional_spacing: self.proportional_spacing,
             debug_bbox: self.debug_bbox,
-            metrics: self.metrics,
         }
     }
 
@@ -113,20 +112,17 @@ impl StaffOpts {
         (room_above_em(self) - self.room_below_em) * 0.5 * self.em
     }
 
-    /// Return a copy of these options scaled by `factor` — `em`, `font_id`
-    /// size, and `metrics` move together, since `metrics` is measured against
-    /// `font_id`'s original size and would otherwise no longer match it.
-    /// Vector-font metrics scale ~linearly with size, close enough to avoid
-    /// needing a live `egui::Ui` to re-measure.
+    /// Distance between two lines of a five-line staff: a quarter of `em`.
+    pub fn staff_space(&self) -> f32 {
+        self.em * 0.25
+    }
+
+    /// Return a copy of these options scaled by `factor`: `em` and the
+    /// `font_id` size move together.
     pub fn rescaled(&self, factor: f32) -> StaffOpts {
         let mut font_id = self.font_id.clone();
         font_id.size *= factor;
-        StaffOpts {
-            em: self.em * factor,
-            font_id,
-            metrics: self.metrics.scaled(factor),
-            ..self.clone()
-        }
+        StaffOpts { em: self.em * factor, font_id, ..self.clone() }
     }
 }
 
@@ -176,31 +172,6 @@ impl StaffLayout {
     }
 }
 
-/// Reserved clef width in em (matches `build_measure_layout`).
-const CLEF_WIDTH_EM: f32 = 1.1;
-
-/// Reserved width per time-signature digit column in em (matches
-/// `build_time_sig_layout`).
-const TS_DIGIT_WIDTH_EM: f32 = 0.35;
-
-fn digit_count(mut n: u32) -> usize {
-    if n == 0 {
-        return 0;
-    }
-    let mut c = 0usize;
-    while n > 0 {
-        c += 1;
-        n /= 10;
-    }
-    c
-}
-
-fn time_sig_width_em(ts: &TimeSignature) -> f32 {
-    let top = digit_count(ts.beats as u32);
-    let bot = digit_count(ts.beat_unit as u32);
-    top.max(bot) as f32 * TS_DIGIT_WIDTH_EM
-}
-
 /// Number of sixteenth notes that fit into a measure of `ts` (at least 1).
 fn sixteenth_slots(ts: &TimeSignature) -> f32 {
     let per_measure = DEFAULT_GRID.ticks_per_measure(ts);
@@ -231,8 +202,8 @@ fn min_measure_width(
     // Short notes next to long ones (e.g. 32nds among eighths) get little
     // space when spaced by duration: widen until no glyph overlaps the next.
     let body = body.max(min_note_area_width(m, plan, &opts.measure_opts(opts.rect, false, false)));
-    let clef = if show_clef { CLEF_WIDTH_EM * opts.em } else { 0.0 };
-    let ts = if show_ts { time_sig_width_em(&m.time_signature()) * opts.em } else { 0.0 };
+    let clef = if show_clef { clef_width(opts.em) } else { 0.0 };
+    let ts = if show_ts { time_sig_width(&m.time_signature(), opts.em) } else { 0.0 };
     body + clef + ts
 }
 
@@ -442,7 +413,6 @@ pub fn hit_test_staff(staff: &StaffLayout, pos: Pos2) -> Option<(MeasureIdx, Bea
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pixel_layout::GlyphMetrics;
     use egui::{FontFamily, FontId, Pos2, Rect};
     use grooph_measure::duration::q;
     use grooph_measure::{Beat, Measure, Score, TimeSignature};
@@ -460,7 +430,6 @@ mod tests {
             accent_below: false,
             proportional_spacing: true,
             debug_bbox: false,
-            metrics: GlyphMetrics::debug(em),
             min_measure_width_em: 6.0,
             note_width_em: 0.6,
             system_spacing_em: 0.5,

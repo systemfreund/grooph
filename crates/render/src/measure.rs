@@ -1,7 +1,7 @@
 use crate::beat::draw_beat;
+use crate::glyph::draw_glyph;
 use eframe::egui;
 use eframe::egui::{Align2, Color32, FontFamily, FontId, Painter, Rangef, Rect, Stroke, pos2};
-use grooph_layout::glyphs;
 use grooph_layout::pixel_layout::{
     BeamLayout, LayoutOpts, MeasureLayout, NoteLayout, TimeSignatureLayout, TupletLayout,
     build_measure_layout,
@@ -87,7 +87,9 @@ pub(crate) fn render_measure_at(
         draw_staff_line_segment(painter, rect, opts.y_center(), opts.em, color);
     }
 
-    draw_clef(painter, measure_layout.clef_pos, &opts.font_id, color);
+    if let Some(clef) = &measure_layout.clef {
+        draw_glyph(painter, clef, &opts.font_id.family, color);
+    }
     if let Some(ts_layout) = &measure_layout.time_signature {
         draw_time_signature(painter, ts_layout, measure.time_signature(), &opts.font_id, color);
     }
@@ -108,18 +110,6 @@ fn draw_staff_line_segment(painter: &Painter, rect: Rect, y: f32, em: f32, color
     painter.hline(Rangef::new(rect.left(), rect.right()), y, Stroke::new(0.02 * em, color));
 }
 
-fn draw_clef(painter: &Painter, clef_pos: Option<egui::Pos2>, font_id: &FontId, color: Color32) {
-    if let Some(pos) = clef_pos {
-        painter.text(
-            pos,
-            Align2::CENTER_CENTER,
-            glyphs::GLYPH_CLEF_PERCUSSION.to_string(),
-            font_id.clone(),
-            color,
-        );
-    }
-}
-
 /// Draws the meter digits at the laid-out positions, with a grouping other
 /// than the usual one written above them.
 pub fn draw_time_signature(
@@ -129,13 +119,8 @@ pub fn draw_time_signature(
     font_id: &FontId,
     color: Color32,
 ) {
-    let top_digits = glyphs::ts_glyphs(ts.beats);
-    let bot_digits = glyphs::ts_glyphs(ts.beat_unit);
-    for (p, ch) in ts_layout.beats.iter().zip(top_digits.iter()) {
-        painter.text(*p, Align2::CENTER_CENTER, ch.to_string(), font_id.clone(), color);
-    }
-    for (p, ch) in ts_layout.beat_unit.iter().zip(bot_digits.iter()) {
-        painter.text(*p, Align2::CENTER_CENTER, ch.to_string(), font_id.clone(), color);
+    for digit in ts_layout.beats.iter().chain(&ts_layout.beat_unit) {
+        draw_glyph(painter, digit, &font_id.family, color);
     }
     // A grouping other than the usual one is written above the meter, e.g.
     // "2+2+3" over 7/8.
@@ -143,7 +128,8 @@ pub fn draw_time_signature(
         && let (Some(first), Some(last)) = (ts_layout.beats.first(), ts_layout.beats.last())
     {
         let em = font_id.size;
-        let pos = egui::pos2((first.x + last.x) / 2.0, first.y - 0.4 * em);
+        let x = (first.origin.x + last.origin.x + last.glyph.advance * em * 0.25) / 2.0;
+        let pos = egui::pos2(x, first.origin.y - 0.4 * em);
         let font = FontId::proportional(0.28 * em);
         painter.text(pos, Align2::CENTER_BOTTOM, ts.groups_label(), font, color);
     }
@@ -415,8 +401,9 @@ pub fn draw_tuplets(
             let half = (seg.p2 - seg.p1).normalized() * thickness * 0.5;
             painter.line_segment([seg.p1 - half, seg.p2 + half], Stroke::new(thickness, color));
         }
-        let digits = glyphs::tuplet_glyphs(t.count);
-        painter.text(t.number_center, Align2::CENTER_CENTER, digits, t.number_font.clone(), color);
+        for digit in &t.number {
+            draw_glyph(painter, digit, &opts.font_id.family, color);
+        }
     }
 }
 
@@ -584,7 +571,6 @@ fn compute_label_xs(
 mod tests {
     use super::*;
     use eframe::egui::{FontFamily, FontId, Pos2};
-    use grooph_layout::pixel_layout::GlyphMetrics;
     use grooph_measure::counting::{CountLayer, CountScope, LabelPattern, LabelToken, Subdiv};
     use grooph_measure::duration::{Duration, NoteValue, e, q, s, t8};
     use grooph_measure::{Beat, Measure, TimeSignature};
@@ -606,7 +592,6 @@ mod tests {
             stem_down: false,
             proportional_spacing: true,
             debug_bbox: false,
-            metrics: GlyphMetrics::debug(em),
         }
     }
 

@@ -1,4 +1,5 @@
-use super::{LayoutOpts, Line, NoteLayout, c, requires_flag};
+use super::{LayoutOpts, Line, NoteLayout, PlacedGlyph, c, requires_flag};
+use crate::glyphs;
 use crate::render_plan::RenderPlan;
 use egui::{Pos2, Rect};
 use grooph_measure::duration::Duration;
@@ -13,15 +14,63 @@ const fn dot_count_of(duration: Duration) -> u8 {
     }
 }
 
-/// X offset of the first augmentation dot, relative to the note center:
-/// just right of the head, or of its parentheses for a soft note. An up-stem
-/// flag curls down beside the dots and pushes them past it; a down-stem flag
-/// hangs below them.
+/// The head or rest glyph of `beat`.
+fn head_glyph(beat: &Beat) -> glyphs::Glyph {
+    match beat.kind {
+        BeatKind::Note => glyphs::NOTEHEAD_BLACK,
+        BeatKind::Rest => glyphs::rest_glyph_for_duration(beat.duration),
+    }
+}
+
+/// From a soft note's center to the outer edge of its parentheses' ink.
+fn paren_reach(opts: &LayoutOpts) -> f32 {
+    let ss = opts.staff_space();
+    opts.head_half_width() + c::SOFT_PAREN_GAP_SS * ss + glyphs::NOTEHEAD_PAREN_LEFT.ink(ss).width()
+}
+
+/// The parentheses around a soft note's head centered at `center`.
+fn parens_at(center: Pos2, opts: &LayoutOpts) -> Vec<PlacedGlyph> {
+    let ss = opts.staff_space();
+    let inner = opts.head_half_width() + c::SOFT_PAREN_GAP_SS * ss;
+    let left = glyphs::NOTEHEAD_PAREN_LEFT;
+    let right = glyphs::NOTEHEAD_PAREN_RIGHT;
+    vec![
+        PlacedGlyph {
+            glyph: left,
+            origin: Pos2::new(center.x - inner - left.ink(ss).right(), center.y),
+            size: opts.em,
+        },
+        PlacedGlyph {
+            glyph: right,
+            origin: Pos2::new(center.x + inner - right.ink(ss).left(), center.y),
+            size: opts.em,
+        },
+    ]
+}
+
+/// The flag of a note of `duration` on `stem`, its end at the stem's tip.
+pub(super) fn flag_at(
+    duration: Duration,
+    stem: &Line,
+    stem_down: bool,
+    opts: &LayoutOpts,
+) -> Option<PlacedGlyph> {
+    let (glyph, anchor) = glyphs::flag_glyph_for_duration(duration, stem_down)?;
+    let ss = opts.staff_space();
+    // Flags hang off the stem's left edge, toward the right.
+    let x = stem.p1.x - opts.stem_thickness() * 0.5 - anchor[0] * ss;
+    Some(PlacedGlyph { glyph, origin: Pos2::new(x, stem.p2.y + anchor[1] * ss), size: opts.em })
+}
+
+/// X offset of the first augmentation dot's center, relative to the note
+/// center: just right of the head, or of its parentheses for a soft note. An
+/// up-stem flag curls down beside the dots and pushes them past it; a
+/// down-stem flag hangs below them.
 fn dot_first_dx(beat: &Beat, in_beam: bool, opts: &LayoutOpts) -> f32 {
     let is_note = beat.kind == BeatKind::Note;
     let mut dx = opts.em * c::DOT_FIRST_DX_NO_FLAG_EM;
     if is_note && beat.soft {
-        dx += opts.metrics.paren_width + opts.em * c::SOFT_PAREN_GAP_EM;
+        dx += paren_reach(opts) - opts.head_half_width();
     }
     if is_note && !in_beam && requires_flag(beat.duration) && !opts.stem_down {
         dx = dx.max(opts.em * c::DOT_FIRST_DX_WITH_FLAG_EM);
@@ -29,43 +78,41 @@ fn dot_first_dx(beat: &Beat, in_beam: bool, opts: &LayoutOpts) -> f32 {
     dx
 }
 
-/// Absolute screen positions of the augmentation dots of `beat`, a note
-/// centered at `(center_x, cy)`. Returns empty if `dot_count == 0`.
-fn dot_positions(
+/// The augmentation dots of `beat`, a note centered at `(center_x, cy)`.
+/// Returns empty if `dot_count == 0`.
+fn dot_glyphs(
     beat: &Beat,
     in_beam: bool,
     center_x: f32,
     cy: f32,
     dot_count: u8,
     opts: &LayoutOpts,
-) -> Vec<Pos2> {
-    if dot_count == 0 {
-        return Vec::new();
-    }
+) -> Vec<PlacedGlyph> {
     let first_dx = dot_first_dx(beat, in_beam, opts);
     let step_dx = opts.em * c::DOT_STEP_DX_EM;
     let y = cy - opts.em * c::DOT_Y_OFFSET_EM;
-    (0..dot_count).map(|d| Pos2::new(center_x + first_dx + (d as f32) * step_dx, y)).collect()
+    (0..dot_count)
+        .map(|d| {
+            let x = center_x + first_dx + (d as f32) * step_dx;
+            PlacedGlyph::centered(glyphs::AUGMENTATION_DOT, x, y, opts.em)
+        })
+        .collect()
 }
 
 /// Pre-layout horizontal extents (relative to a note's center) used by the
-/// shift pass. Estimates the rightward overhang from head/rest base width
-/// plus dots and an ungrouped flag. Stems are not yet known here, so the
-/// flag right edge is approximated from `opts.stem_offset()`.
+/// shift pass: the head or rest, its parentheses and dots, and an ungrouped
+/// flag. Stems are not yet known here, so the flag is placed from
+/// `opts.stem_offset()`.
 fn compute_x_extents(beat: &Beat, in_beam: bool, opts: &LayoutOpts) -> (f32, f32) {
-    let m = &opts.metrics;
+    let ss = opts.staff_space();
     let is_note = beat.kind == BeatKind::Note;
     let needs_flag = requires_flag(beat.duration);
 
     let (left, mut right) = if is_note && beat.soft {
-        let h = m.head_size.x * 0.5 + m.paren_width + opts.em * c::SOFT_PAREN_GAP_EM;
-        (-h, h)
-    } else if is_note {
-        let h = m.head_size.x * 0.5;
-        (-h, h)
+        (-paren_reach(opts), paren_reach(opts))
     } else {
-        let w = m.rest_sizes[beat.duration.base_note().rest_index()].x;
-        (-w * 0.5, w * 0.5)
+        let head = PlacedGlyph::centered(head_glyph(beat), 0.0, 0.0, opts.em).ink();
+        (head.left(), head.right())
     };
 
     let dot_count = dot_count_of(beat.duration);
@@ -73,62 +120,40 @@ fn compute_x_extents(beat: &Beat, in_beam: bool, opts: &LayoutOpts) -> (f32, f32
         let first_dx = dot_first_dx(beat, in_beam, opts);
         let step_dx = opts.em * c::DOT_STEP_DX_EM;
         let last_dot_center_rel = first_dx + ((dot_count - 1) as f32) * step_dx;
-        let last_dot_right_rel = last_dot_center_rel + m.dot_size.x * 0.5;
-        if last_dot_right_rel > right {
-            right = last_dot_right_rel;
-        }
+        let last_dot_right_rel =
+            last_dot_center_rel + glyphs::AUGMENTATION_DOT.ink(ss).width() * 0.5;
+        right = right.max(last_dot_right_rel);
     }
 
-    if is_note && !in_beam && needs_flag {
+    if is_note
+        && !in_beam
+        && needs_flag
+        && let Some((flag, anchor)) = glyphs::flag_glyph_for_duration(beat.duration, opts.stem_down)
+    {
         let stem_dx = if opts.stem_down { -opts.stem_offset() } else { opts.stem_offset() };
-        let flag_left_rel = stem_dx - opts.stem_thickness() * 0.5;
-        let fw = m.flag_size_for(beat.duration.base_note()).x;
-        let flag_right_rel = flag_left_rel + fw;
-        if flag_right_rel > right {
-            right = flag_right_rel;
-        }
+        let flag_x = stem_dx - opts.stem_thickness() * 0.5 - anchor[0] * ss;
+        right = right.max(flag_x + flag.ink(ss).right());
     }
 
     (left, right)
 }
 
-/// Post-layout vertical extents in absolute screen coordinates, derived
-/// from the already-computed stem/flag/dot geometry.
+/// Post-layout vertical extents in absolute screen coordinates, from the
+/// already-placed glyphs and stem.
 fn compute_vertical_extents(
-    beat: &Beat,
-    cy: f32,
+    head: &PlacedGlyph,
     stem: Option<&Line>,
-    flag_pos: Option<Pos2>,
-    dot_count: u8,
-    opts: &LayoutOpts,
+    flag: Option<&PlacedGlyph>,
+    dots: &[PlacedGlyph],
 ) -> (f32, f32) {
-    let m = &opts.metrics;
-    let is_note = beat.kind == BeatKind::Note;
-
-    let base_h = if is_note {
-        m.head_size.y * 0.5
-    } else {
-        m.rest_sizes[beat.duration.base_note().rest_index()].y
-    };
-    let mut top = cy - base_h;
-    let mut bottom = cy + base_h;
-
+    let mut ink = head.ink();
+    for g in flag.into_iter().chain(dots) {
+        ink = ink.union(g.ink());
+    }
     if let Some(s) = stem {
-        top = top.min(s.p2.y).min(s.p1.y);
-        bottom = bottom.max(s.p2.y).max(s.p1.y);
+        ink = ink.union(Rect::from_two_pos(s.p1, s.p2));
     }
-    if dot_count > 0 {
-        let dot_y = cy - opts.em * c::DOT_Y_OFFSET_EM;
-        let h = m.dot_size.y * 0.5;
-        top = top.min(dot_y - h);
-        bottom = bottom.max(dot_y + h);
-    }
-    if let Some(fp) = flag_pos {
-        let fs = m.flag_size_for(beat.duration.base_note());
-        top = top.min(fp.y - fs.y * 0.5);
-        bottom = bottom.max(fp.y + fs.y * 0.5);
-    }
-    (top, bottom)
+    (ink.top(), ink.bottom())
 }
 
 /// Whether each beat sits in a beamed group of two or more (no flag).
@@ -284,6 +309,7 @@ pub(super) fn build_note_layout(
     }
 
     let mut note_layout: Vec<NoteLayout> = Vec::with_capacity(beats.len());
+    let ss = opts.staff_space();
     for (i, b) in beats.iter().enumerate() {
         let (ideal_cx, left_rel, right_rel) = *shifted_layout_info.get(i).unwrap();
         let cy = opts.y_center();
@@ -306,57 +332,72 @@ pub(super) fn build_note_layout(
             let ideal_stem_x = ideal_cx + stem_dx;
             let snapped_stem_x = opts.snap_x(ideal_stem_x, opts.stem_thickness());
 
-            let start = Pos2::new(snapped_stem_x, cy - opts.em * 0.05);
+            let attach = glyphs::NOTEHEAD_BLACK_STEM_UP_SE[1] * ss;
+            let start = Pos2::new(snapped_stem_x, cy - attach);
             let end = Pos2::new(snapped_stem_x, cy - stem_len);
             stem = Some(Line { p1: start, p2: end });
         }
 
-        // 2. Adjust Notehead Center
+        // 2. Notehead or rest. A head hangs off its stem's right edge (left
+        // edge for a down stem): both are rounded to pixels on their own,
+        // and centering the head could leave a hairline between them on
+        // small staffs.
         let center = Pos2::new(ideal_cx, cy);
+        let head = match &stem {
+            Some(s) if opts.stem_down => {
+                let x = s.p1.x
+                    - opts.stem_thickness() * 0.5
+                    - glyphs::NOTEHEAD_BLACK_STEM_DOWN_NW[0] * ss;
+                PlacedGlyph {
+                    glyph: glyphs::NOTEHEAD_BLACK,
+                    origin: Pos2::new(x, cy),
+                    size: opts.em,
+                }
+            }
+            Some(s) => {
+                let x = s.p1.x + opts.stem_thickness() * 0.5
+                    - glyphs::NOTEHEAD_BLACK_STEM_UP_SE[0] * ss;
+                PlacedGlyph {
+                    glyph: glyphs::NOTEHEAD_BLACK,
+                    origin: Pos2::new(x, cy),
+                    size: opts.em,
+                }
+            }
+            None => PlacedGlyph::centered(head_glyph(b), center.x, cy, opts.em),
+        };
+        let parens = if is_note && b.soft { parens_at(center, opts) } else { Vec::new() };
 
         // 3. Dots
-        let dot_count = dot_count_of(b.duration);
-        let dots = dot_positions(b, in_beam, center.x, cy, dot_count, opts);
+        let dots = dot_glyphs(b, in_beam, center.x, cy, dot_count_of(b.duration), opts);
 
         // 4. Flag (if needed)
-        let mut flag_pos: Option<Pos2> = None;
-        if is_note
-            && !in_beam
-            && needs_flag
-            && let Some(s) = &stem
-        {
-            // Align flag to the left edge of the snapped stem
-            let flag_x = s.p1.x - opts.stem_thickness() * 0.5;
-            flag_pos = Some(Pos2::new(flag_x, cy - opts.stem_length()));
-        }
+        let flag = match &stem {
+            Some(s) if !in_beam && needs_flag => flag_at(b.duration, s, opts.stem_down, opts),
+            _ => None,
+        };
 
         // 5. Accent and Debug Bounding Box.
         // We calculate the content bounding box first to position the
         // accent relative to it.
         let (content_top, content_bottom) =
-            compute_vertical_extents(b, cy, stem.as_ref(), flag_pos, dot_count, opts);
+            compute_vertical_extents(&head, stem.as_ref(), flag.as_ref(), &dots);
 
-        let mut accent_pos: Option<Pos2> = None;
+        let mut accent: Option<PlacedGlyph> = None;
         let mut accent_debug_bbox: Option<Rect> = None;
 
         if is_note && b.accented {
             let displacement = opts.em * opts.accent_displacement;
-            let accent_half_h = opts.metrics.accent_size.y * 0.5;
-
-            let logical_y = if opts.accent_below {
-                content_bottom + displacement + accent_half_h
+            let mut glyph = PlacedGlyph::centered(glyphs::ACCENT_ABOVE, center.x, 0.0, opts.em);
+            let ink = glyph.ink();
+            glyph.origin.y = if opts.accent_below {
+                content_bottom + displacement - ink.top()
             } else {
-                content_top - displacement - accent_half_h
+                content_top - displacement - ink.bottom()
             };
-
-            accent_pos = Some(Pos2::new(center.x, logical_y + accent_half_h));
-
             if opts.debug_bbox {
-                accent_debug_bbox = Some(Rect::from_center_size(
-                    Pos2::new(center.x, logical_y),
-                    opts.metrics.accent_size,
-                ));
+                accent_debug_bbox = Some(glyph.ink());
             }
+            accent = Some(glyph);
         }
 
         let debug_bbox = if opts.debug_bbox {
@@ -372,11 +413,12 @@ pub(super) fn build_note_layout(
             center,
             duration: b.duration,
             kind: b.kind,
+            head,
+            parens,
             dots,
             stem,
-            flag_pos,
-            accent_pos,
-            soft: is_note && b.soft,
+            flag,
+            accent,
             debug_bbox,
             accent_debug_bbox,
         });

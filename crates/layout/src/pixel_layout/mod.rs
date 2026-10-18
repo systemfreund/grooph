@@ -1,5 +1,6 @@
+use crate::glyphs::{self, Glyph};
 use crate::render_plan::{RenderPlan, plan_measure};
-use egui::{FontId, Pos2, Rect, Vec2};
+use egui::{FontId, Pos2, Rect};
 use grooph_measure::duration::{Duration, NoteValue};
 use grooph_measure::{BeatKind, Measure, TimeSignature};
 
@@ -11,7 +12,7 @@ mod tuplets;
 /// `opts.em`, `_SS` by `opts.staff_space()`. Unsuffixed constants are pure
 /// ratios applied to another already-scaled quantity.
 mod c {
-    // Dot positioning
+    // Dot positioning: centers, from the head's center
     pub const DOT_FIRST_DX_WITH_FLAG_EM: f32 = 0.50;
     pub const DOT_FIRST_DX_NO_FLAG_EM: f32 = 0.26;
     pub const DOT_STEP_DX_EM: f32 = 0.26;
@@ -24,79 +25,85 @@ mod c {
     pub const NOTE_LEAD_EM: f32 = 0.45;
 
     // Tuplet bracket / number
-    pub const TUPLET_BRACKET_GAP_SS: f32 = 1.80;
+    /// From the stem tips to the bracket line, the number's middle.
+    pub const TUPLET_BRACKET_GAP_SS: f32 = 2.30;
     pub const TUPLET_HOOK_LEN_SS: f32 = 0.80;
     pub const TUPLET_HOOK_DY_FACTOR: f32 = 0.85;
     pub const TUPLET_DIGIT_FONT_FACTOR: f32 = 0.75;
     pub const TUPLET_MARGIN_EM: f32 = 0.15;
-    pub const TUPLET_NUM_WIDTH_EM: f32 = 0.60;
-    pub const TUPLET_NUM_PAD_EM: f32 = 0.25;
+    /// Space between the number's ink and the bracket on either side.
+    pub const TUPLET_NUMBER_CLEARANCE_SS: f32 = 1.75;
     pub const TUPLET_ACCENT_RAISE_SS: f32 = 1.40;
     pub const TUPLET_ACCENT_LOWER_SS: f32 = -0.40;
     pub const TUPLET_NUMBER_CLOSE_SS: f32 = -1.00;
-    pub const TUPLET_NUMBER_BASELINE_LIFT_SS: f32 = 0.50;
     pub const TUPLET_MIN_SEG_SS: f32 = 0.50;
 
-    // Parentheses of a soft note: gap to the head
-    pub const SOFT_PAREN_GAP_EM: f32 = 0.04;
+    /// Space between a soft note's head and the ink of its parentheses.
+    pub const SOFT_PAREN_GAP_SS: f32 = 0.016;
 
     // Beam alignment
     pub const BEAM_BASELINE_OFFSET: f32 = 0.95; // × beam_thickness
+
+    /// Width reserved for the percussion clef.
+    pub const CLEF_WIDTH_EM: f32 = 1.1;
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct GlyphMetrics {
-    pub head_size: Vec2,
-    pub dot_size: Vec2,
-    pub accent_size: Vec2,
-    pub flag_8th_size: Vec2,
-    pub flag_16th_size: Vec2,
-    pub flag_32nd_size: Vec2,
-    pub rest_sizes: [Vec2; 6],
-    /// Width of one parenthesis around a soft note's head.
-    pub paren_width: f32,
+/// A glyph with its origin at `origin`, drawn at font size `size` px.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PlacedGlyph {
+    pub glyph: Glyph,
+    pub origin: Pos2,
+    pub size: f32,
 }
 
-impl GlyphMetrics {
-    /// Size of the flag glyph for a note value. Falls back to the 8th flag
-    /// for non-flagged note values (callers should already gate on
-    /// `requires_flag`).
-    pub fn flag_size_for(&self, nv: NoteValue) -> Vec2 {
-        match nv {
-            NoteValue::Sixteenth => self.flag_16th_size,
-            NoteValue::ThirtySecond => self.flag_32nd_size,
-            _ => self.flag_8th_size,
-        }
+impl PlacedGlyph {
+    /// `glyph` at font size `size`, its advance centered on `x`, its origin
+    /// at `y`.
+    pub fn centered(glyph: Glyph, x: f32, y: f32, size: f32) -> Self {
+        Self { glyph, origin: Pos2::new(x - glyph.advance * size * 0.125, y), size }
     }
 
-    pub fn debug(em: f32) -> Self {
-        let default_size = Vec2::new(0.4 * em, 0.25 * em);
-        Self {
-            head_size: default_size,
-            dot_size: Vec2::new(0.2 * em, 0.2 * em),
-            accent_size: Vec2::new(0.4 * em, 0.2 * em),
-            flag_8th_size: Vec2::new(0.3 * em, 1.0 * em),
-            flag_16th_size: Vec2::new(0.35 * em, 1.2 * em),
-            flag_32nd_size: Vec2::new(0.4 * em, 1.4 * em),
-            rest_sizes: [default_size; 6],
-            paren_width: 0.3 * em,
-        }
+    /// Bounding box of the drawn ink.
+    pub fn ink(&self) -> Rect {
+        self.glyph.ink(self.size * 0.25).translate(self.origin.to_vec2())
     }
+}
 
-    /// Scale every glyph metric by `factor`. Used when a layout shrinks or
-    /// grows toward the legibility floor without a live `egui::Ui` to
-    /// re-measure the font — vector-font metrics scale ~linearly with size.
-    pub fn scaled(&self, factor: f32) -> Self {
-        Self {
-            head_size: self.head_size * factor,
-            dot_size: self.dot_size * factor,
-            accent_size: self.accent_size * factor,
-            flag_8th_size: self.flag_8th_size * factor,
-            flag_16th_size: self.flag_16th_size * factor,
-            flag_32nd_size: self.flag_32nd_size * factor,
-            rest_sizes: self.rest_sizes.map(|v| v * factor),
-            paren_width: self.paren_width * factor,
-        }
+/// `glyphs` set one after another, the run's advance centered on `x` and its
+/// ink centered on `y`.
+fn centered_run(glyphs: &[Glyph], x: f32, y: f32, size: f32) -> Vec<PlacedGlyph> {
+    let ss = size * 0.25;
+    let advance: f32 = glyphs.iter().map(|g| g.advance * ss).sum();
+    let mut pen = x - advance * 0.5;
+    let mut run: Vec<PlacedGlyph> = glyphs
+        .iter()
+        .map(|&glyph| {
+            let placed = PlacedGlyph { glyph, origin: Pos2::new(pen, y), size };
+            pen += glyph.advance * ss;
+            placed
+        })
+        .collect();
+    if let Some(ink) = ink_of(&run) {
+        shift_y(&mut run, y - ink.center().y);
+    }
+    run
+}
+
+/// Bounding box of the ink of `glyphs`, if any.
+fn ink_of(glyphs: &[PlacedGlyph]) -> Option<Rect> {
+    glyphs.iter().map(PlacedGlyph::ink).reduce(|a, b| a.union(b))
+}
+
+fn shift_y(glyphs: &mut [PlacedGlyph], dy: f32) {
+    for g in glyphs {
+        g.origin.y += dy;
+    }
+}
+
+/// Move `glyphs` as a whole to where their ink, mirrored about `cy`, is.
+fn mirror_ink(glyphs: &mut [PlacedGlyph], cy: f32) {
+    if let Some(ink) = ink_of(glyphs) {
+        shift_y(glyphs, (2.0 * cy - ink.bottom()) - ink.top());
     }
 }
 
@@ -111,6 +118,7 @@ pub fn compute_em(rect: &Rect, width_cap_factor: f32, ui: &egui::Ui) -> f32 {
 #[derive(Clone)]
 pub struct LayoutOpts {
     pub rect: Rect,
+    /// The music font, at size `em`.
     pub font_id: FontId,
     pub pixels_per_point: f32,
     pub em: f32,
@@ -128,11 +136,10 @@ pub struct LayoutOpts {
     pub stem_down: bool,
     pub proportional_spacing: bool,
     pub debug_bbox: bool,
-    pub metrics: GlyphMetrics,
 }
 
 impl LayoutOpts {
-    pub(super) const fn staff_space(&self) -> f32 {
+    pub const fn staff_space(&self) -> f32 {
         self.em * 0.25
     }
 
@@ -144,17 +151,21 @@ impl LayoutOpts {
         self.snap_thickness(self.em * self.stem_thickness_factor)
     }
 
+    /// Half the note head's width.
+    pub(super) const fn head_half_width(&self) -> f32 {
+        glyphs::NOTEHEAD_BLACK.advance * self.staff_space() * 0.5
+    }
+
     pub(super) const fn stem_offset(&self) -> f32 {
-        self.metrics.head_size.x * 0.5 - self.stem_thickness() * 0.5
+        self.head_half_width() - self.stem_thickness() * 0.5
     }
 
     pub const fn beam_thickness(&self) -> f32 {
-        // Bravura ~0.5 sp
-        0.5 * self.staff_space()
+        glyphs::BEAM_THICKNESS * self.staff_space()
     }
 
     pub(super) const fn beam_gap(&self) -> f32 {
-        0.25 * self.staff_space()
+        glyphs::BEAM_SPACING * self.staff_space()
     }
 
     pub(super) const fn stub_length(&self) -> f32 {
@@ -203,27 +214,39 @@ pub struct Line {
 pub struct TupletLayout {
     /// The number, e.g. 3 for a triplet
     pub count: u8,
-    /// Center of the number in pixels
-    pub number_center: Pos2,
-    /// Font of the number, set by the layout
-    pub number_font: FontId,
+    /// The digits of the number
+    pub number: Vec<PlacedGlyph>,
     /// Bracket segments including hooks; empty when only the number shows
     pub bracket: Vec<Line>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct NoteLayout {
+    /// Middle of the head or rest, on the staff line.
     pub center: Pos2,
     pub duration: Duration,
     pub kind: BeatKind,
-    pub dots: Vec<Pos2>,
+    /// The note head, or the rest.
+    pub head: PlacedGlyph,
+    /// The parentheses of a soft (ghost) note's head.
+    pub parens: Vec<PlacedGlyph>,
+    pub dots: Vec<PlacedGlyph>,
     pub stem: Option<Line>,
-    pub flag_pos: Option<Pos2>,
-    pub accent_pos: Option<Pos2>,
-    /// A soft (ghost) note: its head is drawn in parentheses.
-    pub soft: bool,
+    pub flag: Option<PlacedGlyph>,
+    pub accent: Option<PlacedGlyph>,
     pub debug_bbox: Option<Rect>,
     pub accent_debug_bbox: Option<Rect>,
+}
+
+impl NoteLayout {
+    /// Every glyph of the note.
+    pub fn glyphs(&self) -> impl Iterator<Item = &PlacedGlyph> {
+        std::iter::once(&self.head)
+            .chain(&self.parens)
+            .chain(&self.dots)
+            .chain(&self.flag)
+            .chain(&self.accent)
+    }
 }
 
 /// Pixel-level layout for a measure.
@@ -232,10 +255,31 @@ pub struct MeasureLayout {
     pub beams: Vec<BeamLayout>,
     pub notes: Vec<NoteLayout>,
     pub tuplets: Vec<TupletLayout>,
-    pub clef_pos: Option<Pos2>,
+    pub clef: Option<PlacedGlyph>,
     pub time_signature: Option<TimeSignatureLayout>,
     // Left boundary of the notes drawing area (excludes clef and time signature)
     pub notes_left_edge: f32,
+}
+
+impl MeasureLayout {
+    /// Bounding box of everything drawn for the notes: glyphs, stems, beams
+    /// and tuplets.
+    pub fn notes_ink(&self) -> Option<Rect> {
+        let glyphs = self
+            .notes
+            .iter()
+            .flat_map(NoteLayout::glyphs)
+            .chain(self.tuplets.iter().flat_map(|t| &t.number))
+            .map(PlacedGlyph::ink);
+        let lines = self
+            .notes
+            .iter()
+            .filter_map(|n| n.stem)
+            .chain(self.tuplets.iter().flat_map(|t| t.bracket.iter().copied()))
+            .map(|l| Rect::from_two_pos(l.p1, l.p2));
+        let beams = self.beams.iter().map(|b| b.rect);
+        glyphs.chain(lines).chain(beams).reduce(|a, b| a.union(b))
+    }
 }
 
 /// Narrowest note area (px, excluding clef and time signature) in which
@@ -253,6 +297,11 @@ pub fn build_measure_layout(measure: &Measure, opts: &LayoutOpts) -> MeasureLayo
     build_measure_layout_with_plan(measure, &plan_measure(measure), opts)
 }
 
+/// Width reserved for the percussion clef at the start of a row.
+pub(crate) fn clef_width(em: f32) -> f32 {
+    c::CLEF_WIDTH_EM * em
+}
+
 /// [`build_measure_layout`] with the measure's [`plan_measure`] already made.
 pub fn build_measure_layout_with_plan(
     measure: &Measure,
@@ -261,10 +310,11 @@ pub fn build_measure_layout_with_plan(
 ) -> MeasureLayout {
     let mut x_offset_acc = opts.rect.left();
 
-    let clef_pos = if opts.layout_clef {
-        let clef_w = opts.em * 1.1; // reserved width for percussion clef
+    let clef = if opts.layout_clef {
+        let clef_w = clef_width(opts.em);
         x_offset_acc += clef_w;
-        Some(Pos2::new(opts.rect.left() + clef_w * 0.4, opts.y_center()))
+        let x = opts.rect.left() + clef_w * 0.4;
+        Some(PlacedGlyph::centered(glyphs::CLEF_PERCUSSION, x, opts.y_center(), opts.em))
     } else {
         None
     };
@@ -296,7 +346,7 @@ pub fn build_measure_layout_with_plan(
         beams: beam_layout,
         notes: note_layout,
         tuplets: tuplet_layout,
-        clef_pos,
+        clef,
         time_signature: time_signature_layout,
         notes_left_edge,
     };
@@ -314,18 +364,20 @@ fn flip_down(layout: &mut MeasureLayout, opts: &LayoutOpts) {
     let y = |y: f32| 2.0 * cy - y;
     let pos = |p: Pos2| Pos2::new(p.x, y(p.y));
     let rect = |r: Rect| Rect::from_two_pos(pos(r.min), pos(r.max));
-    let accent_half_h = opts.metrics.accent_size.y * 0.5;
     for note in &mut layout.notes {
         if note.kind == BeatKind::Rest {
             note.center.y += opts.staff_space();
+            note.head.origin.y += opts.staff_space();
         }
         if let Some(stem) = &mut note.stem {
             *stem = Line { p1: pos(stem.p1), p2: pos(stem.p2) };
+            if let Some(flag) = &mut note.flag {
+                *flag = notes::flag_at(note.duration, stem, true, opts).unwrap_or(*flag);
+            }
         }
-        note.flag_pos = note.flag_pos.map(pos);
-        // The accent glyph is placed half its height below its middle.
-        note.accent_pos =
-            note.accent_pos.map(|p| Pos2::new(p.x, y(p.y - accent_half_h) + accent_half_h));
+        if let Some(accent) = &mut note.accent {
+            mirror_ink(std::slice::from_mut(accent), cy);
+        }
         note.debug_bbox = note.debug_bbox.map(rect);
         note.accent_debug_bbox = note.accent_debug_bbox.map(rect);
     }
@@ -333,75 +385,53 @@ fn flip_down(layout: &mut MeasureLayout, opts: &LayoutOpts) {
         beam.rect = rect(beam.rect);
     }
     for tuplet in &mut layout.tuplets {
-        tuplet.number_center = pos(tuplet.number_center);
+        // The number moves as a whole, its ink on the mirrored bracket line.
+        mirror_ink(&mut tuplet.number, cy);
         for line in &mut tuplet.bracket {
             *line = Line { p1: pos(line.p1), p2: pos(line.p2) };
         }
     }
 }
 
-pub(super) fn digit_count(mut n: u32) -> usize {
-    let mut c = 0usize;
-    while n > 0 {
-        c += 1;
-        n /= 10;
-    }
-    c
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct TimeSignatureLayout {
-    pub beats: Vec<Pos2>,
-    pub beat_unit: Vec<Pos2>,
+    pub beats: Vec<PlacedGlyph>,
+    pub beat_unit: Vec<PlacedGlyph>,
     pub width: f32,
 }
 
-/// Per-column width of a time-signature digit in em.
-const TS_DIGIT_WIDTH_EM: f32 = 0.35;
-
-/// Horizontal space reserved for `time_signature` at `em`.
-fn time_sig_width(time_signature: &TimeSignature, em: f32) -> f32 {
-    let cols =
-        digit_count(time_signature.beats as u32).max(digit_count(time_signature.beat_unit as u32));
-    cols as f32 * TS_DIGIT_WIDTH_EM * em
+/// Horizontal space reserved for `time_signature` at `em`: the wider of its
+/// two numbers.
+pub(crate) fn time_sig_width(time_signature: &TimeSignature, em: f32) -> f32 {
+    let advance = |n: u8| glyphs::ts_glyphs(n).iter().map(|g| g.advance).sum::<f32>();
+    advance(time_signature.beats).max(advance(time_signature.beat_unit)) * em * 0.25
 }
 
-/// Lay out time-signature digits horizontally centered on `x`.
+/// Lay out time-signature digits horizontally centered on `x`, the numbers
+/// centered in the upper and lower half of a five-line staff.
 pub fn build_time_sig_layout(
     time_signature: &TimeSignature,
     x: f32,
     opts: &LayoutOpts,
 ) -> TimeSignatureLayout {
-    let ts_digit_w = opts.em * TS_DIGIT_WIDTH_EM; // per column
-    let top_digits = digit_count(time_signature.beats as u32);
-    let bot_digits = digit_count(time_signature.beat_unit as u32);
-    let ts_cols = top_digits.max(bot_digits) as f32;
-
-    // Compute centered columns for both rows
-    let mut time_sig_top: Vec<Pos2> = Vec::with_capacity(top_digits);
-    let mut time_sig_bottom: Vec<Pos2> = Vec::with_capacity(bot_digits);
-
-    let x_offset = top_digits.max(bot_digits) as f32 * ts_digit_w / 2.0;
-
-    if top_digits > 0 {
-        let offset = (ts_cols - top_digits as f32) * 0.5;
-        for i in 0..top_digits {
-            let cx = x - x_offset + ((i as f32) + 0.5 + offset) * ts_digit_w;
-            time_sig_top.push(Pos2::new(cx, opts.y_center() - opts.em * 0.25));
-        }
-    }
-    if bot_digits > 0 {
-        let offset = (ts_cols - bot_digits as f32) * 0.5;
-        for i in 0..bot_digits {
-            let cx = x - x_offset + ((i as f32) + 0.5 + offset) * ts_digit_w;
-            time_sig_bottom.push(Pos2::new(cx, opts.y_center() + opts.em * 0.25));
-        }
-    }
-
+    let row = |n: u8, y: f32| {
+        let glyphs = glyphs::ts_glyphs(n);
+        let advance: f32 = glyphs.iter().map(|g| g.advance * opts.staff_space()).sum();
+        let mut pen = x - advance * 0.5;
+        glyphs
+            .into_iter()
+            .map(|glyph| {
+                let placed = PlacedGlyph { glyph, origin: Pos2::new(pen, y), size: opts.em };
+                pen += glyph.advance * opts.staff_space();
+                placed
+            })
+            .collect()
+    };
+    let cy = opts.y_center();
     TimeSignatureLayout {
-        beats: time_sig_top,
-        beat_unit: time_sig_bottom,
-        width: ts_cols * ts_digit_w,
+        beats: row(time_signature.beats, cy - opts.staff_space()),
+        beat_unit: row(time_signature.beat_unit, cy + opts.staff_space()),
+        width: time_sig_width(time_signature, opts.em),
     }
 }
 
@@ -412,7 +442,7 @@ pub(super) fn requires_flag(d: Duration) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use egui::{FontFamily, FontId, Pos2, Rect, Vec2};
+    use egui::{FontFamily, FontId, Pos2, Rect};
     use grooph_measure::{Beat, Measure, TimeSignature};
 
     #[test]
@@ -437,14 +467,13 @@ mod tests {
             stem_down: false,
             proportional_spacing: true,
             debug_bbox: false,
-            metrics: GlyphMetrics::debug(em),
         };
         let layout = build_measure_layout(&Measure::new(TimeSignature::THREE_FOUR), &opts);
         let ts = layout.time_signature.expect("time signature laid out");
-        let half_digit = TS_DIGIT_WIDTH_EM * em / 2.0;
-        for p in ts.beats.iter().chain(ts.beat_unit.iter()) {
-            assert!(p.x - half_digit >= opts.rect.left() - 0.01, "digit at {} clipped", p.x);
-            assert!(p.x + half_digit <= layout.notes_left_edge + 0.01);
+        for digit in ts.beats.iter().chain(ts.beat_unit.iter()) {
+            let ink = digit.ink();
+            assert!(ink.left() >= opts.rect.left() - 0.01, "digit at {} clipped", ink.left());
+            assert!(ink.right() <= layout.notes_left_edge + 0.01);
         }
     }
 
@@ -471,7 +500,6 @@ mod tests {
             stem_down: false,
             proportional_spacing: true,
             debug_bbox: true,
-            metrics: GlyphMetrics::debug(em),
         };
 
         let layout = build_measure_layout(&m, &opts);
@@ -489,54 +517,6 @@ mod tests {
             bbox.min.y,
             cy - stem_len
         );
-    }
-
-    #[test]
-    fn test_layout_uses_metrics_if_provided() {
-        use grooph_measure::duration::q;
-        let mut m = Measure::new(TimeSignature::FOUR_FOUR);
-        m.set_beat(0, Beat::note(q())).unwrap();
-
-        let em = 20.0;
-        let mut opts = LayoutOpts {
-            rect: Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(100.0, 100.0)),
-            font_id: FontId::new(em, FontFamily::Proportional),
-            pixels_per_point: 1.0,
-            em,
-            layout_clef: false,
-            layout_time_signature: false,
-            y_offset: 0.0,
-            stem_length_factor: 1.0,
-            stem_thickness_factor: 0.1,
-            accent_displacement: 0.0,
-            accent_below: false,
-            stem_down: false,
-            proportional_spacing: true,
-            debug_bbox: true,
-            metrics: GlyphMetrics::debug(em),
-        };
-
-        // 1. Standard Metrics (Debug defaults)
-        let layout_std = build_measure_layout(&m, &opts);
-        let bbox_std = layout_std.notes[0].debug_bbox.unwrap();
-        let width_std = bbox_std.width();
-
-        // 2. Mit Metrics (Large Head)
-        opts.metrics = GlyphMetrics {
-            head_size: Vec2::new(5.0 * em, 1.0 * em), // Huge head
-            ..GlyphMetrics::debug(em)
-        };
-
-        let layout_metrics = build_measure_layout(&m, &opts);
-        let bbox_metrics = layout_metrics.notes[0].debug_bbox.unwrap();
-        let width_metrics = bbox_metrics.width();
-
-        assert!(
-            width_metrics > width_std * 2.0,
-            "Metrics-based width should be significantly larger"
-        );
-        // Expect width roughly 5.0 * em
-        assert!((width_metrics - 5.0 * em).abs() < 1.0);
     }
 
     #[test]
@@ -565,22 +545,21 @@ mod tests {
             stem_down: false,
             proportional_spacing: true,
             debug_bbox: true,
-            metrics: GlyphMetrics::debug(em),
         };
 
         // Case 1: Accent Above (default)
         let layout = build_measure_layout(&m, &opts);
         let note = &layout.notes[0];
-        let accent_pos = note.accent_pos.expect("Accent should be present");
+        let accent = note.accent.expect("Accent should be present").ink();
         let stem = note.stem.expect("Stem should be present");
 
         let stem_top = stem.p2.y.min(stem.p1.y);
         let expected_y = stem_top - (displacement * em);
 
         assert!(
-            (accent_pos.y - expected_y).abs() < 0.001,
-            "Accent (y={}) should be exactly at expected (y={})",
-            accent_pos.y,
+            (accent.bottom() - expected_y).abs() < 0.001,
+            "Accent (bottom={}) should be exactly at expected (y={})",
+            accent.bottom(),
             expected_y
         );
 
@@ -589,11 +568,11 @@ mod tests {
         opts_below.accent_below = true;
         let layout_below = build_measure_layout(&m, &opts_below);
         let note_below = &layout_below.notes[0];
-        let accent_pos_below = note_below.accent_pos.expect("Accent should be present");
+        let accent_below = note_below.accent.expect("Accent should be present").ink();
 
-        let head_bottom = opts.y_center() + opts.metrics.head_size.y * 0.5;
+        let head_bottom = note_below.head.ink().bottom();
 
-        assert!(accent_pos_below.y > head_bottom, "Accent should be below note head");
+        assert!(accent_below.top() > head_bottom, "Accent should be below note head");
     }
 
     #[test]
@@ -620,7 +599,6 @@ mod tests {
             stem_down: false,
             proportional_spacing: true,
             debug_bbox: true,
-            metrics: GlyphMetrics::debug(em),
         };
 
         let layout = build_measure_layout(&m, &opts);
@@ -632,7 +610,7 @@ mod tests {
         let main_bbox = note.debug_bbox.unwrap();
         let accent_bbox = note.accent_debug_bbox.unwrap();
 
-        let expected_size = opts.metrics.accent_size;
+        let expected_size = note.accent.unwrap().ink().size();
         assert!((accent_bbox.width() - expected_size.x).abs() < 0.001);
         assert!((accent_bbox.height() - expected_size.y).abs() < 0.001);
 
@@ -672,7 +650,6 @@ mod tests {
             stem_down: false,
             proportional_spacing: true,
             debug_bbox: true,
-            metrics: GlyphMetrics::debug(em),
         };
 
         let layout = build_measure_layout(&m, &opts);
@@ -728,7 +705,6 @@ mod tests {
             stem_down: false,
             proportional_spacing: true,
             debug_bbox: true,
-            metrics: GlyphMetrics::debug(em),
         };
 
         let layout = build_measure_layout(&m, &opts);
@@ -768,7 +744,6 @@ mod tests {
             stem_down: false,
             proportional_spacing: true,
             debug_bbox: false,
-            metrics: GlyphMetrics::debug(em),
         };
         let down = LayoutOpts { stem_down: true, ..up.clone() };
         let (a, b) = (build_measure_layout(&m, &up), build_measure_layout(&m, &down));
@@ -781,9 +756,12 @@ mod tests {
                 assert!((ds.p2.y - cy - (cy - us.p2.y)).abs() < 0.01);
             }
         }
-        assert!(b.notes[0].accent_pos.unwrap().y > cy);
+        assert!(b.notes[0].accent.unwrap().ink().top() > cy);
         assert!(b.beams.iter().all(|r| r.rect.min.y > cy));
-        assert!(b.tuplets[0].number_center.y > cy);
+        // The number's ink is mirrored as a whole: centered on its bracket.
+        let ink = |l: &MeasureLayout| ink_of(&l.tuplets[0].number).unwrap();
+        assert!(ink(&b).top() > cy);
+        assert!((ink(&b).center().y - cy - (cy - ink(&a).center().y)).abs() < 0.01);
     }
 
     #[test]
@@ -806,16 +784,15 @@ mod tests {
             stem_down: false,
             proportional_spacing: true,
             debug_bbox: false,
-            metrics: GlyphMetrics::debug(em),
         };
         let down = LayoutOpts { stem_down: true, ..up.clone() };
-        let dx = |l: &MeasureLayout, i: usize| l.notes[i].dots[0].x - l.notes[i].center.x;
+        let dx =
+            |l: &MeasureLayout, i: usize| l.notes[i].dots[0].ink().center().x - l.notes[i].center.x;
         let (u, d) = (build_measure_layout(&m, &up), build_measure_layout(&m, &down));
         let plain = c::DOT_FIRST_DX_NO_FLAG_EM * em;
         // Beamed: right after the head, or after the parentheses.
         assert!((dx(&u, 0) - plain).abs() < 0.01);
-        let paren_right =
-            up.metrics.head_size.x * 0.5 + up.metrics.paren_width + c::SOFT_PAREN_GAP_EM * em;
+        let paren_right = u.notes[1].parens[1].ink().right() - u.notes[1].center.x;
         assert!(dx(&u, 1) > paren_right);
         // A down-stem flag hangs below the dots: they stay at the head.
         assert!((dx(&d, 3) - plain).abs() < 0.01);
@@ -845,7 +822,6 @@ mod tests {
             stem_down: false,
             proportional_spacing: true,
             debug_bbox: false,
-            metrics: GlyphMetrics::debug(em),
         };
         let plan = crate::render_plan::plan_measure(&m);
         let width = min_note_area_width(&m, &plan, &opts);

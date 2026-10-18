@@ -5,7 +5,7 @@ use crate::tools::{Modifier, ToolKind, all_tools};
 use crate::{Mode, TransportState};
 use eframe::egui;
 use eframe::egui::{FontId, Frame, Rect, Response, Stroke};
-use grooph_layout::pixel_layout::{GlyphMetrics, MeasureLayout, compute_em};
+use grooph_layout::pixel_layout::{MeasureLayout, compute_em};
 use grooph_layout::staff_layout::{
     LEGIBILITY_FLOOR_EM, LOWER_VOICE_LABEL_ROOM_EM, PlacedMeasure, ROOM_BELOW_EM,
     ROOM_BELOW_WITH_LABELS_EM, StaffLayout, StaffOpts, build_staff_layout_with_lower,
@@ -14,7 +14,6 @@ use grooph_layout::staff_layout::{
 use grooph_measure::TimeSignature;
 use grooph_measure::grid::DEFAULT_GRID;
 use grooph_measure::tempo::ScoreTiming;
-use grooph_render::measure_glyph_metrics;
 use grooph_render::staff::draw_staff;
 
 impl Grooph {
@@ -69,7 +68,6 @@ impl Grooph {
                         let em = compute_em(&viewport_rect, width_cap_factor, ui);
                         let font_id = FontId::new(em, self.ui.music_font_id.family.clone());
 
-                        let metrics = measure_glyph_metrics(ui, &font_id);
                         let count_config = self.build_count_config();
 
                         // Tighter spacing on narrow screens makes the glyphs
@@ -90,7 +88,6 @@ impl Grooph {
                             accent_below: self.ui.layout.accent_below,
                             proportional_spacing: self.ui.layout.proportional_spacing,
                             debug_bbox: self.ui.layout.debug_bbox,
-                            metrics,
                             min_measure_width_em,
                             note_width_em,
                             system_spacing_em: 0.2,
@@ -249,7 +246,7 @@ impl Grooph {
                             draw_muted_bar(ui, placed.rect);
                         }
 
-                        self.draw_accuracy_markers(ui, &staff, &timing, &render_opts.metrics);
+                        self.draw_accuracy_markers(ui, &staff, &timing, render_opts.staff_space());
                         self.handle_input(resp, &staff);
                     });
                 });
@@ -306,7 +303,7 @@ impl Grooph {
         ui: &egui::Ui,
         staff: &StaffLayout,
         timing: &ScoreTiming,
-        metrics: &GlyphMetrics,
+        staff_space: f32,
     ) {
         if !self.playback_ctl.accuracy.enabled && self.calibration_source().is_none() {
             return;
@@ -333,7 +330,7 @@ impl Grooph {
                     timing,
                     &global_onsets_u64,
                     total_loop_ticks as f64,
-                    metrics,
+                    staff_space,
                 );
             }
         }
@@ -346,7 +343,7 @@ impl Grooph {
         timing: &ScoreTiming,
         global_onsets_u64: &[u64],
         total_loop_ticks: f64,
-        metrics: &GlyphMetrics,
+        staff_space: f32,
     ) {
         let measure = &self.editor.score.measures[placed.measure_idx];
         let beats = measure.beats();
@@ -361,9 +358,10 @@ impl Grooph {
             if note_layout.kind != grooph_measure::BeatKind::Note {
                 continue;
             }
-            let y = note_layout.center.y + metrics.head_size.y * 0.65;
-            let h = metrics.head_size.y * 0.8;
-            let width = (metrics.head_size.y * MARK_WIDTH_PER_HEAD).max(MARK_MIN_WIDTH);
+            // A note head is one staff space high.
+            let y = note_layout.center.y + staff_space * 0.65;
+            let h = staff_space * 0.8;
+            let width = (staff_space * MARK_WIDTH_PER_HEAD).max(MARK_MIN_WIDTH);
             let note_x = note_layout.center.x;
             ui.painter().line_segment(
                 [egui::pos2(note_x, y), egui::pos2(note_x, y + h)],

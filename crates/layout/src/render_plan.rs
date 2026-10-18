@@ -11,7 +11,7 @@ use grooph_measure::Measure;
 ///
 /// Relationship to [`crate::pixel_layout::MeasureLayout`]:
 /// - `RenderPlan` is consumed by [`crate::pixel_layout::build_measure_layout`]
-///   together with the target `Rect`, `FontId`, and `GlyphMetrics` to produce
+///   together with the target `Rect` and font size to produce
 ///   a pixel-resolved `MeasureLayout`.
 /// - The renderer (`grooph_render`) uses `MeasureLayout` exclusively to draw;
 ///   it makes no further geometry decisions.
