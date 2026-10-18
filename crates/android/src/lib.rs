@@ -34,7 +34,7 @@ fn android_main(app: winit::platform::android::activity::AndroidApp) {
         Box::new(|cc| {
             let mut app = Grooph::new(cc);
             app.set_host(Box::new(activity.clone()));
-            Ok(Box::new(AndroidApp { app, insets, activity }))
+            Ok(Box::new(AndroidApp { app, insets, activity, typing: false }))
         }),
     );
     if let Err(err) = result {
@@ -49,6 +49,8 @@ struct AndroidApp {
     app: grooph_app::Grooph,
     insets: insets::SystemBars,
     activity: activity::Activity,
+    /// A text field had the focus last frame, so the keyboard is open.
+    typing: bool,
 }
 
 #[cfg(target_os = "android")]
@@ -67,6 +69,17 @@ impl eframe::App for AndroidApp {
         ui.scope_builder(eframe::egui::UiBuilder::new().max_rect(content), |ui| {
             self.app.ui(ui, frame);
         });
+
+        // winit asks for the keyboard "implicitly", which Android ignores;
+        // ask outright when a text field gets the focus, and again on a tap
+        // into it after the keyboard was closed with the back button.
+        let typing = ui.ctx().output(|o| o.ime.is_some());
+        let tapped = ui.input(|i| i.pointer.any_released());
+        if typing != self.typing || typing && tapped {
+            self.typing = typing;
+            self.activity.soft_keyboard(typing);
+            self.insets.follow_keyboard();
+        }
     }
 
     /// eframe saves when the window goes away, the only notice it passes on
@@ -91,6 +104,6 @@ impl eframe::App for AndroidApp {
         ctx: &eframe::egui::Context,
         raw_input: &mut eframe::egui::RawInput,
     ) {
-        raw_input.safe_area_insets = Some(self.insets.safe_area(ctx.pixels_per_point()));
+        raw_input.safe_area_insets = Some(self.insets.safe_area(ctx));
     }
 }

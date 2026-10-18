@@ -119,6 +119,15 @@ impl Activity {
         });
     }
 
+    /// Open or close the on-screen keyboard.
+    pub(crate) fn soft_keyboard(&self, open: bool) {
+        if open {
+            self.app.show_soft_input(false);
+        } else {
+            self.app.hide_soft_input(false);
+        }
+    }
+
     /// Whether the activity's window is hidden (`View.getWindowVisibility()`
     /// is not `VISIBLE`): the app went to the background.
     pub(crate) fn window_hidden(&self) -> bool {
