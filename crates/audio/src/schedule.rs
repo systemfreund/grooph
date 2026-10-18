@@ -350,6 +350,7 @@ mod tests {
         let mut bar = counter_bar(ts, Ratio { n: 3, span: 2 }).unwrap();
         bar.set_click_level(1, ClickLevel::Strong);
         bar.set_click_level(2, ClickLevel::Off);
+        bar.set_click_level(3, ClickLevel::Soft);
         counter.set(ts, Some(bar));
         let s = Schedule::build(&score, &timing, None, &ClickBars::default())
             .with_counter(&score, &timing, &counter);

@@ -37,8 +37,8 @@ impl std::fmt::Display for Ratio {
     }
 }
 
-/// The counter bar of `ratio` in `ts`: its first click medium, the others
-/// soft (the click bar already clicks the downbeat loud). `None` if the
+/// The counter bar of `ratio` in `ts`, every click medium (the click bar
+/// already clicks the downbeat loud). `None` if the
 /// span does not divide the bar or the clicks fall off the tick grid.
 pub fn counter_bar(ts: TimeSignature, ratio: Ratio) -> Option<Measure> {
     let Ratio { n, span } = ratio;
@@ -62,8 +62,8 @@ pub fn counter_bar(ts: TimeSignature, ratio: Ratio) -> Option<Measure> {
         let code = code_of(&d)?;
         let slots = click_ticks / ticks;
         let mut tokens = Vec::new();
-        for click in 0..(repeats as u32 * n as u32) {
-            tokens.push(if click == 0 { code.to_string() } else { format!("({code})") });
+        for _ in 0..(repeats as u32 * n as u32) {
+            tokens.push(code.to_string());
             tokens.extend((1..slots).map(|_| format!("r:{code}")));
         }
         parse_score(&format!("{ts} {}", tokens.join(" "))).ok()?.measures.into_iter().next()
@@ -244,21 +244,21 @@ mod tests {
 
     #[test]
     fn clicks_take_the_simplest_value() {
-        assert_eq!(bar("3/4", 2, 3), "3/4 q. (q.)");
-        assert_eq!(bar("3/4", 4, 3), "3/4 e. (e.) (e.) (e.)");
-        assert_eq!(bar("6/8", 4, 6), "6/8 e. (e.) (e.) (e.)");
-        assert_eq!(bar("2/4", 3, 2), "2/4 t4 (t4) (t4)");
-        assert_eq!(bar("4/4", 5, 4), "4/4 qt4 (qt4) (qt4) (qt4) (qt4)");
-        assert_eq!(bar("4/4", 7, 4), "4/4 spt4 (spt4) (spt4) (spt4) (spt4) (spt4) (spt4)");
-        assert_eq!(bar("4/4", 3, 4), "4/4 t2 (t2) (t2)");
-        assert_eq!(bar("4/4", 2, 4), "4/4 h (h)");
-        assert_eq!(bar("2/4", 5, 2), "2/4 qt8 (qt8) (qt8) (qt8) (qt8)");
-        assert_eq!(bar("2/4", 7, 2), "2/4 spt8 (spt8) (spt8) (spt8) (spt8) (spt8) (spt8)");
+        assert_eq!(bar("3/4", 2, 3), "3/4 q. q.");
+        assert_eq!(bar("3/4", 4, 3), "3/4 e. e. e. e.");
+        assert_eq!(bar("6/8", 4, 6), "6/8 e. e. e. e.");
+        assert_eq!(bar("2/4", 3, 2), "2/4 t4 t4 t4");
+        assert_eq!(bar("4/4", 5, 4), "4/4 qt4 qt4 qt4 qt4 qt4");
+        assert_eq!(bar("4/4", 7, 4), "4/4 spt4 spt4 spt4 spt4 spt4 spt4 spt4");
+        assert_eq!(bar("4/4", 3, 4), "4/4 t2 t2 t2");
+        assert_eq!(bar("4/4", 2, 4), "4/4 h h");
+        assert_eq!(bar("2/4", 5, 2), "2/4 qt8 qt8 qt8 qt8 qt8");
+        assert_eq!(bar("2/4", 7, 2), "2/4 spt8 spt8 spt8 spt8 spt8 spt8 spt8");
     }
 
     #[test]
     fn spans_repeat_until_the_bar_is_full() {
-        assert_eq!(bar("4/4", 3, 2), "4/4 t4 (t4) (t4) (t4) (t4) (t4)");
+        assert_eq!(bar("4/4", 3, 2), "4/4 t4 t4 t4 t4 t4 t4");
     }
 
     #[test]
@@ -267,8 +267,8 @@ mod tests {
         // rests after every click.
         assert_eq!(
             bar("3/4", 5, 3),
-            "3/4 qt16 r:qt16 r:qt16 (qt16) r:qt16 r:qt16 (qt16) r:qt16 r:qt16 (qt16) r:qt16 \
-             r:qt16 (qt16) r:qt16 r:qt16"
+            "3/4 qt16 r:qt16 r:qt16 qt16 r:qt16 r:qt16 qt16 r:qt16 r:qt16 qt16 r:qt16 \
+             r:qt16 qt16 r:qt16 r:qt16"
         );
     }
 
