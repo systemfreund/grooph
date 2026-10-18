@@ -333,7 +333,11 @@ fn flip_down(layout: &mut MeasureLayout, opts: &LayoutOpts) {
         beam.rect = rect(beam.rect);
     }
     for tuplet in &mut layout.tuplets {
-        tuplet.number_center = pos(tuplet.number_center);
+        // The number sits a little below its logical place, to center the
+        // digit's ink on the bracket; that shift stays downward.
+        let lift = c::TUPLET_NUMBER_BASELINE_LIFT_SS * opts.staff_space();
+        let n = tuplet.number_center;
+        tuplet.number_center = Pos2::new(n.x, y(n.y - lift) + lift);
         for line in &mut tuplet.bracket {
             *line = Line { p1: pos(line.p1), p2: pos(line.p2) };
         }
@@ -784,6 +788,10 @@ mod tests {
         assert!(b.notes[0].accent_pos.unwrap().y > cy);
         assert!(b.beams.iter().all(|r| r.rect.min.y > cy));
         assert!(b.tuplets[0].number_center.y > cy);
+        // The number is mirrored, but stays shifted down onto its bracket.
+        let lift = c::TUPLET_NUMBER_BASELINE_LIFT_SS * up.staff_space();
+        let (nu, nd) = (a.tuplets[0].number_center.y, b.tuplets[0].number_center.y);
+        assert!((nd - lift - cy - (cy - (nu - lift))).abs() < 0.01);
     }
 
     #[test]
