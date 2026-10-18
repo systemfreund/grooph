@@ -37,6 +37,7 @@ use grooph_measure::duration::{Duration, NoteValue, TupletSpec, q};
 use grooph_measure::{BeatIdx, Cursor, Measure, Score, TimeSignature};
 
 use crate::accuracy::AccuracyState;
+use crate::calibration::CalibrationPhase;
 use crate::compact::{CompactState, CompactTab};
 use crate::generator::GeneratorState;
 use crate::library::PatternLibrary;
@@ -797,13 +798,34 @@ impl Grooph {
     /// The system back button: close what is open on top, one step at a
     /// time. `false` when nothing is, so the host can leave the app.
     pub fn back(&mut self) -> bool {
+        // Calibration and the run summary float above every page.
+        if let Some(cal) = &self.playback_ctl.play_along.calibration {
+            if matches!(cal.phase, CalibrationPhase::Done { .. }) {
+                self.playback_ctl.play_along.calibration = None;
+            } else {
+                // Cancel, which also puts the score back.
+                self.stop_transport();
+            }
+            return true;
+        }
+        if self.playback_ctl.transport_state == TransportState::Stopped
+            && self.playback_ctl.accuracy.tracker.last_summary().is_some()
+        {
+            self.playback_ctl.accuracy.tracker.dismiss_summary();
+            return true;
+        }
+        let practice_page = self.compact_tab() == CompactTab::Practice;
         let metronome = self.metronome_mode();
         let ui = &mut self.ui;
         if ui.link_error.take().is_some()
             || ui.pending_load.take().is_some()
             || ui.renaming_preset.take().is_some()
-            || ui.picker.take().is_some()
         {
+            return true;
+        }
+        if ui.picker.take().is_some() {
+            // As when the picker closes itself.
+            ui.tap_tempo.reset();
             return true;
         }
         ui.mode = match ui.mode {
@@ -814,7 +836,8 @@ impl Grooph {
             Mode::Mixer | Mode::Settings | Mode::Help | Mode::Library => Mode::Playback,
             // The metronome's click bar editor ("Done").
             Mode::Edit if metronome => Mode::Playback,
-            _ if !ui.compact.options_collapsed && ui.narrow_screen => {
+            // The practice page's options sheet, when unfolded.
+            _ if ui.narrow_screen && practice_page && !ui.compact.options_collapsed => {
                 ui.compact.options_collapsed = true;
                 return true;
             }
@@ -1184,9 +1207,16 @@ mod tests {
         assert_eq!(app.ui.mode, Mode::Settings);
         assert!(app.back());
         assert_eq!(app.ui.mode, Mode::MoreMenu);
-        // Nothing left to close: the host leaves the app.
+        // Nothing left to close: the host leaves the app. The practice
+        // options sheet is not on this page, so it does not count.
+        app.ui.compact.options_collapsed = false;
         assert!(!app.back());
         assert_eq!(app.ui.mode, Mode::MoreMenu);
+        // On the practice page, back folds the sheet first.
+        app.select_compact_tab(CompactTab::Practice);
+        assert!(app.back());
+        assert!(app.ui.compact.options_collapsed);
+        assert!(!app.back());
     }
 
     fn load(saved: &str) -> CountingSettings {
