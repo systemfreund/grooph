@@ -37,8 +37,7 @@ mod c {
     pub const TUPLET_NUMBER_BASELINE_LIFT_SS: f32 = 0.50;
     pub const TUPLET_MIN_SEG_SS: f32 = 0.50;
 
-    // Parentheses of a soft note: width of one and gap to the head
-    pub const SOFT_PAREN_EM: f32 = 0.3;
+    // Parentheses of a soft note: gap to the head
     pub const SOFT_PAREN_GAP_EM: f32 = 0.04;
 
     // Beam alignment
@@ -54,6 +53,8 @@ pub struct GlyphMetrics {
     pub flag_16th_size: Vec2,
     pub flag_32nd_size: Vec2,
     pub rest_sizes: [Vec2; 6],
+    /// Width of one parenthesis around a soft note's head.
+    pub paren_width: f32,
 }
 
 impl GlyphMetrics {
@@ -78,6 +79,7 @@ impl GlyphMetrics {
             flag_16th_size: Vec2::new(0.35 * em, 1.2 * em),
             flag_32nd_size: Vec2::new(0.4 * em, 1.4 * em),
             rest_sizes: [default_size; 6],
+            paren_width: 0.3 * em,
         }
     }
 
@@ -93,6 +95,7 @@ impl GlyphMetrics {
             flag_16th_size: self.flag_16th_size * factor,
             flag_32nd_size: self.flag_32nd_size * factor,
             rest_sizes: self.rest_sizes.map(|v| v * factor),
+            paren_width: self.paren_width * factor,
         }
     }
 }
@@ -781,6 +784,42 @@ mod tests {
         assert!(b.notes[0].accent_pos.unwrap().y > cy);
         assert!(b.beams.iter().all(|r| r.rect.min.y > cy));
         assert!(b.tuplets[0].number_center.y > cy);
+    }
+
+    #[test]
+    fn dots_sit_right_of_parentheses_and_clear_of_down_flags() {
+        use grooph_measure::notation::parse_score;
+        let m = parse_score("3/4 e. (e.) (e.) e.").unwrap().measures.remove(0);
+        let em = 20.0;
+        let up = LayoutOpts {
+            rect: Rect::from_min_max(Pos2::ZERO, Pos2::new(400.0, 200.0)),
+            font_id: FontId::new(em, FontFamily::Proportional),
+            pixels_per_point: 1.0,
+            em,
+            layout_clef: false,
+            layout_time_signature: false,
+            y_offset: 0.0,
+            stem_length_factor: 0.9,
+            stem_thickness_factor: 0.1,
+            accent_displacement: 0.0,
+            accent_below: false,
+            stem_down: false,
+            proportional_spacing: true,
+            debug_bbox: false,
+            metrics: GlyphMetrics::debug(em),
+        };
+        let down = LayoutOpts { stem_down: true, ..up.clone() };
+        let dx = |l: &MeasureLayout, i: usize| l.notes[i].dots[0].x - l.notes[i].center.x;
+        let (u, d) = (build_measure_layout(&m, &up), build_measure_layout(&m, &down));
+        let plain = c::DOT_FIRST_DX_NO_FLAG_EM * em;
+        // Beamed: right after the head, or after the parentheses.
+        assert!((dx(&u, 0) - plain).abs() < 0.01);
+        let paren_right =
+            up.metrics.head_size.x * 0.5 + up.metrics.paren_width + c::SOFT_PAREN_GAP_EM * em;
+        assert!(dx(&u, 1) > paren_right);
+        // A down-stem flag hangs below the dots: they stay at the head.
+        assert!((dx(&d, 3) - plain).abs() < 0.01);
+        assert!(dx(&d, 2) > paren_right && dx(&d, 2) < dx(&u, 2) + 0.01);
     }
 
     #[test]

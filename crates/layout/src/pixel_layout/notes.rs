@@ -13,24 +13,36 @@ const fn dot_count_of(duration: Duration) -> u8 {
     }
 }
 
-/// X offset of the first augmentation dot, relative to the note center.
-fn dot_first_dx(opts: &LayoutOpts, has_flag_tail: bool) -> f32 {
-    opts.em * if has_flag_tail { c::DOT_FIRST_DX_WITH_FLAG_EM } else { c::DOT_FIRST_DX_NO_FLAG_EM }
+/// X offset of the first augmentation dot, relative to the note center:
+/// just right of the head, or of its parentheses for a soft note. An up-stem
+/// flag curls down beside the dots and pushes them past it; a down-stem flag
+/// hangs below them.
+fn dot_first_dx(beat: &Beat, in_beam: bool, opts: &LayoutOpts) -> f32 {
+    let is_note = beat.kind == BeatKind::Note;
+    let mut dx = opts.em * c::DOT_FIRST_DX_NO_FLAG_EM;
+    if is_note && beat.soft {
+        dx += opts.metrics.paren_width + opts.em * c::SOFT_PAREN_GAP_EM;
+    }
+    if is_note && !in_beam && requires_flag(beat.duration) && !opts.stem_down {
+        dx = dx.max(opts.em * c::DOT_FIRST_DX_WITH_FLAG_EM);
+    }
+    dx
 }
 
-/// Absolute screen positions of the augmentation dots for a note centered
-/// at `(center_x, cy)`. Returns empty if `dot_count == 0`.
+/// Absolute screen positions of the augmentation dots of `beat`, a note
+/// centered at `(center_x, cy)`. Returns empty if `dot_count == 0`.
 fn dot_positions(
+    beat: &Beat,
+    in_beam: bool,
     center_x: f32,
     cy: f32,
     dot_count: u8,
-    has_flag_tail: bool,
     opts: &LayoutOpts,
 ) -> Vec<Pos2> {
     if dot_count == 0 {
         return Vec::new();
     }
-    let first_dx = dot_first_dx(opts, has_flag_tail);
+    let first_dx = dot_first_dx(beat, in_beam, opts);
     let step_dx = opts.em * c::DOT_STEP_DX_EM;
     let y = cy - opts.em * c::DOT_Y_OFFSET_EM;
     (0..dot_count).map(|d| Pos2::new(center_x + first_dx + (d as f32) * step_dx, y)).collect()
@@ -46,7 +58,7 @@ fn compute_x_extents(beat: &Beat, in_beam: bool, opts: &LayoutOpts) -> (f32, f32
     let needs_flag = requires_flag(beat.duration);
 
     let (left, mut right) = if is_note && beat.soft {
-        let h = m.head_size.x * 0.5 + opts.em * (c::SOFT_PAREN_EM + c::SOFT_PAREN_GAP_EM);
+        let h = m.head_size.x * 0.5 + m.paren_width + opts.em * c::SOFT_PAREN_GAP_EM;
         (-h, h)
     } else if is_note {
         let h = m.head_size.x * 0.5;
@@ -58,8 +70,7 @@ fn compute_x_extents(beat: &Beat, in_beam: bool, opts: &LayoutOpts) -> (f32, f32
 
     let dot_count = dot_count_of(beat.duration);
     if dot_count > 0 {
-        let has_flag_tail = is_note && !in_beam && needs_flag;
-        let first_dx = dot_first_dx(opts, has_flag_tail);
+        let first_dx = dot_first_dx(beat, in_beam, opts);
         let step_dx = opts.em * c::DOT_STEP_DX_EM;
         let last_dot_center_rel = first_dx + ((dot_count - 1) as f32) * step_dx;
         let last_dot_right_rel = last_dot_center_rel + m.dot_size.x * 0.5;
@@ -69,7 +80,8 @@ fn compute_x_extents(beat: &Beat, in_beam: bool, opts: &LayoutOpts) -> (f32, f32
     }
 
     if is_note && !in_beam && needs_flag {
-        let flag_left_rel = opts.stem_offset() - opts.stem_thickness() * 0.5;
+        let stem_dx = if opts.stem_down { -opts.stem_offset() } else { opts.stem_offset() };
+        let flag_left_rel = stem_dx - opts.stem_thickness() * 0.5;
         let fw = m.flag_size_for(beat.duration.base_note()).x;
         let flag_right_rel = flag_left_rel + fw;
         if flag_right_rel > right {
@@ -304,8 +316,7 @@ pub(super) fn build_note_layout(
 
         // 3. Dots
         let dot_count = dot_count_of(b.duration);
-        let has_flag_tail = is_note && !in_beam && needs_flag;
-        let dots = dot_positions(center.x, cy, dot_count, has_flag_tail, opts);
+        let dots = dot_positions(b, in_beam, center.x, cy, dot_count, opts);
 
         // 4. Flag (if needed)
         let mut flag_pos: Option<Pos2> = None;
