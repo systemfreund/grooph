@@ -17,8 +17,14 @@ fn android_main(app: winit::platform::android::activity::AndroidApp) {
     // storage so presets, patterns and settings survive a restart.
     let persistence_path = app.internal_data_path().map(|dir| dir.join("grooph.ron"));
     let insets = insets::SystemBars::new(app.clone());
-    let options =
-        eframe::NativeOptions { android_app: Some(app), persistence_path, ..Default::default() };
+    let options = eframe::NativeOptions {
+        android_app: Some(app),
+        persistence_path,
+        // OpenGL ES runs on every phone and in the emulator, where wgpu
+        // fails to create a window surface (EGL BadAlloc).
+        renderer: eframe::Renderer::Glow,
+        ..Default::default()
+    };
     let result = eframe::run_native(
         "grooph",
         options,

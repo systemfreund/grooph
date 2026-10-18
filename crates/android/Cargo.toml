@@ -13,7 +13,8 @@ crate-type = ["cdylib"]
 
 [target.'cfg(target_os = "android")'.dependencies]
 grooph-app = { path = "../app" }
-eframe = { workspace = true, features = ["android-native-activity"] }
+# glow (OpenGL ES): wgpu cannot create a surface in the Android emulator.
+eframe = { workspace = true, features = ["android-native-activity", "glow"] }
 android_logger = "0.15"
 jni = "0.21"
 log = { workspace = true }
