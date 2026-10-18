@@ -307,7 +307,9 @@ If you add new tools/shortcuts, remember:
   (job `android`, artifact `grooph-android`, signed with a throwaway key).
   The workspace eframe leaves out accesskit (NativeActivity cannot use it);
   `crates/app` adds it back on every other target. Settings are stored in the
-  app's internal storage (`persistence_path`). Not handled yet: stopping
+  app's internal storage (`persistence_path`). NativeActivity draws under
+  the status and navigation bars; `crates/android/src/insets.rs` reads their
+  size through JNI and hands it to egui as safe-area insets. Not handled yet: stopping
   audio when the app goes to the background, the share sheet and links
   (Android intents), the back button and the on-screen keyboard.
 

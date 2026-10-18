@@ -1689,6 +1689,7 @@ dependencies = [
  "android_logger",
  "eframe",
  "grooph-app",
+ "jni 0.21.1",
  "log",
  "winit",
 ]
