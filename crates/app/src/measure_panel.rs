@@ -9,7 +9,7 @@ use grooph_layout::pixel_layout::{MeasureLayout, compute_em};
 use grooph_layout::staff_layout::{
     LEGIBILITY_FLOOR_EM, LOWER_VOICE_LABEL_ROOM_EM, PlacedMeasure, ROOM_BELOW_EM,
     ROOM_BELOW_WITH_LABELS_EM, StaffLayout, StaffOpts, Voice, build_staff_layout_with_lower,
-    extra_room_above_em, hit_test_voice, lower_voice_room_below_em, row_height_em,
+    hit_test_voice,
 };
 use grooph_measure::grid::DEFAULT_GRID;
 use grooph_measure::tempo::ScoreTiming;
@@ -83,7 +83,7 @@ impl Grooph {
                         let compact = self.ui.narrow_screen;
                         let (min_measure_width_em, note_width_em) =
                             if compact { (2.0, 0.36) } else { (6.0, 0.6) };
-                        let mut staff_opts = StaffOpts {
+                        let staff_opts = StaffOpts {
                             rect: viewport_rect,
                             font_id: font_id.clone(),
                             pixels_per_point: ui.ctx().pixels_per_point(),
@@ -105,36 +105,31 @@ impl Grooph {
                             } else {
                                 ROOM_BELOW_EM
                             },
-                            room_above_extra_em: extra_room_above_em(
-                                upper.as_ref().unwrap_or(&self.editor.score),
-                                self.ui.layout.accent_below,
-                            ),
-                        };
-                        if let Some(counter) = &counter {
-                            // Count labels go under the lower voice.
-                            let labels = if count_config.is_some() {
+                            // With a lower voice, count labels go under it.
+                            lower_label_room_em: if count_config.is_some() {
                                 LOWER_VOICE_LABEL_ROOM_EM
                             } else {
                                 0.0
-                            };
-                            staff_opts.room_below_em = staff_opts
-                                .room_below_em
-                                .max(lower_voice_room_below_em(counter, &staff_opts) + labels);
-                        }
-                        // One row fits the height, so nothing above or below
-                        // the staff (accents, count labels) is cut off on a
-                        // short, wide panel.
-                        let row_height = row_height_em(&staff_opts) * em;
-                        let staff_opts = if row_height > available.y && available.y > 0.0 {
-                            let floor = LEGIBILITY_FLOOR_EM / em;
-                            staff_opts.rescaled((available.y / row_height).max(floor.min(1.0)))
-                        } else {
-                            staff_opts
+                            },
                         };
 
                         let upper = upper.as_ref().unwrap_or(&self.editor.score);
                         let staff =
                             build_staff_layout_with_lower(upper, counter.as_ref(), &staff_opts);
+                        // One row fits the height, so nothing above or below
+                        // the staff (accents, count labels) is cut off on a
+                        // short, wide panel.
+                        let row_height = staff.room.height() * em;
+                        let (staff_opts, staff) = if row_height > available.y && available.y > 0.0 {
+                            let floor = LEGIBILITY_FLOOR_EM / em;
+                            let staff_opts =
+                                staff_opts.rescaled((available.y / row_height).max(floor.min(1.0)));
+                            let staff =
+                                build_staff_layout_with_lower(upper, counter.as_ref(), &staff_opts);
+                            (staff_opts, staff)
+                        } else {
+                            (staff_opts, staff)
+                        };
                         // Rows may render at a different em than the baseline `staff_opts`
                         // (grow-to-fill / shrink-toward-floor) — rescale font/metrics to
                         // match before drawing, so glyph size agrees with `staff`'s positions.
