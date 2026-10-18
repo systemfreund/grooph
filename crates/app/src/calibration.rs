@@ -193,7 +193,7 @@ impl Grooph {
             Tap,
         }
         let mut action = None;
-        egui::Modal::new(egui::Id::new("calibration")).show(ui.ctx(), |ui| {
+        egui::Modal::new(egui::Id::unique("calibration")).show(ui.ctx(), |ui| {
             ui.set_width(300.0);
             let title = match source {
                 HitSource::Tap => "Calibrate tap latency",

@@ -6,29 +6,33 @@ use eframe::egui::RichText;
 
 impl Grooph {
     pub(super) fn help_panel(&mut self, ui: &mut egui::Ui) {
-        egui::Panel::bottom("info").show_animated_inside(ui, self.ui.mode == Mode::Help, |ui| {
-            ui.horizontal_wrapped(|ui| {
-                ui.label(
+        egui::Panel::bottom("info").drag_to_open(false).show_collapsible(
+            ui,
+            &mut (self.ui.mode == Mode::Help),
+            |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(
                     "This app is in early development. Please report any bugs or feature requests.",
                 );
-                ui.hyperlink_to("Email: hello@grooph.app", "mailto:hello@grooph.app");
-            });
-            ui.separator();
-            ui.collapsing("Keybindings", |ui| {
-                ui.label(RichText::new(keybindings_text()).monospace().size(16.0));
-            });
+                    ui.hyperlink_to("Email: hello@grooph.app", "mailto:hello@grooph.app");
+                });
+                ui.separator();
+                ui.collapsing("Keybindings", |ui| {
+                    ui.label(RichText::new(keybindings_text()).monospace().size(16.0));
+                });
 
-            ui.collapsing("Mouse/Finger controls", |ui| {
-                let text = RichText::new(
-                    "       Click/Tap: Move cursor
+                ui.collapsing("Mouse/Finger controls", |ui| {
+                    let text = RichText::new(
+                        "       Click/Tap: Move cursor
             Drag: Move cursor
 Double-click/Tap: Toggle Note/Rest",
-                )
-                .monospace()
-                .size(16.0);
-                ui.label(text);
-            });
-        });
+                    )
+                    .monospace()
+                    .size(16.0);
+                    ui.label(text);
+                });
+            },
+        );
     }
 }
 

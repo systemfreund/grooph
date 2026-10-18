@@ -328,7 +328,7 @@ impl Grooph {
         let mut picked = None;
         egui::Panel::bottom("compact_tabs")
             .frame(Frame::side_top_panel(ui.style()).inner_margin(Margin::symmetric(0, 4)))
-            .show_inside(ui, |ui| {
+            .show(ui, |ui| {
                 centered_column(ui, |ui| {
                     ui.columns(TABS.len(), |cols| {
                         for (col, (tab, icon, label)) in cols.iter_mut().zip(TABS) {
@@ -415,7 +415,7 @@ impl Grooph {
                 bottom: 4,
             }))
             .show_separator_line(false)
-            .show_inside(ui, |ui| {
+            .show(ui, |ui| {
                 centered_column(ui, |ui| {
                     Frame::new()
                         .fill(card_fill(ui))
@@ -451,7 +451,7 @@ impl Grooph {
                 bottom: 8,
             }))
             .show_separator_line(false)
-            .show_inside(ui, |ui| {
+            .show(ui, |ui| {
                 centered_column(ui, |ui| {
                     Frame::new()
                         .fill(card_fill(ui))
@@ -495,7 +495,7 @@ impl Grooph {
         egui::Panel::bottom("compact_metronome")
             .frame(Frame::new().fill(ui.visuals().panel_fill).inner_margin(Margin::same(12)))
             .show_separator_line(false)
-            .show_inside(ui, |ui| {
+            .show(ui, |ui| {
                 centered_column(ui, |ui| {
                     Frame::new()
                         .fill(card_fill(ui))
@@ -534,7 +534,7 @@ impl Grooph {
         if round_button_at(
             ui,
             Rect::from_center_size(row.center(), size),
-            Id::new("metronome_play"),
+            Id::unique("metronome_play"),
             fill,
             icon,
             |painter, rect, color| paint_play_icon(painter, rect, color, playing),
@@ -546,7 +546,7 @@ impl Grooph {
         if round_button_at(
             ui,
             Rect::from_min_size(row.right_top() - vec2(PLAY_BUTTON_SIZE, 0.0), size),
-            Id::new("metronome_share"),
+            Id::unique("metronome_share"),
             ui.visuals().extreme_bg_color,
             ui.visuals().strong_text_color(),
             paint_share_icon,
@@ -597,7 +597,7 @@ impl Grooph {
         let roll = round_button_at(
             ui,
             new_rect,
-            Id::new("compact_new"),
+            Id::unique("compact_new"),
             side_fill,
             text,
             |painter, rect, color| {
@@ -618,7 +618,7 @@ impl Grooph {
         if round_button_at(
             ui,
             play_rect,
-            Id::new("compact_play"),
+            Id::unique("compact_play"),
             fill,
             icon,
             |painter, rect, color| paint_play_icon(painter, rect, color, playing),
@@ -631,7 +631,7 @@ impl Grooph {
         if round_button_at(
             ui,
             share_rect,
-            Id::new("compact_share"),
+            Id::unique("compact_share"),
             side_fill,
             text,
             paint_share_icon,
@@ -670,7 +670,7 @@ impl Grooph {
                 Frame::new().fill(ui.visuals().panel_fill).inner_margin(Margin::symmetric(12, 6)),
             )
             .show_separator_line(false)
-            .show_inside(ui, |ui| {
+            .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     let playing = self.playback_ctl.transport_state == TransportState::Playing;
                     let fill = ui.visuals().selection.bg_fill;
@@ -719,7 +719,7 @@ impl Grooph {
                 Frame::new().fill(ui.visuals().panel_fill).inner_margin(Margin::symmetric(12, 6)),
             )
             .show_separator_line(false)
-            .show_inside(ui, |ui| {
+            .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     let playing = self.playback_ctl.transport_state == TransportState::Playing;
                     let fill = ui.visuals().selection.bg_fill;
@@ -768,7 +768,7 @@ impl Grooph {
             egui::Panel::bottom("compact_more")
                 .frame(Frame::new().fill(ui.visuals().panel_fill).inner_margin(Margin::same(12)))
                 .show_separator_line(false)
-                .show_inside(ui, |ui| {
+                .show(ui, |ui| {
                     centered_column(ui, |ui| {
                         Frame::new()
                             .fill(card_fill(ui))
@@ -793,7 +793,7 @@ impl Grooph {
         let title = ENTRIES.iter().find(|(m, ..)| *m == self.ui.mode).map_or("", |(.., l)| *l);
         egui::Panel::bottom("compact_more_back")
             .frame(Frame::side_top_panel(ui.style()).inner_margin(Margin::symmetric(12, 6)))
-            .show_inside(ui, |ui| {
+            .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     if ui.button("‹ Back").clicked() {
                         self.ui.mode = Mode::MoreMenu;

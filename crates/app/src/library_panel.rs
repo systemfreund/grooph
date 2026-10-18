@@ -4,9 +4,9 @@ use eframe::egui;
 
 impl Grooph {
     pub(super) fn library_panel(&mut self, ui: &mut egui::Ui) {
-        egui::Panel::bottom("library").resizable(true).show_animated_inside(
+        egui::Panel::bottom("library").resizable(true).drag_to_open(false).show_collapsible(
             ui,
-            self.ui.mode == Mode::Library,
+            &mut (self.ui.mode == Mode::Library),
             |ui| {
                 ui.set_min_height(220.0);
 
