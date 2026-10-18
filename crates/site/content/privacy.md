@@ -13,8 +13,7 @@ Last updated: 18 October 2026
 
 ## Who is responsible
 
-[NAME AND POSTAL ADDRESS OF THE CONTROLLER]
-
+Ömer Yildiz
 Email: [hello@grooph.app](mailto:hello@grooph.app)
 
 ## Data stored on your device
