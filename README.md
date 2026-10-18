@@ -302,12 +302,18 @@ If you add new tools/shortcuts, remember:
 - Tests: `cargo test`
 - WASM (optional): `trunk serve` or `trunk build --release`
 - Android (prototype): `cargo apk build -p grooph-android --release` with
-  `cargo install cargo-apk`, the `aarch64-linux-android` Rust target and
+  `cargo install cargo-apk`, the `aarch64-linux-android` and
+  `x86_64-linux-android` Rust targets (one APK holds both: phones, and
+  emulators and Chromebooks) and
   `ANDROID_HOME` / `ANDROID_NDK_ROOT` set. CI builds the APK on every push
   (job `android`, artifact `grooph-android`, signed with a throwaway key).
   The workspace eframe leaves out accesskit (NativeActivity cannot use it);
   `crates/app` adds it back on every other target. Settings are stored in the
-  app's internal storage (`persistence_path`). Not handled yet: stopping
+  app's internal storage (`persistence_path`). NativeActivity draws under
+  the status and navigation bars; `crates/android/src/insets.rs` reads their
+  size through JNI and hands it to egui as safe-area insets. Android renders
+  with glow (OpenGL ES): wgpu cannot create a surface in the emulator. Not
+  handled yet: stopping
   audio when the app goes to the background, the share sheet and links
   (Android intents), the back button and the on-screen keyboard.
 
