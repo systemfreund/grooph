@@ -55,6 +55,7 @@ use eframe::{App, CreationContext, egui};
 use grooph_audio::{AudioSettings, GapClick, PlaybackOptions, PlayerState, TempoRamp};
 use grooph_link::{LinkContent, SharedLink};
 use grooph_measure::click::ClickBars;
+use grooph_measure::counter::CounterBars;
 use grooph_measure::counting::{
     CountConfig, CountLayer, CountScope, LabelPattern, LabelToken, Subdiv,
 };
@@ -136,6 +137,7 @@ struct PersistedState {
     tempo_ramp: TempoRamp,
     presets: PresetLibrary,
     click_bars: ClickBars,
+    counter_bars: CounterBars,
     metronome_meter: TimeSignature,
     /// Tab open when the state was saved, reopened at the next start.
     tab: CompactTab,
@@ -168,6 +170,7 @@ impl Default for PersistedState {
             tempo_ramp: TempoRamp::default(),
             presets: PresetLibrary::default(),
             click_bars: ClickBars::default(),
+            counter_bars: CounterBars::default(),
             metronome_meter: TimeSignature::FOUR_FOUR,
             tab: CompactTab::Practice,
         }
@@ -211,6 +214,7 @@ impl PersistedState {
             tempo_ramp: stash.map_or(app.playback_ctl.audio_cfg.ramp, |s| s.ramp),
             presets: app.editor.presets.clone(),
             click_bars: app.playback_ctl.audio_cfg.click.clone(),
+            counter_bars: app.playback_ctl.audio_cfg.counter.clone(),
             metronome_meter: app.editor.metronome.meter,
             tab: app.compact_tab(),
         }
@@ -392,6 +396,7 @@ impl Grooph {
             } else {
                 self.playback_ctl.audio_cfg.click.clone()
             },
+            counter: self.played_counter(),
         }
     }
 
@@ -421,7 +426,11 @@ impl Grooph {
     }
 
     fn current_snapshot(&self) -> EditorSnapshot {
-        EditorSnapshot { score: self.editor.score.clone(), cursor: self.editor.cursor }
+        EditorSnapshot {
+            score: self.editor.score.clone(),
+            cursor: self.editor.cursor,
+            counter: self.metronome_mode().then(|| self.playback_ctl.audio_cfg.counter.clone()),
+        }
     }
 
     pub(crate) fn can_undo(&self) -> bool {
@@ -454,6 +463,9 @@ impl Grooph {
         if let Some(prev) = self.editor.history.pop_undo(current) {
             self.editor.score = prev.score;
             self.editor.cursor = prev.cursor;
+            if let Some(counter) = prev.counter {
+                self.playback_ctl.audio_cfg.counter = counter;
+            }
             self.clear_accuracy_for_edit();
             self.editor.dirty = true;
         }
@@ -464,6 +476,9 @@ impl Grooph {
         if let Some(next) = self.editor.history.pop_redo(current) {
             self.editor.score = next.score;
             self.editor.cursor = next.cursor;
+            if let Some(counter) = next.counter {
+                self.playback_ctl.audio_cfg.counter = counter;
+            }
             self.clear_accuracy_for_edit();
             self.editor.dirty = true;
         }
@@ -1027,6 +1042,7 @@ impl Grooph {
                     gap: state.gap_click,
                     ramp: state.tempo_ramp,
                     click: state.click_bars,
+                    counter: state.counter_bars,
                 },
                 playback: PlaybackState::default(),
                 accuracy: AccuracyState::new(state.accuracy_enabled),

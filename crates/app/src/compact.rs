@@ -476,6 +476,9 @@ impl Grooph {
         if value_row(ui, "Edit clicks", "✏").clicked() {
             self.ui.mode = Mode::Edit;
         }
+        if value_row(ui, "Polyrhythm", &self.counter_label()).clicked() {
+            self.ui.picker = Some(Picker::Polyrhythm);
+        }
         switch_row(ui, "Count-in", &mut self.playback_ctl.audio_cfg.count_in);
         switch_row(ui, "Mute bars", &mut self.playback_ctl.audio_cfg.gap.enabled);
     }

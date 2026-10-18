@@ -39,8 +39,9 @@ fn voice_group(
 }
 
 impl Grooph {
-    /// Volumes of the two voices: the metronome (downbeat, primary beats,
-    /// count-in) and the rhythm (notes, accents, ghost notes).
+    /// Volumes of the voices: the metronome (downbeat, primary beats,
+    /// count-in), the metronome's counter rhythm and the rhythm (notes,
+    /// accents, ghost notes).
     pub(super) fn mixer_panel(&mut self, ui: &mut egui::Ui) {
         egui::Panel::bottom("mixer").show_animated_inside(ui, self.ui.mode == Mode::Mixer, |ui| {
             egui::ScrollArea::horizontal()
@@ -66,6 +67,18 @@ impl Grooph {
                             |ui| {
                                 volume_slider(ui, &mut settings.count_in, "Count-in");
                             },
+                        );
+                        ui.separator();
+                        voice_group(
+                            ui,
+                            "Counter",
+                            &mut settings.counter_muted,
+                            "Silence the counter rhythm of the metronome",
+                            |ui| {
+                                volume_slider(ui, &mut settings.counter, "Counter")
+                                    .on_hover_text("Clicks of the polyrhythm in the metronome tab");
+                            },
+                            |_| {},
                         );
                         ui.separator();
                         voice_group(

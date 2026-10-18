@@ -10,7 +10,9 @@ use crate::presets::{self, PresetId};
 use crate::tool_palette::notation_button;
 use eframe::egui;
 use eframe::egui::{Button, Color32, FontId, Id, Modal, Response, RichText, Ui, vec2};
+use grooph_audio::CounterSound;
 use grooph_measure::TimeSignature;
+use grooph_measure::counter::{Ratio, ratio_of};
 use grooph_measure::generator::{
     BeatSpan, FigureSet, MAX_BARS, MAX_COMPLEXITY, Subdivision, complexity_figures,
     effective_subdivision, figures, offered_subdivisions, supports_time_signature,
@@ -38,6 +40,8 @@ pub(crate) enum Picker {
     MetronomeMeter,
     /// A ready-made click bar for the metronome meter.
     ClickFill,
+    /// The metronome's counter rhythm and its sound.
+    Polyrhythm,
 }
 
 pub(crate) fn swing_label(percent: u8) -> String {
@@ -149,6 +153,7 @@ impl Grooph {
                 Picker::Preset => "Preset",
                 Picker::MetronomeMeter => "Time signature",
                 Picker::ClickFill => "Clicks",
+                Picker::Polyrhythm => "Polyrhythm",
             };
             ui.heading(title);
             ui.add_space(8.0);
@@ -171,6 +176,7 @@ impl Grooph {
                 }
                 Picker::MetronomeMeter => self.metronome_meter_choices(ui),
                 Picker::ClickFill => self.click_fill_choices(ui),
+                Picker::Polyrhythm => self.polyrhythm_choices(ui),
             };
             ui.add_space(12.0);
             picked || wide_button(ui, "Done", 19.0, ROW_HEIGHT).clicked()
@@ -428,6 +434,33 @@ impl Grooph {
             self.replace_click_bar(fills[i].0.clone());
         }
         picked.is_some()
+    }
+
+    /// Counter rhythms of the metronome meter, "N:M" for N clicks in the
+    /// time of M beats, then the sound they play with.
+    fn polyrhythm_choices(&mut self, ui: &mut Ui) -> bool {
+        let current = self.counter_bar().and_then(ratio_of);
+        let mut options = vec![(None, "Off".to_owned())];
+        options.extend(self.counter_choices().into_iter().map(|r| (Some(r), r.to_string())));
+        // A custom counter bar is none of the choices: highlight none.
+        let shown = if self.counter_bar().is_some() && current.is_none() {
+            Some(Ratio { n: 0, span: 0 })
+        } else {
+            current
+        };
+        let picked = choice_grid(ui, &options, shown, 3);
+        if let Some(ratio) = picked {
+            self.set_counter_ratio(ratio);
+        }
+        ui.add_space(8.0);
+        ui.label("Sound");
+        let settings = &mut self.playback_ctl.audio_cfg.settings;
+        let sounds: Vec<_> = CounterSound::ALL.iter().map(|&s| (s, s.label().to_owned())).collect();
+        if let Some(sound) = choice_grid(ui, &sounds, settings.counter_sound, 3) {
+            settings.counter_sound = sound;
+        }
+        // Picking a sound keeps the picker open to compare them.
+        false
     }
 
     fn swing_choices(&mut self, ui: &mut Ui) {

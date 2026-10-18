@@ -11,9 +11,9 @@
 //!   it and all following measures. Without one, the first measure is 4/4.
 //! - Durations use the names of the helpers in [`crate::duration`]:
 //!   `q` `e` `s` `th` (quarter to thirty-second), dotted with a trailing `.`
-//!   (`q.` `e.` `s.`), tuplets `t4` `t8` `t16` `t32` (triplets), `qt16`
-//!   (quintuplet), `st8` `st16` (sextuplets), `spt16` (septuplet) and `nt16`
-//!   (nonuplet). Every note of a tuplet group is written out.
+//!   (`q.` `e.` `s.`), tuplets `t4` `t8` `t16` `t32` (triplets), `qt4` `qt16`
+//!   (quintuplets), `st8` `st16` (sextuplets), `spt4` `spt16` (septuplets)
+//!   and `nt16` (nonuplet). Every note of a tuplet group is written out.
 //! - `r:` makes a rest (`r:q`), `>` accents a note (`>e`), parentheses make
 //!   it a soft (ghost) note (`(e)`).
 //!
@@ -100,8 +100,8 @@ impl Display for NotationError {
 impl std::error::Error for NotationError {}
 
 /// Durations with a notation code, in the order of [`crate::duration::COMMON_DURATIONS`].
-const CODES: [(&str, Duration); 16] = {
-    use crate::duration::{e, nt16, q, qt16, s, spt16, st8, st16, t8, t16, t32, th};
+const CODES: [(&str, Duration); 18] = {
+    use crate::duration::{e, nt16, q, qt4, qt16, s, spt4, spt16, st8, st16, t8, t16, t32, th};
     const fn dotted(base: NoteValue) -> Duration {
         Duration::Dotted { base, dots: 1 }
     }
@@ -122,6 +122,8 @@ const CODES: [(&str, Duration); 16] = {
         ("st16", st16()),
         ("spt16", spt16()),
         ("nt16", nt16()),
+        ("qt4", qt4()),
+        ("spt4", spt4()),
     ]
 };
 
@@ -129,7 +131,7 @@ pub(crate) fn duration_of_code(code: &str) -> Option<Duration> {
     CODES.iter().find(|(c, _)| *c == code).map(|(_, d)| *d)
 }
 
-fn code_of(duration: &Duration) -> Option<&'static str> {
+pub(crate) fn code_of(duration: &Duration) -> Option<&'static str> {
     CODES.iter().find(|(_, d)| d == duration).map(|(c, _)| *c)
 }
 

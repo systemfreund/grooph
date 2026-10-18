@@ -137,7 +137,7 @@ pub fn subdivided_click_bar(ts: TimeSignature, parts: u32) -> Option<Measure> {
 }
 
 /// Whether two bars hold the same meter and beats.
-fn same_bar(a: &Measure, b: &Measure) -> bool {
+pub(crate) fn same_bar(a: &Measure, b: &Measure) -> bool {
     a.time_signature() == b.time_signature() && a.beats() == b.beats()
 }
 

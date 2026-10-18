@@ -15,6 +15,7 @@ use eframe::epaint::FontId;
 use grooph_audio::{Audio, AudioSettings, GapClick, TempoRamp};
 use grooph_link::SharedLink;
 use grooph_measure::click::ClickBars;
+use grooph_measure::counter::CounterBars;
 use grooph_measure::swing::Swing;
 use grooph_measure::tap_tempo::TapTempo;
 use grooph_measure::{Cursor, Measure, Score};
@@ -36,6 +37,8 @@ pub(crate) struct AudioConfig {
     pub(crate) ramp: TempoRamp,
     /// What the metronome clicks in each meter.
     pub(crate) click: ClickBars,
+    /// The counter rhythm of each meter that has one.
+    pub(crate) counter: CounterBars,
 }
 
 impl AudioConfig {
@@ -56,6 +59,7 @@ impl Default for AudioConfig {
             gap: GapClick::default(),
             ramp: TempoRamp::default(),
             click: ClickBars::default(),
+            counter: CounterBars::default(),
         }
     }
 }
