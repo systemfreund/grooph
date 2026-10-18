@@ -11,9 +11,9 @@ use grooph_layout::staff_layout::{
     ROOM_BELOW_WITH_LABELS_EM, StaffLayout, StaffOpts, Voice, build_staff_layout_with_lower,
     extra_room_above_em, hit_test_voice, lower_voice_room_below_em, row_height_em,
 };
-use grooph_measure::TimeSignature;
 use grooph_measure::grid::DEFAULT_GRID;
 use grooph_measure::tempo::ScoreTiming;
+use grooph_measure::{Score, TimeSignature};
 use grooph_render::measure_glyph_metrics;
 use grooph_render::staff::draw_staff;
 
@@ -157,11 +157,8 @@ impl Grooph {
                         // the shared helper to find the cursor's actual home measure
                         // and X for this frame.
                         if let Some(playback) = playback_local
-                            && let Some((m_idx, x)) = grooph_render::staff::current_cursor_x(
-                                &self.editor.score,
-                                &staff,
-                                playback,
-                            )
+                            && let Some((m_idx, x)) =
+                                grooph_render::staff::current_cursor_x(upper, &staff, playback)
                             && let Some(placed) = staff.placed(m_idx)
                         {
                             // The row is centred vertically, but the offset
@@ -259,7 +256,13 @@ impl Grooph {
                             draw_muted_bar(ui, placed.rect);
                         }
 
-                        self.draw_accuracy_markers(ui, &staff, &timing, &render_opts.metrics);
+                        self.draw_accuracy_markers(
+                            ui,
+                            upper,
+                            &staff,
+                            &timing,
+                            &render_opts.metrics,
+                        );
                         self.handle_input(resp, &staff);
                     });
                 });
@@ -311,9 +314,11 @@ impl Grooph {
         tick
     }
 
+    /// Marks on the notes of `score`, the score `staff` was laid out from.
     fn draw_accuracy_markers(
         &self,
         ui: &egui::Ui,
+        score: &Score,
         staff: &StaffLayout,
         timing: &ScoreTiming,
         metrics: &GlyphMetrics,
@@ -332,13 +337,14 @@ impl Grooph {
         // One flat list of global onsets across the whole score. Used by
         // `clamp_diff_to_beat_window`, which needs the global neighbours of
         // each note.
-        let global_beats = crate::accuracy::compute_global_beat_onsets(&self.editor.score, timing);
+        let global_beats = crate::accuracy::compute_global_beat_onsets(score, timing);
         let global_onsets_u64: Vec<u64> = global_beats.iter().map(|gb| gb.onset_tick).collect();
 
         for system in &staff.systems {
             for placed in &system.measures {
                 self.draw_accuracy_markers_for_measure(
                     ui,
+                    score,
                     placed,
                     timing,
                     &global_onsets_u64,
@@ -349,16 +355,18 @@ impl Grooph {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn draw_accuracy_markers_for_measure(
         &self,
         ui: &egui::Ui,
+        score: &Score,
         placed: &PlacedMeasure,
         timing: &ScoreTiming,
         global_onsets_u64: &[u64],
         total_loop_ticks: f64,
         metrics: &GlyphMetrics,
     ) {
-        let measure = &self.editor.score.measures[placed.measure_idx];
+        let measure = &score.measures[placed.measure_idx];
         let beats = measure.beats();
         if beats.is_empty() {
             return;
