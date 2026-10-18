@@ -459,8 +459,9 @@ impl Grooph {
 
     /// Tick within the bar being heard (latency taken off) at `now`, if
     /// playing. Follows the staff's smoothed playback cursor, carried on to
-    /// this frame, so the ring moves as evenly as the cursor; the audio
-    /// position alone only moves once per audio buffer.
+    /// this frame, so the ring moves as evenly as the cursor, also through
+    /// the count-in; the audio position alone only moves once per audio
+    /// buffer.
     fn metronome_tick(&self, ts: &TimeSignature, now: f64) -> Option<f64> {
         if self.playback_ctl.transport_state != TransportState::Playing {
             return None;
@@ -471,10 +472,8 @@ impl Grooph {
             .ticks_per_sec_in_measure(0);
         let playback = &self.playback_ctl.playback;
         let heard = match playback.last_update {
-            Some(last) if !playback.counting_in() => {
-                playback.smooth_tick + (now - last).max(0.0) * ticks_per_sec
-            }
-            _ => tick - self.playback_ctl.audio_cfg.latency_s() * ticks_per_sec,
+            Some(last) => playback.heard_tick + (now - last).max(0.0) * ticks_per_sec,
+            None => tick - self.playback_ctl.audio_cfg.latency_s() * ticks_per_sec,
         };
         Some(heard.rem_euclid(bar_ticks.max(1.0)))
     }
