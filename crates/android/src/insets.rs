@@ -29,7 +29,12 @@ impl SystemBars {
         if self.read_at.is_none_or(|at| at.elapsed() >= REFRESH) {
             self.read_at = Some(Instant::now());
             match read_insets(&self.app) {
-                Some(px) => self.px = px,
+                Some(px) => {
+                    if px != self.px {
+                        log::info!("System bar insets (left, top, right, bottom): {px:?} px");
+                    }
+                    self.px = px;
+                }
                 None => log::warn!("Could not read the system bar insets"),
             }
         }

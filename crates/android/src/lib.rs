@@ -45,7 +45,12 @@ struct AndroidApp {
 #[cfg(target_os = "android")]
 impl eframe::App for AndroidApp {
     fn ui(&mut self, ui: &mut eframe::egui::Ui, frame: &mut eframe::Frame) {
-        self.app.ui(ui, frame);
+        // The root Ui spans the whole screen; keep the app inside the part the
+        // system bars leave free (the safe area set in `raw_input_hook`).
+        let content = ui.ctx().content_rect();
+        ui.scope_builder(eframe::egui::UiBuilder::new().max_rect(content), |ui| {
+            self.app.ui(ui, frame);
+        });
     }
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
@@ -58,7 +63,8 @@ impl eframe::App for AndroidApp {
     }
 
     /// NativeActivity draws under the status bar and the navigation bar;
-    /// telling egui their size as safe-area insets keeps the UI out of them.
+    /// their size goes to egui as safe-area insets, which shrink
+    /// `content_rect`.
     fn raw_input_hook(
         &mut self,
         ctx: &eframe::egui::Context,
