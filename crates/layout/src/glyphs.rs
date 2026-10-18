@@ -4,6 +4,8 @@ use grooph_measure::duration::NoteValue::{Eighth, Half, Quarter, Sixteenth, Thir
 // SMuFL glyphs (Bravura)
 // Notehead black: U+E0A4
 pub const GLYPH_NOTEHEAD_BLACK: char = '\u{E0A4}';
+/// Hollow notehead of half notes: U+E0A3
+pub const GLYPH_NOTEHEAD_HALF: char = '\u{E0A3}';
 // Augmentation dot: U+E1E7
 pub const GLYPH_AUGMENTATION_DOT: char = '\u{E1E7}';
 /// Parentheses around a soft (ghost) notehead.
@@ -59,11 +61,20 @@ pub fn ts_glyphs(n: u8) -> Vec<char> {
 
 pub fn rest_glyph_for_duration(d: Duration) -> char {
     match d.base_note() {
+        Whole => GLYPH_REST_WHOLE,
+        Half => GLYPH_REST_HALF,
         Quarter => GLYPH_REST_QUARTER,
         Eighth => GLYPH_REST_EIGHTH,
         Sixteenth => GLYPH_REST_SIXTEENTH,
         ThirtySecond => GLYPH_REST_32ND,
-        Half | Whole => GLYPH_REST_QUARTER,
+    }
+}
+
+/// Hollow for halves (and wholes), filled for the rest.
+pub fn notehead_glyph_for_duration(d: Duration) -> char {
+    match d.base_note() {
+        Half | Whole => GLYPH_NOTEHEAD_HALF,
+        _ => GLYPH_NOTEHEAD_BLACK,
     }
 }
 

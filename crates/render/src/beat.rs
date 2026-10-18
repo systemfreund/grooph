@@ -15,7 +15,7 @@ pub(super) fn draw_beat(
 ) {
     let glyph = match note.kind == BeatKind::Rest {
         true => glyphs::rest_glyph_for_duration(note.duration),
-        false => glyphs::GLYPH_NOTEHEAD_BLACK,
+        false => glyphs::notehead_glyph_for_duration(note.duration),
     };
 
     // Draw stem

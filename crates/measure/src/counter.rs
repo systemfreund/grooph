@@ -133,8 +133,8 @@ pub fn step_span(own: &[Ratio], ratio: Ratio, up: bool) -> Option<Ratio> {
 
 /// The ratio whose counter bar `bar` is, whatever the levels of its clicks:
 /// the same note values, with notes only where that ratio clicks (a click
-/// tapped off is a rest). Ratios with the same note values (3:4 and 3:2 in
-/// 4/4 are both quarter triplets) tell apart by where their rests are; the
+/// tapped off is a rest). Ratios with the same note values (9:4 and 9:2 in
+/// 4/4 are both nonuplet sixteenths) tell apart by where their rests are; the
 /// one with the fewest clicks wins, if any. Any ratio of one's own counts
 /// (see [`own_ratios`]).
 pub fn ratio_of(bar: &Measure) -> Option<Ratio> {
@@ -250,6 +250,10 @@ mod tests {
         assert_eq!(bar("2/4", 3, 2), "2/4 t4 (t4) (t4)");
         assert_eq!(bar("4/4", 5, 4), "4/4 qt4 (qt4) (qt4) (qt4) (qt4)");
         assert_eq!(bar("4/4", 7, 4), "4/4 spt4 (spt4) (spt4) (spt4) (spt4) (spt4) (spt4)");
+        assert_eq!(bar("4/4", 3, 4), "4/4 t2 (t2) (t2)");
+        assert_eq!(bar("4/4", 2, 4), "4/4 h (h)");
+        assert_eq!(bar("2/4", 5, 2), "2/4 qt8 (qt8) (qt8) (qt8) (qt8)");
+        assert_eq!(bar("2/4", 7, 2), "2/4 spt8 (spt8) (spt8) (spt8) (spt8) (spt8) (spt8)");
     }
 
     #[test]
@@ -259,9 +263,13 @@ mod tests {
 
     #[test]
     fn clicks_without_a_value_get_rests_up_to_the_next() {
-        // No half-note triplet: quarter triplets, every other one a rest.
-        assert_eq!(bar("4/4", 3, 4), "4/4 t4 r:t4 (t4) r:t4 (t4) r:t4");
-        assert_eq!(bar("4/4", 2, 4), "4/4 q r:q (q) r:q");
+        // No quintuplet over a dotted half: sixteenth quintuplets, two
+        // rests after every click.
+        assert_eq!(
+            bar("3/4", 5, 3),
+            "3/4 qt16 r:qt16 r:qt16 (qt16) r:qt16 r:qt16 (qt16) r:qt16 r:qt16 (qt16) r:qt16 \
+             r:qt16 (qt16) r:qt16 r:qt16"
+        );
     }
 
     #[test]
@@ -338,24 +346,25 @@ mod tests {
 
     #[test]
     fn ratios_with_the_same_note_values_tell_apart() {
-        // 3:4 and 3:2 in 4/4 are both six quarter triplets.
+        // 9:4 and 9:2 in 4/4 are both eighteen nonuplet sixteenths.
         let ts = TimeSignature::FOUR_FOUR;
-        for ratio in [Ratio { n: 3, span: 4 }, Ratio { n: 3, span: 2 }] {
+        for ratio in [Ratio { n: 9, span: 4 }, Ratio { n: 9, span: 2 }] {
             assert_eq!(ratio_of(&counter_bar(ts, ratio).unwrap()), Some(ratio));
         }
-        let mut m = counter_bar(ts, Ratio { n: 3, span: 2 }).unwrap();
+        let mut m = counter_bar(ts, Ratio { n: 9, span: 2 }).unwrap();
         m.set_click_level(1, ClickLevel::Off);
-        assert_eq!(ratio_of(&m), Some(Ratio { n: 3, span: 2 }));
+        assert_eq!(ratio_of(&m), Some(Ratio { n: 9, span: 2 }));
     }
 
     #[test]
     fn clicks_fold_in_their_rests() {
         let ts = TimeSignature::FOUR_FOUR;
-        let mut m = counter_bar(ts, Ratio { n: 3, span: 4 }).unwrap();
-        assert_eq!(counter_clicks(&m), [0..2, 2..4, 4..6]);
+        let mut m = counter_bar(ts, Ratio { n: 9, span: 4 }).unwrap();
+        let pairs: Vec<_> = (0..9).map(|i| 2 * i..2 * i + 2).collect();
+        assert_eq!(counter_clicks(&m), pairs);
         // A click tapped off stays a click.
         m.set_click_level(2, ClickLevel::Off);
-        assert_eq!(counter_clicks(&m), [0..2, 2..4, 4..6]);
+        assert_eq!(counter_clicks(&m), pairs);
         assert_eq!(click_level(&m, 2), ClickLevel::Off);
     }
 

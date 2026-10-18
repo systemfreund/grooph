@@ -308,7 +308,9 @@ pub fn build_measure_layout_with_plan(
 
 /// Mirror what hangs off the stems (stems, flags, beams, tuplets, accents)
 /// to below the staff line, and lower the rests a staff space, clear of an
-/// upper voice's. Heads and dots stay where they are.
+/// upper voice's. Heads and dots stay where they are, and so do half and
+/// whole rests: they are told apart only by sitting on the line or hanging
+/// from it.
 fn flip_down(layout: &mut MeasureLayout, opts: &LayoutOpts) {
     let cy = opts.y_center();
     let y = |y: f32| 2.0 * cy - y;
@@ -316,7 +318,9 @@ fn flip_down(layout: &mut MeasureLayout, opts: &LayoutOpts) {
     let rect = |r: Rect| Rect::from_two_pos(pos(r.min), pos(r.max));
     let accent_half_h = opts.metrics.accent_size.y * 0.5;
     for note in &mut layout.notes {
-        if note.kind == BeatKind::Rest {
+        if note.kind == BeatKind::Rest
+            && !matches!(note.duration.base_note(), NoteValue::Half | NoteValue::Whole)
+        {
             note.center.y += opts.staff_space();
         }
         if let Some(stem) = &mut note.stem {
@@ -792,6 +796,35 @@ mod tests {
         let lift = c::TUPLET_NUMBER_BASELINE_LIFT_SS * up.staff_space();
         let (nu, nd) = (a.tuplets[0].number_center.y, b.tuplets[0].number_center.y);
         assert!((nd - lift - cy - (cy - (nu - lift))).abs() < 0.01);
+    }
+
+    #[test]
+    fn lower_rests_drop_but_half_rests_keep_their_line() {
+        use grooph_measure::notation::parse_score;
+        let m = parse_score("4/4 h r:q r:q").unwrap().measures.remove(0);
+        let h = parse_score("4/4 h r:h").unwrap().measures.remove(0);
+        let em = 20.0;
+        let down = LayoutOpts {
+            rect: Rect::from_min_max(Pos2::ZERO, Pos2::new(300.0, 200.0)),
+            font_id: FontId::new(em, FontFamily::Proportional),
+            pixels_per_point: 1.0,
+            em,
+            layout_clef: false,
+            layout_time_signature: false,
+            y_offset: 0.0,
+            stem_length_factor: 3.5,
+            stem_thickness_factor: 0.1,
+            accent_displacement: 0.1,
+            accent_below: false,
+            stem_down: true,
+            proportional_spacing: true,
+            debug_bbox: false,
+            metrics: GlyphMetrics::debug(em),
+        };
+        let cy = down.y_center();
+        let quarter_rest = build_measure_layout(&m, &down).notes[1].center.y;
+        assert!((quarter_rest - cy - down.staff_space()).abs() < 0.01);
+        assert_eq!(build_measure_layout(&h, &down).notes[1].center.y, cy);
     }
 
     #[test]
