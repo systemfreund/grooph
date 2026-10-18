@@ -369,7 +369,7 @@ pub fn draw_notes(
     draw_tuplets(painter, &measure_layout.tuplets, opts, color);
 }
 
-/// Per-note glyphs: head, stem, flag, dots, accent, optional debug boxes.
+/// Per-note glyphs: head, stem, flag, dots, accent.
 pub fn draw_note_glyphs(
     painter: &Painter,
     notes: &[NoteLayout],
@@ -593,7 +593,6 @@ mod tests {
             accent_below: false,
             stem_down: false,
             proportional_spacing: true,
-            debug_bbox: false,
         }
     }
 

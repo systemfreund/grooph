@@ -283,7 +283,6 @@ impl Grooph {
                 accent_below: false,
                 stem_down: false,
                 proportional_spacing: true,
-                debug_bbox: false,
             };
 
             // Use a temporary measure just for layout width and positions
@@ -361,7 +360,6 @@ pub(crate) fn notation_button(
                 accent_below: false,
                 stem_down: false,
                 proportional_spacing: true,
-                debug_bbox: false,
             }
         };
 

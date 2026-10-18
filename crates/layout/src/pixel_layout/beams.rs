@@ -96,10 +96,12 @@ pub(super) fn build_beam_layout(
     beam_groups: &[BeamGroup],
     opts: &LayoutOpts,
 ) -> Vec<BeamLayout> {
-    // Align top edge with stem tip; small downward offset hides the
-    // stem/beam seam.
-    let base_y =
-        opts.y_center() - opts.stem_length() + opts.beam_thickness() * c::BEAM_BASELINE_OFFSET;
+    // Align the top edge with the stem tip of the group's highest head; a
+    // small downward offset hides the stem/beam seam.
+    let base_y = |g: &BeamGroup| {
+        let top = g.beat_indices.iter().map(|&i| note_layout[i].staff_pos).max().unwrap_or(0);
+        opts.stem_tip_y(top) + opts.beam_thickness() * c::BEAM_BASELINE_OFFSET
+    };
 
     // Stems are already snapped in `note_layout`; fall back for un-stemmed
     // entries (shouldn't actually happen for beamed notes).
@@ -111,10 +113,10 @@ pub(super) fn build_beam_layout(
 
     let mut out: Vec<BeamLayout> = Vec::new();
     for g in beam_groups {
-        emit_full_beams(g, &stem_xs, base_y, half_stem, opts, &mut out);
+        emit_full_beams(g, &stem_xs, base_y(g), half_stem, opts, &mut out);
     }
     for g in beam_groups {
-        emit_stub_beams(g, &stem_xs, base_y, half_stem, opts, &mut out);
+        emit_stub_beams(g, &stem_xs, base_y(g), half_stem, opts, &mut out);
     }
     out
 }
