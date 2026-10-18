@@ -1,6 +1,7 @@
-use super::{LayoutOpts, Line, NoteLayout, TupletLayout, c, digit_count};
+use super::{LayoutOpts, Line, NoteLayout, TupletLayout, c, centered_run, ink_of};
+use crate::glyphs;
 use crate::tuplet_plan::TupletPlan;
-use egui::{FontId, Pos2};
+use egui::Pos2;
 use grooph_measure::{Beat, BeatKind};
 
 pub(super) fn build_tuplet_layout(
@@ -12,27 +13,14 @@ pub(super) fn build_tuplet_layout(
     let bracket_gap = c::TUPLET_BRACKET_GAP_SS * opts.staff_space();
     let hook_len = c::TUPLET_HOOK_LEN_SS * opts.staff_space();
     let hook_dy = hook_len * c::TUPLET_HOOK_DY_FACTOR;
-    let digit_font =
-        FontId::new(opts.font_id.size * c::TUPLET_DIGIT_FONT_FACTOR, opts.font_id.family.clone());
-    // Approximate baseline above stems
-    let y_base = opts.y_center()
-        - opts.stem_length()
-        - c::TUPLET_NUMBER_BASELINE_LIFT_SS * opts.staff_space()
-        - bracket_gap;
+    let digit_size = opts.em * c::TUPLET_DIGIT_FONT_FACTOR;
+    // The bracket line above the stems, which the number is centered on
+    let y_base = opts.y_center() - opts.stem_length() - bracket_gap;
 
     // A bracket spans from the left edge of its first head or rest to the
     // right edge of its last, whichever side the stems are on.
-    let half_width = |idx: usize| -> f32 {
-        let n = &note_layout[idx];
-        match n.kind {
-            BeatKind::Note => opts.metrics.head_size.x * 0.5,
-            BeatKind::Rest => opts.metrics.rest_sizes[n.duration.base_note().rest_index()].x * 0.5,
-        }
-    };
-    let left_of = |idx: usize| note_layout[idx].center.x - half_width(idx);
-    let right_of = |idx: usize| note_layout[idx].center.x + half_width(idx);
-
-    let digit_len = |n: u8| -> usize { digit_count(n as u32) };
+    let left_of = |idx: usize| note_layout[idx].head.ink().left();
+    let right_of = |idx: usize| note_layout[idx].head.ink().right();
 
     let mut tuplets_out: Vec<TupletLayout> = Vec::new();
     for t in tuplet_plan {
@@ -42,12 +30,11 @@ pub(super) fn build_tuplet_layout(
         x_l -= margin;
         x_r += margin;
 
-        // Number width approximation in pixels based on em
-        let num_chars = digit_len(t.count) as f32;
-        let num_width = num_chars * c::TUPLET_NUM_WIDTH_EM * opts.em;
-        let pad = c::TUPLET_NUM_PAD_EM * opts.em;
         let xc = 0.5 * (x_l + x_r);
-        let mut gap_half = 0.5 * (num_width + 2.0 * pad);
+        let digits = glyphs::tuplet_glyphs(t.count);
+        let number_at = |y: f32| centered_run(&digits, xc, y, digit_size);
+        let num_width = ink_of(&number_at(0.0)).map_or(0.0, |r| r.width());
+        let mut gap_half = 0.5 * num_width + c::TUPLET_NUMBER_CLEARANCE_SS * opts.staff_space();
         let min_seg = c::TUPLET_MIN_SEG_SS * opts.staff_space();
         let half_span = 0.5 * (x_r - x_l);
         if gap_half > half_span - min_seg {
@@ -92,40 +79,28 @@ pub(super) fn build_tuplet_layout(
                 p2: Pos2::new(x_r, y_bracket + hook_dy),
             });
 
-            let y_num = y_bracket + c::TUPLET_NUMBER_BASELINE_LIFT_SS * opts.staff_space();
             tuplets_out.push(TupletLayout {
                 count: t.count,
-                number_center: Pos2::new(0.5 * (x_l + x_r), y_num),
-                number_font: digit_font.clone(),
+                number: number_at(y_bracket),
                 bracket,
             });
         } else {
-            // Number-only: only lift the number if it would collide with an accent.
-            let num_cx = 0.5 * (x_l + x_r);
-            let num_half_w = 0.5 * num_width;
+            // Number-only: only lift the number if an accent's ink would
+            // reach under it.
             let collides = !opts.accent_below
-                && (t.start..=t.end).any(|i| {
-                    let b = beats[i];
-                    b.kind == BeatKind::Note
-                        && b.accented
-                        && note_layout
-                            .get(i)
-                            .map(|nl| {
-                                nl.center.x >= num_cx - num_half_w
-                                    && nl.center.x <= num_cx + num_half_w
-                            })
-                            .unwrap_or(false)
+                && ink_of(&number_at(0.0)).is_some_and(|num| {
+                    note_layout[t.start..=t.end].iter().filter_map(|nl| nl.accent).any(|a| {
+                        let a = a.ink();
+                        a.left() < num.right() && a.right() > num.left()
+                    })
                 });
 
             let close_clearance = c::TUPLET_NUMBER_CLOSE_SS * opts.staff_space();
             let raised_clearance = c::TUPLET_ACCENT_RAISE_SS * opts.staff_space();
             let clearance = if collides { raised_clearance } else { close_clearance };
-            let y_num =
-                (y_base - clearance) + c::TUPLET_NUMBER_BASELINE_LIFT_SS * opts.staff_space();
             tuplets_out.push(TupletLayout {
                 count: t.count,
-                number_center: Pos2::new(0.5 * (x_l + x_r), y_num),
-                number_font: digit_font.clone(),
+                number: number_at(y_base - clearance),
                 bracket: Vec::new(),
             });
         }

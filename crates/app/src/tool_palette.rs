@@ -5,10 +5,9 @@ use crate::{Mode, tools};
 use eframe::egui;
 use eframe::egui::scroll_area::{ScrollBarVisibility, ScrollSource};
 use eframe::egui::{
-    Align, Atom, Button, Direction, FontFamily, FontId, IdSalt, Layout, Pos2, Rect, Response,
-    RichText, Ui, Vec2,
+    Align, Atom, Button, Direction, FontFamily, FontId, IdSalt, Layout, Rect, Response, RichText,
+    Ui, Vec2,
 };
-use grooph_layout::glyphs;
 use grooph_layout::pixel_layout::{
     LayoutOpts, MeasureLayout, build_measure_layout, build_time_sig_layout, compute_em,
 };
@@ -16,17 +15,11 @@ use grooph_measure::BeatKind::{Note, Rest};
 use grooph_measure::duration::{Duration, TupletKind};
 use grooph_measure::{Beat, Measure};
 use grooph_render::measure::{draw_notes, draw_time_signature};
-use grooph_render::measure_glyph_metrics;
 use log::info;
 use tools::EditOp;
 
 const TOOL_PALETTE_BUTTON_SIZE: f32 = 70.0;
 const TOOL_PALETTE_BUTTON_CORNER_RADIUS: f32 = 2.0;
-/// Approximate visible cap height of the tuplet count digits, as a
-/// fraction of their font size. The SMuFL numeral glyphs sit tight in a
-/// much taller line box (ascent + descent), so the galley's own rect
-/// overstates how much vertical room they actually need.
-const TUPLET_NUMBER_CAP_HEIGHT_FACTOR: f32 = 0.55;
 
 enum ButtonKind {
     /// Renders a miniature notation using `note_button`.
@@ -291,7 +284,6 @@ impl Grooph {
                 stem_down: false,
                 proportional_spacing: true,
                 debug_bbox: false,
-                metrics: measure_glyph_metrics(ui, &font_id),
             };
 
             // Use a temporary measure just for layout width and positions
@@ -354,12 +346,10 @@ pub(crate) fn notation_button(
             _ => 20.0,
         };
 
-        let make_opts = |em: f32, rect: Rect, debug_bbox: bool| -> LayoutOpts {
-            let font_id = FontId::new(em, family.clone());
+        let make_opts = |em: f32, rect: Rect| -> LayoutOpts {
             LayoutOpts {
                 rect,
-                metrics: measure_glyph_metrics(ui, &font_id),
-                font_id,
+                font_id: FontId::new(em, family.clone()),
                 pixels_per_point: ui.ctx().pixels_per_point(),
                 em,
                 layout_clef: false,
@@ -371,20 +361,18 @@ pub(crate) fn notation_button(
                 accent_below: false,
                 stem_down: false,
                 proportional_spacing: true,
-                debug_bbox,
+                debug_bbox: false,
             }
         };
 
         // Probe pass: lay the measure out at the size chosen from the
-        // template beat, then measure the actual rendered content (note
-        // glyphs incl. flags, and tuplet brackets/numbers) instead of
+        // template beat, then take the ink of what it draws (note glyphs
+        // incl. flags, and tuplet brackets/numbers) instead of
         // trusting the fixed factors above. A trailing unbeamed flagged
         // note can overhang the nominal layout width, and a tuplet number
         // sitting close to the top of the tile can overhang its height;
         // shrink and recenter to fit whichever axis overflows.
-        let probe_opts = make_opts(em, rect, true);
-        let probe_layout = build_measure_layout(measure, &probe_opts);
-        let content = content_bounds(ui, &probe_layout);
+        let content = notes_ink(&build_measure_layout(measure, &make_opts(em, rect)));
 
         let pad = em * 0.08;
         let avail = rect.shrink(pad);
@@ -399,16 +387,14 @@ pub(crate) fn notation_button(
             let shrunk_em = em * scale;
             // Re-measure at the shrunk size (glyph widths don't scale
             // perfectly linearly) and recenter the content in the tile.
-            let probe2_opts = make_opts(shrunk_em, rect, true);
-            let probe2_layout = build_measure_layout(measure, &probe2_opts);
-            let content2 = content_bounds(ui, &probe2_layout);
+            let content2 = notes_ink(&build_measure_layout(measure, &make_opts(shrunk_em, rect)));
             let shift = rect.center() - content2.center();
             (shrunk_em, rect.translate(shift))
         } else {
             (em, rect)
         };
 
-        let opts = make_opts(final_em, final_rect, false);
+        let opts = make_opts(final_em, final_rect);
         let measure_layout = build_measure_layout(measure, &opts);
         let painter = &ui.painter_at(rect);
         draw_notes(painter, &measure_layout, ui.style().visuals.text_color(), &opts);
@@ -417,63 +403,11 @@ pub(crate) fn notation_button(
     button.response
 }
 
-/// Bounding rect (in the same pixel space as `LayoutOpts::rect`) of
-/// everything a measure actually draws: note glyph bounding boxes (heads,
-/// dots, stems, flags) and tuplet bracket/number geometry. Used to detect
-/// when the fixed sizing factors in [`notation_button`] under- or
-/// over-shoot the tile, e.g. a trailing unbeamed flag overhanging the
-/// right edge, or a tuplet number sitting close enough to the top of the
-/// tile that its glyph gets clipped.
-fn content_bounds(ui: &Ui, layout: &MeasureLayout) -> Rect {
-    let mut min = Pos2::new(f32::INFINITY, f32::INFINITY);
-    let mut max = Pos2::new(f32::NEG_INFINITY, f32::NEG_INFINITY);
-    let mut grow = |p: Pos2| {
-        min.x = min.x.min(p.x);
-        min.y = min.y.min(p.y);
-        max.x = max.x.max(p.x);
-        max.y = max.y.max(p.y);
-    };
-
-    for note in &layout.notes {
-        if let Some(bbox) = note.debug_bbox {
-            grow(bbox.min);
-            grow(bbox.max);
-        }
-        if let Some(bbox) = note.accent_debug_bbox {
-            grow(bbox.min);
-            grow(bbox.max);
-        }
-    }
-
-    for tuplet in &layout.tuplets {
-        for seg in &tuplet.bracket {
-            grow(seg.p1);
-            grow(seg.p2);
-        }
-        let digits = glyphs::tuplet_glyphs(tuplet.count);
-        let text_width = ui
-            .painter()
-            .layout_no_wrap(digits, tuplet.number_font.clone(), egui::Color32::WHITE)
-            .rect
-            .width();
-        // The galley's own rect is the font's full line box (ascent +
-        // descent), which for these SMuFL numeral glyphs is much taller
-        // than the visible ink; using it here would force needless
-        // shrinking. Approximate the drawn glyph height instead, the same
-        // way `render::glyph_metrics` heuristically sizes other SMuFL
-        // glyphs off the em rather than off font-metrics height.
-        let text_height = tuplet.number_font.size * TUPLET_NUMBER_CAP_HEIGHT_FACTOR;
-        let text_size = Vec2::new(text_width, text_height);
-        // `number_center` is the text's on-screen center (see draw_tuplets'
-        // Align2::CENTER_CENTER), so build the glyph's bounds around it
-        // rather than treating number_center as a baseline.
-        grow(tuplet.number_center - text_size * 0.5);
-        grow(tuplet.number_center + text_size * 0.5);
-    }
-
-    if !min.x.is_finite() || !max.x.is_finite() {
-        Rect::from_min_size(Pos2::ZERO, Vec2::ZERO)
-    } else {
-        Rect::from_min_max(min, max)
-    }
+/// Bounding rect (in the same pixel space as `LayoutOpts::rect`) of the ink
+/// of everything a measure draws. Used to detect when the fixed sizing
+/// factors in [`notation_button`] under- or over-shoot the tile, e.g. a
+/// trailing unbeamed flag overhanging the right edge, or a tuplet number
+/// close enough to the top of the tile to be clipped.
+fn notes_ink(layout: &MeasureLayout) -> Rect {
+    layout.notes_ink().unwrap_or(Rect::ZERO)
 }

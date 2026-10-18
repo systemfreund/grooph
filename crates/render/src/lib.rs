@@ -1,8 +1,8 @@
 pub mod beat;
-pub mod glyph_metrics;
+pub mod glyph;
 pub mod measure;
 pub mod staff;
 
-pub use glyph_metrics::measure_glyph_metrics;
+pub use glyph::draw_glyph;
 pub use measure::*;
 pub use staff::*;

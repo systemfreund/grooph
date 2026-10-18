@@ -11,14 +11,13 @@
 //!   *logical* stage — beaming groups, tuplet spans. No pixels, no fonts.
 //! * [`pixel_layout::MeasureLayout`] (built via [`pixel_layout::build_measure_layout`])
 //!   is the *pixel* stage. It internally calls `plan_measure` and turns the result
-//!   plus a `Rect`, `FontId`, and `GlyphMetrics` into concrete coordinates.
+//!   plus a `Rect` and font size into concrete coordinates: where each glyph's
+//!   origin goes, placed by the glyph's metrics from [`glyphs`].
 //! * [`staff_layout::StaffLayout`] stacks the `MeasureLayout`s of a score one
 //!   per row (clef/TS repeat rules, row width, scroll size).
 //!
 //! The renderer (`grooph_render`) consumes `MeasureLayout` / `StaffLayout` and
-//! makes no further geometry decisions. `GlyphMetrics::measure` lives in
-//! `grooph_render` (it needs a live `egui::Ui`); this crate keeps
-//! `GlyphMetrics` as a plain data struct plus `GlyphMetrics::debug` for tests.
+//! makes no further geometry decisions: it draws each glyph at its origin.
 
 mod basis;
 pub mod beam_plan;

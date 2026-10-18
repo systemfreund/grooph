@@ -10,6 +10,7 @@ use crate::measure::{
 };
 use eframe::egui;
 use eframe::egui::{Color32, Rangef, Stroke};
+use grooph_layout::glyphs;
 use grooph_layout::staff_layout::{PlacedMeasure, StaffLayout, StaffOpts, Voice};
 use grooph_measure::counting::CountConfig;
 use grooph_measure::{Cursor, MeasureIdx, Score};
@@ -208,7 +209,7 @@ fn draw_barlines(
 ) {
     let top = system.y_baseline - 0.5 * staff_opts.em;
     let bottom = system.lower_baseline.unwrap_or(system.y_baseline) + 0.5 * staff_opts.em;
-    let stroke = Stroke::new(0.04 * staff_opts.em, color);
+    let stroke = Stroke::new(glyphs::THIN_BARLINE_THICKNESS * staff_opts.staff_space(), color);
     // Inner barlines: between adjacent measures.
     for w in system.measures.windows(2) {
         let x = w[0].rect.right();
