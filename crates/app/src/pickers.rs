@@ -493,11 +493,15 @@ impl Grooph {
         } else {
             current
         };
-        let picked = choice_grid(ui, &options, shown, 3);
-        // Picking the ratio again starts its clicks over.
+        let mut picked = choice_grid(ui, &options, shown, 3);
+        // Picking the ratio again starts its clicks over; so does this, also
+        // for a ratio of one's own, which has no tile.
         if let Some(ratio) = edited {
             ui.add_space(4.0);
-            ui.label(format!("Clicks edited. Tap {ratio} to reset them."));
+            ui.label("Clicks edited.");
+            if wide_button(ui, &format!("Reset {ratio} clicks"), 18.0, ROW_HEIGHT).clicked() {
+                picked = Some(Some(ratio));
+            }
         }
         if let Some(ratio) = picked {
             self.set_counter_ratio(ratio);
