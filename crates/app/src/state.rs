@@ -105,6 +105,9 @@ pub(crate) const COUNT_IN_WAIT_TIMEOUT_S: f64 = 0.5;
 pub(crate) struct PlaybackState {
     /// Cursor position in **global ticks** across the entire score loop.
     pub(crate) smooth_tick: f64,
+    /// Like `smooth_tick`, but not held during the count-in (which it
+    /// wraps into the loop), for the metronome ring.
+    pub(crate) heard_tick: f64,
     pub(crate) last_update: Option<f64>,
     pub(crate) flash_intensity: f32,
     /// Last (measure_idx, primary_beat_in_measure) that fired the flash. Tracks

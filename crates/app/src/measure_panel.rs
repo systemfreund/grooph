@@ -287,6 +287,10 @@ impl Grooph {
         let tick =
             advance_tick(playback.smooth_tick, dt, audio_pos, latency_s, counting_in, timing);
         playback.smooth_tick = tick;
+        // Its own clock: taking over `tick` after the count-in would jump
+        // back, as `tick` starts the score from the downbeat.
+        playback.heard_tick =
+            advance_tick(playback.heard_tick, dt, audio_pos, latency_s, false, timing);
         if was_counting_in && !counting_in {
             self.realign_accuracy_clock();
         }
