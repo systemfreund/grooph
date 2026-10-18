@@ -7,6 +7,11 @@
 //! signature repeat rules, grow/shrink policy, total size for the host's
 //! scroll area) live here; per-measure pixel geometry stays in `MeasureLayout`.
 //!
+//! A staff can have a lower voice (see [`build_staff_layout_with_lower`]): a
+//! second score on a line of its own below, stems down, spaced like the
+//! upper voice so notes at the same time line up — like the feet under the
+//! hands of a drum part.
+//!
 //! Each measure grows to fill the row. If a measure doesn't fit, glyphs shrink
 //! toward [`LEGIBILITY_FLOOR_EM`]; a measure that doesn't fit even at the floor
 //! overflows its row — the caller is expected to host the result in a
@@ -65,6 +70,22 @@ impl StaffOpts {
         self.measure_opts(placed.rect, placed.show_clef, placed.show_time_signature)
     }
 
+    /// Per-measure [`LayoutOpts`] of the lower voice of a placed measure:
+    /// on its own line [`LOWER_VOICE_GAP_EM`] below, stems down.
+    pub fn lower_opts_for(&self, placed: &PlacedMeasure) -> LayoutOpts {
+        let opts = self.measure_opts(placed.rect, placed.show_clef, placed.show_time_signature);
+        Self::lower_of(opts)
+    }
+
+    fn lower_of(opts: LayoutOpts) -> LayoutOpts {
+        LayoutOpts {
+            y_offset: opts.y_offset + LOWER_VOICE_GAP_EM * opts.em,
+            stem_down: true,
+            accent_below: false,
+            ..opts
+        }
+    }
+
     /// Build per-measure [`LayoutOpts`] with a measure-local rect and clef/TS flags.
     fn measure_opts(&self, rect: Rect, show_clef: bool, show_ts: bool) -> LayoutOpts {
         LayoutOpts {
@@ -79,6 +100,7 @@ impl StaffOpts {
             stem_thickness_factor: self.stem_thickness_factor,
             accent_displacement: self.accent_displacement,
             accent_below: self.accent_below,
+            stem_down: false,
             proportional_spacing: self.proportional_spacing,
             debug_bbox: self.debug_bbox,
             metrics: self.metrics,
@@ -114,6 +136,8 @@ pub struct PlacedMeasure {
     pub measure_idx: MeasureIdx,
     pub rect: Rect,
     pub layout: MeasureLayout,
+    /// The lower voice's measure, if the staff has one.
+    pub lower: Option<MeasureLayout>,
     pub show_clef: bool,
     pub show_time_signature: bool,
 }
@@ -122,6 +146,8 @@ pub struct PlacedMeasure {
 #[derive(Debug, Clone)]
 pub struct SystemLayout {
     pub y_baseline: f32,
+    /// The lower voice's line, if the staff has one.
+    pub lower_baseline: Option<f32>,
     pub rect: Rect,
     pub measures: Vec<PlacedMeasure>,
 }
@@ -251,6 +277,21 @@ pub fn extra_room_above_em(score: &Score, accent_below: bool) -> f32 {
     extra
 }
 
+/// Distance from the staff line down to the lower voice's line, in em: room
+/// for the rests of both voices between them.
+pub const LOWER_VOICE_GAP_EM: f32 = 1.4;
+
+/// Room below the staff line a lower voice `lower` needs (for
+/// [`StaffOpts::room_below_em`]), in em: down to its line, then its stems
+/// and what hangs below them.
+pub fn lower_voice_room_below_em(lower: &Score, opts: &StaffOpts) -> f32 {
+    LOWER_VOICE_GAP_EM
+        + room_above_em(&StaffOpts {
+            room_above_extra_em: extra_room_above_em(lower, false),
+            ..opts.clone()
+        })
+}
+
 /// Vertical budget (in em) for one row's content: the headroom above the
 /// staff line plus the room below it, so adjacent rows sit as close together
 /// as legibility allows rather than leaving dead space. The staff line sits
@@ -268,6 +309,17 @@ pub fn row_height_em(opts: &StaffOpts) -> f32 {
 /// overflows its row (the caller is expected to host the result in a
 /// scrollable area) — the rare, genuinely too-dense case, not the common one.
 pub fn build_staff_layout(score: &Score, opts: &StaffOpts) -> StaffLayout {
+    build_staff_layout_with_lower(score, None, opts)
+}
+
+/// [`build_staff_layout`] with a lower voice: `lower`'s measures under the
+/// score's, one per row, each as wide as the wider of the two. The rows need
+/// [`lower_voice_room_below_em`] in [`StaffOpts::room_below_em`].
+pub fn build_staff_layout_with_lower(
+    score: &Score,
+    lower: Option<&Score>,
+    opts: &StaffOpts,
+) -> StaffLayout {
     assert!(!score.is_empty(), "Score must have at least one measure");
 
     // 1. show-flags: clef only on first. The time signature only shows when
@@ -282,8 +334,20 @@ pub fn build_staff_layout(score: &Score, opts: &StaffOpts) -> StaffLayout {
     // 2. natural widths at the baseline em. Each measure is planned (beams,
     // tuplets) once, for its width and its layout.
     let plans: Vec<RenderPlan> = score.measures.iter().map(plan_measure).collect();
+    let lower_measures = |i: usize| lower.and_then(|l| l.measures.get(i));
+    let lower_plans: Vec<Option<RenderPlan>> =
+        (0..score.len()).map(|i| lower_measures(i).map(plan_measure)).collect();
     let widths_min: Vec<f32> = (0..score.len())
-        .map(|i| min_measure_width(score, i, &plans[i], show_clef[i], show_ts[i], opts))
+        .map(|i| {
+            let upper = min_measure_width(score, i, &plans[i], show_clef[i], show_ts[i], opts);
+            let lower = match (lower, &lower_plans[i]) {
+                (Some(l), Some(plan)) => {
+                    min_measure_width(l, i, plan, show_clef[i], show_ts[i], opts)
+                }
+                _ => 0.0,
+            };
+            upper.max(lower)
+        })
         .collect();
     let available = opts.rect.width().max(0.0);
 
@@ -311,14 +375,22 @@ pub fn build_staff_layout(score: &Score, opts: &StaffOpts) -> StaffLayout {
         let rect = Rect::from_min_size(pos2(left, y_acc), vec2(width, row_height));
         let per_opts = effective_opts.measure_opts(rect, show_clef[i], show_ts[i]);
         let layout = build_measure_layout_with_plan(&score.measures[i], &plans[i], &per_opts);
+        let lower_opts = StaffOpts::lower_of(per_opts);
+        let lower_layout = lower_measures(i)
+            .zip(lower_plans[i].as_ref())
+            .map(|(m, plan)| build_measure_layout_with_plan(m, plan, &lower_opts));
         max_row_width = max_row_width.max(width);
+        let y_baseline =
+            rect.center().y + effective_opts.y_offset + effective_opts.baseline_shift();
         systems.push(SystemLayout {
-            y_baseline: rect.center().y + effective_opts.y_offset + effective_opts.baseline_shift(),
+            y_baseline,
+            lower_baseline: lower_layout.as_ref().map(|_| lower_opts.y_center()),
             rect,
             measures: vec![PlacedMeasure {
                 measure_idx: i,
                 rect,
                 layout,
+                lower: lower_layout,
                 show_clef: show_clef[i],
                 show_time_signature: show_ts[i],
             }],
@@ -434,6 +506,30 @@ mod tests {
                 b.center.x
             );
         }
+    }
+
+    #[test]
+    fn lower_voice_lines_up_below() {
+        use grooph_measure::notation::parse_score;
+        let em = 20.0;
+        let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(400.0, 100.0));
+        let upper = parse_score("4/4 >q q q q").unwrap();
+        let lower = parse_score("4/4 t4 r:t4 (t4) r:t4 (t4) r:t4").unwrap();
+        let mut staff_opts = opts(em, rect);
+        staff_opts.room_below_em = lower_voice_room_below_em(&lower, &staff_opts);
+        let staff = build_staff_layout_with_lower(&upper, Some(&lower), &staff_opts);
+        let system = &staff.systems[0];
+        let gap = system.lower_baseline.unwrap() - system.y_baseline;
+        assert!((gap - LOWER_VOICE_GAP_EM * em).abs() < 0.01);
+        let placed = &system.measures[0];
+        let below = placed.lower.as_ref().unwrap();
+        // Both voices start their beats at the same x: beat 1 and beat 3.
+        assert!((placed.layout.notes[0].center.x - below.notes[0].center.x).abs() < 0.5);
+        assert!((placed.layout.notes[2].center.x - below.notes[3].center.x).abs() < 0.5);
+        // The lower voice's stems end inside the row.
+        let stem_end = below.notes[0].stem.unwrap().p2.y;
+        assert!(stem_end > system.lower_baseline.unwrap() && stem_end < placed.rect.bottom());
+        assert!(build_staff_layout(&upper, &opts(em, rect)).systems[0].lower_baseline.is_none());
     }
 
     #[test]

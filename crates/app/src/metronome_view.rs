@@ -290,8 +290,8 @@ impl Grooph {
         self.playback_ctl.audio_cfg.counter.for_meter(self.metronome_meter())
     }
 
-    /// The counter rhythm as a score of its own, for the staff below the
-    /// click bar: in the metronome tab, if its meter has one.
+    /// The counter rhythm as a score of its own, the lower voice of the staff
+    /// under the click bar: in the metronome tab, if its meter has one.
     pub(crate) fn counter_staff_score(&self) -> Option<Score> {
         if !self.metronome_mode() {
             return None;

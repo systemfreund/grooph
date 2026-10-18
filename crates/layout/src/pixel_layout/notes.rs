@@ -288,7 +288,10 @@ pub(super) fn build_note_layout(
         if is_note {
             let stem_len_factor = if in_beam || needs_flag { 1.0 } else { 0.85 };
             let stem_len = opts.stem_length() * stem_len_factor;
-            let ideal_stem_x = ideal_cx + opts.stem_offset();
+            // Down stems hang off the head's left side (flipped later, see
+            // `flip_down`).
+            let stem_dx = if opts.stem_down { -opts.stem_offset() } else { opts.stem_offset() };
+            let ideal_stem_x = ideal_cx + stem_dx;
             let snapped_stem_x = opts.snap_x(ideal_stem_x, opts.stem_thickness());
 
             let start = Pos2::new(snapped_stem_x, cy - opts.em * 0.05);

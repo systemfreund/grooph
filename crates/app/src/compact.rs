@@ -29,7 +29,7 @@ const SIDE_BUTTON_SIZE: f32 = 52.0;
 const METRONOME_STAFF_SHARE: f32 = 0.35;
 const METRONOME_STAFF_MIN: f32 = 100.0;
 const METRONOME_STAFF_MAX: f32 = 220.0;
-/// The same with the counter rhythm's row below the click bar.
+/// The same with the counter rhythm as a second voice under the click bar.
 const METRONOME_TWO_STAFF_SHARE: f32 = 0.45;
 const METRONOME_TWO_STAFF_MAX: f32 = 340.0;
 const CARD_RADIUS: u8 = 16;

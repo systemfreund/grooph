@@ -120,6 +120,9 @@ pub struct LayoutOpts {
 
     pub accent_displacement: f32,
     pub accent_below: bool,
+    /// Stems point down, with beams, flags, tuplets and accents below the
+    /// notes: the lower voice of a staff with two.
+    pub stem_down: bool,
     pub proportional_spacing: bool,
     pub debug_bbox: bool,
     pub metrics: GlyphMetrics,
@@ -286,13 +289,47 @@ pub fn build_measure_layout_with_plan(
     let tuplet_layout =
         tuplets::build_tuplet_layout(measure.beats(), &note_layout, &render_plan.tuplets, opts);
 
-    MeasureLayout {
+    let mut layout = MeasureLayout {
         beams: beam_layout,
         notes: note_layout,
         tuplets: tuplet_layout,
         clef_pos,
         time_signature: time_signature_layout,
         notes_left_edge,
+    };
+    if opts.stem_down {
+        flip_down(&mut layout, opts);
+    }
+    layout
+}
+
+/// Mirror what hangs off the stems (stems, flags, beams, tuplets, accents)
+/// to below the staff line. Heads, rests and dots stay where they are.
+fn flip_down(layout: &mut MeasureLayout, opts: &LayoutOpts) {
+    let cy = opts.y_center();
+    let y = |y: f32| 2.0 * cy - y;
+    let pos = |p: Pos2| Pos2::new(p.x, y(p.y));
+    let rect = |r: Rect| Rect::from_two_pos(pos(r.min), pos(r.max));
+    let accent_half_h = opts.metrics.accent_size.y * 0.5;
+    for note in &mut layout.notes {
+        if let Some(stem) = &mut note.stem {
+            *stem = Line { p1: pos(stem.p1), p2: pos(stem.p2) };
+        }
+        note.flag_pos = note.flag_pos.map(pos);
+        // The accent glyph is placed half its height below its middle.
+        note.accent_pos =
+            note.accent_pos.map(|p| Pos2::new(p.x, y(p.y - accent_half_h) + accent_half_h));
+        note.debug_bbox = note.debug_bbox.map(rect);
+        note.accent_debug_bbox = note.accent_debug_bbox.map(rect);
+    }
+    for beam in &mut layout.beams {
+        beam.rect = rect(beam.rect);
+    }
+    for tuplet in &mut layout.tuplets {
+        tuplet.number_center = pos(tuplet.number_center);
+        for line in &mut tuplet.bracket {
+            *line = Line { p1: pos(line.p1), p2: pos(line.p2) };
+        }
     }
 }
 
@@ -390,6 +427,7 @@ mod tests {
             stem_thickness_factor: 0.1,
             accent_displacement: 0.0,
             accent_below: false,
+            stem_down: false,
             proportional_spacing: true,
             debug_bbox: false,
             metrics: GlyphMetrics::debug(em),
@@ -423,6 +461,7 @@ mod tests {
             stem_thickness_factor: 0.1,
             accent_displacement: 0.0,
             accent_below: false,
+            stem_down: false,
             proportional_spacing: true,
             debug_bbox: true,
             metrics: GlyphMetrics::debug(em),
@@ -464,6 +503,7 @@ mod tests {
             stem_thickness_factor: 0.1,
             accent_displacement: 0.0,
             accent_below: false,
+            stem_down: false,
             proportional_spacing: true,
             debug_bbox: true,
             metrics: GlyphMetrics::debug(em),
@@ -515,6 +555,7 @@ mod tests {
             stem_thickness_factor: 0.1,
             accent_displacement: displacement,
             accent_below: false,
+            stem_down: false,
             proportional_spacing: true,
             debug_bbox: true,
             metrics: GlyphMetrics::debug(em),
@@ -569,6 +610,7 @@ mod tests {
             stem_thickness_factor: 0.1,
             accent_displacement: 0.5,
             accent_below: false,
+            stem_down: false,
             proportional_spacing: true,
             debug_bbox: true,
             metrics: GlyphMetrics::debug(em),
@@ -620,6 +662,7 @@ mod tests {
             stem_thickness_factor: 0.1,
             accent_displacement: 0.0,
             accent_below: false,
+            stem_down: false,
             proportional_spacing: true,
             debug_bbox: true,
             metrics: GlyphMetrics::debug(em),
@@ -675,6 +718,7 @@ mod tests {
             stem_thickness_factor: 0.1,
             accent_displacement: 0.0,
             accent_below: false,
+            stem_down: false,
             proportional_spacing: true,
             debug_bbox: true,
             metrics: GlyphMetrics::debug(em),
@@ -698,6 +742,44 @@ mod tests {
     }
 
     #[test]
+    fn down_stems_mirror_what_hangs_off_them() {
+        use grooph_measure::notation::parse_score;
+        let m = parse_score("4/4 >t8 t8 t8 e e q q").unwrap().measures.remove(0);
+        let em = 20.0;
+        let up = LayoutOpts {
+            rect: Rect::from_min_max(Pos2::ZERO, Pos2::new(300.0, 200.0)),
+            font_id: FontId::new(em, FontFamily::Proportional),
+            pixels_per_point: 1.0,
+            em,
+            layout_clef: false,
+            layout_time_signature: false,
+            y_offset: 0.0,
+            stem_length_factor: 3.5,
+            stem_thickness_factor: 0.1,
+            accent_displacement: 0.1,
+            accent_below: false,
+            stem_down: false,
+            proportional_spacing: true,
+            debug_bbox: false,
+            metrics: GlyphMetrics::debug(em),
+        };
+        let down = LayoutOpts { stem_down: true, ..up.clone() };
+        let (a, b) = (build_measure_layout(&m, &up), build_measure_layout(&m, &down));
+        let cy = up.y_center();
+        for (u, d) in a.notes.iter().zip(&b.notes) {
+            // Same heads, the stem on the other side and below the line.
+            assert_eq!(u.center, d.center);
+            if let (Some(us), Some(ds)) = (u.stem, d.stem) {
+                assert!(us.p1.x > u.center.x && ds.p1.x < d.center.x);
+                assert!((ds.p2.y - cy - (cy - us.p2.y)).abs() < 0.01);
+            }
+        }
+        assert!(b.notes[0].accent_pos.unwrap().y > cy);
+        assert!(b.beams.iter().all(|r| r.rect.min.y > cy));
+        assert!(b.tuplets[0].number_center.y > cy);
+    }
+
+    #[test]
     fn soft_notes_dont_squeeze_plain_ones_of_the_same_length() {
         use grooph_measure::notation::parse_score;
         let m = parse_score("4/4 >t8 t8 (t8) t8 (t8) (t8) t8 (t8) (t8) t8 (t8) (t8)")
@@ -717,6 +799,7 @@ mod tests {
             stem_thickness_factor: 0.1,
             accent_displacement: 0.0,
             accent_below: false,
+            stem_down: false,
             proportional_spacing: true,
             debug_bbox: false,
             metrics: GlyphMetrics::debug(em),
