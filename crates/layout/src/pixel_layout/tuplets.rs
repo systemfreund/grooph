@@ -17,15 +17,15 @@ pub(super) fn build_tuplet_layout(
     // The bracket line above the stems, which the number is centered on
     let y_base = opts.y_center() - opts.stem_length() - bracket_gap;
 
-    let x_from_idx = |idx: usize| -> f32 {
-        let n = note_layout.get(idx).unwrap();
-        if let Some(stem) = &n.stem { stem.p1.x } else { n.center.x }
-    };
+    // A bracket spans from the left edge of its first head or rest to the
+    // right edge of its last, whichever side the stems are on.
+    let left_of = |idx: usize| note_layout[idx].head.ink().left();
+    let right_of = |idx: usize| note_layout[idx].head.ink().right();
 
     let mut tuplets_out: Vec<TupletLayout> = Vec::new();
     for t in tuplet_plan {
-        let mut x_l = x_from_idx(t.start);
-        let mut x_r = x_from_idx(t.end);
+        let mut x_l = left_of(t.start);
+        let mut x_r = right_of(t.end);
         let margin = opts.em * c::TUPLET_MARGIN_EM;
         x_l -= margin;
         x_r += margin;

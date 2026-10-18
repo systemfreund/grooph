@@ -68,7 +68,11 @@ impl Grooph {
         let Some(url) = self.share_link_url() else {
             return;
         };
-        if !platform::open_share_sheet(&url) {
+        let shared = match &self.ui.host {
+            Some(host) => host.share(&url),
+            None => platform::open_share_sheet(&url),
+        };
+        if !shared {
             ui.ctx().copy_text(url);
             self.ui.link_copied_at = Some(ui.input(|i| i.time));
         }

@@ -8,7 +8,7 @@ use crate::platform::PlatformRuntime;
 use crate::play_along::PlayAlongState;
 use crate::presets::{PresetId, PresetLibrary};
 use crate::undo::UndoHistory;
-use crate::{CountingSettings, Mode, TransportState};
+use crate::{CountingSettings, Host, Mode, TransportState};
 use eframe::egui::TextStyle;
 use eframe::egui::emath::{ease_in_ease_out, lerp};
 use eframe::epaint::FontId;
@@ -105,6 +105,9 @@ pub(crate) const COUNT_IN_WAIT_TIMEOUT_S: f64 = 0.5;
 pub(crate) struct PlaybackState {
     /// Cursor position in **global ticks** across the entire score loop.
     pub(crate) smooth_tick: f64,
+    /// Like `smooth_tick`, but not held during the count-in (which it
+    /// wraps into the loop), for the metronome ring.
+    pub(crate) heard_tick: f64,
     pub(crate) last_update: Option<f64>,
     pub(crate) flash_intensity: f32,
     /// Last (measure_idx, primary_beat_in_measure) that fired the flash. Tracks
@@ -200,6 +203,9 @@ pub(crate) struct MicState {
     pub(crate) monitor_until: f64,
     /// Level shown by the meter (dBFS); falls back slowly after a peak.
     pub(crate) level_db: f32,
+    /// The host was asked for microphone access since the microphone was
+    /// last wanted, so it is not asked again until then.
+    pub(crate) permission_asked: bool,
 }
 
 /// Score editing surface: the document, where the cursor sits, undo history,
@@ -283,6 +289,8 @@ pub(crate) struct UiShell {
     pub(crate) picker: Option<Picker>,
     /// Taps of the tap-tempo buttons (tempo picker).
     pub(crate) tap_tempo: TapTempo,
+    /// Share sheet and permissions of the app around this one (Android).
+    pub(crate) host: Option<Box<dyn Host>>,
 }
 
 /// Something that replaces the working score once unsaved changes are dealt with.

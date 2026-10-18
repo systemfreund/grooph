@@ -32,11 +32,21 @@ impl Glyph {
 
 pub fn rest_glyph_for_duration(d: Duration) -> Glyph {
     match d.base_note() {
+        Whole => REST_WHOLE,
+        Half => REST_HALF,
         Quarter => REST_QUARTER,
         Eighth => REST_8TH,
         Sixteenth => REST_16TH,
         ThirtySecond => REST_32ND,
-        Half | Whole => REST_QUARTER,
+    }
+}
+
+/// Hollow for halves (and wholes), filled for the rest. Both heads have the
+/// same size and stem anchors.
+pub fn notehead_glyph_for_duration(d: Duration) -> Glyph {
+    match d.base_note() {
+        Half | Whole => NOTEHEAD_HALF,
+        _ => NOTEHEAD_BLACK,
     }
 }
 
@@ -76,4 +86,18 @@ pub fn ts_glyphs(n: u8) -> Vec<Glyph> {
 /// The digits of `n` for a tuplet number.
 pub fn tuplet_glyphs(n: u8) -> Vec<Glyph> {
     digits(n, &TUPLET_DIGITS)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn note_heads_share_their_metrics() {
+        // The layout sizes and attaches stems by the black head's metrics.
+        let (black, half) = (NOTEHEAD_BLACK, NOTEHEAD_HALF);
+        assert_eq!((black.advance, black.sw, black.ne), (half.advance, half.sw, half.ne));
+        assert_eq!(NOTEHEAD_BLACK_STEM_UP_SE, NOTEHEAD_HALF_STEM_UP_SE);
+        assert_eq!(NOTEHEAD_BLACK_STEM_DOWN_NW, NOTEHEAD_HALF_STEM_DOWN_NW);
+    }
 }

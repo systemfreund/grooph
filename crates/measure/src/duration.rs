@@ -262,7 +262,7 @@ pub fn human_readable(d: &Duration) -> String {
     }
 }
 
-pub const COMMON_DURATIONS: [Duration; 18] = [
+pub const COMMON_DURATIONS: [Duration; 22] = [
     q(),
     e(),
     s(),
@@ -281,6 +281,10 @@ pub const COMMON_DURATIONS: [Duration; 18] = [
     nt16(),  // nonuplet 1/16
     qt4(),   // quintuplet 1/4
     spt4(),  // septuplet 1/4
+    h(),     // 1/2
+    t2(),    // triplet 1/2
+    qt8(),   // quintuplet 1/8
+    spt8(),  // septuplet 1/8
 ];
 
 pub const fn q() -> Duration {
@@ -326,6 +330,21 @@ pub const fn qt4() -> Duration {
 /// Seven quarters in the time of four.
 pub const fn spt4() -> Duration {
     Duration::Tuplet(TupletSpec { n: 7, m: 4, base: Quarter })
+}
+pub const fn h() -> Duration {
+    Duration::Simple(Half)
+}
+/// Three halves in the time of two: three even clicks over a 4/4 bar.
+pub const fn t2() -> Duration {
+    Duration::Tuplet(TupletSpec { n: 3, m: 2, base: Half })
+}
+/// Five eighths in the time of four: five even clicks over two quarters.
+pub const fn qt8() -> Duration {
+    Duration::Tuplet(TupletSpec { n: 5, m: 4, base: Eighth })
+}
+/// Seven eighths in the time of four.
+pub const fn spt8() -> Duration {
+    Duration::Tuplet(TupletSpec { n: 7, m: 4, base: Eighth })
 }
 
 #[cfg(test)]

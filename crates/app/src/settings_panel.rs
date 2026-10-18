@@ -9,9 +9,9 @@ use grooph_mic::MicStatus;
 
 impl Grooph {
     pub(super) fn settings_panel(&mut self, ui: &mut egui::Ui) {
-        egui::Panel::bottom("settings").resizable(true).show_animated_inside(
+        egui::Panel::bottom("settings").resizable(true).drag_to_open(false).show_collapsible(
             ui,
-            self.ui.mode == Mode::Settings,
+            &mut (self.ui.mode == Mode::Settings),
             |ui| {
                 ui.set_min_height(300.0);
                 egui::ScrollArea::vertical().show(ui, |ui| {
@@ -334,6 +334,12 @@ impl Grooph {
         mic.monitor_until = clock::now_seconds() + 1.0;
         let status = mic.input.as_ref().map(|input| input.status());
         match status {
+            None if mic.permission_asked => {
+                ui.label(
+                    "Waiting for microphone access. If you denied it, allow it in the \
+                     system settings.",
+                );
+            }
             None | Some(MicStatus::Starting) => {
                 ui.label("Starting the microphone…");
             }

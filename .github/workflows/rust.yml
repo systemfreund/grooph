@@ -62,6 +62,63 @@ jobs:
         path: dist
         retention-days: 7
 
+  android:
+    # Build the Android app: the App Bundle for Google Play and an APK to
+    # install directly (crates/android/build-android.sh). The runner image
+    # ships the Android SDK and NDK. Without the upload key secrets both are
+    # signed with a throwaway key, for trying out only. Download them from
+    # the run's artifacts.
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install Rust (Android targets)
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: aarch64-linux-android, x86_64-linux-android
+    - uses: Swatinem/rust-cache@v2
+    - name: Install cargo-ndk
+      run: cargo install cargo-ndk --locked
+    - name: Install the Android platform and bundletool
+      run: |
+        yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "platforms;android-36" "build-tools;36.0.0" > /dev/null
+        curl -sSfL -o "$RUNNER_TEMP/bundletool.jar" \
+          https://github.com/google/bundletool/releases/download/1.18.1/bundletool-all-1.18.1.jar
+    - name: Set up the signing key
+      # The upload key comes from the repository secrets (see README
+      # "Android"); without them, a throwaway key.
+      env:
+        UPLOAD_KEYSTORE_BASE64: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_BASE64 }}
+        UPLOAD_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_PASSWORD }}
+        UPLOAD_KEY_ALIAS: ${{ secrets.ANDROID_UPLOAD_KEY_ALIAS }}
+      run: |
+        keystore="$RUNNER_TEMP/grooph.keystore"
+        if [ -n "$UPLOAD_KEYSTORE_BASE64" ]; then
+          echo "$UPLOAD_KEYSTORE_BASE64" | base64 -d > "$keystore"
+          echo "::add-mask::$UPLOAD_KEYSTORE_PASSWORD"
+          { echo "KEYSTORE_PASSWORD=$UPLOAD_KEYSTORE_PASSWORD"; echo "KEY_ALIAS=$UPLOAD_KEY_ALIAS"; } >> "$GITHUB_ENV"
+        else
+          keytool -genkeypair -keystore "$keystore" -alias throwaway -keyalg RSA -keysize 2048 \
+            -validity 10000 -storepass android -keypass android -dname "CN=grooph test build"
+          { echo "KEYSTORE_PASSWORD=android"; echo "KEY_ALIAS=throwaway"; } >> "$GITHUB_ENV"
+        fi
+        echo "KEYSTORE=$keystore" >> "$GITHUB_ENV"
+    - name: Build the App Bundle and the APK
+      # ANDROID_NDK_LATEST_HOME is set by the runner image, not the env context.
+      run: ANDROID_NDK_HOME="$ANDROID_NDK_LATEST_HOME" crates/android/build-android.sh
+      env:
+        BUNDLETOOL: ${{ runner.temp }}/bundletool.jar
+        # Google Play needs a higher version code on every upload.
+        VERSION_CODE: ${{ github.run_number }}
+    - name: Keep the App Bundle and the APK
+      uses: actions/upload-artifact@v4
+      with:
+        name: grooph-android
+        path: |
+          target/android/grooph.aab
+          target/android/grooph.apk
+        retention-days: 14
+
   deploy:
     # Publish the web app to Cloudflare Pages after every push to main,
     # once the native checks and the web build have passed.

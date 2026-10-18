@@ -12,7 +12,7 @@ use eframe::egui;
 use eframe::egui::{Button, Color32, FontId, Id, Modal, Response, RichText, Ui, vec2};
 use grooph_audio::CounterSound;
 use grooph_measure::TimeSignature;
-use grooph_measure::counter::{Ratio, ratio_of};
+use grooph_measure::counter::{Ratio, own_ratios, ratio_of, step_clicks, step_span};
 use grooph_measure::generator::{
     BeatSpan, FigureSet, MAX_BARS, MAX_COMPLEXITY, Subdivision, complexity_figures,
     effective_subdivision, figures, offered_subdivisions, supports_time_signature,
@@ -121,6 +121,44 @@ fn choice_grid<T: Copy + PartialEq>(
 }
 
 /// Full-width button with a centered label.
+/// Two steppers for `ratio`, its clicks and its beats, each skipping to the
+/// next value `ts` has a counter bar for. The numbers are lit while `active`
+/// (the counter rhythm plays `ratio`). Returns the ratio stepped to.
+fn ratio_stepper(ui: &mut Ui, ts: TimeSignature, ratio: Ratio, active: bool) -> Option<Ratio> {
+    let mut stepped = None;
+    let own = own_ratios(ts);
+    let spacing = ui.spacing().item_spacing.x;
+    // Four buttons, two numbers and the colon in one row; on a narrow
+    // picker the buttons give way first.
+    let room = ui.available_width() - 6.0 * spacing;
+    let button = ((room - 3.0 * 24.0) / 4.0).clamp(28.0, ROW_HEIGHT);
+    let number = ((room - 4.0 * button) / 3.0).max(16.0);
+    let color = if active { ui.visuals().strong_text_color() } else { ui.visuals().text_color() };
+    let mut step = |ui: &mut Ui, label: &str, to: Option<Ratio>| {
+        let button =
+            Button::new(RichText::new(label).size(22.0)).min_size(vec2(button, ROW_HEIGHT));
+        if ui.add_enabled(to.is_some(), button).clicked() {
+            stepped = to;
+        }
+    };
+    let value = |ui: &mut Ui, text: String| {
+        ui.add_sized(
+            vec2(number, ROW_HEIGHT),
+            egui::Label::new(RichText::new(text).size(24.0).color(color)),
+        );
+    };
+    ui.horizontal(|ui| {
+        step(ui, "−", step_clicks(&own, ratio, false));
+        value(ui, ratio.n.to_string());
+        step(ui, "+", step_clicks(&own, ratio, true));
+        value(ui, ":".to_owned());
+        step(ui, "−", step_span(&own, ratio, false));
+        value(ui, ratio.span.to_string());
+        step(ui, "+", step_span(&own, ratio, true));
+    });
+    stepped
+}
+
 fn wide_button(ui: &mut Ui, label: &str, size: f32, height: f32) -> Response {
     let width = ui.available_width();
     ui.horizontal(|ui| {
@@ -141,7 +179,7 @@ impl Grooph {
         let width = (ui.ctx().content_rect().width() - 48.0).clamp(200.0, 380.0);
         let mut preset = None;
 
-        let modal = Modal::new(Id::new("settings_picker")).show(ui.ctx(), |ui| {
+        let modal = Modal::new(Id::unique("settings_picker")).show(ui.ctx(), |ui| {
             ui.set_width(width);
             let title = match picker {
                 Picker::TimeSignature => "Time signature",
@@ -240,7 +278,7 @@ impl Grooph {
                     ui.available_width() - 2.0 * (ROW_HEIGHT + ui.spacing().item_spacing.x) - 16.0;
                 let field = ui.add(
                     egui::TextEdit::singleline(&mut preset.name)
-                        .id(Id::new("rename_preset"))
+                        .id(Id::unique("rename_preset"))
                         .desired_width(field_width),
                 );
                 // Typing goes to the name while nothing else has the focus.
@@ -437,7 +475,8 @@ impl Grooph {
     }
 
     /// Counter rhythms of the metronome meter, "N:M" for N clicks in the
-    /// time of M beats, then the sound they play with.
+    /// time of M beats, then one of one's own, then the sound they play
+    /// with.
     fn polyrhythm_choices(&mut self, ui: &mut Ui) -> bool {
         let current = self.counter_bar().and_then(ratio_of);
         let mut options = vec![(None, "Off".to_owned())];
@@ -452,6 +491,21 @@ impl Grooph {
         if let Some(ratio) = picked {
             self.set_counter_ratio(ratio);
         }
+
+        // Any N and M the meter has a counter bar for, stepped through.
+        let ts = self.metronome_meter();
+        let own = current
+            .or_else(|| self.counter_choices().first().copied())
+            .or_else(|| own_ratios(ts).first().copied());
+        if let Some(own) = own {
+            ui.add_space(8.0);
+            ui.label("Your own (clicks : beats)");
+            let active = current == Some(own);
+            if let Some(ratio) = ratio_stepper(ui, ts, own, active) {
+                self.set_counter_ratio(Some(ratio));
+            }
+        }
+
         ui.add_space(8.0);
         ui.label("Sound");
         let settings = &mut self.playback_ctl.audio_cfg.settings;
@@ -534,7 +588,7 @@ impl Grooph {
             ui.horizontal_wrapped(|ui| {
                 for figure in of_span {
                     let measure = figure.measure();
-                    let id = egui::Id::new(("figure", figure.id.0));
+                    let id = egui::IdSalt::new(("figure", figure.id.0));
                     let tile = notation_button(
                         ui,
                         id,

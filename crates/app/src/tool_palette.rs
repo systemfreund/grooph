@@ -5,8 +5,8 @@ use crate::{Mode, tools};
 use eframe::egui;
 use eframe::egui::scroll_area::{ScrollBarVisibility, ScrollSource};
 use eframe::egui::{
-    Align, Atom, Button, Direction, FontFamily, FontId, Id, Layout, Rect, Response, RichText, Ui,
-    Vec2,
+    Align, Atom, Button, Direction, FontFamily, FontId, IdSalt, Layout, Rect, Response, RichText,
+    Ui, Vec2,
 };
 use grooph_layout::pixel_layout::{
     LayoutOpts, MeasureLayout, build_measure_layout, build_time_sig_layout, compute_em,
@@ -45,7 +45,7 @@ impl Grooph {
         egui::Panel::bottom("tool_palette")
             .show_separator_line(false)
             .resizable(false)
-            .show_animated_inside(ui, self.ui.mode == Mode::Edit, |ui| {
+            .show_collapsible(ui, &mut (self.ui.mode == Mode::Edit), |ui| {
                 let tools = all_tools().iter().filter(|t| t.show_in_palette).collect::<Vec<_>>();
                 let groups = [
                     ToolGroup::Edit,
@@ -257,7 +257,7 @@ impl Grooph {
     }
 
     fn time_signature_button(&self, ui: &mut Ui, id: &str) -> Response {
-        let symbol_id = Id::new(id);
+        let symbol_id = IdSalt::new(id);
         let symbol = Atom::custom(symbol_id, Vec2::splat(TOOL_PALETTE_BUTTON_SIZE));
         let button =
             Button::new(symbol).corner_radius(TOOL_PALETTE_BUTTON_CORNER_RADIUS).atom_ui(ui);
@@ -297,7 +297,7 @@ impl Grooph {
 
     fn note_button(&self, ui: &mut Ui, id: &str) -> Response {
         let measure = self.editor.button_measures.get(id).unwrap();
-        notation_button(ui, Id::new(id), measure, self.ui.music_font_id.family.clone(), false)
+        notation_button(ui, IdSalt::new(id), measure, self.ui.music_font_id.family.clone(), false)
     }
 }
 
@@ -305,7 +305,7 @@ impl Grooph {
 /// picker). `selected` renders it in the highlighted state.
 pub(crate) fn notation_button(
     ui: &mut Ui,
-    symbol_id: Id,
+    symbol_id: IdSalt,
     measure: &Measure,
     family: FontFamily,
     selected: bool,

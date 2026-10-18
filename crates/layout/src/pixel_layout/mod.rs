@@ -30,7 +30,7 @@ mod c {
     pub const TUPLET_HOOK_LEN_SS: f32 = 0.80;
     pub const TUPLET_HOOK_DY_FACTOR: f32 = 0.85;
     pub const TUPLET_DIGIT_FONT_FACTOR: f32 = 0.75;
-    pub const TUPLET_MARGIN_EM: f32 = 0.15;
+    pub const TUPLET_MARGIN_EM: f32 = 0.05;
     /// Space between the number's ink and the bracket on either side.
     pub const TUPLET_NUMBER_CLEARANCE_SS: f32 = 1.75;
     pub const TUPLET_ACCENT_RAISE_SS: f32 = 1.40;
@@ -358,14 +358,18 @@ pub fn build_measure_layout_with_plan(
 
 /// Mirror what hangs off the stems (stems, flags, beams, tuplets, accents)
 /// to below the staff line, and lower the rests a staff space, clear of an
-/// upper voice's. Heads and dots stay where they are.
+/// upper voice's. Heads and dots stay where they are, and so do half and
+/// whole rests: they are told apart only by sitting on the line or hanging
+/// from it.
 fn flip_down(layout: &mut MeasureLayout, opts: &LayoutOpts) {
     let cy = opts.y_center();
     let y = |y: f32| 2.0 * cy - y;
     let pos = |p: Pos2| Pos2::new(p.x, y(p.y));
     let rect = |r: Rect| Rect::from_two_pos(pos(r.min), pos(r.max));
     for note in &mut layout.notes {
-        if note.kind == BeatKind::Rest {
+        if note.kind == BeatKind::Rest
+            && !matches!(note.duration.base_note(), NoteValue::Half | NoteValue::Whole)
+        {
             note.center.y += opts.staff_space();
             note.head.origin.y += opts.staff_space();
         }
@@ -762,6 +766,34 @@ mod tests {
         let ink = |l: &MeasureLayout| ink_of(&l.tuplets[0].number).unwrap();
         assert!(ink(&b).top() > cy);
         assert!((ink(&b).center().y - cy - (cy - ink(&a).center().y)).abs() < 0.01);
+    }
+
+    #[test]
+    fn lower_rests_drop_but_half_rests_keep_their_line() {
+        use grooph_measure::notation::parse_score;
+        let m = parse_score("4/4 h r:q r:q").unwrap().measures.remove(0);
+        let h = parse_score("4/4 h r:h").unwrap().measures.remove(0);
+        let em = 20.0;
+        let down = LayoutOpts {
+            rect: Rect::from_min_max(Pos2::ZERO, Pos2::new(300.0, 200.0)),
+            font_id: FontId::new(em, FontFamily::Proportional),
+            pixels_per_point: 1.0,
+            em,
+            layout_clef: false,
+            layout_time_signature: false,
+            y_offset: 0.0,
+            stem_length_factor: 3.5,
+            stem_thickness_factor: 0.1,
+            accent_displacement: 0.1,
+            accent_below: false,
+            stem_down: true,
+            proportional_spacing: true,
+            debug_bbox: false,
+        };
+        let cy = down.y_center();
+        let quarter_rest = build_measure_layout(&m, &down).notes[1].center.y;
+        assert!((quarter_rest - cy - down.staff_space()).abs() < 0.01);
+        assert_eq!(build_measure_layout(&h, &down).notes[1].center.y, cy);
     }
 
     #[test]

@@ -8,17 +8,17 @@ use eframe::egui::{FontId, Frame, Rect, Response, Stroke};
 use grooph_layout::pixel_layout::{MeasureLayout, compute_em};
 use grooph_layout::staff_layout::{
     LEGIBILITY_FLOOR_EM, LOWER_VOICE_LABEL_ROOM_EM, PlacedMeasure, ROOM_BELOW_EM,
-    ROOM_BELOW_WITH_LABELS_EM, StaffLayout, StaffOpts, build_staff_layout_with_lower,
-    extra_room_above_em, lower_voice_room_below_em, row_height_em,
+    ROOM_BELOW_WITH_LABELS_EM, StaffLayout, StaffOpts, Voice, build_staff_layout_with_lower,
+    extra_room_above_em, hit_test_voice, lower_voice_room_below_em, row_height_em,
 };
-use grooph_measure::TimeSignature;
 use grooph_measure::grid::DEFAULT_GRID;
 use grooph_measure::tempo::ScoreTiming;
+use grooph_measure::{Score, TimeSignature};
 use grooph_render::staff::draw_staff;
 
 impl Grooph {
     pub(super) fn measure_panel(&mut self, ui: &mut egui::Ui) {
-        egui::CentralPanel::default().show_inside(ui, |ui| {
+        egui::CentralPanel::default().show(ui, |ui| {
             Frame::canvas(ui.style())
                 .fill(egui::Color32::TRANSPARENT)
                 .stroke(egui::Stroke::NONE)
@@ -43,8 +43,15 @@ impl Grooph {
                         let viewport_rect = Rect::from_min_size(origin, available);
 
                         // The metronome's counter rhythm, the lower voice
-                        // under its click bar.
-                        let counter = self.counter_staff_score();
+                        // under its click bar. The editor holds one of the
+                        // two (the one being edited), the other comes from
+                        // the audio settings.
+                        let voice = self.edited_voice();
+                        let other = self.other_voice_score();
+                        let (upper, counter) = match voice {
+                            Voice::Upper => (None, other),
+                            Voice::Lower => (other, Some(self.editor.score.clone())),
+                        };
 
                         // Build the multi-measure tempo backbone once per frame.
                         // O(score.len()) — cheap for realistic score sizes.
@@ -100,7 +107,7 @@ impl Grooph {
                                 ROOM_BELOW_EM
                             },
                             room_above_extra_em: extra_room_above_em(
-                                &self.editor.score,
+                                upper.as_ref().unwrap_or(&self.editor.score),
                                 self.ui.layout.accent_below,
                             ),
                         };
@@ -126,11 +133,9 @@ impl Grooph {
                             staff_opts
                         };
 
-                        let staff = build_staff_layout_with_lower(
-                            &self.editor.score,
-                            counter.as_ref(),
-                            &staff_opts,
-                        );
+                        let upper = upper.as_ref().unwrap_or(&self.editor.score);
+                        let staff =
+                            build_staff_layout_with_lower(upper, counter.as_ref(), &staff_opts);
                         // Rows may render at a different em than the baseline `staff_opts`
                         // (grow-to-fill / shrink-toward-floor) — rescale font/metrics to
                         // match before drawing, so glyph size agrees with `staff`'s positions.
@@ -149,11 +154,8 @@ impl Grooph {
                         // the shared helper to find the cursor's actual home measure
                         // and X for this frame.
                         if let Some(playback) = playback_local
-                            && let Some((m_idx, x)) = grooph_render::staff::current_cursor_x(
-                                &self.editor.score,
-                                &staff,
-                                playback,
-                            )
+                            && let Some((m_idx, x)) =
+                                grooph_render::staff::current_cursor_x(upper, &staff, playback)
                             && let Some(placed) = staff.placed(m_idx)
                         {
                             // The row is centred vertically, but the offset
@@ -189,7 +191,11 @@ impl Grooph {
                         if self.ui.mode == Mode::Edit
                             && self.playback_ctl.transport_state == TransportState::Stopped
                             && let Some(placed) = staff.placed(self.editor.cursor.measure_idx)
-                            && let Some(note) = placed.layout.notes.get(self.editor.cursor.beat_idx)
+                            && let Some(layout) = match voice {
+                                Voice::Upper => Some(&placed.layout),
+                                Voice::Lower => placed.lower.as_ref(),
+                            }
+                            && let Some(note) = layout.notes.get(self.editor.cursor.beat_idx)
                         {
                             let cursor_rect = egui::Rect::from_min_size(
                                 egui::pos2(note.center.x, placed.rect.top()),
@@ -214,9 +220,10 @@ impl Grooph {
 
                         draw_staff(
                             ui,
-                            &self.editor.score,
+                            upper,
                             &staff,
                             cursor,
+                            voice,
                             playback,
                             count_config.as_ref(),
                             &render_opts,
@@ -246,7 +253,13 @@ impl Grooph {
                             draw_muted_bar(ui, placed.rect);
                         }
 
-                        self.draw_accuracy_markers(ui, &staff, &timing, render_opts.staff_space());
+                        self.draw_accuracy_markers(
+                            ui,
+                            upper,
+                            &staff,
+                            &timing,
+                            render_opts.staff_space(),
+                        );
                         self.handle_input(resp, &staff);
                     });
                 });
@@ -271,6 +284,10 @@ impl Grooph {
         let tick =
             advance_tick(playback.smooth_tick, dt, audio_pos, latency_s, counting_in, timing);
         playback.smooth_tick = tick;
+        // Its own clock: taking over `tick` after the count-in would jump
+        // back, as `tick` starts the score from the downbeat.
+        playback.heard_tick =
+            advance_tick(playback.heard_tick, dt, audio_pos, latency_s, false, timing);
         if was_counting_in && !counting_in {
             self.realign_accuracy_clock();
         }
@@ -298,9 +315,11 @@ impl Grooph {
         tick
     }
 
+    /// Marks on the notes of `score`, the score `staff` was laid out from.
     fn draw_accuracy_markers(
         &self,
         ui: &egui::Ui,
+        score: &Score,
         staff: &StaffLayout,
         timing: &ScoreTiming,
         staff_space: f32,
@@ -319,13 +338,14 @@ impl Grooph {
         // One flat list of global onsets across the whole score. Used by
         // `clamp_diff_to_beat_window`, which needs the global neighbours of
         // each note.
-        let global_beats = crate::accuracy::compute_global_beat_onsets(&self.editor.score, timing);
+        let global_beats = crate::accuracy::compute_global_beat_onsets(score, timing);
         let global_onsets_u64: Vec<u64> = global_beats.iter().map(|gb| gb.onset_tick).collect();
 
         for system in &staff.systems {
             for placed in &system.measures {
                 self.draw_accuracy_markers_for_measure(
                     ui,
+                    score,
                     placed,
                     timing,
                     &global_onsets_u64,
@@ -336,16 +356,18 @@ impl Grooph {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn draw_accuracy_markers_for_measure(
         &self,
         ui: &egui::Ui,
+        score: &Score,
         placed: &PlacedMeasure,
         timing: &ScoreTiming,
         global_onsets_u64: &[u64],
         total_loop_ticks: f64,
         staff_space: f32,
     ) {
-        let measure = &self.editor.score.measures[placed.measure_idx];
+        let measure = &score.measures[placed.measure_idx];
         let beats = measure.beats();
         if beats.is_empty() {
             return;
@@ -431,8 +453,10 @@ impl Grooph {
         if !matches!(self.ui.mode, Mode::TimeSignature(_))
             && (resp.clicked() || resp.dragged())
             && let Some(pos) = resp.interact_pointer_pos()
-            && let Some((m_idx, b_idx)) = grooph_layout::staff_layout::hit_test_staff(staff, pos)
+            && let Some((voice, m_idx, b_idx)) = hit_test_voice(staff, pos)
         {
+            // A tap on the other voice's line edits that voice from now on.
+            self.select_voice(voice);
             self.editor.cursor.measure_idx = m_idx;
             self.editor.cursor.beat_idx = b_idx;
 

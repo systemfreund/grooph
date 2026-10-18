@@ -8,9 +8,10 @@ use crate::share::paint_share_icon;
 use crate::{Grooph, Mode, TransportState};
 use eframe::egui;
 use eframe::egui::{
-    Align2, Color32, FontId, Frame, Id, Margin, Painter, Rect, Response, RichText, Sense, Shape,
-    Stroke, Ui, UiBuilder, Vec2, pos2, vec2,
+    Align2, Button, Color32, FontId, Frame, Id, Margin, Painter, Rect, Response, RichText, Sense,
+    Shape, Stroke, Ui, UiBuilder, Vec2, pos2, vec2,
 };
+use grooph_layout::staff_layout::Voice;
 use grooph_measure::generator::{Subdivision, effective_subdivision};
 use serde::{Deserialize, Serialize};
 
@@ -153,12 +154,18 @@ fn switch_row(ui: &mut Ui, label: &str, on: &mut bool) -> bool {
     );
 
     let switch = Rect::from_center_size(rect.right_center() - vec2(30.0, 0.0), vec2(52.0, 30.0));
-    let fill = if *on { visuals.selection.bg_fill } else { visuals.extreme_bg_color };
+    let fill = if *on { visuals.selection.bg_fill } else { switch_off_fill(visuals) };
     painter.rect_filled(switch, 15, fill);
     let radius = 12.0;
     let x = egui::lerp((switch.left() + 15.0)..=(switch.right() - 15.0), how_on);
     painter.circle_filled(pos2(x, switch.center().y), radius, Color32::WHITE);
     resp.clicked()
+}
+
+/// Track colour of a switch that is off. It has to differ from the white
+/// knob, so the light theme gets a grey instead of its white field colour.
+fn switch_off_fill(visuals: &egui::Visuals) -> Color32 {
+    if visuals.dark_mode { visuals.extreme_bg_color } else { Color32::from_gray(190) }
 }
 
 /// Full-width row with a label, the current value and a chevron.
@@ -327,7 +334,7 @@ impl Grooph {
         let mut picked = None;
         egui::Panel::bottom("compact_tabs")
             .frame(Frame::side_top_panel(ui.style()).inner_margin(Margin::symmetric(0, 4)))
-            .show_inside(ui, |ui| {
+            .show(ui, |ui| {
                 centered_column(ui, |ui| {
                     ui.columns(TABS.len(), |cols| {
                         for (col, (tab, icon, label)) in cols.iter_mut().zip(TABS) {
@@ -414,7 +421,7 @@ impl Grooph {
                 bottom: 4,
             }))
             .show_separator_line(false)
-            .show_inside(ui, |ui| {
+            .show(ui, |ui| {
                 centered_column(ui, |ui| {
                     Frame::new()
                         .fill(card_fill(ui))
@@ -450,7 +457,7 @@ impl Grooph {
                 bottom: 8,
             }))
             .show_separator_line(false)
-            .show_inside(ui, |ui| {
+            .show(ui, |ui| {
                 centered_column(ui, |ui| {
                     Frame::new()
                         .fill(card_fill(ui))
@@ -494,7 +501,7 @@ impl Grooph {
         egui::Panel::bottom("compact_metronome")
             .frame(Frame::new().fill(ui.visuals().panel_fill).inner_margin(Margin::same(12)))
             .show_separator_line(false)
-            .show_inside(ui, |ui| {
+            .show(ui, |ui| {
                 centered_column(ui, |ui| {
                     Frame::new()
                         .fill(card_fill(ui))
@@ -533,7 +540,7 @@ impl Grooph {
         if round_button_at(
             ui,
             Rect::from_center_size(row.center(), size),
-            Id::new("metronome_play"),
+            Id::unique("metronome_play"),
             fill,
             icon,
             |painter, rect, color| paint_play_icon(painter, rect, color, playing),
@@ -545,7 +552,7 @@ impl Grooph {
         if round_button_at(
             ui,
             Rect::from_min_size(row.right_top() - vec2(PLAY_BUTTON_SIZE, 0.0), size),
-            Id::new("metronome_share"),
+            Id::unique("metronome_share"),
             ui.visuals().extreme_bg_color,
             ui.visuals().strong_text_color(),
             paint_share_icon,
@@ -596,7 +603,7 @@ impl Grooph {
         let roll = round_button_at(
             ui,
             new_rect,
-            Id::new("compact_new"),
+            Id::unique("compact_new"),
             side_fill,
             text,
             |painter, rect, color| {
@@ -617,7 +624,7 @@ impl Grooph {
         if round_button_at(
             ui,
             play_rect,
-            Id::new("compact_play"),
+            Id::unique("compact_play"),
             fill,
             icon,
             |painter, rect, color| paint_play_icon(painter, rect, color, playing),
@@ -630,7 +637,7 @@ impl Grooph {
         if round_button_at(
             ui,
             share_rect,
-            Id::new("compact_share"),
+            Id::unique("compact_share"),
             side_fill,
             text,
             paint_share_icon,
@@ -669,7 +676,7 @@ impl Grooph {
                 Frame::new().fill(ui.visuals().panel_fill).inner_margin(Margin::symmetric(12, 6)),
             )
             .show_separator_line(false)
-            .show_inside(ui, |ui| {
+            .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     let playing = self.playback_ctl.transport_state == TransportState::Playing;
                     let fill = ui.visuals().selection.bg_fill;
@@ -718,7 +725,7 @@ impl Grooph {
                 Frame::new().fill(ui.visuals().panel_fill).inner_margin(Margin::symmetric(12, 6)),
             )
             .show_separator_line(false)
-            .show_inside(ui, |ui| {
+            .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     let playing = self.playback_ctl.transport_state == TransportState::Playing;
                     let fill = ui.visuals().selection.bg_fill;
@@ -731,7 +738,20 @@ impl Grooph {
                         self.toggle_playback();
                     }
                     ui.add_space(8.0);
-                    ui.label("Click bar");
+                    // With a counter rhythm: which of the two voices the
+                    // palette edits (a tap on its line picks it too).
+                    if self.counter_bar().is_some() {
+                        let voice = self.edited_voice();
+                        for (v, label) in [(Voice::Upper, "Clicks"), (Voice::Lower, "Counter")] {
+                            let button =
+                                Button::new(RichText::new(label).size(16.0)).selected(voice == v);
+                            if ui.add(button).clicked() {
+                                self.select_voice(v);
+                            }
+                        }
+                    } else {
+                        ui.label("Click bar");
+                    }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui.button(RichText::new("Done").size(18.0)).clicked() {
                             self.ui.mode = Mode::Playback;
@@ -754,7 +774,7 @@ impl Grooph {
             egui::Panel::bottom("compact_more")
                 .frame(Frame::new().fill(ui.visuals().panel_fill).inner_margin(Margin::same(12)))
                 .show_separator_line(false)
-                .show_inside(ui, |ui| {
+                .show(ui, |ui| {
                     centered_column(ui, |ui| {
                         Frame::new()
                             .fill(card_fill(ui))
@@ -779,7 +799,7 @@ impl Grooph {
         let title = ENTRIES.iter().find(|(m, ..)| *m == self.ui.mode).map_or("", |(.., l)| *l);
         egui::Panel::bottom("compact_more_back")
             .frame(Frame::side_top_panel(ui.style()).inner_margin(Margin::symmetric(12, 6)))
-            .show_inside(ui, |ui| {
+            .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     if ui.button("‹ Back").clicked() {
                         self.ui.mode = Mode::MoreMenu;

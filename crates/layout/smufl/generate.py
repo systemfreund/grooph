@@ -19,6 +19,7 @@ from pathlib import Path
 # (Rust name, SMuFL name, code point)
 GLYPHS = [
     ("NOTEHEAD_BLACK", "noteheadBlack", 0xE0A4),
+    ("NOTEHEAD_HALF", "noteheadHalf", 0xE0A3),
     ("NOTEHEAD_PAREN_LEFT", "noteheadParenthesisLeft", 0xE0F5),
     ("NOTEHEAD_PAREN_RIGHT", "noteheadParenthesisRight", 0xE0F6),
     ("AUGMENTATION_DOT", "augmentationDot", 0xE1E7),

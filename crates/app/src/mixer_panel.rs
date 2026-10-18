@@ -43,58 +43,64 @@ impl Grooph {
     /// count-in), the metronome's counter rhythm and the rhythm (notes,
     /// accents, ghost notes).
     pub(super) fn mixer_panel(&mut self, ui: &mut egui::Ui) {
-        egui::Panel::bottom("mixer").show_animated_inside(ui, self.ui.mode == Mode::Mixer, |ui| {
-            egui::ScrollArea::horizontal()
-                .scroll_source(ScrollSource::ALL)
-                .scroll_bar_visibility(ScrollBarVisibility::AlwaysHidden)
-                .show(ui, |ui| {
-                    let settings = &mut self.playback_ctl.audio_cfg.settings;
-                    ui.horizontal_top(|ui| {
-                        voice_group(
-                            ui,
-                            "Metronome",
-                            &mut settings.metronome_muted,
-                            "Silence the metronome clicks; the count-in still sounds",
-                            |ui| {
-                                volume_slider(ui, &mut settings.downbeat, "Downbeat")
-                                    .on_hover_text("Accented clicks of the click bar");
-                                volume_slider(ui, &mut settings.primary, "Medium")
-                                    .on_hover_text("Plain clicks of the click bar");
-                                volume_slider(ui, &mut settings.soft, "Soft").on_hover_text(
-                                    "Soft clicks of the click bar (notes in parentheses)",
-                                );
-                            },
-                            |ui| {
-                                volume_slider(ui, &mut settings.count_in, "Count-in");
-                            },
-                        );
-                        ui.separator();
-                        voice_group(
-                            ui,
-                            "Counter",
-                            &mut settings.counter_muted,
-                            "Silence the counter rhythm of the metronome",
-                            |ui| {
-                                volume_slider(ui, &mut settings.counter, "Counter")
-                                    .on_hover_text("Clicks of the polyrhythm in the metronome tab");
-                            },
-                            |_| {},
-                        );
-                        ui.separator();
-                        voice_group(
-                            ui,
-                            "Rhythm",
-                            &mut settings.rhythm_muted,
-                            "Silence notes, accents and ghost notes",
-                            |ui| {
-                                volume_slider(ui, &mut settings.beat, "Notes");
-                                volume_slider(ui, &mut settings.accent, "Accents");
-                                volume_slider(ui, &mut settings.ghost, "Ghost notes");
-                            },
-                            |_| {},
-                        );
+        egui::Panel::bottom("mixer").drag_to_open(false).show_collapsible(
+            ui,
+            &mut (self.ui.mode == Mode::Mixer),
+            |ui| {
+                egui::ScrollArea::horizontal()
+                    .scroll_source(ScrollSource::ALL)
+                    .scroll_bar_visibility(ScrollBarVisibility::AlwaysHidden)
+                    .show(ui, |ui| {
+                        let settings = &mut self.playback_ctl.audio_cfg.settings;
+                        ui.horizontal_top(|ui| {
+                            voice_group(
+                                ui,
+                                "Metronome",
+                                &mut settings.metronome_muted,
+                                "Silence the metronome clicks; the count-in still sounds",
+                                |ui| {
+                                    volume_slider(ui, &mut settings.downbeat, "Downbeat")
+                                        .on_hover_text("Accented clicks of the click bar");
+                                    volume_slider(ui, &mut settings.primary, "Medium")
+                                        .on_hover_text("Plain clicks of the click bar");
+                                    volume_slider(ui, &mut settings.soft, "Soft").on_hover_text(
+                                        "Soft clicks of the click bar (notes in parentheses)",
+                                    );
+                                },
+                                |ui| {
+                                    volume_slider(ui, &mut settings.count_in, "Count-in");
+                                },
+                            );
+                            ui.separator();
+                            voice_group(
+                                ui,
+                                "Counter",
+                                &mut settings.counter_muted,
+                                "Silence the counter rhythm of the metronome",
+                                |ui| {
+                                    volume_slider(ui, &mut settings.counter, "Counter")
+                                        .on_hover_text(
+                                            "Clicks of the polyrhythm in the metronome tab",
+                                        );
+                                },
+                                |_| {},
+                            );
+                            ui.separator();
+                            voice_group(
+                                ui,
+                                "Rhythm",
+                                &mut settings.rhythm_muted,
+                                "Silence notes, accents and ghost notes",
+                                |ui| {
+                                    volume_slider(ui, &mut settings.beat, "Notes");
+                                    volume_slider(ui, &mut settings.accent, "Accents");
+                                    volume_slider(ui, &mut settings.ghost, "Ghost notes");
+                                },
+                                |_| {},
+                            );
+                        });
                     });
-                });
-        });
+            },
+        );
     }
 }

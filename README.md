@@ -20,6 +20,7 @@ files, and invariants so changes can be made with confidence.
 - `crates/mic`: Microphone hit detection (cpal natively, `getUserMedia` + AudioWorklet on the web).
 - `crates/link`: Shareable links (URL query parameters <-> score/generator/metronome).
 - `crates/site`: Static guide pages for grooph.app, generated from Markdown at build time.
+- `crates/android`: Android entry point (`android_main`, NativeActivity) around `crates/app`.
 
 Important root files:
 - `Cargo.toml` (workspace + dependencies, edition 2024)
@@ -300,6 +301,44 @@ If you add new tools/shortcuts, remember:
 - Native: `cargo run`
 - Tests: `cargo test`
 - WASM (optional): `trunk serve` or `trunk build --release`
+- Android: `crates/android/build-android.sh` builds `target/android/grooph.aab`
+  (the App Bundle for Google Play) and `target/android/grooph.apk` (the same
+  app to install directly), each for arm64 phones and the x86_64 emulator.
+  It needs `cargo install cargo-ndk`, the `aarch64-linux-android` and
+  `x86_64-linux-android` Rust targets, `ANDROID_HOME` (with
+  `platforms;android-36`), `ANDROID_NDK_HOME`, Java and bundletool; the
+  script lists its variables (keystore, version code). The manifest is
+  `crates/android/AndroidManifest.xml`, the launcher icon (an adaptive icon
+  with a themed layer) is in `crates/android/res`, the 512 px Play Store
+  icon in `crates/android/store`. CI builds both on every push (job
+  `android`, artifact `grooph-android`).
+  - Signing: CI signs with the upload key when the repository has the
+    secrets `ANDROID_UPLOAD_KEYSTORE_BASE64` (the keystore, `base64 -w0`),
+    `ANDROID_UPLOAD_KEYSTORE_PASSWORD` and `ANDROID_UPLOAD_KEY_ALIAS` (the
+    key's password must match the keystore's), else with a throwaway key.
+    Create the key once with
+    `keytool -genkeypair -keystore upload.keystore -alias upload -keyalg RSA -keysize 2048 -validity 10000`
+    and keep a copy outside GitHub: Play only accepts uploads signed with it.
+  - The workspace eframe leaves out accesskit (NativeActivity cannot use it);
+    `crates/app` adds it back on every other target. Settings are stored in
+    the app's internal storage (`persistence_path`). Android renders with
+    glow (OpenGL ES): wgpu cannot create a surface in the emulator.
+  - Calls into Java go through JNI in `crates/android/src/activity.rs`:
+    NativeActivity draws under the status and navigation bars, so
+    `insets.rs` reads their size and hands it to egui as safe-area insets;
+    the share sheet and the microphone permission reach the app through
+    `grooph_app::Host`. The back button arrives as `Key::BrowserBack`
+    (the manifest opts out of Android 16's predictive back, which would
+    stop sending it) and goes to `Grooph::back`, which closes what is open;
+    with nothing open the app moves to the background. eframe's save when
+    the window goes away is the only sign of going to the background, so
+    the save checks whether the window is hidden and calls `Grooph::hidden`
+    (stops playback, audio and microphone). NativeActivity's own request
+    for the on-screen keyboard does nothing on current Android versions, so
+    the wrapper opens it through the InputMethodManager while egui wants
+    text input (logged as `Keyboard open`) and follows the insets (which
+    include the keyboard) closely while it slides. Not handled yet: opening
+    shared links in the app (Android intents).
 
 ## Test notes (measure)
 

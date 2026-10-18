@@ -5,6 +5,8 @@ use super::Glyph;
 
 pub const NOTEHEAD_BLACK: Glyph =
     Glyph { ch: '\u{E0A4}', advance: 1.18, sw: [0.0, -0.5], ne: [1.18, 0.5] };
+pub const NOTEHEAD_HALF: Glyph =
+    Glyph { ch: '\u{E0A3}', advance: 1.18, sw: [0.0, -0.5], ne: [1.18, 0.5] };
 pub const NOTEHEAD_PAREN_LEFT: Glyph =
     Glyph { ch: '\u{E0F5}', advance: 0.292, sw: [0.0, -0.724], ne: [0.436, 0.724] };
 pub const NOTEHEAD_PAREN_RIGHT: Glyph =
@@ -83,6 +85,8 @@ pub const TUPLET_9: Glyph =
 /// Stem attachment points, relative to the glyph's origin.
 pub const NOTEHEAD_BLACK_STEM_DOWN_NW: [f32; 2] = [0.0, -0.168];
 pub const NOTEHEAD_BLACK_STEM_UP_SE: [f32; 2] = [1.18, 0.168];
+pub const NOTEHEAD_HALF_STEM_DOWN_NW: [f32; 2] = [0.0, -0.168];
+pub const NOTEHEAD_HALF_STEM_UP_SE: [f32; 2] = [1.18, 0.168];
 pub const FLAG_8TH_UP_STEM_UP_NW: [f32; 2] = [0.0, -0.04];
 pub const FLAG_8TH_DOWN_STEM_DOWN_SW: [f32; 2] = [0.0, 0.132];
 pub const FLAG_16TH_UP_STEM_UP_NW: [f32; 2] = [0.0, -0.088];

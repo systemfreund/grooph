@@ -17,7 +17,7 @@ const fn dot_count_of(duration: Duration) -> u8 {
 /// The head or rest glyph of `beat`.
 fn head_glyph(beat: &Beat) -> glyphs::Glyph {
     match beat.kind {
-        BeatKind::Note => glyphs::NOTEHEAD_BLACK,
+        BeatKind::Note => glyphs::notehead_glyph_for_duration(beat.duration),
         BeatKind::Rest => glyphs::rest_glyph_for_duration(beat.duration),
     }
 }
@@ -348,20 +348,12 @@ pub(super) fn build_note_layout(
                 let x = s.p1.x
                     - opts.stem_thickness() * 0.5
                     - glyphs::NOTEHEAD_BLACK_STEM_DOWN_NW[0] * ss;
-                PlacedGlyph {
-                    glyph: glyphs::NOTEHEAD_BLACK,
-                    origin: Pos2::new(x, cy),
-                    size: opts.em,
-                }
+                PlacedGlyph { glyph: head_glyph(b), origin: Pos2::new(x, cy), size: opts.em }
             }
             Some(s) => {
                 let x = s.p1.x + opts.stem_thickness() * 0.5
                     - glyphs::NOTEHEAD_BLACK_STEM_UP_SE[0] * ss;
-                PlacedGlyph {
-                    glyph: glyphs::NOTEHEAD_BLACK,
-                    origin: Pos2::new(x, cy),
-                    size: opts.em,
-                }
+                PlacedGlyph { glyph: head_glyph(b), origin: Pos2::new(x, cy), size: opts.em }
             }
             None => PlacedGlyph::centered(head_glyph(b), center.x, cy, opts.em),
         };

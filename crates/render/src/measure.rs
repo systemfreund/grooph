@@ -135,7 +135,8 @@ pub fn draw_time_signature(
     }
 }
 
-fn draw_edit_cursor(
+/// The blinking edit cursor at note `idx`.
+pub(crate) fn draw_edit_cursor(
     ui: &egui::Ui,
     painter: &Painter,
     measure_layout: &MeasureLayout,
@@ -247,7 +248,8 @@ pub fn playback_cursor_x(
         let end = start + dur_ticks;
         if t >= start && t < end {
             let frac = if dur_ticks > 0.0 { (t - start) / dur_ticks } else { 0.0 };
-            let x0 = measure_layout.notes[i].center.x;
+            // A layout of another measure has other notes: no cursor.
+            let x0 = measure_layout.notes.get(i)?.center.x;
 
             if i + 1 < measure_layout.notes.len() {
                 // Normal note: interpolate to the next note in this measure.
@@ -620,6 +622,20 @@ mod tests {
         let selected = select_label_slots(&label_slots);
         let total_ticks = DEFAULT_GRID.ticks_per_measure(&measure.time_signature());
         compute_label_xs(&selected, measure, layout, rect, total_ticks)
+    }
+
+    #[test]
+    fn cursor_on_another_measures_layout_is_none() {
+        // The staff's upper voice laid out with eight eighths, asked about a
+        // bar of ten notes (the counter rhythm): no cursor, no panic.
+        use grooph_measure::notation::parse_score;
+        let eighths = parse_score("4/4 e e e e e e e e").unwrap().measures.remove(0);
+        let tens = parse_score("4/4 qt8 qt8 qt8 qt8 qt8 qt8 qt8 qt8 qt8 qt8").unwrap();
+        let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(400.0, 100.0));
+        let layout = build_measure_layout(&eighths, &opts_for(rect));
+        let bar_ticks = DEFAULT_GRID.ticks_per_measure(&TimeSignature::FOUR_FOUR) as f64;
+        let tick = 0.85 * bar_ticks;
+        assert_eq!(playback_cursor_x(&tens.measures[0], &layout, rect, tick, 0.5), None);
     }
 
     #[test]
