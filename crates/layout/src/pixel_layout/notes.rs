@@ -140,20 +140,32 @@ fn compute_x_extents(beat: &Beat, in_beam: bool, opts: &LayoutOpts) -> (f32, f32
 
 /// Post-layout vertical extents in absolute screen coordinates, from the
 /// already-placed glyphs and stem.
-fn compute_vertical_extents(
-    head: &PlacedGlyph,
-    stem: Option<&Line>,
-    flag: Option<&PlacedGlyph>,
-    dots: &[PlacedGlyph],
-) -> (f32, f32) {
-    let mut ink = head.ink();
-    for g in flag.into_iter().chain(dots) {
+/// Top and bottom of a note's head, stem, flag and dots.
+pub(super) fn content_extents(note: &NoteLayout) -> (f32, f32) {
+    let mut ink = note.head.ink();
+    for g in note.flag.iter().chain(&note.dots) {
         ink = ink.union(g.ink());
     }
-    if let Some(s) = stem {
+    if let Some(s) = note.stem {
         ink = ink.union(Rect::from_two_pos(s.p1, s.p2));
     }
     (ink.top(), ink.bottom())
+}
+
+/// Put an accent above the note's head, stem, flag and dots (below them
+/// when `below`), replacing any accent it had.
+pub(super) fn place_accent(note: &mut NoteLayout, below: bool, opts: &LayoutOpts) {
+    let (content_top, content_bottom) = content_extents(note);
+    let displacement = opts.em * opts.accent_displacement;
+    let mut glyph = PlacedGlyph::centered(glyphs::ACCENT_ABOVE, note.center.x, 0.0, opts.em);
+    let ink = glyph.ink();
+    glyph.origin.y = if below {
+        content_bottom + displacement - ink.top()
+    } else {
+        content_top - displacement - ink.bottom()
+    };
+    note.accent = Some(glyph);
+    note.accent_debug_bbox = opts.debug_bbox.then(|| glyph.ink());
 }
 
 /// Whether each beat sits in a beamed group of two or more (no flag).
@@ -362,46 +374,14 @@ pub(super) fn build_note_layout(
         // 3. Dots
         let dots = dot_glyphs(b, in_beam, center.x, cy, dot_count_of(b.duration), opts);
 
-        // 4. Flag (if needed)
+        // 4. Flag (if needed). The stem still points up here, so it gets an
+        // up flag; `flip_down` swaps in the down flag.
         let flag = match &stem {
-            Some(s) if !in_beam && needs_flag => flag_at(b.duration, s, opts.stem_down, opts),
+            Some(s) if !in_beam && needs_flag => flag_at(b.duration, s, false, opts),
             _ => None,
         };
 
-        // 5. Accent and Debug Bounding Box.
-        // We calculate the content bounding box first to position the
-        // accent relative to it.
-        let (content_top, content_bottom) =
-            compute_vertical_extents(&head, stem.as_ref(), flag.as_ref(), &dots);
-
-        let mut accent: Option<PlacedGlyph> = None;
-        let mut accent_debug_bbox: Option<Rect> = None;
-
-        if is_note && b.accented {
-            let displacement = opts.em * opts.accent_displacement;
-            let mut glyph = PlacedGlyph::centered(glyphs::ACCENT_ABOVE, center.x, 0.0, opts.em);
-            let ink = glyph.ink();
-            glyph.origin.y = if opts.accent_below {
-                content_bottom + displacement - ink.top()
-            } else {
-                content_top - displacement - ink.bottom()
-            };
-            if opts.debug_bbox {
-                accent_debug_bbox = Some(glyph.ink());
-            }
-            accent = Some(glyph);
-        }
-
-        let debug_bbox = if opts.debug_bbox {
-            Some(Rect::from_min_max(
-                Pos2::new(ideal_cx + left_rel, content_top),
-                Pos2::new(ideal_cx + right_rel, content_bottom),
-            ))
-        } else {
-            None
-        };
-
-        note_layout.push(NoteLayout {
+        let mut note = NoteLayout {
             center,
             duration: b.duration,
             kind: b.kind,
@@ -410,10 +390,24 @@ pub(super) fn build_note_layout(
             dots,
             stem,
             flag,
-            accent,
-            debug_bbox,
-            accent_debug_bbox,
-        });
+            accent: None,
+            debug_bbox: None,
+            accent_debug_bbox: None,
+        };
+
+        // 5. Accent and Debug Bounding Box, around the head, stem, flag and dots.
+        if is_note && b.accented {
+            place_accent(&mut note, opts.accent_below, opts);
+        }
+        if opts.debug_bbox {
+            let (content_top, content_bottom) = content_extents(&note);
+            note.debug_bbox = Some(Rect::from_min_max(
+                Pos2::new(ideal_cx + left_rel, content_top),
+                Pos2::new(ideal_cx + right_rel, content_bottom),
+            ));
+        }
+
+        note_layout.push(note);
     }
 
     note_layout

@@ -85,21 +85,14 @@ pub(super) fn build_tuplet_layout(
                 bracket,
             });
         } else {
-            // Number-only: only lift the number if it would collide with an accent.
-            let num_cx = xc;
-            let num_half_w = 0.5 * num_width;
+            // Number-only: only lift the number if an accent's ink would
+            // reach under it.
             let collides = !opts.accent_below
-                && (t.start..=t.end).any(|i| {
-                    let b = beats[i];
-                    b.kind == BeatKind::Note
-                        && b.accented
-                        && note_layout
-                            .get(i)
-                            .map(|nl| {
-                                nl.center.x >= num_cx - num_half_w
-                                    && nl.center.x <= num_cx + num_half_w
-                            })
-                            .unwrap_or(false)
+                && ink_of(&number_at(0.0)).is_some_and(|num| {
+                    note_layout[t.start..=t.end].iter().filter_map(|nl| nl.accent).any(|a| {
+                        let a = a.ink();
+                        a.left() < num.right() && a.right() > num.left()
+                    })
                 });
 
             let close_clearance = c::TUPLET_NUMBER_CLOSE_SS * opts.staff_space();

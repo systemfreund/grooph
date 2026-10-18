@@ -379,11 +379,12 @@ fn flip_down(layout: &mut MeasureLayout, opts: &LayoutOpts) {
                 *flag = notes::flag_at(note.duration, stem, true, opts).unwrap_or(*flag);
             }
         }
-        if let Some(accent) = &mut note.accent {
-            mirror_ink(std::slice::from_mut(accent), cy);
-        }
         note.debug_bbox = note.debug_bbox.map(rect);
-        note.accent_debug_bbox = note.accent_debug_bbox.map(rect);
+        // Placed again rather than mirrored: the down flag is not the up
+        // flag's mirror image.
+        if note.accent.is_some() {
+            notes::place_accent(note, !opts.accent_below, opts);
+        }
     }
     for beam in &mut layout.beams {
         beam.rect = rect(beam.rect);
@@ -577,6 +578,45 @@ mod tests {
         let head_bottom = note_below.head.ink().bottom();
 
         assert!(accent_below.top() > head_bottom, "Accent should be below note head");
+    }
+
+    #[test]
+    fn lower_voice_accent_clears_the_final_flag() {
+        use grooph_measure::duration::e;
+        let mut m = Measure::new(TimeSignature::FOUR_FOUR);
+        m.set_beat(0, Beat::note(e())).unwrap();
+        m.set_beat(1, Beat::rest(e())).unwrap();
+        m.toggle_accent(0);
+
+        let em = 20.0;
+        let opts = LayoutOpts {
+            rect: Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(200.0, 100.0)),
+            font_id: FontId::new(em, FontFamily::Proportional),
+            pixels_per_point: 1.0,
+            em,
+            layout_clef: false,
+            layout_time_signature: false,
+            y_offset: 0.0,
+            stem_length_factor: 3.5,
+            stem_thickness_factor: 0.1,
+            accent_displacement: 0.1,
+            accent_below: false,
+            stem_down: true,
+            proportional_spacing: true,
+            debug_bbox: false,
+        };
+        let layout = build_measure_layout(&m, &opts);
+        let note = &layout.notes[0];
+        let flag = note.flag.expect("an unbeamed eighth has a flag").ink();
+        let stem = note.stem.expect("a note has a stem");
+        let content_bottom = flag.bottom().max(stem.p1.y.max(stem.p2.y));
+        let accent = note.accent.expect("accented").ink();
+        assert!(
+            (accent.top() - (content_bottom + 0.1 * em)).abs() < 0.001,
+            "accent top {} should sit 0.1em under the stem and flag ({})",
+            accent.top(),
+            content_bottom
+        );
     }
 
     #[test]
