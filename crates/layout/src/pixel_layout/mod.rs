@@ -748,6 +748,16 @@ mod tests {
         assert!((quarter_rest.center.y - cy - down.staff_space()).abs() < 0.01);
         assert_eq!(quarter_rest.center.y, down.y_of(-2));
         assert_eq!(build_measure_layout(&h, &down).notes[1].center.y, cy);
+
+        // A dotted rest's dot drops with it.
+        let dotted = parse_score("4/4 h r:q. e").unwrap().measures.remove(0);
+        let up_rest =
+            &build_measure_layout(&dotted, &LayoutOpts { stem_down: false, ..down.clone() }).notes
+                [1];
+        let down_rest = &build_measure_layout(&dotted, &down).notes[1];
+        let dot_dy = |n: &NoteLayout| n.dots[0].origin.y - n.center.y;
+        assert_eq!(down_rest.dots.len(), 1);
+        assert!((dot_dy(down_rest) - dot_dy(up_rest)).abs() < 0.01);
     }
 
     #[test]
