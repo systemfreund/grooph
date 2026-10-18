@@ -15,6 +15,7 @@
 //! | `swing`   | Swing in percent, 50 (straight) to 75 (dotted); 66 is a triplet feel |
 //! | `su`      | Swung note value: `8` (default) or `16`; needs `swing` |
 //! | `click`   | Click bar of the meter of `r` (its first measure) or `ts`: one measure in the text notation, without the time signature (`>` strong, plain medium, `(e)` soft, rest off) |
+//! | `counter` | Counter rhythm the metronome plays against the click bar of `ts`, written like `click` (see [`grooph_measure::counter`]); needs `ts` without `r` or the generator |
 //!
 //! Any of `sub`, `lvl`, `bars`, `space` or `seed` selects the generator;
 //! unknown parameters are ignored. [`SharedLink::to_url`] is the inverse of
@@ -50,6 +51,8 @@ pub struct SharedLink {
     pub content: Option<LinkContent>,
     /// Click bar of the content's meter (the first measure's meter).
     pub click: Option<Measure>,
+    /// Counter rhythm of the metronome's meter.
+    pub counter: Option<Measure>,
 }
 
 #[derive(Clone, Debug)]
@@ -91,6 +94,7 @@ fn parse_query_with_default_version(
     let mut swing_percent = None;
     let mut swing_unit = None;
     let mut click = None;
+    let mut counter = None;
 
     for pair in query.trim_start_matches('?').split('&').filter(|p| !p.is_empty()) {
         let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
@@ -119,6 +123,7 @@ fn parse_query_with_default_version(
             }
             "su" => swing_unit = Some(parse_swing_unit(&value)?),
             "click" => click = Some(value),
+            "counter" => counter = Some(value),
             _ => {}
         }
     }
@@ -161,18 +166,23 @@ fn parse_query_with_default_version(
         ts.map(LinkContent::Metronome)
     };
 
+    let first_ts = content.as_ref().and_then(LinkContent::first_time_signature);
     let click = match click {
         None => None,
         Some(text) => {
-            let Some(ts) = content.as_ref().and_then(LinkContent::first_time_signature) else {
+            let Some(ts) = first_ts else {
                 return Err("click needs a rhythm (r) or a time signature (ts)".into());
             };
-            let mut bar =
-                parse_score(&format!("{ts} {text}")).map_err(|e| format!("click: {e}"))?.measures;
-            if bar.len() != 1 {
-                return Err("click must be a single measure".into());
-            }
-            bar.pop()
+            Some(single_measure("click", ts, &text)?)
+        }
+    };
+    let counter = match counter {
+        None => None,
+        Some(text) => {
+            let Some(&LinkContent::Metronome(ts)) = content.as_ref() else {
+                return Err("counter needs a time signature (ts) without a rhythm".into());
+            };
+            Some(single_measure("counter", ts, &text)?)
         }
     };
 
@@ -186,8 +196,19 @@ fn parse_query_with_default_version(
     if bpm.is_none() && swing.is_none() && content.is_none() {
         Ok(None)
     } else {
-        Ok(Some(SharedLink { bpm, swing, content, click }))
+        Ok(Some(SharedLink { bpm, swing, content, click, counter }))
     }
+}
+
+/// The one measure of `ts` that `text` (without the time signature) writes,
+/// for the parameter `name`.
+fn single_measure(name: &str, ts: TimeSignature, text: &str) -> Result<Measure, String> {
+    let mut bars =
+        parse_score(&format!("{ts} {text}")).map_err(|e| format!("{name}: {e}"))?.measures;
+    if bars.len() != 1 {
+        return Err(format!("{name} must be a single measure"));
+    }
+    Ok(bars.remove(0))
 }
 
 /// Quarter notes per minute for a version 1 tempo of `bpm` beat units of
@@ -241,10 +262,12 @@ impl SharedLink {
                 params.push(("su", "16".into()));
             }
         }
-        if let Some(bar) = &self.click {
-            let text = format_score(&Score::single(bar.clone()))?;
-            let ts = bar.time_signature().to_string();
-            params.push(("click", text.strip_prefix(&ts)?.trim_start().to_string()));
+        for (name, bar) in [("click", &self.click), ("counter", &self.counter)] {
+            if let Some(bar) = bar {
+                let text = format_score(&Score::single(bar.clone()))?;
+                let ts = bar.time_signature().to_string();
+                params.push((name, text.strip_prefix(&ts)?.trim_start().to_string()));
+            }
         }
         // The version alone opens nothing.
         if params.len() == 1 {
@@ -444,6 +467,7 @@ mod tests {
                 seed: Some(7),
             }),
             click: None,
+            counter: None,
         };
         let url = generator.to_url("https://grooph.app/").unwrap();
         assert_eq!(
@@ -492,6 +516,24 @@ mod tests {
         assert!(parse_query("ts=7/8&click=q+q").unwrap_err().contains("click"));
         assert!(parse_query("ts=7/8&click=q+q.+q+|+q+q.+q").unwrap_err().contains("single"));
         assert!(parse_query("bpm=90&click=q+q+q+q").unwrap_err().contains("needs a rhythm"));
+    }
+
+    #[test]
+    fn counter_link() {
+        let link = parse("v=2&bpm=90&ts=4/4&click=>q+q+q+q&counter=t4+r:t4+(t4)+r:t4+(t4)+r:t4");
+        let bar = link.counter.as_ref().unwrap();
+        assert_eq!(bar.time_signature(), TimeSignature::FOUR_FOUR);
+        assert_eq!(bar.beats().len(), 6);
+        assert!(bar.beats()[2].soft);
+        assert_eq!(
+            link.to_url("/").unwrap(),
+            "/?v=2&bpm=90&ts=4/4&click=%3Eq+q+q+q&counter=t4+r:t4+%28t4%29+r:t4+%28t4%29+r:t4"
+        );
+        assert!(parse_query("ts=4/4&counter=t4+t4").unwrap_err().contains("counter"));
+        assert!(parse_query("ts=2/4&counter=q+q+|+q+q").unwrap_err().contains("single"));
+        // Only the metronome plays a counter rhythm.
+        assert!(parse_query("r=q+q+q+q&counter=q+q+q+q").unwrap_err().contains("without a rhythm"));
+        assert!(parse_query("bpm=90&counter=q+q+q+q").unwrap_err().contains("needs a time"));
     }
 
     #[test]
@@ -570,6 +612,7 @@ mod tests {
             swing: None,
             content: Some(LinkContent::Score(score.clone())),
             click: None,
+            counter: None,
         };
         let url = link.to_url("https://grooph.app/").unwrap();
         assert_eq!(url, "https://grooph.app/?v=2&bpm=96&r=3/4+%3Eq+t8+t8+r:t8+e+e+%7C+e.+s+q+r:q");

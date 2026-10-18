@@ -290,6 +290,15 @@ impl Grooph {
         self.playback_ctl.audio_cfg.counter.for_meter(self.metronome_meter())
     }
 
+    /// The counter rhythm as a score of its own, for the staff below the
+    /// click bar: in the metronome tab, if its meter has one.
+    pub(crate) fn counter_staff_score(&self) -> Option<Score> {
+        if !self.metronome_mode() {
+            return None;
+        }
+        self.counter_bar().cloned().map(Score::single)
+    }
+
     /// The counter rhythm the audio plays: the metronome meter's, in the
     /// metronome tab only, and not while calibrating.
     pub(crate) fn played_counter(&self) -> CounterBars {
@@ -462,6 +471,16 @@ impl Grooph {
                 if hovered == Some(RingHit::Counter(idx)) {
                     segment.paint_hover(painter, center, inner, unit, hover_color);
                 }
+            }
+            // A thin hand across both rings while playing, so it shows where
+            // the clicks of the two rhythms fall against each other.
+            if let Some(turn) = current_turn.filter(|_| !muted) {
+                let strong = thickness(ClickLevel::Strong);
+                let from = inner - strong * COUNTER_THICKNESS * radius / 2.0 - 4.0;
+                let to = radius + strong * radius / 2.0 + 4.0;
+                let stroke = Stroke::new(2.0_f32, visuals.strong_text_color());
+                painter
+                    .line_segment([at_turn(center, from, turn), at_turn(center, to, turn)], stroke);
             }
         } else {
             // A dot for every beat unit inside the ring, bigger ones where a

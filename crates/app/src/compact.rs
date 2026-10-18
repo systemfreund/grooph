@@ -29,6 +29,9 @@ const SIDE_BUTTON_SIZE: f32 = 52.0;
 const METRONOME_STAFF_SHARE: f32 = 0.35;
 const METRONOME_STAFF_MIN: f32 = 100.0;
 const METRONOME_STAFF_MAX: f32 = 220.0;
+/// The same with the counter rhythm's row below the click bar.
+const METRONOME_TWO_STAFF_SHARE: f32 = 0.45;
+const METRONOME_TWO_STAFF_MAX: f32 = 340.0;
 const CARD_RADIUS: u8 = 16;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -299,9 +302,12 @@ impl Grooph {
                 self.compact_metronome_card(ui);
                 // The staff above takes a share of the room, the ring the rest.
                 let room = ui.available_height().max(0.0);
-                let staff = (METRONOME_STAFF_SHARE * room)
-                    .clamp(METRONOME_STAFF_MIN, METRONOME_STAFF_MAX)
-                    .min(room);
+                let (share, max) = if self.counter_bar().is_some() {
+                    (METRONOME_TWO_STAFF_SHARE, METRONOME_TWO_STAFF_MAX)
+                } else {
+                    (METRONOME_STAFF_SHARE, METRONOME_STAFF_MAX)
+                };
+                let staff = (share * room).clamp(METRONOME_STAFF_MIN, max).min(room);
                 let height = (room - staff).min(ui.available_width());
                 self.metronome_ring(ui, height);
             }

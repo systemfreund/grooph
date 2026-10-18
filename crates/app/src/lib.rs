@@ -661,7 +661,7 @@ impl Grooph {
         let replaces_rhythm =
             link.content.as_ref().is_some_and(|c| !matches!(c, LinkContent::Metronome(_)));
         if replaces_rhythm && self.editor.dirty {
-            self.ui.pending_load = Some(PendingLoad::Link(link));
+            self.ui.pending_load = Some(PendingLoad::Link(Box::new(link)));
         } else {
             self.apply_link(link);
         }
@@ -681,6 +681,8 @@ impl Grooph {
             Some(LinkContent::Metronome(ts)) => {
                 self.stop_transport();
                 self.editor.metronome.meter = ts;
+                // The meter plays the link's counter rhythm, or none.
+                self.playback_ctl.audio_cfg.counter.set(ts, link.counter.clone());
             }
             Some(LinkContent::Generator { settings, seed }) => {
                 self.stop_transport();
@@ -727,7 +729,7 @@ impl Grooph {
     pub(crate) fn finish_pending_load(&mut self, pending: PendingLoad) {
         match pending {
             PendingLoad::Pattern(id) => self.load_pattern(id),
-            PendingLoad::Link(link) => self.apply_link(link),
+            PendingLoad::Link(link) => self.apply_link(*link),
         }
     }
 
