@@ -67,7 +67,8 @@ jobs:
     # install directly (crates/android/build-android.sh). The runner image
     # ships the Android SDK and NDK. Without the upload key secrets both are
     # signed with a throwaway key, for trying out only. Download them from
-    # the run's artifacts.
+    # the run's artifacts. Only pushes to main build it, not pull requests.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
 
     steps:
