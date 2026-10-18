@@ -20,17 +20,24 @@ pub(super) fn build_tuplet_layout(
         - c::TUPLET_NUMBER_BASELINE_LIFT_SS * opts.staff_space()
         - bracket_gap;
 
-    let x_from_idx = |idx: usize| -> f32 {
-        let n = note_layout.get(idx).unwrap();
-        if let Some(stem) = &n.stem { stem.p1.x } else { n.center.x }
+    // A bracket spans from the left edge of its first head or rest to the
+    // right edge of its last, whichever side the stems are on.
+    let half_width = |idx: usize| -> f32 {
+        let n = &note_layout[idx];
+        match n.kind {
+            BeatKind::Note => opts.metrics.head_size.x * 0.5,
+            BeatKind::Rest => opts.metrics.rest_sizes[n.duration.base_note().rest_index()].x * 0.5,
+        }
     };
+    let left_of = |idx: usize| note_layout[idx].center.x - half_width(idx);
+    let right_of = |idx: usize| note_layout[idx].center.x + half_width(idx);
 
     let digit_len = |n: u8| -> usize { digit_count(n as u32) };
 
     let mut tuplets_out: Vec<TupletLayout> = Vec::new();
     for t in tuplet_plan {
-        let mut x_l = x_from_idx(t.start);
-        let mut x_r = x_from_idx(t.end);
+        let mut x_l = left_of(t.start);
+        let mut x_r = right_of(t.end);
         let margin = opts.em * c::TUPLET_MARGIN_EM;
         x_l -= margin;
         x_r += margin;

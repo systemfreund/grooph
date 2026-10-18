@@ -89,14 +89,23 @@ pub fn counter_ratios(ts: TimeSignature) -> Vec<Ratio> {
     ratios
 }
 
-/// The ratio whose counter bar has the same notes and rests as `bar`,
-/// whatever their levels, if any.
+/// The ratio whose counter bar `bar` is, whatever the levels of its clicks:
+/// the same note values, with notes only where that ratio clicks (a click
+/// tapped off is a rest). Ratios with the same note values (3:4 and 3:2 in
+/// 4/4 are both quarter triplets) tell apart by where their rests are; the
+/// one with the fewest clicks wins, if any.
 pub fn ratio_of(bar: &Measure) -> Option<Ratio> {
     let ts = bar.time_signature();
-    let shape = |m: &Measure| m.beats().iter().map(|b| b.duration).collect::<Vec<_>>();
+    let fits = |m: &Measure| {
+        m.beats().len() == bar.beats().len()
+            && m.beats().iter().zip(bar.beats()).all(|(c, b)| {
+                c.duration == b.duration && (c.kind == BeatKind::Note || b.kind == BeatKind::Rest)
+            })
+    };
     counter_ratios(ts)
         .into_iter()
-        .find(|&r| counter_bar(ts, r).is_some_and(|m| shape(&m) == shape(bar)))
+        .filter(|&r| counter_bar(ts, r).is_some_and(|m| fits(&m)))
+        .min_by_key(|r| u32::from(r.n) * u32::from(ts.beats / r.span))
 }
 
 /// Index of each click of `bar` (its first beat) and the beats it spans:
@@ -211,6 +220,31 @@ mod tests {
         m.set_click_level(2, ClickLevel::Off);
         assert_eq!(ratio_of(&m), Some(Ratio { n: 3, span: 4 }));
         assert_eq!(ratio_of(&crate::click::default_click_bar(ts)), None);
+    }
+
+    #[test]
+    fn every_offered_ratio_reads_back_as_itself() {
+        for unit in [2, 4, 8, 16] {
+            for beats in 1..=16 {
+                let Ok(ts) = format!("{beats}/{unit}").parse::<TimeSignature>() else { continue };
+                for ratio in counter_ratios(ts) {
+                    let bar = counter_bar(ts, ratio).unwrap();
+                    assert_eq!(ratio_of(&bar), Some(ratio), "{ratio} in {ts}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn ratios_with_the_same_note_values_tell_apart() {
+        // 3:4 and 3:2 in 4/4 are both six quarter triplets.
+        let ts = TimeSignature::FOUR_FOUR;
+        for ratio in [Ratio { n: 3, span: 4 }, Ratio { n: 3, span: 2 }] {
+            assert_eq!(ratio_of(&counter_bar(ts, ratio).unwrap()), Some(ratio));
+        }
+        let mut m = counter_bar(ts, Ratio { n: 3, span: 2 }).unwrap();
+        m.set_click_level(1, ClickLevel::Off);
+        assert_eq!(ratio_of(&m), Some(Ratio { n: 3, span: 2 }));
     }
 
     #[test]
