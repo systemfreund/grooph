@@ -154,12 +154,18 @@ fn switch_row(ui: &mut Ui, label: &str, on: &mut bool) -> bool {
     );
 
     let switch = Rect::from_center_size(rect.right_center() - vec2(30.0, 0.0), vec2(52.0, 30.0));
-    let fill = if *on { visuals.selection.bg_fill } else { visuals.extreme_bg_color };
+    let fill = if *on { visuals.selection.bg_fill } else { switch_off_fill(visuals) };
     painter.rect_filled(switch, 15, fill);
     let radius = 12.0;
     let x = egui::lerp((switch.left() + 15.0)..=(switch.right() - 15.0), how_on);
     painter.circle_filled(pos2(x, switch.center().y), radius, Color32::WHITE);
     resp.clicked()
+}
+
+/// Track colour of a switch that is off. It has to differ from the white
+/// knob, so the light theme gets a grey instead of its white field colour.
+fn switch_off_fill(visuals: &egui::Visuals) -> Color32 {
+    if visuals.dark_mode { visuals.extreme_bg_color } else { Color32::from_gray(190) }
 }
 
 /// Full-width row with a label, the current value and a chevron.
