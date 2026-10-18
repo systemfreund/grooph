@@ -6,8 +6,8 @@ authors.workspace = true
 license.workspace = true
 publish = false
 
-# The Android app: a native library that NativeActivity loads. Build the APK
-# with `cargo apk build -p grooph-android` (see README "Android").
+# The Android app: a native library that NativeActivity loads. Build the App
+# Bundle and the APK with build-android.sh (see README "Android").
 [lib]
 crate-type = ["cdylib"]
 
@@ -19,23 +19,3 @@ android_logger = "0.15"
 jni = "0.21"
 log = { workspace = true }
 winit = { workspace = true, features = ["android-native-activity"] }
-
-[package.metadata.android]
-package = "app.grooph"
-apk_name = "grooph"
-build_targets = ["aarch64-linux-android", "x86_64-linux-android"]
-
-[package.metadata.android.sdk]
-# 29: midir needs AMidi (libamidi), which Android 10 added.
-min_sdk_version = 29
-target_sdk_version = 34
-
-[package.metadata.android.application]
-label = "grooph"
-
-[package.metadata.android.application.activity]
-orientation = "portrait"
-config_changes = "orientation|screenSize|screenLayout|keyboardHidden"
-
-[[package.metadata.android.uses_permission]]
-name = "android.permission.RECORD_AUDIO"

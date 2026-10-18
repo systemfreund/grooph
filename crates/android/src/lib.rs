@@ -3,6 +3,8 @@
 //! picks the compact layout on its own.
 
 #[cfg(target_os = "android")]
+mod activity;
+#[cfg(target_os = "android")]
 mod insets;
 
 #[cfg(target_os = "android")]
@@ -17,6 +19,7 @@ fn android_main(app: winit::platform::android::activity::AndroidApp) {
     // storage so presets, patterns and settings survive a restart.
     let persistence_path = app.internal_data_path().map(|dir| dir.join("grooph.ron"));
     let insets = insets::SystemBars::new(app.clone());
+    let activity = activity::Activity { app: app.clone() };
     let options = eframe::NativeOptions {
         android_app: Some(app),
         persistence_path,
@@ -28,23 +31,36 @@ fn android_main(app: winit::platform::android::activity::AndroidApp) {
     let result = eframe::run_native(
         "grooph",
         options,
-        Box::new(|cc| Ok(Box::new(AndroidApp { app: Grooph::new(cc), insets }))),
+        Box::new(|cc| {
+            let mut app = Grooph::new(cc);
+            app.set_host(Box::new(activity.clone()));
+            Ok(Box::new(AndroidApp { app, insets, activity }))
+        }),
     );
     if let Err(err) = result {
         log::error!("grooph stopped: {err}");
     }
 }
 
-/// The app plus what only Android needs: keeping clear of the system bars.
+/// The app plus what only Android needs: keeping clear of the system bars,
+/// the back button and going to the background.
 #[cfg(target_os = "android")]
 struct AndroidApp {
     app: grooph_app::Grooph,
     insets: insets::SystemBars,
+    activity: activity::Activity,
 }
 
 #[cfg(target_os = "android")]
 impl eframe::App for AndroidApp {
     fn ui(&mut self, ui: &mut eframe::egui::Ui, frame: &mut eframe::Frame) {
+        use eframe::egui::{Key, Modifiers};
+
+        // The back button arrives as BrowserBack. It closes what is open in
+        // the app; with nothing open it leaves the app, as elsewhere.
+        if ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::BrowserBack)) && !self.app.back() {
+            self.activity.move_to_back();
+        }
         // The root Ui spans the whole screen; keep the app inside the part the
         // system bars leave free (the safe area set in `raw_input_hook`).
         let content = ui.ctx().content_rect();
@@ -53,7 +69,12 @@ impl eframe::App for AndroidApp {
         });
     }
 
+    /// eframe saves when the window goes away, the only notice it passes on
+    /// that the app went to the background; it also saves every 30 s.
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        if self.activity.window_hidden() {
+            self.app.hidden();
+        }
         self.app.save(storage);
     }
 

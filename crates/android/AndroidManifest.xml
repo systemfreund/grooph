@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The app is a NativeActivity running libgrooph_android.so; there is no
+     Java code. build-android.sh fills in the version and the SDK levels. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="app.grooph">
+
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+    <!-- The microphone is optional: without it, taps and MIDI still work. -->
+    <uses-feature android:name="android.hardware.microphone" android:required="false" />
+
+    <!-- enableOnBackInvokedCallback="false": keep getting the back button as
+         a key press (Android 16 stops sending it to apps that target it). -->
+    <application
+        android:label="grooph"
+        android:icon="@mipmap/ic_launcher"
+        android:hasCode="false"
+        android:enableOnBackInvokedCallback="false">
+        <activity
+            android:name="android.app.NativeActivity"
+            android:exported="true"
+            android:screenOrientation="portrait"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
+            android:launchMode="singleTask">
+            <meta-data android:name="android.app.lib_name" android:value="grooph_android" />
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

@@ -1,10 +1,9 @@
 //! Size of the status bar and navigation bar, read from the activity's window
 //! through JNI.
 
+use crate::activity::{decor_view, with_activity};
 use eframe::egui::SafeAreaInsets;
 use eframe::epaint::MarginF32;
-use jni::JNIEnv;
-use jni::objects::JObject;
 use std::time::{Duration, Instant};
 use winit::platform::android::activity::AndroidApp;
 
@@ -46,38 +45,24 @@ impl SystemBars {
 /// `activity.getWindow().getDecorView().getRootWindowInsets()` as
 /// `[left, top, right, bottom]`; `None` before the window is laid out.
 fn read_insets(app: &AndroidApp) -> Option<[i32; 4]> {
-    // SAFETY: both pointers come from android-activity and stay valid for as
-    // long as the app runs; the activity is a global reference.
-    let vm = unsafe { jni::JavaVM::from_raw(app.vm_as_ptr().cast()) }.ok()?;
-    let mut env = vm.attach_current_thread().ok()?;
-    let activity = unsafe { JObject::from_raw(app.activity_as_ptr().cast()) };
-    let insets = system_window_insets(&mut env, &activity);
-    if env.exception_check().unwrap_or(false) {
-        let _ = env.exception_clear();
-    }
-    insets
-}
-
-fn system_window_insets(env: &mut JNIEnv, activity: &JObject) -> Option<[i32; 4]> {
-    let window =
-        env.call_method(activity, "getWindow", "()Landroid/view/Window;", &[]).ok()?.l().ok()?;
-    let decor =
-        env.call_method(&window, "getDecorView", "()Landroid/view/View;", &[]).ok()?.l().ok()?;
-    let insets = env
-        .call_method(&decor, "getRootWindowInsets", "()Landroid/view/WindowInsets;", &[])
-        .ok()?
-        .l()
-        .ok()?;
-    if insets.is_null() {
-        return None;
-    }
-    // The system window insets cover the status bar, the navigation bar and
-    // a display cutout next to them (deprecated in API 30, still reported).
-    let mut side = |name: &str| env.call_method(&insets, name, "()I", &[]).ok()?.i().ok();
-    Some([
-        side("getSystemWindowInsetLeft")?,
-        side("getSystemWindowInsetTop")?,
-        side("getSystemWindowInsetRight")?,
-        side("getSystemWindowInsetBottom")?,
-    ])
+    with_activity(app, |env, activity| {
+        let decor = decor_view(env, activity)?;
+        let insets = env
+            .call_method(&decor, "getRootWindowInsets", "()Landroid/view/WindowInsets;", &[])?
+            .l()?;
+        if insets.is_null() {
+            return Ok(None);
+        }
+        // The system window insets cover the status bar, the navigation bar
+        // and a display cutout next to them (deprecated in API 30, still
+        // reported).
+        let mut side = |name: &str| env.call_method(&insets, name, "()I", &[])?.i();
+        Ok(Some([
+            side("getSystemWindowInsetLeft")?,
+            side("getSystemWindowInsetTop")?,
+            side("getSystemWindowInsetRight")?,
+            side("getSystemWindowInsetBottom")?,
+        ]))
+    })
+    .flatten()
 }

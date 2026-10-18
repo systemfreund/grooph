@@ -334,6 +334,12 @@ impl Grooph {
         mic.monitor_until = clock::now_seconds() + 1.0;
         let status = mic.input.as_ref().map(|input| input.status());
         match status {
+            None if mic.permission_asked => {
+                ui.label(
+                    "Waiting for microphone access. If you denied it, allow it in the \
+                     system settings.",
+                );
+            }
             None | Some(MicStatus::Starting) => {
                 ui.label("Starting the microphone…");
             }
