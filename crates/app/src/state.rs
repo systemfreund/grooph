@@ -282,6 +282,9 @@ pub(crate) struct UiShell {
     /// The window is phone-sized: the staff packs its notes tighter. Set
     /// every frame.
     pub(crate) narrow_screen: bool,
+    /// Em the staff was last drawn at, so the metronome ring's hand is as
+    /// wide as the playback cursor.
+    pub(crate) staff_em: f32,
     pub(crate) compact: CompactState,
     /// Setting whose picker dialog is open.
     pub(crate) picker: Option<Picker>,

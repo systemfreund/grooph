@@ -35,6 +35,7 @@ use grooph_measure::grid::DEFAULT_GRID;
 use grooph_measure::score::Score;
 use grooph_measure::tempo::ScoreTiming;
 use grooph_measure::{Cursor, Measure, TimeSignature};
+use grooph_render::playback_cursor_stroke;
 use std::f32::consts::{FRAC_PI_2, TAU};
 
 /// Gap between two segments, as a share of the full turn.
@@ -569,13 +570,15 @@ impl Grooph {
                     segment.paint_hover(painter, center, inner, unit, hover_color);
                 }
             }
-            // A thin hand across both rings while playing, so it shows where
-            // the clicks of the two rhythms fall against each other.
+            // A hand across both rings while playing, so it shows where the
+            // clicks of the two rhythms fall against each other. Drawn like
+            // the staff's playback cursor.
             if let Some(turn) = current_turn.filter(|_| !muted) {
                 let strong = thickness(ClickLevel::Strong);
                 let from = inner - strong * COUNTER_THICKNESS * radius / 2.0 - 4.0;
                 let to = radius + strong * radius / 2.0 + 4.0;
-                let stroke = Stroke::new(2.0_f32, visuals.strong_text_color());
+                let stroke =
+                    playback_cursor_stroke(self.ui.staff_em, visuals.selection.stroke.color);
                 painter
                     .line_segment([at_turn(center, from, turn), at_turn(center, to, turn)], stroke);
             }
