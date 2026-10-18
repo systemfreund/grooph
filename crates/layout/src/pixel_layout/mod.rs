@@ -693,7 +693,13 @@ mod tests {
             assert!((d.rect.min.y - mirrored(u.rect.max.y)).abs() < 0.01);
             assert!((d.rect.max.y - mirrored(u.rect.min.y)).abs() < 0.01);
         }
-        for (u, d) in a.tuplets[0].bracket.iter().zip(&b.tuplets[0].bracket) {
+        // A rest in the triplet gives it a bracket.
+        let r = parse_score("4/4 >t8 r:t8 t8 q h").unwrap().measures.remove(0);
+        let (ra, rb) = (build_measure_layout(&r, &up), build_measure_layout(&r, &down));
+        let (ub, db) = (&ra.tuplets[0].bracket, &rb.tuplets[0].bracket);
+        assert!(!ub.is_empty());
+        assert_eq!(ub.len(), db.len());
+        for (u, d) in ub.iter().zip(db) {
             assert!((d.p1.y - mirrored(u.p1.y)).abs() < 0.01);
             assert!((d.p2.y - mirrored(u.p2.y)).abs() < 0.01);
         }
