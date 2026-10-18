@@ -9,7 +9,7 @@
 //! title: Online Metronome        (<title> and default <h1>)
 //! heading: ...                   (optional <h1>)
 //! description: ...               (meta description, listings)
-//! section: Metronome             (footer group: Metronome, Sight-reading, Learn, Features)
+//! section: Metronome             (footer group: Metronome, Sight-reading, Learn, Features, About)
 //! order: 1                       (position within the section)
 //! ---
 //! ```
@@ -38,7 +38,7 @@ use std::path::{Path, PathBuf};
 pub const SITE_URL: &str = "https://grooph.app";
 
 /// Footer groups, in display order.
-const SECTIONS: [&str; 4] = ["Metronome", "Sight-reading", "Learn", "Features"];
+const SECTIONS: [&str; 5] = ["Metronome", "Sight-reading", "Learn", "Features", "About"];
 
 const STYLESHEET: &str = include_str!("site.css");
 
