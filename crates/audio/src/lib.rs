@@ -5,7 +5,7 @@ mod trainer;
 mod voices;
 mod wav;
 
-pub use sounds::{MetronomeSound, RhythmSound};
+pub use sounds::{CounterSound, MetronomeSound, RhythmSound};
 pub use trainer::{GapClick, GapMode, GapMute, RampEnd, RampUnit, TempoRamp};
 
 use crate::tick_source::{CountInPlan, TickSource};
@@ -13,6 +13,7 @@ use crate::trainer::GapDecider;
 use crate::voices::VoiceMixer;
 use grooph_measure::Score;
 use grooph_measure::click::ClickBars;
+use grooph_measure::counter::CounterBars;
 use grooph_measure::generator::Subdivision;
 use grooph_measure::grid::DEFAULT_GRID;
 use grooph_measure::swing::Swing;
@@ -78,6 +79,15 @@ pub struct AudioSettings {
     /// Silence notes, accents and ghost notes.
     #[serde(default)]
     pub rhythm_muted: bool,
+    /// Sound of the counter rhythm.
+    #[serde(default)]
+    pub counter_sound: CounterSound,
+    /// Volume of the counter rhythm's medium clicks.
+    #[serde(default = "default_counter_gain")]
+    pub counter: f32,
+    /// Silence the counter rhythm.
+    #[serde(default)]
+    pub counter_muted: bool,
 }
 
 pub(crate) fn default_ghost_gain() -> f32 {
@@ -90,6 +100,10 @@ fn default_count_in_gain() -> f32 {
 
 fn default_soft_gain() -> f32 {
     0.35
+}
+
+fn default_counter_gain() -> f32 {
+    0.6
 }
 
 impl Default for AudioSettings {
@@ -112,6 +126,9 @@ impl Default for AudioSettings {
             soft: default_soft_gain(),
             metronome_muted: false,
             rhythm_muted: false,
+            counter_sound: CounterSound::default(),
+            counter: default_counter_gain(),
+            counter_muted: false,
         }
     }
 }
@@ -143,6 +160,9 @@ impl AudioSettings {
             soft: default_soft_gain(),
             metronome_muted: false,
             rhythm_muted: false,
+            counter_sound: CounterSound::default(),
+            counter: default_counter_gain(),
+            counter_muted: false,
         };
         result.clamped()
     }
@@ -160,6 +180,7 @@ impl AudioSettings {
         self.ghost = self.ghost.clamp(0.0, 1.0);
         self.count_in = self.count_in.clamp(0.0, 1.0);
         self.soft = self.soft.clamp(0.0, 1.0);
+        self.counter = self.counter.clamp(0.0, 1.0);
         self
     }
 }
@@ -179,6 +200,8 @@ pub struct PlaybackOptions {
     pub ramp: TempoRamp,
     /// What the metronome clicks in each meter.
     pub click: ClickBars,
+    /// The counter rhythm played against the click bar, per meter.
+    pub counter: CounterBars,
 }
 
 /// The bar the audio engine is playing, as counted since the score started.
@@ -275,7 +298,8 @@ impl Audio {
     pub fn update(&mut self, player_state: &PlayerState, bpm: u32, score: &Score) -> bool {
         let timing = ScoreTiming::from_score(score, bpm).with_swing(self.options.swing);
         let schedule =
-            Schedule::build(score, &timing, self.options.ghost_notes, &self.options.click);
+            Schedule::build(score, &timing, self.options.ghost_notes, &self.options.click)
+                .with_counter(score, &timing, &self.options.counter);
         let count_in = if self.options.count_in { count_in_plan(score) } else { None };
 
         // Check differences

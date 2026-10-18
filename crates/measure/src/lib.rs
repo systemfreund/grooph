@@ -1,5 +1,6 @@
 mod beat;
 pub mod click;
+pub mod counter;
 pub mod counting;
 pub mod duration;
 pub mod editing;

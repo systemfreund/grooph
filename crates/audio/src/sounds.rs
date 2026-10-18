@@ -12,7 +12,7 @@
 //! mixer. Rhythm sounds have their own recordings for notes, accents and
 //! ghost notes, so the dynamics come from the samples.
 
-use crate::schedule::SoundType;
+use crate::schedule::{COUNTER_SOFT_GAIN, SoundType};
 use crate::wav::{self, SampleData};
 use crate::{AudioSettings, Waveform, default_ghost_gain};
 use serde::{Deserialize, Serialize};
@@ -80,6 +80,47 @@ impl MetronomeSound {
         }
     }
 }
+
+/// Sound of the counter rhythm, the metronome's second layer.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CounterSound {
+    /// The click from the sound settings, pitched above the metronome's.
+    #[default]
+    Click,
+    /// Claves, played higher when the metronome plays claves too.
+    Claves,
+    /// Snare drum: accent, normal and ghost-note recordings.
+    Snare,
+}
+
+impl CounterSound {
+    pub const ALL: [CounterSound; 3] =
+        [CounterSound::Click, CounterSound::Claves, CounterSound::Snare];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            CounterSound::Click => "Click",
+            CounterSound::Claves => "Claves",
+            CounterSound::Snare => "Snare",
+        }
+    }
+
+    fn sample(self, sound: SoundType) -> Option<SampleId> {
+        let strong = sound == SoundType::CounterStrong;
+        Some(match self {
+            CounterSound::Click => return None,
+            CounterSound::Claves if strong => SampleId::CLAVES_HIGH,
+            CounterSound::Claves => SampleId::CLAVES_LOW,
+            CounterSound::Snare if strong => SampleId::SNARE_ACCENT,
+            CounterSound::Snare if sound == SoundType::CounterSoft => SampleId::SNARE_GHOST,
+            CounterSound::Snare => SampleId::SNARE,
+        })
+    }
+}
+
+/// Playback rate of counter claves while the metronome plays claves too,
+/// so the two layers stay apart by ear.
+const COUNTER_CLAVES_RATE: f32 = 1.5;
 
 /// An embedded WAV file.
 struct SampleFile {
@@ -164,11 +205,17 @@ impl SoundType {
         matches!(self, SoundType::Beat | SoundType::AccentedBeat | SoundType::Ghost)
     }
 
+    pub(crate) fn is_counter(self) -> bool {
+        matches!(self, SoundType::CounterStrong | SoundType::CounterMedium | SoundType::CounterSoft)
+    }
+
     /// The patch for this hit: the voice's chosen sound in this sound type's
     /// variant.
     pub(crate) fn patch(self, settings: &AudioSettings) -> Patch {
         let sample = if self.is_rhythm() {
             settings.rhythm_sound.sample(self)
+        } else if self.is_counter() {
+            settings.counter_sound.sample(self)
         } else {
             settings.metronome_sound.sample(self)
         };
@@ -178,8 +225,20 @@ impl SoundType {
         if sample.is_some() && self == SoundType::Ghost {
             gain /= default_ghost_gain();
         }
+        // The same holds for the snare's soft counter clicks.
+        if sample == Some(SampleId::SNARE_GHOST) && self == SoundType::CounterSoft {
+            gain /= COUNTER_SOFT_GAIN;
+        }
+        let rate = if self.is_counter()
+            && settings.counter_sound == CounterSound::Claves
+            && settings.metronome_sound == MetronomeSound::Claves
+        {
+            COUNTER_CLAVES_RATE
+        } else {
+            1.0
+        };
         match sample {
-            Some(id) => Patch::Sample { data: id.data(), rate: 1.0, gain },
+            Some(id) => Patch::Sample { data: id.data(), rate, gain },
             None => click(self, settings),
         }
     }
@@ -243,6 +302,45 @@ mod tests {
         assert_eq!(sample(SoundType::CountIn).0, low);
         // The rhythm keeps its own sound.
         assert_ne!(sample(SoundType::Beat).0, low);
+    }
+
+    #[test]
+    fn counter_sounds_stay_apart_from_the_metronome() {
+        let rate_of = |counter_sound, metronome_sound| {
+            let settings =
+                AudioSettings { counter_sound, metronome_sound, ..AudioSettings::default() };
+            match SoundType::CounterMedium.patch(&settings) {
+                Patch::Sample { data, rate, .. } => Some((data, rate)),
+                Patch::Click { .. } => None,
+            }
+        };
+        // Claves against claves play higher, against the click as recorded.
+        let (data, rate) = rate_of(CounterSound::Claves, MetronomeSound::Claves).unwrap();
+        assert_eq!(data, SampleId::CLAVES_LOW.data());
+        assert_eq!(rate, COUNTER_CLAVES_RATE);
+        assert_eq!(rate_of(CounterSound::Claves, MetronomeSound::Click).unwrap().1, 1.0);
+        // The click is pitched above the metronome's.
+        assert!(rate_of(CounterSound::Click, MetronomeSound::Click).is_none());
+        let settings = AudioSettings::default();
+        let profile = |s: SoundType| s.profile(&settings).freq_mult;
+        assert!(profile(SoundType::CounterMedium) > profile(SoundType::Downbeat));
+        // The out-of-the-box counter sound differs from the metronome's.
+        assert_ne!(settings.counter_sound.label(), settings.metronome_sound.label());
+    }
+
+    #[test]
+    fn snare_counter_clicks_use_the_three_recordings() {
+        let settings = AudioSettings { counter_sound: CounterSound::Snare, ..Default::default() };
+        let sample = |sound: SoundType| match sound.patch(&settings) {
+            Patch::Sample { data, gain, .. } => (data, gain),
+            other => panic!("sample expected, got {other:?}"),
+        };
+        assert_eq!(sample(SoundType::CounterStrong).0, SampleId::SNARE_ACCENT.data());
+        assert_eq!(sample(SoundType::CounterMedium).0, SampleId::SNARE.data());
+        let (ghost, gain) = sample(SoundType::CounterSoft);
+        assert_eq!(ghost, SampleId::SNARE_GHOST.data());
+        // The ghost recording is quiet already: it plays at the counter volume.
+        assert!((gain - settings.counter).abs() < 1e-6);
     }
 
     #[test]

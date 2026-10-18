@@ -1,3 +1,4 @@
+use grooph_measure::counter::CounterBars;
 use grooph_measure::{Cursor, Score};
 use std::collections::VecDeque;
 
@@ -6,6 +7,9 @@ pub(crate) const DEFAULT_UNDO_LIMIT: usize = 200;
 pub(crate) struct EditorSnapshot {
     pub score: Score,
     pub cursor: Cursor,
+    /// The counter rhythms, taken in the metronome tab only: it is the one
+    /// place they change, and undo elsewhere must not bring old ones back.
+    pub counter: Option<CounterBars>,
 }
 
 pub(crate) struct UndoHistory {
@@ -57,7 +61,7 @@ mod tests {
     fn snap(beat_idx: usize) -> EditorSnapshot {
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
         m.set_beat(0, Beat::note(q())).unwrap();
-        EditorSnapshot { score: Score::single(m), cursor: Cursor::at(0, beat_idx) }
+        EditorSnapshot { score: Score::single(m), cursor: Cursor::at(0, beat_idx), counter: None }
     }
 
     fn beat_at(snap: &EditorSnapshot) -> usize {
@@ -128,7 +132,7 @@ mod tests {
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
         m.set_beat(0, Beat::note(q())).unwrap();
         let mut score = Score::single(m);
-        let snap = EditorSnapshot { score: score.clone(), cursor: Cursor::start() };
+        let snap = EditorSnapshot { score: score.clone(), cursor: Cursor::start(), counter: None };
 
         let mut h = UndoHistory::new(10);
         h.push(snap);
@@ -137,7 +141,8 @@ mod tests {
         score.current_mut(0).set_beat(1, Beat::note(q())).unwrap();
 
         // restored snapshot retains original beat count (before mutation)
-        let restored = h.pop_undo(EditorSnapshot { score, cursor: Cursor::start() }).unwrap();
+        let restored =
+            h.pop_undo(EditorSnapshot { score, cursor: Cursor::start(), counter: None }).unwrap();
         // the mutation added a beat to the *source* score but the snapshot is independent
         // we just check that pop returns something with a distinct measure state
         assert_eq!(restored.score.current(0).beats().len(), 4); // original 4/4 default beats

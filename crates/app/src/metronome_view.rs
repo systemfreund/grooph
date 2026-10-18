@@ -11,6 +11,11 @@
 //! The segment's thickness shows how loud it clicks; a tap moves it to the
 //! next level. While playing, the click being played lights up and the middle
 //! shows the bar number.
+//!
+//! A meter can have a counter rhythm (see [`grooph_measure::counter`]), e.g.
+//! three clicks against the four beats of 4/4. It plays in this tab only and
+//! shows as a second ring inside the first, one segment per click, tapped
+//! through the same levels.
 
 use crate::undo::{DEFAULT_UNDO_LIMIT, UndoHistory};
 use crate::{Grooph, TransportState};
@@ -18,6 +23,9 @@ use eframe::egui;
 use eframe::egui::epaint::PathShape;
 use eframe::egui::{Align2, Color32, FontId, Pos2, Sense, Shape, Stroke, Ui, vec2};
 use grooph_measure::click::{ClickLevel, default_click_bar, subdivided_click_bar};
+use grooph_measure::counter::{
+    CounterBars, Ratio, click_level, counter_bar, counter_clicks, counter_ratios, ratio_of,
+};
 use grooph_measure::duration::Duration;
 use grooph_measure::grid::DEFAULT_GRID;
 use grooph_measure::score::Score;
@@ -29,6 +37,12 @@ use std::f32::consts::{FRAC_PI_2, TAU};
 const SEGMENT_GAP: f32 = 0.012;
 /// Points per radian on the ring's arcs, so they look round at any size.
 const ARC_STEP: f32 = 0.05;
+/// Radius of the counter rhythm's ring, as a share of the outer ring's.
+const COUNTER_RING: f32 = 0.6;
+/// Thickness of the counter ring's segments, as a share of the outer ones.
+const COUNTER_THICKNESS: f32 = 0.75;
+/// Brightness of soft segments relative to the others.
+const SOFT_DIM: f32 = 0.6;
 
 /// The rhythm the metronome tab put aside, back when it closes.
 pub(crate) struct RhythmStash {
@@ -271,6 +285,68 @@ impl Grooph {
             .map_or_else(|| "Custom".to_owned(), |(_, name)| name)
     }
 
+    /// The counter rhythm of the metronome meter, if it has one.
+    pub(crate) fn counter_bar(&self) -> Option<&Measure> {
+        self.playback_ctl.audio_cfg.counter.for_meter(self.metronome_meter())
+    }
+
+    /// The counter rhythm the audio plays: the metronome meter's, in the
+    /// metronome tab only, and not while calibrating.
+    pub(crate) fn played_counter(&self) -> CounterBars {
+        let mut counter = CounterBars::default();
+        if self.metronome_mode() && self.calibration_stash().is_none() {
+            let ts = self.metronome_meter();
+            counter.set(ts, self.counter_bar().cloned());
+        }
+        counter
+    }
+
+    /// Ratios the metronome meter offers for a counter rhythm.
+    pub(crate) fn counter_choices(&self) -> Vec<Ratio> {
+        counter_ratios(self.metronome_meter())
+    }
+
+    /// The counter rhythm's ratio: "Off" without one, "Custom" for one that
+    /// is no ratio's.
+    pub(crate) fn counter_label(&self) -> String {
+        match self.counter_bar() {
+            None => "Off".to_owned(),
+            Some(bar) => ratio_of(bar).map_or_else(|| "Custom".to_owned(), |r| r.to_string()),
+        }
+    }
+
+    /// Play `ratio` against the click bar from now on, or no counter rhythm.
+    /// Undoable.
+    pub(crate) fn set_counter_ratio(&mut self, ratio: Option<Ratio>) {
+        let ts = self.metronome_meter();
+        let bar = ratio.and_then(|r| counter_bar(ts, r));
+        let unchanged = match (self.counter_bar(), &bar) {
+            (None, None) => true,
+            (Some(a), Some(b)) => same_bar(a, b),
+            _ => false,
+        };
+        if unchanged {
+            return;
+        }
+        self.with_undo_snapshot(|app| {
+            app.playback_ctl.audio_cfg.counter.set(ts, bar);
+            true
+        });
+    }
+
+    /// Move the counter click starting at beat `idx` to its next level.
+    fn cycle_counter_level(&mut self, idx: usize) {
+        let ts = self.metronome_meter();
+        self.with_undo_snapshot(|app| {
+            let Some(mut bar) = app.counter_bar().cloned() else {
+                return false;
+            };
+            bar.set_click_level(idx, click_level(&bar, idx).next());
+            app.playback_ctl.audio_cfg.counter.set(ts, Some(bar));
+            true
+        });
+    }
+
     /// Move the click at `idx` to its next level.
     fn cycle_click_level(&mut self, idx: usize) {
         self.with_undo_snapshot(|app| {
@@ -312,10 +388,15 @@ impl Grooph {
         let bar = self.editor.score.measures[0].clone();
         let ts = bar.time_signature();
         let spans = beat_spans(&bar);
+        let counter = self.counter_bar().cloned();
+        let counter_spans = counter.as_ref().map(counter_spans).unwrap_or_default();
         let tick = self.metronome_tick(&ts);
         let bar_ticks = DEFAULT_GRID.ticks_per_measure(&ts).max(1) as f64;
         let current_turn = tick.map(|t| (t / bar_ticks) as f32);
         let current = current_turn.and_then(|t| beat_at_turn(&spans, t));
+        let counter_now = current_turn.and_then(|t| {
+            counter_spans.iter().position(|&(_, start, end)| (start..end).contains(&t))
+        });
         let bar_state = match self.playback_ctl.audio.as_mut() {
             Some(audio) if tick.is_some() => audio.bar_state(),
             _ => None,
@@ -331,106 +412,194 @@ impl Grooph {
             return;
         }
         let center = rect.center();
+        let inner = COUNTER_RING * radius;
 
         let visuals = ui.visuals();
         let muted = self.playback_ctl.playback.bar_muted;
         let (idle, lit) = ring_colors(visuals.dark_mode);
         let base = if muted { idle.gamma_multiply(0.5) } else { idle };
-        let soft_dim = 0.6;
         let painter = ui.painter();
 
-        // Tapped or hovered click: from the pointer's angle, if it is on the ring.
+        // Tapped or hovered click: from the pointer's angle and its distance
+        // from the middle. With a counter rhythm the two rings split the
+        // room halfway between them.
         let on_ring = |pos: Pos2| {
             let d = pos - center;
+            let turn = ((d.y.atan2(d.x) + FRAC_PI_2) / TAU).rem_euclid(1.0);
             let band = (0.3 * radius).max(24.0);
-            if (d.length() - radius).abs() > band {
+            let dist = d.length();
+            if counter.is_some() && dist < (radius + inner) / 2.0 {
+                if dist < inner - band {
+                    return None;
+                }
+                let idx = counter_spans.iter().position(|&(_, s, e)| (s..e).contains(&turn))?;
+                return Some(RingHit::Counter(counter_spans[idx].0));
+            }
+            if (dist - radius).abs() > band {
                 return None;
             }
-            let turn = ((d.y.atan2(d.x) + FRAC_PI_2) / TAU).rem_euclid(1.0);
-            beat_at_turn(&spans, turn)
+            beat_at_turn(&spans, turn).map(RingHit::Click)
         };
         let hovered = resp.hover_pos().and_then(on_ring);
+        let hover_color = visuals.weak_text_color();
 
         for (idx, (&(start, end), beat)) in spans.iter().zip(bar.beats()).enumerate() {
-            let level = ClickLevel::of(beat);
-            let gap = SEGMENT_GAP.min(0.3 * (end - start)) / 2.0;
-            let (start, end) = (start + gap, end - gap);
-            let width = thickness(level) * radius;
             let color = if current == Some(idx) && !muted { lit } else { base };
-            match level {
-                ClickLevel::Off => {
-                    let mut points = arc(center, radius + width / 2.0, start, end);
-                    points.extend(arc(center, radius - width / 2.0, start, end).into_iter().rev());
-                    painter.add(PathShape::closed_line(points, Stroke::new(2.0_f32, color)));
-                }
-                _ => {
-                    let color = if level == ClickLevel::Soft {
-                        color.gamma_multiply(soft_dim)
-                    } else {
-                        color
-                    };
-                    painter.add(Shape::line(
-                        arc(center, radius, start, end),
-                        Stroke::new(width, color),
-                    ));
-                }
-            }
-            if hovered == Some(idx) {
-                let outer = radius + thickness(ClickLevel::Strong) * radius / 2.0 + 6.0;
-                painter.add(Shape::line(
-                    arc(center, outer, start, end),
-                    Stroke::new(2.0_f32, visuals.weak_text_color()),
-                ));
+            let segment = Segment { start, end, level: ClickLevel::of(beat), color };
+            segment.paint(painter, center, radius, radius);
+            if hovered == Some(RingHit::Click(idx)) {
+                segment.paint_hover(painter, center, radius, radius, hover_color);
             }
         }
 
-        // A dot for every beat unit inside the ring, bigger ones where a beat
-        // group starts.
-        let units = ts.beats.max(1) as usize;
-        let mut group_starts = vec![0usize];
-        for &g in ts.groups().iter() {
-            group_starts.push(group_starts.last().copied().unwrap_or(0) + g as usize);
-        }
-        let dot_radius = (0.0375 * radius).max(3.75);
-        let dot_now = current_turn.map(|t| (t * units as f32) as usize);
-        for dot in 0..units {
-            let pos = at_turn(center, 0.72 * radius, dot as f32 / units as f32);
-            let color =
-                if dot_now == Some(dot) && !muted { lit } else { visuals.weak_text_color() };
-            let r = if group_starts.contains(&dot) { dot_radius } else { 0.6 * dot_radius };
-            painter.circle_filled(pos, r, color);
+        if let Some(counter) = &counter {
+            for (i, &(idx, start, end)) in counter_spans.iter().enumerate() {
+                let color = if counter_now == Some(i) && !muted { lit } else { base };
+                let level = click_level(counter, idx);
+                let segment = Segment { start, end, level, color };
+                let unit = COUNTER_THICKNESS * radius;
+                segment.paint(painter, center, inner, unit);
+                if hovered == Some(RingHit::Counter(idx)) {
+                    segment.paint_hover(painter, center, inner, unit, hover_color);
+                }
+            }
+        } else {
+            // A dot for every beat unit inside the ring, bigger ones where a
+            // beat group starts. The counter ring takes their place.
+            let units = ts.beats.max(1) as usize;
+            let mut group_starts = vec![0usize];
+            for &g in ts.groups().iter() {
+                group_starts.push(group_starts.last().copied().unwrap_or(0) + g as usize);
+            }
+            let dot_radius = (0.0375 * radius).max(3.75);
+            let dot_now = current_turn.map(|t| (t * units as f32) as usize);
+            for dot in 0..units {
+                let pos = at_turn(center, 0.72 * radius, dot as f32 / units as f32);
+                let color = if dot_now == Some(dot) && !muted { lit } else { base };
+                let r = if group_starts.contains(&dot) { dot_radius } else { 0.6 * dot_radius };
+                painter.circle_filled(pos, r, color);
+            }
         }
 
-        // Middle: the bar number while playing, else the meter.
+        // Middle: the bar number while playing, else the meter (and the
+        // counter rhythm's ratio).
+        let caption = match counter.as_ref().and_then(ratio_of) {
+            Some(ratio) => ratio.to_string(),
+            None if counter.is_some() => "custom".to_owned(),
+            None => meter_caption(&ts),
+        };
         let (big, small) = match bar_state {
             Some(b) => ((b.bar + 1).to_string(), if muted { "muted" } else { "bar" }.to_owned()),
-            None => (format!("{}/{}", ts.beats, ts.beat_unit), meter_caption(&ts)),
+            None => (format!("{}/{}", ts.beats, ts.beat_unit), caption),
         };
+        // Smaller inside the counter ring.
+        let scale = if counter.is_some() { 0.8 } else { 1.0 };
         painter.text(
-            center - vec2(0.0, 0.08 * radius),
+            center - vec2(0.0, 0.08 * scale * radius),
             Align2::CENTER_CENTER,
             big,
-            FontId::proportional(0.42 * radius),
+            FontId::proportional(0.42 * scale * radius),
             visuals.strong_text_color(),
         );
         painter.text(
-            center + vec2(0.0, 0.26 * radius),
+            center + vec2(0.0, 0.26 * scale * radius),
             Align2::CENTER_CENTER,
             small,
-            FontId::proportional((0.14 * radius).clamp(13.0, 22.0)),
+            FontId::proportional((0.14 * scale * radius).clamp(13.0, 22.0)),
             visuals.weak_text_color(),
         );
 
-        if let Some(idx) = hovered {
-            let level = bar.beats().get(idx).map_or(ClickLevel::Medium, ClickLevel::of);
-            resp.clone().on_hover_text(format!("Click: {} (tap to change)", level_label(level)));
+        if let Some(hit) = hovered {
+            let level = match hit {
+                RingHit::Click(idx) => {
+                    bar.beats().get(idx).map_or(ClickLevel::Medium, ClickLevel::of)
+                }
+                RingHit::Counter(idx) => {
+                    counter.as_ref().map_or(ClickLevel::Medium, |c| click_level(c, idx))
+                }
+            };
+            let what = if matches!(hit, RingHit::Counter(_)) { "Counter click" } else { "Click" };
+            resp.clone().on_hover_text(format!("{what}: {} (tap to change)", level_label(level)));
         }
-        if resp.clicked()
-            && let Some(idx) = resp.interact_pointer_pos().and_then(on_ring)
-        {
-            self.cycle_click_level(idx);
+        if resp.clicked() {
+            match resp.interact_pointer_pos().and_then(on_ring) {
+                Some(RingHit::Click(idx)) => self.cycle_click_level(idx),
+                Some(RingHit::Counter(idx)) => self.cycle_counter_level(idx),
+                None => {}
+            }
         }
     }
+}
+
+/// What a tap on the ring hits: a beat of the click bar, or a click of the
+/// counter rhythm (the index of its first beat).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum RingHit {
+    Click(usize),
+    Counter(usize),
+}
+
+/// One arc of the ring.
+struct Segment {
+    start: f32,
+    end: f32,
+    level: ClickLevel,
+    color: Color32,
+}
+
+impl Segment {
+    /// Paint on the circle of `radius`, as thick as [`thickness`] of `unit`.
+    fn paint(&self, painter: &egui::Painter, center: Pos2, radius: f32, unit: f32) {
+        let (start, end) = self.trimmed();
+        let width = thickness(self.level) * unit;
+        match self.level {
+            ClickLevel::Off => {
+                let mut points = arc(center, radius + width / 2.0, start, end);
+                points.extend(arc(center, radius - width / 2.0, start, end).into_iter().rev());
+                painter.add(PathShape::closed_line(points, Stroke::new(2.0_f32, self.color)));
+            }
+            _ => {
+                let color = if self.level == ClickLevel::Soft {
+                    self.color.gamma_multiply(SOFT_DIM)
+                } else {
+                    self.color
+                };
+                painter
+                    .add(Shape::line(arc(center, radius, start, end), Stroke::new(width, color)));
+            }
+        }
+    }
+
+    /// The hover mark just outside the segment.
+    fn paint_hover(
+        &self,
+        painter: &egui::Painter,
+        center: Pos2,
+        radius: f32,
+        unit: f32,
+        color: Color32,
+    ) {
+        let (start, end) = self.trimmed();
+        let outer = radius + thickness(ClickLevel::Strong) * unit / 2.0 + 6.0;
+        painter.add(Shape::line(arc(center, outer, start, end), Stroke::new(2.0_f32, color)));
+    }
+
+    /// Start and end with half the gap between segments taken off each.
+    fn trimmed(&self) -> (f32, f32) {
+        let gap = SEGMENT_GAP.min(0.3 * (self.end - self.start)) / 2.0;
+        (self.start + gap, self.end - gap)
+    }
+}
+
+/// Where each click of a counter bar sits on the ring: its first beat, start
+/// and end (shares of the full turn). A click spans the rests it was written
+/// with, see [`counter_clicks`].
+fn counter_spans(bar: &Measure) -> Vec<(usize, f32, f32)> {
+    let spans = beat_spans(bar);
+    counter_clicks(bar)
+        .into_iter()
+        .filter_map(|r| Some((r.start, spans.get(r.start)?.0, spans.get(r.end - 1)?.1)))
+        .collect()
 }
 
 /// Caption under the meter: its beat groups when there are several.
@@ -505,6 +674,20 @@ mod tests {
         let name =
             fills.iter().find(|(m, _)| same_bar(m, &meter_click_bar(TimeSignature::SEVEN_EIGHT)));
         assert_eq!(name.map(|(_, n)| n.as_str()), Some("Eighths"));
+    }
+
+    #[test]
+    fn counter_segments_span_a_click_and_its_rests() {
+        let ts = TimeSignature::FOUR_FOUR;
+        let mut bar = counter_bar(ts, Ratio { n: 3, span: 4 }).unwrap();
+        bar.set_click_level(2, ClickLevel::Off);
+        let spans = counter_spans(&bar);
+        // Three clicks of a third of the bar each, starting at beats 0, 2, 4.
+        assert_eq!(spans.iter().map(|s| s.0).collect::<Vec<_>>(), [0, 2, 4]);
+        for (i, &(_, start, end)) in spans.iter().enumerate() {
+            assert!((start - i as f32 / 3.0).abs() < 1e-6);
+            assert!((end - (i + 1) as f32 / 3.0).abs() < 1e-6);
+        }
     }
 
     #[test]

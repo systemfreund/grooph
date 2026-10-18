@@ -4,7 +4,7 @@ use crate::play_along::{HitSource, MAX_INPUT_OFFSET_MS, TapKey};
 use crate::{CountingBase, Mode, clock};
 use eframe::egui;
 use eframe::egui::global_theme_preference_buttons;
-use grooph_audio::{MetronomeSound, RhythmSound, Waveform};
+use grooph_audio::{CounterSound, MetronomeSound, RhythmSound, Waveform};
 use grooph_mic::MicStatus;
 
 impl Grooph {
@@ -23,6 +23,17 @@ impl Grooph {
                                 for sound in MetronomeSound::ALL {
                                     ui.selectable_value(
                                         &mut settings.metronome_sound,
+                                        sound,
+                                        sound.label(),
+                                    );
+                                }
+                            });
+                        egui::ComboBox::from_label("Counter rhythm")
+                            .selected_text(settings.counter_sound.label())
+                            .show_ui(ui, |ui| {
+                                for sound in CounterSound::ALL {
+                                    ui.selectable_value(
+                                        &mut settings.counter_sound,
                                         sound,
                                         sound.label(),
                                     );
