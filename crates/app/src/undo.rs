@@ -1,4 +1,5 @@
 use grooph_layout::staff_layout::Voice;
+use grooph_measure::click::ClickBars;
 use grooph_measure::counter::CounterBars;
 use grooph_measure::{Cursor, Score};
 use std::collections::VecDeque;
@@ -11,6 +12,9 @@ pub(crate) struct EditorSnapshot {
     /// The counter rhythms, taken in the metronome tab only: it is the one
     /// place they change, and undo elsewhere must not bring old ones back.
     pub counter: Option<CounterBars>,
+    /// The click bars, taken with the counter rhythms: `score` holds only
+    /// one of the two voices, and the other must come back too.
+    pub click: Option<ClickBars>,
     /// The metronome voice `score` holds (see
     /// [`crate::metronome_view::MetronomeState::voice`]).
     pub voice: Voice,
@@ -69,6 +73,7 @@ mod tests {
             score: Score::single(m),
             cursor: Cursor::at(0, beat_idx),
             counter: None,
+            click: None,
             voice: Voice::Upper,
         }
     }
@@ -145,6 +150,7 @@ mod tests {
             score: score.clone(),
             cursor: Cursor::start(),
             counter: None,
+            click: None,
             voice: Voice::Upper,
         };
 
@@ -160,6 +166,7 @@ mod tests {
                 score,
                 cursor: Cursor::start(),
                 counter: None,
+                click: None,
                 voice: Voice::Upper,
             })
             .unwrap();

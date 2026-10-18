@@ -108,10 +108,10 @@ pub fn own_ratios(ts: TimeSignature) -> Vec<Ratio> {
     ratios
 }
 
-/// The ratio of one's own next to `ratio` in `ts` with more clicks (`up`)
-/// or fewer in the same span, if any.
-pub fn step_clicks(ts: TimeSignature, ratio: Ratio, up: bool) -> Option<Ratio> {
-    let same_span = own_ratios(ts).into_iter().filter(|r| r.span == ratio.span);
+/// The ratio of `own` (a meter's [`own_ratios`]) next to `ratio` with more
+/// clicks (`up`) or fewer in the same span, if any.
+pub fn step_clicks(own: &[Ratio], ratio: Ratio, up: bool) -> Option<Ratio> {
+    let same_span = own.iter().copied().filter(|r| r.span == ratio.span);
     if up {
         same_span.filter(|r| r.n > ratio.n).min_by_key(|r| r.n)
     } else {
@@ -119,17 +119,16 @@ pub fn step_clicks(ts: TimeSignature, ratio: Ratio, up: bool) -> Option<Ratio> {
     }
 }
 
-/// The ratio of one's own in `ts` with the next longer (`up`) or shorter
-/// span than `ratio`'s, its clicks as near `ratio`'s as that span allows
-/// (the fewer on a tie), if any.
-pub fn step_span(ts: TimeSignature, ratio: Ratio, up: bool) -> Option<Ratio> {
-    let ratios = own_ratios(ts);
+/// The ratio of `own` (a meter's [`own_ratios`]) with the next longer
+/// (`up`) or shorter span than `ratio`'s, its clicks as near `ratio`'s as
+/// that span allows (the fewer on a tie), if any.
+pub fn step_span(own: &[Ratio], ratio: Ratio, up: bool) -> Option<Ratio> {
     let span = if up {
-        ratios.iter().map(|r| r.span).filter(|&s| s > ratio.span).min()
+        own.iter().map(|r| r.span).filter(|&s| s > ratio.span).min()
     } else {
-        ratios.iter().map(|r| r.span).filter(|&s| s < ratio.span).max()
+        own.iter().map(|r| r.span).filter(|&s| s < ratio.span).max()
     }?;
-    ratios.into_iter().filter(|r| r.span == span).min_by_key(|r| (r.n.abs_diff(ratio.n), r.n))
+    own.iter().copied().filter(|r| r.span == span).min_by_key(|r| (r.n.abs_diff(ratio.n), r.n))
 }
 
 /// The ratio whose counter bar `bar` is, whatever the levels of its clicks:
@@ -317,21 +316,20 @@ mod tests {
 
     #[test]
     fn steps_skip_ratios_without_a_bar() {
-        let ts = TimeSignature::FOUR_FOUR;
+        let own = own_ratios(TimeSignature::FOUR_FOUR);
         let r = |n, span| Ratio { n, span };
         // 4:4 has a common factor, so from 3:4 up is 5:4.
-        assert_eq!(step_clicks(ts, r(3, 4), true), Some(r(5, 4)));
-        assert_eq!(step_clicks(ts, r(3, 4), false), None);
-        assert_eq!(step_span(ts, r(3, 4), false), Some(r(3, 2)));
+        assert_eq!(step_clicks(&own, r(3, 4), true), Some(r(5, 4)));
+        assert_eq!(step_clicks(&own, r(3, 4), false), None);
+        assert_eq!(step_span(&own, r(3, 4), false), Some(r(3, 2)));
         // In two beats 4 has a common factor: 3 and 5 are as near, the
         // fewer clicks win.
-        assert_eq!(step_span(ts, r(4, 1), true), Some(r(3, 2)));
-        assert_eq!(step_span(ts, r(3, 4), true), None);
+        assert_eq!(step_span(&own, r(4, 1), true), Some(r(3, 2)));
+        assert_eq!(step_span(&own, r(3, 4), true), None);
         // Every step lands on a ratio of one's own.
-        let own = own_ratios(ts);
         for &ratio in &own {
             for up in [false, true] {
-                for step in [step_clicks(ts, ratio, up), step_span(ts, ratio, up)] {
+                for step in [step_clicks(&own, ratio, up), step_span(&own, ratio, up)] {
                     assert!(step.is_none_or(|s| own.contains(&s)));
                 }
             }

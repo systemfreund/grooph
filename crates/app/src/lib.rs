@@ -430,6 +430,7 @@ impl Grooph {
             score: self.editor.score.clone(),
             cursor: self.editor.cursor,
             counter: self.metronome_mode().then(|| self.playback_ctl.audio_cfg.counter.clone()),
+            click: self.metronome_mode().then(|| self.playback_ctl.audio_cfg.click.clone()),
             voice: self.edited_voice(),
         }
     }
@@ -471,6 +472,9 @@ impl Grooph {
                 self.playback_ctl.audio_cfg.counter = counter;
                 self.editor.metronome.voice = prev.voice;
             }
+            if let Some(click) = prev.click {
+                self.playback_ctl.audio_cfg.click = click;
+            }
             self.clear_accuracy_for_edit();
             self.editor.dirty = true;
         }
@@ -487,6 +491,9 @@ impl Grooph {
             if let Some(counter) = next.counter {
                 self.playback_ctl.audio_cfg.counter = counter;
                 self.editor.metronome.voice = next.voice;
+            }
+            if let Some(click) = next.click {
+                self.playback_ctl.audio_cfg.click = click;
             }
             self.clear_accuracy_for_edit();
             self.editor.dirty = true;

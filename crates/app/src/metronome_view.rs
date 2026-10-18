@@ -853,6 +853,22 @@ mod tests {
     }
 
     #[test]
+    fn redo_across_a_voice_switch_keeps_both_voices() {
+        let mut app = metronome_app();
+        app.set_counter_ratio(Some(Ratio { n: 3, span: 4 }));
+        app.cycle_click_level(1);
+        let click_edited = app.click_bar();
+        app.select_voice(Voice::Lower);
+        app.undo();
+        app.sync_click_bar();
+        assert!(!same_bar(&app.click_bar(), &click_edited));
+        app.redo();
+        app.sync_click_bar();
+        assert!(same_bar(&app.click_bar(), &click_edited));
+        assert!(app.counter_bar().is_some());
+    }
+
+    #[test]
     fn turning_the_counter_off_goes_back_to_the_clicks() {
         let mut app = metronome_app();
         app.set_counter_ratio(Some(Ratio { n: 3, span: 4 }));

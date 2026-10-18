@@ -126,13 +126,17 @@ fn choice_grid<T: Copy + PartialEq>(
 /// (the counter rhythm plays `ratio`). Returns the ratio stepped to.
 fn ratio_stepper(ui: &mut Ui, ts: TimeSignature, ratio: Ratio, active: bool) -> Option<Ratio> {
     let mut stepped = None;
+    let own = own_ratios(ts);
     let spacing = ui.spacing().item_spacing.x;
-    // Four buttons, two numbers and the colon in one row.
-    let number = ((ui.available_width() - 4.0 * ROW_HEIGHT - 6.0 * spacing) / 3.0).max(24.0);
+    // Four buttons, two numbers and the colon in one row; on a narrow
+    // picker the buttons give way first.
+    let room = ui.available_width() - 6.0 * spacing;
+    let button = ((room - 3.0 * 24.0) / 4.0).clamp(28.0, ROW_HEIGHT);
+    let number = ((room - 4.0 * button) / 3.0).max(16.0);
     let color = if active { ui.visuals().strong_text_color() } else { ui.visuals().text_color() };
     let mut step = |ui: &mut Ui, label: &str, to: Option<Ratio>| {
         let button =
-            Button::new(RichText::new(label).size(22.0)).min_size(vec2(ROW_HEIGHT, ROW_HEIGHT));
+            Button::new(RichText::new(label).size(22.0)).min_size(vec2(button, ROW_HEIGHT));
         if ui.add_enabled(to.is_some(), button).clicked() {
             stepped = to;
         }
@@ -144,13 +148,13 @@ fn ratio_stepper(ui: &mut Ui, ts: TimeSignature, ratio: Ratio, active: bool) -> 
         );
     };
     ui.horizontal(|ui| {
-        step(ui, "−", step_clicks(ts, ratio, false));
+        step(ui, "−", step_clicks(&own, ratio, false));
         value(ui, ratio.n.to_string());
-        step(ui, "+", step_clicks(ts, ratio, true));
+        step(ui, "+", step_clicks(&own, ratio, true));
         value(ui, ":".to_owned());
-        step(ui, "−", step_span(ts, ratio, false));
+        step(ui, "−", step_span(&own, ratio, false));
         value(ui, ratio.span.to_string());
-        step(ui, "+", step_span(ts, ratio, true));
+        step(ui, "+", step_span(&own, ratio, true));
     });
     stepped
 }
