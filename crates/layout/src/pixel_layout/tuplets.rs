@@ -29,6 +29,9 @@ pub(super) fn build_tuplet_layout(
 
     // A skyline of the notes: how far out their ink reaches over `x0..x1`,
     // widened by the gap on both sides.
+    if tuplet_plan.is_empty() {
+        return Vec::new();
+    }
     let boxes = ink_boxes(note_layout, beams);
     let reach = |x0: f32, x1: f32| {
         boxes
@@ -84,9 +87,11 @@ pub(super) fn build_tuplet_layout(
             // The line past the ink under it, its hooks past the ink at the
             // ends, and the number past the ink under the number.
             let mut y_bracket = tip + out * c::TUPLET_BRACKET_GAP_SS * opts.staff_space();
-            y_bracket = clear(y_bracket, x_l, x_r, 0.0);
-            y_bracket = clear(y_bracket, x_l, x_l, hook_dy);
-            y_bracket = clear(y_bracket, x_r, x_r, hook_dy);
+            // The lines are painted half their thickness past their ends.
+            let half_line = 0.5 * opts.bracket_thickness();
+            y_bracket = clear(y_bracket, x_l, x_r, half_line);
+            y_bracket = clear(y_bracket, x_l, x_l, hook_dy + half_line);
+            y_bracket = clear(y_bracket, x_r, x_r, hook_dy + half_line);
             y_bracket = clear_number(y_bracket);
 
             let x_gap_l = (xc - gap_half).max(x_l);

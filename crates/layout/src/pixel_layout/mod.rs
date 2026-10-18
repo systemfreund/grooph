@@ -755,7 +755,9 @@ mod tests {
         // An accent under a hook lifts the bracket so the hook clears it.
         let l = lay_out("4/4 >t8 r:t8 t8 q h", &up);
         let accent = l.notes[0].accent.unwrap().ink();
-        let hook_end = l.tuplets[0].bracket.iter().map(|b| b.p2.y).fold(f32::MIN, f32::max);
+        // The hook as painted, half its thickness past its end.
+        let hook_end = l.tuplets[0].bracket.iter().map(|b| b.p2.y).fold(f32::MIN, f32::max)
+            + 0.5 * up.bracket_thickness();
         assert!((hook_end - (accent.top() - gap)).abs() < 0.01);
         assert!(number_of(&l).bottom() < accent.top() - gap);
         // A quarter's accent sits low enough to leave the bracket nearly
