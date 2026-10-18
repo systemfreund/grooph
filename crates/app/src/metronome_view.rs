@@ -19,6 +19,7 @@
 //! like the click bar: the voice last tapped, on the staff or the ring, is
 //! the one the editor holds (see [`MetronomeState::voice`]).
 
+use crate::state::CountInState;
 use crate::undo::{DEFAULT_UNDO_LIMIT, UndoHistory};
 use crate::{Grooph, TransportState};
 use eframe::egui;
@@ -34,6 +35,7 @@ use grooph_measure::grid::DEFAULT_GRID;
 use grooph_measure::score::Score;
 use grooph_measure::tempo::ScoreTiming;
 use grooph_measure::{Cursor, Measure, TimeSignature};
+use grooph_render::playback_cursor_stroke;
 use std::f32::consts::{FRAC_PI_2, TAU};
 
 /// Gap between two segments, as a share of the full turn.
@@ -478,6 +480,19 @@ impl Grooph {
         Some(heard.rem_euclid(bar_ticks.max(1.0)))
     }
 
+    /// Whether the count-in's first click has been heard yet. Until then,
+    /// with output latency, the ring's turn still wraps to the bar's end.
+    fn count_in_click_heard(&self, ts: &TimeSignature) -> bool {
+        let Some((tick, _)) = self.playback_ctl.audio.as_ref().and_then(|a| a.playback_position())
+        else {
+            return false;
+        };
+        let bar_ticks = DEFAULT_GRID.ticks_per_measure(ts) as f64;
+        let ticks_per_sec = ScoreTiming::from_score(&self.metronome_score(), self.current_bpm())
+            .ticks_per_sec_in_measure(0);
+        tick - self.playback_ctl.audio_cfg.latency_s() * ticks_per_sec >= -bar_ticks
+    }
+
     /// The ring with the click bar, `height` tall at the bottom of the space
     /// left between the panels.
     pub(crate) fn metronome_ring(&mut self, ui: &mut Ui, height: f32) {
@@ -568,13 +583,15 @@ impl Grooph {
                     segment.paint_hover(painter, center, inner, unit, hover_color);
                 }
             }
-            // A thin hand across both rings while playing, so it shows where
-            // the clicks of the two rhythms fall against each other.
+            // A hand across both rings while playing, so it shows where the
+            // clicks of the two rhythms fall against each other. Drawn like
+            // the staff's playback cursor.
             if let Some(turn) = current_turn.filter(|_| !muted) {
                 let strong = thickness(ClickLevel::Strong);
                 let from = inner - strong * COUNTER_THICKNESS * radius / 2.0 - 4.0;
                 let to = radius + strong * radius / 2.0 + 4.0;
-                let stroke = Stroke::new(2.0_f32, visuals.strong_text_color());
+                let stroke =
+                    playback_cursor_stroke(self.ui.staff_em, visuals.selection.stroke.color);
                 painter
                     .line_segment([at_turn(center, from, turn), at_turn(center, to, turn)], stroke);
             }
@@ -596,16 +613,22 @@ impl Grooph {
             }
         }
 
-        // Middle: the bar number while playing, else the meter (and the
-        // counter rhythm's ratio).
+        // Middle: the beat being counted during the count-in, the bar number
+        // while playing, else the meter (and the counter rhythm's ratio).
+        let count_in_beat = current_turn
+            .filter(|_| self.playback_ctl.playback.count_in == CountInState::Active)
+            .map(|t| if self.count_in_click_heard(&ts) { count_in_beat(t, &ts) } else { 1 });
         let caption = match counter.as_ref().and_then(ratio_of) {
             Some(ratio) => ratio.to_string(),
             None if counter.is_some() => "custom".to_owned(),
             None => meter_caption(&ts),
         };
-        let (big, small) = match bar_state {
-            Some(b) => ((b.bar + 1).to_string(), if muted { "muted" } else { "bar" }.to_owned()),
-            None => (format!("{}/{}", ts.beats, ts.beat_unit), caption),
+        let (big, small) = match (count_in_beat, bar_state) {
+            (Some(beat), _) => (beat.to_string(), String::new()),
+            (None, Some(b)) => {
+                ((b.bar + 1).to_string(), if muted { "muted" } else { "bar" }.to_owned())
+            }
+            (None, None) => (format!("{}/{}", ts.beats, ts.beat_unit), caption),
         };
         // Smaller inside the counter ring.
         let scale = if counter.is_some() { 0.8 } else { 1.0 };
@@ -717,6 +740,12 @@ fn counter_spans(bar: &Measure) -> Vec<(usize, f32, f32)> {
         .collect()
 }
 
+/// Beat of the count-in bar (from 1) at `turn`: it clicks every beat unit.
+fn count_in_beat(turn: f32, ts: &TimeSignature) -> u32 {
+    let units = ts.beats.max(1) as u32;
+    ((turn * units as f32) as u32).min(units - 1) + 1
+}
+
 /// Caption under the meter: its beat groups when there are several.
 fn meter_caption(ts: &TimeSignature) -> String {
     if ts.beat_unit != 4 && ts.groups().len() > 1 { ts.groups_label() } else { String::new() }
@@ -752,6 +781,15 @@ mod tests {
         let spans = beat_spans(&bar("1/4 t8 r:t8 t8"));
         assert_eq!(spans.len(), 3);
         assert!((spans[1].0 - 1.0 / 3.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn count_in_counts_every_beat_unit() {
+        let four = TimeSignature::FOUR_FOUR;
+        let counts: Vec<_> =
+            [0.0, 0.24, 0.25, 0.6, 0.99, 1.0].map(|t| count_in_beat(t, &four)).into();
+        assert_eq!(counts, [1, 1, 2, 3, 4, 4]);
+        assert_eq!(count_in_beat(0.9, &TimeSignature::SEVEN_EIGHT), 7);
     }
 
     #[test]

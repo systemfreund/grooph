@@ -174,8 +174,12 @@ pub(crate) fn draw_playback_cursor_span(
     em: f32,
     base: Color32,
 ) {
-    let cursor_color = Color32::from_rgba_unmultiplied(base.r(), base.g(), base.b(), 100);
-    painter.vline(x, ys, Stroke::new(0.1 * em, cursor_color));
+    painter.vline(x, ys, playback_cursor_stroke(em, base));
+}
+
+/// Stroke of the playback cursor at `em`, in a see-through `base`.
+pub fn playback_cursor_stroke(em: f32, base: Color32) -> Stroke {
+    Stroke::new(0.1 * em, Color32::from_rgba_unmultiplied(base.r(), base.g(), base.b(), 100))
 }
 
 /// The count labels of `measure`, under the line at `baseline_y`.

@@ -134,6 +134,7 @@ impl Grooph {
                         // (grow-to-fill / shrink-toward-floor) — rescale font/metrics to
                         // match before drawing, so glyph size agrees with `staff`'s positions.
                         let render_opts = staff_opts.rescaled(staff.scale);
+                        self.ui.staff_em = render_opts.em;
 
                         // From the global tick, derive (playing_measure_idx, local_tick).
                         // The playback cursor renders / auto-scrolls based on this — it
