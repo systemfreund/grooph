@@ -24,7 +24,8 @@ apk_name = "grooph"
 build_targets = ["aarch64-linux-android"]
 
 [package.metadata.android.sdk]
-min_sdk_version = 26
+# 29: midir needs AMidi (libamidi), which Android 10 added.
+min_sdk_version = 29
 target_sdk_version = 34
 
 [package.metadata.android.application]
