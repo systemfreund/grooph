@@ -398,10 +398,12 @@ pub fn draw_tuplets(
     for t in tuplets {
         let thickness = opts.bracket_thickness();
         for seg in &t.bracket {
-            // Square ends: the line and its hook overlap at the corner, so it
-            // stays closed however the ends are rounded to pixels.
-            let half = (seg.p2 - seg.p1).normalized() * thickness * 0.5;
-            painter.line_segment([seg.p1 - half, seg.p2 + half], Stroke::new(thickness, color));
+            // On whole pixels, like the stems, so the line and its hooks are
+            // equally sharp and meet at the same pixel. Square ends: the line
+            // and its hook overlap at the corner, so it stays closed.
+            let (p1, p2) = (opts.snap_pos(seg.p1, thickness), opts.snap_pos(seg.p2, thickness));
+            let half = (p2 - p1).normalized() * thickness * 0.5;
+            painter.line_segment([p1 - half, p2 + half], Stroke::new(thickness, color));
         }
         for digit in &t.number {
             draw_glyph(painter, digit, &opts.font_id.family, color);
