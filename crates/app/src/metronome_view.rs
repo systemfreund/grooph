@@ -785,15 +785,16 @@ mod tests {
 
     #[test]
     fn counter_segments_span_a_click_and_its_rests() {
-        let ts = TimeSignature::FOUR_FOUR;
-        let mut bar = counter_bar(ts, Ratio { n: 3, span: 4 }).unwrap();
-        bar.set_click_level(2, ClickLevel::Off);
+        let ts = TimeSignature::THREE_FOUR;
+        let mut bar = counter_bar(ts, Ratio { n: 5, span: 3 }).unwrap();
+        bar.set_click_level(3, ClickLevel::Off);
         let spans = counter_spans(&bar);
-        // Three clicks of a third of the bar each, starting at beats 0, 2, 4.
-        assert_eq!(spans.iter().map(|s| s.0).collect::<Vec<_>>(), [0, 2, 4]);
+        // Five clicks of a fifth of the bar each, every one a sixteenth
+        // quintuplet and two rests.
+        assert_eq!(spans.iter().map(|s| s.0).collect::<Vec<_>>(), [0, 3, 6, 9, 12]);
         for (i, &(_, start, end)) in spans.iter().enumerate() {
-            assert!((start - i as f32 / 3.0).abs() < 1e-6);
-            assert!((end - (i + 1) as f32 / 3.0).abs() < 1e-6);
+            assert!((start - i as f32 / 5.0).abs() < 1e-6);
+            assert!((end - (i + 1) as f32 / 5.0).abs() < 1e-6);
         }
     }
 

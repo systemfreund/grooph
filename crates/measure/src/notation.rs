@@ -10,10 +10,10 @@
 //! - A time signature (`4/4`, `7/8`, ...) may start a measure and applies to
 //!   it and all following measures. Without one, the first measure is 4/4.
 //! - Durations use the names of the helpers in [`crate::duration`]:
-//!   `q` `e` `s` `th` (quarter to thirty-second), dotted with a trailing `.`
-//!   (`q.` `e.` `s.`), tuplets `t4` `t8` `t16` `t32` (triplets), `qt4` `qt16`
-//!   (quintuplets), `st8` `st16` (sextuplets), `spt4` `spt16` (septuplets)
-//!   and `nt16` (nonuplet). Every note of a tuplet group is written out.
+//!   `h` `q` `e` `s` `th` (half to thirty-second), dotted with a trailing `.`
+//!   (`q.` `e.` `s.`), tuplets `t2` `t4` `t8` `t16` `t32` (triplets), `qt4`
+//!   `qt8` `qt16` (quintuplets), `st8` `st16` (sextuplets), `spt4` `spt8`
+//!   `spt16` (septuplets) and `nt16` (nonuplet). Every note of a tuplet group is written out.
 //! - `r:` makes a rest (`r:q`), `>` accents a note (`>e`), parentheses make
 //!   it a soft (ghost) note (`(e)`).
 //!
@@ -100,8 +100,10 @@ impl Display for NotationError {
 impl std::error::Error for NotationError {}
 
 /// Durations with a notation code, in the order of [`crate::duration::COMMON_DURATIONS`].
-const CODES: [(&str, Duration); 18] = {
-    use crate::duration::{e, nt16, q, qt4, qt16, s, spt4, spt16, st8, st16, t8, t16, t32, th};
+const CODES: [(&str, Duration); 22] = {
+    use crate::duration::{
+        e, h, nt16, q, qt4, qt8, qt16, s, spt4, spt8, spt16, st8, st16, t2, t8, t16, t32, th,
+    };
     const fn dotted(base: NoteValue) -> Duration {
         Duration::Dotted { base, dots: 1 }
     }
@@ -124,6 +126,10 @@ const CODES: [(&str, Duration); 18] = {
         ("nt16", nt16()),
         ("qt4", qt4()),
         ("spt4", spt4()),
+        ("h", h()),
+        ("t2", t2()),
+        ("qt8", qt8()),
+        ("spt8", spt8()),
     ]
 };
 

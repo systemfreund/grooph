@@ -32,7 +32,9 @@ impl Measure {
                 .durations
                 .iter()
                 .copied()
-                .filter(|d| matches!(d, Duration::Simple { .. }))
+                // Up to quarters, as before halves were written: the editor
+                // has no tools for half rests.
+                .filter(|d| matches!(d, Duration::Simple(v) if v.denominator() >= 4))
                 .filter_map(|d| {
                     let den = d.denominator();
                     DEFAULT_GRID.ticks_of(&d).map(|t| (t, d, den))
@@ -104,5 +106,19 @@ impl Measure {
             ta.cmp(&tb)
         });
         Some(result)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::duration::{h, q};
+    use crate::grid::DEFAULT_GRID;
+    use crate::{Measure, TimeSignature};
+
+    #[test]
+    fn gaps_fill_with_quarters_not_halves() {
+        let m = Measure::new(TimeSignature::FOUR_FOUR);
+        let half = DEFAULT_GRID.ticks_of(&h()).unwrap();
+        assert_eq!(m.best_fill_for_gap(half, &[]), Some(vec![q(), q()]));
     }
 }
