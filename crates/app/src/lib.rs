@@ -1156,6 +1156,7 @@ impl Grooph {
                 link_copied_at: None,
                 narrow_screen: false,
                 staff_em: 40.0,
+                followed_cursor: None,
                 compact: CompactState::default(),
                 picker: None,
                 tap_tempo: Default::default(),

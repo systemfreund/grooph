@@ -13,6 +13,7 @@ use eframe::egui::TextStyle;
 use eframe::egui::emath::{ease_in_ease_out, lerp};
 use eframe::epaint::FontId;
 use grooph_audio::{Audio, AudioSettings, GapClick, TempoRamp};
+use grooph_layout::staff_layout::Voice;
 use grooph_link::SharedLink;
 use grooph_measure::click::ClickBars;
 use grooph_measure::counter::CounterBars;
@@ -285,6 +286,9 @@ pub(crate) struct UiShell {
     /// Em the staff was last drawn at, so the metronome ring's hand is as
     /// wide as the playback cursor.
     pub(crate) staff_em: f32,
+    /// Edit cursor the staff last scrolled into view. The staff follows the
+    /// cursor only when it moves, so the user can scroll away from it.
+    pub(crate) followed_cursor: Option<(Voice, Cursor)>,
     pub(crate) compact: CompactState,
     /// Setting whose picker dialog is open.
     pub(crate) picker: Option<Picker>,
