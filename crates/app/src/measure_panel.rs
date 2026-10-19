@@ -178,13 +178,15 @@ impl Grooph {
                             );
                         }
 
-                        // Keep the edit cursor in view while editing. `Align::None`
-                        // means "scroll just enough to make visible" — no fight with
-                        // manual horizontal scrolling as long as the cursor stays
-                        // on-screen. Gated on Stopped so it doesn't clobber the
-                        // playback re-centering above.
-                        if self.ui.mode == Mode::Edit
-                            && self.playback_ctl.transport_state == TransportState::Stopped
+                        // Bring the edit cursor into view when it moves. `Align::None`
+                        // means "scroll just enough to make visible"; following only
+                        // on a move leaves the user free to scroll away from it.
+                        // Gated on Stopped so it doesn't clobber the playback
+                        // re-centering above.
+                        let editing = self.ui.mode == Mode::Edit
+                            && self.playback_ctl.transport_state == TransportState::Stopped;
+                        let followed = editing.then_some((voice, self.editor.cursor));
+                        if followed != self.ui.followed_cursor
                             && let Some(placed) = staff.placed(self.editor.cursor.measure_idx)
                             && let Some(layout) = match voice {
                                 Voice::Upper => Some(&placed.layout),
@@ -202,17 +204,10 @@ impl Grooph {
                                 eframe::egui::style::ScrollAnimation::none(),
                             );
                         }
+                        self.ui.followed_cursor = followed;
 
-                        // On a touch screen the staff takes taps only: a drag
-                        // over the notes is left to the `ScrollArea`, so a
-                        // finger scrolls the score anywhere, not just on the
-                        // scroll bar. A mouse keeps dragging the edit cursor.
-                        let sense = if ui.input(|i| i.has_touch_screen()) {
-                            egui::Sense::click()
-                        } else {
-                            egui::Sense::click_and_drag()
-                        };
-                        let (rect, resp) = ui.allocate_exact_size(staff.total_size, sense);
+                        let (rect, resp) =
+                            ui.allocate_exact_size(staff.total_size, egui::Sense::click_and_drag());
 
                         let cursor = if self.ui.mode == Mode::Edit {
                             Some(self.editor.cursor)
@@ -263,7 +258,16 @@ impl Grooph {
                             &timing,
                             render_opts.staff_space(),
                         );
-                        self.handle_input(resp, &staff);
+                        // A finger dragging over the notes scrolls the score,
+                        // as on the scroll bar; a mouse drags the edit cursor.
+                        if resp.dragged() && ui.input(|i| i.any_touches()) {
+                            ui.scroll_with_delta_animation(
+                                resp.drag_delta(),
+                                eframe::egui::style::ScrollAnimation::none(),
+                            );
+                        } else {
+                            self.handle_input(resp, &staff);
+                        }
                     });
                 });
         });
