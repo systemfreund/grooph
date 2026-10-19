@@ -203,8 +203,16 @@ impl Grooph {
                             );
                         }
 
-                        let (rect, resp) =
-                            ui.allocate_exact_size(staff.total_size, egui::Sense::click_and_drag());
+                        // On a touch screen the staff takes taps only: a drag
+                        // over the notes is left to the `ScrollArea`, so a
+                        // finger scrolls the score anywhere, not just on the
+                        // scroll bar. A mouse keeps dragging the edit cursor.
+                        let sense = if ui.input(|i| i.has_touch_screen()) {
+                            egui::Sense::click()
+                        } else {
+                            egui::Sense::click_and_drag()
+                        };
+                        let (rect, resp) = ui.allocate_exact_size(staff.total_size, sense);
 
                         let cursor = if self.ui.mode == Mode::Edit {
                             Some(self.editor.cursor)
