@@ -166,6 +166,20 @@ fn fill_name(d: Duration) -> String {
     if d.is_tuplet() { format!("{base} triplets") } else { format!("{base}s") }
 }
 
+/// The ratio a counter bar plays, and whether its clicks were edited since
+/// it was picked: louder, softer or muted ones the ratio's own bar (every
+/// click medium) does not have.
+pub(crate) fn counter_ratio(bar: &Measure) -> Option<(Ratio, bool)> {
+    let ratio = ratio_of(bar)?;
+    let edited = !counter_bar(bar.time_signature(), ratio).is_some_and(|m| same_bar(&m, bar));
+    Some((ratio, edited))
+}
+
+/// "3:4", or "3:4 edited" once its clicks were changed.
+pub(crate) fn ratio_label((ratio, edited): (Ratio, bool)) -> String {
+    if edited { format!("{ratio} edited") } else { ratio.to_string() }
+}
+
 /// Whether two bars hold the same meter and beats.
 pub(crate) fn same_bar(a: &Measure, b: &Measure) -> bool {
     a.time_signature() == b.time_signature() && a.beats() == b.beats()
@@ -391,11 +405,11 @@ impl Grooph {
     }
 
     /// The counter rhythm's ratio: "Off" without one, "Custom" for one that
-    /// is no ratio's.
+    /// is no ratio's, marked "edited" once its clicks were changed.
     pub(crate) fn counter_label(&self) -> String {
         match self.counter_bar() {
             None => "Off".to_owned(),
-            Some(bar) => ratio_of(bar).map_or_else(|| "Custom".to_owned(), |r| r.to_string()),
+            Some(bar) => counter_ratio(bar).map_or_else(|| "Custom".to_owned(), ratio_label),
         }
     }
 
@@ -618,8 +632,8 @@ impl Grooph {
         let count_in_beat = current_turn
             .filter(|_| self.playback_ctl.playback.count_in == CountInState::Active)
             .map(|t| if self.count_in_click_heard(&ts) { count_in_beat(t, &ts) } else { 1 });
-        let caption = match counter.as_ref().and_then(ratio_of) {
-            Some(ratio) => ratio.to_string(),
+        let caption = match counter.as_ref().and_then(counter_ratio) {
+            Some(ratio) => ratio_label(ratio),
             None if counter.is_some() => "custom".to_owned(),
             None => meter_caption(&ts),
         };
@@ -872,6 +886,24 @@ mod tests {
         app.select_voice(Voice::Upper);
         assert!(same_bar(&app.editor.score.measures[0], &click));
         assert_eq!(app.counter_bar().map(|c| click_level(c, 2)), Some(ClickLevel::Strong));
+    }
+
+    #[test]
+    fn an_edited_counter_rhythm_says_so_until_picked_again() {
+        let mut app = metronome_app();
+        let ratio = Ratio { n: 3, span: 4 };
+        app.set_counter_ratio(Some(ratio));
+        assert_eq!(app.counter_label(), "3:4");
+        app.cycle_counter_level(2);
+        assert_eq!(app.counter_label(), "3:4 edited");
+        // A muted click still plays the ratio, edited.
+        while app.counter_bar().map(|c| click_level(c, 2)) != Some(ClickLevel::Off) {
+            app.cycle_counter_level(2);
+        }
+        assert_eq!(app.counter_label(), "3:4 edited");
+        // Picking the ratio again starts its clicks over.
+        app.set_counter_ratio(Some(ratio));
+        assert_eq!(app.counter_label(), "3:4");
     }
 
     #[test]
