@@ -384,7 +384,7 @@ impl Grooph {
             settings.complexity.to_string()
         };
         let cells = [
-            (Picker::TimeSignature, "Meter", settings.time_signature.to_string()),
+            (Picker::TimeSignature, "Meter", time_signature_label(settings.time_signature)),
             (Picker::Subdivision, "Notes", subdivision_short_label(subdivision).to_owned()),
             (Picker::Complexity, "Level", level),
             (Picker::Bars, "Bars", self.editor.generator.effective_bars().to_string()),
