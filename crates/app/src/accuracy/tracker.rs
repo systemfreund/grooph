@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::ops::Range;
 
 use grooph_measure::Score;
 use grooph_measure::tempo::ScoreTiming;
@@ -98,6 +99,14 @@ impl AccuracyTracker {
     pub(crate) fn clear_for_edit(&mut self) {
         self.session.clear_marks();
         self.last_marks.clear();
+    }
+
+    /// Forget the marks of the notes whose global onset lies in `ticks`, e.g.
+    /// a measure endless mode just replaced. The run's stats keep counting
+    /// what was played there.
+    pub(crate) fn forget_onsets(&mut self, ticks: Range<u64>) {
+        self.session.forget_onsets(&ticks);
+        self.last_marks.retain(|tick, _| !ticks.contains(tick));
     }
 
     /// Whether there are marks to draw: a running session, or the marks a
@@ -338,6 +347,23 @@ mod tests {
         tracker.clear_for_edit();
         assert!(!tracker.has_marks());
         assert!(tracker.mark_for_onset(0).is_none());
+    }
+
+    #[test]
+    fn forget_onsets_drops_only_marks_of_that_range() {
+        let score = score_of_quarters(&[TimeSignature::FOUR_FOUR, TimeSignature::FOUR_FOUR]);
+        let timing = ScoreTiming::from_score(&score, 120);
+        let m1_start = timing.measure_start_tick(1);
+        let mut tracker = AccuracyTracker::new();
+        tracker.on_playback_start_at(0.0, 0.0);
+        tracker.record_hit(0.0, &timing, &score);
+        tracker.record_hit(timing.global_tick_to_seconds(m1_start as f64), &timing, &score);
+
+        // Measure 0 gets replaced: its marks go, measure 1 keeps its own.
+        tracker.forget_onsets(0..m1_start);
+        assert!(tracker.mark_for_onset(0).is_none());
+        assert!(tracker.mark_for_onset(m1_start).is_some());
+        assert_eq!(tracker.live_summary().map(|s| s.hits), Some(2));
     }
 
     #[test]

@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::ops::Range;
 
 use grooph_measure::Score;
 use grooph_measure::grid::DEFAULT_GRID;
@@ -294,6 +295,16 @@ impl RecordingSession {
             d.stats.reset();
             d.counters = RunCounters::default();
             d.last_tick = None;
+        }
+    }
+
+    /// Drop marks and loop hit bookkeeping of the onsets in `ticks`, keeping
+    /// stats and counters. No-op when `Idle`.
+    pub(super) fn forget_onsets(&mut self, ticks: &Range<u64>) {
+        if let Self::Recording(d) = self {
+            d.marks_by_onset.retain(|tick, _| !ticks.contains(tick));
+            d.hits_in_loop.retain(|tick| !ticks.contains(tick));
+            d.hits_next_loop.retain(|tick| !ticks.contains(tick));
         }
     }
 
