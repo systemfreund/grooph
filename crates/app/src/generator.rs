@@ -3,7 +3,7 @@
 //! ones while the transport runs.
 
 use crate::platform::random_seed;
-use crate::{Grooph, TransportState};
+use crate::{Grooph, TransportState, clock};
 use grooph_measure::generator::{GeneratorSettings, Rng, generate_measure, generate_score};
 use grooph_measure::tempo::ScoreTiming;
 use grooph_measure::{Cursor, MeasureIdx};
@@ -167,10 +167,14 @@ impl Grooph {
                 return;
             }
         };
+        // Settle the old notes' hit windows first: a hit not yet confirmed
+        // would otherwise be forgotten and turn into a miss on the new notes.
+        let timing = self.score_timing();
+        let tracker = &mut self.playback_ctl.accuracy.tracker;
+        tracker.update_progress(clock::now_seconds(), &timing, &self.editor.score);
         self.editor.score.measures[idx] = measure;
         // Same time signature, so the measure still spans the same ticks; the
         // old measure's marks would otherwise show under the new notes.
-        let timing = self.score_timing();
         let start = timing.measure_start_tick(idx);
         let end = start + u64::from(timing.ticks_per_measure(idx));
         self.playback_ctl.accuracy.tracker.forget_onsets(start..end);
