@@ -10,6 +10,8 @@ their own license, listed here.
 | `snare-normal.wav` | snare, normal note | MusicRadar | [MusicRadar SampleRadar](https://www.musicradar.com/news/drums/1000-free-drum-samples) | royalty-free, no redistribution (see below) |
 | `snare-accent.wav` | snare, accent | MusicRadar | [MusicRadar SampleRadar](https://www.musicradar.com/news/drums/1000-free-drum-samples) | royalty-free, no redistribution (see below) |
 | `snare-ghost.wav` | snare, ghost note | MusicRadar | [MusicRadar SampleRadar](https://www.musicradar.com/news/drums/1000-free-drum-samples) | royalty-free, no redistribution (see below) |
+| `xylo-high.wav` | xylophone, high (downbeat, strong counter clicks) | [Brsjak](https://freesound.org/people/Brsjak/) | [freesound #482734](https://freesound.org/s/482734/) ("Wooden_Xylophone.wav") | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) |
+| `xylo-low.wav` | xylophone, low (other beats) | [Brsjak](https://freesound.org/people/Brsjak/) | [freesound #482734](https://freesound.org/s/482734/) ("Wooden_Xylophone.wav") | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) |
 
 The snare samples come from MusicRadar's free drum sample pack "1000 free drum
 samples". MusicRadar publishes no formal license: the page says the samples are
@@ -20,5 +22,9 @@ The claves come from the pack [altemark: pack 11638](https://freesound.org/peopl
 on freesound.org. "CC BY-NC" (Creative Commons Attribution-NonCommercial)
 means the author must be credited and the samples must not be used
 commercially. The exact license version is stated on each sound's page.
+
+The xylophone notes are cut from "Wooden_Xylophone.wav" by Brsjak
+(https://freesound.org/s/482734/), licensed under Attribution 4.0. "CC BY 4.0"
+means the author must be credited; commercial use is allowed.
 
 When adding a sample, add a row here with its author, source and license.

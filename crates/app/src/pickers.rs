@@ -525,7 +525,7 @@ impl Grooph {
         ui.label("Sound");
         let settings = &mut self.playback_ctl.audio_cfg.settings;
         let sounds: Vec<_> = CounterSound::ALL.iter().map(|&s| (s, s.label().to_owned())).collect();
-        if let Some(sound) = choice_grid(ui, &sounds, settings.counter_sound, 3) {
+        if let Some(sound) = choice_grid(ui, &sounds, settings.counter_sound, 2) {
             settings.counter_sound = sound;
         }
         // Picking a sound keeps the picker open to compare them.
