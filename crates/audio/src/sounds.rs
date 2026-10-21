@@ -60,22 +60,29 @@ pub enum MetronomeSound {
     Claves,
     /// The click from the sound settings.
     Click,
+    /// Xylophone: a higher note on the downbeat, a lower one elsewhere.
+    Xylophone,
 }
 
 impl MetronomeSound {
-    pub const ALL: [MetronomeSound; 2] = [MetronomeSound::Claves, MetronomeSound::Click];
+    pub const ALL: [MetronomeSound; 3] =
+        [MetronomeSound::Claves, MetronomeSound::Click, MetronomeSound::Xylophone];
 
     pub fn label(self) -> &'static str {
         match self {
             MetronomeSound::Claves => "Claves",
             MetronomeSound::Click => "Click",
+            MetronomeSound::Xylophone => "Xylophone",
         }
     }
 
     fn sample(self, sound: SoundType) -> Option<SampleId> {
+        let downbeat = sound == SoundType::Downbeat;
         match self {
-            MetronomeSound::Claves if sound == SoundType::Downbeat => Some(SampleId::CLAVES_HIGH),
+            MetronomeSound::Claves if downbeat => Some(SampleId::CLAVES_HIGH),
             MetronomeSound::Claves => Some(SampleId::CLAVES_LOW),
+            MetronomeSound::Xylophone if downbeat => Some(SampleId::XYLO_HIGH),
+            MetronomeSound::Xylophone => Some(SampleId::XYLO_LOW),
             MetronomeSound::Click => None,
         }
     }
@@ -91,18 +98,31 @@ pub enum CounterSound {
     Claves,
     /// Snare drum: accent, normal and ghost-note recordings.
     Snare,
+    /// Xylophone, played higher when the metronome plays it too.
+    Xylophone,
 }
 
 impl CounterSound {
-    pub const ALL: [CounterSound; 3] =
-        [CounterSound::Click, CounterSound::Claves, CounterSound::Snare];
+    pub const ALL: [CounterSound; 4] =
+        [CounterSound::Click, CounterSound::Claves, CounterSound::Snare, CounterSound::Xylophone];
 
     pub fn label(self) -> &'static str {
         match self {
             CounterSound::Click => "Click",
             CounterSound::Claves => "Claves",
             CounterSound::Snare => "Snare",
+            CounterSound::Xylophone => "Xylophone",
         }
+    }
+
+    /// The metronome sound this one is, if any: the counter rhythm plays it
+    /// higher then, so the two layers stay apart by ear.
+    fn same_as(self, metronome: MetronomeSound) -> bool {
+        matches!(
+            (self, metronome),
+            (CounterSound::Claves, MetronomeSound::Claves)
+                | (CounterSound::Xylophone, MetronomeSound::Xylophone)
+        )
     }
 
     fn sample(self, sound: SoundType) -> Option<SampleId> {
@@ -114,13 +134,15 @@ impl CounterSound {
             CounterSound::Snare if strong => SampleId::SNARE_ACCENT,
             CounterSound::Snare if sound == SoundType::CounterSoft => SampleId::SNARE_GHOST,
             CounterSound::Snare => SampleId::SNARE,
+            CounterSound::Xylophone if strong => SampleId::XYLO_HIGH,
+            CounterSound::Xylophone => SampleId::XYLO_LOW,
         })
     }
 }
 
-/// Playback rate of counter claves while the metronome plays claves too,
-/// so the two layers stay apart by ear.
-const COUNTER_CLAVES_RATE: f32 = 1.5;
+/// Playback rate of the counter rhythm's samples while the metronome plays
+/// the same sound, so the two layers stay apart by ear.
+const COUNTER_SAME_SOUND_RATE: f32 = 1.5;
 
 /// An embedded WAV file.
 struct SampleFile {
@@ -135,6 +157,8 @@ const SAMPLES: &[SampleFile] = &[
     SampleFile { name: "snare-normal.wav", bytes: include_bytes!("../samples/snare-normal.wav") },
     SampleFile { name: "snare-accent.wav", bytes: include_bytes!("../samples/snare-accent.wav") },
     SampleFile { name: "snare-ghost.wav", bytes: include_bytes!("../samples/snare-ghost.wav") },
+    SampleFile { name: "xylo-high.wav", bytes: include_bytes!("../samples/xylo-high.wav") },
+    SampleFile { name: "xylo-low.wav", bytes: include_bytes!("../samples/xylo-low.wav") },
 ];
 
 /// An embedded sample, decoded on first use.
@@ -147,6 +171,8 @@ impl SampleId {
     const SNARE: SampleId = SampleId(2);
     const SNARE_ACCENT: SampleId = SampleId(3);
     const SNARE_GHOST: SampleId = SampleId(4);
+    const XYLO_HIGH: SampleId = SampleId(5);
+    const XYLO_LOW: SampleId = SampleId(6);
 
     /// The decoded sample; an unreadable file becomes silence (logged once).
     fn data(self) -> Arc<SampleData> {
@@ -229,11 +255,9 @@ impl SoundType {
         if sample == Some(SampleId::SNARE_GHOST) && self == SoundType::CounterSoft {
             gain /= COUNTER_SOFT_GAIN;
         }
-        let rate = if self.is_counter()
-            && settings.counter_sound == CounterSound::Claves
-            && settings.metronome_sound == MetronomeSound::Claves
+        let rate = if self.is_counter() && settings.counter_sound.same_as(settings.metronome_sound)
         {
-            COUNTER_CLAVES_RATE
+            COUNTER_SAME_SOUND_RATE
         } else {
             1.0
         };
@@ -317,7 +341,7 @@ mod tests {
         // Claves against claves play higher, against the click as recorded.
         let (data, rate) = rate_of(CounterSound::Claves, MetronomeSound::Claves).unwrap();
         assert_eq!(data, SampleId::CLAVES_LOW.data());
-        assert_eq!(rate, COUNTER_CLAVES_RATE);
+        assert_eq!(rate, COUNTER_SAME_SOUND_RATE);
         assert_eq!(rate_of(CounterSound::Claves, MetronomeSound::Click).unwrap().1, 1.0);
         // The click is pitched above the metronome's.
         assert!(rate_of(CounterSound::Click, MetronomeSound::Click).is_none());
@@ -326,6 +350,31 @@ mod tests {
         assert!(profile(SoundType::CounterMedium) > profile(SoundType::Downbeat));
         // The out-of-the-box counter sound differs from the metronome's.
         assert_ne!(settings.counter_sound.label(), settings.metronome_sound.label());
+    }
+
+    #[test]
+    fn xylophone_plays_high_on_the_downbeat_and_strong_counter_clicks() {
+        let settings = AudioSettings {
+            metronome_sound: MetronomeSound::Xylophone,
+            counter_sound: CounterSound::Xylophone,
+            ..AudioSettings::default()
+        };
+        let sample = |sound: SoundType| match sound.patch(&settings) {
+            Patch::Sample { data, rate, .. } => (data, rate),
+            other => panic!("sample expected, got {other:?}"),
+        };
+        let (high, low) = (SampleId::XYLO_HIGH.data(), SampleId::XYLO_LOW.data());
+        assert_eq!(sample(SoundType::Downbeat), (high.clone(), 1.0));
+        assert_eq!(sample(SoundType::PrimaryBeat), (low.clone(), 1.0));
+        assert_eq!(sample(SoundType::CountIn).0, low);
+        // Against the xylophone metronome the counter rhythm plays higher.
+        assert_eq!(sample(SoundType::CounterStrong), (high, COUNTER_SAME_SOUND_RATE));
+        assert_eq!(sample(SoundType::CounterMedium), (low.clone(), COUNTER_SAME_SOUND_RATE));
+        let against_claves = AudioSettings { metronome_sound: MetronomeSound::Claves, ..settings };
+        assert!(matches!(
+            SoundType::CounterMedium.patch(&against_claves),
+            Patch::Sample { rate: 1.0, .. }
+        ));
     }
 
     #[test]
