@@ -110,22 +110,25 @@ impl Grid<'_> {
 
     /// All supported durations on the tuplet grid identified by `(n, m)`.
     /// Used to constrain fills that must stay inside an existing tuplet group.
-    /// A ratio outside [`Self::durations`] takes every note value on the grid.
+    /// Beyond the listed ones, the shorter note values on the grid (6:4 of
+    /// thirty-seconds next to `st8` and `st16`); a ratio outside
+    /// [`Self::durations`] takes every note value on the grid.
     pub fn tuplet_grid_durations(&self, n: u8, m: u8) -> Vec<Duration> {
-        let listed: Vec<Duration> = self
+        let mut durations: Vec<Duration> = self
             .durations
             .iter()
             .copied()
             .filter(|d| matches!(d, Duration::Tuplet(TupletSpec { n: dn, m: dm, .. }) if *dn == n && *dm == m))
             .collect();
-        if !listed.is_empty() {
-            return listed;
-        }
-        NOTE_VALUES
-            .into_iter()
-            .map(|base| Duration::Tuplet(TupletSpec { n, m, base }))
-            .filter(|d| self.supports(d))
-            .collect()
+        let shortest = durations.iter().filter_map(|d| self.ticks_of(d)).min();
+        durations.extend(
+            NOTE_VALUES
+                .into_iter()
+                .map(|base| Duration::Tuplet(TupletSpec { n, m, base }))
+                .filter(|d| self.supports(d))
+                .filter(|d| shortest.is_none_or(|s| self.ticks_of(d).is_some_and(|t| t < s))),
+        );
+        durations
     }
 
     pub fn compute_onset_ticks(&self, beats: &[Beat]) -> Vec<u32> {

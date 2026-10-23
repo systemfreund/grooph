@@ -4,7 +4,8 @@
 //! [`TupletGroupId`]; the [`TupletRegistry`] owns the per-group [`TupletAnchor`]
 //! metadata (n:m ratio, frozen tick span, base hint) and hands out fresh ids.
 
-use crate::duration::NoteValue;
+use crate::duration::{Duration, NoteValue};
+use crate::grid::DEFAULT_GRID;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -33,6 +34,7 @@ impl From<u32> for TupletGroupId {
 
 /// Stable anchor describing a tuplet group span and semantics.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(from = "StoredAnchor")]
 pub struct TupletAnchor {
     pub id: TupletGroupId,
     pub n: u8,
@@ -41,6 +43,27 @@ pub struct TupletAnchor {
     pub target_ticks: u32,
     /// Intended base for UI/export; not authoritative for grid validity
     pub base_hint: NoteValue,
+}
+
+/// A [`TupletAnchor`] as saved. Its span is recomputed on load: it was saved
+/// in the ticks of the grid of its time, which grows with the durations.
+#[derive(Deserialize)]
+struct StoredAnchor {
+    id: TupletGroupId,
+    n: u8,
+    m: u8,
+    target_ticks: u32,
+    base_hint: NoteValue,
+}
+
+impl From<StoredAnchor> for TupletAnchor {
+    fn from(a: StoredAnchor) -> Self {
+        let StoredAnchor { id, n, m, target_ticks, base_hint } = a;
+        let target_ticks = DEFAULT_GRID
+            .ticks_of(&Duration::Simple(base_hint))
+            .map_or(target_ticks, |base| u32::from(m) * base);
+        Self { id, n, m, target_ticks, base_hint }
+    }
 }
 
 /// Registry of tuplet anchors for a measure.
@@ -101,5 +124,27 @@ impl TupletRegistry {
 
     pub fn len(&self) -> usize {
         self.anchors.len()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::duration::{q, t8};
+    use crate::{Beat, Measure, TimeSignature};
+
+    #[test]
+    fn saved_spans_are_recomputed_on_the_current_grid() {
+        let mut m = Measure::new(TimeSignature::FOUR_FOUR);
+        m.set_beat(0, Beat::note(t8())).unwrap();
+        let saved = ron::to_string(&m).unwrap();
+        let span = m.tuplets().get(m.beats()[0].tuplet_group_id.unwrap()).unwrap().target_ticks;
+        // Saved when the grid had half as many ticks.
+        let old =
+            saved.replace(&format!("target_ticks:{span}"), &format!("target_ticks:{}", span / 2));
+        assert_ne!(old, saved);
+        let mut back: Measure = ron::from_str(&old).unwrap();
+        assert!(back.dissolve_tuplet_group(0).is_some());
+        assert_eq!(back.beats()[0].duration, q());
+        assert_eq!(back.beats().len(), 4);
     }
 }

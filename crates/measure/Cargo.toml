@@ -9,3 +9,6 @@ license.workspace = true
 either = { workspace = true }
 serde = { workspace = true }
 
+
+[dev-dependencies]
+ron = "0.12"

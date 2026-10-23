@@ -400,6 +400,17 @@ mod tests {
     use std::assert_matches;
 
     #[test]
+    fn a_counter_sextuplet_of_thirty_seconds_can_be_edited() {
+        use crate::counter::{Ratio, counter_bar};
+        use crate::grid::DEFAULT_GRID;
+        let mut m = counter_bar("1/4".parse().unwrap(), Ratio { n: 12, span: 1 }).unwrap();
+        assert!(m.modify_beat(1, NoteValue::Sixteenth, None).is_some());
+        assert!(m.modify_beat(0, NoteValue::Sixteenth, None).is_some());
+        let total: u32 = m.beats().iter().filter_map(|b| DEFAULT_GRID.ticks_of(&b.duration)).sum();
+        assert_eq!(total, DEFAULT_GRID.ticks_per_measure(&m.time_signature()));
+    }
+
+    #[test]
     fn dissolve_tuplet_initializes_note_when_group_contains_any_note_and_preserves_accent() {
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
         // A triplet eighth at the start: the first slot a note, the others prefilled as rests

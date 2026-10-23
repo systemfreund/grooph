@@ -242,10 +242,13 @@ pub fn ratio_of(bar: &Measure) -> Option<Ratio> {
             note_onsets.iter().all(|t| t.is_multiple_of(click_ticks))
         }
     };
+    // By length, not spelling: a bar saved before 6:5 in 5/4 was written in
+    // sextuplets (triplets then) is still that ratio's.
+    let ticks = |b: &crate::Beat| DEFAULT_GRID.ticks_of(&b.duration);
     let fits = |m: &Measure| {
         m.beats().len() == bar.beats().len()
             && m.beats().iter().zip(bar.beats()).all(|(c, b)| {
-                c.duration == b.duration && (c.kind == BeatKind::Note || b.kind == BeatKind::Rest)
+                ticks(c) == ticks(b) && (c.kind == BeatKind::Note || b.kind == BeatKind::Rest)
             })
     };
     (1..=ts.beats)
@@ -279,11 +282,37 @@ pub fn click_level(bar: &Measure, idx: usize) -> ClickLevel {
     bar.beats().get(idx).map_or(ClickLevel::Off, ClickLevel::of)
 }
 
+/// `bar` in the spelling [`counter_bar`] writes its ratio with today, its
+/// clicks at their levels; unchanged if it is no ratio's. Bars saved or
+/// linked before a spelling changed (6:5 in 5/4 was triplets) keep working.
+pub fn respelled(bar: Measure) -> Measure {
+    let Some(mut current) = ratio_of(&bar).and_then(|r| counter_bar(bar.time_signature(), r))
+    else {
+        return bar;
+    };
+    for (idx, b) in bar.beats().iter().enumerate() {
+        current.set_click_level(idx, ClickLevel::of(b));
+    }
+    current
+}
+
 /// The counter bar of each meter that has one.
 #[derive(Clone, Default, Serialize, Deserialize)]
-#[serde(transparent)]
+#[serde(from = "Vec<Measure>", into = "Vec<Measure>")]
 pub struct CounterBars {
     bars: Vec<Measure>,
+}
+
+impl From<Vec<Measure>> for CounterBars {
+    fn from(bars: Vec<Measure>) -> Self {
+        Self { bars: bars.into_iter().map(respelled).collect() }
+    }
+}
+
+impl From<CounterBars> for Vec<Measure> {
+    fn from(bars: CounterBars) -> Self {
+        bars.bars
+    }
 }
 
 impl std::fmt::Debug for CounterBars {
@@ -310,7 +339,7 @@ impl CounterBars {
     /// Give `ts` the counter bar `bar` (of that meter), or none.
     pub fn set(&mut self, ts: TimeSignature, bar: Option<Measure>) {
         self.bars.retain(|m| m.time_signature() != ts);
-        self.bars.extend(bar.filter(|m| m.time_signature() == ts));
+        self.bars.extend(bar.filter(|m| m.time_signature() == ts).map(respelled));
     }
 }
 
@@ -370,6 +399,25 @@ mod tests {
         let m = counter_bar("1/4".parse().unwrap(), Ratio { n: 12, span: 1 }).unwrap();
         assert_eq!(m.tuplet_groups().len(), 2);
         assert_eq!(ratio_of(&m), Some(Ratio { n: 12, span: 1 }));
+    }
+
+    #[test]
+    fn bars_saved_in_an_older_spelling_keep_their_ratio_and_levels() {
+        // 6:5 in 5/4 as main wrote it: triplet sixteenths.
+        let click = "t16 r:t16 r:t16 r:t16 r:t16";
+        let old = format!("5/4 {}", [click; 6].join(" "));
+        let mut old = parse_score(&old).unwrap().measures.remove(0);
+        old.set_click_level(0, ClickLevel::Strong);
+        old.set_click_level(5, ClickLevel::Off);
+        assert_eq!(ratio_of(&old), Some(Ratio { n: 6, span: 5 }));
+        assert_eq!(counter_clicks(&old).len(), 6);
+        let new = respelled(old);
+        assert!(text(&new).starts_with("5/4 >st16 r:st16 r:st16 r:st16 r:st16 r:st16 r:st16"));
+        assert_eq!(click_level(&new, 5), ClickLevel::Off);
+        assert_eq!(click_level(&new, 10), ClickLevel::Medium);
+        let mut bars = CounterBars::default();
+        bars.set("5/4".parse().unwrap(), Some(new.clone()));
+        assert!(same_bar(bars.for_meter("5/4".parse().unwrap()).unwrap(), &new));
     }
 
     #[test]
