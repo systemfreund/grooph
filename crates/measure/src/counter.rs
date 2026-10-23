@@ -70,7 +70,10 @@ pub fn counter_bar_with(ts: TimeSignature, ratio: Ratio, merge_rests: bool) -> O
         .filter(|&(t, _)| click_ticks.is_multiple_of(t) && click_ticks / t <= MAX_SLOTS_PER_CLICK)
         .filter(|&(t, d)| fits_the_beats(d, t, beat_ticks))
         .collect();
-    durations.sort_by_key(|&(t, _)| std::cmp::Reverse(t));
+    // Longest first, but nonuplets in the time of ten only where nothing
+    // else fits: 3:5 stays triplets.
+    let over_ten = |d: Duration| matches!(d, Duration::Tuplet(TupletSpec { m: 10, .. }));
+    durations.sort_by_key(|&(t, d)| (over_ten(d), std::cmp::Reverse(t)));
     let clicks = u32::from(ts.beats / span) * u32::from(n);
     let windows = beat_windows(ts);
     durations.into_iter().find_map(|(ticks, d)| {
@@ -442,7 +445,7 @@ mod tests {
         let offered = |ts: &str| {
             counter_ratios(ts.parse().unwrap()).iter().map(|r| r.to_string()).collect::<Vec<_>>()
         };
-        assert_eq!(offered("5/4"), ["3:5", "4:5", "6:5", "7:5", "8:5"]);
+        assert_eq!(offered("5/4"), ["3:5", "4:5", "6:5", "7:5", "8:5", "9:5"]);
         assert_eq!(offered("7/4"), ["4:7", "5:7", "6:7", "8:7"]);
     }
 
@@ -463,6 +466,18 @@ mod tests {
         assert!(offered("9/8").contains(&"5:3".to_string()));
         let own = own_ratios("6/8".parse().unwrap());
         assert!(own.contains(&Ratio { n: 7, span: 3 }));
+    }
+
+    #[test]
+    fn nine_clicks_over_five_beats() {
+        let nine = |ts: &str, base: &str| format!("{ts} {}", [base; 9].join(" "));
+        assert_eq!(bar("5/4", 9, 5), nine("5/4", "nt8_10"));
+        assert_eq!(bar("5/8", 9, 5), nine("5/8", "nt16_10"));
+        assert!(counter_ratios("5/4".parse().unwrap()).contains(&Ratio { n: 9, span: 5 }));
+        assert_eq!(
+            ratio_of(&counter_bar("10/8".parse().unwrap(), Ratio { n: 9, span: 10 }).unwrap()),
+            Some(Ratio { n: 9, span: 10 })
+        );
     }
 
     #[test]
