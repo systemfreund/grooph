@@ -71,8 +71,8 @@ impl PlacedGlyph {
     }
 }
 
-/// `glyphs` set one after another, the run's advance centered on `x` and its
-/// ink centered on `y`.
+/// `glyphs` set one after another, their ink centered on `(x, y)`: an
+/// italic digit's ink sits off the middle of its advance.
 fn centered_run(glyphs: &[Glyph], x: f32, y: f32, size: f32) -> Vec<PlacedGlyph> {
     let ss = size * 0.25;
     let advance: f32 = glyphs.iter().map(|g| g.advance * ss).sum();
@@ -86,7 +86,7 @@ fn centered_run(glyphs: &[Glyph], x: f32, y: f32, size: f32) -> Vec<PlacedGlyph>
         })
         .collect();
     if let Some(ink) = ink_of(&run) {
-        shift_y(&mut run, y - ink.center().y);
+        shift(&mut run, Pos2::new(x, y) - ink.center());
     }
     run
 }
@@ -96,9 +96,9 @@ fn ink_of(glyphs: &[PlacedGlyph]) -> Option<Rect> {
     glyphs.iter().map(PlacedGlyph::ink).reduce(|a, b| a.union(b))
 }
 
-fn shift_y(glyphs: &mut [PlacedGlyph], dy: f32) {
+fn shift(glyphs: &mut [PlacedGlyph], d: egui::Vec2) {
     for g in glyphs {
-        g.origin.y += dy;
+        g.origin += d;
     }
 }
 
@@ -715,6 +715,39 @@ mod tests {
         let ink = |l: &MeasureLayout| ink_of(&l.tuplets[0].number).unwrap();
         assert!(ink(&b).top() > cy);
         assert!((ink(&b).center().y - cy - (cy - ink(&a).center().y)).abs() < 0.01);
+    }
+
+    #[test]
+    fn a_beamed_tuplets_number_centers_on_its_middle_stem() {
+        use grooph_measure::notation::parse_score;
+        let em = 20.0;
+        let up = LayoutOpts {
+            rect: Rect::from_min_max(Pos2::ZERO, Pos2::new(300.0, 200.0)),
+            font_id: FontId::new(em, FontFamily::Proportional),
+            pixels_per_point: 1.0,
+            em,
+            layout_clef: false,
+            layout_time_signature: false,
+            y_offset: 0.0,
+            stem_length_factor: 0.9,
+            stem_thickness_factor: 0.1,
+            accent_displacement: 0.07,
+            accent_below: false,
+            stem_down: false,
+            proportional_spacing: true,
+        };
+        let down = LayoutOpts { stem_down: true, ..up.clone() };
+        let m = parse_score("4/4 t8 t8 t8 t16 t16 t16 t16 t16 t16 h").unwrap().measures.remove(0);
+        for opts in [&up, &down] {
+            let l = build_measure_layout(&m, opts);
+            assert_eq!(l.tuplets.len(), 3);
+            for (t, mid) in l.tuplets.iter().zip([1, 4, 7]) {
+                let stem = l.notes[mid].stem.unwrap().p1.x;
+                let center = ink_of(&t.number).unwrap().center().x;
+                // Up to the half pixel the stems snap by.
+                assert!((center - stem).abs() <= 0.51, "{center} vs {stem}");
+            }
+        }
     }
 
     #[test]
