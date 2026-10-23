@@ -262,7 +262,7 @@ pub fn human_readable(d: &Duration) -> String {
     }
 }
 
-pub const COMMON_DURATIONS: [Duration; 22] = [
+pub const COMMON_DURATIONS: [Duration; 24] = [
     q(),
     e(),
     s(),
@@ -271,20 +271,22 @@ pub const COMMON_DURATIONS: [Duration; 22] = [
     Duration::Dotted { base: Eighth, dots: 1 },  // dotted 1/8
     Duration::Dotted { base: Sixteenth, dots: 1 }, // dotted 1/16
     Duration::Tuplet(TupletSpec { n: 3, m: 2, base: Quarter }),
-    t8(),    // triplet 1/8
-    t16(),   // triplet 1/16
-    t32(),   // triplet 1/32
-    qt16(),  // quintuplet 1/16
-    st8(),   // sextuplet 1/8
-    st16(),  // sextuplet 1/16
-    spt16(), // septuplet 1/16
-    nt16(),  // nonuplet 1/16
-    qt4(),   // quintuplet 1/4
-    spt4(),  // septuplet 1/4
-    h(),     // 1/2
-    t2(),    // triplet 1/2
-    qt8(),   // quintuplet 1/8
-    spt8(),  // septuplet 1/8
+    t8(),      // triplet 1/8
+    t16(),     // triplet 1/16
+    t32(),     // triplet 1/32
+    qt16(),    // quintuplet 1/16
+    st8(),     // sextuplet 1/8
+    st16(),    // sextuplet 1/16
+    spt16(),   // septuplet 1/16
+    nt16(),    // nonuplet 1/16
+    qt4(),     // quintuplet 1/4
+    spt4(),    // septuplet 1/4
+    h(),       // 1/2
+    t2(),      // triplet 1/2
+    qt8(),     // quintuplet 1/8
+    spt8(),    // septuplet 1/8
+    qt8_3(),   // quintuplet 1/8 over a dotted quarter
+    spt16_6(), // septuplet 1/16 over a dotted quarter
 ];
 
 pub const fn q() -> Duration {
@@ -345,6 +347,16 @@ pub const fn qt8() -> Duration {
 /// Seven eighths in the time of four.
 pub const fn spt8() -> Duration {
     Duration::Tuplet(TupletSpec { n: 7, m: 4, base: Eighth })
+}
+/// Five eighths in the time of three: five even clicks over a dotted
+/// quarter, as in 5:3 in 6/8.
+pub const fn qt8_3() -> Duration {
+    Duration::Tuplet(TupletSpec { n: 5, m: 3, base: Eighth })
+}
+/// Seven sixteenths in the time of six: seven even clicks over a dotted
+/// quarter, as in 7:3 in 6/8.
+pub const fn spt16_6() -> Duration {
+    Duration::Tuplet(TupletSpec { n: 7, m: 6, base: Sixteenth })
 }
 
 #[cfg(test)]

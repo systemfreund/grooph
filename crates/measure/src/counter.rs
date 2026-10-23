@@ -10,6 +10,7 @@
 //! keeps the counter rhythm of each meter that has one.
 
 use crate::click::{ClickLevel, same_bar};
+use crate::duration::{Duration, TupletSpec};
 use crate::grid::DEFAULT_GRID;
 use crate::math::gcd;
 use crate::notation::{code_of, parse_score};
@@ -51,11 +52,13 @@ pub fn counter_bar(ts: TimeSignature, ratio: Ratio) -> Option<Measure> {
         return None;
     }
     let click_ticks = span_ticks / n as u32;
+    let beat_ticks = DEFAULT_GRID.ticks_per_beat(&ts);
     let mut durations: Vec<_> = DEFAULT_GRID
         .durations
         .iter()
         .filter_map(|d| Some((DEFAULT_GRID.ticks_of(d)?, *d)))
         .filter(|&(t, _)| click_ticks.is_multiple_of(t) && click_ticks / t <= MAX_SLOTS_PER_CLICK)
+        .filter(|&(t, d)| fits_the_beats(d, t, beat_ticks))
         .collect();
     durations.sort_by_key(|&(t, _)| std::cmp::Reverse(t));
     let repeats = ts.beats / span;
@@ -69,6 +72,17 @@ pub fn counter_bar(ts: TimeSignature, ratio: Ratio) -> Option<Measure> {
         }
         parse_score(&format!("{ts} {}", tokens.join(" "))).ok()?.measures.into_iter().next()
     })
+}
+
+/// Whether a group of tuplet `d` (each `ticks` long) lies on the beats:
+/// whole beats, or a part of one. A quintuplet over a dotted quarter fits
+/// 6/8 but would straddle the second beat of 3/4.
+fn fits_the_beats(d: Duration, ticks: u32, beat_ticks: u32) -> bool {
+    let Duration::Tuplet(TupletSpec { n, .. }) = d else {
+        return true;
+    };
+    let group = ticks * u32::from(n);
+    group.is_multiple_of(beat_ticks) || beat_ticks.is_multiple_of(group)
 }
 
 /// The ratios offered in `ts`, the ones over the whole bar first: spans of
@@ -273,6 +287,25 @@ mod tests {
     }
 
     #[test]
+    fn compound_meters_click_five_or_seven_over_a_dotted_quarter() {
+        assert_eq!(
+            bar("6/8", 5, 3),
+            "6/8 qt8_3 qt8_3 qt8_3 qt8_3 qt8_3 qt8_3 qt8_3 qt8_3 qt8_3 qt8_3"
+        );
+        assert_eq!(bar("3/8", 7, 3), "3/8 spt16_6 spt16_6 spt16_6 spt16_6 spt16_6 spt16_6 spt16_6");
+        assert_eq!(
+            ratio_of(&counter_bar("12/8".parse().unwrap(), Ratio { n: 5, span: 3 }).unwrap()),
+            Some(Ratio { n: 5, span: 3 })
+        );
+        let offered = |ts: &str| {
+            counter_ratios(ts.parse().unwrap()).iter().map(|r| r.to_string()).collect::<Vec<_>>()
+        };
+        assert!(offered("9/8").contains(&"5:3".to_string()));
+        let own = own_ratios("6/8".parse().unwrap());
+        assert!(own.contains(&Ratio { n: 7, span: 3 }));
+    }
+
+    #[test]
     fn spans_repeat_until_the_bar_is_full() {
         assert_eq!(bar("4/4", 3, 2), "4/4 t4 t4 t4 t4 t4 t4");
     }
@@ -295,7 +328,7 @@ mod tests {
         };
         assert_eq!(ratios("4/4"), ["3:4", "5:4", "7:4", "3:2"]);
         assert_eq!(ratios("3/4"), ["2:3", "4:3", "5:3"]);
-        assert_eq!(ratios("6/8"), ["5:6", "7:6", "2:3", "4:3", "3:2"]);
+        assert_eq!(ratios("6/8"), ["5:6", "7:6", "2:3", "4:3", "5:3", "3:2"]);
         assert!(counter_bar(TimeSignature::SEVEN_EIGHT, Ratio { n: 8, span: 7 }).is_none());
     }
 
