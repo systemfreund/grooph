@@ -71,9 +71,14 @@ pub fn counter_bar_with(ts: TimeSignature, ratio: Ratio, merge_rests: bool) -> O
         .filter(|&(t, d)| fits_the_beats(d, t, beat_ticks))
         .collect();
     // Longest first, but nonuplets in the time of ten only where nothing
-    // else fits: 3:5 stays triplets.
+    // else fits: 3:5 stays triplets. Of equally long tuplets, the one whose
+    // group fills a beat: sextuplets in 5/4, triplets in 7/8.
     let over_ten = |d: Duration| matches!(d, Duration::Tuplet(TupletSpec { m: 10, .. }));
-    durations.sort_by_key(|&(t, d)| (over_ten(d), std::cmp::Reverse(t)));
+    let off_the_beat = |t: u32, d: Duration| match d {
+        Duration::Tuplet(TupletSpec { n, .. }) => t * u32::from(n) != beat_ticks,
+        _ => false,
+    };
+    durations.sort_by_key(|&(t, d)| (over_ten(d), std::cmp::Reverse(t), off_the_beat(t, d)));
     let clicks = u32::from(ts.beats / span) * u32::from(n);
     let windows = beat_windows(ts);
     durations.into_iter().find_map(|(ticks, d)| {
@@ -466,6 +471,14 @@ mod tests {
         assert!(offered("9/8").contains(&"5:3".to_string()));
         let own = own_ratios("6/8".parse().unwrap());
         assert!(own.contains(&Ratio { n: 7, span: 3 }));
+    }
+
+    #[test]
+    fn equally_long_tuplets_take_the_one_that_fills_a_beat() {
+        // Sextuplet sixteenths fill a quarter, triplet ones an eighth.
+        assert_eq!(bar("1/4", 6, 1), "1/4 st16 st16 st16 st16 st16 st16");
+        assert!(bar("5/4", 6, 5).starts_with("5/4 st16 r:st16"));
+        assert!(bar("7/8", 3, 7).starts_with("7/8 t16 r:t16"));
     }
 
     #[test]
