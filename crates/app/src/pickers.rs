@@ -521,22 +521,6 @@ impl Grooph {
             }
         }
 
-        // Rests between the clicks, or stemlets under beams running on;
-        // rests may be merged.
-        ui.add_space(8.0);
-        ui.label("Between clicks");
-        let cfg = &self.playback_ctl.audio_cfg;
-        let views = [(false, "Rests".to_owned()), (true, "Stemlets".to_owned())];
-        if let Some(stemlets) = choice_grid(ui, &views, cfg.counter_stemlets, 2) {
-            self.set_counter_stemlets(stemlets);
-        }
-        if !self.playback_ctl.audio_cfg.counter_stemlets {
-            let mut merge = self.playback_ctl.audio_cfg.merge_counter_rests;
-            if ui.checkbox(&mut merge, "Merge rests").changed() {
-                self.set_merge_counter_rests(merge);
-            }
-        }
-
         ui.add_space(8.0);
         ui.label("Sound");
         let settings = &mut self.playback_ctl.audio_cfg.settings;

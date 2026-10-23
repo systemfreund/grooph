@@ -6,9 +6,8 @@
 //! like a click bar (see [`crate::click`]): its notes click at their level,
 //! rests are silent. The clicks take the simplest note value that is exactly
 //! as long; where there is none (three against four has no half-note
-//! triplet), a shorter value with as few rests up to the next click as keep
-//! to the beats. [`CounterBars`] keeps the counter rhythm of each meter that
-//! has one.
+//! triplet), a shorter value with rests up to the next click. [`CounterBars`]
+//! keeps the counter rhythm of each meter that has one.
 
 use crate::click::{ClickLevel, same_bar};
 use crate::duration::{Duration, TupletSpec};
@@ -17,7 +16,6 @@ use crate::math::gcd;
 use crate::notation::{code_of, parse_score};
 use crate::{BeatKind, Measure, TimeSignature};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
 
 /// Most clicks a counter rhythm offers per span.
 const MAX_CLICKS: u8 = 9;
@@ -42,17 +40,9 @@ impl std::fmt::Display for Ratio {
 }
 
 /// The counter bar of `ratio` in `ts`, every click medium (the click bar
-/// already clicks the downbeat loud), its rests merged (see
-/// [`counter_bar_with`]).
+/// already clicks the downbeat loud). `None` if the
+/// span does not divide the bar or the clicks fall off the tick grid.
 pub fn counter_bar(ts: TimeSignature, ratio: Ratio) -> Option<Measure> {
-    counter_bar_with(ts, ratio, true)
-}
-
-/// The counter bar of `ratio` in `ts`, every click medium. With
-/// `merge_rests` the rests up to each next click are as few as keep to the
-/// beats; without, they are all as long as the click. `None` if the span
-/// does not divide the bar or the clicks fall off the tick grid.
-pub fn counter_bar_with(ts: TimeSignature, ratio: Ratio, merge_rests: bool) -> Option<Measure> {
     let Ratio { n, span } = ratio;
     if n < 2 || span == 0 || !ts.beats.is_multiple_of(span) {
         return None;
@@ -79,123 +69,17 @@ pub fn counter_bar_with(ts: TimeSignature, ratio: Ratio, merge_rests: bool) -> O
         _ => false,
     };
     durations.sort_by_key(|&(t, d)| (over_ten(d), std::cmp::Reverse(t), off_the_beat(t, d)));
-    let clicks = u32::from(ts.beats / span) * u32::from(n);
-    let windows = beat_windows(ts);
+    let repeats = ts.beats / span;
     durations.into_iter().find_map(|(ticks, d)| {
         let code = code_of(&d)?;
+        let slots = click_ticks / ticks;
         let mut tokens = Vec::new();
-        for click in 0..clicks {
-            let start = click * click_ticks;
+        for _ in 0..(repeats as u32 * n as u32) {
             tokens.push(code.to_string());
-            if merge_rests {
-                tokens.extend(rests(start + ticks, start + click_ticks, d, ticks, &windows));
-            } else {
-                tokens.extend((1..click_ticks / ticks).map(|_| format!("r:{code}")));
-            }
+            tokens.extend((1..slots).map(|_| format!("r:{code}")));
         }
         parse_score(&format!("{ts} {}", tokens.join(" "))).ok()?.measures.into_iter().next()
     })
-}
-
-/// Start and end tick of each beat group of `ts` (each beat of 4/4, each
-/// dotted quarter of 6/8).
-fn beat_windows(ts: TimeSignature) -> Vec<(u32, u32)> {
-    let beat_ticks = DEFAULT_GRID.ticks_per_beat(&ts);
-    let mut start = 0;
-    ts.groups()
-        .iter()
-        .map(|&g| {
-            let window = (start, start + u32::from(g) * beat_ticks);
-            start = window.1;
-            window
-        })
-        .collect()
-}
-
-/// The rests from tick `from` to the next click at `to`, after a click of
-/// value `d` (`ticks` long): as few as possible, without cutting a group of
-/// tuplet `d` (inside one they stay `d`) or running over a beat group
-/// (except whole groups from the start of one). Among as few, the one with
-/// most rests at a multiple of their own length into their beat group.
-fn rests(from: u32, to: u32, d: Duration, ticks: u32, windows: &[(u32, u32)]) -> Vec<String> {
-    let group = match d {
-        Duration::Tuplet(TupletSpec { n, .. }) => Some(ticks * u32::from(n)),
-        _ => None,
-    };
-    let code = code_of(&d).unwrap_or_default();
-    // After a tuplet, plain rests only fill the whole groups of it up to the
-    // group of the next click; the rest stay tuplets.
-    let (plain_from, plain_to) = match group {
-        Some(g) => {
-            let plain_from = from.next_multiple_of(g).min(to);
-            (plain_from, (to / g * g).max(plain_from))
-        }
-        None => (from, to),
-    };
-    // The rests that may start at `at`: (code, length, on its own grid).
-    let moves = |at: u32| {
-        let mut moves = Vec::new();
-        if !(plain_from..plain_to).contains(&at) {
-            moves.push((code, ticks, true));
-            return moves;
-        }
-        for c in PLAIN_RESTS {
-            let Some(len) = rest_ticks(c) else { continue };
-            if at + len > plain_to {
-                continue;
-            }
-            if let Some(on_grid) = keeps_to_the_beats(at, len, c.ends_with('.'), windows) {
-                moves.push((c, len, on_grid));
-            }
-        }
-        moves
-    };
-    // Fewest rests (then fewest off their grid) from each tick to `to`,
-    // filled backwards on a grid every rest length divides.
-    let step = PLAIN_RESTS.iter().filter_map(|&c| rest_ticks(c)).fold(ticks, gcd);
-    let mut best: BTreeMap<u32, ((usize, usize), &str, u32)> = BTreeMap::new();
-    for at in (0..(to - from) / step).rev().map(|k| from + k * step) {
-        let choice = moves(at)
-            .into_iter()
-            .filter_map(|(code, len, on_grid)| {
-                let (n, off) = if at + len == to { (0, 0) } else { best.get(&(at + len))?.0 };
-                Some(((n + 1, off + usize::from(!on_grid)), code, len))
-            })
-            .min_by_key(|&(c, ..)| c);
-        if let Some(choice) = choice {
-            best.insert(at, choice);
-        }
-    }
-    let mut tokens = Vec::new();
-    let mut at = from;
-    while let Some(&(_, code, len)) = best.get(&at) {
-        tokens.push(format!("r:{code}"));
-        at += len;
-    }
-    tokens
-}
-
-/// Plain rest values, longest first.
-const PLAIN_RESTS: [&str; 8] = ["h", "q.", "q", "e.", "e", "s.", "s", "th"];
-
-fn rest_ticks(code: &str) -> Option<u32> {
-    DEFAULT_GRID.ticks_of(&crate::notation::duration_of_code(code)?)
-}
-
-/// Whether a plain rest `len` long at tick `at` keeps to the beat groups:
-/// within one group, or whole groups from the start of one at a multiple of
-/// its own length (not dotted). `Some(on_grid)`, where `on_grid` is whether
-/// it starts at a multiple of its length into its group.
-fn keeps_to_the_beats(at: u32, len: u32, dotted: bool, windows: &[(u32, u32)]) -> Option<bool> {
-    let &(start, end) = windows.iter().find(|&&(s, e)| (s..e).contains(&at))?;
-    if at + len <= end {
-        return Some((at - start).is_multiple_of(len));
-    }
-    let whole = at == start
-        && at.is_multiple_of(len)
-        && windows.iter().any(|&(_, e)| e == at + len)
-        && !dotted;
-    whole.then_some(true)
 }
 
 /// Whether a group of tuplet `d` (each `ticks` long) lies on the beats:
@@ -295,42 +179,18 @@ pub fn ratio_of(bar: &Measure) -> Option<Ratio> {
             note_onsets.iter().all(|t| t.is_multiple_of(click_ticks))
         }
     };
-    (1..=ts.beats)
-        .filter(|&span| ts.beats.is_multiple_of(span))
-        .flat_map(|span| (2..=MAX_OWN_CLICKS).map(move |n| Ratio { n, span }))
-        .filter(|r| gcd(u32::from(r.n), u32::from(r.span)) == 1 && clicks_on_notes(r))
-        .filter(|&r| counter_bar_like(bar, r).is_some())
-        .min_by_key(|r| u32::from(r.n) * u32::from(ts.beats / r.span))
-}
-
-/// The counter bar of `ratio` spelled like `bar`, with its rests merged or
-/// not: `None` if neither has `bar`'s note values with notes wherever `bar`
-/// has one.
-pub fn counter_bar_like(bar: &Measure, ratio: Ratio) -> Option<Measure> {
     let fits = |m: &Measure| {
         m.beats().len() == bar.beats().len()
             && m.beats().iter().zip(bar.beats()).all(|(c, b)| {
                 c.duration == b.duration && (c.kind == BeatKind::Note || b.kind == BeatKind::Rest)
             })
     };
-    [true, false]
-        .into_iter()
-        .filter_map(|merge| counter_bar_with(bar.time_signature(), ratio, merge))
-        .find(fits)
-}
-
-/// `bar` with its rests merged or not, each click at the level it has in
-/// `bar`. `None` if `bar` is no ratio's counter bar.
-pub fn respell(bar: &Measure, merge_rests: bool) -> Option<Measure> {
-    let ratio = ratio_of(bar)?;
-    let mut new = counter_bar_with(bar.time_signature(), ratio, merge_rests)?;
-    let starts: Vec<usize> = counter_clicks(&new).into_iter().map(|r| r.start).collect();
-    for (i, old) in counter_clicks(bar).into_iter().enumerate() {
-        if let Some(&at) = starts.get(i) {
-            new.set_click_level(at, click_level(bar, old.start));
-        }
-    }
-    Some(new)
+    (1..=ts.beats)
+        .filter(|&span| ts.beats.is_multiple_of(span))
+        .flat_map(|span| (2..=MAX_OWN_CLICKS).map(move |n| Ratio { n, span }))
+        .filter(|r| gcd(u32::from(r.n), u32::from(r.span)) == 1 && clicks_on_notes(r))
+        .filter(|&r| counter_bar(ts, r).is_some_and(|m| fits(&m)))
+        .min_by_key(|r| u32::from(r.n) * u32::from(ts.beats / r.span))
 }
 
 /// Index of each click of `bar` (its first beat) and the beats it spans:
@@ -338,8 +198,9 @@ pub fn respell(bar: &Measure, merge_rests: bool) -> Option<Measure> {
 /// click stays its own click, so only the rests the counter bar was
 /// written with are folded in.
 pub fn counter_clicks(bar: &Measure) -> Vec<std::ops::Range<usize>> {
+    let ts = bar.time_signature();
     let slots = ratio_of(bar)
-        .and_then(|r| counter_bar_like(bar, r))
+        .and_then(|r| counter_bar(ts, r))
         .map(|m| m.beats().iter().map(|b| b.kind == BeatKind::Note).collect::<Vec<_>>());
     let starts: Vec<usize> = match slots {
         Some(is_click) => (0..bar.beats().len()).filter(|&i| is_click[i]).collect(),
@@ -383,16 +244,6 @@ impl CounterBars {
         self.bars.iter().find(|m| m.time_signature() == ts)
     }
 
-    /// Merge the rests of every counter bar, or write them all as long as
-    /// the click (see [`respell`]); bars of no ratio stay as they are.
-    pub fn respell(&mut self, merge_rests: bool) {
-        for bar in &mut self.bars {
-            if let Some(new) = respell(bar, merge_rests) {
-                *bar = new;
-            }
-        }
-    }
-
     /// Give `ts` the counter bar `bar` (of that meter), or none.
     pub fn set(&mut self, ts: TimeSignature, bar: Option<Measure>) {
         self.bars.retain(|m| m.time_signature() != ts);
@@ -430,47 +281,17 @@ mod tests {
 
     #[test]
     fn clicks_over_an_odd_number_of_beats_rest_up_to_the_next() {
-        // As few rests as keep to the beats: one where it fits in a beat...
-        assert_eq!(bar("7/8", 4, 7), "7/8 th r:e. th r:e. th r:th r:e r:th th r:e.");
-        // ...whole beats from the start of one, never over a beat.
-        assert_eq!(bar("5/4", 2, 5), "5/4 e r:e r:q r:e e r:q r:q");
-        // Inside a triplet they stay triplets.
-        assert_eq!(bar("5/4", 3, 5), "5/4 t8 r:t8 r:t8 r:t8 r:t8 t8 r:q r:t8 t8 r:t8 r:q");
-        // After a tuplet too, between whole groups of it.
+        assert_eq!(bar("5/4", 2, 5), "5/4 e r:e r:e r:e r:e e r:e r:e r:e r:e");
         assert_eq!(
-            bar("7/8", 6, 7),
-            "7/8 t32 r:t32 r:t32 r:s r:t32 t32 r:t32 r:s r:t32 r:t32 t32 r:e \
-             t32 r:t32 r:t32 r:s r:t32 t32 r:t32 r:s r:t32 r:t32 t32 r:e"
+            bar("5/4", 3, 5),
+            "5/4 t8 r:t8 r:t8 r:t8 r:t8 t8 r:t8 r:t8 r:t8 r:t8 t8 r:t8 r:t8 r:t8 r:t8"
         );
-        // In 7/8 (2+3+2) the rests keep to the groups.
-        assert_eq!(
-            bar("7/8", 3, 7),
-            "7/8 t16 r:t16 r:t16 r:e r:t16 t16 r:t16 r:e r:t16 r:t16 t16 r:q"
-        );
+        assert_eq!(bar("7/4", 2, 7), "7/4 e r:e r:e r:e r:e r:e r:e e r:e r:e r:e r:e r:e r:e");
         let offered = |ts: &str| {
             counter_ratios(ts.parse().unwrap()).iter().map(|r| r.to_string()).collect::<Vec<_>>()
         };
         assert_eq!(offered("5/4"), ["3:5", "4:5", "6:5", "7:5", "8:5", "9:5"]);
         assert_eq!(offered("7/4"), ["4:7", "5:7", "6:7", "8:7"]);
-    }
-
-    #[test]
-    fn compound_meters_click_five_or_seven_over_a_dotted_quarter() {
-        assert_eq!(
-            bar("6/8", 5, 3),
-            "6/8 qt8_3 qt8_3 qt8_3 qt8_3 qt8_3 qt8_3 qt8_3 qt8_3 qt8_3 qt8_3"
-        );
-        assert_eq!(bar("3/8", 7, 3), "3/8 spt16_6 spt16_6 spt16_6 spt16_6 spt16_6 spt16_6 spt16_6");
-        assert_eq!(
-            ratio_of(&counter_bar("12/8".parse().unwrap(), Ratio { n: 5, span: 3 }).unwrap()),
-            Some(Ratio { n: 5, span: 3 })
-        );
-        let offered = |ts: &str| {
-            counter_ratios(ts.parse().unwrap()).iter().map(|r| r.to_string()).collect::<Vec<_>>()
-        };
-        assert!(offered("9/8").contains(&"5:3".to_string()));
-        let own = own_ratios("6/8".parse().unwrap());
-        assert!(own.contains(&Ratio { n: 7, span: 3 }));
     }
 
     #[test]
@@ -494,24 +315,22 @@ mod tests {
     }
 
     #[test]
-    fn rests_can_stay_as_long_as_the_click() {
-        let ts = "5/4".parse().unwrap();
-        let ratio = Ratio { n: 2, span: 5 };
-        let even = counter_bar_with(ts, ratio, false).unwrap();
-        assert_eq!(text(&even), "5/4 e r:e r:e r:e r:e e r:e r:e r:e r:e");
-        // Both spellings read back as the ratio, its clicks folding in
-        // their own rests.
-        assert_eq!(ratio_of(&even), Some(ratio));
-        assert_eq!(counter_clicks(&even), [0..5, 5..10]);
-        let merged = counter_bar(ts, ratio).unwrap();
-        assert_eq!(counter_clicks(&merged), [0..4, 4..7]);
-        // Respelling keeps each click's level.
-        let mut tapped = merged.clone();
-        tapped.set_click_level(4, ClickLevel::Off);
-        let respelled = respell(&tapped, false).unwrap();
-        assert_eq!(click_level(&respelled, 0), ClickLevel::Medium);
-        assert_eq!(click_level(&respelled, 5), ClickLevel::Off);
-        assert!(same_bar(&respell(&respelled, true).unwrap(), &tapped));
+    fn compound_meters_click_five_or_seven_over_a_dotted_quarter() {
+        assert_eq!(
+            bar("6/8", 5, 3),
+            "6/8 qt8_3 qt8_3 qt8_3 qt8_3 qt8_3 qt8_3 qt8_3 qt8_3 qt8_3 qt8_3"
+        );
+        assert_eq!(bar("3/8", 7, 3), "3/8 spt16_6 spt16_6 spt16_6 spt16_6 spt16_6 spt16_6 spt16_6");
+        assert_eq!(
+            ratio_of(&counter_bar("12/8".parse().unwrap(), Ratio { n: 5, span: 3 }).unwrap()),
+            Some(Ratio { n: 5, span: 3 })
+        );
+        let offered = |ts: &str| {
+            counter_ratios(ts.parse().unwrap()).iter().map(|r| r.to_string()).collect::<Vec<_>>()
+        };
+        assert!(offered("9/8").contains(&"5:3".to_string()));
+        let own = own_ratios("6/8".parse().unwrap());
+        assert!(own.contains(&Ratio { n: 7, span: 3 }));
     }
 
     #[test]

@@ -28,8 +28,7 @@ use eframe::egui::{Align2, Color32, FontId, Pos2, Sense, Shape, Stroke, Ui, vec2
 use grooph_layout::staff_layout::Voice;
 use grooph_measure::click::{ClickLevel, default_click_bar, subdivided_click_bar};
 use grooph_measure::counter::{
-    CounterBars, Ratio, click_level, counter_bar_like, counter_bar_with, counter_clicks,
-    counter_ratios, ratio_of, respell,
+    CounterBars, Ratio, click_level, counter_bar, counter_clicks, counter_ratios, ratio_of,
 };
 use grooph_measure::duration::Duration;
 use grooph_measure::grid::DEFAULT_GRID;
@@ -172,7 +171,7 @@ fn fill_name(d: Duration) -> String {
 /// click medium) does not have.
 pub(crate) fn counter_ratio(bar: &Measure) -> Option<(Ratio, bool)> {
     let ratio = ratio_of(bar)?;
-    let edited = !counter_bar_like(bar, ratio).is_some_and(|m| same_bar(&m, bar));
+    let edited = !counter_bar(bar.time_signature(), ratio).is_some_and(|m| same_bar(&m, bar));
     Some((ratio, edited))
 }
 
@@ -418,8 +417,7 @@ impl Grooph {
     /// Undoable.
     pub(crate) fn set_counter_ratio(&mut self, ratio: Option<Ratio>) {
         let ts = self.metronome_meter();
-        let merge = self.playback_ctl.audio_cfg.spells_merged_counter_rests();
-        let bar = ratio.and_then(|r| counter_bar_with(ts, r, merge));
+        let bar = ratio.and_then(|r| counter_bar(ts, r));
         let unchanged = match (self.counter_bar(), &bar) {
             (None, None) => true,
             (Some(a), Some(b)) => same_bar(a, b),
@@ -443,36 +441,6 @@ impl Grooph {
             }
             true
         });
-    }
-
-    /// Merge the rests between counter clicks from now on, or write them all
-    /// as long as the click: every meter's counter bar is written anew,
-    /// keeping its clicks' levels. Stemlets keep them as long as the click.
-    pub(crate) fn set_merge_counter_rests(&mut self, merge: bool) {
-        self.playback_ctl.audio_cfg.merge_counter_rests = merge;
-        self.respell_counter();
-    }
-
-    /// Draw the counter's rests under its beams as stemlets from now on, its
-    /// rests then all as long as the click, or as rests.
-    pub(crate) fn set_counter_stemlets(&mut self, stemlets: bool) {
-        self.playback_ctl.audio_cfg.counter_stemlets = stemlets;
-        self.respell_counter();
-    }
-
-    /// Write every counter bar anew, with its rests merged or not as the
-    /// settings say: also after undo, whose bars may be spelled otherwise.
-    pub(crate) fn respell_counter(&mut self) {
-        let cfg = &mut self.playback_ctl.audio_cfg;
-        let merge = cfg.spells_merged_counter_rests();
-        cfg.counter.respell(merge);
-        if self.edited_voice() == Voice::Lower
-            && let Some(bar) = self.editor.score.measures.first().and_then(|m| respell(m, merge))
-            && !same_bar(&bar, &self.editor.score.measures[0])
-        {
-            self.editor.score = Score::single(bar);
-            self.editor.cursor = Cursor::start();
-        }
     }
 
     /// Move the counter click starting at beat `idx` to its next level, and
@@ -809,7 +777,6 @@ fn level_label(level: ClickLevel) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use grooph_measure::counter::counter_bar;
     use grooph_measure::notation::parse_score;
 
     fn bar(text: &str) -> Measure {
@@ -965,23 +932,6 @@ mod tests {
     }
 
     #[test]
-    fn undo_spells_the_counter_as_the_settings_say() {
-        let mut app = metronome_app();
-        let ts: TimeSignature = "5/4".parse().unwrap();
-        let ratio = Ratio { n: 2, span: 5 };
-        app.set_metronome_meter(ts);
-        app.set_counter_ratio(Some(ratio));
-        app.cycle_counter_level(0);
-        app.set_counter_stemlets(true);
-        // The bar from before the edit comes back with stemlets' rests.
-        app.undo();
-        let even = counter_bar_with(ts, ratio, false).unwrap();
-        assert!(same_bar(app.counter_bar().unwrap(), &even));
-        app.redo();
-        assert_eq!(app.counter_bar().unwrap().beats().len(), even.beats().len());
-    }
-
-    #[test]
     fn redo_across_a_voice_switch_keeps_both_voices() {
         let mut app = metronome_app();
         app.set_counter_ratio(Some(Ratio { n: 3, span: 4 }));
@@ -1019,40 +969,6 @@ mod tests {
         assert_eq!(app.editor.metronome.voice, Voice::Upper);
         let counter = app.playback_ctl.audio_cfg.counter.for_meter(TimeSignature::FOUR_FOUR);
         assert_eq!(counter.and_then(ratio_of), Some(Ratio { n: 5, span: 4 }));
-    }
-
-    #[test]
-    fn merging_rests_respells_the_counter_and_keeps_its_ratio() {
-        let mut app = metronome_app();
-        let ts: TimeSignature = "5/4".parse().unwrap();
-        app.set_metronome_meter(ts);
-        // Stemlets are on until switched off.
-        assert!(app.playback_ctl.audio_cfg.counter_stemlets);
-        app.set_counter_stemlets(false);
-        let ratio = Ratio { n: 2, span: 5 };
-        app.set_counter_ratio(Some(ratio));
-        app.set_merge_counter_rests(false);
-        let even = app.counter_bar().cloned().unwrap();
-        assert!(same_bar(&even, &counter_bar_with(ts, ratio, false).unwrap()));
-        assert_eq!(counter_ratio(&even), Some((ratio, false)));
-        // A ratio picked now is written the same way...
-        app.set_counter_ratio(None);
-        app.set_counter_ratio(Some(ratio));
-        assert!(same_bar(app.counter_bar().unwrap(), &even));
-        // ...until rests are merged again, while editing the counter too.
-        app.select_voice(Voice::Lower);
-        app.set_merge_counter_rests(true);
-        assert!(same_bar(app.counter_bar().unwrap(), &counter_bar(ts, ratio).unwrap()));
-        // Stemlets write them as long as the click, whatever merging says,
-        // and give them back when switched off.
-        app.set_counter_stemlets(true);
-        assert!(same_bar(app.counter_bar().unwrap(), &even));
-        assert_eq!(counter_ratio(app.counter_bar().unwrap()), Some((ratio, false)));
-        app.set_counter_ratio(None);
-        app.set_counter_ratio(Some(ratio));
-        assert!(same_bar(app.counter_bar().unwrap(), &even));
-        app.set_counter_stemlets(false);
-        assert!(same_bar(app.counter_bar().unwrap(), &counter_bar(ts, ratio).unwrap()));
     }
 
     #[test]

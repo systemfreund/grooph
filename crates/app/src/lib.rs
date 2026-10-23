@@ -142,8 +142,6 @@ struct PersistedState {
     presets: PresetLibrary,
     click_bars: ClickBars,
     counter_bars: CounterBars,
-    merge_counter_rests: bool,
-    counter_stemlets: bool,
     metronome_meter: TimeSignature,
     /// Tab open when the state was saved, reopened at the next start.
     tab: CompactTab,
@@ -177,8 +175,6 @@ impl Default for PersistedState {
             presets: PresetLibrary::default(),
             click_bars: ClickBars::default(),
             counter_bars: CounterBars::default(),
-            merge_counter_rests: true,
-            counter_stemlets: true,
             metronome_meter: TimeSignature::FOUR_FOUR,
             tab: CompactTab::Practice,
         }
@@ -223,8 +219,6 @@ impl PersistedState {
             presets: app.editor.presets.clone(),
             click_bars: app.playback_ctl.audio_cfg.click.clone(),
             counter_bars: app.playback_ctl.audio_cfg.counter.clone(),
-            merge_counter_rests: app.playback_ctl.audio_cfg.merge_counter_rests,
-            counter_stemlets: app.playback_ctl.audio_cfg.counter_stemlets,
             metronome_meter: app.editor.metronome.meter,
             tab: app.compact_tab(),
         }
@@ -478,7 +472,6 @@ impl Grooph {
             if let Some(counter) = prev.counter {
                 self.playback_ctl.audio_cfg.counter = counter;
                 self.editor.metronome.voice = prev.voice;
-                self.respell_counter();
             }
             if let Some(click) = prev.click {
                 self.playback_ctl.audio_cfg.click = click;
@@ -499,7 +492,6 @@ impl Grooph {
             if let Some(counter) = next.counter {
                 self.playback_ctl.audio_cfg.counter = counter;
                 self.editor.metronome.voice = next.voice;
-                self.respell_counter();
             }
             if let Some(click) = next.click {
                 self.playback_ctl.audio_cfg.click = click;
@@ -706,14 +698,8 @@ impl Grooph {
             Some(LinkContent::Metronome(ts)) => {
                 self.stop_transport();
                 self.editor.metronome.meter = ts;
-                // The meter plays the link's counter rhythm, or none,
-                // spelled as the settings say.
-                let merge = self.playback_ctl.audio_cfg.spells_merged_counter_rests();
-                let counter = link
-                    .counter
-                    .clone()
-                    .map(|bar| grooph_measure::counter::respell(&bar, merge).unwrap_or(bar));
-                self.playback_ctl.audio_cfg.counter.set(ts, counter);
+                // The meter plays the link's counter rhythm, or none.
+                self.playback_ctl.audio_cfg.counter.set(ts, link.counter.clone());
             }
             Some(LinkContent::Generator { settings, seed }) => {
                 self.stop_transport();
@@ -1140,15 +1126,7 @@ impl Grooph {
                     gap: state.gap_click,
                     ramp: state.tempo_ramp,
                     click: state.click_bars,
-                    // Saved before stemlets were the default, or by an
-                    // older version: spell the bars as the settings say.
-                    counter: {
-                        let mut counter = state.counter_bars;
-                        counter.respell(state.merge_counter_rests && !state.counter_stemlets);
-                        counter
-                    },
-                    merge_counter_rests: state.merge_counter_rests,
-                    counter_stemlets: state.counter_stemlets,
+                    counter: state.counter_bars,
                 },
                 playback: PlaybackState::default(),
                 accuracy: AccuracyState::new(state.accuracy_enabled),

@@ -8,9 +8,9 @@
 //! scroll area) live here; per-measure pixel geometry stays in `MeasureLayout`.
 //!
 //! A staff can have a lower voice (see [`build_staff_layout_with_lower`]): a
-//! second score on a line of its own below, stems down, spaced like the
-//! upper voice so notes at the same time line up — like the feet under the
-//! hands of a drum part.
+//! second score on a line of its own below, stems down, its beams running
+//! over its rests as stemlets, spaced like the upper voice so notes at the
+//! same time line up — like the feet under the hands of a drum part.
 //!
 //! Each measure grows to fill the row. If a measure doesn't fit, glyphs shrink
 //! toward [`LEGIBILITY_FLOOR_EM`]; a measure that doesn't fit even at the floor
@@ -62,8 +62,6 @@ pub struct StaffOpts {
     /// Room under a lower voice's notes in em, for count labels: 0 or
     /// [`LOWER_VOICE_LABEL_ROOM_EM`].
     pub lower_label_room_em: f32,
-    /// The lower voice's beams run over its rests, drawn as stemlets.
-    pub lower_stemlets: bool,
 }
 
 impl StaffOpts {
@@ -325,9 +323,8 @@ pub fn build_staff_layout_with_lower(
     // tuplets) once, for its width and its layout.
     let plans: Vec<RenderPlan> = score.measures.iter().map(plan_measure).collect();
     let lower_measures = |i: usize| lower.and_then(|l| l.measures.get(i));
-    let lower_plans: Vec<Option<RenderPlan>> = (0..score.len())
-        .map(|i| lower_measures(i).map(|m| plan_measure_with(m, opts.lower_stemlets)))
-        .collect();
+    let lower_plans: Vec<Option<RenderPlan>> =
+        (0..score.len()).map(|i| lower_measures(i).map(|m| plan_measure_with(m, true))).collect();
     let widths_min: Vec<f32> = (0..score.len())
         .map(|i| {
             let upper = min_measure_width(score, i, &plans[i], show_clef[i], show_ts[i], opts);
@@ -493,7 +490,6 @@ mod tests {
             layout_clef_first: true,
             room_below_em: ROOM_BELOW_EM,
             lower_label_room_em: 0.0,
-            lower_stemlets: false,
         }
     }
 

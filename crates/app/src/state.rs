@@ -40,21 +40,9 @@ pub(crate) struct AudioConfig {
     pub(crate) click: ClickBars,
     /// The counter rhythm of each meter that has one.
     pub(crate) counter: CounterBars,
-    /// Counter bars merge the rests between their clicks (see
-    /// [`grooph_measure::counter::counter_bar_with`]).
-    pub(crate) merge_counter_rests: bool,
-    /// The counter staff beams over its rests, drawn as stemlets (the
-    /// default); its bars then write every rest as long as the click.
-    pub(crate) counter_stemlets: bool,
 }
 
 impl AudioConfig {
-    /// Whether counter bars are written with merged rests: asked for, and
-    /// not drawn with stemlets.
-    pub(crate) const fn spells_merged_counter_rests(&self) -> bool {
-        self.merge_counter_rests && !self.counter_stemlets
-    }
-
     /// The latency offset in seconds, 0 while switched off.
     pub(crate) fn latency_s(&self) -> f64 {
         if self.latency_enabled { self.offset as f64 } else { 0.0 }
@@ -73,8 +61,6 @@ impl Default for AudioConfig {
             ramp: TempoRamp::default(),
             click: ClickBars::default(),
             counter: CounterBars::default(),
-            merge_counter_rests: true,
-            counter_stemlets: true,
         }
     }
 }
