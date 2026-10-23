@@ -17,11 +17,12 @@ const fn dot_count_of(duration: Duration) -> u8 {
 /// Where `beat` sits, in half staff spaces up from the staff line. Notes are
 /// on the line. In the lower voice a rest hangs a staff space lower, clear of
 /// an upper voice's, except half and whole rests: they are told apart only by
-/// sitting on the line or hanging from it.
-fn staff_pos_of(beat: &Beat, opts: &LayoutOpts) -> i8 {
+/// sitting on the line or hanging from it. A stemlet (`in_beam` rest) reaches
+/// from the line like a note's stem.
+fn staff_pos_of(beat: &Beat, in_beam: bool, opts: &LayoutOpts) -> i8 {
     let keeps_line = matches!(beat.duration.base_note(), NoteValue::Half | NoteValue::Whole);
     match beat.kind {
-        BeatKind::Rest if opts.stem_down && !keeps_line => -2,
+        BeatKind::Rest if opts.stem_down && !keeps_line && !in_beam => -2,
         _ => 0,
     }
 }
@@ -334,7 +335,12 @@ pub(super) fn build_note_layout(
     let ss = opts.staff_space();
     for (i, b) in beats.iter().enumerate() {
         let ideal_cx = shifted_cxs[i];
-        let staff_pos = staff_pos_of(b, opts);
+        let needs_flag = requires_flag(b.duration);
+        let in_beam = in_beam_flags.get(i).copied().unwrap_or(false);
+        let is_note = b.kind == BeatKind::Note;
+        // A rest under a beam is a stemlet: a stem without a head.
+        let stemlet = !is_note && in_beam;
+        let staff_pos = staff_pos_of(b, in_beam, opts);
         let cy = opts.y_of(staff_pos);
 
         // 1. Calculate Stem (if any) and determining pixel-snapping offset.
@@ -342,11 +348,7 @@ pub(super) fn build_note_layout(
         // the snapped stem.
         let mut stem: Option<Line> = None;
 
-        let needs_flag = requires_flag(b.duration);
-        let in_beam = in_beam_flags.get(i).copied().unwrap_or(false);
-        let is_note = b.kind == BeatKind::Note;
-
-        if is_note {
+        if is_note || stemlet {
             let stem_len_factor = if in_beam || needs_flag { 1.0 } else { 0.85 };
             let stem_len = opts.stem_length() * stem_len_factor;
             // Down stems hang off the head's left side.
@@ -359,8 +361,15 @@ pub(super) fn build_note_layout(
             } else {
                 glyphs::NOTEHEAD_BLACK_STEM_UP_SE[1]
             };
-            let start = Pos2::new(snapped_stem_x, cy - attach * ss);
             let end = Pos2::new(snapped_stem_x, cy + opts.stem_dir() * stem_len);
+            let start = if stemlet {
+                Pos2::new(
+                    snapped_stem_x,
+                    end.y - opts.stem_dir() * stem_len * c::STEMLET_LENGTH_FACTOR,
+                )
+            } else {
+                Pos2::new(snapped_stem_x, cy - attach * ss)
+            };
             stem = Some(Line { p1: start, p2: end });
         }
 
@@ -400,6 +409,7 @@ pub(super) fn build_note_layout(
             duration: b.duration,
             kind: b.kind,
             head,
+            stemlet,
             parens,
             dots,
             stem,

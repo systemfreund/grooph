@@ -111,6 +111,7 @@ impl Grooph {
                             } else {
                                 0.0
                             },
+                            lower_stemlets: self.playback_ctl.audio_cfg.counter_stemlets,
                         };
 
                         let upper = upper.as_ref().unwrap_or(&self.editor.score);

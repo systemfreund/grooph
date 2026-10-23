@@ -1,4 +1,4 @@
-use crate::beam_plan::{BeamGroup, BeamPlan, compute_beam_plan};
+use crate::beam_plan::{BeamGroup, BeamPlan, compute_beam_plan_with};
 use crate::tuplet_plan::{TupletPlan, compute_tuplet_plan};
 use grooph_measure::Measure;
 
@@ -30,7 +30,13 @@ pub struct RenderPlan {
 /// This step analyzes the musical content (meter-aware grouping, durations) and produces
 /// beaming groups and tuplet segments. No pixel geometry is computed here.
 pub fn plan_measure(measure: &Measure) -> RenderPlan {
-    let BeamPlan { groups: beams } = compute_beam_plan(measure);
+    plan_measure_with(measure, false)
+}
+
+/// [`plan_measure`], with `stemlets` running the beams over rests: a beamed
+/// rest is drawn as a stem without a head, a stemlet.
+pub fn plan_measure_with(measure: &Measure, stemlets: bool) -> RenderPlan {
+    let BeamPlan { groups: beams } = compute_beam_plan_with(measure, stemlets);
     let tuplets = compute_tuplet_plan(measure, &beams);
 
     RenderPlan { beams, tuplets }
@@ -145,6 +151,15 @@ mod tests {
         assert!(!t.contains_rest);
         assert_eq!(t.edge_connection, EdgeConnection::Right);
         assert!(!t.number_only());
+    }
+
+    #[test]
+    fn a_tuplet_with_stemlets_is_beamed_and_shows_its_number_alone() {
+        use grooph_measure::notation::parse_score;
+        let m = parse_score("1/4 t8 r:t8 r:t8").unwrap().measures.remove(0);
+        assert!(!plan_measure(&m).tuplets[0].number_only());
+        let t = &plan_measure_with(&m, true).tuplets[0];
+        assert!(t.fully_beamed && !t.contains_rest && t.number_only());
     }
 
     #[test]

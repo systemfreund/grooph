@@ -143,6 +143,7 @@ struct PersistedState {
     click_bars: ClickBars,
     counter_bars: CounterBars,
     merge_counter_rests: bool,
+    counter_stemlets: bool,
     metronome_meter: TimeSignature,
     /// Tab open when the state was saved, reopened at the next start.
     tab: CompactTab,
@@ -177,6 +178,7 @@ impl Default for PersistedState {
             click_bars: ClickBars::default(),
             counter_bars: CounterBars::default(),
             merge_counter_rests: true,
+            counter_stemlets: false,
             metronome_meter: TimeSignature::FOUR_FOUR,
             tab: CompactTab::Practice,
         }
@@ -222,6 +224,7 @@ impl PersistedState {
             click_bars: app.playback_ctl.audio_cfg.click.clone(),
             counter_bars: app.playback_ctl.audio_cfg.counter.clone(),
             merge_counter_rests: app.playback_ctl.audio_cfg.merge_counter_rests,
+            counter_stemlets: app.playback_ctl.audio_cfg.counter_stemlets,
             metronome_meter: app.editor.metronome.meter,
             tab: app.compact_tab(),
         }
@@ -1131,6 +1134,7 @@ impl Grooph {
                     click: state.click_bars,
                     counter: state.counter_bars,
                     merge_counter_rests: state.merge_counter_rests,
+                    counter_stemlets: state.counter_stemlets,
                 },
                 playback: PlaybackState::default(),
                 accuracy: AccuracyState::new(state.accuracy_enabled),

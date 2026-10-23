@@ -13,7 +13,7 @@ pub struct TupletPlan {
     pub base: NoteValue,
     /// The whole group is beamed together (no bracket needed)
     pub fully_beamed: bool,
-    /// The group contains a rest (always bracketed)
+    /// The group contains a rest not under a beam (always bracketed)
     pub contains_rest: bool,
     /// How the group's beams connect to its neighbours
     pub edge_connection: EdgeConnection,
@@ -73,9 +73,13 @@ pub fn compute_tuplet_plan(measure: &Measure, beams: &[BeamGroup]) -> Vec<Tuplet
     let spans = detect_tuplet_spans(measure);
 
     let mut out: Vec<TupletPlan> = Vec::with_capacity(spans.len());
-    for g in spans.into_iter() {
-        let note_idxs: Vec<BeatIdx> =
-            (g.start..=g.end).filter(|&ix| beats[ix].kind == BeatKind::Note).collect();
+    // A rest under a beam (a stemlet) counts as a note: it breaks nothing.
+    let beamed = |ix: BeatIdx| beams.iter().any(|bg| bg.beat_indices.contains(&ix));
+    for mut g in spans.into_iter() {
+        let note_idxs: Vec<BeatIdx> = (g.start..=g.end)
+            .filter(|&ix| beats[ix].kind == BeatKind::Note || beamed(ix))
+            .collect();
+        g.contains_rest = note_idxs.len() < g.end - g.start + 1;
 
         let fully_beamed = if g.contains_rest || note_idxs.len() < 2 {
             false

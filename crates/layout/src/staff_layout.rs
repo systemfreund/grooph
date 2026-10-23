@@ -21,7 +21,7 @@ use crate::pixel_layout::{
     LayoutOpts, MeasureLayout, build_measure_layout_with_plan, clef_width, min_note_area_width,
     time_sig_width,
 };
-use crate::render_plan::{RenderPlan, plan_measure};
+use crate::render_plan::{RenderPlan, plan_measure, plan_measure_with};
 use egui::{FontId, Pos2, Rect, Vec2, pos2, vec2};
 use grooph_measure::duration::s;
 use grooph_measure::grid::DEFAULT_GRID;
@@ -62,6 +62,8 @@ pub struct StaffOpts {
     /// Room under a lower voice's notes in em, for count labels: 0 or
     /// [`LOWER_VOICE_LABEL_ROOM_EM`].
     pub lower_label_room_em: f32,
+    /// The lower voice's beams run over its rests, drawn as stemlets.
+    pub lower_stemlets: bool,
 }
 
 impl StaffOpts {
@@ -323,8 +325,9 @@ pub fn build_staff_layout_with_lower(
     // tuplets) once, for its width and its layout.
     let plans: Vec<RenderPlan> = score.measures.iter().map(plan_measure).collect();
     let lower_measures = |i: usize| lower.and_then(|l| l.measures.get(i));
-    let lower_plans: Vec<Option<RenderPlan>> =
-        (0..score.len()).map(|i| lower_measures(i).map(plan_measure)).collect();
+    let lower_plans: Vec<Option<RenderPlan>> = (0..score.len())
+        .map(|i| lower_measures(i).map(|m| plan_measure_with(m, opts.lower_stemlets)))
+        .collect();
     let widths_min: Vec<f32> = (0..score.len())
         .map(|i| {
             let upper = min_measure_width(score, i, &plans[i], show_clef[i], show_ts[i], opts);
@@ -490,6 +493,7 @@ mod tests {
             layout_clef_first: true,
             room_below_em: ROOM_BELOW_EM,
             lower_label_room_em: 0.0,
+            lower_stemlets: false,
         }
     }
 

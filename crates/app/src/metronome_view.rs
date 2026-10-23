@@ -418,7 +418,7 @@ impl Grooph {
     /// Undoable.
     pub(crate) fn set_counter_ratio(&mut self, ratio: Option<Ratio>) {
         let ts = self.metronome_meter();
-        let merge = self.playback_ctl.audio_cfg.merge_counter_rests;
+        let merge = self.playback_ctl.audio_cfg.spells_merged_counter_rests();
         let bar = ratio.and_then(|r| counter_bar_with(ts, r, merge));
         let unchanged = match (self.counter_bar(), &bar) {
             (None, None) => true,
@@ -447,10 +447,24 @@ impl Grooph {
 
     /// Merge the rests between counter clicks from now on, or write them all
     /// as long as the click: every meter's counter bar is written anew,
-    /// keeping its clicks' levels.
+    /// keeping its clicks' levels. Stemlets keep them as long as the click.
     pub(crate) fn set_merge_counter_rests(&mut self, merge: bool) {
+        self.playback_ctl.audio_cfg.merge_counter_rests = merge;
+        self.respell_counter();
+    }
+
+    /// Draw the counter's rests under its beams as stemlets from now on, its
+    /// rests then all as long as the click, or as rests.
+    pub(crate) fn set_counter_stemlets(&mut self, stemlets: bool) {
+        self.playback_ctl.audio_cfg.counter_stemlets = stemlets;
+        self.respell_counter();
+    }
+
+    /// Write every counter bar anew, with its rests merged or not as the
+    /// settings say.
+    fn respell_counter(&mut self) {
         let cfg = &mut self.playback_ctl.audio_cfg;
-        cfg.merge_counter_rests = merge;
+        let merge = cfg.spells_merged_counter_rests();
         cfg.counter.respell(merge);
         if self.edited_voice() == Voice::Lower
             && let Some(bar) = self.editor.score.measures.first().and_then(|m| respell(m, merge))
@@ -1007,6 +1021,16 @@ mod tests {
         // ...until rests are merged again, while editing the counter too.
         app.select_voice(Voice::Lower);
         app.set_merge_counter_rests(true);
+        assert!(same_bar(app.counter_bar().unwrap(), &counter_bar(ts, ratio).unwrap()));
+        // Stemlets write them as long as the click, whatever merging says,
+        // and give them back when switched off.
+        app.set_counter_stemlets(true);
+        assert!(same_bar(app.counter_bar().unwrap(), &even));
+        assert_eq!(counter_ratio(app.counter_bar().unwrap()), Some((ratio, false)));
+        app.set_counter_ratio(None);
+        app.set_counter_ratio(Some(ratio));
+        assert!(same_bar(app.counter_bar().unwrap(), &even));
+        app.set_counter_stemlets(false);
         assert!(same_bar(app.counter_bar().unwrap(), &counter_bar(ts, ratio).unwrap()));
     }
 

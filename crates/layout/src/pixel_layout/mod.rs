@@ -45,6 +45,8 @@ mod c {
 
     // Beam alignment
     pub const BEAM_BASELINE_OFFSET: f32 = 0.95; // × beam_thickness
+    /// A stemlet's share of a stem's length, from the beam toward the line.
+    pub const STEMLET_LENGTH_FACTOR: f32 = 0.7;
 
     /// Width reserved for the percussion clef.
     pub const CLEF_WIDTH_EM: f32 = 1.1;
@@ -257,8 +259,11 @@ pub struct NoteLayout {
     pub staff_pos: i8,
     pub duration: Duration,
     pub kind: BeatKind,
-    /// The note head, or the rest.
+    /// The note head, or the rest. A stemlet's rest is not drawn.
     pub head: PlacedGlyph,
+    /// A beamed rest, drawn as a stem from the beam toward the line and no
+    /// head (see [`crate::render_plan::plan_measure_with`]).
+    pub stemlet: bool,
     /// The parentheses of a soft (ghost) note's head.
     pub parens: Vec<PlacedGlyph>,
     pub dots: Vec<PlacedGlyph>,
@@ -271,6 +276,7 @@ impl NoteLayout {
     /// Every glyph of the note.
     pub fn glyphs(&self) -> impl Iterator<Item = &PlacedGlyph> {
         std::iter::once(&self.head)
+            .filter(|_| !self.stemlet)
             .chain(&self.parens)
             .chain(&self.dots)
             .chain(&self.flag)
@@ -884,5 +890,39 @@ mod tests {
         for step in &steps {
             assert!((step - steps[0]).abs() < 0.5, "{xs:?}");
         }
+    }
+
+    #[test]
+    fn beamed_rests_of_a_lower_voice_are_stemlets_under_its_beams() {
+        use grooph_measure::notation::parse_score;
+        let m = parse_score("1/4 s r:s r:s s").unwrap().measures.remove(0);
+        let em = 20.0;
+        let opts = LayoutOpts {
+            rect: Rect::from_min_max(Pos2::ZERO, Pos2::new(100.0, 100.0)),
+            font_id: FontId::new(em, FontFamily::Proportional),
+            pixels_per_point: 1.0,
+            em,
+            layout_clef: false,
+            layout_time_signature: false,
+            y_offset: 0.0,
+            stem_length_factor: 3.5,
+            stem_thickness_factor: 0.1,
+            accent_displacement: 0.0,
+            accent_below: false,
+            stem_down: true,
+            proportional_spacing: true,
+        };
+        let plan = crate::render_plan::plan_measure_with(&m, true);
+        let layout = build_measure_layout_with_plan(&m, &plan, &opts);
+        let [note, rest, _, _] = &layout.notes[..] else { panic!("four beats") };
+        assert!(rest.stemlet && !note.stemlet);
+        // No rest glyph, and a stem from the beam, shorter than the note's.
+        assert_eq!(rest.glyphs().count(), 0);
+        assert_eq!(rest.staff_pos, 0);
+        let (n, r) = (note.stem.unwrap(), rest.stem.unwrap());
+        assert_eq!(r.p2.y, n.p2.y);
+        assert!((r.p2.y - r.p1.y).abs() < (n.p2.y - n.p1.y).abs());
+        // Two beam levels between each two of the four stems.
+        assert_eq!(layout.beams.len(), 6);
     }
 }
