@@ -192,10 +192,6 @@ impl Grooph {
                                 &mut self.ui.layout.proportional_spacing,
                                 "Proportional Spacing",
                             );
-                            ui.checkbox(
-                                &mut self.ui.layout.counter_on_one_line,
-                                "Counter on one line",
-                            );
                         },
                     );
 
