@@ -598,6 +598,7 @@ mod tests {
             accent_displacement: 0.0,
             accent_below: false,
             stem_down: false,
+            shared_line: false,
             proportional_spacing: true,
         }
     }

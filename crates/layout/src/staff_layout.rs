@@ -10,7 +10,9 @@
 //! A staff can have a lower voice (see [`build_staff_layout_with_lower`]): a
 //! second score on a line of its own below, stems down, its beams running
 //! over its rests as stemlets, spaced like the upper voice so notes at the
-//! same time line up — like the feet under the hands of a drum part.
+//! same time line up — like the feet under the hands of a drum part. With
+//! [`StaffOpts::one_line`] both voices share one line instead, the upper one
+//! above it and the lower one below.
 //!
 //! Each measure grows to fill the row. If a measure doesn't fit, glyphs shrink
 //! toward [`LEGIBILITY_FLOOR_EM`]; a measure that doesn't fit even at the floor
@@ -21,7 +23,7 @@ use crate::pixel_layout::{
     LayoutOpts, MeasureLayout, build_measure_layout_with_plan, clef_width, min_note_area_width,
     time_sig_width,
 };
-use crate::render_plan::{RenderPlan, plan_measure, plan_measure_with};
+use crate::render_plan::{RenderPlan, plan_measure_with};
 use egui::{FontId, Pos2, Rect, Vec2, pos2, vec2};
 use grooph_measure::duration::s;
 use grooph_measure::grid::DEFAULT_GRID;
@@ -62,32 +64,49 @@ pub struct StaffOpts {
     /// Room under a lower voice's notes in em, for count labels: 0 or
     /// [`LOWER_VOICE_LABEL_ROOM_EM`].
     pub lower_label_room_em: f32,
+    /// A lower voice shares the staff line instead of having its own: the
+    /// upper voice's heads sit on the line, the lower one's hang from it
+    /// (see [`LayoutOpts::shared_line`]).
+    pub one_line: bool,
 }
 
 impl StaffOpts {
     /// Build per-measure [`LayoutOpts`] for a placed measure (renderer entry).
     pub fn measure_opts_for(&self, placed: &PlacedMeasure) -> LayoutOpts {
-        self.measure_opts(
+        let opts = self.measure_opts(
             placed.rect,
             placed.y_offset,
             placed.show_clef,
             placed.show_time_signature,
-        )
+        );
+        self.upper_of(opts, placed.lower.is_some())
     }
 
     /// Per-measure [`LayoutOpts`] of the lower voice of a placed measure:
-    /// on its own line [`LOWER_VOICE_GAP_EM`] below, stems down.
+    /// stems down, on its own line [`LOWER_VOICE_GAP_EM`] below or below
+    /// the shared one.
     pub fn lower_opts_for(&self, placed: &PlacedMeasure) -> LayoutOpts {
-        Self::lower_of(self.measure_opts_for(placed))
+        self.lower_of(self.measure_opts_for(placed))
     }
 
-    fn lower_of(opts: LayoutOpts) -> LayoutOpts {
+    /// `opts` for the upper voice, which shares its line if `with_lower`.
+    fn upper_of(&self, opts: LayoutOpts, with_lower: bool) -> LayoutOpts {
+        LayoutOpts { shared_line: self.one_line && with_lower, ..opts }
+    }
+
+    fn lower_of(&self, opts: LayoutOpts) -> LayoutOpts {
         LayoutOpts {
-            y_offset: opts.y_offset + LOWER_VOICE_GAP_EM * opts.em,
+            y_offset: opts.y_offset + self.lower_voice_gap_em() * opts.em,
             stem_down: true,
+            shared_line: self.one_line,
             accent_below: false,
             ..opts
         }
+    }
+
+    /// Distance from the staff line down to the lower voice's, in em.
+    fn lower_voice_gap_em(&self) -> f32 {
+        if self.one_line { 0.0 } else { LOWER_VOICE_GAP_EM }
     }
 
     /// Build per-measure [`LayoutOpts`] with a measure-local rect, the staff
@@ -112,6 +131,7 @@ impl StaffOpts {
             accent_displacement: self.accent_displacement,
             accent_below: self.accent_below,
             stem_down: false,
+            shared_line: false,
             proportional_spacing: self.proportional_spacing,
         }
     }
@@ -282,8 +302,8 @@ fn row_room(reaches: &[(RowRoom, Option<RowRoom>)], opts: &StaffOpts) -> RowRoom
     let upper = reaches.iter().map(|r| r.0).fold(RowRoom::NONE, RowRoom::max);
     let mut room_below = opts.room_below_em.max(upper.below + INK_MARGIN_EM);
     if let Some(lower) = reaches.iter().filter_map(|r| r.1).reduce(RowRoom::max) {
-        room_below =
-            room_below.max(LOWER_VOICE_GAP_EM + past_stems(lower.below) + opts.lower_label_room_em);
+        room_below = room_below
+            .max(opts.lower_voice_gap_em() + past_stems(lower.below) + opts.lower_label_room_em);
     }
     RowRoom { above: past_stems(upper.above), below: room_below }
 }
@@ -321,8 +341,16 @@ pub fn build_staff_layout_with_lower(
 
     // 2. natural widths at the baseline em. Each measure is planned (beams,
     // tuplets) once, for its width and its layout.
-    let plans: Vec<RenderPlan> = score.measures.iter().map(plan_measure).collect();
+    // On a shared line the upper voice's beamed rests are stemlets too, clear
+    // of the line.
     let lower_measures = |i: usize| lower.and_then(|l| l.measures.get(i));
+    let shares_line = |i: usize| opts.one_line && lower_measures(i).is_some();
+    let plans: Vec<RenderPlan> = score
+        .measures
+        .iter()
+        .enumerate()
+        .map(|(i, m)| plan_measure_with(m, shares_line(i)))
+        .collect();
     let lower_plans: Vec<Option<RenderPlan>> =
         (0..score.len()).map(|i| lower_measures(i).map(|m| plan_measure_with(m, true))).collect();
     let widths_min: Vec<f32> = (0..score.len())
@@ -357,8 +385,9 @@ pub fn build_staff_layout_with_lower(
     let widths: Vec<f32> = widths_min.iter().map(|w| (w * em_scale).max(available)).collect();
     let lay_out = |i: usize, rect: Rect, y_offset: f32| {
         let per_opts = effective_opts.measure_opts(rect, y_offset, show_clef[i], show_ts[i]);
+        let per_opts = effective_opts.upper_of(per_opts, lower_measures(i).is_some());
         let layout = build_measure_layout_with_plan(&score.measures[i], &plans[i], &per_opts);
-        let lower_opts = StaffOpts::lower_of(per_opts.clone());
+        let lower_opts = effective_opts.lower_of(per_opts.clone());
         let lower = lower_measures(i)
             .zip(lower_plans[i].as_ref())
             .map(|(m, plan)| build_measure_layout_with_plan(m, plan, &lower_opts));
@@ -408,7 +437,7 @@ pub fn build_staff_layout_with_lower(
 }
 
 /// One of the staff's two voices: the upper one on the staff line, or the
-/// lower one on its own line below.
+/// lower one on its own line below (or below the shared one).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Voice {
     #[default]
@@ -426,8 +455,8 @@ pub fn hit_test_staff(staff: &StaffLayout, pos: Pos2) -> Option<(MeasureIdx, Bea
 }
 
 /// Like [`hit_test_staff`], with the voice whose line is nearer `pos`: on a
-/// staff with a lower voice, below halfway between the two lines picks the
-/// lower one and the beat among its notes.
+/// staff with a lower voice, below halfway between the two lines (below the
+/// line both share) picks the lower one and the beat among its notes.
 pub fn hit_test_voice(staff: &StaffLayout, pos: Pos2) -> Option<(Voice, MeasureIdx, BeatIdx)> {
     let system =
         staff.systems.iter().find(|s| pos.y < s.rect.bottom()).or_else(|| staff.systems.last())?;
@@ -490,6 +519,7 @@ mod tests {
             layout_clef_first: true,
             room_below_em: ROOM_BELOW_EM,
             lower_label_room_em: 0.0,
+            one_line: false,
         }
     }
 
@@ -579,6 +609,46 @@ mod tests {
         let single = build_staff_layout(&upper, &opts(em, rect));
         let y = single.systems[0].rect.bottom() - 1.0;
         assert_eq!(hit_test_voice(&single, Pos2::new(x, y)).map(|h| h.0), Some(Voice::Upper));
+    }
+
+    #[test]
+    fn one_line_puts_the_voices_on_either_side_of_it() {
+        use grooph_measure::notation::parse_score;
+        let em = 20.0;
+        let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(400.0, 100.0));
+        let upper = parse_score("4/4 >q e r:e q q").unwrap();
+        let lower = parse_score("4/4 t4 r:t4 (t4) r:t4 (t4) r:t4").unwrap();
+        let two_lines = opts(em, rect);
+        let staff_opts = StaffOpts { one_line: true, ..two_lines.clone() };
+        let staff = build_staff_layout_with_lower(&upper, Some(&lower), &staff_opts);
+        let system = &staff.systems[0];
+        let y = system.y_baseline;
+        assert_eq!(system.lower_baseline, Some(y));
+        let placed = &system.measures[0];
+        let below = placed.lower.as_ref().unwrap();
+        // Every head and rest keeps to its voice's side of the line.
+        for n in &placed.layout.notes {
+            let ink = n.stem.map_or(n.head.ink(), |s| Rect::from_two_pos(s.p1, s.p2));
+            assert!(ink.bottom() <= y + 0.01 && n.staff_pos > 0, "{n:?}");
+        }
+        for n in &below.notes {
+            assert!(n.head.ink().top() >= y - 0.01 && n.staff_pos < 0, "{n:?}");
+        }
+        // The upper voice's beamed rest is a stemlet, like the lower one's.
+        assert!(placed.layout.notes[2].stemlet);
+        // Beats at the same time still line up.
+        assert!((placed.layout.notes[0].center.x - below.notes[0].center.x).abs() < 0.5);
+        // The row is shorter by the second line's gap, at most.
+        let room = build_staff_layout_with_lower(&upper, Some(&lower), &two_lines).room;
+        assert!(staff.room.below < room.below);
+        assert!(staff.room.below >= room.below - LOWER_VOICE_GAP_EM - 0.01);
+        // Above the line hits the upper voice, below it the lower one.
+        let x = below.notes[3].center.x;
+        assert_eq!(hit_test_voice(&staff, Pos2::new(x, y + 2.0)), Some((Voice::Lower, 0, 3)));
+        assert_eq!(hit_test_voice(&staff, Pos2::new(x, y - 2.0)), Some((Voice::Upper, 0, 3)));
+        // Without a lower voice the line is the upper voice's alone.
+        let single = build_staff_layout(&upper, &staff_opts);
+        assert!(single.systems[0].measures[0].layout.notes.iter().all(|n| n.staff_pos == 0));
     }
 
     #[test]

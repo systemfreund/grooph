@@ -282,6 +282,7 @@ impl Grooph {
                 accent_displacement: 0.0,
                 accent_below: false,
                 stem_down: false,
+                shared_line: false,
                 proportional_spacing: true,
             };
 
@@ -359,6 +360,7 @@ pub(crate) fn notation_button(
                 accent_displacement: 0.1,
                 accent_below: false,
                 stem_down: false,
+                shared_line: false,
                 proportional_spacing: true,
             }
         };

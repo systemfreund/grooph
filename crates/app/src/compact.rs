@@ -492,6 +492,9 @@ impl Grooph {
         if value_row(ui, "Polyrhythm", &self.counter_label()).clicked() {
             self.ui.picker = Some(Picker::Polyrhythm);
         }
+        if self.counter_bar().is_some() {
+            switch_row(ui, "Counter on one line", &mut self.ui.layout.counter_on_one_line);
+        }
         switch_row(ui, "Count-in", &mut self.playback_ctl.audio_cfg.count_in);
         switch_row(ui, "Mute bars", &mut self.playback_ctl.audio_cfg.gap.enabled);
     }

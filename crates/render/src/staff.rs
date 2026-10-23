@@ -52,8 +52,8 @@ pub fn draw_staff(
             Stroke::new(0.02 * staff_opts.em, color),
         );
 
-        // The lower voice's line below, if any.
-        if let Some(y) = system.lower_baseline {
+        // The lower voice's line below, if it has one of its own.
+        if let Some(y) = system.lower_baseline.filter(|_| !staff_opts.one_line) {
             ui.painter().hline(
                 Rangef::new(system.rect.left(), system.rect.right()),
                 y,
@@ -73,7 +73,7 @@ pub fn draw_staff(
                 if let Some(c) = lower_cursor.filter(|c| c.measure_idx == placed.measure_idx) {
                     draw_edit_cursor(ui, ui.painter(), lower, c.beat_idx, &lower_opts);
                 }
-                if let Some(x) = cursor_x {
+                if let Some(x) = cursor_x.filter(|_| !staff_opts.one_line) {
                     let ys = Rangef::new(
                         system.y_baseline + 0.7 * staff_opts.em,
                         y + 0.7 * staff_opts.em,

@@ -111,6 +111,7 @@ impl Grooph {
                             } else {
                                 0.0
                             },
+                            one_line: self.ui.layout.counter_on_one_line,
                         };
 
                         let upper = upper.as_ref().unwrap_or(&self.editor.score);

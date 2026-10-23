@@ -19,13 +19,56 @@ const fn dot_count_of(duration: Duration) -> u8 {
 /// an upper voice's, except half and whole rests: they are told apart only by
 /// sitting on the line or hanging from it. A stemlet (`in_beam` rest) reaches
 /// from the line like a note's stem.
+///
+/// On a line shared by two voices ([`LayoutOpts::shared_line`]) each voice
+/// keeps to its side: heads sit on the line or hang from it, rests clear it,
+/// and a lower voice's half rest, which would sit on it, moves to a ledger
+/// line a staff space below (see [`ledger_pos`]).
 fn staff_pos_of(beat: &Beat, in_beam: bool, opts: &LayoutOpts) -> i8 {
-    let keeps_line = matches!(beat.duration.base_note(), NoteValue::Half | NoteValue::Whole);
+    let base = beat.duration.base_note();
+    let keeps_line = matches!(base, NoteValue::Half | NoteValue::Whole);
+    if opts.shared_line {
+        let side = if opts.stem_down { -1 } else { 1 };
+        return match beat.kind {
+            BeatKind::Note => side,
+            BeatKind::Rest if in_beam => side,
+            BeatKind::Rest => match ledger_pos(beat, opts) {
+                Some(pos) => pos,
+                None if keeps_line => 0,
+                None => side * clear_of_line(head_glyph(beat), opts.stem_down),
+            },
+        };
+    }
     match beat.kind {
         BeatKind::Rest if opts.stem_down && !keeps_line && !in_beam => -2,
         _ => 0,
     }
 }
+
+/// Least room between a rest and a staff line it keeps clear of, in staff
+/// spaces.
+const REST_CLEARANCE_SS: f32 = 0.25;
+
+/// How many half staff spaces `rest` moves off the line, away from it, for
+/// its ink to clear the line by [`REST_CLEARANCE_SS`]: up when `below` is
+/// false, down when it is true.
+fn clear_of_line(rest: glyphs::Glyph, below: bool) -> i8 {
+    let reach = if below { rest.ne[1] } else { -rest.sw[1] };
+    (2.0 * (REST_CLEARANCE_SS + reach)).ceil() as i8
+}
+
+/// The staff position of the ledger line of a rest on a shared line that
+/// would otherwise sit in the other voice: a lower voice's half rest sits
+/// on one below. (A whole rest, hanging from the line, would need one above
+/// in the upper voice, but no meter holds a whole note.)
+fn ledger_pos(beat: &Beat, opts: &LayoutOpts) -> Option<i8> {
+    let half = beat.duration.base_note() == NoteValue::Half;
+    (opts.shared_line && opts.stem_down && beat.kind == BeatKind::Rest && half).then_some(-2)
+}
+
+/// How far a ledger line reaches past either side of its rest, in staff
+/// spaces (Bravura's `legerLineExtension`).
+const LEDGER_EXTENSION_SS: f32 = 0.4;
 
 /// The head or rest glyph of `beat`.
 fn head_glyph(beat: &Beat) -> glyphs::Glyph {
@@ -125,7 +168,8 @@ fn compute_x_extents(beat: &Beat, in_beam: bool, opts: &LayoutOpts) -> (f32, f32
         (-paren_reach(opts), paren_reach(opts))
     } else {
         let head = PlacedGlyph::centered(head_glyph(beat), 0.0, 0.0, opts.em).ink();
-        (head.left(), head.right())
+        let ledger = if ledger_pos(beat, opts).is_some() { LEDGER_EXTENSION_SS * ss } else { 0.0 };
+        (head.left() - ledger, head.right() + ledger)
     };
 
     let dot_count = dot_count_of(beat.duration);
@@ -393,6 +437,11 @@ pub(super) fn build_note_layout(
             None => PlacedGlyph::centered(head_glyph(b), center.x, cy, opts.em),
         };
         let parens = if is_note && b.soft { parens_at(center, opts) } else { Vec::new() };
+        let ledger = ledger_pos(b, opts).map(|pos| {
+            let ink = head.ink();
+            let (y, reach) = (opts.y_of(pos), LEDGER_EXTENSION_SS * ss);
+            Line { p1: Pos2::new(ink.left() - reach, y), p2: Pos2::new(ink.right() + reach, y) }
+        });
 
         // 3. Dots
         let dots = dot_glyphs(b, in_beam, center.x, cy, dot_count_of(b.duration), opts);
@@ -411,6 +460,7 @@ pub(super) fn build_note_layout(
             head,
             stemlet,
             parens,
+            ledger,
             dots,
             stem,
             flag,
