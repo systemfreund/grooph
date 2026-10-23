@@ -461,13 +461,14 @@ impl Grooph {
     }
 
     /// Write every counter bar anew, with its rests merged or not as the
-    /// settings say.
-    fn respell_counter(&mut self) {
+    /// settings say: also after undo, whose bars may be spelled otherwise.
+    pub(crate) fn respell_counter(&mut self) {
         let cfg = &mut self.playback_ctl.audio_cfg;
         let merge = cfg.spells_merged_counter_rests();
         cfg.counter.respell(merge);
         if self.edited_voice() == Voice::Lower
             && let Some(bar) = self.editor.score.measures.first().and_then(|m| respell(m, merge))
+            && !same_bar(&bar, &self.editor.score.measures[0])
         {
             self.editor.score = Score::single(bar);
             self.editor.cursor = Cursor::start();
@@ -961,6 +962,23 @@ mod tests {
         let plain = counter_bar(TimeSignature::FOUR_FOUR, Ratio { n: 3, span: 4 }).unwrap();
         assert!(same_bar(app.counter_bar().unwrap(), &plain));
         assert!(same_bar(&app.click_bar(), &default_click_bar(TimeSignature::FOUR_FOUR)));
+    }
+
+    #[test]
+    fn undo_spells_the_counter_as_the_settings_say() {
+        let mut app = metronome_app();
+        let ts: TimeSignature = "5/4".parse().unwrap();
+        let ratio = Ratio { n: 2, span: 5 };
+        app.set_metronome_meter(ts);
+        app.set_counter_ratio(Some(ratio));
+        app.cycle_counter_level(0);
+        app.set_counter_stemlets(true);
+        // The bar from before the edit comes back with stemlets' rests.
+        app.undo();
+        let even = counter_bar_with(ts, ratio, false).unwrap();
+        assert!(same_bar(app.counter_bar().unwrap(), &even));
+        app.redo();
+        assert_eq!(app.counter_bar().unwrap().beats().len(), even.beats().len());
     }
 
     #[test]

@@ -128,7 +128,7 @@ pub fn compute_tuplet_plan(measure: &Measure, beams: &[BeamGroup]) -> Vec<Tuplet
 
         if let Some(fi) = first_note
             && fi > 0
-            && beats[fi - 1].kind == BeatKind::Note
+            && (beats[fi - 1].kind == BeatKind::Note || beamed(fi - 1))
             && !matches!(beats[fi - 1].duration, Duration::Tuplet(_))
         {
             for bg in beams.iter() {
@@ -147,7 +147,7 @@ pub fn compute_tuplet_plan(measure: &Measure, beams: &[BeamGroup]) -> Vec<Tuplet
 
         if let Some(li) = last_note
             && li + 1 < beats.len()
-            && beats[li + 1].kind == BeatKind::Note
+            && (beats[li + 1].kind == BeatKind::Note || beamed(li + 1))
             && !matches!(beats[li + 1].duration, Duration::Tuplet(_))
         {
             for bg in beams.iter() {

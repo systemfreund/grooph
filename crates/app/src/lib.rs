@@ -478,6 +478,7 @@ impl Grooph {
             if let Some(counter) = prev.counter {
                 self.playback_ctl.audio_cfg.counter = counter;
                 self.editor.metronome.voice = prev.voice;
+                self.respell_counter();
             }
             if let Some(click) = prev.click {
                 self.playback_ctl.audio_cfg.click = click;
@@ -498,6 +499,7 @@ impl Grooph {
             if let Some(counter) = next.counter {
                 self.playback_ctl.audio_cfg.counter = counter;
                 self.editor.metronome.voice = next.voice;
+                self.respell_counter();
             }
             if let Some(click) = next.click {
                 self.playback_ctl.audio_cfg.click = click;

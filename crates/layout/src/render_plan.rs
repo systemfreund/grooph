@@ -160,6 +160,11 @@ mod tests {
         assert!(!plan_measure(&m).tuplets[0].number_only());
         let t = &plan_measure_with(&m, true).tuplets[0];
         assert!(t.fully_beamed && !t.contains_rest && t.number_only());
+        // A stemlet beamed onto the triplet from outside keeps its bracket.
+        let m = parse_score("1/4 r:e t16 r:t16 t16").unwrap().measures.remove(0);
+        let t = &plan_measure_with(&m, true).tuplets[0];
+        assert_eq!(t.edge_connection, EdgeConnection::Left);
+        assert!(!t.number_only());
     }
 
     #[test]
