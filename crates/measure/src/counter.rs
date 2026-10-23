@@ -6,8 +6,9 @@
 //! like a click bar (see [`crate::click`]): its notes click at their level,
 //! rests are silent. The clicks take the simplest note value that is exactly
 //! as long; where there is none (three against four has no half-note
-//! triplet), a shorter value with rests up to the next click, merged up to
-//! the next beat and then by whole beats where that saves rests. [`CounterBars`]
+//! triplet), a shorter value with rests up to the next click: one rest if a
+//! plain value is that long, else merged up to the next beat and then by
+//! whole beats where that saves rests. [`CounterBars`]
 //! keeps the counter rhythm of each meter that has one.
 
 use crate::click::{ClickLevel, same_bar};
@@ -106,6 +107,13 @@ fn rests(from: u32, to: u32, d: Duration, ticks: u32, windows: &[(u32, u32)]) ->
     let plain_from = from.next_multiple_of(group).min(to);
     let plain_to = (to / group * group).max(plain_from);
     let code = code_of(&d).unwrap_or_default();
+    // One rest up to the next click when a plain value is exactly that long,
+    // even across a beat: the fewest symbols between two clicks.
+    if !d.is_tuplet()
+        && let Some(single) = PLAIN_RESTS.into_iter().find(|&c| rest_ticks(c) == Some(to - from))
+    {
+        return vec![format!("r:{single}")];
+    }
     let mut tokens: Vec<String> = Vec::new();
     let mut at = from;
     while at < to {
@@ -118,14 +126,20 @@ fn rests(from: u32, to: u32, d: Duration, ticks: u32, windows: &[(u32, u32)]) ->
     tokens
 }
 
+/// Plain rest values, longest first.
+const PLAIN_RESTS: [&str; 8] = ["h", "q.", "q", "e.", "e", "s.", "s", "th"];
+
+fn rest_ticks(code: &str) -> Option<u32> {
+    DEFAULT_GRID.ticks_of(&crate::notation::duration_of_code(code)?)
+}
+
 /// The longest plain rest at tick `at`, ending by `to`, that keeps to the
 /// beat groups: within one group at a multiple of its own length, or
 /// whole groups from the start of one.
 fn plain_rest(at: u32, to: u32, windows: &[(u32, u32)]) -> Option<(&'static str, u32)> {
-    const CODES: [&str; 8] = ["h", "q.", "q", "e.", "e", "s.", "s", "th"];
     let &(start, end) = windows.iter().find(|&&(s, e)| (s..e).contains(&at))?;
-    CODES.into_iter().find_map(|code| {
-        let len = DEFAULT_GRID.ticks_of(&crate::notation::duration_of_code(code)?)?;
+    PLAIN_RESTS.into_iter().find_map(|code| {
+        let len = rest_ticks(code)?;
         let dotted = code.ends_with('.');
         let fits = if at + len <= end {
             (at - start).is_multiple_of(len) && (!dotted || len == end - start)
@@ -338,15 +352,17 @@ mod tests {
 
     #[test]
     fn clicks_over_an_odd_number_of_beats_rest_up_to_the_next() {
-        // Rests fill up to the next beat, then take whole beats; inside a
-        // triplet they stay triplets.
-        assert_eq!(bar("5/4", 2, 5), "5/4 e r:e r:q r:e e r:q r:q");
+        // One rest up to the next click where a plain value is that long.
+        assert_eq!(bar("5/4", 2, 5), "5/4 e r:h e r:h");
+        assert_eq!(bar("7/8", 4, 7), "7/8 th r:e. th r:e. th r:e. th r:e.");
+        // Otherwise rests fill up to the next beat, then take whole beats;
+        // inside a triplet they stay triplets.
         assert_eq!(bar("5/4", 3, 5), "5/4 t8 r:t8 r:t8 r:t8 r:t8 t8 r:q r:t8 t8 r:t8 r:q");
-        assert_eq!(bar("7/4", 2, 7), "7/4 e r:e r:q r:q r:e e r:h r:q");
         // In 7/8 (2+3+2) the rests keep to the groups.
-        assert_eq!(bar("7/8", 2, 7), "7/8 s r:s r:e r:e r:s s r:e r:q");
-        // Merging only where it saves rests: 2:9 keeps its dotted eighths.
-        assert_eq!(bar("9/8", 2, 9), "9/8 e. r:e. r:e. e. r:q.");
+        assert_eq!(
+            bar("7/8", 3, 7),
+            "7/8 t16 r:t16 r:t16 r:e r:t16 t16 r:t16 r:e r:t16 r:t16 t16 r:q"
+        );
         let offered = |ts: &str| {
             counter_ratios(ts.parse().unwrap()).iter().map(|r| r.to_string()).collect::<Vec<_>>()
         };
