@@ -101,8 +101,25 @@ fn build_counter_bar(ts: TimeSignature, ratio: Ratio) -> Option<Measure> {
     };
     durations
         .into_iter()
-        .find_map(|(ticks, d)| bar_of(d, click_ticks / ticks))
+        .find_map(|(ticks, d)| bar_of(grouped_up(d, ticks, beat_ticks), click_ticks / ticks))
         .or_else(|| bar_of(spanning_tuplet(ratio, span_ticks, beat_ticks)?, 1))
+}
+
+/// Tuplet `d` (each `ticks` long) with its group grown to the largest that
+/// lies within a beat, up to nine notes: thirty-second triplets in 4/4 are
+/// written as sextuplets, two to a beat.
+fn grouped_up(d: Duration, ticks: u32, beat_ticks: u32) -> Duration {
+    let Duration::Tuplet(TupletSpec { n, m, base }) = d else {
+        return d;
+    };
+    (2..=MAX_CLICKS / n)
+        .rev()
+        .map(|k| Duration::Tuplet(TupletSpec { n: k * n, m: k * m, base }))
+        .find(|grown| {
+            let group = ticks * u32::from(grown.as_tuplet_spec().map_or(0, |s| s.n));
+            beat_ticks.is_multiple_of(group) && DEFAULT_GRID.supports(grown)
+        })
+        .unwrap_or(d)
 }
 
 /// The tuplet of `ratio` whose group fills the span, `n` notes in the time
@@ -350,6 +367,13 @@ mod tests {
         assert_eq!(bar("1/4", 6, 1), "1/4 st16 st16 st16 st16 st16 st16");
         assert!(bar("5/4", 6, 5).starts_with("5/4 st16 r:st16"));
         assert!(bar("7/8", 3, 7).starts_with("7/8 t16 r:t16"));
+        // Thirty-second triplets grow to sextuplets, two to a beat.
+        assert_eq!(bar("1/4", 12, 1), format!("1/4 {}", ["6:4th"; 12].join(" ")));
+        assert_eq!(bar("3/8", 6, 1), format!("3/8 {}", ["6:4th"; 18].join(" ")));
+        assert!(bar("5/8", 6, 5).starts_with("5/8 6:4th r:6:4th"));
+        let m = counter_bar("1/4".parse().unwrap(), Ratio { n: 12, span: 1 }).unwrap();
+        assert_eq!(m.tuplet_groups().len(), 2);
+        assert_eq!(ratio_of(&m), Some(Ratio { n: 12, span: 1 }));
     }
 
     #[test]
