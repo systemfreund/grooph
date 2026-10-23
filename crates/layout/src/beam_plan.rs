@@ -49,8 +49,8 @@ pub(super) fn compute_beam_plan(measure: &Measure) -> BeamPlan {
 }
 
 /// [`compute_beam_plan`], with `beam_rests` beaming rests like notes of their
-/// length, for stemlets: the beams of a group then run over its rests, and
-/// a group of rests alone gets none.
+/// length, for stemlets: the beams of a group then run over its rests, also
+/// in a group of rests alone.
 pub(super) fn compute_beam_plan_with(measure: &Measure, beam_rests: bool) -> BeamPlan {
     let beats = measure.beats();
     let ts = measure.time_signature();
@@ -110,7 +110,7 @@ pub(super) fn compute_beam_plan_with(measure: &Measure, beam_rests: bool) -> Bea
 }
 
 fn finalize_group(groups: &mut Vec<BeamGroup>, beats: &[Beat], cur: &[BeatIdx]) {
-    if cur.len() <= 1 || cur.iter().all(|&i| beats[i].kind == BeatKind::Rest) {
+    if cur.len() <= 1 {
         // No beamable notes in this group
         return;
     }
@@ -290,12 +290,12 @@ mod tests {
         use grooph_measure::notation::parse_score;
         let m = parse_score("2/4 s r:s r:s r:s r:s r:s r:s r:s").unwrap().measures.remove(0);
         assert!(compute_beam_plan(&m).groups.is_empty());
-        // The first beat's rests run on under its beams; the second beat has
-        // no note to beam.
+        // Each beat's rests run on under its beams, also without a note.
         let plan = compute_beam_plan_with(&m, true);
-        assert_eq!(plan.groups.len(), 1);
+        assert_eq!(plan.groups.len(), 2);
         assert_eq!(plan.groups[0].beat_indices, vec![0, 1, 2, 3]);
-        assert_eq!(plan.groups[0].continuity, vec![2, 2, 2]);
+        assert_eq!(plan.groups[1].beat_indices, vec![4, 5, 6, 7]);
+        assert_eq!(plan.groups[1].continuity, vec![2, 2, 2]);
     }
 
     #[test]
