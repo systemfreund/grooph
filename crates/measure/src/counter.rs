@@ -10,7 +10,7 @@
 //! keeps the counter rhythm of each meter that has one.
 
 use crate::click::{ClickLevel, same_bar};
-use crate::duration::{Duration, TupletSpec};
+use crate::duration::{Duration, TupletSpec, qt8_3, spt16_6};
 use crate::grid::DEFAULT_GRID;
 use crate::math::gcd;
 use crate::notation::{code_of, parse_score};
@@ -43,6 +43,28 @@ impl std::fmt::Display for Ratio {
 /// already clicks the downbeat loud). `None` if the
 /// span does not divide the bar or the clicks fall off the tick grid.
 pub fn counter_bar(ts: TimeSignature, ratio: Ratio) -> Option<Measure> {
+    spell(ts, ratio, false)
+}
+
+/// The counter bar of `ratio` spelled like `bar`: the current spelling, or
+/// the one counter bars had before five eighths in the time of three
+/// (`qt8_3`) and seven sixteenths in the time of six (`spt16_6`), which
+/// bars saved or shared back then still use. `None` if neither has `bar`'s
+/// note values, with notes wherever `bar` has one.
+pub fn counter_bar_like(bar: &Measure, ratio: Ratio) -> Option<Measure> {
+    let ts = bar.time_signature();
+    let fits = |m: &Measure| {
+        m.beats().len() == bar.beats().len()
+            && m.beats().iter().zip(bar.beats()).all(|(c, b)| {
+                c.duration == b.duration && (c.kind == BeatKind::Note || b.kind == BeatKind::Rest)
+            })
+    };
+    [false, true].into_iter().filter_map(|legacy| spell(ts, ratio, legacy)).find(fits)
+}
+
+/// The counter bar of `ratio` in `ts`; `legacy` leaves out the note values
+/// added for compound meters.
+fn spell(ts: TimeSignature, ratio: Ratio, legacy: bool) -> Option<Measure> {
     let Ratio { n, span } = ratio;
     if n < 2 || span == 0 || !ts.beats.is_multiple_of(span) {
         return None;
@@ -58,7 +80,9 @@ pub fn counter_bar(ts: TimeSignature, ratio: Ratio) -> Option<Measure> {
         .iter()
         .filter_map(|d| Some((DEFAULT_GRID.ticks_of(d)?, *d)))
         .filter(|&(t, _)| click_ticks.is_multiple_of(t) && click_ticks / t <= MAX_SLOTS_PER_CLICK)
-        .filter(|&(t, d)| fits_the_beats(d, t, beat_ticks))
+        .filter(|&(t, d)| {
+            if legacy { !COMPOUND_DURATIONS.contains(&d) } else { fits_the_beats(d, t, beat_ticks) }
+        })
         .collect();
     durations.sort_by_key(|&(t, _)| std::cmp::Reverse(t));
     let repeats = ts.beats / span;
@@ -73,6 +97,10 @@ pub fn counter_bar(ts: TimeSignature, ratio: Ratio) -> Option<Measure> {
         parse_score(&format!("{ts} {}", tokens.join(" "))).ok()?.measures.into_iter().next()
     })
 }
+
+/// Note values added so compound meters click five or seven times over a
+/// dotted quarter.
+const COMPOUND_DURATIONS: [Duration; 2] = [qt8_3(), spt16_6()];
 
 /// Whether a group of tuplet `d` (each `ticks` long) lies on the beats:
 /// whole beats, or a part of one. A quintuplet over a dotted quarter fits
@@ -171,17 +199,11 @@ pub fn ratio_of(bar: &Measure) -> Option<Ratio> {
             note_onsets.iter().all(|t| t.is_multiple_of(click_ticks))
         }
     };
-    let fits = |m: &Measure| {
-        m.beats().len() == bar.beats().len()
-            && m.beats().iter().zip(bar.beats()).all(|(c, b)| {
-                c.duration == b.duration && (c.kind == BeatKind::Note || b.kind == BeatKind::Rest)
-            })
-    };
     (1..=ts.beats)
         .filter(|&span| ts.beats.is_multiple_of(span))
         .flat_map(|span| (2..=MAX_OWN_CLICKS).map(move |n| Ratio { n, span }))
         .filter(|r| gcd(u32::from(r.n), u32::from(r.span)) == 1 && clicks_on_notes(r))
-        .filter(|&r| counter_bar(ts, r).is_some_and(|m| fits(&m)))
+        .filter(|&r| counter_bar_like(bar, r).is_some())
         .min_by_key(|r| u32::from(r.n) * u32::from(ts.beats / r.span))
 }
 
@@ -190,9 +212,8 @@ pub fn ratio_of(bar: &Measure) -> Option<Ratio> {
 /// click stays its own click, so only the rests the counter bar was
 /// written with are folded in.
 pub fn counter_clicks(bar: &Measure) -> Vec<std::ops::Range<usize>> {
-    let ts = bar.time_signature();
     let slots = ratio_of(bar)
-        .and_then(|r| counter_bar(ts, r))
+        .and_then(|r| counter_bar_like(bar, r))
         .map(|m| m.beats().iter().map(|b| b.kind == BeatKind::Note).collect::<Vec<_>>());
     let starts: Vec<usize> = match slots {
         Some(is_click) => (0..bar.beats().len()).filter(|&i| is_click[i]).collect(),
@@ -303,6 +324,32 @@ mod tests {
         assert!(offered("9/8").contains(&"5:3".to_string()));
         let own = own_ratios("6/8".parse().unwrap());
         assert!(own.contains(&Ratio { n: 7, span: 3 }));
+    }
+
+    #[test]
+    fn bars_saved_with_the_old_spelling_keep_their_ratio() {
+        let old = |ts: &str, code: &str, n: usize, slots: usize| {
+            let click = [code.to_string()]
+                .into_iter()
+                .chain((1..slots).map(|_| format!("r:{code}")))
+                .collect::<Vec<_>>()
+                .join(" ");
+            let bar = format!("{ts} {}", vec![click; n].join(" "));
+            let mut score = parse_score(&bar).unwrap();
+            assert_eq!(score.measures.len(), 1);
+            score.measures.remove(0)
+        };
+        let bar = old("6/8", "qt16", 5, 3);
+        assert_eq!(ratio_of(&bar), Some(Ratio { n: 5, span: 6 }));
+        assert_eq!(counter_clicks(&bar).len(), 5);
+        assert!(same_bar(&counter_bar_like(&bar, Ratio { n: 5, span: 6 }).unwrap(), &bar));
+        let mut tapped = bar.clone();
+        tapped.set_click_level(3, ClickLevel::Off);
+        assert_eq!(ratio_of(&tapped), Some(Ratio { n: 5, span: 6 }));
+        assert_eq!(counter_clicks(&tapped).len(), 5);
+        let bar = old("6/8", "spt16", 7, 3);
+        assert_eq!(bar.beats().len(), 21);
+        assert_eq!(ratio_of(&bar), Some(Ratio { n: 7, span: 6 }));
     }
 
     #[test]

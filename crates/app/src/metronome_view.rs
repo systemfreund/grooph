@@ -28,7 +28,8 @@ use eframe::egui::{Align2, Color32, FontId, Pos2, Sense, Shape, Stroke, Ui, vec2
 use grooph_layout::staff_layout::Voice;
 use grooph_measure::click::{ClickLevel, default_click_bar, subdivided_click_bar};
 use grooph_measure::counter::{
-    CounterBars, Ratio, click_level, counter_bar, counter_clicks, counter_ratios, ratio_of,
+    CounterBars, Ratio, click_level, counter_bar, counter_bar_like, counter_clicks, counter_ratios,
+    ratio_of,
 };
 use grooph_measure::duration::Duration;
 use grooph_measure::grid::DEFAULT_GRID;
@@ -171,7 +172,7 @@ fn fill_name(d: Duration) -> String {
 /// click medium) does not have.
 pub(crate) fn counter_ratio(bar: &Measure) -> Option<(Ratio, bool)> {
     let ratio = ratio_of(bar)?;
-    let edited = !counter_bar(bar.time_signature(), ratio).is_some_and(|m| same_bar(&m, bar));
+    let edited = !counter_bar_like(bar, ratio).is_some_and(|m| same_bar(&m, bar));
     Some((ratio, edited))
 }
 
