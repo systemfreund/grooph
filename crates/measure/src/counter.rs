@@ -108,8 +108,10 @@ fn rests(from: u32, to: u32, d: Duration, ticks: u32, windows: &[(u32, u32)]) ->
     let plain_to = (to / group * group).max(plain_from);
     let code = code_of(&d).unwrap_or_default();
     // One rest up to the next click when a plain value is exactly that long,
-    // even across a beat: the fewest symbols between two clicks.
-    if !d.is_tuplet()
+    // even across a beat: the fewest symbols between two clicks. After a
+    // tuplet only between whole groups of it.
+    if from.is_multiple_of(group)
+        && to.is_multiple_of(group)
         && let Some(single) = PLAIN_RESTS.into_iter().find(|&c| rest_ticks(c) == Some(to - from))
     {
         return vec![format!("r:{single}")];
@@ -134,21 +136,17 @@ fn rest_ticks(code: &str) -> Option<u32> {
 }
 
 /// The longest plain rest at tick `at`, ending by `to`, that keeps to the
-/// beat groups: within one group at a multiple of its own length, or
-/// whole groups from the start of one.
+/// beat groups: within one group, or whole undotted groups from the start
+/// of one at a multiple of its own length.
 fn plain_rest(at: u32, to: u32, windows: &[(u32, u32)]) -> Option<(&'static str, u32)> {
     let &(start, end) = windows.iter().find(|&&(s, e)| (s..e).contains(&at))?;
     PLAIN_RESTS.into_iter().find_map(|code| {
         let len = rest_ticks(code)?;
-        let dotted = code.ends_with('.');
-        let fits = if at + len <= end {
-            (at - start).is_multiple_of(len) && (!dotted || len == end - start)
-        } else {
-            at == start
+        let fits = at + len <= end
+            || (at == start
                 && at.is_multiple_of(len)
                 && windows.iter().any(|&(_, e)| e == at + len)
-                && !dotted
-        };
+                && !code.ends_with('.'));
         (fits && at + len <= to).then_some((code, len))
     })
 }
@@ -358,6 +356,12 @@ mod tests {
         // Otherwise rests fill up to the next beat, then take whole beats;
         // inside a triplet they stay triplets.
         assert_eq!(bar("5/4", 3, 5), "5/4 t8 r:t8 r:t8 r:t8 r:t8 t8 r:q r:t8 t8 r:t8 r:q");
+        // After a tuplet too, between whole groups of it.
+        assert_eq!(
+            bar("7/8", 6, 7),
+            "7/8 t32 r:t32 r:t32 r:s r:t32 t32 r:t32 r:s r:t32 r:t32 t32 r:e \
+             t32 r:t32 r:t32 r:s r:t32 t32 r:t32 r:s r:t32 r:t32 t32 r:e"
+        );
         // In 7/8 (2+3+2) the rests keep to the groups.
         assert_eq!(
             bar("7/8", 3, 7),
