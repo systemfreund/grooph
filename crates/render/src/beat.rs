@@ -13,6 +13,10 @@ pub(super) fn draw_beat(
     if let Some(stem) = &note.stem {
         painter.line_segment([stem.p1, stem.p2], Stroke::new(opts.stem_thickness(), color));
     }
+    if let Some(ledger) = &note.ledger {
+        let stroke = Stroke::new(opts.staff_line_thickness(), color);
+        painter.line_segment([ledger.p1, ledger.p2], stroke);
+    }
     for glyph in note.glyphs() {
         draw_glyph(painter, glyph, &opts.font_id.family, color);
     }

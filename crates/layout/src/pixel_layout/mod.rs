@@ -131,6 +131,10 @@ pub struct LayoutOpts {
     /// Stems point down, with beams, flags, tuplets and accents below the
     /// notes: the lower voice of a staff with two.
     pub stem_down: bool,
+    /// The staff line is shared with another voice: this one keeps to its
+    /// side of it, heads just above the line (just below with
+    /// `stem_down`), rests clear of it and accents by the stems.
+    pub shared_line: bool,
     pub proportional_spacing: bool,
 }
 
@@ -200,9 +204,15 @@ impl LayoutOpts {
     }
 
     /// Whether accents go below the notes. `accent_below` puts them on the
-    /// heads' side, away from the stems.
+    /// heads' side, away from the stems, unless the other side of a shared
+    /// line belongs to another voice.
     pub(super) const fn accents_below(&self) -> bool {
-        self.accent_below != self.stem_down
+        if self.shared_line { self.stem_down } else { self.accent_below != self.stem_down }
+    }
+
+    /// Thickness of the staff line, and of ledger lines.
+    pub const fn staff_line_thickness(&self) -> f32 {
+        self.em * 0.02
     }
 
     const fn snap_thickness(&self, t: f32) -> f32 {
@@ -266,6 +276,9 @@ pub struct NoteLayout {
     pub stemlet: bool,
     /// The parentheses of a soft (ghost) note's head.
     pub parens: Vec<PlacedGlyph>,
+    /// A rest's ledger line, on a line shared by two voices (see
+    /// [`LayoutOpts::shared_line`]).
+    pub ledger: Option<Line>,
     pub dots: Vec<PlacedGlyph>,
     pub stem: Option<Line>,
     pub flag: Option<PlacedGlyph>,
@@ -309,7 +322,7 @@ impl MeasureLayout {
         let lines = self
             .notes
             .iter()
-            .filter_map(|n| n.stem)
+            .flat_map(|n| n.stem.into_iter().chain(n.ledger))
             .chain(self.tuplets.iter().flat_map(|t| t.bracket.iter().copied()))
             .map(|l| Rect::from_two_pos(l.p1, l.p2));
         let beams = self.beams.iter().map(|b| b.rect);
@@ -459,6 +472,7 @@ mod tests {
             accent_displacement: 0.0,
             accent_below: false,
             stem_down: false,
+            shared_line: false,
             proportional_spacing: true,
         };
         let layout = build_measure_layout(&Measure::new(TimeSignature::THREE_FOUR), &opts);
@@ -494,6 +508,7 @@ mod tests {
             accent_displacement: displacement,
             accent_below: false,
             stem_down: false,
+            shared_line: false,
             proportional_spacing: true,
         };
 
@@ -547,6 +562,7 @@ mod tests {
             accent_displacement: 0.1,
             accent_below: false,
             stem_down: true,
+            shared_line: false,
             proportional_spacing: true,
         };
         let layout = build_measure_layout(&m, &opts);
@@ -594,6 +610,7 @@ mod tests {
             accent_displacement: 0.0,
             accent_below: false,
             stem_down: false,
+            shared_line: false,
             proportional_spacing: true,
         };
 
@@ -648,6 +665,7 @@ mod tests {
             accent_displacement: 0.0,
             accent_below: false,
             stem_down: false,
+            shared_line: false,
             proportional_spacing: true,
         };
 
@@ -686,6 +704,7 @@ mod tests {
             accent_displacement: 0.1,
             accent_below: false,
             stem_down: false,
+            shared_line: false,
             proportional_spacing: true,
         };
         let down = LayoutOpts { stem_down: true, ..up.clone() };
@@ -740,6 +759,7 @@ mod tests {
             accent_displacement: 0.07,
             accent_below: false,
             stem_down: false,
+            shared_line: false,
             proportional_spacing: true,
         };
         let down = LayoutOpts { stem_down: true, ..up.clone() };
@@ -773,6 +793,7 @@ mod tests {
             accent_displacement: 0.07,
             accent_below: false,
             stem_down: false,
+            shared_line: false,
             proportional_spacing: true,
         };
         let ss = up.staff_space();
@@ -836,6 +857,7 @@ mod tests {
             accent_displacement: 0.1,
             accent_below: false,
             stem_down: true,
+            shared_line: false,
             proportional_spacing: true,
         };
         let cy = down.y_center();
@@ -857,6 +879,78 @@ mod tests {
     }
 
     #[test]
+    fn a_shared_lines_voices_keep_their_rests_and_accents_on_their_side() {
+        use grooph_measure::notation::parse_score;
+        let em = 20.0;
+        let up = LayoutOpts {
+            rect: Rect::from_min_max(Pos2::ZERO, Pos2::new(400.0, 200.0)),
+            font_id: FontId::new(em, FontFamily::Proportional),
+            pixels_per_point: 1.0,
+            em,
+            layout_clef: false,
+            layout_time_signature: false,
+            y_offset: 0.0,
+            stem_length_factor: 0.9,
+            stem_thickness_factor: 0.1,
+            accent_displacement: 0.07,
+            accent_below: true,
+            stem_down: false,
+            shared_line: true,
+            proportional_spacing: true,
+        };
+        let down = LayoutOpts { stem_down: true, ..up.clone() };
+        let cy = up.y_center();
+        let rests = parse_score("4/4 >q r:q r:e r:s r:th r:th r:e. s").unwrap().measures.remove(0);
+        let (a, b) = (build_measure_layout(&rests, &up), build_measure_layout(&rests, &down));
+        // Heads sit on the line or hang from it.
+        assert_eq!((a.notes[0].staff_pos, b.notes[0].staff_pos), (1, -1));
+        assert!((a.notes[0].head.ink().bottom() - cy).abs() < 0.01);
+        assert!((b.notes[0].head.ink().top() - cy).abs() < 0.01);
+        // Rests clear the line by at least a quarter staff space.
+        let clear = 0.25 * up.staff_space() - 0.01;
+        for (u, d) in a.notes.iter().zip(&b.notes).filter(|(u, _)| u.kind == BeatKind::Rest) {
+            assert!(u.head.ink().bottom() <= cy - clear, "{u:?}");
+            assert!(d.head.ink().top() >= cy + clear, "{d:?}");
+            assert!(u.ledger.is_none() && d.ledger.is_none());
+        }
+        // Accents go by the stems, whatever `accent_below` says.
+        assert!(a.notes[0].accent.unwrap().ink().bottom() < a.notes[0].stem.unwrap().p2.y);
+        assert!(b.notes[0].accent.unwrap().ink().top() > b.notes[0].stem.unwrap().p2.y);
+
+        // A half rest sits on the line, or on a ledger line below it in the
+        // lower voice.
+        let half = parse_score("4/4 r:h q q").unwrap().measures.remove(0);
+        let (upper_half, lower_half) = (
+            &build_measure_layout(&half, &up).notes[0],
+            &build_measure_layout(&half, &down).notes[0],
+        );
+        assert!(upper_half.ledger.is_none());
+        assert!((upper_half.head.ink().bottom() - cy).abs() < 0.1);
+        let ledger = lower_half.ledger.expect("a ledger line below");
+        assert_eq!(ledger.p1.y, down.y_of(-2));
+        let ink = lower_half.head.ink();
+        assert!(ink.top() > cy && (ink.bottom() - ledger.p1.y).abs() < 0.1);
+        assert!(ledger.p1.x < ink.left() && ledger.p2.x > ink.right());
+
+        // Dots and a soft note's parentheses stay off the line too.
+        let dotted = parse_score("3/4 (q.) (q.)").unwrap().measures.remove(0);
+        let (a, b) = (build_measure_layout(&dotted, &up), build_measure_layout(&dotted, &down));
+        for (u, d) in a.notes.iter().zip(&b.notes) {
+            let ink =
+                |n: &NoteLayout| ink_of(&[n.dots.clone(), n.parens.clone()].concat()).unwrap();
+            assert!(ink(u).bottom() <= cy + 0.01, "{u:?}");
+            assert!(ink(d).top() >= cy - 0.01, "{d:?}");
+            // The parentheses still reach past the head on its far side.
+            assert!(ink_of(&u.parens).unwrap().top() < u.head.ink().top());
+            assert!(ink_of(&d.parens).unwrap().bottom() > d.head.ink().bottom());
+        }
+
+        // Without a shared line nothing moves.
+        let alone = LayoutOpts { shared_line: false, ..up.clone() };
+        assert!(build_measure_layout(&rests, &alone).notes.iter().all(|n| n.staff_pos == 0));
+    }
+
+    #[test]
     fn dots_sit_right_of_parentheses_and_clear_of_down_flags() {
         use grooph_measure::notation::parse_score;
         let m = parse_score("3/4 e. (e.) (e.) e.").unwrap().measures.remove(0);
@@ -874,6 +968,7 @@ mod tests {
             accent_displacement: 0.0,
             accent_below: false,
             stem_down: false,
+            shared_line: false,
             proportional_spacing: true,
         };
         let down = LayoutOpts { stem_down: true, ..up.clone() };
@@ -911,6 +1006,7 @@ mod tests {
             accent_displacement: 0.0,
             accent_below: false,
             stem_down: false,
+            shared_line: false,
             proportional_spacing: true,
         };
         let plan = crate::render_plan::plan_measure(&m);
@@ -943,6 +1039,7 @@ mod tests {
             accent_displacement: 0.0,
             accent_below: false,
             stem_down: true,
+            shared_line: false,
             proportional_spacing: true,
         };
         let plan = crate::render_plan::plan_measure_with(&m, true);
