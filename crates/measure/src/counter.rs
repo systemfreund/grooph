@@ -81,14 +81,10 @@ fn build_counter_bar(ts: TimeSignature, ratio: Ratio) -> Option<Measure> {
         .filter(|&(t, d)| fits_the_beats(d, t, beat_ticks))
         .collect();
     // Longest first, but the nonuplets and decuplets only where nothing else
-    // fits: 3:5 stays triplets. Of equally long tuplets, the one whose group
-    // fills a beat: sextuplets in 5/4, triplets in 7/8.
+    // fits: 3:5 stays triplets. Of equally long tuplets the first listed, its
+    // group grown to fill the beat (see `grouped_up`).
     let last_resort = |d: Duration| [nt8_10(), nt16_10(), nt32(), dt32()].contains(&d);
-    let off_the_beat = |t: u32, d: Duration| match d {
-        Duration::Tuplet(TupletSpec { n, .. }) => t * u32::from(n) != beat_ticks,
-        _ => false,
-    };
-    durations.sort_by_key(|&(t, d)| (last_resort(d), std::cmp::Reverse(t), off_the_beat(t, d)));
+    durations.sort_by_key(|&(t, d)| (last_resort(d), std::cmp::Reverse(t)));
     let repeats = ts.beats / span;
     let bar_of = |d: Duration, slots: u32| {
         let code = code_of(&d)?;
