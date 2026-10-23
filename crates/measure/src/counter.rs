@@ -10,7 +10,7 @@
 //! keeps the counter rhythm of each meter that has one.
 
 use crate::click::{ClickLevel, same_bar};
-use crate::duration::{Duration, TupletSpec};
+use crate::duration::{Duration, TupletSpec, dt32, nt8_10, nt16_10, nt32};
 use crate::grid::DEFAULT_GRID;
 use crate::math::gcd;
 use crate::notation::{code_of, parse_score};
@@ -60,15 +60,15 @@ pub fn counter_bar(ts: TimeSignature, ratio: Ratio) -> Option<Measure> {
         .filter(|&(t, _)| click_ticks.is_multiple_of(t) && click_ticks / t <= MAX_SLOTS_PER_CLICK)
         .filter(|&(t, d)| fits_the_beats(d, t, beat_ticks))
         .collect();
-    // Longest first, but nonuplets in the time of ten only where nothing
-    // else fits: 3:5 stays triplets. Of equally long tuplets, the one whose
-    // group fills a beat: sextuplets in 5/4, triplets in 7/8.
-    let over_ten = |d: Duration| matches!(d, Duration::Tuplet(TupletSpec { m: 10, .. }));
+    // Longest first, but the nonuplets and decuplets only where nothing else
+    // fits: 3:5 stays triplets. Of equally long tuplets, the one whose group
+    // fills a beat: sextuplets in 5/4, triplets in 7/8.
+    let last_resort = |d: Duration| [nt8_10(), nt16_10(), nt32(), dt32()].contains(&d);
     let off_the_beat = |t: u32, d: Duration| match d {
         Duration::Tuplet(TupletSpec { n, .. }) => t * u32::from(n) != beat_ticks,
         _ => false,
     };
-    durations.sort_by_key(|&(t, d)| (over_ten(d), std::cmp::Reverse(t), off_the_beat(t, d)));
+    durations.sort_by_key(|&(t, d)| (last_resort(d), std::cmp::Reverse(t), off_the_beat(t, d)));
     let repeats = ts.beats / span;
     durations.into_iter().find_map(|(ticks, d)| {
         let code = code_of(&d)?;
@@ -291,7 +291,7 @@ mod tests {
             counter_ratios(ts.parse().unwrap()).iter().map(|r| r.to_string()).collect::<Vec<_>>()
         };
         assert_eq!(offered("5/4"), ["3:5", "4:5", "6:5", "7:5", "8:5", "9:5"]);
-        assert_eq!(offered("7/4"), ["4:7", "5:7", "6:7", "8:7"]);
+        assert_eq!(offered("7/4"), ["4:7", "5:7", "6:7", "8:7", "9:7"]);
     }
 
     #[test]
@@ -300,6 +300,14 @@ mod tests {
         assert_eq!(bar("1/4", 6, 1), "1/4 st16 st16 st16 st16 st16 st16");
         assert!(bar("5/4", 6, 5).starts_with("5/4 st16 r:st16"));
         assert!(bar("7/8", 3, 7).starts_with("7/8 t16 r:t16"));
+    }
+
+    #[test]
+    fn nine_or_ten_clicks_a_beat_are_thirty_seconds() {
+        let own = own_ratios("1/4".parse().unwrap());
+        assert!(own.contains(&Ratio { n: 9, span: 1 }) && own.contains(&Ratio { n: 10, span: 1 }));
+        assert_eq!(bar("1/4", 9, 1), format!("1/4 {}", ["nt32"; 9].join(" ")));
+        assert_eq!(bar("1/4", 10, 1), format!("1/4 {}", ["dt32"; 10].join(" ")));
     }
 
     #[test]
@@ -393,8 +401,8 @@ mod tests {
         assert_eq!(
             own,
             [
-                "2:1", "3:1", "4:1", "5:1", "6:1", "7:1", "8:1", "12:1", "3:2", "5:2", "7:2",
-                "9:2", "3:4", "5:4", "7:4", "9:4"
+                "2:1", "3:1", "4:1", "5:1", "6:1", "7:1", "8:1", "9:1", "10:1", "12:1", "3:2",
+                "5:2", "7:2", "9:2", "3:4", "5:4", "7:4", "9:4"
             ]
         );
     }

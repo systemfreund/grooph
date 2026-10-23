@@ -15,8 +15,9 @@
 //!   `qt8` `qt16` (quintuplets), `st8` `st16` (sextuplets), `spt4` `spt8`
 //!   `spt16` (septuplets) and `nt16` (nonuplet), and over a dotted quarter
 //!   `qt8_3` (five eighths in the time of three) and `spt16_6` (seven
-//!   sixteenths in the time of six), and nonuplets in the time of ten
-//!   `nt8_10` and `nt16_10`. Every note of a tuplet group is written out.
+//!   sixteenths in the time of six), nonuplets in the time of ten `nt8_10`
+//!   and `nt16_10`, and thirty-seconds nine or ten in the time of eight
+//!   `nt32` and `dt32`. Every note of a tuplet group is written out.
 //! - `r:` makes a rest (`r:q`), `>` accents a note (`>e`), parentheses make
 //!   it a soft (ghost) note (`(e)`).
 //!
@@ -103,10 +104,10 @@ impl Display for NotationError {
 impl std::error::Error for NotationError {}
 
 /// Durations with a notation code, in the order of [`crate::duration::COMMON_DURATIONS`].
-const CODES: [(&str, Duration); 26] = {
+const CODES: [(&str, Duration); 28] = {
     use crate::duration::{
-        e, h, nt8_10, nt16, nt16_10, q, qt4, qt8, qt8_3, qt16, s, spt4, spt8, spt16, spt16_6, st8,
-        st16, t2, t8, t16, t32, th,
+        dt32, e, h, nt8_10, nt16, nt16_10, nt32, q, qt4, qt8, qt8_3, qt16, s, spt4, spt8, spt16,
+        spt16_6, st8, st16, t2, t8, t16, t32, th,
     };
     const fn dotted(base: NoteValue) -> Duration {
         Duration::Dotted { base, dots: 1 }
@@ -138,6 +139,8 @@ const CODES: [(&str, Duration); 26] = {
         ("spt16_6", spt16_6()),
         ("nt8_10", nt8_10()),
         ("nt16_10", nt16_10()),
+        ("nt32", nt32()),
+        ("dt32", dt32()),
     ]
 };
 
