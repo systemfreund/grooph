@@ -12,8 +12,9 @@
 //! from it, one per meter, so every measure in that meter clicks the same.
 
 use crate::BeatKind::{Note, Rest};
-use crate::grid::DEFAULT_GRID;
-use crate::notation::parse_score;
+use crate::duration::{Duration, TupletSpec};
+use crate::grid::{DEFAULT_GRID, NOTE_VALUES};
+use crate::notation::{code_of, parse_score};
 use crate::{Beat, BeatIdx, Measure, TimeSignature};
 use serde::{Deserialize, Serialize};
 
@@ -64,26 +65,32 @@ impl Measure {
     }
 }
 
-/// Notation code of the plain or dotted note `ticks` long, if there is one.
-fn code_for_ticks(ticks: u32) -> Option<&'static str> {
-    const CODES: [&str; 7] = ["q.", "q", "e.", "e", "s.", "s", "th"];
-    CODES.into_iter().find(|code| {
-        crate::notation::duration_of_code(code).and_then(|d| DEFAULT_GRID.ticks_of(&d))
-            == Some(ticks)
-    })
+/// The plain or dotted note `ticks` long, if there is one.
+fn note_of_ticks(ticks: u32) -> Option<Duration> {
+    NOTE_VALUES
+        .into_iter()
+        .flat_map(|base| [Duration::Simple(base), Duration::Dotted { base, dots: 1 }])
+        .find(|d| DEFAULT_GRID.ticks_of(d) == Some(ticks))
 }
 
-/// Code of one beat unit of `ts` split into `parts` equal notes.
-fn part_code(ts: &TimeSignature, parts: u32) -> Option<&'static str> {
-    Some(match (ts.beat_unit, parts) {
-        (4, 1) => "q",
-        (4, 2) | (8, 1) => "e",
-        (4, 3) => "t8",
-        (4, 4) | (8, 2) | (16, 1) => "s",
-        (8, 3) => "t16",
-        (8, 4) | (16, 2) => "th",
-        (16, 3) => "t32",
-        _ => return None,
+/// One beat unit of `ts` split into `parts` equal notes: the plain or
+/// dotted note of that length, else the tuplet whose group fills the beat,
+/// `parts` notes in the time of the largest power of two below it (three
+/// eighths in the time of two, five or seven sixteenths in the time of
+/// four, nine thirty-seconds in the time of eight).
+fn part_duration(ts: &TimeSignature, parts: u32) -> Option<Duration> {
+    let beat = DEFAULT_GRID.ticks_per_beat(ts);
+    if parts == 0 || !beat.is_multiple_of(parts) {
+        return None;
+    }
+    note_of_ticks(beat / parts).or_else(|| {
+        let n = u8::try_from(parts).ok()?;
+        let m = 1u8 << n.ilog2();
+        let Some(Duration::Simple(base)) = note_of_ticks(beat / u32::from(m)) else {
+            return None;
+        };
+        let d = Duration::Tuplet(TupletSpec { n, m, base });
+        (m < n && DEFAULT_GRID.supports(&d)).then_some(d)
     })
 }
 
@@ -97,11 +104,11 @@ fn parse_bar(ts: &TimeSignature, tokens: &[String]) -> Option<Measure> {
 /// eighths) gets a note on its first beat unit and rests after it.
 pub fn default_click_bar(ts: TimeSignature) -> Measure {
     let unit = DEFAULT_GRID.ticks_per_beat(&ts);
-    let unit_code = part_code(&ts, 1);
+    let unit_code = part_duration(&ts, 1).and_then(|d| code_of(&d));
     let mut tokens = Vec::new();
     for (i, &beats) in ts.groups().iter().enumerate() {
         let accent = if i == 0 { ">" } else { "" };
-        match (code_for_ticks(beats as u32 * unit), unit_code) {
+        match (note_of_ticks(beats as u32 * unit).and_then(|d| code_of(&d)), &unit_code) {
             (Some(code), _) => tokens.push(format!("{accent}{code}")),
             (None, Some(code)) => {
                 tokens.push(format!("{accent}{code}"));
@@ -113,12 +120,12 @@ pub fn default_click_bar(ts: TimeSignature) -> Measure {
     parse_bar(&ts, &tokens).unwrap_or_else(|| Measure::new(ts))
 }
 
-/// Click bar of `ts` with every beat unit split into `parts` notes (2, 3 or
-/// 4; 1 is one note per beat unit). Group starts keep the level of the
+/// Click bar of `ts` with every beat unit split into `parts` notes (1 is
+/// one note per beat unit; see [`part_duration`]). Group starts keep the level of the
 /// default bar (first strong, others medium), all other clicks are soft.
 /// `None` if the meter cannot be split that way.
 pub fn subdivided_click_bar(ts: TimeSignature, parts: u32) -> Option<Measure> {
-    let code = part_code(&ts, parts)?;
+    let code = code_of(&part_duration(&ts, parts)?)?;
     let mut group_starts = vec![0usize];
     for &g in ts.groups().iter() {
         group_starts.push(group_starts.last().unwrap() + g as usize);
@@ -233,6 +240,25 @@ mod tests {
         let seven = subdivided_click_bar(TimeSignature::SEVEN_EIGHT, 2).unwrap();
         assert_eq!(text(&seven), "7/8 >s (s) (s) (s) s (s) (s) (s) (s) (s) s (s) (s) (s)");
         assert!(subdivided_click_bar(TimeSignature::new(7, 16), 4).is_none());
+    }
+
+    #[test]
+    fn subdivisions_beyond_four_take_tuplets_that_fill_the_beat() {
+        let first = |ts, parts| text(&subdivided_click_bar(ts, parts).unwrap())[4..].to_owned();
+        let three = TimeSignature::new(3, 4);
+        assert!(first(three, 5).starts_with(">qt16 (qt16) (qt16) (qt16) (qt16) qt16 "));
+        assert!(first(three, 6).starts_with(">st16 (st16) (st16) (st16) (st16) (st16) st16 "));
+        assert!(first(three, 7).starts_with(">spt16 "));
+        assert!(first(three, 8).starts_with(">th (th) "));
+        assert!(first(three, 9).starts_with(">nt32 "));
+        assert_eq!(subdivided_click_bar(three, 7).unwrap().beats().len(), 21);
+        // Over an eighth, five or seven thirty-seconds in the time of four.
+        let six = TimeSignature::SIX_EIGHT;
+        assert!(first(six, 5).starts_with(">5:4th (5:4th) "));
+        assert_eq!(subdivided_click_bar(six, 7).unwrap().beats().len(), 42);
+        // Sixty-fourths and finer are not written.
+        assert!(subdivided_click_bar(six, 8).is_none());
+        assert!(subdivided_click_bar(TimeSignature::new(5, 16), 5).is_none());
     }
 
     #[test]
