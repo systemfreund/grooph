@@ -13,7 +13,7 @@
 
 use crate::click::{ClickLevel, same_bar};
 use crate::duration::NoteValue::{Eighth, Half, Quarter, Sixteenth, ThirtySecond};
-use crate::duration::{Duration, TupletSpec, dt32, nt8_10, nt16_10, nt32};
+use crate::duration::{Duration, TupletSpec};
 use crate::grid::{DEFAULT_GRID, is_general_tuplet};
 use crate::math::gcd;
 use crate::notation::{code_of, parse_score};
@@ -80,11 +80,9 @@ fn build_counter_bar(ts: TimeSignature, ratio: Ratio) -> Option<Measure> {
         .filter(|&(t, _)| click_ticks.is_multiple_of(t) && click_ticks / t <= MAX_SLOTS_PER_CLICK)
         .filter(|&(t, d)| fits_the_beats(d, t, beat_ticks))
         .collect();
-    // Longest first, but the nonuplets and decuplets only where nothing else
-    // fits: 3:5 stays triplets. Of equally long tuplets the first listed, its
-    // group grown to fill the beat (see `grouped_up`).
-    let last_resort = |d: Duration| [nt8_10(), nt16_10(), nt32(), dt32()].contains(&d);
-    durations.sort_by_key(|&(t, d)| (last_resort(d), std::cmp::Reverse(t)));
+    // Longest first; of equally long tuplets the first listed, its group
+    // grown to fill the beat (see `grouped_up`).
+    durations.sort_by_key(|&(t, _)| std::cmp::Reverse(t));
     let repeats = ts.beats / span;
     let bar_of = |d: Duration, slots: u32| {
         let code = code_of(&d)?;
@@ -119,10 +117,11 @@ fn grouped_up(d: Duration, ticks: u32, beat_ticks: u32) -> Duration {
 }
 
 /// The tuplet of `ratio` whose group fills the span, `n` notes in the time
-/// of `m` of a note value, fewer than `n` if the note values allow and as
-/// near `n` as they allow: 7:5 in 5/8 is seven eighths in the time of five,
-/// 8:5 eight eighths in the time of five, 5:7 in 7/8 five in the time of
-/// seven. Where `n` and `m` share a factor, the smaller groups if they lie
+/// of `m` of a note value: one that is beamed (an eighth or shorter), with
+/// fewer than `n` in the time if the note values allow, and `m` as near `n`
+/// as they allow. 7:5 in 5/8 is seven eighths in the time of five, 8:5
+/// eight eighths in the time of five, 5:7 in 7/8 five in the time of seven,
+/// 9:5 in 5/4 nine eighths in the time of ten. Where `n` and `m` share a factor, the smaller groups if they lie
 /// on the beats: 14:1 is two groups of seven thirty-seconds in the time of four.
 fn spanning_tuplet(ratio: Ratio, span_ticks: u32, beat_ticks: u32) -> Option<Duration> {
     let (n, base, m) = [Half, Quarter, Eighth, Sixteenth, ThirtySecond]
@@ -134,7 +133,7 @@ fn spanning_tuplet(ratio: Ratio, span_ticks: u32, beat_ticks: u32) -> Option<Dur
             (span_ticks.is_multiple_of(base_ticks) && is_general_tuplet(&d))
                 .then_some((ratio.n, base, m))
         })
-        .min_by_key(|&(n, _, m)| (n < m, m.abs_diff(n)))?;
+        .min_by_key(|&(n, base, m)| (base.denominator() < 8, n < m, m.abs_diff(n)))?;
     let g = gcd(u32::from(n), u32::from(m)) as u8;
     let reduced = Duration::Tuplet(TupletSpec { n: n / g, m: m / g, base });
     let ticks = DEFAULT_GRID.ticks_of(&reduced)?;
@@ -424,15 +423,19 @@ mod tests {
     fn nine_or_ten_clicks_a_beat_are_thirty_seconds() {
         let own = own_ratios("1/4".parse().unwrap());
         assert!(own.contains(&Ratio { n: 9, span: 1 }) && own.contains(&Ratio { n: 10, span: 1 }));
-        assert_eq!(bar("1/4", 9, 1), format!("1/4 {}", ["nt32"; 9].join(" ")));
-        assert_eq!(bar("1/4", 10, 1), format!("1/4 {}", ["dt32"; 10].join(" ")));
+        assert_eq!(bar("1/4", 9, 1), format!("1/4 {}", ["9:8th"; 9].join(" ")));
+        // Ten are two quintuplets, as twelve are two sextuplets.
+        assert_eq!(bar("1/4", 10, 1), format!("1/4 {}", ["5:4th"; 10].join(" ")));
     }
 
     #[test]
     fn nine_clicks_over_five_beats() {
         let nine = |ts: &str, base: &str| format!("{ts} {}", [base; 9].join(" "));
-        assert_eq!(bar("5/4", 9, 5), nine("5/4", "nt8_10"));
-        assert_eq!(bar("5/8", 9, 5), nine("5/8", "nt16_10"));
+        // Beamed eighths in the time of ten, not quarters in the time of five.
+        assert_eq!(bar("5/4", 9, 5), nine("5/4", "9:10e"));
+        assert_eq!(bar("5/8", 9, 5), nine("5/8", "9:5e"));
+        // One note a click, not a thirty-second and rests.
+        assert_eq!(bar("7/4", 9, 7), nine("7/4", "9:14e"));
         assert!(counter_ratios("5/4".parse().unwrap()).contains(&Ratio { n: 9, span: 5 }));
         assert_eq!(
             ratio_of(&counter_bar("10/8".parse().unwrap(), Ratio { n: 9, span: 10 }).unwrap()),
