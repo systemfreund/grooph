@@ -68,7 +68,14 @@ pub(super) fn build_tuplet_layout(
         );
         let tip = opts.stem_tip_y(outermost.unwrap_or(0));
 
-        let xc = 0.5 * (x_l + x_r);
+        // A bracket's number is centered on the bracket; a beamed group's on
+        // its beam, between the first and last stem, which puts it over the
+        // middle stem of an odd group.
+        let stem_x = |idx: usize| note_layout[idx].stem.map(|s| s.p1.x);
+        let xc = match (t.number_only(), stem_x(t.start), stem_x(t.end)) {
+            (true, Some(first), Some(last)) => 0.5 * (first + last),
+            _ => 0.5 * (x_l + x_r),
+        };
         let digits = glyphs::tuplet_glyphs(t.count);
         let number_at = |y: f32| centered_run(&digits, xc, y, digit_size);
         let num_ink = ink_of(&number_at(0.0)).unwrap_or(Rect::NOTHING);
