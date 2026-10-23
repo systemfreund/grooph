@@ -84,21 +84,29 @@ fn paren_reach(opts: &LayoutOpts) -> f32 {
     opts.head_half_width() + c::SOFT_PAREN_GAP_SS * ss + glyphs::NOTEHEAD_PAREN_LEFT.ink(ss).width()
 }
 
-/// The parentheses around a soft note's head centered at `center`.
+/// The parentheses around a soft note's head centered at `center`. They
+/// are taller than the head: on a shared line they move off it, away from
+/// the other voice, their inner ends level with the head's edge on the line.
 fn parens_at(center: Pos2, opts: &LayoutOpts) -> Vec<PlacedGlyph> {
     let ss = opts.staff_space();
     let inner = opts.head_half_width() + c::SOFT_PAREN_GAP_SS * ss;
     let left = glyphs::NOTEHEAD_PAREN_LEFT;
     let right = glyphs::NOTEHEAD_PAREN_RIGHT;
+    let overhang = (left.ne[1] - glyphs::NOTEHEAD_BLACK.ne[1]) * ss;
+    let y = match (opts.shared_line, opts.stem_down) {
+        (false, _) => center.y,
+        (true, false) => center.y - overhang,
+        (true, true) => center.y + overhang,
+    };
     vec![
         PlacedGlyph {
             glyph: left,
-            origin: Pos2::new(center.x - inner - left.ink(ss).right(), center.y),
+            origin: Pos2::new(center.x - inner - left.ink(ss).right(), y),
             size: opts.em,
         },
         PlacedGlyph {
             glyph: right,
-            origin: Pos2::new(center.x + inner - right.ink(ss).left(), center.y),
+            origin: Pos2::new(center.x + inner - right.ink(ss).left(), y),
             size: opts.em,
         },
     ]
@@ -146,7 +154,10 @@ fn dot_glyphs(
 ) -> Vec<PlacedGlyph> {
     let first_dx = dot_first_dx(beat, in_beam, opts);
     let step_dx = opts.em * c::DOT_STEP_DX_EM;
-    let y = cy - opts.em * c::DOT_Y_OFFSET_EM;
+    // A head on a shared line sits in the space beside it, and its dots
+    // with it; one on the line moves them up into the space above.
+    let dy = if opts.shared_line { 0.0 } else { opts.em * c::DOT_Y_OFFSET_EM };
+    let y = cy - dy;
     (0..dot_count)
         .map(|d| {
             let x = center_x + first_dx + (d as f32) * step_dx;
@@ -167,9 +178,10 @@ fn compute_x_extents(beat: &Beat, in_beam: bool, opts: &LayoutOpts) -> (f32, f32
     let (left, mut right) = if is_note && beat.soft {
         (-paren_reach(opts), paren_reach(opts))
     } else {
+        // A ledger line may reach past the rest: it doesn't widen it, so the
+        // voice is spaced as on a line of its own.
         let head = PlacedGlyph::centered(head_glyph(beat), 0.0, 0.0, opts.em).ink();
-        let ledger = if ledger_pos(beat, opts).is_some() { LEDGER_EXTENSION_SS * ss } else { 0.0 };
-        (head.left() - ledger, head.right() + ledger)
+        (head.left(), head.right())
     };
 
     let dot_count = dot_count_of(beat.duration);

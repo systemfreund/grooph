@@ -932,6 +932,19 @@ mod tests {
         assert!(ink.top() > cy && (ink.bottom() - ledger.p1.y).abs() < 0.1);
         assert!(ledger.p1.x < ink.left() && ledger.p2.x > ink.right());
 
+        // Dots and a soft note's parentheses stay off the line too.
+        let dotted = parse_score("3/4 (q.) (q.)").unwrap().measures.remove(0);
+        let (a, b) = (build_measure_layout(&dotted, &up), build_measure_layout(&dotted, &down));
+        for (u, d) in a.notes.iter().zip(&b.notes) {
+            let ink =
+                |n: &NoteLayout| ink_of(&[n.dots.clone(), n.parens.clone()].concat()).unwrap();
+            assert!(ink(u).bottom() <= cy + 0.01, "{u:?}");
+            assert!(ink(d).top() >= cy - 0.01, "{d:?}");
+            // The parentheses still reach past the head on its far side.
+            assert!(ink_of(&u.parens).unwrap().top() < u.head.ink().top());
+            assert!(ink_of(&d.parens).unwrap().bottom() > d.head.ink().bottom());
+        }
+
         // Without a shared line nothing moves.
         let alone = LayoutOpts { shared_line: false, ..up.clone() };
         assert!(build_measure_layout(&rests, &alone).notes.iter().all(|n| n.staff_pos == 0));
