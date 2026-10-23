@@ -30,7 +30,7 @@ use grooph_measure::click::{ClickLevel, default_click_bar, subdivided_click_bar}
 use grooph_measure::counter::{
     CounterBars, Ratio, click_level, counter_bar, counter_clicks, counter_ratios, ratio_of,
 };
-use grooph_measure::duration::Duration;
+use grooph_measure::duration::{Duration, TupletKind};
 use grooph_measure::grid::DEFAULT_GRID;
 use grooph_measure::score::Score;
 use grooph_measure::tempo::ScoreTiming;
@@ -162,10 +162,14 @@ pub(crate) fn meter_click_bar(ts: TimeSignature) -> Measure {
     }
 }
 
+/// Name of a fill whose clicks are `d` long. Triplets name their note
+/// value; the longer tuplets come once per meter and go by their kind
+/// alone, so the name fits a tile on a phone.
 fn fill_name(d: Duration) -> String {
     let base = d.base_note().name();
-    match d.as_tuplet_spec().and_then(|t| t.kind().name()) {
-        Some(kind) => format!("{base} {}s", kind.to_lowercase()),
+    match d.as_tuplet_spec().map(|t| t.kind()) {
+        Some(TupletKind::Triplet) => format!("{base} triplets"),
+        Some(kind) => kind.name().map_or_else(|| format!("{base}s"), |k| format!("{k}s")),
         None => format!("{base}s"),
     }
 }
@@ -828,11 +832,11 @@ mod tests {
                 "Eighths",
                 "Eighth triplets",
                 "Sixteenths",
-                "Sixteenth quintuplets",
-                "Sixteenth sextuplets",
-                "Sixteenth septuplets",
+                "Quintuplets",
+                "Sextuplets",
+                "Septuplets",
                 "Thirty-seconds",
-                "Thirty-second nonuplets",
+                "Nonuplets",
             ]
         );
         assert_eq!(
@@ -843,9 +847,9 @@ mod tests {
                 "Sixteenths",
                 "Sixteenth triplets",
                 "Thirty-seconds",
-                "Thirty-second quintuplets",
-                "Thirty-second sextuplets",
-                "Thirty-second septuplets",
+                "Quintuplets",
+                "Sextuplets",
+                "Septuplets",
             ]
         );
     }
