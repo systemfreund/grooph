@@ -21,8 +21,9 @@ const MAX_CLICKS: u8 = 9;
 /// Most clicks per span of a ratio of one's own (see [`own_ratios`]).
 const MAX_OWN_CLICKS: u8 = 16;
 /// Most notes and rests written for one click, so a click is never spelled
-/// as a long row of tiny rests.
-const MAX_SLOTS_PER_CLICK: u32 = 4;
+/// as a long row of tiny rests. Seven lets a click span an odd number of
+/// beats in 5/4 and 7/4: 2:5 is an eighth and four eighth rests.
+const MAX_SLOTS_PER_CLICK: u32 = 7;
 
 /// `n` even clicks in the time of `span` beat units.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -254,6 +255,21 @@ mod tests {
         assert_eq!(bar("4/4", 2, 4), "4/4 h h");
         assert_eq!(bar("2/4", 5, 2), "2/4 qt8 qt8 qt8 qt8 qt8");
         assert_eq!(bar("2/4", 7, 2), "2/4 spt8 spt8 spt8 spt8 spt8 spt8 spt8");
+    }
+
+    #[test]
+    fn clicks_over_an_odd_number_of_beats_rest_up_to_the_next() {
+        assert_eq!(bar("5/4", 2, 5), "5/4 e r:e r:e r:e r:e e r:e r:e r:e r:e");
+        assert_eq!(
+            bar("5/4", 3, 5),
+            "5/4 t8 r:t8 r:t8 r:t8 r:t8 t8 r:t8 r:t8 r:t8 r:t8 t8 r:t8 r:t8 r:t8 r:t8"
+        );
+        assert_eq!(bar("7/4", 2, 7), "7/4 e r:e r:e r:e r:e r:e r:e e r:e r:e r:e r:e r:e r:e");
+        let offered = |ts: &str| {
+            counter_ratios(ts.parse().unwrap()).iter().map(|r| r.to_string()).collect::<Vec<_>>()
+        };
+        assert_eq!(offered("5/4"), ["3:5", "4:5", "6:5", "7:5", "8:5"]);
+        assert_eq!(offered("7/4"), ["4:7", "5:7", "6:7", "8:7"]);
     }
 
     #[test]
