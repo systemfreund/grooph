@@ -27,7 +27,7 @@ pub mod render_plan;
 pub mod staff_layout;
 pub mod tuplet_plan;
 
-pub use basis::calculate_x_centers;
+pub use basis::{calculate_shared_x_centers, calculate_x_centers, shared_min_width};
 pub use beam_plan::*;
 pub use pixel_layout::*;
 pub use render_plan::*;

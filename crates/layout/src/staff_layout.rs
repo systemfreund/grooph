@@ -20,14 +20,15 @@
 //! horizontally scrollable area for that case.
 
 use crate::pixel_layout::{
-    LayoutOpts, MeasureLayout, build_measure_layout_with_plan, clef_width, min_note_area_width,
-    time_sig_width,
+    LayoutOpts, MeasureLayout, build_measure_layout_at, build_measure_layout_with_plan, clef_width,
+    min_note_area_width, note_advances, note_area_offset, note_lead, time_sig_width,
 };
 use crate::render_plan::{RenderPlan, plan_measure_with};
+use crate::{calculate_shared_x_centers, shared_min_width};
 use egui::{FontId, Pos2, Rect, Vec2, pos2, vec2};
 use grooph_measure::duration::s;
 use grooph_measure::grid::DEFAULT_GRID;
-use grooph_measure::{BeatIdx, MeasureIdx, Score, TimeSignature};
+use grooph_measure::{BeatIdx, Measure, MeasureIdx, Score, TimeSignature};
 
 /// Configuration for laying out an entire [`Score`].
 ///
@@ -207,8 +208,10 @@ fn sixteenth_slots(ts: &TimeSignature) -> f32 {
     (per_measure / per_sixteenth).max(1) as f32
 }
 
-/// Minimum natural width (px) for a measure given its content and which
-/// header glyphs (clef / time signature) it will draw.
+/// Minimum natural width (px) for a measure, `voices` of it played
+/// together, given which header glyphs (clef / time signature) it will
+/// draw. `notes_min` is the narrowest note area in which no glyph overlaps
+/// the next one in its voice.
 ///
 /// The body is sized for at least a measure full of sixteenths, so up to
 /// that density the width usually depends only on the time signature:
@@ -217,20 +220,21 @@ fn sixteenth_slots(ts: &TimeSignature) -> f32 {
 /// and measures mixing very short and long notes grow until the short ones,
 /// spaced by duration, no longer collide.
 fn min_measure_width(
-    score: &Score,
-    measure_idx: MeasureIdx,
-    plan: &RenderPlan,
+    voices: &[&Measure],
+    notes_min: f32,
     show_clef: bool,
     show_ts: bool,
     opts: &StaffOpts,
 ) -> f32 {
-    let m = &score.measures[measure_idx];
-    let beats = (m.beats().len() as f32).max(sixteenth_slots(&m.time_signature()));
+    let m = voices[0];
+    let beats = voices
+        .iter()
+        .map(|v| v.beats().len() as f32)
+        .fold(sixteenth_slots(&m.time_signature()), f32::max);
     let body = (opts.min_measure_width_em + beats * opts.note_width_em) * opts.em;
     // Short notes next to long ones (e.g. 32nds among eighths) get little
     // space when spaced by duration: widen until no glyph overlaps the next.
-    let body =
-        body.max(min_note_area_width(m, plan, &opts.measure_opts(opts.rect, 0.0, false, false)));
+    let body = body.max(notes_min);
     let clef = if show_clef { clef_width(opts.em) } else { 0.0 };
     let ts = if show_ts { time_sig_width(&m.time_signature(), opts.em) } else { 0.0 };
     body + clef + ts
@@ -353,16 +357,27 @@ pub fn build_staff_layout_with_lower(
         .collect();
     let lower_plans: Vec<Option<RenderPlan>> =
         (0..score.len()).map(|i| lower_measures(i).map(|m| plan_measure_with(m, true))).collect();
+    // With a lower voice, both are spaced together: beats at the same time
+    // line up, and what one voice needs at a time the other gets too.
+    let lower_voice = |i: usize| lower_measures(i).zip(lower_plans[i].as_ref());
     let widths_min: Vec<f32> = (0..score.len())
         .map(|i| {
-            let upper = min_measure_width(score, i, &plans[i], show_clef[i], show_ts[i], opts);
-            let lower = match (lower, &lower_plans[i]) {
-                (Some(l), Some(plan)) => {
-                    min_measure_width(l, i, plan, show_clef[i], show_ts[i], opts)
+            let upper = &score.measures[i];
+            let upper_opts = opts.upper_of(
+                opts.measure_opts(opts.rect, 0.0, false, false),
+                lower_voice(i).is_some(),
+            );
+            let (notes_min, measures) = match lower_voice(i) {
+                Some((m, plan)) => {
+                    let ua = note_advances(upper, &plans[i], &upper_opts);
+                    let la = note_advances(m, plan, &opts.lower_of(upper_opts));
+                    let together = [(&upper.beats()[..], &ua[..]), (&m.beats()[..], &la[..])];
+                    let width = shared_min_width(&together, opts.proportional_spacing);
+                    (note_lead(opts.em) + width, vec![upper, m])
                 }
-                _ => 0.0,
+                None => (min_note_area_width(upper, &plans[i], &upper_opts), vec![upper]),
             };
-            upper.max(lower)
+            min_measure_width(&measures, notes_min, show_clef[i], show_ts[i], opts)
         })
         .collect();
     let available = opts.rect.width().max(0.0);
@@ -386,12 +401,24 @@ pub fn build_staff_layout_with_lower(
     let lay_out = |i: usize, rect: Rect, y_offset: f32| {
         let per_opts = effective_opts.measure_opts(rect, y_offset, show_clef[i], show_ts[i]);
         let per_opts = effective_opts.upper_of(per_opts, lower_measures(i).is_some());
-        let layout = build_measure_layout_with_plan(&score.measures[i], &plans[i], &per_opts);
         let lower_opts = effective_opts.lower_of(per_opts.clone());
-        let lower = lower_measures(i)
-            .zip(lower_plans[i].as_ref())
-            .map(|(m, plan)| build_measure_layout_with_plan(m, plan, &lower_opts));
-        (layout, per_opts, lower, lower_opts)
+        let upper = &score.measures[i];
+        let Some((m, plan)) = lower_voice(i) else {
+            let layout = build_measure_layout_with_plan(upper, &plans[i], &per_opts);
+            return (layout, per_opts, None, lower_opts);
+        };
+        let ua = note_advances(upper, &plans[i], &per_opts);
+        let la = note_advances(m, plan, &lower_opts);
+        let area = rect.width() - note_area_offset(&upper.time_signature(), &per_opts);
+        let xs = calculate_shared_x_centers(
+            &[(&upper.beats()[..], &ua[..]), (&m.beats()[..], &la[..])],
+            area,
+            effective_opts.proportional_spacing,
+            note_lead(effective_opts.em),
+        );
+        let layout = build_measure_layout_at(upper, &plans[i], &xs[0], &per_opts);
+        let lower = build_measure_layout_at(m, plan, &xs[1], &lower_opts);
+        (layout, per_opts, Some(lower), lower_opts)
     };
     let reaches: Vec<(RowRoom, Option<RowRoom>)> = (0..score.len())
         .map(|i| {
@@ -649,6 +676,36 @@ mod tests {
         // Without a lower voice the line is the upper voice's alone.
         let single = build_staff_layout(&upper, &staff_opts);
         assert!(single.systems[0].measures[0].layout.notes.iter().all(|n| n.staff_pos == 0));
+    }
+
+    #[test]
+    fn crowded_voices_keep_their_beats_together() {
+        use grooph_measure::notation::parse_score;
+        let em = 20.0;
+        // Narrow, with no room beyond what the notes need: the 32nds are
+        // crowded and take more than their share.
+        let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(150.0, 100.0));
+        let upper = parse_score("4/4 th th th th th th th th th th th th th th th th h").unwrap();
+        let lower = parse_score("4/4 q q h").unwrap();
+        for one_line in [false, true] {
+            let tight =
+                StaffOpts { min_measure_width_em: 0.0, note_width_em: 0.0, ..opts(em, rect) };
+            let staff_opts = StaffOpts { one_line, ..tight };
+            let staff = build_staff_layout_with_lower(&upper, Some(&lower), &staff_opts);
+            let placed = &staff.systems[0].measures[0];
+            let below = placed.lower.as_ref().unwrap();
+            let x = |l: &MeasureLayout, i: usize| l.notes[i].center.x;
+            // Beats at the same time line up, though only the upper voice
+            // is crowded.
+            assert!((x(&placed.layout, 0) - x(below, 0)).abs() < 0.01);
+            assert!((x(&placed.layout, 8) - x(below, 1)).abs() < 0.01);
+            assert!((x(&placed.layout, 16) - x(below, 2)).abs() < 0.01);
+            // And the 32nds still get their room: their heads don't overlap,
+            // but for the pixel each one's stem snaps by.
+            for w in placed.layout.notes[..16].windows(2) {
+                assert!(w[0].head.ink().right() <= w[1].head.ink().left() + 1.0);
+            }
+        }
     }
 
     #[test]
