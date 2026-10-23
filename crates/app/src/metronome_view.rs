@@ -1,4 +1,4 @@
-//! Metronome tab: its own meter, whose click bar (see
+//! Metronome tab: its own meter, apart from the rhythm's, whose click bar (see
 //! [`grooph_measure::click`]) is shown as a one-line staff above a ring.
 //!
 //! While the tab is open the click bar takes the working score's place, so
@@ -318,30 +318,29 @@ impl Grooph {
         }
     }
 
-    /// Edit the click bar of `ts` from now on: its own one, or else
-    /// `meter_click_bar`. Undoable, like a bar change.
+    /// Click `ts` from now on, starting over: its click bar is
+    /// `meter_click_bar` and it has no counter rhythm, whatever it had when
+    /// it was last picked. Undoable, like a bar change.
     pub(crate) fn set_metronome_meter(&mut self, ts: TimeSignature) {
         if ts == self.metronome_meter() {
             return;
         }
         self.select_voice(Voice::Upper);
-        let click = &self.playback_ctl.audio_cfg.click;
-        let bar = click.custom_for(ts).cloned().unwrap_or_else(|| meter_click_bar(ts));
+        let bar = meter_click_bar(ts);
         if !self.metronome_mode() {
             self.editor.metronome.meter = ts;
-            self.playback_ctl.audio_cfg.click.set(bar);
+            let cfg = &mut self.playback_ctl.audio_cfg;
+            cfg.click.set(bar);
+            cfg.counter.set(ts, None);
             return;
         }
-        self.replace_click_bar(bar);
-    }
-
-    /// A meter picked for the rhythm (Practice or Edit) becomes the
-    /// metronome's too, with the click bar that meter already has. Not the
-    /// other way round: the metronome's meter leaves the rhythm alone.
-    pub(crate) fn follow_meter(&mut self, ts: TimeSignature) {
-        if !self.metronome_mode() {
-            self.editor.metronome.meter = ts;
-        }
+        self.with_undo_snapshot(|app| {
+            app.playback_ctl.audio_cfg.counter.set(ts, None);
+            app.editor.score = Score::single(bar);
+            app.editor.cursor = Cursor::start();
+            true
+        });
+        self.sync_click_bar();
     }
 
     /// Replace the click bar being edited, undoably.
@@ -969,6 +968,34 @@ mod tests {
         assert_eq!(app.editor.metronome.voice, Voice::Upper);
         let counter = app.playback_ctl.audio_cfg.counter.for_meter(TimeSignature::FOUR_FOUR);
         assert_eq!(counter.and_then(ratio_of), Some(Ratio { n: 5, span: 4 }));
+    }
+
+    #[test]
+    fn a_picked_meter_starts_over() {
+        let mut app = metronome_app();
+        app.set_counter_ratio(Some(Ratio { n: 3, span: 4 }));
+        app.cycle_click_level(1);
+        app.set_metronome_meter(TimeSignature::THREE_FOUR);
+        assert!(app.counter_bar().is_none());
+        // Back in 4/4: plain clicks and no counter rhythm, in the tab...
+        app.set_metronome_meter(TimeSignature::FOUR_FOUR);
+        assert_eq!(app.edited_voice(), Voice::Upper);
+        assert!(app.counter_bar().is_none());
+        assert!(same_bar(&app.click_bar(), &default_click_bar(TimeSignature::FOUR_FOUR)));
+        // ...and with it closed.
+        app.set_counter_ratio(Some(Ratio { n: 3, span: 4 }));
+        app.close_metronome();
+        app.set_metronome_meter(TimeSignature::THREE_FOUR);
+        app.set_metronome_meter(TimeSignature::FOUR_FOUR);
+        assert!(app.playback_ctl.audio_cfg.counter.for_meter(TimeSignature::FOUR_FOUR).is_none());
+        // Undo in the tab brings the counter rhythm back with its meter.
+        app.open_metronome();
+        app.set_counter_ratio(Some(Ratio { n: 3, span: 4 }));
+        app.set_metronome_meter(TimeSignature::THREE_FOUR);
+        app.undo();
+        app.sync_click_bar();
+        assert_eq!(app.metronome_meter(), TimeSignature::FOUR_FOUR);
+        assert!(app.counter_bar().is_some());
     }
 
     #[test]

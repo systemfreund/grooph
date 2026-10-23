@@ -101,7 +101,6 @@ impl Grooph {
                                 true
                             });
                             if committed {
-                                self.follow_meter(new_ts);
                                 self.ui.mode = Mode::Edit;
                             }
                         }
