@@ -537,6 +537,17 @@ mod tests {
     }
 
     #[test]
+    fn counter_link_with_a_tuplet_of_any_ratio() {
+        let link = parse("v=2&bpm=90&ts=5/8&counter=7:5e+7:5e+7:5e+7:5e+7:5e+7:5e+7:5e");
+        let bar = link.counter.as_ref().unwrap();
+        assert_eq!(bar.beats().len(), 7);
+        assert_eq!(
+            link.to_url("/").unwrap(),
+            "/?v=2&bpm=90&ts=5/8&counter=7:5e+7:5e+7:5e+7:5e+7:5e+7:5e+7:5e"
+        );
+    }
+
+    #[test]
     fn version_1_tempo_counts_the_beat_unit() {
         // Without `v`, bpm counted eighths in x/8 and sixteenths in x/16.
         for (query, bpm) in [

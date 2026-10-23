@@ -1,9 +1,32 @@
-use crate::duration::{COMMON_DURATIONS, Duration, TupletSpec};
+use crate::duration::{COMMON_DURATIONS, Duration, NoteValue, TupletSpec};
 use crate::grouping::default_groups_for;
 use crate::math::lcm;
 use crate::{Beat, TimeSignature};
 
 pub const DEFAULT_GRID: Grid = Grid::from_durations(&COMMON_DURATIONS);
+
+/// Most notes of a tuplet outside [`COMMON_DURATIONS`].
+pub const MAX_GENERAL_TUPLET: u8 = 16;
+
+const NOTE_VALUES: [NoteValue; 6] = [
+    NoteValue::Whole,
+    NoteValue::Half,
+    NoteValue::Quarter,
+    NoteValue::Eighth,
+    NoteValue::Sixteenth,
+    NoteValue::ThirtySecond,
+];
+
+/// A tuplet of `n` notes in the time of `m` that is not a plain value:
+/// `n` up to [`MAX_GENERAL_TUPLET`], more than half and fewer than twice
+/// `m`, like 7:5 or 5:7.
+pub fn is_general_tuplet(d: &Duration) -> bool {
+    let Duration::Tuplet(TupletSpec { n, m, .. }) = *d else {
+        return false;
+    };
+    let (n, m) = (u32::from(n), u32::from(m));
+    (2..=u32::from(MAX_GENERAL_TUPLET)).contains(&n) && n != m && 2 * n > m && n < 2 * m
+}
 
 /// A tick grid provider. Build dynamically from the set of supported durations.
 #[derive(Debug)]
@@ -13,9 +36,11 @@ pub struct Grid<'a> {
 }
 
 impl Grid<'_> {
-    /// Build a dynamic grid as the LCM of the denominators of the given durations.
+    /// Build a dynamic grid as the LCM of the denominators of the given
+    /// durations and of 64: eight clicks over an odd number of eighths (8:5
+    /// in 5/8) fall on sixty-fourths.
     pub const fn from_durations(durs: &[Duration]) -> Grid<'_> {
-        let mut l = 1u32;
+        let mut l = 64u32;
         let mut i = 0usize;
         while i < durs.len() {
             let f = durs[i].as_fraction();
@@ -77,14 +102,33 @@ impl Grid<'_> {
         bounds
     }
 
+    /// Whether a measure may hold `d`: one of [`Self::durations`], or a
+    /// tuplet of any other ratio (see [`is_general_tuplet`]) on the grid.
+    pub fn supports(&self, d: &Duration) -> bool {
+        self.durations.contains(d) || (is_general_tuplet(d) && self.ticks_of(d).is_some())
+    }
+
     /// All supported durations on the tuplet grid identified by `(n, m)`.
     /// Used to constrain fills that must stay inside an existing tuplet group.
+    /// Beyond the listed ones, the shorter note values on the grid (6:4 of
+    /// thirty-seconds next to `st8` and `st16`); a ratio outside
+    /// [`Self::durations`] takes every note value on the grid.
     pub fn tuplet_grid_durations(&self, n: u8, m: u8) -> Vec<Duration> {
-        self.durations
+        let mut durations: Vec<Duration> = self
+            .durations
             .iter()
             .copied()
             .filter(|d| matches!(d, Duration::Tuplet(TupletSpec { n: dn, m: dm, .. }) if *dn == n && *dm == m))
-            .collect()
+            .collect();
+        let shortest = durations.iter().filter_map(|d| self.ticks_of(d)).min();
+        durations.extend(
+            NOTE_VALUES
+                .into_iter()
+                .map(|base| Duration::Tuplet(TupletSpec { n, m, base }))
+                .filter(|d| self.supports(d))
+                .filter(|d| shortest.is_none_or(|s| self.ticks_of(d).is_some_and(|t| t < s))),
+        );
+        durations
     }
 
     pub fn compute_onset_ticks(&self, beats: &[Beat]) -> Vec<u32> {

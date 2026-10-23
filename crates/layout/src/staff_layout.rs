@@ -8,9 +8,9 @@
 //! scroll area) live here; per-measure pixel geometry stays in `MeasureLayout`.
 //!
 //! A staff can have a lower voice (see [`build_staff_layout_with_lower`]): a
-//! second score on a line of its own below, stems down, spaced like the
-//! upper voice so notes at the same time line up — like the feet under the
-//! hands of a drum part.
+//! second score on a line of its own below, stems down, its beams running
+//! over its rests as stemlets, spaced like the upper voice so notes at the
+//! same time line up — like the feet under the hands of a drum part.
 //!
 //! Each measure grows to fill the row. If a measure doesn't fit, glyphs shrink
 //! toward [`LEGIBILITY_FLOOR_EM`]; a measure that doesn't fit even at the floor
@@ -21,7 +21,7 @@ use crate::pixel_layout::{
     LayoutOpts, MeasureLayout, build_measure_layout_with_plan, clef_width, min_note_area_width,
     time_sig_width,
 };
-use crate::render_plan::{RenderPlan, plan_measure};
+use crate::render_plan::{RenderPlan, plan_measure, plan_measure_with};
 use egui::{FontId, Pos2, Rect, Vec2, pos2, vec2};
 use grooph_measure::duration::s;
 use grooph_measure::grid::DEFAULT_GRID;
@@ -324,7 +324,7 @@ pub fn build_staff_layout_with_lower(
     let plans: Vec<RenderPlan> = score.measures.iter().map(plan_measure).collect();
     let lower_measures = |i: usize| lower.and_then(|l| l.measures.get(i));
     let lower_plans: Vec<Option<RenderPlan>> =
-        (0..score.len()).map(|i| lower_measures(i).map(plan_measure)).collect();
+        (0..score.len()).map(|i| lower_measures(i).map(|m| plan_measure_with(m, true))).collect();
     let widths_min: Vec<f32> = (0..score.len())
         .map(|i| {
             let upper = min_measure_width(score, i, &plans[i], show_clef[i], show_ts[i], opts);

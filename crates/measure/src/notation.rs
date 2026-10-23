@@ -15,7 +15,11 @@
 //!   `qt8` `qt16` (quintuplets), `st8` `st16` (sextuplets), `spt4` `spt8`
 //!   `spt16` (septuplets) and `nt16` (nonuplet), and over a dotted quarter
 //!   `qt8_3` (five eighths in the time of three) and `spt16_6` (seven
-//!   sixteenths in the time of six). Every note of a tuplet group is written out.
+//!   sixteenths in the time of six), nonuplets in the time of ten `nt8_10`
+//!   and `nt16_10`, and thirty-seconds nine or ten in the time of eight
+//!   `nt32` and `dt32`. Tuplets of other ratios are written `n:m` and their
+//!   note value (`w` `h` `q` `e` `s` `th`), e.g. `7:5e` for seven eighths in
+//!   the time of five. Every note of a tuplet group is written out.
 //! - `r:` makes a rest (`r:q`), `>` accents a note (`>e`), parentheses make
 //!   it a soft (ghost) note (`(e)`).
 //!
@@ -102,10 +106,10 @@ impl Display for NotationError {
 impl std::error::Error for NotationError {}
 
 /// Durations with a notation code, in the order of [`crate::duration::COMMON_DURATIONS`].
-const CODES: [(&str, Duration); 24] = {
+const CODES: [(&str, Duration); 28] = {
     use crate::duration::{
-        e, h, nt16, q, qt4, qt8, qt8_3, qt16, s, spt4, spt8, spt16, spt16_6, st8, st16, t2, t8,
-        t16, t32, th,
+        dt32, e, h, nt8_10, nt16, nt16_10, nt32, q, qt4, qt8, qt8_3, qt16, s, spt4, spt8, spt16,
+        spt16_6, st8, st16, t2, t8, t16, t32, th,
     };
     const fn dotted(base: NoteValue) -> Duration {
         Duration::Dotted { base, dots: 1 }
@@ -135,15 +139,47 @@ const CODES: [(&str, Duration); 24] = {
         ("spt8", spt8()),
         ("qt8_3", qt8_3()),
         ("spt16_6", spt16_6()),
+        ("nt8_10", nt8_10()),
+        ("nt16_10", nt16_10()),
+        ("nt32", nt32()),
+        ("dt32", dt32()),
     ]
 };
 
+/// Codes of the note values a tuplet of any ratio is written with.
+const BASE_CODES: [(&str, NoteValue); 6] = [
+    ("w", NoteValue::Whole),
+    ("h", NoteValue::Half),
+    ("q", Quarter),
+    ("e", Eighth),
+    ("s", Sixteenth),
+    ("th", NoteValue::ThirtySecond),
+];
+
 pub(crate) fn duration_of_code(code: &str) -> Option<Duration> {
-    CODES.iter().find(|(c, _)| *c == code).map(|(_, d)| *d)
+    CODES.iter().find(|(c, _)| *c == code).map(|(_, d)| *d).or_else(|| general_tuplet(code))
 }
 
-pub(crate) fn code_of(duration: &Duration) -> Option<&'static str> {
-    CODES.iter().find(|(_, d)| d == duration).map(|(c, _)| *c)
+/// A tuplet written `n:m` and its note value, e.g. `7:5e` for seven eighths
+/// in the time of five.
+fn general_tuplet(code: &str) -> Option<Duration> {
+    let (n, rest) = code.split_once(':')?;
+    let digits = rest.find(|c: char| !c.is_ascii_digit())?;
+    let (m, base) = rest.split_at(digits);
+    let (_, base) = BASE_CODES.iter().find(|(c, _)| *c == base)?;
+    let d = Duration::Tuplet(TupletSpec { n: n.parse().ok()?, m: m.parse().ok()?, base: *base });
+    DEFAULT_GRID.supports(&d).then_some(d)
+}
+
+pub(crate) fn code_of(duration: &Duration) -> Option<String> {
+    if let Some((c, _)) = CODES.iter().find(|(_, d)| d == duration) {
+        return Some(c.to_string());
+    }
+    let Duration::Tuplet(TupletSpec { n, m, base }) = *duration else {
+        return None;
+    };
+    let (code, _) = BASE_CODES.iter().find(|(_, b)| *b == base)?;
+    DEFAULT_GRID.supports(duration).then(|| format!("{n}:{m}{code}"))
 }
 
 fn parse_beat(token: &str, measure: usize) -> Result<Beat, NotationError> {
@@ -288,7 +324,7 @@ pub fn format_score(score: &Score) -> Option<String> {
                     (Rest, ..) => format!("r:{code}"),
                     (Note, true, _) => format!(">{code}"),
                     (Note, false, true) => format!("({code})"),
-                    (Note, false, false) => code.to_string(),
+                    (Note, false, false) => code,
                 })
             })
             .collect();
@@ -408,6 +444,28 @@ mod tests {
             parse_score("t8 t8 q q q").unwrap_err(),
             NotationError::DoesNotFit { measure: 1, token: "q".into() }
         );
+    }
+
+    #[test]
+    fn tuplets_of_any_ratio_are_written_n_m_and_their_value() {
+        let score = parse_score("5/8 7:5e 7:5e r:7:5e 7:5e >7:5e 7:5e (7:5e)").unwrap();
+        let beats = beats_of(&score, 0);
+        let seven = Duration::Tuplet(TupletSpec { n: 7, m: 5, base: Eighth });
+        assert!(beats.iter().all(|b| b.duration == seven));
+        assert_eq!(group_partition(&score.measures[0]), vec![Some(0); 7]);
+        assert_eq!(format_score(&score).unwrap(), "5/8 7:5e 7:5e r:7:5e 7:5e >7:5e 7:5e (7:5e)");
+        // A listed tuplet keeps its code.
+        assert_eq!(
+            format_score(&parse_score("3:2e 3:2e 3:2e q q q").unwrap()).unwrap(),
+            "4/4 t8 t8 t8 q q q"
+        );
+        // Off the grid, too many notes, or a plain value in disguise.
+        for token in ["11:8th", "17:16th", "4:4q", "7:5x", "7:e", ":5e"] {
+            assert!(
+                matches!(parse_score(token), Err(NotationError::UnknownToken { .. })),
+                "{token}"
+            );
+        }
     }
 
     #[test]
