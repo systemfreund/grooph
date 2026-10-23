@@ -522,6 +522,12 @@ impl Grooph {
         }
 
         ui.add_space(8.0);
+        let mut merge = self.playback_ctl.audio_cfg.merge_counter_rests;
+        if ui.checkbox(&mut merge, "Merge rests").changed() {
+            self.set_merge_counter_rests(merge);
+        }
+
+        ui.add_space(8.0);
         ui.label("Sound");
         let settings = &mut self.playback_ctl.audio_cfg.settings;
         let sounds: Vec<_> = CounterSound::ALL.iter().map(|&s| (s, s.label().to_owned())).collect();

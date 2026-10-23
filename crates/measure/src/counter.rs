@@ -42,9 +42,17 @@ impl std::fmt::Display for Ratio {
 }
 
 /// The counter bar of `ratio` in `ts`, every click medium (the click bar
-/// already clicks the downbeat loud). `None` if the
-/// span does not divide the bar or the clicks fall off the tick grid.
+/// already clicks the downbeat loud), its rests merged (see
+/// [`counter_bar_with`]).
 pub fn counter_bar(ts: TimeSignature, ratio: Ratio) -> Option<Measure> {
+    counter_bar_with(ts, ratio, true)
+}
+
+/// The counter bar of `ratio` in `ts`, every click medium. With
+/// `merge_rests` the rests up to each next click are as few as keep to the
+/// beats; without, they are all as long as the click. `None` if the span
+/// does not divide the bar or the clicks fall off the tick grid.
+pub fn counter_bar_with(ts: TimeSignature, ratio: Ratio, merge_rests: bool) -> Option<Measure> {
     let Ratio { n, span } = ratio;
     if n < 2 || span == 0 || !ts.beats.is_multiple_of(span) {
         return None;
@@ -71,7 +79,11 @@ pub fn counter_bar(ts: TimeSignature, ratio: Ratio) -> Option<Measure> {
         for click in 0..clicks {
             let start = click * click_ticks;
             tokens.push(code.to_string());
-            tokens.extend(rests(start + ticks, start + click_ticks, d, ticks, &windows));
+            if merge_rests {
+                tokens.extend(rests(start + ticks, start + click_ticks, d, ticks, &windows));
+            } else {
+                tokens.extend((1..click_ticks / ticks).map(|_| format!("r:{code}")));
+            }
         }
         parse_score(&format!("{ts} {}", tokens.join(" "))).ok()?.measures.into_iter().next()
     })
@@ -275,18 +287,42 @@ pub fn ratio_of(bar: &Measure) -> Option<Ratio> {
             note_onsets.iter().all(|t| t.is_multiple_of(click_ticks))
         }
     };
+    (1..=ts.beats)
+        .filter(|&span| ts.beats.is_multiple_of(span))
+        .flat_map(|span| (2..=MAX_OWN_CLICKS).map(move |n| Ratio { n, span }))
+        .filter(|r| gcd(u32::from(r.n), u32::from(r.span)) == 1 && clicks_on_notes(r))
+        .filter(|&r| counter_bar_like(bar, r).is_some())
+        .min_by_key(|r| u32::from(r.n) * u32::from(ts.beats / r.span))
+}
+
+/// The counter bar of `ratio` spelled like `bar`, with its rests merged or
+/// not: `None` if neither has `bar`'s note values with notes wherever `bar`
+/// has one.
+pub fn counter_bar_like(bar: &Measure, ratio: Ratio) -> Option<Measure> {
     let fits = |m: &Measure| {
         m.beats().len() == bar.beats().len()
             && m.beats().iter().zip(bar.beats()).all(|(c, b)| {
                 c.duration == b.duration && (c.kind == BeatKind::Note || b.kind == BeatKind::Rest)
             })
     };
-    (1..=ts.beats)
-        .filter(|&span| ts.beats.is_multiple_of(span))
-        .flat_map(|span| (2..=MAX_OWN_CLICKS).map(move |n| Ratio { n, span }))
-        .filter(|r| gcd(u32::from(r.n), u32::from(r.span)) == 1 && clicks_on_notes(r))
-        .filter(|&r| counter_bar(ts, r).is_some_and(|m| fits(&m)))
-        .min_by_key(|r| u32::from(r.n) * u32::from(ts.beats / r.span))
+    [true, false]
+        .into_iter()
+        .filter_map(|merge| counter_bar_with(bar.time_signature(), ratio, merge))
+        .find(fits)
+}
+
+/// `bar` with its rests merged or not, each click at the level it has in
+/// `bar`. `None` if `bar` is no ratio's counter bar.
+pub fn respell(bar: &Measure, merge_rests: bool) -> Option<Measure> {
+    let ratio = ratio_of(bar)?;
+    let mut new = counter_bar_with(bar.time_signature(), ratio, merge_rests)?;
+    let starts: Vec<usize> = counter_clicks(&new).into_iter().map(|r| r.start).collect();
+    for (i, old) in counter_clicks(bar).into_iter().enumerate() {
+        if let Some(&at) = starts.get(i) {
+            new.set_click_level(at, click_level(bar, old.start));
+        }
+    }
+    Some(new)
 }
 
 /// Index of each click of `bar` (its first beat) and the beats it spans:
@@ -294,9 +330,8 @@ pub fn ratio_of(bar: &Measure) -> Option<Ratio> {
 /// click stays its own click, so only the rests the counter bar was
 /// written with are folded in.
 pub fn counter_clicks(bar: &Measure) -> Vec<std::ops::Range<usize>> {
-    let ts = bar.time_signature();
     let slots = ratio_of(bar)
-        .and_then(|r| counter_bar(ts, r))
+        .and_then(|r| counter_bar_like(bar, r))
         .map(|m| m.beats().iter().map(|b| b.kind == BeatKind::Note).collect::<Vec<_>>());
     let starts: Vec<usize> = match slots {
         Some(is_click) => (0..bar.beats().len()).filter(|&i| is_click[i]).collect(),
@@ -338,6 +373,16 @@ impl CounterBars {
     /// The counter bar of `ts`, `None` if it has none.
     pub fn for_meter(&self, ts: TimeSignature) -> Option<&Measure> {
         self.bars.iter().find(|m| m.time_signature() == ts)
+    }
+
+    /// Merge the rests of every counter bar, or write them all as long as
+    /// the click (see [`respell`]); bars of no ratio stay as they are.
+    pub fn respell(&mut self, merge_rests: bool) {
+        for bar in &mut self.bars {
+            if let Some(new) = respell(bar, merge_rests) {
+                *bar = new;
+            }
+        }
     }
 
     /// Give `ts` the counter bar `bar` (of that meter), or none.
@@ -418,6 +463,27 @@ mod tests {
         assert!(offered("9/8").contains(&"5:3".to_string()));
         let own = own_ratios("6/8".parse().unwrap());
         assert!(own.contains(&Ratio { n: 7, span: 3 }));
+    }
+
+    #[test]
+    fn rests_can_stay_as_long_as_the_click() {
+        let ts = "5/4".parse().unwrap();
+        let ratio = Ratio { n: 2, span: 5 };
+        let even = counter_bar_with(ts, ratio, false).unwrap();
+        assert_eq!(text(&even), "5/4 e r:e r:e r:e r:e e r:e r:e r:e r:e");
+        // Both spellings read back as the ratio, its clicks folding in
+        // their own rests.
+        assert_eq!(ratio_of(&even), Some(ratio));
+        assert_eq!(counter_clicks(&even), [0..5, 5..10]);
+        let merged = counter_bar(ts, ratio).unwrap();
+        assert_eq!(counter_clicks(&merged), [0..4, 4..7]);
+        // Respelling keeps each click's level.
+        let mut tapped = merged.clone();
+        tapped.set_click_level(4, ClickLevel::Off);
+        let respelled = respell(&tapped, false).unwrap();
+        assert_eq!(click_level(&respelled, 0), ClickLevel::Medium);
+        assert_eq!(click_level(&respelled, 5), ClickLevel::Off);
+        assert!(same_bar(&respell(&respelled, true).unwrap(), &tapped));
     }
 
     #[test]

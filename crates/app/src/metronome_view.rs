@@ -28,7 +28,8 @@ use eframe::egui::{Align2, Color32, FontId, Pos2, Sense, Shape, Stroke, Ui, vec2
 use grooph_layout::staff_layout::Voice;
 use grooph_measure::click::{ClickLevel, default_click_bar, subdivided_click_bar};
 use grooph_measure::counter::{
-    CounterBars, Ratio, click_level, counter_bar, counter_clicks, counter_ratios, ratio_of,
+    CounterBars, Ratio, click_level, counter_bar_like, counter_bar_with, counter_clicks,
+    counter_ratios, ratio_of, respell,
 };
 use grooph_measure::duration::Duration;
 use grooph_measure::grid::DEFAULT_GRID;
@@ -171,7 +172,7 @@ fn fill_name(d: Duration) -> String {
 /// click medium) does not have.
 pub(crate) fn counter_ratio(bar: &Measure) -> Option<(Ratio, bool)> {
     let ratio = ratio_of(bar)?;
-    let edited = !counter_bar(bar.time_signature(), ratio).is_some_and(|m| same_bar(&m, bar));
+    let edited = !counter_bar_like(bar, ratio).is_some_and(|m| same_bar(&m, bar));
     Some((ratio, edited))
 }
 
@@ -417,7 +418,8 @@ impl Grooph {
     /// Undoable.
     pub(crate) fn set_counter_ratio(&mut self, ratio: Option<Ratio>) {
         let ts = self.metronome_meter();
-        let bar = ratio.and_then(|r| counter_bar(ts, r));
+        let merge = self.playback_ctl.audio_cfg.merge_counter_rests;
+        let bar = ratio.and_then(|r| counter_bar_with(ts, r, merge));
         let unchanged = match (self.counter_bar(), &bar) {
             (None, None) => true,
             (Some(a), Some(b)) => same_bar(a, b),
@@ -441,6 +443,21 @@ impl Grooph {
             }
             true
         });
+    }
+
+    /// Merge the rests between counter clicks from now on, or write them all
+    /// as long as the click: every meter's counter bar is written anew,
+    /// keeping its clicks' levels.
+    pub(crate) fn set_merge_counter_rests(&mut self, merge: bool) {
+        let cfg = &mut self.playback_ctl.audio_cfg;
+        cfg.merge_counter_rests = merge;
+        cfg.counter.respell(merge);
+        if self.edited_voice() == Voice::Lower
+            && let Some(bar) = self.editor.score.measures.first().and_then(|m| respell(m, merge))
+        {
+            self.editor.score = Score::single(bar);
+            self.editor.cursor = Cursor::start();
+        }
     }
 
     /// Move the counter click starting at beat `idx` to its next level, and
@@ -777,6 +794,7 @@ fn level_label(level: ClickLevel) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use grooph_measure::counter::counter_bar;
     use grooph_measure::notation::parse_score;
 
     fn bar(text: &str) -> Measure {
@@ -969,6 +987,27 @@ mod tests {
         assert_eq!(app.editor.metronome.voice, Voice::Upper);
         let counter = app.playback_ctl.audio_cfg.counter.for_meter(TimeSignature::FOUR_FOUR);
         assert_eq!(counter.and_then(ratio_of), Some(Ratio { n: 5, span: 4 }));
+    }
+
+    #[test]
+    fn merging_rests_respells_the_counter_and_keeps_its_ratio() {
+        let mut app = metronome_app();
+        let ts: TimeSignature = "5/4".parse().unwrap();
+        app.set_metronome_meter(ts);
+        let ratio = Ratio { n: 2, span: 5 };
+        app.set_counter_ratio(Some(ratio));
+        app.set_merge_counter_rests(false);
+        let even = app.counter_bar().cloned().unwrap();
+        assert!(same_bar(&even, &counter_bar_with(ts, ratio, false).unwrap()));
+        assert_eq!(counter_ratio(&even), Some((ratio, false)));
+        // A ratio picked now is written the same way...
+        app.set_counter_ratio(None);
+        app.set_counter_ratio(Some(ratio));
+        assert!(same_bar(app.counter_bar().unwrap(), &even));
+        // ...until rests are merged again, while editing the counter too.
+        app.select_voice(Voice::Lower);
+        app.set_merge_counter_rests(true);
+        assert!(same_bar(app.counter_bar().unwrap(), &counter_bar(ts, ratio).unwrap()));
     }
 
     #[test]

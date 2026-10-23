@@ -40,6 +40,9 @@ pub(crate) struct AudioConfig {
     pub(crate) click: ClickBars,
     /// The counter rhythm of each meter that has one.
     pub(crate) counter: CounterBars,
+    /// Counter bars merge the rests between their clicks (see
+    /// [`grooph_measure::counter::counter_bar_with`]).
+    pub(crate) merge_counter_rests: bool,
 }
 
 impl AudioConfig {
@@ -61,6 +64,7 @@ impl Default for AudioConfig {
             ramp: TempoRamp::default(),
             click: ClickBars::default(),
             counter: CounterBars::default(),
+            merge_counter_rests: true,
         }
     }
 }
