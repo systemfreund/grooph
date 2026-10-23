@@ -148,7 +148,7 @@ impl Measure {
 
         // The grid alone may accept more rational durations than the configured
         // DurationSet officially supports - reject the latter.
-        if !DEFAULT_GRID.durations.contains(&beat.duration) {
+        if !DEFAULT_GRID.supports(&beat.duration) {
             return Err(MeasureError::Unfillable {
                 attempted: DEFAULT_GRID.ticks_to_whole_notes(new_ticks),
             });
