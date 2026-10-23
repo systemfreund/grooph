@@ -30,7 +30,7 @@ use grooph_measure::click::{ClickLevel, default_click_bar, subdivided_click_bar}
 use grooph_measure::counter::{
     CounterBars, Ratio, click_level, counter_bar, counter_clicks, counter_ratios, ratio_of,
 };
-use grooph_measure::duration::Duration;
+use grooph_measure::duration::{Duration, TupletKind};
 use grooph_measure::grid::DEFAULT_GRID;
 use grooph_measure::score::Score;
 use grooph_measure::tempo::ScoreTiming;
@@ -135,10 +135,11 @@ fn arc(center: Pos2, radius: f32, start: f32, end: f32) -> Vec<Pos2> {
 }
 
 /// Ready-made click bars of `ts`: the default, then every beat unit split
-/// into 1 to 4 clicks, each with a name. Bars alike are offered once.
+/// into 1 to 9 clicks where the meter allows, each with a name. Bars alike
+/// are offered once.
 pub(crate) fn click_fills(ts: TimeSignature) -> Vec<(Measure, String)> {
     let mut fills = vec![(default_click_bar(ts), "Main beats".to_owned())];
-    for parts in 1..=4 {
+    for parts in 1..=9 {
         let Some(bar) = subdivided_click_bar(ts, parts) else {
             continue;
         };
@@ -161,9 +162,16 @@ pub(crate) fn meter_click_bar(ts: TimeSignature) -> Measure {
     }
 }
 
+/// Name of a fill whose clicks are `d` long. Triplets name their note
+/// value; the longer tuplets come once per meter and go by their kind
+/// alone, so the name fits a tile on a phone.
 fn fill_name(d: Duration) -> String {
     let base = d.base_note().name();
-    if d.is_tuplet() { format!("{base} triplets") } else { format!("{base}s") }
+    match d.as_tuplet_spec().map(|t| t.kind()) {
+        Some(TupletKind::Triplet) => format!("{base} triplets"),
+        Some(kind) => kind.name().map_or_else(|| format!("{base}s"), |k| format!("{k}s")),
+        None => format!("{base}s"),
+    }
 }
 
 /// The ratio a counter bar plays, and whether its clicks were edited since
@@ -819,11 +827,30 @@ mod tests {
         // One click per quarter is the default bar already.
         assert_eq!(
             names(TimeSignature::FOUR_FOUR),
-            ["Main beats", "Eighths", "Eighth triplets", "Sixteenths"]
+            [
+                "Main beats",
+                "Eighths",
+                "Eighth triplets",
+                "Sixteenths",
+                "Quintuplets",
+                "Sextuplets",
+                "Septuplets",
+                "Thirty-seconds",
+                "Nonuplets",
+            ]
         );
         assert_eq!(
             names(TimeSignature::SIX_EIGHT),
-            ["Main beats", "Eighths", "Sixteenths", "Sixteenth triplets", "Thirty-seconds"]
+            [
+                "Main beats",
+                "Eighths",
+                "Sixteenths",
+                "Sixteenth triplets",
+                "Thirty-seconds",
+                "Quintuplets",
+                "Sextuplets",
+                "Septuplets",
+            ]
         );
     }
 

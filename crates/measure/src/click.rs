@@ -250,7 +250,7 @@ mod tests {
         assert!(first(three, 6).starts_with(">st16 (st16) (st16) (st16) (st16) (st16) st16 "));
         assert!(first(three, 7).starts_with(">spt16 "));
         assert!(first(three, 8).starts_with(">th (th) "));
-        assert!(first(three, 9).starts_with(">nt32 "));
+        assert!(first(three, 9).starts_with(">9:8th "));
         assert_eq!(subdivided_click_bar(three, 7).unwrap().beats().len(), 21);
         // Over an eighth, five or seven thirty-seconds in the time of four.
         let six = TimeSignature::SIX_EIGHT;
