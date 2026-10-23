@@ -43,8 +43,8 @@ pub(crate) struct AudioConfig {
     /// Counter bars merge the rests between their clicks (see
     /// [`grooph_measure::counter::counter_bar_with`]).
     pub(crate) merge_counter_rests: bool,
-    /// The counter staff beams over its rests, drawn as stemlets; its bars
-    /// then write every rest as long as the click.
+    /// The counter staff beams over its rests, drawn as stemlets (the
+    /// default); its bars then write every rest as long as the click.
     pub(crate) counter_stemlets: bool,
 }
 
@@ -74,7 +74,7 @@ impl Default for AudioConfig {
             click: ClickBars::default(),
             counter: CounterBars::default(),
             merge_counter_rests: true,
-            counter_stemlets: false,
+            counter_stemlets: true,
         }
     }
 }

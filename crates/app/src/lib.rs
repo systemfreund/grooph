@@ -178,7 +178,7 @@ impl Default for PersistedState {
             click_bars: ClickBars::default(),
             counter_bars: CounterBars::default(),
             merge_counter_rests: true,
-            counter_stemlets: false,
+            counter_stemlets: true,
             metronome_meter: TimeSignature::FOUR_FOUR,
             tab: CompactTab::Practice,
         }
@@ -706,8 +706,14 @@ impl Grooph {
             Some(LinkContent::Metronome(ts)) => {
                 self.stop_transport();
                 self.editor.metronome.meter = ts;
-                // The meter plays the link's counter rhythm, or none.
-                self.playback_ctl.audio_cfg.counter.set(ts, link.counter.clone());
+                // The meter plays the link's counter rhythm, or none,
+                // spelled as the settings say.
+                let merge = self.playback_ctl.audio_cfg.spells_merged_counter_rests();
+                let counter = link
+                    .counter
+                    .clone()
+                    .map(|bar| grooph_measure::counter::respell(&bar, merge).unwrap_or(bar));
+                self.playback_ctl.audio_cfg.counter.set(ts, counter);
             }
             Some(LinkContent::Generator { settings, seed }) => {
                 self.stop_transport();
@@ -1134,7 +1140,13 @@ impl Grooph {
                     gap: state.gap_click,
                     ramp: state.tempo_ramp,
                     click: state.click_bars,
-                    counter: state.counter_bars,
+                    // Saved before stemlets were the default, or by an
+                    // older version: spell the bars as the settings say.
+                    counter: {
+                        let mut counter = state.counter_bars;
+                        counter.respell(state.merge_counter_rests && !state.counter_stemlets);
+                        counter
+                    },
                     merge_counter_rests: state.merge_counter_rests,
                     counter_stemlets: state.counter_stemlets,
                 },

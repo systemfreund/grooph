@@ -1026,6 +1026,9 @@ mod tests {
         let mut app = metronome_app();
         let ts: TimeSignature = "5/4".parse().unwrap();
         app.set_metronome_meter(ts);
+        // Stemlets are on until switched off.
+        assert!(app.playback_ctl.audio_cfg.counter_stemlets);
+        app.set_counter_stemlets(false);
         let ratio = Ratio { n: 2, span: 5 };
         app.set_counter_ratio(Some(ratio));
         app.set_merge_counter_rests(false);
