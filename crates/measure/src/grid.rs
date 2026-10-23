@@ -8,7 +8,7 @@ pub const DEFAULT_GRID: Grid = Grid::from_durations(&COMMON_DURATIONS);
 /// Most notes of a tuplet outside [`COMMON_DURATIONS`].
 pub const MAX_GENERAL_TUPLET: u8 = 16;
 
-const NOTE_VALUES: [NoteValue; 6] = [
+pub(crate) const NOTE_VALUES: [NoteValue; 6] = [
     NoteValue::Whole,
     NoteValue::Half,
     NoteValue::Quarter,
