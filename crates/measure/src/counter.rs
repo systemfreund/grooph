@@ -6,10 +6,9 @@
 //! like a click bar (see [`crate::click`]): its notes click at their level,
 //! rests are silent. The clicks take the simplest note value that is exactly
 //! as long; where there is none (three against four has no half-note
-//! triplet), a shorter value with rests up to the next click: one rest if a
-//! plain value is that long, else merged up to the next beat and then by
-//! whole beats where that saves rests. [`CounterBars`]
-//! keeps the counter rhythm of each meter that has one.
+//! triplet), a shorter value with as few rests up to the next click as keep
+//! to the beats. [`CounterBars`] keeps the counter rhythm of each meter that
+//! has one.
 
 use crate::click::{ClickLevel, same_bar};
 use crate::duration::{Duration, TupletSpec};
@@ -18,6 +17,7 @@ use crate::math::gcd;
 use crate::notation::{code_of, parse_score};
 use crate::{BeatKind, Measure, TimeSignature};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 /// Most clicks a counter rhythm offers per span.
 const MAX_CLICKS: u8 = 9;
@@ -71,9 +71,7 @@ pub fn counter_bar(ts: TimeSignature, ratio: Ratio) -> Option<Measure> {
         for click in 0..clicks {
             let start = click * click_ticks;
             tokens.push(code.to_string());
-            let merged = rests(start + ticks, start + click_ticks, d, ticks, &windows);
-            let even = (1..click_ticks / ticks).map(|_| format!("r:{code}")).collect::<Vec<_>>();
-            tokens.extend(if merged.len() < even.len() { merged } else { even });
+            tokens.extend(rests(start + ticks, start + click_ticks, d, ticks, &windows));
         }
         parse_score(&format!("{ts} {}", tokens.join(" "))).ok()?.measures.into_iter().next()
     })
@@ -95,33 +93,62 @@ fn beat_windows(ts: TimeSignature) -> Vec<(u32, u32)> {
 }
 
 /// The rests from tick `from` to the next click at `to`, after a click of
-/// value `d` (`ticks` long), merged the way rests are written: inside a
-/// group of tuplet `d` they stay `d`; elsewhere they fill up to the next
-/// beat group, then take whole groups.
+/// value `d` (`ticks` long): as few as possible, without cutting a group of
+/// tuplet `d` (inside one they stay `d`) or running over a beat group
+/// (except whole groups from the start of one). Among as few, the one with
+/// most rests at a multiple of their own length into their beat group.
 fn rests(from: u32, to: u32, d: Duration, ticks: u32, windows: &[(u32, u32)]) -> Vec<String> {
     let group = match d {
-        Duration::Tuplet(TupletSpec { n, .. }) => ticks * u32::from(n),
-        _ => ticks,
+        Duration::Tuplet(TupletSpec { n, .. }) => Some(ticks * u32::from(n)),
+        _ => None,
     };
-    // Plain rests only between whole tuplet groups.
-    let plain_from = from.next_multiple_of(group).min(to);
-    let plain_to = (to / group * group).max(plain_from);
     let code = code_of(&d).unwrap_or_default();
-    // One rest up to the next click when a plain value is exactly that long,
-    // even across a beat: the fewest symbols between two clicks. After a
-    // tuplet only between whole groups of it.
-    if from.is_multiple_of(group)
-        && to.is_multiple_of(group)
-        && let Some(single) = PLAIN_RESTS.into_iter().find(|&c| rest_ticks(c) == Some(to - from))
-    {
-        return vec![format!("r:{single}")];
+    // After a tuplet, plain rests only fill the whole groups of it up to the
+    // group of the next click; the rest stay tuplets.
+    let (plain_from, plain_to) = match group {
+        Some(g) => {
+            let plain_from = from.next_multiple_of(g).min(to);
+            (plain_from, (to / g * g).max(plain_from))
+        }
+        None => (from, to),
+    };
+    // The rests that may start at `at`: (code, length, on its own grid).
+    let moves = |at: u32| {
+        let mut moves = Vec::new();
+        if !(plain_from..plain_to).contains(&at) {
+            moves.push((code, ticks, true));
+            return moves;
+        }
+        for c in PLAIN_RESTS {
+            let Some(len) = rest_ticks(c) else { continue };
+            if at + len > plain_to {
+                continue;
+            }
+            if let Some(on_grid) = keeps_to_the_beats(at, len, c.ends_with('.'), windows) {
+                moves.push((c, len, on_grid));
+            }
+        }
+        moves
+    };
+    // Fewest rests (then fewest off their grid) from each tick to `to`,
+    // filled backwards on a grid every rest length divides.
+    let step = PLAIN_RESTS.iter().filter_map(|&c| rest_ticks(c)).fold(ticks, gcd);
+    let mut best: BTreeMap<u32, ((usize, usize), &str, u32)> = BTreeMap::new();
+    for at in (0..(to - from) / step).rev().map(|k| from + k * step) {
+        let choice = moves(at)
+            .into_iter()
+            .filter_map(|(code, len, on_grid)| {
+                let (n, off) = if at + len == to { (0, 0) } else { best.get(&(at + len))?.0 };
+                Some(((n + 1, off + usize::from(!on_grid)), code, len))
+            })
+            .min_by_key(|&(c, ..)| c);
+        if let Some(choice) = choice {
+            best.insert(at, choice);
+        }
     }
-    let mut tokens: Vec<String> = Vec::new();
+    let mut tokens = Vec::new();
     let mut at = from;
-    while at < to {
-        let plain = (plain_from..plain_to).contains(&at);
-        let rest = if plain { plain_rest(at, plain_to, windows) } else { None };
-        let (code, len) = rest.unwrap_or((code, ticks));
+    while let Some(&(_, code, len)) = best.get(&at) {
         tokens.push(format!("r:{code}"));
         at += len;
     }
@@ -135,20 +162,20 @@ fn rest_ticks(code: &str) -> Option<u32> {
     DEFAULT_GRID.ticks_of(&crate::notation::duration_of_code(code)?)
 }
 
-/// The longest plain rest at tick `at`, ending by `to`, that keeps to the
-/// beat groups: within one group, or whole undotted groups from the start
-/// of one at a multiple of its own length.
-fn plain_rest(at: u32, to: u32, windows: &[(u32, u32)]) -> Option<(&'static str, u32)> {
+/// Whether a plain rest `len` long at tick `at` keeps to the beat groups:
+/// within one group, or whole groups from the start of one at a multiple of
+/// its own length (not dotted). `Some(on_grid)`, where `on_grid` is whether
+/// it starts at a multiple of its length into its group.
+fn keeps_to_the_beats(at: u32, len: u32, dotted: bool, windows: &[(u32, u32)]) -> Option<bool> {
     let &(start, end) = windows.iter().find(|&&(s, e)| (s..e).contains(&at))?;
-    PLAIN_RESTS.into_iter().find_map(|code| {
-        let len = rest_ticks(code)?;
-        let fits = at + len <= end
-            || (at == start
-                && at.is_multiple_of(len)
-                && windows.iter().any(|&(_, e)| e == at + len)
-                && !code.ends_with('.'));
-        (fits && at + len <= to).then_some((code, len))
-    })
+    if at + len <= end {
+        return Some((at - start).is_multiple_of(len));
+    }
+    let whole = at == start
+        && at.is_multiple_of(len)
+        && windows.iter().any(|&(_, e)| e == at + len)
+        && !dotted;
+    whole.then_some(true)
 }
 
 /// Whether a group of tuplet `d` (each `ticks` long) lies on the beats:
@@ -350,11 +377,11 @@ mod tests {
 
     #[test]
     fn clicks_over_an_odd_number_of_beats_rest_up_to_the_next() {
-        // One rest up to the next click where a plain value is that long.
-        assert_eq!(bar("5/4", 2, 5), "5/4 e r:h e r:h");
-        assert_eq!(bar("7/8", 4, 7), "7/8 th r:e. th r:e. th r:e. th r:e.");
-        // Otherwise rests fill up to the next beat, then take whole beats;
-        // inside a triplet they stay triplets.
+        // As few rests as keep to the beats: one where it fits in a beat...
+        assert_eq!(bar("7/8", 4, 7), "7/8 th r:e. th r:e. th r:th r:e r:th th r:e.");
+        // ...whole beats from the start of one, never over a beat.
+        assert_eq!(bar("5/4", 2, 5), "5/4 e r:e r:q r:e e r:q r:q");
+        // Inside a triplet they stay triplets.
         assert_eq!(bar("5/4", 3, 5), "5/4 t8 r:t8 r:t8 r:t8 r:t8 t8 r:q r:t8 t8 r:t8 r:q");
         // After a tuplet too, between whole groups of it.
         assert_eq!(
