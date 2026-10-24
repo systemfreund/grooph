@@ -302,6 +302,13 @@ impl Grooph {
     }
 }
 
+/// Padding (px) between a [`notation_button`]'s frame and its notes.
+const NOTATION_PADDING: f32 = 4.0;
+/// Height of a quarter note's ink (stem and head) in em, as drawn here.
+const QUARTER_INK_EM: f32 = 0.85;
+/// Margin around the notes inside their tile, as a share of its height.
+const NOTATION_MARGIN: f32 = 0.08;
+
 /// A button `size` high showing `measure` as miniature notation (tool
 /// palette, grouping picker). `selected` renders it in the highlighted state.
 pub(crate) fn notation_button(
@@ -312,11 +319,17 @@ pub(crate) fn notation_button(
     selected: bool,
     size: f32,
 ) -> Response {
-    let symbol = Atom::custom(symbol_id, notation_size(measure, size));
+    // The notes take most of the button's padding, the button keeps its
+    // size.
+    let padding = ui.spacing().button_padding;
+    let room = 2.0 * (padding - Vec2::splat(NOTATION_PADDING)).max(Vec2::ZERO);
+    let symbol = Atom::custom(symbol_id, notation_size(measure, size) + room);
+    ui.spacing_mut().button_padding = padding.min(Vec2::splat(NOTATION_PADDING));
     let button = Button::new(symbol)
         .corner_radius(TOOL_PALETTE_BUTTON_CORNER_RADIUS)
         .selected(selected)
         .atom_ui(ui);
+    ui.spacing_mut().button_padding = padding;
     if let Some(rect) = button.rect(symbol_id) {
         let color = ui.style().visuals.text_color();
         paint_notation(ui, rect, measure, family, color);
@@ -388,31 +401,21 @@ pub(crate) fn paint_notation(
         // Probe pass: lay the measure out at the size chosen from the
         // template beat, then take the ink of what it draws (note glyphs
         // incl. flags, and tuplet brackets/numbers) instead of
-        // trusting the fixed factors above. A trailing unbeamed flagged
-        // note can overhang the nominal layout width, and a tuplet number
-        // sitting close to the top of the tile can overhang its height;
-        // shrink and recenter to fit whichever axis overflows.
+        // trusting the fixed factors above. Scale it to fill the tile
+        // along whichever axis it reaches first, and center it: a
+        // trailing unbeamed flag or a tuplet number stays inside, a single
+        // note grows to the tile's height.
         let content = notes_ink(&build_measure_layout(measure, &make_opts(em, rect)));
-
-        let pad = em * 0.08;
-        let avail = rect.shrink(pad);
+        let avail = rect.shrink(NOTATION_MARGIN * rect.height());
         let content_size = Vec2::new((content.width()).max(1.0), (content.height()).max(1.0));
-
-        let (final_em, final_rect) = if content_size.x > avail.width()
-            || content_size.y > avail.height()
-            || !avail.contains_rect(content)
-        {
-            let scale =
-                (avail.width() / content_size.x).min(avail.height() / content_size.y).min(1.0);
-            let shrunk_em = em * scale;
-            // Re-measure at the shrunk size (glyph widths don't scale
-            // perfectly linearly) and recenter the content in the tile.
-            let content2 = notes_ink(&build_measure_layout(measure, &make_opts(shrunk_em, rect)));
-            let shift = rect.center() - content2.center();
-            (shrunk_em, rect.translate(shift))
-        } else {
-            (em, rect)
-        };
+        let scale = (avail.width() / content_size.x).min(avail.height() / content_size.y);
+        // No glyph larger than a quarter note filling the tile would be:
+        // rests and flags keep their size next to the notes.
+        let fitted_em = (em * scale).min(avail.height() / QUARTER_INK_EM);
+        // Re-measure at the new size (glyph widths don't scale perfectly
+        // linearly) and center the content in the tile.
+        let fitted = notes_ink(&build_measure_layout(measure, &make_opts(fitted_em, rect)));
+        let (final_em, final_rect) = (fitted_em, rect.translate(rect.center() - fitted.center()));
 
         let opts = make_opts(final_em, final_rect);
         let measure_layout = build_measure_layout(measure, &opts);
