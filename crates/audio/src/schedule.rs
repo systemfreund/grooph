@@ -270,6 +270,32 @@ mod tests {
     }
 
     #[test]
+    fn meters_never_set_click_their_beat_unit() {
+        // 4/4 then 5/8, no click bar set: quarters, then every eighth.
+        let four = TimeSignature::FOUR_FOUR;
+        let five = TimeSignature::FIVE_EIGHT;
+        let score = Score { measures: vec![Measure::new(four), Measure::new(five)] };
+        let timing = ScoreTiming::from_score(&score, 120);
+        let s = Schedule::build(&score, &timing, None, &ClickBars::default());
+        let quarter = DEFAULT_GRID.ticks_per_beat(&four) as u64;
+        let eighth = DEFAULT_GRID.ticks_per_beat(&five) as u64;
+        let bar_two = 4 * quarter;
+        let click_ticks: Vec<u64> = s
+            .map
+            .iter()
+            .filter(|(_, sounds)| {
+                sounds.iter().any(|x| {
+                    matches!(x, SoundType::Downbeat | SoundType::PrimaryBeat | SoundType::SoftBeat)
+                })
+            })
+            .map(|(&t, _)| t)
+            .collect();
+        let expected: Vec<u64> =
+            (0..4).map(|i| i * quarter).chain((0..5).map(|i| bar_two + i * eighth)).collect();
+        assert_eq!(click_ticks, expected);
+    }
+
+    #[test]
     fn click_pattern_sets_the_sound_of_each_group() {
         let eighth = DEFAULT_GRID.ticks_per_beat(&TimeSignature::SEVEN_EIGHT) as u64;
         assert_eq!(

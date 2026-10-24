@@ -6,10 +6,10 @@
 //! ([`ClickLevel::Off`]). Tuplets and dotted notes work like in any rhythm,
 //! so "eighth, then a triplet without its middle note" is just a bar.
 //!
-//! The default bar has one note per beat group of [`TimeSignature::groups`],
-//! as long as the group, the first one accented: the downbeat and primary
-//! beats as they always sounded. [`ClickBars`] keeps the bars that differ
-//! from it, one per meter, so every measure in that meter clicks the same.
+//! A meter starts with its [`meter_click_bar`]: x/4 clicks one note per beat
+//! group of [`TimeSignature::groups`] ([`default_click_bar`]), x/8 and x/16
+//! every eighth or sixteenth. [`ClickBars`] keeps the bars that differ from
+//! it, one per meter, so every measure in that meter clicks the same.
 
 use crate::BeatKind::{Note, Rest};
 use crate::duration::{Duration, TupletSpec};
@@ -143,12 +143,22 @@ pub fn subdivided_click_bar(ts: TimeSignature, parts: u32) -> Option<Measure> {
     parse_bar(&ts, &tokens)
 }
 
+/// Click bar a meter starts with: x/4 clicks its beats, x/8 and x/16 every
+/// eighth or sixteenth.
+pub fn meter_click_bar(ts: TimeSignature) -> Measure {
+    if ts.beat_unit > 4 {
+        subdivided_click_bar(ts, 1).unwrap_or_else(|| default_click_bar(ts))
+    } else {
+        default_click_bar(ts)
+    }
+}
+
 /// Whether two bars hold the same meter and beats.
 pub(crate) fn same_bar(a: &Measure, b: &Measure) -> bool {
     a.time_signature() == b.time_signature() && a.beats() == b.beats()
 }
 
-/// The click bar of every meter: the default unless one was set.
+/// The click bar of every meter: its [`meter_click_bar`] unless one was set.
 #[derive(Clone, Default, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct ClickBars {
@@ -174,19 +184,19 @@ impl Eq for ClickBars {}
 impl ClickBars {
     /// The bar `ts` clicks.
     pub fn for_meter(&self, ts: TimeSignature) -> Measure {
-        self.custom_for(ts).cloned().unwrap_or_else(|| default_click_bar(ts))
+        self.custom_for(ts).cloned().unwrap_or_else(|| meter_click_bar(ts))
     }
 
-    /// The bar of `ts` if it is not the default.
+    /// The bar of `ts` if it is not its [`meter_click_bar`].
     pub fn custom_for(&self, ts: TimeSignature) -> Option<&Measure> {
         self.custom.iter().find(|m| m.time_signature() == ts)
     }
 
-    /// Set the bar of its meter; the default bar is not stored.
+    /// Set the bar of its meter; the meter's own bar is not stored.
     pub fn set(&mut self, bar: Measure) {
         let ts = bar.time_signature();
         self.custom.retain(|m| m.time_signature() != ts);
-        if !same_bar(&bar, &default_click_bar(ts)) {
+        if !same_bar(&bar, &meter_click_bar(ts)) {
             self.custom.push(bar);
         }
     }
@@ -270,10 +280,26 @@ mod tests {
         bars.set(bar);
         assert_eq!(text(&bars.for_meter(seven)), "7/8 >q r:q. q");
         // Another grouping of 7/8 is another meter.
-        assert_eq!(text(&bars.for_meter(seven.with_grouping(1))), "2+2+3/8 >q q q.");
+        let other = seven.with_grouping(1);
+        assert_eq!(text(&bars.for_meter(other)), "2+2+3/8 >e (e) e (e) e (e) (e)");
         assert_eq!(text(&bars.for_meter(TimeSignature::FOUR_FOUR)), "4/4 >q q q q");
-        // Setting the default forgets the custom bar.
-        bars.set(default_click_bar(seven));
+        // Setting the meter's own bar forgets the custom bar.
+        bars.set(meter_click_bar(seven));
         assert_eq!(bars, ClickBars::default());
+    }
+
+    #[test]
+    fn meters_click_their_beat_unit_until_one_is_set() {
+        // Never picked in the metronome: x/8 clicks every eighth, x/4 its beats.
+        let bars = ClickBars::default();
+        let five = TimeSignature::FIVE_EIGHT;
+        assert_eq!(text(&bars.for_meter(five)), "5/8 >e (e) (e) e (e)");
+        assert_eq!(text(&bars.for_meter(TimeSignature::SIX_EIGHT)), "6/8 >e (e) (e) e (e) (e)");
+        assert_eq!(bars.for_meter("5/16".parse().unwrap()).beats().len(), 5);
+        assert_eq!(text(&bars.for_meter(TimeSignature::THREE_FOUR)), "3/4 >q q q");
+        // The main beats alone are a bar of their own in x/8.
+        let mut bars = ClickBars::default();
+        bars.set(default_click_bar(five));
+        assert_eq!(text(&bars.for_meter(five)), "5/8 >q. q");
     }
 }
