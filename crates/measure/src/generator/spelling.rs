@@ -10,12 +10,17 @@
 //! written as one value: from a beat as a dotted quarter or half, from the
 //! "and" as a quarter or dotted quarter. In `x/4` the beats are grouped
 //! like the eighths of `n/8` (4/4 = 2+2, 5/4 = 3+2, ...) and a note leaves
-//! its group only in the two syncopations centred on the group boundary
-//! (`4 2 4` and `8 4 8` over the middle of a 4/4 bar), so the boundary
-//! otherwise stays visible; the same groups merge two silent beats into a
-//! half rest. In `x/8` and `x/16` a
+//! its group only as a half centred on the group boundary (`4 2 4` over the
+//! middle of a 4/4 bar), so the boundary otherwise stays visible; the same
+//! groups merge two silent beats into a half rest. In `x/8` and `x/16` a
 //! note stays in its beat group. A note that cannot be written as long as
 //! drawn is shortened; its onset never moves.
+//!
+//! A note from the "and" over a beat needs eighths around it: with a
+//! sixteenth, a dotted eighth or an offbeat sixteenth start in the beat it
+//! starts or ends in, the figure is read in quarters and the note would hide
+//! the beat (`16 16 4 8`). Such a note is shortened, and the beat it ends in
+//! keeps eighth values (two-level rhythmic parsing).
 //!
 //! Triplet beats are written as drawn and end every note before them. A
 //! beat rest from the "space" setting takes no sustained note either, so
@@ -139,15 +144,32 @@ fn fits(spans: &[Span], start: u32, len: u32) -> bool {
             _ => false,
         };
     }
-    // Into the next group only centred on the boundary: `4 2 4`, `8 4 8`.
+    // Into the next group only as a half centred on the boundary: `4 2 4`.
     let boundary = spans.iter().find(|b| b.group == last.group).unwrap().start;
-    last.group == beat.group + 1
-        && start + len / 2 == boundary
-        && matches!((offset, len), (0, 8) | (2, 4))
+    last.group == beat.group + 1 && start + len / 2 == boundary && (offset, len) == (0, 8)
+}
+
+/// Index of the beat that holds `tick`.
+fn beat_at(spans: &[Span], tick: u32) -> usize {
+    spans.iter().position(|b| b.start <= tick && tick < b.end()).expect("tick in measure")
+}
+
+/// Mark the beat of a value at `start` as read in sixteenths when the value
+/// is a sixteenth or dotted eighth, or starts off the eighth grid.
+fn mark_fine(spans: &[Span], start: u32, len: u32, fine: &mut [bool]) {
+    if start % 2 == 1 || len % 2 == 1 {
+        fine[beat_at(spans, start)] = true;
+    }
 }
 
 /// Rest values for `start..end` inside free (not verbatim) beats.
-fn push_rests(spans: &[Span], mut start: u32, end: u32, out: &mut Vec<(Duration, bool)>) {
+fn push_rests(
+    spans: &[Span],
+    mut start: u32,
+    end: u32,
+    fine: &mut [bool],
+    out: &mut Vec<(Duration, bool)>,
+) {
     while start < end {
         let i = spans.iter().position(|b| b.start <= start && start < b.end()).unwrap();
         let beat = spans[i];
@@ -171,6 +193,7 @@ fn push_rests(spans: &[Span], mut start: u32, end: u32, out: &mut Vec<(Duration,
                 _ => 1,
             }
         };
+        mark_fine(spans, start, len, fine);
         out.push((duration_of(len), false));
         start += len;
     }
@@ -191,6 +214,14 @@ pub(super) fn spell(
         .flat_map(|(d, b)| d.figure.pattern.onset_slots().map(move |slot| b.start + slot))
         .collect();
 
+    // Beats read in sixteenths: their figure has a note off the eighth grid,
+    // or a sixteenth or dotted value was written in them.
+    let mut fine: Vec<bool> = spans
+        .iter()
+        .map(|b| !b.verbatim && onsets.iter().any(|&o| b.start <= o && o < b.end() && o % 2 == 1))
+        .collect();
+    // Beats a syncopated note ends in: their values stay eighths or longer.
+    let mut coarse = vec![false; spans.len()];
     let mut out = Vec::new();
     // Start of the time not yet written in the current run of free beats.
     let mut written = 0;
@@ -202,7 +233,7 @@ pub(super) fn spell(
             continue;
         }
         while let Some(onset) = next_onset.next_if(|&o| o < beat.end()) {
-            push_rests(&spans, written, onset, &mut out);
+            push_rests(&spans, written, onset, &mut fine, &mut out);
             // A note sounds at most up to the next onset, a triplet beat or
             // a space rest.
             let barrier = spans[i + 1..]
@@ -218,23 +249,37 @@ pub(super) fn spell(
             } else {
                 longest.min(beat.end() - onset)
             };
+            // After a syncopation the beat stays in eighths.
+            let wanted = if coarse[i] { wanted.max(2) } else { wanted };
             // Without short notes a note ends on the next onset or a beat.
             let ends_well = |len: u32| {
                 style.short_notes
                     || onset + len == limit
                     || spans.iter().any(|b| b.end() == onset + len)
             };
+            // Over a beat from its "and" only between beats read in eighths.
+            let syncopated = |len: u32| onset != beat.start && onset + len > beat.end();
+            let in_eighths = |len: u32| {
+                if coarse[i] && len % 2 == 1 {
+                    return false;
+                }
+                !syncopated(len) || !fine[i] && !fine[beat_at(&spans, onset + len - 1)]
+            };
             let len = (1..=wanted)
                 .rev()
                 .filter(|len| len % style.step == 0 && ends_well(*len))
-                .find(|&len| fits(&spans, onset, len))
+                .find(|&len| fits(&spans, onset, len) && in_eighths(len))
                 .unwrap_or(style.step);
+            if syncopated(len) {
+                coarse[beat_at(&spans, onset + len - 1)] = true;
+            }
+            mark_fine(&spans, onset, len, &mut fine);
             out.push((duration_of(len), true));
             written = onset + len;
         }
         let run_ends = spans.get(i + 1).is_none_or(|n| n.verbatim);
         if run_ends {
-            push_rests(&spans, written, beat.end(), &mut out);
+            push_rests(&spans, written, beat.end(), &mut fine, &mut out);
             written = beat.end();
         }
     }
@@ -257,13 +302,15 @@ pub(super) fn legato(len: u32, onsets: u8) -> Vec<(Duration, bool)> {
     let starts: Vec<u32> = (0..len).filter(|slot| onsets & 1 << slot != 0).collect();
     let mut out = Vec::new();
     let mut written = 0;
+    // A single beat: nothing runs over a beat, so nobody reads this.
+    let mut fine = [false];
     for (i, &start) in starts.iter().enumerate() {
-        push_rests(&spans, written, start, &mut out);
+        push_rests(&spans, written, start, &mut fine, &mut out);
         let limit = starts.get(i + 1).copied().unwrap_or(len);
         let note = (1..=limit - start).rev().find(|&n| fits(&spans, start, n)).unwrap_or(1);
         out.push((duration_of(note), true));
         written = start + note;
     }
-    push_rests(&spans, written, len, &mut out);
+    push_rests(&spans, written, len, &mut fine, &mut out);
     out
 }
