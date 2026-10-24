@@ -879,6 +879,10 @@ impl Grooph {
         if self.playback_ctl.transport_state == TransportState::Playing {
             return;
         }
+        // Each run of endless mode is a new one, from two fresh bars.
+        if self.editor.generator.endless && !self.metronome_mode() {
+            self.generate_new_score();
+        }
         self.playback_ctl.transport_state = TransportState::Playing;
         let midi_connected =
             self.playback_ctl.midi.input.as_ref().is_some_and(|input| input.is_connected());

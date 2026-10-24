@@ -638,24 +638,26 @@ impl Grooph {
 
         let side_fill = ui.visuals().extreme_bg_color;
         let text = ui.visuals().strong_text_color();
-        let roll = round_button_at(
-            ui,
-            new_rect,
-            Id::unique("compact_new"),
-            side_fill,
-            text,
-            |painter, rect, color| {
-                painter.text(
-                    rect.center(),
-                    Align2::CENTER_CENTER,
-                    "🎲",
-                    FontId::proportional(32.0),
-                    color,
-                );
-            },
-        )
-        .on_hover_text("New rhythm")
-        .clicked();
+        // Endless mode rolls new bars by itself, and each play starts afresh.
+        let roll = !self.editor.generator.endless
+            && round_button_at(
+                ui,
+                new_rect,
+                Id::unique("compact_new"),
+                side_fill,
+                text,
+                |painter, rect, color| {
+                    painter.text(
+                        rect.center(),
+                        Align2::CENTER_CENTER,
+                        "🎲",
+                        FontId::proportional(32.0),
+                        color,
+                    );
+                },
+            )
+            .on_hover_text("New rhythm")
+            .clicked();
 
         let fill = ui.visuals().selection.bg_fill;
         let icon = ui.visuals().selection.stroke.color;

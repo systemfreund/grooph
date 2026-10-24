@@ -127,7 +127,7 @@ Important root files:
   with the same settings. Space and the grouping picker live in the Level
   picker, presets (load, save, update, rename, delete) in the Preset picker.
 - App glue: `crates/app/src/generator.rs`. Endless mode (Bars: Endless)
-  starts with 2 bars and never loops: once the cursor reaches the last measure
+  starts with 2 fresh bars on every play (no 🎲 then) and never loops: once the cursor reaches the last measure
   a new one is added below it, and the first measure is removed once its row
   has scrolled out of view and the audio cursor has left it. Removing it moves
   everything back by its ticks: the audio cursor (`Audio::drop_leading_ticks`,
