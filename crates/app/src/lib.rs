@@ -179,7 +179,7 @@ impl Default for PersistedState {
             counter_bars: CounterBars::default(),
             counter_names: Vec::new(),
             metronome_meter: TimeSignature::FOUR_FOUR,
-            tab: CompactTab::Practice,
+            tab: CompactTab::Metronome,
         }
     }
 }
@@ -1247,12 +1247,13 @@ mod tests {
     }
 
     #[test]
-    fn saved_tab_round_trips_and_older_states_open_practice() {
-        let s = PersistedState { tab: CompactTab::Metronome, ..Default::default() };
+    fn saved_tab_round_trips_and_first_start_opens_metronome() {
+        let s = PersistedState { tab: CompactTab::Edit, ..Default::default() };
         let back: PersistedState = ron::from_str(&ron::to_string(&s).unwrap()).unwrap();
-        assert_eq!(back.tab, CompactTab::Metronome);
+        assert_eq!(back.tab, CompactTab::Edit);
+        assert_eq!(PersistedState::default().tab, CompactTab::Metronome);
         let older: PersistedState = ron::from_str("(version: 2)").unwrap();
-        assert_eq!(older.tab, CompactTab::Practice);
+        assert_eq!(older.tab, CompactTab::Metronome);
     }
 
     #[test]
