@@ -213,7 +213,9 @@ fn notation_value_row(
         return value_row(ui, label, text);
     };
     let resp = value_row(ui, label, "");
-    let color = ui.visuals().weak_text_color();
+    // The weak text color is see-through: laid on the card, so notes that
+    // overlap (heads, stems, beams) don't show their overlaps.
+    let color = card_fill(ui).blend(ui.visuals().weak_text_color());
     let right = resp.rect.right_center() - vec2(28.0, 0.0);
     let at = |size: Vec2| Rect::from_min_size(right - vec2(size.x, size.y / 2.0), size);
     match look {
