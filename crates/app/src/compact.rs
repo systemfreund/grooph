@@ -3,9 +3,10 @@
 //! buttons and a tab bar at the bottom. On wide windows the controls stay a
 //! centered column and the staff gets the full width.
 
+use crate::metronome_view::FillLook;
 use crate::pickers::{Picker, ROW_HEIGHT, swing_label, time_signature_label};
 use crate::share::paint_share_icon;
-use crate::tool_palette::{notation_size, paint_notation};
+use crate::tool_palette::{notation_size, paint_none, paint_notation};
 use crate::{Grooph, Mode, TransportState};
 use eframe::egui;
 use eframe::egui::{
@@ -13,7 +14,6 @@ use eframe::egui::{
     RichText, Sense, Shape, Stroke, Ui, UiBuilder, Vec2, pos2, vec2,
 };
 use grooph_layout::staff_layout::Voice;
-use grooph_measure::Measure;
 use grooph_measure::generator::{Subdivision, effective_subdivision};
 use serde::{Deserialize, Serialize};
 
@@ -200,22 +200,29 @@ fn value_row(ui: &mut Ui, label: &str, value: &str) -> Response {
     resp
 }
 
-/// [`value_row`] showing the value as notes, `text` if there are none.
+/// [`value_row`] showing a subdivision as notes or as "none", `text` if
+/// it is neither.
 fn notation_value_row(
     ui: &mut Ui,
     label: &str,
-    notes: Option<&Measure>,
+    look: Option<&FillLook>,
     text: &str,
     family: FontFamily,
 ) -> Response {
-    let Some(notes) = notes else {
+    let Some(look) = look else {
         return value_row(ui, label, text);
     };
     let resp = value_row(ui, label, "");
-    let size = notation_size(notes, ROW_HEIGHT - 4.0);
+    let color = ui.visuals().weak_text_color();
     let right = resp.rect.right_center() - vec2(28.0, 0.0);
-    let rect = Rect::from_min_size(right - vec2(size.x, size.y / 2.0), size);
-    paint_notation(ui, rect, notes, family, ui.visuals().weak_text_color());
+    let at = |size: Vec2| Rect::from_min_size(right - vec2(size.x, size.y / 2.0), size);
+    match look {
+        FillLook::Notes(notes) => {
+            let rect = at(notation_size(notes, ROW_HEIGHT - 4.0));
+            paint_notation(ui, rect, notes, family, color);
+        }
+        FillLook::NoSubdivision => paint_none(ui.painter(), at(Vec2::splat(ROW_HEIGHT)), color),
+    }
     resp.on_hover_text(text)
 }
 
@@ -505,9 +512,9 @@ impl Grooph {
 
     fn compact_metronome_rows(&mut self, ui: &mut Ui) {
         let family = self.ui.music_font_id.family.clone();
-        let tile = self.click_fill_tile();
+        let look = self.click_fill_look();
         let label = self.click_fill_label();
-        if notation_value_row(ui, "Subdivision", tile.as_ref(), &label, family).clicked() {
+        if notation_value_row(ui, "Subdivision", look.as_ref(), &label, family).clicked() {
             self.ui.picker = Some(Picker::ClickFill);
         }
         if value_row(ui, "Edit clicks", "✏").clicked() {

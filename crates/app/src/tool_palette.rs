@@ -337,6 +337,35 @@ pub(crate) fn notation_button(
     button.response
 }
 
+/// A button like a [`notation_button`] showing "none": a circle struck
+/// through, `size` high.
+pub(crate) fn none_button(ui: &mut Ui, symbol_id: IdSalt, selected: bool, size: f32) -> Response {
+    let padding = ui.spacing().button_padding;
+    let room = 2.0 * (padding - Vec2::splat(NOTATION_PADDING)).max(Vec2::ZERO);
+    let symbol = Atom::custom(symbol_id, Vec2::splat(size) + room);
+    ui.spacing_mut().button_padding = padding.min(Vec2::splat(NOTATION_PADDING));
+    let button = Button::new(symbol)
+        .corner_radius(TOOL_PALETTE_BUTTON_CORNER_RADIUS)
+        .selected(selected)
+        .atom_ui(ui);
+    ui.spacing_mut().button_padding = padding;
+    if let Some(rect) = button.rect(symbol_id) {
+        paint_none(ui.painter(), rect, ui.style().visuals.text_color());
+    }
+    button.response
+}
+
+/// "None" in `rect`: a circle struck through, as on a [`none_button`].
+pub(crate) fn paint_none(painter: &egui::Painter, rect: Rect, color: Color32) {
+    let radius = 0.3 * rect.width().min(rect.height());
+    let stroke = egui::Stroke::new((0.12 * radius).max(1.5), color);
+    let center = rect.center();
+    painter.circle_stroke(center, radius, stroke);
+    // Lower left to upper right.
+    let d = radius * std::f32::consts::FRAC_1_SQRT_2 * Vec2::new(1.0, -1.0);
+    painter.line_segment([center - d, center + d], stroke);
+}
+
 /// Size of a [`notation_button`]'s notes `size` high: tuplets and long rows
 /// of short notes get a wider tile.
 pub(crate) fn notation_size(measure: &Measure, size: f32) -> Vec2 {

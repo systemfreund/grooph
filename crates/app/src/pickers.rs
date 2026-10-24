@@ -5,9 +5,9 @@
 
 use crate::Grooph;
 use crate::generator::ENDLESS_MIN_BARS;
-use crate::metronome_view::{click_fills, ratio_label, same_bar};
+use crate::metronome_view::{FillLook, click_fills, ratio_label, same_bar};
 use crate::presets::{self, PresetId};
-use crate::tool_palette::{TOOL_PALETTE_BUTTON_SIZE, notation_button};
+use crate::tool_palette::{TOOL_PALETTE_BUTTON_SIZE, none_button, notation_button};
 use eframe::egui;
 use eframe::egui::{Button, Color32, FontId, Id, Modal, Response, RichText, Ui, vec2};
 use grooph_audio::CounterSound;
@@ -478,10 +478,13 @@ impl Grooph {
             ui.horizontal_wrapped(|ui| {
                 for (i, fill) in fills.iter().enumerate() {
                     let selected = current == Some(i);
-                    let tile = match &fill.tile() {
-                        Some(tile) => {
-                            let id = egui::IdSalt::new(("click_fill", i));
+                    let id = egui::IdSalt::new(("click_fill", i));
+                    let tile = match &fill.look() {
+                        Some(FillLook::Notes(tile)) => {
                             notation_button(ui, id, tile, family.clone(), selected, FILL_TILE_SIZE)
+                        }
+                        Some(FillLook::NoSubdivision) => {
+                            none_button(ui, id, selected, FILL_TILE_SIZE)
                         }
                         None => ui.add(
                             Button::new(RichText::new(&fill.name).size(18.0))

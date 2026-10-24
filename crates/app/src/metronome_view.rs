@@ -138,16 +138,25 @@ fn arc(center: Pos2, radius: f32, start: f32, end: f32) -> Vec<Pos2> {
 pub(crate) struct ClickFill {
     pub bar: Measure,
     pub name: String,
-    /// Beat units its tile shows: the first beat group for the main beats,
-    /// one for a subdivision.
-    tile_units: u8,
+    /// Whether it splits the beat units: all but the main beats do.
+    subdivides: bool,
+}
+
+/// How a [`ClickFill`] is shown: the main beats as "no subdivision" (in
+/// 5/8 they are a dotted quarter and a quarter, no one note value), the
+/// others as one beat unit of their notes.
+pub(crate) enum FillLook {
+    NoSubdivision,
+    Notes(Measure),
 }
 
 impl ClickFill {
-    /// What its tile shows, every click alike (see [`tile_of`]). Built on
-    /// demand: the label needs only the names.
-    pub(crate) fn tile(&self) -> Option<Measure> {
-        tile_of(&self.bar, self.tile_units)
+    /// How it is shown. Built on demand: the label needs only the names.
+    pub(crate) fn look(&self) -> Option<FillLook> {
+        if !self.subdivides {
+            return Some(FillLook::NoSubdivision);
+        }
+        tile_of(&self.bar, 1).map(FillLook::Notes)
     }
 }
 
@@ -155,11 +164,10 @@ impl ClickFill {
 /// into 1 to 9 clicks where the meter allows, each with a name. Bars alike
 /// are offered once.
 pub(crate) fn click_fills(ts: TimeSignature) -> Vec<ClickFill> {
-    let group = ts.groups().first().copied().unwrap_or(1);
     let mut fills = vec![ClickFill {
         bar: default_click_bar(ts),
-        name: "Main beats".to_owned(),
-        tile_units: group,
+        name: "No subdivision".to_owned(),
+        subdivides: false,
     }];
     for parts in 1..=9 {
         let Some(bar) = subdivided_click_bar(ts, parts) else {
@@ -169,7 +177,7 @@ pub(crate) fn click_fills(ts: TimeSignature) -> Vec<ClickFill> {
             continue;
         }
         let name = bar.beats().first().map_or_else(String::new, |b| fill_name(b.duration));
-        fills.push(ClickFill { bar, name, tile_units: 1 });
+        fills.push(ClickFill { bar, name, subdivides: true });
     }
     fills
 }
@@ -416,11 +424,11 @@ impl Grooph {
             .map_or_else(|| "Custom".to_owned(), |f| f.name)
     }
 
-    /// Tile of the click bar being edited if it is a ready-made one (see
-    /// [`ClickFill::tile`]).
-    pub(crate) fn click_fill_tile(&self) -> Option<Measure> {
+    /// How the click bar being edited is shown if it is a ready-made one
+    /// (see [`ClickFill::look`]).
+    pub(crate) fn click_fill_look(&self) -> Option<FillLook> {
         let bar = self.click_bar();
-        click_fills(bar.time_signature()).into_iter().find(|f| same_bar(&f.bar, &bar))?.tile()
+        click_fills(bar.time_signature()).into_iter().find(|f| same_bar(&f.bar, &bar))?.look()
     }
 
     /// The counter rhythm of the metronome meter, if it has one.
@@ -882,7 +890,7 @@ mod tests {
         assert_eq!(
             names(TimeSignature::FOUR_FOUR),
             [
-                "Main beats",
+                "No subdivision",
                 "Eighths",
                 "Eighth triplets",
                 "Sixteenths",
@@ -896,7 +904,7 @@ mod tests {
         assert_eq!(
             names(TimeSignature::SIX_EIGHT),
             [
-                "Main beats",
+                "No subdivision",
                 "Eighths",
                 "Sixteenths",
                 "Sixteenth triplets",
@@ -909,20 +917,27 @@ mod tests {
     }
 
     #[test]
-    fn fills_show_one_beat_unit_and_the_main_beats_one_group() {
-        let ts = TimeSignature::SIX_EIGHT;
-        let tiles: Vec<_> = click_fills(ts).iter().map(|f| f.tile().unwrap()).collect();
-        assert_eq!(tiles[0].time_signature(), TimeSignature::new(3, 8));
-        assert_eq!(tiles[0].beats().len(), 1);
+    fn fills_show_one_beat_unit_and_the_main_beats_no_subdivision() {
+        // 5/8's main beats are a dotted quarter and a quarter: no one note.
+        let fills = click_fills(TimeSignature::new(5, 8));
+        assert!(matches!(fills[0].look(), Some(FillLook::NoSubdivision)));
+        let fills = click_fills(TimeSignature::SIX_EIGHT);
+        let tiles: Vec<_> = fills[1..]
+            .iter()
+            .map(|f| match f.look() {
+                Some(FillLook::Notes(m)) => m,
+                _ => panic!("{} has no notes", f.name),
+            })
+            .collect();
         // Eighths, sixteenths, sixteenth triplets: one eighth's worth.
-        let counts: Vec<_> = tiles[1..4].iter().map(|t| t.beats().len()).collect();
+        let counts: Vec<_> = tiles[..3].iter().map(|t| t.beats().len()).collect();
         assert_eq!(counts, [1, 2, 3]);
-        for tile in &tiles[1..] {
+        for tile in &tiles {
             assert_eq!(tile.time_signature(), TimeSignature::new(1, 8));
             assert!(tile.beats().iter().all(|b| ClickLevel::of(b) == ClickLevel::Medium));
         }
         for ts in crate::pickers::all_time_signatures() {
-            assert!(click_fills(ts).iter().all(|f| f.tile().is_some()), "{ts}");
+            assert!(click_fills(ts).iter().all(|f| f.look().is_some()), "{ts}");
         }
     }
 
