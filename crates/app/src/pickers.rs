@@ -81,6 +81,15 @@ pub(crate) fn time_signature_label(ts: TimeSignature) -> String {
     format!("{meter} ({})", ts.groups_label())
 }
 
+/// The same for the settings card: the beat groups on a second line.
+pub(crate) fn card_meter_label(ts: TimeSignature) -> String {
+    let meter = format!("{}/{}", ts.beats, ts.beat_unit);
+    if ts.beat_unit == 4 || ts.groups().len() < 2 {
+        return meter;
+    }
+    format!("{meter}\n{}", ts.groups_label())
+}
+
 pub(crate) fn subdivision_label(s: Subdivision) -> &'static str {
     match s {
         Subdivision::Eighths => "8th Notes",

@@ -4,7 +4,7 @@
 //! centered column and the staff gets the full width.
 
 use crate::metronome_view::FillLook;
-use crate::pickers::{Picker, ROW_HEIGHT, swing_label, time_signature_label};
+use crate::pickers::{Picker, ROW_HEIGHT, card_meter_label, swing_label};
 use crate::share::paint_share_icon;
 use crate::tool_palette::{notation_size, paint_none, paint_notation};
 use crate::{Grooph, Mode, TransportState};
@@ -25,6 +25,7 @@ const COLUMN_MAX_WIDTH: f32 = 720.0;
 
 const TAB_HEIGHT: f32 = 56.0;
 const CARD_CELL_HEIGHT: f32 = 64.0;
+const CARD_VALUE_SIZE: f32 = 26.0;
 const PLAY_BUTTON_SIZE: f32 = 68.0;
 const SIDE_BUTTON_SIZE: f32 = 52.0;
 /// Share of the metronome tab's free height the click bar's staff gets, and
@@ -105,7 +106,8 @@ fn fitted_text(
     painter.text(pos, anchor, text, FontId::proportional(size), color);
 }
 
-/// Labelled value in the settings card: caption above, big value below.
+/// Labelled value in the settings card: caption above, big value below. A
+/// second line in `value` (a meter's beat groups) goes small under the first.
 fn card_cell(ui: &mut Ui, label: &str, value: &str) -> Response {
     let (rect, resp) =
         ui.allocate_exact_size(vec2(ui.available_width(), CARD_CELL_HEIGHT), Sense::click());
@@ -125,15 +127,40 @@ fn card_cell(ui: &mut Ui, label: &str, value: &str) -> Response {
         weak,
     );
     let strong = ui.visuals().strong_text_color();
-    fitted_text(
-        painter,
-        rect.center_bottom() - vec2(0.0, 6.0),
-        Align2::CENTER_BOTTOM,
-        value,
-        26.0,
-        width,
-        strong,
-    );
+    // Values that have to shrink stay centered on the line of the full-size ones.
+    let value_height = ui.fonts_mut(|f| f.row_height(&FontId::proportional(CARD_VALUE_SIZE)));
+    let center = rect.center_bottom() - vec2(0.0, 6.0 + value_height / 2.0);
+    match value.split_once('\n') {
+        None => fitted_text(
+            painter,
+            center,
+            Align2::CENTER_CENTER,
+            value,
+            CARD_VALUE_SIZE,
+            width,
+            strong,
+        ),
+        Some((main, detail)) => {
+            fitted_text(
+                painter,
+                center - vec2(0.0, 5.0),
+                Align2::CENTER_CENTER,
+                main,
+                CARD_VALUE_SIZE - 4.0,
+                width,
+                strong,
+            );
+            fitted_text(
+                painter,
+                rect.center_bottom() - vec2(0.0, 3.0),
+                Align2::CENTER_BOTTOM,
+                detail,
+                12.0,
+                width,
+                weak,
+            );
+        }
+    }
     resp
 }
 
@@ -414,7 +441,7 @@ impl Grooph {
             settings.complexity.to_string()
         };
         let cells = [
-            (Picker::TimeSignature, "Meter", time_signature_label(settings.time_signature)),
+            (Picker::TimeSignature, "Meter", card_meter_label(settings.time_signature)),
             (Picker::Subdivision, "Notes", subdivision_short_label(subdivision).to_owned()),
             (Picker::Complexity, "Level", level),
             (Picker::Bars, "Bars", self.editor.generator.effective_bars().to_string()),
@@ -431,7 +458,7 @@ impl Grooph {
     /// Meter and tempo of the metronome tab, in the same card as Practice.
     fn compact_metronome_card(&mut self, ui: &mut Ui) {
         let cells = [
-            (Picker::MetronomeMeter, "Meter", time_signature_label(self.metronome_meter())),
+            (Picker::MetronomeMeter, "Meter", card_meter_label(self.metronome_meter())),
             match self.playback_ctl.playback.ramp_bpm {
                 Some(bpm) => (Picker::Bpm, "BPM now", bpm.to_string()),
                 None => (Picker::Bpm, "BPM", self.playback_ctl.bpm.to_string()),
