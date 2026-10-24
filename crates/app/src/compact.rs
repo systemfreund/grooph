@@ -207,6 +207,11 @@ pub(crate) fn paint_meter(
 
 /// Full-width row with a label and an on/off switch. Returns whether it toggled.
 fn switch_row(ui: &mut Ui, label: &str, on: &mut bool) -> bool {
+    badged_switch_row(ui, label, None, on)
+}
+
+/// [`switch_row`] with a small pill after the label, such as "BETA".
+fn badged_switch_row(ui: &mut Ui, label: &str, badge: Option<&str>, on: &mut bool) -> bool {
     let (rect, resp) =
         ui.allocate_exact_size(vec2(ui.available_width(), ROW_HEIGHT), Sense::click());
     if resp.clicked() {
@@ -215,13 +220,16 @@ fn switch_row(ui: &mut Ui, label: &str, on: &mut bool) -> bool {
     let how_on = ui.ctx().animate_bool_responsive(resp.id, *on);
     let visuals = ui.visuals();
     let painter = ui.painter();
-    painter.text(
+    let label_rect = painter.text(
         rect.left_center() + vec2(4.0, 0.0),
         Align2::LEFT_CENTER,
         label,
         FontId::proportional(19.0),
         visuals.text_color(),
     );
+    if let Some(badge) = badge {
+        paint_badge(painter, pos2(label_rect.right() + 8.0, rect.center().y), badge, visuals);
+    }
 
     let switch = Rect::from_center_size(rect.right_center() - vec2(30.0, 0.0), vec2(52.0, 30.0));
     let fill = if *on { visuals.selection.bg_fill } else { switch_off_fill(visuals) };
@@ -230,6 +238,20 @@ fn switch_row(ui: &mut Ui, label: &str, on: &mut bool) -> bool {
     let x = egui::lerp((switch.left() + 15.0)..=(switch.right() - 15.0), how_on);
     painter.circle_filled(pos2(x, switch.center().y), radius, Color32::WHITE);
     resp.clicked()
+}
+
+/// Pill in the accent colour with small text, its left edge vertically
+/// centered on `left`.
+fn paint_badge(painter: &Painter, left: Pos2, text: &str, visuals: &egui::Visuals) {
+    let galley = painter.layout_no_wrap(
+        text.to_owned(),
+        FontId::proportional(12.0),
+        visuals.selection.stroke.color,
+    );
+    let size = galley.size() + vec2(12.0, 2.0);
+    let pill = Rect::from_min_size(pos2(left.x, left.y - size.y / 2.0), size);
+    painter.rect_filled(pill, size.y / 2.0, visuals.selection.bg_fill);
+    painter.galley(pill.center() - galley.size() / 2.0, galley, Color32::PLACEHOLDER);
 }
 
 /// Track colour of a switch that is off. It has to differ from the white
@@ -804,7 +826,7 @@ impl Grooph {
             self.ui.picker = Some(Picker::Swing);
         }
         let mut accuracy = self.playback_ctl.accuracy.enabled;
-        if switch_row(ui, "Timing feedback", &mut accuracy) {
+        if badged_switch_row(ui, "Timing feedback", Some("BETA"), &mut accuracy) {
             self.set_accuracy_enabled(accuracy);
         }
     }
