@@ -49,6 +49,8 @@ bpm=70&ts=7/8
 
 More meters such as 5/4, 5/8 and 7/8 are explained on the page about
 [odd time signatures](/metronome/odd-time-signatures/).
+The metronome can also play a [polyrhythm](/metronome/polyrhythms/) such as 3 against 2
+or 3 against 4 against its click.
 
 ## More than a click
 

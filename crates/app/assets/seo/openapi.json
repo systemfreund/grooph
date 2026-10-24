@@ -3,7 +3,7 @@
   "info": {
     "title": "grooph links",
     "version": "1.0.0",
-    "summary": "Open grooph with a rhythm, a generated sight-reading exercise or a metronome setting.",
+    "summary": "Open grooph with a rhythm, a generated sight-reading exercise or a metronome setting, including polyrhythms.",
     "description": "grooph is a browser metronome and rhythm trainer. It draws its interface into a canvas, so it cannot be operated through the DOM; instead, build a link with the query parameters below. All parameters are optional and unknown ones are ignored. Invalid links open the app with an error message that names the problem. See https://grooph.app/llms.txt for the rhythm notation.",
     "contact": { "email": "hello@grooph.app" }
   },
@@ -14,7 +14,7 @@
       "get": {
         "operationId": "openGrooph",
         "summary": "Open the app with the given rhythm, exercise or metronome setting",
-        "description": "Combine `r` (a written rhythm) or the generator parameters (`sub`, `lvl`, `bars`, `space`, `seed`), not both. `ts` on its own opens a one-measure metronome in that meter.",
+        "description": "Combine `r` (a written rhythm) or the generator parameters (`sub`, `lvl`, `bars`, `space`, `seed`), not both. `ts` on its own opens a one-measure metronome in that meter, optionally with a polyrhythm (`counter`).",
         "parameters": [
           {
             "name": "v",
@@ -89,8 +89,16 @@
           {
             "name": "click",
             "in": "query",
-            "description": "Click pattern of the meter of `r` (its first measure) or `ts`: one letter per beat group, `S` strong, `M` medium, `L` soft, `-` off. 7/8 (2+3+2) has three groups, e.g. `S-L`. Default: strong on the first group, medium on the others.",
-            "schema": { "type": "string", "pattern": "^[SML-]+$" }
+            "description": "What the metronome clicks in the meter of `r` (its first measure) or `ts`: one measure in the rhythm notation, without the time signature. An accented note (`>q`) clicks strong, a plain note medium, a ghost note (`(q)`) soft, a rest not at all. Default: one click per beat group, the first one strong.",
+            "schema": { "type": "string" },
+            "example": ">q r:q. (q)"
+          },
+          {
+            "name": "counter",
+            "in": "query",
+            "description": "Polyrhythm: a counter rhythm the metronome plays against the click of `ts`, one measure in the rhythm notation without the time signature, written like `click`. Needs `ts`; not together with `r` or the generator. n:m (n clicks in the time of m beat units) in 4/4: 3:2 `t4 t4 t4 t4 t4 t4`, 3:4 `t2 t2 t2`, 5:4 `qt4 qt4 qt4 qt4 qt4`, 2:1 (also 4:2) `e e e e e e e e`; in 3/4: 2:3 `q. q.`, 4:3 `e. e. e. e.`. Other ratios: see https://grooph.app/llms.txt.",
+            "schema": { "type": "string" },
+            "example": "t4 t4 t4 t4 t4 t4"
           }
         ],
         "responses": {
