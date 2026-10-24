@@ -655,7 +655,8 @@ impl Grooph {
             }
         }
 
-        if let Some(counter) = &counter {
+        // Where the hand starts, inside the innermost ring or dots.
+        let hand_from = if let Some(counter) = &counter {
             for (i, &(idx, start, end)) in counter_spans.iter().enumerate() {
                 let color = if counter_now == Some(i) && !muted { lit } else { base };
                 let level = click_level(counter, idx);
@@ -666,18 +667,7 @@ impl Grooph {
                     segment.paint_hover(painter, center, inner, unit, hover_color);
                 }
             }
-            // A hand across both rings while playing, so it shows where the
-            // clicks of the two rhythms fall against each other. Drawn like
-            // the staff's playback cursor.
-            if let Some(turn) = current_turn.filter(|_| !muted) {
-                let strong = thickness(ClickLevel::Strong);
-                let from = inner - strong * COUNTER_THICKNESS * radius / 2.0 - 4.0;
-                let to = radius + strong * radius / 2.0 + 4.0;
-                let stroke =
-                    playback_cursor_stroke(self.ui.staff_em, visuals.selection.stroke.color);
-                painter
-                    .line_segment([at_turn(center, from, turn), at_turn(center, to, turn)], stroke);
-            }
+            inner - thickness(ClickLevel::Strong) * COUNTER_THICKNESS * radius / 2.0 - 4.0
         } else {
             // A dot for every beat unit inside the ring, bigger ones where a
             // beat group starts. The counter ring takes their place.
@@ -694,6 +684,20 @@ impl Grooph {
                 let r = if group_starts.contains(&dot) { dot_radius } else { 0.6 * dot_radius };
                 painter.circle_filled(pos, r, color);
             }
+            0.72 * radius - dot_radius - 4.0
+        };
+
+        // A hand while playing, from inside the dots (or across both rings
+        // with a counter rhythm, so it shows where the clicks of the two
+        // rhythms fall against each other). Drawn like the staff's playback
+        // cursor.
+        if let Some(turn) = current_turn.filter(|_| !muted) {
+            let to = radius + thickness(ClickLevel::Strong) * radius / 2.0 + 4.0;
+            let stroke = playback_cursor_stroke(self.ui.staff_em, visuals.selection.stroke.color);
+            painter.line_segment(
+                [at_turn(center, hand_from, turn), at_turn(center, to, turn)],
+                stroke,
+            );
         }
 
         // Middle: the beat being counted during the count-in, the bar number
