@@ -53,8 +53,10 @@ Important root files:
   level 4) and writes notes and rests for the whole measure: notes cross beats
   only as one value without a tie (dotted quarter or half from a beat, quarter
   or dotted quarter from the "and") inside a half bar (x/4 beats grouped like
-  the eighths of n/8) or centred on its boundary (`4 2 4`, `8 4 8`), never
-  out of an x/8 or x/16 beat group; triplet figures
+  the eighths of n/8) or as a half centred on its boundary (`4 2 4`), never
+  out of an x/8 or x/16 beat group; a note from the "and" over a beat only
+  with eighths around it (no sixteenths in the beats it starts and ends in,
+  the two-level rhythmic parsing rule); triplet figures
   are written as drawn. Measures are written via `set_beat`, so
   they obey the same invariants as edited ones. Seed `Rng` for reproducibility.
 - Note: `Beat` `PartialEq` ignores `tuplet_group_id`. Compare the field explicitly

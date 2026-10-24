@@ -1515,12 +1515,9 @@ mod tests {
             }
             for (b, start, end) in beats {
                 let crosses = |cuts: &[u32]| cuts.iter().any(|&c| start < c && c < end);
-                // `4 2 4` and `8 4 8` over the boundary of two x/4 groups.
+                // `4 2 4` over the boundary of two x/4 groups.
                 let centred = |c: u32| {
-                    ts.beat_unit == 4
-                        && b.kind == Note
-                        && start + end == 2 * c
-                        && (b.duration == h() || b.duration == q())
+                    ts.beat_unit == 4 && b.kind == Note && start + end == 2 * c && b.duration == h()
                 };
                 let ok = boundaries.iter().all(|&c| !(start < c && c < end) || centred(c));
                 assert!(ok, "{b:?} at {start} crosses a group in {m:?}");
@@ -1568,21 +1565,55 @@ mod tests {
     }
 
     #[test]
-    fn syncopations_cross_the_middle_of_a_four_four_bar() {
+    fn only_a_half_crosses_the_middle_of_a_four_four_bar() {
         let quarter = DEFAULT_GRID.ticks_of(&q()).unwrap();
         let mut rng = Rng::new(8);
-        let (mut half_on_two, mut quarter_on_and_of_two) = (false, false);
+        let (mut half_on_two, mut quarter_on_and_of_one) = (false, false);
         for i in 0..1000u32 {
             let m = generate_measure(&settings(Subdivision::Eighths, 1 + (i % 2) as u8), &mut rng)
                 .unwrap();
             let onsets = DEFAULT_GRID.compute_onset_ticks(m.beats());
             for (b, t) in m.beats().iter().zip(onsets) {
                 half_on_two |= b.kind == Note && b.duration == h() && t == quarter;
-                quarter_on_and_of_two |=
-                    b.kind == Note && b.duration == q() && 2 * t == 3 * quarter;
+                quarter_on_and_of_one |= b.kind == Note && b.duration == q() && 2 * t == quarter;
+                let over_beat_three = b.kind == Note && b.duration == q() && 2 * t == 3 * quarter;
+                assert!(!over_beat_three, "`8 4 8` over beat 3 in {m:?}");
             }
         }
         assert!(half_on_two, "no `4 2 4`");
-        assert!(quarter_on_and_of_two, "no `8 4 8` over beat 3");
+        // The same syncopation inside a half bar stays.
+        assert!(quarter_on_and_of_one, "no `8 4 8` over beat 2");
+    }
+
+    #[test]
+    fn syncopations_over_a_beat_keep_eighths_around_them() {
+        let sixteenth = DEFAULT_GRID.ticks_of(&s()).unwrap();
+        let quarter = DEFAULT_GRID.ticks_of(&q()).unwrap();
+        let mut seen = false;
+        for (st, _, m) in generated(6) {
+            if st.time_signature.beat_unit != 4 {
+                continue;
+            }
+            let (beats, _) = bounds(&st, &m);
+            // Quarter beats read in sixteenths: a straight value in them off
+            // the eighth grid or of an odd number of sixteenths.
+            let fine = |beat: u32| {
+                beats.iter().any(|(b, start, end)| {
+                    let straight = !b.duration.is_tuplet();
+                    let odd = |t: u32| (t / sixteenth) % 2 == 1;
+                    straight && start / quarter == beat && (odd(*start) || odd(end - start))
+                })
+            };
+            for (b, start, end) in &beats {
+                let from_and = start % quarter != 0;
+                if b.kind != Note || !from_and || end - start <= quarter - start % quarter {
+                    continue;
+                }
+                seen = true;
+                let (first, last) = (start / quarter, (end - 1) / quarter);
+                assert!(!fine(first) && !fine(last), "{b:?} at {start} beside sixteenths in {m:?}");
+            }
+        }
+        assert!(seen, "no syncopation over a beat");
     }
 }
