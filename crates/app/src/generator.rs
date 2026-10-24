@@ -157,6 +157,7 @@ impl Grooph {
         playback.smooth_tick = (playback.smooth_tick - ticks as f64).max(0.0);
         playback.heard_tick = (playback.heard_tick - ticks as f64).max(0.0);
         playback.scroll.shift(-playback.row_pitch);
+        playback.rows_removed = true;
         playback.rows_above_view -= 1;
         if let Some((m_idx, _)) = &mut playback.last_primary_beat {
             *m_idx = m_idx.saturating_sub(1);

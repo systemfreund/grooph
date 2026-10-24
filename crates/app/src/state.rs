@@ -125,6 +125,10 @@ pub(crate) struct PlaybackState {
     /// Rows scrolled out of view above, as last drawn (endless mode drops
     /// them).
     pub(crate) rows_above_view: usize,
+    /// The rows above were removed since the last frame: the scroll area
+    /// takes the shifted offset right away, or it would show the content
+    /// moved up a row for a frame.
+    pub(crate) rows_removed: bool,
 }
 
 impl PlaybackState {
@@ -187,6 +191,11 @@ impl ScrollTween {
             *state = TweenState { from, to: target, start: now, duration };
         }
         state.value_at(now)
+    }
+
+    /// The offset at `now`, without a new target.
+    pub(crate) fn value_at(&self, now: f64) -> Option<f32> {
+        self.state.map(|state| state.value_at(now))
     }
 
     /// Move the whole tween by `delta`, e.g. when rows above it were removed
