@@ -645,11 +645,22 @@ impl Grooph {
             .show(ui.ctx(), |ui| {
                 let fill = card_fill(ui);
                 let corners = CornerRadius { nw: CARD_RADIUS, ne: CARD_RADIUS, sw: 0, se: 0 };
-                // A shadow above and to the sides only: the card continues below.
-                let shadow = ui.visuals().popup_shadow.as_shape(rect, corners);
-                let mut shadow_clip = rect.expand(64.0);
-                shadow_clip.max.y = bottom;
-                ui.painter().with_clip_rect(shadow_clip).add(shadow);
+                // One shadow around the raised options and the card below,
+                // painted only outside the card so it stays clear. It stops
+                // short of the tab bar.
+                let mut shadow = ui.visuals().popup_shadow;
+                shadow.color = shadow.color.gamma_multiply(openness);
+                let shadow = shadow.as_shape(rect.union(card), CARD_RADIUS);
+                let around = rect.union(card).expand(64.0);
+                let floor = card.bottom() + 8.0;
+                for clip in [
+                    around.with_max_y(bottom),
+                    Rect::from_x_y_ranges(around.left()..=card.left(), bottom..=floor),
+                    Rect::from_x_y_ranges(card.right()..=around.right(), bottom..=floor),
+                    Rect::from_x_y_ranges(card.x_range(), card.bottom()..=floor),
+                ] {
+                    ui.painter().with_clip_rect(clip).add(shadow.clone());
+                }
                 ui.painter().rect_filled(rect, corners, fill);
                 // Taps on the sheet stay on the sheet.
                 ui.interact(rect, id.with("background"), Sense::click());
