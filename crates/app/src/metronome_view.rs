@@ -980,6 +980,20 @@ mod tests {
     }
 
     #[test]
+    fn practice_accuracy_marks_stay_out_of_the_metronome() {
+        let cc = eframe::CreationContext::_new_kittest(egui::Context::default());
+        let mut app = Grooph::new(&cc);
+        app.playback_ctl.accuracy.enabled = true;
+        assert!(app.shows_accuracy_marks());
+        // The marks of a practice run would land on the click bar's notes.
+        app.open_metronome();
+        assert!(!app.shows_accuracy_marks());
+        // Back in practice they belong to the rhythm again.
+        app.close_metronome();
+        assert!(app.shows_accuracy_marks());
+    }
+
+    #[test]
     fn the_counter_rhythm_is_edited_like_the_click_bar() {
         let mut app = metronome_app();
         let click = app.click_bar();

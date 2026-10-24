@@ -345,6 +345,15 @@ impl Grooph {
         tick
     }
 
+    /// Whether the staff shows accuracy marks: while calibrating, and with
+    /// accuracy on outside the metronome tab. The tracker keeps the marks of
+    /// the last practice run, keyed by onset, so they would land on the
+    /// click bar's notes.
+    pub(crate) fn shows_accuracy_marks(&self) -> bool {
+        self.calibration_source().is_some()
+            || (self.playback_ctl.accuracy.enabled && !self.metronome_mode())
+    }
+
     /// Marks on the notes of `score`, the score `staff` was laid out from.
     fn draw_accuracy_markers(
         &self,
@@ -354,7 +363,7 @@ impl Grooph {
         timing: &ScoreTiming,
         staff_space: f32,
     ) {
-        if !self.playback_ctl.accuracy.enabled && self.calibration_source().is_none() {
+        if !self.shows_accuracy_marks() {
             return;
         }
         // Marks stay on the staff after stopping, until the next run or an edit.
