@@ -3,6 +3,7 @@ mod calibration;
 mod clock;
 mod compact;
 mod generator;
+mod guide;
 mod help;
 mod host;
 mod keyboard_input;
@@ -40,6 +41,7 @@ use crate::accuracy::AccuracyState;
 use crate::calibration::CalibrationPhase;
 use crate::compact::{CompactState, CompactTab};
 use crate::generator::GeneratorState;
+use crate::guide::Guide;
 use crate::library::PatternLibrary;
 use crate::metronome_view::MetronomeState;
 use crate::platform::{PlatformRuntime, VisibilityEvent};
@@ -126,6 +128,7 @@ struct PersistedState {
     audio_offset: f32,
     counting: CountingSettings,
     flash_enabled: bool,
+    guide: Guide,
     midi_selected_port_id: Option<String>,
     accuracy_enabled: bool,
     library: PatternLibrary,
@@ -161,6 +164,7 @@ impl Default for PersistedState {
             audio_offset: 0.0,
             counting: CountingSettings::default(),
             flash_enabled: false,
+            guide: Guide::default(),
             midi_selected_port_id: None,
             accuracy_enabled: false,
             library: PatternLibrary::default(),
@@ -203,6 +207,7 @@ impl PersistedState {
             audio_offset: app.playback_ctl.audio_cfg.offset,
             counting: app.ui.counting,
             flash_enabled: app.ui.flash_enabled,
+            guide: app.ui.guide,
             midi_selected_port_id: app.playback_ctl.midi.selected_port_id.clone(),
             accuracy_enabled: app.playback_ctl.accuracy.enabled,
             library: app.editor.library.clone(),
@@ -1155,6 +1160,7 @@ impl Grooph {
                 layout: LayoutSettings::default(),
                 counting: state.counting,
                 flash_enabled: state.flash_enabled,
+                guide: state.guide,
                 platform,
                 save_name_buffer: String::new(),
                 preset_name_buffer: String::new(),

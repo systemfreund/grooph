@@ -825,6 +825,10 @@ impl Grooph {
         if value_row(ui, "Swing", &swing_value).clicked() {
             self.ui.picker = Some(Picker::Swing);
         }
+        let ts = self.guide_meter();
+        if value_row(ui, "Guide", self.ui.guide.in_meter(&ts).label()).clicked() {
+            self.ui.picker = Some(Picker::Guide);
+        }
         let mut accuracy = self.playback_ctl.accuracy.enabled;
         if badged_switch_row(ui, "Timing feedback", Some("BETA"), &mut accuracy) {
             self.set_accuracy_enabled(accuracy);

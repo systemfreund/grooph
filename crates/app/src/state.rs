@@ -1,6 +1,7 @@
 use crate::accuracy::AccuracyState;
 use crate::compact::CompactState;
 use crate::generator::GeneratorState;
+use crate::guide::{AnchorFlash, Guide};
 use crate::library::PatternLibrary;
 use crate::metronome_view::MetronomeState;
 use crate::pickers::Picker;
@@ -113,6 +114,14 @@ pub(crate) struct PlaybackState {
     /// both axes so the flash fires once per primary beat in every measure, not
     /// only when the beat number changes.
     pub(crate) last_primary_beat: Option<(usize, u32)>,
+    /// Bars played since the start, the first being 0, for the guide's
+    /// "every second bar" (endless mode renumbers the measures).
+    pub(crate) bars_played: u64,
+    /// Measure and local tick played in the last frame, to count
+    /// `bars_played`.
+    pub(crate) guide_bar: Option<(usize, f64)>,
+    /// Last guide anchor reached.
+    pub(crate) anchor: Option<AnchorFlash>,
     pub(crate) count_in: CountInState,
     /// Tempo the ramp reached in the bar being played; `None` without a ramp.
     pub(crate) ramp_bpm: Option<u32>,
@@ -288,6 +297,8 @@ pub(crate) struct UiShell {
     pub(crate) counting: CountingSettings,
     /// Whether the playback panel flashes on every primary beat. Off by default.
     pub(crate) flash_enabled: bool,
+    /// What the practice staff shows while it plays.
+    pub(crate) guide: Guide,
     pub(crate) platform: PlatformRuntime,
     /// Transient text buffer for the "save current pattern" name input. Not
     /// persisted.

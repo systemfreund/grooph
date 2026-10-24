@@ -4,6 +4,7 @@
 //! dialog.
 
 use crate::Grooph;
+use crate::guide::Guide;
 use crate::metronome_view::{FillLook, click_fills, ratio_label, same_bar};
 use crate::presets::{self, PresetId};
 use crate::tool_palette::{TOOL_PALETTE_BUTTON_SIZE, none_button, notation_button};
@@ -37,6 +38,8 @@ pub(crate) enum Picker {
     Bars,
     Bpm,
     Swing,
+    /// What the staff shows while playing.
+    Guide,
     Preset,
     /// The metronome tab's meter.
     MetronomeMeter,
@@ -195,6 +198,7 @@ impl Grooph {
                 Picker::Bars => "Bars",
                 Picker::Bpm => "Tempo",
                 Picker::Swing => "Swing",
+                Picker::Guide => "Guide",
                 Picker::Preset => "Preset",
                 Picker::MetronomeMeter => "Time signature",
                 Picker::ClickFill => "Subdivision",
@@ -215,6 +219,7 @@ impl Grooph {
                     self.swing_choices(ui);
                     false
                 }
+                Picker::Guide => self.guide_choices(ui),
                 Picker::Preset => {
                     preset = self.preset_choices(ui);
                     preset.is_some()
@@ -575,6 +580,23 @@ impl Grooph {
         }
         // Picking a sound keeps the picker open to compare them.
         false
+    }
+
+    /// From the most support (the line) to none; steps the meter has no
+    /// use for are left out.
+    fn guide_choices(&mut self, ui: &mut Ui) -> bool {
+        let ts = self.guide_meter();
+        let options: Vec<_> = Guide::ALL
+            .into_iter()
+            .filter(|g| g.offered_in(&ts))
+            .map(|g| (g, g.label().to_owned()))
+            .collect();
+        let current = self.ui.guide.in_meter(&ts);
+        let picked = choice_grid(ui, &options, current, 1);
+        if let Some(guide) = picked {
+            self.ui.guide = guide;
+        }
+        picked.is_some()
     }
 
     fn swing_choices(&mut self, ui: &mut Ui) {

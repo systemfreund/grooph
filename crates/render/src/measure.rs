@@ -1,7 +1,9 @@
 use crate::beat::draw_beat;
 use crate::glyph::draw_glyph;
 use eframe::egui;
-use eframe::egui::{Align2, Color32, FontFamily, FontId, Painter, Rangef, Rect, Stroke, pos2};
+use eframe::egui::{
+    Align2, Color32, FontFamily, FontId, Painter, Pos2, Rangef, Rect, Stroke, pos2,
+};
 use grooph_layout::pixel_layout::{
     BeamLayout, LayoutOpts, MeasureLayout, NoteLayout, TimeSignatureLayout, TupletLayout,
     build_measure_layout,
@@ -270,6 +272,36 @@ pub fn playback_cursor_x(
     // Trailing gap: tick lies past the last beat's end (incomplete measure).
     // Hold the cursor at the right edge — visually consistent with "done".
     Some(rect.right())
+}
+
+/// X of the point in time `tick` of `measure`, for a guide anchor: a note's
+/// head at its onset, then on toward the next head (the barline after the
+/// last one) as the note goes on, so beat 4 of a half note on 3 sits
+/// halfway. `None` if the layout has no notes for it.
+pub fn beat_anchor_x(
+    measure: &Measure,
+    measure_layout: &MeasureLayout,
+    rect: Rect,
+    tick: f64,
+) -> Option<f32> {
+    let beats = measure.beats();
+    let onsets = DEFAULT_GRID.compute_onset_ticks(beats);
+    let i = onsets.iter().rposition(|&onset| onset as f64 <= tick)?;
+    let start = onsets[i] as f64;
+    let dur_ticks = DEFAULT_GRID.ticks_of(&beats[i].duration).unwrap_or(0) as f64;
+    let frac = if dur_ticks > 0.0 { ((tick - start) / dur_ticks).clamp(0.0, 1.0) } else { 0.0 };
+    let x0 = measure_layout.notes.get(i)?.center.x;
+    let x1 = measure_layout.notes.get(i + 1).map_or(rect.right(), |n| n.center.x);
+    Some(x0 + (x1 - x0) * frac as f32)
+}
+
+/// A guide anchor: a soft disc centred on `center`, at `intensity` (1 when
+/// its beat is reached, fading to 0).
+pub fn draw_beat_anchor(painter: &Painter, center: Pos2, em: f32, base: Color32, intensity: f32) {
+    let alpha = |a: f32| (a * intensity.clamp(0.0, 1.0) * 255.0) as u8;
+    let color = |a: f32| Color32::from_rgba_unmultiplied(base.r(), base.g(), base.b(), alpha(a));
+    let radius = 0.45 * em;
+    painter.circle(center, radius, color(0.3), Stroke::new(0.04 * em, color(0.9)));
 }
 
 /// Phase 2 cursor X — cursor enters *this* measure from the left.
@@ -636,6 +668,23 @@ mod tests {
         let bar_ticks = DEFAULT_GRID.ticks_per_measure(&TimeSignature::FOUR_FOUR) as f64;
         let tick = 0.85 * bar_ticks;
         assert_eq!(playback_cursor_x(&tens.measures[0], &layout, rect, tick, 0.5), None);
+    }
+
+    #[test]
+    fn beat_anchors_sit_on_rests_and_inside_held_notes() {
+        use grooph_measure::notation::parse_score;
+        let m = parse_score("4/4 r:e e q h").unwrap().measures.remove(0);
+        let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(400.0, 100.0));
+        let layout = build_measure_layout(&m, &opts_for(rect));
+        let quarter = DEFAULT_GRID.ticks_of(&q()).unwrap() as f64;
+        let x = |beat: f64| beat_anchor_x(&m, &layout, rect, beat * quarter).unwrap();
+        let heads: Vec<f32> = layout.notes.iter().map(|n| n.center.x).collect();
+        // Beat 1 on the eighth rest, 2 and 3 on their notes.
+        assert_eq!(x(0.0), heads[0]);
+        assert_eq!(x(1.0), heads[2]);
+        assert_eq!(x(2.0), heads[3]);
+        // Beat 4 halfway from the half note to the barline.
+        assert!((x(3.0) - (heads[3] + rect.right()) / 2.0).abs() < 1e-3);
     }
 
     #[test]

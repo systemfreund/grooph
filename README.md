@@ -74,6 +74,15 @@ Important root files:
 - `grooph_audio::Audio` builds a playback schedule from the measure
   (Downbeat/Primary/Accent/Beat) and uses `DEFAULT_GRID`.
 - The playback cursor is smoothed in the UI, audio offset for latency is optional.
+- Guide (`crates/app/src/guide.rs`, Practice options): what the staff shows
+  while playing. `Line` is the playback cursor; the other steps hide it and
+  only flash anchors on beats (the primary beats of each bar's meter): every
+  beat, every second beat (from beat 1 in each bar; in two-beat meters the
+  same as every bar), beat 1 of every bar or of every second bar, or nothing.
+  Anchors mark the beat, not a note, so they light rests and held notes too.
+  Bars are counted as played (`PlaybackState::bars_played`), so loops and
+  endless mode keep the every-second-bar rhythm. The metronome tab and
+  calibration always use the line. Not part of presets or links.
 - Counting overlay comes from `grooph_measure::counting`.
 - Swing (`grooph_measure::swing::Swing`, global, main menu next to BPM): 50%
   (off) to 75% (dotted), swung unit 8ths or 16ths. Notation stays straight;

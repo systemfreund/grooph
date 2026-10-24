@@ -4,8 +4,8 @@
 //! wrap animation across measure boundaries.
 
 use crate::measure::{
-    draw_count_layer, draw_edit_cursor, draw_notes, last_note_entering_frac, last_note_split,
-    playback_cursor_entering_x, playback_cursor_x, render_measure_at,
+    beat_anchor_x, draw_count_layer, draw_edit_cursor, draw_notes, last_note_entering_frac,
+    last_note_split, playback_cursor_entering_x, playback_cursor_x, render_measure_at,
 };
 use eframe::egui;
 use eframe::egui::{Color32, Rangef, Stroke};
@@ -21,6 +21,8 @@ use grooph_measure::{Cursor, MeasureIdx, Score};
 /// `Some((measure_idx, local_tick))` referring to the **active** measure (the
 /// one currently being audibly played). The *visual* cursor may live in a
 /// different measure during the wrap animation — see [`current_cursor_x`].
+/// Without `playback_line` the playback position only lights the count
+/// labels.
 #[allow(clippy::too_many_arguments)]
 pub fn draw_staff(
     ui: &mut egui::Ui,
@@ -29,6 +31,7 @@ pub fn draw_staff(
     cursor: Option<Cursor>,
     cursor_voice: Voice,
     playback: Option<(MeasureIdx, f64)>,
+    playback_line: bool,
     count_config: Option<&CountConfig>,
     staff_opts: &StaffOpts,
 ) {
@@ -41,7 +44,8 @@ pub fn draw_staff(
     // Resolve the *visual* cursor location once per frame. Phase 1 of a
     // measure's last note keeps the cursor in that measure; Phase 2 hands it
     // off to the next one (wrapping at the score end).
-    let visual_cursor = playback.and_then(|p| current_cursor_x(score, staff, p));
+    let visual_cursor =
+        playback.filter(|_| playback_line).and_then(|p| current_cursor_x(score, staff, p));
 
     for system in &staff.systems {
         // One continuous staff line per system, so adjacent measures look joined.
@@ -100,6 +104,20 @@ pub fn draw_staff(
         // except after the last one (the right edge is the score end).
         draw_barlines(ui, system, staff_opts, color);
     }
+}
+
+/// Where a guide anchor at `tick` of measure `measure_idx` sits: on the
+/// staff line, at [`beat_anchor_x`].
+pub fn beat_anchor_pos(
+    score: &Score,
+    staff: &StaffLayout,
+    measure_idx: MeasureIdx,
+    tick: f64,
+) -> Option<egui::Pos2> {
+    let measure = score.measures.get(measure_idx)?;
+    let placed = staff.placed(measure_idx)?;
+    let x = beat_anchor_x(measure, &placed.layout, placed.rect, tick)?;
+    Some(egui::pos2(x, placed.rect.center().y + placed.y_offset))
 }
 
 /// Compute the X position of the playback cursor across the whole staff.
