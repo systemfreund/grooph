@@ -10,6 +10,7 @@ use crate::share::paint_share_icon;
 use crate::tool_palette::{notation_size, paint_none, paint_notation};
 use crate::{Grooph, Mode, TransportState};
 use eframe::egui;
+use eframe::egui::layers::ShapeIdx;
 use eframe::egui::{
     Align2, Button, Color32, CornerRadius, FontFamily, FontId, Frame, Id, LayerId, Margin, Order,
     Painter, Pos2, Rect, Response, RichText, Sense, Shape, Stroke, Ui, UiBuilder, Vec2, pos2, vec2,
@@ -339,6 +340,27 @@ fn sheet_handle(ui: &mut Ui) -> bool {
 
 const SHEET_HANDLE_HEIGHT: f32 = 22.0;
 
+/// The card of an options sheet, and a slot painted before it for the shadow
+/// the raised options cast along it.
+struct SheetCard {
+    rect: Rect,
+    shadow_painter: Painter,
+    shadow_slot: ShapeIdx,
+}
+
+fn sheet_card(ui: &mut Ui, add_contents: impl FnOnce(&mut Ui)) -> SheetCard {
+    let shadow_painter = ui.painter().clone();
+    let shadow_slot = shadow_painter.add(Shape::Noop);
+    let rect = Frame::new()
+        .fill(card_fill(ui))
+        .corner_radius(CARD_RADIUS)
+        .inner_margin(Margin { left: 12, right: 12, top: 0, bottom: 12 })
+        .show(ui, add_contents)
+        .response
+        .rect;
+    SheetCard { rect, shadow_painter, shadow_slot }
+}
+
 /// How far a finger moves up or down on a sheet before it opens or folds.
 const SHEET_FLICK_DISTANCE: f32 = 24.0;
 
@@ -583,7 +605,7 @@ impl Grooph {
         let before = self.editor.generator.settings;
         let endless_before = self.editor.generator.endless;
         let mut roll = false;
-        let mut card = Rect::NOTHING;
+        let mut card = None;
 
         let sheet = egui::Panel::bottom("compact_options")
             .frame(Frame::new().fill(ui.visuals().panel_fill).inner_margin(Margin {
@@ -595,19 +617,12 @@ impl Grooph {
             .show_separator_line(false)
             .show(ui, |ui| {
                 centered_column(ui, |ui| {
-                    card = Frame::new()
-                        .fill(card_fill(ui))
-                        .corner_radius(CARD_RADIUS)
-                        .inner_margin(Margin { left: 12, right: 12, top: 0, bottom: 12 })
-                        .show(ui, |ui| {
-                            if sheet_handle(ui) {
-                                self.ui.compact.options_collapsed =
-                                    !self.ui.compact.options_collapsed;
-                            }
-                            roll = self.compact_transport(ui);
-                        })
-                        .response
-                        .rect;
+                    card = Some(sheet_card(ui, |ui| {
+                        if sheet_handle(ui) {
+                            self.ui.compact.options_collapsed = !self.ui.compact.options_collapsed;
+                        }
+                        roll = self.compact_transport(ui);
+                    }));
                 });
             });
         let options = self.sheet_options(ui, card, Self::compact_option_rows);
@@ -623,11 +638,12 @@ impl Grooph {
     fn sheet_options(
         &mut self,
         ui: &Ui,
-        card: Rect,
+        card: Option<SheetCard>,
         add_rows: impl FnOnce(&mut Self, &mut Ui),
     ) -> Option<(LayerId, Rect)> {
         let id = Id::unique("compact_sheet_options");
         let openness = ui.ctx().animate_bool_responsive(id, !self.ui.compact.options_collapsed);
+        let SheetCard { rect: card, shadow_painter, shadow_slot } = card?;
         if openness <= 0.0 || !card.is_positive() {
             return None;
         }
@@ -645,22 +661,20 @@ impl Grooph {
             .show(ui.ctx(), |ui| {
                 let fill = card_fill(ui);
                 let corners = CornerRadius { nw: CARD_RADIUS, ne: CARD_RADIUS, sw: 0, se: 0 };
-                // One shadow around the raised options and the card below,
-                // painted only outside the card so it stays clear. It stops
-                // short of the tab bar.
+                // One shadow around the raised options and the card below.
+                // Above the card it lies over the staff; along the card it
+                // goes behind it, into the slot painted before the card, so
+                // the card's rounded corners stay clean. The panel's clip
+                // keeps it off the tab bar.
                 let mut shadow = ui.visuals().popup_shadow;
                 shadow.color = shadow.color.gamma_multiply(openness);
                 let shadow = shadow.as_shape(rect.union(card), CARD_RADIUS);
-                let around = rect.union(card).expand(64.0);
-                let floor = card.bottom() + 8.0;
-                for clip in [
-                    around.with_max_y(bottom),
-                    Rect::from_x_y_ranges(around.left()..=card.left(), bottom..=floor),
-                    Rect::from_x_y_ranges(card.right()..=around.right(), bottom..=floor),
-                    Rect::from_x_y_ranges(card.x_range(), card.bottom()..=floor),
-                ] {
-                    ui.painter().with_clip_rect(clip).add(shadow.clone());
-                }
+                let above = rect.union(card).expand(64.0).with_max_y(bottom);
+                ui.painter().with_clip_rect(above).add(shadow.clone());
+                let below = shadow_painter
+                    .clip_rect()
+                    .intersect(above.with_min_y(bottom).with_max_y(f32::INFINITY));
+                shadow_painter.with_clip_rect(below).set(shadow_slot, shadow);
                 ui.painter().rect_filled(rect, corners, fill);
                 // Taps on the sheet stay on the sheet.
                 ui.interact(rect, id.with("background"), Sense::click());
@@ -713,26 +727,19 @@ impl Grooph {
 
     /// Metronome options and the play button.
     fn compact_metronome_sheet(&mut self, ui: &mut Ui) {
-        let mut card = Rect::NOTHING;
+        let mut card = None;
         let sheet = egui::Panel::bottom("compact_metronome")
             .frame(Frame::new().fill(ui.visuals().panel_fill).inner_margin(Margin::same(12)))
             .show_separator_line(false)
             .show(ui, |ui| {
                 centered_column(ui, |ui| {
-                    card = Frame::new()
-                        .fill(card_fill(ui))
-                        .corner_radius(CARD_RADIUS)
-                        .inner_margin(Margin { left: 12, right: 12, top: 0, bottom: 12 })
-                        .show(ui, |ui| {
-                            // Folds with the Practice options: one sheet setting.
-                            if sheet_handle(ui) {
-                                self.ui.compact.options_collapsed =
-                                    !self.ui.compact.options_collapsed;
-                            }
-                            self.metronome_transport(ui);
-                        })
-                        .response
-                        .rect;
+                    card = Some(sheet_card(ui, |ui| {
+                        // Folds with the Practice options: one sheet setting.
+                        if sheet_handle(ui) {
+                            self.ui.compact.options_collapsed = !self.ui.compact.options_collapsed;
+                        }
+                        self.metronome_transport(ui);
+                    }));
                 });
             });
         let options = self.sheet_options(ui, card, Self::compact_metronome_rows);
