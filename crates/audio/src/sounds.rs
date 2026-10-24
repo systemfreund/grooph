@@ -12,7 +12,7 @@
 //! mixer. Rhythm sounds have their own recordings for notes, accents and
 //! ghost notes, so the dynamics come from the samples.
 
-use crate::schedule::{COUNTER_SOFT_GAIN, SoundType};
+use crate::schedule::SoundType;
 use crate::wav::{self, SampleData};
 use crate::{AudioSettings, Waveform};
 use serde::{Deserialize, Serialize};
@@ -245,12 +245,7 @@ impl SoundType {
         } else {
             settings.metronome_sound.sample(self)
         };
-        let mut gain = self.profile(settings).gain;
-        // The snare's ghost sample is already recorded quietly; scale it so
-        // the soft counter clicks play it as recorded at full counter volume.
-        if sample == Some(SampleId::SNARE_GHOST) && self == SoundType::CounterSoft {
-            gain /= COUNTER_SOFT_GAIN;
-        }
+        let gain = self.profile(settings).gain;
         let rate = if self.is_counter() && settings.counter_sound.same_as(settings.metronome_sound)
         {
             COUNTER_SAME_SOUND_RATE
@@ -384,8 +379,8 @@ mod tests {
         assert_eq!(sample(SoundType::CounterMedium).0, SampleId::SNARE.data());
         let (ghost, gain) = sample(SoundType::CounterSoft);
         assert_eq!(ghost, SampleId::SNARE_GHOST.data());
-        // The ghost recording is quiet already: it plays at the counter volume.
-        assert!((gain - settings.counter).abs() < 1e-6);
+        // The soft clicks' volume scales the ghost recording directly.
+        assert!((gain - crate::schedule::COUNTER_SOFT_GAIN * settings.counter).abs() < 1e-6);
     }
 
     #[test]
