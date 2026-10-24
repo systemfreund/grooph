@@ -19,7 +19,7 @@ Each level adds new one-beat figures; easier figures keep appearing.
 | 1 | quarter note, quarter rest, two eighths |
 | 2 | eighth rest + eighth (note on "&") |
 | 3 | four sixteenths, eighth + two sixteenths, two sixteenths + eighth |
-| 4 | sixteenth-eighth-sixteenth, dotted eighth + sixteenth, rests inside the beat |
+| 4 | sixteenth-eighth-sixteenth, dotted eighth + sixteenth, rests inside the beat, short notes with sixteenth rests in between |
 | 5 | figures starting with a sixteenth rest (notes on "e" and "a") |
 
 ## Level 3: sixteenths on the beat
@@ -35,10 +35,11 @@ bpm=70&sub=16&lvl=3&bars=2
 ## Level 4: dotted figures and inner rests
 
 The dotted eighth plus sixteenth is a long-short "gallop", counted "1 – – a". The
-sixteenth-eighth-sixteenth figure is short-long-short: "1 e – a".
+sixteenth-eighth-sixteenth figure is short-long-short: "1 e – a". Notes may now also
+stop early, so the same rhythms appear with sixteenth rests between the notes.
 
 ```rhythm bpm=70 | Level 4 figures
-4/4 e. s s e s r:e s s s s r:e
+4/4 e. s s e s s r:s s r:s s r:s r:s s
 ```
 
 ```open | Practice level 4

@@ -59,7 +59,7 @@ fn usual_groups(beats: u8, beat_unit: u8) -> Cow<'static, [u8]> {
 /// Groups of two and three for an `n/8` or `n/16` meter: the usual
 /// groupings up to 13 (5 = 3+2, 7 = 2+3+2, 8 = 3+3+2, ...), beyond that as
 /// many threes as fit with the rest in twos.
-fn compound_groups(n: u8) -> Cow<'static, [u8]> {
+pub(crate) fn compound_groups(n: u8) -> Cow<'static, [u8]> {
     let groups: &'static [u8] = match n {
         0 => &[],
         1 => &[1],

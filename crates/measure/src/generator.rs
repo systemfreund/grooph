@@ -44,9 +44,19 @@
 //! `x/16` works the same way one note value down and always in sixteenths:
 //! two-sixteenth groups (an eighth: `x-`, `xx`, then `-x`) and
 //! three-sixteenth groups (a dotted eighth) with the triplet ladder.
+//!
+//! A cell only fixes where its notes start. How long each note sounds, and
+//! so how the measure is written (`8 8` or `16 16-rest 16 16-rest`, a half
+//! note or a quarter and a quarter rest, a quarter over the beat), is
+//! decided afterwards for the whole measure (see [`spelling`]). From level
+//! [`SHORT_NOTES_LEVEL`] notes may also stop before the next onset inside
+//! their beat.
+
+mod spelling;
 
 use crate::BeatKind::{Note, Rest};
 use crate::duration::{Duration, NoteValue, e, q, s, t8};
+use crate::grid::DEFAULT_GRID;
 use crate::grouping::default_groups_for;
 use crate::{Beat, Measure, MeasureError, Score, TimeSignature};
 use serde::{Deserialize, Serialize};
@@ -522,6 +532,16 @@ impl Cell {
     }
 }
 
+/// Level from which notes may stop early inside their beat (the ladder's
+/// "rests inside the beat").
+const SHORT_NOTES_LEVEL: u8 = 4;
+
+/// Length of a straight duration in sixteenths.
+fn sixteenths_of(duration: Duration) -> u32 {
+    let sixteenth = DEFAULT_GRID.ticks_of(&s()).expect("sixteenths are on the grid");
+    DEFAULT_GRID.ticks_of(&duration).expect("cell durations are on the grid") / sixteenth
+}
+
 /// Weight of the highest allowed level relative to each easier level.
 const TOP_LEVEL_WEIGHT: usize = 3;
 
@@ -581,6 +601,8 @@ struct Pool {
     cells: Vec<&'static Cell>,
     /// Weighted by level (complexity) or uniform (custom figures).
     weighted: bool,
+    /// Highest level the pool may draw.
+    max_level: u8,
 }
 
 impl Pool {
@@ -597,48 +619,61 @@ impl Pool {
         // to the complexity level so the generator never runs dry.
         if custom.is_empty() {
             let complexity = settings.complexity.clamp(1, MAX_COMPLEXITY);
-            Self { cells: candidates(subdivision, span, complexity), weighted: true }
+            let cells = candidates(subdivision, span, complexity);
+            Self { cells, weighted: true, max_level: complexity }
         } else {
-            Self { cells: custom, weighted: false }
+            let max_level = custom.iter().map(|c| c.level_in(subdivision)).max().unwrap_or(1);
+            Self { cells: custom, weighted: false, max_level }
         }
     }
 }
 
-fn pick_cells(settings: &GeneratorSettings, rng: &mut Rng) -> Vec<&'static Cell> {
+/// Draw one cell per generator beat, and how the notes may be written.
+fn draw(settings: &GeneratorSettings, rng: &mut Rng) -> (Vec<spelling::Drawn>, spelling::Style) {
     let ts = settings.time_signature;
-    let Some(spans) = beat_groups(ts) else {
-        return Vec::new();
-    };
     let subdivision = effective_subdivision(settings.subdivision, ts);
+    let spans = beat_groups(ts).unwrap_or_default();
     let space = settings.space.clamp(0.0, 1.0);
     let pools = BeatSpan::ALL.map(|span| Pool::new(settings, subdivision, span));
+    let pool_of = |span: BeatSpan| &pools[BeatSpan::ALL.iter().position(|&s| s == span).unwrap()];
 
-    spans
-        .into_iter()
-        .map(|span| {
-            let pool = &pools[BeatSpan::ALL.iter().position(|&s| s == span).unwrap()];
+    let drawn = spans
+        .iter()
+        .map(|&span| {
+            let pool = pool_of(span);
             if rng.chance(space * MAX_SPACE_REST_PROBABILITY) {
-                span.rest()
+                spelling::Drawn { cell: span.rest(), space: true }
             } else if pool.weighted {
-                pick_cell(&pool.cells, subdivision, rng)
+                spelling::Drawn { cell: pick_cell(&pool.cells, subdivision, rng), space: false }
             } else {
-                pool.cells[rng.below(pool.cells.len())]
+                spelling::Drawn { cell: pool.cells[rng.below(pool.cells.len())], space: false }
             }
         })
-        .collect()
+        .collect();
+    let style = spelling::Style {
+        step: match subdivision {
+            Subdivision::Eighths => 2,
+            // Only quarters are straight.
+            Subdivision::Triplets => 4,
+            Subdivision::Sixteenths | Subdivision::Mixed => 1,
+        },
+        short_notes: spans.iter().any(|&span| pool_of(span).max_level >= SHORT_NOTES_LEVEL),
+    };
+    (drawn, style)
 }
 
 /// Write `cells` (one per beat) into a fresh measure via `set_beat`, so the
 /// result carries the same invariants (tuplet groups, anchors) as an edited one.
 fn build_measure(ts: TimeSignature, cells: &[&Cell]) -> Result<Measure, MeasureError> {
+    let beats: Vec<_> = cells.iter().flat_map(|c| c.beats.iter().copied()).collect();
+    write_measure(ts, &beats)
+}
+
+/// Write `beats` (duration, note?) into a fresh measure via `set_beat`.
+fn write_measure(ts: TimeSignature, beats: &[(Duration, bool)]) -> Result<Measure, MeasureError> {
     let mut measure = Measure::new(ts);
-    let mut idx = 0;
-    for cell in cells {
-        for &(duration, is_note) in cell.beats {
-            let beat = Beat::new(duration, if is_note { Note } else { Rest });
-            measure.set_beat(idx, beat)?;
-            idx += 1;
-        }
+    for (idx, &(duration, is_note)) in beats.iter().enumerate() {
+        measure.set_beat(idx, Beat::new(duration, if is_note { Note } else { Rest }))?;
     }
     Ok(measure)
 }
@@ -656,9 +691,11 @@ pub fn generate_measure(
     settings: &GeneratorSettings,
     rng: &mut Rng,
 ) -> Result<Measure, GeneratorError> {
-    check_time_signature(settings.time_signature)?;
-    let cells = pick_cells(settings, rng);
-    Ok(build_measure(settings.time_signature, &cells)?)
+    let ts = settings.time_signature;
+    check_time_signature(ts)?;
+    let (drawn, style) = draw(settings, rng);
+    let beats = spelling::spell(ts.beat_unit, &drawn, style, rng);
+    Ok(write_measure(ts, &beats)?)
 }
 
 /// Generate a score of `settings.bars` measures.
@@ -675,7 +712,7 @@ pub fn generate_score(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::duration::{e, q, s, t8};
+    use crate::duration::{e, h, q, s, t8};
     use crate::grid::DEFAULT_GRID;
 
     #[test]
@@ -698,6 +735,17 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// Ticks at which the notes of `m` start.
+    fn note_onsets(m: &Measure) -> Vec<u32> {
+        let onsets = DEFAULT_GRID.compute_onset_ticks(m.beats());
+        m.beats().iter().zip(onsets).filter(|(b, _)| b.kind == Note).map(|(_, t)| t).collect()
+    }
+
+    /// The cells drawn for one measure.
+    fn pick_cells(settings: &GeneratorSettings, rng: &mut Rng) -> Vec<&'static Cell> {
+        draw(settings, rng).0.into_iter().map(|d| d.cell).collect()
     }
 
     fn settings(subdivision: Subdivision, complexity: u8) -> GeneratorSettings {
@@ -1155,7 +1203,8 @@ mod tests {
         let mut rng = Rng::new(3);
         for _ in 0..200 {
             let eighths = generate_measure(&settings(Subdivision::Eighths, 5), &mut rng).unwrap();
-            assert!(eighths.beats().iter().all(|b| b.duration == q() || b.duration == e()));
+            assert!(eighths.beats().iter().all(|b| b.duration != s() && b.duration != de()));
+            assert!(eighths.beats().iter().all(|b| !b.duration.is_tuplet()));
 
             let triplets = generate_measure(&settings(Subdivision::Triplets, 5), &mut rng).unwrap();
             assert!(triplets.beats().iter().all(|b| b.duration != s() && b.duration != de()));
@@ -1321,13 +1370,17 @@ mod tests {
         fn rest_ratio(space: f32) -> f32 {
             let mut rng = Rng::new(9);
             let st = GeneratorSettings { space, ..settings(Subdivision::Sixteenths, 3) };
-            let mut rest_beats = 0;
+            let mut rest_sixteenths = 0;
             for _ in 0..300 {
                 let m = generate_measure(&st, &mut rng).unwrap();
-                rest_beats +=
-                    m.beats().iter().filter(|b| b.kind == Rest && b.duration == q()).count();
+                rest_sixteenths += m
+                    .beats()
+                    .iter()
+                    .filter(|b| b.kind == Rest)
+                    .map(|b| sixteenths_of(b.duration))
+                    .sum::<u32>();
             }
-            rest_beats as f32 / (300.0 * 4.0)
+            rest_sixteenths as f32 / (300.0 * 16.0)
         }
         assert!(rest_ratio(1.0) > rest_ratio(0.0) + 0.5);
     }
@@ -1395,11 +1448,14 @@ mod tests {
             ..settings(Subdivision::Sixteenths, 1)
         };
         let mut rng = Rng::new(4);
+        // Only where the notes start is fixed; their lengths vary.
+        let beat = DEFAULT_GRID.ticks_per_beat(&TimeSignature::FOUR_FOUR);
+        let expected: Vec<u32> = (0..4)
+            .flat_map(|i| note_onsets(&pick.measure()).into_iter().map(move |t| i * beat + t))
+            .collect();
         for _ in 0..100 {
             let m = generate_measure(&st, &mut rng).unwrap();
-            let expected: Vec<Beat> =
-                std::iter::repeat_n(pick.measure().beats().clone(), 4).flatten().collect();
-            assert_eq!(m.beats(), &expected);
+            assert_eq!(note_onsets(&m), expected);
         }
     }
 
@@ -1448,5 +1504,132 @@ mod tests {
             let u = rng.unit();
             assert!((0.0..1.0).contains(&u));
         }
+    }
+
+    /// Every supported meter with every subdivision, complexity and some
+    /// space, `n` measures each, with the cells they were drawn from.
+    fn generated(n: usize) -> Vec<(GeneratorSettings, Vec<&'static Cell>, Measure)> {
+        let mut rng = Rng::new(77);
+        let mut out = Vec::new();
+        for beat_unit in TimeSignature::BEAT_UNITS {
+            for beats in TimeSignature::beat_range(beat_unit).into_iter().flatten() {
+                let ts = TimeSignature::new(beats, beat_unit);
+                if !supports_time_signature(ts) {
+                    continue;
+                }
+                for &subdivision in offered_subdivisions(ts) {
+                    for complexity in 1..=MAX_COMPLEXITY {
+                        for space in [0.0, 0.5] {
+                            let st = GeneratorSettings {
+                                time_signature: ts,
+                                space,
+                                ..settings(subdivision, complexity)
+                            };
+                            for _ in 0..n {
+                                let (drawn, style) = draw(&st, &mut rng);
+                                let written = spelling::spell(beat_unit, &drawn, style, &mut rng);
+                                let m = write_measure(ts, &written).expect("spelling must build");
+                                let expected: Vec<Beat> = written
+                                    .iter()
+                                    .map(|&(d, n)| Beat::new(d, if n { Note } else { Rest }))
+                                    .collect();
+                                assert_eq!(m.beats(), &expected, "{ts} written verbatim");
+                                let cells = drawn.iter().map(|d| d.cell).collect();
+                                out.push((st, cells, m));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn spelling_keeps_the_drawn_onsets() {
+        for (st, cells, m) in generated(6) {
+            let drawn = build_measure(st.time_signature, &cells).unwrap();
+            assert_eq!(note_onsets(&m), note_onsets(&drawn), "{m:?} from {drawn:?}");
+        }
+    }
+
+    /// Start and end tick of every beat of `m` and of the generator beats.
+    fn bounds(st: &GeneratorSettings, m: &Measure) -> (Vec<(Beat, u32, u32)>, Vec<u32>) {
+        let ts = st.time_signature;
+        let onsets = DEFAULT_GRID.compute_onset_ticks(m.beats());
+        let beats = m
+            .beats()
+            .iter()
+            .zip(onsets)
+            .map(|(b, t)| (*b, t, t + DEFAULT_GRID.ticks_of(&b.duration).unwrap()))
+            .collect();
+        let mut at = 0;
+        let mut starts = vec![0];
+        for span in beat_groups(ts).unwrap() {
+            at += DEFAULT_GRID.ticks_per_measure(&span.time_signature());
+            starts.push(at);
+        }
+        (beats, starts)
+    }
+
+    #[test]
+    fn notes_cross_beats_only_inside_a_half_bar() {
+        for (st, _, m) in generated(6) {
+            let ts = st.time_signature;
+            let (beats, starts) = bounds(&st, &m);
+            // x/4: quarters grouped like the eighths of n/8.
+            let mut boundaries = vec![0];
+            if ts.beat_unit == 4 {
+                let quarter = DEFAULT_GRID.ticks_of(&q()).unwrap();
+                for g in crate::grouping::compound_groups(ts.beats).iter() {
+                    boundaries.push(boundaries.last().unwrap() + *g as u32 * quarter);
+                }
+            } else {
+                boundaries = starts.clone();
+            }
+            for (b, start, end) in beats {
+                let crosses = |cuts: &[u32]| cuts.iter().any(|&c| start < c && c < end);
+                assert!(!crosses(&boundaries), "{b:?} at {start} crosses a group in {m:?}");
+                if b.kind == Rest && b.duration != h() {
+                    assert!(!crosses(&starts), "rest {b:?} at {start} crosses a beat in {m:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn rests_inside_a_beat_need_the_short_notes_level() {
+        for (st, _, m) in generated(6) {
+            if st.complexity >= SHORT_NOTES_LEVEL || st.subdivision == Subdivision::Triplets {
+                continue;
+            }
+            let (beats, starts) = bounds(&st, &m);
+            for pair in beats.windows(2) {
+                let ((prev, _, _), (b, start, _)) = (pair[0], pair[1]);
+                // Triplet cells bring their own rests.
+                let straight = !b.duration.is_tuplet() && !prev.duration.is_tuplet();
+                if straight && b.kind == Rest && prev.kind == Note {
+                    assert!(starts.contains(&start), "rest after a note at {start} in {m:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn sixteenths_come_in_several_spellings() {
+        let mut rng = Rng::new(5);
+        let st = settings(Subdivision::Sixteenths, 5);
+        let written: Vec<String> =
+            (0..300).map(|_| format!("{:?}", generate_measure(&st, &mut rng).unwrap())).collect();
+        // A sixteenth rest between two notes inside a beat, as in
+        // `16 16-rest 16 16-rest`.
+        assert!(written.iter().any(|m| m.contains("1/16 (1/16) 1/16")), "{written:?}");
+        let mut rng = Rng::new(5);
+        let low = settings(Subdivision::Sixteenths, 1);
+        let written: Vec<String> =
+            (0..300).map(|_| format!("{:?}", generate_measure(&low, &mut rng).unwrap())).collect();
+        // Half notes and half rests from level 1 on.
+        assert!(written.iter().any(|m| m.contains("1/2 ")), "{written:?}");
+        assert!(written.iter().any(|m| m.contains("(1/2)")), "{written:?}");
     }
 }

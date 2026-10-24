@@ -47,7 +47,14 @@ Important root files:
   6/8 = 3+3, 7/8 = 2+3+2, the same for x/16). Two-eighth groups use the
   quarter-beat cells, three-eighth groups their own `Compound*` cells, x/16
   groups `SixteenthPair` / `SixteenthTriple`. Triplets/mixed fall back to
-  8ths/16ths in x/8, x/16 is always 16ths (`effective_subdivision`). Measures are written via `set_beat`, so
+  8ths/16ths in x/8, x/16 is always 16ths (`effective_subdivision`). A cell
+  only fixes the note onsets; `generator/spelling.rs` then picks each note's
+  length (up to the next onset or shorter, early stops inside a beat from
+  level 4) and writes notes and rests for the whole measure: notes cross beats
+  only as one value without a tie (dotted quarter or half from a beat, quarter
+  or dotted quarter from the "and") inside a half bar (x/4 beats grouped like
+  the eighths of n/8), never out of an x/8 or x/16 beat group; triplet cells
+  are written as drawn. Measures are written via `set_beat`, so
   they obey the same invariants as edited ones. Seed `Rng` for reproducibility.
 - Note: `Beat` `PartialEq` ignores `tuplet_group_id`. Compare the field explicitly
   if grouping matters.
