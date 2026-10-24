@@ -92,13 +92,13 @@ impl MetronomeSound {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CounterSound {
     /// The click from the sound settings, pitched above the metronome's.
-    #[default]
     Click,
     /// Claves, played higher when the metronome plays claves too.
     Claves,
     /// Snare drum: accent, normal and ghost-note recordings.
     Snare,
     /// Xylophone, played higher when the metronome plays it too.
+    #[default]
     Xylophone,
 }
 
