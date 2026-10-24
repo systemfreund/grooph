@@ -7,7 +7,7 @@ use crate::Grooph;
 use crate::generator::ENDLESS_MIN_BARS;
 use crate::metronome_view::{click_fills, ratio_label, same_bar};
 use crate::presets::{self, PresetId};
-use crate::tool_palette::notation_button;
+use crate::tool_palette::{TOOL_PALETTE_BUTTON_SIZE, notation_button};
 use eframe::egui;
 use eframe::egui::{Button, Color32, FontId, Id, Modal, Response, RichText, Ui, vec2};
 use grooph_audio::CounterSound;
@@ -23,6 +23,9 @@ use grooph_measure::tempo::{MAX_BPM, MIN_BPM};
 
 /// Height of a touch-friendly row or button.
 pub(crate) const ROW_HEIGHT: f32 = 44.0;
+/// Height of a subdivision tile in the metronome: small enough that all of
+/// them fit a phone screen with the picker.
+const FILL_TILE_SIZE: f32 = 48.0;
 /// Swing amounts offered in the swing picker (percent of a pair).
 const SWING_PRESETS: [u8; 6] = [MIN_SWING_PERCENT, 55, 60, 66, 70, MAX_SWING_PERCENT];
 
@@ -478,7 +481,7 @@ impl Grooph {
                     let tile = match &fill.tile() {
                         Some(tile) => {
                             let id = egui::IdSalt::new(("click_fill", i));
-                            notation_button(ui, id, tile, family.clone(), selected)
+                            notation_button(ui, id, tile, family.clone(), selected, FILL_TILE_SIZE)
                         }
                         None => ui.add(
                             Button::new(RichText::new(&fill.name).size(18.0))
@@ -638,6 +641,7 @@ impl Grooph {
                         &measure,
                         family.clone(),
                         active.contains(figure.id),
+                        TOOL_PALETTE_BUTTON_SIZE,
                     )
                     .on_hover_text(format!("Unlocked at level {}", figure.level));
                     if tile.clicked() {

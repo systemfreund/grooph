@@ -18,7 +18,7 @@ use grooph_render::measure::{draw_notes, draw_time_signature};
 use log::info;
 use tools::EditOp;
 
-const TOOL_PALETTE_BUTTON_SIZE: f32 = 70.0;
+pub(crate) const TOOL_PALETTE_BUTTON_SIZE: f32 = 70.0;
 const TOOL_PALETTE_BUTTON_CORNER_RADIUS: f32 = 2.0;
 
 enum ButtonKind {
@@ -297,18 +297,20 @@ impl Grooph {
 
     fn note_button(&self, ui: &mut Ui, id: &str) -> Response {
         let measure = self.editor.button_measures.get(id).unwrap();
-        notation_button(ui, IdSalt::new(id), measure, self.ui.music_font_id.family.clone(), false)
+        let family = self.ui.music_font_id.family.clone();
+        notation_button(ui, IdSalt::new(id), measure, family, false, TOOL_PALETTE_BUTTON_SIZE)
     }
 }
 
-/// A button showing `measure` as miniature notation (tool palette, grouping
-/// picker). `selected` renders it in the highlighted state.
+/// A button `size` high showing `measure` as miniature notation (tool
+/// palette, grouping picker). `selected` renders it in the highlighted state.
 pub(crate) fn notation_button(
     ui: &mut Ui,
     symbol_id: IdSalt,
     measure: &Measure,
     family: FontFamily,
     selected: bool,
+    size: f32,
 ) -> Response {
     // Size the glyphs by the first note; rest-only measures use rest sizing.
     let first = measure.beats().first().unwrap();
@@ -319,10 +321,7 @@ pub(crate) fn notation_button(
         _ if measure.beats().len() > 6 => 1.5,
         _ => 1.0,
     };
-    let symbol = Atom::custom(
-        symbol_id,
-        Vec2::new(TOOL_PALETTE_BUTTON_SIZE * w_factor, TOOL_PALETTE_BUTTON_SIZE),
-    );
+    let symbol = Atom::custom(symbol_id, Vec2::new(size * w_factor, size));
     let button = Button::new(symbol)
         .corner_radius(TOOL_PALETTE_BUTTON_CORNER_RADIUS)
         .selected(selected)
