@@ -768,8 +768,8 @@ mod tests {
             assert!((d.rect.min.y - mirrored(u.rect.max.y)).abs() < 0.01);
             assert!((d.rect.max.y - mirrored(u.rect.min.y)).abs() < 0.01);
         }
-        // A rest in the triplet gives it a bracket.
-        let r = parse_score("4/4 t8 r:t8 t8 q h").unwrap().measures.remove(0);
+        // A rest at the end of the triplet gives it a bracket.
+        let r = parse_score("4/4 t8 t8 r:t8 q h").unwrap().measures.remove(0);
         let (ra, rb) = (build_measure_layout(&r, &up), build_measure_layout(&r, &down));
         let (ub, db) = (&ra.tuplets[0].bracket, &rb.tuplets[0].bracket);
         assert!(!ub.is_empty());
@@ -840,7 +840,7 @@ mod tests {
         };
         let clearance = c::TUPLET_NUMBER_CLEARANCE_SS * opts.staff_space();
         // One digit and two, each with a rest for a bracket.
-        let ten = "4/4 10:8e 10:8e 10:8e 10:8e r:10:8e 10:8e 10:8e 10:8e 10:8e 10:8e";
+        let ten = "4/4 10:8e 10:8e 10:8e 10:8e 10:8e 10:8e 10:8e 10:8e 10:8e r:10:8e";
         for s in ["4/4 t4 r:t4 t4 h", ten] {
             let l = build_measure_layout(&parse_score(s).unwrap().measures.remove(0), &opts);
             let t = &l.tuplets[0];
@@ -882,7 +882,7 @@ mod tests {
 
         // Without accents the bracket and the number keep their distance
         // from the stem tips.
-        let plain = lay_out("4/4 t8 r:t8 t8 q h", &up);
+        let plain = lay_out("4/4 t8 t8 r:t8 q h", &up);
         assert!((line_of(&plain) - (tip - c::TUPLET_BRACKET_GAP_SS * ss)).abs() < 0.01);
         let beamed = lay_out("4/4 t8 t8 t8 q h", &up);
         assert!(
@@ -894,7 +894,7 @@ mod tests {
         let accent = l.notes[1].accent.unwrap().ink();
         assert!((number_of(&l).bottom() - (accent.top() - gap)).abs() < 0.01);
         // An accent under a hook lifts the bracket so the hook clears it.
-        let l = lay_out("4/4 >t8 r:t8 t8 q h", &up);
+        let l = lay_out("4/4 >t8 t8 r:t8 q h", &up);
         let accent = l.notes[0].accent.unwrap().ink();
         // The hook as painted, half its thickness past its end.
         let hook_end = l.tuplets[0].bracket.iter().map(|b| b.p2.y).fold(f32::MIN, f32::max)
