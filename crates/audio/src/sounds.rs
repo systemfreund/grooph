@@ -14,7 +14,7 @@
 
 use crate::schedule::{COUNTER_SOFT_GAIN, SoundType};
 use crate::wav::{self, SampleData};
-use crate::{AudioSettings, Waveform, default_ghost_gain};
+use crate::{AudioSettings, Waveform};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, OnceLock};
 
@@ -144,6 +144,9 @@ impl CounterSound {
 /// the same sound, so the two layers stay apart by ear.
 const COUNTER_SAME_SOUND_RATE: f32 = 1.5;
 
+/// Ghost volume at which a ghost-note sample plays at its recorded level.
+const GHOST_SAMPLE_GAIN: f32 = 0.25;
+
 /// An embedded WAV file.
 struct SampleFile {
     name: &'static str,
@@ -246,10 +249,10 @@ impl SoundType {
             settings.metronome_sound.sample(self)
         };
         let mut gain = self.profile(settings).gain;
-        // A ghost-note sample is already recorded quietly; scale it so the
-        // default ghost volume plays it as recorded.
+        // A ghost-note sample is already recorded quietly; scale it so a
+        // ghost volume of GHOST_SAMPLE_GAIN plays it as recorded.
         if sample.is_some() && self == SoundType::Ghost {
-            gain /= default_ghost_gain();
+            gain /= GHOST_SAMPLE_GAIN;
         }
         // The same holds for the snare's soft counter clicks.
         if sample == Some(SampleId::SNARE_GHOST) && self == SoundType::CounterSoft {
@@ -405,8 +408,9 @@ mod tests {
             sample(SoundType::AccentedBeat),
             (SampleId::SNARE_ACCENT.data(), settings.accent)
         );
-        // The ghost sample is quiet already: the default volume plays it as recorded.
-        assert_eq!(sample(SoundType::Ghost), (SampleId::SNARE_GHOST.data(), 1.0));
+        // The ghost sample is quiet already: GHOST_SAMPLE_GAIN plays it as recorded.
+        let recorded = AudioSettings { ghost: GHOST_SAMPLE_GAIN, ..settings };
+        assert!(matches!(SoundType::Ghost.patch(&recorded), Patch::Sample { gain: 1.0, .. }));
         let louder = AudioSettings { ghost: 0.5, ..settings };
         assert!(matches!(SoundType::Ghost.patch(&louder), Patch::Sample { gain: 2.0, .. }));
     }
@@ -418,7 +422,7 @@ mod tests {
             (peak(SampleId::SNARE_GHOST), peak(SampleId::SNARE), peak(SampleId::SNARE_ACCENT));
         assert!(ghost < normal && normal < accent, "{ghost} {normal} {accent}");
         // Even at full ghost volume the ghost note does not clip.
-        assert!(ghost / default_ghost_gain() < 1.0);
+        assert!(ghost / GHOST_SAMPLE_GAIN < 1.0);
     }
 
     #[test]
