@@ -274,6 +274,9 @@ pub struct NoteLayout {
     /// A beamed rest, drawn as a stem from the beam toward the line and no
     /// head (see [`crate::render_plan::plan_measure_with`]).
     pub stemlet: bool,
+    /// A rest of an empty bar, drawn as the bar's whole rest by its first
+    /// beat (see [`RenderPlan::bar_rest`]): the others are not drawn.
+    pub hidden: bool,
     /// The parentheses of a soft (ghost) note's head.
     pub parens: Vec<PlacedGlyph>,
     /// A rest's ledger line, on a line shared by two voices (see
@@ -289,7 +292,7 @@ impl NoteLayout {
     /// Every glyph of the note.
     pub fn glyphs(&self) -> impl Iterator<Item = &PlacedGlyph> {
         std::iter::once(&self.head)
-            .filter(|_| !self.stemlet)
+            .filter(|_| !self.stemlet && !self.hidden)
             .chain(&self.parens)
             .chain(&self.dots)
             .chain(&self.flag)

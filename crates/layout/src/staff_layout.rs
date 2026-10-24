@@ -22,7 +22,7 @@ use crate::pixel_layout::{
     LayoutOpts, MeasureLayout, build_measure_layout_at, build_measure_layout_with_plan, clef_width,
     min_note_area_width, note_advances, note_area_offset, note_lead, time_sig_width,
 };
-use crate::render_plan::{RenderPlan, plan_measure_with};
+use crate::render_plan::{RenderPlan, plan_measure_with, rests_only};
 use crate::{calculate_shared_x_centers, shared_min_width};
 use egui::{FontId, Pos2, Rect, Vec2, pos2, vec2};
 use grooph_measure::duration::s;
@@ -64,6 +64,10 @@ pub struct StaffOpts {
     /// Room under a lower voice's notes in em, for count labels: 0 or
     /// [`LOWER_VOICE_LABEL_ROOM_EM`].
     pub lower_label_room_em: f32,
+    /// Draw a measure of rests only as one whole rest (see
+    /// [`RenderPlan::bar_rest`]), unless a lower voice shares its line. Off
+    /// while editing, so each rest shows and can be picked.
+    pub bar_rests: bool,
 }
 
 impl StaffOpts {
@@ -329,7 +333,10 @@ pub fn build_staff_layout_with_lower(
         .measures
         .iter()
         .enumerate()
-        .map(|(i, m)| plan_measure_with(m, shares_line(i)))
+        .map(|(i, m)| RenderPlan {
+            bar_rest: opts.bar_rests && !shares_line(i) && rests_only(m),
+            ..plan_measure_with(m, shares_line(i))
+        })
         .collect();
     let lower_plans: Vec<Option<RenderPlan>> =
         (0..score.len()).map(|i| lower_measures(i).map(|m| plan_measure_with(m, true))).collect();
@@ -521,6 +528,7 @@ mod tests {
             layout_clef_first: true,
             room_below_em: ROOM_BELOW_EM,
             lower_label_room_em: 0.0,
+            bar_rests: false,
         }
     }
 
@@ -1081,5 +1089,47 @@ mod tests {
         let labels = StaffOpts { lower_label_room_em: LOWER_VOICE_LABEL_ROOM_EM, ..opts(em, rect) };
         let with = build_staff_layout_with_lower(&upper, Some(&lower), &labels).room;
         assert!((with.below - without.below - LOWER_VOICE_LABEL_ROOM_EM).abs() < 1e-4);
+    }
+
+    #[test]
+    fn an_empty_bar_shows_one_whole_rest_in_its_middle() {
+        use crate::glyphs::REST_WHOLE;
+        use grooph_measure::notation::parse_score;
+        let em = 20.0;
+        let rect = Rect::from_min_max(Pos2::ZERO, Pos2::new(1200.0, 400.0));
+        let on = StaffOpts { bar_rests: true, ..opts(em, rect) };
+        for meter in [
+            "4/4 r:h r:h | q r:q h",
+            "3/4 r:h r:q | q r:h",
+            "6/8 r:q. r:q. | e r:e r:e r:q.",
+            "2/4 r:h | q q",
+            "7/8 r:q r:q. r:q | e r:e r:q. r:q",
+        ] {
+            let score = parse_score(meter).unwrap();
+            let staff = build_staff_layout(&score, &on);
+            let placed = staff.placed(0).unwrap();
+            let notes = &placed.layout.notes;
+            // Every beat keeps its layout, the first one draws the rest.
+            assert_eq!(notes.len(), score.measures[0].beats().len(), "{meter}");
+            assert_eq!(notes[0].head.glyph, REST_WHOLE, "{meter}");
+            assert!(notes.iter().all(|n| n.dots.is_empty()), "{meter}");
+            assert!(notes[1..].iter().all(|n| n.hidden && n.glyphs().next().is_none()), "{meter}");
+            let area = (placed.layout.notes_left_edge + placed.rect.right()) / 2.0;
+            assert!((notes[0].head.ink().center().x - area).abs() < 1.0, "{meter} centred");
+            // It hangs from the line.
+            let ink = notes[0].head.ink();
+            let line = on.measure_opts(placed.rect, placed.y_offset, false, false).y_of(0);
+            assert!(ink.top() <= line && ink.bottom() > line, "{meter} hangs from the line");
+            // A measure with a note keeps its rests.
+            let other = &staff.placed(1).unwrap().layout.notes;
+            assert!(other.iter().all(|n| !n.hidden));
+        }
+        // Off (while editing) and in triplets, the rests stay as written.
+        let score = parse_score("4/4 r:h r:h").unwrap();
+        let off = build_staff_layout(&score, &opts(em, rect));
+        assert!(off.placed(0).unwrap().layout.notes.iter().all(|n| !n.hidden));
+        let triplets = parse_score("2/4 r:t4 r:t4 r:t4").unwrap();
+        let staff = build_staff_layout(&triplets, &on);
+        assert!(staff.placed(0).unwrap().layout.notes.iter().all(|n| !n.hidden));
     }
 }
