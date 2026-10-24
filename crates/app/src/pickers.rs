@@ -468,24 +468,29 @@ impl Grooph {
         let current = fills.iter().position(|f| same_bar(&f.bar, bar));
         let family = self.ui.music_font_id.family.clone();
         let mut picked = None;
-        ui.horizontal_wrapped(|ui| {
-            for (i, fill) in fills.iter().enumerate() {
-                let selected = current == Some(i);
-                let tile = match &fill.tile {
-                    Some(tile) => {
-                        let id = egui::IdSalt::new(("click_fill", i));
-                        notation_button(ui, id, tile, family.clone(), selected)
+        // Nine tiles wrap to many rows on a narrow phone: they scroll where
+        // they would push "Done" off the screen.
+        let room = (ui.ctx().content_rect().height() - 300.0).max(200.0);
+        egui::ScrollArea::vertical().max_height(room).show(ui, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                for (i, fill) in fills.iter().enumerate() {
+                    let selected = current == Some(i);
+                    let tile = match &fill.tile() {
+                        Some(tile) => {
+                            let id = egui::IdSalt::new(("click_fill", i));
+                            notation_button(ui, id, tile, family.clone(), selected)
+                        }
+                        None => ui.add(
+                            Button::new(RichText::new(&fill.name).size(18.0))
+                                .selected(selected)
+                                .min_size(vec2(0.0, ROW_HEIGHT)),
+                        ),
+                    };
+                    if tile.on_hover_text(&fill.name).clicked() {
+                        picked = Some(i);
                     }
-                    None => ui.add(
-                        Button::new(RichText::new(&fill.name).size(18.0))
-                            .selected(selected)
-                            .min_size(vec2(0.0, ROW_HEIGHT)),
-                    ),
-                };
-                if tile.on_hover_text(&fill.name).clicked() {
-                    picked = Some(i);
                 }
-            }
+            });
         });
         // The name of the one picked, as the tiles show only notes.
         ui.add_space(4.0);

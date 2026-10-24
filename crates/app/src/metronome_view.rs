@@ -138,9 +138,17 @@ fn arc(center: Pos2, radius: f32, start: f32, end: f32) -> Vec<Pos2> {
 pub(crate) struct ClickFill {
     pub bar: Measure,
     pub name: String,
-    /// What its tile shows, every click alike: the first beat group for
-    /// the main beats, one beat unit for a subdivision.
-    pub tile: Option<Measure>,
+    /// Beat units its tile shows: the first beat group for the main beats,
+    /// one for a subdivision.
+    tile_units: u8,
+}
+
+impl ClickFill {
+    /// What its tile shows, every click alike (see [`tile_of`]). Built on
+    /// demand: the label needs only the names.
+    pub(crate) fn tile(&self) -> Option<Measure> {
+        tile_of(&self.bar, self.tile_units)
+    }
 }
 
 /// Ready-made click bars of `ts`: the default, then every beat unit split
@@ -148,9 +156,11 @@ pub(crate) struct ClickFill {
 /// are offered once.
 pub(crate) fn click_fills(ts: TimeSignature) -> Vec<ClickFill> {
     let group = ts.groups().first().copied().unwrap_or(1);
-    let bar = default_click_bar(ts);
-    let mut fills =
-        vec![ClickFill { tile: tile_of(&bar, group), bar, name: "Main beats".to_owned() }];
+    let mut fills = vec![ClickFill {
+        bar: default_click_bar(ts),
+        name: "Main beats".to_owned(),
+        tile_units: group,
+    }];
     for parts in 1..=9 {
         let Some(bar) = subdivided_click_bar(ts, parts) else {
             continue;
@@ -159,7 +169,7 @@ pub(crate) fn click_fills(ts: TimeSignature) -> Vec<ClickFill> {
             continue;
         }
         let name = bar.beats().first().map_or_else(String::new, |b| fill_name(b.duration));
-        fills.push(ClickFill { tile: tile_of(&bar, 1), bar, name });
+        fills.push(ClickFill { bar, name, tile_units: 1 });
     }
     fills
 }
@@ -894,7 +904,7 @@ mod tests {
     #[test]
     fn fills_show_one_beat_unit_and_the_main_beats_one_group() {
         let ts = TimeSignature::SIX_EIGHT;
-        let tiles: Vec<_> = click_fills(ts).into_iter().map(|f| f.tile.unwrap()).collect();
+        let tiles: Vec<_> = click_fills(ts).iter().map(|f| f.tile().unwrap()).collect();
         assert_eq!(tiles[0].time_signature(), TimeSignature::new(3, 8));
         assert_eq!(tiles[0].beats().len(), 1);
         // Eighths, sixteenths, sixteenth triplets: one eighth's worth.
@@ -905,7 +915,7 @@ mod tests {
             assert!(tile.beats().iter().all(|b| ClickLevel::of(b) == ClickLevel::Medium));
         }
         for ts in crate::pickers::all_time_signatures() {
-            assert!(click_fills(ts).iter().all(|f| f.tile.is_some()), "{ts}");
+            assert!(click_fills(ts).iter().all(|f| f.tile().is_some()), "{ts}");
         }
     }
 
