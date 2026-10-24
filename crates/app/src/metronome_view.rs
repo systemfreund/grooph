@@ -28,7 +28,7 @@ use eframe::egui::{Align2, Color32, FontId, Pos2, Sense, Shape, Stroke, Ui, vec2
 use grooph_layout::staff_layout::Voice;
 use grooph_measure::click::{ClickLevel, default_click_bar, subdivided_click_bar};
 use grooph_measure::counter::{
-    CounterBars, Ratio, click_level, counter_bar, counter_clicks, counter_ratios, ratio_of,
+    CounterBars, Ratio, click_level, counter_bar, counter_clicks, counter_ratios, named_ratio_of,
 };
 use grooph_measure::duration::{Duration, TupletKind};
 use grooph_measure::grid::DEFAULT_GRID;
@@ -174,11 +174,11 @@ fn fill_name(d: Duration) -> String {
     }
 }
 
-/// The ratio a counter bar plays, and whether its clicks were edited since
-/// it was picked: louder, softer or muted ones the ratio's own bar (every
-/// click medium) does not have.
-pub(crate) fn counter_ratio(bar: &Measure) -> Option<(Ratio, bool)> {
-    let ratio = ratio_of(bar)?;
+/// The ratio a counter bar plays, `named` if it was picked as that one, and
+/// whether its clicks were edited since it was picked: louder, softer or
+/// muted ones the ratio's own bar (every click medium) does not have.
+pub(crate) fn counter_ratio(bar: &Measure, named: Option<Ratio>) -> Option<(Ratio, bool)> {
+    let ratio = named_ratio_of(bar, named)?;
     let edited = !counter_bar(bar.time_signature(), ratio).is_some_and(|m| same_bar(&m, bar));
     Some((ratio, edited))
 }
@@ -416,8 +416,15 @@ impl Grooph {
     pub(crate) fn counter_label(&self) -> String {
         match self.counter_bar() {
             None => "Off".to_owned(),
-            Some(bar) => counter_ratio(bar).map_or_else(|| "Custom".to_owned(), ratio_label),
+            Some(_) => self.counter_ratio().map_or_else(|| "Custom".to_owned(), ratio_label),
         }
+    }
+
+    /// The counter rhythm's ratio and whether its clicks were edited (see
+    /// [`counter_ratio`]), if it has one.
+    pub(crate) fn counter_ratio(&self) -> Option<(Ratio, bool)> {
+        let named = self.playback_ctl.audio_cfg.counter.name(self.metronome_meter());
+        counter_ratio(self.counter_bar()?, named)
     }
 
     /// Play `ratio` against the click bar from now on, or no counter rhythm.
@@ -427,14 +434,16 @@ impl Grooph {
         let bar = ratio.and_then(|r| counter_bar(ts, r));
         let unchanged = match (self.counter_bar(), &bar) {
             (None, None) => true,
-            (Some(a), Some(b)) => same_bar(a, b),
+            (Some(a), Some(b)) => {
+                same_bar(a, b) && self.playback_ctl.audio_cfg.counter.name(ts) == ratio
+            }
             _ => false,
         };
         if unchanged {
             return;
         }
         self.with_undo_snapshot(|app| {
-            app.playback_ctl.audio_cfg.counter.set(ts, bar.clone());
+            app.playback_ctl.audio_cfg.counter.set_ratio(ts, ratio.filter(|_| bar.is_some()));
             if app.edited_voice() == Voice::Lower {
                 match bar {
                     Some(bar) => app.editor.score = Score::single(bar),
@@ -639,7 +648,7 @@ impl Grooph {
         let count_in_beat = current_turn
             .filter(|_| self.playback_ctl.playback.count_in == CountInState::Active)
             .map(|t| if self.count_in_click_heard(&ts) { count_in_beat(t, &ts) } else { 1 });
-        let caption = match counter.as_ref().and_then(counter_ratio) {
+        let caption = match counter.as_ref().and(self.counter_ratio()) {
             Some(ratio) => ratio_label(ratio),
             None if counter.is_some() => "custom".to_owned(),
             None => meter_caption(&ts),
@@ -915,6 +924,22 @@ mod tests {
     }
 
     #[test]
+    fn a_ratio_of_ones_own_with_a_common_factor_is_named_as_picked() {
+        let mut app = metronome_app();
+        // 6:4 plays 3:2's bar, but stays 6:4.
+        app.set_counter_ratio(Some(Ratio { n: 6, span: 4 }));
+        assert_eq!(app.counter_label(), "6:4");
+        app.cycle_counter_level(2);
+        assert_eq!(app.counter_label(), "6:4 edited");
+        app.set_counter_ratio(Some(Ratio { n: 6, span: 4 }));
+        // Picking 3:2 renames it, undoably.
+        app.set_counter_ratio(Some(Ratio { n: 3, span: 2 }));
+        assert_eq!(app.counter_label(), "3:2");
+        app.undo();
+        assert_eq!(app.counter_label(), "6:4");
+    }
+
+    #[test]
     fn an_edited_counter_rhythm_says_so_until_picked_again() {
         let mut app = metronome_app();
         let ratio = Ratio { n: 3, span: 4 };
@@ -994,7 +1019,10 @@ mod tests {
         app.close_metronome();
         assert_eq!(app.editor.metronome.voice, Voice::Upper);
         let counter = app.playback_ctl.audio_cfg.counter.for_meter(TimeSignature::FOUR_FOUR);
-        assert_eq!(counter.and_then(ratio_of), Some(Ratio { n: 5, span: 4 }));
+        assert_eq!(
+            counter.and_then(grooph_measure::counter::ratio_of),
+            Some(Ratio { n: 5, span: 4 })
+        );
     }
 
     #[test]

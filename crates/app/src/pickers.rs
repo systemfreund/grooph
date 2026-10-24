@@ -5,7 +5,7 @@
 
 use crate::Grooph;
 use crate::generator::ENDLESS_MIN_BARS;
-use crate::metronome_view::{click_fills, counter_ratio, ratio_label, same_bar};
+use crate::metronome_view::{click_fills, ratio_label, same_bar};
 use crate::presets::{self, PresetId};
 use crate::tool_palette::notation_button;
 use eframe::egui;
@@ -477,7 +477,7 @@ impl Grooph {
     /// time of M beats, then one of one's own, then the sound they play
     /// with.
     fn polyrhythm_choices(&mut self, ui: &mut Ui) -> bool {
-        let counter = self.counter_bar().and_then(counter_ratio);
+        let counter = self.counter_ratio();
         let current = counter.map(|(r, _)| r);
         let edited = counter.filter(|&(_, edited)| edited).map(|(r, _)| r);
         let mut options = vec![(None, "Off".to_owned())];

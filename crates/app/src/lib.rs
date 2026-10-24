@@ -59,7 +59,7 @@ use eframe::{App, CreationContext, egui};
 use grooph_audio::{AudioSettings, GapClick, PlaybackOptions, PlayerState, TempoRamp};
 use grooph_link::{LinkContent, SharedLink};
 use grooph_measure::click::ClickBars;
-use grooph_measure::counter::CounterBars;
+use grooph_measure::counter::{CounterBars, Ratio};
 use grooph_measure::counting::{
     CountConfig, CountLayer, CountScope, LabelPattern, LabelToken, Subdiv,
 };
@@ -142,6 +142,8 @@ struct PersistedState {
     presets: PresetLibrary,
     click_bars: ClickBars,
     counter_bars: CounterBars,
+    /// The ratio each counter bar was picked as (see [`CounterBars::names`]).
+    counter_names: Vec<(TimeSignature, Ratio)>,
     metronome_meter: TimeSignature,
     /// Tab open when the state was saved, reopened at the next start.
     tab: CompactTab,
@@ -175,6 +177,7 @@ impl Default for PersistedState {
             presets: PresetLibrary::default(),
             click_bars: ClickBars::default(),
             counter_bars: CounterBars::default(),
+            counter_names: Vec::new(),
             metronome_meter: TimeSignature::FOUR_FOUR,
             tab: CompactTab::Practice,
         }
@@ -219,6 +222,7 @@ impl PersistedState {
             presets: app.editor.presets.clone(),
             click_bars: app.playback_ctl.audio_cfg.click.clone(),
             counter_bars: app.playback_ctl.audio_cfg.counter.clone(),
+            counter_names: app.playback_ctl.audio_cfg.counter.names().to_vec(),
             metronome_meter: app.editor.metronome.meter,
             tab: app.compact_tab(),
         }
@@ -1126,7 +1130,7 @@ impl Grooph {
                     gap: state.gap_click,
                     ramp: state.tempo_ramp,
                     click: state.click_bars,
-                    counter: state.counter_bars,
+                    counter: state.counter_bars.with_names(&state.counter_names),
                 },
                 playback: PlaybackState::default(),
                 accuracy: AccuracyState::new(state.accuracy_enabled),
