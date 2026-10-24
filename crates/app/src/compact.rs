@@ -4,17 +4,21 @@
 //! centered column and the staff gets the full width.
 
 use crate::metronome_view::FillLook;
-use crate::pickers::{Picker, ROW_HEIGHT, card_meter_label, swing_label};
+use crate::pickers::{Picker, ROW_HEIGHT, shown_groups, swing_label};
 use crate::share::paint_share_icon;
 use crate::tool_palette::{notation_size, paint_none, paint_notation};
 use crate::{Grooph, Mode, TransportState};
 use eframe::egui;
 use eframe::egui::{
-    Align2, Button, Color32, FontFamily, FontId, Frame, Id, Margin, Painter, Rect, Response,
+    Align2, Button, Color32, FontFamily, FontId, Frame, Id, Margin, Painter, Pos2, Rect, Response,
     RichText, Sense, Shape, Stroke, Ui, UiBuilder, Vec2, pos2, vec2,
 };
+use grooph_layout::glyphs::ts_glyphs;
+use grooph_layout::pixel_layout::PlacedGlyph;
 use grooph_layout::staff_layout::Voice;
+use grooph_measure::TimeSignature;
 use grooph_measure::generator::{Subdivision, effective_subdivision};
+use grooph_render::draw_glyph;
 use serde::{Deserialize, Serialize};
 
 /// Windows narrower than this (in points) count as phone-sized: the staff
@@ -26,6 +30,8 @@ const COLUMN_MAX_WIDTH: f32 = 720.0;
 const TAB_HEIGHT: f32 = 56.0;
 const CARD_CELL_HEIGHT: f32 = 64.0;
 const CARD_VALUE_SIZE: f32 = 26.0;
+/// Music font size of a meter in the card: its two numbers stacked are this high.
+const CARD_METER_EM: f32 = 34.0;
 const PLAY_BUTTON_SIZE: f32 = 68.0;
 const SIDE_BUTTON_SIZE: f32 = 52.0;
 /// Share of the metronome tab's free height the click bar's staff gets, and
@@ -106,9 +112,15 @@ fn fitted_text(
     painter.text(pos, anchor, text, FontId::proportional(size), color);
 }
 
-/// Labelled value in the settings card: caption above, big value below. A
-/// second line in `value` (a meter's beat groups) goes small under the first.
-fn card_cell(ui: &mut Ui, label: &str, value: &str) -> Response {
+/// A value in the settings card.
+enum CardValue {
+    Text(String),
+    /// A meter, stacked in the music font as on the staff.
+    Meter(TimeSignature),
+}
+
+/// Labelled value in the settings card: caption above, big value below.
+fn card_cell(ui: &mut Ui, label: &str, value: &CardValue, music: &FontFamily) -> Response {
     let (rect, resp) =
         ui.allocate_exact_size(vec2(ui.available_width(), CARD_CELL_HEIGHT), Sense::click());
     if resp.hovered() || resp.is_pointer_button_down_on() {
@@ -130,38 +142,60 @@ fn card_cell(ui: &mut Ui, label: &str, value: &str) -> Response {
     // Values that have to shrink stay centered on the line of the full-size ones.
     let value_height = ui.fonts_mut(|f| f.row_height(&FontId::proportional(CARD_VALUE_SIZE)));
     let center = rect.center_bottom() - vec2(0.0, 6.0 + value_height / 2.0);
-    match value.split_once('\n') {
-        None => fitted_text(
+    match value {
+        CardValue::Text(text) => fitted_text(
             painter,
             center,
             Align2::CENTER_CENTER,
-            value,
+            text,
             CARD_VALUE_SIZE,
             width,
             strong,
         ),
-        Some((main, detail)) => {
-            fitted_text(
-                painter,
-                center - vec2(0.0, 5.0),
-                Align2::CENTER_CENTER,
-                main,
-                CARD_VALUE_SIZE - 4.0,
-                width,
-                strong,
-            );
-            fitted_text(
-                painter,
-                rect.center_bottom() - vec2(0.0, 3.0),
-                Align2::CENTER_BOTTOM,
-                detail,
-                12.0,
-                width,
-                weak,
-            );
-        }
+        CardValue::Meter(ts) => match shown_groups(*ts) {
+            None => paint_meter(painter, *ts, center, CARD_METER_EM, width, music, strong),
+            // The beat groups go small under the meter.
+            Some(groups) => {
+                let em = CARD_METER_EM - 9.0;
+                paint_meter(painter, *ts, center - vec2(0.0, 6.0), em, width, music, strong);
+                fitted_text(
+                    painter,
+                    rect.center_bottom() - vec2(0.0, 3.0),
+                    Align2::CENTER_BOTTOM,
+                    &groups,
+                    11.0,
+                    width,
+                    weak,
+                );
+            }
+        },
     }
     resp
+}
+
+/// `ts` as stacked time-signature digits centered on `center`, at music font
+/// size `em` or smaller to fit `max_width`.
+fn paint_meter(
+    painter: &Painter,
+    ts: TimeSignature,
+    center: Pos2,
+    em: f32,
+    max_width: f32,
+    family: &FontFamily,
+    color: Color32,
+) {
+    let advance = |n: u8| ts_glyphs(n).iter().map(|g| g.advance).sum::<f32>() * 0.25;
+    let widest = advance(ts.beats).max(advance(ts.beat_unit));
+    let em = em.min(max_width / widest);
+    let staff_space = 0.25 * em;
+    for (n, y) in [(ts.beats, center.y - staff_space), (ts.beat_unit, center.y + staff_space)] {
+        let mut pen = center.x - advance(n) * em / 2.0;
+        for glyph in ts_glyphs(n) {
+            let placed = PlacedGlyph { glyph, origin: pos2(pen, y), size: em };
+            draw_glyph(painter, &placed, family, color);
+            pen += glyph.advance * staff_space;
+        }
+    }
 }
 
 /// Full-width row with a label and an on/off switch. Returns whether it toggled.
@@ -441,14 +475,22 @@ impl Grooph {
             settings.complexity.to_string()
         };
         let cells = [
-            (Picker::TimeSignature, "Meter", card_meter_label(settings.time_signature)),
-            (Picker::Subdivision, "Notes", subdivision_short_label(subdivision).to_owned()),
-            (Picker::Complexity, "Level", level),
-            (Picker::Bars, "Bars", self.editor.generator.effective_bars().to_string()),
+            (Picker::TimeSignature, "Meter", CardValue::Meter(settings.time_signature)),
+            (
+                Picker::Subdivision,
+                "Notes",
+                CardValue::Text(subdivision_short_label(subdivision).to_owned()),
+            ),
+            (Picker::Complexity, "Level", CardValue::Text(level)),
+            (
+                Picker::Bars,
+                "Bars",
+                CardValue::Text(self.editor.generator.effective_bars().to_string()),
+            ),
             // While a tempo ramp runs: the tempo being played.
             match self.playback_ctl.playback.ramp_bpm {
-                Some(bpm) => (Picker::Bpm, "BPM now", bpm.to_string()),
-                None => (Picker::Bpm, "BPM", self.playback_ctl.bpm.to_string()),
+                Some(bpm) => (Picker::Bpm, "BPM now", CardValue::Text(bpm.to_string())),
+                None => (Picker::Bpm, "BPM", CardValue::Text(self.playback_ctl.bpm.to_string())),
             },
         ];
 
@@ -458,17 +500,18 @@ impl Grooph {
     /// Meter and tempo of the metronome tab, in the same card as Practice.
     fn compact_metronome_card(&mut self, ui: &mut Ui) {
         let cells = [
-            (Picker::MetronomeMeter, "Meter", card_meter_label(self.metronome_meter())),
+            (Picker::MetronomeMeter, "Meter", CardValue::Meter(self.metronome_meter())),
             match self.playback_ctl.playback.ramp_bpm {
-                Some(bpm) => (Picker::Bpm, "BPM now", bpm.to_string()),
-                None => (Picker::Bpm, "BPM", self.playback_ctl.bpm.to_string()),
+                Some(bpm) => (Picker::Bpm, "BPM now", CardValue::Text(bpm.to_string())),
+                None => (Picker::Bpm, "BPM", CardValue::Text(self.playback_ctl.bpm.to_string())),
             },
         ];
         self.compact_card(ui, &cells);
     }
 
     /// Card of labelled values on top; a tap opens the value's picker.
-    fn compact_card(&mut self, ui: &mut Ui, cells: &[(Picker, &str, String)]) {
+    fn compact_card(&mut self, ui: &mut Ui, cells: &[(Picker, &str, CardValue)]) {
+        let music = self.ui.music_font_id.family.clone();
         let mut picked = None;
         egui::Panel::top("compact_card")
             .frame(Frame::new().fill(ui.visuals().panel_fill).inner_margin(Margin {
@@ -487,7 +530,7 @@ impl Grooph {
                         .show(ui, |ui| {
                             ui.columns(cells.len(), |cols| {
                                 for (col, (picker, label, value)) in cols.iter_mut().zip(cells) {
-                                    if card_cell(col, label, value).clicked() {
+                                    if card_cell(col, label, value, &music).clicked() {
                                         picked = Some(*picker);
                                     }
                                 }

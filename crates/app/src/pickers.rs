@@ -75,19 +75,15 @@ pub(crate) fn all_time_signatures() -> Vec<TimeSignature> {
 /// Beat groups shown next to an x/8 or x/16 meter, e.g. "7/8 (2+3+2)".
 pub(crate) fn time_signature_label(ts: TimeSignature) -> String {
     let meter = format!("{}/{}", ts.beats, ts.beat_unit);
-    if ts.beat_unit == 4 || ts.groups().len() < 2 {
-        return meter;
+    match shown_groups(ts) {
+        Some(groups) => format!("{meter} ({groups})"),
+        None => meter,
     }
-    format!("{meter} ({})", ts.groups_label())
 }
 
-/// The same for the settings card: the beat groups on a second line.
-pub(crate) fn card_meter_label(ts: TimeSignature) -> String {
-    let meter = format!("{}/{}", ts.beats, ts.beat_unit);
-    if ts.beat_unit == 4 || ts.groups().len() < 2 {
-        return meter;
-    }
-    format!("{meter}\n{}", ts.groups_label())
+/// The beat groups of an x/8 or x/16 meter with more than one, e.g. "2+3+2".
+pub(crate) fn shown_groups(ts: TimeSignature) -> Option<String> {
+    (ts.beat_unit != 4 && ts.groups().len() >= 2).then(|| ts.groups_label())
 }
 
 pub(crate) fn subdivision_label(s: Subdivision) -> &'static str {
