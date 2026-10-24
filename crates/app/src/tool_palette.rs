@@ -5,8 +5,8 @@ use crate::{Mode, tools};
 use eframe::egui;
 use eframe::egui::scroll_area::{ScrollBarVisibility, ScrollSource};
 use eframe::egui::{
-    Align, Atom, Button, Direction, FontFamily, FontId, IdSalt, Layout, Rect, Response, RichText,
-    Ui, Vec2,
+    Align, Atom, Button, Color32, Direction, FontFamily, FontId, IdSalt, Layout, Rect, Response,
+    RichText, Ui, Vec2,
 };
 use grooph_layout::pixel_layout::{
     LayoutOpts, MeasureLayout, build_measure_layout, build_time_sig_layout, compute_em,
@@ -312,22 +312,41 @@ pub(crate) fn notation_button(
     selected: bool,
     size: f32,
 ) -> Response {
-    // Size the glyphs by the first note; rest-only measures use rest sizing.
-    let first = measure.beats().first().unwrap();
-    let template = measure.beats().iter().find(|b| b.kind == Note).unwrap_or(first);
-    // Tuplets and long rows of short notes get a wider tile.
-    let w_factor = match template {
-        Beat { kind: Note, duration: Duration::Tuplet(..), .. } => 1.5,
-        _ if measure.beats().len() > 6 => 1.5,
-        _ => 1.0,
-    };
-    let symbol = Atom::custom(symbol_id, Vec2::new(size * w_factor, size));
+    let symbol = Atom::custom(symbol_id, notation_size(measure, size));
     let button = Button::new(symbol)
         .corner_radius(TOOL_PALETTE_BUTTON_CORNER_RADIUS)
         .selected(selected)
         .atom_ui(ui);
-
     if let Some(rect) = button.rect(symbol_id) {
+        let color = ui.style().visuals.text_color();
+        paint_notation(ui, rect, measure, family, color);
+    }
+    button.response
+}
+
+/// Size of a [`notation_button`]'s notes `size` high: tuplets and long rows
+/// of short notes get a wider tile.
+pub(crate) fn notation_size(measure: &Measure, size: f32) -> Vec2 {
+    let wide = measure.beats().len() > 6
+        || measure.beats().iter().any(|b| b.kind == Note && b.duration.as_tuplet_spec().is_some());
+    Vec2::new(if wide { 1.5 * size } else { size }, size)
+}
+
+/// Draw `measure` as miniature notation fitted into `rect`, as on a
+/// [`notation_button`].
+pub(crate) fn paint_notation(
+    ui: &Ui,
+    rect: Rect,
+    measure: &Measure,
+    family: FontFamily,
+    color: Color32,
+) {
+    // Size the glyphs by the first note; rest-only measures use rest sizing.
+    let Some(first) = measure.beats().first() else {
+        return;
+    };
+    let template = measure.beats().iter().find(|b| b.kind == Note).unwrap_or(first);
+    {
         let cap_factor = match template {
             Beat { kind: Rest, .. } => 0.8,
             Beat { kind: Note, duration: Duration::Tuplet(spec), .. }
@@ -398,10 +417,8 @@ pub(crate) fn notation_button(
         let opts = make_opts(final_em, final_rect);
         let measure_layout = build_measure_layout(measure, &opts);
         let painter = &ui.painter_at(rect);
-        draw_notes(painter, &measure_layout, ui.style().visuals.text_color(), &opts);
+        draw_notes(painter, &measure_layout, color, &opts);
     }
-
-    button.response
 }
 
 /// Bounding rect (in the same pixel space as `LayoutOpts::rect`) of the ink

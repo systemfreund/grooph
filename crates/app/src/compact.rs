@@ -5,13 +5,15 @@
 
 use crate::pickers::{Picker, ROW_HEIGHT, swing_label, time_signature_label};
 use crate::share::paint_share_icon;
+use crate::tool_palette::{notation_size, paint_notation};
 use crate::{Grooph, Mode, TransportState};
 use eframe::egui;
 use eframe::egui::{
-    Align2, Button, Color32, FontId, Frame, Id, Margin, Painter, Rect, Response, RichText, Sense,
-    Shape, Stroke, Ui, UiBuilder, Vec2, pos2, vec2,
+    Align2, Button, Color32, FontFamily, FontId, Frame, Id, Margin, Painter, Rect, Response,
+    RichText, Sense, Shape, Stroke, Ui, UiBuilder, Vec2, pos2, vec2,
 };
 use grooph_layout::staff_layout::Voice;
+use grooph_measure::Measure;
 use grooph_measure::generator::{Subdivision, effective_subdivision};
 use serde::{Deserialize, Serialize};
 
@@ -196,6 +198,25 @@ fn value_row(ui: &mut Ui, label: &str, value: &str) -> Response {
         visuals.weak_text_color(),
     );
     resp
+}
+
+/// [`value_row`] showing the value as notes, `text` if there are none.
+fn notation_value_row(
+    ui: &mut Ui,
+    label: &str,
+    notes: Option<&Measure>,
+    text: &str,
+    family: FontFamily,
+) -> Response {
+    let Some(notes) = notes else {
+        return value_row(ui, label, text);
+    };
+    let resp = value_row(ui, label, "");
+    let size = notation_size(notes, ROW_HEIGHT - 4.0);
+    let right = resp.rect.right_center() - vec2(28.0, 0.0);
+    let rect = Rect::from_min_size(right - vec2(size.x, size.y / 2.0), size);
+    paint_notation(ui, rect, notes, family, ui.visuals().weak_text_color());
+    resp.on_hover_text(text)
 }
 
 /// Round button with an icon painted by `icon` (given the icon color).
@@ -483,7 +504,10 @@ impl Grooph {
     }
 
     fn compact_metronome_rows(&mut self, ui: &mut Ui) {
-        if value_row(ui, "Subdivision", &self.click_fill_label()).clicked() {
+        let family = self.ui.music_font_id.family.clone();
+        let tile = self.click_fill_tile();
+        let label = self.click_fill_label();
+        if notation_value_row(ui, "Subdivision", tile.as_ref(), &label, family).clicked() {
             self.ui.picker = Some(Picker::ClickFill);
         }
         if value_row(ui, "Edit clicks", "✏").clicked() {

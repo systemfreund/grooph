@@ -416,6 +416,13 @@ impl Grooph {
             .map_or_else(|| "Custom".to_owned(), |f| f.name)
     }
 
+    /// Tile of the click bar being edited if it is a ready-made one (see
+    /// [`ClickFill::tile`]).
+    pub(crate) fn click_fill_tile(&self) -> Option<Measure> {
+        let bar = self.click_bar();
+        click_fills(bar.time_signature()).into_iter().find(|f| same_bar(&f.bar, &bar))?.tile()
+    }
+
     /// The counter rhythm of the metronome meter, if it has one.
     pub(crate) fn counter_bar(&self) -> Option<&Measure> {
         if self.edited_voice() == Voice::Lower {
