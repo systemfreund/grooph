@@ -181,7 +181,7 @@ fn card_cell(ui: &mut Ui, label: &str, value: &CardValue, music: &FontFamily) ->
 
 /// `ts` as stacked time-signature digits centered on `center`, at music font
 /// size `em` or smaller to fit `max_width`.
-fn paint_meter(
+pub(crate) fn paint_meter(
     painter: &Painter,
     ts: TimeSignature,
     center: Pos2,

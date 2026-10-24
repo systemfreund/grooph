@@ -19,6 +19,7 @@
 //! like the click bar: the voice last tapped, on the staff or the ring, is
 //! the one the editor holds (see [`MetronomeState::voice`]).
 
+use crate::compact::paint_meter;
 use crate::state::CountInState;
 use crate::undo::{DEFAULT_UNDO_LIMIT, UndoHistory};
 use crate::{Grooph, TransportState};
@@ -711,21 +712,39 @@ impl Grooph {
             None => meter_caption(&ts),
         };
         let (big, small) = match (count_in_beat, bar_state) {
-            (Some(beat), _) => (beat.to_string(), String::new()),
+            (Some(beat), _) => (Some(beat.to_string()), String::new()),
             (None, Some(b)) => {
-                ((b.bar + 1).to_string(), if muted { "muted" } else { "bar" }.to_owned())
+                (Some((b.bar + 1).to_string()), if muted { "muted" } else { "bar" }.to_owned())
             }
-            (None, None) => (format!("{}/{}", ts.beats, ts.beat_unit), caption),
+            // The meter, stacked in the music font as in the settings card.
+            (None, None) => (None, caption),
         };
         // Smaller inside the counter ring.
         let scale = if counter.is_some() { 0.8 } else { 1.0 };
-        painter.text(
-            center - vec2(0.0, 0.08 * scale * radius),
-            Align2::CENTER_CENTER,
-            big,
-            FontId::proportional(0.42 * scale * radius),
-            visuals.strong_text_color(),
-        );
+        match big {
+            Some(text) => {
+                painter.text(
+                    center - vec2(0.0, 0.08 * scale * radius),
+                    Align2::CENTER_CENTER,
+                    text,
+                    FontId::proportional(0.42 * scale * radius),
+                    visuals.strong_text_color(),
+                );
+            }
+            None => {
+                // Alone it sits in the middle; above a caption, smaller and higher.
+                let (lift, em) = if small.is_empty() { (0.0, 0.5) } else { (0.12, 0.44) };
+                paint_meter(
+                    painter,
+                    ts,
+                    center - vec2(0.0, lift * scale * radius),
+                    em * scale * radius,
+                    1.1 * scale * radius,
+                    &self.ui.music_font_id.family,
+                    visuals.strong_text_color(),
+                );
+            }
+        }
         painter.text(
             center + vec2(0.0, 0.26 * scale * radius),
             Align2::CENTER_CENTER,
