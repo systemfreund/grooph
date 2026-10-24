@@ -62,6 +62,16 @@ of groupings; the generator favors the newest ones, but easier figures stay in t
 4/4 r:s s e r:s s s s r:s e. q
 ```
 
+A grouping only fixes where the notes start. How long each note sounds is up to the
+generator: up to the next note or shorter, and over the beat where that can be written
+without a tie. So the same rhythm shows up as a half note or as a quarter and a quarter
+rest, and an eighth on the "&" may be held over the next beat. From level 4 notes may also
+stop early inside the beat, so sixteenths come with sixteenth rests in between.
+
+```rhythm | One rhythm, two spellings (level 4 with sixteenths)
+4/4 e s s q e. s q | s r:s s s s r:s r:e s r:s r:s s s r:s r:e
+```
+
 ## Eighth-note meters
 
 In 6/8, 9/8 and 12/8 a beat is a dotted quarter: three eighths. The generator writes one

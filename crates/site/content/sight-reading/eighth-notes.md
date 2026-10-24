@@ -12,10 +12,10 @@ builds on a solid feel for the "&".
 ## Level 1: on the beat
 
 Quarter notes, quarter rests and pairs of eighths. Every beat starts with a note or a
-rest you can see.
+rest you can see, unless a half note holds over it.
 
 ```rhythm bpm=80 | Level 1
-4/4 q e e r:q q | e e e e q r:q
+4/4 q e e r:q q | e e e e h
 ```
 
 ```open | Practice level 1
@@ -25,17 +25,19 @@ bpm=80&sub=8&lvl=1&bars=2
 ## Level 2: the "&" on its own
 
 Now a beat can start with an eighth rest, so the note falls on the "&". Count the rest
-out loud ("1 **&**") and play exactly between the clicks.
+out loud ("1 **&**") and play exactly between the clicks. A note on the "&" may also be
+held over the next beat, as in "eighth, quarter, eighth".
 
 ```rhythm bpm=80 | Level 2
-4/4 r:e e q r:e e e e | q r:e e r:e e q
+4/4 r:e e q r:e e e e | e q e r:e e q
 ```
 
 ```open | Practice level 2
 bpm=80&sub=8&lvl=2&bars=2
 ```
 
-Level 2 already contains every eighth-note figure. For more variety, add **space** in the
+Level 2 already contains every eighth-note rhythm. From level 4 notes may also stop
+early, so an eighth and an eighth rest stand where a quarter would. For more variety, add **space** in the
 generator (more rests) or more bars, then move on to
 [sixteenth notes](/sight-reading/sixteenth-notes/).
 
