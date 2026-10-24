@@ -608,7 +608,6 @@ impl Grooph {
             self.ui.picker = Some(Picker::Preset);
         }
         let generator = &mut self.editor.generator;
-        switch_row(ui, "Endless", &mut generator.endless);
         switch_row(ui, "Ghost notes", &mut generator.ghost_notes);
         switch_row(ui, "Count-in", &mut self.playback_ctl.audio_cfg.count_in);
         let swing = self.playback_ctl.audio_cfg.swing;

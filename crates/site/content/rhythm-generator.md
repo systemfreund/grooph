@@ -23,11 +23,10 @@ rolls a new one with the same settings.
 |---|---|
 | **Notes** | The finest note value: 8th notes, 16th notes, triplets, or mixed (16ths and triplets together). Eighth-note meters offer 8ths and 16ths, sixteenth-note meters 16ths. |
 | **Level** | Level 1 to 5. Higher levels add syncopations, rests inside the beat and offbeat figures. |
-| **Bars** | 1 to 8 measures per exercise, or **Endless**. |
+| **Bars** | 1 to 8 measures per exercise, or **Endless**: it starts with two bars and keeps adding new ones below while you play, so the score scrolls on and never repeats. |
 | **Meter** | Quarter-note meters from 1/4 to 7/4, eighth-note meters from 3/8 to 13/8 and sixteenth-note meters from 5/16 to 19/16. |
 | **Space** | Adds whole-beat rests, from none to a lot. Good for practicing silence. In the **Level** dialog. |
 | **Groupings** | Instead of a level, pick exactly which one-beat figures may appear. In the **Level** dialog. |
-| **Endless** | Starts with two bars and keeps adding new ones below while you play, so the score scrolls on and never repeats. Also in the **Bars** dialog. |
 | **Ghost notes** | Quiet clicks on every free slot of the subdivision, to hear the grid. |
 | **Preset** | Recall a saved exercise. |
 
