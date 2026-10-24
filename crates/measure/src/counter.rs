@@ -178,15 +178,15 @@ pub fn counter_ratios(ts: TimeSignature) -> Vec<Ratio> {
 
 /// Every ratio of one's own in `ts`: any span of beat units that divides
 /// the bar with 2 to 16 clicks and a counter bar, common factor or not (4:2
-/// plays as 2:1, but is there to pick) as long as it clicks faster than
-/// the beats (not 4:4 or 2:4). The offered ones
+/// plays as 2:1, but is there to pick) as long as it has two clicks or
+/// more without it (not 4:4 or 2:4). The offered ones
 /// ([`counter_ratios`]) are among them. Ordered by span, then clicks.
 pub fn own_ratios(ts: TimeSignature) -> Vec<Ratio> {
     let mut ratios = Vec::new();
     for span in (1..=ts.beats).filter(|&s| ts.beats.is_multiple_of(s)) {
         for n in 2..=MAX_OWN_CLICKS {
             let ratio = Ratio { n, span };
-            // 2:4 would be 1:2, slower than the beats.
+            // 2:4 would be 1:2, a single click.
             let reduced_n = n as u32 / gcd(n as u32, span as u32);
             if reduced_n > 1 && counter_bar(ts, ratio).is_some() {
                 ratios.push(ratio);
@@ -364,6 +364,13 @@ impl CounterBars {
         let kept = self.for_meter(ts).and_then(|bar| named_ratio_of(bar, named));
         self.names.retain(|&(t, _)| t != ts);
         self.names.extend(kept.filter(|&r| Some(r) == named).map(|r| (ts, r)));
+    }
+
+    /// Give `ts` the counter bar `bar` from elsewhere (a link), named as
+    /// its simplest ratio, whatever `ts`'s bar was picked as.
+    pub fn replace(&mut self, ts: TimeSignature, bar: Option<Measure>) {
+        self.names.retain(|&(t, _)| t != ts);
+        self.set(ts, bar);
     }
 
     /// Give `ts` the counter bar of `ratio`, picked as that ratio, or none.
@@ -710,6 +717,10 @@ mod tests {
         let loaded = CounterBars::from(saved).with_names(bars.names());
         assert_eq!(loaded, bars);
         assert_eq!(CounterBars::from(Vec::new()).with_names(bars.names()), CounterBars::default());
+        // The same bar from a link is 2:1.
+        let mut linked = bars.clone();
+        linked.replace(ts, Some(bar.clone()));
+        assert_eq!(linked.ratio(ts), Some(r(2, 1)));
         // Picked again as 2:1, it is 2:1.
         bars.set_ratio(ts, Some(r(2, 1)));
         assert_eq!(bars.ratio(ts), Some(r(2, 1)));

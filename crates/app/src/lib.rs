@@ -703,7 +703,7 @@ impl Grooph {
                 self.stop_transport();
                 self.editor.metronome.meter = ts;
                 // The meter plays the link's counter rhythm, or none.
-                self.playback_ctl.audio_cfg.counter.set(ts, link.counter.clone());
+                self.playback_ctl.audio_cfg.counter.replace(ts, link.counter.clone());
             }
             Some(LinkContent::Generator { settings, seed }) => {
                 self.stop_transport();
