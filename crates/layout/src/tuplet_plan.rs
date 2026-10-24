@@ -73,13 +73,21 @@ pub fn compute_tuplet_plan(measure: &Measure, beams: &[BeamGroup]) -> Vec<Tuplet
     let spans = detect_tuplet_spans(measure);
 
     let mut out: Vec<TupletPlan> = Vec::with_capacity(spans.len());
-    // A rest under a beam (a stemlet) counts as a note: it breaks nothing.
+    // A rest under a beam, a stemlet or a rest between two beamed notes,
+    // counts as a note: it breaks nothing.
     let beamed = |ix: BeatIdx| beams.iter().any(|bg| bg.beat_indices.contains(&ix));
+    let under_beam = |ix: BeatIdx| {
+        beams.iter().any(|bg| match (bg.beat_indices.first(), bg.beat_indices.last()) {
+            (Some(&first), Some(&last)) => first <= ix && ix <= last,
+            _ => false,
+        })
+    };
     for mut g in spans.into_iter() {
         let note_idxs: Vec<BeatIdx> = (g.start..=g.end)
             .filter(|&ix| beats[ix].kind == BeatKind::Note || beamed(ix))
             .collect();
-        g.contains_rest = note_idxs.len() < g.end - g.start + 1;
+        g.contains_rest =
+            (g.start..=g.end).any(|ix| beats[ix].kind == BeatKind::Rest && !under_beam(ix));
 
         let fully_beamed = if g.contains_rest || note_idxs.len() < 2 {
             false
@@ -120,49 +128,29 @@ pub fn compute_tuplet_plan(measure: &Measure, beams: &[BeamGroup]) -> Vec<Tuplet
             ok_any
         };
 
-        // Externe Balkenverbindungen links/rechts feststellen (Tuplet-Nachbarn ignorieren)
-        let mut ext_left = false;
-        let mut ext_right = false;
-        let first_note = note_idxs.first().copied();
-        let last_note = note_idxs.last().copied();
-
-        if let Some(fi) = first_note
-            && fi > 0
-            && (beats[fi - 1].kind == BeatKind::Note || beamed(fi - 1))
-            && !matches!(beats[fi - 1].duration, Duration::Tuplet(_))
-        {
-            for bg in beams.iter() {
-                let pos_prev = bg.beat_indices.iter().position(|&x| x == fi - 1);
-                let pos_cur = bg.beat_indices.iter().position(|&x| x == fi);
-                if let (Some(lp), Some(lc)) = (pos_prev, pos_cur) {
-                    let a = lp.min(lc);
-                    let b = lp.max(lc);
-                    if b == a + 1 && *bg.continuity.get(a).unwrap_or(&0) >= 1 {
-                        ext_left = true;
-                        break;
-                    }
-                }
-            }
-        }
-
-        if let Some(li) = last_note
-            && li + 1 < beats.len()
-            && (beats[li + 1].kind == BeatKind::Note || beamed(li + 1))
-            && !matches!(beats[li + 1].duration, Duration::Tuplet(_))
-        {
-            for bg in beams.iter() {
-                let pos_cur = bg.beat_indices.iter().position(|&x| x == li);
-                let pos_next = bg.beat_indices.iter().position(|&x| x == li + 1);
-                if let (Some(lc), Some(ln)) = (pos_cur, pos_next) {
-                    let a = lc.min(ln);
-                    let b = lc.max(ln);
-                    if b == a + 1 && *bg.continuity.get(a).unwrap_or(&0) >= 1 {
-                        ext_right = true;
-                        break;
-                    }
-                }
-            }
-        }
+        // Whether the beam at `ix` runs on to a beat outside the tuplet, to
+        // the left (`step` -1) or right (+1), over rests or not. Other
+        // tuplets never share a beam with it.
+        let beamed_out = |ix: BeatIdx, step: isize| {
+            beams.iter().any(|bg| {
+                let Some(p) = bg.beat_indices.iter().position(|&x| x == ix) else {
+                    return false;
+                };
+                let (q, link) = if step < 0 {
+                    let Some(q) = p.checked_sub(1) else { return false };
+                    (q, q)
+                } else {
+                    (p + 1, p)
+                };
+                bg.beat_indices.get(q).is_some_and(|&n| {
+                    (n < g.start || n > g.end)
+                        && !matches!(beats[n].duration, Duration::Tuplet(_))
+                        && *bg.continuity.get(link).unwrap_or(&0) >= 1
+                })
+            })
+        };
+        let ext_left = note_idxs.first().is_some_and(|&fi| beamed_out(fi, -1));
+        let ext_right = note_idxs.last().is_some_and(|&li| beamed_out(li, 1));
 
         let edge_connection = if g.contains_rest {
             EdgeConnection::None

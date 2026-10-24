@@ -40,7 +40,8 @@ pub struct BeamGroup {
 /// - Group by primary beat boundaries of the time signature
 /// - Contiguous tuplets (same n, m, base; no intervening rests or non-matching notes) take precedence
 ///   over primary boundaries and remain within a single BeamGroup
-/// - Rests break beams: any rest between two notes splits the BeamGroup
+/// - Rests between two notes of a group sit under its beams; a rest too long
+///   for a beam (a quarter or longer) splits the group
 /// - Cross-measure beams are exposed via the `continues_*` flags but left as false here; a higher level
 ///   can link adjacent measures and set these appropriately.
 #[cfg(test)]
@@ -123,12 +124,8 @@ fn finalize_group(groups: &mut Vec<BeamGroup>, beats: &[Beat], cur: &[BeatIdx]) 
     for w in cur.windows(2) {
         let i = w[0];
         let j = w[1];
-        // Determine if there was any content between `i` and `j`; if any rest or other item exists,
-        // continuity can be reduced
-        let min_beams = beam_count(&beats[i].duration).min(beam_count(&beats[j].duration));
-        // Broken beams (rests between) -> continuity 0, otherwise full min_beams
-        let between_has_rest = has_rest_between(beats, i, j);
-        let cont = if between_has_rest { 0 } else { min_beams };
+        // The beams run on over the rests between, as many as all of them share.
+        let cont = beats[i..=j].iter().map(|b| beam_count(&b.duration)).min().unwrap_or(0);
         continuity.push(cont);
     }
 
@@ -142,34 +139,10 @@ fn finalize_group(groups: &mut Vec<BeamGroup>, beats: &[Beat], cur: &[BeatIdx]) 
     });
 }
 
-fn has_rest_between(beats: &[Beat], i: BeatIdx, j: BeatIdx) -> bool {
-    if j <= i + 1 {
-        return false;
-    }
-    for beat in beats.iter().take(j).skip(i + 1) {
-        if beat.kind == BeatKind::Rest {
-            return true;
-        }
-    }
-    false
-}
-
-// Expanded version for grouping decisions: any rest OR non-beamable NOTE between two beamable notes
-fn has_rest_or_nonbeamable_between(beats: &[Beat], i: BeatIdx, j: BeatIdx) -> bool {
-    if j <= i + 1 {
-        return false;
-    }
-    for beat in beats.iter().take(j).skip(i + 1) {
-        match beat.kind {
-            BeatKind::Rest => return true,
-            BeatKind::Note => {
-                if beam_count(&beat.duration) == 0 {
-                    return true;
-                }
-            }
-        }
-    }
-    false
+/// Whether a beat between two beamable notes is too long for a beam, a note
+/// or a rest: it splits their group.
+fn has_unbeamable_between(beats: &[Beat], i: BeatIdx, j: BeatIdx) -> bool {
+    beats.iter().take(j).skip(i + 1).any(|b| beam_count(&b.duration) == 0)
 }
 
 fn is_primary_boundary_between(a_on: u32, b_on: u32, boundaries: &[u32]) -> bool {
@@ -200,7 +173,7 @@ fn tuplet_last_note_crosses_into_non_tuplet(
     let a_end = onsets[a].saturating_add(DEFAULT_GRID.ticks_of(&beats[a].duration).unwrap_or(0));
     let b_on = onsets[b];
     let crosses_boundary = boundaries.iter().copied().any(|bd| bd > onsets[a] && bd < a_end);
-    crosses_boundary && a_end == b_on && !has_rest_between(beats, a, b)
+    crosses_boundary && a_end == b_on
 }
 
 fn should_break(
@@ -213,7 +186,7 @@ fn should_break(
     spans: &[TupletSpan],
 ) -> bool {
     // 1) Hard splits first
-    if has_rest_or_nonbeamable_between(beats, a, b) {
+    if has_unbeamable_between(beats, a, b) {
         return true;
     }
     // Never merge across two different TupletSpans
@@ -225,10 +198,9 @@ fn should_break(
     let boundary_between = is_primary_boundary_between(onsets[a], onsets[b], boundaries);
 
     if boundary_between {
-        // Exception 1: both in same TupletSpan and nothing in between → keep together
+        // Exception 1: both in same TupletSpan → keep together
         if let (Some(sa), Some(sb)) = (span_of_idx[a], span_of_idx[b])
             && sa == sb
-            && !has_rest_between(beats, a, b)
         {
             return false;
         }
@@ -274,14 +246,25 @@ mod tests {
     }
 
     #[test]
-    fn beaming_rest_breaks_group() {
-        // Note 16th, Rest 16th, Note 16th, Rest 16th within the first quarter
-        let mut m = Measure::new(TimeSignature::FOUR_FOUR);
-        m.set_beat(0, Beat::note(s())).unwrap();
-        m.set_beat(1, Beat::rest(s())).unwrap();
-        m.set_beat(2, Beat::note(s())).unwrap();
-        m.set_beat(3, Beat::rest(s())).unwrap();
-        let plan = compute_beam_plan(&m);
+    fn rests_between_notes_sit_under_the_beam() {
+        use grooph_measure::notation::parse_score;
+        let plan_of = |s: &str| compute_beam_plan(&parse_score(s).unwrap().measures.remove(0));
+        // The beams run on over the rests between two notes.
+        let plan = plan_of("1/4 s r:s r:s s");
+        assert_eq!(plan.groups.len(), 1);
+        assert_eq!(plan.groups[0].beat_indices, vec![0, 3]);
+        assert_eq!(plan.groups[0].continuity, vec![2]);
+        // As many as the notes and the rests between share.
+        let plan = plan_of("1/4 s r:e s");
+        assert_eq!(plan.groups[0].beat_indices, vec![0, 2]);
+        assert_eq!(plan.groups[0].continuity, vec![1]);
+        // Rests at either end stay out of the beam.
+        let plan = plan_of("1/4 r:s s s r:s");
+        assert_eq!(plan.groups[0].beat_indices, vec![1, 2]);
+        // A note with only rests beside it keeps its flag.
+        assert!(plan_of("1/4 s r:s r:s r:s").groups.is_empty());
+        // Nor do the beams run over a rest across a beat.
+        let plan = plan_of("2/4 e r:e r:e e");
         assert!(plan.groups.is_empty());
     }
 

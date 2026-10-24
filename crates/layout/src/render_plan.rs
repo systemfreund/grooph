@@ -154,6 +154,20 @@ mod tests {
     }
 
     #[test]
+    fn a_tuplet_with_a_rest_under_its_beam_shows_its_number_alone() {
+        use grooph_measure::notation::parse_score;
+        let plan_of = |s: &str| plan_measure(&parse_score(s).unwrap().measures.remove(0));
+        let t = &plan_of("1/4 t8 r:t8 t8").tuplets[0];
+        assert!(t.fully_beamed && !t.contains_rest && t.number_only());
+        // A rest at its edge, outside the beam, gives it a bracket.
+        assert!(!plan_of("1/4 t8 t8 r:t8").tuplets[0].number_only());
+        // So does a beam running on over a rest to a note outside it.
+        let t = &plan_of("1/4 s r:s t16 t16 t16").tuplets[0];
+        assert_eq!(t.edge_connection, EdgeConnection::Left);
+        assert!(!t.number_only());
+    }
+
+    #[test]
     fn a_tuplet_with_stemlets_is_beamed_and_shows_its_number_alone() {
         use grooph_measure::notation::parse_score;
         let m = parse_score("1/4 t8 r:t8 r:t8").unwrap().measures.remove(0);
@@ -279,11 +293,12 @@ mod tests {
         assert_1st_tuplet(&plan, false, EdgeConnection::None);
         assert_2nd_tuplet(&plan, true, EdgeConnection::None);
 
-        // Middle note of first tuplet is now a rest.
+        // Middle note of first tuplet is now a rest: it sits under the beam.
         m.set_beat(2, Beat::note(t8())).unwrap();
         m.set_beat(1, Beat::rest(t8())).unwrap();
         plan = plan_measure(&m);
-        assert_1st_tuplet(&plan, false, EdgeConnection::None);
+        assert_1st_tuplet(&plan, true, EdgeConnection::None);
         assert_2nd_tuplet(&plan, true, EdgeConnection::None);
+        assert!(plan.tuplets[0].number_only());
     }
 }
