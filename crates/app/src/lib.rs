@@ -708,7 +708,7 @@ impl Grooph {
             Some(LinkContent::Generator { settings, seed }) => {
                 self.stop_transport();
                 self.editor.generator.settings = GeneratorSettings {
-                    custom_figures: self.editor.generator.settings.custom_figures,
+                    custom_patterns: self.editor.generator.settings.custom_patterns,
                     ..settings
                 };
                 self.generate_new_score_with_seed(seed);
@@ -1272,14 +1272,17 @@ mod tests {
     }
 
     #[test]
-    fn generator_settings_stored_before_the_figures_rename_still_load() {
+    fn generator_settings_with_an_old_figure_selection_still_load() {
         use grooph_measure::generator::GeneratorSettings;
-        let mut settings =
-            GeneratorSettings { custom_figures_enabled: true, ..GeneratorSettings::default() };
-        settings.custom_figures.insert(grooph_measure::generator::FigureId(3));
-        let old = ron::to_string(&settings).unwrap().replace("custom_figures", "custom_groupings");
-        assert!(old.contains("custom_groupings_enabled"));
-        let back: GeneratorSettings = ron::from_str(&old).unwrap();
-        assert_eq!(back, settings);
+        let settings = GeneratorSettings { complexity: 4, ..GeneratorSettings::default() };
+        // A selection stored by figure ids before the computed patterns (and
+        // the switch from before the figures rename) loads without it.
+        let stored = ron::to_string(&settings).unwrap();
+        for old in ["custom_figures: (5)", "custom_groupings: (5)"] {
+            let stored = stored.replacen("(", &format!("({old}, "), 1);
+            let back: GeneratorSettings = ron::from_str(&stored).unwrap();
+            assert_eq!(back.complexity, 4, "{stored}");
+            assert!(back.custom_patterns.is_empty(), "{stored}");
+        }
     }
 }

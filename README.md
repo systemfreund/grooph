@@ -40,21 +40,21 @@ Important root files:
   - Groups are tracked via `tuplet_group_id` and `tuplet_anchors`.
   - `set_beat` can absorb/fill following beats to keep the measure consistent.
 - Generator (`grooph_measure::generator`): builds random measures for
-  sight-reading from per-beat cells. `GeneratorSettings` = subdivision,
-  complexity (1-5, caps the cell level), bars, time signature (x/4, x/8,
+  sight-reading from per-beat figures (onset patterns, see Groupings). `GeneratorSettings` = subdivision,
+  complexity (1-5, caps the figure level), bars, time signature (x/4, x/8,
   x/16), space (extra whole-beat rests). In x/8 and x/16 the generator beats
   are the meter's beat groups (`beat_groups`, from `default_groups_for`:
   6/8 = 3+3, 7/8 = 2+3+2, the same for x/16). Two-eighth groups use the
-  quarter-beat cells, three-eighth groups their own `Compound*` cells, x/16
-  groups `SixteenthPair` / `SixteenthTriple`. Triplets/mixed fall back to
-  8ths/16ths in x/8, x/16 is always 16ths (`effective_subdivision`). A cell
+  quarter-beat figures, three-eighth groups (`BeatSpan::DottedQuarter`) and
+  the x/16 groups (`Eighth`, `DottedEighth`) the patterns of their own span. Triplets/mixed fall back to
+  8ths/16ths in x/8, x/16 is always 16ths (`effective_subdivision`). A figure
   only fixes the note onsets; `generator/spelling.rs` then picks each note's
   length (up to the next onset or shorter, early stops inside a beat from
   level 4) and writes notes and rests for the whole measure: notes cross beats
   only as one value without a tie (dotted quarter or half from a beat, quarter
   or dotted quarter from the "and") inside a half bar (x/4 beats grouped like
   the eighths of n/8) or centred on its boundary (`4 2 4`, `8 4 8`), never
-  out of an x/8 or x/16 beat group; triplet cells
+  out of an x/8 or x/16 beat group; triplet figures
   are written as drawn. Measures are written via `set_beat`, so
   they obey the same invariants as edited ones. Seed `Rng` for reproducibility.
 - Note: `Beat` `PartialEq` ignores `tuplet_group_id`. Compare the field explicitly
@@ -134,13 +134,18 @@ Important root files:
   measure full of sixteenths, so up to that density they depend only on the
   meter: editing or swapping measures (endless mode) never reflows the staff.
   Denser measures (32nds, big tuplets) grow with their beat count.
-- Groupings: every one-beat figure has a stable `GroupingId` (bit index in
-  `GroupingSet`; never renumber, it is persisted). The catalog order follows
-  the reference app's "Custom Groupings" screen. A complexity level is a preset
-  subset (`complexity_groupings`); `custom_groupings(_enabled)` in
-  `GeneratorSettings` replaces it with a hand-picked subset (drawn uniformly;
-  an empty selection falls back to complexity). Picker UI: "Groupings" in the
-  generator panel, tiles via `tool_palette::notation_button`.
+- Groupings: the one-beat figures are not a hand-made list but every onset
+  pattern of a beat's grid (`all_patterns`: sixteenths over a quarter, dotted
+  quarter, eighth or dotted eighth, and eighth triplets over a quarter). A
+  `FigureId` is the pattern's position in that enumeration, `FigureSet` a
+  128-bit mask over them. A pattern's level comes from rules (start on
+  "e"/"a", dotted or syncopated notes, ...) and the reference app's triplet
+  ladder for three-slot patterns. A complexity level is a preset subset
+  (`complexity_figures`); `custom_patterns` (switched by
+  `custom_figures_enabled`) in `GeneratorSettings` replaces it with a
+  hand-picked subset (drawn uniformly; an empty selection falls back to
+  complexity). Picker UI: "Groupings" in the generator panel, one row per
+  level, tiles via `tool_palette::notation_button`.
 - Ghost notes (`grooph_measure::ghost::ghost_onsets`): quiet hits on every free
   slot of the generator subdivision (per beat: 8ths=2, 16ths=4, triplets=3;
   mixed = triplets in tuplet beats, else 16ths). Other beat units get a straight

@@ -1,6 +1,6 @@
-//! Writing drawn cells as notes and rests.
+//! Writing drawn figures as notes and rests.
 //!
-//! The cells only decide where notes *start*. This step decides how long
+//! The figures only decide where notes *start*. This step decides how long
 //! each note sounds and writes the measure from that: a note sounds up to
 //! the next onset or stops earlier, and the time after it is written as
 //! rests. One rhythm therefore comes in several spellings (`8 8`,
@@ -21,7 +21,7 @@
 //! beat rest from the "space" setting takes no sustained note either, so
 //! the space stays visible as rests.
 
-use super::{BeatSpan, Cell, CellFamily, Rng};
+use super::{Figure, Rng};
 use crate::duration::{Duration, NoteValue, e, h, q, s};
 
 /// Probability that a note sounds as long as it can be written.
@@ -37,10 +37,10 @@ pub(super) struct Style {
     pub short_notes: bool,
 }
 
-/// A drawn cell and whether it is a beat rest from the "space" setting.
+/// A drawn figure and whether it is a beat rest from the "space" setting.
 #[derive(Clone, Copy, Debug)]
 pub(super) struct Drawn {
-    pub cell: &'static Cell,
+    pub figure: Figure,
     pub space: bool,
 }
 
@@ -64,15 +64,6 @@ struct Span {
 impl Span {
     fn end(&self) -> u32 {
         self.start + self.len
-    }
-}
-
-fn sixteenths(span: BeatSpan) -> u32 {
-    match span {
-        BeatSpan::Quarter => 4,
-        BeatSpan::DottedQuarter => 6,
-        BeatSpan::Eighth => 2,
-        BeatSpan::DottedEighth => 3,
     }
 }
 
@@ -104,12 +95,12 @@ fn spans(beat_unit: u8, drawn: &[Drawn]) -> Vec<Span> {
     drawn
         .iter()
         .map(|d| {
-            let len = sixteenths(d.cell.span());
+            let len = d.figure.span.sixteenths();
             let (group, in_group) = beats_of_group.next().expect("groups cover every beat");
             let span = Span {
                 start,
                 len,
-                verbatim: d.cell.family == CellFamily::Triplet,
+                verbatim: d.figure.pattern.triplet,
                 blocks: d.space,
                 simple: beat_unit == 4,
                 group,
@@ -173,7 +164,7 @@ fn push_rests(spans: &[Span], mut start: u32, end: u32, out: &mut Vec<(Duration,
             let rest = end.min(beat.end()) - start;
             match beat.len {
                 _ if offset == 0 && rest == beat.len => beat.len,
-                // `8.-rest 16` as in the cell library.
+                // `8.-rest 16` for the figure `---x`.
                 4 if offset == 0 && rest == 3 => 3,
                 6 if offset.is_multiple_of(2) && offset <= 2 && rest >= 4 => 4,
                 _ if offset.is_multiple_of(2) && rest >= 2 => 2,
@@ -185,7 +176,7 @@ fn push_rests(spans: &[Span], mut start: u32, end: u32, out: &mut Vec<(Duration,
     }
 }
 
-/// Write `drawn` (one cell per generator beat) as beats of a measure.
+/// Write `drawn` (one figure per generator beat) as beats of a measure.
 pub(super) fn spell(
     beat_unit: u8,
     drawn: &[Drawn],
@@ -197,14 +188,7 @@ pub(super) fn spell(
         .iter()
         .zip(&spans)
         .filter(|(_, b)| !b.verbatim)
-        .flat_map(|(d, b)| {
-            let mut at = b.start;
-            d.cell.beats.iter().filter_map(move |&(duration, is_note)| {
-                let onset = at;
-                at += super::sixteenths_of(duration);
-                is_note.then_some(onset)
-            })
-        })
+        .flat_map(|(d, b)| d.figure.pattern.onset_slots().map(move |slot| b.start + slot))
         .collect();
 
     let mut out = Vec::new();
@@ -213,7 +197,7 @@ pub(super) fn spell(
     let mut next_onset = onsets.iter().copied().peekable();
     for (i, (d, beat)) in drawn.iter().zip(&spans).enumerate() {
         if beat.verbatim {
-            out.extend(d.cell.beats.iter().copied());
+            out.extend(d.figure.pattern.beats());
             written = beat.end();
             continue;
         }
@@ -254,5 +238,32 @@ pub(super) fn spell(
             written = beat.end();
         }
     }
+    out
+}
+
+/// One beat of `len` sixteenths with notes on the `onsets` bits, every note
+/// as long as it can be written up to the next one.
+pub(super) fn legato(len: u32, onsets: u8) -> Vec<(Duration, bool)> {
+    let beat = Span {
+        start: 0,
+        len,
+        verbatim: false,
+        blocks: false,
+        simple: false,
+        group: 0,
+        in_group: 0,
+    };
+    let spans = [beat];
+    let starts: Vec<u32> = (0..len).filter(|slot| onsets & 1 << slot != 0).collect();
+    let mut out = Vec::new();
+    let mut written = 0;
+    for (i, &start) in starts.iter().enumerate() {
+        push_rests(&spans, written, start, &mut out);
+        let limit = starts.get(i + 1).copied().unwrap_or(len);
+        let note = (1..=limit - start).rev().find(|&n| fits(&spans, start, n)).unwrap_or(1);
+        out.push((duration_of(note), true));
+        written = start + note;
+    }
+    push_rests(&spans, written, len, &mut out);
     out
 }
