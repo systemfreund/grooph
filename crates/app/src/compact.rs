@@ -11,8 +11,8 @@ use crate::tool_palette::{notation_size, paint_none, paint_notation};
 use crate::{Grooph, Mode, TransportState};
 use eframe::egui;
 use eframe::egui::{
-    Align2, Button, Color32, FontFamily, FontId, Frame, Id, Margin, Painter, Pos2, Rect, Response,
-    RichText, Sense, Shape, Stroke, Ui, UiBuilder, Vec2, pos2, vec2,
+    Align2, Button, Color32, CornerRadius, FontFamily, FontId, Frame, Id, LayerId, Margin, Order,
+    Painter, Pos2, Rect, Response, RichText, Sense, Shape, Stroke, Ui, UiBuilder, Vec2, pos2, vec2,
 };
 use grooph_layout::glyphs::ts_glyphs;
 use grooph_layout::pixel_layout::PlacedGlyph;
@@ -327,7 +327,8 @@ fn round_button_at(
 /// Handle on top of an options sheet: tap to fold the options away.
 /// Returns whether it was tapped.
 fn sheet_handle(ui: &mut Ui) -> bool {
-    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 22.0), Sense::click());
+    let (rect, resp) =
+        ui.allocate_exact_size(vec2(ui.available_width(), SHEET_HANDLE_HEIGHT), Sense::click());
     ui.painter().rect_filled(
         Rect::from_center_size(rect.center(), vec2(40.0, 5.0)),
         3,
@@ -336,21 +337,25 @@ fn sheet_handle(ui: &mut Ui) -> bool {
     resp.clicked()
 }
 
+const SHEET_HANDLE_HEIGHT: f32 = 22.0;
+
 /// How far a finger moves up or down on a sheet before it opens or folds.
 const SHEET_FLICK_DISTANCE: f32 = 24.0;
 
-/// A finger (or mouse) dragged up or down on the sheet in `rect`: `Some(true)`
-/// to open it, `Some(false)` to fold it. Fires once per gesture, as soon as the
-/// drag is far enough and mostly vertical. Only gestures that start on the
-/// sheet count, so scrolling the staff above never folds it. A drag past the
-/// threshold is no click either, so the buttons under the finger stay untouched.
-fn sheet_flick(ui: &Ui, rect: Rect) -> Option<bool> {
+/// A finger (or mouse) dragged up or down on the sheet, made of the `parts`
+/// (each a rect on its layer): `Some(true)` to open it, `Some(false)` to fold
+/// it. Fires once per gesture, as soon as the drag is far enough and mostly
+/// vertical. Only gestures that start on the sheet count, so scrolling the
+/// staff never folds it. A drag past the threshold is no click either, so the
+/// buttons under the finger stay untouched.
+fn sheet_flick(ui: &Ui, parts: &[(LayerId, Rect)]) -> Option<bool> {
     let (origin, start, delta) = ui.input(|i| {
         let p = &i.pointer;
         Some((p.press_origin()?, p.press_start_time()?, p.total_drag_delta()?))
     })?;
     // A picker or dialog on top of the sheet gets the gesture.
-    if !rect.contains(origin) || ui.ctx().layer_id_at(origin) != Some(ui.layer_id()) {
+    let top = ui.ctx().layer_id_at(origin);
+    if !parts.iter().any(|(layer, rect)| rect.contains(origin) && top == Some(*layer)) {
         return None;
     }
     if delta.y.abs() < SHEET_FLICK_DISTANCE || delta.y.abs() < 1.5 * delta.x.abs() {
@@ -362,21 +367,6 @@ fn sheet_flick(ui: &Ui, rect: Rect) -> Option<bool> {
     }
     ui.data_mut(|d| d.insert_temp(fired, start));
     Some(delta.y < 0.0)
-}
-
-/// The sheet's options, sliding open and shut. One state for both sheets, so
-/// switching tabs doesn't replay the animation.
-fn sheet_body(ui: &mut Ui, open: bool, add_body: impl FnOnce(&mut Ui)) {
-    let mut state = egui::collapsing_header::CollapsingState::load_with_default_open(
-        ui.ctx(),
-        Id::unique("compact_sheet_body"),
-        open,
-    );
-    state.set_open(open);
-    state.show_body_unindented(ui, |ui| {
-        add_body(ui);
-        ui.add_space(8.0);
-    });
 }
 
 fn paint_play_icon(painter: &Painter, rect: Rect, color: Color32, playing: bool) {
@@ -593,6 +583,7 @@ impl Grooph {
         let before = self.editor.generator.settings;
         let endless_before = self.editor.generator.endless;
         let mut roll = false;
+        let mut card = Rect::NOTHING;
 
         let sheet = egui::Panel::bottom("compact_options")
             .frame(Frame::new().fill(ui.visuals().panel_fill).inner_margin(Margin {
@@ -604,7 +595,7 @@ impl Grooph {
             .show_separator_line(false)
             .show(ui, |ui| {
                 centered_column(ui, |ui| {
-                    Frame::new()
+                    card = Frame::new()
                         .fill(card_fill(ui))
                         .corner_radius(CARD_RADIUS)
                         .inner_margin(Margin { left: 12, right: 12, top: 0, bottom: 12 })
@@ -613,20 +604,80 @@ impl Grooph {
                                 self.ui.compact.options_collapsed =
                                     !self.ui.compact.options_collapsed;
                             }
-                            let open = !self.ui.compact.options_collapsed;
-                            sheet_body(ui, open, |ui| self.compact_option_rows(ui));
                             roll = self.compact_transport(ui);
-                        });
+                        })
+                        .response
+                        .rect;
                 });
             });
-        self.fold_sheet_on_flick(ui, sheet.response.rect);
+        let options = self.sheet_options(ui, card, Self::compact_option_rows);
+        self.fold_sheet_on_flick(ui, sheet.response.rect, options);
 
         self.finish_generator_change(before, endless_before, roll);
     }
 
+    /// The sheet's options, sliding up out of its top edge over the screen
+    /// above, so the staff keeps its size. One state for both sheets, so
+    /// switching tabs doesn't replay the animation. Returns the layer and rect
+    /// they cover while shown.
+    fn sheet_options(
+        &mut self,
+        ui: &Ui,
+        card: Rect,
+        add_rows: impl FnOnce(&mut Self, &mut Ui),
+    ) -> Option<(LayerId, Rect)> {
+        let id = Id::unique("compact_sheet_options");
+        let openness = ui.ctx().animate_bool_responsive(id, !self.ui.compact.options_collapsed);
+        if openness <= 0.0 || !card.is_positive() {
+            return None;
+        }
+        // Height of the rows, measured when last shown.
+        let rows_id = id.with("rows_height");
+        let rows = ui.data(|d| d.get_temp::<f32>(rows_id)).unwrap_or(240.0);
+        // Covers the card's own handle, so the two read as one sheet growing.
+        let bottom = card.top() + SHEET_HANDLE_HEIGHT;
+        let top = bottom - SHEET_HANDLE_HEIGHT - openness * rows;
+        let rect = Rect::from_x_y_ranges(card.x_range(), top..=bottom);
+        let area = egui::Area::new(id)
+            .order(Order::Middle)
+            .fixed_pos(rect.min)
+            .constrain(false)
+            .show(ui.ctx(), |ui| {
+                let fill = card_fill(ui);
+                let corners = CornerRadius { nw: CARD_RADIUS, ne: CARD_RADIUS, sw: 0, se: 0 };
+                // A shadow above and to the sides only: the card continues below.
+                let shadow = ui.visuals().popup_shadow.as_shape(rect, corners);
+                let mut shadow_clip = rect.expand(64.0);
+                shadow_clip.max.y = bottom;
+                ui.painter().with_clip_rect(shadow_clip).add(shadow);
+                ui.painter().rect_filled(rect, corners, fill);
+                // Taps on the sheet stay on the sheet.
+                ui.interact(rect, id.with("background"), Sense::click());
+
+                let inner = rect.shrink2(vec2(12.0, 0.0));
+                let builder = UiBuilder::new().max_rect(inner.with_max_y(f32::INFINITY));
+                ui.scope_builder(builder, |ui| {
+                    ui.set_clip_rect(rect);
+                    if sheet_handle(ui) {
+                        self.ui.compact.options_collapsed = !self.ui.compact.options_collapsed;
+                    }
+                    let start = ui.cursor().top();
+                    add_rows(self, ui);
+                    ui.add_space(8.0);
+                    let height = ui.min_rect().bottom() - start;
+                    ui.data_mut(|d| d.insert_temp(rows_id, height));
+                });
+            });
+        if openness < 1.0 {
+            ui.ctx().request_repaint();
+        }
+        Some((area.response.layer_id, rect))
+    }
+
     /// Flicking a sheet up opens its options, flicking it down folds them.
-    fn fold_sheet_on_flick(&mut self, ui: &Ui, sheet: Rect) {
-        if let Some(open) = sheet_flick(ui, sheet) {
+    fn fold_sheet_on_flick(&mut self, ui: &Ui, sheet: Rect, options: Option<(LayerId, Rect)>) {
+        let parts: Vec<_> = std::iter::once((ui.layer_id(), sheet)).chain(options).collect();
+        if let Some(open) = sheet_flick(ui, &parts) {
             self.ui.compact.options_collapsed = !open;
             ui.ctx().request_repaint();
         }
@@ -651,12 +702,13 @@ impl Grooph {
 
     /// Metronome options and the play button.
     fn compact_metronome_sheet(&mut self, ui: &mut Ui) {
+        let mut card = Rect::NOTHING;
         let sheet = egui::Panel::bottom("compact_metronome")
             .frame(Frame::new().fill(ui.visuals().panel_fill).inner_margin(Margin::same(12)))
             .show_separator_line(false)
             .show(ui, |ui| {
                 centered_column(ui, |ui| {
-                    Frame::new()
+                    card = Frame::new()
                         .fill(card_fill(ui))
                         .corner_radius(CARD_RADIUS)
                         .inner_margin(Margin { left: 12, right: 12, top: 0, bottom: 12 })
@@ -666,13 +718,14 @@ impl Grooph {
                                 self.ui.compact.options_collapsed =
                                     !self.ui.compact.options_collapsed;
                             }
-                            let open = !self.ui.compact.options_collapsed;
-                            sheet_body(ui, open, |ui| self.compact_metronome_rows(ui));
                             self.metronome_transport(ui);
-                        });
+                        })
+                        .response
+                        .rect;
                 });
             });
-        self.fold_sheet_on_flick(ui, sheet.response.rect);
+        let options = self.sheet_options(ui, card, Self::compact_metronome_rows);
+        self.fold_sheet_on_flick(ui, sheet.response.rect, options);
     }
 
     /// Centered play button, with share on the right.
@@ -981,7 +1034,7 @@ mod tests {
         let mut flick = None;
         let mut output = ctx.run_ui(input, |ui| {
             let sheet = Rect::from_min_max(pos2(0.0, 600.0), pos2(400.0, 800.0));
-            flick = sheet_flick(ui, sheet);
+            flick = sheet_flick(ui, &[(ui.layer_id(), sheet)]);
         });
         output.textures_delta.clear();
         flick
