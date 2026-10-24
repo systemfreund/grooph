@@ -1,7 +1,7 @@
 use crate::tuplet_plan::{TupletSpan, detect_tuplet_spans};
-use grooph_measure::duration::{Duration, NoteValue, e};
+use grooph_measure::duration::{Duration, NoteValue, e, q};
 use grooph_measure::grid::DEFAULT_GRID;
-use grooph_measure::{Beat, BeatIdx, BeatKind, Measure};
+use grooph_measure::{Beat, BeatIdx, BeatKind, Measure, TimeSignature};
 
 /// Number of beams implied by a duration (eighth = 1, sixteenth = 2, 32nd = 3).
 /// Tuplets map to their base note value for beam count purposes.
@@ -42,6 +42,9 @@ pub struct BeamGroup {
 ///   over primary boundaries and remain within a single BeamGroup
 /// - Rests between two notes of a group sit under its beams; a rest too long
 ///   for a beam (a quarter or longer) splits the group
+/// - In 2/4 and 4/4 the eighths of a half bar are beamed in fours when the
+///   half holds nothing shorter than an eighth and no tuplet (a group of
+///   eighths reaches up to a half); never over the middle of a 4/4 bar
 /// - With a thirty-second in a group, only the eighth beam runs over the
 ///   eighths of its beat: the secondary beams show the eighth pulse, two
 ///   levels above the thirty-seconds (two-level rhythmic parsing)
@@ -62,6 +65,7 @@ pub(super) fn compute_beam_plan_with(measure: &Measure, beam_rests: bool) -> Bea
 
     // Compute primary boundaries (tick positions inside the measure where groups should break by default)
     let boundaries = DEFAULT_GRID.primary_boundaries(&ts);
+    let boundaries = join_eighth_halves(beats, &onsets, &ts, boundaries);
 
     // Build tuplet span map (beam-independent segmentation) for boundary decisions
     let spans = detect_tuplet_spans(measure);
@@ -111,6 +115,44 @@ pub(super) fn compute_beam_plan_with(measure: &Measure, beam_rests: bool) -> Bea
             })
             .collect(),
     }
+}
+
+/// Drop the beat between the two quarters of a half bar of 2/4 or 4/4 from
+/// `boundaries` when the half holds only eighths or longer values and no
+/// tuplet, and notes meet on that beat: its eighths are beamed in fours. A
+/// rest on either side of the beat keeps it, so no beam hides the beat
+/// over a rest.
+fn join_eighth_halves(
+    beats: &[Beat],
+    onsets: &[u32],
+    ts: &TimeSignature,
+    boundaries: Vec<u32>,
+) -> Vec<u32> {
+    if ts.beat_unit != 4 || !matches!(ts.beats, 2 | 4) {
+        return boundaries;
+    }
+    let quarter = DEFAULT_GRID.ticks_of(&q()).unwrap_or(0);
+    let eighth = DEFAULT_GRID.ticks_of(&e()).unwrap_or(0);
+    let in_eighths = |start: u32, end: u32| {
+        beats.iter().zip(onsets).all(|(b, &on)| {
+            let len = DEFAULT_GRID.ticks_of(&b.duration).unwrap_or(0);
+            let outside = on + len <= start || on >= end;
+            outside || (!b.duration.is_tuplet() && len >= eighth)
+        })
+    };
+    let notes_meet = |bd: u32| {
+        onsets.iter().position(|&on| on == bd).is_some_and(|k| {
+            k > 0 && beats[k].kind == BeatKind::Note && beats[k - 1].kind == BeatKind::Note
+        })
+    };
+    boundaries
+        .into_iter()
+        .filter(|&bd| {
+            // The second beat of a half: 2 and 4 in 4/4, 2 in 2/4.
+            let middle_of_half = (bd / quarter) % 2 == 1;
+            !(middle_of_half && in_eighths(bd - quarter, bd + quarter) && notes_meet(bd))
+        })
+        .collect()
 }
 
 fn finalize_group(
@@ -250,19 +292,51 @@ mod tests {
     use grooph_measure::{Beat, Measure, TimeSignature};
 
     #[test]
-    fn beaming_simple_eighths_group_by_quarters() {
-        // 4/4 with eight eighth notes -> 4 groups, each two notes
+    fn beaming_simple_eighths_group_by_half_bars() {
+        // 4/4 with eight eighth notes -> 2 groups of four, one per half bar
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
         for i in 0..8 {
             m.set_beat(i, Beat::note(e())).unwrap();
         }
         let plan = compute_beam_plan(&m);
-        assert_eq!(plan.groups.len(), 4, "expected 4 groups of eighths in 4/4");
+        assert_eq!(plan.groups.len(), 2, "expected 2 groups of eighths in 4/4");
         for (gi, g) in plan.groups.iter().enumerate() {
-            assert_eq!(g.beat_indices.len(), 2, "group {} should have 2 notes", gi);
-            assert_eq!(g.beam_counts, vec![1, 1]);
-            assert_eq!(g.continuity, vec![1]);
+            assert_eq!(g.beat_indices.len(), 4, "group {} should have 4 notes", gi);
+            assert_eq!(g.beam_counts, vec![1, 1, 1, 1]);
+            assert_eq!(g.continuity, vec![1, 1, 1]);
         }
+    }
+
+    #[test]
+    fn eighths_join_in_fours_only_inside_a_half_of_eighths() {
+        use grooph_measure::notation::parse_score;
+        let groups_of = |s: &str| -> Vec<Vec<usize>> {
+            let plan = compute_beam_plan(&parse_score(s).unwrap().measures.remove(0));
+            plan.groups.into_iter().map(|g| g.beat_indices).collect()
+        };
+        // 2/4: the whole bar is one half.
+        assert_eq!(groups_of("2/4 e e e e"), [vec![0, 1, 2, 3]]);
+        // Five eighths and a quarter on the "and" of 3: four and a flag.
+        assert_eq!(groups_of("4/4 e e e e e q e"), [vec![0, 1, 2, 3]]);
+        // Never over the middle of the bar.
+        assert_eq!(groups_of("4/4 q e e e e q"), [vec![1, 2], vec![3, 4]]);
+        // A half with sixteenths stays in beats, the other half joins.
+        assert_eq!(
+            groups_of("4/4 e e s s e e e e e"),
+            [vec![0, 1], vec![2, 3, 4], vec![5, 6, 7, 8]]
+        );
+        // Triplets keep their beats.
+        assert_eq!(groups_of("2/4 e e t8 t8 t8"), [vec![0, 1], vec![2, 3, 4]]);
+        // A rest on either side of the beat keeps it.
+        assert_eq!(groups_of("2/4 e r:e e e"), [vec![2, 3]]);
+        assert_eq!(groups_of("2/4 e e r:e e"), [vec![0, 1]]);
+        // Rests at the ends of a half stay out of its beam.
+        assert_eq!(groups_of("2/4 e e e r:e"), [vec![0, 1, 2]]);
+        assert_eq!(groups_of("2/4 r:e e e e"), [vec![1, 2, 3]]);
+        // Other meters keep their beats.
+        assert_eq!(groups_of("3/4 e e e e e e").len(), 3);
+        assert_eq!(groups_of("6/8 e e e e e e").len(), 2);
+        assert_eq!(groups_of("5/4 e e e e e e e e e e").len(), 5);
     }
 
     #[test]
