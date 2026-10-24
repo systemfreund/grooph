@@ -1573,7 +1573,7 @@ mod tests {
     }
 
     #[test]
-    fn notes_cross_beats_only_inside_a_half_bar() {
+    fn notes_cross_a_half_bar_only_centred_on_it() {
         for (st, _, m) in generated(6) {
             let ts = st.time_signature;
             let (beats, starts) = bounds(&st, &m);
@@ -1589,7 +1589,15 @@ mod tests {
             }
             for (b, start, end) in beats {
                 let crosses = |cuts: &[u32]| cuts.iter().any(|&c| start < c && c < end);
-                assert!(!crosses(&boundaries), "{b:?} at {start} crosses a group in {m:?}");
+                // `4 2 4` and `8 4 8` over the boundary of two x/4 groups.
+                let centred = |c: u32| {
+                    ts.beat_unit == 4
+                        && b.kind == Note
+                        && start + end == 2 * c
+                        && (b.duration == h() || b.duration == q())
+                };
+                let ok = boundaries.iter().all(|&c| !(start < c && c < end) || centred(c));
+                assert!(ok, "{b:?} at {start} crosses a group in {m:?}");
                 if b.kind == Rest && b.duration != h() {
                     assert!(!crosses(&starts), "rest {b:?} at {start} crosses a beat in {m:?}");
                 }
@@ -1631,5 +1639,24 @@ mod tests {
         // Half notes and half rests from level 1 on.
         assert!(written.iter().any(|m| m.contains("1/2 ")), "{written:?}");
         assert!(written.iter().any(|m| m.contains("(1/2)")), "{written:?}");
+    }
+
+    #[test]
+    fn syncopations_cross_the_middle_of_a_four_four_bar() {
+        let quarter = DEFAULT_GRID.ticks_of(&q()).unwrap();
+        let mut rng = Rng::new(8);
+        let (mut half_on_two, mut quarter_on_and_of_two) = (false, false);
+        for i in 0..1000u32 {
+            let m = generate_measure(&settings(Subdivision::Eighths, 1 + (i % 2) as u8), &mut rng)
+                .unwrap();
+            let onsets = DEFAULT_GRID.compute_onset_ticks(m.beats());
+            for (b, t) in m.beats().iter().zip(onsets) {
+                half_on_two |= b.kind == Note && b.duration == h() && t == quarter;
+                quarter_on_and_of_two |=
+                    b.kind == Note && b.duration == q() && 2 * t == 3 * quarter;
+            }
+        }
+        assert!(half_on_two, "no `4 2 4`");
+        assert!(quarter_on_and_of_two, "no `8 4 8` over beat 3");
     }
 }

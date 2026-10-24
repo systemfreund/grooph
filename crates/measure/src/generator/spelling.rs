@@ -9,9 +9,11 @@
 //! Without ties a note may only run over a beat boundary where it can be
 //! written as one value: from a beat as a dotted quarter or half, from the
 //! "and" as a quarter or dotted quarter. In `x/4` the beats are grouped
-//! like the eighths of `n/8` (4/4 = 2+2, 5/4 = 3+2, ...) and a note never
-//! leaves its group, so the middle of a 4/4 bar stays visible; the same
-//! groups merge two silent beats into a half rest. In `x/8` and `x/16` a
+//! like the eighths of `n/8` (4/4 = 2+2, 5/4 = 3+2, ...) and a note leaves
+//! its group only in the two syncopations centred on the group boundary
+//! (`4 2 4` and `8 4 8` over the middle of a 4/4 bar), so the boundary
+//! otherwise stays visible; the same groups merge two silent beats into a
+//! half rest. In `x/8` and `x/16` a
 //! note stays in its beat group. A note that cannot be written as long as
 //! drawn is shortened; its onset never moves.
 //!
@@ -51,6 +53,8 @@ struct Span {
     verbatim: bool,
     /// No note may sound into this beat.
     blocks: bool,
+    /// A quarter beat of an `x/4` meter; only these let notes cross them.
+    simple: bool,
     /// Notes and rests may join beats of the same group only.
     group: usize,
     /// Position of the beat in its group.
@@ -107,6 +111,7 @@ fn spans(beat_unit: u8, drawn: &[Drawn]) -> Vec<Span> {
                 len,
                 verbatim: d.cell.family == CellFamily::Triplet,
                 blocks: d.space,
+                simple: beat_unit == 4,
                 group,
                 in_group,
             };
@@ -133,13 +138,21 @@ fn fits(spans: &[Span], start: u32, len: u32) -> bool {
     let Some(last) = spans.iter().find(|b| b.start < start + len && start + len <= b.end()) else {
         return false;
     };
-    let quarters = beat.len == 4 && last.len == 4 && beat.group == last.group;
-    quarters
-        && match offset {
+    if !(beat.simple && last.simple) {
+        return false;
+    }
+    if beat.group == last.group {
+        return match offset {
             0 => matches!(len, 6 | 8),
             2 => matches!(len, 4 | 6),
             _ => false,
-        }
+        };
+    }
+    // Into the next group only centred on the boundary: `4 2 4`, `8 4 8`.
+    let boundary = spans.iter().find(|b| b.group == last.group).unwrap().start;
+    last.group == beat.group + 1
+        && start + len / 2 == boundary
+        && matches!((offset, len), (0, 8) | (2, 4))
 }
 
 /// Rest values for `start..end` inside free (not verbatim) beats.
@@ -221,9 +234,15 @@ pub(super) fn spell(
             } else {
                 longest.min(beat.end() - onset)
             };
+            // Without short notes a note ends on the next onset or a beat.
+            let ends_well = |len: u32| {
+                style.short_notes
+                    || onset + len == limit
+                    || spans.iter().any(|b| b.end() == onset + len)
+            };
             let len = (1..=wanted)
                 .rev()
-                .filter(|len| len % style.step == 0)
+                .filter(|len| len % style.step == 0 && ends_well(*len))
                 .find(|&len| fits(&spans, onset, len))
                 .unwrap_or(style.step);
             out.push((duration_of(len), true));
