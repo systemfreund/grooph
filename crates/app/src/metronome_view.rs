@@ -983,6 +983,8 @@ mod tests {
     fn practice_accuracy_marks_stay_out_of_the_metronome() {
         let cc = eframe::CreationContext::_new_kittest(egui::Context::default());
         let mut app = Grooph::new(&cc);
+        // A fresh app opens the metronome; start from practice.
+        app.select_compact_tab(crate::compact::CompactTab::Practice);
         app.playback_ctl.accuracy.enabled = true;
         assert!(app.shows_accuracy_marks());
         // The marks of a practice run would land on the click bar's notes.
