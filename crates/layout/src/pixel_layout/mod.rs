@@ -340,6 +340,27 @@ pub fn min_note_area_width(measure: &Measure, plan: &RenderPlan, opts: &LayoutOp
     notes::min_note_area_width(measure, plan, opts)
 }
 
+/// Least distance (px) each beat of `measure` needs to the next note head,
+/// or to the barline for the last one, so their glyphs don't overlap: the
+/// `min_advance` of [`crate::calculate_x_centers`]. `plan` is
+/// [`plan_measure`] of `measure`.
+pub fn note_advances(measure: &Measure, plan: &RenderPlan, opts: &LayoutOpts) -> Vec<f32> {
+    notes::note_advances(measure, plan, opts)
+}
+
+/// Space from the start of the note area to the first note head.
+pub fn note_lead(em: f32) -> f32 {
+    c::NOTE_LEAD_EM * em
+}
+
+/// Width of the clef and time signature `opts` lay out before the notes of
+/// a measure in `time_signature`.
+pub fn note_area_offset(time_signature: &TimeSignature, opts: &LayoutOpts) -> f32 {
+    let clef = if opts.layout_clef { clef_width(opts.em) } else { 0.0 };
+    let ts = if opts.layout_time_signature { time_sig_width(time_signature, opts.em) } else { 0.0 };
+    clef + ts
+}
+
 /// Build the pixel layout (`MeasureLayout`) from a `Measure`.
 pub fn build_measure_layout(measure: &Measure, opts: &LayoutOpts) -> MeasureLayout {
     build_measure_layout_with_plan(measure, &plan_measure(measure), opts)
@@ -354,6 +375,27 @@ pub(crate) fn clef_width(em: f32) -> f32 {
 pub fn build_measure_layout_with_plan(
     measure: &Measure,
     render_plan: &RenderPlan,
+    opts: &LayoutOpts,
+) -> MeasureLayout {
+    lay_out_measure(measure, render_plan, None, opts)
+}
+
+/// [`build_measure_layout_with_plan`] with the notes at `x_centers`, from
+/// the left edge of the note area (see [`note_area_offset`]): one voice of
+/// several spaced together ([`crate::calculate_shared_x_centers`]).
+pub fn build_measure_layout_at(
+    measure: &Measure,
+    render_plan: &RenderPlan,
+    x_centers: &[f32],
+    opts: &LayoutOpts,
+) -> MeasureLayout {
+    lay_out_measure(measure, render_plan, Some(x_centers), opts)
+}
+
+fn lay_out_measure(
+    measure: &Measure,
+    render_plan: &RenderPlan,
+    x_centers: Option<&[f32]>,
     opts: &LayoutOpts,
 ) -> MeasureLayout {
     let mut x_offset_acc = opts.rect.left();
@@ -385,7 +427,7 @@ pub fn build_measure_layout_with_plan(
     let notes_left_edge = x_offset_acc;
     let note_rect =
         Rect::from_min_max(Pos2::new(notes_left_edge, opts.rect.top()), opts.rect.right_bottom());
-    let note_layout = notes::build_note_layout(measure, render_plan, &note_rect, opts);
+    let note_layout = notes::build_note_layout(measure, render_plan, &note_rect, x_centers, opts);
     let beam_layout = beams::build_beam_layout(&note_layout, &render_plan.beams, opts);
     let tuplet_layout =
         tuplets::build_tuplet_layout(&note_layout, &beam_layout, &render_plan.tuplets, opts);

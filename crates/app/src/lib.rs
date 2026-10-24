@@ -143,9 +143,6 @@ struct PersistedState {
     click_bars: ClickBars,
     counter_bars: CounterBars,
     metronome_meter: TimeSignature,
-    /// The counter shares the click bar's line (see
-    /// `LayoutSettings::counter_on_one_line`).
-    counter_on_one_line: bool,
     /// Tab open when the state was saved, reopened at the next start.
     tab: CompactTab,
 }
@@ -179,7 +176,6 @@ impl Default for PersistedState {
             click_bars: ClickBars::default(),
             counter_bars: CounterBars::default(),
             metronome_meter: TimeSignature::FOUR_FOUR,
-            counter_on_one_line: LayoutSettings::default().counter_on_one_line,
             tab: CompactTab::Practice,
         }
     }
@@ -224,7 +220,6 @@ impl PersistedState {
             click_bars: app.playback_ctl.audio_cfg.click.clone(),
             counter_bars: app.playback_ctl.audio_cfg.counter.clone(),
             metronome_meter: app.editor.metronome.meter,
-            counter_on_one_line: app.ui.layout.counter_on_one_line,
             tab: app.compact_tab(),
         }
     }
@@ -1149,10 +1144,7 @@ impl Grooph {
                 font_bump: 8.0,
                 baseline_dark: None,
                 baseline_light: None,
-                layout: LayoutSettings {
-                    counter_on_one_line: state.counter_on_one_line,
-                    ..LayoutSettings::default()
-                },
+                layout: LayoutSettings::default(),
                 counting: state.counting,
                 flash_enabled: state.flash_enabled,
                 platform,

@@ -274,6 +274,17 @@ fn min_advances(beats: &[Beat], in_beam: &[bool], opts: &LayoutOpts) -> Vec<f32>
         .collect()
 }
 
+/// Least distance (px) each beat of `measure` needs to the next note head,
+/// or to the barline for the last one (see [`min_advances`]).
+pub(super) fn note_advances(
+    measure: &Measure,
+    render_plan: &RenderPlan,
+    opts: &LayoutOpts,
+) -> Vec<f32> {
+    let beats = measure.beats();
+    min_advances(beats, &in_beam_flags(beats, render_plan), opts)
+}
+
 /// Narrowest note area in which no glyph overlaps the next one or the
 /// barline (see [`crate::calculate_x_centers`]'s `min_advance`).
 pub(super) fn min_note_area_width(
@@ -281,15 +292,16 @@ pub(super) fn min_note_area_width(
     render_plan: &RenderPlan,
     opts: &LayoutOpts,
 ) -> f32 {
-    let beats = measure.beats();
-    let in_beam = in_beam_flags(beats, render_plan);
-    c::NOTE_LEAD_EM * opts.em + min_advances(beats, &in_beam, opts).iter().sum::<f32>()
+    c::NOTE_LEAD_EM * opts.em + note_advances(measure, render_plan, opts).iter().sum::<f32>()
 }
 
+/// The notes of `measure` in the note area `rect`, at `x_centers` (from the
+/// area's left edge) if given, else spread by rhythm over its width.
 pub(super) fn build_note_layout(
     measure: &Measure,
     render_plan: &RenderPlan,
     rect: &Rect,
+    x_centers: Option<&[f32]>,
     opts: &LayoutOpts,
 ) -> Vec<NoteLayout> {
     let beats = measure.beats();
@@ -299,15 +311,16 @@ pub(super) fn build_note_layout(
     // Determine which beats are inside any beamed group (for flag suppression)
     let in_beam_flags = in_beam_flags(beats, render_plan);
 
-    let lead = c::NOTE_LEAD_EM * opts.em;
-    let min_advance = min_advances(beats, &in_beam_flags, opts);
-    let x_centers = crate::calculate_x_centers(
-        beats,
-        rect.width(),
-        opts.proportional_spacing,
-        lead,
-        &min_advance,
-    )
+    let x_centers = match x_centers {
+        Some(xs) => xs.to_vec(),
+        None => crate::calculate_x_centers(
+            beats,
+            rect.width(),
+            opts.proportional_spacing,
+            c::NOTE_LEAD_EM * opts.em,
+            &min_advances(beats, &in_beam_flags, opts),
+        ),
+    }
     .into_iter()
     .map(|cx| cx + rect.left())
     .collect::<Vec<_>>();

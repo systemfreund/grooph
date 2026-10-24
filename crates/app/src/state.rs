@@ -70,9 +70,6 @@ pub(crate) struct LayoutSettings {
     pub(crate) accent_below: bool,
     pub(crate) proportional_spacing: bool,
     pub(crate) stem_length_factor: f32,
-    /// The counter shares the click bar's line, below it, instead of having
-    /// a line of its own.
-    pub(crate) counter_on_one_line: bool,
 }
 
 impl Default for LayoutSettings {
@@ -82,7 +79,6 @@ impl Default for LayoutSettings {
             accent_below: false,
             proportional_spacing: true,
             stem_length_factor: 0.9,
-            counter_on_one_line: true,
         }
     }
 }

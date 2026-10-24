@@ -167,13 +167,7 @@ fn draw_playback_cursor(painter: &Painter, y: f32, x: f32, em: f32, base: Color3
 }
 
 /// The playback cursor over `ys`.
-pub(crate) fn draw_playback_cursor_span(
-    painter: &Painter,
-    ys: Rangef,
-    x: f32,
-    em: f32,
-    base: Color32,
-) {
+fn draw_playback_cursor_span(painter: &Painter, ys: Rangef, x: f32, em: f32, base: Color32) {
     painter.vline(x, ys, playback_cursor_stroke(em, base));
 }
 

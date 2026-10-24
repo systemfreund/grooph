@@ -8,11 +8,10 @@
 //! scroll area) live here; per-measure pixel geometry stays in `MeasureLayout`.
 //!
 //! A staff can have a lower voice (see [`build_staff_layout_with_lower`]): a
-//! second score on a line of its own below, stems down, its beams running
-//! over its rests as stemlets, spaced like the upper voice so notes at the
-//! same time line up — like the feet under the hands of a drum part. With
-//! [`StaffOpts::one_line`] both voices share one line instead, the upper one
-//! above it and the lower one below.
+//! second score on the same line, below it with stems down, while the upper
+//! voice keeps above it; beamed rests of both are stemlets, and both are
+//! spaced together so notes at the same time line up — like the feet under
+//! the hands of a drum part.
 //!
 //! Each measure grows to fill the row. If a measure doesn't fit, glyphs shrink
 //! toward [`LEGIBILITY_FLOOR_EM`]; a measure that doesn't fit even at the floor
@@ -20,14 +19,15 @@
 //! horizontally scrollable area for that case.
 
 use crate::pixel_layout::{
-    LayoutOpts, MeasureLayout, build_measure_layout_with_plan, clef_width, min_note_area_width,
-    time_sig_width,
+    LayoutOpts, MeasureLayout, build_measure_layout_at, build_measure_layout_with_plan, clef_width,
+    min_note_area_width, note_advances, note_area_offset, note_lead, time_sig_width,
 };
 use crate::render_plan::{RenderPlan, plan_measure_with};
+use crate::{calculate_shared_x_centers, shared_min_width};
 use egui::{FontId, Pos2, Rect, Vec2, pos2, vec2};
 use grooph_measure::duration::s;
 use grooph_measure::grid::DEFAULT_GRID;
-use grooph_measure::{BeatIdx, MeasureIdx, Score, TimeSignature};
+use grooph_measure::{BeatIdx, Measure, MeasureIdx, Score, TimeSignature};
 
 /// Configuration for laying out an entire [`Score`].
 ///
@@ -64,10 +64,6 @@ pub struct StaffOpts {
     /// Room under a lower voice's notes in em, for count labels: 0 or
     /// [`LOWER_VOICE_LABEL_ROOM_EM`].
     pub lower_label_room_em: f32,
-    /// A lower voice shares the staff line instead of having its own: the
-    /// upper voice's heads sit on the line, the lower one's hang from it
-    /// (see [`LayoutOpts::shared_line`]).
-    pub one_line: bool,
 }
 
 impl StaffOpts {
@@ -79,34 +75,22 @@ impl StaffOpts {
             placed.show_clef,
             placed.show_time_signature,
         );
-        self.upper_of(opts, placed.lower.is_some())
+        Self::upper_of(opts, placed.lower.is_some())
     }
 
     /// Per-measure [`LayoutOpts`] of the lower voice of a placed measure:
-    /// stems down, on its own line [`LOWER_VOICE_GAP_EM`] below or below
-    /// the shared one.
+    /// below the shared line, stems down.
     pub fn lower_opts_for(&self, placed: &PlacedMeasure) -> LayoutOpts {
-        self.lower_of(self.measure_opts_for(placed))
+        Self::lower_of(self.measure_opts_for(placed))
     }
 
     /// `opts` for the upper voice, which shares its line if `with_lower`.
-    fn upper_of(&self, opts: LayoutOpts, with_lower: bool) -> LayoutOpts {
-        LayoutOpts { shared_line: self.one_line && with_lower, ..opts }
+    fn upper_of(opts: LayoutOpts, with_lower: bool) -> LayoutOpts {
+        LayoutOpts { shared_line: with_lower, ..opts }
     }
 
-    fn lower_of(&self, opts: LayoutOpts) -> LayoutOpts {
-        LayoutOpts {
-            y_offset: opts.y_offset + self.lower_voice_gap_em() * opts.em,
-            stem_down: true,
-            shared_line: self.one_line,
-            accent_below: false,
-            ..opts
-        }
-    }
-
-    /// Distance from the staff line down to the lower voice's, in em.
-    fn lower_voice_gap_em(&self) -> f32 {
-        if self.one_line { 0.0 } else { LOWER_VOICE_GAP_EM }
+    fn lower_of(opts: LayoutOpts) -> LayoutOpts {
+        LayoutOpts { stem_down: true, shared_line: true, accent_below: false, ..opts }
     }
 
     /// Build per-measure [`LayoutOpts`] with a measure-local rect, the staff
@@ -168,8 +152,6 @@ pub struct PlacedMeasure {
 #[derive(Debug, Clone)]
 pub struct SystemLayout {
     pub y_baseline: f32,
-    /// The lower voice's line, if the staff has one.
-    pub lower_baseline: Option<f32>,
     pub rect: Rect,
     pub measures: Vec<PlacedMeasure>,
 }
@@ -207,8 +189,10 @@ fn sixteenth_slots(ts: &TimeSignature) -> f32 {
     (per_measure / per_sixteenth).max(1) as f32
 }
 
-/// Minimum natural width (px) for a measure given its content and which
-/// header glyphs (clef / time signature) it will draw.
+/// Minimum natural width (px) for a measure, `voices` of it played
+/// together, given which header glyphs (clef / time signature) it will
+/// draw. `notes_min` is the narrowest note area in which no glyph overlaps
+/// the next one in its voice.
 ///
 /// The body is sized for at least a measure full of sixteenths, so up to
 /// that density the width usually depends only on the time signature:
@@ -217,20 +201,21 @@ fn sixteenth_slots(ts: &TimeSignature) -> f32 {
 /// and measures mixing very short and long notes grow until the short ones,
 /// spaced by duration, no longer collide.
 fn min_measure_width(
-    score: &Score,
-    measure_idx: MeasureIdx,
-    plan: &RenderPlan,
+    voices: &[&Measure],
+    notes_min: f32,
     show_clef: bool,
     show_ts: bool,
     opts: &StaffOpts,
 ) -> f32 {
-    let m = &score.measures[measure_idx];
-    let beats = (m.beats().len() as f32).max(sixteenth_slots(&m.time_signature()));
+    let m = voices[0];
+    let beats = voices
+        .iter()
+        .map(|v| v.beats().len() as f32)
+        .fold(sixteenth_slots(&m.time_signature()), f32::max);
     let body = (opts.min_measure_width_em + beats * opts.note_width_em) * opts.em;
     // Short notes next to long ones (e.g. 32nds among eighths) get little
     // space when spaced by duration: widen until no glyph overlaps the next.
-    let body =
-        body.max(min_note_area_width(m, plan, &opts.measure_opts(opts.rect, 0.0, false, false)));
+    let body = body.max(notes_min);
     let clef = if show_clef { clef_width(opts.em) } else { 0.0 };
     let ts = if show_ts { time_sig_width(&m.time_signature(), opts.em) } else { 0.0 };
     body + clef + ts
@@ -252,10 +237,6 @@ const STEM_MARGIN_EM: f32 = 0.15;
 /// Space kept between the notes' ink and the edge of a row, in em.
 const INK_MARGIN_EM: f32 = 0.1;
 
-/// Distance from the staff line down to the lower voice's line, in em: three
-/// staff spaces, about two lines of a five-line staff apart. The lower
-/// voice's rests hang below its line to clear the upper voice's.
-pub const LOWER_VOICE_GAP_EM: f32 = 0.75;
 /// Room below a lower voice for count labels, in em.
 pub const LOWER_VOICE_LABEL_ROOM_EM: f32 = 0.5;
 
@@ -302,8 +283,7 @@ fn row_room(reaches: &[(RowRoom, Option<RowRoom>)], opts: &StaffOpts) -> RowRoom
     let upper = reaches.iter().map(|r| r.0).fold(RowRoom::NONE, RowRoom::max);
     let mut room_below = opts.room_below_em.max(upper.below + INK_MARGIN_EM);
     if let Some(lower) = reaches.iter().filter_map(|r| r.1).reduce(RowRoom::max) {
-        room_below = room_below
-            .max(opts.lower_voice_gap_em() + past_stems(lower.below) + opts.lower_label_room_em);
+        room_below = room_below.max(past_stems(lower.below) + opts.lower_label_room_em);
     }
     RowRoom { above: past_stems(upper.above), below: room_below }
 }
@@ -344,7 +324,7 @@ pub fn build_staff_layout_with_lower(
     // On a shared line the upper voice's beamed rests are stemlets too, clear
     // of the line.
     let lower_measures = |i: usize| lower.and_then(|l| l.measures.get(i));
-    let shares_line = |i: usize| opts.one_line && lower_measures(i).is_some();
+    let shares_line = |i: usize| lower_measures(i).is_some();
     let plans: Vec<RenderPlan> = score
         .measures
         .iter()
@@ -353,16 +333,27 @@ pub fn build_staff_layout_with_lower(
         .collect();
     let lower_plans: Vec<Option<RenderPlan>> =
         (0..score.len()).map(|i| lower_measures(i).map(|m| plan_measure_with(m, true))).collect();
+    // With a lower voice, both are spaced together: beats at the same time
+    // line up, and what one voice needs at a time the other gets too.
+    let lower_voice = |i: usize| lower_measures(i).zip(lower_plans[i].as_ref());
     let widths_min: Vec<f32> = (0..score.len())
         .map(|i| {
-            let upper = min_measure_width(score, i, &plans[i], show_clef[i], show_ts[i], opts);
-            let lower = match (lower, &lower_plans[i]) {
-                (Some(l), Some(plan)) => {
-                    min_measure_width(l, i, plan, show_clef[i], show_ts[i], opts)
+            let upper = &score.measures[i];
+            let upper_opts = StaffOpts::upper_of(
+                opts.measure_opts(opts.rect, 0.0, false, false),
+                lower_voice(i).is_some(),
+            );
+            let (notes_min, measures) = match lower_voice(i) {
+                Some((m, plan)) => {
+                    let ua = note_advances(upper, &plans[i], &upper_opts);
+                    let la = note_advances(m, plan, &StaffOpts::lower_of(upper_opts));
+                    let together = [(&upper.beats()[..], &ua[..]), (&m.beats()[..], &la[..])];
+                    let width = shared_min_width(&together, opts.proportional_spacing);
+                    (note_lead(opts.em) + width, vec![upper, m])
                 }
-                _ => 0.0,
+                None => (min_note_area_width(upper, &plans[i], &upper_opts), vec![upper]),
             };
-            upper.max(lower)
+            min_measure_width(&measures, notes_min, show_clef[i], show_ts[i], opts)
         })
         .collect();
     let available = opts.rect.width().max(0.0);
@@ -385,13 +376,25 @@ pub fn build_staff_layout_with_lower(
     let widths: Vec<f32> = widths_min.iter().map(|w| (w * em_scale).max(available)).collect();
     let lay_out = |i: usize, rect: Rect, y_offset: f32| {
         let per_opts = effective_opts.measure_opts(rect, y_offset, show_clef[i], show_ts[i]);
-        let per_opts = effective_opts.upper_of(per_opts, lower_measures(i).is_some());
-        let layout = build_measure_layout_with_plan(&score.measures[i], &plans[i], &per_opts);
-        let lower_opts = effective_opts.lower_of(per_opts.clone());
-        let lower = lower_measures(i)
-            .zip(lower_plans[i].as_ref())
-            .map(|(m, plan)| build_measure_layout_with_plan(m, plan, &lower_opts));
-        (layout, per_opts, lower, lower_opts)
+        let per_opts = StaffOpts::upper_of(per_opts, lower_measures(i).is_some());
+        let lower_opts = StaffOpts::lower_of(per_opts.clone());
+        let upper = &score.measures[i];
+        let Some((m, plan)) = lower_voice(i) else {
+            let layout = build_measure_layout_with_plan(upper, &plans[i], &per_opts);
+            return (layout, per_opts, None, lower_opts);
+        };
+        let ua = note_advances(upper, &plans[i], &per_opts);
+        let la = note_advances(m, plan, &lower_opts);
+        let area = rect.width() - note_area_offset(&upper.time_signature(), &per_opts);
+        let xs = calculate_shared_x_centers(
+            &[(&upper.beats()[..], &ua[..]), (&m.beats()[..], &la[..])],
+            area,
+            effective_opts.proportional_spacing,
+            note_lead(effective_opts.em),
+        );
+        let layout = build_measure_layout_at(upper, &plans[i], &xs[0], &per_opts);
+        let lower = build_measure_layout_at(m, plan, &xs[1], &lower_opts);
+        (layout, per_opts, Some(lower), lower_opts)
     };
     let reaches: Vec<(RowRoom, Option<RowRoom>)> = (0..score.len())
         .map(|i| {
@@ -413,11 +416,10 @@ pub fn build_staff_layout_with_lower(
 
     for (i, &width) in widths.iter().enumerate() {
         let rect = Rect::from_min_size(pos2(left, y_acc), vec2(width, row_height));
-        let (layout, _, lower_layout, lower_opts) = lay_out(i, rect, y_offset);
+        let (layout, _, lower_layout, _) = lay_out(i, rect, y_offset);
         max_row_width = max_row_width.max(width);
         systems.push(SystemLayout {
             y_baseline: rect.center().y + y_offset,
-            lower_baseline: lower_layout.as_ref().map(|_| lower_opts.y_center()),
             rect,
             measures: vec![PlacedMeasure {
                 measure_idx: i,
@@ -436,8 +438,8 @@ pub fn build_staff_layout_with_lower(
     StaffLayout { total_size: vec2(max_row_width, total_height), systems, scale: em_scale, room }
 }
 
-/// One of the staff's two voices: the upper one on the staff line, or the
-/// lower one on its own line below (or below the shared one).
+/// One of the staff's two voices: the upper one above the staff line, or the
+/// lower one below it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Voice {
     #[default]
@@ -454,15 +456,15 @@ pub fn hit_test_staff(staff: &StaffLayout, pos: Pos2) -> Option<(MeasureIdx, Bea
     hit_test_voice(staff, pos).map(|(_, m, b)| (m, b))
 }
 
-/// Like [`hit_test_staff`], with the voice whose line is nearer `pos`: on a
-/// staff with a lower voice, below halfway between the two lines (below the
-/// line both share) picks the lower one and the beat among its notes.
+/// Like [`hit_test_staff`], with the voice on `pos`'s side of the line: on a
+/// staff with a lower voice, below the line picks the lower one and the beat
+/// among its notes.
 pub fn hit_test_voice(staff: &StaffLayout, pos: Pos2) -> Option<(Voice, MeasureIdx, BeatIdx)> {
     let system =
         staff.systems.iter().find(|s| pos.y < s.rect.bottom()).or_else(|| staff.systems.last())?;
     let target = system.measures.first()?;
-    if let (Some(lower), Some(y)) = (&target.lower, system.lower_baseline)
-        && pos.y > (system.y_baseline + y) / 2.0
+    if let Some(lower) = &target.lower
+        && pos.y > system.y_baseline
         && !lower.notes.is_empty()
     {
         return Some((Voice::Lower, target.measure_idx, nearest_note(lower, pos.x)));
@@ -519,7 +521,6 @@ mod tests {
             layout_clef_first: true,
             room_below_em: ROOM_BELOW_EM,
             lower_label_room_em: 0.0,
-            one_line: false,
         }
     }
 
@@ -565,7 +566,7 @@ mod tests {
     }
 
     #[test]
-    fn lower_voice_lines_up_below() {
+    fn lower_voice_hangs_below_the_line() {
         use grooph_measure::notation::parse_score;
         let em = 20.0;
         let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(400.0, 100.0));
@@ -574,8 +575,6 @@ mod tests {
         let staff_opts = opts(em, rect);
         let staff = build_staff_layout_with_lower(&upper, Some(&lower), &staff_opts);
         let system = &staff.systems[0];
-        let gap = system.lower_baseline.unwrap() - system.y_baseline;
-        assert!((gap - LOWER_VOICE_GAP_EM * em).abs() < 0.01);
         let placed = &system.measures[0];
         let below = placed.lower.as_ref().unwrap();
         // Both voices start their beats at the same x: beat 1 and beat 3.
@@ -583,8 +582,8 @@ mod tests {
         assert!((placed.layout.notes[2].center.x - below.notes[3].center.x).abs() < 0.5);
         // The lower voice's stems end inside the row.
         let stem_end = below.notes[0].stem.unwrap().p2.y;
-        assert!(stem_end > system.lower_baseline.unwrap() && stem_end < placed.rect.bottom());
-        assert!(build_staff_layout(&upper, &opts(em, rect)).systems[0].lower_baseline.is_none());
+        assert!(stem_end > system.y_baseline && stem_end < placed.rect.bottom());
+        assert!(build_staff_layout(&upper, &opts(em, rect)).systems[0].measures[0].lower.is_none());
     }
 
     #[test]
@@ -599,7 +598,7 @@ mod tests {
         let system = &staff.systems[0];
         let below = system.measures[0].lower.as_ref().unwrap();
         let x = below.notes[3].center.x;
-        let lower_y = system.lower_baseline.unwrap();
+        let lower_y = system.y_baseline + 5.0;
         assert_eq!(hit_test_voice(&staff, Pos2::new(x, lower_y)), Some((Voice::Lower, 0, 3)));
         assert_eq!(
             hit_test_voice(&staff, Pos2::new(x, system.y_baseline)),
@@ -612,18 +611,16 @@ mod tests {
     }
 
     #[test]
-    fn one_line_puts_the_voices_on_either_side_of_it() {
+    fn the_voices_keep_to_either_side_of_the_line() {
         use grooph_measure::notation::parse_score;
         let em = 20.0;
         let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(400.0, 100.0));
         let upper = parse_score("4/4 >q e r:e q q").unwrap();
         let lower = parse_score("4/4 t4 r:t4 (t4) r:t4 (t4) r:t4").unwrap();
-        let two_lines = opts(em, rect);
-        let staff_opts = StaffOpts { one_line: true, ..two_lines.clone() };
+        let staff_opts = opts(em, rect);
         let staff = build_staff_layout_with_lower(&upper, Some(&lower), &staff_opts);
         let system = &staff.systems[0];
         let y = system.y_baseline;
-        assert_eq!(system.lower_baseline, Some(y));
         let placed = &system.measures[0];
         let below = placed.lower.as_ref().unwrap();
         // Every head and rest keeps to its voice's side of the line.
@@ -638,10 +635,6 @@ mod tests {
         assert!(placed.layout.notes[2].stemlet);
         // Beats at the same time still line up.
         assert!((placed.layout.notes[0].center.x - below.notes[0].center.x).abs() < 0.5);
-        // The row is shorter by the second line's gap, at most.
-        let room = build_staff_layout_with_lower(&upper, Some(&lower), &two_lines).room;
-        assert!(staff.room.below < room.below);
-        assert!(staff.room.below >= room.below - LOWER_VOICE_GAP_EM - 0.01);
         // Above the line hits the upper voice, below it the lower one.
         let x = below.notes[3].center.x;
         assert_eq!(hit_test_voice(&staff, Pos2::new(x, y + 2.0)), Some((Voice::Lower, 0, 3)));
@@ -649,6 +642,33 @@ mod tests {
         // Without a lower voice the line is the upper voice's alone.
         let single = build_staff_layout(&upper, &staff_opts);
         assert!(single.systems[0].measures[0].layout.notes.iter().all(|n| n.staff_pos == 0));
+    }
+
+    #[test]
+    fn crowded_voices_keep_their_beats_together() {
+        use grooph_measure::notation::parse_score;
+        let em = 20.0;
+        // Narrow, with no room beyond what the notes need: the 32nds are
+        // crowded and take more than their share.
+        let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(150.0, 100.0));
+        let upper = parse_score("4/4 th th th th th th th th th th th th th th th th h").unwrap();
+        let lower = parse_score("4/4 q q h").unwrap();
+        let staff_opts =
+            StaffOpts { min_measure_width_em: 0.0, note_width_em: 0.0, ..opts(em, rect) };
+        let staff = build_staff_layout_with_lower(&upper, Some(&lower), &staff_opts);
+        let placed = &staff.systems[0].measures[0];
+        let below = placed.lower.as_ref().unwrap();
+        let x = |l: &MeasureLayout, i: usize| l.notes[i].center.x;
+        // Beats at the same time line up, though only the upper voice
+        // is crowded.
+        assert!((x(&placed.layout, 0) - x(below, 0)).abs() < 0.01);
+        assert!((x(&placed.layout, 8) - x(below, 1)).abs() < 0.01);
+        assert!((x(&placed.layout, 16) - x(below, 2)).abs() < 0.01);
+        // And the 32nds still get their room: their heads don't overlap,
+        // but for the pixel each one's stem snaps by.
+        for w in placed.layout.notes[..16].windows(2) {
+            assert!(w[0].head.ink().right() <= w[1].head.ink().left() + 1.0);
+        }
     }
 
     #[test]
@@ -1057,7 +1077,7 @@ mod tests {
         let upper = parse_score("4/4 q q q q").unwrap();
         let lower = parse_score("4/4 e e e e e e e e").unwrap();
         let without = build_staff_layout_with_lower(&upper, Some(&lower), &opts(em, rect)).room;
-        assert!((without.below - (LOWER_VOICE_GAP_EM + 3.5 + STEM_MARGIN_EM)).abs() < 1e-4);
+        assert!(without.below >= 3.5 + STEM_MARGIN_EM);
         let labels = StaffOpts { lower_label_room_em: LOWER_VOICE_LABEL_ROOM_EM, ..opts(em, rect) };
         let with = build_staff_layout_with_lower(&upper, Some(&lower), &labels).room;
         assert!((with.below - without.below - LOWER_VOICE_LABEL_ROOM_EM).abs() < 1e-4);
