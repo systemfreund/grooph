@@ -80,6 +80,8 @@ Important root files:
   beat, every second beat (from beat 1 in each bar; in two-beat meters the
   same as every bar), beat 1 of every bar or of every second bar, or nothing.
   Anchors mark the beat, not a note, so they light rests and held notes too.
+  Without the line the count overlay lights its labels only with the anchors
+  (`PlaybackMarks::Anchor`), not along the way.
   Bars are counted as played (`PlaybackState::bars_played`), so loops and
   endless mode keep the every-second-bar rhythm. The metronome tab and
   calibration always use the line. Not part of presets or links.

@@ -15,8 +15,7 @@ use grooph_layout::staff_layout::{
 use grooph_measure::grid::DEFAULT_GRID;
 use grooph_measure::tempo::ScoreTiming;
 use grooph_measure::{Score, TimeSignature};
-use grooph_render::draw_beat_anchor;
-use grooph_render::staff::{beat_anchor_pos, draw_staff};
+use grooph_render::staff::{PlaybackMarks, draw_staff};
 
 impl Grooph {
     pub(super) fn measure_panel(&mut self, ui: &mut egui::Ui) {
@@ -245,6 +244,13 @@ impl Grooph {
                             None
                         };
                         let playback = playback_local;
+                        let marks = if guide == Guide::Line {
+                            PlaybackMarks::Line
+                        } else {
+                            PlaybackMarks::Anchor(self.playback_ctl.playback.anchor.map(|a| {
+                                (a.measure_idx, f64::from(a.tick), anchor_intensity(now - a.at))
+                            }))
+                        };
 
                         draw_staff(
                             ui,
@@ -253,33 +259,10 @@ impl Grooph {
                             cursor,
                             voice,
                             playback,
-                            guide == Guide::Line,
+                            marks,
                             count_config.as_ref(),
                             &render_opts,
                         );
-
-                        if playback.is_some()
-                            && let Some(anchor) = self.playback_ctl.playback.anchor
-                        {
-                            let intensity = anchor_intensity(now - anchor.at);
-                            if intensity > 0.0
-                                && let Some(pos) = beat_anchor_pos(
-                                    upper,
-                                    &staff,
-                                    anchor.measure_idx,
-                                    f64::from(anchor.tick),
-                                )
-                            {
-                                let color = ui.visuals().selection.stroke.color;
-                                draw_beat_anchor(
-                                    ui.painter(),
-                                    pos,
-                                    render_opts.em,
-                                    color,
-                                    intensity,
-                                );
-                            }
-                        }
 
                         // Draw flash overlay (white on dark, black on light) with decay
                         if self.playback_ctl.playback.flash_intensity > 0.01 {

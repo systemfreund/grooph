@@ -28,7 +28,7 @@ pub fn draw_measure(
         &measure_layout,
         opts,
         cursor_idx,
-        playback_tick,
+        playback_tick.map(|t| (t, ui.visuals().selection.stroke.color.to_opaque())),
         count_config,
         true,
         None,
@@ -41,7 +41,7 @@ pub fn draw_measure(
 /// `draw_staff_line` controls whether the horizontal staff line is drawn —
 /// the multi-measure renderer turns it off and draws one continuous line per
 /// system instead. All cursor/playback drawing is scoped to this measure; the
-/// caller decides whether to forward `cursor_idx` / `playback_tick` based on
+/// caller decides whether to forward `cursor_idx` / `count_tick` based on
 /// the active measure.
 ///
 /// `cursor_x` is the pre-computed playback cursor X (in the same coordinate
@@ -62,7 +62,7 @@ pub(crate) fn render_measure_at(
     measure_layout: &MeasureLayout,
     opts: &LayoutOpts,
     cursor_idx: Option<usize>,
-    playback_tick: Option<f64>,
+    count_tick: Option<(f64, Color32)>,
     count_config: Option<&CountConfig>,
     draw_staff_line: bool,
     cursor_x: Option<f32>,
@@ -80,8 +80,7 @@ pub(crate) fn render_measure_at(
             opts.y_center(),
             config,
             ui.visuals().text_color(),
-            ui.visuals().selection.stroke.color,
-            playback_tick,
+            count_tick,
         );
     }
 
@@ -178,7 +177,8 @@ pub fn playback_cursor_stroke(em: f32, base: Color32) -> Stroke {
     Stroke::new(0.1 * em, Color32::from_rgba_unmultiplied(base.r(), base.g(), base.b(), 100))
 }
 
-/// The count labels of `measure`, under the line at `baseline_y`.
+/// The count labels of `measure`, under the line at `baseline_y`. The label
+/// at the tick of `count_tick` is lit in its colour.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn draw_count_layer(
     painter: &Painter,
@@ -188,9 +188,12 @@ pub(crate) fn draw_count_layer(
     baseline_y: f32,
     config: &CountConfig,
     text_color: Color32,
-    highlight_color: Color32,
-    playback_tick: Option<f64>,
+    count_tick: Option<(f64, Color32)>,
 ) {
+    let (playback_tick, highlight_color) = match count_tick {
+        Some((tick, color)) => (Some(tick), color),
+        None => (None, text_color),
+    };
     let slots = build_count_slots(measure, config);
     if slots.is_empty() {
         return;
@@ -470,16 +473,11 @@ fn draw_count_labels(
     let label_y = (baseline_y + 0.75 * em).min(rect.bottom() - 0.2 * em);
     let label_color =
         Color32::from_rgba_unmultiplied(base_color.r(), base_color.g(), base_color.b(), 200);
-    let highlight = Color32::from_rgba_unmultiplied(
-        highlight_color.r(),
-        highlight_color.g(),
-        highlight_color.b(),
-        255,
-    );
 
     for (slot, &x) in selected.iter().zip(xs.iter()) {
         let Some(label) = &slot.label else { continue };
-        let color = if active_start == Some(slot.start_tick) { highlight } else { label_color };
+        let color =
+            if active_start == Some(slot.start_tick) { highlight_color } else { label_color };
         painter.text(pos2(x, label_y), Align2::CENTER_CENTER, label, font.clone(), color);
     }
 }

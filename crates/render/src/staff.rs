@@ -4,8 +4,9 @@
 //! wrap animation across measure boundaries.
 
 use crate::measure::{
-    beat_anchor_x, draw_count_layer, draw_edit_cursor, draw_notes, last_note_entering_frac,
-    last_note_split, playback_cursor_entering_x, playback_cursor_x, render_measure_at,
+    beat_anchor_x, draw_beat_anchor, draw_count_layer, draw_edit_cursor, draw_notes,
+    last_note_entering_frac, last_note_split, playback_cursor_entering_x, playback_cursor_x,
+    render_measure_at,
 };
 use eframe::egui;
 use eframe::egui::{Color32, Rangef, Stroke};
@@ -14,6 +15,16 @@ use grooph_layout::staff_layout::{PlacedMeasure, StaffLayout, StaffOpts, Voice};
 use grooph_measure::counting::CountConfig;
 use grooph_measure::{Cursor, MeasureIdx, Score};
 
+/// How the staff marks the playback position.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum PlaybackMarks {
+    /// The moving playback line; the count label being played is lit.
+    Line,
+    /// No line: a guide anchor `(measure_idx, local_tick, intensity)` lights
+    /// its beat and its count label while it fades (`None` between anchors).
+    Anchor(Option<(MeasureIdx, f64, f32)>),
+}
+
 /// Render a full score described by `staff` to `ui`.
 ///
 /// `cursor` highlights the edit position in `cursor_voice`; only the measure
@@ -21,8 +32,7 @@ use grooph_measure::{Cursor, MeasureIdx, Score};
 /// `Some((measure_idx, local_tick))` referring to the **active** measure (the
 /// one currently being audibly played). The *visual* cursor may live in a
 /// different measure during the wrap animation — see [`current_cursor_x`].
-/// Without `playback_line` the playback position only lights the count
-/// labels.
+/// `marks` says whether the line or a guide anchor shows it.
 #[allow(clippy::too_many_arguments)]
 pub fn draw_staff(
     ui: &mut egui::Ui,
@@ -31,7 +41,7 @@ pub fn draw_staff(
     cursor: Option<Cursor>,
     cursor_voice: Voice,
     playback: Option<(MeasureIdx, f64)>,
-    playback_line: bool,
+    marks: PlaybackMarks,
     count_config: Option<&CountConfig>,
     staff_opts: &StaffOpts,
 ) {
@@ -40,6 +50,20 @@ pub fn draw_staff(
         Voice::Lower => (None, cursor),
     };
     let color = ui.visuals().text_color();
+    let highlight = ui.visuals().selection.stroke.color.to_opaque();
+
+    // The count label to light: the one being played under the line, the
+    // anchor's while it fades in from the label colour.
+    let (playback_line, count_tick) = match marks {
+        PlaybackMarks::Line => (true, playback.map(|(idx, t)| (idx, t, highlight))),
+        PlaybackMarks::Anchor(anchor) => (
+            false,
+            anchor.filter(|_| playback.is_some()).map(|(idx, t, intensity)| {
+                let label = color.gamma_multiply_u8(200);
+                (idx, t, label.lerp_to_gamma(highlight, intensity.clamp(0.0, 1.0)))
+            }),
+        ),
+    };
 
     // Resolve the *visual* cursor location once per frame. Phase 1 of a
     // measure's last note keeps the cursor in that measure; Phase 2 hands it
@@ -73,19 +97,21 @@ pub fn draw_staff(
                 Some(_) => (None, count_config),
                 None => (count_config, None),
             };
+            // Only the active measure lights a label, so a wrap-in cursor
+            // doesn't light labels in the next measure before its turn.
+            let measure_count_tick =
+                count_tick.filter(|(idx, _, _)| *idx == placed.measure_idx).map(|(_, t, c)| (t, c));
             render_placed_measure(
                 ui,
                 score,
                 placed,
                 staff_opts,
                 cursor,
-                playback,
+                measure_count_tick,
                 count_config,
                 cursor_x,
             );
             if let Some(config) = lower_counts {
-                let playback_tick =
-                    playback.filter(|(idx, _)| *idx == placed.measure_idx).map(|(_, t)| t);
                 draw_count_layer(
                     ui.painter(),
                     &score.measures[placed.measure_idx],
@@ -94,8 +120,7 @@ pub fn draw_staff(
                     placed.rect.bottom(),
                     config,
                     color,
-                    ui.visuals().selection.stroke.color,
-                    playback_tick,
+                    measure_count_tick,
                 );
             }
         }
@@ -103,6 +128,14 @@ pub fn draw_staff(
         // Barlines between measures: vertical stroke at each measure boundary
         // except after the last one (the right edge is the score end).
         draw_barlines(ui, system, staff_opts, color);
+    }
+
+    if let PlaybackMarks::Anchor(Some((idx, tick, intensity))) = marks
+        && playback.is_some()
+        && intensity > 0.0
+        && let Some(pos) = beat_anchor_pos(score, staff, idx, tick)
+    {
+        draw_beat_anchor(ui.painter(), pos, staff_opts.em, highlight, intensity);
     }
 }
 
@@ -172,16 +205,11 @@ fn render_placed_measure(
     placed: &PlacedMeasure,
     staff_opts: &StaffOpts,
     cursor: Option<Cursor>,
-    playback: Option<(MeasureIdx, f64)>,
+    count_tick: Option<(f64, Color32)>,
     count_config: Option<&CountConfig>,
     cursor_x: Option<f32>,
 ) {
     let cursor_idx = cursor.filter(|c| c.measure_idx == placed.measure_idx).map(|c| c.beat_idx);
-    // `playback_tick` drives count-label highlighting (and only that, since
-    // the visual cursor is now passed as `cursor_x`). Restrict to the active
-    // measure so a wrap-in cursor doesn't light up labels in the next measure
-    // before its turn.
-    let playback_tick = playback.filter(|(idx, _)| *idx == placed.measure_idx).map(|(_, t)| t);
 
     // Build a per-measure LayoutOpts from the placed rect/flags so the cursor
     // and playback drawing get the right viewport.
@@ -193,7 +221,7 @@ fn render_placed_measure(
         &placed.layout,
         &per_opts,
         cursor_idx,
-        playback_tick,
+        count_tick,
         count_config,
         /* draw_staff_line = */ false,
         cursor_x,
