@@ -14,3 +14,8 @@
 # Polled by the app to notice a new deploy; always ask the server.
 /version.txt
   Cache-Control: no-cache
+
+# Trunk puts a content hash in these names, so a new build gets new URLs and
+# browsers may keep the files without asking again.
+/grooph-app-*
+  Cache-Control: public, max-age=31536000, immutable
