@@ -220,3 +220,19 @@ fn app_page_links_to_existing_guides() {
         assert!(pages.iter().any(|p| p.path == href), "index.html links to missing page {href}");
     }
 }
+
+/// Every app link written out in `llms.txt` opens without an error.
+#[test]
+fn llms_txt_links_open() {
+    let llms = include_str!("../../app/assets/seo/llms.txt");
+    let prefix = format!("{SITE_URL}/?");
+    let links: Vec<&str> = llms
+        .split(|c: char| c.is_whitespace() || c == '|')
+        .filter_map(|word| word.strip_prefix(prefix.as_str()))
+        .collect();
+    assert!(links.iter().any(|l| l.contains("counter=")));
+    for query in links {
+        let link = parse_query(query);
+        assert!(matches!(link, Ok(Some(_))), "llms.txt: bad app link ?{query}: {link:?}");
+    }
+}
