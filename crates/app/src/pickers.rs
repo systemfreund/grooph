@@ -599,17 +599,17 @@ impl Grooph {
 
         let mut enabled = settings.custom_figures_enabled;
         if ui.checkbox(&mut enabled, "Custom groupings").changed() {
-            if enabled && settings.custom_figures.is_empty() {
-                settings.custom_figures = preset;
+            if enabled && settings.custom_patterns.is_empty() {
+                settings.custom_patterns = preset;
             }
             settings.custom_figures_enabled = enabled;
         }
 
         let active: FigureSet =
-            if settings.custom_figures_enabled { settings.custom_figures } else { preset };
+            if settings.custom_figures_enabled { settings.custom_patterns } else { preset };
         let available = figures(settings.subdivision, ts);
         if settings.custom_figures_enabled
-            && !available.iter().any(|g| settings.custom_figures.contains(g.id))
+            && !available.iter().any(|g| settings.custom_patterns.contains(g.id))
         {
             ui.weak("No grouping selected for this subdivision, using the complexity level.");
         } else if !settings.custom_figures_enabled {
@@ -634,28 +634,35 @@ impl Grooph {
                     BeatSpan::DottedEighth => "Groups of three sixteenths",
                 });
             }
-            ui.horizontal_wrapped(|ui| {
-                for figure in of_span {
-                    let measure = figure.measure();
-                    let id = egui::IdSalt::new(("figure", figure.id.0));
-                    let tile = notation_button(
-                        ui,
-                        id,
-                        &measure,
-                        family.clone(),
-                        active.contains(figure.id),
-                        TOOL_PALETTE_BUTTON_SIZE,
-                    )
-                    .on_hover_text(format!("Unlocked at level {}", figure.level));
-                    if tile.clicked() {
-                        if !settings.custom_figures_enabled {
-                            settings.custom_figures = preset;
-                            settings.custom_figures_enabled = true;
-                        }
-                        settings.custom_figures.toggle(figure.id);
-                    }
+            // One row per level: a span can have up to 64 figures.
+            for level in 1..=MAX_COMPLEXITY {
+                let of_level: Vec<_> = of_span.iter().filter(|g| g.level == level).collect();
+                if of_level.is_empty() {
+                    continue;
                 }
-            });
+                ui.weak(format!("Level {level}"));
+                ui.horizontal_wrapped(|ui| {
+                    for figure in of_level {
+                        let measure = figure.measure();
+                        let id = egui::IdSalt::new(("figure", figure.id.0));
+                        let tile = notation_button(
+                            ui,
+                            id,
+                            &measure,
+                            family.clone(),
+                            active.contains(figure.id),
+                            TOOL_PALETTE_BUTTON_SIZE,
+                        );
+                        if tile.clicked() {
+                            if !settings.custom_figures_enabled {
+                                settings.custom_patterns = preset;
+                                settings.custom_figures_enabled = true;
+                            }
+                            settings.custom_patterns.toggle(figure.id);
+                        }
+                    }
+                });
+            }
         }
     }
 }
