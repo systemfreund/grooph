@@ -90,8 +90,8 @@ pub struct AudioSettings {
     pub counter_muted: bool,
 }
 
-pub(crate) fn default_ghost_gain() -> f32 {
-    0.25
+fn default_ghost_gain() -> f32 {
+    0.15
 }
 
 fn default_count_in_gain() -> f32 {
@@ -99,11 +99,11 @@ fn default_count_in_gain() -> f32 {
 }
 
 fn default_soft_gain() -> f32 {
-    0.35
+    0.15
 }
 
 fn default_counter_gain() -> f32 {
-    0.6
+    1.0
 }
 
 impl Default for AudioSettings {
