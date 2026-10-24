@@ -1,6 +1,6 @@
 //! App-side glue for the rhythm generator: settings, "generate" action and
-//! the endless mode that keeps replacing already-played measures with fresh
-//! ones while the transport runs.
+//! the endless mode that keeps adding fresh measures below the playing one
+//! while the transport runs.
 
 use crate::platform::random_seed;
 use crate::{Grooph, TransportState, clock};
@@ -9,61 +9,42 @@ use grooph_measure::tempo::ScoreTiming;
 use grooph_measure::{Cursor, MeasureIdx};
 use log::warn;
 
-/// Minimum score length for endless mode: one measure is read while the other
-/// one is being replaced.
-pub(crate) const ENDLESS_MIN_BARS: usize = 2;
+/// Measures endless mode starts with: the one being played and the next.
+pub(crate) const ENDLESS_START_BARS: usize = 2;
 
 pub(crate) struct GeneratorState {
     pub(crate) settings: GeneratorSettings,
-    /// Replace each measure with a new one right after it has been played.
+    /// Keep adding measures while playing instead of looping the score.
     pub(crate) endless: bool,
     /// Play quiet ghost notes on the free slots of the generator subdivision.
     pub(crate) ghost_notes: bool,
     rng: Rng,
-    /// Measure the playback cursor was in during the last frame (endless mode).
-    last_playing_measure: Option<MeasureIdx>,
-    /// Measure the visible cursor has left but the audio engine may still be
-    /// sounding (latency offset); replaced once audio has left it too.
-    pending_regeneration: Option<MeasureIdx>,
 }
 
 impl GeneratorState {
     pub(crate) fn new(settings: GeneratorSettings, endless: bool, ghost_notes: bool) -> Self {
-        Self {
-            settings,
-            endless,
-            ghost_notes,
-            rng: Rng::new(random_seed()),
-            last_playing_measure: None,
-            pending_regeneration: None,
-        }
+        Self { settings, endless, ghost_notes, rng: Rng::new(random_seed()) }
     }
 
-    /// Bars to generate: endless mode needs at least [`ENDLESS_MIN_BARS`].
+    /// Bars to generate: endless mode starts with [`ENDLESS_START_BARS`].
     pub(crate) fn effective_bars(&self) -> usize {
-        if self.endless {
-            self.settings.bars.max(ENDLESS_MIN_BARS)
-        } else {
-            self.settings.bars.max(1)
-        }
+        if self.endless { ENDLESS_START_BARS } else { self.settings.bars.max(1) }
     }
 }
 
 impl Grooph {
     /// Regenerate the score after the generator settings were shown: on
     /// "New rhythm" (`roll`), on any changed setting, and when endless mode
-    /// was turned on for a score too short for it.
+    /// was turned on or off.
     pub(crate) fn finish_generator_change(
         &mut self,
         before: GeneratorSettings,
         endless_before: bool,
         roll: bool,
     ) {
-        let endless_turned_on = !endless_before && self.editor.generator.endless;
-        let too_short_for_endless = self.editor.score.len() < ENDLESS_MIN_BARS;
         if roll
             || self.editor.generator.settings != before
-            || (endless_turned_on && too_short_for_endless)
+            || endless_before != self.editor.generator.endless
         {
             self.generate_new_score();
         }
@@ -88,8 +69,6 @@ impl Grooph {
             true
         });
         self.editor.active_pattern_id = None;
-        self.editor.generator.last_playing_measure = None;
-        self.editor.generator.pending_regeneration = None;
     }
 
     /// Like [`Self::generate_new_score`], but reseeds the generator first so
@@ -99,46 +78,35 @@ impl Grooph {
         self.generate_new_score();
     }
 
-    /// Endless mode: once the playback cursor leaves a measure, regenerate
-    /// that measure so it is new by the time the loop comes back to it.
+    /// Endless mode: a running score. Once the playback cursor reaches the
+    /// last measure a new one is added below it, and measures already played
+    /// are removed from the top once they have scrolled out of view, so the
+    /// score scrolls down for as long as it plays and never loops.
     ///
-    /// The replacement keeps the measure's time signature, so the loop length
-    /// and the global tick of the playing measure stay unchanged; changed
-    /// generator settings for bars/time signature apply on the next
-    /// [`Self::generate_new_score`].
+    /// Added measures follow the current generator settings.
     pub(crate) fn update_endless(&mut self) {
         let playing = self.playback_ctl.transport_state == TransportState::Playing;
         if !self.editor.generator.endless
             || !playing
             || self.metronome_mode()
-            || self.editor.score.len() < ENDLESS_MIN_BARS
+            || self.editor.score.is_empty()
         {
-            self.editor.generator.last_playing_measure = None;
-            self.editor.generator.pending_regeneration = None;
             return;
         }
 
         let timing = self.score_timing();
         let current = timing.measure_at_global_tick(self.playback_ctl.playback.smooth_tick);
-        let previous = self.editor.generator.last_playing_measure.replace(current);
-        if let Some(left) = previous
-            && left != current
-        {
-            // A measure still pending from before is flushed first so it is
-            // never skipped (only happens with very short measures).
-            if let Some(pending) = self.editor.generator.pending_regeneration.replace(left)
-                && pending != left
-            {
-                self.regenerate_measure(pending);
-            }
+        if current + 1 >= self.editor.score.len() {
+            self.append_endless_measure(&timing);
         }
 
-        if let Some(pending) = self.editor.generator.pending_regeneration
-            && pending != current
-            && self.audio_has_left_measure(&timing, pending)
+        // Rows scrolled out of view above the playing one: the first goes once
+        // the audio engine has left it too (latency offset).
+        if self.playback_ctl.playback.rows_above_view > 0
+            && current > 0
+            && self.audio_has_left_measure(&timing, 0)
         {
-            self.editor.generator.pending_regeneration = None;
-            self.regenerate_measure(pending);
+            self.drop_first_measure(&timing);
         }
     }
 
@@ -155,35 +123,55 @@ impl Grooph {
         }
     }
 
-    fn regenerate_measure(&mut self, idx: MeasureIdx) {
-        let settings = GeneratorSettings {
-            time_signature: self.editor.score.current(idx).time_signature(),
-            ..self.editor.generator.settings
-        };
-        let measure = match generate_measure(&settings, &mut self.editor.generator.rng) {
-            Ok(measure) => measure,
-            Err(err) => {
-                warn!("Endless mode: cannot regenerate measure {idx}: {err:?}");
-                return;
-            }
-        };
-        // Settle the old notes' hit windows first: a hit not yet confirmed
-        // would otherwise be forgotten and turn into a miss on the new notes.
-        let timing = self.score_timing();
+    fn append_endless_measure(&mut self, timing: &ScoreTiming) {
+        let measure =
+            match generate_measure(&self.editor.generator.settings, &mut self.editor.generator.rng)
+            {
+                Ok(measure) => measure,
+                Err(err) => {
+                    warn!("Endless mode: cannot add a measure: {err:?}");
+                    return;
+                }
+            };
+        // Settle the hit windows on the old timing: the loop gets longer, so
+        // the accuracy clock is anchored again below.
         let tracker = &mut self.playback_ctl.accuracy.tracker;
-        tracker.update_progress(clock::now_seconds(), &timing, &self.editor.score);
-        self.editor.score.measures[idx] = measure;
-        // Same time signature, so the measure still spans the same ticks; the
-        // old measure's marks would otherwise show under the new notes.
-        let start = timing.measure_start_tick(idx);
-        let end = start + u64::from(timing.ticks_per_measure(idx));
-        self.playback_ctl.accuracy.tracker.forget_onsets(start..end);
+        tracker.update_progress(clock::now_seconds(), timing, &self.editor.score);
+        self.editor.score.measures.push(measure);
+        self.after_endless_change();
+    }
 
-        let cursor = &mut self.editor.cursor;
-        if cursor.measure_idx == idx {
-            let len = self.editor.score.current(idx).beats().len();
-            cursor.beat_idx = cursor.beat_idx.min(len.saturating_sub(1));
+    fn drop_first_measure(&mut self, timing: &ScoreTiming) {
+        let tracker = &mut self.playback_ctl.accuracy.tracker;
+        tracker.update_progress(clock::now_seconds(), timing, &self.editor.score);
+        self.editor.score.measures.remove(0);
+        let ticks = u64::from(timing.ticks_per_measure(0));
+        tracker.drop_leading_ticks(ticks);
+        if let Some(audio) = self.playback_ctl.audio.as_mut() {
+            audio.drop_leading_ticks(ticks);
         }
+
+        // Everything moves back by one measure: the cursors by its ticks, the
+        // view by one row, so nothing on screen jumps.
+        let playback = &mut self.playback_ctl.playback;
+        playback.smooth_tick = (playback.smooth_tick - ticks as f64).max(0.0);
+        playback.heard_tick = (playback.heard_tick - ticks as f64).max(0.0);
+        playback.scroll.shift(-playback.row_pitch);
+        playback.rows_above_view -= 1;
+        if let Some((m_idx, _)) = &mut playback.last_primary_beat {
+            *m_idx = m_idx.saturating_sub(1);
+        }
+        let cursor = &mut self.editor.cursor;
+        if cursor.measure_idx == 0 {
+            *cursor = Cursor::start();
+        } else {
+            cursor.measure_idx -= 1;
+        }
+        self.after_endless_change();
+    }
+
+    fn after_endless_change(&mut self) {
+        self.realign_accuracy_clock();
         self.editor.active_pattern_id = None;
         self.editor.dirty = true;
     }

@@ -3,6 +3,7 @@
 //! buttons and a tab bar at the bottom. On wide windows the controls stay a
 //! centered column and the staff gets the full width.
 
+use crate::generator::GeneratorState;
 use crate::metronome_view::FillLook;
 use crate::pickers::{Picker, ROW_HEIGHT, swing_label, time_signature_label};
 use crate::share::paint_share_icon;
@@ -56,6 +57,11 @@ impl Default for CompactState {
     fn default() -> Self {
         Self { options_collapsed: true }
     }
+}
+
+/// Bars of the generated score; endless mode never loops.
+fn bars_label(generator: &GeneratorState) -> String {
+    if generator.endless { "∞".to_owned() } else { generator.effective_bars().to_string() }
 }
 
 fn subdivision_short_label(s: Subdivision) -> &'static str {
@@ -417,7 +423,7 @@ impl Grooph {
             (Picker::TimeSignature, "Meter", time_signature_label(settings.time_signature)),
             (Picker::Subdivision, "Notes", subdivision_short_label(subdivision).to_owned()),
             (Picker::Complexity, "Level", level),
-            (Picker::Bars, "Bars", self.editor.generator.effective_bars().to_string()),
+            (Picker::Bars, "Bars", bars_label(&self.editor.generator)),
             // While a tempo ramp runs: the tempo being played.
             match self.playback_ctl.playback.ramp_bpm {
                 Some(bpm) => (Picker::Bpm, "BPM now", bpm.to_string()),

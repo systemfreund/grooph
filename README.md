@@ -126,13 +126,16 @@ Important root files:
   changing a setting regenerates the score (undoable), 🎲 rolls a new rhythm
   with the same settings. Space and the grouping picker live in the Level
   picker, presets (load, save, update, rename, delete) in the Preset picker.
-- App glue: `crates/app/src/generator.rs`. Endless mode replaces a measure once
-  both the visible cursor and the audio cursor have left it; the replacement
-  keeps the measure's time signature so loop timing stays stable. Needs at
-  least 2 bars.
+- App glue: `crates/app/src/generator.rs`. Endless mode (Bars: Endless)
+  starts with 2 bars and never loops: once the cursor reaches the last measure
+  a new one is added below it, and the first measure is removed once its row
+  has scrolled out of view and the audio cursor has left it. Removing it moves
+  everything back by its ticks: the audio cursor (`Audio::drop_leading_ticks`,
+  applied together with the shorter score), the playback clock, the accuracy
+  marks and the scroll tween (by one row), so nothing jumps.
 - Measure widths (`staff_layout::min_measure_width`) are sized for at least a
   measure full of sixteenths, so up to that density they depend only on the
-  meter: editing or swapping measures (endless mode) never reflows the staff.
+  meter: editing or adding measures (endless mode) never reflows the staff.
   Denser measures (32nds, big tuplets) grow with their beat count.
 - Groupings: the one-beat figures are not a hand-made list but every onset
   pattern of a beat's grid (`all_patterns`: sixteenths over a quarter, dotted

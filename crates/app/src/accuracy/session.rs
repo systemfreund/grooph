@@ -1,5 +1,4 @@
 use std::collections::{HashMap, HashSet};
-use std::ops::Range;
 
 use grooph_measure::Score;
 use grooph_measure::grid::DEFAULT_GRID;
@@ -298,13 +297,17 @@ impl RecordingSession {
         }
     }
 
-    /// Drop marks and loop hit bookkeeping of the onsets in `ticks`, keeping
-    /// stats and counters. No-op when `Idle`.
-    pub(super) fn forget_onsets(&mut self, ticks: &Range<u64>) {
+    /// The score lost `ticks` from its front: drop the marks and loop hit
+    /// bookkeeping of the onsets there and move the others back by as much,
+    /// keeping stats and counters. No-op when `Idle`.
+    pub(super) fn drop_leading_ticks(&mut self, ticks: u64) {
         if let Self::Recording(d) = self {
-            d.marks_by_onset.retain(|tick, _| !ticks.contains(tick));
-            d.hits_in_loop.retain(|tick| !ticks.contains(tick));
-            d.hits_next_loop.retain(|tick| !ticks.contains(tick));
+            d.marks_by_onset = shift_marks(std::mem::take(&mut d.marks_by_onset), ticks);
+            let shift = |set: &mut HashSet<u64>| {
+                *set = set.iter().filter_map(|t| t.checked_sub(ticks)).collect();
+            };
+            shift(&mut d.hits_in_loop);
+            shift(&mut d.hits_next_loop);
         }
     }
 
@@ -315,6 +318,14 @@ impl RecordingSession {
             d.last_tick = Some(last_tick);
         }
     }
+}
+
+/// Marks keyed by onset tick, moved back by `ticks`; the ones before it go.
+pub(super) fn shift_marks(
+    marks: HashMap<u64, AccuracyMark>,
+    ticks: u64,
+) -> HashMap<u64, AccuracyMark> {
+    marks.into_iter().filter_map(|(t, m)| Some((t.checked_sub(ticks)?, m))).collect()
 }
 
 #[cfg(test)]

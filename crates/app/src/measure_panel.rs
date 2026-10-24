@@ -164,7 +164,18 @@ impl Grooph {
                                 (placed.rect.center().y - origin.y - view_height / 2.0)
                                     .clamp(0.0, max_offset);
                             let now = ui.input(|i| i.time);
-                            let offset = self.playback_ctl.playback.scroll.update(row_offset, now);
+                            let playback = &mut self.playback_ctl.playback;
+                            let offset = playback.scroll.update(row_offset, now);
+                            playback.row_pitch = staff
+                                .systems
+                                .get(1)
+                                .zip(staff.systems.first())
+                                .map_or(0.0, |(b, a)| b.rect.top() - a.rect.top());
+                            playback.rows_above_view = if playback.row_pitch > 0.0 {
+                                (offset / playback.row_pitch).floor() as usize
+                            } else {
+                                0
+                            };
                             // Centring this rect scrolls to exactly `offset`;
                             // horizontally it follows the cursor at once.
                             let cursor_rect = egui::Rect::from_center_size(
