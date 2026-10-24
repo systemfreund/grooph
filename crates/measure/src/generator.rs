@@ -15,8 +15,9 @@
 //! 2. eighths on the "and" (first syncopations)
 //! 3. sixteenth figures starting on the beat, without dotted or syncopated
 //!    notes
-//! 4. dotted or syncopated figures and figures starting on the "and"
-//! 5. figures starting on "e" or "a"
+//! 4. one hard element: a dotted or syncopated note, or a start on a later
+//!    eighth
+//! 5. figures starting on "e" or "a", or with two hard elements or more
 //!
 //! Patterns of three slots (eighth triplets, eighths over a dotted quarter,
 //! sixteenths over a dotted eighth) follow the triplet ladder of the
@@ -319,23 +320,27 @@ impl Pattern {
         }
     }
 
-    /// Level of a pattern with notes on odd sixteenths: 5 if it starts on
-    /// "e" or "a", 4 if it starts on another eighth or has a dotted or
-    /// syncopated note (a dotted value, or a longer note off the eighths),
-    /// else 3.
+    /// Level of a pattern with notes on odd sixteenths. It starts on "e"
+    /// or "a": 5. Otherwise it counts the hard elements: a start on a later
+    /// eighth, and every dotted or syncopated note (a dotted value, or a
+    /// note from an offbeat sixteenth held over the next eighth, each note
+    /// sounding up to the next). None: 3, one: 4, more: 5, so each level
+    /// brings one new idea.
     fn sixteenth_level(&self) -> u8 {
         let starts: Vec<u32> = self.onset_slots().collect();
-        match starts[0] {
-            first if first % 2 == 1 => return 5,
-            0 => {}
-            _ => return 4,
+        if starts[0] % 2 == 1 {
+            return 5;
         }
         let ends = starts.iter().skip(1).copied().chain([self.slots()]);
-        let irregular = starts.iter().zip(ends).any(|(&start, end)| {
+        let hard_notes = starts.iter().zip(ends).filter(|&(&start, end)| {
             let len = end - start;
             len == 3 || len == 5 || (len >= 2 && start % 2 == 1)
         });
-        if irregular { 4 } else { 3 }
+        match usize::from(starts[0] != 0) + hard_notes.count() {
+            0 => 3,
+            1 => 4,
+            _ => 5,
+        }
     }
 
     /// The pattern written out: straight with every note up to the next
@@ -1059,12 +1064,12 @@ mod tests {
         for p in ["xxxxxx", "xxx-x-", "x-xxx-", "x-x-xx", "x---xx", "xxx---"] {
             assert!(at(3).contains(p), "{p}");
         }
-        // Dotted or syncopated notes, or a start on an eighth: level 4.
-        for p in ["x--xx-", "xx-x--", "xx----", "--xxx-", "--x-xx", "----xx"] {
+        // One dotted or syncopated note, or a start on a later eighth: 4.
+        for p in ["x--xx-", "xx--x-", "xx----", "x----x", "--xxx-", "--x-xx", "----xx"] {
             assert!(at(4).contains(p), "{p}");
         }
-        // A start on a sixteenth offbeat: level 5.
-        for p in ["-xx-x-", "-x----", "---x--", "-----x"] {
+        // A start on a sixteenth offbeat, or two hard elements: 5.
+        for p in ["-xx-x-", "-x----", "---x--", "-----x", "xx-x-x", "x--x--", "--xx--"] {
             assert!(at(5).contains(p), "{p}");
         }
     }

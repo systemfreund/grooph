@@ -139,7 +139,7 @@ Important root files:
   quarter, eighth or dotted eighth, and eighth triplets over a quarter). A
   `FigureId` is the pattern's position in that enumeration, `FigureSet` a
   128-bit mask over them. A pattern's level comes from rules (start on
-  "e"/"a", dotted or syncopated notes, ...) and the reference app's triplet
+  "e"/"a", or the count of dotted or syncopated notes and later starts: none 3, one 4, more 5) and the reference app's triplet
   ladder for three-slot patterns. A complexity level is a preset subset
   (`complexity_figures`); `custom_patterns` (switched by
   `custom_figures_enabled`) in `GeneratorSettings` replaces it with a
