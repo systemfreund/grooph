@@ -37,7 +37,7 @@ mod c {
     pub const TUPLET_DIGIT_FONT_FACTOR: f32 = 0.75;
     pub const TUPLET_MARGIN_EM: f32 = 0.05;
     /// Space between the number's ink and the bracket on either side.
-    pub const TUPLET_NUMBER_CLEARANCE_SS: f32 = 1.75;
+    pub const TUPLET_NUMBER_CLEARANCE_SS: f32 = 0.60;
     pub const TUPLET_MIN_SEG_SS: f32 = 0.50;
 
     /// Space between a soft note's head and the ink of its parentheses.
@@ -815,6 +815,39 @@ mod tests {
                 // Up to the half pixel the stems snap by.
                 assert!((center - stem).abs() <= 0.51, "{center} vs {stem}");
             }
+        }
+    }
+
+    #[test]
+    fn a_bracket_leaves_its_clearance_either_side_of_the_number() {
+        use grooph_measure::notation::parse_score;
+        let em = 20.0;
+        let opts = LayoutOpts {
+            rect: Rect::from_min_max(Pos2::ZERO, Pos2::new(600.0, 200.0)),
+            font_id: FontId::new(em, FontFamily::Proportional),
+            pixels_per_point: 1.0,
+            em,
+            layout_clef: false,
+            layout_time_signature: false,
+            y_offset: 0.0,
+            stem_length_factor: 0.9,
+            stem_thickness_factor: 0.1,
+            accent_displacement: 0.07,
+            accent_below: false,
+            stem_down: false,
+            shared_line: false,
+            proportional_spacing: true,
+        };
+        let clearance = c::TUPLET_NUMBER_CLEARANCE_SS * opts.staff_space();
+        // One digit and two, each with a rest for a bracket.
+        let ten = "4/4 10:8e 10:8e 10:8e 10:8e r:10:8e 10:8e 10:8e 10:8e 10:8e 10:8e";
+        for s in ["4/4 t4 r:t4 t4 h", ten] {
+            let l = build_measure_layout(&parse_score(s).unwrap().measures.remove(0), &opts);
+            let t = &l.tuplets[0];
+            let number = ink_of(&t.number).unwrap();
+            let (left, right) = (t.bracket[0].p2.x, t.bracket[1].p1.x);
+            assert!((number.left() - left - clearance).abs() < 0.01, "{s}");
+            assert!((right - number.right() - clearance).abs() < 0.01, "{s}");
         }
     }
 
