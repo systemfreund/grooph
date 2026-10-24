@@ -1,5 +1,5 @@
 use crate::tuplet_plan::{TupletSpan, detect_tuplet_spans};
-use grooph_measure::duration::{Duration, NoteValue};
+use grooph_measure::duration::{Duration, NoteValue, e};
 use grooph_measure::grid::DEFAULT_GRID;
 use grooph_measure::{Beat, BeatIdx, BeatKind, Measure};
 
@@ -42,6 +42,9 @@ pub struct BeamGroup {
 ///   over primary boundaries and remain within a single BeamGroup
 /// - Rests between two notes of a group sit under its beams; a rest too long
 ///   for a beam (a quarter or longer) splits the group
+/// - With a thirty-second in a group, only the eighth beam runs over the
+///   eighths of its beat: the secondary beams show the eighth pulse, two
+///   levels above the thirty-seconds (two-level rhythmic parsing)
 /// - Cross-measure beams are exposed via the `continues_*` flags but left as false here; a higher level
 ///   can link adjacent measures and set these appropriately.
 #[cfg(test)]
@@ -90,13 +93,13 @@ pub(super) fn compute_beam_plan_with(measure: &Measure, beam_rests: bool) -> Bea
         let break_group = should_break(a, b, beats, &onsets, &boundaries, &span_of_idx, &spans);
 
         if break_group {
-            finalize_group(&mut groups, beats, &cur);
+            finalize_group(&mut groups, beats, &onsets, &boundaries, &cur);
             cur = vec![b];
         } else {
             cur.push(b);
         }
     }
-    finalize_group(&mut groups, beats, &cur);
+    finalize_group(&mut groups, beats, &onsets, &boundaries, &cur);
 
     BeamPlan {
         groups: groups
@@ -110,7 +113,13 @@ pub(super) fn compute_beam_plan_with(measure: &Measure, beam_rests: bool) -> Bea
     }
 }
 
-fn finalize_group(groups: &mut Vec<BeamGroup>, beats: &[Beat], cur: &[BeatIdx]) {
+fn finalize_group(
+    groups: &mut Vec<BeamGroup>,
+    beats: &[Beat],
+    onsets: &[u32],
+    boundaries: &[u32],
+    cur: &[BeatIdx],
+) {
     if cur.len() <= 1 {
         // No beamable notes in this group
         return;
@@ -120,12 +129,23 @@ fn finalize_group(groups: &mut Vec<BeamGroup>, beats: &[Beat], cur: &[BeatIdx]) 
         beam_counts.push(beam_count(&beats[i].duration));
     }
 
+    // Thirty-seconds group by eighths: on an eighth of the beat only the
+    // eighth beam runs on.
+    let eighth = DEFAULT_GRID.ticks_of(&e()).unwrap_or(0);
+    let has_32nds = beats[cur[0]..=cur[cur.len() - 1]].iter().any(|b| beam_count(&b.duration) >= 3);
+    let on_eighth = |t: u32| {
+        let beat_start = boundaries.iter().copied().filter(|&bd| bd <= t).max().unwrap_or(0);
+        eighth > 0 && (t - beat_start).is_multiple_of(eighth)
+    };
+
     let mut continuity: Vec<u8> = Vec::new();
     for w in cur.windows(2) {
         let i = w[0];
         let j = w[1];
         // The beams run on over the rests between, as many as all of them share.
-        let cont = beats[i..=j].iter().map(|b| beam_count(&b.duration)).min().unwrap_or(0);
+        let shared = beats[i..=j].iter().map(|b| beam_count(&b.duration)).min().unwrap_or(0);
+        // The note or rest after `i` starts the next eighth.
+        let cont = if has_32nds && on_eighth(onsets[i + 1]) { shared.min(1) } else { shared };
         continuity.push(cont);
     }
 
@@ -279,6 +299,30 @@ mod tests {
         assert_eq!(plan.groups[0].beat_indices, vec![0, 1, 2, 3]);
         assert_eq!(plan.groups[1].beat_indices, vec![4, 5, 6, 7]);
         assert_eq!(plan.groups[1].continuity, vec![2, 2, 2]);
+    }
+
+    #[test]
+    fn thirty_seconds_break_the_secondary_beams_at_each_eighth() {
+        use grooph_measure::notation::parse_score;
+        let plan_of = |s: &str| compute_beam_plan(&parse_score(s).unwrap().measures.remove(0));
+        // Eight thirty-seconds: 4 + 4 under one eighth beam.
+        let plan = plan_of("1/4 th th th th th th th th");
+        assert_eq!(plan.groups.len(), 1);
+        assert_eq!(plan.groups[0].continuity, vec![3, 3, 3, 1, 3, 3, 3]);
+        // Sixteenths beside thirty-seconds break at the eighth too.
+        let plan = plan_of("1/4 s s th th th th");
+        assert_eq!(plan.groups[0].continuity, vec![2, 1, 3, 3, 3]);
+        // Over a rest on the eighth as well.
+        let plan = plan_of("1/4 th th th th r:th th th th");
+        assert_eq!(plan.groups[0].continuity, vec![3, 3, 3, 1, 3, 3]);
+        // Without thirty-seconds the sixteenths keep both beams.
+        assert_eq!(plan_of("1/4 s s s s").groups[0].continuity, vec![2, 2, 2]);
+        // Eighths count from each beat, also in a dotted-quarter group.
+        let plan = plan_of("6/8 th th th th s s e r:q.");
+        assert_eq!(plan.groups[0].continuity, vec![3, 3, 3, 1, 2, 1]);
+        // Thirty-second triplets keep their beams inside an eighth.
+        let plan = plan_of("1/4 t32 t32 t32 s e");
+        assert_eq!(plan.groups[0].continuity, vec![3, 3, 2, 1]);
     }
 
     #[test]
