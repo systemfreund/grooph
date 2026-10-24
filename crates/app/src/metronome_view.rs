@@ -27,7 +27,7 @@ use eframe::egui;
 use eframe::egui::epaint::PathShape;
 use eframe::egui::{Align2, Color32, FontId, Pos2, Sense, Shape, Stroke, Ui, vec2};
 use grooph_layout::staff_layout::Voice;
-use grooph_measure::click::{ClickLevel, default_click_bar, subdivided_click_bar};
+use grooph_measure::click::{ClickLevel, default_click_bar, meter_click_bar, subdivided_click_bar};
 use grooph_measure::counter::{
     CounterBars, Ratio, click_level, counter_bar, counter_clicks, counter_ratios, named_ratio_of,
 };
@@ -197,16 +197,6 @@ fn tile_of(bar: &Measure, units: u8) -> Option<Measure> {
         tile.set_beat(idx, Beat::new(b.duration, b.kind)).ok()?;
     }
     Some(tile)
-}
-
-/// Click bar a meter picked in the metronome starts with: x/4 clicks its
-/// beats, x/8 and x/16 every eighth or sixteenth.
-pub(crate) fn meter_click_bar(ts: TimeSignature) -> Measure {
-    if ts.beat_unit > 4 {
-        subdivided_click_bar(ts, 1).unwrap_or_else(|| default_click_bar(ts))
-    } else {
-        default_click_bar(ts)
-    }
 }
 
 /// Name of a fill whose clicks are `d` long. Triplets name their note
