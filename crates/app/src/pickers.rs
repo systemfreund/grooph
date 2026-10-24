@@ -190,7 +190,7 @@ impl Grooph {
                 Picker::Swing => "Swing",
                 Picker::Preset => "Preset",
                 Picker::MetronomeMeter => "Time signature",
-                Picker::ClickFill => "Clicks",
+                Picker::ClickFill => "Subdivision",
                 Picker::Polyrhythm => "Polyrhythm",
             };
             ui.heading(title);
@@ -460,15 +460,39 @@ impl Grooph {
 
     /// Ready-made click bars of the metronome meter. Returns whether one was
     /// picked.
+    /// Each shown as its notes, like the tool palette (see
+    /// [`crate::metronome_view::ClickFill::tile`]).
     fn click_fill_choices(&mut self, ui: &mut Ui) -> bool {
         let fills = click_fills(self.metronome_meter());
         let bar = &self.editor.score.measures[0];
-        let current = fills.iter().position(|(m, _)| same_bar(m, bar));
-        let options: Vec<_> =
-            fills.iter().enumerate().map(|(i, (_, name))| (Some(i), name.clone())).collect();
-        let picked = choice_grid(ui, &options, current, 2).flatten();
+        let current = fills.iter().position(|f| same_bar(&f.bar, bar));
+        let family = self.ui.music_font_id.family.clone();
+        let mut picked = None;
+        ui.horizontal_wrapped(|ui| {
+            for (i, fill) in fills.iter().enumerate() {
+                let selected = current == Some(i);
+                let tile = match &fill.tile {
+                    Some(tile) => {
+                        let id = egui::IdSalt::new(("click_fill", i));
+                        notation_button(ui, id, tile, family.clone(), selected)
+                    }
+                    None => ui.add(
+                        Button::new(RichText::new(&fill.name).size(18.0))
+                            .selected(selected)
+                            .min_size(vec2(0.0, ROW_HEIGHT)),
+                    ),
+                };
+                if tile.on_hover_text(&fill.name).clicked() {
+                    picked = Some(i);
+                }
+            }
+        });
+        // The name of the one picked, as the tiles show only notes.
+        ui.add_space(4.0);
+        let name = current.map_or("Custom", |i| fills[i].name.as_str());
+        ui.label(RichText::new(name).size(18.0).weak());
         if let Some(i) = picked {
-            self.replace_click_bar(fills[i].0.clone());
+            self.replace_click_bar(fills[i].bar.clone());
         }
         picked.is_some()
     }

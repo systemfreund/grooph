@@ -34,7 +34,7 @@ use grooph_measure::duration::{Duration, TupletKind};
 use grooph_measure::grid::DEFAULT_GRID;
 use grooph_measure::score::Score;
 use grooph_measure::tempo::ScoreTiming;
-use grooph_measure::{Cursor, Measure, TimeSignature};
+use grooph_measure::{Beat, Cursor, Measure, TimeSignature};
 use grooph_render::playback_cursor_stroke;
 use std::f32::consts::{FRAC_PI_2, TAU};
 
@@ -134,22 +134,50 @@ fn arc(center: Pos2, radius: f32, start: f32, end: f32) -> Vec<Pos2> {
         .collect()
 }
 
+/// A ready-made click bar (see [`click_fills`]).
+pub(crate) struct ClickFill {
+    pub bar: Measure,
+    pub name: String,
+    /// What its tile shows, every click alike: the first beat group for
+    /// the main beats, one beat unit for a subdivision.
+    pub tile: Option<Measure>,
+}
+
 /// Ready-made click bars of `ts`: the default, then every beat unit split
 /// into 1 to 9 clicks where the meter allows, each with a name. Bars alike
 /// are offered once.
-pub(crate) fn click_fills(ts: TimeSignature) -> Vec<(Measure, String)> {
-    let mut fills = vec![(default_click_bar(ts), "Main beats".to_owned())];
+pub(crate) fn click_fills(ts: TimeSignature) -> Vec<ClickFill> {
+    let group = ts.groups().first().copied().unwrap_or(1);
+    let bar = default_click_bar(ts);
+    let mut fills =
+        vec![ClickFill { tile: tile_of(&bar, group), bar, name: "Main beats".to_owned() }];
     for parts in 1..=9 {
         let Some(bar) = subdivided_click_bar(ts, parts) else {
             continue;
         };
-        if fills.iter().any(|(m, _)| same_bar(m, &bar)) {
+        if fills.iter().any(|f| same_bar(&f.bar, &bar)) {
             continue;
         }
         let name = bar.beats().first().map_or_else(String::new, |b| fill_name(b.duration));
-        fills.push((bar, name));
+        fills.push(ClickFill { tile: tile_of(&bar, 1), bar, name });
     }
     fills
+}
+
+/// The first `units` beat units of `bar` as a bar of their own, every
+/// click medium: no accents or soft clicks.
+fn tile_of(bar: &Measure, units: u8) -> Option<Measure> {
+    let ts = bar.time_signature();
+    let end = u32::from(units) * DEFAULT_GRID.ticks_per_beat(&ts);
+    let onsets = DEFAULT_GRID.compute_onset_ticks(bar.beats());
+    let mut tile = Measure::new(TimeSignature::new(units, ts.beat_unit));
+    for (idx, (b, &onset)) in bar.beats().iter().zip(&onsets).enumerate() {
+        if onset >= end {
+            break;
+        }
+        tile.set_beat(idx, Beat::new(b.duration, b.kind)).ok()?;
+    }
+    Some(tile)
 }
 
 /// Click bar a meter picked in the metronome starts with: x/4 clicks its
@@ -374,8 +402,8 @@ impl Grooph {
         let bar = self.click_bar();
         click_fills(bar.time_signature())
             .into_iter()
-            .find(|(m, _)| same_bar(m, &bar))
-            .map_or_else(|| "Custom".to_owned(), |(_, name)| name)
+            .find(|f| same_bar(&f.bar, &bar))
+            .map_or_else(|| "Custom".to_owned(), |f| f.name)
     }
 
     /// The counter rhythm of the metronome meter, if it has one.
@@ -832,7 +860,7 @@ mod tests {
 
     #[test]
     fn fills_name_each_split_once() {
-        let names = |ts| click_fills(ts).into_iter().map(|(_, n)| n).collect::<Vec<_>>();
+        let names = |ts| click_fills(ts).into_iter().map(|f| f.name).collect::<Vec<_>>();
         // One click per quarter is the default bar already.
         assert_eq!(
             names(TimeSignature::FOUR_FOUR),
@@ -864,6 +892,24 @@ mod tests {
     }
 
     #[test]
+    fn fills_show_one_beat_unit_and_the_main_beats_one_group() {
+        let ts = TimeSignature::SIX_EIGHT;
+        let tiles: Vec<_> = click_fills(ts).into_iter().map(|f| f.tile.unwrap()).collect();
+        assert_eq!(tiles[0].time_signature(), TimeSignature::new(3, 8));
+        assert_eq!(tiles[0].beats().len(), 1);
+        // Eighths, sixteenths, sixteenth triplets: one eighth's worth.
+        let counts: Vec<_> = tiles[1..4].iter().map(|t| t.beats().len()).collect();
+        assert_eq!(counts, [1, 2, 3]);
+        for tile in &tiles[1..] {
+            assert_eq!(tile.time_signature(), TimeSignature::new(1, 8));
+            assert!(tile.beats().iter().all(|b| ClickLevel::of(b) == ClickLevel::Medium));
+        }
+        for ts in crate::pickers::all_time_signatures() {
+            assert!(click_fills(ts).iter().all(|f| f.tile.is_some()), "{ts}");
+        }
+    }
+
+    #[test]
     fn picked_meters_click_their_beat_unit() {
         let ts = TimeSignature::FOUR_FOUR;
         assert!(same_bar(&meter_click_bar(ts), &default_click_bar(ts)));
@@ -871,11 +917,11 @@ mod tests {
         assert!(same_bar(&meter_click_bar(ts), &bar("7/8 >e (e) e (e) (e) e (e)")));
         let ts: TimeSignature = "5/16".parse().unwrap();
         assert_eq!(meter_click_bar(ts).beats().len(), 5);
-        // Its name in the Clicks picker.
+        // Its name in the Subdivision picker.
         let fills = click_fills(TimeSignature::SEVEN_EIGHT);
         let name =
-            fills.iter().find(|(m, _)| same_bar(m, &meter_click_bar(TimeSignature::SEVEN_EIGHT)));
-        assert_eq!(name.map(|(_, n)| n.as_str()), Some("Eighths"));
+            fills.iter().find(|f| same_bar(&f.bar, &meter_click_bar(TimeSignature::SEVEN_EIGHT)));
+        assert_eq!(name.map(|f| f.name.as_str()), Some("Eighths"));
     }
 
     #[test]

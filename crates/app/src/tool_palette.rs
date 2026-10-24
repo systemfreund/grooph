@@ -313,8 +313,10 @@ pub(crate) fn notation_button(
     // Size the glyphs by the first note; rest-only measures use rest sizing.
     let first = measure.beats().first().unwrap();
     let template = measure.beats().iter().find(|b| b.kind == Note).unwrap_or(first);
+    // Tuplets and long rows of short notes get a wider tile.
     let w_factor = match template {
         Beat { kind: Note, duration: Duration::Tuplet(..), .. } => 1.5,
+        _ if measure.beats().len() > 6 => 1.5,
         _ => 1.0,
     };
     let symbol = Atom::custom(

@@ -483,7 +483,7 @@ impl Grooph {
     }
 
     fn compact_metronome_rows(&mut self, ui: &mut Ui) {
-        if value_row(ui, "Clicks", &self.click_fill_label()).clicked() {
+        if value_row(ui, "Subdivision", &self.click_fill_label()).clicked() {
             self.ui.picker = Some(Picker::ClickFill);
         }
         if value_row(ui, "Edit clicks", "✏").clicked() {
