@@ -123,6 +123,8 @@ impl Grooph {
                             } else {
                                 0.0
                             },
+                            // While editing every rest stays to be picked.
+                            bar_rests: self.ui.mode != Mode::Edit,
                         };
 
                         let upper = upper.as_ref().unwrap_or(&self.editor.score);
