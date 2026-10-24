@@ -3,7 +3,7 @@
 
 use crate::{Grooph, TransportState};
 use eframe::egui;
-use grooph_audio::{GapMode, GapMute, RampEnd, RampUnit};
+use grooph_audio::{GapMode, GapMute, RampEnd, RampUnit, TempoRamp};
 use grooph_measure::tempo::{MAX_BPM, MIN_BPM};
 
 impl Grooph {
@@ -15,7 +15,7 @@ impl Grooph {
             Some(audio) if playing => audio.bar_state(),
             _ => None,
         };
-        let ramp = self.playback_ctl.audio_cfg.ramp;
+        let ramp = self.played_ramp();
         let bpm = self.playback_ctl.bpm;
         let bars = self.played_bars();
         let ramp_bpm = (playing && ramp.enabled).then(|| match bar {
@@ -31,6 +31,20 @@ impl Grooph {
 }
 
 impl Grooph {
+    /// Endless mode never loops: a ramp counted in loops counts in bars.
+    fn endless_running(&self) -> bool {
+        self.editor.generator.endless && !self.metronome_mode()
+    }
+
+    /// The tempo ramp as played: see [`Self::endless_running`].
+    pub(crate) fn played_ramp(&self) -> TempoRamp {
+        let mut ramp = self.playback_ctl.audio_cfg.ramp;
+        if self.endless_running() {
+            ramp.unit = RampUnit::Bars;
+        }
+        ramp
+    }
+
     pub(crate) fn gap_click_settings(&mut self, ui: &mut egui::Ui) {
         let gap = &mut self.playback_ctl.audio_cfg.gap;
         ui.checkbox(&mut gap.enabled, "Mute bars")
@@ -67,6 +81,7 @@ impl Grooph {
 
     pub(crate) fn tempo_ramp_settings(&mut self, ui: &mut egui::Ui) {
         let start = self.playback_ctl.bpm;
+        let endless = self.endless_running();
         let ramp = &mut self.playback_ctl.audio_cfg.ramp;
         ui.checkbox(&mut ramp.enabled, "Change the tempo while playing")
             .on_hover_text("Starts at the BPM setting and steps towards the target tempo");
@@ -85,15 +100,19 @@ impl Grooph {
                 ui.add(egui::DragValue::new(&mut ramp.step_bpm).range(1..=50).speed(0.05));
                 ui.label("BPM every");
                 ui.add(egui::DragValue::new(&mut ramp.every).range(1..=64).speed(0.05));
-                egui::ComboBox::from_id_salt("ramp_unit")
-                    .selected_text(match ramp.unit {
-                        RampUnit::Bars => "bars",
-                        RampUnit::Loops => "loops",
-                    })
-                    .show_ui(ui, |ui| {
-                        ui.selectable_value(&mut ramp.unit, RampUnit::Bars, "bars");
-                        ui.selectable_value(&mut ramp.unit, RampUnit::Loops, "loops");
-                    });
+                if endless {
+                    ui.label("bars");
+                } else {
+                    egui::ComboBox::from_id_salt("ramp_unit")
+                        .selected_text(match ramp.unit {
+                            RampUnit::Bars => "bars",
+                            RampUnit::Loops => "loops",
+                        })
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(&mut ramp.unit, RampUnit::Bars, "bars");
+                            ui.selectable_value(&mut ramp.unit, RampUnit::Loops, "loops");
+                        });
+                }
             });
             ui.horizontal(|ui| {
                 ui.label("At the target:");

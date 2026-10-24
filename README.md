@@ -132,7 +132,8 @@ Important root files:
   has scrolled out of view and the audio cursor has left it. Removing it moves
   everything back by its ticks: the audio cursor (`Audio::drop_leading_ticks`,
   applied together with the shorter score), the playback clock, the accuracy
-  marks and the scroll tween (by one row), so nothing jumps.
+  marks and the scroll tween (by one row), so nothing jumps. A tempo ramp
+  counted in loops counts in bars there (`played_ramp`).
 - Measure widths (`staff_layout::min_measure_width`) are sized for at least a
   measure full of sixteenths, so up to that density they depend only on the
   meter: editing or adding measures (endless mode) never reflows the staff.

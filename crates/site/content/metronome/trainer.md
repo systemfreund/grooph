@@ -30,7 +30,8 @@ so the result shows how well you kept the time on your own.
 
 Under **Tempo Ramp**, switch on **Change the tempo while playing**. The ramp starts at the
 BPM at the top and goes towards the target tempo in steps, for example 5 BPM every
-4 bars or every loop of the rhythm. The tempo only changes at the start of a bar, and the
+4 bars or every loop of the rhythm. In endless mode the rhythm never loops, so the ramp
+counts in bars there. The tempo only changes at the start of a bar, and the
 tempo being played is shown at the top as **BPM now**.
 
 At the target the ramp can **hold** the tempo, **start over** from the beginning or go

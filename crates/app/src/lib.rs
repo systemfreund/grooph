@@ -394,7 +394,7 @@ impl Grooph {
                 .then_some(generator.settings.subdivision),
             swing: self.playback_ctl.audio_cfg.swing,
             gap: self.playback_ctl.audio_cfg.gap,
-            ramp: self.playback_ctl.audio_cfg.ramp,
+            ramp: self.played_ramp(),
             // Calibration clicks every beat, whatever the user's click bars.
             click: if calibrating {
                 ClickBars::default()
