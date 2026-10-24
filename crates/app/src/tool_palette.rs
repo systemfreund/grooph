@@ -5,8 +5,8 @@ use crate::{Mode, tools};
 use eframe::egui;
 use eframe::egui::scroll_area::{ScrollBarVisibility, ScrollSource};
 use eframe::egui::{
-    Align, Atom, Button, Direction, FontFamily, FontId, IdSalt, Layout, Rect, Response, RichText,
-    Ui, Vec2,
+    Align, Atom, Button, Color32, Direction, FontFamily, FontId, IdSalt, Layout, Rect, Response,
+    RichText, Ui, Vec2,
 };
 use grooph_layout::pixel_layout::{
     LayoutOpts, MeasureLayout, build_measure_layout, build_time_sig_layout, compute_em,
@@ -18,7 +18,7 @@ use grooph_render::measure::{draw_notes, draw_time_signature};
 use log::info;
 use tools::EditOp;
 
-const TOOL_PALETTE_BUTTON_SIZE: f32 = 70.0;
+pub(crate) const TOOL_PALETTE_BUTTON_SIZE: f32 = 70.0;
 const TOOL_PALETTE_BUTTON_CORNER_RADIUS: f32 = 2.0;
 
 enum ButtonKind {
@@ -297,36 +297,98 @@ impl Grooph {
 
     fn note_button(&self, ui: &mut Ui, id: &str) -> Response {
         let measure = self.editor.button_measures.get(id).unwrap();
-        notation_button(ui, IdSalt::new(id), measure, self.ui.music_font_id.family.clone(), false)
+        let family = self.ui.music_font_id.family.clone();
+        notation_button(ui, IdSalt::new(id), measure, family, false, TOOL_PALETTE_BUTTON_SIZE)
     }
 }
 
-/// A button showing `measure` as miniature notation (tool palette, grouping
-/// picker). `selected` renders it in the highlighted state.
+/// Padding (px) between a [`notation_button`]'s frame and its notes.
+const NOTATION_PADDING: f32 = 4.0;
+/// Height of a quarter note's ink (stem and head) in em, as drawn here.
+const QUARTER_INK_EM: f32 = 0.85;
+/// Margin around the notes inside their tile, as a share of its height.
+const NOTATION_MARGIN: f32 = 0.08;
+
+/// A button `size` high showing `measure` as miniature notation (tool
+/// palette, grouping picker). `selected` renders it in the highlighted state.
 pub(crate) fn notation_button(
     ui: &mut Ui,
     symbol_id: IdSalt,
     measure: &Measure,
     family: FontFamily,
     selected: bool,
+    size: f32,
 ) -> Response {
-    // Size the glyphs by the first note; rest-only measures use rest sizing.
-    let first = measure.beats().first().unwrap();
-    let template = measure.beats().iter().find(|b| b.kind == Note).unwrap_or(first);
-    let w_factor = match template {
-        Beat { kind: Note, duration: Duration::Tuplet(..), .. } => 1.5,
-        _ => 1.0,
-    };
-    let symbol = Atom::custom(
-        symbol_id,
-        Vec2::new(TOOL_PALETTE_BUTTON_SIZE * w_factor, TOOL_PALETTE_BUTTON_SIZE),
-    );
+    // The notes take most of the button's padding, the button keeps its
+    // size.
+    let padding = ui.spacing().button_padding;
+    let room = 2.0 * (padding - Vec2::splat(NOTATION_PADDING)).max(Vec2::ZERO);
+    let symbol = Atom::custom(symbol_id, notation_size(measure, size) + room);
+    ui.spacing_mut().button_padding = padding.min(Vec2::splat(NOTATION_PADDING));
     let button = Button::new(symbol)
         .corner_radius(TOOL_PALETTE_BUTTON_CORNER_RADIUS)
         .selected(selected)
         .atom_ui(ui);
-
+    ui.spacing_mut().button_padding = padding;
     if let Some(rect) = button.rect(symbol_id) {
+        let color = ui.style().visuals.text_color();
+        paint_notation(ui, rect, measure, family, color);
+    }
+    button.response
+}
+
+/// A button like a [`notation_button`] showing "none": a circle struck
+/// through, `size` high.
+pub(crate) fn none_button(ui: &mut Ui, symbol_id: IdSalt, selected: bool, size: f32) -> Response {
+    let padding = ui.spacing().button_padding;
+    let room = 2.0 * (padding - Vec2::splat(NOTATION_PADDING)).max(Vec2::ZERO);
+    let symbol = Atom::custom(symbol_id, Vec2::splat(size) + room);
+    ui.spacing_mut().button_padding = padding.min(Vec2::splat(NOTATION_PADDING));
+    let button = Button::new(symbol)
+        .corner_radius(TOOL_PALETTE_BUTTON_CORNER_RADIUS)
+        .selected(selected)
+        .atom_ui(ui);
+    ui.spacing_mut().button_padding = padding;
+    if let Some(rect) = button.rect(symbol_id) {
+        paint_none(ui.painter(), rect, ui.style().visuals.text_color());
+    }
+    button.response
+}
+
+/// "None" in `rect`: a circle struck through, as on a [`none_button`].
+pub(crate) fn paint_none(painter: &egui::Painter, rect: Rect, color: Color32) {
+    let radius = 0.3 * rect.width().min(rect.height());
+    let stroke = egui::Stroke::new((0.12 * radius).max(1.5), color);
+    let center = rect.center();
+    painter.circle_stroke(center, radius, stroke);
+    // Lower left to upper right.
+    let d = radius * std::f32::consts::FRAC_1_SQRT_2 * Vec2::new(1.0, -1.0);
+    painter.line_segment([center - d, center + d], stroke);
+}
+
+/// Size of a [`notation_button`]'s notes `size` high: tuplets and long rows
+/// of short notes get a wider tile.
+pub(crate) fn notation_size(measure: &Measure, size: f32) -> Vec2 {
+    let wide = measure.beats().len() > 6
+        || measure.beats().iter().any(|b| b.kind == Note && b.duration.as_tuplet_spec().is_some());
+    Vec2::new(if wide { 1.5 * size } else { size }, size)
+}
+
+/// Draw `measure` as miniature notation fitted into `rect`, as on a
+/// [`notation_button`].
+pub(crate) fn paint_notation(
+    ui: &Ui,
+    rect: Rect,
+    measure: &Measure,
+    family: FontFamily,
+    color: Color32,
+) {
+    // Size the glyphs by the first note; rest-only measures use rest sizing.
+    let Some(first) = measure.beats().first() else {
+        return;
+    };
+    let template = measure.beats().iter().find(|b| b.kind == Note).unwrap_or(first);
+    {
         let cap_factor = match template {
             Beat { kind: Rest, .. } => 0.8,
             Beat { kind: Note, duration: Duration::Tuplet(spec), .. }
@@ -368,39 +430,27 @@ pub(crate) fn notation_button(
         // Probe pass: lay the measure out at the size chosen from the
         // template beat, then take the ink of what it draws (note glyphs
         // incl. flags, and tuplet brackets/numbers) instead of
-        // trusting the fixed factors above. A trailing unbeamed flagged
-        // note can overhang the nominal layout width, and a tuplet number
-        // sitting close to the top of the tile can overhang its height;
-        // shrink and recenter to fit whichever axis overflows.
+        // trusting the fixed factors above. Scale it to fill the tile
+        // along whichever axis it reaches first, and center it: a
+        // trailing unbeamed flag or a tuplet number stays inside, a single
+        // note grows to the tile's height.
         let content = notes_ink(&build_measure_layout(measure, &make_opts(em, rect)));
-
-        let pad = em * 0.08;
-        let avail = rect.shrink(pad);
+        let avail = rect.shrink(NOTATION_MARGIN * rect.height());
         let content_size = Vec2::new((content.width()).max(1.0), (content.height()).max(1.0));
-
-        let (final_em, final_rect) = if content_size.x > avail.width()
-            || content_size.y > avail.height()
-            || !avail.contains_rect(content)
-        {
-            let scale =
-                (avail.width() / content_size.x).min(avail.height() / content_size.y).min(1.0);
-            let shrunk_em = em * scale;
-            // Re-measure at the shrunk size (glyph widths don't scale
-            // perfectly linearly) and recenter the content in the tile.
-            let content2 = notes_ink(&build_measure_layout(measure, &make_opts(shrunk_em, rect)));
-            let shift = rect.center() - content2.center();
-            (shrunk_em, rect.translate(shift))
-        } else {
-            (em, rect)
-        };
+        let scale = (avail.width() / content_size.x).min(avail.height() / content_size.y);
+        // No glyph larger than a quarter note filling the tile would be:
+        // rests and flags keep their size next to the notes.
+        let fitted_em = (em * scale).min(avail.height() / QUARTER_INK_EM);
+        // Re-measure at the new size (glyph widths don't scale perfectly
+        // linearly) and center the content in the tile.
+        let fitted = notes_ink(&build_measure_layout(measure, &make_opts(fitted_em, rect)));
+        let (final_em, final_rect) = (fitted_em, rect.translate(rect.center() - fitted.center()));
 
         let opts = make_opts(final_em, final_rect);
         let measure_layout = build_measure_layout(measure, &opts);
         let painter = &ui.painter_at(rect);
-        draw_notes(painter, &measure_layout, ui.style().visuals.text_color(), &opts);
+        draw_notes(painter, &measure_layout, color, &opts);
     }
-
-    button.response
 }
 
 /// Bounding rect (in the same pixel space as `LayoutOpts::rect`) of the ink

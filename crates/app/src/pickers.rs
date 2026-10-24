@@ -5,9 +5,9 @@
 
 use crate::Grooph;
 use crate::generator::ENDLESS_MIN_BARS;
-use crate::metronome_view::{click_fills, ratio_label, same_bar};
+use crate::metronome_view::{FillLook, click_fills, ratio_label, same_bar};
 use crate::presets::{self, PresetId};
-use crate::tool_palette::notation_button;
+use crate::tool_palette::{TOOL_PALETTE_BUTTON_SIZE, none_button, notation_button};
 use eframe::egui;
 use eframe::egui::{Button, Color32, FontId, Id, Modal, Response, RichText, Ui, vec2};
 use grooph_audio::CounterSound;
@@ -23,6 +23,9 @@ use grooph_measure::tempo::{MAX_BPM, MIN_BPM};
 
 /// Height of a touch-friendly row or button.
 pub(crate) const ROW_HEIGHT: f32 = 44.0;
+/// Height of a subdivision tile in the metronome: small enough that all of
+/// them fit a phone screen with the picker.
+const FILL_TILE_SIZE: f32 = 48.0;
 /// Swing amounts offered in the swing picker (percent of a pair).
 const SWING_PRESETS: [u8; 6] = [MIN_SWING_PERCENT, 55, 60, 66, 70, MAX_SWING_PERCENT];
 
@@ -190,7 +193,7 @@ impl Grooph {
                 Picker::Swing => "Swing",
                 Picker::Preset => "Preset",
                 Picker::MetronomeMeter => "Time signature",
-                Picker::ClickFill => "Clicks",
+                Picker::ClickFill => "Subdivision",
                 Picker::Polyrhythm => "Polyrhythm",
             };
             ui.heading(title);
@@ -460,15 +463,47 @@ impl Grooph {
 
     /// Ready-made click bars of the metronome meter. Returns whether one was
     /// picked.
+    /// Each shown as its notes, like the tool palette (see
+    /// [`crate::metronome_view::ClickFill::tile`]).
     fn click_fill_choices(&mut self, ui: &mut Ui) -> bool {
         let fills = click_fills(self.metronome_meter());
         let bar = &self.editor.score.measures[0];
-        let current = fills.iter().position(|(m, _)| same_bar(m, bar));
-        let options: Vec<_> =
-            fills.iter().enumerate().map(|(i, (_, name))| (Some(i), name.clone())).collect();
-        let picked = choice_grid(ui, &options, current, 2).flatten();
+        let current = fills.iter().position(|f| same_bar(&f.bar, bar));
+        let family = self.ui.music_font_id.family.clone();
+        let mut picked = None;
+        // Nine tiles wrap to many rows on a narrow phone: they scroll where
+        // they would push "Done" off the screen.
+        let room = (ui.ctx().content_rect().height() - 300.0).max(200.0);
+        egui::ScrollArea::vertical().max_height(room).show(ui, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                for (i, fill) in fills.iter().enumerate() {
+                    let selected = current == Some(i);
+                    let id = egui::IdSalt::new(("click_fill", i));
+                    let tile = match &fill.look() {
+                        Some(FillLook::Notes(tile)) => {
+                            notation_button(ui, id, tile, family.clone(), selected, FILL_TILE_SIZE)
+                        }
+                        Some(FillLook::NoSubdivision) => {
+                            none_button(ui, id, selected, FILL_TILE_SIZE)
+                        }
+                        None => ui.add(
+                            Button::new(RichText::new(&fill.name).size(18.0))
+                                .selected(selected)
+                                .min_size(vec2(0.0, ROW_HEIGHT)),
+                        ),
+                    };
+                    if tile.on_hover_text(&fill.name).clicked() {
+                        picked = Some(i);
+                    }
+                }
+            });
+        });
+        // The name of the one picked, as the tiles show only notes.
+        ui.add_space(4.0);
+        let name = current.map_or("Custom", |i| fills[i].name.as_str());
+        ui.label(RichText::new(name).size(18.0).weak());
         if let Some(i) = picked {
-            self.replace_click_bar(fills[i].0.clone());
+            self.replace_click_bar(fills[i].bar.clone());
         }
         picked.is_some()
     }
@@ -609,6 +644,7 @@ impl Grooph {
                         &measure,
                         family.clone(),
                         active.contains(figure.id),
+                        TOOL_PALETTE_BUTTON_SIZE,
                     )
                     .on_hover_text(format!("Unlocked at level {}", figure.level));
                     if tile.clicked() {
