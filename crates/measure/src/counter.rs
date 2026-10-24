@@ -32,7 +32,7 @@ const MAX_OWN_CLICKS: u8 = 16;
 const MAX_SLOTS_PER_CLICK: u32 = 7;
 
 /// `n` even clicks in the time of `span` beat units.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Ratio {
     pub n: u8,
     pub span: u8,
@@ -177,15 +177,18 @@ pub fn counter_ratios(ts: TimeSignature) -> Vec<Ratio> {
 }
 
 /// Every ratio of one's own in `ts`: any span of beat units that divides
-/// the bar with 2 to 16 clicks, no common factor, and a counter bar. The
-/// offered ones ([`counter_ratios`]) are among them. Ordered by span, then
-/// clicks.
+/// the bar with 2 to 16 clicks and a counter bar, common factor or not (4:2
+/// plays as 2:1, but is there to pick) as long as it has two clicks or
+/// more without it (not 4:4 or 2:4). The offered ones
+/// ([`counter_ratios`]) are among them. Ordered by span, then clicks.
 pub fn own_ratios(ts: TimeSignature) -> Vec<Ratio> {
     let mut ratios = Vec::new();
     for span in (1..=ts.beats).filter(|&s| ts.beats.is_multiple_of(s)) {
         for n in 2..=MAX_OWN_CLICKS {
             let ratio = Ratio { n, span };
-            if gcd(n as u32, span as u32) == 1 && counter_bar(ts, ratio).is_some() {
+            // 2:4 would be 1:2, a single click.
+            let reduced_n = n as u32 / gcd(n as u32, span as u32);
+            if reduced_n > 1 && counter_bar(ts, ratio).is_some() {
                 ratios.push(ratio);
             }
         }
@@ -220,9 +223,15 @@ pub fn step_span(own: &[Ratio], ratio: Ratio, up: bool) -> Option<Ratio> {
 /// the same note values, with notes only where that ratio clicks (a click
 /// tapped off is a rest). Ratios with the same note values (9:4 and 9:2 in
 /// 4/4 are both nonuplet sixteenths) tell apart by where their rests are; the
-/// one with the fewest clicks wins, if any. Any ratio of one's own counts
-/// (see [`own_ratios`]).
+/// one with the fewest clicks wins, if any. Any ratio of one's own without
+/// a common factor counts (see [`own_ratios`]).
 pub fn ratio_of(bar: &Measure) -> Option<Ratio> {
+    named_ratio_of(bar, None)
+}
+
+/// [`ratio_of`], but `named` if `bar` is that ratio's too: 4:2 picked in
+/// 2/4 stays 4:2, though its bar is 2:1's.
+pub fn named_ratio_of(bar: &Measure, named: Option<Ratio>) -> Option<Ratio> {
     let ts = bar.time_signature();
     // Only ratios that click wherever a note of `bar` starts can fit: that
     // spares building every ratio's counter bar.
@@ -250,12 +259,19 @@ pub fn ratio_of(bar: &Measure) -> Option<Ratio> {
                 ticks(c) == ticks(b) && (c.kind == BeatKind::Note || b.kind == BeatKind::Rest)
             })
     };
-    (1..=ts.beats)
-        .filter(|&span| ts.beats.is_multiple_of(span))
-        .flat_map(|span| (2..=MAX_OWN_CLICKS).map(move |n| Ratio { n, span }))
-        .filter(|r| gcd(u32::from(r.n), u32::from(r.span)) == 1 && clicks_on_notes(r))
-        .filter(|&r| counter_bar(ts, r).is_some_and(|m| fits(&m)))
-        .min_by_key(|r| u32::from(r.n) * u32::from(ts.beats / r.span))
+    let is_bars = |r: &Ratio| {
+        ts.beats.is_multiple_of(r.span)
+            && clicks_on_notes(r)
+            && counter_bar(ts, *r).is_some_and(|m| fits(&m))
+    };
+    named.filter(|r| r.span > 0 && is_bars(r)).or_else(|| {
+        (1..=ts.beats)
+            .filter(|&span| ts.beats.is_multiple_of(span))
+            .flat_map(|span| (2..=MAX_OWN_CLICKS).map(move |n| Ratio { n, span }))
+            .filter(|r| gcd(u32::from(r.n), u32::from(r.span)) == 1)
+            .filter(is_bars)
+            .min_by_key(|r| u32::from(r.n) * u32::from(ts.beats / r.span))
+    })
 }
 
 /// Index of each click of `bar` (its first beat) and the beats it spans:
@@ -295,16 +311,19 @@ pub fn respelled(bar: Measure) -> Measure {
     current
 }
 
-/// The counter bar of each meter that has one.
+/// The counter bar of each meter that has one, and the ratio it was picked
+/// as where that has a common factor (4:2 plays 2:1's bar). Saved as the
+/// bars alone; the names are kept apart (see [`CounterBars::names`]).
 #[derive(Clone, Default, Serialize, Deserialize)]
 #[serde(from = "Vec<Measure>", into = "Vec<Measure>")]
 pub struct CounterBars {
     bars: Vec<Measure>,
+    names: Vec<(TimeSignature, Ratio)>,
 }
 
 impl From<Vec<Measure>> for CounterBars {
     fn from(bars: Vec<Measure>) -> Self {
-        Self { bars: bars.into_iter().map(respelled).collect() }
+        Self { bars: bars.into_iter().map(respelled).collect(), names: Vec::new() }
     }
 }
 
@@ -324,6 +343,7 @@ impl PartialEq for CounterBars {
     fn eq(&self, other: &Self) -> bool {
         self.bars.len() == other.bars.len()
             && self.bars.iter().zip(&other.bars).all(|(a, b)| same_bar(a, b))
+            && self.names == other.names
     }
 }
 
@@ -335,10 +355,57 @@ impl CounterBars {
         self.bars.iter().find(|m| m.time_signature() == ts)
     }
 
-    /// Give `ts` the counter bar `bar` (of that meter), or none.
+    /// Give `ts` the counter bar `bar` (of that meter), or none. The ratio
+    /// it was picked as stays while `bar` is that ratio's.
     pub fn set(&mut self, ts: TimeSignature, bar: Option<Measure>) {
         self.bars.retain(|m| m.time_signature() != ts);
         self.bars.extend(bar.filter(|m| m.time_signature() == ts).map(respelled));
+        let named = self.name(ts);
+        let kept = self.for_meter(ts).and_then(|bar| named_ratio_of(bar, named));
+        self.names.retain(|&(t, _)| t != ts);
+        self.names.extend(kept.filter(|&r| Some(r) == named).map(|r| (ts, r)));
+    }
+
+    /// Give `ts` the counter bar `bar` from elsewhere (a link), named as
+    /// its simplest ratio, whatever `ts`'s bar was picked as.
+    pub fn replace(&mut self, ts: TimeSignature, bar: Option<Measure>) {
+        self.names.retain(|&(t, _)| t != ts);
+        self.set(ts, bar);
+    }
+
+    /// Give `ts` the counter bar of `ratio`, picked as that ratio, or none.
+    pub fn set_ratio(&mut self, ts: TimeSignature, ratio: Option<Ratio>) {
+        self.bars.retain(|m| m.time_signature() != ts);
+        self.bars.extend(ratio.and_then(|r| counter_bar(ts, r)));
+        self.names.retain(|&(t, _)| t != ts);
+        self.names.extend(ratio.filter(|_| self.for_meter(ts).is_some()).map(|r| (ts, r)));
+    }
+
+    /// The ratio `ts`'s counter bar was picked as, if any.
+    pub fn name(&self, ts: TimeSignature) -> Option<Ratio> {
+        self.names.iter().find(|&&(t, _)| t == ts).map(|&(_, r)| r)
+    }
+
+    /// The ratio `ts`'s counter bar plays: the one it was picked as, else
+    /// the simplest (see [`named_ratio_of`]).
+    pub fn ratio(&self, ts: TimeSignature) -> Option<Ratio> {
+        named_ratio_of(self.for_meter(ts)?, self.name(ts))
+    }
+
+    /// The ratio each bar was picked as, to save next to the bars.
+    pub fn names(&self) -> &[(TimeSignature, Ratio)] {
+        &self.names
+    }
+
+    /// These bars, picked as `names` where they are those ratios' bars.
+    pub fn with_names(mut self, names: &[(TimeSignature, Ratio)]) -> Self {
+        for &(ts, r) in names {
+            if self.for_meter(ts).is_some_and(|bar| named_ratio_of(bar, Some(r)) == Some(r)) {
+                self.names.retain(|&(t, _)| t != ts);
+                self.names.push((ts, r));
+            }
+        }
+        self
     }
 }
 
@@ -535,7 +602,10 @@ mod tests {
                 let Ok(ts) = format!("{beats}/{unit}").parse::<TimeSignature>() else { continue };
                 for ratio in own_ratios(ts) {
                     let bar = counter_bar(ts, ratio).unwrap();
-                    assert_eq!(ratio_of(&bar), Some(ratio), "{ratio} in {ts}");
+                    let g = gcd(u32::from(ratio.n), u32::from(ratio.span)) as u8;
+                    let reduced = Ratio { n: ratio.n / g, span: ratio.span / g };
+                    assert_eq!(ratio_of(&bar), Some(reduced), "{ratio} in {ts}");
+                    assert_eq!(named_ratio_of(&bar, Some(ratio)), Some(ratio), "{ratio} in {ts}");
                 }
             }
         }
@@ -553,7 +623,9 @@ mod tests {
             own,
             [
                 "2:1", "3:1", "4:1", "5:1", "6:1", "7:1", "8:1", "9:1", "10:1", "12:1", "14:1",
-                "15:1", "3:2", "5:2", "7:2", "9:2", "15:2", "3:4", "5:4", "7:4", "9:4", "15:4"
+                "15:1", "3:2", "4:2", "5:2", "6:2", "7:2", "8:2", "9:2", "10:2", "12:2", "14:2",
+                "15:2", "16:2", "3:4", "5:4", "6:4", "7:4", "8:4", "9:4", "10:4", "12:4", "14:4",
+                "15:4", "16:4"
             ]
         );
     }
@@ -562,13 +634,14 @@ mod tests {
     fn steps_skip_ratios_without_a_bar() {
         let own = own_ratios(TimeSignature::FOUR_FOUR);
         let r = |n, span| Ratio { n, span };
-        // 4:4 has a common factor, so from 3:4 up is 5:4.
+        // 4:4 clicks on the beats, so from 3:4 up is 5:4.
         assert_eq!(step_clicks(&own, r(3, 4), true), Some(r(5, 4)));
         assert_eq!(step_clicks(&own, r(3, 4), false), None);
         assert_eq!(step_span(&own, r(3, 4), false), Some(r(3, 2)));
-        // In two beats 4 has a common factor: 3 and 5 are as near, the
-        // fewer clicks win.
-        assert_eq!(step_span(&own, r(4, 1), true), Some(r(3, 2)));
+        // The clicks stay as they are, common factor or not. 11 has no bar
+        // in two beats: 10 and 12 are as near, the fewer clicks win.
+        assert_eq!(step_span(&own, r(4, 1), true), Some(r(4, 2)));
+        assert_eq!(step_span(&own, r(11, 1), true), Some(r(10, 2)));
         assert_eq!(step_span(&own, r(3, 4), true), None);
         // Every step lands on a ratio of one's own.
         for &ratio in &own {
@@ -616,5 +689,40 @@ mod tests {
         assert!(bars.for_meter(TimeSignature::THREE_FOUR).is_none());
         bars.set(four, None);
         assert_eq!(bars, CounterBars::default());
+    }
+
+    #[test]
+    fn a_ratio_with_a_common_factor_keeps_its_name() {
+        let ts: TimeSignature = "2/4".parse().unwrap();
+        let r = |n, span| Ratio { n, span };
+        assert!(own_ratios(ts).contains(&r(4, 2)));
+        // Its bar is 2:1's; it is named 4:2 while picked as that.
+        let bar = counter_bar(ts, r(4, 2)).unwrap();
+        assert_eq!(ratio_of(&bar), Some(r(2, 1)));
+        assert_eq!(named_ratio_of(&bar, Some(r(4, 2))), Some(r(4, 2)));
+        assert_eq!(named_ratio_of(&bar, Some(r(3, 2))), Some(r(2, 1)));
+        let mut bars = CounterBars::default();
+        bars.set_ratio(ts, Some(r(4, 2)));
+        assert_eq!(bars.ratio(ts), Some(r(4, 2)));
+        // Clicks edited, still 4:2; another bar drops the name.
+        let mut edited = bar.clone();
+        edited.set_click_level(1, ClickLevel::Strong);
+        bars.set(ts, Some(edited));
+        assert_eq!(bars.ratio(ts), Some(r(4, 2)));
+        bars.set(ts, counter_bar(ts, r(3, 2)));
+        assert_eq!(bars.name(ts), None);
+        // Saved as the bars and the names apart.
+        bars.set_ratio(ts, Some(r(4, 2)));
+        let saved: Vec<Measure> = bars.clone().into();
+        let loaded = CounterBars::from(saved).with_names(bars.names());
+        assert_eq!(loaded, bars);
+        assert_eq!(CounterBars::from(Vec::new()).with_names(bars.names()), CounterBars::default());
+        // The same bar from a link is 2:1.
+        let mut linked = bars.clone();
+        linked.replace(ts, Some(bar.clone()));
+        assert_eq!(linked.ratio(ts), Some(r(2, 1)));
+        // Picked again as 2:1, it is 2:1.
+        bars.set_ratio(ts, Some(r(2, 1)));
+        assert_eq!(bars.ratio(ts), Some(r(2, 1)));
     }
 }
