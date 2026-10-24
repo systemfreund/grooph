@@ -220,6 +220,9 @@ pub struct Audio {
     options: PlaybackOptions,
     /// Last bar read from the audio thread, kept while its lock is busy.
     last_bar: Option<BarState>,
+    /// Ticks dropped from the front of the score since the last update, see
+    /// [`Audio::drop_leading_ticks`].
+    pending_shift: f64,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -239,6 +242,9 @@ struct PlaybackState {
     is_silent: bool,
     // Bar being played; `None` before the score starts (stopped, count-in).
     bar: Option<BarState>,
+    // Ticks to move the cursor back when the new params are picked up: the
+    // score lost that much from its front (endless mode).
+    shift: f64,
 }
 
 impl Debug for PlaybackState {
@@ -283,6 +289,7 @@ impl Audio {
             playing_state: PlayerState::Stopped,
             is_silent: true,
             bar: None,
+            shift: 0.0,
         }));
 
         Some(Self {
@@ -291,6 +298,7 @@ impl Audio {
             shared_state,
             options: PlaybackOptions::default(),
             last_bar: None,
+            pending_shift: 0.0,
         })
     }
 
@@ -302,9 +310,15 @@ impl Audio {
                 .with_counter(score, &timing, &self.options.counter);
         let count_in = if self.options.count_in { count_in_plan(score) } else { None };
 
+        // A shift must reach the audio thread with the shorter score it was
+        // made for, so this update waits for the lock rather than skip it.
+        let state = Arc::clone(&self.shared_state);
+        let shared =
+            if self.pending_shift > 0.0 { state.lock().ok() } else { state.try_lock().ok() };
         // Check differences
-        if let Ok(mut shared_state) = self.shared_state.try_lock()
-            && (shared_state.params.bpm != bpm
+        if let Some(mut shared_state) = shared
+            && (self.pending_shift > 0.0
+                || shared_state.params.bpm != bpm
                 || shared_state.params.timing != timing
                 || shared_state.params.schedule != schedule
                 || shared_state.params.count_in != count_in
@@ -319,6 +333,11 @@ impl Audio {
             shared_state.params.gap = self.options.gap;
             shared_state.params.ramp = self.options.ramp;
             shared_state.playing_state = player_state.clone();
+            shared_state.shift += self.pending_shift;
+            // The published cursor moves with the score right away, so the
+            // app never reads the old position against the new score.
+            shared_state.playback_tick = (shared_state.playback_tick - self.pending_shift).max(0.0);
+            self.pending_shift = 0.0;
             shared_state.is_dirty = true;
 
             debug!("Shared state changed: {:?}", shared_state);
@@ -386,6 +405,13 @@ impl Audio {
 
     pub fn set_playback_options(&mut self, options: PlaybackOptions) {
         self.options = options;
+    }
+
+    /// The score lost `ticks` from its front (endless mode dropped a played
+    /// measure): the next [`Audio::update`] moves the cursor back by as much,
+    /// together with the shorter score, so playback goes on without a skip.
+    pub fn drop_leading_ticks(&mut self, ticks: u64) {
+        self.pending_shift += ticks as f64;
     }
 
     /// Whether an output stream is running, i.e. `playback_position` advances.
@@ -481,7 +507,11 @@ impl MetronomeSource {
             return;
         }
         let bar = self.current_bar();
-        if let Ok(mut shared_state) = self.shared_state.try_lock() {
+        if let Ok(mut shared_state) = self.shared_state.try_lock()
+            // Not yet in step with new params: a pending shift already moved
+            // the published cursor.
+            && !shared_state.is_dirty
+        {
             shared_state.playback_tick = self.tick_source.cursor();
             shared_state.is_silent = self.voices.is_silent();
             shared_state.bar = bar;
@@ -512,6 +542,10 @@ impl MetronomeSource {
             self.player_state = shared_state.playing_state.clone();
             self.local_params = shared_state.params.clone();
             shared_state.is_dirty = false;
+            let shift = std::mem::take(&mut shared_state.shift);
+            if !starting && shift > 0.0 {
+                self.tick_source.shift_back(shift);
+            }
 
             if starting {
                 info!("Starting playback.");

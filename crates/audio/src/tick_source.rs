@@ -57,6 +57,12 @@ impl TickSource {
         self.count_in.is_some()
     }
 
+    /// Move the cursor back by `ticks` after as many were dropped from the
+    /// front of the score. The bar count keeps going.
+    pub(crate) fn shift_back(&mut self, ticks: f64) {
+        self.cursor = (self.cursor - ticks).max(0.0);
+    }
+
     /// Start playback from the top of the score, optionally after a count-in.
     pub(crate) fn restart(&mut self, count_in: Option<&CountInPlan>) {
         self.cursor = 0.0;
@@ -274,6 +280,25 @@ mod tests {
         assert_eq!(src.bars(), 2);
         src.restart(None);
         assert_eq!(src.bars(), 0);
+    }
+
+    #[test]
+    fn shift_back_keeps_the_position_in_a_shortened_score() {
+        let mut score = score_4_4_quarters();
+        score.measures.push(score.measures[0].clone());
+        let timing = ScoreTiming::from_score(&score, 120);
+        let schedule = Schedule::build(&score, &timing, None, &ClickBars::default());
+        let bar = timing.ticks_per_measure(0) as f64;
+        let mut src = TickSource::new(48000);
+        let mut out = Vec::new();
+        // 3 s in: halfway through the second bar.
+        for _ in 0..(48_000 * 3) {
+            src.advance_one_sample(&timing, &schedule, 1.0, &mut out);
+        }
+        let before = src.cursor();
+        src.shift_back(bar);
+        assert!((src.cursor() - (before - bar)).abs() < 1e-9);
+        assert_eq!(src.bars(), 1);
     }
 
     #[test]

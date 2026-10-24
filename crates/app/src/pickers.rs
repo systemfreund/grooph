@@ -4,7 +4,6 @@
 //! dialog.
 
 use crate::Grooph;
-use crate::generator::ENDLESS_MIN_BARS;
 use crate::metronome_view::{FillLook, click_fills, ratio_label, same_bar};
 use crate::presets::{self, PresetId};
 use crate::tool_palette::{TOOL_PALETTE_BUTTON_SIZE, none_button, notation_button};
@@ -396,13 +395,20 @@ impl Grooph {
         picked.is_some()
     }
 
+    /// A bar count, or endless: a running score that never loops.
     fn bars_choices(&mut self, ui: &mut Ui) -> bool {
         let generator = &mut self.editor.generator;
-        let min_bars = if generator.endless { ENDLESS_MIN_BARS } else { 1 };
-        let options: Vec<_> = (min_bars..=MAX_BARS).map(|b| (b, b.to_string())).collect();
-        let picked = choice_grid(ui, &options, generator.effective_bars(), 4);
-        if let Some(bars) = picked {
-            generator.settings.bars = bars;
+        let mut options: Vec<_> = (1..=MAX_BARS).map(|b| (Some(b), b.to_string())).collect();
+        options.push((None, "Endless".to_owned()));
+        let current = (!generator.endless).then_some(generator.settings.bars.max(1));
+        let picked = choice_grid(ui, &options, current, 4);
+        match picked {
+            Some(Some(bars)) => {
+                generator.settings.bars = bars;
+                generator.endless = false;
+            }
+            Some(None) => generator.endless = true,
+            None => {}
         }
         picked.is_some()
     }

@@ -394,7 +394,7 @@ impl Grooph {
                 .then_some(generator.settings.subdivision),
             swing: self.playback_ctl.audio_cfg.swing,
             gap: self.playback_ctl.audio_cfg.gap,
-            ramp: self.playback_ctl.audio_cfg.ramp,
+            ramp: self.played_ramp(),
             // Calibration clicks every beat, whatever the user's click bars.
             click: if calibrating {
                 ClickBars::default()
@@ -878,6 +878,10 @@ impl Grooph {
     fn start_playback(&mut self) {
         if self.playback_ctl.transport_state == TransportState::Playing {
             return;
+        }
+        // Each run of endless mode is a new one, from two fresh bars.
+        if self.editor.generator.endless && !self.metronome_mode() {
+            self.generate_new_score();
         }
         self.playback_ctl.transport_state = TransportState::Playing;
         let midi_connected =

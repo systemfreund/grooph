@@ -3,6 +3,7 @@
 //! buttons and a tab bar at the bottom. On wide windows the controls stay a
 //! centered column and the staff gets the full width.
 
+use crate::generator::GeneratorState;
 use crate::metronome_view::FillLook;
 use crate::pickers::{Picker, ROW_HEIGHT, shown_groups, swing_label};
 use crate::share::paint_share_icon;
@@ -63,6 +64,11 @@ impl Default for CompactState {
     fn default() -> Self {
         Self { options_collapsed: true }
     }
+}
+
+/// Bars of the generated score; endless mode never loops.
+fn bars_label(generator: &GeneratorState) -> String {
+    if generator.endless { "∞".to_owned() } else { generator.effective_bars().to_string() }
 }
 
 fn subdivision_short_label(s: Subdivision) -> &'static str {
@@ -482,11 +488,7 @@ impl Grooph {
                 CardValue::Text(subdivision_short_label(subdivision).to_owned()),
             ),
             (Picker::Complexity, "Level", CardValue::Text(level)),
-            (
-                Picker::Bars,
-                "Bars",
-                CardValue::Text(self.editor.generator.effective_bars().to_string()),
-            ),
+            (Picker::Bars, "Bars", CardValue::Text(bars_label(&self.editor.generator))),
             // While a tempo ramp runs: the tempo being played.
             match self.playback_ctl.playback.ramp_bpm {
                 Some(bpm) => (Picker::Bpm, "BPM now", CardValue::Text(bpm.to_string())),
@@ -672,7 +674,6 @@ impl Grooph {
             self.ui.picker = Some(Picker::Preset);
         }
         let generator = &mut self.editor.generator;
-        switch_row(ui, "Endless", &mut generator.endless);
         switch_row(ui, "Ghost notes", &mut generator.ghost_notes);
         switch_row(ui, "Count-in", &mut self.playback_ctl.audio_cfg.count_in);
         let swing = self.playback_ctl.audio_cfg.swing;
@@ -703,24 +704,26 @@ impl Grooph {
 
         let side_fill = ui.visuals().extreme_bg_color;
         let text = ui.visuals().strong_text_color();
-        let roll = round_button_at(
-            ui,
-            new_rect,
-            Id::unique("compact_new"),
-            side_fill,
-            text,
-            |painter, rect, color| {
-                painter.text(
-                    rect.center(),
-                    Align2::CENTER_CENTER,
-                    "🎲",
-                    FontId::proportional(32.0),
-                    color,
-                );
-            },
-        )
-        .on_hover_text("New rhythm")
-        .clicked();
+        // Endless mode rolls new bars by itself, and each play starts afresh.
+        let roll = !self.editor.generator.endless
+            && round_button_at(
+                ui,
+                new_rect,
+                Id::unique("compact_new"),
+                side_fill,
+                text,
+                |painter, rect, color| {
+                    painter.text(
+                        rect.center(),
+                        Align2::CENTER_CENTER,
+                        "🎲",
+                        FontId::proportional(32.0),
+                        color,
+                    );
+                },
+            )
+            .on_hover_text("New rhythm")
+            .clicked();
 
         let fill = ui.visuals().selection.bg_fill;
         let icon = ui.visuals().selection.stroke.color;

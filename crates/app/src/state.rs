@@ -120,6 +120,15 @@ pub(crate) struct PlaybackState {
     pub(crate) bar_muted: bool,
     /// Vertical scroll that follows the playback cursor from row to row.
     pub(crate) scroll: ScrollTween,
+    /// Distance from one row of the staff to the next, as last drawn.
+    pub(crate) row_pitch: f32,
+    /// Rows scrolled out of view above, as last drawn (endless mode drops
+    /// them).
+    pub(crate) rows_above_view: usize,
+    /// The rows above were removed since the last frame: the scroll area
+    /// takes the shifted offset right away, or it would show the content
+    /// moved up a row for a frame.
+    pub(crate) rows_removed: bool,
 }
 
 impl PlaybackState {
@@ -182,6 +191,20 @@ impl ScrollTween {
             *state = TweenState { from, to: target, start: now, duration };
         }
         state.value_at(now)
+    }
+
+    /// The offset at `now`, without a new target.
+    pub(crate) fn value_at(&self, now: f64) -> Option<f32> {
+        self.state.map(|state| state.value_at(now))
+    }
+
+    /// Move the whole tween by `delta`, e.g. when rows above it were removed
+    /// and the content moved up by as much: the view stays where it was.
+    pub(crate) fn shift(&mut self, delta: f32) {
+        if let Some(state) = &mut self.state {
+            state.from += delta;
+            state.to += delta;
+        }
     }
 }
 
@@ -307,6 +330,18 @@ pub(crate) enum PendingLoad {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn scroll_tween_shift_moves_the_glide_along() {
+        let mut tween = ScrollTween::default();
+        tween.update(0.0, 0.0);
+        tween.update(100.0, 0.0);
+        let mid = tween.update(100.0, SCROLL_TWEEN_MIN_S / 2.0);
+        tween.shift(-40.0);
+        // Same target, shifted: the glide goes on, shifted along.
+        assert_eq!(tween.update(60.0, SCROLL_TWEEN_MIN_S / 2.0), mid - 40.0);
+        assert_eq!(tween.update(60.0, SCROLL_TWEEN_MIN_S), 60.0);
+    }
 
     #[test]
     fn scroll_tween_takes_the_first_offset_as_is() {

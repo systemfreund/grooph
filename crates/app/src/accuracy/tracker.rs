@@ -1,12 +1,11 @@
 use std::collections::HashMap;
-use std::ops::Range;
 
 use grooph_measure::Score;
 use grooph_measure::tempo::ScoreTiming;
 
 use super::progress::update_progress;
 use super::recorder::record_hit;
-use super::session::{AccuracyMark, RecordingSession, RunSummary};
+use super::session::{AccuracyMark, RecordingSession, RunSummary, shift_marks};
 
 /// Coordinates the accuracy-recording session. Holds a `RecordingSession`
 /// that is either `Idle` (no playback) or `Recording` (playback active with
@@ -101,12 +100,11 @@ impl AccuracyTracker {
         self.last_marks.clear();
     }
 
-    /// Forget the marks of the notes whose global onset lies in `ticks`, e.g.
-    /// a measure endless mode just replaced. The run's stats keep counting
-    /// what was played there.
-    pub(crate) fn forget_onsets(&mut self, ticks: Range<u64>) {
-        self.session.forget_onsets(&ticks);
-        self.last_marks.retain(|tick, _| !ticks.contains(tick));
+    /// The score lost `ticks` from its front (endless mode dropped a played
+    /// measure): the marks of the notes still there move back with them.
+    pub(crate) fn drop_leading_ticks(&mut self, ticks: u64) {
+        self.session.drop_leading_ticks(ticks);
+        self.last_marks = shift_marks(std::mem::take(&mut self.last_marks), ticks);
     }
 
     /// Whether there are marks to draw: a running session, or the marks a
@@ -350,7 +348,7 @@ mod tests {
     }
 
     #[test]
-    fn forget_onsets_drops_only_marks_of_that_range() {
+    fn dropping_leading_ticks_moves_the_marks_back() {
         let score = score_of_quarters(&[TimeSignature::FOUR_FOUR, TimeSignature::FOUR_FOUR]);
         let timing = ScoreTiming::from_score(&score, 120);
         let m1_start = timing.measure_start_tick(1);
@@ -359,11 +357,15 @@ mod tests {
         tracker.record_hit(0.0, &timing, &score);
         tracker.record_hit(timing.global_tick_to_seconds(m1_start as f64), &timing, &score);
 
-        // Measure 0 gets replaced: its marks go, measure 1 keeps its own.
-        tracker.forget_onsets(0..m1_start);
-        assert!(tracker.mark_for_onset(0).is_none());
-        assert!(tracker.mark_for_onset(m1_start).is_some());
+        // Measure 0 is dropped: its mark goes, measure 1's is now at 0.
+        tracker.drop_leading_ticks(m1_start);
+        assert!(tracker.mark_for_onset(0).is_some());
+        assert!(tracker.mark_for_onset(m1_start).is_none());
         assert_eq!(tracker.live_summary().map(|s| s.hits), Some(2));
+        // The same for the marks a finished run leaves on the staff.
+        tracker.on_playback_stop();
+        tracker.drop_leading_ticks(1);
+        assert!(tracker.mark_for_onset(0).is_none());
     }
 
     #[test]
