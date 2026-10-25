@@ -774,6 +774,7 @@ mod tests {
         });
     }
 
+    #[expect(unsafe_code, reason = "a counting allocator wraps `System`")]
     // SAFETY: every method forwards to `System` with the caller's arguments
     // unchanged; counting only touches const thread-locals through `try_with`,
     // so it neither allocates nor reenters the allocator.

@@ -7,7 +7,12 @@ use std::ops::RangeInclusive;
 use std::str::FromStr;
 
 /// Represents a time signature (e.g., 4/4, 3/4, 6/8)
+///
+/// Invariant: at least one beat, and a beat unit with a note value (see
+/// [`Self::beat_note_value`]). Deserializing checks it (see
+/// [`InvalidTimeSignature`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "RawTimeSignature")]
 pub struct TimeSignature {
     /// Number of beats per measure
     pub beats: u8,
@@ -21,6 +26,46 @@ pub struct TimeSignature {
 
 fn is_zero(v: &u8) -> bool {
     *v == 0
+}
+
+/// A [`TimeSignature`] as saved, before its invariant is checked.
+#[derive(Deserialize)]
+struct RawTimeSignature {
+    beats: u8,
+    beat_unit: u8,
+    #[serde(default)]
+    grouping: u8,
+}
+
+/// A saved time signature without beats or with a beat unit that is no note
+/// value, e.g. `0/4` or `4/0`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InvalidTimeSignature {
+    pub beats: u8,
+    pub beat_unit: u8,
+}
+
+impl Display for InvalidTimeSignature {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}/{} is not a time signature", self.beats, self.beat_unit)
+    }
+}
+
+impl std::error::Error for InvalidTimeSignature {}
+
+/// A grouping out of range is kept: [`TimeSignature::groups`] falls back to
+/// the usual one.
+impl TryFrom<RawTimeSignature> for TimeSignature {
+    type Error = InvalidTimeSignature;
+
+    fn try_from(raw: RawTimeSignature) -> Result<Self, Self::Error> {
+        let RawTimeSignature { beats, beat_unit, grouping } = raw;
+        let ts = Self { beats, beat_unit, grouping };
+        if beats == 0 || ts.beat_note_value().is_none() {
+            return Err(InvalidTimeSignature { beats, beat_unit });
+        }
+        Ok(ts)
+    }
 }
 
 impl TimeSignature {
@@ -241,5 +286,28 @@ mod tests {
             "4/5".parse::<TimeSignature>(),
             Err(ParseTimeSignatureError::UnsupportedUnit(5))
         );
+    }
+
+    #[test]
+    fn deserializing_checks_beats_and_beat_unit() {
+        let read = |text: &str| ron::from_str::<TimeSignature>(text);
+        assert_eq!(
+            read("(beats: 7, beat_unit: 8, grouping: 1)"),
+            Ok(TimeSignature::SEVEN_EIGHT.with_grouping(1))
+        );
+        // Meters the app builds internally, beyond what it offers to pick.
+        assert_eq!(read("(beats: 3, beat_unit: 32)"), Ok(TimeSignature::new(3, 32)));
+        for text in [
+            "(beats: 0, beat_unit: 4)",
+            "(beats: 4, beat_unit: 0)",
+            "(beats: 4, beat_unit: 6)",
+            "(beats: 4, beat_unit: 64)",
+        ] {
+            let err = read(text).unwrap_err().to_string();
+            assert!(err.contains("is not a time signature"), "{text}: {err}");
+        }
+        for ts in [TimeSignature::FOUR_FOUR, TimeSignature::SEVEN_EIGHT.with_grouping(2)] {
+            assert_eq!(read(&ron::to_string(&ts).unwrap()), Ok(ts));
+        }
     }
 }

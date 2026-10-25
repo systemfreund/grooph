@@ -5,10 +5,41 @@ pub type MeasureIdx = usize;
 
 /// A collection of one or more measures.
 ///
-/// Invariant: `measures` is never empty. Constructors and mutators must uphold this.
+/// Invariant: `measures` is never empty. Constructors and mutators must uphold this;
+/// deserializing checks it (see [`EmptyScore`]).
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(try_from = "RawScore")]
 pub struct Score {
     pub measures: Vec<Measure>,
+}
+
+/// A [`Score`] as saved, before its invariant is checked.
+#[derive(Deserialize)]
+struct RawScore {
+    measures: Vec<Measure>,
+}
+
+/// A saved score without measures.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EmptyScore;
+
+impl std::fmt::Display for EmptyScore {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("a score needs at least one measure")
+    }
+}
+
+impl std::error::Error for EmptyScore {}
+
+impl TryFrom<RawScore> for Score {
+    type Error = EmptyScore;
+
+    fn try_from(raw: RawScore) -> Result<Self, Self::Error> {
+        if raw.measures.is_empty() {
+            return Err(EmptyScore);
+        }
+        Ok(Self { measures: raw.measures })
+    }
 }
 
 impl Score {
@@ -93,6 +124,15 @@ mod tests {
         assert!(!score.same_beats(&other_beat));
 
         assert!(!score.same_beats(&Score::single(four)));
+    }
+
+    #[test]
+    fn deserializing_rejects_an_empty_score() {
+        let score = Score::single(Measure::new(TimeSignature::SEVEN_EIGHT));
+        let back: Score = ron::from_str(&ron::to_string(&score).unwrap()).unwrap();
+        assert!(score.same_beats(&back));
+        let err = ron::from_str::<Score>("(measures: [])").unwrap_err().to_string();
+        assert!(err.contains("at least one measure"), "{err}");
     }
 
     #[test]

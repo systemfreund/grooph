@@ -409,7 +409,7 @@ impl Grooph {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     fn draw_accuracy_markers_for_measure(
         &self,
         ui: &egui::Ui,
@@ -573,7 +573,7 @@ fn reference_color(dark: bool) -> egui::Color32 {
 /// A hit: a bar where it landed, joined to the note's zero line. Perfect and
 /// good are plain bars; an off hit also gets an arrowhead pointing the way it
 /// was off (left = early, right = late).
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 fn paint_hit_mark(
     painter: &egui::Painter,
     note_x: f32,
