@@ -43,7 +43,8 @@ cannot be changed, but you can save a copy under a new name.
 ## How the levels work
 
 Each beat of the measure is one short figure, called a *grouping*. A level unlocks a set
-of groupings; the generator favors the newest ones, but easier figures stay in the mix.
+of groupings. Half of the beats use the newest ones; the other half repeats the easier
+levels, each level equally often, so simple figures stay in the mix.
 
 ```rhythm | Level 1: quarters, quarter rests and pairs of eighths
 4/4 q e e r:q e e
