@@ -9,6 +9,7 @@
 
 use crate::schedule::{Schedule, SoundType};
 use grooph_measure::tempo::ScoreTiming;
+use std::sync::Arc;
 
 /// One bar of clicks played before the score starts. Ticks are in the first
 /// measure's tick scale and run at its tempo.
@@ -21,7 +22,9 @@ pub(crate) struct CountInPlan {
 }
 
 struct CountInProgress {
-    plan: CountInPlan,
+    /// Shared with the playback plan, so starting a count-in on the audio
+    /// thread does not copy it.
+    plan: Arc<CountInPlan>,
     pos: f64,
 }
 
@@ -64,12 +67,12 @@ impl TickSource {
     }
 
     /// Start playback from the top of the score, optionally after a count-in.
-    pub(crate) fn restart(&mut self, count_in: Option<&CountInPlan>) {
+    pub(crate) fn restart(&mut self, count_in: Option<&Arc<CountInPlan>>) {
         self.cursor = 0.0;
         self.bars = 0;
         self.count_in = count_in
             .filter(|p| p.ticks > 0)
-            .map(|plan| CountInProgress { plan: plan.clone(), pos: 0.0 });
+            .map(|plan| CountInProgress { plan: Arc::clone(plan), pos: 0.0 });
     }
 
     /// Advance the cursor by one audio sample using the per-measure tempo at
@@ -208,10 +211,10 @@ mod tests {
         assert!(downbeats >= 2, "expected score to loop; got {downbeats} downbeats");
     }
 
-    fn count_in_4_4() -> CountInPlan {
+    fn count_in_4_4() -> Arc<CountInPlan> {
         let tpb = grooph_measure::grid::DEFAULT_GRID.ticks_per_beat(&TimeSignature::FOUR_FOUR);
         let clicks = (0..4).map(|i| (i * tpb, SoundType::CountIn)).collect();
-        CountInPlan { ticks: 4 * tpb, clicks }
+        Arc::new(CountInPlan { ticks: 4 * tpb, clicks })
     }
 
     #[test]

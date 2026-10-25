@@ -218,6 +218,13 @@ pub struct Audio {
     sink: Option<rodio::Sink>,
     shared_state: Arc<Mutex<PlaybackState>>,
     options: PlaybackOptions,
+    /// The plan and player state last handed to the audio thread; updates
+    /// are compared against these without taking the lock.
+    sent_plan: Arc<PlaybackPlan>,
+    sent_state: PlayerState,
+    /// Plans the audio thread may still hold. They are dropped here, on the
+    /// UI thread, once the audio thread has let go of them.
+    retired: Vec<Arc<PlaybackPlan>>,
     /// Last bar read from the audio thread, kept while its lock is busy.
     last_bar: Option<BarState>,
     /// Ticks dropped from the front of the score since the last update, see
@@ -256,29 +263,50 @@ impl Debug for PlaybackState {
     }
 }
 
+/// What the audio thread plays. Cloning it only bumps reference counts, so
+/// the audio thread can take it over without allocating.
 #[derive(Debug, Clone)]
 struct PlaybackParams {
-    bpm: u32,
-    timing: ScoreTiming,
-    schedule: Schedule,
+    plan: Arc<PlaybackPlan>,
     audio_settings: AudioSettings,
-    count_in: Option<CountInPlan>,
-    gap: GapClick,
-    ramp: TempoRamp,
     /// Seed for random gap bars.
     seed: u64,
 }
 
+/// The part of [`PlaybackParams`] that is built from the score. It is never
+/// changed in place: the UI builds a new one outside the lock and swaps it in.
+#[derive(Debug, PartialEq)]
+struct PlaybackPlan {
+    bpm: u32,
+    timing: ScoreTiming,
+    schedule: Schedule,
+    count_in: Option<Arc<CountInPlan>>,
+    gap: GapClick,
+    ramp: TempoRamp,
+}
+
+impl PlaybackPlan {
+    /// Whether anyone besides the holder of `self` still uses the plan or its
+    /// count-in bar (the audio thread keeps the count-in during a count-in).
+    fn is_shared(self: &Arc<Self>) -> bool {
+        Arc::strong_count(self) > 1
+            || self.count_in.as_ref().is_some_and(|c| Arc::strong_count(c) > 1)
+    }
+}
+
 impl Audio {
     pub fn new(bpm: u32) -> Option<Self> {
-        let params = PlaybackParams {
+        let plan = Arc::new(PlaybackPlan {
             bpm,
             timing: ScoreTiming::default(),
             schedule: Schedule::default(),
-            audio_settings: AudioSettings::default(),
             count_in: None,
             gap: GapClick::default(),
             ramp: TempoRamp::default(),
+        });
+        let params = PlaybackParams {
+            plan: Arc::clone(&plan),
+            audio_settings: AudioSettings::default(),
             seed: 1,
         };
 
@@ -297,6 +325,9 @@ impl Audio {
             sink: None,
             shared_state,
             options: PlaybackOptions::default(),
+            sent_plan: plan,
+            sent_state: PlayerState::Stopped,
+            retired: Vec::new(),
             last_bar: None,
             pending_shift: 0.0,
         })
@@ -308,40 +339,18 @@ impl Audio {
         let schedule =
             Schedule::build(score, &timing, self.options.ghost_notes, &self.options.click)
                 .with_counter(score, &timing, &self.options.counter);
-        let count_in = if self.options.count_in { count_in_plan(score) } else { None };
-
-        // A shift must reach the audio thread with the shorter score it was
-        // made for, so this update waits for the lock rather than skip it.
-        let state = Arc::clone(&self.shared_state);
-        let shared =
-            if self.pending_shift > 0.0 { state.lock().ok() } else { state.try_lock().ok() };
-        // Check differences
-        if let Some(mut shared_state) = shared
-            && (self.pending_shift > 0.0
-                || shared_state.params.bpm != bpm
-                || shared_state.params.timing != timing
-                || shared_state.params.schedule != schedule
-                || shared_state.params.count_in != count_in
-                || shared_state.params.gap != self.options.gap
-                || shared_state.params.ramp != self.options.ramp
-                || shared_state.playing_state != *player_state)
-        {
-            shared_state.params.bpm = bpm;
-            shared_state.params.timing = timing;
-            shared_state.params.schedule = schedule;
-            shared_state.params.count_in = count_in;
-            shared_state.params.gap = self.options.gap;
-            shared_state.params.ramp = self.options.ramp;
-            shared_state.playing_state = player_state.clone();
-            shared_state.shift += self.pending_shift;
-            // The published cursor moves with the score right away, so the
-            // app never reads the old position against the new score.
-            shared_state.playback_tick = (shared_state.playback_tick - self.pending_shift).max(0.0);
-            self.pending_shift = 0.0;
-            shared_state.is_dirty = true;
-
-            debug!("Shared state changed: {:?}", shared_state);
-        }
+        let count_in =
+            if self.options.count_in { count_in_plan(score).map(Arc::new) } else { None };
+        let plan = PlaybackPlan {
+            bpm,
+            timing,
+            schedule,
+            count_in,
+            gap: self.options.gap,
+            ramp: self.options.ramp,
+        };
+        self.publish(player_state, plan);
+        self.drop_released_plans();
 
         // On pause/stop: do not pause sink immediately; wait until source reports silence
         if *player_state != PlayerState::Playing
@@ -364,6 +373,48 @@ impl Audio {
 
         // Request repaint while tailing out awaiting pause
         *player_state != PlayerState::Playing && self.sink.is_some()
+    }
+
+    /// Hand `plan` and `player_state` to the audio thread if either changed.
+    /// The lock is held only to swap the plan in; the old one is retired and
+    /// dropped later on this thread, see [`Audio::drop_released_plans`].
+    fn publish(&mut self, player_state: &PlayerState, plan: PlaybackPlan) {
+        let same_plan = *self.sent_plan == plan;
+        if self.pending_shift <= 0.0 && same_plan && self.sent_state == *player_state {
+            return;
+        }
+        let plan = if same_plan { Arc::clone(&self.sent_plan) } else { Arc::new(plan) };
+
+        // A shift must reach the audio thread with the shorter score it was
+        // made for, so this update waits for the lock rather than skip it.
+        let state = Arc::clone(&self.shared_state);
+        let shared =
+            if self.pending_shift > 0.0 { state.lock().ok() } else { state.try_lock().ok() };
+        let Some(mut shared_state) = shared else {
+            return;
+        };
+        let old = std::mem::replace(&mut shared_state.params.plan, Arc::clone(&plan));
+        shared_state.playing_state = player_state.clone();
+        shared_state.shift += self.pending_shift;
+        // The published cursor moves with the score right away, so the
+        // app never reads the old position against the new score.
+        shared_state.playback_tick = (shared_state.playback_tick - self.pending_shift).max(0.0);
+        shared_state.is_dirty = true;
+        debug!("Shared state changed: {:?}", shared_state);
+        drop(shared_state);
+
+        self.pending_shift = 0.0;
+        self.sent_plan = plan;
+        self.sent_state = player_state.clone();
+        if !Arc::ptr_eq(&old, &self.sent_plan) {
+            self.retired.push(old);
+        }
+    }
+
+    /// Drop the retired plans the audio thread no longer holds, so their
+    /// memory is freed here and never on the audio thread.
+    fn drop_released_plans(&mut self) {
+        self.retired.retain(PlaybackPlan::is_shared);
     }
 
     fn start_sink(&mut self) {
@@ -436,7 +487,7 @@ impl Audio {
     pub fn playback_position(&self) -> Option<(f64, u64)> {
         // Non-blocking try to avoid UI stalls; fall back to None if busy
         if let Ok(shared_state) = self.shared_state.try_lock() {
-            Some((shared_state.playback_tick, shared_state.params.timing.total_loop_ticks()))
+            Some((shared_state.playback_tick, shared_state.params.plan.timing.total_loop_ticks()))
         } else {
             None
         }
@@ -472,22 +523,28 @@ struct MetronomeSource {
     tick_source: TickSource,
     gap: GapDecider,
     voices: VoiceMixer,
+    /// Sounds triggered by the current sample, reused so that rendering a
+    /// sample does not allocate.
+    triggered: Vec<SoundType>,
     sample_rate: u32,
     samples_processed: usize,
 }
 
 impl MetronomeSource {
     fn new(shared: Arc<Mutex<PlaybackState>>) -> Self {
+        Self::with_sample_rate(shared, device_sample_rate())
+    }
+
+    fn with_sample_rate(shared: Arc<Mutex<PlaybackState>>, sample_rate: u32) -> Self {
         let (local_params, is_playing) = {
             let state = shared.lock().unwrap();
             (state.params.clone(), state.playing_state.clone())
         };
 
         let seed = local_params.seed;
-        let sample_rate = device_sample_rate();
         let mut tick_source = TickSource::new(sample_rate);
         if is_playing == PlayerState::Playing {
-            tick_source.restart(local_params.count_in.as_ref());
+            tick_source.restart(local_params.plan.count_in.as_ref());
         }
         Self {
             shared_state: shared,
@@ -496,6 +553,8 @@ impl MetronomeSource {
             tick_source,
             gap: GapDecider::new(seed),
             voices: VoiceMixer::new(sample_rate),
+            // Room for many more sounds per sample than can sound at once.
+            triggered: Vec::with_capacity(4 * VoiceMixer::MAX_VOICES),
             sample_rate,
             samples_processed: 0,
         }
@@ -540,6 +599,8 @@ impl MetronomeSource {
                 && shared_state.playing_state == PlayerState::Playing;
 
             self.player_state = shared_state.playing_state.clone();
+            // Only reference counts change: the UI keeps the old plan alive
+            // and frees it, see `Audio::drop_released_plans`.
             self.local_params = shared_state.params.clone();
             shared_state.is_dirty = false;
             let shift = std::mem::take(&mut shared_state.shift);
@@ -549,7 +610,7 @@ impl MetronomeSource {
 
             if starting {
                 info!("Starting playback.");
-                self.tick_source.restart(self.local_params.count_in.as_ref());
+                self.tick_source.restart(self.local_params.plan.count_in.as_ref());
                 self.gap.reset(self.local_params.seed ^ self.samples_processed as u64);
             }
         }
@@ -563,12 +624,12 @@ impl MetronomeSource {
             return None;
         }
         let bar = self.tick_source.bars();
-        Some(BarState { bar, muted: self.gap.muted(&self.local_params.gap, bar) })
+        Some(BarState { bar, muted: self.gap.muted(&self.local_params.plan.gap, bar) })
     }
 
     /// Ratio of the ramp tempo of the current bar to the score tempo.
     fn tempo_scale(&self) -> f64 {
-        let params = &self.local_params;
+        let params = &self.local_params.plan;
         if !params.ramp.enabled || params.bpm == 0 || self.tick_source.in_count_in() {
             return 1.0;
         }
@@ -586,18 +647,17 @@ impl Iterator for MetronomeSource {
         self.update_shared_state();
 
         if self.player_state == PlayerState::Playing {
-            // Same allocation pattern as before — fresh small Vec per sample.
-            let mut triggered: Vec<SoundType> = Vec::with_capacity(VoiceMixer::MAX_VOICES);
+            self.triggered.clear();
             let tempo_scale = self.tempo_scale();
             self.tick_source.advance_one_sample(
-                &self.local_params.timing,
-                &self.local_params.schedule,
+                &self.local_params.plan.timing,
+                &self.local_params.plan.schedule,
                 tempo_scale,
-                &mut triggered,
+                &mut self.triggered,
             );
             let muted = self.current_bar().is_some_and(|b| b.muted);
-            let mute = self.local_params.gap.mute;
-            for sound in triggered {
+            let mute = self.local_params.plan.gap.mute;
+            for &sound in &self.triggered {
                 let settings = &self.local_params.audio_settings;
                 if (muted && sound.muted_by(mute)) || sound.profile(settings).gain <= 0.0 {
                     continue;
@@ -652,10 +712,197 @@ fn device_sample_rate() -> u32 {
 mod tests {
     use super::*;
     use grooph_measure::{Measure, TimeSignature};
+    use std::alloc::{GlobalAlloc, Layout, System};
+    use std::cell::Cell;
 
     fn count_in_of(ts: TimeSignature) -> Vec<SoundType> {
         let score = Score { measures: vec![Measure::new(ts)] };
         count_in_plan(&score).unwrap().clicks.into_iter().map(|(_, s)| s).collect()
+    }
+
+    /// Counts the allocations and deallocations of the current thread while
+    /// it is armed, see [`count_allocations`].
+    struct CountingAllocator;
+
+    thread_local! {
+        static ARMED: Cell<bool> = const { Cell::new(false) };
+        static ALLOCATIONS: Cell<usize> = const { Cell::new(0) };
+    }
+
+    fn count_if_armed() {
+        let _ = ARMED.try_with(|armed| {
+            if armed.get() {
+                let _ = ALLOCATIONS.try_with(|n| n.set(n.get() + 1));
+            }
+        });
+    }
+
+    // SAFETY: every method forwards to `System` with the caller's arguments
+    // unchanged; counting only touches const thread-locals through `try_with`,
+    // so it neither allocates nor reenters the allocator.
+    unsafe impl GlobalAlloc for CountingAllocator {
+        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+            count_if_armed();
+            // SAFETY: the caller's `layout` is passed on as is.
+            unsafe { System.alloc(layout) }
+        }
+
+        unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+            count_if_armed();
+            // SAFETY: `ptr` came from `System` with this `layout`, see `alloc`.
+            unsafe { System.dealloc(ptr, layout) }
+        }
+
+        unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+            count_if_armed();
+            // SAFETY: as for `dealloc`; `new_size` is the caller's, unchanged.
+            unsafe { System.realloc(ptr, layout, new_size) }
+        }
+    }
+
+    #[global_allocator]
+    static ALLOCATOR: CountingAllocator = CountingAllocator;
+
+    /// Allocations and deallocations `f` makes on this thread.
+    fn count_allocations(f: impl FnOnce()) -> usize {
+        ALLOCATIONS.with(|n| n.set(0));
+        ARMED.with(|a| a.set(true));
+        f();
+        ARMED.with(|a| a.set(false));
+        ALLOCATIONS.with(|n| n.get())
+    }
+
+    fn score_of(ts: TimeSignature, bars: usize) -> Score {
+        Score { measures: (0..bars).map(|_| Measure::new(ts)).collect() }
+    }
+
+    /// Everything audible is set to zero, so no voice is started: starting a
+    /// voice builds its signal, which is not part of this check.
+    fn silent_settings() -> AudioSettings {
+        AudioSettings {
+            downbeat: 0.0,
+            primary: 0.0,
+            accent: 0.0,
+            beat: 0.0,
+            ghost: 0.0,
+            count_in: 0.0,
+            soft: 0.0,
+            counter: 0.0,
+            ..AudioSettings::default()
+        }
+    }
+
+    fn plan_for(audio: &Audio, bpm: u32, score: &Score) -> PlaybackPlan {
+        let timing = ScoreTiming::from_score(score, bpm);
+        let schedule = Schedule::build(score, &timing, None, &audio.options.click);
+        let count_in = count_in_plan(score).map(Arc::new);
+        PlaybackPlan {
+            bpm,
+            timing,
+            schedule,
+            count_in,
+            gap: GapClick::default(),
+            ramp: TempoRamp::default(),
+        }
+    }
+
+    #[test]
+    fn rendering_does_not_allocate() {
+        // The counter sees allocations at all.
+        let n = count_allocations(|| drop(std::hint::black_box(Vec::<u8>::with_capacity(8))));
+        assert_eq!(n, 2);
+
+        let mut audio = Audio::new(120).unwrap();
+        audio.set_audio_settings(silent_settings());
+        let score = score_of(TimeSignature::FOUR_FOUR, 2);
+        audio.publish(&PlayerState::Playing, plan_for(&audio, 120, &score));
+        let mut source = MetronomeSource::with_sample_rate(Arc::clone(&audio.shared_state), 48_000);
+
+        // Pick up the plan, play through the count-in and loop the score.
+        let n = count_allocations(|| {
+            for _ in 0..(48_000 * 7) {
+                source.next();
+            }
+        });
+        assert_eq!(n, 0, "allocations while playing");
+
+        // A new plan while playing: the audio thread takes it over and lets
+        // go of the old one without allocating or freeing.
+        audio.publish(
+            &PlayerState::Playing,
+            plan_for(&audio, 90, &score_of(TimeSignature::SIX_EIGHT, 3)),
+        );
+        audio.drop_leading_ticks(1);
+        audio.publish(&PlayerState::Playing, plan_for(&audio, 100, &score));
+        let n = count_allocations(|| {
+            for _ in 0..(48_000 * 2) {
+                source.next();
+            }
+        });
+        assert_eq!(n, 0, "allocations after a plan change");
+        assert_eq!(source.local_params.plan.bpm, 100);
+
+        // Stopping and starting again restarts the count-in.
+        audio.publish(&PlayerState::Stopped, plan_for(&audio, 100, &score));
+        let n = count_allocations(|| {
+            for _ in 0..4096 {
+                source.next();
+            }
+        });
+        assert_eq!(n, 0, "allocations when stopping");
+        audio.publish(&PlayerState::Playing, plan_for(&audio, 100, &score));
+        let n = count_allocations(|| {
+            for _ in 0..(48_000 * 3) {
+                source.next();
+            }
+        });
+        assert_eq!(n, 0, "allocations when starting again");
+    }
+
+    #[test]
+    fn retired_plans_are_freed_once_the_audio_thread_lets_go() {
+        let mut audio = Audio::new(120).unwrap();
+        let score = score_of(TimeSignature::FOUR_FOUR, 1);
+        audio.publish(&PlayerState::Playing, plan_for(&audio, 120, &score));
+        let mut source = MetronomeSource::with_sample_rate(Arc::clone(&audio.shared_state), 48_000);
+        source.next();
+        let first = Arc::clone(&source.local_params.plan);
+
+        audio.publish(&PlayerState::Playing, plan_for(&audio, 90, &score));
+        audio.drop_released_plans();
+        // The source has not picked up the new plan yet.
+        assert_eq!(audio.retired.len(), 1);
+        assert!(Arc::ptr_eq(&audio.retired[0], &first));
+
+        for _ in 0..2048 {
+            source.next();
+        }
+        assert_eq!(source.local_params.plan.bpm, 90);
+        drop(first);
+        // The count-in that started with the first plan is still playing.
+        audio.drop_released_plans();
+        assert_eq!(audio.retired.len(), 1);
+
+        for _ in 0..(48_000 * 4) {
+            source.next();
+        }
+        assert!(!source.tick_source.in_count_in());
+        audio.drop_released_plans();
+        assert!(audio.retired.is_empty());
+    }
+
+    #[test]
+    fn unchanged_plan_is_not_sent_again() {
+        let mut audio = Audio::new(120).unwrap();
+        let score = score_of(TimeSignature::FOUR_FOUR, 1);
+        audio.publish(&PlayerState::Playing, plan_for(&audio, 120, &score));
+        audio.shared_state.lock().unwrap().is_dirty = false;
+        audio.publish(&PlayerState::Playing, plan_for(&audio, 120, &score));
+        assert!(!audio.shared_state.lock().unwrap().is_dirty);
+        audio.publish(&PlayerState::Stopped, plan_for(&audio, 120, &score));
+        assert!(audio.shared_state.lock().unwrap().is_dirty);
+        // Only the plan from `Audio::new` was replaced.
+        assert_eq!(audio.retired.len(), 1);
     }
 
     #[test]
