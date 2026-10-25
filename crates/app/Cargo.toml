@@ -17,6 +17,7 @@ eframe = { workspace = true }
 egui = { workspace = true }
 egui_extras = { workspace = true }
 log = { workspace = true }
+ron = "0.12"
 serde = { workspace = true }
 
 # Renderer: wgpu natively; WebGL2 through glow on the web, which leaves out
@@ -39,7 +40,3 @@ wasm-bindgen = { workspace = true }
 wasm-bindgen-futures = { workspace = true }
 web-sys = { workspace = true }
 getrandom = { workspace = true }
-
-
-[dev-dependencies]
-ron = "0.12"
