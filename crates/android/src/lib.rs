@@ -1,6 +1,6 @@
 //! Android entry point: NativeActivity calls `android_main`, which runs the
 //! same eframe app as the desktop build. The window is a phone, so the app
-//! picks the compact layout on its own.
+//! packs the staff for a narrow screen on its own.
 
 #[cfg(target_os = "android")]
 mod activity;

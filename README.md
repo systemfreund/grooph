@@ -134,7 +134,7 @@ Important root files:
 
 ## Generator / endless mode
 
-- UI: the Practice tab of the layout (`crates/app/src/compact.rs`). The
+- UI: the Practice tab of the layout (`crates/app/src/shell.rs`). The
   settings card opens a picker per setting (`crates/app/src/pickers.rs`);
   changing a setting regenerates the score (undoable), 🎲 rolls a new rhythm
   with the same settings. Space and the grouping picker live in the Level
@@ -297,13 +297,13 @@ Important root files:
 ## Layout
 
 - One layout for every window size, made for touch first
-  (`crates/app/src/compact.rs`). On windows wider than 720 pt the controls stay
+  (`crates/app/src/shell.rs`). On windows wider than 720 pt the controls stay
   a centered column; the staff and the tool palette use the full width.
 - Tabs: Metronome (see below), Practice (generator card with
   Meter/Notes/Level/Bars/BPM, options sheet, big "new rhythm" + play
   buttons), Edit (tool palette + edit bar),
   More (Library, Mixer, Settings, Help reuse their panels). The tab is derived
-  from `Mode` (`compact_tab`), so modes set elsewhere land on the right tab;
+  from `Mode` (`tab`), so modes set elsewhere land on the right tab;
   the Metronome tab is open while `metronome_mode()`, in `Mode::Playback`
   (ring) or `Mode::Edit` (tool palette).
 - Settings open in a `Modal` picker (`settings_picker`); generator changes go

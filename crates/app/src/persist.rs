@@ -154,8 +154,8 @@ impl<'de> Deserialize<'de> for Fields {
 #[cfg(test)]
 mod tests {
     use super::{BACKUP_KEY_PREFIX, StateBackup, restore};
-    use crate::compact::CompactTab;
     use crate::presets::builtin_presets;
+    use crate::shell::Tab;
     use crate::{PERSISTED_STATE_VERSION, PersistedState};
     use grooph_measure::duration::e;
     use grooph_measure::{Beat, Cursor, Measure, Score, TimeSignature};
@@ -164,7 +164,7 @@ mod tests {
     /// A saved state with a pattern in the library, a user preset and a
     /// non-default tempo and tab.
     fn saved_state() -> PersistedState {
-        let mut s = PersistedState { bpm: 93, tab: CompactTab::Edit, ..Default::default() };
+        let mut s = PersistedState { bpm: 93, tab: Tab::Edit, ..Default::default() };
         let mut m = Measure::new(TimeSignature::THREE_FOUR);
         m.set_beat(0, Beat::note(e())).unwrap();
         s.library.add("Groove".into(), Score::single(m), 93);
@@ -187,7 +187,7 @@ mod tests {
         let (s, backup) = restore(Some(&saved_ron()));
         assert_library_and_presets_kept(&s);
         assert_eq!(s.bpm, 93);
-        assert_eq!(s.tab, CompactTab::Edit);
+        assert_eq!(s.tab, Tab::Edit);
         assert!(backup.is_none());
         assert!(restore(None).1.is_none());
     }

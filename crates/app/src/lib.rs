@@ -1,7 +1,6 @@
 mod accuracy;
 mod calibration;
 mod clock;
-mod compact;
 mod generator;
 mod guide;
 mod help;
@@ -23,6 +22,7 @@ mod preset_panel;
 mod presets;
 mod settings_panel;
 mod share;
+mod shell;
 mod state;
 mod style;
 mod time_signature_dialog;
@@ -40,7 +40,6 @@ use grooph_measure::{BeatIdx, Cursor, Measure, Score, TimeSignature};
 
 use crate::accuracy::AccuracyState;
 use crate::calibration::CalibrationPhase;
-use crate::compact::{CompactState, CompactTab};
 use crate::generator::GeneratorState;
 use crate::guide::Guide;
 use crate::library::PatternLibrary;
@@ -48,6 +47,7 @@ use crate::metronome_view::MetronomeState;
 use crate::platform::{PlatformRuntime, VisibilityEvent};
 use crate::play_along::{PlayAlongSettings, PlayAlongState};
 use crate::presets::PresetLibrary;
+use crate::shell::{ShellState, Tab};
 use crate::state::{
     AudioConfig, CountInState, EditorState, LayoutSettings, MicState, MidiState, PendingLoad,
     PlaybackController, PlaybackState, UiShell,
@@ -86,7 +86,7 @@ pub(crate) enum Mode {
     Help,
     Library,
     Generator,
-    /// The compact layout's "More" list of panels.
+    /// The "More" tab's list of panels.
     MoreMenu,
     /// The time signature dialog, holding the meter being picked.
     TimeSignature(TimeSignature),
@@ -149,7 +149,7 @@ pub(crate) struct PersistedState {
     counter_names: Vec<(TimeSignature, Ratio)>,
     metronome_meter: TimeSignature,
     /// Tab open when the state was saved, reopened at the next start.
-    tab: CompactTab,
+    tab: Tab,
 }
 
 impl Default for PersistedState {
@@ -183,7 +183,7 @@ impl Default for PersistedState {
             counter_bars: CounterBars::default(),
             counter_names: Vec::new(),
             metronome_meter: TimeSignature::FOUR_FOUR,
-            tab: CompactTab::Metronome,
+            tab: Tab::Metronome,
         }
     }
 }
@@ -229,7 +229,7 @@ impl PersistedState {
             counter_bars: app.playback_ctl.audio_cfg.counter.clone(),
             counter_names: app.playback_ctl.audio_cfg.counter.names().to_vec(),
             metronome_meter: app.editor.metronome.meter,
-            tab: app.compact_tab(),
+            tab: app.tab(),
         }
     }
 }
@@ -341,8 +341,8 @@ fn add_font(ctx: &Context) {
 impl App for Grooph {
     fn ui(&mut self, ui: &mut Ui, frame: &mut eframe::Frame) {
         self.apply_style(ui);
-        self.ui.narrow_screen = ui.available_width() < compact::NARROW_MAX_WIDTH;
-        self.compact_ui(ui);
+        self.ui.narrow_screen = ui.available_width() < shell::NARROW_MAX_WIDTH;
+        self.shell_ui(ui);
         self.sync_click_bar();
         self.update_metronome_trainer();
         self.update_endless();
@@ -841,7 +841,7 @@ impl Grooph {
             self.playback_ctl.accuracy.tracker.dismiss_summary();
             return true;
         }
-        let practice_page = self.compact_tab() == CompactTab::Practice;
+        let practice_page = self.tab() == Tab::Practice;
         let metronome = self.metronome_mode();
         let ui = &mut self.ui;
         if ui.link_error.take().is_some()
@@ -857,15 +857,12 @@ impl Grooph {
         }
         ui.mode = match ui.mode {
             Mode::TimeSignature(_) => Mode::Edit,
-            Mode::Mixer | Mode::Settings | Mode::Help | Mode::Library if ui.narrow_screen => {
-                Mode::MoreMenu
-            }
-            Mode::Mixer | Mode::Settings | Mode::Help | Mode::Library => Mode::Playback,
+            Mode::Mixer | Mode::Settings | Mode::Help | Mode::Library => Mode::MoreMenu,
             // The metronome's click bar editor ("Done").
             Mode::Edit if metronome => Mode::Playback,
             // The practice page's options sheet, when unfolded.
-            _ if ui.narrow_screen && practice_page && !ui.compact.options_collapsed => {
-                ui.compact.options_collapsed = true;
+            _ if practice_page && !ui.shell.options_collapsed => {
+                ui.shell.options_collapsed = true;
                 return true;
             }
             _ => return false,
@@ -1182,7 +1179,7 @@ impl Grooph {
                 narrow_screen: false,
                 staff_em: 40.0,
                 followed_cursor: None,
-                compact: CompactState::default(),
+                shell: ShellState::default(),
                 picker: None,
                 tap_tempo: Default::default(),
                 host: None,
@@ -1190,7 +1187,7 @@ impl Grooph {
         };
         app.editor.active_preset = app.matching_preset();
         // A link opens after the saved tab, so its tab wins.
-        app.select_compact_tab(state.tab);
+        app.select_tab(state.tab);
         app.open_link_from_url();
         app
     }
@@ -1216,7 +1213,7 @@ impl Grooph {
 #[cfg(test)]
 mod tests {
     use super::{CountingBase, CountingSettings, PersistedState};
-    use crate::compact::CompactTab;
+    use crate::shell::Tab;
     use grooph_measure::counting::CountingSystem;
     use grooph_measure::{Measure, Score, TimeSignature};
 
@@ -1227,8 +1224,7 @@ mod tests {
 
         let cc = eframe::CreationContext::_new_kittest(eframe::egui::Context::default());
         let mut app = Grooph::new(&cc);
-        app.ui.narrow_screen = true;
-        app.select_compact_tab(CompactTab::More);
+        app.select_tab(Tab::More);
         app.ui.mode = Mode::Settings;
         app.ui.picker = Some(Picker::Bpm);
         assert!(app.back());
@@ -1238,13 +1234,13 @@ mod tests {
         assert_eq!(app.ui.mode, Mode::MoreMenu);
         // Nothing left to close: the host leaves the app. The practice
         // options sheet is not on this page, so it does not count.
-        app.ui.compact.options_collapsed = false;
+        app.ui.shell.options_collapsed = false;
         assert!(!app.back());
         assert_eq!(app.ui.mode, Mode::MoreMenu);
         // On the practice page, back folds the sheet first.
-        app.select_compact_tab(CompactTab::Practice);
+        app.select_tab(Tab::Practice);
         assert!(app.back());
-        assert!(app.ui.compact.options_collapsed);
+        assert!(app.ui.shell.options_collapsed);
         assert!(!app.back());
     }
 
@@ -1267,12 +1263,12 @@ mod tests {
 
     #[test]
     fn saved_tab_round_trips_and_first_start_opens_metronome() {
-        let s = PersistedState { tab: CompactTab::Edit, ..Default::default() };
+        let s = PersistedState { tab: Tab::Edit, ..Default::default() };
         let back: PersistedState = ron::from_str(&ron::to_string(&s).unwrap()).unwrap();
-        assert_eq!(back.tab, CompactTab::Edit);
-        assert_eq!(PersistedState::default().tab, CompactTab::Metronome);
+        assert_eq!(back.tab, Tab::Edit);
+        assert_eq!(PersistedState::default().tab, Tab::Metronome);
         let older: PersistedState = ron::from_str("(version: 2)").unwrap();
-        assert_eq!(older.tab, CompactTab::Metronome);
+        assert_eq!(older.tab, Tab::Metronome);
     }
 
     #[test]

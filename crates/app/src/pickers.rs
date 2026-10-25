@@ -404,7 +404,7 @@ impl Grooph {
             .on_hover_text("More rests in the rhythm");
         ui.add_space(8.0);
         egui::CollapsingHeader::new(RichText::new("Groupings").size(18.0))
-            .id_salt("compact_groupings")
+            .id_salt("card_groupings")
             .show(ui, |ui| {
                 egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
                     self.figures_picker(ui);

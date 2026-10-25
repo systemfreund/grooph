@@ -85,8 +85,8 @@ Read the changed code in context, not just the diff lines. Open callers and call
 - **Layout across voices and modes:** a change to how notes, rests, beams, accents or tuplet marks are placed
   must hold for both stem directions (the lower voice of a two-voice staff, `stem_down`), must keep the row
   room (`RowRoom` in `staff_layout.rs`) large enough for the new ink, and should take glyph positions from
-  the Bravura metadata in `layout/src/glyphs` rather than new hand-tuned offsets. Check the compact (phone)
-  and desktop views alike.
+  the Bravura metadata in `layout/src/glyphs` rather than new hand-tuned offsets. Check narrow (phone)
+  and wide windows alike.
 - **Guide pages (`crates/site`):** when app behavior changes, the guide texts and their example links must
   still describe and open what the app now does.
 

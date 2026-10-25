@@ -3,7 +3,7 @@
 //! read and count the rest themselves.
 
 use crate::Grooph;
-use crate::compact::CompactTab;
+use crate::shell::Tab;
 use grooph_measure::TimeSignature;
 use grooph_measure::grid::DEFAULT_GRID;
 use serde::{Deserialize, Serialize};
@@ -100,10 +100,7 @@ impl Grooph {
     /// The guide in use: the metronome and edit tabs and calibration keep
     /// the line.
     pub(crate) fn active_guide(&self) -> Guide {
-        if self.metronome_mode()
-            || self.compact_tab() == CompactTab::Edit
-            || self.calibration_source().is_some()
-        {
+        if self.metronome_mode() || self.tab() == Tab::Edit || self.calibration_source().is_some() {
             Guide::Line
         } else {
             self.ui.guide
@@ -251,7 +248,7 @@ mod tests {
     fn practice_app(bars: usize, guide: Guide) -> Grooph {
         let cc = eframe::CreationContext::_new_kittest(eframe::egui::Context::default());
         let mut app = Grooph::new(&cc);
-        app.select_compact_tab(crate::compact::CompactTab::Practice);
+        app.select_tab(crate::shell::Tab::Practice);
         let measure = Grooph::default_measure();
         app.editor.score.measures = vec![measure; bars];
         app.ui.guide = guide;
@@ -322,9 +319,9 @@ mod tests {
     #[test]
     fn the_edit_tab_keeps_the_line() {
         let mut app = practice_app(1, Guide::EveryBar);
-        app.select_compact_tab(CompactTab::Edit);
+        app.select_tab(Tab::Edit);
         assert_eq!(app.active_guide(), Guide::Line);
-        app.select_compact_tab(CompactTab::Practice);
+        app.select_tab(Tab::Practice);
         assert_eq!(app.active_guide(), Guide::EveryBar);
     }
 
