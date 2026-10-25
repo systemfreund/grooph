@@ -11,6 +11,8 @@ pub mod grid;
 pub(crate) mod grouping;
 mod math;
 pub mod notation;
+#[cfg(test)]
+mod random_tests;
 pub mod score;
 pub mod swing;
 pub mod tap_tempo;
@@ -378,6 +380,14 @@ impl Measure {
         let need = new_ticks - old_ticks;
         debug_assert!(need > 0);
 
+        // A tuplet note may not fill its whole group alone (e.g. one 2:3
+        // quarter in a 2:3 eighth group): a group needs two notes.
+        if let Some(anchor) = self.beats[idx].tuplet_group_id.and_then(|id| self.tuplets.get(id))
+            && new_ticks >= anchor.target_ticks
+        {
+            return self.overflow_err(new_ticks, max_ticks - old_ticks);
+        }
+
         let absorb_ticks = self.compute_ticks_to_absorb(idx, dur_old, need);
         if absorb_ticks < need {
             return self.overflow_err(new_ticks, max_ticks - old_ticks);
@@ -603,11 +613,12 @@ impl Measure {
         DEFAULT_GRID.ticks_per_measure(&self.time_signature)
     }
 
+    /// Turn the beat at `idx` into a rest; it loses its accent and soft flag.
     pub fn remove(&mut self, idx: BeatIdx) {
         if idx >= self.beats.len() {
             return;
         }
-        self.beats[idx].kind = Rest;
+        self.beats[idx] = self.beats[idx].with_kind(Rest);
     }
 
     fn fill_measure(&mut self, kind: BeatKind, allowed: &[Duration]) {
@@ -650,15 +661,14 @@ impl Measure {
     }
 
     /// Toggle the beat kind at `idx` between Note and Rest while preserving duration.
-    /// No-op if `idx` is out of bounds.
+    /// A new rest loses its accent and soft flag. No-op if `idx` is out of bounds.
     pub fn toggle_beat_kind(&mut self, idx: BeatIdx) -> Option<Modification> {
         if let Some(b) = self.beats.get_mut(idx) {
             let new_kind = match b.kind {
                 Rest => Note,
                 Note => Rest,
             };
-            b.kind = new_kind;
-            b.accented = b.accented && b.kind == Note;
+            *b = b.with_kind(new_kind);
             Some(Modification::ToggleKind(idx, new_kind))
         } else {
             None
@@ -692,7 +702,7 @@ impl Debug for Measure {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::duration::NoteValue::{Eighth, Sixteenth, ThirtySecond};
+    use crate::duration::NoteValue::{Eighth, Quarter, Sixteenth, ThirtySecond};
     use crate::duration::{Duration, e, q, s, st8, st16, t8, t16, t32, th};
 
     fn durations_of(measure: &Measure) -> Vec<Duration> {
@@ -1090,6 +1100,32 @@ mod tests {
         }
 
         assert_eq!(m.beats().to_vec(), vec![Beat::note(e()), Beat::rest(e())]);
+    }
+
+    #[test]
+    fn rests_keep_no_accent_or_soft_flag() {
+        let mut m = Measure::new_init(TimeSignature::FOUR_FOUR, Note);
+        m.toggle_accent(0);
+        m.toggle_soft(1);
+        m.remove(0);
+        m.toggle_beat_kind(1);
+        assert_eq!(m.beats()[..2], [Beat::rest(q()), Beat::rest(q())]);
+        // Back to notes, they come back plain.
+        m.toggle_beat_kind(0);
+        m.toggle_beat_kind(1);
+        assert_eq!(m.beats()[..2], [Beat::note(q()), Beat::note(q())]);
+    }
+
+    #[test]
+    fn tuplet_note_cannot_fill_its_group_alone() {
+        let duplet = |base| Duration::Tuplet(TupletSpec { n: 2, m: 3, base });
+        let mut m = Measure::new(TimeSignature::new(3, 8));
+        m.set_beat(0, Beat::note(duplet(Eighth))).unwrap();
+        assert_eq!(m.beats().len(), 2);
+        // One 2:3 quarter would take the whole group of 2:3 eighths.
+        assert!(m.set_beat(0, Beat::note(duplet(Quarter))).is_err());
+        assert_eq!(m.beats().len(), 2);
+        assert!(m.tuplet_group_at(0).is_some());
     }
 
     fn read(text: &str) -> Result<Measure, String> {
