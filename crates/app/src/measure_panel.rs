@@ -244,7 +244,11 @@ impl Grooph {
                             None
                         };
                         let playback = playback_local;
-                        let marks = if guide == Guide::Line {
+                        // A silent bar shows no playback position, like the
+                        // metronome's ring: no line, no lit beat or count.
+                        let marks = if self.playback_ctl.playback.bar_muted {
+                            PlaybackMarks::Anchor(None)
+                        } else if guide == Guide::Line {
                             PlaybackMarks::Line
                         } else {
                             PlaybackMarks::Anchor(self.playback_ctl.playback.anchor.map(|a| {

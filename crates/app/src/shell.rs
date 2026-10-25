@@ -741,6 +741,11 @@ impl Grooph {
         if value_row(ui, "Polyrhythm", &self.counter_label()).clicked() {
             self.ui.picker = Some(Picker::Polyrhythm);
         }
+        self.shared_rows(ui);
+    }
+
+    /// The last rows of both sheets, the same in each tab.
+    fn shared_rows(&mut self, ui: &mut Ui) {
         self.counting_row(ui);
         switch_row(ui, "Count-in", &mut self.playback_ctl.audio_cfg.count_in);
         switch_row(ui, "Silent bars", &mut self.playback_ctl.audio_cfg.gap.enabled);
@@ -823,8 +828,6 @@ impl Grooph {
         }
         let generator = &mut self.editor.generator;
         switch_row(ui, "Ghost notes", &mut generator.ghost_notes);
-        switch_row(ui, "Count-in", &mut self.playback_ctl.audio_cfg.count_in);
-        switch_row(ui, "Silent bars", &mut self.playback_ctl.audio_cfg.gap.enabled);
         let swing = self.playback_ctl.audio_cfg.swing;
         let swing_value = if swing.is_straight() {
             swing_label(swing.percent)
@@ -838,11 +841,11 @@ impl Grooph {
         if value_row(ui, "Guide", self.ui.guide.in_meter(&ts).label()).clicked() {
             self.ui.picker = Some(Picker::Guide);
         }
-        self.counting_row(ui);
         let mut accuracy = self.playback_ctl.accuracy.enabled;
         if badged_switch_row(ui, "Timing feedback", Some("BETA"), &mut accuracy) {
             self.set_accuracy_enabled(accuracy);
         }
+        self.shared_rows(ui);
     }
 
     /// Centered "new rhythm" and play buttons. Returns whether "new" was tapped.
