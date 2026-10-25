@@ -961,11 +961,18 @@ mod tests {
         assert!(!Arc::ptr_eq(&edited, &slower));
         assert!(Arc::ptr_eq(&edited, &audio.sent_plan));
 
+        // And a new meter with the same number of bars.
+        score.measures[0] = Measure::new(TimeSignature::THREE_FOUR);
+        audio.update(&PlayerState::Stopped, 90, &score);
+        let remetered = built(&audio);
+        assert!(!Arc::ptr_eq(&remetered, &edited));
+        assert!(Arc::ptr_eq(&remetered, &audio.sent_plan));
+
         // And a changed option.
         audio
             .set_playback_options(PlaybackOptions { count_in: true, ..PlaybackOptions::default() });
         audio.update(&PlayerState::Stopped, 90, &score);
-        assert!(!Arc::ptr_eq(&built(&audio), &edited));
+        assert!(!Arc::ptr_eq(&built(&audio), &remetered));
         assert!(audio.sent_plan.count_in.is_some());
     }
 

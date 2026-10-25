@@ -77,6 +77,25 @@ mod tests {
     }
 
     #[test]
+    fn same_beats_compares_meters_and_beats() {
+        let four = Measure::new(TimeSignature::FOUR_FOUR);
+        let score = Score { measures: vec![four.clone(), four.clone()] };
+        assert!(score.same_beats(&score.clone()));
+
+        // The same beats under another meter.
+        let mut other_meter = score.clone();
+        other_meter.measures[1].time_signature = TimeSignature::new(2, 4);
+        assert_eq!(other_meter.measures[1].beats(), four.beats());
+        assert!(!score.same_beats(&other_meter));
+
+        let mut other_beat = score.clone();
+        other_beat.measures[1].toggle_beat_kind(0);
+        assert!(!score.same_beats(&other_beat));
+
+        assert!(!score.same_beats(&Score::single(four)));
+    }
+
+    #[test]
     fn cursor_start_is_zero_zero() {
         let c = Cursor::start();
         assert_eq!(c.measure_idx, 0);
