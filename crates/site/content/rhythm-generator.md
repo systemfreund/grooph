@@ -33,7 +33,7 @@ rolls a new one with the same settings.
 ## Presets
 
 A preset stores the generator settings together with everything you practise with them:
-tempo, swing, ghost notes, count-in, endless mode, gap click, tempo ramp and the sounds.
+tempo, swing, ghost notes, count-in, endless mode, silent bars, tempo ramp and the sounds.
 Tap **Preset** and pick one to restore all of it at once. In the same dialog you save the
 current settings as a new preset, update the active one, and rename or delete your own with
 the pencil button.

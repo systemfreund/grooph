@@ -47,7 +47,7 @@ impl Grooph {
 
     pub(crate) fn gap_click_settings(&mut self, ui: &mut egui::Ui) {
         let gap = &mut self.playback_ctl.audio_cfg.gap;
-        ui.checkbox(&mut gap.enabled, "Mute bars")
+        ui.checkbox(&mut gap.enabled, "Enabled")
             .on_hover_text("Practise inner time: the metronome drops out for some bars");
         ui.add_enabled_ui(gap.enabled, |ui| {
             ui.horizontal(|ui| {

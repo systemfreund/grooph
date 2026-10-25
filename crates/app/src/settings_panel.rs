@@ -157,7 +157,7 @@ impl Grooph {
                         ui.checkbox(&mut self.ui.flash_enabled, "Flash on primary beat");
                     });
 
-                    egui::CollapsingHeader::new("Gap Click").default_open(false).show(ui, |ui| {
+                    egui::CollapsingHeader::new("Silent Bars").default_open(false).show(ui, |ui| {
                         self.gap_click_settings(ui);
                     });
 

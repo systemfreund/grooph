@@ -432,7 +432,8 @@ impl Grooph {
         }
     }
 
-    /// Whether the Edit tab is open, including its time signature dialog.
+    /// Whether the score or the metronome's clicks are being edited: the Edit
+    /// tab, its time signature dialog, or "Edit clicks" in the Metronome tab.
     pub(crate) fn editing(&self) -> bool {
         matches!(self.ui.mode, Mode::Edit | Mode::TimeSignature(_))
     }
@@ -1315,8 +1316,13 @@ mod tests {
         app.select_tab(Tab::Metronome);
         app.ui.mode = super::Mode::Edit;
         assert!(!app.playback_options().gap.enabled);
-        // The setting itself stays on.
+        app.select_tab(Tab::Edit);
+        app.ui.mode = super::Mode::TimeSignature(TimeSignature::FOUR_FOUR);
+        assert!(!app.playback_options().gap.enabled);
+        // The setting itself stays on, and bars are muted again after editing.
         assert!(app.playback_ctl.audio_cfg.gap.enabled);
+        app.select_tab(Tab::Practice);
+        assert!(app.playback_options().gap.enabled);
     }
 
     fn load(saved: &str) -> CountingSettings {
