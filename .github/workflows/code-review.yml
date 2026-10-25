@@ -30,7 +30,7 @@ on:
         description: Pull request number to review
         required: true
       models:
-        description: 'Models to compare, as a JSON list, e.g. ["venice/z-ai-glm-5-3"]. Leave blank for the default list'
+        description: 'Models to compare, as a JSON list, e.g. ["venice/kimi-k2-7-code"]. Leave blank for the default list'
         required: false
 
 concurrency:
@@ -49,8 +49,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Default models; "Run workflow" can pass its own list.
-        model: ${{ fromJSON(inputs.models || '["venice/z-ai-glm-5-3", "venice/kimi-k2-7-code", "venice/claude-sonnet-5-5"]') }}
+        # Default models; "Run workflow" can pass its own list. GLM 5.3
+        # (venice/z-ai-glm-5-3) is left out: its runs failed too often. It
+        # stays in opencode.json for manual runs.
+        model: ${{ fromJSON(inputs.models || '["venice/kimi-k2-7-code", "venice/claude-sonnet-5-5"]') }}
     permissions:
       # Read-only on the code: the review must not push changes.
       contents: read
