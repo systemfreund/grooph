@@ -590,7 +590,7 @@ impl Grooph {
     fn card(&mut self, ui: &mut Ui, cells: &[(Picker, &str, CardValue)]) {
         let music = self.ui.music_font_id.family.clone();
         let mut picked = None;
-        egui::Panel::top("card")
+        egui::Panel::top("shell_card")
             .frame(Frame::new().fill(ui.visuals().panel_fill).inner_margin(Margin {
                 left: 12,
                 right: 12,
@@ -930,7 +930,7 @@ impl Grooph {
 
     /// Play button and measure controls above the tool palette, as wide as it.
     fn edit_bar(&mut self, ui: &mut Ui) {
-        egui::Panel::bottom("edit_bar")
+        egui::Panel::bottom("shell_edit_bar")
             .frame(
                 Frame::new().fill(ui.visuals().panel_fill).inner_margin(Margin::symmetric(12, 6)),
             )
@@ -1035,7 +1035,7 @@ impl Grooph {
             (Mode::Help, "?", "Help"),
         ];
         if self.ui.mode == Mode::MoreMenu {
-            egui::Panel::bottom("more_page")
+            egui::Panel::bottom("shell_more")
                 .frame(Frame::new().fill(ui.visuals().panel_fill).inner_margin(Margin::same(12)))
                 .show_separator_line(false)
                 .show(ui, |ui| {
