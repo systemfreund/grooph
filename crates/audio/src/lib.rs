@@ -24,7 +24,7 @@ use rodio::source::Function as RodioFunction;
 use schedule::{Schedule, SoundType};
 use serde::{Deserialize, Serialize};
 use std::fmt::{Debug, Formatter};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError, TryLockError};
 use std::time::Duration;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -359,7 +359,7 @@ impl Audio {
         // On pause/stop: do not pause sink immediately; wait until source reports silence
         if *player_state != PlayerState::Playing
             && self.sink.is_some()
-            && let Ok(mut shared_state) = self.shared_state.try_lock()
+            && let Some(mut shared_state) = try_lock(&self.shared_state)
             && shared_state.is_silent
             && !shared_state.is_dirty
         {
@@ -415,8 +415,7 @@ impl Audio {
         // A shift must reach the audio thread with the shorter score it was
         // made for, so this update waits for the lock rather than skip it.
         let state = Arc::clone(&self.shared_state);
-        let shared =
-            if self.pending_shift > 0.0 { state.lock().ok() } else { state.try_lock().ok() };
+        let shared = if self.pending_shift > 0.0 { Some(lock(&state)) } else { try_lock(&state) };
         let Some(mut shared_state) = shared else {
             return;
         };
@@ -466,7 +465,7 @@ impl Audio {
     }
 
     pub fn set_audio_settings(&mut self, settings: AudioSettings) {
-        let mut shared_state = self.shared_state.lock().unwrap();
+        let mut shared_state = lock(&self.shared_state);
         let s = settings.clamped();
         if shared_state.params.audio_settings != s {
             shared_state.params.audio_settings = s;
@@ -476,9 +475,7 @@ impl Audio {
 
     /// Seed for randomly muted bars (gap click in random mode).
     pub fn set_seed(&mut self, seed: u64) {
-        if let Ok(mut shared_state) = self.shared_state.lock() {
-            shared_state.params.seed = seed;
-        }
+        lock(&self.shared_state).params.seed = seed;
     }
 
     pub fn set_playback_options(&mut self, options: PlaybackOptions) {
@@ -502,7 +499,7 @@ impl Audio {
     pub fn bar_state(&mut self) -> Option<BarState> {
         if !self.is_running() {
             self.last_bar = None;
-        } else if let Ok(shared_state) = self.shared_state.try_lock() {
+        } else if let Some(shared_state) = try_lock(&self.shared_state) {
             self.last_bar = shared_state.bar;
         }
         self.last_bar
@@ -513,11 +510,24 @@ impl Audio {
     /// the count-in bar plays and reaches 0 on the score's first downbeat.
     pub fn playback_position(&self) -> Option<(f64, u64)> {
         // Non-blocking try to avoid UI stalls; fall back to None if busy
-        if let Ok(shared_state) = self.shared_state.try_lock() {
-            Some((shared_state.playback_tick, shared_state.params.plan.timing.total_loop_ticks()))
-        } else {
-            None
-        }
+        try_lock(&self.shared_state)
+            .map(|state| (state.playback_tick, state.params.plan.timing.total_loop_ticks()))
+    }
+}
+
+/// Locks `state`, recovering it when a panic elsewhere poisoned the lock:
+/// the state is plain data and stays usable, so one panic must not turn
+/// every later access into another.
+fn lock<T>(state: &Mutex<T>) -> MutexGuard<'_, T> {
+    state.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// Like [`lock`], but `None` instead of waiting while the lock is held.
+fn try_lock<T>(state: &Mutex<T>) -> Option<MutexGuard<'_, T>> {
+    match state.try_lock() {
+        Ok(guard) => Some(guard),
+        Err(TryLockError::Poisoned(err)) => Some(err.into_inner()),
+        Err(TryLockError::WouldBlock) => None,
     }
 }
 
@@ -564,7 +574,7 @@ impl MetronomeSource {
 
     fn with_sample_rate(shared: Arc<Mutex<PlaybackState>>, sample_rate: u32) -> Self {
         let (local_params, is_playing) = {
-            let state = shared.lock().unwrap();
+            let state = lock(&shared);
             (state.params.clone(), state.playing_state.clone())
         };
 
@@ -593,7 +603,7 @@ impl MetronomeSource {
             return;
         }
         let bar = self.current_bar();
-        if let Ok(mut shared_state) = self.shared_state.try_lock()
+        if let Some(mut shared_state) = try_lock(&self.shared_state)
             // Not yet in step with new params: a pending shift already moved
             // the published cursor.
             && !shared_state.is_dirty
@@ -612,7 +622,7 @@ impl MetronomeSource {
     fn update_local_state(&mut self) {
         // Periodic check for updates (~20ms)
         if self.samples_processed.is_multiple_of(1024)
-            && let Ok(mut shared_state) = self.shared_state.try_lock()
+            && let Some(mut shared_state) = try_lock(&self.shared_state)
             && shared_state.is_dirty
         {
             debug!(

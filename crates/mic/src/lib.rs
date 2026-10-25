@@ -14,7 +14,7 @@ mod web;
 pub use detector::{DEFAULT_THRESHOLD_DB, OnsetDetector, REFRACTORY_S, db_to_linear, linear_to_db};
 
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, TryLockError};
 
 /// Called when hits arrive, e.g. to request a repaint.
 pub type Notifier = Arc<dyn Fn() + Send + Sync>;
@@ -53,15 +53,20 @@ impl Shared {
         f(&mut state)
     }
 
-    /// Hand over a block's hits and peak level.
-    pub(crate) fn push(&self, hits: &[f64], peak: f32) {
-        self.with_state(|s| {
-            s.hits.extend_from_slice(hits);
-            s.peak = s.peak.max(peak);
-        });
-        if !hits.is_empty()
-            && let Some(notify) = &self.notifier
-        {
+    /// Hand over the hits and peak level gathered so far, and reset them.
+    /// The input callback runs on the audio thread and must not wait: while
+    /// the app holds the lock, both are kept and go with the next block.
+    pub(crate) fn push(&self, hits: &mut Vec<f64>, peak: &mut f32) {
+        let mut state = match self.state.try_lock() {
+            Ok(state) => state,
+            Err(TryLockError::Poisoned(err)) => err.into_inner(),
+            Err(TryLockError::WouldBlock) => return,
+        };
+        let added = !hits.is_empty();
+        state.hits.append(hits);
+        state.peak = state.peak.max(std::mem::take(peak));
+        drop(state);
+        if added && let Some(notify) = &self.notifier {
             notify();
         }
     }
@@ -157,9 +162,8 @@ pub(crate) fn is_builtin_ios_mic(label: &str) -> bool {
 mod tests {
     use super::*;
 
-    #[test]
-    fn hits_and_peak_drain() {
-        let mic = MicInput {
+    fn mic() -> MicInput {
+        MicInput {
             shared: Arc::new(Shared {
                 state: Mutex::new(State {
                     hits: Vec::new(),
@@ -170,15 +174,37 @@ mod tests {
                 notifier: None,
             }),
             _backend: None,
-        };
-        mic.shared.push(&[1.0, 2.0], 0.5);
-        mic.shared.push(&[3.0], 0.25);
+        }
+    }
+
+    #[test]
+    fn hits_and_peak_drain() {
+        let mic = mic();
+        let (mut hits, mut peak) = (vec![1.0, 2.0], 0.5);
+        mic.shared.push(&mut hits, &mut peak);
+        assert!(hits.is_empty());
+        assert_eq!(peak, 0.0);
+        let (mut hits, mut peak) = (vec![3.0], 0.25);
+        mic.shared.push(&mut hits, &mut peak);
         assert_eq!(mic.drain_hits(), vec![1.0, 2.0, 3.0]);
         assert!(mic.drain_hits().is_empty());
         assert!((mic.take_peak_db() + 6.02).abs() < 0.01);
         assert_eq!(mic.take_peak_db(), f32::NEG_INFINITY);
         mic.set_threshold_db(-20.0);
         assert_eq!(mic.shared.threshold_db(), -20.0);
+    }
+
+    #[test]
+    fn push_keeps_the_hits_while_the_app_holds_the_lock() {
+        let mic = mic();
+        let (mut hits, mut peak) = (vec![1.0], 0.5);
+        let guard = mic.shared.state.lock().unwrap();
+        mic.shared.push(&mut hits, &mut peak);
+        drop(guard);
+        assert_eq!((hits.as_slice(), peak), ([1.0].as_slice(), 0.5));
+        assert!(mic.drain_hits().is_empty());
+        mic.shared.push(&mut hits, &mut peak);
+        assert_eq!(mic.drain_hits(), vec![1.0]);
     }
 
     #[test]

@@ -40,6 +40,7 @@ where
     let channels = config.channels.max(1) as usize;
     let mut detector = OnsetDetector::new(config.sample_rate.0, shared.threshold_db());
     let mut hits = Vec::new();
+    let mut peak = 0f32;
     let errors = shared.clone();
     device
         .build_input_stream(
@@ -50,10 +51,10 @@ where
                 let ts = info.timestamp();
                 let delay = ts.callback.duration_since(&ts.capture).unwrap_or_default();
                 detector.set_threshold_db(shared.threshold_db());
-                hits.clear();
                 let first_channel = data.chunks(channels).map(|frame| frame[0].to_sample::<f32>());
-                let peak = detector.process(first_channel, now - delay.as_secs_f64(), &mut hits);
-                shared.push(&hits, peak);
+                peak =
+                    peak.max(detector.process(first_channel, now - delay.as_secs_f64(), &mut hits));
+                shared.push(&mut hits, &mut peak);
             },
             move |err| errors.set_status(MicStatus::Failed(err.to_string())),
             None,

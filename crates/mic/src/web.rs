@@ -185,6 +185,7 @@ async fn start(shared: Arc<Shared>, inner: &Inner) -> Result<(), JsValue> {
     let mut detector = OnsetDetector::new(sample_rate as u32, shared.threshold_db());
     let mut clock = ContextClock::default();
     let mut hits = Vec::new();
+    let mut peak = 0f32;
     let handler = shared.clone();
     let clock_ctx = ctx.clone();
     let on_message = MessageHandler::new(move |event: MessageEvent| {
@@ -198,9 +199,8 @@ async fn start(shared: Arc<Shared>, inner: &Inner) -> Result<(), JsValue> {
         };
         let start = clock.map(&clock_ctx, frame / sample_rate as f64);
         detector.set_threshold_db(handler.threshold_db());
-        hits.clear();
-        let peak = detector.process(samples.to_vec(), start, &mut hits);
-        handler.push(&hits, peak);
+        peak = peak.max(detector.process(samples.to_vec(), start, &mut hits));
+        handler.push(&mut hits, &mut peak);
     });
     node.port()?.set_onmessage(Some(on_message.as_ref().unchecked_ref()));
     *inner.on_message.borrow_mut() = Some(on_message);

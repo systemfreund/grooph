@@ -6,23 +6,25 @@ use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::rc::Rc;
 use std::sync::OnceLock;
-use std::sync::atomic::{AtomicU8, Ordering};
 use wasm_bindgen_futures::JsFuture;
 use web_sys::wasm_bindgen::JsCast as _;
 use web_sys::wasm_bindgen::closure::Closure;
 use web_sys::{WakeLockSentinel, WakeLockType};
 
-// 0 = None, 1 = Hidden, 2 = Visible, 3 = PageShow
-static PENDING: AtomicU8 = AtomicU8::new(0);
 static IS_MOBILE: OnceLock<bool> = OnceLock::new();
 
-fn take_pending_visibility_event() -> Option<VisibilityEvent> {
-    match PENDING.swap(0, Ordering::SeqCst) {
-        1 => Some(VisibilityEvent::Hidden),
-        2 => Some(VisibilityEvent::Visible),
-        3 => Some(VisibilityEvent::PageShow),
-        _ => None,
-    }
+thread_local! {
+    /// Visibility events since the last frame, oldest first: a hide and a
+    /// show between two frames must both be handled.
+    static PENDING_VISIBILITY: RefCell<Vec<VisibilityEvent>> = const { RefCell::new(Vec::new()) };
+}
+
+fn push_visibility_event(event: VisibilityEvent) {
+    PENDING_VISIBILITY.with(|q| q.borrow_mut().push(event));
+}
+
+fn take_pending_visibility_events() -> Vec<VisibilityEvent> {
+    PENDING_VISIBILITY.with(|q| std::mem::take(&mut *q.borrow_mut()))
 }
 
 fn install_visibility_listeners(ctx: Context) {
@@ -48,7 +50,11 @@ fn install_visibility_listeners(ctx: Context) {
                 .and_then(|v: JsValue| v.as_string())
                 .map(|s| s == "visible")
                 .unwrap_or(true);
-            PENDING.store(if visible_now { 2 } else { 1 }, Ordering::SeqCst);
+            push_visibility_event(if visible_now {
+                VisibilityEvent::Visible
+            } else {
+                VisibilityEvent::Hidden
+            });
             debug!("visibility change: {}", visible_now);
             ctx1.request_repaint();
         }) as Box<dyn FnMut()>);
@@ -59,7 +65,7 @@ fn install_visibility_listeners(ctx: Context) {
         // pageshow -> PageShow (covers bfcache restores)
         let ctx2 = ctx.clone();
         let on_pageshow = Closure::wrap(Box::new(move || {
-            PENDING.store(3, Ordering::SeqCst);
+            push_visibility_event(VisibilityEvent::PageShow);
             ctx2.request_repaint();
         }) as Box<dyn FnMut()>);
         doc.add_event_listener_with_callback("pageshow", on_pageshow.as_ref().unchecked_ref()).ok();
@@ -141,11 +147,12 @@ impl PlatformRuntime {
         install_press_listeners();
     }
 
-    pub(crate) fn take_visibility_event(&self) -> Option<VisibilityEvent> {
+    /// Visibility events since the last call, oldest first.
+    pub(crate) fn take_visibility_events(&self) -> Vec<VisibilityEvent> {
         if !is_mobile_browser() {
-            return None;
+            return Vec::new();
         }
-        take_pending_visibility_event()
+        take_pending_visibility_events()
     }
 
     pub(crate) fn acquire_wake_lock(&self) {

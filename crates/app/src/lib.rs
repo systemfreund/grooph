@@ -366,7 +366,7 @@ impl App for Grooph {
         self.handle_keyboard_input(ui);
         self.handle_play_along_input(ui);
 
-        if let Some(ev) = self.ui.platform.take_visibility_event() {
+        for ev in self.ui.platform.take_visibility_events() {
             match ev {
                 VisibilityEvent::Hidden => self.hidden(),
                 VisibilityEvent::Visible | VisibilityEvent::PageShow => {
@@ -777,41 +777,41 @@ impl Grooph {
         }
     }
 
+    /// The measure a tool button shows: one beat of `template`, or a whole
+    /// group for a tuplet, in a time signature it fills exactly.
     fn build_button_measure(template: BeatTemplate) -> Measure {
-        let beat_count =
-            if let Duration::Tuplet(TupletSpec { m, .. }) = template.duration { m } else { 2 };
-
-        let mut measure = Measure::new_init(
-            TimeSignature::new(beat_count, template.duration.base_note().denominator()),
-            template.kind,
-        );
-
-        if let Duration::Tuplet(TupletSpec { n, .. }) = template.duration {
-            for i in 0..n {
-                measure.set_beat(i as BeatIdx, Beat::note(template.duration)).unwrap();
+        let denominator = template.duration.base_note().denominator();
+        let time_signature = match template.duration {
+            Duration::Tuplet(TupletSpec { m, .. }) => TimeSignature::new(m, denominator),
+            // A dotted value fills (2^(dots+1) - 1) of its smallest part.
+            Duration::Dotted { dots, .. } => {
+                TimeSignature::new((1 << (dots + 1)) - 1, denominator << dots)
             }
-        }
+            Duration::Simple(..) => TimeSignature::new(1, denominator),
+        };
+        let mut measure = Measure::new_init(time_signature, template.kind);
 
-        if let Duration::Dotted { .. } = template.duration {
-            measure.toggle_dotted(0);
-        }
-
-        if let Duration::Simple(..) = template.duration
-            && template.accented
-        {
-            measure.toggle_accent(0);
-        }
-
-        if let Duration::Simple(..) = template.duration
-            && template.soft
-        {
-            measure.toggle_soft(0);
-        }
-
-        if let Duration::Tuplet(..) = template.duration {
-            //
-        } else {
-            measure.delete_beat(1);
+        match template.duration {
+            Duration::Tuplet(TupletSpec { n, .. }) => {
+                for i in 0..n {
+                    measure.set_beat(i as BeatIdx, Beat::note(template.duration)).unwrap();
+                }
+            }
+            Duration::Dotted { .. } => {
+                let beat = match template.kind {
+                    BeatKind::Note => Beat::note(template.duration),
+                    BeatKind::Rest => Beat::rest(template.duration),
+                };
+                measure.set_beat(0, beat).unwrap();
+            }
+            Duration::Simple(..) => {
+                if template.accented {
+                    measure.toggle_accent(0);
+                }
+                if template.soft {
+                    measure.toggle_soft(0);
+                }
+            }
         }
 
         measure
@@ -1216,6 +1216,43 @@ mod tests {
     use crate::shell::Tab;
     use grooph_measure::counting::CountingSystem;
     use grooph_measure::{Measure, Score, TimeSignature};
+
+    #[test]
+    fn button_measures_fill_their_time_signature() {
+        use super::Grooph;
+        use crate::tools::{ToolKind, all_tools};
+        use grooph_measure::grid::DEFAULT_GRID;
+
+        let templates = all_tools().iter().filter_map(|t| match t.kind {
+            ToolKind::InsertBeat(template) => Some(template),
+            _ => None,
+        });
+        let dotted = super::BeatTemplate {
+            kind: grooph_measure::BeatKind::Note,
+            duration: grooph_measure::duration::Duration::Dotted {
+                dots: 1,
+                base: grooph_measure::duration::NoteValue::Quarter,
+            },
+            accented: false,
+            soft: false,
+        };
+        let mut count = 0;
+        for template in templates.chain([dotted]) {
+            let measure = Grooph::build_button_measure(template);
+            let ticks: u32 =
+                measure.beats().iter().map(|b| DEFAULT_GRID.ticks_of(&b.duration).unwrap()).sum();
+            let ts = measure.time_signature();
+            assert_eq!(ticks, DEFAULT_GRID.ticks_per_measure(&ts), "{:?}", template.duration);
+            let first = measure.beats()[0];
+            assert_eq!((first.kind, first.duration), (template.kind, template.duration));
+            if !template.duration.is_tuplet() {
+                assert_eq!(measure.beats().len(), 1, "{:?}", template.duration);
+                assert_eq!((first.accented, first.soft), (template.accented, template.soft));
+            }
+            count += 1;
+        }
+        assert!(count > 10);
+    }
 
     #[test]
     fn back_closes_one_layer_at_a_time() {

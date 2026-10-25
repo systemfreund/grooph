@@ -97,10 +97,6 @@ impl Measure {
         &self.beats
     }
 
-    pub fn delete_beat(&mut self, idx: BeatIdx) {
-        self.beats.remove(idx);
-    }
-
     /// Replace the beat at index `idx` with `beat` if it fits and the remainder stays fillable.
     ///
     /// Internally classifies the edit via [`Measure::classify_replacement`] and
