@@ -1,0 +1,95 @@
+# Pull request review guidelines
+
+These instructions drive the automated review in `.github/workflows/claude-review.yml`.
+Edit this file to change what the review looks at; the workflow does not need to change.
+
+The CI workflow (`rust.yml`) already runs `cargo fmt`, `cargo clippy -D warnings`, the tests and the
+web build. Do not repeat what those catch (formatting, lint warnings, compile errors). Spend the review on
+what they cannot see: whether the change does what it should, and where it is weak.
+
+## 1. Find the requirements
+
+Work out what this pull request is supposed to achieve, in this order:
+
+1. **Linked issues.** `gh pr view <PR> --json closingIssuesReferences,body,title` lists the issues the PR
+   closes. Also follow issue references in the PR body (`#123`, "Fixes", "Closes", "Part of").
+   Read each with `gh issue view <n> --comments`; later comments often refine or narrow the original ask.
+2. **No issue:** many PRs here come straight out of a coding session and have no issue. Then the PR title
+   and description are the requirements, supplemented by the commit messages
+   (`gh pr view <PR> --json commits`). Treat every behavior the description claims as a requirement.
+3. **Nothing usable** (empty or one-line description, no issue): say so at the top of the review, infer
+   the most likely intent from the diff, and review against that inferred intent, marking it as inferred.
+
+Always state at the top which source you used: `Requirements source: issue #N`, `PR description`, or
+`inferred from the diff`.
+
+## 2. Check the requirements
+
+Turn the requirements into a numbered list of concrete, checkable items. For each, give one verdict:
+
+- ✅ **Met**: name the file/function that implements it.
+- ⚠️ **Partly met**: say what is missing.
+- ❌ **Not met**: say what is missing.
+- ❓ **Unclear**: the requirement is ambiguous, or met only under one reading. Say which reading you assumed.
+
+Also flag the reverse direction: **changes in the diff no requirement asks for** (scope creep, unrelated
+refactors, leftover debug code). For PRs without an issue, flag claims in the description that the diff
+does not back up.
+
+Check that each requirement with observable behavior has a test, or say why a test is impractical (e.g.
+pure UI drawing).
+
+## 3. Look for weaknesses
+
+Read the changed code in context, not just the diff lines. Open callers and callees. Look for:
+
+- **Correctness:** edge cases (empty measures, the first/last beat, tuplet groups, odd time signatures such
+  as 5/8 or 7/8, extreme tempos), off-by-one errors, wrong assumptions about ordering or timing.
+- **Error handling:** `unwrap()`/`expect()`/indexing that can panic on user input, a shared link or device
+  state; errors silently swallowed.
+- **Shared links (`crates/link`):** links already out in the world must keep opening the same way.
+  Any change to parsing or the `?v=2&…` format needs backward compatibility or a new version, plus a test
+  that parses an old link.
+- **Audio and timing (`audio`, `mic`, `midi`, clocks):** allocation, locking or blocking on the audio
+  path; drift between the click and the display; behavior when no device is present or a device
+  disappears.
+- **Native vs. WebAssembly:** code that only works on one target; WASM-only code must sit behind
+  `cfg(target_arch = "wasm32")`; browser APIs (`getUserMedia`, AudioWorklet) failing or being denied.
+- **State and undo:** changes to app state that bypass undo, presets or the library, or that are not
+  persisted where similar settings are.
+- **Rust specifics:** `unsafe` without a `// SAFETY:` comment (edition 2024 rules apply), needless
+  clones or allocations in hot loops (rendering, scheduling), lossy `as` casts on durations and ticks,
+  public API changes in library crates that ripple through the workspace.
+- **Tests:** tests that assert too little, or compare `Beat`s with `==` where the tuplet group matters
+  (`Beat`'s `PartialEq` ignores `tuplet_group_id`).
+
+Only report a weakness you can point to in the code, with a concrete failure scenario. No style nits, no
+speculative "consider maybe" remarks. If you are not sure something is a bug, say how sure you are.
+
+## 4. Output
+
+Post **one summary comment** with `gh pr comment` and, for findings tied to a specific line, **inline
+comments** with the inline comment tool. Do not approve or request changes.
+
+Summary comment layout:
+
+```
+## Claude review
+
+**Requirements source:** …
+
+### Requirements
+| # | Requirement | Verdict | Where / what is missing |
+|---|---|---|---|
+
+### Findings
+1. 🔴/🟠/🟡 **Short title** (`file.rs:line`): what goes wrong, when, and a suggested fix.
+
+### Out of scope / unrequested changes
+…
+
+**Verdict:** one sentence: ready to merge, or what must change first.
+```
+
+Severity: 🔴 breaks a requirement, loses data, panics or breaks existing links; 🟠 wrong in a realistic
+edge case; 🟡 weakness worth fixing but not blocking. Leave out empty sections. Write in English.

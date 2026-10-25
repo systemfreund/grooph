@@ -107,6 +107,16 @@ fn demo_howto_test_measure_with_helpers() {
 - Duration grid utilities: `DEFAULT_GRID.ticks_of(..)` and `DEFAULT_GRID.compute_onset_ticks(..)` are useful for
   low-level assertions.
 
+## Pull requests
+
+Every pull request gets an automated review (`.github/workflows/claude-review.yml`, guided by `REVIEW.md`) that
+checks the change against its requirements. When opening a pull request:
+
+- If it implements an issue, write `Closes #<n>` in the description.
+- If there is no issue (e.g. it comes out of a coding session), the description is the requirements. List what the
+  change should do as concrete, checkable points, including behavior that must stay the same, and note anything
+  deliberately left out.
+
 ## Code style and conventions
 
 - Formatting: See `rustfmt.toml` at repo root. Run `cargo fmt` before committing.
