@@ -824,6 +824,7 @@ impl Grooph {
         let generator = &mut self.editor.generator;
         switch_row(ui, "Ghost notes", &mut generator.ghost_notes);
         switch_row(ui, "Count-in", &mut self.playback_ctl.audio_cfg.count_in);
+        switch_row(ui, "Mute bars", &mut self.playback_ctl.audio_cfg.gap.enabled);
         let swing = self.playback_ctl.audio_cfg.swing;
         let swing_value = if swing.is_straight() {
             swing_label(swing.percent)

@@ -416,7 +416,11 @@ impl Grooph {
             ghost_notes: (generator.ghost_notes && !self.metronome_mode())
                 .then_some(generator.settings.subdivision),
             swing: self.playback_ctl.audio_cfg.swing,
-            gap: self.playback_ctl.audio_cfg.gap,
+            // Editing always sounds every bar, so changes can be heard.
+            gap: GapClick {
+                enabled: self.playback_ctl.audio_cfg.gap.enabled && !self.editing(),
+                ..self.playback_ctl.audio_cfg.gap
+            },
             ramp: self.played_ramp(),
             // Calibration clicks every beat, whatever the user's click bars.
             click: if calibrating {
@@ -426,6 +430,11 @@ impl Grooph {
             },
             counter: self.played_counter(),
         }
+    }
+
+    /// Whether the Edit tab is open, including its time signature dialog.
+    pub(crate) fn editing(&self) -> bool {
+        matches!(self.ui.mode, Mode::Edit | Mode::TimeSignature(_))
     }
 
     /// Tempo backbone of the working score, including swing. Must agree with
@@ -1287,6 +1296,27 @@ mod tests {
         assert!(app.back());
         assert!(app.ui.shell.options_collapsed);
         assert!(!app.back());
+    }
+
+    #[test]
+    fn muted_bars_sound_while_editing() {
+        use super::Grooph;
+
+        let cc = eframe::CreationContext::_new_kittest(eframe::egui::Context::default());
+        let mut app = Grooph::new(&cc);
+        app.playback_ctl.audio_cfg.gap.enabled = true;
+        for tab in [Tab::Practice, Tab::Metronome] {
+            app.select_tab(tab);
+            assert!(app.playback_options().gap.enabled, "{tab:?}");
+        }
+        app.select_tab(Tab::Edit);
+        assert!(!app.playback_options().gap.enabled);
+        // Editing the metronome's clicks too.
+        app.select_tab(Tab::Metronome);
+        app.ui.mode = super::Mode::Edit;
+        assert!(!app.playback_options().gap.enabled);
+        // The setting itself stays on.
+        assert!(app.playback_ctl.audio_cfg.gap.enabled);
     }
 
     fn load(saved: &str) -> CountingSettings {
