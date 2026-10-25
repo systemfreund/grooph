@@ -72,6 +72,7 @@ use grooph_measure::{Beat, BeatKind};
 use grooph_midi::MidiInput;
 use log::{debug, info, warn};
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -255,14 +256,21 @@ impl CountingBase {
         }
     }
 
-    /// The name in the count menu: the start of the count in `system`
-    /// ("1 2 3 4 ...", "1 & 2 & ...", "ta ki da ...").
-    fn label(self, system: CountingSystem) -> String {
+    /// The name in the count menu: the start of the count in `system`, in
+    /// the first bar of `score` it fits, else in 4/4 ("1 2 3 4 ...",
+    /// "1 & 2 & ...", "ta ki da ...").
+    fn label(self, system: CountingSystem, score: &Score) -> String {
         let Some(subdivision) = self.subdivision() else {
             return "Off".to_string();
         };
+        let ts = score
+            .measures
+            .iter()
+            .map(|m| m.time_signature())
+            .find(|ts| subdivision.fits(ts))
+            .unwrap_or(TimeSignature::FOUR_FOUR);
         let config = CountConfig { subdivision, system };
-        let slots = build_count_slots(&Measure::new(TimeSignature::FOUR_FOUR), &config);
+        let slots = build_count_slots(&Measure::new(ts), &config);
         let take = if self == Self::Triplet { 3 } else { 4 };
         let labels: Vec<_> = slots.iter().filter_map(|s| s.label.as_deref()).take(take).collect();
         format!("{} ...", labels.join(" "))
@@ -991,6 +999,16 @@ impl Grooph {
         m
     }
 
+    /// The score on the staff: the click bar in the metronome, else the
+    /// working score.
+    fn shown_score(&self) -> Cow<'_, Score> {
+        if self.metronome_mode() {
+            Cow::Owned(self.metronome_score())
+        } else {
+            Cow::Borrowed(&self.editor.score)
+        }
+    }
+
     fn build_count_config(&self) -> Option<CountConfig> {
         let counting = self.ui.counting;
         let subdivision = counting.base.subdivision()?;
@@ -1198,6 +1216,7 @@ mod tests {
     use super::{CountingBase, CountingSettings, PersistedState};
     use crate::compact::CompactTab;
     use grooph_measure::counting::CountingSystem;
+    use grooph_measure::{Measure, Score, TimeSignature};
 
     #[test]
     fn back_closes_one_layer_at_a_time() {
@@ -1266,7 +1285,8 @@ mod tests {
     #[test]
     fn the_count_menu_shows_each_system() {
         use CountingSystem::*;
-        let labels = |system| CountingBase::ALL.map(|b| b.label(system));
+        let four_four = Score::single(Measure::new(TimeSignature::FOUR_FOUR));
+        let labels = |system| CountingBase::ALL.map(|b| b.label(system, &four_four));
         assert_eq!(
             labels(Numbers),
             ["Off", "1 2 3 4 ...", "1 & 2 & ...", "1 e & a ...", "1 trip let ..."]
@@ -1279,6 +1299,33 @@ mod tests {
             labels(Gordon),
             ["Off", "du du du du ...", "du de du de ...", "du ta de ta ...", "du da di ..."]
         );
+    }
+
+    #[test]
+    fn the_count_menu_spells_the_count_in_the_meter() {
+        use CountingSystem::*;
+        let six_eight = Score::single(Measure::new(TimeSignature::new(6, 8)));
+        let labels = |system| {
+            [CountingBase::Primary, CountingBase::Ands, CountingBase::Triplet]
+                .map(|b| b.label(system, &six_eight))
+        };
+        assert_eq!(labels(Numbers), ["1 2 ...", "1 ta la ta ...", "1 la li ..."]);
+        assert_eq!(labels(Takadimi), ["ta ta ...", "ta va ki di ...", "ta ki da ..."]);
+        assert_eq!(labels(Gordon), ["du du ...", "du ta da ta ...", "du da di ..."]);
+    }
+
+    #[test]
+    fn the_count_menu_spells_a_count_in_the_first_bar_it_fits() {
+        let score = Score {
+            measures: vec![
+                Measure::new(TimeSignature::new(6, 16)),
+                Measure::new(TimeSignature::new(6, 8)),
+            ],
+        };
+        assert_eq!(CountingBase::Primary.label(CountingSystem::Numbers, &score), "1 2 ...");
+        assert_eq!(CountingBase::Ands.label(CountingSystem::Numbers, &score), "1 ta la ta ...");
+        let lone = Score::single(Measure::new(TimeSignature::new(6, 16)));
+        assert_eq!(CountingBase::Ands.label(CountingSystem::Numbers, &lone), "1 & 2 & ...");
     }
 
     #[test]

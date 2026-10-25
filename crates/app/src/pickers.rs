@@ -628,7 +628,7 @@ impl Grooph {
         let bases: Vec<_> = CountingBase::ALL
             .into_iter()
             .filter(|&b| b == counting.base || b.fits(score))
-            .map(|b| (b, b.label(counting.system)))
+            .map(|b| (b, b.label(counting.system, score)))
             .collect();
         let picked = choice_grid(ui, &bases, counting.base, 1);
         if let Some(base) = picked {
