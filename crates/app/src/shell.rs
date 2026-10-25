@@ -5,10 +5,11 @@
 
 use crate::generator::GeneratorState;
 use crate::metronome_view::FillLook;
-use crate::pickers::{Picker, ROW_HEIGHT, shown_groups, swing_label};
+use crate::metronome_view::ratio_label;
+use crate::pickers::{Picker, ROW_HEIGHT, shown_groups, silent_bars_label, swing_label};
 use crate::share::paint_share_icon;
 use crate::tool_palette::{notation_size, paint_none, paint_notation};
-use crate::{Grooph, Mode, TransportState};
+use crate::{CountingBase, Grooph, Mode, TransportState};
 use eframe::egui;
 use eframe::egui::layers::ShapeIdx;
 use eframe::egui::{
@@ -19,7 +20,9 @@ use grooph_layout::glyphs::ts_glyphs;
 use grooph_layout::pixel_layout::PlacedGlyph;
 use grooph_layout::staff_layout::Voice;
 use grooph_measure::TimeSignature;
+use grooph_measure::counter::Ratio;
 use grooph_measure::generator::{Subdivision, effective_subdivision};
+use grooph_measure::swing::MIN_SWING_PERCENT;
 use grooph_render::draw_glyph;
 use serde::{Deserialize, Serialize};
 
@@ -59,13 +62,26 @@ pub(crate) struct ShellState {
     /// The options sheet only shows its handle and the transport buttons.
     /// Folded at start, so the staff and the ring get the room.
     pub(crate) options_collapsed: bool,
+    /// What the switches of the split rows bring back: the last swing,
+    /// count labels and counter rhythm that were not off.
+    pub(crate) last_swing_percent: u8,
+    pub(crate) last_counting: Option<CountingBase>,
+    pub(crate) last_counter: Option<Ratio>,
 }
 
 impl Default for ShellState {
     fn default() -> Self {
-        Self { options_collapsed: true }
+        Self {
+            options_collapsed: true,
+            last_swing_percent: DEFAULT_SWING_PERCENT,
+            last_counting: None,
+            last_counter: None,
+        }
     }
 }
+
+/// Swing the switch turns on before any other was picked: a triplet feel.
+const DEFAULT_SWING_PERCENT: u8 = 66;
 
 /// Bars of the generated score; endless mode never loops.
 fn bars_label(generator: &GeneratorState) -> String {
@@ -231,13 +247,64 @@ fn badged_switch_row(ui: &mut Ui, label: &str, badge: Option<&str>, on: &mut boo
         paint_badge(painter, pos2(label_rect.right() + 8.0, rect.center().y), badge, visuals);
     }
 
-    let switch = Rect::from_center_size(rect.right_center() - vec2(30.0, 0.0), vec2(52.0, 30.0));
-    let fill = if *on { visuals.selection.bg_fill } else { switch_off_fill(visuals) };
+    paint_switch(painter, rect, *on, how_on, visuals);
+    resp.clicked()
+}
+
+/// The switch at the right end of `row`, `how_on` along its way to on.
+fn paint_switch(painter: &Painter, row: Rect, on: bool, how_on: f32, visuals: &egui::Visuals) {
+    let switch = Rect::from_center_size(row.right_center() - vec2(30.0, 0.0), vec2(52.0, 30.0));
+    let fill = if on { visuals.selection.bg_fill } else { switch_off_fill(visuals) };
     painter.rect_filled(switch, 15, fill);
     let radius = 12.0;
     let x = egui::lerp((switch.left() + 15.0)..=(switch.right() - 15.0), how_on);
     painter.circle_filled(pos2(x, switch.center().y), radius, Color32::WHITE);
-    resp.clicked()
+}
+
+/// Width of the switch's own tap area at the right end of a [`split_row`].
+const SPLIT_SWITCH_WIDTH: f32 = 68.0;
+
+/// A [`value_row`] and a switch in one row, split by a thin line: the
+/// switch turns the setting on and off, the rest opens its picker. Returns
+/// the response of the part that opens the picker.
+fn split_row(ui: &mut Ui, label: &str, value: &str, on: &mut bool) -> Response {
+    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), ROW_HEIGHT), Sense::hover());
+    let split = rect.right() - SPLIT_SWITCH_WIDTH;
+    let open_rect = rect.with_max_x(split);
+    let switch_rect = rect.with_min_x(split);
+    let open = ui.interact(open_rect, Id::unique(("split_open", label)), Sense::click());
+    let toggle = ui.interact(switch_rect, Id::unique(("split_switch", label)), Sense::click());
+    if toggle.clicked() {
+        *on = !*on;
+    }
+    let how_on = ui.ctx().animate_bool_responsive(toggle.id, *on);
+    let visuals = ui.visuals();
+    let painter = ui.painter();
+    painter.text(
+        rect.left_center() + vec2(4.0, 0.0),
+        Align2::LEFT_CENTER,
+        label,
+        FontId::proportional(19.0),
+        visuals.text_color(),
+    );
+    painter.text(
+        pos2(split - 30.0, rect.center().y),
+        Align2::RIGHT_CENTER,
+        value,
+        FontId::proportional(19.0),
+        visuals.weak_text_color(),
+    );
+    painter.text(
+        pos2(split - 10.0, rect.center().y),
+        Align2::RIGHT_CENTER,
+        "›",
+        FontId::proportional(26.0),
+        visuals.weak_text_color(),
+    );
+    let divider = visuals.widgets.noninteractive.bg_stroke;
+    painter.vline(split, rect.y_range().shrink(10.0), divider);
+    paint_switch(painter, rect, *on, how_on, visuals);
+    open
 }
 
 /// Pill in the accent colour with small text, its left edge vertically
@@ -738,20 +805,89 @@ impl Grooph {
         if value_row(ui, "Edit clicks", "✏").clicked() {
             self.ui.mode = Mode::Edit;
         }
-        if value_row(ui, "Polyrhythm", &self.counter_label()).clicked() {
-            self.ui.picker = Some(Picker::Polyrhythm);
-        }
-        self.counting_row(ui);
-        switch_row(ui, "Count-in", &mut self.playback_ctl.audio_cfg.count_in);
-        switch_row(ui, "Mute bars", &mut self.playback_ctl.audio_cfg.gap.enabled);
+        self.polyrhythm_row(ui);
+        self.shared_rows(ui);
     }
 
-    /// The count under the staff, shown in every tab; opens its picker.
+    /// Off or the counter rhythm; the switch brings back the last one.
+    fn polyrhythm_row(&mut self, ui: &mut Ui) {
+        if let Some((ratio, _)) = self.counter_ratio() {
+            self.ui.shell.last_counter = Some(ratio);
+        }
+        let Some(restore) = self.counter_to_restore() else {
+            // The meter has no counter rhythm to switch on.
+            if value_row(ui, "Polyrhythm", &self.counter_label()).clicked() {
+                self.ui.picker = Some(Picker::Polyrhythm);
+            }
+            return;
+        };
+        let was_on = self.counter_bar().is_some();
+        let value = if was_on { self.counter_label() } else { ratio_label((restore, false)) };
+        let mut on = was_on;
+        if split_row(ui, "Polyrhythm", &value, &mut on).clicked() {
+            self.ui.picker = Some(Picker::Polyrhythm);
+        }
+        if on != was_on {
+            self.set_counter_ratio(on.then_some(restore));
+        }
+    }
+
+    /// Straight or swung; the switch brings back the last swing.
+    fn swing_row(&mut self, ui: &mut Ui) {
+        let swing = &mut self.playback_ctl.audio_cfg.swing;
+        if !swing.is_straight() {
+            self.ui.shell.last_swing_percent = swing.percent;
+        }
+        let shown = self.ui.shell.last_swing_percent;
+        let value = format!("{} {}", swing_label(shown), swing.unit.label());
+        let was_on = !swing.is_straight();
+        let mut on = was_on;
+        if split_row(ui, "Swing", &value, &mut on).clicked() {
+            self.ui.picker = Some(Picker::Swing);
+        }
+        if on != was_on {
+            swing.percent = if on { shown } else { MIN_SWING_PERCENT };
+        }
+    }
+
+    /// The last rows of both sheets, the same in each tab.
+    fn shared_rows(&mut self, ui: &mut Ui) {
+        self.counting_row(ui);
+        switch_row(ui, "Count-in", &mut self.playback_ctl.audio_cfg.count_in);
+        let gap = &mut self.playback_ctl.audio_cfg.gap;
+        let silent = silent_bars_label(gap);
+        if split_row(ui, "Silent bars", &silent, &mut gap.enabled).clicked() {
+            self.ui.picker = Some(Picker::SilentBars);
+        }
+    }
+
+    /// The count under the staff, shown in every tab; opens its picker. The
+    /// switch brings back the last count that fits the score.
     fn counting_row(&mut self, ui: &mut Ui) {
-        let counting = self.ui.counting;
-        let label = counting.base.label(counting.system, &self.shown_score());
-        if value_row(ui, "Counting", &label).clicked() {
+        let score = self.shown_score().into_owned();
+        let counting = &mut self.ui.counting;
+        if counting.base != CountingBase::Off {
+            self.ui.shell.last_counting = Some(counting.base);
+        }
+        let restore = self.ui.shell.last_counting.filter(|b| b.fits(&score)).or_else(|| {
+            CountingBase::ALL.into_iter().find(|&b| b != CountingBase::Off && b.fits(&score))
+        });
+        let Some(restore) = restore else {
+            if value_row(ui, "Count labels", &counting.base.label(counting.system, &score))
+                .clicked()
+            {
+                self.ui.picker = Some(Picker::Counting);
+            }
+            return;
+        };
+        let was_on = counting.base != CountingBase::Off;
+        let shown = if was_on { counting.base } else { restore };
+        let mut on = was_on;
+        if split_row(ui, "Count labels", &shown.label(counting.system, &score), &mut on).clicked() {
             self.ui.picker = Some(Picker::Counting);
+        }
+        if on != was_on {
+            counting.base = if on { restore } else { CountingBase::Off };
         }
     }
 
@@ -823,25 +959,16 @@ impl Grooph {
         }
         let generator = &mut self.editor.generator;
         switch_row(ui, "Ghost notes", &mut generator.ghost_notes);
-        switch_row(ui, "Count-in", &mut self.playback_ctl.audio_cfg.count_in);
-        let swing = self.playback_ctl.audio_cfg.swing;
-        let swing_value = if swing.is_straight() {
-            swing_label(swing.percent)
-        } else {
-            format!("{} {}", swing_label(swing.percent), swing.unit.label())
-        };
-        if value_row(ui, "Swing", &swing_value).clicked() {
-            self.ui.picker = Some(Picker::Swing);
-        }
+        self.swing_row(ui);
         let ts = self.guide_meter();
         if value_row(ui, "Guide", self.ui.guide.in_meter(&ts).label()).clicked() {
             self.ui.picker = Some(Picker::Guide);
         }
-        self.counting_row(ui);
         let mut accuracy = self.playback_ctl.accuracy.enabled;
         if badged_switch_row(ui, "Timing feedback", Some("BETA"), &mut accuracy) {
             self.set_accuracy_enabled(accuracy);
         }
+        self.shared_rows(ui);
     }
 
     /// Centered "new rhythm" and play buttons. Returns whether "new" was tapped.
@@ -961,7 +1088,7 @@ impl Grooph {
                     }
                     // The edit tab has no options sheet: the count's picker
                     // opens from here.
-                    if ui.button("1 &").on_hover_text("Counting").clicked() {
+                    if ui.button("1 &").on_hover_text("Count labels").clicked() {
                         self.ui.picker = Some(Picker::Counting);
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {

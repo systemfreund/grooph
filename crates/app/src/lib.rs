@@ -416,7 +416,11 @@ impl Grooph {
             ghost_notes: (generator.ghost_notes && !self.metronome_mode())
                 .then_some(generator.settings.subdivision),
             swing: self.playback_ctl.audio_cfg.swing,
-            gap: self.playback_ctl.audio_cfg.gap,
+            // Editing always sounds every bar, so changes can be heard.
+            gap: GapClick {
+                enabled: self.playback_ctl.audio_cfg.gap.enabled && !self.editing(),
+                ..self.playback_ctl.audio_cfg.gap
+            },
             ramp: self.played_ramp(),
             // Calibration clicks every beat, whatever the user's click bars.
             click: if calibrating {
@@ -426,6 +430,12 @@ impl Grooph {
             },
             counter: self.played_counter(),
         }
+    }
+
+    /// Whether the score or the metronome's clicks are being edited: the Edit
+    /// tab, its time signature dialog, or "Edit clicks" in the Metronome tab.
+    pub(crate) fn editing(&self) -> bool {
+        matches!(self.ui.mode, Mode::Edit | Mode::TimeSignature(_))
     }
 
     /// Tempo backbone of the working score, including swing. Must agree with
@@ -1287,6 +1297,66 @@ mod tests {
         assert!(app.back());
         assert!(app.ui.shell.options_collapsed);
         assert!(!app.back());
+    }
+
+    #[test]
+    fn polyrhythm_switch_brings_back_the_last_ratio() {
+        use super::Grooph;
+        use grooph_measure::counter::Ratio;
+
+        let cc = eframe::CreationContext::_new_kittest(eframe::egui::Context::default());
+        let mut app = Grooph::new(&cc);
+        app.select_tab(Tab::Metronome);
+        let first = app.counter_choices().first().copied();
+        assert!(first.is_some());
+        assert_eq!(app.counter_to_restore(), first);
+        let last = *app.counter_choices().last().unwrap();
+        app.ui.shell.last_counter = Some(last);
+        assert_eq!(app.counter_to_restore(), Some(last));
+        // A ratio the meter has no counter bar for falls back to the first.
+        app.ui.shell.last_counter = Some(Ratio { n: 97, span: 1 });
+        assert_eq!(app.counter_to_restore(), first);
+    }
+
+    #[test]
+    fn silent_bars_row_names_the_pattern() {
+        use crate::pickers::silent_bars_label;
+        use grooph_audio::{GapClick, GapMode};
+
+        let mut gap =
+            GapClick { on_bars: 3, off_bars: 1, random_percent: 25, ..GapClick::default() };
+        // Off shows what switching on brings back.
+        assert_eq!(silent_bars_label(&gap), "3 on · 1 off");
+        gap.enabled = true;
+        assert_eq!(silent_bars_label(&gap), "3 on · 1 off");
+        gap.mode = GapMode::Random;
+        assert_eq!(silent_bars_label(&gap), "Random 25%");
+    }
+
+    #[test]
+    fn muted_bars_sound_while_editing() {
+        use super::Grooph;
+
+        let cc = eframe::CreationContext::_new_kittest(eframe::egui::Context::default());
+        let mut app = Grooph::new(&cc);
+        app.playback_ctl.audio_cfg.gap.enabled = true;
+        for tab in [Tab::Practice, Tab::Metronome] {
+            app.select_tab(tab);
+            assert!(app.playback_options().gap.enabled, "{tab:?}");
+        }
+        app.select_tab(Tab::Edit);
+        assert!(!app.playback_options().gap.enabled);
+        // Editing the metronome's clicks too.
+        app.select_tab(Tab::Metronome);
+        app.ui.mode = super::Mode::Edit;
+        assert!(!app.playback_options().gap.enabled);
+        app.select_tab(Tab::Edit);
+        app.ui.mode = super::Mode::TimeSignature(TimeSignature::FOUR_FOUR);
+        assert!(!app.playback_options().gap.enabled);
+        // The setting itself stays on, and bars are muted again after editing.
+        assert!(app.playback_ctl.audio_cfg.gap.enabled);
+        app.select_tab(Tab::Practice);
+        assert!(app.playback_options().gap.enabled);
     }
 
     fn load(saved: &str) -> CountingSettings {
