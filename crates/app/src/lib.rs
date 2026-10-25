@@ -253,15 +253,17 @@ impl CountingBase {
         }
     }
 
-    /// The start of the count in `system` for the menu ("1 & 2 & ..."),
-    /// `None` for `Off` and `Primary`.
-    fn example(self, system: CountingSystem) -> Option<String> {
-        let subdivision = self.subdivision().filter(|_| self != Self::Primary)?;
+    /// The name in the count menu: the start of the count in `system`
+    /// ("1 2 3 4 ...", "1 & 2 & ...", "ta ki da ...").
+    fn label(self, system: CountingSystem) -> String {
+        let Some(subdivision) = self.subdivision() else {
+            return "Off".to_string();
+        };
         let config = CountConfig { subdivision, system };
-        let slots = build_count_slots(&Measure::new(TimeSignature::TWO_FOUR), &config);
+        let slots = build_count_slots(&Measure::new(TimeSignature::FOUR_FOUR), &config);
         let take = if self == Self::Triplet { 3 } else { 4 };
         let labels: Vec<_> = slots.iter().filter_map(|s| s.label.as_deref()).take(take).collect();
-        Some(format!("{} ...", labels.join(" ")))
+        format!("{} ...", labels.join(" "))
     }
 
     /// Whether the subdivision counts sensibly in some measure of `score`.
@@ -1262,14 +1264,28 @@ mod tests {
     #[test]
     fn the_count_menu_shows_each_system() {
         use CountingSystem::*;
-        let examples = |system| {
-            [CountingBase::Ands, CountingBase::Sixteenth, CountingBase::Triplet]
-                .map(|b| b.example(system).unwrap())
+        let labels = |system| {
+            [
+                CountingBase::Off,
+                CountingBase::Primary,
+                CountingBase::Ands,
+                CountingBase::Sixteenth,
+                CountingBase::Triplet,
+            ]
+            .map(|b| b.label(system))
         };
-        assert_eq!(examples(Numbers), ["1 & 2 & ...", "1 e & a ...", "1 trip let ..."]);
-        assert_eq!(examples(Takadimi), ["ta di ta di ...", "ta ka di mi ...", "ta ki da ..."]);
-        assert_eq!(examples(Gordon), ["du de du de ...", "du ta de ta ...", "du da di ..."]);
-        assert_eq!(CountingBase::Primary.example(Numbers), None);
+        assert_eq!(
+            labels(Numbers),
+            ["Off", "1 2 3 4 ...", "1 & 2 & ...", "1 e & a ...", "1 trip let ..."]
+        );
+        assert_eq!(
+            labels(Takadimi),
+            ["Off", "ta ta ta ta ...", "ta di ta di ...", "ta ka di mi ...", "ta ki da ..."]
+        );
+        assert_eq!(
+            labels(Gordon),
+            ["Off", "du du du du ...", "du de du de ...", "du ta de ta ...", "du da di ..."]
+        );
     }
 
     #[test]

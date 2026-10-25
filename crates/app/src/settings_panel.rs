@@ -214,13 +214,7 @@ impl Grooph {
                                 }
                             });
                         egui::ComboBox::from_label("Count")
-                            .selected_text(match self.ui.counting.base {
-                                CountingBase::Off => "Off",
-                                CountingBase::Primary => "Primary",
-                                CountingBase::Ands => "Ands",
-                                CountingBase::Sixteenth => "16th",
-                                CountingBase::Triplet => "Triplet",
-                            })
+                            .selected_text(self.ui.counting.base.label(system))
                             .show_ui(ui, |ui| {
                                 for base in [
                                     CountingBase::Off,
@@ -229,11 +223,7 @@ impl Grooph {
                                     CountingBase::Sixteenth,
                                     CountingBase::Triplet,
                                 ] {
-                                    let label = match base {
-                                        CountingBase::Off => "Off".to_string(),
-                                        CountingBase::Primary => "Primary".to_string(),
-                                        _ => base.example(system).unwrap_or_default(),
-                                    };
+                                    let label = base.label(system);
                                     ui.add_enabled_ui(base.fits(&self.editor.score), |ui| {
                                         ui.selectable_value(&mut self.ui.counting.base, base, label)
                                     })
