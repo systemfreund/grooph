@@ -81,4 +81,4 @@ jobs:
             exactly: find the requirements (linked issues, otherwise the PR description),
             check each one, look for weaknesses, post the inline comments as described
             there, and give the summary as your final answer: it is posted as the PR
-            comment. CLAUDE.md describes the workspace layout. Do not modify any files.
+            comment. AGENTS.md describes the workspace layout. Do not modify any files.

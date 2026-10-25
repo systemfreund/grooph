@@ -39,7 +39,9 @@ Rust developers and focuses on crate-specific behaviors and APIs that matter whe
 - `trunk build --release` (the web job). To check the WASM target without Trunk:
   `cargo clippy -p grooph-app --target wasm32-unknown-unknown -- -D warnings`
 
-Pushes to `main` deploy the web build to Cloudflare Pages once both jobs pass.
+Pushes to `main` deploy the web build to Cloudflare Pages (grooph.app) once both jobs pass. Pull requests from
+branches of this repository deploy to their own preview (`<branch>.grooph.pages.dev`) and get the link as a comment;
+pull requests from forks are not deployed.
 
 ## Testing: how to configure and run
 
