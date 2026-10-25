@@ -118,6 +118,13 @@ impl TupletRegistry {
         self.anchors.get(&id.0)
     }
 
+    /// Make sure [`Self::register`] hands out no id of an anchor again.
+    pub(crate) fn reserve_anchor_ids(&mut self) {
+        if let Some(max) = self.anchors.keys().max() {
+            self.next = self.next.max(max.saturating_add(1));
+        }
+    }
+
     pub fn is_empty(&self) -> bool {
         self.anchors.is_empty()
     }

@@ -25,10 +25,10 @@ use duration::{Duration, TupletSpec};
 use editing::{GroupSpan, Modification};
 use either::Either;
 use grid::DEFAULT_GRID;
-pub use score::{Cursor, MeasureIdx, Score};
+pub use score::{Cursor, EmptyScore, MeasureIdx, Score};
 use serde::{Deserialize, Serialize};
 use std::fmt::{Debug, Formatter};
-pub use time_signature::{ParseTimeSignatureError, TimeSignature};
+pub use time_signature::{InvalidTimeSignature, ParseTimeSignatureError, TimeSignature};
 pub use tuplet::{TupletAnchor, TupletGroupId, TupletRegistry};
 
 /// Logical Beat-Index within a measure (0-based)
@@ -66,13 +66,108 @@ enum ReplacementKind {
 }
 
 /// Represents a musical measure containing a sequence of beats
+///
+/// Invariant: the beats have supported durations and fill the measure
+/// exactly, every beat in a tuplet group has an anchor, and the beats of
+/// every group of two or more fill its anchor's span.
+/// The constructors and editing methods keep it; deserializing checks it
+/// (see [`InvalidMeasure`]).
 #[derive(Clone, Serialize, Deserialize)]
+#[serde(try_from = "RawMeasure")]
 pub struct Measure {
     beats: Vec<Beat>,
     time_signature: TimeSignature,
     /// Tuplet group anchors + id allocator.
     #[serde(flatten)]
     tuplets: TupletRegistry,
+}
+
+/// A [`Measure`] as saved, before its invariant is checked.
+#[derive(Deserialize)]
+struct RawMeasure {
+    beats: Vec<Beat>,
+    time_signature: TimeSignature,
+    #[serde(flatten)]
+    tuplets: TupletRegistry,
+}
+
+/// Why a saved measure does not hold (see [`Measure`]); spans in grid ticks.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InvalidMeasure {
+    /// The beat at `idx` has a duration the measure does not support.
+    UnsupportedDuration { idx: BeatIdx },
+    /// The beats do not fill the measure exactly.
+    WrongLength { ticks: u64, expected: u32 },
+    /// The beat at `idx` is in a tuplet group without an anchor.
+    UnknownTupletGroup { idx: BeatIdx, id: TupletGroupId },
+    /// The beats of a tuplet group do not fill its anchor's span.
+    TupletGroupLength { id: TupletGroupId, ticks: u64, expected: u32 },
+}
+
+impl std::fmt::Display for InvalidMeasure {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UnsupportedDuration { idx } => {
+                write!(f, "beat {idx} has an unsupported duration")
+            }
+            Self::WrongLength { ticks, expected } => {
+                write!(f, "beats span {ticks} ticks, the measure {expected}")
+            }
+            Self::UnknownTupletGroup { idx, id } => {
+                write!(f, "beat {idx} is in tuplet group {} without an anchor", id.as_u32())
+            }
+            Self::TupletGroupLength { id, ticks, expected } => {
+                write!(f, "tuplet group {} spans {ticks} ticks, its anchor {expected}", id.as_u32())
+            }
+        }
+    }
+}
+
+impl std::error::Error for InvalidMeasure {}
+
+impl TryFrom<RawMeasure> for Measure {
+    type Error = InvalidMeasure;
+
+    fn try_from(raw: RawMeasure) -> Result<Self, Self::Error> {
+        let RawMeasure { beats, time_signature, mut tuplets } = raw;
+        let mut ticks = 0u64;
+        for (idx, beat) in beats.iter().enumerate() {
+            // `supports` first: `ticks_of` overflows on durations like a
+            // note with forty dots.
+            let beat_ticks = DEFAULT_GRID
+                .supports(&beat.duration)
+                .then(|| DEFAULT_GRID.ticks_of(&beat.duration))
+                .flatten()
+                .ok_or(InvalidMeasure::UnsupportedDuration { idx })?;
+            ticks += u64::from(beat_ticks);
+            if let Some(id) = beat.tuplet_group_id
+                && tuplets.get(id).is_none()
+            {
+                return Err(InvalidMeasure::UnknownTupletGroup { idx, id });
+            }
+        }
+        let expected = DEFAULT_GRID.ticks_per_measure(&time_signature);
+        if ticks != u64::from(expected) {
+            return Err(InvalidMeasure::WrongLength { ticks, expected });
+        }
+        // Anchors saved at or above the next id would be overwritten.
+        tuplets.reserve_anchor_ids();
+        let measure = Self { beats, time_signature, tuplets };
+        // Like everywhere else, a lone beat with a group id counts as no group
+        // (see `tuplet_group_at`): nothing reads its anchor's span.
+        for GroupSpan { start_idx, end_idx, id } in measure.tuplet_groups() {
+            let ticks: u64 = measure.beats[start_idx..=end_idx]
+                .iter()
+                .filter_map(|b| DEFAULT_GRID.ticks_of(&b.duration))
+                .map(u64::from)
+                .sum();
+            let expected = measure.tuplets.get(id).map_or(0, |a| a.target_ticks);
+            if ticks != u64::from(expected) {
+                return Err(InvalidMeasure::TupletGroupLength { id, ticks, expected });
+            }
+        }
+        Ok(measure)
+    }
 }
 
 impl Measure {
@@ -995,5 +1090,149 @@ mod tests {
         }
 
         assert_eq!(m.beats().to_vec(), vec![Beat::note(e()), Beat::rest(e())]);
+    }
+
+    fn read(text: &str) -> Result<Measure, String> {
+        ron::from_str::<Measure>(text).map_err(|err| err.to_string())
+    }
+
+    fn round_trips(m: &Measure) -> bool {
+        let back = read(&ron::to_string(m).unwrap()).unwrap_or_else(|err| panic!("{m:?}: {err}"));
+        // `Beat`'s `PartialEq` ignores the tuplet group: compare it and its anchor too.
+        let groups = |m: &Measure| -> Vec<_> {
+            m.beats()
+                .iter()
+                .map(|b| b.tuplet_group_id.map(|id| (id, m.tuplets().get(id).cloned())))
+                .collect()
+        };
+        back.time_signature() == m.time_signature()
+            && back.beats() == m.beats()
+            && groups(&back) == groups(m)
+            && back.tuplets().len() == m.tuplets().len()
+    }
+
+    #[test]
+    fn deserializing_keeps_the_measures_the_app_writes() {
+        use crate::click::{default_click_bar, meter_click_bar};
+        use crate::counter::{counter_bar, own_ratios};
+        use crate::generator::{
+            GeneratorSettings, MAX_COMPLEXITY, Rng, Subdivision, generate_measure,
+        };
+
+        let meters = TimeSignature::BEAT_UNITS.into_iter().flat_map(|unit| {
+            TimeSignature::beat_range(unit).unwrap().flat_map(move |beats| {
+                let ts = TimeSignature::new(beats, unit);
+                (0..ts.groupings().len() as u8).map(move |g| ts.with_grouping(g))
+            })
+        });
+        // The meters of the tool buttons, beyond the picker.
+        for (beats, unit) in [(1, 8), (2, 8), (1, 16), (2, 16), (3, 16), (4, 16), (3, 32)] {
+            assert!(round_trips(&Measure::new(TimeSignature::new(beats, unit))));
+        }
+        let mut rng = Rng::new(178);
+        for ts in meters {
+            assert!(round_trips(&Measure::new(ts)));
+            assert!(round_trips(&default_click_bar(ts)));
+            assert!(round_trips(&meter_click_bar(ts)));
+            for ratio in own_ratios(ts) {
+                assert!(round_trips(&counter_bar(ts, ratio).unwrap()));
+            }
+            for subdivision in [
+                Subdivision::Eighths,
+                Subdivision::Sixteenths,
+                Subdivision::Triplets,
+                Subdivision::Mixed,
+            ] {
+                for complexity in 1..=MAX_COMPLEXITY {
+                    let settings = GeneratorSettings {
+                        subdivision,
+                        complexity,
+                        time_signature: ts,
+                        ..GeneratorSettings::default()
+                    };
+                    if let Ok(m) = generate_measure(&settings, &mut rng) {
+                        assert!(round_trips(&m));
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn deserializing_keeps_edited_measures() {
+        use crate::duration::COMMON_DURATIONS;
+        use crate::generator::Rng;
+
+        let mut rng = Rng::new(17);
+        for ts in [TimeSignature::FOUR_FOUR, TimeSignature::SEVEN_EIGHT, TimeSignature::new(5, 16)]
+        {
+            let mut m = Measure::new(ts);
+            for _ in 0..2000 {
+                let idx = rng.below(m.beats().len());
+                match rng.below(4) {
+                    0 => {
+                        m.dissolve_tuplet_group(idx);
+                    }
+                    1 => {
+                        m.toggle_beat_kind(idx);
+                    }
+                    _ => {
+                        let d = COMMON_DURATIONS[rng.below(COMMON_DURATIONS.len())];
+                        let _ = m.set_beat(idx, Beat::note(d));
+                    }
+                }
+                assert!(round_trips(&m));
+            }
+        }
+    }
+
+    #[test]
+    fn deserializing_rejects_broken_measures() {
+        let mut m = Measure::new(TimeSignature::FOUR_FOUR);
+        m.set_beat(1, Beat::note(t8())).unwrap();
+        let saved = ron::to_string(&m).unwrap();
+        assert!(read(&saved).is_ok());
+        let broken = |from: &str, to: &str| {
+            assert!(saved.contains(from), "{from} not in {saved}");
+            read(&saved.replacen(from, to, 1)).unwrap_err()
+        };
+
+        // A time signature that is none.
+        assert!(broken("beat_unit:4", "beat_unit:0").contains("4/0 is not a time signature"));
+        assert!(broken("beats:4", "beats:0").contains("0/4 is not a time signature"));
+        // Beats that overfill or underfill the measure.
+        assert!(broken("beats:4", "beats:3").contains("beats span"));
+        assert!(broken("beats:4", "beats:5").contains("beats span"));
+        // A duration off the grid, and one that overflows the tick arithmetic.
+        let quarter = "duration:Simple(Quarter)";
+        assert!(
+            broken(quarter, "duration:Dotted(base:Quarter,dots:40)")
+                .contains("unsupported duration")
+        );
+        assert!(
+            broken(quarter, "duration:Tuplet((n:0,m:0,base:Quarter))")
+                .contains("unsupported duration")
+        );
+        // A tuplet group without an anchor, and one its beats do not fill.
+        assert!(
+            broken("tuplet_group_id:Some(1)", "tuplet_group_id:Some(9)")
+                .contains("without an anchor")
+        );
+        assert!(broken("m:2,target_ticks", "m:3,target_ticks").contains("tuplet group 1 spans"));
+    }
+
+    #[test]
+    fn deserializing_never_hands_out_a_saved_tuplet_id_again() {
+        let mut m = Measure::new(TimeSignature::FOUR_FOUR);
+        m.set_beat(0, Beat::note(t8())).unwrap();
+        let saved = ron::to_string(&m).unwrap();
+        assert!(saved.contains("\"next_tuplet_id\":2"), "{saved}");
+        let saved = saved.replace("\"next_tuplet_id\":2", "\"next_tuplet_id\":1");
+        let mut back = read(&saved).unwrap();
+        back.set_beat(3, Beat::note(t8())).unwrap();
+        let first = back.beats()[0].tuplet_group_id.unwrap();
+        let second = back.beats()[3].tuplet_group_id.unwrap();
+        assert_ne!(first, second);
+        assert!(back.tuplets().get(first).is_some() && back.tuplets().get(second).is_some());
     }
 }

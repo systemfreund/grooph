@@ -207,6 +207,21 @@ mod tests {
     }
 
     #[test]
+    fn a_broken_score_falls_back_alone() {
+        let mut state = saved_state();
+        state.score = Score::single(Measure::new(TimeSignature::SEVEN_EIGHT));
+        let saved = ron::to_string(&state).unwrap();
+        // Seven eighths in 6/8: an over-full measure.
+        assert_eq!(saved.matches("beats:7,").count(), 1, "{saved}");
+        let saved = saved.replace("beats:7,", "beats:6,");
+        let (s, backup) = restore(Some(&saved));
+        assert!(s.score.same_beats(&PersistedState::default().score));
+        assert_library_and_presets_kept(&s);
+        assert_eq!(s.bpm, 93);
+        assert_eq!(backup.unwrap().ron, saved);
+    }
+
+    #[test]
     fn an_unknown_field_is_ignored() {
         let saved = saved_ron().replacen('(', "(removed_setting:Some(3),", 1);
         let (s, backup) = restore(Some(&saved));
