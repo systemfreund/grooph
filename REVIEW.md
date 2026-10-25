@@ -1,6 +1,6 @@
 # Pull request review guidelines
 
-These instructions drive the automated review in `.github/workflows/opencode-review.yml`.
+These instructions drive the automated review in `.github/workflows/code-review.yml`.
 Edit this file to change what the review looks at; the workflow does not need to change.
 
 The CI workflow (`rust.yml`) already runs `cargo fmt`, `cargo clippy -D warnings`, the tests and the
@@ -85,7 +85,7 @@ summary heading as shown below, and start every inline comment with `**[<MODEL>]
 Summary comment layout:
 
 ```
-## OpenCode review (<MODEL>)
+## Code review (<MODEL>)
 
 **Requirements source:** …
 

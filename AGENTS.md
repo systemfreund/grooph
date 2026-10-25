@@ -109,7 +109,7 @@ fn demo_howto_test_measure_with_helpers() {
 
 ## Pull requests
 
-Every pull request gets an automated review (`.github/workflows/opencode-review.yml`, guided by `REVIEW.md`) that
+Every pull request gets an automated review (`.github/workflows/code-review.yml`, guided by `REVIEW.md`) that
 checks the change against its requirements. When opening a pull request:
 
 - If it implements an issue, write `Closes #<n>` in the description.
