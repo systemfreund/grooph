@@ -10,7 +10,7 @@
 
 use crate::{PERSISTED_STATE_VERSION, PersistedState};
 use grooph_measure::{BeatIdx, Cursor, Measure, Score};
-use log::warn;
+use log::{info, warn};
 use ron::value::RawValue;
 use serde::de::{Deserialize, Deserializer, MapAccess, Visitor};
 use std::fmt;
@@ -35,6 +35,7 @@ impl StateBackup {
             .chain((2..).map(|n| format!("{base}_{n}")))
             .find(|key| storage.get_string(key).is_none())
             .unwrap_or(base);
+        info!("Backing up the saved state under `{key}` ({} bytes)", self.ron.len());
         storage.set_string(&key, self.ron);
     }
 }
@@ -54,9 +55,13 @@ pub(crate) fn restore(saved: Option<&str>) -> (PersistedState, Option<StateBacku
         }
     };
 
-    let version = field(&fields, "version")
-        .and_then(|raw| raw.into_rust::<u8>().ok())
-        .unwrap_or(PERSISTED_STATE_VERSION);
+    // A version that does not read counts as dropped: the text is backed up.
+    let stored_version = field(&fields, "version").map(|raw| raw.into_rust::<u8>().ok());
+    let version_read = stored_version.is_none_or(|v| v.is_some());
+    if !version_read {
+        warn!("Saved state: `version` does not read, assuming the current one");
+    }
+    let version = stored_version.flatten().unwrap_or(PERSISTED_STATE_VERSION);
     if version < PERSISTED_STATE_VERSION {
         migrate(version, &mut fields);
     }
@@ -76,7 +81,7 @@ pub(crate) fn restore(saved: Option<&str>) -> (PersistedState, Option<StateBacku
             PersistedState::default()
         });
 
-    let complete = dropped.is_empty() && version == PERSISTED_STATE_VERSION;
+    let complete = dropped.is_empty() && version_read && version == PERSISTED_STATE_VERSION;
     (state, if complete { None } else { backup(version) })
 }
 
@@ -209,6 +214,18 @@ mod tests {
         let (s, backup) = restore(Some("(bpm: 93, library: ("));
         assert_eq!(s.bpm, PersistedState::default().bpm);
         assert_eq!(backup.unwrap().ron, "(bpm: 93, library: (");
+    }
+
+    #[test]
+    fn a_version_that_does_not_read_is_backed_up() {
+        let saved = saved_ron().replacen(
+            &format!("version:{PERSISTED_STATE_VERSION}"),
+            "version:\"two\"",
+            1,
+        );
+        let (s, backup) = restore(Some(&saved));
+        assert_library_and_presets_kept(&s);
+        assert_eq!(backup.unwrap().ron, saved);
     }
 
     #[test]
