@@ -20,6 +20,12 @@ name: Code review
 #
 # Needs the repository secret VENICE_API_KEY. Runs with the workflow's own
 # GITHUB_TOKEN, so the OpenCode GitHub App is not needed.
+#
+# OpenCode is installed from npm at the version below and started with
+# `opencode github run`, which is what anomalyco/opencode/github does. The
+# action itself is not used: it looks up the latest release with an
+# unauthenticated GitHub API call, which fails on shared runners when the
+# rate limit is hit. To update OpenCode, change OPENCODE_VERSION.
 
 on:
   pull_request:
@@ -32,6 +38,9 @@ on:
       models:
         description: 'Models to compare, as a JSON list, e.g. ["venice/z-ai-glm-5-3"]. Leave blank for the default list'
         required: false
+
+env:
+  OPENCODE_VERSION: 1.19.4
 
 concurrency:
   group: code-review-${{ github.event.pull_request.number || inputs.pr }}
@@ -64,19 +73,21 @@ jobs:
           ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/pull/{0}/head', inputs.pr) || github.event.pull_request.head.sha }}
           fetch-depth: 1
 
+      - name: Install OpenCode
+        run: npm install --global "opencode-ai@${OPENCODE_VERSION}"
+
       - name: Review with ${{ matrix.model }}
-        uses: anomalyco/opencode/github@latest
+        run: opencode github run
         env:
           VENICE_API_KEY: ${{ secrets.VENICE_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          model: ${{ matrix.model }}
-          agent: review
-          use_github_token: true
+          MODEL: ${{ matrix.model }}
+          AGENT: review
+          USE_GITHUB_TOKEN: true
           # Do not publish the session on opencode.ai (the default for public repos).
-          share: false
-          prompt: |
+          SHARE: false
+          PROMPT: |
             REPO: ${{ github.repository }}
             PR NUMBER: ${{ github.event.pull_request.number || inputs.pr }}
             HEAD SHA: ${{ github.event.pull_request.head.sha || '' }}
@@ -123,19 +134,21 @@ jobs:
           ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/pull/{0}/head', inputs.pr) || github.event.pull_request.head.sha }}
           fetch-depth: 1
 
+      - name: Install OpenCode
+        if: steps.changes.outputs.rust == 'true'
+        run: npm install --global "opencode-ai@${OPENCODE_VERSION}"
+
       - name: Rust review
         if: steps.changes.outputs.rust == 'true'
-        uses: anomalyco/opencode/github@latest
+        run: opencode github run
         env:
           VENICE_API_KEY: ${{ secrets.VENICE_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          model: ${{ env.MODEL }}
-          agent: review
-          use_github_token: true
-          share: false
-          prompt: |
+          AGENT: review
+          USE_GITHUB_TOKEN: true
+          SHARE: false
+          PROMPT: |
             REPO: ${{ github.repository }}
             PR NUMBER: ${{ env.PR }}
             HEAD SHA: ${{ github.event.pull_request.head.sha || '' }}
