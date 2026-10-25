@@ -751,7 +751,7 @@ impl Grooph {
     /// The count under the staff, shown in every tab; opens its picker.
     fn counting_row(&mut self, ui: &mut Ui) {
         let counting = self.ui.counting;
-        let label = counting.base.label(counting.system, self.count_meter());
+        let label = counting.base.label(counting.system, &self.shown_score());
         if value_row(ui, "Counting", &label).clicked() {
             self.ui.picker = Some(Picker::Counting);
         }
