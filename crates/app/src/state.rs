@@ -4,6 +4,7 @@ use crate::generator::GeneratorState;
 use crate::guide::{AnchorFlash, Guide};
 use crate::library::PatternLibrary;
 use crate::metronome_view::MetronomeState;
+use crate::persist::StateBackup;
 use crate::pickers::Picker;
 use crate::platform::PlatformRuntime;
 use crate::play_along::PlayAlongState;
@@ -268,6 +269,9 @@ pub(crate) struct EditorState {
     /// The metronome tab's meter, and the rhythm it put aside while it edits
     /// the click bar in the score's place.
     pub(crate) metronome: MetronomeState,
+    /// Saved state that did not restore completely, kept under a backup key
+    /// at the next save.
+    pub(crate) state_backup: Option<StateBackup>,
 }
 
 /// Realtime playback subsystem: transport, tempo, audio engine, MIDI input,

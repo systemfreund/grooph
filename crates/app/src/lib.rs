@@ -14,6 +14,7 @@ mod metronome_trainer;
 mod metronome_view;
 mod midi_input_widget;
 mod mixer_panel;
+mod persist;
 mod pickers;
 mod platform;
 mod play_along;
@@ -113,11 +114,11 @@ pub struct Grooph {
     pub(crate) ui: UiShell,
 }
 
-const PERSISTED_STATE_VERSION: u8 = 2;
+pub(crate) const PERSISTED_STATE_VERSION: u8 = 2;
 
 #[derive(Serialize, Deserialize)]
 #[serde(default)]
-struct PersistedState {
+pub(crate) struct PersistedState {
     version: u8,
     score: Score,
     cursor: Cursor,
@@ -400,6 +401,9 @@ impl App for Grooph {
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         let state = PersistedState::from_app(self);
         eframe::set_value(storage, APP_STATE_KEY, &state);
+        if let Some(backup) = self.editor.state_backup.take() {
+            backup.write(storage);
+        }
     }
 }
 
@@ -1020,11 +1024,8 @@ impl Grooph {
         egui_extras::install_image_loaders(&cc.egui_ctx);
         let ff = FontFamily::Name("music".into());
 
-        let mut state = cc
-            .storage
-            .and_then(|storage| eframe::get_value::<PersistedState>(storage, APP_STATE_KEY))
-            .filter(|s| s.version == PERSISTED_STATE_VERSION)
-            .unwrap_or_default();
+        let saved = cc.storage.and_then(|storage| storage.get_string(APP_STATE_KEY));
+        let (mut state, state_backup) = persist::restore(saved.as_deref());
 
         if state.score.is_empty() {
             state.score = Score::single(Self::default_measure());
@@ -1128,6 +1129,7 @@ impl Grooph {
                 library: state.library,
                 presets: state.presets,
                 active_preset: None,
+                state_backup,
                 metronome: MetronomeState::new(state.metronome_meter),
                 generator: GeneratorState::new(
                     state.generator_settings,
