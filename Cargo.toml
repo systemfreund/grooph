@@ -18,6 +18,19 @@ version = "0.1.0"
 edition = "2024"
 authors = ["systemfreund"]
 license = "LGPL-2"
+# The oldest toolchain that builds and tests the workspace: egui 0.37 needs
+# 1.95, the tests' `assert_matches!` 1.96.
+rust-version = "1.96"
+
+# Shared by every crate through `[lints] workspace = true`. CI adds
+# `-D warnings` on top.
+[workspace.lints.rust]
+unsafe_code = "deny"
+unused_must_use = "deny"
+
+[workspace.lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
 
 [workspace.dependencies]
 grooph-audio = { path = "crates/audio" }

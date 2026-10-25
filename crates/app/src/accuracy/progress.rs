@@ -81,7 +81,7 @@ pub(super) fn update_progress(
     data.last_tick = Some(current_tick);
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 fn process_segment(
     global_beats: &[GlobalBeatOnset],
     start: f64,

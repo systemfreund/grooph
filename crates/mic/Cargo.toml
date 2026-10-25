@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
+rust-version.workspace = true
 
 [dependencies]
 log = { workspace = true }
@@ -39,3 +40,6 @@ web-sys = { workspace = true, features = [
     "Url",
     "Worklet",
 ] }
+
+[lints]
+workspace = true
