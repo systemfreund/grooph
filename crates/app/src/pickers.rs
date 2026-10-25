@@ -618,6 +618,7 @@ impl Grooph {
     fn counting_choices(&mut self, ui: &mut Ui) -> bool {
         let metronome = self.metronome_mode().then(|| self.metronome_score());
         let score = metronome.as_ref().unwrap_or(&self.editor.score);
+        let ts = self.count_meter();
         let counting = &mut self.ui.counting;
         let systems: Vec<_> =
             CountingSystem::ALL.map(|s| (s, counting_system_name(s).to_owned())).into();
@@ -628,7 +629,7 @@ impl Grooph {
         let bases: Vec<_> = CountingBase::ALL
             .into_iter()
             .filter(|&b| b == counting.base || b.fits(score))
-            .map(|b| (b, b.label(counting.system)))
+            .map(|b| (b, b.label(counting.system, ts)))
             .collect();
         let picked = choice_grid(ui, &bases, counting.base, 1);
         if let Some(base) = picked {

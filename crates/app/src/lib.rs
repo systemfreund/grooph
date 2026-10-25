@@ -255,14 +255,14 @@ impl CountingBase {
         }
     }
 
-    /// The name in the count menu: the start of the count in `system`
-    /// ("1 2 3 4 ...", "1 & 2 & ...", "ta ki da ...").
-    fn label(self, system: CountingSystem) -> String {
+    /// The name in the count menu: the start of the count in `system` and a
+    /// bar of `ts` ("1 2 3 4 ...", "1 & 2 & ...", "ta ki da ...").
+    fn label(self, system: CountingSystem, ts: TimeSignature) -> String {
         let Some(subdivision) = self.subdivision() else {
             return "Off".to_string();
         };
         let config = CountConfig { subdivision, system };
-        let slots = build_count_slots(&Measure::new(TimeSignature::FOUR_FOUR), &config);
+        let slots = build_count_slots(&Measure::new(ts), &config);
         let take = if self == Self::Triplet { 3 } else { 4 };
         let labels: Vec<_> = slots.iter().filter_map(|s| s.label.as_deref()).take(take).collect();
         format!("{} ...", labels.join(" "))
@@ -991,6 +991,15 @@ impl Grooph {
         m
     }
 
+    /// The meter the count menu spells its counts in: the metronome's, else
+    /// that of the score's first bar.
+    fn count_meter(&self) -> TimeSignature {
+        if self.metronome_mode() {
+            return self.metronome_meter();
+        }
+        self.editor.score.measures.first().map_or(TimeSignature::FOUR_FOUR, |m| m.time_signature())
+    }
+
     fn build_count_config(&self) -> Option<CountConfig> {
         let counting = self.ui.counting;
         let subdivision = counting.base.subdivision()?;
@@ -1197,6 +1206,7 @@ impl Grooph {
 mod tests {
     use super::{CountingBase, CountingSettings, PersistedState};
     use crate::compact::CompactTab;
+    use grooph_measure::TimeSignature;
     use grooph_measure::counting::CountingSystem;
 
     #[test]
@@ -1266,7 +1276,7 @@ mod tests {
     #[test]
     fn the_count_menu_shows_each_system() {
         use CountingSystem::*;
-        let labels = |system| CountingBase::ALL.map(|b| b.label(system));
+        let labels = |system| CountingBase::ALL.map(|b| b.label(system, TimeSignature::FOUR_FOUR));
         assert_eq!(
             labels(Numbers),
             ["Off", "1 2 3 4 ...", "1 & 2 & ...", "1 e & a ...", "1 trip let ..."]
@@ -1279,6 +1289,19 @@ mod tests {
             labels(Gordon),
             ["Off", "du du du du ...", "du de du de ...", "du ta de ta ...", "du da di ..."]
         );
+    }
+
+    #[test]
+    fn the_count_menu_spells_the_count_in_the_meter() {
+        use CountingSystem::*;
+        let six_eight = TimeSignature::new(6, 8);
+        let labels = |system| {
+            [CountingBase::Primary, CountingBase::Ands, CountingBase::Triplet]
+                .map(|b| b.label(system, six_eight))
+        };
+        assert_eq!(labels(Numbers), ["1 2 ...", "1 ta la ta ...", "1 la li ..."]);
+        assert_eq!(labels(Takadimi), ["ta ta ...", "ta va ki di ...", "ta ki da ..."]);
+        assert_eq!(labels(Gordon), ["du du ...", "du ta da ta ...", "du da di ..."]);
     }
 
     #[test]
