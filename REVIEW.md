@@ -63,6 +63,30 @@ Read the changed code in context, not just the diff lines. Open callers and call
 - **Tests:** tests that assert too little, or compare `Beat`s with `==` where the tuplet group matters
   (`Beat`'s `PartialEq` ignores `tuplet_group_id`).
 
+**Music domain.** grooph is a notation and rhythm tool, so check the music, not just the code:
+
+- **Notation conventions (`measure` grouping/notation, `layout` beam and tuplet plans):** beaming, rest
+  grouping and syncopations must follow standard engraving practice (Gould, *Behind Bars*): the beat and
+  half-bar stay visible, e.g. eighths beamed in fours only where the meter allows it, rests not hiding the
+  middle of a 4/4 bar, an empty bar as one whole rest. A changed rule needs tests in at least one simple
+  (2/4, 3/4 or 4/4), one compound (6/8) and one odd meter (5/8 or 7/8), and the PR should show before/after
+  examples.
+- **Rhythm invariants:** a measure's durations add up to exactly its time signature; tuplet groups are
+  complete; durations and onsets are computed in integer ticks on the grid (`grid.rs`), with floats only at
+  the edges (pixels, seconds). Click, counting labels, the practice tracker and the notation must use the
+  same onsets; flag one of them computing its own timing.
+- **Meaning of stored values:** when a change alters what an existing number means (as when BPM switched to
+  counting quarters), shared links, user presets, library patterns and the site's example links must still
+  open the same way: through a migration or a new link version, with a test using an old value. This goes
+  beyond format changes.
+- **Layout across voices and modes:** a change to how notes, rests, beams, accents or tuplet marks are placed
+  must hold for both stem directions (the lower voice of a two-voice staff, `stem_down`), must keep the row
+  room (`RowRoom` in `staff_layout.rs`) large enough for the new ink, and should take glyph positions from
+  the Bravura metadata in `layout/src/glyphs` rather than new hand-tuned offsets. Check the compact (phone)
+  and desktop views alike.
+- **Guide pages (`crates/site`):** when app behavior changes, the guide texts and their example links must
+  still describe and open what the app now does.
+
 Only report a weakness you can point to in the code, with a concrete failure scenario. No style nits, no
 speculative "consider maybe" remarks. If you are not sure something is a bug, say how sure you are.
 
