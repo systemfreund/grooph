@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 pub enum Subdivision {
     /// One count per beat: "1 2 3 4", "1 2" in 6/8.
     Beats,
-    /// Every beat unit in two: "1 & 2 &", sixteenths in x/8.
+    /// Every beat unit in two: "1 & 2 &", "1 ta la ta li ta" in 6/8.
     Halves,
     /// Every beat unit in four: "1 e & a".
     Quarters,
@@ -96,8 +96,6 @@ pub struct CountPos {
     pub uneven: bool,
     /// The beat the position lies in, from 1.
     pub beat: u32,
-    /// The beat unit the position starts in, from 1.
-    pub unit: u32,
     /// The position is part `part` (from 0) of `parts` equal parts of its beat.
     pub part: u8,
     pub parts: u8,
@@ -137,14 +135,7 @@ pub fn build_count_slots(measure: &Measure, config: &CountConfig) -> Vec<CountSl
             let step = ticks / parts;
             for part in 0..parts {
                 let slot_start = start_tick + step * part;
-                let pos = CountPos {
-                    units,
-                    uneven,
-                    beat,
-                    unit: slot_start / ticks_per_beat + 1,
-                    part: part as u8,
-                    parts: parts as u8,
-                };
+                let pos = CountPos { units, uneven, beat, part: part as u8, parts: parts as u8 };
                 slots.push(CountSlot {
                     start_tick: slot_start,
                     end_tick: slot_start + step,
@@ -158,42 +149,23 @@ pub fn build_count_slots(measure: &Measure, config: &CountConfig) -> Vec<CountSl
     slots
 }
 
-/// Counting in numbers. A beat divided into its own units counts the beats
-/// ("1 la li 2 la li" in 6/8); units divided further count the units
-/// ("1 & 2 & 3 &" in 6/8, "1 e & a" in 4/4, "1 trip let").
+/// Counting in numbers, by the beat as the other systems do: the beat's
+/// number, then its parts. A beat of one unit is "1 & 2 &", "1 e & a" or "1
+/// trip let"; a group of eighths takes the Eastman syllables, "1 & 2 la li"
+/// in its eighths and "1 e & a 2 ta la ta li ta" in its sixteenths.
 fn numbers(pos: &CountPos) -> Option<String> {
-    let part = pos.part as usize;
-    let units = pos.units;
-    let text = |texts: &[&str], i: usize| texts.get(i - 1).map(|t| t.to_string());
-    match pos.parts {
-        parts if parts == 1 || parts == units => match part {
-            0 => Some(pos.beat.to_string()),
-            p => text(
-                match units {
-                    2 => &["&"],
-                    3 => &["la", "li"],
-                    4 => &["e", "&", "a"],
-                    _ => &[],
-                },
-                p,
-            ),
-        },
-        parts if units > 0 && parts.is_multiple_of(units) => {
-            let per_unit = (parts / units) as usize;
-            match part % per_unit {
-                0 => Some(pos.unit.to_string()),
-                p => text(
-                    match per_unit {
-                        2 => &["&"],
-                        3 => &["trip", "let"],
-                        4 => &["e", "&", "a"],
-                        _ => &[],
-                    },
-                    p,
-                ),
-            }
-        }
-        _ => None,
+    let after: &[&str] = match (pos.parts, pos.units) {
+        (1, _) => &[],
+        (2, _) => &["&"],
+        (3, 3) => &["la", "li"],
+        (3, _) => &["trip", "let"],
+        (4, _) => &["e", "&", "a"],
+        (6, 3) => &["ta", "la", "ta", "li", "ta"],
+        _ => return None,
+    };
+    match pos.part as usize {
+        0 => Some(pos.beat.to_string()),
+        p => after.get(p - 1).map(|t| t.to_string()),
     }
 }
 
@@ -255,10 +227,9 @@ mod tests {
         count(score, subdivision, CountingSystem::Numbers)
     }
 
-    /// Every subdivision in numbers, as recorded before counting was split
-    /// into positions and systems.
+    /// Every subdivision in numbers, in simple, compound and odd meters.
     #[test]
-    fn numbers_count_as_before() {
+    fn numbers_in_every_meter() {
         let cases: &[(&str, Subdivision, &str)] = &[
             ("4/4 h h", Beats, "1 2 3 4"),
             ("4/4 h h", Halves, "1 & 2 & 3 & 4 &"),
@@ -269,23 +240,27 @@ mod tests {
             ("3/4 h q", Quarters, "1 e & a 2 e & a 3 e & a"),
             ("3/4 h q", Triplets, "1 trip let 2 trip let 3 trip let"),
             ("6/8 q. q.", Beats, "1 2"),
-            ("6/8 q. q.", Halves, "1 & 2 & 3 & 4 & 5 & 6 &"),
+            ("6/8 q. q.", Halves, "1 ta la ta li ta 2 ta la ta li ta"),
             ("6/8 q. q.", Quarters, ""),
             ("6/8 q. q.", Triplets, "1 la li 2 la li"),
             ("9/8 q. q. q.", Beats, "1 2 3"),
-            ("9/8 q. q. q.", Halves, "1 & 2 & 3 & 4 & 5 & 6 & 7 & 8 & 9 &"),
+            ("9/8 q. q. q.", Halves, "1 ta la ta li ta 2 ta la ta li ta 3 ta la ta li ta"),
             ("9/8 q. q. q.", Quarters, ""),
             ("9/8 q. q. q.", Triplets, "1 la li 2 la li 3 la li"),
             ("12/8 q. q. q. q.", Beats, "1 2 3 4"),
-            ("12/8 q. q. q. q.", Halves, "1 & 2 & 3 & 4 & 5 & 6 & 7 & 8 & 9 & 10 & 11 & 12 &"),
+            (
+                "12/8 q. q. q. q.",
+                Halves,
+                "1 ta la ta li ta 2 ta la ta li ta 3 ta la ta li ta 4 ta la ta li ta",
+            ),
             ("12/8 q. q. q. q.", Quarters, ""),
             ("12/8 q. q. q. q.", Triplets, "1 la li 2 la li 3 la li 4 la li"),
             ("5/8 q. q", Beats, "1 2"),
-            ("5/8 q. q", Halves, "1 & 2 & 3 & 4 & 5 &"),
+            ("5/8 q. q", Halves, "1 ta la ta li ta 2 e & a"),
             ("5/8 q. q", Quarters, ""),
             ("5/8 q. q", Triplets, "1 la li 2 &"),
             ("7/8 q q. q", Beats, "1 2 3"),
-            ("7/8 q q. q", Halves, "1 & 2 & 3 & 4 & 5 & 6 & 7 &"),
+            ("7/8 q q. q", Halves, "1 e & a 2 ta la ta li ta 3 e & a"),
             ("7/8 q q. q", Quarters, ""),
             ("7/8 q q. q", Triplets, "1 & 2 la li 3 &"),
             ("7/16 e e. e", Beats, "1 2 3"),
@@ -293,7 +268,7 @@ mod tests {
             ("7/16 e e. e", Quarters, ""),
             ("7/16 e e. e", Triplets, "1 & 2 la li 3 &"),
             ("5/8 q q.", Beats, "1 2"),
-            ("5/8 q q.", Halves, "1 & 2 & 3 & 4 & 5 &"),
+            ("5/8 q q.", Halves, "1 ta la ta li ta 2 e & a"),
             ("5/8 q q.", Quarters, ""),
             ("5/8 q q.", Triplets, "1 la li 2 &"),
             ("4/4 r:e e q h", Beats, "1 2 3 4"),
@@ -312,7 +287,7 @@ mod tests {
         assert_eq!(*two_three.groups(), [2, 3]);
         let count = |subdivision| labels(&Measure::new(two_three), subdivision, Default::default());
         assert_eq!(count(Beats), "1 2");
-        assert_eq!(count(Halves), "1 & 2 & 3 & 4 & 5 &");
+        assert_eq!(count(Halves), "1 e & a 2 ta la ta li ta");
         assert_eq!(count(Triplets), "1 & 2 la li");
     }
 
@@ -327,7 +302,7 @@ mod tests {
     #[test]
     fn eighth_meters_count_their_groups() {
         assert_eq!(beats("6/8 q. q.", Beats), "1 2");
-        assert_eq!(beats("6/8 q. q.", Halves), "1 & 2 & 3 & 4 & 5 & 6 &");
+        assert_eq!(beats("6/8 q. q.", Halves), "1 ta la ta li ta 2 ta la ta li ta");
         assert_eq!(beats("6/8 q. q.", Triplets), "1 la li 2 la li");
         assert_eq!(beats("9/8 q. q. q.", Triplets), "1 la li 2 la li 3 la li");
         assert_eq!(beats("7/8 q q. q", Beats), "1 2 3");
@@ -365,10 +340,10 @@ mod tests {
         let measure = parse_score("7/8 q q. q").unwrap().measures.remove(0);
         let config = CountConfig { subdivision: Halves, system: CountingSystem::Numbers };
         let slots = build_count_slots(&measure, &config);
-        // The second sixteenth of the "la" in the 3-group: beat 2, unit 4.
+        // The second sixteenth of the "la" in the 3-group of beat 2.
         let pos = slots[7].pos;
         assert_eq!((pos.units, pos.uneven), (3, true));
-        assert_eq!((pos.beat, pos.unit, pos.part, pos.parts), (2, 4, 3, 6));
+        assert_eq!((pos.beat, pos.part, pos.parts), (2, 3, 6));
     }
 
     #[test]
