@@ -743,8 +743,17 @@ impl Grooph {
         if value_row(ui, "Polyrhythm", &self.counter_label()).clicked() {
             self.ui.picker = Some(Picker::Polyrhythm);
         }
+        self.counting_row(ui);
         switch_row(ui, "Count-in", &mut self.playback_ctl.audio_cfg.count_in);
         switch_row(ui, "Mute bars", &mut self.playback_ctl.audio_cfg.gap.enabled);
+    }
+
+    /// The count under the staff, shown in every tab; opens its picker.
+    fn counting_row(&mut self, ui: &mut Ui) {
+        let counting = self.ui.counting;
+        if value_row(ui, "Counting", &counting.base.label(counting.system)).clicked() {
+            self.ui.picker = Some(Picker::Counting);
+        }
     }
 
     /// Metronome options and the play button.
@@ -829,10 +838,7 @@ impl Grooph {
         if value_row(ui, "Guide", self.ui.guide.in_meter(&ts).label()).clicked() {
             self.ui.picker = Some(Picker::Guide);
         }
-        let counting = self.ui.counting;
-        if value_row(ui, "Counting", &counting.base.label(counting.system)).clicked() {
-            self.ui.picker = Some(Picker::Counting);
-        }
+        self.counting_row(ui);
         let mut accuracy = self.playback_ctl.accuracy.enabled;
         if badged_switch_row(ui, "Timing feedback", Some("BETA"), &mut accuracy) {
             self.set_accuracy_enabled(accuracy);
@@ -953,6 +959,11 @@ impl Grooph {
                     }
                     if ui.button("➖").on_hover_text("Remove this bar").clicked() {
                         self.remove_current_measure();
+                    }
+                    // The edit tab has no options sheet: the count's picker
+                    // opens from here.
+                    if ui.button("1 &").on_hover_text("Counting").clicked() {
+                        self.ui.picker = Some(Picker::Counting);
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let fill = ui.visuals().extreme_bg_color;
