@@ -157,10 +157,6 @@ impl Grooph {
                         ui.checkbox(&mut self.ui.flash_enabled, "Flash on primary beat");
                     });
 
-                    egui::CollapsingHeader::new("Silent Bars").default_open(false).show(ui, |ui| {
-                        self.gap_click_settings(ui);
-                    });
-
                     egui::CollapsingHeader::new("Tempo Ramp").default_open(false).show(ui, |ui| {
                         self.tempo_ramp_settings(ui);
                     });

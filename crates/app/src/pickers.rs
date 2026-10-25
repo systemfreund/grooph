@@ -10,7 +10,7 @@ use crate::tool_palette::{TOOL_PALETTE_BUTTON_SIZE, none_button, notation_button
 use crate::{CountingBase, Grooph};
 use eframe::egui;
 use eframe::egui::{Button, Color32, FontId, Id, Modal, Response, RichText, Ui, vec2};
-use grooph_audio::CounterSound;
+use grooph_audio::{CounterSound, GapClick, GapMode, GapMute};
 use grooph_measure::TimeSignature;
 use grooph_measure::counter::{Ratio, own_ratios, step_clicks, step_span};
 use grooph_measure::counting::CountingSystem;
@@ -21,9 +21,14 @@ use grooph_measure::generator::{
 use grooph_measure::swing::{MAX_SWING_PERCENT, MIN_SWING_PERCENT, SwingUnit};
 use grooph_measure::tap_tempo::{TapPulse, tap_pulse};
 use grooph_measure::tempo::{MAX_BPM, MIN_BPM};
+use std::ops::RangeInclusive;
 
 /// Height of a touch-friendly row or button.
 pub(crate) const ROW_HEIGHT: f32 = 44.0;
+
+/// Chances offered for a silent bar in random mode; the slider sets any other.
+const RANDOM_SILENT_PERCENTS: [u8; 3] = [10, 30, 50];
+
 /// Height of a subdivision tile in the metronome: small enough that all of
 /// them fit a phone screen with the picker.
 const FILL_TILE_SIZE: f32 = 48.0;
@@ -50,6 +55,8 @@ pub(crate) enum Picker {
     ClickFill,
     /// The metronome's counter rhythm and its sound.
     Polyrhythm,
+    /// Bars the click drops out of, to practise inner time.
+    SilentBars,
 }
 
 pub(crate) fn counting_system_name(system: CountingSystem) -> &'static str {
@@ -57,6 +64,15 @@ pub(crate) fn counting_system_name(system: CountingSystem) -> &'static str {
         CountingSystem::Numbers => "Numbers",
         CountingSystem::Takadimi => "Takadimi",
         CountingSystem::Gordon => "Gordon",
+    }
+}
+
+/// The silent bars setting in a few words, for its options row.
+pub(crate) fn silent_bars_label(gap: &GapClick) -> String {
+    match (gap.enabled, gap.mode) {
+        (false, _) => "Off".to_owned(),
+        (true, GapMode::Pattern) => format!("{} on · {} off", gap.on_bars, gap.off_bars),
+        (true, GapMode::Random) => format!("Random {}%", gap.random_percent),
     }
 }
 
@@ -180,6 +196,41 @@ fn ratio_stepper(ui: &mut Ui, ts: TimeSignature, ratio: Ratio, active: bool) -> 
     stepped
 }
 
+/// A label with a − / + stepper for `value` on the right.
+fn count_stepper(ui: &mut Ui, label: &str, value: &mut u32, range: RangeInclusive<u32>) {
+    let spacing = ui.spacing().item_spacing.x;
+    let number = 48.0;
+    ui.horizontal(|ui| {
+        let label_width = ui.available_width() - 2.0 * (ROW_HEIGHT + spacing) - number - spacing;
+        let (rect, _) = ui.allocate_exact_size(vec2(label_width, ROW_HEIGHT), egui::Sense::hover());
+        ui.painter().text(
+            rect.left_center(),
+            egui::Align2::LEFT_CENTER,
+            label,
+            FontId::proportional(18.0),
+            ui.visuals().text_color(),
+        );
+        let current = *value;
+        let mut stepped = None;
+        let mut step = |ui: &mut Ui, text: &str, to: u32| {
+            let button =
+                Button::new(RichText::new(text).size(22.0)).min_size(vec2(ROW_HEIGHT, ROW_HEIGHT));
+            if ui.add_enabled(range.contains(&to) && to != current, button).clicked() {
+                stepped = Some(to);
+            }
+        };
+        step(ui, "−", current.saturating_sub(1));
+        ui.add_sized(
+            vec2(number, ROW_HEIGHT),
+            egui::Label::new(RichText::new(current.to_string()).size(24.0).strong()),
+        );
+        step(ui, "+", current + 1);
+        if let Some(to) = stepped {
+            *value = to;
+        }
+    });
+}
+
 fn wide_button(ui: &mut Ui, label: &str, size: f32, height: f32) -> Response {
     let width = ui.available_width();
     ui.horizontal(|ui| {
@@ -215,6 +266,7 @@ impl Grooph {
                 Picker::MetronomeMeter => "Time signature",
                 Picker::ClickFill => "Subdivision",
                 Picker::Polyrhythm => "Polyrhythm",
+                Picker::SilentBars => "Silent bars",
             };
             ui.heading(title);
             ui.add_space(8.0);
@@ -240,6 +292,10 @@ impl Grooph {
                 Picker::MetronomeMeter => self.metronome_meter_choices(ui),
                 Picker::ClickFill => self.click_fill_choices(ui),
                 Picker::Polyrhythm => self.polyrhythm_choices(ui),
+                Picker::SilentBars => {
+                    self.silent_bars_choices(ui);
+                    false
+                }
             };
             ui.add_space(12.0);
             picked || wide_button(ui, "Done", 19.0, ROW_HEIGHT).clicked()
@@ -635,6 +691,55 @@ impl Grooph {
             counting.base = base;
         }
         picked.is_some()
+    }
+
+    /// Off, a pattern of sounding and silent bars, or silent bars at random;
+    /// and whether the notes go quiet too.
+    fn silent_bars_choices(&mut self, ui: &mut Ui) {
+        let gap = &mut self.playback_ctl.audio_cfg.gap;
+        ui.weak("The click drops out for some bars, so you keep the time yourself.");
+        ui.add_space(8.0);
+        let modes = [
+            (None, "Off".to_owned()),
+            (Some(GapMode::Pattern), "Pattern".to_owned()),
+            (Some(GapMode::Random), "Random".to_owned()),
+        ];
+        let current = gap.enabled.then_some(gap.mode);
+        if let Some(picked) = choice_grid(ui, &modes, current, 3) {
+            // Off keeps the mode, so switching back on brings it back.
+            gap.enabled = picked.is_some();
+            gap.mode = picked.unwrap_or(gap.mode);
+        }
+        if !gap.enabled {
+            return;
+        }
+        ui.add_space(8.0);
+        match gap.mode {
+            GapMode::Pattern => {
+                count_stepper(ui, "Sounding bars", &mut gap.on_bars, 1..=16);
+                count_stepper(ui, "Silent bars", &mut gap.off_bars, 1..=16);
+            }
+            GapMode::Random => {
+                ui.label("Chance per bar");
+                let chances: Vec<_> =
+                    RANDOM_SILENT_PERCENTS.iter().map(|&p| (p, format!("{p}%"))).collect();
+                if let Some(percent) = choice_grid(ui, &chances, gap.random_percent, 3) {
+                    gap.random_percent = percent;
+                }
+                ui.add_space(4.0);
+                ui.spacing_mut().slider_width = ui.available_width();
+                ui.add(egui::Slider::new(&mut gap.random_percent, 5..=90).show_value(false));
+            }
+        }
+        ui.add_space(8.0);
+        ui.label("Mute");
+        let mutes = [
+            (GapMute::Metronome, "Click only".to_owned()),
+            (GapMute::Everything, "Click and notes".to_owned()),
+        ];
+        if let Some(mute) = choice_grid(ui, &mutes, gap.mute, 2) {
+            gap.mute = mute;
+        }
     }
 
     fn swing_choices(&mut self, ui: &mut Ui) {

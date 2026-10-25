@@ -3,7 +3,7 @@
 
 use crate::{Grooph, TransportState};
 use eframe::egui;
-use grooph_audio::{GapMode, GapMute, RampEnd, RampUnit, TempoRamp};
+use grooph_audio::{RampEnd, RampUnit, TempoRamp};
 use grooph_measure::tempo::{MAX_BPM, MIN_BPM};
 
 impl Grooph {
@@ -43,40 +43,6 @@ impl Grooph {
             ramp.unit = RampUnit::Bars;
         }
         ramp
-    }
-
-    pub(crate) fn gap_click_settings(&mut self, ui: &mut egui::Ui) {
-        let gap = &mut self.playback_ctl.audio_cfg.gap;
-        ui.checkbox(&mut gap.enabled, "Enabled")
-            .on_hover_text("Practise inner time: the metronome drops out for some bars");
-        ui.add_enabled_ui(gap.enabled, |ui| {
-            ui.horizontal(|ui| {
-                ui.radio_value(&mut gap.mode, GapMode::Pattern, "Pattern");
-                ui.radio_value(&mut gap.mode, GapMode::Random, "Random");
-            });
-            match gap.mode {
-                GapMode::Pattern => {
-                    ui.horizontal(|ui| {
-                        ui.add(egui::DragValue::new(&mut gap.on_bars).range(1..=16).speed(0.05));
-                        ui.label("bars on,");
-                        ui.add(egui::DragValue::new(&mut gap.off_bars).range(1..=16).speed(0.05));
-                        ui.label("bars off");
-                    });
-                }
-                GapMode::Random => {
-                    ui.add(
-                        egui::Slider::new(&mut gap.random_percent, 5..=90)
-                            .text("chance per bar")
-                            .suffix("%"),
-                    );
-                }
-            }
-            ui.horizontal(|ui| {
-                ui.label("Mute:");
-                ui.radio_value(&mut gap.mute, GapMute::Metronome, "Click only");
-                ui.radio_value(&mut gap.mute, GapMute::Everything, "Click and notes");
-            });
-        });
     }
 
     pub(crate) fn tempo_ramp_settings(&mut self, ui: &mut egui::Ui) {

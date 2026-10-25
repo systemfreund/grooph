@@ -5,7 +5,7 @@
 
 use crate::generator::GeneratorState;
 use crate::metronome_view::FillLook;
-use crate::pickers::{Picker, ROW_HEIGHT, shown_groups, swing_label};
+use crate::pickers::{Picker, ROW_HEIGHT, shown_groups, silent_bars_label, swing_label};
 use crate::share::paint_share_icon;
 use crate::tool_palette::{notation_size, paint_none, paint_notation};
 use crate::{Grooph, Mode, TransportState};
@@ -748,7 +748,10 @@ impl Grooph {
     fn shared_rows(&mut self, ui: &mut Ui) {
         self.counting_row(ui);
         switch_row(ui, "Count-in", &mut self.playback_ctl.audio_cfg.count_in);
-        switch_row(ui, "Silent bars", &mut self.playback_ctl.audio_cfg.gap.enabled);
+        let silent = silent_bars_label(&self.playback_ctl.audio_cfg.gap);
+        if value_row(ui, "Silent bars", &silent).clicked() {
+            self.ui.picker = Some(Picker::SilentBars);
+        }
     }
 
     /// The count under the staff, shown in every tab; opens its picker.

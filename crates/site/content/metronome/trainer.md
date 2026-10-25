@@ -6,15 +6,14 @@ section: Metronome
 order: 4
 ---
 A metronome that always clicks can carry you without you noticing. grooph has two trainer
-modes that make you keep the time yourself or push your tempo bit by bit. Both are in the
-settings (**More → Settings**) and work with any rhythm, the [rhythm generator](/rhythm-generator/)
-and its endless mode included. Silent bars can also be switched on and off in the options
-of the Metronome and Practice tabs.
+modes that make you keep the time yourself or push your tempo bit by bit. Both work with
+any rhythm, the [rhythm generator](/rhythm-generator/) and its endless mode included.
 
 ## Silent bars
 
-Under **Silent Bars**, tick **Enabled**. grooph then plays some bars and leaves others
-silent, and you keep playing through the gap. When the click comes back you hear at once
+Tap **Silent bars** in the options of the Metronome or Practice tab and pick **Pattern** or
+**Random**. grooph then plays some bars and leaves others silent, and you keep playing
+through the gap. When the click comes back you hear at once
 whether you rushed or dragged.
 
 - **Pattern** plays a number of bars, then mutes a number of bars, for example 2 on and 2
@@ -25,12 +24,12 @@ whether you rushed or dragged.
 
 A muted bar is dimmed on the staff, so you can see the silence is meant. The count-in is
 never muted, and while you edit (the Edit tab or **Edit clicks**) every bar sounds, so you
-can hear your changes. With [timing practice](/timing-practice/) your hits in muted bars still count,
-so the result shows how well you kept the time on your own.
+can hear your changes. With [timing practice](/timing-practice/) your hits in muted bars
+still count, so the result shows how well you kept the time on your own.
 
 ## Tempo ramp: speed trainer
 
-Under **Tempo Ramp**, switch on **Change the tempo while playing**. The ramp starts at the
+In the settings (**More → Settings**), under **Tempo Ramp**, switch on **Change the tempo while playing**. The ramp starts at the
 BPM at the top and goes towards the target tempo in steps, for example 5 BPM every
 4 bars or every loop of the rhythm. In endless mode the rhythm never loops, so the ramp
 counts in bars there. The tempo only changes at the start of a bar, and the
