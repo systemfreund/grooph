@@ -210,7 +210,7 @@ impl Grooph {
                 Picker::Bpm => "Tempo",
                 Picker::Swing => "Swing",
                 Picker::Guide => "Guide",
-                Picker::Counting => "Counting",
+                Picker::Counting => "Count labels",
                 Picker::Preset => "Preset",
                 Picker::MetronomeMeter => "Time signature",
                 Picker::ClickFill => "Subdivision",

@@ -755,7 +755,7 @@ impl Grooph {
     fn counting_row(&mut self, ui: &mut Ui) {
         let counting = self.ui.counting;
         let label = counting.base.label(counting.system, &self.shown_score());
-        if value_row(ui, "Counting", &label).clicked() {
+        if value_row(ui, "Count labels", &label).clicked() {
             self.ui.picker = Some(Picker::Counting);
         }
     }
@@ -965,7 +965,7 @@ impl Grooph {
                     }
                     // The edit tab has no options sheet: the count's picker
                     // opens from here.
-                    if ui.button("1 &").on_hover_text("Counting").clicked() {
+                    if ui.button("1 &").on_hover_text("Count labels").clicked() {
                         self.ui.picker = Some(Picker::Counting);
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
