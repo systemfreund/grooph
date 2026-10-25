@@ -68,7 +68,8 @@ enum ReplacementKind {
 /// Represents a musical measure containing a sequence of beats
 ///
 /// Invariant: the beats have supported durations and fill the measure
-/// exactly, and every tuplet group has an anchor whose span its beats fill.
+/// exactly, every beat in a tuplet group has an anchor, and the beats of
+/// every group of two or more fill its anchor's span.
 /// The constructors and editing methods keep it; deserializing checks it
 /// (see [`InvalidMeasure`]).
 #[derive(Clone, Serialize, Deserialize)]
@@ -152,6 +153,8 @@ impl TryFrom<RawMeasure> for Measure {
         // Anchors saved at or above the next id would be overwritten.
         tuplets.reserve_anchor_ids();
         let measure = Self { beats, time_signature, tuplets };
+        // Like everywhere else, a lone beat with a group id counts as no group
+        // (see `tuplet_group_at`): nothing reads its anchor's span.
         for GroupSpan { start_idx, end_idx, id } in measure.tuplet_groups() {
             let ticks: u64 = measure.beats[start_idx..=end_idx]
                 .iter()
@@ -1122,6 +1125,10 @@ mod tests {
                 (0..ts.groupings().len() as u8).map(move |g| ts.with_grouping(g))
             })
         });
+        // The meters of the tool buttons, beyond the picker.
+        for (beats, unit) in [(1, 8), (2, 8), (1, 16), (2, 16), (3, 16), (4, 16), (3, 32)] {
+            assert!(round_trips(&Measure::new(TimeSignature::new(beats, unit))));
+        }
         let mut rng = Rng::new(178);
         for ts in meters {
             assert!(round_trips(&Measure::new(ts)));
