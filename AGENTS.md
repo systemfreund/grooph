@@ -110,7 +110,8 @@ fn demo_howto_test_measure_with_helpers() {
 ## Pull requests
 
 Every pull request gets an automated review (`.github/workflows/code-review.yml`, guided by `REVIEW.md`) that
-checks the change against its requirements. When opening a pull request:
+checks the change against its requirements; pull requests that change `.rs` files also get a Rust-specific review
+(`.agents/skills/grooph-rust-review`). When opening a pull request:
 
 - If it implements an issue, write `Closes #<n>` in the description.
 - If there is no issue (e.g. it comes out of a coding session), the description is the requirements. List what the
