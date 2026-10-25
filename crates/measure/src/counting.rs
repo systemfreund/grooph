@@ -346,6 +346,143 @@ mod tests {
 
     use Subdivision::{Beats, Halves, Quarters, Triplets};
 
+    /// Every subdivision in numbers, with the tuplet overlay, as recorded
+    /// before counting was split into positions and systems. "*" marks a
+    /// tuplet's slot.
+    #[test]
+    fn numbers_count_as_before() {
+        let cases: &[(&str, Option<Subdivision>, &str)] = &[
+            ("4/4 h h", Some(Beats), "1 2 3 4"),
+            ("4/4 h h", Some(Halves), "1 & 2 & 3 & 4 &"),
+            ("4/4 h h", Some(Quarters), "1 e & a 2 e & a 3 e & a 4 e & a"),
+            ("4/4 h h", Some(Triplets), "1 trip let 2 trip let 3 trip let 4 trip let"),
+            ("3/4 h q", Some(Beats), "1 2 3"),
+            ("3/4 h q", Some(Halves), "1 & 2 & 3 &"),
+            ("3/4 h q", Some(Quarters), "1 e & a 2 e & a 3 e & a"),
+            ("3/4 h q", Some(Triplets), "1 trip let 2 trip let 3 trip let"),
+            ("6/8 q. q.", Some(Beats), "1 2"),
+            ("6/8 q. q.", Some(Halves), "1 & 2 & 3 & 4 & 5 & 6 &"),
+            ("6/8 q. q.", Some(Quarters), ""),
+            ("6/8 q. q.", Some(Triplets), "1 la li 2 la li"),
+            ("9/8 q. q. q.", Some(Beats), "1 2 3"),
+            ("9/8 q. q. q.", Some(Halves), "1 & 2 & 3 & 4 & 5 & 6 & 7 & 8 & 9 &"),
+            ("9/8 q. q. q.", Some(Quarters), ""),
+            ("9/8 q. q. q.", Some(Triplets), "1 la li 2 la li 3 la li"),
+            ("12/8 q. q. q. q.", Some(Beats), "1 2 3 4"),
+            (
+                "12/8 q. q. q. q.",
+                Some(Halves),
+                "1 & 2 & 3 & 4 & 5 & 6 & 7 & 8 & 9 & 10 & 11 & 12 &",
+            ),
+            ("12/8 q. q. q. q.", Some(Quarters), ""),
+            ("12/8 q. q. q. q.", Some(Triplets), "1 la li 2 la li 3 la li 4 la li"),
+            ("5/8 q. q", Some(Beats), "1 2"),
+            ("5/8 q. q", Some(Halves), "1 & 2 & 3 & 4 & 5 &"),
+            ("5/8 q. q", Some(Quarters), ""),
+            ("5/8 q. q", Some(Triplets), "1 la li 2 &"),
+            ("7/8 q q. q", Some(Beats), "1 2 3"),
+            ("7/8 q q. q", Some(Halves), "1 & 2 & 3 & 4 & 5 & 6 & 7 &"),
+            ("7/8 q q. q", Some(Quarters), ""),
+            ("7/8 q q. q", Some(Triplets), "1 & 2 la li 3 &"),
+            ("7/16 e e. e", Some(Beats), "1 2 3"),
+            ("7/16 e e. e", Some(Halves), ""),
+            ("7/16 e e. e", Some(Quarters), ""),
+            ("7/16 e e. e", Some(Triplets), "1 & 2 la li 3 &"),
+            ("5/8 q q.", Some(Beats), "1 2"),
+            ("5/8 q q.", Some(Halves), "1 & 2 & 3 & 4 & 5 &"),
+            ("5/8 q q.", Some(Quarters), ""),
+            ("5/8 q q.", Some(Triplets), "1 la li 2 &"),
+            ("4/4 r:e e q h", Some(Beats), "1 2 3 4"),
+            ("4/4 r:e e q h", Some(Halves), "1 & 2 & 3 & 4 &"),
+            ("4/4 r:e e q h", Some(Quarters), "1 e & a 2 e & a 3 e & a 4 e & a"),
+            ("4/4 r:e e q h", Some(Triplets), "1 trip let 2 trip let 3 trip let 4 trip let"),
+            ("4/4 t8 t8 t8 q h", Some(Beats), "1* 1 trip* let* 2 3 4"),
+            ("4/4 t8 t8 t8 q h", Some(Halves), "1* 1 trip* & let* 2 & 3 & 4 &"),
+            ("4/4 t8 t8 t8 q h", Some(Quarters), "1* 1 e trip* & let* a 2 e & a 3 e & a 4 e & a"),
+            (
+                "4/4 t8 t8 t8 q h",
+                Some(Triplets),
+                "1* 1 trip* trip let* let 2 trip let 3 trip let 4 trip let",
+            ),
+            ("4/4 t8 t8 t8 q h", None, "1* trip* let*"),
+            ("4/4 t4 t4 t4 h", Some(Beats), "1* 1 trip* 2 let* 3 4"),
+            ("4/4 t4 t4 t4 h", Some(Halves), "1* 1 & trip* 2 let* & 3 & 4 &"),
+            ("4/4 t4 t4 t4 h", Some(Quarters), "1* 1 e & trip* a 2 e let* & a 3 e & a 4 e & a"),
+            (
+                "4/4 t4 t4 t4 h",
+                Some(Triplets),
+                "1* 1 trip trip* let 2 let* trip let 3 trip let 4 trip let",
+            ),
+            ("4/4 t4 t4 t4 h", None, "1* trip* let*"),
+            ("4/4 qt16 qt16 qt16 qt16 qt16 q h", Some(Beats), "1* 1 2* 3* 4* 5* 2 3 4"),
+            ("4/4 qt16 qt16 qt16 qt16 qt16 q h", Some(Halves), "1* 1 2* 3* & 4* 5* 2 & 3 & 4 &"),
+            (
+                "4/4 qt16 qt16 qt16 qt16 qt16 q h",
+                Some(Quarters),
+                "1* 1 2* e 3* & 4* a 5* 2 e & a 3 e & a 4 e & a",
+            ),
+            (
+                "4/4 qt16 qt16 qt16 qt16 qt16 q h",
+                Some(Triplets),
+                "1* 1 2* trip 3* 4* let 5* 2 trip let 3 trip let 4 trip let",
+            ),
+            ("4/4 qt16 qt16 qt16 qt16 qt16 q h", None, "1* 2* 3* 4* 5*"),
+            ("4/4 st16 st16 st16 st16 st16 st16 q h", Some(Beats), "1* 1 2* 3* 4* 5* 6* 2 3 4"),
+            (
+                "4/4 st16 st16 st16 st16 st16 st16 q h",
+                Some(Halves),
+                "1* 1 2* 3* 4* & 5* 6* 2 & 3 & 4 &",
+            ),
+            (
+                "4/4 st16 st16 st16 st16 st16 st16 q h",
+                Some(Quarters),
+                "1* 1 2* e 3* 4* & 5* a 6* 2 e & a 3 e & a 4 e & a",
+            ),
+            (
+                "4/4 st16 st16 st16 st16 st16 st16 q h",
+                Some(Triplets),
+                "1* 1 2* 3* trip 4* 5* let 6* 2 trip let 3 trip let 4 trip let",
+            ),
+            ("4/4 st16 st16 st16 st16 st16 st16 q h", None, "1* 2* 3* 4* 5* 6*"),
+            ("6/8 2:3e 2:3e q.", Some(Beats), "1* 1 2* 2"),
+            ("6/8 2:3e 2:3e q.", Some(Halves), "1* 1 & 2 2* & 3 & 4 & 5 & 6 &"),
+            ("6/8 2:3e 2:3e q.", Some(Quarters), "1* 2*"),
+            ("6/8 2:3e 2:3e q.", Some(Triplets), "1* 1 la 2* li 2 la li"),
+            ("6/8 2:3e 2:3e q.", None, "1* 2*"),
+            ("6/8 4:3e 4:3e 4:3e 4:3e q.", Some(Beats), "1* 1 2* 3* 4* 2"),
+            ("6/8 4:3e 4:3e 4:3e 4:3e q.", Some(Halves), "1* 1 & 2* 2 3* & 3 4* & 4 & 5 & 6 &"),
+            ("6/8 4:3e 4:3e 4:3e 4:3e q.", Some(Quarters), "1* 2* 3* 4*"),
+            ("6/8 4:3e 4:3e 4:3e 4:3e q.", Some(Triplets), "1* 1 2* la 3* li 4* 2 la li"),
+            ("6/8 4:3e 4:3e 4:3e 4:3e q.", None, "1* 2* 3* 4*"),
+        ];
+        for &(score, subdivision, expected) in cases {
+            let measure = parse_score(score).unwrap().measures.remove(0);
+            let slots = build_count_slots(&measure, &config(subdivision, true));
+            let labels: Vec<String> = slots
+                .iter()
+                .map(|s| {
+                    let label = s.label.clone().unwrap_or_else(|| "_".to_string());
+                    if s.in_tuplet() { label + "*" } else { label }
+                })
+                .collect();
+            assert_eq!(labels.join(" "), expected, "{score} {subdivision:?}");
+        }
+    }
+
+    #[test]
+    fn five_eight_in_two_and_three() {
+        let two_three = TimeSignature::new(5, 8).with_grouping(1);
+        assert_eq!(*two_three.groups(), [2, 3]);
+        let labels = |subdivision| {
+            let slots =
+                build_count_slots(&Measure::new(two_three), &config(Some(subdivision), false));
+            slots.iter().filter_map(|s| s.label.clone()).collect::<Vec<_>>().join(" ")
+        };
+        assert_eq!(labels(Beats), "1 2");
+        assert_eq!(labels(Halves), "1 & 2 & 3 & 4 & 5 &");
+        assert_eq!(labels(Triplets), "1 & 2 la li");
+    }
+
     #[test]
     fn simple_meters() {
         assert_eq!(beats("3/4 h q", Beats), "1 2 3");
