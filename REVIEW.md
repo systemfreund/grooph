@@ -13,7 +13,10 @@ Work out what this pull request is supposed to achieve, in this order:
 
 1. **Linked issues.** `gh pr view <PR> --json closingIssuesReferences,body,title` lists the issues the PR
    closes. Also follow issue references in the PR body (`#123`, "Fixes", "Closes", "Part of").
-   Read each with `gh issue view <n> --comments`; later comments often refine or narrow the original ask.
+   Read each with `gh issue view <n> --json title,body,comments`; later comments often refine or narrow the
+   original ask. Do not use `--comments` without `--json`: outside a terminal it prints only the comments, so
+   an issue without comments comes back empty. If a `gh` command prints nothing or an error, say so in the
+   review instead of treating the issue as missing.
 2. **No issue:** many PRs here come straight out of a coding session and have no issue. Then the PR title
    and description are the requirements, supplemented by the commit messages
    (`gh pr view <PR> --json commits`). Treat every behavior the description claims as a requirement.

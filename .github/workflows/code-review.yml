@@ -18,6 +18,11 @@ name: Code review
 # the PR changes .rs files. It follows .agents/skills/grooph-rust-review,
 # which wraps the beagle review-rust skill (see .agents/skills/README.md).
 #
+# `agent: review` alone does not select the agent: opencode overwrites the
+# AGENT variable the action passes it, and then falls back to its default
+# agent (full permissions). OPENCODE_CONFIG_CONTENT makes `review` the default
+# for these runs, so its read-only permissions from opencode.json apply.
+#
 # Needs the repository secret VENICE_API_KEY. Runs with the workflow's own
 # GITHUB_TOKEN, so the OpenCode GitHub App is not needed.
 
@@ -72,6 +77,7 @@ jobs:
           VENICE_API_KEY: ${{ secrets.VENICE_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPENCODE_CONFIG_CONTENT: '{"default_agent": "review"}'
         with:
           model: ${{ matrix.model }}
           agent: review
@@ -132,6 +138,7 @@ jobs:
           VENICE_API_KEY: ${{ secrets.VENICE_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPENCODE_CONFIG_CONTENT: '{"default_agent": "review"}'
         with:
           model: ${{ env.MODEL }}
           agent: review
