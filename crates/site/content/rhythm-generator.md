@@ -102,8 +102,9 @@ list every level in detail.
 
 ## Share an exercise
 
-Every exercise can be shared as a link. A link with a **seed** always produces the same
-rhythm, so a teacher can send the same exercise to a whole class:
+Every exercise can be shared as a link. A link with a **seed** produces the same rhythm
+for everyone, so a teacher can send the same exercise to a whole class. An update to the
+generator can change the rhythm a seed draws:
 
 ```open | The same 2-bar triplet exercise for everyone
 bpm=72&sub=3&lvl=2&bars=2&seed=2024
