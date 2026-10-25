@@ -71,7 +71,7 @@
           {
             "name": "seed",
             "in": "query",
-            "description": "Generator: random seed. The same parameters and seed always give the same rhythm; without a seed every visit draws a new one.",
+            "description": "Generator: random seed. The same parameters and seed give the same rhythm (an app update to the generator may change it); without a seed every visit draws a new one.",
             "schema": { "type": "integer", "minimum": 0 }
           },
           {
