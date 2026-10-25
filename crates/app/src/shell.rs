@@ -76,7 +76,7 @@ fn subdivision_short_label(s: Subdivision) -> &'static str {
     match s {
         Subdivision::Eighths => "8ths",
         Subdivision::Sixteenths => "16ths",
-        Subdivision::Triplets => "Trips",
+        Subdivision::Triplets => "Triplets",
         Subdivision::Mixed => "Mixed",
     }
 }
