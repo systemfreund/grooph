@@ -158,7 +158,9 @@ Important root files:
   128-bit mask over them. A pattern's level comes from rules (start on
   "e"/"a", or the count of dotted or syncopated notes and later starts: none 3, one 4, more 5) and the reference app's triplet
   ladder for three-slot patterns. A complexity level is a preset subset
-  (`complexity_figures`); `custom_patterns` (switched by
+  (`complexity_figures`): half of the beats draw from its highest level, the
+  rest from one of the easier levels (each equally likely), then a figure of
+  the level uniformly; `custom_patterns` (switched by
   `custom_figures_enabled`) in `GeneratorSettings` replaces it with a
   hand-picked subset (drawn uniformly; an empty selection falls back to
   complexity). Picker UI: "Groupings" in the generator panel, one row per

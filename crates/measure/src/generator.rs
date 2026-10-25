@@ -7,8 +7,9 @@
 //! or eighth triplets over a quarter. Which [`Subdivision`] may use a pattern
 //! follows from its grid, and its difficulty level from a few rules.
 //! [`GeneratorSettings::complexity`] caps the level that may be drawn; the
-//! highest allowed level is favoured so a higher setting audibly changes the
-//! result, while easier figures stay in the mix.
+//! highest allowed level fills half of the beats so a higher setting audibly
+//! changes the result; the other half repeats the easier levels, each level
+//! equally often, so easy figures stay in the mix.
 //!
 //! Level ladder for 8th/16th figures (derived from reference examples):
 //! 1. quarters, on-beat eighths and quarter rests
@@ -507,8 +508,9 @@ impl Rng {
 /// "rests inside the beat").
 const SHORT_NOTES_LEVEL: u8 = 4;
 
-/// Weight of the highest allowed level relative to each easier level.
-const TOP_LEVEL_WEIGHT: usize = 3;
+/// Probability that a beat draws from the highest allowed level; the other
+/// beats repeat one of the easier levels.
+const TOP_LEVEL_PROBABILITY: f32 = 0.5;
 
 /// Probability of a whole-beat rest at `space == 1.0` (a 4/4 measure is then
 /// entirely rests about a third of the time).
@@ -527,25 +529,19 @@ fn candidates(subdivision: Subdivision, span: BeatSpan, max_level: u8) -> Vec<Fi
     catalog(subdivision).into_iter().filter(|f| f.span == span && f.level <= max_level).collect()
 }
 
-/// Draw one figure: pick a level (favouring the highest one available),
-/// then a figure of that level uniformly.
+/// Draw one figure: half of the time from the highest level available,
+/// otherwise from one of the easier levels, each level equally likely; then
+/// a figure of that level uniformly.
 fn pick_figure(pool: &[Figure], rng: &mut Rng) -> Figure {
     let mut levels: Vec<u8> = pool.iter().map(|f| f.level).collect();
     levels.sort_unstable();
     levels.dedup();
-    let top = *levels.last().expect("figure pool is never empty");
-
-    let total: usize = levels.iter().map(|&l| if l == top { TOP_LEVEL_WEIGHT } else { 1 }).sum();
-    let mut roll = rng.below(total);
-    let mut level = top;
-    for &l in &levels {
-        let w = if l == top { TOP_LEVEL_WEIGHT } else { 1 };
-        if roll < w {
-            level = l;
-            break;
-        }
-        roll -= w;
-    }
+    let (&top, easier) = levels.split_last().expect("figure pool is never empty");
+    let level = if easier.is_empty() || rng.chance(TOP_LEVEL_PROBABILITY) {
+        top
+    } else {
+        easier[rng.below(easier.len())]
+    };
 
     let at_level: Vec<Figure> = pool.iter().copied().filter(|f| f.level == level).collect();
     at_level[rng.below(at_level.len())]
@@ -1156,8 +1152,24 @@ mod tests {
         let st = settings(Subdivision::Sixteenths, 5);
         let top =
             (0..200).flat_map(|_| pick_figures(&st, &mut rng)).filter(|c| c.level == 5).count();
-        // 4 beats * 200 measures; the top level carries 3/7 of the weight.
-        assert!(top > 200, "top-level cells drawn: {top}");
+        // 4 beats * 200 measures, half of them from the top level.
+        assert!((320..=480).contains(&top), "top-level cells drawn: {top}");
+    }
+
+    #[test]
+    fn easier_levels_share_the_other_half_equally() {
+        // Quarter beats with sixteenths at level 5: level 2 has one figure,
+        // level 4 four, yet each easier level gets an eighth of the draws.
+        let pool = candidates(Subdivision::Sixteenths, BeatSpan::Quarter, 5);
+        let mut rng = Rng::new(5);
+        let mut per_level = [0u32; 6];
+        for _ in 0..8000 {
+            per_level[pick_figure(&pool, &mut rng).level as usize] += 1;
+        }
+        assert!((3700..=4300).contains(&per_level[5]), "{per_level:?}");
+        for level in 1..=4 {
+            assert!((800..=1200).contains(&per_level[level]), "{per_level:?}");
+        }
     }
 
     #[test]

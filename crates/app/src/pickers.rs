@@ -711,7 +711,7 @@ impl Grooph {
                 if of_level.is_empty() {
                     continue;
                 }
-                ui.weak(format!("Level {level}"));
+                ui.weak(format!("From level {level}"));
                 ui.horizontal_wrapped(|ui| {
                     for figure in of_level {
                         let measure = figure.measure();

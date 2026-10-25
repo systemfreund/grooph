@@ -43,7 +43,8 @@ cannot be changed, but you can save a copy under a new name.
 ## How the levels work
 
 Each beat of the measure is one short figure, called a *grouping*. A level unlocks a set
-of groupings; the generator favors the newest ones, but easier figures stay in the mix.
+of groupings. Half of the beats use the newest ones; the other half repeats the easier
+levels, each level equally often, so simple figures stay in the mix.
 
 ```rhythm | Level 1: quarters, quarter rests and pairs of eighths
 4/4 q e e r:q e e
@@ -101,8 +102,9 @@ list every level in detail.
 
 ## Share an exercise
 
-Every exercise can be shared as a link. A link with a **seed** always produces the same
-rhythm, so a teacher can send the same exercise to a whole class:
+Every exercise can be shared as a link. A link with a **seed** produces the same rhythm
+for everyone, so a teacher can send the same exercise to a whole class. An update to the
+generator can change the rhythm a seed draws:
 
 ```open | The same 2-bar triplet exercise for everyone
 bpm=72&sub=3&lvl=2&bars=2&seed=2024

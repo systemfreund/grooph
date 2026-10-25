@@ -11,7 +11,7 @@
 //! | `lvl`     | Generator complexity 1-5 |
 //! | `bars`    | Generator bars 1-8 |
 //! | `space`   | Generator rests 0.0-1.0 |
-//! | `seed`    | Generator seed; the same parameters and seed give the same rhythm |
+//! | `seed`    | Generator seed; the same parameters and seed give the same rhythm in the same app version (a generator update may change it) |
 //! | `swing`   | Swing in percent, 50 (straight) to 75 (dotted); 66 is a triplet feel |
 //! | `su`      | Swung note value: `8` (default) or `16`; needs `swing` |
 //! | `click`   | Click bar of the meter of `r` (its first measure) or `ts`: one measure in the text notation, without the time signature (`>` strong, plain medium, `(e)` soft, rest off) |
