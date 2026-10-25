@@ -471,6 +471,17 @@ impl Grooph {
         counter_ratio(self.counter_bar()?, named)
     }
 
+    /// The counter rhythm the Polyrhythm switch turns on: the last one, if
+    /// the meter has a counter bar for it, else the meter's first ratio.
+    pub(crate) fn counter_to_restore(&self) -> Option<Ratio> {
+        let ts = self.metronome_meter();
+        self.ui
+            .shell
+            .last_counter
+            .filter(|&r| counter_bar(ts, r).is_some())
+            .or_else(|| self.counter_choices().first().copied())
+    }
+
     /// Play `ratio` against the click bar from now on, or no counter rhythm.
     /// Undoable.
     pub(crate) fn set_counter_ratio(&mut self, ratio: Option<Ratio>) {

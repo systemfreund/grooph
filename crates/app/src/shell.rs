@@ -5,10 +5,11 @@
 
 use crate::generator::GeneratorState;
 use crate::metronome_view::FillLook;
+use crate::metronome_view::ratio_label;
 use crate::pickers::{Picker, ROW_HEIGHT, shown_groups, silent_bars_label, swing_label};
 use crate::share::paint_share_icon;
 use crate::tool_palette::{notation_size, paint_none, paint_notation};
-use crate::{Grooph, Mode, TransportState};
+use crate::{CountingBase, Grooph, Mode, TransportState};
 use eframe::egui;
 use eframe::egui::layers::ShapeIdx;
 use eframe::egui::{
@@ -19,7 +20,9 @@ use grooph_layout::glyphs::ts_glyphs;
 use grooph_layout::pixel_layout::PlacedGlyph;
 use grooph_layout::staff_layout::Voice;
 use grooph_measure::TimeSignature;
+use grooph_measure::counter::Ratio;
 use grooph_measure::generator::{Subdivision, effective_subdivision};
+use grooph_measure::swing::MIN_SWING_PERCENT;
 use grooph_render::draw_glyph;
 use serde::{Deserialize, Serialize};
 
@@ -59,13 +62,26 @@ pub(crate) struct ShellState {
     /// The options sheet only shows its handle and the transport buttons.
     /// Folded at start, so the staff and the ring get the room.
     pub(crate) options_collapsed: bool,
+    /// What the switches of the split rows bring back: the last swing,
+    /// count labels and counter rhythm that were not off.
+    pub(crate) last_swing_percent: u8,
+    pub(crate) last_counting: Option<CountingBase>,
+    pub(crate) last_counter: Option<Ratio>,
 }
 
 impl Default for ShellState {
     fn default() -> Self {
-        Self { options_collapsed: true }
+        Self {
+            options_collapsed: true,
+            last_swing_percent: DEFAULT_SWING_PERCENT,
+            last_counting: None,
+            last_counter: None,
+        }
     }
 }
+
+/// Swing the switch turns on before any other was picked: a triplet feel.
+const DEFAULT_SWING_PERCENT: u8 = 66;
 
 /// Bars of the generated score; endless mode never loops.
 fn bars_label(generator: &GeneratorState) -> String {
@@ -789,10 +805,49 @@ impl Grooph {
         if value_row(ui, "Edit clicks", "✏").clicked() {
             self.ui.mode = Mode::Edit;
         }
-        if value_row(ui, "Polyrhythm", &self.counter_label()).clicked() {
+        self.polyrhythm_row(ui);
+        self.shared_rows(ui);
+    }
+
+    /// Off or the counter rhythm; the switch brings back the last one.
+    fn polyrhythm_row(&mut self, ui: &mut Ui) {
+        if let Some((ratio, _)) = self.counter_ratio() {
+            self.ui.shell.last_counter = Some(ratio);
+        }
+        let Some(restore) = self.counter_to_restore() else {
+            // The meter has no counter rhythm to switch on.
+            if value_row(ui, "Polyrhythm", &self.counter_label()).clicked() {
+                self.ui.picker = Some(Picker::Polyrhythm);
+            }
+            return;
+        };
+        let was_on = self.counter_bar().is_some();
+        let value = if was_on { self.counter_label() } else { ratio_label((restore, false)) };
+        let mut on = was_on;
+        if split_row(ui, "Polyrhythm", &value, &mut on).clicked() {
             self.ui.picker = Some(Picker::Polyrhythm);
         }
-        self.shared_rows(ui);
+        if on != was_on {
+            self.set_counter_ratio(on.then_some(restore));
+        }
+    }
+
+    /// Straight or swung; the switch brings back the last swing.
+    fn swing_row(&mut self, ui: &mut Ui) {
+        let swing = &mut self.playback_ctl.audio_cfg.swing;
+        if !swing.is_straight() {
+            self.ui.shell.last_swing_percent = swing.percent;
+        }
+        let shown = self.ui.shell.last_swing_percent;
+        let value = format!("{} {}", swing_label(shown), swing.unit.label());
+        let was_on = !swing.is_straight();
+        let mut on = was_on;
+        if split_row(ui, "Swing", &value, &mut on).clicked() {
+            self.ui.picker = Some(Picker::Swing);
+        }
+        if on != was_on {
+            swing.percent = if on { shown } else { MIN_SWING_PERCENT };
+        }
     }
 
     /// The last rows of both sheets, the same in each tab.
@@ -806,12 +861,33 @@ impl Grooph {
         }
     }
 
-    /// The count under the staff, shown in every tab; opens its picker.
+    /// The count under the staff, shown in every tab; opens its picker. The
+    /// switch brings back the last count that fits the score.
     fn counting_row(&mut self, ui: &mut Ui) {
-        let counting = self.ui.counting;
-        let label = counting.base.label(counting.system, &self.shown_score());
-        if value_row(ui, "Count labels", &label).clicked() {
+        let score = self.shown_score().into_owned();
+        let counting = &mut self.ui.counting;
+        if counting.base != CountingBase::Off {
+            self.ui.shell.last_counting = Some(counting.base);
+        }
+        let restore = self.ui.shell.last_counting.filter(|b| b.fits(&score)).or_else(|| {
+            CountingBase::ALL.into_iter().find(|&b| b != CountingBase::Off && b.fits(&score))
+        });
+        let Some(restore) = restore else {
+            if value_row(ui, "Count labels", &counting.base.label(counting.system, &score))
+                .clicked()
+            {
+                self.ui.picker = Some(Picker::Counting);
+            }
+            return;
+        };
+        let was_on = counting.base != CountingBase::Off;
+        let shown = if was_on { counting.base } else { restore };
+        let mut on = was_on;
+        if split_row(ui, "Count labels", &shown.label(counting.system, &score), &mut on).clicked() {
             self.ui.picker = Some(Picker::Counting);
+        }
+        if on != was_on {
+            counting.base = if on { restore } else { CountingBase::Off };
         }
     }
 
@@ -883,15 +959,7 @@ impl Grooph {
         }
         let generator = &mut self.editor.generator;
         switch_row(ui, "Ghost notes", &mut generator.ghost_notes);
-        let swing = self.playback_ctl.audio_cfg.swing;
-        let swing_value = if swing.is_straight() {
-            swing_label(swing.percent)
-        } else {
-            format!("{} {}", swing_label(swing.percent), swing.unit.label())
-        };
-        if value_row(ui, "Swing", &swing_value).clicked() {
-            self.ui.picker = Some(Picker::Swing);
-        }
+        self.swing_row(ui);
         let ts = self.guide_meter();
         if value_row(ui, "Guide", self.ui.guide.in_meter(&ts).label()).clicked() {
             self.ui.picker = Some(Picker::Guide);
