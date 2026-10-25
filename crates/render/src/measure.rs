@@ -11,7 +11,6 @@ use grooph_layout::pixel_layout::{
 use grooph_measure::counting::{CountConfig, CountSlot, build_count_slots};
 use grooph_measure::grid::DEFAULT_GRID;
 use grooph_measure::{Measure, TimeSignature};
-use std::collections::HashMap;
 
 pub fn draw_measure(
     ui: &mut egui::Ui,
@@ -461,11 +460,10 @@ fn draw_count_labels(
     if total_ticks == 0 {
         return;
     }
-    let label_slots: Vec<&CountSlot> = slots.iter().filter(|s| s.label.is_some()).collect();
-    if label_slots.is_empty() {
+    let selected: Vec<&CountSlot> = slots.iter().filter(|s| s.label.is_some()).collect();
+    if selected.is_empty() {
         return;
     }
-    let selected = select_label_slots(&label_slots);
     let active_start = active_label_start(&selected, playback_tick, measure);
     let xs = compute_label_xs(&selected, measure, layout, rect, total_ticks);
 
@@ -480,29 +478,6 @@ fn draw_count_labels(
             if active_start == Some(slot.start_tick) { highlight_color } else { label_color };
         painter.text(pos2(x, label_y), Align2::CENTER_CENTER, label, font.clone(), color);
     }
-}
-
-fn select_label_slots<'a>(slots: &'a [&'a CountSlot]) -> Vec<&'a CountSlot> {
-    let mut best: HashMap<u32, usize> = HashMap::new();
-    for (i, slot) in slots.iter().enumerate() {
-        best.entry(slot.start_tick)
-            .and_modify(|idx| {
-                let current = slots[*idx];
-                if slot.in_tuplet() && !current.in_tuplet() {
-                    *idx = i;
-                } else if slot.in_tuplet() == current.in_tuplet() {
-                    let cur_span = current.end_tick.saturating_sub(current.start_tick);
-                    let new_span = slot.end_tick.saturating_sub(slot.start_tick);
-                    if new_span < cur_span {
-                        *idx = i;
-                    }
-                }
-            })
-            .or_insert(i);
-    }
-    let mut out: Vec<&CountSlot> = best.values().map(|idx| slots[*idx]).collect();
-    out.sort_by_key(|a| a.start_tick);
-    out
 }
 
 fn active_label_start(
@@ -525,28 +500,7 @@ fn active_label_start(
         t %= total_ticks;
     }
 
-    let mut best: Option<&CountSlot> = None;
-    for slot in slots {
-        let start = slot.start_tick as f64;
-        let end = slot.end_tick as f64;
-        if t >= start && t < end {
-            best = match best {
-                None => Some(*slot),
-                Some(cur) => {
-                    if slot.in_tuplet() && !cur.in_tuplet() {
-                        Some(*slot)
-                    } else if slot.in_tuplet() == cur.in_tuplet() {
-                        let cur_span = cur.end_tick.saturating_sub(cur.start_tick);
-                        let new_span = slot.end_tick.saturating_sub(slot.start_tick);
-                        if new_span < cur_span { Some(*slot) } else { Some(cur) }
-                    } else {
-                        Some(cur)
-                    }
-                }
-            };
-        }
-    }
-    best.map(|s| s.start_tick)
+    slots.iter().find(|s| t >= s.start_tick as f64 && t < s.end_tick as f64).map(|s| s.start_tick)
 }
 
 /// Compute X positions for all selected count labels.
@@ -628,7 +582,7 @@ mod tests {
     }
 
     fn counting(subdivision: Subdivision) -> CountConfig {
-        CountConfig { subdivision: Some(subdivision), ..CountConfig::default() }
+        CountConfig { subdivision, system: Default::default() }
     }
 
     fn ands_config() -> CountConfig {
@@ -636,7 +590,7 @@ mod tests {
     }
 
     /// Collect per-label x positions in slot-start-tick order, using the same
-    /// pipeline as `draw_count_labels` (with `select_label_slots`).
+    /// pipeline as `draw_count_labels`.
     fn label_xs(
         measure: &Measure,
         layout: &MeasureLayout,
@@ -644,8 +598,7 @@ mod tests {
         config: &CountConfig,
     ) -> Vec<f32> {
         let slots = build_count_slots(measure, config);
-        let label_slots: Vec<&CountSlot> = slots.iter().filter(|s| s.label.is_some()).collect();
-        let selected = select_label_slots(&label_slots);
+        let selected: Vec<&CountSlot> = slots.iter().filter(|s| s.label.is_some()).collect();
         let total_ticks = DEFAULT_GRID.ticks_per_measure(&measure.time_signature());
         compute_label_xs(&selected, measure, layout, rect, total_ticks)
     }

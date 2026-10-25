@@ -257,7 +257,7 @@ impl CountingBase {
     /// `None` for `Off` and `Primary`.
     fn example(self, system: CountingSystem) -> Option<String> {
         let subdivision = self.subdivision().filter(|_| self != Self::Primary)?;
-        let config = CountConfig { subdivision: Some(subdivision), tuplets: false, system };
+        let config = CountConfig { subdivision, system };
         let slots = build_count_slots(&Measure::new(TimeSignature::TWO_FOUR), &config);
         let take = if self == Self::Triplet { 3 } else { 4 };
         let labels: Vec<_> = slots.iter().filter_map(|s| s.label.as_deref()).take(take).collect();
@@ -271,25 +271,24 @@ impl CountingBase {
     }
 }
 
-/// The counting overlay: a subdivision to count in (or `Off`) plus an
-/// optional tuplet layer, in numbers or syllables. `Off` without tuplets
-/// hides the overlay.
+/// The counting overlay: a subdivision to count in (or `Off`, which hides
+/// the overlay), in numbers or syllables.
 #[derive(Serialize, Deserialize, Clone, Copy)]
 #[serde(from = "StoredCountingSettings")]
 struct CountingSettings {
     base: CountingBase,
-    show_tuplets: bool,
     system: CountingSystem,
 }
 
 impl Default for CountingSettings {
     fn default() -> Self {
-        Self { base: CountingBase::Off, show_tuplets: false, system: CountingSystem::Numbers }
+        Self { base: CountingBase::Off, system: CountingSystem::Numbers }
     }
 }
 
 /// Saved form, still reading the `enabled` and `show_labels` switches that
-/// older versions stored next to `base`: either one off hid the overlay.
+/// older versions stored next to `base`: either one off hid the overlay. Their
+/// `show_tuplets` switch is ignored.
 #[derive(Deserialize)]
 struct StoredCountingSettings {
     #[serde(default = "yes")]
@@ -297,7 +296,6 @@ struct StoredCountingSettings {
     #[serde(default = "yes")]
     show_labels: bool,
     base: CountingBase,
-    show_tuplets: bool,
     #[serde(default)]
     system: CountingSystem,
 }
@@ -309,7 +307,7 @@ fn yes() -> bool {
 impl From<StoredCountingSettings> for CountingSettings {
     fn from(s: StoredCountingSettings) -> Self {
         if s.enabled && s.show_labels {
-            Self { base: s.base, show_tuplets: s.show_tuplets, system: s.system }
+            Self { base: s.base, system: s.system }
         } else {
             Self { system: s.system, ..Self::default() }
         }
@@ -991,12 +989,8 @@ impl Grooph {
 
     fn build_count_config(&self) -> Option<CountConfig> {
         let counting = self.ui.counting;
-        let config = CountConfig {
-            subdivision: counting.base.subdivision(),
-            tuplets: counting.show_tuplets,
-            system: counting.system,
-        };
-        (config.subdivision.is_some() || config.tuplets).then_some(config)
+        let subdivision = counting.base.subdivision()?;
+        Some(CountConfig { subdivision, system: counting.system })
     }
 
     pub fn new(cc: &CreationContext) -> Self {
@@ -1236,7 +1230,7 @@ mod tests {
     #[test]
     fn counting_overlay_is_off_by_default() {
         let c = CountingSettings::default();
-        assert!(c.base == CountingBase::Off && !c.show_tuplets);
+        assert!(c.base == CountingBase::Off);
     }
 
     #[test]
@@ -1258,13 +1252,10 @@ mod tests {
 
     #[test]
     fn counting_settings_round_trip() {
-        let c = CountingSettings {
-            base: CountingBase::Sixteenth,
-            show_tuplets: true,
-            system: CountingSystem::Takadimi,
-        };
+        let c =
+            CountingSettings { base: CountingBase::Sixteenth, system: CountingSystem::Takadimi };
         let back = load(&ron::to_string(&c).unwrap());
-        assert!(back.base == CountingBase::Sixteenth && back.show_tuplets);
+        assert!(back.base == CountingBase::Sixteenth);
         assert_eq!(back.system, CountingSystem::Takadimi);
     }
 
@@ -1284,14 +1275,14 @@ mod tests {
     #[test]
     fn older_counting_switches_still_hide_the_overlay() {
         let on = load("(enabled: true, show_labels: true, base: Ands, show_tuplets: true)");
-        assert!(on.base == CountingBase::Ands && on.show_tuplets);
+        assert!(on.base == CountingBase::Ands);
         assert_eq!(on.system, CountingSystem::Numbers);
         for hidden in [
             "(enabled: false, show_labels: true, base: Ands, show_tuplets: true)",
             "(enabled: true, show_labels: false, base: Ands, show_tuplets: true)",
         ] {
             let c = load(hidden);
-            assert!(c.base == CountingBase::Off && !c.show_tuplets, "{hidden}");
+            assert!(c.base == CountingBase::Off, "{hidden}");
         }
     }
 

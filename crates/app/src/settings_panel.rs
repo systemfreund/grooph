@@ -241,7 +241,6 @@ impl Grooph {
                                     .on_disabled_hover_text("Too fine for this time signature");
                                 }
                             });
-                        ui.checkbox(&mut self.ui.counting.show_tuplets, "Tuplet overlay");
                     });
 
                     egui::CollapsingHeader::new("MIDI Input").default_open(false).show(ui, |ui| {
