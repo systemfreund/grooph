@@ -844,6 +844,21 @@ mod tests {
     }
 
     #[test]
+    fn audio_survives_a_poisoned_lock() {
+        let mut audio = Audio::new(120).unwrap();
+        let state = Arc::clone(&audio.shared_state);
+        let _ = std::thread::spawn(move || {
+            let _guard = state.lock().unwrap();
+            panic!("poison");
+        })
+        .join();
+        assert!(audio.shared_state.is_poisoned());
+        audio.set_seed(7);
+        assert_eq!(lock(&audio.shared_state).params.seed, 7);
+        assert!(audio.playback_position().is_some());
+    }
+
+    #[test]
     fn rendering_does_not_allocate() {
         // The counter sees allocations at all.
         let n = count_allocations(|| drop(std::hint::black_box(Vec::<u8>::with_capacity(8))));

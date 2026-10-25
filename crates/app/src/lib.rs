@@ -1236,8 +1236,16 @@ mod tests {
             accented: false,
             soft: false,
         };
+        let quarter = super::BeatTemplate {
+            duration: grooph_measure::duration::Duration::Simple(
+                grooph_measure::duration::NoteValue::Quarter,
+            ),
+            ..dotted
+        };
+        let accented = super::BeatTemplate { accented: true, ..quarter };
+        let soft = super::BeatTemplate { soft: true, ..quarter };
         let mut count = 0;
-        for template in templates.chain([dotted]) {
+        for template in templates.chain([dotted, accented, soft]) {
             let measure = Grooph::build_button_measure(template);
             let ticks: u32 =
                 measure.beats().iter().map(|b| DEFAULT_GRID.ticks_of(&b.duration).unwrap()).sum();
