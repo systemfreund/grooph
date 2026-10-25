@@ -159,10 +159,12 @@ const [url, out, w, h, ...taps] = process.argv.slice(2);
 - Typical sizes: 390×844 (phone), 1280×800 (desktop). At 390 px the bottom tabs sit at y≈812, with More at x≈344.
 - A shared link (`?v=2&bpm=..&r=..`, see the `link` crate) opens a specific score or setting without taps.
 
-**Native build under Xvfb (no clicks).** Needs `apt-get install -y libasound2-dev libxkbcommon-x11-0 libgl1-mesa-dri
-libegl1` (`xvfb-run` and ImageMagick's `import` are usually present). Reach the screen by temporarily changing the
-default state in code (e.g. the start tab or a collapsed panel), `cargo build`, copy `target/debug/grooph-app`
-away, then revert. Use a fresh `HOME` so saved state does not interfere:
+**Native build under Xvfb (no clicks).** Needs `apt-get update && apt-get install -y libasound2-dev
+libxkbcommon-x11-0 libgl1-mesa-dri libegl1` (`xvfb-run` and ImageMagick's `import` are usually present). Reach the
+screen by temporarily changing the default state in code (e.g. the start tab or a collapsed panel), `cargo build`,
+copy `target/debug/grooph-app` away, then revert. The window opens at 800×600 (`crates/app/src/main.rs`) and is
+clipped to the Xvfb screen, so a 420-wide screen gives a 420×600 phone-like view (crop the black rest); change
+`with_inner_size` temporarily for other sizes. Use a fresh `HOME` so saved state does not interfere:
 
 ```
 HOME=/tmp/home xvfb-run -a -s "-screen 0 420x860x24" \
