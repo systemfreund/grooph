@@ -1,5 +1,4 @@
 use crate::accuracy::AccuracyState;
-use crate::compact::CompactState;
 use crate::generator::GeneratorState;
 use crate::guide::{AnchorFlash, Guide};
 use crate::library::PatternLibrary;
@@ -9,6 +8,7 @@ use crate::pickers::Picker;
 use crate::platform::PlatformRuntime;
 use crate::play_along::PlayAlongState;
 use crate::presets::{PresetId, PresetLibrary};
+use crate::shell::ShellState;
 use crate::undo::UndoHistory;
 use crate::{CountingSettings, Host, Mode, TransportState};
 use eframe::egui::TextStyle;
@@ -327,7 +327,7 @@ pub(crate) struct UiShell {
     /// Edit cursor the staff last scrolled into view. The staff follows the
     /// cursor only when it moves, so the user can scroll away from it.
     pub(crate) followed_cursor: Option<(Voice, Cursor)>,
-    pub(crate) compact: CompactState,
+    pub(crate) shell: ShellState,
     /// Setting whose picker dialog is open.
     pub(crate) picker: Option<Picker>,
     /// Taps of the tap-tempo buttons (tempo picker).

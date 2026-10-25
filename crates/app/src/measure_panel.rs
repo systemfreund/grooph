@@ -104,9 +104,9 @@ impl Grooph {
                         // Tighter spacing on narrow screens makes the glyphs
                         // bigger: the staff shrinks its em until a measure
                         // full of sixteenths fits the width.
-                        let compact = self.ui.narrow_screen;
+                        let narrow = self.ui.narrow_screen;
                         let (min_measure_width_em, note_width_em) =
-                            if compact { (2.0, 0.36) } else { (6.0, 0.6) };
+                            if narrow { (2.0, 0.36) } else { (6.0, 0.6) };
                         let staff_opts = StaffOpts {
                             rect: viewport_rect,
                             font_id: font_id.clone(),

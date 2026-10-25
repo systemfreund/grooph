@@ -19,7 +19,7 @@
 //! like the click bar: the voice last tapped, on the staff or the ring, is
 //! the one the editor holds (see [`MetronomeState::voice`]).
 
-use crate::compact::paint_meter;
+use crate::shell::paint_meter;
 use crate::state::CountInState;
 use crate::undo::{DEFAULT_UNDO_LIMIT, UndoHistory};
 use crate::{Grooph, TransportState};
@@ -997,7 +997,7 @@ mod tests {
         let cc = eframe::CreationContext::_new_kittest(egui::Context::default());
         let mut app = Grooph::new(&cc);
         // A fresh app opens the metronome; start from practice.
-        app.select_compact_tab(crate::compact::CompactTab::Practice);
+        app.select_tab(crate::shell::Tab::Practice);
         app.playback_ctl.accuracy.enabled = true;
         assert!(app.shows_accuracy_marks());
         // The marks of a practice run would land on the click bar's notes.
