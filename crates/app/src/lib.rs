@@ -62,9 +62,7 @@ use grooph_audio::{AudioSettings, GapClick, PlaybackOptions, PlayerState, TempoR
 use grooph_link::{LinkContent, SharedLink};
 use grooph_measure::click::ClickBars;
 use grooph_measure::counter::{CounterBars, Ratio};
-use grooph_measure::counting::{
-    CountConfig, CountLayer, CountScope, LabelPattern, LabelToken, Subdiv,
-};
+use grooph_measure::counting::{CountConfig, Subdivision};
 use grooph_measure::duration::NoteValue::*;
 use grooph_measure::editing::Modification;
 use grooph_measure::generator::GeneratorSettings;
@@ -244,30 +242,21 @@ enum CountingBase {
 }
 
 impl CountingBase {
-    /// The overlay layer counting in this subdivision, `None` for `Off`.
-    fn layer(self, id: u32) -> Option<CountLayer> {
-        let (scope, subdiv, labels) = match self {
-            Self::Off => return None,
-            Self::Primary => (
-                CountScope::PrimaryGroup,
-                1,
-                LabelPattern { slots: vec![vec![LabelToken::GroupNum]] },
-            ),
-            Self::Ands => (CountScope::BeatUnit, 2, LabelPattern::ands()),
-            Self::Sixteenth => (CountScope::BeatUnit, 4, LabelPattern::sixteenth()),
-            Self::Triplet => (CountScope::PrimaryGroup, 3, LabelPattern::triplet()),
-        };
-        let mut layer = CountLayer::new(id, scope, Subdiv::Fixed(subdiv));
-        layer.labels = Some(labels);
-        // Triplets of a group of eighths are the eighths themselves: count
-        // them as "1 la li" in x/8 and x/16.
-        layer.group_units = self == Self::Triplet;
-        Some(layer)
+    /// The subdivision counted in, `None` for `Off`.
+    fn subdivision(self) -> Option<Subdivision> {
+        match self {
+            Self::Off => None,
+            Self::Primary => Some(Subdivision::Beats),
+            Self::Ands => Some(Subdivision::Halves),
+            Self::Sixteenth => Some(Subdivision::Quarters),
+            Self::Triplet => Some(Subdivision::Triplets),
+        }
     }
 
     /// Whether the subdivision counts sensibly in some measure of `score`.
     fn fits(self, score: &Score) -> bool {
-        self.layer(0).is_none_or(|l| score.measures.iter().any(|m| l.fits(&m.time_signature())))
+        self.subdivision()
+            .is_none_or(|s| score.measures.iter().any(|m| s.fits(&m.time_signature())))
     }
 }
 
@@ -986,24 +975,13 @@ impl Grooph {
     }
 
     fn build_count_config(&self) -> Option<CountConfig> {
-        let mut layers = Vec::new();
-        let mut next_id = 1u32;
-
-        let base_layer = self.ui.counting.base.layer(next_id);
-
-        if let Some(layer) = base_layer {
-            layers.push(layer);
-            next_id = next_id.saturating_add(1);
-        }
-
-        if self.ui.counting.show_tuplets {
-            let mut layer = CountLayer::new(next_id, CountScope::TupletAll, Subdiv::TupletN);
-            layer.labels = Some(LabelPattern::triplet());
-            layer.priority = 10;
-            layers.push(layer);
-        }
-
-        if layers.is_empty() { None } else { Some(CountConfig::new(layers)) }
+        let counting = self.ui.counting;
+        let config = CountConfig {
+            subdivision: counting.base.subdivision(),
+            tuplets: counting.show_tuplets,
+            ..CountConfig::default()
+        };
+        (config.subdivision.is_some() || config.tuplets).then_some(config)
     }
 
     pub fn new(cc: &CreationContext) -> Self {

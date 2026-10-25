@@ -488,9 +488,9 @@ fn select_label_slots<'a>(slots: &'a [&'a CountSlot]) -> Vec<&'a CountSlot> {
         best.entry(slot.start_tick)
             .and_modify(|idx| {
                 let current = slots[*idx];
-                if slot.priority > current.priority {
+                if slot.in_tuplet() && !current.in_tuplet() {
                     *idx = i;
-                } else if slot.priority == current.priority {
+                } else if slot.in_tuplet() == current.in_tuplet() {
                     let cur_span = current.end_tick.saturating_sub(current.start_tick);
                     let new_span = slot.end_tick.saturating_sub(slot.start_tick);
                     if new_span < cur_span {
@@ -533,9 +533,9 @@ fn active_label_start(
             best = match best {
                 None => Some(*slot),
                 Some(cur) => {
-                    if slot.priority > cur.priority {
+                    if slot.in_tuplet() && !cur.in_tuplet() {
                         Some(*slot)
-                    } else if slot.priority == cur.priority {
+                    } else if slot.in_tuplet() == cur.in_tuplet() {
                         let cur_span = cur.end_tick.saturating_sub(cur.start_tick);
                         let new_span = slot.end_tick.saturating_sub(slot.start_tick);
                         if new_span < cur_span { Some(*slot) } else { Some(cur) }
@@ -603,7 +603,7 @@ fn compute_label_xs(
 mod tests {
     use super::*;
     use eframe::egui::{FontFamily, FontId, Pos2};
-    use grooph_measure::counting::{CountLayer, CountScope, LabelPattern, LabelToken, Subdiv};
+    use grooph_measure::counting::Subdivision;
     use grooph_measure::duration::{Duration, NoteValue, e, q, s, t8};
     use grooph_measure::{Beat, Measure, TimeSignature};
 
@@ -627,16 +627,12 @@ mod tests {
         }
     }
 
-    fn ands_config() -> CountConfig {
-        let mut layer = CountLayer::new(0, CountScope::BeatUnit, Subdiv::Fixed(2));
-        layer.labels = Some(LabelPattern::ands());
-        CountConfig::new(vec![layer])
+    fn counting(subdivision: Subdivision) -> CountConfig {
+        CountConfig { subdivision: Some(subdivision), ..CountConfig::default() }
     }
 
-    fn primary_config() -> CountConfig {
-        let mut layer = CountLayer::new(0, CountScope::Measure, Subdiv::Fixed(1));
-        layer.labels = Some(LabelPattern::single(LabelToken::BeatNum));
-        CountConfig::new(vec![layer])
+    fn ands_config() -> CountConfig {
+        counting(Subdivision::Halves)
     }
 
     /// Collect per-label x positions in slot-start-tick order, using the same
@@ -725,9 +721,7 @@ mod tests {
         let opts = opts_for(rect);
         let layout = build_measure_layout(&m, &opts);
 
-        let mut layer = CountLayer::new(0, CountScope::BeatUnit, Subdiv::Fixed(4));
-        layer.labels = Some(LabelPattern::sixteenth());
-        let xs = label_xs(&m, &layout, rect, &CountConfig::new(vec![layer]));
+        let xs = label_xs(&m, &layout, rect, &counting(Subdivision::Quarters));
         assert_eq!(xs.len(), 16);
         let step = (rect.right() - xs[0]) / 16.0;
         for (i, w) in xs.windows(2).enumerate() {
@@ -761,21 +755,22 @@ mod tests {
     }
 
     #[test]
-    fn whole_measure_primary_label_on_the_downbeat() {
-        // 4/4 with a single `1` label spanning the whole measure: it counts
-        // the downbeat, so it sits over the first beat.
-        let mut m = Measure::new(TimeSignature::FOUR_FOUR);
-        for i in 0..4 {
-            m.set_beat(i, Beat::rest(q())).unwrap();
+    fn beat_labels_of_compound_beats_sit_over_their_downbeats() {
+        // 6/8 in eighth rests, counted in beats: each `1` and `2` spans a
+        // dotted quarter and sits over the first rest of its beat.
+        let mut m = Measure::new(TimeSignature::SIX_EIGHT);
+        for i in 0..6 {
+            m.set_beat(i, Beat::rest(e())).unwrap();
         }
 
         let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(400.0, 100.0));
         let opts = opts_for(rect);
         let layout = build_measure_layout(&m, &opts);
 
-        let xs = label_xs(&m, &layout, rect, &primary_config());
-        assert_eq!(xs.len(), 1);
+        let xs = label_xs(&m, &layout, rect, &counting(Subdivision::Beats));
+        assert_eq!(xs.len(), 2);
         assert!((xs[0] - layout.notes[0].center.x).abs() < 0.5);
+        assert!((xs[1] - layout.notes[3].center.x).abs() < 0.5);
     }
 
     #[test]
