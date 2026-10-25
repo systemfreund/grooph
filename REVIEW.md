@@ -68,8 +68,8 @@ speculative "consider maybe" remarks. If you are not sure something is a bug, sa
 
 ## 4. Output
 
-Post **one summary comment** with `gh pr comment <PR> --body-file -` and, for findings tied to a specific
-line, **inline comments** on the changed lines:
+Your **final answer is the summary comment**: the workflow posts it on the pull request, so do not post it
+yourself. For findings tied to a specific line, post **inline comments** on the changed lines:
 
 ```
 gh api repos/<REPO>/pulls/<PR>/comments -f commit_id=<HEAD SHA> -f path=<file> -F line=<line> -f side=RIGHT -f body='…'

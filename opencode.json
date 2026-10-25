@@ -24,7 +24,7 @@
   "agent": {
     "review": {
       "mode": "primary",
-      "description": "Reviews a pull request as described in REVIEW.md. Reads code and talks to GitHub only through gh; never edits files.",
+      "description": "Reviews a pull request as described in REVIEW.md. Reads code and GitHub through gh, may only add inline review comments, never edits files.",
       "permission": {
         "edit": "deny",
         "webfetch": "deny",
@@ -32,11 +32,12 @@
           "*": "deny",
           "gh pr view *": "allow",
           "gh pr diff *": "allow",
-          "gh pr comment *": "allow",
           "gh issue view *": "allow",
           "gh issue list *": "allow",
           "gh search *": "allow",
-          "gh api *": "allow"
+          "gh api repos/*/pulls/*/comments *": "allow",
+          "gh api * -X *": "deny",
+          "gh api * --method *": "deny"
         }
       }
     }

@@ -56,7 +56,7 @@ jobs:
       - name: Check out the pull request
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/pull/{0}/head', inputs.pr) || '' }}
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/pull/{0}/head', inputs.pr) || github.event.pull_request.head.sha }}
           fetch-depth: 1
 
       - name: Review with ${{ matrix.model }}
@@ -79,7 +79,6 @@ jobs:
 
             Review this pull request. Read REVIEW.md in the repository root and follow it
             exactly: find the requirements (linked issues, otherwise the PR description),
-            check each one, look for weaknesses, then post the summary comment and inline
-            comments as described there. CLAUDE.md describes the workspace layout.
-            Do not modify any files. When you are done, answer with one line saying the
-            review was posted.
+            check each one, look for weaknesses, post the inline comments as described
+            there, and give the summary as your final answer: it is posted as the PR
+            comment. CLAUDE.md describes the workspace layout. Do not modify any files.
