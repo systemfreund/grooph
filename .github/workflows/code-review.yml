@@ -1,0 +1,147 @@
+name: Code review
+
+# Reviews each pull request against its requirements (linked issue, or the PR
+# description when there is none) and looks for weaknesses in the
+# implementation. What the review checks lives in REVIEW.md at the repo root.
+#
+# Runs once when a PR is opened, reopened or marked ready for review, not on
+# every push. To review again after changes, re-run the job from the Actions
+# tab or use "Run workflow" with the PR number.
+#
+# Uses OpenCode with Venice AI as model provider. The provider and the
+# read-only `review` agent are configured in opencode.json at the repo root;
+# every model in the matrix below must also be listed there. Each model posts
+# its own review, so the same prompt can be compared across models; the
+# reviews run in parallel and one failing model does not stop the others.
+#
+# A second job, rust-review, runs a Rust-specific review with one model when
+# the PR changes .rs files. It follows .agents/skills/grooph-rust-review,
+# which wraps the beagle review-rust skill (see .agents/skills/README.md).
+#
+# Needs the repository secret VENICE_API_KEY. Runs with the workflow's own
+# GITHUB_TOKEN, so the OpenCode GitHub App is not needed.
+
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review]
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: Pull request number to review
+        required: true
+      models:
+        description: 'Models to compare, as a JSON list, e.g. ["venice/z-ai-glm-5-3"]. Leave blank for the default list'
+        required: false
+
+concurrency:
+  group: code-review-${{ github.event.pull_request.number || inputs.pr }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    # Skip drafts, and PRs from forks (they get no secrets).
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (!github.event.pull_request.draft &&
+       github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        # Default models; "Run workflow" can pass its own list.
+        model: ${{ fromJSON(inputs.models || '["venice/z-ai-glm-5-3", "venice/kimi-k2-7-code", "venice/claude-sonnet-5-5"]') }}
+    permissions:
+      # Read-only on the code: the review must not push changes.
+      contents: read
+      pull-requests: write
+      issues: write
+
+    steps:
+      - name: Check out the pull request
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/pull/{0}/head', inputs.pr) || github.event.pull_request.head.sha }}
+          fetch-depth: 1
+
+      - name: Review with ${{ matrix.model }}
+        uses: anomalyco/opencode/github@latest
+        env:
+          VENICE_API_KEY: ${{ secrets.VENICE_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          model: ${{ matrix.model }}
+          agent: review
+          use_github_token: true
+          # Do not publish the session on opencode.ai (the default for public repos).
+          share: false
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.pull_request.number || inputs.pr }}
+            HEAD SHA: ${{ github.event.pull_request.head.sha || '' }}
+            MODEL: ${{ matrix.model }}
+
+            Review this pull request. Read REVIEW.md in the repository root and follow it
+            exactly: find the requirements (linked issues, otherwise the PR description),
+            check each one, look for weaknesses, post the inline comments as described
+            there, and give the summary as your final answer: it is posted as the PR
+            comment. AGENTS.md describes the workspace layout. Do not modify any files.
+
+  rust-review:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (!github.event.pull_request.draft &&
+       github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # The cheapest of the default models.
+      MODEL: venice/kimi-k2-7-code
+      PR: ${{ github.event.pull_request.number || inputs.pr }}
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+
+    steps:
+      - name: Check for Rust changes
+        id: changes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh pr diff "$PR" --repo "$GITHUB_REPOSITORY" --name-only | grep -q '\.rs$'; then
+            echo "rust=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No .rs files changed, skipping the Rust review."
+          fi
+
+      - name: Check out the pull request
+        if: steps.changes.outputs.rust == 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/pull/{0}/head', inputs.pr) || github.event.pull_request.head.sha }}
+          fetch-depth: 1
+
+      - name: Rust review
+        if: steps.changes.outputs.rust == 'true'
+        uses: anomalyco/opencode/github@latest
+        env:
+          VENICE_API_KEY: ${{ secrets.VENICE_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          model: ${{ env.MODEL }}
+          agent: review
+          use_github_token: true
+          share: false
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ env.PR }}
+            HEAD SHA: ${{ github.event.pull_request.head.sha || '' }}
+            MODEL: ${{ env.MODEL }}
+
+            Do a Rust-specific review of this pull request. Read
+            .agents/skills/grooph-rust-review/SKILL.md and follow it exactly. Post the
+            inline comments as described there and give the summary as your final
+            answer: it is posted as the PR comment. Do not modify any files.

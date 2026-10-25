@@ -39,7 +39,9 @@ Rust developers and focuses on crate-specific behaviors and APIs that matter whe
 - `trunk build --release` (the web job). To check the WASM target without Trunk:
   `cargo clippy -p grooph-app --target wasm32-unknown-unknown -- -D warnings`
 
-Pushes to `main` deploy the web build to Cloudflare Pages once both jobs pass.
+Pushes to `main` deploy the web build to Cloudflare Pages (grooph.app) once both jobs pass. Pull requests from
+branches of this repository deploy to their own preview (`<branch>.grooph.pages.dev`) and get the link as a comment;
+pull requests from forks are not deployed.
 
 ## Testing: how to configure and run
 
@@ -104,6 +106,17 @@ fn demo_howto_test_measure_with_helpers() {
 - Use `Measure::set_beat(idx, Beat::note/rest(..))` to surgically adjust a measure.
 - Duration grid utilities: `DEFAULT_GRID.ticks_of(..)` and `DEFAULT_GRID.compute_onset_ticks(..)` are useful for
   low-level assertions.
+
+## Pull requests
+
+Every pull request gets an automated review (`.github/workflows/code-review.yml`, guided by `REVIEW.md`) that
+checks the change against its requirements; pull requests that change `.rs` files also get a Rust-specific review
+(`.agents/skills/grooph-rust-review`). When opening a pull request:
+
+- If it implements an issue, write `Closes #<n>` in the description.
+- If there is no issue (e.g. it comes out of a coding session), the description is the requirements. List what the
+  change should do as concrete, checkable points, including behavior that must stay the same, and note anything
+  deliberately left out.
 
 ## Code style and conventions
 
