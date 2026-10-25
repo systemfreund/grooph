@@ -8,6 +8,7 @@ mod activity;
 mod insets;
 
 #[cfg(target_os = "android")]
+#[expect(unsafe_code, reason = "NativeActivity looks the entry point up by name")]
 #[unsafe(no_mangle)]
 fn android_main(app: winit::platform::android::activity::AndroidApp) {
     use grooph_app::Grooph;

@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
+rust-version.workspace = true
 
 [dependencies]
 grooph-measure = { workspace = true }
@@ -14,3 +15,5 @@ serde = { workspace = true }
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 cpal = { workspace = true }
 
+[lints]
+workspace = true

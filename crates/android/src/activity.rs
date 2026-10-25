@@ -9,6 +9,7 @@ const RECORD_AUDIO: &str = "android.permission.RECORD_AUDIO";
 
 /// Run `f` with the activity on this thread's JNI environment. `None` if
 /// that fails; a Java exception is logged and cleared.
+#[expect(unsafe_code, reason = "JNI hands out raw pointers")]
 pub(crate) fn with_activity<R>(
     app: &AndroidApp,
     f: impl FnOnce(&mut JNIEnv, &JObject) -> jni::errors::Result<R>,

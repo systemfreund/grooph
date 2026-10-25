@@ -4,8 +4,11 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
+rust-version.workspace = true
 
 [dependencies]
 grooph-measure = { workspace = true }
 egui = { workspace = true }
 
+[lints]
+workspace = true

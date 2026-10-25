@@ -54,7 +54,7 @@ pub fn draw_measure(
 /// staff line, clef + time signature, notes/beams/tuplets, edit cursor,
 /// playback cursor. Each phase is a small helper; reorder or extend by
 /// editing this function.
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 pub(crate) fn render_measure_at(
     ui: &mut egui::Ui,
     measure: &Measure,
@@ -178,7 +178,7 @@ pub fn playback_cursor_stroke(em: f32, base: Color32) -> Stroke {
 
 /// The count labels of `measure`, under the line at `baseline_y`. The label
 /// at the tick of `count_tick` is lit in its colour.
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 pub(crate) fn draw_count_layer(
     painter: &Painter,
     measure: &Measure,
@@ -443,7 +443,7 @@ pub fn draw_tuplets(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 fn draw_count_labels(
     painter: &Painter,
     measure: &Measure,

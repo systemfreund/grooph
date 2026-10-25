@@ -33,7 +33,7 @@ pub enum PlaybackMarks {
 /// one currently being audibly played). The *visual* cursor may live in a
 /// different measure during the wrap animation — see [`current_cursor_x`].
 /// `marks` says whether the line or a guide anchor shows it.
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 pub fn draw_staff(
     ui: &mut egui::Ui,
     score: &Score,
@@ -198,7 +198,7 @@ pub fn current_cursor_x(
     Some((play_idx, x))
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 fn render_placed_measure(
     ui: &mut egui::Ui,
     score: &Score,
