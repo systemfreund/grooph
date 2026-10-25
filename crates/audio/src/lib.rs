@@ -737,19 +737,25 @@ mod tests {
         });
     }
 
+    // SAFETY: every method forwards to `System` with the caller's arguments
+    // unchanged; counting only touches const thread-locals through `try_with`,
+    // so it neither allocates nor reenters the allocator.
     unsafe impl GlobalAlloc for CountingAllocator {
         unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
             count_if_armed();
+            // SAFETY: the caller's `layout` is passed on as is.
             unsafe { System.alloc(layout) }
         }
 
         unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
             count_if_armed();
+            // SAFETY: `ptr` came from `System` with this `layout`, see `alloc`.
             unsafe { System.dealloc(ptr, layout) }
         }
 
         unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
             count_if_armed();
+            // SAFETY: as for `dealloc`; `new_size` is the caller's, unchanged.
             unsafe { System.realloc(ptr, layout, new_size) }
         }
     }
