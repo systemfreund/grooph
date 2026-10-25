@@ -1,11 +1,10 @@
 use crate::Grooph;
 use crate::midi_input_widget::midi_input_widget;
 use crate::play_along::{HitSource, MAX_INPUT_OFFSET_MS, TapKey};
-use crate::{CountingBase, Mode, clock};
+use crate::{Mode, clock};
 use eframe::egui;
 use eframe::egui::global_theme_preference_buttons;
 use grooph_audio::{CounterSound, MetronomeSound, RhythmSound, Waveform};
-use grooph_measure::counting::CountingSystem;
 use grooph_mic::MicStatus;
 
 impl Grooph {
@@ -196,43 +195,6 @@ impl Grooph {
                         },
                     );
 
-                    egui::CollapsingHeader::new("Counting").default_open(false).show(ui, |ui| {
-                        let system = self.ui.counting.system;
-                        egui::ComboBox::from_label("Count in")
-                            .selected_text(system_name(system))
-                            .show_ui(ui, |ui| {
-                                for system in [
-                                    CountingSystem::Numbers,
-                                    CountingSystem::Takadimi,
-                                    CountingSystem::Gordon,
-                                ] {
-                                    ui.selectable_value(
-                                        &mut self.ui.counting.system,
-                                        system,
-                                        system_name(system),
-                                    );
-                                }
-                            });
-                        egui::ComboBox::from_label("Count")
-                            .selected_text(self.ui.counting.base.label(system))
-                            .show_ui(ui, |ui| {
-                                for base in [
-                                    CountingBase::Off,
-                                    CountingBase::Primary,
-                                    CountingBase::Ands,
-                                    CountingBase::Sixteenth,
-                                    CountingBase::Triplet,
-                                ] {
-                                    let label = base.label(system);
-                                    ui.add_enabled_ui(base.fits(&self.editor.score), |ui| {
-                                        ui.selectable_value(&mut self.ui.counting.base, base, label)
-                                    })
-                                    .inner
-                                    .on_disabled_hover_text("Too fine for this time signature");
-                                }
-                            });
-                    });
-
                     egui::CollapsingHeader::new("MIDI Input").default_open(false).show(ui, |ui| {
                         midi_input_widget(
                             ui,
@@ -403,12 +365,4 @@ fn level_meter(ui: &mut egui::Ui, level_db: f32, threshold_db: f32) {
     painter.rect_filled(level, 3.0, fill);
     let mark = x(threshold_db);
     painter.vline(mark, rect.y_range(), egui::Stroke::new(2.0_f32, visuals.error_fg_color));
-}
-
-fn system_name(system: CountingSystem) -> &'static str {
-    match system {
-        CountingSystem::Numbers => "Numbers",
-        CountingSystem::Takadimi => "Takadimi",
-        CountingSystem::Gordon => "Gordon (MLT)",
-    }
 }
