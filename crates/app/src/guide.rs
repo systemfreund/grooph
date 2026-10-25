@@ -3,6 +3,7 @@
 //! read and count the rest themselves.
 
 use crate::Grooph;
+use crate::compact::CompactTab;
 use grooph_measure::TimeSignature;
 use grooph_measure::grid::DEFAULT_GRID;
 use serde::{Deserialize, Serialize};
@@ -96,9 +97,13 @@ impl Grooph {
         self.editor.score.measures.first().map_or(TimeSignature::FOUR_FOUR, |m| m.time_signature())
     }
 
-    /// The guide in use: the metronome tab and calibration keep the line.
+    /// The guide in use: the metronome and edit tabs and calibration keep
+    /// the line.
     pub(crate) fn active_guide(&self) -> Guide {
-        if self.metronome_mode() || self.calibration_source().is_some() {
+        if self.metronome_mode()
+            || self.compact_tab() == CompactTab::Edit
+            || self.calibration_source().is_some()
+        {
             Guide::Line
         } else {
             self.ui.guide
@@ -312,6 +317,15 @@ mod tests {
         assert_eq!(app.active_guide(), Guide::None);
         app.open_metronome();
         assert_eq!(app.active_guide(), Guide::Line);
+    }
+
+    #[test]
+    fn the_edit_tab_keeps_the_line() {
+        let mut app = practice_app(1, Guide::EveryBar);
+        app.select_compact_tab(CompactTab::Edit);
+        assert_eq!(app.active_guide(), Guide::Line);
+        app.select_compact_tab(CompactTab::Practice);
+        assert_eq!(app.active_guide(), Guide::EveryBar);
     }
 
     #[test]
