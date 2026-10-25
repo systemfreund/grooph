@@ -35,7 +35,7 @@ on:
         description: Pull request number to review
         required: true
       models:
-        description: 'Models to compare, as a JSON list, e.g. ["venice/kimi-k2-7-code"]. Leave blank for the default list'
+        description: 'Models to compare, as a JSON list, e.g. ["venice/deepseek-v4-1-flash"]. Leave blank for the default list'
         required: false
 
 concurrency:
@@ -55,9 +55,10 @@ jobs:
       fail-fast: false
       matrix:
         # Default models; "Run workflow" can pass its own list. GLM 5.3
-        # (venice/z-ai-glm-5-3) is left out: its runs failed too often. It
-        # stays in opencode.json for manual runs.
-        model: ${{ fromJSON(inputs.models || '["venice/kimi-k2-7-code", "venice/claude-sonnet-5-5"]') }}
+        # (venice/z-ai-glm-5-3, its runs failed too often) and Kimi K2.7 Code
+        # (venice/kimi-k2-7-code, replaced by DeepSeek V4.1 Flash) are left
+        # out. Both stay in opencode.json for manual runs.
+        model: ${{ fromJSON(inputs.models || '["venice/deepseek-v4-1-flash", "venice/claude-sonnet-5-5"]') }}
     permissions:
       # Read-only on the code: the review must not push changes.
       contents: read
@@ -104,8 +105,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      # The cheapest of the default models.
-      MODEL: venice/kimi-k2-7-code
+      # The cheaper of the default models.
+      MODEL: venice/deepseek-v4-1-flash
       PR: ${{ github.event.pull_request.number || inputs.pr }}
     permissions:
       contents: read

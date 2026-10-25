@@ -15,6 +15,9 @@
         "kimi-k2-7-code": {
           "name": "Kimi K2.7 Code"
         },
+        "deepseek-v4-1-flash": {
+          "name": "DeepSeek V4.1 Flash"
+        },
         "claude-sonnet-5-5": {
           "name": "Claude Sonnet 5.5"
         }
