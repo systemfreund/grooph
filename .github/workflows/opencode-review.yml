@@ -25,7 +25,7 @@ on:
         description: Pull request number to review
         required: true
       models:
-        description: 'Models to compare, as a JSON list (empty: the default list below), e.g. ["venice/z-ai-glm-5-3"]'
+        description: 'Models to compare, as a JSON list, e.g. ["venice/z-ai-glm-5-3"]. Leave blank for the default list'
         required: false
 
 concurrency:

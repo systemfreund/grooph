@@ -35,7 +35,7 @@
           "gh issue view *": "allow",
           "gh issue list *": "allow",
           "gh search *": "allow",
-          "gh api repos/*/pulls/*/comments *": "allow",
+          "gh api repos/*/*/pulls/*/comments *": "allow",
           "gh api * -X *": "deny",
           "gh api * --method *": "deny"
         }
