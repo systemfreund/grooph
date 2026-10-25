@@ -79,10 +79,13 @@ The head SHA is in the prompt; otherwise get it with `gh pr view <PR> --json hea
 work on lines inside the diff; mention other findings in the summary only. Do not approve or request changes,
 and do not edit files or push commits.
 
+Several models may review the same pull request side by side. Put the model from the prompt (`MODEL`) in the
+summary heading as shown below, and start every inline comment with `**[<MODEL>]**`.
+
 Summary comment layout:
 
 ```
-## OpenCode review
+## OpenCode review (<MODEL>)
 
 **Requirements source:** …
 

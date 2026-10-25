@@ -10,7 +10,9 @@ name: OpenCode review
 #
 # Uses OpenCode with Venice AI as model provider. The provider and the
 # read-only `review` agent are configured in opencode.json at the repo root;
-# to switch models, add the model there and change `model` below.
+# every model in the matrix below must also be listed there. Each model posts
+# its own review, so the same prompt can be compared across models; the
+# reviews run in parallel and one failing model does not stop the others.
 # Needs the repository secret VENICE_API_KEY. Runs with the workflow's own
 # GITHUB_TOKEN, so the OpenCode GitHub App is not needed.
 
@@ -22,6 +24,9 @@ on:
       pr:
         description: Pull request number to review
         required: true
+      models:
+        description: 'Models to compare, as a JSON list (empty: the default list below), e.g. ["venice/z-ai-glm-5-3"]'
+        required: false
 
 concurrency:
   group: opencode-review-${{ github.event.pull_request.number || inputs.pr }}
@@ -36,6 +41,11 @@ jobs:
        github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        # Default models; "Run workflow" can pass its own list.
+        model: ${{ fromJSON(inputs.models || '["venice/z-ai-glm-5-3", "venice/kimi-k2-7-code", "venice/claude-sonnet-5-5"]') }}
     permissions:
       # Read-only on the code: the review must not push changes.
       contents: read
@@ -49,14 +59,14 @@ jobs:
           ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/pull/{0}/head', inputs.pr) || '' }}
           fetch-depth: 1
 
-      - name: Review
+      - name: Review with ${{ matrix.model }}
         uses: anomalyco/opencode/github@latest
         env:
           VENICE_API_KEY: ${{ secrets.VENICE_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          model: venice/z-ai-glm-5-3
+          model: ${{ matrix.model }}
           agent: review
           use_github_token: true
           # Do not publish the session on opencode.ai (the default for public repos).
@@ -65,6 +75,7 @@ jobs:
             REPO: ${{ github.repository }}
             PR NUMBER: ${{ github.event.pull_request.number || inputs.pr }}
             HEAD SHA: ${{ github.event.pull_request.head.sha || '' }}
+            MODEL: ${{ matrix.model }}
 
             Review this pull request. Read REVIEW.md in the repository root and follow it
             exactly: find the requirements (linked issues, otherwise the PR description),
