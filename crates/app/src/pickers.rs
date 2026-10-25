@@ -613,8 +613,11 @@ impl Grooph {
     }
 
     /// The words to count in, then the count itself; picking a count closes
-    /// the dialog. Counts too fine for every measure of the score are left out.
+    /// the dialog. Counts too fine for every measure of the shown score are
+    /// left out, unless one is already chosen.
     fn counting_choices(&mut self, ui: &mut Ui) -> bool {
+        let metronome = self.metronome_mode().then(|| self.metronome_score());
+        let score = metronome.as_ref().unwrap_or(&self.editor.score);
         let counting = &mut self.ui.counting;
         let systems: Vec<_> =
             CountingSystem::ALL.map(|s| (s, counting_system_name(s).to_owned())).into();
@@ -624,7 +627,7 @@ impl Grooph {
         ui.add_space(8.0);
         let bases: Vec<_> = CountingBase::ALL
             .into_iter()
-            .filter(|b| b.fits(&self.editor.score))
+            .filter(|&b| b == counting.base || b.fits(score))
             .map(|b| (b, b.label(counting.system)))
             .collect();
         let picked = choice_grid(ui, &bases, counting.base, 1);
