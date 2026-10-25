@@ -377,7 +377,10 @@ fn percent_encode(value: &str) -> String {
 mod tests {
     use super::*;
     use grooph_measure::Beat;
+    use grooph_measure::BeatKind::{Note, Rest};
+    use grooph_measure::duration::{COMMON_DURATIONS, Duration, NoteValue, TupletSpec};
     use grooph_measure::duration::{e, q};
+    use grooph_measure::generator::Rng;
 
     fn parse(query: &str) -> SharedLink {
         parse_query(query).unwrap().unwrap()
@@ -659,5 +662,109 @@ mod tests {
         assert_eq!(percent_decode("%4"), "%4");
         assert_eq!(percent_decode("%4g"), "%4g");
         assert!(parse_query("bpm=9%+0").is_err());
+    }
+
+    /// Encode every byte outside the unreserved set as `%XX`, spaces included,
+    /// as other tools write query values.
+    fn strict_percent_encode(value: &str) -> String {
+        value
+            .bytes()
+            .map(|b| match b {
+                b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                    (b as char).to_string()
+                }
+                _ => format!("%{b:02X}"),
+            })
+            .collect()
+    }
+
+    /// A random score of up to four measures in random meters, filled
+    /// beat by beat with random notes and rests.
+    fn random_score(rng: &mut Rng) -> Score {
+        let meters: Vec<TimeSignature> = TimeSignature::BEAT_UNITS
+            .into_iter()
+            .flat_map(|unit| {
+                TimeSignature::beat_range(unit).unwrap().flat_map(move |beats| {
+                    let ts = TimeSignature::new(beats, unit);
+                    (0..ts.groupings().len()).map(move |g| ts.with_grouping(g as u8))
+                })
+            })
+            .collect();
+        let general =
+            [(7, 5, NoteValue::Eighth), (5, 7, NoteValue::Eighth), (9, 8, NoteValue::Sixteenth)]
+                .map(|(n, m, base)| Duration::Tuplet(TupletSpec { n, m, base }));
+        let durations: Vec<Duration> = COMMON_DURATIONS.into_iter().chain(general).collect();
+        let measures = (0..1 + rng.below(4))
+            .map(|_| {
+                let mut m = Measure::new(meters[rng.below(meters.len())]);
+                let (mut idx, mut tries) = (0, 0);
+                while idx < m.beats().len() {
+                    let d = durations[rng.below(durations.len())];
+                    let kind = if rng.chance(0.3) { Rest } else { Note };
+                    // Keep the beat there if a few tries do not fit.
+                    if m.set_beat(idx, Beat::new(d, kind)).is_err() && tries < 20 {
+                        tries += 1;
+                        continue;
+                    }
+                    tries = 0;
+                    if kind == Note && rng.chance(0.2) {
+                        m.toggle_accent(idx);
+                    } else if kind == Note && rng.chance(0.2) {
+                        m.toggle_soft(idx);
+                    }
+                    idx += 1;
+                }
+                m
+            })
+            .collect();
+        Score { measures }
+    }
+
+    fn assert_same_score(a: &Score, b: &Score, context: &str) {
+        assert!(a.same_beats(b), "{context}: {:?} became {:?}", format_score(a), format_score(b));
+        assert_eq!(format_score(a), format_score(b), "{context}");
+    }
+
+    fn run_link_round_trips(seed: u64, scores: usize) {
+        let mut rng = Rng::new(seed);
+        for i in 0..scores {
+            let score = &random_score(&mut rng);
+            let context = format!("seed {seed}, score {i}");
+            let link = SharedLink {
+                bpm: Some(90),
+                content: Some(LinkContent::Score(score.clone())),
+                ..SharedLink::default()
+            };
+            let url = link.to_url("https://grooph.app/").expect(&context);
+            let query = url.split_once('?').unwrap().1;
+            let Some(LinkContent::Score(back)) =
+                parse_query_current(query).expect(&context).unwrap().content
+            else {
+                panic!("{context}: {url} opens no score");
+            };
+            assert_same_score(score, &back, &format!("{context}, {url}"));
+
+            let text = format_score(score).unwrap();
+            let query = format!("v=2&r={}", strict_percent_encode(&text));
+            let Some(LinkContent::Score(back)) =
+                parse_query_current(&query).expect(&context).unwrap().content
+            else {
+                panic!("{context}: {query} opens no score");
+            };
+            assert_same_score(score, &back, &format!("{context}, {query}"));
+        }
+    }
+
+    #[test]
+    fn random_score_links_round_trip() {
+        run_link_round_trips(0x9E37_79B9_7F4A_7C15, 500);
+    }
+
+    #[test]
+    #[ignore = "long run; cargo test -p grooph-link -- --ignored"]
+    fn random_score_links_round_trip_long() {
+        for seed in 1..=20 {
+            run_link_round_trips(seed, 2000);
+        }
     }
 }
