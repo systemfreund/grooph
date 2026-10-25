@@ -1,7 +1,7 @@
 //! MIDI input abstraction for receiving MIDI clock and other messages.
 
 use std::collections::VecDeque;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, PoisonError};
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::Instant;
 
@@ -89,13 +89,13 @@ impl MidiInputEventQueue {
 
     /// Drain all queued events
     pub fn drain(&self) -> Vec<MidiInputEvent> {
-        let mut queue = self.inner.lock().unwrap();
+        let mut queue = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
         queue.drain(..).collect()
     }
 
     /// Clear all queued events
     pub fn clear(&self) {
-        let mut queue = self.inner.lock().unwrap();
+        let mut queue = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
         queue.clear();
     }
 
@@ -142,7 +142,7 @@ impl MidiInputEventQueue {
         };
 
         if let Some(event) = event {
-            let mut queue = self.inner.lock().unwrap();
+            let mut queue = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
             queue.push_back(event);
             return true;
         }
@@ -340,12 +340,12 @@ impl MidiClockState {
 
     /// Get the current BPM calculated from MIDI clock.
     pub fn bpm(&self) -> f32 {
-        self.inner.lock().unwrap().sync.bpm()
+        self.inner.lock().unwrap_or_else(PoisonError::into_inner).sync.bpm()
     }
 
     /// Check if MIDI clock is running (received start/continue, not stopped).
     pub fn is_running(&self) -> bool {
-        self.inner.lock().unwrap().running
+        self.inner.lock().unwrap_or_else(PoisonError::into_inner).running
     }
 
     /// Process a MIDI realtime message and update clock state.
@@ -354,7 +354,7 @@ impl MidiClockState {
             return;
         };
 
-        let mut state = self.inner.lock().unwrap();
+        let mut state = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
         match status {
             MIDI_CLOCK => {
                 state.sync.on_clock(clock_now());
@@ -375,9 +375,40 @@ impl MidiClockState {
 
     /// Reset the clock state (BPM back to default, accumulators cleared).
     pub fn reset(&self) {
-        let mut state = self.inner.lock().unwrap();
+        let mut state = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
         state.sync.reset();
         state.running = false;
+    }
+}
+
+/// Maps midir's timestamps (microseconds since an origin each backend picks)
+/// onto the app clock, so hit timing does not depend on how late the callback
+/// runs. The offset between the two is read with every message; callback
+/// latency only makes a reading larger, so the smallest recent one is kept.
+#[derive(Default)]
+struct TimestampMap {
+    offset: Option<f64>,
+}
+
+impl TimestampMap {
+    /// How far the kept offset may drift up per message (s): follows the slow
+    /// drift between the two clocks.
+    const DRIFT: f64 = 1e-5;
+    /// A reading this far above the kept offset means the backend's clock
+    /// jumped (e.g. restarted); start over from it.
+    const JUMP: f64 = 0.05;
+
+    /// The app-clock time (s) of a message stamped `micros`, received at `now`.
+    fn map(&mut self, micros: u64, now: f64) -> f64 {
+        let stamped = micros as f64 / 1e6;
+        let reading = now - stamped;
+        let offset = match self.offset {
+            Some(kept) if reading - kept < Self::JUMP => reading.min(kept + Self::DRIFT),
+            _ => reading,
+        };
+        self.offset = Some(offset);
+        // Never later than the message arrived.
+        (stamped + offset).min(now)
     }
 }
 
@@ -453,13 +484,15 @@ impl MidiInput {
         let event_queue = self.event_queue.clone();
         let event_notifier = self.event_notifier.clone();
         let clock_origin = self.clock_origin;
+        let mut timestamps = TimestampMap::default();
 
         let connection = match midi_in.connect(
             &port,
             "grooph-input",
-            move |_timestamp, message, _| {
+            move |timestamp, message, _| {
                 clock_state.process_message(message);
-                let event_timestamp = clock_elapsed_seconds(clock_now(), clock_origin);
+                let now = clock_elapsed_seconds(clock_now(), clock_origin);
+                let event_timestamp = timestamps.map(timestamp, now);
                 if event_queue.process_message(message, event_timestamp)
                     && let Some(ref notify) = event_notifier
                 {
@@ -575,6 +608,42 @@ mod tests {
 
     fn interval_for_bpm(bpm: f32, cpb: u32) -> f32 {
         60.0 / (bpm * cpb as f32)
+    }
+
+    #[test]
+    fn timestamp_map_uses_the_stamp_not_the_callback_time() {
+        let mut map = TimestampMap::default();
+        // Backend clock starts 100 s before the app clock; first message arrives 1 ms late.
+        assert!((map.map(100_000_000, 0.001) - 0.001).abs() < 1e-9);
+        // A message arriving with less latency lowers the offset.
+        assert!((map.map(100_500_000, 0.5) - 0.5).abs() < 1e-9);
+        // Two hits 10 ms apart, delivered together 30 ms late, keep their spacing.
+        let a = map.map(101_000_000, 1.04);
+        let b = map.map(101_010_000, 1.04);
+        assert!((a - 1.0).abs() < 1e-4, "{a}");
+        assert!((b - a - 0.01).abs() < 1e-4, "{}", b - a);
+    }
+
+    #[test]
+    fn timestamp_map_starts_over_when_the_backend_clock_jumps() {
+        let mut map = TimestampMap::default();
+        map.map(5_000_000, 1.0);
+        // The backend restarted its clock at zero.
+        assert!((map.map(0, 2.0) - 2.0).abs() < 1e-9);
+        assert!((map.map(10_000, 2.01) - 2.01).abs() < 1e-9);
+    }
+
+    #[test]
+    fn queue_survives_a_poisoned_lock() {
+        let queue = MidiInputEventQueue::new();
+        let inner = queue.inner.clone();
+        let _ = std::thread::spawn(move || {
+            let _guard = inner.lock().unwrap();
+            panic!("poison");
+        })
+        .join();
+        assert!(queue.process_message(&[0x90, 38, 100], 0.0));
+        assert_eq!(queue.drain().len(), 1);
     }
 
     #[test]

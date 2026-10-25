@@ -332,13 +332,13 @@ fn percent_decode(value: &str) -> String {
         match bytes[i] {
             b'+' => out.push(b' '),
             b'%' => {
-                let hex = value.get(i + 1..i + 3).and_then(|h| u8::from_str_radix(h, 16).ok());
-                match hex {
-                    Some(b) => {
-                        out.push(b);
+                // Exactly two hex digits; anything else (`%+4`, `%4`) stays as it is.
+                match (bytes.get(i + 1), bytes.get(i + 2)) {
+                    (Some(&hi), Some(&lo)) if hi.is_ascii_hexdigit() && lo.is_ascii_hexdigit() => {
+                        out.push(hex_value(hi) << 4 | hex_value(lo));
                         i += 2;
                     }
-                    None => out.push(b'%'),
+                    _ => out.push(b'%'),
                 }
             }
             b => out.push(b),
@@ -346,6 +346,15 @@ fn percent_decode(value: &str) -> String {
         i += 1;
     }
     String::from_utf8_lossy(&out).into_owned()
+}
+
+/// The value of an ASCII hex digit.
+fn hex_value(digit: u8) -> u8 {
+    match digit {
+        b'0'..=b'9' => digit - b'0',
+        b'a'..=b'f' => digit - b'a' + 10,
+        _ => digit - b'A' + 10,
+    }
 }
 
 /// Encode a query value; keeps the notation's `/`, `:` and `.` readable and
@@ -639,5 +648,16 @@ mod tests {
         assert_eq!(percent_decode("%E2%86%92"), "→");
         assert_eq!(percent_decode("100%"), "100%");
         assert_eq!(percent_decode("%zz"), "%zz");
+        assert_eq!(percent_decode("%e2%86%92"), "→");
+    }
+
+    #[test]
+    fn percent_decoding_takes_only_two_hex_digits() {
+        // A sign is not a hex digit: no NUL byte comes out of `%+0`.
+        assert_eq!(percent_decode("9%+0"), "9% 0");
+        assert_eq!(percent_decode("%-1"), "%-1");
+        assert_eq!(percent_decode("%4"), "%4");
+        assert_eq!(percent_decode("%4g"), "%4g");
+        assert!(parse_query("bpm=9%+0").is_err());
     }
 }

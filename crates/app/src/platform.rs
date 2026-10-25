@@ -20,8 +20,8 @@ impl PlatformRuntime {
 
     pub(crate) fn install_listeners(&self, _ctx: eframe::egui::Context) {}
 
-    pub(crate) fn take_visibility_event(&self) -> Option<VisibilityEvent> {
-        None
+    pub(crate) fn take_visibility_events(&self) -> Vec<VisibilityEvent> {
+        Vec::new()
     }
 
     pub(crate) fn acquire_wake_lock(&self) {}
