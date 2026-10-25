@@ -242,6 +242,8 @@ enum CountingBase {
 }
 
 impl CountingBase {
+    const ALL: [Self; 5] = [Self::Off, Self::Primary, Self::Ands, Self::Sixteenth, Self::Triplet];
+
     /// The subdivision counted in, `None` for `Off`.
     fn subdivision(self) -> Option<Subdivision> {
         match self {
@@ -1264,16 +1266,7 @@ mod tests {
     #[test]
     fn the_count_menu_shows_each_system() {
         use CountingSystem::*;
-        let labels = |system| {
-            [
-                CountingBase::Off,
-                CountingBase::Primary,
-                CountingBase::Ands,
-                CountingBase::Sixteenth,
-                CountingBase::Triplet,
-            ]
-            .map(|b| b.label(system))
-        };
+        let labels = |system| CountingBase::ALL.map(|b| b.label(system));
         assert_eq!(
             labels(Numbers),
             ["Off", "1 2 3 4 ...", "1 & 2 & ...", "1 e & a ...", "1 trip let ..."]

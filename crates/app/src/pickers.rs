@@ -1,18 +1,19 @@
 //! Picker dialogs for single settings (meter, notes, level, bars, tempo,
-//! swing, preset): a grid of big buttons that works by touch, opened from the
+//! swing, guide, counting, preset): a grid of big buttons that works by touch, opened from the
 //! settings card and the options sheet. Also the grouping picker of the level
 //! dialog.
 
-use crate::Grooph;
 use crate::guide::Guide;
 use crate::metronome_view::{FillLook, click_fills, ratio_label, same_bar};
 use crate::presets::{self, PresetId};
 use crate::tool_palette::{TOOL_PALETTE_BUTTON_SIZE, none_button, notation_button};
+use crate::{CountingBase, Grooph};
 use eframe::egui;
 use eframe::egui::{Button, Color32, FontId, Id, Modal, Response, RichText, Ui, vec2};
 use grooph_audio::CounterSound;
 use grooph_measure::TimeSignature;
 use grooph_measure::counter::{Ratio, own_ratios, step_clicks, step_span};
+use grooph_measure::counting::CountingSystem;
 use grooph_measure::generator::{
     BeatSpan, FigureSet, MAX_BARS, MAX_COMPLEXITY, Subdivision, complexity_figures,
     effective_subdivision, figures, offered_subdivisions, supports_time_signature,
@@ -40,6 +41,8 @@ pub(crate) enum Picker {
     Swing,
     /// What the staff shows while playing.
     Guide,
+    /// The count under the staff and the words it is spoken in.
+    Counting,
     Preset,
     /// The metronome tab's meter.
     MetronomeMeter,
@@ -47,6 +50,14 @@ pub(crate) enum Picker {
     ClickFill,
     /// The metronome's counter rhythm and its sound.
     Polyrhythm,
+}
+
+pub(crate) fn counting_system_name(system: CountingSystem) -> &'static str {
+    match system {
+        CountingSystem::Numbers => "Numbers",
+        CountingSystem::Takadimi => "Takadimi",
+        CountingSystem::Gordon => "Gordon",
+    }
 }
 
 pub(crate) fn swing_label(percent: u8) -> String {
@@ -199,6 +210,7 @@ impl Grooph {
                 Picker::Bpm => "Tempo",
                 Picker::Swing => "Swing",
                 Picker::Guide => "Guide",
+                Picker::Counting => "Counting",
                 Picker::Preset => "Preset",
                 Picker::MetronomeMeter => "Time signature",
                 Picker::ClickFill => "Subdivision",
@@ -220,6 +232,7 @@ impl Grooph {
                     false
                 }
                 Picker::Guide => self.guide_choices(ui),
+                Picker::Counting => self.counting_choices(ui),
                 Picker::Preset => {
                     preset = self.preset_choices(ui);
                     preset.is_some()
@@ -595,6 +608,31 @@ impl Grooph {
         let picked = choice_grid(ui, &options, current, 1);
         if let Some(guide) = picked {
             self.ui.guide = guide;
+        }
+        picked.is_some()
+    }
+
+    /// The words to count in, then the count itself; picking a count closes
+    /// the dialog. Counts too fine for every measure of the shown score are
+    /// left out, unless one is already chosen.
+    fn counting_choices(&mut self, ui: &mut Ui) -> bool {
+        let metronome = self.metronome_mode().then(|| self.metronome_score());
+        let score = metronome.as_ref().unwrap_or(&self.editor.score);
+        let counting = &mut self.ui.counting;
+        let systems: Vec<_> =
+            CountingSystem::ALL.map(|s| (s, counting_system_name(s).to_owned())).into();
+        if let Some(system) = choice_grid(ui, &systems, counting.system, 3) {
+            counting.system = system;
+        }
+        ui.add_space(8.0);
+        let bases: Vec<_> = CountingBase::ALL
+            .into_iter()
+            .filter(|&b| b == counting.base || b.fits(score))
+            .map(|b| (b, b.label(counting.system)))
+            .collect();
+        let picked = choice_grid(ui, &bases, counting.base, 1);
+        if let Some(base) = picked {
+            counting.base = base;
         }
         picked.is_some()
     }

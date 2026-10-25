@@ -69,6 +69,8 @@ pub enum CountingSystem {
 }
 
 impl CountingSystem {
+    pub const ALL: [Self; 3] = [Self::Numbers, Self::Takadimi, Self::Gordon];
+
     /// The label of `pos`, `None` where the system has nothing to say.
     pub fn label(self, pos: &CountPos) -> Option<String> {
         match self {
