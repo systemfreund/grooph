@@ -222,6 +222,9 @@ pub struct Audio {
     /// are compared against these without taking the lock.
     sent_plan: Arc<PlaybackPlan>,
     sent_state: PlayerState,
+    /// The inputs of the last built plan and that plan, so a frame with the
+    /// same score, tempo and options reuses it instead of building it again.
+    built: Option<(PlanInputs, Arc<PlaybackPlan>)>,
     /// Plans the audio thread may still hold. They are dropped here, on the
     /// UI thread, once the audio thread has let go of them.
     retired: Vec<Arc<PlaybackPlan>>,
@@ -285,6 +288,19 @@ struct PlaybackPlan {
     ramp: TempoRamp,
 }
 
+/// Everything a [`PlaybackPlan`] is built from.
+struct PlanInputs {
+    bpm: u32,
+    options: PlaybackOptions,
+    score: Score,
+}
+
+impl PlanInputs {
+    fn matches(&self, bpm: u32, options: &PlaybackOptions, score: &Score) -> bool {
+        self.bpm == bpm && self.options == *options && self.score.same_beats(score)
+    }
+}
+
 impl PlaybackPlan {
     /// Whether anyone besides the holder of `self` still uses the plan or its
     /// count-in bar (the audio thread keeps the count-in during a count-in).
@@ -327,6 +343,7 @@ impl Audio {
             options: PlaybackOptions::default(),
             sent_plan: plan,
             sent_state: PlayerState::Stopped,
+            built: None,
             retired: Vec::new(),
             last_bar: None,
             pending_shift: 0.0,
@@ -335,20 +352,7 @@ impl Audio {
 
     // Returns true if UI should repaint soon (while playing or while waiting for tail-out)
     pub fn update(&mut self, player_state: &PlayerState, bpm: u32, score: &Score) -> bool {
-        let timing = ScoreTiming::from_score(score, bpm).with_swing(self.options.swing);
-        let schedule =
-            Schedule::build(score, &timing, self.options.ghost_notes, &self.options.click)
-                .with_counter(score, &timing, &self.options.counter);
-        let count_in =
-            if self.options.count_in { count_in_plan(score).map(Arc::new) } else { None };
-        let plan = PlaybackPlan {
-            bpm,
-            timing,
-            schedule,
-            count_in,
-            gap: self.options.gap,
-            ramp: self.options.ramp,
-        };
+        let plan = self.plan(bpm, score);
         self.publish(player_state, plan);
         self.drop_released_plans();
 
@@ -375,15 +379,38 @@ impl Audio {
         *player_state != PlayerState::Playing && self.sink.is_some()
     }
 
+    /// The plan for `score` at `bpm` with the current options. It is built
+    /// only when one of them changed since the last call.
+    fn plan(&mut self, bpm: u32, score: &Score) -> Arc<PlaybackPlan> {
+        if let Some((inputs, plan)) = &self.built
+            && inputs.matches(bpm, &self.options, score)
+        {
+            return Arc::clone(plan);
+        }
+        let options = &self.options;
+        let timing = ScoreTiming::from_score(score, bpm).with_swing(options.swing);
+        let schedule = Schedule::build(score, &timing, options.ghost_notes, &options.click)
+            .with_counter(score, &timing, &options.counter);
+        let count_in = if options.count_in { count_in_plan(score).map(Arc::new) } else { None };
+        let plan =
+            PlaybackPlan { bpm, timing, schedule, count_in, gap: options.gap, ramp: options.ramp };
+        // Inputs that changed back keep the plan the audio thread already has.
+        let plan =
+            if *self.sent_plan == plan { Arc::clone(&self.sent_plan) } else { Arc::new(plan) };
+        let inputs = PlanInputs { bpm, options: options.clone(), score: score.clone() };
+        self.built = Some((inputs, Arc::clone(&plan)));
+        plan
+    }
+
     /// Hand `plan` and `player_state` to the audio thread if either changed.
     /// The lock is held only to swap the plan in; the old one is retired and
     /// dropped later on this thread, see [`Audio::drop_released_plans`].
-    fn publish(&mut self, player_state: &PlayerState, plan: PlaybackPlan) {
-        let same_plan = *self.sent_plan == plan;
+    fn publish(&mut self, player_state: &PlayerState, plan: Arc<PlaybackPlan>) {
+        let same_plan = Arc::ptr_eq(&plan, &self.sent_plan) || *self.sent_plan == *plan;
         if self.pending_shift <= 0.0 && same_plan && self.sent_state == *player_state {
             return;
         }
-        let plan = if same_plan { Arc::clone(&self.sent_plan) } else { Arc::new(plan) };
+        let plan = if same_plan { Arc::clone(&self.sent_plan) } else { plan };
 
         // A shift must reach the audio thread with the shorter score it was
         // made for, so this update waits for the lock rather than skip it.
@@ -792,18 +819,18 @@ mod tests {
         }
     }
 
-    fn plan_for(audio: &Audio, bpm: u32, score: &Score) -> PlaybackPlan {
+    fn plan_for(audio: &Audio, bpm: u32, score: &Score) -> Arc<PlaybackPlan> {
         let timing = ScoreTiming::from_score(score, bpm);
         let schedule = Schedule::build(score, &timing, None, &audio.options.click);
         let count_in = count_in_plan(score).map(Arc::new);
-        PlaybackPlan {
+        Arc::new(PlaybackPlan {
             bpm,
             timing,
             schedule,
             count_in,
             gap: GapClick::default(),
             ramp: TempoRamp::default(),
-        }
+        })
     }
 
     #[test]
@@ -903,6 +930,70 @@ mod tests {
         assert!(audio.shared_state.lock().unwrap().is_dirty);
         // Only the plan from `Audio::new` was replaced.
         assert_eq!(audio.retired.len(), 1);
+    }
+
+    #[test]
+    fn plan_is_built_only_when_its_inputs_change() {
+        let mut audio = Audio::new(120).unwrap();
+        let mut score = score_of(TimeSignature::FOUR_FOUR, 2);
+        let built = |audio: &Audio| Arc::clone(&audio.built.as_ref().unwrap().1);
+
+        audio.update(&PlayerState::Stopped, 120, &score);
+        let first = built(&audio);
+        assert!(Arc::ptr_eq(&first, &audio.sent_plan));
+        audio.shared_state.lock().unwrap().is_dirty = false;
+        // Same inputs, also from a fresh copy of the score: nothing is built
+        // or sent.
+        audio.update(&PlayerState::Stopped, 120, &score.clone());
+        assert!(Arc::ptr_eq(&built(&audio), &first));
+        assert!(!audio.shared_state.lock().unwrap().is_dirty);
+
+        // A new tempo builds and sends a new plan.
+        audio.update(&PlayerState::Stopped, 90, &score);
+        let slower = built(&audio);
+        assert!(!Arc::ptr_eq(&slower, &first));
+        assert_eq!(audio.sent_plan.bpm, 90);
+
+        // So does an edited beat.
+        score.measures[1].toggle_beat_kind(0);
+        audio.update(&PlayerState::Stopped, 90, &score);
+        let edited = built(&audio);
+        assert!(!Arc::ptr_eq(&edited, &slower));
+        assert!(Arc::ptr_eq(&edited, &audio.sent_plan));
+
+        // And a new meter with the same number of bars.
+        score.measures[0] = Measure::new(TimeSignature::THREE_FOUR);
+        audio.update(&PlayerState::Stopped, 90, &score);
+        let remetered = built(&audio);
+        assert!(!Arc::ptr_eq(&remetered, &edited));
+        assert!(Arc::ptr_eq(&remetered, &audio.sent_plan));
+
+        // And a changed option.
+        audio
+            .set_playback_options(PlaybackOptions { count_in: true, ..PlaybackOptions::default() });
+        audio.update(&PlayerState::Stopped, 90, &score);
+        assert!(!Arc::ptr_eq(&built(&audio), &remetered));
+        assert!(audio.sent_plan.count_in.is_some());
+    }
+
+    #[test]
+    fn inputs_changed_back_reuse_the_sent_plan() {
+        let mut audio = Audio::new(120).unwrap();
+        let score = score_of(TimeSignature::FOUR_FOUR, 1);
+        audio.update(&PlayerState::Stopped, 120, &score);
+        let sent = Arc::clone(&audio.sent_plan);
+        audio.shared_state.lock().unwrap().is_dirty = false;
+
+        // A new tempo is built while the audio thread holds the lock, so it
+        // is not sent; then the tempo goes back.
+        let state = Arc::clone(&audio.shared_state);
+        let guard = state.lock().unwrap();
+        audio.update(&PlayerState::Stopped, 90, &score);
+        drop(guard);
+        assert!(Arc::ptr_eq(&audio.sent_plan, &sent));
+        audio.update(&PlayerState::Stopped, 120, &score);
+        assert!(Arc::ptr_eq(&audio.built.as_ref().unwrap().1, &sent));
+        assert!(!audio.shared_state.lock().unwrap().is_dirty);
     }
 
     #[test]

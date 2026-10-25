@@ -31,6 +31,13 @@ impl Score {
     pub fn is_empty(&self) -> bool {
         self.measures.is_empty()
     }
+
+    /// Whether `other` has the same meters and beats, measure by measure:
+    /// everything that decides how the score sounds.
+    pub fn same_beats(&self, other: &Score) -> bool {
+        self.len() == other.len()
+            && self.measures.iter().zip(&other.measures).all(|(a, b)| crate::click::same_bar(a, b))
+    }
 }
 
 /// Position within a score: which measure, and which beat within that measure.
@@ -67,6 +74,25 @@ mod tests {
         let s = Score::single(m);
         assert_eq!(s.len(), 1);
         assert!(!s.is_empty());
+    }
+
+    #[test]
+    fn same_beats_compares_meters_and_beats() {
+        let four = Measure::new(TimeSignature::FOUR_FOUR);
+        let score = Score { measures: vec![four.clone(), four.clone()] };
+        assert!(score.same_beats(&score.clone()));
+
+        // The same beats under another meter.
+        let mut other_meter = score.clone();
+        other_meter.measures[1].time_signature = TimeSignature::new(2, 4);
+        assert_eq!(other_meter.measures[1].beats(), four.beats());
+        assert!(!score.same_beats(&other_meter));
+
+        let mut other_beat = score.clone();
+        other_beat.measures[1].toggle_beat_kind(0);
+        assert!(!score.same_beats(&other_beat));
+
+        assert!(!score.same_beats(&Score::single(four)));
     }
 
     #[test]
