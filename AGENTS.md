@@ -118,6 +118,62 @@ checks the change against its requirements; pull requests that change `.rs` file
   change should do as concrete, checkable points, including behavior that must stay the same, and note anything
   deliberately left out.
 
+## Screenshots
+
+To show a UI change, screenshot the real app. Two ways work in a headless Linux container:
+
+**Web build + Playwright (supports clicks).** Playwright and Chromium are preinstalled (`require('playwright')`).
+
+```
+rustup target add wasm32-unknown-unknown
+wget -qO- https://github.com/trunk-rs/trunk/releases/download/v0.21.14/trunk-x86_64-unknown-linux-gnu.tar.gz \
+  | tar -xzf- -C ~/.cargo/bin                     # version pinned in .github/workflows/rust.yml
+trunk build --release --dist /tmp/web             # ~3 min; one dist dir per variant (before/after)
+(cd /tmp/web && python3 -m http.server 8123 &)
+node shot.js http://localhost:8123/ out.png 390 844 344,812   # phone size, then tap at (344,812)
+```
+
+`shot.js`:
+
+```js
+const { chromium } = require('playwright');
+const [url, out, w, h, ...taps] = process.argv.slice(2);
+(async () => {
+  const b = await chromium.launch();
+  // deviceScaleFactor must be 1: at 2, egui lays out wrong and clicks miss.
+  const p = await b.newPage({ viewport: { width: +w, height: +h }, deviceScaleFactor: 1 });
+  await p.goto(url);
+  await p.waitForTimeout(5000); // let the WASM start
+  for (const t of taps) {
+    const [x, y] = t.split(',').map(Number);
+    await p.mouse.click(x, y);
+    await p.waitForTimeout(700);
+  }
+  await p.screenshot({ path: out });
+  await b.close();
+})();
+```
+
+- The page is a single canvas, so there are no selectors: tap by pixel. Take a screenshot, read the PNG to find the
+  next coordinates, and replay the taps from the start (each run is a fresh browser with empty storage).
+- Typical sizes: 390×844 (phone), 1280×800 (desktop). At 390 px the bottom tabs sit at y≈812, with More at x≈344.
+- A shared link (`?v=2&bpm=..&r=..`, see the `link` crate) opens a specific score or setting without taps.
+
+**Native build under Xvfb (no clicks).** Needs `apt-get update && apt-get install -y libasound2-dev
+libxkbcommon-x11-0 libgl1-mesa-dri libegl1` (`xvfb-run` and ImageMagick's `import` are usually present). Reach the
+screen by temporarily changing the default state in code (e.g. the start tab or a collapsed panel), `cargo build`,
+copy `target/debug/grooph-app` away, then revert. The window opens at 800×600 (`crates/app/src/main.rs`) and is
+clipped to the Xvfb screen, so a 420-wide screen gives a 420×600 phone-like view (crop the black rest); change
+`with_inner_size` temporarily for other sizes. Use a fresh `HOME` so saved state does not interfere:
+
+```
+HOME=/tmp/home xvfb-run -a -s "-screen 0 420x860x24" \
+  bash -c "./grooph-app & sleep 15; import -window root out.png; kill %1"
+```
+
+For before/after images, build both variants, crop and place them side by side with Python/PIL, and attach the
+image in the conversation; screenshots are not committed to the repository.
+
 ## Code style and conventions
 
 - Formatting: See `rustfmt.toml` at repo root. Run `cargo fmt` before committing.
