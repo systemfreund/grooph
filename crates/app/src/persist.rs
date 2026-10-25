@@ -68,20 +68,25 @@ pub(crate) fn restore(saved: Option<&str>) -> (PersistedState, Option<StateBacku
     fields.retain(|(name, _)| name != "version");
 
     // Serde ignores unknown fields and reads each field independently of the
-    // others, so the fields that read alone also read together.
-    let (kept, dropped): (Vec<_>, Vec<_>) = fields.iter().partition(|(name, raw)| {
-        ron::from_str::<PersistedState>(&struct_ron([(name, raw)])).is_ok()
-    });
-    for (name, _) in &dropped {
+    // others, so the fields that read alone, each name once, also read
+    // together. Of a name stored twice the last one counts.
+    let (kept, dropped): (Vec<_>, Vec<_>) =
+        fields.iter().enumerate().partition(|(i, (name, raw))| {
+            !fields[i + 1..].iter().any(|(later, _)| later == name)
+                && ron::from_str::<PersistedState>(&struct_ron([(name, raw)])).is_ok()
+        });
+    for (_, (name, _)) in &dropped {
         warn!("Saved state: `{name}` does not read, using its default");
     }
-    let state = ron::from_str(&struct_ron(kept.iter().map(|(name, raw)| (name, raw))))
-        .unwrap_or_else(|err| {
-            warn!("Saved state does not read, starting from defaults: {err}");
-            PersistedState::default()
-        });
+    let state = ron::from_str(&struct_ron(kept.iter().map(|(_, (name, raw))| (name, raw))));
+    let read_together = state.is_ok();
+    let state = state.unwrap_or_else(|err| {
+        warn!("Saved state does not read, starting from defaults: {err}");
+        PersistedState::default()
+    });
 
-    let complete = dropped.is_empty() && version_read && version == PERSISTED_STATE_VERSION;
+    let complete =
+        dropped.is_empty() && read_together && version_read && version == PERSISTED_STATE_VERSION;
     (state, if complete { None } else { backup(version) })
 }
 
@@ -207,6 +212,15 @@ mod tests {
         let (s, backup) = restore(Some(&saved));
         assert_library_and_presets_kept(&s);
         assert!(backup.is_none());
+    }
+
+    #[test]
+    fn a_field_stored_twice_keeps_the_last_and_is_backed_up() {
+        let saved = saved_ron().replacen('(', "(bpm:60,", 1);
+        let (s, backup) = restore(Some(&saved));
+        assert_eq!(s.bpm, 93);
+        assert_library_and_presets_kept(&s);
+        assert_eq!(backup.unwrap().ron, saved);
     }
 
     #[test]
