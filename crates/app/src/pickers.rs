@@ -67,12 +67,12 @@ pub(crate) fn counting_system_name(system: CountingSystem) -> &'static str {
     }
 }
 
-/// The silent bars setting in a few words, for its options row.
+/// Which bars go silent, in a few words, for the options row. Also while
+/// off, so the row shows what switching on brings back.
 pub(crate) fn silent_bars_label(gap: &GapClick) -> String {
-    match (gap.enabled, gap.mode) {
-        (false, _) => "Off".to_owned(),
-        (true, GapMode::Pattern) => format!("{} on · {} off", gap.on_bars, gap.off_bars),
-        (true, GapMode::Random) => format!("Random {}%", gap.random_percent),
+    match gap.mode {
+        GapMode::Pattern => format!("{} on · {} off", gap.on_bars, gap.off_bars),
+        GapMode::Random => format!("Random {}%", gap.random_percent),
     }
 }
 

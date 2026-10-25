@@ -1300,13 +1300,14 @@ mod tests {
     }
 
     #[test]
-    fn silent_bars_row_names_the_mode() {
+    fn silent_bars_row_names_the_pattern() {
         use crate::pickers::silent_bars_label;
         use grooph_audio::{GapClick, GapMode};
 
         let mut gap =
             GapClick { on_bars: 3, off_bars: 1, random_percent: 25, ..GapClick::default() };
-        assert_eq!(silent_bars_label(&gap), "Off");
+        // Off shows what switching on brings back.
+        assert_eq!(silent_bars_label(&gap), "3 on · 1 off");
         gap.enabled = true;
         assert_eq!(silent_bars_label(&gap), "3 on · 1 off");
         gap.mode = GapMode::Random;

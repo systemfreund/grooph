@@ -231,13 +231,64 @@ fn badged_switch_row(ui: &mut Ui, label: &str, badge: Option<&str>, on: &mut boo
         paint_badge(painter, pos2(label_rect.right() + 8.0, rect.center().y), badge, visuals);
     }
 
-    let switch = Rect::from_center_size(rect.right_center() - vec2(30.0, 0.0), vec2(52.0, 30.0));
-    let fill = if *on { visuals.selection.bg_fill } else { switch_off_fill(visuals) };
+    paint_switch(painter, rect, *on, how_on, visuals);
+    resp.clicked()
+}
+
+/// The switch at the right end of `row`, `how_on` along its way to on.
+fn paint_switch(painter: &Painter, row: Rect, on: bool, how_on: f32, visuals: &egui::Visuals) {
+    let switch = Rect::from_center_size(row.right_center() - vec2(30.0, 0.0), vec2(52.0, 30.0));
+    let fill = if on { visuals.selection.bg_fill } else { switch_off_fill(visuals) };
     painter.rect_filled(switch, 15, fill);
     let radius = 12.0;
     let x = egui::lerp((switch.left() + 15.0)..=(switch.right() - 15.0), how_on);
     painter.circle_filled(pos2(x, switch.center().y), radius, Color32::WHITE);
-    resp.clicked()
+}
+
+/// Width of the switch's own tap area at the right end of a [`split_row`].
+const SPLIT_SWITCH_WIDTH: f32 = 68.0;
+
+/// A [`value_row`] and a switch in one row, split by a thin line: the
+/// switch turns the setting on and off, the rest opens its picker. Returns
+/// the response of the part that opens the picker.
+fn split_row(ui: &mut Ui, label: &str, value: &str, on: &mut bool) -> Response {
+    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), ROW_HEIGHT), Sense::hover());
+    let split = rect.right() - SPLIT_SWITCH_WIDTH;
+    let open_rect = rect.with_max_x(split);
+    let switch_rect = rect.with_min_x(split);
+    let open = ui.interact(open_rect, Id::unique(("split_open", label)), Sense::click());
+    let toggle = ui.interact(switch_rect, Id::unique(("split_switch", label)), Sense::click());
+    if toggle.clicked() {
+        *on = !*on;
+    }
+    let how_on = ui.ctx().animate_bool_responsive(toggle.id, *on);
+    let visuals = ui.visuals();
+    let painter = ui.painter();
+    painter.text(
+        rect.left_center() + vec2(4.0, 0.0),
+        Align2::LEFT_CENTER,
+        label,
+        FontId::proportional(19.0),
+        visuals.text_color(),
+    );
+    painter.text(
+        pos2(split - 30.0, rect.center().y),
+        Align2::RIGHT_CENTER,
+        value,
+        FontId::proportional(19.0),
+        visuals.weak_text_color(),
+    );
+    painter.text(
+        pos2(split - 10.0, rect.center().y),
+        Align2::RIGHT_CENTER,
+        "›",
+        FontId::proportional(26.0),
+        visuals.weak_text_color(),
+    );
+    let divider = visuals.widgets.noninteractive.bg_stroke;
+    painter.vline(split, rect.y_range().shrink(10.0), divider);
+    paint_switch(painter, rect, *on, how_on, visuals);
+    open
 }
 
 /// Pill in the accent colour with small text, its left edge vertically
@@ -748,8 +799,9 @@ impl Grooph {
     fn shared_rows(&mut self, ui: &mut Ui) {
         self.counting_row(ui);
         switch_row(ui, "Count-in", &mut self.playback_ctl.audio_cfg.count_in);
-        let silent = silent_bars_label(&self.playback_ctl.audio_cfg.gap);
-        if value_row(ui, "Silent bars", &silent).clicked() {
+        let gap = &mut self.playback_ctl.audio_cfg.gap;
+        let silent = silent_bars_label(gap);
+        if split_row(ui, "Silent bars", &silent, &mut gap.enabled).clicked() {
             self.ui.picker = Some(Picker::SilentBars);
         }
     }
