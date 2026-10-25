@@ -1095,7 +1095,17 @@ mod tests {
 
     fn round_trips(m: &Measure) -> bool {
         let back = read(&ron::to_string(m).unwrap()).unwrap_or_else(|err| panic!("{m:?}: {err}"));
-        back.time_signature() == m.time_signature() && back.beats() == m.beats()
+        // `Beat`'s `PartialEq` ignores the tuplet group: compare it and its anchor too.
+        let groups = |m: &Measure| -> Vec<_> {
+            m.beats()
+                .iter()
+                .map(|b| b.tuplet_group_id.map(|id| (id, m.tuplets().get(id).cloned())))
+                .collect()
+        };
+        back.time_signature() == m.time_signature()
+            && back.beats() == m.beats()
+            && groups(&back) == groups(m)
+            && back.tuplets().len() == m.tuplets().len()
     }
 
     #[test]
