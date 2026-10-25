@@ -1,4 +1,4 @@
-name: Claude review
+name: OpenCode review
 
 # Reviews each pull request against its requirements (linked issue, or the PR
 # description when there is none) and looks for weaknesses in the
@@ -8,9 +8,11 @@ name: Claude review
 # every push. To review again after changes, re-run the job from the Actions
 # tab or use "Run workflow" with the PR number.
 #
-# Needs the repository secret CLAUDE_CODE_OAUTH_TOKEN (create it with
-# `claude setup-token`). To use an API key instead, replace
-# claude_code_oauth_token below with anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}.
+# Uses OpenCode with Venice AI as model provider. The provider and the
+# read-only `review` agent are configured in opencode.json at the repo root;
+# to switch models, add the model there and change `model` below.
+# Needs the repository secret VENICE_API_KEY. Runs with the workflow's own
+# GITHUB_TOKEN, so the OpenCode GitHub App is not needed.
 
 on:
   pull_request:
@@ -22,7 +24,7 @@ on:
         required: true
 
 concurrency:
-  group: claude-review-${{ github.event.pull_request.number || inputs.pr }}
+  group: opencode-review-${{ github.event.pull_request.number || inputs.pr }}
   cancel-in-progress: true
 
 jobs:
@@ -35,10 +37,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
+      # Read-only on the code: the review must not push changes.
       contents: read
       pull-requests: write
-      issues: read
-      id-token: write
+      issues: write
 
     steps:
       - name: Check out the pull request
@@ -48,17 +50,25 @@ jobs:
           fetch-depth: 1
 
       - name: Review
-        uses: anthropics/claude-code-action@v1
+        uses: anomalyco/opencode/github@latest
+        env:
+          VENICE_API_KEY: ${{ secrets.VENICE_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          track_progress: ${{ github.event_name == 'pull_request' }}
+          model: venice/z-ai-glm-5-3
+          agent: review
+          use_github_token: true
+          # Do not publish the session on opencode.ai (the default for public repos).
+          share: false
           prompt: |
             REPO: ${{ github.repository }}
             PR NUMBER: ${{ github.event.pull_request.number || inputs.pr }}
+            HEAD SHA: ${{ github.event.pull_request.head.sha || '' }}
 
             Review this pull request. Read REVIEW.md in the repository root and follow it
             exactly: find the requirements (linked issues, otherwise the PR description),
             check each one, look for weaknesses, then post the summary comment and inline
             comments as described there. CLAUDE.md describes the workspace layout.
-          claude_args: >-
-            --allowed-tools "Read,Glob,Grep,mcp__github_inline_comment__create_inline_comment,Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*),Bash(gh issue view:*),Bash(gh issue list:*),Bash(gh search:*)"
+            Do not modify any files. When you are done, answer with one line saying the
+            review was posted.

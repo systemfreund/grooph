@@ -1,6 +1,6 @@
 # Pull request review guidelines
 
-These instructions drive the automated review in `.github/workflows/claude-review.yml`.
+These instructions drive the automated review in `.github/workflows/opencode-review.yml`.
 Edit this file to change what the review looks at; the workflow does not need to change.
 
 The CI workflow (`rust.yml`) already runs `cargo fmt`, `cargo clippy -D warnings`, the tests and the
@@ -68,13 +68,21 @@ speculative "consider maybe" remarks. If you are not sure something is a bug, sa
 
 ## 4. Output
 
-Post **one summary comment** with `gh pr comment` and, for findings tied to a specific line, **inline
-comments** with the inline comment tool. Do not approve or request changes.
+Post **one summary comment** with `gh pr comment <PR> --body-file -` and, for findings tied to a specific
+line, **inline comments** on the changed lines:
+
+```
+gh api repos/<REPO>/pulls/<PR>/comments -f commit_id=<HEAD SHA> -f path=<file> -F line=<line> -f side=RIGHT -f body='…'
+```
+
+The head SHA is in the prompt; otherwise get it with `gh pr view <PR> --json headRefOid`. Inline comments only
+work on lines inside the diff; mention other findings in the summary only. Do not approve or request changes,
+and do not edit files or push commits.
 
 Summary comment layout:
 
 ```
-## Claude review
+## OpenCode review
 
 **Requirements source:** …
 
