@@ -62,7 +62,7 @@ use grooph_audio::{AudioSettings, GapClick, PlaybackOptions, PlayerState, TempoR
 use grooph_link::{LinkContent, SharedLink};
 use grooph_measure::click::ClickBars;
 use grooph_measure::counter::{CounterBars, Ratio};
-use grooph_measure::counting::{CountConfig, Subdivision};
+use grooph_measure::counting::{CountConfig, CountingSystem, Subdivision, build_count_slots};
 use grooph_measure::duration::NoteValue::*;
 use grooph_measure::editing::Modification;
 use grooph_measure::generator::GeneratorSettings;
@@ -253,6 +253,17 @@ impl CountingBase {
         }
     }
 
+    /// The start of the count in `system` for the menu ("1 & 2 & ..."),
+    /// `None` for `Off` and `Primary`.
+    fn example(self, system: CountingSystem) -> Option<String> {
+        let subdivision = self.subdivision().filter(|_| self != Self::Primary)?;
+        let config = CountConfig { subdivision: Some(subdivision), tuplets: false, system };
+        let slots = build_count_slots(&Measure::new(TimeSignature::TWO_FOUR), &config);
+        let take = if self == Self::Triplet { 3 } else { 4 };
+        let labels: Vec<_> = slots.iter().filter_map(|s| s.label.as_deref()).take(take).collect();
+        Some(format!("{} ...", labels.join(" ")))
+    }
+
     /// Whether the subdivision counts sensibly in some measure of `score`.
     fn fits(self, score: &Score) -> bool {
         self.subdivision()
@@ -261,17 +272,19 @@ impl CountingBase {
 }
 
 /// The counting overlay: a subdivision to count in (or `Off`) plus an
-/// optional tuplet layer. `Off` without tuplets hides the overlay.
+/// optional tuplet layer, in numbers or syllables. `Off` without tuplets
+/// hides the overlay.
 #[derive(Serialize, Deserialize, Clone, Copy)]
 #[serde(from = "StoredCountingSettings")]
 struct CountingSettings {
     base: CountingBase,
     show_tuplets: bool,
+    system: CountingSystem,
 }
 
 impl Default for CountingSettings {
     fn default() -> Self {
-        Self { base: CountingBase::Off, show_tuplets: false }
+        Self { base: CountingBase::Off, show_tuplets: false, system: CountingSystem::Numbers }
     }
 }
 
@@ -285,6 +298,8 @@ struct StoredCountingSettings {
     show_labels: bool,
     base: CountingBase,
     show_tuplets: bool,
+    #[serde(default)]
+    system: CountingSystem,
 }
 
 fn yes() -> bool {
@@ -294,9 +309,9 @@ fn yes() -> bool {
 impl From<StoredCountingSettings> for CountingSettings {
     fn from(s: StoredCountingSettings) -> Self {
         if s.enabled && s.show_labels {
-            Self { base: s.base, show_tuplets: s.show_tuplets }
+            Self { base: s.base, show_tuplets: s.show_tuplets, system: s.system }
         } else {
-            Self::default()
+            Self { system: s.system, ..Self::default() }
         }
     }
 }
@@ -979,7 +994,7 @@ impl Grooph {
         let config = CountConfig {
             subdivision: counting.base.subdivision(),
             tuplets: counting.show_tuplets,
-            ..CountConfig::default()
+            system: counting.system,
         };
         (config.subdivision.is_some() || config.tuplets).then_some(config)
     }
@@ -1184,6 +1199,7 @@ impl Grooph {
 mod tests {
     use super::{CountingBase, CountingSettings, PersistedState};
     use crate::compact::CompactTab;
+    use grooph_measure::counting::CountingSystem;
 
     #[test]
     fn back_closes_one_layer_at_a_time() {
@@ -1242,15 +1258,34 @@ mod tests {
 
     #[test]
     fn counting_settings_round_trip() {
-        let c = CountingSettings { base: CountingBase::Sixteenth, show_tuplets: true };
+        let c = CountingSettings {
+            base: CountingBase::Sixteenth,
+            show_tuplets: true,
+            system: CountingSystem::Takadimi,
+        };
         let back = load(&ron::to_string(&c).unwrap());
         assert!(back.base == CountingBase::Sixteenth && back.show_tuplets);
+        assert_eq!(back.system, CountingSystem::Takadimi);
+    }
+
+    #[test]
+    fn the_count_menu_shows_each_system() {
+        use CountingSystem::*;
+        let examples = |system| {
+            [CountingBase::Ands, CountingBase::Sixteenth, CountingBase::Triplet]
+                .map(|b| b.example(system).unwrap())
+        };
+        assert_eq!(examples(Numbers), ["1 & 2 & ...", "1 e & a ...", "1 trip let ..."]);
+        assert_eq!(examples(Takadimi), ["ta di ta di ...", "ta ka di mi ...", "ta ki da ..."]);
+        assert_eq!(examples(Gordon), ["du de du de ...", "du ta de ta ...", "du da di ..."]);
+        assert_eq!(CountingBase::Primary.example(Numbers), None);
     }
 
     #[test]
     fn older_counting_switches_still_hide_the_overlay() {
         let on = load("(enabled: true, show_labels: true, base: Ands, show_tuplets: true)");
         assert!(on.base == CountingBase::Ands && on.show_tuplets);
+        assert_eq!(on.system, CountingSystem::Numbers);
         for hidden in [
             "(enabled: false, show_labels: true, base: Ands, show_tuplets: true)",
             "(enabled: true, show_labels: false, base: Ands, show_tuplets: true)",

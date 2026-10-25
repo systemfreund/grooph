@@ -5,12 +5,13 @@
 //! positions of a measure on a fixed grid, whatever its notes: which beat a
 //! position lies in, how finely that beat is divided and which part of it the
 //! position is ([`CountPos`]). A [`CountingSystem`] then names each position
-//! ("1 e & a"), or leaves it unnamed. The positions know nothing of syllables
+//! ("1 e & a", "ta ka di mi", "du ta de ta"), or leaves it unnamed. The positions know nothing of syllables
 //! and the systems nothing of ticks.
 
 use crate::grid::DEFAULT_GRID;
 use crate::grouping::default_groups_for;
 use crate::{Measure, TimeSignature};
+use serde::{Deserialize, Serialize};
 
 /// How finely the count divides the beats of a measure.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -52,19 +53,32 @@ impl Subdivision {
 }
 
 /// The words a count is spoken in.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CountingSystem {
     /// "1 e & a", "1 trip let", "1 la li".
     #[default]
     Numbers,
+    /// Takadimi (Hoffman, Pelto and White): every beat is "ta", its parts
+    /// are named by their place in the beat ("ta di", "ta ka di mi", "ta ki
+    /// da"), the same in simple and compound meters.
+    Takadimi,
+    /// Gordon's Music Learning Theory: "du de" and "du ta de ta" in duple,
+    /// "du da di" in triple, and "du be" and "du ba bi" for the groups of the
+    /// unusual meters (5/8, 7/8).
+    Gordon,
 }
 
 impl CountingSystem {
-    /// The label of `pos`, `None` where the system has nothing to say.
+    /// The label of `pos`, `None` where the system has nothing to say. The
+    /// syllable systems count what they have no syllables for (quintuplets,
+    /// septuplets) in numbers.
     pub fn label(self, pos: &CountPos) -> Option<String> {
-        match self {
-            Self::Numbers => numbers(pos),
-        }
+        let syllable = match self {
+            Self::Numbers => return numbers(pos),
+            Self::Takadimi => takadimi(pos),
+            Self::Gordon => gordon(pos),
+        };
+        syllable.map(str::to_string).or_else(|| numbers(pos))
     }
 }
 
@@ -82,8 +96,9 @@ pub struct CountConfig {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CountSpan {
     /// A beat (primary group) of `units` beat units: one in x/4, two or three
-    /// in x/8 and x/16.
-    Beat { units: u8 },
+    /// in x/8 and x/16. `uneven`: the measure mixes beats of different sizes
+    /// (2+2+3 in 7/8).
+    Beat { units: u8, uneven: bool },
     /// A tuplet group.
     Tuplet,
 }
@@ -126,8 +141,9 @@ pub fn build_count_slots(measure: &Measure, config: &CountConfig) -> Vec<CountSl
 
     let mut slots = Vec::new();
     if let Some(subdivision) = config.subdivision.filter(|s| s.fits(&ts)) {
+        let uneven = grid.beats.windows(2).any(|w| w[0].2 != w[1].2);
         for &(start_tick, end_tick, units) in &grid.beats {
-            let span = CountSpan::Beat { units };
+            let span = CountSpan::Beat { units, uneven };
             let parts = subdivision.parts(&ts, units);
             grid.push_slots(&mut slots, config.system, span, start_tick, end_tick, parts);
         }
@@ -240,7 +256,7 @@ fn numbers(pos: &CountPos) -> Option<String> {
             p => text(&["trip", "let"], p),
         },
         CountSpan::Tuplet => Some((part + 1).to_string()),
-        CountSpan::Beat { units } if pos.parts == 1 || pos.parts == units => match part {
+        CountSpan::Beat { units, .. } if pos.parts == 1 || pos.parts == units => match part {
             0 => Some(pos.beat.to_string()),
             p => text(
                 match units {
@@ -252,7 +268,7 @@ fn numbers(pos: &CountPos) -> Option<String> {
                 p,
             ),
         },
-        CountSpan::Beat { units } if units > 0 && pos.parts.is_multiple_of(units) => {
+        CountSpan::Beat { units, .. } if units > 0 && pos.parts.is_multiple_of(units) => {
             let per_unit = (pos.parts / units) as usize;
             match part % per_unit {
                 0 => Some(pos.unit.to_string()),
@@ -269,6 +285,41 @@ fn numbers(pos: &CountPos) -> Option<String> {
         }
         CountSpan::Beat { .. } => None,
     }
+}
+
+/// Takadimi names a part by its place in the beat (or tuplet), whatever the
+/// meter: halves "ta di", thirds "ta ki da", quarters "ta ka di mi", sixths
+/// "ta va ki di da ma".
+fn takadimi(pos: &CountPos) -> Option<&'static str> {
+    let syllables: &[&str] = match pos.parts {
+        1 => &["ta"],
+        2 => &["ta", "di"],
+        3 => &["ta", "ki", "da"],
+        4 => &["ta", "ka", "di", "mi"],
+        6 => &["ta", "va", "ki", "di", "da", "ma"],
+        _ => &[],
+    };
+    syllables.get(pos.part as usize).copied()
+}
+
+/// Gordon names the beat "du" and its parts by the meter: duple "du de",
+/// triple "du da di", each split once more with "ta" ("du ta de ta"). The
+/// groups of an unusual meter are "du be" and "du ba bi".
+fn gordon(pos: &CountPos) -> Option<&'static str> {
+    let unusual = matches!(pos.span, CountSpan::Beat { uneven: true, .. });
+    let syllables: &[&str] = match (pos.parts, unusual) {
+        (1, _) => &["du"],
+        (2, false) => &["du", "de"],
+        (2, true) => &["du", "be"],
+        (3, false) => &["du", "da", "di"],
+        (3, true) => &["du", "ba", "bi"],
+        (4, false) => &["du", "ta", "de", "ta"],
+        (4, true) => &["du", "ta", "be", "ta"],
+        (6, false) => &["du", "ta", "da", "ta", "di", "ta"],
+        (6, true) => &["du", "ta", "ba", "ta", "bi", "ta"],
+        _ => &[],
+    };
+    syllables.get(pos.part as usize).copied()
 }
 
 #[cfg(test)]
@@ -360,7 +411,64 @@ mod tests {
         let slots = build_count_slots(&measure, &config(Some(Halves), false));
         // The second sixteenth of the "la" in the 3-group: beat 2, unit 4.
         let pos = slots[7].pos;
-        assert_eq!(pos.span, CountSpan::Beat { units: 3 });
+        assert_eq!(pos.span, CountSpan::Beat { units: 3, uneven: true });
         assert_eq!((pos.beat, pos.unit, pos.part, pos.parts), (2, 4, 3, 6));
+    }
+
+    fn syllables(score: &str, subdivision: Option<Subdivision>, system: CountingSystem) -> String {
+        count(score, CountConfig { subdivision, tuplets: false, system })
+    }
+
+    #[test]
+    fn takadimi_names_the_place_in_the_beat() {
+        use CountingSystem::Takadimi;
+        assert_eq!(syllables("2/4 q q", Some(Beats), Takadimi), "ta ta");
+        assert_eq!(syllables("2/4 q q", Some(Halves), Takadimi), "ta di ta di");
+        assert_eq!(syllables("2/4 q q", Some(Quarters), Takadimi), "ta ka di mi ta ka di mi");
+        assert_eq!(syllables("2/4 q q", Some(Triplets), Takadimi), "ta ki da ta ki da");
+        // Compound meters divide the dotted quarter.
+        assert_eq!(syllables("6/8 q. q.", Some(Beats), Takadimi), "ta ta");
+        assert_eq!(syllables("6/8 q. q.", Some(Triplets), Takadimi), "ta ki da ta ki da");
+        assert_eq!(
+            syllables("6/8 q. q.", Some(Halves), Takadimi),
+            "ta va ki di da ma ta va ki di da ma"
+        );
+        // Odd meters: each group by its own size.
+        assert_eq!(syllables("7/8 q q. q", Some(Triplets), Takadimi), "ta di ta ki da ta di");
+        assert_eq!(syllables("5/8 q. q", Some(Halves), Takadimi), "ta va ki di da ma ta ka di mi");
+    }
+
+    #[test]
+    fn gordon_follows_the_meter() {
+        use CountingSystem::Gordon;
+        assert_eq!(syllables("2/4 q q", Some(Halves), Gordon), "du de du de");
+        assert_eq!(syllables("2/4 q q", Some(Quarters), Gordon), "du ta de ta du ta de ta");
+        assert_eq!(syllables("2/4 q q", Some(Triplets), Gordon), "du da di du da di");
+        assert_eq!(syllables("6/8 q. q.", Some(Triplets), Gordon), "du da di du da di");
+        assert_eq!(
+            syllables("6/8 q. q.", Some(Halves), Gordon),
+            "du ta da ta di ta du ta da ta di ta"
+        );
+        // Unusual meters.
+        assert_eq!(syllables("7/8 q q. q", Some(Triplets), Gordon), "du be du ba bi du be");
+        assert_eq!(syllables("5/8 q. q", Some(Triplets), Gordon), "du ba bi du be");
+        assert_eq!(
+            syllables("7/8 q q. q", Some(Halves), Gordon),
+            "du ta be ta du ta ba ta bi ta du ta be ta"
+        );
+    }
+
+    #[test]
+    fn syllable_systems_count_tuplets_they_have_no_names_for() {
+        for (system, triplet, duplet) in [
+            (CountingSystem::Takadimi, "ta ki da", "ta di"),
+            (CountingSystem::Gordon, "du da di", "du de"),
+        ] {
+            let tuplets = CountConfig { subdivision: None, tuplets: true, system };
+            assert_eq!(count("4/4 t8 t8 t8 q h", tuplets), triplet);
+            assert_eq!(count("4/4 qt16 qt16 qt16 qt16 qt16 q h", tuplets), "1 2 3 4 5");
+            // A duplet in 6/8 divides its span in two.
+            assert_eq!(count("6/8 2:3e 2:3e q.", tuplets), duplet);
+        }
     }
 }
