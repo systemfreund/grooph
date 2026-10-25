@@ -1,5 +1,6 @@
 use crate::Grooph;
 use crate::accuracy::{AccuracyMark, HitGrade, clamp_diff_to_beat_window};
+use crate::guide::{Guide, anchor_intensity};
 use crate::playback_clock::{advance_tick, next_count_in};
 use crate::tools::{Modifier, ToolKind, all_tools};
 use crate::{Mode, TransportState};
@@ -14,7 +15,7 @@ use grooph_layout::staff_layout::{
 use grooph_measure::grid::DEFAULT_GRID;
 use grooph_measure::tempo::ScoreTiming;
 use grooph_measure::{Score, TimeSignature};
-use grooph_render::staff::draw_staff;
+use grooph_render::staff::{PlaybackMarks, draw_staff};
 
 impl Grooph {
     pub(super) fn measure_panel(&mut self, ui: &mut egui::Ui) {
@@ -77,6 +78,17 @@ impl Grooph {
                                 None
                             }
                         };
+
+                        // From the global tick, derive (playing_measure_idx, local_tick).
+                        // The playback cursor renders / auto-scrolls based on this — it
+                        // wanders through all measures, independent of cursor.measure_idx.
+                        // With swing the cursor follows the written positions, so it
+                        // reaches a swung note exactly when it sounds.
+                        let playback_local = playback_tick_to_draw
+                            .map(|global| timing.to_local(timing.written_global_tick(global)));
+                        let now = ui.input(|i| i.time);
+                        self.update_guide_anchor(playback_local, now);
+                        let guide = self.active_guide();
 
                         let width_cap_factor = if self.ui.narrow_screen {
                             // Let the measure width alone decide the size.
@@ -149,14 +161,6 @@ impl Grooph {
                         // match before drawing, so glyph size agrees with `staff`'s positions.
                         let render_opts = staff_opts.rescaled(staff.scale);
                         self.ui.staff_em = render_opts.em;
-
-                        // From the global tick, derive (playing_measure_idx, local_tick).
-                        // The playback cursor renders / auto-scrolls based on this — it
-                        // wanders through all measures, independent of cursor.measure_idx.
-                        // With swing the cursor follows the written positions, so it
-                        // reaches a swung note exactly when it sounds.
-                        let playback_local = playback_tick_to_draw
-                            .map(|global| timing.to_local(timing.written_global_tick(global)));
 
                         // Auto-scroll follows the same visual cursor logic as the
                         // renderer (incl. cross-measure wrap animation), so we use
@@ -240,6 +244,13 @@ impl Grooph {
                             None
                         };
                         let playback = playback_local;
+                        let marks = if guide == Guide::Line {
+                            PlaybackMarks::Line
+                        } else {
+                            PlaybackMarks::Anchor(self.playback_ctl.playback.anchor.map(|a| {
+                                (a.measure_idx, f64::from(a.tick), anchor_intensity(now - a.at))
+                            }))
+                        };
 
                         draw_staff(
                             ui,
@@ -248,6 +259,7 @@ impl Grooph {
                             cursor,
                             voice,
                             playback,
+                            marks,
                             count_config.as_ref(),
                             &render_opts,
                         );

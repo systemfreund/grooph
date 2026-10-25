@@ -162,6 +162,12 @@ impl Grooph {
         if let Some((m_idx, _)) = &mut playback.last_primary_beat {
             *m_idx = m_idx.saturating_sub(1);
         }
+        if let Some((m_idx, _)) = &mut playback.guide_bar {
+            *m_idx = m_idx.saturating_sub(1);
+        }
+        if let Some(anchor) = &mut playback.anchor {
+            anchor.measure_idx = anchor.measure_idx.saturating_sub(1);
+        }
         let cursor = &mut self.editor.cursor;
         if cursor.measure_idx == 0 {
             *cursor = Cursor::start();
