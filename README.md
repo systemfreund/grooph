@@ -83,8 +83,8 @@ Important root files:
   Without the line the count overlay lights its labels only with the anchors
   (`PlaybackMarks::Anchor`), not along the way.
   Bars are counted as played (`PlaybackState::bars_played`), so loops and
-  endless mode keep the every-second-bar rhythm. The metronome tab and
-  calibration always use the line. Not part of presets or links.
+  endless mode keep the every-second-bar rhythm. The metronome and edit
+  tabs and calibration always use the line. Not part of presets or links.
 - Counting overlay comes from `grooph_measure::counting`.
 - Swing (`grooph_measure::swing::Swing`, global, main menu next to BPM): 50%
   (off) to 75% (dotted), swung unit 8ths or 16ths. Notation stays straight;
