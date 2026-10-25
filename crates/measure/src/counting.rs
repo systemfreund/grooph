@@ -1,511 +1,378 @@
+//! The counting overlay: where the counts of a measure fall and what is said
+//! on them.
+//!
+//! Counting takes two steps. [`build_count_slots`] first finds the counted
+//! positions of a measure on a fixed grid, whatever its notes: which beat a
+//! position lies in, how finely that beat is divided and which part of it the
+//! position is ([`CountPos`]). A [`CountingSystem`] then names each position
+//! ("1 e & a", "ta ka di mi", "du ta de ta"), or leaves it unnamed. The
+//! positions know nothing of syllables and the systems nothing of ticks.
+
 use crate::grid::DEFAULT_GRID;
 use crate::grouping::default_groups_for;
 use crate::{Measure, TimeSignature};
+use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum LabelToken {
-    BeatNum,
-    GroupNum,
-    SubNum,
-    Text(String),
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct LabelPattern {
-    pub slots: Vec<Vec<LabelToken>>,
-}
-
-impl LabelPattern {
-    pub fn single(token: LabelToken) -> Self {
-        Self { slots: vec![vec![token]] }
-    }
-
-    pub fn ands() -> Self {
-        Self { slots: vec![vec![LabelToken::BeatNum], vec![LabelToken::Text("&".to_string())]] }
-    }
-
-    pub fn sixteenth() -> Self {
-        Self {
-            slots: vec![
-                vec![LabelToken::BeatNum],
-                vec![LabelToken::Text("e".to_string())],
-                vec![LabelToken::Text("&".to_string())],
-                vec![LabelToken::Text("a".to_string())],
-            ],
-        }
-    }
-
-    pub fn triplet() -> Self {
-        Self {
-            slots: vec![
-                vec![LabelToken::BeatNum],
-                vec![LabelToken::Text("trip".to_string())],
-                vec![LabelToken::Text("let".to_string())],
-            ],
-        }
-    }
-}
-
+/// How finely the count divides the beats of a measure.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Subdiv {
-    Fixed(u8),
-    TupletN,
+pub enum Subdivision {
+    /// One count per beat: "1 2 3 4", "1 2" in 6/8.
+    Beats,
+    /// Every beat unit in two: "1 & 2 &", "1 ta la ta li ta" in 6/8.
+    Halves,
+    /// Every beat unit in four: "1 e & a".
+    Quarters,
+    /// Every beat in three ("1 trip let"); a group of eighths or sixteenths
+    /// in its own units ("1 la li 2 la li" in 6/8, "1 & 2 la li 3 &" in 7/8).
+    Triplets,
 }
 
+impl Subdivision {
+    /// Whether the subdivision counts sensibly in `ts`: never finer than
+    /// sixteenths (no "1 e & a" on 32nds in 6/8).
+    pub fn fits(self, ts: &TimeSignature) -> bool {
+        match self {
+            Self::Halves => ts.beat_unit as u32 * 2 <= 16,
+            Self::Quarters => ts.beat_unit as u32 * 4 <= 16,
+            Self::Beats | Self::Triplets => true,
+        }
+    }
+
+    /// How many parts a beat of `units` beat units is divided into.
+    fn parts(self, ts: &TimeSignature, units: u8) -> u32 {
+        let units = units as u32;
+        match self {
+            Self::Beats => 1,
+            Self::Halves => units * 2,
+            Self::Quarters => units * 4,
+            // In x/8 and x/16 the beat units themselves are the subdivision.
+            Self::Triplets if ts.beat_unit >= 8 => units,
+            Self::Triplets => units * 3,
+        }
+    }
+}
+
+/// The words a count is spoken in.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CountingSystem {
+    /// "1 e & a", "1 trip let", "1 la li".
+    #[default]
+    Numbers,
+    /// Takadimi (Hoffman, Pelto and White): every beat is "ta", its parts
+    /// are named by their place in the beat ("ta di", "ta ka di mi", "ta ki
+    /// da"), the same in simple and compound meters.
+    Takadimi,
+    /// Gordon's Music Learning Theory: "du de" and "du ta de ta" in duple,
+    /// "du da di" in triple, and "du be" and "du ba bi" for the groups of the
+    /// unusual meters (5/8, 7/8).
+    Gordon,
+}
+
+impl CountingSystem {
+    /// The label of `pos`, `None` where the system has nothing to say.
+    pub fn label(self, pos: &CountPos) -> Option<String> {
+        match self {
+            Self::Numbers => numbers(pos),
+            Self::Takadimi => takadimi(pos).map(str::to_string),
+            Self::Gordon => gordon(pos).map(str::to_string),
+        }
+    }
+}
+
+/// What the overlay counts: the beats in a subdivision, in a system.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum CountScope {
-    Measure,
-    PrimaryGroup,
-    BeatUnit,
-    TupletAll,
-    Tuplet(u32),
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct CountLayer {
-    pub id: u32,
-    pub enabled: bool,
-    pub scope: CountScope,
-    pub subdiv: Subdiv,
-    pub labels: Option<LabelPattern>,
-    pub show_labels: bool,
-    pub priority: u8,
-    /// In x/8 and x/16, count each primary group by its own beat units
-    /// ("1 la li 2 la li" in 6/8) instead of applying `subdiv` and `labels`.
-    /// Only meaningful for `CountScope::PrimaryGroup`.
-    pub group_units: bool,
-}
-
-impl CountLayer {
-    pub fn new(id: u32, scope: CountScope, subdiv: Subdiv) -> Self {
-        Self {
-            id,
-            enabled: true,
-            scope,
-            subdiv,
-            labels: None,
-            show_labels: true,
-            priority: 0,
-            group_units: false,
-        }
-    }
-
-    /// Whether the layer counts sensibly in `ts`: a beat-unit layer never
-    /// counts finer than sixteenths (no "1 e & a" on 32nds in 6/8).
-    pub fn fits(&self, ts: &TimeSignature) -> bool {
-        match (self.scope, self.subdiv) {
-            (CountScope::BeatUnit, Subdiv::Fixed(n)) => (ts.beat_unit as u32) * (n as u32) <= 16,
-            _ => true,
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CountConfig {
-    pub layers: Vec<CountLayer>,
+    pub subdivision: Subdivision,
+    pub system: CountingSystem,
 }
 
-impl CountConfig {
-    pub fn new(layers: Vec<CountLayer>) -> Self {
-        Self { layers }
-    }
+/// A counted position, independent of what is said on it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CountPos {
+    /// The size of the beat (primary group) the position lies in, in beat
+    /// units: one in x/4, two or three in x/8 and x/16.
+    pub units: u8,
+    /// The measure mixes beats of different sizes (2+2+3 in 7/8).
+    pub uneven: bool,
+    /// The beat the position lies in, from 1.
+    pub beat: u32,
+    /// The position is part `part` (from 0) of `parts` equal parts of its beat.
+    pub part: u8,
+    pub parts: u8,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CountSlot {
-    pub layer_id: u32,
-    pub scope: CountScope,
-    pub scope_idx: u32,
-    pub sub_idx: u8,
     pub start_tick: u32,
     pub end_tick: u32,
+    pub pos: CountPos,
     pub label: Option<String>,
-    pub priority: u8,
-    pub tuplet_id: Option<u32>,
 }
 
-#[derive(Clone, Copy, Debug)]
-struct Span {
-    start_tick: u32,
-    end_tick: u32,
-    idx: u32,
-}
-
-#[derive(Clone, Copy, Debug)]
-struct TupletSpan {
-    id: u32,
-    idx: u32,
-    start_tick: u32,
-    end_tick: u32,
-    n: u8,
-}
-
-struct LabelContext {
-    beat_num: u32,
-    group_num: u32,
-    sub_num: u8,
-}
-
-#[derive(Clone, Copy)]
-struct ScopeSpan {
-    scope: CountScope,
-    scope_idx: u32,
-    start_tick: u32,
-    end_tick: u32,
-    tuplet_id: Option<u32>,
-    tuplet_n: Option<u8>,
-}
-
-impl ScopeSpan {
-    fn from_span(scope: CountScope, span: Span) -> Self {
-        Self {
-            scope,
-            scope_idx: span.idx,
-            start_tick: span.start_tick,
-            end_tick: span.end_tick,
-            tuplet_id: None,
-            tuplet_n: None,
-        }
-    }
-
-    fn from_tuplet(span: TupletSpan) -> Self {
-        Self {
-            scope: CountScope::Tuplet(span.id),
-            scope_idx: span.idx,
-            start_tick: span.start_tick,
-            end_tick: span.end_tick,
-            tuplet_id: Some(span.id),
-            tuplet_n: Some(span.n),
-        }
-    }
-}
-
-struct CountContext<'a> {
-    slots: &'a mut Vec<CountSlot>,
-    ticks_per_beat: u32,
-    primary_groups: &'a [Span],
-}
-
-impl<'a> CountContext<'a> {
-    fn push_slots(&mut self, layer: &CountLayer, span: ScopeSpan) {
-        let subdiv = resolve_subdiv(layer.subdiv, span.tuplet_n);
-        let span_ticks = span.end_tick.saturating_sub(span.start_tick);
-        if subdiv == 0 || span_ticks == 0 {
-            return;
-        }
-        let subdiv_u32 = subdiv as u32;
-        if !span_ticks.is_multiple_of(subdiv_u32) {
-            return;
-        }
-        let step = span_ticks / subdiv_u32;
-        for sub_idx in 0..subdiv {
-            let sub_idx_u32 = sub_idx as u32;
-            let slot_start = span.start_tick + step * sub_idx_u32;
-            let slot_end = slot_start + step;
-            let beat_num = (slot_start / self.ticks_per_beat) + 1;
-            let group_num = group_num_for_tick(self.primary_groups, slot_start);
-            let ctx = LabelContext { beat_num, group_num, sub_num: sub_idx + 1 };
-            let label = if layer.show_labels {
-                layer.labels.as_ref().and_then(|p| {
-                    // A tuplet the pattern does not fit (a quintuplet under
-                    // "1 trip let") is counted by number instead.
-                    if span.tuplet_n.is_some() && p.slots.len() != subdiv as usize {
-                        label_from_tokens(&[LabelToken::SubNum], &ctx)
-                    } else {
-                        label_for_slot(p, sub_idx, &ctx)
-                    }
-                })
-            } else {
-                None
-            };
-            self.slots.push(CountSlot {
-                layer_id: layer.id,
-                scope: span.scope,
-                scope_idx: span.scope_idx,
-                sub_idx,
-                start_tick: slot_start,
-                end_tick: slot_end,
-                label,
-                priority: layer.priority,
-                tuplet_id: span.tuplet_id,
-            });
-        }
-    }
-}
-
-impl CountContext<'_> {
-    /// Count a group of eighths or sixteenths by its own units: the group
-    /// number, then "&" in a group of two and "la li" in a group of three,
-    /// so 6/8 reads "1 la li 2 la li" and 7/8 "1 & 2 la li 3 &".
-    fn push_group_units(&mut self, layer: &CountLayer, span: Span) {
-        let units = span.end_tick.saturating_sub(span.start_tick) / self.ticks_per_beat;
-        let texts: &[&str] = match units {
-            2 => &["&"],
-            3 => &["la", "li"],
-            4 => &["e", "&", "a"],
-            _ => &[],
-        };
-        for sub_idx in 0..units.min(u8::MAX as u32) as u8 {
-            let start_tick = span.start_tick + self.ticks_per_beat * sub_idx as u32;
-            let label = match sub_idx {
-                0 => Some((span.idx + 1).to_string()),
-                i => texts.get(i as usize - 1).map(|t| t.to_string()),
-            };
-            self.slots.push(CountSlot {
-                layer_id: layer.id,
-                scope: CountScope::PrimaryGroup,
-                scope_idx: span.idx,
-                sub_idx,
-                start_tick,
-                end_tick: start_tick + self.ticks_per_beat,
-                label: if layer.show_labels { label } else { None },
-                priority: layer.priority,
-                tuplet_id: None,
-            });
-        }
-    }
-}
-
+/// The counted positions of `measure` with their labels, by start tick.
+/// Empty when the subdivision is too fine for the time signature.
 pub fn build_count_slots(measure: &Measure, config: &CountConfig) -> Vec<CountSlot> {
     let ts = measure.time_signature();
     let ticks_per_beat = DEFAULT_GRID.ticks_per_beat(&ts);
     let measure_ticks = DEFAULT_GRID.ticks_per_measure(&ts);
-
-    if ticks_per_beat == 0 || measure_ticks == 0 {
+    if ticks_per_beat == 0 || measure_ticks == 0 || !config.subdivision.fits(&ts) {
         return Vec::new();
     }
 
-    let primary_groups = primary_group_spans(&ts, ticks_per_beat, measure_ticks);
-    let beat_units = beat_unit_spans(&ts, ticks_per_beat);
-    let tuplets = tuplet_spans(measure, measure_ticks);
-
+    let groups = default_groups_for(&ts);
+    let uneven = groups.windows(2).any(|w| w[0] != w[1]);
     let mut slots = Vec::new();
-    {
-        let mut ctx =
-            CountContext { slots: &mut slots, ticks_per_beat, primary_groups: &primary_groups };
-
-        // In x/8 and x/16 the beat units themselves are the subdivision.
-        let unit_groups = ts.beat_unit >= 8;
-        for layer in &config.layers {
-            if !layer.enabled || !layer.fits(&ts) {
-                continue;
-            }
-            match layer.scope {
-                CountScope::PrimaryGroup if unit_groups && layer.group_units => {
-                    for span in &primary_groups {
-                        ctx.push_group_units(layer, *span);
-                    }
-                }
-                CountScope::Measure => {
-                    let span = Span { start_tick: 0, end_tick: measure_ticks, idx: 0 };
-                    ctx.push_slots(layer, ScopeSpan::from_span(CountScope::Measure, span));
-                }
-                CountScope::PrimaryGroup => {
-                    for span in &primary_groups {
-                        ctx.push_slots(
-                            layer,
-                            ScopeSpan::from_span(CountScope::PrimaryGroup, *span),
-                        );
-                    }
-                }
-                CountScope::BeatUnit => {
-                    for span in &beat_units {
-                        ctx.push_slots(layer, ScopeSpan::from_span(CountScope::BeatUnit, *span));
-                    }
-                }
-                CountScope::TupletAll => {
-                    for span in &tuplets {
-                        ctx.push_slots(layer, ScopeSpan::from_tuplet(*span));
-                    }
-                }
-                CountScope::Tuplet(id) => {
-                    if let Some(span) = tuplets.iter().find(|s| s.id == id) {
-                        ctx.push_slots(layer, ScopeSpan::from_tuplet(*span));
-                    }
-                }
-            }
-        }
-    }
-
-    slots.sort_by(|a, b| {
-        a.start_tick
-            .cmp(&b.start_tick)
-            .then_with(|| b.priority.cmp(&a.priority))
-            .then_with(|| a.layer_id.cmp(&b.layer_id))
-    });
-    slots
-}
-
-fn primary_group_spans(ts: &TimeSignature, ticks_per_beat: u32, measure_ticks: u32) -> Vec<Span> {
-    let groups = default_groups_for(ts);
-    let mut spans = Vec::new();
-    let mut acc = 0u32;
-    for (idx, g) in groups.iter().enumerate() {
-        let start_tick = acc;
-        let mut end_tick = acc + (*g as u32) * ticks_per_beat;
+    let mut start_tick = 0;
+    for (beat, &units) in (1..).zip(groups.iter()) {
         if start_tick >= measure_ticks {
             break;
         }
-        if end_tick > measure_ticks {
-            end_tick = measure_ticks;
+        let end_tick = (start_tick + units as u32 * ticks_per_beat).min(measure_ticks);
+        let parts = config.subdivision.parts(&ts, units);
+        let ticks = end_tick - start_tick;
+        // A part must fall on the grid.
+        if parts > 0 && parts <= u8::MAX as u32 && ticks.is_multiple_of(parts) {
+            let step = ticks / parts;
+            for part in 0..parts {
+                let slot_start = start_tick + step * part;
+                let pos = CountPos { units, uneven, beat, part: part as u8, parts: parts as u8 };
+                slots.push(CountSlot {
+                    start_tick: slot_start,
+                    end_tick: slot_start + step,
+                    pos,
+                    label: config.system.label(&pos),
+                });
+            }
         }
-        spans.push(Span { start_tick, end_tick, idx: idx as u32 });
-        acc = end_tick;
+        start_tick = end_tick;
     }
-    spans
+    slots
 }
 
-fn beat_unit_spans(ts: &TimeSignature, ticks_per_beat: u32) -> Vec<Span> {
-    let mut spans = Vec::with_capacity(ts.beats as usize);
-    for i in 0..ts.beats {
-        let start_tick = (i as u32) * ticks_per_beat;
-        let end_tick = start_tick + ticks_per_beat;
-        spans.push(Span { start_tick, end_tick, idx: i as u32 });
-    }
-    spans
-}
-
-fn tuplet_spans(measure: &Measure, measure_ticks: u32) -> Vec<TupletSpan> {
-    let beats = measure.beats();
-    if beats.is_empty() {
-        return Vec::new();
-    }
-    let onsets = DEFAULT_GRID.compute_onset_ticks(beats);
-    measure
-        .tuplet_groups()
-        .into_iter()
-        .filter_map(|group| measure.tuplets().get(group.id).map(|a| (group, a)))
-        .enumerate()
-        .map(|(idx, (group, anchor))| {
-            let start_tick = onsets[group.start_idx];
-            let end_tick = (start_tick + anchor.target_ticks).min(measure_ticks);
-            TupletSpan { id: group.id.as_u32(), idx: idx as u32, start_tick, end_tick, n: anchor.n }
-        })
-        .collect()
-}
-
-fn resolve_subdiv(subdiv: Subdiv, tuplet_n: Option<u8>) -> u8 {
-    match subdiv {
-        Subdiv::Fixed(n) => n,
-        Subdiv::TupletN => tuplet_n.unwrap_or(0),
+/// Counting in numbers, by the beat as the other systems do: the beat's
+/// number, then its parts. A beat of one unit is "1 & 2 &", "1 e & a" or "1
+/// trip let"; a group of eighths takes the Eastman syllables, "1 & 2 la li"
+/// in its eighths and "1 e & a 2 ta la ta li ta" in its sixteenths.
+fn numbers(pos: &CountPos) -> Option<String> {
+    let after: &[&str] = match (pos.parts, pos.units) {
+        (1, _) => &[],
+        (2, _) => &["&"],
+        (3, 3) => &["la", "li"],
+        (3, _) => &["trip", "let"],
+        (4, _) => &["e", "&", "a"],
+        (6, 3) => &["ta", "la", "ta", "li", "ta"],
+        _ => return None,
+    };
+    match pos.part as usize {
+        0 => Some(pos.beat.to_string()),
+        p => after.get(p - 1).map(|t| t.to_string()),
     }
 }
 
-fn group_num_for_tick(groups: &[Span], tick: u32) -> u32 {
-    for g in groups {
-        if tick >= g.start_tick && tick < g.end_tick {
-            return g.idx + 1;
-        }
-    }
-    1
+/// Takadimi names a part by its place in the beat, whatever the
+/// meter: halves "ta di", thirds "ta ki da", quarters "ta ka di mi", sixths
+/// "ta va ki di da ma".
+fn takadimi(pos: &CountPos) -> Option<&'static str> {
+    let syllables: &[&str] = match pos.parts {
+        1 => &["ta"],
+        2 => &["ta", "di"],
+        3 => &["ta", "ki", "da"],
+        4 => &["ta", "ka", "di", "mi"],
+        6 => &["ta", "va", "ki", "di", "da", "ma"],
+        _ => &[],
+    };
+    syllables.get(pos.part as usize).copied()
 }
 
-fn label_for_slot(pattern: &LabelPattern, sub_idx: u8, ctx: &LabelContext) -> Option<String> {
-    if pattern.slots.is_empty() {
-        return None;
-    }
-    let slot = &pattern.slots[sub_idx as usize % pattern.slots.len()];
-    label_from_tokens(slot, ctx)
-}
-
-fn label_from_tokens(tokens: &[LabelToken], ctx: &LabelContext) -> Option<String> {
-    if tokens.is_empty() {
-        return None;
-    }
-    let mut out = String::new();
-    for token in tokens {
-        match token {
-            LabelToken::BeatNum => out.push_str(&ctx.beat_num.to_string()),
-            LabelToken::GroupNum => out.push_str(&ctx.group_num.to_string()),
-            LabelToken::SubNum => out.push_str(&ctx.sub_num.to_string()),
-            LabelToken::Text(s) => out.push_str(s),
-        }
-    }
-    Some(out)
+/// Gordon names the beat "du" and its parts by the meter: duple "du de",
+/// triple "du da di", each split once more with "ta" ("du ta de ta"). The
+/// groups of an unusual meter are "du be" and "du ba bi".
+fn gordon(pos: &CountPos) -> Option<&'static str> {
+    let syllables: &[&str] = match (pos.parts, pos.uneven) {
+        (1, _) => &["du"],
+        (2, false) => &["du", "de"],
+        (2, true) => &["du", "be"],
+        (3, false) => &["du", "da", "di"],
+        (3, true) => &["du", "ba", "bi"],
+        (4, false) => &["du", "ta", "de", "ta"],
+        (4, true) => &["du", "ta", "be", "ta"],
+        (6, false) => &["du", "ta", "da", "ta", "di", "ta"],
+        (6, true) => &["du", "ta", "ba", "ta", "bi", "ta"],
+        _ => &[],
+    };
+    syllables.get(pos.part as usize).copied()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::notation::parse_score;
 
-    fn labels(ts: TimeSignature, layer: CountLayer) -> Vec<String> {
-        let slots = build_count_slots(&Measure::new(ts), &CountConfig::new(vec![layer]));
-        slots.into_iter().map(|s| s.label.unwrap_or_default()).collect()
+    use Subdivision::{Beats, Halves, Quarters, Triplets};
+
+    /// The labels of the first measure of `score`, "_" for an unnamed slot.
+    fn count(score: &str, subdivision: Subdivision, system: CountingSystem) -> String {
+        let measure = parse_score(score).unwrap().measures.remove(0);
+        labels(&measure, subdivision, system)
     }
 
-    fn triplets() -> CountLayer {
-        let mut layer = CountLayer::new(1, CountScope::PrimaryGroup, Subdiv::Fixed(3));
-        layer.labels = Some(LabelPattern::triplet());
-        layer.group_units = true;
-        layer
+    fn labels(measure: &Measure, subdivision: Subdivision, system: CountingSystem) -> String {
+        let slots = build_count_slots(measure, &CountConfig { subdivision, system });
+        let labels: Vec<String> =
+            slots.into_iter().map(|s| s.label.unwrap_or_else(|| "_".to_string())).collect();
+        labels.join(" ")
     }
 
-    fn sixteenths() -> CountLayer {
-        let mut layer = CountLayer::new(1, CountScope::BeatUnit, Subdiv::Fixed(4));
-        layer.labels = Some(LabelPattern::sixteenth());
-        layer
+    fn beats(score: &str, subdivision: Subdivision) -> String {
+        count(score, subdivision, CountingSystem::Numbers)
     }
 
-    fn ands() -> CountLayer {
-        let mut layer = CountLayer::new(1, CountScope::BeatUnit, Subdiv::Fixed(2));
-        layer.labels = Some(LabelPattern::ands());
-        layer
+    /// Every subdivision in numbers, in simple, compound and odd meters.
+    #[test]
+    fn numbers_in_every_meter() {
+        let cases: &[(&str, Subdivision, &str)] = &[
+            ("4/4 h h", Beats, "1 2 3 4"),
+            ("4/4 h h", Halves, "1 & 2 & 3 & 4 &"),
+            ("4/4 h h", Quarters, "1 e & a 2 e & a 3 e & a 4 e & a"),
+            ("4/4 h h", Triplets, "1 trip let 2 trip let 3 trip let 4 trip let"),
+            ("3/4 h q", Beats, "1 2 3"),
+            ("3/4 h q", Halves, "1 & 2 & 3 &"),
+            ("3/4 h q", Quarters, "1 e & a 2 e & a 3 e & a"),
+            ("3/4 h q", Triplets, "1 trip let 2 trip let 3 trip let"),
+            ("6/8 q. q.", Beats, "1 2"),
+            ("6/8 q. q.", Halves, "1 ta la ta li ta 2 ta la ta li ta"),
+            ("6/8 q. q.", Quarters, ""),
+            ("6/8 q. q.", Triplets, "1 la li 2 la li"),
+            ("9/8 q. q. q.", Beats, "1 2 3"),
+            ("9/8 q. q. q.", Halves, "1 ta la ta li ta 2 ta la ta li ta 3 ta la ta li ta"),
+            ("9/8 q. q. q.", Quarters, ""),
+            ("9/8 q. q. q.", Triplets, "1 la li 2 la li 3 la li"),
+            ("12/8 q. q. q. q.", Beats, "1 2 3 4"),
+            (
+                "12/8 q. q. q. q.",
+                Halves,
+                "1 ta la ta li ta 2 ta la ta li ta 3 ta la ta li ta 4 ta la ta li ta",
+            ),
+            ("12/8 q. q. q. q.", Quarters, ""),
+            ("12/8 q. q. q. q.", Triplets, "1 la li 2 la li 3 la li 4 la li"),
+            ("5/8 q. q", Beats, "1 2"),
+            ("5/8 q. q", Halves, "1 ta la ta li ta 2 e & a"),
+            ("5/8 q. q", Quarters, ""),
+            ("5/8 q. q", Triplets, "1 la li 2 &"),
+            ("7/8 q q. q", Beats, "1 2 3"),
+            ("7/8 q q. q", Halves, "1 e & a 2 ta la ta li ta 3 e & a"),
+            ("7/8 q q. q", Quarters, ""),
+            ("7/8 q q. q", Triplets, "1 & 2 la li 3 &"),
+            ("7/16 e e. e", Beats, "1 2 3"),
+            ("7/16 e e. e", Halves, ""),
+            ("7/16 e e. e", Quarters, ""),
+            ("7/16 e e. e", Triplets, "1 & 2 la li 3 &"),
+            ("5/8 q q.", Beats, "1 2"),
+            ("5/8 q q.", Halves, "1 ta la ta li ta 2 e & a"),
+            ("5/8 q q.", Quarters, ""),
+            ("5/8 q q.", Triplets, "1 la li 2 &"),
+            ("4/4 r:e e q h", Beats, "1 2 3 4"),
+            ("4/4 r:e e q h", Halves, "1 & 2 & 3 & 4 &"),
+            ("4/4 r:e e q h", Quarters, "1 e & a 2 e & a 3 e & a 4 e & a"),
+            ("4/4 r:e e q h", Triplets, "1 trip let 2 trip let 3 trip let 4 trip let"),
+        ];
+        for &(score, subdivision, expected) in cases {
+            assert_eq!(beats(score, subdivision), expected, "{score} {subdivision:?}");
+        }
     }
 
     #[test]
-    fn triplets_in_simple_meters() {
-        assert_eq!(
-            labels(TimeSignature::THREE_FOUR, triplets()),
-            ["1", "trip", "let", "2", "trip", "let", "3", "trip", "let"]
-        );
+    fn five_eight_in_two_and_three() {
+        let two_three = TimeSignature::new(5, 8).with_grouping(1);
+        assert_eq!(*two_three.groups(), [2, 3]);
+        let count = |subdivision| labels(&Measure::new(two_three), subdivision, Default::default());
+        assert_eq!(count(Beats), "1 2");
+        assert_eq!(count(Halves), "1 e & a 2 ta la ta li ta");
+        assert_eq!(count(Triplets), "1 & 2 la li");
+    }
+
+    #[test]
+    fn simple_meters() {
+        assert_eq!(beats("3/4 h q", Beats), "1 2 3");
+        assert_eq!(beats("3/4 h q", Halves), "1 & 2 & 3 &");
+        assert_eq!(beats("2/4 q q", Quarters), "1 e & a 2 e & a");
+        assert_eq!(beats("3/4 h q", Triplets), "1 trip let 2 trip let 3 trip let");
     }
 
     #[test]
     fn eighth_meters_count_their_groups() {
-        assert_eq!(
-            labels(TimeSignature::SIX_EIGHT, triplets()),
-            ["1", "la", "li", "2", "la", "li"]
-        );
-        assert_eq!(
-            labels(TimeSignature::SEVEN_EIGHT, triplets()),
-            ["1", "&", "2", "la", "li", "3", "&"]
-        );
-        let seven_sixteen = TimeSignature::new(7, 16);
-        assert_eq!(labels(seven_sixteen, triplets()), ["1", "&", "2", "la", "li", "3", "&"]);
-        // The count follows the picked grouping.
-        let two_two_three = TimeSignature::SEVEN_EIGHT.with_grouping(1);
-        assert_eq!(*two_two_three.groups(), [2, 2, 3]);
-        assert_eq!(labels(two_two_three, triplets()), ["1", "&", "2", "&", "3", "la", "li"]);
+        assert_eq!(beats("6/8 q. q.", Beats), "1 2");
+        assert_eq!(beats("6/8 q. q.", Halves), "1 ta la ta li ta 2 ta la ta li ta");
+        assert_eq!(beats("6/8 q. q.", Triplets), "1 la li 2 la li");
+        assert_eq!(beats("9/8 q. q. q.", Triplets), "1 la li 2 la li 3 la li");
+        assert_eq!(beats("7/8 q q. q", Beats), "1 2 3");
+        assert_eq!(beats("7/8 q q. q", Triplets), "1 & 2 la li 3 &");
+        assert_eq!(beats("5/8 q. q", Triplets), "1 la li 2 &");
+        assert_eq!(beats("7/16 e e. e", Triplets), "1 & 2 la li 3 &");
     }
 
     #[test]
-    fn group_units_is_explicit() {
-        // Without the flag, a triplet pattern on primary groups counts triplets
-        // even in 6/8; with it, renamed labels still count the group's units.
-        let mut plain = triplets();
-        plain.group_units = false;
-        assert_eq!(
-            labels(TimeSignature::SIX_EIGHT, plain),
-            ["1", "trip", "let", "4", "trip", "let"]
-        );
-        let mut renamed = triplets();
-        renamed.labels = Some(LabelPattern {
-            slots: vec![
-                vec![LabelToken::BeatNum],
-                vec![LabelToken::Text("ta".to_string())],
-                vec![LabelToken::Text("ki".to_string())],
-            ],
-        });
-        assert_eq!(labels(TimeSignature::SIX_EIGHT, renamed), ["1", "la", "li", "2", "la", "li"]);
+    fn the_count_follows_the_picked_grouping() {
+        let two_two_three = TimeSignature::SEVEN_EIGHT.with_grouping(1);
+        assert_eq!(*two_two_three.groups(), [2, 2, 3]);
+        let measure = Measure::new(two_two_three);
+        assert_eq!(labels(&measure, Triplets, Default::default()), "1 & 2 & 3 la li");
     }
 
     #[test]
     fn nothing_finer_than_sixteenths() {
-        assert!(sixteenths().fits(&TimeSignature::FOUR_FOUR));
-        assert!(!sixteenths().fits(&TimeSignature::SIX_EIGHT));
-        assert!(labels(TimeSignature::SIX_EIGHT, sixteenths()).is_empty());
-        assert!(ands().fits(&TimeSignature::SIX_EIGHT));
-        assert!(!ands().fits(&TimeSignature::FOUR_SIXTEENTH));
-        assert_eq!(labels(TimeSignature::TWO_EIGHT, ands()), ["1", "&", "2", "&"]);
+        assert!(Quarters.fits(&TimeSignature::FOUR_FOUR));
+        assert!(!Quarters.fits(&TimeSignature::SIX_EIGHT));
+        assert_eq!(beats("6/8 q. q.", Quarters), "");
+        assert!(Halves.fits(&TimeSignature::SIX_EIGHT));
+        assert!(!Halves.fits(&TimeSignature::FOUR_SIXTEENTH));
+        assert_eq!(beats("7/16 e e. e", Halves), "");
+    }
+
+    #[test]
+    fn tuplets_are_counted_by_the_beats_they_fall_in() {
+        assert_eq!(beats("4/4 t8 t8 t8 q h", Halves), "1 & 2 & 3 & 4 &");
+        assert_eq!(beats("4/4 qt16 qt16 qt16 qt16 qt16 q h", Triplets), beats("4/4 h h", Triplets));
+    }
+
+    #[test]
+    fn positions_describe_the_beat() {
+        let measure = parse_score("7/8 q q. q").unwrap().measures.remove(0);
+        let config = CountConfig { subdivision: Halves, system: CountingSystem::Numbers };
+        let slots = build_count_slots(&measure, &config);
+        // The second sixteenth of the "la" in the 3-group of beat 2.
+        let pos = slots[7].pos;
+        assert_eq!((pos.units, pos.uneven), (3, true));
+        assert_eq!((pos.beat, pos.part, pos.parts), (2, 3, 6));
+    }
+
+    #[test]
+    fn takadimi_names_the_place_in_the_beat() {
+        let takadimi = |score, subdivision| count(score, subdivision, CountingSystem::Takadimi);
+        assert_eq!(takadimi("2/4 q q", Beats), "ta ta");
+        assert_eq!(takadimi("2/4 q q", Halves), "ta di ta di");
+        assert_eq!(takadimi("2/4 q q", Quarters), "ta ka di mi ta ka di mi");
+        assert_eq!(takadimi("2/4 q q", Triplets), "ta ki da ta ki da");
+        // Compound meters divide the dotted quarter.
+        assert_eq!(takadimi("6/8 q. q.", Beats), "ta ta");
+        assert_eq!(takadimi("6/8 q. q.", Triplets), "ta ki da ta ki da");
+        assert_eq!(takadimi("6/8 q. q.", Halves), "ta va ki di da ma ta va ki di da ma");
+        // Odd meters: each group by its own size.
+        assert_eq!(takadimi("7/8 q q. q", Triplets), "ta di ta ki da ta di");
+        assert_eq!(takadimi("5/8 q. q", Halves), "ta va ki di da ma ta ka di mi");
+    }
+
+    #[test]
+    fn gordon_follows_the_meter() {
+        let gordon = |score, subdivision| count(score, subdivision, CountingSystem::Gordon);
+        assert_eq!(gordon("2/4 q q", Halves), "du de du de");
+        assert_eq!(gordon("2/4 q q", Quarters), "du ta de ta du ta de ta");
+        assert_eq!(gordon("2/4 q q", Triplets), "du da di du da di");
+        assert_eq!(gordon("6/8 q. q.", Triplets), "du da di du da di");
+        assert_eq!(gordon("6/8 q. q.", Halves), "du ta da ta di ta du ta da ta di ta");
+        // Unusual meters.
+        assert_eq!(gordon("7/8 q q. q", Triplets), "du be du ba bi du be");
+        assert_eq!(gordon("5/8 q. q", Triplets), "du ba bi du be");
+        assert_eq!(gordon("7/8 q q. q", Halves), "du ta be ta du ta ba ta bi ta du ta be ta");
     }
 }

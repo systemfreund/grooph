@@ -62,9 +62,7 @@ use grooph_audio::{AudioSettings, GapClick, PlaybackOptions, PlayerState, TempoR
 use grooph_link::{LinkContent, SharedLink};
 use grooph_measure::click::ClickBars;
 use grooph_measure::counter::{CounterBars, Ratio};
-use grooph_measure::counting::{
-    CountConfig, CountLayer, CountScope, LabelPattern, LabelToken, Subdiv,
-};
+use grooph_measure::counting::{CountConfig, CountingSystem, Subdivision, build_count_slots};
 use grooph_measure::duration::NoteValue::*;
 use grooph_measure::editing::Modification;
 use grooph_measure::generator::GeneratorSettings;
@@ -244,50 +242,55 @@ enum CountingBase {
 }
 
 impl CountingBase {
-    /// The overlay layer counting in this subdivision, `None` for `Off`.
-    fn layer(self, id: u32) -> Option<CountLayer> {
-        let (scope, subdiv, labels) = match self {
-            Self::Off => return None,
-            Self::Primary => (
-                CountScope::PrimaryGroup,
-                1,
-                LabelPattern { slots: vec![vec![LabelToken::GroupNum]] },
-            ),
-            Self::Ands => (CountScope::BeatUnit, 2, LabelPattern::ands()),
-            Self::Sixteenth => (CountScope::BeatUnit, 4, LabelPattern::sixteenth()),
-            Self::Triplet => (CountScope::PrimaryGroup, 3, LabelPattern::triplet()),
+    /// The subdivision counted in, `None` for `Off`.
+    fn subdivision(self) -> Option<Subdivision> {
+        match self {
+            Self::Off => None,
+            Self::Primary => Some(Subdivision::Beats),
+            Self::Ands => Some(Subdivision::Halves),
+            Self::Sixteenth => Some(Subdivision::Quarters),
+            Self::Triplet => Some(Subdivision::Triplets),
+        }
+    }
+
+    /// The name in the count menu: the start of the count in `system`
+    /// ("1 2 3 4 ...", "1 & 2 & ...", "ta ki da ...").
+    fn label(self, system: CountingSystem) -> String {
+        let Some(subdivision) = self.subdivision() else {
+            return "Off".to_string();
         };
-        let mut layer = CountLayer::new(id, scope, Subdiv::Fixed(subdiv));
-        layer.labels = Some(labels);
-        // Triplets of a group of eighths are the eighths themselves: count
-        // them as "1 la li" in x/8 and x/16.
-        layer.group_units = self == Self::Triplet;
-        Some(layer)
+        let config = CountConfig { subdivision, system };
+        let slots = build_count_slots(&Measure::new(TimeSignature::FOUR_FOUR), &config);
+        let take = if self == Self::Triplet { 3 } else { 4 };
+        let labels: Vec<_> = slots.iter().filter_map(|s| s.label.as_deref()).take(take).collect();
+        format!("{} ...", labels.join(" "))
     }
 
     /// Whether the subdivision counts sensibly in some measure of `score`.
     fn fits(self, score: &Score) -> bool {
-        self.layer(0).is_none_or(|l| score.measures.iter().any(|m| l.fits(&m.time_signature())))
+        self.subdivision()
+            .is_none_or(|s| score.measures.iter().any(|m| s.fits(&m.time_signature())))
     }
 }
 
-/// The counting overlay: a subdivision to count in (or `Off`) plus an
-/// optional tuplet layer. `Off` without tuplets hides the overlay.
+/// The counting overlay: a subdivision to count in (or `Off`, which hides
+/// the overlay), in numbers or syllables.
 #[derive(Serialize, Deserialize, Clone, Copy)]
 #[serde(from = "StoredCountingSettings")]
 struct CountingSettings {
     base: CountingBase,
-    show_tuplets: bool,
+    system: CountingSystem,
 }
 
 impl Default for CountingSettings {
     fn default() -> Self {
-        Self { base: CountingBase::Off, show_tuplets: false }
+        Self { base: CountingBase::Off, system: CountingSystem::Numbers }
     }
 }
 
 /// Saved form, still reading the `enabled` and `show_labels` switches that
-/// older versions stored next to `base`: either one off hid the overlay.
+/// older versions stored next to `base`: either one off hid the overlay. Their
+/// `show_tuplets` switch is ignored.
 #[derive(Deserialize)]
 struct StoredCountingSettings {
     #[serde(default = "yes")]
@@ -295,7 +298,8 @@ struct StoredCountingSettings {
     #[serde(default = "yes")]
     show_labels: bool,
     base: CountingBase,
-    show_tuplets: bool,
+    #[serde(default)]
+    system: CountingSystem,
 }
 
 fn yes() -> bool {
@@ -305,9 +309,9 @@ fn yes() -> bool {
 impl From<StoredCountingSettings> for CountingSettings {
     fn from(s: StoredCountingSettings) -> Self {
         if s.enabled && s.show_labels {
-            Self { base: s.base, show_tuplets: s.show_tuplets }
+            Self { base: s.base, system: s.system }
         } else {
-            Self::default()
+            Self { system: s.system, ..Self::default() }
         }
     }
 }
@@ -986,24 +990,9 @@ impl Grooph {
     }
 
     fn build_count_config(&self) -> Option<CountConfig> {
-        let mut layers = Vec::new();
-        let mut next_id = 1u32;
-
-        let base_layer = self.ui.counting.base.layer(next_id);
-
-        if let Some(layer) = base_layer {
-            layers.push(layer);
-            next_id = next_id.saturating_add(1);
-        }
-
-        if self.ui.counting.show_tuplets {
-            let mut layer = CountLayer::new(next_id, CountScope::TupletAll, Subdiv::TupletN);
-            layer.labels = Some(LabelPattern::triplet());
-            layer.priority = 10;
-            layers.push(layer);
-        }
-
-        if layers.is_empty() { None } else { Some(CountConfig::new(layers)) }
+        let counting = self.ui.counting;
+        let subdivision = counting.base.subdivision()?;
+        Some(CountConfig { subdivision, system: counting.system })
     }
 
     pub fn new(cc: &CreationContext) -> Self {
@@ -1206,6 +1195,7 @@ impl Grooph {
 mod tests {
     use super::{CountingBase, CountingSettings, PersistedState};
     use crate::compact::CompactTab;
+    use grooph_measure::counting::CountingSystem;
 
     #[test]
     fn back_closes_one_layer_at_a_time() {
@@ -1242,7 +1232,7 @@ mod tests {
     #[test]
     fn counting_overlay_is_off_by_default() {
         let c = CountingSettings::default();
-        assert!(c.base == CountingBase::Off && !c.show_tuplets);
+        assert!(c.base == CountingBase::Off);
     }
 
     #[test]
@@ -1264,21 +1254,51 @@ mod tests {
 
     #[test]
     fn counting_settings_round_trip() {
-        let c = CountingSettings { base: CountingBase::Sixteenth, show_tuplets: true };
+        let c =
+            CountingSettings { base: CountingBase::Sixteenth, system: CountingSystem::Takadimi };
         let back = load(&ron::to_string(&c).unwrap());
-        assert!(back.base == CountingBase::Sixteenth && back.show_tuplets);
+        assert!(back.base == CountingBase::Sixteenth);
+        assert_eq!(back.system, CountingSystem::Takadimi);
+    }
+
+    #[test]
+    fn the_count_menu_shows_each_system() {
+        use CountingSystem::*;
+        let labels = |system| {
+            [
+                CountingBase::Off,
+                CountingBase::Primary,
+                CountingBase::Ands,
+                CountingBase::Sixteenth,
+                CountingBase::Triplet,
+            ]
+            .map(|b| b.label(system))
+        };
+        assert_eq!(
+            labels(Numbers),
+            ["Off", "1 2 3 4 ...", "1 & 2 & ...", "1 e & a ...", "1 trip let ..."]
+        );
+        assert_eq!(
+            labels(Takadimi),
+            ["Off", "ta ta ta ta ...", "ta di ta di ...", "ta ka di mi ...", "ta ki da ..."]
+        );
+        assert_eq!(
+            labels(Gordon),
+            ["Off", "du du du du ...", "du de du de ...", "du ta de ta ...", "du da di ..."]
+        );
     }
 
     #[test]
     fn older_counting_switches_still_hide_the_overlay() {
         let on = load("(enabled: true, show_labels: true, base: Ands, show_tuplets: true)");
-        assert!(on.base == CountingBase::Ands && on.show_tuplets);
+        assert!(on.base == CountingBase::Ands);
+        assert_eq!(on.system, CountingSystem::Numbers);
         for hidden in [
             "(enabled: false, show_labels: true, base: Ands, show_tuplets: true)",
             "(enabled: true, show_labels: false, base: Ands, show_tuplets: true)",
         ] {
             let c = load(hidden);
-            assert!(c.base == CountingBase::Off && !c.show_tuplets, "{hidden}");
+            assert!(c.base == CountingBase::Off, "{hidden}");
         }
     }
 

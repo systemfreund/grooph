@@ -11,7 +11,6 @@ use grooph_layout::pixel_layout::{
 use grooph_measure::counting::{CountConfig, CountSlot, build_count_slots};
 use grooph_measure::grid::DEFAULT_GRID;
 use grooph_measure::{Measure, TimeSignature};
-use std::collections::HashMap;
 
 pub fn draw_measure(
     ui: &mut egui::Ui,
@@ -461,11 +460,10 @@ fn draw_count_labels(
     if total_ticks == 0 {
         return;
     }
-    let label_slots: Vec<&CountSlot> = slots.iter().filter(|s| s.label.is_some()).collect();
-    if label_slots.is_empty() {
+    let selected: Vec<&CountSlot> = slots.iter().filter(|s| s.label.is_some()).collect();
+    if selected.is_empty() {
         return;
     }
-    let selected = select_label_slots(&label_slots);
     let active_start = active_label_start(&selected, playback_tick, measure);
     let xs = compute_label_xs(&selected, measure, layout, rect, total_ticks);
 
@@ -480,29 +478,6 @@ fn draw_count_labels(
             if active_start == Some(slot.start_tick) { highlight_color } else { label_color };
         painter.text(pos2(x, label_y), Align2::CENTER_CENTER, label, font.clone(), color);
     }
-}
-
-fn select_label_slots<'a>(slots: &'a [&'a CountSlot]) -> Vec<&'a CountSlot> {
-    let mut best: HashMap<u32, usize> = HashMap::new();
-    for (i, slot) in slots.iter().enumerate() {
-        best.entry(slot.start_tick)
-            .and_modify(|idx| {
-                let current = slots[*idx];
-                if slot.priority > current.priority {
-                    *idx = i;
-                } else if slot.priority == current.priority {
-                    let cur_span = current.end_tick.saturating_sub(current.start_tick);
-                    let new_span = slot.end_tick.saturating_sub(slot.start_tick);
-                    if new_span < cur_span {
-                        *idx = i;
-                    }
-                }
-            })
-            .or_insert(i);
-    }
-    let mut out: Vec<&CountSlot> = best.values().map(|idx| slots[*idx]).collect();
-    out.sort_by_key(|a| a.start_tick);
-    out
 }
 
 fn active_label_start(
@@ -525,28 +500,7 @@ fn active_label_start(
         t %= total_ticks;
     }
 
-    let mut best: Option<&CountSlot> = None;
-    for slot in slots {
-        let start = slot.start_tick as f64;
-        let end = slot.end_tick as f64;
-        if t >= start && t < end {
-            best = match best {
-                None => Some(*slot),
-                Some(cur) => {
-                    if slot.priority > cur.priority {
-                        Some(*slot)
-                    } else if slot.priority == cur.priority {
-                        let cur_span = cur.end_tick.saturating_sub(cur.start_tick);
-                        let new_span = slot.end_tick.saturating_sub(slot.start_tick);
-                        if new_span < cur_span { Some(*slot) } else { Some(cur) }
-                    } else {
-                        Some(cur)
-                    }
-                }
-            };
-        }
-    }
-    best.map(|s| s.start_tick)
+    slots.iter().find(|s| t >= s.start_tick as f64 && t < s.end_tick as f64).map(|s| s.start_tick)
 }
 
 /// Compute X positions for all selected count labels.
@@ -603,7 +557,7 @@ fn compute_label_xs(
 mod tests {
     use super::*;
     use eframe::egui::{FontFamily, FontId, Pos2};
-    use grooph_measure::counting::{CountLayer, CountScope, LabelPattern, LabelToken, Subdiv};
+    use grooph_measure::counting::Subdivision;
     use grooph_measure::duration::{Duration, NoteValue, e, q, s, t8};
     use grooph_measure::{Beat, Measure, TimeSignature};
 
@@ -627,20 +581,16 @@ mod tests {
         }
     }
 
-    fn ands_config() -> CountConfig {
-        let mut layer = CountLayer::new(0, CountScope::BeatUnit, Subdiv::Fixed(2));
-        layer.labels = Some(LabelPattern::ands());
-        CountConfig::new(vec![layer])
+    fn counting(subdivision: Subdivision) -> CountConfig {
+        CountConfig { subdivision, system: Default::default() }
     }
 
-    fn primary_config() -> CountConfig {
-        let mut layer = CountLayer::new(0, CountScope::Measure, Subdiv::Fixed(1));
-        layer.labels = Some(LabelPattern::single(LabelToken::BeatNum));
-        CountConfig::new(vec![layer])
+    fn ands_config() -> CountConfig {
+        counting(Subdivision::Halves)
     }
 
     /// Collect per-label x positions in slot-start-tick order, using the same
-    /// pipeline as `draw_count_labels` (with `select_label_slots`).
+    /// pipeline as `draw_count_labels`.
     fn label_xs(
         measure: &Measure,
         layout: &MeasureLayout,
@@ -648,8 +598,7 @@ mod tests {
         config: &CountConfig,
     ) -> Vec<f32> {
         let slots = build_count_slots(measure, config);
-        let label_slots: Vec<&CountSlot> = slots.iter().filter(|s| s.label.is_some()).collect();
-        let selected = select_label_slots(&label_slots);
+        let selected: Vec<&CountSlot> = slots.iter().filter(|s| s.label.is_some()).collect();
         let total_ticks = DEFAULT_GRID.ticks_per_measure(&measure.time_signature());
         compute_label_xs(&selected, measure, layout, rect, total_ticks)
     }
@@ -725,9 +674,7 @@ mod tests {
         let opts = opts_for(rect);
         let layout = build_measure_layout(&m, &opts);
 
-        let mut layer = CountLayer::new(0, CountScope::BeatUnit, Subdiv::Fixed(4));
-        layer.labels = Some(LabelPattern::sixteenth());
-        let xs = label_xs(&m, &layout, rect, &CountConfig::new(vec![layer]));
+        let xs = label_xs(&m, &layout, rect, &counting(Subdivision::Quarters));
         assert_eq!(xs.len(), 16);
         let step = (rect.right() - xs[0]) / 16.0;
         for (i, w) in xs.windows(2).enumerate() {
@@ -761,21 +708,22 @@ mod tests {
     }
 
     #[test]
-    fn whole_measure_primary_label_on_the_downbeat() {
-        // 4/4 with a single `1` label spanning the whole measure: it counts
-        // the downbeat, so it sits over the first beat.
-        let mut m = Measure::new(TimeSignature::FOUR_FOUR);
-        for i in 0..4 {
-            m.set_beat(i, Beat::rest(q())).unwrap();
+    fn beat_labels_of_compound_beats_sit_over_their_downbeats() {
+        // 6/8 in eighth rests, counted in beats: each `1` and `2` spans a
+        // dotted quarter and sits over the first rest of its beat.
+        let mut m = Measure::new(TimeSignature::SIX_EIGHT);
+        for i in 0..6 {
+            m.set_beat(i, Beat::rest(e())).unwrap();
         }
 
         let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(400.0, 100.0));
         let opts = opts_for(rect);
         let layout = build_measure_layout(&m, &opts);
 
-        let xs = label_xs(&m, &layout, rect, &primary_config());
-        assert_eq!(xs.len(), 1);
+        let xs = label_xs(&m, &layout, rect, &counting(Subdivision::Beats));
+        assert_eq!(xs.len(), 2);
         assert!((xs[0] - layout.notes[0].center.x).abs() < 0.5);
+        assert!((xs[1] - layout.notes[3].center.x).abs() < 0.5);
     }
 
     #[test]
