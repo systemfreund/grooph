@@ -1,38 +1,35 @@
 use crate::Grooph;
-use crate::Mode;
+use crate::pickers::dialog_scroll_height;
 use crate::tools::{DeleteOp, EditOp, MetaOp, NavOp, Tool, ToolKind, all_tools};
 use eframe::egui;
 use eframe::egui::RichText;
 
 impl Grooph {
     pub(super) fn help_panel(&mut self, ui: &mut egui::Ui) {
-        egui::Panel::bottom("info").drag_to_open(false).show_collapsible(
-            ui,
-            &mut (self.ui.mode == Mode::Help),
-            |ui| {
-                ui.horizontal_wrapped(|ui| {
-                    ui.label(
+        // Both ways: the keybindings are wider than a phone.
+        egui::ScrollArea::both().max_height(dialog_scroll_height(ui)).show(ui, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                ui.label(
                     "This app is in early development. Please report any bugs or feature requests.",
                 );
-                    ui.hyperlink_to("Email: hello@grooph.app", "mailto:hello@grooph.app");
-                });
-                ui.separator();
-                ui.collapsing("Keybindings", |ui| {
-                    ui.label(RichText::new(keybindings_text()).monospace().size(16.0));
-                });
+                ui.hyperlink_to("Email: hello@grooph.app", "mailto:hello@grooph.app");
+            });
+            ui.separator();
+            ui.collapsing("Keybindings", |ui| {
+                ui.label(RichText::new(keybindings_text()).monospace().size(16.0));
+            });
 
-                ui.collapsing("Mouse/Finger controls", |ui| {
-                    let text = RichText::new(
-                        "       Click/Tap: Move cursor
+            ui.collapsing("Mouse/Finger controls", |ui| {
+                let text = RichText::new(
+                    "       Click/Tap: Move cursor
             Drag: Move cursor
 Double-click/Tap: Toggle Note/Rest",
-                    )
-                    .monospace()
-                    .size(16.0);
-                    ui.label(text);
-                });
-            },
-        );
+                )
+                .monospace()
+                .size(16.0);
+                ui.label(text);
+            });
+        });
     }
 }
 
@@ -43,7 +40,11 @@ fn keybindings_text() -> String {
     // App-global shortcuts that don't live in the tool registry (handled directly
     // in `keyboard_input.rs`).
     entries.push(("Space".to_string(), "Play/pause".to_string()));
-    entries.push(("Esc".to_string(), "Toggle between edit mode and playback mode".to_string()));
+    entries.push((
+        "Esc".to_string(),
+        "Toggle between edit mode and playback mode; on the More screen, close the open dialog"
+            .to_string(),
+    ));
 
     for tool in all_tools() {
         for shortcut in tool.shortcuts {

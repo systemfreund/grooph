@@ -243,6 +243,22 @@ impl Grooph {
         self.editor.metronome.stash.as_ref()
     }
 
+    /// The rhythm put aside while the metronome is open no longer is pattern
+    /// `id`, which was deleted: it comes back without it.
+    pub(crate) fn forget_stashed_pattern(&mut self, id: u64) {
+        if let Some(stash) = self.editor.metronome.stash.as_mut()
+            && stash.active_pattern_id == Some(id)
+        {
+            stash.active_pattern_id = None;
+        }
+    }
+
+    /// Whether the rhythm has unsaved changes, also while the metronome's
+    /// click bar is edited in its place.
+    pub(crate) fn rhythm_dirty(&self) -> bool {
+        self.metronome_stash().map_or(self.editor.dirty, |stash| stash.dirty)
+    }
+
     /// Meter the metronome tab clicks.
     pub(crate) fn metronome_meter(&self) -> TimeSignature {
         self.editor.metronome.meter
@@ -290,6 +306,14 @@ impl Grooph {
         editor.cursor = stash.cursor;
         editor.dirty = stash.dirty;
         editor.active_pattern_id = stash.active_pattern_id;
+    }
+
+    /// Stop the metronome if it plays and bring the rhythm back.
+    pub(crate) fn leave_metronome(&mut self) {
+        if self.metronome_mode() {
+            self.stop_transport();
+            self.close_metronome();
+        }
     }
 
     /// While the tab is open: the edited bar is the click bar of its meter

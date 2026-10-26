@@ -73,7 +73,7 @@ A polyrhythm n:m plays n even counter clicks in the time of m beat units of the 
 ## How to use
 
 - Play/pause: Space key or the play button. Esc switches between edit and playback mode.
-- Share: the library (folder) panel has a "Copy link" button that copies a link to the current rhythm and tempo.
+- Share: the share button next to play (Practice and Metronome tabs) and in the Edit tab's bar shares a link to the current rhythm or metronome and tempo; where there is no share sheet it copies the link.
 - Generator: open the dice (🎲) menu, choose subdivision, complexity, bars and rests; every change creates a new rhythm.
 - Editor: pick a note, rest or tuplet from the palette and click a position in the measure; double-click toggles note/rest.
 

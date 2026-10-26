@@ -68,6 +68,9 @@ pub(crate) struct ShellState {
     pub(crate) last_swing_percent: u8,
     pub(crate) last_counting: Option<CountingBase>,
     pub(crate) last_counter: Option<Ratio>,
+    /// The rhythm page a pattern loaded on the More screen opens on: the
+    /// practice or edit page More was opened from.
+    pub(crate) rhythm_tab: Tab,
 }
 
 impl Default for ShellState {
@@ -77,6 +80,7 @@ impl Default for ShellState {
             last_swing_percent: DEFAULT_SWING_PERCENT,
             last_counting: None,
             last_counter: None,
+            rhythm_tab: Tab::Practice,
         }
     }
 }
@@ -89,7 +93,7 @@ fn bars_label(generator: &GeneratorState) -> String {
     if generator.endless { "∞".to_owned() } else { generator.effective_bars().to_string() }
 }
 
-fn subdivision_short_label(s: Subdivision) -> &'static str {
+pub(crate) fn subdivision_short_label(s: Subdivision) -> &'static str {
     match s {
         Subdivision::Eighths => "8ths",
         Subdivision::Sixteenths => "16ths",
@@ -576,20 +580,24 @@ impl Grooph {
     /// Tab shown in the tab bar, derived from the mode so modes set
     /// elsewhere (links, time signature dialog) land on the right tab.
     pub(crate) fn tab(&self) -> Tab {
-        if self.metronome_mode() {
-            return Tab::Metronome;
-        }
         match self.ui.mode {
+            // More stays in front of an open metronome.
+            Mode::MoreMenu => Tab::More,
+            _ if self.metronome_mode() => Tab::Metronome,
             Mode::Edit | Mode::TimeSignature(_) => Tab::Edit,
-            Mode::MoreMenu | Mode::Mixer | Mode::Settings | Mode::Help | Mode::Library => Tab::More,
             Mode::Playback | Mode::Generator => Tab::Practice,
         }
     }
 
     pub(crate) fn select_tab(&mut self, tab: Tab) {
+        let current = self.tab();
+        if matches!(current, Tab::Practice | Tab::Edit) {
+            self.ui.shell.rhythm_tab = current;
+        }
         // Into or out of the metronome the played score changes: stop first.
+        // More is a screen of its own and leaves what plays alone.
         let metronome = tab == Tab::Metronome;
-        if metronome != self.metronome_mode() {
+        if tab != Tab::More && metronome != self.metronome_mode() {
             self.stop_transport();
             if metronome {
                 self.open_metronome();
@@ -638,7 +646,12 @@ impl Grooph {
             }
             Tab::More => self.more_page(ui),
         }
-        self.measure_panel(ui);
+        if tab == Tab::More {
+            // No staff on this screen, but what plays moves on.
+            self.advance_unseen_playback(ui);
+        } else {
+            self.measure_panel(ui);
+        }
         self.settings_picker(ui);
     }
 
@@ -1231,87 +1244,52 @@ impl Grooph {
             });
     }
 
-    /// "More" tab: a list of the remaining panels, or the open panel with a
-    /// way back to the list.
+    /// "More" tab: a screen of its own, without the staff. A list at the
+    /// bottom, in reach of the thumb, whose rows open dialogs.
     fn more_page(&mut self, ui: &mut Ui) {
-        const ENTRIES: [(Mode, &str, &str); 4] = [
-            (Mode::Library, "📁", "Library"),
-            (Mode::Mixer, "🔈", "Mixer"),
-            (Mode::Settings, "⚙", "Settings"),
-            (Mode::Help, "?", "Help"),
-        ];
-        if self.ui.mode == Mode::MoreMenu {
-            egui::Panel::bottom("shell_more")
-                .frame(Frame::new().fill(ui.visuals().panel_fill).inner_margin(Margin::same(12)))
-                .show_separator_line(false)
-                .show(ui, |ui| {
-                    centered_column(ui, |ui| {
-                        Frame::new()
-                            .fill(card_fill(ui))
-                            .corner_radius(CARD_RADIUS)
-                            .inner_margin(Margin::symmetric(12, 4))
-                            .show(ui, |ui| {
-                                for (mode, icon, label) in ENTRIES {
-                                    // The sounds are picked here rather than
-                                    // deep in Settings; the click's own
-                                    // parameters stay there.
-                                    if mode == Mode::Settings
-                                        && value_row(ui, "🔔   Sounds", "").clicked()
-                                    {
-                                        self.ui.picker = Some(Picker::Sounds);
-                                    }
-                                    if mode == Mode::Settings
-                                        && value_row(
-                                            ui,
-                                            "🎹   MIDI input",
-                                            &self.midi_input_label(),
-                                        )
-                                        .clicked()
-                                    {
-                                        // A device plugged in since shows up.
-                                        self.refresh_midi_ports();
-                                        self.ui.picker = Some(Picker::MidiInput);
-                                    }
-                                    // Next to the MIDI device it listens to:
-                                    // the other inputs and every latency.
-                                    if mode == Mode::Settings
-                                        && value_row(
-                                            ui,
-                                            "🎯   Play along",
-                                            &self.play_along_label(),
-                                        )
-                                        .clicked()
-                                    {
-                                        self.ui.picker = Some(Picker::PlayAlong);
-                                    }
-                                    if mode == Mode::Help {
-                                        theme_row(ui);
-                                    }
-                                    if value_row(ui, &format!("{icon}   {label}"), "").clicked() {
-                                        self.ui.mode = mode;
-                                    }
-                                }
-                            });
-                    });
-                });
-            return;
-        }
-
-        self.library_panel(ui);
-        self.mixer_panel(ui);
-        self.settings_panel(ui);
-        self.help_panel(ui);
-        let title = ENTRIES.iter().find(|(m, ..)| *m == self.ui.mode).map_or("", |(.., l)| *l);
-        egui::Panel::bottom("shell_more_back")
-            .frame(Frame::side_top_panel(ui.style()).inner_margin(Margin::symmetric(12, 6)))
-            .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    if ui.button("‹ Back").clicked() {
-                        self.ui.mode = Mode::MoreMenu;
-                    }
-                    ui.strong(title);
-                });
+        let frame = Frame::new().fill(ui.visuals().panel_fill).inner_margin(Margin::same(12));
+        egui::Panel::bottom("shell_more").frame(frame).show_separator_line(false).show(ui, |ui| {
+            centered_column(ui, |ui| {
+                Frame::new()
+                    .fill(card_fill(ui))
+                    .corner_radius(CARD_RADIUS)
+                    .inner_margin(Margin::symmetric(12, 4))
+                    .show(ui, |ui| self.more_menu(ui));
             });
+        });
+        egui::CentralPanel::default().frame(frame).show(ui, |_| {});
+    }
+
+    /// The rows of the More menu.
+    fn more_menu(&mut self, ui: &mut Ui) {
+        if value_row(ui, "📁   Library", "").clicked() {
+            self.ui.picker = Some(Picker::Library);
+        }
+        if value_row(ui, "🔈   Mixer", "").clicked() {
+            self.ui.picker = Some(Picker::Mixer);
+        }
+        // The sounds are picked here rather than deep in Settings; the
+        // click's own parameters stay there.
+        if value_row(ui, "🔔   Sounds", "").clicked() {
+            self.ui.picker = Some(Picker::Sounds);
+        }
+        if value_row(ui, "🎹   MIDI input", &self.midi_input_label()).clicked() {
+            // A device plugged in since shows up.
+            self.refresh_midi_ports();
+            self.ui.picker = Some(Picker::MidiInput);
+        }
+        // Next to the MIDI device it listens to: the other inputs and every
+        // latency.
+        if value_row(ui, "🎯   Play along", &self.play_along_label()).clicked() {
+            self.ui.picker = Some(Picker::PlayAlong);
+        }
+        if value_row(ui, "⚙   Settings", "").clicked() {
+            self.ui.picker = Some(Picker::Settings);
+        }
+        theme_row(ui);
+        if value_row(ui, "?   Help", "").clicked() {
+            self.ui.picker = Some(Picker::Help);
+        }
     }
 }
 

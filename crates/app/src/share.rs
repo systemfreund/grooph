@@ -78,14 +78,6 @@ impl Grooph {
         }
     }
 
-    /// Copy a link to the working score, tempo and swing to the clipboard.
-    pub(crate) fn copy_share_link(&mut self, ui: &Ui) {
-        if let Some(url) = self.share_link_url() {
-            ui.ctx().copy_text(url);
-            self.ui.link_copied_at = Some(ui.input(|i| i.time));
-        }
-    }
-
     /// Whether a link was copied recently enough to say so. Keeps repainting
     /// while the notice shows, so it goes away on time.
     pub(crate) fn link_copied_recently(&self, ui: &Ui) -> bool {

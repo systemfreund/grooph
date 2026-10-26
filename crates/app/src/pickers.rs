@@ -5,7 +5,7 @@
 
 use crate::guide::Guide;
 use crate::metronome_view::{FillLook, click_fills, ratio_label, same_bar};
-use crate::presets::{self, PresetId};
+use crate::mixer_panel::mixer_width;
 use crate::shell::paint_grouped_meter;
 use crate::tool_palette::{TOOL_PALETTE_BUTTON_SIZE, none_button, notation_button};
 use crate::{CountingBase, Grooph};
@@ -64,6 +64,14 @@ pub(crate) enum Picker {
     MidiInput,
     /// The inputs that count as hits and their latency.
     PlayAlong,
+    /// Saved rhythms and practice presets: save, load, rename, delete.
+    Library,
+    /// The volumes of the voices.
+    Mixer,
+    /// The click's own parameters and the rest of the settings.
+    Settings,
+    /// Contact, keybindings and touch controls.
+    Help,
 }
 
 pub(crate) fn counting_system_name(system: CountingSystem) -> &'static str {
@@ -312,6 +320,12 @@ pub(crate) fn wide_button(ui: &mut Ui, label: &str, size: f32, height: f32) -> R
     .inner
 }
 
+/// Height a dialog's long content (library, settings, help) scrolls in, so
+/// that the title and "Done" stay on screen.
+pub(crate) fn dialog_scroll_height(ui: &Ui) -> f32 {
+    0.6 * ui.ctx().content_rect().height()
+}
+
 impl Grooph {
     /// Dialog for the setting in [`crate::state::UiShell::picker`], opened
     /// from the settings card and the options sheet.
@@ -321,8 +335,14 @@ impl Grooph {
         };
         let before = self.editor.generator.settings;
         let endless_before = self.editor.generator.endless;
-        let width = (ui.ctx().content_rect().width() - 48.0).clamp(200.0, 380.0);
+        // The mixer gets as wide as its sliders, if the screen has room.
+        let max_width = match picker {
+            Picker::Mixer => mixer_width(ui).map_or(380.0, |w| w.max(380.0)),
+            _ => 380.0,
+        };
+        let width = (ui.ctx().content_rect().width() - 48.0).clamp(200.0, max_width);
         let mut preset = None;
+        let mut library_preset = None;
         let mut calibrate = None;
 
         let modal = Modal::new(Id::unique("settings_picker")).show(ui.ctx(), |ui| {
@@ -344,6 +364,10 @@ impl Grooph {
                 Picker::Sounds => "Sounds",
                 Picker::MidiInput => "MIDI input",
                 Picker::PlayAlong => "Play along",
+                Picker::Library => "Library",
+                Picker::Mixer => "Mixer",
+                Picker::Settings => "Settings",
+                Picker::Help => "Help",
             };
             ui.heading(title);
             ui.add_space(8.0);
@@ -363,7 +387,7 @@ impl Grooph {
                 Picker::Guide => self.guide_choices(ui),
                 Picker::Counting => self.counting_choices(ui),
                 Picker::Preset => {
-                    preset = self.preset_choices(ui);
+                    preset = self.preset_cards(ui);
                     preset.is_some()
                 }
                 Picker::MetronomeMeter => self.metronome_meter_choices(ui),
@@ -382,6 +406,22 @@ impl Grooph {
                     calibrate = self.play_along_choices(ui);
                     false
                 }
+                Picker::Library => {
+                    library_preset = self.library_panel(ui);
+                    library_preset.is_some()
+                }
+                Picker::Mixer => {
+                    self.mixer_panel(ui);
+                    false
+                }
+                Picker::Settings => {
+                    self.settings_panel(ui);
+                    false
+                }
+                Picker::Help => {
+                    self.help_panel(ui);
+                    false
+                }
             };
             ui.add_space(12.0);
             picked || wide_button(ui, "Done", 19.0, ROW_HEIGHT).clicked()
@@ -390,11 +430,16 @@ impl Grooph {
             self.ui.picker = self.ui.picker_return.take();
             self.ui.tap_tempo.reset();
             self.ui.renaming_preset = None;
+            self.ui.renaming_pattern = None;
         }
 
+        // After the generator check, which would generate a second rhythm.
         self.finish_generator_change(before, endless_before, false);
         if let Some(id) = preset {
             self.apply_preset(id);
+        }
+        if let Some(id) = library_preset {
+            self.open_preset(id);
         }
         // After the generator check: the run swaps the score and turns endless
         // mode off, which is no generator change. The dialog stays open
@@ -402,105 +447,6 @@ impl Grooph {
         if let Some(source) = calibrate {
             self.start_calibration(source);
         }
-    }
-
-    /// Presets to load; saving, updating, renaming and deleting the user's own.
-    fn preset_choices(&mut self, ui: &mut Ui) -> Option<PresetId> {
-        let current = self.editor.active_preset;
-        let builtin: Vec<_> = presets::builtin_presets()
-            .into_iter()
-            .enumerate()
-            .map(|(i, (name, _))| (Some(PresetId::BuiltIn(i)), name.to_owned()))
-            .collect();
-        let mut picked = None;
-        egui::ScrollArea::vertical().id_salt("preset_list").max_height(320.0).show(ui, |ui| {
-            // The user's own presets first: they are the ones picked most.
-            for preset in &self.editor.presets.presets {
-                let id = PresetId::User(preset.id);
-                ui.horizontal(|ui| {
-                    let name_width =
-                        ui.available_width() - ROW_HEIGHT - ui.spacing().item_spacing.x - 4.0;
-                    let name = Button::new(RichText::new(&preset.name).size(18.0))
-                        .selected(current == Some(id))
-                        .truncate();
-                    if ui.add_sized(vec2(name_width, ROW_HEIGHT), name).clicked() {
-                        picked = Some(id);
-                    }
-                    let edit = Button::new(RichText::new("✏").size(18.0))
-                        .selected(self.ui.renaming_preset == Some(preset.id))
-                        .min_size(vec2(ROW_HEIGHT, ROW_HEIGHT));
-                    if ui.add(edit).on_hover_text("Rename or delete").clicked() {
-                        self.ui.renaming_preset = Some(preset.id);
-                    }
-                });
-            }
-            if let Some(id) = choice_grid(ui, &builtin, current, 1).flatten() {
-                picked = Some(id);
-            }
-        });
-        ui.add_space(8.0);
-
-        let renaming = self.ui.renaming_preset;
-        if let Some(preset) =
-            renaming.and_then(|id| self.editor.presets.presets.iter_mut().find(|p| p.id == id))
-        {
-            let mut delete = false;
-            let mut done = false;
-            ui.horizontal(|ui| {
-                let field_width =
-                    ui.available_width() - 2.0 * (ROW_HEIGHT + ui.spacing().item_spacing.x) - 16.0;
-                let field = ui.add(
-                    egui::TextEdit::singleline(&mut preset.name)
-                        .id(Id::unique("rename_preset"))
-                        .desired_width(field_width),
-                );
-                // Typing goes to the name while nothing else has the focus.
-                if ui.memory(|m| m.focused().is_none()) {
-                    field.request_focus();
-                }
-                let submit = field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                let size = vec2(ROW_HEIGHT, 32.0);
-                delete = ui.add(Button::new("🗑").min_size(size)).on_hover_text("Delete").clicked();
-                let valid = !preset.name.trim().is_empty();
-                done = ui.add_enabled(valid, Button::new("✔").min_size(size)).clicked()
-                    || (submit && valid);
-            });
-            if done {
-                preset.name = preset.name.trim().to_owned();
-                self.ui.renaming_preset = None;
-            }
-            if delete {
-                let id = preset.id;
-                self.delete_preset(id);
-                self.ui.renaming_preset = None;
-            }
-            return picked;
-        }
-
-        if let Some(PresetId::User(id)) = current
-            && let Some(preset) = self.editor.presets.get(id)
-            && preset.settings != self.preset_snapshot()
-        {
-            let label = format!("Update \u{201c}{}\u{201d}", preset.name);
-            if wide_button(ui, &label, 18.0, ROW_HEIGHT)
-                .on_hover_text("Store the current settings in this preset")
-                .clicked()
-            {
-                self.editor.presets.update(id, self.preset_snapshot());
-            }
-        }
-        ui.horizontal(|ui| {
-            ui.add(
-                egui::TextEdit::singleline(&mut self.ui.preset_name_buffer)
-                    .hint_text("Name")
-                    .desired_width(ui.available_width() - 80.0),
-            );
-            if ui.add(Button::new("Save").min_size(vec2(72.0, 32.0))).clicked() {
-                let name = std::mem::take(&mut self.ui.preset_name_buffer);
-                self.save_preset_as(&name);
-            }
-        });
-        picked
     }
 
     fn time_signature_choices(&mut self, ui: &mut Ui) -> bool {

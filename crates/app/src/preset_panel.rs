@@ -56,9 +56,10 @@ impl Grooph {
     }
 
     /// Store the current settings as a new preset and make it the active one.
-    pub(crate) fn save_preset_as(&mut self, name: &str) {
+    pub(crate) fn save_preset_as(&mut self, name: &str) -> u64 {
         let id = self.editor.presets.add(name, self.preset_snapshot());
         self.editor.active_preset = Some(PresetId::User(id));
+        id
     }
 
     pub(crate) fn delete_preset(&mut self, id: u64) {

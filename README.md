@@ -111,8 +111,8 @@ Important root files:
   `ts` link on its own opens the Metronome tab with that meter (and its
   `click` bar) and leaves the rhythm alone. A link that replaces the score
   goes through `PendingLoad::Link` and the
-  unsaved-changes dialog. "Copy link" in the library panel builds a link via
-  `grooph_link::share_url`.
+  unsaved-changes dialog. The share buttons (`share_link`) build a link with
+  `SharedLink::to_url`.
 - The link format is documented for AI agents in
   `crates/app/assets/seo/llms.txt`; keep it in sync.
 
@@ -214,8 +214,8 @@ Important root files:
   freesound.org, CC BY 4.0),
   see `crates/audio/samples/CREDITS.md`; add a row there with every new sample.
 - `VoiceMixer` (`voices.rs`) plays samples resampled to the device rate.
-- Mixer (`mixer_panel.rs`): a "Rhythm" group (`beat` as "Notes", `accent`,
-  `ghost`) and a "Metronome" group (`downbeat`, `primary` as "Medium", `soft`,
+- Mixer (`mixer_panel.rs`, a picker on the More screen): a "Rhythm" group (`beat` as "Notes", `accent`,
+  `ghost`) above a "Metronome" group (`downbeat`, `primary` as "Medium", `soft`,
   `counter` as "Polyrhythm", `count_in`), each with a mute (`rhythm_muted` /
   `metronome_muted`, applied in `SoundType::profile`). The metronome mute also
   silences the counter rhythm and leaves the count-in audible.
@@ -311,11 +311,20 @@ Important root files:
 - Tabs: Metronome (see below), Practice (generator card with
   Meter/Notes/Level/Bars/BPM, options sheet, big "new rhythm" + play
   buttons), Edit (tool palette + edit bar),
-  More (Library, Mixer, Settings, Help reuse their panels; Sounds, MIDI input and Play along
-  open a picker, Theme is picked in its row). The tab is derived
-  from `Mode` (`tab`), so modes set elsewhere land on the right tab;
+  More (`Mode::MoreMenu`, a screen of its own without the staff: a list at
+  the bottom whose rows open pickers, Theme is picked in its row). The tab is
+  derived from `Mode` (`tab`), so modes set elsewhere land on the right tab;
   the Metronome tab is open while `metronome_mode()`, in `Mode::Playback`
-  (ring) or `Mode::Edit` (tool palette).
+  (ring) or `Mode::Edit` (tool palette). More stays in front of an open
+  metronome and leaves it playing (`advance_unseen_playback` moves the
+  playback on without a staff); saving or loading in the library puts it
+  away first (`leave_metronome`), and a loaded pattern opens on the rhythm
+  page More was opened from (`ShellState::rhythm_tab`).
+- The library (`library_panel.rs`) has two halves, Rhythms and Presets, of
+  the same cards (`library_card`): a tap loads a rhythm or applies a preset
+  and opens the practice page (`open_preset`), ✏ renames or deletes, built-in
+  presets have no ✏. The Preset picker on the practice page shows the same
+  preset cards (`preset_cards`); a tap there applies the preset and stays.
 - Settings open in a `Modal` picker (`settings_picker`); generator changes go
   through `finish_generator_change`.
 - The staff's em is capped so one row fits the panel's height. The row's

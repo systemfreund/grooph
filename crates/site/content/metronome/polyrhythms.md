@@ -21,7 +21,7 @@ bpm=90&ts=4/4&counter=t4+t4+t4+t4+t4+t4
    two beats; the pattern repeats until the bar is full.
 3. Under **Your own (clicks : beats)** you can set any other ratio that fits the meter,
    for example 7:4 or 9:4.
-4. Press play. The counter rhythm has its own volume in the mixer (speaker icon), and you
+4. Press play. The counter rhythm has its own volume in the mixer (**More → Mixer**), and you
    can tap single counter clicks on the circle to make them louder, softer or silent.
 
 The beats count in the meter's beat unit: quarters in 4/4 and 3/4, eighths in 6/8 or 7/8.
@@ -60,7 +60,7 @@ The `counter` parameter is one bar of the meter in grooph's
 [text notation](https://grooph.app/llms.txt): the counter clicks as notes, rests where it is
 silent. A note with `>` clicks strong, a note in parentheses such as `(e)` soft. It needs
 `ts` and works only for the metronome, not together with a written rhythm. The easiest way
-to get a link is to set the polyrhythm in the app and use **Copy link** in the library panel.
+to get a link is to set the polyrhythm in the app and share it with the share button next to play in the Metronome tab.
 
 A ratio with a common factor sounds like the reduced one: 4:2 in 4/4 is four eighths in the
 time of two quarters, the same as 2:1, so a 4:2 link opens as 2:1:
@@ -85,5 +85,5 @@ clicks land on note values grooph can write: 3:2, 3:4, 5:4 and 7:4 in 4/4, 2:3 a
 
 ### Can I send someone a polyrhythm?
 
-Yes. **Copy link** in the library panel copies a link with the tempo, the meter, the click
-and the polyrhythm.
+Yes. The share button next to play in the Metronome tab shares a link with the tempo, the
+meter, the click and the polyrhythm.

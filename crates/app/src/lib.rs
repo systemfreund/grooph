@@ -82,12 +82,8 @@ use std::sync::Arc;
 pub(crate) enum Mode {
     Edit,
     Playback,
-    Mixer,
-    Settings,
-    Help,
-    Library,
     Generator,
-    /// The "More" tab's list of panels.
+    /// The "More" tab's list of dialogs.
     MoreMenu,
     /// The time signature dialog, holding the meter being picked.
     TimeSignature(TimeSignature),
@@ -617,44 +613,35 @@ impl Grooph {
     }
 
     /// "Save": if a pattern is active, overwrite its score + tempo in place
-    /// (keeping id and name). Otherwise create a new entry from `name` and make
-    /// it active. An empty name falls back to a numbered default.
-    pub(crate) fn save_active_pattern(&mut self, name: String) {
+    /// (keeping id and name); otherwise save a new one (see
+    /// [`Self::save_pattern_as`]). Returns the pattern's id.
+    pub(crate) fn save_active_pattern(&mut self) -> u64 {
+        // The library keeps rhythms, not the metronome's click bar.
+        self.leave_metronome();
         let score = self.editor.score.clone();
         let bpm = self.playback_ctl.bpm;
         match self.editor.active_pattern_id {
             Some(id) if self.editor.library.contains(id) => {
                 self.editor.library.update(id, score, bpm);
+                self.editor.dirty = false;
+                id
             }
-            _ => {
-                let id = self.editor.library.add(
-                    Self::pattern_name_or_default(&name, &self.editor.library),
-                    score,
-                    bpm,
-                );
-                self.editor.active_pattern_id = Some(id);
-            }
+            _ => self.save_pattern_as(),
         }
-        self.editor.dirty = false;
     }
 
-    /// "Save as": always create a new library entry from `name` and make it the
-    /// active pattern. An empty name falls back to a numbered default.
-    pub(crate) fn save_pattern_as(&mut self, name: String) {
+    /// "Save as new": always create a new library entry under the next free
+    /// "Pattern N" and make it the active pattern.
+    pub(crate) fn save_pattern_as(&mut self) -> u64 {
+        self.leave_metronome();
         let score = self.editor.score.clone();
         let bpm = self.playback_ctl.bpm;
-        let name = Self::pattern_name_or_default(&name, &self.editor.library);
+        let names = self.editor.library.patterns.iter().map(|p| p.name.as_str());
+        let name = library::next_default_name("Pattern", names);
         let id = self.editor.library.add(name, score, bpm);
         self.editor.active_pattern_id = Some(id);
         self.editor.dirty = false;
-    }
-
-    fn pattern_name_or_default(name: &str, library: &PatternLibrary) -> String {
-        if name.trim().is_empty() {
-            format!("Pattern {}", library.patterns.len() + 1)
-        } else {
-            name.trim().to_string()
-        }
+        id
     }
 
     /// Replace the current score + tempo with the saved pattern `id`. The score
@@ -667,6 +654,8 @@ impl Grooph {
         let score = pattern.score.clone();
         let bpm = pattern.bpm;
 
+        // The rhythm is replaced, not the metronome's click bar.
+        self.leave_metronome();
         self.stop_transport();
         self.with_undo_snapshot(|app| {
             app.editor.score = score;
@@ -684,15 +673,30 @@ impl Grooph {
         self.playback_ctl.playback.reset();
         self.editor.active_pattern_id = Some(id);
         self.editor.dirty = false;
+        self.show_loaded_pattern();
+    }
+
+    /// A pattern loaded on the More screen, which has no staff, opens on
+    /// the rhythm page More was opened from.
+    fn show_loaded_pattern(&mut self) {
+        if self.tab() == Tab::More {
+            self.ui.picker = None;
+            self.select_tab(self.ui.shell.rhythm_tab);
+        }
     }
 
     /// Entry point for the load button: if the working score has unsaved changes,
     /// defer to the confirmation dialog; otherwise load immediately.
     pub(crate) fn request_load_pattern(&mut self, id: u64) {
-        if self.editor.active_pattern_id == Some(id) && !self.editor.dirty {
-            return; // already loaded and unchanged
+        let dirty = self.rhythm_dirty();
+        if self.editor.active_pattern_id == Some(id) && !dirty {
+            // Already loaded and unchanged.
+            self.leave_metronome();
+            self.show_loaded_pattern();
+            return;
         }
-        if self.editor.dirty {
+        // Asking first leaves the metronome playing, in case of a cancel.
+        if dirty {
             self.ui.pending_load = Some(PendingLoad::Pattern(id));
         } else {
             self.load_pattern(id);
@@ -704,6 +708,7 @@ impl Grooph {
         if self.editor.active_pattern_id == Some(id) {
             self.editor.active_pattern_id = None;
         }
+        self.forget_stashed_pattern(id);
         if matches!(self.ui.pending_load, Some(PendingLoad::Pattern(p)) if p == id) {
             self.ui.pending_load = None;
         }
@@ -715,7 +720,9 @@ impl Grooph {
         // A metronome link leaves the rhythm alone: nothing to lose.
         let replaces_rhythm =
             link.content.as_ref().is_some_and(|c| !matches!(c, LinkContent::Metronome(_)));
-        if replaces_rhythm && self.editor.dirty {
+        // The rhythm's changes, also while the metronome's click bar is in
+        // its place.
+        if replaces_rhythm && self.rhythm_dirty() {
             self.ui.pending_load = Some(PendingLoad::Link(Box::new(link)));
         } else {
             self.apply_link(link);
@@ -726,8 +733,7 @@ impl Grooph {
         // A rhythm link puts the metronome's click bar away first; a
         // metronome link reopens it below with its meter and click bar.
         if self.metronome_mode() {
-            self.stop_transport();
-            self.close_metronome();
+            self.leave_metronome();
             self.ui.mode = Mode::Playback;
         }
         let metronome = matches!(link.content, Some(LinkContent::Metronome(_)));
@@ -778,6 +784,7 @@ impl Grooph {
             true
         });
         self.editor.active_pattern_id = None;
+        self.show_loaded_pattern();
     }
 
     /// Run a pending load after the unsaved-changes dialog.
@@ -858,6 +865,7 @@ impl Grooph {
         if ui.link_error.take().is_some()
             || ui.pending_load.take().is_some()
             || ui.renaming_preset.take().is_some()
+            || ui.renaming_pattern.take().is_some()
         {
             return true;
         }
@@ -869,7 +877,6 @@ impl Grooph {
         }
         ui.mode = match ui.mode {
             Mode::TimeSignature(_) => Mode::Edit,
-            Mode::Mixer | Mode::Settings | Mode::Help | Mode::Library => Mode::MoreMenu,
             // The metronome's click bar editor ("Done").
             Mode::Edit if metronome => Mode::Playback,
             // The practice page's options sheet, when unfolded.
@@ -1182,12 +1189,15 @@ impl Grooph {
                 flash_enabled: state.flash_enabled,
                 guide: state.guide,
                 platform,
-                save_name_buffer: String::new(),
-                preset_name_buffer: String::new(),
                 renaming_preset: None,
+                renaming_pattern: None,
+                rename_typed: String::new(),
                 pending_load: None,
                 link_error: None,
                 link_copied_at: None,
+                library_saved: None,
+                scroll_to_library_item: None,
+                library_tab: Default::default(),
                 narrow_screen: false,
                 staff_em: 40.0,
                 followed_cursor: None,
@@ -1283,11 +1293,10 @@ mod tests {
         let cc = eframe::CreationContext::_new_kittest(eframe::egui::Context::default());
         let mut app = Grooph::new(&cc);
         app.select_tab(Tab::More);
-        app.ui.mode = Mode::Settings;
-        app.ui.picker = Some(Picker::Bpm);
+        app.ui.picker = Some(Picker::Settings);
         assert!(app.back());
         assert_eq!(app.ui.picker, None);
-        assert_eq!(app.ui.mode, Mode::Settings);
+        assert_eq!(app.ui.mode, Mode::MoreMenu);
         // The MIDI input picker opened from Play along goes back to it.
         app.ui.picker = Some(Picker::MidiInput);
         app.ui.picker_return = Some(Picker::PlayAlong);
@@ -1295,8 +1304,6 @@ mod tests {
         assert_eq!(app.ui.picker, Some(Picker::PlayAlong));
         assert!(app.back());
         assert_eq!(app.ui.picker, None);
-        assert!(app.back());
-        assert_eq!(app.ui.mode, Mode::MoreMenu);
         // Nothing left to close: the host leaves the app. The practice
         // options sheet is not on this page, so it does not count.
         app.ui.shell.options_collapsed = false;
@@ -1307,6 +1314,545 @@ mod tests {
         assert!(app.back());
         assert!(app.ui.shell.options_collapsed);
         assert!(!app.back());
+    }
+
+    #[test]
+    fn more_leaves_the_playing_metronome_alone() {
+        use super::{Grooph, Mode, TransportState};
+
+        let cc = eframe::CreationContext::_new_kittest(eframe::egui::Context::default());
+        let mut app = Grooph::new(&cc);
+        app.select_tab(Tab::Metronome);
+        app.start_playback();
+        app.select_tab(Tab::More);
+        assert_eq!(app.tab(), Tab::More);
+        assert!(app.metronome_mode());
+        assert_eq!(app.playback_ctl.transport_state, TransportState::Playing);
+        app.select_tab(Tab::Metronome);
+        assert_eq!(app.ui.mode, Mode::Playback);
+        assert_eq!(app.playback_ctl.transport_state, TransportState::Playing);
+        // From More to a rhythm page the metronome closes, as from its tab.
+        app.select_tab(Tab::More);
+        app.select_tab(Tab::Practice);
+        assert!(!app.metronome_mode());
+        assert_eq!(app.playback_ctl.transport_state, TransportState::Stopped);
+    }
+
+    #[test]
+    fn library_holds_the_rhythm_and_loads_onto_its_page() {
+        use super::{Grooph, TransportState};
+        use crate::pickers::Picker;
+
+        let cc = eframe::CreationContext::_new_kittest(eframe::egui::Context::default());
+        let mut app = Grooph::new(&cc);
+        app.select_tab(Tab::Edit);
+        app.editor.score = Score::single(Measure::new(TimeSignature::new(3, 4)));
+        let rhythm = app.editor.score.clone();
+        app.save_pattern_as();
+        let id = app.editor.active_pattern_id.unwrap();
+
+        // Through the metronome to More: the library leaves it open.
+        app.select_tab(Tab::Metronome);
+        app.start_playback();
+        app.select_tab(Tab::More);
+        app.ui.picker = Some(Picker::Library);
+        assert!(app.metronome_mode());
+        // Saving keeps the rhythm, not the click bar, and stops the click.
+        app.save_pattern_as();
+        assert!(!app.metronome_mode());
+        assert_eq!(app.playback_ctl.transport_state, TransportState::Stopped);
+        assert_eq!(format!("{:?}", app.editor.score), format!("{rhythm:?}"));
+        let saved = app.editor.library.get(app.editor.active_pattern_id.unwrap()).unwrap();
+        assert_eq!(format!("{:?}", saved.score), format!("{rhythm:?}"));
+        // So does loading.
+        app.select_tab(Tab::Metronome);
+        app.select_tab(Tab::Edit);
+        app.select_tab(Tab::Metronome);
+        app.select_tab(Tab::More);
+
+        // Loading closes the dialog and opens the rhythm page More was last
+        // opened from.
+        app.request_load_pattern(id);
+        assert_eq!(app.tab(), Tab::Edit);
+        assert_eq!(app.ui.picker, None);
+        app.select_tab(Tab::Practice);
+        app.select_tab(Tab::More);
+        app.ui.picker = Some(Picker::Library);
+        app.editor.active_pattern_id = None;
+        app.editor.dirty = true;
+        app.request_load_pattern(id);
+        // Unsaved changes ask first, above the library.
+        assert_eq!(app.tab(), Tab::More);
+        assert_eq!(app.ui.picker, Some(Picker::Library));
+        let pending = app.ui.pending_load.take().unwrap();
+        app.finish_pending_load(pending);
+        assert_eq!(app.tab(), Tab::Practice);
+        assert_eq!(app.ui.picker, None);
+        // Loading on a rhythm page stays there.
+        app.select_tab(Tab::Edit);
+        app.editor.active_pattern_id = None;
+        app.request_load_pattern(id);
+        assert_eq!(app.tab(), Tab::Edit);
+    }
+
+    #[test]
+    fn mixer_dialog_fits_its_sliders_where_the_screen_allows() {
+        use super::Grooph;
+        use crate::mixer_panel::mixer_width;
+        use crate::pickers::Picker;
+        use eframe::egui::{Pos2, RawInput, Rect, vec2};
+
+        let ctx = eframe::egui::Context::default();
+        let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let mut app = Grooph::new(&cc);
+        app.ui.picker = Some(Picker::Mixer);
+        let mut frame = |width: f32| {
+            let input = RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(width, 800.0))),
+                ..Default::default()
+            };
+            let mut measured = None;
+            let mut output = ctx.run_ui(input, |ui| {
+                app.apply_style(ui);
+                app.settings_picker(ui);
+                measured = mixer_width(ui);
+            });
+            output.textures_delta.clear();
+            measured.unwrap()
+        };
+        let mut sizes = Vec::new();
+        for _ in 0..4 {
+            sizes.push(frame(1200.0));
+        }
+        // Wider than the other dialogs, measured once and then stable.
+        let wide = *sizes.last().unwrap();
+        assert!(wide > 380.0 && wide < 1100.0, "{sizes:?}");
+        assert_eq!(sizes[2], wide, "{sizes:?}");
+    }
+
+    #[test]
+    fn library_previews_render_at_phone_width() {
+        use super::Grooph;
+        use crate::pickers::Picker;
+        use eframe::egui::{Pos2, RawInput, Rect, vec2};
+        use grooph_measure::Beat;
+        use grooph_measure::duration::{e, q, s, t8};
+
+        let ctx = eframe::egui::Context::default();
+        let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let mut app = Grooph::new(&cc);
+        app.select_tab(Tab::Edit);
+        // From sparse to too dense for the row, which then clips.
+        for d in [q(), e(), s(), t8()] {
+            let mut m = Measure::new(TimeSignature::FOUR_FOUR);
+            let mut i = 0;
+            while i < m.beats().len() {
+                m.set_beat(i, Beat::note(d)).unwrap();
+                i += 1;
+            }
+            app.editor.score = Score { measures: vec![m.clone(), m] };
+            app.save_pattern_as();
+        }
+        app.select_tab(Tab::More);
+        app.ui.picker = Some(Picker::Library);
+        for _ in 0..3 {
+            let screen = Rect::from_min_size(Pos2::ZERO, vec2(390.0, 844.0));
+            let input = RawInput { screen_rect: Some(screen), ..Default::default() };
+            let mut output = ctx.run_ui(input, |ui| {
+                app.apply_style(ui);
+                app.settings_picker(ui);
+            });
+            output.textures_delta.clear();
+        }
+        assert_eq!(app.ui.picker, Some(Picker::Library));
+    }
+
+    #[test]
+    fn a_preset_from_the_library_opens_the_practice_page() {
+        use super::{Grooph, Mode};
+        use crate::pickers::Picker;
+        use crate::presets::{PresetId, builtin_presets};
+
+        let cc = eframe::CreationContext::_new_kittest(eframe::egui::Context::default());
+        let mut app = Grooph::new(&cc);
+        // Through the metronome: the click bar stays the metronome's.
+        app.select_tab(Tab::Metronome);
+        let click_bar = format!("{:?}", app.editor.score);
+        app.select_tab(Tab::More);
+        app.ui.picker = Some(Picker::Library);
+        let last = builtin_presets().len() - 1;
+        app.open_preset(PresetId::BuiltIn(last));
+        assert_eq!(app.tab(), Tab::Practice);
+        assert_eq!(app.ui.mode, Mode::Generator);
+        assert_eq!(app.ui.picker, None);
+        assert_eq!(app.editor.active_preset, Some(PresetId::BuiltIn(last)));
+        assert_eq!(app.editor.generator.settings, builtin_presets()[last].1.generator);
+        app.select_tab(Tab::Metronome);
+        assert_eq!(format!("{:?}", app.editor.score), click_bar);
+    }
+
+    #[test]
+    fn library_and_preset_picker_render_at_phone_width() {
+        use super::Grooph;
+        use crate::library_panel::LibraryTab;
+        use crate::pickers::Picker;
+        use eframe::egui::{Pos2, RawInput, Rect, vec2};
+
+        let ctx = eframe::egui::Context::default();
+        let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let mut app = Grooph::new(&cc);
+        app.select_tab(Tab::Practice);
+        app.save_preset_as("Mine");
+        app.select_tab(Tab::More);
+        app.ui.picker = Some(Picker::Library);
+        for tab in [LibraryTab::Rhythms, LibraryTab::Presets] {
+            app.ui.library_tab = tab;
+            for _ in 0..2 {
+                let screen = Rect::from_min_size(Pos2::ZERO, vec2(390.0, 844.0));
+                let input = RawInput { screen_rect: Some(screen), ..Default::default() };
+                let mut output = ctx.run_ui(input, |ui| {
+                    app.apply_style(ui);
+                    app.settings_picker(ui);
+                });
+                output.textures_delta.clear();
+            }
+        }
+        assert_eq!(app.ui.picker, Some(Picker::Library));
+        // The Preset picker on the practice page shows the same cards.
+        app.select_tab(Tab::Practice);
+        app.ui.picker = Some(Picker::Preset);
+        for _ in 0..2 {
+            let screen = Rect::from_min_size(Pos2::ZERO, vec2(390.0, 844.0));
+            let input = RawInput { screen_rect: Some(screen), ..Default::default() };
+            let mut output = ctx.run_ui(input, |ui| {
+                app.apply_style(ui);
+                app.settings_picker(ui);
+            });
+            output.textures_delta.clear();
+        }
+        assert_eq!(app.ui.picker, Some(Picker::Preset));
+    }
+
+    /// Runs frames of the shell at phone size, `time` seconds into the run,
+    /// with `events` in the first.
+    fn shell_frame(
+        app: &mut super::Grooph,
+        ctx: &eframe::egui::Context,
+        time: f64,
+        events: Vec<eframe::egui::Event>,
+    ) {
+        use eframe::egui::{Pos2, RawInput, Rect, vec2};
+        let screen = Rect::from_min_size(Pos2::ZERO, vec2(390.0, 844.0));
+        let input =
+            RawInput { screen_rect: Some(screen), time: Some(time), events, ..Default::default() };
+        let mut output = ctx.run_ui(input, |ui| {
+            app.apply_style(ui);
+            app.shell_ui(ui);
+            app.update_endless();
+            app.handle_keyboard_input(ui);
+        });
+        output.textures_delta.clear();
+    }
+
+    #[test]
+    fn endless_mode_drops_played_bars_behind_the_more_screen() {
+        use super::Grooph;
+
+        let ctx = eframe::egui::Context::default();
+        let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let mut app = Grooph::new(&cc);
+        app.select_tab(Tab::Practice);
+        app.editor.generator.endless = true;
+        app.playback_ctl.bpm = 240;
+        app.start_playback();
+        app.select_tab(Tab::More);
+        // A minute at 240 BPM: sixty bars of 4/4 go by.
+        let mut time = 0.0;
+        while time < 60.0 {
+            shell_frame(&mut app, &ctx, time, vec![]);
+            time += 0.1;
+        }
+        assert!(app.editor.score.len() <= 4, "{} bars", app.editor.score.len());
+    }
+
+    #[test]
+    fn esc_on_the_more_screen_closes_the_dialog_first() {
+        use super::Grooph;
+        use crate::pickers::Picker;
+        use eframe::egui::{Event, Key, Modifiers};
+
+        let ctx = eframe::egui::Context::default();
+        let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let mut app = Grooph::new(&cc);
+        app.select_tab(Tab::More);
+        app.ui.picker = Some(Picker::Mixer);
+        shell_frame(&mut app, &ctx, 0.0, vec![]);
+        let esc = |pressed| Event::Key {
+            key: Key::Escape,
+            physical_key: None,
+            pressed,
+            repeat: false,
+            modifiers: Modifiers::NONE,
+        };
+        shell_frame(&mut app, &ctx, 0.1, vec![esc(true), esc(false)]);
+        assert_eq!(app.ui.picker, None);
+        assert_eq!(app.tab(), Tab::More);
+        // Without a dialog, Esc stays on More, also with the metronome
+        // behind it: its click bar editor does not open.
+        app.select_tab(Tab::Metronome);
+        app.select_tab(Tab::More);
+        shell_frame(&mut app, &ctx, 0.2, vec![esc(true), esc(false)]);
+        assert_eq!(app.tab(), Tab::More);
+        assert!(app.metronome_mode());
+        app.select_tab(Tab::Metronome);
+        assert_eq!(app.ui.mode, super::Mode::Playback);
+    }
+
+    #[test]
+    fn save_is_off_while_there_is_nothing_new_to_save() {
+        use super::Grooph;
+        use crate::presets::{PresetId, builtin_presets};
+
+        let cc = eframe::CreationContext::_new_kittest(eframe::egui::Context::default());
+        let mut app = Grooph::new(&cc);
+        app.select_tab(Tab::Edit);
+        // Rhythms: a new one while none is active, then the active one only
+        // with changes.
+        app.editor.active_pattern_id = None;
+        let target = app.rhythm_save_target();
+        assert_eq!((target.overwrites, target.enabled), (None, true));
+        app.save_pattern_as();
+        let target = app.rhythm_save_target();
+        assert!(target.overwrites.is_some() && !target.enabled);
+        app.editor.dirty = true;
+        assert!(app.rhythm_save_target().enabled);
+
+        // Presets: an unchanged built-in has nothing to save, a changed one
+        // saves a new preset.
+        app.select_tab(Tab::Practice);
+        app.apply_preset(PresetId::BuiltIn(0));
+        assert_eq!(app.editor.generator.settings, builtin_presets()[0].1.generator);
+        let target = app.preset_save_target();
+        assert_eq!((target.overwrites, target.enabled), (None, false));
+        app.playback_ctl.bpm += 1;
+        let target = app.preset_save_target();
+        assert_eq!((target.overwrites, target.enabled), (None, true));
+        let id = app.save_preset_as("");
+        let target = app.preset_save_target();
+        assert_eq!(target.overwrites, app.editor.presets.get(id).map(|p| p.name.clone()));
+        assert!(!target.enabled);
+        app.playback_ctl.bpm += 1;
+        assert!(app.preset_save_target().enabled);
+        app.editor.active_preset = None;
+        assert!(app.preset_save_target().enabled);
+    }
+
+    #[test]
+    fn a_load_that_asks_first_leaves_the_metronome_playing() {
+        use super::{Grooph, TransportState};
+
+        let cc = eframe::CreationContext::_new_kittest(eframe::egui::Context::default());
+        let mut app = Grooph::new(&cc);
+        app.select_tab(Tab::Edit);
+        let id = app.save_pattern_as();
+        app.editor.dirty = true;
+        app.select_tab(Tab::Metronome);
+        app.start_playback();
+        app.select_tab(Tab::More);
+        app.editor.active_pattern_id = None;
+        app.request_load_pattern(id);
+        assert!(app.ui.pending_load.is_some());
+        assert!(app.metronome_mode());
+        assert_eq!(app.playback_ctl.transport_state, TransportState::Playing);
+        // Loading after all puts the metronome away.
+        let pending = app.ui.pending_load.take().unwrap();
+        app.finish_pending_load(pending);
+        assert!(!app.metronome_mode());
+        assert_eq!(app.editor.active_pattern_id, Some(id));
+    }
+
+    #[test]
+    fn library_dialog_stays_within_a_phone_screen() {
+        use super::Grooph;
+        use crate::pickers::Picker;
+        use eframe::egui::Id;
+
+        let ctx = eframe::egui::Context::default();
+        let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let mut app = Grooph::new(&cc);
+        app.select_tab(Tab::Edit);
+        let first = app.save_pattern_as();
+        app.save_pattern_as();
+        app.save_pattern_as();
+        app.editor.library.patterns[1].name = "A name far too long for a phone's dialog".into();
+        app.select_tab(Tab::More);
+        app.ui.picker = Some(Picker::Library);
+        let width = |app: &mut Grooph| {
+            for i in 0..3 {
+                shell_frame(app, &ctx, f64::from(i) * 0.1, vec![]);
+            }
+            ctx.memory(|m| m.area_rect(Id::unique("settings_picker"))).unwrap().width()
+        };
+        let closed = width(&mut app);
+        assert!(closed <= 390.0, "{closed}");
+        // Renaming opens a field and two buttons under the card.
+        app.ui.renaming_pattern = Some(first);
+        assert_eq!(width(&mut app), closed);
+    }
+
+    #[test]
+    fn a_link_asks_first_for_a_rhythm_put_aside_by_the_metronome() {
+        use super::Grooph;
+        use grooph_link::{LinkContent, SharedLink};
+
+        let cc = eframe::CreationContext::_new_kittest(eframe::egui::Context::default());
+        let mut app = Grooph::new(&cc);
+        app.select_tab(Tab::Edit);
+        app.editor.dirty = true;
+        app.select_tab(Tab::Metronome);
+        app.select_tab(Tab::More);
+        // The click bar has no changes; the rhythm behind it has.
+        app.editor.dirty = false;
+        let score = Score::single(Measure::new(TimeSignature::new(3, 4)));
+        app.open_link(SharedLink {
+            content: Some(LinkContent::Score(score)),
+            ..Default::default()
+        });
+        assert!(app.ui.pending_load.is_some());
+        assert!(app.metronome_mode());
+    }
+
+    #[test]
+    fn deleting_the_rhythm_behind_the_metronome_forgets_it() {
+        use super::Grooph;
+
+        let cc = eframe::CreationContext::_new_kittest(eframe::egui::Context::default());
+        let mut app = Grooph::new(&cc);
+        app.select_tab(Tab::Edit);
+        let id = app.save_pattern_as();
+        app.select_tab(Tab::Metronome);
+        app.select_tab(Tab::More);
+        app.delete_pattern(id);
+        app.select_tab(Tab::Edit);
+        assert_eq!(app.editor.active_pattern_id, None);
+    }
+
+    #[test]
+    fn keys_on_the_more_screen_leave_the_hidden_score_alone() {
+        use super::{Grooph, TransportState};
+        use crate::tools::all_tools;
+        use eframe::egui::{Event, Key, Modifiers};
+
+        let ctx = eframe::egui::Context::default();
+        let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let mut app = Grooph::new(&cc);
+        app.select_tab(Tab::Edit);
+        app.select_tab(Tab::More);
+        let score = format!("{:?}", app.editor.score);
+        let key = |key, pressed| Event::Key {
+            key,
+            physical_key: None,
+            pressed,
+            repeat: false,
+            modifiers: Modifiers::NONE,
+        };
+        // Every plain tool key: none edits the score behind More (tools run
+        // in edit mode only).
+        let mut time = 0.0;
+        for tool in all_tools() {
+            for shortcut in tool.shortcuts.iter().filter(|s| !s.shift && !s.command) {
+                if shortcut.key == Key::Space || shortcut.key == Key::Escape {
+                    continue;
+                }
+                time += 0.1;
+                shell_frame(
+                    &mut app,
+                    &ctx,
+                    time,
+                    vec![key(shortcut.key, true), key(shortcut.key, false)],
+                );
+            }
+        }
+        assert_eq!(format!("{:?}", app.editor.score), score);
+        assert_eq!(app.tab(), Tab::More);
+        // Space still plays.
+        shell_frame(
+            &mut app,
+            &ctx,
+            time + 0.1,
+            vec![key(Key::Space, true), key(Key::Space, false)],
+        );
+        assert_eq!(app.playback_ctl.transport_state, TransportState::Playing);
+    }
+
+    #[test]
+    fn save_as_new_opens_the_name_and_says_saved() {
+        use super::Grooph;
+        use crate::library_panel::{LibraryItem, SaveAs};
+
+        let cc = eframe::CreationContext::_new_kittest(eframe::egui::Context::default());
+        let mut app = Grooph::new(&cc);
+        app.select_tab(Tab::Edit);
+        let id = app.save_rhythm(SaveAs::New, 1.0);
+        assert_eq!(app.ui.renaming_pattern, Some(id));
+        assert_eq!(app.ui.rename_typed, app.editor.library.get(id).unwrap().name);
+        assert_eq!(app.ui.library_saved, Some((LibraryItem::Pattern(id), 1.0)));
+        assert_eq!(app.ui.scroll_to_library_item, Some(LibraryItem::Pattern(id)));
+        // Overwriting names no new pattern and opens no name.
+        app.ui.renaming_pattern = None;
+        app.editor.dirty = true;
+        assert_eq!(app.save_rhythm(SaveAs::Update, 2.0), id);
+        assert_eq!(app.editor.library.patterns.len(), 1);
+        assert_eq!(app.ui.renaming_pattern, None);
+
+        app.select_tab(Tab::Practice);
+        let preset = app.save_preset(SaveAs::New, 3.0);
+        assert_eq!(app.ui.renaming_preset, Some(preset));
+        assert_eq!(app.ui.library_saved, Some((LibraryItem::Preset(preset), 3.0)));
+        app.playback_ctl.bpm += 1;
+        assert_eq!(app.save_preset(SaveAs::Update, 4.0), preset);
+        assert_eq!(app.editor.presets.get(preset).unwrap().settings, app.preset_snapshot());
+    }
+
+    #[test]
+    fn more_dialogs_stay_within_a_phone_screen() {
+        use super::Grooph;
+        use crate::pickers::Picker;
+        use eframe::egui::Id;
+
+        let ctx = eframe::egui::Context::default();
+        let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let mut app = Grooph::new(&cc);
+        let mut time = 0.0;
+        for picker in [Picker::Mixer, Picker::Settings, Picker::Help, Picker::Preset] {
+            app.select_tab(if picker == Picker::Preset { Tab::Practice } else { Tab::More });
+            app.ui.picker = Some(picker);
+            for _ in 0..3 {
+                time += 0.1;
+                shell_frame(&mut app, &ctx, time, vec![]);
+            }
+            let rect = ctx.memory(|m| m.area_rect(Id::unique("settings_picker"))).unwrap();
+            assert!(rect.width() <= 390.0 && rect.height() <= 844.0, "{picker:?}: {rect:?}");
+        }
+    }
+
+    #[test]
+    fn calibration_from_more_puts_the_metronome_away() {
+        use super::Grooph;
+        use crate::play_along::HitSource;
+
+        let cc = eframe::CreationContext::_new_kittest(eframe::egui::Context::default());
+        let mut app = Grooph::new(&cc);
+        app.select_tab(Tab::Edit);
+        app.editor.score = Score::single(Measure::new(TimeSignature::new(3, 4)));
+        let rhythm = app.editor.score.clone();
+        app.select_tab(Tab::Metronome);
+        app.select_tab(Tab::More);
+        app.start_calibration(HitSource::Tap);
+        assert!(!app.metronome_mode());
+        app.stop_transport();
+        assert_eq!(format!("{:?}", app.editor.score), format!("{rhythm:?}"));
+        assert_eq!(app.tab(), Tab::More);
     }
 
     #[test]

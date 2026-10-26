@@ -2,6 +2,7 @@ use crate::accuracy::AccuracyState;
 use crate::generator::GeneratorState;
 use crate::guide::{AnchorFlash, Guide};
 use crate::library::PatternLibrary;
+use crate::library_panel::{LibraryItem, LibraryTab};
 use crate::metronome_view::MetronomeState;
 use crate::persist::StateBackup;
 use crate::pickers::Picker;
@@ -317,13 +318,13 @@ pub(crate) struct UiShell {
     /// What the practice staff shows while it plays.
     pub(crate) guide: Guide,
     pub(crate) platform: PlatformRuntime,
-    /// Transient text buffer for the "save current pattern" name input. Not
-    /// persisted.
-    pub(crate) save_name_buffer: String,
-    /// Name input for "save preset as". Not persisted.
-    pub(crate) preset_name_buffer: String,
     /// User preset whose row in the preset picker is being renamed. Not persisted.
     pub(crate) renaming_preset: Option<u64>,
+    /// Saved pattern whose card in the library is being renamed. Not persisted.
+    pub(crate) renaming_pattern: Option<u64>,
+    /// The name being typed for the card being renamed; it becomes the name
+    /// on ✔ or Enter only. Not persisted.
+    pub(crate) rename_typed: String,
     /// Load awaiting the "discard unsaved changes?" confirmation. `Some` shows
     /// the confirm dialog. Not persisted.
     pub(crate) pending_load: Option<PendingLoad>,
@@ -331,6 +332,13 @@ pub(crate) struct UiShell {
     pub(crate) link_error: Option<String>,
     /// UI time of the last "copy link" click, for a short confirmation.
     pub(crate) link_copied_at: Option<f64>,
+    /// The library item saved last and the UI time, for "✓ Saved" on its
+    /// card. Not persisted.
+    pub(crate) library_saved: Option<(LibraryItem, f64)>,
+    /// A library card to scroll into view once: the one just saved.
+    pub(crate) scroll_to_library_item: Option<LibraryItem>,
+    /// The half of the library shown. Not persisted.
+    pub(crate) library_tab: LibraryTab,
     /// The window is phone-sized: the staff packs its notes tighter. Set
     /// every frame.
     pub(crate) narrow_screen: bool,

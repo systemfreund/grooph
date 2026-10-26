@@ -122,6 +122,7 @@ impl Grooph {
                             // No percussion clef: on a single line it says nothing
                             // the line doesn't, and every row starts alike.
                             layout_clef_first: false,
+                            time_signature_first: false,
                             room_below_em: if count_config.is_some() {
                                 ROOM_BELOW_WITH_LABELS_EM
                             } else {
@@ -310,6 +311,21 @@ impl Grooph {
                     });
                 });
         });
+    }
+
+    /// Keep the playback going while no staff is drawn (the More screen):
+    /// endless mode, play along and the count-in follow its cursor.
+    pub(super) fn advance_unseen_playback(&mut self, ui: &egui::Ui) {
+        match self.playback_ctl.transport_state {
+            TransportState::Playing => {
+                let timing = self.score_timing();
+                let tick = self.advance_playback(ui, &timing);
+                // Nothing is on screen: every bar before the playing one is
+                // out of view, so endless mode drops them as it goes.
+                self.playback_ctl.playback.rows_above_view = timing.to_local(tick).0;
+            }
+            TransportState::Stopped => self.playback_ctl.playback.reset(),
+        }
     }
 
     /// Move the playback cursor to this frame (see [`advance_tick`]), track
