@@ -209,10 +209,11 @@ Important root files:
   freesound.org, CC BY 4.0),
   see `crates/audio/samples/CREDITS.md`; add a row there with every new sample.
 - `VoiceMixer` (`voices.rs`) plays samples resampled to the device rate.
-- Mixer (`mixer_panel.rs`): a "Metronome" group (`downbeat`, `primary` as
-  "Medium", `soft`, `count_in`) and a "Rhythm" group (`beat` as "Notes", `accent`,
-  `ghost`), each with a mute (`metronome_muted` / `rhythm_muted`, applied in
-  `SoundType::profile`). The metronome mute leaves the count-in audible.
+- Mixer (`mixer_panel.rs`): a "Rhythm" group (`beat` as "Notes", `accent`,
+  `ghost`) and a "Metronome" group (`downbeat`, `primary` as "Medium", `soft`,
+  `counter` as "Polyrhythm", `count_in`), each with a mute (`rhythm_muted` /
+  `metronome_muted`, applied in `SoundType::profile`). The metronome mute also
+  silences the counter rhythm and leaves the count-in audible.
   Sounds with zero gain are not triggered at all. Clicks between the beats
   (e.g. every eighth of 7/8) come from the click bar, not from the mixer.
 - Click bars (`grooph_measure::click`): what the metronome clicks in a meter

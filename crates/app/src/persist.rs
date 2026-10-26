@@ -239,8 +239,7 @@ mod tests {
         let saved = saved.replacen("rhythm_muted:", "counter_muted:true,rhythm_muted:", 1);
         assert!(saved.contains("counter_muted:true"), "{saved}");
         let (s, backup) = restore(Some(&saved));
-        assert_eq!(s.audio_settings.counter, 0.4);
-        assert!(s.audio_settings.rhythm_muted);
+        assert_eq!(s.audio_settings, state.audio_settings);
         assert!(backup.is_none());
     }
 
