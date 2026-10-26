@@ -1,6 +1,7 @@
 use crate::Measure;
 use crate::duration::Duration;
 use crate::grid::DEFAULT_GRID;
+use crate::math::gcd;
 
 impl Measure {
     /// Compute the best exact spelling for a gap measured in ticks.
@@ -43,7 +44,11 @@ impl Measure {
         };
         coins.sort_unstable_by_key(|c| std::cmp::Reverse(c.0));
 
-        let target = gap_ticks as usize;
+        // Every sum of coins is a multiple of their common divisor, so the
+        // table only needs those steps: a 4/4 bar has 4 * 2^n * 3^m * .. ticks
+        // but few steps of the shortest coin.
+        let unit = coins.iter().fold(gap_ticks, |g, c| gcd(g, c.0));
+        let target = (gap_ticks / unit) as usize;
         #[derive(Clone, Copy)]
         struct Cell {
             len: u16,
@@ -57,7 +62,7 @@ impl Measure {
         for i in 1..=target {
             let mut best: Option<Cell> = None;
             for (idx, (ticks, _d, w)) in coins.iter().enumerate() {
-                let t = *ticks as usize;
+                let t = (*ticks / unit) as usize;
                 if t <= i
                     && let Some(prev) = dp[i - t]
                 {
