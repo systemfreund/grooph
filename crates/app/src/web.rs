@@ -256,3 +256,82 @@ fn is_mobile_browser() -> bool {
         is_ios || is_android || (has_touch && is_mobile_token)
     })
 }
+
+thread_local! {
+    /// Lines of the keyboard debug overlay, oldest first, and the state
+    /// last logged.
+    static KEYBOARD_LOG: RefCell<(VecDeque<String>, String)> =
+        const { RefCell::new((VecDeque::new(), String::new())) };
+}
+
+/// Temporary: with `#kbdebug` in the address, log focus, the visible part
+/// and the pointer, key and focus events of each frame in an overlay, to
+/// see why the on-screen keyboard closes. `state` is the app's own part.
+pub(crate) fn keyboard_debug(ctx: &Context, state: String) {
+    use eframe::egui::{self, Event, Id, Order, RichText};
+    let enabled = web_sys::window()
+        .and_then(|w| w.location().hash().ok())
+        .is_some_and(|hash| hash.contains("kbdebug"));
+    if !enabled {
+        return;
+    }
+    let now = ctx.input(|i| i.time);
+    let focused = ctx.memory(|m| m.focused()).map(|id| id.short_debug_format());
+    let visible = crate::platform::visible_rect(ctx);
+    let viewport = web_sys::window()
+        .and_then(|w| w.visual_viewport())
+        .map(|v| format!("vv top {:.0} h {:.0}", v.page_top(), v.height()));
+    let line = format!(
+        "focus {focused:?} text {} | vis {:.0}..{:.0} | {} | {state}",
+        ctx.text_edit_focused(),
+        visible.top(),
+        visible.bottom(),
+        viewport.unwrap_or_default(),
+    );
+    let events: Vec<String> = ctx.input(|i| {
+        i.raw
+            .events
+            .iter()
+            .filter_map(|e| match e {
+                Event::WindowFocused(f) => Some(format!("WindowFocused({f})")),
+                Event::PointerButton { pos, pressed, .. } => Some(format!(
+                    "Pointer {} at {:.0},{:.0}",
+                    if *pressed { "down" } else { "up" },
+                    pos.x,
+                    pos.y
+                )),
+                Event::PointerGone => Some("PointerGone".to_owned()),
+                Event::Key { key, pressed: true, .. } => Some(format!("Key {key:?}")),
+                Event::Ime(ime) => Some(format!("{ime:?}")),
+                _ => None,
+            })
+            .collect()
+    });
+    let lines = KEYBOARD_LOG.with(|log| {
+        let (lines, last) = &mut *log.borrow_mut();
+        for event in events {
+            lines.push_back(format!("{now:.2} {event}"));
+        }
+        if line != *last {
+            lines.push_back(format!("{now:.2} {line}"));
+            last.clone_from(&line);
+        }
+        while lines.len() > 16 {
+            lines.pop_front();
+        }
+        lines.clone()
+    });
+    egui::Area::new(Id::unique("keyboard_debug"))
+        .order(Order::Debug)
+        .interactable(false)
+        .fixed_pos(pos2(4.0, 4.0))
+        .show(ctx, |ui| {
+            egui::Frame::new().fill(egui::Color32::from_black_alpha(220)).show(ui, |ui| {
+                ui.set_max_width(ctx.content_rect().width() - 8.0);
+                for line in lines {
+                    let text = RichText::new(line).monospace().size(10.0);
+                    ui.label(text.color(egui::Color32::WHITE));
+                }
+            });
+        });
+}
