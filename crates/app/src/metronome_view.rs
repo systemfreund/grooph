@@ -38,7 +38,9 @@ use grooph_measure::score::Score;
 use grooph_measure::tempo::ScoreTiming;
 use grooph_measure::{Beat, Cursor, Measure, TimeSignature};
 use grooph_render::playback_cursor_stroke;
+use std::cell::RefCell;
 use std::f32::consts::{FRAC_PI_2, TAU};
+use std::rc::Rc;
 
 /// Gap between two segments, as a share of the full turn.
 const SEGMENT_GAP: f32 = 0.012;
@@ -164,8 +166,23 @@ impl ClickFill {
 
 /// Ready-made click bars of `ts`: the default, then every beat unit split
 /// into 1 to 9 clicks where the meter allows, each with a name. Bars alike
-/// are offered once.
-pub(crate) fn click_fills(ts: TimeSignature) -> Vec<ClickFill> {
+/// are offered once. Kept per meter once built: the options sheet asks for
+/// them every frame, and building the bars takes milliseconds.
+pub(crate) fn click_fills(ts: TimeSignature) -> Rc<[ClickFill]> {
+    thread_local! {
+        static FILLS: RefCell<Vec<(TimeSignature, Rc<[ClickFill]>)>> = const { RefCell::new(Vec::new()) };
+    }
+    FILLS.with_borrow_mut(|cache| {
+        if let Some((_, fills)) = cache.iter().find(|(t, _)| *t == ts) {
+            return Rc::clone(fills);
+        }
+        let fills: Rc<[ClickFill]> = build_click_fills(ts).into();
+        cache.push((ts, Rc::clone(&fills)));
+        fills
+    })
+}
+
+fn build_click_fills(ts: TimeSignature) -> Vec<ClickFill> {
     let mut fills = vec![ClickFill {
         bar: default_click_bar(ts),
         name: "No subdivision".to_owned(),
@@ -435,16 +452,16 @@ impl Grooph {
     pub(crate) fn click_fill_label(&self) -> String {
         let bar = self.click_bar();
         click_fills(bar.time_signature())
-            .into_iter()
+            .iter()
             .find(|f| same_bar(&f.bar, &bar))
-            .map_or_else(|| "Custom".to_owned(), |f| f.name)
+            .map_or_else(|| "Custom".to_owned(), |f| f.name.clone())
     }
 
     /// How the click bar being edited is shown if it is a ready-made one
     /// (see [`ClickFill::look`]).
     pub(crate) fn click_fill_look(&self) -> Option<FillLook> {
         let bar = self.click_bar();
-        click_fills(bar.time_signature()).into_iter().find(|f| same_bar(&f.bar, &bar))?.look()
+        click_fills(bar.time_signature()).iter().find(|f| same_bar(&f.bar, &bar))?.look()
     }
 
     /// The counter rhythm of the metronome meter, if it has one.
@@ -930,7 +947,7 @@ mod tests {
 
     #[test]
     fn fills_name_each_split_once() {
-        let names = |ts| click_fills(ts).into_iter().map(|f| f.name).collect::<Vec<_>>();
+        let names = |ts| click_fills(ts).iter().map(|f| f.name.clone()).collect::<Vec<_>>();
         // One click per quarter is the default bar already.
         assert_eq!(
             names(TimeSignature::FOUR_FOUR),
