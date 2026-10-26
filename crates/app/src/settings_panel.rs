@@ -3,7 +3,6 @@ use crate::midi_input_widget::midi_input_widget;
 use crate::play_along::{HitSource, MAX_INPUT_OFFSET_MS, TapKey};
 use crate::{Mode, clock};
 use eframe::egui;
-use eframe::egui::global_theme_preference_buttons;
 use grooph_audio::{CounterSound, MetronomeSound, RhythmSound, Waveform};
 use grooph_mic::MicStatus;
 
@@ -205,10 +204,6 @@ impl Grooph {
                     egui::CollapsingHeader::new("Play Along").default_open(false).show(ui, |ui| {
                         self.play_along_settings(ui);
                     });
-
-                    ui.separator();
-                    ui.label("Theme:");
-                    global_theme_preference_buttons(ui);
                 });
             },
         );
