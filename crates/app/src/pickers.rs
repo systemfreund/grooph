@@ -387,7 +387,7 @@ impl Grooph {
             picked || wide_button(ui, "Done", 19.0, ROW_HEIGHT).clicked()
         });
         if modal.inner || modal.should_close() {
-            self.ui.picker = None;
+            self.ui.picker = self.ui.picker_return.take();
             self.ui.tap_tempo.reset();
             self.ui.renaming_preset = None;
         }

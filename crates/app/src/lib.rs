@@ -863,6 +863,7 @@ impl Grooph {
         }
         if ui.picker.take().is_some() {
             // As when the picker closes itself.
+            ui.picker = ui.picker_return.take();
             ui.tap_tempo.reset();
             return true;
         }
@@ -1192,6 +1193,7 @@ impl Grooph {
                 followed_cursor: None,
                 shell: ShellState::default(),
                 picker: None,
+                picker_return: None,
                 tap_tempo: Default::default(),
                 host: None,
             },
@@ -1286,6 +1288,13 @@ mod tests {
         assert!(app.back());
         assert_eq!(app.ui.picker, None);
         assert_eq!(app.ui.mode, Mode::Settings);
+        // The MIDI input picker opened from Play along goes back to it.
+        app.ui.picker = Some(Picker::MidiInput);
+        app.ui.picker_return = Some(Picker::PlayAlong);
+        assert!(app.back());
+        assert_eq!(app.ui.picker, Some(Picker::PlayAlong));
+        assert!(app.back());
+        assert_eq!(app.ui.picker, None);
         assert!(app.back());
         assert_eq!(app.ui.mode, Mode::MoreMenu);
         // Nothing left to close: the host leaves the app. The practice

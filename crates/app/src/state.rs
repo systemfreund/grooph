@@ -343,6 +343,9 @@ pub(crate) struct UiShell {
     pub(crate) shell: ShellState,
     /// Setting whose picker dialog is open.
     pub(crate) picker: Option<Picker>,
+    /// Picker that opened the one in [`Self::picker`] and comes back when
+    /// it closes (Play along's MIDI row opens the MIDI input picker).
+    pub(crate) picker_return: Option<Picker>,
     /// Taps of the tap-tempo buttons (tempo picker).
     pub(crate) tap_tempo: TapTempo,
     /// Share sheet and permissions of the app around this one (Android).
