@@ -9,6 +9,7 @@ answer with JSON, and this script turns that into PR comments.
   publish   post new inline comments, reply to resolved ones, update the summary comment
 
 Standard library only; talks to GitHub through the `gh` CLI (GH_TOKEN in the environment).
+Tests: python3 -m unittest discover -s .github/review
 """
 
 import argparse
@@ -23,10 +24,14 @@ from pathlib import Path
 DRY_RUN = False
 MARKER = "<!-- grooph-review -->"
 STATE_RE = re.compile(r"<!-- grooph-review-state:([A-Za-z0-9+/=]+) -->")
+FAILURE_RE = re.compile(r"\n*<!-- grooph-review-failure -->.*?<!-- /grooph-review-failure -->", re.S)
 FINDING_MARKER = "<!-- grooph-finding:{} -->"
 FINDING_MARKER_RE = re.compile(r"<!-- grooph-finding:(F\d+) -->")
 SEVERITY_ICON = {"high": "🔴", "medium": "🟠", "low": "🟡"}
 VERDICT_ICON = {"met": "✅ Met", "partly": "⚠️ Partly met", "not_met": "❌ Not met", "unclear": "❓ Unclear"}
+# GitHub rejects comments over 65536 characters.
+MAX_COMMENT = 65000
+BOT = "github-actions[bot]"
 
 
 def gh(*args, input=None, check=True):
@@ -67,9 +72,10 @@ def parse_json_answer(text):
     return None
 
 
-def cmd_extract(args):
+def parse_events(lines):
+    """The answer in `opencode run --format json` output, or {"error": ...}."""
     texts, errors = [], []
-    for line in Path(args.events).read_text().splitlines():
+    for line in lines:
         try:
             event = json.loads(line)
         except json.JSONDecodeError:
@@ -80,20 +86,22 @@ def cmd_extract(args):
             error = event.get("error") or {}
             errors.append((error.get("data") or {}).get("message") or error.get("name") or "unknown error")
 
-    answer = None
     # The final answer is the last text; earlier texts are remarks between tool calls.
     for text in reversed(texts):
         answer = parse_json_answer(text)
         if answer is not None:
-            break
+            answer.setdefault("findings", [])
+            return answer
+    return {"error": "; ".join(errors) or ("no JSON in the final answer" if texts else "no answer")}
 
-    meta = {"reviewer": args.reviewer, "model": args.model, "kind": args.kind}
-    if answer is None:
-        reason = "; ".join(errors) or ("no JSON in the final answer" if texts else "no answer")
-        result = {**meta, "error": reason}
+
+def cmd_extract(args):
+    events = Path(args.events)
+    if events.exists():
+        answer = parse_events(events.read_text().splitlines())
     else:
-        answer.setdefault("findings", [])
-        result = {**answer, **meta}
+        answer = {"error": "OpenCode did not run"}
+    result = {**answer, "reviewer": args.reviewer, "model": args.model, "kind": args.kind}
     Path(args.out).write_text(json.dumps(result, indent=2, ensure_ascii=False))
     if "error" in result:
         print(f"::error::{args.reviewer}: {result['error']}")
@@ -106,9 +114,8 @@ def cmd_extract(args):
 
 
 def find_summary_comment(repo, pr):
-    comments = gh_paginated(f"repos/{repo}/issues/{pr}/comments")
-    for comment in comments:
-        if comment["user"]["login"] == "github-actions[bot]" and MARKER in comment["body"]:
+    for comment in gh_paginated(f"repos/{repo}/issues/{pr}/comments"):
+        if comment["user"]["login"] == BOT and MARKER in comment["body"]:
             return comment
     return None
 
@@ -122,13 +129,26 @@ def read_state(comment):
     return json.loads(base64.b64decode(match.group(1)))
 
 
+def build_context(pr, head, reviews, expected, prior, diff_since_prior):
+    answered = {r["reviewer"] for r in reviews}
+    failed = [{"reviewer": r["reviewer"], "error": r["error"]} for r in reviews if "error" in r]
+    # A reviewer job that failed before its extract step left no file at all.
+    failed += [{"reviewer": name, "error": "no output"} for name in expected if name not in answered]
+    return {
+        "pr": int(pr),
+        "head_sha": head,
+        "reviewers": [r["reviewer"] for r in reviews if "error" not in r],
+        "failed_reviewers": failed,
+        "prior_review": prior is not None,
+        "diff_since_prior": diff_since_prior,
+    }
+
+
 def cmd_prepare(args):
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
 
-    reviews = []
-    for path in sorted(Path(args.reviews).glob("*.json")):
-        reviews.append(json.loads(path.read_text()))
+    reviews = [json.loads(path.read_text()) for path in sorted(Path(args.reviews).glob("*.json"))]
     (out / "reviews.json").write_text(json.dumps(reviews, indent=2, ensure_ascii=False))
 
     state = read_state(find_summary_comment(args.repo, args.pr))
@@ -149,14 +169,8 @@ def cmd_prepare(args):
         if diff.returncode == 0:
             (out / "diff-since-prior.patch").write_text(diff.stdout)
 
-    context = {
-        "pr": int(args.pr),
-        "head_sha": args.head,
-        "reviewers": [r["reviewer"] for r in reviews if "error" not in r],
-        "failed_reviewers": [{"reviewer": r["reviewer"], "error": r["error"]} for r in reviews if "error" in r],
-        "prior_review": prior is not None,
-        "diff_since_prior": (out / "diff-since-prior.patch").exists(),
-    }
+    expected = json.loads(args.expected)
+    context = build_context(args.pr, args.head, reviews, expected, prior, (out / "diff-since-prior.patch").exists())
     (out / "context.json").write_text(json.dumps(context, indent=2))
     print(json.dumps(context, indent=2))
     if not context["reviewers"]:
@@ -168,22 +182,81 @@ def cmd_prepare(args):
 # ---------------------------------------------------------------- publish
 
 
+def patch_lines(patch):
+    """Right-side line numbers inside one file's diff: inline comments only work there."""
+    found = set()
+    number = 0
+    for row in (patch or "").splitlines():
+        hunk = re.match(r"@@ -\d+(?:,\d+)? \+(\d+)", row)
+        if hunk:
+            number = int(hunk.group(1))
+        elif row.startswith("-") or row.startswith("\\"):
+            continue
+        else:
+            found.add(number)
+            number += 1
+    return found
+
+
 def diff_lines(repo, pr):
-    """Right-side line numbers inside the PR diff, per file: inline comments only work there."""
-    lines = {}
-    for file in gh_paginated(f"repos/{repo}/pulls/{pr}/files"):
-        found = lines.setdefault(file["filename"], set())
-        number = 0
-        for row in (file.get("patch") or "").splitlines():
-            hunk = re.match(r"@@ -\d+(?:,\d+)? \+(\d+)", row)
-            if hunk:
-                number = int(hunk.group(1))
-            elif row.startswith("-"):
-                continue
-            elif not row.startswith("\\"):
-                found.add(number)
-                number += 1
-    return lines
+    return {f["filename"]: patch_lines(f.get("patch")) for f in gh_paginated(f"repos/{repo}/pulls/{pr}/files")}
+
+
+def as_line(value):
+    return int(value) if str(value or "").isdigit() else None
+
+
+def merge_state(prior, synthesis, head):
+    """Apply the synthesis to the previous state. Returns (state, findings resolved or withdrawn now)."""
+    findings = [dict(f) for f in prior["findings"]]
+    by_id = {f["id"]: f for f in findings}
+    next_id = prior["next_id"]
+
+    # A finding the synthesis still lists stays open, even if it also lists it as resolved.
+    still_open = set()
+    for item in synthesis.get("findings") or []:
+        fields = {k: item.get(k) for k in ("severity", "title", "file", "body")}
+        fields["line"] = as_line(item.get("line"))
+        f = by_id.get(item.get("id"))
+        if f:
+            fields["found_by"] = item.get("found_by") or f.get("found_by") or []
+            for key in ("resolution", "resolved_in"):
+                f.pop(key, None)
+            f.update(fields, status="open")
+        else:
+            fields["found_by"] = item.get("found_by") or []
+            f = {"id": f"F{next_id}", "status": "open", "comment_id": None, **fields}
+            next_id += 1
+            findings.append(f)
+            by_id[f["id"]] = f
+        still_open.add(f["id"])
+
+    newly_resolved = []
+    for status in ("resolved", "withdrawn"):
+        for item in synthesis.get(status) or []:
+            f = by_id.get(item.get("id"))
+            if f and f["status"] == "open" and f["id"] not in still_open:
+                f.update(status=status, resolution=item.get("note", ""), resolved_in=head)
+                newly_resolved.append(f)
+    # Prior findings the synthesis did not mention stay open as they were.
+
+    return {"version": 1, "head_sha": head, "next_id": next_id, "findings": findings}, newly_resolved
+
+
+def encode_state(state, limit=None):
+    """The hidden state block. `limit` shortens the text of open findings."""
+    # Closed findings only need what the "Resolved earlier" list shows.
+    kept = ("id", "status", "title", "resolution", "resolved_in", "comment_id")
+
+    def store(f):
+        if f["status"] != "open":
+            return {k: f.get(k) for k in kept}
+        return {**f, "body": shorten(f["body"], limit)} if limit else f
+
+    compact = dict(state)
+    compact["findings"] = [store(f) for f in state["findings"]]
+    encoded = base64.b64encode(json.dumps(compact, ensure_ascii=False).encode()).decode()
+    return f"<!-- grooph-review-state:{encoded} -->"
 
 
 def location(finding):
@@ -202,7 +275,7 @@ def found_by(finding):
 
 def inline_body(finding):
     icon = SEVERITY_ICON.get(finding["severity"], "🟡")
-    parts = [f"{icon} **{finding['id']} · {finding['title']}**", "", finding["body"]]
+    parts = [f"{icon} **{finding['id']} · {finding['title']}**", "", finding["body"] or ""]
     if finding.get("found_by"):
         parts += ["", f"<sub>Found by: {', '.join(finding['found_by'])}</sub>"]
     parts.append(FINDING_MARKER.format(finding["id"]))
@@ -213,11 +286,27 @@ def cell(text):
     return str(text or "").replace("|", "\\|").replace("\n", " ")
 
 
-def render_summary(synthesis, state, context, args, newly_resolved):
-    short = args.head[:7]
+def shorten(text, limit):
+    text = str(text or "")
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+def render_summary(synthesis, state, context, head, model, run_url, newly_resolved):
+    """The summary comment, shortened step by step until it fits GitHub's size limit."""
+    for limit in (None, 600, 200, 60):
+        text = render_summary_with(synthesis, state, context, head, model, run_url, newly_resolved, limit)
+        if len(text) <= MAX_COMMENT:
+            break
+    return text
+
+
+def render_summary_with(synthesis, state, context, head, model, run_url, newly_resolved, limit):
+    compact = limit is not None
+    body = (lambda text: shorten(text, limit)) if compact else (lambda text: text or "")
+    short = head[:7]
     out = [MARKER, "## Code review", ""]
     reviewers = ", ".join(context["reviewers"]) or "none"
-    out.append(f"Reviewed `{short}` · reviewers: {reviewers} · synthesis: {args.model}")
+    out.append(f"Reviewed `{short}` · reviewers: {reviewers} · synthesis: {model}")
     for failed in context["failed_reviewers"]:
         out.append(f"\n⚠️ Reviewer **{failed['reviewer']}** failed: {cell(failed['error'])}")
     out.append("")
@@ -228,7 +317,7 @@ def render_summary(synthesis, state, context, args, newly_resolved):
         out += ["### Requirements", "| # | Requirement | Verdict | Where / what is missing |", "|---|---|---|---|"]
         for i, req in enumerate(synthesis["requirements"], 1):
             verdict = VERDICT_ICON.get(req.get("verdict"), cell(req.get("verdict")))
-            out.append(f"| {i} | {cell(req.get('text'))} | {verdict} | {cell(req.get('note'))} |")
+            out.append(f"| {i} | {cell(req.get('text'))} | {verdict} | {cell(body(req.get('note')))} |")
         out.append("")
 
     open_findings = [f for f in state["findings"] if f["status"] == "open"]
@@ -238,7 +327,7 @@ def render_summary(synthesis, state, context, args, newly_resolved):
         out.append("### Findings")
         for f in open_findings:
             icon = SEVERITY_ICON.get(f["severity"], "🟡")
-            out.append(f"- {icon} **{f['id']} · {f['title']}**{location(f)}: {f['body']}")
+            out.append(f"- {icon} **{f['id']} · {f['title']}**{location(f)}: {body(f['body'])}")
             if found_by(f):
                 out.append(f"  {found_by(f)}")
         out.append("")
@@ -246,24 +335,25 @@ def render_summary(synthesis, state, context, args, newly_resolved):
     if newly_resolved:
         out.append(f"### Resolved in `{short}`")
         for f in newly_resolved:
-            label = "resolved" if f["status"] == "resolved" else "withdrawn"
-            out.append(f"- ~~{f['id']} · {f['title']}~~ {label}: {f.get('resolution', '')}")
+            out.append(f"- ~~{f['id']} · {f['title']}~~ {f['status']}: {body(f.get('resolution'))}")
         out.append("")
 
-    earlier = [f for f in state["findings"] if f["status"] != "open" and f not in newly_resolved]
-    if earlier:
+    resolved_now = {f["id"] for f in newly_resolved}
+    earlier = [f for f in state["findings"] if f["status"] != "open" and f["id"] not in resolved_now]
+    if earlier and not compact:
         out.append(f"<details><summary>Resolved earlier ({len(earlier)})</summary>\n")
         for f in earlier:
-            out.append(f"- ~~{f['id']} · {f['title']}~~ {f['status']} in `{f.get('resolved_in', '')[:7]}`: {f.get('resolution', '')}")
+            when = (f.get("resolved_in") or "")[:7]
+            out.append(f"- ~~{f['id']} · {f['title']}~~ {f['status']} in `{when}`: {f.get('resolution') or ''}")
         out.append("\n</details>\n")
 
     if synthesis.get("out_of_scope"):
         out.append("### Out of scope / unrequested changes")
-        out += [f"- {item}" for item in synthesis["out_of_scope"]]
+        out += [f"- {body(item)}" for item in synthesis["out_of_scope"]]
         out.append("")
 
     discarded = synthesis.get("discarded") or []
-    if discarded:
+    if discarded and not compact:
         out.append(f"<details><summary>Discarded reviewer findings ({len(discarded)})</summary>\n")
         for d in discarded:
             by = ", ".join(d.get("found_by") or [])
@@ -272,81 +362,82 @@ def render_summary(synthesis, state, context, args, newly_resolved):
 
     if synthesis.get("verdict"):
         out += [f"**Verdict:** {synthesis['verdict']}", ""]
-    out.append(f"<sub>[Workflow run]({args.run_url})</sub>")
-    encoded = base64.b64encode(json.dumps(state, ensure_ascii=False).encode()).decode()
-    out.append(f"<!-- grooph-review-state:{encoded} -->")
+    out.append(f"<sub>[Workflow run]({run_url})</sub>")
+    out.append(encode_state(state, limit))
     return "\n".join(out)
 
 
+def render_failure(previous_body, context, error, head, run_url):
+    """The summary after a failed run: the previous review, plus one note that replaces any earlier note."""
+    body = FAILURE_RE.sub("", previous_body) if previous_body else f"{MARKER}\n## Code review"
+    note = [f"⚠️ The review of `{head[:7]}` failed ({cell(error)}), see the [workflow run]({run_url})."]
+    for failed in context.get("failed_reviewers") or []:
+        note.append(f"Reviewer **{failed['reviewer']}** failed: {cell(failed['error'])}")
+    if previous_body:
+        note.append("The findings below are from the previous review.")
+    block = "<!-- grooph-review-failure -->\n" + "\n\n".join(note) + "\n<!-- /grooph-review-failure -->"
+    # The note goes right under the heading, so it is not mistaken for part of the old review.
+    heading = "## Code review"
+    if heading in body:
+        return body.replace(heading, f"{heading}\n\n{block}", 1)
+    return f"{body}\n\n{block}"
+
+
 def upsert_summary(repo, pr, comment, body):
+    """Creates or updates the summary comment; returns the comment."""
     if DRY_RUN:
         print(f"--- summary comment ({'update' if comment else 'new'}) ---\n{body}")
-        return
+        return comment or {"id": 0, "body": body}
     payload = json.dumps({"body": body})
     if comment:
-        gh("api", "-X", "PATCH", f"repos/{repo}/issues/comments/{comment['id']}", "--input", "-", input=payload)
-    else:
-        gh("api", "-X", "POST", f"repos/{repo}/issues/{pr}/comments", "--input", "-", input=payload)
+        return gh_json("api", "-X", "PATCH", f"repos/{repo}/issues/comments/{comment['id']}", "--input", "-", input=payload)
+    return gh_json("api", "-X", "POST", f"repos/{repo}/issues/{pr}/comments", "--input", "-", input=payload)
+
+
+def posted_finding_comments(repo, pr):
+    """Inline comments this workflow already posted, by finding id."""
+    found = {}
+    for comment in gh_paginated(f"repos/{repo}/pulls/{pr}/comments"):
+        match = FINDING_MARKER_RE.search(comment["body"])
+        if comment["user"]["login"] == BOT and match and not comment.get("in_reply_to_id"):
+            found.setdefault(match.group(1), comment["id"])
+    return found
 
 
 def cmd_publish(args):
     comment = find_summary_comment(args.repo, args.pr)
     prior = read_state(comment) or {"next_id": 1, "findings": []}
-    context = json.loads(Path(args.input, "context.json").read_text())
+    context_path = Path(args.input, "context.json")
+    context = json.loads(context_path.read_text()) if context_path.exists() else {"reviewers": [], "failed_reviewers": []}
 
     synthesis_path = Path(args.synthesis)
     synthesis = json.loads(synthesis_path.read_text()) if synthesis_path.exists() else {"error": "no output"}
     if "error" in synthesis:
         # Keep the previous findings; only say that this run failed.
-        body = (comment["body"] if comment else f"{MARKER}\n## Code review\n") + (
-            f"\n\n⚠️ The review of `{args.head[:7]}` failed ({cell(synthesis['error'])}), "
-            f"see the [workflow run]({args.run_url})."
-        )
+        body = render_failure(comment["body"] if comment else None, context, synthesis["error"], args.head, args.run_url)
         upsert_summary(args.repo, args.pr, comment, body)
         print(f"::error::synthesis failed: {synthesis['error']}")
         return 1
 
-    by_id = {f["id"]: f for f in prior["findings"]}
-    next_id = prior["next_id"]
-    newly_resolved = []
+    state, newly_resolved = merge_state(prior, synthesis, args.head)
 
-    for kind, status in (("resolved", "resolved"), ("withdrawn", "withdrawn")):
-        for item in synthesis.get(kind) or []:
-            f = by_id.get(item.get("id"))
-            if f and f["status"] == "open":
-                f.update(status=status, resolution=item.get("note", ""), resolved_in=args.head)
-                newly_resolved.append(f)
+    def summary():
+        return render_summary(synthesis, state, context, args.head, args.model, args.run_url, newly_resolved)
 
-    for item in synthesis.get("findings") or []:
-        f = by_id.get(item.get("id"))
-        fields = {k: item.get(k) for k in ("severity", "title", "file", "body")}
-        fields["line"] = int(item["line"]) if str(item.get("line") or "").isdigit() else None
-        fields["found_by"] = item.get("found_by") or (f or {}).get("found_by") or []
-        if f and f["status"] == "open":
-            f.update(fields)
-        else:
-            f = {"id": f"F{next_id}", "status": "open", "comment_id": None, **fields}
-            next_id += 1
-            prior["findings"].append(f)
-            by_id[f["id"]] = f
-    # Prior findings the synthesis did not mention stay open as they were.
+    # Store the new ids before posting anything: if this job is cancelled after posting, the next run
+    # finds the posted comments by their markers instead of posting them again under other ids.
+    comment = upsert_summary(args.repo, args.pr, comment, summary())
 
-    state = {"version": 1, "head_sha": args.head, "next_id": next_id, "findings": prior["findings"]}
+    posted = {} if DRY_RUN else posted_finding_comments(args.repo, args.pr)
+    for f in state["findings"]:
+        if not f.get("comment_id") and f["id"] in posted:
+            f["comment_id"] = posted[f["id"]]
 
     for f in newly_resolved:
         if f.get("comment_id") and not DRY_RUN:
-            label = "Resolved" if f["status"] == "resolved" else "Withdrawn"
-            reply = json.dumps({"body": f"{label} in {args.head[:7]}: {f['resolution']}"})
-            gh(
-                "api",
-                "-X",
-                "POST",
-                f"repos/{args.repo}/pulls/{args.pr}/comments/{f['comment_id']}/replies",
-                "--input",
-                "-",
-                input=reply,
-                check=False,
-            )
+            reply = json.dumps({"body": f"{f['status'].capitalize()} in {args.head[:7]}: {f['resolution']}"})
+            path = f"repos/{args.repo}/pulls/{args.pr}/comments/{f['comment_id']}/replies"
+            gh("api", "-X", "POST", path, "--input", "-", input=reply, check=False)
 
     in_diff = diff_lines(args.repo, args.pr)
     to_post = [
@@ -355,8 +446,7 @@ def cmd_publish(args):
         if f["status"] == "open"
         and not f.get("comment_id")
         and f.get("file")
-        and f.get("line")
-        and f["line"] in in_diff.get(f["file"], set())
+        and f.get("line") in in_diff.get(f["file"], set())
     ]
     if to_post and DRY_RUN:
         for f in to_post:
@@ -374,16 +464,17 @@ def cmd_publish(args):
             input=json.dumps(review), check=False,
         )
         if result.returncode == 0:
+            by_id = {f["id"]: f for f in state["findings"]}
             review_id = json.loads(result.stdout)["id"]
-            for posted in gh_paginated(f"repos/{args.repo}/pulls/{args.pr}/reviews/{review_id}/comments"):
-                match = FINDING_MARKER_RE.search(posted["body"])
+            for c in gh_paginated(f"repos/{args.repo}/pulls/{args.pr}/reviews/{review_id}/comments"):
+                match = FINDING_MARKER_RE.search(c["body"])
                 if match and match.group(1) in by_id:
-                    by_id[match.group(1)]["comment_id"] = posted["id"]
+                    by_id[match.group(1)]["comment_id"] = c["id"]
         else:
             print(f"::warning::inline comments not posted: {result.stderr.strip()}")
 
-    upsert_summary(args.repo, args.pr, comment, render_summary(synthesis, state, context, args, newly_resolved))
-    print(f"{len(to_post)} inline comments, {len(newly_resolved)} resolved")
+    upsert_summary(args.repo, args.pr, comment, summary())
+    print(f"{len(to_post)} inline comments, {len(newly_resolved)} resolved or withdrawn")
     return 0
 
 
@@ -405,6 +496,7 @@ def main():
         p.add_argument("--head", required=True)
         if name == "prepare":
             p.add_argument("--reviews", required=True)
+            p.add_argument("--expected", required=True, help="JSON list of the reviewer names that should answer")
             p.add_argument("--out", required=True)
         else:
             p.add_argument("--input", required=True)

@@ -46,6 +46,8 @@ runs:
       run: opencode run --agent review --format json -m "$MODEL" "$PROMPT" < /dev/null > "$RUNNER_TEMP/events.jsonl" || true
 
     - name: Extract the answer
+      # Also when the install failed, so the synthesis learns that this reviewer failed.
+      if: always()
       shell: bash
       env:
         REVIEWER: ${{ inputs.reviewer }}

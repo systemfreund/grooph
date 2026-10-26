@@ -23,7 +23,9 @@ name: Code review
 #
 # OpenCode runs the read-only `review` agent from opencode.json; every model
 # used here must be listed there. Only the publish job can write to the pull
-# request, and it runs no model.
+# request, and it runs no model. The scripts and instructions come from the
+# PR's head, so a change to them is tried on its own PR; that is why PRs from
+# forks are never reviewed, not even through "Run workflow".
 #
 # Needs the repository secret VENICE_API_KEY.
 
@@ -73,7 +75,18 @@ jobs:
           PR: ${{ github.event.pull_request.number || inputs.pr }}
           MODELS: ${{ inputs.models || env.DEFAULT_MODELS }}
         run: |
-          head=$(gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json headRefOid --jq .headRefOid)
+          if ! [[ "$PR" =~ ^[0-9]+$ ]]; then
+            echo "::error::Not a pull request number: $PR"
+            exit 1
+          fi
+          # "Run workflow" must not review a fork either: the jobs below run scripts from the PR's
+          # head with the Venice key, and the publish job with a token that can write.
+          read -r head cross <<< "$(gh pr view "$PR" --repo "$GITHUB_REPOSITORY" \
+            --json headRefOid,isCrossRepository --jq '"\(.headRefOid) \(.isCrossRepository)"')"
+          if [ "$cross" = true ]; then
+            echo "::error::#$PR comes from a fork; forks are not reviewed."
+            exit 1
+          fi
           if gh pr diff "$PR" --repo "$GITHUB_REPOSITORY" --name-only | grep -q '\.rs$'; then
             rust=true
           else
@@ -158,6 +171,8 @@ jobs:
           persist-credentials: false
 
       - uses: actions/download-artifact@v4
+        # No artifacts when every reviewer job died early; prepare reports them as failed.
+        continue-on-error: true
         with:
           pattern: review-*
           path: review-output
@@ -166,11 +181,13 @@ jobs:
       - name: Prepare
         env:
           GH_TOKEN: ${{ github.token }}
+          PR: ${{ needs.setup.outputs.pr }}
+          HEAD: ${{ needs.setup.outputs.head }}
+          REVIEWERS: ${{ needs.setup.outputs.reviewers }}
         run: |
           mkdir -p review-output
-          python3 .github/review/review.py prepare --repo "$GITHUB_REPOSITORY" \
-            --pr "${{ needs.setup.outputs.pr }}" --head "${{ needs.setup.outputs.head }}" \
-            --reviews review-output --out review-input
+          python3 .github/review/review.py prepare --repo "$GITHUB_REPOSITORY" --pr "$PR" --head "$HEAD" \
+            --reviews review-output --expected "$(jq -c '[.[].name]' <<< "$REVIEWERS")" --out review-input
 
       - name: Synthesize
         uses: ./.github/actions/opencode-review
@@ -221,10 +238,9 @@ jobs:
       - name: Post the review
         env:
           GH_TOKEN: ${{ github.token }}
+          PR: ${{ needs.setup.outputs.pr }}
+          HEAD: ${{ needs.setup.outputs.head }}
         run: |
-          mkdir -p review-input
-          [ -f review-input/context.json ] || echo '{"reviewers": [], "failed_reviewers": []}' > review-input/context.json
-          python3 .github/review/review.py publish --repo "$GITHUB_REPOSITORY" \
-            --pr "${{ needs.setup.outputs.pr }}" --head "${{ needs.setup.outputs.head }}" \
+          python3 .github/review/review.py publish --repo "$GITHUB_REPOSITORY" --pr "$PR" --head "$HEAD" \
             --input review-input --synthesis review-input/synthesis.json --model "$SYNTHESIS_MODEL" \
             --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"

@@ -38,6 +38,7 @@ Rust developers and focuses on crate-specific behaviors and APIs that matter whe
 - `cargo fmt --all -- --check`
 - `cargo clippy --workspace --all-targets -- -D warnings` (unused imports and dead code are errors)
 - `cargo build` and `cargo test`
+- `python3 -m unittest discover -s .github/review` (the scripts of the code review workflow)
 - `trunk build --release` (the web job). To check the WASM target without Trunk:
   `cargo clippy -p grooph-app --target wasm32-unknown-unknown -- -D warnings`
 
