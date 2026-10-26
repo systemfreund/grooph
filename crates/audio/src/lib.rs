@@ -241,7 +241,15 @@ pub struct Audio {
     /// Ticks dropped from the front of the score since the last update, see
     /// [`Audio::drop_leading_ticks`].
     pending_shift: f64,
+    /// Updates left before the output device is tried again after it could
+    /// not be opened.
+    reopen_wait: u32,
 }
+
+/// Updates to wait before opening the output device again once it failed:
+/// about a second of frames, so a missing device is not tried, and logged,
+/// every frame.
+const REOPEN_AFTER_UPDATES: u32 = 60;
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum PlayerState {
@@ -355,6 +363,7 @@ impl Audio {
             retired: Vec::new(),
             last_bar: None,
             pending_shift: 0.0,
+            reopen_wait: 0,
         })
     }
 
@@ -380,7 +389,11 @@ impl Audio {
 
         // Playback start: ensure sink runs
         if *player_state == PlayerState::Playing && self.sink.is_none() {
-            self.start_sink();
+            if self.reopen_wait == 0 {
+                self.start_sink();
+            } else {
+                self.reopen_wait -= 1;
+            }
         }
 
         // Request repaint while tailing out awaiting pause
@@ -458,6 +471,7 @@ impl Audio {
             Ok(s) => Some(s),
             Err(e) => {
                 error!("Failed to init audio: {}", e);
+                self.reopen_wait = REOPEN_AFTER_UPDATES;
                 None
             }
         };
@@ -918,6 +932,19 @@ mod tests {
             }
         });
         assert_eq!(n, 0, "allocations when starting again");
+    }
+
+    #[test]
+    fn a_failed_device_is_not_tried_again_every_update() {
+        let mut audio = Audio::new(120).unwrap();
+        let score = score_of(TimeSignature::FOUR_FOUR, 1);
+        // As after a failed open: the next updates wait instead of opening.
+        audio.reopen_wait = 3;
+        audio.update(&PlayerState::Playing, 120, &score);
+        audio.update(&PlayerState::Playing, 120, &score);
+        assert_eq!(audio.reopen_wait, 1);
+        assert!(audio.stream.is_none());
+        assert!(audio.sink.is_none());
     }
 
     #[test]
