@@ -33,6 +33,15 @@ class ParseEvents(unittest.TestCase):
         lines = [json.dumps({"type": "error", "error": {"name": "UnknownError", "data": {"message": "boom"}}})]
         self.assertEqual(review.parse_events(lines), {"error": "boom"})
 
+    def test_prefers_the_last_block_over_a_quoted_example(self):
+        text = 'The format is:\n```json\n{"findings": [{"title": "example"}]}\n```\nMy answer:\n```json\n{"findings": []}\n```'
+        lines = [json.dumps({"type": "text", "part": {"text": text}})]
+        self.assertEqual(review.parse_events(lines), {"findings": []})
+
+    def test_an_object_without_answer_keys_is_no_answer(self):
+        lines = [json.dumps({"type": "text", "part": {"text": "Nothing to report {}"}})]
+        self.assertEqual(review.parse_events(lines), {"error": "no JSON in the final answer"})
+
     def test_reports_text_without_json(self):
         lines = [json.dumps({"type": "text", "part": {"text": "I could not finish."}})]
         self.assertEqual(review.parse_events(lines), {"error": "no JSON in the final answer"})
@@ -102,6 +111,16 @@ class MergeState(unittest.TestCase):
         self.assertEqual(state["findings"][0]["status"], "open")
         self.assertNotIn("resolution", state["findings"][0])
 
+    def test_fields_left_out_keep_their_value(self):
+        state, _ = merged([finding("F1", body="text", line=4)], {"findings": [{"id": "F1", "title": "new title"}]})
+        self.assertEqual(state["findings"][0]["body"], "text")
+        self.assertEqual(state["findings"][0]["line"], 4)
+        self.assertEqual(state["findings"][0]["title"], "new title")
+
+    def test_a_resolved_finding_waits_for_its_reply(self):
+        state, _ = merged([finding("F1", comment_id=5)], {"resolved": [{"id": "F1", "note": "n"}]})
+        self.assertIs(state["findings"][0]["replied"], False)
+
     def test_keeps_the_prior_reviewers_when_none_are_given(self):
         state, _ = merged([finding("F1", found_by=["m1"])], {"findings": [{"id": "F1", "title": "t"}]})
         self.assertEqual(state["findings"][0]["found_by"], ["m1"])
@@ -130,12 +149,33 @@ class Summary(unittest.TestCase):
         self.assertNotIn("body", stored["findings"][0])
         self.assertEqual(stored["findings"][0]["resolution"], "n")
 
-    def test_stays_under_the_size_limit(self):
+    def test_shortens_the_visible_text_before_the_stored_one(self):
+        findings = [{"title": f"t{i}", "body": "x" * 3000, "line": i} for i in range(12)]
+        state, _ = merged([], {"findings": findings})
+        body = self.render(state)
+        self.assertLess(len(body), review.MAX_COMMENT)
+        self.assertNotIn("x" * 3000, body.split("<!-- grooph-review-state")[0])
+        # The stored text stays whole: the next synthesis reads it.
+        stored = review.read_state({"body": body})["findings"]
+        self.assertEqual([f["body"] for f in stored], ["x" * 3000] * 12)
+
+    def test_shortens_stored_texts_as_a_last_resort(self):
         findings = [{"title": f"t{i}", "body": "x" * 3000, "line": i} for i in range(30)]
         state, _ = merged([], {"findings": findings})
         body = self.render(state)
         self.assertLess(len(body), review.MAX_COMMENT)
         self.assertEqual(len(review.read_state({"body": body})["findings"]), 30)
+
+    def test_drops_closed_findings_before_shortening_stored_texts(self):
+        closed = [finding(f"F{i}", status="resolved", title="t" * 300, resolution="r" * 300) for i in range(1, 200)]
+        opened = [finding(f"F{i}", body="x" * 1000) for i in range(200, 230)]
+        state = {"findings": closed + opened, "next_id": 230, "head_sha": "h"}
+        body = self.render(state)
+        self.assertLess(len(body), review.MAX_COMMENT)
+        stored = review.read_state({"body": body})
+        self.assertEqual([f["id"] for f in stored["findings"]], [f["id"] for f in opened])
+        self.assertEqual(stored["findings"][0]["body"], "x" * 1000)
+        self.assertEqual(stored["next_id"], 230)
 
     def test_escapes_table_cells(self):
         body = self.render({"findings": [], "next_id": 1}, {"requirements": [{"text": "a | b", "verdict": "met"}]})
@@ -159,6 +199,62 @@ class Failure(unittest.TestCase):
         self.assertEqual(twice.count("grooph-review-failure -->"), 2)  # one opening, one closing marker
         self.assertIn("old review", twice)
         self.assertEqual(review.read_state({"body": twice})["next_id"], 3)
+
+
+class CheckSynthesis(unittest.TestCase):
+    def test_accepts_a_normal_answer(self):
+        self.assertIsNone(review.check_synthesis({"findings": [{"title": "t"}], "resolved": [{"id": "F1"}]}))
+
+    def test_rejects_the_wrong_shape(self):
+        self.assertIsNotNone(review.check_synthesis({"findings": {"F1": {}}}))
+        self.assertIsNotNone(review.check_synthesis({"findings": ["text"]}))
+        self.assertIsNotNone(review.check_synthesis({"findings": [{"body": "no title"}]}))
+        self.assertIsNotNone(review.check_synthesis({"resolved": [{"note": "no id"}]}))
+        self.assertIsNotNone(review.check_synthesis({"out_of_scope": "text"}))
+
+
+class ThreadUpdates(unittest.TestCase):
+    def posted(self, f):
+        return {f["id"]: {"id": f["comment_id"], "body": review.inline_body(f)}}
+
+    def test_nothing_to_say_when_the_thread_is_current(self):
+        f = finding("F1", comment_id=5)
+        f["thread_key"] = review.content_key(f)
+        self.assertEqual(review.thread_updates({"findings": [f]}, self.posted(f), "head123"), [])
+
+    def test_a_changed_finding_gets_a_reply_and_a_note_on_the_original(self):
+        f = finding("F1", comment_id=5)
+        posted = self.posted(f)
+        f["thread_key"] = review.content_key(f)
+        f.update(title="sharper title", severity="medium")
+        [(target, reply, original)] = review.thread_updates({"findings": [f]}, posted, "head123")
+        self.assertIs(target, f)
+        self.assertIn("Still open in `head123`", reply)
+        self.assertIn("🟠 **F1 · sharper title**", reply)
+        self.assertTrue(original.startswith("> **Updated in `head123`**"))
+        # A second update replaces the note instead of stacking it.
+        again = review.mark_updated(original, "fffffff")
+        self.assertEqual(again.count("Updated in"), 1)
+
+    def test_moved_lines_alone_are_no_change(self):
+        f = finding("F1", comment_id=5)
+        f["thread_key"] = review.content_key(f)
+        f["line"] = 99
+        self.assertEqual(review.thread_updates({"findings": [f]}, self.posted(f), "head123"), [])
+
+    def test_comments_from_before_thread_keys(self):
+        f = finding("F1", comment_id=5)
+        posted = self.posted(f)
+        self.assertEqual(review.thread_updates({"findings": [dict(f)]}, posted, "h"), [])
+        changed = dict(f, body="new text")
+        self.assertEqual(len(review.thread_updates({"findings": [changed]}, posted, "h")), 1)
+
+    def test_closed_findings_get_one_reply(self):
+        waiting = finding("F1", status="resolved", comment_id=5, resolution="fixed", replied=False)
+        done = finding("F2", status="resolved", comment_id=6, resolution="fixed", replied=True)
+        before_flags = finding("F3", status="resolved", comment_id=7, resolution="fixed")
+        updates = review.thread_updates({"findings": [waiting, done, before_flags]}, {}, "head123")
+        self.assertEqual([(f["id"], reply) for f, reply, _ in updates], [("F1", "Resolved in head123: fixed")])
 
 
 class Context(unittest.TestCase):

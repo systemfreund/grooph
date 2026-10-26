@@ -11,8 +11,9 @@ name: Code review
 #               finding against the code, and decides which findings of the
 #               previous review are resolved (.github/review/SYNTHESIS.md).
 #   publish     a script without a model posts the result: new findings as one
-#               PR review with inline comments, replies on resolved ones, and a
-#               single summary comment that is updated on every run.
+#               PR review with inline comments, a reply in the thread of each
+#               finding that was resolved or whose text changed, and a single
+#               summary comment that is updated on every run.
 #
 # The summary comment carries the findings of the last run in a hidden state
 # block, so each push is reviewed against the previous review. Raw reviews stay
