@@ -1,7 +1,7 @@
 use crate::Grooph;
 use crate::library::SavedPattern;
 use crate::pickers::ROW_HEIGHT;
-use crate::pickers::dialog_scroll_height;
+use crate::pickers::{dialog_scroll_height, note_focused_field};
 use crate::presets::{self, PresetId, PresetSettings};
 use crate::shell::{Tab, subdivision_short_label};
 use crate::state::PendingLoad;
@@ -251,6 +251,10 @@ fn rename_row(ui: &mut egui::Ui, name: &mut String) -> Option<Renamed> {
     // Typing goes to the name while nothing else has the focus.
     if ui.memory(|m| m.focused().is_none()) {
         field.request_focus();
+    }
+    // The dialog moves it above an on-screen keyboard.
+    if field.has_focus() {
+        note_focused_field(ui.ctx(), field.rect);
     }
     let submit = field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
     let done = ok || (submit && valid);
