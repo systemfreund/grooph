@@ -3,7 +3,7 @@
 
 use crate::Grooph;
 use crate::pickers::{ROW_HEIGHT, choice_grid, wide_button};
-use eframe::egui::Ui;
+use eframe::egui::{Id, Ui};
 use log::warn;
 
 impl Grooph {
@@ -47,7 +47,8 @@ impl Grooph {
     }
 
     /// Off or one of the ports, one per row, and a button to look for new
-    /// devices. Returns whether a port was picked (which closes the picker).
+    /// devices. Returns whether a port was picked and connected (which closes the
+    /// picker); a port that fails to connect keeps it open with a note.
     pub(crate) fn midi_input_choices(&mut self, ui: &mut Ui) -> bool {
         ui.weak(
             "Play along on an e-drum kit, a pad or a keyboard to see how early or late you are.",
@@ -65,17 +66,39 @@ impl Grooph {
         let options: Vec<_> = std::iter::once((None, "Off".to_owned()))
             .chain(midi.available_ports.iter().enumerate().map(|(i, name)| (Some(i), name.clone())))
             .collect();
-        let picked = choice_grid(ui, &options, current, 1);
-        match picked {
+        // Shown until the next pick or search: why the last pick did not connect.
+        let failed_id = Id::unique("midi_connect_failed");
+        let mut close = false;
+        match choice_grid(ui, &options, current, 1) {
             Some(None) => {
                 let _ = input.disconnect();
                 midi.selected_port_id = None;
+                ui.data_mut(|d| d.remove::<String>(failed_id));
+                close = true;
             }
             Some(Some(idx)) => match input.connect(idx) {
-                Ok(()) => midi.selected_port_id = input.port_id(idx),
-                Err(e) => warn!("Failed to connect MIDI input: {}", e),
+                Ok(()) => {
+                    midi.selected_port_id = input.port_id(idx);
+                    ui.data_mut(|d| d.remove::<String>(failed_id));
+                    close = true;
+                }
+                Err(e) => {
+                    // `connect` closed the old connection first, so nothing
+                    // is connected now; forget the old port too.
+                    warn!("Failed to connect MIDI input: {}", e);
+                    midi.selected_port_id = None;
+                    let name = midi.available_ports[idx].clone();
+                    ui.data_mut(|d| d.insert_temp(failed_id, name));
+                }
             },
             None => {}
+        }
+        if let Some(name) = ui.data(|d| d.get_temp::<String>(failed_id)) {
+            ui.add_space(4.0);
+            ui.colored_label(
+                ui.visuals().error_fg_color,
+                format!("Could not connect to {name}. Is it still plugged in?"),
+            );
         }
         if midi.available_ports.is_empty() {
             ui.add_space(4.0);
@@ -83,8 +106,9 @@ impl Grooph {
         }
         ui.add_space(8.0);
         if wide_button(ui, "🔄  Look for devices", 17.0, ROW_HEIGHT).clicked() {
+            ui.data_mut(|d| d.remove::<String>(failed_id));
             self.refresh_midi_ports();
         }
-        picked.is_some()
+        close
     }
 }
