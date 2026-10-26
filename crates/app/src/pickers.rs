@@ -185,7 +185,7 @@ fn meter_grid(
                 let resp = ui.add(button);
                 // The meter is painted, so the button gets its name here.
                 resp.widget_info(|| {
-                    egui::WidgetInfo::selected(egui::WidgetType::Button, true, selected, &label)
+                    egui::WidgetInfo::selected(egui::Role::Button, true, selected, &label)
                 });
                 let resp = resp.on_hover_text(label);
                 let color = ui.style().interact_selectable(&resp, selected).text_color();
