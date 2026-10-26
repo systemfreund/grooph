@@ -3,7 +3,7 @@ use crate::midi_input_widget::midi_input_widget;
 use crate::play_along::{HitSource, MAX_INPUT_OFFSET_MS, TapKey};
 use crate::{Mode, clock};
 use eframe::egui;
-use grooph_audio::{CounterSound, MetronomeSound, RhythmSound, Waveform};
+use grooph_audio::Waveform;
 use grooph_mic::MicStatus;
 
 impl Grooph {
@@ -14,43 +14,6 @@ impl Grooph {
             |ui| {
                 ui.set_min_height(300.0);
                 egui::ScrollArea::vertical().show(ui, |ui| {
-                    egui::CollapsingHeader::new("Sounds").default_open(false).show(ui, |ui| {
-                        let settings = &mut self.playback_ctl.audio_cfg.settings;
-                        egui::ComboBox::from_label("Metronome")
-                            .selected_text(settings.metronome_sound.label())
-                            .show_ui(ui, |ui| {
-                                for sound in MetronomeSound::ALL {
-                                    ui.selectable_value(
-                                        &mut settings.metronome_sound,
-                                        sound,
-                                        sound.label(),
-                                    );
-                                }
-                            });
-                        egui::ComboBox::from_label("Counter rhythm")
-                            .selected_text(settings.counter_sound.label())
-                            .show_ui(ui, |ui| {
-                                for sound in CounterSound::ALL {
-                                    ui.selectable_value(
-                                        &mut settings.counter_sound,
-                                        sound,
-                                        sound.label(),
-                                    );
-                                }
-                            });
-                        egui::ComboBox::from_label("Rhythm")
-                            .selected_text(settings.rhythm_sound.label())
-                            .show_ui(ui, |ui| {
-                                for sound in RhythmSound::ALL {
-                                    ui.selectable_value(
-                                        &mut settings.rhythm_sound,
-                                        sound,
-                                        sound.label(),
-                                    );
-                                }
-                            });
-                    });
-
                     egui::CollapsingHeader::new("Click").default_open(false).show(ui, |ui| {
                         ui.label("Decay:");
                         ui.add(
