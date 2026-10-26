@@ -443,6 +443,11 @@ def render_summary(synthesis, state, context, head, model, run_url, newly_resolv
     raise RuntimeError(f"the summary does not fit in a comment ({len(text)} characters)")
 
 
+def collapsed(title, lines):
+    """A section that starts folded, so the summary takes little room in the pull request."""
+    return [f"<details><summary><b>{title}</b></summary>", "", *lines, "", "</details>", ""]
+
+
 def render_summary_with(synthesis, state, context, head, model, run_url, newly_resolved, limit, closed, stored):
     compact = limit is not None
     body = (lambda text: shorten(text, limit)) if compact else (lambda text: text or "")
@@ -456,32 +461,36 @@ def render_summary_with(synthesis, state, context, head, model, run_url, newly_r
         out.append(f"\n⚠️ Reviewer **{failed['reviewer']}** failed: {cell(failed['error'])}")
     out.append("")
 
-    if synthesis.get("requirements_source"):
-        out += [f"**Requirements source:** {synthesis['requirements_source']}", ""]
-    if synthesis.get("requirements"):
-        out += ["### Requirements", "| # | Requirement | Verdict | Where / what is missing |", "|---|---|---|---|"]
-        for i, req in enumerate(synthesis["requirements"], 1):
+    requirements = synthesis.get("requirements") or []
+    if requirements or synthesis.get("requirements_source"):
+        lines = []
+        if synthesis.get("requirements_source"):
+            lines += [f"**Requirements source:** {synthesis['requirements_source']}", ""]
+        if requirements:
+            lines += ["| # | Requirement | Verdict | Where / what is missing |", "|---|---|---|---|"]
+        for i, req in enumerate(requirements, 1):
             verdict = VERDICT_ICON.get(req.get("verdict"), cell(req.get("verdict")))
-            out.append(f"| {i} | {cell(req.get('text'))} | {verdict} | {cell(body(req.get('note')))} |")
-        out.append("")
+            lines.append(f"| {i} | {cell(req.get('text'))} | {verdict} | {cell(body(req.get('note')))} |")
+        met = sum(req.get("verdict") == "met" for req in requirements)
+        out += collapsed(f"Requirements ({met}/{len(requirements)} met)" if requirements else "Requirements", lines)
 
     open_findings = [f for f in state["findings"] if f["status"] == "open"]
     order = {"high": 0, "medium": 1, "low": 2}
     open_findings.sort(key=lambda f: (order.get(f.get("severity"), 3), int(f["id"][1:])))
     if open_findings:
-        out.append("### Findings")
+        lines = []
         for f in open_findings:
             icon = SEVERITY_ICON.get(f.get("severity"), "🟡")
-            out.append(f"- {icon} **{f['id']} · {f['title']}**{location(f)}: {body(f.get('body'))}")
+            lines.append(f"- {icon} **{f['id']} · {f['title']}**{location(f)}: {body(f.get('body'))}")
             if found_by(f):
-                out.append(f"  {found_by(f)}")
-        out.append("")
+                lines.append(f"  {found_by(f)}")
+        icons = [SEVERITY_ICON.get(f.get("severity"), "🟡") for f in open_findings]
+        counts = " · ".join(f"{icon} {icons.count(icon)}" for icon in dict.fromkeys(icons))
+        out += collapsed(f"Findings ({counts})", lines)
 
     if newly_resolved:
-        out.append(f"### Resolved in `{short}`")
-        for f in newly_resolved:
-            out.append(f"- ~~{f['id']} · {f['title']}~~ {f['status']}: {body(f.get('resolution'))}")
-        out.append("")
+        lines = [f"- ~~{f['id']} · {f['title']}~~ {f['status']}: {body(f.get('resolution'))}" for f in newly_resolved]
+        out += collapsed(f"Resolved in <code>{short}</code> ({len(newly_resolved)})", lines)
 
     resolved_now = {f["id"] for f in newly_resolved}
     earlier = [f for f in state["findings"] if f["status"] != "open" and f["id"] not in resolved_now]
@@ -493,9 +502,8 @@ def render_summary_with(synthesis, state, context, head, model, run_url, newly_r
         out.append("\n</details>\n")
 
     if synthesis.get("out_of_scope"):
-        out.append("### Out of scope / unrequested changes")
-        out += [f"- {body(item)}" for item in synthesis["out_of_scope"]]
-        out.append("")
+        lines = [f"- {body(item)}" for item in synthesis["out_of_scope"]]
+        out += collapsed(f"Out of scope / unrequested changes ({len(lines)})", lines)
 
     discarded = synthesis.get("discarded") or []
     if discarded and not compact:

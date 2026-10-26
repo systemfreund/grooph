@@ -197,6 +197,22 @@ class Summary(unittest.TestCase):
         self.assertIn("a \\| b", body)
 
 
+class Folded(unittest.TestCase):
+    def test_every_section_starts_folded_with_its_counts(self):
+        synthesis = {"requirements": [{"text": "a", "verdict": "met"}, {"text": "b", "verdict": "partly"}],
+                     "out_of_scope": ["x"], "verdict": "Fix F1 first."}
+        state = {"findings": [finding("F1", severity="high"), finding("F2"), finding("F3"),
+                              finding("F4", status="resolved", resolution="fixed")]}
+        context = {"reviewers": ["m1"], "failed_reviewers": []}
+        text = review.render_summary(synthesis, state, context, "abcdef1", "s", "http://run", [state["findings"][3]])
+        self.assertNotIn("###", text)
+        for title in ("Requirements (1/2 met)", "Findings (🔴 1 · 🟡 2)", "Resolved in <code>abcdef1</code> (1)",
+                      "Out of scope / unrequested changes (1)"):
+            self.assertIn(f"<details><summary><b>{title}</b></summary>\n\n", text)
+        self.assertNotIn("<details open", text)
+        self.assertIn("**Verdict:** Fix F1 first.", text)
+
+
 class Failure(unittest.TestCase):
     context = {"failed_reviewers": [{"reviewer": "m1", "error": "boom"}]}
 
