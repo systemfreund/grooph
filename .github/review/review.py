@@ -62,19 +62,20 @@ def gh_paginated(path):
 def parse_json_answer(text):
     """The answer object in a model's text, or None.
 
-    Models sometimes quote an example from the instructions next to their answer. An answer written
-    outside code blocks wins over the blocks, the last block over earlier ones, and an object only counts
-    when it has the keys of an answer.
+    Models sometimes quote an example from the instructions next to their answer, fenced or not, so the
+    candidate that comes last in the text wins: each code block, and the object in each stretch of text
+    between them. An object only counts when it has the keys of an answer.
     """
-    fence = r"```(?:json)?\s*\n(.*?)\n```"
-
     def braces(part):
         start, end = part.find("{"), part.rfind("}")
         return [part[start : end + 1]] if start != -1 and end > start else []
 
-    candidates = braces(re.sub(fence, "", text, flags=re.S))
-    candidates += re.findall(fence, text, re.S)[::-1]
-    candidates += braces(text)
+    # re.split with a group alternates: text, block, text, block, ..., text.
+    parts = re.split(r"```(?:json)?\s*\n(.*?)\n```", text, flags=re.S)
+    candidates = []
+    for i, part in enumerate(parts):
+        candidates += [part] if i % 2 else braces(part)
+    candidates = candidates[::-1] + braces(text)
     for candidate in candidates:
         try:
             value = json.loads(candidate)
@@ -219,8 +220,8 @@ def as_line(value):
     return int(value) if str(value or "").isdigit() else None
 
 
-def check_synthesis(synthesis):
-    """Why the synthesis answer has the wrong shape, or None."""
+def check_synthesis(synthesis, open_ids):
+    """Why the synthesis answer has the wrong shape, or None. `open_ids` are the ids it may refer to."""
     for key in ("findings", "resolved", "withdrawn", "discarded", "requirements"):
         items = synthesis.get(key)
         if items is not None and not (isinstance(items, list) and all(isinstance(i, dict) for i in items)):
@@ -228,8 +229,12 @@ def check_synthesis(synthesis):
     for key in ("resolved", "withdrawn"):
         if any(not isinstance(i.get("id"), str) for i in synthesis.get(key) or []):
             return f"an entry in `{key}` has no id"
-    if any(not isinstance(i.get("title"), str) or not i["title"] for i in synthesis.get("findings") or []):
-        return "a finding has no title"
+    for item in synthesis.get("findings") or []:
+        if item.get("id") is not None and not isinstance(item["id"], str):
+            return f"a finding has the id {item['id']!r}, not a string like \"F1\""
+        # A known finding may be listed by its id alone; a new one needs its title.
+        if item.get("id") not in open_ids and not (isinstance(item.get("title"), str) and item["title"]):
+            return "a new finding has no title"
     out_of_scope = synthesis.get("out_of_scope")
     if out_of_scope is not None and not isinstance(out_of_scope, list):
         return "`out_of_scope` is not a list"
@@ -277,7 +282,10 @@ def merge_state(prior, synthesis, head):
         for item in synthesis.get(status) or []:
             f = by_id.get(item.get("id"))
             if f and f["status"] == "open" and f["id"] not in still_open:
-                f.update(status=status, resolution=item.get("note", ""), resolved_in=head, replied=False)
+                f.update(status=status, resolution=item.get("note", ""), resolved_in=head)
+                if f.get("comment_id"):
+                    # Without an inline comment there is no thread to reply in.
+                    f["replied"] = False
                 newly_resolved.append(f)
     # Prior findings the synthesis did not mention stay open as they were.
 
@@ -525,7 +533,8 @@ def cmd_publish(args):
 
     synthesis_path = Path(args.synthesis)
     synthesis = json.loads(synthesis_path.read_text()) if synthesis_path.exists() else {"error": "no output"}
-    problem = synthesis.get("error") or check_synthesis(synthesis)
+    open_ids = {f["id"] for f in prior["findings"] if f["status"] == "open"}
+    problem = synthesis.get("error") or check_synthesis(synthesis, open_ids)
     if problem:
         # Keep the previous findings; only say that this run failed.
         body = render_failure(comment["body"] if comment else None, context, problem, args.head, args.run_url)

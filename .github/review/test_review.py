@@ -47,6 +47,11 @@ class ParseEvents(unittest.TestCase):
         lines = [json.dumps({"type": "text", "part": {"text": text}})]
         self.assertEqual(review.parse_events(lines), {"findings": [], "requirements": []})
 
+    def test_prefers_a_fenced_answer_after_an_unfenced_example(self):
+        text = 'The format is {"findings": []}, so:\n```json\n{"findings": [{"title": "real"}]}\n```'
+        lines = [json.dumps({"type": "text", "part": {"text": text}})]
+        self.assertEqual(review.parse_events(lines), {"findings": [{"title": "real"}]})
+
     def test_an_object_without_answer_keys_is_no_answer(self):
         lines = [json.dumps({"type": "text", "part": {"text": "Nothing to report {}"}})]
         self.assertEqual(review.parse_events(lines), {"error": "no JSON in the final answer"})
@@ -126,6 +131,10 @@ class MergeState(unittest.TestCase):
     def test_a_resolved_finding_waits_for_its_reply(self):
         state, _ = merged([finding("F1", comment_id=5)], {"resolved": [{"id": "F1", "note": "n"}]})
         self.assertIs(state["findings"][0]["replied"], False)
+
+    def test_a_resolved_finding_without_inline_comment_waits_for_nothing(self):
+        state, _ = merged([finding("F1")], {"resolved": [{"id": "F1", "note": "n"}]})
+        self.assertNotIn("replied", state["findings"][0])
 
     def test_keeps_the_prior_reviewers_when_none_are_given(self):
         state, _ = merged([finding("F1", found_by=["m1"])], {"findings": [{"id": "F1", "title": "t"}]})
@@ -220,15 +229,23 @@ class Failure(unittest.TestCase):
 
 
 class CheckSynthesis(unittest.TestCase):
+    def check(self, synthesis):
+        return review.check_synthesis(synthesis, {"F1"})
+
     def test_accepts_a_normal_answer(self):
-        self.assertIsNone(review.check_synthesis({"findings": [{"title": "t"}], "resolved": [{"id": "F1"}]}))
+        self.assertIsNone(self.check({"findings": [{"title": "t"}], "resolved": [{"id": "F1"}]}))
+
+    def test_a_known_finding_may_be_listed_by_its_id_alone(self):
+        self.assertIsNone(self.check({"findings": [{"id": "F1", "line": 9}]}))
 
     def test_rejects_the_wrong_shape(self):
-        self.assertIsNotNone(review.check_synthesis({"findings": {"F1": {}}}))
-        self.assertIsNotNone(review.check_synthesis({"findings": ["text"]}))
-        self.assertIsNotNone(review.check_synthesis({"findings": [{"body": "no title"}]}))
-        self.assertIsNotNone(review.check_synthesis({"resolved": [{"note": "no id"}]}))
-        self.assertIsNotNone(review.check_synthesis({"out_of_scope": "text"}))
+        self.assertIsNotNone(self.check({"findings": {"F1": {}}}))
+        self.assertIsNotNone(self.check({"findings": ["text"]}))
+        self.assertIsNotNone(self.check({"findings": [{"body": "no title"}]}))
+        self.assertIsNotNone(self.check({"findings": [{"id": "F9", "line": 9}]}))  # unknown id, no title
+        self.assertIsNotNone(self.check({"findings": [{"id": 1, "title": "t"}]}))
+        self.assertIsNotNone(self.check({"resolved": [{"note": "no id"}]}))
+        self.assertIsNotNone(self.check({"out_of_scope": "text"}))
 
 
 class ThreadUpdates(unittest.TestCase):
@@ -418,10 +435,14 @@ class Publish(unittest.TestCase):
         self.assertIs(self.by_id()["F1"]["replied"], True)
 
     def test_a_changed_finding_updates_its_thread_once(self):
-        self.publish("aaaaaaa", {"findings": [{"title": "t", "severity": "low", "file": "a.rs", "line": 3, "body": "b"}]})
+        first = {"title": "t", "severity": "low", "file": "a.rs", "line": 3, "body": "b"}
+        self.assertEqual(self.publish("aaaaaaa", {"findings": [first]}), 0)
         comment_id = self.by_id()["F1"]["comment_id"]
-        self.publish("bbbbbbb", {"findings": [{"id": "F1", "title": "sharper", "severity": "medium", "line": 7}]})
-        self.publish("ccccccc", {"findings": [{"id": "F1", "line": 9}]})  # only the line moves
+        changed = {"id": "F1", "title": "sharper", "severity": "medium", "line": 7}
+        self.assertEqual(self.publish("bbbbbbb", {"findings": [changed]}), 0)
+        self.assertEqual(self.publish("ccccccc", {"findings": [{"id": "F1", "line": 9}]}), 0)  # only the line moves
+        self.assertEqual(self.by_id()["F1"]["line"], 9)
+        self.assertEqual(self.by_id()["F1"]["body"], "b")
         [reply] = self.github.replies_to(comment_id)
         self.assertIn("Still open in `bbbbbbb`", reply)
         self.assertIn("🟠 **F1 · sharper**", reply)
