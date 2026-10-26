@@ -104,9 +104,9 @@ pub(crate) struct PlaybackState {
     pub(crate) heard_tick: f64,
     pub(crate) last_update: Option<f64>,
     pub(crate) flash_intensity: f32,
-    /// Last (measure_idx, primary_beat_in_measure) that fired the flash. Tracks
-    /// both axes so the flash fires once per primary beat in every measure, not
-    /// only when the beat number changes.
+    /// Last (measure_idx, primary_beat_in_measure) playback reached; the flash
+    /// fires when it changes. Tracks both axes so the flash fires once per
+    /// primary beat in every measure, not only when the beat number changes.
     pub(crate) last_primary_beat: Option<(usize, u32)>,
     /// Bars played since the start, the first being 0, for the guide's
     /// "every second bar" (endless mode renumbers the measures).
@@ -146,16 +146,22 @@ impl PlaybackState {
 
     /// Fire the staff flash when playback reaches `beat` (measure, beat in
     /// the measure). Like the guide's anchors: nothing during the count-in,
-    /// so the first flash is the score's first downbeat, and nothing in a
-    /// silent bar.
+    /// so the first flash is the score's first downbeat.
     pub(crate) fn reach_flash_beat(&mut self, beat: (usize, u32), enabled: bool) {
         if self.counting_in() || self.last_primary_beat == Some(beat) {
             return;
         }
         self.last_primary_beat = Some(beat);
-        if enabled && !self.bar_muted {
+        if enabled {
             self.flash_intensity = 1.0;
         }
+    }
+
+    /// How strongly the staff flash shows now. Dark in a silent bar, like
+    /// the anchors: checked when drawn, not when the beat is reached, as
+    /// `bar_muted` can trail the cursor into the next bar by a frame.
+    pub(crate) fn flash_shown(&self) -> f32 {
+        if self.bar_muted { 0.0 } else { self.flash_intensity }
     }
 }
 
@@ -378,10 +384,11 @@ mod tests {
     fn a_silent_bar_does_not_flash() {
         let mut playback = PlaybackState { bar_muted: true, ..Default::default() };
         playback.reach_flash_beat((0, 0), true);
-        assert_eq!(playback.flash_intensity, 0.0);
-        playback.bar_muted = false;
+        assert_eq!(playback.flash_shown(), 0.0);
+        // The mute ends a frame late: the next bar's downbeat still shows.
         playback.reach_flash_beat((1, 0), true);
-        assert_eq!(playback.flash_intensity, 1.0);
+        playback.bar_muted = false;
+        assert_eq!(playback.flash_shown(), 1.0);
     }
 
     #[test]

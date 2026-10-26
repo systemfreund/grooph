@@ -267,12 +267,12 @@ impl Grooph {
                         );
 
                         // Draw flash overlay (white on dark, black on light) with decay
-                        if self.playback_ctl.playback.flash_intensity > 0.01 {
+                        let flash = self.playback_ctl.playback.flash_shown();
+                        if flash > 0.01 {
                             let dark = ui.visuals().dark_mode;
                             let base =
                                 if dark { egui::Color32::GREEN } else { egui::Color32::BLUE };
-                            let alpha =
-                                (0.8 * self.playback_ctl.playback.flash_intensity).clamp(0.0, 0.8);
+                            let alpha = (0.8 * flash).clamp(0.0, 0.8);
                             let color = egui::Color32::from_rgba_unmultiplied(
                                 base.r(),
                                 base.g(),
