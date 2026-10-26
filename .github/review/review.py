@@ -60,15 +60,21 @@ def gh_paginated(path):
 
 
 def parse_json_answer(text):
-    """The answer object in a model's text: the last fenced block or the text itself, if it is a review.
+    """The answer object in a model's text, or None.
 
-    Models sometimes quote an example from the instructions before their answer, so the last block wins,
-    and an object only counts when it has the keys of an answer.
+    Models sometimes quote an example from the instructions next to their answer. An answer written
+    outside code blocks wins over the blocks, the last block over earlier ones, and an object only counts
+    when it has the keys of an answer.
     """
-    candidates = re.findall(r"```(?:json)?\s*\n(.*?)\n```", text, re.S)[::-1]
-    start, end = text.find("{"), text.rfind("}")
-    if start != -1 and end > start:
-        candidates.append(text[start : end + 1])
+    fence = r"```(?:json)?\s*\n(.*?)\n```"
+
+    def braces(part):
+        start, end = part.find("{"), part.rfind("}")
+        return [part[start : end + 1]] if start != -1 and end > start else []
+
+    candidates = braces(re.sub(fence, "", text, flags=re.S))
+    candidates += re.findall(fence, text, re.S)[::-1]
+    candidates += braces(text)
     for candidate in candidates:
         try:
             value = json.loads(candidate)
@@ -249,6 +255,10 @@ def merge_state(prior, synthesis, head):
         fields["line"] = as_line(item.get("line"))
         fields["found_by"] = item.get("found_by") or []
         f = by_id.get(item.get("id"))
+        if f and f["status"] != "open":
+            # The synthesis only sees open findings, so a closed id is a mix-up (e.g. copied from the
+            # example in SYNTHESIS.md), and the state no longer has the closed finding's text: a new finding.
+            f = None
         if f:
             # A field the synthesis left out keeps its previous value.
             f.update({k: v for k, v in fields.items() if v})
@@ -282,10 +292,12 @@ def encode_state(state, limit=None, closed=True):
     def store(f):
         if f["status"] != "open":
             return {k: f.get(k) for k in kept}
-        return {**f, "body": shorten(f["body"], limit)} if limit else f
+        return {**f, "body": shorten(f.get("body"), limit)} if limit else f
 
+    # Closed findings still waiting for their reply stay, or the reply would never be retried.
+    keep = [f for f in state["findings"] if closed or f["status"] == "open" or f.get("replied") is False]
     compact = dict(state)
-    compact["findings"] = [store(f) for f in state["findings"] if closed or f["status"] == "open"]
+    compact["findings"] = [store(f) for f in keep]
     encoded = base64.b64encode(json.dumps(compact, ensure_ascii=False).encode()).decode()
     return f"<!-- grooph-review-state:{encoded} -->"
 
@@ -363,12 +375,12 @@ def render_summary_with(synthesis, state, context, head, model, run_url, newly_r
 
     open_findings = [f for f in state["findings"] if f["status"] == "open"]
     order = {"high": 0, "medium": 1, "low": 2}
-    open_findings.sort(key=lambda f: (order.get(f["severity"], 3), int(f["id"][1:])))
+    open_findings.sort(key=lambda f: (order.get(f.get("severity"), 3), int(f["id"][1:])))
     if open_findings:
         out.append("### Findings")
         for f in open_findings:
-            icon = SEVERITY_ICON.get(f["severity"], "🟡")
-            out.append(f"- {icon} **{f['id']} · {f['title']}**{location(f)}: {body(f['body'])}")
+            icon = SEVERITY_ICON.get(f.get("severity"), "🟡")
+            out.append(f"- {icon} **{f['id']} · {f['title']}**{location(f)}: {body(f.get('body'))}")
             if found_by(f):
                 out.append(f"  {found_by(f)}")
         out.append("")
@@ -463,7 +475,8 @@ def thread_updates(state, posted, head):
             continue
         if f["status"] != "open":
             if f.get("replied") is False:
-                updates.append((f, f"{f['status'].capitalize()} in {head[:7]}: {f.get('resolution') or ''}", None))
+                when = (f.get("resolved_in") or head)[:7]
+                updates.append((f, f"{f['status'].capitalize()} in {when}: {f.get('resolution') or ''}", None))
             continue
         original = (posted.get(f["id"]) or {}).get("body")
         if "thread_key" not in f:
@@ -538,11 +551,11 @@ def cmd_publish(args):
         if DRY_RUN:
             print(f"--- reply to {f['id']} ---\n{reply}")
             continue
-        path = f"repos/{args.repo}/pulls/{args.pr}/comments/{f['comment_id']}"
         if original:
-            gh("api", "-X", "PATCH", path, "--input", "-", input=json.dumps({"body": original}), check=False)
-        result = gh("api", "-X", "POST", f"{path}/replies", "--input", "-", input=json.dumps({"body": reply}),
-                    check=False)
+            edit = f"repos/{args.repo}/pulls/comments/{f['comment_id']}"
+            gh("api", "-X", "PATCH", edit, "--input", "-", input=json.dumps({"body": original}), check=False)
+        replies = f"repos/{args.repo}/pulls/{args.pr}/comments/{f['comment_id']}/replies"
+        result = gh("api", "-X", "POST", replies, "--input", "-", input=json.dumps({"body": reply}), check=False)
         if result.returncode != 0:
             print(f"::warning::reply to {f['id']} failed, retried next run: {result.stderr.strip()}")
         elif f["status"] == "open":

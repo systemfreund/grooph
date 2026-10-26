@@ -1,7 +1,11 @@
 """Tests for review.py. Run with: python3 -m unittest discover -s .github/review"""
 
 import json
+import tempfile
+import types
 import unittest
+from pathlib import Path
+from unittest import mock
 
 import review
 
@@ -37,6 +41,11 @@ class ParseEvents(unittest.TestCase):
         text = 'The format is:\n```json\n{"findings": [{"title": "example"}]}\n```\nMy answer:\n```json\n{"findings": []}\n```'
         lines = [json.dumps({"type": "text", "part": {"text": text}})]
         self.assertEqual(review.parse_events(lines), {"findings": []})
+
+    def test_prefers_an_unfenced_answer_over_a_fenced_example(self):
+        text = 'The format is:\n```json\n{"findings": [{"title": "example"}]}\n```\n{"findings": [], "requirements": []}'
+        lines = [json.dumps({"type": "text", "part": {"text": text}})]
+        self.assertEqual(review.parse_events(lines), {"findings": [], "requirements": []})
 
     def test_an_object_without_answer_keys_is_no_answer(self):
         lines = [json.dumps({"type": "text", "part": {"text": "Nothing to report {}"}})]
@@ -102,14 +111,11 @@ class MergeState(unittest.TestCase):
         self.assertEqual(state["findings"][0]["status"], "open")
         self.assertEqual(state["findings"][0]["comment_id"], 5)
 
-    def test_reopens_an_earlier_resolved_finding_under_its_id(self):
-        state, _ = merged(
-            [finding("F1", status="resolved", resolution="fixed", resolved_in="old")],
-            {"findings": [{"id": "F1", "title": "back"}]},
-        )
-        self.assertEqual(len(state["findings"]), 1)
-        self.assertEqual(state["findings"][0]["status"], "open")
-        self.assertNotIn("resolution", state["findings"][0])
+    def test_the_id_of_a_closed_finding_starts_a_new_one(self):
+        # Closed findings are stored without their text, so they cannot come back as they were.
+        closed = {"id": "F1", "status": "resolved", "title": "old", "resolution": "fixed", "comment_id": 5}
+        state, _ = merged([closed], {"findings": [{"id": "F1", "title": "back"}]})
+        self.assertEqual([(f["id"], f["status"]) for f in state["findings"]], [("F1", "resolved"), ("F2", "open")])
 
     def test_fields_left_out_keep_their_value(self):
         state, _ = merged([finding("F1", body="text", line=4)], {"findings": [{"id": "F1", "title": "new title"}]})
@@ -201,6 +207,18 @@ class Failure(unittest.TestCase):
         self.assertEqual(review.read_state({"body": twice})["next_id"], 3)
 
 
+    def test_the_summary_keeps_closed_findings_that_wait_for_their_reply(self):
+        closed = [finding(f"F{i}", status="resolved", title="t" * 300, resolution="r" * 300, replied=True)
+                  for i in range(1, 200)]
+        waiting = finding("F200", status="resolved", resolution="fixed", comment_id=5, replied=False)
+        opened = [finding(f"F{i}", body="x" * 1000) for i in range(201, 231)]
+        state = {"findings": closed + [waiting] + opened, "next_id": 231, "head_sha": "h"}
+        body = review.render_summary({}, state, {"reviewers": [], "failed_reviewers": []}, "h", "s", "u", [])
+        stored = review.read_state({"body": body})
+        self.assertIn("F200", [f["id"] for f in stored["findings"]])
+        self.assertNotIn("F1", [f["id"] for f in stored["findings"]])
+
+
 class CheckSynthesis(unittest.TestCase):
     def test_accepts_a_normal_answer(self):
         self.assertIsNone(review.check_synthesis({"findings": [{"title": "t"}], "resolved": [{"id": "F1"}]}))
@@ -255,6 +273,212 @@ class ThreadUpdates(unittest.TestCase):
         before_flags = finding("F3", status="resolved", comment_id=7, resolution="fixed")
         updates = review.thread_updates({"findings": [waiting, done, before_flags]}, {}, "head123")
         self.assertEqual([(f["id"], reply) for f, reply, _ in updates], [("F1", "Resolved in head123: fixed")])
+
+
+class FakeGitHub:
+    """The parts of the GitHub API that review.py uses, in memory. `fail` holds what GitHub should reject:
+    "review" (a batch of inline comments), "path:line" (a single inline comment) or "reply"."""
+
+    def __init__(self, changed_lines=range(1, 51)):
+        self.issue_comments, self.review_comments, self.fail, self.calls = [], [], set(), []
+        self.files = [{"filename": "a.rs", "patch": f"@@ -1,0 +1,{len(changed_lines)} @@\n" + "+x\n" * len(changed_lines)}]
+        self.next_id, self.reviews = 1000, 0
+
+    def new_id(self):
+        self.next_id += 1
+        return self.next_id
+
+    def ok(self, value):
+        return types.SimpleNamespace(returncode=0, stdout=json.dumps(value), stderr="")
+
+    def rejected(self):
+        return types.SimpleNamespace(returncode=1, stdout="", stderr="HTTP 422")
+
+    def gh(self, *args, input=None, check=True):
+        result = self.call(args, json.loads(input) if input else None)
+        if check and result.returncode != 0:
+            raise RuntimeError(result.stderr)
+        return result
+
+    def call(self, args, data):
+        if "-H" in args:  # the compare diff
+            return self.rejected()
+        method, path = args[2], args[3].split("/", 3)[3]  # drop "repos/o/r/"
+        self.calls.append((method, path))
+        if method == "POST" and path == "issues/5/comments":
+            comment = {"id": self.new_id(), "body": data["body"], "user": {"login": review.BOT}}
+            self.issue_comments.append(comment)
+            return self.ok(comment)
+        if method == "PATCH" and path.startswith("issues/comments/"):
+            comment = next(c for c in self.issue_comments if c["id"] == int(path.rsplit("/", 1)[1]))
+            comment["body"] = data["body"]
+            return self.ok(comment)
+        if method == "POST" and path == "pulls/5/reviews":
+            if "review" in self.fail:
+                return self.rejected()
+            self.reviews += 1
+            for c in data["comments"]:
+                self.add_review_comment(c, review=self.reviews)
+            return self.ok({"id": self.reviews})
+        if method == "POST" and path == "pulls/5/comments":
+            if f"{data['path']}:{data['line']}" in self.fail:
+                return self.rejected()
+            return self.ok(self.add_review_comment(data))
+        if method == "POST" and path.endswith("/replies"):
+            if "reply" in self.fail:
+                return self.rejected()
+            parent = int(path.split("/")[-2])
+            return self.ok(self.add_review_comment({"body": data["body"]}, in_reply_to_id=parent))
+        if method == "PATCH" and path.startswith("pulls/comments/"):  # not under the PR number
+            comment = next(c for c in self.review_comments if c["id"] == int(path.rsplit("/", 1)[1]))
+            comment["body"] = data["body"]
+            return self.ok(comment)
+        raise AssertionError(f"unexpected call {method} {path}")
+
+    def add_review_comment(self, data, **extra):
+        comment = {"id": self.new_id(), "user": {"login": review.BOT}, "in_reply_to_id": None, **data, **extra}
+        self.review_comments.append(comment)
+        return comment
+
+    def paginated(self, path):
+        path = path.split("/", 3)[3]
+        if path == "issues/5/comments":
+            return list(self.issue_comments)
+        if path == "pulls/5/comments":
+            return list(self.review_comments)
+        if path == "pulls/5/files":
+            return self.files
+        if path.startswith("pulls/5/reviews/"):
+            number = int(path.split("/")[3])
+            return [c for c in self.review_comments if c.get("review") == number]
+        raise AssertionError(f"unexpected list {path}")
+
+    def replies_to(self, comment_id):
+        return [c["body"] for c in self.review_comments if c["in_reply_to_id"] == comment_id]
+
+    def state(self):
+        return review.read_state(self.issue_comments[0])
+
+
+class Publish(unittest.TestCase):
+    def setUp(self):
+        self.github = FakeGitHub()
+        self.dir = Path(tempfile.mkdtemp())
+        (self.dir / "context.json").write_text(json.dumps({"reviewers": ["m1"], "failed_reviewers": []}))
+        for name, fake in (("gh", self.github.gh), ("gh_paginated", self.github.paginated), ("print", lambda *a: None)):
+            patcher = mock.patch.object(review, name, fake, create=True)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        self.addCleanup(mock.patch.object(review, "DRY_RUN", False).stop)
+
+    def publish(self, head, synthesis):
+        (self.dir / "synthesis.json").write_text(json.dumps(synthesis))
+        args = types.SimpleNamespace(repo="o/r", pr="5", head=head, input=str(self.dir),
+                                     synthesis=str(self.dir / "synthesis.json"), model="s", run_url="http://run")
+        return review.cmd_publish(args)
+
+    def by_id(self):
+        return {f["id"]: f for f in self.github.state()["findings"]}
+
+    def test_first_run_posts_one_review_and_the_summary(self):
+        self.assertEqual(self.publish("aaaaaaa", {"findings": [
+            {"title": "in diff", "severity": "high", "file": "a.rs", "line": 3, "body": "b"},
+            {"title": "outside", "severity": "low", "file": "b.rs", "line": 3, "body": "b"},
+        ]}), 0)
+        self.assertEqual(self.github.reviews, 1)
+        findings = self.by_id()
+        self.assertIsNotNone(findings["F1"]["comment_id"])
+        self.assertIsNone(findings["F2"]["comment_id"])
+        self.assertEqual(len(self.github.issue_comments), 1)
+        self.assertIn("🔴 **F1 · in diff**", self.github.issue_comments[0]["body"])
+
+    def test_a_rejected_batch_is_posted_one_by_one_and_the_job_fails_for_the_rest(self):
+        self.github.fail |= {"review", "a.rs:4"}
+        self.assertEqual(self.publish("aaaaaaa", {"findings": [
+            {"title": "ok", "file": "a.rs", "line": 3, "body": "b"},
+            {"title": "rejected", "file": "a.rs", "line": 4, "body": "b"},
+        ]}), 1)
+        findings = self.by_id()
+        self.assertIsNotNone(findings["F1"]["comment_id"])
+        self.assertIsNone(findings["F2"]["comment_id"])
+        # Both stay in the summary.
+        self.assertIn("F2 · rejected", self.github.issue_comments[0]["body"])
+
+    def test_a_failed_reply_is_retried_once_on_the_next_run(self):
+        self.publish("aaaaaaa", {"findings": [{"title": "t", "file": "a.rs", "line": 3, "body": "b"}]})
+        comment_id = self.by_id()["F1"]["comment_id"]
+        self.github.fail.add("reply")
+        self.publish("bbbbbbb", {"resolved": [{"id": "F1", "note": "fixed"}]})
+        self.assertEqual(self.github.replies_to(comment_id), [])
+        self.assertIs(self.by_id()["F1"]["replied"], False)
+        self.github.fail.clear()
+        self.publish("ccccccc", {})
+        self.publish("ddddddd", {})
+        self.assertEqual(self.github.replies_to(comment_id), ["Resolved in bbbbbbb: fixed"])
+        self.assertIs(self.by_id()["F1"]["replied"], True)
+
+    def test_a_changed_finding_updates_its_thread_once(self):
+        self.publish("aaaaaaa", {"findings": [{"title": "t", "severity": "low", "file": "a.rs", "line": 3, "body": "b"}]})
+        comment_id = self.by_id()["F1"]["comment_id"]
+        self.publish("bbbbbbb", {"findings": [{"id": "F1", "title": "sharper", "severity": "medium", "line": 7}]})
+        self.publish("ccccccc", {"findings": [{"id": "F1", "line": 9}]})  # only the line moves
+        [reply] = self.github.replies_to(comment_id)
+        self.assertIn("Still open in `bbbbbbb`", reply)
+        self.assertIn("🟠 **F1 · sharper**", reply)
+        original = next(c for c in self.github.review_comments if c["id"] == comment_id)["body"]
+        self.assertTrue(original.startswith("> **Updated in `bbbbbbb`**"))
+        self.assertEqual(self.github.reviews, 1)
+
+    def test_a_cancelled_run_does_not_post_twice(self):
+        self.publish("aaaaaaa", {})
+        before = self.github.issue_comments[0]["body"]
+        real_upsert = review.upsert_summary
+        calls = []
+
+        def cancelled_after_posting(repo, pr, comment, body):
+            calls.append(body)
+            if len(calls) == 2:
+                raise KeyboardInterrupt  # cancelled before the final update
+            return real_upsert(repo, pr, comment, body)
+
+        new = {"findings": [{"title": "t", "file": "a.rs", "line": 3, "body": "b"}]}
+        with mock.patch.object(review, "upsert_summary", cancelled_after_posting):
+            with self.assertRaises(KeyboardInterrupt):
+                self.publish("bbbbbbb", new)
+        self.assertNotEqual(self.github.issue_comments[0]["body"], before)
+        self.assertIsNone(self.by_id()["F1"]["comment_id"])
+        self.publish("ccccccc", {"findings": [{"id": "F1", "title": "t", "file": "a.rs", "line": 3, "body": "b"}]})
+        self.assertEqual(self.github.reviews, 1)
+        self.assertIsNotNone(self.by_id()["F1"]["comment_id"])
+
+    def test_a_malformed_synthesis_keeps_the_previous_review(self):
+        self.publish("aaaaaaa", {"findings": [{"title": "t", "file": "a.rs", "line": 3, "body": "b"}]})
+        self.assertEqual(self.publish("bbbbbbb", {"findings": {"F1": {}}}), 1)
+        body = self.github.issue_comments[0]["body"]
+        self.assertIn("The review of `bbbbbbb` failed (`findings` is not a list of objects)", body)
+        self.assertIn("F1 · t", body)
+        self.assertEqual(self.by_id()["F1"]["status"], "open")
+
+
+class Prepare(unittest.TestCase):
+    def test_gives_the_synthesis_the_open_findings_and_the_failed_reviewers(self):
+        github = FakeGitHub()
+        state = {"version": 1, "head_sha": "old", "next_id": 3, "findings": [
+            finding("F1"), {"id": "F2", "status": "resolved", "title": "t", "comment_id": None}]}
+        github.issue_comments.append({"id": 1, "user": {"login": review.BOT},
+                                      "body": f"{review.MARKER}\n{review.encode_state(state)}"})
+        reviews, out = Path(tempfile.mkdtemp()), Path(tempfile.mkdtemp())
+        (reviews / "0.json").write_text(json.dumps({"reviewer": "m1", "findings": []}))
+        args = types.SimpleNamespace(repo="o/r", pr="5", head="new", reviews=str(reviews), out=str(out),
+                                     expected=json.dumps(["m1", "m2"]))
+        with (mock.patch.object(review, "gh", github.gh), mock.patch.object(review, "gh_paginated", github.paginated),
+              mock.patch.object(review, "print", lambda *a: None, create=True)):
+            self.assertEqual(review.cmd_prepare(args), 0)
+        prior = json.loads((out / "prior.json").read_text())
+        self.assertEqual([f["id"] for f in prior["findings"]], ["F1"])
+        context = json.loads((out / "context.json").read_text())
+        self.assertEqual(context["failed_reviewers"], [{"reviewer": "m2", "error": "no output"}])
+        self.assertFalse(context["diff_since_prior"])
 
 
 class Context(unittest.TestCase):

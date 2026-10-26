@@ -39,7 +39,8 @@ at the head commit. `REVIEW.md` says what matters in this repository.
    - wrong after all: put it in `withdrawn` with its `id` and why.
 
    A finding the reviewers report again that matches a previous one keeps the previous `id`. New findings get
-   `"id": null`; the script numbers them.
+   `"id": null`; the script numbers them. Use only ids from `prior.json`; the ids in the example below are
+   placeholders.
 6. **Out of scope:** merge the reviewers' `out_of_scope` lists, dropping duplicates and items you cannot confirm.
 7. **Verdict:** one sentence: ready to merge, or what must change first.
 
@@ -57,7 +58,7 @@ Your final answer is a single JSON object and nothing else (a ```json fence arou
   ],
   "findings": [
     {
-      "id": "F2",
+      "id": "F7",
       "severity": "medium",
       "title": "…",
       "file": "crates/midi/src/input.rs",
