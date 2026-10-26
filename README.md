@@ -196,9 +196,13 @@ Important root files:
   (`include_bytes!`, decoded once by the small decoder in `wav.rs`).
   `MetronomeSound::Claves` (default) plays `claves3.wav` on the downbeat and
   `claves4.wav` on the other primary beats and the count-in;
-  `MetronomeSound::Xylophone` plays `xylo-high.wav` and `xylo-low.wav` the same way.
-  The counter rhythm (`CounterSound`) plays a sample 1.5× faster when the
-  metronome uses the same sound, so the two layers stay apart.
+  `MetronomeSound::Xylophone` plays `xylo-high.wav` and `xylo-low.wav` the same way,
+  `MetronomeSound::Snare` the accent and normal snare recordings.
+  Every voice (`RhythmSound`, `MetronomeSound`, `CounterSound`) offers the same
+  four sounds: Click, Claves, Snare, Xylophone. The rhythm and the counter
+  rhythm play a sample 1.5× faster (`SAME_SOUND_RATE`) when the metronome uses
+  the same sound, so the voices stay apart. Rhythm claves and xylophone play
+  the high sample on accents and the low one on notes and ghost notes.
   `RhythmSound::Snare` (default) plays its own recording per dynamic:
   `snare-normal.wav` for notes, `snare-accent.wav` for accents and
   `snare-ghost.wav` for ghost notes. A ghost sample is recorded quietly, so its

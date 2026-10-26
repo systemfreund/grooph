@@ -94,9 +94,10 @@ mute web audio while the ringer switch is set to silent.
 
 Yes. By default the metronome plays claves: a high hit on the downbeat and a lower one on
 the other main beats, and the rhythm plays a snare drum with its own recordings for
-normal notes, accents and ghost notes. Under More → Sounds you can switch the
-metronome to a xylophone or a plain click (whose waveform you can change under
-Settings → Click), and the rhythm to a plain click. The mixer
+normal notes, accents and ghost notes. Under More → Sounds you can give the
+metronome, the counter rhythm and the rhythm any of claves, snare, xylophone or a plain
+click (whose waveform you can change under Settings → Click). When two of them share a
+sound, the rhythm or the counter rhythm plays it higher, so you can still tell them apart. The mixer
 (speaker icon) has two groups: the rhythm (notes, accents, ghost notes) and the metronome
 (downbeat, medium and soft clicks, counter rhythm, count-in). Each group can be muted, for example to hear
 only the written rhythm. What the metronome clicks is set per time signature in the

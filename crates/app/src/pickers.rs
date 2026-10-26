@@ -730,7 +730,7 @@ impl Grooph {
         ui.label("Metronome");
         let sounds: Vec<_> =
             MetronomeSound::ALL.iter().map(|&s| (s, s.label().to_owned())).collect();
-        if let Some(sound) = choice_grid(ui, &sounds, settings.metronome_sound, 3) {
+        if let Some(sound) = choice_grid(ui, &sounds, settings.metronome_sound, 2) {
             settings.metronome_sound = sound;
         }
         ui.add_space(8.0);
