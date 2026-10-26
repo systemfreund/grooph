@@ -116,7 +116,7 @@ impl Grooph {
                     );
 
                     egui::CollapsingHeader::new("Playback").default_open(false).show(ui, |ui| {
-                        ui.checkbox(&mut self.ui.flash_enabled, "Flash on primary beat");
+                        ui.checkbox(&mut self.ui.flash_enabled, "Flash staff on every beat");
                     });
 
                     egui::CollapsingHeader::new("Tempo Ramp").default_open(false).show(ui, |ui| {

@@ -267,12 +267,12 @@ impl Grooph {
                         );
 
                         // Draw flash overlay (white on dark, black on light) with decay
-                        if self.playback_ctl.playback.flash_intensity > 0.01 {
+                        let flash = self.playback_ctl.playback.flash_shown();
+                        if flash > 0.01 {
                             let dark = ui.visuals().dark_mode;
                             let base =
                                 if dark { egui::Color32::GREEN } else { egui::Color32::BLUE };
-                            let alpha =
-                                (0.8 * self.playback_ctl.playback.flash_intensity).clamp(0.0, 0.8);
+                            let alpha = (0.8 * flash).clamp(0.0, 0.8);
                             let color = egui::Color32::from_rgba_unmultiplied(
                                 base.r(),
                                 base.g(),
@@ -338,7 +338,7 @@ impl Grooph {
             self.realign_accuracy_clock();
         }
 
-        // Flash once per primary beat of the playing measure.
+        // Flash once per beat of the playing measure.
         let (m_idx, local_tick) = timing.to_local(tick);
         let primary_beat_in_measure = self
             .editor
@@ -346,12 +346,11 @@ impl Grooph {
             .measures
             .get(m_idx)
             .map_or(0, |m| primary_beat_index(&m.time_signature(), local_tick));
-        let key = (m_idx, primary_beat_in_measure);
+        let flash_enabled = self.ui.flash_enabled;
+        self.playback_ctl
+            .playback
+            .reach_flash_beat((m_idx, primary_beat_in_measure), flash_enabled);
         let playback = &mut self.playback_ctl.playback;
-        if self.ui.flash_enabled && playback.last_primary_beat != Some(key) {
-            playback.flash_intensity = 1.0;
-            playback.last_primary_beat = Some(key);
-        }
         // Exponential decay towards 0; larger -> faster fade.
         let decay_per_sec = 10.0;
         playback.flash_intensity *= (-decay_per_sec * dt).exp() as f32;
