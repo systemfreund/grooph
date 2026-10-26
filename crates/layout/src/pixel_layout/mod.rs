@@ -127,15 +127,13 @@ pub struct LayoutOpts {
     pub stem_thickness_factor: f32,
 
     pub accent_displacement: f32,
-    pub accent_below: bool,
     /// Stems point down, with beams, flags, tuplets and accents below the
     /// notes: the lower voice of a staff with two.
     pub stem_down: bool,
     /// The staff line is shared with another voice: this one keeps to its
     /// side of it, heads just above the line (just below with
-    /// `stem_down`), rests clear of it and accents by the stems.
+    /// `stem_down`) and rests clear of it.
     pub shared_line: bool,
-    pub proportional_spacing: bool,
 }
 
 impl LayoutOpts {
@@ -203,11 +201,10 @@ impl LayoutOpts {
         self.y_of(pos) + self.stem_dir() * self.stem_length()
     }
 
-    /// Whether accents go below the notes. `accent_below` puts them on the
-    /// heads' side, away from the stems, unless the other side of a shared
-    /// line belongs to another voice.
+    /// Whether accents go below the notes: they go by the stems, below
+    /// with `stem_down`.
     pub(super) const fn accents_below(&self) -> bool {
-        if self.shared_line { self.stem_down } else { self.accent_below != self.stem_down }
+        self.stem_down
     }
 
     /// Thickness of the staff line, and of ledger lines.
@@ -515,10 +512,8 @@ mod tests {
             stem_length_factor: 2.0,
             stem_thickness_factor: 0.1,
             accent_displacement: 0.0,
-            accent_below: false,
             stem_down: false,
             shared_line: false,
-            proportional_spacing: true,
         };
         let layout = build_measure_layout(&Measure::new(TimeSignature::THREE_FOUR), &opts);
         let ts = layout.time_signature.expect("time signature laid out");
@@ -551,13 +546,11 @@ mod tests {
             stem_length_factor: 3.5,
             stem_thickness_factor: 0.1,
             accent_displacement: displacement,
-            accent_below: false,
             stem_down: false,
             shared_line: false,
-            proportional_spacing: true,
         };
 
-        // Case 1: Accent Above (default)
+        // Case 1: stems up, accent above
         let layout = build_measure_layout(&m, &opts);
         let note = &layout.notes[0];
         let accent = note.accent.expect("Accent should be present").ink();
@@ -573,9 +566,8 @@ mod tests {
             expected_y
         );
 
-        // Case 2: Accent Below
-        let mut opts_below = opts.clone();
-        opts_below.accent_below = true;
+        // Case 2: stems down, accent below
+        let opts_below = LayoutOpts { stem_down: true, ..opts.clone() };
         let layout_below = build_measure_layout(&m, &opts_below);
         let note_below = &layout_below.notes[0];
         let accent_below = note_below.accent.expect("Accent should be present").ink();
@@ -605,10 +597,8 @@ mod tests {
             stem_length_factor: 3.5,
             stem_thickness_factor: 0.1,
             accent_displacement: 0.1,
-            accent_below: false,
             stem_down: true,
             shared_line: false,
-            proportional_spacing: true,
         };
         let layout = build_measure_layout(&m, &opts);
         let note = &layout.notes[0];
@@ -653,10 +643,8 @@ mod tests {
             stem_length_factor: 3.5,
             stem_thickness_factor: 0.1,
             accent_displacement: 0.0,
-            accent_below: false,
             stem_down: false,
             shared_line: false,
-            proportional_spacing: true,
         };
 
         let layout = build_measure_layout(&m, &opts);
@@ -708,10 +696,8 @@ mod tests {
             stem_length_factor: 3.5,
             stem_thickness_factor: 0.1,
             accent_displacement: 0.0,
-            accent_below: false,
             stem_down: false,
             shared_line: false,
-            proportional_spacing: true,
         };
 
         let layout = build_measure_layout(&m, &opts);
@@ -747,10 +733,8 @@ mod tests {
             stem_length_factor: 3.5,
             stem_thickness_factor: 0.1,
             accent_displacement: 0.1,
-            accent_below: false,
             stem_down: false,
             shared_line: false,
-            proportional_spacing: true,
         };
         let down = LayoutOpts { stem_down: true, ..up.clone() };
         let (a, b) = (build_measure_layout(&m, &up), build_measure_layout(&m, &down));
@@ -802,10 +786,8 @@ mod tests {
             stem_length_factor: 0.9,
             stem_thickness_factor: 0.1,
             accent_displacement: 0.07,
-            accent_below: false,
             stem_down: false,
             shared_line: false,
-            proportional_spacing: true,
         };
         let down = LayoutOpts { stem_down: true, ..up.clone() };
         let m = parse_score("4/4 t8 t8 t8 t16 t16 t16 t16 t16 t16 h").unwrap().measures.remove(0);
@@ -836,10 +818,8 @@ mod tests {
             stem_length_factor: 0.9,
             stem_thickness_factor: 0.1,
             accent_displacement: 0.07,
-            accent_below: false,
             stem_down: false,
             shared_line: false,
-            proportional_spacing: true,
         };
         let clearance = c::TUPLET_NUMBER_CLEARANCE_SS * opts.staff_space();
         // One digit and two, each with a rest for a bracket.
@@ -869,10 +849,8 @@ mod tests {
             stem_length_factor: 0.9,
             stem_thickness_factor: 0.1,
             accent_displacement: 0.07,
-            accent_below: false,
             stem_down: false,
             shared_line: false,
-            proportional_spacing: true,
         };
         let ss = up.staff_space();
         let gap = c::TUPLET_INK_GAP_SS * ss;
@@ -933,10 +911,8 @@ mod tests {
             stem_length_factor: 3.5,
             stem_thickness_factor: 0.1,
             accent_displacement: 0.1,
-            accent_below: false,
             stem_down: true,
             shared_line: false,
-            proportional_spacing: true,
         };
         let cy = down.y_center();
         let quarter_rest = &build_measure_layout(&m, &down).notes[1];
@@ -971,10 +947,8 @@ mod tests {
             stem_length_factor: 0.9,
             stem_thickness_factor: 0.1,
             accent_displacement: 0.07,
-            accent_below: true,
             stem_down: false,
             shared_line: true,
-            proportional_spacing: true,
         };
         let down = LayoutOpts { stem_down: true, ..up.clone() };
         let cy = up.y_center();
@@ -991,7 +965,7 @@ mod tests {
             assert!(d.head.ink().top() >= cy + clear, "{d:?}");
             assert!(u.ledger.is_none() && d.ledger.is_none());
         }
-        // Accents go by the stems, whatever `accent_below` says.
+        // Accents go by the stems.
         assert!(a.notes[0].accent.unwrap().ink().bottom() < a.notes[0].stem.unwrap().p2.y);
         assert!(b.notes[0].accent.unwrap().ink().top() > b.notes[0].stem.unwrap().p2.y);
 
@@ -1044,10 +1018,8 @@ mod tests {
             stem_length_factor: 0.9,
             stem_thickness_factor: 0.1,
             accent_displacement: 0.0,
-            accent_below: false,
             stem_down: false,
             shared_line: false,
-            proportional_spacing: true,
         };
         let down = LayoutOpts { stem_down: true, ..up.clone() };
         let dx =
@@ -1082,10 +1054,8 @@ mod tests {
             stem_length_factor: 3.5,
             stem_thickness_factor: 0.1,
             accent_displacement: 0.0,
-            accent_below: false,
             stem_down: false,
             shared_line: false,
-            proportional_spacing: true,
         };
         let plan = crate::render_plan::plan_measure(&m);
         let width = min_note_area_width(&m, &plan, &opts);
@@ -1115,10 +1085,8 @@ mod tests {
             stem_length_factor: 3.5,
             stem_thickness_factor: 0.1,
             accent_displacement: 0.0,
-            accent_below: false,
             stem_down: true,
             shared_line: false,
-            proportional_spacing: true,
         };
         let plan = crate::render_plan::plan_measure_with(&m, true);
         let layout = build_measure_layout_with_plan(&m, &plan, &opts);

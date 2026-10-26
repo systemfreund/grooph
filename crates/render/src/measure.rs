@@ -574,10 +574,8 @@ mod tests {
             stem_length_factor: 3.5,
             stem_thickness_factor: 0.1,
             accent_displacement: 0.0,
-            accent_below: false,
             stem_down: false,
             shared_line: false,
-            proportional_spacing: true,
         }
     }
 

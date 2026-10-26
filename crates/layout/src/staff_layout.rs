@@ -46,8 +46,6 @@ pub struct StaffOpts {
     pub stem_length_factor: f32,
     pub stem_thickness_factor: f32,
     pub accent_displacement: f32,
-    pub accent_below: bool,
-    pub proportional_spacing: bool,
 
     /// Minimum width of a measure in em, before per-beat additions.
     pub min_measure_width_em: f32,
@@ -94,7 +92,7 @@ impl StaffOpts {
     }
 
     fn lower_of(opts: LayoutOpts) -> LayoutOpts {
-        LayoutOpts { stem_down: true, shared_line: true, accent_below: false, ..opts }
+        LayoutOpts { stem_down: true, shared_line: true, ..opts }
     }
 
     /// Build per-measure [`LayoutOpts`] with a measure-local rect, the staff
@@ -117,10 +115,8 @@ impl StaffOpts {
             stem_length_factor: self.stem_length_factor,
             stem_thickness_factor: self.stem_thickness_factor,
             accent_displacement: self.accent_displacement,
-            accent_below: self.accent_below,
             stem_down: false,
             shared_line: false,
-            proportional_spacing: self.proportional_spacing,
         }
     }
 
@@ -355,7 +351,7 @@ pub fn build_staff_layout_with_lower(
                     let ua = note_advances(upper, &plans[i], &upper_opts);
                     let la = note_advances(m, plan, &StaffOpts::lower_of(upper_opts));
                     let together = [(&upper.beats()[..], &ua[..]), (&m.beats()[..], &la[..])];
-                    let width = shared_min_width(&together, opts.proportional_spacing);
+                    let width = shared_min_width(&together);
                     (note_lead(opts.em) + width, vec![upper, m])
                 }
                 None => (min_note_area_width(upper, &plans[i], &upper_opts), vec![upper]),
@@ -396,7 +392,6 @@ pub fn build_staff_layout_with_lower(
         let xs = calculate_shared_x_centers(
             &[(&upper.beats()[..], &ua[..]), (&m.beats()[..], &la[..])],
             area,
-            effective_opts.proportional_spacing,
             note_lead(effective_opts.em),
         );
         let layout = build_measure_layout_at(upper, &plans[i], &xs[0], &per_opts);
@@ -520,8 +515,6 @@ mod tests {
             stem_length_factor: 3.5,
             stem_thickness_factor: 0.1,
             accent_displacement: 0.0,
-            accent_below: false,
-            proportional_spacing: true,
             min_measure_width_em: 6.0,
             note_width_em: 0.6,
             system_spacing_em: 0.5,
@@ -1053,20 +1046,17 @@ mod tests {
         use grooph_measure::notation::parse_score;
         let em = 20.0;
         let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(400.0, 100.0));
-        let room = |text: &str, accent_below: bool| {
-            let score = parse_score(text).unwrap();
-            build_staff_layout(&score, &StaffOpts { accent_below, ..opts(em, rect) }).room
-        };
+        let room =
+            |text: &str| build_staff_layout(&parse_score(text).unwrap(), &opts(em, rect)).room;
         // Full-length stems and the room below, whatever the notes.
-        let plain = room("4/4 q q q q", false);
+        let plain = room("4/4 q q q q");
         assert!((plain.above - (3.5 + STEM_MARGIN_EM)).abs() < 1e-4);
-        assert_eq!(room("4/4 s s s s s s s s s s s s s s s s", false), plain);
+        assert_eq!(room("4/4 s s s s s s s s s s s s s s s s"), plain);
         assert!((plain.below - ROOM_BELOW_EM).abs() < 1e-4);
         // Accents above, and more for a tuplet over them.
-        let accented = room("4/4 >e e e e e e e e", false);
+        let accented = room("4/4 >e e e e e e e e");
         assert!(accented.above > plain.above);
-        assert_eq!(room("4/4 >e e e e e e e e", true).above, plain.above);
-        let tuplet = room("4/4 >t8 r:t8 t8 q q q", false);
+        let tuplet = room("4/4 >t8 r:t8 t8 q q q");
         assert!(tuplet.above > accented.above);
         // Each measured to its ink.
         let staff =

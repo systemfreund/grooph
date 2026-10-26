@@ -280,10 +280,8 @@ impl Grooph {
                 stem_length_factor: 0.9,
                 stem_thickness_factor: 0.03,
                 accent_displacement: 0.0,
-                accent_below: false,
                 stem_down: false,
                 shared_line: false,
-                proportional_spacing: true,
             };
 
             // Use a temporary measure just for layout width and positions
@@ -420,10 +418,8 @@ pub(crate) fn paint_notation(
                 stem_length_factor: 0.8,
                 stem_thickness_factor: 0.06,
                 accent_displacement: 0.1,
-                accent_below: false,
                 stem_down: false,
                 shared_line: false,
-                proportional_spacing: true,
             }
         };
 

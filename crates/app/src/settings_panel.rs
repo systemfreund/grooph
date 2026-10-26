@@ -176,17 +176,6 @@ impl Grooph {
                                     .speed(0.01)
                                     .range(0.7..=1.3),
                             );
-                            ui.separator();
-                            ui.label("Accents Position:");
-                            ui.horizontal(|ui| {
-                                ui.radio_value(&mut self.ui.layout.accent_below, true, "Below");
-                                ui.radio_value(&mut self.ui.layout.accent_below, false, "Above");
-                            });
-                            ui.separator();
-                            ui.checkbox(
-                                &mut self.ui.layout.proportional_spacing,
-                                "Proportional Spacing",
-                            );
                         },
                     );
 
