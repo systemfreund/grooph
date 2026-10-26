@@ -11,7 +11,9 @@ use crate::shell::paint_grouped_meter;
 use crate::tool_palette::{TOOL_PALETTE_BUTTON_SIZE, none_button, notation_button};
 use crate::{CountingBase, Grooph};
 use eframe::egui;
-use eframe::egui::{Button, Color32, FontFamily, FontId, Id, Modal, Response, RichText, Ui, vec2};
+use eframe::egui::{
+    Button, Color32, FontFamily, FontId, Id, Modal, Rect, Response, RichText, Ui, vec2,
+};
 use grooph_audio::{GapClick, GapMode, GapMute, Sound};
 use grooph_measure::TimeSignature;
 use grooph_measure::counter::{Ratio, own_ratios, step_clicks, step_span};
@@ -322,23 +324,48 @@ pub(crate) fn wide_button(ui: &mut Ui, label: &str, size: f32, height: f32) -> R
 }
 
 /// Height a dialog's long content (library, settings, help) scrolls in, so
-/// that the title and "Done" stay on screen, above an on-screen keyboard
-/// too.
+/// that the title and "Done" stay on screen.
+///
+/// It stays the same when an on-screen keyboard comes up: a list getting
+/// shorter could hide the focused field, and egui stops reporting a field
+/// it does not show, so the browser would close the keyboard again. The
+/// dialog moves up instead (see [`keyboard_shift`]).
 pub(crate) fn dialog_scroll_height(ui: &Ui) -> f32 {
-    let ctx = ui.ctx();
-    scroll_height(ctx.content_rect().height(), platform::visible_rect(ctx).height())
+    0.6 * ui.ctx().content_rect().height()
 }
 
-/// Room a dialog keeps around its scrolling content: title, the buttons
-/// above the list, "Done" and the margins.
-const DIALOG_CHROME: f32 = 260.0;
-/// Content that scrolls in less than this would show too little.
-const MIN_SCROLL_HEIGHT: f32 = 120.0;
+fn focused_field_id() -> Id {
+    Id::unique("dialog_focused_field")
+}
 
-/// [`dialog_scroll_height`] for a screen `screen` high of which `visible`
-/// is seen: 60 % of the screen, less where a keyboard covers part of it.
-fn scroll_height(screen: f32, visible: f32) -> f32 {
-    (0.6 * screen).min(visible - DIALOG_CHROME).max(MIN_SCROLL_HEIGHT)
+fn keyboard_shift_id() -> Id {
+    Id::unique("dialog_keyboard_shift")
+}
+
+/// The dialog's text field with the focus is at `rect` this frame, for
+/// [`keyboard_shift`].
+pub(crate) fn note_focused_field(ctx: &egui::Context, rect: Rect) {
+    ctx.data_mut(|d| d.insert_temp(focused_field_id(), rect));
+}
+
+/// Room kept between a focused field and the edge of what is seen.
+const KEYBOARD_MARGIN: f32 = 12.0;
+
+/// How far up the dialog moves from its centered place, as `shift` (zero
+/// or less), so that the focused field at `field` sits in `visible`, the
+/// part of the screen an on-screen keyboard leaves. The dialog only moves,
+/// nothing in it is cut off, so the field stays shown.
+fn keyboard_shift(shift: f32, field: Rect, visible: Rect) -> f32 {
+    let below = field.bottom() + KEYBOARD_MARGIN - visible.bottom();
+    let above = visible.top() + KEYBOARD_MARGIN - field.top();
+    let shift = if below > 0.0 {
+        shift - below
+    } else if above > 0.0 {
+        shift + above
+    } else {
+        shift
+    };
+    shift.min(0.0)
 }
 
 impl Grooph {
@@ -360,9 +387,14 @@ impl Grooph {
         let mut library_preset = None;
         let mut calibrate = None;
 
-        // In the part of the screen an on-screen keyboard leaves.
+        // Moved up while an on-screen keyboard covers its focused field; the
+        // title may leave the screen then, as in native apps.
         let id = Id::unique("settings_picker");
-        let area = Modal::default_area(id).constrain_to(platform::visible_rect(ui.ctx()));
+        let ctx = ui.ctx().clone();
+        let shift = ctx.data(|d| d.get_temp::<f32>(keyboard_shift_id())).unwrap_or(0.0);
+        let area = Modal::default_area(id)
+            .anchor(egui::Align2::CENTER_CENTER, vec2(0.0, shift))
+            .constrain(shift == 0.0);
         let modal = Modal::new(id).area(area).show(ui.ctx(), |ui| {
             ui.set_width(width);
             let title = match picker {
@@ -444,6 +476,22 @@ impl Grooph {
             ui.add_space(12.0);
             picked || wide_button(ui, "Done", 19.0, ROW_HEIGHT).clicked()
         });
+        let visible = platform::visible_rect(&ctx);
+        let keyboard_up = visible.height() < ctx.content_rect().height() - 1.0;
+        // Taken, not kept: a frame without a focused field has none.
+        let field = ctx.data_mut(|d| {
+            let field = d.get_temp::<Rect>(focused_field_id());
+            d.remove::<Rect>(focused_field_id());
+            field
+        });
+        let new_shift = match field {
+            Some(field) if keyboard_up => keyboard_shift(shift, field, visible),
+            _ => 0.0,
+        };
+        if new_shift != shift {
+            ctx.data_mut(|d| d.insert_temp(keyboard_shift_id(), new_shift));
+            ctx.request_repaint();
+        }
         if modal.inner || modal.should_close() {
             self.ui.picker = self.ui.picker_return.take();
             self.ui.tap_tempo.reset();
@@ -919,13 +967,25 @@ impl Grooph {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn dialogs_scroll_in_what_a_keyboard_leaves() {
-        use super::scroll_height;
-        // A phone without and with an on-screen keyboard.
-        assert_eq!(scroll_height(844.0, 844.0), 0.6 * 844.0);
-        assert_eq!(scroll_height(844.0, 500.0), 240.0);
-        // Never less than a few rows.
-        assert_eq!(scroll_height(844.0, 300.0), 120.0);
+    fn a_dialog_moves_its_focused_field_above_the_keyboard() {
+        use super::{KEYBOARD_MARGIN, keyboard_shift};
+        use eframe::egui::{Rect, pos2};
+        let field = Rect::from_min_max(pos2(20.0, 520.0), pos2(300.0, 574.0));
+        // A keyboard leaving the top 400 points: up until the field is above it.
+        let visible = Rect::from_min_max(pos2(0.0, 0.0), pos2(390.0, 400.0));
+        let shift = keyboard_shift(0.0, field, visible);
+        assert_eq!(shift, 400.0 - KEYBOARD_MARGIN - 574.0);
+        // Moved there, it stays.
+        let moved = field.translate(eframe::egui::vec2(0.0, shift));
+        assert_eq!(keyboard_shift(shift, moved, visible), shift);
+        // Without a keyboard covering it, the dialog does not move.
+        let all = Rect::from_min_max(pos2(0.0, 0.0), pos2(390.0, 844.0));
+        assert_eq!(keyboard_shift(0.0, field, all), 0.0);
+        // Never down from its centered place.
+        assert_eq!(
+            keyboard_shift(-50.0, field.translate(eframe::egui::vec2(0.0, -600.0)), all),
+            0.0
+        );
     }
 
     use super::*;
