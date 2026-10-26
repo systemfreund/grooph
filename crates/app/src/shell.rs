@@ -361,33 +361,48 @@ fn value_row(ui: &mut Ui, label: &str, value: &str) -> Response {
 /// The More menu's theme row: its three choices side by side at the right.
 fn theme_row(ui: &mut Ui) {
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), ROW_HEIGHT), Sense::hover());
-    ui.painter().text(
+    let label = ui.painter().text(
         rect.left_center() + vec2(4.0, 0.0),
         Align2::LEFT_CENTER,
         "🌙   Theme",
         FontId::proportional(19.0),
         ui.visuals().text_color(),
     );
-    let mut theme = ui.options(|o| o.theme_preference);
+    let theme = ui.options(|o| o.theme_preference);
     let choices = [
         (ThemePreference::System, "System"),
         (ThemePreference::Light, "Light"),
         (ThemePreference::Dark, "Dark"),
     ];
+    let spacing = 4.0;
+    // Up to 76 px each, narrower on a small phone so they stay clear of the
+    // label; their text shrinks to fit.
+    let room = rect.right() - label.right() - 12.0;
+    let width = ((room - 2.0 * spacing) / 3.0).min(76.0);
+    let padding = 2.0 * ui.spacing().button_padding.x;
     let layout = egui::Layout::right_to_left(egui::Align::Center);
+    let mut picked = None;
     ui.scope_builder(UiBuilder::new().max_rect(rect).layout(layout), |ui| {
-        ui.spacing_mut().item_spacing.x = 4.0;
+        ui.spacing_mut().item_spacing.x = spacing;
         // Right to left: the last choice comes first.
-        for (choice, label) in choices.into_iter().rev() {
-            let button = Button::new(RichText::new(label).size(16.0))
+        for (choice, text) in choices.into_iter().rev() {
+            let text_width = ui
+                .painter()
+                .layout_no_wrap(text.to_owned(), FontId::proportional(16.0), Color32::WHITE)
+                .size()
+                .x;
+            let size = 16.0 * ((width - padding) / text_width).min(1.0);
+            let button = Button::new(RichText::new(text).size(size))
                 .selected(theme == choice)
-                .min_size(vec2(64.0, 32.0));
+                .min_size(vec2(width, 32.0));
             if ui.add(button).clicked() {
-                theme = choice;
+                picked = Some(choice);
             }
         }
     });
-    ui.ctx().set_theme(theme);
+    if let Some(theme) = picked {
+        ui.ctx().set_theme(theme);
+    }
 }
 
 /// [`value_row`] showing a subdivision as notes or as "none", `text` if
