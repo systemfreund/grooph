@@ -97,8 +97,8 @@ the other main beats, and the rhythm plays a snare drum with its own recordings 
 normal notes, accents and ghost notes. Under Settings → Sounds you can switch the
 metronome to a xylophone or a plain click (whose waveform you can change), and the
 rhythm to a plain click. The mixer
-(speaker icon) has two groups: the metronome (downbeat, medium and soft clicks, count-in) and
-the rhythm (notes, accents, ghost notes). Each group can be muted, for example to hear
+(speaker icon) has two groups: the rhythm (notes, accents, ghost notes) and the metronome
+(downbeat, medium and soft clicks, counter rhythm, count-in). Each group can be muted, for example to hear
 only the written rhythm. What the metronome clicks is set per time signature in the
 Metronome tab under **Clicks**: **Main beats** gives 7/8 three clicks per bar, **Eighths** all
 seven, with the eighths between the beats played soft.

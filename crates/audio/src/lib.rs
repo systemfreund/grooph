@@ -73,7 +73,8 @@ pub struct AudioSettings {
     /// Volume of the beat groups a click pattern sets to soft.
     #[serde(default = "default_soft_gain")]
     pub soft: f32,
-    /// Silence downbeat and primary beats (the count-in still sounds).
+    /// Silence downbeat, primary beats, soft clicks and the counter rhythm
+    /// (the count-in still sounds).
     #[serde(default)]
     pub metronome_muted: bool,
     /// Silence notes, accents and ghost notes.
@@ -85,9 +86,6 @@ pub struct AudioSettings {
     /// Volume of the counter rhythm's medium clicks.
     #[serde(default = "default_counter_gain")]
     pub counter: f32,
-    /// Silence the counter rhythm.
-    #[serde(default)]
-    pub counter_muted: bool,
 }
 
 fn default_ghost_gain() -> f32 {
@@ -128,7 +126,6 @@ impl Default for AudioSettings {
             rhythm_muted: false,
             counter_sound: CounterSound::default(),
             counter: default_counter_gain(),
-            counter_muted: false,
         }
     }
 }
@@ -162,7 +159,6 @@ impl AudioSettings {
             rhythm_muted: false,
             counter_sound: CounterSound::default(),
             counter: default_counter_gain(),
-            counter_muted: false,
         };
         result.clamped()
     }

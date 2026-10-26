@@ -39,9 +39,9 @@ fn voice_group(
 }
 
 impl Grooph {
-    /// Volumes of the voices: the metronome (downbeat, primary beats,
-    /// count-in), the metronome's counter rhythm and the rhythm (notes,
-    /// accents, ghost notes).
+    /// Volumes of the voices: the rhythm (notes, accents, ghost notes) and
+    /// the metronome (downbeat, primary beats, soft clicks, counter rhythm,
+    /// count-in).
     pub(super) fn mixer_panel(&mut self, ui: &mut egui::Ui) {
         egui::Panel::bottom("mixer").drag_to_open(false).show_collapsible(
             ui,
@@ -55,39 +55,6 @@ impl Grooph {
                         ui.horizontal_top(|ui| {
                             voice_group(
                                 ui,
-                                "Metronome",
-                                &mut settings.metronome_muted,
-                                "Silence the metronome clicks; the count-in still sounds",
-                                |ui| {
-                                    volume_slider(ui, &mut settings.downbeat, "Downbeat")
-                                        .on_hover_text("Accented clicks of the click bar");
-                                    volume_slider(ui, &mut settings.primary, "Medium")
-                                        .on_hover_text("Plain clicks of the click bar");
-                                    volume_slider(ui, &mut settings.soft, "Soft").on_hover_text(
-                                        "Soft clicks of the click bar (notes in parentheses)",
-                                    );
-                                },
-                                |ui| {
-                                    volume_slider(ui, &mut settings.count_in, "Count-in");
-                                },
-                            );
-                            ui.separator();
-                            voice_group(
-                                ui,
-                                "Counter",
-                                &mut settings.counter_muted,
-                                "Silence the counter rhythm of the metronome",
-                                |ui| {
-                                    volume_slider(ui, &mut settings.counter, "Counter")
-                                        .on_hover_text(
-                                            "Clicks of the polyrhythm in the metronome tab",
-                                        );
-                                },
-                                |_| {},
-                            );
-                            ui.separator();
-                            voice_group(
-                                ui,
                                 "Rhythm",
                                 &mut settings.rhythm_muted,
                                 "Silence notes, accents and ghost notes",
@@ -97,6 +64,27 @@ impl Grooph {
                                     volume_slider(ui, &mut settings.ghost, "Ghost notes");
                                 },
                                 |_| {},
+                            );
+                            ui.separator();
+                            voice_group(
+                                ui,
+                                "Metronome",
+                                &mut settings.metronome_muted,
+                                "Silence the metronome clicks and its counter rhythm; the count-in still sounds",
+                                |ui| {
+                                    volume_slider(ui, &mut settings.downbeat, "Downbeat")
+                                        .on_hover_text("Accented clicks of the click bar");
+                                    volume_slider(ui, &mut settings.primary, "Medium")
+                                        .on_hover_text("Plain clicks of the click bar");
+                                    volume_slider(ui, &mut settings.soft, "Soft").on_hover_text(
+                                        "Soft clicks of the click bar (notes in parentheses)",
+                                    );
+                                    volume_slider(ui, &mut settings.counter, "Polyrhythm")
+                                        .on_hover_text("Clicks of the polyrhythm in the metronome tab");
+                                },
+                                |ui| {
+                                    volume_slider(ui, &mut settings.count_in, "Count-in");
+                                },
                             );
                         });
                     });
