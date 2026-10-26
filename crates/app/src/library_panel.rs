@@ -607,7 +607,11 @@ impl Grooph {
 
         // A modal, so that it comes up above the library dialog it is
         // asked from.
+        let save = format!("Save & {action}");
+        let discard = format!("Discard & {action}");
+        let width = dialog_width(ui.ctx());
         egui::Modal::new(egui::Id::unique("unsaved_changes")).show(ui.ctx(), |ui| {
+            ui.set_max_width(width);
             ui.heading("Unsaved changes");
             ui.add_space(8.0);
             ui.label(message);
@@ -615,22 +619,21 @@ impl Grooph {
             ui.separator();
             ui.add_space(8.0);
 
-            ui.horizontal(|ui| {
-                if ui.button(format!("Save & {action}")).clicked() {
+            match choice_buttons(ui, width, &[&save, &discard, "Cancel"]) {
+                Some(0) => {
                     self.save_active_pattern();
                     if let Some(pending) = self.ui.pending_load.take() {
                         self.finish_pending_load(pending);
                     }
                 }
-                if ui.button(format!("Discard & {action}")).clicked()
-                    && let Some(pending) = self.ui.pending_load.take()
-                {
-                    self.finish_pending_load(pending);
+                Some(1) => {
+                    if let Some(pending) = self.ui.pending_load.take() {
+                        self.finish_pending_load(pending);
+                    }
                 }
-                if ui.button("Cancel").clicked() {
-                    self.ui.pending_load = None;
-                }
-            });
+                Some(_) => self.ui.pending_load = None,
+                None => {}
+            }
         });
     }
 
@@ -641,6 +644,7 @@ impl Grooph {
         };
         let mut close = false;
         egui::Window::new("Link could not be opened")
+            .max_width(dialog_width(ui.ctx()))
             .collapsible(false)
             .resizable(false)
             .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
@@ -653,4 +657,52 @@ impl Grooph {
             self.ui.link_error = None;
         }
     }
+}
+
+/// Widest a dialog gets: 380 points, less on a phone so that it keeps a
+/// margin to the screen edges.
+fn dialog_width(ctx: &egui::Context) -> f32 {
+    (ctx.content_rect().width() - 48.0).clamp(200.0, 380.0)
+}
+
+/// A dialog's buttons side by side, or stacked at full width when the row
+/// would be wider than `width`. Returns the index of the clicked one.
+fn choice_buttons(ui: &mut egui::Ui, width: f32, labels: &[&str]) -> Option<usize> {
+    let pad = ui.spacing().button_padding.x * 2.0;
+    let gaps = ui.spacing().item_spacing.x * labels.len().saturating_sub(1) as f32;
+    let row: f32 = labels
+        .iter()
+        .map(|label| {
+            let text = egui::WidgetText::from(*label);
+            let galley = text.into_galley(
+                ui,
+                Some(egui::TextWrapMode::Extend),
+                f32::INFINITY,
+                egui::TextStyle::Button,
+            );
+            galley.size().x + pad
+        })
+        .sum::<f32>()
+        + gaps;
+
+    let mut clicked = None;
+    if row <= width {
+        ui.horizontal(|ui| {
+            for (i, label) in labels.iter().enumerate() {
+                if ui.button(*label).clicked() {
+                    clicked = Some(i);
+                }
+            }
+        });
+    } else {
+        ui.set_width(width);
+        ui.vertical_centered_justified(|ui| {
+            for (i, label) in labels.iter().enumerate() {
+                if ui.button(*label).clicked() {
+                    clicked = Some(i);
+                }
+            }
+        });
+    }
+    clicked
 }
