@@ -230,6 +230,21 @@ mod tests {
     }
 
     #[test]
+    fn mixer_settings_with_the_old_counter_mute_still_load() {
+        let mut state = saved_state();
+        state.audio_settings.counter = 0.4;
+        state.audio_settings.rhythm_muted = true;
+        let saved = ron::to_string(&state).unwrap();
+        // Saved before the counter rhythm joined the metronome group.
+        let saved = saved.replacen("rhythm_muted:", "counter_muted:true,rhythm_muted:", 1);
+        assert!(saved.contains("counter_muted:true"), "{saved}");
+        let (s, backup) = restore(Some(&saved));
+        assert_eq!(s.audio_settings.counter, 0.4);
+        assert!(s.audio_settings.rhythm_muted);
+        assert!(backup.is_none());
+    }
+
+    #[test]
     fn a_field_stored_twice_keeps_the_last_and_is_backed_up() {
         let saved = saved_ron().replacen('(', "(bpm:60,", 1);
         let (s, backup) = restore(Some(&saved));

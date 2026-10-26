@@ -60,14 +60,14 @@ impl SoundType {
 
     pub(crate) fn profile(self, settings: &AudioSettings) -> SoundProfile {
         let muted = match self {
-            SoundType::Downbeat | SoundType::PrimaryBeat | SoundType::SoftBeat => {
-                settings.metronome_muted
-            }
+            SoundType::Downbeat
+            | SoundType::PrimaryBeat
+            | SoundType::SoftBeat
+            | SoundType::CounterStrong
+            | SoundType::CounterMedium
+            | SoundType::CounterSoft => settings.metronome_muted,
             SoundType::AccentedBeat | SoundType::Beat | SoundType::Ghost => settings.rhythm_muted,
             SoundType::CountIn | SoundType::CountInSoft => false,
-            SoundType::CounterStrong | SoundType::CounterMedium | SoundType::CounterSoft => {
-                settings.counter_muted
-            }
         };
         let profile = match self {
             SoundType::Downbeat => SoundProfile { freq_mult: 3.375, gain: settings.downbeat },
@@ -398,11 +398,11 @@ mod tests {
     }
 
     #[test]
-    fn counter_clicks_follow_the_counter_mute_and_muted_bars() {
-        let muted = AudioSettings { counter_muted: true, ..AudioSettings::default() };
-        assert_eq!(SoundType::CounterMedium.profile(&muted).gain, 0.0);
+    fn counter_clicks_follow_the_metronome_mute_and_muted_bars() {
         let metronome_muted = AudioSettings { metronome_muted: true, ..AudioSettings::default() };
-        assert!(SoundType::CounterMedium.profile(&metronome_muted).gain > 0.0);
+        assert_eq!(SoundType::CounterMedium.profile(&metronome_muted).gain, 0.0);
+        let rhythm_muted = AudioSettings { rhythm_muted: true, ..AudioSettings::default() };
+        assert!(SoundType::CounterMedium.profile(&rhythm_muted).gain > 0.0);
         assert!(SoundType::CounterSoft.muted_by(GapMute::Metronome));
     }
 
