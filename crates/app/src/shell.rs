@@ -859,6 +859,7 @@ impl Grooph {
         if split_row(ui, "Silent bars", &silent, &mut gap.enabled).clicked() {
             self.ui.picker = Some(Picker::SilentBars);
         }
+        self.swing_row(ui);
     }
 
     /// The count under the staff, shown in every tab; opens its picker. The
@@ -959,7 +960,6 @@ impl Grooph {
         }
         let generator = &mut self.editor.generator;
         switch_row(ui, "Ghost notes", &mut generator.ghost_notes);
-        self.swing_row(ui);
         let ts = self.guide_meter();
         if value_row(ui, "Guide", self.ui.guide.in_meter(&ts).label()).clicked() {
             self.ui.picker = Some(Picker::Guide);

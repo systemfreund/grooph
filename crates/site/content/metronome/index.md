@@ -22,8 +22,8 @@ bpm=100&ts=4/4
    3 to 13 over an eighth or 5 to 19 over a sixteenth note, so 3/4, 6/8, 7/8 and 12/8 are
    all possible.
 3. **Press play** (or the space bar). A moving cursor shows where you are in the measure.
-4. **Optional:** switch on **Count-in** on the **Practice** tab to hear one bar of clicks
-   before the music starts, or add a feel under **Swing**.
+4. **Optional:** switch on **Count-in** in the options of the **Metronome** or **Practice**
+   tab to hear one bar of clicks before the music starts, or add a feel under **Swing**.
 
 On phones and tablets the screen stays awake while the metronome is playing.
 

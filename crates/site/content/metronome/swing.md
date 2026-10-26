@@ -25,8 +25,10 @@ grooph describes swing as the share of the pair taken by the first note:
 | 66% | triplet swing, the classic jazz and shuffle feel | 2:1 |
 | 75% | dotted, a hard shuffle | 3:1 |
 
-Set the amount under **Swing** on the **Practice** tab. You can swing eighth notes
-(jazz, blues, shuffle) or sixteenth notes (funk, hip-hop, neo-soul).
+Tap **Swing** in the options of the **Metronome** or **Practice** tab to set the amount; its
+switch turns swing on and off. You can swing eighth notes (jazz, blues, shuffle) or
+sixteenth notes (funk, hip-hop, neo-soul). In the metronome you hear it once the click has
+offbeats, from a subdivision or a polyrhythm.
 
 ## Hear the difference
 
