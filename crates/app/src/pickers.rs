@@ -64,7 +64,7 @@ pub(crate) enum Picker {
     MidiInput,
     /// The inputs that count as hits and their latency.
     PlayAlong,
-    /// Saved rhythms: save, load, rename, delete, share.
+    /// Saved rhythms and practice presets: save, load, rename, delete.
     Library,
     /// The volumes of the voices.
     Mixer,

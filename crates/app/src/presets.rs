@@ -6,6 +6,7 @@
 //! cannot be deleted or renamed and always come back unchanged. User presets
 //! live in [`PresetLibrary`] and are persisted with the app state.
 
+use crate::library::next_default_name;
 use grooph_audio::{GapClick, GapMode, GapMute, Sound, TempoRamp};
 use grooph_measure::TimeSignature;
 use grooph_measure::generator::{GeneratorSettings, Subdivision};
@@ -67,10 +68,10 @@ pub(crate) struct PresetLibrary {
 }
 
 impl PresetLibrary {
-    /// Add a preset; an empty name becomes "Preset N".
+    /// Add a preset; an empty name becomes the next free "Preset N".
     pub(crate) fn add(&mut self, name: &str, settings: PresetSettings) -> u64 {
         let name = match name.trim() {
-            "" => format!("Preset {}", self.presets.len() + 1),
+            "" => next_default_name("Preset", self.presets.iter().map(|p| p.name.as_str())),
             name => name.to_string(),
         };
         let id = self.next_id;

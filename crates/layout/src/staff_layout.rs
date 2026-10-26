@@ -740,6 +740,11 @@ mod tests {
         assert_eq!(flags, vec![true, false]);
         let first = &staff.systems[0].measures[0];
         assert!(first.layout.time_signature.is_some());
+
+        // A compound meter alone, as in a library preview.
+        let six_eight = Score::single(Measure::new(TimeSignature::new(6, 8)));
+        let staff = build_staff_layout(&six_eight, &staff_opts);
+        assert!(staff.systems[0].measures[0].layout.time_signature.is_some());
     }
 
     #[test]

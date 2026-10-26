@@ -319,7 +319,10 @@ impl Grooph {
         match self.playback_ctl.transport_state {
             TransportState::Playing => {
                 let timing = self.score_timing();
-                self.advance_playback(ui, &timing);
+                let tick = self.advance_playback(ui, &timing);
+                // Nothing is on screen: every bar before the playing one is
+                // out of view, so endless mode drops them as it goes.
+                self.playback_ctl.playback.rows_above_view = timing.to_local(tick).0;
             }
             TransportState::Stopped => self.playback_ctl.playback.reset(),
         }

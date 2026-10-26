@@ -243,6 +243,12 @@ impl Grooph {
         self.editor.metronome.stash.as_ref()
     }
 
+    /// Whether the rhythm has unsaved changes, also while the metronome's
+    /// click bar is edited in its place.
+    pub(crate) fn rhythm_dirty(&self) -> bool {
+        self.metronome_stash().map_or(self.editor.dirty, |stash| stash.dirty)
+    }
+
     /// Meter the metronome tab clicks.
     pub(crate) fn metronome_meter(&self) -> TimeSignature {
         self.editor.metronome.meter

@@ -1,6 +1,16 @@
 use grooph_measure::Score;
 use serde::{Deserialize, Serialize};
 
+/// `"{prefix} N"` with N one more than the highest such name in `names`, so
+/// a default name does not repeat after a deletion.
+pub(crate) fn next_default_name<'a>(prefix: &str, names: impl Iterator<Item = &'a str>) -> String {
+    let highest = names
+        .filter_map(|name| name.strip_prefix(prefix)?.strip_prefix(' ')?.parse::<u32>().ok())
+        .max()
+        .unwrap_or(0);
+    format!("{prefix} {}", highest + 1)
+}
+
 /// A user-saved metronome pattern: a complete score plus its tempo, addressable
 /// by a stable id and a human-readable name.
 #[derive(Clone, Serialize, Deserialize)]
@@ -84,5 +94,13 @@ mod tests {
         lib.remove(a);
         assert!(lib.get(a).is_none());
         assert!(lib.get(b).is_some());
+    }
+
+    #[test]
+    fn default_names_do_not_repeat_after_a_deletion() {
+        use super::next_default_name;
+        let names = ["Pattern 1", "Pattern 3", "Groove", "Pattern x"];
+        assert_eq!(next_default_name("Pattern", names.into_iter()), "Pattern 4");
+        assert_eq!(next_default_name("Preset", names.into_iter()), "Preset 1");
     }
 }

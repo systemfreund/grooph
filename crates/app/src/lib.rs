@@ -613,8 +613,8 @@ impl Grooph {
     }
 
     /// "Save": if a pattern is active, overwrite its score + tempo in place
-    /// (keeping id and name). Otherwise create a new entry from `name` and make
-    /// it active. An empty name falls back to a numbered default.
+    /// (keeping id and name); otherwise save a new one (see
+    /// [`Self::save_pattern_as`]). Returns the pattern's id.
     pub(crate) fn save_active_pattern(&mut self) -> u64 {
         // The library keeps rhythms, not the metronome's click bar.
         self.leave_metronome();
@@ -630,13 +630,14 @@ impl Grooph {
         }
     }
 
-    /// "Save as new": always create a new library entry under a numbered
-    /// name and make it the active pattern.
+    /// "Save as new": always create a new library entry under the next free
+    /// "Pattern N" and make it the active pattern.
     pub(crate) fn save_pattern_as(&mut self) -> u64 {
         self.leave_metronome();
         let score = self.editor.score.clone();
         let bpm = self.playback_ctl.bpm;
-        let name = format!("Pattern {}", self.editor.library.patterns.len() + 1);
+        let names = self.editor.library.patterns.iter().map(|p| p.name.as_str());
+        let name = library::next_default_name("Pattern", names);
         let id = self.editor.library.add(name, score, bpm);
         self.editor.active_pattern_id = Some(id);
         self.editor.dirty = false;
@@ -653,6 +654,8 @@ impl Grooph {
         let score = pattern.score.clone();
         let bpm = pattern.bpm;
 
+        // The rhythm is replaced, not the metronome's click bar.
+        self.leave_metronome();
         self.stop_transport();
         self.with_undo_snapshot(|app| {
             app.editor.score = score;
@@ -685,14 +688,15 @@ impl Grooph {
     /// Entry point for the load button: if the working score has unsaved changes,
     /// defer to the confirmation dialog; otherwise load immediately.
     pub(crate) fn request_load_pattern(&mut self, id: u64) {
-        // Whether the rhythm has unsaved changes, not the click bar.
-        self.leave_metronome();
-        if self.editor.active_pattern_id == Some(id) && !self.editor.dirty {
+        let dirty = self.rhythm_dirty();
+        if self.editor.active_pattern_id == Some(id) && !dirty {
             // Already loaded and unchanged.
+            self.leave_metronome();
             self.show_loaded_pattern();
             return;
         }
-        if self.editor.dirty {
+        // Asking first leaves the metronome playing, in case of a cancel.
+        if dirty {
             self.ui.pending_load = Some(PendingLoad::Pattern(id));
         } else {
             self.load_pattern(id);
@@ -1184,6 +1188,7 @@ impl Grooph {
                 platform,
                 renaming_preset: None,
                 renaming_pattern: None,
+                rename_typed: String::new(),
                 pending_load: None,
                 link_error: None,
                 link_copied_at: None,
@@ -1523,6 +1528,125 @@ mod tests {
             output.textures_delta.clear();
         }
         assert_eq!(app.ui.picker, Some(Picker::Preset));
+    }
+
+    /// Runs frames of the shell at phone size, `time` seconds into the run,
+    /// with `events` in the first.
+    fn shell_frame(
+        app: &mut super::Grooph,
+        ctx: &eframe::egui::Context,
+        time: f64,
+        events: Vec<eframe::egui::Event>,
+    ) {
+        use eframe::egui::{Pos2, RawInput, Rect, vec2};
+        let screen = Rect::from_min_size(Pos2::ZERO, vec2(390.0, 844.0));
+        let input =
+            RawInput { screen_rect: Some(screen), time: Some(time), events, ..Default::default() };
+        let mut output = ctx.run_ui(input, |ui| {
+            app.apply_style(ui);
+            app.shell_ui(ui);
+            app.update_endless();
+            app.handle_keyboard_input(ui);
+        });
+        output.textures_delta.clear();
+    }
+
+    #[test]
+    fn endless_mode_drops_played_bars_behind_the_more_screen() {
+        use super::Grooph;
+
+        let ctx = eframe::egui::Context::default();
+        let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let mut app = Grooph::new(&cc);
+        app.select_tab(Tab::Practice);
+        app.editor.generator.endless = true;
+        app.playback_ctl.bpm = 240;
+        app.start_playback();
+        app.select_tab(Tab::More);
+        // A minute at 240 BPM: sixty bars of 4/4 go by.
+        let mut time = 0.0;
+        while time < 60.0 {
+            shell_frame(&mut app, &ctx, time, vec![]);
+            time += 0.1;
+        }
+        assert!(app.editor.score.len() <= 4, "{} bars", app.editor.score.len());
+    }
+
+    #[test]
+    fn esc_on_the_more_screen_closes_the_dialog_first() {
+        use super::Grooph;
+        use crate::pickers::Picker;
+        use eframe::egui::{Event, Key, Modifiers};
+
+        let ctx = eframe::egui::Context::default();
+        let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let mut app = Grooph::new(&cc);
+        app.select_tab(Tab::More);
+        app.ui.picker = Some(Picker::Mixer);
+        shell_frame(&mut app, &ctx, 0.0, vec![]);
+        let esc = |pressed| Event::Key {
+            key: Key::Escape,
+            physical_key: None,
+            pressed,
+            repeat: false,
+            modifiers: Modifiers::NONE,
+        };
+        shell_frame(&mut app, &ctx, 0.1, vec![esc(true), esc(false)]);
+        assert_eq!(app.ui.picker, None);
+        assert_eq!(app.tab(), Tab::More);
+    }
+
+    #[test]
+    fn a_load_that_asks_first_leaves_the_metronome_playing() {
+        use super::{Grooph, TransportState};
+
+        let cc = eframe::CreationContext::_new_kittest(eframe::egui::Context::default());
+        let mut app = Grooph::new(&cc);
+        app.select_tab(Tab::Edit);
+        let id = app.save_pattern_as();
+        app.editor.dirty = true;
+        app.select_tab(Tab::Metronome);
+        app.start_playback();
+        app.select_tab(Tab::More);
+        app.editor.active_pattern_id = None;
+        app.request_load_pattern(id);
+        assert!(app.ui.pending_load.is_some());
+        assert!(app.metronome_mode());
+        assert_eq!(app.playback_ctl.transport_state, TransportState::Playing);
+        // Loading after all puts the metronome away.
+        let pending = app.ui.pending_load.take().unwrap();
+        app.finish_pending_load(pending);
+        assert!(!app.metronome_mode());
+        assert_eq!(app.editor.active_pattern_id, Some(id));
+    }
+
+    #[test]
+    fn library_dialog_stays_within_a_phone_screen() {
+        use super::Grooph;
+        use crate::pickers::Picker;
+        use eframe::egui::Id;
+
+        let ctx = eframe::egui::Context::default();
+        let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let mut app = Grooph::new(&cc);
+        app.select_tab(Tab::Edit);
+        let first = app.save_pattern_as();
+        app.save_pattern_as();
+        app.save_pattern_as();
+        app.editor.library.patterns[1].name = "A name far too long for a phone's dialog".into();
+        app.select_tab(Tab::More);
+        app.ui.picker = Some(Picker::Library);
+        let width = |app: &mut Grooph| {
+            for i in 0..3 {
+                shell_frame(app, &ctx, f64::from(i) * 0.1, vec![]);
+            }
+            ctx.memory(|m| m.area_rect(Id::unique("settings_picker"))).unwrap().width()
+        };
+        let closed = width(&mut app);
+        assert!(closed <= 390.0, "{closed}");
+        // Renaming opens a field and two buttons under the card.
+        app.ui.renaming_pattern = Some(first);
+        assert_eq!(width(&mut app), closed);
     }
 
     #[test]

@@ -322,6 +322,9 @@ pub(crate) struct UiShell {
     pub(crate) renaming_preset: Option<u64>,
     /// Saved pattern whose card in the library is being renamed. Not persisted.
     pub(crate) renaming_pattern: Option<u64>,
+    /// The name being typed for the card being renamed; it becomes the name
+    /// on ✔ or Enter only. Not persisted.
+    pub(crate) rename_typed: String,
     /// Load awaiting the "discard unsaved changes?" confirmation. `Some` shows
     /// the confirm dialog. Not persisted.
     pub(crate) pending_load: Option<PendingLoad>,

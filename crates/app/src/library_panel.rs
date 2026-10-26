@@ -133,11 +133,14 @@ struct CardState {
 }
 
 /// One saved rhythm or preset: name, `meta` below it, ✏, and the first bar
-/// of `preview`'s score. A tap anywhere else on the card loads it; ✏ opens renaming and
-/// deleting under it.
+/// of `preview`'s score. A tap anywhere else on the card loads it; ✏ opens
+/// renaming and deleting under it. The new name is typed into `typed` and
+/// only becomes the name on ✔ or Enter, so closing renaming any other way
+/// leaves the old one.
 fn library_card(
     ui: &mut egui::Ui,
     name: &mut String,
+    typed: &mut String,
     meta: String,
     preview: Option<(&Score, &PreviewLook)>,
     state: CardState,
@@ -191,8 +194,11 @@ fn library_card(
                     pattern_preview(ui, score, width, look);
                 }
                 if editing == Some(true) {
-                    match rename_row(ui, name) {
-                        Some(Renamed::Done) => action = Some(CardAction::Renamed),
+                    match rename_row(ui, typed) {
+                        Some(Renamed::Done) => {
+                            *name = typed.trim().to_owned();
+                            action = Some(CardAction::Renamed);
+                        }
                         Some(Renamed::Delete) => action = Some(CardAction::Delete),
                         None => {}
                     }
@@ -251,7 +257,6 @@ fn rename_row(ui: &mut egui::Ui, name: &mut String) -> Option<Renamed> {
     if delete {
         Some(Renamed::Delete)
     } else if done {
-        *name = name.trim().to_owned();
         Some(Renamed::Done)
     } else {
         None
@@ -357,8 +362,7 @@ impl Grooph {
     /// Saved rhythms: a tap loads one onto the staff.
     fn rhythms(&mut self, ui: &mut egui::Ui) {
         let active_id = self.editor.active_pattern_id;
-        // The rhythm's, also while the metronome's click bar is edited.
-        let dirty = self.metronome_stash().map_or(self.editor.dirty, |stash| stash.dirty);
+        let dirty = self.rhythm_dirty();
         let active_name =
             active_id.and_then(|id| self.editor.library.get(id)).map(|p| p.name.clone());
         if let Some(save) = save_buttons(ui, active_name.as_deref(), dirty) {
@@ -367,6 +371,8 @@ impl Grooph {
                 SaveAs::New => {
                     let id = self.save_pattern_as();
                     self.ui.renaming_pattern = Some(id);
+                    self.ui.rename_typed =
+                        self.editor.library.get(id).map(|p| p.name.clone()).unwrap_or_default();
                     id
                 }
             };
@@ -389,6 +395,7 @@ impl Grooph {
             stem_length_factor: self.ui.layout.stem_length_factor,
         };
         let renaming = &mut self.ui.renaming_pattern;
+        let typed = &mut self.ui.rename_typed;
         egui::ScrollArea::vertical().max_height(dialog_scroll_height(ui)).show(ui, |ui| {
             for pattern in &mut self.editor.library.patterns {
                 let id = pattern.id;
@@ -403,10 +410,11 @@ impl Grooph {
                 };
                 let meta = pattern_summary(pattern);
                 let preview = Some((&pattern.score, look));
-                let action = library_card(ui, &mut pattern.name, meta, preview, state);
+                let action = library_card(ui, &mut pattern.name, typed, meta, preview, state);
                 match action {
                     Some(CardAction::Edit) => {
                         *renaming = if *renaming == Some(id) { None } else { Some(id) };
+                        typed.clone_from(&pattern.name);
                     }
                     Some(CardAction::Renamed) => *renaming = None,
                     Some(action) => picked = Some((id, action)),
@@ -448,6 +456,8 @@ impl Grooph {
                 _ => {
                     let id = self.save_preset_as("");
                     self.ui.renaming_preset = Some(id);
+                    self.ui.rename_typed =
+                        self.editor.presets.get(id).map(|p| p.name.clone()).unwrap_or_default();
                     id
                 }
             };
@@ -459,6 +469,7 @@ impl Grooph {
         let mut to_delete = None;
         let (just_saved, scroll_to) = self.card_notices(ui);
         let renaming = &mut self.ui.renaming_preset;
+        let typed = &mut self.ui.rename_typed;
         let builtin = presets::builtin_presets();
         egui::ScrollArea::vertical().max_height(dialog_scroll_height(ui)).show(ui, |ui| {
             for preset in &mut self.editor.presets.presets {
@@ -473,10 +484,11 @@ impl Grooph {
                     editing: Some(*renaming == Some(id)),
                 };
                 let meta = preset_summary(&preset.settings);
-                let action = library_card(ui, &mut preset.name, meta, None, state);
+                let action = library_card(ui, &mut preset.name, typed, meta, None, state);
                 match action {
                     Some(CardAction::Edit) => {
                         *renaming = if *renaming == Some(id) { None } else { Some(id) };
+                        typed.clone_from(&preset.name);
                     }
                     Some(CardAction::Renamed) => *renaming = None,
                     Some(CardAction::Load) => picked = Some(PresetId::User(id)),
@@ -501,7 +513,9 @@ impl Grooph {
                 };
                 let mut name = (*name).to_owned();
                 let meta = preset_summary(settings);
-                if let Some(CardAction::Load) = library_card(ui, &mut name, meta, None, state) {
+                if let Some(CardAction::Load) =
+                    library_card(ui, &mut name, typed, meta, None, state)
+                {
                     picked = Some(id);
                 }
                 ui.add_space(6.0);
