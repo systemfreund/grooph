@@ -21,6 +21,7 @@ import json
 import re
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 # publish --dry-run prints what it would post instead of posting it.
@@ -182,9 +183,12 @@ def discussion(summary, comments):
 def new_answers(summary, state, review_comments, comments):
     """Answers the synthesis has not seen yet: replies in the thread of an open finding, and comments in the
     conversation that name a finding."""
-    threads = {f["comment_id"] for f in state["findings"] if f["status"] == "open" and f.get("comment_id")}
+    open_findings = [f for f in state["findings"] if f["status"] == "open"]
+    threads = {f["comment_id"] for f in open_findings if f.get("comment_id")}
+    ids = {f["id"] for f in open_findings}
     replies = [c for c in review_comments if c.get("in_reply_to_id") in threads]
-    named = [c for c in comments if FINDING_ID_RE.search(c["body"])]
+    # Only ids of open findings: "the F16 case" is no answer.
+    named = [c for c in comments if ids & set(FINDING_ID_RE.findall(c["body"]))]
     # Before answers_until existed, the last update of the summary is the closest.
     seen = state.get("answers_until") or summary["updated_at"]
     return [c for c in replies + named if from_people(c) and c["created_at"] > seen]
@@ -212,13 +216,12 @@ def cmd_rerun(args):
     return 0
 
 
-def latest_answer(prior):
-    """When the newest answer the synthesis gets was written, or None."""
-    answers = [r for f in prior["findings"] for r in f.get("replies", [])] + prior["discussion"]
-    return max((a["at"] for a in answers), default=None)
+def now():
+    """The time in GitHub's format, so it compares with `created_at` as a string."""
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def build_context(pr, head, reviews, expected, prior, diff_since_prior, answers_only=False):
+def build_context(pr, head, reviews, expected, prior, diff_since_prior, answers_only=False, answers_until=None):
     answered = {r["reviewer"] for r in reviews}
     failed = [{"reviewer": r["reviewer"], "error": r["error"]} for r in reviews if "error" in r]
     # A reviewer job that failed before its extract step left no file at all.
@@ -231,7 +234,7 @@ def build_context(pr, head, reviews, expected, prior, diff_since_prior, answers_
         "prior_review": prior is not None,
         "diff_since_prior": diff_since_prior,
         "answers_only": answers_only,
-        "answers_until": latest_answer(prior) if prior else None,
+        "answers_until": answers_until,
     }
 
 
@@ -242,6 +245,8 @@ def cmd_prepare(args):
     reviews = [json.loads(path.read_text()) for path in sorted(Path(args.reviews).glob("*.json"))]
     (out / "reviews.json").write_text(json.dumps(reviews, indent=2, ensure_ascii=False))
 
+    # Every answer written before this moment is in the comments fetched now; a later one is new to the next run.
+    fetched_at = now()
     comments = issue_comments(args.repo, args.pr)
     summary = find_summary_comment(comments)
     state = read_state(summary)
@@ -266,7 +271,8 @@ def cmd_prepare(args):
 
     expected = json.loads(args.expected)
     diff_since_prior = (out / "diff-since-prior.patch").exists()
-    context = build_context(args.pr, args.head, reviews, expected, prior, diff_since_prior, args.answers_only)
+    context = build_context(args.pr, args.head, reviews, expected, prior, diff_since_prior, args.answers_only,
+                            fetched_at)
     (out / "context.json").write_text(json.dumps(context, indent=2))
     print(json.dumps(context, indent=2))
     if not context["reviewers"]:
@@ -617,11 +623,22 @@ def post_inline(repo, pr, head, findings):
     return failed
 
 
+def outdated(args, prior):
+    """Whether a newer push or review overtook a run that merges answers to the review of `args.head`."""
+    pr = gh_json("api", "-X", "GET", f"repos/{args.repo}/pulls/{args.pr}")
+    return pr["head"]["sha"] != args.head or prior.get("head_sha") != args.head
+
+
 def cmd_publish(args):
     comment = find_summary_comment(issue_comments(args.repo, args.pr))
     prior = read_state(comment) or {"next_id": 1, "findings": []}
     context_path = Path(args.input, "context.json")
     context = json.loads(context_path.read_text()) if context_path.exists() else {"reviewers": [], "failed_reviewers": []}
+
+    if context.get("answers_only") and outdated(args, prior):
+        # Comment runs have their own concurrency group, so a push can arrive while one runs; its review wins.
+        print(f"::notice::not published: {args.head[:7]} is no longer the head, or was reviewed again meanwhile")
+        return 0
 
     synthesis_path = Path(args.synthesis)
     synthesis = json.loads(synthesis_path.read_text()) if synthesis_path.exists() else {"error": "no output"}
@@ -637,7 +654,7 @@ def cmd_publish(args):
     state, newly_resolved = merge_state(prior, synthesis, args.head)
     # What a comment needs to start the synthesis again: the reviews to reuse, and which answers it has seen.
     state["reviews_run"] = args.reviews_run
-    state["answers_until"] = context.get("answers_until") or prior.get("answers_until")
+    state["answers_until"] = max(filter(None, [context.get("answers_until"), prior.get("answers_until")]), default=None)
 
     def summary():
         return render_summary(synthesis, state, context, args.head, args.model, args.run_url, newly_resolved)

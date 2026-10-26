@@ -26,7 +26,7 @@ name: Code review
 # someone with write access answered a finding since: a reply in its thread, or a
 # comment in the conversation that names it (F3). `review.py rerun` decides; it
 # looks at all answers since the last review, so a comment that cancels a waiting
-# run loses nothing. A comment never cancels a running review. Comment runs use
+# run loses nothing. A comment never cancels a review. Comment runs use
 # the workflow file of the default branch (GitHub's rule for issue_comment), but
 # still the scripts and instructions of the PR's head.
 #
@@ -54,9 +54,14 @@ on:
         description: 'Models for the general review, as a JSON list, e.g. ["venice/deepseek-v4-1-flash"]. Leave blank for the default list'
         required: false
 
+# Comment runs get their own group: in a shared one, a comment would replace a push's review that is still
+# waiting. A newer comment does replace a waiting comment run, which loses nothing (see above), and a push
+# that lands during a comment run wins: publish then drops the comment run's result.
 concurrency:
-  group: code-review-${{ github.event.pull_request.number || github.event.issue.number || inputs.pr }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' }}
+  group: >-
+    code-review-${{ github.event.pull_request.number || github.event.issue.number || inputs.pr
+    }}${{ endsWith(github.event_name, 'comment') && '-answers' || '' }}
+  cancel-in-progress: ${{ !endsWith(github.event_name, 'comment') }}
 
 env:
   # Default models of the general review. GLM 5.3 (venice/z-ai-glm-5-3, its

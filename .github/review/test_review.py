@@ -316,6 +316,7 @@ class FakeGitHub:
         self.issue_comments, self.review_comments, self.fail, self.calls = [], [], set(), []
         self.files = [{"filename": "a.rs", "patch": f"@@ -1,0 +1,{len(changed_lines)} @@\n" + "+x\n" * len(changed_lines)}]
         self.next_id, self.reviews = 1000, 0
+        self.head = None  # the PR's head; None: the head of the run
 
     def new_id(self):
         self.next_id += 1
@@ -338,6 +339,8 @@ class FakeGitHub:
             return self.rejected()
         method, path = args[2], args[3].split("/", 3)[3]  # drop "repos/o/r/"
         self.calls.append((method, path))
+        if method == "GET" and path == "pulls/5":
+            return self.ok({"head": {"sha": self.head}})
         if method == "POST" and path == "issues/5/comments":
             comment = {"id": self.new_id(), "body": data["body"], "user": {"login": review.BOT}}
             self.issue_comments.append(comment)
@@ -489,16 +492,30 @@ class Publish(unittest.TestCase):
         self.assertEqual(self.github.reviews, 1)
         self.assertIsNotNone(self.by_id()["F1"]["comment_id"])
 
+    def context(self, **fields):
+        (self.dir / "context.json").write_text(json.dumps({"reviewers": ["m1"], "failed_reviewers": [], **fields}))
+
     def test_stores_the_run_of_the_reviews_and_the_answers_seen(self):
-        (self.dir / "context.json").write_text(json.dumps(
-            {"reviewers": ["m1"], "failed_reviewers": [], "answers_only": True, "answers_until": "2026-01-03"}))
+        self.context(answers_until="2026-01-03")
         self.publish("aaaaaaa", {})
         self.assertEqual(self.github.state()["reviews_run"], "77")
-        self.assertEqual(self.github.state()["answers_until"], "2026-01-03")
+        self.github.head = "aaaaaaa"
+        self.context(answers_only=True, answers_until="2026-01-05")
+        self.publish("aaaaaaa", {})
         self.assertIn("Merged again after new answers", self.github.issue_comments[0]["body"])
-        (self.dir / "context.json").write_text(json.dumps({"reviewers": ["m1"], "failed_reviewers": []}))
+        self.assertEqual(self.github.state()["answers_until"], "2026-01-05")
+        # A run that saw less does not move it back.
+        self.context(answers_until="2026-01-04")
         self.publish("bbbbbbb", {})
-        self.assertEqual(self.github.state()["answers_until"], "2026-01-03")
+        self.assertEqual(self.github.state()["answers_until"], "2026-01-05")
+
+    def test_answers_to_a_commit_that_is_no_longer_the_head_are_not_published(self):
+        self.publish("aaaaaaa", {"findings": [{"title": "t", "file": "a.rs", "line": 3, "body": "b"}]})
+        before = self.github.issue_comments[0]["body"]
+        self.context(answers_only=True)
+        self.github.head = "bbbbbbb"  # pushed while the synthesis ran
+        self.assertEqual(self.publish("aaaaaaa", {"withdrawn": [{"id": "F1", "note": "intended"}]}), 0)
+        self.assertEqual(self.github.issue_comments[0]["body"], before)
 
     def test_a_malformed_synthesis_keeps_the_previous_review(self):
         self.publish("aaaaaaa", {"findings": [{"title": "t", "file": "a.rs", "line": 3, "body": "b"}]})
@@ -530,6 +547,9 @@ class Prepare(unittest.TestCase):
         self.assertFalse(context["diff_since_prior"])
 
     def test_gives_the_synthesis_what_people_answered(self):
+        patcher = mock.patch.object(review, "now", lambda: "2026-02-01T00:00:00Z")
+        patcher.start()
+        self.addCleanup(patcher.stop)
         github = FakeGitHub()
         state = {"version": 1, "head_sha": "old", "next_id": 3, "findings": [finding("F1", comment_id=7), finding("F2")]}
 
@@ -552,7 +572,7 @@ class Prepare(unittest.TestCase):
         reviews, out = Path(tempfile.mkdtemp()), Path(tempfile.mkdtemp())
         (reviews / "0.json").write_text(json.dumps({"reviewer": "m1", "findings": []}))
         args = types.SimpleNamespace(repo="o/r", pr="5", head="new", reviews=str(reviews), out=str(out),
-                                     expected=json.dumps(["m1"]), answers_only=False)
+                                     expected=json.dumps(["m1"]), answers_only=True)
         with (mock.patch.object(review, "gh", github.gh), mock.patch.object(review, "gh_paginated", github.paginated),
               mock.patch.object(review, "print", lambda *a: None, create=True)):
             self.assertEqual(review.cmd_prepare(args), 0)
@@ -561,7 +581,9 @@ class Prepare(unittest.TestCase):
         self.assertEqual(f1["replies"], [{"author": "dev", "at": "2026-01-03", "body": "handled in b.rs"}])
         self.assertNotIn("replies", f2)
         self.assertEqual(prior["discussion"], [{"author": "dev", "at": "2026-01-03", "body": "F2 is intended"}])
-        self.assertEqual(json.loads((out / "context.json").read_text())["answers_until"], "2026-01-03")
+        context = json.loads((out / "context.json").read_text())
+        self.assertEqual(context["answers_until"], "2026-02-01T00:00:00Z")
+        self.assertTrue(context["answers_only"])
 
 
 class Rerun(unittest.TestCase):
@@ -591,6 +613,11 @@ class Rerun(unittest.TestCase):
     def test_a_comment_that_names_a_finding_reuses_the_reviews(self):
         self.github.issue_comments.append(self.comment(9, "2026-01-06", "F1 is intended"))
         self.assertEqual(self.rerun(), ["reuse=77"])
+
+    def test_a_comment_that_names_no_open_finding_does_nothing(self):
+        self.github.issue_comments += [self.comment(9, "2026-01-06", "the F16 case"),
+                                       self.comment(10, "2026-01-06", "F2 was resolved")]
+        self.assertEqual(self.rerun(), [])
 
     def test_what_is_no_new_answer_does_nothing(self):
         self.github.issue_comments += [
