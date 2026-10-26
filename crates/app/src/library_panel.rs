@@ -291,8 +291,8 @@ fn save_buttons(ui: &mut egui::Ui, target: &SaveTarget) -> Option<SaveAs> {
 }
 
 /// What a save button asked for.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum SaveAs {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SaveAs {
     /// Overwrite the active one.
     Update,
     /// A new one, under a name to type at once.
@@ -368,9 +368,48 @@ impl Grooph {
         (just_saved, self.ui.scroll_to_library_item.take())
     }
 
-    fn saved(&mut self, ui: &egui::Ui, item: LibraryItem) {
-        self.ui.library_saved = Some((item, ui.input(|i| i.time)));
+    /// The card of `item` says "✓ Saved" from UI time `now` on and scrolls
+    /// into view.
+    fn saved(&mut self, item: LibraryItem, now: f64) {
+        self.ui.library_saved = Some((item, now));
         self.ui.scroll_to_library_item = Some(item);
+    }
+
+    /// What a save button of the rhythms asked for; a new pattern opens its
+    /// name. Returns the pattern's id.
+    pub(crate) fn save_rhythm(&mut self, save: SaveAs, now: f64) -> u64 {
+        let id = match save {
+            SaveAs::Update => self.save_active_pattern(),
+            SaveAs::New => {
+                let id = self.save_pattern_as();
+                self.ui.renaming_pattern = Some(id);
+                self.ui.rename_typed =
+                    self.editor.library.get(id).map(|p| p.name.clone()).unwrap_or_default();
+                id
+            }
+        };
+        self.saved(LibraryItem::Pattern(id), now);
+        id
+    }
+
+    /// What a save button of the presets asked for; a new preset opens its
+    /// name. Returns the preset's id.
+    pub(crate) fn save_preset(&mut self, save: SaveAs, now: f64) -> u64 {
+        let id = match (save, self.editor.active_preset) {
+            (SaveAs::Update, Some(PresetId::User(id))) => {
+                self.editor.presets.update(id, self.preset_snapshot());
+                id
+            }
+            _ => {
+                let id = self.save_preset_as("");
+                self.ui.renaming_preset = Some(id);
+                self.ui.rename_typed =
+                    self.editor.presets.get(id).map(|p| p.name.clone()).unwrap_or_default();
+                id
+            }
+        };
+        self.saved(LibraryItem::Preset(id), now);
+        id
     }
 
     /// "Save" for the rhythms: the active pattern while it has changes, a
@@ -405,17 +444,7 @@ impl Grooph {
         let dirty = self.rhythm_dirty();
         let target = self.rhythm_save_target();
         if let Some(save) = save_buttons(ui, &target) {
-            let id = match save {
-                SaveAs::Update => self.save_active_pattern(),
-                SaveAs::New => {
-                    let id = self.save_pattern_as();
-                    self.ui.renaming_pattern = Some(id);
-                    self.ui.rename_typed =
-                        self.editor.library.get(id).map(|p| p.name.clone()).unwrap_or_default();
-                    id
-                }
-            };
-            self.saved(ui, LibraryItem::Pattern(id));
+            self.save_rhythm(save, ui.input(|i| i.time));
         }
         if target.overwrites.is_none() {
             ui.weak("The rhythm on the staff is not saved.");
@@ -481,20 +510,7 @@ impl Grooph {
         let snapshot = self.preset_snapshot();
         let active = self.editor.active_preset;
         if let Some(save) = save_buttons(ui, &self.preset_save_target()) {
-            let id = match (save, active) {
-                (SaveAs::Update, Some(PresetId::User(id))) => {
-                    self.editor.presets.update(id, snapshot);
-                    id
-                }
-                _ => {
-                    let id = self.save_preset_as("");
-                    self.ui.renaming_preset = Some(id);
-                    self.ui.rename_typed =
-                        self.editor.presets.get(id).map(|p| p.name.clone()).unwrap_or_default();
-                    id
-                }
-            };
-            self.saved(ui, LibraryItem::Preset(id));
+            self.save_preset(save, ui.input(|i| i.time));
         }
         ui.add_space(8.0);
 

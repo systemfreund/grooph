@@ -39,10 +39,6 @@ impl Grooph {
                 self.toggle_playback();
             }
 
-            // The More screen shows no score to edit.
-            if self.tab() == Tab::More {
-                return;
-            }
             if let Some(tool) = matching_tool(i) {
                 self.apply_tool(tool);
             }

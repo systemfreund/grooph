@@ -708,6 +708,7 @@ impl Grooph {
         if self.editor.active_pattern_id == Some(id) {
             self.editor.active_pattern_id = None;
         }
+        self.forget_stashed_pattern(id);
         if matches!(self.ui.pending_load, Some(PendingLoad::Pattern(p)) if p == id) {
             self.ui.pending_load = None;
         }
@@ -719,7 +720,9 @@ impl Grooph {
         // A metronome link leaves the rhythm alone: nothing to lose.
         let replaces_rhythm =
             link.content.as_ref().is_some_and(|c| !matches!(c, LinkContent::Metronome(_)));
-        if replaces_rhythm && self.editor.dirty {
+        // The rhythm's changes, also while the metronome's click bar is in
+        // its place.
+        if replaces_rhythm && self.rhythm_dirty() {
             self.ui.pending_load = Some(PendingLoad::Link(Box::new(link)));
         } else {
             self.apply_link(link);
@@ -1695,6 +1698,142 @@ mod tests {
         // Renaming opens a field and two buttons under the card.
         app.ui.renaming_pattern = Some(first);
         assert_eq!(width(&mut app), closed);
+    }
+
+    #[test]
+    fn a_link_asks_first_for_a_rhythm_put_aside_by_the_metronome() {
+        use super::Grooph;
+        use grooph_link::{LinkContent, SharedLink};
+
+        let cc = eframe::CreationContext::_new_kittest(eframe::egui::Context::default());
+        let mut app = Grooph::new(&cc);
+        app.select_tab(Tab::Edit);
+        app.editor.dirty = true;
+        app.select_tab(Tab::Metronome);
+        app.select_tab(Tab::More);
+        // The click bar has no changes; the rhythm behind it has.
+        app.editor.dirty = false;
+        let score = Score::single(Measure::new(TimeSignature::new(3, 4)));
+        app.open_link(SharedLink {
+            content: Some(LinkContent::Score(score)),
+            ..Default::default()
+        });
+        assert!(app.ui.pending_load.is_some());
+        assert!(app.metronome_mode());
+    }
+
+    #[test]
+    fn deleting_the_rhythm_behind_the_metronome_forgets_it() {
+        use super::Grooph;
+
+        let cc = eframe::CreationContext::_new_kittest(eframe::egui::Context::default());
+        let mut app = Grooph::new(&cc);
+        app.select_tab(Tab::Edit);
+        let id = app.save_pattern_as();
+        app.select_tab(Tab::Metronome);
+        app.select_tab(Tab::More);
+        app.delete_pattern(id);
+        app.select_tab(Tab::Edit);
+        assert_eq!(app.editor.active_pattern_id, None);
+    }
+
+    #[test]
+    fn keys_on_the_more_screen_leave_the_hidden_score_alone() {
+        use super::{Grooph, TransportState};
+        use crate::tools::all_tools;
+        use eframe::egui::{Event, Key, Modifiers};
+
+        let ctx = eframe::egui::Context::default();
+        let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let mut app = Grooph::new(&cc);
+        app.select_tab(Tab::Edit);
+        app.select_tab(Tab::More);
+        let score = format!("{:?}", app.editor.score);
+        let key = |key, pressed| Event::Key {
+            key,
+            physical_key: None,
+            pressed,
+            repeat: false,
+            modifiers: Modifiers::NONE,
+        };
+        // Every plain tool key: none edits the score behind More (tools run
+        // in edit mode only).
+        let mut time = 0.0;
+        for tool in all_tools() {
+            for shortcut in tool.shortcuts.iter().filter(|s| !s.shift && !s.command) {
+                if shortcut.key == Key::Space || shortcut.key == Key::Escape {
+                    continue;
+                }
+                time += 0.1;
+                shell_frame(
+                    &mut app,
+                    &ctx,
+                    time,
+                    vec![key(shortcut.key, true), key(shortcut.key, false)],
+                );
+            }
+        }
+        assert_eq!(format!("{:?}", app.editor.score), score);
+        assert_eq!(app.tab(), Tab::More);
+        // Space still plays.
+        shell_frame(
+            &mut app,
+            &ctx,
+            time + 0.1,
+            vec![key(Key::Space, true), key(Key::Space, false)],
+        );
+        assert_eq!(app.playback_ctl.transport_state, TransportState::Playing);
+    }
+
+    #[test]
+    fn save_as_new_opens_the_name_and_says_saved() {
+        use super::Grooph;
+        use crate::library_panel::{LibraryItem, SaveAs};
+
+        let cc = eframe::CreationContext::_new_kittest(eframe::egui::Context::default());
+        let mut app = Grooph::new(&cc);
+        app.select_tab(Tab::Edit);
+        let id = app.save_rhythm(SaveAs::New, 1.0);
+        assert_eq!(app.ui.renaming_pattern, Some(id));
+        assert_eq!(app.ui.rename_typed, app.editor.library.get(id).unwrap().name);
+        assert_eq!(app.ui.library_saved, Some((LibraryItem::Pattern(id), 1.0)));
+        assert_eq!(app.ui.scroll_to_library_item, Some(LibraryItem::Pattern(id)));
+        // Overwriting names no new pattern and opens no name.
+        app.ui.renaming_pattern = None;
+        app.editor.dirty = true;
+        assert_eq!(app.save_rhythm(SaveAs::Update, 2.0), id);
+        assert_eq!(app.editor.library.patterns.len(), 1);
+        assert_eq!(app.ui.renaming_pattern, None);
+
+        app.select_tab(Tab::Practice);
+        let preset = app.save_preset(SaveAs::New, 3.0);
+        assert_eq!(app.ui.renaming_preset, Some(preset));
+        assert_eq!(app.ui.library_saved, Some((LibraryItem::Preset(preset), 3.0)));
+        app.playback_ctl.bpm += 1;
+        assert_eq!(app.save_preset(SaveAs::Update, 4.0), preset);
+        assert_eq!(app.editor.presets.get(preset).unwrap().settings, app.preset_snapshot());
+    }
+
+    #[test]
+    fn more_dialogs_stay_within_a_phone_screen() {
+        use super::Grooph;
+        use crate::pickers::Picker;
+        use eframe::egui::Id;
+
+        let ctx = eframe::egui::Context::default();
+        let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let mut app = Grooph::new(&cc);
+        let mut time = 0.0;
+        for picker in [Picker::Mixer, Picker::Settings, Picker::Help, Picker::Preset] {
+            app.select_tab(if picker == Picker::Preset { Tab::Practice } else { Tab::More });
+            app.ui.picker = Some(picker);
+            for _ in 0..3 {
+                time += 0.1;
+                shell_frame(&mut app, &ctx, time, vec![]);
+            }
+            let rect = ctx.memory(|m| m.area_rect(Id::unique("settings_picker"))).unwrap();
+            assert!(rect.width() <= 390.0 && rect.height() <= 844.0, "{picker:?}: {rect:?}");
+        }
     }
 
     #[test]

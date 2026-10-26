@@ -243,6 +243,16 @@ impl Grooph {
         self.editor.metronome.stash.as_ref()
     }
 
+    /// The rhythm put aside while the metronome is open no longer is pattern
+    /// `id`, which was deleted: it comes back without it.
+    pub(crate) fn forget_stashed_pattern(&mut self, id: u64) {
+        if let Some(stash) = self.editor.metronome.stash.as_mut()
+            && stash.active_pattern_id == Some(id)
+        {
+            stash.active_pattern_id = None;
+        }
+    }
+
     /// Whether the rhythm has unsaved changes, also while the metronome's
     /// click bar is edited in its place.
     pub(crate) fn rhythm_dirty(&self) -> bool {
