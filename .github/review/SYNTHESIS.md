@@ -7,7 +7,10 @@ following `REVIEW.md`. You turn their answers into one review. A script posts yo
 ## Inputs (in `review-input/`)
 
 - `context.json`: PR number, head commit, the reviewers that answered and those that failed, and whether there
-  is an earlier review.
+  is an earlier review. `answers_only` is true when an answer to the previous review started this run: the code is
+  the same as then and `reviews.json` holds the same reviews, so only the answers can change the outcome. Keep
+  the previous findings as they were, and do not take reviewer findings that are not in `prior.json` (the previous
+  synthesis discarded them), except where an answer changes that.
 - `reviews.json`: one entry per reviewer, in the format of `REVIEW.md` §4, with `reviewer`, `model` and `kind`
   (`general` or `rust`) added. Entries with an `error` field failed and contain nothing else.
 - `prior.json` (only from the second run on): the findings of the previous review that were still open, with their

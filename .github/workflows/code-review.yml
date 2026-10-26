@@ -22,6 +22,14 @@ name: Code review
 # Runs on every push to a pull request; a newer push cancels the running review.
 # "Run workflow" reviews any PR number, optionally with its own model list.
 #
+# A comment runs only the synthesis again, with the reviews of the last run, when
+# someone with write access answered a finding since: a reply in its thread, or a
+# comment in the conversation that names it (F3). `review.py rerun` decides; it
+# looks at all answers since the last review, so a comment that cancels a waiting
+# run loses nothing. A comment never cancels a running review. Comment runs use
+# the workflow file of the default branch (GitHub's rule for issue_comment), but
+# still the scripts and instructions of the PR's head.
+#
 # OpenCode runs the read-only `review` agent from opencode.json; every model
 # used here must be listed there. Only the publish job can write to the pull
 # request, and it runs no model. The scripts and instructions come from the
@@ -33,6 +41,10 @@ name: Code review
 on:
   pull_request:
     types: [opened, reopened, ready_for_review, synchronize]
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
   workflow_dispatch:
     inputs:
       pr:
@@ -43,8 +55,8 @@ on:
         required: false
 
 concurrency:
-  group: code-review-${{ github.event.pull_request.number || inputs.pr }}
-  cancel-in-progress: true
+  group: code-review-${{ github.event.pull_request.number || github.event.issue.number || inputs.pr }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' }}
 
 env:
   # Default models of the general review. GLM 5.3 (venice/z-ai-glm-5-3, its
@@ -56,25 +68,33 @@ env:
 
 jobs:
   setup:
-    # Skip drafts, and PRs from forks (they get no secrets).
+    # Skip drafts, PRs from forks (they get no secrets), and comments on issues.
     if: >-
       github.event_name == 'workflow_dispatch' ||
-      (!github.event.pull_request.draft &&
-       github.event.pull_request.head.repo.full_name == github.repository)
+      (github.event_name == 'pull_request' && !github.event.pull_request.draft &&
+       github.event.pull_request.head.repo.full_name == github.repository) ||
+      (github.event_name == 'pull_request_review_comment' &&
+       github.event.pull_request.head.repo.full_name == github.repository) ||
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request)
     runs-on: ubuntu-latest
     permissions:
       contents: read
       pull-requests: read
+      issues: read
     outputs:
       pr: ${{ steps.pick.outputs.pr }}
       head: ${{ steps.pick.outputs.head }}
       reviewers: ${{ steps.pick.outputs.reviewers }}
+      # review: the full review; answers: only the synthesis, with the reviews of run `reuse`; skip: nothing.
+      mode: ${{ steps.answers.outputs.mode || steps.pick.outputs.mode }}
+      reuse: ${{ steps.answers.outputs.reuse }}
     steps:
       - id: pick
         env:
           GH_TOKEN: ${{ github.token }}
-          PR: ${{ github.event.pull_request.number || inputs.pr }}
+          PR: ${{ github.event.pull_request.number || github.event.issue.number || inputs.pr }}
           MODELS: ${{ inputs.models || env.DEFAULT_MODELS }}
+          COMMENT: ${{ github.event_name == 'issue_comment' || github.event_name == 'pull_request_review_comment' }}
         run: |
           if ! [[ "$PR" =~ ^[0-9]+$ ]]; then
             echo "::error::Not a pull request number: $PR"
@@ -84,9 +104,18 @@ jobs:
           # head with the Venice key, and the publish job with a token that can write.
           read -r head cross <<< "$(gh pr view "$PR" --repo "$GITHUB_REPOSITORY" \
             --json headRefOid,isCrossRepository --jq '"\(.headRefOid) \(.isCrossRepository)"')"
-          if [ "$cross" = true ]; then
+          if [ "$cross" = true ] && [ "$COMMENT" = true ]; then
+            echo "#$PR comes from a fork; forks are not reviewed."
+            echo "mode=skip" >> "$GITHUB_OUTPUT"
+            exit 0
+          elif [ "$cross" = true ]; then
             echo "::error::#$PR comes from a fork; forks are not reviewed."
             exit 1
+          fi
+          if [ "$COMMENT" = true ]; then
+            echo "mode=answers" >> "$GITHUB_OUTPUT"
+          else
+            echo "mode=review" >> "$GITHUB_OUTPUT"
           fi
           if gh pr diff "$PR" --repo "$GITHUB_REPOSITORY" --name-only | grep -q '\.rs$'; then
             rust=true
@@ -101,8 +130,29 @@ jobs:
           echo "reviewers=$reviewers" >> "$GITHUB_OUTPUT"
           echo "Reviewing #$PR at $head with $reviewers"
 
+      - if: steps.pick.outputs.mode == 'answers'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.pick.outputs.head }}
+          persist-credentials: false
+
+      - id: answers
+        if: steps.pick.outputs.mode == 'answers'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ steps.pick.outputs.pr }}
+          HEAD: ${{ steps.pick.outputs.head }}
+        run: |
+          reuse=$(python3 .github/review/review.py rerun --repo "$GITHUB_REPOSITORY" --pr "$PR" --head "$HEAD")
+          if [ -n "$reuse" ]; then
+            echo "$reuse" >> "$GITHUB_OUTPUT"
+          else
+            echo "mode=skip" >> "$GITHUB_OUTPUT"
+          fi
+
   review:
     needs: setup
+    if: needs.setup.outputs.mode == 'review'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -158,20 +208,22 @@ jobs:
   synthesis:
     needs: [setup, review]
     # Also after failed reviewers: the synthesis works with the reviews that came back.
-    if: always() && needs.setup.result == 'success'
+    if: always() && needs.setup.result == 'success' && needs.setup.outputs.mode != 'skip'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
       contents: read
       pull-requests: read
       issues: read
+      actions: read  # the artifacts of an earlier run
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ needs.setup.outputs.head }}
           persist-credentials: false
 
-      - uses: actions/download-artifact@v4
+      - if: needs.setup.outputs.mode == 'review'
+        uses: actions/download-artifact@v4
         # No artifacts when every reviewer job died early; prepare reports them as failed.
         continue-on-error: true
         with:
@@ -179,16 +231,34 @@ jobs:
           path: review-output
           merge-multiple: true
 
+      - if: needs.setup.outputs.mode == 'answers'
+        uses: actions/download-artifact@v4
+        # The reviews of the run that reviewed this commit. Gone after 90 days: then prepare fails.
+        continue-on-error: true
+        with:
+          pattern: review-*
+          path: review-output
+          merge-multiple: true
+          run-id: ${{ needs.setup.outputs.reuse }}
+          github-token: ${{ github.token }}
+
       - name: Prepare
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ needs.setup.outputs.pr }}
           HEAD: ${{ needs.setup.outputs.head }}
           REVIEWERS: ${{ needs.setup.outputs.reviewers }}
+          REUSE: ${{ needs.setup.outputs.reuse }}
         run: |
           mkdir -p review-output
+          if [ -n "$REUSE" ]; then
+            # Which reviewers that run expected is not known here; those that failed left an error entry.
+            set -- --expected '[]' --answers-only
+          else
+            set -- --expected "$(jq -c '[.[].name]' <<< "$REVIEWERS")"
+          fi
           python3 .github/review/review.py prepare --repo "$GITHUB_REPOSITORY" --pr "$PR" --head "$HEAD" \
-            --reviews review-output --expected "$(jq -c '[.[].name]' <<< "$REVIEWERS")" --out review-input
+            --reviews review-output --out review-input "$@"
 
       - name: Synthesize
         uses: ./.github/actions/opencode-review
@@ -218,7 +288,9 @@ jobs:
 
   publish:
     needs: [setup, synthesis]
-    if: always() && needs.setup.result == 'success' && needs.synthesis.result != 'cancelled'
+    if: >-
+      always() && needs.setup.result == 'success' && needs.setup.outputs.mode != 'skip' &&
+      needs.synthesis.result != 'cancelled'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -241,7 +313,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ needs.setup.outputs.pr }}
           HEAD: ${{ needs.setup.outputs.head }}
+          REVIEWS_RUN: ${{ needs.setup.outputs.reuse || github.run_id }}
         run: |
           python3 .github/review/review.py publish --repo "$GITHUB_REPOSITORY" --pr "$PR" --head "$HEAD" \
             --input review-input --synthesis review-input/synthesis.json --model "$SYNTHESIS_MODEL" \
-            --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --reviews-run "$REVIEWS_RUN"

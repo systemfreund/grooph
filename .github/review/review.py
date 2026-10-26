@@ -5,6 +5,7 @@ The models never post anything themselves: every reviewer and the synthesis
 answer with JSON, and this script turns that into PR comments.
 
   extract   pull the final JSON answer out of `opencode run --format json` events
+  rerun     after a comment: whether the synthesis should run again, and with the reviews of which run
   prepare   gather the inputs of the synthesis step (reviews, prior state and the replies to it, diff since
             the last review)
   publish   post new inline comments, reply to resolved ones, update the summary comment
@@ -29,6 +30,7 @@ STATE_RE = re.compile(r"<!-- grooph-review-state:([A-Za-z0-9+/=]+) -->")
 FAILURE_RE = re.compile(r"\n*<!-- grooph-review-failure -->.*?<!-- /grooph-review-failure -->", re.S)
 FINDING_MARKER = "<!-- grooph-finding:{} -->"
 FINDING_MARKER_RE = re.compile(r"<!-- grooph-finding:(F\d+) -->")
+FINDING_ID_RE = re.compile(r"\bF\d+\b")
 UPDATED_RE = re.compile(r"^> \*\*Updated in `[^`]+`\*\*, see the latest reply\.\n\n")
 SEVERITY_ICON = {"high": "🔴", "medium": "🟠", "low": "🟡"}
 VERDICT_ICON = {"met": "✅ Met", "partly": "⚠️ Partly met", "not_met": "❌ Not met", "unclear": "❓ Unclear"}
@@ -177,7 +179,46 @@ def discussion(summary, comments):
     ]
 
 
-def build_context(pr, head, reviews, expected, prior, diff_since_prior):
+def new_answers(summary, state, review_comments, comments):
+    """Answers the synthesis has not seen yet: replies in the thread of an open finding, and comments in the
+    conversation that name a finding."""
+    threads = {f["comment_id"] for f in state["findings"] if f["status"] == "open" and f.get("comment_id")}
+    replies = [c for c in review_comments if c.get("in_reply_to_id") in threads]
+    named = [c for c in comments if FINDING_ID_RE.search(c["body"])]
+    # Before answers_until existed, the last update of the summary is the closest.
+    seen = state.get("answers_until") or summary["updated_at"]
+    return [c for c in replies + named if from_people(c) and c["created_at"] > seen]
+
+
+def cmd_rerun(args):
+    """Prints `reuse=<run>` when the synthesis should run again with the reviews of that run, else nothing.
+
+    Checks all answers since the last review, not just the comment that started this run: a newer comment cancels
+    a run that is still waiting, and the runs of comments that are no answer must not lose the answers before.
+    """
+    comments = issue_comments(args.repo, args.pr)
+    summary = find_summary_comment(comments)
+    state = read_state(summary)
+    if not state or state["head_sha"] != args.head:
+        reason = "this commit has no review yet; its review reads the answers"
+    elif not state.get("reviews_run"):
+        reason = "the last review does not say which run has its reviews"
+    elif not new_answers(summary, state, gh_paginated(f"repos/{args.repo}/pulls/{args.pr}/comments"), comments):
+        reason = "no new answer to a finding"
+    else:
+        print(f"reuse={state['reviews_run']}")
+        return 0
+    print(f"::notice::the synthesis does not run again: {reason}", file=sys.stderr)
+    return 0
+
+
+def latest_answer(prior):
+    """When the newest answer the synthesis gets was written, or None."""
+    answers = [r for f in prior["findings"] for r in f.get("replies", [])] + prior["discussion"]
+    return max((a["at"] for a in answers), default=None)
+
+
+def build_context(pr, head, reviews, expected, prior, diff_since_prior, answers_only=False):
     answered = {r["reviewer"] for r in reviews}
     failed = [{"reviewer": r["reviewer"], "error": r["error"]} for r in reviews if "error" in r]
     # A reviewer job that failed before its extract step left no file at all.
@@ -189,6 +230,8 @@ def build_context(pr, head, reviews, expected, prior, diff_since_prior):
         "failed_reviewers": failed,
         "prior_review": prior is not None,
         "diff_since_prior": diff_since_prior,
+        "answers_only": answers_only,
+        "answers_until": latest_answer(prior) if prior else None,
     }
 
 
@@ -222,7 +265,8 @@ def cmd_prepare(args):
             (out / "diff-since-prior.patch").write_text(diff.stdout)
 
     expected = json.loads(args.expected)
-    context = build_context(args.pr, args.head, reviews, expected, prior, (out / "diff-since-prior.patch").exists())
+    diff_since_prior = (out / "diff-since-prior.patch").exists()
+    context = build_context(args.pr, args.head, reviews, expected, prior, diff_since_prior, args.answers_only)
     (out / "context.json").write_text(json.dumps(context, indent=2))
     print(json.dumps(context, indent=2))
     if not context["reviewers"]:
@@ -406,6 +450,8 @@ def render_summary_with(synthesis, state, context, head, model, run_url, newly_r
     out = [MARKER, "## Code review", ""]
     reviewers = ", ".join(context["reviewers"]) or "none"
     out.append(f"Reviewed `{short}` · reviewers: {reviewers} · synthesis: {model}")
+    if context.get("answers_only"):
+        out.append("\nMerged again after new answers, with the reviews of this commit.")
     for failed in context["failed_reviewers"]:
         out.append(f"\n⚠️ Reviewer **{failed['reviewer']}** failed: {cell(failed['error'])}")
     out.append("")
@@ -581,6 +627,9 @@ def cmd_publish(args):
         return 1
 
     state, newly_resolved = merge_state(prior, synthesis, args.head)
+    # What a comment needs to start the synthesis again: the reviews to reuse, and which answers it has seen.
+    state["reviews_run"] = args.reviews_run
+    state["answers_until"] = context.get("answers_until") or prior.get("answers_until")
 
     def summary():
         return render_summary(synthesis, state, context, args.head, args.model, args.run_url, newly_resolved)
@@ -648,7 +697,7 @@ def main():
     p.add_argument("--model", required=True)
     p.add_argument("--kind", required=True)
 
-    for name in ("prepare", "publish"):
+    for name in ("rerun", "prepare", "publish"):
         p = sub.add_parser(name)
         p.add_argument("--repo", required=True)
         p.add_argument("--pr", required=True)
@@ -657,17 +706,20 @@ def main():
             p.add_argument("--reviews", required=True)
             p.add_argument("--expected", required=True, help="JSON list of the reviewer names that should answer")
             p.add_argument("--out", required=True)
-        else:
+            p.add_argument("--answers-only", action="store_true", help="the reviews are those of an earlier run")
+        elif name == "publish":
             p.add_argument("--input", required=True)
             p.add_argument("--synthesis", required=True)
             p.add_argument("--model", required=True)
             p.add_argument("--run-url", required=True)
+            p.add_argument("--reviews-run", required=True, help="the run whose reviews this synthesis merged")
             p.add_argument("--dry-run", action="store_true")
 
     args = parser.parse_args()
     global DRY_RUN
     DRY_RUN = getattr(args, "dry_run", False)
-    return {"extract": cmd_extract, "prepare": cmd_prepare, "publish": cmd_publish}[args.command](args)
+    commands = {"extract": cmd_extract, "rerun": cmd_rerun, "prepare": cmd_prepare, "publish": cmd_publish}
+    return commands[args.command](args)
 
 
 if __name__ == "__main__":
