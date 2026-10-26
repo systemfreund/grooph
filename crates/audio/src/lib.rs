@@ -5,7 +5,7 @@ mod trainer;
 mod voices;
 mod wav;
 
-pub use sounds::{CounterSound, MetronomeSound, RhythmSound};
+pub use sounds::Sound;
 pub use trainer::{GapClick, GapMode, GapMute, RampEnd, RampUnit, TempoRamp};
 
 use crate::tick_source::{CountInPlan, TickSource};
@@ -62,11 +62,11 @@ pub struct AudioSettings {
     #[serde(default = "default_ghost_gain")]
     pub ghost: f32,
     /// Sound of notes, accents and ghost notes.
-    #[serde(default)]
-    pub rhythm_sound: RhythmSound,
+    #[serde(default = "default_rhythm_sound")]
+    pub rhythm_sound: Sound,
     /// Sound of downbeat, primary beats and count-in.
-    #[serde(default)]
-    pub metronome_sound: MetronomeSound,
+    #[serde(default = "default_metronome_sound")]
+    pub metronome_sound: Sound,
     /// Volume of the count-in bar.
     #[serde(default = "default_count_in_gain")]
     pub count_in: f32,
@@ -81,11 +81,23 @@ pub struct AudioSettings {
     #[serde(default)]
     pub rhythm_muted: bool,
     /// Sound of the counter rhythm.
-    #[serde(default)]
-    pub counter_sound: CounterSound,
+    #[serde(default = "default_counter_sound")]
+    pub counter_sound: Sound,
     /// Volume of the counter rhythm's medium clicks.
     #[serde(default = "default_counter_gain")]
     pub counter: f32,
+}
+
+fn default_rhythm_sound() -> Sound {
+    Sound::RHYTHM_DEFAULT
+}
+
+fn default_metronome_sound() -> Sound {
+    Sound::METRONOME_DEFAULT
+}
+
+fn default_counter_sound() -> Sound {
+    Sound::COUNTER_DEFAULT
 }
 
 fn default_ghost_gain() -> f32 {
@@ -118,13 +130,13 @@ impl Default for AudioSettings {
             noise_mix: 0.05,
             noise_decay: 0.017,
             ghost: default_ghost_gain(),
-            rhythm_sound: RhythmSound::default(),
-            metronome_sound: MetronomeSound::default(),
+            rhythm_sound: Sound::RHYTHM_DEFAULT,
+            metronome_sound: Sound::METRONOME_DEFAULT,
             count_in: default_count_in_gain(),
             soft: default_soft_gain(),
             metronome_muted: false,
             rhythm_muted: false,
-            counter_sound: CounterSound::default(),
+            counter_sound: Sound::COUNTER_DEFAULT,
             counter: default_counter_gain(),
         }
     }
@@ -151,13 +163,13 @@ impl AudioSettings {
             noise_mix: 0.0,
             noise_decay: 0.05,
             ghost: default_ghost_gain(),
-            rhythm_sound: RhythmSound::default(),
-            metronome_sound: MetronomeSound::default(),
+            rhythm_sound: Sound::RHYTHM_DEFAULT,
+            metronome_sound: Sound::METRONOME_DEFAULT,
             count_in: default_count_in_gain(),
             soft: default_soft_gain(),
             metronome_muted: false,
             rhythm_muted: false,
-            counter_sound: CounterSound::default(),
+            counter_sound: Sound::COUNTER_DEFAULT,
             counter: default_counter_gain(),
         };
         result.clamped()

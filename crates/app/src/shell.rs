@@ -1239,6 +1239,14 @@ impl Grooph {
                             .inner_margin(Margin::symmetric(12, 4))
                             .show(ui, |ui| {
                                 for (mode, icon, label) in ENTRIES {
+                                    // The sounds are picked here rather than
+                                    // deep in Settings; the click's own
+                                    // parameters stay there.
+                                    if mode == Mode::Settings
+                                        && value_row(ui, "🔔   Sounds", "").clicked()
+                                    {
+                                        self.ui.picker = Some(Picker::Sounds);
+                                    }
                                     if mode == Mode::Help {
                                         theme_row(ui);
                                     }
