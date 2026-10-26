@@ -317,13 +317,12 @@ pub(crate) struct UiShell {
     /// What the practice staff shows while it plays.
     pub(crate) guide: Guide,
     pub(crate) platform: PlatformRuntime,
-    /// Transient text buffer for the "save current pattern" name input. Not
-    /// persisted.
-    pub(crate) save_name_buffer: String,
     /// Name input for "save preset as". Not persisted.
     pub(crate) preset_name_buffer: String,
     /// User preset whose row in the preset picker is being renamed. Not persisted.
     pub(crate) renaming_preset: Option<u64>,
+    /// Saved pattern whose card in the library is being renamed. Not persisted.
+    pub(crate) renaming_pattern: Option<u64>,
     /// Load awaiting the "discard unsaved changes?" confirmation. `Some` shows
     /// the confirm dialog. Not persisted.
     pub(crate) pending_load: Option<PendingLoad>,
@@ -331,6 +330,11 @@ pub(crate) struct UiShell {
     pub(crate) link_error: Option<String>,
     /// UI time of the last "copy link" click, for a short confirmation.
     pub(crate) link_copied_at: Option<f64>,
+    /// The library pattern saved last and the UI time, for "✓ Saved" on its
+    /// card. Not persisted.
+    pub(crate) pattern_saved: Option<(u64, f64)>,
+    /// A library card to scroll into view once: the one just saved.
+    pub(crate) scroll_to_pattern: Option<u64>,
     /// The window is phone-sized: the staff packs its notes tighter. Set
     /// every frame.
     pub(crate) narrow_screen: bool,

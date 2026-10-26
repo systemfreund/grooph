@@ -107,6 +107,9 @@ impl Grooph {
     }
 
     pub(crate) fn start_calibration(&mut self, source: HitSource) {
+        // The More screen can stay in front of the metronome: its click
+        // bar is not the score to put aside.
+        self.leave_metronome();
         self.stop_transport();
         let generator = &mut self.editor.generator;
         let stash = CalibrationStash {

@@ -52,10 +52,6 @@ impl PatternLibrary {
     pub fn contains(&self, id: u64) -> bool {
         self.patterns.iter().any(|p| p.id == id)
     }
-
-    pub fn name_of(&self, id: u64) -> Option<&str> {
-        self.get(id).map(|p| p.name.as_str())
-    }
 }
 
 #[cfg(test)]

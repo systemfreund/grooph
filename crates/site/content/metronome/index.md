@@ -101,7 +101,7 @@ hits (downbeat, accents) with its high or accent recording and soft hits (ghost 
 soft clicks, the soft count-in) with the snare's ghost recording, or quieter where a sound
 has none. When the rhythm or the
 counter rhythm uses the metronome's sound, it plays it higher, so you can still tell them apart. The mixer
-(speaker icon) has two groups: the rhythm (notes, accents, ghost notes) and the metronome
+(**More → Mixer**) has two groups: the rhythm (notes, accents, ghost notes) and the metronome
 (downbeat, medium and soft clicks, counter rhythm, count-in). Each group can be muted, for example to hear
 only the written rhythm. What the metronome clicks is set per time signature in the
 Metronome tab under **Clicks**: **Main beats** gives 7/8 three clicks per bar, **Eighths** all

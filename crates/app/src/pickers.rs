@@ -5,6 +5,7 @@
 
 use crate::guide::Guide;
 use crate::metronome_view::{FillLook, click_fills, ratio_label, same_bar};
+use crate::mixer_panel::mixer_width;
 use crate::presets::{self, PresetId};
 use crate::shell::paint_grouped_meter;
 use crate::tool_palette::{TOOL_PALETTE_BUTTON_SIZE, none_button, notation_button};
@@ -64,6 +65,14 @@ pub(crate) enum Picker {
     MidiInput,
     /// The inputs that count as hits and their latency.
     PlayAlong,
+    /// Saved rhythms: save, load, rename, delete, share.
+    Library,
+    /// The volumes of the voices.
+    Mixer,
+    /// The click's own parameters and the rest of the settings.
+    Settings,
+    /// Contact, keybindings and touch controls.
+    Help,
 }
 
 pub(crate) fn counting_system_name(system: CountingSystem) -> &'static str {
@@ -312,6 +321,12 @@ pub(crate) fn wide_button(ui: &mut Ui, label: &str, size: f32, height: f32) -> R
     .inner
 }
 
+/// Height a dialog's long content (library, settings, help) scrolls in, so
+/// that the title and "Done" stay on screen.
+pub(crate) fn dialog_scroll_height(ui: &Ui) -> f32 {
+    0.6 * ui.ctx().content_rect().height()
+}
+
 impl Grooph {
     /// Dialog for the setting in [`crate::state::UiShell::picker`], opened
     /// from the settings card and the options sheet.
@@ -321,7 +336,12 @@ impl Grooph {
         };
         let before = self.editor.generator.settings;
         let endless_before = self.editor.generator.endless;
-        let width = (ui.ctx().content_rect().width() - 48.0).clamp(200.0, 380.0);
+        // The mixer gets as wide as its sliders, if the screen has room.
+        let max_width = match picker {
+            Picker::Mixer => mixer_width(ui).map_or(380.0, |w| w.max(380.0)),
+            _ => 380.0,
+        };
+        let width = (ui.ctx().content_rect().width() - 48.0).clamp(200.0, max_width);
         let mut preset = None;
         let mut calibrate = None;
 
@@ -344,6 +364,10 @@ impl Grooph {
                 Picker::Sounds => "Sounds",
                 Picker::MidiInput => "MIDI input",
                 Picker::PlayAlong => "Play along",
+                Picker::Library => "Library",
+                Picker::Mixer => "Mixer",
+                Picker::Settings => "Settings",
+                Picker::Help => "Help",
             };
             ui.heading(title);
             ui.add_space(8.0);
@@ -382,6 +406,22 @@ impl Grooph {
                     calibrate = self.play_along_choices(ui);
                     false
                 }
+                Picker::Library => {
+                    self.library_panel(ui);
+                    false
+                }
+                Picker::Mixer => {
+                    self.mixer_panel(ui);
+                    false
+                }
+                Picker::Settings => {
+                    self.settings_panel(ui);
+                    false
+                }
+                Picker::Help => {
+                    self.help_panel(ui);
+                    false
+                }
             };
             ui.add_space(12.0);
             picked || wide_button(ui, "Done", 19.0, ROW_HEIGHT).clicked()
@@ -390,6 +430,7 @@ impl Grooph {
             self.ui.picker = self.ui.picker_return.take();
             self.ui.tap_tempo.reset();
             self.ui.renaming_preset = None;
+            self.ui.renaming_pattern = None;
         }
 
         self.finish_generator_change(before, endless_before, false);

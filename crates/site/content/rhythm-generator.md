@@ -110,8 +110,8 @@ generator can change the rhythm a seed draws:
 bpm=72&sub=3&lvl=2&bars=2&seed=2024
 ```
 
-In the library (**More → Library**), **Copy link** copies a link to whatever is on the screen, including
-rhythms you wrote yourself.
+The share button next to play shares a link to whatever is on the screen, including rhythms you
+wrote yourself.
 
 ## FAQ
 

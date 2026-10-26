@@ -33,7 +33,7 @@ use grooph_measure::{BeatIdx, Measure, MeasureIdx, Score, TimeSignature};
 ///
 /// Mirrors the per-measure fields of [`LayoutOpts`], plus the cross-measure
 /// knobs (`min_measure_width_em`, `note_width_em`, `system_spacing_em`,
-/// `layout_clef_first`). The per-measure `rect`, `layout_clef` and
+/// `layout_clef_first`, `time_signature_first`). The per-measure `rect`, `layout_clef` and
 /// `layout_time_signature` are derived per measure during layout.
 #[derive(Clone)]
 pub struct StaffOpts {
@@ -55,6 +55,10 @@ pub struct StaffOpts {
     pub system_spacing_em: f32,
     /// Whether to show the clef on the first measure of each system.
     pub layout_clef_first: bool,
+    /// Whether the first measure shows its time signature even when the
+    /// score has only one meter (a preview standing on its own). Mixed
+    /// meters show it on the first measure and every change regardless.
+    pub time_signature_first: bool,
     /// Room below the staff line in em, at least: rests, accents and timing
     /// marks need [`ROOM_BELOW_EM`], count labels
     /// [`ROOM_BELOW_WITH_LABELS_EM`].
@@ -311,13 +315,18 @@ pub fn build_staff_layout_with_lower(
     assert!(!score.is_empty(), "Score must have at least one measure");
 
     // 1. show-flags: clef only on first. The time signature only shows when
-    // the score mixes meters, then on the first measure + every change.
+    // the score mixes meters, then on the first measure + every change, or
+    // on the first when asked for.
     let show_clef: Vec<bool> = (0..score.len()).map(|i| i == 0 && opts.layout_clef_first).collect();
     let meter_changes_at =
         |i: usize| score.measures[i].time_signature() != score.measures[i - 1].time_signature();
     let mixed_meters = (1..score.len()).any(meter_changes_at);
-    let show_ts: Vec<bool> =
-        (0..score.len()).map(|i| mixed_meters && (i == 0 || meter_changes_at(i))).collect();
+    let show_ts: Vec<bool> = (0..score.len())
+        .map(|i| {
+            (i == 0 && opts.time_signature_first)
+                || (mixed_meters && (i == 0 || meter_changes_at(i)))
+        })
+        .collect();
 
     // 2. natural widths at the baseline em. Each measure is planned (beams,
     // tuplets) once, for its width and its layout.
@@ -519,6 +528,7 @@ mod tests {
             note_width_em: 0.6,
             system_spacing_em: 0.5,
             layout_clef_first: true,
+            time_signature_first: false,
             room_below_em: ROOM_BELOW_EM,
             lower_label_room_em: 0.0,
             bar_rests: false,
@@ -709,6 +719,27 @@ mod tests {
         let staff = build_staff_layout(&score, &staff_opts);
         let placed: Vec<_> = staff.systems.iter().flat_map(|s| &s.measures).collect();
         assert!(placed.iter().all(|m| !m.show_time_signature && m.layout.time_signature.is_none()));
+    }
+
+    #[test]
+    fn staff_layout_time_signature_first_for_single_meter() {
+        let em = 20.0;
+        let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(4000.0, 100.0));
+        let staff_opts = StaffOpts { time_signature_first: true, ..opts(em, rect) };
+
+        let score = Score {
+            measures: vec![
+                measure_with_quarters(TimeSignature::THREE_FOUR),
+                measure_with_quarters(TimeSignature::THREE_FOUR),
+            ],
+        };
+
+        let staff = build_staff_layout(&score, &staff_opts);
+        let flags: Vec<bool> =
+            staff.systems.iter().flat_map(|s| &s.measures).map(|m| m.show_time_signature).collect();
+        assert_eq!(flags, vec![true, false]);
+        let first = &staff.systems[0].measures[0];
+        assert!(first.layout.time_signature.is_some());
     }
 
     #[test]

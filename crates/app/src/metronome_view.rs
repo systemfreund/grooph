@@ -292,6 +292,14 @@ impl Grooph {
         editor.active_pattern_id = stash.active_pattern_id;
     }
 
+    /// Stop the metronome if it plays and bring the rhythm back.
+    pub(crate) fn leave_metronome(&mut self) {
+        if self.metronome_mode() {
+            self.stop_transport();
+            self.close_metronome();
+        }
+    }
+
     /// While the tab is open: the edited bar is the click bar of its meter
     /// (or its counter rhythm, see [`MetronomeState::voice`]), and its meter
     /// the metronome's (undo can bring back another one).

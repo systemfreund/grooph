@@ -1,5 +1,6 @@
 use crate::Grooph;
 use crate::Mode;
+use crate::shell::Tab;
 use crate::tools::matching_tool;
 use eframe::egui;
 use eframe::egui::Key;
@@ -31,6 +32,10 @@ impl Grooph {
                 self.toggle_playback();
             }
 
+            // The More screen shows no score to edit.
+            if self.tab() == Tab::More {
+                return;
+            }
             if let Some(tool) = matching_tool(i) {
                 self.apply_tool(tool);
             }
