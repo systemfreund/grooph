@@ -19,6 +19,7 @@
 //! like the click bar: the voice last tapped, on the staff or the ring, is
 //! the one the editor holds (see [`MetronomeState::voice`]).
 
+use crate::pickers::shown_groups;
 use crate::shell::paint_meter;
 use crate::state::CountInState;
 use crate::undo::{DEFAULT_UNDO_LIMIT, UndoHistory};
@@ -710,7 +711,8 @@ impl Grooph {
         let caption = match counter.as_ref().and(self.counter_ratio()) {
             Some(ratio) => ratio_label(ratio),
             None if counter.is_some() => "custom".to_owned(),
-            None => meter_caption(&ts),
+            // Under the meter: its beat groups when there are several.
+            None => shown_groups(ts).unwrap_or_default(),
         };
         let (big, small) = match (count_in_beat, bar_state) {
             (Some(beat), _) => (Some(beat.to_string()), String::new()),
@@ -851,11 +853,6 @@ fn counter_spans(bar: &Measure) -> Vec<(usize, f32, f32)> {
 fn count_in_beat(turn: f32, ts: &TimeSignature) -> u32 {
     let units = ts.beats.max(1) as u32;
     ((turn * units as f32) as u32).min(units - 1) + 1
-}
-
-/// Caption under the meter: its beat groups when there are several.
-fn meter_caption(ts: &TimeSignature) -> String {
-    if ts.beat_unit != 4 && ts.groups().len() > 1 { ts.groups_label() } else { String::new() }
 }
 
 fn level_label(level: ClickLevel) -> &'static str {

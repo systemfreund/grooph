@@ -176,25 +176,43 @@ fn card_cell(ui: &mut Ui, label: &str, value: &CardValue, music: &FontFamily) ->
             width,
             strong,
         ),
-        CardValue::Meter(ts) => match shown_groups(*ts) {
-            None => paint_meter(painter, *ts, center, CARD_METER_EM, width, music, strong),
-            // The beat groups go small under the meter.
-            Some(groups) => {
-                let em = CARD_METER_EM - 9.0;
-                paint_meter(painter, *ts, center - vec2(0.0, 6.0), em, width, music, strong);
-                fitted_text(
-                    painter,
-                    rect.center_bottom() - vec2(0.0, 3.0),
-                    Align2::CENTER_BOTTOM,
-                    &groups,
-                    11.0,
-                    width,
-                    weak,
-                );
-            }
-        },
+        CardValue::Meter(ts) => {
+            paint_grouped_meter(painter, *ts, center, CARD_METER_EM, width, music, strong, weak)
+        }
     }
     resp
+}
+
+/// [`paint_meter`] with the beat groups small underneath in `groups_color`
+/// when they are written out (see [`shown_groups`]). Both together take about
+/// the height of a meter of size `em` alone, centered on `center`.
+#[expect(clippy::too_many_arguments)]
+pub(crate) fn paint_grouped_meter(
+    painter: &Painter,
+    ts: TimeSignature,
+    center: Pos2,
+    em: f32,
+    max_width: f32,
+    family: &FontFamily,
+    color: Color32,
+    groups_color: Color32,
+) {
+    match shown_groups(ts) {
+        None => paint_meter(painter, ts, center, em, max_width, family, color),
+        Some(groups) => {
+            let meter_center = center - vec2(0.0, 0.18 * em);
+            paint_meter(painter, ts, meter_center, 0.74 * em, max_width, family, color);
+            fitted_text(
+                painter,
+                center + vec2(0.0, 0.53 * em),
+                Align2::CENTER_BOTTOM,
+                &groups,
+                0.32 * em,
+                max_width,
+                groups_color,
+            );
+        }
+    }
 }
 
 /// `ts` as stacked time-signature digits centered on `center`, at music font

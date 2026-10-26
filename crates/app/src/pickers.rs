@@ -6,10 +6,11 @@
 use crate::guide::Guide;
 use crate::metronome_view::{FillLook, click_fills, ratio_label, same_bar};
 use crate::presets::{self, PresetId};
+use crate::shell::paint_grouped_meter;
 use crate::tool_palette::{TOOL_PALETTE_BUTTON_SIZE, none_button, notation_button};
 use crate::{CountingBase, Grooph};
 use eframe::egui;
-use eframe::egui::{Button, Color32, FontId, Id, Modal, Response, RichText, Ui, vec2};
+use eframe::egui::{Button, Color32, FontFamily, FontId, Id, Modal, Response, RichText, Ui, vec2};
 use grooph_audio::{CounterSound, GapClick, GapMode, GapMute};
 use grooph_measure::TimeSignature;
 use grooph_measure::counter::{Ratio, own_ratios, step_clicks, step_span};
@@ -137,7 +138,7 @@ fn choice_grid<T: Copy + PartialEq>(
     for row in options.chunks(columns) {
         ui.horizontal(|ui| {
             for (value, label) in row {
-                // Long labels (e.g. "13/16 (3+3+3+2+2)") shrink to fit the cell.
+                // Long labels shrink to fit the cell.
                 let text_width = ui
                     .painter()
                     .layout_no_wrap(label.clone(), FontId::proportional(18.0), Color32::WHITE)
@@ -150,6 +151,66 @@ fn choice_grid<T: Copy + PartialEq>(
                     .min_size(vec2(width, ROW_HEIGHT));
                 if ui.add(button).clicked() {
                     picked = Some(*value);
+                }
+            }
+        });
+    }
+    picked
+}
+
+/// Height of a tile in the time signature pickers.
+const METER_TILE_HEIGHT: f32 = 72.0;
+/// Music font size of a meter on its tile.
+const METER_TILE_EM: f32 = 42.0;
+
+/// Height of the scrolling time signature grid: the tall tiles get as much
+/// of the screen as leaves room for "Done".
+fn meter_grid_height(ui: &Ui) -> f32 {
+    (ui.ctx().content_rect().height() - 240.0).clamp(360.0, 560.0)
+}
+
+/// Grid of time signatures, each drawn as in the settings card; returns the
+/// one that was tapped.
+fn meter_grid(
+    ui: &mut Ui,
+    meters: &[TimeSignature],
+    current: TimeSignature,
+    columns: usize,
+    family: &FontFamily,
+) -> Option<TimeSignature> {
+    let mut picked = None;
+    let spacing = ui.spacing().item_spacing.x;
+    let width = (ui.available_width() - spacing * (columns as f32 - 1.0)) / columns as f32;
+    for row in meters.chunks(columns) {
+        ui.horizontal(|ui| {
+            for &ts in row {
+                let selected = ts == current;
+                let button =
+                    Button::new("").selected(selected).min_size(vec2(width, METER_TILE_HEIGHT));
+                let label = time_signature_label(ts);
+                let resp = ui.add(button);
+                // The meter is painted, so the button gets its name here.
+                resp.widget_info(|| {
+                    egui::WidgetInfo::selected(egui::Role::Button, true, selected, &label)
+                });
+                let resp = resp.on_hover_text(label);
+                let color = ui.style().interact_selectable(&resp, selected).text_color();
+                let room = width - 2.0 * ui.spacing().button_padding.x;
+                let center = resp.rect.center();
+                let groups_color = color.gamma_multiply(0.7);
+                let painter = ui.painter();
+                paint_grouped_meter(
+                    painter,
+                    ts,
+                    center,
+                    METER_TILE_EM,
+                    room,
+                    family,
+                    color,
+                    groups_color,
+                );
+                if resp.clicked() {
+                    picked = Some(ts);
                 }
             }
         });
@@ -412,12 +473,11 @@ impl Grooph {
     }
 
     fn time_signature_choices(&mut self, ui: &mut Ui) -> bool {
+        let family = self.ui.music_font_id.family.clone();
         let settings = &mut self.editor.generator.settings;
-        let options: Vec<_> =
-            time_signatures().into_iter().map(|ts| (ts, time_signature_label(ts))).collect();
         let picked = egui::ScrollArea::vertical()
-            .max_height(360.0)
-            .show(ui, |ui| choice_grid(ui, &options, settings.time_signature, 2))
+            .max_height(meter_grid_height(ui))
+            .show(ui, |ui| meter_grid(ui, &time_signatures(), settings.time_signature, 2, &family))
             .inner;
         if let Some(ts) = picked {
             settings.time_signature = ts;
@@ -533,12 +593,11 @@ impl Grooph {
     /// Meter of the metronome tab: any the editor offers. Returns whether
     /// one was picked.
     fn metronome_meter_choices(&mut self, ui: &mut Ui) -> bool {
-        let options: Vec<_> =
-            all_time_signatures().into_iter().map(|ts| (ts, time_signature_label(ts))).collect();
+        let family = self.ui.music_font_id.family.clone();
         let current = self.metronome_meter();
         let picked = egui::ScrollArea::vertical()
-            .max_height(360.0)
-            .show(ui, |ui| choice_grid(ui, &options, current, 2))
+            .max_height(meter_grid_height(ui))
+            .show(ui, |ui| meter_grid(ui, &all_time_signatures(), current, 2, &family))
             .inner;
         if let Some(ts) = picked {
             self.set_metronome_meter(ts);
@@ -840,5 +899,22 @@ impl Grooph {
                 });
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn groups_are_shown_for_x8_and_x16_meters_with_several() {
+        assert_eq!(shown_groups(TimeSignature::FOUR_FOUR), None);
+        assert_eq!(shown_groups(TimeSignature::new(3, 8)), None);
+        assert_eq!(shown_groups(TimeSignature::new(4, 8)).as_deref(), Some("2+2"));
+        assert_eq!(shown_groups(TimeSignature::new(6, 8)).as_deref(), Some("3+3"));
+        assert_eq!(
+            shown_groups(TimeSignature::new(7, 16).with_grouping(1)).as_deref(),
+            Some("2+2+3")
+        );
     }
 }
