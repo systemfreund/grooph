@@ -93,7 +93,7 @@ fn bars_label(generator: &GeneratorState) -> String {
     if generator.endless { "∞".to_owned() } else { generator.effective_bars().to_string() }
 }
 
-fn subdivision_short_label(s: Subdivision) -> &'static str {
+pub(crate) fn subdivision_short_label(s: Subdivision) -> &'static str {
     match s {
         Subdivision::Eighths => "8ths",
         Subdivision::Sixteenths => "16ths",

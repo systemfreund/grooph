@@ -1188,8 +1188,9 @@ impl Grooph {
                 pending_load: None,
                 link_error: None,
                 link_copied_at: None,
-                pattern_saved: None,
-                scroll_to_pattern: None,
+                library_saved: None,
+                scroll_to_library_item: None,
+                library_tab: Default::default(),
                 narrow_screen: false,
                 staff_em: 40.0,
                 followed_cursor: None,
@@ -1455,6 +1456,59 @@ mod tests {
                 app.settings_picker(ui);
             });
             output.textures_delta.clear();
+        }
+        assert_eq!(app.ui.picker, Some(Picker::Library));
+    }
+
+    #[test]
+    fn a_preset_from_the_library_opens_the_practice_page() {
+        use super::{Grooph, Mode};
+        use crate::pickers::Picker;
+        use crate::presets::{PresetId, builtin_presets};
+
+        let cc = eframe::CreationContext::_new_kittest(eframe::egui::Context::default());
+        let mut app = Grooph::new(&cc);
+        // Through the metronome: the click bar stays the metronome's.
+        app.select_tab(Tab::Metronome);
+        let click_bar = format!("{:?}", app.editor.score);
+        app.select_tab(Tab::More);
+        app.ui.picker = Some(Picker::Library);
+        let last = builtin_presets().len() - 1;
+        app.open_preset(PresetId::BuiltIn(last));
+        assert_eq!(app.tab(), Tab::Practice);
+        assert_eq!(app.ui.mode, Mode::Generator);
+        assert_eq!(app.ui.picker, None);
+        assert_eq!(app.editor.active_preset, Some(PresetId::BuiltIn(last)));
+        assert_eq!(app.editor.generator.settings, builtin_presets()[last].1.generator);
+        app.select_tab(Tab::Metronome);
+        assert_eq!(format!("{:?}", app.editor.score), click_bar);
+    }
+
+    #[test]
+    fn library_renders_both_halves_at_phone_width() {
+        use super::Grooph;
+        use crate::library_panel::LibraryTab;
+        use crate::pickers::Picker;
+        use eframe::egui::{Pos2, RawInput, Rect, vec2};
+
+        let ctx = eframe::egui::Context::default();
+        let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let mut app = Grooph::new(&cc);
+        app.select_tab(Tab::Practice);
+        app.save_preset_as("Mine");
+        app.select_tab(Tab::More);
+        app.ui.picker = Some(Picker::Library);
+        for tab in [LibraryTab::Rhythms, LibraryTab::Presets] {
+            app.ui.library_tab = tab;
+            for _ in 0..2 {
+                let screen = Rect::from_min_size(Pos2::ZERO, vec2(390.0, 844.0));
+                let input = RawInput { screen_rect: Some(screen), ..Default::default() };
+                let mut output = ctx.run_ui(input, |ui| {
+                    app.apply_style(ui);
+                    app.settings_picker(ui);
+                });
+                output.textures_delta.clear();
+            }
         }
         assert_eq!(app.ui.picker, Some(Picker::Library));
     }

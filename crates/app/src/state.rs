@@ -2,6 +2,7 @@ use crate::accuracy::AccuracyState;
 use crate::generator::GeneratorState;
 use crate::guide::{AnchorFlash, Guide};
 use crate::library::PatternLibrary;
+use crate::library_panel::{LibraryItem, LibraryTab};
 use crate::metronome_view::MetronomeState;
 use crate::persist::StateBackup;
 use crate::pickers::Picker;
@@ -330,11 +331,13 @@ pub(crate) struct UiShell {
     pub(crate) link_error: Option<String>,
     /// UI time of the last "copy link" click, for a short confirmation.
     pub(crate) link_copied_at: Option<f64>,
-    /// The library pattern saved last and the UI time, for "✓ Saved" on its
+    /// The library item saved last and the UI time, for "✓ Saved" on its
     /// card. Not persisted.
-    pub(crate) pattern_saved: Option<(u64, f64)>,
+    pub(crate) library_saved: Option<(LibraryItem, f64)>,
     /// A library card to scroll into view once: the one just saved.
-    pub(crate) scroll_to_pattern: Option<u64>,
+    pub(crate) scroll_to_library_item: Option<LibraryItem>,
+    /// The half of the library shown. Not persisted.
+    pub(crate) library_tab: LibraryTab,
     /// The window is phone-sized: the staff packs its notes tighter. Set
     /// every frame.
     pub(crate) narrow_screen: bool,
