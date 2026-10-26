@@ -159,9 +159,15 @@ fn choice_grid<T: Copy + PartialEq>(
 }
 
 /// Height of a tile in the time signature pickers.
-const METER_TILE_HEIGHT: f32 = 60.0;
+const METER_TILE_HEIGHT: f32 = 72.0;
 /// Music font size of a meter on its tile.
-const METER_TILE_EM: f32 = 34.0;
+const METER_TILE_EM: f32 = 42.0;
+
+/// Height of the scrolling time signature grid: the tall tiles get as much
+/// of the screen as leaves room for "Done".
+fn meter_grid_height(ui: &Ui) -> f32 {
+    (ui.ctx().content_rect().height() - 240.0).clamp(360.0, 560.0)
+}
 
 /// Grid of time signatures, each drawn as in the settings card; returns the
 /// one that was tapped.
@@ -470,7 +476,7 @@ impl Grooph {
         let family = self.ui.music_font_id.family.clone();
         let settings = &mut self.editor.generator.settings;
         let picked = egui::ScrollArea::vertical()
-            .max_height(360.0)
+            .max_height(meter_grid_height(ui))
             .show(ui, |ui| meter_grid(ui, &time_signatures(), settings.time_signature, 2, &family))
             .inner;
         if let Some(ts) = picked {
@@ -590,7 +596,7 @@ impl Grooph {
         let family = self.ui.music_font_id.family.clone();
         let current = self.metronome_meter();
         let picked = egui::ScrollArea::vertical()
-            .max_height(360.0)
+            .max_height(meter_grid_height(ui))
             .show(ui, |ui| meter_grid(ui, &all_time_signatures(), current, 2, &family))
             .inner;
         if let Some(ts) = picked {
