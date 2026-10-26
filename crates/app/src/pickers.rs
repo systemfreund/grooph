@@ -11,7 +11,7 @@ use crate::tool_palette::{TOOL_PALETTE_BUTTON_SIZE, none_button, notation_button
 use crate::{CountingBase, Grooph};
 use eframe::egui;
 use eframe::egui::{Button, Color32, FontFamily, FontId, Id, Modal, Response, RichText, Ui, vec2};
-use grooph_audio::{CounterSound, GapClick, GapMode, GapMute, MetronomeSound, RhythmSound};
+use grooph_audio::{GapClick, GapMode, GapMute, Sound};
 use grooph_measure::TimeSignature;
 use grooph_measure::counter::{Ratio, own_ratios, step_clicks, step_span};
 use grooph_measure::counting::CountingSystem;
@@ -292,6 +292,12 @@ fn count_stepper(ui: &mut Ui, label: &str, value: &mut u32, range: RangeInclusiv
             *value = to;
         }
     });
+}
+
+/// Every [`Sound`] in two columns; returns the one that was tapped.
+fn sound_grid(ui: &mut Ui, current: Sound) -> Option<Sound> {
+    let sounds: Vec<_> = Sound::ALL.iter().map(|&s| (s, s.label().to_owned())).collect();
+    choice_grid(ui, &sounds, current, 2)
 }
 
 fn wide_button(ui: &mut Ui, label: &str, size: f32, height: f32) -> Response {
@@ -709,8 +715,7 @@ impl Grooph {
         ui.add_space(8.0);
         ui.label("Sound");
         let settings = &mut self.playback_ctl.audio_cfg.settings;
-        let sounds: Vec<_> = CounterSound::ALL.iter().map(|&s| (s, s.label().to_owned())).collect();
-        if let Some(sound) = choice_grid(ui, &sounds, settings.counter_sound, 2) {
+        if let Some(sound) = sound_grid(ui, settings.counter_sound) {
             settings.counter_sound = sound;
         }
         // Picking a sound keeps the picker open to compare them.
@@ -721,23 +726,19 @@ impl Grooph {
     /// picker open to compare them.
     fn sound_choices(&mut self, ui: &mut Ui) {
         let settings = &mut self.playback_ctl.audio_cfg.settings;
-        ui.label("Rhythm");
-        let sounds: Vec<_> = RhythmSound::ALL.iter().map(|&s| (s, s.label().to_owned())).collect();
-        if let Some(sound) = choice_grid(ui, &sounds, settings.rhythm_sound, 2) {
-            settings.rhythm_sound = sound;
-        }
-        ui.add_space(8.0);
-        ui.label("Metronome");
-        let sounds: Vec<_> =
-            MetronomeSound::ALL.iter().map(|&s| (s, s.label().to_owned())).collect();
-        if let Some(sound) = choice_grid(ui, &sounds, settings.metronome_sound, 2) {
-            settings.metronome_sound = sound;
-        }
-        ui.add_space(8.0);
-        ui.label("Counter rhythm");
-        let sounds: Vec<_> = CounterSound::ALL.iter().map(|&s| (s, s.label().to_owned())).collect();
-        if let Some(sound) = choice_grid(ui, &sounds, settings.counter_sound, 2) {
-            settings.counter_sound = sound;
+        let voices = [
+            ("Rhythm", &mut settings.rhythm_sound),
+            ("Metronome", &mut settings.metronome_sound),
+            ("Counter rhythm", &mut settings.counter_sound),
+        ];
+        for (i, (label, sound)) in voices.into_iter().enumerate() {
+            if i > 0 {
+                ui.add_space(8.0);
+            }
+            ui.label(label);
+            if let Some(picked) = sound_grid(ui, *sound) {
+                *sound = picked;
+            }
         }
     }
 

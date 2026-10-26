@@ -187,26 +187,27 @@ Important root files:
 
 ## Sounds
 
-- Two voices (`crates/audio/src/sounds.rs`): the rhythm (`Beat`, `AccentedBeat`,
+- Three voices (`crates/audio/src/sounds.rs`): the rhythm (`Beat`, `AccentedBeat`,
   `Ghost`) uses `AudioSettings::rhythm_sound`, the metronome (`Downbeat`,
-  `PrimaryBeat`, `CountIn`) `AudioSettings::metronome_sound`. `SoundType::patch`
-  turns a hit into a `Patch`: the configurable `Click` (waveform, frequency, noise)
-  or an embedded WAV sample, both with the mixer gain of that sound type.
+  `PrimaryBeat`, `SoftBeat`, `CountIn`, `CountInSoft`) `metronome_sound`, the
+  counter rhythm (`Counter*`) `counter_sound`. All three are a `Sound` (Click,
+  Claves, Snare, Xylophone); defaults are `Sound::RHYTHM_DEFAULT` (snare),
+  `METRONOME_DEFAULT` (claves) and `COUNTER_DEFAULT` (xylophone).
+  `SoundType::patch` turns a hit into a `Patch`: the configurable `Click`
+  (waveform, frequency, noise) or an embedded WAV sample, both with the mixer
+  gain of that sound type.
+- Every `SoundType` has a `Level` (strong: downbeat, accents, strong counter
+  clicks; normal: primary beats, notes, count-in, medium counter clicks; soft:
+  soft beats, ghost notes, soft count-in and counter clicks). A sample sound's
+  `SampleSet` has one recording per level; without a soft one, soft hits play
+  the normal recording, quieter through the mixer. Claves: `claves3.wav`
+  (strong) and `claves4.wav`; xylophone: `xylo-high.wav` and `xylo-low.wav`;
+  snare: `snare-accent.wav`, `snare-normal.wav` and `snare-ghost.wav`.
+- The rhythm and the counter rhythm play a sample 1.5× faster
+  (`SAME_SOUND_RATE`) when the metronome uses the same sound, so the voices
+  stay apart.
 - Samples live in `crates/audio/samples/` and are listed in `SAMPLES`
   (`include_bytes!`, decoded once by the small decoder in `wav.rs`).
-  `MetronomeSound::Claves` (default) plays `claves3.wav` on the downbeat and
-  `claves4.wav` on the other primary beats and the count-in;
-  `MetronomeSound::Xylophone` plays `xylo-high.wav` and `xylo-low.wav` the same way,
-  `MetronomeSound::Snare` the accent and normal snare recordings.
-  Every voice (`RhythmSound`, `MetronomeSound`, `CounterSound`) offers the same
-  four sounds: Click, Claves, Snare, Xylophone. The rhythm and the counter
-  rhythm play a sample 1.5× faster (`SAME_SOUND_RATE`) when the metronome uses
-  the same sound, so the voices stay apart. Rhythm claves and xylophone play
-  the high sample on accents and the low one on notes and ghost notes.
-  `RhythmSound::Snare` (default) plays its own recording per dynamic:
-  `snare-normal.wav` for notes, `snare-accent.wav` for accents and
-  `snare-ghost.wav` for ghost notes. A ghost sample is recorded quietly, so its
-  gain is divided by the default ghost volume (the default plays it as recorded).
   Samples are stored as 16-bit mono WAV, trimmed after the decay, to keep the
   WASM build small.
   Samples keep their own license (claves: altemark on freesound.org, CC BY-NC; xylophone: Brsjak on

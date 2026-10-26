@@ -153,11 +153,10 @@ impl VoiceMixer {
 mod tests {
     use super::*;
     use crate::schedule::SoundType;
-    use crate::{AudioSettings, RhythmSound};
+    use crate::{AudioSettings, Sound};
 
     fn beat() -> Patch {
-        let settings =
-            AudioSettings { rhythm_sound: RhythmSound::Click, ..AudioSettings::default() };
+        let settings = AudioSettings { rhythm_sound: Sound::Click, ..AudioSettings::default() };
         SoundType::Beat.patch(&settings)
     }
 

@@ -6,7 +6,7 @@
 //! cannot be deleted or renamed and always come back unchanged. User presets
 //! live in [`PresetLibrary`] and are persisted with the app state.
 
-use grooph_audio::{GapClick, GapMode, GapMute, MetronomeSound, RhythmSound, TempoRamp};
+use grooph_audio::{GapClick, GapMode, GapMute, Sound, TempoRamp};
 use grooph_measure::TimeSignature;
 use grooph_measure::generator::{GeneratorSettings, Subdivision};
 use grooph_measure::swing::{Swing, SwingUnit};
@@ -24,8 +24,8 @@ pub(crate) struct PresetSettings {
     pub(crate) endless: bool,
     pub(crate) gap_click: GapClick,
     pub(crate) tempo_ramp: TempoRamp,
-    pub(crate) metronome_sound: MetronomeSound,
-    pub(crate) rhythm_sound: RhythmSound,
+    pub(crate) metronome_sound: Sound,
+    pub(crate) rhythm_sound: Sound,
 }
 
 impl Default for PresetSettings {
@@ -39,8 +39,8 @@ impl Default for PresetSettings {
             endless: false,
             gap_click: GapClick::default(),
             tempo_ramp: TempoRamp::default(),
-            metronome_sound: MetronomeSound::default(),
-            rhythm_sound: RhythmSound::default(),
+            metronome_sound: Sound::METRONOME_DEFAULT,
+            rhythm_sound: Sound::RHYTHM_DEFAULT,
         }
     }
 }

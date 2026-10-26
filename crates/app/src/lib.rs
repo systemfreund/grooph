@@ -1387,6 +1387,27 @@ mod tests {
     }
 
     #[test]
+    fn saved_sounds_still_load() {
+        // The rhythm, metronome and counter sounds were separate enums with
+        // these variant names; they all load as the one `Sound`.
+        use grooph_audio::{AudioSettings, Sound};
+        for (saved, sound) in [
+            ("Click", Sound::Click),
+            ("Claves", Sound::Claves),
+            ("Snare", Sound::Snare),
+            ("Xylophone", Sound::Xylophone),
+        ] {
+            assert_eq!(ron::from_str::<Sound>(saved).unwrap(), sound);
+        }
+        // Settings saved before a voice had its sound get that voice's default.
+        let saved = ron::to_string(&AudioSettings::default()).unwrap();
+        let older = saved.replace("counter_sound:Xylophone,", "");
+        assert_ne!(older, saved);
+        let back: AudioSettings = ron::from_str(&older).unwrap();
+        assert_eq!(back.counter_sound, Sound::COUNTER_DEFAULT);
+    }
+
+    #[test]
     fn counting_settings_round_trip() {
         let c =
             CountingSettings { base: CountingBase::Sixteenth, system: CountingSystem::Takadimi };
