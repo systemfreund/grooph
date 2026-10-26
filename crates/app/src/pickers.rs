@@ -342,6 +342,7 @@ impl Grooph {
         };
         let width = (ui.ctx().content_rect().width() - 48.0).clamp(200.0, max_width);
         let mut preset = None;
+        let mut library_preset = None;
         let mut calibrate = None;
 
         let modal = Modal::new(Id::unique("settings_picker")).show(ui.ctx(), |ui| {
@@ -406,8 +407,8 @@ impl Grooph {
                     false
                 }
                 Picker::Library => {
-                    self.library_panel(ui);
-                    false
+                    library_preset = self.library_panel(ui);
+                    library_preset.is_some()
                 }
                 Picker::Mixer => {
                     self.mixer_panel(ui);
@@ -432,9 +433,13 @@ impl Grooph {
             self.ui.renaming_pattern = None;
         }
 
+        // After the generator check, which would generate a second rhythm.
         self.finish_generator_change(before, endless_before, false);
         if let Some(id) = preset {
             self.apply_preset(id);
+        }
+        if let Some(id) = library_preset {
+            self.open_preset(id);
         }
         // After the generator check: the run swaps the score and turns endless
         // mode off, which is no generator change. The dialog stays open

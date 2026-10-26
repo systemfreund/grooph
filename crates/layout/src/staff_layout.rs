@@ -741,10 +741,12 @@ mod tests {
         let first = &staff.systems[0].measures[0];
         assert!(first.layout.time_signature.is_some());
 
-        // A compound meter alone, as in a library preview.
-        let six_eight = Score::single(Measure::new(TimeSignature::new(6, 8)));
-        let staff = build_staff_layout(&six_eight, &staff_opts);
-        assert!(staff.systems[0].measures[0].layout.time_signature.is_some());
+        // A compound and an odd meter alone, as in a library preview.
+        for ts in [TimeSignature::new(6, 8), TimeSignature::new(7, 8)] {
+            let alone = Score::single(Measure::new(ts));
+            let staff = build_staff_layout(&alone, &staff_opts);
+            assert!(staff.systems[0].measures[0].layout.time_signature.is_some(), "{ts}");
+        }
     }
 
     #[test]

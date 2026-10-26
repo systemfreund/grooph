@@ -263,16 +263,25 @@ fn rename_row(ui: &mut egui::Ui, name: &mut String) -> Option<Renamed> {
     }
 }
 
-/// "Save" naming what it overwrites, off while that has no changes, and
-/// "Save as new". Returns which was tapped.
-fn save_buttons(ui: &mut egui::Ui, active_name: Option<&str>, dirty: bool) -> Option<SaveAs> {
-    let label = active_name.map_or("💾 Save".to_owned(), |name| format!("💾 Save {name}"));
+/// What "Save" does in a half of the library: overwrite the active entry
+/// (named in its label) or save a new one, and whether it is on.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct SaveTarget {
+    pub(crate) overwrites: Option<String>,
+    pub(crate) enabled: bool,
+}
+
+/// "Save" as `target` says, and "Save as new". Returns which was tapped.
+fn save_buttons(ui: &mut egui::Ui, target: &SaveTarget) -> Option<SaveAs> {
+    let label =
+        target.overwrites.as_ref().map_or("💾 Save".to_owned(), |name| format!("💾 Save {name}"));
     let mut tapped = None;
     ui.columns(2, |cols| {
         let size = vec2(cols[0].available_width(), ROW_HEIGHT);
         let save = Button::new(label).truncate().min_size(size);
-        if cols[0].add_enabled(active_name.is_none() || dirty, save).clicked() {
-            tapped = Some(if active_name.is_some() { SaveAs::Update } else { SaveAs::New });
+        if cols[0].add_enabled(target.enabled, save).clicked() {
+            let update = target.overwrites.is_some();
+            tapped = Some(if update { SaveAs::Update } else { SaveAs::New });
         }
         if cols[1].add(Button::new("➕ Save as new").min_size(size)).clicked() {
             tapped = Some(SaveAs::New);
@@ -316,8 +325,9 @@ fn pattern_summary(pattern: &SavedPattern) -> String {
 
 impl Grooph {
     /// Saved rhythms and practice presets, as cards: a tap loads one, ✏
-    /// renames or deletes it.
-    pub(super) fn library_panel(&mut self, ui: &mut egui::Ui) {
+    /// renames or deletes it. Returns a preset tapped, for the caller to open
+    /// after its check for generator changes.
+    pub(super) fn library_panel(&mut self, ui: &mut egui::Ui) -> Option<PresetId> {
         ui.columns(2, |cols| {
             for (col, (tab, label)) in cols
                 .iter_mut()
@@ -325,20 +335,24 @@ impl Grooph {
             {
                 let size = vec2(col.available_width(), ROW_HEIGHT);
                 let button = Button::new(label).selected(self.ui.library_tab == tab).min_size(size);
-                if col.add(button).clicked() {
+                if col.add(button).clicked() && self.ui.library_tab != tab {
+                    // The halves share the name being typed.
                     self.ui.library_tab = tab;
+                    self.ui.renaming_pattern = None;
+                    self.ui.renaming_preset = None;
                 }
             }
         });
         ui.add_space(8.0);
         match self.ui.library_tab {
-            LibraryTab::Rhythms => self.rhythms(ui),
+            LibraryTab::Rhythms => {
+                self.rhythms(ui);
+                None
+            }
             LibraryTab::Presets => {
                 ui.weak("A tap opens the practice page with the preset's settings.");
                 ui.add_space(4.0);
-                if let Some(id) = self.preset_cards(ui) {
-                    self.open_preset(id);
-                }
+                self.preset_cards(ui)
             }
         }
     }
@@ -359,13 +373,38 @@ impl Grooph {
         self.ui.scroll_to_library_item = Some(item);
     }
 
+    /// "Save" for the rhythms: the active pattern while it has changes, a
+    /// new one without an active pattern.
+    pub(crate) fn rhythm_save_target(&self) -> SaveTarget {
+        let active = self.editor.active_pattern_id.and_then(|id| self.editor.library.get(id));
+        SaveTarget {
+            overwrites: active.map(|p| p.name.clone()),
+            enabled: active.is_none() || self.rhythm_dirty(),
+        }
+    }
+
+    /// "Save" for the presets: the active user preset while the settings
+    /// differ from it; a new one for changed built-in settings or without
+    /// an active preset. An unchanged built-in has nothing to save.
+    pub(crate) fn preset_save_target(&self) -> SaveTarget {
+        let snapshot = self.preset_snapshot();
+        let active = self.editor.active_preset;
+        let changed = active
+            .and_then(|id| presets::lookup(&self.editor.presets, id))
+            .is_none_or(|(_, settings)| settings != snapshot);
+        let overwrites = match active {
+            Some(PresetId::User(id)) => self.editor.presets.get(id).map(|p| p.name.clone()),
+            _ => None,
+        };
+        SaveTarget { overwrites, enabled: changed }
+    }
+
     /// Saved rhythms: a tap loads one onto the staff.
     fn rhythms(&mut self, ui: &mut egui::Ui) {
         let active_id = self.editor.active_pattern_id;
         let dirty = self.rhythm_dirty();
-        let active_name =
-            active_id.and_then(|id| self.editor.library.get(id)).map(|p| p.name.clone());
-        if let Some(save) = save_buttons(ui, active_name.as_deref(), dirty) {
+        let target = self.rhythm_save_target();
+        if let Some(save) = save_buttons(ui, &target) {
             let id = match save {
                 SaveAs::Update => self.save_active_pattern(),
                 SaveAs::New => {
@@ -378,7 +417,7 @@ impl Grooph {
             };
             self.saved(ui, LibraryItem::Pattern(id));
         }
-        if active_name.is_none() {
+        if target.overwrites.is_none() {
             ui.weak("The rhythm on the staff is not saved.");
         }
         ui.add_space(8.0);
@@ -441,13 +480,7 @@ impl Grooph {
     pub(crate) fn preset_cards(&mut self, ui: &mut egui::Ui) -> Option<PresetId> {
         let snapshot = self.preset_snapshot();
         let active = self.editor.active_preset;
-        let active_user = match active {
-            Some(PresetId::User(id)) => self.editor.presets.get(id),
-            _ => None,
-        };
-        let dirty = active_user.is_some_and(|p| p.settings != snapshot);
-        let active_name = active_user.map(|p| p.name.clone());
-        if let Some(save) = save_buttons(ui, active_name.as_deref(), dirty) {
+        if let Some(save) = save_buttons(ui, &self.preset_save_target()) {
             let id = match (save, active) {
                 (SaveAs::Update, Some(PresetId::User(id))) => {
                     self.editor.presets.update(id, snapshot);

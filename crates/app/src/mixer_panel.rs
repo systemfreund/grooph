@@ -1,4 +1,5 @@
 use crate::Grooph;
+use crate::pickers::dialog_scroll_height;
 use eframe::egui;
 use eframe::egui::scroll_area::{ScrollBarVisibility, ScrollSource};
 use eframe::egui::style::HandleShape;
@@ -86,8 +87,10 @@ impl Grooph {
     /// count-in).
     pub(super) fn mixer_panel(&mut self, ui: &mut egui::Ui) {
         // The groups one above the other; a screen too narrow for the
-        // dialog to fit them scrolls the sliders of a group sideways.
-        let out = egui::ScrollArea::horizontal()
+        // dialog to fit them scrolls the sliders of a group sideways, one too
+        // short scrolls the groups.
+        let out = egui::ScrollArea::both()
+            .max_height(dialog_scroll_height(ui))
             .scroll_source(ScrollSource::ALL)
             .scroll_bar_visibility(ScrollBarVisibility::AlwaysHidden)
             .show(ui, |ui| {

@@ -1594,6 +1594,54 @@ mod tests {
         shell_frame(&mut app, &ctx, 0.1, vec![esc(true), esc(false)]);
         assert_eq!(app.ui.picker, None);
         assert_eq!(app.tab(), Tab::More);
+        // Without a dialog, Esc stays on More, also with the metronome
+        // behind it: its click bar editor does not open.
+        app.select_tab(Tab::Metronome);
+        app.select_tab(Tab::More);
+        shell_frame(&mut app, &ctx, 0.2, vec![esc(true), esc(false)]);
+        assert_eq!(app.tab(), Tab::More);
+        assert!(app.metronome_mode());
+        app.select_tab(Tab::Metronome);
+        assert_eq!(app.ui.mode, super::Mode::Playback);
+    }
+
+    #[test]
+    fn save_is_off_while_there_is_nothing_new_to_save() {
+        use super::Grooph;
+        use crate::presets::{PresetId, builtin_presets};
+
+        let cc = eframe::CreationContext::_new_kittest(eframe::egui::Context::default());
+        let mut app = Grooph::new(&cc);
+        app.select_tab(Tab::Edit);
+        // Rhythms: a new one while none is active, then the active one only
+        // with changes.
+        app.editor.active_pattern_id = None;
+        let target = app.rhythm_save_target();
+        assert_eq!((target.overwrites, target.enabled), (None, true));
+        app.save_pattern_as();
+        let target = app.rhythm_save_target();
+        assert!(target.overwrites.is_some() && !target.enabled);
+        app.editor.dirty = true;
+        assert!(app.rhythm_save_target().enabled);
+
+        // Presets: an unchanged built-in has nothing to save, a changed one
+        // saves a new preset.
+        app.select_tab(Tab::Practice);
+        app.apply_preset(PresetId::BuiltIn(0));
+        assert_eq!(app.editor.generator.settings, builtin_presets()[0].1.generator);
+        let target = app.preset_save_target();
+        assert_eq!((target.overwrites, target.enabled), (None, false));
+        app.playback_ctl.bpm += 1;
+        let target = app.preset_save_target();
+        assert_eq!((target.overwrites, target.enabled), (None, true));
+        let id = app.save_preset_as("");
+        let target = app.preset_save_target();
+        assert_eq!(target.overwrites, app.editor.presets.get(id).map(|p| p.name.clone()));
+        assert!(!target.enabled);
+        app.playback_ctl.bpm += 1;
+        assert!(app.preset_save_target().enabled);
+        app.editor.active_preset = None;
+        assert!(app.preset_save_target().enabled);
     }
 
     #[test]

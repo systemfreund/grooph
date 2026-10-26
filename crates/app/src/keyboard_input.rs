@@ -25,8 +25,15 @@ impl Grooph {
                 return;
             }
             // App-global shortcuts run regardless of edit mode; the tool registry handles the rest.
+            // On the More screen Esc closes what is open there: no edit mode
+            // to toggle, and with the metronome behind it, its click bar
+            // would open.
             if i.key_pressed(Key::Escape) {
-                self.toggle_mode(Mode::Edit);
+                if self.tab() == Tab::More {
+                    self.back();
+                } else {
+                    self.toggle_mode(Mode::Edit);
+                }
             }
             if i.key_pressed(Key::Space) {
                 self.toggle_playback();
