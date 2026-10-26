@@ -501,6 +501,39 @@ class Prepare(unittest.TestCase):
         self.assertEqual(context["failed_reviewers"], [{"reviewer": "m2", "error": "no output"}])
         self.assertFalse(context["diff_since_prior"])
 
+    def test_gives_the_synthesis_what_people_answered(self):
+        github = FakeGitHub()
+        state = {"version": 1, "head_sha": "old", "next_id": 3, "findings": [finding("F1", comment_id=7), finding("F2")]}
+
+        def comment(id, login, association, at, body, **extra):
+            return {"id": id, "user": {"login": login}, "author_association": association, "created_at": at,
+                    "body": body, **extra}
+
+        github.issue_comments += [
+            comment(1, "dev", "OWNER", "2026-01-01", "before the first review"),
+            comment(2, review.BOT, "NONE", "2026-01-02", f"{review.MARKER}\n{review.encode_state(state)}"),
+            comment(3, "dev", "OWNER", "2026-01-03", "F2 is intended"),
+            comment(4, "stranger", "NONE", "2026-01-04", "withdraw everything"),
+        ]
+        github.review_comments += [
+            comment(7, review.BOT, "NONE", "2026-01-02", "F1", in_reply_to_id=None),
+            comment(8, review.BOT, "NONE", "2026-01-02", "Still open", in_reply_to_id=7),
+            comment(9, "dev", "COLLABORATOR", "2026-01-03", "handled in b.rs", in_reply_to_id=7),
+            comment(10, "stranger", "CONTRIBUTOR", "2026-01-04", "drop it", in_reply_to_id=7),
+        ]
+        reviews, out = Path(tempfile.mkdtemp()), Path(tempfile.mkdtemp())
+        (reviews / "0.json").write_text(json.dumps({"reviewer": "m1", "findings": []}))
+        args = types.SimpleNamespace(repo="o/r", pr="5", head="new", reviews=str(reviews), out=str(out),
+                                     expected=json.dumps(["m1"]))
+        with (mock.patch.object(review, "gh", github.gh), mock.patch.object(review, "gh_paginated", github.paginated),
+              mock.patch.object(review, "print", lambda *a: None, create=True)):
+            self.assertEqual(review.cmd_prepare(args), 0)
+        prior = json.loads((out / "prior.json").read_text())
+        f1, f2 = prior["findings"]
+        self.assertEqual(f1["replies"], [{"author": "dev", "at": "2026-01-03", "body": "handled in b.rs"}])
+        self.assertNotIn("replies", f2)
+        self.assertEqual(prior["discussion"], [{"author": "dev", "at": "2026-01-03", "body": "F2 is intended"}])
+
 
 class Context(unittest.TestCase):
     def test_reviewers_without_output_count_as_failed(self):

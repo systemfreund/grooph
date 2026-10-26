@@ -5,7 +5,8 @@ The models never post anything themselves: every reviewer and the synthesis
 answer with JSON, and this script turns that into PR comments.
 
   extract   pull the final JSON answer out of `opencode run --format json` events
-  prepare   gather the inputs of the synthesis step (reviews, prior state, diff since the last review)
+  prepare   gather the inputs of the synthesis step (reviews, prior state and the replies to it, diff since
+            the last review)
   publish   post new inline comments, reply to resolved ones, update the summary comment
 
 Standard library only; talks to GitHub through the `gh` CLI (GH_TOKEN in the environment).
@@ -36,6 +37,8 @@ MAX_COMMENT = 65000
 # An answer (review or synthesis) has at least one of these.
 ANSWER_KEYS = {"findings", "requirements", "resolved", "withdrawn"}
 BOT = "github-actions[bot]"
+# Whose replies to the review the synthesis reads: anyone can comment on a public pull request.
+TRUSTED = {"OWNER", "MEMBER", "COLLABORATOR"}
 
 
 def gh(*args, input=None, check=True):
@@ -127,8 +130,12 @@ def cmd_extract(args):
 # ---------------------------------------------------------------- prepare
 
 
-def find_summary_comment(repo, pr):
-    for comment in gh_paginated(f"repos/{repo}/issues/{pr}/comments"):
+def issue_comments(repo, pr):
+    return gh_paginated(f"repos/{repo}/issues/{pr}/comments")
+
+
+def find_summary_comment(comments):
+    for comment in comments:
         if comment["user"]["login"] == BOT and MARKER in comment["body"]:
             return comment
     return None
@@ -141,6 +148,33 @@ def read_state(comment):
     if not match:
         return None
     return json.loads(base64.b64decode(match.group(1)))
+
+
+def from_people(comment):
+    return comment.get("author_association") in TRUSTED and comment["user"]["login"] != BOT
+
+
+def human_comment(comment):
+    return {"author": comment["user"]["login"], "at": comment.get("created_at"), "body": comment["body"]}
+
+
+def with_replies(findings, review_comments):
+    """`findings` with what people answered in their inline threads, under `replies`."""
+    replies = {}
+    for comment in review_comments:
+        # GitHub links every reply to the first comment of its thread.
+        if comment.get("in_reply_to_id") and from_people(comment):
+            replies.setdefault(comment["in_reply_to_id"], []).append(human_comment(comment))
+    return [{**f, "replies": replies[f["comment_id"]]} if f.get("comment_id") in replies else f for f in findings]
+
+
+def discussion(summary, comments):
+    """What people wrote in the conversation of the pull request since the first review."""
+    return [
+        human_comment(c)
+        for c in comments
+        if c["id"] != summary["id"] and from_people(c) and c["created_at"] > summary["created_at"]
+    ]
 
 
 def build_context(pr, head, reviews, expected, prior, diff_since_prior):
@@ -165,12 +199,16 @@ def cmd_prepare(args):
     reviews = [json.loads(path.read_text()) for path in sorted(Path(args.reviews).glob("*.json"))]
     (out / "reviews.json").write_text(json.dumps(reviews, indent=2, ensure_ascii=False))
 
-    state = read_state(find_summary_comment(args.repo, args.pr))
+    comments = issue_comments(args.repo, args.pr)
+    summary = find_summary_comment(comments)
+    state = read_state(summary)
     prior = None
     if state:
+        open_findings = [f for f in state["findings"] if f["status"] == "open"]
         prior = {
             "reviewed_sha": state["head_sha"],
-            "findings": [f for f in state["findings"] if f["status"] == "open"],
+            "findings": with_replies(open_findings, gh_paginated(f"repos/{args.repo}/pulls/{args.pr}/comments")),
+            "discussion": discussion(summary, comments),
         }
         (out / "prior.json").write_text(json.dumps(prior, indent=2, ensure_ascii=False))
         diff = gh(
@@ -526,7 +564,7 @@ def post_inline(repo, pr, head, findings):
 
 
 def cmd_publish(args):
-    comment = find_summary_comment(args.repo, args.pr)
+    comment = find_summary_comment(issue_comments(args.repo, args.pr))
     prior = read_state(comment) or {"next_id": 1, "findings": []}
     context_path = Path(args.input, "context.json")
     context = json.loads(context_path.read_text()) if context_path.exists() else {"reviewers": [], "failed_reviewers": []}

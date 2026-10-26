@@ -16,8 +16,8 @@ name: Code review
 #               summary comment that is updated on every run.
 #
 # The summary comment carries the findings of the last run in a hidden state
-# block, so each push is reviewed against the previous review. Raw reviews stay
-# in the run's artifacts.
+# block, so each push is reviewed against the previous review and what people
+# with write access answered to it. Raw reviews stay in the run's artifacts.
 #
 # Runs on every push to a pull request; a newer push cancels the running review.
 # "Run workflow" reviews any PR number, optionally with its own model list.

@@ -116,7 +116,8 @@ Every pull request gets an automated review (`.github/workflows/code-review.yml`
 checks the change against its requirements; pull requests that change `.rs` files also get a Rust-specific review
 (`.agents/skills/grooph-rust-review`). Several models review independently, and a synthesis step
 (`.github/review/SYNTHESIS.md`) merges them into one summary comment plus inline comments. Every push is
-reviewed again: the summary comment is updated and marks earlier findings as resolved. When opening a pull request:
+reviewed again: the summary comment is updated and marks earlier findings as resolved. Answers to a finding
+(in its thread or the PR conversation) are read on the next push; a reason that holds withdraws it. When opening a pull request:
 
 - If it implements an issue, write `Closes #<n>` in the description.
 - If there is no issue (e.g. it comes out of a coding session), the description is the requirements. List what the
