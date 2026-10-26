@@ -181,7 +181,13 @@ fn meter_grid(
                 let selected = ts == current;
                 let button =
                     Button::new("").selected(selected).min_size(vec2(width, METER_TILE_HEIGHT));
-                let resp = ui.add(button).on_hover_text(time_signature_label(ts));
+                let label = time_signature_label(ts);
+                let resp = ui.add(button);
+                // The meter is painted, so the button gets its name here.
+                resp.widget_info(|| {
+                    egui::WidgetInfo::selected(egui::WidgetType::Button, true, selected, &label)
+                });
+                let resp = resp.on_hover_text(label);
                 let color = ui.style().interact_selectable(&resp, selected).text_color();
                 let room = width - 2.0 * ui.spacing().button_padding.x;
                 let center = resp.rect.center();
@@ -887,5 +893,22 @@ impl Grooph {
                 });
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn groups_are_shown_for_x8_and_x16_meters_with_several() {
+        assert_eq!(shown_groups(TimeSignature::FOUR_FOUR), None);
+        assert_eq!(shown_groups(TimeSignature::new(3, 8)), None);
+        assert_eq!(shown_groups(TimeSignature::new(4, 8)).as_deref(), Some("2+2"));
+        assert_eq!(shown_groups(TimeSignature::new(6, 8)).as_deref(), Some("3+3"));
+        assert_eq!(
+            shown_groups(TimeSignature::new(7, 16).with_grouping(1)).as_deref(),
+            Some("2+2+3")
+        );
     }
 }
