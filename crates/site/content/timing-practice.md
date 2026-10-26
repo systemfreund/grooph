@@ -23,12 +23,12 @@ bpm=70&sub=16&lvl=2&bars=2
 2. Tap every note: press **J** on the keyboard, or touch or click the staff.
 
 While you play along, touching the staff counts as a hit and does not move the cursor.
-You can pick another tap key or switch tapping off under **Play Along** in the settings.
+You can pick another tap key or switch tapping off under **More → Play along**.
 
 ### Microphone
 
-1. Open **More → Settings**, go to **Play Along** and switch on **Microphone input**. Allow
-   grooph to use the microphone when the browser asks.
+1. Open **More → Play along** and switch on **Microphone**. Allow grooph to use the
+   microphone when the browser asks.
 2. Hit your sticks, pad or hands and watch the level meter: hits should cross the red
    threshold mark, the click on its own should stay below it. Move the threshold if not.
 3. Make sure **Timing feedback** on the **Practice** tab is switched on, then press play.
@@ -49,8 +49,8 @@ Any key or pad counts as a hit, so you can use whichever sound you like.
 ## Calibrate the latency
 
 Every device adds a little delay between your hit and the moment grooph sees it, so your
-hits can look late although they are not. Open **More → Settings**, go to
-**Play Along** and press **Calibrate…** next to *Tap*, *MIDI* or *Mic*. grooph plays a
+hits can look late although they are not. Open **More → Play along** and press
+**Calibrate** under *Tap*, *Microphone* or *MIDI*. grooph plays a
 click and you play along on every beat; after 16 hits the median deviation becomes the
 offset that is subtracted from your hits. Every input has its own offset. Bluetooth
 headphones add a lot of delay, so calibrate again when you switch to or from them.

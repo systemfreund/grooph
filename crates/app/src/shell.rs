@@ -241,7 +241,7 @@ pub(crate) fn paint_meter(
 }
 
 /// Full-width row with a label and an on/off switch. Returns whether it toggled.
-fn switch_row(ui: &mut Ui, label: &str, on: &mut bool) -> bool {
+pub(crate) fn switch_row(ui: &mut Ui, label: &str, on: &mut bool) -> bool {
     badged_switch_row(ui, label, None, on)
 }
 
@@ -347,7 +347,7 @@ fn switch_off_fill(visuals: &egui::Visuals) -> Color32 {
 }
 
 /// Full-width row with a label, the current value and a chevron.
-fn value_row(ui: &mut Ui, label: &str, value: &str) -> Response {
+pub(crate) fn value_row(ui: &mut Ui, label: &str, value: &str) -> Response {
     let (rect, resp) =
         ui.allocate_exact_size(vec2(ui.available_width(), ROW_HEIGHT), Sense::click());
     let visuals = ui.visuals();
@@ -1271,6 +1271,18 @@ impl Grooph {
                                         // A device plugged in since shows up.
                                         self.refresh_midi_ports();
                                         self.ui.picker = Some(Picker::MidiInput);
+                                    }
+                                    // Next to the MIDI device it listens to:
+                                    // the other inputs and every latency.
+                                    if mode == Mode::Settings
+                                        && value_row(
+                                            ui,
+                                            "🎯   Play along",
+                                            &self.play_along_label(),
+                                        )
+                                        .clicked()
+                                    {
+                                        self.ui.picker = Some(Picker::PlayAlong);
                                     }
                                     if mode == Mode::Help {
                                         theme_row(ui);

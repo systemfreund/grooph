@@ -287,7 +287,7 @@ Important root files:
   1024-frame blocks to the page, whose context time is mapped onto
   `performance.now()`; natively cpal's capture timestamp is used. The
   microphone is open only while a run with it plays, a microphone calibration
-  runs or the settings show its level meter, because phones change audio
+  runs or the Play along dialog shows its level meter, because phones change audio
   routing while recording. On iOS the built-in microphone is chosen over a
   headset's, which filters out hits.
 - The session (`accuracy::AccuracyTracker`) runs while MIDI is connected or
@@ -300,7 +300,8 @@ Important root files:
 - Calibration (`crates/app/src/calibration.rs`): stashes the score and playback
   options, plays 4 quarters at 100 BPM, takes the median of the hits after a
   warm-up as the source's offset and restores the stash on stop. Persistence
-  reads the stash while a calibration runs.
+  reads the stash while a calibration runs. It is started from More → Play
+  along (`play_along_settings.rs`), whose dialog stays open underneath.
 
 ## Layout
 
@@ -310,8 +311,8 @@ Important root files:
 - Tabs: Metronome (see below), Practice (generator card with
   Meter/Notes/Level/Bars/BPM, options sheet, big "new rhythm" + play
   buttons), Edit (tool palette + edit bar),
-  More (Library, Mixer, Settings, Help reuse their panels; Sounds and MIDI input open a
-  picker, Theme is picked in its row). The tab is derived
+  More (Library, Mixer, Settings, Help reuse their panels; Sounds, MIDI input and Play along
+  open a picker, Theme is picked in its row). The tab is derived
   from `Mode` (`tab`), so modes set elsewhere land on the right tab;
   the Metronome tab is open while `metronome_mode()`, in `Mode::Playback`
   (ring) or `Mode::Edit` (tool palette).
