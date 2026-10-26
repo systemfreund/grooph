@@ -310,7 +310,7 @@ Important root files:
 - Tabs: Metronome (see below), Practice (generator card with
   Meter/Notes/Level/Bars/BPM, options sheet, big "new rhythm" + play
   buttons), Edit (tool palette + edit bar),
-  More (Library, Mixer, Settings, Help reuse their panels; Sounds opens a
+  More (Library, Mixer, Settings, Help reuse their panels; Sounds and MIDI input open a
   picker, Theme is picked in its row). The tab is derived
   from `Mode` (`tab`), so modes set elsewhere land on the right tab;
   the Metronome tab is open while `metronome_mode()`, in `Mode::Playback`

@@ -60,6 +60,8 @@ pub(crate) enum Picker {
     SilentBars,
     /// The sounds of the rhythm, the metronome and the counter rhythm.
     Sounds,
+    /// The MIDI device the play-along listens to.
+    MidiInput,
 }
 
 pub(crate) fn counting_system_name(system: CountingSystem) -> &'static str {
@@ -128,7 +130,7 @@ pub(crate) fn subdivision_label(s: Subdivision) -> &'static str {
 }
 
 /// Grid of option buttons; returns the one that was tapped.
-fn choice_grid<T: Copy + PartialEq>(
+pub(crate) fn choice_grid<T: Copy + PartialEq>(
     ui: &mut Ui,
     options: &[(T, String)],
     current: T,
@@ -300,7 +302,7 @@ fn sound_grid(ui: &mut Ui, current: Sound) -> Option<Sound> {
     choice_grid(ui, &sounds, current, 2)
 }
 
-fn wide_button(ui: &mut Ui, label: &str, size: f32, height: f32) -> Response {
+pub(crate) fn wide_button(ui: &mut Ui, label: &str, size: f32, height: f32) -> Response {
     let width = ui.available_width();
     ui.horizontal(|ui| {
         ui.add(Button::new(RichText::new(label).size(size)).min_size(vec2(width, height)))
@@ -337,6 +339,7 @@ impl Grooph {
                 Picker::Polyrhythm => "Polyrhythm",
                 Picker::SilentBars => "Silent bars",
                 Picker::Sounds => "Sounds",
+                Picker::MidiInput => "MIDI input",
             };
             ui.heading(title);
             ui.add_space(8.0);
@@ -370,6 +373,7 @@ impl Grooph {
                     self.sound_choices(ui);
                     false
                 }
+                Picker::MidiInput => self.midi_input_choices(ui),
             };
             ui.add_space(12.0);
             picked || wide_button(ui, "Done", 19.0, ROW_HEIGHT).clicked()

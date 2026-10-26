@@ -41,7 +41,7 @@ through the device's own microphone, because headset microphones filter out hits
 
 1. Connect the MIDI device to your computer (USB or Bluetooth MIDI).
 2. Open grooph in a browser with Web MIDI support, such as Chrome or Edge.
-3. Open **More → Settings** and choose the device under **MIDI Input**.
+3. Open **More → MIDI input** and pick the device. If it is not listed, press **Look for devices**.
 4. Make sure **Timing feedback** on the **Practice** tab is switched on, then press play.
 
 Any key or pad counts as a hit, so you can use whichever sound you like.

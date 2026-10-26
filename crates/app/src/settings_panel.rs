@@ -1,5 +1,4 @@
 use crate::Grooph;
-use crate::midi_input_widget::midi_input_widget;
 use crate::play_along::{HitSource, MAX_INPUT_OFFSET_MS, TapKey};
 use crate::{Mode, clock};
 use eframe::egui;
@@ -141,17 +140,6 @@ impl Grooph {
                             );
                         },
                     );
-
-                    egui::CollapsingHeader::new("MIDI Input").default_open(false).show(ui, |ui| {
-                        midi_input_widget(
-                            ui,
-                            "settings_midi_input",
-                            "🔄",
-                            &mut self.playback_ctl.midi.input,
-                            &mut self.playback_ctl.midi.available_ports,
-                            &mut self.playback_ctl.midi.selected_port_id,
-                        );
-                    });
 
                     egui::CollapsingHeader::new("Play Along").default_open(false).show(ui, |ui| {
                         self.play_along_settings(ui);
