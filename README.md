@@ -1,10 +1,14 @@
-# grooph
+# Grooph
 
-**A free rhythm trainer: read rhythms, keep time, and see how well you play
-them.** grooph runs in your browser at **[grooph.app](https://grooph.app)**,
+Practice rhythm reading and timing: generate sight-reading exercises in standard notation (eighths, sixteenths, triplets, odd meters), count along with syllables, use a metronome with polyrhythms, swing and trainer modes, and see how early or late you play by tap, mic or MIDI drum pad.
+
+<img width="390" height="844" alt="grooph-generator" src="https://github.com/user-attachments/assets/4f46c318-88be-4167-892a-00f8dfbddbb2" />
+<img width="390" height="844" alt="grooph-play-along" src="https://github.com/user-attachments/assets/414b41c4-e194-44ee-b080-a9f1fdc0ee75" />
+<img width="390" height="844" alt="grooph-polyrhythm" src="https://github.com/user-attachments/assets/bd124bdd-f894-4368-baf4-0d32a5ad8152" />
+<img width="390" height="844" alt="grooph-odd-meter" src="https://github.com/user-attachments/assets/a06544b3-3720-447d-b6bc-8cecd5fd94ad" />
+
+grooph is free and runs in your browser at **[grooph.app](https://grooph.app)**,
 with no account and no installation, and as an Android app.
-
-<img width="945" height="2048" alt="grooph on a phone" src="https://github.com/user-attachments/assets/208b524b-b48e-4410-8b41-dfb3f060c8e7" />
 
 ## What you can do with it
 
