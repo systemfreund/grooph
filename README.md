@@ -1,10 +1,12 @@
 # Grooph
 
-Short description: Grooph is a rhythm and meter editor with playback. The app
-shows a single measure, allows notes/rests/tuplets (triplets), plays a metronome
-track, and runs native as well as WebAssembly (eframe/egui).
+Practice rhythm reading and timing: generate sight-reading exercises in standard notation (eighths, sixteenths, triplets, odd meters), count along with syllables, use a metronome with polyrhythms, swing and trainer modes, and see how early or late you play by tap, mic or MIDI drum pad.
 
-<img width="945" height="2048" alt="image" src="https://github.com/user-attachments/assets/208b524b-b48e-4410-8b41-dfb3f060c8e7" />
+<img width="390" height="844" alt="grooph-generator" src="https://github.com/user-attachments/assets/4f46c318-88be-4167-892a-00f8dfbddbb2" />
+<img width="390" height="844" alt="grooph-play-along" src="https://github.com/user-attachments/assets/414b41c4-e194-44ee-b080-a9f1fdc0ee75" />
+<img width="390" height="844" alt="grooph-polyrhythm" src="https://github.com/user-attachments/assets/bd124bdd-f894-4368-baf4-0d32a5ad8152" />
+<img width="390" height="844" alt="grooph-odd-meter" src="https://github.com/user-attachments/assets/a06544b3-3720-447d-b6bc-8cecd5fd94ad" />
+
 
 This README is meant for LLM coding agents and describes the key concepts,
 files, and invariants so changes can be made with confidence.
