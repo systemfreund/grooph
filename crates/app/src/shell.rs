@@ -14,7 +14,8 @@ use eframe::egui;
 use eframe::egui::layers::ShapeIdx;
 use eframe::egui::{
     Align2, Button, Color32, CornerRadius, FontFamily, FontId, Frame, Id, LayerId, Margin, Order,
-    Painter, Pos2, Rect, Response, RichText, Sense, Shape, Stroke, Ui, UiBuilder, Vec2, pos2, vec2,
+    Painter, Pos2, Rect, Response, RichText, Sense, Shape, Stroke, ThemePreference, Ui, UiBuilder,
+    Vec2, pos2, vec2,
 };
 use grooph_layout::glyphs::ts_glyphs;
 use grooph_layout::pixel_layout::PlacedGlyph;
@@ -355,6 +356,38 @@ fn value_row(ui: &mut Ui, label: &str, value: &str) -> Response {
         visuals.weak_text_color(),
     );
     resp
+}
+
+/// The More menu's theme row: its three choices side by side at the right.
+fn theme_row(ui: &mut Ui) {
+    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), ROW_HEIGHT), Sense::hover());
+    ui.painter().text(
+        rect.left_center() + vec2(4.0, 0.0),
+        Align2::LEFT_CENTER,
+        "🌙   Theme",
+        FontId::proportional(19.0),
+        ui.visuals().text_color(),
+    );
+    let mut theme = ui.options(|o| o.theme_preference);
+    let choices = [
+        (ThemePreference::System, "System"),
+        (ThemePreference::Light, "Light"),
+        (ThemePreference::Dark, "Dark"),
+    ];
+    let layout = egui::Layout::right_to_left(egui::Align::Center);
+    ui.scope_builder(UiBuilder::new().max_rect(rect).layout(layout), |ui| {
+        ui.spacing_mut().item_spacing.x = 4.0;
+        // Right to left: the last choice comes first.
+        for (choice, label) in choices.into_iter().rev() {
+            let button = Button::new(RichText::new(label).size(16.0))
+                .selected(theme == choice)
+                .min_size(vec2(64.0, 32.0));
+            if ui.add(button).clicked() {
+                theme = choice;
+            }
+        }
+    });
+    ui.ctx().set_theme(theme);
 }
 
 /// [`value_row`] showing a subdivision as notes or as "none", `text` if
@@ -1173,6 +1206,9 @@ impl Grooph {
                             .inner_margin(Margin::symmetric(12, 4))
                             .show(ui, |ui| {
                                 for (mode, icon, label) in ENTRIES {
+                                    if mode == Mode::Help {
+                                        theme_row(ui);
+                                    }
                                     if value_row(ui, &format!("{icon}   {label}"), "").clicked() {
                                         self.ui.mode = mode;
                                     }
