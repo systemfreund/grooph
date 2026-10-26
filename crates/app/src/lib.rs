@@ -11,7 +11,7 @@ mod library_panel;
 mod measure_panel;
 mod metronome_trainer;
 mod metronome_view;
-mod midi_input_widget;
+mod midi_input;
 mod mixer_panel;
 mod persist;
 mod pickers;

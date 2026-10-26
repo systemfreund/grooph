@@ -352,13 +352,26 @@ fn value_row(ui: &mut Ui, label: &str, value: &str) -> Response {
         ui.allocate_exact_size(vec2(ui.available_width(), ROW_HEIGHT), Sense::click());
     let visuals = ui.visuals();
     let painter = ui.painter();
-    painter.text(
+    let label = painter.text(
         rect.left_center() + vec2(4.0, 0.0),
         Align2::LEFT_CENTER,
         label,
         FontId::proportional(19.0),
         visuals.text_color(),
     );
+    // A long value (a device or preset name) is cut short before the label.
+    let room = rect.right() - 30.0 - label.right() - 16.0;
+    let fits = |text: &str| {
+        painter.layout_no_wrap(text.to_owned(), FontId::proportional(19.0), Color32::WHITE).size().x
+            <= room
+    };
+    let mut value = value.to_owned();
+    if !fits(&value) {
+        while !value.is_empty() && !fits(&format!("{value}…")) {
+            value.pop();
+        }
+        value = format!("{}…", value.trim_end());
+    }
     painter.text(
         rect.right_center() - vec2(30.0, 0.0),
         Align2::RIGHT_CENTER,
@@ -1246,6 +1259,18 @@ impl Grooph {
                                         && value_row(ui, "🔔   Sounds", "").clicked()
                                     {
                                         self.ui.picker = Some(Picker::Sounds);
+                                    }
+                                    if mode == Mode::Settings
+                                        && value_row(
+                                            ui,
+                                            "🎹   MIDI input",
+                                            &self.midi_input_label(),
+                                        )
+                                        .clicked()
+                                    {
+                                        // A device plugged in since shows up.
+                                        self.refresh_midi_ports();
+                                        self.ui.picker = Some(Picker::MidiInput);
                                     }
                                     if mode == Mode::Help {
                                         theme_row(ui);
