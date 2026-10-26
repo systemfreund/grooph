@@ -7,8 +7,8 @@ use grooph_measure::grid::DEFAULT_GRID;
 ///
 /// Each note sits at its onset and its duration's space follows it, as in
 /// printed music: the first note sits `lead` in from the left edge and the
-/// last note's space runs up to the right edge. With `proportional`, space is
-/// proportional to duration; otherwise every beat gets the same width.
+/// last note's space runs up to the right edge. Space is proportional to
+/// duration.
 ///
 /// `min_advance[i]` (px, optional per beat) is the least distance beat `i`
 /// needs to the next note head or the barline so their glyphs don't touch.
@@ -17,7 +17,6 @@ use grooph_measure::grid::DEFAULT_GRID;
 pub fn calculate_x_centers(
     beats: &[Beat],
     content_w: f32,
-    proportional: bool,
     lead: f32,
     min_advance: &[f32],
 ) -> Vec<f32> {
@@ -25,11 +24,8 @@ pub fn calculate_x_centers(
     let lead = lead.clamp(0.0, content_w.max(0.0));
     let body_w = content_w - lead;
 
-    let weights: Vec<f32> = if proportional {
-        durations.iter().map(|d| DEFAULT_GRID.ticks_of(d).unwrap_or(0) as f32).collect()
-    } else {
-        vec![1.0; durations.len()]
-    };
+    let weights: Vec<f32> =
+        durations.iter().map(|d| DEFAULT_GRID.ticks_of(d).unwrap_or(0) as f32).collect();
     let needs: Vec<f32> =
         (0..durations.len()).map(|i| min_advance.get(i).copied().unwrap_or(0.0)).collect();
     let advances = share_out(&weights, &needs, body_w);
@@ -55,7 +51,7 @@ struct Columns {
 }
 
 impl Columns {
-    fn new(voices: &[(&[Beat], &[f32])], proportional: bool) -> Self {
+    fn new(voices: &[(&[Beat], &[f32])]) -> Self {
         let ticks = |b: &Beat| DEFAULT_GRID.ticks_of(&b.duration).unwrap_or(0);
         let starts: Vec<Vec<u32>> =
             voices.iter().map(|(beats, _)| DEFAULT_GRID.compute_onset_ticks(beats)).collect();
@@ -69,10 +65,7 @@ impl Columns {
         onsets.sort_unstable();
         onsets.dedup();
         let weights: Vec<f32> = (0..onsets.len())
-            .map(|j| {
-                let next = onsets.get(j + 1).copied().unwrap_or(end);
-                if proportional { (next - onsets[j]) as f32 } else { 1.0 }
-            })
+            .map(|j| (onsets.get(j + 1).copied().unwrap_or(end) - onsets[j]) as f32)
             .collect();
         let mut needs = vec![0.0f32; onsets.len()];
         for ((_, min_advance), starts) in voices.iter().zip(&starts) {
@@ -100,10 +93,9 @@ impl Columns {
 pub fn calculate_shared_x_centers(
     voices: &[(&[Beat], &[f32])],
     content_w: f32,
-    proportional: bool,
     lead: f32,
 ) -> Vec<Vec<f32>> {
-    let columns = Columns::new(voices, proportional);
+    let columns = Columns::new(voices);
     let lead = lead.clamp(0.0, content_w.max(0.0));
     let advances = share_out(&columns.weights, &columns.needs, content_w - lead);
     let xs: Vec<f32> = advances
@@ -128,8 +120,8 @@ pub fn calculate_shared_x_centers(
 
 /// The least width of the columns of [`calculate_shared_x_centers`], lead
 /// excluded: at it, every beat gets just its `min_advance`.
-pub fn shared_min_width(voices: &[(&[Beat], &[f32])], proportional: bool) -> f32 {
-    Columns::new(voices, proportional).needs.iter().sum()
+pub fn shared_min_width(voices: &[(&[Beat], &[f32])]) -> f32 {
+    Columns::new(voices).needs.iter().sum()
 }
 
 /// Split `total` into `max(needs[i], weights[i] * k)` per item, with `k` as
@@ -170,25 +162,12 @@ mod tests {
         let beats = vec![Beat::note(q()), Beat::note(e()), Beat::note(e())];
         let width = 100.0;
         // 10 px lead, then 90 px split as quarter / eighth / eighth.
-        let centers = calculate_x_centers(&beats, width, true, 10.0, &[]);
+        let centers = calculate_x_centers(&beats, width, 10.0, &[]);
 
         assert_eq!(centers.len(), 3);
         assert!((centers[0] - 10.0).abs() < 1e-5, "Expected 10.0, got {}", centers[0]);
         assert!((centers[1] - 55.0).abs() < 1e-5, "Expected 55.0, got {}", centers[1]);
         assert!((centers[2] - 77.5).abs() < 1e-5, "Expected 77.5, got {}", centers[2]);
-    }
-
-    #[test]
-    fn test_uniform_spacing() {
-        let beats = vec![Beat::note(q()), Beat::note(e()), Beat::note(e())];
-        let width = 100.0;
-        let centers = calculate_x_centers(&beats, width, false, 10.0, &[]);
-
-        assert_eq!(centers.len(), 3);
-        // Uniform spacing: 3 cells of 30 px after the 10 px lead.
-        assert!((centers[0] - 10.0).abs() < 0.01, "Expected 10.0, got {}", centers[0]);
-        assert!((centers[1] - 40.0).abs() < 0.01, "Expected 40.0, got {}", centers[1]);
-        assert!((centers[2] - 70.0).abs() < 0.01, "Expected 70.0, got {}", centers[2]);
     }
 
     #[test]
@@ -198,7 +177,7 @@ mod tests {
         // rest.
         use grooph_measure::duration::s;
         let beats = vec![Beat::note(q()), Beat::note(s()), Beat::note(s())];
-        let centers = calculate_x_centers(&beats, 100.0, true, 0.0, &[0.0, 20.0, 20.0]);
+        let centers = calculate_x_centers(&beats, 100.0, 0.0, &[0.0, 20.0, 20.0]);
         assert!((centers[0] - 0.0).abs() < 1e-4);
         assert!((centers[1] - 60.0).abs() < 1e-4, "got {}", centers[1]);
         assert!((centers[2] - 80.0).abs() < 1e-4, "got {}", centers[2]);
@@ -213,24 +192,24 @@ mod tests {
         upper.push(Beat::note(h()));
         let lower = vec![Beat::note(h()), Beat::note(h())];
         let needs = vec![10.0; 16];
-        let xs = calculate_shared_x_centers(&[(&upper, &needs), (&lower, &[])], 200.0, true, 0.0);
+        let xs = calculate_shared_x_centers(&[(&upper, &needs), (&lower, &[])], 200.0, 0.0);
         // Both halves at the second half of the measure start together.
         assert!((xs[0][16] - xs[1][1]).abs() < 1e-4, "{} vs {}", xs[0][16], xs[1][1]);
         assert!((xs[0][0] - xs[1][0]).abs() < 1e-4);
         for w in xs[0][..17].windows(2) {
             assert!(w[1] - w[0] >= 10.0 - 1e-4, "{:?}", xs[0]);
         }
-        assert!((shared_min_width(&[(&upper, &needs), (&lower, &[])], true) - 160.0).abs() < 1e-3);
+        assert!((shared_min_width(&[(&upper, &needs), (&lower, &[])]) - 160.0).abs() < 1e-3);
         // A voice alone is spaced as by itself.
-        let alone = calculate_shared_x_centers(&[(&upper, &needs)], 200.0, true, 5.0);
-        assert_eq!(alone[0], calculate_x_centers(&upper, 200.0, true, 5.0, &needs));
+        let alone = calculate_shared_x_centers(&[(&upper, &needs)], 200.0, 5.0);
+        assert_eq!(alone[0], calculate_x_centers(&upper, 200.0, 5.0, &needs));
     }
 
     #[test]
     fn uncrowded_beats_stay_proportional() {
         let beats = vec![Beat::note(q()), Beat::note(e()), Beat::note(e())];
-        let plain = calculate_x_centers(&beats, 100.0, true, 0.0, &[]);
-        let with_needs = calculate_x_centers(&beats, 100.0, true, 0.0, &[5.0, 5.0, 5.0]);
+        let plain = calculate_x_centers(&beats, 100.0, 0.0, &[]);
+        let with_needs = calculate_x_centers(&beats, 100.0, 0.0, &[5.0, 5.0, 5.0]);
         assert_eq!(plain, with_needs);
     }
 }

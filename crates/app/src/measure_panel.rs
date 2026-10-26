@@ -116,8 +116,6 @@ impl Grooph {
                             stem_length_factor: self.ui.layout.stem_length_factor,
                             stem_thickness_factor: 0.04,
                             accent_displacement: 0.07,
-                            accent_below: self.ui.layout.accent_below,
-                            proportional_spacing: self.ui.layout.proportional_spacing,
                             min_measure_width_em,
                             note_width_em,
                             system_spacing_em: 0.2,

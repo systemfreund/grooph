@@ -69,19 +69,12 @@ impl Default for AudioConfig {
 
 pub(crate) struct LayoutSettings {
     pub(crate) width_cap_factor: f32,
-    pub(crate) accent_below: bool,
-    pub(crate) proportional_spacing: bool,
     pub(crate) stem_length_factor: f32,
 }
 
 impl Default for LayoutSettings {
     fn default() -> Self {
-        Self {
-            width_cap_factor: 0.1,
-            accent_below: false,
-            proportional_spacing: true,
-            stem_length_factor: 0.9,
-        }
+        Self { width_cap_factor: 0.1, stem_length_factor: 0.9 }
     }
 }
 

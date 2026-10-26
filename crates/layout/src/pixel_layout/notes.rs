@@ -316,7 +316,6 @@ pub(super) fn build_note_layout(
         None => crate::calculate_x_centers(
             beats,
             rect.width(),
-            opts.proportional_spacing,
             c::NOTE_LEAD_EM * opts.em,
             &min_advances(beats, &in_beam_flags, opts),
         ),
@@ -359,27 +358,12 @@ pub(super) fn build_note_layout(
         // Push right to keep the minimum gap to the previous box
         let mut cx = base_cx;
 
-        // Propagate shift if connected to previous beat
-        let mut connected = false;
-        if i > 0 {
-            // 1. Beam
-            if let Some(bg) = beat_to_beam_group[i]
-                && beat_to_beam_group[i - 1] == Some(bg)
-            {
-                connected = true;
-            }
-            // 2. Tuplet
-            else if render_plan.tuplets.iter().any(|t| t.start <= (i - 1) && t.end >= i) {
-                connected = true;
-            }
-            // 3. Primary Group (only if proportional spacing is enabled)
-            else if opts.proportional_spacing {
-                let t = onsets[i];
-                if !boundaries.contains(&t) {
-                    connected = true;
-                }
-            }
-        }
+        // Propagate shift if connected to previous beat: by a beam, a tuplet
+        // or the same primary group.
+        let connected = i > 0
+            && (beat_to_beam_group[i].is_some_and(|bg| beat_to_beam_group[i - 1] == Some(bg))
+                || render_plan.tuplets.iter().any(|t| t.start <= (i - 1) && t.end >= i)
+                || !boundaries.contains(&onsets[i]));
 
         if connected {
             cx += shifts[i - 1];
