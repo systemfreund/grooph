@@ -8,7 +8,7 @@ rust-version.workspace = true
 publish = false
 
 # The Android app: a native library that NativeActivity loads. Build the App
-# Bundle and the APK with build-android.sh (see README "Android").
+# Bundle and the APK with build-android.sh (see ARCHITECTURE.md, "Build and test").
 [lib]
 crate-type = ["cdylib"]
 

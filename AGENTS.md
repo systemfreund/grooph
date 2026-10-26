@@ -2,7 +2,7 @@
 
 Repository: https://github.com/systemfreund/grooph — remote `origin`, default branch `main`.
 
-Read README.md first.
+Read ARCHITECTURE.md first.
 This document captures build, test, and development practices tailored to this repository. It’s written for experienced
 Rust developers and focuses on crate-specific behaviors and APIs that matter when developing or debugging.
 
@@ -25,7 +25,7 @@ Rust developers and focuses on crate-specific behaviors and APIs that matter whe
       `cfg(target_arch = "wasm32")`.
     - `site` (grooph-site): static guide pages, written into the web build by a Trunk `post_build` hook.
 - Running locally:
-    - Native run: `cargo run`
+    - Native run: `cargo run --bin grooph-app`
     - Tests: `cargo test --workspace`
     - WASM build (optional): Trunk.toml at the repo root drives web builds. `trunk serve` for dev, or
       `trunk build --release` to produce optimized WASM (release profile uses `opt-level = "z"` and `lto = true`;

@@ -88,8 +88,8 @@ jobs:
         curl -sSfL -o "$RUNNER_TEMP/bundletool.jar" \
           https://github.com/google/bundletool/releases/download/1.18.1/bundletool-all-1.18.1.jar
     - name: Set up the signing key
-      # The upload key comes from the repository secrets (see README
-      # "Android"); without them, a throwaway key.
+      # The upload key comes from the repository secrets (see ARCHITECTURE.md
+      # "Build and test"); without them, a throwaway key.
       env:
         UPLOAD_KEYSTORE_BASE64: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_BASE64 }}
         UPLOAD_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_PASSWORD }}
