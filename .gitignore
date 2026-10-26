@@ -3,3 +3,4 @@
 /dist/
 .wrangler
 TODO.md
+__pycache__/

@@ -38,6 +38,7 @@ Rust developers and focuses on crate-specific behaviors and APIs that matter whe
 - `cargo fmt --all -- --check`
 - `cargo clippy --workspace --all-targets -- -D warnings` (unused imports and dead code are errors)
 - `cargo build` and `cargo test`
+- `python3 -m unittest discover -s .github/review` (the scripts of the code review workflow)
 - `trunk build --release` (the web job). To check the WASM target without Trunk:
   `cargo clippy -p grooph-app --target wasm32-unknown-unknown -- -D warnings`
 
@@ -113,7 +114,9 @@ fn demo_howto_test_measure_with_helpers() {
 
 Every pull request gets an automated review (`.github/workflows/code-review.yml`, guided by `REVIEW.md`) that
 checks the change against its requirements; pull requests that change `.rs` files also get a Rust-specific review
-(`.agents/skills/grooph-rust-review`). When opening a pull request:
+(`.agents/skills/grooph-rust-review`). Several models review independently, and a synthesis step
+(`.github/review/SYNTHESIS.md`) merges them into one summary comment plus inline comments. Every push is
+reviewed again: the summary comment is updated and marks earlier findings as resolved. When opening a pull request:
 
 - If it implements an issue, write `Closes #<n>` in the description.
 - If there is no issue (e.g. it comes out of a coding session), the description is the requirements. List what the

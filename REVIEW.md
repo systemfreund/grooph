@@ -95,39 +95,38 @@ speculative "consider maybe" remarks. If you are not sure something is a bug, sa
 
 ## 4. Output
 
-Your **final answer is the summary comment**: the workflow posts it on the pull request, so do not post it
-yourself. For findings tied to a specific line, post **inline comments** on the changed lines:
+Do not post anything on the pull request: several reviewers run side by side, and a synthesis step merges
+their answers into one review (`.github/review/SYNTHESIS.md`). Your **final answer is a single JSON object**
+and nothing else (a ```json fence around it is fine):
 
-```
-gh api repos/<REPO>/pulls/<PR>/comments -f commit_id=<HEAD SHA> -f path=<file> -F line=<line> -f side=RIGHT -f body='…'
-```
-
-The head SHA is in the prompt; otherwise get it with `gh pr view <PR> --json headRefOid`. Inline comments only
-work on lines inside the diff; mention other findings in the summary only. Do not approve or request changes,
-and do not edit files or push commits.
-
-Several models may review the same pull request side by side. Put the model from the prompt (`MODEL`) in the
-summary heading as shown below, and start every inline comment with `**[<MODEL>]**`.
-
-Summary comment layout:
-
-```
-## Code review (<MODEL>)
-
-**Requirements source:** …
-
-### Requirements
-| # | Requirement | Verdict | Where / what is missing |
-|---|---|---|---|
-
-### Findings
-1. 🔴/🟠/🟡 **Short title** (`file.rs:line`): what goes wrong, when, and a suggested fix.
-
-### Out of scope / unrequested changes
-…
-
-**Verdict:** one sentence: ready to merge, or what must change first.
+```json
+{
+  "requirements_source": "issue #12",
+  "requirements": [
+    {"text": "Tapping More opens the MIDI picker", "verdict": "met", "note": "shell.rs: more_menu()"}
+  ],
+  "findings": [
+    {
+      "severity": "medium",
+      "title": "Failed connect leaves the old port",
+      "file": "crates/midi/src/input.rs",
+      "line": 476,
+      "body": "What goes wrong, when, and a suggested fix.",
+      "confidence": "high"
+    }
+  ],
+  "out_of_scope": ["Also changes value_row in the Options sheet; not mentioned in the PR"]
+}
 ```
 
-Severity: 🔴 breaks a requirement, loses data, panics or breaks existing links; 🟠 wrong in a realistic
-edge case; 🟡 weakness worth fixing but not blocking. Leave out empty sections. Write in English.
+- `requirements_source`: `issue #N`, `PR description`, or `inferred from the diff` (§1).
+- `requirements`: the numbered list from §2, in order. `verdict` is `met`, `partly`, `not_met` or `unclear`;
+  `note` names the file/function or says what is missing.
+- `findings`: the weaknesses from §3, and requirements that are not met. `severity` is `high` (breaks a
+  requirement, loses data, panics or breaks existing links), `medium` (wrong in a realistic edge case) or
+  `low` (weakness worth fixing but not blocking). `file` is relative to the repository root; `line` is a line
+  of that file at the head commit, preferably one inside the diff, or `null` when the finding has no single
+  place. `confidence` is `high`, `medium` or `low`: how sure you are that it is a real problem.
+- `out_of_scope`: changes no requirement asks for, and claims in the description the diff does not back up.
+
+Use empty lists for empty sections. Write in English.

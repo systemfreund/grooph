@@ -1,0 +1,60 @@
+name: OpenCode review step
+description: >-
+  Runs the read-only `review` agent from opencode.json with one model and writes its final
+  JSON answer to a file (see .github/review/review.py extract). Never posts to GitHub itself.
+
+inputs:
+  reviewer:
+    description: Name of this reviewer, shown in the summary (e.g. the model, or "rust · <model>")
+    required: true
+  model:
+    description: Model as provider/model, listed in opencode.json
+    required: true
+  kind:
+    description: general, rust or synthesis
+    required: true
+  prompt:
+    description: The prompt
+    required: true
+  out:
+    description: Path of the JSON file to write
+    required: true
+  venice-api-key:
+    required: true
+  github-token:
+    description: Read-only token for the gh commands the agent may run
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Install OpenCode
+      shell: bash
+      # Pinned so a new release cannot change how the agent runs or what it may do.
+      run: npm install --global "opencode-ai@1.19.4"
+
+    - name: Run ${{ inputs.reviewer }}
+      shell: bash
+      env:
+        VENICE_API_KEY: ${{ inputs.venice-api-key }}
+        GH_TOKEN: ${{ inputs.github-token }}
+        # Makes `review` the default agent too, in case --agent is ignored.
+        OPENCODE_CONFIG_CONTENT: '{"default_agent": "review"}'
+        MODEL: ${{ inputs.model }}
+        PROMPT: ${{ inputs.prompt }}
+      # A failed run still leaves its events; extract turns them into an error entry.
+      run: opencode run --agent review --format json -m "$MODEL" "$PROMPT" < /dev/null > "$RUNNER_TEMP/events.jsonl" || true
+
+    - name: Extract the answer
+      # Also when the install failed, so the synthesis learns that this reviewer failed.
+      if: always()
+      shell: bash
+      env:
+        REVIEWER: ${{ inputs.reviewer }}
+        MODEL: ${{ inputs.model }}
+        KIND: ${{ inputs.kind }}
+        OUT: ${{ inputs.out }}
+      run: |
+        mkdir -p "$(dirname "$OUT")"
+        python3 .github/review/review.py extract --events "$RUNNER_TEMP/events.jsonl" \
+          --out "$OUT" --reviewer "$REVIEWER" --model "$MODEL" --kind "$KIND"

@@ -1,6 +1,6 @@
 ---
 name: grooph-rust-review
-description: Rust-specific review of a grooph pull request in CI. Runs the beagle review-rust skill with the adjustments this repository's review job needs (no cargo, no git, diff from gh). Use only when the review workflow asks for it.
+description: Rust-specific review of a grooph pull request in CI. Runs the beagle review-rust skill with the adjustments this repository's review job needs (no cargo, no git, diff from gh, JSON answer). Use only when the review workflow asks for it.
 ---
 
 # Rust review of a grooph pull request
@@ -16,7 +16,7 @@ commands. Do not try `cargo`, `git` or `grep` in the shell: they are denied.
 
 - **Step 1 (changed files):** use `gh pr diff <PR> --name-only` and keep the `.rs` paths. For the diff itself use
   `gh pr diff <PR>`. Wherever review-rust runs `git diff $(git merge-base HEAD main)..HEAD`, use `gh pr diff <PR>`
-  instead. If no `.rs` file changed, answer "No Rust files in scope" and stop.
+  instead. If no `.rs` file changed, stop and answer with empty lists (see Output).
 - **Step 2 (edition):** the workspace uses edition 2024; check `Cargo.toml` with the Read tool.
 - **Step 3 (clippy / cargo check) and Post-Fix Verification:** skip both. CI (`.github/workflows/rust.yml`) runs
   `cargo fmt --check`, `cargo clippy --workspace --all-targets -D warnings`, the tests and the web build on every
@@ -32,9 +32,10 @@ commands. Do not try `cargo`, `git` or `grep` in the shell: they are denied.
 
 ## Output
 
-- **Inline comments:** for each Critical, Major or Minor finding on a line inside the diff, post an inline comment
-  with the `gh api` command from `REVIEW.md` §4. Start each with `**[Rust review · <MODEL>]**` and the severity.
-- **Summary:** your final answer is the summary comment; the workflow posts it, so do not post it yourself. Use the
-  Output Format of review-rust, but start with the heading `## Rust review (<MODEL>)` instead of
-  `## Review Summary`, and leave out empty sections. Write in English.
-- Do not approve or request changes, and do not edit files.
+Do not post anything on the pull request: a synthesis step merges this review with the general ones.
+
+- **Final answer:** the JSON object from `REVIEW.md` §4, and nothing else. This review checks no requirements,
+  so leave `requirements_source` empty and `requirements` and `out_of_scope` as empty lists.
+- **Findings:** one entry per Critical, Major or Minor issue, with severity Critical → `high`, Major → `medium`,
+  Minor → `low`. Leave out Informational items. Put review-rust's description and fix in `body`.
+- Do not edit files.

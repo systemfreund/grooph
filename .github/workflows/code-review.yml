@@ -1,157 +1,247 @@
 name: Code review
 
-# Reviews each pull request against its requirements (linked issue, or the PR
-# description when there is none) and looks for weaknesses in the
-# implementation. What the review checks lives in REVIEW.md at the repo root.
+# Reviews each pull request with several models and posts one consolidated review.
 #
-# Runs once when a PR is opened, reopened or marked ready for review, not on
-# every push. To review again after changes, re-run the job from the Actions
-# tab or use "Run workflow" with the PR number.
+#   setup       picks the PR, its head commit and the reviewers
+#   review      one job per reviewer: every model in the list does the general
+#               review (REVIEW.md); with .rs changes, one more does the Rust
+#               review (.agents/skills/grooph-rust-review). Each answers with
+#               JSON (REVIEW.md §4), uploaded as an artifact; nothing is posted.
+#   synthesis   one model (SYNTHESIS_MODEL) merges the reviews, checks every
+#               finding against the code, and decides which findings of the
+#               previous review are resolved (.github/review/SYNTHESIS.md).
+#   publish     a script without a model posts the result: new findings as one
+#               PR review with inline comments, a reply in the thread of each
+#               finding that was resolved or whose text changed, and a single
+#               summary comment that is updated on every run.
 #
-# Uses OpenCode with Venice AI as model provider. The provider and the
-# read-only `review` agent are configured in opencode.json at the repo root;
-# every model in the matrix below must also be listed there. Each model posts
-# its own review, so the same prompt can be compared across models; the
-# reviews run in parallel and one failing model does not stop the others.
+# The summary comment carries the findings of the last run in a hidden state
+# block, so each push is reviewed against the previous review. Raw reviews stay
+# in the run's artifacts.
 #
-# A second job, rust-review, runs a Rust-specific review with one model when
-# the PR changes .rs files. It follows .agents/skills/grooph-rust-review,
-# which wraps the beagle review-rust skill (see .agents/skills/README.md).
+# Runs on every push to a pull request; a newer push cancels the running review.
+# "Run workflow" reviews any PR number, optionally with its own model list.
 #
-# `agent: review` alone does not select the agent: opencode overwrites the
-# AGENT variable the action passes it, and then falls back to its default
-# agent (full permissions). OPENCODE_CONFIG_CONTENT makes `review` the default
-# for these runs, so its read-only permissions from opencode.json apply.
+# OpenCode runs the read-only `review` agent from opencode.json; every model
+# used here must be listed there. Only the publish job can write to the pull
+# request, and it runs no model. The scripts and instructions come from the
+# PR's head, so a change to them is tried on its own PR; that is why PRs from
+# forks are never reviewed, not even through "Run workflow".
 #
-# Needs the repository secret VENICE_API_KEY. Runs with the workflow's own
-# GITHUB_TOKEN, so the OpenCode GitHub App is not needed.
+# Needs the repository secret VENICE_API_KEY.
 
 on:
   pull_request:
-    types: [opened, reopened, ready_for_review]
+    types: [opened, reopened, ready_for_review, synchronize]
   workflow_dispatch:
     inputs:
       pr:
         description: Pull request number to review
         required: true
       models:
-        description: 'Models to compare, as a JSON list, e.g. ["venice/deepseek-v4-1-flash"]. Leave blank for the default list'
+        description: 'Models for the general review, as a JSON list, e.g. ["venice/deepseek-v4-1-flash"]. Leave blank for the default list'
         required: false
 
 concurrency:
   group: code-review-${{ github.event.pull_request.number || inputs.pr }}
   cancel-in-progress: true
 
+env:
+  # Default models of the general review. GLM 5.3 (venice/z-ai-glm-5-3, its
+  # runs failed too often) and Kimi K2.7 Code (venice/kimi-k2-7-code) are left
+  # out but stay in opencode.json for manual runs.
+  DEFAULT_MODELS: '["venice/deepseek-v4-1-flash", "venice/claude-sonnet-5-5"]'
+  RUST_MODEL: venice/deepseek-v4-1-flash
+  SYNTHESIS_MODEL: venice/claude-sonnet-5-5
+
 jobs:
-  review:
+  setup:
     # Skip drafts, and PRs from forks (they get no secrets).
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (!github.event.pull_request.draft &&
        github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      pr: ${{ steps.pick.outputs.pr }}
+      head: ${{ steps.pick.outputs.head }}
+      reviewers: ${{ steps.pick.outputs.reviewers }}
+    steps:
+      - id: pick
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number || inputs.pr }}
+          MODELS: ${{ inputs.models || env.DEFAULT_MODELS }}
+        run: |
+          if ! [[ "$PR" =~ ^[0-9]+$ ]]; then
+            echo "::error::Not a pull request number: $PR"
+            exit 1
+          fi
+          # "Run workflow" must not review a fork either: the jobs below run scripts from the PR's
+          # head with the Venice key, and the publish job with a token that can write.
+          read -r head cross <<< "$(gh pr view "$PR" --repo "$GITHUB_REPOSITORY" \
+            --json headRefOid,isCrossRepository --jq '"\(.headRefOid) \(.isCrossRepository)"')"
+          if [ "$cross" = true ]; then
+            echo "::error::#$PR comes from a fork; forks are not reviewed."
+            exit 1
+          fi
+          if gh pr diff "$PR" --repo "$GITHUB_REPOSITORY" --name-only | grep -q '\.rs$'; then
+            rust=true
+          else
+            rust=false
+          fi
+          reviewers=$(jq -nc --argjson models "$MODELS" --arg rust_model "$RUST_MODEL" --argjson rust "$rust" '
+            [$models[] | {name: ., model: ., kind: "general"}]
+            + (if $rust then [{name: ("rust · " + $rust_model), model: $rust_model, kind: "rust"}] else [] end)')
+          echo "pr=$PR" >> "$GITHUB_OUTPUT"
+          echo "head=$head" >> "$GITHUB_OUTPUT"
+          echo "reviewers=$reviewers" >> "$GITHUB_OUTPUT"
+          echo "Reviewing #$PR at $head with $reviewers"
+
+  review:
+    needs: setup
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        # Default models; "Run workflow" can pass its own list. GLM 5.3
-        # (venice/z-ai-glm-5-3, its runs failed too often) and Kimi K2.7 Code
-        # (venice/kimi-k2-7-code, replaced by DeepSeek V4.1 Flash) are left
-        # out. Both stay in opencode.json for manual runs.
-        model: ${{ fromJSON(inputs.models || '["venice/deepseek-v4-1-flash", "venice/claude-sonnet-5-5"]') }}
+        reviewer: ${{ fromJSON(needs.setup.outputs.reviewers) }}
     permissions:
-      # Read-only on the code: the review must not push changes.
       contents: read
-      pull-requests: write
-      issues: write
-
+      pull-requests: read
+      issues: read
+    env:
+      GENERAL_TASK: >-
+        Review this pull request. Read REVIEW.md in the repository root and follow it exactly: find
+        the requirements (linked issues, otherwise the PR description), check each one and look for
+        weaknesses. AGENTS.md describes the workspace layout.
+      RUST_TASK: >-
+        Do a Rust-specific review of this pull request. Read
+        .agents/skills/grooph-rust-review/SKILL.md and follow it exactly.
     steps:
-      - name: Check out the pull request
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/pull/{0}/head', inputs.pr) || github.event.pull_request.head.sha }}
-          fetch-depth: 1
+          ref: ${{ needs.setup.outputs.head }}
+          persist-credentials: false
 
-      - name: Review with ${{ matrix.model }}
-        uses: anomalyco/opencode/github@latest
-        env:
-          VENICE_API_KEY: ${{ secrets.VENICE_API_KEY }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          OPENCODE_CONFIG_CONTENT: '{"default_agent": "review"}'
+      - name: Review
+        uses: ./.github/actions/opencode-review
         with:
-          model: ${{ matrix.model }}
-          agent: review
-          use_github_token: true
-          # Do not publish the session on opencode.ai (the default for public repos).
-          share: false
+          reviewer: ${{ matrix.reviewer.name }}
+          model: ${{ matrix.reviewer.model }}
+          kind: ${{ matrix.reviewer.kind }}
+          out: review-output/${{ strategy.job-index }}.json
+          venice-api-key: ${{ secrets.VENICE_API_KEY }}
+          github-token: ${{ github.token }}
           prompt: |
             REPO: ${{ github.repository }}
-            PR NUMBER: ${{ github.event.pull_request.number || inputs.pr }}
-            HEAD SHA: ${{ github.event.pull_request.head.sha || '' }}
-            MODEL: ${{ matrix.model }}
+            PR NUMBER: ${{ needs.setup.outputs.pr }}
+            HEAD SHA: ${{ needs.setup.outputs.head }}
+            MODEL: ${{ matrix.reviewer.model }}
 
-            Review this pull request. Read REVIEW.md in the repository root and follow it
-            exactly: find the requirements (linked issues, otherwise the PR description),
-            check each one, look for weaknesses, post the inline comments as described
-            there, and give the summary as your final answer: it is posted as the PR
-            comment. AGENTS.md describes the workspace layout. Do not modify any files.
+            ${{ matrix.reviewer.kind == 'rust' && env.RUST_TASK || env.GENERAL_TASK }}
 
-  rust-review:
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (!github.event.pull_request.draft &&
-       github.event.pull_request.head.repo.full_name == github.repository)
+            Do not post anything to GitHub and do not modify any files: your final answer is the
+            JSON object described in REVIEW.md §4, and nothing else.
+
+      - name: Upload the review
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: review-${{ strategy.job-index }}
+          path: review-output/
+          if-no-files-found: ignore
+
+  synthesis:
+    needs: [setup, review]
+    # Also after failed reviewers: the synthesis works with the reviews that came back.
+    if: always() && needs.setup.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    env:
-      # The cheaper of the default models.
-      MODEL: venice/deepseek-v4-1-flash
-      PR: ${{ github.event.pull_request.number || inputs.pr }}
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.setup.outputs.head }}
+          persist-credentials: false
+
+      - uses: actions/download-artifact@v4
+        # No artifacts when every reviewer job died early; prepare reports them as failed.
+        continue-on-error: true
+        with:
+          pattern: review-*
+          path: review-output
+          merge-multiple: true
+
+      - name: Prepare
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ needs.setup.outputs.pr }}
+          HEAD: ${{ needs.setup.outputs.head }}
+          REVIEWERS: ${{ needs.setup.outputs.reviewers }}
+        run: |
+          mkdir -p review-output
+          python3 .github/review/review.py prepare --repo "$GITHUB_REPOSITORY" --pr "$PR" --head "$HEAD" \
+            --reviews review-output --expected "$(jq -c '[.[].name]' <<< "$REVIEWERS")" --out review-input
+
+      - name: Synthesize
+        uses: ./.github/actions/opencode-review
+        with:
+          reviewer: synthesis
+          model: ${{ env.SYNTHESIS_MODEL }}
+          kind: synthesis
+          out: review-input/synthesis.json
+          venice-api-key: ${{ secrets.VENICE_API_KEY }}
+          github-token: ${{ github.token }}
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ needs.setup.outputs.pr }}
+            HEAD SHA: ${{ needs.setup.outputs.head }}
+
+            Merge the reviews of this pull request into one. Read .github/review/SYNTHESIS.md and
+            follow it exactly; the inputs are in review-input/. Do not post anything to GitHub and
+            do not modify any files: your final answer is the JSON object described there, and
+            nothing else.
+
+      - name: Upload the synthesis
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: synthesis
+          path: review-input/
+
+  publish:
+    needs: [setup, synthesis]
+    if: always() && needs.setup.result == 'success' && needs.synthesis.result != 'cancelled'
+    runs-on: ubuntu-latest
     permissions:
       contents: read
       pull-requests: write
       issues: write
-
     steps:
-      - name: Check for Rust changes
-        id: changes
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.setup.outputs.head }}
+          persist-credentials: false
+
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: synthesis
+          path: review-input
+
+      - name: Post the review
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ needs.setup.outputs.pr }}
+          HEAD: ${{ needs.setup.outputs.head }}
         run: |
-          if gh pr diff "$PR" --repo "$GITHUB_REPOSITORY" --name-only | grep -q '\.rs$'; then
-            echo "rust=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "No .rs files changed, skipping the Rust review."
-          fi
-
-      - name: Check out the pull request
-        if: steps.changes.outputs.rust == 'true'
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/pull/{0}/head', inputs.pr) || github.event.pull_request.head.sha }}
-          fetch-depth: 1
-
-      - name: Rust review
-        if: steps.changes.outputs.rust == 'true'
-        uses: anomalyco/opencode/github@latest
-        env:
-          VENICE_API_KEY: ${{ secrets.VENICE_API_KEY }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          OPENCODE_CONFIG_CONTENT: '{"default_agent": "review"}'
-        with:
-          model: ${{ env.MODEL }}
-          agent: review
-          use_github_token: true
-          share: false
-          prompt: |
-            REPO: ${{ github.repository }}
-            PR NUMBER: ${{ env.PR }}
-            HEAD SHA: ${{ github.event.pull_request.head.sha || '' }}
-            MODEL: ${{ env.MODEL }}
-
-            Do a Rust-specific review of this pull request. Read
-            .agents/skills/grooph-rust-review/SKILL.md and follow it exactly. Post the
-            inline comments as described there and give the summary as your final
-            answer: it is posted as the PR comment. Do not modify any files.
+          python3 .github/review/review.py publish --repo "$GITHUB_REPOSITORY" --pr "$PR" --head "$HEAD" \
+            --input review-input --synthesis review-input/synthesis.json --model "$SYNTHESIS_MODEL" \
+            --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
