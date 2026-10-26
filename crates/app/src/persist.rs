@@ -240,6 +240,7 @@ mod tests {
         assert!(saved.contains("counter_muted:true"), "{saved}");
         let (s, backup) = restore(Some(&saved));
         assert_eq!(s.audio_settings, state.audio_settings);
+        assert_library_and_presets_kept(&s);
         assert!(backup.is_none());
     }
 

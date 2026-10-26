@@ -73,8 +73,8 @@ pub struct AudioSettings {
     /// Volume of the beat groups a click pattern sets to soft.
     #[serde(default = "default_soft_gain")]
     pub soft: f32,
-    /// Silence downbeat, primary beats and the counter rhythm (the count-in
-    /// still sounds).
+    /// Silence downbeat, primary beats, soft clicks and the counter rhythm
+    /// (the count-in still sounds).
     #[serde(default)]
     pub metronome_muted: bool,
     /// Silence notes, accents and ghost notes.
