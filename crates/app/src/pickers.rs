@@ -6,6 +6,7 @@
 use crate::guide::Guide;
 use crate::metronome_view::{FillLook, click_fills, ratio_label, same_bar};
 use crate::mixer_panel::mixer_width;
+use crate::platform;
 use crate::shell::paint_grouped_meter;
 use crate::tool_palette::{TOOL_PALETTE_BUTTON_SIZE, none_button, notation_button};
 use crate::{CountingBase, Grooph};
@@ -321,9 +322,23 @@ pub(crate) fn wide_button(ui: &mut Ui, label: &str, size: f32, height: f32) -> R
 }
 
 /// Height a dialog's long content (library, settings, help) scrolls in, so
-/// that the title and "Done" stay on screen.
+/// that the title and "Done" stay on screen, above an on-screen keyboard
+/// too.
 pub(crate) fn dialog_scroll_height(ui: &Ui) -> f32 {
-    0.6 * ui.ctx().content_rect().height()
+    let ctx = ui.ctx();
+    scroll_height(ctx.content_rect().height(), platform::visible_rect(ctx).height())
+}
+
+/// Room a dialog keeps around its scrolling content: title, the buttons
+/// above the list, "Done" and the margins.
+const DIALOG_CHROME: f32 = 260.0;
+/// Content that scrolls in less than this would show too little.
+const MIN_SCROLL_HEIGHT: f32 = 120.0;
+
+/// [`dialog_scroll_height`] for a screen `screen` high of which `visible`
+/// is seen: 60 % of the screen, less where a keyboard covers part of it.
+fn scroll_height(screen: f32, visible: f32) -> f32 {
+    (0.6 * screen).min(visible - DIALOG_CHROME).max(MIN_SCROLL_HEIGHT)
 }
 
 impl Grooph {
@@ -345,7 +360,10 @@ impl Grooph {
         let mut library_preset = None;
         let mut calibrate = None;
 
-        let modal = Modal::new(Id::unique("settings_picker")).show(ui.ctx(), |ui| {
+        // In the part of the screen an on-screen keyboard leaves.
+        let id = Id::unique("settings_picker");
+        let area = Modal::default_area(id).constrain_to(platform::visible_rect(ui.ctx()));
+        let modal = Modal::new(id).area(area).show(ui.ctx(), |ui| {
             ui.set_width(width);
             let title = match picker {
                 Picker::TimeSignature => "Time signature",
@@ -900,6 +918,16 @@ impl Grooph {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn dialogs_scroll_in_what_a_keyboard_leaves() {
+        use super::scroll_height;
+        // A phone without and with an on-screen keyboard.
+        assert_eq!(scroll_height(844.0, 844.0), 0.6 * 844.0);
+        assert_eq!(scroll_height(844.0, 500.0), 240.0);
+        // Never less than a few rows.
+        assert_eq!(scroll_height(844.0, 300.0), 120.0);
+    }
+
     use super::*;
 
     #[test]

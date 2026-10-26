@@ -1,6 +1,6 @@
 use crate::platform::TapKind;
 use crate::platform::VisibilityEvent;
-use eframe::egui::Context;
+use eframe::egui::{Context, Rect, pos2, vec2};
 use log::{debug, error};
 use std::cell::RefCell;
 use std::collections::VecDeque;
@@ -25,6 +25,33 @@ fn push_visibility_event(event: VisibilityEvent) {
 
 fn take_pending_visibility_events() -> Vec<VisibilityEvent> {
     PENDING_VISIBILITY.with(|q| std::mem::take(&mut *q.borrow_mut()))
+}
+
+/// The visual viewport, which an on-screen keyboard shortens, over the
+/// canvas, in points (CSS pixels divided by egui's `zoom`).
+pub(crate) fn visible_canvas_rect(zoom: f32) -> Option<Rect> {
+    let window = web_sys::window()?;
+    let viewport = window.visual_viewport()?;
+    let canvas = window.document()?.get_element_by_id("grooph-canvas")?.get_bounding_client_rect();
+    let min = pos2(
+        (viewport.offset_left() - canvas.left()) as f32,
+        (viewport.offset_top() - canvas.top()) as f32,
+    );
+    let size = vec2(viewport.width() as f32, viewport.height() as f32);
+    Some(Rect::from_min_size(min / zoom, size / zoom))
+}
+
+/// Paint again when the visual viewport changes, as when the on-screen
+/// keyboard comes up: egui sees no event of its own then.
+fn install_viewport_listeners(ctx: Context) {
+    let Some(viewport) = web_sys::window().and_then(|w| w.visual_viewport()) else {
+        return;
+    };
+    let on_change = Closure::wrap(Box::new(move || ctx.request_repaint()) as Box<dyn FnMut()>);
+    for event in ["resize", "scroll"] {
+        viewport.add_event_listener_with_callback(event, on_change.as_ref().unchecked_ref()).ok();
+    }
+    on_change.forget();
 }
 
 fn install_visibility_listeners(ctx: Context) {
@@ -143,6 +170,7 @@ impl PlatformRuntime {
     }
 
     pub(crate) fn install_listeners(&self, ctx: Context) {
+        install_viewport_listeners(ctx.clone());
         install_visibility_listeners(ctx);
         install_press_listeners();
     }

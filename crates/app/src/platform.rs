@@ -29,6 +29,21 @@ impl PlatformRuntime {
     pub(crate) fn release_wake_lock(&self) {}
 }
 
+/// The part of the screen the user sees, in points: on the web the visual
+/// viewport, which an on-screen keyboard shortens; elsewhere the whole
+/// content area.
+pub(crate) fn visible_rect(ctx: &eframe::egui::Context) -> eframe::egui::Rect {
+    let content = ctx.content_rect();
+    #[cfg(target_arch = "wasm32")]
+    if let Some(visible) = crate::web::visible_canvas_rect(ctx.zoom_factor()) {
+        let visible = visible.intersect(content);
+        if visible.is_positive() {
+            return visible;
+        }
+    }
+    content
+}
+
 /// What produced a tap, for looking up its precise event time.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]

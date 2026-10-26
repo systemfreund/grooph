@@ -2,6 +2,7 @@ use crate::Grooph;
 use crate::library::SavedPattern;
 use crate::pickers::ROW_HEIGHT;
 use crate::pickers::dialog_scroll_height;
+use crate::platform;
 use crate::presets::{self, PresetId, PresetSettings};
 use crate::shell::{Tab, subdivision_short_label};
 use crate::state::PendingLoad;
@@ -251,6 +252,15 @@ fn rename_row(ui: &mut egui::Ui, name: &mut String) -> Option<Renamed> {
     // Typing goes to the name while nothing else has the focus.
     if ui.memory(|m| m.focused().is_none()) {
         field.request_focus();
+    }
+    // When it gets the focus, and when an on-screen keyboard comes up and
+    // leaves less of the screen, the field scrolls into what is seen.
+    let visible = platform::visible_rect(ui.ctx()).height();
+    let seen = Id::unique("rename_field_visible_height");
+    let before = ui.data(|d| d.get_temp::<f32>(seen));
+    ui.data_mut(|d| d.insert_temp(seen, visible));
+    if field.has_focus() && (field.gained_focus() || before != Some(visible)) {
+        field.scroll_to_me(None);
     }
     let submit = field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
     let done = ok || (submit && valid);
