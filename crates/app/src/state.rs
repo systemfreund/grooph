@@ -318,8 +318,6 @@ pub(crate) struct UiShell {
     /// What the practice staff shows while it plays.
     pub(crate) guide: Guide,
     pub(crate) platform: PlatformRuntime,
-    /// Name input for "save preset as". Not persisted.
-    pub(crate) preset_name_buffer: String,
     /// User preset whose row in the preset picker is being renamed. Not persisted.
     pub(crate) renaming_preset: Option<u64>,
     /// Saved pattern whose card in the library is being renamed. Not persisted.

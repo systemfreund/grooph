@@ -1182,7 +1182,6 @@ impl Grooph {
                 flash_enabled: state.flash_enabled,
                 guide: state.guide,
                 platform,
-                preset_name_buffer: String::new(),
                 renaming_preset: None,
                 renaming_pattern: None,
                 pending_load: None,
@@ -1485,7 +1484,7 @@ mod tests {
     }
 
     #[test]
-    fn library_renders_both_halves_at_phone_width() {
+    fn library_and_preset_picker_render_at_phone_width() {
         use super::Grooph;
         use crate::library_panel::LibraryTab;
         use crate::pickers::Picker;
@@ -1511,6 +1510,19 @@ mod tests {
             }
         }
         assert_eq!(app.ui.picker, Some(Picker::Library));
+        // The Preset picker on the practice page shows the same cards.
+        app.select_tab(Tab::Practice);
+        app.ui.picker = Some(Picker::Preset);
+        for _ in 0..2 {
+            let screen = Rect::from_min_size(Pos2::ZERO, vec2(390.0, 844.0));
+            let input = RawInput { screen_rect: Some(screen), ..Default::default() };
+            let mut output = ctx.run_ui(input, |ui| {
+                app.apply_style(ui);
+                app.settings_picker(ui);
+            });
+            output.textures_delta.clear();
+        }
+        assert_eq!(app.ui.picker, Some(Picker::Preset));
     }
 
     #[test]

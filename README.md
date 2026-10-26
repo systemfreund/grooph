@@ -323,8 +323,8 @@ Important root files:
 - The library (`library_panel.rs`) has two halves, Rhythms and Presets, of
   the same cards (`library_card`): a tap loads a rhythm or applies a preset
   and opens the practice page (`open_preset`), ✏ renames or deletes, built-in
-  presets have no ✏. The Preset picker on the practice page stays for
-  switching while practising.
+  presets have no ✏. The Preset picker on the practice page shows the same
+  preset cards (`preset_cards`); a tap there applies the preset and stays.
 - Settings open in a `Modal` picker (`settings_picker`); generator changes go
   through `finish_generator_change`.
 - The staff's em is capped so one row fits the panel's height. The row's
