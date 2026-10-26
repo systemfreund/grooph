@@ -340,14 +340,6 @@ impl App for Grooph {
         self.apply_style(ui);
         self.ui.narrow_screen = ui.available_width() < shell::NARROW_MAX_WIDTH;
         self.shell_ui(ui);
-        #[cfg(target_arch = "wasm32")]
-        crate::web::keyboard_debug(
-            ui.ctx(),
-            format!(
-                "picker {:?} ren {:?}/{:?}",
-                self.ui.picker, self.ui.renaming_pattern, self.ui.renaming_preset
-            ),
-        );
         self.sync_click_bar();
         self.update_metronome_trainer();
         self.update_endless();
