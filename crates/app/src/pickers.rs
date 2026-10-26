@@ -62,6 +62,8 @@ pub(crate) enum Picker {
     Sounds,
     /// The MIDI device the play-along listens to.
     MidiInput,
+    /// The inputs that count as hits and their latency.
+    PlayAlong,
 }
 
 pub(crate) fn counting_system_name(system: CountingSystem) -> &'static str {
@@ -321,6 +323,7 @@ impl Grooph {
         let endless_before = self.editor.generator.endless;
         let width = (ui.ctx().content_rect().width() - 48.0).clamp(200.0, 380.0);
         let mut preset = None;
+        let mut calibrate = None;
 
         let modal = Modal::new(Id::unique("settings_picker")).show(ui.ctx(), |ui| {
             ui.set_width(width);
@@ -340,6 +343,7 @@ impl Grooph {
                 Picker::SilentBars => "Silent bars",
                 Picker::Sounds => "Sounds",
                 Picker::MidiInput => "MIDI input",
+                Picker::PlayAlong => "Play along",
             };
             ui.heading(title);
             ui.add_space(8.0);
@@ -374,6 +378,10 @@ impl Grooph {
                     false
                 }
                 Picker::MidiInput => self.midi_input_choices(ui),
+                Picker::PlayAlong => {
+                    calibrate = self.play_along_choices(ui);
+                    false
+                }
             };
             ui.add_space(12.0);
             picked || wide_button(ui, "Done", 19.0, ROW_HEIGHT).clicked()
@@ -387,6 +395,12 @@ impl Grooph {
         self.finish_generator_change(before, endless_before, false);
         if let Some(id) = preset {
             self.apply_preset(id);
+        }
+        // After the generator check: the run swaps the score and turns endless
+        // mode off, which is no generator change. The dialog stays open
+        // under the calibration and shows the new latency afterwards.
+        if let Some(source) = calibrate {
+            self.start_calibration(source);
         }
     }
 

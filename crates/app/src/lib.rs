@@ -17,6 +17,7 @@ mod persist;
 mod pickers;
 mod platform;
 mod play_along;
+mod play_along_settings;
 mod playback_clock;
 mod preset_panel;
 mod presets;

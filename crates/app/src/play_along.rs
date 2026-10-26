@@ -1,6 +1,6 @@
 //! Play-along input: hits from MIDI, the microphone and taps (keyboard or
 //! touch on the staff) feed the accuracy tracker on the shared [`crate::clock`] timeline.
-//! Also the run summary shown after playback and the settings section.
+//! Also the run summary shown after playback.
 
 use crate::accuracy::{GOOD_WINDOW_MS, PERFECT_WINDOW_MS, RunSummary};
 use crate::calibration::Calibration;
