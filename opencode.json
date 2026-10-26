@@ -27,20 +27,18 @@
   "agent": {
     "review": {
       "mode": "primary",
-      "description": "Reviews a pull request as described in REVIEW.md. Reads code and GitHub through gh, may only add inline review comments, never edits files.",
+      "description": "Reviews a pull request (REVIEW.md) or merges reviews (.github/review/SYNTHESIS.md). Reads code and GitHub through gh, answers with JSON, never posts or edits files.",
       "permission": {
         "edit": "deny",
         "webfetch": "deny",
+        "external_directory": "deny",
         "bash": {
           "*": "deny",
           "gh pr view *": "allow",
           "gh pr diff *": "allow",
           "gh issue view *": "allow",
           "gh issue list *": "allow",
-          "gh search *": "allow",
-          "gh api repos/*/*/pulls/*/comments *": "allow",
-          "gh api * -X *": "deny",
-          "gh api * --method *": "deny"
+          "gh search *": "allow"
         }
       }
     }
