@@ -29,13 +29,18 @@ fn take_pending_visibility_events() -> Vec<VisibilityEvent> {
 
 /// The visual viewport, which an on-screen keyboard shortens, over the
 /// canvas, in points (CSS pixels divided by egui's `zoom`).
+///
+/// Both positions are taken on the page, as eframe places its text agent:
+/// the canvas' `getBoundingClientRect` flaps in mobile Safari while the
+/// keyboard comes up, and the dialog would jump with it.
 pub(crate) fn visible_canvas_rect(zoom: f32) -> Option<Rect> {
     let window = web_sys::window()?;
     let viewport = window.visual_viewport()?;
-    let canvas = window.document()?.get_element_by_id("grooph-canvas")?.get_bounding_client_rect();
+    let canvas: web_sys::HtmlElement =
+        window.document()?.get_element_by_id("grooph-canvas")?.dyn_into().ok()?;
     let min = pos2(
-        (viewport.offset_left() - canvas.left()) as f32,
-        (viewport.offset_top() - canvas.top()) as f32,
+        (viewport.page_left() - f64::from(canvas.offset_left())) as f32,
+        (viewport.page_top() - f64::from(canvas.offset_top())) as f32,
     );
     let size = vec2(viewport.width() as f32, viewport.height() as f32);
     Some(Rect::from_min_size(min / zoom, size / zoom))
