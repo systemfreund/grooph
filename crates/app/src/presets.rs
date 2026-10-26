@@ -267,6 +267,21 @@ mod tests {
     }
 
     #[test]
+    fn presets_saved_with_the_old_sound_names_still_load() {
+        // The metronome and rhythm sounds were separate enums with these
+        // variant names before they became one `Sound`.
+        for (metronome, rhythm, sounds) in [
+            ("Xylophone", "Click", (Sound::Xylophone, Sound::Click)),
+            ("Claves", "Snare", (Sound::Claves, Sound::Snare)),
+            ("Click", "Snare", (Sound::Click, Sound::Snare)),
+        ] {
+            let saved = format!("(metronome_sound: {metronome}, rhythm_sound: {rhythm})");
+            let settings: PresetSettings = ron::from_str(&saved).unwrap();
+            assert_eq!((settings.metronome_sound, settings.rhythm_sound), sounds, "{saved}");
+        }
+    }
+
+    #[test]
     fn builtin_presets_are_playable() {
         for (name, settings) in builtin_presets() {
             assert!(supports_time_signature(settings.generator.time_signature), "{name}");
