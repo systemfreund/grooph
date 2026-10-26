@@ -5,7 +5,9 @@ The models never post anything themselves: every reviewer and the synthesis
 answer with JSON, and this script turns that into PR comments.
 
   extract   pull the final JSON answer out of `opencode run --format json` events
-  prepare   gather the inputs of the synthesis step (reviews, prior state, diff since the last review)
+  rerun     after a comment: whether the synthesis should run again, and with the reviews of which run
+  prepare   gather the inputs of the synthesis step (reviews, prior state and the replies to it, diff since
+            the last review)
   publish   post new inline comments, reply to resolved ones, update the summary comment
 
 Standard library only; talks to GitHub through the `gh` CLI (GH_TOKEN in the environment).
@@ -19,6 +21,7 @@ import json
 import re
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 # publish --dry-run prints what it would post instead of posting it.
@@ -28,6 +31,7 @@ STATE_RE = re.compile(r"<!-- grooph-review-state:([A-Za-z0-9+/=]+) -->")
 FAILURE_RE = re.compile(r"\n*<!-- grooph-review-failure -->.*?<!-- /grooph-review-failure -->", re.S)
 FINDING_MARKER = "<!-- grooph-finding:{} -->"
 FINDING_MARKER_RE = re.compile(r"<!-- grooph-finding:(F\d+) -->")
+FINDING_ID_RE = re.compile(r"\bF\d+\b")
 UPDATED_RE = re.compile(r"^> \*\*Updated in `[^`]+`\*\*, see the latest reply\.\n\n")
 SEVERITY_ICON = {"high": "🔴", "medium": "🟠", "low": "🟡"}
 VERDICT_ICON = {"met": "✅ Met", "partly": "⚠️ Partly met", "not_met": "❌ Not met", "unclear": "❓ Unclear"}
@@ -36,6 +40,8 @@ MAX_COMMENT = 65000
 # An answer (review or synthesis) has at least one of these.
 ANSWER_KEYS = {"findings", "requirements", "resolved", "withdrawn"}
 BOT = "github-actions[bot]"
+# Whose replies to the review the synthesis reads: anyone can comment on a public pull request.
+TRUSTED = {"OWNER", "MEMBER", "COLLABORATOR"}
 
 
 def gh(*args, input=None, check=True):
@@ -127,8 +133,12 @@ def cmd_extract(args):
 # ---------------------------------------------------------------- prepare
 
 
-def find_summary_comment(repo, pr):
-    for comment in gh_paginated(f"repos/{repo}/issues/{pr}/comments"):
+def issue_comments(repo, pr):
+    return gh_paginated(f"repos/{repo}/issues/{pr}/comments")
+
+
+def find_summary_comment(comments):
+    for comment in comments:
         if comment["user"]["login"] == BOT and MARKER in comment["body"]:
             return comment
     return None
@@ -143,7 +153,75 @@ def read_state(comment):
     return json.loads(base64.b64decode(match.group(1)))
 
 
-def build_context(pr, head, reviews, expected, prior, diff_since_prior):
+def from_people(comment):
+    return comment.get("author_association") in TRUSTED and comment["user"]["login"] != BOT
+
+
+def human_comment(comment):
+    return {"author": comment["user"]["login"], "at": comment.get("created_at"), "body": comment["body"]}
+
+
+def with_replies(findings, review_comments):
+    """`findings` with what people answered in their inline threads, under `replies`."""
+    replies = {}
+    for comment in review_comments:
+        # GitHub links every reply to the first comment of its thread.
+        if comment.get("in_reply_to_id") and from_people(comment):
+            replies.setdefault(comment["in_reply_to_id"], []).append(human_comment(comment))
+    return [{**f, "replies": replies[f["comment_id"]]} if f.get("comment_id") in replies else f for f in findings]
+
+
+def discussion(summary, comments):
+    """What people wrote in the conversation of the pull request since the first review."""
+    return [
+        human_comment(c)
+        for c in comments
+        if c["id"] != summary["id"] and from_people(c) and c["created_at"] > summary["created_at"]
+    ]
+
+
+def new_answers(summary, state, review_comments, comments):
+    """Answers the synthesis has not seen yet: replies in the thread of an open finding, and comments in the
+    conversation that name a finding."""
+    open_findings = [f for f in state["findings"] if f["status"] == "open"]
+    threads = {f["comment_id"] for f in open_findings if f.get("comment_id")}
+    ids = {f["id"] for f in open_findings}
+    replies = [c for c in review_comments if c.get("in_reply_to_id") in threads]
+    # Only ids of open findings: "the F16 case" is no answer.
+    named = [c for c in comments if ids & set(FINDING_ID_RE.findall(c["body"]))]
+    # Before answers_until existed, the last update of the summary is the closest.
+    seen = state.get("answers_until") or summary["updated_at"]
+    return [c for c in replies + named if from_people(c) and c["created_at"] > seen]
+
+
+def cmd_rerun(args):
+    """Prints `reuse=<run>` when the synthesis should run again with the reviews of that run, else nothing.
+
+    Checks all answers since the last review, not just the comment that started this run: a newer comment cancels
+    a run that is still waiting, and the runs of comments that are no answer must not lose the answers before.
+    """
+    comments = issue_comments(args.repo, args.pr)
+    summary = find_summary_comment(comments)
+    state = read_state(summary)
+    if not state or state["head_sha"] != args.head:
+        reason = "this commit has no review yet; its review reads the answers"
+    elif not state.get("reviews_run"):
+        reason = "the last review does not say which run has its reviews"
+    elif not new_answers(summary, state, gh_paginated(f"repos/{args.repo}/pulls/{args.pr}/comments"), comments):
+        reason = "no new answer to a finding"
+    else:
+        print(f"reuse={state['reviews_run']}")
+        return 0
+    print(f"::notice::the synthesis does not run again: {reason}", file=sys.stderr)
+    return 0
+
+
+def now():
+    """The time in GitHub's format, so it compares with `created_at` as a string."""
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def build_context(pr, head, reviews, expected, prior, diff_since_prior, answers_only=False, answers_until=None):
     answered = {r["reviewer"] for r in reviews}
     failed = [{"reviewer": r["reviewer"], "error": r["error"]} for r in reviews if "error" in r]
     # A reviewer job that failed before its extract step left no file at all.
@@ -155,6 +233,8 @@ def build_context(pr, head, reviews, expected, prior, diff_since_prior):
         "failed_reviewers": failed,
         "prior_review": prior is not None,
         "diff_since_prior": diff_since_prior,
+        "answers_only": answers_only,
+        "answers_until": answers_until,
     }
 
 
@@ -165,12 +245,18 @@ def cmd_prepare(args):
     reviews = [json.loads(path.read_text()) for path in sorted(Path(args.reviews).glob("*.json"))]
     (out / "reviews.json").write_text(json.dumps(reviews, indent=2, ensure_ascii=False))
 
-    state = read_state(find_summary_comment(args.repo, args.pr))
+    # Every answer written before this moment is in the comments fetched now; a later one is new to the next run.
+    fetched_at = now()
+    comments = issue_comments(args.repo, args.pr)
+    summary = find_summary_comment(comments)
+    state = read_state(summary)
     prior = None
     if state:
+        open_findings = [f for f in state["findings"] if f["status"] == "open"]
         prior = {
             "reviewed_sha": state["head_sha"],
-            "findings": [f for f in state["findings"] if f["status"] == "open"],
+            "findings": with_replies(open_findings, gh_paginated(f"repos/{args.repo}/pulls/{args.pr}/comments")),
+            "discussion": discussion(summary, comments),
         }
         (out / "prior.json").write_text(json.dumps(prior, indent=2, ensure_ascii=False))
         diff = gh(
@@ -184,7 +270,9 @@ def cmd_prepare(args):
             (out / "diff-since-prior.patch").write_text(diff.stdout)
 
     expected = json.loads(args.expected)
-    context = build_context(args.pr, args.head, reviews, expected, prior, (out / "diff-since-prior.patch").exists())
+    diff_since_prior = (out / "diff-since-prior.patch").exists()
+    context = build_context(args.pr, args.head, reviews, expected, prior, diff_since_prior, args.answers_only,
+                            fetched_at)
     (out / "context.json").write_text(json.dumps(context, indent=2))
     print(json.dumps(context, indent=2))
     if not context["reviewers"]:
@@ -361,6 +449,11 @@ def render_summary(synthesis, state, context, head, model, run_url, newly_resolv
     raise RuntimeError(f"the summary does not fit in a comment ({len(text)} characters)")
 
 
+def collapsed(title, lines):
+    """A section that starts folded, so the summary takes little room in the pull request."""
+    return [f"<details><summary><b>{title}</b></summary>", "", *lines, "", "</details>", ""]
+
+
 def render_summary_with(synthesis, state, context, head, model, run_url, newly_resolved, limit, closed, stored):
     compact = limit is not None
     body = (lambda text: shorten(text, limit)) if compact else (lambda text: text or "")
@@ -368,36 +461,42 @@ def render_summary_with(synthesis, state, context, head, model, run_url, newly_r
     out = [MARKER, "## Code review", ""]
     reviewers = ", ".join(context["reviewers"]) or "none"
     out.append(f"Reviewed `{short}` · reviewers: {reviewers} · synthesis: {model}")
+    if context.get("answers_only"):
+        out.append("\nMerged again after new answers, with the reviews of this commit.")
     for failed in context["failed_reviewers"]:
         out.append(f"\n⚠️ Reviewer **{failed['reviewer']}** failed: {cell(failed['error'])}")
     out.append("")
 
-    if synthesis.get("requirements_source"):
-        out += [f"**Requirements source:** {synthesis['requirements_source']}", ""]
-    if synthesis.get("requirements"):
-        out += ["### Requirements", "| # | Requirement | Verdict | Where / what is missing |", "|---|---|---|---|"]
-        for i, req in enumerate(synthesis["requirements"], 1):
+    requirements = synthesis.get("requirements") or []
+    if requirements or synthesis.get("requirements_source"):
+        lines = []
+        if synthesis.get("requirements_source"):
+            lines += [f"**Requirements source:** {synthesis['requirements_source']}", ""]
+        if requirements:
+            lines += ["| # | Requirement | Verdict | Where / what is missing |", "|---|---|---|---|"]
+        for i, req in enumerate(requirements, 1):
             verdict = VERDICT_ICON.get(req.get("verdict"), cell(req.get("verdict")))
-            out.append(f"| {i} | {cell(req.get('text'))} | {verdict} | {cell(body(req.get('note')))} |")
-        out.append("")
+            lines.append(f"| {i} | {cell(req.get('text'))} | {verdict} | {cell(body(req.get('note')))} |")
+        met = sum(req.get("verdict") == "met" for req in requirements)
+        out += collapsed(f"Requirements ({met}/{len(requirements)} met)" if requirements else "Requirements", lines)
 
     open_findings = [f for f in state["findings"] if f["status"] == "open"]
     order = {"high": 0, "medium": 1, "low": 2}
     open_findings.sort(key=lambda f: (order.get(f.get("severity"), 3), int(f["id"][1:])))
     if open_findings:
-        out.append("### Findings")
+        lines = []
         for f in open_findings:
             icon = SEVERITY_ICON.get(f.get("severity"), "🟡")
-            out.append(f"- {icon} **{f['id']} · {f['title']}**{location(f)}: {body(f.get('body'))}")
+            lines.append(f"- {icon} **{f['id']} · {f['title']}**{location(f)}: {body(f.get('body'))}")
             if found_by(f):
-                out.append(f"  {found_by(f)}")
-        out.append("")
+                lines.append(f"  {found_by(f)}")
+        icons = [SEVERITY_ICON.get(f.get("severity"), "🟡") for f in open_findings]
+        counts = " · ".join(f"{icon} {icons.count(icon)}" for icon in dict.fromkeys(icons))
+        out += collapsed(f"Findings ({counts})", lines)
 
     if newly_resolved:
-        out.append(f"### Resolved in `{short}`")
-        for f in newly_resolved:
-            out.append(f"- ~~{f['id']} · {f['title']}~~ {f['status']}: {body(f.get('resolution'))}")
-        out.append("")
+        lines = [f"- ~~{f['id']} · {f['title']}~~ {f['status']}: {body(f.get('resolution'))}" for f in newly_resolved]
+        out += collapsed(f"Resolved in <code>{short}</code> ({len(newly_resolved)})", lines)
 
     resolved_now = {f["id"] for f in newly_resolved}
     earlier = [f for f in state["findings"] if f["status"] != "open" and f["id"] not in resolved_now]
@@ -409,9 +508,8 @@ def render_summary_with(synthesis, state, context, head, model, run_url, newly_r
         out.append("\n</details>\n")
 
     if synthesis.get("out_of_scope"):
-        out.append("### Out of scope / unrequested changes")
-        out += [f"- {body(item)}" for item in synthesis["out_of_scope"]]
-        out.append("")
+        lines = [f"- {body(item)}" for item in synthesis["out_of_scope"]]
+        out += collapsed(f"Out of scope / unrequested changes ({len(lines)})", lines)
 
     discarded = synthesis.get("discarded") or []
     if discarded and not compact:
@@ -525,11 +623,22 @@ def post_inline(repo, pr, head, findings):
     return failed
 
 
+def outdated(args, prior):
+    """Whether a newer push or review overtook a run that merges answers to the review of `args.head`."""
+    pr = gh_json("api", "-X", "GET", f"repos/{args.repo}/pulls/{args.pr}")
+    return pr["head"]["sha"] != args.head or prior.get("head_sha") != args.head
+
+
 def cmd_publish(args):
-    comment = find_summary_comment(args.repo, args.pr)
+    comment = find_summary_comment(issue_comments(args.repo, args.pr))
     prior = read_state(comment) or {"next_id": 1, "findings": []}
     context_path = Path(args.input, "context.json")
     context = json.loads(context_path.read_text()) if context_path.exists() else {"reviewers": [], "failed_reviewers": []}
+
+    if context.get("answers_only") and outdated(args, prior):
+        # Comment runs have their own concurrency group, so a push can arrive while one runs; its review wins.
+        print(f"::notice::not published: {args.head[:7]} is no longer the head, or was reviewed again meanwhile")
+        return 0
 
     synthesis_path = Path(args.synthesis)
     synthesis = json.loads(synthesis_path.read_text()) if synthesis_path.exists() else {"error": "no output"}
@@ -543,6 +652,9 @@ def cmd_publish(args):
         return 1
 
     state, newly_resolved = merge_state(prior, synthesis, args.head)
+    # What a comment needs to start the synthesis again: the reviews to reuse, and which answers it has seen.
+    state["reviews_run"] = args.reviews_run
+    state["answers_until"] = max(filter(None, [context.get("answers_until"), prior.get("answers_until")]), default=None)
 
     def summary():
         return render_summary(synthesis, state, context, args.head, args.model, args.run_url, newly_resolved)
@@ -610,7 +722,7 @@ def main():
     p.add_argument("--model", required=True)
     p.add_argument("--kind", required=True)
 
-    for name in ("prepare", "publish"):
+    for name in ("rerun", "prepare", "publish"):
         p = sub.add_parser(name)
         p.add_argument("--repo", required=True)
         p.add_argument("--pr", required=True)
@@ -619,17 +731,20 @@ def main():
             p.add_argument("--reviews", required=True)
             p.add_argument("--expected", required=True, help="JSON list of the reviewer names that should answer")
             p.add_argument("--out", required=True)
-        else:
+            p.add_argument("--answers-only", action="store_true", help="the reviews are those of an earlier run")
+        elif name == "publish":
             p.add_argument("--input", required=True)
             p.add_argument("--synthesis", required=True)
             p.add_argument("--model", required=True)
             p.add_argument("--run-url", required=True)
+            p.add_argument("--reviews-run", required=True, help="the run whose reviews this synthesis merged")
             p.add_argument("--dry-run", action="store_true")
 
     args = parser.parse_args()
     global DRY_RUN
     DRY_RUN = getattr(args, "dry_run", False)
-    return {"extract": cmd_extract, "prepare": cmd_prepare, "publish": cmd_publish}[args.command](args)
+    commands = {"extract": cmd_extract, "rerun": cmd_rerun, "prepare": cmd_prepare, "publish": cmd_publish}
+    return commands[args.command](args)
 
 
 if __name__ == "__main__":

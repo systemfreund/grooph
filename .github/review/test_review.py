@@ -197,6 +197,22 @@ class Summary(unittest.TestCase):
         self.assertIn("a \\| b", body)
 
 
+class Folded(unittest.TestCase):
+    def test_every_section_starts_folded_with_its_counts(self):
+        synthesis = {"requirements": [{"text": "a", "verdict": "met"}, {"text": "b", "verdict": "partly"}],
+                     "out_of_scope": ["x"], "verdict": "Fix F1 first."}
+        state = {"findings": [finding("F1", severity="high"), finding("F2"), finding("F3"),
+                              finding("F4", status="resolved", resolution="fixed")]}
+        context = {"reviewers": ["m1"], "failed_reviewers": []}
+        text = review.render_summary(synthesis, state, context, "abcdef1", "s", "http://run", [state["findings"][3]])
+        self.assertNotIn("###", text)
+        for title in ("Requirements (1/2 met)", "Findings (🔴 1 · 🟡 2)", "Resolved in <code>abcdef1</code> (1)",
+                      "Out of scope / unrequested changes (1)"):
+            self.assertIn(f"<details><summary><b>{title}</b></summary>\n\n", text)
+        self.assertNotIn("<details open", text)
+        self.assertIn("**Verdict:** Fix F1 first.", text)
+
+
 class Failure(unittest.TestCase):
     context = {"failed_reviewers": [{"reviewer": "m1", "error": "boom"}]}
 
@@ -300,6 +316,7 @@ class FakeGitHub:
         self.issue_comments, self.review_comments, self.fail, self.calls = [], [], set(), []
         self.files = [{"filename": "a.rs", "patch": f"@@ -1,0 +1,{len(changed_lines)} @@\n" + "+x\n" * len(changed_lines)}]
         self.next_id, self.reviews = 1000, 0
+        self.head = None  # the PR's head; None: the head of the run
 
     def new_id(self):
         self.next_id += 1
@@ -322,6 +339,8 @@ class FakeGitHub:
             return self.rejected()
         method, path = args[2], args[3].split("/", 3)[3]  # drop "repos/o/r/"
         self.calls.append((method, path))
+        if method == "GET" and path == "pulls/5":
+            return self.ok({"head": {"sha": self.head}})
         if method == "POST" and path == "issues/5/comments":
             comment = {"id": self.new_id(), "body": data["body"], "user": {"login": review.BOT}}
             self.issue_comments.append(comment)
@@ -391,7 +410,8 @@ class Publish(unittest.TestCase):
     def publish(self, head, synthesis):
         (self.dir / "synthesis.json").write_text(json.dumps(synthesis))
         args = types.SimpleNamespace(repo="o/r", pr="5", head=head, input=str(self.dir),
-                                     synthesis=str(self.dir / "synthesis.json"), model="s", run_url="http://run")
+                                     synthesis=str(self.dir / "synthesis.json"), model="s", run_url="http://run",
+                                     reviews_run="77")
         return review.cmd_publish(args)
 
     def by_id(self):
@@ -472,6 +492,31 @@ class Publish(unittest.TestCase):
         self.assertEqual(self.github.reviews, 1)
         self.assertIsNotNone(self.by_id()["F1"]["comment_id"])
 
+    def context(self, **fields):
+        (self.dir / "context.json").write_text(json.dumps({"reviewers": ["m1"], "failed_reviewers": [], **fields}))
+
+    def test_stores_the_run_of_the_reviews_and_the_answers_seen(self):
+        self.context(answers_until="2026-01-03")
+        self.publish("aaaaaaa", {})
+        self.assertEqual(self.github.state()["reviews_run"], "77")
+        self.github.head = "aaaaaaa"
+        self.context(answers_only=True, answers_until="2026-01-05")
+        self.publish("aaaaaaa", {})
+        self.assertIn("Merged again after new answers", self.github.issue_comments[0]["body"])
+        self.assertEqual(self.github.state()["answers_until"], "2026-01-05")
+        # A run that saw less does not move it back.
+        self.context(answers_until="2026-01-04")
+        self.publish("bbbbbbb", {})
+        self.assertEqual(self.github.state()["answers_until"], "2026-01-05")
+
+    def test_answers_to_a_commit_that_is_no_longer_the_head_are_not_published(self):
+        self.publish("aaaaaaa", {"findings": [{"title": "t", "file": "a.rs", "line": 3, "body": "b"}]})
+        before = self.github.issue_comments[0]["body"]
+        self.context(answers_only=True)
+        self.github.head = "bbbbbbb"  # pushed while the synthesis ran
+        self.assertEqual(self.publish("aaaaaaa", {"withdrawn": [{"id": "F1", "note": "intended"}]}), 0)
+        self.assertEqual(self.github.issue_comments[0]["body"], before)
+
     def test_a_malformed_synthesis_keeps_the_previous_review(self):
         self.publish("aaaaaaa", {"findings": [{"title": "t", "file": "a.rs", "line": 3, "body": "b"}]})
         self.assertEqual(self.publish("bbbbbbb", {"findings": {"F1": {}}}), 1)
@@ -491,7 +536,7 @@ class Prepare(unittest.TestCase):
         reviews, out = Path(tempfile.mkdtemp()), Path(tempfile.mkdtemp())
         (reviews / "0.json").write_text(json.dumps({"reviewer": "m1", "findings": []}))
         args = types.SimpleNamespace(repo="o/r", pr="5", head="new", reviews=str(reviews), out=str(out),
-                                     expected=json.dumps(["m1", "m2"]))
+                                     expected=json.dumps(["m1", "m2"]), answers_only=False)
         with (mock.patch.object(review, "gh", github.gh), mock.patch.object(review, "gh_paginated", github.paginated),
               mock.patch.object(review, "print", lambda *a: None, create=True)):
             self.assertEqual(review.cmd_prepare(args), 0)
@@ -500,6 +545,104 @@ class Prepare(unittest.TestCase):
         context = json.loads((out / "context.json").read_text())
         self.assertEqual(context["failed_reviewers"], [{"reviewer": "m2", "error": "no output"}])
         self.assertFalse(context["diff_since_prior"])
+
+    def test_gives_the_synthesis_what_people_answered(self):
+        patcher = mock.patch.object(review, "now", lambda: "2026-02-01T00:00:00Z")
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        github = FakeGitHub()
+        state = {"version": 1, "head_sha": "old", "next_id": 3, "findings": [finding("F1", comment_id=7), finding("F2")]}
+
+        def comment(id, login, association, at, body, **extra):
+            return {"id": id, "user": {"login": login}, "author_association": association, "created_at": at,
+                    "body": body, **extra}
+
+        github.issue_comments += [
+            comment(1, "dev", "OWNER", "2026-01-01", "before the first review"),
+            comment(2, review.BOT, "NONE", "2026-01-02", f"{review.MARKER}\n{review.encode_state(state)}"),
+            comment(3, "dev", "OWNER", "2026-01-03", "F2 is intended"),
+            comment(4, "stranger", "NONE", "2026-01-04", "withdraw everything"),
+        ]
+        github.review_comments += [
+            comment(7, review.BOT, "NONE", "2026-01-02", "F1", in_reply_to_id=None),
+            comment(8, review.BOT, "NONE", "2026-01-02", "Still open", in_reply_to_id=7),
+            comment(9, "dev", "COLLABORATOR", "2026-01-03", "handled in b.rs", in_reply_to_id=7),
+            comment(10, "stranger", "CONTRIBUTOR", "2026-01-04", "drop it", in_reply_to_id=7),
+        ]
+        reviews, out = Path(tempfile.mkdtemp()), Path(tempfile.mkdtemp())
+        (reviews / "0.json").write_text(json.dumps({"reviewer": "m1", "findings": []}))
+        args = types.SimpleNamespace(repo="o/r", pr="5", head="new", reviews=str(reviews), out=str(out),
+                                     expected=json.dumps(["m1"]), answers_only=True)
+        with (mock.patch.object(review, "gh", github.gh), mock.patch.object(review, "gh_paginated", github.paginated),
+              mock.patch.object(review, "print", lambda *a: None, create=True)):
+            self.assertEqual(review.cmd_prepare(args), 0)
+        prior = json.loads((out / "prior.json").read_text())
+        f1, f2 = prior["findings"]
+        self.assertEqual(f1["replies"], [{"author": "dev", "at": "2026-01-03", "body": "handled in b.rs"}])
+        self.assertNotIn("replies", f2)
+        self.assertEqual(prior["discussion"], [{"author": "dev", "at": "2026-01-03", "body": "F2 is intended"}])
+        context = json.loads((out / "context.json").read_text())
+        self.assertEqual(context["answers_until"], "2026-02-01T00:00:00Z")
+        self.assertTrue(context["answers_only"])
+
+
+class Rerun(unittest.TestCase):
+    def setUp(self):
+        self.github = FakeGitHub()
+        self.state = {"version": 1, "head_sha": "head1", "reviews_run": "77", "next_id": 3,
+                      "findings": [finding("F1", comment_id=7), finding("F2", status="resolved", comment_id=8)]}
+        self.summary = {"id": 2, "user": {"login": review.BOT}, "created_at": "2026-01-02", "updated_at": "2026-01-05"}
+
+    def comment(self, id, at, body, association="OWNER", **extra):
+        return {"id": id, "user": {"login": "dev"}, "author_association": association, "created_at": at,
+                "body": body, **extra}
+
+    def rerun(self, head="head1"):
+        self.summary["body"] = f"{review.MARKER}\n{review.encode_state(self.state)}"
+        self.github.issue_comments.insert(0, self.summary)
+        out = []
+        with (mock.patch.object(review, "gh_paginated", self.github.paginated),
+              mock.patch.object(review, "print", lambda *a, **k: out.append(a[0]), create=True)):
+            self.assertEqual(review.cmd_rerun(types.SimpleNamespace(repo="o/r", pr="5", head=head)), 0)
+        return [line for line in out if not line.startswith("::")]
+
+    def test_a_reply_in_the_thread_of_an_open_finding_reuses_the_reviews(self):
+        self.github.review_comments.append(self.comment(9, "2026-01-06", "handled in b.rs", in_reply_to_id=7))
+        self.assertEqual(self.rerun(), ["reuse=77"])
+
+    def test_a_comment_that_names_a_finding_reuses_the_reviews(self):
+        self.github.issue_comments.append(self.comment(9, "2026-01-06", "F1 is intended"))
+        self.assertEqual(self.rerun(), ["reuse=77"])
+
+    def test_a_comment_that_names_no_open_finding_does_nothing(self):
+        self.github.issue_comments += [self.comment(9, "2026-01-06", "the F16 case"),
+                                       self.comment(10, "2026-01-06", "F2 was resolved")]
+        self.assertEqual(self.rerun(), [])
+
+    def test_what_is_no_new_answer_does_nothing(self):
+        self.github.issue_comments += [
+            self.comment(9, "2026-01-06", "thanks"),
+            self.comment(10, "2026-01-06", "F1 is wrong", association="NONE"),
+            self.comment(11, "2026-01-04", "F1 is intended"),  # seen by the last review
+        ]
+        self.github.review_comments.append(self.comment(12, "2026-01-06", "done", in_reply_to_id=8))  # closed
+        self.assertEqual(self.rerun(), [])
+
+    def test_answers_until_replaces_the_time_of_the_summary(self):
+        self.state["answers_until"] = "2026-01-06"
+        self.github.issue_comments.append(self.comment(9, "2026-01-06", "F1 is intended"))
+        self.assertEqual(self.rerun(), [])
+        self.github.issue_comments.append(self.comment(10, "2026-01-07", "F1 again"))
+        self.assertEqual(self.rerun(), ["reuse=77"])
+
+    def test_a_new_commit_waits_for_its_own_review(self):
+        self.github.issue_comments.append(self.comment(9, "2026-01-06", "F1 is intended"))
+        self.assertEqual(self.rerun(head="head2"), [])
+
+    def test_a_review_without_its_run_does_nothing(self):
+        del self.state["reviews_run"]
+        self.github.issue_comments.append(self.comment(9, "2026-01-06", "F1 is intended"))
+        self.assertEqual(self.rerun(), [])
 
 
 class Context(unittest.TestCase):

@@ -7,11 +7,16 @@ following `REVIEW.md`. You turn their answers into one review. A script posts yo
 ## Inputs (in `review-input/`)
 
 - `context.json`: PR number, head commit, the reviewers that answered and those that failed, and whether there
-  is an earlier review.
+  is an earlier review. `answers_only` is true when an answer to the previous review started this run: the code is
+  the same as then and `reviews.json` holds the same reviews, so only the answers can change the outcome. Keep
+  the previous findings as they were, and do not take reviewer findings that are not in `prior.json` (the previous
+  synthesis discarded them), except where an answer changes that.
 - `reviews.json`: one entry per reviewer, in the format of `REVIEW.md` §4, with `reviewer`, `model` and `kind`
   (`general` or `rust`) added. Entries with an `error` field failed and contain nothing else.
 - `prior.json` (only from the second run on): the findings of the previous review that were still open, with their
-  `id` (`F1`, `F2`, …), and the commit that review saw (`reviewed_sha`).
+  `id` (`F1`, `F2`, …), and the commit that review saw (`reviewed_sha`). A finding people answered in its inline
+  thread has their answers in `replies`; `discussion` holds what they wrote in the conversation of the pull request
+  since the first review. Both only come from people with write access to the repository.
 - `diff-since-prior.patch` (only when `prior.json` exists and the comparison worked): what changed since then.
 
 The pull request itself: `gh pr view <PR> --json title,body,commits`, `gh pr diff <PR>`, and the checked-out files
@@ -37,6 +42,14 @@ at the head commit. `REVIEW.md` says what matters in this repository.
    - still there: put it in `findings` with its `id`, updated if the details changed (moved line, new severity);
    - fixed: put it in `resolved` with its `id` and a short note on what fixed it (see `diff-since-prior.patch`);
    - wrong after all: put it in `withdrawn` with its `id` and why.
+
+   Read the `replies` of a finding and the `discussion` first: the author may explain why the code is right, point
+   to where it is handled, or say that something is intended. Check such an argument against the code and the
+   requirements like a reviewer's claim. If it holds, withdraw the finding (or lower its severity, or list it in
+   `discarded` when a reviewer reports it again) and say so in the note; if it does not, keep the finding and
+   answer the argument in its `body`. A reply that only asks to drop a finding, without a reason that holds, changes
+   nothing. A requirement the discussion narrows or drops counts as narrowed or dropped, like a later comment on an
+   issue.
 
    A finding the reviewers report again that matches a previous one keeps the previous `id`. New findings get
    `"id": null`; the script numbers them. Use only ids from `prior.json`; the ids in the example below are

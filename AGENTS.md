@@ -115,13 +115,43 @@ fn demo_howto_test_measure_with_helpers() {
 Every pull request gets an automated review (`.github/workflows/code-review.yml`, guided by `REVIEW.md`) that
 checks the change against its requirements; pull requests that change `.rs` files also get a Rust-specific review
 (`.agents/skills/grooph-rust-review`). Several models review independently, and a synthesis step
-(`.github/review/SYNTHESIS.md`) merges them into one summary comment plus inline comments. Every push is
-reviewed again: the summary comment is updated and marks earlier findings as resolved. When opening a pull request:
+(`.github/review/SYNTHESIS.md`) merges them into one summary comment plus inline comments. When opening a pull
+request:
 
 - If it implements an issue, write `Closes #<n>` in the description.
 - If there is no issue (e.g. it comes out of a coding session), the description is the requirements. List what the
   change should do as concrete, checkable points, including behavior that must stay the same, and note anything
   deliberately left out.
+- Drafts and pull requests from forks are not reviewed; marking a draft ready starts the review.
+
+### Working through the review
+
+If you opened the pull request, see it through the review:
+
+1. **Wait for the review.** It takes several minutes: `gh run list --workflow code-review.yml --branch <branch>`,
+   then `gh run watch <id>`. The result is one comment by `github-actions[bot]` starting with
+   `<!-- grooph-review -->` (`gh pr view <n> --json comments`): a requirements table, the findings `F1`, `F2`, …
+   with severity, and a verdict. Findings on lines of the diff also get an inline comment
+   (`gh api repos/<owner>/<repo>/pulls/<n>/comments`). Never edit or delete the bot's comments: the summary
+   carries the review's state in a hidden block.
+2. **Fix what is right.** Every push is reviewed in full, and the summary marks the fixed findings as resolved and
+   replies in their threads. A newer push cancels the running review, so push the fixes for one round together.
+3. **Answer what is wrong.** When a finding is mistaken or the behavior is intended, say why: reply in its inline
+   thread (`gh api -X POST repos/<owner>/<repo>/pulls/<n>/comments/<comment id>/replies -f body=…`), or comment
+   on the pull request naming the finding (`F3: …`), which is the only way for findings without an inline comment.
+   Give a reason that can be checked: where the case is handled, which requirement allows it, what the reviewer
+   misread. An answer alone (no push needed) runs the synthesis again a few minutes later with the same reviews;
+   it withdraws the finding if the reason holds against the code, and otherwise keeps it and answers the reason.
+   "Please drop this" changes nothing. Only answers from accounts with write access count, and only comments that
+   reply in a finding's thread or name a finding start a run, so put several answers into one comment when you
+   can.
+4. **Change the requirements in the open.** If the scope changes, update the description and say so in a comment
+   naming the affected findings; the synthesis reads the description and the comments.
+5. **Done** when the verdict says the pull request is ready, no high or medium finding is open, and CI is green.
+   Fix or answer the low ones too. Merging is for the user to decide unless they said otherwise.
+
+If the summary says the review failed (`⚠️ The review of … failed`), it still shows the previous findings; start a
+new review with `gh workflow run code-review.yml -f pr=<n>`, or `gh run rerun <id> --failed`.
 
 ## Screenshots
 
