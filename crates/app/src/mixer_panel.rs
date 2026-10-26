@@ -79,7 +79,7 @@ impl Grooph {
                                     volume_slider(ui, &mut settings.soft, "Soft").on_hover_text(
                                         "Soft clicks of the click bar (notes in parentheses)",
                                     );
-                                    volume_slider(ui, &mut settings.counter, "Counter")
+                                    volume_slider(ui, &mut settings.counter, "Polyrhythm")
                                         .on_hover_text("Clicks of the polyrhythm in the metronome tab");
                                 },
                                 |ui| {
