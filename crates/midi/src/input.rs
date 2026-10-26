@@ -450,23 +450,26 @@ impl MidiInput {
     }
 
     /// Get available MIDI input ports
+    ///
+    /// Ports whose name cannot be read are left out of the stored ports too,
+    /// so a name's index is the index to [`Self::connect`] to.
     pub fn available_ports(&mut self) -> Result<Vec<String>> {
-        if let Some(ref midi_in) = self.midi_in {
-            let ports = midi_in.ports();
-            let names = ports.iter().filter_map(|port| midi_in.port_name(port).ok()).collect();
-            self.ports = ports;
-            return Ok(names);
-        }
-
-        if self.connection.is_some() {
-            let midi_in = Self::new_midir_input()?;
-            let ports = midi_in.ports();
-            let names = ports.iter().filter_map(|port| midi_in.port_name(port).ok()).collect();
-            self.ports = ports;
-            return Ok(names);
-        }
-
-        Err(Error::NotConnected)
+        let fresh;
+        let midi_in = match self.midi_in {
+            Some(ref midi_in) => midi_in,
+            None if self.connection.is_some() => {
+                fresh = Self::new_midir_input()?;
+                &fresh
+            }
+            None => return Err(Error::NotConnected),
+        };
+        let (ports, names) = midi_in
+            .ports()
+            .into_iter()
+            .filter_map(|port| midi_in.port_name(&port).ok().map(|name| (port, name)))
+            .unzip();
+        self.ports = ports;
+        Ok(names)
     }
 
     /// Connect to a MIDI input port by index

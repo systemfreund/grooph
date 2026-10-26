@@ -3,6 +3,7 @@
 
 use crate::Grooph;
 use crate::pickers::{ROW_HEIGHT, choice_grid, wide_button};
+use eframe::egui;
 use eframe::egui::{Id, Ui};
 use log::warn;
 
@@ -41,8 +42,9 @@ impl Grooph {
         if let Some(port_id) = midi.selected_port_id.as_ref()
             && let Some(idx) = input.find_port_index_by_id(port_id)
             && !input.is_connected()
+            && let Err(e) = input.connect(idx)
         {
-            let _ = input.connect(idx);
+            warn!("Failed to reconnect MIDI input: {}", e);
         }
     }
 
@@ -69,7 +71,14 @@ impl Grooph {
         // Shown until the next pick or search: why the last pick did not connect.
         let failed_id = Id::unique("midi_connect_failed");
         let mut close = false;
-        match choice_grid(ui, &options, current, 1) {
+        // Many ports (virtual ones, a DAW's) scroll, so the buttons below
+        // stay on screen.
+        let picked = egui::ScrollArea::vertical()
+            .id_salt("midi_ports")
+            .max_height(320.0)
+            .show(ui, |ui| choice_grid(ui, &options, current, 1))
+            .inner;
+        match picked {
             Some(None) => {
                 let _ = input.disconnect();
                 midi.selected_port_id = None;
