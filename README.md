@@ -8,7 +8,7 @@ Practice rhythm reading and timing: generate sight-reading exercises in standard
 <img width="390" height="844" alt="grooph-odd-meter" src="https://github.com/user-attachments/assets/a06544b3-3720-447d-b6bc-8cecd5fd94ad" />
 
 grooph is free and runs in your browser at **[grooph.app](https://grooph.app)**,
-with no account and no installation, and as an Android app.
+with no account and no installation, and natively on your computer.
 
 ## What you can do with it
 
