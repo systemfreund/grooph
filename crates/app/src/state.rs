@@ -143,6 +143,20 @@ impl PlaybackState {
     pub(crate) fn counting_in(&self) -> bool {
         self.count_in != CountInState::Off
     }
+
+    /// Fire the staff flash when playback reaches `beat` (measure, beat in
+    /// the measure). Like the guide's anchors: nothing during the count-in,
+    /// so the first flash is the score's first downbeat, and nothing in a
+    /// silent bar.
+    pub(crate) fn reach_flash_beat(&mut self, beat: (usize, u32), enabled: bool) {
+        if self.counting_in() || self.last_primary_beat == Some(beat) {
+            return;
+        }
+        self.last_primary_beat = Some(beat);
+        if enabled && !self.bar_muted {
+            self.flash_intensity = 1.0;
+        }
+    }
 }
 
 /// How long the score takes to scroll one row further while playing; a
@@ -292,7 +306,7 @@ pub(crate) struct UiShell {
     pub(crate) baseline_light: Option<Vec<(TextStyle, f32)>>,
     pub(crate) layout: LayoutSettings,
     pub(crate) counting: CountingSettings,
-    /// Whether the playback panel flashes on every primary beat. Off by default.
+    /// Whether the staff flashes on every beat while playing. Off by default.
     pub(crate) flash_enabled: bool,
     /// What the practice staff shows while it plays.
     pub(crate) guide: Guide,
@@ -338,6 +352,37 @@ pub(crate) enum PendingLoad {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_flash_waits_for_the_first_downbeat() {
+        let mut playback = PlaybackState { count_in: CountInState::Active, ..Default::default() };
+        playback.reach_flash_beat((0, 0), true);
+        assert_eq!(playback.flash_intensity, 0.0);
+        playback.count_in = CountInState::Off;
+        playback.reach_flash_beat((0, 0), true);
+        assert_eq!(playback.flash_intensity, 1.0);
+    }
+
+    #[test]
+    fn the_flash_fires_once_per_beat() {
+        let mut playback = PlaybackState::default();
+        playback.reach_flash_beat((0, 1), true);
+        playback.flash_intensity = 0.5;
+        playback.reach_flash_beat((0, 1), true);
+        assert_eq!(playback.flash_intensity, 0.5);
+        playback.reach_flash_beat((0, 2), true);
+        assert_eq!(playback.flash_intensity, 1.0);
+    }
+
+    #[test]
+    fn a_silent_bar_does_not_flash() {
+        let mut playback = PlaybackState { bar_muted: true, ..Default::default() };
+        playback.reach_flash_beat((0, 0), true);
+        assert_eq!(playback.flash_intensity, 0.0);
+        playback.bar_muted = false;
+        playback.reach_flash_beat((1, 0), true);
+        assert_eq!(playback.flash_intensity, 1.0);
+    }
 
     #[test]
     fn scroll_tween_shift_moves_the_glide_along() {
