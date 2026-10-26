@@ -82,7 +82,7 @@ Found a bug or missing a feature? Please
 
 grooph is written in Rust with [egui](https://github.com/emilk/egui):
 
-- Run the desktop app: `cargo run` (on Linux, install the ALSA headers
+- Run the desktop app: `cargo run --bin grooph-app` (on Linux, install the ALSA headers
   first, e.g. `libasound2-dev`)
 - Run the web app: `trunk serve`
 - Run the tests: `cargo test --workspace`

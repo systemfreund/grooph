@@ -347,7 +347,7 @@ If you add new tools/shortcuts, remember:
 
 ## Build and test
 
-- Native: `cargo run`
+- Native: `cargo run --bin grooph-app`
 - Tests: `cargo test`
 - WASM (optional): `trunk serve` or `trunk build --release`
 - Android: `crates/android/build-android.sh` builds `target/android/grooph.aab`
