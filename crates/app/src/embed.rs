@@ -420,7 +420,7 @@ mod tests {
     #[test]
     fn the_embedded_view_renders_at_chat_sizes() {
         use eframe::egui::{Pos2, RawInput, Rect, vec2};
-        for (width, height) in [(360.0, 520.0), (720.0, 520.0), (360.0, 400.0)] {
+        for (width, height) in [(320.0, 520.0), (360.0, 520.0), (720.0, 520.0), (360.0, 400.0)] {
             let (ctx, mut app) = embedded_app("?v=2&bpm=90&ts=4/4&poly=3:2&embed=mcp");
             let screen = Rect::from_min_size(Pos2::ZERO, vec2(width, height));
             for picker in [None, Some(crate::pickers::Picker::MetronomeMeter)] {
