@@ -633,11 +633,11 @@ mod tests {
     }
 
     #[test]
-    fn a_lit_note_takes_its_dot_flag_and_accent_but_no_beam_or_bracket() {
+    fn a_lit_note_or_rest_takes_its_glyphs_but_no_beam_or_bracket() {
         use grooph_measure::notation::parse_score;
         let lit = Color32::RED;
         let opts = opts_for(Rect::from_min_size(Pos2::ZERO, egui::vec2(600.0, 100.0)));
-        let measure = parse_score("4/4 q. e >e e t8 t8 t8").unwrap().measures.remove(0);
+        let measure = parse_score("5/4 q. e >e e t8 t8 t8 r:q").unwrap().measures.remove(0);
         let layout = build_measure_layout(&measure, &opts);
         assert!(!layout.beams.is_empty() && !layout.tuplets.is_empty());
         let nearest = |x: f32| {
@@ -648,8 +648,9 @@ mod tests {
                 })
                 .unwrap()
         };
-        // The dotted quarter, the flagged eighth, the accented beamed one.
-        for idx in [0, 1, 2] {
+        // The dotted quarter, the flagged eighth, the accented beamed one
+        // (head and dot, flag or accent), and the rest.
+        for (idx, glyphs) in [(0, 2), (1, 2), (2, 2), (7, 1)] {
             let ctx = egui::Context::default();
             let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
                 draw_notes(ui.painter(), &layout, Color32::WHITE, Some((idx, lit)), &opts);
@@ -670,8 +671,7 @@ mod tests {
                     _ => {}
                 }
             }
-            // The head and its dot, flag or accent.
-            assert!(lit_glyphs >= 2, "note {idx}: {lit_glyphs} glyphs lit");
+            assert!(lit_glyphs >= glyphs, "note {idx}: {lit_glyphs} glyphs lit");
         }
     }
 
