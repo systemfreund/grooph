@@ -155,8 +155,10 @@ grooph's metronome runs inside AI chats as an
   `Grooph::new` before the link clears it. Storage is neither read nor
   written (also not egui's memory); no update check, wake lock, MIDI,
   microphone, calibration, unsaved-changes dialog or keyboard shortcuts but
-  Space. `embed_ui` shows the Metronome tab without the tab bar, with "Open
-  in grooph" instead of share and without "Edit clicks". The theme follows
+  Space. `embed_ui` shows the Metronome tab without the tab bar and the card on
+  top: meter and tempo sit left and right of the play button, so the staff
+  and the ring get the room. The share button gives way to an "Open in
+  grooph" row in the options, which have no "Edit clicks". The theme follows
   the host (`groophHost.theme`, the view calls `groophHost.repaint`). The
   settings go to the model through `groophHost.updateModelContext` once they
   stayed the same for a second. The bridge is in `web.rs`/`platform.rs`.
