@@ -31,6 +31,7 @@ pub fn draw_measure(
         count_config,
         true,
         None,
+        None,
     );
     measure_layout
 }
@@ -50,6 +51,9 @@ pub fn draw_measure(
 /// following measure. The caller (`draw_staff`) decides via `current_cursor_x`
 /// and passes `Some(x)` only to the measure that actually hosts the cursor.
 ///
+/// `lit` draws one note (its index) in the given colour instead of the text
+/// colour.
+///
 /// The function orchestrates independent decoration phases — counting layer,
 /// staff line, clef + time signature, notes/beams/tuplets, edit cursor,
 /// playback cursor. Each phase is a small helper; reorder or extend by
@@ -65,6 +69,7 @@ pub(crate) fn render_measure_at(
     count_config: Option<&CountConfig>,
     draw_staff_line: bool,
     cursor_x: Option<f32>,
+    lit: Option<(usize, Color32)>,
 ) {
     let color = ui.visuals().text_color();
     let painter = ui.painter();
@@ -94,7 +99,7 @@ pub(crate) fn render_measure_at(
         draw_time_signature(painter, ts_layout, measure.time_signature(), &opts.font_id, color);
     }
 
-    draw_notes(painter, measure_layout, color, opts);
+    draw_notes(painter, measure_layout, color, lit, opts);
 
     if let Some(idx) = cursor_idx {
         draw_edit_cursor(ui, painter, measure_layout, idx, opts);
@@ -390,25 +395,31 @@ fn clamp_tick_to_measure(tick: f64, total_ticks: f64) -> f64 {
 /// Draw all foreground decorations (notes, beams, tuplets) in their canonical
 /// stacking order. Coordinates each phase by reading `measure_layout`; phases
 /// can be invoked individually if a caller needs to reorder or skip layers.
+/// `lit` gives one note's glyphs (its index) a colour of their own; beams and
+/// tuplet brackets are shared, so they keep `color`.
 pub fn draw_notes(
     painter: &Painter,
     measure_layout: &MeasureLayout,
     color: Color32,
+    lit: Option<(usize, Color32)>,
     opts: &LayoutOpts,
 ) {
-    draw_note_glyphs(painter, &measure_layout.notes, opts, color);
+    draw_note_glyphs(painter, &measure_layout.notes, opts, color, lit);
     draw_beams(painter, &measure_layout.beams, color);
     draw_tuplets(painter, &measure_layout.tuplets, opts, color);
 }
 
-/// Per-note glyphs: head, stem, flag, dots, accent.
+/// Per-note glyphs: head, stem, flag, dots, accent. The note `lit` names
+/// is drawn in its colour.
 pub fn draw_note_glyphs(
     painter: &Painter,
     notes: &[NoteLayout],
     opts: &LayoutOpts,
     color: Color32,
+    lit: Option<(usize, Color32)>,
 ) {
-    for note in notes {
+    for (idx, note) in notes.iter().enumerate() {
+        let color = lit.filter(|&(i, _)| i == idx).map_or(color, |(_, c)| c);
         draw_beat(painter, note, opts, color);
     }
 }
@@ -576,6 +587,91 @@ mod tests {
             accent_displacement: 0.0,
             stem_down: false,
             shared_line: false,
+        }
+    }
+
+    #[test]
+    fn a_lit_note_is_drawn_in_its_colour() {
+        let (base, lit) = (Color32::WHITE, Color32::RED);
+        let opts = opts_for(Rect::from_min_size(Pos2::ZERO, egui::vec2(400.0, 100.0)));
+        let mut measure = Measure::new(TimeSignature::FOUR_FOUR);
+        for i in 0..4 {
+            measure.set_beat(i, Beat::note(q())).unwrap();
+        }
+        let layout = build_measure_layout(&measure, &opts);
+        let ctx = egui::Context::default();
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            draw_notes(ui.painter(), &layout, base, Some((1, lit)), &opts);
+        });
+        output.textures_delta.clear();
+        // Each shape's colour and the note nearest it.
+        let nearest = |x: f32| {
+            (0..layout.notes.len())
+                .min_by(|&a, &b| {
+                    let d = |i: usize| (layout.notes[i].center.x - x).abs();
+                    d(a).total_cmp(&d(b))
+                })
+                .unwrap()
+        };
+        let shapes: Vec<(Color32, usize)> = output
+            .shapes
+            .iter()
+            .filter_map(|c| {
+                let color = match &c.shape {
+                    egui::Shape::LineSegment { stroke, .. } => stroke.color,
+                    egui::Shape::Text(text) => text.fallback_color,
+                    _ => return None,
+                };
+                Some((color, nearest(c.shape.visual_bounding_rect().center().x)))
+            })
+            .collect();
+        // Head and stem of the second quarter, nothing else.
+        assert!(shapes.iter().filter(|s| s.0 == lit).count() >= 2, "{shapes:?}");
+        for (color, note) in shapes {
+            assert_eq!(color == lit, note == 1, "{color:?} at note {note}");
+        }
+    }
+
+    #[test]
+    fn a_lit_note_or_rest_takes_its_glyphs_but_no_beam_or_bracket() {
+        use grooph_measure::notation::parse_score;
+        let lit = Color32::RED;
+        let opts = opts_for(Rect::from_min_size(Pos2::ZERO, egui::vec2(600.0, 100.0)));
+        let measure = parse_score("5/4 q. e >e e t8 t8 t8 r:q").unwrap().measures.remove(0);
+        let layout = build_measure_layout(&measure, &opts);
+        assert!(!layout.beams.is_empty() && !layout.tuplets.is_empty());
+        let nearest = |x: f32| {
+            (0..layout.notes.len())
+                .min_by(|&a, &b| {
+                    let d = |i: usize| (layout.notes[i].center.x - x).abs();
+                    d(a).total_cmp(&d(b))
+                })
+                .unwrap()
+        };
+        // The dotted quarter, the flagged eighth, the accented beamed one
+        // (head and dot, flag or accent), and the rest.
+        for (idx, glyphs) in [(0, 2), (1, 2), (2, 2), (7, 1)] {
+            let ctx = egui::Context::default();
+            let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                draw_notes(ui.painter(), &layout, Color32::WHITE, Some((idx, lit)), &opts);
+            });
+            output.textures_delta.clear();
+            let mut lit_glyphs = 0;
+            for c in &output.shapes {
+                let at = nearest(c.shape.visual_bounding_rect().center().x);
+                match &c.shape {
+                    egui::Shape::Rect(rect) => assert_ne!(rect.fill, lit, "a beam is lit"),
+                    egui::Shape::LineSegment { stroke, .. } if stroke.color == lit => {
+                        assert_eq!(at, idx, "the stem of note {at}");
+                    }
+                    egui::Shape::Text(text) if text.fallback_color == lit => {
+                        assert_eq!(at, idx, "a glyph of note {at}");
+                        lit_glyphs += 1;
+                    }
+                    _ => {}
+                }
+            }
+            assert!(lit_glyphs >= glyphs, "note {idx}: {lit_glyphs} glyphs lit");
         }
     }
 

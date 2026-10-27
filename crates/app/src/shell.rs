@@ -626,6 +626,9 @@ impl Grooph {
                 self.edit_bar(ui);
             }
             Tab::Metronome if self.ui.mode == Mode::Edit => {
+                // No ring here: what was hovered on it is gone, also when
+                // Done brings the ring back with the staff of this frame.
+                self.editor.metronome.forget_hover();
                 self.tool_palette_panel(ui);
                 self.metronome_edit_bar(ui);
                 self.metronome_card(ui);
@@ -649,6 +652,7 @@ impl Grooph {
         if tab == Tab::More {
             // No staff on this screen, but what plays moves on.
             self.advance_unseen_playback(ui);
+            self.editor.metronome.forget_hover();
         } else {
             self.measure_panel(ui);
         }

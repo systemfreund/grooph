@@ -10,7 +10,9 @@
 //! The ring has one segment per note or rest of the click bar, as long as it.
 //! The segment's thickness shows how loud it clicks; a tap moves it to the
 //! next level. While playing, the click being played lights up and the middle
-//! shows the bar number.
+//! shows the bar number. The segment under the pointer (or a finger) and its
+//! note on the staff light each other, from either side, and a tap on the
+//! note changes its level like one on the segment.
 //!
 //! A meter can have a counter rhythm (see [`grooph_measure::counter`]), e.g.
 //! three clicks against the four beats of 4/4. It plays in this tab only and
@@ -73,6 +75,12 @@ pub(crate) struct MetronomeState {
     /// the counter rhythm (the staff's lower voice). The other one stays in
     /// the audio settings.
     pub(crate) voice: Voice,
+    /// The note of the ring's segment under the pointer (or finger), which
+    /// the staff lights. Written by the ring every frame it is drawn.
+    pub(crate) ring_hover: Option<(Voice, usize)>,
+    /// The note under the pointer on the staff, whose segment the ring
+    /// marks. Written by the staff every frame it is drawn with the ring.
+    pub(crate) staff_hover: Option<(Voice, usize)>,
 }
 
 impl MetronomeState {
@@ -82,7 +90,15 @@ impl MetronomeState {
             stash: None,
             history: UndoHistory::new(DEFAULT_UNDO_LIMIT),
             voice: Voice::Upper,
+            ring_hover: None,
+            staff_hover: None,
         }
+    }
+
+    /// Forget what the pointer was on, e.g. while the staff is not drawn.
+    pub(crate) fn forget_hover(&mut self) {
+        self.ring_hover = None;
+        self.staff_hover = None;
     }
 }
 
@@ -298,6 +314,7 @@ impl Grooph {
         }
         let bar = self.playback_ctl.audio_cfg.click.for_meter(self.metronome_meter());
         let editor = &mut self.editor;
+        editor.metronome.forget_hover();
         let history = std::mem::replace(
             &mut editor.history,
             std::mem::replace(&mut editor.metronome.history, UndoHistory::new(0)),
@@ -315,6 +332,7 @@ impl Grooph {
     pub(crate) fn close_metronome(&mut self) {
         self.select_voice(Voice::Upper);
         let editor = &mut self.editor;
+        editor.metronome.forget_hover();
         let Some(stash) = editor.metronome.stash.take() else {
             return;
         };
@@ -556,6 +574,16 @@ impl Grooph {
         });
     }
 
+    /// A tap on note `idx` of `voice` on the staff, as on its ring segment.
+    pub(crate) fn tap_staff_note(&mut self, voice: Voice, idx: usize) {
+        let spans = self.counter_bar().map(counter_spans).unwrap_or_default();
+        match segment_of_note(voice, idx, &spans) {
+            Some(RingHit::Click(idx)) => self.cycle_click_level(idx),
+            Some(RingHit::Counter(idx)) => self.cycle_counter_level(idx),
+            None => {}
+        }
+    }
+
     /// Move the counter click starting at beat `idx` to its next level, and
     /// edit the counter rhythm from now on.
     fn cycle_counter_level(&mut self, idx: usize) {
@@ -632,6 +660,8 @@ impl Grooph {
     }
 
     fn ring(&mut self, ui: &mut Ui) {
+        // Nothing hovered unless the ring is drawn below.
+        self.editor.metronome.ring_hover = None;
         let bar = self.click_bar();
         let ts = bar.time_signature();
         let spans = beat_spans(&bar);
@@ -689,12 +719,19 @@ impl Grooph {
         };
         let hovered = resp.hover_pos().and_then(on_ring);
         let hover_color = visuals.weak_text_color();
+        // The staff lights the hovered segment's note, and a note hovered on
+        // the staff marks its segment here: a counter click spans its rests.
+        self.editor.metronome.ring_hover = hovered.map(|hit| match hit {
+            RingHit::Click(idx) => (Voice::Upper, idx),
+            RingHit::Counter(idx) => (Voice::Lower, idx),
+        });
+        let marked = marked_segment(hovered, self.editor.metronome.staff_hover, &counter_spans);
 
         for (idx, (&(start, end), beat)) in spans.iter().zip(bar.beats()).enumerate() {
             let color = if current == Some(idx) && !muted { lit } else { base };
             let segment = Segment { start, end, level: ClickLevel::of(beat), color };
             segment.paint(painter, center, radius, radius);
-            if hovered == Some(RingHit::Click(idx)) {
+            if marked == Some(RingHit::Click(idx)) {
                 segment.paint_hover(painter, center, radius, radius, hover_color);
             }
         }
@@ -707,7 +744,7 @@ impl Grooph {
                 let segment = Segment { start, end, level, color };
                 let unit = COUNTER_THICKNESS * radius;
                 segment.paint(painter, center, inner, unit);
-                if hovered == Some(RingHit::Counter(idx)) {
+                if marked == Some(RingHit::Counter(idx)) {
                     segment.paint_hover(painter, center, inner, unit, hover_color);
                 }
             }
@@ -797,18 +834,6 @@ impl Grooph {
             visuals.weak_text_color(),
         );
 
-        if let Some(hit) = hovered {
-            let level = match hit {
-                RingHit::Click(idx) => {
-                    bar.beats().get(idx).map_or(ClickLevel::Medium, ClickLevel::of)
-                }
-                RingHit::Counter(idx) => {
-                    counter.as_ref().map_or(ClickLevel::Medium, |c| click_level(c, idx))
-                }
-            };
-            let what = if matches!(hit, RingHit::Counter(_)) { "Counter click" } else { "Click" };
-            resp.clone().on_hover_text(format!("{what}: {} (tap to change)", level_label(level)));
-        }
         if resp.clicked() {
             match resp.interact_pointer_pos().and_then(on_ring) {
                 Some(RingHit::Click(idx)) => self.cycle_click_level(idx),
@@ -890,19 +915,40 @@ fn counter_spans(bar: &Measure) -> Vec<(usize, f32, f32)> {
         .collect()
 }
 
+/// The segment the ring marks: the one under the pointer, else the one of
+/// the note hovered on the staff.
+fn marked_segment(
+    hovered: Option<RingHit>,
+    staff_hover: Option<(Voice, usize)>,
+    counter_spans: &[(usize, f32, f32)],
+) -> Option<RingHit> {
+    hovered.or_else(|| {
+        let (voice, idx) = staff_hover?;
+        segment_of_note(voice, idx, counter_spans)
+    })
+}
+
+/// The ring segment of note `idx` of `voice`: a click of the click bar, or
+/// the counter click whose span (see [`counter_spans`]) holds it.
+fn segment_of_note(
+    voice: Voice,
+    idx: usize,
+    counter_spans: &[(usize, f32, f32)],
+) -> Option<RingHit> {
+    match voice {
+        Voice::Upper => Some(RingHit::Click(idx)),
+        Voice::Lower => counter_spans
+            .iter()
+            .rev()
+            .find(|&&(start, _, _)| start <= idx)
+            .map(|&(start, _, _)| RingHit::Counter(start)),
+    }
+}
+
 /// Beat of the count-in bar (from 1) at `turn`: it clicks every beat unit.
 fn count_in_beat(turn: f32, ts: &TimeSignature) -> u32 {
     let units = ts.beats.max(1) as u32;
     ((turn * units as f32) as u32).min(units - 1) + 1
-}
-
-fn level_label(level: ClickLevel) -> &'static str {
-    match level {
-        ClickLevel::Strong => "strong",
-        ClickLevel::Medium => "medium",
-        ClickLevel::Soft => "soft",
-        ClickLevel::Off => "off",
-    }
 }
 
 #[cfg(test)]
@@ -1031,6 +1077,258 @@ mod tests {
             assert!((start - i as f32 / 5.0).abs() < 1e-6);
             assert!((end - (i + 1) as f32 / 5.0).abs() < 1e-6);
         }
+    }
+
+    #[test]
+    fn a_note_marks_the_segment_it_sounds_or_rests_in() {
+        let bar = counter_bar(TimeSignature::THREE_FOUR, Ratio { n: 5, span: 3 }).unwrap();
+        let spans = counter_spans(&bar);
+        // The click and its two rests all belong to the click's segment.
+        for (idx, segment) in [(0, 0), (2, 0), (3, 3), (5, 3), (14, 12)] {
+            assert!(segment_of_note(Voice::Lower, idx, &spans) == Some(RingHit::Counter(segment)));
+        }
+        assert!(segment_of_note(Voice::Upper, 2, &spans) == Some(RingHit::Click(2)));
+    }
+
+    #[test]
+    fn the_ring_marks_its_own_hover_else_the_staff_note() {
+        let bar = counter_bar(TimeSignature::THREE_FOUR, Ratio { n: 5, span: 3 }).unwrap();
+        let spans = counter_spans(&bar);
+        let marked = |hovered, staff| marked_segment(hovered, staff, &spans);
+        assert!(marked(None, Some((Voice::Lower, 4))) == Some(RingHit::Counter(3)));
+        assert!(marked(None, Some((Voice::Upper, 1))) == Some(RingHit::Click(1)));
+        // A finger on the ring wins over what the staff last reported.
+        let on_ring = Some(RingHit::Click(2));
+        assert!(marked(on_ring, Some((Voice::Lower, 4))) == on_ring);
+        assert!(marked(None, None).is_none());
+    }
+
+    /// Runs frames of the whole app at phone size with the pointer at `pos`
+    /// (hover follows a frame behind the pointer).
+    fn hover(app: &mut Grooph, ctx: &egui::Context, pos: Pos2) {
+        for _ in 0..3 {
+            frame(app, ctx, vec![egui::Event::PointerMoved(pos)]);
+        }
+    }
+
+    /// A tap at `pos`, then the pointer stays there.
+    fn tap(app: &mut Grooph, ctx: &egui::Context, pos: Pos2) {
+        hover(app, ctx, pos);
+        for pressed in [true, false] {
+            frame(app, ctx, vec![button(pos, pressed)]);
+        }
+        hover(app, ctx, pos);
+    }
+
+    /// One frame of the whole app at phone size.
+    fn frame(app: &mut Grooph, ctx: &egui::Context, events: Vec<egui::Event>) {
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(Pos2::ZERO, vec2(390.0, 844.0))),
+            events,
+            ..Default::default()
+        };
+        let mut output = ctx.run_ui(input, |ui| {
+            app.apply_style(ui);
+            app.ui.narrow_screen = true;
+            app.shell_ui(ui);
+            app.sync_click_bar();
+        });
+        output.textures_delta.clear();
+    }
+
+    /// What the ring and the staff report while the pointer moves up the
+    /// screen left of the ring's middle: each change once.
+    fn hovers_upwards(app: &mut Grooph, ctx: &egui::Context) -> Vec<HoverState> {
+        hovers_along(app, ctx, (200..820).rev().step_by(4).map(|y| Pos2::new(180.0, y as f32)))
+            .into_iter()
+            .map(|(state, _)| state)
+            .collect()
+    }
+
+    /// What the ring and the staff report at each of `points`, each change
+    /// once with the first point it showed at.
+    fn hovers_along(
+        app: &mut Grooph,
+        ctx: &egui::Context,
+        points: impl Iterator<Item = Pos2>,
+    ) -> Vec<(HoverState, Pos2)> {
+        let mut seen: Vec<(HoverState, Pos2)> = Vec::new();
+        for pos in points {
+            hover(app, ctx, pos);
+            let m = &app.editor.metronome;
+            let now = (m.ring_hover, m.staff_hover);
+            if seen.last().map(|s| s.0) != Some(now) {
+                seen.push((now, pos));
+            }
+        }
+        seen
+    }
+
+    /// The staff's notes under the pointer, left to right along the row at
+    /// `y`, each with a point on it.
+    fn staff_notes(app: &mut Grooph, ctx: &egui::Context, y: f32) -> Vec<(Voice, usize, Pos2)> {
+        hovers_along(app, ctx, (5..385).step_by(3).map(|x| Pos2::new(x as f32, y)))
+            .into_iter()
+            .filter_map(|((_, staff), pos)| staff.map(|(v, i)| (v, i, pos)))
+            .collect()
+    }
+
+    /// A phone-sized app in the Metronome tab, clicking `meter`'s default bar.
+    fn metronome_on(ctx: &egui::Context, meter: TimeSignature) -> Grooph {
+        let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let mut app = Grooph::new(&cc);
+        app.select_tab(crate::shell::Tab::Metronome);
+        app.set_metronome_meter(meter);
+        app.replace_click_bar(default_click_bar(meter));
+        app
+    }
+
+    /// A height on the staff where `voice` reports its notes, from the top.
+    fn staff_row(app: &mut Grooph, ctx: &egui::Context, voice: Voice) -> f32 {
+        (100..500)
+            .step_by(4)
+            .map(|y| y as f32)
+            .find(|&y| {
+                hover(app, ctx, Pos2::new(195.0, y));
+                app.editor.metronome.staff_hover.is_some_and(|(v, _)| v == voice)
+            })
+            .expect("a staff row")
+    }
+
+    fn indices(notes: &[(Voice, usize, Pos2)]) -> Vec<usize> {
+        notes.iter().map(|n| n.1).collect()
+    }
+
+    fn button(pos: Pos2, pressed: bool) -> egui::Event {
+        egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        }
+    }
+
+    #[test]
+    fn a_tap_on_the_staff_changes_the_level_as_on_the_ring() {
+        let ctx = egui::Context::default();
+        let mut app = metronome_on(&ctx, TimeSignature::FOUR_FOUR);
+        let row = staff_row(&mut app, &ctx, Voice::Upper);
+        let notes = staff_notes(&mut app, &ctx, row);
+        assert_eq!(indices(&notes), [0, 1, 2, 3], "{notes:?}");
+
+        // Every tap moves the note's click on, also two in a row.
+        let (_, idx, pos) = notes[2];
+        let level = |app: &Grooph| ClickLevel::of(&app.click_bar().beats()[idx]);
+        let before = level(&app);
+        tap(&mut app, &ctx, pos);
+        assert_eq!(level(&app), before.next());
+        tap(&mut app, &ctx, pos);
+        assert_eq!(level(&app), before.next().next());
+    }
+
+    #[test]
+    fn a_silent_bar_keeps_a_rest_per_click_to_tap() {
+        let ctx = egui::Context::default();
+        let meters =
+            [TimeSignature::FOUR_FOUR, TimeSignature::SIX_EIGHT, TimeSignature::SEVEN_EIGHT];
+        for meter in meters {
+            let mut app = metronome_on(&ctx, meter);
+            let row = staff_row(&mut app, &ctx, Voice::Upper);
+            let mut silent = app.click_bar();
+            let clicks = silent.beats().len();
+            for i in 0..clicks {
+                silent.set_click_level(i, ClickLevel::Off);
+            }
+            app.replace_click_bar(silent);
+            let notes = staff_notes(&mut app, &ctx, row);
+            assert_eq!(indices(&notes), (0..clicks).collect::<Vec<_>>(), "{meter:?}: {notes:?}");
+            let last = clicks - 1;
+            tap(&mut app, &ctx, notes[last].2);
+            let level = ClickLevel::of(&app.click_bar().beats()[last]);
+            assert_eq!(level, ClickLevel::Off.next(), "{meter:?}");
+        }
+    }
+
+    #[test]
+    fn a_tap_on_a_counter_rest_changes_its_click() {
+        let ctx = egui::Context::default();
+        let mut app = metronome_on(&ctx, TimeSignature::THREE_FOUR);
+        app.set_counter_ratio(Some(Ratio { n: 5, span: 3 }));
+        let row = staff_row(&mut app, &ctx, Voice::Lower);
+        let notes = staff_notes(&mut app, &ctx, row);
+        assert!(notes.iter().all(|n| n.0 == Voice::Lower), "{notes:?}");
+        // The second click is a note and two rests: tap its last rest.
+        let start = counter_spans(app.counter_bar().unwrap())[1].0;
+        let (_, _, pos) = *notes.iter().find(|n| n.1 == start + 2).expect("the rest");
+        let level = |app: &Grooph| click_level(app.counter_bar().unwrap(), start);
+        let before = level(&app);
+        tap(&mut app, &ctx, pos);
+        assert_eq!(level(&app), before.next());
+    }
+
+    #[test]
+    fn a_held_finger_lights_like_a_hover() {
+        let ctx = egui::Context::default();
+        let mut app = metronome_on(&ctx, TimeSignature::FOUR_FOUR);
+        let row = staff_row(&mut app, &ctx, Voice::Upper);
+        let on_staff = staff_notes(&mut app, &ctx, row)[1].2;
+        let up_the_ring = (500..820).rev().map(|y| Pos2::new(180.0, y as f32));
+        let (_, on_ring) = hovers_along(&mut app, &ctx, up_the_ring)
+            .into_iter()
+            .find(|(state, _)| state.0.is_some())
+            .expect("the ring");
+        let held = [
+            (on_staff, (None, Some((Voice::Upper, 1)))),
+            (on_ring, (Some((Voice::Upper, 2)), None)),
+        ];
+        for (pos, want) in held {
+            frame(&mut app, &ctx, vec![egui::Event::PointerMoved(pos), button(pos, true)]);
+            for _ in 0..3 {
+                frame(&mut app, &ctx, vec![]);
+                let m = &app.editor.metronome;
+                assert_eq!((m.ring_hover, m.staff_hover), want);
+            }
+            frame(&mut app, &ctx, vec![button(pos, false), egui::Event::PointerGone]);
+            frame(&mut app, &ctx, vec![]);
+        }
+    }
+
+    type HoverState = (Option<(Voice, usize)>, Option<(Voice, usize)>);
+
+    #[test]
+    fn ring_and_staff_report_the_hovered_note() {
+        let ctx = egui::Context::default();
+        let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let mut app = Grooph::new(&cc);
+        app.select_tab(crate::shell::Tab::Metronome);
+        app.set_metronome_meter(TimeSignature::FOUR_FOUR);
+        app.replace_click_bar(default_click_bar(TimeSignature::FOUR_FOUR));
+        app.set_counter_ratio(Some(Ratio { n: 3, span: 4 }));
+        let counter = counter_spans(app.counter_bar().unwrap());
+
+        let seen = hovers_upwards(&mut app, &ctx);
+        let rings: Vec<_> = seen.iter().filter_map(|s| s.0).collect();
+        // Up the left half: the third quarter of the click bar, the counter's
+        // second and third clicks, then the last quarter.
+        let want = [
+            (Voice::Upper, 2),
+            (Voice::Lower, counter[1].0),
+            (Voice::Lower, counter[2].0),
+            (Voice::Upper, 3),
+        ];
+        assert_eq!(rings, want, "{seen:?}");
+        // Never both at once; the staff above reports its notes.
+        assert!(seen.iter().all(|s| s.0.is_none() || s.1.is_none()), "{seen:?}");
+        assert!(seen.iter().any(|s| s.1.is_some()), "{seen:?}");
+
+        // Editing the bar, the ring is gone and the staff lights nothing; the
+        // ring's last hover is forgotten, so leaving the editor lights none.
+        app.editor.metronome.ring_hover = Some((Voice::Upper, 1));
+        app.ui.mode = crate::Mode::Edit;
+        frame(&mut app, &ctx, vec![]);
+        assert!(app.editor.metronome.ring_hover.is_none());
+        let seen = hovers_upwards(&mut app, &ctx);
+        assert!(seen.iter().all(|s| s.1.is_none()), "{seen:?}");
     }
 
     fn metronome_app() -> Grooph {

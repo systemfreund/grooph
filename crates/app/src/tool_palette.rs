@@ -445,7 +445,7 @@ pub(crate) fn paint_notation(
         let opts = make_opts(final_em, final_rect);
         let measure_layout = build_measure_layout(measure, &opts);
         let painter = &ui.painter_at(rect);
-        draw_notes(painter, &measure_layout, color, &opts);
+        draw_notes(painter, &measure_layout, color, None, &opts);
     }
 }
 

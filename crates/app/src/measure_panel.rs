@@ -14,7 +14,7 @@ use grooph_layout::staff_layout::{
 };
 use grooph_measure::grid::DEFAULT_GRID;
 use grooph_measure::tempo::ScoreTiming;
-use grooph_measure::{Score, TimeSignature};
+use grooph_measure::{Cursor, Score, TimeSignature};
 use grooph_render::staff::{PlaybackMarks, draw_staff};
 
 impl Grooph {
@@ -134,8 +134,9 @@ impl Grooph {
                             } else {
                                 0.0
                             },
-                            // While editing every rest stays to be picked.
-                            bar_rests: self.ui.mode != Mode::Edit,
+                            // While editing every rest stays to be picked, and
+                            // in the metronome every click its own to tap.
+                            bar_rests: self.ui.mode != Mode::Edit && !self.metronome_mode(),
                         };
 
                         let upper = upper.as_ref().unwrap_or(&self.editor.score);
@@ -255,12 +256,31 @@ impl Grooph {
                             }))
                         };
 
+                        // Under the metronome's ring the staff and the ring
+                        // light each other's hovered note and segment.
+                        let with_ring = self.metronome_mode() && self.ui.mode != Mode::Edit;
+                        let lit = with_ring
+                            .then_some(self.editor.metronome.ring_hover)
+                            .flatten()
+                            .map(|(voice, beat_idx)| (voice, Cursor { measure_idx: 0, beat_idx }));
+                        let staff_hover = resp
+                            .hover_pos()
+                            .filter(|_| with_ring)
+                            .and_then(|pos| hit_test_voice(&staff, pos))
+                            .map(|(voice, _, beat_idx)| (voice, beat_idx));
+                        if staff_hover != self.editor.metronome.staff_hover {
+                            // The ring was drawn before the staff: show it there next frame.
+                            self.editor.metronome.staff_hover = staff_hover;
+                            ui.ctx().request_repaint();
+                        }
+
                         draw_staff(
                             ui,
                             upper,
                             &staff,
                             cursor,
                             voice,
+                            lit,
                             playback,
                             marks,
                             count_config.as_ref(),
@@ -306,7 +326,7 @@ impl Grooph {
                                 eframe::egui::style::ScrollAnimation::none(),
                             );
                         } else {
-                            self.handle_input(resp, &staff);
+                            self.handle_input(resp, &staff, with_ring);
                         }
                     });
                 });
@@ -522,11 +542,23 @@ impl Grooph {
         None
     }
 
-    fn handle_input(&mut self, resp: Response, staff: &StaffLayout) {
+    /// `with_ring`: under the metronome's ring a tap changes the tapped
+    /// click's level, as on the ring.
+    fn handle_input(&mut self, resp: Response, staff: &StaffLayout, with_ring: bool) {
         // While playing along, a touch or click on the staff is a hit, not an edit.
         if self.tap_capture_active() {
             if resp.contains_pointer() && resp.ctx.input(|i| i.pointer.any_pressed()) {
                 self.push_pointer_tap();
+            }
+            return;
+        }
+        // A tap there changes the click's level, which also picks the voice
+        // and moves the cursor to it.
+        if with_ring && resp.clicked() {
+            if let Some(pos) = resp.interact_pointer_pos()
+                && let Some((voice, _, b_idx)) = hit_test_voice(staff, pos)
+            {
+                self.tap_staff_note(voice, b_idx);
             }
             return;
         }
