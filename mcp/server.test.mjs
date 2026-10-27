@@ -65,7 +65,7 @@ test("tools/call returns the link of this deployment", async () => {
 });
 
 test("tools/call reports wrong numbers to the model", async () => {
-  for (const args of [{ bpm: 500 }, { swing: 90 }, { su: 16 }, { swing: 60, su: 4 }, { ts: "seven" }, { poly: "three" }, { tempo: 90 }]) {
+  for (const args of [{ bpm: 500 }, { swing: 90 }, { su: 16 }, { swing: 60, su: 4 }, { ts: "seven" }, { poly: "three" }, { poly: "2:4" }, { poly: "17:4" }, { tempo: 90 }]) {
     const { result } = await rpc("tools/call", { name: "show_metronome", arguments: args });
     assert.equal(result.isError, true, JSON.stringify(args));
   }

@@ -44,6 +44,8 @@ export function viewHtml({ origin, js, wasm }) {
   <p><button id="open">Open in grooph</button></p>
   <p><code id="link"></code></p>
 </div>
+<!-- Keeps the click audible with the iOS ring/silent switch on, as in the app's index.html. -->
+<script src="${origin}/ios-audio.js"></script>
 <script type="module">
 const CONFIG = ${config};
 ${metronomeQuery.toString()}
@@ -175,52 +177,6 @@ function fail(reason) {
   );
   reportSize();
 }
-
-// iOS mutes Web Audio with the ring/silent switch unless the page plays as
-// "playback", as in crates/app/index.html: Safari 17+ has audioSession; older
-// iOS switches when an <audio> element plays from a tap, so a looping silent
-// WAV plays on the first one.
-(() => {
-  if (navigator.audioSession) {
-    try { navigator.audioSession.type = "playback"; } catch {}
-    return;
-  }
-  const ios = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
-  if (!ios) return;
-  const silentWav = () => {
-    const samples = 800; // 0.1 s of 8-bit mono silence at 8 kHz
-    const view = new DataView(new ArrayBuffer(44 + samples));
-    let o = 0;
-    const str = (s) => { for (const c of s) view.setUint8(o++, c.charCodeAt(0)); };
-    const u32 = (n) => { view.setUint32(o, n, true); o += 4; };
-    const u16 = (n) => { view.setUint16(o, n, true); o += 2; };
-    str("RIFF"); u32(36 + samples); str("WAVE");
-    str("fmt "); u32(16); u16(1); u16(1); u32(8000); u32(8000); u16(1); u16(8);
-    str("data"); u32(samples);
-    for (let i = 0; i < samples; i++) view.setUint8(o++, 128);
-    // A data: URL: the host's CSP allows data: for media, not blob:.
-    return "data:audio/wav;base64," + btoa(String.fromCharCode(...new Uint8Array(view.buffer)));
-  };
-  let audio = null;
-  const events = ["touchend", "pointerup", "click", "keydown"];
-  const listen = (on) =>
-    events.forEach((t) => (on ? window.addEventListener(t, unlock, true) : window.removeEventListener(t, unlock, true)));
-  function unlock() {
-    if (!audio) {
-      audio = document.createElement("audio");
-      audio.loop = true;
-      audio.src = silentWav();
-    }
-    audio.play()?.then(() => listen(false), () => {});
-  }
-  listen(true);
-  document.addEventListener("visibilitychange", () => {
-    if (!audio) return;
-    if (document.visibilityState === "hidden") audio.pause();
-    else listen(true);
-  });
-})();
-
 // The app reads its link from the address bar once at start.
 history.replaceState(null, "", "?" + query + "&embed=mcp&theme=" + theme);
 

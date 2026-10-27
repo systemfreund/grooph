@@ -96,7 +96,7 @@
           {
             "name": "poly",
             "in": "query",
-            "description": "Polyrhythm `n:m`: n even clicks in the time of m beat units of `ts` (quarters in x/4, eighths in x/8), played against the click. m must divide the beats of the meter, n is 2 to 16; e.g. 3:2, 3:4, 5:4 in 4/4, 2:3, 4:3 in 3/4, 7:5 in 5/8. Needs `ts`; not together with `r`, the generator or `counter`.",
+            "description": "Polyrhythm `n:m`: n even clicks in the time of m beat units of `ts` (quarters in x/4, eighths in x/8), played against the click. m must divide the beats of the meter, n is 2 to 16, and the ratio must not reduce to one click (2:4 is 1:2); e.g. 3:2, 3:4, 5:4 in 4/4, 2:3, 4:3 in 3/4, 7:5 in 5/8. Needs `ts`; not together with `r`, the generator or `counter`.",
             "schema": { "type": "string", "pattern": "^[0-9]+:[0-9]+$" },
             "example": "3:2"
           },

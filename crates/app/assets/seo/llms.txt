@@ -34,7 +34,7 @@ AI chat apps can show grooph's metronome inside the conversation: https://grooph
 
 ## Polyrhythms
 
-A polyrhythm n:m plays n even counter clicks in the time of m beat units of the meter (quarters in x/4, eighths in x/8), repeated until the bar is full, against the normal click. Pass it as `poly` together with `ts`; grooph writes the counter clicks itself. m must divide the beats of the meter (in 4/4: 1, 2 or 4), n is 2 to 16. Examples:
+A polyrhythm n:m plays n even counter clicks in the time of m beat units of the meter (quarters in x/4, eighths in x/8), repeated until the bar is full, against the normal click. Pass it as `poly` together with `ts`; grooph writes the counter clicks itself. m must divide the beats of the meter (in 4/4: 1, 2 or 4), n is 2 to 16, and the ratio must not reduce to one click (2:4 is 1:2). Examples:
 
 - 3:2 in 4/4 (three against two): https://grooph.app/?v=2&bpm=90&ts=4/4&poly=3:2
 - 3:4 in 4/4: https://grooph.app/?v=2&bpm=90&ts=4/4&poly=3:4

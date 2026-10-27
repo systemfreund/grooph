@@ -28,7 +28,7 @@ export const TOOL = {
 
 Tempo is always in quarter notes per minute: 7/8 at bpm 70 clicks 140 eighths per minute.
 
-poly is a polyrhythm n:m: n even clicks in the time of m beat units of the meter (quarters in x/4, eighths in x/8), repeated until the bar is full. m must divide the beats of the meter, n is 2 to 16. Examples: "3 against 2" in 4/4 is poly "3:2", "3 against 4" is "3:4", "5 against 4" is "5:4"; in 3/4 "2:3" or "4:3"; in 6/8 "2:3" is two against each dotted quarter; in 5/8 "7:5".
+poly is a polyrhythm n:m: n even clicks in the time of m beat units of the meter (quarters in x/4, eighths in x/8), repeated until the bar is full. m must divide the beats of the meter, n is 2 to 16, and the ratio must not reduce to one click (2:4 is 1:2); not every such ratio fits every meter, and grooph names the ones that do. Examples: "3 against 2" in 4/4 is poly "3:2", "3 against 4" is "3:4", "5 against 4" is "5:4"; in 3/4 "2:3" or "4:3"; in 6/8 "2:3" is two against each dotted quarter; in 5/8 "7:5".
 
 click replaces the main click: one bar of the meter in grooph's rhythm notation, without the time signature. Tokens separated by spaces: h q e s (half to sixteenth), dotted q. e., r: makes a rest, > an accent (strong click), (q) a ghost note (soft click); the bar must add up exactly to the meter. E.g. 7/8 with the middle group silent and the last soft is ">q r:q. (q)". Default: one click per beat group, the first one strong. More at https://grooph.app/llms.txt.`,
   inputSchema: {

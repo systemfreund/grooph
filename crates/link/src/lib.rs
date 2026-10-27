@@ -223,7 +223,7 @@ fn poly_bar(ts: TimeSignature, ratio: Ratio) -> Result<Measure, String> {
         .collect();
     let offered: Vec<String> = counter_ratios(ts).iter().map(Ratio::to_string).collect();
     Err(format!(
-        "poly {ratio} does not fit {ts}: it takes n:m with m one of {}, such as {}",
+        "poly {ratio} does not fit {ts}: it takes n:m with m one of {} and at least two clicks once reduced (not 2:4, which is 1:2), such as {}",
         spans.join(", "),
         offered.join(", ")
     ))

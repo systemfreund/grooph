@@ -38,6 +38,12 @@ export function argumentError(args, known) {
   if (args?.su != null && !["8", "16"].includes(String(args.su))) return `su must be 8 or 16, got ${args.su}`;
   if (args?.su != null && args?.swing == null) return "su needs a swing amount (swing 50-75)";
   if (args?.ts != null && !/^\s*\d+(\+\d+)*\/\d+\s*$/.test(String(args.ts))) return `ts must be a time signature such as 7/8, got ${args.ts}`;
-  if (args?.poly != null && !/^\s*\d+\s*:\s*\d+\s*$/.test(String(args.poly))) return `poly must be a ratio such as 3:2, got ${args.poly}`;
+  if (args?.poly != null) {
+    const ratio = String(args.poly).match(/^\s*(\d+)\s*:\s*(\d+)\s*$/);
+    if (!ratio) return `poly must be a ratio such as 3:2, got ${args.poly}`;
+    const [n, m] = [Number(ratio[1]), Number(ratio[2])];
+    const gcd = (a, b) => (b ? gcd(b, a % b) : a);
+    if (n > 16 || m < 1 || n / gcd(n, m) < 2) return `poly ${n}:${m} is no polyrhythm: n is 2 to 16 and must not reduce to one click (2:4 is 1:2)`;
+  }
   return null;
 }
