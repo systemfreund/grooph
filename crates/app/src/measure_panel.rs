@@ -134,8 +134,9 @@ impl Grooph {
                             } else {
                                 0.0
                             },
-                            // While editing every rest stays to be picked.
-                            bar_rests: self.ui.mode != Mode::Edit,
+                            // While editing every rest stays to be picked, and
+                            // in the metronome every click its own to tap.
+                            bar_rests: self.ui.mode != Mode::Edit && !self.metronome_mode(),
                         };
 
                         let upper = upper.as_ref().unwrap_or(&self.editor.score);
@@ -332,7 +333,7 @@ impl Grooph {
                                 eframe::egui::style::ScrollAnimation::none(),
                             );
                         } else {
-                            self.handle_input(resp, &staff);
+                            self.handle_input(resp, &staff, with_ring);
                         }
                     });
                 });
@@ -538,11 +539,22 @@ impl Grooph {
         None
     }
 
-    fn handle_input(&mut self, resp: Response, staff: &StaffLayout) {
+    /// `with_ring`: under the metronome's ring a tap changes the tapped
+    /// click's level, as on the ring.
+    fn handle_input(&mut self, resp: Response, staff: &StaffLayout, with_ring: bool) {
         // While playing along, a touch or click on the staff is a hit, not an edit.
         if self.tap_capture_active() {
             if resp.contains_pointer() && resp.ctx.input(|i| i.pointer.any_pressed()) {
                 self.push_pointer_tap();
+            }
+            return;
+        }
+        // Every tap changes a level there, so a double tap toggles no rest.
+        if with_ring && resp.clicked() {
+            if let Some(pos) = resp.interact_pointer_pos()
+                && let Some((voice, _, b_idx)) = hit_test_voice(staff, pos)
+            {
+                self.tap_staff_note(voice, b_idx);
             }
             return;
         }

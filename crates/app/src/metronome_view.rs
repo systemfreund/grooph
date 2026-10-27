@@ -11,7 +11,8 @@
 //! The segment's thickness shows how loud it clicks; a tap moves it to the
 //! next level. While playing, the click being played lights up and the middle
 //! shows the bar number. The segment under the pointer (or a finger) and its
-//! note on the staff light each other, from either side.
+//! note on the staff light each other, from either side, and a tap on the
+//! note changes its level like one on the segment.
 //!
 //! A meter can have a counter rhythm (see [`grooph_measure::counter`]), e.g.
 //! three clicks against the four beats of 4/4. It plays in this tab only and
@@ -573,6 +574,16 @@ impl Grooph {
         });
     }
 
+    /// A tap on note `idx` of `voice` on the staff, as on its ring segment.
+    pub(crate) fn tap_staff_note(&mut self, voice: Voice, idx: usize) {
+        let spans = self.counter_bar().map(counter_spans).unwrap_or_default();
+        match segment_of_note(voice, idx, &spans) {
+            Some(RingHit::Click(idx)) => self.cycle_click_level(idx),
+            Some(RingHit::Counter(idx)) => self.cycle_counter_level(idx),
+            None => {}
+        }
+    }
+
     /// Move the counter click starting at beat `idx` to its next level, and
     /// edit the counter rhythm from now on.
     fn cycle_counter_level(&mut self, idx: usize) {
@@ -826,18 +837,6 @@ impl Grooph {
             visuals.weak_text_color(),
         );
 
-        if let Some(hit) = hovered {
-            let level = match hit {
-                RingHit::Click(idx) => {
-                    bar.beats().get(idx).map_or(ClickLevel::Medium, ClickLevel::of)
-                }
-                RingHit::Counter(idx) => {
-                    counter.as_ref().map_or(ClickLevel::Medium, |c| click_level(c, idx))
-                }
-            };
-            let what = if matches!(hit, RingHit::Counter(_)) { "Counter click" } else { "Click" };
-            resp.clone().on_hover_text(format!("{what}: {} (tap to change)", level_label(level)));
-        }
         if resp.clicked() {
             match resp.interact_pointer_pos().and_then(on_ring) {
                 Some(RingHit::Click(idx)) => self.cycle_click_level(idx),
@@ -940,15 +939,6 @@ fn segment_of_note(
 fn count_in_beat(turn: f32, ts: &TimeSignature) -> u32 {
     let units = ts.beats.max(1) as u32;
     ((turn * units as f32) as u32).min(units - 1) + 1
-}
-
-fn level_label(level: ClickLevel) -> &'static str {
-    match level {
-        ClickLevel::Strong => "strong",
-        ClickLevel::Medium => "medium",
-        ClickLevel::Soft => "soft",
-        ClickLevel::Off => "off",
-    }
 }
 
 #[cfg(test)]
@@ -1094,34 +1084,118 @@ mod tests {
     /// (hover follows a frame behind the pointer).
     fn hover(app: &mut Grooph, ctx: &egui::Context, pos: Pos2) {
         for _ in 0..3 {
-            let input = egui::RawInput {
-                screen_rect: Some(egui::Rect::from_min_size(Pos2::ZERO, vec2(390.0, 844.0))),
-                events: vec![egui::Event::PointerMoved(pos)],
-                ..Default::default()
-            };
-            let mut output = ctx.run_ui(input, |ui| {
-                app.apply_style(ui);
-                app.ui.narrow_screen = true;
-                app.shell_ui(ui);
-                app.sync_click_bar();
-            });
-            output.textures_delta.clear();
+            frame(app, ctx, vec![egui::Event::PointerMoved(pos)]);
         }
+    }
+
+    /// A tap at `pos`, then the pointer stays there.
+    fn tap(app: &mut Grooph, ctx: &egui::Context, pos: Pos2) {
+        hover(app, ctx, pos);
+        for pressed in [true, false] {
+            let button = egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            };
+            frame(app, ctx, vec![button]);
+        }
+        hover(app, ctx, pos);
+    }
+
+    /// One frame of the whole app at phone size.
+    fn frame(app: &mut Grooph, ctx: &egui::Context, events: Vec<egui::Event>) {
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(Pos2::ZERO, vec2(390.0, 844.0))),
+            events,
+            ..Default::default()
+        };
+        let mut output = ctx.run_ui(input, |ui| {
+            app.apply_style(ui);
+            app.ui.narrow_screen = true;
+            app.shell_ui(ui);
+            app.sync_click_bar();
+        });
+        output.textures_delta.clear();
     }
 
     /// What the ring and the staff report while the pointer moves up the
     /// screen left of the ring's middle: each change once.
     fn hovers_upwards(app: &mut Grooph, ctx: &egui::Context) -> Vec<HoverState> {
-        let mut seen: Vec<HoverState> = Vec::new();
-        for y in (200..820).rev().step_by(4) {
-            hover(app, ctx, Pos2::new(180.0, y as f32));
+        hovers_along(app, ctx, (200..820).rev().step_by(4).map(|y| Pos2::new(180.0, y as f32)))
+            .into_iter()
+            .map(|(state, _)| state)
+            .collect()
+    }
+
+    /// What the ring and the staff report at each of `points`, each change
+    /// once with the first point it showed at.
+    fn hovers_along(
+        app: &mut Grooph,
+        ctx: &egui::Context,
+        points: impl Iterator<Item = Pos2>,
+    ) -> Vec<(HoverState, Pos2)> {
+        let mut seen: Vec<(HoverState, Pos2)> = Vec::new();
+        for pos in points {
+            hover(app, ctx, pos);
             let m = &app.editor.metronome;
             let now = (m.ring_hover, m.staff_hover);
-            if seen.last() != Some(&now) {
-                seen.push(now);
+            if seen.last().map(|s| s.0) != Some(now) {
+                seen.push((now, pos));
             }
         }
         seen
+    }
+
+    /// The staff's notes under the pointer, left to right along the row at
+    /// `y`, each with a point on it.
+    fn staff_notes(app: &mut Grooph, ctx: &egui::Context, y: f32) -> Vec<(Voice, usize, Pos2)> {
+        hovers_along(app, ctx, (5..385).step_by(3).map(|x| Pos2::new(x as f32, y)))
+            .into_iter()
+            .filter_map(|((_, staff), pos)| staff.map(|(v, i)| (v, i, pos)))
+            .collect()
+    }
+
+    #[test]
+    fn a_tap_on_the_staff_changes_the_level_as_on_the_ring() {
+        let ctx = egui::Context::default();
+        let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let mut app = Grooph::new(&cc);
+        app.select_tab(crate::shell::Tab::Metronome);
+        app.set_metronome_meter(TimeSignature::FOUR_FOUR);
+        app.replace_click_bar(default_click_bar(TimeSignature::FOUR_FOUR));
+        // Where the staff's row is: the first place a note reports itself.
+        let row = (100..400)
+            .step_by(4)
+            .map(|y| y as f32)
+            .find(|&y| {
+                hover(&mut app, &ctx, Pos2::new(195.0, y));
+                app.editor.metronome.staff_hover.is_some()
+            })
+            .expect("a staff row");
+        let notes = staff_notes(&mut app, &ctx, row);
+        assert_eq!(notes.iter().map(|n| n.1).collect::<Vec<_>>(), [0, 1, 2, 3], "{notes:?}");
+
+        // Every tap moves the note's click on, through off and back, and a
+        // double tap toggles no rest.
+        let (_, idx, pos) = notes[2];
+        let level = |app: &Grooph| ClickLevel::of(&app.click_bar().beats()[idx]);
+        let before = level(&app);
+        tap(&mut app, &ctx, pos);
+        assert_eq!(level(&app), before.next());
+        tap(&mut app, &ctx, pos);
+        assert_eq!(level(&app), before.next().next());
+
+        // A silent bar keeps a rest per click to tap.
+        let mut silent = app.click_bar();
+        for i in 0..silent.beats().len() {
+            silent.set_click_level(i, ClickLevel::Off);
+        }
+        app.replace_click_bar(silent);
+        let notes = staff_notes(&mut app, &ctx, row);
+        assert_eq!(notes.iter().map(|n| n.1).collect::<Vec<_>>(), [0, 1, 2, 3], "{notes:?}");
+        tap(&mut app, &ctx, notes[3].2);
+        assert_eq!(ClickLevel::of(&app.click_bar().beats()[3]), ClickLevel::Off.next());
     }
 
     type HoverState = (Option<(Voice, usize)>, Option<(Voice, usize)>);

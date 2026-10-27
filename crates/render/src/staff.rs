@@ -258,3 +258,85 @@ fn draw_barlines(
         ui.painter().vline(last.rect.right(), Rangef::new(top, bottom), stroke);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use eframe::egui::{FontFamily, FontId, Pos2, Rect, vec2};
+    use grooph_layout::staff_layout::{ROOM_BELOW_EM, build_staff_layout_with_lower};
+    use grooph_measure::notation::parse_score;
+
+    fn opts() -> StaffOpts {
+        let em = 20.0;
+        StaffOpts {
+            rect: Rect::from_min_size(Pos2::ZERO, vec2(400.0, 200.0)),
+            font_id: FontId::new(em, FontFamily::Proportional),
+            pixels_per_point: 1.0,
+            em,
+            y_offset: 0.0,
+            stem_length_factor: 3.5,
+            stem_thickness_factor: 0.1,
+            accent_displacement: 0.0,
+            min_measure_width_em: 6.0,
+            note_width_em: 0.6,
+            system_spacing_em: 0.5,
+            layout_clef_first: false,
+            time_signature_first: false,
+            room_below_em: ROOM_BELOW_EM,
+            lower_label_room_em: 0.0,
+            bar_rests: false,
+        }
+    }
+
+    /// The voice and index of the note nearest (across) each shape drawn in
+    /// the highlight colour, with `lit` lit on a two-voice staff whose notes
+    /// all stand at different places.
+    fn lit_notes(lit: (Voice, Cursor)) -> Vec<(Voice, usize)> {
+        let upper = parse_score("4/4 q q q q").unwrap();
+        let lower = parse_score("4/4 r:e q q q e").unwrap();
+        let opts = opts();
+        let staff = build_staff_layout_with_lower(&upper, Some(&lower), &opts);
+        let ctx = egui::Context::default();
+        let mut color = Color32::PLACEHOLDER;
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            color = ui.visuals().selection.stroke.color.to_opaque();
+            let marks = PlaybackMarks::Line;
+            draw_staff(ui, &upper, &staff, None, Voice::Upper, Some(lit), None, marks, None, &opts);
+        });
+        output.textures_delta.clear();
+        let placed = staff.placed(0).unwrap();
+        let lower_notes = &placed.lower.as_ref().unwrap().notes;
+        let notes: Vec<(Voice, usize, Pos2)> = (placed.layout.notes.iter().enumerate())
+            .map(|(i, n)| (Voice::Upper, i, n.center))
+            .chain(lower_notes.iter().enumerate().map(|(i, n)| (Voice::Lower, i, n.center)))
+            .collect();
+        output
+            .shapes
+            .iter()
+            .filter(|c| match &c.shape {
+                egui::Shape::LineSegment { stroke, .. } => stroke.color == color,
+                egui::Shape::Text(text) => text.fallback_color == color,
+                _ => false,
+            })
+            .map(|c| {
+                let at = c.shape.visual_bounding_rect().center();
+                let nearest = notes
+                    .iter()
+                    .min_by(|a, b| (a.2.x - at.x).abs().total_cmp(&(b.2.x - at.x).abs()))
+                    .unwrap();
+                (nearest.0, nearest.1)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_lit_note_lights_in_its_own_voice_only() {
+        for voice in [Voice::Upper, Voice::Lower] {
+            let lit = lit_notes((voice, Cursor { measure_idx: 0, beat_idx: 1 }));
+            assert!(lit.len() >= 2, "{voice:?}: {lit:?}");
+            assert!(lit.iter().all(|&n| n == (voice, 1)), "{voice:?}: {lit:?}");
+        }
+        // A note of another measure lights nothing here.
+        assert!(lit_notes((Voice::Upper, Cursor { measure_idx: 1, beat_idx: 1 })).is_empty());
+    }
+}
