@@ -1200,8 +1200,16 @@ mod tests {
         let before = level(&app);
         tap(&mut app, &ctx, pos);
         assert_eq!(level(&app), before.next());
+        // The second tap comes within egui's double-click window (frames
+        // advance by 1/60 s), and the click stays a note unless off.
         tap(&mut app, &ctx, pos);
         assert_eq!(level(&app), before.next().next());
+        let beat = app.click_bar().beats()[idx];
+        assert_eq!(
+            beat.kind == grooph_measure::BeatKind::Note,
+            level(&app) != ClickLevel::Off,
+            "{beat:?}"
+        );
     }
 
     #[test]

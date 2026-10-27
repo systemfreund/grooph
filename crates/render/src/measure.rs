@@ -632,6 +632,49 @@ mod tests {
         }
     }
 
+    #[test]
+    fn a_lit_note_takes_its_dot_flag_and_accent_but_no_beam_or_bracket() {
+        use grooph_measure::notation::parse_score;
+        let lit = Color32::RED;
+        let opts = opts_for(Rect::from_min_size(Pos2::ZERO, egui::vec2(600.0, 100.0)));
+        let measure = parse_score("4/4 q. e >e e t8 t8 t8").unwrap().measures.remove(0);
+        let layout = build_measure_layout(&measure, &opts);
+        assert!(!layout.beams.is_empty() && !layout.tuplets.is_empty());
+        let nearest = |x: f32| {
+            (0..layout.notes.len())
+                .min_by(|&a, &b| {
+                    let d = |i: usize| (layout.notes[i].center.x - x).abs();
+                    d(a).total_cmp(&d(b))
+                })
+                .unwrap()
+        };
+        // The dotted quarter, the flagged eighth, the accented beamed one.
+        for idx in [0, 1, 2] {
+            let ctx = egui::Context::default();
+            let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                draw_notes(ui.painter(), &layout, Color32::WHITE, Some((idx, lit)), &opts);
+            });
+            output.textures_delta.clear();
+            let mut lit_glyphs = 0;
+            for c in &output.shapes {
+                let at = nearest(c.shape.visual_bounding_rect().center().x);
+                match &c.shape {
+                    egui::Shape::Rect(rect) => assert_ne!(rect.fill, lit, "a beam is lit"),
+                    egui::Shape::LineSegment { stroke, .. } if stroke.color == lit => {
+                        assert_eq!(at, idx, "the stem of note {at}");
+                    }
+                    egui::Shape::Text(text) if text.fallback_color == lit => {
+                        assert_eq!(at, idx, "a glyph of note {at}");
+                        lit_glyphs += 1;
+                    }
+                    _ => {}
+                }
+            }
+            // The head and its dot, flag or accent.
+            assert!(lit_glyphs >= 2, "note {idx}: {lit_glyphs} glyphs lit");
+        }
+    }
+
     fn counting(subdivision: Subdivision) -> CountConfig {
         CountConfig { subdivision, system: Default::default() }
     }
