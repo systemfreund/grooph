@@ -26,7 +26,7 @@ use rodio::source::Function as RodioFunction;
 use schedule::{Schedule, SoundType};
 use serde::{Deserialize, Serialize};
 use std::fmt::{Debug, Formatter};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, TryLockError};
 use std::time::Duration;
 
@@ -245,6 +245,8 @@ pub struct Audio {
     pending_shift: f64,
     /// A play started since the last update, see [`Audio::restart`].
     pending_start: bool,
+    /// [`PlaybackState::start_pending`].
+    start_pending: Arc<AtomicBool>,
     /// Updates left before the output device is tried again after it could
     /// not be opened.
     reopen_wait: u32,
@@ -296,6 +298,9 @@ struct PlaybackState {
     // Plays started; the audio thread starts the score over when it sees a
     // new one, also when it missed the stop in between.
     starts: u64,
+    // A start the audio thread has not taken over yet. Set and cleared under
+    // the lock with `starts`; read without it.
+    start_pending: Arc<AtomicBool>,
 }
 
 impl Debug for PlaybackState {
@@ -367,6 +372,7 @@ impl Audio {
             seed: 1,
         };
 
+        let start_pending = Arc::new(AtomicBool::new(false));
         let shared_state = Arc::new(Mutex::new(PlaybackState {
             params,
             is_dirty: false,
@@ -375,6 +381,7 @@ impl Audio {
             bar: None,
             shift: 0.0,
             starts: 0,
+            start_pending: Arc::clone(&start_pending),
         }));
 
         Some(Self {
@@ -388,6 +395,7 @@ impl Audio {
             last_bar: None,
             pending_shift: 0.0,
             pending_start: false,
+            start_pending,
             reopen_wait: 0,
             watchdog: Watchdog::default(),
             output_lost: false,
@@ -420,8 +428,8 @@ impl Audio {
             self.output_lost = true;
             return Some(Duration::ZERO);
         }
-        // Lost while stopped: noticed only now (no frames while idle), so
-        // this play simply opens a new one.
+        // Lost while stopped (seen by the idle frames, or by this play):
+        // closed quietly, and a play opens a new one.
 
         // Playback start: ensure sink runs
         if *player_state == PlayerState::Playing && self.output.is_none() {
@@ -530,6 +538,7 @@ impl Audio {
         let playing = *player_state == PlayerState::Playing;
         if playing && (shared_state.playing_state != *player_state || self.pending_start) {
             shared_state.starts += 1;
+            shared_state.start_pending.store(true, Ordering::Relaxed);
         }
         shared_state.playing_state = player_state.clone();
         shared_state.shift += self.pending_shift;
@@ -610,9 +619,19 @@ impl Audio {
     }
 
     /// Whether the output is open but does not play yet: a device waking up
-    /// (a new `AudioContext`, Bluetooth) makes the first click wait.
+    /// (a new `AudioContext`, Bluetooth) makes the first click wait, and on
+    /// an open output a play waits for the audio thread to start the score
+    /// over (up to one block).
     pub fn is_starting(&self) -> bool {
-        self.output.as_ref().is_some_and(|output| !output.started())
+        self.output.as_ref().is_some_and(|output| !output.started() || self.start_pending())
+    }
+
+    /// A play the audio thread has not started the score over for yet,
+    /// from [`Audio::restart`] on, so no frame in between misses it.
+    fn start_pending(&self) -> bool {
+        self.pending_start
+            || (self.sent_state == PlayerState::Playing
+                && self.start_pending.load(Ordering::Relaxed))
     }
 
     /// Bar the engine is playing; `None` while stopped or counting in. While
@@ -812,6 +831,7 @@ impl MetronomeSource {
             let starting = self.starts != shared_state.starts
                 && shared_state.playing_state == PlayerState::Playing;
             self.starts = shared_state.starts;
+            shared_state.start_pending.store(false, Ordering::Relaxed);
 
             self.player_state = shared_state.playing_state.clone();
             // Only reference counts change: the UI keeps the old plan alive
@@ -1158,25 +1178,35 @@ mod tests {
         }
         assert!(!source.tick_source.in_count_in());
 
-        // Stop and play again before the audio thread looks.
+        // Stop and play again before the audio thread looks. Until it does,
+        // the play counts as pending.
         audio.publish(&PlayerState::Stopped, plan_for(&audio, 120, &score));
         audio.publish(&PlayerState::Playing, plan_for(&audio, 120, &score));
+        assert!(audio.start_pending());
         for _ in 0..1024 {
             source.next();
         }
         assert!(source.tick_source.in_count_in());
+        assert!(!audio.start_pending());
 
         // Stop and play within one frame: only the play reaches `update`.
         for _ in 0..(48_000 * 3) {
             source.next();
         }
         assert!(!source.tick_source.in_count_in());
+        // Pending from the play on, before it is even handed over (the
+        // stop in the same frame never was).
+        audio.sent_state = PlayerState::Stopped;
         audio.restart();
+        assert!(audio.start_pending());
+        audio.sent_state = PlayerState::Playing;
         audio.publish(&PlayerState::Playing, plan_for(&audio, 120, &score));
+        assert!(audio.start_pending());
         for _ in 0..1024 {
             source.next();
         }
         assert!(source.tick_source.in_count_in());
+        assert!(!audio.start_pending());
     }
 
     #[test]
