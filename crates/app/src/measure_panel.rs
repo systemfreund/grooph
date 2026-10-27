@@ -334,9 +334,16 @@ impl Grooph {
     fn advance_playback(&mut self, ui: &egui::Ui, timing: &ScoreTiming) -> f64 {
         let now = ui.input(|i| i.time);
         let latency_s = self.playback_ctl.audio_cfg.latency_s();
-        let audio_pos =
-            self.playback_ctl.audio.as_ref().and_then(|audio| audio.playback_position());
+        let audio = self.playback_ctl.audio.as_ref();
         let playback = &mut self.playback_ctl.playback;
+        // The output is still waking up: the cursor waits at the start for
+        // the first click instead of running ahead of it.
+        if audio.is_some_and(grooph_audio::Audio::is_starting) {
+            playback.last_update = None;
+            playback.waited_for_output = true;
+            return playback.smooth_tick;
+        }
+        let audio_pos = audio.and_then(|audio| audio.playback_position());
         let dt = now - playback.last_update.unwrap_or(now);
         playback.last_update = Some(now);
 
@@ -350,7 +357,8 @@ impl Grooph {
         // back, as `tick` starts the score from the downbeat.
         playback.heard_tick =
             advance_tick(playback.heard_tick, dt, audio_pos, latency_s, false, timing);
-        if was_counting_in && !counting_in {
+        let waited = std::mem::take(&mut playback.waited_for_output);
+        if (was_counting_in || waited) && !counting_in {
             self.realign_accuracy_clock();
         }
 

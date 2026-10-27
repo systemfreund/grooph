@@ -386,12 +386,20 @@ impl App for Grooph {
         let playback_options = self.playback_options();
         let metronome = self.metronome_mode().then(|| self.metronome_score());
         let score = metronome.as_ref().unwrap_or(&self.editor.score);
+        let now = ui.input(|i| i.time);
+        let mut output_lost = false;
         if let Some(audio) = &mut self.playback_ctl.audio {
             audio.set_audio_settings(self.playback_ctl.audio_cfg.settings);
             audio.set_playback_options(playback_options);
-            if audio.update(&audio_state, self.playback_ctl.bpm, score) {
+            if audio.update(&audio_state, self.playback_ctl.bpm, score, now) {
                 ui.ctx().request_repaint();
             }
+            output_lost = audio.take_output_lost();
+        }
+        // The output went away (e.g. a Bluetooth device): stop, as the next
+        // play opens a new one.
+        if output_lost {
+            self.stop_transport();
         }
     }
 
