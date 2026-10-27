@@ -28,7 +28,7 @@ use crate::undo::{DEFAULT_UNDO_LIMIT, UndoHistory};
 use crate::{Grooph, TransportState};
 use eframe::egui;
 use eframe::egui::epaint::PathShape;
-use eframe::egui::{Align2, Color32, FontId, Pos2, Sense, Shape, Stroke, Ui, vec2};
+use eframe::egui::{Align2, Color32, FontId, Mesh, Pos2, Sense, Shape, Stroke, Ui, vec2};
 use grooph_layout::staff_layout::Voice;
 use grooph_measure::click::{ClickLevel, default_click_bar, meter_click_bar, subdivided_click_bar};
 use grooph_measure::counter::{
@@ -46,6 +46,8 @@ use std::rc::Rc;
 
 /// Gap between two segments, as a share of the full turn.
 const SEGMENT_GAP: f32 = 0.012;
+/// Distance of the hover mark from the outside of the thickest segments.
+const HOVER_OFFSET: f32 = 6.0;
 /// Points per radian on the ring's arcs, so they look round at any size.
 const ARC_STEP: f32 = 0.05;
 /// Radius of the counter rhythm's ring, as a share of the outer ring's.
@@ -148,7 +150,16 @@ fn at_turn(center: Pos2, radius: f32, turn: f32) -> Pos2 {
 
 /// Points of an arc from `start` to `end` (shares of the full turn).
 fn arc(center: Pos2, radius: f32, start: f32, end: f32) -> Vec<Pos2> {
-    let steps = (((end - start) * TAU) / ARC_STEP).ceil().max(1.0) as usize;
+    arc_of_steps(center, radius, start, end, arc_steps(start, end))
+}
+
+/// How many steps [`arc`] takes from `start` to `end`.
+fn arc_steps(start: f32, end: f32) -> usize {
+    (((end - start) * TAU) / ARC_STEP).ceil().max(1.0) as usize
+}
+
+/// Points of an arc in `steps` even steps.
+fn arc_of_steps(center: Pos2, radius: f32, start: f32, end: f32, steps: usize) -> Vec<Pos2> {
     (0..=steps)
         .map(|i| at_turn(center, radius, start + (end - start) * i as f32 / steps as f32))
         .collect()
@@ -684,7 +695,11 @@ impl Grooph {
 
         let area = ui.available_rect_before_wrap();
         let (rect, resp) = ui.allocate_exact_size(area.size(), Sense::click());
-        let radius = 0.44 * rect.width().min(rect.height());
+        // Small enough that the hover mark outside the thickest segments
+        // (see [`Segment::paint_hover`]) stays inside the view.
+        let room = rect.width().min(rect.height()) / 2.0;
+        let mark_reach = 1.0 + thickness(ClickLevel::Strong) / 2.0;
+        let radius = (0.88 * room).min((room - HOVER_OFFSET - 2.0) / mark_reach);
         if radius < 20.0 {
             return;
         }
@@ -863,13 +878,13 @@ struct Segment {
 impl Segment {
     /// Paint on the circle of `radius`, as thick as [`thickness`] of `unit`.
     fn paint(&self, painter: &egui::Painter, center: Pos2, radius: f32, unit: f32) {
-        let (start, end) = self.trimmed();
         let width = thickness(self.level) * unit;
+        let (outer, inner) = self.band(center, radius, width);
+        let mut outline = outer.clone();
+        outline.extend(inner.iter().rev());
         match self.level {
             ClickLevel::Off => {
-                let mut points = arc(center, radius + width / 2.0, start, end);
-                points.extend(arc(center, radius - width / 2.0, start, end).into_iter().rev());
-                painter.add(PathShape::closed_line(points, Stroke::new(2.0_f32, self.color)));
+                painter.add(PathShape::closed_line(outline, Stroke::new(2.0_f32, self.color)));
             }
             _ => {
                 let color = if self.level == ClickLevel::Soft {
@@ -877,10 +892,36 @@ impl Segment {
                 } else {
                     self.color
                 };
-                painter
-                    .add(Shape::line(arc(center, radius, start, end), Stroke::new(width, color)));
+                // Filled as a strip of quads between the two arcs: egui only
+                // fills convex paths.
+                let mut mesh = Mesh::default();
+                for (&o, &i) in outer.iter().zip(&inner) {
+                    mesh.colored_vertex(o, color);
+                    mesh.colored_vertex(i, color);
+                }
+                for k in 0..outer.len().saturating_sub(1) as u32 {
+                    let a = 2 * k;
+                    mesh.add_triangle(a, a + 1, a + 2);
+                    mesh.add_triangle(a + 1, a + 3, a + 2);
+                }
+                painter.add(mesh);
+                // The mesh has hard edges; a thin outline smooths them.
+                painter.add(PathShape::closed_line(outline, Stroke::new(1.0_f32, color)));
             }
         }
+    }
+
+    /// The outer and inner arc of the segment as a band `width` thick around
+    /// `radius`, both clockwise and with as many points.
+    fn band(&self, center: Pos2, radius: f32, width: f32) -> (Vec<Pos2>, Vec<Pos2>) {
+        let (r_out, r_in) = (radius + width / 2.0, radius - width / 2.0);
+        let (start, end) = self.trimmed(radius, r_out);
+        let steps = arc_steps(start, end);
+        let edge = |r: f32| {
+            let (start, end) = self.trimmed(radius, r);
+            arc_of_steps(center, r, start, end, steps)
+        };
+        (edge(r_out), edge(r_in))
     }
 
     /// The hover mark just outside the segment.
@@ -892,15 +933,20 @@ impl Segment {
         unit: f32,
         color: Color32,
     ) {
-        let (start, end) = self.trimmed();
-        let outer = radius + thickness(ClickLevel::Strong) * unit / 2.0 + 6.0;
+        let outer = radius + thickness(ClickLevel::Strong) * unit / 2.0 + HOVER_OFFSET;
+        let (start, end) = self.trimmed(radius, outer);
         painter.add(Shape::line(arc(center, outer, start, end), Stroke::new(2.0_f32, color)));
     }
 
-    /// Start and end with half the gap between segments taken off each.
-    fn trimmed(&self) -> (f32, f32) {
-        let gap = SEGMENT_GAP.min(0.3 * (self.end - self.start)) / 2.0;
-        (self.start + gap, self.end - gap)
+    /// Start and end at distance `r` from the center, with half the gap
+    /// between segments taken off each. The gap is equally wide at any
+    /// distance, so the ends of neighbouring segments run parallel; on the
+    /// ring's `radius` it is [`SEGMENT_GAP`] of the turn.
+    fn trimmed(&self, radius: f32, r: f32) -> (f32, f32) {
+        let half_gap = SEGMENT_GAP.min(0.3 * (self.end - self.start)) * TAU * radius / 2.0;
+        let trim = (half_gap / r).min(1.0).asin() / TAU;
+        let mid = (self.start + self.end) / 2.0;
+        ((self.start + trim).min(mid), (self.end - trim).max(mid))
     }
 }
 
