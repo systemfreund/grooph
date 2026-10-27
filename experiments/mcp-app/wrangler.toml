@@ -1,0 +1,8 @@
+name = "grooph-mcp-spike"
+main = "worker.js"
+compatibility_date = "2026-10-01"
+
+[vars]
+# The grooph build the test view loads; a branch preview works too
+# (https://<branch>.grooph.pages.dev).
+GROOPH_ORIGIN = "https://grooph.app"
