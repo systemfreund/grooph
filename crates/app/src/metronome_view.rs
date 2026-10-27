@@ -48,6 +48,11 @@ use std::rc::Rc;
 const SEGMENT_GAP: f32 = 0.012;
 /// Distance of the hover mark from the outside of the thickest segments.
 const HOVER_OFFSET: f32 = 6.0;
+/// Share of the room from the view's center to its nearest edge that the
+/// outer ring's radius takes at most.
+const RING_ROOM: f32 = 0.88;
+/// Width of the outline that smooths the filled segments' edges.
+const FILL_OUTLINE: f32 = 1.0;
 /// Width of the hover mark's line.
 const HOVER_STROKE: f32 = 2.0;
 /// Points per radian on the ring's arcs, so they look round at any size.
@@ -164,12 +169,12 @@ fn hover_mark_reach(radius: f32) -> f32 {
 }
 
 /// Radius of the outer ring with `room` from the center to the nearest edge
-/// of the view: 88 % of it, or less so that the hover mark stays inside.
+/// of the view: [`RING_ROOM`] of it, or less so that the hover mark stays inside.
 fn ring_radius(room: f32) -> f32 {
     // The mark's reach grows linearly with the radius.
     let base = hover_mark_reach(0.0);
     let slope = hover_mark_reach(1.0) - base;
-    (0.88 * room).min((room - base) / slope)
+    (RING_ROOM * room).min((room - base) / slope)
 }
 
 /// Points of an arc from `start` to `end` (shares of the full turn).
@@ -719,9 +724,9 @@ impl Grooph {
 
         let area = ui.available_rect_before_wrap();
         let (rect, resp) = ui.allocate_exact_size(area.size(), Sense::click());
-        // Too small for a ring below 20 points at the full 88 % of the room.
+        // Too small for a ring below 20 points at the full share of the room.
         let room = rect.width().min(rect.height()) / 2.0;
-        if 0.88 * room < 20.0 {
+        if RING_ROOM * room < 20.0 {
             return;
         }
         let radius = ring_radius(room);
@@ -901,7 +906,10 @@ impl Segment {
     /// Paint on the circle of `radius`, as thick as [`thickness`] of `unit`.
     fn paint(&self, painter: &egui::Painter, center: Pos2, radius: f32, unit: f32) {
         let width = thickness(self.level) * unit;
-        let (outer, inner) = self.band(center, radius, width);
+        // Filled segments are inset by half their outline, so the outline
+        // ends where the segment does and does not narrow the gap.
+        let inset = if self.level == ClickLevel::Off { 0.0 } else { FILL_OUTLINE / 2.0 };
+        let (outer, inner) = self.band(center, radius, width, inset);
         let mut outline = outer.clone();
         outline.extend(inner.iter().rev());
         match self.level {
@@ -928,19 +936,20 @@ impl Segment {
                 }
                 painter.add(mesh);
                 // The mesh has hard edges; a thin outline smooths them.
-                painter.add(PathShape::closed_line(outline, Stroke::new(1.0_f32, color)));
+                painter.add(PathShape::closed_line(outline, Stroke::new(FILL_OUTLINE, color)));
             }
         }
     }
 
     /// The outer and inner arc of the segment as a band `width` thick around
-    /// `radius`, both clockwise and with as many points.
-    fn band(&self, center: Pos2, radius: f32, width: f32) -> (Vec<Pos2>, Vec<Pos2>) {
-        let (r_out, r_in) = (radius + width / 2.0, radius - width / 2.0);
-        let (start, end) = self.trimmed(radius, r_out);
+    /// `radius` and `inset` smaller on every side, both clockwise and with as
+    /// many points.
+    fn band(&self, center: Pos2, radius: f32, width: f32, inset: f32) -> (Vec<Pos2>, Vec<Pos2>) {
+        let (r_out, r_in) = (radius + width / 2.0 - inset, radius - width / 2.0 + inset);
+        let (start, end) = self.trimmed(radius, r_out, inset);
         let steps = arc_steps(start, end);
         let edge = |r: f32| {
-            let (start, end) = self.trimmed(radius, r);
+            let (start, end) = self.trimmed(radius, r, inset);
             arc_of_steps(center, r, start, end, steps)
         };
         (edge(r_out), edge(r_in))
@@ -956,16 +965,17 @@ impl Segment {
         color: Color32,
     ) {
         let outer = hover_mark_radius(radius, unit);
-        let (start, end) = self.trimmed(radius, outer);
+        let (start, end) = self.trimmed(radius, outer, 0.0);
         painter.add(Shape::line(arc(center, outer, start, end), Stroke::new(HOVER_STROKE, color)));
     }
 
     /// Start and end at distance `r` from the center, with half the gap
     /// between segments taken off each. The gap is equally wide at any
     /// distance, so the ends of neighbouring segments run parallel; on the
-    /// ring's `radius` it is [`SEGMENT_GAP`] of the turn.
-    fn trimmed(&self, radius: f32, r: f32) -> (f32, f32) {
-        let half_gap = SEGMENT_GAP.min(0.3 * (self.end - self.start)) * TAU * radius / 2.0;
+    /// ring's `radius` it is [`SEGMENT_GAP`] of the turn. `inset` widens each
+    /// half of the gap.
+    fn trimmed(&self, radius: f32, r: f32, inset: f32) -> (f32, f32) {
+        let half_gap = SEGMENT_GAP.min(0.3 * (self.end - self.start)) * TAU * radius / 2.0 + inset;
         let trim = (half_gap / r).min(1.0).asin() / TAU;
         let mid = (self.start + self.end) / 2.0;
         ((self.start + trim).min(mid), (self.end - trim).max(mid))
@@ -1040,7 +1050,7 @@ mod tests {
         // segment's start and end: half the gap, inside as outside.
         let half_gap = SEGMENT_GAP * TAU * radius / 2.0;
         for r in [70.0, 100.0, 130.0] {
-            let (start, end) = seg.trimmed(radius, r);
+            let (start, end) = seg.trimmed(radius, r, 0.0);
             assert!((r * ((start - 0.1) * TAU).sin() - half_gap).abs() < 1e-3, "start at {r}");
             assert!((r * ((0.3 - end) * TAU).sin() - half_gap).abs() < 1e-3, "end at {r}");
         }
@@ -1050,20 +1060,23 @@ mod tests {
     fn short_segment_keeps_its_ends_in_order() {
         let seg = segment(0.5, 0.501);
         for r in [1.0, 50.0, 100.0] {
-            let (start, end) = seg.trimmed(100.0, r);
+            let (start, end) = seg.trimmed(100.0, r, 0.0);
             assert!(0.5 <= start && start <= end && end <= 0.501, "at {r}: {start}..{end}");
         }
+        // On the ring's radius the gap is capped at 30 % of the segment.
+        let (start, end) = seg.trimmed(100.0, 100.0, 0.0);
+        assert!(((0.501 - 0.5) - (end - start) - 0.3 * 0.001).abs() < 1e-5, "{start}..{end}");
     }
 
     #[test]
     fn ring_leaves_room_for_the_hover_mark() {
         for room in [23.0, 50.0, 150.0, 400.0, 2000.0] {
             let radius = ring_radius(room);
-            assert!(radius <= 0.88 * room);
+            assert!(radius <= RING_ROOM * room);
             assert!(hover_mark_reach(radius) <= room + 1e-3, "room {room}");
         }
         // Large views keep the usual 88 %.
-        assert_eq!(ring_radius(2000.0), 0.88 * 2000.0);
+        assert_eq!(ring_radius(2000.0), RING_ROOM * 2000.0);
     }
 
     #[test]
