@@ -457,7 +457,7 @@ impl App for Grooph {
 pub fn web_options() -> eframe::WebOptions {
     let mut options = eframe::WebOptions::default();
     if platform::link_query().as_deref().and_then(embed_params).is_some() {
-        options.should_prevent_default = Box::new(|event| !embed::leaves_to_page(event));
+        options.should_prevent_default = Box::new(|event| !embed::chat_takes(event));
     }
     options
 }

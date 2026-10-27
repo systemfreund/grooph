@@ -922,9 +922,9 @@ impl Grooph {
     }
 
     /// Flicking a sheet up opens its options, flicking it down folds them.
-    /// Not when embedded: a vertical drag there scrolls the chat.
+    /// Not inline in a chat: a vertical drag there scrolls the chat.
     fn fold_sheet_on_flick(&mut self, ui: &Ui, sheet: Rect, options: Option<(LayerId, Rect)>) {
-        if self.embedded() {
+        if self.chat_scrolls() {
             return;
         }
         let parts: Vec<_> = std::iter::once((ui.layer_id(), sheet)).chain(options).collect();

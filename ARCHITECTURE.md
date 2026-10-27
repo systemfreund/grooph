@@ -204,10 +204,13 @@ grooph's metronome runs inside AI chats as an
   (`style::readable_text`, egui's weak and dark text are too faint). The
   settings go to the model through `groophHost.updateModelContext` once they
   stayed the same for a second. The bridge is in `web.rs`/`platform.rs`.
-  Touch and wheel events are left to the page (`web_options`,
-  `embed::leaves_to_page`; the canvas has `touch-action: pan-y`), so a
-  vertical drag on the view scrolls the chat, as Claude's guidelines ask;
-  taps and horizontal drags stay with the app. The view moves with the page
+  Inline, touch and wheel events are left to the page (`web_options`,
+  `embed::chat_takes`; the canvas has `touch-action: pan-y`), so a vertical
+  drag on the view scrolls the chat, as Claude's guidelines ask; taps and
+  horizontal drags stay with the app. In fullscreen no chat scrolls behind,
+  and the guidelines leave vertical scrolling to the app: the canvas gets
+  `touch-action: none`, eframe prevents the defaults again, and pickers
+  scroll and the options sheet folds on a flick as in the app. The view moves with the page
   while it scrolls, so egui would take the scroll for a tap where it began:
   on `touchcancel`/`pointercancel` `embed::cancel_scrolled_touch` moves the
   pointer far off before releasing it. The options sheet does not fold on a
