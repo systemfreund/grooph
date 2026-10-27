@@ -22,6 +22,22 @@ Important root files:
 - `Trunk.toml` (WASM build/serve)
 - `rustfmt.toml` (formatting)
 
+## Crate dependencies
+
+Dependencies point one way, from the app down to the model:
+
+- `measure` is the base: the music model and its rules, with no GUI, audio, device or browser dependencies.
+- `layout`, `audio` and `link` build on `measure`; `render` on `layout` and `measure`; `site` on `link` and
+  `measure`. `layout` takes geometry types and text measurement from egui but paints nothing; drawing is
+  `render`'s job. `audio` and `link` know nothing about the GUI.
+- `midi` and `mic` stand alone: they deliver input events and know nothing about the model.
+- `app` ties everything together: state, panels, persistence, undo. `android` only wraps `app`.
+
+Music rules (durations, onsets, grouping, counting) belong in `measure`, not in `app` or a panel, so the
+click, the notation, the counting and the practice tracker share them. Platform differences sit behind
+`cfg(target_arch = "wasm32")` inside the crate that talks to the platform (`audio`, `mic`, `midi`, `app`), not
+spread across callers.
+
 ## Data model and invariants
 
 - Core object: `grooph_measure::Measure` with `Vec<Beat>` and `TimeSignature`.

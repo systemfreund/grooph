@@ -31,7 +31,9 @@ at the head commit. `REVIEW.md` says what matters in this repository.
    the claim depends on them. Keep a finding only when the problem is really there at the head commit. Several
    reviewers agreeing is a hint, not proof; a finding only one reviewer saw can be the most important one.
    Findings you reject go to `discarded` with a one-line reason (the code does not do that, already handled in
-   `x.rs`, only a style preference, caught by clippy or the compiler, …).
+   `x.rs`, only a style preference, caught by clippy or the compiler, …). A design finding (`REVIEW.md` §3,
+   "Design and maintainability") is not a style preference when its reason holds: check that the rule, the
+   duplicated helper or the second copy it names really exists.
 3. **Set the severity yourself** (`high`, `medium`, `low` as defined in `REVIEW.md` §4) after verifying; do not
    just take the highest a reviewer gave. Correct `file` and `line` to the place the problem really is, preferably
    a line inside the diff.
