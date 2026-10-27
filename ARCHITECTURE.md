@@ -179,6 +179,10 @@ grooph's metronome runs inside AI chats as an
   `groophHost.colors`, which `embed::HostColors` applies to egui's panels,
   cards and text each frame (`apply_style`). Accents stay grooph's; without
   host variables egui's own colors stay.
+- The metronome's staff (in the app and embedded) takes its size from the
+  width alone and the panel as much height as it needs
+  (`UiShell::staff_height`, measured before it shrinks to fit); the ring
+  gets the rest (`Grooph::staff_and_ring`).
 - Accessibility: eframe gives the web no accessibility tree (AccessKit is
   native only), so a screen reader sees an empty canvas. The view adds a
   small DOM layer: a `role="status"` live region with the model context's

@@ -278,6 +278,8 @@ impl Grooph {
         });
         egui::Panel::top("embed_tempo").frame(frame).show_separator_line(false).show(ui, |ui| {
             ui.horizontal(|ui| {
+                // Buttons as tall as their 44 pt, not the app's roomy padding.
+                ui.spacing_mut().button_padding = vec2(8.0, 4.0);
                 tempo_mark(ui, bpm, music);
                 ui.add_space(4.0);
                 for (label, delta, hint) in [("−", -1, "Slower"), ("+", 1, "Faster")] {
@@ -416,6 +418,8 @@ impl Grooph {
 
 /// Smallest touch target, in points (Apple's and Claude's guidelines).
 const TARGET: f32 = 44.0;
+/// Size of the tempo mark's text.
+const TEMPO_TEXT_SIZE: f32 = 22.0;
 
 /// `♩ = 140` as a tempo mark, the note and the text on one baseline,
 /// centered in a row as tall as the buttons beside it. Painted rather than
@@ -425,16 +429,20 @@ fn tempo_mark(ui: &mut Ui, bpm: u32, music: egui::FontFamily) {
     let color = ui.visuals().strong_text_color();
     // SMuFL metNoteQuarterUp: a quarter note, as in a tempo mark.
     let note = ui.painter().layout_no_wrap("\u{ECA5}".into(), FontId::new(24.0, music), color);
-    let text = ui.painter().layout_no_wrap(format!("= {bpm}"), FontId::proportional(22.0), color);
+    let text = ui.painter().layout_no_wrap(
+        format!("= {bpm}"),
+        FontId::proportional(TEMPO_TEXT_SIZE),
+        color,
+    );
     let gap = 6.0;
     let (rect, _) =
         ui.allocate_exact_size(vec2(note.size().x + gap + text.size().x, TARGET), Sense::hover());
-    // Each galley's first glyph sits on its baseline; the text's middle on
-    // the row's middle.
+    // Each galley's first glyph sits on its baseline; the middle of the
+    // digits (cap height about 0.7 of the size) on the row's middle.
     let baseline_of = |galley: &egui::Galley| {
         galley.rows.first().and_then(|r| r.row.glyphs.first()).map_or(0.0, |g| g.pos.y)
     };
-    let baseline = rect.center().y - text.size().y / 2.0 + baseline_of(&text);
+    let baseline = rect.center().y + 0.35 * TEMPO_TEXT_SIZE;
     let painter = ui.painter();
     let note_top = baseline - baseline_of(&note);
     painter.galley(pos2(rect.left(), note_top), note.clone(), color);
@@ -666,6 +674,31 @@ mod tests {
                 });
                 output.textures_delta.clear();
             }
+        }
+    }
+
+    #[test]
+    fn the_staff_keeps_its_size_and_the_ring_gets_the_rest() {
+        use eframe::egui::{Pos2, RawInput, Rect, vec2};
+        for compact in [true, false] {
+            let (ctx, mut app) = embedded_app("?v=2&bpm=129&ts=7/8&poly=4:7&embed=mcp");
+            app.ui.embed.as_mut().unwrap().fullscreen_offered = compact;
+            let screen = Rect::from_min_size(Pos2::ZERO, vec2(393.0, 400.0));
+            let mut sizes = Vec::new();
+            for _ in 0..6 {
+                let input = RawInput { screen_rect: Some(screen), ..Default::default() };
+                let mut output = ctx.run_ui(input, |ui| {
+                    app.apply_style(ui);
+                    app.ui.narrow_screen = ui.available_width() < crate::shell::NARROW_MAX_WIDTH;
+                    app.embed_ui(ui);
+                });
+                output.textures_delta.clear();
+                sizes.push((app.ui.staff_em, app.ui.staff_height));
+            }
+            // Measured once, then the same in every frame: it does not
+            // shrink to the room it was given.
+            assert!(sizes.windows(2).skip(1).all(|w| w[0] == w[1]), "{compact}: {sizes:?}");
+            assert!(sizes[5].0 > 20.0, "{compact}: {sizes:?}");
         }
     }
 

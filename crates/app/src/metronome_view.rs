@@ -1362,7 +1362,7 @@ mod tests {
     /// What the ring and the staff report while the pointer moves up the
     /// screen left of the ring's middle: each change once.
     fn hovers_upwards(app: &mut Grooph, ctx: &egui::Context) -> Vec<HoverState> {
-        hovers_along(app, ctx, (200..820).rev().step_by(4).map(|y| Pos2::new(180.0, y as f32)))
+        hovers_along(app, ctx, (0..820).rev().step_by(4).map(|y| Pos2::new(180.0, y as f32)))
             .into_iter()
             .map(|(state, _)| state)
             .collect()
