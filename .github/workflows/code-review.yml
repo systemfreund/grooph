@@ -204,7 +204,7 @@ jobs:
             JSON object described in REVIEW.md §4, and nothing else.
 
       - name: Upload the review
-        if: always()
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
         with:
           name: review-${{ strategy.job-index }}
@@ -213,8 +213,9 @@ jobs:
 
   synthesis:
     needs: [setup, review]
-    # Also after failed reviewers: the synthesis works with the reviews that came back.
-    if: always() && needs.setup.result == 'success' && needs.setup.outputs.mode != 'skip'
+    # Also after failed reviewers: the synthesis works with the reviews that came back. Not after a
+    # cancel (a newer push): the reviewers it stopped would count as failed, and the newer run reviews.
+    if: ${{ !cancelled() && needs.setup.result == 'success' && needs.setup.outputs.mode != 'skip' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -286,7 +287,7 @@ jobs:
             nothing else.
 
       - name: Upload the synthesis
-        if: always()
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
         with:
           name: synthesis
@@ -294,9 +295,8 @@ jobs:
 
   publish:
     needs: [setup, synthesis]
-    if: >-
-      always() && needs.setup.result == 'success' && needs.setup.outputs.mode != 'skip' &&
-      needs.synthesis.result != 'cancelled'
+    # Never after a cancel: a cancelled run would post its stopped reviewers as failed, over the newer run's review.
+    if: ${{ !cancelled() && needs.setup.result == 'success' && needs.setup.outputs.mode != 'skip' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
