@@ -108,6 +108,13 @@ test("llms.txt describes the tool's arguments, not written-out counter rhythms",
   assert.ok(!llms.includes("counter="), "llms.txt should offer poly, not counter");
 });
 
+// The same cases go through SharedLink::to_url in crates/link (test
+// `links_of_the_mcp_tool_are_the_apps_own`), so both write one format.
+test("the tool's queries are the app's link format (mcp/link-cases.json)", () => {
+  const cases = JSON.parse(fs.readFileSync(path.join(here, "link-cases.json"), "utf8"));
+  for (const { args, query } of cases) assert.equal(metronomeQuery(args), query, JSON.stringify(args));
+});
+
 test("the query is the app's own link format", () => {
   assert.equal(metronomeQuery({}), "v=2&ts=4/4");
   assert.equal(metronomeQuery({ ts: " 2+2+3/8 ", bpm: "90" }), "v=2&bpm=90&ts=2%2B2%2B3/8");

@@ -143,8 +143,9 @@ grooph's metronome runs inside AI chats as an
   logic is in `mcp/server.js`: a stateless MCP server (Streamable HTTP, JSON
   answers, CORS) with one tool, `show_metronome`, whose arguments are the
   metronome's link parameters (`bpm`, `ts`, `click`, `poly`, `swing`,
-  `su`; `mcp/link.js` builds the same query as `SharedLink::to_url`). Its
-  result carries the link, for hosts without views.
+  `su`; `mcp/link.js` builds the same query as `SharedLink::to_url`, checked
+  by both test suites against `mcp/link-cases.json`). Its result carries
+  the link, for hosts without views.
 - The tool's view `ui://grooph/metronome.html` (`mcp/view.js`) runs in the
   host's sandboxed iframe on another origin. It does the MCP Apps handshake
   over postMessage, puts the link plus `embed=mcp&theme=light|dark` into the

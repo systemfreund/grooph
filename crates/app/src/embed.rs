@@ -13,6 +13,7 @@ use crate::pickers::silent_bars_label;
 use crate::{Grooph, TransportState, platform};
 use eframe::egui::{Context, Theme, Ui};
 use grooph_link::format_bar;
+use grooph_measure::swing::SwingUnit;
 
 /// How long the settings stay unchanged before they are reported, so a
 /// tempo dragged on the slider is reported once.
@@ -131,7 +132,11 @@ impl Grooph {
                     let name = ratio.map_or_else(|| "custom".to_owned(), ratio_label);
                     let counter = format_bar(bar).unwrap_or_default();
                     text += &format!(", polyrhythm {name} (counter clicks {counter})");
-                    fields.push(("polyrhythm", Field::Text(name)));
+                    // The fields use the tool's names: `poly` for the ratio,
+                    // and the clicks as the link writes them.
+                    if let Some((ratio, _)) = ratio {
+                        fields.push(("poly", Field::Text(ratio.to_string())));
+                    }
                     fields.push(("counter", Field::Text(counter)));
                 }
             }
@@ -139,7 +144,11 @@ impl Grooph {
         if !cfg.swing.is_straight() {
             text += &format!(", swing {}% {}", cfg.swing.percent, cfg.swing.unit.label());
             fields.push(("swing", Field::Number(cfg.swing.percent.into())));
-            fields.push(("su", Field::Text(cfg.swing.unit.label().to_owned())));
+            let su = match cfg.swing.unit {
+                SwingUnit::Eighths => 8,
+                SwingUnit::Sixteenths => 16,
+            };
+            fields.push(("su", Field::Number(su.into())));
         }
         if cfg.count_in {
             text += ", count-in";
@@ -260,6 +269,7 @@ mod tests {
         assert!(context.text.contains("polyrhythm 3:2,"), "{}", context.text);
         assert!(context.text.contains("swing 66% 8ths"), "{}", context.text);
         assert!(context.fields.contains(&("poly", Field::Text("3:2".into()))));
+        assert!(context.fields.contains(&("su", Field::Number(8.0))));
         let link = context.fields.iter().find(|(k, _)| *k == "link").map(|(_, v)| v.clone());
         let Some(Field::Text(link)) = link else { panic!("no link in {:?}", context.fields) };
         assert!(link.contains("ts=4/4") && link.contains("poly=3:2") && link.contains("swing=66"));
@@ -269,8 +279,9 @@ mod tests {
         assert!(app.model_context().text.contains("polyrhythm 3:2,"));
         // Edited ones are written out.
         let (_, app) = embedded_app("?v=2&ts=4/4&counter=t4+(t4)+t4+t4+t4+t4&embed=mcp");
-        let text = app.model_context().text;
-        assert!(text.contains("polyrhythm 3:2 edited (counter clicks t4 (t4) t4"), "{text}");
+        let context = app.model_context();
+        assert!(context.text.contains("polyrhythm 3:2 edited (counter clicks t4 (t4) t4"));
+        assert!(context.fields.contains(&("poly", Field::Text("3:2".into()))));
     }
 
     #[test]

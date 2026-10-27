@@ -209,15 +209,24 @@ fn parse_query_with_default_version(
 }
 
 /// The counter bar of `ratio` in `ts`, as the app's polyrhythm picker builds
-/// it; the error names the ratios `ts` offers.
+/// it (any ratio of one's own); the error names the rule and the ratios the
+/// picker shows first.
 fn poly_bar(ts: TimeSignature, ratio: Ratio) -> Result<Measure, String> {
     if own_ratios(ts).contains(&ratio)
         && let Some(bar) = counter_bar(ts, ratio)
     {
         return Ok(bar);
     }
+    let spans: Vec<String> = (1..=ts.beats)
+        .filter(|&s| ts.beats.is_multiple_of(s) && own_ratios(ts).iter().any(|r| r.span == s))
+        .map(|s| s.to_string())
+        .collect();
     let offered: Vec<String> = counter_ratios(ts).iter().map(Ratio::to_string).collect();
-    Err(format!("poly {ratio} does not fit {ts}; it offers {}", offered.join(", ")))
+    Err(format!(
+        "poly {ratio} does not fit {ts}: it takes n:m with m one of {}, such as {}",
+        spans.join(", "),
+        offered.join(", ")
+    ))
 }
 
 /// The one measure of `ts` that `text` (without the time signature) writes,
@@ -606,9 +615,37 @@ mod tests {
         assert_eq!(link.counter.unwrap().beats().len(), 7);
         let err = parse_query("ts=4/4&poly=7:5").unwrap_err();
         assert!(err.contains("does not fit 4/4") && err.contains("3:2"), "{err}");
+        assert!(err.contains("m one of 1, 2, 4"), "{err}");
+        // Only ratios whose span the error names open, and its examples do.
+        for span in 1..=4 {
+            for n in 2..=16 {
+                let query = format!("ts=4/4&poly={n}:{span}");
+                assert!(parse_query(&query).is_err() || span != 3, "{query}");
+            }
+        }
+        for example in ["3:4", "5:4", "7:4", "3:2"] {
+            assert!(parse_query(&format!("ts=4/4&poly={example}")).is_ok(), "{example}");
+        }
         assert!(parse_query("ts=4/4&poly=three").unwrap_err().contains("poly"));
         assert!(parse_query("ts=4/4&poly=3:2&counter=t2+t2+t2").unwrap_err().contains("either"));
         assert!(parse_query("r=q+q+q+q&poly=3:2").unwrap_err().contains("without a rhythm"));
+    }
+
+    /// The MCP tool builds its links in JavaScript (`mcp/link.js`); its test
+    /// cases must read back and be written again as they are.
+    #[test]
+    fn links_of_the_mcp_tool_are_the_apps_own() {
+        let cases = include_str!("../../../mcp/link-cases.json");
+        let queries: Vec<&str> = cases
+            .split("\"query\": \"")
+            .skip(1)
+            .map(|rest| &rest[..rest.find('"').unwrap()])
+            .collect();
+        assert!(queries.len() >= 5);
+        for query in queries {
+            let link = parse_query_current(query).unwrap().unwrap();
+            assert_eq!(link.to_url("").unwrap(), format!("?{query}"));
+        }
     }
 
     #[test]
