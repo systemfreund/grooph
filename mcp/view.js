@@ -40,7 +40,38 @@ export function viewHtml({ origin, js, wasm }) {
   /* Vertical drags scroll the chat; taps and horizontal drags go to the app. */
   html, canvas { touch-action: pan-y; }
   canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; outline: none; }
-  #loading_text { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); opacity: 0.7; }
+  /* The skeleton while the app loads, laid out like the card it becomes
+     (eframe removes #loading_text once the app runs). */
+  #loading_text {
+    --sk-card: var(--color-background-secondary, light-dark(#e6e6e6, #323232));
+    --sk-ring: light-dark(#c8c8c8, #4a4a4a);
+    --sk-accent: light-dark(#90d1ff, #005c80);
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    padding: 14px 20px 18px; box-sizing: border-box; gap: 10px;
+  }
+  .sk-row { display: flex; align-items: center; gap: 8px; height: 44px; flex: none; }
+  .sk-tempo { font-size: 22px; margin-right: 4px; white-space: nowrap; }
+  .sk-button { width: 44px; height: 44px; border-radius: 8px; background: var(--sk-card); }
+  .sk-full { margin-left: auto; width: 18px; height: 18px; border: 2px solid var(--sk-ring); border-radius: 2px; }
+  .sk-staff { display: flex; align-items: center; gap: 10px; height: 70px; flex: none; }
+  .sk-meter { font: bold 26px/0.9 Georgia, serif; text-align: center; }
+  .sk-line { flex: 1; height: 1px; background: currentColor; opacity: 0.5; }
+  .sk-ring-box { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; }
+  .sk-ring {
+    height: 88%; max-width: 88%; aspect-ratio: 1; border-radius: 50%; box-sizing: border-box;
+    border: 14px solid var(--sk-ring); display: flex; align-items: center; justify-content: center;
+  }
+  .sk-play { width: 46%; aspect-ratio: 1; border-radius: 50%; background: var(--sk-accent); opacity: 0.6; }
+  .sk-bar { display: none; height: 92px; flex: none; border-radius: 16px; background: var(--sk-card); }
+  /* The whole metronome (fullscreen, or a host without it): the bar below
+     instead of the tempo row. */
+  #loading_text.whole .sk-row { display: none; }
+  #loading_text.whole .sk-bar { display: block; }
+  #loading_text.whole .sk-play, #loading_text.whole .sk-meter { display: none; }
+  .sk-note { width: 14px; height: 26px; fill: currentColor; vertical-align: -3px; }
+  .sk-ring, .sk-button, .sk-bar { animation: sk-pulse 1.4s ease-in-out infinite alternate; }
+  @keyframes sk-pulse { from { opacity: 1; } to { opacity: 0.55; } }
+  @media (prefers-reduced-motion: reduce) { .sk-ring, .sk-button, .sk-bar { animation: none; } }
   #fallback { padding: 16px 20px; }
   /* For screen readers only (the canvas has no accessibility tree); the
      button shows when it has the keyboard focus. */
@@ -54,7 +85,13 @@ export function viewHtml({ origin, js, wasm }) {
 </style>
 </head>
 <body>
-<div id="stage"><canvas id="grooph-canvas" aria-hidden="true"></canvas><div id="loading_text">Loading the metronome…</div></div>
+<div id="stage"><canvas id="grooph-canvas" aria-hidden="true"></canvas>
+<div id="loading_text" role="status" aria-label="Loading the metronome…">
+  <div class="sk-row" aria-hidden="true"><span class="sk-tempo"><svg class="sk-note" viewBox="0 0 14 26"><ellipse cx="6" cy="21" rx="5.6" ry="4" transform="rotate(-20 6 21)"/><rect x="10" y="1" width="1.6" height="20"/></svg><span> =</span></span><span class="sk-button"></span><span class="sk-button"></span><span class="sk-full"></span></div>
+  <div class="sk-staff" aria-hidden="true"><span class="sk-meter"></span><span class="sk-line"></span></div>
+  <div class="sk-ring-box" aria-hidden="true"><div class="sk-ring"><div class="sk-play"></div></div></div>
+  <div class="sk-bar" aria-hidden="true"></div>
+</div></div>
 <button id="a11y-play" class="sr-only" type="button" aria-pressed="false">Play metronome</button>
 <p id="a11y-status" class="sr-only" role="status" aria-live="polite"></p>
 <div id="fallback" hidden>
@@ -189,6 +226,7 @@ function fitHeight(next) {
 function setDisplay(mode, modes) {
   if (modes) hostModes = modes;
   if (mode) displayMode = mode;
+  document.getElementById("loading_text")?.classList.toggle("whole", !canFullscreen() || displayMode === "fullscreen");
   fitHeight();
   if (window.groophHost) {
     window.groophHost.displayMode = displayMode;
@@ -241,6 +279,16 @@ new ResizeObserver(reportSize).observe(document.body);
 reportSize();
 
 toolArgs = await toolInput;
+// The skeleton shows the tool's tempo and meter while the app loads.
+(() => {
+  const bpm = Number(toolArgs?.bpm) || 120;
+  const [top, unit] = String(toolArgs?.ts || "4/4").trim().split("/");
+  const beats = String(top).split("+").reduce((sum, g) => sum + (Number(g) || 0), 0) || 4;
+  const tempo = document.querySelector("#loading_text .sk-tempo");
+  const meter = document.querySelector("#loading_text .sk-meter");
+  if (tempo) tempo.lastChild.textContent = " = " + bpm;
+  if (meter) meter.innerHTML = beats + "<br>" + (Number(unit) || 4);
+})();
 // The link builder the server uses too, served unbundled by the build
 // (crates/site writes mcp/link.js to /embed/link.js).
 let query;
@@ -327,7 +375,7 @@ function fail(reason) {
 history.replaceState(null, "", "?" + query + "&embed=mcp&theme=" + theme);
 
 // A tiny module first: a host whose CSP forbids WebAssembly fails here,
-// before the 7 MB download.
+// before the WASM download (about 3 MB compressed).
 const wasmAllowed = (() => {
   try {
     return new WebAssembly.Module(new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0])) instanceof WebAssembly.Module;
