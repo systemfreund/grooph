@@ -217,6 +217,33 @@ pub(crate) fn take_toggle_play() -> bool {
     false
 }
 
+/// The MCP App host's display mode as the view passes it on
+/// (`window.groophHost.displayMode`: `inline` or `fullscreen`), and whether
+/// the host offers fullscreen (`displayModes`). `None` without a view.
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn host_display() -> Option<(bool, bool)> {
+    let fullscreen = crate::web::host_string("displayMode")? == "fullscreen";
+    let offered = crate::web::host_string("displayModes")
+        .is_some_and(|modes| modes.split(',').any(|m| m == "fullscreen"));
+    Some((fullscreen, offered))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn host_display() -> Option<(bool, bool)> {
+    None
+}
+
+/// Ask the MCP App host for fullscreen. `false` without a host that offers it.
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn host_request_fullscreen() -> bool {
+    crate::web::host_call("requestFullscreen", &[]).and_then(|r| r.as_bool()).unwrap_or(false)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn host_request_fullscreen() -> bool {
+    false
+}
+
 /// Let the embedding view ask for a frame (`window.groophHost.repaint()`),
 /// e.g. after the host switched its theme.
 #[cfg(target_arch = "wasm32")]

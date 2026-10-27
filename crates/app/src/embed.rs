@@ -12,10 +12,12 @@ use crate::metronome_view::ratio_label;
 use crate::pickers::silent_bars_label;
 use crate::{Grooph, TransportState, platform};
 use eframe::egui::{
-    Color32, Context, Event, PointerButton, RawInput, Theme, TouchPhase, Ui, Visuals, vec2,
+    self, Align, Button, Color32, Context, Event, FontId, Frame, Layout, Margin, PointerButton,
+    RawInput, Rect, RichText, Sense, Stroke, Theme, TouchPhase, Ui, Visuals, pos2, vec2,
 };
 use grooph_link::format_bar;
 use grooph_measure::swing::SwingUnit;
+use grooph_measure::tempo::{MAX_BPM, MIN_BPM};
 
 /// How long the settings stay unchanged before they are reported, so a
 /// tempo dragged on the slider is reported once.
@@ -171,6 +173,10 @@ pub(crate) struct ModelContext {
 pub(crate) struct Embed {
     /// Theme last applied: from the query, then from the host.
     theme: Option<Theme>,
+    /// The host shows the view in fullscreen, and whether it offers that:
+    /// inline it is then the compact card (see [`Grooph::compact_card`]).
+    pub(crate) fullscreen: bool,
+    pub(crate) fullscreen_offered: bool,
     /// The host's colors, and the text they were read from.
     pub(crate) colors: HostColors,
     colors_text: Option<String>,
@@ -190,6 +196,8 @@ impl Embed {
         platform::install_host_toggle_play(ctx.clone());
         Self {
             theme: params.theme,
+            fullscreen: false,
+            fullscreen_offered: false,
             colors: HostColors::default(),
             colors_text: None,
             reported: None,
@@ -204,14 +212,28 @@ impl Grooph {
         self.ui.embed.is_some()
     }
 
-    /// The layout of an embedded app: the metronome tab without the tab bar.
+    /// Whether the view is the compact card: inline, where the host offers
+    /// fullscreen for the rest (options, pickers, "Open in grooph").
+    /// Otherwise the metronome tab without the tab bar.
+    pub(crate) fn compact_card(&self) -> bool {
+        self.ui.embed.as_ref().is_some_and(|e| e.fullscreen_offered && !e.fullscreen)
+    }
+
+    /// The layout of an embedded app: the compact card inline, the
+    /// metronome tab without the tab bar in fullscreen (or where the host
+    /// offers no fullscreen).
     pub(crate) fn embed_ui(&mut self, ui: &mut Ui) {
         self.follow_host_theme(ui.ctx());
         // The view's play button, for screen readers.
         if platform::take_toggle_play() {
             self.toggle_playback();
         }
-        self.metronome_page(ui);
+        if self.compact_card() {
+            self.tempo_row(ui);
+            self.staff_and_ring(ui, true);
+        } else {
+            self.metronome_page(ui);
+        }
         self.measure_panel(ui);
         self.settings_picker(ui);
         self.report_to_model(ui);
@@ -226,12 +248,66 @@ impl Grooph {
             ctx.set_theme(theme);
             embed.theme = Some(theme);
         }
+        if let Some((fullscreen, offered)) = platform::host_display()
+            && (fullscreen, offered) != (embed.fullscreen, embed.fullscreen_offered)
+        {
+            embed.fullscreen = fullscreen;
+            embed.fullscreen_offered = offered;
+            ctx.request_repaint();
+        }
         let colors = platform::host_colors();
         if colors != embed.colors_text {
             embed.colors = colors.as_deref().map(HostColors::parse).unwrap_or_default();
             embed.colors_text = colors;
             ctx.request_repaint();
         }
+    }
+
+    /// The compact card's top row: the tempo as notation writes it
+    /// (`♩ = 140`) with − and + beside it, and the fullscreen button.
+    fn tempo_row(&mut self, ui: &mut Ui) {
+        let music = self.ui.music_font_id.family.clone();
+        let bpm = self.playback_ctl.playback.ramp_bpm.unwrap_or(self.playback_ctl.bpm);
+        let mut step = 0;
+        let mut fullscreen = false;
+        let frame = Frame::new().fill(ui.visuals().panel_fill).inner_margin(Margin {
+            left: 12,
+            right: 8,
+            top: 6,
+            bottom: 0,
+        });
+        egui::Panel::top("embed_tempo").frame(frame).show_separator_line(false).show(ui, |ui| {
+            ui.horizontal(|ui| {
+                let color = ui.visuals().strong_text_color();
+                // SMuFL metNoteQuarterUp: a quarter note, as in a tempo mark.
+                ui.label(RichText::new("\u{ECA5}").font(FontId::new(24.0, music)).color(color));
+                ui.label(RichText::new(format!("= {bpm}")).size(22.0).color(color));
+                ui.add_space(4.0);
+                for (label, delta, hint) in [("−", -1, "Slower"), ("+", 1, "Faster")] {
+                    let button =
+                        Button::new(RichText::new(label).size(22.0)).min_size(vec2(TARGET, TARGET));
+                    if ui.add(button).on_hover_text(hint).clicked() {
+                        step = delta;
+                    }
+                }
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    fullscreen = fullscreen_button(ui).on_hover_text("Fullscreen").clicked();
+                });
+            });
+        });
+        if step != 0 {
+            self.step_bpm(step);
+        }
+        if fullscreen {
+            platform::host_request_fullscreen();
+        }
+    }
+
+    /// One BPM faster (`delta` 1) or slower (-1), within the tempo range.
+    fn step_bpm(&mut self, delta: i64) {
+        let bpm = (i64::from(self.playback_ctl.bpm) + delta).clamp(MIN_BPM.into(), MAX_BPM.into());
+        self.playback_ctl.bpm = bpm as u32;
+        self.handle_bpm_change();
     }
 
     /// The metronome's settings, for the model.
@@ -339,6 +415,30 @@ impl Grooph {
             ui.ctx().open_url(eframe::egui::OpenUrl::new_tab(url));
         }
     }
+}
+
+/// Smallest touch target, in points (Apple's and Claude's guidelines).
+const TARGET: f32 = 44.0;
+
+/// The fullscreen button: four corners pointing outwards.
+fn fullscreen_button(ui: &mut Ui) -> egui::Response {
+    let (rect, resp) = ui.allocate_exact_size(vec2(TARGET, TARGET), Sense::click());
+    let color =
+        if resp.hovered() { ui.visuals().strong_text_color() } else { ui.visuals().text_color() };
+    let stroke = Stroke::new(2.0, color);
+    let r = Rect::from_center_size(rect.center(), vec2(18.0, 18.0));
+    let arm = 6.0;
+    for (corner, dx, dy) in [
+        (r.left_top(), 1.0, 1.0),
+        (r.right_top(), -1.0, 1.0),
+        (r.left_bottom(), 1.0, -1.0),
+        (r.right_bottom(), -1.0, -1.0),
+    ] {
+        let painter = ui.painter();
+        painter.line_segment([corner, pos2(corner.x + dx * arm, corner.y)], stroke);
+        painter.line_segment([corner, pos2(corner.x, corner.y + dy * arm)], stroke);
+    }
+    resp
 }
 
 #[cfg(test)]
@@ -527,8 +627,13 @@ mod tests {
     #[test]
     fn the_embedded_view_renders_at_chat_sizes() {
         use eframe::egui::{Pos2, RawInput, Rect, vec2};
-        for (width, height) in [(320.0, 520.0), (360.0, 520.0), (720.0, 520.0), (360.0, 400.0)] {
-            let (ctx, mut app) = embedded_app("?v=2&bpm=90&ts=4/4&poly=3:2&embed=mcp");
+        let sizes =
+            [(320.0, 520.0), (360.0, 520.0), (720.0, 520.0), (360.0, 400.0), (320.0, 360.0)];
+        // The whole metronome, and the compact card where fullscreen is offered.
+        for ((width, height), compact) in sizes.into_iter().flat_map(|s| [(s, false), (s, true)]) {
+            let (ctx, mut app) = embedded_app("?v=2&bpm=90&ts=2+2+3/8&poly=3:7&embed=mcp");
+            app.ui.embed.as_mut().unwrap().fullscreen_offered = compact;
+            assert_eq!(app.compact_card(), compact);
             let screen = Rect::from_min_size(Pos2::ZERO, vec2(width, height));
             for picker in [None, Some(crate::pickers::Picker::MetronomeMeter)] {
                 app.ui.picker = picker;
@@ -540,6 +645,56 @@ mod tests {
                 output.textures_delta.clear();
             }
         }
+    }
+
+    #[test]
+    fn the_tempo_buttons_step_the_bpm_within_its_range() {
+        let (_, mut app) = embedded_app("?v=2&bpm=21&ts=4/4&embed=mcp");
+        app.step_bpm(1);
+        assert_eq!(app.playback_ctl.bpm, 22);
+        for _ in 0..5 {
+            app.step_bpm(-1);
+        }
+        assert_eq!(app.playback_ctl.bpm, 20);
+        app.playback_ctl.bpm = 300;
+        app.step_bpm(1);
+        assert_eq!(app.playback_ctl.bpm, 300);
+    }
+
+    #[test]
+    fn the_middle_of_the_ring_is_the_play_button() {
+        use crate::metronome_view::paint_play_middle;
+        use eframe::egui::{Event, Modifiers, PointerButton, RawInput, Sense, pos2};
+        let ctx = eframe::egui::Context::default();
+        let center = pos2(100.0, 100.0);
+        let tapped_at = |at| {
+            let mut tapped = false;
+            for events in [
+                vec![Event::PointerMoved(at)],
+                vec![Event::PointerButton {
+                    pos: at,
+                    button: PointerButton::Primary,
+                    pressed: true,
+                    modifiers: Modifiers::default(),
+                }],
+                vec![Event::PointerButton {
+                    pos: at,
+                    button: PointerButton::Primary,
+                    pressed: false,
+                    modifiers: Modifiers::default(),
+                }],
+            ] {
+                let mut output = ctx.run_ui(RawInput { events, ..Default::default() }, |ui| {
+                    let resp = ui.allocate_response(ui.available_size(), Sense::click());
+                    tapped |= paint_play_middle(ui, &resp, center, 30.0, false, None, None);
+                });
+                output.textures_delta.clear();
+            }
+            tapped
+        };
+        assert!(tapped_at(center));
+        assert!(tapped_at(pos2(120.0, 115.0)));
+        assert!(!tapped_at(pos2(140.0, 100.0)), "outside the button: the ring's");
     }
 
     #[derive(Default)]

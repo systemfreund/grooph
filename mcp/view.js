@@ -8,15 +8,19 @@
 // through `openLink`, and reads `appUrl`, `theme` and `colors` (the host's
 // card colors, see `resolveColors`).
 
-/** Inline height of the view, in CSS pixels: card, staff, ring and play
- * button, with the options folded. Less if the host allows less. */
-export const VIEW_HEIGHT = 520;
+/** Inline height of the view, in CSS pixels, less if the host allows less:
+ * the compact card (tempo, staff, ring with play in the middle) where the
+ * host offers fullscreen for the rest, else the whole metronome with its
+ * options folded. Fullscreen takes the host's height. */
+export const INLINE_HEIGHT = 400;
+export const INLINE_HEIGHT_WITHOUT_FULLSCREEN = 520;
 
 /** The view's HTML for the web build at `origin` (`js` and `wasm` are the
  * hashed file names from embed.json). */
 export function viewHtml({ origin, js, wasm }) {
   // Safe inside <script>: no "</" can close it early.
-  const config = JSON.stringify({ origin, js, wasm, height: VIEW_HEIGHT }).replace(/</g, "\\u003c");
+  const heights = { compact: INLINE_HEIGHT, whole: INLINE_HEIGHT_WITHOUT_FULLSCREEN };
+  const config = JSON.stringify({ origin, js, wasm, heights }).replace(/</g, "\\u003c");
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -32,7 +36,7 @@ export function viewHtml({ origin, js, wasm }) {
     background: var(--color-background-primary, light-dark(#f8f8f8, #1b1b1b));
     color: var(--color-text-primary, light-dark(#222, #ddd));
   }
-  #stage { position: relative; height: ${VIEW_HEIGHT}px; }
+  #stage { position: relative; height: ${INLINE_HEIGHT}px; }
   /* Vertical drags scroll the chat; taps and horizontal drags go to the app. */
   html, canvas { touch-action: pan-y; }
   canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; outline: none; }
@@ -152,10 +156,32 @@ function setTheme(next) {
     window.groophHost.repaint?.();
   }
 }
-function fitHeight(dimensions) {
+// Display mode: "inline" or "fullscreen", and the modes the host offers.
+let displayMode = "inline";
+let hostModes = [];
+let dimensions = null;
+const canFullscreen = () => hostModes.includes("fullscreen");
+function fitHeight(next) {
+  if (next) dimensions = next;
+  const stage = document.getElementById("stage");
+  if (displayMode === "fullscreen") {
+    stage.style.height = Number.isFinite(dimensions?.height) ? dimensions.height + "px" : "100vh";
+    return;
+  }
+  const base = canFullscreen() ? CONFIG.heights.compact : CONFIG.heights.whole;
   const limit = dimensions?.height ?? dimensions?.maxHeight;
-  const height = Math.max(240, Math.min(CONFIG.height, Number.isFinite(limit) ? limit : CONFIG.height));
-  document.getElementById("stage").style.height = height + "px";
+  const height = Math.max(240, Math.min(base, Number.isFinite(limit) ? limit : base));
+  stage.style.height = height + "px";
+}
+function setDisplay(mode, modes) {
+  if (modes) hostModes = modes;
+  if (mode) displayMode = mode;
+  fitHeight();
+  if (window.groophHost) {
+    window.groophHost.displayMode = displayMode;
+    window.groophHost.displayModes = hostModes.join(",");
+    window.groophHost.repaint?.();
+  }
 }
 function reportSize() {
   if (!connected) return;
@@ -166,6 +192,9 @@ handlers["ui/notifications/host-context-changed"] = (context) => {
   if (context.styles) applyHostStyles(context.styles);
   if (context.theme || context.styles) setTheme(context.theme || theme);
   if (context.containerDimensions) fitHeight(context.containerDimensions);
+  if (context.displayMode || context.availableDisplayModes) {
+    setDisplay(context.displayMode, context.availableDisplayModes);
+  }
 };
 
 let toolArgs = null;
@@ -177,7 +206,7 @@ const toolInput = new Promise((resolve) => {
 try {
   const init = await request("ui/initialize", {
     appInfo: { name: "grooph", version: "1.0.0" },
-    appCapabilities: { availableDisplayModes: ["inline"] },
+    appCapabilities: { availableDisplayModes: ["inline", "fullscreen"] },
     protocolVersion: "2026-01-26",
   });
   connected = true;
@@ -185,7 +214,8 @@ try {
   const context = init?.hostContext || {};
   applyHostStyles(context.styles);
   if (context.theme) setTheme(context.theme);
-  fitHeight(context.containerDimensions);
+  dimensions = context.containerDimensions || null;
+  setDisplay(context.displayMode, context.availableDisplayModes);
 } catch (e) {
   console.warn("grooph: no MCP Apps host", e);
 }
@@ -216,6 +246,17 @@ window.groophHost = {
   appUrl,
   theme,
   colors,
+  displayMode,
+  displayModes: hostModes.join(","),
+  // The compact card's fullscreen button; the host answers with the mode
+  // it chose (and may say so again in host-context-changed).
+  requestFullscreen() {
+    if (!connected || !canFullscreen()) return false;
+    request("ui/request-display-mode", { mode: "fullscreen" })
+      .then((result) => setDisplay(result?.mode))
+      .catch((e) => console.warn("grooph: no fullscreen", e));
+    return true;
+  },
   // Returns whether it took the context; the app tries again if not. A
   // request the host fails is sent again a few seconds later, unless newer
   // settings replaced it.

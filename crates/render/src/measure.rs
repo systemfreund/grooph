@@ -127,7 +127,7 @@ fn draw_staff_line_segment(painter: &Painter, rect: Rect, y: f32, em: f32, color
 }
 
 /// Draws the meter digits at the laid-out positions, with a grouping other
-/// than the usual one written above them.
+/// than the usual one written below them.
 pub fn draw_time_signature(
     painter: &Painter,
     ts_layout: &TimeSignatureLayout,
@@ -138,16 +138,21 @@ pub fn draw_time_signature(
     for digit in ts_layout.beats.iter().chain(&ts_layout.beat_unit) {
         draw_glyph(painter, digit, &font_id.family, color);
     }
-    // A grouping other than the usual one is written above the meter, e.g.
-    // "2+2+3" over 7/8.
+    // A grouping other than the usual one is written below the meter, e.g.
+    // "2+2+3" under 7/8.
     if ts.grouping != 0
-        && let (Some(first), Some(last)) = (ts_layout.beats.first(), ts_layout.beats.last())
+        && let (Some(first), Some(last)) = (ts_layout.beat_unit.first(), ts_layout.beat_unit.last())
     {
         let em = font_id.size;
-        let x = (first.origin.x + last.origin.x + last.glyph.advance * em * 0.25) / 2.0;
-        let pos = egui::pos2(x, first.origin.y - 0.4 * em);
         let font = FontId::proportional(0.28 * em);
-        painter.text(pos, Align2::CENTER_BOTTOM, ts.groups_label(), font, color);
+        let label = painter.layout_no_wrap(ts.groups_label(), font, color);
+        // Centered under the digits, but wider than they are: moved right
+        // where it would leave the drawing area at the left.
+        let x = (first.origin.x + last.origin.x + last.glyph.advance * em * 0.25) / 2.0;
+        let left = (x - label.size().x / 2.0).max(painter.clip_rect().left() + 1.0);
+        // The digit reaches a staff space (a quarter em) below its origin.
+        let pos = egui::pos2(left, first.origin.y + 0.3 * em);
+        painter.galley(pos, label, color);
     }
 }
 
