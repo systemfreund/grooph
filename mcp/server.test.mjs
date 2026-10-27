@@ -82,6 +82,8 @@ test("resources/read returns the view with this origin in its CSP", async () => 
   assert.deepEqual(content._meta.ui.csp, { connectDomains: [ORIGIN], resourceDomains: [ORIGIN] });
   assert.ok(content.text.includes('id="grooph-canvas"'));
   assert.ok(content.text.includes('id="loading_text"'));
+  // The skeleton inside it, which eframe removes once the app runs.
+  for (const part of ["sk-row", "sk-staff", "sk-ring", "sk-play", "sk-bar"]) assert.ok(content.text.includes(`class="${part}"`), part);
   assert.ok(content.text.includes(`"origin":"${ORIGIN}"`));
   assert.ok(content.text.includes('"js":"grooph-app-abc123.js"'));
   // The link builder is imported, not inlined: a bundled function's source

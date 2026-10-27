@@ -179,6 +179,10 @@ grooph's metronome runs inside AI chats as an
   `groophHost.colors`, which `embed::HostColors` applies to egui's panels,
   cards and text each frame (`apply_style`). Accents stay grooph's; without
   host variables egui's own colors stay.
+- Loading: while the 7 MB WASM loads, `#loading_text` holds a skeleton of
+  the card it becomes (tempo row with the tool's tempo, staff with its
+  meter, ring with the play button; the bar below instead in the whole
+  view), in the host's colors. eframe removes the element once the app runs.
 - Safe area: the view passes `hostContext.safeAreaInsets` (what the host
   covers, e.g. Claude's composer over the bottom in fullscreen) as
   `groophHost.insets`; `embed::host_safe_area` hands them to egui in
