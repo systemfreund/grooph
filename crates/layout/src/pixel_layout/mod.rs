@@ -297,6 +297,12 @@ impl NoteLayout {
     }
 }
 
+/// The note that shows note `idx` of `notes`: itself, or for a hidden rest
+/// of a bar drawn as one whole rest the first note, which draws that rest.
+pub fn shown_note(notes: &[NoteLayout], idx: usize) -> usize {
+    if notes.get(idx).is_some_and(|n| n.hidden) { 0 } else { idx }
+}
+
 /// Pixel-level layout for a measure.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MeasureLayout {

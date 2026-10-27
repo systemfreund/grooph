@@ -6,7 +6,7 @@ use eframe::egui::{
 };
 use grooph_layout::pixel_layout::{
     BeamLayout, LayoutOpts, MeasureLayout, NoteLayout, TimeSignatureLayout, TupletLayout,
-    build_measure_layout,
+    build_measure_layout, shown_note,
 };
 use grooph_measure::counting::{CountConfig, CountSlot, build_count_slots};
 use grooph_measure::grid::DEFAULT_GRID;
@@ -425,12 +425,6 @@ pub fn draw_note_glyphs(
     }
 }
 
-/// The note that shows note `idx`: itself, or for a hidden rest of a bar
-/// drawn as one whole rest the first note, which draws that rest.
-fn shown_note(notes: &[NoteLayout], idx: usize) -> usize {
-    if notes.get(idx).is_some_and(|n| n.hidden) { 0 } else { idx }
-}
-
 /// Beam rectangles between stems.
 pub fn draw_beams(painter: &Painter, beams: &[BeamLayout], color: Color32) {
     for seg in beams {
@@ -598,16 +592,45 @@ mod tests {
     }
 
     #[test]
-    fn a_hidden_rest_shows_as_the_bar_rest() {
-        let measure = Measure::new(TimeSignature::FOUR_FOUR);
-        let mut layout = build_measure_layout(&measure, &opts_for(Rect::ZERO));
-        assert!(layout.notes.len() > 1);
-        assert_eq!(shown_note(&layout.notes, 1), 1);
-        for note in &mut layout.notes[1..] {
-            note.hidden = true;
+    fn a_lit_note_is_drawn_in_its_colour() {
+        let (base, lit) = (Color32::WHITE, Color32::RED);
+        let opts = opts_for(Rect::from_min_size(Pos2::ZERO, egui::vec2(400.0, 100.0)));
+        let mut measure = Measure::new(TimeSignature::FOUR_FOUR);
+        for i in 0..4 {
+            measure.set_beat(i, Beat::note(q())).unwrap();
         }
-        assert_eq!(shown_note(&layout.notes, 1), 0);
-        assert_eq!(shown_note(&layout.notes, 0), 0);
+        let layout = build_measure_layout(&measure, &opts);
+        let ctx = egui::Context::default();
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            draw_notes(ui.painter(), &layout, base, Some((1, lit)), &opts);
+        });
+        output.textures_delta.clear();
+        // Each shape's colour and the note nearest it.
+        let nearest = |x: f32| {
+            (0..layout.notes.len())
+                .min_by(|&a, &b| {
+                    let d = |i: usize| (layout.notes[i].center.x - x).abs();
+                    d(a).total_cmp(&d(b))
+                })
+                .unwrap()
+        };
+        let shapes: Vec<(Color32, usize)> = output
+            .shapes
+            .iter()
+            .filter_map(|c| {
+                let color = match &c.shape {
+                    egui::Shape::LineSegment { stroke, .. } => stroke.color,
+                    egui::Shape::Text(text) => text.fallback_color,
+                    _ => return None,
+                };
+                Some((color, nearest(c.shape.visual_bounding_rect().center().x)))
+            })
+            .collect();
+        // Head and stem of the second quarter, nothing else.
+        assert!(shapes.iter().filter(|s| s.0 == lit).count() >= 2, "{shapes:?}");
+        for (color, note) in shapes {
+            assert_eq!(color == lit, note == 1, "{color:?} at note {note}");
+        }
     }
 
     fn counting(subdivision: Subdivision) -> CountConfig {

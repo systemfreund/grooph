@@ -6,7 +6,7 @@ use crate::tools::{Modifier, ToolKind, all_tools};
 use crate::{Mode, TransportState};
 use eframe::egui;
 use eframe::egui::{FontId, Frame, Rect, Response, Stroke};
-use grooph_layout::pixel_layout::{MeasureLayout, compute_em};
+use grooph_layout::pixel_layout::{MeasureLayout, compute_em, shown_note};
 use grooph_layout::staff_layout::{
     LEGIBILITY_FLOOR_EM, LOWER_VOICE_LABEL_ROOM_EM, PlacedMeasure, ROOM_BELOW_EM,
     ROOM_BELOW_WITH_LABELS_EM, StaffLayout, StaffOpts, Voice, build_staff_layout_with_lower,
@@ -266,7 +266,14 @@ impl Grooph {
                             .hover_pos()
                             .filter(|_| with_ring)
                             .and_then(|pos| hit_test_voice(&staff, pos))
-                            .map(|(voice, _, beat_idx)| (voice, beat_idx));
+                            .map(|(voice, m_idx, beat_idx)| {
+                                // A bar of rests drawn as one whole rest is its first beat.
+                                let notes = staff.placed(m_idx).and_then(|p| match voice {
+                                    Voice::Upper => Some(&p.layout.notes),
+                                    Voice::Lower => p.lower.as_ref().map(|l| &l.notes),
+                                });
+                                (voice, notes.map_or(beat_idx, |n| shown_note(n, beat_idx)))
+                            });
                         if staff_hover != self.editor.metronome.staff_hover {
                             // The ring was drawn before the staff: show it there next frame.
                             self.editor.metronome.staff_hover = staff_hover;
