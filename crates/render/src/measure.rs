@@ -418,10 +418,17 @@ pub fn draw_note_glyphs(
     color: Color32,
     lit: Option<(usize, Color32)>,
 ) {
+    let lit = lit.map(|(idx, c)| (shown_note(notes, idx), c));
     for (idx, note) in notes.iter().enumerate() {
         let color = lit.filter(|&(i, _)| i == idx).map_or(color, |(_, c)| c);
         draw_beat(painter, note, opts, color);
     }
+}
+
+/// The note that shows note `idx`: itself, or for a hidden rest of a bar
+/// drawn as one whole rest the first note, which draws that rest.
+fn shown_note(notes: &[NoteLayout], idx: usize) -> usize {
+    if notes.get(idx).is_some_and(|n| n.hidden) { 0 } else { idx }
 }
 
 /// Beam rectangles between stems.
@@ -588,6 +595,19 @@ mod tests {
             stem_down: false,
             shared_line: false,
         }
+    }
+
+    #[test]
+    fn a_hidden_rest_shows_as_the_bar_rest() {
+        let measure = Measure::new(TimeSignature::FOUR_FOUR);
+        let mut layout = build_measure_layout(&measure, &opts_for(Rect::ZERO));
+        assert!(layout.notes.len() > 1);
+        assert_eq!(shown_note(&layout.notes, 1), 1);
+        for note in &mut layout.notes[1..] {
+            note.hidden = true;
+        }
+        assert_eq!(shown_note(&layout.notes, 1), 0);
+        assert_eq!(shown_note(&layout.notes, 0), 0);
     }
 
     fn counting(subdivision: Subdivision) -> CountConfig {

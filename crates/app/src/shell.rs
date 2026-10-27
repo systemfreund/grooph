@@ -649,6 +649,7 @@ impl Grooph {
         if tab == Tab::More {
             // No staff on this screen, but what plays moves on.
             self.advance_unseen_playback(ui);
+            self.editor.metronome.forget_hover();
         } else {
             self.measure_panel(ui);
         }
