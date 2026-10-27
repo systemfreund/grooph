@@ -254,5 +254,7 @@ fn embed_manifest_names_the_hashed_app_files() {
     std::fs::write(dir.join("index.html"), html).unwrap();
     write_embed_manifest(&dir).unwrap();
     assert!(std::fs::read_to_string(dir.join("embed.json")).unwrap().contains("_bg.wasm"));
+    let link = std::fs::read_to_string(dir.join("embed/link.js")).unwrap();
+    assert!(link.contains("export function metronomeQuery"));
     let _ = std::fs::remove_dir_all(&dir);
 }

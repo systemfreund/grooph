@@ -7,8 +7,6 @@
 // the app reports its settings through `updateModelContext`, opens links
 // through `openLink`, and reads `appUrl` and `theme`.
 
-import { metronomeQuery } from "./link.js";
-
 /** Inline height of the view, in CSS pixels: card, staff, ring and play
  * button, with the options folded. Less if the host allows less. */
 export const VIEW_HEIGHT = 520;
@@ -48,7 +46,6 @@ export function viewHtml({ origin, js, wasm }) {
 <script src="${origin}/ios-audio.js"></script>
 <script type="module">
 const CONFIG = ${config};
-${metronomeQuery.toString()}
 
 // --- MCP Apps protocol over postMessage ---
 let nextId = 1;
@@ -135,7 +132,16 @@ new ResizeObserver(reportSize).observe(document.body);
 reportSize();
 
 toolArgs = await toolInput;
-const query = metronomeQuery(toolArgs || {});
+// The link builder the server uses too, served unbundled by the build
+// (crates/site writes mcp/link.js to /embed/link.js).
+let query;
+try {
+  const { metronomeQuery } = await import(CONFIG.origin + "/embed/link.js");
+  query = metronomeQuery(toolArgs || {});
+} catch (e) {
+  console.error("grooph: link builder not loaded", e);
+  query = "v=2&ts=4/4";
+}
 const appUrl = CONFIG.origin + "/";
 const link = appUrl + "?" + query;
 

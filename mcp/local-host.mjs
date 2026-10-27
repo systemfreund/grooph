@@ -17,6 +17,10 @@
 //   w=360           width of the frame in CSS pixels
 //   bpm, ts, click, poly, swing, su      the tool's arguments
 //
+// With GROOPH_ORIGIN set (e.g. http://localhost:8788 for `npx wrangler pages
+// dev dist`), the host uses that deployment instead of serving dist itself:
+// this runs the function as Cloudflare bundles it.
+//
 // The page logs the messages from the view; `window.modelContext` holds the
 // last model context and `window.opened` the links the view asked to open.
 
@@ -28,7 +32,7 @@ import { handleRequest } from "./server.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const dist = path.resolve(process.argv[2] || path.join(here, "../dist"));
-const GROOPH = "http://localhost:8090";
+const GROOPH = process.env.GROOPH_ORIGIN || "http://localhost:8090";
 const TYPES = { ".html": "text/html", ".js": "text/javascript", ".wasm": "application/wasm", ".css": "text/css", ".json": "application/json" };
 
 function staticFile(pathname) {
@@ -36,7 +40,9 @@ function staticFile(pathname) {
   const file = fs.existsSync(p) && fs.statSync(p).isDirectory() ? path.join(p, "index.html") : p;
   if (!file.startsWith(dist) || !fs.existsSync(file)) return new Response("Not found", { status: 404 });
   const headers = { "Content-Type": TYPES[path.extname(file)] || "application/octet-stream" };
-  if (path.basename(file).startsWith("grooph-app-")) headers["Access-Control-Allow-Origin"] = "*";
+  if (path.basename(file).startsWith("grooph-app-") || pathname.startsWith("/embed/")) {
+    headers["Access-Control-Allow-Origin"] = "*";
+  }
   return new Response(fs.readFileSync(file), { headers });
 }
 
@@ -48,8 +54,8 @@ async function readBody(req) {
   return Buffer.concat(chunks);
 }
 
-// "grooph.app": the build and the Pages Function.
-http
+// "grooph.app": the build and the Pages Function, unless GROOPH_ORIGIN is one.
+if (!process.env.GROOPH_ORIGIN) http
   .createServer(async (req, res) => {
     const url = new URL(req.url, GROOPH);
     let response;

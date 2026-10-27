@@ -166,10 +166,15 @@ pub fn build(out: &Path, pages: &[Page], llms_base: &str) -> Result<Vec<Rendered
     Ok(rendered)
 }
 
+/// The MCP App view's link builder (`mcp/link.js`), served unbundled as
+/// `/embed/link.js`: the Pages Function bundles its own copy, and a bundled
+/// function's source cannot be inlined into the view (esbuild adds helpers).
+const EMBED_LINK_JS: &str = include_str!("../../../mcp/link.js");
+
 /// Write `embed.json` next to the app's `index.html` in `out`: the hashed
 /// names of its JS glue and WASM, which the MCP App view loads (see
-/// `mcp/server.js`). Does nothing without an `index.html` (pages built by
-/// hand into an empty directory).
+/// `mcp/server.js`), and `embed/link.js`. Does nothing without an
+/// `index.html` (pages built by hand into an empty directory).
 pub fn write_embed_manifest(out: &Path) -> Result<(), String> {
     let index = out.join("index.html");
     let Ok(html) = std::fs::read_to_string(&index) else {
@@ -177,7 +182,10 @@ pub fn write_embed_manifest(out: &Path) -> Result<(), String> {
     };
     let manifest = embed_manifest(&html)
         .ok_or_else(|| format!("{}: no grooph-app-*.js and *_bg.wasm", index.display()))?;
-    write(&out.join("embed.json"), &manifest)
+    write(&out.join("embed.json"), &manifest)?;
+    let dir = out.join("embed");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    write(&dir.join("link.js"), EMBED_LINK_JS)
 }
 
 /// `{"js":"grooph-app-<hash>.js","wasm":"grooph-app-<hash>_bg.wasm"}` from

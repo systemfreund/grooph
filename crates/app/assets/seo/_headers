@@ -21,3 +21,8 @@
 /grooph-app-*
   Cache-Control: public, max-age=31536000, immutable
   Access-Control-Allow-Origin: *
+
+# The view's link builder (mcp/link.js), imported as a module from the
+# host's sandbox origin.
+/embed/*
+  Access-Control-Allow-Origin: *

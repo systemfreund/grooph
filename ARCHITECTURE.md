@@ -153,7 +153,11 @@ grooph's metronome runs inside AI chats as an
   `updateModelContext`, `openLink`) and imports the web build from the
   request's own origin (allowed by the resource's `_meta.ui.csp`). The
   hashed file names come from `embed.json`, which `crates/site` writes next
-  to `index.html`; `_headers` sends CORS for `/grooph-app-*`. A host whose
+  to `index.html`, together with `mcp/link.js` as `/embed/link.js`, which
+  the view imports to build the link. Never inline function source into the
+  view (`fn.toString()`): Cloudflare bundles the function with esbuild,
+  which adds helpers such as `__name` the view does not have. `_headers`
+  sends CORS for `/grooph-app-*` and `/embed/*`. A host whose
   CSP forbids WebAssembly gets a message with the grooph.app link instead.
 - Embed mode (`crates/app/src/embed.rs`): `embed=mcp` in the query, read in
   `Grooph::new` before the link clears it. Storage is neither read nor
@@ -168,7 +172,9 @@ grooph's metronome runs inside AI chats as an
   stayed the same for a second. The bridge is in `web.rs`/`platform.rs`.
 - Tests: `node --test mcp/server.test.mjs` (no Cloudflare needed), `cargo test` (embed
   mode). `node mcp/local-host.mjs [dist]` plays host and sandbox locally
-  for a `trunk build` (spec CSP, `?wasm=1` adds `'wasm-unsafe-eval'`).
+  for a `trunk build` (spec CSP, `?wasm=1` adds `'wasm-unsafe-eval'`). To
+  run the function as Cloudflare bundles it, start `npx wrangler pages dev
+  dist` and the host with `GROOPH_ORIGIN=http://localhost:8788`.
 - To try a branch in Claude: Settings → Connectors → Add custom connector
   with the preview's `https://<branch>.grooph.pages.dev/mcp`.
 

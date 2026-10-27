@@ -84,7 +84,11 @@ test("resources/read returns the view with this origin in its CSP", async () => 
   assert.ok(content.text.includes('id="loading_text"'));
   assert.ok(content.text.includes(`"origin":"${ORIGIN}"`));
   assert.ok(content.text.includes('"js":"grooph-app-abc123.js"'));
-  assert.ok(content.text.includes("function metronomeQuery"));
+  // The link builder is imported, not inlined: a bundled function's source
+  // carries esbuild helpers (__name) the view does not have.
+  assert.ok(content.text.includes("/embed/link.js"));
+  assert.ok(!content.text.includes("function metronomeQuery"));
+  assert.ok(!/__name/.test(content.text));
   // The inline script parses (the view is a module; check its syntax as one).
   const script = content.text.match(/<script type="module">([\s\S]*)<\/script>/)[1];
   assert.doesNotThrow(() => new Function(`return async () => { ${script.replace(/^import .*$/gm, "")} }`));

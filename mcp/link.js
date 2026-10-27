@@ -1,7 +1,8 @@
 // The metronome link of the `show_metronome` tool: the tool's arguments are
 // the app's link parameters (see crates/link and llms.txt), so the server and
-// the view build the same `?v=2&ts=…` query from them. `metronomeQuery` is
-// also inlined into the view (view.js), so it must stay self-contained.
+// the view build the same `?v=2&ts=…` query from them. The build also serves
+// this file unbundled as /embed/link.js (crates/site), which the view
+// imports, so it must not import anything.
 
 /** Query (without `?`) that opens the metronome as `args` describe, written
  * as the app's share links are (crates/link `SharedLink::to_url`). */
