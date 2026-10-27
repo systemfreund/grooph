@@ -596,7 +596,8 @@ impl Audio {
     /// Bar the engine is playing; `None` while stopped or counting in. While
     /// the audio thread holds its lock, the last known bar is returned.
     pub fn bar_state(&mut self) -> Option<BarState> {
-        if !self.is_running() {
+        // Stopped, the open output may not have published the stop yet.
+        if !self.is_running() || self.sent_state != PlayerState::Playing {
             self.last_bar = None;
         } else if let Some(shared_state) = try_lock(&self.shared_state) {
             self.last_bar = shared_state.bar;
