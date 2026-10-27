@@ -35,6 +35,8 @@ jobs:
       run: cargo test --verbose
     - name: Test the code review scripts
       run: python3 -m unittest discover -s .github/review
+    - name: Test the MCP server
+      run: node --test mcp/server.test.mjs
 
   web:
     # Build the web app on every push and pull request, so a WASM-only

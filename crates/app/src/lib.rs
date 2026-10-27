@@ -1,6 +1,7 @@
 mod accuracy;
 mod calibration;
 mod clock;
+mod embed;
 mod generator;
 mod guide;
 mod help;
@@ -41,6 +42,7 @@ use grooph_measure::{BeatIdx, Cursor, Measure, Score, TimeSignature};
 
 use crate::accuracy::AccuracyState;
 use crate::calibration::CalibrationPhase;
+use crate::embed::{Embed, EmbedParams, embed_params};
 use crate::generator::GeneratorState;
 use crate::guide::Guide;
 use crate::library::PatternLibrary;
@@ -339,18 +341,25 @@ impl App for Grooph {
     fn ui(&mut self, ui: &mut Ui, frame: &mut eframe::Frame) {
         self.apply_style(ui);
         self.ui.narrow_screen = ui.available_width() < shell::NARROW_MAX_WIDTH;
-        self.shell_ui(ui);
+        let embedded = self.embedded();
+        if embedded {
+            self.embed_ui(ui);
+        } else {
+            self.shell_ui(ui);
+        }
         self.sync_click_bar();
         self.update_metronome_trainer();
         self.update_endless();
-        self.run_summary_window(ui);
-        self.calibration_window(ui);
+        if !embedded {
+            self.run_summary_window(ui);
+            self.calibration_window(ui);
+        }
 
         if matches!(self.ui.mode, Mode::TimeSignature(_)) {
             self.time_signature_dialog(ui);
         }
 
-        if self.ui.pending_load.is_some() {
+        if self.ui.pending_load.is_some() && !embedded {
             self.load_confirm_dialog(ui);
         }
 
@@ -358,10 +367,14 @@ impl App for Grooph {
             self.link_error_dialog(ui);
         }
 
-        self.update_notice(ui, frame);
+        if !embedded {
+            self.update_notice(ui, frame);
+        }
 
         self.handle_keyboard_input(ui);
-        self.handle_play_along_input(ui);
+        if !embedded {
+            self.handle_play_along_input(ui);
+        }
 
         for ev in self.ui.platform.take_visibility_events() {
             match ev {
@@ -404,11 +417,19 @@ impl App for Grooph {
     }
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        // Each embed starts from its link alone (see `embed`).
+        if self.embedded() {
+            return;
+        }
         let state = PersistedState::from_app(self);
         eframe::set_value(storage, APP_STATE_KEY, &state);
         if let Some(backup) = self.editor.state_backup.take() {
             backup.write(storage);
         }
+    }
+
+    fn persist_egui_memory(&self) -> bool {
+        !self.embedded()
     }
 }
 
@@ -750,8 +771,13 @@ impl Grooph {
             Some(LinkContent::Metronome(ts)) => {
                 self.stop_transport();
                 self.editor.metronome.meter = ts;
-                // The meter plays the link's counter rhythm, or none.
-                self.playback_ctl.audio_cfg.counter.replace(ts, link.counter.clone());
+                // The meter plays the link's counter rhythm, or none; a
+                // `poly` link's as picked in the app.
+                let counter = &mut self.playback_ctl.audio_cfg.counter;
+                match link.poly {
+                    Some(ratio) => counter.set_ratio(ts, Some(ratio)),
+                    None => counter.replace(ts, link.counter.clone()),
+                }
             }
             Some(LinkContent::Generator { settings, seed }) => {
                 self.stop_transport();
@@ -952,7 +978,10 @@ impl Grooph {
             self.playback_ctl.playback.count_in = CountInState::Waiting { since: f64::NAN };
         }
 
-        self.ui.platform.acquire_wake_lock();
+        // The view in a chat has no permission for a wake lock.
+        if !self.embedded() {
+            self.ui.platform.acquire_wake_lock();
+        }
     }
 
     fn stop_transport(&mut self) {
@@ -1047,11 +1076,27 @@ impl Grooph {
     }
 
     pub fn new(cc: &CreationContext) -> Self {
+        // Read before the link is opened, which clears the query.
+        let query = platform::link_query();
+        let embed = query.as_deref().and_then(embed_params);
+        Self::new_with(cc, embed, query)
+    }
+
+    /// [`Self::new`] with the page's query and whether it embeds the app.
+    pub(crate) fn new_with(
+        cc: &CreationContext,
+        embed: Option<EmbedParams>,
+        query: Option<String>,
+    ) -> Self {
         add_font(&cc.egui_ctx);
         egui_extras::install_image_loaders(&cc.egui_ctx);
         let ff = FontFamily::Name("music".into());
 
-        let saved = cc.storage.and_then(|storage| storage.get_string(APP_STATE_KEY));
+        // Embedded, the user's own settings and library stay out of the chat.
+        let saved = cc
+            .storage
+            .filter(|_| embed.is_none())
+            .and_then(|storage| storage.get_string(APP_STATE_KEY));
         let (mut state, state_backup) = persist::restore(saved.as_deref());
 
         if state.score.is_empty() {
@@ -1117,8 +1162,10 @@ impl Grooph {
             }
         }
 
-        let (mut midi_input, midi_input_ports) = match MidiInput::new() {
-            Ok(mut input) => {
+        let midi = if embed.is_some() { None } else { Some(MidiInput::new()) };
+        let (mut midi_input, midi_input_ports) = match midi.transpose() {
+            Ok(None) => (None, Vec::new()),
+            Ok(Some(mut input)) => {
                 let ports = input.available_ports().unwrap_or_default();
                 (Some(input), ports)
             }
@@ -1143,7 +1190,9 @@ impl Grooph {
 
         let platform = PlatformRuntime::new();
         platform.install_listeners(cc.egui_ctx.clone());
-        update_check::start(cc.egui_ctx.clone());
+        if embed.is_none() {
+            update_check::start(cc.egui_ctx.clone());
+        }
 
         let mut app = Self {
             editor: EditorState {
@@ -1217,22 +1266,26 @@ impl Grooph {
                 picker_return: None,
                 tap_tempo: Default::default(),
                 host: None,
+                embed: embed.map(|params| Embed::new(&cc.egui_ctx, params)),
             },
         };
         app.editor.active_preset = app.matching_preset();
         // A link opens after the saved tab, so its tab wins.
         app.select_tab(state.tab);
-        app.open_link_from_url();
+        if let Some(query) = query {
+            app.open_link_from_url(&query);
+        }
+        // Embedded, only the metronome is shown, whatever the link opened.
+        if app.embedded() && !app.metronome_mode() {
+            app.select_tab(Tab::Metronome);
+        }
         app
     }
 
     /// Open the link the app was started with (web only) and drop its
     /// parameters from the address bar, so a reload keeps later edits.
-    fn open_link_from_url(&mut self) {
-        let Some(query) = platform::link_query() else {
-            return;
-        };
-        match grooph_link::parse_query(&query) {
+    fn open_link_from_url(&mut self, query: &str) {
+        match grooph_link::parse_query(query) {
             Ok(None) => return,
             Ok(Some(link)) => self.open_link(link),
             Err(err) => {

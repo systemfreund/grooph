@@ -256,3 +256,60 @@ fn is_mobile_browser() -> bool {
         is_ios || is_android || (has_touch && is_mobile_token)
     })
 }
+
+/// `window.groophHost`, the bridge the MCP App view defines (see `mcp/view.js`).
+fn host_object() -> Option<web_sys::wasm_bindgen::JsValue> {
+    use web_sys::js_sys::Reflect;
+    let window = web_sys::window()?;
+    let host = Reflect::get(&window, &"groophHost".into()).ok()?;
+    host.is_object().then_some(host)
+}
+
+/// A string property of `window.groophHost`.
+pub(crate) fn host_string(key: &str) -> Option<String> {
+    use web_sys::js_sys::Reflect;
+    Reflect::get(&host_object()?, &key.into()).ok()?.as_string()
+}
+
+/// Call the function `name` of `window.groophHost` with `args` and return
+/// what it returned. `None` if there is no such function or it threw.
+pub(crate) fn host_call(
+    name: &str,
+    args: &[web_sys::wasm_bindgen::JsValue],
+) -> Option<web_sys::wasm_bindgen::JsValue> {
+    use web_sys::js_sys::{Array, Function, Reflect};
+    let host = host_object()?;
+    let function =
+        Reflect::get(&host, &name.into()).ok().and_then(|f| f.dyn_into::<Function>().ok())?;
+    let args: Array = args.iter().collect();
+    function.apply(&host, &args).map_err(|err| error!("groophHost.{name} failed: {err:?}")).ok()
+}
+
+/// Define `window.groophHost.repaint`, so the view can wake the app.
+pub(crate) fn install_host_repaint(ctx: Context) {
+    use web_sys::js_sys::Reflect;
+    let Some(host) = host_object() else { return };
+    let repaint = Closure::wrap(Box::new(move || ctx.request_repaint()) as Box<dyn FnMut()>);
+    Reflect::set(&host, &"repaint".into(), repaint.as_ref()).ok();
+    repaint.forget();
+}
+
+/// `window.groophHost.updateModelContext(text, fields)`. Whether the view
+/// took it: it returns `true` once it is connected to the host.
+pub(crate) fn host_update_model_context(context: &crate::embed::ModelContext) -> bool {
+    use crate::embed::Field;
+    use web_sys::js_sys::{Object, Reflect};
+    use web_sys::wasm_bindgen::JsValue;
+    let fields = Object::new();
+    for (key, value) in &context.fields {
+        let value = match value {
+            Field::Text(text) => JsValue::from_str(text),
+            Field::Number(n) => JsValue::from_f64(*n),
+            Field::Bool(b) => JsValue::from_bool(*b),
+        };
+        Reflect::set(&fields, &(*key).into(), &value).ok();
+    }
+    host_call("updateModelContext", &[context.text.as_str().into(), fields.into()])
+        .and_then(|taken| taken.as_bool())
+        .unwrap_or(false)
+}

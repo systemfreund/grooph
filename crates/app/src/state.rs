@@ -361,6 +361,8 @@ pub(crate) struct UiShell {
     pub(crate) tap_tempo: TapTempo,
     /// Share sheet and permissions of the app around this one (Android).
     pub(crate) host: Option<Box<dyn Host>>,
+    /// `Some` when the app runs embedded in a chat (see [`crate::embed`]).
+    pub(crate) embed: Option<crate::embed::Embed>,
 }
 
 /// Something that replaces the working score once unsaved changes are dealt with.

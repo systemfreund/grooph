@@ -633,20 +633,7 @@ impl Grooph {
                 self.metronome_edit_bar(ui);
                 self.metronome_card(ui);
             }
-            Tab::Metronome => {
-                self.metronome_sheet(ui);
-                self.metronome_card(ui);
-                // The staff above takes a share of the room, the ring the rest.
-                let room = ui.available_height().max(0.0);
-                let (share, max) = if self.counter_bar().is_some() {
-                    (METRONOME_TWO_STAFF_SHARE, METRONOME_TWO_STAFF_MAX)
-                } else {
-                    (METRONOME_STAFF_SHARE, METRONOME_STAFF_MAX)
-                };
-                let staff = (share * room).clamp(METRONOME_STAFF_MIN, max).min(room);
-                let height = (room - staff).min(ui.available_width());
-                self.metronome_ring(ui, height);
-            }
+            Tab::Metronome => self.metronome_page(ui),
             Tab::More => self.more_page(ui),
         }
         if tab == Tab::More {
@@ -657,6 +644,27 @@ impl Grooph {
             self.measure_panel(ui);
         }
         self.settings_picker(ui);
+    }
+
+    /// The metronome tab above the tab bar: its card, options sheet and ring.
+    /// The staff goes in the room left.
+    /// Embedded, meter and tempo sit next to the play button instead, so the
+    /// staff and the ring get the card's room.
+    pub(crate) fn metronome_page(&mut self, ui: &mut Ui) {
+        self.metronome_sheet(ui);
+        if !self.embedded() {
+            self.metronome_card(ui);
+        }
+        // The staff above takes a share of the room, the ring the rest.
+        let room = ui.available_height().max(0.0);
+        let (share, max) = if self.counter_bar().is_some() {
+            (METRONOME_TWO_STAFF_SHARE, METRONOME_TWO_STAFF_MAX)
+        } else {
+            (METRONOME_STAFF_SHARE, METRONOME_STAFF_MAX)
+        };
+        let staff = (share * room).clamp(METRONOME_STAFF_MIN, max).min(room);
+        let height = (room - staff).min(ui.available_width());
+        self.metronome_ring(ui, height);
     }
 
     fn tab_bar(&mut self, ui: &mut Ui, current: Tab) {
@@ -739,14 +747,19 @@ impl Grooph {
 
     /// Meter and tempo of the metronome tab, in the same card as Practice.
     fn metronome_card(&mut self, ui: &mut Ui) {
-        let cells = [
+        let cells = self.metronome_cells();
+        self.card(ui, &cells);
+    }
+
+    /// The metronome's meter and tempo, each opening its picker.
+    fn metronome_cells(&self) -> [(Picker, &'static str, CardValue); 2] {
+        [
             (Picker::MetronomeMeter, "Meter", CardValue::Meter(self.metronome_meter())),
             match self.playback_ctl.playback.ramp_bpm {
                 Some(bpm) => (Picker::Bpm, "BPM now", CardValue::Text(bpm.to_string())),
                 None => (Picker::Bpm, "BPM", CardValue::Text(self.playback_ctl.bpm.to_string())),
             },
-        ];
-        self.card(ui, &cells);
+        ]
     }
 
     /// Card of labelled values on top; a tap opens the value's picker.
@@ -898,7 +911,13 @@ impl Grooph {
         if notation_value_row(ui, "Subdivision", look.as_ref(), &label, family).clicked() {
             self.ui.picker = Some(Picker::ClickFill);
         }
-        if value_row(ui, "Edit clicks", "✏").clicked() {
+        // Embedded there is no tool palette to edit them with, and the
+        // transport row has no room for the link: it is a row here.
+        if self.embedded() {
+            if value_row(ui, "Open in grooph", "grooph.app").clicked() {
+                self.open_in_grooph(ui);
+            }
+        } else if value_row(ui, "Edit clicks", "✏").clicked() {
             self.ui.mode = Mode::Edit;
         }
         self.polyrhythm_row(ui);
@@ -1009,7 +1028,8 @@ impl Grooph {
         self.fold_sheet_on_flick(ui, sheet.response.rect, options);
     }
 
-    /// Centered play button, with share on the right.
+    /// Centered play button, with share on the right; embedded, meter and
+    /// tempo on either side instead (see [`Self::metronome_page`]).
     fn metronome_transport(&mut self, ui: &mut Ui) {
         if self.link_copied_recently(ui) {
             ui.vertical_centered(|ui| {
@@ -1035,6 +1055,10 @@ impl Grooph {
         {
             self.toggle_playback();
         }
+        if self.embedded() {
+            self.transport_cells(ui, row);
+            return;
+        }
         if round_button_at(
             ui,
             Rect::from_min_size(row.right_top() - vec2(PLAY_BUTTON_SIZE, 0.0), size),
@@ -1047,6 +1071,32 @@ impl Grooph {
         .clicked()
         {
             self.share_link(ui);
+        }
+    }
+
+    /// Meter left and tempo right of the play button in `row`, as in the
+    /// card; a tap opens the picker.
+    fn transport_cells(&mut self, ui: &mut Ui, row: Rect) {
+        const GAP: f32 = 12.0;
+        const MAX_WIDTH: f32 = 140.0;
+        let music = self.ui.music_font_id.family.clone();
+        let width = ((row.width() - PLAY_BUTTON_SIZE) / 2.0 - GAP).min(MAX_WIDTH);
+        let size = vec2(width, CARD_CELL_HEIGHT);
+        let left = row.center() - vec2(PLAY_BUTTON_SIZE / 2.0 + GAP + width / 2.0, 0.0);
+        let right = row.center() + vec2(PLAY_BUTTON_SIZE / 2.0 + GAP + width / 2.0, 0.0);
+        let mut picked = None;
+        for ((picker, label, value), center) in
+            self.metronome_cells().into_iter().zip([left, right])
+        {
+            let rect = Rect::from_center_size(center, size);
+            let builder = UiBuilder::new().max_rect(rect).id_salt(label);
+            if ui.scope_builder(builder, |ui| card_cell(ui, label, &value, &music)).inner.clicked()
+            {
+                picked = Some(picker);
+            }
+        }
+        if picked.is_some() {
+            self.ui.picker = picked;
         }
     }
 

@@ -14,7 +14,7 @@
       "get": {
         "operationId": "openGrooph",
         "summary": "Open the app with the given rhythm, exercise or metronome setting",
-        "description": "Combine `r` (a written rhythm) or the generator parameters (`sub`, `lvl`, `bars`, `space`, `seed`), not both. `ts` on its own opens a one-measure metronome in that meter, optionally with a polyrhythm (`counter`).",
+        "description": "Combine `r` (a written rhythm) or the generator parameters (`sub`, `lvl`, `bars`, `space`, `seed`), not both. `ts` on its own opens a one-measure metronome in that meter, optionally with a polyrhythm (`poly`).",
         "parameters": [
           {
             "name": "v",
@@ -94,11 +94,18 @@
             "example": ">q r:q. (q)"
           },
           {
+            "name": "poly",
+            "in": "query",
+            "description": "Polyrhythm `n:m`: n even clicks in the time of m beat units of `ts` (quarters in x/4, eighths in x/8), played against the click. m must divide the beats of the meter, n is 2 to 16, and the ratio must not reduce to one click (2:4 is 1:2); e.g. 3:2, 3:4, 5:4 in 4/4, 2:3, 4:3 in 3/4, 7:5 in 5/8. Needs `ts`; not together with `r`, the generator or `counter`.",
+            "schema": { "type": "string", "pattern": "^[0-9]+:[0-9]+$" },
+            "example": "3:2"
+          },
+          {
             "name": "counter",
             "in": "query",
-            "description": "Polyrhythm: a counter rhythm the metronome plays against the click of `ts`, one measure in the rhythm notation without the time signature, written like `click`. Needs `ts`; not together with `r` or the generator. n:m (n clicks in the time of m beat units) in 4/4: 3:2 `t4 t4 t4 t4 t4 t4`, 3:4 `t2 t2 t2`, 5:4 `qt4 qt4 qt4 qt4 qt4`, 2:1 (also 4:2) `e e e e e e e e`; in 3/4: 2:3 `q. q.`, 4:3 `e. e. e. e.`. Other ratios: see https://grooph.app/llms.txt.",
+            "description": "The polyrhythm's counter clicks written out: one measure in the rhythm notation without the time signature, written like `click`. The app writes it into shared links when the user edited the clicks; to ask for a polyrhythm, use `poly`. Needs `ts`; not together with `r`, the generator or `poly`.",
             "schema": { "type": "string" },
-            "example": "t4 t4 t4 t4 t4 t4"
+            "example": "t4 (t4) t4 t4 (t4) t4"
           }
         ],
         "responses": {

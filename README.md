@@ -50,6 +50,14 @@ with no account and no installation, and natively on your computer.
   and tuplets, and keep them in your library.
 - Share a rhythm, an exercise or a metronome setting as a link.
 
+### Use it in an AI chat
+
+grooph's metronome also works inside Claude and other chat apps that support
+[MCP Apps](https://modelcontextprotocol.io/extensions/apps/overview): ask for
+"a 7/8 click at 140" or "3:2 against 4/4 at 90" and a working metronome
+appears in the conversation. In Claude, add it under Settings → Connectors →
+Add custom connector with the URL `https://grooph.app/mcp`.
+
 ## Learn more
 
 The guides on grooph.app explain the features and the basics of reading
@@ -85,7 +93,7 @@ grooph is written in Rust with [egui](https://github.com/emilk/egui):
 - Run the desktop app: `cargo run --bin grooph-app` (on Linux, install the ALSA headers
   first, e.g. `libasound2-dev`)
 - Run the web app: `trunk serve`
-- Run the tests: `cargo test --workspace`
+- Run the tests: `cargo test --workspace` and, for the MCP server, `node --test mcp/server.test.mjs`
 
 [ARCHITECTURE.md](ARCHITECTURE.md) describes how the code is organised,
 including the Android build, and [AGENTS.md](AGENTS.md) the development

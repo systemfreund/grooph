@@ -24,6 +24,13 @@ impl Grooph {
                 }
                 return;
             }
+            // Embedded there is only the metronome: no edit mode, no tools.
+            if self.embedded() {
+                if i.key_pressed(Key::Space) {
+                    self.toggle_playback();
+                }
+                return;
+            }
             // App-global shortcuts run regardless of edit mode; the tool registry handles the rest.
             // On the More screen Esc closes what is open there: no edit mode
             // to toggle, and with the metronome behind it, its click bar

@@ -15,6 +15,7 @@ user-facing overview is README.md.
 - `crates/mic`: Microphone hit detection (cpal natively, `getUserMedia` + AudioWorklet on the web).
 - `crates/link`: Shareable links (URL query parameters <-> score/generator/metronome).
 - `crates/site`: Static guide pages for grooph.app, generated from Markdown at build time.
+- `functions/`, `mcp/`: the MCP server (`grooph.app/mcp`) and the view that embeds the metronome in AI chats.
 - `crates/android`: Android entry point (`android_main`, NativeActivity) around `crates/app`.
 
 Important root files:
@@ -120,12 +121,62 @@ spread across callers.
   `SharedLink::to_url` writes them. The app reads the link once at startup
   (`Grooph::open_link_from_url`), then removes it from the address bar. A
   `ts` link on its own opens the Metronome tab with that meter (and its
-  `click` bar) and leaves the rhythm alone. A link that replaces the score
+  `click` bar) and leaves the rhythm alone. A polyrhythm is `poly=n:m`: the
+  link builds the ratio's counter bar as the picker does (`counter_bar`) and
+  names it; `counter=` carries the clicks written out, which the share
+  buttons write only when they were edited (`SharedLink::poly`). `llms.txt`
+  and the MCP tool offer only `poly`: models get the notation wrong too often. A link that replaces the score
   goes through `PendingLoad::Link` and the
   unsaved-changes dialog. The share buttons (`share_link`) build a link with
   `SharedLink::to_url`.
 - The link format is documented for AI agents in
   `crates/app/assets/seo/llms.txt`; keep it in sync.
+
+## Embed mode and the MCP server
+
+grooph's metronome runs inside AI chats as an
+[MCP App](https://modelcontextprotocol.io/extensions/apps/overview):
+
+- `functions/mcp.js` is a Cloudflare Pages Function, so `wrangler pages
+  deploy dist` (run from the repository root) serves it as `/mcp` next to
+  the web build: `https://grooph.app/mcp`, and each preview its own. The
+  logic is in `mcp/server.js`: a stateless MCP server (Streamable HTTP, JSON
+  answers, CORS) with one tool, `show_metronome`, whose arguments are the
+  metronome's link parameters (`bpm`, `ts`, `click`, `poly`, `swing`,
+  `su`; `mcp/link.js` builds the same query as `SharedLink::to_url`, checked
+  by both test suites against `mcp/link-cases.json`). Its result carries
+  the link, for hosts without views.
+- The tool's view `ui://grooph/metronome.html` (`mcp/view.js`) runs in the
+  host's sandboxed iframe on another origin. It does the MCP Apps handshake
+  over postMessage, puts the link plus `embed=mcp&theme=light|dark` into the
+  address bar, defines `window.groophHost` (`appUrl`, `theme`,
+  `updateModelContext`, `openLink`) and imports the web build from the
+  request's own origin (allowed by the resource's `_meta.ui.csp`). The
+  hashed file names come from `embed.json`, which `crates/site` writes next
+  to `index.html`, together with `mcp/link.js` as `/embed/link.js`, which
+  the view imports to build the link. Never inline function source into the
+  view (`fn.toString()`): Cloudflare bundles the function with esbuild,
+  which adds helpers such as `__name` the view does not have. `_headers`
+  sends CORS for `/grooph-app-*` and `/embed/*`. A host whose
+  CSP forbids WebAssembly gets a message with the grooph.app link instead.
+- Embed mode (`crates/app/src/embed.rs`): `embed=mcp` in the query, read in
+  `Grooph::new` before the link clears it. Storage is neither read nor
+  written (also not egui's memory); no update check, wake lock, MIDI,
+  microphone, calibration, unsaved-changes dialog or keyboard shortcuts but
+  Space. `embed_ui` shows the Metronome tab without the tab bar and the card on
+  top: meter and tempo sit left and right of the play button, so the staff
+  and the ring get the room. The share button gives way to an "Open in
+  grooph" row in the options, which have no "Edit clicks". The theme follows
+  the host (`groophHost.theme`, the view calls `groophHost.repaint`). The
+  settings go to the model through `groophHost.updateModelContext` once they
+  stayed the same for a second. The bridge is in `web.rs`/`platform.rs`.
+- Tests: `node --test mcp/server.test.mjs` (no Cloudflare needed), `cargo test` (embed
+  mode). `node mcp/local-host.mjs [dist]` plays host and sandbox locally
+  for a `trunk build` (spec CSP, `?wasm=1` adds `'wasm-unsafe-eval'`). To
+  run the function as Cloudflare bundles it, start `npx wrangler pages dev
+  dist` and the host with `GROOPH_ORIGIN=http://localhost:8788`.
+- To try a branch in Claude: Settings → Connectors → Add custom connector
+  with the preview's `https://<branch>.grooph.pages.dev/mcp`.
 
 ## Guide pages (crates/site)
 

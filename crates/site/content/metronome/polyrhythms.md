@@ -11,7 +11,7 @@ rhythm** against its normal click, with a sound of its own, so you hear exactly 
 pulses line up.
 
 ```open | Open the metronome with 3 against 2 in 4/4
-bpm=90&ts=4/4&counter=t4+t4+t4+t4+t4+t4
+bpm=90&ts=4/4&poly=3:2
 ```
 
 ## How to use it
@@ -31,42 +31,43 @@ The beats count in the meter's beat unit: quarters in 4/4 and 3/4, eighths in 6/
 These links open the metronome with the polyrhythm already switched on:
 
 ```open | 3:4 in 4/4 – three against four
-bpm=80&ts=4/4&counter=t2+t2+t2
+bpm=80&ts=4/4&poly=3:4
 ```
 
 ```open | 5:4 in 4/4 – five against four
-bpm=70&ts=4/4&counter=qt4+qt4+qt4+qt4+qt4
+bpm=70&ts=4/4&poly=5:4
 ```
 
 ```open | 2:3 in 3/4 – two against three
-bpm=90&ts=3/4&counter=q.+q.
+bpm=90&ts=3/4&poly=2:3
 ```
 
 ```open | 4:3 in 3/4 – four against three
-bpm=80&ts=3/4&counter=e.+e.+e.+e.
+bpm=80&ts=3/4&poly=4:3
 ```
 
 ```open | 2:3 in 6/8 – duplets against the dotted quarters
-bpm=60&ts=6/8&counter=e.+e.+e.+e.
+bpm=60&ts=6/8&poly=2:3
 ```
 
 ```open | 7:5 in 5/8 – seven eighths in the time of five
-bpm=80&ts=5/8&counter=7:5e+7:5e+7:5e+7:5e+7:5e+7:5e+7:5e
+bpm=80&ts=5/8&poly=7:5
 ```
 
 ## Building your own link
 
-The `counter` parameter is one bar of the meter in grooph's
-[text notation](https://grooph.app/llms.txt): the counter clicks as notes, rests where it is
-silent. A note with `>` clicks strong, a note in parentheses such as `(e)` soft. It needs
-`ts` and works only for the metronome, not together with a written rhythm. The easiest way
-to get a link is to set the polyrhythm in the app and share it with the share button next to play in the Metronome tab.
+The `poly` parameter is the ratio, such as `poly=3:2`: grooph writes the counter clicks
+itself, as when you pick the ratio in the app. It needs `ts` and works only for the
+metronome, not together with a written rhythm. The ratio's second number has to divide the
+beats of the meter: 3:2 and 3:4 fit 4/4, 7:5 fits 5/8 but not 4/4. When you change single
+counter clicks in the app (louder, softer, silent), its share button writes the clicks out
+instead, so the link keeps them.
 
 A ratio with a common factor sounds like the reduced one: 4:2 in 4/4 is four eighths in the
-time of two quarters, the same as 2:1, so a 4:2 link opens as 2:1:
+time of two quarters, the same as 2:1:
 
 ```open | 2:1 (or 4:2) in 4/4 – eighths against quarters
-bpm=90&ts=4/4&counter=e+e+e+e+e+e+e+e
+bpm=90&ts=4/4&poly=2:1
 ```
 
 ## FAQ
