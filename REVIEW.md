@@ -90,8 +90,34 @@ Read the changed code in context, not just the diff lines. Open callers and call
 - **Guide pages (`crates/site`):** when app behavior changes, the guide texts and their example links must
   still describe and open what the app now does.
 
-Only report a weakness you can point to in the code, with a concrete failure scenario. No style nits, no
-speculative "consider maybe" remarks. If you are not sure something is a bug, say how sure you are.
+**Design and maintainability.** Check whether the change leaves the code harder to change than it found it.
+`ARCHITECTURE.md` is the reference: its crate dependencies, data model and invariants.
+
+- **Dependency direction:** a new dependency between crates, or a crate reaching into something its layer
+  should not know (GUI in `measure`, `audio` or `link`; drawing in `layout`; the model in `midi` or `mic`).
+- **Logic in the wrong place:** music rules (durations, onsets, grouping, counting) computed in `app` or a
+  panel instead of `measure`; state logic buried in drawing code; a panel doing what a model function should.
+- **Cross-cutting concerns:** persistence, undo, error reporting, repaint requests and the native/web split
+  each have an existing mechanism. Flag a feature that builds its own instead, or spreads one concern over
+  many call sites (`cfg(target_arch = "wasm32")` branches in callers, the same save or undo step repeated by
+  hand) where one place would do.
+- **Duplication:** a new helper, type or constant that repeats one the workspace already has. Name the
+  existing one.
+- **One source of truth:** new state that copies or derives from existing state and has to be kept in sync
+  by hand; flags that live across updates and only work if things happen in a certain order.
+- **Interfaces:** callers that must know internal details or call things in a fixed order; fields or
+  functions made `pub` only to reach them from elsewhere; functions whose parameter lists or `match`/`if`
+  chains grow with every feature where the data model should carry the case.
+- **Debt left behind:** `TODO`s, commented-out code, workarounds without a reason, magic numbers next to an
+  existing constant, a structural change that `ARCHITECTURE.md` no longer describes.
+- **Testability:** new logic reachable only through the UI or a real device, when it could sit in a plain
+  function with a unit test.
+
+Only report a weakness you can point to in the code. For correctness, give a concrete failure scenario. For
+design, give a concrete, checkable reason instead: the `ARCHITECTURE.md` rule it breaks, the existing helper
+it duplicates, the two places that must now be kept in sync, the call sites a future change will have to
+touch. No style nits (naming, formatting, taste), no speculative "consider maybe" remarks. If you are not
+sure something is a bug, say how sure you are.
 
 ## 4. Output
 
@@ -124,7 +150,8 @@ and nothing else (a ```json fence around it is fine):
   `note` names the file/function or says what is missing.
 - `findings`: the weaknesses from §3, and requirements that are not met. `severity` is `high` (breaks a
   requirement, loses data, panics or breaks existing links), `medium` (wrong in a realistic edge case) or
-  `low` (weakness worth fixing but not blocking). `file` is relative to the repository root; `line` is a line
+  `low` (weakness worth fixing but not blocking). Design findings are `low`, or `medium` when they break a
+  rule `ARCHITECTURE.md` states or leave two copies of the same state or logic to keep in sync. `file` is relative to the repository root; `line` is a line
   of that file at the head commit, preferably one inside the diff, or `null` when the finding has no single
   place. `confidence` is `high`, `medium` or `low`: how sure you are that it is a real problem.
 - `out_of_scope`: changes no requirement asks for, and claims in the description the diff does not back up.
