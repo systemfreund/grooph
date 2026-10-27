@@ -65,11 +65,12 @@ concurrency:
 
 env:
   # Default models of the general review. GLM 5.3 (venice/z-ai-glm-5-3, its
-  # runs failed too often) and Kimi K2.7 Code (venice/kimi-k2-7-code) are left
-  # out but stay in opencode.json for manual runs.
-  DEFAULT_MODELS: '["venice/deepseek-v4-1-flash", "venice/claude-sonnet-5-5"]'
+  # runs failed too often), Kimi K2.7 Code (venice/kimi-k2-7-code) and Claude
+  # Sonnet 5.5 (venice/claude-sonnet-5-5) are left out but stay in
+  # opencode.json for manual runs.
+  DEFAULT_MODELS: '["venice/deepseek-v4-1-flash"]'
   RUST_MODEL: venice/deepseek-v4-1-flash
-  SYNTHESIS_MODEL: venice/claude-sonnet-5-5
+  SYNTHESIS_MODEL: venice/deepseek-v4-1-flash
 
 jobs:
   setup:
