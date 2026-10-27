@@ -701,17 +701,18 @@ impl Grooph {
     }
 
     /// The ring with the click bar, `height` tall at the bottom of the space
-    /// left between the panels.
-    pub(crate) fn metronome_ring(&mut self, ui: &mut Ui, height: f32) {
+    /// left between the panels. With `play_in_middle` (the inline view in a
+    /// chat) its middle is the play button.
+    pub(crate) fn metronome_ring(&mut self, ui: &mut Ui, height: f32, play_in_middle: bool) {
         egui::Panel::bottom("metronome_ring")
             .exact_size(height)
             .resizable(false)
             .show_separator_line(false)
             .frame(egui::Frame::new().fill(ui.visuals().panel_fill))
-            .show(ui, |ui| self.ring(ui));
+            .show(ui, |ui| self.ring(ui, play_in_middle));
     }
 
-    fn ring(&mut self, ui: &mut Ui) {
+    fn ring(&mut self, ui: &mut Ui, play_in_middle: bool) {
         // Nothing hovered unless the ring is drawn below.
         self.editor.metronome.ring_hover = None;
         let bar = self.click_bar();
@@ -822,6 +823,11 @@ impl Grooph {
             0.72 * radius - dot_radius - 4.0
         };
 
+        // The play button in the middle, as big as the room inside the dots
+        // or the counter ring leaves (at least a finger's width).
+        let button = play_in_middle.then(|| (0.75 * hand_from).max(22.0).min(hand_from));
+        let hand_from = button.map_or(hand_from, |r| r + 4.0);
+
         // A hand while playing, from inside the dots (or across both rings
         // with a counter rhythm, so it shows where the clicks of the two
         // rhythms fall against each other). Drawn like the staff's playback
@@ -840,6 +846,28 @@ impl Grooph {
         let count_in_beat = current_turn
             .filter(|_| self.playback_ctl.playback.count_in == CountInState::Active)
             .map(|t| if self.count_in_click_heard(&ts) { count_in_beat(t, &ts) } else { 1 });
+        if let Some(button) = button {
+            let playing = self.playback_ctl.transport_state == TransportState::Playing;
+            let tapped = paint_play_middle(
+                ui,
+                &resp,
+                center,
+                button,
+                playing,
+                count_in_beat,
+                bar_state.map(|b| b.bar + 1),
+            );
+            if tapped {
+                self.toggle_playback();
+            } else if resp.clicked() {
+                match resp.interact_pointer_pos().and_then(on_ring) {
+                    Some(RingHit::Click(idx)) => self.cycle_click_level(idx),
+                    Some(RingHit::Counter(idx)) => self.cycle_counter_level(idx),
+                    None => {}
+                }
+            }
+            return;
+        }
         let caption = match counter.as_ref().and(self.counter_ratio()) {
             Some(ratio) => ratio_label(ratio),
             None if counter.is_some() => "custom".to_owned(),
@@ -896,6 +924,62 @@ impl Grooph {
             }
         }
     }
+}
+
+/// The play button in the ring's middle, `radius` around `center`: play when
+/// stopped; the beat being counted during the count-in, on a faded button;
+/// stop and the bar number while playing. Returns whether it was tapped.
+pub(crate) fn paint_play_middle(
+    ui: &Ui,
+    resp: &egui::Response,
+    center: Pos2,
+    radius: f32,
+    playing: bool,
+    count_in_beat: Option<u32>,
+    bar: Option<u64>,
+) -> bool {
+    let visuals = ui.visuals();
+    let on_button = |pos: Pos2| (pos - center).length() <= radius;
+    if resp.hover_pos().is_some_and(on_button) {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    let pressed =
+        resp.is_pointer_button_down_on() && resp.interact_pointer_pos().is_some_and(on_button);
+    let mut fill = visuals.selection.bg_fill;
+    if count_in_beat.is_some() {
+        fill = fill.gamma_multiply(0.35);
+    }
+    if pressed {
+        fill = fill.gamma_multiply(0.8);
+    }
+    let painter = ui.painter();
+    painter.circle_filled(center, radius, fill);
+    let icon = visuals.selection.stroke.color;
+    let icon_rect = egui::Rect::from_center_size(center, vec2(radius, radius) * 1.2);
+    match count_in_beat {
+        Some(beat) => {
+            painter.text(
+                center,
+                Align2::CENTER_CENTER,
+                beat.to_string(),
+                FontId::proportional(1.1 * radius),
+                visuals.strong_text_color(),
+            );
+        }
+        None => {
+            crate::shell::paint_play_icon(painter, icon_rect, icon, playing);
+            if let Some(bar) = bar.filter(|_| playing) {
+                painter.text(
+                    center + vec2(0.0, 0.62 * radius),
+                    Align2::CENTER_CENTER,
+                    bar.to_string(),
+                    FontId::proportional((0.26 * radius).clamp(11.0, 18.0)),
+                    icon,
+                );
+            }
+        }
+    }
+    resp.clicked() && resp.interact_pointer_pos().is_some_and(on_button)
 }
 
 /// What a tap on the ring hits: a beat of the click bar, or a click of the

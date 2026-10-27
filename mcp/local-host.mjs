@@ -16,6 +16,8 @@
 //                   switches it later
 //   w=360           width of the frame in CSS pixels
 //   tall=1          room below the frame, so the page scrolls as a chat does
+//   fullscreen=0    a host without fullscreen (else window.exitFullscreen()
+//                   brings a fullscreen view back inline)
 //   styles=0        no hostContext.styles (by default Claude-like color
 //                   variables with light-dark(), as the spec suggests)
 //   bpm, ts, click, poly, swing, su      the tool's arguments
@@ -158,13 +160,24 @@ const styles = q.get("styles") === "0" ? undefined : { variables: {
   "--color-text-secondary": "light-dark(#3d3d3a, #c2c0b6)",
   "--color-border-primary": "light-dark(#1f1e1d26, #dedcd126)",
 } };
+const modes = q.get("fullscreen") === "0" ? ["inline"] : ["inline", "fullscreen"];
+const inlineWidth = frame.style.width;
+const display = (mode) => {
+  const full = mode === "fullscreen";
+  frame.style.width = full ? "100%" : inlineWidth;
+  const height = full ? 700 : undefined;
+  if (full) frame.style.height = height + "px";
+  post({ method: "ui/notifications/host-context-changed", params: { displayMode: mode,
+    containerDimensions: full ? { width: frame.clientWidth, height } : { width: frame.clientWidth, maxHeight: 1000 } } });
+};
+window.exitFullscreen = () => display("inline");
 window.addEventListener("message", (e) => {
   if (e.source !== frame.contentWindow) return;
   const m = e.data;
   const reply = (result) => post({ id: m.id, result });
   if (m.method === "ui/initialize") {
     reply({ protocolVersion: "2026-01-26", hostInfo: { name: "local-host", version: "0" }, hostCapabilities: { openLinks: {} },
-      hostContext: { theme, styles, platform: "web", displayMode: "inline", availableDisplayModes: ["inline"], containerDimensions: { width: frame.clientWidth, maxHeight: 1000 } } });
+      hostContext: { theme, styles, platform: "web", displayMode: "inline", availableDisplayModes: modes, containerDimensions: { width: frame.clientWidth, maxHeight: 1000 } } });
   } else if (m.method === "ui/notifications/initialized") {
     post({ method: "ui/notifications/tool-input", params: { arguments: args } });
     post({ method: "ui/notifications/tool-result", params: callResult });
@@ -174,6 +187,11 @@ window.addEventListener("message", (e) => {
     log("model context:", m.params.content?.[0]?.text);
     window.modelContext = m.params;
     reply({});
+  } else if (m.method === "ui/request-display-mode") {
+    const mode = modes.includes(m.params.mode) ? m.params.mode : "inline";
+    log("display mode:", mode);
+    reply({ mode });
+    display(mode);
   } else if (m.method === "ui/open-link") {
     log("open link:", m.params.url);
     window.opened.push(m.params.url);
