@@ -931,6 +931,9 @@ impl Grooph {
             self.generate_new_score();
         }
         self.playback_ctl.transport_state = TransportState::Playing;
+        if let Some(audio) = &mut self.playback_ctl.audio {
+            audio.restart();
+        }
         let midi_connected =
             self.playback_ctl.midi.input.as_ref().is_some_and(|input| input.is_connected());
         let accuracy_start = midi_connected.then(clock::now_seconds);

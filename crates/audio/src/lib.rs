@@ -243,6 +243,8 @@ pub struct Audio {
     /// Ticks dropped from the front of the score since the last update, see
     /// [`Audio::drop_leading_ticks`].
     pending_shift: f64,
+    /// A play started since the last update, see [`Audio::restart`].
+    pending_start: bool,
     /// Updates left before the output device is tried again after it could
     /// not be opened.
     reopen_wait: u32,
@@ -382,6 +384,7 @@ impl Audio {
             retired: Vec::new(),
             last_bar: None,
             pending_shift: 0.0,
+            pending_start: false,
             reopen_wait: 0,
             watchdog: Watchdog::default(),
             output_lost: false,
@@ -503,7 +506,11 @@ impl Audio {
     /// dropped later on this thread, see [`Audio::drop_released_plans`].
     fn publish(&mut self, player_state: &PlayerState, plan: Arc<PlaybackPlan>) {
         let same_plan = Arc::ptr_eq(&plan, &self.sent_plan) || *self.sent_plan == *plan;
-        if self.pending_shift <= 0.0 && same_plan && self.sent_state == *player_state {
+        if self.pending_shift <= 0.0
+            && !self.pending_start
+            && same_plan
+            && self.sent_state == *player_state
+        {
             return;
         }
         let plan = if same_plan { Arc::clone(&self.sent_plan) } else { plan };
@@ -516,19 +523,23 @@ impl Audio {
             return;
         };
         let old = std::mem::replace(&mut shared_state.params.plan, Arc::clone(&plan));
-        if *player_state == PlayerState::Playing && shared_state.playing_state != *player_state {
+        let playing = *player_state == PlayerState::Playing;
+        if playing && (shared_state.playing_state != *player_state || self.pending_start) {
             shared_state.starts += 1;
         }
         shared_state.playing_state = player_state.clone();
         shared_state.shift += self.pending_shift;
         // The published cursor moves with the score right away, so the
-        // app never reads the old position against the new score.
-        shared_state.playback_tick = (shared_state.playback_tick - self.pending_shift).max(0.0);
+        // app never reads the old position against the new score; stopped,
+        // it reads the start, as the audio thread will publish.
+        shared_state.playback_tick =
+            if playing { (shared_state.playback_tick - self.pending_shift).max(0.0) } else { 0.0 };
         shared_state.is_dirty = true;
         debug!("Shared state changed: {:?}", shared_state);
         drop(shared_state);
 
         self.pending_shift = 0.0;
+        self.pending_start = false;
         self.sent_plan = plan;
         self.sent_state = player_state.clone();
         if !Arc::ptr_eq(&old, &self.sent_plan) {
@@ -572,6 +583,13 @@ impl Audio {
 
     pub fn set_playback_options(&mut self, options: PlaybackOptions) {
         self.options = options;
+    }
+
+    /// A play started: the next [`Audio::update`] starts the score over,
+    /// also when the stop before it came within the same frame and never
+    /// reached the audio thread.
+    pub fn restart(&mut self) {
+        self.pending_start = true;
     }
 
     /// The score lost `ticks` from its front (endless mode dropped a played
@@ -1143,6 +1161,18 @@ mod tests {
             source.next();
         }
         assert!(source.tick_source.in_count_in());
+
+        // Stop and play within one frame: only the play reaches `update`.
+        for _ in 0..(48_000 * 3) {
+            source.next();
+        }
+        assert!(!source.tick_source.in_count_in());
+        audio.restart();
+        audio.publish(&PlayerState::Playing, plan_for(&audio, 120, &score));
+        for _ in 0..1024 {
+            source.next();
+        }
+        assert!(source.tick_source.in_count_in());
     }
 
     #[test]
@@ -1158,8 +1188,10 @@ mod tests {
         assert!(audio.playback_position().unwrap().0 > 0.0);
         assert!(lock(&audio.shared_state).bar.is_some());
 
-        // The output stays open, the next play starts over.
+        // The output stays open, the next play starts over. The position
+        // reads the start right away, before the audio thread looks.
         audio.publish(&PlayerState::Stopped, plan_for(&audio, 120, &score));
+        assert_eq!(audio.playback_position().unwrap().0, 0.0);
         for _ in 0..4096 {
             source.next();
         }
