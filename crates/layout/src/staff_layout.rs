@@ -1122,7 +1122,6 @@ mod tests {
     #[test]
     fn an_empty_bar_shows_one_whole_rest_in_its_middle() {
         use crate::glyphs::REST_WHOLE;
-        use crate::pixel_layout::shown_note;
         use grooph_measure::notation::parse_score;
         let em = 20.0;
         let rect = Rect::from_min_max(Pos2::ZERO, Pos2::new(1200.0, 400.0));
@@ -1143,8 +1142,6 @@ mod tests {
             assert_eq!(notes[0].head.glyph, REST_WHOLE, "{meter}");
             assert!(notes.iter().all(|n| n.dots.is_empty()), "{meter}");
             assert!(notes[1..].iter().all(|n| n.hidden && n.glyphs().next().is_none()), "{meter}");
-            // They show as the whole rest.
-            assert!((0..notes.len()).all(|i| shown_note(notes, i) == 0), "{meter}");
             let area = (placed.layout.notes_left_edge + placed.rect.right()) / 2.0;
             assert!((notes[0].head.ink().center().x - area).abs() < 1.0, "{meter} centred");
             // It hangs from the line.
@@ -1154,7 +1151,6 @@ mod tests {
             // A measure with a note keeps its rests.
             let other = &staff.placed(1).unwrap().layout.notes;
             assert!(other.iter().all(|n| !n.hidden));
-            assert!((0..other.len()).all(|i| shown_note(other, i) == i));
         }
         // Off (while editing) and in triplets, the rests stay as written.
         let score = parse_score("4/4 r:h r:h").unwrap();

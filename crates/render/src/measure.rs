@@ -6,7 +6,7 @@ use eframe::egui::{
 };
 use grooph_layout::pixel_layout::{
     BeamLayout, LayoutOpts, MeasureLayout, NoteLayout, TimeSignatureLayout, TupletLayout,
-    build_measure_layout, shown_note,
+    build_measure_layout,
 };
 use grooph_measure::counting::{CountConfig, CountSlot, build_count_slots};
 use grooph_measure::grid::DEFAULT_GRID;
@@ -418,7 +418,6 @@ pub fn draw_note_glyphs(
     color: Color32,
     lit: Option<(usize, Color32)>,
 ) {
-    let lit = lit.map(|(idx, c)| (shown_note(notes, idx), c));
     for (idx, note) in notes.iter().enumerate() {
         let color = lit.filter(|&(i, _)| i == idx).map_or(color, |(_, c)| c);
         draw_beat(painter, note, opts, color);
