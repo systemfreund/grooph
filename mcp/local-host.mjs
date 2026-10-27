@@ -15,6 +15,7 @@
 //   theme=dark      the host's theme (light by default); window.setTheme(t)
 //                   switches it later
 //   w=360           width of the frame in CSS pixels
+//   tall=1          room below the frame, so the page scrolls as a chat does
 //   bpm, ts, click, poly, swing, su      the tool's arguments
 //
 // With GROOPH_ORIGIN set (e.g. http://localhost:8788 for `npx wrangler pages
@@ -121,6 +122,7 @@ let theme = q.get("theme") || "light";
 document.body.classList.toggle("dark", theme === "dark");
 const frame = document.getElementById("view");
 frame.style.width = (q.get("w") || "720") + "px";
+if (q.get("tall") === "1") document.body.style.paddingBottom = "2000px";
 window.opened = [];
 let id = 1;
 async function rpc(method, params) {

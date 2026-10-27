@@ -170,6 +170,14 @@ grooph's metronome runs inside AI chats as an
   the host (`groophHost.theme`, the view calls `groophHost.repaint`). The
   settings go to the model through `groophHost.updateModelContext` once they
   stayed the same for a second. The bridge is in `web.rs`/`platform.rs`.
+  Touch and wheel events are left to the page (`web_options`,
+  `embed::leaves_to_page`; the canvas has `touch-action: pan-y`), so a
+  vertical drag on the view scrolls the chat, as Claude's guidelines ask;
+  taps and horizontal drags stay with the app. The view moves with the page
+  while it scrolls, so egui would take the scroll for a tap where it began:
+  on `touchcancel`/`pointercancel` `embed::cancel_scrolled_touch` moves the
+  pointer far off before releasing it. The options sheet does not fold on a
+  flick there.
 - Tests: `node --test mcp/server.test.mjs` (no Cloudflare needed), `cargo test` (embed
   mode). `node mcp/local-host.mjs [dist]` plays host and sandbox locally
   for a `trunk build` (spec CSP, `?wasm=1` adds `'wasm-unsafe-eval'`). To

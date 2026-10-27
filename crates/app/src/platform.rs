@@ -194,6 +194,27 @@ pub(crate) fn install_host_repaint(ctx: eframe::egui::Context) {
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn install_host_repaint(_ctx: eframe::egui::Context) {}
 
+/// Notice `pointercancel`, which eframe does not forward: the page took over
+/// a touch to scroll (see [`crate::embed::cancel_scrolled_touch`]).
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn install_pointer_cancel_listener(ctx: eframe::egui::Context) {
+    crate::web::install_pointer_cancel_listener(ctx);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn install_pointer_cancel_listener(_ctx: eframe::egui::Context) {}
+
+/// Whether a `pointercancel` came since the last call.
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn take_pointer_cancel() -> bool {
+    crate::web::take_pointer_cancel()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn take_pointer_cancel() -> bool {
+    false
+}
+
 /// Report the metronome's settings to the model through the MCP App host.
 /// `false` if the view could not take them (no host, not connected).
 #[cfg(target_arch = "wasm32")]

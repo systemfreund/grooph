@@ -19,7 +19,7 @@ fn main() {
     // Redirect `log` message to `console.log` and friends:
     eframe::WebLogger::init(log::LevelFilter::Debug).ok();
 
-    let web_options = eframe::WebOptions::default();
+    let web_options = grooph_app::web_options();
 
     wasm_bindgen_futures::spawn_local(async {
         let document = web_sys::window().expect("No window").document().expect("No document");

@@ -24,10 +24,12 @@ export function viewHtml({ origin, js, wasm }) {
 <meta name="color-scheme" content="light dark">
 <title>grooph metronome</title>
 <style>
-  html, body { margin: 0; padding: 0; overflow: hidden; touch-action: manipulation; }
+  html, body { margin: 0; padding: 0; overflow: hidden; }
   body { font: 15px/1.4 system-ui, sans-serif; background: #f8f8f8; color: #222; }
   html.dark body { background: #1b1b1b; color: #ddd; }
   #stage { position: relative; height: ${VIEW_HEIGHT}px; }
+  /* Vertical drags scroll the chat; taps and horizontal drags go to the app. */
+  html, canvas { touch-action: pan-y; }
   canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; outline: none; }
   #loading_text { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); opacity: 0.7; }
   #fallback { padding: 16px 20px; }

@@ -431,6 +431,24 @@ impl App for Grooph {
     fn persist_egui_memory(&self) -> bool {
         !self.embedded()
     }
+
+    fn raw_input_hook(&mut self, ctx: &Context, raw_input: &mut egui::RawInput) {
+        if self.embedded() {
+            embed::cancel_scrolled_touch(ctx, raw_input);
+        }
+    }
+}
+
+/// eframe's options for the web app. Embedded in a chat (see [`embed`]),
+/// pointer and touch events are left to the page as well, so a vertical drag
+/// that starts on the view scrolls the conversation.
+#[cfg(target_arch = "wasm32")]
+pub fn web_options() -> eframe::WebOptions {
+    let mut options = eframe::WebOptions::default();
+    if platform::link_query().as_deref().and_then(embed_params).is_some() {
+        options.should_prevent_default = Box::new(|event| !embed::leaves_to_page(event));
+    }
+    options
 }
 
 impl Grooph {
