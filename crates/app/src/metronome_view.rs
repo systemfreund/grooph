@@ -848,15 +848,7 @@ impl Grooph {
             .map(|t| if self.count_in_click_heard(&ts) { count_in_beat(t, &ts) } else { 1 });
         if let Some(button) = button {
             let playing = self.playback_ctl.transport_state == TransportState::Playing;
-            let tapped = paint_play_middle(
-                ui,
-                &resp,
-                center,
-                button,
-                playing,
-                count_in_beat,
-                bar_state.map(|b| b.bar + 1),
-            );
+            let tapped = paint_play_middle(ui, &resp, center, button, playing, count_in_beat);
             if tapped {
                 self.toggle_playback();
             } else if resp.clicked() {
@@ -928,7 +920,7 @@ impl Grooph {
 
 /// The play button in the ring's middle, `radius` around `center`: play when
 /// stopped; the beat being counted during the count-in, on a faded button;
-/// stop and the bar number while playing. Returns whether it was tapped.
+/// stop while playing. Returns whether it was tapped.
 pub(crate) fn paint_play_middle(
     ui: &Ui,
     resp: &egui::Response,
@@ -936,7 +928,6 @@ pub(crate) fn paint_play_middle(
     radius: f32,
     playing: bool,
     count_in_beat: Option<u32>,
-    bar: Option<u64>,
 ) -> bool {
     let visuals = ui.visuals();
     let on_button = |pos: Pos2| (pos - center).length() <= radius;
@@ -968,15 +959,6 @@ pub(crate) fn paint_play_middle(
         }
         None => {
             crate::shell::paint_play_icon(painter, icon_rect, icon, playing);
-            if let Some(bar) = bar.filter(|_| playing) {
-                painter.text(
-                    center + vec2(0.0, 0.62 * radius),
-                    Align2::CENTER_CENTER,
-                    bar.to_string(),
-                    FontId::proportional((0.26 * radius).clamp(11.0, 18.0)),
-                    icon,
-                );
-            }
         }
     }
     resp.clicked() && resp.interact_pointer_pos().is_some_and(on_button)

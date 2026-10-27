@@ -273,15 +273,12 @@ impl Grooph {
         let frame = Frame::new().fill(ui.visuals().panel_fill).inner_margin(Margin {
             left: 12,
             right: 8,
-            top: 6,
+            top: 2,
             bottom: 0,
         });
         egui::Panel::top("embed_tempo").frame(frame).show_separator_line(false).show(ui, |ui| {
             ui.horizontal(|ui| {
-                let color = ui.visuals().strong_text_color();
-                // SMuFL metNoteQuarterUp: a quarter note, as in a tempo mark.
-                ui.label(RichText::new("\u{ECA5}").font(FontId::new(24.0, music)).color(color));
-                ui.label(RichText::new(format!("= {bpm}")).size(22.0).color(color));
+                tempo_mark(ui, bpm, music);
                 ui.add_space(4.0);
                 for (label, delta, hint) in [("−", -1, "Slower"), ("+", 1, "Faster")] {
                     let button =
@@ -419,6 +416,31 @@ impl Grooph {
 
 /// Smallest touch target, in points (Apple's and Claude's guidelines).
 const TARGET: f32 = 44.0;
+
+/// `♩ = 140` as a tempo mark, the note and the text on one baseline,
+/// centered in a row as tall as the buttons beside it. Painted rather than
+/// labelled: the music font's line is far taller than its note, and labels
+/// could be selected.
+fn tempo_mark(ui: &mut Ui, bpm: u32, music: egui::FontFamily) {
+    let color = ui.visuals().strong_text_color();
+    // SMuFL metNoteQuarterUp: a quarter note, as in a tempo mark.
+    let note = ui.painter().layout_no_wrap("\u{ECA5}".into(), FontId::new(24.0, music), color);
+    let text = ui.painter().layout_no_wrap(format!("= {bpm}"), FontId::proportional(22.0), color);
+    let gap = 6.0;
+    let (rect, _) =
+        ui.allocate_exact_size(vec2(note.size().x + gap + text.size().x, TARGET), Sense::hover());
+    // Each galley's first glyph sits on its baseline; the text's middle on
+    // the row's middle.
+    let baseline_of = |galley: &egui::Galley| {
+        galley.rows.first().and_then(|r| r.row.glyphs.first()).map_or(0.0, |g| g.pos.y)
+    };
+    let baseline = rect.center().y - text.size().y / 2.0 + baseline_of(&text);
+    let painter = ui.painter();
+    let note_top = baseline - baseline_of(&note);
+    painter.galley(pos2(rect.left(), note_top), note.clone(), color);
+    let text_top = baseline - baseline_of(&text);
+    painter.galley(pos2(rect.left() + note.size().x + gap, text_top), text, color);
+}
 
 /// The fullscreen button: four corners pointing outwards.
 fn fullscreen_button(ui: &mut Ui) -> egui::Response {
@@ -686,7 +708,7 @@ mod tests {
             ] {
                 let mut output = ctx.run_ui(RawInput { events, ..Default::default() }, |ui| {
                     let resp = ui.allocate_response(ui.available_size(), Sense::click());
-                    tapped |= paint_play_middle(ui, &resp, center, 30.0, false, None, None);
+                    tapped |= paint_play_middle(ui, &resp, center, 30.0, false, None);
                 });
                 output.textures_delta.clear();
             }

@@ -167,8 +167,7 @@ grooph's metronome runs inside AI chats as an
   compact card (`Grooph::compact_card`): a tempo row (`♩ = 140`, − and +,
   the fullscreen button), the staff with its meter in front
   (`time_signature_first`) and the ring with the play button in its middle
-  (count-in beats on it while counting in, stop and the bar number while
-  playing); no menus or popovers, as Claude's guidelines ask. The view
+  (count-in beats on it while counting in, stop while playing); no menus or popovers, as Claude's guidelines ask. The view
   passes the display mode as `groophHost.displayMode`/`displayModes` and
   asks for fullscreen with `ui/request-display-mode`. In fullscreen, or on
   a host without it, it is the Metronome tab without the tab bar and the
