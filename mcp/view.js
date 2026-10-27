@@ -375,7 +375,7 @@ function fail(reason) {
 history.replaceState(null, "", "?" + query + "&embed=mcp&theme=" + theme);
 
 // A tiny module first: a host whose CSP forbids WebAssembly fails here,
-// before the 7 MB download.
+// before the WASM download (about 3 MB compressed).
 const wasmAllowed = (() => {
   try {
     return new WebAssembly.Module(new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0])) instanceof WebAssembly.Module;
