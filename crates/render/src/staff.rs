@@ -5,8 +5,8 @@
 
 use crate::measure::{
     beat_anchor_x, draw_beat_anchor, draw_count_layer, draw_edit_cursor, draw_notes,
-    last_note_entering_frac, last_note_split, playback_cursor_entering_x, playback_cursor_x,
-    render_measure_at,
+    highlight_color, last_note_entering_frac, last_note_split, playback_cursor_entering_x,
+    playback_cursor_x, render_measure_at,
 };
 use eframe::egui;
 use eframe::egui::{Color32, Rangef, Stroke};
@@ -52,7 +52,7 @@ pub fn draw_staff(
         Voice::Lower => (None, cursor),
     };
     let color = ui.visuals().text_color();
-    let highlight = ui.visuals().selection.stroke.color.to_opaque();
+    let highlight = highlight_color(ui.visuals());
     // The lit note of `voice` in the measure `measure_idx`, if any.
     let lit_in = |voice: Voice, measure_idx: MeasureIdx| {
         lit.filter(|&(v, c)| v == voice && c.measure_idx == measure_idx)
@@ -299,7 +299,7 @@ mod tests {
         let ctx = egui::Context::default();
         let mut color = Color32::PLACEHOLDER;
         let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
-            color = ui.visuals().selection.stroke.color.to_opaque();
+            color = highlight_color(ui.visuals());
             let marks = PlaybackMarks::Line;
             draw_staff(ui, &upper, &staff, None, Voice::Upper, Some(lit), None, marks, None, &opts);
         });

@@ -39,7 +39,7 @@ use grooph_measure::grid::DEFAULT_GRID;
 use grooph_measure::score::Score;
 use grooph_measure::tempo::ScoreTiming;
 use grooph_measure::{Beat, Cursor, Measure, TimeSignature};
-use grooph_render::playback_cursor_stroke;
+use grooph_render::{highlight_color, playback_cursor_stroke};
 use std::cell::RefCell;
 use std::f32::consts::{FRAC_PI_2, TAU};
 use std::rc::Rc;
@@ -827,7 +827,7 @@ impl Grooph {
         // cursor.
         if let Some(turn) = current_turn.filter(|_| !muted) {
             let to = radius + thickness(ClickLevel::Strong) * radius / 2.0 + 4.0;
-            let stroke = playback_cursor_stroke(self.ui.staff_em, visuals.selection.stroke.color);
+            let stroke = playback_cursor_stroke(self.ui.staff_em, highlight_color(visuals));
             painter.line_segment(
                 [at_turn(center, hand_from, turn), at_turn(center, to, turn)],
                 stroke,

@@ -27,7 +27,7 @@ pub fn draw_measure(
         &measure_layout,
         opts,
         cursor_idx,
-        playback_tick.map(|t| (t, ui.visuals().selection.stroke.color.to_opaque())),
+        playback_tick.map(|t| (t, highlight_color(ui.visuals()))),
         count_config,
         true,
         None,
@@ -106,8 +106,19 @@ pub(crate) fn render_measure_at(
     }
 
     if let Some(x) = cursor_x {
-        let color = ui.visuals().selection.stroke.color;
+        let color = highlight_color(ui.visuals());
         draw_playback_cursor(painter, opts.y_center(), x, opts.em, color);
+    }
+}
+
+/// Colour of the playback cursor, the count label being played and a lit
+/// note. The light theme's selection colour is a dark blue that barely stands
+/// out from the dark grey notes, so it takes a vivid blue.
+pub fn highlight_color(visuals: &egui::Visuals) -> Color32 {
+    if visuals.dark_mode {
+        visuals.selection.stroke.color.to_opaque()
+    } else {
+        Color32::from_rgb(0, 110, 240)
     }
 }
 
