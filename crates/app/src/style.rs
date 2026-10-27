@@ -29,6 +29,11 @@ impl Grooph {
 
             style.spacing.button_padding = Vec2::new(15.0, 15.0);
             style.spacing.window_margin = Margin::same(10);
+
+            // Embedded in a chat: its card colors (see `embed::HostColors`).
+            if let Some(embed) = &self.ui.embed {
+                embed.colors.apply(&mut style.visuals);
+            }
         });
     }
 }

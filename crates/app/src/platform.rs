@@ -184,6 +184,18 @@ pub(crate) fn host_theme() -> Option<eframe::egui::Theme> {
     None
 }
 
+/// The chat host's colors as the embedding view resolved them
+/// (`window.groophHost.colors`, see [`crate::embed::HostColors`]).
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn host_colors() -> Option<String> {
+    crate::web::host_string("colors").filter(|c| !c.is_empty())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn host_colors() -> Option<String> {
+    None
+}
+
 /// Let the embedding view ask for a frame (`window.groophHost.repaint()`),
 /// e.g. after the host switched its theme.
 #[cfg(target_arch = "wasm32")]

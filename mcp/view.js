@@ -5,7 +5,8 @@
 // and the host's theme, and starts the web build of `origin` in embed mode
 // (crates/app/src/embed.rs). `window.groophHost` is its bridge to the app:
 // the app reports its settings through `updateModelContext`, opens links
-// through `openLink`, and reads `appUrl` and `theme`.
+// through `openLink`, and reads `appUrl`, `theme` and `colors` (the host's
+// card colors, see `resolveColors`).
 
 /** Inline height of the view, in CSS pixels: card, staff, ring and play
  * button, with the options folded. Less if the host allows less. */
@@ -25,8 +26,12 @@ export function viewHtml({ origin, js, wasm }) {
 <title>grooph metronome</title>
 <style>
   html, body { margin: 0; padding: 0; overflow: hidden; }
-  body { font: 15px/1.4 system-ui, sans-serif; background: #f8f8f8; color: #222; }
-  html.dark body { background: #1b1b1b; color: #ddd; }
+  /* The host's colors (hostContext.styles.variables), else grooph's own. */
+  body {
+    font: 15px/1.4 system-ui, sans-serif;
+    background: var(--color-background-primary, light-dark(#f8f8f8, #1b1b1b));
+    color: var(--color-text-primary, light-dark(#222, #ddd));
+  }
   #stage { position: relative; height: ${VIEW_HEIGHT}px; }
   /* Vertical drags scroll the chat; taps and horizontal drags go to the app. */
   html, canvas { touch-action: pan-y; }
@@ -85,12 +90,56 @@ function notify(method, params) {
 // --- Theme and size ---
 const systemDark = () => window.matchMedia?.("(prefers-color-scheme: dark)").matches;
 let theme = systemDark() ? "dark" : "light";
+// The host's style variables the app takes, by the name the app knows them.
+const HOST_COLORS = {
+  background: "--color-background-primary",
+  card: "--color-background-secondary",
+  text: "--color-text-primary",
+  textWeak: "--color-text-secondary",
+  border: "--color-border-primary",
+};
+let hostVariables = {};
+let colors = "";
+// The host's colors as the app reads them: "background=#rrggbbaa;card=…",
+// only those the host gave. Values may use light-dark(), so they are
+// resolved by the browser in the current color scheme.
+function resolveColors() {
+  const probe = document.createElement("span");
+  document.body.appendChild(probe);
+  const resolved = [];
+  for (const [name, variable] of Object.entries(HOST_COLORS)) {
+    if (!hostVariables[variable]) continue;
+    probe.style.color = "var(" + variable + ")";
+    const hex = cssColorToHex(getComputedStyle(probe).color);
+    if (hex) resolved.push(name + "=" + hex);
+  }
+  probe.remove();
+  return resolved.join(";");
+}
+// "rgb(1, 2, 3)", "rgba(1, 2, 3, 0.5)" or "rgb(1 2 3 / 50%)" as #rrggbbaa.
+function cssColorToHex(css) {
+  const parts = css.match(/rgba?\\(([^)]*)\\)/)?.[1].split(/[\\s,/]+/).filter(Boolean);
+  if (!parts || parts.length < 3) return null;
+  const alpha = parts[3] === undefined ? 1 : parts[3].endsWith("%") ? parseFloat(parts[3]) / 100 : parseFloat(parts[3]);
+  const bytes = [...parts.slice(0, 3).map(Number), Math.round(alpha * 255)];
+  return "#" + bytes.map((b) => Math.max(0, Math.min(255, Math.round(b))).toString(16).padStart(2, "0")).join("");
+}
+function applyHostStyles(styles) {
+  for (const [variable, value] of Object.entries(styles?.variables || {})) {
+    if (!value) continue;
+    hostVariables[variable] = value;
+    document.documentElement.style.setProperty(variable, value);
+  }
+}
 function setTheme(next) {
   if (next !== "light" && next !== "dark") return;
   theme = next;
-  document.documentElement.classList.toggle("dark", theme === "dark");
+  // light-dark() in the host's variables follows the color scheme.
+  document.documentElement.style.colorScheme = theme;
+  colors = resolveColors();
   if (window.groophHost) {
     window.groophHost.theme = theme;
+    window.groophHost.colors = colors;
     window.groophHost.repaint?.();
   }
 }
@@ -105,7 +154,8 @@ function reportSize() {
   notify("ui/notifications/size-changed", { width: Math.ceil(width), height: Math.ceil(height) });
 }
 handlers["ui/notifications/host-context-changed"] = (context) => {
-  if (context.theme) setTheme(context.theme);
+  if (context.styles) applyHostStyles(context.styles);
+  if (context.theme || context.styles) setTheme(context.theme || theme);
   if (context.containerDimensions) fitHeight(context.containerDimensions);
 };
 
@@ -124,6 +174,7 @@ try {
   connected = true;
   notify("ui/notifications/initialized", {});
   const context = init?.hostContext || {};
+  applyHostStyles(context.styles);
   if (context.theme) setTheme(context.theme);
   fitHeight(context.containerDimensions);
 } catch (e) {
@@ -155,6 +206,7 @@ function openLink(url) {
 window.groophHost = {
   appUrl,
   theme,
+  colors,
   // Returns whether it took the context; the app tries again if not. A
   // request the host fails is sent again a few seconds later, unless newer
   // settings replaced it.

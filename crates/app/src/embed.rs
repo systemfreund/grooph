@@ -11,7 +11,9 @@
 use crate::metronome_view::ratio_label;
 use crate::pickers::silent_bars_label;
 use crate::{Grooph, TransportState, platform};
-use eframe::egui::{Context, Event, PointerButton, RawInput, Theme, TouchPhase, Ui, vec2};
+use eframe::egui::{
+    Color32, Context, Event, PointerButton, RawInput, Theme, TouchPhase, Ui, Visuals, vec2,
+};
 use grooph_link::format_bar;
 use grooph_measure::swing::SwingUnit;
 
@@ -87,6 +89,68 @@ pub(crate) fn cancel_scrolled_touch(ctx: &Context, raw: &mut RawInput) {
     raw.events.push(Event::PointerGone);
 }
 
+/// The chat host's own colors (`hostContext.styles.variables`, resolved by
+/// the view as `background=#rrggbbaa;card=…`), so the view's background,
+/// cards and text match the chat around it. Accents (play, the ring) stay
+/// grooph's. Each is `None` where the host gave none: egui's own then.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct HostColors {
+    background: Option<Color32>,
+    card: Option<Color32>,
+    text: Option<Color32>,
+    text_weak: Option<Color32>,
+    border: Option<Color32>,
+}
+
+impl HostColors {
+    pub(crate) fn parse(text: &str) -> Self {
+        let mut colors = Self::default();
+        for (name, hex) in text.split(';').filter_map(|pair| pair.split_once('=')) {
+            let Ok(color) = Color32::from_hex(hex.trim()) else { continue };
+            let slot = match name.trim() {
+                "background" => &mut colors.background,
+                "card" => &mut colors.card,
+                "text" => &mut colors.text,
+                "textWeak" => &mut colors.text_weak,
+                "border" => &mut colors.border,
+                _ => continue,
+            };
+            *slot = Some(color);
+        }
+        colors
+    }
+
+    /// Paint egui's panels, cards (and buttons, which share their fill) and
+    /// text in these colors.
+    pub(crate) fn apply(&self, visuals: &mut Visuals) {
+        if let Some(background) = self.background {
+            visuals.panel_fill = background;
+            visuals.window_fill = background;
+        }
+        let widgets = &mut visuals.widgets;
+        if let Some(card) = self.card {
+            widgets.inactive.weak_bg_fill = card;
+            // Hovered and pressed cards turn a little towards the text.
+            let toward = self.text.unwrap_or(widgets.inactive.fg_stroke.color);
+            widgets.hovered.weak_bg_fill = card.lerp_to_gamma(toward, 0.08);
+            widgets.active.weak_bg_fill = card.lerp_to_gamma(toward, 0.16);
+        }
+        if let Some(text) = self.text {
+            for widget in [&mut widgets.noninteractive, &mut widgets.inactive, &mut widgets.hovered]
+            {
+                widget.fg_stroke.color = text;
+            }
+        }
+        if let Some(border) = self.border {
+            widgets.noninteractive.bg_stroke.color = border;
+            visuals.window_stroke.color = border;
+        }
+        if self.text_weak.is_some() {
+            visuals.weak_text_color = self.text_weak;
+        }
+    }
+}
+
 /// A value of the settings reported to the model, as JSON would hold it.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Field {
@@ -107,6 +171,9 @@ pub(crate) struct ModelContext {
 pub(crate) struct Embed {
     /// Theme last applied: from the query, then from the host.
     theme: Option<Theme>,
+    /// The host's colors, and the text they were read from.
+    pub(crate) colors: HostColors,
+    colors_text: Option<String>,
     /// Settings last reported to the model.
     reported: Option<ModelContext>,
     /// Settings that differ from the reported ones, and since when.
@@ -120,7 +187,13 @@ impl Embed {
         }
         platform::install_host_repaint(ctx.clone());
         platform::install_pointer_cancel_listener(ctx.clone());
-        Self { theme: params.theme, reported: None, changed: None }
+        Self {
+            theme: params.theme,
+            colors: HostColors::default(),
+            colors_text: None,
+            reported: None,
+            changed: None,
+        }
     }
 }
 
@@ -139,7 +212,7 @@ impl Grooph {
         self.report_to_model(ui);
     }
 
-    /// Switch to the host's theme when it changes.
+    /// Switch to the host's theme and colors when they change.
     fn follow_host_theme(&mut self, ctx: &Context) {
         let Some(embed) = self.ui.embed.as_mut() else { return };
         if let Some(theme) = platform::host_theme()
@@ -147,6 +220,12 @@ impl Grooph {
         {
             ctx.set_theme(theme);
             embed.theme = Some(theme);
+        }
+        let colors = platform::host_colors();
+        if colors != embed.colors_text {
+            embed.colors = colors.as_deref().map(HostColors::parse).unwrap_or_default();
+            embed.colors_text = colors;
+            ctx.request_repaint();
         }
     }
 
@@ -405,6 +484,29 @@ mod tests {
         // A real tap still clicks.
         frame(events(vec![press]));
         assert!(frame(events(vec![release])));
+    }
+
+    #[test]
+    fn host_colors_paint_panels_cards_and_text() {
+        use super::HostColors;
+        use eframe::egui::{Color32, Visuals};
+        let colors = HostColors::parse(
+            "background=#ffffffff;card=#f5f4efff;text=#141413ff;textWeak=#73726cff;bogus=#000000ff;border=nope",
+        );
+        let mut visuals = Visuals::light();
+        let accent = visuals.selection.bg_fill;
+        colors.apply(&mut visuals);
+        assert_eq!(visuals.panel_fill, Color32::WHITE);
+        assert_eq!(visuals.widgets.inactive.weak_bg_fill, Color32::from_rgb(0xf5, 0xf4, 0xef));
+        assert_eq!(visuals.text_color(), Color32::from_rgb(0x14, 0x14, 0x13));
+        assert_eq!(visuals.weak_text_color(), Color32::from_rgb(0x73, 0x72, 0x6c));
+        // What the host does not give stays egui's; accents stay grooph's.
+        assert_eq!(visuals.window_stroke, Visuals::light().window_stroke);
+        assert_eq!(visuals.selection.bg_fill, accent);
+        // No colors, no change.
+        let mut plain = Visuals::dark();
+        HostColors::parse("").apply(&mut plain);
+        assert_eq!(plain.panel_fill, Visuals::dark().panel_fill);
     }
 
     #[test]
