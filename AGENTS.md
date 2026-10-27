@@ -112,21 +112,22 @@ fn demo_howto_test_measure_with_helpers() {
 
 ## Pull requests
 
-Every pull request gets an automated review (`.github/workflows/code-review.yml`, guided by `REVIEW.md`) that
+Pull requests can get an automated review (`.github/workflows/code-review.yml`, guided by `REVIEW.md`) that
 checks the change against its requirements; pull requests that change `.rs` files also get a Rust-specific review
 (`.agents/skills/grooph-rust-review`). Several models review independently, and a synthesis step
-(`.github/review/SYNTHESIS.md`) merges them into one summary comment plus inline comments. When opening a pull
-request:
+(`.github/review/SYNTHESIS.md`) merges them into one summary comment plus inline comments. The review costs money,
+so it is only started by hand for now: `gh workflow run code-review.yml -f pr=<n>`. Pushes and comments start
+nothing. Start a review only when the user asks for one. When opening a pull request:
 
 - If it implements an issue, write `Closes #<n>` in the description.
 - If there is no issue (e.g. it comes out of a coding session), the description is the requirements. List what the
   change should do as concrete, checkable points, including behavior that must stay the same, and note anything
   deliberately left out.
-- Drafts and pull requests from forks are not reviewed; marking a draft ready starts the review.
+- Pull requests from forks are never reviewed, not even by hand.
 
 ### Working through the review
 
-If you opened the pull request, see it through the review:
+If you opened the pull request and a review was started, see it through:
 
 1. **Wait for the review.** It takes several minutes: `gh run list --workflow code-review.yml --branch <branch>`,
    then `gh run watch <id>`. The result is one comment by `github-actions[bot]` starting with
@@ -134,17 +135,16 @@ If you opened the pull request, see it through the review:
    with severity, and a verdict. Findings on lines of the diff also get an inline comment
    (`gh api repos/<owner>/<repo>/pulls/<n>/comments`). Never edit or delete the bot's comments: the summary
    carries the review's state in a hidden block.
-2. **Fix what is right.** Every push is reviewed in full, and the summary marks the fixed findings as resolved and
-   replies in their threads. A newer push cancels the running review, so push the fixes for one round together.
+2. **Fix what is right.** Push the fixes for one round together; the next review (started by hand) checks the
+   push in full, marks the fixed findings as resolved and replies in their threads. A new review cancels the
+   running one.
 3. **Answer what is wrong.** When a finding is mistaken or the behavior is intended, say why: reply in its inline
    thread (`gh api -X POST repos/<owner>/<repo>/pulls/<n>/comments/<comment id>/replies -f body=…`), or comment
    on the pull request naming the finding (`F3: …`), which is the only way for findings without an inline comment.
    Give a reason that can be checked: where the case is handled, which requirement allows it, what the reviewer
-   misread. An answer alone (no push needed) runs the synthesis again a few minutes later with the same reviews;
-   it withdraws the finding if the reason holds against the code, and otherwise keeps it and answers the reason.
-   "Please drop this" changes nothing. Only answers from accounts with write access count, and only comments that
-   reply in a finding's thread or name a finding start a run, so put several answers into one comment when you
-   can.
+   misread. The next review reads the answers: it withdraws the finding if the reason holds against the code, and
+   otherwise keeps it and answers the reason. "Please drop this" changes nothing. Only answers from accounts with
+   write access count.
 4. **Change the requirements in the open.** If the scope changes, update the description and say so in a comment
    naming the affected findings; the synthesis reads the description and the comments.
 5. **Done** when the verdict says the pull request is ready, no high or medium finding is open, and CI is green.
