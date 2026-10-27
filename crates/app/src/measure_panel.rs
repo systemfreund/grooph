@@ -19,6 +19,8 @@ use grooph_render::staff::{PlaybackMarks, draw_staff};
 
 impl Grooph {
     pub(super) fn measure_panel(&mut self, ui: &mut egui::Ui) {
+        // The room given, margins included (see `staff_height` below).
+        let panel_height = ui.available_height();
         egui::CentralPanel::default().show(ui, |ui| {
             Frame::canvas(ui.style())
                 .fill(egui::Color32::TRANSPARENT)
@@ -96,7 +98,16 @@ impl Grooph {
                         } else {
                             self.ui.layout.width_cap_factor
                         };
-                        let em = compute_em(&viewport_rect, width_cap_factor, ui);
+                        // The metronome's staff takes its size from the width
+                        // alone: its height then decides how much room the
+                        // ring below gets (see `Grooph::staff_and_ring`),
+                        // which must not in turn decide its size.
+                        let em = if self.metronome_mode() {
+                            let tall = viewport_rect.with_max_y(viewport_rect.top() + 1.0e4);
+                            compute_em(&tall, width_cap_factor, ui)
+                        } else {
+                            compute_em(&viewport_rect, width_cap_factor, ui)
+                        };
                         let font_id = FontId::new(em, self.ui.music_font_id.family.clone());
 
                         let count_config = self.build_count_config();
@@ -147,6 +158,17 @@ impl Grooph {
                         // One row fits the height, so nothing above or below
                         // the staff (accents, count labels) is cut off on a
                         // short, wide panel.
+                        // The metronome's ring takes the room the staff does
+                        // not need: as tall as it is before it shrinks to
+                        // fit (which would otherwise shrink it frame by
+                        // frame), with this panel's margins.
+                        if self.metronome_mode() {
+                            let needed = staff.total_size.y + (panel_height - available.y);
+                            if (needed - self.ui.staff_height).abs() > 0.5 {
+                                self.ui.staff_height = needed;
+                                ui.ctx().request_repaint();
+                            }
+                        }
                         let row_height = staff.room.height() * em;
                         let (staff_opts, staff) = if row_height > available.y && available.y > 0.0 {
                             let floor = LEGIBILITY_FLOOR_EM / em;

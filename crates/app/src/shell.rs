@@ -670,8 +670,8 @@ impl Grooph {
         self.staff_and_ring(ui, false);
     }
 
-    /// The ring below the space left, which the staff above shares
-    /// (see [`Self::metronome_ring`] for `play_in_middle`).
+    /// The ring below the space left, the staff above it as tall as it
+    /// needs (see [`Self::metronome_ring`] for `play_in_middle`).
     pub(crate) fn staff_and_ring(&mut self, ui: &mut Ui, play_in_middle: bool) {
         // The staff above takes a share of the room, the ring the rest.
         let room = ui.available_height().max(0.0);
@@ -680,8 +680,16 @@ impl Grooph {
         } else {
             (METRONOME_STAFF_SHARE, METRONOME_STAFF_MAX)
         };
-        let staff = (share * room).clamp(METRONOME_STAFF_MIN, max).min(room);
-        let height = (room - staff).min(ui.available_width());
+        // The staff gets what it needs at this width (up to its share's
+        // limit), the ring the rest, centered in it. Before the staff was
+        // first measured: its share of the room.
+        let staff = if self.ui.staff_height > 0.0 {
+            self.ui.staff_height.min(max)
+        } else {
+            (share * room).clamp(METRONOME_STAFF_MIN, max)
+        }
+        .min(room);
+        let height = room - staff;
         self.metronome_ring(ui, height, play_in_middle);
     }
 
