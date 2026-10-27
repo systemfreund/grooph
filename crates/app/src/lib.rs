@@ -391,8 +391,8 @@ impl App for Grooph {
         if let Some(audio) = &mut self.playback_ctl.audio {
             audio.set_audio_settings(self.playback_ctl.audio_cfg.settings);
             audio.set_playback_options(playback_options);
-            if audio.update(&audio_state, self.playback_ctl.bpm, score, now) {
-                ui.ctx().request_repaint();
+            if let Some(after) = audio.update(&audio_state, self.playback_ctl.bpm, score, now) {
+                ui.ctx().request_repaint_after(after);
             }
             output_lost = audio.take_output_lost();
         }
