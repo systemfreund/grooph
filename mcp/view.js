@@ -156,6 +156,19 @@ function setTheme(next) {
     window.groophHost.repaint?.();
   }
 }
+// What the host covers at the view's edges (hostContext.safeAreaInsets,
+// CSS pixels), e.g. Claude's composer over the bottom in fullscreen; the app
+// keeps its controls out of it (groophHost.insets: "top,right,bottom,left").
+let insets = "";
+function setInsets(next) {
+  if (!next) return;
+  insets = ["top", "right", "bottom", "left"].map((side) => Math.max(0, Number(next[side]) || 0)).join(",");
+  if (window.groophHost) {
+    window.groophHost.insets = insets;
+    window.groophHost.repaint?.();
+  }
+}
+
 // Display mode: "inline" or "fullscreen", and the modes the host offers.
 let displayMode = "inline";
 let hostModes = [];
@@ -189,6 +202,8 @@ function reportSize() {
   notify("ui/notifications/size-changed", { width: Math.ceil(width), height: Math.ceil(height) });
 }
 handlers["ui/notifications/host-context-changed"] = (context) => {
+  console.info("grooph: host context changed", context);
+  if (context.safeAreaInsets) setInsets(context.safeAreaInsets);
   if (context.styles) applyHostStyles(context.styles);
   if (context.theme || context.styles) setTheme(context.theme || theme);
   if (context.containerDimensions) fitHeight(context.containerDimensions);
@@ -212,6 +227,8 @@ try {
   connected = true;
   notify("ui/notifications/initialized", {});
   const context = init?.hostContext || {};
+  console.info("grooph: host context", context);
+  setInsets(context.safeAreaInsets);
   applyHostStyles(context.styles);
   if (context.theme) setTheme(context.theme);
   dimensions = context.containerDimensions || null;
@@ -246,6 +263,7 @@ window.groophHost = {
   appUrl,
   theme,
   colors,
+  insets,
   displayMode,
   displayModes: hostModes.join(","),
   // The compact card's fullscreen button; the host answers with the mode

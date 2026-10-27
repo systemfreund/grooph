@@ -179,6 +179,14 @@ grooph's metronome runs inside AI chats as an
   `groophHost.colors`, which `embed::HostColors` applies to egui's panels,
   cards and text each frame (`apply_style`). Accents stay grooph's; without
   host variables egui's own colors stay.
+- Safe area: the view passes `hostContext.safeAreaInsets` (what the host
+  covers, e.g. Claude's composer over the bottom in fullscreen) as
+  `groophHost.insets`; `embed::host_safe_area` hands them to egui in
+  `raw_input_hook`. `Grooph::ui` lays the app out inside
+  `ctx.content_rect()` for every platform, so the Android wrapper only sets
+  its system bars' insets. Claude sends 12 px
+  inline (the card's padding) and, in fullscreen, 88 px at the bottom for
+  its composer.
 - The metronome's staff (in the app and embedded) takes its size from the
   width alone and the panel as much height as it needs
   (`UiShell::staff_height`, measured before it shrinks to fit); the ring
