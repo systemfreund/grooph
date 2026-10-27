@@ -48,6 +48,8 @@ use std::rc::Rc;
 const SEGMENT_GAP: f32 = 0.012;
 /// Distance of the hover mark from the outside of the thickest segments.
 const HOVER_OFFSET: f32 = 6.0;
+/// Width of the hover mark's line.
+const HOVER_STROKE: f32 = 2.0;
 /// Points per radian on the ring's arcs, so they look round at any size.
 const ARC_STEP: f32 = 0.05;
 /// Radius of the counter rhythm's ring, as a share of the outer ring's.
@@ -146,6 +148,28 @@ fn beat_at_turn(spans: &[(f32, f32)], turn: f32) -> Option<usize> {
 fn at_turn(center: Pos2, radius: f32, turn: f32) -> Pos2 {
     let angle = turn * TAU - FRAC_PI_2;
     center + radius * vec2(angle.cos(), angle.sin())
+}
+
+/// Distance from the center to the hover mark of a segment on the circle of
+/// `radius`, thick as [`thickness`] of `unit`: just outside the thickest
+/// segments.
+fn hover_mark_radius(radius: f32, unit: f32) -> f32 {
+    radius + thickness(ClickLevel::Strong) * unit / 2.0 + HOVER_OFFSET
+}
+
+/// How far the outer ring's hover mark reaches from the center: its line
+/// and a point for the anti-aliasing.
+fn hover_mark_reach(radius: f32) -> f32 {
+    hover_mark_radius(radius, radius) + HOVER_STROKE / 2.0 + 1.0
+}
+
+/// Radius of the outer ring with `room` from the center to the nearest edge
+/// of the view: 88 % of it, or less so that the hover mark stays inside.
+fn ring_radius(room: f32) -> f32 {
+    // The mark's reach grows linearly with the radius.
+    let base = hover_mark_reach(0.0);
+    let slope = hover_mark_reach(1.0) - base;
+    (0.88 * room).min((room - base) / slope)
 }
 
 /// Points of an arc from `start` to `end` (shares of the full turn).
@@ -695,14 +719,12 @@ impl Grooph {
 
         let area = ui.available_rect_before_wrap();
         let (rect, resp) = ui.allocate_exact_size(area.size(), Sense::click());
-        // Small enough that the hover mark outside the thickest segments
-        // (see [`Segment::paint_hover`]) stays inside the view.
+        // Too small for a ring below 20 points at the full 88 % of the room.
         let room = rect.width().min(rect.height()) / 2.0;
-        let mark_reach = 1.0 + thickness(ClickLevel::Strong) / 2.0;
-        let radius = (0.88 * room).min((room - HOVER_OFFSET - 2.0) / mark_reach);
-        if radius < 20.0 {
+        if 0.88 * room < 20.0 {
             return;
         }
+        let radius = ring_radius(room);
         let center = rect.center();
         let inner = COUNTER_RING * radius;
 
@@ -933,9 +955,9 @@ impl Segment {
         unit: f32,
         color: Color32,
     ) {
-        let outer = radius + thickness(ClickLevel::Strong) * unit / 2.0 + HOVER_OFFSET;
+        let outer = hover_mark_radius(radius, unit);
         let (start, end) = self.trimmed(radius, outer);
-        painter.add(Shape::line(arc(center, outer, start, end), Stroke::new(2.0_f32, color)));
+        painter.add(Shape::line(arc(center, outer, start, end), Stroke::new(HOVER_STROKE, color)));
     }
 
     /// Start and end at distance `r` from the center, with half the gap
@@ -1004,6 +1026,44 @@ mod tests {
 
     fn bar(text: &str) -> Measure {
         parse_score(text).unwrap().measures.remove(0)
+    }
+
+    fn segment(start: f32, end: f32) -> Segment {
+        Segment { start, end, level: ClickLevel::Strong, color: Color32::WHITE }
+    }
+
+    #[test]
+    fn segment_gap_is_equally_wide_at_any_distance() {
+        let radius = 100.0;
+        let seg = segment(0.1, 0.3);
+        // Distance of each end from the line through the center at the
+        // segment's start and end: half the gap, inside as outside.
+        let half_gap = SEGMENT_GAP * TAU * radius / 2.0;
+        for r in [70.0, 100.0, 130.0] {
+            let (start, end) = seg.trimmed(radius, r);
+            assert!((r * ((start - 0.1) * TAU).sin() - half_gap).abs() < 1e-3, "start at {r}");
+            assert!((r * ((0.3 - end) * TAU).sin() - half_gap).abs() < 1e-3, "end at {r}");
+        }
+    }
+
+    #[test]
+    fn short_segment_keeps_its_ends_in_order() {
+        let seg = segment(0.5, 0.501);
+        for r in [1.0, 50.0, 100.0] {
+            let (start, end) = seg.trimmed(100.0, r);
+            assert!(0.5 <= start && start <= end && end <= 0.501, "at {r}: {start}..{end}");
+        }
+    }
+
+    #[test]
+    fn ring_leaves_room_for_the_hover_mark() {
+        for room in [23.0, 50.0, 150.0, 400.0, 2000.0] {
+            let radius = ring_radius(room);
+            assert!(radius <= 0.88 * room);
+            assert!(hover_mark_reach(radius) <= room + 1e-3, "room {room}");
+        }
+        // Large views keep the usual 88 %.
+        assert_eq!(ring_radius(2000.0), 0.88 * 2000.0);
     }
 
     #[test]
