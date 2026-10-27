@@ -1,3 +1,4 @@
+mod output;
 mod schedule;
 mod sounds;
 mod tick_source;
@@ -8,6 +9,7 @@ mod wav;
 pub use sounds::Sound;
 pub use trainer::{GapClick, GapMode, GapMute, RampEnd, RampUnit, TempoRamp};
 
+use crate::output::Output;
 use crate::tick_source::{CountInPlan, TickSource};
 use crate::trainer::GapDecider;
 use crate::voices::VoiceMixer;
@@ -18,12 +20,13 @@ use grooph_measure::generator::Subdivision;
 use grooph_measure::grid::DEFAULT_GRID;
 use grooph_measure::swing::Swing;
 use grooph_measure::tempo::ScoreTiming;
-use log::{debug, error, info, trace};
+use log::{debug, error, info, trace, warn};
 use rodio::Source;
 use rodio::source::Function as RodioFunction;
 use schedule::{Schedule, SoundType};
 use serde::{Deserialize, Serialize};
 use std::fmt::{Debug, Formatter};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, TryLockError};
 use std::time::Duration;
 
@@ -222,8 +225,7 @@ pub struct BarState {
 }
 
 pub struct Audio {
-    stream: Option<rodio::OutputStream>,
-    sink: Option<rodio::Sink>,
+    output: Option<Output>,
     shared_state: Arc<Mutex<PlaybackState>>,
     options: PlaybackOptions,
     /// The plan and player state last handed to the audio thread; updates
@@ -244,12 +246,23 @@ pub struct Audio {
     /// Updates left before the output device is tried again after it could
     /// not be opened.
     reopen_wait: u32,
+    /// Notices when the output stops rendering.
+    watchdog: Watchdog,
+    /// The output stopped on its own, see [`Audio::take_output_lost`].
+    output_lost: bool,
 }
 
 /// Updates to wait before opening the output device again once it failed:
 /// about a second of frames, so a missing device is not tried, and logged,
 /// every frame.
 const REOPEN_AFTER_UPDATES: u32 = 60;
+
+/// Seconds an open output may render nothing new before it counts as lost.
+/// Once it plays, a stop this long is no hiccup (a busy frame on the web,
+/// where the audio callbacks run on the UI thread, takes far less).
+const STALL_TIMEOUT_S: f64 = 2.0;
+/// The same before it plays: waking up a device (Bluetooth) takes a while.
+const START_TIMEOUT_S: f64 = 5.0;
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum PlayerState {
@@ -353,8 +366,7 @@ impl Audio {
         }));
 
         Some(Self {
-            stream: None,
-            sink: None,
+            output: None,
             shared_state,
             options: PlaybackOptions::default(),
             sent_plan: plan,
@@ -364,40 +376,87 @@ impl Audio {
             last_bar: None,
             pending_shift: 0.0,
             reopen_wait: 0,
+            watchdog: Watchdog::default(),
+            output_lost: false,
         })
     }
 
-    // Returns true if UI should repaint soon (while playing or while waiting for tail-out)
-    pub fn update(&mut self, player_state: &PlayerState, bpm: u32, score: &Score) -> bool {
+    /// Returns true if UI should repaint soon (while playing or while waiting
+    /// for tail-out). `now` is a clock in seconds, for noticing an output that
+    /// stopped.
+    pub fn update(
+        &mut self,
+        player_state: &PlayerState,
+        bpm: u32,
+        score: &Score,
+        now: f64,
+    ) -> bool {
         let plan = self.plan(bpm, score);
         self.publish(player_state, plan);
         self.drop_released_plans();
+        if self.watch_output(now) {
+            // Not opened again right away: the app stops first, and on the
+            // web a new output needs the tap on play.
+            return true;
+        }
 
         // On pause/stop: do not pause sink immediately; wait until source reports silence
         if *player_state != PlayerState::Playing
-            && self.sink.is_some()
+            && self.output.is_some()
             && let Some(mut shared_state) = try_lock(&self.shared_state)
             && shared_state.is_silent
             && !shared_state.is_dirty
         {
             // Now it's safe to pause without pops
             debug!("Pausing sink. {:?}", shared_state);
-            self.sink = None;
+            self.output = None;
             shared_state.playback_tick = 0.0;
             shared_state.bar = None;
         }
 
         // Playback start: ensure sink runs
-        if *player_state == PlayerState::Playing && self.sink.is_none() {
+        if *player_state == PlayerState::Playing && self.output.is_none() {
             if self.reopen_wait == 0 {
-                self.start_sink();
+                self.start_sink(now);
             } else {
                 self.reopen_wait -= 1;
             }
         }
 
         // Request repaint while tailing out awaiting pause
-        *player_state != PlayerState::Playing && self.sink.is_some()
+        *player_state != PlayerState::Playing && self.output.is_some()
+    }
+
+    /// Close the output when it stopped on its own: the browser took it away
+    /// (see [`Output::lost`]) or it rendered nothing new for too long. A
+    /// stopped output never reports silence, so it would otherwise stay open
+    /// for good and playing again would not open a new one. Returns whether
+    /// it was closed.
+    fn watch_output(&mut self, now: f64) -> bool {
+        let Some(output) = &self.output else {
+            return false;
+        };
+        let lost = output.lost();
+        let stalled = self.watchdog.stalled(output.rendered(), output.started(), now);
+        if !lost && !stalled {
+            return false;
+        }
+        warn!("Audio output {}, closing it.", if lost { "lost" } else { "stalled" });
+        self.output = None;
+        self.output_lost = true;
+        let mut shared_state = lock(&self.shared_state);
+        shared_state.playback_tick = 0.0;
+        shared_state.bar = None;
+        shared_state.is_silent = true;
+        // A new output starts the score over.
+        shared_state.shift = 0.0;
+        true
+    }
+
+    /// Whether the output stopped on its own since the last call; playback
+    /// should stop then, as the next play opens a new output.
+    pub fn take_output_lost(&mut self) -> bool {
+        std::mem::take(&mut self.output_lost)
     }
 
     /// The plan for `score` at `bpm` with the current options. It is built
@@ -464,25 +523,17 @@ impl Audio {
         self.retired.retain(PlaybackPlan::is_shared);
     }
 
-    fn start_sink(&mut self) {
+    fn start_sink(&mut self, now: f64) {
         debug!("Starting sink.");
-
-        let stream = match rodio::OutputStreamBuilder::open_default_stream() {
-            Ok(s) => Some(s),
+        match Output::open(Arc::clone(&self.shared_state)) {
+            Ok(output) => {
+                self.output = Some(output);
+                self.watchdog = Watchdog { rendered: 0, since: now };
+            }
             Err(e) => {
                 error!("Failed to init audio: {}", e);
                 self.reopen_wait = REOPEN_AFTER_UPDATES;
-                None
             }
-        };
-
-        self.stream = stream;
-
-        if let Some(stream) = &self.stream {
-            let sink = rodio::Sink::connect_new(stream.mixer());
-            sink.append(MetronomeSource::new(self.shared_state.clone()));
-            sink.play();
-            self.sink = Some(sink);
         }
     }
 
@@ -513,7 +564,13 @@ impl Audio {
 
     /// Whether an output stream is running, i.e. `playback_position` advances.
     pub fn is_running(&self) -> bool {
-        self.sink.is_some()
+        self.output.is_some()
+    }
+
+    /// Whether the output is open but does not play yet: a device waking up
+    /// (a new `AudioContext`, Bluetooth) makes the first click wait.
+    pub fn is_starting(&self) -> bool {
+        self.output.as_ref().is_some_and(|output| !output.started())
     }
 
     /// Bar the engine is playing; `None` while stopped or counting in. While
@@ -534,6 +591,27 @@ impl Audio {
         // Non-blocking try to avoid UI stalls; fall back to None if busy
         try_lock(&self.shared_state)
             .map(|state| (state.playback_tick, state.params.plan.timing.total_loop_ticks()))
+    }
+}
+
+/// Notices an output that stopped asking for samples.
+#[derive(Default)]
+struct Watchdog {
+    /// Samples rendered when last looked at.
+    rendered: u64,
+    /// When (as passed to [`Audio::update`]) they last moved.
+    since: f64,
+}
+
+impl Watchdog {
+    /// Whether `rendered` did not move for longer than an output that is
+    /// `started` (or not yet) may stay quiet.
+    fn stalled(&mut self, rendered: u64, started: bool, now: f64) -> bool {
+        if rendered != self.rendered {
+            *self = Self { rendered, since: now };
+        }
+        let timeout = if started { STALL_TIMEOUT_S } else { START_TIMEOUT_S };
+        now - self.since > timeout
     }
 }
 
@@ -587,9 +665,12 @@ struct MetronomeSource {
     triggered: Vec<SoundType>,
     sample_rate: u32,
     samples_processed: usize,
+    /// `samples_processed` for the UI thread, updated every 1024 samples.
+    rendered: Arc<AtomicU64>,
 }
 
 impl MetronomeSource {
+    #[cfg(not(target_arch = "wasm32"))]
     fn new(shared: Arc<Mutex<PlaybackState>>) -> Self {
         Self::with_sample_rate(shared, device_sample_rate())
     }
@@ -616,7 +697,13 @@ impl MetronomeSource {
             triggered: Vec::with_capacity(4 * VoiceMixer::MAX_VOICES),
             sample_rate,
             samples_processed: 0,
+            rendered: Arc::default(),
         }
+    }
+
+    /// Counter of the samples rendered, see [`Output::rendered`].
+    fn rendered(&self) -> Arc<AtomicU64> {
+        Arc::clone(&self.rendered)
     }
 
     fn update_shared_state(&mut self) {
@@ -731,6 +818,9 @@ impl Iterator for MetronomeSource {
         }
 
         self.samples_processed += 1;
+        if self.samples_processed.is_multiple_of(1024) {
+            self.rendered.store(self.samples_processed as u64, Ordering::Relaxed);
+        }
         Some(self.voices.next_sample())
     }
 }
@@ -753,6 +843,7 @@ impl Source for MetronomeSource {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn device_sample_rate() -> u32 {
     use rodio::cpal::traits::{DeviceTrait, HostTrait};
     let host = rodio::cpal::default_host();
@@ -940,11 +1031,38 @@ mod tests {
         let score = score_of(TimeSignature::FOUR_FOUR, 1);
         // As after a failed open: the next updates wait instead of opening.
         audio.reopen_wait = 3;
-        audio.update(&PlayerState::Playing, 120, &score);
-        audio.update(&PlayerState::Playing, 120, &score);
+        audio.update(&PlayerState::Playing, 120, &score, 0.0);
+        audio.update(&PlayerState::Playing, 120, &score, 0.0);
         assert_eq!(audio.reopen_wait, 1);
-        assert!(audio.stream.is_none());
-        assert!(audio.sink.is_none());
+        assert!(audio.output.is_none());
+    }
+
+    #[test]
+    fn watchdog_notices_an_output_that_stops_rendering() {
+        let mut dog = Watchdog { rendered: 0, since: 10.0 };
+        // Waking up the device takes its time.
+        assert!(!dog.stalled(0, false, 10.0 + START_TIMEOUT_S - 0.1));
+        assert!(dog.stalled(0, false, 10.0 + START_TIMEOUT_S + 0.1));
+
+        let mut dog = Watchdog { rendered: 0, since: 10.0 };
+        assert!(!dog.stalled(1024, true, 11.0));
+        assert!(!dog.stalled(4096, true, 12.0));
+        // Each move starts the wait over; once playing, it is shorter.
+        assert!(!dog.stalled(4096, true, 12.0 + STALL_TIMEOUT_S - 0.1));
+        assert!(dog.stalled(4096, true, 12.0 + STALL_TIMEOUT_S + 0.1));
+    }
+
+    #[test]
+    fn rendered_samples_are_counted_for_the_watchdog() {
+        let audio = Audio::new(120).unwrap();
+        let mut source = MetronomeSource::with_sample_rate(Arc::clone(&audio.shared_state), 48_000);
+        let rendered = source.rendered();
+        for _ in 0..1023 {
+            source.next();
+        }
+        assert_eq!(rendered.load(Ordering::Relaxed), 0);
+        source.next();
+        assert_eq!(rendered.load(Ordering::Relaxed), 1024);
     }
 
     #[test]
@@ -999,32 +1117,32 @@ mod tests {
         let mut score = score_of(TimeSignature::FOUR_FOUR, 2);
         let built = |audio: &Audio| Arc::clone(&audio.built.as_ref().unwrap().1);
 
-        audio.update(&PlayerState::Stopped, 120, &score);
+        audio.update(&PlayerState::Stopped, 120, &score, 0.0);
         let first = built(&audio);
         assert!(Arc::ptr_eq(&first, &audio.sent_plan));
         audio.shared_state.lock().unwrap().is_dirty = false;
         // Same inputs, also from a fresh copy of the score: nothing is built
         // or sent.
-        audio.update(&PlayerState::Stopped, 120, &score.clone());
+        audio.update(&PlayerState::Stopped, 120, &score.clone(), 0.0);
         assert!(Arc::ptr_eq(&built(&audio), &first));
         assert!(!audio.shared_state.lock().unwrap().is_dirty);
 
         // A new tempo builds and sends a new plan.
-        audio.update(&PlayerState::Stopped, 90, &score);
+        audio.update(&PlayerState::Stopped, 90, &score, 0.0);
         let slower = built(&audio);
         assert!(!Arc::ptr_eq(&slower, &first));
         assert_eq!(audio.sent_plan.bpm, 90);
 
         // So does an edited beat.
         score.measures[1].toggle_beat_kind(0);
-        audio.update(&PlayerState::Stopped, 90, &score);
+        audio.update(&PlayerState::Stopped, 90, &score, 0.0);
         let edited = built(&audio);
         assert!(!Arc::ptr_eq(&edited, &slower));
         assert!(Arc::ptr_eq(&edited, &audio.sent_plan));
 
         // And a new meter with the same number of bars.
         score.measures[0] = Measure::new(TimeSignature::THREE_FOUR);
-        audio.update(&PlayerState::Stopped, 90, &score);
+        audio.update(&PlayerState::Stopped, 90, &score, 0.0);
         let remetered = built(&audio);
         assert!(!Arc::ptr_eq(&remetered, &edited));
         assert!(Arc::ptr_eq(&remetered, &audio.sent_plan));
@@ -1032,7 +1150,7 @@ mod tests {
         // And a changed option.
         audio
             .set_playback_options(PlaybackOptions { count_in: true, ..PlaybackOptions::default() });
-        audio.update(&PlayerState::Stopped, 90, &score);
+        audio.update(&PlayerState::Stopped, 90, &score, 0.0);
         assert!(!Arc::ptr_eq(&built(&audio), &remetered));
         assert!(audio.sent_plan.count_in.is_some());
     }
@@ -1041,7 +1159,7 @@ mod tests {
     fn inputs_changed_back_reuse_the_sent_plan() {
         let mut audio = Audio::new(120).unwrap();
         let score = score_of(TimeSignature::FOUR_FOUR, 1);
-        audio.update(&PlayerState::Stopped, 120, &score);
+        audio.update(&PlayerState::Stopped, 120, &score, 0.0);
         let sent = Arc::clone(&audio.sent_plan);
         audio.shared_state.lock().unwrap().is_dirty = false;
 
@@ -1049,10 +1167,10 @@ mod tests {
         // is not sent; then the tempo goes back.
         let state = Arc::clone(&audio.shared_state);
         let guard = state.lock().unwrap();
-        audio.update(&PlayerState::Stopped, 90, &score);
+        audio.update(&PlayerState::Stopped, 90, &score, 0.0);
         drop(guard);
         assert!(Arc::ptr_eq(&audio.sent_plan, &sent));
-        audio.update(&PlayerState::Stopped, 120, &score);
+        audio.update(&PlayerState::Stopped, 120, &score, 0.0);
         assert!(Arc::ptr_eq(&audio.built.as_ref().unwrap().1, &sent));
         assert!(!audio.shared_state.lock().unwrap().is_dirty);
     }

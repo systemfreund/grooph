@@ -1729,6 +1729,7 @@ dependencies = [
  "log",
  "rodio",
  "serde",
+ "web-sys",
 ]
 
 [[package]]

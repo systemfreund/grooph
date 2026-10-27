@@ -104,6 +104,9 @@ pub(crate) struct PlaybackState {
     /// wraps into the loop), for the metronome ring.
     pub(crate) heard_tick: f64,
     pub(crate) last_update: Option<f64>,
+    /// The cursor waited for the output to start playing, see
+    /// `Audio::is_starting`.
+    pub(crate) waited_for_output: bool,
     pub(crate) flash_intensity: f32,
     /// Last (measure_idx, primary_beat_in_measure) playback reached; the flash
     /// fires when it changes. Tracks both axes so the flash fires once per

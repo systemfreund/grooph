@@ -4,3 +4,4 @@
 .wrangler
 TODO.md
 __pycache__/
+.claude/

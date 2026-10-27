@@ -14,6 +14,7 @@ serde = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 cpal = { workspace = true }
+web-sys = { workspace = true, features = ["AudioContext", "AudioContextState", "BaseAudioContext"] }
 
 [lints]
 workspace = true
