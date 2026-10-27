@@ -167,7 +167,12 @@ grooph's metronome runs inside AI chats as an
   top: meter and tempo sit left and right of the play button, so the staff
   and the ring get the room. The share button gives way to an "Open in
   grooph" row in the options, which have no "Edit clicks". The theme follows
-  the host (`groophHost.theme`, the view calls `groophHost.repaint`). The
+  the host (`groophHost.theme`, the view calls `groophHost.repaint`), and so
+  do its colors: the view resolves the host's style variables
+  (`hostContext.styles.variables`, may use `light-dark()`) to
+  `groophHost.colors`, which `embed::HostColors` applies to egui's panels,
+  cards and text each frame (`apply_style`). Accents stay grooph's; without
+  host variables egui's own colors stay. The
   settings go to the model through `groophHost.updateModelContext` once they
   stayed the same for a second. The bridge is in `web.rs`/`platform.rs`.
   Touch and wheel events are left to the page (`web_options`,

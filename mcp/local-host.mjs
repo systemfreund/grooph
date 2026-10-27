@@ -16,6 +16,8 @@
 //                   switches it later
 //   w=360           width of the frame in CSS pixels
 //   tall=1          room below the frame, so the page scrolls as a chat does
+//   styles=0        no hostContext.styles (by default Claude-like color
+//                   variables with light-dark(), as the spec suggests)
 //   bpm, ts, click, poly, swing, su      the tool's arguments
 //
 // With GROOPH_ORIGIN set (e.g. http://localhost:8788 for `npx wrangler pages
@@ -148,13 +150,21 @@ window.setTheme = (t) => {
   document.body.classList.toggle("dark", t === "dark");
   post({ method: "ui/notifications/host-context-changed", params: { theme: t } });
 };
+// Color variables in the style of Claude's, light and dark in one value.
+const styles = q.get("styles") === "0" ? undefined : { variables: {
+  "--color-background-primary": "light-dark(#ffffff, #30302e)",
+  "--color-background-secondary": "light-dark(#f5f4ed, #262624)",
+  "--color-text-primary": "light-dark(#141413, #faf9f5)",
+  "--color-text-secondary": "light-dark(#3d3d3a, #c2c0b6)",
+  "--color-border-primary": "light-dark(#1f1e1d26, #dedcd126)",
+} };
 window.addEventListener("message", (e) => {
   if (e.source !== frame.contentWindow) return;
   const m = e.data;
   const reply = (result) => post({ id: m.id, result });
   if (m.method === "ui/initialize") {
     reply({ protocolVersion: "2026-01-26", hostInfo: { name: "local-host", version: "0" }, hostCapabilities: { openLinks: {} },
-      hostContext: { theme, platform: "web", displayMode: "inline", availableDisplayModes: ["inline"], containerDimensions: { width: frame.clientWidth, maxHeight: 1000 } } });
+      hostContext: { theme, styles, platform: "web", displayMode: "inline", availableDisplayModes: ["inline"], containerDimensions: { width: frame.clientWidth, maxHeight: 1000 } } });
   } else if (m.method === "ui/notifications/initialized") {
     post({ method: "ui/notifications/tool-input", params: { arguments: args } });
     post({ method: "ui/notifications/tool-result", params: callResult });

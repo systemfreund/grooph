@@ -94,6 +94,17 @@ test("resources/read returns the view with this origin in its CSP", async () => 
   assert.doesNotThrow(() => new Function(`return async () => { ${script.replace(/^import .*$/gm, "")} }`));
 });
 
+test("the view reads the host's colors as #rrggbbaa", async () => {
+  const { result } = await rpc("resources/read", { uri: RESOURCE_URI });
+  const script = result.contents[0].text.match(/<script type="module">([\s\S]*)<\/script>/)[1];
+  const source = script.match(/function cssColorToHex[\s\S]*?\n}\n/)[0];
+  const cssColorToHex = new Function(source + "return cssColorToHex")();
+  assert.equal(cssColorToHex("rgb(20, 20, 19)"), "#141413ff");
+  assert.equal(cssColorToHex("rgba(255, 0, 16, 0.5)"), "#ff001080");
+  assert.equal(cssColorToHex("rgb(10 20 30 / 50%)"), "#0a141e80");
+  assert.equal(cssColorToHex("transparent"), null);
+});
+
 test("resources/read without a web build is an error", async () => {
   const missing = { ASSETS: { fetch: async () => new Response("", { status: 404 }) } };
   const { error } = await rpc("resources/read", { uri: RESOURCE_URI }, missing);
