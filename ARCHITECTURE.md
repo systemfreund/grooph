@@ -166,7 +166,7 @@ grooph's metronome runs inside AI chats as an
   the host (`groophHost.theme`, the view calls `groophHost.repaint`). The
   settings go to the model through `groophHost.updateModelContext` once they
   stayed the same for a second. The bridge is in `web.rs`/`platform.rs`.
-- Tests: `node --test mcp/` (no Cloudflare needed), `cargo test` (embed
+- Tests: `node --test mcp/server.test.mjs` (no Cloudflare needed), `cargo test` (embed
   mode). `node mcp/local-host.mjs [dist]` plays host and sandbox locally
   for a `trunk build` (spec CSP, `?wasm=1` adds `'wasm-unsafe-eval'`).
 - To try a branch in Claude: Settings → Connectors → Add custom connector

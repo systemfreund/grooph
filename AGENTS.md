@@ -41,7 +41,7 @@ Rust developers and focuses on crate-specific behaviors and APIs that matter whe
 - `cargo clippy --workspace --all-targets -- -D warnings` (unused imports and dead code are errors)
 - `cargo build` and `cargo test`
 - `python3 -m unittest discover -s .github/review` (the scripts of the code review workflow)
-- `node --test mcp/` (the MCP server, see ARCHITECTURE.md "Embed mode and the MCP server")
+- `node --test mcp/server.test.mjs` (the MCP server, see ARCHITECTURE.md "Embed mode and the MCP server")
 - `trunk build --release` (the web job). To check the WASM target without Trunk:
   `cargo clippy -p grooph-app --target wasm32-unknown-unknown -- -D warnings`
 
