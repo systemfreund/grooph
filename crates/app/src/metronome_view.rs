@@ -942,9 +942,10 @@ impl Segment {
     }
 
     /// The outer and inner arc of the segment as a band `width` thick around
-    /// `radius` and `inset` smaller on every side, both clockwise and with as
-    /// many points.
+    /// `radius` and `inset` smaller on every side (at most down to no width),
+    /// both clockwise and with as many points.
     fn band(&self, center: Pos2, radius: f32, width: f32, inset: f32) -> (Vec<Pos2>, Vec<Pos2>) {
+        let inset = inset.min(width / 2.0);
         let (r_out, r_in) = (radius + width / 2.0 - inset, radius - width / 2.0 + inset);
         let (start, end) = self.trimmed(radius, r_out, inset);
         let steps = arc_steps(start, end);
@@ -1054,6 +1055,31 @@ mod tests {
             assert!((r * ((start - 0.1) * TAU).sin() - half_gap).abs() < 1e-3, "start at {r}");
             assert!((r * ((0.3 - end) * TAU).sin() - half_gap).abs() < 1e-3, "end at {r}");
         }
+    }
+
+    #[test]
+    fn filled_band_is_inset_by_half_its_outline() {
+        let (center, radius, width) = (Pos2::ZERO, 100.0, 20.0);
+        let seg = segment(0.1, 0.3);
+        let inset = FILL_OUTLINE / 2.0;
+        let (outer, inner) = seg.band(center, radius, width, inset);
+        assert_eq!(outer.len(), inner.len());
+        for p in &outer {
+            assert!((p.distance(center) - (radius + width / 2.0 - inset)).abs() < 1e-3);
+        }
+        for p in &inner {
+            assert!((p.distance(center) - (radius - width / 2.0 + inset)).abs() < 1e-3);
+        }
+        // The outline's half outside the band ends where the gap begins.
+        let half_gap = SEGMENT_GAP * TAU * radius / 2.0;
+        for p in [outer[0], inner[0]] {
+            let (start, _) = seg.trimmed(radius, p.distance(center), inset);
+            let r = p.distance(center);
+            assert!((r * ((start - 0.1) * TAU).sin() - inset - half_gap).abs() < 1e-3);
+        }
+        // Thinner than the outline: no width left, but not inverted.
+        let (outer, inner) = seg.band(center, radius, 0.4, inset);
+        assert!(outer[0].distance(center) >= inner[0].distance(center) - 1e-3);
     }
 
     #[test]
