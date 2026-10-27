@@ -15,6 +15,7 @@ user-facing overview is README.md.
 - `crates/mic`: Microphone hit detection (cpal natively, `getUserMedia` + AudioWorklet on the web).
 - `crates/link`: Shareable links (URL query parameters <-> score/generator/metronome).
 - `crates/site`: Static guide pages for grooph.app, generated from Markdown at build time.
+- `functions/`, `mcp/`: the MCP server (`grooph.app/mcp`) and the view that embeds the metronome in AI chats.
 - `crates/android`: Android entry point (`android_main`, NativeActivity) around `crates/app`.
 
 Important root files:
@@ -126,6 +127,44 @@ spread across callers.
   `SharedLink::to_url`.
 - The link format is documented for AI agents in
   `crates/app/assets/seo/llms.txt`; keep it in sync.
+
+## Embed mode and the MCP server
+
+grooph's metronome runs inside AI chats as an
+[MCP App](https://modelcontextprotocol.io/extensions/apps/overview):
+
+- `functions/mcp.js` is a Cloudflare Pages Function, so `wrangler pages
+  deploy dist` (run from the repository root) serves it as `/mcp` next to
+  the web build: `https://grooph.app/mcp`, and each preview its own. The
+  logic is in `mcp/server.js`: a stateless MCP server (Streamable HTTP, JSON
+  answers, CORS) with one tool, `show_metronome`, whose arguments are the
+  metronome's link parameters (`bpm`, `ts`, `click`, `counter`, `swing`,
+  `su`; `mcp/link.js` builds the same query as `SharedLink::to_url`). Its
+  result carries the link, for hosts without views. The polyrhythm table in
+  its description must match `llms.txt` (checked by the Node tests).
+- The tool's view `ui://grooph/metronome.html` (`mcp/view.js`) runs in the
+  host's sandboxed iframe on another origin. It does the MCP Apps handshake
+  over postMessage, puts the link plus `embed=mcp&theme=light|dark` into the
+  address bar, defines `window.groophHost` (`appUrl`, `theme`,
+  `updateModelContext`, `openLink`) and imports the web build from the
+  request's own origin (allowed by the resource's `_meta.ui.csp`). The
+  hashed file names come from `embed.json`, which `crates/site` writes next
+  to `index.html`; `_headers` sends CORS for `/grooph-app-*`. A host whose
+  CSP forbids WebAssembly gets a message with the grooph.app link instead.
+- Embed mode (`crates/app/src/embed.rs`): `embed=mcp` in the query, read in
+  `Grooph::new` before the link clears it. Storage is neither read nor
+  written (also not egui's memory); no update check, wake lock, MIDI,
+  microphone, calibration, unsaved-changes dialog or keyboard shortcuts but
+  Space. `embed_ui` shows the Metronome tab without the tab bar, with "Open
+  in grooph" instead of share and without "Edit clicks". The theme follows
+  the host (`groophHost.theme`, the view calls `groophHost.repaint`). The
+  settings go to the model through `groophHost.updateModelContext` once they
+  stayed the same for a second. The bridge is in `web.rs`/`platform.rs`.
+- Tests: `node --test mcp/` (no Cloudflare needed), `cargo test` (embed
+  mode). `node mcp/local-host.mjs [dist]` plays host and sandbox locally
+  for a `trunk build` (spec CSP, `?wasm=1` adds `'wasm-unsafe-eval'`).
+- To try a branch in Claude: Settings → Connectors → Add custom connector
+  with the preview's `https://<branch>.grooph.pages.dev/mcp`.
 
 ## Guide pages (crates/site)
 

@@ -110,9 +110,13 @@ pub(crate) fn clear_link_query() {
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn clear_link_query() {}
 
-/// Base URL for shared links: the current page on the web, grooph.app natively.
+/// Base URL for shared links: the current page on the web (the app's own
+/// page when embedded, see [`crate::embed`]), grooph.app natively.
 #[cfg(target_arch = "wasm32")]
 pub(crate) fn share_base_url() -> String {
+    if let Some(url) = crate::web::host_string("appUrl") {
+        return url;
+    }
     web_sys::window()
         .and_then(|w| {
             let location = w.location();
@@ -161,5 +165,51 @@ pub(crate) fn open_share_sheet(url: &str) -> bool {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn open_share_sheet(_url: &str) -> bool {
+    false
+}
+
+/// The theme the MCP App host shows, as the embedding view passes it on
+/// (`window.groophHost.theme`). `None` outside embed mode.
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn host_theme() -> Option<eframe::egui::Theme> {
+    match crate::web::host_string("theme")?.as_str() {
+        "light" => Some(eframe::egui::Theme::Light),
+        "dark" => Some(eframe::egui::Theme::Dark),
+        _ => None,
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn host_theme() -> Option<eframe::egui::Theme> {
+    None
+}
+
+/// Let the embedding view ask for a frame (`window.groophHost.repaint()`),
+/// e.g. after the host switched its theme.
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn install_host_repaint(ctx: eframe::egui::Context) {
+    crate::web::install_host_repaint(ctx);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn install_host_repaint(_ctx: eframe::egui::Context) {}
+
+/// Report the metronome's settings to the model through the MCP App host.
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn host_update_model_context(context: &crate::embed::ModelContext) {
+    crate::web::host_update_model_context(context);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn host_update_model_context(_context: &crate::embed::ModelContext) {}
+
+/// Ask the MCP App host to open `url`. `false` without a host.
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn host_open_link(url: &str) -> bool {
+    crate::web::host_call("openLink", &[url.into()])
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn host_open_link(_url: &str) -> bool {
     false
 }

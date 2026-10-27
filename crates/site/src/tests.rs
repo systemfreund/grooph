@@ -236,3 +236,23 @@ fn llms_txt_links_open() {
         assert!(matches!(link, Ok(Some(_))), "llms.txt: bad app link ?{query}: {link:?}");
     }
 }
+
+#[test]
+fn embed_manifest_names_the_hashed_app_files() {
+    let html = r#"<link rel="modulepreload" href="/grooph-app-1a2b3c.js" crossorigin="anonymous">
+<link rel="preload" href="/grooph-app-1a2b3c_bg.wasm" crossorigin="anonymous" as="fetch" type="application/wasm">
+<script type="module">import init from '/grooph-app-1a2b3c.js';</script>"#;
+    assert_eq!(
+        embed_manifest(html).as_deref(),
+        Some("{\"js\":\"grooph-app-1a2b3c.js\",\"wasm\":\"grooph-app-1a2b3c_bg.wasm\"}\n")
+    );
+    assert_eq!(embed_manifest("<p>grooph-app-zz.js</p>"), None);
+
+    let dir = temp_dir("embed");
+    write_embed_manifest(&dir).unwrap();
+    assert!(!dir.join("embed.json").exists(), "no index.html, no manifest");
+    std::fs::write(dir.join("index.html"), html).unwrap();
+    write_embed_manifest(&dir).unwrap();
+    assert!(std::fs::read_to_string(dir.join("embed.json")).unwrap().contains("_bg.wasm"));
+    let _ = std::fs::remove_dir_all(&dir);
+}

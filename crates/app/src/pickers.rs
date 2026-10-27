@@ -181,9 +181,11 @@ const METER_TILE_HEIGHT: f32 = 72.0;
 const METER_TILE_EM: f32 = 42.0;
 
 /// Height of the scrolling time signature grid: the tall tiles get as much
-/// of the screen as leaves room for "Done".
+/// of the screen as leaves room for "Done", at least two rows (a short view
+/// such as the one embedded in a chat).
 fn meter_grid_height(ui: &Ui) -> f32 {
-    (ui.ctx().content_rect().height() - 240.0).clamp(360.0, 560.0)
+    let room = ui.ctx().content_rect().height() - 240.0;
+    room.min(560.0).max(360.0_f32.min(room).max(2.0 * METER_TILE_HEIGHT))
 }
 
 /// Grid of time signatures, each drawn as in the settings card; returns the

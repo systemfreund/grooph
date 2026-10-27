@@ -28,6 +28,10 @@ Examples:
 
 If the user has unsaved changes, grooph asks before replacing them. Invalid links show an error message that names the problem.
 
+## MCP server
+
+AI chat apps can show grooph's metronome inside the conversation: https://grooph.app/mcp is an MCP server (Streamable HTTP, no authentication) with the tool `show_metronome`. Its arguments are the metronome's link parameters (`bpm`, `ts`, `click`, `counter`, `swing`, `su`). Hosts that support MCP Apps show a working metronome; the result also contains the grooph.app link.
+
 ## Polyrhythms
 
 A polyrhythm n:m plays n even counter clicks in the time of m beat units of the meter (quarters in x/4, eighths in x/8), repeated until the bar is full, against the normal click. Pass it as `counter` together with `ts`. Values for common ratios (spaces written as `+`):

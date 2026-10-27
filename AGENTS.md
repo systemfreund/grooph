@@ -24,6 +24,8 @@ Rust developers and focuses on crate-specific behaviors and APIs that matter whe
     - `app` (grooph-app): the eframe app, binary + library. WebAssembly code is gated behind
       `cfg(target_arch = "wasm32")`.
     - `site` (grooph-site): static guide pages, written into the web build by a Trunk `post_build` hook.
+    - `functions/` and `mcp/` (JavaScript, not crates): the MCP server at `grooph.app/mcp`, a Cloudflare Pages
+      Function, and the view that runs the metronome inside AI chats.
 - Running locally:
     - Native run: `cargo run --bin grooph-app`
     - Tests: `cargo test --workspace`
@@ -39,6 +41,7 @@ Rust developers and focuses on crate-specific behaviors and APIs that matter whe
 - `cargo clippy --workspace --all-targets -- -D warnings` (unused imports and dead code are errors)
 - `cargo build` and `cargo test`
 - `python3 -m unittest discover -s .github/review` (the scripts of the code review workflow)
+- `node --test mcp/` (the MCP server, see ARCHITECTURE.md "Embed mode and the MCP server")
 - `trunk build --release` (the web job). To check the WASM target without Trunk:
   `cargo clippy -p grooph-app --target wasm32-unknown-unknown -- -D warnings`
 

@@ -264,9 +264,7 @@ impl SharedLink {
         }
         for (name, bar) in [("click", &self.click), ("counter", &self.counter)] {
             if let Some(bar) = bar {
-                let text = format_score(&Score::single(bar.clone()))?;
-                let ts = bar.time_signature().to_string();
-                params.push((name, text.strip_prefix(&ts)?.trim_start().to_string()));
+                params.push((name, format_bar(bar)?));
             }
         }
         // The version alone opens nothing.
@@ -277,6 +275,14 @@ impl SharedLink {
             params.iter().map(|(k, v)| format!("{k}={}", percent_encode(v))).collect();
         Some(format!("{base}?{}", query.join("&")))
     }
+}
+
+/// `bar` in the text notation without its time signature, as `click` and
+/// `counter` write it (`>q r:q. (q)`); `None` if a beat has no code.
+pub fn format_bar(bar: &Measure) -> Option<String> {
+    let text = format_score(&Score::single(bar.clone()))?;
+    let ts = bar.time_signature().to_string();
+    Some(text.strip_prefix(&ts)?.trim_start().to_string())
 }
 
 fn parse_in_range<T>(name: &str, value: &str, min: T, max: T) -> Result<T, String>
@@ -390,6 +396,17 @@ mod tests {
     fn query_without_link_parameters_is_ignored() {
         assert!(parse_query("").unwrap().is_none());
         assert!(parse_query("?utm_source=x").unwrap().is_none());
+    }
+
+    #[test]
+    fn embed_parameters_leave_the_link_alone() {
+        // The MCP App view adds `embed` and `theme` to the tool's link.
+        assert!(parse_query("?embed=mcp&theme=dark").unwrap().is_none());
+        let link = parse("?v=2&bpm=140&ts=7/8&embed=mcp&theme=light");
+        assert_eq!(link.bpm, Some(140));
+        assert!(
+            matches!(link.content, Some(LinkContent::Metronome(ts)) if ts == TimeSignature::new(7, 8))
+        );
     }
 
     #[test]

@@ -9,7 +9,7 @@ grooph is a metronome and rhythm trainer that runs in your browser at grooph.app
 Android app. It works without an account, shows no ads and contains no analytics or
 tracking code. This page explains which data is processed anyway and why.
 
-Last updated: 18 October 2026
+Last updated: 27 October 2026
 
 ## Who is responsible
 
@@ -43,6 +43,17 @@ When you share a rhythm, grooph creates a link that contains the tempo and the r
 itself, for example `grooph.app/?v=2&bpm=90&r=…`. The link contains no personal data. It is
 passed only to the app or contact you choose, such as a messenger, and opening it simply
 loads the rhythm in grooph.
+
+## grooph in chat apps
+
+AI chat apps such as Claude can show grooph's metronome inside a conversation through the
+grooph connector (`grooph.app/mcp`). The chat app calls it with the metronome settings the
+assistant chose and loads the metronome from grooph.app. Inside the chat, grooph stores
+nothing on your device and tells the chat app the metronome's settings (time signature,
+tempo, clicks, polyrhythm, swing and whether it is playing) whenever you change them, so
+the assistant can refer to them. These settings become part of your conversation and are
+processed by the chat app's provider under its own privacy policy. Requests to
+`grooph.app/mcp` are handled like page requests (see below) and are not stored by us.
 
 ## Hosting and server logs
 

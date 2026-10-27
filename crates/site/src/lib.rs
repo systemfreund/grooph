@@ -166,6 +166,35 @@ pub fn build(out: &Path, pages: &[Page], llms_base: &str) -> Result<Vec<Rendered
     Ok(rendered)
 }
 
+/// Write `embed.json` next to the app's `index.html` in `out`: the hashed
+/// names of its JS glue and WASM, which the MCP App view loads (see
+/// `mcp/server.js`). Does nothing without an `index.html` (pages built by
+/// hand into an empty directory).
+pub fn write_embed_manifest(out: &Path) -> Result<(), String> {
+    let index = out.join("index.html");
+    let Ok(html) = std::fs::read_to_string(&index) else {
+        return Ok(());
+    };
+    let manifest = embed_manifest(&html)
+        .ok_or_else(|| format!("{}: no grooph-app-*.js and *_bg.wasm", index.display()))?;
+    write(&out.join("embed.json"), &manifest)
+}
+
+/// `{"js":"grooph-app-<hash>.js","wasm":"grooph-app-<hash>_bg.wasm"}` from
+/// the file names Trunk wrote into `index_html`.
+pub fn embed_manifest(index_html: &str) -> Option<String> {
+    let name = |suffix: &str| {
+        index_html.match_indices("grooph-app-").find_map(|(at, prefix)| {
+            let rest = &index_html[at + prefix.len()..];
+            let hash = rest.find(|c: char| !c.is_ascii_hexdigit()).unwrap_or(rest.len());
+            (hash > 0 && rest[hash..].starts_with(suffix))
+                .then(|| format!("{prefix}{}{suffix}", &rest[..hash]))
+        })
+    };
+    let (js, wasm) = (name(".js")?, name("_bg.wasm")?);
+    Some(format!("{{\"js\":\"{js}\",\"wasm\":\"{wasm}\"}}\n"))
+}
+
 fn write(path: &Path, text: &str) -> Result<(), String> {
     std::fs::write(path, text).map_err(|e| format!("{}: {e}", path.display()))
 }

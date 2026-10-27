@@ -563,6 +563,27 @@ fn sheet_flick(ui: &Ui, parts: &[(LayerId, Rect)]) -> Option<bool> {
     Some(delta.y < 0.0)
 }
 
+/// "Open in grooph": a box with an arrow leaving it at the top right.
+pub(crate) fn paint_open_icon(painter: &Painter, rect: Rect, color: Color32) {
+    let c = rect.center();
+    let s = rect.width() * 0.14;
+    let stroke = Stroke::new(2.5_f32, color);
+    painter.add(Shape::line(
+        vec![
+            pos2(c.x - 0.1 * s, c.y - 1.1 * s),
+            pos2(c.x - 1.1 * s, c.y - 1.1 * s),
+            pos2(c.x - 1.1 * s, c.y + 1.1 * s),
+            pos2(c.x + 1.1 * s, c.y + 1.1 * s),
+            pos2(c.x + 1.1 * s, c.y + 0.1 * s),
+        ],
+        stroke,
+    ));
+    let tip = pos2(c.x + 1.4 * s, c.y - 1.4 * s);
+    painter.line_segment([c, tip], stroke);
+    painter.line_segment([tip, tip + vec2(-0.8 * s, 0.0)], stroke);
+    painter.line_segment([tip, tip + vec2(0.0, 0.8 * s)], stroke);
+}
+
 fn paint_play_icon(painter: &Painter, rect: Rect, color: Color32, playing: bool) {
     let c = rect.center();
     let s = rect.width() * 0.17;
@@ -633,20 +654,7 @@ impl Grooph {
                 self.metronome_edit_bar(ui);
                 self.metronome_card(ui);
             }
-            Tab::Metronome => {
-                self.metronome_sheet(ui);
-                self.metronome_card(ui);
-                // The staff above takes a share of the room, the ring the rest.
-                let room = ui.available_height().max(0.0);
-                let (share, max) = if self.counter_bar().is_some() {
-                    (METRONOME_TWO_STAFF_SHARE, METRONOME_TWO_STAFF_MAX)
-                } else {
-                    (METRONOME_STAFF_SHARE, METRONOME_STAFF_MAX)
-                };
-                let staff = (share * room).clamp(METRONOME_STAFF_MIN, max).min(room);
-                let height = (room - staff).min(ui.available_width());
-                self.metronome_ring(ui, height);
-            }
+            Tab::Metronome => self.metronome_page(ui),
             Tab::More => self.more_page(ui),
         }
         if tab == Tab::More {
@@ -657,6 +665,23 @@ impl Grooph {
             self.measure_panel(ui);
         }
         self.settings_picker(ui);
+    }
+
+    /// The metronome tab above the tab bar: its card, options sheet and ring.
+    /// The staff goes in the room left.
+    pub(crate) fn metronome_page(&mut self, ui: &mut Ui) {
+        self.metronome_sheet(ui);
+        self.metronome_card(ui);
+        // The staff above takes a share of the room, the ring the rest.
+        let room = ui.available_height().max(0.0);
+        let (share, max) = if self.counter_bar().is_some() {
+            (METRONOME_TWO_STAFF_SHARE, METRONOME_TWO_STAFF_MAX)
+        } else {
+            (METRONOME_STAFF_SHARE, METRONOME_STAFF_MAX)
+        };
+        let staff = (share * room).clamp(METRONOME_STAFF_MIN, max).min(room);
+        let height = (room - staff).min(ui.available_width());
+        self.metronome_ring(ui, height);
     }
 
     fn tab_bar(&mut self, ui: &mut Ui, current: Tab) {
@@ -898,7 +923,8 @@ impl Grooph {
         if notation_value_row(ui, "Subdivision", look.as_ref(), &label, family).clicked() {
             self.ui.picker = Some(Picker::ClickFill);
         }
-        if value_row(ui, "Edit clicks", "✏").clicked() {
+        // Embedded there is no tool palette to edit them with.
+        if !self.embedded() && value_row(ui, "Edit clicks", "✏").clicked() {
             self.ui.mode = Mode::Edit;
         }
         self.polyrhythm_row(ui);
@@ -1009,7 +1035,8 @@ impl Grooph {
         self.fold_sheet_on_flick(ui, sheet.response.rect, options);
     }
 
-    /// Centered play button, with share on the right.
+    /// Centered play button, with share on the right (embedded: "Open in
+    /// grooph").
     fn metronome_transport(&mut self, ui: &mut Ui) {
         if self.link_copied_recently(ui) {
             ui.vertical_centered(|ui| {
@@ -1035,12 +1062,21 @@ impl Grooph {
         {
             self.toggle_playback();
         }
-        if round_button_at(
+        let side = Rect::from_min_size(row.right_top() - vec2(PLAY_BUTTON_SIZE, 0.0), size);
+        let (fill, text) = (ui.visuals().extreme_bg_color, ui.visuals().strong_text_color());
+        if self.embedded() {
+            if round_button_at(ui, side, Id::unique("metronome_open"), fill, text, paint_open_icon)
+                .on_hover_text("Open in grooph")
+                .clicked()
+            {
+                self.open_in_grooph(ui);
+            }
+        } else if round_button_at(
             ui,
-            Rect::from_min_size(row.right_top() - vec2(PLAY_BUTTON_SIZE, 0.0), size),
+            side,
             Id::unique("metronome_share"),
-            ui.visuals().extreme_bg_color,
-            ui.visuals().strong_text_color(),
+            fill,
+            text,
             paint_share_icon,
         )
         .on_hover_text("Share a link to this metronome")
