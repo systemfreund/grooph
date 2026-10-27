@@ -271,6 +271,9 @@ const START_TIMEOUT_S: f64 = 5.0;
 /// time sounds right away, a longer break lets the device sleep (battery,
 /// Bluetooth) and the next play wakes it up again.
 const IDLE_CLOSE_S: f64 = 60.0;
+/// Seconds between looks at the idle output: no frames run while idle, and
+/// the watchdog has to see a device that went away before the next play.
+const IDLE_WATCH_S: f64 = 1.0;
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum PlayerState {
@@ -393,8 +396,9 @@ impl Audio {
     }
 
     /// Returns when the UI should call this again even without input: right
-    /// away when the output was lost, or when the idle output is due to be
-    /// closed. `now` is a clock in seconds.
+    /// away when the output was lost, and while the output is idle, so the
+    /// watchdog keeps watching it and it is closed in time. `now` is a clock
+    /// in seconds.
     ///
     /// The output stays open for [`IDLE_CLOSE_S`] after playback stops,
     /// rendering silence, so a play within that time sounds right away
@@ -431,12 +435,12 @@ impl Audio {
     }
 
     /// Close the output once it was stopped for [`IDLE_CLOSE_S`]; until then,
-    /// the time left.
+    /// when to look again.
     fn close_idle_output(&mut self, player_state: &PlayerState, now: f64) -> Option<Duration> {
         let idle = *player_state != PlayerState::Playing && self.output.is_some();
         let left = self.idle.left(idle, now)?;
         if left > 0.0 {
-            return Some(Duration::from_secs_f64(left));
+            return Some(Duration::from_secs_f64(left.min(IDLE_WATCH_S)));
         }
         debug!("Closing the idle output.");
         self.close_output();
