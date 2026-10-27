@@ -343,7 +343,12 @@ impl App for Grooph {
         self.ui.narrow_screen = ui.available_width() < shell::NARROW_MAX_WIDTH;
         let embedded = self.embedded();
         if embedded {
-            self.embed_ui(ui);
+            // The root Ui spans the whole view; keep the app inside what the
+            // host leaves free (the safe area set in `raw_input_hook`).
+            // What it covers keeps the app's background.
+            let content = ui.ctx().content_rect();
+            ui.painter().rect_filled(ui.max_rect(), 0, ui.visuals().panel_fill);
+            ui.scope_builder(egui::UiBuilder::new().max_rect(content), |ui| self.embed_ui(ui));
         } else {
             self.shell_ui(ui);
         }
@@ -435,6 +440,11 @@ impl App for Grooph {
     fn raw_input_hook(&mut self, ctx: &Context, raw_input: &mut egui::RawInput) {
         if self.embedded() {
             embed::cancel_scrolled_touch(ctx, raw_input);
+            // What the chat covers at the edges, e.g. its composer over the
+            // bottom in fullscreen: egui lays everything out inside the rest.
+            if let Some(insets) = embed::host_safe_area(ctx) {
+                raw_input.safe_area_insets = Some(insets);
+            }
         }
     }
 }

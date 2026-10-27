@@ -13,8 +13,10 @@ use crate::pickers::silent_bars_label;
 use crate::{Grooph, TransportState, platform};
 use eframe::egui::{
     self, Align, Button, Color32, Context, Event, FontId, Frame, Layout, Margin, PointerButton,
-    RawInput, Rect, RichText, Sense, Stroke, Theme, TouchPhase, Ui, Visuals, pos2, vec2,
+    RawInput, Rect, RichText, SafeAreaInsets, Sense, Stroke, Theme, TouchPhase, Ui, Visuals, pos2,
+    vec2,
 };
+use eframe::epaint::MarginF32;
 use grooph_link::format_bar;
 use grooph_measure::swing::SwingUnit;
 use grooph_measure::tempo::{MAX_BPM, MIN_BPM};
@@ -89,6 +91,26 @@ pub(crate) fn cancel_scrolled_touch(ctx: &Context, raw: &mut RawInput) {
         modifiers: Default::default(),
     });
     raw.events.push(Event::PointerGone);
+}
+
+/// What the chat host covers at the view's edges, as egui's safe area:
+/// `insets` (`top,right,bottom,left` in CSS pixels) in points.
+pub(crate) fn safe_area_of(insets: &str, zoom: f32) -> Option<SafeAreaInsets> {
+    let sides: Vec<f32> =
+        insets.split(',').map(|v| v.trim().parse().ok()).collect::<Option<_>>()?;
+    let [top, right, bottom, left] = sides[..] else { return None };
+    let point = |px: f32| px.max(0.0) / zoom.max(0.1);
+    Some(SafeAreaInsets(MarginF32 {
+        left: point(left),
+        right: point(right),
+        top: point(top),
+        bottom: point(bottom),
+    }))
+}
+
+/// The host's safe area for this frame (see [`safe_area_of`]).
+pub(crate) fn host_safe_area(ctx: &Context) -> Option<SafeAreaInsets> {
+    safe_area_of(&platform::host_insets()?, ctx.zoom_factor())
 }
 
 /// The chat host's own colors (`hostContext.styles.variables`, resolved by
@@ -700,6 +722,17 @@ mod tests {
             assert!(sizes.windows(2).skip(1).all(|w| w[0] == w[1]), "{compact}: {sizes:?}");
             assert!(sizes[5].0 > 20.0, "{compact}: {sizes:?}");
         }
+    }
+
+    #[test]
+    fn the_hosts_insets_become_the_safe_area() {
+        use super::safe_area_of;
+        let area = safe_area_of("10, 0, 96.5, 4", 1.0).unwrap().0;
+        assert_eq!((area.top, area.right, area.bottom, area.left), (10.0, 0.0, 96.5, 4.0));
+        // CSS pixels are points over egui's zoom.
+        assert_eq!(safe_area_of("0,0,100,0", 2.0).unwrap().0.bottom, 50.0);
+        assert!(safe_area_of("1,2,3", 1.0).is_none());
+        assert!(safe_area_of("a,b,c,d", 1.0).is_none());
     }
 
     #[test]

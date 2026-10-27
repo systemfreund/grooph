@@ -244,6 +244,18 @@ pub(crate) fn host_request_fullscreen() -> bool {
     false
 }
 
+/// What the MCP App host covers at the view's edges, in CSS pixels, as the
+/// view passes it on (`window.groophHost.insets`: `top,right,bottom,left`).
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn host_insets() -> Option<String> {
+    crate::web::host_string("insets").filter(|i| !i.is_empty())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn host_insets() -> Option<String> {
+    None
+}
+
 /// Let the embedding view ask for a frame (`window.groophHost.repaint()`),
 /// e.g. after the host switched its theme.
 #[cfg(target_arch = "wasm32")]

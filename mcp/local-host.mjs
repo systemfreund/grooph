@@ -18,6 +18,8 @@
 //   tall=1          room below the frame, so the page scrolls as a chat does
 //   fullscreen=0    a host without fullscreen (else window.exitFullscreen()
 //                   brings a fullscreen view back inline)
+//   insets=0        no safeAreaInsets (by default the bottom 88 px in
+//                   fullscreen, under a stand-in for Claude's composer)
 //   styles=0        no hostContext.styles (by default Claude-like color
 //                   variables with light-dark(), as the spec suggests)
 //   bpm, ts, click, poly, swing, su      the tool's arguments
@@ -117,7 +119,11 @@ const hostPage = `<!DOCTYPE html><meta charset="utf-8"><title>local MCP Apps hos
   iframe { display: block; border: 1px solid #888; border-radius: 12px; height: 200px; }
   pre { white-space: pre-wrap; }
 </style>
+<div style="position: relative">
 <iframe id="view" sandbox="allow-scripts allow-same-origin allow-forms" allow="autoplay"></iframe>
+<div id="composer" style="display: none; position: absolute; left: 5%; right: 5%; bottom: 16px; height: 56px; border-radius: 14px;
+  background: #3a3a38ee; color: #aaa; font: 16px system-ui; align-items: center; padding-left: 16px">Reply…</div>
+</div>
 <pre id="log"></pre>
 <script type="module">
 const log = (...a) => { document.getElementById("log").textContent += a.join(" ") + "\\n"; };
@@ -167,7 +173,11 @@ const display = (mode) => {
   frame.style.width = full ? "100%" : inlineWidth;
   const height = full ? 700 : undefined;
   if (full) frame.style.height = height + "px";
-  post({ method: "ui/notifications/host-context-changed", params: { displayMode: mode,
+  // Fullscreen, a stand-in for Claude's composer covers the bottom.
+  document.getElementById("composer").style.display = full ? "flex" : "none";
+  // insets=0: a host that gives none (the view then guesses).
+  const safeAreaInsets = q.get("insets") === "0" ? undefined : { top: 0, right: 0, bottom: full ? 88 : 0, left: 0 };
+  post({ method: "ui/notifications/host-context-changed", params: { displayMode: mode, safeAreaInsets,
     containerDimensions: full ? { width: frame.clientWidth, height } : { width: frame.clientWidth, maxHeight: 1000 } } });
 };
 window.exitFullscreen = () => display("inline");
