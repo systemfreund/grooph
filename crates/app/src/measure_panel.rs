@@ -341,6 +341,8 @@ impl Grooph {
         if audio.is_some_and(grooph_audio::Audio::is_starting) {
             playback.last_update = None;
             playback.waited_for_output = true;
+            // Frames go on, so the wait ends (and the watchdog runs).
+            ui.ctx().request_repaint_after(std::time::Duration::from_millis(16));
             return playback.smooth_tick;
         }
         let audio_pos = audio.and_then(|audio| audio.playback_position());

@@ -394,7 +394,11 @@ impl Audio {
         let plan = self.plan(bpm, score);
         self.publish(player_state, plan);
         self.drop_released_plans();
-        self.watch_output(now);
+        if self.watch_output(now) {
+            // Not opened again right away: the app stops first, and on the
+            // web a new output needs the tap on play.
+            return true;
+        }
 
         // On pause/stop: do not pause sink immediately; wait until source reports silence
         if *player_state != PlayerState::Playing
@@ -426,15 +430,16 @@ impl Audio {
     /// Close the output when it stopped on its own: the browser took it away
     /// (see [`Output::lost`]) or it rendered nothing new for too long. A
     /// stopped output never reports silence, so it would otherwise stay open
-    /// for good and playing again would not open a new one.
-    fn watch_output(&mut self, now: f64) {
+    /// for good and playing again would not open a new one. Returns whether
+    /// it was closed.
+    fn watch_output(&mut self, now: f64) -> bool {
         let Some(output) = &self.output else {
-            return;
+            return false;
         };
         let lost = output.lost();
         let stalled = self.watchdog.stalled(output.rendered(), output.started(), now);
         if !lost && !stalled {
-            return;
+            return false;
         }
         warn!("Audio output {}, closing it.", if lost { "lost" } else { "stalled" });
         self.output = None;
@@ -445,6 +450,7 @@ impl Audio {
         shared_state.is_silent = true;
         // A new output starts the score over.
         shared_state.shift = 0.0;
+        true
     }
 
     /// Whether the output stopped on its own since the last call; playback
