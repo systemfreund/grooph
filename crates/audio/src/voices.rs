@@ -90,8 +90,8 @@ impl VoiceMixer {
         Self { voices: Vec::with_capacity(Self::MAX_VOICES), sample_rate }
     }
 
-    /// `true` when no voice is currently sounding. Used by the orchestrator to
-    /// decide when it is safe to pause the audio sink without a click.
+    /// `true` when no voice is currently sounding.
+    #[cfg(test)]
     pub(crate) fn is_silent(&self) -> bool {
         self.voices.is_empty()
     }

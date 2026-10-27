@@ -663,7 +663,13 @@ impl Grooph {
         if self.playback_ctl.transport_state != TransportState::Playing {
             return None;
         }
-        let (tick, _) = self.playback_ctl.audio.as_ref()?.playback_position()?;
+        let audio = self.playback_ctl.audio.as_ref()?;
+        // Waiting for the output, as the staff's cursor does: on the web the
+        // position runs ahead by the buffers rendered before it plays.
+        if audio.is_starting() {
+            return Some(0.0);
+        }
+        let (tick, _) = audio.playback_position()?;
         let bar_ticks = DEFAULT_GRID.ticks_per_measure(ts) as f64;
         let ticks_per_sec = ScoreTiming::from_score(&self.metronome_score(), self.current_bpm())
             .ticks_per_sec_in_measure(0);
@@ -678,7 +684,12 @@ impl Grooph {
     /// Whether the count-in's first click has been heard yet. Until then,
     /// with output latency, the ring's turn still wraps to the bar's end.
     fn count_in_click_heard(&self, ts: &TimeSignature) -> bool {
-        let Some((tick, _)) = self.playback_ctl.audio.as_ref().and_then(|a| a.playback_position())
+        let Some((tick, _)) = self
+            .playback_ctl
+            .audio
+            .as_ref()
+            .filter(|a| !a.is_starting())
+            .and_then(|a| a.playback_position())
         else {
             return false;
         };

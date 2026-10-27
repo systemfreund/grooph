@@ -26,7 +26,7 @@ use rodio::source::Function as RodioFunction;
 use schedule::{Schedule, SoundType};
 use serde::{Deserialize, Serialize};
 use std::fmt::{Debug, Formatter};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, TryLockError};
 use std::time::Duration;
 
@@ -243,6 +243,10 @@ pub struct Audio {
     /// Ticks dropped from the front of the score since the last update, see
     /// [`Audio::drop_leading_ticks`].
     pending_shift: f64,
+    /// A play started since the last update, see [`Audio::restart`].
+    pending_start: bool,
+    /// [`PlaybackState::start_pending`].
+    start_pending: Arc<AtomicBool>,
     /// Updates left before the output device is tried again after it could
     /// not be opened.
     reopen_wait: u32,
@@ -250,6 +254,8 @@ pub struct Audio {
     watchdog: Watchdog,
     /// The output stopped on its own, see [`Audio::take_output_lost`].
     output_lost: bool,
+    /// Closes the output after a while stopped.
+    idle: IdleTimer,
 }
 
 /// Updates to wait before opening the output device again once it failed:
@@ -263,6 +269,13 @@ const REOPEN_AFTER_UPDATES: u32 = 60;
 const STALL_TIMEOUT_S: f64 = 2.0;
 /// The same before it plays: waking up a device (Bluetooth) takes a while.
 const START_TIMEOUT_S: f64 = 5.0;
+/// Seconds the output stays open after playback stopped: a play within that
+/// time sounds right away, a longer break lets the device sleep (battery,
+/// Bluetooth) and the next play wakes it up again.
+const IDLE_CLOSE_S: f64 = 60.0;
+/// Seconds between looks at the idle output: no frames run while idle, and
+/// the watchdog has to see a device that went away before the next play.
+const IDLE_WATCH_S: f64 = 1.0;
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum PlayerState {
@@ -277,13 +290,17 @@ struct PlaybackState {
     playback_tick: f64,
     // Controls whether new tones are triggered and cursor advances
     playing_state: PlayerState,
-    // Whether source currently produces absolute silence (no active voices and not playing)
-    is_silent: bool,
     // Bar being played; `None` before the score starts (stopped, count-in).
     bar: Option<BarState>,
     // Ticks to move the cursor back when the new params are picked up: the
     // score lost that much from its front (endless mode).
     shift: f64,
+    // Plays started; the audio thread starts the score over when it sees a
+    // new one, also when it missed the stop in between.
+    starts: u64,
+    // A start the audio thread has not taken over yet. Set and cleared under
+    // the lock with `starts`; read without it.
+    start_pending: Arc<AtomicBool>,
 }
 
 impl Debug for PlaybackState {
@@ -355,14 +372,16 @@ impl Audio {
             seed: 1,
         };
 
+        let start_pending = Arc::new(AtomicBool::new(false));
         let shared_state = Arc::new(Mutex::new(PlaybackState {
             params,
             is_dirty: false,
             playback_tick: 0.0,
             playing_state: PlayerState::Stopped,
-            is_silent: true,
             bar: None,
             shift: 0.0,
+            starts: 0,
+            start_pending: Arc::clone(&start_pending),
         }));
 
         Some(Self {
@@ -375,44 +394,42 @@ impl Audio {
             retired: Vec::new(),
             last_bar: None,
             pending_shift: 0.0,
+            pending_start: false,
+            start_pending,
             reopen_wait: 0,
             watchdog: Watchdog::default(),
             output_lost: false,
+            idle: IdleTimer::default(),
         })
     }
 
-    /// Returns true if UI should repaint soon (while playing or while waiting
-    /// for tail-out). `now` is a clock in seconds, for noticing an output that
-    /// stopped.
+    /// Returns when the UI should call this again even without input: right
+    /// away when the output was lost, and while the output is idle, so the
+    /// watchdog keeps watching it and it is closed in time. `now` is a clock
+    /// in seconds.
+    ///
+    /// The output stays open for [`IDLE_CLOSE_S`] after playback stops,
+    /// rendering silence, so a play within that time sounds right away
+    /// instead of waking up the device again.
     pub fn update(
         &mut self,
         player_state: &PlayerState,
         bpm: u32,
         score: &Score,
         now: f64,
-    ) -> bool {
+    ) -> Option<Duration> {
+        let was_playing = self.sent_state == PlayerState::Playing;
         let plan = self.plan(bpm, score);
         self.publish(player_state, plan);
         self.drop_released_plans();
-        if self.watch_output(now) {
+        if self.watch_output(now) && was_playing {
             // Not opened again right away: the app stops first, and on the
             // web a new output needs the tap on play.
-            return true;
+            self.output_lost = true;
+            return Some(Duration::ZERO);
         }
-
-        // On pause/stop: do not pause sink immediately; wait until source reports silence
-        if *player_state != PlayerState::Playing
-            && self.output.is_some()
-            && let Some(mut shared_state) = try_lock(&self.shared_state)
-            && shared_state.is_silent
-            && !shared_state.is_dirty
-        {
-            // Now it's safe to pause without pops
-            debug!("Pausing sink. {:?}", shared_state);
-            self.output = None;
-            shared_state.playback_tick = 0.0;
-            shared_state.bar = None;
-        }
+        // Lost while stopped (seen by the idle frames, or by this play):
+        // closed quietly, and a play opens a new one.
 
         // Playback start: ensure sink runs
         if *player_state == PlayerState::Playing && self.output.is_none() {
@@ -422,16 +439,37 @@ impl Audio {
                 self.reopen_wait -= 1;
             }
         }
+        self.close_idle_output(player_state, now)
+    }
 
-        // Request repaint while tailing out awaiting pause
-        *player_state != PlayerState::Playing && self.output.is_some()
+    /// Close the output once it was stopped for [`IDLE_CLOSE_S`]; until then,
+    /// when to look again.
+    fn close_idle_output(&mut self, player_state: &PlayerState, now: f64) -> Option<Duration> {
+        let idle = *player_state != PlayerState::Playing && self.output.is_some();
+        let left = self.idle.left(idle, now)?;
+        if left > 0.0 {
+            return Some(Duration::from_secs_f64(left.min(IDLE_WATCH_S)));
+        }
+        debug!("Closing the idle output.");
+        self.close_output();
+        self.idle = IdleTimer::default();
+        None
+    }
+
+    /// Close the output; the published state reads as stopped, and a new
+    /// output starts the score over.
+    fn close_output(&mut self) {
+        self.output = None;
+        let mut shared_state = lock(&self.shared_state);
+        shared_state.playback_tick = 0.0;
+        shared_state.bar = None;
+        shared_state.shift = 0.0;
     }
 
     /// Close the output when it stopped on its own: the browser took it away
-    /// (see [`Output::lost`]) or it rendered nothing new for too long. A
-    /// stopped output never reports silence, so it would otherwise stay open
-    /// for good and playing again would not open a new one. Returns whether
-    /// it was closed.
+    /// (see [`Output::lost`]) or it rendered nothing new for too long. It
+    /// would otherwise stay open for good, and playing again would play into
+    /// it. Returns whether it was closed.
     fn watch_output(&mut self, now: f64) -> bool {
         let Some(output) = &self.output else {
             return false;
@@ -442,19 +480,12 @@ impl Audio {
             return false;
         }
         warn!("Audio output {}, closing it.", if lost { "lost" } else { "stalled" });
-        self.output = None;
-        self.output_lost = true;
-        let mut shared_state = lock(&self.shared_state);
-        shared_state.playback_tick = 0.0;
-        shared_state.bar = None;
-        shared_state.is_silent = true;
-        // A new output starts the score over.
-        shared_state.shift = 0.0;
+        self.close_output();
         true
     }
 
-    /// Whether the output stopped on its own since the last call; playback
-    /// should stop then, as the next play opens a new output.
+    /// Whether the output stopped on its own while playing since the last
+    /// call; playback should stop then, as the next play opens a new output.
     pub fn take_output_lost(&mut self) -> bool {
         std::mem::take(&mut self.output_lost)
     }
@@ -487,7 +518,11 @@ impl Audio {
     /// dropped later on this thread, see [`Audio::drop_released_plans`].
     fn publish(&mut self, player_state: &PlayerState, plan: Arc<PlaybackPlan>) {
         let same_plan = Arc::ptr_eq(&plan, &self.sent_plan) || *self.sent_plan == *plan;
-        if self.pending_shift <= 0.0 && same_plan && self.sent_state == *player_state {
+        if self.pending_shift <= 0.0
+            && !self.pending_start
+            && same_plan
+            && self.sent_state == *player_state
+        {
             return;
         }
         let plan = if same_plan { Arc::clone(&self.sent_plan) } else { plan };
@@ -500,16 +535,24 @@ impl Audio {
             return;
         };
         let old = std::mem::replace(&mut shared_state.params.plan, Arc::clone(&plan));
+        let playing = *player_state == PlayerState::Playing;
+        if playing && (shared_state.playing_state != *player_state || self.pending_start) {
+            shared_state.starts += 1;
+            shared_state.start_pending.store(true, Ordering::Relaxed);
+        }
         shared_state.playing_state = player_state.clone();
         shared_state.shift += self.pending_shift;
         // The published cursor moves with the score right away, so the
-        // app never reads the old position against the new score.
-        shared_state.playback_tick = (shared_state.playback_tick - self.pending_shift).max(0.0);
+        // app never reads the old position against the new score; stopped,
+        // it reads the start, as the audio thread will publish.
+        shared_state.playback_tick =
+            if playing { (shared_state.playback_tick - self.pending_shift).max(0.0) } else { 0.0 };
         shared_state.is_dirty = true;
         debug!("Shared state changed: {:?}", shared_state);
         drop(shared_state);
 
         self.pending_shift = 0.0;
+        self.pending_start = false;
         self.sent_plan = plan;
         self.sent_state = player_state.clone();
         if !Arc::ptr_eq(&old, &self.sent_plan) {
@@ -555,6 +598,13 @@ impl Audio {
         self.options = options;
     }
 
+    /// A play started: the next [`Audio::update`] starts the score over,
+    /// also when the stop before it came within the same frame and never
+    /// reached the audio thread.
+    pub fn restart(&mut self) {
+        self.pending_start = true;
+    }
+
     /// The score lost `ticks` from its front (endless mode dropped a played
     /// measure): the next [`Audio::update`] moves the cursor back by as much,
     /// together with the shorter score, so playback goes on without a skip.
@@ -562,21 +612,33 @@ impl Audio {
         self.pending_shift += ticks as f64;
     }
 
-    /// Whether an output stream is running, i.e. `playback_position` advances.
+    /// Whether an output stream is open; while playing, `playback_position`
+    /// advances.
     pub fn is_running(&self) -> bool {
         self.output.is_some()
     }
 
     /// Whether the output is open but does not play yet: a device waking up
-    /// (a new `AudioContext`, Bluetooth) makes the first click wait.
+    /// (a new `AudioContext`, Bluetooth) makes the first click wait, and on
+    /// an open output a play waits for the audio thread to start the score
+    /// over (up to one block).
     pub fn is_starting(&self) -> bool {
-        self.output.as_ref().is_some_and(|output| !output.started())
+        self.output.as_ref().is_some_and(|output| !output.started() || self.start_pending())
+    }
+
+    /// A play the audio thread has not started the score over for yet,
+    /// from [`Audio::restart`] on, so no frame in between misses it.
+    fn start_pending(&self) -> bool {
+        self.pending_start
+            || (self.sent_state == PlayerState::Playing
+                && self.start_pending.load(Ordering::Relaxed))
     }
 
     /// Bar the engine is playing; `None` while stopped or counting in. While
     /// the audio thread holds its lock, the last known bar is returned.
     pub fn bar_state(&mut self) -> Option<BarState> {
-        if !self.is_running() {
+        // Stopped, the open output may not have published the stop yet.
+        if !self.is_running() || self.sent_state != PlayerState::Playing {
             self.last_bar = None;
         } else if let Some(shared_state) = try_lock(&self.shared_state) {
             self.last_bar = shared_state.bar;
@@ -612,6 +674,26 @@ impl Watchdog {
         }
         let timeout = if started { STALL_TIMEOUT_S } else { START_TIMEOUT_S };
         now - self.since > timeout
+    }
+}
+
+/// Counts the time the output stays open after playback stopped, see
+/// [`IDLE_CLOSE_S`].
+#[derive(Default)]
+struct IdleTimer {
+    /// When (as passed to [`Audio::update`]) the output became idle.
+    since: Option<f64>,
+}
+
+impl IdleTimer {
+    /// Seconds left until an `idle` output is closed (zero or less: due);
+    /// `None` while it is not idle, which starts the time over.
+    fn left(&mut self, idle: bool, now: f64) -> Option<f64> {
+        if !idle {
+            self.since = None;
+            return None;
+        }
+        Some(IDLE_CLOSE_S - (now - *self.since.get_or_insert(now)))
     }
 }
 
@@ -656,6 +738,8 @@ struct MetronomeSource {
     shared_state: Arc<Mutex<PlaybackState>>,
     local_params: PlaybackParams,
     player_state: PlayerState,
+    /// The [`PlaybackState::starts`] this source started the score for.
+    starts: u64,
 
     tick_source: TickSource,
     gap: GapDecider,
@@ -676,9 +760,9 @@ impl MetronomeSource {
     }
 
     fn with_sample_rate(shared: Arc<Mutex<PlaybackState>>, sample_rate: u32) -> Self {
-        let (local_params, is_playing) = {
+        let (local_params, is_playing, starts) = {
             let state = lock(&shared);
-            (state.params.clone(), state.playing_state.clone())
+            (state.params.clone(), state.playing_state.clone(), state.starts)
         };
 
         let seed = local_params.seed;
@@ -690,6 +774,7 @@ impl MetronomeSource {
             shared_state: shared,
             local_params,
             player_state: is_playing,
+            starts,
             tick_source,
             gap: GapDecider::new(seed),
             voices: VoiceMixer::new(sample_rate),
@@ -717,14 +802,16 @@ impl MetronomeSource {
             // the published cursor.
             && !shared_state.is_dirty
         {
-            shared_state.playback_tick = self.tick_source.cursor();
-            shared_state.is_silent = self.voices.is_silent();
+            // Stopped, the cursor reads the start, as the next play begins
+            // there; the output stays open.
+            shared_state.playback_tick = if self.player_state == PlayerState::Playing {
+                self.tick_source.cursor()
+            } else {
+                0.0
+            };
             shared_state.bar = bar;
 
-            trace!(
-                "Updating shared state. playback_tick={:?} is_silent={}",
-                shared_state.playback_tick, shared_state.is_silent
-            );
+            trace!("Updating shared state. playback_tick={:?}", shared_state.playback_tick);
         }
     }
 
@@ -741,8 +828,9 @@ impl MetronomeSource {
                 shared_state
             );
 
-            let starting = self.player_state != shared_state.playing_state
+            let starting = self.starts != shared_state.starts
                 && shared_state.playing_state == PlayerState::Playing;
+            self.starts = shared_state.starts;
 
             self.player_state = shared_state.playing_state.clone();
             // Only reference counts change: the UI keeps the old plan alive
@@ -759,6 +847,9 @@ impl MetronomeSource {
                 self.tick_source.restart(self.local_params.plan.count_in.as_ref());
                 self.gap.reset(self.local_params.seed ^ self.samples_processed as u64);
             }
+            // Only once the score started over, so a frame that sees the flag
+            // cleared sees the new start.
+            shared_state.start_pending.store(false, Ordering::Relaxed);
         }
     }
 }
@@ -1063,6 +1154,85 @@ mod tests {
         assert_eq!(rendered.load(Ordering::Relaxed), 0);
         source.next();
         assert_eq!(rendered.load(Ordering::Relaxed), 1024);
+    }
+
+    #[test]
+    fn an_idle_output_is_closed_after_a_while() {
+        let mut idle = IdleTimer::default();
+        assert_eq!(idle.left(false, 0.0), None);
+        assert_eq!(idle.left(true, 10.0), Some(IDLE_CLOSE_S));
+        assert_eq!(idle.left(true, 40.0), Some(IDLE_CLOSE_S - 30.0));
+        assert!(idle.left(true, 10.0 + IDLE_CLOSE_S).is_some_and(|left| left <= 0.0));
+        // Playing in between starts the time over.
+        assert_eq!(idle.left(false, 50.0), None);
+        assert_eq!(idle.left(true, 100.0), Some(IDLE_CLOSE_S));
+    }
+
+    #[test]
+    fn a_quick_stop_and_play_starts_the_score_over() {
+        let mut audio = Audio::new(120).unwrap();
+        let score = score_of(TimeSignature::FOUR_FOUR, 2);
+        audio.publish(&PlayerState::Playing, plan_for(&audio, 120, &score));
+        let mut source = MetronomeSource::with_sample_rate(Arc::clone(&audio.shared_state), 48_000);
+        // Past the count-in bar (2 s at 120 bpm).
+        for _ in 0..(48_000 * 3) {
+            source.next();
+        }
+        assert!(!source.tick_source.in_count_in());
+
+        // Stop and play again before the audio thread looks. Until it does,
+        // the play counts as pending.
+        audio.publish(&PlayerState::Stopped, plan_for(&audio, 120, &score));
+        audio.publish(&PlayerState::Playing, plan_for(&audio, 120, &score));
+        assert!(audio.start_pending());
+        for _ in 0..1024 {
+            source.next();
+        }
+        assert!(source.tick_source.in_count_in());
+        assert!(!audio.start_pending());
+
+        // Stop and play within one frame: only the play reaches `update`.
+        for _ in 0..(48_000 * 3) {
+            source.next();
+        }
+        assert!(!source.tick_source.in_count_in());
+        // Pending from the play on, before it is even handed over (the
+        // stop in the same frame never was).
+        audio.sent_state = PlayerState::Stopped;
+        audio.restart();
+        assert!(audio.start_pending());
+        audio.sent_state = PlayerState::Playing;
+        audio.publish(&PlayerState::Playing, plan_for(&audio, 120, &score));
+        assert!(audio.start_pending());
+        for _ in 0..1024 {
+            source.next();
+        }
+        assert!(source.tick_source.in_count_in());
+        assert!(!audio.start_pending());
+    }
+
+    #[test]
+    fn a_stopped_source_reads_the_start() {
+        let mut audio = Audio::new(120).unwrap();
+        let score = score_of(TimeSignature::FOUR_FOUR, 2);
+        audio.publish(&PlayerState::Playing, plan_for(&audio, 120, &score));
+        let mut source = MetronomeSource::with_sample_rate(Arc::clone(&audio.shared_state), 48_000);
+        // Past the count-in bar (2 s at 120 bpm).
+        for _ in 0..(48_000 * 3) {
+            source.next();
+        }
+        assert!(audio.playback_position().unwrap().0 > 0.0);
+        assert!(lock(&audio.shared_state).bar.is_some());
+
+        // The output stays open, the next play starts over. The position
+        // reads the start right away, before the audio thread looks.
+        audio.publish(&PlayerState::Stopped, plan_for(&audio, 120, &score));
+        assert_eq!(audio.playback_position().unwrap().0, 0.0);
+        for _ in 0..4096 {
+            source.next();
+        }
+        assert_eq!(audio.playback_position().unwrap().0, 0.0);
+        assert!(lock(&audio.shared_state).bar.is_none());
     }
 
     #[test]
