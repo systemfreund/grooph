@@ -51,6 +51,7 @@ ${metronomeQuery.toString()}
 // --- MCP Apps protocol over postMessage ---
 let nextId = 1;
 let connected = false;
+let latestContext = null;
 const pending = new Map();
 const handlers = {};
 window.addEventListener("message", (event) => {
@@ -144,11 +145,20 @@ function openLink(url) {
 window.groophHost = {
   appUrl,
   theme,
+  // Returns whether it took the context; the app tries again if not. A
+  // request the host fails is sent again a few seconds later, unless newer
+  // settings replaced it.
   updateModelContext(text, fields) {
-    if (!connected) return;
-    request("ui/update-model-context", { content: [{ type: "text", text }], structuredContent: fields }).catch((e) =>
-      console.warn("grooph: model context not updated", e),
-    );
+    if (!connected) return false;
+    const params = { content: [{ type: "text", text }], structuredContent: fields };
+    latestContext = params;
+    const send = (tries) =>
+      request("ui/update-model-context", params).catch((e) => {
+        console.warn("grooph: model context not updated", e);
+        if (tries > 1) setTimeout(() => latestContext === params && send(tries - 1), 3000);
+      });
+    send(3);
+    return true;
   },
   openLink,
 };
@@ -193,7 +203,8 @@ function fail(reason) {
   };
   let audio = null;
   const events = ["touchend", "pointerup", "click", "keydown"];
-  const listen = (on) => events.forEach((t) => (on ? addEventListener : removeEventListener)(t, unlock, true));
+  const listen = (on) =>
+    events.forEach((t) => (on ? window.addEventListener(t, unlock, true) : window.removeEventListener(t, unlock, true)));
   function unlock() {
     if (!audio) {
       audio = document.createElement("audio");

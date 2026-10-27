@@ -195,18 +195,21 @@ pub(crate) fn install_host_repaint(ctx: eframe::egui::Context) {
 pub(crate) fn install_host_repaint(_ctx: eframe::egui::Context) {}
 
 /// Report the metronome's settings to the model through the MCP App host.
+/// `false` if the view could not take them (no host, not connected).
 #[cfg(target_arch = "wasm32")]
-pub(crate) fn host_update_model_context(context: &crate::embed::ModelContext) {
-    crate::web::host_update_model_context(context);
+pub(crate) fn host_update_model_context(context: &crate::embed::ModelContext) -> bool {
+    crate::web::host_update_model_context(context)
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn host_update_model_context(_context: &crate::embed::ModelContext) {}
+pub(crate) fn host_update_model_context(_context: &crate::embed::ModelContext) -> bool {
+    false
+}
 
 /// Ask the MCP App host to open `url`. `false` without a host.
 #[cfg(target_arch = "wasm32")]
 pub(crate) fn host_open_link(url: &str) -> bool {
-    crate::web::host_call("openLink", &[url.into()])
+    crate::web::host_call("openLink", &[url.into()]).is_some()
 }
 
 #[cfg(not(target_arch = "wasm32"))]

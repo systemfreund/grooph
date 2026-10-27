@@ -132,12 +132,12 @@ impl Grooph {
                     let name = ratio.map_or_else(|| "custom".to_owned(), ratio_label);
                     let counter = format_bar(bar).unwrap_or_default();
                     text += &format!(", polyrhythm {name} (counter clicks {counter})");
-                    // The fields use the tool's names: `poly` for the ratio,
-                    // and the clicks as the link writes them.
+                    // The fields use the tool's arguments only: the ratio as
+                    // `poly`; the edited clicks are in the text and the link.
                     if let Some((ratio, _)) = ratio {
                         fields.push(("poly", Field::Text(ratio.to_string())));
                     }
-                    fields.push(("counter", Field::Text(counter)));
+                    fields.push(("polyEdited", Field::Bool(true)));
                 }
             }
         }
@@ -193,7 +193,11 @@ impl Grooph {
             ui.ctx().request_repaint_after_secs((since + REPORT_DELAY_S - now) as f32);
             return;
         }
-        platform::host_update_model_context(&context);
+        // Not taken (no host yet): a later frame tries again.
+        if !platform::host_update_model_context(&context) {
+            embed.changed = Some((context, since));
+            return;
+        }
         embed.reported = Some(context);
         embed.changed = None;
     }
@@ -282,6 +286,18 @@ mod tests {
         let context = app.model_context();
         assert!(context.text.contains("polyrhythm 3:2 edited (counter clicks t4 (t4) t4"));
         assert!(context.fields.contains(&("poly", Field::Text("3:2".into()))));
+    }
+
+    #[test]
+    fn a_report_the_view_did_not_take_is_tried_again() {
+        use eframe::egui::RawInput;
+        let (ctx, mut app) = embedded_app("?v=2&ts=4/4&embed=mcp");
+        // Natively there is no view to take it, like a host not yet connected.
+        let mut output = ctx.run_ui(RawInput::default(), |ui| app.embed_ui(ui));
+        output.textures_delta.clear();
+        let embed = app.ui.embed.as_ref().unwrap();
+        assert!(embed.reported.is_none());
+        assert!(embed.changed.is_some());
     }
 
     #[test]

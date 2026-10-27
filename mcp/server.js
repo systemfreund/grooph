@@ -126,7 +126,10 @@ export function showMetronome(args, origin) {
     content: [
       {
         type: "text",
-        text: `The metronome is shown to the user; they start it with the play button. Open in grooph: ${link}`,
+        text:
+          `The metronome is shown to the user; they start it with the play button. Open in grooph: ${link}\n` +
+          "If the click notation or the polyrhythm does not fit the meter, grooph shows an error instead; " +
+          "the view then reports it as model context, so check it before telling the user the metronome is set.",
       },
     ],
     structuredContent: { link },
