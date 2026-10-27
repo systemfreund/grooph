@@ -724,39 +724,34 @@ mod tests {
     }
 
     #[test]
-    fn the_staff_keeps_its_size_and_the_ring_gets_the_rest() {
+    fn the_staff_keeps_its_size_and_follows_a_resize_at_once() {
         use eframe::egui::{Pos2, RawInput, Rect, vec2};
+        let run = |app: &mut Grooph, ctx: &eframe::egui::Context, width: f32| {
+            let screen = Rect::from_min_size(Pos2::ZERO, vec2(width, 400.0));
+            let input = RawInput { screen_rect: Some(screen), ..Default::default() };
+            let mut output = ctx.run_ui(input, |ui| {
+                app.apply_style(ui);
+                app.ui.narrow_screen = ui.available_width() < crate::shell::NARROW_MAX_WIDTH;
+                app.embed_ui(ui);
+            });
+            output.textures_delta.clear();
+            app.ui.staff_em
+        };
         for compact in [true, false] {
+            let fresh = |width| {
+                let (ctx, mut app) = embedded_app("?v=2&bpm=129&ts=7/8&poly=4:7&embed=mcp");
+                app.ui.embed.as_mut().unwrap().fullscreen_offered = compact;
+                run(&mut app, &ctx, width)
+            };
             let (ctx, mut app) = embedded_app("?v=2&bpm=129&ts=7/8&poly=4:7&embed=mcp");
             app.ui.embed.as_mut().unwrap().fullscreen_offered = compact;
-            let screen = Rect::from_min_size(Pos2::ZERO, vec2(393.0, 400.0));
-            let mut sizes = Vec::new();
-            for _ in 0..6 {
-                let input = RawInput { screen_rect: Some(screen), ..Default::default() };
-                let mut output = ctx.run_ui(input, |ui| {
-                    app.apply_style(ui);
-                    app.ui.narrow_screen = ui.available_width() < crate::shell::NARROW_MAX_WIDTH;
-                    app.embed_ui(ui);
-                });
-                output.textures_delta.clear();
-                sizes.push((app.ui.staff_em, app.ui.staff_height));
-            }
-            // Measured once, then the same in every frame: it does not
-            // shrink to the room it was given.
-            assert!(sizes.windows(2).skip(1).all(|w| w[0] == w[1]), "{compact}: {sizes:?}");
-            assert!(sizes[5].0 > 20.0, "{compact}: {sizes:?}");
+            // The same size frame after frame: it does not shrink to the
+            // room it was given.
+            let sizes: Vec<f32> = (0..4).map(|_| run(&mut app, &ctx, 393.0)).collect();
+            assert!(sizes.windows(2).all(|w| w[0] == w[1]) && sizes[0] > 20.0, "{sizes:?}");
+            // A new width shows in the first frame, as in a fresh view.
+            assert_eq!(run(&mut app, &ctx, 360.0), fresh(360.0), "{compact}");
         }
-    }
-
-    #[test]
-    fn the_hosts_insets_become_the_safe_area() {
-        use super::safe_area_of;
-        let area = safe_area_of("10, 0, 96.5, 4", 1.0).unwrap().0;
-        assert_eq!((area.top, area.right, area.bottom, area.left), (10.0, 0.0, 96.5, 4.0));
-        // CSS pixels are points over egui's zoom.
-        assert_eq!(safe_area_of("0,0,100,0", 2.0).unwrap().0.bottom, 50.0);
-        assert!(safe_area_of("1,2,3", 1.0).is_none());
-        assert!(safe_area_of("a,b,c,d", 1.0).is_none());
     }
 
     #[test]

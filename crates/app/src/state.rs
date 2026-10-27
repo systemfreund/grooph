@@ -348,9 +348,6 @@ pub(crate) struct UiShell {
     /// Em the staff was last drawn at, so the metronome ring's hand is as
     /// wide as the playback cursor.
     pub(crate) staff_em: f32,
-    /// Height the metronome's staff panel needs at its width, margins
-    /// included, so the ring gets the rest (see `Grooph::staff_and_ring`).
-    pub(crate) staff_height: f32,
     /// Edit cursor the staff last scrolled into view. The staff follows the
     /// cursor only when it moves, so the user can scroll away from it.
     pub(crate) followed_cursor: Option<(Voice, Cursor)>,

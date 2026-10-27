@@ -17,343 +17,358 @@ use grooph_measure::tempo::ScoreTiming;
 use grooph_measure::{Cursor, Score, TimeSignature};
 use grooph_render::staff::{PlaybackMarks, draw_staff};
 
+/// The frames around the staff: the central panel's, and the canvas inside
+/// it (transparent, no stroke).
+fn staff_frames(style: &egui::Style) -> (Frame, Frame) {
+    let canvas = Frame::canvas(style).fill(egui::Color32::TRANSPARENT).stroke(egui::Stroke::NONE);
+    (Frame::central_panel(style), canvas)
+}
+
+/// What the frames around the staff take of the room it is given.
+pub(crate) fn staff_margins(style: &egui::Style) -> egui::Vec2 {
+    let (panel, canvas) = staff_frames(style);
+    panel.total_margin().sum() + canvas.total_margin().sum()
+}
+
 impl Grooph {
+    /// The staff's two voices besides the edited score: the upper one (when
+    /// the editor holds the lower) and the lower one, the metronome's counter
+    /// rhythm under its click bar. The editor holds one of the two (the one
+    /// being edited), the other comes from the audio settings.
+    pub(crate) fn staff_voices(&self) -> (Option<Score>, Option<Score>) {
+        let other = self.other_voice_score();
+        match self.edited_voice() {
+            Voice::Upper => (None, other),
+            Voice::Lower => (other, Some(self.editor.score.clone())),
+        }
+    }
+
+    /// The staff's options for `viewport_rect`. The metronome's staff takes
+    /// its size from the width alone: its height then decides how much room
+    /// the ring below gets (see `Grooph::staff_and_ring`), which must not in
+    /// turn decide its size.
+    pub(crate) fn staff_opts(&self, ui: &egui::Ui, viewport_rect: Rect) -> StaffOpts {
+        let width_cap_factor = if self.ui.narrow_screen {
+            // Let the measure width alone decide the size.
+            self.ui.layout.width_cap_factor.max(0.2)
+        } else {
+            self.ui.layout.width_cap_factor
+        };
+        let em = if self.metronome_mode() {
+            let tall = viewport_rect.with_max_y(viewport_rect.top() + 1.0e4);
+            compute_em(&tall, width_cap_factor, ui)
+        } else {
+            compute_em(&viewport_rect, width_cap_factor, ui)
+        };
+        let font_id = FontId::new(em, self.ui.music_font_id.family.clone());
+        let count_config = self.build_count_config();
+
+        // Tighter spacing on narrow screens makes the glyphs
+        // bigger: the staff shrinks its em until a measure
+        // full of sixteenths fits the width.
+        let narrow = self.ui.narrow_screen;
+        let (min_measure_width_em, note_width_em) = if narrow { (2.0, 0.36) } else { (6.0, 0.6) };
+        StaffOpts {
+            rect: viewport_rect,
+            font_id: font_id.clone(),
+            pixels_per_point: ui.ctx().pixels_per_point(),
+            em,
+            y_offset: 0.0,
+            stem_length_factor: self.ui.layout.stem_length_factor,
+            stem_thickness_factor: 0.04,
+            accent_displacement: 0.07,
+            min_measure_width_em,
+            note_width_em,
+            system_spacing_em: 0.2,
+            // No percussion clef: on a single line it says nothing
+            // the line doesn't, and every row starts alike.
+            layout_clef_first: false,
+            // The compact card in a chat has no meter in
+            // a card: the staff shows it.
+            time_signature_first: self.compact_card(),
+            room_below_em: if count_config.is_some() {
+                ROOM_BELOW_WITH_LABELS_EM
+            } else {
+                ROOM_BELOW_EM
+            },
+            // With a lower voice, count labels go under it.
+            lower_label_room_em: if count_config.is_some() {
+                LOWER_VOICE_LABEL_ROOM_EM
+            } else {
+                0.0
+            },
+            // While editing every rest stays to be picked, and
+            // in the metronome every click its own to tap.
+            bar_rests: self.ui.mode != Mode::Edit && !self.metronome_mode(),
+        }
+    }
+
+    /// Height of the metronome's staff panel at `width` (the room beside
+    /// the panel's margins), margins included: what it needs this frame.
+    pub(crate) fn metronome_staff_height(&self, ui: &egui::Ui, width: f32) -> f32 {
+        let margins = staff_margins(ui.style());
+        let rect = Rect::from_min_size(ui.cursor().min, egui::vec2(width - margins.x, 1.0e4));
+        let opts = self.staff_opts(ui, rect);
+        let (upper, counter) = self.staff_voices();
+        let upper = upper.as_ref().unwrap_or(&self.editor.score);
+        build_staff_layout_with_lower(upper, counter.as_ref(), &opts).total_size.y + margins.y
+    }
+
     pub(super) fn measure_panel(&mut self, ui: &mut egui::Ui) {
-        // The room given, margins included (see `staff_height` below).
-        let panel_height = ui.available_height();
-        egui::CentralPanel::default().show(ui, |ui| {
-            Frame::canvas(ui.style())
-                .fill(egui::Color32::TRANSPARENT)
-                .stroke(egui::Stroke::NONE)
-                .show(ui, |ui| {
-                    // Size measured on the frame's own `ui`, *before* entering
-                    // the `ScrollArea`: because the area scrolls both axes,
-                    // its inner `ui.available_size()` reports an unbounded
-                    // (scrollable) extent rather than the actual visible
-                    // viewport, which would make the staff size itself (and
-                    // pick its em) against a phantom width — overflowing the
-                    // real, narrower screen (e.g. on mobile) instead of
-                    // shrinking a measure to fit it fully in one row.
-                    let available = ui.available_size();
+        let (panel, canvas) = staff_frames(ui.style());
+        egui::CentralPanel::default().frame(panel).show(ui, |ui| {
+            canvas.show(ui, |ui| {
+                // Size measured on the frame's own `ui`, *before* entering
+                // the `ScrollArea`: because the area scrolls both axes,
+                // its inner `ui.available_size()` reports an unbounded
+                // (scrollable) extent rather than the actual visible
+                // viewport, which would make the staff size itself (and
+                // pick its em) against a phantom width — overflowing the
+                // real, narrower screen (e.g. on mobile) instead of
+                // shrinking a measure to fit it fully in one row.
+                let available = ui.available_size();
 
-                    // While playing, the tween below is the only animation:
-                    // egui's own would keep heading for a target from an
-                    // earlier frame, e.g. one before endless mode removed a
-                    // row.
-                    let playing = self.playback_ctl.transport_state == TransportState::Playing;
-                    let mut scroll_area = egui::ScrollArea::both().animated(!playing);
-                    let playback = &mut self.playback_ctl.playback;
-                    if std::mem::take(&mut playback.rows_removed)
-                        && let Some(offset) = playback.scroll.value_at(ui.input(|i| i.time))
-                    {
-                        scroll_area = scroll_area.vertical_scroll_offset(offset);
-                    }
-                    scroll_area.show(ui, |ui| {
-                        // `origin`, unlike `available`, must come from the
-                        // *inner* ui: egui bakes the current scroll offset
-                        // into its cursor position, which is what makes
-                        // content laid out from here actually move as the
-                        // user scrolls (the outer ui's cursor is fixed).
-                        let origin = ui.cursor().min;
-                        let viewport_rect = Rect::from_min_size(origin, available);
+                // While playing, the tween below is the only animation:
+                // egui's own would keep heading for a target from an
+                // earlier frame, e.g. one before endless mode removed a
+                // row.
+                let playing = self.playback_ctl.transport_state == TransportState::Playing;
+                let mut scroll_area = egui::ScrollArea::both().animated(!playing);
+                let playback = &mut self.playback_ctl.playback;
+                if std::mem::take(&mut playback.rows_removed)
+                    && let Some(offset) = playback.scroll.value_at(ui.input(|i| i.time))
+                {
+                    scroll_area = scroll_area.vertical_scroll_offset(offset);
+                }
+                scroll_area.show(ui, |ui| {
+                    // `origin`, unlike `available`, must come from the
+                    // *inner* ui: egui bakes the current scroll offset
+                    // into its cursor position, which is what makes
+                    // content laid out from here actually move as the
+                    // user scrolls (the outer ui's cursor is fixed).
+                    let origin = ui.cursor().min;
+                    let viewport_rect = Rect::from_min_size(origin, available);
 
-                        // The metronome's counter rhythm, the lower voice
-                        // under its click bar. The editor holds one of the
-                        // two (the one being edited), the other comes from
-                        // the audio settings.
-                        let voice = self.edited_voice();
-                        let other = self.other_voice_score();
-                        let (upper, counter) = match voice {
-                            Voice::Upper => (None, other),
-                            Voice::Lower => (other, Some(self.editor.score.clone())),
-                        };
+                    // The metronome's counter rhythm, the lower voice
+                    // under its click bar. The editor holds one of the
+                    // two (the one being edited), the other comes from
+                    // the audio settings.
+                    let voice = self.edited_voice();
+                    let (upper, counter) = self.staff_voices();
 
-                        // Build the multi-measure tempo backbone once per frame.
-                        // O(score.len()) — cheap for realistic score sizes.
-                        let timing = self.score_timing();
+                    // Build the multi-measure tempo backbone once per frame.
+                    // O(score.len()) — cheap for realistic score sizes.
+                    let timing = self.score_timing();
 
-                        // Update playback smoothing & primary-beat flash state
-                        let playback_tick_to_draw = match self.playback_ctl.transport_state {
-                            TransportState::Playing => Some(self.advance_playback(ui, &timing)),
-                            TransportState::Stopped => {
-                                self.playback_ctl.playback.reset();
-                                None
-                            }
-                        };
+                    // Update playback smoothing & primary-beat flash state
+                    let playback_tick_to_draw = match self.playback_ctl.transport_state {
+                        TransportState::Playing => Some(self.advance_playback(ui, &timing)),
+                        TransportState::Stopped => {
+                            self.playback_ctl.playback.reset();
+                            None
+                        }
+                    };
 
-                        // From the global tick, derive (playing_measure_idx, local_tick).
-                        // The playback cursor renders / auto-scrolls based on this — it
-                        // wanders through all measures, independent of cursor.measure_idx.
-                        // With swing the cursor follows the written positions, so it
-                        // reaches a swung note exactly when it sounds.
-                        let playback_local = playback_tick_to_draw
-                            .map(|global| timing.to_local(timing.written_global_tick(global)));
-                        let now = ui.input(|i| i.time);
-                        self.update_guide_anchor(playback_local, now);
-                        let guide = self.active_guide();
+                    // From the global tick, derive (playing_measure_idx, local_tick).
+                    // The playback cursor renders / auto-scrolls based on this — it
+                    // wanders through all measures, independent of cursor.measure_idx.
+                    // With swing the cursor follows the written positions, so it
+                    // reaches a swung note exactly when it sounds.
+                    let playback_local = playback_tick_to_draw
+                        .map(|global| timing.to_local(timing.written_global_tick(global)));
+                    let now = ui.input(|i| i.time);
+                    self.update_guide_anchor(playback_local, now);
+                    let guide = self.active_guide();
 
-                        let width_cap_factor = if self.ui.narrow_screen {
-                            // Let the measure width alone decide the size.
-                            self.ui.layout.width_cap_factor.max(0.2)
-                        } else {
-                            self.ui.layout.width_cap_factor
-                        };
-                        // The metronome's staff takes its size from the width
-                        // alone: its height then decides how much room the
-                        // ring below gets (see `Grooph::staff_and_ring`),
-                        // which must not in turn decide its size.
-                        let em = if self.metronome_mode() {
-                            let tall = viewport_rect.with_max_y(viewport_rect.top() + 1.0e4);
-                            compute_em(&tall, width_cap_factor, ui)
-                        } else {
-                            compute_em(&viewport_rect, width_cap_factor, ui)
-                        };
-                        let font_id = FontId::new(em, self.ui.music_font_id.family.clone());
+                    let staff_opts = self.staff_opts(ui, viewport_rect);
+                    let em = staff_opts.em;
+                    let count_config = self.build_count_config();
 
-                        let count_config = self.build_count_config();
-
-                        // Tighter spacing on narrow screens makes the glyphs
-                        // bigger: the staff shrinks its em until a measure
-                        // full of sixteenths fits the width.
-                        let narrow = self.ui.narrow_screen;
-                        let (min_measure_width_em, note_width_em) =
-                            if narrow { (2.0, 0.36) } else { (6.0, 0.6) };
-                        let staff_opts = StaffOpts {
-                            rect: viewport_rect,
-                            font_id: font_id.clone(),
-                            pixels_per_point: ui.ctx().pixels_per_point(),
-                            em,
-                            y_offset: 0.0,
-                            stem_length_factor: self.ui.layout.stem_length_factor,
-                            stem_thickness_factor: 0.04,
-                            accent_displacement: 0.07,
-                            min_measure_width_em,
-                            note_width_em,
-                            system_spacing_em: 0.2,
-                            // No percussion clef: on a single line it says nothing
-                            // the line doesn't, and every row starts alike.
-                            layout_clef_first: false,
-                            // The compact card in a chat has no meter in
-                            // a card: the staff shows it.
-                            time_signature_first: self.compact_card(),
-                            room_below_em: if count_config.is_some() {
-                                ROOM_BELOW_WITH_LABELS_EM
-                            } else {
-                                ROOM_BELOW_EM
-                            },
-                            // With a lower voice, count labels go under it.
-                            lower_label_room_em: if count_config.is_some() {
-                                LOWER_VOICE_LABEL_ROOM_EM
-                            } else {
-                                0.0
-                            },
-                            // While editing every rest stays to be picked, and
-                            // in the metronome every click its own to tap.
-                            bar_rests: self.ui.mode != Mode::Edit && !self.metronome_mode(),
-                        };
-
-                        let upper = upper.as_ref().unwrap_or(&self.editor.score);
+                    let upper = upper.as_ref().unwrap_or(&self.editor.score);
+                    let staff = build_staff_layout_with_lower(upper, counter.as_ref(), &staff_opts);
+                    // One row fits the height, so nothing above or below
+                    // the staff (accents, count labels) is cut off on a
+                    // short, wide panel.
+                    let row_height = staff.room.height() * em;
+                    let (staff_opts, staff) = if row_height > available.y && available.y > 0.0 {
+                        let floor = LEGIBILITY_FLOOR_EM / em;
+                        let staff_opts =
+                            staff_opts.rescaled((available.y / row_height).max(floor.min(1.0)));
                         let staff =
                             build_staff_layout_with_lower(upper, counter.as_ref(), &staff_opts);
-                        // One row fits the height, so nothing above or below
-                        // the staff (accents, count labels) is cut off on a
-                        // short, wide panel.
-                        // The metronome's ring takes the room the staff does
-                        // not need: as tall as it is before it shrinks to
-                        // fit (which would otherwise shrink it frame by
-                        // frame), with this panel's margins.
-                        if self.metronome_mode() {
-                            let needed = staff.total_size.y + (panel_height - available.y);
-                            if (needed - self.ui.staff_height).abs() > 0.5 {
-                                self.ui.staff_height = needed;
-                                ui.ctx().request_repaint();
-                            }
-                        }
-                        let row_height = staff.room.height() * em;
-                        let (staff_opts, staff) = if row_height > available.y && available.y > 0.0 {
-                            let floor = LEGIBILITY_FLOOR_EM / em;
-                            let staff_opts =
-                                staff_opts.rescaled((available.y / row_height).max(floor.min(1.0)));
-                            let staff =
-                                build_staff_layout_with_lower(upper, counter.as_ref(), &staff_opts);
-                            (staff_opts, staff)
+                        (staff_opts, staff)
+                    } else {
+                        (staff_opts, staff)
+                    };
+                    // Rows may render at a different em than the baseline `staff_opts`
+                    // (grow-to-fill / shrink-toward-floor) — rescale font/metrics to
+                    // match before drawing, so glyph size agrees with `staff`'s positions.
+                    let render_opts = staff_opts.rescaled(staff.scale);
+                    self.ui.staff_em = render_opts.em;
+
+                    // Auto-scroll follows the same visual cursor logic as the
+                    // renderer (incl. cross-measure wrap animation), so we use
+                    // the shared helper to find the cursor's actual home measure
+                    // and X for this frame.
+                    if let Some(playback) = playback_local
+                        && let Some((m_idx, x)) =
+                            grooph_render::staff::current_cursor_x(upper, &staff, playback)
+                        && let Some(placed) = staff.placed(m_idx)
+                    {
+                        // The row is centred vertically, but the offset
+                        // eases to it, so the rows glide up when the cursor
+                        // wraps rather than jump. The tween runs on the
+                        // offset egui will clamp to, so it never stalls at
+                        // the top or bottom of the score.
+                        let view_height = ui.clip_rect().height();
+                        let max_offset = (staff.total_size.y - view_height).max(0.0);
+                        let row_offset = (placed.rect.center().y - origin.y - view_height / 2.0)
+                            .clamp(0.0, max_offset);
+                        let now = ui.input(|i| i.time);
+                        let playback = &mut self.playback_ctl.playback;
+                        let offset = playback.scroll.update(row_offset, now);
+                        playback.row_pitch = staff
+                            .systems
+                            .get(1)
+                            .zip(staff.systems.first())
+                            .map_or(0.0, |(b, a)| b.rect.top() - a.rect.top());
+                        playback.rows_above_view = if playback.row_pitch > 0.0 {
+                            (offset / playback.row_pitch).floor() as usize
                         } else {
-                            (staff_opts, staff)
+                            0
                         };
-                        // Rows may render at a different em than the baseline `staff_opts`
-                        // (grow-to-fill / shrink-toward-floor) — rescale font/metrics to
-                        // match before drawing, so glyph size agrees with `staff`'s positions.
-                        let render_opts = staff_opts.rescaled(staff.scale);
-                        self.ui.staff_em = render_opts.em;
-
-                        // Auto-scroll follows the same visual cursor logic as the
-                        // renderer (incl. cross-measure wrap animation), so we use
-                        // the shared helper to find the cursor's actual home measure
-                        // and X for this frame.
-                        if let Some(playback) = playback_local
-                            && let Some((m_idx, x)) =
-                                grooph_render::staff::current_cursor_x(upper, &staff, playback)
-                            && let Some(placed) = staff.placed(m_idx)
-                        {
-                            // The row is centred vertically, but the offset
-                            // eases to it, so the rows glide up when the cursor
-                            // wraps rather than jump. The tween runs on the
-                            // offset egui will clamp to, so it never stalls at
-                            // the top or bottom of the score.
-                            let view_height = ui.clip_rect().height();
-                            let max_offset = (staff.total_size.y - view_height).max(0.0);
-                            let row_offset =
-                                (placed.rect.center().y - origin.y - view_height / 2.0)
-                                    .clamp(0.0, max_offset);
-                            let now = ui.input(|i| i.time);
-                            let playback = &mut self.playback_ctl.playback;
-                            let offset = playback.scroll.update(row_offset, now);
-                            playback.row_pitch = staff
-                                .systems
-                                .get(1)
-                                .zip(staff.systems.first())
-                                .map_or(0.0, |(b, a)| b.rect.top() - a.rect.top());
-                            playback.rows_above_view = if playback.row_pitch > 0.0 {
-                                (offset / playback.row_pitch).floor() as usize
-                            } else {
-                                0
-                            };
-                            // Centring this rect scrolls to exactly `offset`;
-                            // horizontally it follows the cursor at once.
-                            let cursor_rect = egui::Rect::from_center_size(
-                                egui::pos2(x, origin.y + offset + view_height / 2.0),
-                                egui::vec2(1.0, placed.rect.height()),
-                            );
-                            ui.scroll_to_rect_animation(
-                                cursor_rect,
-                                Some(egui::Align::Center),
-                                eframe::egui::style::ScrollAnimation::none(),
-                            );
-                        }
-
-                        // Bring the edit cursor into view when it moves. `Align::None`
-                        // means "scroll just enough to make visible"; following only
-                        // on a move leaves the user free to scroll away from it.
-                        // Gated on Stopped so it doesn't clobber the playback
-                        // re-centering above.
-                        let editing = self.ui.mode == Mode::Edit
-                            && self.playback_ctl.transport_state == TransportState::Stopped;
-                        let followed = editing.then_some((voice, self.editor.cursor));
-                        if followed != self.ui.followed_cursor
-                            && let Some(placed) = staff.placed(self.editor.cursor.measure_idx)
-                            && let Some(layout) = match voice {
-                                Voice::Upper => Some(&placed.layout),
-                                Voice::Lower => placed.lower.as_ref(),
-                            }
-                            && let Some(note) = layout.notes.get(self.editor.cursor.beat_idx)
-                        {
-                            let cursor_rect = egui::Rect::from_min_size(
-                                egui::pos2(note.center.x, placed.rect.top()),
-                                egui::vec2(1.0, placed.rect.height()),
-                            );
-                            ui.scroll_to_rect_animation(
-                                cursor_rect,
-                                None,
-                                eframe::egui::style::ScrollAnimation::none(),
-                            );
-                        }
-                        self.ui.followed_cursor = followed;
-
-                        let (rect, resp) =
-                            ui.allocate_exact_size(staff.total_size, egui::Sense::click_and_drag());
-
-                        let cursor = if self.ui.mode == Mode::Edit {
-                            Some(self.editor.cursor)
-                        } else {
-                            None
-                        };
-                        let playback = playback_local;
-                        // A silent bar shows no playback position, like the
-                        // metronome's ring: no line, no lit beat or count.
-                        let marks = if self.playback_ctl.playback.bar_muted {
-                            PlaybackMarks::Anchor(None)
-                        } else if guide == Guide::Line {
-                            PlaybackMarks::Line
-                        } else {
-                            PlaybackMarks::Anchor(self.playback_ctl.playback.anchor.map(|a| {
-                                (a.measure_idx, f64::from(a.tick), anchor_intensity(now - a.at))
-                            }))
-                        };
-
-                        // Under the metronome's ring the staff and the ring
-                        // light each other's hovered note and segment.
-                        let with_ring = self.metronome_mode() && self.ui.mode != Mode::Edit;
-                        let lit = with_ring
-                            .then_some(self.editor.metronome.ring_hover)
-                            .flatten()
-                            .map(|(voice, beat_idx)| (voice, Cursor { measure_idx: 0, beat_idx }));
-                        let staff_hover = resp
-                            .hover_pos()
-                            .filter(|_| with_ring)
-                            .and_then(|pos| hit_test_voice(&staff, pos))
-                            .map(|(voice, _, beat_idx)| (voice, beat_idx));
-                        if staff_hover != self.editor.metronome.staff_hover {
-                            // The ring was drawn before the staff: show it there next frame.
-                            self.editor.metronome.staff_hover = staff_hover;
-                            ui.ctx().request_repaint();
-                        }
-
-                        draw_staff(
-                            ui,
-                            upper,
-                            &staff,
-                            cursor,
-                            voice,
-                            lit,
-                            playback,
-                            marks,
-                            count_config.as_ref(),
-                            &render_opts,
+                        // Centring this rect scrolls to exactly `offset`;
+                        // horizontally it follows the cursor at once.
+                        let cursor_rect = egui::Rect::from_center_size(
+                            egui::pos2(x, origin.y + offset + view_height / 2.0),
+                            egui::vec2(1.0, placed.rect.height()),
                         );
-
-                        // Draw flash overlay (white on dark, black on light) with decay
-                        let flash = self.playback_ctl.playback.flash_shown();
-                        if flash > 0.01 {
-                            let dark = ui.visuals().dark_mode;
-                            let base =
-                                if dark { egui::Color32::GREEN } else { egui::Color32::BLUE };
-                            let alpha = (0.8 * flash).clamp(0.0, 0.8);
-                            let color = egui::Color32::from_rgba_unmultiplied(
-                                base.r(),
-                                base.g(),
-                                base.b(),
-                                (alpha * 255.0) as u8,
-                            );
-                            ui.painter().rect_filled(rect, 0.0, color);
-                            ui.ctx().request_repaint();
-                        }
-
-                        if self.playback_ctl.playback.bar_muted
-                            && let Some((m_idx, _)) = playback_local
-                            && let Some(placed) = staff.placed(m_idx)
-                        {
-                            draw_muted_bar(ui, placed.rect);
-                        }
-
-                        self.draw_accuracy_markers(
-                            ui,
-                            upper,
-                            &staff,
-                            &timing,
-                            render_opts.staff_space(),
+                        ui.scroll_to_rect_animation(
+                            cursor_rect,
+                            Some(egui::Align::Center),
+                            eframe::egui::style::ScrollAnimation::none(),
                         );
-                        // A finger dragging over the notes scrolls the score,
-                        // as on the scroll bar; a mouse drags the edit cursor.
-                        if resp.dragged() && ui.input(|i| i.any_touches()) {
-                            ui.scroll_with_delta_animation(
-                                resp.drag_delta(),
-                                eframe::egui::style::ScrollAnimation::none(),
-                            );
-                        } else {
-                            self.handle_input(resp, &staff, with_ring);
+                    }
+
+                    // Bring the edit cursor into view when it moves. `Align::None`
+                    // means "scroll just enough to make visible"; following only
+                    // on a move leaves the user free to scroll away from it.
+                    // Gated on Stopped so it doesn't clobber the playback
+                    // re-centering above.
+                    let editing = self.ui.mode == Mode::Edit
+                        && self.playback_ctl.transport_state == TransportState::Stopped;
+                    let followed = editing.then_some((voice, self.editor.cursor));
+                    if followed != self.ui.followed_cursor
+                        && let Some(placed) = staff.placed(self.editor.cursor.measure_idx)
+                        && let Some(layout) = match voice {
+                            Voice::Upper => Some(&placed.layout),
+                            Voice::Lower => placed.lower.as_ref(),
                         }
-                    });
+                        && let Some(note) = layout.notes.get(self.editor.cursor.beat_idx)
+                    {
+                        let cursor_rect = egui::Rect::from_min_size(
+                            egui::pos2(note.center.x, placed.rect.top()),
+                            egui::vec2(1.0, placed.rect.height()),
+                        );
+                        ui.scroll_to_rect_animation(
+                            cursor_rect,
+                            None,
+                            eframe::egui::style::ScrollAnimation::none(),
+                        );
+                    }
+                    self.ui.followed_cursor = followed;
+
+                    let (rect, resp) =
+                        ui.allocate_exact_size(staff.total_size, egui::Sense::click_and_drag());
+
+                    let cursor =
+                        if self.ui.mode == Mode::Edit { Some(self.editor.cursor) } else { None };
+                    let playback = playback_local;
+                    // A silent bar shows no playback position, like the
+                    // metronome's ring: no line, no lit beat or count.
+                    let marks = if self.playback_ctl.playback.bar_muted {
+                        PlaybackMarks::Anchor(None)
+                    } else if guide == Guide::Line {
+                        PlaybackMarks::Line
+                    } else {
+                        PlaybackMarks::Anchor(self.playback_ctl.playback.anchor.map(|a| {
+                            (a.measure_idx, f64::from(a.tick), anchor_intensity(now - a.at))
+                        }))
+                    };
+
+                    // Under the metronome's ring the staff and the ring
+                    // light each other's hovered note and segment.
+                    let with_ring = self.metronome_mode() && self.ui.mode != Mode::Edit;
+                    let lit = with_ring
+                        .then_some(self.editor.metronome.ring_hover)
+                        .flatten()
+                        .map(|(voice, beat_idx)| (voice, Cursor { measure_idx: 0, beat_idx }));
+                    let staff_hover = resp
+                        .hover_pos()
+                        .filter(|_| with_ring)
+                        .and_then(|pos| hit_test_voice(&staff, pos))
+                        .map(|(voice, _, beat_idx)| (voice, beat_idx));
+                    if staff_hover != self.editor.metronome.staff_hover {
+                        // The ring was drawn before the staff: show it there next frame.
+                        self.editor.metronome.staff_hover = staff_hover;
+                        ui.ctx().request_repaint();
+                    }
+
+                    draw_staff(
+                        ui,
+                        upper,
+                        &staff,
+                        cursor,
+                        voice,
+                        lit,
+                        playback,
+                        marks,
+                        count_config.as_ref(),
+                        &render_opts,
+                    );
+
+                    // Draw flash overlay (white on dark, black on light) with decay
+                    let flash = self.playback_ctl.playback.flash_shown();
+                    if flash > 0.01 {
+                        let dark = ui.visuals().dark_mode;
+                        let base = if dark { egui::Color32::GREEN } else { egui::Color32::BLUE };
+                        let alpha = (0.8 * flash).clamp(0.0, 0.8);
+                        let color = egui::Color32::from_rgba_unmultiplied(
+                            base.r(),
+                            base.g(),
+                            base.b(),
+                            (alpha * 255.0) as u8,
+                        );
+                        ui.painter().rect_filled(rect, 0.0, color);
+                        ui.ctx().request_repaint();
+                    }
+
+                    if self.playback_ctl.playback.bar_muted
+                        && let Some((m_idx, _)) = playback_local
+                        && let Some(placed) = staff.placed(m_idx)
+                    {
+                        draw_muted_bar(ui, placed.rect);
+                    }
+
+                    self.draw_accuracy_markers(
+                        ui,
+                        upper,
+                        &staff,
+                        &timing,
+                        render_opts.staff_space(),
+                    );
+                    // A finger dragging over the notes scrolls the score,
+                    // as on the scroll bar; a mouse drags the edit cursor.
+                    if resp.dragged() && ui.input(|i| i.any_touches()) {
+                        ui.scroll_with_delta_animation(
+                            resp.drag_delta(),
+                            eframe::egui::style::ScrollAnimation::none(),
+                        );
+                    } else {
+                        self.handle_input(resp, &staff, with_ring);
+                    }
                 });
+            });
         });
     }
 
