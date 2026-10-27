@@ -771,8 +771,13 @@ impl Grooph {
             Some(LinkContent::Metronome(ts)) => {
                 self.stop_transport();
                 self.editor.metronome.meter = ts;
-                // The meter plays the link's counter rhythm, or none.
-                self.playback_ctl.audio_cfg.counter.replace(ts, link.counter.clone());
+                // The meter plays the link's counter rhythm, or none; a
+                // `poly` link's as picked in the app.
+                let counter = &mut self.playback_ctl.audio_cfg.counter;
+                match link.poly {
+                    Some(ratio) => counter.set_ratio(ts, Some(ratio)),
+                    None => counter.replace(ts, link.counter.clone()),
+                }
             }
             Some(LinkContent::Generator { settings, seed }) => {
                 self.stop_transport();

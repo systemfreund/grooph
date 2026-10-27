@@ -5,7 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { POLYRHYTHMS, metronomeQuery } from "./link.js";
+import { metronomeQuery } from "./link.js";
 import { RESOURCE_MIME, RESOURCE_URI, handleRequest } from "./server.js";
 
 const ORIGIN = "https://feature-x.grooph.pages.dev";
@@ -47,23 +47,23 @@ test("tools/list has show_metronome with its view", async () => {
   const tool = result.tools.find((t) => t.name === "show_metronome");
   assert.ok(tool);
   assert.equal(tool._meta.ui.resourceUri, RESOURCE_URI);
-  assert.deepEqual(Object.keys(tool.inputSchema.properties).sort(), ["bpm", "click", "counter", "su", "swing", "ts"]);
-  assert.match(tool.description, /3:2 in 4\/4: ts "4\/4", counter "t4 t4 t4 t4 t4 t4"/);
+  assert.deepEqual(Object.keys(tool.inputSchema.properties).sort(), ["bpm", "click", "poly", "su", "swing", "ts"]);
+  assert.match(tool.description, /poly "3:2"/);
 });
 
 test("tools/call returns the link of this deployment", async () => {
   const { result } = await rpc("tools/call", {
     name: "show_metronome",
-    arguments: { ts: "7/8", bpm: 70, click: ">q r:q. (q)", swing: 60, su: 16 },
+    arguments: { ts: "7/8", bpm: 70, click: ">q r:q. (q)", swing: 60, su: 16, poly: "3:7" },
   });
-  const link = `${ORIGIN}/?v=2&bpm=70&ts=7/8&swing=60&su=16&click=%3Eq+r:q.+%28q%29`;
+  const link = `${ORIGIN}/?v=2&bpm=70&ts=7/8&swing=60&su=16&click=%3Eq+r:q.+%28q%29&poly=3:7`;
   assert.equal(result.structuredContent.link, link);
   assert.ok(result.content[0].text.includes(`Open in grooph: ${link}`));
   assert.ok(!result.isError);
 });
 
 test("tools/call reports wrong numbers to the model", async () => {
-  for (const args of [{ bpm: 500 }, { swing: 90 }, { su: 16 }, { swing: 60, su: 4 }, { ts: "seven" }]) {
+  for (const args of [{ bpm: 500 }, { swing: 90 }, { su: 16 }, { swing: 60, su: 4 }, { ts: "seven" }, { poly: "three" }]) {
     const { result } = await rpc("tools/call", { name: "show_metronome", arguments: args });
     assert.equal(result.isError, true, JSON.stringify(args));
   }
@@ -102,15 +102,14 @@ test("notifications get 202, GET gets 405", async () => {
   assert.equal(get.status, 405);
 });
 
-test("the polyrhythms are the ones llms.txt lists (tested by grooph-site)", () => {
+test("llms.txt describes the tool's arguments, not written-out counter rhythms", () => {
   const llms = fs.readFileSync(path.join(here, "../crates/app/assets/seo/llms.txt"), "utf8");
-  for (const p of POLYRHYTHMS) {
-    const query = metronomeQuery({ ts: p.ts, counter: p.counter }).replace("v=2&", "");
-    assert.ok(llms.includes(query), `${p.ratio} in ${p.ts}: ${query} not in llms.txt`);
-  }
+  assert.ok(llms.includes("`show_metronome`") && llms.includes("`poly`"));
+  assert.ok(!llms.includes("counter="), "llms.txt should offer poly, not counter");
 });
 
 test("the query is the app's own link format", () => {
   assert.equal(metronomeQuery({}), "v=2&ts=4/4");
   assert.equal(metronomeQuery({ ts: " 2+2+3/8 ", bpm: "90" }), "v=2&bpm=90&ts=2%2B2%2B3/8");
+  assert.equal(metronomeQuery({ ts: "4/4", poly: " 3 : 2 " }), "v=2&ts=4/4&poly=3:2");
 });

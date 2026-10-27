@@ -15,7 +15,7 @@
 //   theme=dark      the host's theme (light by default); window.setTheme(t)
 //                   switches it later
 //   w=360           width of the frame in CSS pixels
-//   bpm, ts, click, counter, swing, su   the tool's arguments
+//   bpm, ts, click, poly, swing, su      the tool's arguments
 //
 // The page logs the messages from the view; `window.modelContext` holds the
 // last model context and `window.opened` the links the view asked to open.
@@ -128,7 +128,7 @@ await rpc("initialize", { protocolVersion: "2025-06-18", capabilities: { extensi
 const { tools } = await rpc("tools/list", {});
 const tool = tools.find((t) => t.name === "show_metronome");
 const args = {};
-for (const key of ["ts", "click", "counter"]) if (q.has(key)) args[key] = q.get(key);
+for (const key of ["ts", "click", "poly"]) if (q.has(key)) args[key] = q.get(key);
 for (const key of ["bpm", "swing", "su"]) if (q.has(key)) args[key] = Number(q.get(key));
 const callResult = await rpc("tools/call", { name: tool.name, arguments: args });
 log("tool result:", callResult.content[0].text);

@@ -230,7 +230,7 @@ fn llms_txt_links_open() {
         .split(|c: char| c.is_whitespace() || c == '|')
         .filter_map(|word| word.strip_prefix(prefix.as_str()))
         .collect();
-    assert!(links.iter().any(|l| l.contains("counter=")));
+    assert!(links.iter().any(|l| l.contains("poly=")));
     for query in links {
         let link = parse_query(query);
         assert!(matches!(link, Ok(Some(_))), "llms.txt: bad app link ?{query}: {link:?}");

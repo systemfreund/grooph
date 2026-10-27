@@ -6,7 +6,7 @@
 // and runs it in a sandboxed iframe, which loads the web build of this same
 // deployment, so a preview serves its own build.
 
-import { POLYRHYTHMS, argumentError, metronomeQuery } from "./link.js";
+import { argumentError, metronomeQuery } from "./link.js";
 import { viewHtml } from "./view.js";
 
 export const RESOURCE_URI = "ui://grooph/metronome.html";
@@ -21,8 +21,6 @@ const CORS = {
   "Access-Control-Expose-Headers": "Mcp-Session-Id",
 };
 
-const polyrhythmTable = POLYRHYTHMS.map((p) => `- ${p.ratio} in ${p.ts}: ts "${p.ts}", counter "${p.counter}"`).join("\n");
-
 export const TOOL = {
   name: "show_metronome",
   title: "Show a metronome",
@@ -30,20 +28,16 @@ export const TOOL = {
 
 Tempo is always in quarter notes per minute: 7/8 at bpm 70 clicks 140 eighths per minute.
 
-click and counter are one bar of the meter in grooph's rhythm notation, without the time signature: tokens separated by spaces, h q e s th (half to thirty-second), dotted q. e. s., triplets t2 t4 t8 t16, quintuplets qt4 qt8 qt16, septuplets spt4 spt8 spt16, any other tuplet n:m plus a note value (7:5e). r: makes a rest, > an accent (strong click), (e) a ghost note (soft click). The bar must add up exactly to the meter.
+poly is a polyrhythm n:m: n even clicks in the time of m beat units of the meter (quarters in x/4, eighths in x/8), repeated until the bar is full. m must divide the beats of the meter, n is 2 to 16. Examples: "3 against 2" in 4/4 is poly "3:2", "3 against 4" is "3:4", "5 against 4" is "5:4"; in 3/4 "2:3" or "4:3"; in 6/8 "2:3" is two against each dotted quarter; in 5/8 "7:5".
 
-click replaces the main click: e.g. 7/8 with the middle group silent and the last soft is ">q r:q. (q)". Default: one click per beat group, the first one strong.
-
-counter is a polyrhythm: n clicks evenly in the time of m beat units of the meter, repeated until the bar is full. Common ones:
-${polyrhythmTable}
-Any other ratio: one bar with n notes spread evenly over every m beats, using a tuplet when the clicks do not fall on plain note values (5/8, 7:5: "7:5e 7:5e 7:5e 7:5e 7:5e 7:5e 7:5e"). More at https://grooph.app/llms.txt.`,
+click replaces the main click: one bar of the meter in grooph's rhythm notation, without the time signature. Tokens separated by spaces: h q e s (half to sixteenth), dotted q. e., r: makes a rest, > an accent (strong click), (q) a ghost note (soft click); the bar must add up exactly to the meter. E.g. 7/8 with the middle group silent and the last soft is ">q r:q. (q)". Default: one click per beat group, the first one strong. More at https://grooph.app/llms.txt.`,
   inputSchema: {
     type: "object",
     properties: {
       bpm: { type: "integer", minimum: 20, maximum: 300, description: "Tempo in quarter notes per minute. Default 120." },
       ts: { type: "string", description: "Time signature: 1-17 beats over 4, 8 or 16, e.g. 4/4, 7/8 or 2+2+3/8. Default 4/4." },
       click: { type: "string", description: "The click bar in rhythm notation without the time signature, e.g. \">q r:q. (q)\" in 7/8." },
-      counter: { type: "string", description: "A counter rhythm (polyrhythm) in rhythm notation without the time signature, e.g. \"t4 t4 t4 t4 t4 t4\" for 3:2 in 4/4." },
+      poly: { type: "string", pattern: "^\\s*[0-9]+\\s*:\\s*[0-9]+\\s*$", description: "Polyrhythm n:m against the click, e.g. \"3:2\" for three against two in 4/4." },
       swing: { type: "integer", minimum: 50, maximum: 75, description: "Swing in percent: 50 is straight, 66 a triplet feel, 75 dotted." },
       su: { type: "integer", enum: [8, 16], description: "Note value that swings: 8 (default) or 16. Needs swing." },
     },

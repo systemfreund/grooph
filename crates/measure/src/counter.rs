@@ -44,6 +44,20 @@ impl std::fmt::Display for Ratio {
     }
 }
 
+impl std::str::FromStr for Ratio {
+    type Err = String;
+
+    /// `n:span`, e.g. `3:2`.
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let number = |t: &str| t.trim().parse::<u8>().ok().filter(|&v| v > 0);
+        let (n, span) = s.split_once(':').unwrap_or((s, ""));
+        match (number(n), number(span)) {
+            (Some(n), Some(span)) => Ok(Ratio { n, span }),
+            _ => Err(format!("'{s}' is no ratio such as 3:2")),
+        }
+    }
+}
+
 /// The counter bar of `ratio` in `ts`, every click medium (the click bar
 /// already clicks the downbeat loud). `None` if the
 /// span does not divide the bar or the clicks fall off the tick grid.

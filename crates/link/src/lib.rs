@@ -15,7 +15,8 @@
 //! | `swing`   | Swing in percent, 50 (straight) to 75 (dotted); 66 is a triplet feel |
 //! | `su`      | Swung note value: `8` (default) or `16`; needs `swing` |
 //! | `click`   | Click bar of the meter of `r` (its first measure) or `ts`: one measure in the text notation, without the time signature (`>` strong, plain medium, `(e)` soft, rest off) |
-//! | `counter` | Counter rhythm the metronome plays against the click bar of `ts`, written like `click` (see [`grooph_measure::counter`]); needs `ts` without `r` or the generator |
+//! | `poly`    | Polyrhythm `n:m` (n clicks in the time of m beat units) the metronome plays against the click bar of `ts`, its counter bar built as the app's picker does (see [`grooph_measure::counter`]); needs `ts` without `r` or the generator |
+//! | `counter` | The counter rhythm written out like `click`, for one whose clicks were edited; otherwise as `poly`. Not together with `poly` |
 //!
 //! Any of `sub`, `lvl`, `bars`, `space` or `seed` selects the generator;
 //! unknown parameters are ignored. [`SharedLink::to_url`] is the inverse of
@@ -31,6 +32,7 @@
 //! old 7/8 link at `bpm=140` opens at 70 and plays as fast as it used to. A
 //! score mixing beat units is converted by its first measure.
 
+use grooph_measure::counter::{Ratio, counter_bar, counter_ratios, own_ratios};
 use grooph_measure::generator::{
     GeneratorSettings, MAX_BARS, MAX_COMPLEXITY, Subdivision, supports_time_signature,
 };
@@ -53,6 +55,9 @@ pub struct SharedLink {
     pub click: Option<Measure>,
     /// Counter rhythm of the metronome's meter.
     pub counter: Option<Measure>,
+    /// The ratio `counter` was picked as. [`SharedLink::to_url`] writes it
+    /// as `poly` while `counter` is that ratio's bar, else the bar itself.
+    pub poly: Option<Ratio>,
 }
 
 #[derive(Clone, Debug)]
@@ -95,6 +100,7 @@ fn parse_query_with_default_version(
     let mut swing_unit = None;
     let mut click = None;
     let mut counter = None;
+    let mut poly = None;
 
     for pair in query.trim_start_matches('?').split('&').filter(|p| !p.is_empty()) {
         let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
@@ -124,6 +130,7 @@ fn parse_query_with_default_version(
             "su" => swing_unit = Some(parse_swing_unit(&value)?),
             "click" => click = Some(value),
             "counter" => counter = Some(value),
+            "poly" => poly = Some(value.parse::<Ratio>().map_err(|e| format!("poly: {e}"))?),
             _ => {}
         }
     }
@@ -176,14 +183,15 @@ fn parse_query_with_default_version(
             Some(single_measure("click", ts, &text)?)
         }
     };
-    let counter = match counter {
-        None => None,
-        Some(text) => {
-            let Some(&LinkContent::Metronome(ts)) = content.as_ref() else {
-                return Err("counter needs a time signature (ts) without a rhythm".into());
-            };
-            Some(single_measure("counter", ts, &text)?)
-        }
+    let metronome_meter = |name: &str| match content.as_ref() {
+        Some(&LinkContent::Metronome(ts)) => Ok(ts),
+        _ => Err(format!("{name} needs a time signature (ts) without a rhythm")),
+    };
+    let counter = match (counter, poly) {
+        (None, None) => None,
+        (Some(_), Some(_)) => return Err("use either poly or counter, not both".into()),
+        (Some(text), None) => Some(single_measure("counter", metronome_meter("counter")?, &text)?),
+        (None, Some(ratio)) => Some(poly_bar(metronome_meter("poly")?, ratio)?),
     };
 
     if version == 1
@@ -196,8 +204,20 @@ fn parse_query_with_default_version(
     if bpm.is_none() && swing.is_none() && content.is_none() {
         Ok(None)
     } else {
-        Ok(Some(SharedLink { bpm, swing, content, click, counter }))
+        Ok(Some(SharedLink { bpm, swing, content, click, counter, poly }))
     }
+}
+
+/// The counter bar of `ratio` in `ts`, as the app's polyrhythm picker builds
+/// it; the error names the ratios `ts` offers.
+fn poly_bar(ts: TimeSignature, ratio: Ratio) -> Result<Measure, String> {
+    if own_ratios(ts).contains(&ratio)
+        && let Some(bar) = counter_bar(ts, ratio)
+    {
+        return Ok(bar);
+    }
+    let offered: Vec<String> = counter_ratios(ts).iter().map(Ratio::to_string).collect();
+    Err(format!("poly {ratio} does not fit {ts}; it offers {}", offered.join(", ")))
 }
 
 /// The one measure of `ts` that `text` (without the time signature) writes,
@@ -262,9 +282,17 @@ impl SharedLink {
                 params.push(("su", "16".into()));
             }
         }
-        for (name, bar) in [("click", &self.click), ("counter", &self.counter)] {
-            if let Some(bar) = bar {
-                params.push((name, format_bar(bar)?));
+        if let Some(bar) = &self.click {
+            params.push(("click", format_bar(bar)?));
+        }
+        if let Some(bar) = &self.counter {
+            let ts = bar.time_signature();
+            match self
+                .poly
+                .filter(|&r| counter_bar(ts, r).is_some_and(|b| b.beats() == bar.beats()))
+            {
+                Some(ratio) => params.push(("poly", ratio.to_string())),
+                None => params.push(("counter", format_bar(bar)?)),
             }
         }
         // The version alone opens nothing.
@@ -497,6 +525,7 @@ mod tests {
             }),
             click: None,
             counter: None,
+            poly: None,
         };
         let url = generator.to_url("https://grooph.app/").unwrap();
         assert_eq!(
@@ -563,6 +592,52 @@ mod tests {
         // Only the metronome plays a counter rhythm.
         assert!(parse_query("r=q+q+q+q&counter=q+q+q+q").unwrap_err().contains("without a rhythm"));
         assert!(parse_query("bpm=90&counter=q+q+q+q").unwrap_err().contains("needs a time"));
+    }
+
+    #[test]
+    fn poly_link_builds_the_counter_bar_of_its_ratio() {
+        let link = parse("v=2&bpm=90&ts=4/4&poly=3:2");
+        assert_eq!(link.poly, Some(Ratio { n: 3, span: 2 }));
+        assert_eq!(format_bar(link.counter.as_ref().unwrap()).unwrap(), "t4 t4 t4 t4 t4 t4");
+        assert_eq!(link.to_url("/").unwrap(), "/?v=2&bpm=90&ts=4/4&poly=3:2");
+        // A ratio with a common factor keeps its name.
+        assert_eq!(parse("ts=4/4&poly=4:2").to_url("/").unwrap(), "/?v=2&ts=4/4&poly=4:2");
+        let link = parse("ts=5/8&poly=7:5");
+        assert_eq!(link.counter.unwrap().beats().len(), 7);
+        let err = parse_query("ts=4/4&poly=7:5").unwrap_err();
+        assert!(err.contains("does not fit 4/4") && err.contains("3:2"), "{err}");
+        assert!(parse_query("ts=4/4&poly=three").unwrap_err().contains("poly"));
+        assert!(parse_query("ts=4/4&poly=3:2&counter=t2+t2+t2").unwrap_err().contains("either"));
+        assert!(parse_query("r=q+q+q+q&poly=3:2").unwrap_err().contains("without a rhythm"));
+    }
+
+    #[test]
+    fn edited_poly_clicks_are_written_out() {
+        let mut link = parse("ts=4/4&poly=3:2");
+        link.counter.as_mut().unwrap().toggle_soft(1);
+        assert!(link.to_url("/").unwrap().contains("&counter=t4+%28t4%29+t4"));
+    }
+
+    #[test]
+    fn written_out_polyrhythms_are_the_ratios_bars() {
+        // The counter values llms.txt used to list open the same as `poly`.
+        for (ts, counter, ratio) in [
+            ("4/4", "t4+t4+t4+t4+t4+t4", "3:2"),
+            ("4/4", "t2+t2+t2", "3:4"),
+            ("4/4", "qt4+qt4+qt4+qt4+qt4", "5:4"),
+            ("4/4", "spt4+spt4+spt4+spt4+spt4+spt4+spt4", "7:4"),
+            ("4/4", "e+e+e+e+e+e+e+e", "2:1"),
+            ("2/4", "t4+t4+t4", "3:2"),
+            ("3/4", "q.+q.", "2:3"),
+            ("3/4", "e.+e.+e.+e.", "4:3"),
+            ("6/8", "e.+e.+e.+e.", "2:3"),
+            ("6/8", "s.+s.+s.+s.+s.+s.+s.+s.", "4:3"),
+            ("5/8", "7:5e+7:5e+7:5e+7:5e+7:5e+7:5e+7:5e", "7:5"),
+        ] {
+            let written = parse(&format!("ts={ts}&counter={counter}")).counter.unwrap();
+            let poly = parse(&format!("ts={ts}&poly={ratio}")).counter.unwrap();
+            assert_eq!(written.beats(), poly.beats(), "{ratio} in {ts}");
+        }
     }
 
     #[test]
@@ -653,6 +728,7 @@ mod tests {
             content: Some(LinkContent::Score(score.clone())),
             click: None,
             counter: None,
+            poly: None,
         };
         let url = link.to_url("https://grooph.app/").unwrap();
         assert_eq!(url, "https://grooph.app/?v=2&bpm=96&r=3/4+%3Eq+t8+t8+r:t8+e+e+%7C+e.+s+q+r:q");

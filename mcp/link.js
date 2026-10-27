@@ -19,13 +19,13 @@ export function metronomeQuery(args) {
   if (text(args?.swing)) params.push(["swing", text(args.swing)]);
   if (text(args?.su)) params.push(["su", text(args.su)]);
   if (text(args?.click)) params.push(["click", text(args.click)]);
-  if (text(args?.counter)) params.push(["counter", text(args.counter)]);
+  if (text(args?.poly)) params.push(["poly", text(args.poly).replace(/\s+/g, "")]);
   return params.map(([key, value]) => `${key}=${encode(value)}`).join("&");
 }
 
 /** Why `args` cannot be a metronome link, or `null`. Checks the numbers;
- * the notation of `ts`, `click` and `counter` is checked by the app, which
- * names the problem in the view. */
+ * the notation of `ts` and `click`, and whether `poly` fits the meter, are
+ * checked by the app, which names the problem in the view. */
 export function argumentError(args) {
   const whole = (value, min, max) => Number.isInteger(Number(value)) && Number(value) >= min && Number(value) <= max;
   if (args?.bpm != null && !whole(args.bpm, 20, 300)) return `bpm must be a whole number from 20 to 300, got ${args.bpm}`;
@@ -33,20 +33,6 @@ export function argumentError(args) {
   if (args?.su != null && !["8", "16"].includes(String(args.su))) return `su must be 8 or 16, got ${args.su}`;
   if (args?.su != null && args?.swing == null) return "su needs a swing amount (swing 50-75)";
   if (args?.ts != null && !/^\s*\d+(\+\d+)*\/\d+\s*$/.test(String(args.ts))) return `ts must be a time signature such as 7/8, got ${args.ts}`;
+  if (args?.poly != null && !/^\s*\d+\s*:\s*\d+\s*$/.test(String(args.poly))) return `poly must be a ratio such as 3:2, got ${args.poly}`;
   return null;
 }
-
-/** Counter rhythms of common polyrhythms, as in llms.txt ("Polyrhythms"),
- * for the tool's description. */
-export const POLYRHYTHMS = [
-  { ts: "4/4", ratio: "3:2", counter: "t4 t4 t4 t4 t4 t4" },
-  { ts: "4/4", ratio: "3:4", counter: "t2 t2 t2" },
-  { ts: "4/4", ratio: "5:4", counter: "qt4 qt4 qt4 qt4 qt4" },
-  { ts: "4/4", ratio: "7:4", counter: "spt4 spt4 spt4 spt4 spt4 spt4 spt4" },
-  { ts: "4/4", ratio: "2:1", counter: "e e e e e e e e" },
-  { ts: "2/4", ratio: "3:2", counter: "t4 t4 t4" },
-  { ts: "3/4", ratio: "2:3", counter: "q. q." },
-  { ts: "3/4", ratio: "4:3", counter: "e. e. e. e." },
-  { ts: "6/8", ratio: "2:3", counter: "e. e. e. e." },
-  { ts: "6/8", ratio: "4:3", counter: "s. s. s. s. s. s. s. s." },
-];

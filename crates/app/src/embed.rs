@@ -121,11 +121,20 @@ impl Grooph {
             ("subdivision", Field::Text(subdivision)),
         ];
         if let Some(bar) = self.counter_bar() {
-            let counter = format_bar(bar).unwrap_or_default();
-            let name = self.counter_ratio().map_or_else(|| "custom".to_owned(), ratio_label);
-            text += &format!(", polyrhythm {name} ({counter})");
-            fields.push(("polyrhythm", Field::Text(name)));
-            fields.push(("counter", Field::Text(counter)));
+            // A ratio's own clicks are the ratio; edited ones are written out.
+            match self.counter_ratio() {
+                Some((ratio, false)) => {
+                    text += &format!(", polyrhythm {ratio}");
+                    fields.push(("poly", Field::Text(ratio.to_string())));
+                }
+                ratio => {
+                    let name = ratio.map_or_else(|| "custom".to_owned(), ratio_label);
+                    let counter = format_bar(bar).unwrap_or_default();
+                    text += &format!(", polyrhythm {name} (counter clicks {counter})");
+                    fields.push(("polyrhythm", Field::Text(name)));
+                    fields.push(("counter", Field::Text(counter)));
+                }
+            }
         }
         if !cfg.swing.is_straight() {
             text += &format!(", swing {}% {}", cfg.swing.percent, cfg.swing.unit.label());
@@ -146,6 +155,11 @@ impl Grooph {
         if let Some(link) = self.share_link_url() {
             text += &format!(" Link: {link}");
             fields.push(("link", Field::Text(link)));
+        }
+        // A link that could not be opened: the model can call again.
+        if let Some(error) = &self.ui.link_error {
+            text = format!("The tool's link could not be opened: {error}. {text}");
+            fields.push(("error", Field::Text(error.clone())));
         }
         ModelContext { text, fields }
     }
@@ -235,19 +249,28 @@ mod tests {
         let (_, app) = embedded_app("?v=2&ts=7/8&counter=t4+t4+t4&embed=mcp");
         assert!(app.ui.link_error.is_some());
         assert!(app.metronome_mode());
+        let text = app.model_context().text;
+        assert!(text.starts_with("The tool's link could not be opened: counter"), "{text}");
     }
 
     #[test]
     fn the_model_hears_of_the_polyrhythm_and_swing() {
-        let (_, app) =
-            embedded_app("?v=2&bpm=90&ts=4/4&counter=t4+t4+t4+t4+t4+t4&swing=66&embed=mcp");
+        let (_, app) = embedded_app("?v=2&bpm=90&ts=4/4&poly=3:2&swing=66&embed=mcp");
         let context = app.model_context();
-        assert!(context.text.contains("polyrhythm 3:2 (t4 t4 t4 t4 t4 t4)"), "{}", context.text);
+        assert!(context.text.contains("polyrhythm 3:2,"), "{}", context.text);
         assert!(context.text.contains("swing 66% 8ths"), "{}", context.text);
+        assert!(context.fields.contains(&("poly", Field::Text("3:2".into()))));
         let link = context.fields.iter().find(|(k, _)| *k == "link").map(|(_, v)| v.clone());
         let Some(Field::Text(link)) = link else { panic!("no link in {:?}", context.fields) };
-        assert!(link.contains("ts=4/4") && link.contains("counter=") && link.contains("swing=66"));
+        assert!(link.contains("ts=4/4") && link.contains("poly=3:2") && link.contains("swing=66"));
         assert!(!link.contains("embed"), "{link}");
+        // Clicks written out that are a ratio's are reported as the ratio.
+        let (_, app) = embedded_app("?v=2&ts=4/4&counter=t4+t4+t4+t4+t4+t4&embed=mcp");
+        assert!(app.model_context().text.contains("polyrhythm 3:2,"));
+        // Edited ones are written out.
+        let (_, app) = embedded_app("?v=2&ts=4/4&counter=t4+(t4)+t4+t4+t4+t4&embed=mcp");
+        let text = app.model_context().text;
+        assert!(text.contains("polyrhythm 3:2 edited (counter clicks t4 (t4) t4"), "{text}");
     }
 
     #[test]
@@ -264,8 +287,7 @@ mod tests {
     fn the_embedded_view_renders_at_chat_sizes() {
         use eframe::egui::{Pos2, RawInput, Rect, vec2};
         for (width, height) in [(360.0, 520.0), (720.0, 520.0), (360.0, 400.0)] {
-            let (ctx, mut app) =
-                embedded_app("?v=2&bpm=90&ts=4/4&counter=t4+t4+t4+t4+t4+t4&embed=mcp");
+            let (ctx, mut app) = embedded_app("?v=2&bpm=90&ts=4/4&poly=3:2&embed=mcp");
             let screen = Rect::from_min_size(Pos2::ZERO, vec2(width, height));
             for picker in [None, Some(crate::pickers::Picker::MetronomeMeter)] {
                 app.ui.picker = picker;

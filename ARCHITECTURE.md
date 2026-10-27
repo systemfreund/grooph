@@ -121,7 +121,11 @@ spread across callers.
   `SharedLink::to_url` writes them. The app reads the link once at startup
   (`Grooph::open_link_from_url`), then removes it from the address bar. A
   `ts` link on its own opens the Metronome tab with that meter (and its
-  `click` bar) and leaves the rhythm alone. A link that replaces the score
+  `click` bar) and leaves the rhythm alone. A polyrhythm is `poly=n:m`: the
+  link builds the ratio's counter bar as the picker does (`counter_bar`) and
+  names it; `counter=` carries the clicks written out, which the share
+  buttons write only when they were edited (`SharedLink::poly`). `llms.txt`
+  and the MCP tool offer only `poly`: models get the notation wrong too often. A link that replaces the score
   goes through `PendingLoad::Link` and the
   unsaved-changes dialog. The share buttons (`share_link`) build a link with
   `SharedLink::to_url`.
@@ -138,10 +142,9 @@ grooph's metronome runs inside AI chats as an
   the web build: `https://grooph.app/mcp`, and each preview its own. The
   logic is in `mcp/server.js`: a stateless MCP server (Streamable HTTP, JSON
   answers, CORS) with one tool, `show_metronome`, whose arguments are the
-  metronome's link parameters (`bpm`, `ts`, `click`, `counter`, `swing`,
+  metronome's link parameters (`bpm`, `ts`, `click`, `poly`, `swing`,
   `su`; `mcp/link.js` builds the same query as `SharedLink::to_url`). Its
-  result carries the link, for hosts without views. The polyrhythm table in
-  its description must match `llms.txt` (checked by the Node tests).
+  result carries the link, for hosts without views.
 - The tool's view `ui://grooph/metronome.html` (`mcp/view.js`) runs in the
   host's sandboxed iframe on another origin. It does the MCP Apps handshake
   over postMessage, puts the link plus `embed=mcp&theme=light|dark` into the
