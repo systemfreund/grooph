@@ -39,6 +39,8 @@ export function viewHtml({ origin, js, wasm }) {
   #stage { position: relative; height: ${INLINE_HEIGHT}px; }
   /* Vertical drags scroll the chat; taps and horizontal drags go to the app. */
   html, canvas { touch-action: pan-y; }
+  /* In fullscreen no chat scrolls behind: vertical drags are the app's. */
+  html.fullscreen, html.fullscreen canvas { touch-action: none; }
   canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; outline: none; }
   /* The skeleton while the app loads, laid out like the card it becomes
      (eframe removes #loading_text once the app runs). */
@@ -227,6 +229,7 @@ function setDisplay(mode, modes) {
   if (modes) hostModes = modes;
   if (mode) displayMode = mode;
   document.getElementById("loading_text")?.classList.toggle("whole", !canFullscreen() || displayMode === "fullscreen");
+  document.documentElement.classList.toggle("fullscreen", displayMode === "fullscreen");
   fitHeight();
   if (window.groophHost) {
     window.groophHost.displayMode = displayMode;

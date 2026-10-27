@@ -48,9 +48,22 @@ pub(crate) fn embed_params(query: &str) -> Option<EmbedParams> {
     embedded.then_some(EmbedParams { theme })
 }
 
-/// Whether the page may handle `event` too (no `preventDefault`) when
-/// embedded: pointer, touch and wheel events, so the chat scrolls on a
-/// vertical drag (the view's canvas has `touch-action: pan-y`) or the wheel.
+/// Whether the view is in fullscreen, read by eframe's event handlers (see
+/// [`chat_takes`]): there no chat scrolls behind it.
+static FULLSCREEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Whether the page may handle `event` too (no `preventDefault`): inline,
+/// pointer, touch and wheel events, so the chat scrolls on a vertical drag
+/// (the view's canvas has `touch-action: pan-y` then) or the wheel. In
+/// fullscreen vertical gestures are the app's again (pickers scroll, the
+/// options sheet folds on a flick), as Claude's guidelines allow.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+pub(crate) fn chat_takes(event: &Event) -> bool {
+    !FULLSCREEN.load(std::sync::atomic::Ordering::Relaxed) && leaves_to_page(event)
+}
+
+/// Whether the page may handle `event` too when embedded inline: pointer,
+/// touch and wheel events.
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 pub(crate) fn leaves_to_page(event: &Event) -> bool {
     matches!(
@@ -69,6 +82,10 @@ pub(crate) fn leaves_to_page(event: &Event) -> bool {
 /// stay where it pressed. The pointer moves far off before it is released,
 /// which egui takes as a drag, not a click.
 pub(crate) fn cancel_scrolled_touch(ctx: &Context, raw: &mut RawInput) {
+    // In fullscreen the app keeps its touches (see `chat_takes`).
+    if FULLSCREEN.load(std::sync::atomic::Ordering::Relaxed) {
+        return;
+    }
     let touch_cancelled =
         raw.events.iter().any(|e| matches!(e, Event::Touch { phase: TouchPhase::Cancel, .. }));
     if !(platform::take_pointer_cancel() || touch_cancelled) {
@@ -234,6 +251,12 @@ impl Grooph {
         self.ui.embed.is_some()
     }
 
+    /// Whether a chat scrolls behind the view: embedded and inline. Vertical
+    /// gestures are then the chat's (see [`chat_takes`]).
+    pub(crate) fn chat_scrolls(&self) -> bool {
+        self.ui.embed.as_ref().is_some_and(|e| !e.fullscreen)
+    }
+
     /// Whether the view is the compact card: inline, where the host offers
     /// fullscreen for the rest (options, pickers, "Open in grooph").
     /// Otherwise the metronome tab without the tab bar.
@@ -275,6 +298,7 @@ impl Grooph {
         {
             embed.fullscreen = fullscreen;
             embed.fullscreen_offered = offered;
+            FULLSCREEN.store(fullscreen, std::sync::atomic::Ordering::Relaxed);
             ctx.request_repaint();
         }
         let colors = platform::host_colors();
