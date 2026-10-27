@@ -111,15 +111,12 @@ pub(crate) fn render_measure_at(
     }
 }
 
-/// Colour of the playback cursor, the count label being played and a lit
-/// note. The light theme's selection colour is a dark blue that barely stands
-/// out from the dark grey notes, so it takes a vivid blue.
+/// Colour of the edit and playback cursors, the count label being played and
+/// a lit note. The selection colours are too close to the notes: the dark
+/// theme's light blue to its light grey, the light theme's dark blue to its
+/// dark grey. So the dark theme takes yellow and the light one a vivid blue.
 pub fn highlight_color(visuals: &egui::Visuals) -> Color32 {
-    if visuals.dark_mode {
-        visuals.selection.stroke.color.to_opaque()
-    } else {
-        Color32::from_rgb(0, 110, 240)
-    }
+    if visuals.dark_mode { Color32::YELLOW } else { Color32::from_rgb(0, 110, 240) }
 }
 
 fn draw_staff_line_segment(painter: &Painter, rect: Rect, y: f32, em: f32, color: Color32) {
@@ -176,7 +173,7 @@ pub(crate) fn draw_edit_cursor(
     let c = measure_layout.notes[idx].center;
     let top = c.y + 0.5 * opts.em;
     let bottom = c.y - 0.5 * opts.em;
-    let base = if ui.visuals().dark_mode { Color32::YELLOW } else { Color32::BLUE };
+    let base = highlight_color(ui.visuals());
     let cursor_color = Color32::from_rgba_unmultiplied(base.r(), base.g(), base.b(), alpha);
     painter.vline(nl.center.x, Rangef::new(top, bottom), Stroke::new(0.03 * opts.em, cursor_color));
     // Drive animation between input events.
