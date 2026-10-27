@@ -369,7 +369,7 @@ mod tests {
             force: None,
         };
         // A button under the finger; returns whether it was clicked.
-        let mut frame = |mut raw: RawInput| {
+        let frame = |mut raw: RawInput| {
             cancel_scrolled_touch(&ctx, &mut raw);
             let mut clicked = false;
             let mut output = ctx.run_ui(raw, |ui| {
