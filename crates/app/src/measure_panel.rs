@@ -542,7 +542,8 @@ impl Grooph {
             }
             return;
         }
-        // Every tap changes a level there, so a double tap toggles no rest.
+        // A tap there changes the click's level, which also picks the voice
+        // and moves the cursor to it.
         if with_ring && resp.clicked() {
             if let Some(pos) = resp.interact_pointer_pos()
                 && let Some((voice, _, b_idx)) = hit_test_voice(staff, pos)

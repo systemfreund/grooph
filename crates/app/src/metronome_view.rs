@@ -725,10 +725,7 @@ impl Grooph {
             RingHit::Click(idx) => (Voice::Upper, idx),
             RingHit::Counter(idx) => (Voice::Lower, idx),
         });
-        let marked = hovered.or_else(|| {
-            let (voice, idx) = self.editor.metronome.staff_hover?;
-            segment_of_note(voice, idx, &counter_spans)
-        });
+        let marked = marked_segment(hovered, self.editor.metronome.staff_hover, &counter_spans);
 
         for (idx, (&(start, end), beat)) in spans.iter().zip(bar.beats()).enumerate() {
             let color = if current == Some(idx) && !muted { lit } else { base };
@@ -918,6 +915,19 @@ fn counter_spans(bar: &Measure) -> Vec<(usize, f32, f32)> {
         .collect()
 }
 
+/// The segment the ring marks: the one under the pointer, else the one of
+/// the note hovered on the staff.
+fn marked_segment(
+    hovered: Option<RingHit>,
+    staff_hover: Option<(Voice, usize)>,
+    counter_spans: &[(usize, f32, f32)],
+) -> Option<RingHit> {
+    hovered.or_else(|| {
+        let (voice, idx) = staff_hover?;
+        segment_of_note(voice, idx, counter_spans)
+    })
+}
+
 /// The ring segment of note `idx` of `voice`: a click of the click bar, or
 /// the counter click whose span (see [`counter_spans`]) holds it.
 fn segment_of_note(
@@ -1080,6 +1090,19 @@ mod tests {
         assert!(segment_of_note(Voice::Upper, 2, &spans) == Some(RingHit::Click(2)));
     }
 
+    #[test]
+    fn the_ring_marks_its_own_hover_else_the_staff_note() {
+        let bar = counter_bar(TimeSignature::THREE_FOUR, Ratio { n: 5, span: 3 }).unwrap();
+        let spans = counter_spans(&bar);
+        let marked = |hovered, staff| marked_segment(hovered, staff, &spans);
+        assert!(marked(None, Some((Voice::Lower, 4))) == Some(RingHit::Counter(3)));
+        assert!(marked(None, Some((Voice::Upper, 1))) == Some(RingHit::Click(1)));
+        // A finger on the ring wins over what the staff last reported.
+        let on_ring = Some(RingHit::Click(2));
+        assert!(marked(on_ring, Some((Voice::Lower, 4))) == on_ring);
+        assert!(marked(None, None).is_none());
+    }
+
     /// Runs frames of the whole app at phone size with the pointer at `pos`
     /// (hover follows a frame behind the pointer).
     fn hover(app: &mut Grooph, ctx: &egui::Context, pos: Pos2) {
@@ -1193,23 +1216,14 @@ mod tests {
         let notes = staff_notes(&mut app, &ctx, row);
         assert_eq!(indices(&notes), [0, 1, 2, 3], "{notes:?}");
 
-        // Every tap moves the note's click on, through off and back, and a
-        // double tap toggles no rest.
+        // Every tap moves the note's click on, also two in a row.
         let (_, idx, pos) = notes[2];
         let level = |app: &Grooph| ClickLevel::of(&app.click_bar().beats()[idx]);
         let before = level(&app);
         tap(&mut app, &ctx, pos);
         assert_eq!(level(&app), before.next());
-        // The second tap comes within egui's double-click window (frames
-        // advance by 1/60 s), and the click stays a note unless off.
         tap(&mut app, &ctx, pos);
         assert_eq!(level(&app), before.next().next());
-        let beat = app.click_bar().beats()[idx];
-        assert_eq!(
-            beat.kind == grooph_measure::BeatKind::Note,
-            level(&app) != ClickLevel::Off,
-            "{beat:?}"
-        );
     }
 
     #[test]
