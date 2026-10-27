@@ -187,6 +187,7 @@ impl Embed {
         }
         platform::install_host_repaint(ctx.clone());
         platform::install_pointer_cancel_listener(ctx.clone());
+        platform::install_host_toggle_play(ctx.clone());
         Self {
             theme: params.theme,
             colors: HostColors::default(),
@@ -206,6 +207,10 @@ impl Grooph {
     /// The layout of an embedded app: the metronome tab without the tab bar.
     pub(crate) fn embed_ui(&mut self, ui: &mut Ui) {
         self.follow_host_theme(ui.ctx());
+        // The view's play button, for screen readers.
+        if platform::take_toggle_play() {
+            self.toggle_playback();
+        }
         self.metronome_page(ui);
         self.measure_panel(ui);
         self.settings_picker(ui);

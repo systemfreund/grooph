@@ -196,6 +196,27 @@ pub(crate) fn host_colors() -> Option<String> {
     None
 }
 
+/// Let the view's play button for screen readers drive the app
+/// (`window.groophHost.togglePlay`).
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn install_host_toggle_play(ctx: eframe::egui::Context) {
+    crate::web::install_host_toggle_play(ctx);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn install_host_toggle_play(_ctx: eframe::egui::Context) {}
+
+/// Whether the view's play button was pressed since the last call.
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn take_toggle_play() -> bool {
+    crate::web::take_toggle_play()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn take_toggle_play() -> bool {
+    false
+}
+
 /// Let the embedding view ask for a frame (`window.groophHost.repaint()`),
 /// e.g. after the host switched its theme.
 #[cfg(target_arch = "wasm32")]
