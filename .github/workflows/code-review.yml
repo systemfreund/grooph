@@ -19,16 +19,18 @@ name: Code review
 # block, so each push is reviewed against the previous review and what people
 # with write access answered to it. Raw reviews stay in the run's artifacts.
 #
-# Runs on every push to a pull request; a newer push cancels the running review.
-# "Run workflow" reviews any PR number, optionally with its own model list.
+# "Run workflow" reviews any PR number, optionally with its own model list; a
+# newer review cancels the running one. With the automatic triggers on (see
+# `on:`), every push to a pull request starts a review.
 #
-# A comment runs only the synthesis again, with the reviews of the last run, when
-# someone with write access answered a finding since: a reply in its thread, or a
-# comment in the conversation that names it (F3). `review.py rerun` decides; it
-# looks at all answers since the last review, so a comment that cancels a waiting
-# run loses nothing. A comment never cancels a review. Comment runs use
-# the workflow file of the default branch (GitHub's rule for issue_comment), but
-# still the scripts and instructions of the PR's head.
+# A comment, or "Run workflow" with mode `answers`, runs only the synthesis again,
+# with the reviews of the last run, when someone with write access answered a
+# finding since: a reply in its thread, or a comment in the conversation that
+# names it (F3). `review.py rerun` decides; it looks at all answers since the last
+# review, so an answers run that cancels a waiting one loses nothing. An answers
+# run never cancels a review. Comment runs use the workflow file of the default
+# branch (GitHub's rule for issue_comment), but still the scripts and
+# instructions of the PR's head.
 #
 # OpenCode runs the read-only `review` agent from opencode.json; every model
 # used here must be listed there. Only the publish job can write to the pull
@@ -51,15 +53,20 @@ on:
       models:
         description: 'Models for the general review, as a JSON list, e.g. ["venice/deepseek-v4-1-flash"]. Leave blank for the default list'
         required: false
+      mode:
+        description: 'review: review the head commit in full. answers: only the synthesis again, with the reviews of the last run, after answers to its findings'
+        type: choice
+        options: [review, answers]
+        default: review
 
-# Comment runs get their own group: in a shared one, a comment would replace a push's review that is still
-# waiting. A newer comment does replace a waiting comment run, which loses nothing (see above), and a push
-# that lands during a comment run wins: publish then drops the comment run's result.
+# Answers runs (comments, or mode `answers`) get their own group: in a shared one, they would replace a
+# review that is still waiting. A newer answers run does replace a waiting one, which loses nothing (see
+# above), and a review that lands during an answers run wins: publish then drops the answers run's result.
 concurrency:
   group: >-
     code-review-${{ github.event.pull_request.number || github.event.issue.number || inputs.pr
-    }}${{ endsWith(github.event_name, 'comment') && '-answers' || '' }}
-  cancel-in-progress: ${{ !endsWith(github.event_name, 'comment') }}
+    }}${{ (endsWith(github.event_name, 'comment') || inputs.mode == 'answers') && '-answers' || '' }}
+  cancel-in-progress: ${{ !(endsWith(github.event_name, 'comment') || inputs.mode == 'answers') }}
 
 env:
   # Default models of the general review. GLM 5.3 (venice/z-ai-glm-5-3, its
@@ -99,6 +106,7 @@ jobs:
           PR: ${{ github.event.pull_request.number || github.event.issue.number || inputs.pr }}
           MODELS: ${{ inputs.models || env.DEFAULT_MODELS }}
           COMMENT: ${{ github.event_name == 'issue_comment' || github.event_name == 'pull_request_review_comment' }}
+          ANSWERS: ${{ inputs.mode == 'answers' }}
         run: |
           if ! [[ "$PR" =~ ^[0-9]+$ ]]; then
             echo "::error::Not a pull request number: $PR"
@@ -116,7 +124,7 @@ jobs:
             echo "::error::#$PR comes from a fork; forks are not reviewed."
             exit 1
           fi
-          if [ "$COMMENT" = true ]; then
+          if [ "$COMMENT" = true ] || [ "$ANSWERS" = true ]; then
             echo "mode=answers" >> "$GITHUB_OUTPUT"
           else
             echo "mode=review" >> "$GITHUB_OUTPUT"

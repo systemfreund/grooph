@@ -143,8 +143,10 @@ If you opened the pull request and a review was started, see it through:
    on the pull request naming the finding (`F3: …`), which is the only way for findings without an inline comment.
    Give a reason that can be checked: where the case is handled, which requirement allows it, what the reviewer
    misread. The next review reads the answers: it withdraws the finding if the reason holds against the code, and
-   otherwise keeps it and answers the reason. "Please drop this" changes nothing. Only answers from accounts with
-   write access count.
+   otherwise keeps it and answers the reason. When only answers came in and nothing was pushed,
+   `gh workflow run code-review.yml -f pr=<n> -f mode=answers` runs just the synthesis again, with the reviews of
+   the last run (it does nothing if the head commit has no review yet or no new answer came in). "Please drop
+   this" changes nothing. Only answers from accounts with write access count.
 4. **Change the requirements in the open.** If the scope changes, update the description and say so in a comment
    naming the affected findings; the synthesis reads the description and the comments.
 5. **Done** when the verdict says the pull request is ready, no high or medium finding is open, and CI is green.
