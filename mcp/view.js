@@ -160,20 +160,8 @@ function setTheme(next) {
 // CSS pixels), e.g. Claude's composer over the bottom in fullscreen; the app
 // keeps its controls out of it (groophHost.insets: "top,right,bottom,left").
 let insets = "";
-let hostInsets = false;
-// Claude's fullscreen covers the bottom with its composer (and on a phone
-// the top with its title bar); where the host gives no insets, these keep
-// the controls clear. Measured from Claude's apps, October 2026.
-const FULLSCREEN_FALLBACK = { web: { top: 0, right: 0, bottom: 96, left: 0 }, mobile: { top: 120, right: 0, bottom: 130, left: 0 } };
-let platform = "web";
-function fallbackInsets() {
-  if (hostInsets) return;
-  const fallback = displayMode === "fullscreen" ? FULLSCREEN_FALLBACK[platform] || FULLSCREEN_FALLBACK.web : { top: 0, right: 0, bottom: 0, left: 0 };
-  setInsets(fallback, false);
-}
-function setInsets(next, fromHost = true) {
+function setInsets(next) {
   if (!next) return;
-  if (fromHost) hostInsets = true;
   insets = ["top", "right", "bottom", "left"].map((side) => Math.max(0, Number(next[side]) || 0)).join(",");
   if (window.groophHost) {
     window.groophHost.insets = insets;
@@ -201,7 +189,6 @@ function fitHeight(next) {
 function setDisplay(mode, modes) {
   if (modes) hostModes = modes;
   if (mode) displayMode = mode;
-  fallbackInsets();
   fitHeight();
   if (window.groophHost) {
     window.groophHost.displayMode = displayMode;
@@ -241,7 +228,6 @@ try {
   notify("ui/notifications/initialized", {});
   const context = init?.hostContext || {};
   console.info("grooph: host context", context);
-  if (context.platform) platform = context.platform;
   setInsets(context.safeAreaInsets);
   applyHostStyles(context.styles);
   if (context.theme) setTheme(context.theme);
