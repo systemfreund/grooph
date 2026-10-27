@@ -313,3 +313,30 @@ pub(crate) fn host_update_model_context(context: &crate::embed::ModelContext) ->
         .and_then(|taken| taken.as_bool())
         .unwrap_or(false)
 }
+
+thread_local! {
+    /// A `pointercancel` came since the app last looked.
+    static POINTER_CANCELLED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Note every `pointercancel` (eframe only forwards `touchcancel`).
+pub(crate) fn install_pointer_cancel_listener(ctx: Context) {
+    let Some(window) = web_sys::window() else { return };
+    let on_cancel = Closure::wrap(Box::new(move || {
+        POINTER_CANCELLED.with(|c| c.set(true));
+        ctx.request_repaint();
+    }) as Box<dyn FnMut()>);
+    window
+        .add_event_listener_with_callback_and_bool(
+            "pointercancel",
+            on_cancel.as_ref().unchecked_ref(),
+            true,
+        )
+        .ok();
+    on_cancel.forget();
+}
+
+/// Whether a `pointercancel` came since the last call.
+pub(crate) fn take_pointer_cancel() -> bool {
+    POINTER_CANCELLED.with(|c| c.replace(false))
+}

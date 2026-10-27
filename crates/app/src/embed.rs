@@ -11,7 +11,7 @@
 use crate::metronome_view::ratio_label;
 use crate::pickers::silent_bars_label;
 use crate::{Grooph, TransportState, platform};
-use eframe::egui::{Context, Theme, Ui};
+use eframe::egui::{Context, Event, PointerButton, RawInput, Theme, TouchPhase, Ui, vec2};
 use grooph_link::format_bar;
 use grooph_measure::swing::SwingUnit;
 
@@ -40,6 +40,51 @@ pub(crate) fn embed_params(query: &str) -> Option<EmbedParams> {
         }
     }
     embedded.then_some(EmbedParams { theme })
+}
+
+/// Whether the page may handle `event` too (no `preventDefault`) when
+/// embedded: pointer, touch and wheel events, so the chat scrolls on a
+/// vertical drag (the view's canvas has `touch-action: pan-y`) or the wheel.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+pub(crate) fn leaves_to_page(event: &Event) -> bool {
+    matches!(
+        event,
+        Event::PointerButton { .. }
+            | Event::PointerMoved(_)
+            | Event::PointerGone
+            | Event::Touch { .. }
+            | Event::MouseWheel { .. }
+    )
+}
+
+/// A touch the page took over to scroll the chat (`touchcancel`, or a
+/// `pointercancel` seen by [`platform::take_pointer_cancel`]) must not end
+/// as a tap: the view moves with the page, so to egui the finger seems to
+/// stay where it pressed. The pointer moves far off before it is released,
+/// which egui takes as a drag, not a click.
+pub(crate) fn cancel_scrolled_touch(ctx: &Context, raw: &mut RawInput) {
+    let touch_cancelled =
+        raw.events.iter().any(|e| matches!(e, Event::Touch { phase: TouchPhase::Cancel, .. }));
+    if !(platform::take_pointer_cancel() || touch_cancelled) {
+        return;
+    }
+    // The press may have come in with this frame's events.
+    let pressed_now = raw.events.iter().rev().find_map(|e| match e {
+        Event::PointerButton { pos, pressed: true, .. } => Some(*pos),
+        _ => None,
+    });
+    let Some(origin) = pressed_now.or_else(|| ctx.input(|i| i.pointer.press_origin())) else {
+        return;
+    };
+    let away = origin + vec2(0.0, 10_000.0);
+    raw.events.push(Event::PointerMoved(away));
+    raw.events.push(Event::PointerButton {
+        pos: away,
+        button: PointerButton::Primary,
+        pressed: false,
+        modifiers: Default::default(),
+    });
+    raw.events.push(Event::PointerGone);
 }
 
 /// A value of the settings reported to the model, as JSON would hold it.
@@ -74,6 +119,7 @@ impl Embed {
             ctx.set_theme(theme);
         }
         platform::install_host_repaint(ctx.clone());
+        platform::install_pointer_cancel_listener(ctx.clone());
         Self { theme: params.theme, reported: None, changed: None }
     }
 }
@@ -298,6 +344,67 @@ mod tests {
         let embed = app.ui.embed.as_ref().unwrap();
         assert!(embed.reported.is_none());
         assert!(embed.changed.is_some());
+    }
+
+    #[test]
+    fn a_touch_the_page_scrolls_with_is_no_tap() {
+        use super::cancel_scrolled_touch;
+        use eframe::egui::{
+            Button, Event, Modifiers, PointerButton, RawInput, TouchDeviceId, TouchId, TouchPhase,
+            pos2,
+        };
+        let ctx = eframe::egui::Context::default();
+        let at = pos2(50.0, 20.0);
+        let press = Event::PointerButton {
+            pos: at,
+            button: PointerButton::Primary,
+            pressed: true,
+            modifiers: Modifiers::default(),
+        };
+        let cancel = Event::Touch {
+            device_id: TouchDeviceId(0),
+            id: TouchId(0),
+            phase: TouchPhase::Cancel,
+            pos: at,
+            force: None,
+        };
+        // A button under the finger; returns whether it was clicked.
+        let mut frame = |mut raw: RawInput| {
+            cancel_scrolled_touch(&ctx, &mut raw);
+            let mut clicked = false;
+            let mut output = ctx.run_ui(raw, |ui| {
+                clicked = ui.add_sized([200.0, 100.0], Button::new("play")).clicked();
+            });
+            output.textures_delta.clear();
+            clicked
+        };
+        // Each touch starts with the finger's position, as eframe reports it.
+        let events = |mut events: Vec<Event>| {
+            if events
+                .first()
+                .is_some_and(|e| matches!(e, Event::PointerButton { pressed: true, .. }))
+            {
+                events.insert(0, Event::PointerMoved(at));
+            }
+            RawInput { events, ..Default::default() }
+        };
+        frame(events(vec![]));
+        let release = Event::PointerButton {
+            pos: at,
+            button: PointerButton::Primary,
+            pressed: false,
+            modifiers: Modifiers::default(),
+        };
+        // Pressed, then the page took the touch over (in one frame or two);
+        // the finger lifts where it pressed, as the view moved with the page.
+        assert!(!frame(events(vec![press.clone(), cancel.clone()])));
+        assert!(!frame(events(vec![release.clone()])));
+        assert!(!frame(events(vec![press.clone()])));
+        assert!(!frame(events(vec![cancel])));
+        assert!(!frame(events(vec![release.clone()])));
+        // A real tap still clicks.
+        frame(events(vec![press]));
+        assert!(frame(events(vec![release])));
     }
 
     #[test]
