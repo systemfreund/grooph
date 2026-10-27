@@ -831,7 +831,6 @@ impl MetronomeSource {
             let starting = self.starts != shared_state.starts
                 && shared_state.playing_state == PlayerState::Playing;
             self.starts = shared_state.starts;
-            shared_state.start_pending.store(false, Ordering::Relaxed);
 
             self.player_state = shared_state.playing_state.clone();
             // Only reference counts change: the UI keeps the old plan alive
@@ -848,6 +847,9 @@ impl MetronomeSource {
                 self.tick_source.restart(self.local_params.plan.count_in.as_ref());
                 self.gap.reset(self.local_params.seed ^ self.samples_processed as u64);
             }
+            // Only once the score started over, so a frame that sees the flag
+            // cleared sees the new start.
+            shared_state.start_pending.store(false, Ordering::Relaxed);
         }
     }
 }
