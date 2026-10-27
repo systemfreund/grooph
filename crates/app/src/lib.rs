@@ -1289,7 +1289,6 @@ impl Grooph {
                 library_tab: Default::default(),
                 narrow_screen: false,
                 staff_em: 40.0,
-                staff_height: 0.0,
                 followed_cursor: None,
                 shell: ShellState::default(),
                 picker: None,

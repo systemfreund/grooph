@@ -40,13 +40,10 @@ const CARD_VALUE_SIZE: f32 = 26.0;
 const CARD_METER_EM: f32 = 34.0;
 const PLAY_BUTTON_SIZE: f32 = 68.0;
 const SIDE_BUTTON_SIZE: f32 = 52.0;
-/// Share of the metronome tab's free height the click bar's staff gets, and
-/// its bounds; the ring below takes the rest.
-const METRONOME_STAFF_SHARE: f32 = 0.35;
-const METRONOME_STAFF_MIN: f32 = 100.0;
+/// Most height the metronome tab's staff takes, however wide the window;
+/// the ring below takes the rest.
 const METRONOME_STAFF_MAX: f32 = 220.0;
 /// The same with the counter rhythm as a second voice under the click bar.
-const METRONOME_TWO_STAFF_SHARE: f32 = 0.45;
 const METRONOME_TWO_STAFF_MAX: f32 = 340.0;
 const CARD_RADIUS: u8 = 16;
 
@@ -673,22 +670,16 @@ impl Grooph {
     /// The ring below the space left, the staff above it as tall as it
     /// needs (see [`Self::metronome_ring`] for `play_in_middle`).
     pub(crate) fn staff_and_ring(&mut self, ui: &mut Ui, play_in_middle: bool) {
-        // The staff above takes a share of the room, the ring the rest.
         let room = ui.available_height().max(0.0);
-        let (share, max) = if self.counter_bar().is_some() {
-            (METRONOME_TWO_STAFF_SHARE, METRONOME_TWO_STAFF_MAX)
+        let max = if self.counter_bar().is_some() {
+            METRONOME_TWO_STAFF_MAX
         } else {
-            (METRONOME_STAFF_SHARE, METRONOME_STAFF_MAX)
+            METRONOME_STAFF_MAX
         };
-        // The staff gets what it needs at this width (up to its share's
-        // limit), the ring the rest, centered in it. Before the staff was
-        // first measured: its share of the room.
-        let staff = if self.ui.staff_height > 0.0 {
-            self.ui.staff_height.min(max)
-        } else {
-            (share * room).clamp(METRONOME_STAFF_MIN, max)
-        }
-        .min(room);
+        // The staff gets what it needs at this width (up to `max`), the ring
+        // the rest, centered in it: worked out in this frame, so a new size
+        // or layout shows at once.
+        let staff = self.metronome_staff_height(ui, ui.available_width()).min(max).min(room);
         let height = room - staff;
         self.metronome_ring(ui, height, play_in_middle);
     }

@@ -193,9 +193,10 @@ grooph's metronome runs inside AI chats as an
   inline (the card's padding) and, in fullscreen, 88 px at the bottom for
   its composer.
 - The metronome's staff (in the app and embedded) takes its size from the
-  width alone and the panel as much height as it needs
-  (`UiShell::staff_height`, measured before it shrinks to fit); the ring
-  gets the rest (`Grooph::staff_and_ring`).
+  width alone, and its panel only the height it needs: `staff_and_ring`
+  works it out in the same frame (`metronome_staff_height`, from
+  `staff_opts` and the panel frames' margins) before it sizes the ring
+  below with the rest, so a resize shows at once.
 - Accessibility: eframe gives the web no accessibility tree (AccessKit is
   native only), so a screen reader sees an empty canvas. The view adds a
   small DOM layer: a `role="status"` live region with the model context's
