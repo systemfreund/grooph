@@ -31,6 +31,7 @@ pub fn draw_measure(
         count_config,
         true,
         None,
+        None,
     );
     measure_layout
 }
@@ -50,6 +51,9 @@ pub fn draw_measure(
 /// following measure. The caller (`draw_staff`) decides via `current_cursor_x`
 /// and passes `Some(x)` only to the measure that actually hosts the cursor.
 ///
+/// `lit` draws one note (its index) in the given colour instead of the text
+/// colour.
+///
 /// The function orchestrates independent decoration phases — counting layer,
 /// staff line, clef + time signature, notes/beams/tuplets, edit cursor,
 /// playback cursor. Each phase is a small helper; reorder or extend by
@@ -65,6 +69,7 @@ pub(crate) fn render_measure_at(
     count_config: Option<&CountConfig>,
     draw_staff_line: bool,
     cursor_x: Option<f32>,
+    lit: Option<(usize, Color32)>,
 ) {
     let color = ui.visuals().text_color();
     let painter = ui.painter();
@@ -94,7 +99,7 @@ pub(crate) fn render_measure_at(
         draw_time_signature(painter, ts_layout, measure.time_signature(), &opts.font_id, color);
     }
 
-    draw_notes(painter, measure_layout, color, opts);
+    draw_notes(painter, measure_layout, color, lit, opts);
 
     if let Some(idx) = cursor_idx {
         draw_edit_cursor(ui, painter, measure_layout, idx, opts);
@@ -390,25 +395,31 @@ fn clamp_tick_to_measure(tick: f64, total_ticks: f64) -> f64 {
 /// Draw all foreground decorations (notes, beams, tuplets) in their canonical
 /// stacking order. Coordinates each phase by reading `measure_layout`; phases
 /// can be invoked individually if a caller needs to reorder or skip layers.
+/// `lit` gives one note's glyphs (its index) a colour of their own; beams and
+/// tuplet brackets are shared, so they keep `color`.
 pub fn draw_notes(
     painter: &Painter,
     measure_layout: &MeasureLayout,
     color: Color32,
+    lit: Option<(usize, Color32)>,
     opts: &LayoutOpts,
 ) {
-    draw_note_glyphs(painter, &measure_layout.notes, opts, color);
+    draw_note_glyphs(painter, &measure_layout.notes, opts, color, lit);
     draw_beams(painter, &measure_layout.beams, color);
     draw_tuplets(painter, &measure_layout.tuplets, opts, color);
 }
 
-/// Per-note glyphs: head, stem, flag, dots, accent.
+/// Per-note glyphs: head, stem, flag, dots, accent. The note `lit` names
+/// is drawn in its colour.
 pub fn draw_note_glyphs(
     painter: &Painter,
     notes: &[NoteLayout],
     opts: &LayoutOpts,
     color: Color32,
+    lit: Option<(usize, Color32)>,
 ) {
-    for note in notes {
+    for (idx, note) in notes.iter().enumerate() {
+        let color = lit.filter(|&(i, _)| i == idx).map_or(color, |(_, c)| c);
         draw_beat(painter, note, opts, color);
     }
 }

@@ -10,7 +10,8 @@
 //! The ring has one segment per note or rest of the click bar, as long as it.
 //! The segment's thickness shows how loud it clicks; a tap moves it to the
 //! next level. While playing, the click being played lights up and the middle
-//! shows the bar number.
+//! shows the bar number. The segment under the pointer (or a finger) and its
+//! note on the staff light each other, from either side.
 //!
 //! A meter can have a counter rhythm (see [`grooph_measure::counter`]), e.g.
 //! three clicks against the four beats of 4/4. It plays in this tab only and
@@ -73,6 +74,12 @@ pub(crate) struct MetronomeState {
     /// the counter rhythm (the staff's lower voice). The other one stays in
     /// the audio settings.
     pub(crate) voice: Voice,
+    /// The note of the ring's segment under the pointer (or finger), which
+    /// the staff lights. Written by the ring every frame it is drawn.
+    pub(crate) ring_hover: Option<(Voice, usize)>,
+    /// The note under the pointer on the staff, whose segment the ring
+    /// marks. Written by the staff every frame it is drawn with the ring.
+    pub(crate) staff_hover: Option<(Voice, usize)>,
 }
 
 impl MetronomeState {
@@ -82,6 +89,8 @@ impl MetronomeState {
             stash: None,
             history: UndoHistory::new(DEFAULT_UNDO_LIMIT),
             voice: Voice::Upper,
+            ring_hover: None,
+            staff_hover: None,
         }
     }
 }
@@ -689,12 +698,22 @@ impl Grooph {
         };
         let hovered = resp.hover_pos().and_then(on_ring);
         let hover_color = visuals.weak_text_color();
+        // The staff lights the hovered segment's note, and a note hovered on
+        // the staff marks its segment here: a counter click spans its rests.
+        self.editor.metronome.ring_hover = hovered.map(|hit| match hit {
+            RingHit::Click(idx) => (Voice::Upper, idx),
+            RingHit::Counter(idx) => (Voice::Lower, idx),
+        });
+        let marked = hovered.or_else(|| {
+            let (voice, idx) = self.editor.metronome.staff_hover?;
+            segment_of_note(voice, idx, &counter_spans)
+        });
 
         for (idx, (&(start, end), beat)) in spans.iter().zip(bar.beats()).enumerate() {
             let color = if current == Some(idx) && !muted { lit } else { base };
             let segment = Segment { start, end, level: ClickLevel::of(beat), color };
             segment.paint(painter, center, radius, radius);
-            if hovered == Some(RingHit::Click(idx)) {
+            if marked == Some(RingHit::Click(idx)) {
                 segment.paint_hover(painter, center, radius, radius, hover_color);
             }
         }
@@ -707,7 +726,7 @@ impl Grooph {
                 let segment = Segment { start, end, level, color };
                 let unit = COUNTER_THICKNESS * radius;
                 segment.paint(painter, center, inner, unit);
-                if hovered == Some(RingHit::Counter(idx)) {
+                if marked == Some(RingHit::Counter(idx)) {
                     segment.paint_hover(painter, center, inner, unit, hover_color);
                 }
             }
@@ -890,6 +909,23 @@ fn counter_spans(bar: &Measure) -> Vec<(usize, f32, f32)> {
         .collect()
 }
 
+/// The ring segment of note `idx` of `voice`: a click of the click bar, or
+/// the counter click whose span (see [`counter_spans`]) holds it.
+fn segment_of_note(
+    voice: Voice,
+    idx: usize,
+    counter_spans: &[(usize, f32, f32)],
+) -> Option<RingHit> {
+    match voice {
+        Voice::Upper => Some(RingHit::Click(idx)),
+        Voice::Lower => counter_spans
+            .iter()
+            .rev()
+            .find(|&&(start, _, _)| start <= idx)
+            .map(|&(start, _, _)| RingHit::Counter(start)),
+    }
+}
+
 /// Beat of the count-in bar (from 1) at `turn`: it clicks every beat unit.
 fn count_in_beat(turn: f32, ts: &TimeSignature) -> u32 {
     let units = ts.beats.max(1) as u32;
@@ -1031,6 +1067,17 @@ mod tests {
             assert!((start - i as f32 / 5.0).abs() < 1e-6);
             assert!((end - (i + 1) as f32 / 5.0).abs() < 1e-6);
         }
+    }
+
+    #[test]
+    fn a_note_marks_the_segment_it_sounds_or_rests_in() {
+        let bar = counter_bar(TimeSignature::THREE_FOUR, Ratio { n: 5, span: 3 }).unwrap();
+        let spans = counter_spans(&bar);
+        // The click and its two rests all belong to the click's segment.
+        for (idx, segment) in [(0, 0), (2, 0), (3, 3), (5, 3), (14, 12)] {
+            assert!(segment_of_note(Voice::Lower, idx, &spans) == Some(RingHit::Counter(segment)));
+        }
+        assert!(segment_of_note(Voice::Upper, 2, &spans) == Some(RingHit::Click(2)));
     }
 
     fn metronome_app() -> Grooph {

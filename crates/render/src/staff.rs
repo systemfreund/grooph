@@ -32,7 +32,8 @@ pub enum PlaybackMarks {
 /// `Some((measure_idx, local_tick))` referring to the **active** measure (the
 /// one currently being audibly played). The *visual* cursor may live in a
 /// different measure during the wrap animation — see [`current_cursor_x`].
-/// `marks` says whether the line or a guide anchor shows it.
+/// `marks` says whether the line or a guide anchor shows it. `lit` draws
+/// one note of a voice in the highlight colour.
 #[expect(clippy::too_many_arguments)]
 pub fn draw_staff(
     ui: &mut egui::Ui,
@@ -40,6 +41,7 @@ pub fn draw_staff(
     staff: &StaffLayout,
     cursor: Option<Cursor>,
     cursor_voice: Voice,
+    lit: Option<(Voice, Cursor)>,
     playback: Option<(MeasureIdx, f64)>,
     marks: PlaybackMarks,
     count_config: Option<&CountConfig>,
@@ -51,6 +53,11 @@ pub fn draw_staff(
     };
     let color = ui.visuals().text_color();
     let highlight = ui.visuals().selection.stroke.color.to_opaque();
+    // The lit note of `voice` in the measure `measure_idx`, if any.
+    let lit_in = |voice: Voice, measure_idx: MeasureIdx| {
+        lit.filter(|&(v, c)| v == voice && c.measure_idx == measure_idx)
+            .map(|(_, c)| (c.beat_idx, highlight))
+    };
 
     // The count label to light: the one being played under the line, the
     // anchor's while it fades in from the label colour.
@@ -86,7 +93,8 @@ pub fn draw_staff(
             // The lower voice's notes, below the shared line.
             if let Some(lower) = &placed.lower {
                 let lower_opts = staff_opts.lower_opts_for(placed);
-                draw_notes(ui.painter(), lower, color, &lower_opts);
+                let lit = lit_in(Voice::Lower, placed.measure_idx);
+                draw_notes(ui.painter(), lower, color, lit, &lower_opts);
                 if let Some(c) = lower_cursor.filter(|c| c.measure_idx == placed.measure_idx) {
                     draw_edit_cursor(ui, ui.painter(), lower, c.beat_idx, &lower_opts);
                 }
@@ -110,6 +118,7 @@ pub fn draw_staff(
                 measure_count_tick,
                 count_config,
                 cursor_x,
+                lit_in(Voice::Upper, placed.measure_idx),
             );
             if let Some(config) = lower_counts {
                 draw_count_layer(
@@ -208,6 +217,7 @@ fn render_placed_measure(
     count_tick: Option<(f64, Color32)>,
     count_config: Option<&CountConfig>,
     cursor_x: Option<f32>,
+    lit: Option<(usize, Color32)>,
 ) {
     let cursor_idx = cursor.filter(|c| c.measure_idx == placed.measure_idx).map(|c| c.beat_idx);
 
@@ -225,6 +235,7 @@ fn render_placed_measure(
         count_config,
         /* draw_staff_line = */ false,
         cursor_x,
+        lit,
     );
 }
 

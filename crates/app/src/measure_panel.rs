@@ -14,7 +14,7 @@ use grooph_layout::staff_layout::{
 };
 use grooph_measure::grid::DEFAULT_GRID;
 use grooph_measure::tempo::ScoreTiming;
-use grooph_measure::{Score, TimeSignature};
+use grooph_measure::{Cursor, Score, TimeSignature};
 use grooph_render::staff::{PlaybackMarks, draw_staff};
 
 impl Grooph {
@@ -255,12 +255,31 @@ impl Grooph {
                             }))
                         };
 
+                        // Under the metronome's ring the staff and the ring
+                        // light each other's hovered note and segment.
+                        let with_ring = self.metronome_mode() && self.ui.mode != Mode::Edit;
+                        let lit = with_ring
+                            .then_some(self.editor.metronome.ring_hover)
+                            .flatten()
+                            .map(|(voice, beat_idx)| (voice, Cursor { measure_idx: 0, beat_idx }));
+                        let staff_hover = resp
+                            .hover_pos()
+                            .filter(|_| with_ring)
+                            .and_then(|pos| hit_test_voice(&staff, pos))
+                            .map(|(voice, _, beat_idx)| (voice, beat_idx));
+                        if staff_hover != self.editor.metronome.staff_hover {
+                            // The ring was drawn before the staff: show it there next frame.
+                            self.editor.metronome.staff_hover = staff_hover;
+                            ui.ctx().request_repaint();
+                        }
+
                         draw_staff(
                             ui,
                             upper,
                             &staff,
                             cursor,
                             voice,
+                            lit,
                             playback,
                             marks,
                             count_config.as_ref(),
