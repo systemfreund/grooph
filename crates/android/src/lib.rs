@@ -64,12 +64,9 @@ impl eframe::App for AndroidApp {
         if ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::BrowserBack)) && !self.app.back() {
             self.activity.move_to_back();
         }
-        // The root Ui spans the whole screen; keep the app inside the part the
-        // system bars leave free (the safe area set in `raw_input_hook`).
-        let content = ui.ctx().content_rect();
-        ui.scope_builder(eframe::egui::UiBuilder::new().max_rect(content), |ui| {
-            self.app.ui(ui, frame);
-        });
+        // The app keeps inside the part the system bars leave free (the safe
+        // area set in `raw_input_hook`).
+        self.app.ui(ui, frame);
 
         // winit's request for the keyboard does nothing; open it when a text
         // field gets the focus, and again on a tap into it after the

@@ -182,8 +182,9 @@ grooph's metronome runs inside AI chats as an
 - Safe area: the view passes `hostContext.safeAreaInsets` (what the host
   covers, e.g. Claude's composer over the bottom in fullscreen) as
   `groophHost.insets`; `embed::host_safe_area` hands them to egui in
-  `raw_input_hook`, and `App::ui` lays the embed out inside
-  `ctx.content_rect()`, as the Android wrapper does. Claude sends 12 px
+  `raw_input_hook`. `Grooph::ui` lays the app out inside
+  `ctx.content_rect()` for every platform, so the Android wrapper only sets
+  its system bars' insets. Claude sends 12 px
   inline (the card's padding) and, in fullscreen, 88 px at the bottom for
   its composer.
 - The metronome's staff (in the app and embedded) takes its size from the
