@@ -80,7 +80,7 @@ async function dispatch(message, { origin, env }) {
   switch (message.method) {
     case "initialize":
       return ok({
-        protocolVersion: PROTOCOL_VERSIONS.includes(params.protocolVersion) ? params.protocolVersion : PROTOCOL_VERSIONS[1],
+        protocolVersion: PROTOCOL_VERSIONS.includes(params.protocolVersion) ? params.protocolVersion : PROTOCOL_VERSIONS[0],
         capabilities: { tools: {}, resources: {}, extensions: { "io.modelcontextprotocol/ui": {} } },
         serverInfo: SERVER_INFO,
         instructions: "grooph is a metronome and rhythm trainer. Call show_metronome to give the user a working metronome in the chat.",
@@ -118,7 +118,7 @@ async function dispatch(message, { origin, env }) {
 
 /** The tool's result: the link, for hosts that show no view as well. */
 export function showMetronome(args, origin) {
-  const error = argumentError(args);
+  const error = argumentError(args, Object.keys(TOOL.inputSchema.properties));
   if (error) return { isError: true, content: [{ type: "text", text: error }] };
   const query = metronomeQuery(args);
   const link = `${origin}/?${query}`;

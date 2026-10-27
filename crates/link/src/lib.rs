@@ -32,7 +32,7 @@
 //! old 7/8 link at `bpm=140` opens at 70 and plays as fast as it used to. A
 //! score mixing beat units is converted by its first measure.
 
-use grooph_measure::counter::{Ratio, counter_bar, counter_ratios, own_ratios};
+use grooph_measure::counter::{Ratio, counter_bar, counter_ratios, is_ratio_bar, own_ratios};
 use grooph_measure::generator::{
     GeneratorSettings, MAX_BARS, MAX_COMPLEXITY, Subdivision, supports_time_signature,
 };
@@ -295,11 +295,7 @@ impl SharedLink {
             params.push(("click", format_bar(bar)?));
         }
         if let Some(bar) = &self.counter {
-            let ts = bar.time_signature();
-            match self
-                .poly
-                .filter(|&r| counter_bar(ts, r).is_some_and(|b| b.beats() == bar.beats()))
-            {
+            match self.poly.filter(|&r| is_ratio_bar(bar, r)) {
                 Some(ratio) => params.push(("poly", ratio.to_string())),
                 None => params.push(("counter", format_bar(bar)?)),
             }
@@ -648,6 +644,12 @@ mod tests {
         }
     }
 
+    /// How many beats each tuplet group of `bar` holds, in order.
+    fn tuplet_groups(bar: &Measure) -> Vec<usize> {
+        let ids: Vec<_> = bar.beats().iter().filter_map(|b| b.tuplet_group_id).collect();
+        ids.chunk_by(|a, b| a == b).map(<[_]>::len).collect()
+    }
+
     #[test]
     fn edited_poly_clicks_are_written_out() {
         let mut link = parse("ts=4/4&poly=3:2");
@@ -673,7 +675,9 @@ mod tests {
         ] {
             let written = parse(&format!("ts={ts}&counter={counter}")).counter.unwrap();
             let poly = parse(&format!("ts={ts}&poly={ratio}")).counter.unwrap();
-            assert_eq!(written.beats(), poly.beats(), "{ratio} in {ts}");
+            // `Beat`'s == leaves out the tuplet groups: compare them too.
+            assert_eq!(format_bar(&written), format_bar(&poly), "{ratio} in {ts}");
+            assert_eq!(tuplet_groups(&written), tuplet_groups(&poly), "{ratio} in {ts}");
         }
     }
 

@@ -37,6 +37,8 @@ async function rpc(method, params, environment = env) {
 test("initialize advertises tools, resources and MCP Apps", async () => {
   const { result } = await rpc("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "t", version: "0" } });
   assert.equal(result.protocolVersion, "2025-06-18");
+  const { result: newer } = await rpc("initialize", { protocolVersion: "2099-01-01", capabilities: {} });
+  assert.equal(newer.protocolVersion, "2025-11-25");
   assert.ok(result.capabilities.tools);
   assert.ok(result.capabilities.resources);
   assert.ok(result.capabilities.extensions["io.modelcontextprotocol/ui"]);
@@ -63,10 +65,12 @@ test("tools/call returns the link of this deployment", async () => {
 });
 
 test("tools/call reports wrong numbers to the model", async () => {
-  for (const args of [{ bpm: 500 }, { swing: 90 }, { su: 16 }, { swing: 60, su: 4 }, { ts: "seven" }, { poly: "three" }]) {
+  for (const args of [{ bpm: 500 }, { swing: 90 }, { su: 16 }, { swing: 60, su: 4 }, { ts: "seven" }, { poly: "three" }, { tempo: 90 }]) {
     const { result } = await rpc("tools/call", { name: "show_metronome", arguments: args });
     assert.equal(result.isError, true, JSON.stringify(args));
   }
+  const { result: counter } = await rpc("tools/call", { name: "show_metronome", arguments: { counter: "t4 t4 t4 t4 t4 t4" } });
+  assert.match(counter.content[0].text, /pass the polyrhythm as poly/);
   const { error } = await rpc("tools/call", { name: "other", arguments: {} });
   assert.equal(error.code, -32602);
 });

@@ -32,7 +32,8 @@ use eframe::egui::{Align2, Color32, FontId, Mesh, Pos2, Sense, Shape, Stroke, Ui
 use grooph_layout::staff_layout::Voice;
 use grooph_measure::click::{ClickLevel, default_click_bar, meter_click_bar, subdivided_click_bar};
 use grooph_measure::counter::{
-    CounterBars, Ratio, click_level, counter_bar, counter_clicks, counter_ratios, named_ratio_of,
+    CounterBars, Ratio, click_level, counter_bar, counter_clicks, counter_ratios, is_ratio_bar,
+    named_ratio_of,
 };
 use grooph_measure::duration::{Duration, TupletKind};
 use grooph_measure::grid::DEFAULT_GRID;
@@ -290,7 +291,7 @@ fn fill_name(d: Duration) -> String {
 /// muted ones the ratio's own bar (every click medium) does not have.
 pub(crate) fn counter_ratio(bar: &Measure, named: Option<Ratio>) -> Option<(Ratio, bool)> {
     let ratio = named_ratio_of(bar, named)?;
-    let edited = !counter_bar(bar.time_signature(), ratio).is_some_and(|m| same_bar(&m, bar));
+    let edited = !is_ratio_bar(bar, ratio);
     Some((ratio, edited))
 }
 

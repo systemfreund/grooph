@@ -58,6 +58,12 @@ impl std::str::FromStr for Ratio {
     }
 }
 
+/// Whether `bar` is `ratio`'s own counter bar, no click edited: the one
+/// rule for showing it as the ratio, in the app and in links (`poly`).
+pub fn is_ratio_bar(bar: &Measure, ratio: Ratio) -> bool {
+    counter_bar(bar.time_signature(), ratio).is_some_and(|m| same_bar(&m, bar))
+}
+
 /// The counter bar of `ratio` in `ts`, every click medium (the click bar
 /// already clicks the downbeat loud). `None` if the
 /// span does not divide the bar or the clicks fall off the tick grid.

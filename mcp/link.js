@@ -17,16 +17,21 @@ export function metronomeQuery(args) {
   if (text(args?.bpm)) params.push(["bpm", text(args.bpm)]);
   params.push(["ts", text(args?.ts) || "4/4"]);
   if (text(args?.swing)) params.push(["swing", text(args.swing)]);
-  if (text(args?.su)) params.push(["su", text(args.su)]);
+  // Eighths swing by default: the app writes su only for sixteenths.
+  if (text(args?.su) && text(args.su) !== "8") params.push(["su", text(args.su)]);
   if (text(args?.click)) params.push(["click", text(args.click)]);
   if (text(args?.poly)) params.push(["poly", text(args.poly).replace(/\s+/g, "")]);
   return params.map(([key, value]) => `${key}=${encode(value)}`).join("&");
 }
 
-/** Why `args` cannot be a metronome link, or `null`. Checks the numbers;
- * the notation of `ts` and `click`, and whether `poly` fits the meter, are
- * checked by the app, which names the problem in the view. */
-export function argumentError(args) {
+/** Why `args` cannot be a metronome link, or `null`. Checks that only the
+ * `known` arguments are given and the numbers; the notation of `ts` and
+ * `click`, and whether `poly` fits the meter, are checked by the app, which
+ * names the problem in the view. */
+export function argumentError(args, known) {
+  const unknown = Object.keys(args || {}).filter((key) => !known.includes(key));
+  if (unknown.includes("counter")) return "counter is not an argument: pass the polyrhythm as poly, e.g. \"3:2\"";
+  if (unknown.length) return `unknown argument ${unknown.join(", ")}; the arguments are ${known.join(", ")}`;
   const whole = (value, min, max) => Number.isInteger(Number(value)) && Number(value) >= min && Number(value) <= max;
   if (args?.bpm != null && !whole(args.bpm, 20, 300)) return `bpm must be a whole number from 20 to 300, got ${args.bpm}`;
   if (args?.swing != null && !whole(args.swing, 50, 75)) return `swing must be a whole number from 50 to 75, got ${args.swing}`;
