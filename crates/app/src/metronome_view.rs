@@ -1321,8 +1321,12 @@ mod tests {
         assert!(seen.iter().all(|s| s.0.is_none() || s.1.is_none()), "{seen:?}");
         assert!(seen.iter().any(|s| s.1.is_some()), "{seen:?}");
 
-        // Editing the bar, the ring is gone and the staff lights nothing.
+        // Editing the bar, the ring is gone and the staff lights nothing; the
+        // ring's last hover is forgotten, so leaving the editor lights none.
+        app.editor.metronome.ring_hover = Some((Voice::Upper, 1));
         app.ui.mode = crate::Mode::Edit;
+        frame(&mut app, &ctx, vec![]);
+        assert!(app.editor.metronome.ring_hover.is_none());
         let seen = hovers_upwards(&mut app, &ctx);
         assert!(seen.iter().all(|s| s.1.is_none()), "{seen:?}");
     }
