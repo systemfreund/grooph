@@ -303,13 +303,15 @@ fn split_row(ui: &mut Ui, label: &str, value: &str, on: &mut bool) -> Response {
     let how_on = ui.ctx().animate_bool_responsive(toggle.id, *on);
     let visuals = ui.visuals();
     let painter = ui.painter();
-    painter.text(
+    let label = painter.text(
         rect.left_center() + vec2(4.0, 0.0),
         Align2::LEFT_CENTER,
         label,
         FontId::proportional(19.0),
         visuals.text_color(),
     );
+    // Cut short before the label on a narrow screen.
+    let value = cut_to_fit(painter, value, split - 30.0 - label.right() - 16.0);
     painter.text(
         pos2(split - 30.0, rect.center().y),
         Align2::RIGHT_CENTER,
@@ -351,6 +353,22 @@ fn switch_off_fill(visuals: &egui::Visuals) -> Color32 {
 }
 
 /// Full-width row with a label, the current value and a chevron.
+/// `value`, cut short with "…" to be at most `room` wide in a row's value font.
+fn cut_to_fit(painter: &Painter, value: &str, room: f32) -> String {
+    let fits = |text: &str| {
+        painter.layout_no_wrap(text.to_owned(), FontId::proportional(19.0), Color32::WHITE).size().x
+            <= room
+    };
+    let mut value = value.to_owned();
+    if !fits(&value) {
+        while !value.is_empty() && !fits(&format!("{value}…")) {
+            value.pop();
+        }
+        value = format!("{}…", value.trim_end());
+    }
+    value
+}
+
 pub(crate) fn value_row(ui: &mut Ui, label: &str, value: &str) -> Response {
     let (rect, resp) =
         ui.allocate_exact_size(vec2(ui.available_width(), ROW_HEIGHT), Sense::click());
@@ -364,18 +382,7 @@ pub(crate) fn value_row(ui: &mut Ui, label: &str, value: &str) -> Response {
         visuals.text_color(),
     );
     // A long value (a device or preset name) is cut short before the label.
-    let room = rect.right() - 30.0 - label.right() - 16.0;
-    let fits = |text: &str| {
-        painter.layout_no_wrap(text.to_owned(), FontId::proportional(19.0), Color32::WHITE).size().x
-            <= room
-    };
-    let mut value = value.to_owned();
-    if !fits(&value) {
-        while !value.is_empty() && !fits(&format!("{value}…")) {
-            value.pop();
-        }
-        value = format!("{}…", value.trim_end());
-    }
+    let value = cut_to_fit(painter, value, rect.right() - 30.0 - label.right() - 16.0);
     painter.text(
         rect.right_center() - vec2(30.0, 0.0),
         Align2::RIGHT_CENTER,
@@ -500,17 +507,22 @@ fn round_button_at(
 /// Handle on top of an options sheet: tap to fold the options away.
 /// Returns whether it was tapped.
 fn sheet_handle(ui: &mut Ui) -> bool {
-    let (rect, resp) =
-        ui.allocate_exact_size(vec2(ui.available_width(), SHEET_HANDLE_HEIGHT), Sense::click());
+    let (rect, _) =
+        ui.allocate_exact_size(vec2(ui.available_width(), SHEET_HANDLE_HEIGHT), Sense::hover());
     ui.painter().rect_filled(
         Rect::from_center_size(rect.center(), vec2(40.0, 5.0)),
         3,
         ui.visuals().weak_text_color(),
     );
-    resp.clicked()
+    // A finger-sized target around the thin handle; the buttons below are
+    // registered later, so they keep their own taps where the two overlap.
+    let target = Rect::from_center_size(rect.center(), vec2(rect.width(), MIN_TOUCH_TARGET));
+    ui.interact(target, ui.auto_id_with("sheet_handle"), Sense::click()).clicked()
 }
 
 const SHEET_HANDLE_HEIGHT: f32 = 22.0;
+/// Smallest touch target, in points (Apple's and Claude's guidelines).
+const MIN_TOUCH_TARGET: f32 = 44.0;
 
 /// The card of an options sheet, and a slot painted before it for the shadow
 /// the raised options cast along it.
