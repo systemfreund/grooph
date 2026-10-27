@@ -38,12 +38,21 @@ export function viewHtml({ origin, js, wasm }) {
   canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; outline: none; }
   #loading_text { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); opacity: 0.7; }
   #fallback { padding: 16px 20px; }
+  /* For screen readers only (the canvas has no accessibility tree); the
+     button shows when it has the keyboard focus. */
+  .sr-only:not(:focus) {
+    position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+    overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+  }
+  #a11y-play:focus { position: absolute; top: 8px; left: 8px; z-index: 1; font: inherit; padding: 8px 16px; }
   #fallback button { font: inherit; padding: 8px 16px; margin-top: 4px; cursor: pointer; }
   #fallback code { font-size: 13px; word-break: break-all; }
 </style>
 </head>
 <body>
-<div id="stage"><canvas id="grooph-canvas"></canvas><div id="loading_text">Loading the metronome…</div></div>
+<div id="stage"><canvas id="grooph-canvas" aria-hidden="true"></canvas><div id="loading_text">Loading the metronome…</div></div>
+<button id="a11y-play" class="sr-only" type="button" aria-pressed="false">Play metronome</button>
+<p id="a11y-status" class="sr-only" role="status" aria-live="polite"></p>
 <div id="fallback" hidden>
   <p><strong>The metronome cannot run here.</strong> <span id="reason"></span></p>
   <p><button id="open">Open in grooph</button></p>
@@ -211,6 +220,7 @@ window.groophHost = {
   // request the host fails is sent again a few seconds later, unless newer
   // settings replaced it.
   updateModelContext(text, fields) {
+    announce(text, fields);
     if (!connected) return false;
     const params = { content: [{ type: "text", text }], structuredContent: fields };
     latestContext = params;
@@ -224,6 +234,23 @@ window.groophHost = {
   },
   openLink,
 };
+
+// What a screen reader gets of the canvas: the settings as the model gets
+// them (without the link), read out when they change, and a play button
+// that drives the app (groophHost.togglePlay, defined by the app).
+let announced = "";
+function announce(text, fields) {
+  const status = text.split(" Link: ")[0];
+  if (status !== announced) {
+    announced = status;
+    document.getElementById("a11y-status").textContent = status;
+  }
+  const playing = fields?.playing === true;
+  const play = document.getElementById("a11y-play");
+  play.setAttribute("aria-pressed", String(playing));
+  play.textContent = playing ? "Stop metronome" : "Play metronome";
+}
+document.getElementById("a11y-play").addEventListener("click", () => window.groophHost?.togglePlay?.());
 
 function fail(reason) {
   document.getElementById("stage").hidden = true;
@@ -255,6 +282,9 @@ if (!wasmAllowed) {
   try {
     const app = await import(CONFIG.origin + "/" + CONFIG.js);
     await app.default({ module_or_path: CONFIG.origin + "/" + CONFIG.wasm });
+    // eframe's hidden text field holds the keyboard focus; name it, so a
+    // screen reader that lands on it says what it is.
+    setTimeout(() => document.querySelector("#stage input")?.setAttribute("aria-label", "Metronome. Space plays or stops it."), 0);
   } catch (e) {
     console.error("grooph: start failed", e);
     fail("It could not be loaded from " + CONFIG.origin + ": " + (e?.message || e) + ".");

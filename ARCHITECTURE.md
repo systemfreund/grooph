@@ -172,7 +172,13 @@ grooph's metronome runs inside AI chats as an
   (`hostContext.styles.variables`, may use `light-dark()`) to
   `groophHost.colors`, which `embed::HostColors` applies to egui's panels,
   cards and text each frame (`apply_style`). Accents stay grooph's; without
-  host variables egui's own colors stay. The
+  host variables egui's own colors stay.
+- Accessibility: eframe gives the web no accessibility tree (AccessKit is
+  native only), so a screen reader sees an empty canvas. The view adds a
+  small DOM layer: a `role="status"` live region with the model context's
+  text, a play/stop button (`groophHost.togglePlay`, defined by the app) and
+  a label on eframe's hidden text field. Text colors meet WCAG AA app-wide
+  (`style::readable_text`, egui's weak and dark text are too faint). The
   settings go to the model through `groophHost.updateModelContext` once they
   stayed the same for a second. The bridge is in `web.rs`/`platform.rs`.
   Touch and wheel events are left to the page (`web_options`,

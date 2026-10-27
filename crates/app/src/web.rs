@@ -285,6 +285,29 @@ pub(crate) fn host_call(
     function.apply(&host, &args).map_err(|err| error!("groophHost.{name} failed: {err:?}")).ok()
 }
 
+thread_local! {
+    /// The view's play button was pressed since the app last looked.
+    static TOGGLE_PLAY: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Define `window.groophHost.togglePlay`, for the view's play button that
+/// screen readers use (the canvas has no accessibility tree).
+pub(crate) fn install_host_toggle_play(ctx: Context) {
+    use web_sys::js_sys::Reflect;
+    let Some(host) = host_object() else { return };
+    let toggle = Closure::wrap(Box::new(move || {
+        TOGGLE_PLAY.with(|t| t.set(true));
+        ctx.request_repaint();
+    }) as Box<dyn FnMut()>);
+    Reflect::set(&host, &"togglePlay".into(), toggle.as_ref()).ok();
+    toggle.forget();
+}
+
+/// Whether the view's play button was pressed since the last call.
+pub(crate) fn take_toggle_play() -> bool {
+    TOGGLE_PLAY.with(|t| t.replace(false))
+}
+
 /// Define `window.groophHost.repaint`, so the view can wake the app.
 pub(crate) fn install_host_repaint(ctx: Context) {
     use web_sys::js_sys::Reflect;
