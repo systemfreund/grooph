@@ -140,7 +140,7 @@ test("the result says what the metronome shows", async () => {
   // The grouping from groups, not accents in the usual 2+3+2.
   const grouped = await call({ ts: "7/8", groups: "3+2+2", bpm: 140 });
   assert.ok(!grouped.isError, grouped.content[0].text);
-  assert.ok(grouped.structuredContent.link.includes("ts=3%2B2%2B2/8"), grouped.structuredContent.link);
+  assert.ok(grouped.structuredContent.link.includes("ts=7/8&groups=3%2B2%2B2"), grouped.structuredContent.link);
   assert.match(grouped.structuredContent.shown, /^7\/8 grouped 3\+2\+2 \(groups start on eighths 1, 4, 6\) at 140 BPM/);
   assert.ok(grouped.content[0].text.includes(grouped.structuredContent.shown));
   const accents = await call({ ts: "7/8", click: ">e e e >e e >e e" });
@@ -155,12 +155,13 @@ test("groups are checked against ts", async () => {
     assert.equal(result.isError, true, JSON.stringify(args));
     assert.match(result.content[0].text, pattern);
   };
-  await error({ ts: "7/8", groups: "3+3+2" }, /add up to 8 beats, but ts 7\/8 has 7/);
-  await error({ ts: "2+2+3/8", groups: "3+2+2" }, /give the grouping once/);
+  await error({ ts: "7/8", groups: "3+3+2" }, /add up to 8 beats, but 7\/8 has 7/);
+  await error({ ts: "2+2+3/8" }, /pass the grouping as groups/);
+  await error({ ts: "6/8", groups: "2+2+2" }, /which takes 3\+3/);
   await error({ ts: "7/8", groups: "3-2-2" }, /groups must be/);
   // The meter does not take this grouping: the app's parser says so.
   await error({ ts: "6/8", groups: "2+2+2" }, /do not open in grooph/);
-  assert.equal(metronomeQuery({ groups: "3 + 2 + 2", ts: "7/8" }), "v=2&ts=3%2B2%2B2/8");
+  assert.equal(metronomeQuery({ groups: "3 + 2 + 2", ts: "7/8" }), "v=2&ts=7/8&groups=3%2B2%2B2");
   assert.ok(!(await call({ ts: "7/16", groups: "2+2+3" })).isError);
 });
 
@@ -234,6 +235,6 @@ test("the tool's queries are the app's link format (mcp/link-cases.json)", () =>
 
 test("the query is the app's own link format", () => {
   assert.equal(metronomeQuery({}), "v=2&ts=4/4");
-  assert.equal(metronomeQuery({ ts: " 2+2+3/8 ", bpm: "90" }), "v=2&bpm=90&ts=2%2B2%2B3/8");
+  assert.equal(metronomeQuery({ ts: " 7/8 ", groups: " 2+2+3 ", bpm: "90" }), "v=2&bpm=90&ts=7/8&groups=2%2B2%2B3");
   assert.equal(metronomeQuery({ ts: "4/4", poly: " 3 : 2 " }), "v=2&ts=4/4&poly=3:2");
 });

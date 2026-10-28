@@ -7,6 +7,7 @@
 //! | `bpm`     | Tempo in quarter notes per minute, 20-300 |
 //! | `r`       | Rhythm in the text notation of [`grooph_measure::notation`] |
 //! | `ts`      | Time signature, e.g. `7/8`; default for `r`, the generator's meter, or on its own the metronome in that meter (the rhythm stays) |
+//! | `groups`  | Grouping of `ts`, e.g. `3+2+2` for 7/8, one the meter offers ([`TimeSignature::groupings`]); default the usual one |
 //! | `sub`     | Generator subdivision: `8`, `16`, `3` (triplets) or `mix` |
 //! | `lvl`     | Generator complexity 1-5 |
 //! | `bars`    | Generator bars 1-8 |
@@ -105,6 +106,7 @@ fn parse_query_with_default_version(
     let mut click = None;
     let mut counter = None;
     let mut poly = None;
+    let mut groups = None;
 
     for pair in query.trim_start_matches('?').split('&').filter(|p| !p.is_empty()) {
         let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
@@ -113,13 +115,8 @@ fn parse_query_with_default_version(
             "v" => version = parse_in_range("v", &value, 1, LINK_VERSION)?,
             "bpm" => bpm = Some(parse_in_range("bpm", &value, MIN_BPM, MAX_BPM)?),
             "r" => rhythm = Some(value),
-            "ts" => {
-                ts = Some(
-                    value
-                        .parse::<TimeSignature>()
-                        .map_err(|e| format!("time signature '{value}': {e}"))?,
-                )
-            }
+            "ts" => ts = Some(parse_meter(&value)?),
+            "groups" => groups = Some(value),
             "sub" => sub = Some(parse_subdivision(&value)?),
             "lvl" => lvl = Some(parse_in_range("lvl", &value, 1, MAX_COMPLEXITY)?),
             "bars" => bars = Some(parse_in_range("bars", &value, 1, MAX_BARS)?),
@@ -143,6 +140,12 @@ fn parse_query_with_default_version(
         (Some(percent), unit) => Some(Swing { unit: unit.unwrap_or_default(), percent }),
         (None, Some(_)) => return Err("su needs a swing amount (swing=50-75)".into()),
         (None, None) => None,
+    };
+
+    let ts = match (ts, groups) {
+        (ts, None) => ts,
+        (None, Some(_)) => return Err("groups needs a time signature (ts)".into()),
+        (Some(ts), Some(text)) => Some(grouped(ts, &text)?),
     };
 
     let generator =
@@ -212,6 +215,56 @@ fn parse_query_with_default_version(
     }
 }
 
+/// The meter of `ts`, without a grouping: that is `groups`.
+fn parse_meter(value: &str) -> Result<TimeSignature, String> {
+    if let Some((top, unit)) = value.split_once('/')
+        && top.contains('+')
+    {
+        let beats: u32 = top.split('+').filter_map(|g| g.trim().parse::<u32>().ok()).sum();
+        return Err(format!(
+            "time signature '{value}': the grouping goes into its own parameter, ts={beats}/{unit}&groups={top}"
+        ));
+    }
+    value.parse::<TimeSignature>().map_err(|e| format!("time signature '{value}': {e}"))
+}
+
+/// `ts` grouped as `text` says (`3+2+2`; a `+` decoded to a space counts
+/// too), if the meter offers that grouping.
+fn grouped(ts: TimeSignature, text: &str) -> Result<TimeSignature, String> {
+    let groups = text
+        .split(|c: char| c == '+' || c.is_whitespace())
+        .filter(|g| !g.is_empty())
+        .map(str::parse::<u8>)
+        .collect::<Result<Vec<_>, _>>()
+        .ok()
+        .filter(|groups| groups.len() > 1)
+        .ok_or_else(|| format!("groups '{text}': expected beat groups such as 3+2+2"))?;
+    let label = groups.iter().map(u8::to_string).collect::<Vec<_>>().join("+");
+    let sum: u32 = groups.iter().map(|&g| u32::from(g)).sum();
+    if sum != u32::from(ts.beats) {
+        return Err(format!("groups {label} add up to {sum} beats, but {ts} has {}", ts.beats));
+    }
+    let offered = ts.groupings();
+    match offered.iter().position(|g| *g == groups) {
+        Some(grouping) => Ok(ts.with_grouping(grouping as u8)),
+        None => {
+            let labels: Vec<String> = offered
+                .iter()
+                .map(|g| g.iter().map(u8::to_string).collect::<Vec<_>>().join("+"))
+                .collect();
+            Err(format!("groups {label} do not fit {ts}, which takes {}", labels.join(" or ")))
+        }
+    }
+}
+
+/// `ts` and, unless it is the usual one, `groups` for the meter `ts`.
+fn push_meter(params: &mut Vec<(&str, String)>, ts: TimeSignature) {
+    params.push(("ts", format!("{}/{}", ts.beats, ts.beat_unit)));
+    if ts.to_string().contains('+') {
+        params.push(("groups", ts.groups_label()));
+    }
+}
+
 /// The counter bar of `ratio` in `ts`, as the app's polyrhythm picker builds
 /// it (any ratio of one's own); the error names the rule and the ratios the
 /// picker shows first.
@@ -273,10 +326,10 @@ impl SharedLink {
         match &self.content {
             None => {}
             Some(LinkContent::Score(score)) => params.push(("r", format_score(score)?)),
-            Some(LinkContent::Metronome(ts)) => params.push(("ts", ts.to_string())),
+            Some(LinkContent::Metronome(ts)) => push_meter(&mut params, *ts),
             Some(LinkContent::Generator { settings, seed }) => {
                 if settings.time_signature != TimeSignature::FOUR_FOUR {
-                    params.push(("ts", settings.time_signature.to_string()));
+                    push_meter(&mut params, settings.time_signature);
                 }
                 params.push(("sub", subdivision_code(settings.subdivision).to_string()));
                 params.push(("lvl", settings.complexity.to_string()));
@@ -668,7 +721,7 @@ mod tests {
         let metronome =
             SharedLink { content: Some(LinkContent::Metronome(grouped)), ..SharedLink::default() };
         let url = metronome.to_url("/").unwrap();
-        assert_eq!(url, "/?v=2&ts=3%2B2%2B2/8");
+        assert_eq!(url, "/?v=2&ts=7/8&groups=3%2B2%2B2");
         assert!(
             matches!(parse(&url[2..]).content, Some(LinkContent::Metronome(ts)) if ts == grouped)
         );
@@ -850,7 +903,8 @@ mod tests {
         for (query, meter) in [
             ("ts=7/8&sub=16&seed=3", "7/8"),
             ("ts=11/16&sub=16", "11/16"),
-            ("ts=2%2B2%2B3/8&sub=8", "2+2+3/8"),
+            ("ts=7/8&groups=2%2B2%2B3&sub=8", "2+2+3/8"),
+            ("ts=7/8&groups=2+2+3&sub=8", "2+2+3/8"),
         ] {
             let link = parse_query(query).unwrap().unwrap();
             let Some(LinkContent::Generator { settings, .. }) = link.content else {
@@ -867,6 +921,26 @@ mod tests {
         assert!(parse_query("sub=4").unwrap_err().contains("sub"));
         assert!(parse_query("r=q+q+q").unwrap_err().contains("too short"));
         assert!(parse_query("r=q+q+q+q&seed=1").unwrap_err().contains("not both"));
+    }
+
+    #[test]
+    fn the_grouping_is_its_own_parameter() {
+        // The grouping in front of the meter was the old way; it points to groups.
+        let err = parse_query("ts=2%2B2%2B3/8").unwrap_err();
+        assert!(err.ends_with("ts=7/8&groups=2+2+3"), "{err}");
+        assert!(parse_query("groups=3%2B2%2B2").unwrap_err().contains("needs a time signature"));
+        let err = parse_query("ts=7/8&groups=3%2B3%2B2").unwrap_err();
+        assert_eq!(err, "groups 3+3+2 add up to 8 beats, but 7/8 has 7");
+        let err = parse_query("ts=6/8&groups=2%2B2%2B2").unwrap_err();
+        assert_eq!(err, "groups 2+2+2 do not fit 6/8, which takes 3+3");
+        assert!(parse_query("ts=7/8&groups=three").unwrap_err().contains("expected beat groups"));
+        // The usual grouping, written out, is the plain meter.
+        let usual = parse("ts=7/8&groups=2%2B3%2B2");
+        assert_eq!(usual.to_url("/").unwrap(), "/?v=2&ts=7/8");
+        // With a rhythm, groups group the meter that ts gives it.
+        let score = parse("ts=7/8&groups=3%2B2%2B2&r=q.+q+q");
+        let Some(LinkContent::Score(score)) = score.content else { panic!("expected a score") };
+        assert_eq!(score.measures[0].time_signature().to_string(), "3+2+2/8");
     }
 
     #[test]

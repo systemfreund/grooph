@@ -130,7 +130,7 @@ mod tests {
             "7/8 grouped 2+3+2 (groups start on eighths 1, 3, 6) at 120 BPM (quarter notes), \
              click bar >e e e >e e >e e (strong on eighths 1, 4, 6; medium on 2, 3, 5, 7)"
         );
-        let grouped = open_query("v=2&ts=3%2B2%2B2/8").unwrap();
+        let grouped = open_query("v=2&ts=7/8&groups=3%2B2%2B2").unwrap();
         assert!(
             grouped.starts_with("7/8 grouped 3+2+2 (groups start on eighths 1, 4, 6)"),
             "{grouped}"

@@ -16,10 +16,8 @@ export function metronomeQuery(args) {
   const text = (value) => (value === undefined || value === null ? "" : String(value).trim());
   const params = [["v", "2"]];
   if (text(args?.bpm)) params.push(["bpm", text(args.bpm)]);
-  const ts = text(args?.ts) || "4/4";
-  // The grouping goes in front of the meter's unit: 3+2+2/8.
-  const groups = text(args?.groups).replace(/\s+/g, "");
-  params.push(["ts", groups ? `${groups}/${ts.split("/").pop()}` : ts]);
+  params.push(["ts", text(args?.ts) || "4/4"]);
+  if (text(args?.groups)) params.push(["groups", text(args.groups).replace(/\s+/g, "")]);
   if (text(args?.swing)) params.push(["swing", text(args.swing)]);
   // Eighths swing by default: the app writes su only for sixteenths.
   if (text(args?.su) && text(args.su) !== "8") params.push(["su", text(args.su)]);
@@ -33,10 +31,10 @@ export function metronomeQuery(args) {
 export const MAX_LENGTH = { ts: 32, groups: 32, click: 1000, poly: 16 };
 
 /** Why `args` cannot be a metronome link, or `null`. Checks that only the
- * `known` arguments are given, the numbers, and that `groups` add up to
- * `ts`; the notation of `ts` and `click`, whether the meter takes the
- * grouping and whether `poly` fits it are checked afterwards on the link with
- * the app's parser (`checkLink`, see link-check.js). */
+ * `known` arguments are given and the numbers; the notation of `click`,
+ * whether `groups` fit the meter and whether `poly` does are checked
+ * afterwards on the link with the app's parser (`checkLink`, see
+ * link-check.js). */
 export function argumentError(args, known) {
   const unknown = Object.keys(args || {}).filter((key) => !known.includes(key));
   // Far beyond any bar the app writes, short enough to check at once.
@@ -50,15 +48,9 @@ export function argumentError(args, known) {
   if (args?.swing != null && !whole(args.swing, 50, 75)) return `swing must be a whole number from 50 to 75, got ${args.swing}`;
   if (args?.su != null && !["8", "16"].includes(String(args.su))) return `su must be 8 or 16, got ${args.su}`;
   if (args?.su != null && args?.swing == null) return "su needs a swing amount (swing 50-75)";
-  if (args?.ts != null && !/^\s*\d+(\+\d+)*\/\d+\s*$/.test(String(args.ts))) return `ts must be a time signature such as 7/8, got ${args.ts}`;
-  if (args?.groups != null) {
-    if (!/^\s*\d+(\s*\+\s*\d+)+\s*$/.test(String(args.groups))) return `groups must be beat groups such as 3+2+2, got ${args.groups}`;
-    const ts = String(args?.ts ?? "4/4").trim();
-    if (ts.includes("+")) return `give the grouping once: groups ${args.groups} and ts ${ts} both group the beats; pass ts without it`;
-    const sum = String(args.groups).split("+").reduce((total, group) => total + Number(group), 0);
-    const beats = Number(ts.split("/")[0]);
-    if (sum !== beats) return `groups ${String(args.groups).trim()} add up to ${sum} beats, but ts ${ts} has ${beats}`;
-  }
+  if (args?.ts != null && String(args.ts).includes("+")) return `ts is the meter alone, such as 7/8; pass the grouping as groups, e.g. "3+2+2", got ${args.ts}`;
+  if (args?.ts != null && !/^\s*\d+\/\d+\s*$/.test(String(args.ts))) return `ts must be a time signature such as 7/8, got ${args.ts}`;
+  if (args?.groups != null && !/^\s*\d+(\s*\+\s*\d+)+\s*$/.test(String(args.groups))) return `groups must be beat groups such as 3+2+2, got ${args.groups}`;
   if (args?.poly != null) {
     const ratio = String(args.poly).match(/^\s*(\d+)\s*:\s*(\d+)\s*$/);
     if (!ratio) return `poly must be a ratio such as 3:2, got ${args.poly}`;

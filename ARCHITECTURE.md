@@ -116,8 +116,9 @@ spread across callers.
   bar line, a leading `N/D` sets the time signature. Parsing goes through
   `set_beat`; each measure must be filled exactly, errors name the measure
   and token. Formatting returns `None` for durations without a code.
-- `grooph_link` (`crates/link`): query parameters `bpm`, `r`, `ts`, `swing`,
-  `su` and the generator's `sub`, `lvl`, `bars`, `space`, `seed` (seeded
+- `grooph_link` (`crates/link`): query parameters `bpm`, `r`, `ts`,
+  `groups` (the grouping of `ts`, `ts=7/8&groups=3+2+2`; `ts` takes no
+  grouping of its own), `swing`, `su` and the generator's `sub`, `lvl`, `bars`, `space`, `seed` (seeded
   `Rng`, so a link reproduces the same exercise). `parse_query` reads them,
   `SharedLink::to_url` writes them. The app reads the link once at startup
   (`Grooph::open_link_from_url`), then removes it from the address bar. A
@@ -144,8 +145,7 @@ grooph's metronome runs inside AI chats as an
   logic is in `mcp/server.js`: a stateless MCP server (Streamable HTTP, JSON
   answers, CORS) with one tool, `show_metronome`, whose arguments are the
   metronome's link parameters (`bpm`, `ts`, `click`, `poly`, `swing`,
-  `su`), plus `groups`, the grouping that the link writes in front of the
-  meter (`groups=3+2+2` with `ts=7/8` becomes `ts=3+2+2/8`). `mcp/link.js`
+  `su`, `groups`). `mcp/link.js`
   builds the same query as `SharedLink::to_url`, checked by both test suites
   against `mcp/link-cases.json`. Its result carries the link, for hosts
   without views, and what the metronome shows (`grooph_link::describe`:

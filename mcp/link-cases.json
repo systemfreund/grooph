@@ -3,8 +3,7 @@
   { "args": { "ts": "7/8", "bpm": 70, "click": ">q r:q. (q)" }, "query": "v=2&bpm=70&ts=7/8&click=%3Eq+r:q.+%28q%29" },
   { "args": { "ts": "4/4", "bpm": 90, "poly": "3:2", "swing": 66, "su": 16 }, "query": "v=2&bpm=90&ts=4/4&swing=66&su=16&poly=3:2" },
   { "args": { "ts": "5/8", "bpm": 80, "poly": "7:5" }, "query": "v=2&bpm=80&ts=5/8&poly=7:5" },
-  { "args": { "ts": "2+2+3/8", "bpm": 120, "swing": 60 }, "query": "v=2&bpm=120&ts=2%2B2%2B3/8&swing=60" },
-  { "args": { "ts": "7/8", "groups": "3+2+2", "bpm": 140 }, "query": "v=2&bpm=140&ts=3%2B2%2B2/8" },
+  { "args": { "ts": "7/8", "groups": "2+2+3", "bpm": 120, "swing": 60 }, "query": "v=2&bpm=120&ts=7/8&groups=2%2B2%2B3&swing=60" },
   { "args": { "ts": "4/4", "swing": 66, "su": 8 }, "query": "v=2&ts=4/4&swing=66" },
   { "args": { "ts": "3/4", "click": ">q (q) (q)", "poly": "4:3" }, "query": "v=2&ts=3/4&click=%3Eq+%28q%29+%28q%29&poly=4:3" }
 ]

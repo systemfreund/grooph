@@ -707,7 +707,7 @@ mod tests {
             [(320.0, 520.0), (360.0, 520.0), (720.0, 520.0), (360.0, 400.0), (320.0, 360.0)];
         // The whole metronome, and the compact card where fullscreen is offered.
         for ((width, height), compact) in sizes.into_iter().flat_map(|s| [(s, false), (s, true)]) {
-            let (ctx, mut app) = embedded_app("?v=2&bpm=90&ts=2+2+3/8&poly=3:7&embed=mcp");
+            let (ctx, mut app) = embedded_app("?v=2&bpm=90&ts=7/8&groups=2+2+3&poly=3:7&embed=mcp");
             app.ui.embed.as_mut().unwrap().fullscreen_offered = compact;
             assert_eq!(app.compact_card(), compact);
             let screen = Rect::from_min_size(Pos2::ZERO, vec2(width, height));
