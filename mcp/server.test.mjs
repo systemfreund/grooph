@@ -1,15 +1,25 @@
 // Tests of the MCP server without Cloudflare: node --test mcp/server.test.mjs
+// They need the link check's module, built with
+//   cargo build --release --target wasm32-unknown-unknown -p grooph-link-check
+// (CARGO_TARGET_DIR is honored, or LINK_CHECK_WASM points at the module).
 
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { linkChecker } from "./link-check.js";
 import { metronomeQuery } from "./link.js";
-import { RESOURCE_MIME, RESOURCE_URI, handleRequest } from "./server.js";
+import { RESOURCE_MIME, RESOURCE_URI, handleRequest, showMetronome } from "./server.js";
 
 const ORIGIN = "https://feature-x.grooph.pages.dev";
 const here = path.dirname(fileURLToPath(import.meta.url));
+
+const targetDir = process.env.CARGO_TARGET_DIR || path.join(here, "../target");
+const wasmPath =
+  process.env.LINK_CHECK_WASM || path.join(targetDir, "wasm32-unknown-unknown/release/grooph_link_check.wasm");
+assert.ok(fs.existsSync(wasmPath), `build the link check first: ${wasmPath} is missing (see the top of this file)`);
+const checkLink = linkChecker(fs.readFileSync(wasmPath));
 
 const env = {
   ASSETS: {
@@ -28,6 +38,7 @@ async function rpc(method, params, environment = env) {
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
     }),
     environment,
+    checkLink,
   );
   assert.equal(response.status, 200);
   assert.equal(response.headers.get("Access-Control-Allow-Origin"), "*");
@@ -65,7 +76,7 @@ test("tools/call returns the link of this deployment", async () => {
 });
 
 test("tools/call reports wrong numbers to the model", async () => {
-  for (const args of [{ bpm: 500 }, { swing: 90 }, { su: 16 }, { swing: 60, su: 4 }, { ts: "seven" }, { poly: "three" }, { poly: "2:4" }, { poly: "17:4" }, { tempo: 90 }]) {
+  for (const args of [{ bpm: 500 }, { swing: 90 }, { su: 16 }, { swing: 60, su: 4 }, { ts: "seven" }, { poly: "three" }, { poly: "2:4" }, { poly: "17:4" }, { tempo: 90 }, { ts: "4/4", click: "q ".repeat(600) }, { poly: " ".repeat(20) + "3:2" }]) {
     const { result } = await rpc("tools/call", { name: "show_metronome", arguments: args });
     assert.equal(result.isError, true, JSON.stringify(args));
   }
@@ -105,6 +116,36 @@ test("the view reads the host's colors as #rrggbbaa", async () => {
   assert.equal(cssColorToHex("rgba(255, 0, 16, 0.5)"), "#ff001080");
   assert.equal(cssColorToHex("rgb(10 20 30 / 50%)"), "#0a141e80");
   assert.equal(cssColorToHex("transparent"), null);
+});
+
+test("tools/call checks notation and polyrhythm by the app's parser", async () => {
+  const call = async (args) => (await rpc("tools/call", { name: "show_metronome", arguments: args })).result;
+  const tooLong = await call({ ts: "7/8", click: "q q q q" });
+  assert.equal(tooLong.isError, true);
+  assert.match(tooLong.content[0].text, /click: measure 1 is too long/);
+  const poly = await call({ ts: "4/4", poly: "7:5" });
+  assert.equal(poly.isError, true);
+  assert.match(poly.content[0].text, /poly 7:5 does not fit 4\/4/);
+  assert.equal((await call({ ts: "99/4" })).isError, true);
+  const fine = await call({ ts: "7/8", bpm: 140, click: ">q r:q. (q)", poly: "3:7" });
+  assert.ok(!fine.isError, fine.content[0].text);
+});
+
+test("the link check survives its memory growing", () => {
+  // A query (3 MB) far beyond the memory the module starts with.
+  const long = "v=2&ts=4/4&click=" + "q+".repeat(1500000);
+  assert.match(checkLink(long), /click/);
+  assert.equal(checkLink("v=2&ts=4/4"), null);
+});
+
+test("the tool does not answer without its link check", () => {
+  assert.throws(() => showMetronome({ ts: "4/4" }, ORIGIN), /checkLink/);
+  assert.ok(!showMetronome({ ts: "4/4" }, ORIGIN, checkLink).isError);
+});
+
+test("every link case opens in the app", () => {
+  const cases = JSON.parse(fs.readFileSync(path.join(here, "link-cases.json"), "utf8"));
+  for (const { query } of cases) assert.equal(checkLink(query), null, query);
 });
 
 test("resources/read without a web build is an error", async () => {

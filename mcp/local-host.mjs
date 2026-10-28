@@ -36,6 +36,7 @@ import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { linkChecker } from "./link-check.js";
 import { handleRequest } from "./server.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -54,6 +55,11 @@ function staticFile(pathname) {
   return new Response(fs.readFileSync(file), { headers });
 }
 
+// The link check the build writes next to the app (Trunk.toml), as the
+// Pages Function imports it; only needed when this serves the function.
+const checkLink = process.env.GROOPH_ORIGIN
+  ? null
+  : linkChecker(fs.readFileSync(path.join(dist, "embed/link-check.wasm")));
 const env = { ASSETS: { fetch: async (request) => staticFile(new URL(request.url).pathname) } };
 
 async function readBody(req) {
@@ -69,7 +75,7 @@ if (!process.env.GROOPH_ORIGIN) http
     let response;
     if (url.pathname === "/mcp") {
       const body = ["GET", "HEAD", "OPTIONS"].includes(req.method) ? undefined : await readBody(req);
-      response = await handleRequest(new Request(url, { method: req.method, headers: req.headers, body }), env);
+      response = await handleRequest(new Request(url, { method: req.method, headers: req.headers, body }), env, checkLink);
     } else {
       response = staticFile(url.pathname);
     }

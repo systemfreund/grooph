@@ -22,6 +22,8 @@ jobs:
       uses: dtolnay/rust-toolchain@stable
       with:
         components: rustfmt, clippy
+        # For the MCP server's link check (crates/link-check).
+        targets: wasm32-unknown-unknown
     - uses: Swatinem/rust-cache@v2
     - name: Install system dependencies
       run: sudo apt-get update && sudo apt-get install -y libasound2-dev
@@ -36,7 +38,9 @@ jobs:
     - name: Test the code review scripts
       run: python3 -m unittest discover -s .github/review
     - name: Test the MCP server
-      run: node --test mcp/server.test.mjs
+      run: |
+        cargo build --release --target wasm32-unknown-unknown --package grooph-link-check
+        node --test mcp/server.test.mjs
 
   web:
     # Build the web app on every push and pull request, so a WASM-only
@@ -59,6 +63,11 @@ jobs:
       env:
         # Baked into the app and written to version.txt, so the app notices new deploys.
         GROOPH_BUILD: ${{ github.sha }}
+    - name: Bundle the MCP server's Pages Function
+      # As the deploy does, with the version wrangler-action installs: the
+      # function imports the link check's module from dist/ (Trunk.toml), so
+      # a missing module or a bundling problem shows here, not at deploy.
+      run: npx --yes wrangler@3.90.0 pages functions build --outdir "$RUNNER_TEMP/functions"
     - name: Keep the build for the deploy
       uses: actions/upload-artifact@v4
       with:

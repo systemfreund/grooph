@@ -1748,6 +1748,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "grooph-link-check"
+version = "0.1.0"
+dependencies = [
+ "grooph-link",
+]
+
+[[package]]
 name = "grooph-measure"
 version = "0.1.0"
 dependencies = [

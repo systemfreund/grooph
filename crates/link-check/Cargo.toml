@@ -1,0 +1,18 @@
+[package]
+name = "grooph-link-check"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+# grooph-link's parser as a WebAssembly module for the MCP server
+# (mcp/server.js), so the tool and the app check a link by the same rules.
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+grooph-link = { workspace = true }
+
+[lints]
+workspace = true

@@ -6,7 +6,7 @@
 // and runs it in a sandboxed iframe, which loads the web build of this same
 // deployment, so a preview serves its own build.
 
-import { argumentError, metronomeQuery } from "./link.js";
+import { MAX_LENGTH, argumentError, metronomeQuery } from "./link.js";
 import { viewHtml } from "./view.js";
 
 export const RESOURCE_URI = "ui://grooph/metronome.html";
@@ -35,9 +35,9 @@ click replaces the main click: one bar of the meter in grooph's rhythm notation,
     type: "object",
     properties: {
       bpm: { type: "integer", minimum: 20, maximum: 300, description: "Tempo in quarter notes per minute. Default 120." },
-      ts: { type: "string", description: "Time signature: 1-17 beats over 4, 8 or 16, e.g. 4/4, 7/8 or 2+2+3/8. Default 4/4." },
-      click: { type: "string", description: "The click bar in rhythm notation without the time signature, e.g. \">q r:q. (q)\" in 7/8." },
-      poly: { type: "string", pattern: "^\\s*[0-9]+\\s*:\\s*[0-9]+\\s*$", description: "Polyrhythm n:m against the click, e.g. \"3:2\" for three against two in 4/4." },
+      ts: { type: "string", maxLength: MAX_LENGTH.ts, description: "Time signature: 1-17 beats over 4, 8 or 16, e.g. 4/4, 7/8 or 2+2+3/8. Default 4/4." },
+      click: { type: "string", maxLength: MAX_LENGTH.click, description: "The click bar in rhythm notation without the time signature, e.g. \">q r:q. (q)\" in 7/8." },
+      poly: { type: "string", maxLength: MAX_LENGTH.poly, pattern: "^\\s*[0-9]+\\s*:\\s*[0-9]+\\s*$", description: "Polyrhythm n:m against the click, e.g. \"3:2\" for three against two in 4/4." },
       swing: { type: "integer", minimum: 50, maximum: 75, description: "Swing in percent: 50 is straight, 66 a triplet feel, 75 dotted." },
       su: { type: "integer", enum: [8, 16], description: "Note value that swings: 8 (default) or 16. Needs swing." },
     },
@@ -47,8 +47,10 @@ click replaces the main click: one bar of the meter in grooph's rhythm notation,
   _meta: { ui: { resourceUri: RESOURCE_URI } },
 };
 
-/** Answers a request to `/mcp`. `env.ASSETS` serves the web build. */
-export async function handleRequest(request, env) {
+/** Answers a request to `/mcp`. `env.ASSETS` serves the web build;
+ * `checkLink(query)` says why a link would not open in the app, or `null`
+ * (`linkChecker` in link-check.js). */
+export async function handleRequest(request, env, checkLink) {
   if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
   if (request.method !== "POST") {
     return new Response("grooph MCP server: POST JSON-RPC messages here.\n", {
@@ -62,7 +64,7 @@ export async function handleRequest(request, env) {
   } catch {
     return json({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error" } });
   }
-  const context = { origin: new URL(request.url).origin, env };
+  const context = { origin: new URL(request.url).origin, env, checkLink };
   if (Array.isArray(message)) {
     const replies = (await Promise.all(message.map((m) => dispatch(m, context)))).filter(Boolean);
     return replies.length ? json(replies) : new Response(null, { status: 202, headers: CORS });
@@ -71,7 +73,7 @@ export async function handleRequest(request, env) {
   return reply ? json(reply) : new Response(null, { status: 202, headers: CORS });
 }
 
-async function dispatch(message, { origin, env }) {
+async function dispatch(message, { origin, env, checkLink }) {
   // Notifications (no id) and answers get no answer.
   if (message?.id === undefined || message.id === null || !message.method) return null;
   const ok = (result) => ({ jsonrpc: "2.0", id: message.id, result });
@@ -91,7 +93,7 @@ async function dispatch(message, { origin, env }) {
       return ok({ tools: [TOOL] });
     case "tools/call":
       if (params.name !== TOOL.name) return fail(-32602, `Unknown tool: ${params.name}`);
-      return ok(showMetronome(params.arguments || {}, origin));
+      return ok(showMetronome(params.arguments || {}, origin, checkLink));
     case "resources/list":
       return ok({ resources: [{ uri: RESOURCE_URI, name: "grooph metronome", mimeType: RESOURCE_MIME }] });
     case "resources/templates/list":
@@ -116,20 +118,27 @@ async function dispatch(message, { origin, env }) {
   }
 }
 
-/** The tool's result: the link, for hosts that show no view as well. */
-export function showMetronome(args, origin) {
+/** The tool's result: the link, for hosts that show no view as well. Wrong
+ * arguments come back as an error that says what to fix: the numbers from
+ * `argumentError`, the notation and the polyrhythm from `checkLink`, by the
+ * app's own parser. */
+export function showMetronome(args, origin, checkLink) {
   const error = argumentError(args, Object.keys(TOOL.inputSchema.properties));
   if (error) return { isError: true, content: [{ type: "text", text: error }] };
   const query = metronomeQuery(args);
+  // Without it the tool would answer success for links that do not open.
+  if (typeof checkLink !== "function") throw new Error("showMetronome needs checkLink (link-check.js)");
+  const problem = checkLink(query);
+  if (problem) {
+    const text = `These settings do not open in grooph: ${problem}. Fix the argument and call the tool again.`;
+    return { isError: true, content: [{ type: "text", text }] };
+  }
   const link = `${origin}/?${query}`;
   return {
     content: [
       {
         type: "text",
-        text:
-          `The metronome is shown to the user; they start it with the play button. Open in grooph: ${link}\n` +
-          "If the click notation or the polyrhythm does not fit the meter, grooph shows an error instead; " +
-          "the view then reports it as model context, so check it before telling the user the metronome is set.",
+        text: `The metronome is shown to the user; they start it with the play button. Open in grooph: ${link}`,
       },
     ],
     structuredContent: { link },

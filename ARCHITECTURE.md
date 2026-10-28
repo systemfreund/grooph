@@ -15,6 +15,7 @@ user-facing overview is README.md.
 - `crates/mic`: Microphone hit detection (cpal natively, `getUserMedia` + AudioWorklet on the web).
 - `crates/link`: Shareable links (URL query parameters <-> score/generator/metronome).
 - `crates/site`: Static guide pages for grooph.app, generated from Markdown at build time.
+- `crates/link-check`: grooph-link's parser as a WebAssembly module for the MCP server's link check.
 - `functions/`, `mcp/`: the MCP server (`grooph.app/mcp`) and the view that embeds the metronome in AI chats.
 - `crates/android`: Android entry point (`android_main`, NativeActivity) around `crates/app`.
 
@@ -145,7 +146,13 @@ grooph's metronome runs inside AI chats as an
   metronome's link parameters (`bpm`, `ts`, `click`, `poly`, `swing`,
   `su`; `mcp/link.js` builds the same query as `SharedLink::to_url`, checked
   by both test suites against `mcp/link-cases.json`). Its result carries
-  the link, for hosts without views.
+  the link, for hosts without views. Before it answers, the tool checks the
+  link with the app's own parser: `crates/link-check` builds
+  `grooph_link::parse_query` as a plain WebAssembly module (three
+  exports, no imports, no wasm-bindgen; a Trunk hook writes it to
+  `dist/embed/link-check.wasm`, which `functions/mcp.js` imports), loaded by
+  `mcp/link-check.js`. Wrong notation or a `poly` that does not fit the
+  meter comes back as `isError` with the app's message.
 - The tool's view `ui://grooph/metronome.html` (`mcp/view.js`) runs in the
   host's sandboxed iframe on another origin. It does the MCP Apps handshake
   over postMessage, puts the link plus `embed=mcp&theme=light|dark` into the
@@ -216,7 +223,9 @@ grooph's metronome runs inside AI chats as an
   on `touchcancel`/`pointercancel` `embed::cancel_scrolled_touch` moves the
   pointer far off before releasing it. The options sheet does not fold on a
   flick there.
-- Tests: `node --test mcp/server.test.mjs` (no Cloudflare needed), `cargo test` (embed
+- Tests: `node --test mcp/server.test.mjs` (no Cloudflare needed; build the
+  link check first with `cargo build --release --target
+  wasm32-unknown-unknown -p grooph-link-check`), `cargo test` (embed
   mode). `node mcp/local-host.mjs [dist]` plays host and sandbox locally
   for a `trunk build` (spec CSP, `?wasm=1` adds `'wasm-unsafe-eval'`). To
   run the function as Cloudflare bundles it, start `npx wrangler pages dev
