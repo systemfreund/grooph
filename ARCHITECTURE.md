@@ -148,7 +148,7 @@ grooph's metronome runs inside AI chats as an
   by both test suites against `mcp/link-cases.json`). Its result carries
   the link, for hosts without views. Before it answers, the tool checks the
   link with the app's own parser: `crates/link-check` builds
-  `grooph_link::parse_query_current` as a plain WebAssembly module (three
+  `grooph_link::parse_query` as a plain WebAssembly module (three
   exports, no imports, no wasm-bindgen; a Trunk hook writes it to
   `dist/embed/link-check.wasm`, which `functions/mcp.js` imports), loaded by
   `mcp/link-check.js`. Wrong notation or a `poly` that does not fit the

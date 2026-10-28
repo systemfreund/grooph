@@ -63,6 +63,11 @@ jobs:
       env:
         # Baked into the app and written to version.txt, so the app notices new deploys.
         GROOPH_BUILD: ${{ github.sha }}
+    - name: Bundle the MCP server's Pages Function
+      # As the deploy does, with the version wrangler-action installs: the
+      # function imports the link check's module from dist/ (Trunk.toml), so
+      # a missing module or a bundling problem shows here, not at deploy.
+      run: npx --yes wrangler@3.90.0 pages functions build --outdir "$RUNNER_TEMP/functions"
     - name: Keep the build for the deploy
       uses: actions/upload-artifact@v4
       with:

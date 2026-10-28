@@ -10,7 +10,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { linkChecker } from "./link-check.js";
 import { metronomeQuery } from "./link.js";
-import { RESOURCE_MIME, RESOURCE_URI, handleRequest } from "./server.js";
+import { RESOURCE_MIME, RESOURCE_URI, handleRequest, showMetronome } from "./server.js";
 
 const ORIGIN = "https://feature-x.grooph.pages.dev";
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -135,6 +135,11 @@ test("the link check survives its memory growing", () => {
   const long = "v=2&ts=4/4&click=" + "q+".repeat(1500000);
   assert.match(checkLink(long), /click/);
   assert.equal(checkLink("v=2&ts=4/4"), null);
+});
+
+test("the tool does not answer without its link check", () => {
+  assert.throws(() => showMetronome({ ts: "4/4" }, ORIGIN), /checkLink/);
+  assert.ok(!showMetronome({ ts: "4/4" }, ORIGIN, checkLink).isError);
 });
 
 test("every link case opens in the app", () => {

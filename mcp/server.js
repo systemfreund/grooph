@@ -126,7 +126,9 @@ export function showMetronome(args, origin, checkLink) {
   const error = argumentError(args, Object.keys(TOOL.inputSchema.properties));
   if (error) return { isError: true, content: [{ type: "text", text: error }] };
   const query = metronomeQuery(args);
-  const problem = checkLink?.(query);
+  // Without it the tool would answer success for links that do not open.
+  if (typeof checkLink !== "function") throw new Error("showMetronome needs checkLink (link-check.js)");
+  const problem = checkLink(query);
   if (problem) {
     const text = `These settings do not open in grooph: ${problem}. Fix the argument and call the tool again.`;
     return { isError: true, content: [{ type: "text", text }] };

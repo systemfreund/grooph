@@ -27,8 +27,8 @@ export function metronomeQuery(args) {
 
 /** Why `args` cannot be a metronome link, or `null`. Checks that only the
  * `known` arguments are given and the numbers; the notation of `ts` and
- * `click`, and whether `poly` fits the meter, are checked by the app, which
- * names the problem in the view. */
+ * `click`, and whether `poly` fits the meter, are checked afterwards on the
+ * link with the app's parser (`checkLink`, see link-check.js). */
 export function argumentError(args, known) {
   const unknown = Object.keys(args || {}).filter((key) => !known.includes(key));
   if (unknown.includes("counter")) return "counter is not an argument: pass the polyrhythm as poly, e.g. \"3:2\"";

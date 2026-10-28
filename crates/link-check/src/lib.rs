@@ -18,19 +18,15 @@ thread_local! {
     static OUTPUT: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
 }
 
-/// Why `query` (without `?`) cannot be opened as a link, or `None`. The same
-/// parser the app opens links with ([`grooph_link::parse_query_current`]).
+/// Why `query` (without `?`) cannot be opened as a link, or `None`: the
+/// parser the app opens links with ([`grooph_link::parse_query`]). A query
+/// that sets nothing opens too, to the defaults.
 pub fn check_query(query: &str) -> Option<String> {
-    match grooph_link::parse_query_current(query) {
-        Ok(Some(_)) => None,
-        Ok(None) => Some("the link sets nothing".to_owned()),
-        Err(err) => Some(err),
-    }
+    grooph_link::parse_query(query).err()
 }
 
 /// A buffer of `len` bytes for the query, in this module's memory.
-// The export attribute counts as unsafe code; there is no unsafe block.
-#[allow(unsafe_code)]
+#[expect(unsafe_code, reason = "exported by name for the host; no unsafe block")]
 #[unsafe(no_mangle)]
 pub extern "C" fn buffer(len: usize) -> *mut u8 {
     INPUT.with_borrow_mut(|input| {
@@ -42,7 +38,7 @@ pub extern "C" fn buffer(len: usize) -> *mut u8 {
 
 /// Checks the query in [`buffer`]; the length of the [`message`], 0 if the
 /// link opens.
-#[allow(unsafe_code)]
+#[expect(unsafe_code, reason = "exported by name for the host; no unsafe block")]
 #[unsafe(no_mangle)]
 pub extern "C" fn check() -> usize {
     let problem = INPUT.with_borrow(|input| match std::str::from_utf8(input) {
@@ -57,7 +53,7 @@ pub extern "C" fn check() -> usize {
 }
 
 /// Where the last [`check`]'s message is.
-#[allow(unsafe_code)]
+#[expect(unsafe_code, reason = "exported by name for the host; no unsafe block")]
 #[unsafe(no_mangle)]
 pub extern "C" fn message() -> *const u8 {
     OUTPUT.with_borrow(|output| output.as_ptr())
@@ -80,7 +76,12 @@ mod tests {
         let poly = check_query("v=2&ts=4/4&poly=7:5").unwrap();
         assert!(poly.contains("does not fit 4/4"), "{poly}");
         assert!(check_query("v=2&ts=99/4").unwrap().contains("time signature"));
-        assert!(check_query("").is_some());
+    }
+
+    #[test]
+    fn a_link_that_sets_nothing_opens() {
+        assert_eq!(check_query(""), None);
+        assert_eq!(check_query("embed=mcp&theme=dark"), None);
     }
 
     #[test]
@@ -94,6 +95,6 @@ mod tests {
         assert_eq!(len, message.len());
         assert!(message.contains("does not fit"));
         super::INPUT.with_borrow_mut(|input| input.clear());
-        assert_eq!(super::check(), "the link sets nothing".len());
+        assert_eq!(super::check(), 0);
     }
 }
