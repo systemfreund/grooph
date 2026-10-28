@@ -60,7 +60,7 @@ test("tools/list has show_metronome with its view", async () => {
   const tool = result.tools.find((t) => t.name === "show_metronome");
   assert.ok(tool);
   assert.equal(tool._meta.ui.resourceUri, RESOURCE_URI);
-  assert.deepEqual(Object.keys(tool.inputSchema.properties).sort(), ["bpm", "click", "poly", "su", "swing", "ts"]);
+  assert.deepEqual(Object.keys(tool.inputSchema.properties).sort(), ["bpm", "click", "groups", "poly", "su", "swing", "ts"]);
   // Describes, points nowhere else, stays short; the details are the parameters'.
   assert.doesNotMatch(tool.description, /llms\.txt|https?:\/\//);
   assert.ok(tool.description.length < 500, tool.description.length);
@@ -135,11 +135,40 @@ test("tools/call checks notation and polyrhythm by the app's parser", async () =
   assert.ok(!fine.isError, fine.content[0].text);
 });
 
+test("the result says what the metronome shows", async () => {
+  const call = async (args) => (await rpc("tools/call", { name: "show_metronome", arguments: args })).result;
+  // The grouping from groups, not accents in the usual 2+3+2.
+  const grouped = await call({ ts: "7/8", groups: "3+2+2", bpm: 140 });
+  assert.ok(!grouped.isError, grouped.content[0].text);
+  assert.ok(grouped.structuredContent.link.includes("ts=3%2B2%2B2/8"), grouped.structuredContent.link);
+  assert.match(grouped.structuredContent.shown, /^7\/8 grouped 3\+2\+2 \(groups start on eighths 1, 4, 6\) at 140 BPM/);
+  assert.ok(grouped.content[0].text.includes(grouped.structuredContent.shown));
+  const accents = await call({ ts: "7/8", click: ">e e e >e e >e e" });
+  assert.match(accents.structuredContent.shown, /grouped 2\+3\+2/);
+  assert.match(accents.structuredContent.shown, /strong on eighths 1, 4, 6/);
+});
+
+test("groups are checked against ts", async () => {
+  const call = async (args) => (await rpc("tools/call", { name: "show_metronome", arguments: args })).result;
+  const error = async (args, pattern) => {
+    const result = await call(args);
+    assert.equal(result.isError, true, JSON.stringify(args));
+    assert.match(result.content[0].text, pattern);
+  };
+  await error({ ts: "7/8", groups: "3+3+2" }, /add up to 8 beats, but ts 7\/8 has 7/);
+  await error({ ts: "2+2+3/8", groups: "3+2+2" }, /give the grouping once/);
+  await error({ ts: "7/8", groups: "3-2-2" }, /groups must be/);
+  // The meter does not take this grouping: the app's parser says so.
+  await error({ ts: "6/8", groups: "2+2+2" }, /do not open in grooph/);
+  assert.equal(metronomeQuery({ groups: "3 + 2 + 2", ts: "7/8" }), "v=2&ts=3%2B2%2B2/8");
+  assert.ok(!(await call({ ts: "7/16", groups: "2+2+3" })).isError);
+});
+
 test("the link check survives its memory growing", () => {
   // A query (3 MB) far beyond the memory the module starts with.
   const long = "v=2&ts=4/4&click=" + "q+".repeat(1500000);
-  assert.match(checkLink(long), /click/);
-  assert.equal(checkLink("v=2&ts=4/4"), null);
+  assert.match(checkLink(long).problem, /click/);
+  assert.equal(checkLink("v=2&ts=4/4").problem, null);
 });
 
 test("the tool does not answer without its link check", () => {
@@ -147,27 +176,31 @@ test("the tool does not answer without its link check", () => {
   assert.ok(!showMetronome({ ts: "4/4" }, ORIGIN, checkLink).isError);
 });
 
-test("the ts description matches the meters the app takes", async () => {
+test("the ts and groups descriptions match the meters the app takes", async () => {
   const { result } = await rpc("tools/list", {});
   const text = result.tools[0].inputSchema.properties.ts.description;
-  // Every meter it names opens, groupings included.
-  for (const ts of text.match(/\b\d+(?:\+\d+)*\/\d+\b/g)) {
-    assert.equal(checkLink(metronomeQuery({ ts })), null, ts);
+  for (const ts of text.match(/\b\d+\/\d+\b/g)) assert.equal(checkLink(metronomeQuery({ ts })).problem, null, ts);
+  // Every grouping groups names opens in the meter it names.
+  const groups = result.tools[0].inputSchema.properties.groups.description;
+  const named = [...groups.matchAll(/((?:\d+\+)+\d+(?: or (?:\d+\+)+\d+)*)(?: and others)? in (\d+\/\d+)/g)];
+  assert.ok(named.length >= 5, groups);
+  for (const [, list, ts] of named) {
+    for (const g of list.split(" or ")) assert.equal(checkLink(metronomeQuery({ ts, groups: g })).problem, null, `${g} in ${ts}`);
   }
   // Each range's ends open, one beat past them does not.
   const ranges = [...text.matchAll(/(\d+)-(\d+) (?:beats )?over (\d+)/g)];
   assert.equal(ranges.length, 3, text);
   for (const [, low, high, unit] of ranges) {
-    for (const beats of [low, high]) assert.equal(checkLink(`v=2&ts=${beats}/${unit}`), null, `${beats}/${unit}`);
+    for (const beats of [low, high]) assert.equal(checkLink(`v=2&ts=${beats}/${unit}`).problem, null, `${beats}/${unit}`);
     for (const beats of [Number(low) - 1, Number(high) + 1]) {
-      if (beats > 0) assert.notEqual(checkLink(`v=2&ts=${beats}/${unit}`), null, `${beats}/${unit}`);
+      if (beats > 0) assert.notEqual(checkLink(`v=2&ts=${beats}/${unit}`).problem, null, `${beats}/${unit}`);
     }
   }
 });
 
 test("every link case opens in the app", () => {
   const cases = JSON.parse(fs.readFileSync(path.join(here, "link-cases.json"), "utf8"));
-  for (const { query } of cases) assert.equal(checkLink(query), null, query);
+  for (const { query } of cases) assert.equal(checkLink(query).problem, null, query);
 });
 
 test("resources/read without a web build is an error", async () => {

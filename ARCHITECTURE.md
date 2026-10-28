@@ -144,14 +144,19 @@ grooph's metronome runs inside AI chats as an
   logic is in `mcp/server.js`: a stateless MCP server (Streamable HTTP, JSON
   answers, CORS) with one tool, `show_metronome`, whose arguments are the
   metronome's link parameters (`bpm`, `ts`, `click`, `poly`, `swing`,
-  `su`; `mcp/link.js` builds the same query as `SharedLink::to_url`, checked
-  by both test suites against `mcp/link-cases.json`). Its result carries
-  the link, for hosts without views. Before it answers, the tool checks the
-  link with the app's own parser: `crates/link-check` builds
-  `grooph_link::parse_query` as a plain WebAssembly module (three
-  exports, no imports, no wasm-bindgen; a Trunk hook writes it to
-  `dist/embed/link-check.wasm`, which `functions/mcp.js` imports), loaded by
-  `mcp/link-check.js`. Wrong notation or a `poly` that does not fit the
+  `su`), plus `groups`, the grouping that the link writes in front of the
+  meter (`groups=3+2+2` with `ts=7/8` becomes `ts=3+2+2/8`). `mcp/link.js`
+  builds the same query as `SharedLink::to_url`, checked by both test suites
+  against `mcp/link-cases.json`. Its result carries the link, for hosts
+  without views, and what the metronome shows (`grooph_link::describe`:
+  meter and grouping, tempo, click bar with its strong, medium and soft
+  clicks, polyrhythm, swing), so the model can check it against the request;
+  the embedded app's model context starts with the same description. Before
+  it answers, the tool checks the link with the app's own parser:
+  `crates/link-check` builds `grooph_link::parse_query` and `describe` as a
+  plain WebAssembly module (four exports, no imports, no wasm-bindgen; a
+  Trunk hook writes it to `dist/embed/link-check.wasm`, which
+  `functions/mcp.js` imports), loaded by `mcp/link-check.js`. Wrong notation or a `poly` that does not fit the
   meter comes back as `isError` with the app's message.
 - The tool's view `ui://grooph/metronome.html` (`mcp/view.js`) runs in the
   host's sandboxed iframe on another origin. It does the MCP Apps handshake

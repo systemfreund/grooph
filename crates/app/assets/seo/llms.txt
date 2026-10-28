@@ -30,7 +30,7 @@ If the user has unsaved changes, grooph asks before replacing them. Invalid link
 
 ## MCP server
 
-AI chat apps can show grooph's metronome inside the conversation: https://grooph.app/mcp is an MCP server (Streamable HTTP, no authentication) with the tool `show_metronome`. Its arguments are the metronome's link parameters (`bpm`, `ts`, `click`, `poly`, `swing`, `su`). Hosts that support MCP Apps show a working metronome; the result also contains the grooph.app link.
+AI chat apps can show grooph's metronome inside the conversation: https://grooph.app/mcp is an MCP server (Streamable HTTP, no authentication) with the tool `show_metronome`. Its arguments are the metronome's link parameters (`bpm`, `ts`, `click`, `poly`, `swing`, `su`), plus `groups` for the beat grouping (`ts` 7/8 with `groups` 3+2+2 is the link's `ts=3+2+2/8`). Hosts that support MCP Apps show a working metronome; the result says what it shows and contains the grooph.app link.
 
 ## Polyrhythms
 

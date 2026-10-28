@@ -8,7 +8,6 @@
 //! shows no tabs, menus or library, and leaves out the update check, the
 //! wake lock, MIDI, the microphone and calibration.
 
-use crate::metronome_view::ratio_label;
 use crate::pickers::silent_bars_label;
 use crate::{Grooph, TransportState, platform};
 use eframe::egui::{
@@ -363,37 +362,32 @@ impl Grooph {
         let cfg = &self.playback_ctl.audio_cfg;
         let click = format_bar(&self.click_bar()).unwrap_or_default();
         let subdivision = self.click_fill_label();
-        let mut text = format!(
-            "Metronome: {ts} at {bpm} BPM (quarter notes), click bar {click} ({subdivision})"
-        );
+        // The same description as the tool's result (grooph_link::describe):
+        // the meter's grouping, where the clicks fall, the polyrhythm, swing.
+        let mut text = format!("Metronome: {}", grooph_link::describe(&self.shared_link()));
         let mut fields = vec![
             ("ts", Field::Text(ts.to_string())),
             ("bpm", Field::Number(bpm.into())),
             ("click", Field::Text(click)),
             ("subdivision", Field::Text(subdivision)),
         ];
-        if let Some(bar) = self.counter_bar() {
-            // A ratio's own clicks are the ratio; edited ones are written out.
-            match self.counter_ratio() {
-                Some((ratio, false)) => {
-                    text += &format!(", polyrhythm {ratio}");
-                    fields.push(("poly", Field::Text(ratio.to_string())));
-                }
-                ratio => {
-                    let name = ratio.map_or_else(|| "custom".to_owned(), ratio_label);
-                    let counter = format_bar(bar).unwrap_or_default();
-                    text += &format!(", polyrhythm {name} (counter clicks {counter})");
-                    // The fields use the tool's arguments only: the ratio as
-                    // `poly`; the edited clicks are in the text and the link.
-                    if let Some((ratio, _)) = ratio {
-                        fields.push(("poly", Field::Text(ratio.to_string())));
-                    }
+        let groups = ts.groups();
+        if groups.len() > 1 && groups.iter().any(|&g| g > 1) {
+            fields.push(("groups", Field::Text(ts.groups_label())));
+        }
+        if self.counter_bar().is_some() {
+            // The fields use the tool's arguments only: the ratio as `poly`;
+            // edited clicks are in the text and the link.
+            if let Some((ratio, edited)) = self.counter_ratio() {
+                fields.push(("poly", Field::Text(ratio.to_string())));
+                if edited {
                     fields.push(("polyEdited", Field::Bool(true)));
                 }
+            } else {
+                fields.push(("polyEdited", Field::Bool(true)));
             }
         }
         if !cfg.swing.is_straight() {
-            text += &format!(", swing {}% {}", cfg.swing.percent, cfg.swing.unit.label());
             fields.push(("swing", Field::Number(cfg.swing.percent.into())));
             let su = match cfg.swing.unit {
                 SwingUnit::Eighths => 8,
@@ -556,7 +550,9 @@ mod tests {
         assert_eq!(app.metronome_meter().to_string(), "7/8");
         assert_eq!(ctx.options(|o| o.theme_preference), Theme::Dark.into());
         let context = app.model_context();
-        assert!(context.text.starts_with("Metronome: 7/8 at 140 BPM"), "{}", context.text);
+        assert!(context.text.starts_with("Metronome: 7/8 grouped 2+3+2"), "{}", context.text);
+        assert!(context.text.contains("at 140 BPM"), "{}", context.text);
+        assert!(context.text.contains("(strong on eighths 1; soft on 6)"), "{}", context.text);
         assert!(context.fields.contains(&("bpm", Field::Number(140.0))));
         assert!(context.fields.contains(&("click", Field::Text(">q r:q. (q)".into()))));
         assert!(context.fields.contains(&("playing", Field::Bool(false))));
@@ -590,7 +586,11 @@ mod tests {
         // Edited ones are written out.
         let (_, app) = embedded_app("?v=2&ts=4/4&counter=t4+(t4)+t4+t4+t4+t4&embed=mcp");
         let context = app.model_context();
-        assert!(context.text.contains("polyrhythm 3:2 edited (counter clicks t4 (t4) t4"));
+        assert!(
+            context.text.contains("polyrhythm 3:2 with edited clicks t4 (t4) t4"),
+            "{}",
+            context.text
+        );
         assert!(context.fields.contains(&("poly", Field::Text("3:2".into()))));
     }
 
