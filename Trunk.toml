@@ -10,3 +10,10 @@ minify = "always"
 stage = "post_build"
 command = "cargo"
 command_arguments = ["run", "--quiet", "--package", "grooph-site"]
+
+# The MCP server's link check (crates/link-check): grooph-link's parser as a
+# plain WebAssembly module, which functions/mcp.js imports from dist/.
+[[hooks]]
+stage = "post_build"
+command = "sh"
+command_arguments = ["-c", "cargo build --quiet --release --target wasm32-unknown-unknown --package grooph-link-check && mkdir -p \"$TRUNK_STAGING_DIR/embed\" && cp target/wasm32-unknown-unknown/release/grooph_link_check.wasm \"$TRUNK_STAGING_DIR/embed/link-check.wasm\""]

@@ -47,8 +47,10 @@ click replaces the main click: one bar of the meter in grooph's rhythm notation,
   _meta: { ui: { resourceUri: RESOURCE_URI } },
 };
 
-/** Answers a request to `/mcp`. `env.ASSETS` serves the web build. */
-export async function handleRequest(request, env) {
+/** Answers a request to `/mcp`. `env.ASSETS` serves the web build;
+ * `checkLink(query)` says why a link would not open in the app, or `null`
+ * (`linkChecker` in link-check.js). */
+export async function handleRequest(request, env, checkLink) {
   if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
   if (request.method !== "POST") {
     return new Response("grooph MCP server: POST JSON-RPC messages here.\n", {
@@ -62,7 +64,7 @@ export async function handleRequest(request, env) {
   } catch {
     return json({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error" } });
   }
-  const context = { origin: new URL(request.url).origin, env };
+  const context = { origin: new URL(request.url).origin, env, checkLink };
   if (Array.isArray(message)) {
     const replies = (await Promise.all(message.map((m) => dispatch(m, context)))).filter(Boolean);
     return replies.length ? json(replies) : new Response(null, { status: 202, headers: CORS });
@@ -71,7 +73,7 @@ export async function handleRequest(request, env) {
   return reply ? json(reply) : new Response(null, { status: 202, headers: CORS });
 }
 
-async function dispatch(message, { origin, env }) {
+async function dispatch(message, { origin, env, checkLink }) {
   // Notifications (no id) and answers get no answer.
   if (message?.id === undefined || message.id === null || !message.method) return null;
   const ok = (result) => ({ jsonrpc: "2.0", id: message.id, result });
@@ -91,7 +93,7 @@ async function dispatch(message, { origin, env }) {
       return ok({ tools: [TOOL] });
     case "tools/call":
       if (params.name !== TOOL.name) return fail(-32602, `Unknown tool: ${params.name}`);
-      return ok(showMetronome(params.arguments || {}, origin));
+      return ok(showMetronome(params.arguments || {}, origin, checkLink));
     case "resources/list":
       return ok({ resources: [{ uri: RESOURCE_URI, name: "grooph metronome", mimeType: RESOURCE_MIME }] });
     case "resources/templates/list":
@@ -116,20 +118,25 @@ async function dispatch(message, { origin, env }) {
   }
 }
 
-/** The tool's result: the link, for hosts that show no view as well. */
-export function showMetronome(args, origin) {
+/** The tool's result: the link, for hosts that show no view as well. Wrong
+ * arguments come back as an error that says what to fix: the numbers from
+ * `argumentError`, the notation and the polyrhythm from `checkLink`, by the
+ * app's own parser. */
+export function showMetronome(args, origin, checkLink) {
   const error = argumentError(args, Object.keys(TOOL.inputSchema.properties));
   if (error) return { isError: true, content: [{ type: "text", text: error }] };
   const query = metronomeQuery(args);
+  const problem = checkLink?.(query);
+  if (problem) {
+    const text = `These settings do not open in grooph: ${problem}. Fix the argument and call the tool again.`;
+    return { isError: true, content: [{ type: "text", text }] };
+  }
   const link = `${origin}/?${query}`;
   return {
     content: [
       {
         type: "text",
-        text:
-          `The metronome is shown to the user; they start it with the play button. Open in grooph: ${link}\n` +
-          "If the click notation or the polyrhythm does not fit the meter, grooph shows an error instead; " +
-          "the view then reports it as model context, so check it before telling the user the metronome is set.",
+        text: `The metronome is shown to the user; they start it with the play button. Open in grooph: ${link}`,
       },
     ],
     structuredContent: { link },

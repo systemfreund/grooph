@@ -6,6 +6,7 @@ members = [
     "crates/audio",
     "crates/layout",
     "crates/link",
+    "crates/link-check",
     "crates/measure",
     "crates/mic",
     "crates/midi",
