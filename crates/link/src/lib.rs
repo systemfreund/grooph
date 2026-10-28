@@ -43,7 +43,7 @@ use grooph_measure::grid::DEFAULT_GRID;
 use grooph_measure::notation::{format_score, parse_score};
 use grooph_measure::swing::{MAX_SWING_PERCENT, MIN_SWING_PERCENT, Swing, SwingUnit};
 use grooph_measure::tempo::{MAX_BPM, MIN_BPM};
-use grooph_measure::{Measure, Score, TimeSignature};
+use grooph_measure::{Measure, ParseTimeSignatureError, Score, TimeSignature};
 use std::fmt::Write as _;
 
 /// Version [`SharedLink::to_url`] writes as `v`.
@@ -217,13 +217,24 @@ fn parse_query_with_default_version(
 
 /// The meter of `ts`, without a grouping: that is `groups`.
 fn parse_meter(value: &str) -> Result<TimeSignature, String> {
-    if let Some((top, unit)) = value.split_once('/')
-        && top.contains('+')
+    // The old form, groups in front (`2+2+3/8`; a `+` typed into a link
+    // decodes to a space), points to the new one.
+    if let Some((top, unit)) = value.trim().split_once('/')
+        && top.contains(|c: char| c == '+' || c.is_whitespace())
     {
-        let beats: u32 = top.split('+').filter_map(|g| g.trim().parse::<u32>().ok()).sum();
-        return Err(format!(
-            "time signature '{value}': the grouping goes into its own parameter, ts={beats}/{unit}&groups={top}"
-        ));
+        let groups: Vec<&str> =
+            top.split(|c: char| c == '+' || c.is_whitespace()).filter(|g| !g.is_empty()).collect();
+        let beats = groups
+            .iter()
+            .try_fold(0u32, |sum, g| sum.checked_add(g.parse::<u32>().ok()?))
+            .filter(|_| groups.len() > 1);
+        return Err(match beats {
+            Some(beats) => format!(
+                "time signature '{value}': the grouping goes into its own parameter, ts={beats}/{unit}&groups={}",
+                groups.join("+")
+            ),
+            None => format!("time signature '{value}': {}", ParseTimeSignatureError::Malformed),
+        });
     }
     value.parse::<TimeSignature>().map_err(|e| format!("time signature '{value}': {e}"))
 }
@@ -367,7 +378,8 @@ impl SharedLink {
     }
 }
 
-/// The app's tempo without a `bpm` (crates/app `PersistedState`).
+/// The tempo without a `bpm`; the app starts at it too (crates/app
+/// `PersistedState`).
 pub const DEFAULT_BPM: u32 = 120;
 
 /// What `link` opens, in the terms the user sees: the meter with its
@@ -376,17 +388,21 @@ pub const DEFAULT_BPM: u32 = 120;
 /// (groups start on eighths 1, 3, 6) at 120 BPM (quarter notes), click bar
 /// >e e e >e e >e e (strong on eighths 1, 4, 6; medium on 2, 3, 5, 7)".
 pub fn describe(link: &SharedLink) -> String {
-    let ts = match &link.content {
-        Some(LinkContent::Metronome(ts)) => *ts,
+    let ts = link
+        .content
+        .as_ref()
+        .and_then(LinkContent::first_time_signature)
+        .unwrap_or(TimeSignature::FOUR_FOUR);
+    let mut text = match &link.content {
         Some(LinkContent::Score(score)) => {
-            return format!("a rhythm of {} bar(s)", score.len());
+            format!("a rhythm of {} bar(s) starting in ", score.len())
         }
-        Some(LinkContent::Generator { .. }) => return "a generated rhythm".to_owned(),
-        None => TimeSignature::FOUR_FOUR,
+        Some(LinkContent::Generator { .. }) => "a generated rhythm in ".to_owned(),
+        _ => String::new(),
     };
     let unit = unit_name(ts.beat_unit);
     let groups = ts.groups();
-    let mut text = format!("{}/{}", ts.beats, ts.beat_unit);
+    let _ = write!(text, "{}/{}", ts.beats, ts.beat_unit);
     // Beats grouped as in 6/8 or 7/8; x/4 meters count single beats.
     if groups.len() > 1 && groups.iter().any(|&g| g > 1) {
         let starts: Vec<String> = groups
@@ -928,6 +944,12 @@ mod tests {
         // The grouping in front of the meter was the old way; it points to groups.
         let err = parse_query("ts=2%2B2%2B3/8").unwrap_err();
         assert!(err.ends_with("ts=7/8&groups=2+2+3"), "{err}");
+        // Typed by hand, the `+` arrives as a space.
+        assert!(parse_query("ts=2+2+3/8").unwrap_err().ends_with("ts=7/8&groups=2+2+3"));
+        // Numbers too large or not numbers are malformed, not a sum.
+        let err = parse_query("ts=4000000000%2B4000000000/8").unwrap_err();
+        assert!(err.contains("expected beats/unit"), "{err}");
+        assert!(parse_query("ts=2%2Babc/8").unwrap_err().contains("expected beats/unit"));
         assert!(parse_query("groups=3%2B2%2B2").unwrap_err().contains("needs a time signature"));
         let err = parse_query("ts=7/8&groups=3%2B3%2B2").unwrap_err();
         assert_eq!(err, "groups 3+3+2 add up to 8 beats, but 7/8 has 7");

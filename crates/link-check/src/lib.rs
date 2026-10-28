@@ -4,7 +4,7 @@
 //!
 //! Built for `wasm32-unknown-unknown` (see Trunk.toml, which writes it to
 //! `embed/link-check.wasm`) and loaded by `mcp/link-check.js`. The interface
-//! is three plain exports and no imports, so neither wasm-bindgen nor its
+//! is four plain exports and no imports, so neither wasm-bindgen nor its
 //! glue is needed: the host asks for a [`buffer`] of the query's length,
 //! writes the query into it, calls [`check`], and reads the [`message`] it
 //! returns the length of: why the link does not open, or, if [`opened`],
@@ -138,6 +138,14 @@ mod tests {
         assert!(
             grouped.ends_with("(strong on eighths 1; medium on 4, 6; soft on 2, 3, 5, 7)"),
             "{grouped}"
+        );
+        // A rhythm is described by its first meter too.
+        let score = open_query("v=2&bpm=80&ts=3/4&r=q+q+q+|+q+q+q").unwrap();
+        assert!(
+            score.starts_with(
+                "a rhythm of 2 bar(s) starting in 3/4 at 80 BPM (quarter notes), click bar"
+            ),
+            "{score}"
         );
         let plain = open_query("v=2&ts=4/4&bpm=90&poly=3:2&swing=66").unwrap();
         assert_eq!(

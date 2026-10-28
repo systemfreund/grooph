@@ -366,7 +366,8 @@ impl Grooph {
         // the meter's grouping, where the clicks fall, the polyrhythm, swing.
         let mut text = format!("Metronome: {}", grooph_link::describe(&self.shared_link()));
         let mut fields = vec![
-            ("ts", Field::Text(ts.to_string())),
+            // The meter alone, as the tool's ts; the grouping is groups.
+            ("ts", Field::Text(format!("{}/{}", ts.beats, ts.beat_unit))),
             ("bpm", Field::Number(bpm.into())),
             ("click", Field::Text(click)),
             ("subdivision", Field::Text(subdivision)),
@@ -557,6 +558,20 @@ mod tests {
         assert!(context.fields.contains(&("click", Field::Text(">q r:q. (q)".into()))));
         assert!(context.fields.contains(&("playing", Field::Bool(false))));
         assert!(app.ui.link_error.is_none());
+    }
+
+    #[test]
+    fn the_model_hears_the_grouping_as_the_tools_arguments() {
+        // ts is the meter alone, as the tool takes it; the grouping is groups.
+        let (_, app) = embedded_app("?v=2&ts=7/8&groups=3%2B2%2B2&embed=mcp");
+        let context = app.model_context();
+        assert!(
+            context.fields.contains(&("ts", Field::Text("7/8".into()))),
+            "{:?}",
+            context.fields
+        );
+        assert!(context.fields.contains(&("groups", Field::Text("3+2+2".into()))));
+        assert!(context.text.starts_with("Metronome: 7/8 grouped 3+2+2"), "{}", context.text);
     }
 
     #[test]

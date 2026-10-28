@@ -157,7 +157,7 @@ impl Default for PersistedState {
             version: PERSISTED_STATE_VERSION,
             score: Score::single(Grooph::default_measure()),
             cursor: Cursor::start(),
-            bpm: 120,
+            bpm: grooph_link::DEFAULT_BPM,
             audio_settings: AudioSettings::default(),
             audio_latency_enabled: true,
             audio_offset: 0.0,
