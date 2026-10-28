@@ -40,9 +40,16 @@
           {
             "name": "ts",
             "in": "query",
-            "description": "Time signature: 1-7 beats over 4, 3-13 over 8, 5-19 over 16. Meters of 5, 7, 8, 10 or 11 eighths or sixteenths may name another grouping than the usual one, e.g. `2+2+3/8`. With `r` it is the default meter; on its own it opens a one-measure metronome.",
+            "description": "Time signature: 1-7 beats over 4, 3-13 over 8, 5-19 over 16. With `r` it is the default meter; on its own it opens a one-measure metronome.",
             "schema": { "type": "string", "pattern": "^[0-9]{1,2}/(4|8|16)$" },
             "example": "7/8"
+          },
+          {
+            "name": "groups",
+            "in": "query",
+            "description": "Beat grouping of `ts`, e.g. `3+2+2` for 7/8 (usual 2+3+2). Meters of 5, 7, 8, 10 or 11 eighths or sixteenths offer other groupings than the usual one; other meters take only their usual one. Needs `ts`.",
+            "schema": { "type": "string", "pattern": "^[0-9]+(\\+[0-9]+)+$" },
+            "example": "3+2+2"
           },
           {
             "name": "sub",
