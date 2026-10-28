@@ -16,4 +16,4 @@ command_arguments = ["run", "--quiet", "--package", "grooph-site"]
 [[hooks]]
 stage = "post_build"
 command = "sh"
-command_arguments = ["-c", "cargo build --quiet --release --target wasm32-unknown-unknown --package grooph-link-check && mkdir -p \"$TRUNK_STAGING_DIR/embed\" && cp target/wasm32-unknown-unknown/release/grooph_link_check.wasm \"$TRUNK_STAGING_DIR/embed/link-check.wasm\""]
+command_arguments = ["-c", "cargo build --quiet --release --target wasm32-unknown-unknown --package grooph-link-check && mkdir -p \"$TRUNK_STAGING_DIR/embed\" && cp \"${CARGO_TARGET_DIR:-target}/wasm32-unknown-unknown/release/grooph_link_check.wasm\" \"$TRUNK_STAGING_DIR/embed/link-check.wasm\""]

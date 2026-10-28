@@ -6,7 +6,7 @@
 // and runs it in a sandboxed iframe, which loads the web build of this same
 // deployment, so a preview serves its own build.
 
-import { argumentError, metronomeQuery } from "./link.js";
+import { MAX_LENGTH, argumentError, metronomeQuery } from "./link.js";
 import { viewHtml } from "./view.js";
 
 export const RESOURCE_URI = "ui://grooph/metronome.html";
@@ -35,9 +35,9 @@ click replaces the main click: one bar of the meter in grooph's rhythm notation,
     type: "object",
     properties: {
       bpm: { type: "integer", minimum: 20, maximum: 300, description: "Tempo in quarter notes per minute. Default 120." },
-      ts: { type: "string", description: "Time signature: 1-17 beats over 4, 8 or 16, e.g. 4/4, 7/8 or 2+2+3/8. Default 4/4." },
-      click: { type: "string", description: "The click bar in rhythm notation without the time signature, e.g. \">q r:q. (q)\" in 7/8." },
-      poly: { type: "string", pattern: "^\\s*[0-9]+\\s*:\\s*[0-9]+\\s*$", description: "Polyrhythm n:m against the click, e.g. \"3:2\" for three against two in 4/4." },
+      ts: { type: "string", maxLength: MAX_LENGTH.ts, description: "Time signature: 1-17 beats over 4, 8 or 16, e.g. 4/4, 7/8 or 2+2+3/8. Default 4/4." },
+      click: { type: "string", maxLength: MAX_LENGTH.click, description: "The click bar in rhythm notation without the time signature, e.g. \">q r:q. (q)\" in 7/8." },
+      poly: { type: "string", maxLength: MAX_LENGTH.poly, pattern: "^\\s*[0-9]+\\s*:\\s*[0-9]+\\s*$", description: "Polyrhythm n:m against the click, e.g. \"3:2\" for three against two in 4/4." },
       swing: { type: "integer", minimum: 50, maximum: 75, description: "Swing in percent: 50 is straight, 66 a triplet feel, 75 dotted." },
       su: { type: "integer", enum: [8, 16], description: "Note value that swings: 8 (default) or 16. Needs swing." },
     },

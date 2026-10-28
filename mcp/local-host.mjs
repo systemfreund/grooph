@@ -56,8 +56,10 @@ function staticFile(pathname) {
 }
 
 // The link check the build writes next to the app (Trunk.toml), as the
-// Pages Function imports it.
-const checkLink = linkChecker(fs.readFileSync(path.join(dist, "embed/link-check.wasm")));
+// Pages Function imports it; only needed when this serves the function.
+const checkLink = process.env.GROOPH_ORIGIN
+  ? null
+  : linkChecker(fs.readFileSync(path.join(dist, "embed/link-check.wasm")));
 const env = { ASSETS: { fetch: async (request) => staticFile(new URL(request.url).pathname) } };
 
 async function readBody(req) {

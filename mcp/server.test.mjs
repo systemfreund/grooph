@@ -1,7 +1,7 @@
 // Tests of the MCP server without Cloudflare: node --test mcp/server.test.mjs
 // They need the link check's module, built with
 //   cargo build --release --target wasm32-unknown-unknown -p grooph-link-check
-// (or LINK_CHECK_WASM pointing at it).
+// (CARGO_TARGET_DIR is honored, or LINK_CHECK_WASM points at the module).
 
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -15,8 +15,9 @@ import { RESOURCE_MIME, RESOURCE_URI, handleRequest, showMetronome } from "./ser
 const ORIGIN = "https://feature-x.grooph.pages.dev";
 const here = path.dirname(fileURLToPath(import.meta.url));
 
+const targetDir = process.env.CARGO_TARGET_DIR || path.join(here, "../target");
 const wasmPath =
-  process.env.LINK_CHECK_WASM || path.join(here, "../target/wasm32-unknown-unknown/release/grooph_link_check.wasm");
+  process.env.LINK_CHECK_WASM || path.join(targetDir, "wasm32-unknown-unknown/release/grooph_link_check.wasm");
 assert.ok(fs.existsSync(wasmPath), `build the link check first: ${wasmPath} is missing (see the top of this file)`);
 const checkLink = linkChecker(fs.readFileSync(wasmPath));
 
@@ -75,7 +76,7 @@ test("tools/call returns the link of this deployment", async () => {
 });
 
 test("tools/call reports wrong numbers to the model", async () => {
-  for (const args of [{ bpm: 500 }, { swing: 90 }, { su: 16 }, { swing: 60, su: 4 }, { ts: "seven" }, { poly: "three" }, { poly: "2:4" }, { poly: "17:4" }, { tempo: 90 }]) {
+  for (const args of [{ bpm: 500 }, { swing: 90 }, { su: 16 }, { swing: 60, su: 4 }, { ts: "seven" }, { poly: "three" }, { poly: "2:4" }, { poly: "17:4" }, { tempo: 90 }, { ts: "4/4", click: "q ".repeat(600) }, { poly: " ".repeat(20) + "3:2" }]) {
     const { result } = await rpc("tools/call", { name: "show_metronome", arguments: args });
     assert.equal(result.isError, true, JSON.stringify(args));
   }
