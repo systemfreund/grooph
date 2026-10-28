@@ -41,7 +41,11 @@ export const TOOL = {
       ts: {
         type: "string",
         maxLength: MAX_LENGTH.ts,
-        description: "Time signature: 1-17 beats over 4, 8 or 16, e.g. 4/4, 7/8 or 2+2+3/8. Default 4/4.",
+        description:
+          "Time signature: 1-7 beats over 4, 3-13 over 8 or 5-19 over 16, e.g. 4/4 or 7/8. Default 4/4. Meters of 5, 7, " +
+          "8, 10 or 11 eighths or sixteenths take a grouping other than the usual one in front: 2+2+3/8 or 3+2+2/8 " +
+          "for 7/8 (usual 2+3+2), 2+3/8 for 5/8, 3+2+3/8 or 2+3+3/8 for 8/8, 2+2+3+3/8 and others for 10/8, " +
+          "2+2+3+2+2/8 or 2+3+3+3/8 for 11/8.",
       },
       click: {
         type: "string",

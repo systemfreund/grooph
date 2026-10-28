@@ -147,6 +147,24 @@ test("the tool does not answer without its link check", () => {
   assert.ok(!showMetronome({ ts: "4/4" }, ORIGIN, checkLink).isError);
 });
 
+test("the ts description matches the meters the app takes", async () => {
+  const { result } = await rpc("tools/list", {});
+  const text = result.tools[0].inputSchema.properties.ts.description;
+  // Every meter it names opens, groupings included.
+  for (const ts of text.match(/\b\d+(?:\+\d+)*\/\d+\b/g)) {
+    assert.equal(checkLink(metronomeQuery({ ts })), null, ts);
+  }
+  // Each range's ends open, one beat past them does not.
+  const ranges = [...text.matchAll(/(\d+)-(\d+) (?:beats )?over (\d+)/g)];
+  assert.equal(ranges.length, 3, text);
+  for (const [, low, high, unit] of ranges) {
+    for (const beats of [low, high]) assert.equal(checkLink(`v=2&ts=${beats}/${unit}`), null, `${beats}/${unit}`);
+    for (const beats of [Number(low) - 1, Number(high) + 1]) {
+      if (beats > 0) assert.notEqual(checkLink(`v=2&ts=${beats}/${unit}`), null, `${beats}/${unit}`);
+    }
+  }
+});
+
 test("every link case opens in the app", () => {
   const cases = JSON.parse(fs.readFileSync(path.join(here, "link-cases.json"), "utf8"));
   for (const { query } of cases) assert.equal(checkLink(query), null, query);
