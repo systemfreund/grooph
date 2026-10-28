@@ -64,9 +64,10 @@ export const TOOL = {
           "Subdivision of the click, as the app's subdivision picker sets it: every beat unit split into clicks of " +
           "one note value, strong on 1, medium on each beat group's start, soft between. The value is the note's " +
           "code: in x/4 e (eighths), t8 (eighth triplets), s (sixteenths), qt16 (quintuplets), st16 (sextuplets), " +
-          "spt16 (septuplets), th (thirty-seconds); in x/8 e (eighths, the default), s (sixteenths), t16 (sixteenth " +
-          "triplets), th (thirty-seconds); in x/16 s (the default), th, t32. none is one click per beat group. Not " +
-          "together with click.",
+          "spt16 (septuplets), th (thirty-seconds), 9:8th (nine thirty-seconds); in x/8 e (eighths, the default), s " +
+          "(sixteenths), t16 (sixteenth triplets), th (thirty-seconds), 5:4th, 6:4th, 7:4th (five, six, seven " +
+          "thirty-seconds per eighth); in x/16 s (sixteenths, the default), th (thirty-seconds), t32 (thirty-second " +
+          "triplets). none is one click per beat group. Not together with click.",
       },
       click: {
         type: "string",

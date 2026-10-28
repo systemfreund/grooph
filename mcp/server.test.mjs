@@ -170,9 +170,15 @@ test("the subdivision description names what each meter takes", async () => {
   const text = result.tools[0].inputSchema.properties.subdivision.description;
   const named = [];
   for (const [, unit, list] of text.matchAll(/in x\/(\d+) ([^;.]+)/g)) {
-    for (const [, code] of list.matchAll(/(?:^|, )([a-z0-9:]+)(?= \(|,|$)/g)) named.push([code, unit]);
+    // The codes, without the names in parentheses.
+    for (const code of list.replace(/\([^)]*\)/g, "").split(",")) named.push([code.trim(), unit]);
   }
-  assert.ok(named.length >= 12, JSON.stringify(named));
+  // Every code the meter offers is named, and nothing else.
+  for (const [ts, unit] of [["4/4", "4"], ["7/8", "8"], ["7/16", "16"]]) {
+    const offered = checkLink(metronomeQuery({ ts, subdivision: "x" })).problem.split("it takes ")[1].split(", ");
+    const listed = ["none", ...named.filter(([, u]) => u === unit).map(([code]) => code)];
+    assert.deepEqual(listed.sort(), offered.sort(), ts);
+  }
   for (const [code, unit] of named) {
     const query = metronomeQuery({ ts: `${unit === "16" ? 7 : 4}/${unit}`, subdivision: code });
     assert.equal(checkLink(query).problem, null, `${code} in x/${unit}`);

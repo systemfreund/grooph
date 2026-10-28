@@ -17,6 +17,8 @@ use crate::grid::{DEFAULT_GRID, NOTE_VALUES};
 use crate::notation::{code_of, parse_score};
 use crate::{Beat, BeatIdx, Measure, TimeSignature};
 use serde::{Deserialize, Serialize};
+use std::cell::RefCell;
+use std::rc::Rc;
 
 /// How loud one click sounds.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -167,8 +169,23 @@ pub struct Subdivision {
 /// The subdivision picker's options for `ts`: one click per beat group
 /// ([`default_click_bar`]), then each beat unit split into 1 to 9 clicks
 /// where the meter allows ([`subdivided_click_bar`]). Bars alike are
-/// offered once, under the first name.
-pub fn subdivisions(ts: TimeSignature) -> Vec<Subdivision> {
+/// offered once, under the first name. Kept per meter once built: the
+/// embedded app asks every frame, and building the bars takes milliseconds.
+pub fn subdivisions(ts: TimeSignature) -> Rc<[Subdivision]> {
+    thread_local! {
+        static OPTIONS: RefCell<Vec<(TimeSignature, Rc<[Subdivision]>)>> = const { RefCell::new(Vec::new()) };
+    }
+    OPTIONS.with_borrow_mut(|cache| {
+        if let Some((_, options)) = cache.iter().find(|(t, _)| *t == ts) {
+            return Rc::clone(options);
+        }
+        let options: Rc<[Subdivision]> = build_subdivisions(ts).into();
+        cache.push((ts, Rc::clone(&options)));
+        options
+    })
+}
+
+fn build_subdivisions(ts: TimeSignature) -> Vec<Subdivision> {
     let mut options = vec![Subdivision {
         code: "none".to_owned(),
         name: "No subdivision".to_owned(),
@@ -190,7 +207,7 @@ pub fn subdivisions(ts: TimeSignature) -> Vec<Subdivision> {
 
 /// The subdivision `bar` is, if the picker offers it in its meter.
 pub fn subdivision_of(bar: &Measure) -> Option<Subdivision> {
-    subdivisions(bar.time_signature()).into_iter().find(|o| same_bar(&o.bar, bar))
+    subdivisions(bar.time_signature()).iter().find(|o| same_bar(&o.bar, bar)).cloned()
 }
 
 /// "Sixteenths", "Eighth triplets", "Quintuplets": clicks of duration `d`.

@@ -240,8 +240,12 @@ pub(crate) fn click_fills(ts: TimeSignature) -> Rc<[ClickFill]> {
 
 fn build_click_fills(ts: TimeSignature) -> Vec<ClickFill> {
     subdivisions(ts)
-        .into_iter()
-        .map(|o| ClickFill { subdivides: o.code != "none", name: o.name, bar: o.bar })
+        .iter()
+        .map(|o| ClickFill {
+            subdivides: o.code != "none",
+            name: o.name.clone(),
+            bar: o.bar.clone(),
+        })
         .collect()
 }
 

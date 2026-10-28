@@ -476,7 +476,7 @@ pub fn describe(link: &SharedLink) -> String {
             if !levels.is_empty() {
                 let _ = write!(text, " ({levels})");
             }
-            let codes: Vec<String> = subdivisions(ts).into_iter().map(|o| o.code).collect();
+            let codes: Vec<String> = subdivisions(ts).iter().map(|o| o.code.clone()).collect();
             let _ = write!(text, "; the subdivision picker offers {}", codes.join(", "));
         }
     }
@@ -838,6 +838,15 @@ mod tests {
             parse_query("ts=4/4&subdivision=s&click=q+q+q+q").unwrap_err().contains("not both")
         );
         assert!(parse_query("subdivision=s").unwrap_err().contains("needs a rhythm"));
+        // With a rhythm, the subdivision is that of its first meter.
+        let rhythm = parse("v=2&r=7/16+q+e.+|+4/4+q+q+q+q&subdivision=th");
+        let bar = rhythm.click.as_ref().unwrap();
+        assert_eq!(bar.time_signature().to_string(), "7/16");
+        assert_eq!(subdivision_of(bar).unwrap().code, "th");
+        assert_eq!(
+            parse_query("v=2&r=7/16+q+e.&subdivision=e").unwrap_err(),
+            "subdivision e does not fit 7/16: it takes none, s, th, t32"
+        );
     }
 
     #[test]
