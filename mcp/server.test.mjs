@@ -60,7 +60,7 @@ test("tools/list has show_metronome with its view", async () => {
   const tool = result.tools.find((t) => t.name === "show_metronome");
   assert.ok(tool);
   assert.equal(tool._meta.ui.resourceUri, RESOURCE_URI);
-  assert.deepEqual(Object.keys(tool.inputSchema.properties).sort(), ["bpm", "click", "groups", "poly", "su", "swing", "ts"]);
+  assert.deepEqual(Object.keys(tool.inputSchema.properties).sort(), ["bpm", "click", "groups", "poly", "su", "subdivision", "swing", "ts"]);
   // Describes, points nowhere else, stays short; the details are the parameters'.
   assert.doesNotMatch(tool.description, /llms\.txt|https?:\/\//);
   assert.ok(tool.description.length < 500, tool.description.length);
@@ -146,6 +146,38 @@ test("the result says what the metronome shows", async () => {
   const accents = await call({ ts: "7/8", click: ">e e e >e e >e e" });
   assert.match(accents.structuredContent.shown, /grouped 2\+3\+2/);
   assert.match(accents.structuredContent.shown, /strong on eighths 1, 4, 6/);
+});
+
+test("a subdivision is the picker's bar, named in the result", async () => {
+  const call = async (args) => (await rpc("tools/call", { name: "show_metronome", arguments: args })).result;
+  const sixteenths = await call({ ts: "7/8", groups: "3+2+2", bpm: 140, subdivision: "s" });
+  assert.ok(!sixteenths.isError, sixteenths.content[0].text);
+  assert.ok(sixteenths.structuredContent.link.endsWith("&subdivision=s"), sixteenths.structuredContent.link);
+  assert.match(sixteenths.structuredContent.shown, /subdivision sixteenths \(subdivision=s\): click bar >s \(s\) \(s\)/);
+  // Written out by hand, the bar is one of its own, and the result says what the picker offers.
+  const byHand = await call({ ts: "7/8", groups: "3+2+2", click: ">s s s s s s >s s s s >s s s s" });
+  assert.match(byHand.structuredContent.shown, /a click bar of its own .*; the subdivision picker offers none, e, s, t16/);
+  const both = await call({ ts: "4/4", subdivision: "s", click: "q q q q" });
+  assert.equal(both.isError, true);
+  assert.match(both.content[0].text, /either subdivision or click/);
+  const wrong = await call({ ts: "7/16", subdivision: "e" });
+  assert.equal(wrong.isError, true);
+  assert.match(wrong.content[0].text, /subdivision e does not fit 7\/16: it takes none, s, th, t32/);
+});
+
+test("the subdivision description names what each meter takes", async () => {
+  const { result } = await rpc("tools/list", {});
+  const text = result.tools[0].inputSchema.properties.subdivision.description;
+  const named = [];
+  for (const [, unit, list] of text.matchAll(/in x\/(\d+) ([^;.]+)/g)) {
+    for (const [, code] of list.matchAll(/(?:^|, )([a-z0-9:]+)(?= \(|,|$)/g)) named.push([code, unit]);
+  }
+  assert.ok(named.length >= 12, JSON.stringify(named));
+  for (const [code, unit] of named) {
+    const query = metronomeQuery({ ts: `${unit === "16" ? 7 : 4}/${unit}`, subdivision: code });
+    assert.equal(checkLink(query).problem, null, `${code} in x/${unit}`);
+  }
+  for (const ts of ["4/4", "7/8", "7/16"]) assert.equal(checkLink(metronomeQuery({ ts, subdivision: "none" })).problem, null, ts);
 });
 
 test("groups are checked against ts", async () => {

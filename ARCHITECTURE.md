@@ -144,8 +144,9 @@ grooph's metronome runs inside AI chats as an
   the web build: `https://grooph.app/mcp`, and each preview its own. The
   logic is in `mcp/server.js`: a stateless MCP server (Streamable HTTP, JSON
   answers, CORS) with one tool, `show_metronome`, whose arguments are the
-  metronome's link parameters (`bpm`, `ts`, `click`, `poly`, `swing`,
-  `su`, `groups`). `mcp/link.js`
+  metronome's link parameters (`bpm`, `ts`, `groups`, `subdivision`,
+  `click`, `poly`, `swing`, `su`): the app's own controls, with `click` only
+  for bars the subdivision picker does not offer. `mcp/link.js`
   builds the same query as `SharedLink::to_url`, checked by both test suites
   against `mcp/link-cases.json`. Its result carries the link, for hosts
   without views, and what the metronome shows (`grooph_link::describe`:
@@ -353,7 +354,9 @@ grooph's metronome runs inside AI chats as an
   click; tuplets and dotted notes work as in any rhythm. The default bar
   (`default_click_bar`) has one note per beat group, as long as the group,
   the first accented; `subdivided_click_bar` splits every beat unit into 1 to
-  4 clicks (group starts keep their level, the rest are soft). `ClickBars`
+  9 clicks (group starts keep their level, the rest are soft). `subdivisions`
+  lists the subdivision picker's options (`none` for the default bar, then
+  each split by its notes' code: `e`, `s`, `t16`, …). `ClickBars`
   (in `AudioConfig`, persisted) keeps the bars that differ from the default,
   keyed by the whole `TimeSignature` including its grouping, and applies to
   all playback in that meter. `Schedule::build` plays strong as `Downbeat`,
@@ -361,7 +364,9 @@ grooph's metronome runs inside AI chats as an
   position of each note. The count-in and calibration
   ignore the click bars. Link parameter `click` is the click bar of the
   link's first meter in text notation without the time signature (e.g.
-  `>q r:q. (q)`); shared links carry it when it is not the default.
+  `>q r:q. (q)`); shared links carry it when it is not the default, and
+  write a picker option as `subdivision=<code>` instead (`subdivision_of`);
+  a link takes one of the two.
 
 ## Metronome trainer
 
