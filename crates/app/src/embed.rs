@@ -8,7 +8,6 @@
 //! shows no tabs, menus or library, and leaves out the update check, the
 //! wake lock, MIDI, the microphone and calibration.
 
-use crate::metronome_view::ratio_label;
 use crate::pickers::silent_bars_label;
 use crate::{Grooph, TransportState, platform};
 use eframe::egui::{
@@ -363,37 +362,34 @@ impl Grooph {
         let cfg = &self.playback_ctl.audio_cfg;
         let click = format_bar(&self.click_bar()).unwrap_or_default();
         let subdivision = self.click_fill_label();
-        let mut text = format!(
-            "Metronome: {ts} at {bpm} BPM (quarter notes), click bar {click} ({subdivision})"
-        );
+        // The same description as the tool's result (grooph_link::describe):
+        // the meter's grouping, where the clicks fall, the polyrhythm, swing.
+        // Built once: the description and the link come from the same value.
+        let shared = self.shared_link();
+        let mut text = format!("Metronome: {}", grooph_link::describe(&shared));
         let mut fields = vec![
-            ("ts", Field::Text(ts.to_string())),
+            // The meter alone, as the tool's ts; the grouping is groups.
+            ("ts", Field::Text(format!("{}/{}", ts.beats, ts.beat_unit))),
             ("bpm", Field::Number(bpm.into())),
             ("click", Field::Text(click)),
             ("subdivision", Field::Text(subdivision)),
         ];
-        if let Some(bar) = self.counter_bar() {
-            // A ratio's own clicks are the ratio; edited ones are written out.
-            match self.counter_ratio() {
-                Some((ratio, false)) => {
-                    text += &format!(", polyrhythm {ratio}");
-                    fields.push(("poly", Field::Text(ratio.to_string())));
-                }
-                ratio => {
-                    let name = ratio.map_or_else(|| "custom".to_owned(), ratio_label);
-                    let counter = format_bar(bar).unwrap_or_default();
-                    text += &format!(", polyrhythm {name} (counter clicks {counter})");
-                    // The fields use the tool's arguments only: the ratio as
-                    // `poly`; the edited clicks are in the text and the link.
-                    if let Some((ratio, _)) = ratio {
-                        fields.push(("poly", Field::Text(ratio.to_string())));
-                    }
+        if ts.shows_grouping() {
+            fields.push(("groups", Field::Text(ts.groups_label())));
+        }
+        if self.counter_bar().is_some() {
+            // The fields use the tool's arguments only: the ratio as `poly`;
+            // edited clicks are in the text and the link.
+            if let Some((ratio, edited)) = self.counter_ratio() {
+                fields.push(("poly", Field::Text(ratio.to_string())));
+                if edited {
                     fields.push(("polyEdited", Field::Bool(true)));
                 }
+            } else {
+                fields.push(("polyEdited", Field::Bool(true)));
             }
         }
         if !cfg.swing.is_straight() {
-            text += &format!(", swing {}% {}", cfg.swing.percent, cfg.swing.unit.label());
             fields.push(("swing", Field::Number(cfg.swing.percent.into())));
             let su = match cfg.swing.unit {
                 SwingUnit::Eighths => 8,
@@ -412,7 +408,7 @@ impl Grooph {
         }
         text += if playing { ", playing." } else { ", stopped." };
         fields.push(("playing", Field::Bool(playing)));
-        if let Some(link) = self.share_link_url() {
+        if let Some(link) = shared.to_url(&platform::share_base_url()) {
             text += &format!(" Link: {link}");
             fields.push(("link", Field::Text(link)));
         }
@@ -556,11 +552,27 @@ mod tests {
         assert_eq!(app.metronome_meter().to_string(), "7/8");
         assert_eq!(ctx.options(|o| o.theme_preference), Theme::Dark.into());
         let context = app.model_context();
-        assert!(context.text.starts_with("Metronome: 7/8 at 140 BPM"), "{}", context.text);
+        assert!(context.text.starts_with("Metronome: 7/8 grouped 2+3+2"), "{}", context.text);
+        assert!(context.text.contains("at 140 BPM"), "{}", context.text);
+        assert!(context.text.contains("(strong on eighths 1; soft on 6)"), "{}", context.text);
         assert!(context.fields.contains(&("bpm", Field::Number(140.0))));
         assert!(context.fields.contains(&("click", Field::Text(">q r:q. (q)".into()))));
         assert!(context.fields.contains(&("playing", Field::Bool(false))));
         assert!(app.ui.link_error.is_none());
+    }
+
+    #[test]
+    fn the_model_hears_the_grouping_as_the_tools_arguments() {
+        // ts is the meter alone, as the tool takes it; the grouping is groups.
+        let (_, app) = embedded_app("?v=2&ts=7/8&groups=3%2B2%2B2&embed=mcp");
+        let context = app.model_context();
+        assert!(
+            context.fields.contains(&("ts", Field::Text("7/8".into()))),
+            "{:?}",
+            context.fields
+        );
+        assert!(context.fields.contains(&("groups", Field::Text("3+2+2".into()))));
+        assert!(context.text.starts_with("Metronome: 7/8 grouped 3+2+2"), "{}", context.text);
     }
 
     #[test]
@@ -590,7 +602,11 @@ mod tests {
         // Edited ones are written out.
         let (_, app) = embedded_app("?v=2&ts=4/4&counter=t4+(t4)+t4+t4+t4+t4&embed=mcp");
         let context = app.model_context();
-        assert!(context.text.contains("polyrhythm 3:2 edited (counter clicks t4 (t4) t4"));
+        assert!(
+            context.text.contains("polyrhythm 3:2 with edited clicks t4 (t4) t4"),
+            "{}",
+            context.text
+        );
         assert!(context.fields.contains(&("poly", Field::Text("3:2".into()))));
     }
 
@@ -707,7 +723,7 @@ mod tests {
             [(320.0, 520.0), (360.0, 520.0), (720.0, 520.0), (360.0, 400.0), (320.0, 360.0)];
         // The whole metronome, and the compact card where fullscreen is offered.
         for ((width, height), compact) in sizes.into_iter().flat_map(|s| [(s, false), (s, true)]) {
-            let (ctx, mut app) = embedded_app("?v=2&bpm=90&ts=2+2+3/8&poly=3:7&embed=mcp");
+            let (ctx, mut app) = embedded_app("?v=2&bpm=90&ts=7/8&groups=2+2+3&poly=3:7&embed=mcp");
             app.ui.embed.as_mut().unwrap().fullscreen_offered = compact;
             assert_eq!(app.compact_card(), compact);
             let screen = Rect::from_min_size(Pos2::ZERO, vec2(width, height));

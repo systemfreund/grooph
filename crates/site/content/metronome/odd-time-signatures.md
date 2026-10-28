@@ -1,7 +1,7 @@
 ---
 title: Metronome for Odd Time Signatures
 heading: A metronome for odd time signatures like 5/4, 7/8 and 11/8
-description: Practice 5/4, 5/8, 7/8, 9/8 and other odd meters with a free online metronome. Learn the common groupings and hear them with accents.
+description: Practice 5/4, 5/8, 7/8, 9/8 and other odd meters with a free online metronome. Learn the common groupings and hear them clicked.
 section: Metronome
 order: 2
 ---
@@ -42,20 +42,32 @@ completely.
 | 9/8 | 3+3+3 (compound), 2+2+2+3 |
 | 11/8 | 3+3+3+2, 2+2+3+2+2 |
 
-grooph draws 5/8 as 3+2 and 7/8 as 2+3+2 by default. To practice another grouping, put
-accents on the first note of each group. The click for an accented note is higher, so you
-hear the grouping:
+grooph draws 5/8 as 3+2 and 7/8 as 2+3+2 by default. To practice another grouping, pick it
+next to the meter in the time signature dialog: the beams, the beat ring, the click and the
+counting then follow the groups, and the first note of each group clicks a little louder.
+In a link the grouping is its own parameter, `ts=7/8&groups=2+2+3`:
+
+```open | 7/8 grouped 2+2+3 at 90 BPM
+bpm=90&ts=7/8&groups=2%2B2%2B3
+```
+
+```open | 7/8 grouped 3+2+2 at 90 BPM
+bpm=90&ts=7/8&groups=3%2B2%2B2
+```
+
+```open | 5/8 grouped 2+3 at 80 BPM
+bpm=80&ts=5/8&groups=2%2B3
+```
+
+In a written rhythm the grouping comes in front of the meter, and accents make the groups
+stand out even more:
 
 ```rhythm bpm=90 | 7/8 grouped 2+2+3
-7/8 >e e >e e >e e e
+2+2+3/8 >e e >e e >e e e
 ```
 
 ```rhythm bpm=90 | 7/8 grouped 3+2+2
-7/8 >e e e >e e >e e
-```
-
-```rhythm bpm=80 | 5/8 grouped 2+3
-5/8 >e e >e e e
+3+2+2/8 >e e e >e e >e e
 ```
 
 ## 5/4 in quarter notes

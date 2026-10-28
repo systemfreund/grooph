@@ -39,6 +39,15 @@ impl Grooph {
     /// and swing, with the click bar of its first meter if that is not the
     /// default.
     pub(crate) fn share_link_url(&self) -> Option<String> {
+        let url = self.shared_link().to_url(&platform::share_base_url());
+        if url.is_none() {
+            warn!("The score cannot be written as a link");
+        }
+        url
+    }
+
+    /// What [`Self::share_link_url`] links to.
+    pub(crate) fn shared_link(&self) -> SharedLink {
         let swing = self.playback_ctl.audio_cfg.swing;
         let click = &self.playback_ctl.audio_cfg.click;
         let (content, meter) = if self.metronome_mode() {
@@ -48,7 +57,7 @@ impl Grooph {
             let meter = score.measures.first().map(|m| m.time_signature());
             (LinkContent::Score(score.clone()), meter)
         };
-        let link = SharedLink {
+        SharedLink {
             bpm: Some(self.playback_ctl.bpm),
             swing: (!swing.is_straight()).then_some(swing),
             content: Some(content),
@@ -56,12 +65,7 @@ impl Grooph {
             counter: self.metronome_mode().then(|| self.counter_bar().cloned()).flatten(),
             // Written as `poly` while its clicks are the ratio's.
             poly: self.metronome_mode().then(|| self.counter_ratio().map(|(r, _)| r)).flatten(),
-        };
-        let url = link.to_url(&platform::share_base_url());
-        if url.is_none() {
-            warn!("The score cannot be written as a link");
         }
-        url
     }
 
     /// Open the share sheet with a link to the score, or copy the link where

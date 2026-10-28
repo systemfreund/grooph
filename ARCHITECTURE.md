@@ -116,8 +116,9 @@ spread across callers.
   bar line, a leading `N/D` sets the time signature. Parsing goes through
   `set_beat`; each measure must be filled exactly, errors name the measure
   and token. Formatting returns `None` for durations without a code.
-- `grooph_link` (`crates/link`): query parameters `bpm`, `r`, `ts`, `swing`,
-  `su` and the generator's `sub`, `lvl`, `bars`, `space`, `seed` (seeded
+- `grooph_link` (`crates/link`): query parameters `bpm`, `r`, `ts`,
+  `groups` (the grouping of `ts`, `ts=7/8&groups=3+2+2`; `ts` takes no
+  grouping of its own), `swing`, `su` and the generator's `sub`, `lvl`, `bars`, `space`, `seed` (seeded
   `Rng`, so a link reproduces the same exercise). `parse_query` reads them,
   `SharedLink::to_url` writes them. The app reads the link once at startup
   (`Grooph::open_link_from_url`), then removes it from the address bar. A
@@ -144,14 +145,18 @@ grooph's metronome runs inside AI chats as an
   logic is in `mcp/server.js`: a stateless MCP server (Streamable HTTP, JSON
   answers, CORS) with one tool, `show_metronome`, whose arguments are the
   metronome's link parameters (`bpm`, `ts`, `click`, `poly`, `swing`,
-  `su`; `mcp/link.js` builds the same query as `SharedLink::to_url`, checked
-  by both test suites against `mcp/link-cases.json`). Its result carries
-  the link, for hosts without views. Before it answers, the tool checks the
-  link with the app's own parser: `crates/link-check` builds
-  `grooph_link::parse_query` as a plain WebAssembly module (three
-  exports, no imports, no wasm-bindgen; a Trunk hook writes it to
-  `dist/embed/link-check.wasm`, which `functions/mcp.js` imports), loaded by
-  `mcp/link-check.js`. Wrong notation or a `poly` that does not fit the
+  `su`, `groups`). `mcp/link.js`
+  builds the same query as `SharedLink::to_url`, checked by both test suites
+  against `mcp/link-cases.json`. Its result carries the link, for hosts
+  without views, and what the metronome shows (`grooph_link::describe`:
+  meter and grouping, tempo, click bar with its strong, medium and soft
+  clicks, polyrhythm, swing), so the model can check it against the request;
+  the embedded app's model context starts with the same description. Before
+  it answers, the tool checks the link with the app's own parser:
+  `crates/link-check` builds `grooph_link::parse_query` and `describe` as a
+  plain WebAssembly module (four exports, no imports, no wasm-bindgen; a
+  Trunk hook writes it to `dist/embed/link-check.wasm`, which
+  `functions/mcp.js` imports), loaded by `mcp/link-check.js`. Wrong notation or a `poly` that does not fit the
   meter comes back as `isError` with the app's message.
 - The tool's view `ui://grooph/metronome.html` (`mcp/view.js`) runs in the
   host's sandboxed iframe on another origin. It does the MCP Apps handshake

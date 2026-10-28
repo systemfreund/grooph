@@ -25,10 +25,10 @@ export const TOOL = {
   name: "show_metronome",
   title: "Show a metronome",
   description:
-    "Shows grooph's interactive metronome in the chat, set to a tempo and time signature, optionally with an accent " +
-    "pattern, a polyrhythm against the beat and swing. Playback starts when the user taps play. The user can change " +
-    "the settings in the view; the current settings come back as model context. The result includes a link that " +
-    "opens the same metronome on grooph.app.",
+    "Shows grooph's interactive metronome in the chat, set to a tempo and time signature, optionally with a beat " +
+    "grouping, a click pattern, a polyrhythm against the beat and swing. Playback starts when the user taps play. The " +
+    "result says what the metronome shows (check it against the request) and links to the same metronome on " +
+    "grooph.app. The user can change the settings in the view; the current settings come back as model context.",
   inputSchema: {
     type: "object",
     properties: {
@@ -42,19 +42,31 @@ export const TOOL = {
         type: "string",
         maxLength: MAX_LENGTH.ts,
         description:
-          "Time signature: 1-7 beats over 4, 3-13 over 8 or 5-19 over 16, e.g. 4/4 or 7/8. Default 4/4. Meters of 5, 7, " +
-          "8, 10 or 11 eighths or sixteenths take a grouping other than the usual one in front: 2+2+3/8 or 3+2+2/8 " +
-          "for 7/8 (usual 2+3+2), 2+3/8 for 5/8, 3+2+3/8 or 2+3+3/8 for 8/8, 2+2+3+3/8 and others for 10/8, " +
-          "2+2+3+2+2/8 or 2+3+3+3/8 for 11/8.",
+          "Time signature: 1-7 beats over 4, 3-13 over 8 or 5-19 over 16, e.g. 4/4 or 7/8. Default 4/4. For a beat " +
+          "grouping such as 3+2+2 pass groups as well.",
+      },
+      groups: {
+        type: "string",
+        maxLength: MAX_LENGTH.groups,
+        pattern: "^\\s*[0-9]+(\\s*\\+\\s*[0-9]+)+\\s*$",
+        description:
+          "How the beats of ts group, e.g. \"3+2+2\" in 7/8: the staff, the ring and the default click (strong on 1, " +
+          "medium on each group's start) follow it. The groups add up to the meter's beats. Meters of 5, 7, 8, 10 or 11 " +
+          "eighths or sixteenths take a grouping other than the usual one: 3+2+2 or 2+2+3 in 7/8 (usual 2+3+2), " +
+          "2+3 in 5/8 (usual 3+2), 3+2+3 or 2+3+3 in 8/8 (usual 3+3+2), 2+2+3+3 and others in 10/8, 2+2+3+2+2 or " +
+          "2+3+3+3 in 11/8. Other meters keep their usual grouping (6/8 is 3+3).",
       },
       click: {
         type: "string",
         maxLength: MAX_LENGTH.click,
         description:
-          "The click bar, replacing the default of one click per beat group with the first one strong: one bar of the " +
-          "meter in grooph's rhythm notation, without the time signature. Tokens separated by spaces: h q e s (half to " +
-          "sixteenth), dotted q. e., r: makes a rest, > an accent (strong click), (q) a ghost note (soft click). The bar " +
-          'must add up exactly to the meter. Example in 7/8, middle group silent and the last soft: ">q r:q. (q)".',
+          "Only for clicks the default does not give: rests, extra accents, a rhythm of its own. The default click bar " +
+          "already follows the meter and its groups (strong on 1, medium on each group start, soft between); a grouping " +
+          "goes into groups, not into accents here, or the staff shows another one. One bar of the meter in grooph's " +
+          "rhythm notation, without the time signature. Tokens separated by spaces: h q e s (half to sixteenth), " +
+          "dotted q. e., r: makes a rest, > an accent (strong click), (q) a ghost note (soft click), a plain note is " +
+          'medium. The bar must add up exactly to the meter. Example in 7/8, middle group silent and the last soft: ' +
+          '">q r:q. (q)".',
       },
       poly: {
         type: "string",
@@ -77,8 +89,8 @@ export const TOOL = {
 
 
 /** Answers a request to `/mcp`. `env.ASSETS` serves the web build;
- * `checkLink(query)` says why a link would not open in the app, or `null`
- * (`linkChecker` in link-check.js). */
+ * `checkLink(query)` says why a link would not open in the app, or what it
+ * opens (`linkChecker` in link-check.js). */
 export async function handleRequest(request, env, checkLink) {
   if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
   if (request.method !== "POST") {
@@ -116,7 +128,7 @@ async function dispatch(message, { origin, env, checkLink }) {
         serverInfo: SERVER_INFO,
         instructions:
           "grooph is a metronome and rhythm trainer. Its tool show_metronome shows an interactive metronome for a " +
-          "tempo, time signature, accent pattern, polyrhythm and swing.",
+          "tempo, time signature, beat grouping, click pattern, polyrhythm and swing.",
       });
     case "ping":
       return ok({});
@@ -149,17 +161,18 @@ async function dispatch(message, { origin, env, checkLink }) {
   }
 }
 
-/** The tool's result: the link, for hosts that show no view as well. Wrong
- * arguments come back as an error that says what to fix: the numbers from
- * `argumentError`, the notation and the polyrhythm from `checkLink`, by the
- * app's own parser. */
+/** The tool's result: what the metronome shows, so the model can check it
+ * against the request, and the link, for hosts that show no view as well.
+ * Wrong arguments come back as an error that says what to fix: the numbers
+ * from `argumentError`, the notation and the polyrhythm from `checkLink`, by
+ * the app's own parser. */
 export function showMetronome(args, origin, checkLink) {
   const error = argumentError(args, Object.keys(TOOL.inputSchema.properties));
   if (error) return { isError: true, content: [{ type: "text", text: error }] };
   const query = metronomeQuery(args);
   // Without it the tool would answer success for links that do not open.
   if (typeof checkLink !== "function") throw new Error("showMetronome needs checkLink (link-check.js)");
-  const problem = checkLink(query);
+  const { problem, description } = checkLink(query);
   if (problem) {
     const text = `These settings do not open in grooph: ${problem}. Fix the argument and call the tool again.`;
     return { isError: true, content: [{ type: "text", text }] };
@@ -169,10 +182,12 @@ export function showMetronome(args, origin, checkLink) {
     content: [
       {
         type: "text",
-        text: `The metronome is shown to the user; they start it with the play button. Open in grooph: ${link}`,
+        text:
+          `The metronome is shown to the user; they start it with the play button. It shows ${description}. ` +
+          `Open in grooph: ${link}`,
       },
     ],
-    structuredContent: { link },
+    structuredContent: { link, shown: description },
   };
 }
 
