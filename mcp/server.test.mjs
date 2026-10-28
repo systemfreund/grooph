@@ -61,7 +61,11 @@ test("tools/list has show_metronome with its view", async () => {
   assert.ok(tool);
   assert.equal(tool._meta.ui.resourceUri, RESOURCE_URI);
   assert.deepEqual(Object.keys(tool.inputSchema.properties).sort(), ["bpm", "click", "poly", "su", "swing", "ts"]);
-  assert.match(tool.description, /poly "3:2"/);
+  // Describes, points nowhere else, stays short; the details are the parameters'.
+  assert.doesNotMatch(tool.description, /llms\.txt|https?:\/\//);
+  assert.ok(tool.description.length < 500, tool.description.length);
+  assert.match(tool.inputSchema.properties.poly.description, /"3:2"/);
+  assert.match(tool.inputSchema.properties.click.description, />q r:q\. \(q\)/);
 });
 
 test("tools/call returns the link of this deployment", async () => {

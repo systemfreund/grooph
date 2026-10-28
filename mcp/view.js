@@ -243,7 +243,6 @@ function reportSize() {
   notify("ui/notifications/size-changed", { width: Math.ceil(width), height: Math.ceil(height) });
 }
 handlers["ui/notifications/host-context-changed"] = (context) => {
-  console.info("grooph: host context changed", context);
   if (context.safeAreaInsets) setInsets(context.safeAreaInsets);
   if (context.styles) applyHostStyles(context.styles);
   if (context.theme || context.styles) setTheme(context.theme || theme);
@@ -268,7 +267,6 @@ try {
   connected = true;
   notify("ui/notifications/initialized", {});
   const context = init?.hostContext || {};
-  console.info("grooph: host context", context);
   setInsets(context.safeAreaInsets);
   applyHostStyles(context.styles);
   if (context.theme) setTheme(context.theme);

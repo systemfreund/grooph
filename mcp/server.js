@@ -24,20 +24,44 @@ const CORS = {
 export const TOOL = {
   name: "show_metronome",
   title: "Show a metronome",
-  description: `Shows grooph's metronome in the chat, set to a tempo and time signature, optionally with its own click pattern, a polyrhythm (a second click against the beat) and swing. The user starts it with the play button and can change the settings there; the current settings come back as model context. The result also has a link that opens the same metronome on https://grooph.app.
-
-Tempo is always in quarter notes per minute: 7/8 at bpm 70 clicks 140 eighths per minute.
-
-poly is a polyrhythm n:m: n even clicks in the time of m beat units of the meter (quarters in x/4, eighths in x/8), repeated until the bar is full. m must divide the beats of the meter, n is 2 to 16, and the ratio must not reduce to one click (2:4 is 1:2); not every such ratio fits every meter, and grooph names the ones that do. Examples: "3 against 2" in 4/4 is poly "3:2", "3 against 4" is "3:4", "5 against 4" is "5:4"; in 3/4 "2:3" or "4:3"; in 6/8 "2:3" is two against each dotted quarter; in 5/8 "7:5".
-
-click replaces the main click: one bar of the meter in grooph's rhythm notation, without the time signature. Tokens separated by spaces: h q e s (half to sixteenth), dotted q. e., r: makes a rest, > an accent (strong click), (q) a ghost note (soft click); the bar must add up exactly to the meter. E.g. 7/8 with the middle group silent and the last soft is ">q r:q. (q)". Default: one click per beat group, the first one strong. More at https://grooph.app/llms.txt.`,
+  description:
+    "Shows grooph's interactive metronome in the chat, set to a tempo and time signature, optionally with an accent " +
+    "pattern, a polyrhythm against the beat and swing. Playback starts when the user taps play. The user can change " +
+    "the settings in the view; the current settings come back as model context. The result includes a link that " +
+    "opens the same metronome on grooph.app.",
   inputSchema: {
     type: "object",
     properties: {
-      bpm: { type: "integer", minimum: 20, maximum: 300, description: "Tempo in quarter notes per minute. Default 120." },
-      ts: { type: "string", maxLength: MAX_LENGTH.ts, description: "Time signature: 1-17 beats over 4, 8 or 16, e.g. 4/4, 7/8 or 2+2+3/8. Default 4/4." },
-      click: { type: "string", maxLength: MAX_LENGTH.click, description: "The click bar in rhythm notation without the time signature, e.g. \">q r:q. (q)\" in 7/8." },
-      poly: { type: "string", maxLength: MAX_LENGTH.poly, pattern: "^\\s*[0-9]+\\s*:\\s*[0-9]+\\s*$", description: "Polyrhythm n:m against the click, e.g. \"3:2\" for three against two in 4/4." },
+      bpm: {
+        type: "integer",
+        minimum: 20,
+        maximum: 300,
+        description: "Tempo in quarter notes per minute, also in x/8: 7/8 at 70 clicks 140 eighths per minute. Default 120.",
+      },
+      ts: {
+        type: "string",
+        maxLength: MAX_LENGTH.ts,
+        description: "Time signature: 1-17 beats over 4, 8 or 16, e.g. 4/4, 7/8 or 2+2+3/8. Default 4/4.",
+      },
+      click: {
+        type: "string",
+        maxLength: MAX_LENGTH.click,
+        description:
+          "The click bar, replacing the default of one click per beat group with the first one strong: one bar of the " +
+          "meter in grooph's rhythm notation, without the time signature. Tokens separated by spaces: h q e s (half to " +
+          "sixteenth), dotted q. e., r: makes a rest, > an accent (strong click), (q) a ghost note (soft click). The bar " +
+          'must add up exactly to the meter. Example in 7/8, middle group silent and the last soft: ">q r:q. (q)".',
+      },
+      poly: {
+        type: "string",
+        maxLength: MAX_LENGTH.poly,
+        pattern: "^\\s*[0-9]+\\s*:\\s*[0-9]+\\s*$",
+        description:
+          "Polyrhythm n:m against the click: n even clicks in the time of m beat units of the meter (quarters in x/4, " +
+          "eighths in x/8), repeated through the bar. m must divide the meter's beats; n is 2 to 16 and must not reduce " +
+          'to one click (2:4 is 1:2). Examples: "3:2", "3:4", "5:4" in 4/4; "2:3", "4:3" in 3/4; "2:3" in 6/8 (two ' +
+          'against each dotted quarter); "7:5" in 5/8.',
+      },
       swing: { type: "integer", minimum: 50, maximum: 75, description: "Swing in percent: 50 is straight, 66 a triplet feel, 75 dotted." },
       su: { type: "integer", enum: [8, 16], description: "Note value that swings: 8 (default) or 16. Needs swing." },
     },
@@ -46,6 +70,7 @@ click replaces the main click: one bar of the meter in grooph's rhythm notation,
   annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   _meta: { ui: { resourceUri: RESOURCE_URI } },
 };
+
 
 /** Answers a request to `/mcp`. `env.ASSETS` serves the web build;
  * `checkLink(query)` says why a link would not open in the app, or `null`
@@ -85,7 +110,9 @@ async function dispatch(message, { origin, env, checkLink }) {
         protocolVersion: PROTOCOL_VERSIONS.includes(params.protocolVersion) ? params.protocolVersion : PROTOCOL_VERSIONS[0],
         capabilities: { tools: {}, resources: {}, extensions: { "io.modelcontextprotocol/ui": {} } },
         serverInfo: SERVER_INFO,
-        instructions: "grooph is a metronome and rhythm trainer. Call show_metronome to give the user a working metronome in the chat.",
+        instructions:
+          "grooph is a metronome and rhythm trainer. Its tool show_metronome shows an interactive metronome for a " +
+          "tempo, time signature, accent pattern, polyrhythm and swing.",
       });
     case "ping":
       return ok({});
