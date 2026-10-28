@@ -271,7 +271,7 @@ fn grouped(ts: TimeSignature, text: &str) -> Result<TimeSignature, String> {
 /// `ts` and, unless it is the usual one, `groups` for the meter `ts`.
 fn push_meter(params: &mut Vec<(&str, String)>, ts: TimeSignature) {
     params.push(("ts", format!("{}/{}", ts.beats, ts.beat_unit)));
-    if ts.to_string().contains('+') {
+    if ts.grouping != 0 {
         params.push(("groups", ts.groups_label()));
     }
 }
@@ -388,11 +388,15 @@ pub const DEFAULT_BPM: u32 = 120;
 /// (groups start on eighths 1, 3, 6) at 120 BPM (quarter notes), click bar
 /// >e e e >e e >e e (strong on eighths 1, 4, 6; medium on 2, 3, 5, 7)".
 pub fn describe(link: &SharedLink) -> String {
-    let ts = link
-        .content
-        .as_ref()
-        .and_then(LinkContent::first_time_signature)
-        .unwrap_or(TimeSignature::FOUR_FOUR);
+    let bpm = link.bpm.unwrap_or(DEFAULT_BPM);
+    // Without a meter the app keeps the one it has: only tempo and swing.
+    let Some(ts) = link.content.as_ref().and_then(LinkContent::first_time_signature) else {
+        let mut text = format!("the meter left as it is, at {bpm} BPM (quarter notes)");
+        if let Some(swing) = link.swing.filter(|s| !s.is_straight()) {
+            let _ = write!(text, ", swing {}% {}", swing.percent, swing.unit.label());
+        }
+        return text;
+    };
     let mut text = match &link.content {
         Some(LinkContent::Score(score)) => {
             format!("a rhythm of {} bar(s) starting in ", score.len())
@@ -401,11 +405,10 @@ pub fn describe(link: &SharedLink) -> String {
         _ => String::new(),
     };
     let unit = unit_name(ts.beat_unit);
-    let groups = ts.groups();
     let _ = write!(text, "{}/{}", ts.beats, ts.beat_unit);
-    // Beats grouped as in 6/8 or 7/8; x/4 meters count single beats.
-    if groups.len() > 1 && groups.iter().any(|&g| g > 1) {
-        let starts: Vec<String> = groups
+    if ts.shows_grouping() {
+        let starts: Vec<String> = ts
+            .groups()
             .iter()
             .scan(1, |at, g| {
                 let start = *at;
@@ -420,7 +423,7 @@ pub fn describe(link: &SharedLink) -> String {
             starts.join(", ")
         );
     }
-    let _ = write!(text, " at {} BPM (quarter notes)", link.bpm.unwrap_or(DEFAULT_BPM));
+    let _ = write!(text, " at {bpm} BPM (quarter notes)");
     let click = link.click.clone().unwrap_or_else(|| meter_click_bar(ts));
     if let Some(notation) = format_bar(&click) {
         let per_unit = DEFAULT_GRID.ticks_per_beat(&ts).max(1);

@@ -139,6 +139,11 @@ mod tests {
             grouped.ends_with("(strong on eighths 1; medium on 4, 6; soft on 2, 3, 5, 7)"),
             "{grouped}"
         );
+        // Without a meter, the app keeps its own.
+        assert_eq!(
+            open_query("v=2&bpm=90&swing=60").unwrap(),
+            "the meter left as it is, at 90 BPM (quarter notes), swing 60% 8ths"
+        );
         // A rhythm is described by its first meter too.
         let score = open_query("v=2&bpm=80&ts=3/4&r=q+q+q+|+q+q+q").unwrap();
         assert!(

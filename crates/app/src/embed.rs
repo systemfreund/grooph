@@ -364,7 +364,9 @@ impl Grooph {
         let subdivision = self.click_fill_label();
         // The same description as the tool's result (grooph_link::describe):
         // the meter's grouping, where the clicks fall, the polyrhythm, swing.
-        let mut text = format!("Metronome: {}", grooph_link::describe(&self.shared_link()));
+        // Built once: the description and the link come from the same value.
+        let shared = self.shared_link();
+        let mut text = format!("Metronome: {}", grooph_link::describe(&shared));
         let mut fields = vec![
             // The meter alone, as the tool's ts; the grouping is groups.
             ("ts", Field::Text(format!("{}/{}", ts.beats, ts.beat_unit))),
@@ -372,8 +374,7 @@ impl Grooph {
             ("click", Field::Text(click)),
             ("subdivision", Field::Text(subdivision)),
         ];
-        let groups = ts.groups();
-        if groups.len() > 1 && groups.iter().any(|&g| g > 1) {
+        if ts.shows_grouping() {
             fields.push(("groups", Field::Text(ts.groups_label())));
         }
         if self.counter_bar().is_some() {
@@ -407,7 +408,7 @@ impl Grooph {
         }
         text += if playing { ", playing." } else { ", stopped." };
         fields.push(("playing", Field::Bool(playing)));
-        if let Some(link) = self.share_link_url() {
+        if let Some(link) = shared.to_url(&platform::share_base_url()) {
             text += &format!(" Link: {link}");
             fields.push(("link", Field::Text(link)));
         }

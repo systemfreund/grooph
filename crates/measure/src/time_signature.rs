@@ -111,6 +111,13 @@ impl TimeSignature {
         grouping::default_groups_for(self)
     }
 
+    /// Whether the meter groups its beats (6/8 as 3+3, 7/8 as 2+3+2), so a
+    /// description names the grouping; x/4 meters count single beats.
+    pub fn shows_grouping(&self) -> bool {
+        let groups = self.groups();
+        groups.len() > 1 && groups.iter().any(|&g| g > 1)
+    }
+
     /// The beat groups joined with `+`, e.g. `2+2+3`.
     pub fn groups_label(&self) -> String {
         self.groups().iter().map(|g| g.to_string()).collect::<Vec<_>>().join("+")
