@@ -223,6 +223,10 @@ grooph's metronome runs inside AI chats as an
   on `touchcancel`/`pointercancel` `embed::cancel_scrolled_touch` moves the
   pointer far off before releasing it. The options sheet does not fold on a
   flick there.
+- After every deploy CI runs `node mcp/smoke.mjs <url>/mcp` against the
+  deployment: the MCP Inspector's CLI (pinned), the official client, lists
+  the tool, calls it once with settings that open and once with a misfit
+  `poly` (`isError`), and reads the view's resource.
 - Tests: `node --test mcp/server.test.mjs` (no Cloudflare needed; build the
   link check first with `cargo build --release --target
   wasm32-unknown-unknown -p grooph-link-check`), `cargo test` (embed

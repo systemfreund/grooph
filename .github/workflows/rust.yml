@@ -160,6 +160,15 @@ jobs:
         accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         command: pages deploy dist --branch main --project-name grooph
         gitHubToken: ${{ secrets.GITHUB_TOKEN }}
+    - name: Node for the smoke test
+      # The MCP Inspector needs Node 22.19 or newer.
+      uses: actions/setup-node@v4
+      with:
+        node-version: 22
+    - name: Smoke-test grooph.app's MCP server
+      # With the MCP Inspector, the official client (mcp/smoke.mjs). After
+      # the deploy it can only warn, not stop a broken one.
+      run: node mcp/smoke.mjs https://grooph.app/mcp
 
   deploy-preview:
     # Publish every pull request to its own Cloudflare Pages preview
@@ -224,3 +233,14 @@ jobs:
           } else {
             await github.rest.issues.createComment({ owner, repo, issue_number, body });
           }
+    - name: Node for the smoke test
+      # The MCP Inspector needs Node 22.19 or newer.
+      uses: actions/setup-node@v4
+      with:
+        node-version: 22
+    - name: Smoke-test the preview's MCP server
+      # With the MCP Inspector, the official client (mcp/smoke.mjs), against
+      # this commit's deployment, so a pull request shows it before merging.
+      env:
+        DEPLOY_URL: ${{ steps.deploy.outputs.deployment-url }}
+      run: node mcp/smoke.mjs "$DEPLOY_URL/mcp"

@@ -61,7 +61,11 @@ test("tools/list has show_metronome with its view", async () => {
   assert.ok(tool);
   assert.equal(tool._meta.ui.resourceUri, RESOURCE_URI);
   assert.deepEqual(Object.keys(tool.inputSchema.properties).sort(), ["bpm", "click", "poly", "su", "swing", "ts"]);
-  assert.match(tool.description, /poly "3:2"/);
+  // Describes, points nowhere else, stays short; the details are the parameters'.
+  assert.doesNotMatch(tool.description, /llms\.txt|https?:\/\//);
+  assert.ok(tool.description.length < 500, tool.description.length);
+  assert.match(tool.inputSchema.properties.poly.description, /"3:2"/);
+  assert.match(tool.inputSchema.properties.click.description, />q r:q\. \(q\)/);
 });
 
 test("tools/call returns the link of this deployment", async () => {
@@ -141,6 +145,24 @@ test("the link check survives its memory growing", () => {
 test("the tool does not answer without its link check", () => {
   assert.throws(() => showMetronome({ ts: "4/4" }, ORIGIN), /checkLink/);
   assert.ok(!showMetronome({ ts: "4/4" }, ORIGIN, checkLink).isError);
+});
+
+test("the ts description matches the meters the app takes", async () => {
+  const { result } = await rpc("tools/list", {});
+  const text = result.tools[0].inputSchema.properties.ts.description;
+  // Every meter it names opens, groupings included.
+  for (const ts of text.match(/\b\d+(?:\+\d+)*\/\d+\b/g)) {
+    assert.equal(checkLink(metronomeQuery({ ts })), null, ts);
+  }
+  // Each range's ends open, one beat past them does not.
+  const ranges = [...text.matchAll(/(\d+)-(\d+) (?:beats )?over (\d+)/g)];
+  assert.equal(ranges.length, 3, text);
+  for (const [, low, high, unit] of ranges) {
+    for (const beats of [low, high]) assert.equal(checkLink(`v=2&ts=${beats}/${unit}`), null, `${beats}/${unit}`);
+    for (const beats of [Number(low) - 1, Number(high) + 1]) {
+      if (beats > 0) assert.notEqual(checkLink(`v=2&ts=${beats}/${unit}`), null, `${beats}/${unit}`);
+    }
+  }
 });
 
 test("every link case opens in the app", () => {
