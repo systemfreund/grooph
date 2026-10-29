@@ -148,17 +148,16 @@ impl std::fmt::Display for InvalidTechnique {
 impl std::error::Error for InvalidTechnique {}
 
 /// One note head of a beat: an instrument, played accented, soft (a ghost
-/// note) or plain, with a technique the instrument allows.
+/// note) or plain, never both, with a technique the instrument allows.
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(try_from = "RawHead")]
 pub struct Head {
     instrument: Instrument,
     #[serde(skip_serializing_if = "is_false")]
-    pub accented: bool,
-    /// A ghost note, written with its head in parentheses. Never together
-    /// with `accented`.
+    accented: bool,
+    /// A ghost note, written with its head in parentheses.
     #[serde(skip_serializing_if = "is_false")]
-    pub soft: bool,
+    soft: bool,
     #[serde(skip_serializing_if = "is_normal")]
     technique: Technique,
 }
@@ -183,6 +182,28 @@ impl Head {
 
     pub const fn technique(&self) -> Technique {
         self.technique
+    }
+
+    pub const fn accented(&self) -> bool {
+        self.accented
+    }
+
+    /// A ghost note, written with its head in parentheses.
+    pub const fn soft(&self) -> bool {
+        self.soft
+    }
+
+    /// Accent the head, or not. An accented head is not soft.
+    pub fn set_accented(&mut self, accented: bool) {
+        self.accented = accented;
+        self.soft &= !accented;
+    }
+
+    /// Make the head soft (a ghost note), or not. A soft head is not
+    /// accented.
+    pub fn set_soft(&mut self, soft: bool) {
+        self.soft = soft;
+        self.accented &= !soft;
     }
 
     /// The head played with `technique`, if its instrument allows it.
@@ -211,7 +232,11 @@ impl TryFrom<RawHead> for Head {
     type Error = InvalidTechnique;
 
     fn try_from(raw: RawHead) -> Result<Self, Self::Error> {
-        let head = Head { accented: raw.accented, soft: raw.soft, ..Head::new(raw.instrument) };
+        let mut head = Head::new(raw.instrument);
+        // A head saved both soft and accented keeps the accent, as it is
+        // written and played.
+        head.set_soft(raw.soft);
+        head.set_accented(raw.accented);
         head.with_technique(raw.technique)
     }
 }
@@ -364,6 +389,18 @@ mod tests {
     }
 
     #[test]
+    fn a_head_is_accented_or_soft_never_both() {
+        let mut head = Head::new(Instrument::Snare);
+        head.set_accented(true);
+        head.set_soft(true);
+        assert!(head.soft() && !head.accented());
+        head.set_accented(true);
+        assert!(head.accented() && !head.soft());
+        head.set_accented(false);
+        assert!(!head.accented() && !head.soft());
+    }
+
+    #[test]
     fn a_head_takes_only_its_instruments_techniques() {
         let hh = Head::new(Instrument::HiHat);
         assert_eq!(hh.with_technique(Technique::Open).unwrap().technique(), Technique::Open);
@@ -379,11 +416,14 @@ mod tests {
     #[test]
     fn heads_round_trip_and_saved_ones_are_checked() {
         let open = Head::new(Instrument::HiHat).with_technique(Technique::Open).unwrap();
-        let ghost = Head { soft: true, ..Head::new(Instrument::Snare) };
+        let mut ghost = Head::new(Instrument::Snare);
+        ghost.set_soft(true);
         let heads = Heads::new([open, ghost]).unwrap();
         let text = ron::to_string(&heads).unwrap();
         assert_eq!(ron::from_str::<Heads>(&text).unwrap(), heads);
         assert!(ron::from_str::<Head>("(instrument: Snare, technique: Bell)").is_err());
+        let both: Head = ron::from_str("(instrument: Snare, accented: true, soft: true)").unwrap();
+        assert!(both.accented() && !both.soft(), "the accent wins");
         let twice = "[(instrument: Kick), (instrument: Kick)]";
         assert!(ron::from_str::<Heads>(twice).unwrap_err().to_string().contains("two heads"));
     }

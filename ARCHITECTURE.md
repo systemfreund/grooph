@@ -48,7 +48,8 @@ spread across callers.
   note, several a chord on one stem (at most one per `Instrument`, sorted from
   the foot up, at most `MAX_HEADS`). Each `Head` has its `Instrument`,
   `accented`, `soft` (a ghost note, head in parentheses; never with
-  `accented`) and a `Technique` its instrument allows (open hi-hat,
+  `accented`: the setters clear the other flag, a save with both keeps the
+  accent) and a `Technique` its instrument allows (open hi-hat,
   cross-stick, ...; checked when built or loaded). `kind()`, `accented()`,
   `soft()` read the beat as a whole (any head); `set_accented`/`set_soft` set
   every head, `set_kind` turns a rest into a plain note and back.

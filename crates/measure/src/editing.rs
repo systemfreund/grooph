@@ -43,9 +43,6 @@ impl Measure {
                 && b.is_note()
             {
                 b.set_accented(accented);
-                if accented {
-                    b.set_soft(false);
-                }
             }
             Some(ToggleAccent(idx, accented))
         } else {
@@ -60,9 +57,6 @@ impl Measure {
         let soft = !b.soft();
         if b.is_note() {
             b.set_soft(soft);
-            if soft {
-                b.set_accented(false);
-            }
         }
         Some(Modification::ToggleSoft(idx, soft))
     }

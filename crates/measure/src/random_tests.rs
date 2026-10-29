@@ -53,9 +53,6 @@ fn check_invariants(m: &Measure) -> Result<(), String> {
             Some(0) | None => return Err(format!("beat {i} ({:?}) has no length", b.duration)),
             Some(t) => total += t,
         }
-        if b.heads().iter().any(|h| h.accented && h.soft) {
-            return Err(format!("beat {i} has a head both accented and soft"));
-        }
         if b.duration.is_tuplet() && m.tuplet_group_at(i).is_none() {
             return Err(format!("tuplet beat {i} is outside a group"));
         }

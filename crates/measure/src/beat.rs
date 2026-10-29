@@ -66,22 +66,24 @@ impl Beat {
 
     /// Whether a head is accented.
     pub fn accented(&self) -> bool {
-        self.heads.iter().any(|h| h.accented)
+        self.heads.iter().any(Head::accented)
     }
 
     /// Whether a head is soft (a ghost note).
     pub fn soft(&self) -> bool {
-        self.heads.iter().any(|h| h.soft)
+        self.heads.iter().any(Head::soft)
     }
 
-    /// Accent every head, or none. No change on a rest.
+    /// Accent every head, or none; an accented head is not soft. No change
+    /// on a rest.
     pub fn set_accented(&mut self, accented: bool) {
-        self.heads.iter_mut().for_each(|h| h.accented = accented);
+        self.heads.iter_mut().for_each(|h| h.set_accented(accented));
     }
 
-    /// Make every head soft, or none. No change on a rest.
+    /// Make every head soft, or none; a soft head is not accented. No
+    /// change on a rest.
     pub fn set_soft(&mut self, soft: bool) {
-        self.heads.iter_mut().for_each(|h| h.soft = soft);
+        self.heads.iter_mut().for_each(|h| h.set_soft(soft));
     }
 
     /// Make the beat a rest, or a note: a note stays as it is, a rest
@@ -153,8 +155,10 @@ impl TryFrom<RawBeat> for Beat {
             (Some(heads), _) => Self::with_heads(raw.duration, heads),
             (None, Some(kind)) => {
                 let mut beat = Self::new(raw.duration, kind);
-                beat.set_accented(raw.accented);
+                // Saved both soft and accented, the accent wins, as it is
+                // written and played.
                 beat.set_soft(raw.soft);
+                beat.set_accented(raw.accented);
                 beat
             }
             (None, None) => return Err("a beat needs its heads"),
@@ -195,7 +199,7 @@ mod tests {
     fn a_beat_round_trips_with_its_heads() {
         let open = Head::new(Instrument::HiHat).with_technique(Technique::Open).unwrap();
         let mut ghost = Head::new(Instrument::Snare);
-        ghost.soft = true;
+        ghost.set_soft(true);
         let mut beat = Beat::with_heads(t8(), Heads::new([open, ghost]).unwrap());
         beat.tuplet_group_id = Some(TupletGroupId(2));
         let back: Beat = ron::from_str(&ron::to_string(&beat).unwrap()).unwrap();
