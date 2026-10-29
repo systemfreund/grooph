@@ -505,6 +505,10 @@ mod tests {
     use crate::duration::{e, q, qt16, s, t8};
     use crate::generator::{GeneratorSettings, Rng, Subdivision, generate_score};
 
+    fn q_dot() -> Duration {
+        Duration::Dotted { base: Quarter, dots: 1 }
+    }
+
     fn beats_of(score: &Score, measure: usize) -> Vec<Beat> {
         score.measures[measure].beats().clone()
     }
@@ -779,6 +783,27 @@ mod tests {
         // Every kit instrument has a code; the one line has none.
         let coded = INSTRUMENT_CODES.map(|(_, i)| i);
         assert!(Instrument::ALL.iter().all(|i| coded.contains(i) == (*i != Instrument::Rhythm)));
+    }
+
+    #[test]
+    fn voices_read_back_in_every_meter_and_measure() {
+        // Simple, compound and odd meters; voices in some measures only, a
+        // meter change, tuplets in a second voice.
+        let text = "4/4 H:e S-H:e H:e H:e H:e S-H:e H:e H:e ; K:q r:q K:q r:q \
+                    | 6/8 RD:e RD:e RD:e >RDb:e RD:e RD:e ; K:q. HF:q. \
+                    | (S):e S:e S:e S:e S:e S:e \
+                    | 7/8 H:e H:e H:e H:e H:e H:e H:e ; K:q r:e K:t8 K:t8 K:t8 r:e K:e";
+        let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
+        let score = parse_score(&text).unwrap();
+        let voices: Vec<usize> = score.measures.iter().map(|m| m.voices().len()).collect();
+        assert_eq!(voices, [2, 2, 1, 2]);
+        assert_eq!(score.measures[1].time_signature(), TimeSignature::SIX_EIGHT);
+        // The 6/8 feet keep their meter's beats: two dotted quarters.
+        let feet = score.measures[1].voice(1).unwrap().beats();
+        assert_eq!(feet.iter().map(|b| b.duration).collect::<Vec<_>>(), [q_dot(), q_dot()]);
+        let feet = score.measures[3].voice(1).unwrap();
+        assert!(feet.tuplet_group_at(2).is_some());
+        assert_eq!(format_score(&score).unwrap(), text);
     }
 
     #[test]
