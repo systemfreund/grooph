@@ -1,6 +1,6 @@
 use crate::beam_plan::BeamGroup;
 use grooph_measure::duration::{Duration, NoteValue};
-use grooph_measure::{BeatIdx, BeatKind, Measure};
+use grooph_measure::{BeatIdx, Measure};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TupletPlan {
@@ -55,8 +55,7 @@ pub(crate) fn detect_tuplet_spans(measure: &Measure) -> Vec<TupletSpan> {
         .into_iter()
         .filter_map(|group| {
             let anchor = measure.tuplets().get(group.id)?;
-            let contains_rest =
-                (group.start_idx..=group.end_idx).any(|i| beats[i].kind == BeatKind::Rest);
+            let contains_rest = (group.start_idx..=group.end_idx).any(|i| beats[i].is_rest());
             Some(TupletSpan {
                 count: anchor.n,
                 start: group.start_idx,
@@ -83,11 +82,9 @@ pub fn compute_tuplet_plan(measure: &Measure, beams: &[BeamGroup]) -> Vec<Tuplet
         })
     };
     for mut g in spans.into_iter() {
-        let note_idxs: Vec<BeatIdx> = (g.start..=g.end)
-            .filter(|&ix| beats[ix].kind == BeatKind::Note || beamed(ix))
-            .collect();
-        g.contains_rest =
-            (g.start..=g.end).any(|ix| beats[ix].kind == BeatKind::Rest && !under_beam(ix));
+        let note_idxs: Vec<BeatIdx> =
+            (g.start..=g.end).filter(|&ix| beats[ix].is_note() || beamed(ix)).collect();
+        g.contains_rest = (g.start..=g.end).any(|ix| beats[ix].is_rest() && !under_beam(ix));
 
         let fully_beamed = if g.contains_rest || note_idxs.len() < 2 {
             false

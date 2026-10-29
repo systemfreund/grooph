@@ -38,12 +38,11 @@ impl Measure {
     /// Toggle the user accent flag at index `idx`.
     pub fn toggle_accent(&mut self, idx: BeatIdx) -> Option<Modification> {
         if let Some(b) = self.beats.get(idx) {
-            let accented = !b.accented;
+            let accented = !b.accented();
             if let Some(b) = self.beats.get_mut(idx)
-                && b.kind == Note
+                && b.is_note()
             {
-                b.accented = accented;
-                b.soft &= !accented;
+                b.set_accented(accented);
             }
             Some(ToggleAccent(idx, accented))
         } else {
@@ -55,10 +54,9 @@ impl Measure {
     /// its accent. No change on a rest.
     pub fn toggle_soft(&mut self, idx: BeatIdx) -> Option<Modification> {
         let b = self.beats.get_mut(idx)?;
-        let soft = !b.soft;
-        if b.kind == Note {
-            b.soft = soft;
-            b.accented &= !soft;
+        let soft = !b.soft();
+        if b.is_note() {
+            b.set_soft(soft);
         }
         Some(Modification::ToggleSoft(idx, soft))
     }
@@ -83,13 +81,8 @@ impl Measure {
             _ => None,
         };
         if let Some(dur) = new_dur {
-            let new_beat = Beat {
-                duration: dur,
-                kind: current.kind,
-                accented: current.accented,
-                soft: current.soft,
-                tuplet_group_id: current.tuplet_group_id,
-            };
+            let mut new_beat = current;
+            new_beat.duration = dur;
             if self.set_beat(idx, new_beat).is_ok() {
                 return Some(Modification::ToggleDotted(idx, new_dots));
             }
@@ -112,7 +105,7 @@ impl Measure {
         };
 
         if let Some(new_dur) = new_dur_opt {
-            let kind = if let Some(override_kind) = beat_kind { override_kind } else { cur.kind };
+            let kind = if let Some(override_kind) = beat_kind { override_kind } else { cur.kind() };
             let new_beat = match kind {
                 Note => Beat::note(new_dur),
                 Rest => Beat::rest(new_dur),
@@ -183,7 +176,7 @@ impl Measure {
                 {
                     // A new tuplet group starts with every slot as a note
                     for i in group_span.start_idx..=group_span.end_idx {
-                        self.beats[i].kind = Note;
+                        self.beats[i].set_kind(Note);
                     }
                     result = Some(Modification::SetTuplet(group_span, *next_target));
                 }
@@ -211,10 +204,10 @@ impl Measure {
             let mut had_any_note = false;
             let mut had_any_accent = false;
             for b in &self.beats[start_idx..=end_idx] {
-                if b.kind == Note {
+                if b.is_note() {
                     had_any_note = true;
                 }
-                if b.accented {
+                if b.accented() {
                     had_any_accent = true;
                 }
             }
@@ -229,9 +222,9 @@ impl Measure {
             if start_idx < self.beats.len() {
                 self.beats[start_idx].tuplet_group_id = None;
                 if had_any_note {
-                    self.beats[start_idx].kind = Note;
+                    self.beats[start_idx].set_kind(Note);
                 }
-                self.beats[start_idx].accented = had_any_accent;
+                self.beats[start_idx].set_accented(had_any_accent);
             }
 
             self.tuplets.unregister(group_id).map(|anchor| {
@@ -261,8 +254,8 @@ impl Measure {
         let start_onset = onsets[start_idx];
 
         let mut offsets: Vec<(u32, bool)> = (group.start_idx..=group.end_idx)
-            .filter(|&i| self.beats[i].kind == Note)
-            .map(|i| ((onsets[i] - start_onset).min(span_ticks), self.beats[i].accented))
+            .filter(|&i| self.beats[i].is_note())
+            .map(|i| ((onsets[i] - start_onset).min(span_ticks), self.beats[i].accented()))
             .collect();
         offsets.sort_by_key(|e| e.0);
         Some(offsets)
@@ -304,9 +297,7 @@ impl Measure {
 
         // Start with every slot a rest without an accent
         for j in group.start_idx..=group.end_idx {
-            self.beats[j].kind = Rest;
-            self.beats[j].accented = false;
-            self.beats[j].soft = false;
+            self.beats[j].set_kind(Rest);
         }
 
         // Greedy: give each source note the nearest free slot
@@ -328,9 +319,9 @@ impl Measure {
             }
             if let Some(k) = best_k {
                 let ti = target_rel[k].1;
-                self.beats[ti].kind = Note;
+                self.beats[ti].set_kind(Note);
                 if src_accent {
-                    self.beats[ti].accented = true;
+                    self.beats[ti].set_accented(true);
                 }
                 used[k] = true;
             }
@@ -375,7 +366,7 @@ impl Measure {
                     break;
                 }
                 // Check if we are about to absorb the following beat that is a note
-                if k > idx && self.beats[k].kind == Note {
+                if k > idx && self.beats[k].is_note() {
                     return None;
                 }
                 consumed += DEFAULT_GRID.ticks_of(&self.beats[k].duration).unwrap();
@@ -384,9 +375,7 @@ impl Measure {
         }
 
         let new_duration = Duration::Tuplet(tuplet_spec);
-        let mut new_beat = Beat::new(new_duration, cur.kind);
-        new_beat.accented = cur.accented;
-        new_beat.soft = cur.soft;
+        let new_beat = Beat::with_heads(new_duration, *cur.heads());
         if self.set_beat(idx, new_beat).is_ok() { self.tuplet_group_at(idx) } else { None }
     }
 }
@@ -428,8 +417,8 @@ mod tests {
 
         // The first new beat is an accented note
         assert!(m.beats()[0].tuplet_group_id.is_none());
-        assert_eq!(m.beats()[0].kind, Note);
-        assert!(m.beats()[0].accented, "accent should be preserved on first replacement beat");
+        assert_eq!(m.beats()[0].kind(), Note);
+        assert!(m.beats()[0].accented(), "accent should be preserved on first replacement beat");
     }
 
     #[test]
@@ -443,7 +432,7 @@ mod tests {
         );
         // All three slots are rests
         for i in 0..3 {
-            assert_eq!(m.beats()[i].kind, Rest);
+            assert_eq!(m.beats()[i].kind(), Rest);
         }
 
         assert_matches!(
@@ -455,8 +444,8 @@ mod tests {
         );
 
         assert!(m.beats()[0].tuplet_group_id.is_none());
-        assert_eq!(m.beats()[0].kind, Rest);
-        assert!(!m.beats()[0].accented);
+        assert_eq!(m.beats()[0].kind(), Rest);
+        assert!(!m.beats()[0].accented());
     }
 
     #[test]
@@ -542,7 +531,7 @@ mod tests {
             None
         );
         // Verify state unchanged (idx 1 is still Note)
-        assert_eq!(m.beats()[1].kind, Note);
+        assert_eq!(m.beats()[1].kind(), Note);
         assert!(m.beats()[0].tuplet_group_id.is_none());
     }
 

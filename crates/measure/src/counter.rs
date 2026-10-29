@@ -17,7 +17,7 @@ use crate::duration::{Duration, TupletSpec};
 use crate::grid::{DEFAULT_GRID, is_general_tuplet};
 use crate::math::gcd;
 use crate::notation::{code_of, parse_score};
-use crate::{BeatKind, Measure, TimeSignature};
+use crate::{Measure, TimeSignature};
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -257,12 +257,8 @@ pub fn named_ratio_of(bar: &Measure, named: Option<Ratio>) -> Option<Ratio> {
     // spares building every ratio's counter bar.
     let ticks_per_beat = DEFAULT_GRID.ticks_per_beat(&ts);
     let onsets = DEFAULT_GRID.compute_onset_ticks(bar.beats());
-    let note_onsets: Vec<u32> = onsets
-        .iter()
-        .zip(bar.beats())
-        .filter(|(_, b)| b.kind == BeatKind::Note)
-        .map(|(&t, _)| t)
-        .collect();
+    let note_onsets: Vec<u32> =
+        onsets.iter().zip(bar.beats()).filter(|(_, b)| b.is_note()).map(|(&t, _)| t).collect();
     let clicks_on_notes = |r: &Ratio| {
         let span_ticks = u32::from(r.span) * ticks_per_beat;
         span_ticks.is_multiple_of(u32::from(r.n)) && {
@@ -275,9 +271,10 @@ pub fn named_ratio_of(bar: &Measure, named: Option<Ratio>) -> Option<Ratio> {
     let ticks = |b: &crate::Beat| DEFAULT_GRID.ticks_of(&b.duration);
     let fits = |m: &Measure| {
         m.beats().len() == bar.beats().len()
-            && m.beats().iter().zip(bar.beats()).all(|(c, b)| {
-                ticks(c) == ticks(b) && (c.kind == BeatKind::Note || b.kind == BeatKind::Rest)
-            })
+            && m.beats()
+                .iter()
+                .zip(bar.beats())
+                .all(|(c, b)| ticks(c) == ticks(b) && (c.is_note() || b.is_rest()))
     };
     let is_bars = |r: &Ratio| {
         ts.beats.is_multiple_of(r.span)
@@ -302,7 +299,7 @@ pub fn counter_clicks(bar: &Measure) -> Vec<std::ops::Range<usize>> {
     let ts = bar.time_signature();
     let slots = ratio_of(bar)
         .and_then(|r| counter_bar(ts, r))
-        .map(|m| m.beats().iter().map(|b| b.kind == BeatKind::Note).collect::<Vec<_>>());
+        .map(|m| m.beats().iter().map(|b| b.is_note()).collect::<Vec<_>>());
     let starts: Vec<usize> = match slots {
         Some(is_click) => (0..bar.beats().len()).filter(|&i| is_click[i]).collect(),
         None => (0..bar.beats().len()).collect(),

@@ -1,7 +1,7 @@
 use crate::tuplet_plan::{TupletSpan, detect_tuplet_spans};
 use grooph_measure::duration::{Duration, NoteValue, e, q};
 use grooph_measure::grid::DEFAULT_GRID;
-use grooph_measure::{Beat, BeatIdx, BeatKind, Measure, TimeSignature};
+use grooph_measure::{Beat, BeatIdx, Measure, TimeSignature};
 
 /// Number of beams implied by a duration (eighth = 1, sixteenth = 2, 32nd = 3).
 /// Tuplets map to their base note value for beam count purposes.
@@ -81,7 +81,7 @@ pub(super) fn compute_beam_plan_with(measure: &Measure, beam_rests: bool) -> Bea
     // Collect indices of beamable notes
     let mut note_idxs: Vec<BeatIdx> = Vec::new();
     for (i, b) in beats.iter().enumerate() {
-        if (beam_rests || b.kind == BeatKind::Note) && beam_count(&b.duration) > 0 {
+        if (beam_rests || b.is_note()) && beam_count(&b.duration) > 0 {
             note_idxs.push(i);
         }
     }
@@ -143,9 +143,10 @@ fn join_eighth_halves(
         })
     };
     let notes_meet = |bd: u32| {
-        onsets.iter().position(|&on| on == bd).is_some_and(|k| {
-            k > 0 && beats[k].kind == BeatKind::Note && beats[k - 1].kind == BeatKind::Note
-        })
+        onsets
+            .iter()
+            .position(|&on| on == bd)
+            .is_some_and(|k| k > 0 && beats[k].is_note() && beats[k - 1].is_note())
     };
     boundaries
         .into_iter()

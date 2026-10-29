@@ -179,10 +179,10 @@ pub(crate) fn code_of(duration: &Duration) -> Option<String> {
 fn parse_beat(token: &str, measure: usize) -> Result<Beat, NotationError> {
     if let Some(inner) = token.strip_prefix('(').and_then(|t| t.strip_suffix(')')) {
         let mut beat = parse_beat(inner, measure)?;
-        if beat.kind == Rest || beat.accented {
+        if beat.is_rest() || beat.accented() {
             return Err(NotationError::InvalidSoft { measure, token: token.to_string() });
         }
-        beat.soft = true;
+        beat.set_soft(true);
         return Ok(beat);
     }
     let (accented, rest_of) = match token.strip_prefix('>') {
@@ -199,7 +199,7 @@ fn parse_beat(token: &str, measure: usize) -> Result<Beat, NotationError> {
         return Err(NotationError::AccentedRest { measure, token: token.to_string() });
     }
     let mut beat = Beat::new(duration, kind);
-    beat.accented = accented;
+    beat.set_accented(accented);
     Ok(beat)
 }
 
@@ -229,10 +229,10 @@ fn build_measure(
             }
         })?;
         // `set_beat` keeps the accent of the slot it overwrites; apply ours.
-        if m.beats()[idx].accented != beat.accented {
+        if m.beats()[idx].accented() != beat.accented() {
             m.toggle_accent(idx);
         }
-        if m.beats()[idx].soft != beat.soft {
+        if m.beats()[idx].soft() != beat.soft() {
             m.toggle_soft(idx);
         }
     }
@@ -314,7 +314,7 @@ pub fn format_score(score: &Score) -> Option<String> {
             .iter()
             .map(|b| {
                 let code = code_of(&b.duration)?;
-                Some(match (b.kind, b.accented, b.soft) {
+                Some(match (b.kind(), b.accented(), b.soft()) {
                     (Rest, ..) => format!("r:{code}"),
                     (Note, true, _) => format!(">{code}"),
                     (Note, false, true) => format!("({code})"),
@@ -357,7 +357,7 @@ mod tests {
         assert_eq!(score.len(), 1);
         assert_eq!(score.measures[0].time_signature(), TimeSignature::FOUR_FOUR);
         let mut accented = Beat::note(q());
-        accented.accented = true;
+        accented.set_accented(true);
         assert_eq!(
             beats_of(&score, 0),
             vec![Beat::note(q()), Beat::note(e()), Beat::note(e()), Beat::rest(q()), accented]
@@ -391,9 +391,9 @@ mod tests {
     fn soft_notes_are_written_in_parentheses() {
         let score = parse_score("4/4 q (q) >q (e) e").unwrap();
         let beats = beats_of(&score, 0);
-        assert!(beats[1].soft && !beats[1].accented);
-        assert!(beats[2].accented && !beats[2].soft);
-        assert!(beats[3].soft);
+        assert!(beats[1].soft() && !beats[1].accented());
+        assert!(beats[2].accented() && !beats[2].soft());
+        assert!(beats[3].soft());
         assert_eq!(format_score(&score).unwrap(), "4/4 q (q) >q (e) e");
         assert!(matches!(parse_score("(r:q) q q q"), Err(NotationError::InvalidSoft { .. })));
         assert!(parse_score(">(q) q q q").is_err());
@@ -404,7 +404,7 @@ mod tests {
         let score = parse_score("q. >e s s s s q").unwrap();
         let beats = beats_of(&score, 0);
         assert_eq!(beats[0].duration, Duration::Dotted { base: Quarter, dots: 1 });
-        assert!(beats[1].accented);
+        assert!(beats[1].accented());
         assert_eq!(beats[2].duration, s());
     }
 

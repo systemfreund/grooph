@@ -1,6 +1,6 @@
 use crate::beam_plan::{BeamGroup, BeamPlan, compute_beam_plan_with};
 use crate::tuplet_plan::{TupletPlan, compute_tuplet_plan};
-use grooph_measure::{BeatKind, Measure};
+use grooph_measure::Measure;
 
 /// Logical, device-independent render plan derived from a `Measure`.
 ///
@@ -50,7 +50,7 @@ pub fn plan_measure_with(measure: &Measure, stemlets: bool) -> RenderPlan {
 /// bar, written with one whole rest.
 pub fn rests_only(measure: &Measure) -> bool {
     let beats = measure.beats();
-    !beats.is_empty() && beats.iter().all(|b| b.kind == BeatKind::Rest && !b.duration.is_tuplet())
+    !beats.is_empty() && beats.iter().all(|b| b.is_rest() && !b.duration.is_tuplet())
 }
 
 #[cfg(test)]

@@ -1368,10 +1368,10 @@ mod tests {
             let ts = measure.time_signature();
             assert_eq!(ticks, DEFAULT_GRID.ticks_per_measure(&ts), "{:?}", template.duration);
             let first = measure.beats()[0];
-            assert_eq!((first.kind, first.duration), (template.kind, template.duration));
+            assert_eq!((first.kind(), first.duration), (template.kind, template.duration));
             if !template.duration.is_tuplet() {
                 assert_eq!(measure.beats().len(), 1, "{:?}", template.duration);
-                assert_eq!((first.accented, first.soft), (template.accented, template.soft));
+                assert_eq!((first.accented(), first.soft()), (template.accented, template.soft));
             }
             count += 1;
         }

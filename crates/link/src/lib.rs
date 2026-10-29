@@ -683,7 +683,7 @@ mod tests {
         let beats = score.measures[0].beats();
         assert_eq!(beats[0], Beat::note(q()));
         assert_eq!(beats[1], Beat::note(e()));
-        assert!(beats[4].accented);
+        assert!(beats[4].accented());
     }
 
     #[test]
@@ -804,7 +804,7 @@ mod tests {
         let link = parse("v=2&bpm=70&ts=7/8&click=>q+r:q.+(q)");
         let bar = link.click.as_ref().unwrap();
         assert_eq!(bar.time_signature(), TimeSignature::SEVEN_EIGHT);
-        assert!(bar.beats()[0].accented && bar.beats()[2].soft);
+        assert!(bar.beats()[0].accented() && bar.beats()[2].soft());
         assert_eq!(link.to_url("/").unwrap(), "/?v=2&bpm=70&ts=7/8&click=%3Eq+r:q.+%28q%29");
         // The pattern belongs to the first measure of a rhythm.
         let link = parse("r=6/8+q.+q.+|+3/4+q+q+q&click=q.+>q.");
@@ -855,7 +855,7 @@ mod tests {
         let bar = link.counter.as_ref().unwrap();
         assert_eq!(bar.time_signature(), TimeSignature::FOUR_FOUR);
         assert_eq!(bar.beats().len(), 6);
-        assert!(bar.beats()[2].soft);
+        assert!(bar.beats()[2].soft());
         assert_eq!(
             link.to_url("/").unwrap(),
             "/?v=2&bpm=90&ts=4/4&click=%3Eq+r:q+q+q&counter=t4+r:t4+%28t4%29+r:t4+%28t4%29+r:t4"

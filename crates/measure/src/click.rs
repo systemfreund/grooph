@@ -39,7 +39,7 @@ impl ClickLevel {
 
     /// The level a beat of a click bar plays at.
     pub fn of(beat: &Beat) -> Self {
-        match (beat.kind, beat.accented, beat.soft) {
+        match (beat.kind(), beat.accented(), beat.soft()) {
             (Rest, ..) => ClickLevel::Off,
             (Note, true, _) => ClickLevel::Strong,
             (Note, false, true) => ClickLevel::Soft,
@@ -61,9 +61,9 @@ impl Measure {
         let Some(b) = self.beats.get_mut(idx) else {
             return;
         };
-        b.kind = if level == ClickLevel::Off { Rest } else { Note };
-        b.accented = level == ClickLevel::Strong;
-        b.soft = level == ClickLevel::Soft;
+        b.set_kind(if level == ClickLevel::Off { Rest } else { Note });
+        b.set_accented(level == ClickLevel::Strong);
+        b.set_soft(level == ClickLevel::Soft);
     }
 }
 

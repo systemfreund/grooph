@@ -12,8 +12,8 @@ use grooph_layout::pixel_layout::{
     LayoutOpts, MeasureLayout, build_measure_layout, build_time_sig_layout, compute_em,
 };
 use grooph_measure::BeatKind::{Note, Rest};
+use grooph_measure::Measure;
 use grooph_measure::duration::{Duration, TupletKind};
-use grooph_measure::{Beat, Measure};
 use grooph_render::measure::{draw_notes, draw_time_signature};
 use log::info;
 use tools::EditOp;
@@ -368,7 +368,7 @@ pub(crate) fn paint_none(painter: &egui::Painter, rect: Rect, color: Color32) {
 /// of short notes get a wider tile.
 pub(crate) fn notation_size(measure: &Measure, size: f32) -> Vec2 {
     let wide = measure.beats().len() > 6
-        || measure.beats().iter().any(|b| b.kind == Note && b.duration.as_tuplet_spec().is_some());
+        || measure.beats().iter().any(|b| b.is_note() && b.duration.as_tuplet_spec().is_some());
     Vec2::new(if wide { 1.5 * size } else { size }, size)
 }
 
@@ -385,24 +385,20 @@ pub(crate) fn paint_notation(
     let Some(first) = measure.beats().first() else {
         return;
     };
-    let template = measure.beats().iter().find(|b| b.kind == Note).unwrap_or(first);
+    let template = measure.beats().iter().find(|b| b.is_note()).unwrap_or(first);
     {
-        let cap_factor = match template {
-            Beat { kind: Rest, .. } => 0.8,
-            Beat { kind: Note, duration: Duration::Tuplet(spec), .. }
-                if matches!(spec.kind(), TupletKind::Nonuplet) =>
-            {
-                0.35
-            }
-            Beat { kind: Note, duration: Duration::Tuplet(..), .. } => 0.4,
+        let cap_factor = match (template.kind(), template.duration) {
+            (Rest, _) => 0.8,
+            (Note, Duration::Tuplet(spec)) if matches!(spec.kind(), TupletKind::Nonuplet) => 0.35,
+            (Note, Duration::Tuplet(..)) => 0.4,
             _ => 0.7,
         };
 
         let em = compute_em(&rect, cap_factor, ui);
 
-        let y_offset = match template {
-            Beat { kind: Rest, .. } => 2.0,
-            Beat { kind: Note, duration: Duration::Tuplet(..), .. } => 22.0,
+        let y_offset = match (template.kind(), template.duration) {
+            (Rest, _) => 2.0,
+            (Note, Duration::Tuplet(..)) => 22.0,
             _ => 20.0,
         };
 

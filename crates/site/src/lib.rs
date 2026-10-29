@@ -545,7 +545,7 @@ fn measure_grid(measure: &Measure) -> String {
         .zip(&onsets)
         .map(|(b, &t)| {
             let syllable = count_syllable(t, ts);
-            match (b.kind, b.accented) {
+            match (b.kind(), b.accented()) {
                 (BeatKind::Rest, _) => format!("({syllable})"),
                 (BeatKind::Note, true) => format!("{syllable}!"),
                 (BeatKind::Note, false) => syllable,
@@ -591,7 +591,7 @@ fn ticks_of(beat: &Beat) -> u32 {
 }
 
 fn cell(beat: &Beat, onset: u32, ts: TimeSignature) -> String {
-    let class = match (beat.kind, beat.accented) {
+    let class = match (beat.kind(), beat.accented()) {
         (BeatKind::Rest, _) => "cell rest",
         (BeatKind::Note, true) => "cell note accent",
         (BeatKind::Note, false) => "cell note",
