@@ -287,6 +287,18 @@ mod tests {
     }
 
     #[test]
+    fn a_score_saved_before_heads_reads_unchanged() {
+        // A score as the app saved it before beats had heads (#251): an
+        // accented note, a ghost note and a rest.
+        let old = r#"(measures:[{"beats":[(duration:Simple(Eighth),kind:Note,accented:true,soft:false,tuplet_group_id:None),(duration:Simple(Eighth),kind:Note,accented:false,soft:true,tuplet_group_id:None),(duration:Simple(Quarter),kind:Rest,accented:false,soft:false,tuplet_group_id:None)],"time_signature":(beats:2,beat_unit:4),"tuplet_anchors":{},"next_tuplet_id":1}])"#;
+        let saved = format!("(version:{PERSISTED_STATE_VERSION},score:{old})");
+        let (s, backup) = restore(Some(&saved));
+        assert!(backup.is_none(), "the old score is read, nothing is dropped");
+        let want = grooph_measure::notation::parse_score("2/4 >e (e) r:q").unwrap();
+        assert_eq!(ron::to_string(&s.score), ron::to_string(&want));
+    }
+
+    #[test]
     fn a_newer_version_keeps_what_reads() {
         let saved = saved_ron().replacen(
             &format!("version:{PERSISTED_STATE_VERSION}"),

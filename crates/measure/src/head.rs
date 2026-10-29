@@ -16,8 +16,8 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 /// rhythm on one line, whose sound comes from the settings; the others are
 /// the drumkit's.
 ///
-/// The order is the staff's, from low to high, so a chord's heads sort
-/// from the foot up.
+/// [`Instrument::Rhythm`] comes first; the kit follows in the staff's
+/// order, from low to high, so a chord's heads sort from the foot up.
 #[derive(
     Copy, Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
 )]
@@ -232,7 +232,7 @@ pub struct Heads {
 pub enum InvalidHeads {
     /// More than [`MAX_HEADS`].
     TooMany,
-    /// Two heads of `0`.
+    /// Two heads of the same instrument.
     SameInstrument(Instrument),
 }
 
@@ -393,5 +393,26 @@ mod tests {
         // Heads sort by instrument; on the staff that is from low to high.
         let kit = &Instrument::ALL[1..];
         assert!(kit.windows(2).all(|w| w[0] < w[1] && w[0].staff_pos() < w[1].staff_pos()));
+        assert_eq!(Instrument::ALL[0], Instrument::Rhythm);
+    }
+
+    #[test]
+    fn all_lists_every_instrument() {
+        // `ALL` holds the variants in declaration order without a gap, up to
+        // the last one: a new variant fails to compile in `is_last` until
+        // it is placed, and then this test until `ALL` holds it.
+        fn is_last(i: Instrument) -> bool {
+            use Instrument::*;
+            match i {
+                Crash => true,
+                Rhythm | HiHatFoot | Kick | FloorTom | Snare | MidTom | HighTom | Ride | HiHat => {
+                    false
+                }
+            }
+        }
+        for (n, &i) in Instrument::ALL.iter().enumerate() {
+            assert_eq!(i as usize, n, "{i:?}");
+        }
+        assert!(is_last(Instrument::ALL[Instrument::ALL.len() - 1]));
     }
 }

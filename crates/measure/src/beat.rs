@@ -183,6 +183,12 @@ mod tests {
         let beat: Beat = ron::from_str(old).unwrap();
         assert!(beat.is_rest());
         assert_eq!(beat.tuplet_group_id.map(|id| id.as_u32()), Some(3));
+        let old = "(duration: Simple(Eighth), kind: Note, accented: false, soft: true, \
+                   tuplet_group_id: None)";
+        let beat: Beat = ron::from_str(old).unwrap();
+        let mut ghost = Beat::note(e());
+        ghost.set_soft(true);
+        assert_eq!(beat, ghost);
     }
 
     #[test]
