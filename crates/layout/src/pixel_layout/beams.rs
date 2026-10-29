@@ -92,6 +92,25 @@ fn emit_stub_beams(
     }
 }
 
+/// Let every stem of a beamed group reach the group's beams, at the tip of
+/// its outermost head: on the kit's staff the heads of a group sit at
+/// different heights. A stemlet keeps its length.
+pub(super) fn reach_beams(notes: &mut [NoteLayout], beam_groups: &[BeamGroup], opts: &LayoutOpts) {
+    for g in beam_groups.iter().filter(|g| g.beat_indices.len() >= 2) {
+        let positions = g.beat_indices.iter().map(|&i| notes[i].staff_pos);
+        let tip = opts.stem_tip_y(opts.outermost(positions).unwrap_or(0));
+        for &i in &g.beat_indices {
+            let stemlet = notes[i].stemlet;
+            if let Some(stem) = &mut notes[i].stem {
+                if stemlet {
+                    stem.p1.y = tip - (stem.p2.y - stem.p1.y);
+                }
+                stem.p2.y = tip;
+            }
+        }
+    }
+}
+
 pub(super) fn build_beam_layout(
     note_layout: &[NoteLayout],
     beam_groups: &[BeamGroup],

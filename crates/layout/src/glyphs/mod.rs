@@ -6,6 +6,8 @@ pub use bravura::*;
 use egui::{Rect, pos2};
 use grooph_measure::duration::Duration;
 use grooph_measure::duration::NoteValue::{Eighth, Half, Quarter, Sixteenth, ThirtySecond, Whole};
+use grooph_measure::head::Notehead;
+use grooph_measure::{Instrument, Technique};
 
 /// A SMuFL glyph with its metrics in staff spaces (a quarter of the font
 /// size), relative to its origin on the baseline, y up.
@@ -47,6 +49,72 @@ pub fn notehead_glyph_for_duration(d: Duration) -> Glyph {
     match d.base_note() {
         Half | Whole => NOTEHEAD_HALF,
         _ => NOTEHEAD_BLACK,
+    }
+}
+
+/// A note head and the points its stems attach to, relative to its origin.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct HeadGlyph {
+    pub glyph: Glyph,
+    pub stem_up_se: [f32; 2],
+    pub stem_down_nw: [f32; 2],
+}
+
+impl HeadGlyph {
+    const fn of(glyph: Glyph, stem_up_se: [f32; 2], stem_down_nw: [f32; 2]) -> Self {
+        HeadGlyph { glyph, stem_up_se, stem_down_nw }
+    }
+}
+
+/// The head of `instrument` played with `technique` in a note of duration
+/// `d`: the usual oval for drums and the one line, an x for cymbals; a
+/// cross-stick is a circled x, a rimshot a slashed head, the ride's bell a
+/// diamond (Weinberg).
+pub fn head_glyph_for(instrument: Instrument, technique: Technique, d: Duration) -> HeadGlyph {
+    let hollow = matches!(d.base_note(), Half | Whole);
+    match (technique, instrument.notehead(), hollow) {
+        (Technique::CrossStick, ..) => HeadGlyph::of(
+            NOTEHEAD_CIRCLE_X,
+            NOTEHEAD_CIRCLE_X_STEM_UP_SE,
+            NOTEHEAD_CIRCLE_X_STEM_DOWN_NW,
+        ),
+        (Technique::Rimshot, ..) => HeadGlyph::of(
+            NOTEHEAD_SLASHED_BLACK,
+            NOTEHEAD_SLASHED_BLACK_STEM_UP_SE,
+            NOTEHEAD_SLASHED_BLACK_STEM_DOWN_NW,
+        ),
+        (Technique::Bell, ..) => HeadGlyph::of(
+            NOTEHEAD_DIAMOND_BLACK,
+            NOTEHEAD_DIAMOND_BLACK_STEM_UP_SE,
+            NOTEHEAD_DIAMOND_BLACK_STEM_DOWN_NW,
+        ),
+        (_, Notehead::Cross, false) => HeadGlyph::of(
+            NOTEHEAD_X_BLACK,
+            NOTEHEAD_X_BLACK_STEM_UP_SE,
+            NOTEHEAD_X_BLACK_STEM_DOWN_NW,
+        ),
+        (_, Notehead::Cross, true) => {
+            HeadGlyph::of(NOTEHEAD_X_HALF, NOTEHEAD_X_HALF_STEM_UP_SE, NOTEHEAD_X_HALF_STEM_DOWN_NW)
+        }
+        (_, Notehead::Normal, false) => {
+            HeadGlyph::of(NOTEHEAD_BLACK, NOTEHEAD_BLACK_STEM_UP_SE, NOTEHEAD_BLACK_STEM_DOWN_NW)
+        }
+        (_, Notehead::Normal, true) => {
+            HeadGlyph::of(NOTEHEAD_HALF, NOTEHEAD_HALF_STEM_UP_SE, NOTEHEAD_HALF_STEM_DOWN_NW)
+        }
+    }
+}
+
+/// The sign written by a note for `technique`, if it has one: o for an open
+/// hi-hat, + for a closed one, the half-open sign between, and the choke's
+/// mark.
+pub fn technique_sign(technique: Technique) -> Option<Glyph> {
+    match technique {
+        Technique::Open => Some(SIGN_OPEN),
+        Technique::HalfOpen => Some(SIGN_HALF_OPEN),
+        Technique::Closed => Some(SIGN_CLOSED),
+        Technique::Choke => Some(SIGN_CHOKE),
+        Technique::Normal | Technique::CrossStick | Technique::Rimshot | Technique::Bell => None,
     }
 }
 

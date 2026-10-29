@@ -600,6 +600,7 @@ mod tests {
             accent_displacement: 0.0,
             stem_down: false,
             shared_line: false,
+            staff: grooph_measure::StaffKind::Line,
         }
     }
 

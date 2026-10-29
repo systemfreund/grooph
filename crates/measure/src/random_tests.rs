@@ -176,7 +176,7 @@ fn random_score(rng: &mut Rng, durations: &[Duration], meters: &[TimeSignature])
             m
         })
         .collect();
-    Score { measures }
+    Score::new(measures)
 }
 
 /// Which beats share a tuplet group, independent of the group ids.

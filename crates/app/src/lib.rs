@@ -1543,7 +1543,7 @@ mod tests {
                 m.set_beat(i, Beat::note(d)).unwrap();
                 i += 1;
             }
-            app.editor.score = Score { measures: vec![m.clone(), m] };
+            app.editor.score = Score::new(vec![m.clone(), m]);
             app.save_pattern_as();
         }
         app.select_tab(Tab::More);
@@ -2099,12 +2099,10 @@ mod tests {
 
     #[test]
     fn the_count_menu_spells_a_count_in_the_first_bar_it_fits() {
-        let score = Score {
-            measures: vec![
-                Measure::new(TimeSignature::new(6, 16)),
-                Measure::new(TimeSignature::new(6, 8)),
-            ],
-        };
+        let score = Score::new(vec![
+            Measure::new(TimeSignature::new(6, 16)),
+            Measure::new(TimeSignature::new(6, 8)),
+        ]);
         assert_eq!(CountingBase::Primary.label(CountingSystem::Numbers, &score), "1 2 ...");
         assert_eq!(CountingBase::Ands.label(CountingSystem::Numbers, &score), "1 ta la ta ...");
         let lone = Score::single(Measure::new(TimeSignature::new(6, 16)));

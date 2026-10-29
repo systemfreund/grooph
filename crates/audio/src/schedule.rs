@@ -198,8 +198,8 @@ mod tests {
     use grooph_measure::{Beat, Measure, Score, TimeSignature};
 
     fn score_of_quarters(ts_list: &[TimeSignature]) -> Score {
-        Score {
-            measures: ts_list
+        Score::new(
+            ts_list
                 .iter()
                 .map(|ts| {
                     let mut m = Measure::new(*ts);
@@ -209,7 +209,7 @@ mod tests {
                     m
                 })
                 .collect(),
-        }
+        )
     }
 
     #[test]
@@ -239,7 +239,7 @@ mod tests {
     /// Metronome sounds of the first bar of a one-measure `ts` score with
     /// `pattern`, as (tick in the bar, sound).
     fn clicks(ts: TimeSignature, bar: &str) -> Vec<(u64, SoundType)> {
-        let score = Score { measures: vec![Measure::new(ts)] };
+        let score = Score::new(vec![Measure::new(ts)]);
         let timing = ScoreTiming::from_score(&score, 120);
         let mut bars = ClickBars::default();
         let bar = grooph_measure::notation::parse_score(&format!("{ts} {bar}")).unwrap();
@@ -273,7 +273,7 @@ mod tests {
         // 4/4 then 5/8, no click bar set: quarters, then every eighth.
         let four = TimeSignature::FOUR_FOUR;
         let five = TimeSignature::FIVE_EIGHT;
-        let score = Score { measures: vec![Measure::new(four), Measure::new(five)] };
+        let score = Score::new(vec![Measure::new(four), Measure::new(five)]);
         let timing = ScoreTiming::from_score(&score, 120);
         let s = Schedule::build(&score, &timing, None, &ClickBars::default());
         let quarter = DEFAULT_GRID.ticks_per_beat(&four) as u64;
@@ -368,7 +368,7 @@ mod tests {
         use grooph_measure::counter::{Ratio, counter_bar};
         use grooph_measure::swing::{Swing, SwingUnit};
         let ts = TimeSignature::FOUR_FOUR;
-        let score = Score { measures: vec![Measure::new(ts), Measure::new(ts.with_grouping(0))] };
+        let score = Score::new(vec![Measure::new(ts), Measure::new(ts.with_grouping(0))]);
         let swing = Swing { unit: SwingUnit::Eighths, percent: 75 };
         let timing = ScoreTiming::from_score(&score, 120).with_swing(swing);
         let mut counter = CounterBars::default();
@@ -441,7 +441,7 @@ mod tests {
         for i in 0..8 {
             m.set_beat(i, Beat::note(e())).unwrap();
         }
-        let score = Score { measures: vec![m] };
+        let score = Score::new(vec![m]);
         let swing = Swing { unit: SwingUnit::Eighths, percent: 75 };
         let timing = ScoreTiming::from_score(&score, 120).with_swing(swing);
         let s =

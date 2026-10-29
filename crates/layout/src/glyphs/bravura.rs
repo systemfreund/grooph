@@ -7,6 +7,16 @@ pub const NOTEHEAD_BLACK: Glyph =
     Glyph { ch: '\u{E0A4}', advance: 1.18, sw: [0.0, -0.5], ne: [1.18, 0.5] };
 pub const NOTEHEAD_HALF: Glyph =
     Glyph { ch: '\u{E0A3}', advance: 1.18, sw: [0.0, -0.5], ne: [1.18, 0.5] };
+pub const NOTEHEAD_X_BLACK: Glyph =
+    Glyph { ch: '\u{E0A9}', advance: 1.16, sw: [0.0, -0.5], ne: [1.16, 0.5] };
+pub const NOTEHEAD_X_HALF: Glyph =
+    Glyph { ch: '\u{E0A8}', advance: 1.336, sw: [0.0, -0.5], ne: [1.336, 0.5] };
+pub const NOTEHEAD_CIRCLE_X: Glyph =
+    Glyph { ch: '\u{E0B3}', advance: 0.996, sw: [0.0, -0.5], ne: [0.996, 0.5] };
+pub const NOTEHEAD_DIAMOND_BLACK: Glyph =
+    Glyph { ch: '\u{E0DB}', advance: 1.0, sw: [0.0, -0.5], ne: [1.0, 0.5] };
+pub const NOTEHEAD_SLASHED_BLACK: Glyph =
+    Glyph { ch: '\u{E0CF}', advance: 1.18, sw: [-0.32, -0.66], ne: [1.5, 0.668] };
 pub const NOTEHEAD_PAREN_LEFT: Glyph =
     Glyph { ch: '\u{E0F5}', advance: 0.292, sw: [0.0, -0.724], ne: [0.436, 0.724] };
 pub const NOTEHEAD_PAREN_RIGHT: Glyph =
@@ -29,6 +39,16 @@ pub const FLAG_32ND_DOWN: Glyph =
     Glyph { ch: '\u{E245}', advance: 1.096, sw: [0.0, -0.6875], ne: [1.092, 3.248] };
 pub const ACCENT_ABOVE: Glyph =
     Glyph { ch: '\u{E4A0}', advance: 1.356, sw: [0.0, 0.004], ne: [1.356, 0.98] };
+pub const ACCENT_BELOW: Glyph =
+    Glyph { ch: '\u{E4A1}', advance: 1.356, sw: [0.0, -0.976], ne: [1.356, 0.0] };
+pub const SIGN_OPEN: Glyph =
+    Glyph { ch: '\u{E5E7}', advance: 1.22, sw: [0.0, 0.0], ne: [1.216, 1.216] };
+pub const SIGN_HALF_OPEN: Glyph =
+    Glyph { ch: '\u{E5E6}', advance: 1.22, sw: [0.004, 0.0], ne: [1.22, 1.216] };
+pub const SIGN_CLOSED: Glyph =
+    Glyph { ch: '\u{E5E5}', advance: 1.088, sw: [0.0, 0.0], ne: [1.088, 1.088] };
+pub const SIGN_CHOKE: Glyph =
+    Glyph { ch: '\u{E805}', advance: 0.612, sw: [0.004, 0.008], ne: [0.608, 1.004] };
 pub const REST_WHOLE: Glyph =
     Glyph { ch: '\u{E4E3}', advance: 1.132, sw: [0.0, -0.54], ne: [1.128, 0.036] };
 pub const REST_HALF: Glyph =
@@ -87,6 +107,16 @@ pub const NOTEHEAD_BLACK_STEM_DOWN_NW: [f32; 2] = [0.0, -0.168];
 pub const NOTEHEAD_BLACK_STEM_UP_SE: [f32; 2] = [1.18, 0.168];
 pub const NOTEHEAD_HALF_STEM_DOWN_NW: [f32; 2] = [0.0, -0.168];
 pub const NOTEHEAD_HALF_STEM_UP_SE: [f32; 2] = [1.18, 0.168];
+pub const NOTEHEAD_X_BLACK_STEM_DOWN_NW: [f32; 2] = [0.0, -0.44];
+pub const NOTEHEAD_X_BLACK_STEM_UP_SE: [f32; 2] = [1.16, 0.444];
+pub const NOTEHEAD_X_HALF_STEM_DOWN_NW: [f32; 2] = [0.0, -0.412];
+pub const NOTEHEAD_X_HALF_STEM_UP_SE: [f32; 2] = [1.336, 0.412];
+pub const NOTEHEAD_CIRCLE_X_STEM_DOWN_NW: [f32; 2] = [0.0, 0.0];
+pub const NOTEHEAD_CIRCLE_X_STEM_UP_SE: [f32; 2] = [0.996, 0.0];
+pub const NOTEHEAD_DIAMOND_BLACK_STEM_DOWN_NW: [f32; 2] = [0.0, 0.0];
+pub const NOTEHEAD_DIAMOND_BLACK_STEM_UP_SE: [f32; 2] = [1.0, 0.0];
+pub const NOTEHEAD_SLASHED_BLACK_STEM_DOWN_NW: [f32; 2] = [0.0, -0.172];
+pub const NOTEHEAD_SLASHED_BLACK_STEM_UP_SE: [f32; 2] = [1.18, 0.164];
 pub const FLAG_8TH_UP_STEM_UP_NW: [f32; 2] = [0.0, -0.04];
 pub const FLAG_8TH_DOWN_STEM_DOWN_SW: [f32; 2] = [0.0, 0.132];
 pub const FLAG_16TH_UP_STEM_UP_NW: [f32; 2] = [0.0, -0.088];

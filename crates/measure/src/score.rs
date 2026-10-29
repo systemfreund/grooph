@@ -3,19 +3,41 @@ use serde::{Deserialize, Serialize};
 
 pub type MeasureIdx = usize;
 
-/// A collection of one or more measures.
+/// A collection of one or more measures, on its staff.
 ///
 /// Invariant: `measures` is never empty. Constructors and mutators must uphold this;
 /// deserializing checks it (see [`EmptyScore`]).
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(try_from = "RawScore")]
 pub struct Score {
+    /// The staff the score is written on.
+    #[serde(default, skip_serializing_if = "StaffKind::is_line")]
+    pub staff: StaffKind,
     pub measures: Vec<Measure>,
+}
+
+/// The staff a score is written on.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum StaffKind {
+    /// One line, for a rhythm of one sound.
+    #[default]
+    Line,
+    /// Five lines, for a drum kit: each instrument on its own line or space
+    /// ([`crate::Instrument::staff_pos`]).
+    Kit,
+}
+
+impl StaffKind {
+    fn is_line(&self) -> bool {
+        *self == StaffKind::Line
+    }
 }
 
 /// A [`Score`] as saved, before its invariant is checked.
 #[derive(Deserialize)]
 struct RawScore {
+    #[serde(default)]
+    staff: StaffKind,
     measures: Vec<Measure>,
 }
 
@@ -38,13 +60,19 @@ impl TryFrom<RawScore> for Score {
         if raw.measures.is_empty() {
             return Err(EmptyScore);
         }
-        Ok(Self { measures: raw.measures })
+        Ok(Self { staff: raw.staff, measures: raw.measures })
     }
 }
 
 impl Score {
+    /// `measures` on one line. Panics if there are none.
+    pub fn new(measures: Vec<Measure>) -> Self {
+        assert!(!measures.is_empty(), "a score needs at least one measure");
+        Self { staff: StaffKind::Line, measures }
+    }
+
     pub fn single(measure: Measure) -> Self {
-        Self { measures: vec![measure] }
+        Self::new(vec![measure])
     }
 
     pub fn current(&self, idx: MeasureIdx) -> &Measure {
@@ -110,7 +138,7 @@ mod tests {
     #[test]
     fn same_beats_compares_meters_and_beats() {
         let four = Measure::new(TimeSignature::FOUR_FOUR);
-        let score = Score { measures: vec![four.clone(), four.clone()] };
+        let score = Score::new(vec![four.clone(), four.clone()]);
         assert!(score.same_beats(&score.clone()));
 
         // The same beats under another meter of the same length.

@@ -97,12 +97,10 @@ mod tests {
     use grooph_measure::{Measure, Score, TimeSignature};
 
     fn timing() -> ScoreTiming {
-        let score = Score {
-            measures: vec![
-                Measure::new(TimeSignature::FOUR_FOUR),
-                Measure::new(TimeSignature::FOUR_FOUR),
-            ],
-        };
+        let score = Score::new(vec![
+            Measure::new(TimeSignature::FOUR_FOUR),
+            Measure::new(TimeSignature::FOUR_FOUR),
+        ]);
         ScoreTiming::from_score(&score, 120)
     }
 

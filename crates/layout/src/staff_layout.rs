@@ -27,7 +27,9 @@ use crate::{calculate_shared_x_centers, shared_min_width};
 use egui::{FontId, Pos2, Rect, Vec2, pos2, vec2};
 use grooph_measure::duration::s;
 use grooph_measure::grid::DEFAULT_GRID;
-use grooph_measure::{Beat, BeatIdx, MeasureIdx, Score, TimeSignature, VoiceBar, VoiceIdx};
+use grooph_measure::{
+    Beat, BeatIdx, MeasureIdx, Score, StaffKind, TimeSignature, VoiceBar, VoiceIdx,
+};
 
 /// Configuration for laying out an entire [`Score`].
 ///
@@ -81,6 +83,7 @@ impl StaffOpts {
             placed.y_offset,
             placed.show_clef,
             placed.show_time_signature,
+            placed.staff,
         );
         Self::voice_of(opts, voice, placed.voices.len())
     }
@@ -100,6 +103,7 @@ impl StaffOpts {
         y_offset: f32,
         show_clef: bool,
         show_ts: bool,
+        staff: StaffKind,
     ) -> LayoutOpts {
         LayoutOpts {
             rect,
@@ -114,6 +118,7 @@ impl StaffOpts {
             accent_displacement: self.accent_displacement,
             stem_down: false,
             shared_line: false,
+            staff,
         }
     }
 
@@ -136,8 +141,11 @@ impl StaffOpts {
 pub struct PlacedMeasure {
     pub measure_idx: MeasureIdx,
     pub rect: Rect,
-    /// How far the staff line sits below the center of `rect`.
+    /// How far the staff line (the kit's middle line) sits below the center
+    /// of `rect`.
     pub y_offset: f32,
+    /// The staff of its score.
+    pub staff: StaffKind,
     /// The layout of each voice of the measure, the first one upper.
     pub voices: Vec<MeasureLayout>,
     pub show_clef: bool,
@@ -314,7 +322,11 @@ pub fn build_staff_layout(score: &Score, opts: &StaffOpts) -> StaffLayout {
     // 1. show-flags: clef only on first. The time signature only shows when
     // the score mixes meters, then on the first measure + every change, or
     // on the first when asked for.
-    let show_clef: Vec<bool> = (0..score.len()).map(|i| i == 0 && opts.layout_clef_first).collect();
+    // The kit's staff starts every row with its clef: it tells the five
+    // lines from a pitched staff's.
+    let kit = score.staff == StaffKind::Kit;
+    let show_clef: Vec<bool> =
+        (0..score.len()).map(|i| kit || (i == 0 && opts.layout_clef_first)).collect();
     let meter_changes_at =
         |i: usize| score.measures[i].time_signature() != score.measures[i - 1].time_signature();
     let mixed_meters = (1..score.len()).any(meter_changes_at);
@@ -358,7 +370,8 @@ pub fn build_staff_layout(score: &Score, opts: &StaffOpts) -> StaffLayout {
     };
     let widths_min: Vec<f32> = (0..score.len())
         .map(|i| {
-            let per_voice = voice_opts(i, opts.measure_opts(opts.rect, 0.0, false, false));
+            let per_voice =
+                voice_opts(i, opts.measure_opts(opts.rect, 0.0, false, false, score.staff));
             let notes_min = if voices(i).len() > 1 {
                 note_lead(opts.em)
                     + shared_min_width(&together(voices(i), &advances(i, &per_voice)))
@@ -388,7 +401,8 @@ pub fn build_staff_layout(score: &Score, opts: &StaffOpts) -> StaffLayout {
     let left = opts.rect.left();
     let widths: Vec<f32> = widths_min.iter().map(|w| (w * em_scale).max(available)).collect();
     let lay_out = |i: usize, rect: Rect, y_offset: f32| -> Vec<(MeasureLayout, LayoutOpts)> {
-        let per_opts = effective_opts.measure_opts(rect, y_offset, show_clef[i], show_ts[i]);
+        let per_opts =
+            effective_opts.measure_opts(rect, y_offset, show_clef[i], show_ts[i], score.staff);
         let per_voice = voice_opts(i, per_opts);
         if voices(i).len() == 1 {
             let layout = build_measure_layout_with_plan(&voices(i)[0], &plans[i][0], &per_voice[0]);
@@ -417,6 +431,11 @@ pub fn build_staff_layout(score: &Score, opts: &StaffOpts) -> StaffLayout {
         })
         .collect();
     let mut room = row_room(&reaches, opts);
+    if kit {
+        // The five lines reach two staff spaces either way.
+        let lines = 0.5 + INK_MARGIN_EM;
+        room = RowRoom { above: room.above.max(lines), below: room.below.max(lines) };
+    }
     // A meter with an unusual grouping has it written below (see
     // grooph-render's `draw_time_signature`).
     let grouping_shown = score
@@ -449,6 +468,7 @@ pub fn build_staff_layout(score: &Score, opts: &StaffOpts) -> StaffLayout {
                 rect,
                 y_offset,
                 voices,
+                staff: score.staff,
                 show_clef: show_clef[i],
                 show_time_signature: show_ts[i],
             }],
@@ -583,7 +603,7 @@ mod tests {
         let placed = &staff.systems[0].measures[0];
         let direct = crate::pixel_layout::build_measure_layout(
             &m,
-            &staff_opts.measure_opts(rect, 0.0, true, false),
+            &staff_opts.measure_opts(rect, 0.0, true, false, StaffKind::Line),
         );
 
         assert_eq!(placed.layout().notes.len(), direct.notes.len());
@@ -639,6 +659,115 @@ mod tests {
         let single = build_staff_layout(&upper, &opts(em, rect));
         let y = single.systems[0].rect.bottom() - 1.0;
         assert_eq!(hit_test_voice(&single, Pos2::new(x, y)).map(|h| h.0), Some(0));
+    }
+
+    /// The kit staff's layout of `text` (one measure), its middle line's y
+    /// and staff space.
+    fn kit(text: &str) -> (PlacedMeasure, f32, f32) {
+        let score = grooph_measure::notation::parse_score(text).unwrap();
+        assert_eq!(score.staff, StaffKind::Kit);
+        let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(500.0, 200.0));
+        let o = opts(20.0, rect);
+        let staff = build_staff_layout(&score, &o);
+        let placed = staff.systems[0].measures[0].clone();
+        let line = staff.systems[0].y_baseline;
+        (placed, line, o.rescaled(staff.scale).staff_space())
+    }
+
+    #[test]
+    fn kit_heads_sit_at_their_instruments_places_on_one_stem() {
+        let (placed, line, ss) = kit("4/4 S-H:q K-H:q T1:q CR:q");
+        let notes = &placed.layout().notes;
+        // Snare and hi-hat share a stem from the snare to past the hi-hat.
+        let chord = &notes[0];
+        assert_eq!(chord.staff_pos, 5);
+        assert_eq!(chord.chord.len(), 1);
+        let stem = chord.stem.unwrap();
+        let snare_y = line - 0.5 * ss;
+        let hihat_y = line - 2.5 * ss;
+        assert!((chord.chord[0].origin.y - snare_y).abs() < 0.01);
+        assert!((chord.head.origin.y - hihat_y).abs() < 0.01);
+        assert!(stem.p1.y > snare_y - ss && stem.p2.y < hihat_y - 2.0 * ss, "{stem:?}");
+        // Both left of the up stem, an x head for the hi-hat.
+        for head in std::iter::once(&chord.head).chain(&chord.chord) {
+            assert!(head.ink().right() <= stem.p1.x + 0.5 * ss, "{head:?} {stem:?}");
+        }
+        assert_eq!(chord.head.glyph, crate::glyphs::NOTEHEAD_X_BLACK);
+        assert_eq!(notes[1].chord[0].origin.y, line + 1.5 * ss, "kick in the first space");
+        assert_eq!(notes[2].staff_pos, 3);
+        // The crash, above the staff, on a ledger line.
+        let crash = &notes[3];
+        assert_eq!(crash.staff_pos, 6);
+        assert_eq!(crash.ledgers.len(), 1);
+        assert!((crash.ledgers[0].p1.y - (line - 3.0 * ss)).abs() < 0.01);
+        assert!(notes[..3].iter().all(|n| n.ledgers.is_empty()));
+    }
+
+    #[test]
+    fn a_ghost_notes_parentheses_center_on_the_note() {
+        // On one line as on the kit's staff, unless a head is flipped.
+        let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(500.0, 200.0));
+        let score = grooph_measure::notation::parse_score("4/4 q (q) q q").unwrap();
+        let staff = build_staff_layout(&score, &opts(20.0, rect));
+        let (line, _, _) = kit("4/4 S:q (S):q S:q S:q");
+        for note in [&staff.systems[0].measures[0].layout().notes[1], &line.layout().notes[1]] {
+            let [left, right] = [note.parens[0].ink(), note.parens[1].ink()];
+            assert!(((left.right() + right.left()) / 2.0 - note.center.x).abs() < 0.01);
+        }
+    }
+
+    #[test]
+    fn kit_heads_a_second_apart_take_both_sides_of_the_stem() {
+        // Ride (4) and hi-hat (5), mid (2) and high tom (3): a second each.
+        let (placed, _, ss) = kit("2/4 RD-H:q T2-T1:q");
+        for note in &placed.layout().notes {
+            let stem = note.stem.unwrap();
+            let lower = note.chord[0].ink();
+            let upper = note.head.ink();
+            assert!(lower.right() <= stem.p1.x + 0.5 * ss, "the lower head left of the stem");
+            assert!(upper.left() >= stem.p1.x - 0.5 * ss, "the upper one right of it");
+            assert!(lower.right() <= upper.left() + 0.5 * ss);
+        }
+        // With the stem down the other way round: from the top, the head a
+        // second below goes left of the stem.
+        let (placed, _, ss) = kit("2/4 CR:h ; T2-T1:h");
+        let toms = &placed.voices[1].notes[0];
+        let stem = toms.stem.unwrap();
+        assert!(toms.chord[0].ink().left() >= stem.p1.x - 0.5 * ss, "high tom right of the stem");
+        assert!(toms.head.ink().right() <= stem.p1.x + 0.5 * ss, "mid tom left of it");
+    }
+
+    #[test]
+    fn kit_signs_stack_past_the_accent_and_rests_keep_to_their_voice() {
+        let (placed, line, _) = kit("4/4 >Ho:q H:q Hc:q (S)-H:q ; K:q r:q K:q r:q");
+        let hands = &placed.layout().notes;
+        let accent = hands[0].accent.unwrap().ink();
+        let open = hands[0].sign.unwrap();
+        assert_eq!(open.glyph, crate::glyphs::SIGN_OPEN);
+        assert!(open.ink().bottom() <= accent.top(), "the o above the accent");
+        assert!(accent.bottom() <= hands[0].stem.unwrap().p2.y + 0.01, "the accent above the stem");
+        assert!(hands[1].sign.is_none());
+        assert_eq!(hands[2].sign.unwrap().glyph, crate::glyphs::SIGN_CLOSED);
+        assert_eq!(hands[3].parens.len(), 2, "the ghost snare's parentheses");
+        let feet = &placed.voices[1].notes;
+        assert!(feet[1].staff_pos < 0 && feet[1].head.ink().top() > line, "kick rests below");
+        assert!(feet[0].stem.unwrap().p2.y > line, "stems down");
+        // One voice alone keeps its rests in the middle.
+        let (placed, _, _) = kit("2/4 S:q r:q");
+        assert_eq!(placed.layout().notes[1].staff_pos, 0);
+        let (placed, _, _) = kit("2/4 S:q r:q ; K:h");
+        assert!(placed.layout().notes[1].staff_pos > 0, "above with a lower voice");
+    }
+
+    #[test]
+    fn kit_beams_reach_every_stem_and_the_row_holds_five_lines() {
+        let (placed, line, ss) = kit("2/4 H:e S:e K-H:e S:e");
+        let notes = &placed.layout().notes;
+        let tips: Vec<f32> = notes.iter().map(|n| n.stem.unwrap().p2.y).collect();
+        assert!(tips.windows(2).all(|w| (w[0] - w[1]).abs() < 0.01), "{tips:?}");
+        assert!(placed.layout().beams.iter().all(|b| b.rect.bottom() <= tips[0] + 0.5 * ss));
+        assert!(placed.rect.top() < line - 2.0 * ss && placed.rect.bottom() > line + 2.0 * ss);
+        assert!(placed.show_clef, "every kit row starts with its clef");
     }
 
     #[test]
@@ -727,14 +856,12 @@ mod tests {
         let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(4000.0, 100.0));
         let staff_opts = opts(em, rect);
 
-        let score = Score {
-            measures: vec![
-                measure_with_quarters(TimeSignature::FOUR_FOUR),
-                measure_with_quarters(TimeSignature::FOUR_FOUR),
-                measure_with_quarters(TimeSignature::THREE_FOUR),
-                measure_with_quarters(TimeSignature::THREE_FOUR),
-            ],
-        };
+        let score = Score::new(vec![
+            measure_with_quarters(TimeSignature::FOUR_FOUR),
+            measure_with_quarters(TimeSignature::FOUR_FOUR),
+            measure_with_quarters(TimeSignature::THREE_FOUR),
+            measure_with_quarters(TimeSignature::THREE_FOUR),
+        ]);
 
         let staff = build_staff_layout(&score, &staff_opts);
         let flags: Vec<bool> =
@@ -748,12 +875,10 @@ mod tests {
         let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(4000.0, 100.0));
         let staff_opts = opts(em, rect);
 
-        let score = Score {
-            measures: vec![
-                measure_with_quarters(TimeSignature::THREE_FOUR),
-                measure_with_quarters(TimeSignature::THREE_FOUR),
-            ],
-        };
+        let score = Score::new(vec![
+            measure_with_quarters(TimeSignature::THREE_FOUR),
+            measure_with_quarters(TimeSignature::THREE_FOUR),
+        ]);
 
         let staff = build_staff_layout(&score, &staff_opts);
         let placed: Vec<_> = staff.systems.iter().flat_map(|s| &s.measures).collect();
@@ -786,12 +911,10 @@ mod tests {
         let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(4000.0, 100.0));
         let staff_opts = StaffOpts { time_signature_first: true, ..opts(em, rect) };
 
-        let score = Score {
-            measures: vec![
-                measure_with_quarters(TimeSignature::THREE_FOUR),
-                measure_with_quarters(TimeSignature::THREE_FOUR),
-            ],
-        };
+        let score = Score::new(vec![
+            measure_with_quarters(TimeSignature::THREE_FOUR),
+            measure_with_quarters(TimeSignature::THREE_FOUR),
+        ]);
 
         let staff = build_staff_layout(&score, &staff_opts);
         let flags: Vec<bool> =
@@ -814,13 +937,11 @@ mod tests {
         let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(4000.0, 100.0));
         let staff_opts = opts(em, rect);
 
-        let score = Score {
-            measures: vec![
-                measure_with_quarters(TimeSignature::FOUR_FOUR),
-                measure_with_quarters(TimeSignature::FOUR_FOUR),
-                measure_with_quarters(TimeSignature::FOUR_FOUR),
-            ],
-        };
+        let score = Score::new(vec![
+            measure_with_quarters(TimeSignature::FOUR_FOUR),
+            measure_with_quarters(TimeSignature::FOUR_FOUR),
+            measure_with_quarters(TimeSignature::FOUR_FOUR),
+        ]);
 
         let staff = build_staff_layout(&score, &staff_opts);
         let flags: Vec<bool> =
@@ -836,13 +957,11 @@ mod tests {
         let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(4000.0, 100.0));
         let staff_opts = opts(em, rect);
 
-        let score = Score {
-            measures: vec![
-                measure_with_quarters(TimeSignature::FOUR_FOUR),
-                measure_with_quarters(TimeSignature::FOUR_FOUR),
-                measure_with_quarters(TimeSignature::FOUR_FOUR),
-            ],
-        };
+        let score = Score::new(vec![
+            measure_with_quarters(TimeSignature::FOUR_FOUR),
+            measure_with_quarters(TimeSignature::FOUR_FOUR),
+            measure_with_quarters(TimeSignature::FOUR_FOUR),
+        ]);
 
         let staff = build_staff_layout(&score, &staff_opts);
         assert_eq!(staff.systems.len(), 3);
@@ -868,13 +987,11 @@ mod tests {
         let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(4000.0, 100.0));
         let staff_opts = opts(em, rect);
 
-        let score = Score {
-            measures: vec![
-                measure_with_quarters(TimeSignature::FOUR_FOUR),
-                measure_with_quarters(TimeSignature::FOUR_FOUR),
-                measure_with_quarters(TimeSignature::FOUR_FOUR),
-            ],
-        };
+        let score = Score::new(vec![
+            measure_with_quarters(TimeSignature::FOUR_FOUR),
+            measure_with_quarters(TimeSignature::FOUR_FOUR),
+            measure_with_quarters(TimeSignature::FOUR_FOUR),
+        ]);
 
         let staff = build_staff_layout(&score, &staff_opts);
         assert_eq!(staff.scale, 1.0, "growing never scales glyphs");
@@ -896,13 +1013,11 @@ mod tests {
         let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(1200.0, 100.0));
         let staff_opts = opts(em, rect);
 
-        let score = Score {
-            measures: vec![
-                measure_with_quarters(TimeSignature::FOUR_FOUR),
-                measure_with_quarters(TimeSignature::FOUR_FOUR),
-                measure_with_quarters(TimeSignature::FOUR_FOUR),
-            ],
-        };
+        let score = Score::new(vec![
+            measure_with_quarters(TimeSignature::FOUR_FOUR),
+            measure_with_quarters(TimeSignature::FOUR_FOUR),
+            measure_with_quarters(TimeSignature::FOUR_FOUR),
+        ]);
 
         let staff = build_staff_layout(&score, &staff_opts);
         let floor_scale = LEGIBILITY_FLOOR_EM / em;
@@ -988,18 +1103,14 @@ mod tests {
         // both get identical rows and measure rects.
         let rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(600.0, 400.0));
         let o = opts(20.0, rect);
-        let sparse = Score {
-            measures: vec![
-                measure_with_quarters(TimeSignature::FOUR_FOUR),
-                measure_with_quarters(TimeSignature::FOUR_FOUR),
-            ],
-        };
-        let dense = Score {
-            measures: vec![
-                measure_with_quarters(TimeSignature::FOUR_FOUR),
-                measure_with_sixteenths(TimeSignature::FOUR_FOUR),
-            ],
-        };
+        let sparse = Score::new(vec![
+            measure_with_quarters(TimeSignature::FOUR_FOUR),
+            measure_with_quarters(TimeSignature::FOUR_FOUR),
+        ]);
+        let dense = Score::new(vec![
+            measure_with_quarters(TimeSignature::FOUR_FOUR),
+            measure_with_sixteenths(TimeSignature::FOUR_FOUR),
+        ]);
         let a = build_staff_layout(&sparse, &o);
         let b = build_staff_layout(&dense, &o);
         assert_eq!(a.systems.len(), b.systems.len());
@@ -1031,13 +1142,11 @@ mod tests {
             thirty_seconds.set_beat(idx, Beat::note(th())).unwrap();
             idx += 1;
         }
-        let score = Score {
-            measures: vec![
-                measure_with_sixteenths(TimeSignature::FOUR_FOUR),
-                measure_with_sixteenths(TimeSignature::FOUR_FOUR),
-                thirty_seconds,
-            ],
-        };
+        let score = Score::new(vec![
+            measure_with_sixteenths(TimeSignature::FOUR_FOUR),
+            measure_with_sixteenths(TimeSignature::FOUR_FOUR),
+            thirty_seconds,
+        ]);
         let staff = build_staff_layout(&score, &o);
         let w1 = staff.placed(1).unwrap().rect.width();
         let w2 = staff.placed(2).unwrap().rect.width();
@@ -1052,13 +1161,11 @@ mod tests {
         let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(4000.0, 100.0));
         let staff_opts = opts(em, rect);
 
-        let score = Score {
-            measures: vec![
-                measure_with_quarters(TimeSignature::FOUR_FOUR),
-                measure_with_quarters(TimeSignature::FOUR_FOUR),
-                measure_with_quarters(TimeSignature::FOUR_FOUR),
-            ],
-        };
+        let score = Score::new(vec![
+            measure_with_quarters(TimeSignature::FOUR_FOUR),
+            measure_with_quarters(TimeSignature::FOUR_FOUR),
+            measure_with_quarters(TimeSignature::FOUR_FOUR),
+        ]);
         let staff = build_staff_layout(&score, &staff_opts);
         let y = staff.systems[0].rect.center().y;
 
@@ -1082,13 +1189,11 @@ mod tests {
         let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(4000.0, 100.0));
         let staff_opts = opts(em, rect);
 
-        let score = Score {
-            measures: vec![
-                measure_with_quarters(TimeSignature::FOUR_FOUR),
-                measure_with_quarters(TimeSignature::FOUR_FOUR),
-                measure_with_quarters(TimeSignature::FOUR_FOUR),
-            ],
-        };
+        let score = Score::new(vec![
+            measure_with_quarters(TimeSignature::FOUR_FOUR),
+            measure_with_quarters(TimeSignature::FOUR_FOUR),
+            measure_with_quarters(TimeSignature::FOUR_FOUR),
+        ]);
         let staff = build_staff_layout(&score, &staff_opts);
         let x = rect.center().x;
         for (i, system) in staff.systems.iter().enumerate() {
@@ -1101,12 +1206,10 @@ mod tests {
     fn staff_line_sits_on_note_heads_with_off_center_rows() {
         let em = 20.0;
         let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(4000.0, 100.0));
-        let score = Score {
-            measures: vec![
-                measure_with_quarters(TimeSignature::FOUR_FOUR),
-                measure_with_quarters(TimeSignature::FOUR_FOUR),
-            ],
-        };
+        let score = Score::new(vec![
+            measure_with_quarters(TimeSignature::FOUR_FOUR),
+            measure_with_quarters(TimeSignature::FOUR_FOUR),
+        ]);
         for below in [ROOM_BELOW_EM, ROOM_BELOW_WITH_LABELS_EM] {
             let staff_opts = StaffOpts { room_below_em: below, ..opts(em, rect) };
             let staff = build_staff_layout(&score, &staff_opts);
@@ -1127,13 +1230,11 @@ mod tests {
     fn staff_layout_counts_a_grouping_change_as_a_meter_change() {
         let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(4000.0, 100.0));
         let grouped = TimeSignature::SEVEN_EIGHT.with_grouping(1);
-        let score = Score {
-            measures: vec![
-                Measure::new(TimeSignature::SEVEN_EIGHT),
-                Measure::new(grouped),
-                Measure::new(grouped),
-            ],
-        };
+        let score = Score::new(vec![
+            Measure::new(TimeSignature::SEVEN_EIGHT),
+            Measure::new(grouped),
+            Measure::new(grouped),
+        ]);
 
         let staff = build_staff_layout(&score, &opts(20.0, rect));
         let flags: Vec<bool> =
@@ -1208,7 +1309,8 @@ mod tests {
             assert!((notes[0].head.ink().center().x - area).abs() < 1.0, "{meter} centred");
             // It hangs from the line.
             let ink = notes[0].head.ink();
-            let line = on.measure_opts(placed.rect, placed.y_offset, false, false).y_of(0);
+            let line =
+                on.measure_opts(placed.rect, placed.y_offset, false, false, placed.staff).y_of(0);
             assert!(ink.top() <= line && ink.bottom() > line, "{meter} hangs from the line");
             // A measure with a note keeps its rests.
             let other = &staff.placed(1).unwrap().layout().notes;

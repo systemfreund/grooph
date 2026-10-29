@@ -116,6 +116,20 @@ spread across callers.
    The metronome's staff is one such measure: the click bar with the counter
    rhythm as its second voice (`Grooph::metronome_staff_score`); which of
    the two the editor holds is the app's `MetronomeVoice`.
+5. A score is written on one line or on the kit's five (`Score::staff`,
+   `StaffKind`; the notation puts a score with kit instruments on the kit's
+   staff). On the kit's staff (`LayoutOpts::staff`) each head sits at its
+   instrument's place (`Instrument::staff_pos`), with its glyph
+   (`glyphs::head_glyph_for`: x for cymbals, circled x for a cross-stick,
+   slashed for a rimshot, diamond for the ride's bell). A chord's heads
+   share one stem from the head at its base to past the one at its tip
+   (`NoteLayout::head`, at `staff_pos`; the others in `chord`); a head a
+   second from the one before it goes to the other side of the stem. Heads
+   past the staff get ledger lines, rests keep to their voice's half, a
+   beamed group's stems all reach its beams (`beams::reach_beams`). Past
+   the accent a technique's sign (o, +, the choke's mark) stacks
+   (`notes::place_marks`). Every kit row starts with the percussion clef;
+   the renderer draws five lines. The one line's layout is unchanged.
 
 ## Audio, playback, counting
 

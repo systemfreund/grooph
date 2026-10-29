@@ -30,7 +30,7 @@ use editing::{GroupSpan, Modification};
 use either::Either;
 use grid::DEFAULT_GRID;
 pub use head::{Head, Heads, Instrument, Technique};
-pub use score::{Cursor, EmptyScore, MeasureIdx, Score};
+pub use score::{Cursor, EmptyScore, MeasureIdx, Score, StaffKind};
 use std::fmt::{Debug, Formatter};
 pub use time_signature::{InvalidTimeSignature, ParseTimeSignatureError, TimeSignature};
 pub use tuplet::{TupletAnchor, TupletGroupId, TupletRegistry};
