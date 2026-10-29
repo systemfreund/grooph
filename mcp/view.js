@@ -280,26 +280,29 @@ new ResizeObserver(reportSize).observe(document.body);
 reportSize();
 
 toolArgs = await toolInput;
-// The skeleton shows the tool's tempo and meter while the app loads.
+// The link builder the server uses too, served unbundled by the build
+// (crates/site writes mcp/link.js to /embed/link.js). With a link
+// argument it merges the changes into that link's settings.
+let query;
+let settings = toolArgs || {};
+try {
+  const { metronomeQuery, resolveSettings } = await import(CONFIG.origin + "/embed/link.js");
+  query = metronomeQuery(toolArgs || {});
+  settings = resolveSettings(toolArgs || {});
+} catch (e) {
+  console.error("grooph: link builder not loaded", e);
+  query = "v=2&ts=4/4";
+}
+// The skeleton shows the tempo and meter while the app loads.
 (() => {
-  const bpm = Number(toolArgs?.bpm) || 120;
-  const [top, unit] = String(toolArgs?.ts || "4/4").trim().split("/");
-  const beats = String(top).split("+").reduce((sum, g) => sum + (Number(g) || 0), 0) || 4;
+  const bpm = Number(settings.bpm) || 120;
+  const [top, unit] = String(settings.ts || "4/4").trim().split("/");
+  const beats = Number(top) || 4;
   const tempo = document.querySelector("#loading_text .sk-tempo");
   const meter = document.querySelector("#loading_text .sk-meter");
   if (tempo) tempo.lastChild.textContent = " = " + bpm;
   if (meter) meter.innerHTML = beats + "<br>" + (Number(unit) || 4);
 })();
-// The link builder the server uses too, served unbundled by the build
-// (crates/site writes mcp/link.js to /embed/link.js).
-let query;
-try {
-  const { metronomeQuery } = await import(CONFIG.origin + "/embed/link.js");
-  query = metronomeQuery(toolArgs || {});
-} catch (e) {
-  console.error("grooph: link builder not loaded", e);
-  query = "v=2&ts=4/4";
-}
 const appUrl = CONFIG.origin + "/";
 const link = appUrl + "?" + query;
 

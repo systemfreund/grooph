@@ -6,7 +6,7 @@
 // and runs it in a sandboxed iframe, which loads the web build of this same
 // deployment, so a preview serves its own build.
 
-import { MAX_LENGTH, argumentError, metronomeQuery } from "./link.js";
+import { MAX_LENGTH, argumentError, changes, metronomeQuery } from "./link.js";
 import { viewHtml } from "./view.js";
 
 export const RESOURCE_URI = "ui://grooph/metronome.html";
@@ -26,12 +26,21 @@ export const TOOL = {
   title: "Show a metronome",
   description:
     "Shows grooph's interactive metronome: tempo, time signature, optionally beat grouping, subdivision or click " +
-    "pattern, polyrhythm and swing. The arguments are the app's own controls; prefer them to writing out a click " +
-    "bar. The user starts playback. The result says what the metronome shows (check it against the request) and " +
-    "links to it on grooph.app. Settings the user changes in the view come back as model context.",
+    "pattern, polyrhythm and swing; the arguments are the app's own controls. To change a metronome already shown, " +
+    "pass its link and only what changes; the new one replaces it. The user starts playback. The result says what " +
+    "the metronome shows (check it against the request). Changes the user makes come back as model context.",
   inputSchema: {
     type: "object",
     properties: {
+      link: {
+        type: "string",
+        maxLength: MAX_LENGTH.link,
+        description:
+          "The link of a metronome already shown (from its result or the latest model context, which has the user's " +
+          "changes), to change it: the other arguments change only what they set and the rest stays. A new meter " +
+          "drops the old one's groups, click, subdivision and polyrhythm. Remove a setting with click \"default\", " +
+          "poly \"none\" or swing 50.",
+      },
       bpm: {
         type: "integer",
         minimum: 20,
@@ -85,7 +94,7 @@ export const TOOL = {
       poly: {
         type: "string",
         maxLength: MAX_LENGTH.poly,
-        pattern: "^\\s*[0-9]+\\s*:\\s*[0-9]+\\s*$",
+        pattern: "^\\s*([0-9]+\\s*:\\s*[0-9]+|none)\\s*$",
         description:
           "Polyrhythm n:m against the click: n even clicks in the time of m beat units of the meter (quarters in x/4, " +
           "eighths in x/8), repeated through the bar. m must divide the meter's beats; n is 2 to 16 and must not reduce " +
@@ -192,13 +201,15 @@ export function showMetronome(args, origin, checkLink) {
     return { isError: true, content: [{ type: "text", text }] };
   }
   const link = `${origin}/?${query}`;
+  const changed = changes(args);
+  const replaced = changed ? `It replaces the metronome of the given link; changed: ${changed}. ` : "";
   return {
     content: [
       {
         type: "text",
         text:
-          `The metronome is shown to the user; they start it with the play button. It shows ${description}. ` +
-          `Open in grooph: ${link}`,
+          `The metronome is shown to the user; they start it with the play button. ${replaced}It shows ` +
+          `${description}. Open in grooph: ${link}`,
       },
     ],
     structuredContent: { link, shown: description },

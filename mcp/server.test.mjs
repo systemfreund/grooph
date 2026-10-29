@@ -60,7 +60,7 @@ test("tools/list has show_metronome with its view", async () => {
   const tool = result.tools.find((t) => t.name === "show_metronome");
   assert.ok(tool);
   assert.equal(tool._meta.ui.resourceUri, RESOURCE_URI);
-  assert.deepEqual(Object.keys(tool.inputSchema.properties).sort(), ["bpm", "click", "groups", "poly", "su", "subdivision", "swing", "ts"]);
+  assert.deepEqual(Object.keys(tool.inputSchema.properties).sort(), ["bpm", "click", "groups", "link", "poly", "su", "subdivision", "swing", "ts"]);
   // Describes, points nowhere else, stays short; the details are the parameters'.
   assert.doesNotMatch(tool.description, /llms\.txt|https?:\/\//);
   assert.ok(tool.description.length < 500, tool.description.length);
@@ -184,6 +184,47 @@ test("the subdivision description names what each meter takes", async () => {
     assert.equal(checkLink(query).problem, null, `${code} in x/${unit}`);
   }
   for (const ts of ["4/4", "7/8", "7/16"]) assert.equal(checkLink(metronomeQuery({ ts, subdivision: "none" })).problem, null, ts);
+});
+
+test("a call with a link changes that metronome", async () => {
+  const call = async (args) => (await rpc("tools/call", { name: "show_metronome", arguments: args })).result;
+  const first = await call({ ts: "7/8", groups: "3+2+2", bpm: 140 });
+  const link = first.structuredContent.link;
+  // Only what is given changes; the rest is the link's.
+  const sixteenths = await call({ link, subdivision: "s" });
+  assert.ok(!sixteenths.isError, sixteenths.content[0].text);
+  assert.equal(sixteenths.structuredContent.link, `${ORIGIN}/?v=2&bpm=140&ts=7/8&groups=3%2B2%2B2&subdivision=s`);
+  assert.match(sixteenths.content[0].text, /It replaces the metronome of the given link; changed: subdivision \(default\) → s\. It shows 7\/8 grouped 3\+2\+2/);
+  // A click bar replaces the subdivision, and the default removes it.
+  const clicked = await call({ link: sixteenths.structuredContent.link, click: ">q. r:q (q)" });
+  assert.ok(clicked.structuredContent.link.endsWith("&click=%3Eq.+r:q+%28q%29"), clicked.structuredContent.link);
+  const plain = await call({ link: clicked.structuredContent.link, click: "default" });
+  assert.equal(plain.structuredContent.link, `${ORIGIN}/?v=2&bpm=140&ts=7/8&groups=3%2B2%2B2`);
+  // A new meter drops what belonged to the old one; tempo and swing stay.
+  const swung = `?v=2&bpm=90&ts=7/8&groups=3%2B2%2B2&swing=60&subdivision=s&poly=3:7`;
+  const five = await call({ link: swung, ts: "5/8" });
+  assert.equal(five.structuredContent.link, `${ORIGIN}/?v=2&bpm=90&ts=5/8&swing=60`);
+  assert.match(five.content[0].text, /changed: ts 7\/8 → 5\/8, groups 3\+2\+2 → \(default\), subdivision s → \(default\), poly 3:7 → \(default\)/);
+  // Removing the polyrhythm and the swing.
+  const straight = await call({ link: swung, poly: "none", swing: 50 });
+  assert.equal(straight.structuredContent.link, `${ORIGIN}/?v=2&bpm=90&ts=7/8&groups=3%2B2%2B2&subdivision=s`);
+  // Edited polyrhythm clicks are kept, and a new ratio replaces them.
+  const edited = "v=2&ts=4/4&counter=t4+r:t4+t4+t4+(t4)+t4";
+  assert.ok((await call({ link: edited, bpm: 100 })).structuredContent.link.endsWith("&counter=t4+r:t4+t4+t4+%28t4%29+t4"));
+  assert.ok((await call({ link: edited, poly: "5:4" })).structuredContent.link.endsWith("&poly=5:4"));
+  // su with the link's swing.
+  assert.ok(!(await call({ link: swung, su: 16 })).isError);
+});
+
+test("a link that is no metronome is an error", async () => {
+  const call = async (args) => (await rpc("tools/call", { name: "show_metronome", arguments: args })).result;
+  const rhythm = await call({ link: "https://grooph.app/?v=2&r=q+q+q+q", bpm: 90 });
+  assert.equal(rhythm.isError, true);
+  assert.match(rhythm.content[0].text, /rhythm, not a metronome/);
+  assert.match((await call({ link: "https://grooph.app/?v=2&bpm=90" })).content[0].text, /no time signature/);
+  // A link whose bar no longer fits is the parser's to catch.
+  const wrong = await call({ link: "v=2&ts=4/4&click=q+q+q+q", groups: "3+2+2" });
+  assert.equal(wrong.isError, true);
 });
 
 test("groups are checked against ts", async () => {
