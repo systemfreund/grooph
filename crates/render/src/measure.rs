@@ -766,10 +766,12 @@ mod tests {
     }
 
     #[test]
-    fn sixteenth_labels_are_evenly_spaced_up_to_the_barline() {
-        // Quarter, two eighths, quarter, quarter: notes sit at their onsets,
-        // so every sixteenth label is the same distance from the next, also
-        // after the first quarter and in the last beat before the barline.
+    fn sixteenth_labels_are_evenly_spaced_within_each_note_up_to_the_barline() {
+        // Quarter, two eighths, quarter, quarter: notes sit at their onsets
+        // and a note's labels share its room evenly, also in the last beat
+        // before the barline. (Room grows with duration less than
+        // proportionally, so a quarter's labels sit closer than an
+        // eighth's.)
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
         m.set_beat(0, Beat::note(q())).unwrap();
         m.set_beat(1, Beat::note(e())).unwrap();
@@ -783,11 +785,32 @@ mod tests {
 
         let xs = label_xs(&m, &layout, rect, &counting(Subdivision::Quarters));
         assert_eq!(xs.len(), 16);
-        let step = (rect.right() - xs[0]) / 16.0;
-        for (i, w) in xs.windows(2).enumerate() {
-            let gap = w[1] - w[0];
-            assert!((gap - step).abs() < 0.5, "gap after label {i}: {gap}, expected {step}");
+        // Labels per note, then the note's right edge: the next note's
+        // center, or the barline for the last one.
+        let mut edges: Vec<f32> = layout.notes.iter().skip(1).map(|n| n.center.x).collect();
+        edges.push(rect.right());
+        let mut label = 0;
+        for (i, (beat, &edge)) in m.beats().iter().zip(&edges).enumerate() {
+            let count = if beat.duration == q() { 4 } else { 2 };
+            let x0 = layout.notes[i].center.x;
+            assert!(
+                (xs[label] - x0).abs() < 0.5,
+                "note {i} starts at {x0}, label at {}",
+                xs[label]
+            );
+            let step = (edge - x0) / count as f32;
+            for k in 0..count {
+                let exp = x0 + step * k as f32;
+                assert!(
+                    (xs[label + k] - exp).abs() < 0.5,
+                    "label {} of note {i}: {}, expected {exp}",
+                    k,
+                    xs[label + k]
+                );
+            }
+            label += count;
         }
+        assert_eq!(label, 16);
     }
 
     #[test]
