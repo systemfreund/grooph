@@ -48,6 +48,9 @@ spread across callers.
   the shared line with its stems down (the metronome's counter rhythm under
   the click bar; later the feet under the hands of a drum part). All voices
   share the meter: `Measure::set_time_signature` refits every one, or none.
+  Each voice keeps the meter for itself (it is filled, edited and laid out
+  on its own), but only `grooph_measure::voice`, where `Measure` and
+  `VoiceBar` live, can set it: no voice leaves its measure's meter.
   A `Measure` reads and edits as its first voice (`Deref` to `VoiceBar`), so
   single-voice code (click bars, generator, counting, notation, audio)
   needs no change; `voices()`, `voice_mut(i)` and `push_voices` reach the

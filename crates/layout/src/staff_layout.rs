@@ -470,17 +470,27 @@ pub fn hit_test_staff(staff: &StaffLayout, pos: Pos2) -> Option<(MeasureIdx, Bea
 }
 
 /// Like [`hit_test_staff`], with the voice on `pos`'s side of the line: on a
-/// staff with a lower voice, below the line picks the second voice and the
-/// beat among its notes.
+/// staff with lower voices, below the line picks the beat nearest `pos.x` in
+/// each and, of those, the voice whose note is nearest `pos`.
 pub fn hit_test_voice(staff: &StaffLayout, pos: Pos2) -> Option<(VoiceIdx, MeasureIdx, BeatIdx)> {
     let system =
         staff.systems.iter().find(|s| pos.y < s.rect.bottom()).or_else(|| staff.systems.last())?;
     let target = system.measures.first()?;
-    if let Some(lower) = target.voices.get(1)
-        && pos.y > system.y_baseline
-        && !lower.notes.is_empty()
+    if pos.y > system.y_baseline
+        && let Some((voice, beat)) = target
+            .voices
+            .iter()
+            .enumerate()
+            .skip(1)
+            .filter(|(_, layout)| !layout.notes.is_empty())
+            .map(|(v, layout)| {
+                let beat = nearest_note(layout, pos.x);
+                (v, beat, layout.notes[beat].center.distance_sq(pos))
+            })
+            .min_by(|a, b| a.2.total_cmp(&b.2))
+            .map(|(v, beat, _)| (v, beat))
     {
-        return Some((1, target.measure_idx, nearest_note(lower, pos.x)));
+        return Some((voice, target.measure_idx, beat));
     }
 
     if target.layout().notes.is_empty() {
@@ -629,6 +639,25 @@ mod tests {
         let single = build_staff_layout(&upper, &opts(em, rect));
         let y = single.systems[0].rect.bottom() - 1.0;
         assert_eq!(hit_test_voice(&single, Pos2::new(x, y)).map(|h| h.0), Some(0));
+    }
+
+    #[test]
+    fn hit_test_reaches_every_lower_voice() {
+        use grooph_measure::notation::parse_score;
+        let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(400.0, 100.0));
+        let upper = parse_score("4/4 q q q q").unwrap();
+        let mut score = with_lower(&upper, &parse_score("4/4 q q q q").unwrap());
+        let third = parse_score("4/4 r:e e r:e e r:h").unwrap();
+        score.measures[0].push_voices(third.measures[0].clone()).unwrap();
+        let staff = build_staff_layout(&score, &opts(20.0, rect));
+        let system = &staff.systems[0];
+        let voices = &system.measures[0].voices;
+        // On an offbeat the third voice's note is the nearest below the line;
+        // on a beat the second voice's.
+        let offbeat = voices[2].notes[3].center;
+        assert_eq!(hit_test_voice(&staff, offbeat), Some((2, 0, 3)));
+        let beat = voices[1].notes[2].center;
+        assert_eq!(hit_test_voice(&staff, beat), Some((1, 0, 2)));
     }
 
     #[test]

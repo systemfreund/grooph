@@ -29,7 +29,7 @@ use crate::{Grooph, TransportState};
 use eframe::egui;
 use eframe::egui::epaint::PathShape;
 use eframe::egui::{Align2, Color32, FontId, Mesh, Pos2, Sense, Shape, Stroke, Ui, vec2};
-use grooph_measure::click::{ClickLevel, meter_click_bar, subdivisions};
+use grooph_measure::click::{ClickLevel, meter_click_bar, same_bar, subdivisions};
 use grooph_measure::counter::{
     CounterBars, Ratio, click_level, counter_bar, counter_clicks, counter_ratios, is_ratio_bar,
     named_ratio_of,
@@ -90,9 +90,13 @@ impl MetronomeVoice {
         }
     }
 
-    /// The bar of the staff's voice `voice`.
-    pub(crate) fn of(voice: VoiceIdx) -> Self {
-        if voice == 0 { MetronomeVoice::Click } else { MetronomeVoice::Counter }
+    /// The bar of the staff's voice `voice`, if it is one of the two.
+    pub(crate) fn of(voice: VoiceIdx) -> Option<Self> {
+        match voice {
+            0 => Some(MetronomeVoice::Click),
+            1 => Some(MetronomeVoice::Counter),
+            _ => None,
+        }
     }
 }
 
@@ -300,11 +304,6 @@ pub(crate) fn counter_ratio(bar: &Measure, named: Option<Ratio>) -> Option<(Rati
 /// "3:4", or "3:4 edited" once its clicks were changed.
 pub(crate) fn ratio_label((ratio, edited): (Ratio, bool)) -> String {
     if edited { format!("{ratio} edited") } else { ratio.to_string() }
-}
-
-/// Whether two bars hold the same meter and beats.
-pub(crate) fn same_bar(a: &Measure, b: &Measure) -> bool {
-    a.time_signature() == b.time_signature() && a.beats() == b.beats()
 }
 
 impl Grooph {

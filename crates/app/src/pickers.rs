@@ -4,7 +4,7 @@
 //! dialog.
 
 use crate::guide::Guide;
-use crate::metronome_view::{FillLook, click_fills, ratio_label, same_bar};
+use crate::metronome_view::{FillLook, click_fills, ratio_label};
 use crate::mixer_panel::mixer_width;
 use crate::platform;
 use crate::shell::paint_grouped_meter;
@@ -16,6 +16,7 @@ use eframe::egui::{
 };
 use grooph_audio::{GapClick, GapMode, GapMute, Sound};
 use grooph_measure::TimeSignature;
+use grooph_measure::click::same_bar;
 use grooph_measure::counter::{Ratio, own_ratios, step_clicks, step_span};
 use grooph_measure::counting::CountingSystem;
 use grooph_measure::generator::{

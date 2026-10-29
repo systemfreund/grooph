@@ -221,7 +221,7 @@ fn subdivision_name(d: Duration) -> String {
 }
 
 /// Whether two bars hold the same meter and beats, in every voice.
-pub(crate) fn same_bar(a: &Measure, b: &Measure) -> bool {
+pub fn same_bar(a: &Measure, b: &Measure) -> bool {
     a.time_signature() == b.time_signature()
         && a.voices().len() == b.voices().len()
         && a.voices().iter().zip(b.voices()).all(|(u, v)| u.beats() == v.beats())

@@ -288,7 +288,9 @@ impl Grooph {
                         .hover_pos()
                         .filter(|_| with_ring)
                         .and_then(|pos| hit_test_voice(&staff, pos))
-                        .map(|(voice, _, beat_idx)| (MetronomeVoice::of(voice), beat_idx));
+                        .and_then(|(voice, _, beat_idx)| {
+                            Some((MetronomeVoice::of(voice)?, beat_idx))
+                        });
                     if staff_hover != self.editor.metronome.staff_hover {
                         // The ring was drawn before the staff: show it there next frame.
                         self.editor.metronome.staff_hover = staff_hover;
@@ -577,8 +579,9 @@ impl Grooph {
         if with_ring && resp.clicked() {
             if let Some(pos) = resp.interact_pointer_pos()
                 && let Some((voice, _, b_idx)) = hit_test_voice(staff, pos)
+                && let Some(voice) = MetronomeVoice::of(voice)
             {
-                self.tap_staff_note(MetronomeVoice::of(voice), b_idx);
+                self.tap_staff_note(voice, b_idx);
             }
             return;
         }
@@ -586,9 +589,10 @@ impl Grooph {
             && (resp.clicked() || resp.dragged())
             && let Some(pos) = resp.interact_pointer_pos()
             && let Some((voice, m_idx, b_idx)) = hit_test_voice(staff, pos)
+            && let Some(voice) = MetronomeVoice::of(voice)
         {
             // A tap on the other voice's line edits that voice from now on.
-            self.select_voice(MetronomeVoice::of(voice));
+            self.select_voice(voice);
             self.editor.cursor.measure_idx = m_idx;
             self.editor.cursor.beat_idx = b_idx;
 
