@@ -25,10 +25,10 @@ export const TOOL = {
   name: "show_metronome",
   title: "Show a metronome",
   description:
-    "Shows grooph's interactive metronome in the chat, set to a tempo and time signature, optionally with a beat " +
-    "grouping, a click pattern, a polyrhythm against the beat and swing. Playback starts when the user taps play. The " +
-    "result says what the metronome shows (check it against the request) and links to the same metronome on " +
-    "grooph.app. The user can change the settings in the view; the current settings come back as model context.",
+    "Shows grooph's interactive metronome: tempo, time signature, optionally beat grouping, subdivision or click " +
+    "pattern, polyrhythm and swing. The arguments are the app's own controls; prefer them to writing out a click " +
+    "bar. The user starts playback. The result says what the metronome shows (check it against the request) and " +
+    "links to it on grooph.app. Settings the user changes in the view come back as model context.",
   inputSchema: {
     type: "object",
     properties: {
@@ -56,13 +56,27 @@ export const TOOL = {
           "2+3 in 5/8 (usual 3+2), 3+2+3 or 2+3+3 in 8/8 (usual 3+3+2), 2+2+3+3 and others in 10/8, 2+2+3+2+2 or " +
           "2+3+3+3 in 11/8. Other meters keep their usual grouping (6/8 is 3+3).",
       },
+      subdivision: {
+        type: "string",
+        maxLength: MAX_LENGTH.subdivision,
+        pattern: "^\\s*[a-z0-9:_.]+\\s*$",
+        description:
+          "Subdivision of the click, as the app's subdivision picker sets it: every beat unit split into clicks of " +
+          "one note value, strong on 1, medium on each beat group's start, soft between. The value is the note's " +
+          "code: in x/4 e (eighths), t8 (eighth triplets), s (sixteenths), qt16 (quintuplets), st16 (sextuplets), " +
+          "spt16 (septuplets), th (thirty-seconds), 9:8th (nine thirty-seconds); in x/8 e (eighths, the default), s " +
+          "(sixteenths), t16 (sixteenth triplets), th (thirty-seconds), 5:4th, 6:4th, 7:4th (five, six, seven " +
+          "thirty-seconds per eighth); in x/16 s (sixteenths, the default), th (thirty-seconds), t32 (thirty-second " +
+          "triplets). none is one click per beat group. Not together with click.",
+      },
       click: {
         type: "string",
         maxLength: MAX_LENGTH.click,
         description:
-          "Only for clicks the default does not give: rests, extra accents, a rhythm of its own. The default click bar " +
-          "already follows the meter and its groups (strong on 1, medium on each group start, soft between); a grouping " +
-          "goes into groups, not into accents here, or the staff shows another one. One bar of the meter in grooph's " +
+          "Only for clicks that groups and subdivision do not give: rests, extra accents, a rhythm of its own. The " +
+          "default click bar already follows the meter and its groups (strong on 1, medium on each group start, soft " +
+          "between); a grouping goes into groups and an even subdivision such as sixteenths into subdivision, not into " +
+          "this bar. One bar of the meter in grooph's " +
           "rhythm notation, without the time signature. Tokens separated by spaces: h q e s (half to sixteenth), " +
           "dotted q. e., r: makes a rest, > an accent (strong click), (q) a ghost note (soft click), a plain note is " +
           'medium. The bar must add up exactly to the meter. Example in 7/8, middle group silent and the last soft: ' +
@@ -128,7 +142,7 @@ async function dispatch(message, { origin, env, checkLink }) {
         serverInfo: SERVER_INFO,
         instructions:
           "grooph is a metronome and rhythm trainer. Its tool show_metronome shows an interactive metronome for a " +
-          "tempo, time signature, beat grouping, click pattern, polyrhythm and swing.",
+          "tempo, time signature, beat grouping, subdivision or click pattern, polyrhythm and swing.",
       });
     case "ping":
       return ok({});

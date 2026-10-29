@@ -30,12 +30,11 @@ use eframe::egui;
 use eframe::egui::epaint::PathShape;
 use eframe::egui::{Align2, Color32, FontId, Mesh, Pos2, Sense, Shape, Stroke, Ui, vec2};
 use grooph_layout::staff_layout::Voice;
-use grooph_measure::click::{ClickLevel, default_click_bar, meter_click_bar, subdivided_click_bar};
+use grooph_measure::click::{ClickLevel, meter_click_bar, subdivisions};
 use grooph_measure::counter::{
     CounterBars, Ratio, click_level, counter_bar, counter_clicks, counter_ratios, is_ratio_bar,
     named_ratio_of,
 };
-use grooph_measure::duration::{Duration, TupletKind};
 use grooph_measure::grid::DEFAULT_GRID;
 use grooph_measure::score::Score;
 use grooph_measure::tempo::ScoreTiming;
@@ -240,22 +239,14 @@ pub(crate) fn click_fills(ts: TimeSignature) -> Rc<[ClickFill]> {
 }
 
 fn build_click_fills(ts: TimeSignature) -> Vec<ClickFill> {
-    let mut fills = vec![ClickFill {
-        bar: default_click_bar(ts),
-        name: "No subdivision".to_owned(),
-        subdivides: false,
-    }];
-    for parts in 1..=9 {
-        let Some(bar) = subdivided_click_bar(ts, parts) else {
-            continue;
-        };
-        if fills.iter().any(|f| same_bar(&f.bar, &bar)) {
-            continue;
-        }
-        let name = bar.beats().first().map_or_else(String::new, |b| fill_name(b.duration));
-        fills.push(ClickFill { bar, name, subdivides: true });
-    }
-    fills
+    subdivisions(ts)
+        .iter()
+        .map(|o| ClickFill {
+            subdivides: o.code != "none",
+            name: o.name.clone(),
+            bar: o.bar.clone(),
+        })
+        .collect()
 }
 
 /// The first `units` beat units of `bar` as a bar of their own, every
@@ -272,18 +263,6 @@ fn tile_of(bar: &Measure, units: u8) -> Option<Measure> {
         tile.set_beat(idx, Beat::new(b.duration, b.kind)).ok()?;
     }
     Some(tile)
-}
-
-/// Name of a fill whose clicks are `d` long. Triplets name their note
-/// value; the longer tuplets come once per meter and go by their kind
-/// alone, so the name fits a tile on a phone.
-fn fill_name(d: Duration) -> String {
-    let base = d.base_note().name();
-    match d.as_tuplet_spec().map(|t| t.kind()) {
-        Some(TupletKind::Triplet) => format!("{base} triplets"),
-        Some(kind) => kind.name().map_or_else(|| format!("{base}s"), |k| format!("{k}s")),
-        None => format!("{base}s"),
-    }
 }
 
 /// The ratio a counter bar plays, `named` if it was picked as that one, and
@@ -1111,6 +1090,7 @@ fn count_in_beat(turn: f32, ts: &TimeSignature) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use grooph_measure::click::default_click_bar;
     use grooph_measure::notation::parse_score;
 
     fn bar(text: &str) -> Measure {

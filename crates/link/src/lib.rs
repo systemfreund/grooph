@@ -15,6 +15,7 @@
 //! | `seed`    | Generator seed; the same parameters and seed give the same rhythm in the same app version (a generator update may change it) |
 //! | `swing`   | Swing in percent, 50 (straight) to 75 (dotted); 66 is a triplet feel |
 //! | `su`      | Swung note value: `8` (default) or `16`; needs `swing` |
+//! | `subdivision` | Click bar of the subdivision picker for the meter of `r` or `ts`: `none` (one click per beat group) or the code of its notes, e.g. `s`, `t16` ([`grooph_measure::click::subdivisions`]); not together with `click` |
 //! | `click`   | Click bar of the meter of `r` (its first measure) or `ts`: one measure in the text notation, without the time signature (`>` strong, plain medium, `(e)` soft, rest off) |
 //! | `poly`    | Polyrhythm `n:m` (n clicks in the time of m beat units) the metronome plays against the click bar of `ts`, its counter bar built as the app's picker does (see [`grooph_measure::counter`]); needs `ts` without `r` or the generator |
 //! | `counter` | The counter rhythm written out like `click`, for one whose clicks were edited; otherwise as `poly`. Not together with `poly` |
@@ -33,7 +34,7 @@
 //! old 7/8 link at `bpm=140` opens at 70 and plays as fast as it used to. A
 //! score mixing beat units is converted by its first measure.
 
-use grooph_measure::click::{ClickLevel, meter_click_bar};
+use grooph_measure::click::{ClickLevel, meter_click_bar, subdivision_of, subdivisions};
 use grooph_measure::counter::ratio_of;
 use grooph_measure::counter::{Ratio, counter_bar, counter_ratios, is_ratio_bar, own_ratios};
 use grooph_measure::generator::{
@@ -107,6 +108,7 @@ fn parse_query_with_default_version(
     let mut counter = None;
     let mut poly = None;
     let mut groups = None;
+    let mut subdivision = None;
 
     for pair in query.trim_start_matches('?').split('&').filter(|p| !p.is_empty()) {
         let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
@@ -117,6 +119,7 @@ fn parse_query_with_default_version(
             "r" => rhythm = Some(value),
             "ts" => ts = Some(parse_meter(&value)?),
             "groups" => groups = Some(value),
+            "subdivision" => subdivision = Some(value),
             "sub" => sub = Some(parse_subdivision(&value)?),
             "lvl" => lvl = Some(parse_in_range("lvl", &value, 1, MAX_COMPLEXITY)?),
             "bars" => bars = Some(parse_in_range("bars", &value, 1, MAX_BARS)?),
@@ -181,13 +184,20 @@ fn parse_query_with_default_version(
     };
 
     let first_ts = content.as_ref().and_then(LinkContent::first_time_signature);
-    let click = match click {
-        None => None,
-        Some(text) => {
+    let click = match (click, subdivision) {
+        (None, None) => None,
+        (Some(_), Some(_)) => return Err("use either subdivision or click, not both".into()),
+        (Some(text), None) => {
             let Some(ts) = first_ts else {
                 return Err("click needs a rhythm (r) or a time signature (ts)".into());
             };
             Some(single_measure("click", ts, &text)?)
+        }
+        (None, Some(code)) => {
+            let Some(ts) = first_ts else {
+                return Err("subdivision needs a rhythm (r) or a time signature (ts)".into());
+            };
+            Some(subdivision_bar(ts, code.trim())?)
         }
     };
     let metronome_meter = |name: &str| match content.as_ref() {
@@ -266,6 +276,17 @@ fn grouped(ts: TimeSignature, text: &str) -> Result<TimeSignature, String> {
             Err(format!("groups {label} do not fit {ts}, which takes {}", labels.join(" or ")))
         }
     }
+}
+
+/// The click bar of the subdivision picker's option `code` in `ts`; the
+/// error names the options the meter has.
+fn subdivision_bar(ts: TimeSignature, code: &str) -> Result<Measure, String> {
+    let options = subdivisions(ts);
+    if let Some(option) = options.iter().find(|o| o.code == code) {
+        return Ok(option.bar.clone());
+    }
+    let codes: Vec<&str> = options.iter().map(|o| o.code.as_str()).collect();
+    Err(format!("subdivision {code} does not fit {ts}: it takes {}", codes.join(", ")))
 }
 
 /// `ts` and, unless it is the usual one, `groups` for the meter `ts`.
@@ -359,8 +380,12 @@ impl SharedLink {
                 params.push(("su", "16".into()));
             }
         }
+        // A bar of the subdivision picker by its name, any other written out.
         if let Some(bar) = &self.click {
-            params.push(("click", format_bar(bar)?));
+            match subdivision_of(bar) {
+                Some(option) => params.push(("subdivision", option.code)),
+                None => params.push(("click", format_bar(bar)?)),
+            }
         }
         if let Some(bar) = &self.counter {
             match self.poly.filter(|&r| is_ratio_bar(bar, r)) {
@@ -383,10 +408,12 @@ impl SharedLink {
 pub const DEFAULT_BPM: u32 = 120;
 
 /// What `link` opens, in the terms the user sees: the meter with its
-/// grouping and where its groups start, the tempo, the click bar and where
-/// its accents fall, the polyrhythm and swing. E.g. "7/8 grouped 2+3+2
-/// (groups start on eighths 1, 3, 6) at 120 BPM (quarter notes), click bar
-/// >e e e >e e >e e (strong on eighths 1, 4, 6; medium on 2, 3, 5, 7)".
+/// grouping and where its groups start, the tempo, the click bar (by its
+/// name if the subdivision picker offers it, else where its clicks fall),
+/// the polyrhythm and swing. E.g. "7/8 grouped 2+3+2 (groups start on
+/// eighths 1, 3, 6) at 120 BPM (quarter notes), subdivision sixteenths
+/// (subdivision=s): click bar …, strong on 1, medium on each beat group's
+/// start, soft between".
 pub fn describe(link: &SharedLink) -> String {
     let bpm = link.bpm.unwrap_or(DEFAULT_BPM);
     // Without a meter the app keeps the one it has: only tempo and swing.
@@ -425,40 +452,32 @@ pub fn describe(link: &SharedLink) -> String {
     }
     let _ = write!(text, " at {bpm} BPM (quarter notes)");
     let click = link.click.clone().unwrap_or_else(|| meter_click_bar(ts));
-    if let Some(notation) = format_bar(&click) {
-        let per_unit = DEFAULT_GRID.ticks_per_beat(&ts).max(1);
-        let onsets = DEFAULT_GRID.compute_onset_ticks(click.beats());
-        // Where the strong (accented), medium (plain) and soft (ghost)
-        // clicks fall; rests are silent.
-        let at = |level: ClickLevel| -> Vec<String> {
-            click
-                .beats()
-                .iter()
-                .zip(&onsets)
-                .filter(|(b, _)| ClickLevel::of(b) == level)
-                .map(|(_, &tick)| {
-                    let at = f64::from(tick) / f64::from(per_unit) + 1.0;
-                    if at.fract() == 0.0 { format!("{at}") } else { format!("{at:.2}") }
-                })
-                .collect()
-        };
-        let _ = write!(text, ", click bar {notation}");
-        let mut levels = Vec::new();
-        let named = [
-            (ClickLevel::Strong, "strong"),
-            (ClickLevel::Medium, "medium"),
-            (ClickLevel::Soft, "soft"),
-        ];
-        for (level, name) in named {
-            let at = at(level);
-            if !at.is_empty() {
-                // The unit once, with the first level named.
-                let unit = if levels.is_empty() { format!("{unit} ") } else { String::new() };
-                levels.push(format!("{name} on {unit}{}", at.join(", ")));
-            }
+    let notation = format_bar(&click).unwrap_or_default();
+    // The picker's bars by name and rule, any other with where its clicks
+    // fall, and what the picker would have offered instead.
+    match subdivision_of(&click) {
+        Some(option) if option.code == "none" => {
+            let _ = write!(
+                text,
+                ", no subdivision (subdivision=none): click bar {notation}, one click per beat group, the first strong"
+            );
         }
-        if !levels.is_empty() {
-            let _ = write!(text, " ({})", levels.join("; "));
+        Some(option) => {
+            let _ = write!(
+                text,
+                ", subdivision {} (subdivision={}): click bar {notation}, strong on 1, medium on each beat group's start, soft between",
+                option.name.to_lowercase(),
+                option.code
+            );
+        }
+        None => {
+            let _ = write!(text, ", a click bar of its own {notation}");
+            let levels = click_levels(&click, unit);
+            if !levels.is_empty() {
+                let _ = write!(text, " ({levels})");
+            }
+            let codes: Vec<String> = subdivisions(ts).iter().map(|o| o.code.clone()).collect();
+            let _ = write!(text, "; the subdivision picker offers {}", codes.join(", "));
         }
     }
     if let Some(bar) = &link.counter {
@@ -479,6 +498,39 @@ pub fn describe(link: &SharedLink) -> String {
         let _ = write!(text, ", swing {}% {}", swing.percent, swing.unit.label());
     }
     text
+}
+
+/// Where the strong (accented), medium (plain) and soft (ghost) clicks of
+/// `click` fall, counted in `unit`; rests are silent. E.g. "strong on
+/// eighths 1; soft on 6".
+fn click_levels(click: &Measure, unit: &str) -> String {
+    let ts = click.time_signature();
+    let per_unit = DEFAULT_GRID.ticks_per_beat(&ts).max(1);
+    let onsets = DEFAULT_GRID.compute_onset_ticks(click.beats());
+    let mut levels = Vec::new();
+    let named = [
+        (ClickLevel::Strong, "strong"),
+        (ClickLevel::Medium, "medium"),
+        (ClickLevel::Soft, "soft"),
+    ];
+    for (level, name) in named {
+        let at: Vec<String> = click
+            .beats()
+            .iter()
+            .zip(&onsets)
+            .filter(|(b, _)| ClickLevel::of(b) == level)
+            .map(|(_, &tick)| {
+                let at = f64::from(tick) / f64::from(per_unit) + 1.0;
+                if at.fract() == 0.0 { format!("{at}") } else { format!("{at:.2}") }
+            })
+            .collect();
+        if !at.is_empty() {
+            // The unit once, with the first level named.
+            let unit = if levels.is_empty() { format!("{unit} ") } else { String::new() };
+            levels.push(format!("{name} on {unit}{}", at.join(", ")));
+        }
+    }
+    levels.join("; ")
 }
 
 /// "quarters", "eighths", "sixteenths": what a meter's beats count.
@@ -763,15 +815,50 @@ mod tests {
     }
 
     #[test]
+    fn subdivisions_are_the_pickers_bars_by_name() {
+        // 7/8 3+2+2 in sixteenths, as the subdivision picker builds it.
+        let link = parse("v=2&ts=7/8&groups=3%2B2%2B2&subdivision=s");
+        assert_eq!(
+            format_bar(link.click.as_ref().unwrap()).unwrap(),
+            ">s (s) (s) (s) (s) (s) s (s) (s) (s) s (s) (s) (s)"
+        );
+        assert_eq!(link.to_url("/").unwrap(), "/?v=2&ts=7/8&groups=3%2B2%2B2&subdivision=s");
+        // The same bar written out is written by its name.
+        let written = parse(
+            "v=2&ts=7/8&groups=3%2B2%2B2&click=%3Es+(s)+(s)+(s)+(s)+(s)+s+(s)+(s)+(s)+s+(s)+(s)+(s)",
+        );
+        assert_eq!(written.to_url("/").unwrap(), "/?v=2&ts=7/8&groups=3%2B2%2B2&subdivision=s");
+        let none = parse("v=2&ts=7/8&subdivision=none");
+        assert_eq!(format_bar(none.click.as_ref().unwrap()).unwrap(), ">q q. q");
+        assert_eq!(
+            parse_query("ts=4/4&subdivision=qt8").unwrap_err(),
+            "subdivision qt8 does not fit 4/4: it takes none, e, t8, s, qt16, st16, spt16, th, 9:8th"
+        );
+        assert!(
+            parse_query("ts=4/4&subdivision=s&click=q+q+q+q").unwrap_err().contains("not both")
+        );
+        assert!(parse_query("subdivision=s").unwrap_err().contains("needs a rhythm"));
+        // With a rhythm, the subdivision is that of its first meter.
+        let rhythm = parse("v=2&r=7/16+q+e.+|+4/4+q+q+q+q&subdivision=th");
+        let bar = rhythm.click.as_ref().unwrap();
+        assert_eq!(bar.time_signature().to_string(), "7/16");
+        assert_eq!(subdivision_of(bar).unwrap().code, "th");
+        assert_eq!(
+            parse_query("v=2&r=7/16+q+e.&subdivision=e").unwrap_err(),
+            "subdivision e does not fit 7/16: it takes none, s, th, t32"
+        );
+    }
+
+    #[test]
     fn counter_link() {
-        let link = parse("v=2&bpm=90&ts=4/4&click=>q+q+q+q&counter=t4+r:t4+(t4)+r:t4+(t4)+r:t4");
+        let link = parse("v=2&bpm=90&ts=4/4&click=>q+r:q+q+q&counter=t4+r:t4+(t4)+r:t4+(t4)+r:t4");
         let bar = link.counter.as_ref().unwrap();
         assert_eq!(bar.time_signature(), TimeSignature::FOUR_FOUR);
         assert_eq!(bar.beats().len(), 6);
         assert!(bar.beats()[2].soft);
         assert_eq!(
             link.to_url("/").unwrap(),
-            "/?v=2&bpm=90&ts=4/4&click=%3Eq+q+q+q&counter=t4+r:t4+%28t4%29+r:t4+%28t4%29+r:t4"
+            "/?v=2&bpm=90&ts=4/4&click=%3Eq+r:q+q+q&counter=t4+r:t4+%28t4%29+r:t4+%28t4%29+r:t4"
         );
         assert!(parse_query("ts=4/4&counter=t4+t4").unwrap_err().contains("counter"));
         assert!(parse_query("ts=2/4&counter=q+q+|+q+q").unwrap_err().contains("single"));

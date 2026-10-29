@@ -12,11 +12,13 @@
 //! it, one per meter, so every measure in that meter clicks the same.
 
 use crate::BeatKind::{Note, Rest};
-use crate::duration::{Duration, TupletSpec};
+use crate::duration::{Duration, TupletKind, TupletSpec};
 use crate::grid::{DEFAULT_GRID, NOTE_VALUES};
 use crate::notation::{code_of, parse_score};
 use crate::{Beat, BeatIdx, Measure, TimeSignature};
 use serde::{Deserialize, Serialize};
+use std::cell::RefCell;
+use std::rc::Rc;
 
 /// How loud one click sounds.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -150,6 +152,71 @@ pub fn meter_click_bar(ts: TimeSignature) -> Measure {
         subdivided_click_bar(ts, 1).unwrap_or_else(|| default_click_bar(ts))
     } else {
         default_click_bar(ts)
+    }
+}
+
+/// One option of the subdivision picker: a click bar the app builds itself.
+#[derive(Clone, Debug)]
+pub struct Subdivision {
+    /// Its name in links: `none` for one click per beat group, else the
+    /// notation code of its notes (`e`, `s`, `t16`, …).
+    pub code: String,
+    /// "Sixteenths", "Eighth triplets", …; "No subdivision" for `none`.
+    pub name: String,
+    pub bar: Measure,
+}
+
+/// The subdivision picker's options for `ts`: one click per beat group
+/// ([`default_click_bar`]), then each beat unit split into 1 to 9 clicks
+/// where the meter allows ([`subdivided_click_bar`]). Bars alike are
+/// offered once, under the first name. Kept per meter once built: the
+/// embedded app asks every frame, and building the bars takes milliseconds.
+pub fn subdivisions(ts: TimeSignature) -> Rc<[Subdivision]> {
+    thread_local! {
+        static OPTIONS: RefCell<Vec<(TimeSignature, Rc<[Subdivision]>)>> = const { RefCell::new(Vec::new()) };
+    }
+    OPTIONS.with_borrow_mut(|cache| {
+        if let Some((_, options)) = cache.iter().find(|(t, _)| *t == ts) {
+            return Rc::clone(options);
+        }
+        let options: Rc<[Subdivision]> = build_subdivisions(ts).into();
+        cache.push((ts, Rc::clone(&options)));
+        options
+    })
+}
+
+fn build_subdivisions(ts: TimeSignature) -> Vec<Subdivision> {
+    let mut options = vec![Subdivision {
+        code: "none".to_owned(),
+        name: "No subdivision".to_owned(),
+        bar: default_click_bar(ts),
+    }];
+    for parts in 1..=9 {
+        let Some(bar) = subdivided_click_bar(ts, parts) else {
+            continue;
+        };
+        if options.iter().any(|o| same_bar(&o.bar, &bar)) {
+            continue;
+        }
+        let Some(&first) = bar.beats().first() else { continue };
+        let Some(code) = code_of(&first.duration) else { continue };
+        options.push(Subdivision { code, name: subdivision_name(first.duration), bar });
+    }
+    options
+}
+
+/// The subdivision `bar` is, if the picker offers it in its meter.
+pub fn subdivision_of(bar: &Measure) -> Option<Subdivision> {
+    subdivisions(bar.time_signature()).iter().find(|o| same_bar(&o.bar, bar)).cloned()
+}
+
+/// "Sixteenths", "Eighth triplets", "Quintuplets": clicks of duration `d`.
+fn subdivision_name(d: Duration) -> String {
+    let base = d.base_note().name();
+    match d.as_tuplet_spec().map(|t| t.kind()) {
+        Some(TupletKind::Triplet) => format!("{base} triplets"),
+        Some(kind) => kind.name().map_or_else(|| format!("{base}s"), |k| format!("{k}s")),
+        None => format!("{base}s"),
     }
 }
 

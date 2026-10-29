@@ -17,6 +17,7 @@ use eframe::egui::{
 };
 use eframe::epaint::MarginF32;
 use grooph_link::format_bar;
+use grooph_measure::click::subdivision_of;
 use grooph_measure::swing::SwingUnit;
 use grooph_measure::tempo::{MAX_BPM, MIN_BPM};
 
@@ -360,8 +361,7 @@ impl Grooph {
         let bpm = self.playback_ctl.bpm;
         let playing = self.playback_ctl.transport_state == TransportState::Playing;
         let cfg = &self.playback_ctl.audio_cfg;
-        let click = format_bar(&self.click_bar()).unwrap_or_default();
-        let subdivision = self.click_fill_label();
+        let click_bar = self.click_bar();
         // The same description as the tool's result (grooph_link::describe):
         // the meter's grouping, where the clicks fall, the polyrhythm, swing.
         // Built once: the description and the link come from the same value.
@@ -371,9 +371,12 @@ impl Grooph {
             // The meter alone, as the tool's ts; the grouping is groups.
             ("ts", Field::Text(format!("{}/{}", ts.beats, ts.beat_unit))),
             ("bpm", Field::Number(bpm.into())),
-            ("click", Field::Text(click)),
-            ("subdivision", Field::Text(subdivision)),
         ];
+        // As the tool takes it: the picker's bar by its name, else written out.
+        match subdivision_of(&click_bar) {
+            Some(option) => fields.push(("subdivision", Field::Text(option.code))),
+            None => fields.push(("click", Field::Text(format_bar(&click_bar).unwrap_or_default()))),
+        }
         if ts.shows_grouping() {
             fields.push(("groups", Field::Text(ts.groups_label())));
         }
@@ -572,6 +575,9 @@ mod tests {
             context.fields
         );
         assert!(context.fields.contains(&("groups", Field::Text("3+2+2".into()))));
+        // The default click is the picker's eighths: named, not written out.
+        assert!(context.fields.contains(&("subdivision", Field::Text("e".into()))));
+        assert!(!context.fields.iter().any(|(key, _)| *key == "click"));
         assert!(context.text.starts_with("Metronome: 7/8 grouped 3+2+2"), "{}", context.text);
     }
 

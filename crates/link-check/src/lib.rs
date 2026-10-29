@@ -128,7 +128,8 @@ mod tests {
         assert_eq!(
             as_accents,
             "7/8 grouped 2+3+2 (groups start on eighths 1, 3, 6) at 120 BPM (quarter notes), \
-             click bar >e e e >e e >e e (strong on eighths 1, 4, 6; medium on 2, 3, 5, 7)"
+             a click bar of its own >e e e >e e >e e (strong on eighths 1, 4, 6; medium on 2, 3, 5, \
+             7); the subdivision picker offers none, e, s, t16, th, 5:4th, 6:4th, 7:4th"
         );
         let grouped = open_query("v=2&ts=7/8&groups=3%2B2%2B2").unwrap();
         assert!(
@@ -136,9 +137,15 @@ mod tests {
             "{grouped}"
         );
         assert!(
-            grouped.ends_with("(strong on eighths 1; medium on 4, 6; soft on 2, 3, 5, 7)"),
+            grouped.ends_with(
+                "subdivision eighths (subdivision=e): click bar >e (e) (e) e (e) e (e), strong on 1, \
+                 medium on each beat group's start, soft between"
+            ),
             "{grouped}"
         );
+        // Sixteenths written out by hand are the picker's, if they match.
+        let sixteenths = open_query("v=2&ts=7/8&groups=3%2B2%2B2&subdivision=s").unwrap();
+        assert!(sixteenths.contains(", subdivision sixteenths (subdivision=s): "), "{sixteenths}");
         // Without a meter, the app keeps its own.
         assert_eq!(
             open_query("v=2&bpm=90&swing=60").unwrap(),
@@ -148,15 +155,15 @@ mod tests {
         let score = open_query("v=2&bpm=80&ts=3/4&r=q+q+q+|+q+q+q").unwrap();
         assert!(
             score.starts_with(
-                "a rhythm of 2 bar(s) starting in 3/4 at 80 BPM (quarter notes), click bar"
+                "a rhythm of 2 bar(s) starting in 3/4 at 80 BPM (quarter notes), no subdivision"
             ),
             "{score}"
         );
         let plain = open_query("v=2&ts=4/4&bpm=90&poly=3:2&swing=66").unwrap();
         assert_eq!(
             plain,
-            "4/4 at 90 BPM (quarter notes), click bar >q q q q (strong on quarters 1; medium on \
-             2, 3, 4), polyrhythm 3:2, swing 66% 8ths"
+            "4/4 at 90 BPM (quarter notes), no subdivision (subdivision=none): click bar >q q q q, \
+             one click per beat group, the first strong, polyrhythm 3:2, swing 66% 8ths"
         );
     }
 }

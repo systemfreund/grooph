@@ -94,6 +94,13 @@
             "schema": { "type": "string", "enum": ["8", "16"] }
           },
           {
+            "name": "subdivision",
+            "in": "query",
+            "description": "The click split evenly as the subdivision picker does it (strong on 1, medium on each beat group's start, soft between): the code of its notes, e.g. `e`, `s`, `t8`, `t16`, `th`, or `none` for one click per beat group. Not together with `click`.",
+            "schema": { "type": "string" },
+            "example": "s"
+          },
+          {
             "name": "click",
             "in": "query",
             "description": "What the metronome clicks in the meter of `r` (its first measure) or `ts`: one measure in the rhythm notation, without the time signature. An accented note (`>q`) clicks strong, a plain note medium, a ghost note (`(q)`) soft, a rest not at all. Default: one click per beat group, the first one strong.",
