@@ -252,42 +252,6 @@ handlers["ui/notifications/host-context-changed"] = (context) => {
   }
 };
 
-// PROBE (temporary): do two views of this server reach each other?
-(() => {
-  const me = Math.random().toString(36).slice(2, 6);
-  const heard = new Set();
-  const line = document.createElement("div");
-  line.style.cssText =
-    "position:fixed;left:4px;bottom:4px;z-index:99;font:11px monospace;color:#f80;background:#000a;padding:2px 4px;pointer-events:none";
-  document.body.appendChild(line);
-  let storage = "no";
-  try {
-    localStorage.setItem("grooph-probe", me);
-    storage = "yes";
-  } catch {}
-  const show = (extra = "") => {
-    line.textContent = `probe ${me} @ ${location.origin} | ls:${storage} | heard: ${[...heard].join(",") || "-"} ${extra}`;
-  };
-  try {
-    const channel = new BroadcastChannel("grooph-probe");
-    channel.onmessage = (e) => {
-      if (!e.data || e.data.from === me) return;
-      const fresh = !heard.has(e.data.from);
-      heard.add(e.data.from);
-      if (fresh && e.data.hello) channel.postMessage({ from: me, hello: false });
-      show();
-    };
-    channel.postMessage({ from: me, hello: true });
-    show();
-  } catch (e) {
-    show("bc failed: " + e);
-  }
-  addEventListener("storage", (e) => {
-    if (e.key === "grooph-probe" && e.newValue) heard.add("ls:" + e.newValue);
-    show();
-  });
-})();
-
 let toolArgs = null;
 const toolInput = new Promise((resolve) => {
   handlers["ui/notifications/tool-input"] = (params) => resolve(params.arguments || {});
