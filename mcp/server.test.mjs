@@ -9,7 +9,7 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { linkChecker } from "./link-check.js";
-import { metronomeQuery } from "./link.js";
+import { GENERATOR_KEYS, METRONOME_KEYS, metronomeQuery } from "./link.js";
 import { RESOURCE_MIME, RESOURCE_URI, handleRequest, showMetronome } from "./server.js";
 
 const ORIGIN = "https://feature-x.grooph.pages.dev";
@@ -60,7 +60,7 @@ test("tools/list has show_metronome with its view", async () => {
   const tool = result.tools.find((t) => t.name === "show_metronome");
   assert.ok(tool);
   assert.equal(tool._meta.ui.resourceUri, RESOURCE_URI);
-  assert.deepEqual(Object.keys(tool.inputSchema.properties).sort(), ["bpm", "click", "groups", "poly", "su", "subdivision", "swing", "ts"]);
+  assert.deepEqual(Object.keys(tool.inputSchema.properties).sort(), ["bpm", "click", "groups", "link", "poly", "su", "subdivision", "swing", "ts"]);
   // Describes, points nowhere else, stays short; the details are the parameters'.
   assert.doesNotMatch(tool.description, /llms\.txt|https?:\/\//);
   assert.ok(tool.description.length < 500, tool.description.length);
@@ -109,6 +109,21 @@ test("resources/read returns the view with this origin in its CSP", async () => 
   // The inline script parses (the view is a module; check its syntax as one).
   const script = content.text.match(/<script type="module">([\s\S]*)<\/script>/)[1];
   assert.doesNotThrow(() => new Function(`return async () => { ${script.replace(/^import .*$/gm, "")} }`));
+});
+
+test("the view stops when another metronome starts, at once", async () => {
+  const { result } = await rpc("resources/read", { uri: RESOURCE_URI });
+  const view = result.contents[0].text;
+  // The app calls the hook by name at the transition (crates/app platform.rs).
+  const platform = fs.readFileSync(path.join(here, "../crates/app/src/platform.rs"), "utf8");
+  assert.ok(platform.includes('host_call("playingChanged"'));
+  assert.ok(view.includes("playingChanged(now)"));
+  // Others are stopped, never toggled: a toggle could start one.
+  assert.ok(fs.readFileSync(path.join(here, "../crates/app/src/web.rs"), "utf8").includes('"stopPlay"'));
+  assert.ok(view.includes("window.groophHost?.stopPlay?.()"));
+  assert.ok(view.includes('new BroadcastChannel("grooph-metronome")'));
+  // The loading skeleton shows the merged settings, not the raw arguments.
+  assert.ok(view.includes("settings = resolveSettings(toolArgs"));
 });
 
 test("the view reads the host's colors as #rrggbbaa", async () => {
@@ -184,6 +199,66 @@ test("the subdivision description names what each meter takes", async () => {
     assert.equal(checkLink(query).problem, null, `${code} in x/${unit}`);
   }
   for (const ts of ["4/4", "7/8", "7/16"]) assert.equal(checkLink(metronomeQuery({ ts, subdivision: "none" })).problem, null, ts);
+});
+
+test("a call with a link changes that metronome", async () => {
+  const call = async (args) => (await rpc("tools/call", { name: "show_metronome", arguments: args })).result;
+  const first = await call({ ts: "7/8", groups: "3+2+2", bpm: 140 });
+  const link = first.structuredContent.link;
+  // Only what is given changes; the rest is the link's.
+  const sixteenths = await call({ link, subdivision: "s" });
+  assert.ok(!sixteenths.isError, sixteenths.content[0].text);
+  assert.equal(sixteenths.structuredContent.link, `${ORIGIN}/?v=2&bpm=140&ts=7/8&groups=3%2B2%2B2&subdivision=s`);
+  assert.match(sixteenths.content[0].text, /It replaces the metronome of the given link; changed: subdivision \(default\) → s\. It shows 7\/8 grouped 3\+2\+2/);
+  // A click bar replaces the subdivision, and the default removes it.
+  const clicked = await call({ link: sixteenths.structuredContent.link, click: ">q. r:q (q)" });
+  assert.ok(clicked.structuredContent.link.endsWith("&click=%3Eq.+r:q+%28q%29"), clicked.structuredContent.link);
+  const plain = await call({ link: clicked.structuredContent.link, click: "default" });
+  assert.equal(plain.structuredContent.link, `${ORIGIN}/?v=2&bpm=140&ts=7/8&groups=3%2B2%2B2`);
+  // A new meter drops what belonged to the old one; tempo and swing stay.
+  const swung = `?v=2&bpm=90&ts=7/8&groups=3%2B2%2B2&swing=60&subdivision=s&poly=3:7`;
+  const five = await call({ link: swung, ts: "5/8" });
+  assert.equal(five.structuredContent.link, `${ORIGIN}/?v=2&bpm=90&ts=5/8&swing=60`);
+  assert.match(five.content[0].text, /changed: ts 7\/8 → 5\/8, groups 3\+2\+2 → \(default\), subdivision s → \(default\), poly 3:7 → \(default\)/);
+  // Removing the polyrhythm and the swing.
+  const straight = await call({ link: swung, poly: "none", swing: 50 });
+  assert.equal(straight.structuredContent.link, `${ORIGIN}/?v=2&bpm=90&ts=7/8&groups=3%2B2%2B2&subdivision=s`);
+  // Edited polyrhythm clicks are kept, and a new ratio replaces them.
+  const edited = "v=2&ts=4/4&counter=t4+r:t4+t4+t4+(t4)+t4";
+  assert.ok((await call({ link: edited, bpm: 100 })).structuredContent.link.endsWith("&counter=t4+r:t4+t4+t4+%28t4%29+t4"));
+  assert.ok((await call({ link: edited, poly: "5:4" })).structuredContent.link.endsWith("&poly=5:4"));
+  // A + typed into a link arrives as a space: still groups.
+  const typed = await call({ link: "v=2&ts=7/8&groups=3+2+2", bpm: 100 });
+  assert.equal(typed.structuredContent.link, `${ORIGIN}/?v=2&bpm=100&ts=7/8&groups=3%2B2%2B2`);
+  assert.match(typed.content[0].text, /changed: bpm \(default\) → 100\. /);
+  // Spaces the link does not have are no change.
+  assert.match((await call({ link, groups: "3 + 2 + 2", bpm: 100 })).content[0].text, /changed: bpm 140 → 100\. /);
+  // The removing values work without a link too.
+  assert.equal(metronomeQuery({ ts: "4/4", swing: 50, su: 16 }), "v=2&ts=4/4");
+  assert.equal(metronomeQuery({ ts: "4/4", poly: "none", click: "default" }), "v=2&ts=4/4");
+  // su with the link's swing, not without one.
+  assert.ok(!(await call({ link: swung, su: 16 })).isError);
+  assert.match((await call({ link, su: 16 })).content[0].text, /su needs a swing amount/);
+});
+
+test("the link keys are the parser's", () => {
+  const source = fs.readFileSync(path.join(here, "../crates/link/src/lib.rs"), "utf8");
+  const parse = source.slice(source.indexOf("fn parse_query_with_default_version"), source.indexOf("let swing = match"));
+  const keys = [...parse.matchAll(/^\s*"(\w+)" =>/gm)].map((m) => m[1]);
+  assert.deepEqual([...METRONOME_KEYS, ...GENERATOR_KEYS, "v", "r"].sort(), keys.sort());
+});
+
+test("a link that is no metronome is an error", async () => {
+  const call = async (args) => (await rpc("tools/call", { name: "show_metronome", arguments: args })).result;
+  const rhythm = await call({ link: "https://grooph.app/?v=2&r=q+q+q+q", bpm: 90 });
+  assert.equal(rhythm.isError, true);
+  assert.match(rhythm.content[0].text, /rhythm, not a metronome/);
+  assert.match((await call({ link: "https://grooph.app/?v=2&bpm=90" })).content[0].text, /no time signature/);
+  // Version 1 counted bpm in the meter's beat unit: not taken over as quarters.
+  assert.match((await call({ link: "https://grooph.app/?bpm=140&ts=7/8", subdivision: "s" })).content[0].text, /old link/);
+  // A link whose bar no longer fits is the parser's to catch.
+  const wrong = await call({ link: "v=2&ts=4/4&click=q+q+q+q", groups: "3+2+2" });
+  assert.equal(wrong.isError, true);
 });
 
 test("groups are checked against ts", async () => {

@@ -223,6 +223,8 @@ pub(crate) struct Embed {
     reported: Option<ModelContext>,
     /// Settings that differ from the reported ones, and since when.
     changed: Option<(ModelContext, f64)>,
+    /// Whether the view was last told the metronome plays.
+    playing: bool,
 }
 
 impl Embed {
@@ -233,6 +235,7 @@ impl Embed {
         platform::install_host_repaint(ctx.clone());
         platform::install_pointer_cancel_listener(ctx.clone());
         platform::install_host_toggle_play(ctx.clone());
+        platform::install_host_stop_play(ctx.clone());
         Self {
             theme: params.theme,
             fullscreen: false,
@@ -241,6 +244,7 @@ impl Embed {
             colors_text: None,
             reported: None,
             changed: None,
+            playing: false,
         }
     }
 }
@@ -273,6 +277,10 @@ impl Grooph {
         if platform::take_toggle_play() {
             self.toggle_playback();
         }
+        // Another metronome started: stop, whatever the view thought.
+        if platform::take_stop_play() {
+            self.stop_for_another_metronome();
+        }
         if self.compact_card() {
             self.tempo_row(ui);
             self.staff_and_ring(ui, true);
@@ -282,6 +290,25 @@ impl Grooph {
         self.measure_panel(ui);
         self.settings_picker(ui);
         self.report_to_model(ui);
+        self.tell_view_playing();
+    }
+
+    /// Another metronome started: stop if playing, else nothing; never a
+    /// toggle, which could start this one.
+    fn stop_for_another_metronome(&mut self) {
+        if self.playback_ctl.transport_state == TransportState::Playing {
+            self.stop_transport();
+        }
+    }
+
+    /// Tell the view at once when playback starts or stops, not with the
+    /// delayed report: it stops the other metronomes when this one starts.
+    fn tell_view_playing(&mut self) {
+        let playing = self.playback_ctl.transport_state == TransportState::Playing;
+        let Some(embed) = self.ui.embed.as_mut() else { return };
+        if embed.playing != playing && platform::host_playing_changed(playing) {
+            embed.playing = playing;
+        }
     }
 
     /// Switch to the host's theme and colors when they change.
@@ -544,6 +571,18 @@ mod tests {
         let cc = eframe::CreationContext::_new_kittest(ctx.clone());
         let app = Grooph::new_with(&cc, embed_params(query), Some(query.to_owned()));
         (ctx, app)
+    }
+
+    #[test]
+    fn another_metronome_stops_this_one_and_never_starts_it() {
+        use crate::TransportState;
+        let (_, mut app) = embedded_app("?v=2&ts=4/4&embed=mcp");
+        app.stop_for_another_metronome();
+        assert_eq!(app.playback_ctl.transport_state, TransportState::Stopped);
+        app.toggle_playback();
+        assert_eq!(app.playback_ctl.transport_state, TransportState::Playing);
+        app.stop_for_another_metronome();
+        assert_eq!(app.playback_ctl.transport_state, TransportState::Stopped);
     }
 
     #[test]

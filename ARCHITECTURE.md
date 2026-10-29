@@ -146,7 +146,17 @@ grooph's metronome runs inside AI chats as an
   answers, CORS) with one tool, `show_metronome`, whose arguments are the
   metronome's link parameters (`bpm`, `ts`, `groups`, `subdivision`,
   `click`, `poly`, `swing`, `su`): the app's own controls, with `click` only
-  for bars the subdivision picker does not offer. `mcp/link.js`
+  for bars the subdivision picker does not offer. A view cannot be reached
+  by a later tool call (each call renders its own), so a change is a new
+  call with `link`, the shown metronome's link: `resolveSettings` in
+  `mcp/link.js` takes that link's settings and changes only what the other
+  arguments set (a new meter drops groups, click, subdivision and
+  polyrhythm; `click: "default"`, `poly: "none"`, `swing: 50` remove one),
+  in the server and the view alike; the result names the changes. The old
+  view stays in the chat; views of the server share the host's sandbox
+  origin, so a view that starts playing tells the others on a
+  `BroadcastChannel` and a playing one stops: one metronome plays at a
+  time, across chats and tabs of the same browser. `mcp/link.js`
   builds the same query as `SharedLink::to_url`, checked by both test suites
   against `mcp/link-cases.json`. Its result carries the link, for hosts
   without views, and what the metronome shows (`grooph_link::describe`:

@@ -288,6 +288,8 @@ pub(crate) fn host_call(
 thread_local! {
     /// The view's play button was pressed since the app last looked.
     static TOGGLE_PLAY: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// Another metronome started since the app last looked.
+    static STOP_PLAY: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 /// Define `window.groophHost.togglePlay`, for the view's play button that
@@ -301,6 +303,24 @@ pub(crate) fn install_host_toggle_play(ctx: Context) {
     }) as Box<dyn FnMut()>);
     Reflect::set(&host, &"togglePlay".into(), toggle.as_ref()).ok();
     toggle.forget();
+}
+
+/// Define `window.groophHost.stopPlay`, which the view calls when another
+/// metronome starts: a stop, never a toggle, so it cannot start this one.
+pub(crate) fn install_host_stop_play(ctx: Context) {
+    use web_sys::js_sys::Reflect;
+    let Some(host) = host_object() else { return };
+    let stop = Closure::wrap(Box::new(move || {
+        STOP_PLAY.with(|t| t.set(true));
+        ctx.request_repaint();
+    }) as Box<dyn FnMut()>);
+    Reflect::set(&host, &"stopPlay".into(), stop.as_ref()).ok();
+    stop.forget();
+}
+
+/// Whether the view asked to stop since the last call.
+pub(crate) fn take_stop_play() -> bool {
+    STOP_PLAY.with(|t| t.replace(false))
 }
 
 /// Whether the view's play button was pressed since the last call.
