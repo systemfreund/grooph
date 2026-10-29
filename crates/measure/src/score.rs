@@ -113,9 +113,9 @@ mod tests {
         let score = Score { measures: vec![four.clone(), four.clone()] };
         assert!(score.same_beats(&score.clone()));
 
-        // The same beats under another meter.
+        // The same beats under another meter of the same length.
         let mut other_meter = score.clone();
-        other_meter.measures[1].time_signature = TimeSignature::new(2, 4);
+        other_meter.measures[1].set_time_signature(TimeSignature::new(2, 2)).unwrap();
         assert_eq!(other_meter.measures[1].beats(), four.beats());
         assert!(!score.same_beats(&other_meter));
 

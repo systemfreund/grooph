@@ -1,4 +1,4 @@
-use grooph_layout::staff_layout::Voice;
+use crate::metronome_view::MetronomeVoice;
 use grooph_measure::click::ClickBars;
 use grooph_measure::counter::CounterBars;
 use grooph_measure::{Cursor, Score};
@@ -17,7 +17,7 @@ pub(crate) struct EditorSnapshot {
     pub click: Option<ClickBars>,
     /// The metronome voice `score` holds (see
     /// [`crate::metronome_view::MetronomeState::voice`]).
-    pub voice: Voice,
+    pub voice: MetronomeVoice,
 }
 
 pub(crate) struct UndoHistory {
@@ -74,7 +74,7 @@ mod tests {
             cursor: Cursor::at(0, beat_idx),
             counter: None,
             click: None,
-            voice: Voice::Upper,
+            voice: MetronomeVoice::Click,
         }
     }
 
@@ -151,7 +151,7 @@ mod tests {
             cursor: Cursor::start(),
             counter: None,
             click: None,
-            voice: Voice::Upper,
+            voice: MetronomeVoice::Click,
         };
 
         let mut h = UndoHistory::new(10);
@@ -167,7 +167,7 @@ mod tests {
                 cursor: Cursor::start(),
                 counter: None,
                 click: None,
-                voice: Voice::Upper,
+                voice: MetronomeVoice::Click,
             })
             .unwrap();
         // the mutation added a beat to the *source* score but the snapshot is independent

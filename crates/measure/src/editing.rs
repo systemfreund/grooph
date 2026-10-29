@@ -4,7 +4,7 @@ use crate::duration::{Duration, NoteValue, TupletSpec};
 use crate::editing::Modification::{DissolveTuplet, ToggleAccent};
 use crate::grid::DEFAULT_GRID;
 use crate::tuplet::TupletGroupId;
-use crate::{Beat, BeatIdx, BeatKind, Measure, TimeSignature};
+use crate::{Beat, BeatIdx, BeatKind, TimeSignature, VoiceBar};
 use either::Either;
 
 #[derive(Debug)]
@@ -34,7 +34,7 @@ pub const CYCLE_TUPLET_SPECS: [TupletSpec; 5] = [
     TupletSpec { n: 9, m: 8, base: Sixteenth }, // nt16 - 1/16 nonuplets
 ];
 
-impl Measure {
+impl VoiceBar {
     /// Toggle the user accent flag at index `idx`.
     pub fn toggle_accent(&mut self, idx: BeatIdx) -> Option<Modification> {
         if let Some(b) = self.beats.get(idx) {
@@ -385,7 +385,7 @@ mod tests {
     use super::*;
     use crate::duration::NoteValue::Eighth;
     use crate::duration::{e, t8};
-    use crate::{Beat, TimeSignature};
+    use crate::{Beat, Measure, TimeSignature};
     use std::assert_matches;
 
     #[test]

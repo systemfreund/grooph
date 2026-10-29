@@ -11,9 +11,9 @@ use crate::measure::{
 use eframe::egui;
 use eframe::egui::{Color32, Rangef, Stroke};
 use grooph_layout::glyphs;
-use grooph_layout::staff_layout::{PlacedMeasure, StaffLayout, StaffOpts, Voice};
+use grooph_layout::staff_layout::{PlacedMeasure, StaffLayout, StaffOpts};
 use grooph_measure::counting::CountConfig;
-use grooph_measure::{Cursor, MeasureIdx, Score};
+use grooph_measure::{Cursor, MeasureIdx, Score, VoiceIdx};
 
 /// How the staff marks the playback position.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -40,21 +40,17 @@ pub fn draw_staff(
     score: &Score,
     staff: &StaffLayout,
     cursor: Option<Cursor>,
-    cursor_voice: Voice,
-    lit: Option<(Voice, Cursor)>,
+    cursor_voice: VoiceIdx,
+    lit: Option<(VoiceIdx, Cursor)>,
     playback: Option<(MeasureIdx, f64)>,
     marks: PlaybackMarks,
     count_config: Option<&CountConfig>,
     staff_opts: &StaffOpts,
 ) {
-    let (cursor, lower_cursor) = match cursor_voice {
-        Voice::Upper => (cursor, None),
-        Voice::Lower => (None, cursor),
-    };
     let color = ui.visuals().text_color();
     let highlight = highlight_color(ui.visuals());
     // The lit note of `voice` in the measure `measure_idx`, if any.
-    let lit_in = |voice: Voice, measure_idx: MeasureIdx| {
+    let lit_in = |voice: VoiceIdx, measure_idx: MeasureIdx| {
         lit.filter(|&(v, c)| v == voice && c.measure_idx == measure_idx)
             .map(|(_, c)| (c.beat_idx, highlight))
     };
@@ -90,20 +86,24 @@ pub fn draw_staff(
             let cursor_x =
                 visual_cursor.filter(|(idx, _)| *idx == placed.measure_idx).map(|(_, x)| x);
 
-            // The lower voice's notes, below the shared line.
-            if let Some(lower) = &placed.lower {
-                let lower_opts = staff_opts.lower_opts_for(placed);
-                let lit = lit_in(Voice::Lower, placed.measure_idx);
-                draw_notes(ui.painter(), lower, color, lit, &lower_opts);
-                if let Some(c) = lower_cursor.filter(|c| c.measure_idx == placed.measure_idx) {
-                    draw_edit_cursor(ui, ui.painter(), lower, c.beat_idx, &lower_opts);
+            // The cursor of `voice` in this measure, if any.
+            let cursor_in = |voice: VoiceIdx| {
+                cursor.filter(|c| voice == cursor_voice && c.measure_idx == placed.measure_idx)
+            };
+            // The other voices' notes, below the shared line.
+            for (voice, layout) in placed.voices.iter().enumerate().skip(1) {
+                let voice_opts = staff_opts.voice_opts_for(placed, voice);
+                let lit = lit_in(voice, placed.measure_idx);
+                draw_notes(ui.painter(), layout, color, lit, &voice_opts);
+                if let Some(c) = cursor_in(voice) {
+                    draw_edit_cursor(ui, ui.painter(), layout, c.beat_idx, &voice_opts);
                 }
             }
 
             // With a lower voice the count labels go under the whole staff.
-            let (count_config, lower_counts) = match placed.lower {
-                Some(_) => (None, count_config),
-                None => (count_config, None),
+            let (count_config, lower_counts) = match placed.voices.len() {
+                1 => (count_config, None),
+                _ => (None, count_config),
             };
             // Only the active measure lights a label, so a wrap-in cursor
             // doesn't light labels in the next measure before its turn.
@@ -114,18 +114,18 @@ pub fn draw_staff(
                 score,
                 placed,
                 staff_opts,
-                cursor,
+                cursor_in(0),
                 measure_count_tick,
                 count_config,
                 cursor_x,
-                lit_in(Voice::Upper, placed.measure_idx),
+                lit_in(0, placed.measure_idx),
             );
             if let Some(config) = lower_counts {
                 draw_count_layer(
                     ui.painter(),
                     &score.measures[placed.measure_idx],
-                    &placed.layout,
-                    &staff_opts.measure_opts_for(placed),
+                    placed.layout(),
+                    &staff_opts.voice_opts_for(placed, 0),
                     placed.rect.bottom(),
                     config,
                     color,
@@ -158,7 +158,7 @@ pub fn beat_anchor_pos(
 ) -> Option<egui::Pos2> {
     let measure = score.measures.get(measure_idx)?;
     let placed = staff.placed(measure_idx)?;
-    let x = beat_anchor_x(measure, &placed.layout, placed.rect, tick)?;
+    let x = beat_anchor_x(measure, placed.layout(), placed.rect, tick)?;
     Some(egui::pos2(x, placed.rect.center().y + placed.y_offset))
 }
 
@@ -187,19 +187,19 @@ pub fn current_cursor_x(
     let active_placed = staff.placed(play_idx)?;
     let next_idx = (play_idx + 1) % score.len();
     let next_placed = staff.placed(next_idx)?;
-    let split = last_note_split(&active_placed.layout, active_placed.rect, &next_placed.layout);
+    let split = last_note_split(active_placed.layout(), active_placed.rect, next_placed.layout());
 
     // Phase 2 first: if we're past the split of the active measure's last
     // note, the cursor visually belongs to the *next* measure.
     if let Some(entry_frac) = last_note_entering_frac(active_measure, local_tick, split) {
-        let x = playback_cursor_entering_x(&next_placed.layout, next_placed.rect, entry_frac)?;
+        let x = playback_cursor_entering_x(next_placed.layout(), next_placed.rect, entry_frac)?;
         return Some((next_idx, x));
     }
 
     // Phase 1: cursor lives in the active measure.
     let x = playback_cursor_x(
         active_measure,
-        &active_placed.layout,
+        active_placed.layout(),
         active_placed.rect,
         local_tick,
         split,
@@ -223,12 +223,12 @@ fn render_placed_measure(
 
     // Build a per-measure LayoutOpts from the placed rect/flags so the cursor
     // and playback drawing get the right viewport.
-    let per_opts = staff_opts.measure_opts_for(placed);
+    let per_opts = staff_opts.voice_opts_for(placed, 0);
 
     render_measure_at(
         ui,
         &score.measures[placed.measure_idx],
-        &placed.layout,
+        placed.layout(),
         &per_opts,
         cursor_idx,
         count_tick,
@@ -263,7 +263,7 @@ fn draw_barlines(
 mod tests {
     use super::*;
     use eframe::egui::{FontFamily, FontId, Pos2, Rect, vec2};
-    use grooph_layout::staff_layout::{ROOM_BELOW_EM, build_staff_layout_with_lower};
+    use grooph_layout::staff_layout::{ROOM_BELOW_EM, build_staff_layout};
     use grooph_measure::notation::parse_score;
 
     fn opts() -> StaffOpts {
@@ -291,24 +291,28 @@ mod tests {
     /// The voice and index of the note nearest (across) each shape drawn in
     /// the highlight colour, with `lit` lit on a two-voice staff whose notes
     /// all stand at different places.
-    fn lit_notes(lit: (Voice, Cursor)) -> Vec<(Voice, usize)> {
+    fn lit_notes(lit: (VoiceIdx, Cursor)) -> Vec<(VoiceIdx, usize)> {
         let upper = parse_score("4/4 q q q q").unwrap();
         let lower = parse_score("4/4 r:e q q q e").unwrap();
         let opts = opts();
-        let staff = build_staff_layout_with_lower(&upper, Some(&lower), &opts);
+        let mut both = upper.clone();
+        for (m, l) in both.measures.iter_mut().zip(&lower.measures) {
+            m.push_voices(l).unwrap();
+        }
+        let staff = build_staff_layout(&both, &opts);
         let ctx = egui::Context::default();
         let mut color = Color32::PLACEHOLDER;
         let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
             color = highlight_color(ui.visuals());
             let marks = PlaybackMarks::Line;
-            draw_staff(ui, &upper, &staff, None, Voice::Upper, Some(lit), None, marks, None, &opts);
+            draw_staff(ui, &both, &staff, None, 0, Some(lit), None, marks, None, &opts);
         });
         output.textures_delta.clear();
         let placed = staff.placed(0).unwrap();
-        let lower_notes = &placed.lower.as_ref().unwrap().notes;
-        let notes: Vec<(Voice, usize, Pos2)> = (placed.layout.notes.iter().enumerate())
-            .map(|(i, n)| (Voice::Upper, i, n.center))
-            .chain(lower_notes.iter().enumerate().map(|(i, n)| (Voice::Lower, i, n.center)))
+        let lower_notes = &placed.voices[1].notes;
+        let notes: Vec<(VoiceIdx, usize, Pos2)> = (placed.layout().notes.iter().enumerate())
+            .map(|(i, n)| (0, i, n.center))
+            .chain(lower_notes.iter().enumerate().map(|(i, n)| (1, i, n.center)))
             .collect();
         output
             .shapes
@@ -331,12 +335,12 @@ mod tests {
 
     #[test]
     fn a_lit_note_lights_in_its_own_voice_only() {
-        for voice in [Voice::Upper, Voice::Lower] {
+        for voice in [0, 1] {
             let lit = lit_notes((voice, Cursor { measure_idx: 0, beat_idx: 1 }));
             assert!(lit.len() >= 2, "{voice:?}: {lit:?}");
             assert!(lit.iter().all(|&n| n == (voice, 1)), "{voice:?}: {lit:?}");
         }
         // A note of another measure lights nothing here.
-        assert!(lit_notes((Voice::Upper, Cursor { measure_idx: 1, beat_idx: 1 })).is_empty());
+        assert!(lit_notes((0, Cursor { measure_idx: 1, beat_idx: 1 })).is_empty());
     }
 }

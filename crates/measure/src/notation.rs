@@ -296,8 +296,12 @@ pub fn parse_score(input: &str) -> Result<Score, NotationError> {
 /// Format `score` in the text notation. The first measure always states its
 /// time signature; later ones only when it changes. Returns `None` if a beat
 /// has a duration without a notation code (not produced by the editor or the
-/// generator).
+/// generator), or a measure has more than one voice: the notation has no
+/// voices yet (#253), and dropping them would lose notes.
 pub fn format_score(score: &Score) -> Option<String> {
+    if score.measures.iter().any(|m| m.voices().len() > 1) {
+        return None;
+    }
     let mut out = String::new();
     let mut prev_ts: Option<TimeSignature> = None;
     for (i, m) in score.measures.iter().enumerate() {
@@ -543,6 +547,15 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn a_score_with_voices_is_not_written_without_them() {
+        let mut score = parse_score("2/4 q q").unwrap();
+        let lower = parse_score("2/4 e e e e").unwrap();
+        assert!(format_score(&score).is_some());
+        score.measures[0].push_voices(&lower.measures[0]).unwrap();
+        assert_eq!(format_score(&score), None);
     }
 
     #[test]

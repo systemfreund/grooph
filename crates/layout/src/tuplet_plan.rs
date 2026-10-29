@@ -1,6 +1,6 @@
 use crate::beam_plan::BeamGroup;
 use grooph_measure::duration::{Duration, NoteValue};
-use grooph_measure::{BeatIdx, Measure};
+use grooph_measure::{BeatIdx, VoiceBar};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TupletPlan {
@@ -48,7 +48,7 @@ pub(crate) struct TupletSpan {
 }
 
 /// Finds tuplet spans from the measure alone, without beaming information.
-pub(crate) fn detect_tuplet_spans(measure: &Measure) -> Vec<TupletSpan> {
+pub(crate) fn detect_tuplet_spans(measure: &VoiceBar) -> Vec<TupletSpan> {
     let beats = measure.beats();
     measure
         .tuplet_groups()
@@ -67,7 +67,7 @@ pub(crate) fn detect_tuplet_spans(measure: &Measure) -> Vec<TupletSpan> {
         .collect()
 }
 
-pub fn compute_tuplet_plan(measure: &Measure, beams: &[BeamGroup]) -> Vec<TupletPlan> {
+pub fn compute_tuplet_plan(measure: &VoiceBar, beams: &[BeamGroup]) -> Vec<TupletPlan> {
     let beats = measure.beats();
     let spans = detect_tuplet_spans(measure);
 

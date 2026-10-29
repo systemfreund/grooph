@@ -1,9 +1,9 @@
-use crate::Measure;
+use crate::VoiceBar;
 use crate::duration::Duration;
 use crate::grid::DEFAULT_GRID;
 use crate::math::gcd;
 
-impl Measure {
+impl VoiceBar {
     /// Compute the best exact spelling for a gap measured in ticks.
     /// Optimization priority:
     /// 1) Minimal number of tokens (durations)

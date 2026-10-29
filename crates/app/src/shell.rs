@@ -5,6 +5,7 @@
 
 use crate::generator::GeneratorState;
 use crate::metronome_view::FillLook;
+use crate::metronome_view::MetronomeVoice;
 use crate::metronome_view::ratio_label;
 use crate::pickers::{Picker, ROW_HEIGHT, shown_groups, silent_bars_label, swing_label};
 use crate::share::paint_share_icon;
@@ -19,7 +20,6 @@ use eframe::egui::{
 };
 use grooph_layout::glyphs::ts_glyphs;
 use grooph_layout::pixel_layout::PlacedGlyph;
-use grooph_layout::staff_layout::Voice;
 use grooph_measure::TimeSignature;
 use grooph_measure::counter::Ratio;
 use grooph_measure::generator::{Subdivision, effective_subdivision};
@@ -1300,7 +1300,10 @@ impl Grooph {
                     // palette edits (a tap on its line picks it too).
                     if self.counter_bar().is_some() {
                         let voice = self.edited_voice();
-                        for (v, label) in [(Voice::Upper, "Clicks"), (Voice::Lower, "Counter")] {
+                        for (v, label) in [
+                            (MetronomeVoice::Click, "Clicks"),
+                            (MetronomeVoice::Counter, "Counter"),
+                        ] {
                             let button =
                                 Button::new(RichText::new(label).size(16.0)).selected(voice == v);
                             if ui.add(button).clicked() {

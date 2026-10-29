@@ -1,6 +1,7 @@
 use crate::Grooph;
 use crate::accuracy::{AccuracyMark, HitGrade, clamp_diff_to_beat_window};
 use crate::guide::{Guide, anchor_intensity};
+use crate::metronome_view::MetronomeVoice;
 use crate::playback_clock::{advance_tick, next_count_in};
 use crate::tools::{Modifier, ToolKind, all_tools};
 use crate::{Mode, TransportState};
@@ -9,8 +10,7 @@ use eframe::egui::{FontId, Frame, Rect, Response, Stroke};
 use grooph_layout::pixel_layout::{MeasureLayout, compute_em};
 use grooph_layout::staff_layout::{
     LEGIBILITY_FLOOR_EM, LOWER_VOICE_LABEL_ROOM_EM, PlacedMeasure, ROOM_BELOW_EM,
-    ROOM_BELOW_WITH_LABELS_EM, StaffLayout, StaffOpts, Voice, build_staff_layout_with_lower,
-    hit_test_voice,
+    ROOM_BELOW_WITH_LABELS_EM, StaffLayout, StaffOpts, build_staff_layout, hit_test_voice,
 };
 use grooph_measure::grid::DEFAULT_GRID;
 use grooph_measure::tempo::ScoreTiming;
@@ -31,18 +31,6 @@ pub(crate) fn staff_margins(style: &egui::Style) -> egui::Vec2 {
 }
 
 impl Grooph {
-    /// The staff's two voices besides the edited score: the upper one (when
-    /// the editor holds the lower) and the lower one, the metronome's counter
-    /// rhythm under its click bar. The editor holds one of the two (the one
-    /// being edited), the other comes from the audio settings.
-    pub(crate) fn staff_voices(&self) -> (Option<Score>, Option<Score>) {
-        let other = self.other_voice_score();
-        match self.edited_voice() {
-            Voice::Upper => (None, other),
-            Voice::Lower => (other, Some(self.editor.score.clone())),
-        }
-    }
-
     /// The staff's options for `viewport_rect`. The metronome's staff takes
     /// its size from the width alone: its height then decides how much room
     /// the ring below gets (see `Grooph::staff_and_ring`), which must not in
@@ -109,9 +97,9 @@ impl Grooph {
         let margins = staff_margins(ui.style());
         let rect = Rect::from_min_size(ui.cursor().min, egui::vec2(width - margins.x, 1.0e4));
         let opts = self.staff_opts(ui, rect);
-        let (upper, counter) = self.staff_voices();
-        let upper = upper.as_ref().unwrap_or(&self.editor.score);
-        build_staff_layout_with_lower(upper, counter.as_ref(), &opts).total_size.y + margins.y
+        let shown = self.metronome_staff_score();
+        let score = shown.as_ref().unwrap_or(&self.editor.score);
+        build_staff_layout(score, &opts).total_size.y + margins.y
     }
 
     pub(super) fn measure_panel(&mut self, ui: &mut egui::Ui) {
@@ -149,12 +137,10 @@ impl Grooph {
                     let origin = ui.cursor().min;
                     let viewport_rect = Rect::from_min_size(origin, available);
 
-                    // The metronome's counter rhythm, the lower voice
-                    // under its click bar. The editor holds one of the
-                    // two (the one being edited), the other comes from
-                    // the audio settings.
+                    // The metronome's click bar with its counter rhythm
+                    // as the second voice, or the edited score.
                     let voice = self.edited_voice();
-                    let (upper, counter) = self.staff_voices();
+                    let shown = self.metronome_staff_score();
 
                     // Build the multi-measure tempo backbone once per frame.
                     // O(score.len()) — cheap for realistic score sizes.
@@ -184,8 +170,8 @@ impl Grooph {
                     let em = staff_opts.em;
                     let count_config = self.build_count_config();
 
-                    let upper = upper.as_ref().unwrap_or(&self.editor.score);
-                    let staff = build_staff_layout_with_lower(upper, counter.as_ref(), &staff_opts);
+                    let score = shown.as_ref().unwrap_or(&self.editor.score);
+                    let staff = build_staff_layout(score, &staff_opts);
                     // One row fits the height, so nothing above or below
                     // the staff (accents, count labels) is cut off on a
                     // short, wide panel.
@@ -194,8 +180,7 @@ impl Grooph {
                         let floor = LEGIBILITY_FLOOR_EM / em;
                         let staff_opts =
                             staff_opts.rescaled((available.y / row_height).max(floor.min(1.0)));
-                        let staff =
-                            build_staff_layout_with_lower(upper, counter.as_ref(), &staff_opts);
+                        let staff = build_staff_layout(score, &staff_opts);
                         (staff_opts, staff)
                     } else {
                         (staff_opts, staff)
@@ -212,7 +197,7 @@ impl Grooph {
                     // and X for this frame.
                     if let Some(playback) = playback_local
                         && let Some((m_idx, x)) =
-                            grooph_render::staff::current_cursor_x(upper, &staff, playback)
+                            grooph_render::staff::current_cursor_x(score, &staff, playback)
                         && let Some(placed) = staff.placed(m_idx)
                     {
                         // The row is centred vertically, but the offset
@@ -260,10 +245,7 @@ impl Grooph {
                     let followed = editing.then_some((voice, self.editor.cursor));
                     if followed != self.ui.followed_cursor
                         && let Some(placed) = staff.placed(self.editor.cursor.measure_idx)
-                        && let Some(layout) = match voice {
-                            Voice::Upper => Some(&placed.layout),
-                            Voice::Lower => placed.lower.as_ref(),
-                        }
+                        && let Some(layout) = placed.voices.get(voice.idx())
                         && let Some(note) = layout.notes.get(self.editor.cursor.beat_idx)
                     {
                         let cursor_rect = egui::Rect::from_min_size(
@@ -299,15 +281,16 @@ impl Grooph {
                     // Under the metronome's ring the staff and the ring
                     // light each other's hovered note and segment.
                     let with_ring = self.metronome_mode() && self.ui.mode != Mode::Edit;
-                    let lit = with_ring
-                        .then_some(self.editor.metronome.ring_hover)
-                        .flatten()
-                        .map(|(voice, beat_idx)| (voice, Cursor { measure_idx: 0, beat_idx }));
+                    let lit = with_ring.then_some(self.editor.metronome.ring_hover).flatten().map(
+                        |(voice, beat_idx)| (voice.idx(), Cursor { measure_idx: 0, beat_idx }),
+                    );
                     let staff_hover = resp
                         .hover_pos()
                         .filter(|_| with_ring)
                         .and_then(|pos| hit_test_voice(&staff, pos))
-                        .map(|(voice, _, beat_idx)| (voice, beat_idx));
+                        .and_then(|(voice, _, beat_idx)| {
+                            Some((MetronomeVoice::of(voice)?, beat_idx))
+                        });
                     if staff_hover != self.editor.metronome.staff_hover {
                         // The ring was drawn before the staff: show it there next frame.
                         self.editor.metronome.staff_hover = staff_hover;
@@ -316,10 +299,10 @@ impl Grooph {
 
                     draw_staff(
                         ui,
-                        upper,
+                        score,
                         &staff,
                         cursor,
-                        voice,
+                        voice.idx(),
                         lit,
                         playback,
                         marks,
@@ -352,7 +335,7 @@ impl Grooph {
 
                     self.draw_accuracy_markers(
                         ui,
-                        upper,
+                        score,
                         &staff,
                         &timing,
                         render_opts.staff_space(),
@@ -513,7 +496,7 @@ impl Grooph {
         }
         let local_onsets = DEFAULT_GRID.compute_onset_ticks(beats);
         let measure_start = timing.measure_start_tick(placed.measure_idx);
-        let layout = &placed.layout;
+        let layout = &placed.layout();
         let dark = ui.visuals().dark_mode;
         for (idx, note_layout) in layout.notes.iter().enumerate() {
             if note_layout.kind != grooph_measure::BeatKind::Note {
@@ -596,6 +579,7 @@ impl Grooph {
         if with_ring && resp.clicked() {
             if let Some(pos) = resp.interact_pointer_pos()
                 && let Some((voice, _, b_idx)) = hit_test_voice(staff, pos)
+                && let Some(voice) = MetronomeVoice::of(voice)
             {
                 self.tap_staff_note(voice, b_idx);
             }
@@ -605,6 +589,7 @@ impl Grooph {
             && (resp.clicked() || resp.dragged())
             && let Some(pos) = resp.interact_pointer_pos()
             && let Some((voice, m_idx, b_idx)) = hit_test_voice(staff, pos)
+            && let Some(voice) = MetronomeVoice::of(voice)
         {
             // A tap on the other voice's line edits that voice from now on.
             self.select_voice(voice);

@@ -4,7 +4,7 @@ use crate::render_plan::RenderPlan;
 use egui::{Pos2, Rect};
 use grooph_measure::duration::{Duration, NoteValue};
 use grooph_measure::grid::DEFAULT_GRID;
-use grooph_measure::{Beat, BeatKind, Measure};
+use grooph_measure::{Beat, BeatKind, VoiceBar};
 
 /// Number of augmentation dots on a duration (0 for non-dotted).
 const fn dot_count_of(duration: Duration) -> u8 {
@@ -277,7 +277,7 @@ fn min_advances(beats: &[Beat], in_beam: &[bool], opts: &LayoutOpts) -> Vec<f32>
 /// Least distance (px) each beat of `measure` needs to the next note head,
 /// or to the barline for the last one (see [`min_advances`]).
 pub(super) fn note_advances(
-    measure: &Measure,
+    measure: &VoiceBar,
     render_plan: &RenderPlan,
     opts: &LayoutOpts,
 ) -> Vec<f32> {
@@ -288,7 +288,7 @@ pub(super) fn note_advances(
 /// Narrowest note area in which no glyph overlaps the next one or the
 /// barline (see [`crate::calculate_x_centers`]'s `min_advance`).
 pub(super) fn min_note_area_width(
-    measure: &Measure,
+    measure: &VoiceBar,
     render_plan: &RenderPlan,
     opts: &LayoutOpts,
 ) -> f32 {
@@ -298,14 +298,13 @@ pub(super) fn min_note_area_width(
 /// The notes of `measure` in the note area `rect`, at `x_centers` (from the
 /// area's left edge) if given, else spread by rhythm over its width.
 pub(super) fn build_note_layout(
-    measure: &Measure,
+    measure: &VoiceBar,
     render_plan: &RenderPlan,
     rect: &Rect,
     x_centers: Option<&[f32]>,
     opts: &LayoutOpts,
 ) -> Vec<NoteLayout> {
     let beats = measure.beats();
-    let beams = &render_plan.beams;
 
     // Base positions, spread evenly by rhythm over the available width
     // Determine which beats are inside any beamed group (for flag suppression)
@@ -324,70 +323,13 @@ pub(super) fn build_note_layout(
     .map(|cx| cx + rect.left())
     .collect::<Vec<_>>();
 
-    // 1) Avoid collisions: a metrics-based bounding box per element, pushed
-    //    right greedily (x only).
-    let em = opts.em;
-    let min_gap = c::COLLISION_MIN_GAP_EM * em;
-
-    // Map beat index to beam group index to detect connected notes
-    let mut beat_to_beam_group = vec![None; beats.len()];
-    for (g_idx, g) in beams.iter().enumerate() {
-        for &b_idx in &g.beat_indices {
-            if b_idx < beat_to_beam_group.len() {
-                beat_to_beam_group[b_idx] = Some(g_idx);
-            }
-        }
-    }
-
-    // Primary group info
-    let onsets = DEFAULT_GRID.compute_onset_ticks(beats);
-    let boundaries = DEFAULT_GRID.primary_boundaries(&measure.time_signature());
-
-    // Track shift per beat (cx - base_cx) to propagate within beam groups
-    let mut shifts = vec![0.0; beats.len()];
-
-    let mut shifted_cxs: Vec<f32> = Vec::with_capacity(beats.len());
-    let mut prev_right: Option<f32> = None;
-
-    for (i, b) in beats.iter().enumerate() {
-        let base_cx = *x_centers.get(i).unwrap_or(&rect.center().x);
-
-        let in_beam = in_beam_flags.get(i).copied().unwrap_or(false);
-        let (left, right) = compute_x_extents(b, in_beam, opts);
-
-        // Push right to keep the minimum gap to the previous box
-        let mut cx = base_cx;
-
-        // Propagate shift if connected to previous beat: by a beam, a tuplet
-        // or the same primary group.
-        let connected = i > 0
-            && (beat_to_beam_group[i].is_some_and(|bg| beat_to_beam_group[i - 1] == Some(bg))
-                || render_plan.tuplets.iter().any(|t| t.start <= (i - 1) && t.end >= i)
-                || !boundaries.contains(&onsets[i]));
-
-        if connected {
-            cx += shifts[i - 1];
-        }
-
-        if let Some(prev_r) = prev_right {
-            let curr_left_abs = cx + left;
-            let overlap = (prev_r + min_gap) - curr_left_abs;
-            if overlap > 0.0 {
-                cx += overlap;
-            }
-        }
-
-        shifts[i] = cx - base_cx;
-
-        // Update rechter Rand dieser Box in absoluten Koordinaten
-        prev_right = Some(cx + right);
-        shifted_cxs.push(cx);
-    }
-
+    // No note is moved after spacing: the spacing already keeps every
+    // glyph clear of the next (`min_advances`), and with several voices a
+    // note moved in one would leave the beat it shares with the others.
     let mut note_layout: Vec<NoteLayout> = Vec::with_capacity(beats.len());
     let ss = opts.staff_space();
     for (i, b) in beats.iter().enumerate() {
-        let ideal_cx = shifted_cxs[i];
+        let ideal_cx = x_centers[i];
         let needs_flag = requires_flag(b.duration);
         let in_beam = in_beam_flags.get(i).copied().unwrap_or(false);
         let is_note = b.is_note();

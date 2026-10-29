@@ -72,6 +72,7 @@ impl From<StoredAnchor> for TupletAnchor {
 /// accidentally register two anchors under the same id or leak an unregistered
 /// id back onto a beat.
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(default)]
 pub struct TupletRegistry {
     /// Stored map keyed by raw `u32`. Keeping the raw key keeps the JSON wire
     /// format identical to the previous `HashMap<u32, TupletAnchor>` and lets
