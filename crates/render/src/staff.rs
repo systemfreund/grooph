@@ -297,7 +297,7 @@ mod tests {
         let opts = opts();
         let mut both = upper.clone();
         for (m, l) in both.measures.iter_mut().zip(&lower.measures) {
-            m.push_voices(l.clone()).unwrap();
+            m.push_voices(l).unwrap();
         }
         let staff = build_staff_layout(&both, &opts);
         let ctx = egui::Context::default();

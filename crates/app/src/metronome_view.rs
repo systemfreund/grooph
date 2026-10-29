@@ -453,7 +453,7 @@ impl Grooph {
     /// metronome tab when the meter has one. The editor holds one of the two
     /// (the one being edited), the other comes from the audio settings.
     pub(crate) fn metronome_staff_score(&self) -> Option<Score> {
-        let counter = self.counter_bar().filter(|_| self.metronome_mode())?.clone();
+        let counter = self.counter_bar().filter(|_| self.metronome_mode())?;
         let mut bar = self.click_bar();
         bar.push_voices(counter).ok()?;
         Some(Score::single(bar))

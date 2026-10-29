@@ -551,7 +551,7 @@ mod tests {
     fn with_lower(upper: &Score, lower: &Score) -> Score {
         let mut score = upper.clone();
         for (m, l) in score.measures.iter_mut().zip(&lower.measures) {
-            m.push_voices(l.clone()).unwrap();
+            m.push_voices(l).unwrap();
         }
         score
     }
@@ -648,7 +648,7 @@ mod tests {
         let upper = parse_score("4/4 q q q q").unwrap();
         let mut score = with_lower(&upper, &parse_score("4/4 q q q q").unwrap());
         let third = parse_score("4/4 r:e e r:e e r:h").unwrap();
-        score.measures[0].push_voices(third.measures[0].clone()).unwrap();
+        score.measures[0].push_voices(&third.measures[0]).unwrap();
         let staff = build_staff_layout(&score, &opts(20.0, rect));
         let system = &staff.systems[0];
         let voices = &system.measures[0].voices;

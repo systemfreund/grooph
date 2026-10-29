@@ -178,13 +178,13 @@ impl Measure {
         self.voices.get_mut(voice)
     }
 
-    /// Add the voices of `other` below this measure's. Fails if `other` is
-    /// in another meter.
-    pub fn push_voices(&mut self, other: Measure) -> Result<(), DifferentMeter> {
+    /// Add copies of the voices of `other` below this measure's. Fails, and
+    /// adds none, if `other` is in another meter.
+    pub fn push_voices(&mut self, other: &Measure) -> Result<(), DifferentMeter> {
         if other.time_signature() != self.time_signature() {
             return Err(DifferentMeter);
         }
-        self.voices.extend(other.voices);
+        self.voices.extend_from_slice(&other.voices);
         Ok(())
     }
 
@@ -223,6 +223,14 @@ impl std::ops::DerefMut for Measure {
 /// A voice in another meter than the measure's.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DifferentMeter;
+
+impl std::fmt::Display for DifferentMeter {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_str("a voice in another meter than its measure")
+    }
+}
+
+impl std::error::Error for DifferentMeter {}
 
 impl VoiceBar {
     fn new_init(time_signature: TimeSignature, init: BeatKind) -> Self {

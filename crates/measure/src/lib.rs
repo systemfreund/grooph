@@ -989,16 +989,20 @@ mod tests {
     fn round_trips(m: &Measure) -> bool {
         let back = read(&ron::to_string(m).unwrap()).unwrap_or_else(|err| panic!("{m:?}: {err}"));
         // `Beat`'s `PartialEq` ignores the tuplet group: compare it and its anchor too.
-        let groups = |m: &Measure| -> Vec<_> {
-            m.beats()
+        let groups = |v: &VoiceBar| -> Vec<_> {
+            v.beats()
                 .iter()
-                .map(|b| b.tuplet_group_id.map(|id| (id, m.tuplets().get(id).cloned())))
+                .map(|b| b.tuplet_group_id.map(|id| (id, v.tuplets().get(id).cloned())))
                 .collect()
         };
         back.time_signature() == m.time_signature()
-            && back.beats() == m.beats()
-            && groups(&back) == groups(m)
-            && back.tuplets().len() == m.tuplets().len()
+            && back.voices().len() == m.voices().len()
+            && back.voices().iter().zip(m.voices()).all(|(b, v)| {
+                b.time_signature() == v.time_signature()
+                    && b.beats() == v.beats()
+                    && groups(b) == groups(v)
+                    && b.tuplets().len() == v.tuplets().len()
+            })
     }
 
     fn parse(notation: &str) -> Measure {
@@ -1021,8 +1025,8 @@ mod tests {
     #[test]
     fn voices_share_the_meter_and_round_trip() {
         let mut m = parse("2/4 q q");
-        m.push_voices(parse("2/4 t8 t8 t8 r:q")).unwrap();
-        assert_eq!(m.push_voices(parse("3/4 q q q")), Err(DifferentMeter));
+        m.push_voices(&parse("2/4 t8 t8 t8 r:q")).unwrap();
+        assert_eq!(m.push_voices(&parse("3/4 q q q")), Err(DifferentMeter));
         assert_eq!(m.voices().len(), 2);
         assert_eq!(format!("{m:?}"), "1/4 1/4 ; 1/8[3:2] 1/8[3:2] 1/8[3:2] (1/4)");
         // Editing the measure edits its first voice.
@@ -1031,12 +1035,10 @@ mod tests {
         assert!(m.voice(1).unwrap().beats()[0].is_note());
         m.voice_mut(1).unwrap().set_beat(3, Beat::note(q())).unwrap();
 
-        let back: Measure = ron::from_str(&ron::to_string(&m).unwrap()).unwrap();
-        assert!(crate::click::same_bar(&back, &m));
+        // Every voice comes back with its beats, tuplet groups and anchors.
+        assert!(round_trips(&m));
         let first_only = parse("2/4 r:q q");
         assert!(!crate::click::same_bar(&first_only, &m), "the second voice counts");
-        // The tuplet group of the second voice survives the round trip.
-        assert!(back.voice(1).unwrap().tuplet_group_at(0).is_some());
         assert!(
             ron::from_str::<Measure>(r#"{"time_signature":(beats:2,beat_unit:4),"voices":[]}"#)
                 .unwrap_err()
@@ -1048,7 +1050,7 @@ mod tests {
     #[test]
     fn a_new_time_signature_refits_every_voice() {
         let mut m = parse("4/4 q q q q");
-        m.push_voices(parse("4/4 h h")).unwrap();
+        m.push_voices(&parse("4/4 h h")).unwrap();
         m.set_time_signature(TimeSignature::THREE_FOUR).unwrap();
         assert_eq!(format!("{m:?}"), "1/4 1/4 1/4 ; 1/2 (1/4)");
         assert!(m.voices().iter().all(|v| v.time_signature() == TimeSignature::THREE_FOUR));
