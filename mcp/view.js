@@ -266,8 +266,7 @@ handlers["ui/notifications/host-context-changed"] = (context) => {
     storage = "yes";
   } catch {}
   const show = (extra = "") => {
-    line.textContent =
-      "probe " + me + " @ " + location.origin + " | ls:" + storage + " | heard: " + ([...heard].join(",") || "-") + " " + extra;
+    line.textContent = `probe ${me} @ ${location.origin} | ls:${storage} | heard: ${[...heard].join(",") || "-"} ${extra}`;
   };
   try {
     const channel = new BroadcastChannel("grooph-probe");
