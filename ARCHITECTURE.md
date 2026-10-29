@@ -42,7 +42,17 @@ spread across callers.
 
 ## Data model and invariants
 
-- Core object: `grooph_measure::Measure` with `Vec<Beat>` and `TimeSignature`.
+- Core object: `grooph_measure::Measure`, a `TimeSignature` and its voices
+  (`VoiceBar`, at least one): each voice a `Vec<Beat>` filling the meter, with
+  its own tuplet groups. Voice 0 has its stems up; a second voice sits below
+  the shared line with its stems down (the metronome's counter rhythm under
+  the click bar; later the feet under the hands of a drum part). All voices
+  share the meter: `Measure::set_time_signature` refits every one, or none.
+  A `Measure` reads and edits as its first voice (`Deref` to `VoiceBar`), so
+  single-voice code (click bars, generator, counting, notation, audio)
+  needs no change; `voices()`, `voice_mut(i)` and `push_voices` reach the
+  rest. Measures saved before voices (beats and tuplets inline) load as one
+  voice (`RawMeasure`).
 - `Beat` is a slot of the rhythm, `duration` and `tuplet_group_id`, and what
   is played in it, its `Heads` (`grooph_measure::head`): none is a rest, one a
   note, several a chord on one stem (at most one per `Instrument`, sorted from
@@ -93,6 +103,16 @@ spread across callers.
    (note/beam/tuplet positions) from `Measure` and `LayoutOpts`.
 2. `grooph_render::measure::draw_measure` renders the result with egui.
 3. The font `Bravura.otf` (SMuFL) lives in `crates/app/assets/fonts`.
+4. `grooph_layout::staff_layout::build_staff_layout` lays out a score, one
+   measure per row, every voice of a measure (`PlacedMeasure::voices`, one
+   `MeasureLayout` each; `layout()` is the first). With several voices they
+   share the line and are spaced together (`calculate_shared_x_centers`):
+   beats at the same time line up and each voice keeps the room its glyphs
+   need. Nothing moves a note after spacing, or the voices would part.
+   `StaffOpts::voice_opts_for` gives each voice its stem direction.
+   The metronome's staff is one such measure: the click bar with the counter
+   rhythm as its second voice (`Grooph::metronome_staff_score`); which of
+   the two the editor holds is the app's `MetronomeVoice`.
 
 ## Audio, playback, counting
 

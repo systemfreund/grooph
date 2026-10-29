@@ -1,6 +1,6 @@
 use crate::beam_plan::{BeamGroup, BeamPlan, compute_beam_plan_with};
 use crate::tuplet_plan::{TupletPlan, compute_tuplet_plan};
-use grooph_measure::Measure;
+use grooph_measure::VoiceBar;
 
 /// Logical, device-independent render plan derived from a `Measure`.
 ///
@@ -33,13 +33,13 @@ pub struct RenderPlan {
 ///
 /// This step analyzes the musical content (meter-aware grouping, durations) and produces
 /// beaming groups and tuplet segments. No pixel geometry is computed here.
-pub fn plan_measure(measure: &Measure) -> RenderPlan {
+pub fn plan_measure(measure: &VoiceBar) -> RenderPlan {
     plan_measure_with(measure, false)
 }
 
 /// [`plan_measure`], with `stemlets` running the beams over rests: a beamed
 /// rest is drawn as a stem without a head, a stemlet.
-pub fn plan_measure_with(measure: &Measure, stemlets: bool) -> RenderPlan {
+pub fn plan_measure_with(measure: &VoiceBar, stemlets: bool) -> RenderPlan {
     let BeamPlan { groups: beams } = compute_beam_plan_with(measure, stemlets);
     let tuplets = compute_tuplet_plan(measure, &beams);
 
@@ -48,7 +48,7 @@ pub fn plan_measure_with(measure: &Measure, stemlets: bool) -> RenderPlan {
 
 /// Whether `measure` holds rests only, none of them in a tuplet: an empty
 /// bar, written with one whole rest.
-pub fn rests_only(measure: &Measure) -> bool {
+pub fn rests_only(measure: &VoiceBar) -> bool {
     let beats = measure.beats();
     !beats.is_empty() && beats.iter().all(|b| b.is_rest() && !b.duration.is_tuplet())
 }

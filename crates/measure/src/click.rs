@@ -15,7 +15,7 @@ use crate::BeatKind::{Note, Rest};
 use crate::duration::{Duration, TupletKind, TupletSpec};
 use crate::grid::{DEFAULT_GRID, NOTE_VALUES};
 use crate::notation::{code_of, parse_score};
-use crate::{Beat, BeatIdx, Measure, TimeSignature};
+use crate::{Beat, BeatIdx, Measure, TimeSignature, VoiceBar};
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -54,7 +54,7 @@ impl ClickLevel {
     }
 }
 
-impl Measure {
+impl VoiceBar {
     /// Give the beat at `idx` the note, accent and soft flag of `level`. The
     /// duration stays, so the measure stays valid.
     pub fn set_click_level(&mut self, idx: BeatIdx, level: ClickLevel) {
@@ -220,9 +220,11 @@ fn subdivision_name(d: Duration) -> String {
     }
 }
 
-/// Whether two bars hold the same meter and beats.
+/// Whether two bars hold the same meter and beats, in every voice.
 pub(crate) fn same_bar(a: &Measure, b: &Measure) -> bool {
-    a.time_signature() == b.time_signature() && a.beats() == b.beats()
+    a.time_signature() == b.time_signature()
+        && a.voices().len() == b.voices().len()
+        && a.voices().iter().zip(b.voices()).all(|(u, v)| u.beats() == v.beats())
 }
 
 /// The click bar of every meter: its [`meter_click_bar`] unless one was set.

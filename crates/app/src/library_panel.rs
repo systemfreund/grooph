@@ -10,7 +10,7 @@ use eframe::egui::{
     Align, Button, FontFamily, FontId, Frame, Id, Label, Margin, RichText, Sense, Stroke,
     UiBuilder, vec2,
 };
-use grooph_layout::staff_layout::{ROOM_BELOW_EM, StaffOpts, Voice, build_staff_layout};
+use grooph_layout::staff_layout::{ROOM_BELOW_EM, StaffOpts, build_staff_layout};
 use grooph_measure::Score;
 use grooph_measure::generator::effective_subdivision;
 use grooph_render::staff::{PlaybackMarks, draw_staff};
@@ -78,7 +78,7 @@ fn pattern_preview(ui: &mut egui::Ui, score: &Score, width: f32, look: &PreviewL
         &first,
         &staff,
         None,
-        Voice::Upper,
+        0,
         None,
         None,
         PlaybackMarks::Anchor(None),

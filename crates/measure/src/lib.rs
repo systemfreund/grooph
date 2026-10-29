@@ -69,35 +69,77 @@ enum ReplacementKind {
     NewTupletGroup(TupletSpec),
 }
 
-/// Represents a musical measure containing a sequence of beats
+/// Index of a voice in its [`Measure`]: 0 is the first, the upper one.
+pub type VoiceIdx = usize;
+
+/// A measure: its meter and its voices, played together.
+///
+/// A voice is one rhythm through the measure, written with its own stems:
+/// voice 0 with the stems up, voice 1 below it with the stems down (hands
+/// and feet of a drum part, or a click bar and its counter rhythm). Every
+/// measure has at least one voice; all share its time signature.
+///
+/// A measure reads and edits as its first voice (it dereferences to it), so
+/// code for one voice needs no change; [`Measure::voices`] and
+/// [`Measure::voice_mut`] reach the others.
+#[derive(Clone, Deserialize)]
+#[serde(try_from = "RawMeasure")]
+pub struct Measure {
+    /// Never empty; every voice in the same meter.
+    voices: Vec<VoiceBar>,
+}
+
+/// One voice of a [`Measure`]: a sequence of beats filling its meter.
 ///
 /// Invariant: the beats have supported durations and fill the measure
 /// exactly, every beat in a tuplet group has an anchor, and the beats of
 /// every group of two or more fill its anchor's span.
 /// The constructors and editing methods keep it; deserializing checks it
 /// (see [`InvalidMeasure`]).
-#[derive(Clone, Serialize, Deserialize)]
-#[serde(try_from = "RawMeasure")]
-pub struct Measure {
+#[derive(Clone, Serialize)]
+pub struct VoiceBar {
     beats: Vec<Beat>,
+    /// The meter of its measure, set by the measure only.
+    #[serde(skip)]
     time_signature: TimeSignature,
     /// Tuplet group anchors + id allocator.
     #[serde(flatten)]
     tuplets: TupletRegistry,
 }
 
-/// A [`Measure`] as saved, before its invariant is checked.
+/// A [`Measure`] as saved, before its invariant is checked: with its
+/// voices, or as before them with its one voice's beats and tuplets inline.
 #[derive(Deserialize)]
 struct RawMeasure {
-    beats: Vec<Beat>,
     time_signature: TimeSignature,
+    #[serde(default, deserialize_with = "present")]
+    voices: Option<Vec<RawVoice>>,
+    #[serde(default, deserialize_with = "present")]
+    beats: Option<Vec<Beat>>,
     #[serde(flatten)]
     tuplets: TupletRegistry,
+}
+
+/// A [`VoiceBar`] as saved.
+#[derive(Deserialize)]
+struct RawVoice {
+    beats: Vec<Beat>,
+    #[serde(flatten)]
+    tuplets: TupletRegistry,
+}
+
+/// A field that is there, as `Some` (a missing one is `None` by default).
+fn present<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
+    deserializer: D,
+) -> Result<Option<T>, D::Error> {
+    T::deserialize(deserializer).map(Some)
 }
 
 /// Why a saved measure does not hold (see [`Measure`]); spans in grid ticks.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InvalidMeasure {
+    /// The measure has no voice.
+    NoVoice,
     /// The beat at `idx` has a duration the measure does not support.
     UnsupportedDuration { idx: BeatIdx },
     /// The beats do not fill the measure exactly.
@@ -111,6 +153,7 @@ pub enum InvalidMeasure {
 impl std::fmt::Display for InvalidMeasure {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::NoVoice => write!(f, "the measure has no voice"),
             Self::UnsupportedDuration { idx } => {
                 write!(f, "beat {idx} has an unsupported duration")
             }
@@ -133,7 +176,35 @@ impl TryFrom<RawMeasure> for Measure {
     type Error = InvalidMeasure;
 
     fn try_from(raw: RawMeasure) -> Result<Self, Self::Error> {
-        let RawMeasure { beats, time_signature, mut tuplets } = raw;
+        let RawMeasure { time_signature, voices, beats, tuplets } = raw;
+        let voices = match (voices, beats) {
+            (Some(voices), _) if !voices.is_empty() => voices,
+            (_, Some(beats)) => vec![RawVoice { beats, tuplets }],
+            _ => return Err(InvalidMeasure::NoVoice),
+        };
+        let voices = voices
+            .into_iter()
+            .map(|voice| VoiceBar::checked(voice, time_signature))
+            .collect::<Result<_, _>>()?;
+        Ok(Measure { voices })
+    }
+}
+
+impl Serialize for Measure {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        // A map, like the measures saved before voices.
+        use serde::ser::SerializeMap;
+        let mut map = serializer.serialize_map(Some(2))?;
+        map.serialize_entry("time_signature", &self.time_signature())?;
+        map.serialize_entry("voices", &self.voices)?;
+        map.end()
+    }
+}
+
+impl VoiceBar {
+    /// The voice saved as `raw`, in `time_signature`, if it holds.
+    fn checked(raw: RawVoice, time_signature: TimeSignature) -> Result<Self, InvalidMeasure> {
+        let RawVoice { beats, mut tuplets } = raw;
         let mut ticks = 0u64;
         for (idx, beat) in beats.iter().enumerate() {
             // `supports` first: `ticks_of` overflows on durations like a
@@ -156,7 +227,7 @@ impl TryFrom<RawMeasure> for Measure {
         }
         // Anchors saved at or above the next id would be overwritten.
         tuplets.reserve_anchor_ids();
-        let measure = Self { beats, time_signature, tuplets };
+        let measure = VoiceBar { beats, time_signature, tuplets };
         // Like everywhere else, a lone beat with a group id counts as no group
         // (see `tuplet_group_at`): nothing reads its anchor's span.
         for GroupSpan { start_idx, end_idx, id } in measure.tuplet_groups() {
@@ -175,12 +246,77 @@ impl TryFrom<RawMeasure> for Measure {
 }
 
 impl Measure {
-    /// Creates a new empty measure with the given time signature
+    /// A measure of one voice of rests in `time_signature`.
     pub fn new(time_signature: TimeSignature) -> Self {
         Self::new_init(time_signature, Rest)
     }
 
+    /// A measure of one voice, a note or a rest on every beat unit.
     pub fn new_init(time_signature: TimeSignature, init: BeatKind) -> Self {
+        Measure { voices: vec![VoiceBar::new_init(time_signature, init)] }
+    }
+
+    /// The voices, the first one upper.
+    pub fn voices(&self) -> &[VoiceBar] {
+        &self.voices
+    }
+
+    pub fn voice(&self, voice: VoiceIdx) -> Option<&VoiceBar> {
+        self.voices.get(voice)
+    }
+
+    pub fn voice_mut(&mut self, voice: VoiceIdx) -> Option<&mut VoiceBar> {
+        self.voices.get_mut(voice)
+    }
+
+    /// Add the voices of `other` below this measure's. Fails if `other` is
+    /// in another meter.
+    pub fn push_voices(&mut self, other: Measure) -> Result<(), DifferentMeter> {
+        if other.time_signature() != self.time_signature() {
+            return Err(DifferentMeter);
+        }
+        self.voices.extend(other.voices);
+        Ok(())
+    }
+
+    /// Change the time signature of every voice (see
+    /// [`VoiceBar::refit`]); if one cannot change, none does.
+    pub fn set_time_signature(
+        &mut self,
+        new_ts: TimeSignature,
+    ) -> Result<Modification, MeasureError> {
+        let mut voices = self.voices.clone();
+        let modification = voices
+            .iter_mut()
+            .map(|v| v.refit(new_ts))
+            .collect::<Result<Vec<_>, _>>()?
+            .swap_remove(0);
+        self.voices = voices;
+        Ok(modification)
+    }
+}
+
+/// The measure reads and edits as its first voice.
+impl std::ops::Deref for Measure {
+    type Target = VoiceBar;
+
+    fn deref(&self) -> &VoiceBar {
+        &self.voices[0]
+    }
+}
+
+impl std::ops::DerefMut for Measure {
+    fn deref_mut(&mut self) -> &mut VoiceBar {
+        &mut self.voices[0]
+    }
+}
+
+/// A voice in another meter than the measure's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DifferentMeter;
+
+impl VoiceBar {
+    fn new_init(time_signature: TimeSignature, init: BeatKind) -> Self {
         let mut s = Self { beats: Vec::new(), time_signature, tuplets: TupletRegistry::new() };
         s.fill_measure(init, &[Duration::Simple(time_signature.beat_note_value().unwrap())]);
         s
@@ -535,7 +671,7 @@ impl Measure {
         end
     }
 
-    /// Change the measure's time signature using the default policy:
+    /// Change the voice's time signature using the default policy:
     /// - If the new measure is shorter: remove whole beats from the end; if a tuplet is touched,
     ///   remove the entire tuplet group (no splitting).
     /// - If the new measure is longer (or space remains after removals): pad with rests using the
@@ -543,12 +679,10 @@ impl Measure {
     ///
     /// Returns a Modification describing the TS change. Undo/redo is expected to be snapshot-based
     /// in the UI, but we still report a consolidated modification.
-    pub fn set_time_signature(
-        &mut self,
-        new_ts: TimeSignature,
-    ) -> Result<Modification, MeasureError> {
-        use crate::editing::Modification;
-
+    ///
+    /// Only through [`Measure::set_time_signature`], which keeps its voices
+    /// in one meter.
+    fn refit(&mut self, new_ts: TimeSignature) -> Result<Modification, MeasureError> {
         let old_ts = self.time_signature;
         if old_ts == new_ts {
             return Ok(Modification::ChangeTimeSignature(old_ts, new_ts));
@@ -689,6 +823,18 @@ impl Measure {
 
 impl Debug for Measure {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        for (i, voice) in self.voices.iter().enumerate() {
+            if i > 0 {
+                write!(f, " ; ")?;
+            }
+            voice.fmt(f)?;
+        }
+        Ok(())
+    }
+}
+
+impl Debug for VoiceBar {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         self.beats.iter().enumerate().try_fold((), |_, (idx, beat)| {
             beat.fmt(f)?;
             if idx < self.beats.len() - 1 {
@@ -709,7 +855,7 @@ mod tests {
         measure.beats().iter().map(|b| b.duration).collect()
     }
 
-    impl Measure {
+    impl VoiceBar {
         fn remaining_ticks(&self, idx: BeatIdx) -> u32 {
             if idx >= self.beats.len() {
                 return 0;
@@ -1145,6 +1291,59 @@ mod tests {
             && back.beats() == m.beats()
             && groups(&back) == groups(m)
             && back.tuplets().len() == m.tuplets().len()
+    }
+
+    fn parse(notation: &str) -> Measure {
+        crate::notation::parse_score(notation).unwrap().measures.remove(0)
+    }
+
+    #[test]
+    fn a_measure_saved_before_voices_reads_as_one_voice() {
+        // As saved before voices: the one voice's beats and tuplets inline.
+        let old = r#"{"beats":[(duration:Tuplet((n:3,m:2,base:Eighth)),heads:[(instrument:Rhythm)],tuplet_group_id:Some(1)),(duration:Tuplet((n:3,m:2,base:Eighth)),heads:[],tuplet_group_id:Some(1)),(duration:Tuplet((n:3,m:2,base:Eighth)),heads:[],tuplet_group_id:Some(1))],"time_signature":(beats:1,beat_unit:4),"tuplet_anchors":{1:(id:1,n:3,m:2,target_ticks:0,base_hint:Eighth)},"next_tuplet_id":2}"#;
+        let m: Measure = ron::from_str(old).unwrap();
+        assert_eq!(m.voices().len(), 1);
+        assert_eq!(format!("{m:?}"), format!("{:?}", parse("1/4 t8 r:t8 r:t8")));
+        assert!(m.tuplet_group_at(0).is_some());
+        // Saved again, it has its voices.
+        let again: Measure = ron::from_str(&ron::to_string(&m).unwrap()).unwrap();
+        assert!(crate::click::same_bar(&again, &m));
+    }
+
+    #[test]
+    fn voices_share_the_meter_and_round_trip() {
+        let mut m = parse("2/4 q q");
+        m.push_voices(parse("2/4 t8 t8 t8 r:q")).unwrap();
+        assert_eq!(m.push_voices(parse("3/4 q q q")), Err(DifferentMeter));
+        assert_eq!(m.voices().len(), 2);
+        assert_eq!(format!("{m:?}"), "1/4 1/4 ; 1/8[3:2] 1/8[3:2] 1/8[3:2] (1/4)");
+        // Editing the measure edits its first voice.
+        m.toggle_beat_kind(0);
+        assert!(m.voice(0).unwrap().beats()[0].is_rest());
+        assert!(m.voice(1).unwrap().beats()[0].is_note());
+        m.voice_mut(1).unwrap().set_beat(3, Beat::note(q())).unwrap();
+
+        let back: Measure = ron::from_str(&ron::to_string(&m).unwrap()).unwrap();
+        assert!(crate::click::same_bar(&back, &m));
+        let first_only = parse("2/4 r:q q");
+        assert!(!crate::click::same_bar(&first_only, &m), "the second voice counts");
+        // The tuplet group of the second voice survives the round trip.
+        assert!(back.voice(1).unwrap().tuplet_group_at(0).is_some());
+        assert!(
+            ron::from_str::<Measure>(r#"{"time_signature":(beats:2,beat_unit:4),"voices":[]}"#)
+                .unwrap_err()
+                .to_string()
+                .contains("no voice")
+        );
+    }
+
+    #[test]
+    fn a_new_time_signature_refits_every_voice() {
+        let mut m = parse("4/4 q q q q");
+        m.push_voices(parse("4/4 h h")).unwrap();
+        m.set_time_signature(TimeSignature::THREE_FOUR).unwrap();
+        assert_eq!(format!("{m:?}"), "1/4 1/4 1/4 ; 1/2 (1/4)");
+        assert!(m.voices().iter().all(|v| v.time_signature() == TimeSignature::THREE_FOUR));
     }
 
     #[test]

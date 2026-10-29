@@ -4,6 +4,7 @@ use crate::guide::{AnchorFlash, Guide};
 use crate::library::PatternLibrary;
 use crate::library_panel::{LibraryItem, LibraryTab};
 use crate::metronome_view::MetronomeState;
+use crate::metronome_view::MetronomeVoice;
 use crate::persist::StateBackup;
 use crate::pickers::Picker;
 use crate::platform::PlatformRuntime;
@@ -16,7 +17,6 @@ use eframe::egui::TextStyle;
 use eframe::egui::emath::{ease_in_ease_out, lerp};
 use eframe::epaint::FontId;
 use grooph_audio::{Audio, AudioSettings, GapClick, TempoRamp};
-use grooph_layout::staff_layout::Voice;
 use grooph_link::SharedLink;
 use grooph_measure::click::ClickBars;
 use grooph_measure::counter::CounterBars;
@@ -350,7 +350,7 @@ pub(crate) struct UiShell {
     pub(crate) staff_em: f32,
     /// Edit cursor the staff last scrolled into view. The staff follows the
     /// cursor only when it moves, so the user can scroll away from it.
-    pub(crate) followed_cursor: Option<(Voice, Cursor)>,
+    pub(crate) followed_cursor: Option<(MetronomeVoice, Cursor)>,
     pub(crate) shell: ShellState,
     /// Setting whose picker dialog is open.
     pub(crate) picker: Option<Picker>,

@@ -2,7 +2,7 @@ use crate::glyphs::{self, Glyph};
 use crate::render_plan::{RenderPlan, plan_measure};
 use egui::{FontId, Pos2, Rect};
 use grooph_measure::duration::{Duration, NoteValue};
-use grooph_measure::{BeatKind, Measure, TimeSignature};
+use grooph_measure::{BeatKind, TimeSignature, VoiceBar};
 
 mod beams;
 mod notes;
@@ -336,7 +336,7 @@ impl MeasureLayout {
 ///
 /// `plan` is [`plan_measure`] of `measure`, shared with
 /// [`build_measure_layout_with_plan`] so a staff plans each measure once.
-pub fn min_note_area_width(measure: &Measure, plan: &RenderPlan, opts: &LayoutOpts) -> f32 {
+pub fn min_note_area_width(measure: &VoiceBar, plan: &RenderPlan, opts: &LayoutOpts) -> f32 {
     notes::min_note_area_width(measure, plan, opts)
 }
 
@@ -344,7 +344,7 @@ pub fn min_note_area_width(measure: &Measure, plan: &RenderPlan, opts: &LayoutOp
 /// or to the barline for the last one, so their glyphs don't overlap: the
 /// `min_advance` of [`crate::calculate_x_centers`]. `plan` is
 /// [`plan_measure`] of `measure`.
-pub fn note_advances(measure: &Measure, plan: &RenderPlan, opts: &LayoutOpts) -> Vec<f32> {
+pub fn note_advances(measure: &VoiceBar, plan: &RenderPlan, opts: &LayoutOpts) -> Vec<f32> {
     notes::note_advances(measure, plan, opts)
 }
 
@@ -362,7 +362,7 @@ pub fn note_area_offset(time_signature: &TimeSignature, opts: &LayoutOpts) -> f3
 }
 
 /// Build the pixel layout (`MeasureLayout`) from a `Measure`.
-pub fn build_measure_layout(measure: &Measure, opts: &LayoutOpts) -> MeasureLayout {
+pub fn build_measure_layout(measure: &VoiceBar, opts: &LayoutOpts) -> MeasureLayout {
     build_measure_layout_with_plan(measure, &plan_measure(measure), opts)
 }
 
@@ -373,7 +373,7 @@ pub(crate) fn clef_width(em: f32) -> f32 {
 
 /// [`build_measure_layout`] with the measure's [`plan_measure`] already made.
 pub fn build_measure_layout_with_plan(
-    measure: &Measure,
+    measure: &VoiceBar,
     render_plan: &RenderPlan,
     opts: &LayoutOpts,
 ) -> MeasureLayout {
@@ -384,7 +384,7 @@ pub fn build_measure_layout_with_plan(
 /// the left edge of the note area (see [`note_area_offset`]): one voice of
 /// several spaced together ([`crate::calculate_shared_x_centers`]).
 pub fn build_measure_layout_at(
-    measure: &Measure,
+    measure: &VoiceBar,
     render_plan: &RenderPlan,
     x_centers: &[f32],
     opts: &LayoutOpts,
@@ -393,7 +393,7 @@ pub fn build_measure_layout_at(
 }
 
 fn lay_out_measure(
-    measure: &Measure,
+    measure: &VoiceBar,
     render_plan: &RenderPlan,
     x_centers: Option<&[f32]>,
     opts: &LayoutOpts,

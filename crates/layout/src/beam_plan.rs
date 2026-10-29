@@ -1,7 +1,7 @@
 use crate::tuplet_plan::{TupletSpan, detect_tuplet_spans};
 use grooph_measure::duration::{Duration, NoteValue, e, q};
 use grooph_measure::grid::DEFAULT_GRID;
-use grooph_measure::{Beat, BeatIdx, Measure, TimeSignature};
+use grooph_measure::{Beat, BeatIdx, TimeSignature, VoiceBar};
 
 /// Number of beams implied by a duration (eighth = 1, sixteenth = 2, 32nd = 3).
 /// Tuplets map to their base note value for beam count purposes.
@@ -52,14 +52,14 @@ pub struct BeamGroup {
 /// - Cross-measure beams are exposed via the `continues_*` flags but left as false here; a higher level
 ///   can link adjacent measures and set these appropriately.
 #[cfg(test)]
-pub(super) fn compute_beam_plan(measure: &Measure) -> BeamPlan {
+pub(super) fn compute_beam_plan(measure: &VoiceBar) -> BeamPlan {
     compute_beam_plan_with(measure, false)
 }
 
 /// [`compute_beam_plan`], with `beam_rests` beaming rests like notes of their
 /// length, for stemlets: the beams of a group then run over its rests, also
 /// in a group of rests alone.
-pub(super) fn compute_beam_plan_with(measure: &Measure, beam_rests: bool) -> BeamPlan {
+pub(super) fn compute_beam_plan_with(measure: &VoiceBar, beam_rests: bool) -> BeamPlan {
     let beats = measure.beats();
     let ts = measure.time_signature();
     let onsets = DEFAULT_GRID.compute_onset_ticks(beats);
