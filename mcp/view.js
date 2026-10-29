@@ -352,21 +352,21 @@ window.groophHost = {
 
 // One metronome plays at a time: a view that starts says so to the other
 // views of this server (they share the host's sandbox origin, also across
-// chats and tabs), and one that plays stops.
+// chats and tabs), and they stop. The app says when it starts
+// (playingChanged); the view keeps no play state of its own.
 const me = Math.random().toString(36).slice(2);
-let playing = false;
 let channel = null;
 try {
   channel = new BroadcastChannel("grooph-metronome");
   channel.onmessage = (e) => {
-    if (e.data?.started && e.data.started !== me && playing) window.groophHost?.togglePlay?.();
+    // A stop, not a toggle: harmless if this one does not play.
+    if (e.data?.started && e.data.started !== me) window.groophHost?.stopPlay?.();
   };
 } catch (e) {
   console.warn("grooph: no BroadcastChannel", e);
 }
 function onlyOnePlays(now) {
-  if (now && !playing) channel?.postMessage({ started: me });
-  playing = now;
+  if (now) channel?.postMessage({ started: me });
 }
 
 // What a screen reader gets of the canvas: the settings as the model gets

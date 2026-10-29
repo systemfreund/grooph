@@ -9,7 +9,7 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { linkChecker } from "./link-check.js";
-import { metronomeQuery } from "./link.js";
+import { GENERATOR_KEYS, METRONOME_KEYS, metronomeQuery } from "./link.js";
 import { RESOURCE_MIME, RESOURCE_URI, handleRequest, showMetronome } from "./server.js";
 
 const ORIGIN = "https://feature-x.grooph.pages.dev";
@@ -118,6 +118,9 @@ test("the view stops when another metronome starts, at once", async () => {
   const platform = fs.readFileSync(path.join(here, "../crates/app/src/platform.rs"), "utf8");
   assert.ok(platform.includes('host_call("playingChanged"'));
   assert.ok(view.includes("playingChanged(now)"));
+  // Others are stopped, never toggled: a toggle could start one.
+  assert.ok(fs.readFileSync(path.join(here, "../crates/app/src/web.rs"), "utf8").includes('"stopPlay"'));
+  assert.ok(view.includes("window.groophHost?.stopPlay?.()"));
   assert.ok(view.includes('new BroadcastChannel("grooph-metronome")'));
   // The loading skeleton shows the merged settings, not the raw arguments.
   assert.ok(view.includes("settings = resolveSettings(toolArgs"));
@@ -229,8 +232,16 @@ test("a call with a link changes that metronome", async () => {
   // The removing values work without a link too.
   assert.equal(metronomeQuery({ ts: "4/4", swing: 50, su: 16 }), "v=2&ts=4/4");
   assert.equal(metronomeQuery({ ts: "4/4", poly: "none", click: "default" }), "v=2&ts=4/4");
-  // su with the link's swing.
+  // su with the link's swing, not without one.
   assert.ok(!(await call({ link: swung, su: 16 })).isError);
+  assert.match((await call({ link, su: 16 })).content[0].text, /su needs a swing amount/);
+});
+
+test("the link keys are the parser's", () => {
+  const source = fs.readFileSync(path.join(here, "../crates/link/src/lib.rs"), "utf8");
+  const parse = source.slice(source.indexOf("fn parse_query_with_default_version"), source.indexOf("let swing = match"));
+  const keys = [...parse.matchAll(/^\s*"(\w+)" =>/gm)].map((m) => m[1]);
+  assert.deepEqual([...METRONOME_KEYS, ...GENERATOR_KEYS, "v", "r"].sort(), keys.sort());
 });
 
 test("a link that is no metronome is an error", async () => {

@@ -299,6 +299,25 @@ pub(crate) fn host_update_model_context(_context: &crate::embed::ModelContext) -
     false
 }
 
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn install_host_stop_play(ctx: eframe::egui::Context) {
+    crate::web::install_host_stop_play(ctx);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn install_host_stop_play(_ctx: eframe::egui::Context) {}
+
+/// Whether the view asked to stop, because another metronome started.
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn take_stop_play() -> bool {
+    crate::web::take_stop_play()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn take_stop_play() -> bool {
+    false
+}
+
 /// Tell the view that playback started or stopped. `false` without a view.
 #[cfg(target_arch = "wasm32")]
 pub(crate) fn host_playing_changed(playing: bool) -> bool {

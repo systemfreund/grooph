@@ -235,6 +235,7 @@ impl Embed {
         platform::install_host_repaint(ctx.clone());
         platform::install_pointer_cancel_listener(ctx.clone());
         platform::install_host_toggle_play(ctx.clone());
+        platform::install_host_stop_play(ctx.clone());
         Self {
             theme: params.theme,
             fullscreen: false,
@@ -275,6 +276,12 @@ impl Grooph {
         // The view's play button, for screen readers.
         if platform::take_toggle_play() {
             self.toggle_playback();
+        }
+        // Another metronome started: stop, whatever the view thought.
+        if platform::take_stop_play()
+            && self.playback_ctl.transport_state == TransportState::Playing
+        {
+            self.stop_transport();
         }
         if self.compact_card() {
             self.tempo_row(ui);

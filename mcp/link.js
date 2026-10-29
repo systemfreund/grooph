@@ -6,6 +6,12 @@
 // metronome of that link (`resolveSettings`): the view and the server merge
 // the same way.
 
+/** The link parameters of crates/link (`parse_query`) a metronome link can
+ * carry, and those that make it a generated rhythm; a test checks them
+ * against the parser. */
+export const METRONOME_KEYS = ["bpm", "ts", "groups", "subdivision", "click", "poly", "counter", "swing", "su"];
+export const GENERATOR_KEYS = ["sub", "lvl", "bars", "space", "seed"];
+
 /** The settings a metronome link carries, as the tool's arguments, plus
  * edited polyrhythm clicks (`counter`, which no argument sets). `link` is a
  * grooph URL or its query; throws with the reason if it is no metronome
@@ -13,14 +19,14 @@
 export function linkSettings(link) {
   const text = String(link).trim();
   const params = new URLSearchParams(text.includes("?") ? text.slice(text.indexOf("?") + 1) : text);
-  if (params.has("r") || ["sub", "lvl", "bars", "space", "seed"].some((key) => params.has(key))) {
+  if (params.has("r") || GENERATOR_KEYS.some((key) => params.has(key))) {
     throw new Error("link is a rhythm, not a metronome: pass the link of a metronome (from its result or model context)");
   }
   if (!params.has("ts")) throw new Error("link has no time signature (ts): pass the link of a metronome");
   // Without v=2, bpm counted the meter's beat unit (crates/link).
   if (params.get("v") !== "2") throw new Error("link is an old link (without v=2): pass the link from the latest result or model context");
   const settings = {};
-  for (const key of ["bpm", "ts", "groups", "subdivision", "click", "poly", "counter", "swing", "su"]) {
+  for (const key of METRONOME_KEYS) {
     if (params.has(key)) settings[key] = params.get(key);
   }
   return settings;
@@ -125,7 +131,7 @@ export function argumentError(args, known) {
     }
   }
   // With a link, the swing may be the link's.
-  if (args?.su != null && args?.swing == null && args?.link == null) return "su needs a swing amount (swing 50-75)";
+  if (args?.su != null && resolveSettings(args).swing == null) return "su needs a swing amount (swing 51-75), given or in the link";
   if (args?.ts != null && String(args.ts).includes("+")) return `ts is the meter alone, such as 7/8; pass the grouping as groups, e.g. "3+2+2", got ${args.ts}`;
   if (args?.ts != null && !/^\s*\d+\/\d+\s*$/.test(String(args.ts))) return `ts must be a time signature such as 7/8, got ${args.ts}`;
   if (args?.groups != null && !/^\s*\d+(\s*\+\s*\d+)+\s*$/.test(String(args.groups))) return `groups must be beat groups such as 3+2+2, got ${args.groups}`;
