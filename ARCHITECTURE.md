@@ -151,6 +151,15 @@ spread across callers.
   bar line, a leading `N/D` sets the time signature. Parsing goes through
   `set_beat`; each measure must be filled exactly, errors name the measure
   and token. Formatting returns `None` for durations without a code.
+  Drum kit notes name their heads before the duration: `S:e`, a chord
+  `K-H:e` (`-`, not `+`, which links read as a space), per head `>S` and
+  `(S)`, a technique as a lowercase letter (`Ho`, `Hc`, `Sx`, `RDb`, `CRc`);
+  instruments `K S H HF RD CR T1 T2 FT` (`INSTRUMENT_CODES`; cymbals take two
+  letters so `R` never reads as `r:`). `;` separates the voices of a
+  measure. Errors name the place (`Place`: measure and voice).
+- Links refuse drum kit scores (`grooph_link::one_line`: instruments or
+  several voices, in `r`, `click` and `counter`) until the app shows and
+  plays them (#254, #255); so does the MCP server's link check.
 - `grooph_link` (`crates/link`): query parameters `bpm`, `r`, `ts`,
   `groups` (the grouping of `ts`, `ts=7/8&groups=3+2+2`; `ts` takes no
   grouping of its own), `swing`, `su` and the generator's `sub`, `lvl`, `bars`, `space`, `seed` (seeded

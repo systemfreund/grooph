@@ -52,6 +52,11 @@ impl Beat {
         &self.heads
     }
 
+    /// Play `heads` in this slot instead, a rest if there are none.
+    pub fn set_heads(&mut self, heads: Heads) {
+        self.heads = heads;
+    }
+
     pub fn kind(&self) -> BeatKind {
         if self.heads.is_empty() { Rest } else { Note }
     }

@@ -21,19 +21,69 @@
 //! - `r:` makes a rest (`r:q`), `>` accents a note (`>e`), parentheses make
 //!   it a soft (ghost) note (`(e)`).
 //!
+//! ## Drum kit
+//!
+//! ```text
+//! 4/4 H:e S-H:e H:e H:e H:e S-H:e Ho:e Hc:e ; K:q r:q K:q r:q
+//! ```
+//!
+//! - A note of the kit names its heads before the duration: `S:e` is a snare
+//!   eighth. The instruments are `K` kick, `S` snare, `H` hi-hat, `HF` hi-hat
+//!   foot, `RD` ride, `CR` crash, `T1` high tom, `T2` mid tom and `FT` floor
+//!   tom (see [`Instrument`]). A note without them is the one line's
+//!   ([`Instrument::Rhythm`]), as above.
+//! - A chord joins its heads with `-`: `K-H:e`. They are written from the
+//!   foot up; any order reads.
+//! - Each head is accented with `>` or a ghost note in parentheses: `>S-H:q`,
+//!   `K-(S):e`.
+//! - A lowercase letter after an instrument plays it with a [`Technique`]: `Ho`
+//!   open, `Hh` half-open, `Hc` closed hi-hat, `Sx` cross-stick, `Sr` (`T1r`,
+//!   ...) rimshot, `RDb` ride bell, `CRc` choked crash.
+//! - `;` separates the voices of a measure: the first with its stems up, the
+//!   second below it (see [`Measure::voices`]). Every voice fills the measure;
+//!   a time signature comes before the first.
+//!
 //! Parsing goes through [`Measure::set_beat`], so a parsed score obeys the
 //! same invariants as an edited one. Every measure must be filled exactly;
-//! errors name the measure and token so the input can be corrected.
+//! errors name the measure, the voice and the token so the input can be
+//! corrected.
 
 use crate::BeatKind::{Note, Rest};
 use crate::duration::NoteValue::{Eighth, Quarter, Sixteenth};
 use crate::duration::{Duration, NoteValue, TupletSpec};
 use crate::grid::DEFAULT_GRID;
-use crate::{Beat, Measure, MeasureError, ParseTimeSignatureError, Score, TimeSignature};
+use crate::{
+    Beat, Head, Heads, Instrument, Measure, MeasureError, ParseTimeSignatureError, Score,
+    Technique, TimeSignature,
+};
 use std::fmt::{Display, Formatter};
 
 /// Upper bound for the number of measures in a parsed score.
 pub const MAX_MEASURES: usize = 64;
+
+/// Where in the input an error is: a measure and one of its voices, both
+/// counted from 1.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Place {
+    pub measure: usize,
+    pub voice: usize,
+}
+
+impl Place {
+    /// The first voice of `measure`.
+    pub const fn measure(measure: usize) -> Self {
+        Place { measure, voice: 1 }
+    }
+}
+
+impl Display for Place {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self.voice {
+            1 => write!(f, "measure {}", self.measure),
+            voice => write!(f, "measure {}, voice {voice}", self.measure),
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NotationError {
@@ -41,25 +91,31 @@ pub enum NotationError {
     Empty,
     /// More than [`MAX_MEASURES`] measures.
     TooManyMeasures,
-    /// A token that is not a duration, rest, accent or time signature.
-    UnknownToken { measure: usize, token: String },
+    /// A token that is not a duration, rest, accent, note of the kit or time
+    /// signature.
+    UnknownToken { at: Place, token: String },
     /// A time signature that is malformed or not supported.
-    InvalidTimeSignature { measure: usize, token: String, reason: ParseTimeSignatureError },
-    /// A time signature in the middle of a measure.
-    MisplacedTimeSignature { measure: usize, token: String },
+    InvalidTimeSignature { at: Place, token: String, reason: ParseTimeSignatureError },
+    /// A time signature in the middle of a measure, or before a voice other
+    /// than the first.
+    MisplacedTimeSignature { at: Place, token: String },
     /// `>` on a rest.
-    AccentedRest { measure: usize, token: String },
+    AccentedRest { at: Place, token: String },
     /// A soft note that is also a rest or accented, e.g. `(r:q)` or `>(e)`.
-    InvalidSoft { measure: usize, token: String },
-    /// A measure without beats (e.g. `q q q q | | q q q q`).
-    EmptyMeasure { measure: usize },
+    InvalidSoft { at: Place, token: String },
+    /// A head played with a technique its instrument has not, e.g. `Sb:e`.
+    InvalidTechnique { at: Place, token: String },
+    /// A chord with an instrument twice or more heads than a beat holds.
+    InvalidChord { at: Place, token: String },
+    /// A measure or voice without beats (e.g. `q q q q | | q q q q`).
+    EmptyMeasure { at: Place },
     /// The beats exceed the measure length.
-    TooLong { measure: usize, token: String },
+    TooLong { at: Place, token: String },
     /// The beats do not fill the measure; `missing` is a fraction of a whole note.
-    TooShort { measure: usize, missing: String },
+    TooShort { at: Place, missing: String },
     /// The beat cannot be placed here, e.g. an incomplete tuplet group or a
     /// duration that would leave an unfillable gap.
-    DoesNotFit { measure: usize, token: String },
+    DoesNotFit { at: Place, token: String },
 }
 
 impl Display for NotationError {
@@ -68,34 +124,42 @@ impl Display for NotationError {
         match self {
             Empty => write!(f, "the rhythm is empty"),
             TooManyMeasures => write!(f, "more than {MAX_MEASURES} measures"),
-            UnknownToken { measure, token } => write!(
+            UnknownToken { at, token } => write!(
                 f,
-                "measure {measure}: unknown token '{token}' (expected e.g. q, e, s, th, q., t8, qt16, r:q, >e or 4/4)"
+                "{at}: unknown token '{token}' (expected e.g. q, e, s, th, q., t8, qt16, r:q, >e or 4/4)"
             ),
-            InvalidTimeSignature { measure, token, reason } => {
-                write!(f, "measure {measure}: time signature '{token}': {reason}")
+            InvalidTimeSignature { at, token, reason } => {
+                write!(f, "{at}: time signature '{token}': {reason}")
             }
-            MisplacedTimeSignature { measure, token } => write!(
+            MisplacedTimeSignature { at, token } => write!(
                 f,
-                "measure {measure}: time signature '{token}' must come before the first beat of the measure"
+                "{at}: time signature '{token}' must come before the first beat of the measure"
             ),
-            AccentedRest { measure, token } => {
-                write!(f, "measure {measure}: '{token}' - rests cannot be accented")
+            AccentedRest { at, token } => {
+                write!(f, "{at}: '{token}' - rests cannot be accented")
             }
-            InvalidSoft { measure, token } => write!(
+            InvalidSoft { at, token } => write!(
                 f,
-                "measure {measure}: '{token}' - a soft note is written (e) and cannot be a rest or accented"
+                "{at}: '{token}' - a soft note is written (e) and cannot be a rest or accented"
             ),
-            EmptyMeasure { measure } => write!(f, "measure {measure} has no beats"),
-            TooLong { measure, token } => {
-                write!(f, "measure {measure} is too long: '{token}' does not fit anymore")
+            InvalidTechnique { at, token } => {
+                write!(f, "{at}: '{token}' - the instrument is not played that way")
             }
-            TooShort { measure, missing } => {
-                write!(f, "measure {measure} is too short: {missing} of a whole note missing")
-            }
-            DoesNotFit { measure, token } => write!(
+            InvalidChord { at, token } => write!(
                 f,
-                "measure {measure}: '{token}' cannot be placed here (tuplet groups must be complete, e.g. t8 t8 t8)"
+                "{at}: '{token}' - a chord has each instrument once and at most {} heads",
+                crate::head::MAX_HEADS
+            ),
+            EmptyMeasure { at } => write!(f, "{at} has no beats"),
+            TooLong { at, token } => {
+                write!(f, "{at} is too long: '{token}' does not fit anymore")
+            }
+            TooShort { at, missing } => {
+                write!(f, "{at} is too short: {missing} of a whole note missing")
+            }
+            DoesNotFit { at, token } => write!(
+                f,
+                "{at}: '{token}' cannot be placed here (tuplet groups must be complete, e.g. t8 t8 t8)"
             ),
         }
     }
@@ -176,11 +240,98 @@ pub(crate) fn code_of(duration: &Duration) -> Option<String> {
     DEFAULT_GRID.supports(duration).then(|| format!("{n}:{m}{code}"))
 }
 
-fn parse_beat(token: &str, measure: usize) -> Result<Beat, NotationError> {
+/// Codes of the drum kit's instruments.
+const INSTRUMENT_CODES: [(&str, Instrument); 9] = [
+    ("K", Instrument::Kick),
+    ("S", Instrument::Snare),
+    ("H", Instrument::HiHat),
+    ("HF", Instrument::HiHatFoot),
+    ("RD", Instrument::Ride),
+    ("CR", Instrument::Crash),
+    ("T1", Instrument::HighTom),
+    ("T2", Instrument::MidTom),
+    ("FT", Instrument::FloorTom),
+];
+
+/// The letter written after an instrument for `technique`, none for the
+/// usual stroke. A letter means one technique per instrument (`c` is a
+/// closed hi-hat and a choked crash).
+const fn technique_letter(technique: Technique) -> Option<char> {
+    match technique {
+        Technique::Normal => None,
+        Technique::Open => Some('o'),
+        Technique::HalfOpen => Some('h'),
+        Technique::Closed => Some('c'),
+        Technique::CrossStick => Some('x'),
+        Technique::Rimshot => Some('r'),
+        Technique::Bell => Some('b'),
+        Technique::Choke => Some('c'),
+    }
+}
+
+/// Whether `token` is a note of the kit: its heads (after `>` or `(`) start
+/// with an instrument's capital, where a plain note starts with a duration
+/// and a rest with `r:`.
+fn is_kit_token(token: &str) -> bool {
+    token.trim_start_matches(['>', '(']).starts_with(|c: char| c.is_ascii_uppercase())
+}
+
+/// A head written `S`, `Ho`, `>S` or `(S)`.
+fn parse_head(text: &str, token: &str, at: Place) -> Result<Head, NotationError> {
+    let unknown = || NotationError::UnknownToken { at, token: token.to_string() };
+    let (accented, text) = match text.strip_prefix('>') {
+        Some(t) => (true, t),
+        None => (false, text),
+    };
+    let (soft, text) = match text.strip_prefix('(').and_then(|t| t.strip_suffix(')')) {
+        Some(t) => (true, t),
+        None => (false, text),
+    };
+    if accented && soft {
+        return Err(NotationError::InvalidSoft { at, token: token.to_string() });
+    }
+    let split = text.find(|c: char| c.is_ascii_lowercase()).unwrap_or(text.len());
+    let (code, letter) = text.split_at(split);
+    let (_, instrument) = INSTRUMENT_CODES.iter().find(|(c, _)| *c == code).ok_or_else(unknown)?;
+    let mut head = Head::new(*instrument);
+    if !letter.is_empty() {
+        let mut letters = letter.chars();
+        let (Some(letter), None) = (letters.next(), letters.next()) else {
+            return Err(unknown());
+        };
+        let technique = instrument
+            .techniques()
+            .iter()
+            .find(|t| technique_letter(**t) == Some(letter))
+            .ok_or_else(|| NotationError::InvalidTechnique { at, token: token.to_string() })?;
+        head = head.with_technique(*technique).expect("one of the instrument's techniques");
+    }
+    head.set_accented(accented);
+    head.set_soft(soft);
+    Ok(head)
+}
+
+/// A note of the kit: its heads, joined by `-`, a colon and the duration,
+/// e.g. `K-(S):e`.
+fn parse_kit_beat(token: &str, at: Place) -> Result<Beat, NotationError> {
+    let unknown = || NotationError::UnknownToken { at, token: token.to_string() };
+    let (heads, code) = token.split_once(':').ok_or_else(unknown)?;
+    let duration = duration_of_code(code).ok_or_else(unknown)?;
+    let heads =
+        heads.split('-').map(|head| parse_head(head, token, at)).collect::<Result<Vec<_>, _>>()?;
+    let heads = Heads::new(heads)
+        .map_err(|_| NotationError::InvalidChord { at, token: token.to_string() })?;
+    Ok(Beat::with_heads(duration, heads))
+}
+
+fn parse_beat(token: &str, at: Place) -> Result<Beat, NotationError> {
+    if is_kit_token(token) {
+        return parse_kit_beat(token, at);
+    }
     if let Some(inner) = token.strip_prefix('(').and_then(|t| t.strip_suffix(')')) {
-        let mut beat = parse_beat(inner, measure)?;
+        let mut beat = parse_beat(inner, at)?;
         if beat.is_rest() || beat.accented() {
-            return Err(NotationError::InvalidSoft { measure, token: token.to_string() });
+            return Err(NotationError::InvalidSoft { at, token: token.to_string() });
         }
         beat.set_soft(true);
         return Ok(beat);
@@ -194,9 +345,9 @@ fn parse_beat(token: &str, measure: usize) -> Result<Beat, NotationError> {
         None => (Note, rest_of),
     };
     let duration = duration_of_code(code)
-        .ok_or_else(|| NotationError::UnknownToken { measure, token: token.to_string() })?;
+        .ok_or_else(|| NotationError::UnknownToken { at, token: token.to_string() })?;
     if accented && kind == Rest {
-        return Err(NotationError::AccentedRest { measure, token: token.to_string() });
+        return Err(NotationError::AccentedRest { at, token: token.to_string() });
     }
     let mut beat = Beat::new(duration, kind);
     beat.set_accented(accented);
@@ -213,35 +364,30 @@ fn ticks_as_fraction(ticks: u32) -> String {
 fn build_measure(
     ts: TimeSignature,
     tokens: &[(&str, Beat)],
-    measure: usize,
+    at: Place,
 ) -> Result<Measure, NotationError> {
     let mut m = Measure::new(ts);
     for (idx, (token, beat)) in tokens.iter().enumerate() {
         if idx >= m.beats().len() {
-            return Err(NotationError::TooLong { measure, token: token.to_string() });
+            return Err(NotationError::TooLong { at, token: token.to_string() });
         }
         m.set_beat(idx, *beat).map_err(|err| match err {
             MeasureError::Overflow { .. } => {
-                NotationError::TooLong { measure, token: token.to_string() }
+                NotationError::TooLong { at, token: token.to_string() }
             }
             MeasureError::Unfillable { .. } => {
-                NotationError::DoesNotFit { measure, token: token.to_string() }
+                NotationError::DoesNotFit { at, token: token.to_string() }
             }
         })?;
-        // `set_beat` keeps the accent of the slot it overwrites; apply ours.
-        if m.beats()[idx].accented() != beat.accented() {
-            m.toggle_accent(idx);
-        }
-        if m.beats()[idx].soft() != beat.soft() {
-            m.toggle_soft(idx);
-        }
+        // `set_beat` keeps the accent of the slot it overwrites; play ours.
+        m.set_heads(idx, *beat.heads());
     }
     if m.beats().len() > tokens.len() {
         let missing: u32 = m.beats()[tokens.len()..]
             .iter()
             .map(|b| DEFAULT_GRID.ticks_of(&b.duration).unwrap_or(0))
             .sum();
-        return Err(NotationError::TooShort { measure, missing: ticks_as_fraction(missing) });
+        return Err(NotationError::TooShort { at, missing: ticks_as_fraction(missing) });
     }
     Ok(m)
 }
@@ -262,33 +408,37 @@ pub fn parse_score(input: &str) -> Result<Score, NotationError> {
     let mut ts = TimeSignature::FOUR_FOUR;
     let mut measures = Vec::with_capacity(chunks.len());
     for (i, chunk) in chunks.iter().enumerate() {
-        let measure = i + 1;
-        let mut beats: Vec<(&str, Beat)> = Vec::new();
-        for token in chunk.split_whitespace() {
-            // Duration codes never contain '/', so any token with one is a meter.
-            if token.contains('/') {
-                let new_ts = token.parse::<TimeSignature>().map_err(|reason| {
-                    NotationError::InvalidTimeSignature {
-                        measure,
-                        token: token.to_string(),
-                        reason,
+        let mut measure: Option<Measure> = None;
+        for (v, text) in chunk.split(';').enumerate() {
+            let at = Place { measure: i + 1, voice: v + 1 };
+            let mut beats: Vec<(&str, Beat)> = Vec::new();
+            for token in text.split_whitespace() {
+                // Duration codes never contain '/', so any token with one is a meter.
+                if token.contains('/') {
+                    let new_ts = token.parse::<TimeSignature>().map_err(|reason| {
+                        NotationError::InvalidTimeSignature { at, token: token.to_string(), reason }
+                    })?;
+                    if !beats.is_empty() || v > 0 {
+                        return Err(NotationError::MisplacedTimeSignature {
+                            at,
+                            token: token.to_string(),
+                        });
                     }
-                })?;
-                if !beats.is_empty() {
-                    return Err(NotationError::MisplacedTimeSignature {
-                        measure,
-                        token: token.to_string(),
-                    });
+                    ts = new_ts;
+                    continue;
                 }
-                ts = new_ts;
-                continue;
+                beats.push((token, parse_beat(token, at)?));
             }
-            beats.push((token, parse_beat(token, measure)?));
+            if beats.is_empty() {
+                return Err(NotationError::EmptyMeasure { at });
+            }
+            let voice = build_measure(ts, &beats, at)?;
+            match &mut measure {
+                None => measure = Some(voice),
+                Some(m) => m.push_voices(&voice).expect("every voice in the measure's meter"),
+            }
         }
-        if beats.is_empty() {
-            return Err(NotationError::EmptyMeasure { measure });
-        }
-        measures.push(build_measure(ts, &beats, measure)?);
+        measures.extend(measure);
     }
     Ok(Score { measures })
 }
@@ -296,12 +446,8 @@ pub fn parse_score(input: &str) -> Result<Score, NotationError> {
 /// Format `score` in the text notation. The first measure always states its
 /// time signature; later ones only when it changes. Returns `None` if a beat
 /// has a duration without a notation code (not produced by the editor or the
-/// generator), or a measure has more than one voice: the notation has no
-/// voices yet (#253), and dropping them would lose notes.
+/// generator), or a head no notation (the one line's in a chord).
 pub fn format_score(score: &Score) -> Option<String> {
-    if score.measures.iter().any(|m| m.voices().len() > 1) {
-        return None;
-    }
     let mut out = String::new();
     let mut prev_ts: Option<TimeSignature> = None;
     for (i, m) in score.measures.iter().enumerate() {
@@ -313,22 +459,44 @@ pub fn format_score(score: &Score) -> Option<String> {
             out.push_str(&format!("{ts} "));
             prev_ts = Some(ts);
         }
-        let tokens: Option<Vec<String>> = m
-            .beats()
+        let voices: Option<Vec<String>> = m
+            .voices()
             .iter()
-            .map(|b| {
-                let code = code_of(&b.duration)?;
-                Some(match (b.kind(), b.accented(), b.soft()) {
-                    (Rest, ..) => format!("r:{code}"),
-                    (Note, true, _) => format!(">{code}"),
-                    (Note, false, true) => format!("({code})"),
-                    (Note, false, false) => code,
-                })
-            })
+            .map(|v| Some(v.beats().iter().map(format_beat).collect::<Option<Vec<_>>>()?.join(" ")))
             .collect();
-        out.push_str(&tokens?.join(" "));
+        out.push_str(&voices?.join(" ; "));
     }
     Some(out)
+}
+
+/// `beat` as a token: a rest, a note of the one line, or a note of the kit.
+fn format_beat(beat: &Beat) -> Option<String> {
+    let code = code_of(&beat.duration)?;
+    let heads: Vec<&Head> = beat.heads().iter().collect();
+    Some(match heads[..] {
+        [] => format!("r:{code}"),
+        [head] if head.instrument() == Instrument::Rhythm => match (head.accented(), head.soft()) {
+            (true, _) => format!(">{code}"),
+            (false, true) => format!("({code})"),
+            (false, false) => code,
+        },
+        _ => {
+            let heads: Option<Vec<String>> = heads.into_iter().map(format_head).collect();
+            format!("{}:{code}", heads?.join("-"))
+        }
+    })
+}
+
+/// `head` of the kit as written in a chord, e.g. `>S`, `(Sx)` or `Ho`.
+fn format_head(head: &Head) -> Option<String> {
+    let (code, _) = INSTRUMENT_CODES.iter().find(|(_, i)| *i == head.instrument())?;
+    let letter = technique_letter(head.technique()).map(String::from).unwrap_or_default();
+    let text = format!("{code}{letter}");
+    Some(match (head.accented(), head.soft()) {
+        (true, _) => format!(">{text}"),
+        (false, true) => format!("({text})"),
+        (false, false) => text,
+    })
 }
 
 #[cfg(test)]
@@ -336,6 +504,10 @@ mod tests {
     use super::*;
     use crate::duration::{e, q, qt16, s, t8};
     use crate::generator::{GeneratorSettings, Rng, Subdivision, generate_score};
+
+    fn q_dot() -> Duration {
+        Duration::Dotted { base: Quarter, dots: 1 }
+    }
 
     fn beats_of(score: &Score, measure: usize) -> Vec<Beat> {
         score.measures[measure].beats().clone()
@@ -416,11 +588,11 @@ mod tests {
     fn too_short_measure_reports_missing_amount() {
         assert_eq!(
             parse_score("q q q").unwrap_err(),
-            NotationError::TooShort { measure: 1, missing: "1/4".into() }
+            NotationError::TooShort { at: Place::measure(1), missing: "1/4".into() }
         );
         assert_eq!(
             parse_score("q q q q | q q q e").unwrap_err(),
-            NotationError::TooShort { measure: 2, missing: "1/8".into() }
+            NotationError::TooShort { at: Place::measure(2), missing: "1/8".into() }
         );
     }
 
@@ -428,11 +600,11 @@ mod tests {
     fn too_long_measure_is_rejected() {
         assert!(matches!(
             parse_score("q q q q e").unwrap_err(),
-            NotationError::TooLong { measure: 1, .. }
+            NotationError::TooLong { at: Place { measure: 1, voice: 1 }, .. }
         ));
         assert!(matches!(
             parse_score("q q q e. s s").unwrap_err(),
-            NotationError::TooLong { measure: 1, .. }
+            NotationError::TooLong { at: Place { measure: 1, voice: 1 }, .. }
         ));
     }
 
@@ -440,7 +612,7 @@ mod tests {
     fn incomplete_tuplet_is_rejected() {
         assert_eq!(
             parse_score("t8 t8 q q q").unwrap_err(),
-            NotationError::DoesNotFit { measure: 1, token: "q".into() }
+            NotationError::DoesNotFit { at: Place::measure(1), token: "q".into() }
         );
     }
 
@@ -470,11 +642,11 @@ mod tests {
     fn invalid_tokens_are_reported() {
         assert_eq!(
             parse_score("q q x q").unwrap_err(),
-            NotationError::UnknownToken { measure: 1, token: "x".into() }
+            NotationError::UnknownToken { at: Place::measure(1), token: "x".into() }
         );
         assert_eq!(
             parse_score(">r:q q q q").unwrap_err(),
-            NotationError::AccentedRest { measure: 1, token: ">r:q".into() }
+            NotationError::AccentedRest { at: Place::measure(1), token: ">r:q".into() }
         );
         assert!(matches!(
             parse_score("4/5 q").unwrap_err(),
@@ -486,9 +658,12 @@ mod tests {
         ));
         assert_eq!(
             parse_score("q q q q | | q q q q").unwrap_err(),
-            NotationError::EmptyMeasure { measure: 2 }
+            NotationError::EmptyMeasure { at: Place::measure(2) }
         );
-        assert_eq!(parse_score("|").unwrap_err(), NotationError::EmptyMeasure { measure: 1 });
+        assert_eq!(
+            parse_score("|").unwrap_err(),
+            NotationError::EmptyMeasure { at: Place::measure(1) }
+        );
         assert_eq!(parse_score("  ").unwrap_err(), NotationError::Empty);
     }
 
@@ -550,12 +725,121 @@ mod tests {
     }
 
     #[test]
-    fn a_score_with_voices_is_not_written_without_them() {
-        let mut score = parse_score("2/4 q q").unwrap();
-        let lower = parse_score("2/4 e e e e").unwrap();
-        assert!(format_score(&score).is_some());
-        score.measures[0].push_voices(&lower.measures[0]).unwrap();
-        assert_eq!(format_score(&score), None);
+    fn a_kit_groove_reads_and_writes_back() {
+        use crate::Technique::{Closed, Open};
+        let text = "4/4 H:e S-H:e H:e H:e H:e S-H:e Ho:e Hc:e ; K:q r:q K:q r:q";
+        let score = parse_score(text).unwrap();
+        let m = &score.measures[0];
+        assert_eq!(m.voices().len(), 2);
+        let hands = m.voice(0).unwrap().beats();
+        let heads = |b: &Beat| b.heads().iter().map(|h| h.instrument()).collect::<Vec<_>>();
+        assert_eq!(heads(&hands[1]), [Instrument::Snare, Instrument::HiHat]);
+        assert_eq!(hands[6].heads().get(Instrument::HiHat).unwrap().technique(), Open);
+        assert_eq!(hands[7].heads().get(Instrument::HiHat).unwrap().technique(), Closed);
+        let feet = m.voice(1).unwrap().beats();
+        assert_eq!(heads(&feet[0]), [Instrument::Kick]);
+        assert!(feet[1].is_rest());
+        assert_eq!(format_score(&score).unwrap(), text);
+    }
+
+    #[test]
+    fn kit_heads_carry_their_own_accent_ghost_and_technique() {
+        // Any order reads; heads are written from the foot up.
+        let score = parse_score("2/4 H-K:e >S-H:e K-(Sx):e RDb-CRc-T1r-HF:e").unwrap();
+        assert_eq!(format_score(&score).unwrap(), "2/4 K-H:e >S-H:e K-(Sx):e HF-T1r-RDb-CRc:e");
+        let beats = beats_of(&score, 0);
+        let snare = beats[1].heads().get(Instrument::Snare).unwrap();
+        assert!(snare.accented() && !beats[1].heads().get(Instrument::HiHat).unwrap().accented());
+        let ghost = beats[2].heads().get(Instrument::Snare).unwrap();
+        assert!(ghost.soft() && ghost.technique() == Technique::CrossStick);
+        // Tuplets, dotted notes and ratios work as for any note of the line.
+        let text = "2/4 S:t8 (S):t8 >S:t8 K:q | K:q. H:e | 5/8 S:7:5e (S):7:5e r:7:5e S:7:5e S:7:5e \
+                    S:7:5e K:7:5e";
+        let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
+        let score = parse_score(&text).unwrap();
+        assert_eq!(format_score(&score).unwrap(), text);
+        let line =
+            parse_score("2/4 t8 t8 t8 q | q. e | 5/8 7:5e 7:5e 7:5e 7:5e 7:5e 7:5e 7:5e").unwrap();
+        for (kit, plain) in score.measures.iter().zip(&line.measures) {
+            assert_eq!(group_partition(kit), group_partition(plain));
+        }
+    }
+
+    #[test]
+    fn every_head_of_the_kit_reads_back_as_written() {
+        for &(_, instrument) in &INSTRUMENT_CODES {
+            for &technique in instrument.techniques() {
+                for (accented, soft) in [(false, false), (true, false), (false, true)] {
+                    let mut head = Head::new(instrument).with_technique(technique).unwrap();
+                    head.set_accented(accented);
+                    head.set_soft(soft);
+                    let beat = Beat::with_heads(q(), Heads::one(head));
+                    let text = format!("1/4 {}", format_beat(&beat).unwrap());
+                    let back = parse_score(&text).unwrap();
+                    assert_eq!(beats_of(&back, 0), [beat], "{text}");
+                }
+            }
+        }
+        // Every kit instrument has a code; the one line has none.
+        let coded = INSTRUMENT_CODES.map(|(_, i)| i);
+        assert!(Instrument::ALL.iter().all(|i| coded.contains(i) == (*i != Instrument::Rhythm)));
+    }
+
+    #[test]
+    fn voices_read_back_in_every_meter_and_measure() {
+        // Simple, compound and odd meters; voices in some measures only, a
+        // meter change, tuplets in a second voice.
+        let text = "4/4 H:e S-H:e H:e H:e H:e S-H:e H:e H:e ; K:q r:q K:q r:q \
+                    | 6/8 RD:e RD:e RD:e >RDb:e RD:e RD:e ; K:q. HF:q. \
+                    | (S):e S:e S:e S:e S:e S:e \
+                    | 7/8 H:e H:e H:e H:e H:e H:e H:e ; K:q r:e K:t8 K:t8 K:t8 r:e K:e";
+        let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
+        let score = parse_score(&text).unwrap();
+        let voices: Vec<usize> = score.measures.iter().map(|m| m.voices().len()).collect();
+        assert_eq!(voices, [2, 2, 1, 2]);
+        assert_eq!(score.measures[1].time_signature(), TimeSignature::SIX_EIGHT);
+        // The 6/8 feet keep their meter's beats: two dotted quarters.
+        let feet = score.measures[1].voice(1).unwrap().beats();
+        assert_eq!(feet.iter().map(|b| b.duration).collect::<Vec<_>>(), [q_dot(), q_dot()]);
+        let feet = score.measures[3].voice(1).unwrap();
+        assert!(feet.tuplet_group_at(2).is_some());
+        assert_eq!(format_score(&score).unwrap(), text);
+    }
+
+    #[test]
+    fn kit_mistakes_name_measure_voice_and_token() {
+        let err = |text: &str| parse_score(text).unwrap_err();
+        let at = Place::measure(1);
+        let token = |t: &str| t.to_string();
+        assert_eq!(err("Sb:e e q h"), NotationError::InvalidTechnique { at, token: token("Sb:e") });
+        assert_eq!(err("K-K:e e q h"), NotationError::InvalidChord { at, token: token("K-K:e") });
+        assert_eq!(
+            err("K-S-H-HF-CR:e e q h"),
+            NotationError::InvalidChord { at, token: token("K-S-H-HF-CR:e") }
+        );
+        assert_eq!(err(">(S):e e q h"), NotationError::InvalidSoft { at, token: token(">(S):e") });
+        for bad in ["X:e", "K:", "K:x", "Hoo:e", "H", "k:e", "K-:e"] {
+            assert_eq!(
+                err(&format!("{bad} e q h")),
+                NotationError::UnknownToken { at, token: token(bad) },
+                "{bad}"
+            );
+        }
+        let second = Place { measure: 2, voice: 2 };
+        let e = err("h h | h h ; h q");
+        assert_eq!(e, NotationError::TooShort { at: second, missing: "1/4".into() });
+        assert!(e.to_string().starts_with("measure 2, voice 2 is too short"), "{e}");
+        assert_eq!(
+            err("h h ;"),
+            NotationError::EmptyMeasure { at: Place { measure: 1, voice: 2 } }
+        );
+        assert_eq!(
+            err("h h ; 3/4 h h"),
+            NotationError::MisplacedTimeSignature {
+                at: Place { measure: 1, voice: 2 },
+                token: token("3/4")
+            }
+        );
     }
 
     #[test]

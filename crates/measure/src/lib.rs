@@ -469,6 +469,15 @@ impl VoiceBar {
         DEFAULT_GRID.ticks_per_measure(&self.time_signature())
     }
 
+    /// Play `heads` at `idx`: a rest if there are none. The duration and
+    /// tuplet group stay, so the measure stays valid. No-op if `idx` is out
+    /// of bounds.
+    pub fn set_heads(&mut self, idx: BeatIdx, heads: Heads) {
+        if let Some(beat) = self.beats.get_mut(idx) {
+            beat.set_heads(heads);
+        }
+    }
+
     /// Turn the beat at `idx` into a rest; it loses its accent and soft flag.
     pub fn remove(&mut self, idx: BeatIdx) {
         if idx >= self.beats.len() {

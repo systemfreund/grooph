@@ -150,6 +150,19 @@ test("tools/call checks notation and polyrhythm by the app's parser", async () =
   assert.ok(!fine.isError, fine.content[0].text);
 });
 
+test("a drum kit score is refused until the app plays one", async () => {
+  const call = async (args) => (await rpc("tools/call", { name: "show_metronome", arguments: args })).result;
+  for (const args of [
+    { ts: "4/4", click: "K:q q q q" },
+    { ts: "4/4", click: "q q q q ; h h" },
+    { link: "https://grooph.app/?v=2&ts=4/4&click=K-H:q+q+q+q" },
+  ]) {
+    const kit = await call(args);
+    assert.equal(kit.isError, true, JSON.stringify(args));
+    assert.match(kit.content[0].text, /drum kit scores .* are not supported yet/);
+  }
+});
+
 test("the result says what the metronome shows", async () => {
   const call = async (args) => (await rpc("tools/call", { name: "show_metronome", arguments: args })).result;
   // The grouping from groups, not accents in the usual 2+3+2.
