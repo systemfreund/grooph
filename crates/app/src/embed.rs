@@ -278,10 +278,8 @@ impl Grooph {
             self.toggle_playback();
         }
         // Another metronome started: stop, whatever the view thought.
-        if platform::take_stop_play()
-            && self.playback_ctl.transport_state == TransportState::Playing
-        {
-            self.stop_transport();
+        if platform::take_stop_play() {
+            self.stop_for_another_metronome();
         }
         if self.compact_card() {
             self.tempo_row(ui);
@@ -293,6 +291,14 @@ impl Grooph {
         self.settings_picker(ui);
         self.report_to_model(ui);
         self.tell_view_playing();
+    }
+
+    /// Another metronome started: stop if playing, else nothing; never a
+    /// toggle, which could start this one.
+    fn stop_for_another_metronome(&mut self) {
+        if self.playback_ctl.transport_state == TransportState::Playing {
+            self.stop_transport();
+        }
     }
 
     /// Tell the view at once when playback starts or stops, not with the
@@ -565,6 +571,18 @@ mod tests {
         let cc = eframe::CreationContext::_new_kittest(ctx.clone());
         let app = Grooph::new_with(&cc, embed_params(query), Some(query.to_owned()));
         (ctx, app)
+    }
+
+    #[test]
+    fn another_metronome_stops_this_one_and_never_starts_it() {
+        use crate::TransportState;
+        let (_, mut app) = embedded_app("?v=2&ts=4/4&embed=mcp");
+        app.stop_for_another_metronome();
+        assert_eq!(app.playback_ctl.transport_state, TransportState::Stopped);
+        app.toggle_playback();
+        assert_eq!(app.playback_ctl.transport_state, TransportState::Playing);
+        app.stop_for_another_metronome();
+        assert_eq!(app.playback_ctl.transport_state, TransportState::Stopped);
     }
 
     #[test]

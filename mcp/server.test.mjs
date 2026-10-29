@@ -227,6 +227,10 @@ test("a call with a link changes that metronome", async () => {
   const edited = "v=2&ts=4/4&counter=t4+r:t4+t4+t4+(t4)+t4";
   assert.ok((await call({ link: edited, bpm: 100 })).structuredContent.link.endsWith("&counter=t4+r:t4+t4+t4+%28t4%29+t4"));
   assert.ok((await call({ link: edited, poly: "5:4" })).structuredContent.link.endsWith("&poly=5:4"));
+  // A + typed into a link arrives as a space: still groups.
+  const typed = await call({ link: "v=2&ts=7/8&groups=3+2+2", bpm: 100 });
+  assert.equal(typed.structuredContent.link, `${ORIGIN}/?v=2&bpm=100&ts=7/8&groups=3%2B2%2B2`);
+  assert.match(typed.content[0].text, /changed: bpm \(default\) → 100\. /);
   // Spaces the link does not have are no change.
   assert.match((await call({ link, groups: "3 + 2 + 2", bpm: 100 })).content[0].text, /changed: bpm 140 → 100\. /);
   // The removing values work without a link too.

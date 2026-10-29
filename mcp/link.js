@@ -12,6 +12,12 @@
 export const METRONOME_KEYS = ["bpm", "ts", "groups", "subdivision", "click", "poly", "counter", "swing", "su"];
 export const GENERATOR_KEYS = ["sub", "lvl", "bars", "space", "seed"];
 
+/** Beat groups as the link writes them, `3+2+2`: spaces separate groups
+ * too, as in a link whose `+` was decoded to a space (the app reads both). */
+export function groupsText(value) {
+  return String(value).split(/[\s+]+/).filter(Boolean).join("+");
+}
+
 /** The settings a metronome link carries, as the tool's arguments, plus
  * edited polyrhythm clicks (`counter`, which no argument sets). `link` is a
  * grooph URL or its query; throws with the reason if it is no metronome
@@ -68,9 +74,15 @@ export function changes(args) {
   if (!args?.link) return null;
   const before = linkSettings(args.link);
   const after = resolveSettings(args);
-  // As metronomeQuery writes them: groups and poly without spaces.
+  // As metronomeQuery writes them.
   const shown = (value, key) =>
-    value == null ? "(default)" : ["groups", "poly"].includes(key) ? String(value).replace(/\s+/g, "") : String(value).trim();
+    value == null
+      ? "(default)"
+      : key === "groups"
+        ? groupsText(value)
+        : key === "poly"
+          ? String(value).replace(/\s+/g, "")
+          : String(value).trim();
   const keys = [...new Set([...Object.keys(before), ...Object.keys(after)])];
   const changed = keys.filter((key) => shown(before[key], key) !== shown(after[key], key));
   return changed.map((key) => `${key} ${shown(before[key], key)} → ${shown(after[key], key)}`).join(", ") || "nothing";
@@ -91,7 +103,7 @@ export function metronomeQuery(input) {
   const params = [["v", "2"]];
   if (text(args?.bpm)) params.push(["bpm", text(args.bpm)]);
   params.push(["ts", text(args?.ts) || "4/4"]);
-  if (text(args?.groups)) params.push(["groups", text(args.groups).replace(/\s+/g, "")]);
+  if (text(args?.groups)) params.push(["groups", groupsText(args.groups)]);
   if (text(args?.swing)) params.push(["swing", text(args.swing)]);
   // Eighths swing by default: the app writes su only for sixteenths.
   if (text(args?.su) && text(args.su) !== "8") params.push(["su", text(args.su)]);
