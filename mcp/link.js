@@ -17,6 +17,8 @@ export function linkSettings(link) {
     throw new Error("link is a rhythm, not a metronome: pass the link of a metronome (from its result or model context)");
   }
   if (!params.has("ts")) throw new Error("link has no time signature (ts): pass the link of a metronome");
+  // Without v=2, bpm counted the meter's beat unit (crates/link).
+  if (params.get("v") !== "2") throw new Error("link is an old link (without v=2): pass the link from the latest result or model context");
   const settings = {};
   for (const key of ["bpm", "ts", "groups", "subdivision", "click", "poly", "counter", "swing", "su"]) {
     if (params.has(key)) settings[key] = params.get(key);
@@ -60,10 +62,12 @@ export function changes(args) {
   if (!args?.link) return null;
   const before = linkSettings(args.link);
   const after = resolveSettings(args);
-  const shown = (value) => (value == null ? "(default)" : String(value).trim());
+  // As metronomeQuery writes them: groups and poly without spaces.
+  const shown = (value, key) =>
+    value == null ? "(default)" : ["groups", "poly"].includes(key) ? String(value).replace(/\s+/g, "") : String(value).trim();
   const keys = [...new Set([...Object.keys(before), ...Object.keys(after)])];
-  const changed = keys.filter((key) => shown(before[key]) !== shown(after[key]));
-  return changed.map((key) => `${key} ${shown(before[key])} → ${shown(after[key])}`).join(", ") || "nothing";
+  const changed = keys.filter((key) => shown(before[key], key) !== shown(after[key], key));
+  return changed.map((key) => `${key} ${shown(before[key], key)} → ${shown(after[key], key)}`).join(", ") || "nothing";
 }
 
 /** Query (without `?`) that opens the metronome as `args` describe (see

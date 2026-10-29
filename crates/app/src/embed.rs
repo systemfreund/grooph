@@ -223,6 +223,8 @@ pub(crate) struct Embed {
     reported: Option<ModelContext>,
     /// Settings that differ from the reported ones, and since when.
     changed: Option<(ModelContext, f64)>,
+    /// Whether the view was last told the metronome plays.
+    playing: bool,
 }
 
 impl Embed {
@@ -241,6 +243,7 @@ impl Embed {
             colors_text: None,
             reported: None,
             changed: None,
+            playing: false,
         }
     }
 }
@@ -282,6 +285,17 @@ impl Grooph {
         self.measure_panel(ui);
         self.settings_picker(ui);
         self.report_to_model(ui);
+        self.tell_view_playing();
+    }
+
+    /// Tell the view at once when playback starts or stops, not with the
+    /// delayed report: it stops the other metronomes when this one starts.
+    fn tell_view_playing(&mut self) {
+        let playing = self.playback_ctl.transport_state == TransportState::Playing;
+        let Some(embed) = self.ui.embed.as_mut() else { return };
+        if embed.playing != playing && platform::host_playing_changed(playing) {
+            embed.playing = playing;
+        }
     }
 
     /// Switch to the host's theme and colors when they change.

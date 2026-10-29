@@ -111,6 +111,18 @@ test("resources/read returns the view with this origin in its CSP", async () => 
   assert.doesNotThrow(() => new Function(`return async () => { ${script.replace(/^import .*$/gm, "")} }`));
 });
 
+test("the view stops when another metronome starts, at once", async () => {
+  const { result } = await rpc("resources/read", { uri: RESOURCE_URI });
+  const view = result.contents[0].text;
+  // The app calls the hook by name at the transition (crates/app platform.rs).
+  const platform = fs.readFileSync(path.join(here, "../crates/app/src/platform.rs"), "utf8");
+  assert.ok(platform.includes('host_call("playingChanged"'));
+  assert.ok(view.includes("playingChanged(now)"));
+  assert.ok(view.includes('new BroadcastChannel("grooph-metronome")'));
+  // The loading skeleton shows the merged settings, not the raw arguments.
+  assert.ok(view.includes("settings = resolveSettings(toolArgs"));
+});
+
 test("the view reads the host's colors as #rrggbbaa", async () => {
   const { result } = await rpc("resources/read", { uri: RESOURCE_URI });
   const script = result.contents[0].text.match(/<script type="module">([\s\S]*)<\/script>/)[1];
@@ -212,6 +224,11 @@ test("a call with a link changes that metronome", async () => {
   const edited = "v=2&ts=4/4&counter=t4+r:t4+t4+t4+(t4)+t4";
   assert.ok((await call({ link: edited, bpm: 100 })).structuredContent.link.endsWith("&counter=t4+r:t4+t4+t4+%28t4%29+t4"));
   assert.ok((await call({ link: edited, poly: "5:4" })).structuredContent.link.endsWith("&poly=5:4"));
+  // Spaces the link does not have are no change.
+  assert.match((await call({ link, groups: "3 + 2 + 2", bpm: 100 })).content[0].text, /changed: bpm 140 → 100\. /);
+  // The removing values work without a link too.
+  assert.equal(metronomeQuery({ ts: "4/4", swing: 50, su: 16 }), "v=2&ts=4/4");
+  assert.equal(metronomeQuery({ ts: "4/4", poly: "none", click: "default" }), "v=2&ts=4/4");
   // su with the link's swing.
   assert.ok(!(await call({ link: swung, su: 16 })).isError);
 });
@@ -222,6 +239,8 @@ test("a link that is no metronome is an error", async () => {
   assert.equal(rhythm.isError, true);
   assert.match(rhythm.content[0].text, /rhythm, not a metronome/);
   assert.match((await call({ link: "https://grooph.app/?v=2&bpm=90" })).content[0].text, /no time signature/);
+  // Version 1 counted bpm in the meter's beat unit: not taken over as quarters.
+  assert.match((await call({ link: "https://grooph.app/?bpm=140&ts=7/8", subdivision: "s" })).content[0].text, /old link/);
   // A link whose bar no longer fits is the parser's to catch.
   const wrong = await call({ link: "v=2&ts=4/4&click=q+q+q+q", groups: "3+2+2" });
   assert.equal(wrong.isError, true);

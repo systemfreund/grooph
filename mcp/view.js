@@ -332,7 +332,6 @@ window.groophHost = {
   // settings replaced it.
   updateModelContext(text, fields) {
     announce(text, fields);
-    onlyOnePlays(fields?.playing === true);
     if (!connected) return false;
     const params = { content: [{ type: "text", text }], structuredContent: fields };
     latestContext = params;
@@ -345,6 +344,10 @@ window.groophHost = {
     return true;
   },
   openLink,
+  // Called by the app at once when playback starts or stops.
+  playingChanged(now) {
+    onlyOnePlays(now === true);
+  },
 };
 
 // One metronome plays at a time: a view that starts says so to the other

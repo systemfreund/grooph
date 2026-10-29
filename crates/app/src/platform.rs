@@ -299,6 +299,17 @@ pub(crate) fn host_update_model_context(_context: &crate::embed::ModelContext) -
     false
 }
 
+/// Tell the view that playback started or stopped. `false` without a view.
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn host_playing_changed(playing: bool) -> bool {
+    crate::web::host_call("playingChanged", &[playing.into()]).is_some()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn host_playing_changed(_playing: bool) -> bool {
+    false
+}
+
 /// Ask the MCP App host to open `url`. `false` without a host.
 #[cfg(target_arch = "wasm32")]
 pub(crate) fn host_open_link(url: &str) -> bool {
