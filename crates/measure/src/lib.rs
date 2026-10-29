@@ -9,6 +9,7 @@ pub mod generator;
 pub mod ghost;
 pub mod grid;
 pub(crate) mod grouping;
+pub mod head;
 mod math;
 pub mod notation;
 #[cfg(test)]
@@ -27,6 +28,7 @@ use duration::{Duration, TupletSpec};
 use editing::{GroupSpan, Modification};
 use either::Either;
 use grid::DEFAULT_GRID;
+pub use head::{Head, Heads, Instrument, Technique};
 pub use score::{Cursor, EmptyScore, MeasureIdx, Score};
 use serde::{Deserialize, Serialize};
 use std::fmt::{Debug, Formatter};
@@ -282,9 +284,9 @@ impl Measure {
     /// Overwrite the slot at `idx` with `new_beat`, carrying the slot's prior
     /// accent forward (only on notes - rests can never be accented).
     fn write_in_place(&mut self, idx: BeatIdx, new_beat: Beat) {
-        let old_accent = self.beats[idx].accented;
+        let old_accent = self.beats[idx].accented();
         self.beats[idx] = new_beat;
-        self.beats[idx].accented = old_accent && new_beat.kind == Note;
+        self.beats[idx].set_accented(old_accent);
     }
 
     /// Replace `[idx..]` with a freshly created tuplet group described by `spec`.
@@ -299,7 +301,7 @@ impl Measure {
         spec: TupletSpec,
     ) -> Result<(), MeasureError> {
         let TupletSpec { n, m, base } = spec;
-        let old_accent = self.beats[idx].accented;
+        let old_accent = self.beats[idx].accented();
         let old_ticks = DEFAULT_GRID.ticks_of(&self.beats[idx].duration).unwrap();
         let new_ticks = DEFAULT_GRID.ticks_of(&new_beat.duration).unwrap();
         let max_ticks = self.max_ticks();
@@ -345,7 +347,7 @@ impl Measure {
         first.tuplet_group_id = Some(id);
         self.beats.insert(idx, first);
         // Preserve the prior accent on the first inserted beat
-        self.beats[idx].accented = old_accent && new_beat.kind == Note;
+        self.beats[idx].set_accented(old_accent);
         let mut insert_at = idx + 1;
         for _ in 1..n {
             let mut r = Beat::rest(new_beat.duration);
@@ -375,7 +377,7 @@ impl Measure {
         let old_ticks = DEFAULT_GRID.ticks_of(&dur_old).unwrap();
         let new_ticks = DEFAULT_GRID.ticks_of(&new_beat.duration).unwrap();
         let max_ticks = self.max_ticks();
-        let old_accent = self.beats[idx].accented;
+        let old_accent = self.beats[idx].accented();
 
         let need = new_ticks - old_ticks;
         debug_assert!(need > 0);
@@ -394,7 +396,7 @@ impl Measure {
         }
 
         self.beats[idx] = new_beat;
-        self.beats[idx].accented = old_accent && new_beat.kind == Note;
+        self.beats[idx].set_accented(old_accent);
         let p = idx + 1;
         let mut remaining_to_consume = need;
         while remaining_to_consume > 0 {
@@ -629,9 +631,7 @@ impl Measure {
         if let Some(fill) = self.best_fill_for_gap(self.max_ticks(), allowed) {
             let take = fill.len();
             for duration in fill.into_iter().take(take) {
-                let beat =
-                    Beat { duration, kind, accented: false, soft: false, tuplet_group_id: None };
-                self.beats.push(beat);
+                self.beats.push(Beat::new(duration, kind));
             }
         }
     }
@@ -664,7 +664,7 @@ impl Measure {
     /// A new rest loses its accent and soft flag. No-op if `idx` is out of bounds.
     pub fn toggle_beat_kind(&mut self, idx: BeatIdx) -> Option<Modification> {
         if let Some(b) = self.beats.get_mut(idx) {
-            let new_kind = match b.kind {
+            let new_kind = match b.kind() {
                 Rest => Note,
                 Note => Rest,
             };
@@ -727,10 +727,10 @@ mod tests {
         let mut m = Measure::new(TimeSignature::ONE_FOUR);
 
         assert!(m.set_beat(0, Beat::note(t8())).is_ok());
-        let Beat { duration, kind, .. } = m.beats()[1];
+        let (duration, kind) = (m.beats()[1].duration, m.beats()[1].kind());
         assert_eq!(duration, t8());
         assert_eq!(kind, Rest);
-        let Beat { duration, kind, .. } = m.beats()[2];
+        let (duration, kind) = (m.beats()[2].duration, m.beats()[2].kind());
         assert_eq!(duration, t8());
         assert_eq!(kind, Rest);
 
@@ -967,8 +967,8 @@ mod tests {
         let mut m = Measure::new(TimeSignature::ONE_FOUR);
         assert!(m.set_beat(0, Beat::note(t8())).is_ok());
         // Expect two triplet-eighth rests to complete the triplet group
-        let Beat { duration: d1, kind: k1, .. } = m.beats()[1];
-        let Beat { duration: d2, kind: k2, .. } = m.beats()[2];
+        let (d1, k1) = (m.beats()[1].duration, m.beats()[1].kind());
+        let (d2, k2) = (m.beats()[2].duration, m.beats()[2].kind());
         assert_eq!(d1, t8());
         assert_eq!(k1, Rest);
         assert_eq!(d2, t8());

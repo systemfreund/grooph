@@ -72,7 +72,8 @@ pull requests from forks are not deployed.
     - Simple: `q()` (quarter), `e()` (eighth), `s()` (sixteenth), `th()` (thirty-second)
     - Triplets: `t8()`, `t16()`, `t32()`
     - Quintuplet: `qt16()` (5 in the time of 4, sixteenth base)
-- Constructing beats: `Beat::note(duration)` or `Beat::rest(duration)`
+- Constructing beats: `Beat::note(duration)` or `Beat::rest(duration)`; a kit chord with
+  `Beat::with_heads(duration, Heads::new([Head::new(Instrument::HiHat), ..])?)`
 - Constructing measures: `Measure::new(TimeSignature::FOUR_FOUR)` etc. See `time_signature.rs` for variants.
 
 ### Important testing gotchas
@@ -89,25 +90,22 @@ measure crate. Imports mirror existing tests so helper functions are visible.
 ```
 #[test]
 fn demo_howto_test_measure_with_helpers() {
-    use crate::BeatKind::Rest;
     use crate::duration::{e, t8};
     use crate::{Beat, Measure, TimeSignature};
 
     // 4/4: insert eighth note; auto-fill adds an eighth rest to complete the quarter boundary
     let mut m = Measure::new(TimeSignature::FOUR_FOUR);
     assert!(m.set_beat(0, Beat::note(e())).is_ok());
-    let Beat { duration: d1, kind: k1, .. } = m.beats()[1];
-    assert_eq!(d1, e());
-    assert_eq!(k1, Rest);
+    let b1 = m.beats()[1];
+    assert_eq!(b1.duration, e());
+    assert!(b1.is_rest());
 
     // insert one triplet eighth; remaining two tuplets auto-fill as rests at positions 2 and 3
     assert!(m.set_beat(1, Beat::note(t8())).is_ok());
-    let Beat { duration: d2, kind: k2, .. } = m.beats()[2];
-    let Beat { duration: d3, kind: k3, .. } = m.beats()[3];
-    assert_eq!(d2, t8());
-    assert_eq!(k2, Rest);
-    assert_eq!(d3, t8());
-    assert_eq!(k3, Rest);
+    for b in &m.beats()[2..4] {
+        assert_eq!(b.duration, t8());
+        assert!(b.is_rest());
+    }
 }
 ```
 

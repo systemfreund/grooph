@@ -691,7 +691,7 @@ mod tests {
     /// Ticks at which the notes of `m` start.
     fn note_onsets(m: &Measure) -> Vec<u32> {
         let onsets = DEFAULT_GRID.compute_onset_ticks(m.beats());
-        m.beats().iter().zip(onsets).filter(|(b, _)| b.kind == Note).map(|(_, t)| t).collect()
+        m.beats().iter().zip(onsets).filter(|(b, _)| b.is_note()).map(|(_, t)| t).collect()
     }
 
     /// The figures drawn for one measure.
@@ -1301,7 +1301,7 @@ mod tests {
                 rest_sixteenths += m
                     .beats()
                     .iter()
-                    .filter(|b| b.kind == Rest)
+                    .filter(|b| b.is_rest())
                     .map(|b| {
                         DEFAULT_GRID.ticks_of(&b.duration).unwrap()
                             / DEFAULT_GRID.ticks_of(&s()).unwrap()
@@ -1319,7 +1319,7 @@ mod tests {
         let st = GeneratorSettings { space: 1.0, ..settings(Subdivision::Sixteenths, 3) };
         let empty = (0..100)
             .map(|_| generate_measure(&st, &mut rng).unwrap())
-            .filter(|m| m.beats().iter().all(|b| b.kind == Rest))
+            .filter(|m| m.beats().iter().all(|b| b.is_rest()))
             .count();
         assert!(empty > 0, "expected some all-rest measures at maximum space");
     }
@@ -1352,7 +1352,7 @@ mod tests {
         assert_eq!(figures(Subdivision::Triplets, TimeSignature::FOUR_FOUR).len(), 8);
         for sub in [Subdivision::Eighths, Subdivision::Sixteenths, Subdivision::Triplets] {
             let first = figures(sub, TimeSignature::FOUR_FOUR)[0].measure();
-            assert!(first.beats().iter().all(|b| b.kind == Rest), "{sub:?}");
+            assert!(first.beats().iter().all(|b| b.is_rest()), "{sub:?}");
         }
     }
 
@@ -1529,11 +1529,11 @@ mod tests {
                 let crosses = |cuts: &[u32]| cuts.iter().any(|&c| start < c && c < end);
                 // `4 2 4` over the boundary of two x/4 groups.
                 let centred = |c: u32| {
-                    ts.beat_unit == 4 && b.kind == Note && start + end == 2 * c && b.duration == h()
+                    ts.beat_unit == 4 && b.is_note() && start + end == 2 * c && b.duration == h()
                 };
                 let ok = boundaries.iter().all(|&c| !(start < c && c < end) || centred(c));
                 assert!(ok, "{b:?} at {start} crosses a group in {m:?}");
-                if b.kind == Rest && b.duration != h() {
+                if b.is_rest() && b.duration != h() {
                     assert!(!crosses(&starts), "rest {b:?} at {start} crosses a beat in {m:?}");
                 }
             }
@@ -1551,7 +1551,7 @@ mod tests {
                 let ((prev, _, _), (b, start, _)) = (pair[0], pair[1]);
                 // Triplet cells bring their own rests.
                 let straight = !b.duration.is_tuplet() && !prev.duration.is_tuplet();
-                if straight && b.kind == Rest && prev.kind == Note {
+                if straight && b.is_rest() && prev.is_note() {
                     assert!(starts.contains(&start), "rest after a note at {start} in {m:?}");
                 }
             }
@@ -1586,9 +1586,9 @@ mod tests {
                 .unwrap();
             let onsets = DEFAULT_GRID.compute_onset_ticks(m.beats());
             for (b, t) in m.beats().iter().zip(onsets) {
-                half_on_two |= b.kind == Note && b.duration == h() && t == quarter;
-                quarter_on_and_of_one |= b.kind == Note && b.duration == q() && 2 * t == quarter;
-                let over_beat_three = b.kind == Note && b.duration == q() && 2 * t == 3 * quarter;
+                half_on_two |= b.is_note() && b.duration == h() && t == quarter;
+                quarter_on_and_of_one |= b.is_note() && b.duration == q() && 2 * t == quarter;
+                let over_beat_three = b.is_note() && b.duration == q() && 2 * t == 3 * quarter;
                 assert!(!over_beat_three, "`8 4 8` over beat 3 in {m:?}");
             }
         }
@@ -1618,7 +1618,7 @@ mod tests {
             };
             for (b, start, end) in &beats {
                 let from_and = start % quarter != 0;
-                if b.kind != Note || !from_and || end - start <= quarter - start % quarter {
+                if b.is_rest() || !from_and || end - start <= quarter - start % quarter {
                     continue;
                 }
                 seen = true;

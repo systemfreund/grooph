@@ -3,7 +3,6 @@
 //! notation. The random numbers come from a fixed seed, so a failure names
 //! the seed and step that reproduce it.
 
-use crate::BeatKind::Rest;
 use crate::duration::{COMMON_DURATIONS, Duration, NoteValue, TupletSpec};
 use crate::editing::CYCLE_TUPLET_SPECS;
 use crate::generator::Rng;
@@ -54,10 +53,10 @@ fn check_invariants(m: &Measure) -> Result<(), String> {
             Some(0) | None => return Err(format!("beat {i} ({:?}) has no length", b.duration)),
             Some(t) => total += t,
         }
-        if b.accented && b.soft {
+        if b.accented() && b.soft() {
             return Err(format!("beat {i} is both accented and soft"));
         }
-        if b.kind == Rest && (b.accented || b.soft) {
+        if b.is_rest() && (b.accented() || b.soft()) {
             return Err(format!("rest {i} is accented or soft"));
         }
         if b.duration.is_tuplet() && m.tuplet_group_at(i).is_none() {

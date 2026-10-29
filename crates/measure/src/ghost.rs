@@ -9,7 +9,6 @@
 //! note value: triplets fall back to eighths and mixed to sixteenths, and
 //! `x/16` always uses sixteenths, as in the generator.
 
-use crate::BeatKind::Note;
 use crate::Measure;
 use crate::duration::{e, s};
 use crate::generator::Subdivision;
@@ -27,7 +26,7 @@ pub fn ghost_onsets(measure: &Measure, subdivision: Subdivision) -> Vec<u32> {
     let beats = measure.beats();
     let onsets = DEFAULT_GRID.compute_onset_ticks(beats);
     let note_onsets: Vec<u32> =
-        beats.iter().zip(&onsets).filter(|(b, _)| b.kind == Note).map(|(_, &t)| t).collect();
+        beats.iter().zip(&onsets).filter(|(b, _)| b.is_note()).map(|(_, &t)| t).collect();
     let beat_has_tuplet = |beat_start: u32| {
         beats
             .iter()

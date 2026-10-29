@@ -1,9 +1,9 @@
 use std::collections::{HashMap, HashSet};
 
+use grooph_measure::MeasureIdx;
 use grooph_measure::Score;
 use grooph_measure::grid::DEFAULT_GRID;
 use grooph_measure::tempo::ScoreTiming;
-use grooph_measure::{BeatKind, MeasureIdx};
 
 #[derive(Clone, Copy)]
 pub(crate) enum AccuracyMark {
@@ -175,7 +175,7 @@ pub(crate) fn compute_global_beat_onsets(
                 out.push(GlobalBeatOnset {
                     onset_tick: start + local as u64,
                     performed_tick: timing.performed_global_tick(m_idx, local),
-                    is_note: beat.kind == BeatKind::Note,
+                    is_note: beat.is_note(),
                     measure_idx: m_idx,
                 });
             }

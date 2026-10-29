@@ -1,5 +1,6 @@
 use crate::beat::BeatKind::{Note, Rest};
 use crate::duration::Duration;
+use crate::head::{Head, Heads, Instrument};
 use crate::tuplet::TupletGroupId;
 use serde::{Deserialize, Serialize};
 use std::fmt::{Debug, Formatter};
@@ -10,63 +11,207 @@ pub enum BeatKind {
     Rest,
 }
 
+/// A slot of the rhythm, and what is played in it.
+///
+/// The slot is the duration, maybe in a tuplet group: what the measure's
+/// rules keep filled. What is played are the [`Heads`]: none for a rest,
+/// one for a note, several for a chord (see [`crate::head`]).
 #[derive(Copy, Clone, Eq, Serialize, Deserialize)]
+#[serde(try_from = "RawBeat")]
 pub struct Beat {
     pub duration: Duration,
-    pub kind: BeatKind,
-    pub accented: bool,
-    /// A soft (ghost) note, written with its head in parentheses. Never
-    /// together with `accented`.
-    #[serde(default)]
-    pub soft: bool,
+    heads: Heads,
     pub tuplet_group_id: Option<TupletGroupId>,
 }
 
 impl Beat {
-    /// Creates a new note with the given duration
+    /// A note of the rhythm's one instrument ([`Instrument::Rhythm`]).
     pub fn note(duration: Duration) -> Self {
-        Self { duration, kind: Note, accented: false, soft: false, tuplet_group_id: None }
+        Self::with_heads(duration, Heads::one(Head::new(Instrument::Rhythm)))
     }
 
-    /// Creates a new rest with the given duration
+    /// A rest.
     pub fn rest(duration: Duration) -> Self {
-        Self { duration, kind: Rest, accented: false, soft: false, tuplet_group_id: None }
+        Self::with_heads(duration, Heads::NONE)
     }
 
+    /// A plain [`Beat::note`] or a [`Beat::rest`].
     pub fn new(duration: Duration, kind: BeatKind) -> Self {
-        Self { duration, kind, accented: false, soft: false, tuplet_group_id: None }
+        match kind {
+            Note => Self::note(duration),
+            Rest => Self::rest(duration),
+        }
     }
 
-    pub fn with_kind(&self, kind: BeatKind) -> Self {
-        Self {
-            duration: self.duration,
-            kind,
-            accented: self.accented && kind == Note,
-            soft: self.soft && kind == Note,
-            tuplet_group_id: self.tuplet_group_id,
+    /// A beat playing `heads`, a rest if there are none.
+    pub fn with_heads(duration: Duration, heads: Heads) -> Self {
+        Self { duration, heads, tuplet_group_id: None }
+    }
+
+    pub fn heads(&self) -> &Heads {
+        &self.heads
+    }
+
+    pub fn kind(&self) -> BeatKind {
+        if self.heads.is_empty() { Rest } else { Note }
+    }
+
+    pub fn is_rest(&self) -> bool {
+        self.heads.is_empty()
+    }
+
+    pub fn is_note(&self) -> bool {
+        !self.is_rest()
+    }
+
+    /// Whether a head is accented.
+    pub fn accented(&self) -> bool {
+        self.heads.iter().any(|h| h.accented)
+    }
+
+    /// Whether a head is soft (a ghost note).
+    pub fn soft(&self) -> bool {
+        self.heads.iter().any(|h| h.soft)
+    }
+
+    /// Accent every head, or none. No change on a rest.
+    pub fn set_accented(&mut self, accented: bool) {
+        self.heads.iter_mut().for_each(|h| h.accented = accented);
+    }
+
+    /// Make every head soft, or none. No change on a rest.
+    pub fn set_soft(&mut self, soft: bool) {
+        self.heads.iter_mut().for_each(|h| h.soft = soft);
+    }
+
+    /// Make the beat a rest, or a note: a note stays as it is, a rest
+    /// becomes a plain [`Beat::note`].
+    pub fn set_kind(&mut self, kind: BeatKind) {
+        match kind {
+            Rest => self.heads = Heads::NONE,
+            Note if self.is_rest() => self.heads = Heads::one(Head::new(Instrument::Rhythm)),
+            Note => {}
         }
+    }
+
+    /// The beat made a rest or a note (see [`Beat::set_kind`]).
+    pub fn with_kind(&self, kind: BeatKind) -> Self {
+        let mut beat = *self;
+        beat.set_kind(kind);
+        beat
     }
 }
 
 impl PartialEq for Beat {
     fn eq(&self, other: &Self) -> bool {
         // Excludes `tuplet_group_id` from the comparison
-        self.duration == other.duration
-            && self.kind == other.kind
-            && self.accented == other.accented
-            && self.soft == other.soft
+        self.duration == other.duration && self.heads == other.heads
     }
 }
 
 impl Debug for Beat {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        if self.kind == Rest {
+        if self.is_rest() {
             write!(f, "(")?
         }
         self.duration.fmt(f)?;
-        if self.kind == Rest {
+        if self.is_rest() {
             write!(f, ")")?
         }
         Ok(())
+    }
+}
+
+/// A [`Beat`] as saved: with its heads, or as before them with a kind and
+/// the flags of its one head.
+#[derive(Deserialize)]
+struct RawBeat {
+    duration: Duration,
+    tuplet_group_id: Option<TupletGroupId>,
+    #[serde(default, deserialize_with = "present")]
+    heads: Option<Heads>,
+    #[serde(default, deserialize_with = "present")]
+    kind: Option<BeatKind>,
+    #[serde(default)]
+    accented: bool,
+    #[serde(default)]
+    soft: bool,
+}
+
+/// A field that is there, as `Some` (a missing one is `None` by default).
+fn present<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
+    deserializer: D,
+) -> Result<Option<T>, D::Error> {
+    T::deserialize(deserializer).map(Some)
+}
+
+impl TryFrom<RawBeat> for Beat {
+    type Error = &'static str;
+
+    fn try_from(raw: RawBeat) -> Result<Self, Self::Error> {
+        let mut beat = match (raw.heads, raw.kind) {
+            (Some(heads), _) => Self::with_heads(raw.duration, heads),
+            (None, Some(kind)) => {
+                let mut beat = Self::new(raw.duration, kind);
+                beat.set_accented(raw.accented);
+                beat.set_soft(raw.soft);
+                beat
+            }
+            (None, None) => return Err("a beat needs its heads"),
+        };
+        beat.tuplet_group_id = raw.tuplet_group_id;
+        Ok(beat)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::duration::{e, t8};
+    use crate::head::Technique;
+    use crate::tuplet::TupletGroupId;
+
+    #[test]
+    fn a_beat_saved_before_heads_opens_as_one_rhythm_head() {
+        let old = "(duration: Simple(Eighth), kind: Note, accented: true, tuplet_group_id: None)";
+        let beat: Beat = ron::from_str(old).unwrap();
+        let mut accented = Beat::note(e());
+        accented.set_accented(true);
+        assert_eq!(beat, accented);
+        let old = "(duration: Simple(Eighth), kind: Rest, accented: false, soft: false, \
+                   tuplet_group_id: Some(3))";
+        let beat: Beat = ron::from_str(old).unwrap();
+        assert!(beat.is_rest());
+        assert_eq!(beat.tuplet_group_id.map(|id| id.as_u32()), Some(3));
+    }
+
+    #[test]
+    fn a_beat_round_trips_with_its_heads() {
+        let open = Head::new(Instrument::HiHat).with_technique(Technique::Open).unwrap();
+        let mut ghost = Head::new(Instrument::Snare);
+        ghost.soft = true;
+        let mut beat = Beat::with_heads(t8(), Heads::new([open, ghost]).unwrap());
+        beat.tuplet_group_id = Some(TupletGroupId(2));
+        let back: Beat = ron::from_str(&ron::to_string(&beat).unwrap()).unwrap();
+        assert_eq!(back, beat);
+        assert_eq!(back.tuplet_group_id, beat.tuplet_group_id);
+        assert!(back.soft() && !back.accented());
+        assert!(
+            ron::from_str::<Beat>("(duration: Simple(Eighth), tuplet_group_id: None)").is_err()
+        );
+    }
+
+    #[test]
+    fn kind_and_flags_follow_the_heads() {
+        let mut b = Beat::note(e());
+        b.set_accented(true);
+        assert!(b.is_note() && b.accented());
+        b.set_kind(Note);
+        assert!(b.accented(), "a note stays as it is");
+        b.set_kind(Rest);
+        assert!(b.is_rest() && !b.accented());
+        b.set_accented(true);
+        assert!(!b.accented(), "a rest has no head to accent");
+        assert_eq!(b.with_kind(Note), Beat::note(e()));
     }
 }

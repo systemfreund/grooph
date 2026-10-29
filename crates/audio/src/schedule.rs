@@ -1,4 +1,3 @@
-use grooph_measure::BeatKind;
 use grooph_measure::Score;
 use grooph_measure::click::{ClickBars, ClickLevel};
 use grooph_measure::counter::CounterBars;
@@ -132,10 +131,10 @@ impl Schedule {
 
             let onsets = DEFAULT_GRID.compute_onset_ticks(measure.beats());
             for (i, beat) in measure.beats().iter().enumerate() {
-                if beat.kind == BeatKind::Note
+                if beat.is_note()
                     && let Some(&t) = onsets.get(i)
                 {
-                    let s = if beat.accented { SoundType::AccentedBeat } else { SoundType::Beat };
+                    let s = if beat.accented() { SoundType::AccentedBeat } else { SoundType::Beat };
                     map.entry(timing.performed_global_tick(idx, t)).or_default().push(s);
                 }
             }

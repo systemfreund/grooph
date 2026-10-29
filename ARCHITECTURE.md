@@ -43,8 +43,19 @@ spread across callers.
 ## Data model and invariants
 
 - Core object: `grooph_measure::Measure` with `Vec<Beat>` and `TimeSignature`.
-- `Beat` has `duration`, `kind` (Note/Rest), `accented`, `soft` (a ghost note,
-  head in parentheses; never with `accented`), `tuplet_group_id`.
+- `Beat` is a slot of the rhythm, `duration` and `tuplet_group_id`, and what
+  is played in it, its `Heads` (`grooph_measure::head`): none is a rest, one a
+  note, several a chord on one stem (at most one per `Instrument`, sorted from
+  the foot up, at most `MAX_HEADS`). Each `Head` has its `Instrument`,
+  `accented`, `soft` (a ghost note, head in parentheses; never with
+  `accented`) and a `Technique` its instrument allows (open hi-hat,
+  cross-stick, ...; checked when built or loaded). `kind()`, `accented()`,
+  `soft()` read the beat as a whole (any head); `set_accented`/`set_soft` set
+  every head, `set_kind` turns a rest into a plain note and back.
+  Today every note is one `Instrument::Rhythm` head, the one line of the
+  staff; `Instrument::staff_pos`/`notehead` hold the drumkit legend for kit
+  scores (#251-#255). Beats saved before heads (`kind`, `accented`, `soft`)
+  load as one `Rhythm` head (`RawBeat`).
 - `Duration` is `Simple`, `Dotted`, or `Tuplet(TupletSpec { n, m, base })`.
 - `Measure::set_beat` guarantees a valid measure length and fills gaps.
 - `DEFAULT_GRID` defines the valid duration grid and tick calculations.

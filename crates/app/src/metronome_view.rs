@@ -260,7 +260,7 @@ fn tile_of(bar: &Measure, units: u8) -> Option<Measure> {
         if onset >= end {
             break;
         }
-        tile.set_beat(idx, Beat::new(b.duration, b.kind)).ok()?;
+        tile.set_beat(idx, Beat::new(b.duration, b.kind())).ok()?;
     }
     Some(tile)
 }
@@ -1713,6 +1713,6 @@ mod tests {
     #[test]
     fn the_metronome_plays_one_silent_bar() {
         let m = Measure::new(TimeSignature::SEVEN_EIGHT);
-        assert!(m.beats().iter().all(|b| b.kind == grooph_measure::BeatKind::Rest));
+        assert!(m.beats().iter().all(|b| b.kind() == grooph_measure::BeatKind::Rest));
     }
 }

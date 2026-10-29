@@ -29,7 +29,7 @@ fn staff_pos_of(beat: &Beat, in_beam: bool, opts: &LayoutOpts) -> i8 {
     let keeps_line = matches!(base, NoteValue::Half | NoteValue::Whole);
     if opts.shared_line {
         let side = if opts.stem_down { -1 } else { 1 };
-        return match beat.kind {
+        return match beat.kind() {
             BeatKind::Note => side,
             BeatKind::Rest if in_beam => side,
             BeatKind::Rest => match ledger_pos(beat, opts) {
@@ -39,7 +39,7 @@ fn staff_pos_of(beat: &Beat, in_beam: bool, opts: &LayoutOpts) -> i8 {
             },
         };
     }
-    match beat.kind {
+    match beat.kind() {
         BeatKind::Rest if opts.stem_down && !keeps_line && !in_beam => -2,
         _ => 0,
     }
@@ -63,7 +63,7 @@ fn clear_of_line(rest: glyphs::Glyph, below: bool) -> i8 {
 /// in the upper voice, but no meter holds a whole note.)
 fn ledger_pos(beat: &Beat, opts: &LayoutOpts) -> Option<i8> {
     let half = beat.duration.base_note() == NoteValue::Half;
-    (opts.shared_line && opts.stem_down && beat.kind == BeatKind::Rest && half).then_some(-2)
+    (opts.shared_line && opts.stem_down && beat.is_rest() && half).then_some(-2)
 }
 
 /// How far a ledger line reaches past either side of its rest, in staff
@@ -72,7 +72,7 @@ const LEDGER_EXTENSION_SS: f32 = 0.4;
 
 /// The head or rest glyph of `beat`.
 fn head_glyph(beat: &Beat) -> glyphs::Glyph {
-    match beat.kind {
+    match beat.kind() {
         BeatKind::Note => glyphs::notehead_glyph_for_duration(beat.duration),
         BeatKind::Rest => glyphs::rest_glyph_for_duration(beat.duration),
     }
@@ -131,9 +131,9 @@ fn flag_at(
 /// up-stem flag curls down beside the dots and pushes them past it; a
 /// down-stem flag hangs below them.
 fn dot_first_dx(beat: &Beat, in_beam: bool, opts: &LayoutOpts) -> f32 {
-    let is_note = beat.kind == BeatKind::Note;
+    let is_note = beat.is_note();
     let mut dx = opts.em * c::DOT_FIRST_DX_NO_FLAG_EM;
-    if is_note && beat.soft {
+    if is_note && beat.soft() {
         dx += paren_reach(opts) - opts.head_half_width();
     }
     if is_note && !in_beam && requires_flag(beat.duration) && !opts.stem_down {
@@ -172,10 +172,10 @@ fn dot_glyphs(
 /// `opts.stem_offset()`.
 fn compute_x_extents(beat: &Beat, in_beam: bool, opts: &LayoutOpts) -> (f32, f32) {
     let ss = opts.staff_space();
-    let is_note = beat.kind == BeatKind::Note;
+    let is_note = beat.is_note();
     let needs_flag = requires_flag(beat.duration);
 
-    let (left, mut right) = if is_note && beat.soft {
+    let (left, mut right) = if is_note && beat.soft() {
         (-paren_reach(opts), paren_reach(opts))
     } else {
         // A ledger line may reach past the rest: it doesn't widen it, so the
@@ -390,7 +390,7 @@ pub(super) fn build_note_layout(
         let ideal_cx = shifted_cxs[i];
         let needs_flag = requires_flag(b.duration);
         let in_beam = in_beam_flags.get(i).copied().unwrap_or(false);
-        let is_note = b.kind == BeatKind::Note;
+        let is_note = b.is_note();
         // A rest under a beam is a stemlet: a stem without a head.
         let stemlet = !is_note && in_beam;
         let staff_pos = staff_pos_of(b, in_beam, opts);
@@ -445,7 +445,7 @@ pub(super) fn build_note_layout(
             }
             None => PlacedGlyph::centered(head_glyph(b), center.x, cy, opts.em),
         };
-        let parens = if is_note && b.soft { parens_at(center, opts) } else { Vec::new() };
+        let parens = if is_note && b.soft() { parens_at(center, opts) } else { Vec::new() };
         let ledger = ledger_pos(b, opts).map(|pos| {
             let ink = head.ink();
             let (y, reach) = (opts.y_of(pos), LEDGER_EXTENSION_SS * ss);
@@ -465,7 +465,7 @@ pub(super) fn build_note_layout(
             center,
             staff_pos,
             duration: b.duration,
-            kind: b.kind,
+            kind: b.kind(),
             head,
             stemlet,
             hidden: false,
@@ -478,7 +478,7 @@ pub(super) fn build_note_layout(
         };
 
         // 5. Accent, around the head, stem, flag and dots.
-        if is_note && b.accented {
+        if is_note && b.accented() {
             place_accent(&mut note, opts.accents_below(), opts);
         }
 
