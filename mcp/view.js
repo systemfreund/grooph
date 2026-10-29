@@ -332,6 +332,7 @@ window.groophHost = {
   // settings replaced it.
   updateModelContext(text, fields) {
     announce(text, fields);
+    onlyOnePlays(fields?.playing === true);
     if (!connected) return false;
     const params = { content: [{ type: "text", text }], structuredContent: fields };
     latestContext = params;
@@ -345,6 +346,25 @@ window.groophHost = {
   },
   openLink,
 };
+
+// One metronome plays at a time: a view that starts says so to the other
+// views of this server (they share the host's sandbox origin, also across
+// chats and tabs), and one that plays stops.
+const me = Math.random().toString(36).slice(2);
+let playing = false;
+let channel = null;
+try {
+  channel = new BroadcastChannel("grooph-metronome");
+  channel.onmessage = (e) => {
+    if (e.data?.started && e.data.started !== me && playing) window.groophHost?.togglePlay?.();
+  };
+} catch (e) {
+  console.warn("grooph: no BroadcastChannel", e);
+}
+function onlyOnePlays(now) {
+  if (now && !playing) channel?.postMessage({ started: me });
+  playing = now;
+}
 
 // What a screen reader gets of the canvas: the settings as the model gets
 // them (without the link), read out when they change, and a play button
