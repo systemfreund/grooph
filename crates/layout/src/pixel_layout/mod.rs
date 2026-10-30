@@ -325,8 +325,8 @@ pub struct MeasureLayout {
 
 /// The head standing for `onset` in the layouts of its measure's `voices`
 /// (see [`Onset::voice`]): where the onset is drawn. `None` where that
-/// voice's layout has no such note, e.g. a layout of another measure or a
-/// bar drawn as one whole rest.
+/// voice's layout has no such note, i.e. a layout of another measure (a bar
+/// drawn as one whole rest keeps a hidden layout per beat).
 pub fn onset_head<'a>(voices: &'a [MeasureLayout], onset: &Onset) -> Option<&'a NoteLayout> {
     voices.get(onset.voice)?.notes.get(onset.beat_idx)
 }

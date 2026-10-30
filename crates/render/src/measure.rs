@@ -233,8 +233,7 @@ pub(crate) fn draw_count_layer(
 
 /// Where `measure` starts a beat in any of its voices ([`Measure::onsets`]),
 /// with the x of the head standing for each in `voices` (`None` where that
-/// voice's layout has no such note, e.g. a layout of another measure or a
-/// bar drawn as one whole rest). The cursor and the count labels follow
+/// voice's layout has no such note: a layout of another measure). The cursor and the count labels follow
 /// these, so a lower voice's notes between the upper voice's are counted
 /// and passed too; with one voice they are its beats.
 struct Columns {
