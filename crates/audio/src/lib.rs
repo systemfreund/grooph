@@ -901,11 +901,6 @@ impl Iterator for MetronomeSource {
                 }
                 self.voices.trigger(sound.patch(&self.local_params.audio_settings));
             }
-        } else if self.samples_processed.is_multiple_of(8192) {
-            debug!(
-                "Metronome state={:?}, samples processed: {}",
-                self.player_state, self.samples_processed
-            )
         }
 
         self.samples_processed += 1;
