@@ -27,21 +27,20 @@ pub enum PlaybackMarks {
 
 /// Render a full score described by `staff` to `ui`.
 ///
-/// `cursor` highlights the edit position in `cursor_voice`; only the measure
+/// `cursor` highlights the edit position in its voice; only the measure
 /// matching `cursor.measure_idx` gets a blinking cursor. `playback` is
 /// `Some((measure_idx, local_tick))` referring to the **active** measure (the
 /// one currently being audibly played). The *visual* cursor may live in a
 /// different measure during the wrap animation — see [`current_cursor_x`].
 /// `marks` says whether the line or a guide anchor shows it. `lit` draws
-/// one note of a voice in the highlight colour.
+/// the note it points at in the highlight colour.
 #[expect(clippy::too_many_arguments)]
 pub fn draw_staff(
     ui: &mut egui::Ui,
     score: &Score,
     staff: &StaffLayout,
     cursor: Option<Cursor>,
-    cursor_voice: VoiceIdx,
-    lit: Option<(VoiceIdx, Cursor)>,
+    lit: Option<Cursor>,
     playback: Option<(MeasureIdx, f64)>,
     marks: PlaybackMarks,
     count_config: Option<&CountConfig>,
@@ -51,8 +50,8 @@ pub fn draw_staff(
     let highlight = highlight_color(ui.visuals());
     // The lit note of `voice` in the measure `measure_idx`, if any.
     let lit_in = |voice: VoiceIdx, measure_idx: MeasureIdx| {
-        lit.filter(|&(v, c)| v == voice && c.measure_idx == measure_idx)
-            .map(|(_, c)| (c.beat_idx, highlight))
+        lit.filter(|c| c.voice == voice && c.measure_idx == measure_idx)
+            .map(|c| (c.beat_idx, highlight))
     };
 
     // The count label to light: the one being played under the line, the
@@ -95,7 +94,7 @@ pub fn draw_staff(
 
             // The cursor of `voice` in this measure, if any.
             let cursor_in = |voice: VoiceIdx| {
-                cursor.filter(|c| voice == cursor_voice && c.measure_idx == placed.measure_idx)
+                cursor.filter(|c| c.voice == voice && c.measure_idx == placed.measure_idx)
             };
             // The other voices' notes, below the shared line.
             for (voice, layout) in placed.voices.iter().enumerate().skip(1) {
@@ -298,7 +297,7 @@ mod tests {
     /// The voice and index of the note nearest (across) each shape drawn in
     /// the highlight colour, with `lit` lit on a two-voice staff whose notes
     /// all stand at different places.
-    fn lit_notes(lit: (VoiceIdx, Cursor)) -> Vec<(VoiceIdx, usize)> {
+    fn lit_notes(lit: Cursor) -> Vec<(VoiceIdx, usize)> {
         let upper = parse_score("4/4 q q q q").unwrap();
         let lower = parse_score("4/4 r:e q q q e").unwrap();
         let opts = opts();
@@ -312,7 +311,7 @@ mod tests {
         let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
             color = highlight_color(ui.visuals());
             let marks = PlaybackMarks::Line;
-            draw_staff(ui, &both, &staff, None, 0, Some(lit), None, marks, None, &opts);
+            draw_staff(ui, &both, &staff, None, Some(lit), None, marks, None, &opts);
         });
         output.textures_delta.clear();
         let placed = staff.placed(0).unwrap();
@@ -343,12 +342,12 @@ mod tests {
     #[test]
     fn a_lit_note_lights_in_its_own_voice_only() {
         for voice in [0, 1] {
-            let lit = lit_notes((voice, Cursor { measure_idx: 0, beat_idx: 1 }));
+            let lit = lit_notes(Cursor::in_voice(0, voice, 1));
             assert!(lit.len() >= 2, "{voice:?}: {lit:?}");
             assert!(lit.iter().all(|&n| n == (voice, 1)), "{voice:?}: {lit:?}");
         }
         // A note of another measure lights nothing here.
-        assert!(lit_notes((0, Cursor { measure_idx: 1, beat_idx: 1 })).is_empty());
+        assert!(lit_notes(Cursor::at(1, 1)).is_empty());
     }
 
     /// A kit bar whose lower voice is busier than the upper one: halves
@@ -396,7 +395,7 @@ mod tests {
         let marks = PlaybackMarks::Line;
         let opts = opts();
         let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
-            draw_staff(ui, &score, &staff, None, 0, None, None, marks, Some(&config), &opts);
+            draw_staff(ui, &score, &staff, None, None, None, marks, Some(&config), &opts);
         });
         output.textures_delta.clear();
         let ands: Vec<f32> = output

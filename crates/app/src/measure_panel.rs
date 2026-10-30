@@ -139,7 +139,6 @@ impl Grooph {
 
                     // The metronome's click bar with its counter rhythm
                     // as the second voice, or the edited score.
-                    let voice = self.edited_voice();
                     let shown = self.metronome_staff_score();
 
                     // Build the multi-measure tempo backbone once per frame.
@@ -242,11 +241,12 @@ impl Grooph {
                     // re-centering above.
                     let editing = self.ui.mode == Mode::Edit
                         && self.playback_ctl.transport_state == TransportState::Stopped;
-                    let followed = editing.then_some((voice, self.editor.cursor));
+                    let staff_cursor = self.staff_cursor();
+                    let followed = editing.then_some(staff_cursor);
                     if followed != self.ui.followed_cursor
-                        && let Some(placed) = staff.placed(self.editor.cursor.measure_idx)
-                        && let Some(layout) = placed.voices.get(voice.idx())
-                        && let Some(note) = layout.notes.get(self.editor.cursor.beat_idx)
+                        && let Some(placed) = staff.placed(staff_cursor.measure_idx)
+                        && let Some(layout) = placed.voices.get(staff_cursor.voice)
+                        && let Some(note) = layout.notes.get(staff_cursor.beat_idx)
                     {
                         let cursor_rect = egui::Rect::from_min_size(
                             egui::pos2(note.center.x, placed.rect.top()),
@@ -263,8 +263,7 @@ impl Grooph {
                     let (rect, resp) =
                         ui.allocate_exact_size(staff.total_size, egui::Sense::click_and_drag());
 
-                    let cursor =
-                        if self.ui.mode == Mode::Edit { Some(self.editor.cursor) } else { None };
+                    let cursor = (self.ui.mode == Mode::Edit).then_some(staff_cursor);
                     let playback = playback_local;
                     // A silent bar shows no playback position, like the
                     // metronome's ring: no line, no lit beat or count.
@@ -281,9 +280,10 @@ impl Grooph {
                     // Under the metronome's ring the staff and the ring
                     // light each other's hovered note and segment.
                     let with_ring = self.metronome_mode() && self.ui.mode != Mode::Edit;
-                    let lit = with_ring.then_some(self.editor.metronome.ring_hover).flatten().map(
-                        |(voice, beat_idx)| (voice.idx(), Cursor { measure_idx: 0, beat_idx }),
-                    );
+                    let lit = with_ring
+                        .then_some(self.editor.metronome.ring_hover)
+                        .flatten()
+                        .map(|(voice, beat_idx)| Cursor::in_voice(0, voice.idx(), beat_idx));
                     let staff_hover = resp
                         .hover_pos()
                         .filter(|_| with_ring)
@@ -302,7 +302,6 @@ impl Grooph {
                         score,
                         &staff,
                         cursor,
-                        voice.idx(),
                         lit,
                         playback,
                         marks,
@@ -560,12 +559,18 @@ impl Grooph {
             && (resp.clicked() || resp.dragged())
             && let Some(pos) = resp.interact_pointer_pos()
             && let Some((voice, m_idx, b_idx)) = hit_test_voice(staff, pos)
-            && let Some(voice) = MetronomeVoice::of(voice)
         {
-            // A tap on the other voice's line edits that voice from now on.
-            self.select_voice(voice);
-            self.editor.cursor.measure_idx = m_idx;
-            self.editor.cursor.beat_idx = b_idx;
+            // A tap on another voice edits that voice from now on: in the
+            // metronome tab the other bar, which the editor then holds.
+            if self.metronome_mode() {
+                let Some(voice) = MetronomeVoice::of(voice) else {
+                    return;
+                };
+                self.select_voice(voice);
+                self.editor.cursor = Cursor::at(0, b_idx);
+            } else {
+                self.editor.cursor = Cursor::in_voice(m_idx, voice, b_idx);
+            }
 
             if resp.double_clicked()
                 && let Some(tool) = all_tools()

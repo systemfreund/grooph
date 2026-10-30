@@ -4,7 +4,7 @@ use crate::duration::{Duration, NoteValue, TupletSpec};
 use crate::editing::Modification::{DissolveTuplet, ToggleAccent};
 use crate::grid::DEFAULT_GRID;
 use crate::tuplet::TupletGroupId;
-use crate::{Beat, BeatIdx, BeatKind, TimeSignature, VoiceBar};
+use crate::{Beat, BeatIdx, BeatKind, Instrument, TimeSignature, VoiceBar};
 use either::Either;
 
 #[derive(Debug)]
@@ -106,13 +106,18 @@ impl VoiceBar {
 
         if let Some(new_dur) = new_dur_opt {
             let kind = if let Some(override_kind) = beat_kind { override_kind } else { cur.kind() };
+            // A note of the kit keeps its heads, each with its own accent.
+            let kit = cur.heads().iter().any(|h| h.instrument() != Instrument::Rhythm);
             let new_beat = match kind {
+                Note if kit => Beat::with_heads(new_dur, *cur.heads()),
                 Note => Beat::note(new_dur),
                 Rest => Beat::rest(new_dur),
             };
-            self.set_beat(idx, new_beat)
-                .map(|_| Some(Modification::SetBeat(idx, new_beat)))
-                .unwrap_or(None)
+            self.set_beat(idx, new_beat).ok()?;
+            if kit && kind == Note {
+                self.set_heads(idx, *cur.heads());
+            }
+            Some(Modification::SetBeat(idx, new_beat))
         } else {
             None
         }
@@ -387,6 +392,25 @@ mod tests {
     use crate::duration::{e, t8};
     use crate::{Beat, Measure, TimeSignature};
     use std::assert_matches;
+
+    #[test]
+    fn a_new_duration_keeps_a_kit_notes_heads() {
+        use crate::notation::{format_score, parse_score};
+        let mut score = parse_score("4/4 >S-H:q H:q r:h ; K:h K:h").unwrap();
+        let hands = score.measures[0].voice_mut(0).unwrap();
+        hands.modify_beat(0, NoteValue::Eighth, None).unwrap();
+        hands.modify_beat(2, NoteValue::Eighth, Some(Note)).unwrap();
+        let text = format_score(&score).unwrap();
+        assert!(text.starts_with("4/4 >S-H:e"), "{text}");
+        // A rest made a note is the one line's until the kit has its palette.
+        let line = parse_score("4/4 >q (q) r:h").unwrap();
+        let mut bar = line.measures[0].clone();
+        bar.modify_beat(1, NoteValue::Eighth, None).unwrap();
+        assert!(
+            !bar.beats()[1].soft(),
+            "a duration change on the one line drops the ghost, as before"
+        );
+    }
 
     #[test]
     fn a_counter_sextuplet_of_thirty_seconds_can_be_edited() {

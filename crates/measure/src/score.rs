@@ -1,4 +1,4 @@
-use crate::{BeatIdx, Measure};
+use crate::{BeatIdx, Measure, VoiceBar, VoiceIdx};
 use serde::{Deserialize, Serialize};
 
 pub type MeasureIdx = usize;
@@ -87,6 +87,27 @@ impl Score {
         self.measures.len()
     }
 
+    /// The voice `cursor` is in. Panics if `cursor` is not in the score;
+    /// [`Score::clamp_cursor`] puts it there.
+    pub fn voice_at(&self, cursor: Cursor) -> &VoiceBar {
+        self.measures[cursor.measure_idx].voice(cursor.voice).expect("the cursor's voice")
+    }
+
+    /// The voice `cursor` is in, to edit; see [`Score::voice_at`].
+    pub fn voice_at_mut(&mut self, cursor: Cursor) -> &mut VoiceBar {
+        self.measures[cursor.measure_idx].voice_mut(cursor.voice).expect("the cursor's voice")
+    }
+
+    /// `cursor` moved onto the score: the last measure, voice or beat where
+    /// it is past it.
+    pub fn clamp_cursor(&self, cursor: Cursor) -> Cursor {
+        let measure_idx = cursor.measure_idx.min(self.len() - 1);
+        let measure = &self.measures[measure_idx];
+        let voice = cursor.voice.min(measure.voices().len() - 1);
+        let beats = measure.voice(voice).map_or(0, |v| v.beats().len());
+        Cursor { measure_idx, voice, beat_idx: cursor.beat_idx.min(beats.saturating_sub(1)) }
+    }
+
     pub fn is_empty(&self) -> bool {
         self.measures.is_empty()
     }
@@ -99,20 +120,29 @@ impl Score {
     }
 }
 
-/// Position within a score: which measure, and which beat within that measure.
+/// Position within a score: which measure, which of its voices, and which
+/// beat of that voice.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Cursor {
     pub measure_idx: MeasureIdx,
+    /// Cursors saved before voices are in the first.
+    #[serde(default)]
+    pub voice: VoiceIdx,
     pub beat_idx: BeatIdx,
 }
 
 impl Cursor {
     pub fn start() -> Self {
-        Self { measure_idx: 0, beat_idx: 0 }
+        Self::at(0, 0)
     }
 
+    /// Beat `beat_idx` of the first voice of measure `measure_idx`.
     pub fn at(measure_idx: MeasureIdx, beat_idx: BeatIdx) -> Self {
-        Self { measure_idx, beat_idx }
+        Self::in_voice(measure_idx, 0, beat_idx)
+    }
+
+    pub fn in_voice(measure_idx: MeasureIdx, voice: VoiceIdx, beat_idx: BeatIdx) -> Self {
+        Self { measure_idx, voice, beat_idx }
     }
 }
 
@@ -186,6 +216,25 @@ mod tests {
     fn cursor_at_sets_fields() {
         let c = Cursor::at(2, 5);
         assert_eq!(c.measure_idx, 2);
+        assert_eq!(c.voice, 0);
         assert_eq!(c.beat_idx, 5);
+    }
+
+    #[test]
+    fn a_cursor_saved_before_voices_is_in_the_first() {
+        let back: Cursor = ron::from_str("(measure_idx: 2, beat_idx: 5)").unwrap();
+        assert_eq!(back, Cursor::at(2, 5));
+        let lower = Cursor::in_voice(1, 1, 3);
+        assert_eq!(ron::from_str::<Cursor>(&ron::to_string(&lower).unwrap()).unwrap(), lower);
+    }
+
+    #[test]
+    fn clamp_cursor_keeps_it_on_the_score() {
+        let score = crate::notation::parse_score("4/4 q q q q ; h h | 2/4 q q").unwrap();
+        assert_eq!(score.clamp_cursor(Cursor::in_voice(0, 1, 9)), Cursor::in_voice(0, 1, 1));
+        // The second measure has one voice.
+        assert_eq!(score.clamp_cursor(Cursor::in_voice(1, 1, 1)), Cursor::in_voice(1, 0, 1));
+        assert_eq!(score.clamp_cursor(Cursor::in_voice(7, 0, 0)), Cursor::at(1, 0));
+        assert_eq!(score.voice_at(Cursor::in_voice(0, 1, 0)).beats().len(), 2);
     }
 }

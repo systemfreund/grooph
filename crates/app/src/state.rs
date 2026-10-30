@@ -4,7 +4,6 @@ use crate::guide::{AnchorFlash, Guide};
 use crate::library::PatternLibrary;
 use crate::library_panel::{LibraryItem, LibraryTab};
 use crate::metronome_view::MetronomeState;
-use crate::metronome_view::MetronomeVoice;
 use crate::persist::StateBackup;
 use crate::pickers::Picker;
 use crate::platform::PlatformRuntime;
@@ -350,7 +349,7 @@ pub(crate) struct UiShell {
     pub(crate) staff_em: f32,
     /// Edit cursor the staff last scrolled into view. The staff follows the
     /// cursor only when it moves, so the user can scroll away from it.
-    pub(crate) followed_cursor: Option<(MetronomeVoice, Cursor)>,
+    pub(crate) followed_cursor: Option<Cursor>,
     pub(crate) shell: ShellState,
     /// Setting whose picker dialog is open.
     pub(crate) picker: Option<Picker>,

@@ -78,7 +78,6 @@ fn pattern_preview(ui: &mut egui::Ui, score: &Score, width: f32, look: &PreviewL
         &first,
         &staff,
         None,
-        0,
         None,
         None,
         PlaybackMarks::Anchor(None),

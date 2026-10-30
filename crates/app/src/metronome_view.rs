@@ -427,6 +427,16 @@ impl Grooph {
         if self.metronome_mode() { self.editor.metronome.voice } else { MetronomeVoice::Click }
     }
 
+    /// The edit cursor on the staff as drawn: in the metronome tab the
+    /// editor holds one bar, which the staff shows as its voice.
+    pub(crate) fn staff_cursor(&self) -> Cursor {
+        let cursor = self.editor.cursor;
+        match self.metronome_mode() {
+            true => Cursor { voice: self.edited_voice().idx(), ..cursor },
+            false => cursor,
+        }
+    }
+
     /// Edit `voice` from now on: the click bar, or the counter rhythm if
     /// the meter has one. Not an edit, so not undoable; the snapshots know
     /// which voice they hold.
