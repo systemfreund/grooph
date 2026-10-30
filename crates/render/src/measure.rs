@@ -231,12 +231,12 @@ pub(crate) fn draw_count_layer(
     );
 }
 
-/// Where `measure` starts a beat in any of its voices, each tick once and in
-/// order, with the x of a head there: the first voice's whose layout in
-/// `voices` has one (`None` where none has, e.g. for a layout of another
-/// measure or a bar drawn as one whole rest). The cursor and the count
-/// labels follow these, so a lower voice's notes between the upper voice's
-/// are counted and passed too; with one voice they are its beats.
+/// Where `measure` starts a beat in any of its voices ([`Measure::onsets`]),
+/// with the x of the head standing for each in `voices` (`None` where that
+/// voice's layout has no such note, e.g. a layout of another measure or a
+/// bar drawn as one whole rest). The cursor and the count labels follow
+/// these, so a lower voice's notes between the upper voice's are counted
+/// and passed too; with one voice they are its beats.
 struct Columns {
     ticks: Vec<u32>,
     xs: Vec<Option<f32>>,
@@ -244,26 +244,8 @@ struct Columns {
 
 impl Columns {
     fn new(measure: &Measure, voices: &[MeasureLayout]) -> Self {
-        let mut all: Vec<(u32, Option<f32>)> = Vec::new();
-        for (bar, layout) in measure.voices().iter().zip(voices) {
-            let ticks = DEFAULT_GRID.compute_onset_ticks(bar.beats());
-            all.extend(
-                ticks
-                    .iter()
-                    .enumerate()
-                    .map(|(i, &t)| (t, layout.notes.get(i).map(|n| n.center.x))),
-            );
-        }
-        // Stable: at a tick the first voice comes first.
-        all.sort_by_key(|&(t, _)| t);
-        all.dedup_by(|later, kept| {
-            let same = later.0 == kept.0;
-            if same && kept.1.is_none() {
-                kept.1 = later.1;
-            }
-            same
-        });
-        let (ticks, xs) = all.into_iter().unzip();
+        let x = |voice: usize, beat: usize| Some(voices.get(voice)?.notes.get(beat)?.center.x);
+        let (ticks, xs) = measure.onsets().iter().map(|o| (o.tick, x(o.voice, o.beat_idx))).unzip();
         Columns { ticks, xs }
     }
 
@@ -279,21 +261,21 @@ impl Columns {
     }
 }
 
-/// Phase 1 cursor X — cursor lives inside *this* measure at `tick`.
+/// Phase 1 cursor X — cursor lives inside *this* measure at `tick`, laid
+/// out as `voices`. It follows the onsets of all voices ([`Columns`]):
 ///
-/// - Inside notes (not last): linear interpolation between consecutive note
-///   centers (`notes[i].center.x` → `notes[i+1].center.x`).
-/// - Last note, `frac < split`: linear from `notes[last].center.x` to
-///   `rect.right()` (cursor extends past the last note head, fading out).
-/// - Last note, `frac >= split`: returns `None`. The cursor visually moves
+/// - Inside an onset (not the last): linear interpolation between the heads
+///   of consecutive onsets.
+/// - Last onset, `frac < split`: linear from its head to `rect.right()`
+///   (cursor extends past the last note head, fading out).
+/// - Last onset, `frac >= split`: returns `None`. The cursor visually moves
 ///   into the *following* measure — call [`playback_cursor_entering_x`] there.
 ///
-/// `split` (see [`last_note_split`]) is the share of the last note's duration
-/// spent before the barline.
-/// - Trailing gap (tick past every beat's end, i.e. an incomplete measure):
-///   `Some(rect.right())`. Cursor parks at the right edge.
+/// `split` (see [`last_note_split`]) is the share of the last onset's
+/// duration spent before the barline.
 ///
-/// Returns `None` if the measure has no notes or zero total ticks.
+/// Returns `None` if the measure has no notes or zero total ticks, or the
+/// layout has no head for the onset (a layout of another measure).
 pub fn playback_cursor_x(
     measure: &Measure,
     voices: &[MeasureLayout],
@@ -309,9 +291,8 @@ pub fn playback_cursor_x(
     let t = clamp_tick_to_measure(tick, total_ticks);
     let columns = Columns::new(measure, voices);
 
-    let Some(i) = columns.at(t) else {
-        return Some(rect.right());
-    };
+    // Every voice starts at 0, so a column is at or before `t`.
+    let i = columns.at(t)?;
     let start = columns.ticks[i] as f64;
     let dur_ticks = columns.span(i, total_ticks);
     let frac = if dur_ticks > 0.0 { (t - start) / dur_ticks } else { 0.0 };

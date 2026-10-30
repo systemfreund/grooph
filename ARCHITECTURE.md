@@ -138,10 +138,12 @@ spread across callers.
 - A measure sounds as all its voices together (`grooph_measure::onsets`):
   `Measure::head_onsets` lists every head of every voice by tick, for the
   schedule; `Measure::onsets` every tick where a beat of any voice starts,
-  once, a note if any voice plays there. The accuracy reference
-  (`compute_global_beat_onsets`) and ghost notes follow `onsets`; the playback
-  cursor, guide anchors and count labels follow the merged onsets too, at the
-  x of the first voice's head there (`Columns` in `grooph_render::measure`).
+  once, a note if any voice plays there, with the beat that stands for it
+  (the first voice's note there, else the first voice's rest). The accuracy
+  reference (`compute_global_beat_onsets`) and ghost notes follow `onsets`;
+  the playback cursor, guide anchors, count labels (`Columns` in
+  `grooph_render::measure`) and accuracy marks too, at the head of the beat
+  standing for each onset.
   A one-line score has one voice, so its onsets are its beats.
 - The playback cursor is smoothed in the UI, audio offset for latency is optional.
 - Guide (`crates/app/src/guide.rs`, Practice options): what the staff shows

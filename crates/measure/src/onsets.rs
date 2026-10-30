@@ -25,6 +25,11 @@ pub struct Onset {
     pub tick: u32,
     /// Whether a voice plays a note there; `false` where all are rests.
     pub is_note: bool,
+    /// The beat that stands for the onset: the first voice's note there,
+    /// or the first voice's rest where none plays. Its head is where the
+    /// onset is drawn.
+    pub voice: VoiceIdx,
+    pub beat_idx: BeatIdx,
 }
 
 impl Measure {
@@ -51,18 +56,15 @@ impl Measure {
     /// The ticks where a beat of any voice starts, each once and in order.
     pub fn onsets(&self) -> Vec<Onset> {
         let mut out: Vec<Onset> = Vec::new();
-        for bar in self.voices() {
+        for (voice, bar) in self.voices().iter().enumerate() {
             let ticks = DEFAULT_GRID.compute_onset_ticks(bar.beats());
-            for (beat, &tick) in bar.beats().iter().zip(&ticks) {
-                out.push(Onset { tick, is_note: beat.is_note() });
+            for (beat_idx, (beat, &tick)) in bar.beats().iter().zip(&ticks).enumerate() {
+                out.push(Onset { tick, is_note: beat.is_note(), voice, beat_idx });
             }
         }
-        out.sort_by_key(|o| o.tick);
-        out.dedup_by(|later, kept| {
-            let same = later.tick == kept.tick;
-            kept.is_note |= same && later.is_note;
-            same
-        });
+        // Stable: at a tick the notes come first, then by voice.
+        out.sort_by_key(|o| (o.tick, !o.is_note));
+        out.dedup_by_key(|o| o.tick);
         out
     }
 }
@@ -126,12 +128,19 @@ mod tests {
     #[test]
     fn a_tick_is_a_note_if_any_voice_plays() {
         let m = measure("2/4 r:q H:q ; K:q r:q");
+        let q = m.onsets()[1].tick;
+        // The kick stands for the first onset, the hi-hat for the second.
         assert_eq!(
             m.onsets(),
-            [Onset { tick: 0, is_note: true }, Onset { tick: m.onsets()[1].tick, is_note: true }]
+            [
+                Onset { tick: 0, is_note: true, voice: 1, beat_idx: 0 },
+                Onset { tick: q, is_note: true, voice: 0, beat_idx: 1 },
+            ]
         );
         let rests = measure("2/4 r:q H:q ; r:e r:e r:q");
-        let notes: Vec<bool> = rests.onsets().iter().map(|o| o.is_note).collect();
-        assert_eq!(notes, [false, false, true]);
+        let notes: Vec<(bool, VoiceIdx)> =
+            rests.onsets().iter().map(|o| (o.is_note, o.voice)).collect();
+        // Rests only: the first voice's rest stands for the onset.
+        assert_eq!(notes, [(false, 0), (false, 1), (true, 0)]);
     }
 }

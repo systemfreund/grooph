@@ -490,16 +490,12 @@ impl Grooph {
         staff_space: f32,
     ) {
         let measure = &score.measures[placed.measure_idx];
-        // Every onset of any voice with the head drawn there, the first
-        // voice's where several start together.
-        let mut columns: Vec<(u32, &NoteLayout)> = Vec::new();
-        for (bar, layout) in measure.voices().iter().zip(&placed.voices) {
-            let ticks = DEFAULT_GRID.compute_onset_ticks(bar.beats());
-            columns.extend(ticks.into_iter().zip(&layout.notes));
-        }
-        // Stable: at a tick a note comes before a rest, then by voice.
-        columns.sort_by_key(|&(t, n)| (t, n.kind != grooph_measure::BeatKind::Note));
-        columns.dedup_by_key(|&mut (t, _)| t);
+        // Every onset of any voice, at the head standing for it.
+        let columns: Vec<(u32, &NoteLayout)> = measure
+            .onsets()
+            .iter()
+            .filter_map(|o| Some((o.tick, placed.voices.get(o.voice)?.notes.get(o.beat_idx)?)))
+            .collect();
         let measure_start = timing.measure_start_tick(placed.measure_idx);
         let dark = ui.visuals().dark_mode;
         for (idx, &(local_onset, note_layout)) in columns.iter().enumerate() {
