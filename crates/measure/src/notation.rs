@@ -54,7 +54,7 @@ use crate::duration::{Duration, NoteValue, TupletSpec};
 use crate::grid::DEFAULT_GRID;
 use crate::{
     Beat, Head, Heads, Instrument, Measure, MeasureError, ParseTimeSignatureError, Score,
-    Technique, TimeSignature,
+    StaffKind, Technique, TimeSignature,
 };
 use std::fmt::{Display, Formatter};
 
@@ -440,7 +440,14 @@ pub fn parse_score(input: &str) -> Result<Score, NotationError> {
         }
         measures.extend(measure);
     }
-    Ok(Score { measures })
+    // A score with an instrument of the kit is written on the kit's staff.
+    let kit = measures
+        .iter()
+        .flat_map(|m| m.voices())
+        .flat_map(|v| v.beats())
+        .any(|b| b.heads().iter().any(|h| h.instrument() != Instrument::Rhythm));
+    let staff = if kit { StaffKind::Kit } else { StaffKind::Line };
+    Ok(Score { staff, ..Score::new(measures) })
 }
 
 /// Format `score` in the text notation. The first measure always states its

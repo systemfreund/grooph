@@ -253,7 +253,7 @@ mod tests {
     use crate::{Measure, TimeSignature};
 
     fn score_of(ts: &[TimeSignature]) -> Score {
-        Score { measures: ts.iter().map(|t| Measure::new(*t)).collect() }
+        Score::new(ts.iter().map(|t| Measure::new(*t)).collect())
     }
 
     #[test]

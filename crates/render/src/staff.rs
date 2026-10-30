@@ -13,7 +13,7 @@ use eframe::egui::{Color32, Rangef, Stroke};
 use grooph_layout::glyphs;
 use grooph_layout::staff_layout::{PlacedMeasure, StaffLayout, StaffOpts};
 use grooph_measure::counting::CountConfig;
-use grooph_measure::{Cursor, MeasureIdx, Score, VoiceIdx};
+use grooph_measure::{Cursor, MeasureIdx, Score, StaffKind, VoiceIdx};
 
 /// How the staff marks the playback position.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -75,12 +75,19 @@ pub fn draw_staff(
         playback.filter(|_| playback_line).and_then(|p| current_cursor_x(score, staff, p));
 
     for system in &staff.systems {
-        // One continuous staff line per system, so adjacent measures look joined.
-        ui.painter().hline(
-            Rangef::new(system.rect.left(), system.rect.right()),
-            system.y_baseline,
-            Stroke::new(0.02 * staff_opts.em, color),
-        );
+        // Continuous staff lines per system, so adjacent measures look
+        // joined: one, or the kit's five around it.
+        let lines = match system.measures.first().map(|p| p.staff) {
+            Some(StaffKind::Kit) => -2..=2,
+            _ => 0..=0,
+        };
+        for line in lines {
+            ui.painter().hline(
+                Rangef::new(system.rect.left(), system.rect.right()),
+                system.y_baseline + line as f32 * staff_opts.staff_space(),
+                Stroke::new(0.02 * staff_opts.em, color),
+            );
+        }
 
         for placed in &system.measures {
             let cursor_x =

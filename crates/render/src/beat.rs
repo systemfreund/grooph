@@ -13,8 +13,8 @@ pub(super) fn draw_beat(
     if let Some(stem) = &note.stem {
         painter.line_segment([stem.p1, stem.p2], Stroke::new(opts.stem_thickness(), color));
     }
-    if let Some(ledger) = &note.ledger {
-        let stroke = Stroke::new(opts.staff_line_thickness(), color);
+    let stroke = Stroke::new(opts.staff_line_thickness(), color);
+    for ledger in &note.ledgers {
         painter.line_segment([ledger.p1, ledger.p2], stroke);
     }
     for glyph in note.glyphs() {

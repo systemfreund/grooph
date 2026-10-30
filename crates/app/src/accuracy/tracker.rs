@@ -155,8 +155,8 @@ mod tests {
     use super::super::session::compute_global_beat_onsets;
 
     fn score_of_quarters(ts_list: &[TimeSignature]) -> Score {
-        Score {
-            measures: ts_list
+        Score::new(
+            ts_list
                 .iter()
                 .map(|ts| {
                     let mut m = Measure::new(*ts);
@@ -166,7 +166,7 @@ mod tests {
                     m
                 })
                 .collect(),
-        }
+        )
     }
 
     #[test]

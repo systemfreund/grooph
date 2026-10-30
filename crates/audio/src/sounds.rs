@@ -386,7 +386,7 @@ mod tests {
         use grooph_measure::tempo::ScoreTiming;
         use grooph_measure::{Measure, Score, TimeSignature};
 
-        let score = Score { measures: vec![Measure::new(TimeSignature::FOUR_FOUR)] };
+        let score = Score::new(vec![Measure::new(TimeSignature::FOUR_FOUR)]);
         let timing = ScoreTiming::from_score(&score, 120);
         let mut sounds = Vec::new();
         Schedule::build(&score, &timing, None, &ClickBars::default()).collect_in_range(

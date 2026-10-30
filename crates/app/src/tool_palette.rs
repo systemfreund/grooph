@@ -12,8 +12,8 @@ use grooph_layout::pixel_layout::{
     LayoutOpts, MeasureLayout, build_measure_layout, build_time_sig_layout, compute_em,
 };
 use grooph_measure::BeatKind::{Note, Rest};
-use grooph_measure::Measure;
 use grooph_measure::duration::{Duration, TupletKind};
+use grooph_measure::{Measure, StaffKind};
 use grooph_render::measure::{draw_notes, draw_time_signature};
 use log::info;
 use tools::EditOp;
@@ -282,6 +282,7 @@ impl Grooph {
                 accent_displacement: 0.0,
                 stem_down: false,
                 shared_line: false,
+                staff: StaffKind::Line,
             };
 
             // Use a temporary measure just for layout width and positions
@@ -416,6 +417,7 @@ pub(crate) fn paint_notation(
                 accent_displacement: 0.1,
                 stem_down: false,
                 shared_line: false,
+                staff: StaffKind::Line,
             }
         };
 

@@ -1212,7 +1212,7 @@ mod tests {
                 m
             })
             .collect();
-        Score { measures }
+        Score::new(measures)
     }
 
     fn assert_same_score(a: &Score, b: &Score, context: &str) {

@@ -653,7 +653,7 @@ pub fn generate_score(
     let measures = (0..settings.bars.max(1))
         .map(|_| generate_measure(settings, rng))
         .collect::<Result<Vec<_>, _>>()?;
-    Ok(Score { measures })
+    Ok(Score::new(measures))
 }
 
 #[cfg(test)]

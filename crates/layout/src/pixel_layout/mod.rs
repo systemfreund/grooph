@@ -2,7 +2,7 @@ use crate::glyphs::{self, Glyph};
 use crate::render_plan::{RenderPlan, plan_measure};
 use egui::{FontId, Pos2, Rect};
 use grooph_measure::duration::{Duration, NoteValue};
-use grooph_measure::{BeatKind, TimeSignature, VoiceBar};
+use grooph_measure::{BeatKind, StaffKind, TimeSignature, VoiceBar};
 
 mod beams;
 mod notes;
@@ -132,8 +132,12 @@ pub struct LayoutOpts {
     pub stem_down: bool,
     /// The staff line is shared with another voice: this one keeps to its
     /// side of it, heads just above the line (just below with
-    /// `stem_down`) and rests clear of it.
+    /// `stem_down`) and rests clear of it. On the kit's staff: the measure
+    /// has another voice, and the rests keep to this one's half.
     pub shared_line: bool,
+    /// The staff: one line, or the kit's five, where each head sits at its
+    /// instrument's place.
+    pub staff: StaffKind,
 }
 
 impl LayoutOpts {
@@ -266,23 +270,30 @@ pub struct NoteLayout {
     pub staff_pos: i8,
     pub duration: Duration,
     pub kind: BeatKind,
-    /// The note head, or the rest. A stemlet's rest is not drawn.
+    /// The note head at `staff_pos` (the one nearest the stem's tip), or
+    /// the rest. A stemlet's rest is not drawn.
     pub head: PlacedGlyph,
+    /// The chord's other heads, on the same stem.
+    pub chord: Vec<PlacedGlyph>,
     /// A beamed rest, drawn as a stem from the beam toward the line and no
     /// head (see [`crate::render_plan::plan_measure_with`]).
     pub stemlet: bool,
     /// A rest of an empty bar, drawn as the bar's whole rest by its first
     /// beat (see [`RenderPlan::bar_rest`]): the others are not drawn.
     pub hidden: bool,
-    /// The parentheses of a soft (ghost) note's head.
+    /// The parentheses of each soft (ghost) head.
     pub parens: Vec<PlacedGlyph>,
-    /// A rest's ledger line, on a line shared by two voices (see
-    /// [`LayoutOpts::shared_line`]).
-    pub ledger: Option<Line>,
+    /// Ledger lines: of a rest on a line shared by two voices (see
+    /// [`LayoutOpts::shared_line`]), or of heads above or below the kit's
+    /// staff.
+    pub ledgers: Vec<Line>,
     pub dots: Vec<PlacedGlyph>,
     pub stem: Option<Line>,
     pub flag: Option<PlacedGlyph>,
     pub accent: Option<PlacedGlyph>,
+    /// The signs of the heads' techniques (an open or closed hi-hat, a
+    /// choke), past the accent.
+    pub signs: Vec<PlacedGlyph>,
 }
 
 impl NoteLayout {
@@ -290,10 +301,12 @@ impl NoteLayout {
     pub fn glyphs(&self) -> impl Iterator<Item = &PlacedGlyph> {
         std::iter::once(&self.head)
             .filter(|_| !self.stemlet && !self.hidden)
+            .chain(&self.chord)
             .chain(&self.parens)
             .chain(&self.dots)
             .chain(&self.flag)
             .chain(&self.accent)
+            .chain(&self.signs)
     }
 }
 
@@ -322,7 +335,7 @@ impl MeasureLayout {
         let lines = self
             .notes
             .iter()
-            .flat_map(|n| n.stem.into_iter().chain(n.ledger))
+            .flat_map(|n| n.stem.into_iter().chain(n.ledgers.iter().copied()))
             .chain(self.tuplets.iter().flat_map(|t| t.bracket.iter().copied()))
             .map(|l| Rect::from_two_pos(l.p1, l.p2));
         let beams = self.beams.iter().map(|b| b.rect);
@@ -427,7 +440,10 @@ fn lay_out_measure(
     let notes_left_edge = x_offset_acc;
     let note_rect =
         Rect::from_min_max(Pos2::new(notes_left_edge, opts.rect.top()), opts.rect.right_bottom());
-    let note_layout = notes::build_note_layout(measure, render_plan, &note_rect, x_centers, opts);
+    let mut note_layout =
+        notes::build_note_layout(measure, render_plan, &note_rect, x_centers, opts);
+    beams::reach_beams(&mut note_layout, &render_plan.beams, opts);
+    notes::place_marks(&mut note_layout, measure.beats(), opts);
     let beam_layout = beams::build_beam_layout(&note_layout, &render_plan.beams, opts);
     let tuplet_layout =
         tuplets::build_tuplet_layout(&note_layout, &beam_layout, &render_plan.tuplets, opts);
@@ -514,6 +530,7 @@ mod tests {
             accent_displacement: 0.0,
             stem_down: false,
             shared_line: false,
+            staff: StaffKind::Line,
         };
         let layout = build_measure_layout(&Measure::new(TimeSignature::THREE_FOUR), &opts);
         let ts = layout.time_signature.expect("time signature laid out");
@@ -548,6 +565,7 @@ mod tests {
             accent_displacement: displacement,
             stem_down: false,
             shared_line: false,
+            staff: StaffKind::Line,
         };
 
         // Case 1: stems up, accent above
@@ -599,6 +617,7 @@ mod tests {
             accent_displacement: 0.1,
             stem_down: true,
             shared_line: false,
+            staff: StaffKind::Line,
         };
         let layout = build_measure_layout(&m, &opts);
         let note = &layout.notes[0];
@@ -645,6 +664,7 @@ mod tests {
             accent_displacement: 0.0,
             stem_down: false,
             shared_line: false,
+            staff: StaffKind::Line,
         };
 
         let layout = build_measure_layout(&m, &opts);
@@ -698,6 +718,7 @@ mod tests {
             accent_displacement: 0.0,
             stem_down: false,
             shared_line: false,
+            staff: StaffKind::Line,
         };
 
         let layout = build_measure_layout(&m, &opts);
@@ -735,6 +756,7 @@ mod tests {
             accent_displacement: 0.1,
             stem_down: false,
             shared_line: false,
+            staff: StaffKind::Line,
         };
         let down = LayoutOpts { stem_down: true, ..up.clone() };
         let (a, b) = (build_measure_layout(&m, &up), build_measure_layout(&m, &down));
@@ -788,6 +810,7 @@ mod tests {
             accent_displacement: 0.07,
             stem_down: false,
             shared_line: false,
+            staff: StaffKind::Line,
         };
         let down = LayoutOpts { stem_down: true, ..up.clone() };
         let m = parse_score("4/4 t8 t8 t8 t16 t16 t16 t16 t16 t16 h").unwrap().measures.remove(0);
@@ -820,6 +843,7 @@ mod tests {
             accent_displacement: 0.07,
             stem_down: false,
             shared_line: false,
+            staff: StaffKind::Line,
         };
         let clearance = c::TUPLET_NUMBER_CLEARANCE_SS * opts.staff_space();
         // One digit and two, each with a rest for a bracket.
@@ -851,6 +875,7 @@ mod tests {
             accent_displacement: 0.07,
             stem_down: false,
             shared_line: false,
+            staff: StaffKind::Line,
         };
         let ss = up.staff_space();
         let gap = c::TUPLET_INK_GAP_SS * ss;
@@ -913,6 +938,7 @@ mod tests {
             accent_displacement: 0.1,
             stem_down: true,
             shared_line: false,
+            staff: StaffKind::Line,
         };
         let cy = down.y_center();
         let quarter_rest = &build_measure_layout(&m, &down).notes[1];
@@ -949,6 +975,7 @@ mod tests {
             accent_displacement: 0.07,
             stem_down: false,
             shared_line: true,
+            staff: StaffKind::Line,
         };
         let down = LayoutOpts { stem_down: true, ..up.clone() };
         let cy = up.y_center();
@@ -963,7 +990,7 @@ mod tests {
         for (u, d) in a.notes.iter().zip(&b.notes).filter(|(u, _)| u.kind == BeatKind::Rest) {
             assert!(u.head.ink().bottom() <= cy - clear, "{u:?}");
             assert!(d.head.ink().top() >= cy + clear, "{d:?}");
-            assert!(u.ledger.is_none() && d.ledger.is_none());
+            assert!(u.ledgers.is_empty() && d.ledgers.is_empty());
         }
         // Accents go by the stems.
         assert!(a.notes[0].accent.unwrap().ink().bottom() < a.notes[0].stem.unwrap().p2.y);
@@ -976,9 +1003,9 @@ mod tests {
             &build_measure_layout(&half, &up).notes[0],
             &build_measure_layout(&half, &down).notes[0],
         );
-        assert!(upper_half.ledger.is_none());
+        assert!(upper_half.ledgers.is_empty());
         assert!((upper_half.head.ink().bottom() - cy).abs() < 0.1);
-        let ledger = lower_half.ledger.expect("a ledger line below");
+        let ledger = *lower_half.ledgers.first().expect("a ledger line below");
         assert_eq!(ledger.p1.y, down.y_of(-2));
         let ink = lower_half.head.ink();
         assert!(ink.top() > cy && (ink.bottom() - ledger.p1.y).abs() < 0.1);
@@ -1020,6 +1047,7 @@ mod tests {
             accent_displacement: 0.0,
             stem_down: false,
             shared_line: false,
+            staff: StaffKind::Line,
         };
         let down = LayoutOpts { stem_down: true, ..up.clone() };
         let dx =
@@ -1056,6 +1084,7 @@ mod tests {
             accent_displacement: 0.0,
             stem_down: false,
             shared_line: false,
+            staff: StaffKind::Line,
         };
         let plan = crate::render_plan::plan_measure(&m);
         let width = min_note_area_width(&m, &plan, &opts);
@@ -1087,6 +1116,7 @@ mod tests {
             accent_displacement: 0.0,
             stem_down: true,
             shared_line: false,
+            staff: StaffKind::Line,
         };
         let plan = crate::render_plan::plan_measure_with(&m, true);
         let layout = build_measure_layout_with_plan(&m, &plan, &opts);

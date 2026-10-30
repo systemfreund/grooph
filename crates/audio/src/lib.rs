@@ -957,7 +957,7 @@ mod tests {
     use std::cell::Cell;
 
     fn count_in_of(ts: TimeSignature) -> Vec<SoundType> {
-        let score = Score { measures: vec![Measure::new(ts)] };
+        let score = Score::new(vec![Measure::new(ts)]);
         count_in_plan(&score).unwrap().clicks.into_iter().map(|(_, s)| s).collect()
     }
 
@@ -1015,7 +1015,7 @@ mod tests {
     }
 
     fn score_of(ts: TimeSignature, bars: usize) -> Score {
-        Score { measures: (0..bars).map(|_| Measure::new(ts)).collect() }
+        Score::new((0..bars).map(|_| Measure::new(ts)).collect())
     }
 
     /// Everything audible is set to zero, so no voice is started: starting a
