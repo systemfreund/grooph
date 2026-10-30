@@ -5,7 +5,7 @@
 //! |-----------|---------|
 //! | `v`       | Link version, see below; [`SharedLink::to_url`] always writes the current one |
 //! | `bpm`     | Tempo in quarter notes per minute, 20-300 |
-//! | `r`       | Rhythm in the text notation of [`grooph_measure::notation`], on the one line: drum kit scores are refused until the app plays them |
+//! | `r`       | Rhythm in the text notation of [`grooph_measure::notation`], on the one line or a drum kit's ([`is_kit`]) |
 //! | `ts`      | Time signature, e.g. `7/8`; default for `r`, the generator's meter, or on its own the metronome in that meter (the rhythm stays) |
 //! | `groups`  | Grouping of `ts`, e.g. `3+2+2` for 7/8, one the meter offers ([`TimeSignature::groupings`]); default the usual one |
 //! | `sub`     | Generator subdivision: `8`, `16`, `3` (triplets) or `mix` |
@@ -16,7 +16,7 @@
 //! | `swing`   | Swing in percent, 50 (straight) to 75 (dotted); 66 is a triplet feel |
 //! | `su`      | Swung note value: `8` (default) or `16`; needs `swing` |
 //! | `subdivision` | Click bar of the subdivision picker for the meter of `r` or `ts`: `none` (one click per beat group) or the code of its notes, e.g. `s`, `t16` ([`grooph_measure::click::subdivisions`]); not together with `click` |
-//! | `click`   | Click bar of the meter of `r` (its first measure) or `ts`: one measure in the text notation, without the time signature (`>` strong, plain medium, `(e)` soft, rest off) |
+//! | `click`   | Click bar of the meter of `r` (its first measure) or `ts`: one measure in the text notation, without the time signature (`>` strong, plain medium, `(e)` soft, rest off), on the one line |
 //! | `poly`    | Polyrhythm `n:m` (n clicks in the time of m beat units) the metronome plays against the click bar of `ts`, its counter bar built as the app's picker does (see [`grooph_measure::counter`]); needs `ts` without `r` or the generator |
 //! | `counter` | The counter rhythm written out like `click`, for one whose clicks were edited; otherwise as `poly`. Not together with `poly` |
 //!
@@ -44,7 +44,9 @@ use grooph_measure::grid::DEFAULT_GRID;
 use grooph_measure::notation::{format_score, parse_score};
 use grooph_measure::swing::{MAX_SWING_PERCENT, MIN_SWING_PERCENT, Swing, SwingUnit};
 use grooph_measure::tempo::{MAX_BPM, MIN_BPM};
-use grooph_measure::{Instrument, Measure, ParseTimeSignatureError, Score, TimeSignature};
+use grooph_measure::{
+    Instrument, Measure, ParseTimeSignatureError, Score, StaffKind, TimeSignature,
+};
 use std::fmt::Write as _;
 
 /// Version [`SharedLink::to_url`] writes as `v`.
@@ -162,10 +164,7 @@ fn parse_query_with_default_version(
             Some(ts) => format!("{ts} {text}"),
             None => text,
         };
-        Some(LinkContent::Score(one_line(
-            parse_score(&text).map_err(|e| format!("rhythm: {e}"))?,
-            "rhythm",
-        )?))
+        Some(LinkContent::Score(parse_score(&text).map_err(|e| format!("rhythm: {e}"))?))
     } else if generator {
         let defaults = GeneratorSettings::default();
         let time_signature = ts.unwrap_or(defaults.time_signature);
@@ -325,39 +324,31 @@ fn poly_bar(ts: TimeSignature, ratio: Ratio) -> Result<Measure, String> {
 /// for the parameter `name`.
 fn single_measure(name: &str, ts: TimeSignature, text: &str) -> Result<Measure, String> {
     let score = parse_score(&format!("{ts} {text}")).map_err(|e| format!("{name}: {e}"))?;
-    let mut bars = one_line(score, name)?.measures;
+    if is_kit(&score) {
+        return Err(format!(
+            "{name}: a click bar is on the one line; drum kit notation (instruments such as K:q, voices split by ;) does not fit it"
+        ));
+    }
+    let mut bars = score.measures;
     if bars.len() != 1 {
         return Err(format!("{name} must be a single measure"));
     }
     Ok(bars.remove(0))
 }
 
-/// `score` if the app can show and play it: one voice on the one line. The
-/// notation also writes drum kit scores, which the app cannot play yet.
-fn one_line(score: Score, name: &str) -> Result<Score, String> {
-    if is_kit(&score) {
-        return Err(format!(
-            "{name}: drum kit scores (instruments such as K:q, voices split by ;) are not supported yet"
-        ));
-    }
-    Ok(score)
-}
-
-/// Whether `score` is a drum kit score: one with instruments of the kit or
-/// several voices in a measure.
-fn is_kit(score: &Score) -> bool {
-    score.measures.iter().any(|m| {
-        m.voices().len() > 1
-            || m.beats()
-                .iter()
-                .flat_map(|b| b.heads().iter())
-                .any(|h| h.instrument() != Instrument::Rhythm)
-    })
-}
-
-/// `score` in the text notation, if a link can carry it (see [`one_line`]).
-fn link_notation(score: &Score) -> Option<String> {
-    if is_kit(score) { None } else { format_score(score) }
+/// Whether `score` is a drum kit score: one on the kit's staff, with
+/// instruments of the kit or several voices in a measure. Links open them in
+/// the app; the click bars and the MCP server's metronome stay on the one
+/// line.
+pub fn is_kit(score: &Score) -> bool {
+    score.staff == StaffKind::Kit
+        || score.measures.iter().any(|m| {
+            m.voices().len() > 1
+                || m.beats()
+                    .iter()
+                    .flat_map(|b| b.heads().iter())
+                    .any(|h| h.instrument() != Instrument::Rhythm)
+        })
 }
 
 /// Quarter notes per minute for a version 1 tempo of `bpm` beat units of
@@ -380,8 +371,8 @@ impl LinkContent {
 
 impl SharedLink {
     /// URL that [`parse_query`] reads back as this link, or `None` if the
-    /// score cannot be written in the text notation or is a drum kit score,
-    /// which links refuse for now.
+    /// score cannot be written in the text notation or a click bar is a
+    /// drum kit's.
     pub fn to_url(&self, base: &str) -> Option<String> {
         let mut params: Vec<(&str, String)> = vec![("v", LINK_VERSION.to_string())];
         if let Some(bpm) = self.bpm {
@@ -389,7 +380,7 @@ impl SharedLink {
         }
         match &self.content {
             None => {}
-            Some(LinkContent::Score(score)) => params.push(("r", link_notation(score)?)),
+            Some(LinkContent::Score(score)) => params.push(("r", format_score(score)?)),
             Some(LinkContent::Metronome(ts)) => push_meter(&mut params, *ts),
             Some(LinkContent::Generator { settings, seed }) => {
                 if settings.time_signature != TimeSignature::FOUR_FOUR {
@@ -577,9 +568,13 @@ fn unit_name(beat_unit: u8) -> &'static str {
 
 /// `bar` in the text notation without its time signature, as `click` and
 /// `counter` write it (`>q r:q. (q)`); `None` if a beat has no code or the
-/// bar is a drum kit's, which links refuse for now.
+/// bar is a drum kit's, which they refuse.
 pub fn format_bar(bar: &Measure) -> Option<String> {
-    let text = link_notation(&Score::single(bar.clone()))?;
+    let score = Score::single(bar.clone());
+    if is_kit(&score) {
+        return None;
+    }
+    let text = format_score(&score)?;
     let ts = bar.time_signature().to_string();
     Some(text.strip_prefix(&ts)?.trim_start().to_string())
 }
@@ -692,25 +687,45 @@ mod tests {
     }
 
     #[test]
-    fn drum_kit_scores_are_refused_until_the_app_plays_them() {
+    fn a_rhythm_link_carries_a_drum_kit_score() {
+        // The rock groove of #253: hands above, the kick below.
+        let text = "4/4 H:e S-H:e H:e H:e H:e S-H:e Ho:e Hc:e ; K:q r:q K:q r:q";
+        let score = parse_score(text).unwrap();
+        let link = SharedLink {
+            bpm: Some(96),
+            content: Some(LinkContent::Score(score)),
+            ..Default::default()
+        };
+        let url = link.to_url("/").unwrap();
+        let back = parse(url.strip_prefix("/?").unwrap());
+        let Some(LinkContent::Score(back)) = back.content else { panic!("{url}") };
+        assert_eq!(back.staff, StaffKind::Kit);
+        assert_eq!(format_score(&back).unwrap(), text);
+        assert!(is_kit(&back));
+        // An empty bar of the kit stays on the kit's staff.
+        let empty = parse("r=kit+4/4+r:h+r:h");
+        let Some(LinkContent::Score(empty)) = empty.content else { panic!() };
+        assert_eq!(empty.staff, StaffKind::Kit);
+        let link = SharedLink { content: Some(LinkContent::Score(empty)), ..Default::default() };
+        assert_eq!(link.to_url("/").unwrap(), "/?v=2&r=kit+4/4+r:h+r:h");
+        // The notation of the one line reads as before.
+        let Some(LinkContent::Score(line)) = parse("r=%3Eq+(e)+e+r:q+q").content else { panic!() };
+        assert!(!is_kit(&line));
+    }
+
+    #[test]
+    fn click_bars_stay_on_the_one_line() {
         for query in [
-            "r=K:q+S:q+K:q+S:q",
-            "r=q+q+q+q+%3B+q+q+q+q",
-            "r=K-H:h+h",
             "ts=4/4&click=K:q+q+q+q",
+            "ts=4/4&click=q+q+q+q+%3B+h+h",
             "ts=4/4&counter=q+q+q+q+%3B+h+h",
+            "r=K:h+S:h&click=K:q+q+q+q",
         ] {
             let err = parse_query(query).unwrap_err();
-            assert!(
-                err.contains("drum kit scores") && err.contains("not supported yet"),
-                "{query}: {err}"
-            );
+            assert!(err.contains("drum kit notation"), "{query}: {err}");
         }
         // Nor does a link write one: `to_url` stays the inverse of `parse_query`.
         let kit = parse_score("4/4 K-H:e H:e S-H:e H:e h ; K:h K:h").unwrap();
-        let link =
-            SharedLink { content: Some(LinkContent::Score(kit.clone())), ..Default::default() };
-        assert_eq!(link.to_url("/"), None);
         assert_eq!(format_bar(&kit.measures[0]), None);
         let one_voice = parse_score("4/4 S:q q q q").unwrap();
         assert_eq!(format_bar(&one_voice.measures[0]), None);
@@ -720,8 +735,6 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(metronome.to_url("/"), None);
-        // The notation of the one line reads as before.
-        assert!(parse_query("r=%3Eq+(e)+e+r:q+q").is_ok());
     }
 
     #[test]

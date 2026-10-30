@@ -11,6 +11,7 @@
 //! what it opens ([`grooph_link::describe`]), so the model sees what the
 //! user sees.
 
+use grooph_link::LinkContent;
 use std::cell::{Cell, RefCell};
 
 thread_local! {
@@ -30,8 +31,17 @@ pub fn check_query(query: &str) -> Option<String> {
 }
 
 /// What `query` opens ([`grooph_link::describe`]), or why it does not.
+/// The server is the metronome only: it refuses a drum kit score
+/// ([`grooph_link::is_kit`]), which the app's links open.
 pub fn open_query(query: &str) -> Result<String, String> {
     let link = grooph_link::parse_query(query)?.unwrap_or_default();
+    if let Some(LinkContent::Score(score)) = &link.content
+        && grooph_link::is_kit(score)
+    {
+        return Err(
+            "rhythm: drum kit scores (instruments such as K:q, voices split by ;) are not supported by the metronome".to_owned(),
+        );
+    }
     Ok(grooph_link::describe(&link))
 }
 
@@ -95,6 +105,17 @@ mod tests {
         let poly = check_query("v=2&ts=4/4&poly=7:5").unwrap();
         assert!(poly.contains("does not fit 4/4"), "{poly}");
         assert!(check_query("v=2&ts=99/4").unwrap().contains("time signature"));
+    }
+
+    #[test]
+    fn the_metronome_refuses_a_drum_kit_score() {
+        for query in ["v=2&r=K:q+S:q+K:q+S:q", "v=2&r=q+q+q+q+%3B+h+h", "v=2&r=kit+4/4+r:h+r:h"] {
+            let err = check_query(query).unwrap();
+            assert!(err.contains("drum kit scores") && err.contains("not supported"), "{err}");
+        }
+        assert!(check_query("v=2&ts=4/4&click=K:q+q+q+q").unwrap().contains("drum kit notation"));
+        // A rhythm of the one line opens, as in the app.
+        assert_eq!(check_query("v=2&r=%3Eq+(e)+e+r:q+q"), None);
     }
 
     #[test]

@@ -42,6 +42,9 @@
 //! - `;` separates the voices of a measure: the first with its stems up, the
 //!   second below it (see [`Measure::voices`]). Every voice fills the measure;
 //!   a time signature comes before the first.
+//! - A score with a note of the kit is on the kit's staff. One without, such
+//!   as an empty bar of the kit (`kit 4/4 r:h r:h`), starts with `kit`;
+//!   [`format_score`] writes it only there.
 //!
 //! Parsing goes through [`Measure::set_beat`], so a parsed score obeys the
 //! same invariants as an edited one. Every measure must be filled exactly;
@@ -394,6 +397,11 @@ fn build_measure(
 
 /// Parse a score from the text notation described in the [module docs](self).
 pub fn parse_score(input: &str) -> Result<Score, NotationError> {
+    let (marked_kit, input) = match input.trim_start().split_once(char::is_whitespace) {
+        Some((KIT_MARKER, rest)) => (true, rest),
+        _ if input.trim() == KIT_MARKER => (true, ""),
+        _ => (false, input),
+    };
     if input.trim().is_empty() {
         return Err(NotationError::Empty);
     }
@@ -441,13 +449,21 @@ pub fn parse_score(input: &str) -> Result<Score, NotationError> {
         measures.extend(measure);
     }
     // A score with an instrument of the kit is written on the kit's staff.
-    let kit = measures
+    let kit = marked_kit || has_kit_heads(&measures);
+    let staff = if kit { StaffKind::Kit } else { StaffKind::Line };
+    Ok(Score { staff, ..Score::new(measures) })
+}
+
+/// The token that puts a score without notes of the kit on the kit's staff.
+const KIT_MARKER: &str = "kit";
+
+/// Whether a head of `measures` is an instrument of the kit.
+fn has_kit_heads(measures: &[Measure]) -> bool {
+    measures
         .iter()
         .flat_map(|m| m.voices())
         .flat_map(|v| v.beats())
-        .any(|b| b.heads().iter().any(|h| h.instrument() != Instrument::Rhythm));
-    let staff = if kit { StaffKind::Kit } else { StaffKind::Line };
-    Ok(Score { staff, ..Score::new(measures) })
+        .any(|b| b.heads().iter().any(|h| h.instrument() != Instrument::Rhythm))
 }
 
 /// Format `score` in the text notation. The first measure always states its
@@ -456,6 +472,11 @@ pub fn parse_score(input: &str) -> Result<Score, NotationError> {
 /// generator), or a head no notation (the one line's in a chord).
 pub fn format_score(score: &Score) -> Option<String> {
     let mut out = String::new();
+    // Its notes do not tell the kit's staff.
+    if score.staff == StaffKind::Kit && !has_kit_heads(&score.measures) {
+        out.push_str(KIT_MARKER);
+        out.push(' ');
+    }
     let mut prev_ts: Option<TimeSignature> = None;
     for (i, m) in score.measures.iter().enumerate() {
         if i > 0 {
@@ -747,6 +768,26 @@ mod tests {
         assert_eq!(heads(&feet[0]), [Instrument::Kick]);
         assert!(feet[1].is_rest());
         assert_eq!(format_score(&score).unwrap(), text);
+    }
+
+    #[test]
+    fn a_kit_score_without_kit_notes_keeps_its_staff() {
+        let score = parse_score("kit 4/4 r:h r:h ; r:h r:h").unwrap();
+        assert_eq!(score.staff, StaffKind::Kit);
+        assert_eq!(format_score(&score).unwrap(), "kit 4/4 r:h r:h ; r:h r:h");
+        let empty = Score {
+            staff: StaffKind::Kit,
+            ..Score::single(Measure::new(TimeSignature::new(3, 4)))
+        };
+        let text = format_score(&empty).unwrap();
+        assert!(text.starts_with("kit 3/4 "), "{text}");
+        assert_eq!(parse_score(&text).unwrap().staff, StaffKind::Kit);
+        // Notes of the kit tell the staff themselves; the marker reads anyway.
+        assert_eq!(format_score(&parse_score("kit K:h r:h").unwrap()).unwrap(), "4/4 K:h r:h");
+        // Without it a score of rests is on the one line, as before.
+        assert_eq!(parse_score("4/4 r:h r:h").unwrap().staff, StaffKind::Line);
+        assert_eq!(parse_score("kit").unwrap_err(), NotationError::Empty);
+        assert_eq!(parse_score("  kit  ").unwrap_err(), NotationError::Empty);
     }
 
     #[test]
