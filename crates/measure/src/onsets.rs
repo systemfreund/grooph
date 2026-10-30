@@ -27,7 +27,8 @@ pub struct Onset {
     pub is_note: bool,
     /// The beat that stands for the onset: the note there of the lowest
     /// numbered voice that plays one, or where none plays, the rest of the
-    /// first voice. Its head is where the onset is drawn.
+    /// lowest numbered voice that has a beat there. Its head is where the
+    /// onset is drawn.
     pub voice: VoiceIdx,
     pub beat_idx: BeatIdx,
 }
@@ -148,7 +149,7 @@ mod tests {
         let rests = measure("2/4 r:q H:q ; r:e r:e r:q");
         let notes: Vec<(bool, VoiceIdx)> =
             rests.onsets().iter().map(|o| (o.is_note, o.voice)).collect();
-        // Rests only: the first voice's rest stands for the onset.
+        // Rests only: the rest of the lowest voice with a beat there.
         assert_eq!(notes, [(false, 0), (false, 1), (true, 0)]);
     }
 }

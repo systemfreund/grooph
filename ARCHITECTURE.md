@@ -139,8 +139,8 @@ spread across callers.
   `Measure::head_onsets` lists every head of every voice by tick, for the
   schedule; `Measure::onsets` every tick where a beat of any voice starts,
   once, a note if any voice plays there, with the beat that stands for it
-  (the note of the lowest numbered voice playing there, else the first
-  voice's rest). The accuracy
+  (the note of the lowest numbered voice playing there, else the rest of the
+  lowest numbered voice with a beat there). The accuracy
   reference (`compute_global_beat_onsets`) and ghost notes follow `onsets`;
   the playback cursor, guide anchors, count labels (`Columns` in
   `grooph_render::measure`) and accuracy marks too, at the head of the beat

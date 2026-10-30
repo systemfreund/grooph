@@ -7,7 +7,7 @@ use crate::tools::{Modifier, ToolKind, all_tools};
 use crate::{Mode, TransportState};
 use eframe::egui;
 use eframe::egui::{FontId, Frame, Rect, Response, Stroke};
-use grooph_layout::pixel_layout::{NoteLayout, compute_em};
+use grooph_layout::pixel_layout::{NoteLayout, compute_em, onset_head};
 use grooph_layout::staff_layout::{
     LEGIBILITY_FLOOR_EM, LOWER_VOICE_LABEL_ROOM_EM, PlacedMeasure, ROOM_BELOW_EM,
     ROOM_BELOW_WITH_LABELS_EM, StaffLayout, StaffOpts, build_staff_layout, hit_test_voice,
@@ -494,7 +494,7 @@ impl Grooph {
         let columns: Vec<(u32, &NoteLayout)> = measure
             .onsets()
             .iter()
-            .filter_map(|o| Some((o.tick, placed.voices.get(o.voice)?.notes.get(o.beat_idx)?)))
+            .filter_map(|o| Some((o.tick, onset_head(&placed.voices, o)?)))
             .collect();
         let measure_start = timing.measure_start_tick(placed.measure_idx);
         let dark = ui.visuals().dark_mode;

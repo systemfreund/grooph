@@ -2,6 +2,7 @@ use crate::glyphs::{self, Glyph};
 use crate::render_plan::{RenderPlan, plan_measure};
 use egui::{FontId, Pos2, Rect};
 use grooph_measure::duration::{Duration, NoteValue};
+use grooph_measure::onsets::Onset;
 use grooph_measure::{BeatKind, StaffKind, TimeSignature, VoiceBar};
 
 mod beams;
@@ -320,6 +321,14 @@ pub struct MeasureLayout {
     pub time_signature: Option<TimeSignatureLayout>,
     // Left boundary of the notes drawing area (excludes clef and time signature)
     pub notes_left_edge: f32,
+}
+
+/// The head standing for `onset` in the layouts of its measure's `voices`
+/// (see [`Onset::voice`]): where the onset is drawn. `None` where that
+/// voice's layout has no such note, e.g. a layout of another measure or a
+/// bar drawn as one whole rest.
+pub fn onset_head<'a>(voices: &'a [MeasureLayout], onset: &Onset) -> Option<&'a NoteLayout> {
+    voices.get(onset.voice)?.notes.get(onset.beat_idx)
 }
 
 impl MeasureLayout {

@@ -6,7 +6,7 @@ use eframe::egui::{
 };
 use grooph_layout::pixel_layout::{
     BeamLayout, LayoutOpts, MeasureLayout, NoteLayout, TimeSignatureLayout, TupletLayout,
-    build_measure_layout,
+    build_measure_layout, onset_head,
 };
 use grooph_measure::counting::{CountConfig, CountSlot, build_count_slots};
 use grooph_measure::grid::DEFAULT_GRID;
@@ -244,8 +244,11 @@ struct Columns {
 
 impl Columns {
     fn new(measure: &Measure, voices: &[MeasureLayout]) -> Self {
-        let x = |voice: usize, beat: usize| Some(voices.get(voice)?.notes.get(beat)?.center.x);
-        let (ticks, xs) = measure.onsets().iter().map(|o| (o.tick, x(o.voice, o.beat_idx))).unzip();
+        let (ticks, xs) = measure
+            .onsets()
+            .iter()
+            .map(|o| (o.tick, onset_head(voices, o).map(|n| n.center.x)))
+            .unzip();
         Columns { ticks, xs }
     }
 
