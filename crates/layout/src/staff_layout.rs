@@ -721,9 +721,7 @@ mod tests {
         assert!(feet[1].ledgers.is_empty());
         // Half rests of the lower voice sit on the bottom line, with no
         // ledger line through the staff: in 7/8 and in 4/4.
-        for text in
-            ["7/8 H:e H:e H:e H:e H:e H:e H:e ; K:e r:e r:e r:h", "4/4 S:h S:h ; r:h r:h"]
-        {
+        for text in ["7/8 H:e H:e H:e H:e H:e H:e H:e ; K:e r:e r:e r:h", "4/4 S:h S:h ; r:h r:h"] {
             let (placed, _, _) = kit(text);
             for rest in
                 placed.voices[1].notes.iter().filter(|n| n.kind == grooph_measure::BeatKind::Rest)
