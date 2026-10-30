@@ -28,7 +28,7 @@ export const TOOL = {
     "Shows grooph's interactive metronome: tempo, time signature, optionally beat grouping, subdivision or click " +
     "pattern, polyrhythm and swing; the arguments are the app's own controls. To change a metronome already shown, " +
     "pass its link and only what changes; the new one replaces it. The user starts playback. The result says what " +
-    "the metronome shows (check it against the request). Changes the user makes come back as model context.",
+    "the metronome shows. Changes the user makes come back as model context.",
   inputSchema: {
     type: "object",
     properties: {
