@@ -194,9 +194,9 @@ impl Grooph {
             }
             ToolKind::Meta(MetaOp::ResetMeasure) => {
                 // The voice being edited; the others stay.
-                let voice = self.editor.cursor.voice;
-                self.current_measure_mut().clear_voice(voice, Rest);
-                self.editor.cursor.beat_idx = 0;
+                let cursor = self.editor.score.clamp_cursor(self.editor.cursor);
+                self.editor.score.measures[cursor.measure_idx].clear_voice(cursor.voice, Rest);
+                self.editor.cursor = Cursor { beat_idx: 0, ..cursor };
                 true
             }
             ToolKind::Modify(modifier) => {

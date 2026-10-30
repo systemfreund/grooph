@@ -718,9 +718,24 @@ mod tests {
         let same = |a: &Option<f32>, b: &Option<f32>| (a.unwrap() - b.unwrap()).abs() < 0.01;
         let notes = [0, 2, 3, 4, 5];
         assert!(notes.iter().all(|&i| same(&with_rest[i], &without[i])), "{with_rest:?}");
+        // The rest under the beam stays a rest: in 6/8, 7/8 (2+2+3) and 4/4,
+        // in either voice.
+        for (text, voice, idx) in [
+            ("6/8 S:e r:e S:e S:e S:e S:e ; K:q. r:q.", 0, 1),
+            ("7/8 H:e H:e H:e H:e H:e r:e H:e ; K:e r:e r:e r:h", 0, 5),
+            ("4/4 H:e H:e H:e H:e H:h ; K:s r:s K:s K:s r:q r:h", 1, 1),
+        ] {
+            let (placed, _, _) = kit(text);
+            let notes = &placed.voices[voice].notes;
+            let rest = &notes[idx];
+            assert!(rest.kind == grooph_measure::BeatKind::Rest, "{text}");
+            assert!(!rest.stemlet && rest.stem.is_none(), "{text}: {rest:?}");
+            // Under the beam of the notes around it.
+            let tip = |i: usize| notes[i].stem.unwrap().p2.y;
+            assert!((tip(idx - 1) - tip(idx + 1)).abs() < 0.01, "{text}");
+            assert!(notes[idx - 1].flag.is_none(), "{text}: beamed, not flagged");
+        }
         let (placed, _, _) = kit("6/8 S:e r:e S:e S:e S:e S:e ; K:q. r:q.");
-        let rest = &placed.layout().notes[1];
-        assert!(!rest.stemlet && rest.kind == grooph_measure::BeatKind::Rest);
         let feet = &placed.voices[1].notes;
         assert_eq!(feet[1].staff_pos, -3, "the feet's rest below the middle line");
         assert!(feet[1].ledgers.is_empty());
