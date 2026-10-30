@@ -1,0 +1,137 @@
+//! What sounds when in a measure: the beats of all its voices, merged.
+//!
+//! Playback, the count labels, the playback cursor and the evaluation of
+//! a play-along all follow the measure as it sounds, not one of its voices.
+//! A rhythm on one line has one voice and one head per note, so its onsets
+//! are its beats'.
+
+use crate::grid::DEFAULT_GRID;
+use crate::{BeatIdx, Head, Measure, VoiceIdx};
+
+/// One head sounding in a measure.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HeadOnset {
+    /// Where it starts, in ticks from the start of the measure.
+    pub tick: u32,
+    pub voice: VoiceIdx,
+    pub beat_idx: BeatIdx,
+    pub head: Head,
+}
+
+/// A point in time where a beat of some voice starts.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Onset {
+    /// Ticks from the start of the measure.
+    pub tick: u32,
+    /// Whether a voice plays a note there; `false` where all are rests.
+    pub is_note: bool,
+}
+
+impl Measure {
+    /// Every head of every voice, by tick, then by voice and from the foot
+    /// up.
+    pub fn head_onsets(&self) -> Vec<HeadOnset> {
+        let mut out = Vec::new();
+        for (voice, bar) in self.voices().iter().enumerate() {
+            let ticks = DEFAULT_GRID.compute_onset_ticks(bar.beats());
+            for (beat_idx, (beat, &tick)) in bar.beats().iter().zip(&ticks).enumerate() {
+                out.extend(beat.heads().iter().map(|&head| HeadOnset {
+                    tick,
+                    voice,
+                    beat_idx,
+                    head,
+                }));
+            }
+        }
+        // Stable: within a tick the voices and heads keep their order.
+        out.sort_by_key(|o| o.tick);
+        out
+    }
+
+    /// The ticks where a beat of any voice starts, each once and in order.
+    pub fn onsets(&self) -> Vec<Onset> {
+        let mut out: Vec<Onset> = Vec::new();
+        for bar in self.voices() {
+            let ticks = DEFAULT_GRID.compute_onset_ticks(bar.beats());
+            for (beat, &tick) in bar.beats().iter().zip(&ticks) {
+                out.push(Onset { tick, is_note: beat.is_note() });
+            }
+        }
+        out.sort_by_key(|o| o.tick);
+        out.dedup_by(|later, kept| {
+            let same = later.tick == kept.tick;
+            kept.is_note |= same && later.is_note;
+            same
+        });
+        out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::notation::parse_score;
+    use crate::{Instrument, Technique};
+
+    fn measure(s: &str) -> Measure {
+        parse_score(s).unwrap().measures.remove(0)
+    }
+
+    #[test]
+    fn one_line_onsets_are_its_beats() {
+        let m = measure("4/4 q e r:e >q (q)");
+        let ticks = DEFAULT_GRID.compute_onset_ticks(m.beats());
+        let onsets = m.onsets();
+        assert_eq!(onsets.iter().map(|o| o.tick).collect::<Vec<_>>(), ticks);
+        assert_eq!(
+            onsets.iter().map(|o| o.is_note).collect::<Vec<_>>(),
+            m.beats().iter().map(|b| b.is_note()).collect::<Vec<_>>()
+        );
+        let heads = m.head_onsets();
+        assert_eq!(heads.len(), 4);
+        assert!(heads.iter().all(|h| h.voice == 0 && h.head.instrument() == Instrument::Rhythm));
+        assert_eq!(heads.iter().map(|h| h.beat_idx).collect::<Vec<_>>(), [0, 1, 3, 4]);
+        assert!(heads[2].head.accented() && heads[3].head.soft());
+    }
+
+    #[test]
+    fn voices_merge_by_tick() {
+        // Hands in eighths, the kick on 1 and 3 with rests between.
+        let m = measure("4/4 H:e S-H:e H:e H:e H:e S-H:e Ho:e Hc:e ; K:q r:q K:q r:q");
+        let onsets = m.onsets();
+        let eighth = DEFAULT_GRID.ticks_per_measure(&m.time_signature()) / 8;
+        assert_eq!(onsets.len(), 8);
+        assert!(onsets.iter().enumerate().all(|(i, o)| o.tick == i as u32 * eighth && o.is_note));
+
+        let heads = m.head_onsets();
+        let at = |tick: u32| -> Vec<(VoiceIdx, Instrument, Technique)> {
+            heads
+                .iter()
+                .filter(|h| h.tick == tick)
+                .map(|h| (h.voice, h.head.instrument(), h.head.technique()))
+                .collect()
+        };
+        assert_eq!(
+            at(0),
+            [(0, Instrument::HiHat, Technique::Normal), (1, Instrument::Kick, Technique::Normal)]
+        );
+        assert_eq!(
+            at(eighth),
+            [(0, Instrument::Snare, Technique::Normal), (0, Instrument::HiHat, Technique::Normal)]
+        );
+        assert_eq!(at(6 * eighth), [(0, Instrument::HiHat, Technique::Open)]);
+        assert!(heads.windows(2).all(|w| w[0].tick <= w[1].tick));
+    }
+
+    #[test]
+    fn a_tick_is_a_note_if_any_voice_plays() {
+        let m = measure("2/4 r:q H:q ; K:q r:q");
+        assert_eq!(
+            m.onsets(),
+            [Onset { tick: 0, is_note: true }, Onset { tick: m.onsets()[1].tick, is_note: true }]
+        );
+        let rests = measure("2/4 r:q H:q ; r:e r:e r:q");
+        let notes: Vec<bool> = rests.onsets().iter().map(|o| o.is_note).collect();
+        assert_eq!(notes, [false, false, true]);
+    }
+}

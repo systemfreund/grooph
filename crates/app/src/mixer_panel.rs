@@ -82,9 +82,9 @@ fn voice_group(
 }
 
 impl Grooph {
-    /// Volumes of the voices: the rhythm (notes, accents, ghost notes) and
-    /// the metronome (downbeat, primary beats, soft clicks, counter rhythm,
-    /// count-in).
+    /// Volumes of the voices: the rhythm (notes, accents, ghost notes), the
+    /// drum kit of a kit score (by instrument) and the metronome (downbeat,
+    /// primary beats, soft clicks, counter rhythm, count-in).
     pub(super) fn mixer_panel(&mut self, ui: &mut egui::Ui) {
         // The groups one above the other; a screen too narrow for the
         // dialog to fit them scrolls the sliders of a group sideways, one too
@@ -104,6 +104,24 @@ impl Grooph {
                         volume_slider(ui, &mut settings.beat, "Notes");
                         volume_slider(ui, &mut settings.accent, "Accents");
                         volume_slider(ui, &mut settings.ghost, "Ghost notes");
+                    },
+                    |_| {},
+                );
+                ui.separator();
+                let kit = &mut settings.kit;
+                voice_group(
+                    ui,
+                    "Kit",
+                    &mut settings.kit_muted,
+                    "Silence the drum kit of a drum kit score",
+                    |ui| {
+                        volume_slider(ui, &mut kit.kick, "Kick");
+                        volume_slider(ui, &mut kit.snare, "Snare");
+                        volume_slider(ui, &mut kit.hihat, "Hi-hat")
+                            .on_hover_text("The hi-hat, by stick and by foot");
+                        volume_slider(ui, &mut kit.toms, "Toms");
+                        volume_slider(ui, &mut kit.cymbals, "Cymbals")
+                            .on_hover_text("Ride and crash");
                     },
                     |_| {},
                 );

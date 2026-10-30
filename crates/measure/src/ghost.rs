@@ -1,5 +1,5 @@
 //! Ghost notes: quiet hits on every grid position of the chosen subdivision
-//! that carries no written note onset, so the player hears the subdivision
+//! that carries no written note onset in any voice, so the player hears the subdivision
 //! running underneath the rhythm.
 //!
 //! The grid is laid per beat (the time signature's beat unit):
@@ -23,15 +23,16 @@ pub fn ghost_onsets(measure: &Measure, subdivision: Subdivision) -> Vec<u32> {
         return Vec::new();
     }
 
-    let beats = measure.beats();
-    let onsets = DEFAULT_GRID.compute_onset_ticks(beats);
+    // Free of a written note in any voice.
     let note_onsets: Vec<u32> =
-        beats.iter().zip(&onsets).filter(|(b, _)| b.is_note()).map(|(_, &t)| t).collect();
+        measure.onsets().iter().filter(|o| o.is_note).map(|o| o.tick).collect();
     let beat_has_tuplet = |beat_start: u32| {
-        beats
-            .iter()
-            .zip(&onsets)
-            .any(|(b, &t)| b.duration.is_tuplet() && t >= beat_start && t < beat_start + beat_ticks)
+        measure.voices().iter().any(|voice| {
+            let onsets = DEFAULT_GRID.compute_onset_ticks(voice.beats());
+            voice.beats().iter().zip(&onsets).any(|(b, &t)| {
+                b.duration.is_tuplet() && t >= beat_start && t < beat_start + beat_ticks
+            })
+        })
     };
 
     if ts.beat_unit != 4 {

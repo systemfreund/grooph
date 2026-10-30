@@ -13,13 +13,13 @@ use crate::output::Output;
 use crate::tick_source::{CountInPlan, TickSource};
 use crate::trainer::GapDecider;
 use crate::voices::VoiceMixer;
-use grooph_measure::Score;
 use grooph_measure::click::ClickBars;
 use grooph_measure::counter::CounterBars;
 use grooph_measure::generator::Subdivision;
 use grooph_measure::grid::DEFAULT_GRID;
 use grooph_measure::swing::Swing;
 use grooph_measure::tempo::ScoreTiming;
+use grooph_measure::{Instrument, Score};
 use log::{debug, error, info, trace, warn};
 use rodio::Source;
 use rodio::source::Function as RodioFunction;
@@ -89,6 +89,56 @@ pub struct AudioSettings {
     /// Volume of the counter rhythm's medium clicks.
     #[serde(default = "default_counter_gain")]
     pub counter: f32,
+    /// Volumes of the drum kit's instruments.
+    #[serde(default)]
+    pub kit: KitVolumes,
+    /// Silence the drum kit.
+    #[serde(default)]
+    pub kit_muted: bool,
+}
+
+/// Volumes of the drum kit in the mixer, by instrument group; an accent or
+/// a ghost note plays louder or quieter than this.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct KitVolumes {
+    pub kick: f32,
+    pub snare: f32,
+    /// The hi-hat, played by stick or by foot.
+    pub hihat: f32,
+    pub toms: f32,
+    /// Ride and crash.
+    pub cymbals: f32,
+}
+
+impl Default for KitVolumes {
+    fn default() -> Self {
+        Self { kick: 1.0, snare: 1.0, hihat: 0.8, toms: 1.0, cymbals: 0.7 }
+    }
+}
+
+impl KitVolumes {
+    /// The volume `instrument` plays at.
+    pub fn of(&self, instrument: Instrument) -> f32 {
+        match instrument {
+            Instrument::Kick => self.kick,
+            Instrument::Snare | Instrument::Rhythm => self.snare,
+            Instrument::HiHat | Instrument::HiHatFoot => self.hihat,
+            Instrument::HighTom | Instrument::MidTom | Instrument::FloorTom => self.toms,
+            Instrument::Ride | Instrument::Crash => self.cymbals,
+        }
+    }
+
+    fn clamped(self) -> Self {
+        let c = |v: f32| v.clamp(0.0, 1.0);
+        Self {
+            kick: c(self.kick),
+            snare: c(self.snare),
+            hihat: c(self.hihat),
+            toms: c(self.toms),
+            cymbals: c(self.cymbals),
+        }
+    }
 }
 
 fn default_rhythm_sound() -> Sound {
@@ -141,6 +191,8 @@ impl Default for AudioSettings {
             rhythm_muted: false,
             counter_sound: Sound::COUNTER_DEFAULT,
             counter: default_counter_gain(),
+            kit: KitVolumes::default(),
+            kit_muted: false,
         }
     }
 }
@@ -174,6 +226,8 @@ impl AudioSettings {
             rhythm_muted: false,
             counter_sound: Sound::COUNTER_DEFAULT,
             counter: default_counter_gain(),
+            kit: KitVolumes::default(),
+            kit_muted: false,
         };
         result.clamped()
     }
@@ -192,6 +246,7 @@ impl AudioSettings {
         self.count_in = self.count_in.clamp(0.0, 1.0);
         self.soft = self.soft.clamp(0.0, 1.0);
         self.counter = self.counter.clamp(0.0, 1.0);
+        self.kit = self.kit.clamped();
         self
     }
 }

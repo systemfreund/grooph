@@ -131,7 +131,7 @@ pub fn draw_staff(
                 draw_count_layer(
                     ui.painter(),
                     &score.measures[placed.measure_idx],
-                    placed.layout(),
+                    &placed.voices,
                     &staff_opts.voice_opts_for(placed, 0),
                     placed.rect.bottom(),
                     config,
@@ -165,7 +165,7 @@ pub fn beat_anchor_pos(
 ) -> Option<egui::Pos2> {
     let measure = score.measures.get(measure_idx)?;
     let placed = staff.placed(measure_idx)?;
-    let x = beat_anchor_x(measure, placed.layout(), placed.rect, tick)?;
+    let x = beat_anchor_x(measure, &placed.voices, placed.rect, tick)?;
     Some(egui::pos2(x, placed.rect.center().y + placed.y_offset))
 }
 
@@ -194,7 +194,7 @@ pub fn current_cursor_x(
     let active_placed = staff.placed(play_idx)?;
     let next_idx = (play_idx + 1) % score.len();
     let next_placed = staff.placed(next_idx)?;
-    let split = last_note_split(active_placed.layout(), active_placed.rect, next_placed.layout());
+    let split = last_note_split(&active_placed.voices, active_placed.rect, &next_placed.voices);
 
     // Phase 2 first: if we're past the split of the active measure's last
     // note, the cursor visually belongs to the *next* measure.
@@ -206,7 +206,7 @@ pub fn current_cursor_x(
     // Phase 1: cursor lives in the active measure.
     let x = playback_cursor_x(
         active_measure,
-        active_placed.layout(),
+        &active_placed.voices,
         active_placed.rect,
         local_tick,
         split,
@@ -349,5 +349,70 @@ mod tests {
         }
         // A note of another measure lights nothing here.
         assert!(lit_notes((0, Cursor { measure_idx: 1, beat_idx: 1 })).is_empty());
+    }
+
+    /// A kit bar whose lower voice is busier than the upper one: halves
+    /// above, four 32nd kicks and rests below. Its heads are moved right a
+    /// little, as a layout giving them more room than their time would, so
+    /// that following them differs from following the upper voice.
+    fn busy_kick() -> (Score, StaffLayout) {
+        let score = parse_score("4/4 H:h H:h ; K:th K:th K:th K:th r:e r:q r:h").unwrap();
+        let mut staff = build_staff_layout(&score, &opts());
+        let lower = &mut staff.systems[0].measures[0].voices[1].notes;
+        for note in &mut lower[1..5] {
+            note.center.x += 3.0;
+        }
+        (score, staff)
+    }
+
+    #[test]
+    fn the_playback_line_passes_a_lower_voices_notes() {
+        let (score, staff) = busy_kick();
+        let placed = staff.placed(0).unwrap();
+        let lower = &placed.voices[1].notes;
+        let th = grooph_measure::grid::DEFAULT_GRID
+            .ticks_of(&grooph_measure::duration::th())
+            .unwrap() as f64;
+        let x = |tick: f64| current_cursor_x(&score, &staff, (0, tick)).unwrap().1;
+        // On each kick the line is at its head, halfway between two of them
+        // halfway between their heads.
+        for (i, kick) in lower.iter().take(4).enumerate() {
+            assert!((x(i as f64 * th) - kick.center.x).abs() < 1e-3, "kick {i}");
+        }
+        let between = (lower[2].center.x + lower[3].center.x) / 2.0;
+        assert!((x(2.5 * th) - between).abs() < 1e-3);
+        // The second half note, where no lower note starts, as before.
+        let two = placed.layout().notes[1].center.x;
+        assert!((x(16.0 * th) - two).abs() < 1e-3);
+    }
+
+    #[test]
+    fn count_labels_sit_over_a_lower_voices_notes() {
+        use grooph_measure::counting::{CountConfig, Subdivision};
+        let (score, staff) = busy_kick();
+        let placed = staff.placed(0).unwrap();
+        let config = CountConfig { subdivision: Subdivision::Halves, system: Default::default() };
+        let ctx = egui::Context::default();
+        let marks = PlaybackMarks::Line;
+        let opts = opts();
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            draw_staff(ui, &score, &staff, None, 0, None, None, marks, Some(&config), &opts);
+        });
+        output.textures_delta.clear();
+        let ands: Vec<f32> = output
+            .shapes
+            .iter()
+            .filter_map(|c| match &c.shape {
+                egui::Shape::Text(text) if text.galley.text() == "&" => {
+                    Some(c.shape.visual_bounding_rect().center().x)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(ands.len(), 4, "{ands:?}");
+        // The "&" of 1 over the lower voice's eighth rest there, not where
+        // an eighth of the upper half note would be.
+        let rest = placed.voices[1].notes[4].center.x;
+        assert!((ands[0] - rest).abs() < 1.0, "{ands:?} vs {rest}");
     }
 }

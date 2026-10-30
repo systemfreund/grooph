@@ -2082,6 +2082,20 @@ mod tests {
     }
 
     #[test]
+    fn settings_saved_before_the_kit_get_its_volumes() {
+        use grooph_audio::{AudioSettings, KitVolumes};
+        let mut settings = AudioSettings { kit_muted: true, ..AudioSettings::default() };
+        settings.kit.toms = 0.25;
+        let saved = ron::to_string(&settings).unwrap();
+        assert_eq!(ron::from_str::<AudioSettings>(&saved).unwrap(), settings);
+        let kit = saved.find(",kit:").expect("kit saved");
+        let older = format!("{})", &saved[..kit]);
+        let back: AudioSettings = ron::from_str(&older).unwrap();
+        assert_eq!(back.kit, KitVolumes::default());
+        assert!(!back.kit_muted);
+    }
+
+    #[test]
     fn counting_settings_round_trip() {
         let c =
             CountingSettings { base: CountingBase::Sixteenth, system: CountingSystem::Takadimi };
