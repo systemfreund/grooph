@@ -16,14 +16,16 @@
 //                   switches it later
 //   w=360           width of the frame in CSS pixels
 //   tall=1          room below the frame, so the page scrolls as a chat does
-//   fullscreen=0    a host without fullscreen (else window.exitFullscreen()
-//                   brings a fullscreen view back inline)
+//   fullscreen=0    a host without fullscreen (else window.enterFullscreen()
+//                   and window.exitFullscreen() switch as the host's
+//                   controls would)
 //   insets=0        no safeAreaInsets (by default Claude's: 12 px inline;
 //                   16 px and 88 px at the bottom, under a stand-in for
 //                   its composer, in fullscreen)
 //   styles=0        no hostContext.styles (by default Claude-like color
 //                   variables with light-dark(), as the spec suggests)
-//   bpm, ts, click, poly, swing, su      the tool's arguments
+//   bpm, ts, groups, subdivision, click, poly, swing, su
+//                   the tool's arguments
 //
 // With GROOPH_ORIGIN set (e.g. http://localhost:8788 for `npx wrangler pages
 // dev dist`), the host uses that deployment instead of serving dist itself:
@@ -153,7 +155,7 @@ await rpc("initialize", { protocolVersion: "2025-06-18", capabilities: { extensi
 const { tools } = await rpc("tools/list", {});
 const tool = tools.find((t) => t.name === "show_metronome");
 const args = {};
-for (const key of ["ts", "click", "poly"]) if (q.has(key)) args[key] = q.get(key);
+for (const key of ["ts", "groups", "subdivision", "click", "poly"]) if (q.has(key)) args[key] = q.get(key);
 for (const key of ["bpm", "swing", "su"]) if (q.has(key)) args[key] = Number(q.get(key));
 const callResult = await rpc("tools/call", { name: tool.name, arguments: args });
 log("tool result:", callResult.content[0].text);
@@ -193,6 +195,7 @@ const display = (mode) => {
     containerDimensions: full ? { width: frame.clientWidth, height } : { width: frame.clientWidth, maxHeight: 1000 } } });
 };
 window.exitFullscreen = () => display("inline");
+window.enterFullscreen = () => display("fullscreen");
 window.addEventListener("message", (e) => {
   if (e.source !== frame.contentWindow) return;
   const m = e.data;
