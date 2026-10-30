@@ -112,6 +112,8 @@ spread across callers.
    share the line and are spaced together (`calculate_shared_x_centers`):
    beats at the same time line up and each voice keeps the room its glyphs
    need. Nothing moves a note after spacing, or the voices would part.
+   On the one line a rest under a beam is then a stemlet, clear of the
+   line; on the kit's staff it stays a rest, as drum notation writes it.
    `StaffOpts::voice_opts_for` gives each voice its stem direction.
    The metronome's staff is one such measure: the click bar with the counter
    rhythm as its second voice (`Grooph::metronome_staff_score`); which of
