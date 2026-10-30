@@ -982,7 +982,7 @@ impl Grooph {
             return;
         }
         // Each run of endless mode is a new one, from two fresh bars.
-        if self.editor.generator.endless && !self.metronome_mode() {
+        if self.endless_runs() {
             self.generate_new_score();
         }
         self.playback_ctl.transport_state = TransportState::Playing;
@@ -1666,6 +1666,31 @@ mod tests {
             time += 0.1;
         }
         assert!(app.editor.score.len() <= 4, "{} bars", app.editor.score.len());
+    }
+
+    #[test]
+    fn endless_mode_leaves_the_edited_score_alone() {
+        use super::Grooph;
+
+        let ctx = eframe::egui::Context::default();
+        let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let mut app = Grooph::new(&cc);
+        app.select_tab(Tab::Practice);
+        app.editor.generator.endless = true;
+        app.select_tab(Tab::Edit);
+        let score = format!("{:?}", app.editor.score);
+        app.playback_ctl.bpm = 240;
+        app.start_playback();
+        // Also past the last bar and behind the More screen opened from Edit.
+        let mut time = 0.0;
+        while time < 20.0 {
+            if time == 10.0 {
+                app.select_tab(Tab::More);
+            }
+            shell_frame(&mut app, &ctx, time, vec![]);
+            time += 0.5;
+        }
+        assert_eq!(format!("{:?}", app.editor.score), score);
     }
 
     #[test]
