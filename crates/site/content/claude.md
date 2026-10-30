@@ -40,8 +40,8 @@ Then ask Claude for a metronome in any chat. Other chat apps that support
 The metronome appears as a compact card in the chat: the tempo, the click on a staff and
 the beats of the bar on a ring with the play button in the middle. The click starts only
 when you tap play. Fullscreen shows everything the metronome can do; changes you make
-there (tempo, meter, clicks) are passed back to Claude, so it can refer to them. **Open in grooph** opens the
-same setting in the full app.
+there (tempo, meter, clicks) are passed back to Claude, so it can refer to them.
+**Open in grooph** opens the same setting in the full app.
 
 On an **iPhone** in the Claude app, the click is silent while the ring/silent switch is
 on, because the Claude app decides how its web views play sound. Switch silent mode off

@@ -106,7 +106,14 @@ export const TOOL = {
     },
     additionalProperties: false,
   },
-  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  // The directory reads the name from annotations.title, not the tool's own title.
+  annotations: {
+    title: "Show a metronome",
+    readOnlyHint: true,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: false,
+  },
   _meta: { ui: { resourceUri: RESOURCE_URI } },
 };
 
