@@ -56,7 +56,8 @@ grooph's metronome also works inside Claude and other chat apps that support
 [MCP Apps](https://modelcontextprotocol.io/extensions/apps/overview): ask for
 "a 7/8 click at 140" or "3:2 against 4/4 at 90" and a working metronome
 appears in the conversation. In Claude, add it under Settings → Connectors →
-Add custom connector with the URL `https://grooph.app/mcp`.
+Add custom connector with the URL `https://grooph.app/mcp`. More on
+[grooph.app/claude](https://grooph.app/claude/).
 
 ## Learn more
 
