@@ -1,5 +1,5 @@
 //! Ghost notes: quiet hits on every grid position of the chosen subdivision
-//! that carries no written note onset, so the player hears the subdivision
+//! that carries no written note onset in any voice, so the player hears the subdivision
 //! running underneath the rhythm.
 //!
 //! The grid is laid per beat (the time signature's beat unit):
@@ -23,15 +23,16 @@ pub fn ghost_onsets(measure: &Measure, subdivision: Subdivision) -> Vec<u32> {
         return Vec::new();
     }
 
-    let beats = measure.beats();
-    let onsets = DEFAULT_GRID.compute_onset_ticks(beats);
+    // Free of a written note in any voice.
     let note_onsets: Vec<u32> =
-        beats.iter().zip(&onsets).filter(|(b, _)| b.is_note()).map(|(_, &t)| t).collect();
+        measure.onsets().iter().filter(|o| o.is_note).map(|o| o.tick).collect();
     let beat_has_tuplet = |beat_start: u32| {
-        beats
-            .iter()
-            .zip(&onsets)
-            .any(|(b, &t)| b.duration.is_tuplet() && t >= beat_start && t < beat_start + beat_ticks)
+        measure.voices().iter().any(|voice| {
+            let onsets = DEFAULT_GRID.compute_onset_ticks(voice.beats());
+            voice.beats().iter().zip(&onsets).any(|(b, &t)| {
+                b.duration.is_tuplet() && t >= beat_start && t < beat_start + beat_ticks
+            })
+        })
     };
 
     if ts.beat_unit != 4 {
@@ -138,5 +139,20 @@ mod tests {
         // 7/16: a ghost on every sixteenth.
         let m = Measure::new(TimeSignature::new(7, 16));
         assert_eq!(ghost_onsets(&m, Subdivision::Eighths).len(), 7);
+    }
+
+    #[test]
+    fn a_lower_voices_notes_take_ghost_slots_in_compound_and_odd_meters() {
+        use crate::notation::parse_score;
+        let ghosts = |s: &str, sub| ghost_onsets(&parse_score(s).unwrap().measures[0], sub);
+        let eighth = DEFAULT_GRID.ticks_of(&e()).unwrap();
+        // 6/8: the hi-hat on 1 and 4, the kick on the third and sixth
+        // eighths below; only eighths 2 and 5 are free.
+        let six = ghosts("6/8 H:q. H:q. ; r:q K:e r:q K:e", Subdivision::Eighths);
+        assert_eq!(six, [eighth, 4 * eighth]);
+        // 7/8 (2+2+3): the hi-hat on the group starts, the kick on the
+        // second eighth of each group; only the last eighth is free.
+        let seven = ghosts("7/8 H:q H:q H:q. ; r:e K:e r:e K:e r:e K:e r:e", Subdivision::Eighths);
+        assert_eq!(seven, [6 * eighth]);
     }
 }

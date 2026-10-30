@@ -135,6 +135,19 @@ spread across callers.
 
 - `grooph_audio::Audio` builds a playback schedule from the measure
   (Downbeat/Primary/Accent/Beat) and uses `DEFAULT_GRID`.
+- A measure sounds as all its voices together (`grooph_measure::onsets`):
+  `Measure::head_onsets` lists every head of every voice by tick, for the
+  schedule; `Measure::onsets` every tick where a beat of any voice starts,
+  once, a note if any voice plays there, with the beat that stands for it
+  (the note of the lowest numbered voice playing there, else the rest of the
+  lowest numbered voice with a beat there). The accuracy
+  reference (`compute_global_beat_onsets`) and ghost notes follow `onsets`;
+  the playback cursor, guide anchors, count labels (`Columns` in
+  `grooph_render::measure`) and accuracy marks too, at the head of the beat
+  standing for each onset.
+  The layout's shared spacing of voices (`basis::Columns`) takes its ticks
+  from the same `onsets::merged`, so drawing and sound agree on them.
+  A one-line score has one voice, so its onsets are its beats.
 - The playback cursor is smoothed in the UI, audio offset for latency is optional.
 - Guide (`crates/app/src/guide.rs`, Practice options): what the staff shows
   while playing. `Line` is the playback cursor; the other steps hide it and
@@ -398,6 +411,17 @@ grooph's metronome runs inside AI chats as an
   the normal recording, quieter through the mixer. Claves: `claves3.wav`
   (strong) and `claves4.wav`; xylophone: `xylo-high.wav` and `xylo-low.wav`;
   snare: `snare-accent.wav`, `snare-normal.wav` and `snare-ghost.wav`.
+- A head of a drum kit instrument plays the kit (`SoundType::Kit`, a
+  `KitHit` of instrument, technique and level), whatever the voices' sounds;
+  an `Instrument::Rhythm` head stays the rhythm's `Beat`/`AccentedBeat`, so a
+  one-line score sounds as before. `kit_sample` picks one sample per
+  instrument and technique: the snare plays its three recordings by level
+  (cross-stick and rimshot their own), the hi-hat closed, half-open or open,
+  the ride its bell, the crash choked; the toms play one sample, a rimshot as
+  their normal hit. The other levels play quieter or louder
+  (`KitHit::level_gain`). The kit samples are in `crates/audio/samples/kit/`,
+  synthesized by its `synth.py` (standard library only, seeded); rerun it after
+  changing a sound. An open hi-hat is not cut off by the next closed one.
 - The rhythm and the counter rhythm play a sample 1.5× faster
   (`SAME_SOUND_RATE`) when the metronome uses the same sound, so the voices
   stay apart.
@@ -410,9 +434,11 @@ grooph's metronome runs inside AI chats as an
   see `crates/audio/samples/CREDITS.md`; add a row there with every new sample.
 - `VoiceMixer` (`voices.rs`) plays samples resampled to the device rate.
 - Mixer (`mixer_panel.rs`, a picker on the More screen): a "Rhythm" group (`beat` as "Notes", `accent`,
-  `ghost`) above a "Metronome" group (`downbeat`, `primary` as "Medium", `soft`,
-  `counter` as "Polyrhythm", `count_in`), each with a mute (`rhythm_muted` /
-  `metronome_muted`, applied in `SoundType::profile`). The metronome mute also
+  `ghost`), a "Kit" group (`AudioSettings::kit`, a `KitVolumes` of kick,
+  snare, hi-hat, toms and cymbals) and a "Metronome" group (`downbeat`,
+  `primary` as "Medium", `soft`, `counter` as "Polyrhythm", `count_in`), each
+  with a mute (`rhythm_muted` / `kit_muted` / `metronome_muted`, applied in
+  `SoundType::profile`). The metronome mute also
   silences the counter rhythm and leaves the count-in audible.
   Sounds with zero gain are not triggered at all. Clicks between the beats
   (e.g. every eighth of 7/8) come from the click bar, not from the mixer.

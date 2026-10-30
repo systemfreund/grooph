@@ -13,10 +13,15 @@
 //! decay, noise), pitched per sound type. Every other sound plays short WAV
 //! samples embedded in the binary (see [`SampleId`]) with the volume of the
 //! mixer.
+//!
+//! The heads of a drum kit score play the kit: one sample per instrument and
+//! technique ([`kit_sample`]), whatever sounds the voices have; a
+//! [`Instrument::Rhythm`] head is the rhythm voice's.
 
-use crate::schedule::SoundType;
+use crate::schedule::{KitHit, SoundType};
 use crate::wav::{self, SampleData};
 use crate::{AudioSettings, Waveform};
+use grooph_measure::{Instrument, Technique};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, OnceLock};
 
@@ -74,7 +79,7 @@ impl Sound {
 
 /// How strongly a hit is played, whichever voice plays it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Level {
+pub(crate) enum Level {
     Strong,
     Normal,
     Soft,
@@ -108,6 +113,13 @@ struct SampleFile {
     bytes: &'static [u8],
 }
 
+/// A sample of the drum kit (`samples/kit`, made by its `synth.py`).
+macro_rules! kit_file {
+    ($name:literal) => {
+        SampleFile { name: $name, bytes: include_bytes!(concat!("../samples/kit/", $name)) }
+    };
+}
+
 /// Every embedded sample; [`SampleId`] indexes into it.
 const SAMPLES: &[SampleFile] = &[
     SampleFile { name: "claves3.wav", bytes: include_bytes!("../samples/claves3.wav") },
@@ -117,6 +129,19 @@ const SAMPLES: &[SampleFile] = &[
     SampleFile { name: "snare-ghost.wav", bytes: include_bytes!("../samples/snare-ghost.wav") },
     SampleFile { name: "xylo-high.wav", bytes: include_bytes!("../samples/xylo-high.wav") },
     SampleFile { name: "xylo-low.wav", bytes: include_bytes!("../samples/xylo-low.wav") },
+    kit_file!("kick.wav"),
+    kit_file!("cross-stick.wav"),
+    kit_file!("hihat-closed.wav"),
+    kit_file!("hihat-half.wav"),
+    kit_file!("hihat-open.wav"),
+    kit_file!("hihat-foot.wav"),
+    kit_file!("ride.wav"),
+    kit_file!("ride-bell.wav"),
+    kit_file!("crash.wav"),
+    kit_file!("crash-choke.wav"),
+    kit_file!("tom-high.wav"),
+    kit_file!("tom-mid.wav"),
+    kit_file!("tom-floor.wav"),
 ];
 
 /// An embedded sample, decoded on first use.
@@ -131,6 +156,19 @@ impl SampleId {
     const SNARE_GHOST: SampleId = SampleId(4);
     const XYLO_HIGH: SampleId = SampleId(5);
     const XYLO_LOW: SampleId = SampleId(6);
+    const KICK: SampleId = SampleId(7);
+    const CROSS_STICK: SampleId = SampleId(8);
+    const HIHAT_CLOSED: SampleId = SampleId(9);
+    const HIHAT_HALF: SampleId = SampleId(10);
+    const HIHAT_OPEN: SampleId = SampleId(11);
+    const HIHAT_FOOT: SampleId = SampleId(12);
+    const RIDE: SampleId = SampleId(13);
+    const RIDE_BELL: SampleId = SampleId(14);
+    const CRASH: SampleId = SampleId(15);
+    const CRASH_CHOKE: SampleId = SampleId(16);
+    const TOM_HIGH: SampleId = SampleId(17);
+    const TOM_MID: SampleId = SampleId(18);
+    const TOM_FLOOR: SampleId = SampleId(19);
 
     /// The decoded sample; an unreadable file becomes silence (logged once).
     fn data(self) -> Arc<SampleData> {
@@ -185,7 +223,7 @@ pub(crate) enum Patch {
 }
 
 impl SoundType {
-    fn is_rhythm(self) -> bool {
+    pub(crate) fn is_rhythm(self) -> bool {
         matches!(self, SoundType::Beat | SoundType::AccentedBeat | SoundType::Ghost)
     }
 
@@ -198,6 +236,7 @@ impl SoundType {
     /// plays its normal hits on every beat, like the primary beats.
     fn level(self) -> Level {
         match self {
+            SoundType::Kit(hit) => hit.level,
             SoundType::Downbeat | SoundType::AccentedBeat | SoundType::CounterStrong => {
                 Level::Strong
             }
@@ -214,6 +253,10 @@ impl SoundType {
 
     /// The patch for this hit: the voice's chosen sound at this hit's level.
     pub(crate) fn patch(self, settings: &AudioSettings) -> Patch {
+        if let SoundType::Kit(hit) = self {
+            let gain = self.profile(settings).gain;
+            return Patch::Sample { data: kit_sample(hit).data(), rate: 1.0, gain };
+        }
         let metronome = settings.metronome_sound;
         let sound = if self.is_rhythm() {
             settings.rhythm_sound
@@ -228,6 +271,46 @@ impl SoundType {
         match sound.samples() {
             Some(set) => Patch::Sample { data: set.at(self.level()).data(), rate, gain },
             None => click(self, settings),
+        }
+    }
+}
+
+/// The kit's sample for `hit`. The snare has a recording per level; the
+/// other instruments play theirs quieter or louder through the mixer
+/// ([`KitHit::level_gain`]).
+fn kit_sample(hit: KitHit) -> SampleId {
+    use Instrument::*;
+    use Technique::*;
+    match (hit.instrument, hit.technique) {
+        (Snare, CrossStick) => SampleId::CROSS_STICK,
+        (Snare, Rimshot) => SampleId::SNARE_ACCENT,
+        (Snare, _) => Sound::Snare.samples().expect("recorded").at(hit.level),
+        (Kick, _) => SampleId::KICK,
+        (HiHat, Open) => SampleId::HIHAT_OPEN,
+        (HiHat, HalfOpen) => SampleId::HIHAT_HALF,
+        (HiHat, _) => SampleId::HIHAT_CLOSED,
+        (HiHatFoot, _) => SampleId::HIHAT_FOOT,
+        (Ride, Bell) => SampleId::RIDE_BELL,
+        (Ride, _) => SampleId::RIDE,
+        (Crash, Choke) => SampleId::CRASH_CHOKE,
+        (Crash, _) => SampleId::CRASH,
+        (HighTom, _) => SampleId::TOM_HIGH,
+        (MidTom, _) => SampleId::TOM_MID,
+        (FloorTom, _) => SampleId::TOM_FLOOR,
+        // Never scheduled as a kit hit: the rhythm voice plays it.
+        (Rhythm, _) => Sound::Snare.samples().expect("recorded").at(hit.level),
+    }
+}
+
+impl KitHit {
+    /// Volume of the hit's level, relative to its instrument's in the mixer.
+    /// The snare's soft recording is quiet already.
+    pub(crate) fn level_gain(self) -> f32 {
+        match self.level {
+            Level::Strong => 1.0,
+            Level::Normal => 0.75,
+            Level::Soft if self.instrument == Instrument::Snare => 0.6,
+            Level::Soft => 0.3,
         }
     }
 }
@@ -498,5 +581,53 @@ mod tests {
             assert!(!data.frames.is_empty(), "{} is empty", file.name);
             assert_eq!(*SampleId(i).data(), data);
         }
+    }
+
+    #[test]
+    fn every_kit_instrument_and_technique_has_a_sample() {
+        let settings = AudioSettings::default();
+        let mut samples = Vec::new();
+        for instrument in Instrument::ALL.into_iter().filter(|&i| i != Instrument::Rhythm) {
+            for &technique in instrument.techniques() {
+                let hit = KitHit { instrument, technique, level: Level::Normal };
+                let Patch::Sample { data, rate, .. } = SoundType::Kit(hit).patch(&settings) else {
+                    panic!("{instrument:?} {technique:?}: sample expected");
+                };
+                assert!(!data.frames.is_empty(), "{instrument:?} {technique:?}");
+                assert_eq!(rate, 1.0, "the kit plays as recorded, whatever the voices' sounds");
+                samples.push((instrument, technique, data));
+            }
+        }
+        let of = |i, t| samples.iter().find(|s| s.0 == i && s.1 == t).unwrap().2.clone();
+        use Instrument::{Crash, HiHat, Kick, Ride, Snare};
+        use Technique::{Bell, Choke, Closed, CrossStick, HalfOpen, Normal, Open};
+        // An open hi-hat rings longer than a closed one, a half-open one between.
+        let len = |i, t| of(i, t).frames.len();
+        assert!(len(HiHat, Closed) < len(HiHat, HalfOpen));
+        assert!(len(HiHat, HalfOpen) < len(HiHat, Open));
+        assert_eq!(of(HiHat, Normal), of(HiHat, Closed));
+        assert!(len(Crash, Choke) < len(Crash, Normal));
+        assert_ne!(of(Ride, Bell), of(Ride, Normal));
+        assert_ne!(of(Snare, CrossStick), of(Snare, Normal));
+        assert_ne!(of(Kick, Normal), of(Snare, Normal));
+    }
+
+    #[test]
+    fn the_kit_snare_plays_its_recording_per_level() {
+        let at = |level| {
+            kit_sample(KitHit {
+                instrument: Instrument::Snare,
+                technique: Technique::Normal,
+                level,
+            })
+        };
+        assert_eq!(at(Level::Strong), SampleId::SNARE_ACCENT);
+        assert_eq!(at(Level::Normal), SampleId::SNARE);
+        assert_eq!(at(Level::Soft), SampleId::SNARE_GHOST);
+        // Other instruments have one recording, played quieter.
+        let kick = |level| {
+            kit_sample(KitHit { instrument: Instrument::Kick, technique: Technique::Normal, level })
+        };
+        assert_eq!(kick(Level::Soft), kick(Level::Strong));
     }
 }

@@ -12,6 +12,7 @@ pub(crate) mod grouping;
 pub mod head;
 mod math;
 pub mod notation;
+pub mod onsets;
 #[cfg(test)]
 mod random_tests;
 pub mod score;

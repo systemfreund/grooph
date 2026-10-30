@@ -1,13 +1,15 @@
-use grooph_measure::Score;
 use grooph_measure::click::{ClickBars, ClickLevel};
 use grooph_measure::counter::CounterBars;
 use grooph_measure::generator::Subdivision;
 use grooph_measure::ghost::ghost_onsets;
 use grooph_measure::grid::DEFAULT_GRID;
+use grooph_measure::onsets::HeadOnset;
 use grooph_measure::tempo::ScoreTiming;
+use grooph_measure::{Instrument, Score, Technique};
 use std::collections::BTreeMap;
 
 use crate::AudioSettings;
+use crate::sounds::Level;
 use crate::trainer::GapMute;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -30,6 +32,38 @@ pub(crate) enum SoundType {
     CounterStrong,
     CounterMedium,
     CounterSoft,
+    /// A head of a drum kit score, played on the kit.
+    Kit(KitHit),
+}
+
+/// One head of the drum kit: what is hit, how and how hard.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) struct KitHit {
+    pub(crate) instrument: Instrument,
+    pub(crate) technique: Technique,
+    pub(crate) level: Level,
+}
+
+impl SoundType {
+    /// What `onset` plays: the rhythm voice's note, accented or not, for a
+    /// head on the one line, the kit for the others.
+    fn of_head(onset: &HeadOnset) -> Self {
+        let head = onset.head;
+        match head.instrument() {
+            Instrument::Rhythm if head.accented() => SoundType::AccentedBeat,
+            Instrument::Rhythm => SoundType::Beat,
+            instrument => {
+                let level = if head.accented() {
+                    Level::Strong
+                } else if head.soft() {
+                    Level::Soft
+                } else {
+                    Level::Normal
+                };
+                SoundType::Kit(KitHit { instrument, technique: head.technique(), level })
+            }
+        }
+    }
 }
 
 /// Volume of [`SoundType::CountInSoft`] relative to the count-in volume.
@@ -51,7 +85,7 @@ impl SoundType {
             SoundType::CountIn | SoundType::CountInSoft => false,
             SoundType::Downbeat | SoundType::PrimaryBeat | SoundType::SoftBeat => true,
             SoundType::CounterStrong | SoundType::CounterMedium | SoundType::CounterSoft => true,
-            SoundType::AccentedBeat | SoundType::Beat | SoundType::Ghost => {
+            SoundType::AccentedBeat | SoundType::Beat | SoundType::Ghost | SoundType::Kit(_) => {
                 mute == GapMute::Everything
             }
         }
@@ -67,6 +101,7 @@ impl SoundType {
             | SoundType::CounterSoft => settings.metronome_muted,
             SoundType::AccentedBeat | SoundType::Beat | SoundType::Ghost => settings.rhythm_muted,
             SoundType::CountIn | SoundType::CountInSoft => false,
+            SoundType::Kit(_) => settings.kit_muted,
         };
         let profile = match self {
             SoundType::Downbeat => SoundProfile { freq_mult: 3.375, gain: settings.downbeat },
@@ -87,6 +122,10 @@ impl SoundType {
             SoundType::CounterSoft => {
                 SoundProfile { freq_mult: 4.0, gain: COUNTER_SOFT_GAIN * settings.counter }
             }
+            SoundType::Kit(hit) => SoundProfile {
+                freq_mult: 1.0,
+                gain: hit.level_gain() * settings.kit.of(hit.instrument),
+            },
         };
         if muted { SoundProfile { gain: 0.0, ..profile } } else { profile }
     }
@@ -129,14 +168,11 @@ impl Schedule {
                 map.entry(timing.performed_global_tick(idx, t)).or_default().push(sound);
             }
 
-            let onsets = DEFAULT_GRID.compute_onset_ticks(measure.beats());
-            for (i, beat) in measure.beats().iter().enumerate() {
-                if beat.is_note()
-                    && let Some(&t) = onsets.get(i)
-                {
-                    let s = if beat.accented() { SoundType::AccentedBeat } else { SoundType::Beat };
-                    map.entry(timing.performed_global_tick(idx, t)).or_default().push(s);
-                }
+            // The heads of every voice, the one line's as before.
+            for onset in measure.head_onsets() {
+                map.entry(timing.performed_global_tick(idx, onset.tick))
+                    .or_default()
+                    .push(SoundType::of_head(&onset));
             }
 
             if let Some(subdivision) = ghost_notes {
@@ -474,5 +510,98 @@ mod tests {
         let mut out2 = vec![];
         s.collect_in_range(1, 2.0, &mut out2);
         assert!(!out2.contains(&SoundType::Downbeat));
+    }
+
+    /// The kit hits of a one-measure score, as (tick, instrument,
+    /// technique, level).
+    fn kit_hits(notation: &str) -> Vec<(u64, Instrument, Technique, Level)> {
+        let score = grooph_measure::notation::parse_score(notation).unwrap();
+        let timing = ScoreTiming::from_score(&score, 120);
+        let s = Schedule::build(&score, &timing, None, &ClickBars::default());
+        s.map
+            .iter()
+            .flat_map(|(&t, sounds)| sounds.iter().map(move |&x| (t, x)))
+            .filter_map(|(t, x)| match x {
+                SoundType::Kit(h) => Some((t, h.instrument, h.technique, h.level)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_rock_groove_plays_every_head_of_both_voices() {
+        use Instrument::{HiHat, Kick, Snare};
+        use Technique::{Closed, Normal, Open};
+        let hits = kit_hits("4/4 H:e S-H:e H:e >S-H:e H:e (S)-H:e Ho:e Hc:e ; K:q r:q K:q r:q");
+        let e = DEFAULT_GRID.ticks_per_measure(&TimeSignature::FOUR_FOUR) as u64 / 8;
+        let (n, strong, soft) = (Level::Normal, Level::Strong, Level::Soft);
+        assert_eq!(
+            hits,
+            [
+                (0, HiHat, Normal, n),
+                (0, Kick, Normal, n),
+                (e, Snare, Normal, n),
+                (e, HiHat, Normal, n),
+                (2 * e, HiHat, Normal, n),
+                (3 * e, Snare, Normal, strong),
+                (3 * e, HiHat, Normal, n),
+                (4 * e, HiHat, Normal, n),
+                (4 * e, Kick, Normal, n),
+                (5 * e, Snare, Normal, soft),
+                (5 * e, HiHat, Normal, n),
+                (6 * e, HiHat, Open, n),
+                (7 * e, HiHat, Closed, n),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_line_score_plays_its_notes_as_before() {
+        let score = grooph_measure::notation::parse_score("4/4 q >e (e) r:q q").unwrap();
+        let timing = ScoreTiming::from_score(&score, 120);
+        let s = Schedule::build(&score, &timing, None, &ClickBars::default());
+        let notes: Vec<(u64, SoundType)> = s
+            .map
+            .iter()
+            .flat_map(|(&t, sounds)| sounds.iter().map(move |&x| (t, x)))
+            .filter(|(_, x)| x.is_rhythm() || matches!(x, SoundType::Kit(_)))
+            .collect();
+        let q = DEFAULT_GRID.ticks_per_beat(&TimeSignature::FOUR_FOUR) as u64;
+        assert_eq!(
+            notes,
+            [
+                (0, SoundType::Beat),
+                (q, SoundType::AccentedBeat),
+                // A written ghost note on the line plays as a plain note.
+                (q + q / 2, SoundType::Beat),
+                (3 * q, SoundType::Beat),
+            ]
+        );
+    }
+
+    #[test]
+    fn the_kit_has_its_own_mute_and_volumes() {
+        let hit = |instrument, level| {
+            SoundType::Kit(KitHit { instrument, technique: Technique::Normal, level })
+        };
+        let settings = AudioSettings::default();
+        let kick = hit(Instrument::Kick, Level::Normal);
+        assert!(kick.profile(&settings).gain > 0.0);
+        let accent = hit(Instrument::Kick, Level::Strong).profile(&settings).gain;
+        let ghost = hit(Instrument::Kick, Level::Soft).profile(&settings).gain;
+        assert!(ghost < kick.profile(&settings).gain && kick.profile(&settings).gain < accent);
+        // The rhythm's mute leaves the kit; the kit's silences it.
+        let rhythm_muted = AudioSettings { rhythm_muted: true, ..settings };
+        assert!(kick.profile(&rhythm_muted).gain > 0.0);
+        let kit_muted = AudioSettings { kit_muted: true, ..settings };
+        assert_eq!(kick.profile(&kit_muted).gain, 0.0);
+        assert!(SoundType::Beat.profile(&kit_muted).gain > 0.0);
+        let mut quiet_hats = settings;
+        quiet_hats.kit.hihat = 0.0;
+        assert_eq!(hit(Instrument::HiHat, Level::Normal).profile(&quiet_hats).gain, 0.0);
+        assert_eq!(hit(Instrument::HiHatFoot, Level::Normal).profile(&quiet_hats).gain, 0.0);
+        assert!(kick.profile(&quiet_hats).gain > 0.0);
+        // Muted bars of the gap trainer silence the kit with the notes.
+        assert!(kick.muted_by(GapMute::Everything) && !kick.muted_by(GapMute::Metronome));
     }
 }

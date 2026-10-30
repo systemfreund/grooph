@@ -2,7 +2,6 @@ use std::collections::{HashMap, HashSet};
 
 use grooph_measure::MeasureIdx;
 use grooph_measure::Score;
-use grooph_measure::grid::DEFAULT_GRID;
 use grooph_measure::tempo::ScoreTiming;
 
 #[derive(Clone, Copy)]
@@ -159,9 +158,10 @@ pub(crate) struct GlobalBeatOnset {
     pub measure_idx: MeasureIdx,
 }
 
-/// Flatten every beat of every measure into a vector of score-global onset
-/// ticks (Notes + Rests). The score iterates measures in order; within each
-/// measure beats are in order.
+/// Flatten the onsets of every measure into a vector of score-global onset
+/// ticks (Notes + Rests): each tick where a beat of any voice starts, once,
+/// a note if any voice plays one there. The score iterates measures in
+/// order; within each measure onsets are in order.
 pub(crate) fn compute_global_beat_onsets(
     score: &Score,
     timing: &ScoreTiming,
@@ -169,16 +169,13 @@ pub(crate) fn compute_global_beat_onsets(
     let mut out = Vec::new();
     for (m_idx, measure) in score.measures.iter().enumerate() {
         let start = timing.measure_start_tick(m_idx);
-        let local_onsets = DEFAULT_GRID.compute_onset_ticks(measure.beats());
-        for (i, beat) in measure.beats().iter().enumerate() {
-            if let Some(&local) = local_onsets.get(i) {
-                out.push(GlobalBeatOnset {
-                    onset_tick: start + local as u64,
-                    performed_tick: timing.performed_global_tick(m_idx, local),
-                    is_note: beat.is_note(),
-                    measure_idx: m_idx,
-                });
-            }
+        for onset in measure.onsets() {
+            out.push(GlobalBeatOnset {
+                onset_tick: start + onset.tick as u64,
+                performed_tick: timing.performed_global_tick(m_idx, onset.tick),
+                is_note: onset.is_note,
+                measure_idx: m_idx,
+            });
         }
     }
     out
@@ -402,5 +399,19 @@ mod tests {
         }
         assert_eq!(stats.mean_ms(), Some(0.0));
         assert!((stats.spread_ms().unwrap() - 10.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_kit_scores_onsets_merge_its_voices() {
+        let score =
+            grooph_measure::notation::parse_score("2/4 H:q H:q ; r:e K:e r:q | 2/4 q q").unwrap();
+        let timing = ScoreTiming::from_score(&score, 120);
+        let onsets = compute_global_beat_onsets(&score, &timing);
+        let q = grooph_measure::grid::DEFAULT_GRID
+            .ticks_per_beat(&grooph_measure::TimeSignature::TWO_FOUR) as u64;
+        let ticks: Vec<(u64, bool)> = onsets.iter().map(|o| (o.onset_tick, o.is_note)).collect();
+        // The kick between the hi-hats is a note to hit; a tick is listed once.
+        assert_eq!(ticks, [(0, true), (q / 2, true), (q, true), (2 * q, true), (3 * q, true)]);
+        assert!(onsets.iter().skip(3).all(|o| o.measure_idx == 1));
     }
 }

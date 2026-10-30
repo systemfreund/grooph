@@ -6,7 +6,7 @@ use eframe::egui::{
 };
 use grooph_layout::pixel_layout::{
     BeamLayout, LayoutOpts, MeasureLayout, NoteLayout, TimeSignatureLayout, TupletLayout,
-    build_measure_layout,
+    build_measure_layout, onset_head,
 };
 use grooph_measure::counting::{CountConfig, CountSlot, build_count_slots};
 use grooph_measure::grid::DEFAULT_GRID;
@@ -79,7 +79,7 @@ pub(crate) fn render_measure_at(
         draw_count_layer(
             painter,
             measure,
-            measure_layout,
+            std::slice::from_ref(measure_layout),
             opts,
             opts.y_center(),
             config,
@@ -194,13 +194,13 @@ pub fn playback_cursor_stroke(em: f32, base: Color32) -> Stroke {
     Stroke::new(0.1 * em, Color32::from_rgba_unmultiplied(base.r(), base.g(), base.b(), 100))
 }
 
-/// The count labels of `measure`, under the line at `baseline_y`. The label
-/// at the tick of `count_tick` is lit in its colour.
+/// The count labels of `measure`, laid out as `voices`, under the line at
+/// `baseline_y`. The label at the tick of `count_tick` is lit in its colour.
 #[expect(clippy::too_many_arguments)]
 pub(crate) fn draw_count_layer(
     painter: &Painter,
     measure: &Measure,
-    measure_layout: &MeasureLayout,
+    voices: &[MeasureLayout],
     opts: &LayoutOpts,
     baseline_y: f32,
     config: &CountConfig,
@@ -219,7 +219,7 @@ pub(crate) fn draw_count_layer(
     draw_count_labels(
         painter,
         measure,
-        measure_layout,
+        voices,
         opts.rect,
         baseline_y,
         opts.em,
@@ -231,67 +231,90 @@ pub(crate) fn draw_count_layer(
     );
 }
 
-/// Phase 1 cursor X — cursor lives inside *this* measure at `tick`.
+/// Where `measure` starts a beat in any of its voices ([`Measure::onsets`]),
+/// with the x of the head standing for each in `voices` (`None` where that
+/// voice's layout has no such note: a layout of another measure). The cursor and the count labels follow
+/// these, so a lower voice's notes between the upper voice's are counted
+/// and passed too; with one voice they are its beats.
+struct Columns {
+    ticks: Vec<u32>,
+    xs: Vec<Option<f32>>,
+}
+
+impl Columns {
+    fn new(measure: &Measure, voices: &[MeasureLayout]) -> Self {
+        let (ticks, xs) = measure
+            .onsets()
+            .iter()
+            .map(|o| (o.tick, onset_head(voices, o).map(|n| n.center.x)))
+            .unzip();
+        Columns { ticks, xs }
+    }
+
+    /// The column at or before `tick` (the first one starts at 0).
+    fn at(&self, tick: f64) -> Option<usize> {
+        self.ticks.iter().rposition(|&t| t as f64 <= tick)
+    }
+
+    /// Ticks from column `i` to the next, or to the barline at `total`.
+    fn span(&self, i: usize, total: f64) -> f64 {
+        let end = self.ticks.get(i + 1).map_or(total, |&t| t as f64);
+        end - self.ticks[i] as f64
+    }
+}
+
+/// Phase 1 cursor X — cursor lives inside *this* measure at `tick`, laid
+/// out as `voices`. It follows the onsets of all voices ([`Columns`]):
 ///
-/// - Inside notes (not last): linear interpolation between consecutive note
-///   centers (`notes[i].center.x` → `notes[i+1].center.x`).
-/// - Last note, `frac < split`: linear from `notes[last].center.x` to
-///   `rect.right()` (cursor extends past the last note head, fading out).
-/// - Last note, `frac >= split`: returns `None`. The cursor visually moves
+/// - Inside an onset (not the last): linear interpolation between the heads
+///   of consecutive onsets.
+/// - Last onset, `frac < split`: linear from its head to `rect.right()`
+///   (cursor extends past the last note head, fading out).
+/// - Last onset, `frac >= split`: returns `None`. The cursor visually moves
 ///   into the *following* measure — call [`playback_cursor_entering_x`] there.
 ///
-/// `split` (see [`last_note_split`]) is the share of the last note's duration
-/// spent before the barline.
-/// - Trailing gap (tick past every beat's end, i.e. an incomplete measure):
-///   `Some(rect.right())`. Cursor parks at the right edge.
+/// `split` (see [`last_note_split`]) is the share of the last onset's
+/// duration spent before the barline.
 ///
-/// Returns `None` if the measure has no notes or zero total ticks.
+/// Returns `None` if the measure has no notes or zero total ticks, or the
+/// layout has no head for the onset (a layout of another measure).
 pub fn playback_cursor_x(
     measure: &Measure,
-    measure_layout: &MeasureLayout,
+    voices: &[MeasureLayout],
     rect: Rect,
     tick: f64,
     split: f64,
 ) -> Option<f32> {
     let ts = measure.time_signature();
     let total_ticks = DEFAULT_GRID.ticks_per_measure(&ts) as f64;
-    if total_ticks <= 0.0 || measure_layout.notes.is_empty() {
+    if total_ticks <= 0.0 || voices.first()?.notes.is_empty() {
         return None;
     }
     let t = clamp_tick_to_measure(tick, total_ticks);
+    let columns = Columns::new(measure, voices);
 
-    let onsets = DEFAULT_GRID.compute_onset_ticks(measure.beats());
+    // Every voice starts at 0, so a column is at or before `t`.
+    let i = columns.at(t)?;
+    let start = columns.ticks[i] as f64;
+    let dur_ticks = columns.span(i, total_ticks);
+    let frac = if dur_ticks > 0.0 { (t - start) / dur_ticks } else { 0.0 };
+    // A layout of another measure has other notes: no cursor.
+    let x0 = columns.xs[i]?;
 
-    for (i, &onset) in onsets.iter().enumerate() {
-        let start = onset as f64;
-        let dur_ticks = DEFAULT_GRID.ticks_of(&measure.beats()[i].duration).unwrap_or(0) as f64;
-        let end = start + dur_ticks;
-        if t >= start && t < end {
-            let frac = if dur_ticks > 0.0 { (t - start) / dur_ticks } else { 0.0 };
-            // A layout of another measure has other notes: no cursor.
-            let x0 = measure_layout.notes.get(i)?.center.x;
-
-            if i + 1 < measure_layout.notes.len() {
-                // Normal note: interpolate to the next note in this measure.
-                let x1 = measure_layout.notes[i + 1].center.x;
-                return Some(x0 + ((x1 - x0) * frac as f32));
-            }
-
-            // Last note: split into two phases. Phase 1 covers frac in
-            // [0, split) and walks from the note head to the measure's right
-            // edge. Phase 2 (frac >= split) renders in the following measure
-            // via `playback_cursor_entering_x`.
-            if frac < split {
-                let phase1_frac = (frac / split) as f32;
-                return Some(x0 + (rect.right() - x0) * phase1_frac);
-            }
-            return None;
-        }
+    if let Some(&Some(x1)) = columns.xs.get(i + 1) {
+        // Normal onset: interpolate to the next one in this measure.
+        return Some(x0 + ((x1 - x0) * frac as f32));
     }
 
-    // Trailing gap: tick lies past the last beat's end (incomplete measure).
-    // Hold the cursor at the right edge — visually consistent with "done".
-    Some(rect.right())
+    // Last onset: split into two phases. Phase 1 covers frac in [0, split)
+    // and walks from the note head to the measure's right edge. Phase 2
+    // (frac >= split) renders in the following measure via
+    // `playback_cursor_entering_x`.
+    if frac < split {
+        let phase1_frac = (frac / split) as f32;
+        return Some(x0 + (rect.right() - x0) * phase1_frac);
+    }
+    None
 }
 
 /// X of the point in time `tick` of `measure`, for a guide anchor: a note's
@@ -300,18 +323,18 @@ pub fn playback_cursor_x(
 /// halfway. `None` if the layout has no notes for it.
 pub fn beat_anchor_x(
     measure: &Measure,
-    measure_layout: &MeasureLayout,
+    voices: &[MeasureLayout],
     rect: Rect,
     tick: f64,
 ) -> Option<f32> {
-    let beats = measure.beats();
-    let onsets = DEFAULT_GRID.compute_onset_ticks(beats);
-    let i = onsets.iter().rposition(|&onset| onset as f64 <= tick)?;
-    let start = onsets[i] as f64;
-    let dur_ticks = DEFAULT_GRID.ticks_of(&beats[i].duration).unwrap_or(0) as f64;
+    let columns = Columns::new(measure, voices);
+    let i = columns.at(tick)?;
+    let start = columns.ticks[i] as f64;
+    let total_ticks = DEFAULT_GRID.ticks_per_measure(&measure.time_signature()) as f64;
+    let dur_ticks = columns.span(i, total_ticks);
     let frac = if dur_ticks > 0.0 { ((tick - start) / dur_ticks).clamp(0.0, 1.0) } else { 0.0 };
-    let x0 = measure_layout.notes.get(i)?.center.x;
-    let x1 = measure_layout.notes.get(i + 1).map_or(rect.right(), |n| n.center.x);
+    let x0 = columns.xs[i]?;
+    let x1 = columns.xs.get(i + 1).copied().flatten().unwrap_or(rect.right());
     Some(x0 + (x1 - x0) * frac as f32)
 }
 
@@ -351,16 +374,16 @@ pub fn playback_cursor_entering_x(
 /// its distance from the last note head to the barline, out of that plus the
 /// following measure's distance from its left edge to its first note head.
 /// The cursor then moves at an even speed across the barline.
-pub fn last_note_split(
-    measure_layout: &MeasureLayout,
-    rect: Rect,
-    next_layout: &MeasureLayout,
-) -> f64 {
-    let (Some(last), Some(first)) = (measure_layout.notes.last(), next_layout.notes.first()) else {
+pub fn last_note_split(voices: &[MeasureLayout], rect: Rect, next_voices: &[MeasureLayout]) -> f64 {
+    // The last head of any voice: the voices share their columns.
+    let last = voices.iter().filter_map(|v| v.notes.last()).map(|n| n.center.x).reduce(f32::max);
+    let next = next_voices.first();
+    let (Some(last), Some(first), Some(next)) = (last, next.and_then(|n| n.notes.first()), next)
+    else {
         return 0.5;
     };
-    let out = (rect.right() - last.center.x).max(0.0);
-    let into = (first.center.x - next_layout.notes_left_edge).max(0.0);
+    let out = (rect.right() - last).max(0.0);
+    let into = (first.center.x - next.notes_left_edge).max(0.0);
     if out + into <= 0.0 { 0.5 } else { (out / (out + into)) as f64 }
 }
 
@@ -375,11 +398,9 @@ pub fn last_note_entering_frac(measure: &Measure, local_tick: f64, split: f64) -
     if total_ticks <= 0.0 {
         return None;
     }
-    let beats = measure.beats();
-    let last_i = beats.len().checked_sub(1)?;
-    let onsets = DEFAULT_GRID.compute_onset_ticks(beats);
-    let start = *onsets.get(last_i)? as f64;
-    let dur_ticks = DEFAULT_GRID.ticks_of(&beats[last_i].duration).unwrap_or(0) as f64;
+    // The last onset of any voice, up to the barline.
+    let start = measure.onsets().last()?.tick as f64;
+    let dur_ticks = total_ticks - start;
     if dur_ticks <= 0.0 {
         return None;
     }
@@ -471,7 +492,7 @@ pub fn draw_tuplets(
 fn draw_count_labels(
     painter: &Painter,
     measure: &Measure,
-    layout: &MeasureLayout,
+    voices: &[MeasureLayout],
     rect: Rect,
     baseline_y: f32,
     em: f32,
@@ -489,7 +510,7 @@ fn draw_count_labels(
         return;
     }
     let active_start = active_label_start(&selected, playback_tick, measure);
-    let xs = compute_label_xs(&selected, measure, layout, rect, total_ticks);
+    let xs = compute_label_xs(&selected, measure, voices, rect, total_ticks);
 
     let font = FontId::new(em * 0.4, FontFamily::Proportional);
     let label_y = (baseline_y + 0.75 * em).min(rect.bottom() - 0.2 * em);
@@ -544,27 +565,28 @@ fn active_label_start(
 fn compute_label_xs(
     selected: &[&CountSlot],
     measure: &Measure,
-    layout: &MeasureLayout,
+    voices: &[MeasureLayout],
     rect: Rect,
     total_ticks: u32,
 ) -> Vec<f32> {
-    let left = layout.notes_left_edge;
+    let left = voices.first().map_or(rect.left(), |v| v.notes_left_edge);
     let right = rect.right();
-    let beats = measure.beats();
-    if total_ticks == 0 || beats.is_empty() || layout.notes.len() < beats.len() {
+    let columns = Columns::new(measure, voices);
+    let xs: Option<Vec<f32>> = columns.xs.iter().copied().collect();
+    let Some(xs) = xs.filter(|xs| total_ticks > 0 && !xs.is_empty()) else {
         let content_w = right - left;
         return selected
             .iter()
             .map(|s| left + s.start_tick as f32 / total_ticks.max(1) as f32 * content_w)
             .collect();
-    }
-    let onsets = DEFAULT_GRID.compute_onset_ticks(beats);
+    };
+    let onsets = &columns.ticks;
     let x_at = |tick: u32| -> f32 {
-        // Last beat starting at or before `tick`; the first beat starts at 0.
+        // Last onset at or before `tick`; the first one is at 0.
         let i = onsets.iter().rposition(|&o| o <= tick).unwrap_or(0);
-        let x0 = layout.notes[i].center.x;
+        let x0 = xs[i];
         let (next_tick, x1) = match onsets.get(i + 1) {
-            Some(&t) => (t, layout.notes[i + 1].center.x),
+            Some(&t) => (t, xs[i + 1]),
             None => (total_ticks, right),
         };
         let span = next_tick.saturating_sub(onsets[i]);
@@ -708,7 +730,7 @@ mod tests {
         let slots = build_count_slots(measure, config);
         let selected: Vec<&CountSlot> = slots.iter().filter(|s| s.label.is_some()).collect();
         let total_ticks = DEFAULT_GRID.ticks_per_measure(&measure.time_signature());
-        compute_label_xs(&selected, measure, layout, rect, total_ticks)
+        compute_label_xs(&selected, measure, std::slice::from_ref(layout), rect, total_ticks)
     }
 
     #[test]
@@ -722,7 +744,10 @@ mod tests {
         let layout = build_measure_layout(&eighths, &opts_for(rect));
         let bar_ticks = DEFAULT_GRID.ticks_per_measure(&TimeSignature::FOUR_FOUR) as f64;
         let tick = 0.85 * bar_ticks;
-        assert_eq!(playback_cursor_x(&tens.measures[0], &layout, rect, tick, 0.5), None);
+        assert_eq!(
+            playback_cursor_x(&tens.measures[0], std::slice::from_ref(&layout), rect, tick, 0.5),
+            None
+        );
     }
 
     #[test]
@@ -732,7 +757,8 @@ mod tests {
         let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(400.0, 100.0));
         let layout = build_measure_layout(&m, &opts_for(rect));
         let quarter = DEFAULT_GRID.ticks_of(&q()).unwrap() as f64;
-        let x = |beat: f64| beat_anchor_x(&m, &layout, rect, beat * quarter).unwrap();
+        let voices = std::slice::from_ref(&layout);
+        let x = |beat: f64| beat_anchor_x(&m, voices, rect, beat * quarter).unwrap();
         let heads: Vec<f32> = layout.notes.iter().map(|n| n.center.x).collect();
         // Beat 1 on the eighth rest, 2 and 3 on their notes.
         assert_eq!(x(0.0), heads[0]);

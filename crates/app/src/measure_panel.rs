@@ -7,7 +7,7 @@ use crate::tools::{Modifier, ToolKind, all_tools};
 use crate::{Mode, TransportState};
 use eframe::egui;
 use eframe::egui::{FontId, Frame, Rect, Response, Stroke};
-use grooph_layout::pixel_layout::{MeasureLayout, compute_em};
+use grooph_layout::pixel_layout::{NoteLayout, compute_em, onset_head};
 use grooph_layout::staff_layout::{
     LEGIBILITY_FLOOR_EM, LOWER_VOICE_LABEL_ROOM_EM, PlacedMeasure, ROOM_BELOW_EM,
     ROOM_BELOW_WITH_LABELS_EM, StaffLayout, StaffOpts, build_staff_layout, hit_test_voice,
@@ -490,15 +490,15 @@ impl Grooph {
         staff_space: f32,
     ) {
         let measure = &score.measures[placed.measure_idx];
-        let beats = measure.beats();
-        if beats.is_empty() {
-            return;
-        }
-        let local_onsets = DEFAULT_GRID.compute_onset_ticks(beats);
+        // Every onset of any voice, at the head standing for it.
+        let columns: Vec<(u32, &NoteLayout)> = measure
+            .onsets()
+            .iter()
+            .filter_map(|o| Some((o.tick, onset_head(&placed.voices, o)?)))
+            .collect();
         let measure_start = timing.measure_start_tick(placed.measure_idx);
-        let layout = &placed.layout();
         let dark = ui.visuals().dark_mode;
-        for (idx, note_layout) in layout.notes.iter().enumerate() {
+        for (idx, &(local_onset, note_layout)) in columns.iter().enumerate() {
             if note_layout.kind != grooph_measure::BeatKind::Note {
                 continue;
             }
@@ -511,10 +511,7 @@ impl Grooph {
                 [egui::pos2(note_x, y), egui::pos2(note_x, y + h)],
                 Stroke::new(width * 0.5, reference_color(dark)),
             );
-            let Some(local_onset) = local_onsets.get(idx) else {
-                continue;
-            };
-            let global_onset = measure_start + *local_onset as u64;
+            let global_onset = measure_start + local_onset as u64;
             let Some(mark) = self.playback_ctl.accuracy.tracker.mark_for_onset(global_onset) else {
                 continue;
             };
@@ -527,8 +524,7 @@ impl Grooph {
                         global_onsets_u64,
                         total_loop_ticks,
                     );
-                    let Some(px_per_tick) = self.local_pixels_per_tick(&local_onsets, layout, idx)
-                    else {
+                    let Some(px_per_tick) = local_pixels_per_tick(&columns, idx) else {
                         continue;
                     };
                     let x = note_x + (diff_ticks * px_per_tick) as f32;
@@ -537,31 +533,6 @@ impl Grooph {
                 AccuracyMark::Miss => paint_miss_mark(ui.painter(), note_x, y, h, width, dark),
             }
         }
-    }
-
-    fn local_pixels_per_tick(
-        &self,
-        onsets: &[u32],
-        layout: &MeasureLayout,
-        idx: usize,
-    ) -> Option<f64> {
-        if idx + 1 < onsets.len() {
-            let dt = (onsets[idx + 1] as i64 - onsets[idx] as i64) as f64;
-            if dt != 0.0 {
-                let x0 = layout.notes.get(idx)?.center.x as f64;
-                let x1 = layout.notes.get(idx + 1)?.center.x as f64;
-                return Some((x1 - x0) / dt);
-            }
-        }
-        if idx > 0 {
-            let dt = (onsets[idx] as i64 - onsets[idx - 1] as i64) as f64;
-            if dt != 0.0 {
-                let x0 = layout.notes.get(idx - 1)?.center.x as f64;
-                let x1 = layout.notes.get(idx)?.center.x as f64;
-                return Some((x1 - x0) / dt);
-            }
-        }
-        None
     }
 
     /// `with_ring`: under the metronome's ring a tap changes the tapped
@@ -699,6 +670,18 @@ fn paint_miss_mark(painter: &egui::Painter, note_x: f32, y: f32, h: f32, width: 
     let (left, right, top, bottom) = (note_x - half, note_x + half, mid_y - half, mid_y + half);
     painter.line_segment([egui::pos2(left, top), egui::pos2(right, bottom)], stroke);
     painter.line_segment([egui::pos2(left, bottom), egui::pos2(right, top)], stroke);
+}
+
+/// Pixels per tick around column `idx` of a measure's `columns` (onset tick
+/// and head), toward the next column or, for the last, from the one before.
+fn local_pixels_per_tick(columns: &[(u32, &NoteLayout)], idx: usize) -> Option<f64> {
+    let slope = |a: usize, b: usize| {
+        let (ta, na) = columns.get(a)?;
+        let (tb, nb) = columns.get(b)?;
+        let dt = (*tb as i64 - *ta as i64) as f64;
+        (dt != 0.0).then(|| (nb.center.x - na.center.x) as f64 / dt)
+    };
+    slope(idx, idx + 1).or_else(|| idx.checked_sub(1).and_then(|prev| slope(prev, idx)))
 }
 
 #[cfg(test)]

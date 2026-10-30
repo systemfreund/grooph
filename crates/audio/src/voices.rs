@@ -84,7 +84,7 @@ pub(crate) struct VoiceMixer {
 }
 
 impl VoiceMixer {
-    pub(crate) const MAX_VOICES: usize = 8;
+    pub(crate) const MAX_VOICES: usize = 16;
 
     pub(crate) fn new(sample_rate: u32) -> Self {
         Self { voices: Vec::with_capacity(Self::MAX_VOICES), sample_rate }
