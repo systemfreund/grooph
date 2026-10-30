@@ -144,7 +144,8 @@ fn clear_of_line(rest: glyphs::Glyph, below: bool) -> i8 {
 /// in the upper voice, but no meter holds a whole note.)
 fn ledger_pos(beat: &Beat, opts: &LayoutOpts) -> Option<i8> {
     let half = beat.duration.base_note() == NoteValue::Half;
-    (opts.shared_line && opts.stem_down && beat.is_rest() && half).then_some(-2)
+    let line = opts.staff == StaffKind::Line;
+    (line && opts.shared_line && opts.stem_down && beat.is_rest() && half).then_some(-2)
 }
 
 /// How far a ledger line reaches past either side of its rest, in staff
@@ -240,12 +241,12 @@ fn flag_at(
 /// center: just right of the head, or of its parentheses for a soft note. An
 /// up-stem flag curls down beside the dots and pushes them past it; a
 /// down-stem flag hangs below them.
-fn dot_first_dx(beat: &Beat, in_beam: bool, opts: &LayoutOpts) -> f32 {
+/// `chord` is the note's ([`chord_of`]), empty for a rest.
+fn dot_first_dx(beat: &Beat, in_beam: bool, chord: &[ChordHead], opts: &LayoutOpts) -> f32 {
     let is_note = beat.is_note();
     let mut dx = opts.em * c::DOT_FIRST_DX_NO_FLAG_EM;
     // Heads flipped right of an up stem push the dots past them.
-    let flipped_right =
-        is_note && !opts.stem_down && chord_of(beat, in_beam, opts).iter().any(|h| h.flipped);
+    let flipped_right = !opts.stem_down && chord.iter().any(|h| h.flipped);
     if flipped_right {
         dx += glyphs::NOTEHEAD_BLACK.advance * opts.staff_space();
     }
@@ -258,17 +259,16 @@ fn dot_first_dx(beat: &Beat, in_beam: bool, opts: &LayoutOpts) -> f32 {
     dx
 }
 
-/// The augmentation dots of `beat`, a note centered at `(center_x, cy)`.
-/// Returns empty if `dot_count == 0`.
+/// The augmentation dots of a head at `cy` of a note centered at
+/// `center_x`, the first `first_dx` from it ([`dot_first_dx`]). Returns
+/// empty if `dot_count == 0`.
 fn dot_glyphs(
-    beat: &Beat,
-    in_beam: bool,
+    first_dx: f32,
     center_x: f32,
     cy: f32,
     dot_count: u8,
     opts: &LayoutOpts,
 ) -> Vec<PlacedGlyph> {
-    let first_dx = dot_first_dx(beat, in_beam, opts);
     let step_dx = opts.em * c::DOT_STEP_DX_EM;
     // A head on a shared line sits in the space beside it, and its dots
     // with it; one on the line moves them up into the space above. On the
@@ -298,9 +298,10 @@ fn compute_x_extents(beat: &Beat, in_beam: bool, opts: &LayoutOpts) -> (f32, f32
     let is_note = beat.is_note();
     let needs_flag = requires_flag(beat.duration);
 
+    let chord = if is_note { chord_of(beat, in_beam, opts) } else { Vec::new() };
     let (left, mut right) = if is_note {
         // Every head, on its side of the stem, and its parentheses.
-        chord_of(beat, in_beam, opts)
+        chord
             .iter()
             .map(|h| {
                 let x = head_origin_x(stem_dx(opts), &h.glyph, h.flipped, opts);
@@ -324,7 +325,7 @@ fn compute_x_extents(beat: &Beat, in_beam: bool, opts: &LayoutOpts) -> (f32, f32
 
     let dot_count = dot_count_of(beat.duration);
     if dot_count > 0 {
-        let first_dx = dot_first_dx(beat, in_beam, opts);
+        let first_dx = dot_first_dx(beat, in_beam, &chord, opts);
         let step_dx = opts.em * c::DOT_STEP_DX_EM;
         let last_dot_center_rel = first_dx + ((dot_count - 1) as f32) * step_dx;
         let last_dot_right_rel =
@@ -585,20 +586,13 @@ pub(super) fn build_note_layout(
         }
 
         // 3. Dots, by every head.
+        let first_dx = dot_first_dx(b, in_beam, &chord, opts);
+        let dot_count = dot_count_of(b.duration);
         let dots = match chord.is_empty() {
-            true => dot_glyphs(b, in_beam, center.x, cy, dot_count_of(b.duration), opts),
+            true => dot_glyphs(first_dx, center.x, cy, dot_count, opts),
             false => chord
                 .iter()
-                .flat_map(|h| {
-                    dot_glyphs(
-                        b,
-                        in_beam,
-                        center.x,
-                        opts.y_of(h.pos),
-                        dot_count_of(b.duration),
-                        opts,
-                    )
-                })
+                .flat_map(|h| dot_glyphs(first_dx, center.x, opts.y_of(h.pos), dot_count, opts))
                 .collect(),
         };
 

@@ -39,8 +39,6 @@ pub const FLAG_32ND_DOWN: Glyph =
     Glyph { ch: '\u{E245}', advance: 1.096, sw: [0.0, -0.6875], ne: [1.092, 3.248] };
 pub const ACCENT_ABOVE: Glyph =
     Glyph { ch: '\u{E4A0}', advance: 1.356, sw: [0.0, 0.004], ne: [1.356, 0.98] };
-pub const ACCENT_BELOW: Glyph =
-    Glyph { ch: '\u{E4A1}', advance: 1.356, sw: [0.0, -0.976], ne: [1.356, 0.0] };
 pub const SIGN_OPEN: Glyph =
     Glyph { ch: '\u{E5E7}', advance: 1.22, sw: [0.0, 0.0], ne: [1.216, 1.216] };
 pub const SIGN_HALF_OPEN: Glyph =

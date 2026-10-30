@@ -704,6 +704,39 @@ mod tests {
     }
 
     #[test]
+    fn kit_rests_and_beams_in_compound_and_odd_meters() {
+        // 6/8: a beamed rest among the snares leaves the beam where the
+        // snares alone put it, and reaches it as a stemlet.
+        let tips = |text: &str| -> Vec<f32> {
+            let (placed, _, _) = kit(text);
+            placed.layout().notes.iter().map(|n| n.stem.unwrap().p2.y).collect()
+        };
+        let with_rest = tips("6/8 S:e r:e S:e S:e S:e S:e ; K:q. r:q.");
+        let without = tips("6/8 S:e S:e S:e S:e S:e S:e ; K:q. r:q.");
+        assert!(with_rest.iter().zip(&without).all(|(a, b)| (a - b).abs() < 0.01), "{with_rest:?}");
+        let (placed, _, _) = kit("6/8 S:e r:e S:e S:e S:e S:e ; K:q. r:q.");
+        assert!(placed.layout().notes[1].stemlet);
+        let feet = &placed.voices[1].notes;
+        assert_eq!(feet[1].staff_pos, -3, "the feet's rest below the middle line");
+        assert!(feet[1].ledgers.is_empty());
+        // Half rests of the lower voice sit on the bottom line, with no
+        // ledger line through the staff: in 7/8 and in 4/4.
+        for text in
+            ["7/8 H:e H:e H:e H:e H:e H:e H:e ; K:e r:e r:e r:h", "4/4 S:h S:h ; r:h r:h"]
+        {
+            let (placed, _, _) = kit(text);
+            for rest in
+                placed.voices[1].notes.iter().filter(|n| n.kind == grooph_measure::BeatKind::Rest)
+            {
+                assert!(rest.ledgers.is_empty(), "{text}: {rest:?}");
+                if rest.duration.base_note() == grooph_measure::duration::NoteValue::Half {
+                    assert_eq!(rest.staff_pos, -4, "{text}");
+                }
+            }
+        }
+    }
+
+    #[test]
     fn a_ghost_notes_parentheses_center_on_the_note() {
         // On one line as on the kit's staff, unless a head is flipped.
         let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(500.0, 200.0));

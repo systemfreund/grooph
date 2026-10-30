@@ -36,7 +36,6 @@ GLYPHS = [
     ("FLAG_32ND_UP", "flag32ndUp", 0xE244),
     ("FLAG_32ND_DOWN", "flag32ndDown", 0xE245),
     ("ACCENT_ABOVE", "articAccentAbove", 0xE4A0),
-    ("ACCENT_BELOW", "articAccentBelow", 0xE4A1),
     ("SIGN_OPEN", "brassMuteOpen", 0xE5E7),
     ("SIGN_HALF_OPEN", "brassMuteHalfClosed", 0xE5E6),
     ("SIGN_CLOSED", "brassMuteClosed", 0xE5E5),

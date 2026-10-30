@@ -94,11 +94,17 @@ fn emit_stub_beams(
 
 /// Let every stem of a beamed group reach the group's beams, at the tip of
 /// its outermost head: on the kit's staff the heads of a group sit at
-/// different heights. A stemlet keeps its length.
+/// different heights. A beamed rest (a stemlet) neither moves the beams nor
+/// loses its length. [`build_beam_layout`] then hangs the beams off the
+/// stems' tips.
 pub(super) fn reach_beams(notes: &mut [NoteLayout], beam_groups: &[BeamGroup], opts: &LayoutOpts) {
     for g in beam_groups.iter().filter(|g| g.beat_indices.len() >= 2) {
-        let positions = g.beat_indices.iter().map(|&i| notes[i].staff_pos);
-        let tip = opts.stem_tip_y(opts.outermost(positions).unwrap_or(0));
+        let heads = g.beat_indices.iter().filter(|&&i| !notes[i].stemlet);
+        let positions = heads.map(|&i| notes[i].staff_pos);
+        let Some(outermost) = opts.outermost(positions) else {
+            continue;
+        };
+        let tip = opts.stem_tip_y(outermost);
         for &i in &g.beat_indices {
             let stemlet = notes[i].stemlet;
             if let Some(stem) = &mut notes[i].stem {
@@ -116,10 +122,10 @@ pub(super) fn build_beam_layout(
     beam_groups: &[BeamGroup],
     opts: &LayoutOpts,
 ) -> Vec<BeamLayout> {
-    // The beams hang off the stem tips of the group's outermost head.
+    // The beams hang off the stems' tips, where `reach_beams` put them.
     let tip_y = |g: &BeamGroup| {
-        let positions = g.beat_indices.iter().map(|&i| note_layout[i].staff_pos);
-        opts.stem_tip_y(opts.outermost(positions).unwrap_or(0))
+        let stems = g.beat_indices.iter().filter_map(|&i| note_layout[i].stem);
+        stems.map(|s| s.p2.y).next().unwrap_or_else(|| opts.stem_tip_y(0))
     };
 
     // Stems are already snapped in `note_layout`; fall back for un-stemmed

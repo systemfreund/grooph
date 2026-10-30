@@ -164,6 +164,18 @@ mod tests {
     }
 
     #[test]
+    fn a_score_saved_before_staves_is_on_one_line() {
+        let line = Score::single(Measure::new(TimeSignature::FOUR_FOUR));
+        let saved = ron::to_string(&line).unwrap();
+        assert!(!saved.contains("staff"), "a score on one line is saved as before: {saved}");
+        let back: Score = ron::from_str(&saved).unwrap();
+        assert_eq!(back.staff, StaffKind::Line);
+        let kit = Score { staff: StaffKind::Kit, ..line };
+        let back: Score = ron::from_str(&ron::to_string(&kit).unwrap()).unwrap();
+        assert_eq!(back.staff, StaffKind::Kit);
+    }
+
+    #[test]
     fn cursor_start_is_zero_zero() {
         let c = Cursor::start();
         assert_eq!(c.measure_idx, 0);
