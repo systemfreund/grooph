@@ -6,7 +6,7 @@
 //! are its beats'.
 
 use crate::grid::DEFAULT_GRID;
-use crate::{BeatIdx, Head, Measure, VoiceIdx};
+use crate::{Beat, BeatIdx, Head, Measure, VoiceIdx};
 
 /// One head sounding in a measure.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -55,18 +55,26 @@ impl Measure {
 
     /// The ticks where a beat of any voice starts, each once and in order.
     pub fn onsets(&self) -> Vec<Onset> {
-        let mut out: Vec<Onset> = Vec::new();
-        for (voice, bar) in self.voices().iter().enumerate() {
-            let ticks = DEFAULT_GRID.compute_onset_ticks(bar.beats());
-            for (beat_idx, (beat, &tick)) in bar.beats().iter().zip(&ticks).enumerate() {
-                out.push(Onset { tick, is_note: beat.is_note(), voice, beat_idx });
-            }
-        }
-        // Stable: at a tick the notes come first, then by voice.
-        out.sort_by_key(|o| (o.tick, !o.is_note));
-        out.dedup_by_key(|o| o.tick);
-        out
+        let voices: Vec<&[Beat]> = self.voices().iter().map(|v| &v.beats()[..]).collect();
+        merged(&voices)
     }
+}
+
+/// The onsets of `voices` played together, as [`Measure::onsets`]: each
+/// tick where a beat of one of them starts, once and in order. The layout
+/// spaces voices by these, so the drawing and the sound agree on them.
+pub fn merged(voices: &[&[Beat]]) -> Vec<Onset> {
+    let mut out: Vec<Onset> = Vec::new();
+    for (voice, beats) in voices.iter().enumerate() {
+        let ticks = DEFAULT_GRID.compute_onset_ticks(beats);
+        for (beat_idx, (beat, &tick)) in beats.iter().zip(&ticks).enumerate() {
+            out.push(Onset { tick, is_note: beat.is_note(), voice, beat_idx });
+        }
+    }
+    // Stable: at a tick the notes come first, then by voice.
+    out.sort_by_key(|o| (o.tick, !o.is_note));
+    out.dedup_by_key(|o| o.tick);
+    out
 }
 
 #[cfg(test)]

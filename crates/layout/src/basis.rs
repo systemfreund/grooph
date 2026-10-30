@@ -1,6 +1,7 @@
 use grooph_measure::Beat;
 use grooph_measure::duration::Duration;
 use grooph_measure::grid::DEFAULT_GRID;
+use grooph_measure::onsets::merged;
 
 /// X position of each beat's note head, relative to the start of the note
 /// area `content_w` wide.
@@ -61,9 +62,8 @@ impl Columns {
             .filter_map(|((beats, _), s)| Some(s.last()? + ticks(beats.last()?)))
             .max()
             .unwrap_or(0);
-        let mut onsets: Vec<u32> = starts.iter().flatten().copied().collect();
-        onsets.sort_unstable();
-        onsets.dedup();
+        let beats: Vec<&[Beat]> = voices.iter().map(|(beats, _)| *beats).collect();
+        let onsets: Vec<u32> = merged(&beats).iter().map(|o| o.tick).collect();
         let weights: Vec<f32> = (0..onsets.len())
             .map(|j| (onsets.get(j + 1).copied().unwrap_or(end) - onsets[j]) as f32)
             .collect();

@@ -145,6 +145,8 @@ spread across callers.
   the playback cursor, guide anchors, count labels (`Columns` in
   `grooph_render::measure`) and accuracy marks too, at the head of the beat
   standing for each onset.
+  The layout's shared spacing of voices (`basis::Columns`) takes its ticks
+  from the same `onsets::merged`, so drawing and sound agree on them.
   A one-line score has one voice, so its onsets are its beats.
 - The playback cursor is smoothed in the UI, audio offset for latency is optional.
 - Guide (`crates/app/src/guide.rs`, Practice options): what the staff shows
