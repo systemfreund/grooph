@@ -1841,6 +1841,31 @@ mod tests {
     }
 
     #[test]
+    fn a_kit_link_opens_and_shares_the_groove() {
+        use super::Grooph;
+        use grooph_measure::StaffKind;
+
+        let ctx = eframe::egui::Context::default();
+        let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let mut app = Grooph::new(&cc);
+        let groove = "4/4 H:e S-H:e H:e H:e H:e S-H:e Ho:e Hc:e ; K:q r:q K:q r:q";
+        let query = format!("v=2&bpm=96&r={}", groove.replace(' ', "+").replace(';', "%3B"));
+        app.open_link(grooph_link::parse_query(&query).unwrap().unwrap());
+        assert_eq!(app.editor.score.staff, StaffKind::Kit);
+        assert_eq!(app.editor.score.measures[0].voices().len(), 2);
+        // Every tab draws it.
+        for (i, tab) in [Tab::Practice, Tab::Edit, Tab::Practice].into_iter().enumerate() {
+            app.select_tab(tab);
+            shell_frame(&mut app, &ctx, i as f64 * 0.1, vec![]);
+        }
+        // Sharing writes the groove back.
+        let url = app.share_link_url().unwrap();
+        let shared = grooph_link::parse_query(url.split_once('?').unwrap().1).unwrap().unwrap();
+        let Some(grooph_link::LinkContent::Score(score)) = shared.content else { panic!("{url}") };
+        assert_eq!(grooph_measure::notation::format_score(&score).unwrap(), groove);
+    }
+
+    #[test]
     fn deleting_the_rhythm_behind_the_metronome_forgets_it() {
         use super::Grooph;
 

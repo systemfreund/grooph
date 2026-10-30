@@ -150,7 +150,7 @@ test("tools/call checks notation and polyrhythm by the app's parser", async () =
   assert.ok(!fine.isError, fine.content[0].text);
 });
 
-test("a drum kit score is refused until the app plays one", async () => {
+test("a drum kit score is refused: the metronome stays on the one line", async () => {
   const call = async (args) => (await rpc("tools/call", { name: "show_metronome", arguments: args })).result;
   for (const args of [
     { ts: "4/4", click: "K:q q q q" },
@@ -159,8 +159,11 @@ test("a drum kit score is refused until the app plays one", async () => {
   ]) {
     const kit = await call(args);
     assert.equal(kit.isError, true, JSON.stringify(args));
-    assert.match(kit.content[0].text, /drum kit scores .* are not supported yet/);
+    assert.match(kit.content[0].text, /drum kit notation .* does not fit/);
   }
+  // The app's links open a kit score; the tool takes no rhythm at all.
+  const rhythm = await call({ link: "https://grooph.app/?v=2&ts=4/4&r=K:q+S:q+K:q+S:q" });
+  assert.equal(rhythm.isError, true);
 });
 
 test("the result says what the metronome shows", async () => {

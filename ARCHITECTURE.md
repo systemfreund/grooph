@@ -183,10 +183,14 @@ spread across callers.
   `(S)`, a technique as a lowercase letter (`Ho`, `Hc`, `Sx`, `RDb`, `CRc`);
   instruments `K S H HF RD CR T1 T2 FT` (`INSTRUMENT_CODES`; cymbals take two
   letters so `R` never reads as `r:`). `;` separates the voices of a
-  measure. Errors name the place (`Place`: measure and voice).
-- Links refuse drum kit scores (`grooph_link::one_line`: instruments or
-  several voices, in `r`, `click` and `counter`) until the app shows and
-  plays them (#254, #255); so does the MCP server's link check.
+  measure. Errors name the place (`Place`: measure and voice). A score with
+  no note of the kit on the kit's staff (an empty kit bar) starts with
+  `kit`; `format_score` writes it only then.
+- App links carry drum kit scores in `r` (`grooph_link::is_kit`: the kit's
+  staff, its instruments or several voices). `click` and `counter` stay on
+  the one line. The MCP server is the metronome only: its link check
+  (`grooph_link_check::open_query`) refuses a kit score, and its tool
+  description and `llms.txt` do not describe the kit notation.
 - `grooph_link` (`crates/link`): query parameters `bpm`, `r`, `ts`,
   `groups` (the grouping of `ts`, `ts=7/8&groups=3+2+2`; `ts` takes no
   grouping of its own), `swing`, `su` and the generator's `sub`, `lvl`, `bars`, `space`, `seed` (seeded
