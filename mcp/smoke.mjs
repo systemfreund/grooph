@@ -51,6 +51,7 @@ const { tools } = await firstAnswer("--method", "tools/list");
 const tool = tools.find((t) => t.name === "show_metronome");
 assert.ok(tool, "tools/list has show_metronome");
 assert.equal(tool.annotations?.readOnlyHint, true);
+assert.equal(tool.annotations?.title, tool.title);
 const uri = tool._meta?.ui?.resourceUri;
 assert.ok(uri, "show_metronome has a view");
 console.log("tools/list: show_metronome");
