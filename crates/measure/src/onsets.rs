@@ -25,9 +25,9 @@ pub struct Onset {
     pub tick: u32,
     /// Whether a voice plays a note there; `false` where all are rests.
     pub is_note: bool,
-    /// The beat that stands for the onset: the first voice's note there,
-    /// or the first voice's rest where none plays. Its head is where the
-    /// onset is drawn.
+    /// The beat that stands for the onset: the note there of the lowest
+    /// numbered voice that plays one, or where none plays, the rest of the
+    /// first voice. Its head is where the onset is drawn.
     pub voice: VoiceIdx,
     pub beat_idx: BeatIdx,
 }
