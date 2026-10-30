@@ -50,14 +50,15 @@ fn staff_pos_of(beat: &Beat, in_beam: bool, opts: &LayoutOpts) -> i8 {
 
 /// Where a rest sits on the kit's staff: in the middle with one voice (a
 /// whole rest hangs from the fourth line), in its voice's half with two,
-/// clear of the other's notes: half and whole rests on a line, the others
-/// in the third or second space from the middle.
+/// clear of the other's notes: a half rest on the fourth or first line, a
+/// whole rest hanging from the fourth or second, the others in the second
+/// space up or down from the middle line.
 fn kit_rest_pos(beat: &Beat, opts: &LayoutOpts) -> i8 {
     let base = beat.duration.base_note();
     match (opts.shared_line, opts.stem_down, base) {
         (false, _, NoteValue::Whole) => 2,
         (false, ..) => 0,
-        (true, false, NoteValue::Whole) => 4,
+        (true, false, NoteValue::Whole) => 2,
         (true, false, NoteValue::Half) => 2,
         (true, false, _) => 3,
         (true, true, NoteValue::Whole) => -2,
@@ -384,14 +385,15 @@ pub(super) fn place_marks(notes: &mut [NoteLayout], beats: &[Beat], opts: &Layou
         if beat.accented() {
             place_accent(note, below, opts);
         }
-        let sign = beat.heads().iter().find_map(|h| glyphs::technique_sign(h.technique()));
-        if let Some(sign) = sign {
-            let (mut top, mut bottom) = content_extents(note);
-            if let Some(accent) = &note.accent {
-                top = top.min(accent.ink().top());
-                bottom = bottom.max(accent.ink().bottom());
-            }
-            let displacement = opts.em * opts.accent_displacement;
+        // One sign per head that has one (an open hi-hat and a choked
+        // crash), each past the one before.
+        let (mut top, mut bottom) = content_extents(note);
+        if let Some(accent) = &note.accent {
+            top = top.min(accent.ink().top());
+            bottom = bottom.max(accent.ink().bottom());
+        }
+        let displacement = opts.em * opts.accent_displacement;
+        for sign in beat.heads().iter().filter_map(|h| glyphs::technique_sign(h.technique())) {
             let mut glyph = PlacedGlyph::centered(sign, note.center.x, 0.0, opts.em);
             let ink = glyph.ink();
             glyph.origin.y = if below {
@@ -399,7 +401,9 @@ pub(super) fn place_marks(notes: &mut [NoteLayout], beats: &[Beat], opts: &Layou
             } else {
                 top - displacement - ink.bottom()
             };
-            note.sign = Some(glyph);
+            top = top.min(glyph.ink().top());
+            bottom = bottom.max(glyph.ink().bottom());
+            note.signs.push(glyph);
         }
     }
 }
@@ -617,7 +621,7 @@ pub(super) fn build_note_layout(
             stem,
             flag,
             accent: None,
-            sign: None,
+            signs: Vec::new(),
         };
 
         note_layout.push(note);
@@ -636,7 +640,11 @@ fn bar_rest(notes: &mut [NoteLayout], rect: &Rect, opts: &LayoutOpts) {
     for (i, note) in notes.iter_mut().enumerate() {
         note.dots.clear();
         if i == 0 {
-            let y = opts.y_of(0);
+            // From the one line, or the kit's fourth line.
+            let y = match opts.staff {
+                StaffKind::Line => opts.y_of(0),
+                StaffKind::Kit => opts.y_of(2),
+            };
             note.head = PlacedGlyph::centered(glyphs::REST_WHOLE, rect.center().x, y, opts.em);
         } else {
             note.hidden = true;

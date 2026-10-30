@@ -291,9 +291,9 @@ pub struct NoteLayout {
     pub stem: Option<Line>,
     pub flag: Option<PlacedGlyph>,
     pub accent: Option<PlacedGlyph>,
-    /// The sign of a technique (an open or closed hi-hat, a choke), beyond
-    /// the accent.
-    pub sign: Option<PlacedGlyph>,
+    /// The signs of the heads' techniques (an open or closed hi-hat, a
+    /// choke), past the accent.
+    pub signs: Vec<PlacedGlyph>,
 }
 
 impl NoteLayout {
@@ -306,7 +306,7 @@ impl NoteLayout {
             .chain(&self.dots)
             .chain(&self.flag)
             .chain(&self.accent)
-            .chain(&self.sign)
+            .chain(&self.signs)
     }
 }
 

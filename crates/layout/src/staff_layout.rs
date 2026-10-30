@@ -735,6 +735,21 @@ mod tests {
     }
 
     #[test]
+    fn an_empty_kit_bar_hangs_its_whole_rest_from_the_fourth_line() {
+        // An empty bar shown as one whole rest hangs from the fourth line,
+        // as a whole rest of one voice does.
+        let score = grooph_measure::notation::parse_score("4/4 S:q S:q S:q S:q | r:h r:h").unwrap();
+        let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(500.0, 400.0));
+        let o = StaffOpts { bar_rests: true, ..opts(20.0, rect) };
+        let staff = build_staff_layout(&score, &o);
+        let empty = &staff.systems[1];
+        let rest = &empty.measures[0].layout().notes[0];
+        assert_eq!(rest.head.glyph, crate::glyphs::REST_WHOLE);
+        let fourth = empty.y_baseline - o.rescaled(staff.scale).staff_space();
+        assert!((rest.head.origin.y - fourth).abs() < 0.01, "{rest:?}");
+    }
+
+    #[test]
     fn a_ghost_notes_parentheses_center_on_the_note() {
         // On one line as on the kit's staff, unless a head is flipped.
         let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(500.0, 200.0));
@@ -773,12 +788,12 @@ mod tests {
         let (placed, line, _) = kit("4/4 >Ho:q H:q Hc:q (S)-H:q ; K:q r:q K:q r:q");
         let hands = &placed.layout().notes;
         let accent = hands[0].accent.unwrap().ink();
-        let open = hands[0].sign.unwrap();
+        let open = hands[0].signs[0];
         assert_eq!(open.glyph, crate::glyphs::SIGN_OPEN);
         assert!(open.ink().bottom() <= accent.top(), "the o above the accent");
         assert!(accent.bottom() <= hands[0].stem.unwrap().p2.y + 0.01, "the accent above the stem");
-        assert!(hands[1].sign.is_none());
-        assert_eq!(hands[2].sign.unwrap().glyph, crate::glyphs::SIGN_CLOSED);
+        assert!(hands[1].signs.is_empty());
+        assert_eq!(hands[2].signs[0].glyph, crate::glyphs::SIGN_CLOSED);
         assert_eq!(hands[3].parens.len(), 2, "the ghost snare's parentheses");
         let feet = &placed.voices[1].notes;
         assert!(feet[1].staff_pos < 0 && feet[1].head.ink().top() > line, "kick rests below");
@@ -788,6 +803,12 @@ mod tests {
         assert_eq!(placed.layout().notes[1].staff_pos, 0);
         let (placed, _, _) = kit("2/4 S:q r:q ; K:h");
         assert!(placed.layout().notes[1].staff_pos > 0, "above with a lower voice");
+        // Each head with a technique gets its sign, stacked.
+        let (placed, _, _) = kit("2/4 Ho-CRc:q H:q");
+        let signs = &placed.layout().notes[0].signs;
+        let glyphs: Vec<_> = signs.iter().map(|g| g.glyph).collect();
+        assert_eq!(glyphs, [crate::glyphs::SIGN_OPEN, crate::glyphs::SIGN_CHOKE]);
+        assert!(signs[1].ink().bottom() <= signs[0].ink().top(), "the choke above the o");
     }
 
     #[test]
