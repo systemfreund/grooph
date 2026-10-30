@@ -3,6 +3,7 @@
 //! while the transport runs.
 
 use crate::platform::random_seed;
+use crate::shell::Tab;
 use crate::{Grooph, TransportState, clock};
 use grooph_measure::generator::{GeneratorSettings, Rng, generate_measure, generate_score};
 use grooph_measure::tempo::ScoreTiming;
@@ -79,6 +80,17 @@ impl Grooph {
         self.generate_new_score();
     }
 
+    /// Whether endless mode drives the played score: on the practice page,
+    /// also behind the More screen opened from it. The edit page plays the
+    /// score as it is, and the metronome plays no rhythm.
+    pub(crate) fn endless_runs(&self) -> bool {
+        let page = match self.tab() {
+            Tab::More => self.ui.shell.rhythm_tab,
+            tab => tab,
+        };
+        self.editor.generator.endless && page == Tab::Practice && !self.metronome_mode()
+    }
+
     /// Endless mode: a running score. Once the playback cursor reaches the
     /// last measure a new one is added below it, and measures already played
     /// are removed from the top once they have scrolled out of view, so the
@@ -87,11 +99,7 @@ impl Grooph {
     /// Added measures follow the current generator settings.
     pub(crate) fn update_endless(&mut self) {
         let playing = self.playback_ctl.transport_state == TransportState::Playing;
-        if !self.editor.generator.endless
-            || !playing
-            || self.metronome_mode()
-            || self.editor.score.is_empty()
-        {
+        if !self.endless_runs() || !playing || self.editor.score.is_empty() {
             return;
         }
 
