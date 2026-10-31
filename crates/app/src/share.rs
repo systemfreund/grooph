@@ -62,7 +62,7 @@ impl Grooph {
             swing: (!swing.is_straight()).then_some(swing),
             content: Some(content),
             click: meter.and_then(|ts| click.custom_for(ts)).cloned(),
-            counter: self.metronome_mode().then(|| self.counter_bar().cloned()).flatten(),
+            counter: self.metronome_mode().then(|| self.counter_bar()).flatten(),
             // Written as `poly` while its clicks are the ratio's.
             poly: self.metronome_mode().then(|| self.counter_ratio().map(|(r, _)| r)).flatten(),
         }

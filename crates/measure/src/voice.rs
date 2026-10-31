@@ -194,6 +194,11 @@ impl Measure {
         self.voices.get_mut(voice)
     }
 
+    /// Voice `voice` alone, as a measure of its own, if there is one.
+    pub fn single_voice(&self, voice: VoiceIdx) -> Option<Measure> {
+        self.voices.get(voice).map(|v| Measure { voices: vec![v.clone()] })
+    }
+
     /// Voice `voice` all `init` again, a note or a rest on every beat unit;
     /// the other voices stay. No change if the measure has no such voice.
     pub fn clear_voice(&mut self, voice: VoiceIdx, init: BeatKind) {

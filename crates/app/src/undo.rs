@@ -1,4 +1,3 @@
-use crate::metronome_view::MetronomeVoice;
 use grooph_measure::click::ClickBars;
 use grooph_measure::counter::CounterBars;
 use grooph_measure::{Cursor, Score};
@@ -12,12 +11,9 @@ pub(crate) struct EditorSnapshot {
     /// The counter rhythms, taken in the metronome tab only: it is the one
     /// place they change, and undo elsewhere must not bring old ones back.
     pub counter: Option<CounterBars>,
-    /// The click bars, taken with the counter rhythms: `score` holds only
-    /// one of the two voices, and the other must come back too.
+    /// The click bars, taken with the counter rhythms: `score` holds the
+    /// bars of one meter only, the others must come back too.
     pub click: Option<ClickBars>,
-    /// The metronome voice `score` holds (see
-    /// [`crate::metronome_view::MetronomeState::voice`]).
-    pub voice: MetronomeVoice,
 }
 
 pub(crate) struct UndoHistory {
@@ -74,7 +70,6 @@ mod tests {
             cursor: Cursor::at(0, beat_idx),
             counter: None,
             click: None,
-            voice: MetronomeVoice::Click,
         }
     }
 
@@ -151,7 +146,6 @@ mod tests {
             cursor: Cursor::start(),
             counter: None,
             click: None,
-            voice: MetronomeVoice::Click,
         };
 
         let mut h = UndoHistory::new(10);
@@ -162,13 +156,7 @@ mod tests {
 
         // restored snapshot retains original beat count (before mutation)
         let restored = h
-            .pop_undo(EditorSnapshot {
-                score,
-                cursor: Cursor::start(),
-                counter: None,
-                click: None,
-                voice: MetronomeVoice::Click,
-            })
+            .pop_undo(EditorSnapshot { score, cursor: Cursor::start(), counter: None, click: None })
             .unwrap();
         // the mutation added a beat to the *source* score but the snapshot is independent
         // we just check that pop returns something with a distinct measure state
