@@ -134,14 +134,16 @@ impl Grooph {
     /// Whether taps are captured right now. Touches on the staff then count
     /// as hits instead of moving the cursor.
     pub(crate) fn tap_capture_active(&self) -> bool {
-        // In the metronome there is no rhythm to play along with; taps edit the ring.
-        if self.playback_ctl.transport_state != TransportState::Playing || self.metronome_mode() {
+        if self.playback_ctl.transport_state != TransportState::Playing {
             return false;
         }
         match self.calibration_source() {
             Some(source) => source == HitSource::Tap,
+            // In the metronome there is no rhythm to play along with; taps
+            // edit the ring.
             None => {
-                self.playback_ctl.accuracy.enabled
+                !self.metronome_mode()
+                    && self.playback_ctl.accuracy.enabled
                     && self.playback_ctl.play_along.settings.tap_enabled
             }
         }
@@ -313,7 +315,8 @@ impl Grooph {
         if !self.playback_ctl.accuracy.tracker.update_state(active, now) {
             return;
         }
-        if total_loop_seconds <= 0.0 || self.editor.doc().score.measures().is_empty() {
+        let score = self.played_score().into_owned();
+        if total_loop_seconds <= 0.0 || score.measures().is_empty() {
             return;
         }
 
@@ -322,18 +325,14 @@ impl Grooph {
             // A calibration measures the raw latency, so it ignores the offset.
             let offset_ms = if calibrating.is_some() { 0.0 } else { settings.offset_ms(source) };
             let time = time - offset_ms as f64 / 1000.0;
-            let delta = self.playback_ctl.accuracy.tracker.record_hit(
-                time,
-                &timing,
-                &self.editor.doc().score,
-            );
+            let delta = self.playback_ctl.accuracy.tracker.record_hit(time, &timing, &score);
             if let (Some(delta), Some(cal)) =
                 (delta, self.playback_ctl.play_along.calibration.as_mut())
             {
                 cal.push(delta);
             }
         }
-        self.playback_ctl.accuracy.tracker.update_progress(now, &timing, &self.editor.doc().score);
+        self.playback_ctl.accuracy.tracker.update_progress(now, &timing, &score);
         self.advance_calibration();
     }
 

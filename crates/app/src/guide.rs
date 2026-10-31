@@ -116,15 +116,15 @@ impl Grooph {
     /// count-in: the first anchor is the score's first downbeat.
     pub(crate) fn update_guide_anchor(&mut self, playing: Option<(usize, f64)>, now: f64) {
         let guide = self.active_guide();
-        let playback = &mut self.playback_ctl.playback;
-        let Some((measure_idx, tick)) = playing.filter(|_| !playback.counting_in()) else {
+        let counting_in = self.playback_ctl.playback.counting_in();
+        let Some((measure_idx, tick)) = playing.filter(|_| !counting_in) else {
             return;
         };
-        let Some(ts) =
-            self.editor.doc().score.measures().get(measure_idx).map(|m| m.time_signature())
+        let Some(ts) = self.played_score().measures().get(measure_idx).map(|m| m.time_signature())
         else {
             return;
         };
+        let playback = &mut self.playback_ctl.playback;
         // A new bar: another measure, or the same one again after a loop
         // (the tick jumps back; small nudges toward the audio don't count).
         let half_bar = f64::from(DEFAULT_GRID.ticks_per_measure(&ts)) / 2.0;

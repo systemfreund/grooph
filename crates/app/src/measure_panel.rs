@@ -163,8 +163,13 @@ impl Grooph {
                     let em = staff_opts.em;
                     let count_config = self.build_count_config();
 
-                    // Only the documents: the hover marks below change.
-                    let score = &self.editor.docs.get(self.editor.document).score;
+                    // A calibration's click bar while it runs, else the
+                    // document (borrowed apart from the hover marks
+                    // below, which change).
+                    let calibration = self.calibrating().then(|| self.played_score().into_owned());
+                    let score = calibration
+                        .as_ref()
+                        .unwrap_or(&self.editor.docs.get(self.editor.document).score);
                     let staff = build_staff_layout(score, &staff_opts);
                     // One row fits the height, so nothing above or below
                     // the staff (accents, count labels) is cut off on a

@@ -2,17 +2,16 @@
 //! (or plays MIDI) along, and the median deviation becomes that source's
 //! input offset.
 //!
-//! The working score and playback options are stashed for the run and put
-//! back afterwards; persistence reads the stash so a save mid-calibration
-//! never stores the click score.
+//! The run plays a click bar of its own (quarter notes in 4/4) at its own
+//! tempo and with plain options ([`Grooph::played_score`],
+//! [`Grooph::played_bpm`], [`Grooph::playback_options`]): no page's
+//! document, the tempo or an option is touched, and the page shown stays.
 
-use crate::documents::Document;
 use crate::play_along::{HitSource, MAX_INPUT_OFFSET_MS};
 use crate::{Grooph, TransportState};
 use eframe::egui;
-use grooph_audio::{GapClick, TempoRamp};
-use grooph_measure::swing::Swing;
-use grooph_measure::{Cursor, Score};
+use grooph_measure::Score;
+use std::borrow::Cow;
 
 /// Tempo of the calibration click.
 pub(crate) const CALIBRATION_BPM: u32 = 100;
@@ -22,21 +21,6 @@ pub(crate) const CALIBRATION_WARMUP: usize = 4;
 pub(crate) const CALIBRATION_HITS: usize = 12;
 /// Above this spread the result is flagged as unreliable.
 const UNSTEADY_SPREAD_MS: f64 = 30.0;
-
-/// What the calibration run replaced and puts back.
-pub(crate) struct CalibrationStash {
-    pub(crate) score: Score,
-    pub(crate) cursor: Cursor,
-    pub(crate) bpm: u32,
-    pub(crate) swing: Swing,
-    pub(crate) count_in: bool,
-    pub(crate) endless: bool,
-    pub(crate) ghost_notes: bool,
-    pub(crate) gap: GapClick,
-    pub(crate) ramp: TempoRamp,
-    pub(crate) dirty: bool,
-    pub(crate) active_pattern_id: Option<u64>,
-}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum CalibrationPhase {
@@ -48,7 +32,8 @@ pub(crate) struct Calibration {
     pub(crate) source: HitSource,
     pub(crate) phase: CalibrationPhase,
     deltas: Vec<f64>,
-    pub(crate) stash: Option<CalibrationStash>,
+    /// The click bar the run plays: quarter notes in 4/4.
+    score: Score,
 }
 
 impl Calibration {
@@ -103,35 +88,41 @@ impl Grooph {
             .map(|c| c.source)
     }
 
-    pub(crate) fn calibration_stash(&self) -> Option<&CalibrationStash> {
-        self.playback_ctl.play_along.calibration.as_ref()?.stash.as_ref()
+    /// Whether a calibration run plays: the transport plays its click bar.
+    pub(crate) fn calibrating(&self) -> bool {
+        self.calibration_source().is_some()
+    }
+
+    /// The click bar of a calibration run.
+    fn calibration_score(&self) -> Option<&Score> {
+        let cal = self.playback_ctl.play_along.calibration.as_ref()?;
+        (cal.phase == CalibrationPhase::Running).then_some(&cal.score)
+    }
+
+    /// The score the transport plays: the calibration's click bar during a
+    /// run, the click bar in the metronome, else the shown page's document.
+    pub(crate) fn played_score(&self) -> Cow<'_, Score> {
+        if let Some(score) = self.calibration_score() {
+            Cow::Borrowed(score)
+        } else if self.metronome_mode() {
+            Cow::Owned(self.metronome_score())
+        } else {
+            Cow::Borrowed(&self.editor.doc().score)
+        }
+    }
+
+    /// The tempo setting played: the calibration's own during a run.
+    pub(crate) fn played_bpm(&self) -> u32 {
+        if self.calibrating() { CALIBRATION_BPM } else { self.playback_ctl.bpm }
     }
 
     pub(crate) fn start_calibration(&mut self, source: HitSource) {
-        // It runs on the practice page, whatever page the More screen was
-        // opened from: a written score or the click bar is never put aside.
-        self.show_document(Document::Practice);
         self.stop_transport();
-        let generator = &mut self.editor.generator;
-        let doc = self.editor.docs.get_mut(self.editor.document);
-        let stash = CalibrationStash {
-            score: std::mem::replace(&mut doc.score, Score::single(Self::default_measure())),
-            cursor: std::mem::replace(&mut doc.cursor, Cursor::start()),
-            bpm: std::mem::replace(&mut self.playback_ctl.bpm, CALIBRATION_BPM),
-            swing: std::mem::take(&mut self.playback_ctl.audio_cfg.swing),
-            count_in: std::mem::replace(&mut self.playback_ctl.audio_cfg.count_in, true),
-            endless: std::mem::replace(&mut generator.endless, false),
-            ghost_notes: std::mem::replace(&mut generator.ghost_notes, false),
-            gap: std::mem::take(&mut self.playback_ctl.audio_cfg.gap),
-            ramp: std::mem::take(&mut self.playback_ctl.audio_cfg.ramp),
-            dirty: doc.dirty,
-            active_pattern_id: doc.active_pattern_id,
-        };
         self.playback_ctl.play_along.calibration = Some(Calibration {
             source,
             phase: CalibrationPhase::Running,
             deltas: Vec::new(),
-            stash: Some(stash),
+            score: Score::single(Self::default_measure()),
         });
         self.start_playback();
     }
@@ -154,26 +145,10 @@ impl Grooph {
         self.stop_transport();
     }
 
-    /// Called when the transport stops: put the user's score back. A run
-    /// stopped before it finished is a cancel.
+    /// Called when the transport stops: a run stopped before it finished is
+    /// a cancel.
     pub(crate) fn end_calibration_run(&mut self) {
-        let Some(cal) = self.playback_ctl.play_along.calibration.as_mut() else {
-            return;
-        };
-        if let Some(stash) = cal.stash.take() {
-            self.editor.doc_mut().score = stash.score;
-            self.editor.doc_mut().cursor = stash.cursor;
-            self.playback_ctl.bpm = stash.bpm;
-            self.playback_ctl.audio_cfg.swing = stash.swing;
-            self.playback_ctl.audio_cfg.count_in = stash.count_in;
-            self.editor.generator.endless = stash.endless;
-            self.editor.generator.ghost_notes = stash.ghost_notes;
-            self.playback_ctl.audio_cfg.gap = stash.gap;
-            self.playback_ctl.audio_cfg.ramp = stash.ramp;
-            self.editor.doc_mut().dirty = stash.dirty;
-            self.editor.doc_mut().active_pattern_id = stash.active_pattern_id;
-        }
-        if cal.phase == CalibrationPhase::Running {
+        if self.calibrating() {
             self.playback_ctl.play_along.calibration = None;
         }
     }
