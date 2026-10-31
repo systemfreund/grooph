@@ -263,7 +263,7 @@ fn badged_switch_row(ui: &mut Ui, label: &str, badge: Option<&str>, on: &mut boo
         visuals.text_color(),
     );
     if let Some(badge) = badge {
-        paint_badge(painter, pos2(label_rect.right() + 8.0, rect.center().y), badge, visuals);
+        paint_badge(painter, pos2(label_rect.right() + 8.0, rect.center().y), badge);
     }
 
     paint_switch(painter, rect, *on, how_on, visuals);
@@ -330,17 +330,18 @@ fn split_row(ui: &mut Ui, label: &str, value: &str, on: &mut bool) -> Response {
 
 /// Pill in the accent colour with small text, its left edge vertically
 /// centered on `left`.
-fn paint_badge(painter: &Painter, left: Pos2, text: &str, visuals: &egui::Visuals) {
-    let galley = painter.layout_no_wrap(
-        text.to_owned(),
-        FontId::proportional(12.0),
-        visuals.selection.stroke.color,
-    );
+fn paint_badge(painter: &Painter, left: Pos2, text: &str) {
+    let galley = painter.layout_no_wrap(text.to_owned(), FontId::proportional(12.0), BADGE_TEXT);
     let size = galley.size() + vec2(12.0, 2.0);
     let pill = Rect::from_min_size(pos2(left.x, left.y - size.y / 2.0), size);
-    painter.rect_filled(pill, size.y / 2.0, visuals.selection.bg_fill);
+    painter.rect_filled(pill, size.y / 2.0, BADGE_FILL);
     painter.galley(pill.center() - galley.size() / 2.0, galley, Color32::PLACEHOLDER);
 }
+
+/// The colours of a badge such as "BETA", in a settings row or on a tab:
+/// orange, the same in both themes.
+const BADGE_FILL: Color32 = Color32::from_rgb(0xD9, 0x6B, 0x1E);
+const BADGE_TEXT: Color32 = Color32::WHITE;
 
 /// Track colour of a switch that is off. It has to differ from the white
 /// knob, so the light theme gets a grey instead of its white field colour.
@@ -1498,10 +1499,10 @@ impl Grooph {
 /// icon: the tab is not finished yet.
 fn beta_pill(painter: &egui::Painter, left_top: egui::Pos2) {
     let font = FontId::proportional(9.0);
-    let text = painter.layout_no_wrap("BETA".to_owned(), font, Color32::WHITE);
+    let text = painter.layout_no_wrap("BETA".to_owned(), font, BADGE_TEXT);
     let rect = egui::Rect::from_min_size(left_top, text.size() + vec2(8.0, 2.0));
-    painter.rect_filled(rect, rect.height() / 2.0, Color32::from_rgb(0xD9, 0x6B, 0x1E));
-    painter.galley(rect.min + vec2(4.0, 1.0), text, Color32::WHITE);
+    painter.rect_filled(rect, rect.height() / 2.0, BADGE_FILL);
+    painter.galley(rect.min + vec2(4.0, 1.0), text, BADGE_TEXT);
 }
 
 #[cfg(test)]
