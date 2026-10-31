@@ -1641,6 +1641,50 @@ mod tests {
     }
 
     #[test]
+    fn the_score_tabs_library_holds_rhythms_only() {
+        use super::Grooph;
+        use crate::library_panel::LibraryTab;
+        use crate::pickers::Picker;
+        use eframe::egui::{Pos2, RawInput, Rect, Shape, vec2};
+
+        let ctx = eframe::egui::Context::default();
+        let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let mut app = Grooph::new(&cc);
+        app.ui.library_tab = LibraryTab::Presets;
+        let mut texts = |app: &mut Grooph| {
+            let mut texts = Vec::new();
+            for _ in 0..2 {
+                let screen = Rect::from_min_size(Pos2::ZERO, vec2(390.0, 844.0));
+                let input = RawInput { screen_rect: Some(screen), ..Default::default() };
+                let mut output = ctx.run_ui(input, |ui| {
+                    app.apply_style(ui);
+                    app.settings_picker(ui);
+                });
+                output.textures_delta.clear();
+                texts = output
+                    .shapes
+                    .iter()
+                    .filter_map(|clipped| match &clipped.shape {
+                        Shape::Text(text) => Some(text.galley.text().to_owned()),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>();
+            }
+            texts
+        };
+        // From More: both halves.
+        app.select_tab(Tab::More);
+        app.ui.picker = Some(Picker::Library);
+        assert!(texts(&mut app).iter().any(|t| t == "Presets"));
+        // From the score tab's card: its rhythms, no presets.
+        app.select_tab(Tab::Score);
+        app.ui.picker = Some(Picker::Library);
+        let shown = texts(&mut app);
+        assert!(!shown.iter().any(|t| t == "Presets"), "{shown:?}");
+        assert!(shown.iter().any(|t| t.contains("Save as new")), "{shown:?}");
+    }
+
+    #[test]
     fn library_and_preset_picker_render_at_phone_width() {
         use super::Grooph;
         use crate::library_panel::LibraryTab;

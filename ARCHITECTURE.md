@@ -603,7 +603,8 @@ grooph's metronome runs inside AI chats as an
   the playback on without a staff); saving in the library leaves it playing
   too, and a loaded pattern opens on the score tab.
 - The library (`library_panel.rs`) has two halves, Rhythms and Presets, of
-  the same cards (`library_card`). Rhythms are the score tab's: a tap loads
+  the same cards (`library_card`); opened from the score tab's card it
+  holds the rhythms only. Rhythms are the score tab's: a tap loads
   one into it, Save keeps its score from any page (`docs.score`),
   and its marks (active, unsaved) are its pattern's. A tap on a preset
   applies it and opens the practice page (`open_preset`), ✏ renames or deletes, built-in

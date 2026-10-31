@@ -331,7 +331,13 @@ impl Grooph {
     /// Saved rhythms and practice presets, as cards: a tap loads one, ✏
     /// renames or deletes it. Returns a preset tapped, for the caller to open
     /// after its check for generator changes.
+    /// On the score tab it holds the score's rhythms only: a preset belongs
+    /// to the practice page.
     pub(super) fn library_panel(&mut self, ui: &mut egui::Ui) -> Option<PresetId> {
+        if self.tab() == Tab::Score {
+            self.rhythms(ui);
+            return None;
+        }
         ui.columns(2, |cols| {
             for (col, (tab, label)) in cols
                 .iter_mut()
