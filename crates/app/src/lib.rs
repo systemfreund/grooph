@@ -781,7 +781,8 @@ impl Grooph {
         let Some(pattern) = self.editor.library.get(id) else {
             return;
         };
-        let score = pattern.score.clone();
+        let mut score = pattern.score.clone();
+        score.undouble_instruments();
         let bpm = pattern.bpm;
 
         // The score tab's score is replaced.
@@ -901,7 +902,8 @@ impl Grooph {
         }
     }
 
-    fn replace_score_from_link(&mut self, score: Score) {
+    fn replace_score_from_link(&mut self, mut score: Score) {
+        score.undouble_instruments();
         self.stop_transport();
         self.show_document(Document::Score);
         self.with_undo_snapshot(|app| {
@@ -1961,6 +1963,20 @@ mod tests {
         });
         assert!(app.ui.pending_load.is_some());
         assert!(app.metronome_mode());
+    }
+
+    #[test]
+    fn a_link_with_a_doubled_drum_opens_with_it_once() {
+        use super::Grooph;
+        use grooph_measure::notation::format_score;
+
+        let cc = eframe::CreationContext::_new_kittest(eframe::egui::Context::default());
+        let mut app = Grooph::new(&cc);
+        let groove = "4/4 S-H:q H:q H:h ; >S:q K:q K:h";
+        let query = format!("v=2&r={}", groove.replace(' ', "+").replace(';', "%3B"));
+        app.open_link(grooph_link::parse_query(&query).unwrap().unwrap());
+        let score = &app.editor.doc().score;
+        assert_eq!(format_score(score).unwrap(), "4/4 >S-H:q H:q H:h ; r:q K:q K:h");
     }
 
     #[test]

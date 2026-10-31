@@ -635,7 +635,8 @@ mod tests {
         apply(&mut app, "edit.undo");
         assert_eq!(text(&app), "4/4 S-H:q H:q H:q H:q ; K:q r:q K:q r:q");
 
-        // A snare in both voices already, from a link: the other edits of
+        // A snare in both voices already (links and patterns are loaded
+        // without, see `Score::undouble_instruments`): the other edits of
         // the measure go through, a second doubling does not.
         let mut app = editing("4/4 S-H:q H:q H:q H:q ; S:q r:q K:h");
         app.editor.instrument = Snare;

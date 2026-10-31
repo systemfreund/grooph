@@ -169,7 +169,10 @@ spread across callers.
    a tool whose edit makes two voices strike an instrument of the kit at
    the same tick is refused (`Measure::doubled_instruments`, compared
    before and after each tool in `apply_tool`, so a doubling the score
-   already has does not block other edits). The one line edits as before:
+   already has does not block other edits). A score loaded from a link
+   or a saved pattern is made so first (`Score::undouble_instruments`):
+   a doubled head stays in its instrument's usual voice, its accent going
+   along, and leaves the other. The one line edits as before:
    its pen is `Rhythm`, and the kit's tools do nothing there.
 7. Both staves are one model, `grooph_layout::staff::Staff`, which
    `Staff::of(StaffKind)` gives (`LayoutOpts::staff_model`; the only match

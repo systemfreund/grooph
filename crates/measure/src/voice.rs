@@ -245,6 +245,44 @@ impl Measure {
         doubled
     }
 
+    /// Strike each drum of the kit by one voice at a time again (see
+    /// [`Measure::doubled_instruments`]), for a score made elsewhere, such
+    /// as an old link: a head struck by two voices at once stays in the
+    /// voice its instrument is written in ([`Instrument::default_voice`]),
+    /// or the uppermost, and leaves the others, its accent going along. A
+    /// beat left without heads is a rest. Reports whether one was doubled.
+    pub fn undouble_instruments(&mut self) -> bool {
+        let doubled = self.doubled_instruments();
+        for &(tick, instrument) in &doubled {
+            let hits: Vec<(VoiceIdx, usize)> = (self.voices.iter().enumerate())
+                .filter_map(|(v, voice)| {
+                    let onsets = DEFAULT_GRID.compute_onset_ticks(voice.beats());
+                    let mut beats = voice.beats().iter().zip(onsets);
+                    let at = beats.position(|(beat, t)| {
+                        t == tick && beat.heads().get(instrument).is_some()
+                    })?;
+                    Some((v, at))
+                })
+                .collect();
+            let Some(&keep) =
+                hits.iter().find(|&&(v, _)| v == instrument.default_voice()).or(hits.first())
+            else {
+                continue;
+            };
+            let mut accented = false;
+            for &(v, at) in hits.iter().filter(|&&hit| hit != keep) {
+                let beat = &mut self.voices[v].beats[at];
+                let mut heads = *beat.heads();
+                accented |= heads.remove(instrument).is_some_and(|h| h.accented());
+                beat.set_heads(heads);
+            }
+            if accented && let Some(head) = self.voices[keep.0].beats[keep.1].head_mut(instrument) {
+                head.set_accented(true);
+            }
+        }
+        !doubled.is_empty()
+    }
+
     /// Add copies of the voices of `other` below this measure's. Fails, and
     /// adds none, if `other` is in another meter.
     pub fn push_voices(&mut self, other: &Measure) -> Result<(), DifferentMeter> {

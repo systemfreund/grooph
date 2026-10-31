@@ -90,6 +90,13 @@ impl Score {
         &mut self.measures
     }
 
+    /// Strike each drum of the kit by one voice at a time in every measure
+    /// (see [`Measure::undouble_instruments`]). Reports whether one was
+    /// doubled.
+    pub fn undouble_instruments(&mut self) -> bool {
+        self.measures.iter_mut().fold(false, |any, m| m.undouble_instruments() | any)
+    }
+
     /// The measures, taken out of the score: at least one.
     pub fn into_measures(self) -> Vec<Measure> {
         self.measures
@@ -238,6 +245,28 @@ mod tests {
         // The metronome's click and counter rhythm sound together.
         let rhythms = parse_score("4/4 q q q q ; q q q q").unwrap();
         assert!(rhythms.measures()[0].doubled_instruments().is_empty());
+    }
+
+    #[test]
+    fn a_doubled_drum_stays_in_its_voice() {
+        use crate::notation::{format_score, parse_score};
+        let undoubled = |text: &str| {
+            let mut score = parse_score(text).unwrap();
+            let changed = score.undouble_instruments();
+            assert!(score.measures()[0].doubled_instruments().is_empty());
+            (changed, format_score(&score).unwrap())
+        };
+        // The snare stays above, its accent going along; the kick below.
+        assert_eq!(
+            undoubled("4/4 S-H:q H:q H:h ; >S:q K:q K:h"),
+            (true, "4/4 >S-H:q H:q H:h ; r:q K:q K:h".to_owned())
+        );
+        assert_eq!(
+            undoubled("4/4 K-H:q H:q H:h ; K:q K:q K:h"),
+            (true, "4/4 H:q H:q H:h ; K:q K:q K:h".to_owned())
+        );
+        let fine = "4/4 S-H:e H:e H:q H:h ; r:e S:e K:q K:h";
+        assert_eq!(undoubled(fine), (false, format_score(&parse_score(fine).unwrap()).unwrap()));
     }
 
     #[test]
