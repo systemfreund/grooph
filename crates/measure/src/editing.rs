@@ -4,7 +4,7 @@ use crate::duration::{Duration, NoteValue, TupletSpec};
 use crate::editing::Modification::{DissolveTuplet, ToggleAccent};
 use crate::grid::DEFAULT_GRID;
 use crate::tuplet::TupletGroupId;
-use crate::{Beat, BeatIdx, BeatKind, Instrument, TimeSignature, VoiceBar};
+use crate::{Beat, BeatIdx, BeatKind, TimeSignature, VoiceBar};
 use either::Either;
 
 #[derive(Debug)]
@@ -108,9 +108,8 @@ impl VoiceBar {
             let kind = if let Some(override_kind) = beat_kind { override_kind } else { cur.kind() };
             // A note of the kit keeps its heads (`set_beat` keeps each
             // one's accent).
-            let kit = cur.heads().iter().any(|h| h.instrument() != Instrument::Rhythm);
             let new_beat = match kind {
-                Note if kit => Beat::with_heads(new_dur, *cur.heads()),
+                Note if cur.is_kit() => Beat::with_heads(new_dur, *cur.heads()),
                 Note => Beat::note(new_dur),
                 Rest => Beat::rest(new_dur),
             };

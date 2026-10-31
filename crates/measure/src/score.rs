@@ -112,6 +112,12 @@ impl Score {
         Cursor { measure_idx, voice, beat_idx: cursor.beat_idx.min(beats.saturating_sub(1)) }
     }
 
+    /// Whether a note of any voice plays an instrument of the kit
+    /// ([`Beat::is_kit`](crate::Beat::is_kit)).
+    pub fn has_kit_heads(&self) -> bool {
+        self.measures.iter().flat_map(|m| m.voices()).flat_map(|v| v.beats()).any(|b| b.is_kit())
+    }
+
     pub fn is_empty(&self) -> bool {
         self.measures.is_empty()
     }
@@ -231,6 +237,16 @@ mod tests {
         assert_eq!(back, Cursor::at(2, 5));
         let lower = Cursor::in_voice(1, 1, 3);
         assert_eq!(ron::from_str::<Cursor>(&ron::to_string(&lower).unwrap()).unwrap(), lower);
+    }
+
+    #[test]
+    fn kit_heads_are_found_in_any_voice() {
+        use crate::notation::parse_score;
+        assert!(!parse_score("4/4 q q q q").unwrap().has_kit_heads());
+        assert!(!parse_score("kit 4/4 q q q q").unwrap().has_kit_heads());
+        assert!(parse_score("4/4 q q q q ; K:h K:h").unwrap().has_kit_heads());
+        let line = parse_score("4/4 q q q q").unwrap();
+        assert!(!line.measures[0].first_voice().beats()[0].is_kit());
     }
 
     #[test]

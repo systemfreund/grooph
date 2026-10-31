@@ -44,9 +44,7 @@ use grooph_measure::grid::DEFAULT_GRID;
 use grooph_measure::notation::{format_score, parse_score};
 use grooph_measure::swing::{MAX_SWING_PERCENT, MIN_SWING_PERCENT, Swing, SwingUnit};
 use grooph_measure::tempo::{MAX_BPM, MIN_BPM};
-use grooph_measure::{
-    Instrument, Measure, ParseTimeSignatureError, Score, StaffKind, TimeSignature,
-};
+use grooph_measure::{Measure, ParseTimeSignatureError, Score, StaffKind, TimeSignature};
 use std::fmt::Write as _;
 
 /// Version [`SharedLink::to_url`] writes as `v`.
@@ -342,14 +340,8 @@ fn single_measure(name: &str, ts: TimeSignature, text: &str) -> Result<Measure, 
 /// line.
 pub fn is_kit(score: &Score) -> bool {
     score.staff == StaffKind::Kit
-        || score.measures.iter().any(|m| {
-            m.voices().len() > 1
-                || m.first_voice()
-                    .beats()
-                    .iter()
-                    .flat_map(|b| b.heads().iter())
-                    .any(|h| h.instrument() != Instrument::Rhythm)
-        })
+        || score.has_kit_heads()
+        || score.measures.iter().any(|m| m.voices().len() > 1)
 }
 
 /// Quarter notes per minute for a version 1 tempo of `bpm` beat units of

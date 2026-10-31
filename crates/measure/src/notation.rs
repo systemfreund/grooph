@@ -449,22 +449,15 @@ pub fn parse_score(input: &str) -> Result<Score, NotationError> {
         measures.extend(measure);
     }
     // A score with an instrument of the kit is written on the kit's staff.
-    let kit = marked_kit || has_kit_heads(&measures);
-    let staff = if kit { StaffKind::Kit } else { StaffKind::Line };
-    Ok(Score { staff, ..Score::new(measures) })
+    let mut score = Score::new(measures);
+    if marked_kit || score.has_kit_heads() {
+        score.staff = StaffKind::Kit;
+    }
+    Ok(score)
 }
 
 /// The token that puts a score without notes of the kit on the kit's staff.
 const KIT_MARKER: &str = "kit";
-
-/// Whether a head of `measures` is an instrument of the kit.
-fn has_kit_heads(measures: &[Measure]) -> bool {
-    measures
-        .iter()
-        .flat_map(|m| m.voices())
-        .flat_map(|v| v.beats())
-        .any(|b| b.heads().iter().any(|h| h.instrument() != Instrument::Rhythm))
-}
 
 /// Format `score` in the text notation. The first measure always states its
 /// time signature; later ones only when it changes. Returns `None` if a beat
@@ -473,7 +466,7 @@ fn has_kit_heads(measures: &[Measure]) -> bool {
 pub fn format_score(score: &Score) -> Option<String> {
     let mut out = String::new();
     // Its notes do not tell the kit's staff.
-    if score.staff == StaffKind::Kit && !has_kit_heads(&score.measures) {
+    if score.staff == StaffKind::Kit && !score.has_kit_heads() {
         out.push_str(KIT_MARKER);
         out.push(' ');
     }
