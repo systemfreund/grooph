@@ -1853,8 +1853,11 @@ mod tests {
         app.set_metronome_meter(TimeSignature::SEVEN_EIGHT);
         app.set_counter_ratio(app.counter_choices().first().copied());
         app.cycle_click_level(0);
+        // The counter rhythm's clicks edited too: still its ratio, edited.
+        app.cycle_counter_level(1);
         let (click, counter, ratio) =
             (app.click_bar(), app.counter_bar().unwrap(), app.counter_ratio());
+        assert!(matches!(ratio, Some((_, true))), "{ratio:?}");
         let url = app.share_link_url().unwrap();
         // Saved as the settings always were, and loaded into the document.
         let mut storage = SavedState::default();
@@ -1875,7 +1878,7 @@ mod tests {
         assert_eq!(fresh.metronome_meter(), TimeSignature::SEVEN_EIGHT);
         assert!(same_bar(&fresh.click_bar(), &click));
         assert!(same_bar(&fresh.counter_bar().unwrap(), &counter));
-        assert_eq!(fresh.counter_ratio().map(|(r, _)| r), ratio.map(|(r, _)| r));
+        assert_eq!(fresh.counter_ratio(), ratio);
     }
 
     #[test]
