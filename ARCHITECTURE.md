@@ -593,8 +593,8 @@ grooph's metronome runs inside AI chats as an
   buttons), Score (its own score, see "Rhythm documents": a card with the
   score's name (a tap opens the library) and BPM, the options sheet without the generator's
   rows and ✏ / play / share in `Mode::Score`; ✏ (`edit_score`) opens the
-  editor, `Mode::Edit`: tool palette + edit bar with Done; Esc and Back
-  switch between the two), More (`Mode::MoreMenu`, a screen of its own without the staff: a list at
+  editor, `Mode::Edit`: tool palette + edit bar with Done; Esc switches
+  between the two, Back closes the editor), More (`Mode::MoreMenu`, a screen of its own without the staff: a list at
   the bottom whose rows open pickers, Theme is picked in its row). The tab is
   derived from `Mode` (`tab`), so modes set elsewhere land on the right tab;
   the Metronome tab is open while `metronome_mode()`, in `Mode::Playback`

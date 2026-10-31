@@ -71,7 +71,7 @@ A ratio that does not fit the meter (7:5 in 4/4) shows an error that lists the r
 
 ## How to use
 
-- Play/pause: Space key or the play button. Esc switches between edit and playback mode.
+- Play/pause: Space key or the play button. Esc opens and closes the editor of the Score tab (and of the metronome's clicks).
 - Share: the share button next to play (Practice, Score and Metronome tabs) and in the score editor's bar shares a link to the current rhythm or metronome and tempo; where there is no share sheet it copies the link.
 - Generator: open the dice (🎲) menu, choose subdivision, complexity, bars and rests; every change creates a new rhythm.
 - Editor: pick a note, rest or tuplet from the palette and click a position in the measure; double-click toggles note/rest.

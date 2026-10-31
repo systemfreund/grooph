@@ -128,6 +128,9 @@ pub(crate) struct PersistedState {
     /// The score tab's score.
     score: Score,
     cursor: Cursor,
+    /// The document shown, so the More screen opens again on the one it was
+    /// opened from.
+    document: Document,
     /// Practice's generated rhythm; a state saved before the two documents
     /// has none, and Practice starts with a new one.
     practice_score: Option<Score>,
@@ -168,6 +171,7 @@ impl Default for PersistedState {
             version: PERSISTED_STATE_VERSION,
             score: Score::single(Grooph::default_measure()),
             cursor: Cursor::start(),
+            document: Document::Score,
             practice_score: None,
             practice_cursor: Cursor::start(),
             bpm: grooph_link::DEFAULT_BPM,
@@ -233,6 +237,7 @@ impl PersistedState {
             version: PERSISTED_STATE_VERSION,
             score: score.clone(),
             cursor,
+            document: app.document(),
             practice_score: Some(practice_score.clone()),
             practice_cursor,
             bpm: stash.map_or(app.playback_ctl.bpm, |s| s.bpm),
@@ -825,6 +830,8 @@ impl Grooph {
             self.ui.mode = Mode::Playback;
         }
         let metronome = matches!(link.content, Some(LinkContent::Metronome(_)));
+        let replaces_rhythm =
+            matches!(link.content, Some(LinkContent::Score(_) | LinkContent::Generator { .. }));
         match link.content {
             Some(LinkContent::Score(score)) => self.replace_score_from_link(score),
             Some(LinkContent::Metronome(ts)) => {
@@ -864,8 +871,9 @@ impl Grooph {
         if metronome {
             self.open_metronome();
             self.ui.mode = Mode::Playback;
-        } else {
-            // The content is reproducible from the link, so it is not "unsaved".
+        } else if replaces_rhythm {
+            // The content is reproducible from the link, so it is not
+            // "unsaved". A tempo-only link leaves the score's mark alone.
             self.editor.dirty = false;
         }
     }
@@ -1340,6 +1348,8 @@ impl Grooph {
             },
         };
         app.editor.active_preset = app.matching_preset();
+        // The document the More screen (or the metronome) was opened from.
+        app.show_document(state.document);
         // A link opens after the saved tab, so its tab wins.
         app.select_tab(state.tab);
         if let Some(query) = query {

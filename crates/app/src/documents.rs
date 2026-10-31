@@ -18,9 +18,10 @@ use crate::state::{EditorState, PendingLoad};
 use crate::undo::{DEFAULT_UNDO_LIMIT, UndoHistory};
 use crate::{Grooph, Mode};
 use grooph_measure::{Cursor, Score};
+use serde::{Deserialize, Serialize};
 
 /// One of the two rhythm documents.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) enum Document {
     /// The generator's rhythm on the practice page: thrown away freely.
     Practice,
@@ -53,13 +54,14 @@ impl RhythmDoc {
 }
 
 impl EditorState {
-    /// Swap the working score with `doc`.
-    pub(crate) fn swap_working(&mut self, doc: &mut RhythmDoc) {
-        std::mem::swap(&mut self.score, &mut doc.score);
-        std::mem::swap(&mut self.cursor, &mut doc.cursor);
-        std::mem::swap(&mut self.history, &mut doc.history);
-        std::mem::swap(&mut self.dirty, &mut doc.dirty);
-        std::mem::swap(&mut self.active_pattern_id, &mut doc.active_pattern_id);
+    /// Swap the working score with the other document.
+    fn swap_with_other(&mut self) {
+        let Self { score, cursor, history, dirty, active_pattern_id, other, .. } = self;
+        std::mem::swap(score, &mut other.score);
+        std::mem::swap(cursor, &mut other.cursor);
+        std::mem::swap(history, &mut other.history);
+        std::mem::swap(dirty, &mut other.dirty);
+        std::mem::swap(active_pattern_id, &mut other.active_pattern_id);
     }
 }
 
@@ -95,27 +97,19 @@ impl Grooph {
         }
     }
 
-    /// Make `doc` the shown document. A different one stops playback, as it
-    /// changes what plays, and its run's marks are gone.
+    /// Make `doc` the shown document and the working score. A different one
+    /// stops playback, as it changes what plays, closes the metronome, whose
+    /// click bar is the working score while it is open, and its run's marks
+    /// are gone.
     pub(crate) fn show_document(&mut self, doc: Document) {
         if self.editor.document == doc {
             return;
         }
         // Also puts back a calibration's score before the swap.
         self.stop_transport();
-        let editor = &mut self.editor;
-        match editor.metronome.stash_mut() {
-            Some(stash) => std::mem::swap(stash, &mut editor.other),
-            None => {
-                let mut other = std::mem::replace(
-                    &mut editor.other,
-                    RhythmDoc::new(Score::single(Self::default_measure()), Cursor::start()),
-                );
-                editor.swap_working(&mut other);
-                editor.other = other;
-            }
-        }
-        editor.document = doc;
+        self.close_metronome();
+        self.editor.swap_with_other();
+        self.editor.document = doc;
         self.playback_ctl.playback.reset();
         self.playback_ctl.accuracy.tracker.clear_for_edit();
     }
@@ -290,6 +284,15 @@ mod tests {
     }
 
     #[test]
+    fn a_tempo_link_keeps_the_scores_unsaved_mark() {
+        let (mut app, _) = app_with_groove();
+        assert!(app.score_dirty());
+        app.open_link(grooph_link::parse_query("v=2&bpm=120").unwrap().unwrap());
+        assert_eq!(app.playback_ctl.bpm, 120);
+        assert!(app.score_dirty());
+    }
+
+    #[test]
     fn each_document_undoes_its_own_changes() {
         let (mut app, groove) = app_with_groove();
         app.select_tab(Tab::Practice);
@@ -435,6 +438,8 @@ mod tests {
             assert!(state.dirty, "{tab:?}");
             let mut back = restart(&state);
             assert_eq!(back.tab(), tab);
+            // More reopens on the document it was opened from.
+            assert_eq!(back.document(), app.document(), "{tab:?}");
             back.select_tab(Tab::Score);
             assert_eq!(text(&back.editor.score), groove);
             assert!(back.editor.dirty);
