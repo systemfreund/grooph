@@ -4,9 +4,9 @@
 //! can be rendered dynamically without hardcoding entries in `app.rs`.
 
 use eframe::egui::{InputState, Key};
-use grooph_measure::BeatKind;
 use grooph_measure::duration::NoteValue::{Eighth, Quarter, Sixteenth, ThirtySecond};
 use grooph_measure::duration::{Duration, TupletSpec};
+use grooph_measure::{BeatKind, Technique};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ToolGroup {
@@ -40,6 +40,9 @@ pub enum Modifier {
     ToggleHead,
     /// Play the chosen instrument's head with its next technique.
     CycleTechnique,
+    /// Play the chosen instrument's head with this technique, or the usual
+    /// way again if it already is.
+    ToggleTechnique(Technique),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -178,7 +181,7 @@ pub fn all_tools() -> &'static [Tool] {
     use BeatKind::*;
     use Duration::*;
 
-    static ALL: [Tool; 31] = [
+    static ALL: [Tool; 38] = [
         Tool {
             id: "edit.undo",
             label: "⟲",
@@ -352,6 +355,62 @@ pub fn all_tools() -> &'static [Tool] {
             kind: ToolKind::Modify(Modifier::CycleTechnique),
             shortcuts: &[Shortcut::plain(Key::O)],
             show_in_palette: false,
+        },
+        Tool {
+            id: "modify.technique.open",
+            label: "o",
+            group: ToolGroup::Modifiers,
+            kind: ToolKind::Modify(Modifier::ToggleTechnique(Technique::Open)),
+            shortcuts: &[],
+            show_in_palette: true,
+        },
+        Tool {
+            id: "modify.technique.half_open",
+            label: "ø",
+            group: ToolGroup::Modifiers,
+            kind: ToolKind::Modify(Modifier::ToggleTechnique(Technique::HalfOpen)),
+            shortcuts: &[],
+            show_in_palette: true,
+        },
+        Tool {
+            id: "modify.technique.closed",
+            label: "+",
+            group: ToolGroup::Modifiers,
+            kind: ToolKind::Modify(Modifier::ToggleTechnique(Technique::Closed)),
+            shortcuts: &[],
+            show_in_palette: true,
+        },
+        Tool {
+            id: "modify.technique.cross_stick",
+            label: "×st",
+            group: ToolGroup::Modifiers,
+            kind: ToolKind::Modify(Modifier::ToggleTechnique(Technique::CrossStick)),
+            shortcuts: &[],
+            show_in_palette: true,
+        },
+        Tool {
+            id: "modify.technique.rimshot",
+            label: "rim",
+            group: ToolGroup::Modifiers,
+            kind: ToolKind::Modify(Modifier::ToggleTechnique(Technique::Rimshot)),
+            shortcuts: &[],
+            show_in_palette: true,
+        },
+        Tool {
+            id: "modify.technique.bell",
+            label: "bell",
+            group: ToolGroup::Modifiers,
+            kind: ToolKind::Modify(Modifier::ToggleTechnique(Technique::Bell)),
+            shortcuts: &[],
+            show_in_palette: true,
+        },
+        Tool {
+            id: "modify.technique.choke",
+            label: "ch",
+            group: ToolGroup::Modifiers,
+            kind: ToolKind::Modify(Modifier::ToggleTechnique(Technique::Choke)),
+            shortcuts: &[],
+            show_in_palette: true,
         },
         Tool {
             id: "modify.cycle_tuplet",

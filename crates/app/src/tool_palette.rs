@@ -1,19 +1,20 @@
 use crate::Grooph;
+use crate::kit_palette::{instrument_label, instrument_short};
 use crate::pickers::Picker;
-use crate::tools::{DeleteOp, MetaOp, Modifier, NavOp, Tool, ToolGroup, ToolKind, all_tools};
+use crate::tools::{DeleteOp, MetaOp, Modifier, NavOp, Tool, ToolKind, all_tools};
 use crate::{Mode, tools};
 use eframe::egui;
-use eframe::egui::scroll_area::{ScrollBarVisibility, ScrollSource};
+use eframe::egui::scroll_area::ScrollBarVisibility;
 use eframe::egui::{
-    Align, Atom, Button, Color32, Direction, FontFamily, FontId, IdSalt, Layout, Rect, Response,
-    RichText, Ui, Vec2,
+    Align2, Atom, Button, Color32, FontFamily, FontId, IdSalt, Pos2, Rect, Response, Sense,
+    StrokeKind, Ui, Vec2, WidgetInfo,
 };
 use grooph_layout::pixel_layout::{
     LayoutOpts, MeasureLayout, build_measure_layout, build_time_sig_layout, compute_em,
 };
 use grooph_measure::BeatKind::{Note, Rest};
 use grooph_measure::duration::{Duration, TupletKind};
-use grooph_measure::{Cursor, Measure, StaffKind};
+use grooph_measure::{Cursor, Instrument, Measure, StaffKind, Technique, VoiceIdx};
 use grooph_render::measure::{draw_notes, draw_time_signature};
 use log::info;
 use tools::EditOp;
@@ -22,11 +23,11 @@ pub(crate) const TOOL_PALETTE_BUTTON_SIZE: f32 = 70.0;
 const TOOL_PALETTE_BUTTON_CORNER_RADIUS: f32 = 2.0;
 
 enum ButtonKind {
-    /// Renders a miniature notation using `note_button`.
+    /// Renders a miniature notation.
     Note,
     /// Renders a stacked time-signature glyph.
     TimeSignature,
-    /// Plain text/symbol button with optional disabled state.
+    /// Plain text/symbol button.
     Plain,
 }
 
@@ -40,69 +41,313 @@ fn button_kind(kind: &ToolKind) -> ButtonKind {
     }
 }
 
+/// Room between the grid's cells.
+const GRID_GAP: f32 = 4.0;
+/// The narrowest a cell gets before the grid takes fewer columns.
+const MIN_CELL: f32 = 36.0;
+/// The widest a cell gets: on a wide screen the grid stays in the middle.
+const MAX_CELL: f32 = 64.0;
+/// The tallest a cell gets; narrower ones are square.
+const MAX_CELL_HEIGHT: f32 = 52.0;
+/// The most columns the grid has, on a wide screen.
+const MAX_COLUMNS: usize = 16;
+/// The share of the screen's height the grid takes at most; past it the
+/// grid scrolls, and the staff above stays in view.
+const MAX_GRID_SHARE: f32 = 0.45;
+
+/// The kit's instruments in the grid's order, cymbals and drums from left to
+/// right as they stand, then the feet.
+const KIT_ORDER: [Instrument; 9] = [
+    Instrument::HiHat,
+    Instrument::Ride,
+    Instrument::Crash,
+    Instrument::Snare,
+    Instrument::HighTom,
+    Instrument::MidTom,
+    Instrument::FloorTom,
+    Instrument::Kick,
+    Instrument::HiHatFoot,
+];
+
+/// The head modifiers' tools, before the kit's.
+const HEAD_TOOLS: [&str; 2] = ["modify.toggle.accent", "modify.toggle.soft"];
+/// The tools that change the bar, after the head modifiers.
+const BAR_TOOLS: [&str; 3] = ["edit.undo", "edit.redo", "meta.reset_measure"];
+/// The note values, their rests and the dot.
+const VALUE_TOOLS: [&str; 9] = [
+    "insert.note.q",
+    "insert.note.e",
+    "insert.note.s",
+    "insert.note.th",
+    "insert.rest.q",
+    "insert.rest.e",
+    "insert.rest.s",
+    "insert.rest.th",
+    "modify.toggle.dotted",
+];
+/// The meter, then the tuplets.
+const METER_TOOLS: [&str; 7] = [
+    "meta.change_time_signature",
+    "insert.tuplet.t8",
+    "insert.tuplet.t16",
+    "insert.tuplet.qt16",
+    "insert.tuplet.st16",
+    "insert.tuplet.spt16",
+    "insert.tuplet.nt16",
+];
+
+/// One cell of the tool grid.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum Cell {
+    Tool(&'static Tool),
+    /// Picks the instrument the tools write and change (the kit's).
+    Instrument(Instrument),
+    /// Moves the cursor to a voice of the kit: 0 the hands, 1 the feet.
+    Voice(VoiceIdx),
+}
+
+/// The tool with `id`.
+fn tool(id: &str) -> &'static Tool {
+    all_tools().iter().find(|t| t.id == id).expect("a tool of the palette")
+}
+
+/// What `technique` is, on its button's hover.
+fn technique_name(technique: Technique) -> &'static str {
+    match technique {
+        Technique::Normal => "Plain",
+        Technique::Open => "Open",
+        Technique::HalfOpen => "Half open",
+        Technique::Closed => "Closed",
+        Technique::CrossStick => "Cross-stick",
+        Technique::Rimshot => "Rimshot",
+        Technique::Bell => "Bell",
+        Technique::Choke => "Choke",
+    }
+}
+
+/// The grid's rows, top to bottom; a row wider than the grid goes on in the
+/// next line. On the kit the instruments and voices come first and the
+/// head modifiers get the kit's; on the one line they are left out.
+pub(crate) fn grid_rows(kit: bool) -> Vec<Vec<Cell>> {
+    let tools = |ids: &[&str]| ids.iter().map(|id| Cell::Tool(tool(id))).collect::<Vec<_>>();
+    let mut heads = tools(&HEAD_TOOLS);
+    let mut rows = Vec::new();
+    if kit {
+        let mut instruments: Vec<Cell> = KIT_ORDER.iter().map(|&i| Cell::Instrument(i)).collect();
+        instruments.extend([Cell::Voice(0), Cell::Voice(1)]);
+        rows.push(instruments);
+        heads.push(Cell::Tool(tool("modify.toggle.head")));
+        heads.extend(
+            all_tools()
+                .iter()
+                .filter(|t| matches!(t.kind, ToolKind::Modify(Modifier::ToggleTechnique(_))))
+                .map(Cell::Tool),
+        );
+    }
+    heads.extend(tools(&BAR_TOOLS));
+    rows.push(heads);
+    rows.push(tools(&VALUE_TOOLS));
+    rows.push(tools(&METER_TOOLS));
+    rows
+}
+
+/// The grid's columns and the size of its cells, `width` wide.
+fn grid_metrics(width: f32) -> (usize, Vec2) {
+    let columns =
+        (((width + GRID_GAP) / (MIN_CELL + GRID_GAP)).floor() as usize).clamp(1, MAX_COLUMNS);
+    let cell = ((width - GRID_GAP * (columns - 1) as f32) / columns as f32).min(MAX_CELL);
+    (columns, Vec2::new(cell, cell.min(MAX_CELL_HEIGHT)))
+}
+
 impl Grooph {
+    /// The editor's tools as a grid in the thumb's reach, the same in every
+    /// editor (Practice, Score, the metronome's click bar): on the kit its
+    /// instruments and voices, then the head modifiers, the note values and
+    /// rests, the meter and the tuplets.
     pub(super) fn tool_palette_panel(&mut self, ui: &mut Ui) {
         egui::Panel::bottom("tool_palette")
             .show_separator_line(false)
             .resizable(false)
             .show_collapsible(ui, &mut (self.ui.mode == Mode::Edit), |ui| {
-                self.kit_palette(ui);
-                let tools = all_tools().iter().filter(|t| t.show_in_palette).collect::<Vec<_>>();
-                let groups = [
-                    ToolGroup::Edit,
-                    ToolGroup::Meta,
-                    ToolGroup::Notes,
-                    ToolGroup::Modifiers,
-                    ToolGroup::Rests,
-                    ToolGroup::Tuplets,
-                ];
-
-                egui::ScrollArea::horizontal()
-                    .scroll_source(ScrollSource::ALL)
+                // Sized up front: a bottom panel offers the height it had.
+                let rows = grid_rows(!self.staff_model().one_line());
+                let (columns, cell) = grid_metrics(ui.available_width());
+                let lines: usize = rows.iter().map(|r| r.len().div_ceil(columns)).sum();
+                let height = lines as f32 * (cell.y + GRID_GAP) - GRID_GAP;
+                let height = height.min(MAX_GRID_SHARE * ui.ctx().content_rect().height());
+                egui::ScrollArea::vertical()
+                    .id_salt("tool_grid")
+                    .min_scrolled_height(height)
+                    .max_height(height)
                     .scroll_bar_visibility(ScrollBarVisibility::AlwaysHidden)
-                    .show(ui, |ui| {
-                        let layout = Layout::from_main_dir_and_cross_align(
-                            Direction::LeftToRight,
-                            Align::Center,
-                        )
-                        .with_cross_justify(true);
-
-                        ui.with_layout(layout, |ui| {
-                            self.tool_palette(tools.to_vec(), groups.as_slice(), ui);
-                        })
-                    });
+                    .show(ui, |ui| self.tool_grid(ui, &rows));
             });
     }
 
-    fn tool_palette(&mut self, tools: Vec<&Tool>, groups: &[ToolGroup], ui: &mut Ui) {
-        for g in groups {
-            for t in tools.iter().filter(|t| &t.group == g) {
-                let response = match button_kind(&t.kind) {
-                    ButtonKind::Note => self.note_button(ui, t.id),
-                    ButtonKind::TimeSignature => self.time_signature_button(ui, t.id),
-                    ButtonKind::Plain => self.plain_tool_button(ui, t),
-                };
-                if response.clicked() {
-                    self.apply_tool(t);
+    fn tool_grid(&mut self, ui: &mut Ui, rows: &[Vec<Cell>]) {
+        let width = ui.available_width();
+        let (columns, cell) = grid_metrics(width);
+        let used = columns as f32 * cell.x + (columns - 1) as f32 * GRID_GAP;
+        let left = ui.max_rect().left() + (width - used) / 2.0;
+        let mut top = ui.cursor().top();
+        let mut clicked = None;
+        for row in rows {
+            for line in row.chunks(columns) {
+                for (col, &c) in line.iter().enumerate() {
+                    let min = Pos2::new(left + col as f32 * (cell.x + GRID_GAP), top);
+                    if self.grid_cell(ui, Rect::from_min_size(min, cell), c).clicked() {
+                        clicked = Some(c);
+                    }
                 }
+                top += cell.y + GRID_GAP;
             }
+        }
+        ui.allocate_rect(
+            Rect::from_min_max(
+                Pos2::new(ui.max_rect().left(), ui.cursor().top()),
+                Pos2::new(ui.max_rect().right(), top - GRID_GAP),
+            ),
+            Sense::hover(),
+        );
+        match clicked {
+            Some(Cell::Tool(t)) => self.apply_tool(t),
+            Some(Cell::Instrument(i)) => self.pick_instrument(i),
+            Some(Cell::Voice(v)) => self.go_to_voice(v),
+            None => {}
         }
     }
 
-    fn plain_tool_button(&self, ui: &mut Ui, tool: &Tool) -> Response {
-        let enabled = match tool.kind {
-            ToolKind::Edit(EditOp::Undo) => self.can_undo(),
-            ToolKind::Edit(EditOp::Redo) => self.can_redo(),
-            _ => true,
+    /// Whether `cell` shows as picked: the instrument, the voice, or the
+    /// technique of the picked instrument's head on the cursor's beat.
+    fn cell_selected(&self, cell: Cell) -> bool {
+        match cell {
+            Cell::Instrument(i) => i == self.edit_instrument(),
+            Cell::Voice(v) => v == self.editor.doc().cursor.voice,
+            Cell::Tool(Tool { kind: ToolKind::Modify(Modifier::ToggleTechnique(t)), .. }) => {
+                let cursor = self.editor.doc().cursor;
+                self.current_voice()
+                    .beats()
+                    .get(cursor.beat_idx)
+                    .and_then(|b| b.heads().get(self.edit_instrument()))
+                    .is_some_and(|h| h.technique() == *t)
+            }
+            Cell::Tool(_) => false,
+        }
+    }
+
+    /// Whether `cell` does something now: undo and redo with a step to take,
+    /// a technique the picked instrument is played with.
+    fn cell_enabled(&self, cell: Cell) -> bool {
+        match cell {
+            Cell::Tool(t) => match t.kind {
+                ToolKind::Edit(EditOp::Undo) => self.can_undo(),
+                ToolKind::Edit(EditOp::Redo) => self.can_redo(),
+                ToolKind::Modify(Modifier::ToggleTechnique(technique)) => {
+                    self.edit_instrument().allows(technique)
+                }
+                _ => true,
+            },
+            Cell::Instrument(_) | Cell::Voice(_) => true,
+        }
+    }
+
+    /// One cell of the grid in `rect`, framed like a button.
+    fn grid_cell(&self, ui: &mut Ui, rect: Rect, cell: Cell) -> Response {
+        let enabled = self.cell_enabled(cell);
+        let selected = self.cell_selected(cell);
+        let (key, label, hover) = match cell {
+            Cell::Tool(t) => {
+                let hover = match t.kind {
+                    ToolKind::Modify(Modifier::ToggleTechnique(technique)) => {
+                        technique_name(technique).to_owned()
+                    }
+                    ToolKind::Modify(Modifier::ToggleHead) => {
+                        "Add the instrument here, or take it away".to_owned()
+                    }
+                    _ => t.label.to_owned(),
+                };
+                let hover = match t.shortcuts.first() {
+                    Some(sc) => format!("{hover} ({})", sc.label()),
+                    None => hover,
+                };
+                let label = match t.kind {
+                    ToolKind::Modify(Modifier::ToggleHead) => "+/−",
+                    _ => t.label,
+                };
+                (t.id, label, hover)
+            }
+            Cell::Instrument(i) => {
+                (instrument_short(i), instrument_short(i), instrument_label(i).to_owned())
+            }
+            Cell::Voice(0) => ("voice.hands", "Hands", "Edit the hands' voice, above".to_owned()),
+            Cell::Voice(_) => ("voice.feet", "Feet", "Edit the feet's voice, below".to_owned()),
         };
-        ui.add_enabled_ui(enabled, |ui| {
-            ui.add_sized(
-                Vec2::splat(TOOL_PALETTE_BUTTON_SIZE),
-                Button::new(RichText::new(tool.label).size(24.0))
-                    .corner_radius(TOOL_PALETTE_BUTTON_CORNER_RADIUS),
-            )
-        })
-        .inner
+        let id = ui.make_persistent_id(("tool_grid", key));
+        let sense = if enabled { Sense::click() } else { Sense::hover() };
+        let response = ui.interact(rect, id, sense);
+        response
+            .widget_info(|| WidgetInfo::selected(egui::Role::Button, enabled, selected, &hover));
+        let visuals = if enabled {
+            ui.style().interact_selectable(&response, selected)
+        } else {
+            ui.visuals().widgets.noninteractive
+        };
+        let painter = ui.painter();
+        painter.rect(
+            rect,
+            TOOL_PALETTE_BUTTON_CORNER_RADIUS,
+            visuals.weak_bg_fill,
+            visuals.bg_stroke,
+            StrokeKind::Inside,
+        );
+        let color = if enabled { visuals.text_color() } else { ui.visuals().weak_text_color() };
+        let inner = rect.shrink(NOTATION_PADDING);
+        match cell {
+            Cell::Tool(t) if matches!(button_kind(&t.kind), ButtonKind::Note) => {
+                let measure = &self.editor.button_measures[t.id];
+                paint_notation(ui, inner, measure, self.ui.music_font_id.family.clone(), color);
+            }
+            Cell::Tool(t) if matches!(button_kind(&t.kind), ButtonKind::TimeSignature) => {
+                self.paint_time_signature(ui, inner, color);
+            }
+            _ => {
+                // Words smaller than marks and short labels.
+                let size = if label.chars().count() > 3 { 0.3 } else { 0.42 } * rect.height();
+                painter.text(
+                    rect.center(),
+                    Align2::CENTER_CENTER,
+                    label,
+                    FontId::proportional(size),
+                    color,
+                );
+            }
+        }
+        response.on_hover_text(hover)
+    }
+
+    /// The bar's meter as on the staff, stacked, in `rect`.
+    fn paint_time_signature(&self, ui: &Ui, rect: Rect, color: Color32) {
+        let painter = &ui.painter_at(rect);
+        let em = compute_em(&rect, 0.7, ui);
+        let font_id = FontId::new(em, self.ui.music_font_id.family.clone());
+        let opts = LayoutOpts {
+            rect,
+            font_id: font_id.clone(),
+            pixels_per_point: ui.ctx().pixels_per_point(),
+            em,
+            layout_clef: false,
+            layout_time_signature: true,
+            y_offset: 0.0,
+            stem_length_factor: 0.9,
+            stem_thickness_factor: 0.03,
+            accent_displacement: 0.0,
+            stem_down: false,
+            shared_line: false,
+            staff: StaffKind::Line,
+        };
+        let ts = self.current_measure().time_signature();
+        let layout = build_time_sig_layout(&ts, rect.center().x, &opts);
+        draw_time_signature(painter, &layout, ts, &font_id, color);
     }
 
     pub(super) fn apply_tool(&mut self, tool: &Tool) {
@@ -168,8 +413,12 @@ impl Grooph {
     fn tool_applicable(&self, tool: &Tool) -> bool {
         // The heads of one instrument and its techniques are the kit's: on
         // the one line a note is its one head.
-        let kit_only =
-            matches!(tool.kind, ToolKind::Modify(Modifier::ToggleHead | Modifier::CycleTechnique));
+        let kit_only = matches!(
+            tool.kind,
+            ToolKind::Modify(
+                Modifier::ToggleHead | Modifier::CycleTechnique | Modifier::ToggleTechnique(_)
+            )
+        );
         // Tools only run in edit mode, and not while a modal dialog is open.
         // Mode::TimeSignature is a sub-state of editing but blocks tool actions.
         matches!(self.ui.mode, Mode::Edit) && !(kit_only && self.staff_model().one_line())
@@ -242,6 +491,9 @@ impl Grooph {
                     Modifier::CycleTuplet => self.set_tuplet(idx, None),
                     Modifier::ToggleHead => self.current_voice_mut().toggle_head(idx, pen),
                     Modifier::CycleTechnique => self.current_voice_mut().cycle_technique(idx, pen),
+                    Modifier::ToggleTechnique(technique) => {
+                        self.current_voice_mut().toggle_technique(idx, pen, technique)
+                    }
                 };
                 result.is_some()
             }
@@ -272,50 +524,6 @@ impl Grooph {
                 false
             }
         }
-    }
-
-    fn time_signature_button(&self, ui: &mut Ui, id: &str) -> Response {
-        let symbol_id = IdSalt::new(id);
-        let symbol = Atom::custom(symbol_id, Vec2::splat(TOOL_PALETTE_BUTTON_SIZE));
-        let button =
-            Button::new(symbol).corner_radius(TOOL_PALETTE_BUTTON_CORNER_RADIUS).atom_ui(ui);
-
-        if let Some(rect) = button.rect(symbol_id) {
-            // Render a stacked 4/4 symbol using Bravura, similar to measure rendering
-            let painter = &ui.painter_at(rect);
-            let em = compute_em(&rect, 0.7, ui);
-            let font_id = FontId::new(em, self.ui.music_font_id.family.clone());
-
-            // Build a minimal layout area for the time signature only
-            let opts = LayoutOpts {
-                rect,
-                font_id: font_id.clone(),
-                pixels_per_point: ui.ctx().pixels_per_point(),
-                em,
-                layout_clef: false,
-                layout_time_signature: true,
-                y_offset: 0.0,
-                stem_length_factor: 0.9,
-                stem_thickness_factor: 0.03,
-                accent_displacement: 0.0,
-                stem_down: false,
-                shared_line: false,
-                staff: StaffKind::Line,
-            };
-
-            // Use a temporary measure just for layout width and positions
-            let ts = self.current_measure().time_signature();
-            let layout = build_time_sig_layout(&ts, rect.center().x, &opts);
-            draw_time_signature(painter, &layout, ts, &font_id, ui.style().visuals.text_color());
-        }
-
-        button.response
-    }
-
-    fn note_button(&self, ui: &mut Ui, id: &str) -> Response {
-        let measure = self.editor.button_measures.get(id).unwrap();
-        let family = self.ui.music_font_id.family.clone();
-        notation_button(ui, IdSalt::new(id), measure, family, false, TOOL_PALETTE_BUTTON_SIZE)
     }
 }
 
@@ -653,12 +861,74 @@ mod tests {
     }
 
     #[test]
+    fn the_grid_offers_every_tool_of_the_palette() {
+        use super::{Cell, grid_rows};
+        use crate::tools::{Modifier, ToolKind};
+        let tools = |kit| {
+            grid_rows(kit)
+                .into_iter()
+                .flatten()
+                .filter_map(|c| match c {
+                    Cell::Tool(t) => Some(t.id),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        let kit_only = |t: &crate::tools::Tool| {
+            matches!(t.kind, ToolKind::Modify(Modifier::ToggleTechnique(_)))
+        };
+        for t in all_tools().iter().filter(|t| t.show_in_palette) {
+            assert_eq!(tools(true).iter().filter(|&&id| id == t.id).count(), 1, "{}", t.id);
+            assert_eq!(tools(false).contains(&t.id), !kit_only(t), "{}", t.id);
+        }
+        // The kit adds its instruments, voices and "+/−".
+        assert!(tools(true).contains(&"modify.toggle.head"));
+        assert!(!tools(false).contains(&"modify.toggle.head"));
+        let cells = grid_rows(true).into_iter().flatten().collect::<Vec<_>>();
+        assert!(cells.contains(&Cell::Voice(0)) && cells.contains(&Cell::Voice(1)));
+        let instruments = cells.iter().filter(|c| matches!(c, Cell::Instrument(_))).count();
+        assert_eq!(instruments, 9);
+        assert!(grid_rows(false).iter().flatten().all(|c| matches!(c, Cell::Tool(_))));
+    }
+
+    #[test]
+    fn a_technique_is_offered_for_the_instruments_that_play_it() {
+        use super::Cell;
+        use grooph_measure::Instrument::{HiHat, Kick, Snare};
+        let open = all_tools().iter().find(|t| t.id == "modify.technique.open").unwrap();
+        let mut app = editing("4/4 S-H:q H:q H:q H:q ; K:q r:q K:q r:q");
+        app.editor.instrument = HiHat;
+        app.editor.doc_mut().cursor = Cursor::in_voice(0, 0, 1);
+        assert!(app.cell_enabled(Cell::Tool(open)));
+        assert!(!app.cell_selected(Cell::Tool(open)));
+        apply(&mut app, "modify.technique.open");
+        assert!(app.cell_selected(Cell::Tool(open)));
+        apply(&mut app, "modify.technique.closed");
+        assert_eq!(text(&app), "4/4 S-H:q Hc:q H:q H:q ; K:q r:q K:q r:q");
+        apply(&mut app, "modify.technique.closed");
+        assert_eq!(text(&app), "4/4 S-H:q H:q H:q H:q ; K:q r:q K:q r:q");
+        // The snare and the kick are not played open.
+        for instrument in [Snare, Kick] {
+            app.editor.instrument = instrument;
+            assert!(!app.cell_enabled(Cell::Tool(open)));
+        }
+        app.editor.instrument = Snare;
+        app.editor.doc_mut().cursor = Cursor::in_voice(0, 0, 0);
+        apply(&mut app, "modify.technique.cross_stick");
+        assert_eq!(text(&app), "4/4 Sx-H:q H:q H:q H:q ; K:q r:q K:q r:q");
+        // The picked instrument and voice show as picked.
+        assert!(app.cell_selected(Cell::Instrument(Snare)));
+        assert!(app.cell_selected(Cell::Voice(0)) && !app.cell_selected(Cell::Voice(1)));
+    }
+
+    #[test]
     fn the_one_line_has_no_instruments_to_pick() {
         let mut app = editing("4/4 q (q) r:q q");
         app.pick_instrument(grooph_measure::Instrument::Kick);
         assert_eq!(app.editor.doc().cursor, Cursor::at(0, 0));
         apply(&mut app, "modify.toggle.head");
         apply(&mut app, "modify.cycle_technique");
+        apply(&mut app, "modify.technique.open");
         assert_eq!(text(&app), "4/4 q (q) r:q q");
         // The tools write the line's rhythm, as before.
         app.editor.doc_mut().cursor = Cursor::at(0, 2);

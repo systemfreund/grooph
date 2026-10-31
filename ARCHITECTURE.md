@@ -155,14 +155,16 @@ spread across callers.
    the accent a technique's sign (o, +, the choke's mark) stacks
    (`notes::place_marks`). Every kit row starts with the percussion clef.
 6. Kit editing (`grooph-app`'s `kit_palette`): on a staff of several
-   instruments a row above the tools picks the instrument the tools mean
+   instruments the tool grid's first row picks the instrument the tools mean
    (`EditorState::instrument`; `Grooph::edit_instrument` gives it, or the
    staff's own on the one line, `Staff::instrument_or`). A tap on a head
    picks its instrument too. Picking one moves the cursor to its default
    voice, onto the beat sounding then (`Score::cursor_in_voice`), and a
    kit measure without that voice gets it (`Measure::fill_voices`);
-   "Upper"/"Lower" move it to a voice. "+/−" (H) adds or removes the head
-   on the cursor's beat, "Technique" (O) steps through its techniques.
+   "Hands"/"Feet" move it to a voice. "+/−" (H) adds or removes the head
+   on the cursor's beat; a cell per technique (`Modifier::ToggleTechnique`)
+   plays it that way or plainly again, greyed out where the instrument has
+   no such technique, and O steps through them.
    The library's "New drum groove" starts one bar of two voices on the
    kit's staff, asking first if the score has unsaved changes
    (`PendingLoad::NewKitScore`); it is offered while the score tab is
@@ -689,8 +691,17 @@ grooph's metronome runs inside AI chats as an
 - Keyboard handling: `crates/app/src/keyboard_input.rs`.
 - Measure operations: `grooph_measure::editing::{Modification, set_tuplet, ...}`.
 
+The tool palette (`tool_palette_panel`) is one grid for every editor
+(Practice, Score, the metronome's click bar): rows of cells
+(`tool_palette::grid_rows`), on the kit its instruments and voices, then
+the head modifiers (with the kit's "+/−" and techniques), undo, redo and
+clear, the note values, rests and dot, and the meter and tuplets. The
+columns follow the width (`grid_metrics`, at most 64 px a cell), a row
+wider than the grid goes on in the next line, and past 45% of the screen's
+height the grid scrolls, so the staff stays in view.
+
 If you add new tools/shortcuts, remember:
-- Tool registry + palette
+- Tool registry + palette (`grid_rows`)
 - Keyboard input
 - UI help text
 

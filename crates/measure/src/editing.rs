@@ -92,6 +92,21 @@ impl VoiceBar {
         Some(Modification::SetTechnique(idx, instrument, head.technique()))
     }
 
+    /// Play the head of `instrument` at `idx` with `technique`, or the usual
+    /// way again if it already is. `None` without that head, or if the
+    /// instrument is not played with `technique`, as nothing changes.
+    pub fn toggle_technique(
+        &mut self,
+        idx: BeatIdx,
+        instrument: Instrument,
+        technique: Technique,
+    ) -> Option<Modification> {
+        let head = self.beats.get_mut(idx)?.head_mut(instrument)?;
+        let to = if head.technique() == technique { Technique::Normal } else { technique };
+        *head = head.with_technique(to).ok()?;
+        Some(Modification::SetTechnique(idx, instrument, to))
+    }
+
     /// Toggle dotted (one dot) for the beat at `idx`.
     /// - Simple(base) -> Dotted { base, dots: 1 }
     /// - Dotted { base, dots: 1 } -> Simple(base)
@@ -553,6 +568,25 @@ mod tests {
         assert!(voice.toggle_soft(1, Snare).is_none());
         assert!(voice.cycle_technique(2, Kick).is_none());
         assert!(voice.cycle_technique(0, Snare).is_some());
+    }
+
+    #[test]
+    fn a_technique_toggles_on_the_instruments_that_play_it() {
+        use crate::Instrument::{HiHat, Snare};
+        use crate::notation::{format_score, parse_score};
+        let mut score = parse_score("4/4 S-H:q H:q r:q H:q").unwrap();
+        let voice = score.measures_mut()[0].first_voice_mut();
+        voice.toggle_technique(1, HiHat, Technique::Open).unwrap();
+        // Another technique replaces it, the same one again takes it away.
+        voice.toggle_technique(3, HiHat, Technique::Open).unwrap();
+        voice.toggle_technique(3, HiHat, Technique::Closed).unwrap();
+        voice.toggle_technique(0, Snare, Technique::Rimshot).unwrap();
+        voice.toggle_technique(0, Snare, Technique::Rimshot).unwrap();
+        // Not on a rest, a head not there, or one the instrument lacks.
+        assert!(voice.toggle_technique(2, HiHat, Technique::Open).is_none());
+        assert!(voice.toggle_technique(1, Snare, Technique::Rimshot).is_none());
+        assert!(voice.toggle_technique(0, Snare, Technique::Open).is_none());
+        assert_eq!(format_score(&score).unwrap(), "4/4 S-H:q Ho:q r:q Hc:q");
     }
 
     #[test]
