@@ -1651,7 +1651,7 @@ mod tests {
         let cc = eframe::CreationContext::_new_kittest(ctx.clone());
         let mut app = Grooph::new(&cc);
         app.ui.library_tab = LibraryTab::Presets;
-        let mut texts = |app: &mut Grooph| {
+        let texts = |app: &mut Grooph| {
             let mut texts = Vec::new();
             for _ in 0..2 {
                 let screen = Rect::from_min_size(Pos2::ZERO, vec2(390.0, 844.0));
