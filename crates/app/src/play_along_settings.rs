@@ -35,7 +35,7 @@ impl Grooph {
 
     /// One group per input: its switch (or device), what it needs and its
     /// latency. Returns the input to calibrate; the caller starts it once
-    /// the dialog is drawn, because the run swaps the score.
+    /// the dialog is drawn, because the run restarts playback on its own bar.
     pub(crate) fn play_along_choices(&mut self, ui: &mut Ui) -> Option<HitSource> {
         let mut calibrate = None;
         // Everything open at once is taller than a phone.

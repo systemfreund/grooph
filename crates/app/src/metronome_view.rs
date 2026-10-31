@@ -302,8 +302,9 @@ impl Grooph {
     }
 
     /// Bars in the score being played, for the tempo ramp's loops.
+    /// Agrees with [`Self::played_score`] without building the bar.
     pub(crate) fn played_bars(&self) -> usize {
-        self.played_score().len()
+        if self.calibrating() || self.metronome_mode() { 1 } else { self.editor.doc().score.len() }
     }
 
     /// Open the metronome's document on the click bar of its meter, with

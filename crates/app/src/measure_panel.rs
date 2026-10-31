@@ -408,9 +408,7 @@ impl Grooph {
         // Flash once per beat of the playing measure.
         let (m_idx, local_tick) = timing.to_local(tick);
         let primary_beat_in_measure = self
-            .editor
-            .doc()
-            .score
+            .played_score()
             .measures()
             .get(m_idx)
             .map_or(0, |m| primary_beat_index(&m.time_signature(), local_tick));

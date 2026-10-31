@@ -414,17 +414,20 @@ impl App for Grooph {
 
         let playback_options = self.playback_options();
         let bpm = self.played_bpm();
-        let score = self.played_score().into_owned();
         let now = ui.input(|i| i.time);
         let mut output_lost = false;
-        if let Some(audio) = &mut self.playback_ctl.audio {
+        // The engine leaves `self` while it reads the played score, which
+        // borrows `self`: no copy of the score per frame.
+        let mut engine = self.playback_ctl.audio.take();
+        if let Some(audio) = &mut engine {
             audio.set_audio_settings(self.playback_ctl.audio_cfg.settings);
             audio.set_playback_options(playback_options);
-            if let Some(after) = audio.update(&audio_state, bpm, &score, now) {
+            if let Some(after) = audio.update(&audio_state, bpm, &self.played_score(), now) {
                 ui.ctx().request_repaint_after(after);
             }
             output_lost = audio.take_output_lost();
         }
+        self.playback_ctl.audio = engine;
         // The output went away (e.g. a Bluetooth device): stop, as the next
         // play opens a new one.
         if output_lost {
@@ -507,8 +510,10 @@ impl Grooph {
     /// the timing the audio engine builds from [`Self::playback_options`],
     /// including the tempo ramp of the bar being played.
     pub(crate) fn score_timing(&self) -> ScoreTiming {
-        ScoreTiming::from_score(&self.played_score(), self.current_bpm())
-            .with_swing(self.playback_options().swing)
+        // A calibration plays without swing, as in `playback_options`.
+        let swing =
+            if self.calibrating() { Swing::default() } else { self.playback_ctl.audio_cfg.swing };
+        ScoreTiming::from_score(&self.played_score(), self.current_bpm()).with_swing(swing)
     }
 
     /// Tempo being played: the ramp tempo while a ramp runs, else the BPM setting.
@@ -2109,14 +2114,17 @@ mod tests {
         let docs = &app.editor.docs;
         let audio = &app.playback_ctl.audio_cfg;
         format!(
-            "{:?} {:?} {:?} {:?} {:?} {} {} {} | {} {:?} {} {:?} {:?} {} {}",
+            "{:?} {:?} {:?} {:?} {:?} {:?} {:?} {} {} {} {} | {} {:?} {} {:?} {:?} {} {}",
             docs.metronome.score,
             docs.practice.score,
             docs.score.score,
+            docs.metronome.cursor,
+            docs.practice.cursor,
             docs.score.cursor,
             docs.score.active_pattern_id,
             docs.score.dirty,
             docs.practice.dirty,
+            docs.score.history.can_undo(),
             docs.practice.history.can_undo(),
             app.playback_ctl.bpm,
             audio.swing,
@@ -2142,6 +2150,7 @@ mod tests {
                 Swing { unit: grooph_measure::swing::SwingUnit::Eighths, percent: 66 };
             app.editor.generator.endless = true;
             app.editor.generator.ghost_notes = true;
+            app.playback_ctl.audio_cfg.gap.enabled = true;
             app.select_tab(page);
             let document = app.document();
             app.select_tab(Tab::More);
@@ -2151,9 +2160,14 @@ mod tests {
             assert!(app.calibrating());
             assert_eq!(app.played_bpm(), crate::calibration::CALIBRATION_BPM, "{page:?}");
             assert_eq!(app.played_score().len(), 1);
-            let options = app.playback_options();
-            assert!(options.count_in && options.ghost_notes.is_none(), "{page:?}");
-            assert_eq!(options.swing, Swing::default());
+            // Counted in, and none of the user's options: no ghost notes,
+            // swing, gap, ramp, click pattern or counter rhythm.
+            assert_eq!(
+                app.playback_options(),
+                grooph_audio::PlaybackOptions { count_in: true, ..Default::default() },
+                "{page:?}"
+            );
+            assert_eq!(app.score_timing().swing(), Swing::default());
             assert!(!app.endless_runs());
             // The page and everything of the user's stay as they are,
             // also for a save during the run.

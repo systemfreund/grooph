@@ -315,24 +315,35 @@ impl Grooph {
         if !self.playback_ctl.accuracy.tracker.update_state(active, now) {
             return;
         }
-        let score = self.played_score().into_owned();
-        if total_loop_seconds <= 0.0 || score.measures().is_empty() {
+        // The tracker leaves `self` while it reads the played score, which
+        // borrows `self`: no copy of the score per frame.
+        let mut tracker = std::mem::take(&mut self.playback_ctl.accuracy.tracker);
+        let mut deltas = Vec::new();
+        let played = {
+            let score = self.played_score();
+            let played = total_loop_seconds > 0.0 && !score.measures().is_empty();
+            if played {
+                hits.sort_by(|a, b| a.1.total_cmp(&b.1));
+                for (source, time) in hits {
+                    // A calibration measures the raw latency, so it ignores the offset.
+                    let offset_ms =
+                        if calibrating.is_some() { 0.0 } else { settings.offset_ms(source) };
+                    let time = time - offset_ms as f64 / 1000.0;
+                    deltas.extend(tracker.record_hit(time, &timing, &score));
+                }
+                tracker.update_progress(now, &timing, &score);
+            }
+            played
+        };
+        self.playback_ctl.accuracy.tracker = tracker;
+        if !played {
             return;
         }
-
-        hits.sort_by(|a, b| a.1.total_cmp(&b.1));
-        for (source, time) in hits {
-            // A calibration measures the raw latency, so it ignores the offset.
-            let offset_ms = if calibrating.is_some() { 0.0 } else { settings.offset_ms(source) };
-            let time = time - offset_ms as f64 / 1000.0;
-            let delta = self.playback_ctl.accuracy.tracker.record_hit(time, &timing, &score);
-            if let (Some(delta), Some(cal)) =
-                (delta, self.playback_ctl.play_along.calibration.as_mut())
-            {
+        if let Some(cal) = self.playback_ctl.play_along.calibration.as_mut() {
+            for delta in deltas {
                 cal.push(delta);
             }
         }
-        self.playback_ctl.accuracy.tracker.update_progress(now, &timing, &score);
         self.advance_calibration();
     }
 
