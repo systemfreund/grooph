@@ -10,7 +10,9 @@ use crate::duration::Duration;
 use crate::editing::GroupSpan;
 use crate::editing::Modification;
 use crate::grid::DEFAULT_GRID;
-use crate::{Beat, BeatKind, InvalidMeasure, MeasureError, TimeSignature, TupletRegistry};
+use crate::{
+    Beat, BeatKind, Instrument, InvalidMeasure, MeasureError, TimeSignature, TupletRegistry,
+};
 use either::Either;
 use serde::{Deserialize, Serialize};
 use std::fmt::{Debug, Formatter};
@@ -211,6 +213,36 @@ impl Measure {
     /// A measure of rests in `time_signature`, as many voices as this one.
     pub fn empty_like(&self, time_signature: TimeSignature) -> Self {
         Measure { voices: vec![VoiceBar::new_init(time_signature, Rest); self.voices.len()] }
+    }
+
+    /// Add voices of rests below this measure's until it has `count`.
+    pub fn fill_voices(&mut self, count: usize) {
+        let ts = self.time_signature();
+        while self.voices.len() < count {
+            self.voices.push(VoiceBar::new_init(ts, Rest));
+        }
+    }
+
+    /// The instruments of the kit that two voices strike at the same time,
+    /// with the tick: a drum is played once at a time, by one voice. The
+    /// one line's rhythm is left out, as the metronome's click and counter
+    /// rhythm sound together as two rhythms.
+    pub fn doubled_instruments(&self) -> Vec<(u32, Instrument)> {
+        let mut struck: Vec<(u32, Instrument, usize)> = Vec::new();
+        let mut doubled = Vec::new();
+        for (v, voice) in self.voices.iter().enumerate() {
+            let onsets = DEFAULT_GRID.compute_onset_ticks(voice.beats());
+            for (beat, tick) in voice.beats().iter().zip(onsets) {
+                for head in beat.heads().iter().filter(|h| h.instrument() != Instrument::Rhythm) {
+                    let instrument = head.instrument();
+                    if struck.iter().any(|&(t, i, w)| t == tick && i == instrument && w != v) {
+                        doubled.push((tick, instrument));
+                    }
+                    struck.push((tick, instrument, v));
+                }
+            }
+        }
+        doubled
     }
 
     /// Add copies of the voices of `other` below this measure's. Fails, and

@@ -105,7 +105,7 @@ fn random_edit(
             format!("remove({idx})")
         }
         5 => {
-            m.first_voice_mut().toggle_beat_kind(idx);
+            m.first_voice_mut().toggle_beat_kind(idx, crate::Instrument::Rhythm);
             format!("toggle_beat_kind({idx})")
         }
         6 => {
@@ -114,17 +114,17 @@ fn random_edit(
         }
         7 => {
             if rng.chance(0.5) {
-                m.first_voice_mut().toggle_accent(idx);
+                m.first_voice_mut().toggle_accent(idx, crate::Instrument::Rhythm);
                 format!("toggle_accent({idx})")
             } else {
-                m.first_voice_mut().toggle_soft(idx);
+                m.first_voice_mut().toggle_soft(idx, crate::Instrument::Rhythm);
                 format!("toggle_soft({idx})")
             }
         }
         8 => {
             let spec = if rng.chance(0.3) { None } else { Some(pick(rng, &CYCLE_TUPLET_SPECS)) };
             let overwrite = rng.chance(0.5);
-            m.first_voice_mut().set_tuplet(idx, spec, overwrite);
+            m.first_voice_mut().set_tuplet(idx, spec, overwrite, crate::Instrument::Rhythm);
             format!("set_tuplet({idx}, {spec:?}, {overwrite})")
         }
         9 => {
@@ -133,7 +133,7 @@ fn random_edit(
         }
         10 => {
             let base = pick(rng, &[NoteValue::Quarter, NoteValue::Eighth, NoteValue::Sixteenth]);
-            m.first_voice_mut().modify_beat(idx, base, None);
+            m.first_voice_mut().modify_beat(idx, base, None, crate::Instrument::Rhythm);
             format!("modify_beat({idx}, {base:?})")
         }
         _ => {

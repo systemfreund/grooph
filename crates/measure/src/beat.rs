@@ -27,7 +27,12 @@ pub struct Beat {
 impl Beat {
     /// A note of the rhythm's one instrument ([`Instrument::Rhythm`]).
     pub fn note(duration: Duration) -> Self {
-        Self::with_heads(duration, Heads::one(Head::new(Instrument::Rhythm)))
+        Self::note_of(duration, Instrument::Rhythm)
+    }
+
+    /// A note of one plain head of `instrument`.
+    pub fn note_of(duration: Duration, instrument: Instrument) -> Self {
+        Self::with_heads(duration, Heads::one(Head::new(instrument)))
     }
 
     /// A rest.
@@ -55,6 +60,11 @@ impl Beat {
     /// Play `heads` in this slot instead, a rest if there are none.
     pub fn set_heads(&mut self, heads: Heads) {
         self.heads = heads;
+    }
+
+    /// The head of `instrument`, to change its accent, ghost or technique.
+    pub fn head_mut(&mut self, instrument: Instrument) -> Option<&mut Head> {
+        self.heads.get_mut(instrument)
     }
 
     pub fn kind(&self) -> BeatKind {
@@ -107,20 +117,33 @@ impl Beat {
         self.heads.iter_mut().for_each(|h| h.set_soft(soft));
     }
 
-    /// Make the beat a rest, or a note: a note stays as it is, a rest
-    /// becomes a plain [`Beat::note`].
+    /// Make the beat a rest, or a note of the one line: a note stays as it
+    /// is, a rest becomes a plain [`Beat::note`].
     pub fn set_kind(&mut self, kind: BeatKind) {
+        self.set_kind_of(kind, Instrument::Rhythm);
+    }
+
+    /// Make the beat a rest, or a note: a note stays as it is, a rest
+    /// becomes a plain head of `instrument`.
+    pub fn set_kind_of(&mut self, kind: BeatKind, instrument: Instrument) {
         match kind {
             Rest => self.heads = Heads::NONE,
-            Note if self.is_rest() => self.heads = Heads::one(Head::new(Instrument::Rhythm)),
+            Note if self.is_rest() => self.heads = Heads::one(Head::new(instrument)),
             Note => {}
         }
     }
 
-    /// The beat made a rest or a note (see [`Beat::set_kind`]).
+    /// The beat made a rest or a note of the one line (see
+    /// [`Beat::set_kind`]).
     pub fn with_kind(&self, kind: BeatKind) -> Self {
+        self.with_kind_of(kind, Instrument::Rhythm)
+    }
+
+    /// The beat made a rest or a note of `instrument` (see
+    /// [`Beat::set_kind_of`]).
+    pub fn with_kind_of(&self, kind: BeatKind, instrument: Instrument) -> Self {
         let mut beat = *self;
-        beat.set_kind(kind);
+        beat.set_kind_of(kind, instrument);
         beat
     }
 }

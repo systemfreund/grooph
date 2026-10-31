@@ -568,7 +568,7 @@ mod tests {
         // Quarter note with accent
         let b = Beat::note(q());
         m.first_voice_mut().set_beat(0, b).unwrap();
-        m.first_voice_mut().toggle_accent(0);
+        m.first_voice_mut().toggle_accent(0, grooph_measure::Instrument::Rhythm);
 
         let em = 20.0;
         let displacement = 0.5; // 0.5 em gap
@@ -621,7 +621,7 @@ mod tests {
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
         m.first_voice_mut().set_beat(0, Beat::note(e())).unwrap();
         m.first_voice_mut().set_beat(1, Beat::rest(e())).unwrap();
-        m.first_voice_mut().toggle_accent(0);
+        m.first_voice_mut().toggle_accent(0, grooph_measure::Instrument::Rhythm);
 
         let em = 20.0;
         let opts = LayoutOpts {

@@ -1409,7 +1409,9 @@ mod tests {
         assert_eq!(audio.sent_plan.bpm, 90);
 
         // So does an edited beat.
-        score.measures_mut()[1].first_voice_mut().toggle_beat_kind(0);
+        score.measures_mut()[1]
+            .first_voice_mut()
+            .toggle_beat_kind(0, grooph_measure::Instrument::Rhythm);
         audio.update(&PlayerState::Stopped, 90, &score, 0.0);
         let edited = built(&audio);
         assert!(!Arc::ptr_eq(&edited, &slower));

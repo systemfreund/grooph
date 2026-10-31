@@ -460,6 +460,11 @@ impl Grooph {
         if target.overwrites.is_none() {
             ui.weak("The score is not saved.");
         }
+        ui.add_space(4.0);
+        // A drum groove is a score of its own, on the kit's staff.
+        if ui.button("🎼 New drum groove").clicked() {
+            self.request_new_kit_score();
+        }
         ui.add_space(8.0);
         if self.editor.library.patterns.is_empty() {
             ui.weak("No saved rhythms yet.");
@@ -609,6 +614,10 @@ impl Grooph {
             Some(PendingLoad::Link(_)) => (
                 "The link replaces the current measure, which has unsaved changes. Save first?",
                 "Open link",
+            ),
+            Some(PendingLoad::NewKitScore) => (
+                "A new drum groove replaces the current score, which has unsaved changes. Save first?",
+                "Start",
             ),
         };
 

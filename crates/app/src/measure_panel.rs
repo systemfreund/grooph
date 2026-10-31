@@ -10,7 +10,8 @@ use eframe::egui::{FontId, Frame, Rect, Response, Stroke};
 use grooph_layout::pixel_layout::{NoteLayout, compute_em, onset_head};
 use grooph_layout::staff_layout::{
     LEGIBILITY_FLOOR_EM, LOWER_VOICE_LABEL_ROOM_EM, PlacedMeasure, ROOM_BELOW_EM,
-    ROOM_BELOW_WITH_LABELS_EM, StaffLayout, StaffOpts, build_staff_layout, hit_test_voice,
+    ROOM_BELOW_WITH_LABELS_EM, StaffLayout, StaffOpts, build_staff_layout, hit_test_head,
+    hit_test_voice,
 };
 use grooph_measure::grid::DEFAULT_GRID;
 use grooph_measure::tempo::ScoreTiming;
@@ -557,11 +558,16 @@ impl Grooph {
         if !matches!(self.ui.mode, Mode::TimeSignature(_))
             && (resp.clicked() || resp.dragged())
             && let Some(pos) = resp.interact_pointer_pos()
-            && let Some((voice, m_idx, b_idx)) = hit_test_voice(staff, pos)
+            && let Some(hit) = hit_test_head(staff, pos)
         {
             // A tap on another voice edits that voice from now on: in the
-            // metronome tab the click bar or its counter rhythm.
-            self.editor.doc_mut().cursor = Cursor::in_voice(m_idx, voice, b_idx);
+            // metronome tab the click bar or its counter rhythm. On the
+            // kit's staff it also picks the instrument whose head it is on.
+            self.editor.doc_mut().cursor =
+                Cursor::in_voice(hit.measure_idx, hit.voice, hit.beat_idx);
+            if !self.staff_model().one_line() {
+                self.editor.instrument = hit.instrument;
+            }
 
             if resp.double_clicked()
                 && let Some(tool) = all_tools()

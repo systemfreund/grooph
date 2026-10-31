@@ -28,11 +28,18 @@ pub struct BeatTemplate {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Modifier {
-    ToggleDotted { dots: u8 },
+    ToggleDotted {
+        dots: u8,
+    },
     ToggleAccent,
     ToggleSoft,
     ToggleRestNote,
     CycleTuplet,
+    /// Add the chosen instrument's head to the beat, or take it away: on a
+    /// staff of several instruments.
+    ToggleHead,
+    /// Play the chosen instrument's head with its next technique.
+    CycleTechnique,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -171,7 +178,7 @@ pub fn all_tools() -> &'static [Tool] {
     use BeatKind::*;
     use Duration::*;
 
-    static ALL: [Tool; 29] = [
+    static ALL: [Tool; 31] = [
         Tool {
             id: "edit.undo",
             label: "⟲",
@@ -328,6 +335,22 @@ pub fn all_tools() -> &'static [Tool] {
             group: ToolGroup::Modifiers,
             kind: ToolKind::Modify(Modifier::ToggleRestNote),
             shortcuts: &[Shortcut::plain(Key::Enter)],
+            show_in_palette: false,
+        },
+        Tool {
+            id: "modify.toggle.head",
+            label: "Toggle Instrument",
+            group: ToolGroup::Modifiers,
+            kind: ToolKind::Modify(Modifier::ToggleHead),
+            shortcuts: &[Shortcut::plain(Key::H)],
+            show_in_palette: false,
+        },
+        Tool {
+            id: "modify.cycle_technique",
+            label: "Cycle Technique",
+            group: ToolGroup::Modifiers,
+            kind: ToolKind::Modify(Modifier::CycleTechnique),
+            shortcuts: &[Shortcut::plain(Key::O)],
             show_in_palette: false,
         },
         Tool {
