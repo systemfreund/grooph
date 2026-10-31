@@ -117,7 +117,7 @@ impl Grooph {
         if self.editor.document == doc {
             return;
         }
-        // Also puts back a calibration's score.
+        // Also cancels a calibration run.
         self.stop_transport();
         if self.metronome_mode() {
             self.close_metronome();

@@ -302,8 +302,9 @@ impl Grooph {
     }
 
     /// Bars in the score being played, for the tempo ramp's loops.
+    /// Agrees with [`Self::played_score`] without building the bar.
     pub(crate) fn played_bars(&self) -> usize {
-        if self.metronome_mode() { 1 } else { self.editor.doc().score.len() }
+        if self.calibrating() || self.metronome_mode() { 1 } else { self.editor.doc().score.len() }
     }
 
     /// Open the metronome's document on the click bar of its meter, with
@@ -323,7 +324,7 @@ impl Grooph {
     }
 
     /// Close the metronome, if open, for something that needs a rhythm
-    /// (a calibration, a preset, a link): shows the practice page.
+    /// (a preset, a link): shows the practice page.
     pub(crate) fn leave_metronome(&mut self) {
         if self.metronome_mode() {
             self.show_document(Document::Practice);
@@ -471,10 +472,10 @@ impl Grooph {
     }
 
     /// The counter rhythm the audio plays: the metronome meter's, in the
-    /// metronome tab only, and not while calibrating.
+    /// metronome tab only.
     pub(crate) fn played_counter(&self) -> CounterBars {
         let mut counter = CounterBars::default();
-        if self.metronome_mode() && self.calibration_stash().is_none() {
+        if self.metronome_mode() {
             let ts = self.metronome_meter();
             counter.set(ts, self.counter_bar());
         }

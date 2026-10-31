@@ -78,7 +78,6 @@ use grooph_measure::{Beat, BeatKind};
 use grooph_midi::MidiInput;
 use log::{debug, info, warn};
 use serde::{Deserialize, Serialize};
-use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -204,31 +203,17 @@ impl Default for PersistedState {
 
 impl PersistedState {
     fn from_app(app: &Grooph) -> Self {
-        // A running calibration has swapped in its click score: save what it
-        // will restore instead, in the document it took the place of.
-        let stash = app.calibration_stash();
         let generator = &app.editor.generator;
         let docs = &app.editor.docs;
-        let calibrating = |doc| stash.filter(|_| app.document() == doc);
         let score_doc = &docs.score;
-        let (score, cursor, active_pattern_id, dirty) = match calibrating(Document::Score) {
-            Some(s) => (&s.score, s.cursor, s.active_pattern_id, s.dirty),
-            None => {
-                (&score_doc.score, score_doc.cursor, score_doc.active_pattern_id, score_doc.dirty)
-            }
-        };
-        let (practice_score, practice_cursor) = match calibrating(Document::Practice) {
-            Some(s) => (&s.score, s.cursor),
-            None => (&docs.practice.score, docs.practice.cursor),
-        };
         Self {
             version: PERSISTED_STATE_VERSION,
-            score: score.clone(),
-            cursor,
+            score: score_doc.score.clone(),
+            cursor: score_doc.cursor,
             document: app.document(),
-            practice_score: Some(practice_score.clone()),
-            practice_cursor,
-            bpm: stash.map_or(app.playback_ctl.bpm, |s| s.bpm),
+            practice_score: Some(docs.practice.score.clone()),
+            practice_cursor: docs.practice.cursor,
+            bpm: app.playback_ctl.bpm,
             audio_settings: app.playback_ctl.audio_cfg.settings,
             audio_latency_enabled: app.playback_ctl.audio_cfg.latency_enabled,
             audio_offset: app.playback_ctl.audio_cfg.offset,
@@ -238,16 +223,16 @@ impl PersistedState {
             midi_selected_port_id: app.playback_ctl.midi.selected_port_id.clone(),
             accuracy_enabled: app.playback_ctl.accuracy.enabled,
             library: app.editor.library.clone(),
-            active_pattern_id,
-            dirty,
+            active_pattern_id: score_doc.active_pattern_id,
+            dirty: score_doc.dirty,
             generator_settings: generator.settings,
-            endless: stash.map_or(generator.endless, |s| s.endless),
-            ghost_notes: stash.map_or(generator.ghost_notes, |s| s.ghost_notes),
-            count_in: stash.map_or(app.playback_ctl.audio_cfg.count_in, |s| s.count_in),
-            swing: stash.map_or(app.playback_ctl.audio_cfg.swing, |s| s.swing),
+            endless: generator.endless,
+            ghost_notes: generator.ghost_notes,
+            count_in: app.playback_ctl.audio_cfg.count_in,
+            swing: app.playback_ctl.audio_cfg.swing,
             play_along: app.playback_ctl.play_along.settings,
-            gap_click: stash.map_or(app.playback_ctl.audio_cfg.gap, |s| s.gap),
-            tempo_ramp: stash.map_or(app.playback_ctl.audio_cfg.ramp, |s| s.ramp),
+            gap_click: app.playback_ctl.audio_cfg.gap,
+            tempo_ramp: app.playback_ctl.audio_cfg.ramp,
             presets: app.editor.presets.clone(),
             click_bars: app.playback_ctl.audio_cfg.click.clone(),
             counter_bars: app.playback_ctl.audio_cfg.counter.clone(),
@@ -428,18 +413,21 @@ impl App for Grooph {
         }
 
         let playback_options = self.playback_options();
-        let metronome = self.metronome_mode().then(|| self.metronome_score());
-        let score = metronome.as_ref().unwrap_or(&self.editor.doc().score);
+        let bpm = self.played_bpm();
         let now = ui.input(|i| i.time);
         let mut output_lost = false;
-        if let Some(audio) = &mut self.playback_ctl.audio {
+        // The engine leaves `self` while it reads the played score, which
+        // borrows `self`: no copy of the score per frame.
+        let mut engine = self.playback_ctl.audio.take();
+        if let Some(audio) = &mut engine {
             audio.set_audio_settings(self.playback_ctl.audio_cfg.settings);
             audio.set_playback_options(playback_options);
-            if let Some(after) = audio.update(&audio_state, self.playback_ctl.bpm, score, now) {
+            if let Some(after) = audio.update(&audio_state, bpm, &self.played_score(), now) {
                 ui.ctx().request_repaint_after(after);
             }
             output_lost = audio.take_output_lost();
         }
+        self.playback_ctl.audio = engine;
         // The output went away (e.g. a Bluetooth device): stop, as the next
         // play opens a new one.
         if output_lost {
@@ -489,8 +477,12 @@ pub fn web_options() -> eframe::WebOptions {
 
 impl Grooph {
     fn playback_options(&self) -> PlaybackOptions {
+        // A calibration clicks every beat once counted in, whatever the
+        // user's options.
+        if self.calibrating() {
+            return PlaybackOptions { count_in: true, ..Default::default() };
+        }
         let generator = &self.editor.generator;
-        let calibrating = self.calibration_stash().is_some();
         PlaybackOptions {
             count_in: self.playback_ctl.audio_cfg.count_in,
             // On the generator's grid: Practice's rhythm only.
@@ -503,12 +495,7 @@ impl Grooph {
                 ..self.playback_ctl.audio_cfg.gap
             },
             ramp: self.played_ramp(),
-            // Calibration clicks every beat, whatever the user's click bars.
-            click: if calibrating {
-                ClickBars::default()
-            } else {
-                self.playback_ctl.audio_cfg.click.clone()
-            },
+            click: self.playback_ctl.audio_cfg.click.clone(),
             counter: self.played_counter(),
         }
     }
@@ -523,13 +510,15 @@ impl Grooph {
     /// the timing the audio engine builds from [`Self::playback_options`],
     /// including the tempo ramp of the bar being played.
     pub(crate) fn score_timing(&self) -> ScoreTiming {
-        ScoreTiming::from_score(&self.editor.doc().score, self.current_bpm())
-            .with_swing(self.playback_ctl.audio_cfg.swing)
+        // A calibration plays without swing, as in `playback_options`.
+        let swing =
+            if self.calibrating() { Swing::default() } else { self.playback_ctl.audio_cfg.swing };
+        ScoreTiming::from_score(&self.played_score(), self.current_bpm()).with_swing(swing)
     }
 
     /// Tempo being played: the ramp tempo while a ramp runs, else the BPM setting.
     pub(crate) fn current_bpm(&self) -> u32 {
-        self.playback_ctl.playback.ramp_bpm.unwrap_or(self.playback_ctl.bpm)
+        self.playback_ctl.playback.ramp_bpm.unwrap_or(self.played_bpm())
     }
 
     fn clear_accuracy_for_edit(&mut self) {
@@ -944,7 +933,7 @@ impl Grooph {
             if matches!(cal.phase, CalibrationPhase::Done { .. }) {
                 self.playback_ctl.play_along.calibration = None;
             } else {
-                // Cancel, which also puts the score back.
+                // Cancel.
                 self.stop_transport();
             }
             return true;
@@ -1037,7 +1026,7 @@ impl Grooph {
         self.playback_ctl.playback.reset();
         // Mark the count-in as pending until the UI clock is known (first
         // frame of the measure panel fills in `since`).
-        if self.playback_ctl.audio_cfg.count_in {
+        if self.playback_options().count_in {
             self.playback_ctl.playback.count_in = CountInState::Waiting { since: f64::NAN };
         }
 
@@ -1120,16 +1109,6 @@ impl Grooph {
         m.first_voice_mut().set_beat(2, Beat::note(q())).unwrap();
         m.first_voice_mut().set_beat(3, Beat::note(q())).unwrap();
         m
-    }
-
-    /// The score on the staff: the click bar in the metronome, else the
-    /// working score.
-    fn shown_score(&self) -> Cow<'_, Score> {
-        if self.metronome_mode() {
-            Cow::Owned(self.metronome_score())
-        } else {
-            Cow::Borrowed(&self.editor.doc().score)
-        }
     }
 
     fn build_count_config(&self) -> Option<CountConfig> {
@@ -1474,7 +1453,7 @@ mod tests {
         app.select_tab(Tab::More);
         app.select_tab(Tab::Practice);
         assert!(!app.metronome_mode());
-        assert_eq!(app.playback_ctl.transport_state, TransportState::Stopped);
+        assert_eq!(app.playback_ctl.transport_state, crate::TransportState::Stopped);
     }
 
     #[test]
@@ -2130,42 +2109,136 @@ mod tests {
         }
     }
 
-    #[test]
-    fn calibration_from_the_score_tab_runs_on_practice() {
-        use super::Grooph;
-        use crate::play_along::HitSource;
-
-        let cc = eframe::CreationContext::_new_kittest(eframe::egui::Context::default());
-        let mut app = Grooph::new(&cc);
-        app.select_tab(Tab::Score);
-        let score = format!("{:?}", app.editor.docs.score.score);
-        app.select_tab(Tab::More);
-        app.start_calibration(HitSource::Tap);
-        assert_eq!(app.document(), crate::documents::Document::Practice);
-        assert_eq!(app.tab(), Tab::More);
-        assert_eq!(format!("{:?}", app.editor.docs.score.score), score);
-        app.stop_transport();
-        assert_eq!(format!("{:?}", app.editor.docs.score.score), score);
+    /// Everything a calibration run must leave alone, as text.
+    fn user_state(app: &super::Grooph) -> String {
+        let docs = &app.editor.docs;
+        let audio = &app.playback_ctl.audio_cfg;
+        format!(
+            "{:?} {:?} {:?} {:?} {:?} {:?} {:?} {:?} {:?} {} {} {} {} {} {} | {} {:?} {} {:?} {:?} {} {}",
+            docs.metronome.score,
+            docs.practice.score,
+            docs.score.score,
+            docs.metronome.cursor,
+            docs.practice.cursor,
+            docs.score.cursor,
+            docs.metronome.active_pattern_id,
+            docs.practice.active_pattern_id,
+            docs.score.active_pattern_id,
+            docs.metronome.dirty,
+            docs.practice.dirty,
+            docs.score.dirty,
+            docs.metronome.history.can_undo(),
+            docs.practice.history.can_undo(),
+            docs.score.history.can_undo(),
+            app.playback_ctl.bpm,
+            audio.swing,
+            audio.count_in,
+            audio.gap,
+            audio.ramp,
+            app.editor.generator.endless,
+            app.editor.generator.ghost_notes,
+        )
     }
 
     #[test]
-    fn calibration_from_more_puts_the_metronome_away() {
+    fn a_calibration_run_touches_no_page_and_no_setting() {
         use super::Grooph;
+        use crate::play_along::HitSource;
+        use grooph_measure::swing::Swing;
+
+        for page in [Tab::Metronome, Tab::Practice, Tab::Score] {
+            let cc = eframe::CreationContext::_new_kittest(eframe::egui::Context::default());
+            let mut app = Grooph::new(&cc);
+            app.playback_ctl.bpm = 133;
+            app.playback_ctl.audio_cfg.swing =
+                Swing { unit: grooph_measure::swing::SwingUnit::Eighths, percent: 66 };
+            app.editor.generator.endless = true;
+            app.editor.generator.ghost_notes = true;
+            app.playback_ctl.audio_cfg.gap.enabled = true;
+            app.select_tab(page);
+            let document = app.document();
+            app.select_tab(Tab::More);
+            let before = user_state(&app);
+            app.start_calibration(HitSource::Tap);
+            // It plays its own click bar at its own tempo, plainly.
+            assert!(app.calibrating());
+            assert_eq!(app.played_bpm(), crate::calibration::CALIBRATION_BPM, "{page:?}");
+            let bar = format!("{:?}", Score::single(Grooph::default_measure()));
+            assert_eq!(format!("{:?}", *app.played_score()), bar, "{page:?}");
+            // Hits are measured against that bar, and taps count on every
+            // page, the metronome's too.
+            assert_eq!(format!("{:?}", app.tracked_score()), bar, "{page:?}");
+            assert!(app.tap_capture_active(), "{page:?}");
+            // Counted in, and none of the user's options: no ghost notes,
+            // swing, gap, ramp, click pattern or counter rhythm.
+            assert_eq!(
+                app.playback_options(),
+                grooph_audio::PlaybackOptions { count_in: true, ..Default::default() },
+                "{page:?}"
+            );
+            assert_eq!(app.score_timing().swing(), Swing::default());
+            assert!(!app.endless_runs());
+            // The page and everything of the user's stay as they are,
+            // also for a save during the run.
+            assert_eq!(app.tab(), Tab::More);
+            assert_eq!(app.document(), document, "{page:?}");
+            assert_eq!(user_state(&app), before, "{page:?}");
+            let saved = PersistedState::from_app(&app);
+            assert_eq!(saved.bpm, 133);
+            assert_eq!(
+                saved.swing,
+                Swing { unit: grooph_measure::swing::SwingUnit::Eighths, percent: 66 }
+            );
+            assert_eq!(format!("{:?}", saved.score), format!("{:?}", app.editor.docs.score.score));
+            // Cancelled: nothing to put back.
+            app.stop_transport();
+            assert!(!app.calibrating());
+            assert_eq!(user_state(&app), before, "{page:?}");
+            assert_eq!(app.played_bpm(), 133);
+        }
+    }
+
+    #[test]
+    fn a_calibration_applies_the_offset_it_finds() {
+        use super::Grooph;
+        use crate::calibration::{CALIBRATION_HITS, CALIBRATION_WARMUP};
         use crate::play_along::HitSource;
 
         let cc = eframe::CreationContext::_new_kittest(eframe::egui::Context::default());
         let mut app = Grooph::new(&cc);
-        app.select_tab(Tab::Practice);
-        let rhythm = app.editor.doc().score.clone();
-        app.select_tab(Tab::Metronome);
         app.select_tab(Tab::More);
-        // It calibrates on the practice page and gives its rhythm back.
+        let before = user_state(&app);
         app.start_calibration(HitSource::Tap);
-        assert!(!app.metronome_mode());
-        assert_eq!(app.document(), crate::documents::Document::Practice);
-        app.stop_transport();
-        assert_eq!(format!("{:?}", app.editor.doc().score), format!("{rhythm:?}"));
-        assert_eq!(app.tab(), Tab::More);
+        let cal = app.playback_ctl.play_along.calibration.as_mut().unwrap();
+        // The warm-up hits are ignored, the median of the rest is the offset.
+        for _ in 0..CALIBRATION_WARMUP {
+            cal.push(-200.0);
+        }
+        for i in 0..CALIBRATION_HITS {
+            cal.push(if i % 2 == 0 { 24.0 } else { 26.0 });
+        }
+        app.advance_calibration();
+        assert_eq!(app.playback_ctl.play_along.settings.offset_ms(HitSource::Tap), 25.0);
+        assert!(!app.calibrating());
+        assert_eq!(app.playback_ctl.transport_state, crate::TransportState::Stopped);
+        assert_eq!(user_state(&app), before);
+    }
+
+    #[test]
+    fn the_metronome_measures_hits_against_its_clicks() {
+        use super::Grooph;
+
+        let cc = eframe::CreationContext::_new_kittest(eframe::egui::Context::default());
+        let mut app = Grooph::new(&cc);
+        app.select_tab(Tab::Metronome);
+        // It plays a silent bar, but hits count against the click bar.
+        assert_eq!(
+            format!("{:?}", app.tracked_score()),
+            format!("{:?}", app.editor.docs.metronome.score)
+        );
+        assert!(
+            app.tracked_score().measures()[0].first_voice().beats().iter().any(|b| b.is_note())
+        );
     }
 
     #[test]

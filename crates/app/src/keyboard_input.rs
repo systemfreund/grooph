@@ -16,8 +16,8 @@ impl Grooph {
             if matches!(self.ui.mode, Mode::TimeSignature(_)) {
                 return;
             }
-            // Calibration swaps in its own click score: no editing, but Space
-            // still stops (= cancels) it.
+            // During a calibration: no editing, but Space still stops
+            // (= cancels) it.
             if self.playback_ctl.play_along.calibration.is_some() {
                 if i.key_pressed(Key::Space) {
                     self.stop_transport();

@@ -511,8 +511,8 @@ impl Grooph {
         if let Some(id) = library_preset {
             self.open_preset(id);
         }
-        // After the generator check: the run swaps the score and turns endless
-        // mode off, which is no generator change. The dialog stays open
+        // After the generator check: the run plays its own bar and leaves the
+        // pages and endless mode alone, so it is no generator change. The dialog stays open
         // under the calibration and shows the new latency afterwards.
         if let Some(source) = calibrate {
             self.start_calibration(source);

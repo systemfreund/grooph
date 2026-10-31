@@ -134,14 +134,16 @@ impl Grooph {
     /// Whether taps are captured right now. Touches on the staff then count
     /// as hits instead of moving the cursor.
     pub(crate) fn tap_capture_active(&self) -> bool {
-        // In the metronome there is no rhythm to play along with; taps edit the ring.
-        if self.playback_ctl.transport_state != TransportState::Playing || self.metronome_mode() {
+        if self.playback_ctl.transport_state != TransportState::Playing {
             return false;
         }
         match self.calibration_source() {
             Some(source) => source == HitSource::Tap,
+            // In the metronome there is no rhythm to play along with; taps
+            // edit the ring.
             None => {
-                self.playback_ctl.accuracy.enabled
+                !self.metronome_mode()
+                    && self.playback_ctl.accuracy.enabled
                     && self.playback_ctl.play_along.settings.tap_enabled
             }
         }
@@ -313,27 +315,35 @@ impl Grooph {
         if !self.playback_ctl.accuracy.tracker.update_state(active, now) {
             return;
         }
-        if total_loop_seconds <= 0.0 || self.editor.doc().score.measures().is_empty() {
+        // The tracker leaves `self` while it reads the tracked score, which
+        // borrows `self`: no copy of the score per frame.
+        let mut tracker = std::mem::take(&mut self.playback_ctl.accuracy.tracker);
+        let mut deltas = Vec::new();
+        let played = {
+            let score = self.tracked_score();
+            let played = total_loop_seconds > 0.0 && !score.measures().is_empty();
+            if played {
+                hits.sort_by(|a, b| a.1.total_cmp(&b.1));
+                for (source, time) in hits {
+                    // A calibration measures the raw latency, so it ignores the offset.
+                    let offset_ms =
+                        if calibrating.is_some() { 0.0 } else { settings.offset_ms(source) };
+                    let time = time - offset_ms as f64 / 1000.0;
+                    deltas.extend(tracker.record_hit(time, &timing, score));
+                }
+                tracker.update_progress(now, &timing, score);
+            }
+            played
+        };
+        self.playback_ctl.accuracy.tracker = tracker;
+        if !played {
             return;
         }
-
-        hits.sort_by(|a, b| a.1.total_cmp(&b.1));
-        for (source, time) in hits {
-            // A calibration measures the raw latency, so it ignores the offset.
-            let offset_ms = if calibrating.is_some() { 0.0 } else { settings.offset_ms(source) };
-            let time = time - offset_ms as f64 / 1000.0;
-            let delta = self.playback_ctl.accuracy.tracker.record_hit(
-                time,
-                &timing,
-                &self.editor.doc().score,
-            );
-            if let (Some(delta), Some(cal)) =
-                (delta, self.playback_ctl.play_along.calibration.as_mut())
-            {
+        if let Some(cal) = self.playback_ctl.play_along.calibration.as_mut() {
+            for delta in deltas {
                 cal.push(delta);
             }
         }
-        self.playback_ctl.accuracy.tracker.update_progress(now, &timing, &self.editor.doc().score);
         self.advance_calibration();
     }
 

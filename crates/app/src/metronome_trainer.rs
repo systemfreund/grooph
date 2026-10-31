@@ -16,7 +16,7 @@ impl Grooph {
             _ => None,
         };
         let ramp = self.played_ramp();
-        let bpm = self.playback_ctl.bpm;
+        let bpm = self.played_bpm();
         let bars = self.played_bars();
         let ramp_bpm = (playing && ramp.enabled).then(|| match bar {
             Some(b) => ramp.bpm_for_bar(bpm, b.bar, bars),
@@ -34,6 +34,9 @@ impl Grooph {
     /// The tempo ramp as played: endless mode never loops, so there a ramp
     /// counted in loops counts in bars (see [`Self::endless_runs`]).
     pub(crate) fn played_ramp(&self) -> TempoRamp {
+        if self.calibrating() {
+            return TempoRamp::default();
+        }
         let mut ramp = self.playback_ctl.audio_cfg.ramp;
         if self.endless_runs() {
             ramp.unit = RampUnit::Bars;

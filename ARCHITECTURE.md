@@ -505,7 +505,7 @@ grooph's metronome runs inside AI chats as an
   tool palette and undo work on it: `open_metronome` builds it from
   `ClickBars` when the tab opens, `sync_click_bar` writes it back every
   frame and when it closes (persistence saves the click settings, not the
-  bar). Something that needs a rhythm (a calibration, a preset, a link)
+  bar). Something that needs a rhythm (a preset, a link)
   closes it with `leave_metronome`, which shows the practice page. The audio engine
   gets one silent bar of the meter (`metronome_score`), so only the clicks
   sound; ghost notes, endless mode and play along are off there. Below the
@@ -546,11 +546,14 @@ grooph's metronome runs inside AI chats as an
 - Grading (`accuracy::session::HitWindows`): perfect ≤ 25 ms, good ≤ 60 ms,
   narrowed to 1/5 and 2/5 of the gap to the closest neighbouring onset (as
   heard) for fast notes. Markers are coloured by grade.
-- Calibration (`crates/app/src/calibration.rs`): stashes the score and playback
-  options, plays 4 quarters at 100 BPM, takes the median of the hits after a
-  warm-up as the source's offset and restores the stash on stop. Persistence
-  reads the stash while a calibration runs. It is started from More → Play
-  along (`play_along_settings.rs`), whose dialog stays open underneath.
+- Calibration (`crates/app/src/calibration.rs`): plays a click bar of its own
+  (4 quarters at 100 BPM, counted in, no swing, ghost notes, gap or ramp)
+  and takes the median of the hits after a warm-up as the source's offset.
+  It touches no page's document, tempo or option and leaves the page shown:
+  while it runs, `played_score`, `played_bpm` and `playback_options` (and
+  so `score_timing`, the audio, the accuracy tracker and the staff) give its
+  bar instead of the page's. It is started from More → Play along
+  (`play_along_settings.rs`), whose dialog stays open underneath.
 
 ## Rhythm documents
 

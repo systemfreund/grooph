@@ -92,6 +92,7 @@ impl Grooph {
         self.editor.generator.endless
             && self.document() == Document::Practice
             && !self.editing()
+            && !self.calibrating()
             && !self.metronome_mode()
     }
 
