@@ -1236,13 +1236,9 @@ impl Grooph {
         self.guide_row(ui);
         self.timing_feedback_row(ui);
         self.shared_rows(ui);
-        // Edited here, as the metronome's "Edit clicks"; kept by copying it
-        // into the score tab.
+        // Edited here, as the metronome's "Edit clicks".
         if value_row(ui, "Edit rhythm", "✏").clicked() {
             self.edit_page();
-        }
-        if value_row(ui, "Copy to Score", "").clicked() {
-            self.request_copy_to_score();
         }
     }
 
@@ -1381,20 +1377,9 @@ impl Grooph {
                         self.ui.picker = Some(Picker::Counting);
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        // Back to the score tab's options sheet.
+                        // Back to the page's card and options sheet.
                         if ui.button(RichText::new("Done").size(18.0)).clicked() {
                             self.ui.mode = Mode::Playback;
-                        }
-                        let fill = ui.visuals().extreme_bg_color;
-                        let text = ui.visuals().strong_text_color();
-                        if round_button(ui, SIDE_BUTTON_SIZE, fill, text, paint_share_icon)
-                            .on_hover_text("Share a link to this score")
-                            .clicked()
-                        {
-                            self.share_link(ui);
-                        }
-                        if self.link_copied_recently(ui) {
-                            ui.weak("Copied");
                         }
                     });
                 });

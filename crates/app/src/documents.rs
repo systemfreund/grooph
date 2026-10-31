@@ -9,14 +9,13 @@
 //! staff, the tools and undo work on its document ([`EditorState::doc`]).
 //! The generator only ever writes Practice's document (see
 //! [`Grooph::generate_new_score`]), so a written score is never replaced by a
-//! generated rhythm. "Copy to Score" copies Practice's rhythm into the score
-//! tab.
+//! generated rhythm.
 //!
 //! [`EditorState::document`]: crate::state::EditorState::document
 //! [`EditorState::doc`]: crate::state::EditorState::doc
 
 use crate::shell::Tab;
-use crate::state::{EditorState, PendingLoad};
+use crate::state::EditorState;
 use crate::undo::{DEFAULT_UNDO_LIMIT, UndoHistory};
 use crate::{Grooph, Mode};
 use grooph_measure::{Cursor, Score};
@@ -162,31 +161,6 @@ impl Grooph {
         }
     }
 
-    /// "Copy to Score" on the practice page: asks first when the score tab's
-    /// score has unsaved changes, which Practice's rhythm would replace.
-    pub(crate) fn request_copy_to_score(&mut self) {
-        if self.editor.docs.score.dirty {
-            self.ui.pending_load = Some(PendingLoad::PracticeRhythm);
-        } else {
-            self.copy_to_score();
-        }
-    }
-
-    /// Copy Practice's rhythm into the score tab (undoable there) and open
-    /// it. It is a new, unsaved score.
-    pub(crate) fn copy_to_score(&mut self) {
-        let practice = self.editor.docs.practice.score.clone();
-        self.ui.picker = None;
-        self.select_tab(Tab::Score);
-        self.with_undo_snapshot(|app| {
-            let doc = app.editor.doc_mut();
-            doc.score = practice;
-            doc.cursor = Cursor::start();
-            true
-        });
-        self.editor.doc_mut().active_pattern_id = None;
-    }
-
     /// A page's editor (✏, "Edit clicks"): its tool palette on its document.
     pub(crate) fn edit_page(&mut self) {
         if self.tab() == Tab::More {
@@ -324,36 +298,6 @@ mod tests {
         app.redo();
         assert_eq!(score_text(&app), groove);
         assert_eq!(practice_text(&app), first);
-    }
-
-    #[test]
-    fn copy_to_score_copies_practices_rhythm_and_asks_first() {
-        let (mut app, groove) = app_with_groove();
-        app.select_tab(Tab::Practice);
-        let practice = practice_text(&app);
-        // The groove has unsaved changes: asked first, nothing changes yet.
-        app.request_copy_to_score();
-        assert!(app.ui.pending_load.is_some());
-        assert_eq!(score_text(&app), groove);
-        assert_eq!(app.tab(), Tab::Practice);
-        let pending = app.ui.pending_load.take().unwrap();
-        app.finish_pending_load(pending);
-        // The score tab, on a new unsaved copy.
-        assert_eq!(app.tab(), Tab::Score);
-        assert_eq!(score_text(&app), practice);
-        assert_eq!(app.editor.docs.score.active_pattern_id, None);
-        assert!(app.editor.docs.score.dirty);
-        // Undo there brings the groove back; Practice keeps its rhythm.
-        app.undo();
-        assert_eq!(score_text(&app), groove);
-        assert_eq!(practice_text(&app), practice);
-        // A saved score is replaced without asking.
-        app.save_active_pattern();
-        app.select_tab(Tab::Practice);
-        app.request_copy_to_score();
-        assert!(app.ui.pending_load.is_none());
-        assert_eq!(score_text(&app), practice);
-        assert_eq!(app.tab(), Tab::Score);
     }
 
     #[test]

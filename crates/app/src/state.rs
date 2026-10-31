@@ -366,8 +366,6 @@ pub(crate) struct UiShell {
 pub(crate) enum PendingLoad {
     Pattern(u64),
     Link(Box<SharedLink>),
-    /// "Copy to Score": Practice's rhythm into the score tab.
-    PracticeRhythm,
 }
 
 #[cfg(test)]

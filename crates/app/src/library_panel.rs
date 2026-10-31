@@ -604,10 +604,6 @@ impl Grooph {
                 "The link replaces the current measure, which has unsaved changes. Save first?",
                 "Open link",
             ),
-            Some(PendingLoad::PracticeRhythm) => (
-                "The rhythm from Practice replaces your score, which has unsaved changes. Save first?",
-                "Replace",
-            ),
         };
 
         // A modal, so that it comes up above the library dialog it is

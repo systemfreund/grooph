@@ -573,11 +573,6 @@ grooph's metronome runs inside AI chats as an
   it first, so no generator action (🎲, a setting, a preset, a generator
   link, endless mode) replaces the score tab's score. Endless mode and ghost
   notes run on Practice's rhythm only.
-- The one way between them is "Copy to Score" in Practice's options
-  (`request_copy_to_score`): Practice's rhythm is copied into the score tab
-  as a new unsaved score (undoable there) and the tab opens; with unsaved
-  changes there the unsaved-changes dialog asks first
-  (`PendingLoad::PracticeRhythm`).
 - The library and the unsaved-changes checks reach the score tab's document
   as `docs.score`, from any page and without closing the metronome. A tempo
   change marks it unsaved only on the score tab (`mark_tempo_unsaved`).
@@ -621,7 +616,7 @@ grooph's metronome runs inside AI chats as an
 - Windows narrower than `NARROW_MAX_WIDTH` (600 pt, `UiShell::narrow_screen`)
   get tighter staff spacing, so glyphs are bigger on phones.
 - While a tempo ramp runs, the card shows the tempo being played ("BPM now").
-- Share (right of play, and in the edit bar) builds a score link with tempo
+- Share (right of play; not in the editors) builds a score link with tempo
   and swing; on the web it opens the system share sheet
   (`platform::open_share_sheet`, Web Share API), else copies the link. In the
   Metronome tab, share (right of play) builds a `ts` link with tempo, swing

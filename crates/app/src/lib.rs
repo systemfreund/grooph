@@ -704,7 +704,7 @@ impl Grooph {
     /// (keeping id and name); otherwise save a new one (see
     /// [`Self::save_pattern_as`]). Returns the pattern's id.
     /// The library keeps the score tab's score, also when it is saved from
-    /// another page: Practice's rhythm gets there by "Copy to Score".
+    /// another page.
     pub(crate) fn save_active_pattern(&mut self) -> u64 {
         let bpm = self.playback_ctl.bpm;
         let doc = &mut self.editor.docs.score;
@@ -878,7 +878,6 @@ impl Grooph {
         match pending {
             PendingLoad::Pattern(id) => self.load_pattern(id),
             PendingLoad::Link(link) => self.apply_link(*link),
-            PendingLoad::PracticeRhythm => self.copy_to_score(),
         }
     }
 
