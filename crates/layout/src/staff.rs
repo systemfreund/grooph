@@ -94,10 +94,12 @@ impl Staff {
         }
     }
 
-    /// Where the rest `beat` sits in a voice of `voicing`. A stemlet (a
-    /// rest under a beam) reaches from beside the line like a note's stem.
+    /// Where the rest `beat` sits in a voice of `voicing`. On a staff of one
+    /// line a stemlet (a rest under a beam) reaches from the line, or from
+    /// beside it when shared, like a note's stem. On a staff of several
+    /// lines every rest keeps its own place.
     pub fn rest_pos(&self, beat: &Beat, in_beam: bool, voicing: Voicing) -> i8 {
-        match (in_beam, self.shares_line(voicing)) {
+        match (in_beam && self.one_line(), self.shares_line(voicing)) {
             (true, true) => Self::side(voicing),
             (true, false) => 0,
             (false, _) => (self.rest_place)(beat, voicing),
