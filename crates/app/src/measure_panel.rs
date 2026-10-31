@@ -97,7 +97,7 @@ impl Grooph {
         let margins = staff_margins(ui.style());
         let rect = Rect::from_min_size(ui.cursor().min, egui::vec2(width - margins.x, 1.0e4));
         let opts = self.staff_opts(ui, rect);
-        build_staff_layout(&self.editor.score, &opts).total_size.y + margins.y
+        build_staff_layout(&self.editor.doc().score, &opts).total_size.y + margins.y
     }
 
     pub(super) fn measure_panel(&mut self, ui: &mut egui::Ui) {
@@ -163,7 +163,8 @@ impl Grooph {
                     let em = staff_opts.em;
                     let count_config = self.build_count_config();
 
-                    let score = &self.editor.score;
+                    // Only the documents: the hover marks below change.
+                    let score = &self.editor.docs.get(self.editor.document).score;
                     let staff = build_staff_layout(score, &staff_opts);
                     // One row fits the height, so nothing above or below
                     // the staff (accents, count labels) is cut off on a
@@ -235,7 +236,7 @@ impl Grooph {
                     // re-centering above.
                     let editing = self.ui.mode == Mode::Edit
                         && self.playback_ctl.transport_state == TransportState::Stopped;
-                    let staff_cursor = self.editor.cursor;
+                    let staff_cursor = self.editor.doc().cursor;
                     let followed = editing.then_some(staff_cursor);
                     if followed != self.ui.followed_cursor
                         && let Some(placed) = staff.placed(staff_cursor.measure_idx)
@@ -403,6 +404,7 @@ impl Grooph {
         let (m_idx, local_tick) = timing.to_local(tick);
         let primary_beat_in_measure = self
             .editor
+            .doc()
             .score
             .measures()
             .get(m_idx)
@@ -556,7 +558,7 @@ impl Grooph {
         {
             // A tap on another voice edits that voice from now on: in the
             // metronome tab the click bar or its counter rhythm.
-            self.editor.cursor = Cursor::in_voice(m_idx, voice, b_idx);
+            self.editor.doc_mut().cursor = Cursor::in_voice(m_idx, voice, b_idx);
 
             if resp.double_clicked()
                 && let Some(tool) = all_tools()

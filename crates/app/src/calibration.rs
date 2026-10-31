@@ -112,12 +112,10 @@ impl Grooph {
         self.leave_metronome();
         self.stop_transport();
         let generator = &mut self.editor.generator;
+        let doc = self.editor.docs.get_mut(self.editor.document);
         let stash = CalibrationStash {
-            score: std::mem::replace(
-                &mut self.editor.score,
-                Score::single(Self::default_measure()),
-            ),
-            cursor: std::mem::replace(&mut self.editor.cursor, Cursor::start()),
+            score: std::mem::replace(&mut doc.score, Score::single(Self::default_measure())),
+            cursor: std::mem::replace(&mut doc.cursor, Cursor::start()),
             bpm: std::mem::replace(&mut self.playback_ctl.bpm, CALIBRATION_BPM),
             swing: std::mem::take(&mut self.playback_ctl.audio_cfg.swing),
             count_in: std::mem::replace(&mut self.playback_ctl.audio_cfg.count_in, true),
@@ -125,8 +123,8 @@ impl Grooph {
             ghost_notes: std::mem::replace(&mut generator.ghost_notes, false),
             gap: std::mem::take(&mut self.playback_ctl.audio_cfg.gap),
             ramp: std::mem::take(&mut self.playback_ctl.audio_cfg.ramp),
-            dirty: self.editor.dirty,
-            active_pattern_id: self.editor.active_pattern_id,
+            dirty: doc.dirty,
+            active_pattern_id: doc.active_pattern_id,
         };
         self.playback_ctl.play_along.calibration = Some(Calibration {
             source,
@@ -162,8 +160,8 @@ impl Grooph {
             return;
         };
         if let Some(stash) = cal.stash.take() {
-            self.editor.score = stash.score;
-            self.editor.cursor = stash.cursor;
+            self.editor.doc_mut().score = stash.score;
+            self.editor.doc_mut().cursor = stash.cursor;
             self.playback_ctl.bpm = stash.bpm;
             self.playback_ctl.audio_cfg.swing = stash.swing;
             self.playback_ctl.audio_cfg.count_in = stash.count_in;
@@ -171,8 +169,8 @@ impl Grooph {
             self.editor.generator.ghost_notes = stash.ghost_notes;
             self.playback_ctl.audio_cfg.gap = stash.gap;
             self.playback_ctl.audio_cfg.ramp = stash.ramp;
-            self.editor.dirty = stash.dirty;
-            self.editor.active_pattern_id = stash.active_pattern_id;
+            self.editor.doc_mut().dirty = stash.dirty;
+            self.editor.doc_mut().active_pattern_id = stash.active_pattern_id;
         }
         if cal.phase == CalibrationPhase::Running {
             self.playback_ctl.play_along.calibration = None;

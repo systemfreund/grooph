@@ -94,6 +94,7 @@ impl Grooph {
     /// Meter the guide picker offers its steps for: the first bar's.
     pub(crate) fn guide_meter(&self) -> TimeSignature {
         self.editor
+            .doc()
             .score
             .measures()
             .first()
@@ -119,7 +120,8 @@ impl Grooph {
         let Some((measure_idx, tick)) = playing.filter(|_| !playback.counting_in()) else {
             return;
         };
-        let Some(ts) = self.editor.score.measures().get(measure_idx).map(|m| m.time_signature())
+        let Some(ts) =
+            self.editor.doc().score.measures().get(measure_idx).map(|m| m.time_signature())
         else {
             return;
         };
@@ -254,7 +256,7 @@ mod tests {
         let mut app = Grooph::new(&cc);
         app.select_tab(crate::shell::Tab::Practice);
         let measure = Grooph::default_measure();
-        app.editor.score = grooph_measure::Score::new(vec![measure; bars]);
+        app.editor.doc_mut().score = grooph_measure::Score::new(vec![measure; bars]);
         app.ui.guide = guide;
         app
     }
@@ -316,14 +318,15 @@ mod tests {
     fn the_metronome_keeps_the_line() {
         let mut app = practice_app(1, Guide::None);
         assert_eq!(app.active_guide(), Guide::None);
-        app.open_metronome();
+        app.select_tab(Tab::Metronome);
         assert_eq!(app.active_guide(), Guide::Line);
     }
 
     #[test]
     fn the_editor_keeps_the_line() {
         let mut app = practice_app(1, Guide::EveryBar);
-        app.edit_score();
+        app.select_tab(Tab::Score);
+        app.edit_page();
         assert_eq!(app.active_guide(), Guide::Line);
         app.select_tab(Tab::Score);
         assert_eq!(app.active_guide(), Guide::EveryBar);

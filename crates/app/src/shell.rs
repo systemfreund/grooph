@@ -585,66 +585,52 @@ pub(crate) fn paint_play_icon(painter: &Painter, rect: Rect, color: Color32, pla
 }
 
 impl Grooph {
-    /// Tab shown in the tab bar, derived from the mode so modes set
-    /// elsewhere (links, time signature dialog) land on the right tab.
+    /// Tab shown in the tab bar: the More screen, else the page whose
+    /// document is shown.
     pub(crate) fn tab(&self) -> Tab {
         match self.ui.mode {
-            // More stays in front of an open metronome.
+            // More stays in front of the page it was opened from.
             Mode::MoreMenu => Tab::More,
-            _ if self.metronome_mode() => Tab::Metronome,
-            Mode::Score | Mode::Edit | Mode::TimeSignature(_) => Tab::Score,
-            Mode::Playback | Mode::Generator => Tab::Practice,
+            _ => self.document().tab(),
         }
     }
 
+    /// Open `tab`: a page plays its own document. Another page stops what
+    /// plays; More is a screen of its own and leaves it alone.
     pub(crate) fn select_tab(&mut self, tab: Tab) {
-        // Into or out of the metronome the played score changes: stop first.
-        // More is a screen of its own and leaves what plays alone.
-        let metronome = tab == Tab::Metronome;
-        if tab != Tab::More && metronome != self.metronome_mode() {
-            self.stop_transport();
-            if metronome {
-                self.open_metronome();
-            } else {
-                self.close_metronome();
-            }
-        }
-        // Practice and the score tab each show their own document.
-        match tab {
-            Tab::Practice => self.show_document(Document::Practice),
-            Tab::Score => self.show_document(Document::Score),
-            Tab::Metronome | Tab::More => {}
-        }
         self.ui.mode = match tab {
-            Tab::Practice => Mode::Generator,
-            Tab::Metronome => Mode::Playback,
-            Tab::Score => Mode::Score,
+            Tab::Metronome => {
+                self.show_document(Document::Metronome);
+                Mode::Playback
+            }
+            Tab::Practice => {
+                self.show_document(Document::Practice);
+                Mode::Playback
+            }
+            Tab::Score => {
+                self.show_document(Document::Score);
+                Mode::Playback
+            }
             Tab::More => Mode::MoreMenu,
         };
-    }
-
-    /// The score tab's editor (✏): its tool palette on its score.
-    pub(crate) fn edit_score(&mut self) {
-        if self.tab() != Tab::Score {
-            self.select_tab(Tab::Score);
-        }
-        self.ui.mode = Mode::Edit;
     }
 
     pub(super) fn shell_ui(&mut self, ui: &mut Ui) {
         let tab = self.tab();
         self.tab_bar(ui, tab);
+        let playing = self.ui.mode == Mode::Playback;
         match tab {
-            Tab::Practice => {
+            Tab::Practice if playing => {
                 self.options_sheet(ui);
                 self.settings_card(ui);
             }
-            Tab::Score if self.ui.mode == Mode::Score => {
+            Tab::Score if playing => {
                 self.score_sheet(ui);
                 self.score_card(ui);
             }
-            // The editor leaves the staff all the room above its palette.
-            Tab::Score => {
+            // A rhythm page's editor leaves the staff all the room above
+            // its palette.
+            Tab::Practice | Tab::Score => {
                 self.tool_palette_panel(ui);
                 self.edit_bar(ui);
             }
@@ -933,7 +919,7 @@ impl Grooph {
         .on_hover_text("Edit the score")
         .clicked()
         {
-            self.edit_score();
+            self.edit_page();
         }
         let fill = ui.visuals().selection.bg_fill;
         let icon = ui.visuals().selection.stroke.color;
@@ -1250,9 +1236,13 @@ impl Grooph {
         self.guide_row(ui);
         self.timing_feedback_row(ui);
         self.shared_rows(ui);
-        // The one way from Practice's rhythm to the score tab.
-        if value_row(ui, "Edit in Score", "✏").clicked() {
-            self.request_edit_in_score();
+        // Edited here, as the metronome's "Edit clicks"; kept by copying it
+        // into the score tab.
+        if value_row(ui, "Edit rhythm", "✏").clicked() {
+            self.edit_page();
+        }
+        if value_row(ui, "Copy to Score", "").clicked() {
+            self.request_copy_to_score();
         }
     }
 
@@ -1376,8 +1366,8 @@ impl Grooph {
                     ui.add_space(8.0);
                     ui.label(format!(
                         "{}/{}",
-                        self.editor.cursor.measure_idx + 1,
-                        self.editor.score.len()
+                        self.editor.doc().cursor.measure_idx + 1,
+                        self.editor.doc().score.len()
                     ));
                     if ui.button("➕").on_hover_text("Add a bar").clicked() {
                         self.append_measure();
@@ -1393,7 +1383,7 @@ impl Grooph {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         // Back to the score tab's options sheet.
                         if ui.button(RichText::new("Done").size(18.0)).clicked() {
-                            self.ui.mode = Mode::Score;
+                            self.ui.mode = Mode::Playback;
                         }
                         let fill = ui.visuals().extreme_bg_color;
                         let text = ui.visuals().strong_text_color();

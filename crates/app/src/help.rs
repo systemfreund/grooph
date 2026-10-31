@@ -42,8 +42,8 @@ fn keybindings_text() -> String {
     entries.push(("Space".to_string(), "Play/pause".to_string()));
     entries.push((
         "Esc".to_string(),
-        "Open or close the editor of the Score tab or of the metronome's clicks; on the More \
-         screen, close the open dialog"
+        "Open or close the editor of the page shown (Practice, Score or the metronome's \
+         clicks); on the More screen, close the open dialog"
             .to_string(),
     ));
 

@@ -419,10 +419,11 @@ impl Grooph {
     /// "Save" for the rhythms, which keeps the score tab's score: its
     /// pattern while it has changes, a new one without a pattern.
     pub(crate) fn rhythm_save_target(&self) -> SaveTarget {
-        let active = self.score_pattern().and_then(|id| self.editor.library.get(id));
+        let active =
+            self.editor.docs.score.active_pattern_id.and_then(|id| self.editor.library.get(id));
         SaveTarget {
             overwrites: active.map(|p| p.name.clone()),
-            enabled: active.is_none() || self.score_dirty(),
+            enabled: active.is_none() || self.editor.docs.score.dirty,
         }
     }
 
@@ -444,8 +445,8 @@ impl Grooph {
 
     /// Saved rhythms: a tap loads one onto the staff.
     fn rhythms(&mut self, ui: &mut egui::Ui) {
-        let active_id = self.score_pattern();
-        let dirty = self.score_dirty();
+        let active_id = self.editor.docs.score.active_pattern_id;
+        let dirty = self.editor.docs.score.dirty;
         let target = self.rhythm_save_target();
         if let Some(save) = save_buttons(ui, &target) {
             self.save_rhythm(save, ui.input(|i| i.time));
