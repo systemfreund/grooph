@@ -48,7 +48,7 @@ use crate::embed::{Embed, EmbedParams, embed_params};
 use crate::generator::GeneratorState;
 use crate::guide::Guide;
 use crate::library::PatternLibrary;
-use crate::metronome_view::MetronomeState;
+use crate::metronome_view::{MetronomeState, metronome_bar};
 use crate::platform::{PlatformRuntime, VisibilityEvent};
 use crate::play_along::{PlayAlongSettings, PlayAlongState};
 use crate::presets::PresetLibrary;
@@ -67,7 +67,7 @@ use eframe::{App, CreationContext, egui};
 use grooph_audio::{AudioSettings, GapClick, PlaybackOptions, PlayerState, TempoRamp};
 use grooph_link::{LinkContent, SharedLink};
 use grooph_measure::click::ClickBars;
-use grooph_measure::counter::{CounterBars, Ratio};
+use grooph_measure::counter::{CounterBars, Ratio, counter_bar, respelled};
 use grooph_measure::counting::{CountConfig, CountingSystem, Subdivision, build_count_slots};
 use grooph_measure::duration::NoteValue::*;
 use grooph_measure::editing::Modification;
@@ -234,10 +234,10 @@ impl PersistedState {
             gap_click: app.playback_ctl.audio_cfg.gap,
             tempo_ramp: app.playback_ctl.audio_cfg.ramp,
             presets: app.editor.presets.clone(),
-            click_bars: app.playback_ctl.audio_cfg.click.clone(),
-            counter_bars: app.playback_ctl.audio_cfg.counter.clone(),
-            counter_names: app.playback_ctl.audio_cfg.counter.names().to_vec(),
-            metronome_meter: app.editor.metronome.meter,
+            click_bars: app.click_bars(),
+            counter_bars: app.counter_bars(),
+            counter_names: app.counter_bars().names().to_vec(),
+            metronome_meter: app.metronome_meter(),
             tab: app.tab(),
         }
     }
@@ -363,7 +363,6 @@ impl App for Grooph {
         ui.scope_builder(egui::UiBuilder::new().max_rect(content), |ui| {
             if embedded { self.embed_ui(ui) } else { self.shell_ui(ui) }
         });
-        self.sync_click_bar();
         self.update_metronome_trainer();
         self.update_endless();
         if !embedded {
@@ -495,7 +494,7 @@ impl Grooph {
                 ..self.playback_ctl.audio_cfg.gap
             },
             ramp: self.played_ramp(),
-            click: self.playback_ctl.audio_cfg.click.clone(),
+            click: self.click_bars(),
             counter: self.played_counter(),
         }
     }
@@ -551,8 +550,9 @@ impl Grooph {
         EditorSnapshot {
             score: self.editor.doc().score.clone(),
             cursor: self.editor.doc().cursor,
-            counter: self.metronome_mode().then(|| self.playback_ctl.audio_cfg.counter.clone()),
-            click: self.metronome_mode().then(|| self.playback_ctl.audio_cfg.click.clone()),
+            counter_name: self
+                .metronome_mode()
+                .then(|| self.playback_ctl.audio_cfg.counter.name(self.metronome_meter())),
         }
     }
 
@@ -581,39 +581,34 @@ impl Grooph {
         }
     }
 
+    /// Bring back `snap`'s score and cursor. In the metronome tab the
+    /// meter may change with it: the current one keeps its bars.
+    fn restore_snapshot(&mut self, snap: EditorSnapshot) {
+        if self.metronome_mode() {
+            self.store_metronome_bars();
+        }
+        let doc = self.editor.doc_mut();
+        doc.score = snap.score;
+        doc.cursor = snap.cursor;
+        // The counter rhythm's bar is the document's, its name the settings'.
+        if let Some(name) = snap.counter_name {
+            self.playback_ctl.audio_cfg.counter.set_ratio(self.metronome_meter(), name);
+        }
+    }
+
     fn undo(&mut self) {
-        // The audio settings take the edited bar first: the restored
-        // snapshot brings back its own.
-        self.sync_click_bar();
         let current = self.current_snapshot();
         if let Some(prev) = self.editor.doc_mut().history.pop_undo(current) {
-            self.editor.doc_mut().score = prev.score;
-            self.editor.doc_mut().cursor = prev.cursor;
-            if let Some(counter) = prev.counter {
-                self.playback_ctl.audio_cfg.counter = counter;
-            }
-            if let Some(click) = prev.click {
-                self.playback_ctl.audio_cfg.click = click;
-            }
+            self.restore_snapshot(prev);
             self.clear_accuracy_for_edit();
             self.editor.doc_mut().dirty = true;
         }
     }
 
     fn redo(&mut self) {
-        // The audio settings take the edited bar first: the restored
-        // snapshot brings back its own.
-        self.sync_click_bar();
         let current = self.current_snapshot();
         if let Some(next) = self.editor.doc_mut().history.pop_redo(current) {
-            self.editor.doc_mut().score = next.score;
-            self.editor.doc_mut().cursor = next.cursor;
-            if let Some(counter) = next.counter {
-                self.playback_ctl.audio_cfg.counter = counter;
-            }
-            if let Some(click) = next.click {
-                self.playback_ctl.audio_cfg.click = click;
-            }
+            self.restore_snapshot(next);
             self.clear_accuracy_for_edit();
             self.editor.doc_mut().dirty = true;
         }
@@ -663,6 +658,10 @@ impl Grooph {
     /// inherits the time signature and the voices of the active measure.
     /// Moves the cursor to the start of the new measure, in its voice.
     pub(crate) fn append_measure(&mut self) {
+        // The metronome's document is one bar: its meter's clicks.
+        if self.metronome_mode() {
+            return;
+        }
         self.with_undo_snapshot(|app| {
             let current = app.current_measure();
             let new_measure = current.empty_like(current.time_signature());
@@ -797,24 +796,25 @@ impl Grooph {
         // a generator link on Practice, a metronome link on the metronome
         // (below, with its meter and click bar).
         let metronome = matches!(link.content, Some(LinkContent::Metronome(_)));
-        if metronome {
-            // Put the open click bar away first, so that nothing syncs it
-            // back over the link's meter and clicks before it reopens.
-            self.leave_metronome();
-        }
         let replaces_rhythm =
             matches!(link.content, Some(LinkContent::Score(_) | LinkContent::Generator { .. }));
         match link.content {
             Some(LinkContent::Score(score)) => self.replace_score_from_link(score),
             Some(LinkContent::Metronome(ts)) => {
                 self.stop_transport();
-                self.editor.metronome.meter = ts;
                 // The meter plays the link's counter rhythm, or none; a
                 // `poly` link's as picked in the app.
-                let counter = &mut self.playback_ctl.audio_cfg.counter;
+                let counter = match link.poly {
+                    Some(ratio) => counter_bar(ts, ratio),
+                    None => {
+                        link.counter.clone().filter(|m| m.time_signature() == ts).map(respelled)
+                    }
+                };
+                self.set_metronome_clicks(ts, counter);
+                let names = &mut self.playback_ctl.audio_cfg.counter;
                 match link.poly {
-                    Some(ratio) => counter.set_ratio(ts, Some(ratio)),
-                    None => counter.replace(ts, link.counter.clone()),
+                    Some(ratio) => names.set_ratio(ts, Some(ratio)),
+                    None => names.replace(ts, link.counter.clone()),
                 }
             }
             Some(LinkContent::Generator { settings, seed }) => {
@@ -844,7 +844,7 @@ impl Grooph {
             self.playback_ctl.audio_cfg.swing = swing;
         }
         if let Some(bar) = link.click {
-            self.playback_ctl.audio_cfg.click.set(bar);
+            self.set_meter_click_bar(bar);
         }
         self.playback_ctl.playback.reset();
         if metronome {
@@ -1239,9 +1239,13 @@ impl Grooph {
             editor: EditorState {
                 document: Document::Score,
                 docs: Documents {
-                    // Its click bar is set when the metronome opens.
+                    // The click bar and counter rhythm of its meter: from
+                    // here on they are kept in it alone.
                     metronome: RhythmDoc::new(
-                        Score::single(Self::default_measure()),
+                        Score::single(metronome_bar(
+                            state.click_bars.for_meter(state.metronome_meter),
+                            state.counter_bars.for_meter(state.metronome_meter),
+                        )),
                         Cursor::start(),
                     ),
                     practice: RhythmDoc::new(practice_score, state.practice_cursor),
@@ -1258,7 +1262,7 @@ impl Grooph {
                 presets: state.presets,
                 active_preset: None,
                 state_backup,
-                metronome: MetronomeState::new(state.metronome_meter),
+                metronome: MetronomeState::new(),
                 generator,
             },
             playback_ctl: PlaybackController {

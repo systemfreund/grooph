@@ -123,8 +123,8 @@ spread across callers.
    `StaffOpts::voice_opts_for` gives each voice its stem direction.
    The metronome tab edits one such measure: the click bar with the counter
    rhythm as its second voice. The cursor's voice is the bar being edited
-   (`MetronomeVoice` names the two), as in a kit score; `sync_click_bar`
-   writes both back to the audio settings.
+   (`MetronomeVoice` names the two), as in a kit score; it is the one
+   source of both (see "Metronome tab").
    The edit cursor (`Cursor`) names its measure, voice and beat. The tools
    edit that voice (`Score::voice_at_mut`); a tap picks the voice on its
    side of the line (`hit_test_voice`); moving to a measure with fewer
@@ -499,14 +499,20 @@ grooph's metronome runs inside AI chats as an
   session on every change.
 
 - Metronome tab (`crates/app/src/metronome_view.rs`): its own meter
-  (`MetronomeState::meter`, persisted, picked in the tab's card), separate
-  from the generator's. The tab's document is the meter's click bar
-  (`EditorState::docs.metronome`, see "Rhythm documents"), so the staff,
-  tool palette and undo work on it: `open_metronome` builds it from
-  `ClickBars` when the tab opens, `sync_click_bar` writes it back every
-  frame and when it closes (persistence saves the click settings, not the
-  bar). Something that needs a rhythm (a preset, a link)
-  closes it with `leave_metronome`, which shows the practice page. The audio engine
+  (persisted, picked in the tab's card), separate from the generator's.
+  The tab's document (`EditorState::docs.metronome`, see "Rhythm
+  documents") is the one source of the meter's click bar and counter
+  rhythm, open or not, and its bar's meter is the metronome's
+  (`metronome_meter`), so the staff, tool palette and undo work on them
+  directly. The audio settings (`AudioConfig::click`/`counter`) keep the
+  other meters' bars and the counter ratios' names; their entry for the
+  metronome's meter is not read. `click_bars`/`counter_bars` give every
+  meter's, the metronome's from its document: the audio engine and
+  persistence take those. When the document turns to another meter (a
+  picked meter, undo, a link), `store_metronome_bars` puts the old meter's
+  bars into the settings first. A metronome link sets the meter and clicks
+  in place, also with the tab open; a preset, which needs a rhythm, closes
+  it with `leave_metronome`, which shows the practice page. The audio engine
   gets one silent bar of the meter (`metronome_score`), so only the clicks
   sound; ghost notes, endless mode and play along are off there. Below the
   staff a ring shows one segment per note or rest of the bar, as long as it,
@@ -569,9 +575,8 @@ grooph's metronome runs inside AI chats as an
   `EditorState::document`, and the staff, tools and undo work on its
   document (`EditorState::doc`/`doc_mut`). `show_document` changes it and
   stops playback; `select_tab` shows the tab's document.
-- The metronome's document is built from the click settings when it opens
-  (`open_metronome`) and written back to them while open and when it closes
-  (`sync_click_bar`, `close_metronome`).
+- The metronome's document holds its click bar and counter rhythm whether
+  the tab is open or not; nothing copies them back and forth.
 - The generator writes Practice's document only: `generate_new_score` shows
   it first, so no generator action (🎲, a setting, a preset, a generator
   link, endless mode) replaces the score tab's score. Endless mode and ghost

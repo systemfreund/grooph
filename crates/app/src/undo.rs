@@ -1,5 +1,4 @@
-use grooph_measure::click::ClickBars;
-use grooph_measure::counter::CounterBars;
+use grooph_measure::counter::Ratio;
 use grooph_measure::{Cursor, Score};
 use std::collections::VecDeque;
 
@@ -8,12 +7,9 @@ pub(crate) const DEFAULT_UNDO_LIMIT: usize = 200;
 pub(crate) struct EditorSnapshot {
     pub score: Score,
     pub cursor: Cursor,
-    /// The counter rhythms, taken in the metronome tab only: it is the one
-    /// place they change, and undo elsewhere must not bring old ones back.
-    pub counter: Option<CounterBars>,
-    /// The click bars, taken with the counter rhythms: `score` holds the
-    /// bars of one meter only, the others must come back too.
-    pub click: Option<ClickBars>,
+    /// The ratio the counter rhythm was picked as, taken in the metronome
+    /// tab only: `score` holds its bar, the audio settings its name.
+    pub counter_name: Option<Option<Ratio>>,
 }
 
 pub(crate) struct UndoHistory {
@@ -68,8 +64,7 @@ mod tests {
         EditorSnapshot {
             score: Score::single(m),
             cursor: Cursor::at(0, beat_idx),
-            counter: None,
-            click: None,
+            counter_name: None,
         }
     }
 
@@ -141,12 +136,8 @@ mod tests {
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
         m.first_voice_mut().set_beat(0, Beat::note(q())).unwrap();
         let mut score = Score::single(m);
-        let snap = EditorSnapshot {
-            score: score.clone(),
-            cursor: Cursor::start(),
-            counter: None,
-            click: None,
-        };
+        let snap =
+            EditorSnapshot { score: score.clone(), cursor: Cursor::start(), counter_name: None };
 
         let mut h = UndoHistory::new(10);
         h.push(snap);
@@ -156,7 +147,7 @@ mod tests {
 
         // restored snapshot retains original beat count (before mutation)
         let restored = h
-            .pop_undo(EditorSnapshot { score, cursor: Cursor::start(), counter: None, click: None })
+            .pop_undo(EditorSnapshot { score, cursor: Cursor::start(), counter_name: None })
             .unwrap();
         // the mutation added a beat to the *source* score but the snapshot is independent
         // we just check that pop returns something with a distinct measure state

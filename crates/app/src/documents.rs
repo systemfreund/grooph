@@ -123,7 +123,6 @@ impl Grooph {
             self.close_metronome();
         }
         if doc == Document::Metronome {
-            // Built from the click settings while it is still closed.
             self.open_metronome();
         }
         self.editor.document = doc;
