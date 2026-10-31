@@ -12,7 +12,7 @@ use crate::{PERSISTED_STATE_VERSION, PersistedState, SavedDoc};
 use grooph_measure::{BeatIdx, Cursor, Measure, Score};
 use log::{info, warn};
 use ron::value::RawValue;
-use serde::de::{Deserialize, Deserializer, MapAccess, Visitor};
+use serde::de::{Deserialize, DeserializeOwned, Deserializer, MapAccess, Visitor};
 use std::fmt;
 
 /// The fields holding a rhythm document ([`SavedDoc`]), whose own fields
@@ -82,18 +82,11 @@ pub(crate) fn restore(saved: Option<&str>) -> (PersistedState, Option<StateBacku
         }
     }
 
-    // Serde ignores unknown fields and reads each field independently of the
-    // others, so the fields that read alone, each name once, also read
-    // together. Of a name stored twice the last one counts.
-    let (kept, dropped): (Vec<_>, Vec<_>) =
-        fields.iter().enumerate().partition(|(i, (name, raw))| {
-            !fields[i + 1..].iter().any(|(later, _)| later == name)
-                && ron::from_str::<PersistedState>(&struct_ron([(name, raw)])).is_ok()
-        });
-    for (_, (name, _)) in &dropped {
+    let (kept, dropped) = partition_fields::<PersistedState>(&fields);
+    for (name, _) in &dropped {
         warn!("Saved state: `{name}` does not read, using its default");
     }
-    let state = ron::from_str(&struct_ron(kept.iter().map(|(_, (name, raw))| (name, raw))));
+    let state = ron::from_str(&struct_ron(kept));
     let read_together = state.is_ok();
     let state = state.unwrap_or_else(|err| {
         warn!("Saved state does not read, starting from defaults: {err}");
@@ -130,16 +123,21 @@ fn migrate(version: u8, fields: &mut Vec<(String, Box<RawValue>)>) -> bool {
         // Version 2 kept the score tab's document in flat fields and
         // Practice's rhythm, if any, as `practice_score`; version 3 each
         // document as one entry of the same shape.
-        let score_doc: Vec<_> = ["score", "cursor", "dirty", "active_pattern_id"]
+        // A field stored twice: the last counts and the text is backed up.
+        let mut take = |fields: &mut Vec<Field>, name: &str| {
+            let (raw, once) = take_last(fields, name);
+            carried &= once;
+            raw
+        };
+        let score_doc: Vec<Field> = ["score", "cursor", "dirty", "active_pattern_id"]
             .into_iter()
             .filter_map(|name| Some((name.to_owned(), take(fields, name)?)))
             .collect();
-        if !score_doc.is_empty() {
-            let doc = struct_ron(score_doc.iter().map(|(n, r)| (n, r)));
-            carried &= push_ron(fields, "score_doc", doc);
-        }
         let practice_score = take(fields, "practice_score");
         let practice_cursor = take(fields, "practice_cursor");
+        if !score_doc.is_empty() {
+            carried &= push_ron(fields, "score_doc", struct_ron(&score_doc));
+        }
         // `None` (or no field): saved before Practice had its own rhythm.
         let score = practice_score.and_then(|raw| match raw.into_rust::<Option<Box<RawValue>>>() {
             Ok(score) => score,
@@ -154,7 +152,7 @@ fn migrate(version: u8, fields: &mut Vec<(String, Box<RawValue>)>) -> bool {
                 .into_iter()
                 .chain(practice_cursor.map(|raw| ("cursor".to_owned(), raw)))
                 .collect::<Vec<_>>();
-            let doc = struct_ron(doc.iter().map(|(n, r)| (n, r)));
+            let doc = struct_ron(&doc);
             carried &= push_ron(fields, "practice_doc", format!("Some({doc})"));
         }
     }
@@ -175,15 +173,30 @@ fn repair_doc(raw: &RawValue) -> Option<(Box<RawValue>, Vec<String>)> {
         Ok(fields) => (fields, false),
         Err(_) => (raw.into_rust::<Option<Fields>>().ok()??, true),
     };
-    let (kept, dropped): (Vec<_>, Vec<_>) =
-        fields.iter().enumerate().partition(|(i, (name, raw))| {
-            !fields[i + 1..].iter().any(|(later, _)| later == name)
-                && ron::from_str::<SavedDoc>(&struct_ron([(name, raw)])).is_ok()
-        });
-    let doc = struct_ron(kept.iter().map(|(_, (name, raw))| (name, raw)));
+    let (kept, dropped) = partition_fields::<SavedDoc>(&fields);
+    let doc = struct_ron(kept);
     let doc = if some { format!("Some({doc})") } else { doc };
-    let dropped = dropped.into_iter().map(|(_, (name, _))| name.clone()).collect();
+    let dropped = dropped.into_iter().map(|(name, _)| name.clone()).collect();
     Some((RawValue::from_boxed_ron(doc.into_boxed_str()).ok()?, dropped))
+}
+
+/// A stored field: its name and its unparsed RON.
+type Field = (String, Box<RawValue>);
+
+/// `fields` split into those kept and those dropped as fields of `T`. Serde
+/// ignores unknown fields and reads each field independently of the others,
+/// so the fields that read alone, each name once, also read together. Of a
+/// name stored twice the last one counts, and the earlier one is dropped.
+fn partition_fields<T: DeserializeOwned>(fields: &[Field]) -> (Vec<&Field>, Vec<&Field>) {
+    let reads = |i: usize, field: &Field| {
+        !fields[i + 1..].iter().any(|(later, _)| *later == field.0)
+            && ron::from_str::<T>(&struct_ron([field])).is_ok()
+    };
+    let (mut kept, mut dropped) = (Vec::new(), Vec::new());
+    for (i, field) in fields.iter().enumerate() {
+        if reads(i, field) { kept.push(field) } else { dropped.push(field) }
+    }
+    (kept, dropped)
 }
 
 fn field<'a>(fields: &'a [(String, Box<RawValue>)], name: &str) -> Option<&'a RawValue> {
@@ -195,8 +208,19 @@ fn take(fields: &mut Vec<(String, Box<RawValue>)>, name: &str) -> Option<Box<Raw
     Some(fields.remove(idx).1)
 }
 
+/// Takes every field `name`: the last one counts, as in [`restore`]. Also
+/// whether it was stored at most once.
+fn take_last(fields: &mut Vec<Field>, name: &str) -> (Option<Box<RawValue>>, bool) {
+    let mut taken = Vec::new();
+    while let Some(raw) = take(fields, name) {
+        taken.push(raw);
+    }
+    let once = taken.len() <= 1;
+    (taken.pop(), once)
+}
+
 /// The RON text of a struct with the given fields.
-fn struct_ron<'a>(fields: impl IntoIterator<Item = (&'a String, &'a Box<RawValue>)>) -> String {
+fn struct_ron<'a>(fields: impl IntoIterator<Item = &'a Field>) -> String {
     let fields: Vec<_> =
         fields.into_iter().map(|(name, raw)| format!("{name}:{}", raw.get_ron())).collect();
     format!("({})", fields.join(","))
@@ -231,12 +255,13 @@ impl<'de> Deserialize<'de> for Fields {
 
 #[cfg(test)]
 mod tests {
-    use super::{BACKUP_KEY_PREFIX, StateBackup, restore};
+    use super::{BACKUP_KEY_PREFIX, DOC_FIELDS, Fields, StateBackup, field, restore};
     use crate::presets::builtin_presets;
     use crate::shell::Tab;
     use crate::{PERSISTED_STATE_VERSION, PersistedState, SavedDoc};
     use grooph_measure::duration::e;
     use grooph_measure::{Beat, Cursor, Measure, Score, TimeSignature};
+    use ron::value::RawValue;
     use std::collections::HashMap;
 
     /// A saved state with a pattern in the library, a user preset and a
@@ -328,9 +353,10 @@ mod tests {
         let start = fields.find("score_doc:").unwrap();
         let end = start + "score_doc:".len() + ron::to_string(doc).unwrap().len();
         let flat = format!(
-            "score:{},cursor:{},dirty:true,active_pattern_id:Some(1)",
+            "score:{},cursor:{},dirty:true,active_pattern_id:Some({})",
             ron::to_string(&doc.score).unwrap(),
             ron::to_string(&Cursor::at(0, 1)).unwrap(),
+            state.library.patterns[0].id,
         );
         let practice = if practice {
             format!(
@@ -363,7 +389,9 @@ mod tests {
             assert!(doc.score.same_beats(&saved_state().score_doc.score));
             assert_eq!(doc.cursor, Cursor::at(0, 1));
             assert!(doc.dirty);
-            assert_eq!(doc.active_pattern_id, Some(1));
+            // Its pattern is in the library, so the app keeps it.
+            let pattern = s.library.patterns[0].id;
+            assert_eq!(doc.active_pattern_id, Some(pattern));
             // Saved before Practice had its own: none, so it gets a new one.
             match &s.practice_doc {
                 Some(doc) => {
@@ -376,7 +404,36 @@ mod tests {
             }
             assert_library_and_presets_kept(&s);
             assert_eq!(s.bpm, 93);
+            let doc = s.score_doc.into_doc(&s.library);
+            assert_eq!(doc.active_pattern_id, Some(pattern));
+            assert!(doc.dirty);
         }
+    }
+
+    #[test]
+    fn a_version_2_field_stored_twice_keeps_the_last_and_is_backed_up() {
+        let saved = version_2_state(true).replacen("dirty:true", "dirty:false,dirty:true", 1);
+        assert!(saved.contains("dirty:false,dirty:true"), "{saved}");
+        let (s, backup) = restore(Some(&saved));
+        assert!(s.score_doc.dirty);
+        assert_eq!(backup.unwrap().version, 2);
+    }
+
+    #[test]
+    fn the_doc_fields_are_the_states_documents() {
+        // The fields whose value is a document (a struct with a score and a
+        // cursor), as saved with both documents.
+        let state = PersistedState { practice_doc: Some(SavedDoc::default()), ..saved_state() };
+        let Fields(fields) = ron::from_str(&ron::to_string(&state).unwrap()).unwrap();
+        let is_doc = |raw: &RawValue| {
+            let fields = raw.into_rust::<Fields>().or_else(|_| {
+                raw.into_rust::<Option<Fields>>().map_err(|_| ()).and_then(|f| f.ok_or(()))
+            });
+            fields.is_ok_and(|Fields(f)| ["score", "cursor"].iter().all(|n| field(&f, n).is_some()))
+        };
+        let docs: Vec<_> =
+            fields.iter().filter(|(_, raw)| is_doc(raw)).map(|(name, _)| name.as_str()).collect();
+        assert_eq!(docs, DOC_FIELDS);
     }
 
     #[test]
