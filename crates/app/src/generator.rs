@@ -2,12 +2,12 @@
 //! the endless mode that keeps adding fresh measures below the playing one
 //! while the transport runs.
 
+use crate::documents::Document;
 use crate::platform::random_seed;
-use crate::shell::Tab;
 use crate::{Grooph, TransportState, clock};
 use grooph_measure::generator::{GeneratorSettings, Rng, generate_measure, generate_score};
 use grooph_measure::tempo::ScoreTiming;
-use grooph_measure::{Cursor, MeasureIdx};
+use grooph_measure::{Cursor, MeasureIdx, Score};
 use log::warn;
 
 /// Measures endless mode starts with: the one being played and the next.
@@ -31,6 +31,14 @@ impl GeneratorState {
     pub(crate) fn effective_bars(&self) -> usize {
         if self.endless { ENDLESS_START_BARS } else { self.settings.bars.max(1) }
     }
+
+    /// A new rhythm with the current settings, `None` if it fails.
+    pub(crate) fn generate(&mut self) -> Option<Score> {
+        let settings = GeneratorSettings { bars: self.effective_bars(), ..self.settings };
+        generate_score(&settings, &mut self.rng)
+            .inspect_err(|err| warn!("Rhythm generation failed: {err:?}"))
+            .ok()
+    }
 }
 
 impl Grooph {
@@ -51,18 +59,13 @@ impl Grooph {
         }
     }
 
-    /// Replace the working score with a freshly generated one (undoable).
+    /// Replace Practice's rhythm with a freshly generated one (undoable).
+    /// Only ever Practice's: the score tab's score is never replaced by a
+    /// generated rhythm, whatever page this is called from.
     pub(crate) fn generate_new_score(&mut self) {
-        let settings = GeneratorSettings {
-            bars: self.editor.generator.effective_bars(),
-            ..self.editor.generator.settings
-        };
-        let score = match generate_score(&settings, &mut self.editor.generator.rng) {
-            Ok(score) => score,
-            Err(err) => {
-                warn!("Rhythm generation failed: {err:?}");
-                return;
-            }
+        self.show_document(Document::Practice);
+        let Some(score) = self.editor.generator.generate() else {
+            return;
         };
         self.with_undo_snapshot(|app| {
             app.editor.score = score;
@@ -80,15 +83,13 @@ impl Grooph {
         self.generate_new_score();
     }
 
-    /// Whether endless mode drives the played score: on the practice page,
-    /// also behind the More screen opened from it. The edit page plays the
-    /// score as it is, and the metronome plays no rhythm.
+    /// Whether endless mode drives the played score: Practice's rhythm, on
+    /// the practice page or behind the More screen opened from it. The score
+    /// tab plays its score as it is, and the metronome plays no rhythm.
     pub(crate) fn endless_runs(&self) -> bool {
-        let page = match self.tab() {
-            Tab::More => self.ui.shell.rhythm_tab,
-            tab => tab,
-        };
-        self.editor.generator.endless && page == Tab::Practice && !self.metronome_mode()
+        self.editor.generator.endless
+            && self.document() == Document::Practice
+            && !self.metronome_mode()
     }
 
     /// Endless mode: a running score. Once the playback cursor reaches the

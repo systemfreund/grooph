@@ -22,6 +22,7 @@
 //! and the voice of the cursor, last tapped on the staff or the ring, is the
 //! one edited (see [`MetronomeVoice`]).
 
+use crate::documents::RhythmDoc;
 use crate::pickers::shown_groups;
 use crate::shell::paint_meter;
 use crate::state::CountInState;
@@ -64,15 +65,6 @@ const COUNTER_THICKNESS: f32 = 0.75;
 /// Brightness of soft segments relative to the others.
 const SOFT_DIM: f32 = 0.6;
 
-/// The rhythm the metronome tab put aside, back when it closes.
-pub(crate) struct RhythmStash {
-    pub(crate) score: Score,
-    pub(crate) cursor: Cursor,
-    history: UndoHistory,
-    pub(crate) dirty: bool,
-    pub(crate) active_pattern_id: Option<u64>,
-}
-
 /// A voice of the metronome's bar: the click bar, the first voice of the
 /// staff, or the counter rhythm below it. The editor holds both as one
 /// measure; the cursor's voice is the one being edited.
@@ -105,8 +97,9 @@ impl MetronomeVoice {
 pub(crate) struct MetronomeState {
     /// Meter the metronome clicks, separate from the rhythm's.
     pub(crate) meter: TimeSignature,
-    /// `Some` while the tab is open.
-    stash: Option<RhythmStash>,
+    /// The rhythm document put aside, back when the tab closes. `Some`
+    /// while the tab is open.
+    stash: Option<RhythmDoc>,
     /// Undo of the click bar edits while the tab is closed.
     history: UndoHistory,
     /// The note of the ring's segment under the pointer (or finger), which
@@ -126,6 +119,11 @@ impl MetronomeState {
             ring_hover: None,
             staff_hover: None,
         }
+    }
+
+    /// The rhythm document put aside while the tab is open.
+    pub(crate) fn stash_mut(&mut self) -> Option<&mut RhythmDoc> {
+        self.stash.as_mut()
     }
 
     /// Forget what the pointer was on, e.g. while the staff is not drawn.
@@ -311,24 +309,8 @@ impl Grooph {
     }
 
     /// The rhythm put aside while the metronome tab is open.
-    pub(crate) fn metronome_stash(&self) -> Option<&RhythmStash> {
+    pub(crate) fn metronome_stash(&self) -> Option<&RhythmDoc> {
         self.editor.metronome.stash.as_ref()
-    }
-
-    /// The rhythm put aside while the metronome is open no longer is pattern
-    /// `id`, which was deleted: it comes back without it.
-    pub(crate) fn forget_stashed_pattern(&mut self, id: u64) {
-        if let Some(stash) = self.editor.metronome.stash.as_mut()
-            && stash.active_pattern_id == Some(id)
-        {
-            stash.active_pattern_id = None;
-        }
-    }
-
-    /// Whether the rhythm has unsaved changes, also while the metronome's
-    /// click bar is edited in its place.
-    pub(crate) fn rhythm_dirty(&self) -> bool {
-        self.metronome_stash().map_or(self.editor.dirty, |stash| stash.dirty)
     }
 
     /// Meter the metronome tab clicks.
@@ -358,7 +340,7 @@ impl Grooph {
             &mut editor.history,
             std::mem::replace(&mut editor.metronome.history, UndoHistory::new(0)),
         );
-        editor.metronome.stash = Some(RhythmStash {
+        editor.metronome.stash = Some(RhythmDoc {
             score: std::mem::replace(&mut editor.score, Score::single(bar)),
             cursor: std::mem::replace(&mut editor.cursor, Cursor::start()),
             history,

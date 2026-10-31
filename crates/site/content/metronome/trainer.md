@@ -23,7 +23,7 @@ whether you rushed or dragged.
   **Click and notes** silences everything.
 
 A muted bar is dimmed on the staff, so you can see the silence is meant. The count-in is
-never muted, and while you edit (the Edit tab or **Edit clicks**) every bar sounds, so you
+never muted, and while you edit (the score editor or **Edit clicks**) every bar sounds, so you
 can hear your changes. With [timing practice](/timing-practice/) your hits in muted bars
 still count, so the result shows how well you kept the time on your own.
 

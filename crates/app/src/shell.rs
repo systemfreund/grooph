@@ -3,6 +3,7 @@
 //! buttons and a tab bar at the bottom. On wide windows the controls stay a
 //! centered column and the staff gets the full width.
 
+use crate::documents::Document;
 use crate::generator::GeneratorState;
 use crate::metronome_view::FillLook;
 use crate::metronome_view::MetronomeVoice;
@@ -51,7 +52,9 @@ const CARD_RADIUS: u8 = 16;
 pub(crate) enum Tab {
     Metronome,
     Practice,
-    Edit,
+    /// The score tab, called Edit before it had its own score.
+    #[serde(alias = "Edit")]
+    Score,
     More,
 }
 
@@ -65,9 +68,6 @@ pub(crate) struct ShellState {
     pub(crate) last_swing_percent: u8,
     pub(crate) last_counting: Option<CountingBase>,
     pub(crate) last_counter: Option<Ratio>,
-    /// The rhythm page a pattern loaded on the More screen opens on: the
-    /// practice or edit page More was opened from.
-    pub(crate) rhythm_tab: Tab,
 }
 
 impl Default for ShellState {
@@ -77,7 +77,6 @@ impl Default for ShellState {
             last_swing_percent: DEFAULT_SWING_PERCENT,
             last_counting: None,
             last_counter: None,
-            rhythm_tab: Tab::Practice,
         }
     }
 }
@@ -593,16 +592,12 @@ impl Grooph {
             // More stays in front of an open metronome.
             Mode::MoreMenu => Tab::More,
             _ if self.metronome_mode() => Tab::Metronome,
-            Mode::Edit | Mode::TimeSignature(_) => Tab::Edit,
+            Mode::Score | Mode::Edit | Mode::TimeSignature(_) => Tab::Score,
             Mode::Playback | Mode::Generator => Tab::Practice,
         }
     }
 
     pub(crate) fn select_tab(&mut self, tab: Tab) {
-        let current = self.tab();
-        if matches!(current, Tab::Practice | Tab::Edit) {
-            self.ui.shell.rhythm_tab = current;
-        }
         // Into or out of the metronome the played score changes: stop first.
         // More is a screen of its own and leaves what plays alone.
         let metronome = tab == Tab::Metronome;
@@ -614,12 +609,26 @@ impl Grooph {
                 self.close_metronome();
             }
         }
+        // Practice and the score tab each show their own document.
+        match tab {
+            Tab::Practice => self.show_document(Document::Practice),
+            Tab::Score => self.show_document(Document::Score),
+            Tab::Metronome | Tab::More => {}
+        }
         self.ui.mode = match tab {
             Tab::Practice => Mode::Generator,
             Tab::Metronome => Mode::Playback,
-            Tab::Edit => Mode::Edit,
+            Tab::Score => Mode::Score,
             Tab::More => Mode::MoreMenu,
         };
+    }
+
+    /// The score tab's editor (✏): its tool palette on its score.
+    pub(crate) fn edit_score(&mut self) {
+        if self.tab() != Tab::Score {
+            self.select_tab(Tab::Score);
+        }
+        self.ui.mode = Mode::Edit;
     }
 
     pub(super) fn shell_ui(&mut self, ui: &mut Ui) {
@@ -630,7 +639,12 @@ impl Grooph {
                 self.options_sheet(ui);
                 self.settings_card(ui);
             }
-            Tab::Edit => {
+            Tab::Score if self.ui.mode == Mode::Score => {
+                self.score_sheet(ui);
+                self.score_card(ui);
+            }
+            // The editor leaves the staff all the room above its palette.
+            Tab::Score => {
                 self.tool_palette_panel(ui);
                 self.edit_bar(ui);
             }
@@ -688,7 +702,7 @@ impl Grooph {
         const TABS: [(Tab, &str, &str); 4] = [
             (Tab::Metronome, "⏱", "Metronome"),
             (Tab::Practice, "🎲", "Practice"),
-            (Tab::Edit, "🖊", "Edit"),
+            (Tab::Score, "🎼", "Score"),
             (Tab::More, "☰", "More"),
         ];
         let mut picked = None;
@@ -759,6 +773,19 @@ impl Grooph {
             },
         ];
 
+        self.card(ui, &cells);
+    }
+
+    /// The score tab's score by name (a tap opens the library) and the
+    /// tempo, in the same card as Practice.
+    fn score_card(&mut self, ui: &mut Ui) {
+        let cells = [
+            (Picker::Library, "Score", CardValue::Text(self.score_title())),
+            match self.playback_ctl.playback.ramp_bpm {
+                Some(bpm) => (Picker::Bpm, "BPM now", CardValue::Text(bpm.to_string())),
+                None => (Picker::Bpm, "BPM", CardValue::Text(self.playback_ctl.bpm.to_string())),
+            },
+        ];
         self.card(ui, &cells);
     }
 
@@ -842,6 +869,99 @@ impl Grooph {
         self.fold_sheet_on_flick(ui, sheet.response.rect, options);
 
         self.finish_generator_change(before, endless_before, roll);
+    }
+
+    /// The score tab's options and its transport: ✏ for the editor, play
+    /// and share.
+    fn score_sheet(&mut self, ui: &mut Ui) {
+        let mut card = None;
+        let sheet = egui::Panel::bottom("shell_score")
+            .frame(Frame::new().fill(ui.visuals().panel_fill).inner_margin(Margin {
+                left: 12,
+                right: 12,
+                top: 8,
+                bottom: 8,
+            }))
+            .show_separator_line(false)
+            .show(ui, |ui| {
+                centered_column(ui, |ui| {
+                    card = Some(sheet_card(ui, |ui| {
+                        // Folds with the other sheets: one sheet setting.
+                        if sheet_handle(ui) {
+                            self.ui.shell.options_collapsed = !self.ui.shell.options_collapsed;
+                        }
+                        self.score_transport(ui);
+                    }));
+                });
+            });
+        let options = self.sheet_options(ui, card, Self::score_rows);
+        self.fold_sheet_on_flick(ui, sheet.response.rect, options);
+    }
+
+    /// The score tab's options: Practice's, without those of the generator.
+    fn score_rows(&mut self, ui: &mut Ui) {
+        self.guide_row(ui);
+        self.timing_feedback_row(ui);
+        self.shared_rows(ui);
+    }
+
+    /// ✏ (the editor), play and share, as Practice's 🎲, play and share.
+    fn score_transport(&mut self, ui: &mut Ui) {
+        let playing = self.playback_ctl.transport_state == TransportState::Playing;
+        self.status_line(ui);
+        let (row, _) =
+            ui.allocate_exact_size(vec2(ui.available_width(), PLAY_BUTTON_SIZE), Sense::hover());
+        let size = Vec2::splat(PLAY_BUTTON_SIZE);
+        let side_fill = ui.visuals().extreme_bg_color;
+        let text = ui.visuals().strong_text_color();
+        if round_button_at(
+            ui,
+            Rect::from_min_size(row.min, size),
+            Id::unique("score_edit"),
+            side_fill,
+            text,
+            |painter, rect, color| {
+                painter.text(
+                    rect.center(),
+                    Align2::CENTER_CENTER,
+                    "✏",
+                    FontId::proportional(30.0),
+                    color,
+                );
+            },
+        )
+        .on_hover_text("Edit the score")
+        .clicked()
+        {
+            self.edit_score();
+        }
+        let fill = ui.visuals().selection.bg_fill;
+        let icon = ui.visuals().selection.stroke.color;
+        if round_button_at(
+            ui,
+            Rect::from_center_size(row.center(), size),
+            Id::unique("score_play"),
+            fill,
+            icon,
+            |painter, rect, color| paint_play_icon(painter, rect, color, playing),
+        )
+        .clicked()
+        {
+            self.toggle_playback();
+        }
+        if round_button_at(
+            ui,
+            Rect::from_min_size(row.right_top() - vec2(PLAY_BUTTON_SIZE, 0.0), size),
+            Id::unique("score_share"),
+            side_fill,
+            text,
+            paint_share_icon,
+        )
+        .on_hover_text("Share a link to this score")
+        .clicked()
+        {
+            self.share_link(ui);
+        }
     }
 
     /// The sheet's options, sliding up out of its top edge over the screen
@@ -1127,15 +1247,27 @@ impl Grooph {
         }
         let generator = &mut self.editor.generator;
         switch_row(ui, "Ghost notes", &mut generator.ghost_notes);
+        self.guide_row(ui);
+        self.timing_feedback_row(ui);
+        self.shared_rows(ui);
+        // The one way from Practice's rhythm to the score tab.
+        if value_row(ui, "Edit in Score", "✏").clicked() {
+            self.request_edit_in_score();
+        }
+    }
+
+    fn guide_row(&mut self, ui: &mut Ui) {
         let ts = self.guide_meter();
         if value_row(ui, "Guide", self.ui.guide.in_meter(&ts).label()).clicked() {
             self.ui.picker = Some(Picker::Guide);
         }
+    }
+
+    fn timing_feedback_row(&mut self, ui: &mut Ui) {
         let mut accuracy = self.playback_ctl.accuracy.enabled;
         if badged_switch_row(ui, "Timing feedback", Some("BETA"), &mut accuracy) {
             self.set_accuracy_enabled(accuracy);
         }
-        self.shared_rows(ui);
     }
 
     /// Centered "new rhythm" and play buttons. Returns whether "new" was tapped.
@@ -1253,16 +1385,20 @@ impl Grooph {
                     if ui.button("➖").on_hover_text("Remove this bar").clicked() {
                         self.remove_current_measure();
                     }
-                    // The edit tab has no options sheet: the count's picker
+                    // The editor has no options sheet: the count's picker
                     // opens from here.
                     if ui.button("1 &").on_hover_text("Count labels").clicked() {
                         self.ui.picker = Some(Picker::Counting);
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        // Back to the score tab's options sheet.
+                        if ui.button(RichText::new("Done").size(18.0)).clicked() {
+                            self.ui.mode = Mode::Score;
+                        }
                         let fill = ui.visuals().extreme_bg_color;
                         let text = ui.visuals().strong_text_color();
                         if round_button(ui, SIDE_BUTTON_SIZE, fill, text, paint_share_icon)
-                            .on_hover_text("Share a link to this rhythm")
+                            .on_hover_text("Share a link to this score")
                             .clicked()
                         {
                             self.share_link(ui);

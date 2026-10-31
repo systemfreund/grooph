@@ -164,7 +164,7 @@ mod tests {
     /// A saved state with a pattern in the library, a user preset and a
     /// non-default tempo and tab.
     fn saved_state() -> PersistedState {
-        let mut s = PersistedState { bpm: 93, tab: Tab::Edit, ..Default::default() };
+        let mut s = PersistedState { bpm: 93, tab: Tab::Score, ..Default::default() };
         let mut m = Measure::new(TimeSignature::THREE_FOUR);
         m.first_voice_mut().set_beat(0, Beat::note(e())).unwrap();
         s.library.add("Groove".into(), Score::single(m), 93);
@@ -187,7 +187,7 @@ mod tests {
         let (s, backup) = restore(Some(&saved_ron()));
         assert_library_and_presets_kept(&s);
         assert_eq!(s.bpm, 93);
-        assert_eq!(s.tab, Tab::Edit);
+        assert_eq!(s.tab, Tab::Score);
         assert!(backup.is_none());
         assert!(restore(None).1.is_none());
     }
@@ -195,7 +195,7 @@ mod tests {
     #[test]
     fn a_field_that_does_not_read_falls_back_alone() {
         // A tab variant this version does not know, e.g. renamed.
-        let saved = saved_ron().replace("tab:Edit", "tab:Practise");
+        let saved = saved_ron().replace("tab:Score", "tab:Practise");
         assert_ne!(saved, saved_ron());
         let (s, backup) = restore(Some(&saved));
         assert_eq!(s.tab, PersistedState::default().tab);

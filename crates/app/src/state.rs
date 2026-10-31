@@ -1,4 +1,5 @@
 use crate::accuracy::AccuracyState;
+use crate::documents::{Document, RhythmDoc};
 use crate::generator::GeneratorState;
 use crate::guide::{AnchorFlash, Guide};
 use crate::library::PatternLibrary;
@@ -256,10 +257,17 @@ pub(crate) struct MicState {
     pub(crate) permission_asked: bool,
 }
 
-/// Score editing surface: the document, where the cursor sits, undo history,
-/// and pre-built button thumbnails. Mutated by tools and the time-signature
-/// dialog; read by the rendering pipeline.
+/// Score editing surface: the working score, where the cursor sits, undo
+/// history, and pre-built button thumbnails. Mutated by tools and the
+/// time-signature dialog; read by the rendering pipeline. The working score
+/// is the shown rhythm document (see [`crate::documents`]) or, while the
+/// metronome tab is open, its click bar.
 pub(crate) struct EditorState {
+    /// The rhythm document shown: the working score's, or the one the
+    /// metronome tab put aside.
+    pub(crate) document: Document,
+    /// The other rhythm document, waiting while this one is shown.
+    pub(crate) other: RhythmDoc,
     pub(crate) score: Score,
     pub(crate) cursor: Cursor,
     pub(crate) history: UndoHistory,
@@ -368,6 +376,8 @@ pub(crate) struct UiShell {
 pub(crate) enum PendingLoad {
     Pattern(u64),
     Link(Box<SharedLink>),
+    /// "Edit in Score": Practice's rhythm into the score tab.
+    PracticeRhythm,
 }
 
 #[cfg(test)]

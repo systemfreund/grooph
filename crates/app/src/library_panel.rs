@@ -416,13 +416,13 @@ impl Grooph {
         id
     }
 
-    /// "Save" for the rhythms: the active pattern while it has changes, a
-    /// new one without an active pattern.
+    /// "Save" for the rhythms, which keeps the score tab's score: its
+    /// pattern while it has changes, a new one without a pattern.
     pub(crate) fn rhythm_save_target(&self) -> SaveTarget {
-        let active = self.editor.active_pattern_id.and_then(|id| self.editor.library.get(id));
+        let active = self.score_pattern().and_then(|id| self.editor.library.get(id));
         SaveTarget {
             overwrites: active.map(|p| p.name.clone()),
-            enabled: active.is_none() || self.rhythm_dirty(),
+            enabled: active.is_none() || self.score_dirty(),
         }
     }
 
@@ -444,14 +444,14 @@ impl Grooph {
 
     /// Saved rhythms: a tap loads one onto the staff.
     fn rhythms(&mut self, ui: &mut egui::Ui) {
-        let active_id = self.editor.active_pattern_id;
-        let dirty = self.rhythm_dirty();
+        let active_id = self.score_pattern();
+        let dirty = self.score_dirty();
         let target = self.rhythm_save_target();
         if let Some(save) = save_buttons(ui, &target) {
             self.save_rhythm(save, ui.input(|i| i.time));
         }
         if target.overwrites.is_none() {
-            ui.weak("The rhythm on the staff is not saved.");
+            ui.weak("The score is not saved.");
         }
         ui.add_space(8.0);
         if self.editor.library.patterns.is_empty() {
@@ -602,6 +602,10 @@ impl Grooph {
             Some(PendingLoad::Link(_)) => (
                 "The link replaces the current measure, which has unsaved changes. Save first?",
                 "Open link",
+            ),
+            Some(PendingLoad::PracticeRhythm) => (
+                "The rhythm from Practice replaces your score, which has unsaved changes. Save first?",
+                "Replace",
             ),
         };
 

@@ -39,7 +39,7 @@ impl Grooph {
                 if self.tab() == Tab::More {
                     self.back();
                 } else {
-                    self.toggle_mode(Mode::Edit);
+                    self.toggle_edit();
                 }
             }
             if i.key_pressed(Key::Space) {

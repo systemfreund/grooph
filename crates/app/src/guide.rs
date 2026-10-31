@@ -3,7 +3,6 @@
 //! read and count the rest themselves.
 
 use crate::Grooph;
-use crate::shell::Tab;
 use grooph_measure::TimeSignature;
 use grooph_measure::grid::DEFAULT_GRID;
 use serde::{Deserialize, Serialize};
@@ -101,10 +100,10 @@ impl Grooph {
             .map_or(TimeSignature::FOUR_FOUR, |m| m.time_signature())
     }
 
-    /// The guide in use: the metronome and edit tabs and calibration keep
-    /// the line.
+    /// The guide in use: the metronome tab, the score tab's editor and
+    /// calibration keep the line. The score tab plays with the guide.
     pub(crate) fn active_guide(&self) -> Guide {
-        if self.metronome_mode() || self.tab() == Tab::Edit || self.calibration_source().is_some() {
+        if self.metronome_mode() || self.editing() || self.calibration_source().is_some() {
             Guide::Line
         } else {
             self.ui.guide
@@ -164,6 +163,7 @@ pub(crate) fn anchor_intensity(elapsed: f64) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::shell::Tab;
 
     use grooph_measure::duration::{Duration, e, q};
 
@@ -321,10 +321,12 @@ mod tests {
     }
 
     #[test]
-    fn the_edit_tab_keeps_the_line() {
+    fn the_editor_keeps_the_line() {
         let mut app = practice_app(1, Guide::EveryBar);
-        app.select_tab(Tab::Edit);
+        app.edit_score();
         assert_eq!(app.active_guide(), Guide::Line);
+        app.select_tab(Tab::Score);
+        assert_eq!(app.active_guide(), Guide::EveryBar);
         app.select_tab(Tab::Practice);
         assert_eq!(app.active_guide(), Guide::EveryBar);
     }

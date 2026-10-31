@@ -17,8 +17,8 @@ bpm=100&ts=4/4
 
 1. **Set the tempo.** Tap **BPM** in the card at the top and use the buttons, the slider or
    **Tap** to tap it in. Any tempo from 20 to 300 beats per minute works.
-2. **Choose a time signature.** Open the **Edit** tab and use the time signature
-   button (it shows the current meter, e.g. "4/4"). You can use 1 to 7 beats over a quarter,
+2. **Choose a time signature.** Tap **Meter** in the card of the **Metronome** tab
+   (it shows the current meter, e.g. "4/4"). You can use 1 to 7 beats over a quarter,
    3 to 13 over an eighth or 5 to 19 over a sixteenth note, so 3/4, 6/8, 7/8 and 12/8 are
    all possible.
 3. **Press play** (or the space bar). A moving cursor shows where you are in the measure.
