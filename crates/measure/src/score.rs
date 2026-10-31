@@ -285,6 +285,24 @@ mod tests {
     }
 
     #[test]
+    fn remove_and_truncate_keep_a_measure() {
+        use crate::TimeSignature;
+        let one = || Measure::new(TimeSignature::FOUR_FOUR);
+        let mut score = Score::single(one());
+        assert!(score.remove(0).is_none());
+        assert_eq!(score.len(), 1);
+        score.push(Measure::new(TimeSignature::THREE_FOUR));
+        assert!(score.remove(5).is_none());
+        assert_eq!(score.remove(0).map(|m| m.time_signature()), Some(TimeSignature::FOUR_FOUR));
+        assert_eq!(score.len(), 1);
+        score.push(one());
+        score.push(one());
+        score.truncate(0);
+        assert_eq!(score.len(), 1);
+        assert_eq!(score.measures()[0].time_signature(), TimeSignature::THREE_FOUR);
+    }
+
+    #[test]
     fn kit_heads_are_found_in_any_voice() {
         use crate::notation::parse_score;
         assert!(!parse_score("4/4 q q q q").unwrap().has_kit_heads());

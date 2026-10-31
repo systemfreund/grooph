@@ -508,18 +508,15 @@ impl Grooph {
     /// Name of the click bar being edited if it is a ready-made one, else
     /// "Custom".
     pub(crate) fn click_fill_label(&self) -> String {
-        let bar = self.click_bar();
-        click_fills(bar.time_signature())
-            .iter()
-            .find(|f| same_bar(&f.bar, &bar))
-            .map_or_else(|| "Custom".to_owned(), |f| f.name.clone())
+        self.current_click_fill()
+            .and_then(|i| click_fills(self.metronome_meter()).get(i).map(|f| f.name.clone()))
+            .unwrap_or_else(|| "Custom".to_owned())
     }
 
     /// How the click bar being edited is shown if it is a ready-made one
     /// (see [`ClickFill::look`]).
     pub(crate) fn click_fill_look(&self) -> Option<FillLook> {
-        let bar = self.click_bar();
-        click_fills(bar.time_signature()).iter().find(|f| same_bar(&f.bar, &bar))?.look()
+        click_fills(self.metronome_meter()).get(self.current_click_fill()?)?.look()
     }
 
     /// The counter rhythm of the metronome meter, if it has one.
@@ -549,10 +546,11 @@ impl Grooph {
     /// The counter rhythm's ratio: "Off" without one, "Custom" for one that
     /// is no ratio's, marked "edited" once its clicks were changed.
     pub(crate) fn counter_label(&self) -> String {
-        match self.counter_bar() {
-            None => "Off".to_owned(),
-            Some(_) => self.counter_ratio().map_or_else(|| "Custom".to_owned(), ratio_label),
-        }
+        let Some(bar) = self.counter_bar() else {
+            return "Off".to_owned();
+        };
+        let named = self.playback_ctl.audio_cfg.counter.name(self.metronome_meter());
+        counter_ratio(&bar, named).map_or_else(|| "Custom".to_owned(), ratio_label)
     }
 
     /// The counter rhythm's ratio and whether its clicks were edited (see
