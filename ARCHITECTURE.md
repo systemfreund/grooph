@@ -694,9 +694,9 @@ grooph's metronome runs inside AI chats as an
 The tool palette (`tool_palette_panel`) is one grid for every editor
 (Practice, Score, the metronome's click bar): rows of cells
 (`tool_palette::grid_rows`), on the kit its instruments and voices, then
-the head modifiers (with the kit's "+/−" and techniques), undo, redo and
-clear, the note values, rests and dot, and the meter and tuplets. The
-columns follow the width (`grid_metrics`, at most 64 px a cell), a row
+undo, redo and clear, then the head modifiers (with the kit's "+/−" and
+techniques), the note values, rests and dot, and the meter and tuplets. The
+columns follow the width (`grid_metrics`, cells 54 to 64 px wide), a row
 wider than the grid goes on in the next line, and past 45% of the screen's
 height the grid scrolls, so the staff stays in view.
 

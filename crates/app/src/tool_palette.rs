@@ -44,11 +44,11 @@ fn button_kind(kind: &ToolKind) -> ButtonKind {
 /// Room between the grid's cells.
 const GRID_GAP: f32 = 4.0;
 /// The narrowest a cell gets before the grid takes fewer columns.
-const MIN_CELL: f32 = 36.0;
+const MIN_CELL: f32 = 54.0;
 /// The widest a cell gets: on a wide screen the grid stays in the middle.
 const MAX_CELL: f32 = 64.0;
 /// The tallest a cell gets; narrower ones are square.
-const MAX_CELL_HEIGHT: f32 = 52.0;
+const MAX_CELL_HEIGHT: f32 = 64.0;
 /// The most columns the grid has, on a wide screen.
 const MAX_COLUMNS: usize = 16;
 /// The share of the screen's height the grid takes at most; past it the
@@ -69,9 +69,9 @@ const KIT_ORDER: [Instrument; 9] = [
     Instrument::HiHatFoot,
 ];
 
-/// The head modifiers' tools, before the kit's.
+/// The head modifiers' tools, after the bar's and before the kit's.
 const HEAD_TOOLS: [&str; 2] = ["modify.toggle.accent", "modify.toggle.soft"];
-/// The tools that change the bar, after the head modifiers.
+/// The tools that change the bar, first in their row.
 const BAR_TOOLS: [&str; 3] = ["edit.undo", "edit.redo", "meta.reset_measure"];
 /// The note values, their rests and the dot.
 const VALUE_TOOLS: [&str; 9] = [
@@ -130,7 +130,8 @@ fn technique_name(technique: Technique) -> &'static str {
 /// head modifiers get the kit's; on the one line they are left out.
 pub(crate) fn grid_rows(kit: bool) -> Vec<Vec<Cell>> {
     let tools = |ids: &[&str]| ids.iter().map(|id| Cell::Tool(tool(id))).collect::<Vec<_>>();
-    let mut heads = tools(&HEAD_TOOLS);
+    let mut heads = tools(&BAR_TOOLS);
+    heads.extend(tools(&HEAD_TOOLS));
     let mut rows = Vec::new();
     if kit {
         let mut instruments: Vec<Cell> = KIT_ORDER.iter().map(|&i| Cell::Instrument(i)).collect();
@@ -144,7 +145,6 @@ pub(crate) fn grid_rows(kit: bool) -> Vec<Vec<Cell>> {
                 .map(Cell::Tool),
         );
     }
-    heads.extend(tools(&BAR_TOOLS));
     rows.push(heads);
     rows.push(tools(&VALUE_TOOLS));
     rows.push(tools(&METER_TOOLS));
