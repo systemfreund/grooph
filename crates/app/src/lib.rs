@@ -116,22 +116,72 @@ pub struct Grooph {
     pub(crate) ui: UiShell,
 }
 
-pub(crate) const PERSISTED_STATE_VERSION: u8 = 2;
+pub(crate) const PERSISTED_STATE_VERSION: u8 = 3;
+
+/// A rhythm document as saved: the same entry for the score tab's and
+/// Practice's.
+#[derive(Serialize, Deserialize)]
+#[serde(default)]
+pub(crate) struct SavedDoc {
+    score: Score,
+    cursor: Cursor,
+    /// Changed since it was saved to or loaded from the library.
+    dirty: bool,
+    /// The library pattern it is.
+    active_pattern_id: Option<u64>,
+}
+
+impl Default for SavedDoc {
+    fn default() -> Self {
+        Self {
+            score: Score::single(Grooph::default_measure()),
+            cursor: Cursor::start(),
+            dirty: false,
+            active_pattern_id: None,
+        }
+    }
+}
+
+impl SavedDoc {
+    fn of(doc: &RhythmDoc) -> Self {
+        Self {
+            score: doc.score.clone(),
+            cursor: doc.cursor,
+            dirty: doc.dirty,
+            active_pattern_id: doc.active_pattern_id,
+        }
+    }
+
+    /// The document again, with nothing to undo: an empty score is one bar,
+    /// and a pattern no longer in `library` is forgotten.
+    fn into_doc(self, library: &PatternLibrary) -> RhythmDoc {
+        // A measure always has beats (`VoiceBar`'s invariant, checked when
+        // it loads), so the cursor clamps into a score with one.
+        let score = if self.score.is_empty() {
+            Score::single(Grooph::default_measure())
+        } else {
+            self.score
+        };
+        RhythmDoc {
+            dirty: self.dirty,
+            active_pattern_id: self.active_pattern_id.filter(|id| library.contains(*id)),
+            ..RhythmDoc::new(score, self.cursor)
+        }
+    }
+}
 
 #[derive(Serialize, Deserialize)]
 #[serde(default)]
 pub(crate) struct PersistedState {
     version: u8,
-    /// The score tab's score.
-    score: Score,
-    cursor: Cursor,
+    /// The score tab's document.
+    score_doc: SavedDoc,
+    /// Practice's document with its generated rhythm; a state saved before
+    /// the two documents has none, and Practice starts with a new one.
+    practice_doc: Option<SavedDoc>,
     /// The document shown, so the More screen opens again on the one it was
     /// opened from.
     document: Document,
-    /// Practice's generated rhythm; a state saved before the two documents
-    /// has none, and Practice starts with a new one.
-    practice_score: Option<Score>,
-    practice_cursor: Cursor,
     bpm: u32,
     audio_settings: AudioSettings,
     audio_latency_enabled: bool,
@@ -142,8 +192,6 @@ pub(crate) struct PersistedState {
     midi_selected_port_id: Option<String>,
     accuracy_enabled: bool,
     library: PatternLibrary,
-    active_pattern_id: Option<u64>,
-    dirty: bool,
     generator_settings: GeneratorSettings,
     endless: bool,
     ghost_notes: bool,
@@ -166,11 +214,9 @@ impl Default for PersistedState {
     fn default() -> Self {
         Self {
             version: PERSISTED_STATE_VERSION,
-            score: Score::single(Grooph::default_measure()),
-            cursor: Cursor::start(),
+            score_doc: SavedDoc::default(),
+            practice_doc: None,
             document: Document::Score,
-            practice_score: None,
-            practice_cursor: Cursor::start(),
             bpm: grooph_link::DEFAULT_BPM,
             audio_settings: AudioSettings::default(),
             audio_latency_enabled: true,
@@ -181,8 +227,6 @@ impl Default for PersistedState {
             midi_selected_port_id: None,
             accuracy_enabled: false,
             library: PatternLibrary::default(),
-            active_pattern_id: None,
-            dirty: false,
             generator_settings: GeneratorSettings::default(),
             endless: false,
             ghost_notes: false,
@@ -205,14 +249,11 @@ impl PersistedState {
     fn from_app(app: &Grooph) -> Self {
         let generator = &app.editor.generator;
         let docs = &app.editor.docs;
-        let score_doc = &docs.score;
         Self {
             version: PERSISTED_STATE_VERSION,
-            score: score_doc.score.clone(),
-            cursor: score_doc.cursor,
+            score_doc: SavedDoc::of(&docs.score),
+            practice_doc: Some(SavedDoc::of(&docs.practice)),
             document: app.document(),
-            practice_score: Some(docs.practice.score.clone()),
-            practice_cursor: docs.practice.cursor,
             bpm: app.playback_ctl.bpm,
             audio_settings: app.playback_ctl.audio_cfg.settings,
             audio_latency_enabled: app.playback_ctl.audio_cfg.latency_enabled,
@@ -223,8 +264,6 @@ impl PersistedState {
             midi_selected_port_id: app.playback_ctl.midi.selected_port_id.clone(),
             accuracy_enabled: app.playback_ctl.accuracy.enabled,
             library: app.editor.library.clone(),
-            active_pattern_id: score_doc.active_pattern_id,
-            dirty: score_doc.dirty,
             generator_settings: generator.settings,
             endless: generator.endless,
             ghost_notes: generator.ghost_notes,
@@ -1130,15 +1169,6 @@ impl Grooph {
             .and_then(|storage| storage.get_string(APP_STATE_KEY));
         let (mut state, state_backup) = persist::restore(saved.as_deref());
 
-        if state.score.is_empty() {
-            state.score = Score::single(Self::default_measure());
-            state.cursor = Cursor::start();
-        } else {
-            // A measure always has beats (`VoiceBar`'s invariant, checked
-            // when it loads).
-            state.cursor = state.score.clamp_cursor(state.cursor);
-        }
-
         state.audio_settings = state.audio_settings.clamped();
 
         // Precompute button measures for all insert-beat tools
@@ -1219,11 +1249,15 @@ impl Grooph {
 
         let mut generator =
             GeneratorState::new(state.generator_settings, state.endless, state.ghost_notes);
+        let score_doc = state.score_doc.into_doc(&state.library);
         // Saved before Practice had its own: Practice starts with a new rhythm.
-        let practice_score = state
-            .practice_score
-            .or_else(|| generator.generate())
-            .unwrap_or_else(|| Score::single(Self::default_measure()));
+        let practice_doc = match state.practice_doc {
+            Some(doc) => doc.into_doc(&state.library),
+            None => RhythmDoc::new(
+                generator.generate().unwrap_or_else(|| Score::single(Self::default_measure())),
+                Cursor::start(),
+            ),
+        };
         let mut app = Self {
             editor: EditorState {
                 document: Document::Score,
@@ -1237,14 +1271,8 @@ impl Grooph {
                         )),
                         Cursor::start(),
                     ),
-                    practice: RhythmDoc::new(practice_score, state.practice_cursor),
-                    score: RhythmDoc {
-                        active_pattern_id: state
-                            .active_pattern_id
-                            .filter(|id| state.library.contains(*id)),
-                        dirty: state.dirty,
-                        ..RhythmDoc::new(state.score, state.cursor)
-                    },
+                    practice: practice_doc,
+                    score: score_doc,
                 },
                 button_measures,
                 library: state.library,
@@ -2182,7 +2210,10 @@ mod tests {
                 saved.swing,
                 Swing { unit: grooph_measure::swing::SwingUnit::Eighths, percent: 66 }
             );
-            assert_eq!(format!("{:?}", saved.score), format!("{:?}", app.editor.docs.score.score));
+            assert_eq!(
+                format!("{:?}", saved.score_doc.score),
+                format!("{:?}", app.editor.docs.score.score)
+            );
             // Cancelled: nothing to put back.
             app.stop_transport();
             assert!(!app.calibrating());

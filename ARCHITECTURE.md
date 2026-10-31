@@ -585,11 +585,17 @@ grooph's metronome runs inside AI chats as an
   as `docs.score`, from any page and without closing the metronome. A tempo
   change marks it unsaved on the score tab, and on any page when it is a
   saved pattern (`mark_tempo_unsaved`).
-- Persistence saves the rhythm documents and the page: `score`/`cursor`/
-  `dirty`/`active_pattern_id` are the score tab's, `practice_score`/
-  `practice_cursor` Practice's, `document` the page behind More. A state
-  saved before has no `practice_score`: its score stays in the score tab
-  and Practice starts with a new rhythm. `Tab::Score` still reads `Edit`.
+- Persistence saves the rhythm documents and the page: each document as
+  one `SavedDoc` (score, cursor, `dirty`, `active_pattern_id`), the score
+  tab's as `score_doc`, Practice's as `practice_doc`, and `document` the
+  page behind More. `SavedDoc::of`/`into_doc` turn a document into its
+  entry and back, the same way for both. Within an entry, too, a field that
+  does not read falls back alone (`persist::repair_doc`). A version 2 state
+  kept the score tab's document in flat fields and Practice's rhythm as
+  `practice_score`; `persist::migrate` moves them into the entries without
+  a backup. A state saved before the two documents has no Practice
+  rhythm: its score stays in the score tab and Practice starts with a new
+  one. `Tab::Score` still reads `Edit`.
 
 ## Layout
 
