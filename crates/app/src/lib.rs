@@ -870,7 +870,10 @@ impl Grooph {
         match template.duration {
             Duration::Tuplet(TupletSpec { n, .. }) => {
                 for i in 0..n {
-                    measure.set_beat(i as BeatIdx, Beat::note(template.duration)).unwrap();
+                    measure
+                        .first_voice_mut()
+                        .set_beat(i as BeatIdx, Beat::note(template.duration))
+                        .unwrap();
                 }
             }
             Duration::Dotted { .. } => {
@@ -878,14 +881,14 @@ impl Grooph {
                     BeatKind::Note => Beat::note(template.duration),
                     BeatKind::Rest => Beat::rest(template.duration),
                 };
-                measure.set_beat(0, beat).unwrap();
+                measure.first_voice_mut().set_beat(0, beat).unwrap();
             }
             Duration::Simple(..) => {
                 if template.accented {
-                    measure.toggle_accent(0);
+                    measure.first_voice_mut().toggle_accent(0);
                 }
                 if template.soft {
-                    measure.toggle_soft(0);
+                    measure.first_voice_mut().toggle_soft(0);
                 }
             }
         }
@@ -1076,10 +1079,10 @@ impl Grooph {
 
     fn default_measure() -> Measure {
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
-        m.set_beat(0, Beat::note(q())).unwrap();
-        m.set_beat(1, Beat::note(q())).unwrap();
-        m.set_beat(2, Beat::note(q())).unwrap();
-        m.set_beat(3, Beat::note(q())).unwrap();
+        m.first_voice_mut().set_beat(0, Beat::note(q())).unwrap();
+        m.first_voice_mut().set_beat(1, Beat::note(q())).unwrap();
+        m.first_voice_mut().set_beat(2, Beat::note(q())).unwrap();
+        m.first_voice_mut().set_beat(3, Beat::note(q())).unwrap();
         m
     }
 
@@ -1350,14 +1353,18 @@ mod tests {
         let mut count = 0;
         for template in templates.chain([dotted, accented, soft]) {
             let measure = Grooph::build_button_measure(template);
-            let ticks: u32 =
-                measure.beats().iter().map(|b| DEFAULT_GRID.ticks_of(&b.duration).unwrap()).sum();
+            let ticks: u32 = measure
+                .first_voice()
+                .beats()
+                .iter()
+                .map(|b| DEFAULT_GRID.ticks_of(&b.duration).unwrap())
+                .sum();
             let ts = measure.time_signature();
             assert_eq!(ticks, DEFAULT_GRID.ticks_per_measure(&ts), "{:?}", template.duration);
-            let first = measure.beats()[0];
+            let first = measure.first_voice().beats()[0];
             assert_eq!((first.kind(), first.duration), (template.kind, template.duration));
             if !template.duration.is_tuplet() {
-                assert_eq!(measure.beats().len(), 1, "{:?}", template.duration);
+                assert_eq!(measure.first_voice().beats().len(), 1, "{:?}", template.duration);
                 assert_eq!((first.accented(), first.soft()), (template.accented, template.soft));
             }
             count += 1;
@@ -1526,8 +1533,8 @@ mod tests {
         for d in [q(), e(), s(), t8()] {
             let mut m = Measure::new(TimeSignature::FOUR_FOUR);
             let mut i = 0;
-            while i < m.beats().len() {
-                m.set_beat(i, Beat::note(d)).unwrap();
+            while i < m.first_voice().beats().len() {
+                m.first_voice_mut().set_beat(i, Beat::note(d)).unwrap();
                 i += 1;
             }
             app.editor.score = Score::new(vec![m.clone(), m]);

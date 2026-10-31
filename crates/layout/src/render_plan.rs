@@ -67,10 +67,10 @@ mod tests {
         // The middle group (beats 2..=4, 0-based) should be beamed.
         let mut m = Measure::new(TimeSignature::SEVEN_EIGHT);
         for i in 0..7 {
-            m.set_beat(i, Beat::note(e())).unwrap();
+            m.first_voice_mut().set_beat(i, Beat::note(e())).unwrap();
         }
 
-        let plan = plan_measure(&m);
+        let plan = plan_measure(m.first_voice());
         let has_group = plan.beams.iter().any(|g| {
             let idxs = &g.beat_indices;
             if !(idxs.contains(&2) && idxs.contains(&3) && idxs.contains(&4)) {
@@ -98,14 +98,14 @@ mod tests {
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
         // First six eighths, then a triplet over the next three eighth slots
         for i in 0..3 {
-            m.set_beat(i, Beat::note(e())).unwrap();
+            m.first_voice_mut().set_beat(i, Beat::note(e())).unwrap();
         }
         // Three triplet eighth notes
-        m.set_beat(3, Beat::note(t8())).unwrap();
-        m.set_beat(4, Beat::note(t8())).unwrap();
-        m.set_beat(5, Beat::note(t8())).unwrap();
+        m.first_voice_mut().set_beat(3, Beat::note(t8())).unwrap();
+        m.first_voice_mut().set_beat(4, Beat::note(t8())).unwrap();
+        m.first_voice_mut().set_beat(5, Beat::note(t8())).unwrap();
 
-        let plan = plan_measure(&m);
+        let plan = plan_measure(m.first_voice());
         let ok = plan.tuplets.iter().any(|t| t.count == 3 && t.start == 3 && t.end == 5);
         assert!(ok);
     }
@@ -113,11 +113,11 @@ mod tests {
     #[test]
     fn triplet_bracket_over_beats_when_preceding_beat_is_connected_to_triplet_with_beams_in_7_8() {
         let mut m = Measure::new_init(TimeSignature::SEVEN_EIGHT, Note);
-        m.set_beat(3, Beat::note(t8())).unwrap();
-        m.set_beat(4, Beat::note(t8())).unwrap();
-        m.set_beat(5, Beat::note(t8())).unwrap();
+        m.first_voice_mut().set_beat(3, Beat::note(t8())).unwrap();
+        m.first_voice_mut().set_beat(4, Beat::note(t8())).unwrap();
+        m.first_voice_mut().set_beat(5, Beat::note(t8())).unwrap();
 
-        let plan = plan_measure(&m);
+        let plan = plan_measure(m.first_voice());
 
         // Beam connects the triplets (3,4,5) with the preceding beat (2).
         // Expected because of the default 2+3+2 grouping in 7/8.
@@ -140,11 +140,11 @@ mod tests {
     #[test]
     fn triplet_bracket_over_beats_when_following_beat_is_connected_to_triplet_with_beams_in_7_8() {
         let mut m = Measure::new_init(TimeSignature::SEVEN_EIGHT, Note);
-        m.set_beat(2, Beat::note(t8())).unwrap();
-        m.set_beat(3, Beat::note(t8())).unwrap();
-        m.set_beat(4, Beat::note(t8())).unwrap();
+        m.first_voice_mut().set_beat(2, Beat::note(t8())).unwrap();
+        m.first_voice_mut().set_beat(3, Beat::note(t8())).unwrap();
+        m.first_voice_mut().set_beat(4, Beat::note(t8())).unwrap();
 
-        let plan = plan_measure(&m);
+        let plan = plan_measure(m.first_voice());
 
         // Beam connects the triplets (2,3,4) with the following beat (5).
         // Expected because of the default 2+3+2 grouping in 7/8.
@@ -167,7 +167,8 @@ mod tests {
     #[test]
     fn a_tuplet_with_a_rest_under_its_beam_shows_its_number_alone() {
         use grooph_measure::notation::parse_score;
-        let plan_of = |s: &str| plan_measure(&parse_score(s).unwrap().measures.remove(0));
+        let plan_of =
+            |s: &str| plan_measure(parse_score(s).unwrap().measures.remove(0).first_voice());
         let t = &plan_of("1/4 t8 r:t8 t8").tuplets[0];
         assert!(t.fully_beamed && !t.contains_rest && t.number_only());
         // A rest at its edge, outside the beam, gives it a bracket.
@@ -182,12 +183,12 @@ mod tests {
     fn a_tuplet_with_stemlets_is_beamed_and_shows_its_number_alone() {
         use grooph_measure::notation::parse_score;
         let m = parse_score("1/4 t8 r:t8 r:t8").unwrap().measures.remove(0);
-        assert!(!plan_measure(&m).tuplets[0].number_only());
-        let t = &plan_measure_with(&m, true).tuplets[0];
+        assert!(!plan_measure(m.first_voice()).tuplets[0].number_only());
+        let t = &plan_measure_with(m.first_voice(), true).tuplets[0];
         assert!(t.fully_beamed && !t.contains_rest && t.number_only());
         // A stemlet beamed onto the triplet from outside keeps its bracket.
         let m = parse_score("1/4 r:e t16 r:t16 t16").unwrap().measures.remove(0);
-        let t = &plan_measure_with(&m, true).tuplets[0];
+        let t = &plan_measure_with(m.first_voice(), true).tuplets[0];
         assert_eq!(t.edge_connection, EdgeConnection::Left);
         assert!(!t.number_only());
     }
@@ -195,18 +196,18 @@ mod tests {
     #[test]
     fn triplet_render_plan_0() {
         let mut m = Measure::new(TimeSignature::ONE_FOUR);
-        m.set_beat(0, Beat::note(t16())).unwrap();
-        m.set_beat(1, Beat::note(t8())).unwrap();
+        m.first_voice_mut().set_beat(0, Beat::note(t16())).unwrap();
+        m.first_voice_mut().set_beat(1, Beat::note(t8())).unwrap();
 
-        let mut tuplets = plan_measure(&m).tuplets;
+        let mut tuplets = plan_measure(m.first_voice()).tuplets;
         assert_eq!(tuplets.len(), 1);
         // The number remains 3 (triplet), but the bracket spans only the two remaining slots
         assert_eq!(tuplets[0].count, 3);
         assert_eq!(tuplets[0].start, 0);
         assert_eq!(tuplets[0].end, 1);
 
-        m.set_beat(2, Beat::note(t16())).unwrap();
-        tuplets = plan_measure(&m).tuplets;
+        m.first_voice_mut().set_beat(2, Beat::note(t16())).unwrap();
+        tuplets = plan_measure(m.first_voice()).tuplets;
         assert_eq!(tuplets.len(), 2);
         assert_eq!(tuplets[1].count, 3);
         assert_eq!(tuplets[1].start, 2);
@@ -216,10 +217,10 @@ mod tests {
     #[test]
     fn triplet_render_plan_1() {
         let mut m = Measure::new(TimeSignature::ONE_FOUR);
-        m.set_beat(0, Beat::note(t32())).unwrap();
-        m.set_beat(0, Beat::note(t16())).unwrap();
+        m.first_voice_mut().set_beat(0, Beat::note(t32())).unwrap();
+        m.first_voice_mut().set_beat(0, Beat::note(t16())).unwrap();
 
-        let mut tuplets = plan_measure(&m).tuplets;
+        let mut tuplets = plan_measure(m.first_voice()).tuplets;
         assert_eq!(tuplets.len(), 1, "first tuplet group not found");
         // The number remains 3 (triplet), but the bracket spans only the two remaining slots
         assert_eq!(tuplets[0].count, 3);
@@ -227,11 +228,11 @@ mod tests {
         assert_eq!(tuplets[0].end, 1);
 
         // Start a new tuplet group with a t16 immediately after the t32-group.
-        m.set_beat(2, Beat::rest(t16())).unwrap();
+        m.first_voice_mut().set_beat(2, Beat::rest(t16())).unwrap();
         // Now we expect to have two tuplet groups, and the very last beat must be a simple 1/16 note.
-        tuplets = plan_measure(&m).tuplets;
+        tuplets = plan_measure(m.first_voice()).tuplets;
         assert_eq!(tuplets.len(), 2);
-        tuplets = plan_measure(&m).tuplets;
+        tuplets = plan_measure(m.first_voice()).tuplets;
 
         assert_eq!(tuplets[1].count, 3);
         assert_eq!(tuplets[1].start, 2);
@@ -241,11 +242,11 @@ mod tests {
     #[test]
     fn triplet_render_plan_2() {
         let mut m = Measure::new(TimeSignature::ONE_FOUR);
-        m.set_beat(0, Beat::note(t8())).unwrap();
+        m.first_voice_mut().set_beat(0, Beat::note(t8())).unwrap();
         // Subdivide first beat into two t16s.
-        m.set_beat(0, Beat::note(t16())).unwrap();
+        m.first_voice_mut().set_beat(0, Beat::note(t16())).unwrap();
 
-        let tuplets = plan_measure(&m).tuplets;
+        let tuplets = plan_measure(m.first_voice()).tuplets;
         assert_eq!(tuplets[0].count, 3);
         assert_eq!(tuplets[0].start, 0);
         assert_eq!(tuplets[0].end, 3);
@@ -254,11 +255,11 @@ mod tests {
     #[test]
     fn triplet_render_plan_3() {
         let mut m = Measure::new(TimeSignature::ONE_FOUR);
-        m.set_beat(0, Beat::note(t8())).unwrap();
+        m.first_voice_mut().set_beat(0, Beat::note(t8())).unwrap();
         // Subdivide second beat into two t16s.
-        m.set_beat(1, Beat::note(t16())).unwrap();
+        m.first_voice_mut().set_beat(1, Beat::note(t16())).unwrap();
 
-        let plan = plan_measure(&m);
+        let plan = plan_measure(m.first_voice());
         let tuplets = plan.tuplets;
         assert_eq!(tuplets[0].count, 3);
         assert_eq!(tuplets[0].start, 0);
@@ -268,14 +269,14 @@ mod tests {
     #[test]
     fn triplet_render_plan_4() {
         let mut m = Measure::new(TimeSignature::TWO_FOUR);
-        m.set_beat(0, Beat::note(t8())).unwrap();
-        m.set_beat(1, Beat::note(t8())).unwrap();
-        m.set_beat(2, Beat::note(t8())).unwrap();
-        m.set_beat(3, Beat::note(t8())).unwrap();
-        m.set_beat(4, Beat::note(t8())).unwrap();
-        m.set_beat(5, Beat::note(t8())).unwrap();
+        m.first_voice_mut().set_beat(0, Beat::note(t8())).unwrap();
+        m.first_voice_mut().set_beat(1, Beat::note(t8())).unwrap();
+        m.first_voice_mut().set_beat(2, Beat::note(t8())).unwrap();
+        m.first_voice_mut().set_beat(3, Beat::note(t8())).unwrap();
+        m.first_voice_mut().set_beat(4, Beat::note(t8())).unwrap();
+        m.first_voice_mut().set_beat(5, Beat::note(t8())).unwrap();
 
-        let mut plan = plan_measure(&m);
+        let mut plan = plan_measure(m.first_voice());
 
         let assert_1st_tuplet = |plan: &RenderPlan, fully_beamed: bool, edge: EdgeConnection| {
             let tuplets = &plan.tuplets;
@@ -299,15 +300,15 @@ mod tests {
         assert_2nd_tuplet(&plan, true, EdgeConnection::None);
 
         // Last note of first tuplet is now a rest.
-        m.set_beat(2, Beat::rest(t8())).unwrap();
-        plan = plan_measure(&m);
+        m.first_voice_mut().set_beat(2, Beat::rest(t8())).unwrap();
+        plan = plan_measure(m.first_voice());
         assert_1st_tuplet(&plan, false, EdgeConnection::None);
         assert_2nd_tuplet(&plan, true, EdgeConnection::None);
 
         // Middle note of first tuplet is now a rest: it sits under the beam.
-        m.set_beat(2, Beat::note(t8())).unwrap();
-        m.set_beat(1, Beat::rest(t8())).unwrap();
-        plan = plan_measure(&m);
+        m.first_voice_mut().set_beat(2, Beat::note(t8())).unwrap();
+        m.first_voice_mut().set_beat(1, Beat::rest(t8())).unwrap();
+        plan = plan_measure(m.first_voice());
         assert_1st_tuplet(&plan, true, EdgeConnection::None);
         assert_2nd_tuplet(&plan, true, EdgeConnection::None);
         assert!(plan.tuplets[0].number_only());

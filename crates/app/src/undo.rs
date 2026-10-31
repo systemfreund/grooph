@@ -68,7 +68,7 @@ mod tests {
 
     fn snap(beat_idx: usize) -> EditorSnapshot {
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
-        m.set_beat(0, Beat::note(q())).unwrap();
+        m.first_voice_mut().set_beat(0, Beat::note(q())).unwrap();
         EditorSnapshot {
             score: Score::single(m),
             cursor: Cursor::at(0, beat_idx),
@@ -144,7 +144,7 @@ mod tests {
     fn clone_independence_via_push() {
         // Pushed snapshot must not be affected by later mutation of the source score.
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
-        m.set_beat(0, Beat::note(q())).unwrap();
+        m.first_voice_mut().set_beat(0, Beat::note(q())).unwrap();
         let mut score = Score::single(m);
         let snap = EditorSnapshot {
             score: score.clone(),
@@ -158,7 +158,7 @@ mod tests {
         h.push(snap);
 
         // mutate source after push
-        score.current_mut(0).set_beat(1, Beat::note(q())).unwrap();
+        score.current_mut(0).first_voice_mut().set_beat(1, Beat::note(q())).unwrap();
 
         // restored snapshot retains original beat count (before mutation)
         let restored = h
@@ -172,6 +172,6 @@ mod tests {
             .unwrap();
         // the mutation added a beat to the *source* score but the snapshot is independent
         // we just check that pop returns something with a distinct measure state
-        assert_eq!(restored.score.current(0).beats().len(), 4); // original 4/4 default beats
+        assert_eq!(restored.score.current(0).first_voice().beats().len(), 4); // original 4/4 default beats
     }
 }

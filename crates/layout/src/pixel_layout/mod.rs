@@ -541,7 +541,8 @@ mod tests {
             shared_line: false,
             staff: StaffKind::Line,
         };
-        let layout = build_measure_layout(&Measure::new(TimeSignature::THREE_FOUR), &opts);
+        let layout =
+            build_measure_layout(Measure::new(TimeSignature::THREE_FOUR).first_voice(), &opts);
         let ts = layout.time_signature.expect("time signature laid out");
         for digit in ts.beats.iter().chain(ts.beat_unit.iter()) {
             let ink = digit.ink();
@@ -556,8 +557,8 @@ mod tests {
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
         // Quarter note with accent
         let b = Beat::note(q());
-        m.set_beat(0, b).unwrap();
-        m.toggle_accent(0);
+        m.first_voice_mut().set_beat(0, b).unwrap();
+        m.first_voice_mut().toggle_accent(0);
 
         let em = 20.0;
         let displacement = 0.5; // 0.5 em gap
@@ -578,7 +579,7 @@ mod tests {
         };
 
         // Case 1: stems up, accent above
-        let layout = build_measure_layout(&m, &opts);
+        let layout = build_measure_layout(m.first_voice(), &opts);
         let note = &layout.notes[0];
         let accent = note.accent.expect("Accent should be present").ink();
         let stem = note.stem.expect("Stem should be present");
@@ -595,7 +596,7 @@ mod tests {
 
         // Case 2: stems down, accent below
         let opts_below = LayoutOpts { stem_down: true, ..opts.clone() };
-        let layout_below = build_measure_layout(&m, &opts_below);
+        let layout_below = build_measure_layout(m.first_voice(), &opts_below);
         let note_below = &layout_below.notes[0];
         let accent_below = note_below.accent.expect("Accent should be present").ink();
 
@@ -608,9 +609,9 @@ mod tests {
     fn lower_voice_accent_clears_the_final_flag() {
         use grooph_measure::duration::e;
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
-        m.set_beat(0, Beat::note(e())).unwrap();
-        m.set_beat(1, Beat::rest(e())).unwrap();
-        m.toggle_accent(0);
+        m.first_voice_mut().set_beat(0, Beat::note(e())).unwrap();
+        m.first_voice_mut().set_beat(1, Beat::rest(e())).unwrap();
+        m.first_voice_mut().toggle_accent(0);
 
         let em = 20.0;
         let opts = LayoutOpts {
@@ -628,7 +629,7 @@ mod tests {
             shared_line: false,
             staff: StaffKind::Line,
         };
-        let layout = build_measure_layout(&m, &opts);
+        let layout = build_measure_layout(m.first_voice(), &opts);
         let note = &layout.notes[0];
         let flag = note.flag.expect("an unbeamed eighth has a flag").ink();
         let stem = note.stem.expect("a note has a stem");
@@ -649,12 +650,12 @@ mod tests {
 
         // Group 1: 7x 32nd notes
         for i in 0..7 {
-            m.set_beat(i, Beat::note(th())).unwrap();
+            m.first_voice_mut().set_beat(i, Beat::note(th())).unwrap();
         }
 
         // Group 2: 3x triplet 8th (Indices 7, 8, 9)
         for i in 0..3 {
-            m.set_beat(7 + i, Beat::note(t8())).unwrap();
+            m.first_voice_mut().set_beat(7 + i, Beat::note(t8())).unwrap();
         }
 
         let em = 10.0;
@@ -676,7 +677,7 @@ mod tests {
             staff: StaffKind::Line,
         };
 
-        let layout = build_measure_layout(&m, &opts);
+        let layout = build_measure_layout(m.first_voice(), &opts);
 
         let n7 = &layout.notes[7];
         let n8 = &layout.notes[8];
@@ -705,14 +706,14 @@ mod tests {
         // 4x 16th
         let s = Duration::Simple(NoteValue::Sixteenth);
         for i in 0..4 {
-            m.set_beat(i, Beat::note(s)).unwrap();
+            m.first_voice_mut().set_beat(i, Beat::note(s)).unwrap();
         }
 
         // 3x Quarter Triplets
         let tq = Duration::Tuplet(TupletSpec { n: 3, m: 2, base: NoteValue::Quarter });
-        m.set_beat(4, Beat::note(tq)).unwrap();
-        m.set_beat(5, Beat::note(tq)).unwrap();
-        m.set_beat(6, Beat::note(tq)).unwrap();
+        m.first_voice_mut().set_beat(4, Beat::note(tq)).unwrap();
+        m.first_voice_mut().set_beat(5, Beat::note(tq)).unwrap();
+        m.first_voice_mut().set_beat(6, Beat::note(tq)).unwrap();
 
         let opts = LayoutOpts {
             rect: Rect::from_min_max(Pos2::ZERO, Pos2::new(50.0, 100.0)),
@@ -730,7 +731,7 @@ mod tests {
             staff: StaffKind::Line,
         };
 
-        let layout = build_measure_layout(&m, &opts);
+        let layout = build_measure_layout(m.first_voice(), &opts);
 
         let n4 = &layout.notes[4];
         let n5 = &layout.notes[5];
@@ -768,7 +769,10 @@ mod tests {
             staff: StaffKind::Line,
         };
         let down = LayoutOpts { stem_down: true, ..up.clone() };
-        let (a, b) = (build_measure_layout(&m, &up), build_measure_layout(&m, &down));
+        let (a, b) = (
+            build_measure_layout(m.first_voice(), &up),
+            build_measure_layout(m.first_voice(), &down),
+        );
         let cy = up.y_center();
         for (u, d) in a.notes.iter().zip(&b.notes) {
             // Same heads, the stem on the other side and below the line.
@@ -788,7 +792,10 @@ mod tests {
         }
         // A rest at the end of the triplet gives it a bracket.
         let r = parse_score("4/4 t8 t8 r:t8 q h").unwrap().measures.remove(0);
-        let (ra, rb) = (build_measure_layout(&r, &up), build_measure_layout(&r, &down));
+        let (ra, rb) = (
+            build_measure_layout(r.first_voice(), &up),
+            build_measure_layout(r.first_voice(), &down),
+        );
         let (ub, db) = (&ra.tuplets[0].bracket, &rb.tuplets[0].bracket);
         assert!(!ub.is_empty());
         assert_eq!(ub.len(), db.len());
@@ -824,7 +831,7 @@ mod tests {
         let down = LayoutOpts { stem_down: true, ..up.clone() };
         let m = parse_score("4/4 t8 t8 t8 t16 t16 t16 t16 t16 t16 h").unwrap().measures.remove(0);
         for opts in [&up, &down] {
-            let l = build_measure_layout(&m, opts);
+            let l = build_measure_layout(m.first_voice(), opts);
             assert_eq!(l.tuplets.len(), 3);
             for (t, mid) in l.tuplets.iter().zip([1, 4, 7]) {
                 let stem = l.notes[mid].stem.unwrap().p1.x;
@@ -858,7 +865,10 @@ mod tests {
         // One digit and two, each with a rest for a bracket.
         let ten = "4/4 10:8e 10:8e 10:8e 10:8e 10:8e 10:8e 10:8e 10:8e 10:8e r:10:8e";
         for s in ["4/4 t4 r:t4 t4 h", ten] {
-            let l = build_measure_layout(&parse_score(s).unwrap().measures.remove(0), &opts);
+            let l = build_measure_layout(
+                parse_score(s).unwrap().measures.remove(0).first_voice(),
+                &opts,
+            );
             let t = &l.tuplets[0];
             let number = ink_of(&t.number).unwrap();
             let (left, right) = (t.bracket[0].p2.x, t.bracket[1].p1.x);
@@ -890,7 +900,7 @@ mod tests {
         let gap = c::TUPLET_INK_GAP_SS * ss;
         let tip = up.stem_tip_y(0);
         let lay_out = |s: &str, opts: &LayoutOpts| {
-            build_measure_layout(&parse_score(s).unwrap().measures.remove(0), opts)
+            build_measure_layout(parse_score(s).unwrap().measures.remove(0).first_voice(), opts)
         };
         let line_of = |l: &MeasureLayout| l.tuplets[0].bracket[0].p1.y;
         let number_of = |l: &MeasureLayout| ink_of(&l.tuplets[0].number).unwrap();
@@ -950,18 +960,20 @@ mod tests {
             staff: StaffKind::Line,
         };
         let cy = down.y_center();
-        let quarter_rest = &build_measure_layout(&m, &down).notes[1];
+        let quarter_rest = &build_measure_layout(m.first_voice(), &down).notes[1];
         assert_eq!(quarter_rest.staff_pos, -2);
         assert!((quarter_rest.center.y - cy - down.staff_space()).abs() < 0.01);
         assert_eq!(quarter_rest.center.y, down.y_of(-2));
-        assert_eq!(build_measure_layout(&h, &down).notes[1].center.y, cy);
+        assert_eq!(build_measure_layout(h.first_voice(), &down).notes[1].center.y, cy);
 
         // A dotted rest's dot drops with it.
         let dotted = parse_score("4/4 h r:q. e").unwrap().measures.remove(0);
-        let up_rest =
-            &build_measure_layout(&dotted, &LayoutOpts { stem_down: false, ..down.clone() }).notes
-                [1];
-        let down_rest = &build_measure_layout(&dotted, &down).notes[1];
+        let up_rest = &build_measure_layout(
+            dotted.first_voice(),
+            &LayoutOpts { stem_down: false, ..down.clone() },
+        )
+        .notes[1];
+        let down_rest = &build_measure_layout(dotted.first_voice(), &down).notes[1];
         let dot_dy = |n: &NoteLayout| n.dots[0].origin.y - n.center.y;
         assert_eq!(down_rest.dots.len(), 1);
         assert!((dot_dy(down_rest) - dot_dy(up_rest)).abs() < 0.01);
@@ -989,7 +1001,10 @@ mod tests {
         let down = LayoutOpts { stem_down: true, ..up.clone() };
         let cy = up.y_center();
         let rests = parse_score("4/4 >q r:q r:e r:s r:th r:th r:e. s").unwrap().measures.remove(0);
-        let (a, b) = (build_measure_layout(&rests, &up), build_measure_layout(&rests, &down));
+        let (a, b) = (
+            build_measure_layout(rests.first_voice(), &up),
+            build_measure_layout(rests.first_voice(), &down),
+        );
         // Heads sit on the line or hang from it.
         assert_eq!((a.notes[0].staff_pos, b.notes[0].staff_pos), (1, -1));
         assert!((a.notes[0].head.ink().bottom() - cy).abs() < 0.01);
@@ -1009,8 +1024,8 @@ mod tests {
         // lower voice.
         let half = parse_score("4/4 r:h q q").unwrap().measures.remove(0);
         let (upper_half, lower_half) = (
-            &build_measure_layout(&half, &up).notes[0],
-            &build_measure_layout(&half, &down).notes[0],
+            &build_measure_layout(half.first_voice(), &up).notes[0],
+            &build_measure_layout(half.first_voice(), &down).notes[0],
         );
         assert!(upper_half.ledgers.is_empty());
         assert!((upper_half.head.ink().bottom() - cy).abs() < 0.1);
@@ -1022,7 +1037,10 @@ mod tests {
 
         // Dots and a soft note's parentheses stay off the line too.
         let dotted = parse_score("3/4 (q.) (q.)").unwrap().measures.remove(0);
-        let (a, b) = (build_measure_layout(&dotted, &up), build_measure_layout(&dotted, &down));
+        let (a, b) = (
+            build_measure_layout(dotted.first_voice(), &up),
+            build_measure_layout(dotted.first_voice(), &down),
+        );
         for (u, d) in a.notes.iter().zip(&b.notes) {
             let ink =
                 |n: &NoteLayout| ink_of(&[n.dots.clone(), n.parens.clone()].concat()).unwrap();
@@ -1035,7 +1053,12 @@ mod tests {
 
         // Without a shared line nothing moves.
         let alone = LayoutOpts { shared_line: false, ..up.clone() };
-        assert!(build_measure_layout(&rests, &alone).notes.iter().all(|n| n.staff_pos == 0));
+        assert!(
+            build_measure_layout(rests.first_voice(), &alone)
+                .notes
+                .iter()
+                .all(|n| n.staff_pos == 0)
+        );
     }
 
     #[test]
@@ -1061,7 +1084,10 @@ mod tests {
         let down = LayoutOpts { stem_down: true, ..up.clone() };
         let dx =
             |l: &MeasureLayout, i: usize| l.notes[i].dots[0].ink().center().x - l.notes[i].center.x;
-        let (u, d) = (build_measure_layout(&m, &up), build_measure_layout(&m, &down));
+        let (u, d) = (
+            build_measure_layout(m.first_voice(), &up),
+            build_measure_layout(m.first_voice(), &down),
+        );
         let plain = c::DOT_FIRST_DX_NO_FLAG_EM * em;
         // Beamed: right after the head, or after the parentheses.
         assert!((dx(&u, 0) - plain).abs() < 0.01);
@@ -1095,10 +1121,10 @@ mod tests {
             shared_line: false,
             staff: StaffKind::Line,
         };
-        let plan = crate::render_plan::plan_measure(&m);
-        let width = min_note_area_width(&m, &plan, &opts);
+        let plan = crate::render_plan::plan_measure(m.first_voice());
+        let width = min_note_area_width(m.first_voice(), &plan, &opts);
         opts.rect = Rect::from_min_max(Pos2::ZERO, Pos2::new(width, 100.0));
-        let layout = build_measure_layout(&m, &opts);
+        let layout = build_measure_layout(m.first_voice(), &opts);
         let xs: Vec<f32> = layout.notes.iter().map(|n| n.center.x).collect();
         // Equal triplets, equally spaced, even where the measure is tight.
         let steps: Vec<f32> = xs.windows(2).map(|p| p[1] - p[0]).collect();
@@ -1127,8 +1153,8 @@ mod tests {
             shared_line: false,
             staff: StaffKind::Line,
         };
-        let plan = crate::render_plan::plan_measure_with(&m, true);
-        let layout = build_measure_layout_with_plan(&m, &plan, &opts);
+        let plan = crate::render_plan::plan_measure_with(m.first_voice(), true);
+        let layout = build_measure_layout_with_plan(m.first_voice(), &plan, &opts);
         let [note, rest, _, _] = &layout.notes[..] else { panic!("four beats") };
         assert!(rest.stemlet && !note.stemlet);
         // No rest glyph, and a stem from the beam, shorter than the note's.

@@ -179,11 +179,11 @@ mod tests {
         // The same beats under another meter of the same length.
         let mut other_meter = score.clone();
         other_meter.measures[1].set_time_signature(TimeSignature::new(2, 2)).unwrap();
-        assert_eq!(other_meter.measures[1].beats(), four.beats());
+        assert_eq!(other_meter.measures[1].first_voice().beats(), four.first_voice().beats());
         assert!(!score.same_beats(&other_meter));
 
         let mut other_beat = score.clone();
-        other_beat.measures[1].toggle_beat_kind(0);
+        other_beat.measures[1].first_voice_mut().toggle_beat_kind(0);
         assert!(!score.same_beats(&other_beat));
 
         assert!(!score.same_beats(&Score::single(four)));

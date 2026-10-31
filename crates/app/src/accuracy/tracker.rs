@@ -161,7 +161,7 @@ mod tests {
                 .map(|ts| {
                     let mut m = Measure::new(*ts);
                     for i in 0..(ts.beats as usize) {
-                        m.set_beat(i, Beat::note(q())).unwrap();
+                        m.first_voice_mut().set_beat(i, Beat::note(q())).unwrap();
                     }
                     m
                 })
@@ -209,7 +209,7 @@ mod tests {
         // beat 1 = rest (default Rest in Measure::new). After set_beat(0, q),
         // beat 1 stays Rest because set_beat fills.
         let mut m = Measure::new(TimeSignature::TWO_FOUR);
-        m.set_beat(0, Beat::note(q())).unwrap();
+        m.first_voice_mut().set_beat(0, Beat::note(q())).unwrap();
         let score = Score::single(m);
         let timing = ScoreTiming::from_score(&score, 120);
         let mut tracker = AccuracyTracker::new();
@@ -272,7 +272,7 @@ mod tests {
         use grooph_measure::swing::{Swing, SwingUnit};
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
         for i in 0..8 {
-            m.set_beat(i, Beat::note(e())).unwrap();
+            m.first_voice_mut().set_beat(i, Beat::note(e())).unwrap();
         }
         let score = Score::single(m);
         let swing = Swing { unit: SwingUnit::Eighths, percent: 75 };
@@ -390,7 +390,7 @@ mod tests {
         // 16ths at 160 BPM are ~94 ms apart; a 40 ms late hit is no longer "good".
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
         for i in 0..16 {
-            m.set_beat(i, Beat::note(s())).unwrap();
+            m.first_voice_mut().set_beat(i, Beat::note(s())).unwrap();
         }
         let score = Score::single(m);
         let timing = ScoreTiming::from_score(&score, 160);

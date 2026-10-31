@@ -371,10 +371,10 @@ fn build_measure(
 ) -> Result<Measure, NotationError> {
     let mut m = Measure::new(ts);
     for (idx, (token, beat)) in tokens.iter().enumerate() {
-        if idx >= m.beats().len() {
+        if idx >= m.first_voice().beats().len() {
             return Err(NotationError::TooLong { at, token: token.to_string() });
         }
-        m.set_beat(idx, *beat).map_err(|err| match err {
+        m.first_voice_mut().set_beat(idx, *beat).map_err(|err| match err {
             MeasureError::Overflow { .. } => {
                 NotationError::TooLong { at, token: token.to_string() }
             }
@@ -383,10 +383,10 @@ fn build_measure(
             }
         })?;
         // `set_beat` keeps the accent of the slot it overwrites; play ours.
-        m.set_heads(idx, *beat.heads());
+        m.first_voice_mut().set_heads(idx, *beat.heads());
     }
-    if m.beats().len() > tokens.len() {
-        let missing: u32 = m.beats()[tokens.len()..]
+    if m.first_voice().beats().len() > tokens.len() {
+        let missing: u32 = m.first_voice().beats()[tokens.len()..]
             .iter()
             .map(|b| DEFAULT_GRID.ticks_of(&b.duration).unwrap_or(0))
             .sum();
@@ -538,14 +538,14 @@ mod tests {
     }
 
     fn beats_of(score: &Score, measure: usize) -> Vec<Beat> {
-        score.measures[measure].beats().clone()
+        score.measures[measure].first_voice().beats().clone()
     }
 
     /// Which beats share a tuplet group, independent of the group ids: each
     /// beat maps to the index of the first beat in its group (`None` outside
     /// tuplets).
     fn group_partition(m: &Measure) -> Vec<Option<usize>> {
-        let beats = m.beats();
+        let beats = m.first_voice().beats();
         beats
             .iter()
             .map(|b| {
@@ -743,7 +743,7 @@ mod tests {
                 let parsed = parse_score(&text).unwrap();
                 assert_eq!(score.len(), parsed.len(), "{text}");
                 for (a, b) in score.measures.iter().zip(&parsed.measures) {
-                    assert_eq!(a.beats(), b.beats(), "{text}");
+                    assert_eq!(a.first_voice().beats(), b.first_voice().beats(), "{text}");
                     assert_eq!(a.time_signature(), b.time_signature());
                     // `Beat`'s `PartialEq` ignores tuplet groups; compare them too.
                     assert_eq!(group_partition(a), group_partition(b), "{text}");

@@ -20,7 +20,7 @@ pub fn draw_measure(
     playback_tick: Option<f64>,
     count_config: Option<&CountConfig>,
 ) -> MeasureLayout {
-    let measure_layout = build_measure_layout(measure, opts);
+    let measure_layout = build_measure_layout(measure.first_voice(), opts);
     render_measure_at(
         ui,
         measure,
@@ -632,9 +632,9 @@ mod tests {
         let opts = opts_for(Rect::from_min_size(Pos2::ZERO, egui::vec2(400.0, 100.0)));
         let mut measure = Measure::new(TimeSignature::FOUR_FOUR);
         for i in 0..4 {
-            measure.set_beat(i, Beat::note(q())).unwrap();
+            measure.first_voice_mut().set_beat(i, Beat::note(q())).unwrap();
         }
-        let layout = build_measure_layout(&measure, &opts);
+        let layout = build_measure_layout(measure.first_voice(), &opts);
         let ctx = egui::Context::default();
         let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
             draw_notes(ui.painter(), &layout, base, Some((1, lit)), &opts);
@@ -674,7 +674,7 @@ mod tests {
         let lit = Color32::RED;
         let opts = opts_for(Rect::from_min_size(Pos2::ZERO, egui::vec2(600.0, 100.0)));
         let measure = parse_score("5/4 q. e >e e t8 t8 t8 r:q").unwrap().measures.remove(0);
-        let layout = build_measure_layout(&measure, &opts);
+        let layout = build_measure_layout(measure.first_voice(), &opts);
         assert!(!layout.beams.is_empty() && !layout.tuplets.is_empty());
         let nearest = |x: f32| {
             (0..layout.notes.len())
@@ -741,7 +741,7 @@ mod tests {
         let eighths = parse_score("4/4 e e e e e e e e").unwrap().measures.remove(0);
         let tens = parse_score("4/4 qt8 qt8 qt8 qt8 qt8 qt8 qt8 qt8 qt8 qt8").unwrap();
         let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(400.0, 100.0));
-        let layout = build_measure_layout(&eighths, &opts_for(rect));
+        let layout = build_measure_layout(eighths.first_voice(), &opts_for(rect));
         let bar_ticks = DEFAULT_GRID.ticks_per_measure(&TimeSignature::FOUR_FOUR) as f64;
         let tick = 0.85 * bar_ticks;
         assert_eq!(
@@ -755,7 +755,7 @@ mod tests {
         use grooph_measure::notation::parse_score;
         let m = parse_score("4/4 r:e e q h").unwrap().measures.remove(0);
         let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(400.0, 100.0));
-        let layout = build_measure_layout(&m, &opts_for(rect));
+        let layout = build_measure_layout(m.first_voice(), &opts_for(rect));
         let quarter = DEFAULT_GRID.ticks_of(&q()).unwrap() as f64;
         let voices = std::slice::from_ref(&layout);
         let x = |beat: f64| beat_anchor_x(&m, voices, rect, beat * quarter).unwrap();
@@ -775,12 +775,12 @@ mod tests {
         // is halfway between the rests; the trailing `&` halfway between the
         // last rest and the barline, not on it (#13).
         let mut m = Measure::new(TimeSignature::TWO_FOUR);
-        m.set_beat(0, Beat::rest(q())).unwrap();
-        m.set_beat(1, Beat::rest(q())).unwrap();
+        m.first_voice_mut().set_beat(0, Beat::rest(q())).unwrap();
+        m.first_voice_mut().set_beat(1, Beat::rest(q())).unwrap();
 
         let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(400.0, 100.0));
         let opts = opts_for(rect);
-        let layout = build_measure_layout(&m, &opts);
+        let layout = build_measure_layout(m.first_voice(), &opts);
 
         let xs = label_xs(&m, &layout, rect, &ands_config());
         assert_eq!(xs.len(), 4, "expected 1 & 2 &");
@@ -798,15 +798,15 @@ mod tests {
         // so every sixteenth label is the same distance from the next, also
         // after the first quarter and in the last beat before the barline.
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
-        m.set_beat(0, Beat::note(q())).unwrap();
-        m.set_beat(1, Beat::note(e())).unwrap();
-        m.set_beat(2, Beat::note(e())).unwrap();
-        m.set_beat(3, Beat::note(q())).unwrap();
-        m.set_beat(4, Beat::note(q())).unwrap();
+        m.first_voice_mut().set_beat(0, Beat::note(q())).unwrap();
+        m.first_voice_mut().set_beat(1, Beat::note(e())).unwrap();
+        m.first_voice_mut().set_beat(2, Beat::note(e())).unwrap();
+        m.first_voice_mut().set_beat(3, Beat::note(q())).unwrap();
+        m.first_voice_mut().set_beat(4, Beat::note(q())).unwrap();
 
         let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(400.0, 100.0));
         let opts = opts_for(rect);
-        let layout = build_measure_layout(&m, &opts);
+        let layout = build_measure_layout(m.first_voice(), &opts);
 
         let xs = label_xs(&m, &layout, rect, &counting(Subdivision::Quarters));
         assert_eq!(xs.len(), 16);
@@ -823,12 +823,12 @@ mod tests {
         // formula reproduces the note centers — labels align with notes.
         let mut m = Measure::new(TimeSignature::TWO_FOUR);
         for i in 0..4 {
-            m.set_beat(i, Beat::note(e())).unwrap();
+            m.first_voice_mut().set_beat(i, Beat::note(e())).unwrap();
         }
 
         let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(400.0, 100.0));
         let opts = opts_for(rect);
-        let layout = build_measure_layout(&m, &opts);
+        let layout = build_measure_layout(m.first_voice(), &opts);
 
         let xs = label_xs(&m, &layout, rect, &ands_config());
         assert_eq!(xs.len(), 4);
@@ -847,12 +847,12 @@ mod tests {
         // dotted quarter and sits over the first rest of its beat.
         let mut m = Measure::new(TimeSignature::SIX_EIGHT);
         for i in 0..6 {
-            m.set_beat(i, Beat::rest(e())).unwrap();
+            m.first_voice_mut().set_beat(i, Beat::rest(e())).unwrap();
         }
 
         let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(400.0, 100.0));
         let opts = opts_for(rect);
-        let layout = build_measure_layout(&m, &opts);
+        let layout = build_measure_layout(m.first_voice(), &opts);
 
         let xs = label_xs(&m, &layout, rect, &counting(Subdivision::Beats));
         assert_eq!(xs.len(), 2);
@@ -870,14 +870,14 @@ mod tests {
         // `&` of beat 1).
         let mut m = Measure::new(TimeSignature::TWO_FOUR);
         for i in 0..4 {
-            m.set_beat(i, Beat::note(s())).unwrap();
+            m.first_voice_mut().set_beat(i, Beat::note(s())).unwrap();
         }
-        m.set_beat(4, Beat::note(e())).unwrap();
-        m.set_beat(5, Beat::note(e())).unwrap();
+        m.first_voice_mut().set_beat(4, Beat::note(e())).unwrap();
+        m.first_voice_mut().set_beat(5, Beat::note(e())).unwrap();
 
         let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(400.0, 100.0));
         let opts = opts_for(rect);
-        let layout = build_measure_layout(&m, &opts);
+        let layout = build_measure_layout(m.first_voice(), &opts);
 
         let xs = label_xs(&m, &layout, rect, &ands_config());
         assert_eq!(xs.len(), 4);
@@ -918,13 +918,13 @@ mod tests {
         // and interpolates between `1` and `2` — landing at the visual
         // midpoint of the quarter rest and the first 8th.
         let mut m = Measure::new(TimeSignature::TWO_FOUR);
-        m.set_beat(0, Beat::rest(q())).unwrap();
-        m.set_beat(1, Beat::note(e())).unwrap();
-        m.set_beat(2, Beat::note(e())).unwrap();
+        m.first_voice_mut().set_beat(0, Beat::rest(q())).unwrap();
+        m.first_voice_mut().set_beat(1, Beat::note(e())).unwrap();
+        m.first_voice_mut().set_beat(2, Beat::note(e())).unwrap();
 
         let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(400.0, 100.0));
         let opts = opts_for(rect);
-        let layout = build_measure_layout(&m, &opts);
+        let layout = build_measure_layout(m.first_voice(), &opts);
 
         let xs = label_xs(&m, &layout, rect, &ands_config());
         assert_eq!(xs.len(), 4);
@@ -947,12 +947,12 @@ mod tests {
         // the rests, every `&` halfway to the next rest or the barline.
         let mut m = Measure::new(TimeSignature::THREE_FOUR);
         for i in 0..3 {
-            m.set_beat(i, Beat::rest(q())).unwrap();
+            m.first_voice_mut().set_beat(i, Beat::rest(q())).unwrap();
         }
 
         let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(600.0, 100.0));
         let opts = opts_for(rect);
-        let layout = build_measure_layout(&m, &opts);
+        let layout = build_measure_layout(m.first_voice(), &opts);
 
         let xs = label_xs(&m, &layout, rect, &ands_config());
         assert_eq!(xs.len(), 6);
@@ -971,16 +971,16 @@ mod tests {
         // extrapolating the spacing of the 8ths pushed the `&` of a closing
         // quarter rest past the barline, right in front of the next `1`.
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
-        m.set_beat(0, Beat::note(e())).unwrap();
-        m.set_beat(1, Beat::note(e())).unwrap();
-        m.set_beat(2, Beat::rest(q())).unwrap();
-        m.set_beat(3, Beat::note(e())).unwrap();
-        m.set_beat(4, Beat::note(e())).unwrap();
-        m.set_beat(5, Beat::rest(q())).unwrap();
+        m.first_voice_mut().set_beat(0, Beat::note(e())).unwrap();
+        m.first_voice_mut().set_beat(1, Beat::note(e())).unwrap();
+        m.first_voice_mut().set_beat(2, Beat::rest(q())).unwrap();
+        m.first_voice_mut().set_beat(3, Beat::note(e())).unwrap();
+        m.first_voice_mut().set_beat(4, Beat::note(e())).unwrap();
+        m.first_voice_mut().set_beat(5, Beat::rest(q())).unwrap();
 
         let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(500.0, 100.0));
         let opts = opts_for(rect);
-        let mut layout = build_measure_layout(&m, &opts);
+        let mut layout = build_measure_layout(m.first_voice(), &opts);
         // Squeeze the last rest towards the barline, as the stable staff
         // layout does with a short measure tail.
         let last = layout.notes.len() - 1;
@@ -998,12 +998,14 @@ mod tests {
         // Dotted 8th + 16th: the `&` falls inside the dotted 8th. It belongs
         // between the two notes, not over the 16th (which is the "a").
         let mut m = Measure::new(TimeSignature::ONE_FOUR);
-        m.set_beat(0, Beat::note(Duration::Dotted { base: NoteValue::Eighth, dots: 1 })).unwrap();
-        m.set_beat(1, Beat::note(s())).unwrap();
+        m.first_voice_mut()
+            .set_beat(0, Beat::note(Duration::Dotted { base: NoteValue::Eighth, dots: 1 }))
+            .unwrap();
+        m.first_voice_mut().set_beat(1, Beat::note(s())).unwrap();
 
         let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(300.0, 100.0));
         let opts = opts_for(rect);
-        let layout = build_measure_layout(&m, &opts);
+        let layout = build_measure_layout(m.first_voice(), &opts);
 
         let xs = label_xs(&m, &layout, rect, &ands_config());
         assert_eq!(xs.len(), 2);
@@ -1018,12 +1020,12 @@ mod tests {
         // halfway between the 2nd and 3rd note heads; it is not the 3rd note.
         let mut m = Measure::new(TimeSignature::ONE_FOUR);
         for i in 0..3 {
-            m.set_beat(i, Beat::note(t8())).unwrap();
+            m.first_voice_mut().set_beat(i, Beat::note(t8())).unwrap();
         }
 
         let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(300.0, 100.0));
         let opts = opts_for(rect);
-        let layout = build_measure_layout(&m, &opts);
+        let layout = build_measure_layout(m.first_voice(), &opts);
 
         let xs = label_xs(&m, &layout, rect, &ands_config());
         assert_eq!(xs.len(), 2);

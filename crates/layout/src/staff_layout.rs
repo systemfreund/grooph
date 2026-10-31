@@ -580,7 +580,7 @@ mod tests {
     fn measure_with_quarters(ts: TimeSignature) -> Measure {
         let mut m = Measure::new(ts);
         for i in 0..(ts.beats as usize) {
-            m.set_beat(i, Beat::note(q())).unwrap();
+            m.first_voice_mut().set_beat(i, Beat::note(q())).unwrap();
         }
         m
     }
@@ -603,7 +603,7 @@ mod tests {
 
         let placed = &staff.systems[0].measures[0];
         let direct = crate::pixel_layout::build_measure_layout(
-            &m,
+            m.first_voice(),
             &staff_opts.measure_opts(rect, 0.0, true, false, StaffKind::Line),
         );
 
@@ -1162,8 +1162,8 @@ mod tests {
         use grooph_measure::duration::s;
         let mut m = Measure::new(ts);
         let mut idx = 0;
-        while idx < m.beats().len() {
-            m.set_beat(idx, Beat::note(s())).unwrap();
+        while idx < m.first_voice().beats().len() {
+            m.first_voice_mut().set_beat(idx, Beat::note(s())).unwrap();
             idx += 1;
         }
         m
@@ -1210,8 +1210,8 @@ mod tests {
         let dense_ts = TimeSignature::new(16, 4);
         let mut thirty_seconds = Measure::new(dense_ts);
         let mut idx = 0;
-        while idx < thirty_seconds.beats().len() {
-            thirty_seconds.set_beat(idx, Beat::note(th())).unwrap();
+        while idx < thirty_seconds.first_voice().beats().len() {
+            thirty_seconds.first_voice_mut().set_beat(idx, Beat::note(th())).unwrap();
             idx += 1;
         }
         let score = Score::new(vec![
@@ -1373,7 +1373,7 @@ mod tests {
             let placed = staff.placed(0).unwrap();
             let notes = &placed.layout().notes;
             // Every beat keeps its layout, the first one draws the rest.
-            assert_eq!(notes.len(), score.measures[0].beats().len(), "{meter}");
+            assert_eq!(notes.len(), score.measures[0].first_voice().beats().len(), "{meter}");
             assert_eq!(notes[0].head.glyph, REST_WHOLE, "{meter}");
             assert!(notes.iter().all(|n| n.dots.is_empty()), "{meter}");
             assert!(notes[1..].iter().all(|n| n.hidden && n.glyphs().next().is_none()), "{meter}");

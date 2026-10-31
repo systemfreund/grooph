@@ -170,6 +170,22 @@ impl Measure {
         &self.voices
     }
 
+    /// The measure's meter, the same in every voice.
+    pub fn time_signature(&self) -> TimeSignature {
+        self.voices[0].time_signature()
+    }
+
+    /// The first voice: the upper one, and the only one of a click bar or
+    /// a rhythm on one line.
+    pub fn first_voice(&self) -> &VoiceBar {
+        &self.voices[0]
+    }
+
+    /// The first voice, to edit; see [`Measure::first_voice`].
+    pub fn first_voice_mut(&mut self) -> &mut VoiceBar {
+        &mut self.voices[0]
+    }
+
     pub fn voice(&self, voice: VoiceIdx) -> Option<&VoiceBar> {
         self.voices.get(voice)
     }
@@ -216,21 +232,6 @@ impl Measure {
         }
         self.voices = voices;
         Ok(Modification::ChangeTimeSignature(old_ts, new_ts))
-    }
-}
-
-/// The measure reads and edits as its first voice.
-impl std::ops::Deref for Measure {
-    type Target = VoiceBar;
-
-    fn deref(&self) -> &VoiceBar {
-        &self.voices[0]
-    }
-}
-
-impl std::ops::DerefMut for Measure {
-    fn deref_mut(&mut self) -> &mut VoiceBar {
-        &mut self.voices[0]
     }
 }
 

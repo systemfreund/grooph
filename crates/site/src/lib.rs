@@ -538,7 +538,7 @@ fn swing_label(swing: Swing) -> String {
 /// are dots, rests are dashes, and every cell shows its counting syllable.
 fn measure_grid(measure: &Measure) -> String {
     let ts = measure.time_signature();
-    let beats = measure.beats();
+    let beats = measure.first_voice().beats();
     let onsets = DEFAULT_GRID.compute_onset_ticks(beats);
     let spoken: Vec<String> = beats
         .iter()

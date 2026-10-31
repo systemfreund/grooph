@@ -344,7 +344,8 @@ pub fn is_kit(score: &Score) -> bool {
     score.staff == StaffKind::Kit
         || score.measures.iter().any(|m| {
             m.voices().len() > 1
-                || m.beats()
+                || m.first_voice()
+                    .beats()
                     .iter()
                     .flat_map(|b| b.heads().iter())
                     .any(|h| h.instrument() != Instrument::Rhythm)
@@ -529,7 +530,7 @@ pub fn describe(link: &SharedLink) -> String {
 fn click_levels(click: &Measure, unit: &str) -> String {
     let ts = click.time_signature();
     let per_unit = DEFAULT_GRID.ticks_per_beat(&ts).max(1);
-    let onsets = DEFAULT_GRID.compute_onset_ticks(click.beats());
+    let onsets = DEFAULT_GRID.compute_onset_ticks(click.first_voice().beats());
     let mut levels = Vec::new();
     let named = [
         (ClickLevel::Strong, "strong"),
@@ -538,6 +539,7 @@ fn click_levels(click: &Measure, unit: &str) -> String {
     ];
     for (level, name) in named {
         let at: Vec<String> = click
+            .first_voice()
             .beats()
             .iter()
             .zip(&onsets)
@@ -759,7 +761,7 @@ mod tests {
         let link = parse("?bpm=90&r=q+e+e+r:q+%3Eq&utm_source=chat");
         assert_eq!(link.bpm, Some(90));
         let Some(LinkContent::Score(score)) = link.content else { panic!("expected a score") };
-        let beats = score.measures[0].beats();
+        let beats = score.measures[0].first_voice().beats();
         assert_eq!(beats[0], Beat::note(q()));
         assert_eq!(beats[1], Beat::note(e()));
         assert!(beats[4].accented());
@@ -883,7 +885,7 @@ mod tests {
         let link = parse("v=2&bpm=70&ts=7/8&click=>q+r:q.+(q)");
         let bar = link.click.as_ref().unwrap();
         assert_eq!(bar.time_signature(), TimeSignature::SEVEN_EIGHT);
-        assert!(bar.beats()[0].accented() && bar.beats()[2].soft());
+        assert!(bar.first_voice().beats()[0].accented() && bar.first_voice().beats()[2].soft());
         assert_eq!(link.to_url("/").unwrap(), "/?v=2&bpm=70&ts=7/8&click=%3Eq+r:q.+%28q%29");
         // The pattern belongs to the first measure of a rhythm.
         let link = parse("r=6/8+q.+q.+|+3/4+q+q+q&click=q.+>q.");
@@ -933,8 +935,8 @@ mod tests {
         let link = parse("v=2&bpm=90&ts=4/4&click=>q+r:q+q+q&counter=t4+r:t4+(t4)+r:t4+(t4)+r:t4");
         let bar = link.counter.as_ref().unwrap();
         assert_eq!(bar.time_signature(), TimeSignature::FOUR_FOUR);
-        assert_eq!(bar.beats().len(), 6);
-        assert!(bar.beats()[2].soft());
+        assert_eq!(bar.first_voice().beats().len(), 6);
+        assert!(bar.first_voice().beats()[2].soft());
         assert_eq!(
             link.to_url("/").unwrap(),
             "/?v=2&bpm=90&ts=4/4&click=%3Eq+r:q+q+q&counter=t4+r:t4+%28t4%29+r:t4+%28t4%29+r:t4"
@@ -955,7 +957,7 @@ mod tests {
         // A ratio with a common factor keeps its name.
         assert_eq!(parse("ts=4/4&poly=4:2").to_url("/").unwrap(), "/?v=2&ts=4/4&poly=4:2");
         let link = parse("ts=5/8&poly=7:5");
-        assert_eq!(link.counter.unwrap().beats().len(), 7);
+        assert_eq!(link.counter.unwrap().first_voice().beats().len(), 7);
         let err = parse_query("ts=4/4&poly=7:5").unwrap_err();
         assert!(err.contains("does not fit 4/4") && err.contains("3:2"), "{err}");
         assert!(err.contains("m one of 1, 2, 4"), "{err}");
@@ -993,14 +995,15 @@ mod tests {
 
     /// How many beats each tuplet group of `bar` holds, in order.
     fn tuplet_groups(bar: &Measure) -> Vec<usize> {
-        let ids: Vec<_> = bar.beats().iter().filter_map(|b| b.tuplet_group_id).collect();
+        let ids: Vec<_> =
+            bar.first_voice().beats().iter().filter_map(|b| b.tuplet_group_id).collect();
         ids.chunk_by(|a, b| a == b).map(<[_]>::len).collect()
     }
 
     #[test]
     fn edited_poly_clicks_are_written_out() {
         let mut link = parse("ts=4/4&poly=3:2");
-        link.counter.as_mut().unwrap().toggle_soft(1);
+        link.counter.as_mut().unwrap().first_voice_mut().toggle_soft(1);
         assert!(link.to_url("/").unwrap().contains("&counter=t4+%28t4%29+t4"));
     }
 
@@ -1032,7 +1035,7 @@ mod tests {
     fn counter_link_with_a_tuplet_of_any_ratio() {
         let link = parse("v=2&bpm=90&ts=5/8&counter=7:5e+7:5e+7:5e+7:5e+7:5e+7:5e+7:5e");
         let bar = link.counter.as_ref().unwrap();
-        assert_eq!(bar.beats().len(), 7);
+        assert_eq!(bar.first_voice().beats().len(), 7);
         assert_eq!(
             link.to_url("/").unwrap(),
             "/?v=2&bpm=90&ts=5/8&counter=7:5e+7:5e+7:5e+7:5e+7:5e+7:5e+7:5e"
@@ -1206,19 +1209,20 @@ mod tests {
             .map(|_| {
                 let mut m = Measure::new(meters[rng.below(meters.len())]);
                 let (mut idx, mut tries) = (0, 0);
-                while idx < m.beats().len() {
+                while idx < m.first_voice().beats().len() {
                     let d = durations[rng.below(durations.len())];
                     let kind = if rng.chance(0.3) { Rest } else { Note };
                     // Keep the beat there if a few tries do not fit.
-                    if m.set_beat(idx, Beat::new(d, kind)).is_err() && tries < 20 {
+                    if m.first_voice_mut().set_beat(idx, Beat::new(d, kind)).is_err() && tries < 20
+                    {
                         tries += 1;
                         continue;
                     }
                     tries = 0;
                     if kind == Note && rng.chance(0.2) {
-                        m.toggle_accent(idx);
+                        m.first_voice_mut().toggle_accent(idx);
                     } else if kind == Note && rng.chance(0.2) {
-                        m.toggle_soft(idx);
+                        m.first_voice_mut().toggle_soft(idx);
                     }
                     idx += 1;
                 }

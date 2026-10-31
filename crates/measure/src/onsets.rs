@@ -91,12 +91,12 @@ mod tests {
     #[test]
     fn one_line_onsets_are_its_beats() {
         let m = measure("4/4 q e r:e >q (q)");
-        let ticks = DEFAULT_GRID.compute_onset_ticks(m.beats());
+        let ticks = DEFAULT_GRID.compute_onset_ticks(m.first_voice().beats());
         let onsets = m.onsets();
         assert_eq!(onsets.iter().map(|o| o.tick).collect::<Vec<_>>(), ticks);
         assert_eq!(
             onsets.iter().map(|o| o.is_note).collect::<Vec<_>>(),
-            m.beats().iter().map(|b| b.is_note()).collect::<Vec<_>>()
+            m.first_voice().beats().iter().map(|b| b.is_note()).collect::<Vec<_>>()
         );
         let heads = m.head_onsets();
         assert_eq!(heads.len(), 4);

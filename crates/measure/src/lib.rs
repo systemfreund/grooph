@@ -571,7 +571,7 @@ mod tests {
     use crate::duration::{Duration, e, q, s, st8, st16, t8, t16, t32, th};
 
     fn durations_of(measure: &Measure) -> Vec<Duration> {
-        measure.beats().iter().map(|b| b.duration).collect()
+        measure.first_voice().beats().iter().map(|b| b.duration).collect()
     }
 
     impl VoiceBar {
@@ -591,21 +591,23 @@ mod tests {
     fn test_triplet_in_one_four() {
         let mut m = Measure::new(TimeSignature::ONE_FOUR);
 
-        assert!(m.set_beat(0, Beat::note(t8())).is_ok());
-        let (duration, kind) = (m.beats()[1].duration, m.beats()[1].kind());
+        assert!(m.first_voice_mut().set_beat(0, Beat::note(t8())).is_ok());
+        let (duration, kind) =
+            (m.first_voice().beats()[1].duration, m.first_voice().beats()[1].kind());
         assert_eq!(duration, t8());
         assert_eq!(kind, Rest);
-        let (duration, kind) = (m.beats()[2].duration, m.beats()[2].kind());
+        let (duration, kind) =
+            (m.first_voice().beats()[2].duration, m.first_voice().beats()[2].kind());
         assert_eq!(duration, t8());
         assert_eq!(kind, Rest);
 
-        assert!(m.set_beat(1, Beat::note(q())).is_err());
-        assert!(m.set_beat(1, Beat::note(e())).is_err());
-        assert!(m.set_beat(1, Beat::note(s())).is_err());
-        assert!(m.set_beat(1, Beat::note(th())).is_err());
+        assert!(m.first_voice_mut().set_beat(1, Beat::note(q())).is_err());
+        assert!(m.first_voice_mut().set_beat(1, Beat::note(e())).is_err());
+        assert!(m.first_voice_mut().set_beat(1, Beat::note(s())).is_err());
+        assert!(m.first_voice_mut().set_beat(1, Beat::note(th())).is_err());
 
-        assert!(m.set_beat(1, Beat::note(t8())).is_ok());
-        assert!(m.set_beat(2, Beat::rest(t8())).is_ok());
+        assert!(m.first_voice_mut().set_beat(1, Beat::note(t8())).is_ok());
+        assert!(m.first_voice_mut().set_beat(2, Beat::rest(t8())).is_ok());
     }
 
     #[test]
@@ -613,25 +615,25 @@ mod tests {
         let mut m = Measure::new(TimeSignature::TWO_FOUR);
 
         // First triplet group
-        assert!(m.set_beat(0, Beat::note(t16())).is_ok());
-        assert!(m.set_beat(1, Beat::note(t16())).is_ok());
+        assert!(m.first_voice_mut().set_beat(0, Beat::note(t16())).is_ok());
+        assert!(m.first_voice_mut().set_beat(1, Beat::note(t16())).is_ok());
         // The next triplet 1/8 overfills this tuplet group, which has only space for one triplet
         // 1/6 note left (or two triplet 1/32 subdivisions).
-        assert!(m.set_beat(2, Beat::note(t8())).is_err());
+        assert!(m.first_voice_mut().set_beat(2, Beat::note(t8())).is_err());
     }
 
     #[test]
     fn test_triplet_insertions_1() {
         let mut m = Measure::new(TimeSignature::ONE_FOUR);
 
-        assert!(m.set_beat(0, Beat::note(t16())).is_ok());
-        assert!(m.set_beat(1, Beat::note(t8())).is_ok());
+        assert!(m.first_voice_mut().set_beat(0, Beat::note(t16())).is_ok());
+        assert!(m.first_voice_mut().set_beat(1, Beat::note(t8())).is_ok());
         assert!(
-            m.set_beat(2, Beat::note(t8())).is_err(),
+            m.first_voice_mut().set_beat(2, Beat::note(t8())).is_err(),
             "can't start a new triplet 1/8 group measure has only 1/8 space left"
         );
-        assert!(m.set_beat(2, Beat::note(e())).is_ok());
-        assert_eq!(m.remaining_ticks(3), 0);
+        assert!(m.first_voice_mut().set_beat(2, Beat::note(e())).is_ok());
+        assert_eq!(m.first_voice().remaining_ticks(3), 0);
     }
 
     #[test]
@@ -639,48 +641,48 @@ mod tests {
         let mut m = Measure::new(TimeSignature::TWO_FOUR);
 
         // First triplet group
-        assert!(m.set_beat(0, Beat::note(t8())).is_ok());
-        assert!(m.set_beat(1, Beat::note(t16())).is_ok());
-        assert!(m.set_beat(2, Beat::note(t16())).is_ok());
-        assert!(m.set_beat(3, Beat::note(t8())).is_ok());
+        assert!(m.first_voice_mut().set_beat(0, Beat::note(t8())).is_ok());
+        assert!(m.first_voice_mut().set_beat(1, Beat::note(t16())).is_ok());
+        assert!(m.first_voice_mut().set_beat(2, Beat::note(t16())).is_ok());
+        assert!(m.first_voice_mut().set_beat(3, Beat::note(t8())).is_ok());
 
         // Second triplet group
-        assert!(m.set_beat(4, Beat::note(t16())).is_ok());
-        assert!(m.set_beat(5, Beat::note(t32())).is_ok());
-        assert!(m.set_beat(6, Beat::note(t32())).is_ok());
-        assert!(m.set_beat(7, Beat::note(t32())).is_ok());
-        assert!(m.set_beat(8, Beat::note(t32())).is_ok());
+        assert!(m.first_voice_mut().set_beat(4, Beat::note(t16())).is_ok());
+        assert!(m.first_voice_mut().set_beat(5, Beat::note(t32())).is_ok());
+        assert!(m.first_voice_mut().set_beat(6, Beat::note(t32())).is_ok());
+        assert!(m.first_voice_mut().set_beat(7, Beat::note(t32())).is_ok());
+        assert!(m.first_voice_mut().set_beat(8, Beat::note(t32())).is_ok());
 
-        assert!(m.set_beat(9, Beat::note(t8())).is_err());
-        assert!(m.set_beat(9, Beat::note(e())).is_ok());
-        assert_eq!(m.remaining_ticks(10), 0);
+        assert!(m.first_voice_mut().set_beat(9, Beat::note(t8())).is_err());
+        assert!(m.first_voice_mut().set_beat(9, Beat::note(e())).is_ok());
+        assert_eq!(m.first_voice().remaining_ticks(10), 0);
     }
 
     #[test]
     fn test_triplet_insertions_3() {
         let mut m = Measure::new(TimeSignature::TWO_EIGHT);
 
-        assert!(m.set_beat(0, Beat::note(t8())).is_ok());
-        assert!(m.set_beat(1, Beat::note(t16())).is_ok());
-        assert!(m.set_beat(2, Beat::note(t8())).is_ok());
+        assert!(m.first_voice_mut().set_beat(0, Beat::note(t8())).is_ok());
+        assert!(m.first_voice_mut().set_beat(1, Beat::note(t16())).is_ok());
+        assert!(m.first_voice_mut().set_beat(2, Beat::note(t8())).is_ok());
         // The next triplet 1/8 overfills this tuplet group, which has only space for one triplet
         // 1/6 note left (or two triplet 1/32 subdivisions).
-        assert!(m.set_beat(3, Beat::note(t8())).is_err());
-        assert!(m.set_beat(3, Beat::note(t32())).is_ok());
+        assert!(m.first_voice_mut().set_beat(3, Beat::note(t8())).is_err());
+        assert!(m.first_voice_mut().set_beat(3, Beat::note(t32())).is_ok());
         // Doesn't fit.
-        assert!(m.set_beat(4, Beat::note(t16())).is_err());
-        assert!(m.set_beat(4, Beat::note(t32())).is_ok());
+        assert!(m.first_voice_mut().set_beat(4, Beat::note(t16())).is_err());
+        assert!(m.first_voice_mut().set_beat(4, Beat::note(t32())).is_ok());
 
         // The next beat starts a new tuplet group, but we don't have enough space in our measure.
-        assert_eq!(m.remaining_ticks(5), 0);
+        assert_eq!(m.first_voice().remaining_ticks(5), 0);
     }
 
     #[test]
     fn test_triplet_insertions_4() {
         let mut m = Measure::new(TimeSignature::SEVEN_EIGHT);
 
-        assert!(m.set_beat(1, Beat::rest(s())).is_ok());
-        assert!(m.set_beat(1, Beat::rest(t8())).is_ok());
+        assert!(m.first_voice_mut().set_beat(1, Beat::rest(s())).is_ok());
+        assert!(m.first_voice_mut().set_beat(1, Beat::rest(t8())).is_ok());
         assert_eq!(&durations_of(&m), &[e(), t8(), t8(), t8(), e(), e(), e(), e()]);
     }
 
@@ -688,7 +690,7 @@ mod tests {
     fn test_triplet_insertions_5() {
         let mut m = Measure::new(TimeSignature::TWO_FOUR);
 
-        assert!(m.set_beat(0, Beat::note(t16())).is_ok());
+        assert!(m.first_voice_mut().set_beat(0, Beat::note(t16())).is_ok());
 
         assert_eq!(&durations_of(&m), &[t16(), t16(), t16(), e(), q()]);
     }
@@ -696,109 +698,115 @@ mod tests {
     #[test]
     fn test_triplet_insertion_in_seven_eight() {
         let mut m = Measure::new(TimeSignature::SEVEN_EIGHT);
-        assert!(m.set_beat(0, Beat::note(t8())).is_ok());
-        assert!(m.set_beat(1, Beat::note(t8())).is_ok());
-        assert!(m.set_beat(2, Beat::note(t16())).is_ok());
+        assert!(m.first_voice_mut().set_beat(0, Beat::note(t8())).is_ok());
+        assert!(m.first_voice_mut().set_beat(1, Beat::note(t8())).is_ok());
+        assert!(m.first_voice_mut().set_beat(2, Beat::note(t16())).is_ok());
     }
 
     #[test]
     fn test_triplet_split_1() {
         let mut m = Measure::new(TimeSignature::ONE_FOUR);
-        assert!(m.set_beat(0, Beat::note(t8())).is_ok());
-        assert!(m.set_beat(1, Beat::note(t8())).is_ok());
-        assert!(m.set_beat(2, Beat::note(t8())).is_ok());
+        assert!(m.first_voice_mut().set_beat(0, Beat::note(t8())).is_ok());
+        assert!(m.first_voice_mut().set_beat(1, Beat::note(t8())).is_ok());
+        assert!(m.first_voice_mut().set_beat(2, Beat::note(t8())).is_ok());
 
-        assert!(m.set_beat(1, Beat::note(t16())).is_ok());
+        assert!(m.first_voice_mut().set_beat(1, Beat::note(t16())).is_ok());
         assert_eq!(&durations_of(&m), &[t8(), t16(), t16(), t8()]);
 
-        assert!(m.set_beat(0, Beat::note(t16())).is_ok());
+        assert!(m.first_voice_mut().set_beat(0, Beat::note(t16())).is_ok());
         assert_eq!(&durations_of(&m), &[t16(), t16(), t16(), t16(), t8()]);
     }
 
     #[test]
     fn test_triplet_split_2() {
         let mut m = Measure::new(TimeSignature::ONE_FOUR);
-        assert!(m.set_beat(0, Beat::note(t8())).is_ok());
-        assert!(m.set_beat(1, Beat::note(t8())).is_ok());
-        assert!(m.set_beat(2, Beat::note(t8())).is_ok());
+        assert!(m.first_voice_mut().set_beat(0, Beat::note(t8())).is_ok());
+        assert!(m.first_voice_mut().set_beat(1, Beat::note(t8())).is_ok());
+        assert!(m.first_voice_mut().set_beat(2, Beat::note(t8())).is_ok());
 
-        assert!(m.set_beat(2, Beat::note(t32())).is_ok());
+        assert!(m.first_voice_mut().set_beat(2, Beat::note(t32())).is_ok());
         assert_eq!(&durations_of(&m), &[t8(), t8(), t32(), t32(), t16()]);
     }
 
     #[test]
     fn test_triplet_split_3() {
         let mut m = Measure::new(TimeSignature::ONE_FOUR);
-        assert!(m.set_beat(0, Beat::note(t32())).is_ok());
-        assert!(m.set_beat(1, Beat::note(t32())).is_ok());
-        assert!(m.set_beat(2, Beat::note(t32())).is_ok());
+        assert!(m.first_voice_mut().set_beat(0, Beat::note(t32())).is_ok());
+        assert!(m.first_voice_mut().set_beat(1, Beat::note(t32())).is_ok());
+        assert!(m.first_voice_mut().set_beat(2, Beat::note(t32())).is_ok());
 
-        assert!(m.set_beat(0, Beat::note(t8())).is_err());
-        assert!(m.set_beat(0, Beat::note(t16())).is_ok());
+        assert!(m.first_voice_mut().set_beat(0, Beat::note(t8())).is_err());
+        assert!(m.first_voice_mut().set_beat(0, Beat::note(t16())).is_ok());
         assert_eq!(&durations_of(&m), &[t16(), t32(), s(), e()]);
 
-        assert!(m.set_beat(2, Beat::note(t16())).is_ok());
+        assert!(m.first_voice_mut().set_beat(2, Beat::note(t16())).is_ok());
         assert_eq!(&durations_of(&m), &[t16(), t32(), t16(), t16(), t16(), s()]);
     }
 
     #[test]
     fn test_triplet_split_4() {
         let mut m = Measure::new(TimeSignature::ONE_FOUR);
-        assert!(m.set_beat(0, Beat::note(t16())).is_ok());
-        assert!(m.set_beat(1, Beat::note(t16())).is_ok());
-        assert!(m.set_beat(2, Beat::note(t16())).is_ok());
+        assert!(m.first_voice_mut().set_beat(0, Beat::note(t16())).is_ok());
+        assert!(m.first_voice_mut().set_beat(1, Beat::note(t16())).is_ok());
+        assert!(m.first_voice_mut().set_beat(2, Beat::note(t16())).is_ok());
 
         // Cannot merge last note in the group (not enough space).
-        assert!(m.set_beat(2, Beat::note(t8())).is_err());
+        assert!(m.first_voice_mut().set_beat(2, Beat::note(t8())).is_err());
 
         // Merge t16 note in the middle.
-        assert!(m.set_beat(1, Beat::note(t8())).is_ok());
+        assert!(m.first_voice_mut().set_beat(1, Beat::note(t8())).is_ok());
         assert_eq!(&durations_of(&m), &[t16(), t8(), e()]);
 
         // Subdivide t8 note in the middle.
-        assert!(m.set_beat(1, Beat::rest(t16())).is_ok());
+        assert!(m.first_voice_mut().set_beat(1, Beat::rest(t16())).is_ok());
         assert_eq!(&durations_of(&m), &[t16(), t16(), t16(), e()]);
 
         // Subdivide third t16 note.
-        assert!(m.set_beat(2, Beat::rest(t32())).is_ok());
+        assert!(m.first_voice_mut().set_beat(2, Beat::rest(t32())).is_ok());
         assert_eq!(&durations_of(&m), &[t16(), t16(), t32(), t32(), e()]);
 
         // Merge second note to t8. Must work because the remainder of the tuplet has enough space.
-        assert!(m.set_beat(1, Beat::rest(t8())).is_ok());
+        assert!(m.first_voice_mut().set_beat(1, Beat::rest(t8())).is_ok());
         assert_eq!(&durations_of(&m), &[t16(), t8(), e()]);
     }
 
     #[test]
     fn test_tuplet_split_5() {
         let mut m = Measure::new(TimeSignature::ONE_FOUR);
-        m.set_beat(0, Beat::rest(st16())).unwrap();
+        m.first_voice_mut().set_beat(0, Beat::rest(st16())).unwrap();
 
         // Merge 2nd+3rd st16 beats -> st8
-        m.set_beat(1, Beat::rest(st8())).unwrap();
+        m.first_voice_mut().set_beat(1, Beat::rest(st8())).unwrap();
         assert_eq!(&durations_of(&m), &[st16(), st8(), st16(), st16(), st16()]);
 
         // Merge 1st st16 beat -> st8
-        m.set_beat(0, Beat::rest(st8())).unwrap();
+        m.first_voice_mut().set_beat(0, Beat::rest(st8())).unwrap();
         assert_eq!(&durations_of(&m), &[st8(), st16(), st16(), st16(), st16()]);
     }
 
     #[test]
     fn test_add_eighth_triplet_to_seven_eight_measure() {
         let mut m = Measure::new(TimeSignature::SEVEN_EIGHT);
-        m.set_beat(0, Beat::note(Duration::Dotted { base: Eighth, dots: 1 })).unwrap();
-        m.set_beat(1, Beat::note(Duration::Dotted { base: Sixteenth, dots: 1 })).unwrap();
-        m.set_beat(2, Beat::note(Duration::Simple(ThirtySecond))).unwrap();
-        m.set_beat(3, Beat::note(Duration::Simple(Sixteenth))).unwrap();
-        m.set_beat(4, Beat::note(Duration::Simple(Eighth))).unwrap();
-        m.set_beat(5, Beat::note(Duration::Simple(Sixteenth))).unwrap();
-        m.set_beat(6, Beat::rest(Duration::Dotted { base: Eighth, dots: 1 })).unwrap();
+        m.first_voice_mut()
+            .set_beat(0, Beat::note(Duration::Dotted { base: Eighth, dots: 1 }))
+            .unwrap();
+        m.first_voice_mut()
+            .set_beat(1, Beat::note(Duration::Dotted { base: Sixteenth, dots: 1 }))
+            .unwrap();
+        m.first_voice_mut().set_beat(2, Beat::note(Duration::Simple(ThirtySecond))).unwrap();
+        m.first_voice_mut().set_beat(3, Beat::note(Duration::Simple(Sixteenth))).unwrap();
+        m.first_voice_mut().set_beat(4, Beat::note(Duration::Simple(Eighth))).unwrap();
+        m.first_voice_mut().set_beat(5, Beat::note(Duration::Simple(Sixteenth))).unwrap();
+        m.first_voice_mut()
+            .set_beat(6, Beat::rest(Duration::Dotted { base: Eighth, dots: 1 }))
+            .unwrap();
     }
 
     #[test]
     fn test_beat_positions_quarters() {
         // Default 4/4 measure is filled with quarter rests by fill_measure
         let m = Measure::new(TimeSignature::FOUR_FOUR);
-        let pos = m.beat_positions();
+        let pos = m.first_voice().beat_positions();
         assert_eq!(pos, vec![1.0, 2.0, 3.0, 4.0]);
     }
 
@@ -806,10 +814,10 @@ mod tests {
     fn test_beat_positions_triplet_eighths_start() {
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
         // Replace the first three beats with eighth-note triplets
-        m.set_beat(0, Beat::note(t8())).unwrap();
-        m.set_beat(1, Beat::note(t8())).unwrap();
-        m.set_beat(2, Beat::note(t8())).unwrap();
-        let pos = m.beat_positions();
+        m.first_voice_mut().set_beat(0, Beat::note(t8())).unwrap();
+        m.first_voice_mut().set_beat(1, Beat::note(t8())).unwrap();
+        m.first_voice_mut().set_beat(2, Beat::note(t8())).unwrap();
+        let pos = m.first_voice().beat_positions();
         // Expect positions: 1.0, 1 + 1/3, 1 + 2/3
         let expect = [1.0f32, 1.0 + 1.0 / 3.0, 1.0 + 2.0 / 3.0];
         let eps = 1e-4f32;
@@ -822,18 +830,18 @@ mod tests {
     fn append_autofill_to_primary_boundary_simple() {
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
         // Insert one eighth at start; autofill up to the next quarter boundary
-        assert!(m.set_beat(0, Beat::note(e())).is_ok());
+        assert!(m.first_voice_mut().set_beat(0, Beat::note(e())).is_ok());
         // Expect: e() followed by an e() rest to reach the quarter boundary
-        assert_eq!(m.beats()[1], Beat::rest(e()));
+        assert_eq!(m.first_voice().beats()[1], Beat::rest(e()));
     }
 
     #[test]
     fn append_autofill_to_primary_boundary_triplet() {
         let mut m = Measure::new(TimeSignature::ONE_FOUR);
-        assert!(m.set_beat(0, Beat::note(t8())).is_ok());
+        assert!(m.first_voice_mut().set_beat(0, Beat::note(t8())).is_ok());
         // Expect two triplet-eighth rests to complete the triplet group
-        let (d1, k1) = (m.beats()[1].duration, m.beats()[1].kind());
-        let (d2, k2) = (m.beats()[2].duration, m.beats()[2].kind());
+        let (d1, k1) = (m.first_voice().beats()[1].duration, m.first_voice().beats()[1].kind());
+        let (d2, k2) = (m.first_voice().beats()[2].duration, m.first_voice().beats()[2].kind());
         assert_eq!(d1, t8());
         assert_eq!(k1, Rest);
         assert_eq!(d2, t8());
@@ -843,15 +851,15 @@ mod tests {
     #[test]
     fn tuplet_group_0() {
         let mut m = Measure::new(TimeSignature::ONE_FOUR);
-        m.set_beat(0, Beat::rest(t8())).unwrap();
+        m.first_voice_mut().set_beat(0, Beat::rest(t8())).unwrap();
         // Subdivide 2nd t8 + 3rd t8 beat into two t16s each:
-        m.set_beat(1, Beat::rest(t16())).unwrap();
+        m.first_voice_mut().set_beat(1, Beat::rest(t16())).unwrap();
         // Merge tuplet at the 'odd' position. This yields the measure: t8 t16 t8 t16
-        m.set_beat(2, Beat::rest(t8())).unwrap();
+        m.first_voice_mut().set_beat(2, Beat::rest(t8())).unwrap();
 
         assert_eq!(&durations_of(&m), &[t8(), t16(), t8(), t16()]);
         assert_eq!(
-            m.beats().iter().enumerate().find_map(|(idx, beat)| {
+            m.first_voice().beats().iter().enumerate().find_map(|(idx, beat)| {
                 if !matches!(beat.tuplet_group_id, Some(TupletGroupId(1))) {
                     Some(idx)
                 } else {
@@ -867,34 +875,34 @@ mod tests {
         let mut m = Measure::new(TimeSignature::ONE_FOUR);
 
         // Arrange: create rests 1/16 at idx 0 and 1/8 at idx 1
-        m.set_beat(0, Beat::rest(s())).unwrap();
-        m.set_beat(1, Beat::rest(e())).unwrap();
+        m.first_voice_mut().set_beat(0, Beat::rest(s())).unwrap();
+        m.first_voice_mut().set_beat(1, Beat::rest(e())).unwrap();
 
         // Act: set a bigger note (1/8) at position 0
-        assert!(m.set_beat(0, Beat::note(e())).is_ok());
+        assert!(m.first_voice_mut().set_beat(0, Beat::note(e())).is_ok());
 
         // Assert: index 0 becomes 1/8 note, index 1 becomes 1/16 rest
-        assert_eq!(m.beats()[0], Beat::note(e()));
-        assert_eq!(m.beats()[1], Beat::rest(s()));
+        assert_eq!(m.first_voice().beats()[0], Beat::note(e()));
+        assert_eq!(m.first_voice().beats()[1], Beat::rest(s()));
     }
 
     #[test]
     fn change_note_to_dotted_does_not_turn_overwritten_beat_to_rest() {
         let mut m = Measure::new(TimeSignature::ONE_FOUR);
 
-        m.set_beat(0, Beat::note(e())).unwrap();
-        m.set_beat(1, Beat::rest(e())).unwrap();
+        m.first_voice_mut().set_beat(0, Beat::note(e())).unwrap();
+        m.first_voice_mut().set_beat(1, Beat::rest(e())).unwrap();
 
         let dotted_e = Beat::note(Duration::Dotted { base: Eighth, dots: 1 });
-        assert!(m.set_beat(0, dotted_e).is_ok());
-        assert_eq!(m.beats.to_vec(), vec![dotted_e, Beat::rest(s())]);
+        assert!(m.first_voice_mut().set_beat(0, dotted_e).is_ok());
+        assert_eq!(m.first_voice().beats.to_vec(), vec![dotted_e, Beat::rest(s())]);
 
         // Now try again where the second beat is not a rest
-        m.set_beat(0, Beat::note(e())).unwrap();
-        m.set_beat(1, Beat::note(e())).unwrap();
+        m.first_voice_mut().set_beat(0, Beat::note(e())).unwrap();
+        m.first_voice_mut().set_beat(1, Beat::note(e())).unwrap();
 
-        assert!(m.set_beat(0, dotted_e).is_ok());
-        assert_eq!(m.beats.to_vec(), vec![dotted_e, Beat::note(s())]);
+        assert!(m.first_voice_mut().set_beat(0, dotted_e).is_ok());
+        assert_eq!(m.first_voice().beats.to_vec(), vec![dotted_e, Beat::note(s())]);
     }
 
     #[test]
@@ -902,7 +910,7 @@ mod tests {
         // Arrange: 4/4 where the last quarter is a triplet of eighths
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
         // Replace the last quarter with an 1/8 triplet group (occupies exactly one quarter)
-        m.set_beat(3, Beat::note(t8())).unwrap();
+        m.first_voice_mut().set_beat(3, Beat::note(t8())).unwrap();
 
         // Act: shrink 4/4 -> 3/4
         let modif = m.set_time_signature(TimeSignature::THREE_FOUR).unwrap();
@@ -915,44 +923,50 @@ mod tests {
         }
 
         // Should consist of three quarters (rests by default)
-        assert_eq!(m.beats.to_vec(), vec![Beat::rest(q()), Beat::rest(q()), Beat::rest(q())]);
+        assert_eq!(
+            m.first_voice().beats.to_vec(),
+            vec![Beat::rest(q()), Beat::rest(q()), Beat::rest(q())]
+        );
     }
 
     #[test]
     fn change_ts_keep_and_pad_on_extend() {
         // Arrange: 3/4 with two eighths at the beginning
         let mut m = Measure::new(TimeSignature::ONE_FOUR);
-        assert!(m.set_beat(0, Beat::note(e())).is_ok());
-        assert!(m.set_beat(1, Beat::note(e())).is_ok());
+        assert!(m.first_voice_mut().set_beat(0, Beat::note(e())).is_ok());
+        assert!(m.first_voice_mut().set_beat(1, Beat::note(e())).is_ok());
 
         // Act: extend to 2/4
         let _ = m.set_time_signature(TimeSignature::TWO_FOUR).unwrap();
 
         // Assert: contents preserved; the measure is padded with one quarter rest at the end
         assert_eq!(m.time_signature(), TimeSignature::TWO_FOUR);
-        assert_eq!(m.beats().to_vec(), vec![Beat::note(e()), Beat::note(e()), Beat::rest(q())])
+        assert_eq!(
+            m.first_voice().beats().to_vec(),
+            vec![Beat::note(e()), Beat::note(e()), Beat::rest(q())]
+        )
     }
 
     #[test]
     fn change_ts_shorten_non_tuplet_whole_beats() {
         // Arrange: default 4/4 is four quarter rests
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
-        m.set_beat(1, Beat::note(q())).unwrap();
+        m.first_voice_mut().set_beat(1, Beat::note(q())).unwrap();
 
         // Act: shrink to 2/4
         let _ = m.set_time_signature(TimeSignature::TWO_FOUR).unwrap();
 
         // Assert: last two quarters removed; no splitting; exactly two quarter beats remain
         assert_eq!(m.time_signature(), TimeSignature::TWO_FOUR);
-        assert_eq!(m.beats().to_vec(), vec![Beat::rest(q()), Beat::note(q())]);
+        assert_eq!(m.first_voice().beats().to_vec(), vec![Beat::rest(q()), Beat::note(q())]);
     }
 
     #[test]
     fn change_ts_removes_entire_offset_triplet_group_on_shrink() {
         // Arrange: 4/4 where the last quarter is a triplet of eighths
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
-        m.set_beat(0, Beat::note(e())).unwrap(); // offset triplet by an 1/8
-        m.set_beat(1, Beat::note(t8())).unwrap();
+        m.first_voice_mut().set_beat(0, Beat::note(e())).unwrap(); // offset triplet by an 1/8
+        m.first_voice_mut().set_beat(1, Beat::note(t8())).unwrap();
 
         // Act: shrink 4/4 -> 1/4
         let modif = m.set_time_signature(TimeSignature::ONE_FOUR).unwrap();
@@ -964,33 +978,33 @@ mod tests {
             _ => panic!("unexpected modification variant"),
         }
 
-        assert_eq!(m.beats().to_vec(), vec![Beat::note(e()), Beat::rest(e())]);
+        assert_eq!(m.first_voice().beats().to_vec(), vec![Beat::note(e()), Beat::rest(e())]);
     }
 
     #[test]
     fn rests_keep_no_accent_or_soft_flag() {
         let mut m = Measure::new_init(TimeSignature::FOUR_FOUR, Note);
-        m.toggle_accent(0);
-        m.toggle_soft(1);
-        m.remove(0);
-        m.toggle_beat_kind(1);
-        assert_eq!(m.beats()[..2], [Beat::rest(q()), Beat::rest(q())]);
+        m.first_voice_mut().toggle_accent(0);
+        m.first_voice_mut().toggle_soft(1);
+        m.first_voice_mut().remove(0);
+        m.first_voice_mut().toggle_beat_kind(1);
+        assert_eq!(m.first_voice().beats()[..2], [Beat::rest(q()), Beat::rest(q())]);
         // Back to notes, they come back plain.
-        m.toggle_beat_kind(0);
-        m.toggle_beat_kind(1);
-        assert_eq!(m.beats()[..2], [Beat::note(q()), Beat::note(q())]);
+        m.first_voice_mut().toggle_beat_kind(0);
+        m.first_voice_mut().toggle_beat_kind(1);
+        assert_eq!(m.first_voice().beats()[..2], [Beat::note(q()), Beat::note(q())]);
     }
 
     #[test]
     fn tuplet_note_cannot_fill_its_group_alone() {
         let duplet = |base| Duration::Tuplet(TupletSpec { n: 2, m: 3, base });
         let mut m = Measure::new(TimeSignature::new(3, 8));
-        m.set_beat(0, Beat::note(duplet(Eighth))).unwrap();
-        assert_eq!(m.beats().len(), 2);
+        m.first_voice_mut().set_beat(0, Beat::note(duplet(Eighth))).unwrap();
+        assert_eq!(m.first_voice().beats().len(), 2);
         // One 2:3 quarter would take the whole group of 2:3 eighths.
-        assert!(m.set_beat(0, Beat::note(duplet(Quarter))).is_err());
-        assert_eq!(m.beats().len(), 2);
-        assert!(m.tuplet_group_at(0).is_some());
+        assert!(m.first_voice_mut().set_beat(0, Beat::note(duplet(Quarter))).is_err());
+        assert_eq!(m.first_voice().beats().len(), 2);
+        assert!(m.first_voice().tuplet_group_at(0).is_some());
     }
 
     fn read(text: &str) -> Result<Measure, String> {
@@ -1027,7 +1041,7 @@ mod tests {
         let m: Measure = ron::from_str(old).unwrap();
         assert_eq!(m.voices().len(), 1);
         assert_eq!(format!("{m:?}"), format!("{:?}", parse("1/4 t8 r:t8 r:t8")));
-        assert!(m.tuplet_group_at(0).is_some());
+        assert!(m.first_voice().tuplet_group_at(0).is_some());
         // Saved again, it has its voices.
         let again: Measure = ron::from_str(&ron::to_string(&m).unwrap()).unwrap();
         assert!(crate::click::same_bar(&again, &m));
@@ -1041,7 +1055,7 @@ mod tests {
         assert_eq!(m.voices().len(), 2);
         assert_eq!(format!("{m:?}"), "1/4 1/4 ; 1/8[3:2] 1/8[3:2] 1/8[3:2] (1/4)");
         // Editing the measure edits its first voice.
-        m.toggle_beat_kind(0);
+        m.first_voice_mut().toggle_beat_kind(0);
         assert!(m.voice(0).unwrap().beats()[0].is_rest());
         assert!(m.voice(1).unwrap().beats()[0].is_note());
         m.voice_mut(1).unwrap().set_beat(3, Beat::note(q())).unwrap();
@@ -1124,17 +1138,17 @@ mod tests {
         {
             let mut m = Measure::new(ts);
             for _ in 0..2000 {
-                let idx = rng.below(m.beats().len());
+                let idx = rng.below(m.first_voice().beats().len());
                 match rng.below(4) {
                     0 => {
-                        m.dissolve_tuplet_group(idx);
+                        m.first_voice_mut().dissolve_tuplet_group(idx);
                     }
                     1 => {
-                        m.toggle_beat_kind(idx);
+                        m.first_voice_mut().toggle_beat_kind(idx);
                     }
                     _ => {
                         let d = COMMON_DURATIONS[rng.below(COMMON_DURATIONS.len())];
-                        let _ = m.set_beat(idx, Beat::note(d));
+                        let _ = m.first_voice_mut().set_beat(idx, Beat::note(d));
                     }
                 }
                 assert!(round_trips(&m));
@@ -1145,7 +1159,7 @@ mod tests {
     #[test]
     fn deserializing_rejects_broken_measures() {
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
-        m.set_beat(1, Beat::note(t8())).unwrap();
+        m.first_voice_mut().set_beat(1, Beat::note(t8())).unwrap();
         let saved = ron::to_string(&m).unwrap();
         assert!(read(&saved).is_ok());
         let broken = |from: &str, to: &str| {
@@ -1180,15 +1194,18 @@ mod tests {
     #[test]
     fn deserializing_never_hands_out_a_saved_tuplet_id_again() {
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
-        m.set_beat(0, Beat::note(t8())).unwrap();
+        m.first_voice_mut().set_beat(0, Beat::note(t8())).unwrap();
         let saved = ron::to_string(&m).unwrap();
         assert!(saved.contains("\"next_tuplet_id\":2"), "{saved}");
         let saved = saved.replace("\"next_tuplet_id\":2", "\"next_tuplet_id\":1");
         let mut back = read(&saved).unwrap();
-        back.set_beat(3, Beat::note(t8())).unwrap();
-        let first = back.beats()[0].tuplet_group_id.unwrap();
-        let second = back.beats()[3].tuplet_group_id.unwrap();
+        back.first_voice_mut().set_beat(3, Beat::note(t8())).unwrap();
+        let first = back.first_voice().beats()[0].tuplet_group_id.unwrap();
+        let second = back.first_voice().beats()[3].tuplet_group_id.unwrap();
         assert_ne!(first, second);
-        assert!(back.tuplets().get(first).is_some() && back.tuplets().get(second).is_some());
+        assert!(
+            back.first_voice().tuplets().get(first).is_some()
+                && back.first_voice().tuplets().get(second).is_some()
+        );
     }
 }

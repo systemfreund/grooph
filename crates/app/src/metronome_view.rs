@@ -164,7 +164,7 @@ fn thickness(level: ClickLevel) -> f32 {
 fn beat_spans(bar: &Measure) -> Vec<(f32, f32)> {
     let ts = bar.time_signature();
     let total = DEFAULT_GRID.ticks_per_measure(&ts).max(1) as f32;
-    let onsets = DEFAULT_GRID.compute_onset_ticks(bar.beats());
+    let onsets = DEFAULT_GRID.compute_onset_ticks(bar.first_voice().beats());
     let mut ends: Vec<f32> = onsets.iter().skip(1).map(|&t| t as f32 / total).collect();
     ends.push(1.0);
     onsets.iter().zip(ends).map(|(&start, end)| (start as f32 / total, end)).collect()
@@ -281,13 +281,13 @@ fn build_click_fills(ts: TimeSignature) -> Vec<ClickFill> {
 fn tile_of(bar: &Measure, units: u8) -> Option<Measure> {
     let ts = bar.time_signature();
     let end = u32::from(units) * DEFAULT_GRID.ticks_per_beat(&ts);
-    let onsets = DEFAULT_GRID.compute_onset_ticks(bar.beats());
+    let onsets = DEFAULT_GRID.compute_onset_ticks(bar.first_voice().beats());
     let mut tile = Measure::new(TimeSignature::new(units, ts.beat_unit));
-    for (idx, (b, &onset)) in bar.beats().iter().zip(&onsets).enumerate() {
+    for (idx, (b, &onset)) in bar.first_voice().beats().iter().zip(&onsets).enumerate() {
         if onset >= end {
             break;
         }
-        tile.set_beat(idx, Beat::new(b.duration, b.kind())).ok()?;
+        tile.first_voice_mut().set_beat(idx, Beat::new(b.duration, b.kind())).ok()?;
     }
     Some(tile)
 }
@@ -409,7 +409,7 @@ impl Grooph {
         let cfg = &mut self.playback_ctl.audio_cfg;
         match editor.metronome.voice {
             MetronomeVoice::Click => {
-                if cfg.click.for_meter(ts).beats() != bar.beats() {
+                if cfg.click.for_meter(ts).first_voice().beats() != bar.first_voice().beats() {
                     cfg.click.set(bar.clone());
                 }
             }
@@ -638,7 +638,7 @@ impl Grooph {
         self.with_undo_snapshot(|app| {
             let bar = &mut app.editor.score.measures[0];
             let level = click_level(bar, idx).next();
-            bar.set_click_level(idx, level);
+            bar.first_voice_mut().set_click_level(idx, level);
             app.editor.cursor = Cursor::at(0, idx);
             true
         });
@@ -650,10 +650,10 @@ impl Grooph {
         self.select_voice(MetronomeVoice::Click);
         self.with_undo_snapshot(|app| {
             let bar = &mut app.editor.score.measures[0];
-            let Some(level) = bar.beats().get(idx).map(ClickLevel::of) else {
+            let Some(level) = bar.first_voice().beats().get(idx).map(ClickLevel::of) else {
                 return false;
             };
-            bar.set_click_level(idx, level.next());
+            bar.first_voice_mut().set_click_level(idx, level.next());
             app.editor.cursor = Cursor::at(0, idx);
             true
         });
@@ -786,7 +786,8 @@ impl Grooph {
         });
         let marked = marked_segment(hovered, self.editor.metronome.staff_hover, &counter_spans);
 
-        for (idx, (&(start, end), beat)) in spans.iter().zip(bar.beats()).enumerate() {
+        for (idx, (&(start, end), beat)) in spans.iter().zip(bar.first_voice().beats()).enumerate()
+        {
             let color = if current == Some(idx) && !muted { lit } else { base };
             let segment = Segment { start, end, level: ClickLevel::of(beat), color };
             segment.paint(painter, center, radius, radius);
@@ -1266,11 +1267,13 @@ mod tests {
             })
             .collect();
         // Eighths, sixteenths, sixteenth triplets: one eighth's worth.
-        let counts: Vec<_> = tiles[..3].iter().map(|t| t.beats().len()).collect();
+        let counts: Vec<_> = tiles[..3].iter().map(|t| t.first_voice().beats().len()).collect();
         assert_eq!(counts, [1, 2, 3]);
         for tile in &tiles {
             assert_eq!(tile.time_signature(), TimeSignature::new(1, 8));
-            assert!(tile.beats().iter().all(|b| ClickLevel::of(b) == ClickLevel::Medium));
+            assert!(
+                tile.first_voice().beats().iter().all(|b| ClickLevel::of(b) == ClickLevel::Medium)
+            );
         }
         for ts in crate::pickers::all_time_signatures() {
             assert!(click_fills(ts).iter().all(|f| f.look().is_some()), "{ts}");
@@ -1284,7 +1287,7 @@ mod tests {
         let ts = TimeSignature::SEVEN_EIGHT;
         assert!(same_bar(&meter_click_bar(ts), &bar("7/8 >e (e) e (e) (e) e (e)")));
         let ts: TimeSignature = "5/16".parse().unwrap();
-        assert_eq!(meter_click_bar(ts).beats().len(), 5);
+        assert_eq!(meter_click_bar(ts).first_voice().beats().len(), 5);
         // Its name in the Subdivision picker.
         let fills = click_fills(TimeSignature::SEVEN_EIGHT);
         let name =
@@ -1296,7 +1299,7 @@ mod tests {
     fn counter_segments_span_a_click_and_its_rests() {
         let ts = TimeSignature::THREE_FOUR;
         let mut bar = counter_bar(ts, Ratio { n: 5, span: 3 }).unwrap();
-        bar.set_click_level(3, ClickLevel::Off);
+        bar.first_voice_mut().set_click_level(3, ClickLevel::Off);
         let spans = counter_spans(&bar);
         // Five clicks of a fifth of the bar each, every one a sixteenth
         // quintuplet and two rests.
@@ -1453,7 +1456,7 @@ mod tests {
 
         // Every tap moves the note's click on, also two in a row.
         let (_, idx, pos) = notes[2];
-        let level = |app: &Grooph| ClickLevel::of(&app.click_bar().beats()[idx]);
+        let level = |app: &Grooph| ClickLevel::of(&app.click_bar().first_voice().beats()[idx]);
         let before = level(&app);
         tap(&mut app, &ctx, pos);
         assert_eq!(level(&app), before.next());
@@ -1470,16 +1473,16 @@ mod tests {
             let mut app = metronome_on(&ctx, meter);
             let row = staff_row(&mut app, &ctx, MetronomeVoice::Click);
             let mut silent = app.click_bar();
-            let clicks = silent.beats().len();
+            let clicks = silent.first_voice().beats().len();
             for i in 0..clicks {
-                silent.set_click_level(i, ClickLevel::Off);
+                silent.first_voice_mut().set_click_level(i, ClickLevel::Off);
             }
             app.replace_click_bar(silent);
             let notes = staff_notes(&mut app, &ctx, row);
             assert_eq!(indices(&notes), (0..clicks).collect::<Vec<_>>(), "{meter:?}: {notes:?}");
             let last = clicks - 1;
             tap(&mut app, &ctx, notes[last].2);
-            let level = ClickLevel::of(&app.click_bar().beats()[last]);
+            let level = ClickLevel::of(&app.click_bar().first_voice().beats()[last]);
             assert_eq!(level, ClickLevel::Off.next(), "{meter:?}");
         }
     }
@@ -1615,7 +1618,7 @@ mod tests {
         assert_eq!(app.edited_voice(), MetronomeVoice::Counter);
         // The editor holds the counter bar; an edit goes to the counter.
         app.with_undo_snapshot(|app| {
-            app.editor.score.measures[0].set_click_level(2, ClickLevel::Strong);
+            app.editor.score.measures[0].first_voice_mut().set_click_level(2, ClickLevel::Strong);
             true
         });
         app.sync_click_bar();
@@ -1761,6 +1764,6 @@ mod tests {
     #[test]
     fn the_metronome_plays_one_silent_bar() {
         let m = Measure::new(TimeSignature::SEVEN_EIGHT);
-        assert!(m.beats().iter().all(|b| b.kind() == grooph_measure::BeatKind::Rest));
+        assert!(m.first_voice().beats().iter().all(|b| b.kind() == grooph_measure::BeatKind::Rest));
     }
 }

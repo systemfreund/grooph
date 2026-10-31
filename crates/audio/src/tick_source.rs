@@ -163,7 +163,7 @@ mod tests {
     fn score_4_4_quarters() -> Score {
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
         for i in 0..4 {
-            m.set_beat(i, Beat::note(q())).unwrap();
+            m.first_voice_mut().set_beat(i, Beat::note(q())).unwrap();
         }
         Score::single(m)
     }
@@ -269,7 +269,7 @@ mod tests {
     #[test]
     fn bars_count_measures_across_loops() {
         let mut m2 = Measure::new(TimeSignature::FOUR_FOUR);
-        m2.set_beat(0, Beat::note(q())).unwrap();
+        m2.first_voice_mut().set_beat(0, Beat::note(q())).unwrap();
         let mut score = score_4_4_quarters();
         score.measures.push(m2);
         let timing = ScoreTiming::from_score(&score, 120);
