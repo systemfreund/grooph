@@ -70,11 +70,13 @@ const KIT_ORDER: [Instrument; 9] = [
 ];
 
 /// The head modifiers' tools, after the bar's and before the kit's.
-const HEAD_TOOLS: [&str; 2] = ["modify.toggle.accent", "modify.toggle.soft"];
-/// The tools that change the bar, first in their row.
-const BAR_TOOLS: [&str; 3] = ["edit.undo", "edit.redo", "meta.reset_measure"];
-/// The note values, their rests and the dot.
-const VALUE_TOOLS: [&str; 9] = [
+const HEAD_TOOLS: [&str; 3] =
+    ["modify.toggle.accent", "modify.toggle.soft", "modify.toggle.dotted"];
+/// The tools that change the bar and its meter, first in their row.
+const BAR_TOOLS: [&str; 4] =
+    ["edit.undo", "edit.redo", "meta.reset_measure", "meta.change_time_signature"];
+/// The note values, then their rests.
+const VALUE_TOOLS: [&str; 8] = [
     "insert.note.q",
     "insert.note.e",
     "insert.note.s",
@@ -83,11 +85,9 @@ const VALUE_TOOLS: [&str; 9] = [
     "insert.rest.e",
     "insert.rest.s",
     "insert.rest.th",
-    "modify.toggle.dotted",
 ];
-/// The meter, then the tuplets.
-const METER_TOOLS: [&str; 7] = [
-    "meta.change_time_signature",
+/// The tuplets.
+const TUPLET_TOOLS: [&str; 6] = [
     "insert.tuplet.t8",
     "insert.tuplet.t16",
     "insert.tuplet.qt16",
@@ -147,7 +147,7 @@ pub(crate) fn grid_rows(kit: bool) -> Vec<Vec<Cell>> {
     }
     rows.push(heads);
     rows.push(tools(&VALUE_TOOLS));
-    rows.push(tools(&METER_TOOLS));
+    rows.push(tools(&TUPLET_TOOLS));
     rows
 }
 
@@ -162,8 +162,8 @@ fn grid_metrics(width: f32) -> (usize, Vec2) {
 impl Grooph {
     /// The editor's tools as a grid in the thumb's reach, the same in every
     /// editor (Practice, Score, the metronome's click bar): on the kit its
-    /// instruments and voices, then the head modifiers, the note values and
-    /// rests, the meter and the tuplets.
+    /// instruments and voices, then undo, redo, clear, the meter and the
+    /// head modifiers, the note values and rests, and the tuplets.
     pub(super) fn tool_palette_panel(&mut self, ui: &mut Ui) {
         egui::Panel::bottom("tool_palette")
             .show_separator_line(false)
