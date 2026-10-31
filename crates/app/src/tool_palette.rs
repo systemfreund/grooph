@@ -453,6 +453,7 @@ fn notes_ink(layout: &MeasureLayout) -> Rect {
 
 #[cfg(test)]
 mod tests {
+    use crate::shell::Tab;
     use crate::tools::all_tools;
     use crate::{Grooph, Mode};
     use grooph_measure::Cursor;
@@ -461,6 +462,7 @@ mod tests {
     fn editing(score: &str) -> Grooph {
         let cc = eframe::CreationContext::_new_kittest(eframe::egui::Context::default());
         let mut app = Grooph::new(&cc);
+        app.select_tab(Tab::Score);
         app.editor.doc_mut().score = parse_score(score).unwrap();
         app.ui.mode = Mode::Edit;
         app

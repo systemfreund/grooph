@@ -173,7 +173,7 @@ impl Default for PersistedState {
             score: Score::single(Grooph::default_measure()),
             cursor: Cursor::start(),
             document: Document::Score,
-            rhythm_page: Document::Score,
+            rhythm_page: Document::Practice,
             practice_score: None,
             practice_cursor: Cursor::start(),
             bpm: grooph_link::DEFAULT_BPM,
@@ -1338,12 +1338,14 @@ impl Grooph {
             },
         };
         app.editor.active_preset = app.matching_preset();
-        // The rhythm page the metronome goes back to, the page the More
-        // screen was opened from, then the saved tab.
-        app.select_tab(state.rhythm_page.tab());
+        // The page the More screen was opened from, then the saved tab.
         app.select_tab(state.document.tab());
-        // A link opens after the saved tab, so its tab wins.
         app.select_tab(state.tab);
+        if app.metronome_mode() {
+            // The rhythm page it goes back to.
+            app.editor.rhythm_page = state.rhythm_page;
+        }
+        // A link opens after the saved tab, so its tab wins.
         if let Some(query) = query {
             app.open_link_from_url(&query);
         }

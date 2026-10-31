@@ -345,6 +345,25 @@ mod tests {
     }
 
     #[test]
+    fn a_preset_with_another_tempo_marks_the_saved_score_unsaved() {
+        let (mut app, _) = app_with_groove();
+        app.save_active_pattern();
+        app.select_tab(Tab::Practice);
+        app.playback_ctl.bpm = 1;
+        app.apply_preset(PresetId::BuiltIn(1));
+        assert_ne!(app.playback_ctl.bpm, 1);
+        assert!(app.editor.docs.score.dirty);
+    }
+
+    #[test]
+    fn a_fresh_metronome_goes_back_to_practice() {
+        let mut app = app();
+        assert!(app.metronome_mode());
+        app.leave_metronome();
+        assert_eq!(app.document(), Document::Practice);
+    }
+
+    #[test]
     fn leaving_the_metronome_after_a_restart_goes_back_to_its_page() {
         let mut app = app();
         app.select_tab(Tab::Practice);
@@ -363,8 +382,11 @@ mod tests {
         assert!(app.endless_runs());
         app.select_tab(Tab::More);
         assert!(app.endless_runs());
-        // Practice's editor plays its rhythm as it is.
+        // Practice's editor plays its rhythm as it is, also behind its
+        // meter dialog.
         app.edit_page();
+        assert!(!app.endless_runs());
+        app.ui.mode = Mode::TimeSignature(grooph_measure::TimeSignature::FOUR_FOUR);
         assert!(!app.endless_runs());
         app.select_tab(Tab::Score);
         assert!(!app.endless_runs());

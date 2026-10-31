@@ -4,7 +4,7 @@
 
 use crate::documents::Document;
 use crate::platform::random_seed;
-use crate::{Grooph, Mode, TransportState, clock};
+use crate::{Grooph, TransportState, clock};
 use grooph_measure::generator::{GeneratorSettings, Rng, generate_measure, generate_score};
 use grooph_measure::tempo::ScoreTiming;
 use grooph_measure::{Cursor, MeasureIdx, Score};
@@ -90,7 +90,7 @@ impl Grooph {
     pub(crate) fn endless_runs(&self) -> bool {
         self.editor.generator.endless
             && self.document() == Document::Practice
-            && self.ui.mode != Mode::Edit
+            && !self.editing()
             && !self.metronome_mode()
     }
 
