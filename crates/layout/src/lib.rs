@@ -24,6 +24,7 @@ pub mod beam_plan;
 pub mod glyphs;
 pub mod pixel_layout;
 pub mod render_plan;
+pub mod staff;
 pub mod staff_layout;
 pub mod tuplet_plan;
 

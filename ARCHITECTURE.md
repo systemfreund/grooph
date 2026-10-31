@@ -144,8 +144,18 @@ spread across callers.
    past the staff get ledger lines, rests keep to their voice's half, a
    beamed group's stems all reach its beams (`beams::reach_beams`). Past
    the accent a technique's sign (o, +, the choke's mark) stacks
-   (`notes::place_marks`). Every kit row starts with the percussion clef;
-   the renderer draws five lines. The one line's layout is unchanged.
+   (`notes::place_marks`). Every kit row starts with the percussion clef.
+6. Both staves are one model, `grooph_layout::staff::Staff`, which
+   `Staff::of(StaffKind)` gives (`LayoutOpts::staff_model`; the only match
+   on the kind). A staff holds its lines as staff positions (half staff
+   spaces up from the middle line), where an instrument's heads sit, where
+   its rests go, and whether every row starts with the clef. From that
+   alone come the head and rest positions (`head_pos`, `rest_pos`,
+   `bar_rest_pos`), the ledger lines of heads and half and whole rests
+   past the outer lines (`ledgers`), the dots moved up off a line
+   (`on_line`), the side of the line two voices keep to (`shares_line`,
+   only on a staff of one line, where beamed rests become stemlets), the
+   row's room for the lines, and the lines the renderer draws.
 
 ## Audio, playback, counting
 

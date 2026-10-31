@@ -1,69 +1,17 @@
 use super::{LayoutOpts, Line, NoteLayout, PlacedGlyph, c, requires_flag};
 use crate::glyphs;
 use crate::render_plan::RenderPlan;
+use crate::staff::rest_takes_ledgers;
 use egui::{Pos2, Rect};
-use grooph_measure::duration::{Duration, NoteValue};
+use grooph_measure::duration::Duration;
 use grooph_measure::grid::DEFAULT_GRID;
-use grooph_measure::{Beat, BeatKind, StaffKind, VoiceBar};
+use grooph_measure::{Beat, BeatKind, VoiceBar};
 
 /// Number of augmentation dots on a duration (0 for non-dotted).
 const fn dot_count_of(duration: Duration) -> u8 {
     match duration {
         Duration::Dotted { dots, .. } => dots,
         _ => 0,
-    }
-}
-
-/// Where `beat` sits, in half staff spaces up from the staff line. Notes are
-/// on the line. In the lower voice a rest hangs a staff space lower, clear of
-/// an upper voice's, except half and whole rests: they are told apart only by
-/// sitting on the line or hanging from it. A stemlet (`in_beam` rest) reaches
-/// from the line like a note's stem.
-///
-/// On a line shared by two voices ([`LayoutOpts::shared_line`]) each voice
-/// keeps to its side: heads sit on the line or hang from it, rests clear it,
-/// and a lower voice's half rest, which would sit on it, moves to a ledger
-/// line a staff space below (see [`ledger_pos`]).
-fn staff_pos_of(beat: &Beat, in_beam: bool, opts: &LayoutOpts) -> i8 {
-    if opts.staff == StaffKind::Kit && beat.is_rest() {
-        return kit_rest_pos(beat, opts);
-    }
-    let base = beat.duration.base_note();
-    let keeps_line = matches!(base, NoteValue::Half | NoteValue::Whole);
-    if opts.shared_line {
-        let side = if opts.stem_down { -1 } else { 1 };
-        return match beat.kind() {
-            BeatKind::Note => side,
-            BeatKind::Rest if in_beam => side,
-            BeatKind::Rest => match ledger_pos(beat, opts) {
-                Some(pos) => pos,
-                None if keeps_line => 0,
-                None => side * clear_of_line(head_glyph(beat), opts.stem_down),
-            },
-        };
-    }
-    match beat.kind() {
-        BeatKind::Rest if opts.stem_down && !keeps_line && !in_beam => -2,
-        _ => 0,
-    }
-}
-
-/// Where a rest sits on the kit's staff: in the middle with one voice (a
-/// whole rest hangs from the fourth line), in its voice's half with two,
-/// clear of the other's notes: a half rest on the fourth or first line, a
-/// whole rest hanging from the fourth or second, the others in the second
-/// space up or down from the middle line.
-fn kit_rest_pos(beat: &Beat, opts: &LayoutOpts) -> i8 {
-    let base = beat.duration.base_note();
-    match (opts.shared_line, opts.stem_down, base) {
-        (false, _, NoteValue::Whole) => 2,
-        (false, ..) => 0,
-        (true, false, NoteValue::Whole) => 2,
-        (true, false, NoteValue::Half) => 2,
-        (true, false, _) => 3,
-        (true, true, NoteValue::Whole) => -2,
-        (true, true, NoteValue::Half) => -4,
-        (true, true, _) => -3,
     }
 }
 
@@ -78,19 +26,17 @@ struct ChordHead {
     flipped: bool,
 }
 
-/// The heads of the note `beat`, from the stem's base to its tip. On the
-/// kit's staff each sits at its instrument's place; a head a second from
-/// the one before it, unless that one is flipped already, goes to the other
-/// side of the stem so the two don't overlap.
-fn chord_of(beat: &Beat, in_beam: bool, opts: &LayoutOpts) -> Vec<ChordHead> {
+/// The heads of the note `beat`, from the stem's base to its tip, each where
+/// the staff puts its instrument ([`crate::staff::Staff::head_pos`]); a head
+/// a second from the one before it, unless that one is flipped already,
+/// goes to the other side of the stem so the two don't overlap.
+fn chord_of(beat: &Beat, opts: &LayoutOpts) -> Vec<ChordHead> {
+    let (staff, voicing) = (opts.staff_model(), opts.voicing());
     let mut heads: Vec<ChordHead> = beat
         .heads()
         .iter()
         .map(|h| ChordHead {
-            pos: match opts.staff {
-                StaffKind::Kit => h.instrument().staff_pos(),
-                StaffKind::Line => staff_pos_of(beat, in_beam, opts),
-            },
+            pos: staff.head_pos(h.instrument(), voicing),
             glyph: glyphs::head_glyph_for(h.instrument(), h.technique(), beat.duration),
             soft: h.soft(),
             flipped: false,
@@ -127,50 +73,27 @@ fn stem_dx(opts: &LayoutOpts) -> f32 {
     if opts.stem_down { -opts.stem_offset() } else { opts.stem_offset() }
 }
 
-/// Least room between a rest and a staff line it keeps clear of, in staff
-/// spaces.
-const REST_CLEARANCE_SS: f32 = 0.25;
-
-/// How many half staff spaces `rest` moves off the line, away from it, for
-/// its ink to clear the line by [`REST_CLEARANCE_SS`]: up when `below` is
-/// false, down when it is true.
-fn clear_of_line(rest: glyphs::Glyph, below: bool) -> i8 {
-    let reach = if below { rest.ne[1] } else { -rest.sw[1] };
-    (2.0 * (REST_CLEARANCE_SS + reach)).ceil() as i8
-}
-
-/// The staff position of the ledger line of a rest on a shared line that
-/// would otherwise sit in the other voice: a lower voice's half rest sits
-/// on one below. (A whole rest, hanging from the line, would need one above
-/// in the upper voice, but no meter holds a whole note.)
-fn ledger_pos(beat: &Beat, opts: &LayoutOpts) -> Option<i8> {
-    let half = beat.duration.base_note() == NoteValue::Half;
-    let line = opts.staff == StaffKind::Line;
-    (line && opts.shared_line && opts.stem_down && beat.is_rest() && half).then_some(-2)
-}
-
-/// How far a ledger line reaches past either side of its rest, in staff
-/// spaces (Bravura's `legerLineExtension`).
+/// How far a ledger line reaches past either side of its head or rest, in
+/// staff spaces (Bravura's `legerLineExtension`).
 const LEDGER_EXTENSION_SS: f32 = 0.4;
 
-/// The ledger lines of heads above or below the kit's staff, from its top
-/// or bottom line outward to each head, as wide as the heads they hold.
-fn kit_ledgers(heads: &[(PlacedGlyph, &ChordHead)], opts: &LayoutOpts) -> Vec<Line> {
+/// The ledger lines of heads or a rest off the staff
+/// ([`crate::staff::Staff::ledgers`]), each glyph given with its staff
+/// position and whether it takes ledger lines, as wide as the glyphs they
+/// hold.
+fn ledgers_of(glyphs: &[(PlacedGlyph, i8, bool)], opts: &LayoutOpts) -> Vec<Line> {
     let reach = LEDGER_EXTENSION_SS * opts.staff_space();
     let mut lines: Vec<(i8, f32, f32)> = Vec::new();
-    for (glyph, head) in heads {
+    for &(glyph, pos, with_ledgers) in glyphs {
         let ink = glyph.ink();
-        let outward = head.pos.signum();
-        let mut pos = 6 * outward;
-        while outward != 0 && pos.abs() <= head.pos.abs() {
-            match lines.iter_mut().find(|l| l.0 == pos) {
+        for at in opts.staff_model().ledgers(pos, with_ledgers) {
+            match lines.iter_mut().find(|l| l.0 == at) {
                 Some(l) => {
                     l.1 = l.1.min(ink.left());
                     l.2 = l.2.max(ink.right());
                 }
-                None => lines.push((pos, ink.left(), ink.right())),
+                None => lines.push((at, ink.left(), ink.right())),
             }
-            pos += 2 * outward;
         }
     }
     lines
@@ -205,7 +128,7 @@ fn parens_at(center: Pos2, opts: &LayoutOpts) -> Vec<PlacedGlyph> {
     let left = glyphs::NOTEHEAD_PAREN_LEFT;
     let right = glyphs::NOTEHEAD_PAREN_RIGHT;
     let overhang = (left.ne[1] - glyphs::NOTEHEAD_BLACK.ne[1]) * ss;
-    let y = match (opts.shared_line && opts.staff == StaffKind::Line, opts.stem_down) {
+    let y = match (opts.staff_model().shares_line(opts.voicing()), opts.stem_down) {
         (false, _) => center.y,
         (true, false) => center.y - overhang,
         (true, true) => center.y + overhang,
@@ -260,28 +183,23 @@ fn dot_first_dx(beat: &Beat, in_beam: bool, chord: &[ChordHead], opts: &LayoutOp
     dx
 }
 
-/// The augmentation dots of a head at `cy` of a note centered at
-/// `center_x`, the first `first_dx` from it ([`dot_first_dx`]). Returns
-/// empty if `dot_count == 0`.
+/// The augmentation dots of a head or rest at staff position `pos` of a
+/// note centered at `center_x`, the first `first_dx` from it
+/// ([`dot_first_dx`]). `with_ledgers`: the glyph takes ledger lines (see
+/// [`crate::staff::Staff::ledgers`]). Returns empty if `dot_count == 0`.
 fn dot_glyphs(
     first_dx: f32,
     center_x: f32,
-    cy: f32,
+    (pos, with_ledgers): (i8, bool),
     dot_count: u8,
     opts: &LayoutOpts,
 ) -> Vec<PlacedGlyph> {
     let step_dx = opts.em * c::DOT_STEP_DX_EM;
-    // A head on a shared line sits in the space beside it, and its dots
-    // with it; one on the line moves them up into the space above. On the
-    // kit's staff that goes for heads on its lines.
-    let on_line = match opts.staff {
-        StaffKind::Line => !opts.shared_line,
-        StaffKind::Kit => {
-            (((opts.y_center() - cy) / (opts.staff_space() * 0.5)).round() as i32) % 2 == 0
-        }
-    };
+    // A glyph in a space has its dots beside it; one on a line, of the
+    // staff or a ledger line, moves them up into the space above.
+    let on_line = opts.staff_model().on_line(pos, with_ledgers);
     let dy = if on_line { opts.em * c::DOT_Y_OFFSET_EM } else { 0.0 };
-    let y = cy - dy;
+    let y = opts.y_of(pos) - dy;
     (0..dot_count)
         .map(|d| {
             let x = center_x + first_dx + (d as f32) * step_dx;
@@ -299,7 +217,7 @@ fn compute_x_extents(beat: &Beat, in_beam: bool, opts: &LayoutOpts) -> (f32, f32
     let is_note = beat.is_note();
     let needs_flag = requires_flag(beat.duration);
 
-    let chord = if is_note { chord_of(beat, in_beam, opts) } else { Vec::new() };
+    let chord = if is_note { chord_of(beat, opts) } else { Vec::new() };
     let (left, mut right) = if is_note {
         // Every head, on its side of the stem, and its parentheses.
         chord
@@ -507,10 +425,13 @@ pub(super) fn build_note_layout(
         let is_note = b.is_note();
         // A rest under a beam is a stemlet: a stem without a head.
         let stemlet = !is_note && in_beam;
-        let chord = if is_note { chord_of(b, in_beam, opts) } else { Vec::new() };
+        let chord = if is_note { chord_of(b, opts) } else { Vec::new() };
         // The head at the stem's tip sets the note's place: the beams and
         // tuplets reach from it.
-        let staff_pos = chord.last().map_or_else(|| staff_pos_of(b, in_beam, opts), |h| h.pos);
+        let staff_pos = match chord.last() {
+            Some(h) => h.pos,
+            None => opts.staff_model().rest_pos(b, in_beam, opts.voicing()),
+        };
         let cy = opts.y_of(staff_pos);
 
         // 1. Calculate Stem (if any) and determining pixel-snapping offset.
@@ -577,28 +498,22 @@ pub(super) fn build_note_layout(
                 parens_at(Pos2::new(paren_mid(center.x, g.ink(), h), opts.y_of(h.pos)), opts)
             })
             .collect();
-        let mut ledgers: Vec<Line> = ledger_pos(b, opts)
-            .map(|pos| {
-                let ink = head.ink();
-                let (y, reach) = (opts.y_of(pos), LEDGER_EXTENSION_SS * ss);
-                Line { p1: Pos2::new(ink.left() - reach, y), p2: Pos2::new(ink.right() + reach, y) }
-            })
-            .into_iter()
-            .collect();
-        if opts.staff == StaffKind::Kit {
-            ledgers.extend(kit_ledgers(&placed, opts));
-        }
+        // Every head takes ledger lines, a rest only a half or whole rest.
+        let inked: Vec<(PlacedGlyph, i8, bool)> = match placed.is_empty() {
+            true => vec![(head, staff_pos, rest_takes_ledgers(b))],
+            false => placed.iter().map(|(g, h)| (*g, h.pos, true)).collect(),
+        };
+        let ledgers = ledgers_of(&inked, opts);
 
         // 3. Dots, by every head.
         let first_dx = dot_first_dx(b, in_beam, &chord, opts);
         let dot_count = dot_count_of(b.duration);
-        let dots = match chord.is_empty() {
-            true => dot_glyphs(first_dx, center.x, cy, dot_count, opts),
-            false => chord
-                .iter()
-                .flat_map(|h| dot_glyphs(first_dx, center.x, opts.y_of(h.pos), dot_count, opts))
-                .collect(),
-        };
+        let dots = inked
+            .iter()
+            .flat_map(|&(_, pos, with)| {
+                dot_glyphs(first_dx, center.x, (pos, with), dot_count, opts)
+            })
+            .collect();
 
         // 4. Flag (if needed)
         let flag = match &stem {
@@ -640,11 +555,7 @@ fn bar_rest(notes: &mut [NoteLayout], rect: &Rect, opts: &LayoutOpts) {
     for (i, note) in notes.iter_mut().enumerate() {
         note.dots.clear();
         if i == 0 {
-            // From the one line, or the kit's fourth line.
-            let y = match opts.staff {
-                StaffKind::Line => opts.y_of(0),
-                StaffKind::Kit => opts.y_of(2),
-            };
+            let y = opts.y_of(opts.staff_model().bar_rest_pos());
             note.head = PlacedGlyph::centered(glyphs::REST_WHOLE, rect.center().x, y, opts.em);
         } else {
             note.hidden = true;
