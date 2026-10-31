@@ -4,7 +4,7 @@
 
 use crate::documents::Document;
 use crate::platform::random_seed;
-use crate::{Grooph, TransportState, clock};
+use crate::{Grooph, Mode, TransportState, clock};
 use grooph_measure::generator::{GeneratorSettings, Rng, generate_measure, generate_score};
 use grooph_measure::tempo::ScoreTiming;
 use grooph_measure::{Cursor, MeasureIdx, Score};
@@ -85,10 +85,12 @@ impl Grooph {
 
     /// Whether endless mode drives the played score: Practice's rhythm, on
     /// the practice page or behind the More screen opened from it. The score
-    /// tab plays its score as it is, and the metronome plays no rhythm.
+    /// tab and Practice's editor play their score as it is, and the
+    /// metronome plays no rhythm.
     pub(crate) fn endless_runs(&self) -> bool {
         self.editor.generator.endless
             && self.document() == Document::Practice
+            && self.ui.mode != Mode::Edit
             && !self.metronome_mode()
     }
 

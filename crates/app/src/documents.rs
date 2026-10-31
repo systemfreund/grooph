@@ -363,6 +363,9 @@ mod tests {
         assert!(app.endless_runs());
         app.select_tab(Tab::More);
         assert!(app.endless_runs());
+        // Practice's editor plays its rhythm as it is.
+        app.edit_page();
+        assert!(!app.endless_runs());
         app.select_tab(Tab::Score);
         assert!(!app.endless_runs());
         app.start_playback();

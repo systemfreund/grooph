@@ -369,7 +369,7 @@ grooph's metronome runs inside AI chats as an
   score tab's score, see "Rhythm documents"), 🎲 rolls a new rhythm
   with the same settings. Space and the grouping picker live in the Level
   picker, presets (load, save, update, rename, delete) in the Preset picker.
-- App glue: `crates/app/src/generator.rs`. Endless mode (Bars: Endless)
+- App glue: `crates/app/src/generator.rs`. Endless mode (Bars: Endless; on the practice page, not in its editor)
   starts with 2 fresh bars on every play (no 🎲 then) and never loops: once the cursor reaches the last measure
   a new one is added below it, and the first measure is removed once its row
   has scrolled out of view and the audio cursor has left it. Removing it moves
