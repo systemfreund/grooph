@@ -145,6 +145,7 @@ impl Cursor {
         Self::in_voice(measure_idx, 0, beat_idx)
     }
 
+    /// Beat `beat_idx` of voice `voice` in measure `measure_idx`.
     pub fn in_voice(measure_idx: MeasureIdx, voice: VoiceIdx, beat_idx: BeatIdx) -> Self {
         Self { measure_idx, voice, beat_idx }
     }

@@ -1591,6 +1591,22 @@ mod tests {
     }
 
     #[test]
+    fn the_staff_cursor_is_on_the_edited_bars_voice() {
+        let mut app = metronome_app();
+        app.set_counter_ratio(Some(Ratio { n: 3, span: 4 }));
+        app.editor.cursor = Cursor::at(0, 1);
+        assert_eq!(app.staff_cursor(), Cursor::in_voice(0, 0, 1));
+        app.select_voice(MetronomeVoice::Counter);
+        app.editor.cursor = Cursor::at(0, 2);
+        // The editor holds the counter bar alone, the staff draws it below.
+        assert_eq!(app.editor.cursor.voice, 0);
+        assert_eq!(app.staff_cursor(), Cursor::in_voice(0, 1, 2));
+        app.select_voice(MetronomeVoice::Click);
+        app.editor.cursor = Cursor::at(0, 1);
+        assert_eq!(app.staff_cursor(), Cursor::in_voice(0, 0, 1));
+    }
+
+    #[test]
     fn the_counter_rhythm_is_edited_like_the_click_bar() {
         let mut app = metronome_app();
         let click = app.click_bar();
