@@ -78,37 +78,39 @@ fn median(mut values: Vec<f64>) -> Option<f64> {
 }
 
 impl Grooph {
+    /// The calibration whose run plays: the one place that checks the phase.
+    fn running_calibration(&self) -> Option<&Calibration> {
+        let cal = self.playback_ctl.play_along.calibration.as_ref()?;
+        (cal.phase == CalibrationPhase::Running).then_some(cal)
+    }
+
     /// Source being calibrated while the calibration click runs.
     pub(crate) fn calibration_source(&self) -> Option<HitSource> {
-        self.playback_ctl
-            .play_along
-            .calibration
-            .as_ref()
-            .filter(|c| c.phase == CalibrationPhase::Running)
-            .map(|c| c.source)
+        self.running_calibration().map(|c| c.source)
     }
 
     /// Whether a calibration run plays: the transport plays its click bar.
     pub(crate) fn calibrating(&self) -> bool {
-        self.calibration_source().is_some()
-    }
-
-    /// The click bar of a calibration run.
-    fn calibration_score(&self) -> Option<&Score> {
-        let cal = self.playback_ctl.play_along.calibration.as_ref()?;
-        (cal.phase == CalibrationPhase::Running).then_some(&cal.score)
+        self.running_calibration().is_some()
     }
 
     /// The score the transport plays: the calibration's click bar during a
     /// run, the click bar in the metronome, else the shown page's document.
     pub(crate) fn played_score(&self) -> Cow<'_, Score> {
-        if let Some(score) = self.calibration_score() {
-            Cow::Borrowed(score)
+        if let Some(cal) = self.running_calibration() {
+            Cow::Borrowed(&cal.score)
         } else if self.metronome_mode() {
             Cow::Owned(self.metronome_score())
         } else {
             Cow::Borrowed(&self.editor.doc().score)
         }
+    }
+
+    /// The score hits are measured against: the calibration's click bar
+    /// during a run, else the shown page's document. In the metronome that
+    /// is its click bar with a note per click, not the silent bar it plays.
+    pub(crate) fn tracked_score(&self) -> &Score {
+        self.running_calibration().map_or(&self.editor.doc().score, |cal| &cal.score)
     }
 
     /// The tempo setting played: the calibration's own during a run.

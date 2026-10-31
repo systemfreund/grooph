@@ -1453,7 +1453,7 @@ mod tests {
         app.select_tab(Tab::More);
         app.select_tab(Tab::Practice);
         assert!(!app.metronome_mode());
-        assert_eq!(app.playback_ctl.transport_state, TransportState::Stopped);
+        assert_eq!(app.playback_ctl.transport_state, crate::TransportState::Stopped);
     }
 
     #[test]
@@ -2114,18 +2114,22 @@ mod tests {
         let docs = &app.editor.docs;
         let audio = &app.playback_ctl.audio_cfg;
         format!(
-            "{:?} {:?} {:?} {:?} {:?} {:?} {:?} {} {} {} {} | {} {:?} {} {:?} {:?} {} {}",
+            "{:?} {:?} {:?} {:?} {:?} {:?} {:?} {:?} {:?} {} {} {} {} {} {} | {} {:?} {} {:?} {:?} {} {}",
             docs.metronome.score,
             docs.practice.score,
             docs.score.score,
             docs.metronome.cursor,
             docs.practice.cursor,
             docs.score.cursor,
+            docs.metronome.active_pattern_id,
+            docs.practice.active_pattern_id,
             docs.score.active_pattern_id,
-            docs.score.dirty,
+            docs.metronome.dirty,
             docs.practice.dirty,
-            docs.score.history.can_undo(),
+            docs.score.dirty,
+            docs.metronome.history.can_undo(),
             docs.practice.history.can_undo(),
+            docs.score.history.can_undo(),
             app.playback_ctl.bpm,
             audio.swing,
             audio.count_in,
@@ -2159,7 +2163,12 @@ mod tests {
             // It plays its own click bar at its own tempo, plainly.
             assert!(app.calibrating());
             assert_eq!(app.played_bpm(), crate::calibration::CALIBRATION_BPM, "{page:?}");
-            assert_eq!(app.played_score().len(), 1);
+            let bar = format!("{:?}", Score::single(Grooph::default_measure()));
+            assert_eq!(format!("{:?}", *app.played_score()), bar, "{page:?}");
+            // Hits are measured against that bar, and taps count on every
+            // page, the metronome's too.
+            assert_eq!(format!("{:?}", app.tracked_score()), bar, "{page:?}");
+            assert!(app.tap_capture_active(), "{page:?}");
             // Counted in, and none of the user's options: no ghost notes,
             // swing, gap, ramp, click pattern or counter rhythm.
             assert_eq!(
@@ -2187,6 +2196,49 @@ mod tests {
             assert_eq!(user_state(&app), before, "{page:?}");
             assert_eq!(app.played_bpm(), 133);
         }
+    }
+
+    #[test]
+    fn a_calibration_applies_the_offset_it_finds() {
+        use super::Grooph;
+        use crate::calibration::{CALIBRATION_HITS, CALIBRATION_WARMUP};
+        use crate::play_along::HitSource;
+
+        let cc = eframe::CreationContext::_new_kittest(eframe::egui::Context::default());
+        let mut app = Grooph::new(&cc);
+        app.select_tab(Tab::More);
+        let before = user_state(&app);
+        app.start_calibration(HitSource::Tap);
+        let cal = app.playback_ctl.play_along.calibration.as_mut().unwrap();
+        // The warm-up hits are ignored, the median of the rest is the offset.
+        for _ in 0..CALIBRATION_WARMUP {
+            cal.push(-200.0);
+        }
+        for i in 0..CALIBRATION_HITS {
+            cal.push(if i % 2 == 0 { 24.0 } else { 26.0 });
+        }
+        app.advance_calibration();
+        assert_eq!(app.playback_ctl.play_along.settings.offset_ms(HitSource::Tap), 25.0);
+        assert!(!app.calibrating());
+        assert_eq!(app.playback_ctl.transport_state, crate::TransportState::Stopped);
+        assert_eq!(user_state(&app), before);
+    }
+
+    #[test]
+    fn the_metronome_measures_hits_against_its_clicks() {
+        use super::Grooph;
+
+        let cc = eframe::CreationContext::_new_kittest(eframe::egui::Context::default());
+        let mut app = Grooph::new(&cc);
+        app.select_tab(Tab::Metronome);
+        // It plays a silent bar, but hits count against the click bar.
+        assert_eq!(
+            format!("{:?}", app.tracked_score()),
+            format!("{:?}", app.editor.docs.metronome.score)
+        );
+        assert!(
+            app.tracked_score().measures()[0].first_voice().beats().iter().any(|b| b.is_note())
+        );
     }
 
     #[test]

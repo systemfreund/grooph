@@ -315,12 +315,12 @@ impl Grooph {
         if !self.playback_ctl.accuracy.tracker.update_state(active, now) {
             return;
         }
-        // The tracker leaves `self` while it reads the played score, which
+        // The tracker leaves `self` while it reads the tracked score, which
         // borrows `self`: no copy of the score per frame.
         let mut tracker = std::mem::take(&mut self.playback_ctl.accuracy.tracker);
         let mut deltas = Vec::new();
         let played = {
-            let score = self.played_score();
+            let score = self.tracked_score();
             let played = total_loop_seconds > 0.0 && !score.measures().is_empty();
             if played {
                 hits.sort_by(|a, b| a.1.total_cmp(&b.1));
@@ -329,9 +329,9 @@ impl Grooph {
                     let offset_ms =
                         if calibrating.is_some() { 0.0 } else { settings.offset_ms(source) };
                     let time = time - offset_ms as f64 / 1000.0;
-                    deltas.extend(tracker.record_hit(time, &timing, &score));
+                    deltas.extend(tracker.record_hit(time, &timing, score));
                 }
-                tracker.update_progress(now, &timing, &score);
+                tracker.update_progress(now, &timing, score);
             }
             played
         };
