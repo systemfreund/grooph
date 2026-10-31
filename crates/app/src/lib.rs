@@ -159,13 +159,15 @@ impl SavedDoc {
     fn into_doc(self, library: &PatternLibrary) -> RhythmDoc {
         // A measure always has beats (`VoiceBar`'s invariant, checked when
         // it loads), so the cursor clamps into a score with one.
-        let score = if self.score.is_empty() {
+        let mut score = if self.score.is_empty() {
             Score::single(Grooph::default_measure())
         } else {
             self.score
         };
+        // Saved before a drum was struck by one voice at a time.
+        let undoubled = score.undouble_instruments();
         RhythmDoc {
-            dirty: self.dirty,
+            dirty: self.dirty || undoubled,
             active_pattern_id: self.active_pattern_id.filter(|id| library.contains(*id)),
             ..RhythmDoc::new(score, self.cursor)
         }
@@ -782,7 +784,8 @@ impl Grooph {
             return;
         };
         let mut score = pattern.score.clone();
-        score.undouble_instruments();
+        // A drum struck by two voices at once is a change to save.
+        let undoubled = score.undouble_instruments();
         let bpm = pattern.bpm;
 
         // The score tab's score is replaced.
@@ -796,7 +799,7 @@ impl Grooph {
         self.playback_ctl.bpm = bpm;
         self.playback_ctl.playback.reset();
         self.editor.doc_mut().active_pattern_id = Some(id);
-        self.editor.doc_mut().dirty = false;
+        self.editor.doc_mut().dirty = undoubled;
         self.show_loaded_pattern();
     }
 
@@ -854,8 +857,9 @@ impl Grooph {
         let metronome = matches!(link.content, Some(LinkContent::Metronome(_)));
         let replaces_rhythm =
             matches!(link.content, Some(LinkContent::Score(_) | LinkContent::Generator { .. }));
+        let mut undoubled = false;
         match link.content {
-            Some(LinkContent::Score(score)) => self.replace_score_from_link(score),
+            Some(LinkContent::Score(score)) => undoubled = self.replace_score_from_link(score),
             Some(LinkContent::Metronome(ts)) => {
                 self.stop_transport();
                 // The meter plays the link's counter rhythm, or none; a
@@ -897,13 +901,16 @@ impl Grooph {
             self.ui.mode = Mode::Playback;
         } else if replaces_rhythm {
             // The content is reproducible from the link, so it is not
-            // "unsaved".
-            self.editor.doc_mut().dirty = false;
+            // "unsaved", unless a drum struck by two voices at once was
+            // taken from one of them.
+            self.editor.doc_mut().dirty = undoubled;
         }
     }
 
-    fn replace_score_from_link(&mut self, mut score: Score) {
-        score.undouble_instruments();
+    /// Reports whether a drum struck by two voices at once was taken from
+    /// one of them (see [`Score::undouble_instruments`]).
+    fn replace_score_from_link(&mut self, mut score: Score) -> bool {
+        let undoubled = score.undouble_instruments();
         self.stop_transport();
         self.show_document(Document::Score);
         self.with_undo_snapshot(|app| {
@@ -913,6 +920,7 @@ impl Grooph {
         });
         self.editor.doc_mut().active_pattern_id = None;
         self.show_loaded_pattern();
+        undoubled
     }
 
     /// Run a pending load after the unsaved-changes dialog.
@@ -1977,6 +1985,8 @@ mod tests {
         app.open_link(grooph_link::parse_query(&query).unwrap().unwrap());
         let score = &app.editor.doc().score;
         assert_eq!(format_score(score).unwrap(), "4/4 >S-H:q H:q H:h ; r:q K:q K:h");
+        // No longer the link's groove: a change to save.
+        assert!(app.editor.doc().dirty);
     }
 
     #[test]

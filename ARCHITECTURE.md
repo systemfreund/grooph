@@ -172,7 +172,8 @@ spread across callers.
    already has does not block other edits). A score loaded from a link
    or a saved pattern is made so first (`Score::undouble_instruments`):
    a doubled head stays in its instrument's usual voice, its accent going
-   along, and leaves the other. The one line edits as before:
+   along, and leaves the other, and the score is marked unsaved; so is a
+   score restored from the saved session. The one line edits as before:
    its pen is `Rhythm`, and the kit's tools do nothing there.
 7. Both staves are one model, `grooph_layout::staff::Staff`, which
    `Staff::of(StaffKind)` gives (`LayoutOpts::staff_model`; the only match

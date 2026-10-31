@@ -261,6 +261,11 @@ mod tests {
         assert_eq!(kit.instrument_near(5.2), Instrument::HiHat);
         assert_eq!(kit.instrument_near(-2.6), Instrument::Kick);
         assert_eq!(kit.instrument_near(20.0), Instrument::Crash);
+        // Every drum of the kit can be picked on its staff.
+        let drums = Instrument::ALL.into_iter().filter(|&i| i != Instrument::Rhythm);
+        for drum in drums {
+            assert!(kit.instruments.contains(&drum), "{drum:?}");
+        }
         let line = Staff::of(StaffKind::Line);
         assert_eq!(line.instrument_or(Instrument::Snare), Instrument::Rhythm);
         assert_eq!(line.instrument_near(3.0), Instrument::Rhythm);

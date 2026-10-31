@@ -37,13 +37,10 @@ pub const CYCLE_TUPLET_SPECS: [TupletSpec; 5] = [
 ];
 
 impl VoiceBar {
-    /// Toggle the accent of the head of `instrument` at index `idx`. No
-    /// change on a rest; `None` on a note without that head.
+    /// Toggle the accent of the head of `instrument` at index `idx`. `None`
+    /// on a rest or a note without that head, as nothing changes.
     pub fn toggle_accent(&mut self, idx: BeatIdx, instrument: Instrument) -> Option<Modification> {
         let b = self.beats.get_mut(idx)?;
-        if b.is_rest() {
-            return Some(ToggleAccent(idx, !b.accented()));
-        }
         let head = b.head_mut(instrument)?;
         let accented = !head.accented();
         head.set_accented(accented);
@@ -51,13 +48,10 @@ impl VoiceBar {
     }
 
     /// Toggle the soft (ghost note) flag of the head of `instrument` at
-    /// index `idx`; a soft head loses its accent. No change on a rest;
-    /// `None` on a note without that head.
+    /// index `idx`; a soft head loses its accent. `None` on a rest or a
+    /// note without that head, as nothing changes.
     pub fn toggle_soft(&mut self, idx: BeatIdx, instrument: Instrument) -> Option<Modification> {
         let b = self.beats.get_mut(idx)?;
-        if b.is_rest() {
-            return Some(Modification::ToggleSoft(idx, !b.soft()));
-        }
         let head = b.head_mut(instrument)?;
         let soft = !head.soft();
         head.set_soft(soft);
@@ -82,14 +76,19 @@ impl VoiceBar {
     }
 
     /// Play the head of `instrument` at `idx` with its next technique (see
-    /// [`Head::with_next_technique`]). `None` without that head.
+    /// [`Head::with_next_technique`]). `None` without that head, or for an
+    /// instrument of one technique, as nothing changes.
     pub fn cycle_technique(
         &mut self,
         idx: BeatIdx,
         instrument: Instrument,
     ) -> Option<Modification> {
         let head = self.beats.get_mut(idx)?.head_mut(instrument)?;
-        *head = head.with_next_technique();
+        let next = head.with_next_technique();
+        if next == *head {
+            return None;
+        }
+        *head = next;
         Some(Modification::SetTechnique(idx, instrument, head.technique()))
     }
 
@@ -533,6 +532,27 @@ mod tests {
         let mut rest = parse_score("4/4 H:q r:q r:h").unwrap();
         rest.measures_mut()[0].first_voice_mut().set_tuplet(1, Some(triplet), true, Snare).unwrap();
         assert!(format_score(&rest).unwrap().starts_with("4/4 H:q S:t8 S:t8 S:t8"));
+        // On the one line too, a ghost note stays a ghost note.
+        let mut line = parse_score("4/4 (q) r:q r:h").unwrap();
+        let voice = line.measures_mut()[0].first_voice_mut();
+        voice.set_tuplet(0, Some(triplet), true, crate::Instrument::Rhythm).unwrap();
+        voice.set_tuplet(0, None, true, crate::Instrument::Rhythm).unwrap();
+        voice.dissolve_tuplet_group(0).unwrap();
+        let text = format_score(&line).unwrap();
+        assert!(text.starts_with("4/4 (q)") || text.starts_with("4/4 (e)"), "{text}");
+    }
+
+    #[test]
+    fn a_tool_that_changes_nothing_says_so() {
+        use crate::Instrument::{Kick, Snare};
+        use crate::notation::parse_score;
+        let mut score = parse_score("4/4 S:q r:q K:h").unwrap();
+        let voice = score.measures_mut()[0].first_voice_mut();
+        // A rest has no head to accent or ghost; the kick plays one way.
+        assert!(voice.toggle_accent(1, Snare).is_none());
+        assert!(voice.toggle_soft(1, Snare).is_none());
+        assert!(voice.cycle_technique(2, Kick).is_none());
+        assert!(voice.cycle_technique(0, Snare).is_some());
     }
 
     #[test]
