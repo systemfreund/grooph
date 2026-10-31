@@ -163,7 +163,10 @@ spread across callers.
    on the cursor's beat, "Technique" (O) steps through its techniques.
    The library's "New drum groove" starts one bar of two voices on the
    kit's staff, asking first if the score has unsaved changes
-   (`PendingLoad::NewKitScore`). The one line edits as before: its pen is `Rhythm`, and the
+   (`PendingLoad::NewKitScore`). A drum is struck by one voice at a time:
+   a tool whose edit has two voices strike an instrument of the kit at the
+   same tick is refused (`Measure::doubled_instrument`, checked after each
+   tool in `apply_tool`). The one line edits as before: its pen is `Rhythm`, and the
    kit's tools do nothing there.
 7. Both staves are one model, `grooph_layout::staff::Staff`, which
    `Staff::of(StaffKind)` gives (`LayoutOpts::staff_model`; the only match

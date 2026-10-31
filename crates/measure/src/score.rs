@@ -227,6 +227,20 @@ mod tests {
     use crate::TimeSignature;
 
     #[test]
+    fn a_drum_is_struck_by_one_voice_at_a_time() {
+        use crate::Instrument;
+        use crate::notation::parse_score;
+        let doubled = parse_score("4/4 S-H:q H:q H:h ; S:q K:q K:h").unwrap();
+        assert_eq!(doubled.measures()[0].doubled_instrument(), Some(Instrument::Snare));
+        // The same drum at another time, or another drum at the same time.
+        let fine = parse_score("4/4 S-H:e H:e H:q H:h ; r:e S:e K:q K:h").unwrap();
+        assert_eq!(fine.measures()[0].doubled_instrument(), None);
+        // The metronome's click and counter rhythm sound together.
+        let rhythms = parse_score("4/4 q q q q ; q q q q").unwrap();
+        assert_eq!(rhythms.measures()[0].doubled_instrument(), None);
+    }
+
+    #[test]
     fn a_cursor_moves_to_the_beat_sounding_in_another_voice() {
         let mut score = crate::notation::parse_score("4/4 e e e e e e e e ; q q h").unwrap();
         let on = |s: &Score, beat, voice| s.cursor_in_voice(Cursor::in_voice(0, 0, beat), voice);

@@ -138,7 +138,18 @@ impl Grooph {
 
         debug_assert!(tool.kind.is_mutating());
 
-        let committed = self.with_undo_snapshot(|g| g.execute_mutating_tool(tool));
+        let committed = self.with_undo_snapshot(|g| {
+            let before = (g.editor.doc().score.clone(), g.editor.doc().cursor);
+            let changed = g.execute_mutating_tool(tool);
+            // A drum is struck by one voice at a time: an edit that has
+            // two voices strike it together is refused.
+            if changed && g.current_measure().doubled_instrument().is_some() {
+                let doc = g.editor.doc_mut();
+                (doc.score, doc.cursor) = before;
+                return false;
+            }
+            changed
+        });
         if committed {
             info!("applied tool: {}", tool.id);
         }
@@ -593,6 +604,27 @@ mod tests {
             apply(&mut app, "edit.undo");
         }
         assert_eq!(text(&app), "4/4 q q q q");
+    }
+
+    #[test]
+    fn a_drum_is_not_struck_by_both_voices_at_once() {
+        use grooph_measure::Instrument::Snare;
+        let mut app = editing("4/4 S-H:q H:q H:q H:q ; K:q r:q K:q r:q");
+        app.editor.instrument = Snare;
+        // The snare is above on the first beat: not below as well.
+        app.editor.doc_mut().cursor = Cursor::in_voice(0, 1, 0);
+        apply(&mut app, "modify.toggle.head");
+        app.editor.doc_mut().cursor = Cursor::in_voice(0, 1, 1);
+        apply(&mut app, "modify.toggle.rest_note");
+        assert_eq!(text(&app), "4/4 S-H:q H:q H:q H:q ; K:q S:q K:q r:q");
+        // Below on the second beat, so not above there.
+        app.editor.doc_mut().cursor = Cursor::in_voice(0, 0, 1);
+        apply(&mut app, "modify.toggle.head");
+        assert_eq!(text(&app), "4/4 S-H:q H:q H:q H:q ; K:q S:q K:q r:q");
+        assert_eq!(app.editor.doc().cursor, Cursor::in_voice(0, 0, 1));
+        // A refused edit leaves nothing to undo.
+        apply(&mut app, "edit.undo");
+        assert_eq!(text(&app), "4/4 S-H:q H:q H:q H:q ; K:q r:q K:q r:q");
     }
 
     #[test]
