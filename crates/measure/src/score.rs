@@ -99,11 +99,15 @@ impl Score {
     }
 
     /// `cursor` moved onto the score: the last measure, voice or beat where
-    /// it is past it.
+    /// it is past it. An empty score (only possible by building one by hand,
+    /// since [`Score::new`] and loading refuse it) gives [`Cursor::start`].
     pub fn clamp_cursor(&self, cursor: Cursor) -> Cursor {
-        let measure_idx = cursor.measure_idx.min(self.len() - 1);
+        let Some(measure_idx) = self.len().checked_sub(1).map(|last| cursor.measure_idx.min(last))
+        else {
+            return Cursor::start();
+        };
         let measure = &self.measures[measure_idx];
-        let voice = cursor.voice.min(measure.voices().len() - 1);
+        let voice = cursor.voice.min(measure.voices().len().saturating_sub(1));
         let beats = measure.voice(voice).map_or(0, |v| v.beats().len());
         Cursor { measure_idx, voice, beat_idx: cursor.beat_idx.min(beats.saturating_sub(1)) }
     }
@@ -226,6 +230,12 @@ mod tests {
         assert_eq!(back, Cursor::at(2, 5));
         let lower = Cursor::in_voice(1, 1, 3);
         assert_eq!(ron::from_str::<Cursor>(&ron::to_string(&lower).unwrap()).unwrap(), lower);
+    }
+
+    #[test]
+    fn clamp_cursor_on_a_hand_built_empty_score_is_the_start() {
+        let empty = Score { staff: StaffKind::Line, measures: Vec::new() };
+        assert_eq!(empty.clamp_cursor(Cursor::in_voice(3, 1, 2)), Cursor::start());
     }
 
     #[test]
