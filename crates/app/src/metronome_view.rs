@@ -37,7 +37,6 @@ use grooph_measure::counter::{
 };
 use grooph_measure::grid::DEFAULT_GRID;
 use grooph_measure::score::Score;
-use grooph_measure::tempo::ScoreTiming;
 use grooph_measure::{Beat, Cursor, Measure, TimeSignature, VoiceIdx};
 use grooph_render::{highlight_color, playback_cursor_stroke};
 use std::cell::RefCell;
@@ -313,15 +312,9 @@ impl Grooph {
         &self.editor.docs.metronome.score.measures()[0]
     }
 
-    /// The silent bar the metronome plays: only its clicks sound.
-    pub(crate) fn metronome_score(&self) -> Score {
-        Score::single(Measure::new(self.metronome_meter()))
-    }
-
     /// Bars in the score being played, for the tempo ramp's loops.
-    /// Agrees with [`Self::played_score`] without building the bar.
     pub(crate) fn played_bars(&self) -> usize {
-        if self.calibrating() || self.metronome_mode() { 1 } else { self.editor.doc().score.len() }
+        self.played_score().len()
     }
 
     /// Open the metronome's document, on its first click.
@@ -503,17 +496,6 @@ impl Grooph {
         self.metronome_doc_bar().single_voice(MetronomeVoice::Counter.idx())
     }
 
-    /// The counter rhythm the audio plays: the metronome meter's, in the
-    /// metronome tab only.
-    pub(crate) fn played_counter(&self) -> CounterBars {
-        let mut counter = CounterBars::default();
-        if self.metronome_mode() {
-            let ts = self.metronome_meter();
-            counter.set(ts, self.counter_bar());
-        }
-        counter
-    }
-
     /// Ratios the metronome meter offers for a counter rhythm.
     pub(crate) fn counter_choices(&self) -> Vec<Ratio> {
         counter_ratios(self.metronome_meter())
@@ -645,8 +627,7 @@ impl Grooph {
         }
         let (tick, _) = audio.playback_position()?;
         let bar_ticks = DEFAULT_GRID.ticks_per_measure(ts) as f64;
-        let ticks_per_sec = ScoreTiming::from_score(&self.metronome_score(), self.current_bpm())
-            .ticks_per_sec_in_measure(0);
+        let ticks_per_sec = self.score_timing().ticks_per_sec_in_measure(0);
         let playback = &self.playback_ctl.playback;
         let heard = match playback.last_update {
             Some(last) => playback.heard_tick + (now - last).max(0.0) * ticks_per_sec,
@@ -668,8 +649,7 @@ impl Grooph {
             return false;
         };
         let bar_ticks = DEFAULT_GRID.ticks_per_measure(ts) as f64;
-        let ticks_per_sec = ScoreTiming::from_score(&self.metronome_score(), self.current_bpm())
-            .ticks_per_sec_in_measure(0);
+        let ticks_per_sec = self.score_timing().ticks_per_sec_in_measure(0);
         tick - self.playback_ctl.audio_cfg.latency_s() * ticks_per_sec >= -bar_ticks
     }
 

@@ -1107,7 +1107,7 @@ impl Grooph {
     /// The count under the staff, shown in every tab; opens its picker. The
     /// switch brings back the last count that fits the score.
     fn counting_row(&mut self, ui: &mut Ui) {
-        let score = self.played_score().into_owned();
+        let score = self.played_score().clone();
         let counting = &mut self.ui.counting;
         if counting.base != CountingBase::Off {
             self.ui.shell.last_counting = Some(counting.base);
