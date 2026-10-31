@@ -918,6 +918,7 @@ impl Grooph {
         match pending {
             PendingLoad::Pattern(id) => self.load_pattern(id),
             PendingLoad::Link(link) => self.apply_link(*link),
+            PendingLoad::NewKitScore => self.new_kit_score(),
         }
     }
 

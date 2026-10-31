@@ -371,6 +371,8 @@ pub(crate) struct UiShell {
 pub(crate) enum PendingLoad {
     Pattern(u64),
     Link(Box<SharedLink>),
+    /// A new drum groove (see `Grooph::new_kit_score`).
+    NewKitScore,
 }
 
 #[cfg(test)]

@@ -7,12 +7,18 @@
 //! the note values write it on a rest, accent and ghost change its head, and
 //! "Toggle Instrument" adds it to the beat or takes it away. Picking one, in
 //! the row or by a tap on its head, moves the cursor to its voice: the feet
-//! below, the hands above (`Instrument::default_voice`); "Voice" moves it to
-//! the other voice for a head off its usual side.
+//! below, the hands above (`Instrument::default_voice`); "Upper" and "Lower"
+//! move it to a voice for a head off its usual side. The library's "New
+//! drum groove" starts a score on the kit's staff.
 
 use crate::Grooph;
+use crate::Mode;
+use crate::documents::Document;
+use crate::shell::Tab;
+use crate::state::PendingLoad;
 use crate::tools::{Modifier, ToolKind, all_tools};
-use eframe::egui::{Button, RichText, Ui, Vec2};
+use eframe::egui::scroll_area::{ScrollBarVisibility, ScrollSource};
+use eframe::egui::{Button, RichText, ScrollArea, Ui, Vec2};
 use grooph_measure::{Cursor, Instrument, Measure, Score, StaffKind, VoiceIdx};
 
 /// The name of `instrument` on its button.
@@ -31,57 +37,69 @@ pub(crate) fn instrument_label(instrument: Instrument) -> &'static str {
     }
 }
 
+/// Height of the row's buttons.
+const ROW_HEIGHT: f32 = 36.0;
+
 /// A kit score's two voices, hands above and feet below.
 const KIT_VOICES: usize = 2;
 
 impl Grooph {
-    /// The kit's row above the tools, on a staff of several instruments.
+    /// The kit's row above the tools, on a staff of several instruments:
+    /// one line that scrolls sideways, like the tools', the head's tools
+    /// first, then the instruments and the voices.
     pub(crate) fn kit_palette(&mut self, ui: &mut Ui) {
         let staff = self.staff_model();
         if staff.one_line() {
             return;
         }
         let chosen = self.edit_instrument();
-        let height = 36.0;
-        ui.horizontal_wrapped(|ui| {
-            for &instrument in staff.instruments {
-                let button = Button::selectable(
-                    instrument == chosen,
-                    RichText::new(instrument_label(instrument)).size(16.0),
-                )
-                .min_size(Vec2::new(0.0, height));
-                if ui.add(button).clicked() {
-                    self.pick_instrument(instrument);
-                }
-            }
-            ui.separator();
-            let voice = self.editor.doc().cursor.voice;
-            let other = if voice == 0 { "Voice ↓" } else { "Voice ↑" };
-            if ui
-                .add(Button::new(RichText::new(other).size(16.0)).min_size(Vec2::new(0.0, height)))
-                .on_hover_text("Edit the other voice: hands above, feet below")
-                .clicked()
-            {
-                self.go_to_voice(if voice == 0 { 1 } else { 0 });
-            }
-            for (modifier, label, hover) in [
-                (Modifier::ToggleHead, "+/−", "Add the instrument here, or take it away (H)"),
-                (Modifier::CycleTechnique, "Technique", "Play it open, closed, on the rim … (O)"),
-            ] {
-                let tool = all_tools().iter().find(|t| t.kind == ToolKind::Modify(modifier));
-                if ui
-                    .add(
-                        Button::new(RichText::new(label).size(16.0))
-                            .min_size(Vec2::new(0.0, height)),
-                    )
-                    .on_hover_text(hover)
-                    .clicked()
-                    && let Some(tool) = tool
-                {
-                    self.apply_tool(tool);
-                }
-            }
-        });
+        let voice = self.editor.doc().cursor.voice;
+        let button = |label: &str, selected: bool| {
+            Button::selectable(selected, RichText::new(label).size(16.0))
+                .min_size(Vec2::new(0.0, ROW_HEIGHT))
+        };
+        ScrollArea::horizontal()
+            .id_salt("kit_palette")
+            .scroll_source(ScrollSource::ALL)
+            .scroll_bar_visibility(ScrollBarVisibility::AlwaysHidden)
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    for (modifier, label, hover) in [
+                        (
+                            Modifier::ToggleHead,
+                            "+/−",
+                            "Add the instrument here, or take it away (H)",
+                        ),
+                        (Modifier::CycleTechnique, "Technique", "Open, closed, on the rim, … (O)"),
+                    ] {
+                        let tool =
+                            all_tools().iter().find(|t| t.kind == ToolKind::Modify(modifier));
+                        let framed = Button::new(RichText::new(label).size(16.0))
+                            .min_size(Vec2::new(0.0, ROW_HEIGHT));
+                        if ui.add(framed).on_hover_text(hover).clicked()
+                            && let Some(tool) = tool
+                        {
+                            self.apply_tool(tool);
+                        }
+                    }
+                    ui.separator();
+                    for &instrument in staff.instruments {
+                        let label = instrument_label(instrument);
+                        if ui.add(button(label, instrument == chosen)).clicked() {
+                            self.pick_instrument(instrument);
+                        }
+                    }
+                    ui.separator();
+                    for (v, label, hover) in [
+                        (0, "Upper", "Edit the upper voice: the hands"),
+                        (1, "Lower", "Edit the lower voice: the feet"),
+                    ] {
+                        if ui.add(button(label, voice == v)).on_hover_text(hover).clicked() {
+                            self.go_to_voice(v);
+                        }
+                    }
+                });
+            });
         ui.add_space(4.0);
     }
 
@@ -108,9 +126,21 @@ impl Grooph {
         doc.cursor = doc.score.cursor_in_voice(cursor, voice);
     }
 
-    /// Start a new score on the kit's staff, one bar of the current meter
-    /// with its two voices of rests (an undoable change).
+    /// Start a new drum groove in the score tab, asking first if its score
+    /// has unsaved changes (as a pattern loaded from the library does).
+    pub(crate) fn request_new_kit_score(&mut self) {
+        match self.editor.docs.score.dirty {
+            true => self.ui.pending_load = Some(PendingLoad::NewKitScore),
+            false => self.new_kit_score(),
+        }
+    }
+
+    /// Replace the score tab's score with a new drum groove, one bar of the
+    /// current meter with its two voices of rests on the kit's staff (an
+    /// undoable change), and edit it.
     pub(crate) fn new_kit_score(&mut self) {
+        self.stop_transport();
+        self.show_document(Document::Score);
         let mut bar = Measure::new(self.current_measure().time_signature());
         bar.fill_voices(KIT_VOICES);
         self.with_undo_snapshot(|app| {
@@ -120,6 +150,9 @@ impl Grooph {
             doc.active_pattern_id = None;
             true
         });
+        self.ui.picker = None;
+        self.select_tab(Tab::Score);
+        self.ui.mode = Mode::Edit;
         self.pick_instrument(self.editor.instrument);
     }
 }

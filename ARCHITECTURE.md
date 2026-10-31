@@ -159,10 +159,11 @@ spread across callers.
    picks its instrument too. Picking one moves the cursor to its default
    voice, onto the beat sounding then (`Score::cursor_in_voice`), and a
    kit measure without that voice gets it (`Measure::fill_voices`);
-   "Voice" moves it to the other. "+/−" (H) adds or removes the head on
-   the cursor's beat, "Technique" (O) steps through its techniques. The
-   score tab's 🥁 starts a new drum groove: one bar of two voices on the
-   kit's staff. The one line edits as before: its pen is `Rhythm`, and the
+   "Upper"/"Lower" move it to a voice. "+/−" (H) adds or removes the head
+   on the cursor's beat, "Technique" (O) steps through its techniques.
+   The library's "New drum groove" starts one bar of two voices on the
+   kit's staff, asking first if the score has unsaved changes
+   (`PendingLoad::NewKitScore`). The one line edits as before: its pen is `Rhythm`, and the
    kit's tools do nothing there.
 7. Both staves are one model, `grooph_layout::staff::Staff`, which
    `Staff::of(StaffKind)` gives (`LayoutOpts::staff_model`; the only match
