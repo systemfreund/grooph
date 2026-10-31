@@ -263,7 +263,9 @@ pub struct PlaybackOptions {
     pub gap: GapClick,
     /// Stepwise tempo change, starting at the score tempo.
     pub ramp: TempoRamp,
-    /// What the metronome clicks in each meter, over a score.
+    /// What the metronome clicks in each meter, over a score. Only
+    /// [`Played::Score`] reads it; [`Played::Clicks`] takes its clicks from
+    /// the score itself.
     pub click: ClickBars,
     /// What the played score is.
     pub played: Played,
