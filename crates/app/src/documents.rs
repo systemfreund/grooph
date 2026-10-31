@@ -446,9 +446,10 @@ mod tests {
         for tab in [Tab::Practice, Tab::Metronome, Tab::More, Tab::Score] {
             app.select_tab(tab);
             let state = PersistedState::from_app(&app);
-            assert_eq!(text(&state.score), groove, "{tab:?}");
-            assert_eq!(text(state.practice_score.as_ref().unwrap()), practice, "{tab:?}");
-            assert!(state.dirty, "{tab:?}");
+            assert_eq!(text(&state.score_doc.score), groove, "{tab:?}");
+            let practice_doc = state.practice_doc.as_ref().unwrap();
+            assert_eq!(text(&practice_doc.score), practice, "{tab:?}");
+            assert!(state.score_doc.dirty, "{tab:?}");
             let back = restart(&state);
             assert_eq!(back.tab(), tab);
             // More reopens on the document it was opened from.
@@ -462,16 +463,13 @@ mod tests {
     #[test]
     fn a_state_saved_before_keeps_its_score_in_the_score_tab() {
         let old = parse_score("3/4 q e e q").unwrap();
-        let state = PersistedState {
-            score: old.clone(),
-            cursor: Cursor::at(0, 2),
-            dirty: true,
-            ..Default::default()
-        };
-        // As saved before: no Practice rhythm, the tab still called Edit.
-        let ron = ron::to_string(&state).unwrap().replace("tab:Metronome", "tab:Edit");
-        let ron = ron.replace("practice_score:None,", "");
-        assert!(!ron.contains("practice_score:"), "{ron}");
+        // As saved before (version 2): the score tab's document flat, no
+        // Practice rhythm, the tab still called Edit.
+        let ron = format!(
+            "(version:2,score:{},cursor:{},dirty:true,tab:Edit)",
+            ron::to_string(&old).unwrap(),
+            ron::to_string(&Cursor::at(0, 2)).unwrap()
+        );
         let (state, backup) = crate::persist::restore(Some(&ron));
         assert!(backup.is_none());
         assert_eq!(state.tab, Tab::Score);

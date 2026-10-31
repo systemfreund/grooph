@@ -8,12 +8,16 @@
 //! migrated, and whenever anything was dropped the stored text is kept under
 //! a backup key that later saves leave alone.
 
-use crate::{PERSISTED_STATE_VERSION, PersistedState};
+use crate::{PERSISTED_STATE_VERSION, PersistedState, SavedDoc};
 use grooph_measure::{BeatIdx, Cursor, Measure, Score};
 use log::{info, warn};
 use ron::value::RawValue;
 use serde::de::{Deserialize, Deserializer, MapAccess, Visitor};
 use std::fmt;
+
+/// The fields holding a rhythm document ([`SavedDoc`]), whose own fields
+/// are restored one by one too.
+const DOC_FIELDS: [&str; 2] = ["score_doc", "practice_doc"];
 
 /// Prefix of the keys the stored text is backed up under, followed by the
 /// version it was saved with (`grooph_state_backup_v2`, then `_v2_2`, ...).
@@ -62,10 +66,21 @@ pub(crate) fn restore(saved: Option<&str>) -> (PersistedState, Option<StateBacku
         warn!("Saved state: `version` does not read, assuming the current one");
     }
     let version = stored_version.flatten().unwrap_or(PERSISTED_STATE_VERSION);
-    if version < PERSISTED_STATE_VERSION {
-        migrate(version, &mut fields);
-    }
+    let migrated = version < PERSISTED_STATE_VERSION && migrate(version, &mut fields);
     fields.retain(|(name, _)| name != "version");
+    // Within a document too, a field that does not read falls back alone.
+    let mut doc_dropped = false;
+    for (name, raw) in &mut fields {
+        if DOC_FIELDS.contains(&name.as_str())
+            && let Some((repaired, dropped)) = repair_doc(raw)
+        {
+            for field in &dropped {
+                warn!("Saved state: `{name}.{field}` does not read, using its default");
+            }
+            doc_dropped |= !dropped.is_empty();
+            *raw = repaired;
+        }
+    }
 
     // Serde ignores unknown fields and reads each field independently of the
     // others, so the fields that read alone, each name once, also read
@@ -85,14 +100,19 @@ pub(crate) fn restore(saved: Option<&str>) -> (PersistedState, Option<StateBacku
         PersistedState::default()
     });
 
-    let complete =
-        dropped.is_empty() && read_together && version_read && version == PERSISTED_STATE_VERSION;
+    let complete = dropped.is_empty()
+        && !doc_dropped
+        && read_together
+        && version_read
+        && (version == PERSISTED_STATE_VERSION || migrated);
     (state, if complete { None } else { backup(version) })
 }
 
 /// Brings the fields of a state saved with an older `version` up to the
-/// current one.
-fn migrate(version: u8, fields: &mut Vec<(String, Box<RawValue>)>) {
+/// current one. Returns whether all of it was carried over, so that the
+/// stored text needs no backup; a version 1 state is always backed up.
+fn migrate(version: u8, fields: &mut Vec<(String, Box<RawValue>)>) -> bool {
+    let mut carried = version >= 2;
     if version < 2 {
         // Version 1 held one measure and the beat index in it; version 2 a
         // score and a cursor into it.
@@ -106,6 +126,64 @@ fn migrate(version: u8, fields: &mut Vec<(String, Box<RawValue>)>) {
             fields.push(("cursor".into(), cursor));
         }
     }
+    if version < 3 {
+        // Version 2 kept the score tab's document in flat fields and
+        // Practice's rhythm, if any, as `practice_score`; version 3 each
+        // document as one entry of the same shape.
+        let score_doc: Vec<_> = ["score", "cursor", "dirty", "active_pattern_id"]
+            .into_iter()
+            .filter_map(|name| Some((name.to_owned(), take(fields, name)?)))
+            .collect();
+        if !score_doc.is_empty() {
+            let doc = struct_ron(score_doc.iter().map(|(n, r)| (n, r)));
+            carried &= push_ron(fields, "score_doc", doc);
+        }
+        let practice_score = take(fields, "practice_score");
+        let practice_cursor = take(fields, "practice_cursor");
+        // `None` (or no field): saved before Practice had its own rhythm.
+        let score = practice_score.and_then(|raw| match raw.into_rust::<Option<Box<RawValue>>>() {
+            Ok(score) => score,
+            // Kept as it was: it drops alone, and the text is backed up.
+            Err(_) => {
+                carried = false;
+                Some(raw)
+            }
+        });
+        if let Some(score) = score {
+            let doc = [("score".to_owned(), score)]
+                .into_iter()
+                .chain(practice_cursor.map(|raw| ("cursor".to_owned(), raw)))
+                .collect::<Vec<_>>();
+            let doc = struct_ron(doc.iter().map(|(n, r)| (n, r)));
+            carried &= push_ron(fields, "practice_doc", format!("Some({doc})"));
+        }
+    }
+    carried
+}
+
+/// Adds the field `name` with the value `ron`; whether it reads as RON.
+fn push_ron(fields: &mut Vec<(String, Box<RawValue>)>, name: &str, ron: String) -> bool {
+    let raw = RawValue::from_boxed_ron(ron.into_boxed_str());
+    raw.map(|raw| fields.push((name.to_owned(), raw))).is_ok()
+}
+
+/// A stored document (`(…)` or `Some((…))`) with only its fields that read,
+/// and the names of the ones dropped; `None` for `None` or for text that is
+/// no struct, which then reads or drops as a whole.
+fn repair_doc(raw: &RawValue) -> Option<(Box<RawValue>, Vec<String>)> {
+    let (Fields(fields), some) = match raw.into_rust::<Fields>() {
+        Ok(fields) => (fields, false),
+        Err(_) => (raw.into_rust::<Option<Fields>>().ok()??, true),
+    };
+    let (kept, dropped): (Vec<_>, Vec<_>) =
+        fields.iter().enumerate().partition(|(i, (name, raw))| {
+            !fields[i + 1..].iter().any(|(later, _)| later == name)
+                && ron::from_str::<SavedDoc>(&struct_ron([(name, raw)])).is_ok()
+        });
+    let doc = struct_ron(kept.iter().map(|(_, (name, raw))| (name, raw)));
+    let doc = if some { format!("Some({doc})") } else { doc };
+    let dropped = dropped.into_iter().map(|(_, (name, _))| name.clone()).collect();
+    Some((RawValue::from_boxed_ron(doc.into_boxed_str()).ok()?, dropped))
 }
 
 fn field<'a>(fields: &'a [(String, Box<RawValue>)], name: &str) -> Option<&'a RawValue> {
@@ -156,7 +234,7 @@ mod tests {
     use super::{BACKUP_KEY_PREFIX, StateBackup, restore};
     use crate::presets::builtin_presets;
     use crate::shell::Tab;
-    use crate::{PERSISTED_STATE_VERSION, PersistedState};
+    use crate::{PERSISTED_STATE_VERSION, PersistedState, SavedDoc};
     use grooph_measure::duration::e;
     use grooph_measure::{Beat, Cursor, Measure, Score, TimeSignature};
     use std::collections::HashMap;
@@ -208,17 +286,97 @@ mod tests {
 
     #[test]
     fn a_broken_score_falls_back_alone() {
-        let mut state = saved_state();
-        state.score = Score::single(Measure::new(TimeSignature::SEVEN_EIGHT));
-        let saved = ron::to_string(&state).unwrap();
-        // Seven eighths in 6/8: an over-full measure.
-        assert_eq!(saved.matches("beats:7,").count(), 1, "{saved}");
-        let saved = saved.replace("beats:7,", "beats:6,");
-        let (s, backup) = restore(Some(&saved));
-        assert!(s.score.same_beats(&PersistedState::default().score));
-        assert_library_and_presets_kept(&s);
-        assert_eq!(s.bpm, 93);
-        assert_eq!(backup.unwrap().ron, saved);
+        for practice in [false, true] {
+            let mut state = saved_state();
+            // The broken score in the score tab's document, or in Practice's.
+            let mut doc = SavedDoc {
+                score: Score::single(Measure::new(TimeSignature::SEVEN_EIGHT)),
+                cursor: Cursor::at(0, 1),
+                dirty: true,
+                ..Default::default()
+            };
+            let mut plain = SavedDoc { dirty: true, ..Default::default() };
+            if practice {
+                std::mem::swap(&mut doc, &mut plain);
+            }
+            state.score_doc = doc;
+            state.practice_doc = Some(plain);
+            let saved = ron::to_string(&state).unwrap();
+            // Seven eighths in 6/8: an over-full measure.
+            assert_eq!(saved.matches("beats:7,").count(), 1, "{saved}");
+            let saved = saved.replace("beats:7,", "beats:6,");
+            let (s, backup) = restore(Some(&saved));
+            // Only the score falls back, the rest of its document stays.
+            let doc = if practice { s.practice_doc.as_ref().unwrap() } else { &s.score_doc };
+            assert!(doc.score.same_beats(&SavedDoc::default().score), "{practice}");
+            assert_eq!(doc.cursor, Cursor::at(0, 1));
+            assert!(doc.dirty);
+            assert!(s.score_doc.dirty && s.practice_doc.as_ref().unwrap().dirty);
+            assert_library_and_presets_kept(&s);
+            assert_eq!(s.bpm, 93);
+            assert_eq!(backup.unwrap().ron, saved);
+        }
+    }
+
+    /// The fields of a version 2 state: the score tab's document flat, and
+    /// Practice's rhythm as `practice_score` if `practice`.
+    fn version_2_state(practice: bool) -> String {
+        let state = saved_state();
+        let fields = ron::to_string(&state).unwrap();
+        let (doc, practice_doc) = (&state.score_doc, state.practice_doc.as_ref());
+        assert!(practice_doc.is_none());
+        let start = fields.find("score_doc:").unwrap();
+        let end = start + "score_doc:".len() + ron::to_string(doc).unwrap().len();
+        let flat = format!(
+            "score:{},cursor:{},dirty:true,active_pattern_id:Some(1)",
+            ron::to_string(&doc.score).unwrap(),
+            ron::to_string(&Cursor::at(0, 1)).unwrap(),
+        );
+        let practice = if practice {
+            format!(
+                ",practice_score:Some({}),practice_cursor:{}",
+                ron::to_string(&practice_score()).unwrap(),
+                ron::to_string(&Cursor::at(0, 2)).unwrap(),
+            )
+        } else {
+            String::new()
+        };
+        let fields = format!("{}{flat}{practice}{}", &fields[..start], &fields[end..]);
+        let fields = fields.replace(",practice_doc:None", "");
+        fields.replacen(&format!("version:{PERSISTED_STATE_VERSION}"), "version:2", 1)
+    }
+
+    fn practice_score() -> Score {
+        grooph_measure::notation::parse_score("4/4 q e e q q").unwrap()
+    }
+
+    #[test]
+    fn a_version_2_state_is_migrated_without_loss() {
+        for practice in [true, false] {
+            let saved = version_2_state(practice);
+            assert!(saved.contains("version:2,") && !saved.contains("score_doc"), "{saved}");
+            assert_eq!(saved.contains("practice_score"), practice, "{saved}");
+            let (s, backup) = restore(Some(&saved));
+            assert!(backup.is_none(), "{saved}");
+            assert_eq!(s.version, PERSISTED_STATE_VERSION);
+            let doc = &s.score_doc;
+            assert!(doc.score.same_beats(&saved_state().score_doc.score));
+            assert_eq!(doc.cursor, Cursor::at(0, 1));
+            assert!(doc.dirty);
+            assert_eq!(doc.active_pattern_id, Some(1));
+            // Saved before Practice had its own: none, so it gets a new one.
+            match &s.practice_doc {
+                Some(doc) => {
+                    assert!(practice);
+                    assert!(doc.score.same_beats(&practice_score()));
+                    assert_eq!(doc.cursor, Cursor::at(0, 2));
+                    assert!(!doc.dirty && doc.active_pattern_id.is_none());
+                }
+                None => assert!(!practice),
+            }
+            assert_library_and_presets_kept(&s);
+            assert_eq!(s.bpm, 93);
+        }
     }
 
     #[test]
@@ -279,8 +437,8 @@ mod tests {
         let saved =
             format!("(version:1,measure:{},cursor_idx:2,bpm:87)", ron::to_string(&m).unwrap());
         let (s, backup) = restore(Some(&saved));
-        assert_eq!(ron::to_string(&s.score), ron::to_string(&Score::single(m)));
-        assert_eq!(s.cursor, Cursor::at(0, 2));
+        assert_eq!(ron::to_string(&s.score_doc.score), ron::to_string(&Score::single(m)));
+        assert_eq!(s.score_doc.cursor, Cursor::at(0, 2));
         assert_eq!(s.bpm, 87);
         assert_eq!(s.version, PERSISTED_STATE_VERSION);
         assert_eq!(backup.unwrap().version, 1);
@@ -291,11 +449,11 @@ mod tests {
         // A score as the app saved it before beats had heads (#251): an
         // accented note, a ghost note and a rest.
         let old = r#"(measures:[{"beats":[(duration:Simple(Eighth),kind:Note,accented:true,soft:false,tuplet_group_id:None),(duration:Simple(Eighth),kind:Note,accented:false,soft:true,tuplet_group_id:None),(duration:Simple(Quarter),kind:Rest,accented:false,soft:false,tuplet_group_id:None)],"time_signature":(beats:2,beat_unit:4),"tuplet_anchors":{},"next_tuplet_id":1}])"#;
-        let saved = format!("(version:{PERSISTED_STATE_VERSION},score:{old})");
+        let saved = format!("(version:{PERSISTED_STATE_VERSION},score_doc:(score:{old}))");
         let (s, backup) = restore(Some(&saved));
         assert!(backup.is_none(), "the old score is read, nothing is dropped");
         let want = grooph_measure::notation::parse_score("2/4 >e (e) r:q").unwrap();
-        assert_eq!(ron::to_string(&s.score), ron::to_string(&want));
+        assert_eq!(ron::to_string(&s.score_doc.score), ron::to_string(&want));
     }
 
     #[test]
