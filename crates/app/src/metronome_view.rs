@@ -18,8 +18,9 @@
 //! three clicks against the four beats of 4/4. It plays in this tab only and
 //! shows as a second ring inside the first, one segment per click, tapped
 //! through the same levels. It is the staff's lower voice and can be edited
-//! like the click bar: the voice last tapped, on the staff or the ring, is
-//! the one the editor holds (see [`MetronomeState::voice`]).
+//! like the click bar: the editor holds both as one measure of two voices,
+//! and the voice of the cursor, last tapped on the staff or the ring, is the
+//! one edited (see [`MetronomeVoice`]).
 
 use crate::pickers::shown_groups;
 use crate::shell::paint_meter;
@@ -404,18 +405,20 @@ impl Grooph {
         let ts = bar.time_signature();
         editor.metronome.meter = ts;
         let cfg = &mut self.playback_ctl.audio_cfg;
-        let click = bar.single_voice(MetronomeVoice::Click.idx()).expect("a measure's first voice");
-        if !same_bar(&cfg.click.for_meter(ts), &click) {
-            cfg.click.set(click);
+        // Compared voice by voice, copied only when changed: this runs
+        // every frame.
+        let click = MetronomeVoice::Click.idx();
+        if cfg.click.for_meter(ts).first_voice().beats() != bar.first_voice().beats() {
+            cfg.click.set(bar.single_voice(click).expect("a measure's first voice"));
         }
-        let counter = bar.single_voice(MetronomeVoice::Counter.idx());
-        let same_counter = match (cfg.counter.for_meter(ts), &counter) {
+        let counter = MetronomeVoice::Counter.idx();
+        let same_counter = match (cfg.counter.for_meter(ts), bar.voice(counter)) {
             (None, None) => true,
-            (Some(a), Some(b)) => same_bar(a, b),
+            (Some(a), Some(b)) => a.first_voice().beats() == b.beats(),
             _ => false,
         };
         if !same_counter {
-            cfg.counter.set(ts, counter);
+            cfg.counter.set(ts, bar.single_voice(counter));
         }
     }
 
@@ -1603,6 +1606,15 @@ mod tests {
         assert!(same_bar(&app.click_bar(), &click));
         let counter = app.playback_ctl.audio_cfg.counter.for_meter(TimeSignature::FOUR_FOUR);
         assert_eq!(counter.map(|c| click_level(c, 0)), Some(ClickLevel::Off));
+    }
+
+    #[test]
+    fn the_click_fill_is_found_with_a_counter_rhythm() {
+        let mut app = metronome_app();
+        let fill = app.current_click_fill();
+        assert!(fill.is_some());
+        app.set_counter_ratio(Some(Ratio { n: 3, span: 4 }));
+        assert_eq!(app.current_click_fill(), fill);
     }
 
     #[test]

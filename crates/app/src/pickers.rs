@@ -652,14 +652,21 @@ impl Grooph {
         picked.is_some()
     }
 
+    /// Which of the metronome meter's ready-made click bars the click bar
+    /// is, if one: the click voice alone, the bar may hold a counter rhythm
+    /// below it.
+    pub(crate) fn current_click_fill(&self) -> Option<usize> {
+        let bar = self.click_bar();
+        click_fills(self.metronome_meter()).iter().position(|f| same_bar(&f.bar, &bar))
+    }
+
     /// Ready-made click bars of the metronome meter. Returns whether one was
     /// picked.
     /// Each shown as its notes, like the tool palette (see
     /// [`crate::metronome_view::ClickFill::tile`]).
     fn click_fill_choices(&mut self, ui: &mut Ui) -> bool {
         let fills = click_fills(self.metronome_meter());
-        let bar = &self.editor.score.measures()[0];
-        let current = fills.iter().position(|f| same_bar(&f.bar, bar));
+        let current = self.current_click_fill();
         let family = self.ui.music_font_id.family.clone();
         let mut picked = None;
         // Nine tiles wrap to many rows on a narrow phone: they scroll where

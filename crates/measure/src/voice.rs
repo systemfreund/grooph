@@ -25,9 +25,9 @@ pub type VoiceIdx = usize;
 /// and feet of a drum part, or a click bar and its counter rhythm). Every
 /// measure has at least one voice; all share its time signature.
 ///
-/// A measure reads and edits as its first voice (it dereferences to it), so
-/// code for one voice needs no change; [`Measure::voices`] and
-/// [`Measure::voice_mut`] reach the others.
+/// Code names the voice it reads or edits: [`Measure::first_voice`] is the
+/// upper one (the only one of a click bar or a line rhythm),
+/// [`Measure::voices`] and [`Measure::voice_mut`] reach the others.
 #[derive(Clone, Deserialize)]
 #[serde(try_from = "RawMeasure")]
 pub struct Measure {
