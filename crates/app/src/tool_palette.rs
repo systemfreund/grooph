@@ -139,13 +139,22 @@ impl Grooph {
         debug_assert!(tool.kind.is_mutating());
 
         let committed = self.with_undo_snapshot(|g| {
-            let before = (g.editor.doc().score.clone(), g.editor.doc().cursor);
+            // A drum is struck by one voice at a time: an edit that has two
+            // voices strike it together is refused. One there already (from
+            // a link, say) leaves the other edits of its measure alone.
+            let kit = !g.staff_model().one_line();
+            let before = kit.then(|| (g.editor.doc().cursor, g.current_measure().clone()));
             let changed = g.execute_mutating_tool(tool);
-            // A drum is struck by one voice at a time: an edit that has
-            // two voices strike it together is refused.
-            if changed && g.current_measure().doubled_instrument().is_some() {
+            if let Some((cursor, measure)) = before
+                && changed
+                && g.current_measure()
+                    .doubled_instruments()
+                    .iter()
+                    .any(|d| !measure.doubled_instruments().contains(d))
+            {
                 let doc = g.editor.doc_mut();
-                (doc.score, doc.cursor) = before;
+                doc.score.measures_mut()[cursor.measure_idx] = measure;
+                doc.cursor = cursor;
                 return false;
             }
             changed
@@ -625,6 +634,21 @@ mod tests {
         // A refused edit leaves nothing to undo.
         apply(&mut app, "edit.undo");
         assert_eq!(text(&app), "4/4 S-H:q H:q H:q H:q ; K:q r:q K:q r:q");
+
+        // A snare in both voices already, from a link: the other edits of
+        // the measure go through, a second doubling does not.
+        let mut app = editing("4/4 S-H:q H:q H:q H:q ; S:q r:q K:h");
+        app.editor.instrument = Snare;
+        app.editor.doc_mut().cursor = Cursor::in_voice(0, 0, 3);
+        apply(&mut app, "modify.toggle.accent");
+        assert_eq!(text(&app), "4/4 S-H:q H:q H:q H:q ; S:q r:q K:h");
+        apply(&mut app, "modify.toggle.head");
+        assert_eq!(text(&app), "4/4 S-H:q H:q H:q S-H:q ; S:q r:q K:h");
+        app.editor.doc_mut().cursor = Cursor::in_voice(0, 0, 2);
+        apply(&mut app, "modify.toggle.head");
+        app.editor.doc_mut().cursor = Cursor::in_voice(0, 1, 1);
+        apply(&mut app, "modify.toggle.head");
+        assert_eq!(text(&app), "4/4 S-H:q H:q S-H:q S-H:q ; S:q S:q K:h");
     }
 
     #[test]

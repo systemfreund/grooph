@@ -223,25 +223,26 @@ impl Measure {
         }
     }
 
-    /// An instrument of the kit that two voices strike at the same time,
-    /// if any: a drum is played once at a time, by one voice. The one
-    /// line's rhythm is left out, as the metronome's click and counter
+    /// The instruments of the kit that two voices strike at the same time,
+    /// with the tick: a drum is played once at a time, by one voice. The
+    /// one line's rhythm is left out, as the metronome's click and counter
     /// rhythm sound together as two rhythms.
-    pub fn doubled_instrument(&self) -> Option<Instrument> {
+    pub fn doubled_instruments(&self) -> Vec<(u32, Instrument)> {
         let mut struck: Vec<(u32, Instrument, usize)> = Vec::new();
+        let mut doubled = Vec::new();
         for (v, voice) in self.voices.iter().enumerate() {
             let onsets = DEFAULT_GRID.compute_onset_ticks(voice.beats());
             for (beat, tick) in voice.beats().iter().zip(onsets) {
                 for head in beat.heads().iter().filter(|h| h.instrument() != Instrument::Rhythm) {
                     let instrument = head.instrument();
                     if struck.iter().any(|&(t, i, w)| t == tick && i == instrument && w != v) {
-                        return Some(instrument);
+                        doubled.push((tick, instrument));
                     }
                     struck.push((tick, instrument, v));
                 }
             }
         }
-        None
+        doubled
     }
 
     /// Add copies of the voices of `other` below this measure's. Fails, and

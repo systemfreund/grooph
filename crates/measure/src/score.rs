@@ -231,13 +231,13 @@ mod tests {
         use crate::Instrument;
         use crate::notation::parse_score;
         let doubled = parse_score("4/4 S-H:q H:q H:h ; S:q K:q K:h").unwrap();
-        assert_eq!(doubled.measures()[0].doubled_instrument(), Some(Instrument::Snare));
+        assert_eq!(doubled.measures()[0].doubled_instruments(), vec![(0, Instrument::Snare)]);
         // The same drum at another time, or another drum at the same time.
         let fine = parse_score("4/4 S-H:e H:e H:q H:h ; r:e S:e K:q K:h").unwrap();
-        assert_eq!(fine.measures()[0].doubled_instrument(), None);
+        assert!(fine.measures()[0].doubled_instruments().is_empty());
         // The metronome's click and counter rhythm sound together.
         let rhythms = parse_score("4/4 q q q q ; q q q q").unwrap();
-        assert_eq!(rhythms.measures()[0].doubled_instrument(), None);
+        assert!(rhythms.measures()[0].doubled_instruments().is_empty());
     }
 
     #[test]

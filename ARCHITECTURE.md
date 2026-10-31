@@ -81,7 +81,9 @@ spread across callers.
   "Kit editing"): accent and ghost change its head, `toggle_head` adds or
   removes it, `cycle_technique` steps through its techniques, and a rest
   made a note (a duration, Enter, a tuplet) gets its head. A tuplet keeps
-  the instruments of the notes it is made of (`Heads::plain_accented`).
+  the notes it is made of: a new group's slots play plain heads of its
+  note's instruments (`Heads::plain`), a next tuplet or a dissolved one
+  moves each note's heads as they are.
 - `Duration` is `Simple`, `Dotted`, or `Tuplet(TupletSpec { n, m, base })`.
 - `Measure::set_beat` guarantees a valid measure length and fills gaps.
 - `DEFAULT_GRID` defines the valid duration grid and tick calculations.
@@ -164,10 +166,11 @@ spread across callers.
    The library's "New drum groove" starts one bar of two voices on the
    kit's staff, asking first if the score has unsaved changes
    (`PendingLoad::NewKitScore`). A drum is struck by one voice at a time:
-   a tool whose edit has two voices strike an instrument of the kit at the
-   same tick is refused (`Measure::doubled_instrument`, checked after each
-   tool in `apply_tool`). The one line edits as before: its pen is `Rhythm`, and the
-   kit's tools do nothing there.
+   a tool whose edit makes two voices strike an instrument of the kit at
+   the same tick is refused (`Measure::doubled_instruments`, compared
+   before and after each tool in `apply_tool`, so a doubling the score
+   already has does not block other edits). The one line edits as before:
+   its pen is `Rhythm`, and the kit's tools do nothing there.
 7. Both staves are one model, `grooph_layout::staff::Staff`, which
    `Staff::of(StaffKind)` gives (`LayoutOpts::staff_model`; the only match
    on the kind). A staff holds its lines as staff positions (half staff

@@ -345,15 +345,6 @@ impl Heads {
         plain
     }
 
-    /// Plain heads of the same instruments, each keeping its accent.
-    pub fn plain_accented(&self) -> Heads {
-        let mut plain = self.plain();
-        for (head, old) in plain.iter_mut().zip(self.iter()) {
-            head.set_accented(old.accented);
-        }
-        plain
-    }
-
     /// Add `head` in its place. Fails on a second head of its instrument
     /// or a head too many.
     pub fn insert(&mut self, head: Head) -> Result<(), InvalidHeads> {

@@ -240,8 +240,8 @@ impl VoiceBar {
     ///
     /// - Replaces the group's whole span with plain (non-tuplet) rests.
     /// - If the group held a note, the first new beat becomes a note, of
-    ///   the instruments of the first; an accent anywhere in the group moves
-    ///   to it.
+    ///   the heads of the first; an accent anywhere in the group moves to
+    ///   it.
     /// - Clears `tuplet_group_id` in the span and unregisters the anchor.
     /// - Returns the dissolved span and spec, or `None` if `idx` is not in a
     ///   tuplet.
@@ -251,10 +251,10 @@ impl VoiceBar {
         }
 
         if let Some(GroupSpan { start_idx, end_idx, id: group_id }) = self.tuplet_group_at(idx) {
-            // The instruments of the group's first note, and whether it
-            // held an accent
+            // The heads of the group's first note, and whether it held an
+            // accent
             let group = &self.beats[start_idx..=end_idx];
-            let first_note = group.iter().find(|b| b.is_note()).map(|b| b.heads().plain_accented());
+            let first_note = group.iter().find(|b| b.is_note()).map(|b| *b.heads());
             let had_any_accent = group.iter().any(Beat::accented);
 
             self.beats.drain(start_idx..=end_idx);
@@ -287,8 +287,8 @@ impl VoiceBar {
 
     /// Onsets of the notes in the tuplet group starting at `start_idx`, as
     /// `(offset_ticks, heads)`: grid ticks from the group start, sorted
-    /// ascending, with plain heads of the note's instruments, each keeping
-    /// its accent.
+    /// ascending, with the note's heads as they are (accent, ghost and
+    /// technique).
     ///
     /// `None` if no tuplet group starts at `start_idx`.
     fn tuplet_group_note_offsets(&self, start_idx: BeatIdx) -> Option<Vec<(u32, Heads)>> {
@@ -303,9 +303,7 @@ impl VoiceBar {
 
         let mut offsets: Vec<(u32, Heads)> = (group.start_idx..=group.end_idx)
             .filter(|&i| self.beats[i].is_note())
-            .map(|i| {
-                ((onsets[i] - start_onset).min(span_ticks), self.beats[i].heads().plain_accented())
-            })
+            .map(|i| ((onsets[i] - start_onset).min(span_ticks), *self.beats[i].heads()))
             .collect();
         offsets.sort_by_key(|e| e.0);
         Some(offsets)
@@ -318,8 +316,7 @@ impl VoiceBar {
     /// - Computes the new group's slot onsets relative to its start.
     /// - Greedily assigns each source note to the nearest free slot (the lower
     ///   index wins a tie), so no slot gets two notes.
-    /// - All other slots become rests; instruments and accents follow their
-    ///   source note.
+    /// - All other slots become rests; the heads follow their source note.
     ///
     /// Returns `false` if no tuplet group starts at `start_idx`.
     fn apply_tuplet_projection_at(
@@ -517,20 +514,21 @@ mod tests {
         use crate::notation::{format_score, parse_score};
         let triplet = TupletSpec { n: 3, m: 2, base: Eighth };
         // From a chord: every slot of the group plays its instruments, plain.
-        let mut score = parse_score("4/4 >S-H:q r:q r:h").unwrap();
+        let mut score = parse_score("4/4 >S-Ho:q r:q r:h").unwrap();
         let hands = score.measures_mut()[0].first_voice_mut();
         hands.set_tuplet(0, Some(triplet), true, Kick).unwrap();
         let text = format_score(&score).unwrap();
-        assert!(text.starts_with("4/4 >S-H:t8 S-H:t8 S-H:t8"), "{text}");
-        // To the next tuplet and dissolved, the notes keep their instruments.
+        assert!(text.starts_with("4/4 >S-Ho:t8 S-H:t8 S-H:t8"), "{text}");
+        // To the next tuplet and dissolved, the notes keep their heads as they
+        // are, the open hi-hat too.
         let hands = score.measures_mut()[0].first_voice_mut();
         hands.set_tuplet(0, None, true, Kick).unwrap();
         let text = format_score(&score).unwrap();
-        assert!(text.starts_with("4/4 >S-H:qt16 r:qt16 S-H:qt16 S-H:qt16"), "{text}");
+        assert!(text.starts_with("4/4 >S-Ho:qt16 r:qt16 S-H:qt16 S-H:qt16"), "{text}");
         let hands = score.measures_mut()[0].first_voice_mut();
         hands.dissolve_tuplet_group(0).unwrap();
         let text = format_score(&score).unwrap();
-        assert!(text.starts_with("4/4 >S-H:"), "{text}");
+        assert!(text.starts_with("4/4 >S-Ho:"), "{text}");
         // From a rest: notes of the instrument given.
         let mut rest = parse_score("4/4 H:q r:q r:h").unwrap();
         rest.measures_mut()[0].first_voice_mut().set_tuplet(1, Some(triplet), true, Snare).unwrap();
