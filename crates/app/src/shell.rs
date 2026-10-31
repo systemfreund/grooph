@@ -618,7 +618,11 @@ impl Grooph {
 
     pub(super) fn shell_ui(&mut self, ui: &mut Ui) {
         let tab = self.tab();
-        self.tab_bar(ui, tab);
+        // An editor has the screen to itself: Done leaves it, and the tool
+        // grid gets the tab bar's room.
+        if !matches!(self.ui.mode, Mode::Edit | Mode::TimeSignature(_)) {
+            self.tab_bar(ui, tab);
+        }
         let playing = self.ui.mode == Mode::Playback;
         match tab {
             Tab::Practice if playing => {
