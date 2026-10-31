@@ -493,9 +493,16 @@ mod tests {
         assert_eq!(app.editor.cursor, Cursor::in_voice(1, 1, 0));
         apply(&mut app, "nav.left");
         assert_eq!(app.editor.cursor, Cursor::in_voice(0, 1, 3));
+        apply(&mut app, "nav.start");
+        assert_eq!(app.editor.cursor, Cursor::in_voice(0, 1, 0));
         // The last measure has one voice.
         apply(&mut app, "nav.end");
         assert_eq!(app.editor.cursor, Cursor::at(2, 3));
+        // Into a last measure with two, End keeps the voice.
+        let mut two = editing("4/4 H:h H:h ; K:q K:q K:q K:q | H:h H:h ; K:h K:h");
+        two.editor.cursor = Cursor::in_voice(0, 1, 1);
+        apply(&mut two, "nav.end");
+        assert_eq!(two.editor.cursor, Cursor::in_voice(1, 1, 1));
         // A new measure has the voices of the one before.
         app.editor.cursor = Cursor::in_voice(0, 1, 0);
         app.append_measure();

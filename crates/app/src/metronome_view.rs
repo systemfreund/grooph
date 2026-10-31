@@ -402,9 +402,8 @@ impl Grooph {
         }
         let editor = &mut self.editor;
         editor.score.measures.truncate(1);
-        editor.cursor.measure_idx = 0;
+        editor.cursor = editor.score.clamp_cursor(editor.cursor);
         let bar = &editor.score.measures[0];
-        editor.cursor.beat_idx = editor.cursor.beat_idx.min(bar.beats().len().saturating_sub(1));
         let ts = bar.time_signature();
         editor.metronome.meter = ts;
         let cfg = &mut self.playback_ctl.audio_cfg;

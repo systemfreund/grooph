@@ -177,12 +177,14 @@ impl Grooph {
         if let Some(anchor) = &mut playback.anchor {
             anchor.measure_idx = anchor.measure_idx.saturating_sub(1);
         }
-        let cursor = &mut self.editor.cursor;
-        if cursor.measure_idx == 0 {
-            *cursor = Cursor::start();
-        } else {
-            cursor.measure_idx -= 1;
-        }
+        // In the same voice; on the dropped measure, from the start of the
+        // one that took its place.
+        let cursor = self.editor.cursor;
+        let moved = match cursor.measure_idx {
+            0 => Cursor { beat_idx: 0, ..cursor },
+            m => Cursor { measure_idx: m - 1, ..cursor },
+        };
+        self.editor.cursor = self.editor.score.clamp_cursor(moved);
         self.after_endless_change();
     }
 
