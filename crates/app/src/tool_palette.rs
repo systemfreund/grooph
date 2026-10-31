@@ -287,19 +287,20 @@ impl Grooph {
         let response = ui.interact(rect, id, sense);
         response
             .widget_info(|| WidgetInfo::selected(egui::Role::Button, enabled, selected, &hover));
+        // Framed like the edit bar's buttons; a disabled one keeps its frame
+        // and fades, as an egui button does.
         let visuals = if enabled {
             ui.style().interact_selectable(&response, selected)
         } else {
-            ui.visuals().widgets.noninteractive
+            ui.visuals().widgets.inactive
         };
         let painter = ui.painter();
-        painter.rect(
-            rect,
-            TOOL_PALETTE_BUTTON_CORNER_RADIUS,
-            visuals.weak_bg_fill,
-            visuals.bg_stroke,
-            StrokeKind::Inside,
-        );
+        let fill = if enabled {
+            visuals.weak_bg_fill
+        } else {
+            visuals.weak_bg_fill.gamma_multiply(ui.visuals().disabled_alpha())
+        };
+        painter.rect(rect, visuals.corner_radius, fill, visuals.bg_stroke, StrokeKind::Inside);
         let color = if enabled { visuals.text_color() } else { ui.visuals().weak_text_color() };
         let inner = rect.shrink(NOTATION_PADDING);
         match cell {
