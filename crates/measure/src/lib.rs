@@ -526,14 +526,19 @@ impl VoiceBar {
     }
 
     /// Toggle the beat kind at `idx` between Note and Rest while preserving duration.
-    /// A new rest loses its accent and soft flag. No-op if `idx` is out of bounds.
-    pub fn toggle_beat_kind(&mut self, idx: BeatIdx) -> Option<Modification> {
+    /// A new rest loses its accent and soft flag; a new note is a plain head
+    /// of `instrument`. No-op if `idx` is out of bounds.
+    pub fn toggle_beat_kind(
+        &mut self,
+        idx: BeatIdx,
+        instrument: Instrument,
+    ) -> Option<Modification> {
         if let Some(b) = self.beats.get_mut(idx) {
             let new_kind = match b.kind() {
                 Rest => Note,
                 Note => Rest,
             };
-            *b = b.with_kind(new_kind);
+            *b = b.with_kind_of(new_kind, instrument);
             Some(Modification::ToggleKind(idx, new_kind))
         } else {
             None
@@ -984,14 +989,14 @@ mod tests {
     #[test]
     fn rests_keep_no_accent_or_soft_flag() {
         let mut m = Measure::new_init(TimeSignature::FOUR_FOUR, Note);
-        m.first_voice_mut().toggle_accent(0);
-        m.first_voice_mut().toggle_soft(1);
+        m.first_voice_mut().toggle_accent(0, crate::Instrument::Rhythm);
+        m.first_voice_mut().toggle_soft(1, crate::Instrument::Rhythm);
         m.first_voice_mut().remove(0);
-        m.first_voice_mut().toggle_beat_kind(1);
+        m.first_voice_mut().toggle_beat_kind(1, crate::Instrument::Rhythm);
         assert_eq!(m.first_voice().beats()[..2], [Beat::rest(q()), Beat::rest(q())]);
         // Back to notes, they come back plain.
-        m.first_voice_mut().toggle_beat_kind(0);
-        m.first_voice_mut().toggle_beat_kind(1);
+        m.first_voice_mut().toggle_beat_kind(0, crate::Instrument::Rhythm);
+        m.first_voice_mut().toggle_beat_kind(1, crate::Instrument::Rhythm);
         assert_eq!(m.first_voice().beats()[..2], [Beat::note(q()), Beat::note(q())]);
     }
 
@@ -1055,7 +1060,7 @@ mod tests {
         assert_eq!(m.voices().len(), 2);
         assert_eq!(format!("{m:?}"), "1/4 1/4 ; 1/8[3:2] 1/8[3:2] 1/8[3:2] (1/4)");
         // Editing the measure edits its first voice.
-        m.first_voice_mut().toggle_beat_kind(0);
+        m.first_voice_mut().toggle_beat_kind(0, crate::Instrument::Rhythm);
         assert!(m.voice(0).unwrap().beats()[0].is_rest());
         assert!(m.voice(1).unwrap().beats()[0].is_note());
         m.voice_mut(1).unwrap().set_beat(3, Beat::note(q())).unwrap();
@@ -1144,7 +1149,7 @@ mod tests {
                         m.first_voice_mut().dissolve_tuplet_group(idx);
                     }
                     1 => {
-                        m.first_voice_mut().toggle_beat_kind(idx);
+                        m.first_voice_mut().toggle_beat_kind(idx, crate::Instrument::Rhythm);
                     }
                     _ => {
                         let d = COMMON_DURATIONS[rng.below(COMMON_DURATIONS.len())];

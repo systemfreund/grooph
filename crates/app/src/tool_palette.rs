@@ -46,6 +46,7 @@ impl Grooph {
             .show_separator_line(false)
             .resizable(false)
             .show_collapsible(ui, &mut (self.ui.mode == Mode::Edit), |ui| {
+                self.kit_palette(ui);
                 let tools = all_tools().iter().filter(|t| t.show_in_palette).collect::<Vec<_>>();
                 let groups = [
                     ToolGroup::Edit,
@@ -144,10 +145,14 @@ impl Grooph {
     }
 
     /// Gate for any tool dispatch — single source of truth, regardless of trigger (palette / keyboard / panel).
-    fn tool_applicable(&self, _tool: &Tool) -> bool {
+    fn tool_applicable(&self, tool: &Tool) -> bool {
+        // The heads of one instrument and its techniques are the kit's: on
+        // the one line a note is its one head.
+        let kit_only =
+            matches!(tool.kind, ToolKind::Modify(Modifier::ToggleHead | Modifier::CycleTechnique));
         // Tools only run in edit mode, and not while a modal dialog is open.
         // Mode::TimeSignature is a sub-state of editing but blocks tool actions.
-        matches!(self.ui.mode, Mode::Edit)
+        matches!(self.ui.mode, Mode::Edit) && !(kit_only && self.staff_model().one_line())
     }
 
     /// Moves the cursor according to `op`. Non-mutating; never produces an undo snapshot.
@@ -206,14 +211,17 @@ impl Grooph {
                     return false;
                 }
                 let idx = self.editor.doc().cursor.beat_idx.min(beats_len - 1);
+                let pen = self.edit_instrument();
                 let result = match modifier {
                     Modifier::ToggleDotted { dots: _ } => {
                         self.current_voice_mut().toggle_dotted(idx)
                     }
-                    Modifier::ToggleAccent => self.current_voice_mut().toggle_accent(idx),
-                    Modifier::ToggleSoft => self.current_voice_mut().toggle_soft(idx),
-                    Modifier::ToggleRestNote => self.current_voice_mut().toggle_beat_kind(idx),
+                    Modifier::ToggleAccent => self.current_voice_mut().toggle_accent(idx, pen),
+                    Modifier::ToggleSoft => self.current_voice_mut().toggle_soft(idx, pen),
+                    Modifier::ToggleRestNote => self.current_voice_mut().toggle_beat_kind(idx, pen),
                     Modifier::CycleTuplet => self.set_tuplet(idx, None),
+                    Modifier::ToggleHead => self.current_voice_mut().toggle_head(idx, pen),
+                    Modifier::CycleTechnique => self.current_voice_mut().cycle_technique(idx, pen),
                 };
                 result.is_some()
             }
@@ -530,5 +538,75 @@ mod tests {
         assert_eq!(app.editor.doc().cursor, Cursor::at(0, 2));
         apply(&mut app, "meta.reset_measure");
         assert_eq!(text(&app), "4/4 r:q r:q r:q r:q");
+    }
+
+    #[test]
+    fn the_rock_groove_can_be_entered_on_the_kit() {
+        use grooph_measure::Instrument::{HiHat, Kick, Snare};
+        let mut app = editing("4/4 q q q q");
+        app.new_kit_score();
+        assert_eq!(text(&app), "kit 4/4 r:q r:q r:q r:q ; r:q r:q r:q r:q");
+        // The hi-hat's eighths, step by step.
+        app.pick_instrument(HiHat);
+        assert_eq!(app.editor.doc().cursor, Cursor::in_voice(0, 0, 0));
+        for _ in 0..8 {
+            apply(&mut app, "insert.note.e");
+        }
+        // The snare on two and four, on the hi-hat's stem.
+        app.pick_instrument(Snare);
+        for beat in [1, 5] {
+            app.editor.doc_mut().cursor = Cursor::in_voice(0, 0, beat);
+            apply(&mut app, "modify.toggle.head");
+        }
+        // The hi-hat opens on the last but one eighth and closes on the last.
+        app.pick_instrument(HiHat);
+        app.editor.doc_mut().cursor = Cursor::in_voice(0, 0, 6);
+        apply(&mut app, "modify.cycle_technique");
+        app.editor.doc_mut().cursor = Cursor::in_voice(0, 0, 7);
+        for _ in 0..3 {
+            apply(&mut app, "modify.cycle_technique");
+        }
+        // The kick goes below, to the feet's voice, on the beat sounding.
+        app.pick_instrument(Kick);
+        assert_eq!(app.editor.doc().cursor, Cursor::in_voice(0, 1, 3));
+        for beat in [0, 2] {
+            app.editor.doc_mut().cursor = Cursor::in_voice(0, 1, beat);
+            apply(&mut app, "modify.toggle.rest_note");
+        }
+        assert_eq!(text(&app), "4/4 H:e S-H:e H:e H:e H:e S-H:e Ho:e Hc:e ; K:q r:q K:q r:q");
+        // Accent and ghost change the picked instrument's head alone.
+        app.pick_instrument(Snare);
+        app.editor.doc_mut().cursor = Cursor::in_voice(0, 0, 1);
+        apply(&mut app, "modify.toggle.accent");
+        app.editor.doc_mut().cursor = Cursor::in_voice(0, 0, 5);
+        apply(&mut app, "modify.toggle.soft");
+        assert!(text(&app).starts_with("4/4 H:e >S-H:e H:e H:e H:e (S)-H:e"), "{}", text(&app));
+        // Taking the snare away leaves the hi-hat; the hi-hat's head away
+        // on a beat of its own leaves a rest.
+        apply(&mut app, "modify.toggle.head");
+        app.pick_instrument(HiHat);
+        app.editor.doc_mut().cursor = Cursor::in_voice(0, 0, 2);
+        apply(&mut app, "modify.toggle.head");
+        assert!(text(&app).starts_with("4/4 H:e >S-H:e r:e H:e H:e H:e"), "{}", text(&app));
+        // Every step undoes, back to the empty kit bar.
+        while app.can_undo() && app.editor.doc().score.staff == grooph_measure::StaffKind::Kit {
+            apply(&mut app, "edit.undo");
+        }
+        assert_eq!(text(&app), "4/4 q q q q");
+    }
+
+    #[test]
+    fn the_one_line_has_no_instruments_to_pick() {
+        let mut app = editing("4/4 q (q) r:q q");
+        app.pick_instrument(grooph_measure::Instrument::Kick);
+        assert_eq!(app.editor.doc().cursor, Cursor::at(0, 0));
+        apply(&mut app, "modify.toggle.head");
+        apply(&mut app, "modify.cycle_technique");
+        assert_eq!(text(&app), "4/4 q (q) r:q q");
+        // The tools write the line's rhythm, as before.
+        app.editor.doc_mut().cursor = Cursor::at(0, 2);
+        apply(&mut app, "modify.toggle.rest_note");
+        apply(&mut app, "modify.toggle.accent");
+        assert_eq!(text(&app), "4/4 q (q) >q q");
     }
 }

@@ -71,11 +71,17 @@ spread across callers.
   accent) and a `Technique` its instrument allows (open hi-hat,
   cross-stick, ...; checked when built or loaded). `kind()`, `accented()`,
   `soft()` read the beat as a whole (any head); `set_accented`/`set_soft` set
-  every head, `set_kind` turns a rest into a plain note and back.
-  Today every note is one `Instrument::Rhythm` head, the one line of the
-  staff; `Instrument::staff_pos`/`notehead` hold the drumkit legend for kit
-  scores (#251-#255). Beats saved before heads (`kind`, `accented`, `soft`)
-  load as one `Rhythm` head (`RawBeat`).
+  every head, `set_kind_of` turns a rest into a plain note of an instrument
+  and back (`set_kind`: the one line's `Rhythm`).
+  On the one line every note is one `Instrument::Rhythm` head;
+  `Instrument::staff_pos`/`notehead`/`default_voice` hold the drumkit
+  legend for kit scores (#251-#255). Beats saved before heads (`kind`,
+  `accented`, `soft`) load as one `Rhythm` head (`RawBeat`).
+  The editing operations of a voice take the instrument they mean (see
+  "Kit editing"): accent and ghost change its head, `toggle_head` adds or
+  removes it, `cycle_technique` steps through its techniques, and a rest
+  made a note (a duration, Enter, a tuplet) gets its head. A tuplet keeps
+  the instruments of the notes it is made of (`Heads::plain_accented`).
 - `Duration` is `Simple`, `Dotted`, or `Tuplet(TupletSpec { n, m, base })`.
 - `Measure::set_beat` guarantees a valid measure length and fills gaps.
 - `DEFAULT_GRID` defines the valid duration grid and tick calculations.
@@ -127,7 +133,8 @@ spread across callers.
    source of both (see "Metronome tab").
    The edit cursor (`Cursor`) names its measure, voice and beat. The tools
    edit that voice (`Score::voice_at_mut`); a tap picks the voice on its
-   side of the line (`hit_test_voice`); moving to a measure with fewer
+   side of the line (`hit_test_voice`), on the kit's staff the head by its
+   instrument's place (`hit_test_head`); moving to a measure with fewer
    voices puts it in the last (`Score::clamp_cursor`). A new measure gets
    the voices of the one before (`Measure::empty_like`), "clear" empties
    the cursor's voice only (`Measure::clear_voice`), and a new duration
@@ -145,10 +152,23 @@ spread across callers.
    beamed group's stems all reach its beams (`beams::reach_beams`). Past
    the accent a technique's sign (o, +, the choke's mark) stacks
    (`notes::place_marks`). Every kit row starts with the percussion clef.
-6. Both staves are one model, `grooph_layout::staff::Staff`, which
+6. Kit editing (`grooph-app`'s `kit_palette`): on a staff of several
+   instruments a row above the tools picks the instrument the tools mean
+   (`EditorState::instrument`; `Grooph::edit_instrument` gives it, or the
+   staff's own on the one line, `Staff::instrument_or`). A tap on a head
+   picks its instrument too. Picking one moves the cursor to its default
+   voice, onto the beat sounding then (`Score::cursor_in_voice`), and a
+   kit measure without that voice gets it (`Measure::fill_voices`);
+   "Voice" moves it to the other. "+/−" (H) adds or removes the head on
+   the cursor's beat, "Technique" (O) steps through its techniques. The
+   score tab's 🥁 starts a new drum groove: one bar of two voices on the
+   kit's staff. The one line edits as before: its pen is `Rhythm`, and the
+   kit's tools do nothing there.
+7. Both staves are one model, `grooph_layout::staff::Staff`, which
    `Staff::of(StaffKind)` gives (`LayoutOpts::staff_model`; the only match
    on the kind). A staff holds its lines as staff positions (half staff
-   spaces up from the middle line), where an instrument's heads sit, where
+   spaces up from the middle line), the instruments it writes
+   (`instruments`, `instrument_near` by place), where their heads sit, where
    its rests go, and whether every row starts with the clef. From that
    alone come the head and rest positions (`head_pos`, `rest_pos`,
    `bar_rest_pos`), the ledger lines of heads and half and whole rests

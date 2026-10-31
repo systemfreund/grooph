@@ -213,6 +213,14 @@ impl Measure {
         Measure { voices: vec![VoiceBar::new_init(time_signature, Rest); self.voices.len()] }
     }
 
+    /// Add voices of rests below this measure's until it has `count`.
+    pub fn fill_voices(&mut self, count: usize) {
+        let ts = self.time_signature();
+        while self.voices.len() < count {
+            self.voices.push(VoiceBar::new_init(ts, Rest));
+        }
+    }
+
     /// Add copies of the voices of `other` below this measure's. Fails, and
     /// adds none, if `other` is in another meter.
     pub fn push_voices(&mut self, other: &Measure) -> Result<(), DifferentMeter> {

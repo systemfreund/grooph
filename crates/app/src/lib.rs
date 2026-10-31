@@ -8,6 +8,7 @@ mod guide;
 mod help;
 mod host;
 mod keyboard_input;
+mod kit_palette;
 mod library;
 mod library_panel;
 mod measure_panel;
@@ -38,8 +39,9 @@ mod web;
 
 pub use host::Host;
 
+use grooph_layout::staff::Staff;
 use grooph_measure::duration::{Duration, NoteValue, TupletSpec, q};
-use grooph_measure::{BeatIdx, Cursor, Measure, Score, TimeSignature, VoiceBar};
+use grooph_measure::{BeatIdx, Cursor, Instrument, Measure, Score, TimeSignature, VoiceBar};
 
 use crate::accuracy::AccuracyState;
 use crate::calibration::CalibrationPhase;
@@ -573,6 +575,17 @@ impl Grooph {
         doc.score.current_mut(doc.cursor.measure_idx)
     }
 
+    /// The staff the document is written on.
+    pub(crate) fn staff_model(&self) -> &'static Staff {
+        Staff::of(self.editor.doc().score.staff)
+    }
+
+    /// The instrument the tools write and change: the chosen one on a staff
+    /// that writes it, else the staff's own (the one line's rhythm).
+    pub(crate) fn edit_instrument(&self) -> Instrument {
+        self.staff_model().instrument_or(self.editor.instrument)
+    }
+
     /// The voice the cursor is in, whose beats the tools edit.
     pub(crate) fn current_voice(&self) -> &VoiceBar {
         self.editor
@@ -660,7 +673,8 @@ impl Grooph {
         base: NoteValue,
         beat_kind: Option<BeatKind>,
     ) -> Option<Modification> {
-        let result = self.current_voice_mut().modify_beat(idx, base, beat_kind);
+        let pen = self.edit_instrument();
+        let result = self.current_voice_mut().modify_beat(idx, base, beat_kind, pen);
         if result.is_some() {
             let new_len = self.current_voice().beats().len();
             if new_len > 0 {
@@ -675,7 +689,8 @@ impl Grooph {
     }
 
     fn set_tuplet(&mut self, idx: usize, tuplet_spec: Option<TupletSpec>) -> Option<Modification> {
-        let result = self.current_voice_mut().set_tuplet(idx, tuplet_spec, true);
+        let pen = self.edit_instrument();
+        let result = self.current_voice_mut().set_tuplet(idx, tuplet_spec, true, pen);
         match &result {
             Some(Modification::DissolveTuplet(tuplet_idx, _)) => {
                 let new_len = self.current_voice().beats().len();
@@ -938,10 +953,10 @@ impl Grooph {
             }
             Duration::Simple(..) => {
                 if template.accented {
-                    measure.first_voice_mut().toggle_accent(0);
+                    measure.first_voice_mut().toggle_accent(0, Instrument::Rhythm);
                 }
                 if template.soft {
-                    measure.first_voice_mut().toggle_soft(0);
+                    measure.first_voice_mut().toggle_soft(0, Instrument::Rhythm);
                 }
             }
         }
@@ -1276,6 +1291,7 @@ impl Grooph {
                     score: score_doc,
                 },
                 button_measures,
+                instrument: Instrument::Snare,
                 library: state.library,
                 presets: state.presets,
                 active_preset: None,

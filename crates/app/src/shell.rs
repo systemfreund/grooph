@@ -1379,6 +1379,12 @@ impl Grooph {
                     if ui.button("1 &").on_hover_text("Count labels").clicked() {
                         self.ui.picker = Some(Picker::Counting);
                     }
+                    // A drum groove is a score of its own, on the kit's staff.
+                    if self.tab() == Tab::Score
+                        && ui.button("🥁").on_hover_text("New drum groove").clicked()
+                    {
+                        self.new_kit_score();
+                    }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         // Back to the page's card and options sheet.
                         if ui.button(RichText::new("Done").size(18.0)).clicked() {

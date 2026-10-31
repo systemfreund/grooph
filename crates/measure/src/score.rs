@@ -1,3 +1,4 @@
+use crate::grid::DEFAULT_GRID;
 use crate::{BeatIdx, Measure, VoiceBar, VoiceIdx};
 use serde::{Deserialize, Serialize};
 
@@ -157,6 +158,18 @@ impl Score {
         Cursor { measure_idx, voice, beat_idx: cursor.beat_idx.min(beats.saturating_sub(1)) }
     }
 
+    /// `cursor` moved to `voice` of its measure, onto the beat sounding when
+    /// the cursor's beat starts; the last voice where the measure has fewer
+    /// (see [`Score::clamp_cursor`]).
+    pub fn cursor_in_voice(&self, cursor: Cursor, voice: VoiceIdx) -> Cursor {
+        let from = self.clamp_cursor(cursor);
+        let to = self.clamp_cursor(Cursor { voice, ..from });
+        let onsets = |c: Cursor| DEFAULT_GRID.compute_onset_ticks(self.voice_at(c).beats());
+        let tick = onsets(from).get(from.beat_idx).copied().unwrap_or(0);
+        let beat_idx = onsets(to).iter().take_while(|&&t| t <= tick).count().saturating_sub(1);
+        Cursor { beat_idx, ..to }
+    }
+
     /// Whether a note of any voice plays an instrument of the kit
     /// ([`Beat::is_kit`](crate::Beat::is_kit)).
     pub fn has_kit_heads(&self) -> bool {
@@ -214,6 +227,24 @@ mod tests {
     use crate::TimeSignature;
 
     #[test]
+    fn a_cursor_moves_to_the_beat_sounding_in_another_voice() {
+        let mut score = crate::notation::parse_score("4/4 e e e e e e e e ; q q h").unwrap();
+        let on = |s: &Score, beat, voice| s.cursor_in_voice(Cursor::in_voice(0, 0, beat), voice);
+        assert_eq!(on(&score, 0, 1), Cursor::in_voice(0, 1, 0));
+        assert_eq!(on(&score, 3, 1), Cursor::in_voice(0, 1, 1));
+        assert_eq!(on(&score, 7, 1), Cursor::in_voice(0, 1, 2));
+        assert_eq!(score.cursor_in_voice(Cursor::in_voice(0, 1, 2), 0), Cursor::in_voice(0, 0, 4));
+        // A measure of one voice stays in it, until it has the other.
+        let mut one = crate::notation::parse_score("4/4 e e e e e e e e").unwrap();
+        assert_eq!(on(&one, 5, 1), Cursor::in_voice(0, 0, 5));
+        one.measures_mut()[0].fill_voices(2);
+        assert_eq!(one.measures()[0].voices().len(), 2);
+        assert_eq!(on(&one, 5, 1), Cursor::in_voice(0, 1, 2));
+        score.measures_mut()[0].fill_voices(2);
+        assert_eq!(score.measures()[0].voices().len(), 2);
+    }
+
+    #[test]
     fn score_single_constructor_yields_one_measure() {
         let m = Measure::new(TimeSignature::FOUR_FOUR);
         let s = Score::single(m);
@@ -234,7 +265,7 @@ mod tests {
         assert!(!score.same_beats(&other_meter));
 
         let mut other_beat = score.clone();
-        other_beat.measures[1].first_voice_mut().toggle_beat_kind(0);
+        other_beat.measures[1].first_voice_mut().toggle_beat_kind(0, crate::Instrument::Rhythm);
         assert!(!score.same_beats(&other_beat));
 
         assert!(!score.same_beats(&Score::single(four)));
