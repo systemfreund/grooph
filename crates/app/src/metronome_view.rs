@@ -1,11 +1,11 @@
 //! Metronome tab: its own meter, apart from the rhythm's, whose click bar (see
 //! [`grooph_measure::click`]) is shown as a one-line staff above a ring.
 //!
-//! While the tab is open the click bar takes the working score's place, so
-//! the staff, the tool palette and undo edit it like any rhythm; the rhythm is
-//! put aside and comes back when the tab closes. Every frame the bar is
-//! written back to the click bars of its meter. What plays is a silent bar of
-//! the meter: only the clicks sound.
+//! The metronome's document holds the click bar of its meter with the
+//! counter rhythm as its second voice, open or not: it is their one source,
+//! and the staff, the tool palette and undo edit it like any rhythm. The
+//! audio settings keep the other meters' click bars. What plays is a silent
+//! bar of the meter: only the clicks sound.
 //!
 //! The ring has one segment per note or rest of the click bar, as long as it.
 //! The segment's thickness shows how loud it clicks; a tap moves it to the
@@ -33,7 +33,7 @@ use eframe::egui::{Align2, Color32, FontId, Mesh, Pos2, Sense, Shape, Stroke, Ui
 use grooph_measure::click::{ClickBars, ClickLevel, meter_click_bar, same_bar, subdivisions};
 use grooph_measure::counter::{
     CounterBars, Ratio, click_level, counter_bar, counter_clicks, counter_ratios, is_ratio_bar,
-    named_ratio_of,
+    named_ratio_of, respelled,
 };
 use grooph_measure::grid::DEFAULT_GRID;
 use grooph_measure::score::Score;
@@ -391,15 +391,32 @@ impl Grooph {
         }
     }
 
-    /// The metronome clicks `ts` with its click bar and the counter rhythm
-    /// `counter` (a link's), not undoably.
-    pub(crate) fn set_metronome_clicks(&mut self, ts: TimeSignature, counter: Option<Measure>) {
+    /// The metronome clicks `ts` with its click bar and a link's counter
+    /// rhythm, not undoably: the bar of `poly`, picked as that ratio, else
+    /// `counter`, named as its simplest ratio, or none.
+    pub(crate) fn set_metronome_clicks(
+        &mut self,
+        ts: TimeSignature,
+        poly: Option<Ratio>,
+        counter: Option<Measure>,
+    ) {
         let click = if ts == self.metronome_meter() {
             self.click_bar()
         } else {
             self.playback_ctl.audio_cfg.click.for_meter(ts)
         };
-        self.set_metronome_doc(click, counter.as_ref());
+        let counter = counter.filter(|m| m.time_signature() == ts).map(respelled);
+        let bar = match poly {
+            Some(ratio) => counter_bar(ts, ratio),
+            None => counter.clone(),
+        };
+        self.set_metronome_doc(click, bar.as_ref());
+        // The bar is the document's, the ratio's name the settings'.
+        let names = &mut self.playback_ctl.audio_cfg.counter;
+        match poly {
+            Some(ratio) => names.set_ratio(ts, Some(ratio)),
+            None => names.replace(ts, counter),
+        }
     }
 
     /// The voice the cursor edits in the metronome tab.
@@ -1804,6 +1821,61 @@ mod tests {
         assert_eq!(app.metronome_meter(), TimeSignature::THREE_FOUR);
         assert!(same_bar(&app.click_bar(), &three));
         assert!(same_bar(&app.click_bars().for_meter(TimeSignature::FOUR_FOUR), &four));
+    }
+
+    /// Storage holding one saved app state.
+    #[derive(Default)]
+    struct SavedState(std::collections::HashMap<String, String>);
+
+    impl eframe::Storage for SavedState {
+        fn get_string(&self, key: &str) -> Option<String> {
+            self.0.get(key).cloned()
+        }
+        fn set_string(&mut self, key: &str, value: String) {
+            self.0.insert(key.to_owned(), value);
+        }
+        fn remove_string(&mut self, key: &str) {
+            self.0.remove(key);
+        }
+        fn flush(&mut self) {}
+    }
+
+    #[test]
+    fn the_metronome_clicks_come_back_from_a_save_and_a_link() {
+        use eframe::App;
+
+        let cc = eframe::CreationContext::_new_kittest(eframe::egui::Context::default());
+        let mut app = Grooph::new(&cc);
+        app.select_tab(Tab::Metronome);
+        app.set_metronome_meter(TimeSignature::THREE_FOUR);
+        app.cycle_click_level(1);
+        let three = app.click_bar();
+        app.set_metronome_meter(TimeSignature::SEVEN_EIGHT);
+        app.set_counter_ratio(app.counter_choices().first().copied());
+        app.cycle_click_level(0);
+        let (click, counter, ratio) =
+            (app.click_bar(), app.counter_bar().unwrap(), app.counter_ratio());
+        let url = app.share_link_url().unwrap();
+        // Saved as the settings always were, and loaded into the document.
+        let mut storage = SavedState::default();
+        app.save(&mut storage);
+        let mut cc = eframe::CreationContext::_new_kittest(eframe::egui::Context::default());
+        cc.storage = Some(&storage);
+        let loaded = Grooph::new(&cc);
+        assert_eq!(loaded.metronome_meter(), TimeSignature::SEVEN_EIGHT);
+        assert!(same_bar(&loaded.click_bar(), &click));
+        assert!(same_bar(&loaded.counter_bar().unwrap(), &counter));
+        assert_eq!(loaded.counter_ratio(), ratio);
+        assert!(same_bar(&loaded.click_bars().for_meter(TimeSignature::THREE_FOUR), &three));
+        // The link opens the same clicks in a fresh app.
+        let cc = eframe::CreationContext::_new_kittest(eframe::egui::Context::default());
+        let mut fresh = Grooph::new(&cc);
+        fresh.open_link(grooph_link::parse_query(url.split_once('?').unwrap().1).unwrap().unwrap());
+        assert!(fresh.metronome_mode());
+        assert_eq!(fresh.metronome_meter(), TimeSignature::SEVEN_EIGHT);
+        assert!(same_bar(&fresh.click_bar(), &click));
+        assert!(same_bar(&fresh.counter_bar().unwrap(), &counter));
+        assert_eq!(fresh.counter_ratio().map(|(r, _)| r), ratio.map(|(r, _)| r));
     }
 
     #[test]

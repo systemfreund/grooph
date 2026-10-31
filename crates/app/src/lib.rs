@@ -67,7 +67,7 @@ use eframe::{App, CreationContext, egui};
 use grooph_audio::{AudioSettings, GapClick, PlaybackOptions, PlayerState, TempoRamp};
 use grooph_link::{LinkContent, SharedLink};
 use grooph_measure::click::ClickBars;
-use grooph_measure::counter::{CounterBars, Ratio, counter_bar, respelled};
+use grooph_measure::counter::{CounterBars, Ratio};
 use grooph_measure::counting::{CountConfig, CountingSystem, Subdivision, build_count_slots};
 use grooph_measure::duration::NoteValue::*;
 use grooph_measure::editing::Modification;
@@ -804,18 +804,7 @@ impl Grooph {
                 self.stop_transport();
                 // The meter plays the link's counter rhythm, or none; a
                 // `poly` link's as picked in the app.
-                let counter = match link.poly {
-                    Some(ratio) => counter_bar(ts, ratio),
-                    None => {
-                        link.counter.clone().filter(|m| m.time_signature() == ts).map(respelled)
-                    }
-                };
-                self.set_metronome_clicks(ts, counter);
-                let names = &mut self.playback_ctl.audio_cfg.counter;
-                match link.poly {
-                    Some(ratio) => names.set_ratio(ts, Some(ratio)),
-                    None => names.replace(ts, link.counter.clone()),
-                }
+                self.set_metronome_clicks(ts, link.poly, link.counter.clone());
             }
             Some(LinkContent::Generator { settings, seed }) => {
                 self.stop_transport();
