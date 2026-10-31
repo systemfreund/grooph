@@ -31,15 +31,11 @@ impl Grooph {
 }
 
 impl Grooph {
-    /// Endless mode never loops: a ramp counted in loops counts in bars.
-    fn endless_running(&self) -> bool {
-        self.editor.generator.endless && !self.metronome_mode()
-    }
-
-    /// The tempo ramp as played: see [`Self::endless_running`].
+    /// The tempo ramp as played: endless mode never loops, so there a ramp
+    /// counted in loops counts in bars (see [`Self::endless_runs`]).
     pub(crate) fn played_ramp(&self) -> TempoRamp {
         let mut ramp = self.playback_ctl.audio_cfg.ramp;
-        if self.endless_running() {
+        if self.endless_runs() {
             ramp.unit = RampUnit::Bars;
         }
         ramp
@@ -47,7 +43,7 @@ impl Grooph {
 
     pub(crate) fn tempo_ramp_settings(&mut self, ui: &mut egui::Ui) {
         let start = self.playback_ctl.bpm;
-        let endless = self.endless_running();
+        let endless = self.endless_runs();
         let ramp = &mut self.playback_ctl.audio_cfg.ramp;
         ui.checkbox(&mut ramp.enabled, "Change the tempo while playing")
             .on_hover_text("Starts at the BPM setting and steps towards the target tempo");

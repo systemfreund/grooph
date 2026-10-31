@@ -632,7 +632,7 @@ impl Grooph {
 
         if bpm != self.playback_ctl.bpm {
             self.playback_ctl.bpm = bpm;
-            self.editor.dirty = true;
+            self.mark_tempo_unsaved();
             self.handle_bpm_change();
         }
     }
@@ -805,7 +805,7 @@ impl Grooph {
     /// left out, unless one is already chosen.
     fn counting_choices(&mut self, ui: &mut Ui) -> bool {
         let metronome = self.metronome_mode().then(|| self.metronome_score());
-        let score = metronome.as_ref().unwrap_or(&self.editor.score);
+        let score = metronome.as_ref().unwrap_or(&self.editor.doc().score);
         let counting = &mut self.ui.counting;
         let systems: Vec<_> =
             CountingSystem::ALL.map(|s| (s, counting_system_name(s).to_owned())).into();

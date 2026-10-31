@@ -1,4 +1,5 @@
 use crate::accuracy::AccuracyState;
+use crate::documents::{Document, Documents};
 use crate::generator::GeneratorState;
 use crate::guide::{AnchorFlash, Guide};
 use crate::library::PatternLibrary;
@@ -10,7 +11,6 @@ use crate::platform::PlatformRuntime;
 use crate::play_along::PlayAlongState;
 use crate::presets::{PresetId, PresetLibrary};
 use crate::shell::ShellState;
-use crate::undo::UndoHistory;
 use crate::{CountingSettings, Host, Mode, TransportState};
 use eframe::egui::TextStyle;
 use eframe::egui::emath::{ease_in_ease_out, lerp};
@@ -21,7 +21,7 @@ use grooph_measure::click::ClickBars;
 use grooph_measure::counter::CounterBars;
 use grooph_measure::swing::Swing;
 use grooph_measure::tap_tempo::TapTempo;
-use grooph_measure::{Cursor, Measure, Score};
+use grooph_measure::{Cursor, Measure};
 use grooph_mic::MicInput;
 use grooph_midi::MidiInput;
 use std::collections::HashMap;
@@ -256,25 +256,21 @@ pub(crate) struct MicState {
     pub(crate) permission_asked: bool,
 }
 
-/// Score editing surface: the document, where the cursor sits, undo history,
-/// and pre-built button thumbnails. Mutated by tools and the time-signature
-/// dialog; read by the rendering pipeline.
+/// Score editing surface: the three pages' documents, the one being edited,
+/// the library and pre-built button thumbnails. Mutated by tools and the
+/// time-signature dialog; read by the rendering pipeline.
 pub(crate) struct EditorState {
-    pub(crate) score: Score,
-    pub(crate) cursor: Cursor,
-    pub(crate) history: UndoHistory,
+    /// The page whose document is shown, edited and played (also behind
+    /// the More screen); see [`crate::documents`].
+    pub(crate) document: Document,
+    /// The metronome's, Practice's and the score tab's documents.
+    pub(crate) docs: Documents,
     /// Prebuilt measures for note/rest/tuplet tool buttons to avoid per-frame
     /// reconstruction.
     pub(crate) button_measures: HashMap<&'static str, Measure>,
-    /// User-saved, named patterns (score + tempo). Persisted across sessions.
+    /// User-saved, named patterns (score + tempo), the score tab's.
+    /// Persisted across sessions.
     pub(crate) library: PatternLibrary,
-    /// Id of the saved pattern the working score was loaded from, if any. Drives
-    /// "save" (overwrite) vs "save as" (new entry) and the active-row highlight.
-    /// `None` means the working score is unsaved / not tied to any entry.
-    pub(crate) active_pattern_id: Option<u64>,
-    /// Whether the working score/tempo has been edited since the last save or
-    /// load. Used to warn before discarding changes when loading another pattern.
-    pub(crate) dirty: bool,
     /// Rhythm generator settings and endless-mode state.
     pub(crate) generator: GeneratorState,
     /// User-saved generator presets. Persisted across sessions.
@@ -282,8 +278,7 @@ pub(crate) struct EditorState {
     /// Preset last loaded or saved; "Save" overwrites it when it is a user
     /// preset. Not persisted.
     pub(crate) active_preset: Option<PresetId>,
-    /// The metronome tab's meter, and the rhythm it put aside while it edits
-    /// the click bar in the score's place.
+    /// The metronome tab's meter and what the pointer is on.
     pub(crate) metronome: MetronomeState,
     /// Saved state that did not restore completely, kept under a backup key
     /// at the next save.

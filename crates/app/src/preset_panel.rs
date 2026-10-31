@@ -41,6 +41,7 @@ impl Grooph {
         audio.settings.rhythm_sound = preset.rhythm_sound;
         if self.playback_ctl.bpm != preset.bpm {
             self.playback_ctl.bpm = preset.bpm;
+            self.mark_tempo_unsaved();
             self.handle_bpm_change();
         }
         self.editor.active_preset = Some(id);

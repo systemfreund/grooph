@@ -331,7 +331,13 @@ impl Grooph {
     /// Saved rhythms and practice presets, as cards: a tap loads one, ✏
     /// renames or deletes it. Returns a preset tapped, for the caller to open
     /// after its check for generator changes.
+    /// On the score tab it holds the score's rhythms only: a preset belongs
+    /// to the practice page.
     pub(super) fn library_panel(&mut self, ui: &mut egui::Ui) -> Option<PresetId> {
+        if self.tab() == Tab::Score {
+            self.rhythms(ui);
+            return None;
+        }
         ui.columns(2, |cols| {
             for (col, (tab, label)) in cols
                 .iter_mut()
@@ -416,13 +422,14 @@ impl Grooph {
         id
     }
 
-    /// "Save" for the rhythms: the active pattern while it has changes, a
-    /// new one without an active pattern.
+    /// "Save" for the rhythms, which keeps the score tab's score: its
+    /// pattern while it has changes, a new one without a pattern.
     pub(crate) fn rhythm_save_target(&self) -> SaveTarget {
-        let active = self.editor.active_pattern_id.and_then(|id| self.editor.library.get(id));
+        let active =
+            self.editor.docs.score.active_pattern_id.and_then(|id| self.editor.library.get(id));
         SaveTarget {
             overwrites: active.map(|p| p.name.clone()),
-            enabled: active.is_none() || self.rhythm_dirty(),
+            enabled: active.is_none() || self.editor.docs.score.dirty,
         }
     }
 
@@ -444,14 +451,14 @@ impl Grooph {
 
     /// Saved rhythms: a tap loads one onto the staff.
     fn rhythms(&mut self, ui: &mut egui::Ui) {
-        let active_id = self.editor.active_pattern_id;
-        let dirty = self.rhythm_dirty();
+        let active_id = self.editor.docs.score.active_pattern_id;
+        let dirty = self.editor.docs.score.dirty;
         let target = self.rhythm_save_target();
         if let Some(save) = save_buttons(ui, &target) {
             self.save_rhythm(save, ui.input(|i| i.time));
         }
         if target.overwrites.is_none() {
-            ui.weak("The rhythm on the staff is not saved.");
+            ui.weak("The score is not saved.");
         }
         ui.add_space(8.0);
         if self.editor.library.patterns.is_empty() {

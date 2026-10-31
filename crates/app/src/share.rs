@@ -53,7 +53,7 @@ impl Grooph {
         let (content, meter) = if self.metronome_mode() {
             (LinkContent::Metronome(self.metronome_meter()), Some(self.metronome_meter()))
         } else {
-            let score = &self.editor.score;
+            let score = &self.editor.doc().score;
             let meter = score.measures().first().map(|m| m.time_signature());
             (LinkContent::Score(score.clone()), meter)
         };

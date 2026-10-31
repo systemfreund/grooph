@@ -3,7 +3,6 @@
 //! read and count the rest themselves.
 
 use crate::Grooph;
-use crate::shell::Tab;
 use grooph_measure::TimeSignature;
 use grooph_measure::grid::DEFAULT_GRID;
 use serde::{Deserialize, Serialize};
@@ -95,16 +94,17 @@ impl Grooph {
     /// Meter the guide picker offers its steps for: the first bar's.
     pub(crate) fn guide_meter(&self) -> TimeSignature {
         self.editor
+            .doc()
             .score
             .measures()
             .first()
             .map_or(TimeSignature::FOUR_FOUR, |m| m.time_signature())
     }
 
-    /// The guide in use: the metronome and edit tabs and calibration keep
-    /// the line.
+    /// The guide in use: the metronome tab, the score tab's editor and
+    /// calibration keep the line. The score tab plays with the guide.
     pub(crate) fn active_guide(&self) -> Guide {
-        if self.metronome_mode() || self.tab() == Tab::Edit || self.calibration_source().is_some() {
+        if self.metronome_mode() || self.editing() || self.calibration_source().is_some() {
             Guide::Line
         } else {
             self.ui.guide
@@ -120,7 +120,8 @@ impl Grooph {
         let Some((measure_idx, tick)) = playing.filter(|_| !playback.counting_in()) else {
             return;
         };
-        let Some(ts) = self.editor.score.measures().get(measure_idx).map(|m| m.time_signature())
+        let Some(ts) =
+            self.editor.doc().score.measures().get(measure_idx).map(|m| m.time_signature())
         else {
             return;
         };
@@ -164,6 +165,7 @@ pub(crate) fn anchor_intensity(elapsed: f64) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::shell::Tab;
 
     use grooph_measure::duration::{Duration, e, q};
 
@@ -254,7 +256,7 @@ mod tests {
         let mut app = Grooph::new(&cc);
         app.select_tab(crate::shell::Tab::Practice);
         let measure = Grooph::default_measure();
-        app.editor.score = grooph_measure::Score::new(vec![measure; bars]);
+        app.editor.doc_mut().score = grooph_measure::Score::new(vec![measure; bars]);
         app.ui.guide = guide;
         app
     }
@@ -316,15 +318,18 @@ mod tests {
     fn the_metronome_keeps_the_line() {
         let mut app = practice_app(1, Guide::None);
         assert_eq!(app.active_guide(), Guide::None);
-        app.open_metronome();
+        app.select_tab(Tab::Metronome);
         assert_eq!(app.active_guide(), Guide::Line);
     }
 
     #[test]
-    fn the_edit_tab_keeps_the_line() {
+    fn the_editor_keeps_the_line() {
         let mut app = practice_app(1, Guide::EveryBar);
-        app.select_tab(Tab::Edit);
+        app.select_tab(Tab::Score);
+        app.edit_page();
         assert_eq!(app.active_guide(), Guide::Line);
+        app.select_tab(Tab::Score);
+        assert_eq!(app.active_guide(), Guide::EveryBar);
         app.select_tab(Tab::Practice);
         assert_eq!(app.active_guide(), Guide::EveryBar);
     }

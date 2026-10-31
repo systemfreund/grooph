@@ -1,6 +1,7 @@
 mod accuracy;
 mod calibration;
 mod clock;
+mod documents;
 mod embed;
 mod generator;
 mod guide;
@@ -42,6 +43,7 @@ use grooph_measure::{BeatIdx, Cursor, Measure, Score, TimeSignature, VoiceBar};
 
 use crate::accuracy::AccuracyState;
 use crate::calibration::CalibrationPhase;
+use crate::documents::{Document, Documents, RhythmDoc};
 use crate::embed::{Embed, EmbedParams, embed_params};
 use crate::generator::GeneratorState;
 use crate::guide::Guide;
@@ -57,7 +59,7 @@ use crate::state::{
 };
 use crate::tools::ToolKind;
 use crate::tools::{BeatTemplate, Modifier, all_tools};
-use crate::undo::{DEFAULT_UNDO_LIMIT, EditorSnapshot, UndoHistory};
+use crate::undo::EditorSnapshot;
 use eframe::egui::{Context, Ui};
 use eframe::epaint::text::{FontInsert, InsertFontFamily};
 use eframe::epaint::{FontFamily, FontId};
@@ -82,9 +84,11 @@ use std::sync::Arc;
 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum Mode {
+    /// A page's editor: tool palette on its document.
     Edit,
+    /// A page playing its document: the metronome's ring, Practice's and
+    /// the score tab's options sheet.
     Playback,
-    Generator,
     /// The "More" tab's list of dialogs.
     MoreMenu,
     /// The time signature dialog, holding the meter being picked.
@@ -119,8 +123,16 @@ pub(crate) const PERSISTED_STATE_VERSION: u8 = 2;
 #[serde(default)]
 pub(crate) struct PersistedState {
     version: u8,
+    /// The score tab's score.
     score: Score,
     cursor: Cursor,
+    /// The document shown, so the More screen opens again on the one it was
+    /// opened from.
+    document: Document,
+    /// Practice's generated rhythm; a state saved before the two documents
+    /// has none, and Practice starts with a new one.
+    practice_score: Option<Score>,
+    practice_cursor: Cursor,
     bpm: u32,
     audio_settings: AudioSettings,
     audio_latency_enabled: bool,
@@ -157,6 +169,9 @@ impl Default for PersistedState {
             version: PERSISTED_STATE_VERSION,
             score: Score::single(Grooph::default_measure()),
             cursor: Cursor::start(),
+            document: Document::Score,
+            practice_score: None,
+            practice_cursor: Cursor::start(),
             bpm: grooph_link::DEFAULT_BPM,
             audio_settings: AudioSettings::default(),
             audio_latency_enabled: true,
@@ -189,17 +204,30 @@ impl Default for PersistedState {
 
 impl PersistedState {
     fn from_app(app: &Grooph) -> Self {
-        // A running calibration has swapped in its click score, the metronome
-        // tab its click bar: save what they will restore instead.
+        // A running calibration has swapped in its click score: save what it
+        // will restore instead, in the document it took the place of.
         let stash = app.calibration_stash();
-        let rhythm = app.metronome_stash();
         let generator = &app.editor.generator;
+        let docs = &app.editor.docs;
+        let calibrating = |doc| stash.filter(|_| app.document() == doc);
+        let score_doc = &docs.score;
+        let (score, cursor, active_pattern_id, dirty) = match calibrating(Document::Score) {
+            Some(s) => (&s.score, s.cursor, s.active_pattern_id, s.dirty),
+            None => {
+                (&score_doc.score, score_doc.cursor, score_doc.active_pattern_id, score_doc.dirty)
+            }
+        };
+        let (practice_score, practice_cursor) = match calibrating(Document::Practice) {
+            Some(s) => (&s.score, s.cursor),
+            None => (&docs.practice.score, docs.practice.cursor),
+        };
         Self {
             version: PERSISTED_STATE_VERSION,
-            score: stash
-                .map_or(rhythm.map_or(&app.editor.score, |r| &r.score), |s| &s.score)
-                .clone(),
-            cursor: stash.map_or(rhythm.map_or(app.editor.cursor, |r| r.cursor), |s| s.cursor),
+            score: score.clone(),
+            cursor,
+            document: app.document(),
+            practice_score: Some(practice_score.clone()),
+            practice_cursor,
             bpm: stash.map_or(app.playback_ctl.bpm, |s| s.bpm),
             audio_settings: app.playback_ctl.audio_cfg.settings,
             audio_latency_enabled: app.playback_ctl.audio_cfg.latency_enabled,
@@ -210,11 +238,8 @@ impl PersistedState {
             midi_selected_port_id: app.playback_ctl.midi.selected_port_id.clone(),
             accuracy_enabled: app.playback_ctl.accuracy.enabled,
             library: app.editor.library.clone(),
-            active_pattern_id: stash.map_or(
-                rhythm.map_or(app.editor.active_pattern_id, |r| r.active_pattern_id),
-                |s| s.active_pattern_id,
-            ),
-            dirty: stash.map_or(rhythm.map_or(app.editor.dirty, |r| r.dirty), |s| s.dirty),
+            active_pattern_id,
+            dirty,
             generator_settings: generator.settings,
             endless: stash.map_or(generator.endless, |s| s.endless),
             ghost_notes: stash.map_or(generator.ghost_notes, |s| s.ghost_notes),
@@ -404,7 +429,7 @@ impl App for Grooph {
 
         let playback_options = self.playback_options();
         let metronome = self.metronome_mode().then(|| self.metronome_score());
-        let score = metronome.as_ref().unwrap_or(&self.editor.score);
+        let score = metronome.as_ref().unwrap_or(&self.editor.doc().score);
         let now = ui.input(|i| i.time);
         let mut output_lost = false;
         if let Some(audio) = &mut self.playback_ctl.audio {
@@ -468,7 +493,8 @@ impl Grooph {
         let calibrating = self.calibration_stash().is_some();
         PlaybackOptions {
             count_in: self.playback_ctl.audio_cfg.count_in,
-            ghost_notes: (generator.ghost_notes && !self.metronome_mode())
+            // On the generator's grid: Practice's rhythm only.
+            ghost_notes: (generator.ghost_notes && self.document() == Document::Practice)
                 .then_some(generator.settings.subdivision),
             swing: self.playback_ctl.audio_cfg.swing,
             // Editing always sounds every bar, so changes can be heard.
@@ -497,7 +523,7 @@ impl Grooph {
     /// the timing the audio engine builds from [`Self::playback_options`],
     /// including the tempo ramp of the bar being played.
     pub(crate) fn score_timing(&self) -> ScoreTiming {
-        ScoreTiming::from_score(&self.editor.score, self.current_bpm())
+        ScoreTiming::from_score(&self.editor.doc().score, self.current_bpm())
             .with_swing(self.playback_ctl.audio_cfg.swing)
     }
 
@@ -511,38 +537,42 @@ impl Grooph {
     }
 
     pub(crate) fn current_measure(&self) -> &Measure {
-        self.editor.score.current(self.editor.cursor.measure_idx)
+        self.editor.doc().score.current(self.editor.doc().cursor.measure_idx)
     }
 
     pub(crate) fn current_measure_mut(&mut self) -> &mut Measure {
-        self.editor.score.current_mut(self.editor.cursor.measure_idx)
+        let doc = self.editor.doc_mut();
+        doc.score.current_mut(doc.cursor.measure_idx)
     }
 
     /// The voice the cursor is in, whose beats the tools edit.
     pub(crate) fn current_voice(&self) -> &VoiceBar {
-        self.editor.score.voice_at(self.editor.score.clamp_cursor(self.editor.cursor))
+        self.editor
+            .doc()
+            .score
+            .voice_at(self.editor.doc().score.clamp_cursor(self.editor.doc().cursor))
     }
 
     pub(crate) fn current_voice_mut(&mut self) -> &mut VoiceBar {
-        let cursor = self.editor.score.clamp_cursor(self.editor.cursor);
-        self.editor.score.voice_at_mut(cursor)
+        let cursor = self.editor.doc().score.clamp_cursor(self.editor.doc().cursor);
+        self.editor.doc_mut().score.voice_at_mut(cursor)
     }
 
     fn current_snapshot(&self) -> EditorSnapshot {
         EditorSnapshot {
-            score: self.editor.score.clone(),
-            cursor: self.editor.cursor,
+            score: self.editor.doc().score.clone(),
+            cursor: self.editor.doc().cursor,
             counter: self.metronome_mode().then(|| self.playback_ctl.audio_cfg.counter.clone()),
             click: self.metronome_mode().then(|| self.playback_ctl.audio_cfg.click.clone()),
         }
     }
 
     pub(crate) fn can_undo(&self) -> bool {
-        self.editor.history.can_undo()
+        self.editor.doc().history.can_undo()
     }
 
     pub(crate) fn can_redo(&self) -> bool {
-        self.editor.history.can_redo()
+        self.editor.doc().history.can_redo()
     }
 
     /// Snapshot the current state, run `op`, and commit only if it reports a change.
@@ -553,9 +583,9 @@ impl Grooph {
     {
         let snap = self.current_snapshot();
         if op(self) {
-            self.editor.history.push(snap);
+            self.editor.doc_mut().history.push(snap);
             self.clear_accuracy_for_edit();
-            self.editor.dirty = true;
+            self.editor.doc_mut().dirty = true;
             true
         } else {
             false
@@ -567,9 +597,9 @@ impl Grooph {
         // snapshot brings back its own.
         self.sync_click_bar();
         let current = self.current_snapshot();
-        if let Some(prev) = self.editor.history.pop_undo(current) {
-            self.editor.score = prev.score;
-            self.editor.cursor = prev.cursor;
+        if let Some(prev) = self.editor.doc_mut().history.pop_undo(current) {
+            self.editor.doc_mut().score = prev.score;
+            self.editor.doc_mut().cursor = prev.cursor;
             if let Some(counter) = prev.counter {
                 self.playback_ctl.audio_cfg.counter = counter;
             }
@@ -577,7 +607,7 @@ impl Grooph {
                 self.playback_ctl.audio_cfg.click = click;
             }
             self.clear_accuracy_for_edit();
-            self.editor.dirty = true;
+            self.editor.doc_mut().dirty = true;
         }
     }
 
@@ -586,9 +616,9 @@ impl Grooph {
         // snapshot brings back its own.
         self.sync_click_bar();
         let current = self.current_snapshot();
-        if let Some(next) = self.editor.history.pop_redo(current) {
-            self.editor.score = next.score;
-            self.editor.cursor = next.cursor;
+        if let Some(next) = self.editor.doc_mut().history.pop_redo(current) {
+            self.editor.doc_mut().score = next.score;
+            self.editor.doc_mut().cursor = next.cursor;
             if let Some(counter) = next.counter {
                 self.playback_ctl.audio_cfg.counter = counter;
             }
@@ -596,7 +626,7 @@ impl Grooph {
                 self.playback_ctl.audio_cfg.click = click;
             }
             self.clear_accuracy_for_edit();
-            self.editor.dirty = true;
+            self.editor.doc_mut().dirty = true;
         }
     }
 
@@ -611,8 +641,8 @@ impl Grooph {
             let new_len = self.current_voice().beats().len();
             if new_len > 0 {
                 let last = new_len - 1;
-                if self.editor.cursor.beat_idx < last {
-                    self.editor.cursor.beat_idx += 1;
+                if self.editor.doc().cursor.beat_idx < last {
+                    self.editor.doc_mut().cursor.beat_idx += 1;
                 }
             }
         }
@@ -626,13 +656,13 @@ impl Grooph {
             Some(Modification::DissolveTuplet(tuplet_idx, _)) => {
                 let new_len = self.current_voice().beats().len();
                 if new_len > 0 {
-                    self.editor.cursor.beat_idx = tuplet_idx.start_idx.min(new_len - 1);
+                    self.editor.doc_mut().cursor.beat_idx = tuplet_idx.start_idx.min(new_len - 1);
                 } else {
-                    self.editor.cursor.beat_idx = 0;
+                    self.editor.doc_mut().cursor.beat_idx = 0;
                 }
             }
             Some(Modification::SetTuplet(group_span, ..)) => {
-                self.editor.cursor.beat_idx =
+                self.editor.doc_mut().cursor.beat_idx =
                     (group_span.end_idx + 1).min(self.current_voice().beats().len() - 1);
             }
             _ => {}
@@ -647,10 +677,10 @@ impl Grooph {
         self.with_undo_snapshot(|app| {
             let current = app.current_measure();
             let new_measure = current.empty_like(current.time_signature());
-            let insert_at = app.editor.cursor.measure_idx + 1;
-            app.editor.score.insert(insert_at, new_measure);
-            app.editor.cursor.measure_idx = insert_at;
-            app.editor.cursor.beat_idx = 0;
+            let insert_at = app.editor.doc().cursor.measure_idx + 1;
+            app.editor.doc_mut().score.insert(insert_at, new_measure);
+            app.editor.doc_mut().cursor.measure_idx = insert_at;
+            app.editor.doc_mut().cursor.beat_idx = 0;
             true
         });
     }
@@ -658,13 +688,14 @@ impl Grooph {
     /// Remove the currently active measure. Does nothing if only one measure
     /// remains (Score invariant: at least one measure).
     pub(crate) fn remove_current_measure(&mut self) {
-        if self.editor.score.len() <= 1 {
+        if self.editor.doc().score.len() <= 1 {
             return;
         }
         self.with_undo_snapshot(|app| {
-            let idx = app.editor.cursor.measure_idx;
-            app.editor.score.remove(idx);
-            app.editor.cursor = app.editor.score.clamp_cursor(app.editor.cursor);
+            let idx = app.editor.doc().cursor.measure_idx;
+            app.editor.doc_mut().score.remove(idx);
+            let doc = app.editor.doc_mut();
+            doc.cursor = doc.score.clamp_cursor(doc.cursor);
             true
         });
     }
@@ -672,15 +703,15 @@ impl Grooph {
     /// "Save": if a pattern is active, overwrite its score + tempo in place
     /// (keeping id and name); otherwise save a new one (see
     /// [`Self::save_pattern_as`]). Returns the pattern's id.
+    /// The library keeps the score tab's score, also when it is saved from
+    /// another page.
     pub(crate) fn save_active_pattern(&mut self) -> u64 {
-        // The library keeps rhythms, not the metronome's click bar.
-        self.leave_metronome();
-        let score = self.editor.score.clone();
         let bpm = self.playback_ctl.bpm;
-        match self.editor.active_pattern_id {
+        let doc = &mut self.editor.docs.score;
+        match doc.active_pattern_id {
             Some(id) if self.editor.library.contains(id) => {
-                self.editor.library.update(id, score, bpm);
-                self.editor.dirty = false;
+                self.editor.library.update(id, doc.score.clone(), bpm);
+                doc.dirty = false;
                 id
             }
             _ => self.save_pattern_as(),
@@ -690,14 +721,13 @@ impl Grooph {
     /// "Save as new": always create a new library entry under the next free
     /// "Pattern N" and make it the active pattern.
     pub(crate) fn save_pattern_as(&mut self) -> u64 {
-        self.leave_metronome();
-        let score = self.editor.score.clone();
+        let doc = &mut self.editor.docs.score;
         let bpm = self.playback_ctl.bpm;
         let names = self.editor.library.patterns.iter().map(|p| p.name.as_str());
         let name = library::next_default_name("Pattern", names);
-        let id = self.editor.library.add(name, score, bpm);
-        self.editor.active_pattern_id = Some(id);
-        self.editor.dirty = false;
+        let id = self.editor.library.add(name, doc.score.clone(), bpm);
+        doc.active_pattern_id = Some(id);
+        doc.dirty = false;
         id
     }
 
@@ -711,37 +741,37 @@ impl Grooph {
         let score = pattern.score.clone();
         let bpm = pattern.bpm;
 
-        // The rhythm is replaced, not the metronome's click bar.
-        self.leave_metronome();
+        // The score tab's score is replaced.
         self.stop_transport();
+        self.show_document(Document::Score);
         self.with_undo_snapshot(|app| {
-            app.editor.score = score;
-            app.editor.cursor = Cursor::start();
+            app.editor.doc_mut().score = score;
+            app.editor.doc_mut().cursor = Cursor::start();
             true
         });
         self.playback_ctl.bpm = bpm;
         self.playback_ctl.playback.reset();
-        self.editor.active_pattern_id = Some(id);
-        self.editor.dirty = false;
+        self.editor.doc_mut().active_pattern_id = Some(id);
+        self.editor.doc_mut().dirty = false;
         self.show_loaded_pattern();
     }
 
-    /// A pattern loaded on the More screen, which has no staff, opens on
-    /// the rhythm page More was opened from.
+    /// A loaded pattern or score link opens on the score tab. The library
+    /// closes; the editor stays open if it was.
     fn show_loaded_pattern(&mut self) {
-        if self.tab() == Tab::More {
-            self.ui.picker = None;
-            self.select_tab(self.ui.shell.rhythm_tab);
+        self.ui.picker = None;
+        if self.tab() != Tab::Score {
+            self.select_tab(Tab::Score);
         }
     }
 
     /// Entry point for the load button: if the working score has unsaved changes,
     /// defer to the confirmation dialog; otherwise load immediately.
     pub(crate) fn request_load_pattern(&mut self, id: u64) {
-        let dirty = self.rhythm_dirty();
-        if self.editor.active_pattern_id == Some(id) && !dirty {
+        let dirty = self.editor.docs.score.dirty;
+        if self.editor.docs.score.active_pattern_id == Some(id) && !dirty {
             // Already loaded and unchanged.
-            self.leave_metronome();
+            self.show_document(Document::Score);
             self.show_loaded_pattern();
             return;
         }
@@ -755,24 +785,18 @@ impl Grooph {
 
     pub(crate) fn delete_pattern(&mut self, id: u64) {
         self.editor.library.remove(id);
-        if self.editor.active_pattern_id == Some(id) {
-            self.editor.active_pattern_id = None;
-        }
-        self.forget_stashed_pattern(id);
+        self.forget_pattern(id);
         if matches!(self.ui.pending_load, Some(PendingLoad::Pattern(p)) if p == id) {
             self.ui.pending_load = None;
         }
     }
 
-    /// Open a shared link. Replacing the working score asks first if it has
-    /// unsaved changes; a tempo-only link applies right away.
+    /// Open a shared link. A score link replaces the score tab's score and
+    /// asks first if it has unsaved changes; a generator link replaces
+    /// Practice's rhythm, a metronome or tempo-only link applies right away.
     pub(crate) fn open_link(&mut self, link: SharedLink) {
-        // A metronome link leaves the rhythm alone: nothing to lose.
-        let replaces_rhythm =
-            link.content.as_ref().is_some_and(|c| !matches!(c, LinkContent::Metronome(_)));
-        // The rhythm's changes, also while the metronome's click bar is in
-        // its place.
-        if replaces_rhythm && self.rhythm_dirty() {
+        let replaces_score = matches!(link.content, Some(LinkContent::Score(_)));
+        if replaces_score && self.editor.docs.score.dirty {
             self.ui.pending_load = Some(PendingLoad::Link(Box::new(link)));
         } else {
             self.apply_link(link);
@@ -780,13 +804,17 @@ impl Grooph {
     }
 
     pub(crate) fn apply_link(&mut self, link: SharedLink) {
-        // A rhythm link puts the metronome's click bar away first; a
-        // metronome link reopens it below with its meter and click bar.
-        if self.metronome_mode() {
-            self.leave_metronome();
-            self.ui.mode = Mode::Playback;
-        }
+        // Each content opens on its own page: a score link on the score tab,
+        // a generator link on Practice, a metronome link on the metronome
+        // (below, with its meter and click bar).
         let metronome = matches!(link.content, Some(LinkContent::Metronome(_)));
+        if metronome {
+            // Put the open click bar away first, so that nothing syncs it
+            // back over the link's meter and clicks before it reopens.
+            self.leave_metronome();
+        }
+        let replaces_rhythm =
+            matches!(link.content, Some(LinkContent::Score(_) | LinkContent::Generator { .. }));
         match link.content {
             Some(LinkContent::Score(score)) => self.replace_score_from_link(score),
             Some(LinkContent::Metronome(ts)) => {
@@ -802,17 +830,25 @@ impl Grooph {
             }
             Some(LinkContent::Generator { settings, seed }) => {
                 self.stop_transport();
+                self.show_document(Document::Practice);
                 self.editor.generator.settings = GeneratorSettings {
                     custom_patterns: self.editor.generator.settings.custom_patterns,
                     ..settings
                 };
                 self.generate_new_score_with_seed(seed);
-                self.ui.mode = Mode::Generator;
+                self.ui.mode = Mode::Playback;
             }
             None => {}
         }
-        if let Some(bpm) = link.bpm {
+        if let Some(bpm) = link.bpm
+            && bpm != self.playback_ctl.bpm
+        {
             self.playback_ctl.bpm = bpm;
+            // A rhythm from the link is clean below; otherwise the tempo
+            // is a change of the saved score, as in the BPM picker.
+            if !replaces_rhythm {
+                self.mark_tempo_unsaved();
+            }
             self.handle_bpm_change();
         }
         if let Some(swing) = link.swing {
@@ -823,22 +859,24 @@ impl Grooph {
         }
         self.playback_ctl.playback.reset();
         if metronome {
-            self.open_metronome();
+            self.show_document(Document::Metronome);
             self.ui.mode = Mode::Playback;
-        } else {
-            // The content is reproducible from the link, so it is not "unsaved".
-            self.editor.dirty = false;
+        } else if replaces_rhythm {
+            // The content is reproducible from the link, so it is not
+            // "unsaved".
+            self.editor.doc_mut().dirty = false;
         }
     }
 
     fn replace_score_from_link(&mut self, score: Score) {
         self.stop_transport();
+        self.show_document(Document::Score);
         self.with_undo_snapshot(|app| {
-            app.editor.score = score;
-            app.editor.cursor = Cursor::start();
+            app.editor.doc_mut().score = score;
+            app.editor.doc_mut().cursor = Cursor::start();
             true
         });
-        self.editor.active_pattern_id = None;
+        self.editor.doc_mut().active_pattern_id = None;
         self.show_loaded_pattern();
     }
 
@@ -917,8 +955,8 @@ impl Grooph {
             self.playback_ctl.accuracy.tracker.dismiss_summary();
             return true;
         }
-        let practice_page = self.tab() == Tab::Practice;
-        let metronome = self.metronome_mode();
+        // Practice's and the score tab's options sheet.
+        let practice_page = matches!(self.tab(), Tab::Practice | Tab::Score);
         let ui = &mut self.ui;
         if ui.link_error.take().is_some()
             || ui.pending_load.take().is_some()
@@ -935,9 +973,9 @@ impl Grooph {
         }
         ui.mode = match ui.mode {
             Mode::TimeSignature(_) => Mode::Edit,
-            // The metronome's click bar editor ("Done").
-            Mode::Edit if metronome => Mode::Playback,
-            // The practice page's options sheet, when unfolded.
+            // A page's editor ("Done").
+            Mode::Edit => Mode::Playback,
+            // The options sheet, when unfolded.
             _ if practice_page && !ui.shell.options_collapsed => {
                 ui.shell.options_collapsed = true;
                 return true;
@@ -956,12 +994,13 @@ impl Grooph {
         self.playback_ctl.mic.input = None;
     }
 
-    fn toggle_mode(&mut self, mode: Mode) {
-        if self.ui.mode == mode {
-            self.ui.mode = Mode::Playback;
-        } else {
-            self.ui.mode = mode
-        }
+    /// Esc: into or out of the page's editor.
+    fn toggle_edit(&mut self) {
+        self.ui.mode = match self.ui.mode {
+            Mode::Edit => Mode::Playback,
+            Mode::Playback => Mode::Edit,
+            _ => return,
+        };
     }
 
     fn audio_state(&self) -> PlayerState {
@@ -1019,7 +1058,7 @@ impl Grooph {
             && self.playback_ctl.play_along.calibration.is_none()
         {
             self.playback_ctl.bpm = bpm;
-            self.editor.dirty = true;
+            self.mark_tempo_unsaved();
         }
         if self.playback_ctl.play_along.calibration.is_some() {
             self.playback_ctl.accuracy.tracker.discard_session();
@@ -1089,7 +1128,7 @@ impl Grooph {
         if self.metronome_mode() {
             Cow::Owned(self.metronome_score())
         } else {
-            Cow::Borrowed(&self.editor.score)
+            Cow::Borrowed(&self.editor.doc().score)
         }
     }
 
@@ -1210,24 +1249,38 @@ impl Grooph {
             update_check::start(cc.egui_ctx.clone());
         }
 
+        let mut generator =
+            GeneratorState::new(state.generator_settings, state.endless, state.ghost_notes);
+        // Saved before Practice had its own: Practice starts with a new rhythm.
+        let practice_score = state
+            .practice_score
+            .or_else(|| generator.generate())
+            .unwrap_or_else(|| Score::single(Self::default_measure()));
         let mut app = Self {
             editor: EditorState {
-                score: state.score,
-                cursor: state.cursor,
-                history: UndoHistory::new(DEFAULT_UNDO_LIMIT),
+                document: Document::Score,
+                docs: Documents {
+                    // Its click bar is set when the metronome opens.
+                    metronome: RhythmDoc::new(
+                        Score::single(Self::default_measure()),
+                        Cursor::start(),
+                    ),
+                    practice: RhythmDoc::new(practice_score, state.practice_cursor),
+                    score: RhythmDoc {
+                        active_pattern_id: state
+                            .active_pattern_id
+                            .filter(|id| state.library.contains(*id)),
+                        dirty: state.dirty,
+                        ..RhythmDoc::new(state.score, state.cursor)
+                    },
+                },
                 button_measures,
-                active_pattern_id: state.active_pattern_id.filter(|id| state.library.contains(*id)),
-                dirty: state.dirty,
                 library: state.library,
                 presets: state.presets,
                 active_preset: None,
                 state_backup,
                 metronome: MetronomeState::new(state.metronome_meter),
-                generator: GeneratorState::new(
-                    state.generator_settings,
-                    state.endless,
-                    state.ghost_notes,
-                ),
+                generator,
             },
             playback_ctl: PlaybackController {
                 transport_state: TransportState::Stopped,
@@ -1286,8 +1339,10 @@ impl Grooph {
             },
         };
         app.editor.active_preset = app.matching_preset();
-        // A link opens after the saved tab, so its tab wins.
+        // The page the More screen was opened from, then the saved tab.
+        app.select_tab(state.document.tab());
         app.select_tab(state.tab);
+        // A link opens after the saved tab, so its tab wins.
         if let Some(query) = query {
             app.open_link_from_url(&query);
         }
@@ -1423,17 +1478,18 @@ mod tests {
     }
 
     #[test]
-    fn library_holds_the_rhythm_and_loads_onto_its_page() {
-        use super::{Grooph, TransportState};
+    fn library_holds_the_score_and_loads_it_into_the_score_tab() {
+        use super::{Grooph, Mode, TransportState};
         use crate::pickers::Picker;
 
         let cc = eframe::CreationContext::_new_kittest(eframe::egui::Context::default());
         let mut app = Grooph::new(&cc);
-        app.select_tab(Tab::Edit);
-        app.editor.score = Score::single(Measure::new(TimeSignature::new(3, 4)));
-        let rhythm = app.editor.score.clone();
+        app.select_tab(Tab::Score);
+        app.edit_page();
+        app.editor.doc_mut().score = Score::single(Measure::new(TimeSignature::new(3, 4)));
+        let rhythm = app.editor.doc().score.clone();
         app.save_pattern_as();
-        let id = app.editor.active_pattern_id.unwrap();
+        let id = app.editor.doc().active_pattern_id.unwrap();
 
         // Through the metronome to More: the library leaves it open.
         app.select_tab(Tab::Metronome);
@@ -1441,42 +1497,50 @@ mod tests {
         app.select_tab(Tab::More);
         app.ui.picker = Some(Picker::Library);
         assert!(app.metronome_mode());
-        // Saving keeps the rhythm, not the click bar, and stops the click.
+        // Saving keeps the score tab's score, not the click bar, and the
+        // click plays on.
         app.save_pattern_as();
-        assert!(!app.metronome_mode());
-        assert_eq!(app.playback_ctl.transport_state, TransportState::Stopped);
-        assert_eq!(format!("{:?}", app.editor.score), format!("{rhythm:?}"));
-        let saved = app.editor.library.get(app.editor.active_pattern_id.unwrap()).unwrap();
+        assert!(app.metronome_mode());
+        assert_eq!(app.playback_ctl.transport_state, TransportState::Playing);
+        assert_eq!(format!("{:?}", app.editor.docs.score.score), format!("{rhythm:?}"));
+        let saved = app.editor.docs.score.active_pattern_id.unwrap();
+        let saved = app.editor.library.get(saved).unwrap();
         assert_eq!(format!("{:?}", saved.score), format!("{rhythm:?}"));
         // So does loading.
         app.select_tab(Tab::Metronome);
-        app.select_tab(Tab::Edit);
+        app.select_tab(Tab::Score);
+        app.edit_page();
         app.select_tab(Tab::Metronome);
         app.select_tab(Tab::More);
 
-        // Loading closes the dialog and opens the rhythm page More was last
-        // opened from.
+        // Loading closes the dialog and opens the score tab.
         app.request_load_pattern(id);
-        assert_eq!(app.tab(), Tab::Edit);
+        assert_eq!(app.tab(), Tab::Score);
         assert_eq!(app.ui.picker, None);
+        app.editor.doc_mut().active_pattern_id = None;
+        app.editor.doc_mut().dirty = true;
+        // From the practice page too, which keeps its rhythm.
         app.select_tab(Tab::Practice);
+        let practice = format!("{:?}", app.editor.doc().score);
         app.select_tab(Tab::More);
         app.ui.picker = Some(Picker::Library);
-        app.editor.active_pattern_id = None;
-        app.editor.dirty = true;
         app.request_load_pattern(id);
-        // Unsaved changes ask first, above the library.
+        // The score tab's unsaved changes ask first, above the library.
         assert_eq!(app.tab(), Tab::More);
         assert_eq!(app.ui.picker, Some(Picker::Library));
         let pending = app.ui.pending_load.take().unwrap();
         app.finish_pending_load(pending);
-        assert_eq!(app.tab(), Tab::Practice);
+        assert_eq!(app.tab(), Tab::Score);
         assert_eq!(app.ui.picker, None);
-        // Loading on a rhythm page stays there.
-        app.select_tab(Tab::Edit);
-        app.editor.active_pattern_id = None;
+        assert_eq!(app.editor.doc().active_pattern_id, Some(id));
+        app.select_tab(Tab::Practice);
+        assert_eq!(format!("{:?}", app.editor.doc().score), practice);
+        // Loading in the editor stays there.
+        app.select_tab(Tab::Score);
+        app.edit_page();
+        app.editor.doc_mut().active_pattern_id = None;
         app.request_load_pattern(id);
-        assert_eq!(app.tab(), Tab::Edit);
+        assert_eq!(app.ui.mode, Mode::Edit);
     }
 
     #[test]
@@ -1525,7 +1589,8 @@ mod tests {
         let ctx = eframe::egui::Context::default();
         let cc = eframe::CreationContext::_new_kittest(ctx.clone());
         let mut app = Grooph::new(&cc);
-        app.select_tab(Tab::Edit);
+        app.select_tab(Tab::Score);
+        app.edit_page();
         // From sparse to too dense for the row, which then clips.
         for d in [q(), e(), s(), t8()] {
             let mut m = Measure::new(TimeSignature::FOUR_FOUR);
@@ -1534,7 +1599,7 @@ mod tests {
                 m.first_voice_mut().set_beat(i, Beat::note(d)).unwrap();
                 i += 1;
             }
-            app.editor.score = Score::new(vec![m.clone(), m]);
+            app.editor.doc_mut().score = Score::new(vec![m.clone(), m]);
             app.save_pattern_as();
         }
         app.select_tab(Tab::More);
@@ -1561,18 +1626,62 @@ mod tests {
         let mut app = Grooph::new(&cc);
         // Through the metronome: the click bar stays the metronome's.
         app.select_tab(Tab::Metronome);
-        let click_bar = format!("{:?}", app.editor.score);
+        let click_bar = format!("{:?}", app.editor.doc().score);
         app.select_tab(Tab::More);
         app.ui.picker = Some(Picker::Library);
         let last = builtin_presets().len() - 1;
         app.open_preset(PresetId::BuiltIn(last));
         assert_eq!(app.tab(), Tab::Practice);
-        assert_eq!(app.ui.mode, Mode::Generator);
+        assert_eq!(app.ui.mode, Mode::Playback);
         assert_eq!(app.ui.picker, None);
         assert_eq!(app.editor.active_preset, Some(PresetId::BuiltIn(last)));
         assert_eq!(app.editor.generator.settings, builtin_presets()[last].1.generator);
         app.select_tab(Tab::Metronome);
-        assert_eq!(format!("{:?}", app.editor.score), click_bar);
+        assert_eq!(format!("{:?}", app.editor.doc().score), click_bar);
+    }
+
+    #[test]
+    fn the_score_tabs_library_holds_rhythms_only() {
+        use super::Grooph;
+        use crate::library_panel::LibraryTab;
+        use crate::pickers::Picker;
+        use eframe::egui::{Pos2, RawInput, Rect, Shape, vec2};
+
+        let ctx = eframe::egui::Context::default();
+        let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let mut app = Grooph::new(&cc);
+        app.ui.library_tab = LibraryTab::Presets;
+        let texts = |app: &mut Grooph| {
+            let mut texts = Vec::new();
+            for _ in 0..2 {
+                let screen = Rect::from_min_size(Pos2::ZERO, vec2(390.0, 844.0));
+                let input = RawInput { screen_rect: Some(screen), ..Default::default() };
+                let mut output = ctx.run_ui(input, |ui| {
+                    app.apply_style(ui);
+                    app.settings_picker(ui);
+                });
+                output.textures_delta.clear();
+                texts = output
+                    .shapes
+                    .iter()
+                    .filter_map(|clipped| match &clipped.shape {
+                        Shape::Text(text) => Some(text.galley.text().to_owned()),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>();
+            }
+            texts
+        };
+        // From More: both halves.
+        app.select_tab(Tab::More);
+        app.ui.picker = Some(Picker::Library);
+        assert!(texts(&mut app).iter().any(|t| t == "Presets"));
+        // From the score tab's card: its rhythms, no presets.
+        app.select_tab(Tab::Score);
+        app.ui.picker = Some(Picker::Library);
+        let shown = texts(&mut app);
+        assert!(!shown.iter().any(|t| t == "Presets"), "{shown:?}");
+        assert!(shown.iter().any(|t| t.contains("Save as new")), "{shown:?}");
     }
 
     #[test]
@@ -1656,7 +1765,7 @@ mod tests {
             shell_frame(&mut app, &ctx, time, vec![]);
             time += 0.1;
         }
-        assert!(app.editor.score.len() <= 4, "{} bars", app.editor.score.len());
+        assert!(app.editor.doc().score.len() <= 4, "{} bars", app.editor.doc().score.len());
     }
 
     #[test]
@@ -1668,8 +1777,9 @@ mod tests {
         let mut app = Grooph::new(&cc);
         app.select_tab(Tab::Practice);
         app.editor.generator.endless = true;
-        app.select_tab(Tab::Edit);
-        let score = format!("{:?}", app.editor.score);
+        app.select_tab(Tab::Score);
+        app.edit_page();
+        let score = format!("{:?}", app.editor.doc().score);
         app.playback_ctl.bpm = 240;
         app.start_playback();
         // Also past the last bar and behind the More screen opened from Edit.
@@ -1681,7 +1791,7 @@ mod tests {
             shell_frame(&mut app, &ctx, time, vec![]);
             time += 0.5;
         }
-        assert_eq!(format!("{:?}", app.editor.score), score);
+        assert_eq!(format!("{:?}", app.editor.doc().score), score);
     }
 
     #[test]
@@ -1724,16 +1834,17 @@ mod tests {
 
         let cc = eframe::CreationContext::_new_kittest(eframe::egui::Context::default());
         let mut app = Grooph::new(&cc);
-        app.select_tab(Tab::Edit);
+        app.select_tab(Tab::Score);
+        app.edit_page();
         // Rhythms: a new one while none is active, then the active one only
         // with changes.
-        app.editor.active_pattern_id = None;
+        app.editor.doc_mut().active_pattern_id = None;
         let target = app.rhythm_save_target();
         assert_eq!((target.overwrites, target.enabled), (None, true));
         app.save_pattern_as();
         let target = app.rhythm_save_target();
         assert!(target.overwrites.is_some() && !target.enabled);
-        app.editor.dirty = true;
+        app.editor.doc_mut().dirty = true;
         assert!(app.rhythm_save_target().enabled);
 
         // Presets: an unchanged built-in has nothing to save, a changed one
@@ -1762,13 +1873,14 @@ mod tests {
 
         let cc = eframe::CreationContext::_new_kittest(eframe::egui::Context::default());
         let mut app = Grooph::new(&cc);
-        app.select_tab(Tab::Edit);
+        app.select_tab(Tab::Score);
+        app.edit_page();
         let id = app.save_pattern_as();
-        app.editor.dirty = true;
+        app.editor.doc_mut().dirty = true;
         app.select_tab(Tab::Metronome);
         app.start_playback();
         app.select_tab(Tab::More);
-        app.editor.active_pattern_id = None;
+        app.editor.doc_mut().active_pattern_id = None;
         app.request_load_pattern(id);
         assert!(app.ui.pending_load.is_some());
         assert!(app.metronome_mode());
@@ -1777,7 +1889,7 @@ mod tests {
         let pending = app.ui.pending_load.take().unwrap();
         app.finish_pending_load(pending);
         assert!(!app.metronome_mode());
-        assert_eq!(app.editor.active_pattern_id, Some(id));
+        assert_eq!(app.editor.doc().active_pattern_id, Some(id));
     }
 
     #[test]
@@ -1789,7 +1901,8 @@ mod tests {
         let ctx = eframe::egui::Context::default();
         let cc = eframe::CreationContext::_new_kittest(ctx.clone());
         let mut app = Grooph::new(&cc);
-        app.select_tab(Tab::Edit);
+        app.select_tab(Tab::Score);
+        app.edit_page();
         let first = app.save_pattern_as();
         app.save_pattern_as();
         app.save_pattern_as();
@@ -1816,12 +1929,13 @@ mod tests {
 
         let cc = eframe::CreationContext::_new_kittest(eframe::egui::Context::default());
         let mut app = Grooph::new(&cc);
-        app.select_tab(Tab::Edit);
-        app.editor.dirty = true;
+        app.select_tab(Tab::Score);
+        app.edit_page();
+        app.editor.doc_mut().dirty = true;
         app.select_tab(Tab::Metronome);
         app.select_tab(Tab::More);
         // The click bar has no changes; the rhythm behind it has.
-        app.editor.dirty = false;
+        app.editor.doc_mut().dirty = false;
         let score = Score::single(Measure::new(TimeSignature::new(3, 4)));
         app.open_link(SharedLink {
             content: Some(LinkContent::Score(score)),
@@ -1842,12 +1956,14 @@ mod tests {
         let groove = "4/4 H:e S-H:e H:e H:e H:e S-H:e Ho:e Hc:e ; K:q r:q K:q r:q";
         let query = format!("v=2&bpm=96&r={}", groove.replace(' ', "+").replace(';', "%3B"));
         app.open_link(grooph_link::parse_query(&query).unwrap().unwrap());
-        assert_eq!(app.editor.score.staff, StaffKind::Kit);
-        assert_eq!(app.editor.score.measures()[0].voices().len(), 2);
-        // Every tab draws it.
-        for (i, tab) in [Tab::Practice, Tab::Edit, Tab::Practice].into_iter().enumerate() {
+        assert_eq!(app.editor.doc().score.staff, StaffKind::Kit);
+        assert_eq!(app.editor.doc().score.measures()[0].voices().len(), 2);
+        // It opens in the score tab; Practice keeps its rhythm.
+        assert_eq!(app.tab(), Tab::Score);
+        for (i, tab) in [Tab::Score, Tab::Practice, Tab::Score].into_iter().enumerate() {
             app.select_tab(tab);
             shell_frame(&mut app, &ctx, i as f64 * 0.1, vec![]);
+            assert_eq!(app.editor.doc().score.staff == StaffKind::Kit, tab == Tab::Score);
         }
         // Sharing writes the groove back.
         let url = app.share_link_url().unwrap();
@@ -1866,8 +1982,9 @@ mod tests {
         let ctx = eframe::egui::Context::default();
         let cc = eframe::CreationContext::_new_kittest(ctx.clone());
         let mut app = Grooph::new(&cc);
-        app.select_tab(Tab::Edit);
-        app.editor.score =
+        app.select_tab(Tab::Score);
+        app.edit_page();
+        app.editor.doc_mut().score =
             parse_score("4/4 H:e H:e H:e H:e H:e H:e H:e H:e ; K:q K:q K:q K:q").unwrap();
         app.ui.mode = Mode::Edit;
         let mut time = 0.0;
@@ -1883,7 +2000,7 @@ mod tests {
                 time += 0.5;
                 shell_frame(app, &ctx, time, vec![Event::PointerMoved(pos), event]);
             }
-            app.editor.cursor
+            app.editor.doc().cursor
         };
         shell_frame(&mut app, &ctx, 0.0, vec![]);
         // Down from the top of the staff: the hands first, then the kick.
@@ -1901,13 +2018,15 @@ mod tests {
 
         let cc = eframe::CreationContext::_new_kittest(eframe::egui::Context::default());
         let mut app = Grooph::new(&cc);
-        app.select_tab(Tab::Edit);
+        app.select_tab(Tab::Score);
+        app.edit_page();
         let id = app.save_pattern_as();
         app.select_tab(Tab::Metronome);
         app.select_tab(Tab::More);
         app.delete_pattern(id);
-        app.select_tab(Tab::Edit);
-        assert_eq!(app.editor.active_pattern_id, None);
+        app.select_tab(Tab::Score);
+        app.edit_page();
+        assert_eq!(app.editor.doc().active_pattern_id, None);
     }
 
     #[test]
@@ -1919,9 +2038,10 @@ mod tests {
         let ctx = eframe::egui::Context::default();
         let cc = eframe::CreationContext::_new_kittest(ctx.clone());
         let mut app = Grooph::new(&cc);
-        app.select_tab(Tab::Edit);
+        app.select_tab(Tab::Score);
+        app.edit_page();
         app.select_tab(Tab::More);
-        let score = format!("{:?}", app.editor.score);
+        let score = format!("{:?}", app.editor.doc().score);
         let key = |key, pressed| Event::Key {
             key,
             physical_key: None,
@@ -1946,7 +2066,7 @@ mod tests {
                 );
             }
         }
-        assert_eq!(format!("{:?}", app.editor.score), score);
+        assert_eq!(format!("{:?}", app.editor.doc().score), score);
         assert_eq!(app.tab(), Tab::More);
         // Space still plays.
         shell_frame(
@@ -1965,7 +2085,8 @@ mod tests {
 
         let cc = eframe::CreationContext::_new_kittest(eframe::egui::Context::default());
         let mut app = Grooph::new(&cc);
-        app.select_tab(Tab::Edit);
+        app.select_tab(Tab::Score);
+        app.edit_page();
         let id = app.save_rhythm(SaveAs::New, 1.0);
         assert_eq!(app.ui.renaming_pattern, Some(id));
         assert_eq!(app.ui.rename_typed, app.editor.library.get(id).unwrap().name);
@@ -1973,7 +2094,7 @@ mod tests {
         assert_eq!(app.ui.scroll_to_library_item, Some(LibraryItem::Pattern(id)));
         // Overwriting names no new pattern and opens no name.
         app.ui.renaming_pattern = None;
-        app.editor.dirty = true;
+        app.editor.doc_mut().dirty = true;
         assert_eq!(app.save_rhythm(SaveAs::Update, 2.0), id);
         assert_eq!(app.editor.library.patterns.len(), 1);
         assert_eq!(app.ui.renaming_pattern, None);
@@ -2010,21 +2131,40 @@ mod tests {
     }
 
     #[test]
+    fn calibration_from_the_score_tab_runs_on_practice() {
+        use super::Grooph;
+        use crate::play_along::HitSource;
+
+        let cc = eframe::CreationContext::_new_kittest(eframe::egui::Context::default());
+        let mut app = Grooph::new(&cc);
+        app.select_tab(Tab::Score);
+        let score = format!("{:?}", app.editor.docs.score.score);
+        app.select_tab(Tab::More);
+        app.start_calibration(HitSource::Tap);
+        assert_eq!(app.document(), crate::documents::Document::Practice);
+        assert_eq!(app.tab(), Tab::More);
+        assert_eq!(format!("{:?}", app.editor.docs.score.score), score);
+        app.stop_transport();
+        assert_eq!(format!("{:?}", app.editor.docs.score.score), score);
+    }
+
+    #[test]
     fn calibration_from_more_puts_the_metronome_away() {
         use super::Grooph;
         use crate::play_along::HitSource;
 
         let cc = eframe::CreationContext::_new_kittest(eframe::egui::Context::default());
         let mut app = Grooph::new(&cc);
-        app.select_tab(Tab::Edit);
-        app.editor.score = Score::single(Measure::new(TimeSignature::new(3, 4)));
-        let rhythm = app.editor.score.clone();
+        app.select_tab(Tab::Practice);
+        let rhythm = app.editor.doc().score.clone();
         app.select_tab(Tab::Metronome);
         app.select_tab(Tab::More);
+        // It calibrates on the practice page and gives its rhythm back.
         app.start_calibration(HitSource::Tap);
         assert!(!app.metronome_mode());
+        assert_eq!(app.document(), crate::documents::Document::Practice);
         app.stop_transport();
-        assert_eq!(format!("{:?}", app.editor.score), format!("{rhythm:?}"));
+        assert_eq!(format!("{:?}", app.editor.doc().score), format!("{rhythm:?}"));
         assert_eq!(app.tab(), Tab::More);
     }
 
@@ -2073,13 +2213,15 @@ mod tests {
             app.select_tab(tab);
             assert!(app.playback_options().gap.enabled, "{tab:?}");
         }
-        app.select_tab(Tab::Edit);
+        app.select_tab(Tab::Score);
+        app.edit_page();
         assert!(!app.playback_options().gap.enabled);
         // Editing the metronome's clicks too.
         app.select_tab(Tab::Metronome);
         app.ui.mode = super::Mode::Edit;
         assert!(!app.playback_options().gap.enabled);
-        app.select_tab(Tab::Edit);
+        app.select_tab(Tab::Score);
+        app.edit_page();
         app.ui.mode = super::Mode::TimeSignature(TimeSignature::FOUR_FOUR);
         assert!(!app.playback_options().gap.enabled);
         // The setting itself stays on, and bars are muted again after editing.
@@ -2107,9 +2249,9 @@ mod tests {
 
     #[test]
     fn saved_tab_round_trips_and_first_start_opens_metronome() {
-        let s = PersistedState { tab: Tab::Edit, ..Default::default() };
+        let s = PersistedState { tab: Tab::Score, ..Default::default() };
         let back: PersistedState = ron::from_str(&ron::to_string(&s).unwrap()).unwrap();
-        assert_eq!(back.tab, Tab::Edit);
+        assert_eq!(back.tab, Tab::Score);
         assert_eq!(PersistedState::default().tab, Tab::Metronome);
         let older: PersistedState = ron::from_str("(version: 2)").unwrap();
         assert_eq!(older.tab, Tab::Metronome);

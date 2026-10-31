@@ -218,9 +218,10 @@ spread across callers.
   link builds the ratio's counter bar as the picker does (`counter_bar`) and
   names it; `counter=` carries the clicks written out, which the share
   buttons write only when they were edited (`SharedLink::poly`). `llms.txt`
-  and the MCP tool offer only `poly`: models get the notation wrong too often. A link that replaces the score
-  goes through `PendingLoad::Link` and the
-  unsaved-changes dialog. The share buttons (`share_link`) build a link with
+  and the MCP tool offer only `poly`: models get the notation wrong too often. A score link replaces the score
+  tab's score (and opens that tab) through `PendingLoad::Link` and the
+  unsaved-changes dialog; a generator link replaces Practice's rhythm
+  without asking. The share buttons (`share_link`) build a link with
   `SharedLink::to_url`.
 - The link format is documented for AI agents in
   `crates/app/assets/seo/llms.txt`; keep it in sync.
@@ -364,10 +365,11 @@ grooph's metronome runs inside AI chats as an
 
 - UI: the Practice tab of the layout (`crates/app/src/shell.rs`). The
   settings card opens a picker per setting (`crates/app/src/pickers.rs`);
-  changing a setting regenerates the score (undoable), 🎲 rolls a new rhythm
+  changing a setting regenerates Practice's rhythm (undoable; never the
+  score tab's score, see "Rhythm documents"), 🎲 rolls a new rhythm
   with the same settings. Space and the grouping picker live in the Level
   picker, presets (load, save, update, rename, delete) in the Preset picker.
-- App glue: `crates/app/src/generator.rs`. Endless mode (Bars: Endless)
+- App glue: `crates/app/src/generator.rs`. Endless mode (Bars: Endless; on the practice page, not in its editor)
   starts with 2 fresh bars on every play (no 🎲 then) and never loops: once the cursor reaches the last measure
   a new one is added below it, and the first measure is removed once its row
   has scrolled out of view and the audio cursor has left it. Removing it moves
@@ -498,11 +500,13 @@ grooph's metronome runs inside AI chats as an
 
 - Metronome tab (`crates/app/src/metronome_view.rs`): its own meter
   (`MetronomeState::meter`, persisted, picked in the tab's card), separate
-  from the generator's. Opening the tab puts the rhythm (score, cursor, undo,
-  dirty flag) aside in `MetronomeState` and edits the meter's click bar in its
-  place, so the staff, tool palette and undo work on it; `sync_click_bar`
-  writes it back to `ClickBars` every frame, and closing the tab brings the
-  rhythm back (persistence saves the rhythm, not the bar). The audio engine
+  from the generator's. The tab's document is the meter's click bar
+  (`EditorState::docs.metronome`, see "Rhythm documents"), so the staff,
+  tool palette and undo work on it: `open_metronome` builds it from
+  `ClickBars` when the tab opens, `sync_click_bar` writes it back every
+  frame and when it closes (persistence saves the click settings, not the
+  bar). Something that needs a rhythm (a calibration, a preset, a link)
+  closes it with `leave_metronome`, which shows the practice page. The audio engine
   gets one silent bar of the meter (`metronome_score`), so only the clicks
   sound; ghost notes, endless mode and play along are off there. Below the
   staff a ring shows one segment per note or rest of the bar, as long as it,
@@ -513,7 +517,7 @@ grooph's metronome runs inside AI chats as an
   (beats in x/4, every eighth or sixteenth in x/8 and x/16, stored as the
   meter's click bar) and it has no counter rhythm, whatever it had when it
   was last picked. The metronome's meter and the rhythm's never change each
-  other (Practice's meter picker, Edit's time signature dialog). The staff gets a share of the free height
+  other (Practice's meter picker, the score editor's time signature dialog). The staff gets a share of the free height
   (`METRONOME_STAFF_SHARE`), the ring the rest; the options sheet folds away
   like Practice's (shared `options_collapsed`). While playing, the click and beat being heard light
   up and the middle shows the bar number. Switching into or out of the tab
@@ -548,6 +552,37 @@ grooph's metronome runs inside AI chats as an
   reads the stash while a calibration runs. It is started from More → Play
   along (`play_along_settings.rs`), whose dialog stays open underneath.
 
+## Rhythm documents
+
+- Three documents (`crates/app/src/documents.rs`), one per page: the
+  metronome's click bar, Practice's generated rhythm (thrown away freely)
+  and the score tab's score (written, loaded from the library or opened
+  from a score link). Each keeps its score, cursor, undo history, dirty flag
+  and pattern (`RhythmDoc`, all three in `EditorState::docs`).
+- Each page edits its own document in place: the metronome's "Edit clicks",
+  Practice's ✏ ("Edit rhythm") and the score tab's ✏ (`edit_page`) open
+  `Mode::Edit` on the page shown, Done, Back and Esc close it. Nothing is
+  swapped: the page shown, or the one the More screen was opened from, is
+  `EditorState::document`, and the staff, tools and undo work on its
+  document (`EditorState::doc`/`doc_mut`). `show_document` changes it and
+  stops playback; `select_tab` shows the tab's document.
+- The metronome's document is built from the click settings when it opens
+  (`open_metronome`) and written back to them while open and when it closes
+  (`sync_click_bar`, `close_metronome`).
+- The generator writes Practice's document only: `generate_new_score` shows
+  it first, so no generator action (🎲, a setting, a preset, a generator
+  link, endless mode) replaces the score tab's score. Endless mode and ghost
+  notes run on Practice's rhythm only.
+- The library and the unsaved-changes checks reach the score tab's document
+  as `docs.score`, from any page and without closing the metronome. A tempo
+  change marks it unsaved on the score tab, and on any page when it is a
+  saved pattern (`mark_tempo_unsaved`).
+- Persistence saves the rhythm documents and the page: `score`/`cursor`/
+  `dirty`/`active_pattern_id` are the score tab's, `practice_score`/
+  `practice_cursor` Practice's, `document` the page behind More. A state
+  saved before has no `practice_score`: its score stays in the score tab
+  and Practice starts with a new rhythm. `Tab::Score` still reads `Edit`.
+
 ## Layout
 
 - One layout for every window size, made for touch first
@@ -555,19 +590,24 @@ grooph's metronome runs inside AI chats as an
   a centered column; the staff and the tool palette use the full width.
 - Tabs: Metronome (see below), Practice (generator card with
   Meter/Notes/Level/Bars/BPM, options sheet, big "new rhythm" + play
-  buttons), Edit (tool palette + edit bar),
-  More (`Mode::MoreMenu`, a screen of its own without the staff: a list at
-  the bottom whose rows open pickers, Theme is picked in its row). The tab is
-  derived from `Mode` (`tab`), so modes set elsewhere land on the right tab;
-  the Metronome tab is open while `metronome_mode()`, in `Mode::Playback`
-  (ring) or `Mode::Edit` (tool palette). More stays in front of an open
-  metronome and leaves it playing (`advance_unseen_playback` moves the
-  playback on without a staff); saving or loading in the library puts it
-  away first (`leave_metronome`), and a loaded pattern opens on the rhythm
-  page More was opened from (`ShellState::rhythm_tab`).
+  buttons; ✏ in its options opens its editor), Score (its own score, see
+  "Rhythm documents": a card with the score's name (a tap opens the library)
+  and BPM, the options sheet without the generator's rows and ✏ / play /
+  share), More (`Mode::MoreMenu`, a screen of its own without the staff: a
+  list at the bottom whose rows open pickers, Theme is picked in its row).
+  Each of Metronome, Practice and Score is in `Mode::Playback` (its card) or
+  `Mode::Edit` (tool palette + edit bar with Done) on its own document; Esc
+  switches between the two, Back closes the editor. The tab is derived from
+  the document (`tab`), More from `Mode::MoreMenu`. More stays in front of
+  an open metronome and leaves it playing (`advance_unseen_playback` moves
+  the playback on without a staff); saving in the library leaves it playing
+  too, and a loaded pattern opens on the score tab.
 - The library (`library_panel.rs`) has two halves, Rhythms and Presets, of
-  the same cards (`library_card`): a tap loads a rhythm or applies a preset
-  and opens the practice page (`open_preset`), ✏ renames or deletes, built-in
+  the same cards (`library_card`); opened from the score tab's card it
+  holds the rhythms only. Rhythms are the score tab's: a tap loads
+  one into it, Save keeps its score from any page (`docs.score`),
+  and its marks (active, unsaved) are its pattern's. A tap on a preset
+  applies it and opens the practice page (`open_preset`), ✏ renames or deletes, built-in
   presets have no ✏. The Preset picker on the practice page shows the same
   preset cards (`preset_cards`); a tap there applies the preset and stays.
 - Settings open in a `Modal` picker (`settings_picker`); generator changes go
@@ -578,7 +618,7 @@ grooph's metronome runs inside AI chats as an
 - Windows narrower than `NARROW_MAX_WIDTH` (600 pt, `UiShell::narrow_screen`)
   get tighter staff spacing, so glyphs are bigger on phones.
 - While a tempo ramp runs, the card shows the tempo being played ("BPM now").
-- Share (right of play, and in the edit bar) builds a score link with tempo
+- Share (right of play; not in the editors) builds a score link with tempo
   and swing; on the web it opens the system share sheet
   (`platform::open_share_sheet`, Web Share API), else copies the link. In the
   Metronome tab, share (right of play) builds a `ts` link with tempo, swing

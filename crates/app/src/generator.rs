@@ -2,12 +2,12 @@
 //! the endless mode that keeps adding fresh measures below the playing one
 //! while the transport runs.
 
+use crate::documents::Document;
 use crate::platform::random_seed;
-use crate::shell::Tab;
 use crate::{Grooph, TransportState, clock};
 use grooph_measure::generator::{GeneratorSettings, Rng, generate_measure, generate_score};
 use grooph_measure::tempo::ScoreTiming;
-use grooph_measure::{Cursor, MeasureIdx};
+use grooph_measure::{Cursor, MeasureIdx, Score};
 use log::warn;
 
 /// Measures endless mode starts with: the one being played and the next.
@@ -31,6 +31,14 @@ impl GeneratorState {
     pub(crate) fn effective_bars(&self) -> usize {
         if self.endless { ENDLESS_START_BARS } else { self.settings.bars.max(1) }
     }
+
+    /// A new rhythm with the current settings, `None` if it fails.
+    pub(crate) fn generate(&mut self) -> Option<Score> {
+        let settings = GeneratorSettings { bars: self.effective_bars(), ..self.settings };
+        generate_score(&settings, &mut self.rng)
+            .inspect_err(|err| warn!("Rhythm generation failed: {err:?}"))
+            .ok()
+    }
 }
 
 impl Grooph {
@@ -51,25 +59,21 @@ impl Grooph {
         }
     }
 
-    /// Replace the working score with a freshly generated one (undoable).
+    /// Replace Practice's rhythm with a freshly generated one (undoable).
+    /// Only ever Practice's: the score tab's score is never replaced by a
+    /// generated rhythm, whatever page this is called from.
     pub(crate) fn generate_new_score(&mut self) {
-        let settings = GeneratorSettings {
-            bars: self.editor.generator.effective_bars(),
-            ..self.editor.generator.settings
+        // Nothing changes, the page shown neither, when it cannot generate.
+        let Some(score) = self.editor.generator.generate() else {
+            return;
         };
-        let score = match generate_score(&settings, &mut self.editor.generator.rng) {
-            Ok(score) => score,
-            Err(err) => {
-                warn!("Rhythm generation failed: {err:?}");
-                return;
-            }
-        };
+        self.show_document(Document::Practice);
         self.with_undo_snapshot(|app| {
-            app.editor.score = score;
-            app.editor.cursor = Cursor::start();
+            app.editor.doc_mut().score = score;
+            app.editor.doc_mut().cursor = Cursor::start();
             true
         });
-        self.editor.active_pattern_id = None;
+        self.editor.doc_mut().active_pattern_id = None;
     }
 
     /// Like [`Self::generate_new_score`], but reseeds the generator first so
@@ -80,15 +84,15 @@ impl Grooph {
         self.generate_new_score();
     }
 
-    /// Whether endless mode drives the played score: on the practice page,
-    /// also behind the More screen opened from it. The edit page plays the
-    /// score as it is, and the metronome plays no rhythm.
+    /// Whether endless mode drives the played score: Practice's rhythm, on
+    /// the practice page or behind the More screen opened from it. The score
+    /// tab and Practice's editor play their score as it is, and the
+    /// metronome plays no rhythm.
     pub(crate) fn endless_runs(&self) -> bool {
-        let page = match self.tab() {
-            Tab::More => self.ui.shell.rhythm_tab,
-            tab => tab,
-        };
-        self.editor.generator.endless && page == Tab::Practice && !self.metronome_mode()
+        self.editor.generator.endless
+            && self.document() == Document::Practice
+            && !self.editing()
+            && !self.metronome_mode()
     }
 
     /// Endless mode: a running score. Once the playback cursor reaches the
@@ -99,13 +103,13 @@ impl Grooph {
     /// Added measures follow the current generator settings.
     pub(crate) fn update_endless(&mut self) {
         let playing = self.playback_ctl.transport_state == TransportState::Playing;
-        if !self.endless_runs() || !playing || self.editor.score.is_empty() {
+        if !self.endless_runs() || !playing || self.editor.doc().score.is_empty() {
             return;
         }
 
         let timing = self.score_timing();
         let current = timing.measure_at_global_tick(self.playback_ctl.playback.smooth_tick);
-        if current + 1 >= self.editor.score.len() {
+        if current + 1 >= self.editor.doc().score.len() {
             self.append_endless_measure(&timing);
         }
 
@@ -145,15 +149,15 @@ impl Grooph {
         // Settle the hit windows on the old timing: the loop gets longer, so
         // the accuracy clock is anchored again below.
         let tracker = &mut self.playback_ctl.accuracy.tracker;
-        tracker.update_progress(clock::now_seconds(), timing, &self.editor.score);
-        self.editor.score.push(measure);
+        tracker.update_progress(clock::now_seconds(), timing, &self.editor.doc().score);
+        self.editor.doc_mut().score.push(measure);
         self.after_endless_change();
     }
 
     fn drop_first_measure(&mut self, timing: &ScoreTiming) {
         let tracker = &mut self.playback_ctl.accuracy.tracker;
-        tracker.update_progress(clock::now_seconds(), timing, &self.editor.score);
-        if self.editor.score.remove(0).is_none() {
+        tracker.update_progress(clock::now_seconds(), timing, &self.editor.doc().score);
+        if self.editor.doc_mut().score.remove(0).is_none() {
             return;
         }
         let ticks = u64::from(timing.ticks_per_measure(0));
@@ -181,18 +185,19 @@ impl Grooph {
         }
         // In the same voice; on the dropped measure, from the start of the
         // one that took its place.
-        let cursor = self.editor.cursor;
+        let cursor = self.editor.doc().cursor;
         let moved = match cursor.measure_idx {
             0 => Cursor { beat_idx: 0, ..cursor },
             m => Cursor { measure_idx: m - 1, ..cursor },
         };
-        self.editor.cursor = self.editor.score.clamp_cursor(moved);
+        let doc = self.editor.doc_mut();
+        doc.cursor = doc.score.clamp_cursor(moved);
         self.after_endless_change();
     }
 
     fn after_endless_change(&mut self) {
         self.realign_accuracy_clock();
-        self.editor.active_pattern_id = None;
-        self.editor.dirty = true;
+        self.editor.doc_mut().active_pattern_id = None;
+        self.editor.doc_mut().dirty = true;
     }
 }

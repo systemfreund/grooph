@@ -91,7 +91,8 @@ impl Grooph {
                                 if g.current_measure_mut().set_time_signature(new_ts).is_err() {
                                     return false;
                                 }
-                                g.editor.cursor = g.editor.score.clamp_cursor(g.editor.cursor);
+                                let doc = g.editor.doc_mut();
+                                doc.cursor = doc.score.clamp_cursor(doc.cursor);
                                 true
                             });
                             if committed {

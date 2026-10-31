@@ -11,7 +11,7 @@ any rhythm, the [rhythm generator](/rhythm-generator/) and its endless mode incl
 
 ## Silent bars
 
-Tap **Silent bars** in the options of the Metronome or Practice tab and pick **Pattern** or
+Tap **Silent bars** in the options of the Metronome, Practice or Score tab and pick **Pattern** or
 **Random**. grooph then plays some bars and leaves others silent, and you keep playing
 through the gap. When the click comes back you hear at once
 whether you rushed or dragged.
@@ -23,7 +23,7 @@ whether you rushed or dragged.
   **Click and notes** silences everything.
 
 A muted bar is dimmed on the staff, so you can see the silence is meant. The count-in is
-never muted, and while you edit (the Edit tab or **Edit clicks**) every bar sounds, so you
+never muted, and while you edit (a page's editor or **Edit clicks**) every bar sounds, so you
 can hear your changes. With [timing practice](/timing-practice/) your hits in muted bars
 still count, so the result shows how well you kept the time on your own.
 

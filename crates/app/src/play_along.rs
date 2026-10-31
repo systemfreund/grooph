@@ -313,7 +313,7 @@ impl Grooph {
         if !self.playback_ctl.accuracy.tracker.update_state(active, now) {
             return;
         }
-        if total_loop_seconds <= 0.0 || self.editor.score.measures().is_empty() {
+        if total_loop_seconds <= 0.0 || self.editor.doc().score.measures().is_empty() {
             return;
         }
 
@@ -322,15 +322,18 @@ impl Grooph {
             // A calibration measures the raw latency, so it ignores the offset.
             let offset_ms = if calibrating.is_some() { 0.0 } else { settings.offset_ms(source) };
             let time = time - offset_ms as f64 / 1000.0;
-            let delta =
-                self.playback_ctl.accuracy.tracker.record_hit(time, &timing, &self.editor.score);
+            let delta = self.playback_ctl.accuracy.tracker.record_hit(
+                time,
+                &timing,
+                &self.editor.doc().score,
+            );
             if let (Some(delta), Some(cal)) =
                 (delta, self.playback_ctl.play_along.calibration.as_mut())
             {
                 cal.push(delta);
             }
         }
-        self.playback_ctl.accuracy.tracker.update_progress(now, &timing, &self.editor.score);
+        self.playback_ctl.accuracy.tracker.update_progress(now, &timing, &self.editor.doc().score);
         self.advance_calibration();
     }
 
