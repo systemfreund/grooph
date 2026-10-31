@@ -263,9 +263,6 @@ pub(crate) struct EditorState {
     /// The page whose document is shown, edited and played (also behind
     /// the More screen); see [`crate::documents`].
     pub(crate) document: Document,
-    /// The rhythm page (Practice or Score) last shown, which leaving the
-    /// metronome goes back to.
-    pub(crate) rhythm_page: Document,
     /// The metronome's, Practice's and the score tab's documents.
     pub(crate) docs: Documents,
     /// Prebuilt measures for note/rest/tuplet tool buttons to avoid per-frame

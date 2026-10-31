@@ -322,11 +322,11 @@ impl Grooph {
         self.editor.metronome.forget_hover();
     }
 
-    /// Stop the metronome if it plays and show the rhythm page it was opened
-    /// from.
+    /// Close the metronome, if open, for something that needs a rhythm
+    /// (a calibration, a preset, a link): shows the practice page.
     pub(crate) fn leave_metronome(&mut self) {
         if self.metronome_mode() {
-            self.show_document(self.editor.rhythm_page);
+            self.show_document(Document::Practice);
         }
     }
 

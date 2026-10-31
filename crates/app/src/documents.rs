@@ -122,10 +122,9 @@ impl Grooph {
         if self.metronome_mode() {
             self.close_metronome();
         }
-        match doc {
+        if doc == Document::Metronome {
             // Built from the click settings while it is still closed.
-            Document::Metronome => self.open_metronome(),
-            Document::Practice | Document::Score => self.editor.rhythm_page = doc,
+            self.open_metronome();
         }
         self.editor.document = doc;
         self.playback_ctl.playback.reset();
@@ -356,22 +355,12 @@ mod tests {
     }
 
     #[test]
-    fn a_fresh_metronome_goes_back_to_practice() {
+    fn leaving_the_metronome_shows_practice() {
         let mut app = app();
-        assert!(app.metronome_mode());
+        app.select_tab(Tab::Score);
+        app.select_tab(Tab::Metronome);
         app.leave_metronome();
         assert_eq!(app.document(), Document::Practice);
-    }
-
-    #[test]
-    fn leaving_the_metronome_after_a_restart_goes_back_to_its_page() {
-        let mut app = app();
-        app.select_tab(Tab::Practice);
-        app.select_tab(Tab::Metronome);
-        let mut back = restart(&PersistedState::from_app(&app));
-        assert!(back.metronome_mode());
-        back.leave_metronome();
-        assert_eq!(back.document(), Document::Practice);
     }
 
     #[test]

@@ -505,8 +505,8 @@ grooph's metronome runs inside AI chats as an
   tool palette and undo work on it: `open_metronome` builds it from
   `ClickBars` when the tab opens, `sync_click_bar` writes it back every
   frame and when it closes (persistence saves the click settings, not the
-  bar). Leaving the tab shows the rhythm page it was opened from
-  (`rhythm_page`, persisted). The audio engine
+  bar). Something that needs a rhythm (a calibration, a preset, a link)
+  closes it with `leave_metronome`, which shows the practice page. The audio engine
   gets one silent bar of the meter (`metronome_score`), so only the clicks
   sound; ghost notes, endless mode and play along are off there. Below the
   staff a ring shows one segment per note or rest of the bar, as long as it,
@@ -565,8 +565,7 @@ grooph's metronome runs inside AI chats as an
   swapped: the page shown, or the one the More screen was opened from, is
   `EditorState::document`, and the staff, tools and undo work on its
   document (`EditorState::doc`/`doc_mut`). `show_document` changes it and
-  stops playback; `select_tab` shows the tab's document. The rhythm page the
-  metronome was opened from is `rhythm_page`.
+  stops playback; `select_tab` shows the tab's document.
 - The metronome's document is built from the click settings when it opens
   (`open_metronome`) and written back to them while open and when it closes
   (`sync_click_bar`, `close_metronome`).
@@ -580,8 +579,7 @@ grooph's metronome runs inside AI chats as an
   saved pattern (`mark_tempo_unsaved`).
 - Persistence saves the rhythm documents and the page: `score`/`cursor`/
   `dirty`/`active_pattern_id` are the score tab's, `practice_score`/
-  `practice_cursor` Practice's, `document` the page behind More, `rhythm_page` the one behind the
-  metronome. A state
+  `practice_cursor` Practice's, `document` the page behind More. A state
   saved before has no `practice_score`: its score stays in the score tab
   and Practice starts with a new rhythm. `Tab::Score` still reads `Edit`.
 

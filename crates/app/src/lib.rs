@@ -129,9 +129,6 @@ pub(crate) struct PersistedState {
     /// The document shown, so the More screen opens again on the one it was
     /// opened from.
     document: Document,
-    /// The rhythm page the metronome was last opened from, where leaving it
-    /// goes back to.
-    rhythm_page: Document,
     /// Practice's generated rhythm; a state saved before the two documents
     /// has none, and Practice starts with a new one.
     practice_score: Option<Score>,
@@ -173,7 +170,6 @@ impl Default for PersistedState {
             score: Score::single(Grooph::default_measure()),
             cursor: Cursor::start(),
             document: Document::Score,
-            rhythm_page: Document::Practice,
             practice_score: None,
             practice_cursor: Cursor::start(),
             bpm: grooph_link::DEFAULT_BPM,
@@ -230,7 +226,6 @@ impl PersistedState {
             score: score.clone(),
             cursor,
             document: app.document(),
-            rhythm_page: app.editor.rhythm_page,
             practice_score: Some(practice_score.clone()),
             practice_cursor,
             bpm: stash.map_or(app.playback_ctl.bpm, |s| s.bpm),
@@ -1257,7 +1252,6 @@ impl Grooph {
         let mut app = Self {
             editor: EditorState {
                 document: Document::Score,
-                rhythm_page: Document::Score,
                 docs: Documents {
                     // Its click bar is set when the metronome opens.
                     metronome: RhythmDoc::new(
@@ -1341,10 +1335,6 @@ impl Grooph {
         // The page the More screen was opened from, then the saved tab.
         app.select_tab(state.document.tab());
         app.select_tab(state.tab);
-        if app.metronome_mode() {
-            // The rhythm page it goes back to.
-            app.editor.rhythm_page = state.rhythm_page;
-        }
         // A link opens after the saved tab, so its tab wins.
         if let Some(query) = query {
             app.open_link_from_url(&query);
@@ -2096,14 +2086,14 @@ mod tests {
 
         let cc = eframe::CreationContext::_new_kittest(eframe::egui::Context::default());
         let mut app = Grooph::new(&cc);
-        app.select_tab(Tab::Score);
-        app.edit_page();
-        app.editor.doc_mut().score = Score::single(Measure::new(TimeSignature::new(3, 4)));
+        app.select_tab(Tab::Practice);
         let rhythm = app.editor.doc().score.clone();
         app.select_tab(Tab::Metronome);
         app.select_tab(Tab::More);
+        // It calibrates on the practice page and gives its rhythm back.
         app.start_calibration(HitSource::Tap);
         assert!(!app.metronome_mode());
+        assert_eq!(app.document(), crate::documents::Document::Practice);
         app.stop_transport();
         assert_eq!(format!("{:?}", app.editor.doc().score), format!("{rhythm:?}"));
         assert_eq!(app.tab(), Tab::More);
