@@ -508,7 +508,7 @@ fn rhythm_block(notation: &str, attrs: &str, caption: &str) -> Result<String, St
     let href = link.to_url("/").ok_or_else(|| format!("rhythm '{notation}' has no link form"))?;
 
     let mut out = String::from("<figure class=\"rhythm\">\n<div class=\"measures\">");
-    for measure in &score.measures {
+    for measure in score.measures() {
         out.push_str(&measure_grid(measure));
     }
     out.push_str("</div>\n<figcaption>");

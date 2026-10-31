@@ -751,7 +751,7 @@ mod tests {
     #[test]
     fn down_stems_hang_below_what_up_stems_hang_above() {
         use grooph_measure::notation::parse_score;
-        let m = parse_score("4/4 >t8 t8 t8 e e q q").unwrap().measures.remove(0);
+        let m = parse_score("4/4 >t8 t8 t8 e e q q").unwrap().into_measures().remove(0);
         let em = 20.0;
         let up = LayoutOpts {
             rect: Rect::from_min_max(Pos2::ZERO, Pos2::new(300.0, 200.0)),
@@ -791,7 +791,7 @@ mod tests {
             assert!((d.rect.max.y - mirrored(u.rect.min.y)).abs() < 0.01);
         }
         // A rest at the end of the triplet gives it a bracket.
-        let r = parse_score("4/4 t8 t8 r:t8 q h").unwrap().measures.remove(0);
+        let r = parse_score("4/4 t8 t8 r:t8 q h").unwrap().into_measures().remove(0);
         let (ra, rb) = (
             build_measure_layout(r.first_voice(), &up),
             build_measure_layout(r.first_voice(), &down),
@@ -829,7 +829,10 @@ mod tests {
             staff: StaffKind::Line,
         };
         let down = LayoutOpts { stem_down: true, ..up.clone() };
-        let m = parse_score("4/4 t8 t8 t8 t16 t16 t16 t16 t16 t16 h").unwrap().measures.remove(0);
+        let m = parse_score("4/4 t8 t8 t8 t16 t16 t16 t16 t16 t16 h")
+            .unwrap()
+            .into_measures()
+            .remove(0);
         for opts in [&up, &down] {
             let l = build_measure_layout(m.first_voice(), opts);
             assert_eq!(l.tuplets.len(), 3);
@@ -866,7 +869,7 @@ mod tests {
         let ten = "4/4 10:8e 10:8e 10:8e 10:8e 10:8e 10:8e 10:8e 10:8e 10:8e r:10:8e";
         for s in ["4/4 t4 r:t4 t4 h", ten] {
             let l = build_measure_layout(
-                parse_score(s).unwrap().measures.remove(0).first_voice(),
+                parse_score(s).unwrap().into_measures().remove(0).first_voice(),
                 &opts,
             );
             let t = &l.tuplets[0];
@@ -900,7 +903,10 @@ mod tests {
         let gap = c::TUPLET_INK_GAP_SS * ss;
         let tip = up.stem_tip_y(0);
         let lay_out = |s: &str, opts: &LayoutOpts| {
-            build_measure_layout(parse_score(s).unwrap().measures.remove(0).first_voice(), opts)
+            build_measure_layout(
+                parse_score(s).unwrap().into_measures().remove(0).first_voice(),
+                opts,
+            )
         };
         let line_of = |l: &MeasureLayout| l.tuplets[0].bracket[0].p1.y;
         let number_of = |l: &MeasureLayout| ink_of(&l.tuplets[0].number).unwrap();
@@ -941,8 +947,8 @@ mod tests {
     #[test]
     fn lower_rests_drop_but_half_rests_keep_their_line() {
         use grooph_measure::notation::parse_score;
-        let m = parse_score("4/4 h r:q r:q").unwrap().measures.remove(0);
-        let h = parse_score("4/4 h r:h").unwrap().measures.remove(0);
+        let m = parse_score("4/4 h r:q r:q").unwrap().into_measures().remove(0);
+        let h = parse_score("4/4 h r:h").unwrap().into_measures().remove(0);
         let em = 20.0;
         let down = LayoutOpts {
             rect: Rect::from_min_max(Pos2::ZERO, Pos2::new(300.0, 200.0)),
@@ -967,7 +973,7 @@ mod tests {
         assert_eq!(build_measure_layout(h.first_voice(), &down).notes[1].center.y, cy);
 
         // A dotted rest's dot drops with it.
-        let dotted = parse_score("4/4 h r:q. e").unwrap().measures.remove(0);
+        let dotted = parse_score("4/4 h r:q. e").unwrap().into_measures().remove(0);
         let up_rest = &build_measure_layout(
             dotted.first_voice(),
             &LayoutOpts { stem_down: false, ..down.clone() },
@@ -1000,7 +1006,8 @@ mod tests {
         };
         let down = LayoutOpts { stem_down: true, ..up.clone() };
         let cy = up.y_center();
-        let rests = parse_score("4/4 >q r:q r:e r:s r:th r:th r:e. s").unwrap().measures.remove(0);
+        let rests =
+            parse_score("4/4 >q r:q r:e r:s r:th r:th r:e. s").unwrap().into_measures().remove(0);
         let (a, b) = (
             build_measure_layout(rests.first_voice(), &up),
             build_measure_layout(rests.first_voice(), &down),
@@ -1022,7 +1029,7 @@ mod tests {
 
         // A half rest sits on the line, or on a ledger line below it in the
         // lower voice.
-        let half = parse_score("4/4 r:h q q").unwrap().measures.remove(0);
+        let half = parse_score("4/4 r:h q q").unwrap().into_measures().remove(0);
         let (upper_half, lower_half) = (
             &build_measure_layout(half.first_voice(), &up).notes[0],
             &build_measure_layout(half.first_voice(), &down).notes[0],
@@ -1036,7 +1043,7 @@ mod tests {
         assert!(ledger.p1.x < ink.left() && ledger.p2.x > ink.right());
 
         // Dots and a soft note's parentheses stay off the line too.
-        let dotted = parse_score("3/4 (q.) (q.)").unwrap().measures.remove(0);
+        let dotted = parse_score("3/4 (q.) (q.)").unwrap().into_measures().remove(0);
         let (a, b) = (
             build_measure_layout(dotted.first_voice(), &up),
             build_measure_layout(dotted.first_voice(), &down),
@@ -1064,7 +1071,7 @@ mod tests {
     #[test]
     fn dots_sit_right_of_parentheses_and_clear_of_down_flags() {
         use grooph_measure::notation::parse_score;
-        let m = parse_score("3/4 e. (e.) (e.) e.").unwrap().measures.remove(0);
+        let m = parse_score("3/4 e. (e.) (e.) e.").unwrap().into_measures().remove(0);
         let em = 20.0;
         let up = LayoutOpts {
             rect: Rect::from_min_max(Pos2::ZERO, Pos2::new(400.0, 200.0)),
@@ -1103,7 +1110,7 @@ mod tests {
         use grooph_measure::notation::parse_score;
         let m = parse_score("4/4 >t8 t8 (t8) t8 (t8) (t8) t8 (t8) (t8) t8 (t8) (t8)")
             .unwrap()
-            .measures
+            .into_measures()
             .remove(0);
         let em = 20.0;
         let mut opts = LayoutOpts {
@@ -1136,7 +1143,7 @@ mod tests {
     #[test]
     fn beamed_rests_of_a_lower_voice_are_stemlets_under_its_beams() {
         use grooph_measure::notation::parse_score;
-        let m = parse_score("1/4 s r:s r:s s").unwrap().measures.remove(0);
+        let m = parse_score("1/4 s r:s r:s s").unwrap().into_measures().remove(0);
         let em = 20.0;
         let opts = LayoutOpts {
             rect: Rect::from_min_max(Pos2::ZERO, Pos2::new(100.0, 100.0)),

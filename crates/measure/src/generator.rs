@@ -833,7 +833,7 @@ mod tests {
         let st = GeneratorSettings { bars: 4, ..settings(Subdivision::Mixed, 5) };
         let a = generate_score(&st, &mut Rng::new(42)).unwrap();
         let b = generate_score(&st, &mut Rng::new(42)).unwrap();
-        for (ma, mb) in a.measures.iter().zip(&b.measures) {
+        for (ma, mb) in a.measures().iter().zip(b.measures()) {
             assert_eq!(ma.first_voice().beats(), mb.first_voice().beats());
         }
     }
@@ -847,7 +847,7 @@ mod tests {
         };
         let score = generate_score(&st, &mut Rng::new(1)).unwrap();
         assert_eq!(score.len(), 3);
-        assert!(score.measures.iter().all(|m| m.time_signature() == TimeSignature::THREE_FOUR));
+        assert!(score.measures().iter().all(|m| m.time_signature() == TimeSignature::THREE_FOUR));
     }
 
     #[test]
@@ -927,7 +927,7 @@ mod tests {
                     ..settings(sub, MAX_COMPLEXITY)
                 };
                 let score = generate_score(&st, &mut Rng::new(5)).unwrap();
-                for m in &score.measures {
+                for m in score.measures() {
                     assert_eq!(m.time_signature(), meter);
                     // No note or rest crosses a dotted-quarter boundary.
                     let onsets = DEFAULT_GRID.compute_onset_ticks(m.first_voice().beats());
@@ -958,7 +958,7 @@ mod tests {
                 time_signature: meter,
                 ..settings(Subdivision::Sixteenths, MAX_COMPLEXITY)
             };
-            for m in generate_score(&st, &mut Rng::new(beats as u64)).unwrap().measures {
+            for m in generate_score(&st, &mut Rng::new(beats as u64)).unwrap().measures() {
                 let onsets = DEFAULT_GRID.compute_onset_ticks(m.first_voice().beats());
                 for (b, &t) in m.first_voice().beats().iter().zip(&onsets) {
                     let end = t + DEFAULT_GRID.ticks_of(&b.duration).unwrap();

@@ -85,7 +85,7 @@ mod tests {
     use crate::{Instrument, Technique};
 
     fn measure(s: &str) -> Measure {
-        parse_score(s).unwrap().measures.remove(0)
+        parse_score(s).unwrap().into_measures().remove(0)
     }
 
     #[test]

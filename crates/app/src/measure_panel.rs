@@ -410,7 +410,7 @@ impl Grooph {
         let primary_beat_in_measure = self
             .editor
             .score
-            .measures
+            .measures()
             .get(m_idx)
             .map_or(0, |m| primary_beat_index(&m.time_signature(), local_tick));
         let flash_enabled = self.ui.flash_enabled;
@@ -488,7 +488,7 @@ impl Grooph {
         total_loop_ticks: f64,
         staff_space: f32,
     ) {
-        let measure = &score.measures[placed.measure_idx];
+        let measure = &score.measures()[placed.measure_idx];
         // Every onset of any voice, at the head standing for it.
         let columns: Vec<(u32, &NoteLayout)> = measure
             .onsets()

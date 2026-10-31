@@ -1031,7 +1031,7 @@ mod tests {
     }
 
     fn parse(notation: &str) -> Measure {
-        crate::notation::parse_score(notation).unwrap().measures.remove(0)
+        crate::notation::parse_score(notation).unwrap().into_measures().remove(0)
     }
 
     #[test]

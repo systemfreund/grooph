@@ -111,7 +111,7 @@ fn build_counter_bar(ts: TimeSignature, ratio: Ratio) -> Option<Measure> {
             tokens.push(code.clone());
             tokens.extend((1..slots).map(|_| format!("r:{code}")));
         }
-        parse_score(&format!("{ts} {}", tokens.join(" "))).ok()?.measures.into_iter().next()
+        parse_score(&format!("{ts} {}", tokens.join(" "))).ok()?.into_measures().into_iter().next()
     };
     durations
         .into_iter()
@@ -494,7 +494,7 @@ mod tests {
         // 6:5 in 5/4 as main wrote it: triplet sixteenths.
         let click = "t16 r:t16 r:t16 r:t16 r:t16";
         let old = format!("5/4 {}", [click; 6].join(" "));
-        let mut old = parse_score(&old).unwrap().measures.remove(0);
+        let mut old = parse_score(&old).unwrap().into_measures().remove(0);
         old.first_voice_mut().set_click_level(0, ClickLevel::Strong);
         old.first_voice_mut().set_click_level(5, ClickLevel::Off);
         assert_eq!(ratio_of(&old), Some(Ratio { n: 6, span: 5 }));

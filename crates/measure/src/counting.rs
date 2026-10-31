@@ -214,7 +214,7 @@ mod tests {
 
     /// The labels of the first measure of `score`, "_" for an unnamed slot.
     fn count(score: &str, subdivision: Subdivision, system: CountingSystem) -> String {
-        let measure = parse_score(score).unwrap().measures.remove(0);
+        let measure = parse_score(score).unwrap().into_measures().remove(0);
         labels(&measure, subdivision, system)
     }
 
@@ -339,7 +339,7 @@ mod tests {
 
     #[test]
     fn positions_describe_the_beat() {
-        let measure = parse_score("7/8 q q. q").unwrap().measures.remove(0);
+        let measure = parse_score("7/8 q q. q").unwrap().into_measures().remove(0);
         let config = CountConfig { subdivision: Halves, system: CountingSystem::Numbers };
         let slots = build_count_slots(&measure, &config);
         // The second sixteenth of the "la" in the 3-group of beat 2.

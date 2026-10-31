@@ -361,7 +361,8 @@ mod tests {
     fn eighths_join_in_fours_only_inside_a_half_of_eighths() {
         use grooph_measure::notation::parse_score;
         let groups_of = |s: &str| -> Vec<Vec<usize>> {
-            let plan = compute_beam_plan(parse_score(s).unwrap().measures.remove(0).first_voice());
+            let plan =
+                compute_beam_plan(parse_score(s).unwrap().into_measures().remove(0).first_voice());
             plan.groups.into_iter().map(|g| g.beat_indices).collect()
         };
         // 2/4: the whole bar is one half.
@@ -392,8 +393,9 @@ mod tests {
     #[test]
     fn rests_between_notes_sit_under_the_beam() {
         use grooph_measure::notation::parse_score;
-        let plan_of =
-            |s: &str| compute_beam_plan(parse_score(s).unwrap().measures.remove(0).first_voice());
+        let plan_of = |s: &str| {
+            compute_beam_plan(parse_score(s).unwrap().into_measures().remove(0).first_voice())
+        };
         // The beams run on over the rests between two notes.
         let plan = plan_of("1/4 s r:s r:s s");
         assert_eq!(plan.groups.len(), 1);
@@ -416,7 +418,7 @@ mod tests {
     #[test]
     fn beamed_rests_carry_the_beams_of_their_beat() {
         use grooph_measure::notation::parse_score;
-        let m = parse_score("2/4 s r:s r:s r:s r:s r:s r:s r:s").unwrap().measures.remove(0);
+        let m = parse_score("2/4 s r:s r:s r:s r:s r:s r:s r:s").unwrap().into_measures().remove(0);
         assert!(compute_beam_plan(m.first_voice()).groups.is_empty());
         // Each beat's rests run on under its beams, also without a note.
         let plan = compute_beam_plan_with(m.first_voice(), true);
@@ -429,8 +431,9 @@ mod tests {
     #[test]
     fn thirty_seconds_break_the_secondary_beams_at_each_eighth() {
         use grooph_measure::notation::parse_score;
-        let plan_of =
-            |s: &str| compute_beam_plan(parse_score(s).unwrap().measures.remove(0).first_voice());
+        let plan_of = |s: &str| {
+            compute_beam_plan(parse_score(s).unwrap().into_measures().remove(0).first_voice())
+        };
         // Eight thirty-seconds: 4 + 4 under one eighth beam.
         let plan = plan_of("1/4 th th th th th th th th");
         assert_eq!(plan.groups.len(), 1);
@@ -454,8 +457,9 @@ mod tests {
     #[test]
     fn thirty_seconds_run_through_a_group_of_three_sixteenths() {
         use grooph_measure::notation::parse_score;
-        let plan_of =
-            |s: &str| compute_beam_plan(parse_score(s).unwrap().measures.remove(0).first_voice());
+        let plan_of = |s: &str| {
+            compute_beam_plan(parse_score(s).unwrap().into_measures().remove(0).first_voice())
+        };
         // Two levels above the thirty-second in a dotted-eighth beat is the
         // whole beat: six thirty-seconds under three beams, not 4 + 2.
         let plan = plan_of("6/16 th th th th th th th th th th th th");

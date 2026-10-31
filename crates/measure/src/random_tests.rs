@@ -197,7 +197,7 @@ fn score_difference(a: &Score, b: &Score) -> Option<String> {
     if a.len() != b.len() {
         return Some(format!("{} measures, then {}", a.len(), b.len()));
     }
-    for (i, (ma, mb)) in a.measures.iter().zip(&b.measures).enumerate() {
+    for (i, (ma, mb)) in a.measures().iter().zip(b.measures()).enumerate() {
         if ma.time_signature() != mb.time_signature() {
             return Some(format!(
                 "measure {i}: meter {} became {}",
@@ -234,7 +234,7 @@ fn run_notation_round_trips(seed: u64, scores: usize) {
     let mut rng = Rng::new(seed);
     for i in 0..scores {
         let score = random_score(&mut rng, &durations, &meters);
-        if score.measures.iter().any(has_regrouped_tuplets) {
+        if score.measures().iter().any(has_regrouped_tuplets) {
             continue;
         }
         let text = format_score(&score)

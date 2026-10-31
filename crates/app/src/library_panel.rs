@@ -69,7 +69,7 @@ fn pattern_preview(ui: &mut egui::Ui, score: &Score, width: f32, look: &PreviewL
     };
     // The first bar: two side by side would each need about 170 pt even
     // for quarters, with the meter, more than a phone's dialog has.
-    let first = Score::single(score.measures[0].clone());
+    let first = Score::single(score.measures()[0].clone());
     let staff = build_staff_layout(&first, &opts);
     let mut clipped = ui.new_child(egui::UiBuilder::new().max_rect(rect));
     clipped.set_clip_rect(rect.intersect(ui.clip_rect()));

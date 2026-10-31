@@ -153,7 +153,7 @@ impl Schedule {
     ) -> Self {
         let mut map: BTreeMap<u64, Vec<SoundType>> = BTreeMap::new();
 
-        for (idx, measure) in score.measures.iter().enumerate() {
+        for (idx, measure) in score.measures().iter().enumerate() {
             let ts = measure.time_signature();
 
             let bar = click.for_meter(ts);
@@ -196,7 +196,7 @@ impl Schedule {
         timing: &ScoreTiming,
         counter: &CounterBars,
     ) -> Self {
-        for (idx, measure) in score.measures.iter().enumerate() {
+        for (idx, measure) in score.measures().iter().enumerate() {
             let Some(bar) = counter.for_meter(measure.time_signature()) else {
                 continue;
             };
@@ -279,7 +279,7 @@ mod tests {
         let timing = ScoreTiming::from_score(&score, 120);
         let mut bars = ClickBars::default();
         let bar = grooph_measure::notation::parse_score(&format!("{ts} {bar}")).unwrap();
-        bars.set(bar.measures[0].clone());
+        bars.set(bar.measures()[0].clone());
         let s = Schedule::build(&score, &timing, None, &bars);
         s.map
             .iter()
@@ -448,7 +448,7 @@ mod tests {
         let s = Schedule::build(&score, &timing, None, &ClickBars::default());
 
         let m1_start = timing.measure_start_tick(1);
-        let onsets = DEFAULT_GRID.compute_onset_ticks(score.measures[1].first_voice().beats());
+        let onsets = DEFAULT_GRID.compute_onset_ticks(score.measures()[1].first_voice().beats());
         for &local in &onsets {
             let key = m1_start + local as u64;
             assert!(s.map.contains_key(&key), "missing key {key} for measure 1 note");

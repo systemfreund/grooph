@@ -98,7 +98,7 @@ fn part_duration(ts: &TimeSignature, parts: u32) -> Option<Duration> {
 
 fn parse_bar(ts: &TimeSignature, tokens: &[String]) -> Option<Measure> {
     let text = format!("{ts} {}", tokens.join(" "));
-    parse_score(&text).ok()?.measures.into_iter().next()
+    parse_score(&text).ok()?.into_measures().into_iter().next()
 }
 
 /// The default click bar of `ts`: one note per beat group, as long as the

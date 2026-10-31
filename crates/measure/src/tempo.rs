@@ -78,7 +78,7 @@ impl ScoreTiming {
         measure_starts.push(0);
         measure_seconds_starts.push(0.0);
 
-        for m in &score.measures {
+        for m in score.measures() {
             let ts = m.time_signature();
             let tpb = DEFAULT_GRID.ticks_per_beat(&ts);
             let tpm = DEFAULT_GRID.ticks_per_measure(&ts);
@@ -276,7 +276,7 @@ mod tests {
         ]);
         let t = ScoreTiming::from_score(&s, 120);
         let sum: u64 = s
-            .measures
+            .measures()
             .iter()
             .map(|m| DEFAULT_GRID.ticks_per_measure(&m.time_signature()) as u64)
             .sum();

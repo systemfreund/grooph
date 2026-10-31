@@ -394,28 +394,28 @@ mod tests {
     fn a_new_duration_keeps_a_kit_notes_heads() {
         use crate::notation::{format_score, parse_score};
         let mut score = parse_score("4/4 >S-H:q H:q r:h ; K:h K:h").unwrap();
-        let hands = score.measures[0].voice_mut(0).unwrap();
+        let hands = score.measures_mut()[0].voice_mut(0).unwrap();
         hands.modify_beat(0, NoteValue::Eighth, None).unwrap();
         hands.modify_beat(2, NoteValue::Eighth, Some(Note)).unwrap();
         let text = format_score(&score).unwrap();
         assert!(text.starts_with("4/4 >S-H:e"), "{text}");
         // A dot, a tuplet and a longer note keep each head's accent too.
-        let hands = score.measures[0].voice_mut(0).unwrap();
+        let hands = score.measures_mut()[0].voice_mut(0).unwrap();
         hands.toggle_dotted(0).unwrap();
         hands.modify_beat(0, NoteValue::Quarter, None).unwrap();
         let text = format_score(&score).unwrap();
         assert!(text.starts_with("4/4 >S-H:q"), "{text}");
-        let hands = score.measures[0].voice_mut(0).unwrap();
+        let hands = score.measures_mut()[0].voice_mut(0).unwrap();
         hands.toggle_dotted(0).unwrap();
         assert!(format_score(&score).unwrap().starts_with("4/4 >S-H:q."));
         let mut score = parse_score("4/4 >S-(H):q H:q r:h ; K:h K:h").unwrap();
-        let hands = score.measures[0].voice_mut(0).unwrap();
+        let hands = score.measures_mut()[0].voice_mut(0).unwrap();
         hands.set_tuplet(0, Some(TupletSpec { n: 3, m: 2, base: Eighth }), true).unwrap();
         let text = format_score(&score).unwrap();
         assert!(text.starts_with("4/4 >S-(H):t8"), "{text}");
         // A rest made a note is the one line's until the kit has its palette.
         let line = parse_score("4/4 >q (q) r:h").unwrap();
-        let mut bar = line.measures[0].clone();
+        let mut bar = line.measures()[0].clone();
         bar.first_voice_mut().modify_beat(1, NoteValue::Eighth, None).unwrap();
         assert!(
             !bar.first_voice().beats()[1].soft(),

@@ -5,7 +5,8 @@ pub type MeasureIdx = usize;
 
 /// A collection of one or more measures, on its staff.
 ///
-/// Invariant: `measures` is never empty. Constructors and mutators must uphold this;
+/// Invariant: `measures` is never empty. The field is private so that only
+/// the constructors and mutators here, which uphold it, change the list;
 /// deserializing checks it (see [`EmptyScore`]).
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(try_from = "RawScore")]
@@ -13,7 +14,7 @@ pub struct Score {
     /// The staff the score is written on.
     #[serde(default, skip_serializing_if = "StaffKind::is_line")]
     pub staff: StaffKind,
-    pub measures: Vec<Measure>,
+    measures: Vec<Measure>,
 }
 
 /// The staff a score is written on.
@@ -69,6 +70,50 @@ impl Score {
     pub fn new(measures: Vec<Measure>) -> Self {
         assert!(!measures.is_empty(), "a score needs at least one measure");
         Self { staff: StaffKind::Line, measures }
+    }
+
+    /// The score on `staff` instead.
+    pub fn with_staff(self, staff: StaffKind) -> Self {
+        Self { staff, ..self }
+    }
+
+    /// The measures, at least one.
+    pub fn measures(&self) -> &[Measure] {
+        &self.measures
+    }
+
+    /// The measures, to edit in place; adding or removing one goes through
+    /// [`Score::push`], [`Score::insert`], [`Score::remove`] and
+    /// [`Score::truncate`], which keep at least one.
+    pub fn measures_mut(&mut self) -> &mut [Measure] {
+        &mut self.measures
+    }
+
+    /// The measures, taken out of the score: at least one.
+    pub fn into_measures(self) -> Vec<Measure> {
+        self.measures
+    }
+
+    /// Add `measure` at the end.
+    pub fn push(&mut self, measure: Measure) {
+        self.measures.push(measure);
+    }
+
+    /// Add `measure` at `idx`, shifting the ones after it. Panics if `idx`
+    /// is past the end, like [`Vec::insert`].
+    pub fn insert(&mut self, idx: MeasureIdx, measure: Measure) {
+        self.measures.insert(idx, measure);
+    }
+
+    /// Take out measure `idx`; `None`, and no change, if it is the only one
+    /// or there is no such measure.
+    pub fn remove(&mut self, idx: MeasureIdx) -> Option<Measure> {
+        (self.measures.len() > 1 && idx < self.measures.len()).then(|| self.measures.remove(idx))
+    }
+
+    /// Keep the first `len` measures, and always the first one.
+    pub fn truncate(&mut self, len: usize) {
+        self.measures.truncate(len.max(1));
     }
 
     pub fn single(measure: Measure) -> Self {

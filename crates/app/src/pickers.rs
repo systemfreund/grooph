@@ -658,7 +658,7 @@ impl Grooph {
     /// [`crate::metronome_view::ClickFill::tile`]).
     fn click_fill_choices(&mut self, ui: &mut Ui) -> bool {
         let fills = click_fills(self.metronome_meter());
-        let bar = &self.editor.score.measures[0];
+        let bar = &self.editor.score.measures()[0];
         let current = fills.iter().position(|f| same_bar(&f.bar, bar));
         let family = self.ui.music_font_id.family.clone();
         let mut picked = None;

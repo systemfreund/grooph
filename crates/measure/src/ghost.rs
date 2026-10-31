@@ -144,7 +144,7 @@ mod tests {
     #[test]
     fn a_lower_voices_notes_take_ghost_slots_in_compound_and_odd_meters() {
         use crate::notation::parse_score;
-        let ghosts = |s: &str, sub| ghost_onsets(&parse_score(s).unwrap().measures[0], sub);
+        let ghosts = |s: &str, sub| ghost_onsets(&parse_score(s).unwrap().measures()[0], sub);
         let eighth = DEFAULT_GRID.ticks_of(&e()).unwrap();
         // 6/8: the hi-hat on 1 and 4, the kick on the third and sixth
         // eighths below; only eighths 2 and 5 are free.

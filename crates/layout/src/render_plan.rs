@@ -168,7 +168,7 @@ mod tests {
     fn a_tuplet_with_a_rest_under_its_beam_shows_its_number_alone() {
         use grooph_measure::notation::parse_score;
         let plan_of =
-            |s: &str| plan_measure(parse_score(s).unwrap().measures.remove(0).first_voice());
+            |s: &str| plan_measure(parse_score(s).unwrap().into_measures().remove(0).first_voice());
         let t = &plan_of("1/4 t8 r:t8 t8").tuplets[0];
         assert!(t.fully_beamed && !t.contains_rest && t.number_only());
         // A rest at its edge, outside the beam, gives it a bracket.
@@ -182,12 +182,12 @@ mod tests {
     #[test]
     fn a_tuplet_with_stemlets_is_beamed_and_shows_its_number_alone() {
         use grooph_measure::notation::parse_score;
-        let m = parse_score("1/4 t8 r:t8 r:t8").unwrap().measures.remove(0);
+        let m = parse_score("1/4 t8 r:t8 r:t8").unwrap().into_measures().remove(0);
         assert!(!plan_measure(m.first_voice()).tuplets[0].number_only());
         let t = &plan_measure_with(m.first_voice(), true).tuplets[0];
         assert!(t.fully_beamed && !t.contains_rest && t.number_only());
         // A stemlet beamed onto the triplet from outside keeps its bracket.
-        let m = parse_score("1/4 r:e t16 r:t16 t16").unwrap().measures.remove(0);
+        let m = parse_score("1/4 r:e t16 r:t16 t16").unwrap().into_measures().remove(0);
         let t = &plan_measure_with(m.first_voice(), true).tuplets[0];
         assert_eq!(t.edge_connection, EdgeConnection::Left);
         assert!(!t.number_only());

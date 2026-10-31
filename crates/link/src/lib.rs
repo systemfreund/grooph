@@ -327,7 +327,7 @@ fn single_measure(name: &str, ts: TimeSignature, text: &str) -> Result<Measure, 
             "{name}: a click bar is on the one line; drum kit notation (instruments such as K:q, voices split by ;) does not fit it"
         ));
     }
-    let mut bars = score.measures;
+    let mut bars = score.into_measures();
     if bars.len() != 1 {
         return Err(format!("{name} must be a single measure"));
     }
@@ -341,7 +341,7 @@ fn single_measure(name: &str, ts: TimeSignature, text: &str) -> Result<Measure, 
 pub fn is_kit(score: &Score) -> bool {
     score.staff == StaffKind::Kit
         || score.has_kit_heads()
-        || score.measures.iter().any(|m| m.voices().len() > 1)
+        || score.measures().iter().any(|m| m.voices().len() > 1)
 }
 
 /// Quarter notes per minute for a version 1 tempo of `bpm` beat units of
@@ -355,7 +355,7 @@ impl LinkContent {
     /// Meter the content starts in.
     fn first_time_signature(&self) -> Option<TimeSignature> {
         match self {
-            LinkContent::Score(score) => score.measures.first().map(|m| m.time_signature()),
+            LinkContent::Score(score) => score.measures().first().map(|m| m.time_signature()),
             LinkContent::Metronome(ts) => Some(*ts),
             LinkContent::Generator { settings, .. } => Some(settings.time_signature),
         }
@@ -720,12 +720,12 @@ mod tests {
         }
         // Nor does a link write one: `to_url` stays the inverse of `parse_query`.
         let kit = parse_score("4/4 K-H:e H:e S-H:e H:e h ; K:h K:h").unwrap();
-        assert_eq!(format_bar(&kit.measures[0]), None);
+        assert_eq!(format_bar(&kit.measures()[0]), None);
         let one_voice = parse_score("4/4 S:q q q q").unwrap();
-        assert_eq!(format_bar(&one_voice.measures[0]), None);
+        assert_eq!(format_bar(&one_voice.measures()[0]), None);
         let metronome = SharedLink {
             content: Some(LinkContent::Metronome(TimeSignature::FOUR_FOUR)),
-            click: Some(kit.measures[0].clone()),
+            click: Some(kit.measures()[0].clone()),
             ..Default::default()
         };
         assert_eq!(metronome.to_url("/"), None);
@@ -753,7 +753,7 @@ mod tests {
         let link = parse("?bpm=90&r=q+e+e+r:q+%3Eq&utm_source=chat");
         assert_eq!(link.bpm, Some(90));
         let Some(LinkContent::Score(score)) = link.content else { panic!("expected a score") };
-        let beats = score.measures[0].first_voice().beats();
+        let beats = score.measures()[0].first_voice().beats();
         assert_eq!(beats[0], Beat::note(q()));
         assert_eq!(beats[1], Beat::note(e()));
         assert!(beats[4].accented());
@@ -764,14 +764,14 @@ mod tests {
         let link = parse("ts=3/4&r=q q q | q r:q q");
         let Some(LinkContent::Score(score)) = link.content else { panic!("expected a score") };
         assert_eq!(score.len(), 2);
-        assert_eq!(score.measures[1].time_signature(), TimeSignature::THREE_FOUR);
+        assert_eq!(score.measures()[1].time_signature(), TimeSignature::THREE_FOUR);
     }
 
     #[test]
     fn time_signature_in_rhythm_overrides_ts() {
         let link = parse("ts=3/4&r=4/4+q+q+q+q");
         let Some(LinkContent::Score(score)) = link.content else { panic!("expected a score") };
-        assert_eq!(score.measures[0].time_signature(), TimeSignature::FOUR_FOUR);
+        assert_eq!(score.measures()[0].time_signature(), TimeSignature::FOUR_FOUR);
     }
 
     #[test]
@@ -1126,7 +1126,7 @@ mod tests {
         // With a rhythm, groups group the meter that ts gives it.
         let score = parse("ts=7/8&groups=3%2B2%2B2&r=q.+q+q");
         let Some(LinkContent::Score(score)) = score.content else { panic!("expected a score") };
-        assert_eq!(score.measures[0].time_signature().to_string(), "3+2+2/8");
+        assert_eq!(score.measures()[0].time_signature().to_string(), "3+2+2/8");
     }
 
     #[test]

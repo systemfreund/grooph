@@ -271,7 +271,7 @@ mod tests {
         let mut m2 = Measure::new(TimeSignature::FOUR_FOUR);
         m2.first_voice_mut().set_beat(0, Beat::note(q())).unwrap();
         let mut score = score_4_4_quarters();
-        score.measures.push(m2);
+        score.push(m2);
         let timing = ScoreTiming::from_score(&score, 120);
         let schedule = Schedule::build(&score, &timing, None, &ClickBars::default());
         let mut src = TickSource::new(48000);
@@ -288,7 +288,7 @@ mod tests {
     #[test]
     fn shift_back_keeps_the_position_in_a_shortened_score() {
         let mut score = score_4_4_quarters();
-        score.measures.push(score.measures[0].clone());
+        score.push(score.measures()[0].clone());
         let timing = ScoreTiming::from_score(&score, 120);
         let schedule = Schedule::build(&score, &timing, None, &ClickBars::default());
         let bar = timing.ticks_per_measure(0) as f64;

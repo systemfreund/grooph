@@ -673,7 +673,7 @@ mod tests {
         use grooph_measure::notation::parse_score;
         let lit = Color32::RED;
         let opts = opts_for(Rect::from_min_size(Pos2::ZERO, egui::vec2(600.0, 100.0)));
-        let measure = parse_score("5/4 q. e >e e t8 t8 t8 r:q").unwrap().measures.remove(0);
+        let measure = parse_score("5/4 q. e >e e t8 t8 t8 r:q").unwrap().into_measures().remove(0);
         let layout = build_measure_layout(measure.first_voice(), &opts);
         assert!(!layout.beams.is_empty() && !layout.tuplets.is_empty());
         let nearest = |x: f32| {
@@ -738,14 +738,14 @@ mod tests {
         // The staff's upper voice laid out with eight eighths, asked about a
         // bar of ten notes (the counter rhythm): no cursor, no panic.
         use grooph_measure::notation::parse_score;
-        let eighths = parse_score("4/4 e e e e e e e e").unwrap().measures.remove(0);
+        let eighths = parse_score("4/4 e e e e e e e e").unwrap().into_measures().remove(0);
         let tens = parse_score("4/4 qt8 qt8 qt8 qt8 qt8 qt8 qt8 qt8 qt8 qt8").unwrap();
         let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(400.0, 100.0));
         let layout = build_measure_layout(eighths.first_voice(), &opts_for(rect));
         let bar_ticks = DEFAULT_GRID.ticks_per_measure(&TimeSignature::FOUR_FOUR) as f64;
         let tick = 0.85 * bar_ticks;
         assert_eq!(
-            playback_cursor_x(&tens.measures[0], std::slice::from_ref(&layout), rect, tick, 0.5),
+            playback_cursor_x(&tens.measures()[0], std::slice::from_ref(&layout), rect, tick, 0.5),
             None
         );
     }
@@ -753,7 +753,7 @@ mod tests {
     #[test]
     fn beat_anchors_sit_on_rests_and_inside_held_notes() {
         use grooph_measure::notation::parse_score;
-        let m = parse_score("4/4 r:e e q h").unwrap().measures.remove(0);
+        let m = parse_score("4/4 r:e e q h").unwrap().into_measures().remove(0);
         let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(400.0, 100.0));
         let layout = build_measure_layout(m.first_voice(), &opts_for(rect));
         let quarter = DEFAULT_GRID.ticks_of(&q()).unwrap() as f64;

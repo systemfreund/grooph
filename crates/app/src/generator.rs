@@ -146,14 +146,16 @@ impl Grooph {
         // the accuracy clock is anchored again below.
         let tracker = &mut self.playback_ctl.accuracy.tracker;
         tracker.update_progress(clock::now_seconds(), timing, &self.editor.score);
-        self.editor.score.measures.push(measure);
+        self.editor.score.push(measure);
         self.after_endless_change();
     }
 
     fn drop_first_measure(&mut self, timing: &ScoreTiming) {
         let tracker = &mut self.playback_ctl.accuracy.tracker;
         tracker.update_progress(clock::now_seconds(), timing, &self.editor.score);
-        self.editor.score.measures.remove(0);
+        if self.editor.score.remove(0).is_none() {
+            return;
+        }
         let ticks = u64::from(timing.ticks_per_measure(0));
         tracker.drop_leading_ticks(ticks);
         if let Some(audio) = self.playback_ctl.audio.as_mut() {

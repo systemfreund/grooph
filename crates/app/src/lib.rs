@@ -264,7 +264,7 @@ impl CountingBase {
             return "Off".to_string();
         };
         let ts = score
-            .measures
+            .measures()
             .iter()
             .map(|m| m.time_signature())
             .find(|ts| subdivision.fits(ts))
@@ -279,7 +279,7 @@ impl CountingBase {
     /// Whether the subdivision counts sensibly in some measure of `score`.
     fn fits(self, score: &Score) -> bool {
         self.subdivision()
-            .is_none_or(|s| score.measures.iter().any(|m| s.fits(&m.time_signature())))
+            .is_none_or(|s| score.measures().iter().any(|m| s.fits(&m.time_signature())))
     }
 }
 
@@ -651,7 +651,7 @@ impl Grooph {
             let current = app.current_measure();
             let new_measure = current.empty_like(current.time_signature());
             let insert_at = app.editor.cursor.measure_idx + 1;
-            app.editor.score.measures.insert(insert_at, new_measure);
+            app.editor.score.insert(insert_at, new_measure);
             app.editor.cursor.measure_idx = insert_at;
             app.editor.cursor.beat_idx = 0;
             true
@@ -666,7 +666,7 @@ impl Grooph {
         }
         self.with_undo_snapshot(|app| {
             let idx = app.editor.cursor.measure_idx;
-            app.editor.score.measures.remove(idx);
+            app.editor.score.remove(idx);
             app.editor.cursor = app.editor.score.clamp_cursor(app.editor.cursor);
             true
         });
@@ -1846,7 +1846,7 @@ mod tests {
         let query = format!("v=2&bpm=96&r={}", groove.replace(' ', "+").replace(';', "%3B"));
         app.open_link(grooph_link::parse_query(&query).unwrap().unwrap());
         assert_eq!(app.editor.score.staff, StaffKind::Kit);
-        assert_eq!(app.editor.score.measures[0].voices().len(), 2);
+        assert_eq!(app.editor.score.measures()[0].voices().len(), 2);
         // Every tab draws it.
         for (i, tab) in [Tab::Practice, Tab::Edit, Tab::Practice].into_iter().enumerate() {
             app.select_tab(tab);
