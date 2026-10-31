@@ -4,8 +4,9 @@
 //! The metronome's document holds the click bar of its meter with the
 //! counter rhythm as its second voice, open or not: it is their one source,
 //! and the staff, the tool palette and undo edit it like any rhythm. The
-//! audio settings keep the other meters' click bars. What plays is a silent
-//! bar of the meter: only the clicks sound.
+//! audio settings keep the other meters' click bars. The engine plays the
+//! document itself as clicks ([`grooph_audio::Played::Clicks`]): its first
+//! voice is the click bar, its second, if any, the counter rhythm.
 //!
 //! The ring has one segment per note or rest of the click bar, as long as it.
 //! The segment's thickness shows how loud it clicks; a tap moves it to the
@@ -78,7 +79,7 @@ impl MetronomeVoice {
     pub(crate) const fn idx(self) -> VoiceIdx {
         match self {
             MetronomeVoice::Click => 0,
-            MetronomeVoice::Counter => 1,
+            MetronomeVoice::Counter => grooph_audio::COUNTER_VOICE,
         }
     }
 
@@ -86,7 +87,7 @@ impl MetronomeVoice {
     pub(crate) fn of(voice: VoiceIdx) -> Option<Self> {
         match voice {
             0 => Some(MetronomeVoice::Click),
-            1 => Some(MetronomeVoice::Counter),
+            grooph_audio::COUNTER_VOICE => Some(MetronomeVoice::Counter),
             _ => None,
         }
     }
@@ -1859,11 +1860,5 @@ mod tests {
         assert!(same_bar(&fresh.click_bar(), &click));
         assert!(same_bar(&fresh.counter_bar().unwrap(), &counter));
         assert_eq!(fresh.counter_ratio(), ratio);
-    }
-
-    #[test]
-    fn the_metronome_plays_one_silent_bar() {
-        let m = Measure::new(TimeSignature::SEVEN_EIGHT);
-        assert!(m.first_voice().beats().iter().all(|b| b.kind() == grooph_measure::BeatKind::Rest));
     }
 }

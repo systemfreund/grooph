@@ -185,7 +185,7 @@ impl Schedule {
         let mut map: BTreeMap<u64, Vec<SoundType>> = BTreeMap::new();
         for (idx, measure) in score.measures().iter().enumerate() {
             add_clicks(&mut map, timing, idx, measure.first_voice());
-            let Some(counter) = measure.voice(1) else {
+            let Some(counter) = measure.voice(crate::COUNTER_VOICE) else {
                 continue;
             };
             let onsets = DEFAULT_GRID.compute_onset_ticks(counter.beats());

@@ -269,6 +269,10 @@ pub struct PlaybackOptions {
     pub played: Played,
 }
 
+/// The voice of a click bar that holds its counter rhythm, in
+/// [`Played::Clicks`]; the first voice holds the clicks.
+pub const COUNTER_VOICE: usize = 1;
+
 /// What the score [`Audio::update`] plays is.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Played {
@@ -277,7 +281,8 @@ pub enum Played {
     Score,
     /// Clicks only, as the metronome plays them: each measure is a click
     /// bar, its first voice the clicks and a second voice, if any, the
-    /// counter rhythm. Ghost notes and `click` do not apply.
+    /// counter rhythm ([`COUNTER_VOICE`]).
+    /// Ghost notes and `click` do not apply.
     Clicks,
 }
 
