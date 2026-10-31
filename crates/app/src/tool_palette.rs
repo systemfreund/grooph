@@ -69,12 +69,15 @@ const KIT_ORDER: [Instrument; 9] = [
     Instrument::HiHatFoot,
 ];
 
-/// The head modifiers' tools, after the bar's and before the kit's.
-const HEAD_TOOLS: [&str; 3] =
-    ["modify.toggle.accent", "modify.toggle.soft", "modify.toggle.dotted"];
-/// The tools that change the bar and its meter, first in their row.
-const BAR_TOOLS: [&str; 4] =
-    ["edit.undo", "edit.redo", "meta.reset_measure", "meta.change_time_signature"];
+/// The tools in the editors' bars, next to play, not in the grid.
+pub(crate) const BAR_TOOLS: [&str; 3] = ["edit.undo", "edit.redo", "meta.reset_measure"];
+/// The head modifiers' tools, after the meter and before the kit's.
+const HEAD_TOOLS: [&str; 4] = [
+    "meta.change_time_signature",
+    "modify.toggle.accent",
+    "modify.toggle.soft",
+    "modify.toggle.dotted",
+];
 /// The note values, then their rests.
 const VALUE_TOOLS: [&str; 8] = [
     "insert.note.q",
@@ -107,7 +110,7 @@ pub(crate) enum Cell {
 }
 
 /// The tool with `id`.
-fn tool(id: &str) -> &'static Tool {
+pub(crate) fn tool(id: &str) -> &'static Tool {
     all_tools().iter().find(|t| t.id == id).expect("a tool of the palette")
 }
 
@@ -130,8 +133,7 @@ fn technique_name(technique: Technique) -> &'static str {
 /// head modifiers get the kit's; on the one line they are left out.
 pub(crate) fn grid_rows(kit: bool) -> Vec<Vec<Cell>> {
     let tools = |ids: &[&str]| ids.iter().map(|id| Cell::Tool(tool(id))).collect::<Vec<_>>();
-    let mut heads = tools(&BAR_TOOLS);
-    heads.extend(tools(&HEAD_TOOLS));
+    let mut heads = tools(&HEAD_TOOLS);
     let mut rows = Vec::new();
     if kit {
         let mut instruments: Vec<Cell> = KIT_ORDER.iter().map(|&i| Cell::Instrument(i)).collect();
@@ -162,8 +164,9 @@ fn grid_metrics(width: f32) -> (usize, Vec2) {
 impl Grooph {
     /// The editor's tools as a grid in the thumb's reach, the same in every
     /// editor (Practice, Score, the metronome's click bar): on the kit its
-    /// instruments and voices, then undo, redo, clear, the meter and the
-    /// head modifiers, the note values and rests, and the tuplets.
+    /// instruments and voices, then the meter and the head modifiers, the
+    /// note values and rests, and the tuplets. Undo, redo and clear are in
+    /// the editor's bar ([`BAR_TOOLS`]).
     pub(super) fn tool_palette_panel(&mut self, ui: &mut Ui) {
         egui::Panel::bottom("tool_palette")
             .show_separator_line(false)
@@ -878,9 +881,12 @@ mod tests {
         let kit_only = |t: &crate::tools::Tool| {
             matches!(t.kind, ToolKind::Modify(Modifier::ToggleTechnique(_)))
         };
+        // Undo, redo and clear are in the editor's bar instead.
         for t in all_tools().iter().filter(|t| t.show_in_palette) {
-            assert_eq!(tools(true).iter().filter(|&&id| id == t.id).count(), 1, "{}", t.id);
-            assert_eq!(tools(false).contains(&t.id), !kit_only(t), "{}", t.id);
+            let in_grid = !super::BAR_TOOLS.contains(&t.id);
+            let count = tools(true).iter().filter(|&&id| id == t.id).count();
+            assert_eq!(count, usize::from(in_grid), "{}", t.id);
+            assert_eq!(tools(false).contains(&t.id), in_grid && !kit_only(t), "{}", t.id);
         }
         // The kit adds its instruments, voices and "+/−".
         assert!(tools(true).contains(&"modify.toggle.head"));
