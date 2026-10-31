@@ -64,7 +64,7 @@ use eframe::egui::{Context, Ui};
 use eframe::epaint::text::{FontInsert, InsertFontFamily};
 use eframe::epaint::{FontFamily, FontId};
 use eframe::{App, CreationContext, egui};
-use grooph_audio::{AudioSettings, GapClick, PlaybackOptions, PlayerState, TempoRamp};
+use grooph_audio::{AudioSettings, GapClick, PlaybackOptions, Played, PlayerState, TempoRamp};
 use grooph_link::{LinkContent, SharedLink};
 use grooph_measure::click::ClickBars;
 use grooph_measure::counter::{CounterBars, Ratio};
@@ -460,7 +460,7 @@ impl App for Grooph {
         if let Some(audio) = &mut engine {
             audio.set_audio_settings(self.playback_ctl.audio_cfg.settings);
             audio.set_playback_options(playback_options);
-            if let Some(after) = audio.update(&audio_state, bpm, &self.played_score(), now) {
+            if let Some(after) = audio.update(&audio_state, bpm, self.played_score(), now) {
                 ui.ctx().request_repaint_after(after);
             }
             output_lost = audio.take_output_lost();
@@ -534,7 +534,8 @@ impl Grooph {
             },
             ramp: self.played_ramp(),
             click: self.click_bars(),
-            counter: self.played_counter(),
+            // The metronome plays its click bar and counter rhythm alone.
+            played: if self.metronome_mode() { Played::Clicks } else { Played::Score },
         }
     }
 
@@ -551,7 +552,7 @@ impl Grooph {
         // A calibration plays without swing, as in `playback_options`.
         let swing =
             if self.calibrating() { Swing::default() } else { self.playback_ctl.audio_cfg.swing };
-        ScoreTiming::from_score(&self.played_score(), self.current_bpm()).with_swing(swing)
+        ScoreTiming::from_score(self.played_score(), self.current_bpm()).with_swing(swing)
     }
 
     /// Tempo being played: the ramp tempo while a ramp runs, else the BPM setting.
@@ -2188,7 +2189,6 @@ mod tests {
             assert_eq!(format!("{:?}", *app.played_score()), bar, "{page:?}");
             // Hits are measured against that bar, and taps count on every
             // page, the metronome's too.
-            assert_eq!(format!("{:?}", app.tracked_score()), bar, "{page:?}");
             assert!(app.tap_capture_active(), "{page:?}");
             // Counted in, and none of the user's options: no ghost notes,
             // swing, gap, ramp, click pattern or counter rhythm.
@@ -2255,14 +2255,15 @@ mod tests {
         let cc = eframe::CreationContext::_new_kittest(eframe::egui::Context::default());
         let mut app = Grooph::new(&cc);
         app.select_tab(Tab::Metronome);
-        // It plays a silent bar, but hits count against the click bar.
+        // It plays its own document as clicks, and hits count against it.
         assert_eq!(
-            format!("{:?}", app.tracked_score()),
+            format!("{:?}", app.played_score()),
             format!("{:?}", app.editor.docs.metronome.score)
         );
-        assert!(
-            app.tracked_score().measures()[0].first_voice().beats().iter().any(|b| b.is_note())
-        );
+        assert!(app.played_score().measures()[0].first_voice().beats().iter().any(|b| b.is_note()));
+        assert_eq!(app.playback_options().played, grooph_audio::Played::Clicks);
+        app.select_tab(Tab::Practice);
+        assert_eq!(app.playback_options().played, grooph_audio::Played::Score);
     }
 
     #[test]

@@ -1,11 +1,10 @@
 use grooph_measure::click::{ClickBars, ClickLevel};
-use grooph_measure::counter::CounterBars;
 use grooph_measure::generator::Subdivision;
 use grooph_measure::ghost::ghost_onsets;
 use grooph_measure::grid::DEFAULT_GRID;
 use grooph_measure::onsets::HeadOnset;
 use grooph_measure::tempo::ScoreTiming;
-use grooph_measure::{Instrument, Score, Technique};
+use grooph_measure::{Instrument, Score, Technique, VoiceBar};
 use std::collections::BTreeMap;
 
 use crate::AudioSettings;
@@ -156,17 +155,7 @@ impl Schedule {
         for (idx, measure) in score.measures().iter().enumerate() {
             let ts = measure.time_signature();
 
-            let bar = click.for_meter(ts);
-            let bar_onsets = DEFAULT_GRID.compute_onset_ticks(bar.first_voice().beats());
-            for (beat, &t) in bar.first_voice().beats().iter().zip(&bar_onsets) {
-                let sound = match ClickLevel::of(beat) {
-                    ClickLevel::Strong => SoundType::Downbeat,
-                    ClickLevel::Medium => SoundType::PrimaryBeat,
-                    ClickLevel::Soft => SoundType::SoftBeat,
-                    ClickLevel::Off => continue,
-                };
-                map.entry(timing.performed_global_tick(idx, t)).or_default().push(sound);
-            }
+            add_clicks(&mut map, timing, idx, click.for_meter(ts).first_voice());
 
             // The heads of every voice, the one line's as before.
             for onset in measure.head_onsets() {
@@ -187,31 +176,30 @@ impl Schedule {
         Self { map }
     }
 
-    /// Add the clicks of the counter bar of each measure's meter, if it has
-    /// one. They sound where they are written: a counter rhythm does not
-    /// swing.
-    pub(crate) fn with_counter(
-        mut self,
-        score: &Score,
-        timing: &ScoreTiming,
-        counter: &CounterBars,
-    ) -> Self {
+    /// A schedule of clicks only ([`Played::Clicks`](crate::Played)): each
+    /// measure of `score` is a click bar, its first voice clicking at its
+    /// levels like [`Self::build`]'s click bars, and a second voice, if any,
+    /// its counter rhythm. The counter clicks sound where they are written:
+    /// a counter rhythm does not swing.
+    pub(crate) fn clicks(score: &Score, timing: &ScoreTiming) -> Self {
+        let mut map: BTreeMap<u64, Vec<SoundType>> = BTreeMap::new();
         for (idx, measure) in score.measures().iter().enumerate() {
-            let Some(bar) = counter.for_meter(measure.time_signature()) else {
+            add_clicks(&mut map, timing, idx, measure.first_voice());
+            let Some(counter) = measure.voice(crate::COUNTER_VOICE) else {
                 continue;
             };
-            let onsets = DEFAULT_GRID.compute_onset_ticks(bar.first_voice().beats());
-            for (beat, &t) in bar.first_voice().beats().iter().zip(&onsets) {
+            let onsets = DEFAULT_GRID.compute_onset_ticks(counter.beats());
+            for (beat, &t) in counter.beats().iter().zip(&onsets) {
                 let sound = match ClickLevel::of(beat) {
                     ClickLevel::Strong => SoundType::CounterStrong,
                     ClickLevel::Medium => SoundType::CounterMedium,
                     ClickLevel::Soft => SoundType::CounterSoft,
                     ClickLevel::Off => continue,
                 };
-                self.map.entry(timing.to_global_tick(idx, t)).or_default().push(sound);
+                map.entry(timing.to_global_tick(idx, t)).or_default().push(sound);
             }
         }
-        self
+        Self { map }
     }
 
     /// Collect all sounds in the half-open tick interval `[start, end)`.
@@ -224,6 +212,27 @@ impl Schedule {
             }
             k += 1;
         }
+    }
+}
+
+/// The clicks of `bar` in measure `idx` at their levels (accented is the
+/// downbeat click, plain the primary beat click, soft the soft click), swung
+/// like the notes.
+fn add_clicks(
+    map: &mut BTreeMap<u64, Vec<SoundType>>,
+    timing: &ScoreTiming,
+    idx: usize,
+    bar: &VoiceBar,
+) {
+    let onsets = DEFAULT_GRID.compute_onset_ticks(bar.beats());
+    for (beat, &t) in bar.beats().iter().zip(&onsets) {
+        let sound = match ClickLevel::of(beat) {
+            ClickLevel::Strong => SoundType::Downbeat,
+            ClickLevel::Medium => SoundType::PrimaryBeat,
+            ClickLevel::Soft => SoundType::SoftBeat,
+            ClickLevel::Off => continue,
+        };
+        map.entry(timing.performed_global_tick(idx, t)).or_default().push(sound);
     }
 }
 
@@ -404,17 +413,20 @@ mod tests {
         use grooph_measure::counter::{Ratio, counter_bar};
         use grooph_measure::swing::{Swing, SwingUnit};
         let ts = TimeSignature::FOUR_FOUR;
-        let score = Score::new(vec![Measure::new(ts), Measure::new(ts.with_grouping(0))]);
+        let mut counter = counter_bar(ts, Ratio { n: 3, span: 2 }).unwrap();
+        counter.first_voice_mut().set_click_level(1, ClickLevel::Strong);
+        counter.first_voice_mut().set_click_level(2, ClickLevel::Off);
+        counter.first_voice_mut().set_click_level(3, ClickLevel::Soft);
+        // Two click bars with the counter rhythm as their second voice.
+        let bar = |ts: TimeSignature| {
+            let mut bar = ClickBars::default().for_meter(ts);
+            bar.push_voices(&counter).unwrap();
+            bar
+        };
+        let score = Score::new(vec![bar(ts), bar(ts)]);
         let swing = Swing { unit: SwingUnit::Eighths, percent: 75 };
         let timing = ScoreTiming::from_score(&score, 120).with_swing(swing);
-        let mut counter = CounterBars::default();
-        let mut bar = counter_bar(ts, Ratio { n: 3, span: 2 }).unwrap();
-        bar.first_voice_mut().set_click_level(1, ClickLevel::Strong);
-        bar.first_voice_mut().set_click_level(2, ClickLevel::Off);
-        bar.first_voice_mut().set_click_level(3, ClickLevel::Soft);
-        counter.set(ts, Some(bar));
-        let s = Schedule::build(&score, &timing, None, &ClickBars::default())
-            .with_counter(&score, &timing, &counter);
+        let s = Schedule::clicks(&score, &timing);
         let counter_clicks: Vec<_> = s
             .map
             .iter()

@@ -166,7 +166,7 @@ impl Grooph {
                     // A calibration's click bar while it runs, else the
                     // document (borrowed apart from the hover marks
                     // below, which change).
-                    let calibration = self.calibrating().then(|| self.played_score().into_owned());
+                    let calibration = self.calibrating().then(|| self.played_score().clone());
                     let score = calibration
                         .as_ref()
                         .unwrap_or(&self.editor.docs.get(self.editor.document).score);

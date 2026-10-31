@@ -11,7 +11,6 @@ use crate::play_along::{HitSource, MAX_INPUT_OFFSET_MS};
 use crate::{Grooph, TransportState};
 use eframe::egui;
 use grooph_measure::Score;
-use std::borrow::Cow;
 
 /// Tempo of the calibration click.
 pub(crate) const CALIBRATION_BPM: u32 = 100;
@@ -94,22 +93,11 @@ impl Grooph {
         self.running_calibration().is_some()
     }
 
-    /// The score the transport plays: the calibration's click bar during a
-    /// run, the click bar in the metronome, else the shown page's document.
-    pub(crate) fn played_score(&self) -> Cow<'_, Score> {
-        if let Some(cal) = self.running_calibration() {
-            Cow::Borrowed(&cal.score)
-        } else if self.metronome_mode() {
-            Cow::Owned(self.metronome_score())
-        } else {
-            Cow::Borrowed(&self.editor.doc().score)
-        }
-    }
-
-    /// The score hits are measured against: the calibration's click bar
-    /// during a run, else the shown page's document. In the metronome that
-    /// is its click bar with a note per click, not the silent bar it plays.
-    pub(crate) fn tracked_score(&self) -> &Score {
+    /// The score the transport plays and hits are measured against: the
+    /// calibration's click bar during a run, else the shown page's document.
+    /// The metronome's is its click bar, played as clicks
+    /// ([`grooph_audio::Played::Clicks`]).
+    pub(crate) fn played_score(&self) -> &Score {
         self.running_calibration().map_or(&self.editor.doc().score, |cal| &cal.score)
     }
 

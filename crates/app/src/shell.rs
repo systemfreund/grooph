@@ -1107,30 +1107,33 @@ impl Grooph {
     /// The count under the staff, shown in every tab; opens its picker. The
     /// switch brings back the last count that fits the score.
     fn counting_row(&mut self, ui: &mut Ui) {
-        let score = self.played_score().into_owned();
-        let counting = &mut self.ui.counting;
-        if counting.base != CountingBase::Off {
-            self.ui.shell.last_counting = Some(counting.base);
+        if self.ui.counting.base != CountingBase::Off {
+            self.ui.shell.last_counting = Some(self.ui.counting.base);
         }
-        let restore = self.ui.shell.last_counting.filter(|b| b.fits(&score)).or_else(|| {
-            CountingBase::ALL.into_iter().find(|&b| b != CountingBase::Off && b.fits(&score))
+        // Everything read from the score first, so it is borrowed, not copied.
+        let score = self.played_score();
+        let counting = &self.ui.counting;
+        let restore = self.ui.shell.last_counting.filter(|b| b.fits(score)).or_else(|| {
+            CountingBase::ALL.into_iter().find(|&b| b != CountingBase::Off && b.fits(score))
         });
+        let was_on = counting.base != CountingBase::Off;
+        let shown = match restore {
+            Some(restore) if !was_on => restore,
+            _ => counting.base,
+        };
+        let label = shown.label(counting.system, score);
         let Some(restore) = restore else {
-            if value_row(ui, "Count labels", &counting.base.label(counting.system, &score))
-                .clicked()
-            {
+            if value_row(ui, "Count labels", &label).clicked() {
                 self.ui.picker = Some(Picker::Counting);
             }
             return;
         };
-        let was_on = counting.base != CountingBase::Off;
-        let shown = if was_on { counting.base } else { restore };
         let mut on = was_on;
-        if split_row(ui, "Count labels", &shown.label(counting.system, &score), &mut on).clicked() {
+        if split_row(ui, "Count labels", &label, &mut on).clicked() {
             self.ui.picker = Some(Picker::Counting);
         }
         if on != was_on {
-            counting.base = if on { restore } else { CountingBase::Off };
+            self.ui.counting.base = if on { restore } else { CountingBase::Off };
         }
     }
 

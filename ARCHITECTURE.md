@@ -507,14 +507,15 @@ grooph's metronome runs inside AI chats as an
   directly. The audio settings (`AudioConfig::click`/`counter`) keep the
   other meters' bars and the counter ratios' names; their entry for the
   metronome's meter is not read. `click_bars`/`counter_bars` give every
-  meter's, the metronome's from its document: the audio engine and
-  persistence take those. When the document turns to another meter (a
+  meter's, the metronome's from its document: persistence takes both,
+  and the audio engine takes the click bars when it plays a rhythm. When the document turns to another meter (a
   picked meter, undo, a link), `store_metronome_bars` puts the old meter's
   bars into the settings first. A metronome link sets the meter and clicks
   in place, also with the tab open; a preset, which needs a rhythm, closes
   it with `leave_metronome`, which shows the practice page. The audio engine
-  gets one silent bar of the meter (`metronome_score`), so only the clicks
-  sound; ghost notes, endless mode and play along are off there. Below the
+  plays the document itself as clicks (`Played::Clicks`): its first voice
+  is the click bar, its second the counter rhythm, so only clicks sound and
+  hits are measured against the same score; ghost notes, endless mode and play along are off there. Below the
   staff a ring shows one segment per note or rest of the bar, as long as it,
   thickness by level; a tap cycles strong, medium, soft, off (undoable). The
   "Clicks" picker offers the ready-made bars (`click_fills`), "Edit clicks"

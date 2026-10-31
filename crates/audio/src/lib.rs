@@ -14,7 +14,6 @@ use crate::tick_source::{CountInPlan, TickSource};
 use crate::trainer::GapDecider;
 use crate::voices::VoiceMixer;
 use grooph_measure::click::ClickBars;
-use grooph_measure::counter::CounterBars;
 use grooph_measure::generator::Subdivision;
 use grooph_measure::grid::DEFAULT_GRID;
 use grooph_measure::swing::Swing;
@@ -264,10 +263,29 @@ pub struct PlaybackOptions {
     pub gap: GapClick,
     /// Stepwise tempo change, starting at the score tempo.
     pub ramp: TempoRamp,
-    /// What the metronome clicks in each meter.
+    /// What the metronome clicks in each meter, over a score. Only
+    /// [`Played::Score`] reads it; [`Played::Clicks`] takes its clicks from
+    /// the score itself.
     pub click: ClickBars,
-    /// The counter rhythm played against the click bar, per meter.
-    pub counter: CounterBars,
+    /// What the played score is.
+    pub played: Played,
+}
+
+/// The voice of a click bar that holds its counter rhythm, in
+/// [`Played::Clicks`]; the first voice holds the clicks.
+pub const COUNTER_VOICE: usize = 1;
+
+/// What the score [`Audio::update`] plays is.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Played {
+    /// A rhythm, with the click bar of each measure's meter (`click`).
+    #[default]
+    Score,
+    /// Clicks only, as the metronome plays them: each measure is a click
+    /// bar, its first voice the clicks and a second voice, if any, the
+    /// counter rhythm ([`COUNTER_VOICE`]).
+    /// Ghost notes and `click` do not apply.
+    Clicks,
 }
 
 /// The bar the audio engine is playing, as counted since the score started.
@@ -555,8 +573,10 @@ impl Audio {
         }
         let options = &self.options;
         let timing = ScoreTiming::from_score(score, bpm).with_swing(options.swing);
-        let schedule = Schedule::build(score, &timing, options.ghost_notes, &options.click)
-            .with_counter(score, &timing, &options.counter);
+        let schedule = match options.played {
+            Played::Score => Schedule::build(score, &timing, options.ghost_notes, &options.click),
+            Played::Clicks => Schedule::clicks(score, &timing),
+        };
         let count_in = if options.count_in { count_in_plan(score).map(Arc::new) } else { None };
         let plan =
             PlaybackPlan { bpm, timing, schedule, count_in, gap: options.gap, ramp: options.ramp };
@@ -1329,6 +1349,41 @@ mod tests {
         assert!(audio.shared_state.lock().unwrap().is_dirty);
         // Only the plan from `Audio::new` was replaced.
         assert_eq!(audio.retired.len(), 1);
+    }
+
+    #[test]
+    fn clicks_play_the_click_bar_and_its_counter_rhythm_alone() {
+        use grooph_measure::click::{ClickLevel, meter_click_bar};
+        use grooph_measure::counter::{Ratio, counter_bar};
+        use schedule::SoundType::*;
+
+        // The metronome's bar: its clicks, the second soft, and 3:4 against
+        // them, the clicks of a score's meter being ignored.
+        let ts = TimeSignature::FOUR_FOUR;
+        let mut bar = meter_click_bar(ts);
+        bar.first_voice_mut().set_click_level(1, ClickLevel::Soft);
+        bar.push_voices(&counter_bar(ts, Ratio { n: 3, span: 4 }).unwrap()).unwrap();
+        let score = Score::single(bar);
+        let sounds = |played| {
+            let mut audio = Audio::new(120).unwrap();
+            let mut click = ClickBars::default();
+            click.set(Measure::new(ts));
+            audio.set_playback_options(PlaybackOptions { played, click, ..Default::default() });
+            audio.update(&PlayerState::Stopped, 120, &score, 0.0);
+            let plan = Arc::clone(&audio.built.as_ref().unwrap().1);
+            let mut sounds = Vec::new();
+            plan.schedule.collect_in_range(0, plan.timing.total_loop_ticks() as f64, &mut sounds);
+            sounds
+        };
+        let clicks = sounds(Played::Clicks);
+        let count = |sound| clicks.iter().filter(|&&s| s == sound).count();
+        assert_eq!((count(Downbeat), count(SoftBeat), count(PrimaryBeat)), (1, 1, 2));
+        assert_eq!(count(CounterMedium) + count(CounterStrong), 3, "{clicks:?}");
+        assert!(clicks.iter().all(|s| !matches!(s, Beat | AccentedBeat | Ghost)), "{clicks:?}");
+        // Played as a score, its notes sound as a rhythm and no counter.
+        let rhythm = sounds(Played::Score);
+        assert!(rhythm.iter().any(|s| matches!(s, Beat | AccentedBeat)), "{rhythm:?}");
+        assert!(rhythm.iter().all(|s| !s.is_counter()), "{rhythm:?}");
     }
 
     #[test]

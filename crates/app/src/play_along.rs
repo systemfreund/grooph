@@ -320,7 +320,7 @@ impl Grooph {
         let mut tracker = std::mem::take(&mut self.playback_ctl.accuracy.tracker);
         let mut deltas = Vec::new();
         let played = {
-            let score = self.tracked_score();
+            let score = self.played_score();
             let played = total_loop_seconds > 0.0 && !score.measures().is_empty();
             if played {
                 hits.sort_by(|a, b| a.1.total_cmp(&b.1));
