@@ -123,7 +123,6 @@ impl Grooph {
             self.close_metronome();
         }
         if doc == Document::Metronome {
-            // Built from the click settings while it is still closed.
             self.open_metronome();
         }
         self.editor.document = doc;
@@ -245,22 +244,25 @@ mod tests {
     fn no_generator_action_changes_the_score() {
         let (mut app, groove) = app_with_groove();
         app.select_tab(Tab::Practice);
-        let mut practice = practice_text(&app);
-        let mut changed = |app: &Grooph| {
-            let now = practice_text(app);
-            let new = now != practice;
-            practice = now;
-            new
-        };
+        // Before each action Practice holds a bar no generator writes, so
+        // the action shows by replacing it, also with a rhythm that comes
+        // out the same as the one before by chance.
+        let unset = parse_score("5/4 q q q q q").unwrap();
+        let set_aside = |app: &mut Grooph| app.editor.docs.practice.score = unset.clone();
+        let changed = |app: &Grooph| practice_text(app) != text(&unset);
         // 🎲, a setting, a preset, a generator link, also from the score tab.
+        set_aside(&mut app);
         app.finish_generator_change(app.editor.generator.settings, false, true);
         assert!(changed(&app));
+        set_aside(&mut app);
         let before = app.editor.generator.settings;
         app.editor.generator.settings.complexity = 3;
         app.finish_generator_change(before, false, false);
         assert!(changed(&app));
+        set_aside(&mut app);
         app.apply_preset(PresetId::BuiltIn(1));
         assert!(changed(&app));
+        set_aside(&mut app);
         app.select_tab(Tab::Score);
         let link = grooph_link::parse_query("v=2&sub=16&lvl=2&bars=1&seed=7").unwrap().unwrap();
         app.open_link(link);
@@ -294,6 +296,8 @@ mod tests {
     fn each_document_undoes_its_own_changes() {
         let (mut app, groove) = app_with_groove();
         app.select_tab(Tab::Practice);
+        // A bar no generator writes, so the new rhythm always differs.
+        app.editor.docs.practice.score = parse_score("5/4 q q q q q").unwrap();
         let first = practice_text(&app);
         app.generate_new_score();
         assert_ne!(practice_text(&app), first);

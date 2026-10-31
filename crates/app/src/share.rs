@@ -49,7 +49,7 @@ impl Grooph {
     /// What [`Self::share_link_url`] links to.
     pub(crate) fn shared_link(&self) -> SharedLink {
         let swing = self.playback_ctl.audio_cfg.swing;
-        let click = &self.playback_ctl.audio_cfg.click;
+        let click = self.click_bars();
         let (content, meter) = if self.metronome_mode() {
             (LinkContent::Metronome(self.metronome_meter()), Some(self.metronome_meter()))
         } else {

@@ -38,9 +38,14 @@ pub(crate) struct AudioConfig {
     pub(crate) gap: GapClick,
     /// Metronome trainer: stepwise tempo change from `bpm`.
     pub(crate) ramp: TempoRamp,
-    /// What the metronome clicks in each meter.
+    /// What the metronome clicks in each meter but its own: the click bar
+    /// of the metronome's meter is in its document (`docs.metronome`), and
+    /// this entry is only where it is put when the meter changes. Read
+    /// every meter's through `Grooph::click_bars`.
     pub(crate) click: ClickBars,
-    /// The counter rhythm of each meter that has one.
+    /// The counter rhythm of each meter that has one, as `click`
+    /// (`Grooph::counter_bars`), and the ratio each was picked as, also
+    /// the metronome meter's.
     pub(crate) counter: CounterBars,
 }
 
