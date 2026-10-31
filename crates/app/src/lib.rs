@@ -8,6 +8,7 @@ mod guide;
 mod help;
 mod host;
 mod keyboard_input;
+mod kit_palette;
 mod library;
 mod library_panel;
 mod measure_panel;
@@ -38,8 +39,9 @@ mod web;
 
 pub use host::Host;
 
+use grooph_layout::staff::Staff;
 use grooph_measure::duration::{Duration, NoteValue, TupletSpec, q};
-use grooph_measure::{BeatIdx, Cursor, Measure, Score, TimeSignature, VoiceBar};
+use grooph_measure::{BeatIdx, Cursor, Instrument, Measure, Score, TimeSignature, VoiceBar};
 
 use crate::accuracy::AccuracyState;
 use crate::calibration::CalibrationPhase;
@@ -157,13 +159,15 @@ impl SavedDoc {
     fn into_doc(self, library: &PatternLibrary) -> RhythmDoc {
         // A measure always has beats (`VoiceBar`'s invariant, checked when
         // it loads), so the cursor clamps into a score with one.
-        let score = if self.score.is_empty() {
+        let mut score = if self.score.is_empty() {
             Score::single(Grooph::default_measure())
         } else {
             self.score
         };
+        // Saved before a drum was struck by one voice at a time.
+        let undoubled = score.undouble_instruments();
         RhythmDoc {
-            dirty: self.dirty,
+            dirty: self.dirty || undoubled,
             active_pattern_id: self.active_pattern_id.filter(|id| library.contains(*id)),
             ..RhythmDoc::new(score, self.cursor)
         }
@@ -188,6 +192,8 @@ pub(crate) struct PersistedState {
     audio_offset: f32,
     counting: CountingSettings,
     flash_enabled: bool,
+    /// See [`UiState::show_score_tab`].
+    show_score_tab: bool,
     guide: Guide,
     midi_selected_port_id: Option<String>,
     accuracy_enabled: bool,
@@ -223,6 +229,7 @@ impl Default for PersistedState {
             audio_offset: 0.0,
             counting: CountingSettings::default(),
             flash_enabled: false,
+            show_score_tab: false,
             guide: Guide::default(),
             midi_selected_port_id: None,
             accuracy_enabled: false,
@@ -260,6 +267,7 @@ impl PersistedState {
             audio_offset: app.playback_ctl.audio_cfg.offset,
             counting: app.ui.counting,
             flash_enabled: app.ui.flash_enabled,
+            show_score_tab: app.ui.show_score_tab,
             guide: app.ui.guide,
             midi_selected_port_id: app.playback_ctl.midi.selected_port_id.clone(),
             accuracy_enabled: app.playback_ctl.accuracy.enabled,
@@ -573,6 +581,17 @@ impl Grooph {
         doc.score.current_mut(doc.cursor.measure_idx)
     }
 
+    /// The staff the document is written on.
+    pub(crate) fn staff_model(&self) -> &'static Staff {
+        Staff::of(self.editor.doc().score.staff)
+    }
+
+    /// The instrument the tools write and change: the chosen one on a staff
+    /// that writes it, else the staff's own (the one line's rhythm).
+    pub(crate) fn edit_instrument(&self) -> Instrument {
+        self.staff_model().instrument_or(self.editor.instrument)
+    }
+
     /// The voice the cursor is in, whose beats the tools edit.
     pub(crate) fn current_voice(&self) -> &VoiceBar {
         self.editor
@@ -660,7 +679,8 @@ impl Grooph {
         base: NoteValue,
         beat_kind: Option<BeatKind>,
     ) -> Option<Modification> {
-        let result = self.current_voice_mut().modify_beat(idx, base, beat_kind);
+        let pen = self.edit_instrument();
+        let result = self.current_voice_mut().modify_beat(idx, base, beat_kind, pen);
         if result.is_some() {
             let new_len = self.current_voice().beats().len();
             if new_len > 0 {
@@ -675,7 +695,8 @@ impl Grooph {
     }
 
     fn set_tuplet(&mut self, idx: usize, tuplet_spec: Option<TupletSpec>) -> Option<Modification> {
-        let result = self.current_voice_mut().set_tuplet(idx, tuplet_spec, true);
+        let pen = self.edit_instrument();
+        let result = self.current_voice_mut().set_tuplet(idx, tuplet_spec, true, pen);
         match &result {
             Some(Modification::DissolveTuplet(tuplet_idx, _)) => {
                 let new_len = self.current_voice().beats().len();
@@ -766,7 +787,9 @@ impl Grooph {
         let Some(pattern) = self.editor.library.get(id) else {
             return;
         };
-        let score = pattern.score.clone();
+        let mut score = pattern.score.clone();
+        // A drum struck by two voices at once is a change to save.
+        let undoubled = score.undouble_instruments();
         let bpm = pattern.bpm;
 
         // The score tab's score is replaced.
@@ -780,7 +803,7 @@ impl Grooph {
         self.playback_ctl.bpm = bpm;
         self.playback_ctl.playback.reset();
         self.editor.doc_mut().active_pattern_id = Some(id);
-        self.editor.doc_mut().dirty = false;
+        self.editor.doc_mut().dirty = undoubled;
         self.show_loaded_pattern();
     }
 
@@ -838,8 +861,9 @@ impl Grooph {
         let metronome = matches!(link.content, Some(LinkContent::Metronome(_)));
         let replaces_rhythm =
             matches!(link.content, Some(LinkContent::Score(_) | LinkContent::Generator { .. }));
+        let mut undoubled = false;
         match link.content {
-            Some(LinkContent::Score(score)) => self.replace_score_from_link(score),
+            Some(LinkContent::Score(score)) => undoubled = self.replace_score_from_link(score),
             Some(LinkContent::Metronome(ts)) => {
                 self.stop_transport();
                 // The meter plays the link's counter rhythm, or none; a
@@ -881,12 +905,16 @@ impl Grooph {
             self.ui.mode = Mode::Playback;
         } else if replaces_rhythm {
             // The content is reproducible from the link, so it is not
-            // "unsaved".
-            self.editor.doc_mut().dirty = false;
+            // "unsaved", unless a drum struck by two voices at once was
+            // taken from one of them.
+            self.editor.doc_mut().dirty = undoubled;
         }
     }
 
-    fn replace_score_from_link(&mut self, score: Score) {
+    /// Reports whether a drum struck by two voices at once was taken from
+    /// one of them (see [`Score::undouble_instruments`]).
+    fn replace_score_from_link(&mut self, mut score: Score) -> bool {
+        let undoubled = score.undouble_instruments();
         self.stop_transport();
         self.show_document(Document::Score);
         self.with_undo_snapshot(|app| {
@@ -896,6 +924,7 @@ impl Grooph {
         });
         self.editor.doc_mut().active_pattern_id = None;
         self.show_loaded_pattern();
+        undoubled
     }
 
     /// Run a pending load after the unsaved-changes dialog.
@@ -903,6 +932,7 @@ impl Grooph {
         match pending {
             PendingLoad::Pattern(id) => self.load_pattern(id),
             PendingLoad::Link(link) => self.apply_link(*link),
+            PendingLoad::NewKitScore => self.new_kit_score(),
         }
     }
 
@@ -938,10 +968,10 @@ impl Grooph {
             }
             Duration::Simple(..) => {
                 if template.accented {
-                    measure.first_voice_mut().toggle_accent(0);
+                    measure.first_voice_mut().toggle_accent(0, Instrument::Rhythm);
                 }
                 if template.soft {
-                    measure.first_voice_mut().toggle_soft(0);
+                    measure.first_voice_mut().toggle_soft(0, Instrument::Rhythm);
                 }
             }
         }
@@ -1276,6 +1306,7 @@ impl Grooph {
                     score: score_doc,
                 },
                 button_measures,
+                instrument: Instrument::Snare,
                 library: state.library,
                 presets: state.presets,
                 active_preset: None,
@@ -1317,6 +1348,7 @@ impl Grooph {
                 layout: LayoutSettings::default(),
                 counting: state.counting,
                 flash_enabled: state.flash_enabled,
+                show_score_tab: state.show_score_tab,
                 guide: state.guide,
                 platform,
                 renaming_preset: None,
@@ -1340,9 +1372,14 @@ impl Grooph {
             },
         };
         app.editor.active_preset = app.matching_preset();
-        // The page the More screen was opened from, then the saved tab.
-        app.select_tab(state.document.tab());
-        app.select_tab(state.tab);
+        // The page the More screen was opened from, then the saved tab;
+        // Practice for the score tab while it is hidden.
+        let shown = |tab| match tab {
+            Tab::Score if !state.show_score_tab => Tab::Practice,
+            tab => tab,
+        };
+        app.select_tab(shown(state.document.tab()));
+        app.select_tab(shown(state.tab));
         // A link opens after the saved tab, so its tab wins.
         if let Some(query) = query {
             app.open_link_from_url(&query);
@@ -1944,6 +1981,22 @@ mod tests {
         });
         assert!(app.ui.pending_load.is_some());
         assert!(app.metronome_mode());
+    }
+
+    #[test]
+    fn a_link_with_a_doubled_drum_opens_with_it_once() {
+        use super::Grooph;
+        use grooph_measure::notation::format_score;
+
+        let cc = eframe::CreationContext::_new_kittest(eframe::egui::Context::default());
+        let mut app = Grooph::new(&cc);
+        let groove = "4/4 S-H:q H:q H:h ; >S:q K:q K:h";
+        let query = format!("v=2&r={}", groove.replace(' ', "+").replace(';', "%3B"));
+        app.open_link(grooph_link::parse_query(&query).unwrap().unwrap());
+        let score = &app.editor.doc().score;
+        assert_eq!(format_score(score).unwrap(), "4/4 >S-H:q H:q H:h ; r:q K:q K:h");
+        // No longer the link's groove: a change to save.
+        assert!(app.editor.doc().dirty);
     }
 
     #[test]

@@ -106,6 +106,16 @@ impl Instrument {
     pub fn allows(self, technique: Technique) -> bool {
         self.techniques().contains(&technique)
     }
+
+    /// The voice of a kit score the instrument's heads go to by default:
+    /// the feet (kick, hi-hat foot) below, in the second voice; the hands
+    /// above, in the first. The one line's rhythm is in the first.
+    pub const fn default_voice(self) -> crate::VoiceIdx {
+        match self {
+            Instrument::Kick | Instrument::HiHatFoot => 1,
+            _ => 0,
+        }
+    }
 }
 
 /// How a head is played, beyond accent and ghost. Each instrument allows
@@ -204,6 +214,14 @@ impl Head {
     pub fn set_soft(&mut self, soft: bool) {
         self.soft = soft;
         self.accented &= !soft;
+    }
+
+    /// The head played with its instrument's next technique, after the
+    /// last one the usual way again (see [`Instrument::techniques`]).
+    pub fn with_next_technique(self) -> Self {
+        let techniques = self.instrument.techniques();
+        let at = techniques.iter().position(|&t| t == self.technique).unwrap_or(0);
+        Self { technique: techniques[(at + 1) % techniques.len()], ..self }
     }
 
     /// The head played with `technique`, if its instrument allows it.
@@ -313,6 +331,18 @@ impl Heads {
     /// The head of `instrument`, if any.
     pub fn get(&self, instrument: Instrument) -> Option<&Head> {
         self.iter().find(|h| h.instrument == instrument)
+    }
+
+    /// The head of `instrument`, to change its accent, ghost or technique.
+    pub fn get_mut(&mut self, instrument: Instrument) -> Option<&mut Head> {
+        self.iter_mut().find(|h| h.instrument == instrument)
+    }
+
+    /// Plain heads of the same instruments: no accent, ghost or technique.
+    pub fn plain(&self) -> Heads {
+        let mut plain = *self;
+        plain.slots.iter_mut().flatten().for_each(|h| *h = Head::new(h.instrument));
+        plain
     }
 
     /// Add `head` in its place. Fails on a second head of its instrument

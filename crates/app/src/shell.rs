@@ -263,7 +263,7 @@ fn badged_switch_row(ui: &mut Ui, label: &str, badge: Option<&str>, on: &mut boo
         visuals.text_color(),
     );
     if let Some(badge) = badge {
-        paint_badge(painter, pos2(label_rect.right() + 8.0, rect.center().y), badge, visuals);
+        paint_badge(painter, pos2(label_rect.right() + 8.0, rect.center().y), badge);
     }
 
     paint_switch(painter, rect, *on, how_on, visuals);
@@ -330,17 +330,18 @@ fn split_row(ui: &mut Ui, label: &str, value: &str, on: &mut bool) -> Response {
 
 /// Pill in the accent colour with small text, its left edge vertically
 /// centered on `left`.
-fn paint_badge(painter: &Painter, left: Pos2, text: &str, visuals: &egui::Visuals) {
-    let galley = painter.layout_no_wrap(
-        text.to_owned(),
-        FontId::proportional(12.0),
-        visuals.selection.stroke.color,
-    );
+fn paint_badge(painter: &Painter, left: Pos2, text: &str) {
+    let galley = painter.layout_no_wrap(text.to_owned(), FontId::proportional(12.0), BADGE_TEXT);
     let size = galley.size() + vec2(12.0, 2.0);
     let pill = Rect::from_min_size(pos2(left.x, left.y - size.y / 2.0), size);
-    painter.rect_filled(pill, size.y / 2.0, visuals.selection.bg_fill);
+    painter.rect_filled(pill, size.y / 2.0, BADGE_FILL);
     painter.galley(pill.center() - galley.size() / 2.0, galley, Color32::PLACEHOLDER);
 }
+
+/// The colours of a badge such as "BETA", in a settings row or on a tab:
+/// orange, the same in both themes.
+const BADGE_FILL: Color32 = Color32::from_rgb(0xD9, 0x6B, 0x1E);
+const BADGE_TEXT: Color32 = Color32::WHITE;
 
 /// Track colour of a switch that is off. It has to differ from the white
 /// knob, so the light theme gets a grey instead of its white field colour.
@@ -691,13 +692,19 @@ impl Grooph {
             (Tab::Score, "🎼", "Score"),
             (Tab::More, "☰", "More"),
         ];
+        // The score tab, not finished yet, only when the developer setting
+        // shows it, or while it is open (from a link or a pattern).
+        let tabs: Vec<_> = TABS
+            .into_iter()
+            .filter(|&(tab, ..)| tab != Tab::Score || self.ui.show_score_tab || tab == current)
+            .collect();
         let mut picked = None;
         egui::Panel::bottom("shell_tabs")
             .frame(Frame::side_top_panel(ui.style()).inner_margin(Margin::symmetric(0, 4)))
             .show(ui, |ui| {
                 centered_column(ui, |ui| {
-                    ui.columns(TABS.len(), |cols| {
-                        for (col, (tab, icon, label)) in cols.iter_mut().zip(TABS) {
+                    ui.columns(tabs.len(), |cols| {
+                        for (col, &(tab, icon, label)) in cols.iter_mut().zip(&tabs) {
                             let (rect, resp) = col.allocate_exact_size(
                                 vec2(col.available_width(), TAB_HEIGHT),
                                 Sense::click(),
@@ -722,6 +729,9 @@ impl Grooph {
                                 FontId::proportional(14.0),
                                 color,
                             );
+                            if tab == Tab::Score {
+                                beta_pill(painter, rect.center_top() + vec2(14.0, 2.0));
+                            }
                             if resp.clicked() {
                                 picked = Some(tab);
                             }
@@ -1483,6 +1493,16 @@ impl Grooph {
             self.ui.picker = Some(Picker::Help);
         }
     }
+}
+
+/// A small "BETA" pill with its left edge at `left_top`, beside a tab's
+/// icon: the tab is not finished yet.
+fn beta_pill(painter: &egui::Painter, left_top: egui::Pos2) {
+    let font = FontId::proportional(9.0);
+    let text = painter.layout_no_wrap("BETA".to_owned(), font, BADGE_TEXT);
+    let rect = egui::Rect::from_min_size(left_top, text.size() + vec2(8.0, 2.0));
+    painter.rect_filled(rect, rect.height() / 2.0, BADGE_FILL);
+    painter.galley(rect.min + vec2(4.0, 1.0), text, BADGE_TEXT);
 }
 
 #[cfg(test)]

@@ -16,6 +16,9 @@ use grooph_measure::{Beat, BeatKind, Instrument, StaffKind};
 pub struct Staff {
     /// The lines, as staff positions, from the lowest up.
     pub lines: &'static [i8],
+    /// The instruments written on it, the one a new note gets by default
+    /// first.
+    pub instruments: &'static [Instrument],
     /// Where the heads of an instrument sit.
     place: fn(Instrument) -> i8,
     /// Where a rest that is no stemlet sits (see [`Staff::rest_pos`]).
@@ -35,13 +38,29 @@ pub struct Voicing {
 
 /// The one line of a rhythm, also the metronome's click bar and its counter
 /// rhythm: every instrument on the line.
-static ONE_LINE: Staff =
-    Staff { lines: &[0], place: |_| 0, rest_place: line_rest_place, clef_every_row: false };
+static ONE_LINE: Staff = Staff {
+    lines: &[0],
+    instruments: &[Instrument::Rhythm],
+    place: |_| 0,
+    rest_place: line_rest_place,
+    clef_every_row: false,
+};
 
 /// The kit's five lines: each instrument at its own place. Every row starts
 /// with the clef, which tells the five lines from a pitched staff's.
 static FIVE_LINES: Staff = Staff {
     lines: &[-4, -2, 0, 2, 4],
+    instruments: &[
+        Instrument::Snare,
+        Instrument::Kick,
+        Instrument::HiHat,
+        Instrument::HiHatFoot,
+        Instrument::Ride,
+        Instrument::Crash,
+        Instrument::HighTom,
+        Instrument::MidTom,
+        Instrument::FloorTom,
+    ],
     place: Instrument::staff_pos,
     rest_place: kit_rest_place,
     clef_every_row: true,
@@ -54,6 +73,26 @@ impl Staff {
             StaffKind::Line => &ONE_LINE,
             StaffKind::Kit => &FIVE_LINES,
         }
+    }
+
+    /// The instrument new notes get when `chosen` is picked: `chosen` if
+    /// the staff writes it, else its first (the one line's rhythm).
+    pub fn instrument_or(&self, chosen: Instrument) -> Instrument {
+        match self.instruments.contains(&chosen) {
+            true => chosen,
+            false => self.instruments[0],
+        }
+    }
+
+    /// The instrument whose heads sit nearest staff position `pos`.
+    pub fn instrument_near(&self, pos: f32) -> Instrument {
+        let off = |i: &Instrument| (f32::from((self.place)(*i)) - pos).abs();
+        *self.instruments.iter().min_by(|a, b| off(a).total_cmp(&off(b))).expect("an instrument")
+    }
+
+    /// Where the heads of `instrument` sit.
+    pub fn place_of(&self, instrument: Instrument) -> i8 {
+        (self.place)(instrument)
     }
 
     /// The highest line.
@@ -212,6 +251,24 @@ mod tests {
         assert_eq!(line.ledgers(-1, true).count(), 0);
         // A rest that is no half or whole rest takes none.
         assert_eq!(line.ledgers(-4, false).count(), 0);
+    }
+
+    #[test]
+    fn a_staff_writes_its_instruments_and_finds_them_by_place() {
+        let kit = Staff::of(StaffKind::Kit);
+        assert_eq!(kit.instrument_or(Instrument::HiHat), Instrument::HiHat);
+        assert_eq!(kit.instrument_or(Instrument::Rhythm), Instrument::Snare);
+        assert_eq!(kit.instrument_near(5.2), Instrument::HiHat);
+        assert_eq!(kit.instrument_near(-2.6), Instrument::Kick);
+        assert_eq!(kit.instrument_near(20.0), Instrument::Crash);
+        // Every drum of the kit can be picked on its staff.
+        let drums = Instrument::ALL.into_iter().filter(|&i| i != Instrument::Rhythm);
+        for drum in drums {
+            assert!(kit.instruments.contains(&drum), "{drum:?}");
+        }
+        let line = Staff::of(StaffKind::Line);
+        assert_eq!(line.instrument_or(Instrument::Snare), Instrument::Rhythm);
+        assert_eq!(line.instrument_near(3.0), Instrument::Rhythm);
     }
 
     #[test]

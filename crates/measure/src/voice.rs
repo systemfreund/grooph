@@ -10,7 +10,9 @@ use crate::duration::Duration;
 use crate::editing::GroupSpan;
 use crate::editing::Modification;
 use crate::grid::DEFAULT_GRID;
-use crate::{Beat, BeatKind, InvalidMeasure, MeasureError, TimeSignature, TupletRegistry};
+use crate::{
+    Beat, BeatKind, Instrument, InvalidMeasure, MeasureError, TimeSignature, TupletRegistry,
+};
 use either::Either;
 use serde::{Deserialize, Serialize};
 use std::fmt::{Debug, Formatter};
@@ -211,6 +213,74 @@ impl Measure {
     /// A measure of rests in `time_signature`, as many voices as this one.
     pub fn empty_like(&self, time_signature: TimeSignature) -> Self {
         Measure { voices: vec![VoiceBar::new_init(time_signature, Rest); self.voices.len()] }
+    }
+
+    /// Add voices of rests below this measure's until it has `count`.
+    pub fn fill_voices(&mut self, count: usize) {
+        let ts = self.time_signature();
+        while self.voices.len() < count {
+            self.voices.push(VoiceBar::new_init(ts, Rest));
+        }
+    }
+
+    /// The instruments of the kit that two voices strike at the same time,
+    /// with the tick: a drum is played once at a time, by one voice. The
+    /// one line's rhythm is left out, as the metronome's click and counter
+    /// rhythm sound together as two rhythms.
+    pub fn doubled_instruments(&self) -> Vec<(u32, Instrument)> {
+        let mut struck: Vec<(u32, Instrument, usize)> = Vec::new();
+        let mut doubled = Vec::new();
+        for (v, voice) in self.voices.iter().enumerate() {
+            let onsets = DEFAULT_GRID.compute_onset_ticks(voice.beats());
+            for (beat, tick) in voice.beats().iter().zip(onsets) {
+                for head in beat.heads().iter().filter(|h| h.instrument() != Instrument::Rhythm) {
+                    let instrument = head.instrument();
+                    if struck.iter().any(|&(t, i, w)| t == tick && i == instrument && w != v) {
+                        doubled.push((tick, instrument));
+                    }
+                    struck.push((tick, instrument, v));
+                }
+            }
+        }
+        doubled
+    }
+
+    /// Strike each drum of the kit by one voice at a time again (see
+    /// [`Measure::doubled_instruments`]), for a score made elsewhere, such
+    /// as an old link: a head struck by two voices at once stays in the
+    /// voice its instrument is written in ([`Instrument::default_voice`]),
+    /// or the uppermost, and leaves the others, its accent going along. A
+    /// beat left without heads is a rest. Reports whether one was doubled.
+    pub fn undouble_instruments(&mut self) -> bool {
+        let doubled = self.doubled_instruments();
+        for &(tick, instrument) in &doubled {
+            let hits: Vec<(VoiceIdx, usize)> = (self.voices.iter().enumerate())
+                .filter_map(|(v, voice)| {
+                    let onsets = DEFAULT_GRID.compute_onset_ticks(voice.beats());
+                    let mut beats = voice.beats().iter().zip(onsets);
+                    let at = beats.position(|(beat, t)| {
+                        t == tick && beat.heads().get(instrument).is_some()
+                    })?;
+                    Some((v, at))
+                })
+                .collect();
+            let Some(&keep) =
+                hits.iter().find(|&&(v, _)| v == instrument.default_voice()).or(hits.first())
+            else {
+                continue;
+            };
+            let mut accented = false;
+            for &(v, at) in hits.iter().filter(|&&hit| hit != keep) {
+                let beat = &mut self.voices[v].beats[at];
+                let mut heads = *beat.heads();
+                accented |= heads.remove(instrument).is_some_and(|h| h.accented());
+                beat.set_heads(heads);
+            }
+            if accented && let Some(head) = self.voices[keep.0].beats[keep.1].head_mut(instrument) {
+                head.set_accented(true);
+            }
+        }
+        !doubled.is_empty()
     }
 
     /// Add copies of the voices of `other` below this measure's. Fails, and

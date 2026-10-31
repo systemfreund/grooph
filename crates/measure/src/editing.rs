@@ -4,7 +4,7 @@ use crate::duration::{Duration, NoteValue, TupletSpec};
 use crate::editing::Modification::{DissolveTuplet, ToggleAccent};
 use crate::grid::DEFAULT_GRID;
 use crate::tuplet::TupletGroupId;
-use crate::{Beat, BeatIdx, BeatKind, TimeSignature, VoiceBar};
+use crate::{Beat, BeatIdx, BeatKind, Head, Heads, Instrument, Technique, TimeSignature, VoiceBar};
 use either::Either;
 
 #[derive(Debug)]
@@ -16,6 +16,8 @@ pub enum Modification {
     ToggleAccent(BeatIdx, bool),                       // contains the new accented state
     ToggleSoft(BeatIdx, bool),                         // contains the new soft state
     ToggleDotted(BeatIdx, u8),                         // contains the new dot count
+    ToggleHead(BeatIdx, Instrument, bool),             // contains whether the head is there now
+    SetTechnique(BeatIdx, Instrument, Technique),      // contains the new technique
     ChangeTimeSignature(TimeSignature, TimeSignature), // (old, new)
 }
 
@@ -35,30 +37,59 @@ pub const CYCLE_TUPLET_SPECS: [TupletSpec; 5] = [
 ];
 
 impl VoiceBar {
-    /// Toggle the user accent flag at index `idx`.
-    pub fn toggle_accent(&mut self, idx: BeatIdx) -> Option<Modification> {
-        if let Some(b) = self.beats.get(idx) {
-            let accented = !b.accented();
-            if let Some(b) = self.beats.get_mut(idx)
-                && b.is_note()
-            {
-                b.set_accented(accented);
-            }
-            Some(ToggleAccent(idx, accented))
-        } else {
-            None
-        }
+    /// Toggle the accent of the head of `instrument` at index `idx`. `None`
+    /// on a rest or a note without that head, as nothing changes.
+    pub fn toggle_accent(&mut self, idx: BeatIdx, instrument: Instrument) -> Option<Modification> {
+        let b = self.beats.get_mut(idx)?;
+        let head = b.head_mut(instrument)?;
+        let accented = !head.accented();
+        head.set_accented(accented);
+        Some(ToggleAccent(idx, accented))
     }
 
-    /// Toggle the soft (ghost note) flag at index `idx`; a soft note loses
-    /// its accent. No change on a rest.
-    pub fn toggle_soft(&mut self, idx: BeatIdx) -> Option<Modification> {
+    /// Toggle the soft (ghost note) flag of the head of `instrument` at
+    /// index `idx`; a soft head loses its accent. `None` on a rest or a
+    /// note without that head, as nothing changes.
+    pub fn toggle_soft(&mut self, idx: BeatIdx, instrument: Instrument) -> Option<Modification> {
         let b = self.beats.get_mut(idx)?;
-        let soft = !b.soft();
-        if b.is_note() {
-            b.set_soft(soft);
-        }
+        let head = b.head_mut(instrument)?;
+        let soft = !head.soft();
+        head.set_soft(soft);
         Some(Modification::ToggleSoft(idx, soft))
+    }
+
+    /// Add a plain head of `instrument` to the beat at `idx`, a rest made a
+    /// note, or take its head away, the last one leaving a rest. `None` if
+    /// the beat holds as many heads as it can.
+    pub fn toggle_head(&mut self, idx: BeatIdx, instrument: Instrument) -> Option<Modification> {
+        let b = self.beats.get_mut(idx)?;
+        let mut heads = *b.heads();
+        let there = match heads.remove(instrument) {
+            Some(_) => false,
+            None => {
+                heads.insert(Head::new(instrument)).ok()?;
+                true
+            }
+        };
+        b.set_heads(heads);
+        Some(Modification::ToggleHead(idx, instrument, there))
+    }
+
+    /// Play the head of `instrument` at `idx` with its next technique (see
+    /// [`Head::with_next_technique`]). `None` without that head, or for an
+    /// instrument of one technique, as nothing changes.
+    pub fn cycle_technique(
+        &mut self,
+        idx: BeatIdx,
+        instrument: Instrument,
+    ) -> Option<Modification> {
+        let head = self.beats.get_mut(idx)?.head_mut(instrument)?;
+        let next = head.with_next_technique();
+        if next == *head {
+            return None;
+        }
+        *head = next;
+        Some(Modification::SetTechnique(idx, instrument, head.technique()))
     }
 
     /// Toggle dotted (one dot) for the beat at `idx`.
@@ -90,11 +121,15 @@ impl VoiceBar {
         None
     }
 
+    /// Give the beat at `idx` the value `base` (in its tuplet, if any), and
+    /// make it `beat_kind`'s. A note of the kit keeps its heads; a new note
+    /// is a plain head of `instrument`.
     pub fn modify_beat(
         &mut self,
         idx: BeatIdx,
         base: NoteValue,
         beat_kind: Option<BeatKind>,
+        instrument: Instrument,
     ) -> Option<Modification> {
         let cur = self.beats()[idx];
         let new_dur_opt = match cur.duration {
@@ -110,7 +145,7 @@ impl VoiceBar {
             // one's accent).
             let new_beat = match kind {
                 Note if cur.is_kit() => Beat::with_heads(new_dur, *cur.heads()),
-                Note => Beat::note(new_dur),
+                Note => Beat::note_of(new_dur, instrument),
                 Rest => Beat::rest(new_dur),
             };
             self.set_beat(idx, new_beat).ok()?;
@@ -120,16 +155,21 @@ impl VoiceBar {
         }
     }
 
+    /// Make the beat at `idx` a tuplet group of `tuplet_spec`, or the next
+    /// of [`CYCLE_TUPLET_SPECS`]; dissolve its group if it is one of that
+    /// spec already. The slots of a new group are notes: of the heads of
+    /// the note it is made of, or of `instrument` for a rest.
     pub fn set_tuplet(
         &mut self,
         idx: BeatIdx,
         tuplet_spec: Option<TupletSpec>,
         overwrite: bool,
+        instrument: Instrument,
     ) -> Option<Modification> {
         let start_idx = self.tuplet_group_at(idx).map_or(idx, |g| g.start_idx);
         let cur_beat = self.beats()[start_idx];
         let mut result: Option<Modification> = None;
-        let mut captured_offsets: Option<Vec<(u32, bool)>> = None;
+        let mut captured_offsets: Option<Vec<(u32, Heads)>> = None;
         match cur_beat.duration {
             Duration::Tuplet(current_spec) => {
                 let next_target = if let Some(explicit_tuplet) = &tuplet_spec {
@@ -176,9 +216,16 @@ impl VoiceBar {
 
                 if let Some(group_span) = self.convert_to_tuplet(start_idx, *next_target, overwrite)
                 {
-                    // A new tuplet group starts with every slot as a note
+                    // A new tuplet group starts with every slot as a note,
+                    // of the instruments of the one it was made of.
+                    let heads = match cur_beat.is_note() {
+                        true => cur_beat.heads().plain(),
+                        false => Heads::one(Head::new(instrument)),
+                    };
                     for i in group_span.start_idx..=group_span.end_idx {
-                        self.beats[i].set_kind(Note);
+                        if self.beats[i].is_rest() {
+                            self.beats[i].set_heads(heads);
+                        }
                     }
                     result = Some(Modification::SetTuplet(group_span, *next_target));
                 }
@@ -191,8 +238,9 @@ impl VoiceBar {
     /// Dissolves the tuplet group containing `idx`.
     ///
     /// - Replaces the group's whole span with plain (non-tuplet) rests.
-    /// - If the group held a note, the first new beat becomes a note; an
-    ///   accent anywhere in the group moves to the first new beat.
+    /// - If the group held a note, the first new beat becomes a note, of
+    ///   the heads of the first; an accent anywhere in the group moves to
+    ///   it.
     /// - Clears `tuplet_group_id` in the span and unregisters the anchor.
     /// - Returns the dissolved span and spec, or `None` if `idx` is not in a
     ///   tuplet.
@@ -202,17 +250,11 @@ impl VoiceBar {
         }
 
         if let Some(GroupSpan { start_idx, end_idx, id: group_id }) = self.tuplet_group_at(idx) {
-            // Whether the group held at least one note or accent
-            let mut had_any_note = false;
-            let mut had_any_accent = false;
-            for b in &self.beats[start_idx..=end_idx] {
-                if b.is_note() {
-                    had_any_note = true;
-                }
-                if b.accented() {
-                    had_any_accent = true;
-                }
-            }
+            // The heads of the group's first note, and whether it held an
+            // accent
+            let group = &self.beats[start_idx..=end_idx];
+            let first_note = group.iter().find(|b| b.is_note()).map(|b| *b.heads());
+            let had_any_accent = group.iter().any(Beat::accented);
 
             self.beats.drain(start_idx..=end_idx);
 
@@ -223,10 +265,12 @@ impl VoiceBar {
             // Make the first new beat a note and carry the accent over
             if start_idx < self.beats.len() {
                 self.beats[start_idx].tuplet_group_id = None;
-                if had_any_note {
-                    self.beats[start_idx].set_kind(Note);
+                if let Some(heads) = first_note {
+                    self.beats[start_idx].set_heads(heads);
                 }
-                self.beats[start_idx].set_accented(had_any_accent);
+                if had_any_accent && !self.beats[start_idx].accented() {
+                    self.beats[start_idx].set_accented(true);
+                }
             }
 
             self.tuplets.unregister(group_id).map(|anchor| {
@@ -241,11 +285,12 @@ impl VoiceBar {
     }
 
     /// Onsets of the notes in the tuplet group starting at `start_idx`, as
-    /// `(offset_ticks, accented)`: grid ticks from the group start, sorted
-    /// ascending.
+    /// `(offset_ticks, heads)`: grid ticks from the group start, sorted
+    /// ascending, with the note's heads as they are (accent, ghost and
+    /// technique).
     ///
     /// `None` if no tuplet group starts at `start_idx`.
-    fn tuplet_group_note_offsets(&self, start_idx: BeatIdx) -> Option<Vec<(u32, bool)>> {
+    fn tuplet_group_note_offsets(&self, start_idx: BeatIdx) -> Option<Vec<(u32, Heads)>> {
         let group = self.tuplet_group_at(start_idx)?;
         if group.start_idx != start_idx {
             return None;
@@ -255,9 +300,9 @@ impl VoiceBar {
         let onsets = DEFAULT_GRID.compute_onset_ticks(&self.beats);
         let start_onset = onsets[start_idx];
 
-        let mut offsets: Vec<(u32, bool)> = (group.start_idx..=group.end_idx)
+        let mut offsets: Vec<(u32, Heads)> = (group.start_idx..=group.end_idx)
             .filter(|&i| self.beats[i].is_note())
-            .map(|i| ((onsets[i] - start_onset).min(span_ticks), self.beats[i].accented()))
+            .map(|i| ((onsets[i] - start_onset).min(span_ticks), *self.beats[i].heads()))
             .collect();
         offsets.sort_by_key(|e| e.0);
         Some(offsets)
@@ -270,13 +315,13 @@ impl VoiceBar {
     /// - Computes the new group's slot onsets relative to its start.
     /// - Greedily assigns each source note to the nearest free slot (the lower
     ///   index wins a tie), so no slot gets two notes.
-    /// - All other slots become rests; accents follow their source note.
+    /// - All other slots become rests; the heads follow their source note.
     ///
     /// Returns `false` if no tuplet group starts at `start_idx`.
     fn apply_tuplet_projection_at(
         &mut self,
         start_idx: BeatIdx,
-        source_offsets: &[(u32, bool)],
+        source_offsets: &[(u32, Heads)],
     ) -> bool {
         let Some(group) = self.tuplet_group_at(start_idx) else {
             return false;
@@ -304,7 +349,7 @@ impl VoiceBar {
 
         // Greedy: give each source note the nearest free slot
         let mut used = vec![false; tlen];
-        for &(src_rel, src_accent) in source_offsets.iter() {
+        for &(src_rel, heads) in source_offsets.iter() {
             // Find the nearest free slot
             let mut best_k: Option<BeatIdx> = None;
             let mut best_dist: u32 = u32::MAX;
@@ -321,10 +366,7 @@ impl VoiceBar {
             }
             if let Some(k) = best_k {
                 let ti = target_rel[k].1;
-                self.beats[ti].set_kind(Note);
-                if src_accent {
-                    self.beats[ti].set_accented(true);
-                }
+                self.beats[ti].set_heads(heads);
                 used[k] = true;
             }
         }
@@ -395,14 +437,14 @@ mod tests {
         use crate::notation::{format_score, parse_score};
         let mut score = parse_score("4/4 >S-H:q H:q r:h ; K:h K:h").unwrap();
         let hands = score.measures_mut()[0].voice_mut(0).unwrap();
-        hands.modify_beat(0, NoteValue::Eighth, None).unwrap();
-        hands.modify_beat(2, NoteValue::Eighth, Some(Note)).unwrap();
+        hands.modify_beat(0, NoteValue::Eighth, None, crate::Instrument::Rhythm).unwrap();
+        hands.modify_beat(2, NoteValue::Eighth, Some(Note), crate::Instrument::Rhythm).unwrap();
         let text = format_score(&score).unwrap();
         assert!(text.starts_with("4/4 >S-H:e"), "{text}");
         // A dot, a tuplet and a longer note keep each head's accent too.
         let hands = score.measures_mut()[0].voice_mut(0).unwrap();
         hands.toggle_dotted(0).unwrap();
-        hands.modify_beat(0, NoteValue::Quarter, None).unwrap();
+        hands.modify_beat(0, NoteValue::Quarter, None, crate::Instrument::Rhythm).unwrap();
         let text = format_score(&score).unwrap();
         assert!(text.starts_with("4/4 >S-H:q"), "{text}");
         let hands = score.measures_mut()[0].voice_mut(0).unwrap();
@@ -410,13 +452,22 @@ mod tests {
         assert!(format_score(&score).unwrap().starts_with("4/4 >S-H:q."));
         let mut score = parse_score("4/4 >S-(H):q H:q r:h ; K:h K:h").unwrap();
         let hands = score.measures_mut()[0].voice_mut(0).unwrap();
-        hands.set_tuplet(0, Some(TupletSpec { n: 3, m: 2, base: Eighth }), true).unwrap();
+        hands
+            .set_tuplet(
+                0,
+                Some(TupletSpec { n: 3, m: 2, base: Eighth }),
+                true,
+                crate::Instrument::Rhythm,
+            )
+            .unwrap();
         let text = format_score(&score).unwrap();
         assert!(text.starts_with("4/4 >S-(H):t8"), "{text}");
-        // A rest made a note is the one line's until the kit has its palette.
+        // On the one line a duration change writes its rhythm afresh.
         let line = parse_score("4/4 >q (q) r:h").unwrap();
         let mut bar = line.measures()[0].clone();
-        bar.first_voice_mut().modify_beat(1, NoteValue::Eighth, None).unwrap();
+        bar.first_voice_mut()
+            .modify_beat(1, NoteValue::Eighth, None, crate::Instrument::Rhythm)
+            .unwrap();
         assert!(
             !bar.first_voice().beats()[1].soft(),
             "a duration change on the one line drops the ghost, as before"
@@ -424,12 +475,101 @@ mod tests {
     }
 
     #[test]
+    fn the_tools_change_the_head_of_one_instrument() {
+        use crate::Instrument::{HiHat, Kick, Snare};
+        use crate::notation::{format_score, parse_score};
+        let mut score = parse_score("4/4 S-H:q H:q r:q H:q ; K:h K:h").unwrap();
+        let text = |s: &crate::Score| format_score(s).unwrap();
+        let hands = score.measures_mut()[0].voice_mut(0).unwrap();
+        // Accent and ghost each change their instrument's head alone.
+        hands.toggle_accent(0, Snare).unwrap();
+        hands.toggle_soft(0, HiHat).unwrap();
+        assert!(hands.toggle_accent(1, Snare).is_none(), "no snare there");
+        // A head added and taken away; the last one away leaves a rest.
+        hands.toggle_head(1, Snare).unwrap();
+        hands.toggle_head(3, HiHat).unwrap();
+        // A rest made a note of the instrument.
+        hands.toggle_head(2, Snare).unwrap();
+        hands.toggle_beat_kind(3, Snare).unwrap();
+        assert_eq!(text(&score), "4/4 >S-(H):q S-H:q S:q S:q ; K:h K:h");
+        // The hi-hat's techniques in turn, then the usual way again.
+        for expected in ["Ho", "Hh", "Hc", "H"] {
+            let hands = score.measures_mut()[0].voice_mut(0).unwrap();
+            hands.cycle_technique(1, HiHat).unwrap();
+            assert!(text(&score).contains(&format!(" S-{expected}:q")), "{}", text(&score));
+        }
+        assert!(score.measures_mut()[0].voice_mut(1).unwrap().cycle_technique(0, Snare).is_none());
+        // A head too many is refused.
+        let mut full = parse_score("4/4 K-S-H-CR:q r:q r:h").unwrap();
+        assert!(full.measures_mut()[0].first_voice_mut().toggle_head(0, Kick).is_some());
+        let feet = full.measures_mut()[0].first_voice_mut();
+        feet.toggle_head(0, Kick).unwrap();
+        assert!(feet.toggle_head(0, crate::Instrument::Ride).is_none());
+    }
+
+    #[test]
+    fn a_tuplet_on_the_kit_keeps_its_instruments() {
+        use crate::Instrument::{Kick, Snare};
+        use crate::notation::{format_score, parse_score};
+        let triplet = TupletSpec { n: 3, m: 2, base: Eighth };
+        // From a chord: every slot of the group plays its instruments, plain.
+        let mut score = parse_score("4/4 >S-Ho:q r:q r:h").unwrap();
+        let hands = score.measures_mut()[0].first_voice_mut();
+        hands.set_tuplet(0, Some(triplet), true, Kick).unwrap();
+        let text = format_score(&score).unwrap();
+        assert!(text.starts_with("4/4 >S-Ho:t8 S-H:t8 S-H:t8"), "{text}");
+        // To the next tuplet and dissolved, the notes keep their heads as they
+        // are, the open hi-hat too.
+        let hands = score.measures_mut()[0].first_voice_mut();
+        hands.set_tuplet(0, None, true, Kick).unwrap();
+        let text = format_score(&score).unwrap();
+        assert!(text.starts_with("4/4 >S-Ho:qt16 r:qt16 S-H:qt16 S-H:qt16"), "{text}");
+        let hands = score.measures_mut()[0].first_voice_mut();
+        hands.dissolve_tuplet_group(0).unwrap();
+        let text = format_score(&score).unwrap();
+        assert!(text.starts_with("4/4 >S-Ho:"), "{text}");
+        // From a rest: notes of the instrument given.
+        let mut rest = parse_score("4/4 H:q r:q r:h").unwrap();
+        rest.measures_mut()[0].first_voice_mut().set_tuplet(1, Some(triplet), true, Snare).unwrap();
+        assert!(format_score(&rest).unwrap().starts_with("4/4 H:q S:t8 S:t8 S:t8"));
+        // On the one line too, a ghost note stays a ghost note.
+        let mut line = parse_score("4/4 (q) r:q r:h").unwrap();
+        let voice = line.measures_mut()[0].first_voice_mut();
+        voice.set_tuplet(0, Some(triplet), true, crate::Instrument::Rhythm).unwrap();
+        voice.set_tuplet(0, None, true, crate::Instrument::Rhythm).unwrap();
+        voice.dissolve_tuplet_group(0).unwrap();
+        let text = format_score(&line).unwrap();
+        assert!(text.starts_with("4/4 (q)") || text.starts_with("4/4 (e)"), "{text}");
+    }
+
+    #[test]
+    fn a_tool_that_changes_nothing_says_so() {
+        use crate::Instrument::{Kick, Snare};
+        use crate::notation::parse_score;
+        let mut score = parse_score("4/4 S:q r:q K:h").unwrap();
+        let voice = score.measures_mut()[0].first_voice_mut();
+        // A rest has no head to accent or ghost; the kick plays one way.
+        assert!(voice.toggle_accent(1, Snare).is_none());
+        assert!(voice.toggle_soft(1, Snare).is_none());
+        assert!(voice.cycle_technique(2, Kick).is_none());
+        assert!(voice.cycle_technique(0, Snare).is_some());
+    }
+
+    #[test]
     fn a_counter_sextuplet_of_thirty_seconds_can_be_edited() {
         use crate::counter::{Ratio, counter_bar};
         use crate::grid::DEFAULT_GRID;
         let mut m = counter_bar("1/4".parse().unwrap(), Ratio { n: 12, span: 1 }).unwrap();
-        assert!(m.first_voice_mut().modify_beat(1, NoteValue::Sixteenth, None).is_some());
-        assert!(m.first_voice_mut().modify_beat(0, NoteValue::Sixteenth, None).is_some());
+        assert!(
+            m.first_voice_mut()
+                .modify_beat(1, NoteValue::Sixteenth, None, crate::Instrument::Rhythm)
+                .is_some()
+        );
+        assert!(
+            m.first_voice_mut()
+                .modify_beat(0, NoteValue::Sixteenth, None, crate::Instrument::Rhythm)
+                .is_some()
+        );
         let total: u32 =
             m.first_voice().beats().iter().filter_map(|b| DEFAULT_GRID.ticks_of(&b.duration)).sum();
         assert_eq!(total, DEFAULT_GRID.ticks_per_measure(&m.time_signature()));
@@ -441,7 +581,7 @@ mod tests {
         // A triplet eighth at the start: the first slot a note, the others prefilled as rests
         m.first_voice_mut().set_beat(0, Beat::note(t8())).unwrap();
         m.first_voice_mut().set_beat(2, Beat::note(t8())).unwrap();
-        m.first_voice_mut().toggle_accent(2);
+        m.first_voice_mut().toggle_accent(2, crate::Instrument::Rhythm);
 
         assert_matches!(
             m.first_voice_mut().dissolve_tuplet_group(1),
@@ -532,7 +672,12 @@ mod tests {
         let mut m = Measure::new(TimeSignature::ONE_FOUR);
         m.first_voice_mut().set_beat(0, Beat::note(Duration::Simple(Eighth))).unwrap();
         m.first_voice_mut()
-            .set_tuplet(0, Some(TupletSpec { n: 3, m: 2, base: Eighth }), true)
+            .set_tuplet(
+                0,
+                Some(TupletSpec { n: 3, m: 2, base: Eighth }),
+                true,
+                crate::Instrument::Rhythm,
+            )
             .unwrap();
 
         assert_eq!(
@@ -545,7 +690,12 @@ mod tests {
     fn convert_to_tuplet_initializes_rests_when_source_is_rest() {
         let mut m = Measure::new(TimeSignature::TWO_EIGHT);
         m.first_voice_mut()
-            .set_tuplet(0, Some(TupletSpec { n: 3, m: 2, base: Eighth }), true)
+            .set_tuplet(
+                0,
+                Some(TupletSpec { n: 3, m: 2, base: Eighth }),
+                true,
+                crate::Instrument::Rhythm,
+            )
             .unwrap();
         assert_eq!(
             m.first_voice().beats().to_vec(),

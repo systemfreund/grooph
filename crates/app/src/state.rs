@@ -21,7 +21,7 @@ use grooph_measure::click::ClickBars;
 use grooph_measure::counter::CounterBars;
 use grooph_measure::swing::Swing;
 use grooph_measure::tap_tempo::TapTempo;
-use grooph_measure::{Cursor, Measure};
+use grooph_measure::{Cursor, Instrument, Measure};
 use grooph_mic::MicInput;
 use grooph_midi::MidiInput;
 use std::collections::HashMap;
@@ -273,6 +273,9 @@ pub(crate) struct EditorState {
     /// Prebuilt measures for note/rest/tuplet tool buttons to avoid per-frame
     /// reconstruction.
     pub(crate) button_measures: HashMap<&'static str, Measure>,
+    /// The instrument picked in the kit's palette or by a tap on its head:
+    /// the tools write and change its heads (see `Grooph::edit_instrument`).
+    pub(crate) instrument: Instrument,
     /// User-saved, named patterns (score + tempo), the score tab's.
     /// Persisted across sessions.
     pub(crate) library: PatternLibrary,
@@ -317,6 +320,10 @@ pub(crate) struct UiShell {
     pub(crate) counting: CountingSettings,
     /// Whether the staff flashes on every beat while playing. Off by default.
     pub(crate) flash_enabled: bool,
+    /// Whether the tab bar shows the score tab, which is not finished yet
+    /// (a developer setting, off by default). A link or pattern that opens
+    /// the score tab still shows it while it is open.
+    pub(crate) show_score_tab: bool,
     /// What the practice staff shows while it plays.
     pub(crate) guide: Guide,
     pub(crate) platform: PlatformRuntime,
@@ -368,6 +375,8 @@ pub(crate) struct UiShell {
 pub(crate) enum PendingLoad {
     Pattern(u64),
     Link(Box<SharedLink>),
+    /// A new drum groove (see `Grooph::new_kit_score`).
+    NewKitScore,
 }
 
 #[cfg(test)]

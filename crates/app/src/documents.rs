@@ -441,6 +441,7 @@ mod tests {
     #[test]
     fn both_rhythm_documents_are_saved_from_any_page() {
         let (mut app, groove) = app_with_groove();
+        app.ui.show_score_tab = true;
         app.select_tab(Tab::Practice);
         let practice = practice_text(&app);
         for tab in [Tab::Practice, Tab::Metronome, Tab::More, Tab::Score] {
@@ -461,6 +462,23 @@ mod tests {
     }
 
     #[test]
+    fn the_score_tab_is_hidden_until_the_developer_setting_shows_it() {
+        let (mut app, groove) = app_with_groove();
+        assert!(!app.ui.show_score_tab);
+        // Saved on the score tab, it reopens on Practice, with its score.
+        app.select_tab(Tab::Score);
+        let state = PersistedState::from_app(&app);
+        let back = restart(&state);
+        assert_eq!(back.tab(), Tab::Practice);
+        assert_eq!(score_text(&back), groove);
+        // Shown, the setting is kept and the score tab reopens.
+        app.ui.show_score_tab = true;
+        let back = restart(&PersistedState::from_app(&app));
+        assert!(back.ui.show_score_tab);
+        assert_eq!(back.tab(), Tab::Score);
+    }
+
+    #[test]
     fn a_state_saved_before_keeps_its_score_in_the_score_tab() {
         let old = parse_score("3/4 q e e q").unwrap();
         // As saved before (version 2): the score tab's document flat, no
@@ -470,9 +488,10 @@ mod tests {
             ron::to_string(&old).unwrap(),
             ron::to_string(&Cursor::at(0, 2)).unwrap()
         );
-        let (state, backup) = crate::persist::restore(Some(&ron));
+        let (mut state, backup) = crate::persist::restore(Some(&ron));
         assert!(backup.is_none());
         assert_eq!(state.tab, Tab::Score);
+        state.show_score_tab = true;
         let app = restart(&state);
         assert_eq!(app.tab(), Tab::Score);
         assert_eq!(score_text(&app), text(&old));

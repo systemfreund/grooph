@@ -995,7 +995,11 @@ mod tests {
     #[test]
     fn edited_poly_clicks_are_written_out() {
         let mut link = parse("ts=4/4&poly=3:2");
-        link.counter.as_mut().unwrap().first_voice_mut().toggle_soft(1);
+        link.counter
+            .as_mut()
+            .unwrap()
+            .first_voice_mut()
+            .toggle_soft(1, grooph_measure::Instrument::Rhythm);
         assert!(link.to_url("/").unwrap().contains("&counter=t4+%28t4%29+t4"));
     }
 
@@ -1212,9 +1216,9 @@ mod tests {
                     }
                     tries = 0;
                     if kind == Note && rng.chance(0.2) {
-                        m.first_voice_mut().toggle_accent(idx);
+                        m.first_voice_mut().toggle_accent(idx, grooph_measure::Instrument::Rhythm);
                     } else if kind == Note && rng.chance(0.2) {
-                        m.first_voice_mut().toggle_soft(idx);
+                        m.first_voice_mut().toggle_soft(idx, grooph_measure::Instrument::Rhythm);
                     }
                     idx += 1;
                 }

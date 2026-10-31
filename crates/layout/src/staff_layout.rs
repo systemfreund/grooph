@@ -18,6 +18,7 @@
 //! overflows its row — the caller is expected to host the result in a
 //! horizontally scrollable area for that case.
 
+use crate::PlacedGlyph;
 use crate::pixel_layout::{
     LayoutOpts, MeasureLayout, build_measure_layout_at, build_measure_layout_with_plan, clef_width,
     min_note_area_width, note_advances, note_area_offset, note_lead, time_sig_width,
@@ -29,7 +30,8 @@ use egui::{FontId, Pos2, Rect, Vec2, pos2, vec2};
 use grooph_measure::duration::s;
 use grooph_measure::grid::DEFAULT_GRID;
 use grooph_measure::{
-    Beat, BeatIdx, MeasureIdx, Score, StaffKind, TimeSignature, VoiceBar, VoiceIdx,
+    Beat, BeatIdx, BeatKind, Instrument, MeasureIdx, Score, StaffKind, TimeSignature, VoiceBar,
+    VoiceIdx,
 };
 
 /// Configuration for laying out an entire [`Score`].
@@ -535,6 +537,54 @@ pub fn hit_test_voice(staff: &StaffLayout, pos: Pos2) -> Option<(VoiceIdx, Measu
     Some((0, target.measure_idx, nearest_note(target.layout(), pos.x)))
 }
 
+/// What a tap points at: a beat of a voice, and the instrument whose head
+/// there is meant (see [`hit_test_head`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HeadHit {
+    pub measure_idx: MeasureIdx,
+    pub voice: VoiceIdx,
+    pub beat_idx: BeatIdx,
+    pub instrument: Instrument,
+}
+
+/// Like [`hit_test_voice`], with the instrument whose place on the staff is
+/// nearest `pos` ([`Staff::instrument_near`]). On a staff of one line that
+/// is its rhythm, and the voice is the one on `pos`'s side of the line. On
+/// the kit's staff the voice is the one whose note nearest `pos.x` has a
+/// head of that instrument, else the instrument's default voice.
+pub fn hit_test_head(staff: &StaffLayout, pos: Pos2) -> Option<HeadHit> {
+    let (voice, measure_idx, beat_idx) = hit_test_voice(staff, pos)?;
+    let system =
+        staff.systems.iter().find(|s| pos.y < s.rect.bottom()).or_else(|| staff.systems.last())?;
+    let placed = system.measures.iter().find(|p| p.measure_idx == measure_idx)?;
+    let model = Staff::of(placed.staff);
+    let hit = HeadHit { measure_idx, voice, beat_idx, instrument: model.instruments[0] };
+    let Some(em) = placed.voices.iter().flat_map(|l| l.notes.first()).map(|n| n.head.size).next()
+    else {
+        return Some(hit);
+    };
+    if model.one_line() {
+        return Some(hit);
+    }
+    // Staff positions are half staff spaces, an eighth of an em.
+    let half_ss = em * 0.125;
+    let instrument = model.instrument_near((system.y_baseline - pos.y) / half_ss);
+    let place = model.place_of(instrument);
+    let at_place =
+        |g: &PlacedGlyph| ((system.y_baseline - g.origin.y) / half_ss).round() == f32::from(place);
+    let holding = placed.voices.iter().enumerate().find_map(|(v, layout)| {
+        let beat = nearest_note(layout, pos.x);
+        let note = layout.notes.get(beat)?;
+        let heads = std::iter::once(&note.head).chain(&note.chord);
+        (note.kind == BeatKind::Note && heads.into_iter().any(at_place)).then_some((v, beat))
+    });
+    let (voice, beat_idx) = holding.unwrap_or_else(|| {
+        let v = instrument.default_voice().min(placed.voices.len() - 1);
+        (v, nearest_note(&placed.voices[v], pos.x))
+    });
+    Some(HeadHit { measure_idx, voice, beat_idx, instrument })
+}
+
 /// Index of the note of `layout` nearest `x`.
 fn nearest_note(layout: &MeasureLayout, x: f32) -> BeatIdx {
     let mut best_i = 0usize;
@@ -682,6 +732,40 @@ mod tests {
         let placed = staff.systems[0].measures[0].clone();
         let line = staff.systems[0].y_baseline;
         (placed, line, o.rescaled(staff.scale).staff_space())
+    }
+
+    #[test]
+    fn a_tap_on_the_kit_finds_the_head_by_its_place() {
+        use grooph_measure::Instrument::{Crash, HiHat, Kick, Rhythm, Snare};
+        let score =
+            grooph_measure::notation::parse_score("4/4 S-H:q H:q H:q H:q ; K:h r:h").unwrap();
+        let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(500.0, 200.0));
+        let o = opts(20.0, rect);
+        let staff = build_staff_layout(&score, &o);
+        let system = &staff.systems[0];
+        let half_ss = o.rescaled(staff.scale).staff_space() * 0.5;
+        let notes = &system.measures[0].voices[0].notes;
+        let at = |beat: usize, pos: f32| {
+            let tap = Pos2::new(notes[beat].center.x, system.y_baseline - pos * half_ss);
+            let hit = hit_test_head(&staff, tap).unwrap();
+            (hit.voice, hit.beat_idx, hit.instrument)
+        };
+        // The snare under the hi-hat, both in the upper voice.
+        assert_eq!(at(0, 1.2), (0, 0, Snare));
+        assert_eq!(at(0, 4.6), (0, 0, HiHat));
+        // The kick in the lower voice, by its place.
+        assert_eq!(at(0, -3.0), (1, 0, Kick));
+        // No crash there: its default voice, the upper, at that beat.
+        assert_eq!(at(2, 6.4), (0, 2, Crash));
+        // No kick on the third beat's lower voice: a rest there, its voice.
+        assert_eq!(at(2, -3.0), (1, 1, Kick));
+
+        // On the one line, its rhythm.
+        let line = grooph_measure::notation::parse_score("4/4 q q q q").unwrap();
+        let staff = build_staff_layout(&line, &o);
+        let tap = Pos2::new(staff.systems[0].measures[0].layout().notes[1].center.x, 10.0);
+        let hit = hit_test_head(&staff, tap).unwrap();
+        assert_eq!((hit.voice, hit.beat_idx, hit.instrument), (0, 1, Rhythm));
     }
 
     #[test]
