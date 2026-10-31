@@ -281,6 +281,16 @@ mod tests {
     }
 
     #[test]
+    fn a_tempo_link_marks_a_saved_score_unsaved() {
+        let (mut app, _) = app_with_groove();
+        app.save_active_pattern();
+        app.select_tab(Tab::Practice);
+        app.playback_ctl.bpm = 100;
+        app.open_link(grooph_link::parse_query("v=2&bpm=120").unwrap().unwrap());
+        assert!(app.editor.docs.score.dirty);
+    }
+
+    #[test]
     fn each_document_undoes_its_own_changes() {
         let (mut app, groove) = app_with_groove();
         app.select_tab(Tab::Practice);

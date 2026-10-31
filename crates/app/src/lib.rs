@@ -840,8 +840,15 @@ impl Grooph {
             }
             None => {}
         }
-        if let Some(bpm) = link.bpm {
+        if let Some(bpm) = link.bpm
+            && bpm != self.playback_ctl.bpm
+        {
             self.playback_ctl.bpm = bpm;
+            // A rhythm from the link is clean below; otherwise the tempo
+            // is a change of the saved score, as in the BPM picker.
+            if !replaces_rhythm {
+                self.mark_tempo_unsaved();
+            }
             self.handle_bpm_change();
         }
         if let Some(swing) = link.swing {
@@ -856,7 +863,7 @@ impl Grooph {
             self.ui.mode = Mode::Playback;
         } else if replaces_rhythm {
             // The content is reproducible from the link, so it is not
-            // "unsaved". A tempo-only link leaves the score's mark alone.
+            // "unsaved".
             self.editor.doc_mut().dirty = false;
         }
     }

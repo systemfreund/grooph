@@ -63,10 +63,11 @@ impl Grooph {
     /// Only ever Practice's: the score tab's score is never replaced by a
     /// generated rhythm, whatever page this is called from.
     pub(crate) fn generate_new_score(&mut self) {
-        self.show_document(Document::Practice);
+        // Nothing changes, the page shown neither, when it cannot generate.
         let Some(score) = self.editor.generator.generate() else {
             return;
         };
+        self.show_document(Document::Practice);
         self.with_undo_snapshot(|app| {
             app.editor.doc_mut().score = score;
             app.editor.doc_mut().cursor = Cursor::start();

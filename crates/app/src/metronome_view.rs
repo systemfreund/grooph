@@ -1522,7 +1522,8 @@ mod tests {
         // The marks of a practice run would land on the click bar's notes.
         app.select_tab(Tab::Metronome);
         assert!(!app.shows_accuracy_marks());
-        // Back in practice they belong to the rhythm again.
+        // Back in practice they would belong to the rhythm again (a page
+        // change clears the last run's marks, see `show_document`).
         app.select_tab(Tab::Practice);
         assert!(app.shows_accuracy_marks());
     }
