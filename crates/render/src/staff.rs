@@ -11,6 +11,7 @@ use crate::measure::{
 use eframe::egui;
 use eframe::egui::{Color32, Rangef, Stroke};
 use grooph_layout::glyphs;
+use grooph_layout::staff::Staff;
 use grooph_layout::staff_layout::{PlacedMeasure, StaffLayout, StaffOpts};
 use grooph_measure::counting::CountConfig;
 use grooph_measure::{Cursor, MeasureIdx, Score, StaffKind, VoiceIdx};
@@ -75,15 +76,13 @@ pub fn draw_staff(
 
     for system in &staff.systems {
         // Continuous staff lines per system, so adjacent measures look
-        // joined: one, or the kit's five around it.
-        let lines = match system.measures.first().map(|p| p.staff) {
-            Some(StaffKind::Kit) => -2..=2,
-            _ => 0..=0,
-        };
-        for line in lines {
+        // joined, from the top one down. A staff position is half a staff
+        // space up from the middle line.
+        let kind = system.measures.first().map_or(StaffKind::Line, |p| p.staff);
+        for &pos in Staff::of(kind).lines.iter().rev() {
             ui.painter().hline(
                 Rangef::new(system.rect.left(), system.rect.right()),
-                system.y_baseline + line as f32 * staff_opts.staff_space(),
+                system.y_baseline - f32::from(pos) * 0.5 * staff_opts.staff_space(),
                 Stroke::new(0.02 * staff_opts.em, color),
             );
         }

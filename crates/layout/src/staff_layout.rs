@@ -23,6 +23,7 @@ use crate::pixel_layout::{
     min_note_area_width, note_advances, note_area_offset, note_lead, time_sig_width,
 };
 use crate::render_plan::{RenderPlan, plan_measure_with, rests_only};
+use crate::staff::Staff;
 use crate::{calculate_shared_x_centers, shared_min_width};
 use egui::{FontId, Pos2, Rect, Vec2, pos2, vec2};
 use grooph_measure::duration::s;
@@ -322,11 +323,12 @@ pub fn build_staff_layout(score: &Score, opts: &StaffOpts) -> StaffLayout {
     // 1. show-flags: clef only on first. The time signature only shows when
     // the score mixes meters, then on the first measure + every change, or
     // on the first when asked for.
-    // The kit's staff starts every row with its clef: it tells the five
+    // A staff may start every row with its clef: the kit's tells its five
     // lines from a pitched staff's.
-    let kit = score.staff == StaffKind::Kit;
-    let show_clef: Vec<bool> =
-        (0..score.len()).map(|i| kit || (i == 0 && opts.layout_clef_first)).collect();
+    let staff = Staff::of(score.staff);
+    let show_clef: Vec<bool> = (0..score.len())
+        .map(|i| staff.clef_every_row || (i == 0 && opts.layout_clef_first))
+        .collect();
     let meter_changes_at =
         |i: usize| score.measures()[i].time_signature() != score.measures()[i - 1].time_signature();
     let mixed_meters = (1..score.len()).any(meter_changes_at);
@@ -339,9 +341,10 @@ pub fn build_staff_layout(score: &Score, opts: &StaffOpts) -> StaffLayout {
 
     // 2. natural widths at the baseline em. Each voice is planned (beams,
     // tuplets) once, for its width and its layout. With several voices they
-    // share the line and no bar shows as one whole rest. On the one line
-    // every beamed rest is then a stemlet, clear of the line; the kit's
-    // rests have their own places, so they stay rests, as in drum notation.
+    // share the staff and no bar shows as one whole rest. Sharing one line,
+    // every beamed rest is then a stemlet, clear of the line; on the kit's
+    // five lines rests have their own places, so they stay rests, as in
+    // drum notation.
     let voices = |i: usize| score.measures()[i].voices();
     let plans: Vec<Vec<RenderPlan>> = (0..score.len())
         .map(|i| {
@@ -350,7 +353,7 @@ pub fn build_staff_layout(score: &Score, opts: &StaffOpts) -> StaffLayout {
                 .iter()
                 .map(|v| RenderPlan {
                     bar_rest: opts.bar_rests && !shared && rests_only(v),
-                    ..plan_measure_with(v, shared && !kit)
+                    ..plan_measure_with(v, shared && staff.one_line())
                 })
                 .collect()
         })
@@ -432,11 +435,17 @@ pub fn build_staff_layout(score: &Score, opts: &StaffOpts) -> StaffLayout {
         })
         .collect();
     let mut room = row_room(&reaches, opts);
-    if kit {
-        // The five lines reach two staff spaces either way.
-        let lines = 0.5 + INK_MARGIN_EM;
-        room = RowRoom { above: room.above.max(lines), below: room.below.max(lines) };
-    }
+    // Lines past the middle one need their room: the kit's reach two staff
+    // spaces either way. A staff position is half a staff space, an eighth
+    // of an em.
+    let line_room = |pos: i8| match pos {
+        0 => 0.0,
+        p => f32::from(p.unsigned_abs()) * 0.125 + INK_MARGIN_EM,
+    };
+    room = RowRoom {
+        above: room.above.max(line_room(staff.top())),
+        below: room.below.max(line_room(staff.bottom())),
+    };
     // A meter with an unusual grouping has it written below (see
     // grooph-render's `draw_time_signature`).
     let grouping_shown = score

@@ -1,5 +1,6 @@
 use crate::glyphs::{self, Glyph};
 use crate::render_plan::{RenderPlan, plan_measure};
+use crate::staff::{Staff, Voicing};
 use egui::{FontId, Pos2, Rect};
 use grooph_measure::duration::{Duration, NoteValue};
 use grooph_measure::onsets::Onset;
@@ -142,6 +143,16 @@ pub struct LayoutOpts {
 }
 
 impl LayoutOpts {
+    /// The staff's description: its lines and where heads and rests sit.
+    pub fn staff_model(&self) -> &'static Staff {
+        Staff::of(self.staff)
+    }
+
+    /// How this voice shares its measure.
+    pub const fn voicing(&self) -> Voicing {
+        Voicing { shared: self.shared_line, stem_down: self.stem_down }
+    }
+
     pub const fn staff_space(&self) -> f32 {
         self.em * 0.25
     }
@@ -284,9 +295,8 @@ pub struct NoteLayout {
     pub hidden: bool,
     /// The parentheses of each soft (ghost) head.
     pub parens: Vec<PlacedGlyph>,
-    /// Ledger lines: of a rest on a line shared by two voices (see
-    /// [`LayoutOpts::shared_line`]), or of heads above or below the kit's
-    /// staff.
+    /// Ledger lines of the heads or the half or whole rest off the staff
+    /// (see [`crate::staff::Staff::ledgers`]).
     pub ledgers: Vec<Line>,
     pub dots: Vec<PlacedGlyph>,
     pub stem: Option<Line>,
@@ -972,7 +982,8 @@ mod tests {
         assert_eq!(quarter_rest.center.y, down.y_of(-2));
         assert_eq!(build_measure_layout(h.first_voice(), &down).notes[1].center.y, cy);
 
-        // A dotted rest's dot drops with it.
+        // A dotted rest's dot drops with it. Off the line, with no line to
+        // keep clear of, it stays level with the rest's middle.
         let dotted = parse_score("4/4 h r:q. e").unwrap().into_measures().remove(0);
         let up_rest = &build_measure_layout(
             dotted.first_voice(),
@@ -982,7 +993,8 @@ mod tests {
         let down_rest = &build_measure_layout(dotted.first_voice(), &down).notes[1];
         let dot_dy = |n: &NoteLayout| n.dots[0].origin.y - n.center.y;
         assert_eq!(down_rest.dots.len(), 1);
-        assert!((dot_dy(down_rest) - dot_dy(up_rest)).abs() < 0.01);
+        assert!(down_rest.dots[0].origin.y > up_rest.dots[0].origin.y);
+        assert!(dot_dy(down_rest).abs() < 0.01 && dot_dy(up_rest) < 0.0);
     }
 
     #[test]
