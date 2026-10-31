@@ -6,6 +6,7 @@
 //! back afterwards; persistence reads the stash so a save mid-calibration
 //! never stores the click score.
 
+use crate::documents::Document;
 use crate::play_along::{HitSource, MAX_INPUT_OFFSET_MS};
 use crate::{Grooph, TransportState};
 use eframe::egui;
@@ -107,9 +108,9 @@ impl Grooph {
     }
 
     pub(crate) fn start_calibration(&mut self, source: HitSource) {
-        // The More screen can stay in front of the metronome: its click
-        // bar is not the score to put aside.
-        self.leave_metronome();
+        // It runs on the practice page, whatever page the More screen was
+        // opened from: a written score or the click bar is never put aside.
+        self.show_document(Document::Practice);
         self.stop_transport();
         let generator = &mut self.editor.generator;
         let doc = self.editor.docs.get_mut(self.editor.document);

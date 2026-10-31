@@ -2131,6 +2131,24 @@ mod tests {
     }
 
     #[test]
+    fn calibration_from_the_score_tab_runs_on_practice() {
+        use super::Grooph;
+        use crate::play_along::HitSource;
+
+        let cc = eframe::CreationContext::_new_kittest(eframe::egui::Context::default());
+        let mut app = Grooph::new(&cc);
+        app.select_tab(Tab::Score);
+        let score = format!("{:?}", app.editor.docs.score.score);
+        app.select_tab(Tab::More);
+        app.start_calibration(HitSource::Tap);
+        assert_eq!(app.document(), crate::documents::Document::Practice);
+        assert_eq!(app.tab(), Tab::More);
+        assert_eq!(format!("{:?}", app.editor.docs.score.score), score);
+        app.stop_transport();
+        assert_eq!(format!("{:?}", app.editor.docs.score.score), score);
+    }
+
+    #[test]
     fn calibration_from_more_puts_the_metronome_away() {
         use super::Grooph;
         use crate::play_along::HitSource;

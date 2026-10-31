@@ -11,7 +11,7 @@ any rhythm, the [rhythm generator](/rhythm-generator/) and its endless mode incl
 
 ## Silent bars
 
-Tap **Silent bars** in the options of the Metronome or Practice tab and pick **Pattern** or
+Tap **Silent bars** in the options of the Metronome, Practice or Score tab and pick **Pattern** or
 **Random**. grooph then plays some bars and leaves others silent, and you keep playing
 through the gap. When the click comes back you hear at once
 whether you rushed or dragged.
