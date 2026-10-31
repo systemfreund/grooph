@@ -500,12 +500,13 @@ grooph's metronome runs inside AI chats as an
 
 - Metronome tab (`crates/app/src/metronome_view.rs`): its own meter
   (`MetronomeState::meter`, persisted, picked in the tab's card), separate
-  from the generator's. Opening the tab puts the shown rhythm document
-  (`RhythmDoc`: score, cursor, undo, dirty flag, pattern) aside in
-  `MetronomeState` and edits the meter's click bar in its
-  place, so the staff, tool palette and undo work on it; `sync_click_bar`
-  writes it back to `ClickBars` every frame, and closing the tab brings the
-  rhythm back (persistence saves the rhythm, not the bar). The audio engine
+  from the generator's. The tab's document is the meter's click bar
+  (`EditorState::docs.metronome`, see "Rhythm documents"), so the staff,
+  tool palette and undo work on it: `open_metronome` builds it from
+  `ClickBars` when the tab opens, `sync_click_bar` writes it back every
+  frame and when it closes (persistence saves the click settings, not the
+  bar). Leaving the tab shows the rhythm page it was opened from
+  (`rhythm_page`, persisted). The audio engine
   gets one silent bar of the meter (`metronome_score`), so only the clicks
   sound; ghost notes, endless mode and play along are off there. Below the
   staff a ring shows one segment per note or rest of the bar, as long as it,
@@ -575,10 +576,12 @@ grooph's metronome runs inside AI chats as an
   notes run on Practice's rhythm only.
 - The library and the unsaved-changes checks reach the score tab's document
   as `docs.score`, from any page and without closing the metronome. A tempo
-  change marks it unsaved only on the score tab (`mark_tempo_unsaved`).
+  change marks it unsaved on the score tab, and on any page when it is a
+  saved pattern (`mark_tempo_unsaved`).
 - Persistence saves the rhythm documents and the page: `score`/`cursor`/
   `dirty`/`active_pattern_id` are the score tab's, `practice_score`/
-  `practice_cursor` Practice's, `document` the page behind More. A state
+  `practice_cursor` Practice's, `document` the page behind More, `rhythm_page` the one behind the
+  metronome. A state
   saved before has no `practice_score`: its score stays in the score tab
   and Practice starts with a new rhythm. `Tab::Score` still reads `Edit`.
 

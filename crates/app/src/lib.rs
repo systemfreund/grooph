@@ -129,6 +129,9 @@ pub(crate) struct PersistedState {
     /// The document shown, so the More screen opens again on the one it was
     /// opened from.
     document: Document,
+    /// The rhythm page the metronome was last opened from, where leaving it
+    /// goes back to.
+    rhythm_page: Document,
     /// Practice's generated rhythm; a state saved before the two documents
     /// has none, and Practice starts with a new one.
     practice_score: Option<Score>,
@@ -170,6 +173,7 @@ impl Default for PersistedState {
             score: Score::single(Grooph::default_measure()),
             cursor: Cursor::start(),
             document: Document::Score,
+            rhythm_page: Document::Score,
             practice_score: None,
             practice_cursor: Cursor::start(),
             bpm: grooph_link::DEFAULT_BPM,
@@ -226,6 +230,7 @@ impl PersistedState {
             score: score.clone(),
             cursor,
             document: app.document(),
+            rhythm_page: app.editor.rhythm_page,
             practice_score: Some(practice_score.clone()),
             practice_cursor,
             bpm: stash.map_or(app.playback_ctl.bpm, |s| s.bpm),
@@ -1333,7 +1338,9 @@ impl Grooph {
             },
         };
         app.editor.active_preset = app.matching_preset();
-        // The page the More screen was opened from, then the saved tab.
+        // The rhythm page the metronome goes back to, the page the More
+        // screen was opened from, then the saved tab.
+        app.select_tab(state.rhythm_page.tab());
         app.select_tab(state.document.tab());
         // A link opens after the saved tab, so its tab wins.
         app.select_tab(state.tab);

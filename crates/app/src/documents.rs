@@ -143,11 +143,13 @@ impl Grooph {
         if doc.dirty { format!("{name} •") } else { name }
     }
 
-    /// The tempo changed: a saved score keeps its tempo, so on the score
-    /// tab that is an unsaved change.
+    /// The tempo changed: a saved score keeps its tempo, so that is an
+    /// unsaved change of the score tab's score when it is shown or is a
+    /// saved pattern, whichever page the tempo was changed on.
     pub(crate) fn mark_tempo_unsaved(&mut self) {
-        if self.document() == Document::Score {
-            self.editor.docs.score.dirty = true;
+        let doc = &mut self.editor.docs.score;
+        if self.editor.document == Document::Score || doc.active_pattern_id.is_some() {
+            doc.dirty = true;
         }
     }
 
@@ -319,6 +321,38 @@ mod tests {
         assert_eq!(app.editor.docs.score.active_pattern_id, None);
         assert_eq!(score_text(&app), groove);
         assert_eq!(app.score_title(), "Untitled");
+    }
+
+    #[test]
+    fn a_tempo_change_on_another_page_marks_the_saved_score_unsaved() {
+        let mut app = app();
+        // An untitled score stays as it is.
+        app.select_tab(Tab::Practice);
+        app.playback_ctl.bpm += 5;
+        app.mark_tempo_unsaved();
+        assert!(!app.editor.docs.score.dirty);
+        // A saved pattern keeps its tempo: changed anywhere, it can be saved.
+        let (mut app, _) = app_with_groove();
+        let id = app.save_active_pattern();
+        for tab in [Tab::Practice, Tab::Metronome] {
+            app.select_tab(tab);
+            app.editor.docs.score.dirty = false;
+            app.playback_ctl.bpm += 5;
+            app.mark_tempo_unsaved();
+            assert!(app.editor.docs.score.dirty, "{tab:?}");
+            assert_eq!(app.editor.docs.score.active_pattern_id, Some(id));
+        }
+    }
+
+    #[test]
+    fn leaving_the_metronome_after_a_restart_goes_back_to_its_page() {
+        let mut app = app();
+        app.select_tab(Tab::Practice);
+        app.select_tab(Tab::Metronome);
+        let mut back = restart(&PersistedState::from_app(&app));
+        assert!(back.metronome_mode());
+        back.leave_metronome();
+        assert_eq!(back.document(), Document::Practice);
     }
 
     #[test]
