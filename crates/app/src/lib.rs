@@ -38,7 +38,7 @@ mod web;
 pub use host::Host;
 
 use grooph_measure::duration::{Duration, NoteValue, TupletSpec, q};
-use grooph_measure::{BeatIdx, Cursor, Measure, Score, TimeSignature};
+use grooph_measure::{BeatIdx, Cursor, Measure, Score, TimeSignature, VoiceBar};
 
 use crate::accuracy::AccuracyState;
 use crate::calibration::CalibrationPhase;
@@ -518,6 +518,16 @@ impl Grooph {
         self.editor.score.current_mut(self.editor.cursor.measure_idx)
     }
 
+    /// The voice the cursor is in, whose beats the tools edit.
+    pub(crate) fn current_voice(&self) -> &VoiceBar {
+        self.editor.score.voice_at(self.editor.score.clamp_cursor(self.editor.cursor))
+    }
+
+    pub(crate) fn current_voice_mut(&mut self) -> &mut VoiceBar {
+        let cursor = self.editor.score.clamp_cursor(self.editor.cursor);
+        self.editor.score.voice_at_mut(cursor)
+    }
+
     fn current_snapshot(&self) -> EditorSnapshot {
         EditorSnapshot {
             score: self.editor.score.clone(),
@@ -599,9 +609,9 @@ impl Grooph {
         base: NoteValue,
         beat_kind: Option<BeatKind>,
     ) -> Option<Modification> {
-        let result = self.current_measure_mut().modify_beat(idx, base, beat_kind);
+        let result = self.current_voice_mut().modify_beat(idx, base, beat_kind);
         if result.is_some() {
-            let new_len = self.current_measure().beats().len();
+            let new_len = self.current_voice().beats().len();
             if new_len > 0 {
                 let last = new_len - 1;
                 if self.editor.cursor.beat_idx < last {
@@ -614,10 +624,10 @@ impl Grooph {
     }
 
     fn set_tuplet(&mut self, idx: usize, tuplet_spec: Option<TupletSpec>) -> Option<Modification> {
-        let result = self.current_measure_mut().set_tuplet(idx, tuplet_spec, true);
+        let result = self.current_voice_mut().set_tuplet(idx, tuplet_spec, true);
         match &result {
             Some(Modification::DissolveTuplet(tuplet_idx, _)) => {
-                let new_len = self.current_measure().beats().len();
+                let new_len = self.current_voice().beats().len();
                 if new_len > 0 {
                     self.editor.cursor.beat_idx = tuplet_idx.start_idx.min(new_len - 1);
                 } else {
@@ -626,7 +636,7 @@ impl Grooph {
             }
             Some(Modification::SetTuplet(group_span, ..)) => {
                 self.editor.cursor.beat_idx =
-                    (group_span.end_idx + 1).min(self.current_measure().beats().len() - 1);
+                    (group_span.end_idx + 1).min(self.current_voice().beats().len() - 1);
             }
             _ => {}
         }
@@ -634,12 +644,12 @@ impl Grooph {
     }
 
     /// Append a new empty measure after the current one. The new measure
-    /// inherits the time signature of the active measure. Moves the cursor to
-    /// the start of the new measure.
+    /// inherits the time signature and the voices of the active measure.
+    /// Moves the cursor to the start of the new measure, in its voice.
     pub(crate) fn append_measure(&mut self) {
         self.with_undo_snapshot(|app| {
-            let ts = app.current_measure().time_signature();
-            let new_measure = Measure::new(ts);
+            let current = app.current_measure();
+            let new_measure = current.empty_like(current.time_signature());
             let insert_at = app.editor.cursor.measure_idx + 1;
             app.editor.score.measures.insert(insert_at, new_measure);
             app.editor.cursor.measure_idx = insert_at;
@@ -657,15 +667,7 @@ impl Grooph {
         self.with_undo_snapshot(|app| {
             let idx = app.editor.cursor.measure_idx;
             app.editor.score.measures.remove(idx);
-            if app.editor.cursor.measure_idx >= app.editor.score.len() {
-                app.editor.cursor.measure_idx = app.editor.score.len() - 1;
-            }
-            let new_len = app.editor.score.measures[app.editor.cursor.measure_idx].beats().len();
-            if new_len == 0 {
-                app.editor.cursor.beat_idx = 0;
-            } else if app.editor.cursor.beat_idx >= new_len {
-                app.editor.cursor.beat_idx = new_len - 1;
-            }
+            app.editor.cursor = app.editor.score.clamp_cursor(app.editor.cursor);
             true
         });
     }
@@ -717,14 +719,7 @@ impl Grooph {
         self.stop_transport();
         self.with_undo_snapshot(|app| {
             app.editor.score = score;
-            // measure_idx 0 is valid by Score's non-empty invariant; start at the
-            // beginning and clamp the beat index to the first measure.
-            let mut cursor = Cursor::start();
-            let beats_len = app.editor.score.current(0).beats().len();
-            if beats_len > 0 {
-                cursor.beat_idx = cursor.beat_idx.min(beats_len - 1);
-            }
-            app.editor.cursor = cursor;
+            app.editor.cursor = Cursor::start();
             true
         });
         self.playback_ctl.bpm = bpm;
@@ -1132,17 +1127,9 @@ impl Grooph {
             state.score = Score::single(Self::default_measure());
             state.cursor = Cursor::start();
         } else {
-            let measure_count = state.score.len();
-            if state.cursor.measure_idx >= measure_count {
-                state.cursor.measure_idx = measure_count - 1;
-            }
-            let beats_len = state.score.current(state.cursor.measure_idx).beats().len();
-            if beats_len == 0 {
-                state.score.measures[state.cursor.measure_idx] = Self::default_measure();
-                state.cursor.beat_idx = 0;
-            } else {
-                state.cursor.beat_idx = state.cursor.beat_idx.min(beats_len - 1);
-            }
+            // A measure always has beats (`VoiceBar`'s invariant, checked
+            // when it loads).
+            state.cursor = state.score.clamp_cursor(state.cursor);
         }
 
         state.audio_settings = state.audio_settings.clamped();
@@ -1863,6 +1850,45 @@ mod tests {
         let shared = grooph_link::parse_query(url.split_once('?').unwrap().1).unwrap().unwrap();
         let Some(grooph_link::LinkContent::Score(score)) = shared.content else { panic!("{url}") };
         assert_eq!(grooph_measure::notation::format_score(&score).unwrap(), groove);
+    }
+
+    #[test]
+    fn a_tap_below_the_line_edits_the_lower_voice() {
+        use super::{Grooph, Mode};
+        use eframe::egui::{Event, Modifiers, PointerButton, pos2};
+        use grooph_measure::Cursor;
+        use grooph_measure::notation::parse_score;
+
+        let ctx = eframe::egui::Context::default();
+        let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let mut app = Grooph::new(&cc);
+        app.select_tab(Tab::Edit);
+        app.editor.score =
+            parse_score("4/4 H:e H:e H:e H:e H:e H:e H:e H:e ; K:q K:q K:q K:q").unwrap();
+        app.ui.mode = Mode::Edit;
+        let mut time = 0.0;
+        let mut tap = |app: &mut Grooph, y: f32| {
+            let pos = pos2(195.0, y);
+            for pressed in [true, false] {
+                let event = Event::PointerButton {
+                    pos,
+                    button: PointerButton::Primary,
+                    pressed,
+                    modifiers: Modifiers::NONE,
+                };
+                time += 0.5;
+                shell_frame(app, &ctx, time, vec![Event::PointerMoved(pos), event]);
+            }
+            app.editor.cursor
+        };
+        shell_frame(&mut app, &ctx, 0.0, vec![]);
+        // Down from the top of the staff: the hands first, then the kick.
+        // Down the middle of the staff: the hands' fifth eighth, then the
+        // kick's third quarter.
+        let cursors: Vec<Cursor> = (0..100).step_by(4).map(|y| tap(&mut app, y as f32)).collect();
+        let kick = cursors.iter().position(|c| c.voice == 1).expect("a tap on the kick");
+        assert!(cursors[..kick].contains(&Cursor::in_voice(0, 0, 4)), "{cursors:?}");
+        assert_eq!(cursors[kick], Cursor::in_voice(0, 1, 2));
     }
 
     #[test]

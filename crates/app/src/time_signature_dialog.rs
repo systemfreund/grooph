@@ -91,13 +91,7 @@ impl Grooph {
                                 if g.current_measure_mut().set_time_signature(new_ts).is_err() {
                                     return false;
                                 }
-                                let new_len = g.current_measure().beats().len();
-                                if new_len > 0 {
-                                    g.editor.cursor.beat_idx =
-                                        g.editor.cursor.beat_idx.min(new_len - 1);
-                                } else {
-                                    g.editor.cursor.beat_idx = 0;
-                                }
+                                g.editor.cursor = g.editor.score.clamp_cursor(g.editor.cursor);
                                 true
                             });
                             if committed {

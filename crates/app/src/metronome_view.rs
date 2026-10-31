@@ -402,9 +402,8 @@ impl Grooph {
         }
         let editor = &mut self.editor;
         editor.score.measures.truncate(1);
-        editor.cursor.measure_idx = 0;
+        editor.cursor = editor.score.clamp_cursor(editor.cursor);
         let bar = &editor.score.measures[0];
-        editor.cursor.beat_idx = editor.cursor.beat_idx.min(bar.beats().len().saturating_sub(1));
         let ts = bar.time_signature();
         editor.metronome.meter = ts;
         let cfg = &mut self.playback_ctl.audio_cfg;
@@ -425,6 +424,16 @@ impl Grooph {
     /// The voice the editor holds in the metronome tab.
     pub(crate) fn edited_voice(&self) -> MetronomeVoice {
         if self.metronome_mode() { self.editor.metronome.voice } else { MetronomeVoice::Click }
+    }
+
+    /// The edit cursor on the staff as drawn: in the metronome tab the
+    /// editor holds one bar, which the staff shows as its voice.
+    pub(crate) fn staff_cursor(&self) -> Cursor {
+        let cursor = self.editor.cursor;
+        match self.metronome_mode() {
+            true => Cursor { voice: self.edited_voice().idx(), ..cursor },
+            false => cursor,
+        }
     }
 
     /// Edit `voice` from now on: the click bar, or the counter rhythm if
@@ -1579,6 +1588,22 @@ mod tests {
         // Back in practice they belong to the rhythm again.
         app.close_metronome();
         assert!(app.shows_accuracy_marks());
+    }
+
+    #[test]
+    fn the_staff_cursor_is_on_the_edited_bars_voice() {
+        let mut app = metronome_app();
+        app.set_counter_ratio(Some(Ratio { n: 3, span: 4 }));
+        app.editor.cursor = Cursor::at(0, 1);
+        assert_eq!(app.staff_cursor(), Cursor::in_voice(0, 0, 1));
+        app.select_voice(MetronomeVoice::Counter);
+        app.editor.cursor = Cursor::at(0, 2);
+        // The editor holds the counter bar alone, the staff draws it below.
+        assert_eq!(app.editor.cursor.voice, 0);
+        assert_eq!(app.staff_cursor(), Cursor::in_voice(0, 1, 2));
+        app.select_voice(MetronomeVoice::Click);
+        app.editor.cursor = Cursor::at(0, 1);
+        assert_eq!(app.staff_cursor(), Cursor::in_voice(0, 0, 1));
     }
 
     #[test]

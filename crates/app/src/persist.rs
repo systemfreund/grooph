@@ -101,7 +101,7 @@ fn migrate(version: u8, fields: &mut Vec<(String, Box<RawValue>)>) {
             fields.push(("score".into(), score));
         }
         let beat_idx = take(fields, "cursor_idx").and_then(|raw| raw.into_rust::<BeatIdx>().ok());
-        let cursor = beat_idx.map(|beat_idx| Cursor { measure_idx: 0, beat_idx });
+        let cursor = beat_idx.map(|beat_idx| Cursor::at(0, beat_idx));
         if let Some(cursor) = cursor.and_then(|c| RawValue::from_rust(&c).ok()) {
             fields.push(("cursor".into(), cursor));
         }
@@ -280,7 +280,7 @@ mod tests {
             format!("(version:1,measure:{},cursor_idx:2,bpm:87)", ron::to_string(&m).unwrap());
         let (s, backup) = restore(Some(&saved));
         assert_eq!(ron::to_string(&s.score), ron::to_string(&Score::single(m)));
-        assert_eq!(s.cursor, Cursor { measure_idx: 0, beat_idx: 2 });
+        assert_eq!(s.cursor, Cursor::at(0, 2));
         assert_eq!(s.bpm, 87);
         assert_eq!(s.version, PERSISTED_STATE_VERSION);
         assert_eq!(backup.unwrap().version, 1);

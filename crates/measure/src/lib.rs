@@ -205,11 +205,12 @@ impl VoiceBar {
     }
 
     /// Overwrite the slot at `idx` with `new_beat`, carrying the slot's prior
-    /// accent forward (only on notes - rests can never be accented).
+    /// accents forward, head by head (only on notes - rests can never be
+    /// accented).
     fn write_in_place(&mut self, idx: BeatIdx, new_beat: Beat) {
-        let old_accent = self.beats[idx].accented();
+        let old = self.beats[idx];
         self.beats[idx] = new_beat;
-        self.beats[idx].set_accented(old_accent);
+        self.beats[idx].carry_accents_from(&old);
     }
 
     /// Replace `[idx..]` with a freshly created tuplet group described by `spec`.
@@ -224,7 +225,7 @@ impl VoiceBar {
         spec: TupletSpec,
     ) -> Result<(), MeasureError> {
         let TupletSpec { n, m, base } = spec;
-        let old_accent = self.beats[idx].accented();
+        let old = self.beats[idx];
         let old_ticks = DEFAULT_GRID.ticks_of(&self.beats[idx].duration).unwrap();
         let new_ticks = DEFAULT_GRID.ticks_of(&new_beat.duration).unwrap();
         let max_ticks = self.max_ticks();
@@ -270,7 +271,7 @@ impl VoiceBar {
         first.tuplet_group_id = Some(id);
         self.beats.insert(idx, first);
         // Preserve the prior accent on the first inserted beat
-        self.beats[idx].set_accented(old_accent);
+        self.beats[idx].carry_accents_from(&old);
         let mut insert_at = idx + 1;
         for _ in 1..n {
             let mut r = Beat::rest(new_beat.duration);
@@ -300,7 +301,7 @@ impl VoiceBar {
         let old_ticks = DEFAULT_GRID.ticks_of(&dur_old).unwrap();
         let new_ticks = DEFAULT_GRID.ticks_of(&new_beat.duration).unwrap();
         let max_ticks = self.max_ticks();
-        let old_accent = self.beats[idx].accented();
+        let old = self.beats[idx];
 
         let need = new_ticks - old_ticks;
         debug_assert!(need > 0);
@@ -319,7 +320,7 @@ impl VoiceBar {
         }
 
         self.beats[idx] = new_beat;
-        self.beats[idx].set_accented(old_accent);
+        self.beats[idx].carry_accents_from(&old);
         let p = idx + 1;
         let mut remaining_to_consume = need;
         while remaining_to_consume > 0 {

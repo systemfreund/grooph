@@ -112,10 +112,20 @@ spread across callers.
    share the line and are spaced together (`calculate_shared_x_centers`):
    beats at the same time line up and each voice keeps the room its glyphs
    need. Nothing moves a note after spacing, or the voices would part.
+   On the one line a rest under a beam is then a stemlet, clear of the
+   line; on the kit's staff it stays a rest, as drum notation writes it.
    `StaffOpts::voice_opts_for` gives each voice its stem direction.
    The metronome's staff is one such measure: the click bar with the counter
    rhythm as its second voice (`Grooph::metronome_staff_score`); which of
-   the two the editor holds is the app's `MetronomeVoice`.
+   the two the editor holds is the app's `MetronomeVoice`, and the drawn
+   cursor is in that voice (`Grooph::staff_cursor`).
+   The edit cursor (`Cursor`) names its measure, voice and beat. The tools
+   edit that voice (`Score::voice_at_mut`); a tap picks the voice on its
+   side of the line (`hit_test_voice`); moving to a measure with fewer
+   voices puts it in the last (`Score::clamp_cursor`). A new measure gets
+   the voices of the one before (`Measure::empty_like`), "clear" empties
+   the cursor's voice only (`Measure::clear_voice`), and a new duration
+   keeps a kit note's heads.
 5. A score is written on one line or on the kit's five (`Score::staff`,
    `StaffKind`; the notation puts a score with kit instruments on the kit's
    staff). On the kit's staff (`LayoutOpts::staff`) each head sits at its

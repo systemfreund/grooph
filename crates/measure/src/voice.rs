@@ -178,6 +178,20 @@ impl Measure {
         self.voices.get_mut(voice)
     }
 
+    /// Voice `voice` all `init` again, a note or a rest on every beat unit;
+    /// the other voices stay. No change if the measure has no such voice.
+    pub fn clear_voice(&mut self, voice: VoiceIdx, init: BeatKind) {
+        let ts = self.time_signature();
+        if let Some(v) = self.voices.get_mut(voice) {
+            *v = VoiceBar::new_init(ts, init);
+        }
+    }
+
+    /// A measure of rests in `time_signature`, as many voices as this one.
+    pub fn empty_like(&self, time_signature: TimeSignature) -> Self {
+        Measure { voices: vec![VoiceBar::new_init(time_signature, Rest); self.voices.len()] }
+    }
+
     /// Add copies of the voices of `other` below this measure's. Fails, and
     /// adds none, if `other` is in another meter.
     pub fn push_voices(&mut self, other: &Measure) -> Result<(), DifferentMeter> {

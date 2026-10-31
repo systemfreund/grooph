@@ -13,7 +13,7 @@ use grooph_layout::pixel_layout::{
 };
 use grooph_measure::BeatKind::{Note, Rest};
 use grooph_measure::duration::{Duration, TupletKind};
-use grooph_measure::{Measure, StaffKind};
+use grooph_measure::{Cursor, Measure, StaffKind};
 use grooph_render::measure::{draw_notes, draw_time_signature};
 use log::info;
 use tools::EditOp;
@@ -152,44 +152,31 @@ impl Grooph {
 
     /// Moves the cursor according to `op`. Non-mutating; never produces an undo snapshot.
     /// Left/Right cross measure boundaries; Home/End jump to the very first/last beat in the score.
+    /// The cursor stays in its voice, or the last one of a measure with fewer.
     fn execute_navigation(&mut self, op: NavOp) {
         let measure_count = self.editor.score.len();
-        match op {
-            NavOp::Left => {
-                if self.editor.cursor.beat_idx > 0 {
-                    self.editor.cursor.beat_idx -= 1;
-                } else if self.editor.cursor.measure_idx > 0 {
-                    self.editor.cursor.measure_idx -= 1;
-                    let prev_len = self.current_measure().beats().len();
-                    self.editor.cursor.beat_idx = prev_len.saturating_sub(1);
-                }
+        let cursor = self.editor.cursor;
+        let to = |measure_idx, beat_idx| Cursor { measure_idx, beat_idx, ..cursor };
+        let moved = match op {
+            NavOp::Left if cursor.beat_idx > 0 => to(cursor.measure_idx, cursor.beat_idx - 1),
+            // The clamp puts it on the last beat.
+            NavOp::Left if cursor.measure_idx > 0 => to(cursor.measure_idx - 1, usize::MAX),
+            NavOp::Left => cursor,
+            NavOp::Right if cursor.beat_idx + 1 < self.current_voice().beats().len() => {
+                to(cursor.measure_idx, cursor.beat_idx + 1)
             }
-            NavOp::Right => {
-                let beats_len = self.current_measure().beats().len();
-                let max_idx = beats_len.saturating_sub(1);
-                if self.editor.cursor.beat_idx < max_idx {
-                    self.editor.cursor.beat_idx += 1;
-                } else if self.editor.cursor.measure_idx + 1 < measure_count {
-                    self.editor.cursor.measure_idx += 1;
-                    self.editor.cursor.beat_idx = 0;
-                }
-            }
-            NavOp::Start => {
-                self.editor.cursor.measure_idx = 0;
-                self.editor.cursor.beat_idx = 0;
-            }
-            NavOp::End => {
-                self.editor.cursor.measure_idx = measure_count.saturating_sub(1);
-                let beats_len = self.current_measure().beats().len();
-                self.editor.cursor.beat_idx = beats_len.saturating_sub(1);
-            }
-        }
+            NavOp::Right if cursor.measure_idx + 1 < measure_count => to(cursor.measure_idx + 1, 0),
+            NavOp::Right => cursor,
+            NavOp::Start => to(0, 0),
+            NavOp::End => to(measure_count.saturating_sub(1), usize::MAX),
+        };
+        self.editor.cursor = self.editor.score.clamp_cursor(moved);
     }
 
     /// Executes a tool that is known to be mutating. Returns whether a change was committed.
     /// Must only be called from within `with_undo_snapshot`.
     fn execute_mutating_tool(&mut self, tool: &Tool) -> bool {
-        let beats_len = self.current_measure().beats().len();
+        let beats_len = self.current_voice().beats().len();
         match tool.kind {
             ToolKind::InsertBeat(template) => {
                 if beats_len == 0 {
@@ -206,9 +193,10 @@ impl Grooph {
                 result.is_some()
             }
             ToolKind::Meta(MetaOp::ResetMeasure) => {
-                let ts = self.current_measure().time_signature();
-                *self.current_measure_mut() = Measure::new_init(ts, Rest);
-                self.editor.cursor.beat_idx = 0;
+                // The voice being edited; the others stay.
+                let cursor = self.editor.score.clamp_cursor(self.editor.cursor);
+                self.editor.score.measures[cursor.measure_idx].clear_voice(cursor.voice, Rest);
+                self.editor.cursor = Cursor { beat_idx: 0, ..cursor };
                 true
             }
             ToolKind::Modify(modifier) => {
@@ -218,11 +206,11 @@ impl Grooph {
                 let idx = self.editor.cursor.beat_idx.min(beats_len - 1);
                 let result = match modifier {
                     Modifier::ToggleDotted { dots: _ } => {
-                        self.current_measure_mut().toggle_dotted(idx)
+                        self.current_voice_mut().toggle_dotted(idx)
                     }
-                    Modifier::ToggleAccent => self.current_measure_mut().toggle_accent(idx),
-                    Modifier::ToggleSoft => self.current_measure_mut().toggle_soft(idx),
-                    Modifier::ToggleRestNote => self.current_measure_mut().toggle_beat_kind(idx),
+                    Modifier::ToggleAccent => self.current_voice_mut().toggle_accent(idx),
+                    Modifier::ToggleSoft => self.current_voice_mut().toggle_soft(idx),
+                    Modifier::ToggleRestNote => self.current_voice_mut().toggle_beat_kind(idx),
                     Modifier::CycleTuplet => self.set_tuplet(idx, None),
                 };
                 result.is_some()
@@ -232,8 +220,8 @@ impl Grooph {
                     return false;
                 }
                 let idx = self.editor.cursor.beat_idx.min(beats_len - 1);
-                self.current_measure_mut().remove(idx);
-                let new_len = self.current_measure().beats().len();
+                self.current_voice_mut().remove(idx);
+                let new_len = self.current_voice().beats().len();
                 self.editor.cursor.beat_idx = if new_len == 0 {
                     0
                 } else {
@@ -454,4 +442,84 @@ pub(crate) fn paint_notation(
 /// close enough to the top of the tile to be clipped.
 fn notes_ink(layout: &MeasureLayout) -> Rect {
     layout.notes_ink().unwrap_or(Rect::ZERO)
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::tools::all_tools;
+    use crate::{Grooph, Mode};
+    use grooph_measure::Cursor;
+    use grooph_measure::notation::{format_score, parse_score};
+
+    fn editing(score: &str) -> Grooph {
+        let cc = eframe::CreationContext::_new_kittest(eframe::egui::Context::default());
+        let mut app = Grooph::new(&cc);
+        app.editor.score = parse_score(score).unwrap();
+        app.ui.mode = Mode::Edit;
+        app
+    }
+
+    fn apply(app: &mut Grooph, id: &str) {
+        let tool = all_tools().iter().find(|t| t.id == id).unwrap();
+        app.apply_tool(tool);
+    }
+
+    fn text(app: &Grooph) -> String {
+        format_score(&app.editor.score).unwrap()
+    }
+
+    #[test]
+    fn the_tools_edit_the_voice_of_the_cursor() {
+        let mut app = editing("4/4 H:q H:q H:q H:q ; K:h K:h");
+        app.editor.cursor = Cursor::in_voice(0, 1, 1);
+        apply(&mut app, "insert.note.q");
+        // The kick keeps its head in a new duration; the hands stay.
+        assert_eq!(text(&app), "4/4 H:q H:q H:q H:q ; K:h K:q r:q");
+        apply(&mut app, "modify.toggle.rest_note");
+        assert_eq!(app.editor.cursor, Cursor::in_voice(0, 1, 2));
+        assert!(app.editor.score.measures[0].voice(1).unwrap().beats()[2].is_note());
+        apply(&mut app, "edit.undo");
+        apply(&mut app, "meta.reset_measure");
+        assert_eq!(text(&app), "4/4 H:q H:q H:q H:q ; r:q r:q r:q r:q");
+        apply(&mut app, "edit.undo");
+        assert_eq!(text(&app), "4/4 H:q H:q H:q H:q ; K:h K:q r:q");
+    }
+
+    #[test]
+    fn the_cursor_keeps_its_voice_from_measure_to_measure() {
+        let mut app = editing("4/4 H:h H:h ; K:q K:q K:q K:q | H:h H:h ; K:h K:h | q q q q");
+        app.editor.cursor = Cursor::in_voice(0, 1, 3);
+        apply(&mut app, "nav.right");
+        assert_eq!(app.editor.cursor, Cursor::in_voice(1, 1, 0));
+        apply(&mut app, "nav.left");
+        assert_eq!(app.editor.cursor, Cursor::in_voice(0, 1, 3));
+        apply(&mut app, "nav.start");
+        assert_eq!(app.editor.cursor, Cursor::in_voice(0, 1, 0));
+        // The last measure has one voice.
+        apply(&mut app, "nav.end");
+        assert_eq!(app.editor.cursor, Cursor::at(2, 3));
+        // Into a last measure with two, End keeps the voice.
+        let mut two = editing("4/4 H:h H:h ; K:q K:q K:q K:q | H:h H:h ; K:h K:h");
+        two.editor.cursor = Cursor::in_voice(0, 1, 1);
+        apply(&mut two, "nav.end");
+        assert_eq!(two.editor.cursor, Cursor::in_voice(1, 1, 1));
+        // A new measure has the voices of the one before.
+        app.editor.cursor = Cursor::in_voice(0, 1, 0);
+        app.append_measure();
+        assert_eq!(app.editor.cursor, Cursor::in_voice(1, 1, 0));
+        assert_eq!(app.editor.score.measures[1].voices().len(), 2);
+        app.remove_current_measure();
+        assert_eq!(app.editor.cursor, Cursor::in_voice(1, 1, 0));
+    }
+
+    #[test]
+    fn a_line_score_edits_as_before() {
+        let mut app = editing("4/4 >q (q) q q");
+        app.editor.cursor = Cursor::at(0, 1);
+        apply(&mut app, "insert.note.e");
+        assert_eq!(text(&app), "4/4 >q e r:e q q");
+        assert_eq!(app.editor.cursor, Cursor::at(0, 2));
+        apply(&mut app, "meta.reset_measure");
+        assert_eq!(text(&app), "4/4 r:q r:q r:q r:q");
+    }
 }

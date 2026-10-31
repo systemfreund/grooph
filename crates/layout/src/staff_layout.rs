@@ -9,9 +9,9 @@
 //!
 //! A measure can have a second voice (see [`grooph_measure::Measure::voices`]):
 //! on the same line, below it with stems down, while the first voice keeps
-//! above it; beamed rests of both are stemlets, and both are spaced together
-//! so notes at the same time line up — like the feet under the hands of a
-//! drum part.
+//! above it; on the one line beamed rests of both are stemlets (the kit's
+//! stay rests), and both are spaced together so notes at the same time line
+//! up — like the feet under the hands of a drum part.
 //!
 //! Each measure grows to fill the row. If a measure doesn't fit, glyphs shrink
 //! toward [`LEGIBILITY_FLOOR_EM`]; a measure that doesn't fit even at the floor
@@ -339,8 +339,9 @@ pub fn build_staff_layout(score: &Score, opts: &StaffOpts) -> StaffLayout {
 
     // 2. natural widths at the baseline em. Each voice is planned (beams,
     // tuplets) once, for its width and its layout. With several voices they
-    // share the line: every beamed rest is a stemlet, clear of the line, and
-    // no bar shows as one whole rest.
+    // share the line and no bar shows as one whole rest. On the one line
+    // every beamed rest is then a stemlet, clear of the line; the kit's
+    // rests have their own places, so they stay rests, as in drum notation.
     let voices = |i: usize| score.measures[i].voices();
     let plans: Vec<Vec<RenderPlan>> = (0..score.len())
         .map(|i| {
@@ -349,7 +350,7 @@ pub fn build_staff_layout(score: &Score, opts: &StaffOpts) -> StaffLayout {
                 .iter()
                 .map(|v| RenderPlan {
                     bar_rest: opts.bar_rests && !shared && rests_only(v),
-                    ..plan_measure_with(v, shared)
+                    ..plan_measure_with(v, shared && !kit)
                 })
                 .collect()
         })
@@ -705,17 +706,36 @@ mod tests {
 
     #[test]
     fn kit_rests_and_beams_in_compound_and_odd_meters() {
-        // 6/8: a beamed rest among the snares leaves the beam where the
-        // snares alone put it, and reaches it as a stemlet.
-        let tips = |text: &str| -> Vec<f32> {
+        // 6/8: a rest among the snares leaves the beam where the snares
+        // alone put it, and stays a rest, as in drum notation (no stemlet).
+        let tips = |text: &str| -> Vec<Option<f32>> {
             let (placed, _, _) = kit(text);
-            placed.layout().notes.iter().map(|n| n.stem.unwrap().p2.y).collect()
+            placed.layout().notes.iter().map(|n| n.stem.map(|s| s.p2.y)).collect()
         };
         let with_rest = tips("6/8 S:e r:e S:e S:e S:e S:e ; K:q. r:q.");
         let without = tips("6/8 S:e S:e S:e S:e S:e S:e ; K:q. r:q.");
-        assert!(with_rest.iter().zip(&without).all(|(a, b)| (a - b).abs() < 0.01), "{with_rest:?}");
+        assert_eq!(with_rest[1], None);
+        let same = |a: &Option<f32>, b: &Option<f32>| (a.unwrap() - b.unwrap()).abs() < 0.01;
+        let notes = [0, 2, 3, 4, 5];
+        assert!(notes.iter().all(|&i| same(&with_rest[i], &without[i])), "{with_rest:?}");
+        // The rest under the beam stays a rest: in 6/8, 7/8 (2+2+3) and 4/4,
+        // in either voice.
+        for (text, voice, idx) in [
+            ("6/8 S:e r:e S:e S:e S:e S:e ; K:q. r:q.", 0, 1),
+            ("7/8 H:e H:e H:e H:e H:e r:e H:e ; K:e r:e r:e r:h", 0, 5),
+            ("4/4 H:e H:e H:e H:e H:h ; K:s r:s K:s K:s r:q r:h", 1, 1),
+        ] {
+            let (placed, _, _) = kit(text);
+            let notes = &placed.voices[voice].notes;
+            let rest = &notes[idx];
+            assert!(rest.kind == grooph_measure::BeatKind::Rest, "{text}");
+            assert!(!rest.stemlet && rest.stem.is_none(), "{text}: {rest:?}");
+            // Under the beam of the notes around it.
+            let tip = |i: usize| notes[i].stem.unwrap().p2.y;
+            assert!((tip(idx - 1) - tip(idx + 1)).abs() < 0.01, "{text}");
+            assert!(notes[idx - 1].flag.is_none(), "{text}: beamed, not flagged");
+        }
         let (placed, _, _) = kit("6/8 S:e r:e S:e S:e S:e S:e ; K:q. r:q.");
-        assert!(placed.layout().notes[1].stemlet);
         let feet = &placed.voices[1].notes;
         assert_eq!(feet[1].staff_pos, -3, "the feet's rest below the middle line");
         assert!(feet[1].ledgers.is_empty());

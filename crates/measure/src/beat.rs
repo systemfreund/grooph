@@ -85,6 +85,16 @@ impl Beat {
         self.heads.iter_mut().for_each(|h| h.set_accented(accented));
     }
 
+    /// Take the accents of `old`, the beat this one replaces: each head the
+    /// accent of `old`'s head of its instrument, a head `old` has not the
+    /// accent of `old` as a whole. No change on a rest.
+    pub fn carry_accents_from(&mut self, old: &Beat) {
+        for head in self.heads.iter_mut() {
+            let accented = old.heads.get(head.instrument()).map_or(old.accented(), Head::accented);
+            head.set_accented(accented);
+        }
+    }
+
     /// Make every head soft, or none; a soft head is not accented. No
     /// change on a rest.
     pub fn set_soft(&mut self, soft: bool) {
