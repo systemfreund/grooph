@@ -1,4 +1,3 @@
-use crate::metronome_view::MetronomeVoice;
 use grooph_measure::click::ClickBars;
 use grooph_measure::counter::CounterBars;
 use grooph_measure::{Cursor, Score};
@@ -12,12 +11,9 @@ pub(crate) struct EditorSnapshot {
     /// The counter rhythms, taken in the metronome tab only: it is the one
     /// place they change, and undo elsewhere must not bring old ones back.
     pub counter: Option<CounterBars>,
-    /// The click bars, taken with the counter rhythms: `score` holds only
-    /// one of the two voices, and the other must come back too.
+    /// The click bars, taken with the counter rhythms: `score` holds the
+    /// bars of one meter only, the others must come back too.
     pub click: Option<ClickBars>,
-    /// The metronome voice `score` holds (see
-    /// [`crate::metronome_view::MetronomeState::voice`]).
-    pub voice: MetronomeVoice,
 }
 
 pub(crate) struct UndoHistory {
@@ -68,13 +64,12 @@ mod tests {
 
     fn snap(beat_idx: usize) -> EditorSnapshot {
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
-        m.set_beat(0, Beat::note(q())).unwrap();
+        m.first_voice_mut().set_beat(0, Beat::note(q())).unwrap();
         EditorSnapshot {
             score: Score::single(m),
             cursor: Cursor::at(0, beat_idx),
             counter: None,
             click: None,
-            voice: MetronomeVoice::Click,
         }
     }
 
@@ -144,34 +139,27 @@ mod tests {
     fn clone_independence_via_push() {
         // Pushed snapshot must not be affected by later mutation of the source score.
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
-        m.set_beat(0, Beat::note(q())).unwrap();
+        m.first_voice_mut().set_beat(0, Beat::note(q())).unwrap();
         let mut score = Score::single(m);
         let snap = EditorSnapshot {
             score: score.clone(),
             cursor: Cursor::start(),
             counter: None,
             click: None,
-            voice: MetronomeVoice::Click,
         };
 
         let mut h = UndoHistory::new(10);
         h.push(snap);
 
         // mutate source after push
-        score.current_mut(0).set_beat(1, Beat::note(q())).unwrap();
+        score.current_mut(0).first_voice_mut().set_beat(1, Beat::note(q())).unwrap();
 
         // restored snapshot retains original beat count (before mutation)
         let restored = h
-            .pop_undo(EditorSnapshot {
-                score,
-                cursor: Cursor::start(),
-                counter: None,
-                click: None,
-                voice: MetronomeVoice::Click,
-            })
+            .pop_undo(EditorSnapshot { score, cursor: Cursor::start(), counter: None, click: None })
             .unwrap();
         // the mutation added a beat to the *source* score but the snapshot is independent
         // we just check that pop returns something with a distinct measure state
-        assert_eq!(restored.score.current(0).beats().len(), 4); // original 4/4 default beats
+        assert_eq!(restored.score.current(0).first_voice().beats().len(), 4); // original 4/4 default beats
     }
 }

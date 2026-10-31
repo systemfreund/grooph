@@ -328,7 +328,7 @@ pub fn build_staff_layout(score: &Score, opts: &StaffOpts) -> StaffLayout {
     let show_clef: Vec<bool> =
         (0..score.len()).map(|i| kit || (i == 0 && opts.layout_clef_first)).collect();
     let meter_changes_at =
-        |i: usize| score.measures[i].time_signature() != score.measures[i - 1].time_signature();
+        |i: usize| score.measures()[i].time_signature() != score.measures()[i - 1].time_signature();
     let mixed_meters = (1..score.len()).any(meter_changes_at);
     let show_ts: Vec<bool> = (0..score.len())
         .map(|i| {
@@ -342,7 +342,7 @@ pub fn build_staff_layout(score: &Score, opts: &StaffOpts) -> StaffLayout {
     // share the line and no bar shows as one whole rest. On the one line
     // every beamed rest is then a stemlet, clear of the line; the kit's
     // rests have their own places, so they stay rests, as in drum notation.
-    let voices = |i: usize| score.measures[i].voices();
+    let voices = |i: usize| score.measures()[i].voices();
     let plans: Vec<Vec<RenderPlan>> = (0..score.len())
         .map(|i| {
             let shared = voices(i).len() > 1;
@@ -411,7 +411,7 @@ pub fn build_staff_layout(score: &Score, opts: &StaffOpts) -> StaffLayout {
         }
         let advances = advances(i, &per_voice);
         let area =
-            rect.width() - note_area_offset(&score.measures[i].time_signature(), &per_voice[0]);
+            rect.width() - note_area_offset(&score.measures()[i].time_signature(), &per_voice[0]);
         let xs = calculate_shared_x_centers(
             &together(voices(i), &advances),
             area,
@@ -440,7 +440,7 @@ pub fn build_staff_layout(score: &Score, opts: &StaffOpts) -> StaffLayout {
     // A meter with an unusual grouping has it written below (see
     // grooph-render's `draw_time_signature`).
     let grouping_shown = score
-        .measures
+        .measures()
         .iter()
         .zip(&show_ts)
         .any(|(m, &shown)| shown && m.time_signature().grouping != 0);
@@ -571,7 +571,7 @@ mod tests {
     /// `upper` with the measures of `lower` as its second voice.
     fn with_lower(upper: &Score, lower: &Score) -> Score {
         let mut score = upper.clone();
-        for (m, l) in score.measures.iter_mut().zip(&lower.measures) {
+        for (m, l) in score.measures_mut().iter_mut().zip(lower.measures()) {
             m.push_voices(l).unwrap();
         }
         score
@@ -580,7 +580,7 @@ mod tests {
     fn measure_with_quarters(ts: TimeSignature) -> Measure {
         let mut m = Measure::new(ts);
         for i in 0..(ts.beats as usize) {
-            m.set_beat(i, Beat::note(q())).unwrap();
+            m.first_voice_mut().set_beat(i, Beat::note(q())).unwrap();
         }
         m
     }
@@ -603,7 +603,7 @@ mod tests {
 
         let placed = &staff.systems[0].measures[0];
         let direct = crate::pixel_layout::build_measure_layout(
-            &m,
+            m.first_voice(),
             &staff_opts.measure_opts(rect, 0.0, true, false, StaffKind::Line),
         );
 
@@ -849,7 +849,7 @@ mod tests {
         let upper = parse_score("4/4 q q q q").unwrap();
         let mut score = with_lower(&upper, &parse_score("4/4 q q q q").unwrap());
         let third = parse_score("4/4 r:e e r:e e r:h").unwrap();
-        score.measures[0].push_voices(&third.measures[0]).unwrap();
+        score.measures_mut()[0].push_voices(&third.measures()[0]).unwrap();
         let staff = build_staff_layout(&score, &opts(20.0, rect));
         let system = &staff.systems[0];
         let voices = &system.measures[0].voices;
@@ -1162,8 +1162,8 @@ mod tests {
         use grooph_measure::duration::s;
         let mut m = Measure::new(ts);
         let mut idx = 0;
-        while idx < m.beats().len() {
-            m.set_beat(idx, Beat::note(s())).unwrap();
+        while idx < m.first_voice().beats().len() {
+            m.first_voice_mut().set_beat(idx, Beat::note(s())).unwrap();
             idx += 1;
         }
         m
@@ -1210,8 +1210,8 @@ mod tests {
         let dense_ts = TimeSignature::new(16, 4);
         let mut thirty_seconds = Measure::new(dense_ts);
         let mut idx = 0;
-        while idx < thirty_seconds.beats().len() {
-            thirty_seconds.set_beat(idx, Beat::note(th())).unwrap();
+        while idx < thirty_seconds.first_voice().beats().len() {
+            thirty_seconds.first_voice_mut().set_beat(idx, Beat::note(th())).unwrap();
             idx += 1;
         }
         let score = Score::new(vec![
@@ -1373,7 +1373,7 @@ mod tests {
             let placed = staff.placed(0).unwrap();
             let notes = &placed.layout().notes;
             // Every beat keeps its layout, the first one draws the rest.
-            assert_eq!(notes.len(), score.measures[0].beats().len(), "{meter}");
+            assert_eq!(notes.len(), score.measures()[0].first_voice().beats().len(), "{meter}");
             assert_eq!(notes[0].head.glyph, REST_WHOLE, "{meter}");
             assert!(notes.iter().all(|n| n.dots.is_empty()), "{meter}");
             assert!(notes[1..].iter().all(|n| n.hidden && n.glyphs().next().is_none()), "{meter}");

@@ -371,10 +371,10 @@ fn build_measure(
 ) -> Result<Measure, NotationError> {
     let mut m = Measure::new(ts);
     for (idx, (token, beat)) in tokens.iter().enumerate() {
-        if idx >= m.beats().len() {
+        if idx >= m.first_voice().beats().len() {
             return Err(NotationError::TooLong { at, token: token.to_string() });
         }
-        m.set_beat(idx, *beat).map_err(|err| match err {
+        m.first_voice_mut().set_beat(idx, *beat).map_err(|err| match err {
             MeasureError::Overflow { .. } => {
                 NotationError::TooLong { at, token: token.to_string() }
             }
@@ -383,10 +383,10 @@ fn build_measure(
             }
         })?;
         // `set_beat` keeps the accent of the slot it overwrites; play ours.
-        m.set_heads(idx, *beat.heads());
+        m.first_voice_mut().set_heads(idx, *beat.heads());
     }
-    if m.beats().len() > tokens.len() {
-        let missing: u32 = m.beats()[tokens.len()..]
+    if m.first_voice().beats().len() > tokens.len() {
+        let missing: u32 = m.first_voice().beats()[tokens.len()..]
             .iter()
             .map(|b| DEFAULT_GRID.ticks_of(&b.duration).unwrap_or(0))
             .sum();
@@ -449,22 +449,15 @@ pub fn parse_score(input: &str) -> Result<Score, NotationError> {
         measures.extend(measure);
     }
     // A score with an instrument of the kit is written on the kit's staff.
-    let kit = marked_kit || has_kit_heads(&measures);
-    let staff = if kit { StaffKind::Kit } else { StaffKind::Line };
-    Ok(Score { staff, ..Score::new(measures) })
+    let mut score = Score::new(measures);
+    if marked_kit || score.has_kit_heads() {
+        score.staff = StaffKind::Kit;
+    }
+    Ok(score)
 }
 
 /// The token that puts a score without notes of the kit on the kit's staff.
 const KIT_MARKER: &str = "kit";
-
-/// Whether a head of `measures` is an instrument of the kit.
-fn has_kit_heads(measures: &[Measure]) -> bool {
-    measures
-        .iter()
-        .flat_map(|m| m.voices())
-        .flat_map(|v| v.beats())
-        .any(|b| b.heads().iter().any(|h| h.instrument() != Instrument::Rhythm))
-}
 
 /// Format `score` in the text notation. The first measure always states its
 /// time signature; later ones only when it changes. Returns `None` if a beat
@@ -473,12 +466,12 @@ fn has_kit_heads(measures: &[Measure]) -> bool {
 pub fn format_score(score: &Score) -> Option<String> {
     let mut out = String::new();
     // Its notes do not tell the kit's staff.
-    if score.staff == StaffKind::Kit && !has_kit_heads(&score.measures) {
+    if score.staff == StaffKind::Kit && !score.has_kit_heads() {
         out.push_str(KIT_MARKER);
         out.push(' ');
     }
     let mut prev_ts: Option<TimeSignature> = None;
-    for (i, m) in score.measures.iter().enumerate() {
+    for (i, m) in score.measures().iter().enumerate() {
         if i > 0 {
             out.push_str(" | ");
         }
@@ -538,14 +531,14 @@ mod tests {
     }
 
     fn beats_of(score: &Score, measure: usize) -> Vec<Beat> {
-        score.measures[measure].beats().clone()
+        score.measures()[measure].first_voice().beats().clone()
     }
 
     /// Which beats share a tuplet group, independent of the group ids: each
     /// beat maps to the index of the first beat in its group (`None` outside
     /// tuplets).
     fn group_partition(m: &Measure) -> Vec<Option<usize>> {
-        let beats = m.beats();
+        let beats = m.first_voice().beats();
         beats
             .iter()
             .map(|b| {
@@ -559,7 +552,7 @@ mod tests {
     fn parses_simple_measure_with_default_time_signature() {
         let score = parse_score("q e e r:q >q").unwrap();
         assert_eq!(score.len(), 1);
-        assert_eq!(score.measures[0].time_signature(), TimeSignature::FOUR_FOUR);
+        assert_eq!(score.measures()[0].time_signature(), TimeSignature::FOUR_FOUR);
         let mut accented = Beat::note(q());
         accented.set_accented(true);
         assert_eq!(
@@ -584,7 +577,7 @@ mod tests {
     #[test]
     fn time_signature_carries_over_and_changes() {
         let score = parse_score("3/4 q q q | q q q | 7/8 q q q e").unwrap();
-        let ts: Vec<_> = score.measures.iter().map(|m| m.time_signature()).collect();
+        let ts: Vec<_> = score.measures().iter().map(|m| m.time_signature()).collect();
         assert_eq!(
             ts,
             vec![TimeSignature::THREE_FOUR, TimeSignature::THREE_FOUR, TimeSignature::SEVEN_EIGHT]
@@ -650,7 +643,7 @@ mod tests {
         let beats = beats_of(&score, 0);
         let seven = Duration::Tuplet(TupletSpec { n: 7, m: 5, base: Eighth });
         assert!(beats.iter().all(|b| b.duration == seven));
-        assert_eq!(group_partition(&score.measures[0]), vec![Some(0); 7]);
+        assert_eq!(group_partition(&score.measures()[0]), vec![Some(0); 7]);
         assert_eq!(format_score(&score).unwrap(), "5/8 7:5e 7:5e r:7:5e 7:5e >7:5e 7:5e (7:5e)");
         // A listed tuplet keeps its code.
         assert_eq!(
@@ -716,7 +709,7 @@ mod tests {
     fn groupings_carry_over_and_change_like_meters() {
         let text = "7/8 q e q q | 2+2+3/8 q q e q | q q q e";
         let score = parse_score(text).unwrap();
-        let ts: Vec<_> = score.measures.iter().map(|m| m.time_signature()).collect();
+        let ts: Vec<_> = score.measures().iter().map(|m| m.time_signature()).collect();
         let grouped = TimeSignature::SEVEN_EIGHT.with_grouping(1);
         assert_eq!(ts, [TimeSignature::SEVEN_EIGHT, grouped, grouped]);
         assert_eq!(format_score(&score).unwrap(), text);
@@ -742,8 +735,8 @@ mod tests {
                 let text = format_score(&score).unwrap();
                 let parsed = parse_score(&text).unwrap();
                 assert_eq!(score.len(), parsed.len(), "{text}");
-                for (a, b) in score.measures.iter().zip(&parsed.measures) {
-                    assert_eq!(a.beats(), b.beats(), "{text}");
+                for (a, b) in score.measures().iter().zip(parsed.measures()) {
+                    assert_eq!(a.first_voice().beats(), b.first_voice().beats(), "{text}");
                     assert_eq!(a.time_signature(), b.time_signature());
                     // `Beat`'s `PartialEq` ignores tuplet groups; compare them too.
                     assert_eq!(group_partition(a), group_partition(b), "{text}");
@@ -757,7 +750,7 @@ mod tests {
         use crate::Technique::{Closed, Open};
         let text = "4/4 H:e S-H:e H:e H:e H:e S-H:e Ho:e Hc:e ; K:q r:q K:q r:q";
         let score = parse_score(text).unwrap();
-        let m = &score.measures[0];
+        let m = &score.measures()[0];
         assert_eq!(m.voices().len(), 2);
         let hands = m.voice(0).unwrap().beats();
         let heads = |b: &Beat| b.heads().iter().map(|h| h.instrument()).collect::<Vec<_>>();
@@ -775,10 +768,8 @@ mod tests {
         let score = parse_score("kit 4/4 r:h r:h ; r:h r:h").unwrap();
         assert_eq!(score.staff, StaffKind::Kit);
         assert_eq!(format_score(&score).unwrap(), "kit 4/4 r:h r:h ; r:h r:h");
-        let empty = Score {
-            staff: StaffKind::Kit,
-            ..Score::single(Measure::new(TimeSignature::new(3, 4)))
-        };
+        let empty =
+            Score::single(Measure::new(TimeSignature::new(3, 4))).with_staff(StaffKind::Kit);
         let text = format_score(&empty).unwrap();
         assert!(text.starts_with("kit 3/4 "), "{text}");
         assert_eq!(parse_score(&text).unwrap().staff, StaffKind::Kit);
@@ -808,7 +799,7 @@ mod tests {
         assert_eq!(format_score(&score).unwrap(), text);
         let line =
             parse_score("2/4 t8 t8 t8 q | q. e | 5/8 7:5e 7:5e 7:5e 7:5e 7:5e 7:5e 7:5e").unwrap();
-        for (kit, plain) in score.measures.iter().zip(&line.measures) {
+        for (kit, plain) in score.measures().iter().zip(line.measures()) {
             assert_eq!(group_partition(kit), group_partition(plain));
         }
     }
@@ -843,13 +834,13 @@ mod tests {
                     | 7/8 H:e H:e H:e H:e H:e H:e H:e ; K:q r:e K:t8 K:t8 K:t8 r:e K:e";
         let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
         let score = parse_score(&text).unwrap();
-        let voices: Vec<usize> = score.measures.iter().map(|m| m.voices().len()).collect();
+        let voices: Vec<usize> = score.measures().iter().map(|m| m.voices().len()).collect();
         assert_eq!(voices, [2, 2, 1, 2]);
-        assert_eq!(score.measures[1].time_signature(), TimeSignature::SIX_EIGHT);
+        assert_eq!(score.measures()[1].time_signature(), TimeSignature::SIX_EIGHT);
         // The 6/8 feet keep their meter's beats: two dotted quarters.
-        let feet = score.measures[1].voice(1).unwrap().beats();
+        let feet = score.measures()[1].voice(1).unwrap().beats();
         assert_eq!(feet.iter().map(|b| b.duration).collect::<Vec<_>>(), [q_dot(), q_dot()]);
-        let feet = score.measures[3].voice(1).unwrap();
+        let feet = score.measures()[3].voice(1).unwrap();
         assert!(feet.tuplet_group_at(2).is_some());
         assert_eq!(format_score(&score).unwrap(), text);
     }

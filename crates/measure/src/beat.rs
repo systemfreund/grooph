@@ -69,6 +69,12 @@ impl Beat {
         !self.is_rest()
     }
 
+    /// Whether a head plays an instrument of the kit, not the one line's
+    /// sound.
+    pub fn is_kit(&self) -> bool {
+        self.heads.iter().any(|h| h.instrument() != Instrument::Rhythm)
+    }
+
     /// Whether a head is accented.
     pub fn accented(&self) -> bool {
         self.heads.iter().any(Head::accented)

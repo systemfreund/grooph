@@ -313,7 +313,7 @@ impl Grooph {
         if !self.playback_ctl.accuracy.tracker.update_state(active, now) {
             return;
         }
-        if total_loop_seconds <= 0.0 || self.editor.score.measures.is_empty() {
+        if total_loop_seconds <= 0.0 || self.editor.score.measures().is_empty() {
             return;
         }
 

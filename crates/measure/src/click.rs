@@ -98,7 +98,7 @@ fn part_duration(ts: &TimeSignature, parts: u32) -> Option<Duration> {
 
 fn parse_bar(ts: &TimeSignature, tokens: &[String]) -> Option<Measure> {
     let text = format!("{ts} {}", tokens.join(" "));
-    parse_score(&text).ok()?.measures.into_iter().next()
+    parse_score(&text).ok()?.into_measures().into_iter().next()
 }
 
 /// The default click bar of `ts`: one note per beat group, as long as the
@@ -198,7 +198,7 @@ fn build_subdivisions(ts: TimeSignature) -> Vec<Subdivision> {
         if options.iter().any(|o| same_bar(&o.bar, &bar)) {
             continue;
         }
-        let Some(&first) = bar.beats().first() else { continue };
+        let Some(&first) = bar.first_voice().beats().first() else { continue };
         let Some(code) = code_of(&first.duration) else { continue };
         options.push(Subdivision { code, name: subdivision_name(first.duration), bar });
     }
@@ -292,12 +292,13 @@ mod tests {
     #[test]
     fn levels_follow_the_notes() {
         let mut bar = default_click_bar(TimeSignature::FOUR_FOUR);
-        let levels = |m: &Measure| m.beats().iter().map(ClickLevel::of).collect::<Vec<_>>();
+        let levels =
+            |m: &Measure| m.first_voice().beats().iter().map(ClickLevel::of).collect::<Vec<_>>();
         use ClickLevel::*;
         assert_eq!(levels(&bar), [Strong, Medium, Medium, Medium]);
-        bar.set_click_level(1, Soft);
-        bar.set_click_level(2, Off);
-        bar.set_click_level(3, Strong);
+        bar.first_voice_mut().set_click_level(1, Soft);
+        bar.first_voice_mut().set_click_level(2, Off);
+        bar.first_voice_mut().set_click_level(3, Strong);
         assert_eq!(levels(&bar), [Strong, Soft, Off, Strong]);
         assert_eq!(text(&bar), "4/4 >q (q) r:q >q");
     }
@@ -315,7 +316,7 @@ mod tests {
     fn subdivided_bars_split_every_beat_unit() {
         let four = TimeSignature::FOUR_FOUR;
         assert_eq!(text(&subdivided_click_bar(four, 2).unwrap()), "4/4 >e (e) e (e) e (e) e (e)");
-        assert_eq!(subdivided_click_bar(four, 3).unwrap().beats().len(), 12);
+        assert_eq!(subdivided_click_bar(four, 3).unwrap().first_voice().beats().len(), 12);
         let seven = subdivided_click_bar(TimeSignature::SEVEN_EIGHT, 2).unwrap();
         assert_eq!(text(&seven), "7/8 >s (s) (s) (s) s (s) (s) (s) (s) (s) s (s) (s) (s)");
         assert!(subdivided_click_bar(TimeSignature::new(7, 16), 4).is_none());
@@ -330,11 +331,11 @@ mod tests {
         assert!(first(three, 7).starts_with(">spt16 "));
         assert!(first(three, 8).starts_with(">th (th) "));
         assert!(first(three, 9).starts_with(">9:8th "));
-        assert_eq!(subdivided_click_bar(three, 7).unwrap().beats().len(), 21);
+        assert_eq!(subdivided_click_bar(three, 7).unwrap().first_voice().beats().len(), 21);
         // Over an eighth, five or seven thirty-seconds in the time of four.
         let six = TimeSignature::SIX_EIGHT;
         assert!(first(six, 5).starts_with(">5:4th (5:4th) "));
-        assert_eq!(subdivided_click_bar(six, 7).unwrap().beats().len(), 42);
+        assert_eq!(subdivided_click_bar(six, 7).unwrap().first_voice().beats().len(), 42);
         // Sixty-fourths and finer are not written.
         assert!(subdivided_click_bar(six, 8).is_none());
         assert!(subdivided_click_bar(TimeSignature::new(5, 16), 5).is_none());
@@ -345,7 +346,7 @@ mod tests {
         let mut bars = ClickBars::default();
         let seven = TimeSignature::SEVEN_EIGHT;
         let mut bar = default_click_bar(seven);
-        bar.set_click_level(1, ClickLevel::Off);
+        bar.first_voice_mut().set_click_level(1, ClickLevel::Off);
         bars.set(bar);
         assert_eq!(text(&bars.for_meter(seven)), "7/8 >q r:q. q");
         // Another grouping of 7/8 is another meter.
@@ -364,7 +365,7 @@ mod tests {
         let five = TimeSignature::FIVE_EIGHT;
         assert_eq!(text(&bars.for_meter(five)), "5/8 >e (e) (e) e (e)");
         assert_eq!(text(&bars.for_meter(TimeSignature::SIX_EIGHT)), "6/8 >e (e) (e) e (e) (e)");
-        assert_eq!(bars.for_meter("5/16".parse().unwrap()).beats().len(), 5);
+        assert_eq!(bars.for_meter("5/16".parse().unwrap()).first_voice().beats().len(), 5);
         assert_eq!(text(&bars.for_meter(TimeSignature::THREE_FOUR)), "3/4 >q q q");
         // The main beats alone are a bar of their own in x/8.
         let mut bars = ClickBars::default();

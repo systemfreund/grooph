@@ -72,7 +72,7 @@ mod tests {
 
     fn sample_score() -> Score {
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
-        m.set_beat(0, Beat::note(q())).unwrap();
+        m.first_voice_mut().set_beat(0, Beat::note(q())).unwrap();
         Score::single(m)
     }
 

@@ -25,9 +25,9 @@ pub type VoiceIdx = usize;
 /// and feet of a drum part, or a click bar and its counter rhythm). Every
 /// measure has at least one voice; all share its time signature.
 ///
-/// A measure reads and edits as its first voice (it dereferences to it), so
-/// code for one voice needs no change; [`Measure::voices`] and
-/// [`Measure::voice_mut`] reach the others.
+/// Code names the voice it reads or edits: [`Measure::first_voice`] is the
+/// upper one (the only one of a click bar or a line rhythm),
+/// [`Measure::voices`] and [`Measure::voice_mut`] reach the others.
 #[derive(Clone, Deserialize)]
 #[serde(try_from = "RawMeasure")]
 pub struct Measure {
@@ -170,12 +170,33 @@ impl Measure {
         &self.voices
     }
 
+    /// The measure's meter, the same in every voice.
+    pub fn time_signature(&self) -> TimeSignature {
+        self.voices[0].time_signature()
+    }
+
+    /// The first voice: the upper one, and the only one of a click bar or
+    /// a rhythm on one line.
+    pub fn first_voice(&self) -> &VoiceBar {
+        &self.voices[0]
+    }
+
+    /// The first voice, to edit; see [`Measure::first_voice`].
+    pub fn first_voice_mut(&mut self) -> &mut VoiceBar {
+        &mut self.voices[0]
+    }
+
     pub fn voice(&self, voice: VoiceIdx) -> Option<&VoiceBar> {
         self.voices.get(voice)
     }
 
     pub fn voice_mut(&mut self, voice: VoiceIdx) -> Option<&mut VoiceBar> {
         self.voices.get_mut(voice)
+    }
+
+    /// Voice `voice` alone, as a measure of its own, if there is one.
+    pub fn single_voice(&self, voice: VoiceIdx) -> Option<Measure> {
+        self.voices.get(voice).map(|v| Measure { voices: vec![v.clone()] })
     }
 
     /// Voice `voice` all `init` again, a note or a rest on every beat unit;
@@ -216,21 +237,6 @@ impl Measure {
         }
         self.voices = voices;
         Ok(Modification::ChangeTimeSignature(old_ts, new_ts))
-    }
-}
-
-/// The measure reads and edits as its first voice.
-impl std::ops::Deref for Measure {
-    type Target = VoiceBar;
-
-    fn deref(&self) -> &VoiceBar {
-        &self.voices[0]
-    }
-}
-
-impl std::ops::DerefMut for Measure {
-    fn deref_mut(&mut self) -> &mut VoiceBar {
-        &mut self.voices[0]
     }
 }
 

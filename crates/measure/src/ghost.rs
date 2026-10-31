@@ -88,8 +88,8 @@ mod tests {
     #[test]
     fn quarter_notes_get_sixteenth_ghosts_in_between() {
         let mut m = Measure::new(TimeSignature::TWO_FOUR);
-        m.set_beat(0, Beat::note(q())).unwrap();
-        m.set_beat(1, Beat::note(q())).unwrap();
+        m.first_voice_mut().set_beat(0, Beat::note(q())).unwrap();
+        m.first_voice_mut().set_beat(1, Beat::note(q())).unwrap();
         let sx = tick(s());
         assert_eq!(
             ghost_onsets(&m, Subdivision::Sixteenths),
@@ -109,15 +109,15 @@ mod tests {
     #[test]
     fn eighth_grid_skips_note_on_the_and() {
         let mut m = Measure::new(TimeSignature::ONE_FOUR);
-        m.set_beat(0, Beat::rest(e())).unwrap();
-        m.set_beat(1, Beat::note(e())).unwrap();
+        m.first_voice_mut().set_beat(0, Beat::rest(e())).unwrap();
+        m.first_voice_mut().set_beat(1, Beat::note(e())).unwrap();
         assert_eq!(ghost_onsets(&m, Subdivision::Eighths), vec![0]);
     }
 
     #[test]
     fn mixed_uses_triplet_grid_only_in_tuplet_beats() {
         let mut m = Measure::new(TimeSignature::TWO_FOUR);
-        m.set_beat(0, Beat::note(t8())).unwrap(); // triplet group in beat 1
+        m.first_voice_mut().set_beat(0, Beat::note(t8())).unwrap(); // triplet group in beat 1
         let beat = tick(q());
         let ghosts = ghost_onsets(&m, Subdivision::Mixed);
         // Beat 1: triplet slots 2 and 3 (note on slot 1).
@@ -129,7 +129,7 @@ mod tests {
     #[test]
     fn x8_meters_use_the_subdivision_note_value() {
         let mut m = Measure::new(TimeSignature::SIX_EIGHT);
-        m.set_beat(0, Beat::note(e())).unwrap();
+        m.first_voice_mut().set_beat(0, Beat::note(e())).unwrap();
         // Eighths: the five free eighths; sixteenths: eleven free sixteenths.
         assert_eq!(ghost_onsets(&m, Subdivision::Eighths).len(), 5);
         assert_eq!(ghost_onsets(&m, Subdivision::Sixteenths).len(), 11);
@@ -144,7 +144,7 @@ mod tests {
     #[test]
     fn a_lower_voices_notes_take_ghost_slots_in_compound_and_odd_meters() {
         use crate::notation::parse_score;
-        let ghosts = |s: &str, sub| ghost_onsets(&parse_score(s).unwrap().measures[0], sub);
+        let ghosts = |s: &str, sub| ghost_onsets(&parse_score(s).unwrap().measures()[0], sub);
         let eighth = DEFAULT_GRID.ticks_of(&e()).unwrap();
         // 6/8: the hi-hat on 1 and 4, the kick on the third and sixth
         // eighths below; only eighths 2 and 5 are free.

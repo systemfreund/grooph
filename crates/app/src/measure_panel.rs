@@ -97,9 +97,7 @@ impl Grooph {
         let margins = staff_margins(ui.style());
         let rect = Rect::from_min_size(ui.cursor().min, egui::vec2(width - margins.x, 1.0e4));
         let opts = self.staff_opts(ui, rect);
-        let shown = self.metronome_staff_score();
-        let score = shown.as_ref().unwrap_or(&self.editor.score);
-        build_staff_layout(score, &opts).total_size.y + margins.y
+        build_staff_layout(&self.editor.score, &opts).total_size.y + margins.y
     }
 
     pub(super) fn measure_panel(&mut self, ui: &mut egui::Ui) {
@@ -137,10 +135,6 @@ impl Grooph {
                     let origin = ui.cursor().min;
                     let viewport_rect = Rect::from_min_size(origin, available);
 
-                    // The metronome's click bar with its counter rhythm
-                    // as the second voice, or the edited score.
-                    let shown = self.metronome_staff_score();
-
                     // Build the multi-measure tempo backbone once per frame.
                     // O(score.len()) — cheap for realistic score sizes.
                     let timing = self.score_timing();
@@ -169,7 +163,7 @@ impl Grooph {
                     let em = staff_opts.em;
                     let count_config = self.build_count_config();
 
-                    let score = shown.as_ref().unwrap_or(&self.editor.score);
+                    let score = &self.editor.score;
                     let staff = build_staff_layout(score, &staff_opts);
                     // One row fits the height, so nothing above or below
                     // the staff (accents, count labels) is cut off on a
@@ -241,7 +235,7 @@ impl Grooph {
                     // re-centering above.
                     let editing = self.ui.mode == Mode::Edit
                         && self.playback_ctl.transport_state == TransportState::Stopped;
-                    let staff_cursor = self.staff_cursor();
+                    let staff_cursor = self.editor.cursor;
                     let followed = editing.then_some(staff_cursor);
                     if followed != self.ui.followed_cursor
                         && let Some(placed) = staff.placed(staff_cursor.measure_idx)
@@ -410,7 +404,7 @@ impl Grooph {
         let primary_beat_in_measure = self
             .editor
             .score
-            .measures
+            .measures()
             .get(m_idx)
             .map_or(0, |m| primary_beat_index(&m.time_signature(), local_tick));
         let flash_enabled = self.ui.flash_enabled;
@@ -488,7 +482,7 @@ impl Grooph {
         total_loop_ticks: f64,
         staff_space: f32,
     ) {
-        let measure = &score.measures[placed.measure_idx];
+        let measure = &score.measures()[placed.measure_idx];
         // Every onset of any voice, at the head standing for it.
         let columns: Vec<(u32, &NoteLayout)> = measure
             .onsets()
@@ -561,16 +555,8 @@ impl Grooph {
             && let Some((voice, m_idx, b_idx)) = hit_test_voice(staff, pos)
         {
             // A tap on another voice edits that voice from now on: in the
-            // metronome tab the other bar, which the editor then holds.
-            if self.metronome_mode() {
-                let Some(voice) = MetronomeVoice::of(voice) else {
-                    return;
-                };
-                self.select_voice(voice);
-                self.editor.cursor = Cursor::at(0, b_idx);
-            } else {
-                self.editor.cursor = Cursor::in_voice(m_idx, voice, b_idx);
-            }
+            // metronome tab the click bar or its counter rhythm.
+            self.editor.cursor = Cursor::in_voice(m_idx, voice, b_idx);
 
             if resp.double_clicked()
                 && let Some(tool) = all_tools()

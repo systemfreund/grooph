@@ -124,6 +124,6 @@ mod tests {
     fn gaps_fill_with_quarters_not_halves() {
         let m = Measure::new(TimeSignature::FOUR_FOUR);
         let half = DEFAULT_GRID.ticks_of(&h()).unwrap();
-        assert_eq!(m.best_fill_for_gap(half, &[]), Some(vec![q(), q()]));
+        assert_eq!(m.first_voice().best_fill_for_gap(half, &[]), Some(vec![q(), q()]));
     }
 }

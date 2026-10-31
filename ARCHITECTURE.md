@@ -51,10 +51,16 @@ spread across callers.
   Each voice keeps the meter for itself (it is filled, edited and laid out
   on its own), but only `grooph_measure::voice`, where `Measure` and
   `VoiceBar` live, can set it: no voice leaves its measure's meter.
-  A `Measure` reads and edits as its first voice (`Deref` to `VoiceBar`), so
-  single-voice code (click bars, generator, counting, notation, audio)
-  needs no change; `voices()`, `voice_mut(i)` and `push_voices` reach the
-  rest. Measures saved before voices (beats and tuplets inline) load as one
+  A `Measure` names the voice it is read or edited in: `first_voice()` is
+  the upper one, the only one of click bars, the generator, counting and
+  the audio's click; `voices()`, `voice(i)`, `voice_mut(i)` and
+  `push_voices` reach the rest, and `time_signature()` is the meter of all.
+  There is no `Deref` to the first voice, so code that forgets a lower
+  voice does not compile by accident. `Beat::is_kit` and
+  `Score::has_kit_heads` tell notes of the kit from the one line's.
+  `Score` keeps its measures private: `measures()`/`measures_mut()` give
+  the slice, and `push`, `insert`, `remove` and `truncate` keep at least
+  one measure. Measures saved before voices (beats and tuplets inline) load as one
   voice (`RawMeasure`).
 - `Beat` is a slot of the rhythm, `duration` and `tuplet_group_id`, and what
   is played in it, its `Heads` (`grooph_measure::head`): none is a rest, one a
@@ -115,10 +121,10 @@ spread across callers.
    On the one line a rest under a beam is then a stemlet, clear of the
    line; on the kit's staff it stays a rest, as drum notation writes it.
    `StaffOpts::voice_opts_for` gives each voice its stem direction.
-   The metronome's staff is one such measure: the click bar with the counter
-   rhythm as its second voice (`Grooph::metronome_staff_score`); which of
-   the two the editor holds is the app's `MetronomeVoice`, and the drawn
-   cursor is in that voice (`Grooph::staff_cursor`).
+   The metronome tab edits one such measure: the click bar with the counter
+   rhythm as its second voice. The cursor's voice is the bar being edited
+   (`MetronomeVoice` names the two), as in a kit score; `sync_click_bar`
+   writes both back to the audio settings.
    The edit cursor (`Cursor`) names its measure, voice and beat. The tools
    edit that voice (`Score::voice_at_mut`); a tap picks the voice on its
    side of the line (`hit_test_voice`); moving to a measure with fewer

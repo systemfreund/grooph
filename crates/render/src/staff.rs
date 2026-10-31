@@ -129,7 +129,7 @@ pub fn draw_staff(
             if let Some(config) = lower_counts {
                 draw_count_layer(
                     ui.painter(),
-                    &score.measures[placed.measure_idx],
+                    &score.measures()[placed.measure_idx],
                     &placed.voices,
                     &staff_opts.voice_opts_for(placed, 0),
                     placed.rect.bottom(),
@@ -162,7 +162,7 @@ pub fn beat_anchor_pos(
     measure_idx: MeasureIdx,
     tick: f64,
 ) -> Option<egui::Pos2> {
-    let measure = score.measures.get(measure_idx)?;
+    let measure = score.measures().get(measure_idx)?;
     let placed = staff.placed(measure_idx)?;
     let x = beat_anchor_x(measure, &placed.voices, placed.rect, tick)?;
     Some(egui::pos2(x, placed.rect.center().y + placed.y_offset))
@@ -189,7 +189,7 @@ pub fn current_cursor_x(
         return None;
     }
 
-    let active_measure = score.measures.get(play_idx)?;
+    let active_measure = score.measures().get(play_idx)?;
     let active_placed = staff.placed(play_idx)?;
     let next_idx = (play_idx + 1) % score.len();
     let next_placed = staff.placed(next_idx)?;
@@ -233,7 +233,7 @@ fn render_placed_measure(
 
     render_measure_at(
         ui,
-        &score.measures[placed.measure_idx],
+        &score.measures()[placed.measure_idx],
         placed.layout(),
         &per_opts,
         cursor_idx,
@@ -302,7 +302,7 @@ mod tests {
         let lower = parse_score("4/4 r:e q q q e").unwrap();
         let opts = opts();
         let mut both = upper.clone();
-        for (m, l) in both.measures.iter_mut().zip(&lower.measures) {
+        for (m, l) in both.measures_mut().iter_mut().zip(lower.measures()) {
             m.push_voices(l).unwrap();
         }
         let staff = build_staff_layout(&both, &opts);

@@ -772,7 +772,7 @@ fn try_lock<T>(state: &Mutex<T>) -> Option<MutexGuard<'_, T>> {
 /// downbeat and each primary beat, and a softer one on every other beat unit
 /// (so 7/8 clicks all seven eighths, the group starts louder).
 fn count_in_plan(score: &Score) -> Option<CountInPlan> {
-    let ts = score.measures.first()?.time_signature();
+    let ts = score.measures().first()?.time_signature();
     let ticks = DEFAULT_GRID.ticks_per_measure(&ts);
     let primaries = DEFAULT_GRID.primary_boundaries(&ts);
     let unit = DEFAULT_GRID.ticks_per_beat(&ts).max(1);
@@ -1354,14 +1354,14 @@ mod tests {
         assert_eq!(audio.sent_plan.bpm, 90);
 
         // So does an edited beat.
-        score.measures[1].toggle_beat_kind(0);
+        score.measures_mut()[1].first_voice_mut().toggle_beat_kind(0);
         audio.update(&PlayerState::Stopped, 90, &score, 0.0);
         let edited = built(&audio);
         assert!(!Arc::ptr_eq(&edited, &slower));
         assert!(Arc::ptr_eq(&edited, &audio.sent_plan));
 
         // And a new meter with the same number of bars.
-        score.measures[0] = Measure::new(TimeSignature::THREE_FOUR);
+        score.measures_mut()[0] = Measure::new(TimeSignature::THREE_FOUR);
         audio.update(&PlayerState::Stopped, 90, &score, 0.0);
         let remetered = built(&audio);
         assert!(!Arc::ptr_eq(&remetered, &edited));

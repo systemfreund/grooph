@@ -48,12 +48,12 @@ fn pick<T: Copy>(rng: &mut Rng, items: &[T]) -> T {
 /// Why `m` is not a valid measure, if it is not.
 fn check_invariants(m: &Measure) -> Result<(), String> {
     let mut total = 0;
-    for (i, b) in m.beats().iter().enumerate() {
+    for (i, b) in m.first_voice().beats().iter().enumerate() {
         match DEFAULT_GRID.ticks_of(&b.duration) {
             Some(0) | None => return Err(format!("beat {i} ({:?}) has no length", b.duration)),
             Some(t) => total += t,
         }
-        if b.duration.is_tuplet() && m.tuplet_group_at(i).is_none() {
+        if b.duration.is_tuplet() && m.first_voice().tuplet_group_at(i).is_none() {
             return Err(format!("tuplet beat {i} is outside a group"));
         }
         if !b.duration.is_tuplet() && b.tuplet_group_id.is_some() {
@@ -64,13 +64,13 @@ fn check_invariants(m: &Measure) -> Result<(), String> {
     if total != want {
         return Err(format!("beats take {total} ticks, the meter {want}"));
     }
-    for g in m.tuplet_groups() {
-        let Some(anchor) = m.tuplets().get(g.id) else {
+    for g in m.first_voice().tuplet_groups() {
+        let Some(anchor) = m.first_voice().tuplets().get(g.id) else {
             return Err(format!("group {:?} has no anchor", g.id));
         };
         // Groups of one ratio can have different note values, so each is
         // measured against its own anchor.
-        let span: u32 = m.beats()[g.start_idx..=g.end_idx]
+        let span: u32 = m.first_voice().beats()[g.start_idx..=g.end_idx]
             .iter()
             .map(|b| DEFAULT_GRID.ticks_of(&b.duration).unwrap())
             .sum();
@@ -92,48 +92,48 @@ fn random_edit(
     durations: &[Duration],
     meters: &[TimeSignature],
 ) -> String {
-    let idx = rng.below(m.beats().len());
+    let idx = rng.below(m.first_voice().beats().len());
     match rng.below(12) {
         0..=3 => {
             let d = pick(rng, durations);
             let beat = if rng.chance(0.3) { Beat::rest(d) } else { Beat::note(d) };
-            let ok = m.set_beat(idx, beat).is_ok();
+            let ok = m.first_voice_mut().set_beat(idx, beat).is_ok();
             format!("set_beat({idx}, {beat:?}) ok={ok}")
         }
         4 => {
-            m.remove(idx);
+            m.first_voice_mut().remove(idx);
             format!("remove({idx})")
         }
         5 => {
-            m.toggle_beat_kind(idx);
+            m.first_voice_mut().toggle_beat_kind(idx);
             format!("toggle_beat_kind({idx})")
         }
         6 => {
-            m.toggle_dotted(idx);
+            m.first_voice_mut().toggle_dotted(idx);
             format!("toggle_dotted({idx})")
         }
         7 => {
             if rng.chance(0.5) {
-                m.toggle_accent(idx);
+                m.first_voice_mut().toggle_accent(idx);
                 format!("toggle_accent({idx})")
             } else {
-                m.toggle_soft(idx);
+                m.first_voice_mut().toggle_soft(idx);
                 format!("toggle_soft({idx})")
             }
         }
         8 => {
             let spec = if rng.chance(0.3) { None } else { Some(pick(rng, &CYCLE_TUPLET_SPECS)) };
             let overwrite = rng.chance(0.5);
-            m.set_tuplet(idx, spec, overwrite);
+            m.first_voice_mut().set_tuplet(idx, spec, overwrite);
             format!("set_tuplet({idx}, {spec:?}, {overwrite})")
         }
         9 => {
-            m.dissolve_tuplet_group(idx);
+            m.first_voice_mut().dissolve_tuplet_group(idx);
             format!("dissolve_tuplet_group({idx})")
         }
         10 => {
             let base = pick(rng, &[NoteValue::Quarter, NoteValue::Eighth, NoteValue::Sixteenth]);
-            m.modify_beat(idx, base, None);
+            m.first_voice_mut().modify_beat(idx, base, None);
             format!("modify_beat({idx}, {base:?})")
         }
         _ => {
@@ -181,7 +181,7 @@ fn random_score(rng: &mut Rng, durations: &[Duration], meters: &[TimeSignature])
 
 /// Which beats share a tuplet group, independent of the group ids.
 fn group_partition(m: &Measure) -> Vec<Option<usize>> {
-    let beats = m.beats();
+    let beats = m.first_voice().beats();
     beats
         .iter()
         .map(|b| {
@@ -197,7 +197,7 @@ fn score_difference(a: &Score, b: &Score) -> Option<String> {
     if a.len() != b.len() {
         return Some(format!("{} measures, then {}", a.len(), b.len()));
     }
-    for (i, (ma, mb)) in a.measures.iter().zip(&b.measures).enumerate() {
+    for (i, (ma, mb)) in a.measures().iter().zip(b.measures()).enumerate() {
         if ma.time_signature() != mb.time_signature() {
             return Some(format!(
                 "measure {i}: meter {} became {}",
@@ -205,7 +205,7 @@ fn score_difference(a: &Score, b: &Score) -> Option<String> {
                 mb.time_signature()
             ));
         }
-        if ma.beats() != mb.beats() {
+        if ma.first_voice().beats() != mb.first_voice().beats() {
             return Some(format!("measure {i}: {ma:?} became {mb:?}"));
         }
         if group_partition(ma) != group_partition(mb) {
@@ -220,9 +220,9 @@ fn score_difference(a: &Score, b: &Score) -> Option<String> {
 /// model allows them, but the editor does not build them and the notation
 /// cannot write them: it reads a group's span from its first note.
 fn has_regrouped_tuplets(m: &Measure) -> bool {
-    m.tuplet_groups().iter().any(|g| {
-        let base = m.tuplets().get(g.id).map(|a| a.base_hint);
-        m.beats()[g.start_idx..=g.end_idx]
+    m.first_voice().tuplet_groups().iter().any(|g| {
+        let base = m.first_voice().tuplets().get(g.id).map(|a| a.base_hint);
+        m.first_voice().beats()[g.start_idx..=g.end_idx]
             .iter()
             .any(|b| b.duration.as_tuplet_spec().map(|s| s.base) != base)
     })
@@ -234,7 +234,7 @@ fn run_notation_round_trips(seed: u64, scores: usize) {
     let mut rng = Rng::new(seed);
     for i in 0..scores {
         let score = random_score(&mut rng, &durations, &meters);
-        if score.measures.iter().any(has_regrouped_tuplets) {
+        if score.measures().iter().any(has_regrouped_tuplets) {
             continue;
         }
         let text = format_score(&score)

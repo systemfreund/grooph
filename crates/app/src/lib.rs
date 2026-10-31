@@ -264,7 +264,7 @@ impl CountingBase {
             return "Off".to_string();
         };
         let ts = score
-            .measures
+            .measures()
             .iter()
             .map(|m| m.time_signature())
             .find(|ts| subdivision.fits(ts))
@@ -279,7 +279,7 @@ impl CountingBase {
     /// Whether the subdivision counts sensibly in some measure of `score`.
     fn fits(self, score: &Score) -> bool {
         self.subdivision()
-            .is_none_or(|s| score.measures.iter().any(|m| s.fits(&m.time_signature())))
+            .is_none_or(|s| score.measures().iter().any(|m| s.fits(&m.time_signature())))
     }
 }
 
@@ -534,7 +534,6 @@ impl Grooph {
             cursor: self.editor.cursor,
             counter: self.metronome_mode().then(|| self.playback_ctl.audio_cfg.counter.clone()),
             click: self.metronome_mode().then(|| self.playback_ctl.audio_cfg.click.clone()),
-            voice: self.edited_voice(),
         }
     }
 
@@ -564,8 +563,8 @@ impl Grooph {
     }
 
     fn undo(&mut self) {
-        // The bar being edited goes back to its voice first: the restored
-        // snapshot may hold the other one.
+        // The audio settings take the edited bar first: the restored
+        // snapshot brings back its own.
         self.sync_click_bar();
         let current = self.current_snapshot();
         if let Some(prev) = self.editor.history.pop_undo(current) {
@@ -573,7 +572,6 @@ impl Grooph {
             self.editor.cursor = prev.cursor;
             if let Some(counter) = prev.counter {
                 self.playback_ctl.audio_cfg.counter = counter;
-                self.editor.metronome.voice = prev.voice;
             }
             if let Some(click) = prev.click {
                 self.playback_ctl.audio_cfg.click = click;
@@ -584,8 +582,8 @@ impl Grooph {
     }
 
     fn redo(&mut self) {
-        // The bar being edited goes back to its voice first: the restored
-        // snapshot may hold the other one.
+        // The audio settings take the edited bar first: the restored
+        // snapshot brings back its own.
         self.sync_click_bar();
         let current = self.current_snapshot();
         if let Some(next) = self.editor.history.pop_redo(current) {
@@ -593,7 +591,6 @@ impl Grooph {
             self.editor.cursor = next.cursor;
             if let Some(counter) = next.counter {
                 self.playback_ctl.audio_cfg.counter = counter;
-                self.editor.metronome.voice = next.voice;
             }
             if let Some(click) = next.click {
                 self.playback_ctl.audio_cfg.click = click;
@@ -651,7 +648,7 @@ impl Grooph {
             let current = app.current_measure();
             let new_measure = current.empty_like(current.time_signature());
             let insert_at = app.editor.cursor.measure_idx + 1;
-            app.editor.score.measures.insert(insert_at, new_measure);
+            app.editor.score.insert(insert_at, new_measure);
             app.editor.cursor.measure_idx = insert_at;
             app.editor.cursor.beat_idx = 0;
             true
@@ -666,7 +663,7 @@ impl Grooph {
         }
         self.with_undo_snapshot(|app| {
             let idx = app.editor.cursor.measure_idx;
-            app.editor.score.measures.remove(idx);
+            app.editor.score.remove(idx);
             app.editor.cursor = app.editor.score.clamp_cursor(app.editor.cursor);
             true
         });
@@ -870,7 +867,10 @@ impl Grooph {
         match template.duration {
             Duration::Tuplet(TupletSpec { n, .. }) => {
                 for i in 0..n {
-                    measure.set_beat(i as BeatIdx, Beat::note(template.duration)).unwrap();
+                    measure
+                        .first_voice_mut()
+                        .set_beat(i as BeatIdx, Beat::note(template.duration))
+                        .unwrap();
                 }
             }
             Duration::Dotted { .. } => {
@@ -878,14 +878,14 @@ impl Grooph {
                     BeatKind::Note => Beat::note(template.duration),
                     BeatKind::Rest => Beat::rest(template.duration),
                 };
-                measure.set_beat(0, beat).unwrap();
+                measure.first_voice_mut().set_beat(0, beat).unwrap();
             }
             Duration::Simple(..) => {
                 if template.accented {
-                    measure.toggle_accent(0);
+                    measure.first_voice_mut().toggle_accent(0);
                 }
                 if template.soft {
-                    measure.toggle_soft(0);
+                    measure.first_voice_mut().toggle_soft(0);
                 }
             }
         }
@@ -1076,10 +1076,10 @@ impl Grooph {
 
     fn default_measure() -> Measure {
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
-        m.set_beat(0, Beat::note(q())).unwrap();
-        m.set_beat(1, Beat::note(q())).unwrap();
-        m.set_beat(2, Beat::note(q())).unwrap();
-        m.set_beat(3, Beat::note(q())).unwrap();
+        m.first_voice_mut().set_beat(0, Beat::note(q())).unwrap();
+        m.first_voice_mut().set_beat(1, Beat::note(q())).unwrap();
+        m.first_voice_mut().set_beat(2, Beat::note(q())).unwrap();
+        m.first_voice_mut().set_beat(3, Beat::note(q())).unwrap();
         m
     }
 
@@ -1350,14 +1350,18 @@ mod tests {
         let mut count = 0;
         for template in templates.chain([dotted, accented, soft]) {
             let measure = Grooph::build_button_measure(template);
-            let ticks: u32 =
-                measure.beats().iter().map(|b| DEFAULT_GRID.ticks_of(&b.duration).unwrap()).sum();
+            let ticks: u32 = measure
+                .first_voice()
+                .beats()
+                .iter()
+                .map(|b| DEFAULT_GRID.ticks_of(&b.duration).unwrap())
+                .sum();
             let ts = measure.time_signature();
             assert_eq!(ticks, DEFAULT_GRID.ticks_per_measure(&ts), "{:?}", template.duration);
-            let first = measure.beats()[0];
+            let first = measure.first_voice().beats()[0];
             assert_eq!((first.kind(), first.duration), (template.kind, template.duration));
             if !template.duration.is_tuplet() {
-                assert_eq!(measure.beats().len(), 1, "{:?}", template.duration);
+                assert_eq!(measure.first_voice().beats().len(), 1, "{:?}", template.duration);
                 assert_eq!((first.accented(), first.soft()), (template.accented, template.soft));
             }
             count += 1;
@@ -1526,8 +1530,8 @@ mod tests {
         for d in [q(), e(), s(), t8()] {
             let mut m = Measure::new(TimeSignature::FOUR_FOUR);
             let mut i = 0;
-            while i < m.beats().len() {
-                m.set_beat(i, Beat::note(d)).unwrap();
+            while i < m.first_voice().beats().len() {
+                m.first_voice_mut().set_beat(i, Beat::note(d)).unwrap();
                 i += 1;
             }
             app.editor.score = Score::new(vec![m.clone(), m]);
@@ -1839,7 +1843,7 @@ mod tests {
         let query = format!("v=2&bpm=96&r={}", groove.replace(' ', "+").replace(';', "%3B"));
         app.open_link(grooph_link::parse_query(&query).unwrap().unwrap());
         assert_eq!(app.editor.score.staff, StaffKind::Kit);
-        assert_eq!(app.editor.score.measures[0].voices().len(), 2);
+        assert_eq!(app.editor.score.measures()[0].voices().len(), 2);
         // Every tab draws it.
         for (i, tab) in [Tab::Practice, Tab::Edit, Tab::Practice].into_iter().enumerate() {
             app.select_tab(tab);

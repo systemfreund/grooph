@@ -346,9 +346,9 @@ mod tests {
         // 4/4 with eight eighth notes -> 2 groups of four, one per half bar
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
         for i in 0..8 {
-            m.set_beat(i, Beat::note(e())).unwrap();
+            m.first_voice_mut().set_beat(i, Beat::note(e())).unwrap();
         }
-        let plan = compute_beam_plan(&m);
+        let plan = compute_beam_plan(m.first_voice());
         assert_eq!(plan.groups.len(), 2, "expected 2 groups of eighths in 4/4");
         for (gi, g) in plan.groups.iter().enumerate() {
             assert_eq!(g.beat_indices.len(), 4, "group {} should have 4 notes", gi);
@@ -361,7 +361,8 @@ mod tests {
     fn eighths_join_in_fours_only_inside_a_half_of_eighths() {
         use grooph_measure::notation::parse_score;
         let groups_of = |s: &str| -> Vec<Vec<usize>> {
-            let plan = compute_beam_plan(&parse_score(s).unwrap().measures.remove(0));
+            let plan =
+                compute_beam_plan(parse_score(s).unwrap().into_measures().remove(0).first_voice());
             plan.groups.into_iter().map(|g| g.beat_indices).collect()
         };
         // 2/4: the whole bar is one half.
@@ -392,7 +393,9 @@ mod tests {
     #[test]
     fn rests_between_notes_sit_under_the_beam() {
         use grooph_measure::notation::parse_score;
-        let plan_of = |s: &str| compute_beam_plan(&parse_score(s).unwrap().measures.remove(0));
+        let plan_of = |s: &str| {
+            compute_beam_plan(parse_score(s).unwrap().into_measures().remove(0).first_voice())
+        };
         // The beams run on over the rests between two notes.
         let plan = plan_of("1/4 s r:s r:s s");
         assert_eq!(plan.groups.len(), 1);
@@ -415,10 +418,10 @@ mod tests {
     #[test]
     fn beamed_rests_carry_the_beams_of_their_beat() {
         use grooph_measure::notation::parse_score;
-        let m = parse_score("2/4 s r:s r:s r:s r:s r:s r:s r:s").unwrap().measures.remove(0);
-        assert!(compute_beam_plan(&m).groups.is_empty());
+        let m = parse_score("2/4 s r:s r:s r:s r:s r:s r:s r:s").unwrap().into_measures().remove(0);
+        assert!(compute_beam_plan(m.first_voice()).groups.is_empty());
         // Each beat's rests run on under its beams, also without a note.
-        let plan = compute_beam_plan_with(&m, true);
+        let plan = compute_beam_plan_with(m.first_voice(), true);
         assert_eq!(plan.groups.len(), 2);
         assert_eq!(plan.groups[0].beat_indices, vec![0, 1, 2, 3]);
         assert_eq!(plan.groups[1].beat_indices, vec![4, 5, 6, 7]);
@@ -428,7 +431,9 @@ mod tests {
     #[test]
     fn thirty_seconds_break_the_secondary_beams_at_each_eighth() {
         use grooph_measure::notation::parse_score;
-        let plan_of = |s: &str| compute_beam_plan(&parse_score(s).unwrap().measures.remove(0));
+        let plan_of = |s: &str| {
+            compute_beam_plan(parse_score(s).unwrap().into_measures().remove(0).first_voice())
+        };
         // Eight thirty-seconds: 4 + 4 under one eighth beam.
         let plan = plan_of("1/4 th th th th th th th th");
         assert_eq!(plan.groups.len(), 1);
@@ -452,7 +457,9 @@ mod tests {
     #[test]
     fn thirty_seconds_run_through_a_group_of_three_sixteenths() {
         use grooph_measure::notation::parse_score;
-        let plan_of = |s: &str| compute_beam_plan(&parse_score(s).unwrap().measures.remove(0));
+        let plan_of = |s: &str| {
+            compute_beam_plan(parse_score(s).unwrap().into_measures().remove(0).first_voice())
+        };
         // Two levels above the thirty-second in a dotted-eighth beat is the
         // whole beat: six thirty-seconds under three beams, not 4 + 2.
         let plan = plan_of("6/16 th th th th th th th th th th th th");
@@ -472,12 +479,12 @@ mod tests {
         // In 4/4: Eighth rest, then three eighth‑tuplets starting on the offbeat, which can span a quarter boundary.
         // The three tuplet notes must remain in one BeamGroup even if a primary boundary lies between them.
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
-        m.set_beat(0, Beat::rest(e())).unwrap(); // offset by an eighth
-        m.set_beat(1, Beat::note(t8())).unwrap();
-        m.set_beat(2, Beat::note(t8())).unwrap();
-        m.set_beat(3, Beat::note(t8())).unwrap();
-        m.set_beat(4, Beat::note(e())).unwrap();
-        let plan = compute_beam_plan(&m);
+        m.first_voice_mut().set_beat(0, Beat::rest(e())).unwrap(); // offset by an eighth
+        m.first_voice_mut().set_beat(1, Beat::note(t8())).unwrap();
+        m.first_voice_mut().set_beat(2, Beat::note(t8())).unwrap();
+        m.first_voice_mut().set_beat(3, Beat::note(t8())).unwrap();
+        m.first_voice_mut().set_beat(4, Beat::note(e())).unwrap();
+        let plan = compute_beam_plan(m.first_voice());
 
         // Find the group that contains note index 1 (first tuplet note)
         let tuplet_group =
@@ -494,13 +501,13 @@ mod tests {
     #[test]
     fn last_note_of_tuplet_crosses_primary_boundary() {
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
-        m.set_beat(0, Beat::note(s())).unwrap(); // offset by a sixteenth
-        m.set_beat(1, Beat::note(t8())).unwrap();
-        m.set_beat(2, Beat::note(t8())).unwrap();
-        m.set_beat(3, Beat::note(t8())).unwrap();
-        m.set_beat(4, Beat::note(e())).unwrap();
-        m.set_beat(5, Beat::rest(e())).unwrap();
-        let plan = compute_beam_plan(&m);
+        m.first_voice_mut().set_beat(0, Beat::note(s())).unwrap(); // offset by a sixteenth
+        m.first_voice_mut().set_beat(1, Beat::note(t8())).unwrap();
+        m.first_voice_mut().set_beat(2, Beat::note(t8())).unwrap();
+        m.first_voice_mut().set_beat(3, Beat::note(t8())).unwrap();
+        m.first_voice_mut().set_beat(4, Beat::note(e())).unwrap();
+        m.first_voice_mut().set_beat(5, Beat::rest(e())).unwrap();
+        let plan = compute_beam_plan(m.first_voice());
 
         // The last beat (t8 @ 3) of the tuplet group crosses the primary boundary,
         // because its absolute location+duration 1.917 + 0.333 = 2.25.
@@ -514,10 +521,10 @@ mod tests {
     fn beaming_by_2_3_2_pattern_in_7_8() {
         let mut m = Measure::new(TimeSignature::SEVEN_EIGHT);
         for i in 0..7 {
-            m.set_beat(i, Beat::note(e())).unwrap();
+            m.first_voice_mut().set_beat(i, Beat::note(e())).unwrap();
         }
 
-        let plan = compute_beam_plan(&m);
+        let plan = compute_beam_plan(m.first_voice());
         assert_eq!(plan.groups.len(), 3);
 
         let g0 = &plan.groups[0];
@@ -541,9 +548,9 @@ mod tests {
     fn beaming_follows_the_picked_grouping_in_7_8() {
         let mut m = Measure::new(TimeSignature::SEVEN_EIGHT.with_grouping(1));
         for i in 0..7 {
-            m.set_beat(i, Beat::note(e())).unwrap();
+            m.first_voice_mut().set_beat(i, Beat::note(e())).unwrap();
         }
-        let plan = compute_beam_plan(&m);
+        let plan = compute_beam_plan(m.first_voice());
         let groups: Vec<_> = plan.groups.iter().map(|g| g.beat_indices.clone()).collect();
         assert_eq!(groups, [vec![0, 1], vec![2, 3], vec![4, 5, 6]]);
     }
@@ -553,16 +560,16 @@ mod tests {
         // Expected primary beaming by 2+3+2 with tuplet precedence -> groups:
         // [0,1,2], [3,4,5], [6,7]
         let mut m = Measure::new(TimeSignature::SEVEN_EIGHT);
-        m.set_beat(0, Beat::note(e())).unwrap();
-        m.set_beat(1, Beat::note(e())).unwrap();
-        m.set_beat(2, Beat::note(e())).unwrap();
-        m.set_beat(3, Beat::note(t8())).unwrap();
-        m.set_beat(4, Beat::note(t8())).unwrap();
-        m.set_beat(5, Beat::note(t8())).unwrap();
-        m.set_beat(6, Beat::note(e())).unwrap();
-        m.set_beat(7, Beat::note(e())).unwrap();
+        m.first_voice_mut().set_beat(0, Beat::note(e())).unwrap();
+        m.first_voice_mut().set_beat(1, Beat::note(e())).unwrap();
+        m.first_voice_mut().set_beat(2, Beat::note(e())).unwrap();
+        m.first_voice_mut().set_beat(3, Beat::note(t8())).unwrap();
+        m.first_voice_mut().set_beat(4, Beat::note(t8())).unwrap();
+        m.first_voice_mut().set_beat(5, Beat::note(t8())).unwrap();
+        m.first_voice_mut().set_beat(6, Beat::note(e())).unwrap();
+        m.first_voice_mut().set_beat(7, Beat::note(e())).unwrap();
 
-        let plan = compute_beam_plan(&m);
+        let plan = compute_beam_plan(m.first_voice());
         assert_eq!(plan.groups.len(), 3);
 
         let g0 = &plan.groups[0];
@@ -587,17 +594,17 @@ mod tests {
         // The eighth notes are expected to be part of the first beam group, since the measure still
         // fits the 2+3+2 pattern, despite the 16th-note triplet at the beginning.
         let mut m = Measure::new(TimeSignature::SEVEN_EIGHT);
-        m.set_beat(0, Beat::note(t16())).unwrap();
-        m.set_beat(1, Beat::note(t16())).unwrap();
-        m.set_beat(2, Beat::note(t16())).unwrap();
-        m.set_beat(3, Beat::note(e())).unwrap();
-        m.set_beat(4, Beat::note(e())).unwrap();
-        m.set_beat(5, Beat::note(e())).unwrap();
-        m.set_beat(6, Beat::note(e())).unwrap();
-        m.set_beat(7, Beat::note(e())).unwrap();
-        m.set_beat(8, Beat::note(e())).unwrap();
+        m.first_voice_mut().set_beat(0, Beat::note(t16())).unwrap();
+        m.first_voice_mut().set_beat(1, Beat::note(t16())).unwrap();
+        m.first_voice_mut().set_beat(2, Beat::note(t16())).unwrap();
+        m.first_voice_mut().set_beat(3, Beat::note(e())).unwrap();
+        m.first_voice_mut().set_beat(4, Beat::note(e())).unwrap();
+        m.first_voice_mut().set_beat(5, Beat::note(e())).unwrap();
+        m.first_voice_mut().set_beat(6, Beat::note(e())).unwrap();
+        m.first_voice_mut().set_beat(7, Beat::note(e())).unwrap();
+        m.first_voice_mut().set_beat(8, Beat::note(e())).unwrap();
 
-        let plan = compute_beam_plan(&m);
+        let plan = compute_beam_plan(m.first_voice());
         assert_eq!(plan.groups.len(), 3);
 
         let g0 = &plan.groups[0];
@@ -620,25 +627,25 @@ mod tests {
     fn beaming_with_t8_triplet_where_all_beats_are_subdivided_in_t16() {
         let mut m = Measure::new(TimeSignature::ONE_FOUR);
         // First, create a t8 tuplet group
-        m.set_beat(0, Beat::note(t8())).unwrap();
+        m.first_voice_mut().set_beat(0, Beat::note(t8())).unwrap();
         // Subdivide all 8 eighths into 16th notes
         for i in 0..=5 {
-            m.set_beat(i, Beat::note(t16())).unwrap();
+            m.first_voice_mut().set_beat(i, Beat::note(t16())).unwrap();
         }
 
-        let plan = compute_beam_plan(&m);
+        let plan = compute_beam_plan(m.first_voice());
         assert_eq!(plan.groups[0].beat_indices, vec![0, 1, 2, 3, 4, 5]);
     }
 
     #[test]
     fn beaming_with_t32_triplet_with_merged_t16() {
         let mut m = Measure::new(TimeSignature::ONE_FOUR);
-        m.set_beat(0, Beat::note(t32())).unwrap();
-        m.set_beat(1, Beat::note(t32())).unwrap();
-        m.set_beat(2, Beat::note(t32())).unwrap();
-        m.set_beat(0, Beat::note(t16())).unwrap();
+        m.first_voice_mut().set_beat(0, Beat::note(t32())).unwrap();
+        m.first_voice_mut().set_beat(1, Beat::note(t32())).unwrap();
+        m.first_voice_mut().set_beat(2, Beat::note(t32())).unwrap();
+        m.first_voice_mut().set_beat(0, Beat::note(t16())).unwrap();
 
-        let plan = compute_beam_plan(&m);
+        let plan = compute_beam_plan(m.first_voice());
         assert_eq!(plan.groups[0].beat_indices, vec![0, 1]);
         assert_eq!(plan.groups[0].beam_counts, vec![2, 3]);
         assert_eq!(plan.groups[0].continuity, vec![2]);
@@ -652,15 +659,15 @@ mod tests {
         // Expectation: No beam between note-idx 2 and 3; i.e., the two tuplet groups are not connected.
         let mut m = Measure::new(TimeSignature::TWO_FOUR);
         // First tuplet group (fills one quarter)
-        m.set_beat(0, Beat::note(t8())).unwrap();
-        m.set_beat(1, Beat::note(t8())).unwrap();
-        m.set_beat(2, Beat::note(t8())).unwrap();
+        m.first_voice_mut().set_beat(0, Beat::note(t8())).unwrap();
+        m.first_voice_mut().set_beat(1, Beat::note(t8())).unwrap();
+        m.first_voice_mut().set_beat(2, Beat::note(t8())).unwrap();
         // Second tuplet group (fills the second quarter)
-        m.set_beat(3, Beat::note(t8())).unwrap();
-        m.set_beat(4, Beat::note(t8())).unwrap();
-        m.set_beat(5, Beat::note(t8())).unwrap();
+        m.first_voice_mut().set_beat(3, Beat::note(t8())).unwrap();
+        m.first_voice_mut().set_beat(4, Beat::note(t8())).unwrap();
+        m.first_voice_mut().set_beat(5, Beat::note(t8())).unwrap();
 
-        let plan = compute_beam_plan(&m);
+        let plan = compute_beam_plan(m.first_voice());
 
         // We expect two separate groups: [0,1,2] and [3,4,5]
         assert_eq!(plan.groups.len(), 2, "zwei tuplet-gruppen sollten nicht verbunden werden");
@@ -686,19 +693,19 @@ mod tests {
     fn beaming_two_consecutive_eighth_tuplets_not_joined_when_first_tuplet_contains_rest() {
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
         // Triplet 1
-        m.set_beat(0, Beat::rest(t8())).unwrap();
-        m.set_beat(1, Beat::note(t8())).unwrap();
-        m.set_beat(2, Beat::note(t8())).unwrap();
+        m.first_voice_mut().set_beat(0, Beat::rest(t8())).unwrap();
+        m.first_voice_mut().set_beat(1, Beat::note(t8())).unwrap();
+        m.first_voice_mut().set_beat(2, Beat::note(t8())).unwrap();
 
         // The next note is not a triplet
-        m.set_beat(3, Beat::note(e())).unwrap();
+        m.first_voice_mut().set_beat(3, Beat::note(e())).unwrap();
 
-        let mut plan = compute_beam_plan(&m);
+        let mut plan = compute_beam_plan(m.first_voice());
         assert_eq!(plan.groups[0].beat_indices, vec![1, 2]);
 
         // Now change the note after the 1st triplet to a triplet
-        m.set_beat(3, Beat::note(t8())).unwrap();
-        plan = compute_beam_plan(&m);
+        m.first_voice_mut().set_beat(3, Beat::note(t8())).unwrap();
+        plan = compute_beam_plan(m.first_voice());
         assert_eq!(plan.groups[0].beat_indices, vec![1, 2]);
     }
 
@@ -706,18 +713,18 @@ mod tests {
     fn beaming_two_consecutive_eighth_tuplets_not_joined_when_first_tuplet_is_subdivided() {
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
         // Create two triplet groups
-        m.set_beat(0, Beat::rest(t8())).unwrap();
-        m.set_beat(1, Beat::note(t8())).unwrap();
-        m.set_beat(2, Beat::note(t8())).unwrap();
-        m.set_beat(3, Beat::note(t8())).unwrap();
+        m.first_voice_mut().set_beat(0, Beat::rest(t8())).unwrap();
+        m.first_voice_mut().set_beat(1, Beat::note(t8())).unwrap();
+        m.first_voice_mut().set_beat(2, Beat::note(t8())).unwrap();
+        m.first_voice_mut().set_beat(3, Beat::note(t8())).unwrap();
 
-        let mut plan = compute_beam_plan(&m);
+        let mut plan = compute_beam_plan(m.first_voice());
         assert_eq!(plan.groups[0].beat_indices, vec![1, 2]);
 
         // Subdivide the first note of the first triplet into two notes
-        m.set_beat(0, Beat::rest(t16())).unwrap();
+        m.first_voice_mut().set_beat(0, Beat::rest(t16())).unwrap();
 
-        plan = compute_beam_plan(&m);
+        plan = compute_beam_plan(m.first_voice());
         // We expect the last two 8th notes of the first triplet not to be joined with the next triplet
         assert_eq!(plan.groups[0].beat_indices, vec![2, 3]);
     }
@@ -725,13 +732,13 @@ mod tests {
     #[test]
     fn fully_beamed_when_t8_triplet_is_completely_subdivided_into_t16() {
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
-        m.set_beat(0, Beat::rest(e())).unwrap(); // offset by an eigth
-        m.set_beat(1, Beat::note(t8())).unwrap();
+        m.first_voice_mut().set_beat(0, Beat::rest(e())).unwrap(); // offset by an eigth
+        m.first_voice_mut().set_beat(1, Beat::note(t8())).unwrap();
         for i in 1..=6 {
-            m.set_beat(i, Beat::note(t16())).unwrap();
+            m.first_voice_mut().set_beat(i, Beat::note(t16())).unwrap();
         }
 
-        let plan = compute_beam_plan(&m);
+        let plan = compute_beam_plan(m.first_voice());
         assert_eq!(plan.groups[0].beat_indices, vec![1, 2, 3, 4, 5, 6]);
     }
 }

@@ -620,7 +620,9 @@ fn draw(settings: &GeneratorSettings, rng: &mut Rng) -> (Vec<spelling::Drawn>, s
 fn write_measure(ts: TimeSignature, beats: &[(Duration, bool)]) -> Result<Measure, MeasureError> {
     let mut measure = Measure::new(ts);
     for (idx, &(duration, is_note)) in beats.iter().enumerate() {
-        measure.set_beat(idx, Beat::new(duration, if is_note { Note } else { Rest }))?;
+        measure
+            .first_voice_mut()
+            .set_beat(idx, Beat::new(duration, if is_note { Note } else { Rest }))?;
     }
     Ok(measure)
 }
@@ -690,8 +692,14 @@ mod tests {
 
     /// Ticks at which the notes of `m` start.
     fn note_onsets(m: &Measure) -> Vec<u32> {
-        let onsets = DEFAULT_GRID.compute_onset_ticks(m.beats());
-        m.beats().iter().zip(onsets).filter(|(b, _)| b.is_note()).map(|(_, t)| t).collect()
+        let onsets = DEFAULT_GRID.compute_onset_ticks(m.first_voice().beats());
+        m.first_voice()
+            .beats()
+            .iter()
+            .zip(onsets)
+            .filter(|(b, _)| b.is_note())
+            .map(|(_, t)| t)
+            .collect()
     }
 
     /// The figures drawn for one measure.
@@ -733,8 +741,12 @@ mod tests {
         let sixteenth = DEFAULT_GRID.ticks_of(&crate::duration::s()).unwrap();
         for f in all_patterns().map(|p| p.figure(FigureId(0), 1)) {
             let m = f.measure();
-            let ticks: u32 =
-                m.beats().iter().map(|b| DEFAULT_GRID.ticks_of(&b.duration).unwrap()).sum();
+            let ticks: u32 = m
+                .first_voice()
+                .beats()
+                .iter()
+                .map(|b| DEFAULT_GRID.ticks_of(&b.duration).unwrap())
+                .sum();
             assert_eq!(ticks, DEFAULT_GRID.ticks_per_measure(&f.span.time_signature()), "{f:?}");
             let slot =
                 if f.pattern.triplet { DEFAULT_GRID.ticks_of(&t8()).unwrap() } else { sixteenth };
@@ -750,22 +762,22 @@ mod tests {
         for cell in figures_of(BeatSpan::Quarter) {
             let cells = [cell; 4];
             let m = build_measure(TimeSignature::FOUR_FOUR, &cells).expect("figure must build");
-            assert_eq!(m.beats(), &expected_beats(&cells), "{:?}", cell.pattern());
+            assert_eq!(m.first_voice().beats(), &expected_beats(&cells), "{:?}", cell.pattern());
         }
         for cell in figures_of(BeatSpan::DottedQuarter) {
             let cells = [cell; 4];
             let m = build_measure(TimeSignature::TWELVE_EIGHT, &cells).expect("figure must build");
-            assert_eq!(m.beats(), &expected_beats(&cells), "{:?}", cell.pattern());
+            assert_eq!(m.first_voice().beats(), &expected_beats(&cells), "{:?}", cell.pattern());
         }
         // 12/16 = 3+3+3+3, 10/16 = 3+3+2+2.
         for three in figures_of(BeatSpan::DottedEighth) {
             let cells = [three; 4];
             let m = build_measure(ts(12, 16), &cells).expect("figure must build");
-            assert_eq!(m.beats(), &expected_beats(&cells), "{:?}", three.pattern());
+            assert_eq!(m.first_voice().beats(), &expected_beats(&cells), "{:?}", three.pattern());
             for two in figures_of(BeatSpan::Eighth) {
                 let cells = [three, three, two, two];
                 let m = build_measure(ts(10, 16), &cells).expect("figure must build");
-                assert_eq!(m.beats(), &expected_beats(&cells));
+                assert_eq!(m.first_voice().beats(), &expected_beats(&cells));
             }
         }
     }
@@ -777,14 +789,14 @@ mod tests {
             for b in figures_of(BeatSpan::Quarter) {
                 let cells = [a, b, b, a];
                 let m = build_measure(TimeSignature::FOUR_FOUR, &cells).expect("pair must build");
-                assert_eq!(m.beats(), &expected_beats(&cells));
+                assert_eq!(m.first_voice().beats(), &expected_beats(&cells));
             }
         }
         for a in figures_of(BeatSpan::DottedQuarter) {
             for b in figures_of(BeatSpan::DottedQuarter) {
                 let cells = [a, b];
                 let m = build_measure(TimeSignature::SIX_EIGHT, &cells).expect("pair must build");
-                assert_eq!(m.beats(), &expected_beats(&cells));
+                assert_eq!(m.first_voice().beats(), &expected_beats(&cells));
             }
         }
     }
@@ -797,10 +809,10 @@ mod tests {
             for two in figures_of(BeatSpan::Quarter).filter(|c| !c.pattern.triplet) {
                 let five = [three, two];
                 let m = build_measure(TimeSignature::FIVE_EIGHT, &five).expect("5/8 must build");
-                assert_eq!(m.beats(), &expected_beats(&five));
+                assert_eq!(m.first_voice().beats(), &expected_beats(&five));
                 let seven = [two, three, two];
                 let m = build_measure(TimeSignature::SEVEN_EIGHT, &seven).expect("7/8 must build");
-                assert_eq!(m.beats(), &expected_beats(&seven));
+                assert_eq!(m.first_voice().beats(), &expected_beats(&seven));
             }
         }
     }
@@ -809,8 +821,11 @@ mod tests {
     fn triplet_cells_form_one_group_per_beat() {
         let triplets = figures_of(BeatSpan::Quarter).find(|f| f.pattern() == "xxx").unwrap();
         let m = build_measure(TimeSignature::TWO_FOUR, &[triplets, triplets]).unwrap();
-        assert_eq!(m.tuplet_groups().len(), 2);
-        assert_ne!(m.beats()[0].tuplet_group_id, m.beats()[3].tuplet_group_id);
+        assert_eq!(m.first_voice().tuplet_groups().len(), 2);
+        assert_ne!(
+            m.first_voice().beats()[0].tuplet_group_id,
+            m.first_voice().beats()[3].tuplet_group_id
+        );
     }
 
     #[test]
@@ -818,8 +833,8 @@ mod tests {
         let st = GeneratorSettings { bars: 4, ..settings(Subdivision::Mixed, 5) };
         let a = generate_score(&st, &mut Rng::new(42)).unwrap();
         let b = generate_score(&st, &mut Rng::new(42)).unwrap();
-        for (ma, mb) in a.measures.iter().zip(&b.measures) {
-            assert_eq!(ma.beats(), mb.beats());
+        for (ma, mb) in a.measures().iter().zip(b.measures()) {
+            assert_eq!(ma.first_voice().beats(), mb.first_voice().beats());
         }
     }
 
@@ -832,7 +847,7 @@ mod tests {
         };
         let score = generate_score(&st, &mut Rng::new(1)).unwrap();
         assert_eq!(score.len(), 3);
-        assert!(score.measures.iter().all(|m| m.time_signature() == TimeSignature::THREE_FOUR));
+        assert!(score.measures().iter().all(|m| m.time_signature() == TimeSignature::THREE_FOUR));
     }
 
     #[test]
@@ -912,11 +927,11 @@ mod tests {
                     ..settings(sub, MAX_COMPLEXITY)
                 };
                 let score = generate_score(&st, &mut Rng::new(5)).unwrap();
-                for m in &score.measures {
+                for m in score.measures() {
                     assert_eq!(m.time_signature(), meter);
                     // No note or rest crosses a dotted-quarter boundary.
-                    let onsets = DEFAULT_GRID.compute_onset_ticks(m.beats());
-                    for (b, &t) in m.beats().iter().zip(&onsets) {
+                    let onsets = DEFAULT_GRID.compute_onset_ticks(m.first_voice().beats());
+                    for (b, &t) in m.first_voice().beats().iter().zip(&onsets) {
                         let end = t + DEFAULT_GRID.ticks_of(&b.duration).unwrap();
                         assert_eq!(t / (3 * eighth), (end - 1) / (3 * eighth), "{m:?}");
                         assert!(!b.duration.is_tuplet());
@@ -943,9 +958,9 @@ mod tests {
                 time_signature: meter,
                 ..settings(Subdivision::Sixteenths, MAX_COMPLEXITY)
             };
-            for m in generate_score(&st, &mut Rng::new(beats as u64)).unwrap().measures {
-                let onsets = DEFAULT_GRID.compute_onset_ticks(m.beats());
-                for (b, &t) in m.beats().iter().zip(&onsets) {
+            for m in generate_score(&st, &mut Rng::new(beats as u64)).unwrap().measures() {
+                let onsets = DEFAULT_GRID.compute_onset_ticks(m.first_voice().beats());
+                for (b, &t) in m.first_voice().beats().iter().zip(&onsets) {
                     let end = t + DEFAULT_GRID.ticks_of(&b.duration).unwrap();
                     assert!(bounds.iter().all(|&x| x <= t || x >= end), "{meter}: {m:?}");
                 }
@@ -964,7 +979,10 @@ mod tests {
                 GeneratorSettings { time_signature: ts(7, 16), ..settings(sub, MAX_COMPLEXITY) };
             for _ in 0..50 {
                 let m = generate_measure(&st, &mut rng).unwrap();
-                assert!(m.beats().iter().all(|b| allowed.contains(&b.duration)), "{m:?}");
+                assert!(
+                    m.first_voice().beats().iter().all(|b| allowed.contains(&b.duration)),
+                    "{m:?}"
+                );
             }
         }
         let spans = figures(Subdivision::Sixteenths, ts(7, 16))
@@ -1016,7 +1034,7 @@ mod tests {
             let st = GeneratorSettings { time_signature: six, ..settings(sub, MAX_COMPLEXITY) };
             for _ in 0..50 {
                 let m = generate_measure(&st, &mut rng).unwrap();
-                assert!(m.beats().iter().all(|b| !b.duration.is_tuplet()));
+                assert!(m.first_voice().beats().iter().all(|b| !b.duration.is_tuplet()));
             }
         }
     }
@@ -1177,15 +1195,27 @@ mod tests {
         let mut rng = Rng::new(3);
         for _ in 0..200 {
             let eighths = generate_measure(&settings(Subdivision::Eighths, 5), &mut rng).unwrap();
-            assert!(eighths.beats().iter().all(|b| b.duration != s() && b.duration != de()));
-            assert!(eighths.beats().iter().all(|b| !b.duration.is_tuplet()));
+            assert!(
+                eighths
+                    .first_voice()
+                    .beats()
+                    .iter()
+                    .all(|b| b.duration != s() && b.duration != de())
+            );
+            assert!(eighths.first_voice().beats().iter().all(|b| !b.duration.is_tuplet()));
 
             let triplets = generate_measure(&settings(Subdivision::Triplets, 5), &mut rng).unwrap();
-            assert!(triplets.beats().iter().all(|b| b.duration != s() && b.duration != de()));
+            assert!(
+                triplets
+                    .first_voice()
+                    .beats()
+                    .iter()
+                    .all(|b| b.duration != s() && b.duration != de())
+            );
 
             let sixteenths =
                 generate_measure(&settings(Subdivision::Sixteenths, 5), &mut rng).unwrap();
-            assert!(sixteenths.beats().iter().all(|b| b.duration != t8()));
+            assert!(sixteenths.first_voice().beats().iter().all(|b| b.duration != t8()));
         }
     }
 
@@ -1299,6 +1329,7 @@ mod tests {
             for _ in 0..300 {
                 let m = generate_measure(&st, &mut rng).unwrap();
                 rest_sixteenths += m
+                    .first_voice()
                     .beats()
                     .iter()
                     .filter(|b| b.is_rest())
@@ -1319,7 +1350,7 @@ mod tests {
         let st = GeneratorSettings { space: 1.0, ..settings(Subdivision::Sixteenths, 3) };
         let empty = (0..100)
             .map(|_| generate_measure(&st, &mut rng).unwrap())
-            .filter(|m| m.beats().iter().all(|b| b.is_rest()))
+            .filter(|m| m.first_voice().beats().iter().all(|b| b.is_rest()))
             .count();
         assert!(empty > 0, "expected some all-rest measures at maximum space");
     }
@@ -1352,7 +1383,7 @@ mod tests {
         assert_eq!(figures(Subdivision::Triplets, TimeSignature::FOUR_FOUR).len(), 8);
         for sub in [Subdivision::Eighths, Subdivision::Sixteenths, Subdivision::Triplets] {
             let first = figures(sub, TimeSignature::FOUR_FOUR)[0].measure();
-            assert!(first.beats().iter().all(|b| b.is_rest()), "{sub:?}");
+            assert!(first.first_voice().beats().iter().all(|b| b.is_rest()), "{sub:?}");
         }
     }
 
@@ -1471,7 +1502,11 @@ mod tests {
                                     .iter()
                                     .map(|&(d, n)| Beat::new(d, if n { Note } else { Rest }))
                                     .collect();
-                                assert_eq!(m.beats(), &expected, "{ts} written verbatim");
+                                assert_eq!(
+                                    m.first_voice().beats(),
+                                    &expected,
+                                    "{ts} written verbatim"
+                                );
                                 let cells = drawn.iter().map(|d| d.figure).collect();
                                 out.push((st, cells, m));
                             }
@@ -1494,8 +1529,9 @@ mod tests {
     /// Start and end tick of every beat of `m` and of the generator beats.
     fn bounds(st: &GeneratorSettings, m: &Measure) -> (Vec<(Beat, u32, u32)>, Vec<u32>) {
         let ts = st.time_signature;
-        let onsets = DEFAULT_GRID.compute_onset_ticks(m.beats());
+        let onsets = DEFAULT_GRID.compute_onset_ticks(m.first_voice().beats());
         let beats = m
+            .first_voice()
             .beats()
             .iter()
             .zip(onsets)
@@ -1584,8 +1620,8 @@ mod tests {
         for i in 0..1000u32 {
             let m = generate_measure(&settings(Subdivision::Eighths, 1 + (i % 2) as u8), &mut rng)
                 .unwrap();
-            let onsets = DEFAULT_GRID.compute_onset_ticks(m.beats());
-            for (b, t) in m.beats().iter().zip(onsets) {
+            let onsets = DEFAULT_GRID.compute_onset_ticks(m.first_voice().beats());
+            for (b, t) in m.first_voice().beats().iter().zip(onsets) {
                 half_on_two |= b.is_note() && b.duration == h() && t == quarter;
                 quarter_on_and_of_one |= b.is_note() && b.duration == q() && 2 * t == quarter;
                 let over_beat_three = b.is_note() && b.duration == q() && 2 * t == 3 * quarter;

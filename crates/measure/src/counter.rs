@@ -111,7 +111,7 @@ fn build_counter_bar(ts: TimeSignature, ratio: Ratio) -> Option<Measure> {
             tokens.push(code.clone());
             tokens.extend((1..slots).map(|_| format!("r:{code}")));
         }
-        parse_score(&format!("{ts} {}", tokens.join(" "))).ok()?.measures.into_iter().next()
+        parse_score(&format!("{ts} {}", tokens.join(" "))).ok()?.into_measures().into_iter().next()
     };
     durations
         .into_iter()
@@ -256,9 +256,13 @@ pub fn named_ratio_of(bar: &Measure, named: Option<Ratio>) -> Option<Ratio> {
     // Only ratios that click wherever a note of `bar` starts can fit: that
     // spares building every ratio's counter bar.
     let ticks_per_beat = DEFAULT_GRID.ticks_per_beat(&ts);
-    let onsets = DEFAULT_GRID.compute_onset_ticks(bar.beats());
-    let note_onsets: Vec<u32> =
-        onsets.iter().zip(bar.beats()).filter(|(_, b)| b.is_note()).map(|(&t, _)| t).collect();
+    let onsets = DEFAULT_GRID.compute_onset_ticks(bar.first_voice().beats());
+    let note_onsets: Vec<u32> = onsets
+        .iter()
+        .zip(bar.first_voice().beats())
+        .filter(|(_, b)| b.is_note())
+        .map(|(&t, _)| t)
+        .collect();
     let clicks_on_notes = |r: &Ratio| {
         let span_ticks = u32::from(r.span) * ticks_per_beat;
         span_ticks.is_multiple_of(u32::from(r.n)) && {
@@ -270,10 +274,11 @@ pub fn named_ratio_of(bar: &Measure, named: Option<Ratio>) -> Option<Ratio> {
     // sextuplets (triplets then) is still that ratio's.
     let ticks = |b: &crate::Beat| DEFAULT_GRID.ticks_of(&b.duration);
     let fits = |m: &Measure| {
-        m.beats().len() == bar.beats().len()
-            && m.beats()
+        m.first_voice().beats().len() == bar.first_voice().beats().len()
+            && m.first_voice()
+                .beats()
                 .iter()
-                .zip(bar.beats())
+                .zip(bar.first_voice().beats())
                 .all(|(c, b)| ticks(c) == ticks(b) && (c.is_note() || b.is_rest()))
     };
     let is_bars = |r: &Ratio| {
@@ -299,19 +304,19 @@ pub fn counter_clicks(bar: &Measure) -> Vec<std::ops::Range<usize>> {
     let ts = bar.time_signature();
     let slots = ratio_of(bar)
         .and_then(|r| counter_bar(ts, r))
-        .map(|m| m.beats().iter().map(|b| b.is_note()).collect::<Vec<_>>());
+        .map(|m| m.first_voice().beats().iter().map(|b| b.is_note()).collect::<Vec<_>>());
     let starts: Vec<usize> = match slots {
-        Some(is_click) => (0..bar.beats().len()).filter(|&i| is_click[i]).collect(),
-        None => (0..bar.beats().len()).collect(),
+        Some(is_click) => (0..bar.first_voice().beats().len()).filter(|&i| is_click[i]).collect(),
+        None => (0..bar.first_voice().beats().len()).collect(),
     };
     let mut ends: Vec<usize> = starts.iter().skip(1).copied().collect();
-    ends.push(bar.beats().len());
+    ends.push(bar.first_voice().beats().len());
     starts.into_iter().zip(ends).map(|(s, e)| s..e).collect()
 }
 
 /// The level of the click starting at `idx` of a counter bar.
 pub fn click_level(bar: &Measure, idx: usize) -> ClickLevel {
-    bar.beats().get(idx).map_or(ClickLevel::Off, ClickLevel::of)
+    bar.first_voice().beats().get(idx).map_or(ClickLevel::Off, ClickLevel::of)
 }
 
 /// `bar` in the spelling [`counter_bar`] writes its ratio with today, its
@@ -322,8 +327,8 @@ pub fn respelled(bar: Measure) -> Measure {
     else {
         return bar;
     };
-    for (idx, b) in bar.beats().iter().enumerate() {
-        current.set_click_level(idx, ClickLevel::of(b));
+    for (idx, b) in bar.first_voice().beats().iter().enumerate() {
+        current.first_voice_mut().set_click_level(idx, ClickLevel::of(b));
     }
     current
 }
@@ -480,7 +485,7 @@ mod tests {
         assert_eq!(bar("3/8", 6, 1), format!("3/8 {}", ["6:4th"; 18].join(" ")));
         assert!(bar("5/8", 6, 5).starts_with("5/8 6:4th r:6:4th"));
         let m = counter_bar("1/4".parse().unwrap(), Ratio { n: 12, span: 1 }).unwrap();
-        assert_eq!(m.tuplet_groups().len(), 2);
+        assert_eq!(m.first_voice().tuplet_groups().len(), 2);
         assert_eq!(ratio_of(&m), Some(Ratio { n: 12, span: 1 }));
     }
 
@@ -489,9 +494,9 @@ mod tests {
         // 6:5 in 5/4 as main wrote it: triplet sixteenths.
         let click = "t16 r:t16 r:t16 r:t16 r:t16";
         let old = format!("5/4 {}", [click; 6].join(" "));
-        let mut old = parse_score(&old).unwrap().measures.remove(0);
-        old.set_click_level(0, ClickLevel::Strong);
-        old.set_click_level(5, ClickLevel::Off);
+        let mut old = parse_score(&old).unwrap().into_measures().remove(0);
+        old.first_voice_mut().set_click_level(0, ClickLevel::Strong);
+        old.first_voice_mut().set_click_level(5, ClickLevel::Off);
         assert_eq!(ratio_of(&old), Some(Ratio { n: 6, span: 5 }));
         assert_eq!(counter_clicks(&old).len(), 6);
         let new = respelled(old);
@@ -607,7 +612,7 @@ mod tests {
     fn ratio_of_ignores_levels() {
         let ts = TimeSignature::FOUR_FOUR;
         let mut m = counter_bar(ts, Ratio { n: 3, span: 4 }).unwrap();
-        m.set_click_level(2, ClickLevel::Off);
+        m.first_voice_mut().set_click_level(2, ClickLevel::Off);
         assert_eq!(ratio_of(&m), Some(Ratio { n: 3, span: 4 }));
         assert_eq!(ratio_of(&crate::click::default_click_bar(ts)), None);
     }
@@ -678,7 +683,7 @@ mod tests {
             assert_eq!(ratio_of(&counter_bar(ts, ratio).unwrap()), Some(ratio));
         }
         let mut m = counter_bar(ts, Ratio { n: 9, span: 2 }).unwrap();
-        m.set_click_level(1, ClickLevel::Off);
+        m.first_voice_mut().set_click_level(1, ClickLevel::Off);
         assert_eq!(ratio_of(&m), Some(Ratio { n: 9, span: 2 }));
     }
 
@@ -689,7 +694,7 @@ mod tests {
         let pairs: Vec<_> = (0..9).map(|i| 2 * i..2 * i + 2).collect();
         assert_eq!(counter_clicks(&m), pairs);
         // A click tapped off stays a click.
-        m.set_click_level(2, ClickLevel::Off);
+        m.first_voice_mut().set_click_level(2, ClickLevel::Off);
         assert_eq!(counter_clicks(&m), pairs);
         assert_eq!(click_level(&m, 2), ClickLevel::Off);
     }
@@ -723,7 +728,7 @@ mod tests {
         assert_eq!(bars.ratio(ts), Some(r(4, 2)));
         // Clicks edited, still 4:2; another bar drops the name.
         let mut edited = bar.clone();
-        edited.set_click_level(1, ClickLevel::Strong);
+        edited.first_voice_mut().set_click_level(1, ClickLevel::Strong);
         bars.set(ts, Some(edited));
         assert_eq!(bars.ratio(ts), Some(r(4, 2)));
         bars.set(ts, counter_bar(ts, r(3, 2)));

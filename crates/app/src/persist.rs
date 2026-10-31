@@ -166,7 +166,7 @@ mod tests {
     fn saved_state() -> PersistedState {
         let mut s = PersistedState { bpm: 93, tab: Tab::Edit, ..Default::default() };
         let mut m = Measure::new(TimeSignature::THREE_FOUR);
-        m.set_beat(0, Beat::note(e())).unwrap();
+        m.first_voice_mut().set_beat(0, Beat::note(e())).unwrap();
         s.library.add("Groove".into(), Score::single(m), 93);
         s.presets.add("Mine", builtin_presets()[0].1);
         s
@@ -275,7 +275,7 @@ mod tests {
     #[test]
     fn a_version_1_state_is_migrated() {
         let mut m = Measure::new(TimeSignature::THREE_FOUR);
-        m.set_beat(0, Beat::note(e())).unwrap();
+        m.first_voice_mut().set_beat(0, Beat::note(e())).unwrap();
         let saved =
             format!("(version:1,measure:{},cursor_idx:2,bpm:87)", ron::to_string(&m).unwrap());
         let (s, backup) = restore(Some(&saved));

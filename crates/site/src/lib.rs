@@ -508,7 +508,7 @@ fn rhythm_block(notation: &str, attrs: &str, caption: &str) -> Result<String, St
     let href = link.to_url("/").ok_or_else(|| format!("rhythm '{notation}' has no link form"))?;
 
     let mut out = String::from("<figure class=\"rhythm\">\n<div class=\"measures\">");
-    for measure in &score.measures {
+    for measure in score.measures() {
         out.push_str(&measure_grid(measure));
     }
     out.push_str("</div>\n<figcaption>");
@@ -538,7 +538,7 @@ fn swing_label(swing: Swing) -> String {
 /// are dots, rests are dashes, and every cell shows its counting syllable.
 fn measure_grid(measure: &Measure) -> String {
     let ts = measure.time_signature();
-    let beats = measure.beats();
+    let beats = measure.first_voice().beats();
     let onsets = DEFAULT_GRID.compute_onset_ticks(beats);
     let spoken: Vec<String> = beats
         .iter()

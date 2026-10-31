@@ -167,7 +167,7 @@ pub(crate) fn compute_global_beat_onsets(
     timing: &ScoreTiming,
 ) -> Vec<GlobalBeatOnset> {
     let mut out = Vec::new();
-    for (m_idx, measure) in score.measures.iter().enumerate() {
+    for (m_idx, measure) in score.measures().iter().enumerate() {
         let start = timing.measure_start_tick(m_idx);
         for onset in measure.onsets() {
             out.push(GlobalBeatOnset {

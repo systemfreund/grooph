@@ -5,7 +5,8 @@ pub type MeasureIdx = usize;
 
 /// A collection of one or more measures, on its staff.
 ///
-/// Invariant: `measures` is never empty. Constructors and mutators must uphold this;
+/// Invariant: `measures` is never empty. The field is private so that only
+/// the constructors and mutators here, which uphold it, change the list;
 /// deserializing checks it (see [`EmptyScore`]).
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(try_from = "RawScore")]
@@ -13,7 +14,7 @@ pub struct Score {
     /// The staff the score is written on.
     #[serde(default, skip_serializing_if = "StaffKind::is_line")]
     pub staff: StaffKind,
-    pub measures: Vec<Measure>,
+    measures: Vec<Measure>,
 }
 
 /// The staff a score is written on.
@@ -71,6 +72,50 @@ impl Score {
         Self { staff: StaffKind::Line, measures }
     }
 
+    /// The score on `staff` instead.
+    pub fn with_staff(self, staff: StaffKind) -> Self {
+        Self { staff, ..self }
+    }
+
+    /// The measures, at least one.
+    pub fn measures(&self) -> &[Measure] {
+        &self.measures
+    }
+
+    /// The measures, to edit in place; adding or removing one goes through
+    /// [`Score::push`], [`Score::insert`], [`Score::remove`] and
+    /// [`Score::truncate`], which keep at least one.
+    pub fn measures_mut(&mut self) -> &mut [Measure] {
+        &mut self.measures
+    }
+
+    /// The measures, taken out of the score: at least one.
+    pub fn into_measures(self) -> Vec<Measure> {
+        self.measures
+    }
+
+    /// Add `measure` at the end.
+    pub fn push(&mut self, measure: Measure) {
+        self.measures.push(measure);
+    }
+
+    /// Add `measure` at `idx`, shifting the ones after it. Panics if `idx`
+    /// is past the end, like [`Vec::insert`].
+    pub fn insert(&mut self, idx: MeasureIdx, measure: Measure) {
+        self.measures.insert(idx, measure);
+    }
+
+    /// Take out measure `idx`; `None`, and no change, if it is the only one
+    /// or there is no such measure.
+    pub fn remove(&mut self, idx: MeasureIdx) -> Option<Measure> {
+        (self.measures.len() > 1 && idx < self.measures.len()).then(|| self.measures.remove(idx))
+    }
+
+    /// Keep the first `len` measures, and always the first one.
+    pub fn truncate(&mut self, len: usize) {
+        self.measures.truncate(len.max(1));
+    }
+
     pub fn single(measure: Measure) -> Self {
         Self::new(vec![measure])
     }
@@ -110,6 +155,12 @@ impl Score {
         let voice = cursor.voice.min(measure.voices().len().saturating_sub(1));
         let beats = measure.voice(voice).map_or(0, |v| v.beats().len());
         Cursor { measure_idx, voice, beat_idx: cursor.beat_idx.min(beats.saturating_sub(1)) }
+    }
+
+    /// Whether a note of any voice plays an instrument of the kit
+    /// ([`Beat::is_kit`](crate::Beat::is_kit)).
+    pub fn has_kit_heads(&self) -> bool {
+        self.measures.iter().flat_map(|m| m.voices()).flat_map(|v| v.beats()).any(|b| b.is_kit())
     }
 
     pub fn is_empty(&self) -> bool {
@@ -179,11 +230,11 @@ mod tests {
         // The same beats under another meter of the same length.
         let mut other_meter = score.clone();
         other_meter.measures[1].set_time_signature(TimeSignature::new(2, 2)).unwrap();
-        assert_eq!(other_meter.measures[1].beats(), four.beats());
+        assert_eq!(other_meter.measures[1].first_voice().beats(), four.first_voice().beats());
         assert!(!score.same_beats(&other_meter));
 
         let mut other_beat = score.clone();
-        other_beat.measures[1].toggle_beat_kind(0);
+        other_beat.measures[1].first_voice_mut().toggle_beat_kind(0);
         assert!(!score.same_beats(&other_beat));
 
         assert!(!score.same_beats(&Score::single(four)));
@@ -231,6 +282,34 @@ mod tests {
         assert_eq!(back, Cursor::at(2, 5));
         let lower = Cursor::in_voice(1, 1, 3);
         assert_eq!(ron::from_str::<Cursor>(&ron::to_string(&lower).unwrap()).unwrap(), lower);
+    }
+
+    #[test]
+    fn remove_and_truncate_keep_a_measure() {
+        use crate::TimeSignature;
+        let one = || Measure::new(TimeSignature::FOUR_FOUR);
+        let mut score = Score::single(one());
+        assert!(score.remove(0).is_none());
+        assert_eq!(score.len(), 1);
+        score.push(Measure::new(TimeSignature::THREE_FOUR));
+        assert!(score.remove(5).is_none());
+        assert_eq!(score.remove(0).map(|m| m.time_signature()), Some(TimeSignature::FOUR_FOUR));
+        assert_eq!(score.len(), 1);
+        score.push(one());
+        score.push(one());
+        score.truncate(0);
+        assert_eq!(score.len(), 1);
+        assert_eq!(score.measures()[0].time_signature(), TimeSignature::THREE_FOUR);
+    }
+
+    #[test]
+    fn kit_heads_are_found_in_any_voice() {
+        use crate::notation::parse_score;
+        assert!(!parse_score("4/4 q q q q").unwrap().has_kit_heads());
+        assert!(!parse_score("kit 4/4 q q q q").unwrap().has_kit_heads());
+        assert!(parse_score("4/4 q q q q ; K:h K:h").unwrap().has_kit_heads());
+        let line = parse_score("4/4 q q q q").unwrap();
+        assert!(!line.measures[0].first_voice().beats()[0].is_kit());
     }
 
     #[test]

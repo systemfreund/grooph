@@ -153,12 +153,12 @@ impl Schedule {
     ) -> Self {
         let mut map: BTreeMap<u64, Vec<SoundType>> = BTreeMap::new();
 
-        for (idx, measure) in score.measures.iter().enumerate() {
+        for (idx, measure) in score.measures().iter().enumerate() {
             let ts = measure.time_signature();
 
             let bar = click.for_meter(ts);
-            let bar_onsets = DEFAULT_GRID.compute_onset_ticks(bar.beats());
-            for (beat, &t) in bar.beats().iter().zip(&bar_onsets) {
+            let bar_onsets = DEFAULT_GRID.compute_onset_ticks(bar.first_voice().beats());
+            for (beat, &t) in bar.first_voice().beats().iter().zip(&bar_onsets) {
                 let sound = match ClickLevel::of(beat) {
                     ClickLevel::Strong => SoundType::Downbeat,
                     ClickLevel::Medium => SoundType::PrimaryBeat,
@@ -196,12 +196,12 @@ impl Schedule {
         timing: &ScoreTiming,
         counter: &CounterBars,
     ) -> Self {
-        for (idx, measure) in score.measures.iter().enumerate() {
+        for (idx, measure) in score.measures().iter().enumerate() {
             let Some(bar) = counter.for_meter(measure.time_signature()) else {
                 continue;
             };
-            let onsets = DEFAULT_GRID.compute_onset_ticks(bar.beats());
-            for (beat, &t) in bar.beats().iter().zip(&onsets) {
+            let onsets = DEFAULT_GRID.compute_onset_ticks(bar.first_voice().beats());
+            for (beat, &t) in bar.first_voice().beats().iter().zip(&onsets) {
                 let sound = match ClickLevel::of(beat) {
                     ClickLevel::Strong => SoundType::CounterStrong,
                     ClickLevel::Medium => SoundType::CounterMedium,
@@ -240,7 +240,7 @@ mod tests {
                 .map(|ts| {
                     let mut m = Measure::new(*ts);
                     for i in 0..(ts.beats as usize) {
-                        m.set_beat(i, Beat::note(q())).unwrap();
+                        m.first_voice_mut().set_beat(i, Beat::note(q())).unwrap();
                     }
                     m
                 })
@@ -279,7 +279,7 @@ mod tests {
         let timing = ScoreTiming::from_score(&score, 120);
         let mut bars = ClickBars::default();
         let bar = grooph_measure::notation::parse_score(&format!("{ts} {bar}")).unwrap();
-        bars.set(bar.measures[0].clone());
+        bars.set(bar.measures()[0].clone());
         let s = Schedule::build(&score, &timing, None, &bars);
         s.map
             .iter()
@@ -409,9 +409,9 @@ mod tests {
         let timing = ScoreTiming::from_score(&score, 120).with_swing(swing);
         let mut counter = CounterBars::default();
         let mut bar = counter_bar(ts, Ratio { n: 3, span: 2 }).unwrap();
-        bar.set_click_level(1, ClickLevel::Strong);
-        bar.set_click_level(2, ClickLevel::Off);
-        bar.set_click_level(3, ClickLevel::Soft);
+        bar.first_voice_mut().set_click_level(1, ClickLevel::Strong);
+        bar.first_voice_mut().set_click_level(2, ClickLevel::Off);
+        bar.first_voice_mut().set_click_level(3, ClickLevel::Soft);
         counter.set(ts, Some(bar));
         let s = Schedule::build(&score, &timing, None, &ClickBars::default())
             .with_counter(&score, &timing, &counter);
@@ -448,7 +448,7 @@ mod tests {
         let s = Schedule::build(&score, &timing, None, &ClickBars::default());
 
         let m1_start = timing.measure_start_tick(1);
-        let onsets = DEFAULT_GRID.compute_onset_ticks(score.measures[1].beats());
+        let onsets = DEFAULT_GRID.compute_onset_ticks(score.measures()[1].first_voice().beats());
         for &local in &onsets {
             let key = m1_start + local as u64;
             assert!(s.map.contains_key(&key), "missing key {key} for measure 1 note");
@@ -475,7 +475,7 @@ mod tests {
         use grooph_measure::swing::{Swing, SwingUnit};
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
         for i in 0..8 {
-            m.set_beat(i, Beat::note(e())).unwrap();
+            m.first_voice_mut().set_beat(i, Beat::note(e())).unwrap();
         }
         let score = Score::new(vec![m]);
         let swing = Swing { unit: SwingUnit::Eighths, percent: 75 };

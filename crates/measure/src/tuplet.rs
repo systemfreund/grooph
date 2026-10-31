@@ -143,16 +143,21 @@ mod tests {
     #[test]
     fn saved_spans_are_recomputed_on_the_current_grid() {
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
-        m.set_beat(0, Beat::note(t8())).unwrap();
+        m.first_voice_mut().set_beat(0, Beat::note(t8())).unwrap();
         let saved = ron::to_string(&m).unwrap();
-        let span = m.tuplets().get(m.beats()[0].tuplet_group_id.unwrap()).unwrap().target_ticks;
+        let span = m
+            .first_voice()
+            .tuplets()
+            .get(m.first_voice().beats()[0].tuplet_group_id.unwrap())
+            .unwrap()
+            .target_ticks;
         // Saved when the grid had half as many ticks.
         let old =
             saved.replace(&format!("target_ticks:{span}"), &format!("target_ticks:{}", span / 2));
         assert_ne!(old, saved);
         let mut back: Measure = ron::from_str(&old).unwrap();
-        assert!(back.dissolve_tuplet_group(0).is_some());
-        assert_eq!(back.beats()[0].duration, q());
-        assert_eq!(back.beats().len(), 4);
+        assert!(back.first_voice_mut().dissolve_tuplet_group(0).is_some());
+        assert_eq!(back.first_voice().beats()[0].duration, q());
+        assert_eq!(back.first_voice().beats().len(), 4);
     }
 }

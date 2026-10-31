@@ -94,7 +94,11 @@ pub(crate) struct AnchorFlash {
 impl Grooph {
     /// Meter the guide picker offers its steps for: the first bar's.
     pub(crate) fn guide_meter(&self) -> TimeSignature {
-        self.editor.score.measures.first().map_or(TimeSignature::FOUR_FOUR, |m| m.time_signature())
+        self.editor
+            .score
+            .measures()
+            .first()
+            .map_or(TimeSignature::FOUR_FOUR, |m| m.time_signature())
     }
 
     /// The guide in use: the metronome and edit tabs and calibration keep
@@ -116,7 +120,7 @@ impl Grooph {
         let Some((measure_idx, tick)) = playing.filter(|_| !playback.counting_in()) else {
             return;
         };
-        let Some(ts) = self.editor.score.measures.get(measure_idx).map(|m| m.time_signature())
+        let Some(ts) = self.editor.score.measures().get(measure_idx).map(|m| m.time_signature())
         else {
             return;
         };
@@ -250,7 +254,7 @@ mod tests {
         let mut app = Grooph::new(&cc);
         app.select_tab(crate::shell::Tab::Practice);
         let measure = Grooph::default_measure();
-        app.editor.score.measures = vec![measure; bars];
+        app.editor.score = grooph_measure::Score::new(vec![measure; bars]);
         app.ui.guide = guide;
         app
     }

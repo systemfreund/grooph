@@ -195,7 +195,8 @@ impl Grooph {
             ToolKind::Meta(MetaOp::ResetMeasure) => {
                 // The voice being edited; the others stay.
                 let cursor = self.editor.score.clamp_cursor(self.editor.cursor);
-                self.editor.score.measures[cursor.measure_idx].clear_voice(cursor.voice, Rest);
+                self.editor.score.measures_mut()[cursor.measure_idx]
+                    .clear_voice(cursor.voice, Rest);
                 self.editor.cursor = Cursor { beat_idx: 0, ..cursor };
                 true
             }
@@ -356,8 +357,12 @@ pub(crate) fn paint_none(painter: &egui::Painter, rect: Rect, color: Color32) {
 /// Size of a [`notation_button`]'s notes `size` high: tuplets and long rows
 /// of short notes get a wider tile.
 pub(crate) fn notation_size(measure: &Measure, size: f32) -> Vec2 {
-    let wide = measure.beats().len() > 6
-        || measure.beats().iter().any(|b| b.is_note() && b.duration.as_tuplet_spec().is_some());
+    let wide = measure.first_voice().beats().len() > 6
+        || measure
+            .first_voice()
+            .beats()
+            .iter()
+            .any(|b| b.is_note() && b.duration.as_tuplet_spec().is_some());
     Vec2::new(if wide { 1.5 * size } else { size }, size)
 }
 
@@ -371,10 +376,10 @@ pub(crate) fn paint_notation(
     color: Color32,
 ) {
     // Size the glyphs by the first note; rest-only measures use rest sizing.
-    let Some(first) = measure.beats().first() else {
+    let Some(first) = measure.first_voice().beats().first() else {
         return;
     };
-    let template = measure.beats().iter().find(|b| b.is_note()).unwrap_or(first);
+    let template = measure.first_voice().beats().iter().find(|b| b.is_note()).unwrap_or(first);
     {
         let cap_factor = match (template.kind(), template.duration) {
             (Rest, _) => 0.8,
@@ -416,7 +421,7 @@ pub(crate) fn paint_notation(
         // along whichever axis it reaches first, and center it: a
         // trailing unbeamed flag or a tuplet number stays inside, a single
         // note grows to the tile's height.
-        let content = notes_ink(&build_measure_layout(measure, &make_opts(em, rect)));
+        let content = notes_ink(&build_measure_layout(measure.first_voice(), &make_opts(em, rect)));
         let avail = rect.shrink(NOTATION_MARGIN * rect.height());
         let content_size = Vec2::new((content.width()).max(1.0), (content.height()).max(1.0));
         let scale = (avail.width() / content_size.x).min(avail.height() / content_size.y);
@@ -425,11 +430,12 @@ pub(crate) fn paint_notation(
         let fitted_em = (em * scale).min(avail.height() / QUARTER_INK_EM);
         // Re-measure at the new size (glyph widths don't scale perfectly
         // linearly) and center the content in the tile.
-        let fitted = notes_ink(&build_measure_layout(measure, &make_opts(fitted_em, rect)));
+        let fitted =
+            notes_ink(&build_measure_layout(measure.first_voice(), &make_opts(fitted_em, rect)));
         let (final_em, final_rect) = (fitted_em, rect.translate(rect.center() - fitted.center()));
 
         let opts = make_opts(final_em, final_rect);
-        let measure_layout = build_measure_layout(measure, &opts);
+        let measure_layout = build_measure_layout(measure.first_voice(), &opts);
         let painter = &ui.painter_at(rect);
         draw_notes(painter, &measure_layout, color, None, &opts);
     }
@@ -477,7 +483,7 @@ mod tests {
         assert_eq!(text(&app), "4/4 H:q H:q H:q H:q ; K:h K:q r:q");
         apply(&mut app, "modify.toggle.rest_note");
         assert_eq!(app.editor.cursor, Cursor::in_voice(0, 1, 2));
-        assert!(app.editor.score.measures[0].voice(1).unwrap().beats()[2].is_note());
+        assert!(app.editor.score.measures()[0].voice(1).unwrap().beats()[2].is_note());
         apply(&mut app, "edit.undo");
         apply(&mut app, "meta.reset_measure");
         assert_eq!(text(&app), "4/4 H:q H:q H:q H:q ; r:q r:q r:q r:q");
@@ -507,7 +513,7 @@ mod tests {
         app.editor.cursor = Cursor::in_voice(0, 1, 0);
         app.append_measure();
         assert_eq!(app.editor.cursor, Cursor::in_voice(1, 1, 0));
-        assert_eq!(app.editor.score.measures[1].voices().len(), 2);
+        assert_eq!(app.editor.score.measures()[1].voices().len(), 2);
         app.remove_current_measure();
         assert_eq!(app.editor.cursor, Cursor::in_voice(1, 1, 0));
     }

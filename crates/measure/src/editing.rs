@@ -4,7 +4,7 @@ use crate::duration::{Duration, NoteValue, TupletSpec};
 use crate::editing::Modification::{DissolveTuplet, ToggleAccent};
 use crate::grid::DEFAULT_GRID;
 use crate::tuplet::TupletGroupId;
-use crate::{Beat, BeatIdx, BeatKind, Instrument, TimeSignature, VoiceBar};
+use crate::{Beat, BeatIdx, BeatKind, TimeSignature, VoiceBar};
 use either::Either;
 
 #[derive(Debug)]
@@ -108,9 +108,8 @@ impl VoiceBar {
             let kind = if let Some(override_kind) = beat_kind { override_kind } else { cur.kind() };
             // A note of the kit keeps its heads (`set_beat` keeps each
             // one's accent).
-            let kit = cur.heads().iter().any(|h| h.instrument() != Instrument::Rhythm);
             let new_beat = match kind {
-                Note if kit => Beat::with_heads(new_dur, *cur.heads()),
+                Note if cur.is_kit() => Beat::with_heads(new_dur, *cur.heads()),
                 Note => Beat::note(new_dur),
                 Rest => Beat::rest(new_dur),
             };
@@ -395,31 +394,31 @@ mod tests {
     fn a_new_duration_keeps_a_kit_notes_heads() {
         use crate::notation::{format_score, parse_score};
         let mut score = parse_score("4/4 >S-H:q H:q r:h ; K:h K:h").unwrap();
-        let hands = score.measures[0].voice_mut(0).unwrap();
+        let hands = score.measures_mut()[0].voice_mut(0).unwrap();
         hands.modify_beat(0, NoteValue::Eighth, None).unwrap();
         hands.modify_beat(2, NoteValue::Eighth, Some(Note)).unwrap();
         let text = format_score(&score).unwrap();
         assert!(text.starts_with("4/4 >S-H:e"), "{text}");
         // A dot, a tuplet and a longer note keep each head's accent too.
-        let hands = score.measures[0].voice_mut(0).unwrap();
+        let hands = score.measures_mut()[0].voice_mut(0).unwrap();
         hands.toggle_dotted(0).unwrap();
         hands.modify_beat(0, NoteValue::Quarter, None).unwrap();
         let text = format_score(&score).unwrap();
         assert!(text.starts_with("4/4 >S-H:q"), "{text}");
-        let hands = score.measures[0].voice_mut(0).unwrap();
+        let hands = score.measures_mut()[0].voice_mut(0).unwrap();
         hands.toggle_dotted(0).unwrap();
         assert!(format_score(&score).unwrap().starts_with("4/4 >S-H:q."));
         let mut score = parse_score("4/4 >S-(H):q H:q r:h ; K:h K:h").unwrap();
-        let hands = score.measures[0].voice_mut(0).unwrap();
+        let hands = score.measures_mut()[0].voice_mut(0).unwrap();
         hands.set_tuplet(0, Some(TupletSpec { n: 3, m: 2, base: Eighth }), true).unwrap();
         let text = format_score(&score).unwrap();
         assert!(text.starts_with("4/4 >S-(H):t8"), "{text}");
         // A rest made a note is the one line's until the kit has its palette.
         let line = parse_score("4/4 >q (q) r:h").unwrap();
-        let mut bar = line.measures[0].clone();
-        bar.modify_beat(1, NoteValue::Eighth, None).unwrap();
+        let mut bar = line.measures()[0].clone();
+        bar.first_voice_mut().modify_beat(1, NoteValue::Eighth, None).unwrap();
         assert!(
-            !bar.beats()[1].soft(),
+            !bar.first_voice().beats()[1].soft(),
             "a duration change on the one line drops the ghost, as before"
         );
     }
@@ -429,9 +428,10 @@ mod tests {
         use crate::counter::{Ratio, counter_bar};
         use crate::grid::DEFAULT_GRID;
         let mut m = counter_bar("1/4".parse().unwrap(), Ratio { n: 12, span: 1 }).unwrap();
-        assert!(m.modify_beat(1, NoteValue::Sixteenth, None).is_some());
-        assert!(m.modify_beat(0, NoteValue::Sixteenth, None).is_some());
-        let total: u32 = m.beats().iter().filter_map(|b| DEFAULT_GRID.ticks_of(&b.duration)).sum();
+        assert!(m.first_voice_mut().modify_beat(1, NoteValue::Sixteenth, None).is_some());
+        assert!(m.first_voice_mut().modify_beat(0, NoteValue::Sixteenth, None).is_some());
+        let total: u32 =
+            m.first_voice().beats().iter().filter_map(|b| DEFAULT_GRID.ticks_of(&b.duration)).sum();
         assert_eq!(total, DEFAULT_GRID.ticks_per_measure(&m.time_signature()));
     }
 
@@ -439,12 +439,12 @@ mod tests {
     fn dissolve_tuplet_initializes_note_when_group_contains_any_note_and_preserves_accent() {
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
         // A triplet eighth at the start: the first slot a note, the others prefilled as rests
-        m.set_beat(0, Beat::note(t8())).unwrap();
-        m.set_beat(2, Beat::note(t8())).unwrap();
-        m.toggle_accent(2);
+        m.first_voice_mut().set_beat(0, Beat::note(t8())).unwrap();
+        m.first_voice_mut().set_beat(2, Beat::note(t8())).unwrap();
+        m.first_voice_mut().toggle_accent(2);
 
         assert_matches!(
-            m.dissolve_tuplet_group(1),
+            m.first_voice_mut().dissolve_tuplet_group(1),
             Some(DissolveTuplet(
                 GroupSpan { start_idx: 0, end_idx: 2, id: TupletGroupId(1) },
                 TupletSpec { n: 3, m: 2, base: Eighth }
@@ -452,9 +452,12 @@ mod tests {
         );
 
         // The first new beat is an accented note
-        assert!(m.beats()[0].tuplet_group_id.is_none());
-        assert_eq!(m.beats()[0].kind(), Note);
-        assert!(m.beats()[0].accented(), "accent should be preserved on first replacement beat");
+        assert!(m.first_voice().beats()[0].tuplet_group_id.is_none());
+        assert_eq!(m.first_voice().beats()[0].kind(), Note);
+        assert!(
+            m.first_voice().beats()[0].accented(),
+            "accent should be preserved on first replacement beat"
+        );
     }
 
     #[test]
@@ -463,25 +466,25 @@ mod tests {
         // Make a triplet eighth group of rests: position 0 is already a rest,
         // so convert straight from it
         assert_matches!(
-            m.convert_to_tuplet(0, TupletSpec { n: 3, m: 2, base: Eighth }, true),
+            m.first_voice_mut().convert_to_tuplet(0, TupletSpec { n: 3, m: 2, base: Eighth }, true),
             Some(GroupSpan { start_idx: 0, end_idx: 2, id: _ })
         );
         // All three slots are rests
         for i in 0..3 {
-            assert_eq!(m.beats()[i].kind(), Rest);
+            assert_eq!(m.first_voice().beats()[i].kind(), Rest);
         }
 
         assert_matches!(
-            m.dissolve_tuplet_group(1),
+            m.first_voice_mut().dissolve_tuplet_group(1),
             Some(DissolveTuplet(
                 GroupSpan { start_idx: 0, end_idx: 2, id: TupletGroupId(1) },
                 TupletSpec { n: 3, m: 2, base: Eighth }
             ))
         );
 
-        assert!(m.beats()[0].tuplet_group_id.is_none());
-        assert_eq!(m.beats()[0].kind(), Rest);
-        assert!(!m.beats()[0].accented());
+        assert!(m.first_voice().beats()[0].tuplet_group_id.is_none());
+        assert_eq!(m.first_voice().beats()[0].kind(), Rest);
+        assert!(!m.first_voice().beats()[0].accented());
     }
 
     #[test]
@@ -489,22 +492,22 @@ mod tests {
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
         // Default fill: four quarter rests
         assert_matches!(
-            m.convert_to_tuplet(0, TupletSpec { n: 3, m: 2, base: Eighth }, true),
+            m.first_voice_mut().convert_to_tuplet(0, TupletSpec { n: 3, m: 2, base: Eighth }, true),
             Some(GroupSpan { start_idx: 0, end_idx: 2, id: _ }),
             "Conversion to triplet should succeed"
         );
 
         // Three triplet eighths at the first three positions, sharing a group id
-        let id0 = m.beats()[0].tuplet_group_id;
+        let id0 = m.first_voice().beats()[0].tuplet_group_id;
         assert!(id0.is_some());
         for i in 0..3 {
-            assert_eq!(m.beats()[i].duration, t8());
-            assert_eq!(m.beats()[i].tuplet_group_id, id0);
+            assert_eq!(m.first_voice().beats()[i].duration, t8());
+            assert_eq!(m.first_voice().beats()[i].tuplet_group_id, id0);
         }
 
         // The anchor spans one quarter
         let gid = id0.unwrap();
-        let anchor = m.tuplets().get(gid).expect("anchor must exist");
+        let anchor = m.first_voice().tuplets().get(gid).expect("anchor must exist");
         let base_quarter_ticks = DEFAULT_GRID.ticks_of(&Duration::Simple(Eighth)).unwrap() * 2;
         assert_eq!(anchor.target_ticks, base_quarter_ticks);
     }
@@ -513,11 +516,11 @@ mod tests {
     fn convert_noop_when_already_tuplet() {
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
         // First make a triplet at position 0
-        m.set_beat(0, Beat::note(t8())).unwrap();
+        m.first_voice_mut().set_beat(0, Beat::note(t8())).unwrap();
 
         let before = m.clone();
         assert_matches!(
-            m.convert_to_tuplet(0, TupletSpec { n: 3, m: 2, base: Eighth }, true),
+            m.first_voice_mut().convert_to_tuplet(0, TupletSpec { n: 3, m: 2, base: Eighth }, true),
             None,
             "Should not convert when already a tuplet"
         );
@@ -527,63 +530,81 @@ mod tests {
     #[test]
     fn convert_to_tuplet_initializes_notes_when_source_is_note() {
         let mut m = Measure::new(TimeSignature::ONE_FOUR);
-        m.set_beat(0, Beat::note(Duration::Simple(Eighth))).unwrap();
-        m.set_tuplet(0, Some(TupletSpec { n: 3, m: 2, base: Eighth }), true).unwrap();
+        m.first_voice_mut().set_beat(0, Beat::note(Duration::Simple(Eighth))).unwrap();
+        m.first_voice_mut()
+            .set_tuplet(0, Some(TupletSpec { n: 3, m: 2, base: Eighth }), true)
+            .unwrap();
 
-        assert_eq!(m.beats().to_vec(), vec![Beat::note(t8()), Beat::note(t8()), Beat::note(t8())]);
+        assert_eq!(
+            m.first_voice().beats().to_vec(),
+            vec![Beat::note(t8()), Beat::note(t8()), Beat::note(t8())]
+        );
     }
 
     #[test]
     fn convert_to_tuplet_initializes_rests_when_source_is_rest() {
         let mut m = Measure::new(TimeSignature::TWO_EIGHT);
-        m.set_tuplet(0, Some(TupletSpec { n: 3, m: 2, base: Eighth }), true).unwrap();
-        assert_eq!(m.beats().to_vec(), vec![Beat::note(t8()), Beat::note(t8()), Beat::note(t8())]);
+        m.first_voice_mut()
+            .set_tuplet(0, Some(TupletSpec { n: 3, m: 2, base: Eighth }), true)
+            .unwrap();
+        assert_eq!(
+            m.first_voice().beats().to_vec(),
+            vec![Beat::note(t8()), Beat::note(t8()), Beat::note(t8())]
+        );
     }
 
     #[test]
     fn convert_absorbs_rests_ok() {
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
         // Setup: [Rest(e), Rest(e), Rest(q)...] by replacing the first Q with E (fills the remainder with E)
-        m.set_beat(0, Beat::rest(e())).unwrap();
+        m.first_voice_mut().set_beat(0, Beat::rest(e())).unwrap();
         // Now convert idx 0 (Rest(e)) to Triplet Eighths (span Q). Needs to absorb idx 1 (Rest(e)).
         assert_matches!(
-            m.convert_to_tuplet(0, TupletSpec { n: 3, m: 2, base: Eighth }, false),
+            m.first_voice_mut().convert_to_tuplet(
+                0,
+                TupletSpec { n: 3, m: 2, base: Eighth },
+                false
+            ),
             Some(GroupSpan { start_idx: 0, end_idx: 2, id: _ }),
         );
         // Should have created a tuplet group at 0
-        assert!(m.beats()[0].tuplet_group_id.is_some());
+        assert!(m.first_voice().beats()[0].tuplet_group_id.is_some());
     }
 
     #[test]
     fn convert_aborts_on_note_if_no_overwrite() {
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
         // Setup: [Rest(e), Note(e), Rest(q)...]
-        m.set_beat(0, Beat::rest(e())).unwrap();
-        m.set_beat(1, Beat::note(e())).unwrap();
+        m.first_voice_mut().set_beat(0, Beat::rest(e())).unwrap();
+        m.first_voice_mut().set_beat(1, Beat::note(e())).unwrap();
 
         // Try to convert idx 0 to Triplet Eighths (span Q). Needs to absorb idx 1, which is Note.
         assert_matches!(
-            m.convert_to_tuplet(0, TupletSpec { n: 3, m: 2, base: Eighth }, false),
+            m.first_voice_mut().convert_to_tuplet(
+                0,
+                TupletSpec { n: 3, m: 2, base: Eighth },
+                false
+            ),
             None
         );
         // Verify state unchanged (idx 1 is still Note)
-        assert_eq!(m.beats()[1].kind(), Note);
-        assert!(m.beats()[0].tuplet_group_id.is_none());
+        assert_eq!(m.first_voice().beats()[1].kind(), Note);
+        assert!(m.first_voice().beats()[0].tuplet_group_id.is_none());
     }
 
     #[test]
     fn convert_overwrites_note_if_overwrite_true() {
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
         // Setup: [Rest(e), Note(e), Rest(q)...]
-        m.set_beat(0, Beat::rest(e())).unwrap();
-        m.set_beat(1, Beat::note(e())).unwrap();
+        m.first_voice_mut().set_beat(0, Beat::rest(e())).unwrap();
+        m.first_voice_mut().set_beat(1, Beat::note(e())).unwrap();
 
         // Try to convert idx 0 to Triplet Eighths (span Q). Overwrite=true.
         assert_matches!(
-            m.convert_to_tuplet(0, TupletSpec { n: 3, m: 2, base: Eighth }, true),
+            m.first_voice_mut().convert_to_tuplet(0, TupletSpec { n: 3, m: 2, base: Eighth }, true),
             Some(GroupSpan { start_idx: 0, end_idx: 2, id: _ }),
         );
         // Verify tuplet created
-        assert!(m.beats()[0].tuplet_group_id.is_some());
+        assert!(m.first_voice().beats()[0].tuplet_group_id.is_some());
     }
 }
