@@ -461,8 +461,9 @@ impl Grooph {
             ui.weak("The score is not saved.");
         }
         ui.add_space(4.0);
-        // A drum groove is a score of its own, on the kit's staff.
-        if ui.button("🎼 New drum groove").clicked() {
+        // A drum groove is a score of its own, on the kit's staff, shown
+        // in the score tab: offered while that tab is.
+        if self.ui.show_score_tab && ui.button("🎼 New drum groove").clicked() {
             self.request_new_kit_score();
         }
         ui.add_space(8.0);

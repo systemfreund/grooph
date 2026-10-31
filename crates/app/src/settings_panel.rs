@@ -106,6 +106,8 @@ impl Grooph {
             });
 
             egui::CollapsingHeader::new("Developer settings").default_open(false).show(ui, |ui| {
+                ui.checkbox(&mut self.ui.show_score_tab, "Show the Score tab (beta)");
+                ui.separator();
                 ui.label("Size:");
                 ui.add(
                     egui::DragValue::new(&mut self.ui.layout.width_cap_factor)

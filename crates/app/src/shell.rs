@@ -691,13 +691,19 @@ impl Grooph {
             (Tab::Score, "🎼", "Score"),
             (Tab::More, "☰", "More"),
         ];
+        // The score tab, not finished yet, only when the developer setting
+        // shows it, or while it is open (from a link or a pattern).
+        let tabs: Vec<_> = TABS
+            .into_iter()
+            .filter(|&(tab, ..)| tab != Tab::Score || self.ui.show_score_tab || tab == current)
+            .collect();
         let mut picked = None;
         egui::Panel::bottom("shell_tabs")
             .frame(Frame::side_top_panel(ui.style()).inner_margin(Margin::symmetric(0, 4)))
             .show(ui, |ui| {
                 centered_column(ui, |ui| {
-                    ui.columns(TABS.len(), |cols| {
-                        for (col, (tab, icon, label)) in cols.iter_mut().zip(TABS) {
+                    ui.columns(tabs.len(), |cols| {
+                        for (col, &(tab, icon, label)) in cols.iter_mut().zip(&tabs) {
                             let (rect, resp) = col.allocate_exact_size(
                                 vec2(col.available_width(), TAB_HEIGHT),
                                 Sense::click(),
@@ -722,6 +728,9 @@ impl Grooph {
                                 FontId::proportional(14.0),
                                 color,
                             );
+                            if tab == Tab::Score {
+                                beta_pill(painter, rect.center_top() + vec2(14.0, 2.0));
+                            }
                             if resp.clicked() {
                                 picked = Some(tab);
                             }
@@ -1483,6 +1492,16 @@ impl Grooph {
             self.ui.picker = Some(Picker::Help);
         }
     }
+}
+
+/// A small "BETA" pill with its left edge at `left_top`, beside a tab's
+/// icon: the tab is not finished yet.
+fn beta_pill(painter: &egui::Painter, left_top: egui::Pos2) {
+    let font = FontId::proportional(9.0);
+    let text = painter.layout_no_wrap("BETA".to_owned(), font, Color32::WHITE);
+    let rect = egui::Rect::from_min_size(left_top, text.size() + vec2(8.0, 2.0));
+    painter.rect_filled(rect, rect.height() / 2.0, Color32::from_rgb(0xD9, 0x6B, 0x1E));
+    painter.galley(rect.min + vec2(4.0, 1.0), text, Color32::WHITE);
 }
 
 #[cfg(test)]

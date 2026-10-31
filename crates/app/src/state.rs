@@ -320,6 +320,10 @@ pub(crate) struct UiShell {
     pub(crate) counting: CountingSettings,
     /// Whether the staff flashes on every beat while playing. Off by default.
     pub(crate) flash_enabled: bool,
+    /// Whether the tab bar shows the score tab, which is not finished yet
+    /// (a developer setting, off by default). A link or pattern that opens
+    /// the score tab still shows it while it is open.
+    pub(crate) show_score_tab: bool,
     /// What the practice staff shows while it plays.
     pub(crate) guide: Guide,
     pub(crate) platform: PlatformRuntime,

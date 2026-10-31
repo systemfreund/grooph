@@ -165,7 +165,10 @@ spread across callers.
    on the cursor's beat, "Technique" (O) steps through its techniques.
    The library's "New drum groove" starts one bar of two voices on the
    kit's staff, asking first if the score has unsaved changes
-   (`PendingLoad::NewKitScore`). A drum is struck by one voice at a time:
+   (`PendingLoad::NewKitScore`); it is offered while the score tab is
+   shown. That tab is not finished: the tab bar hides it, with its
+   "BETA" pill, until the developer setting `UiState::show_score_tab`
+   shows it, but a link or pattern still opens it. A drum is struck by one voice at a time:
    a tool whose edit makes two voices strike an instrument of the kit at
    the same tick is refused (`Measure::doubled_instruments`, compared
    before and after each tool in `apply_tool`, so a doubling the score

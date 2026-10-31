@@ -192,6 +192,8 @@ pub(crate) struct PersistedState {
     audio_offset: f32,
     counting: CountingSettings,
     flash_enabled: bool,
+    /// See [`UiState::show_score_tab`].
+    show_score_tab: bool,
     guide: Guide,
     midi_selected_port_id: Option<String>,
     accuracy_enabled: bool,
@@ -227,6 +229,7 @@ impl Default for PersistedState {
             audio_offset: 0.0,
             counting: CountingSettings::default(),
             flash_enabled: false,
+            show_score_tab: false,
             guide: Guide::default(),
             midi_selected_port_id: None,
             accuracy_enabled: false,
@@ -264,6 +267,7 @@ impl PersistedState {
             audio_offset: app.playback_ctl.audio_cfg.offset,
             counting: app.ui.counting,
             flash_enabled: app.ui.flash_enabled,
+            show_score_tab: app.ui.show_score_tab,
             guide: app.ui.guide,
             midi_selected_port_id: app.playback_ctl.midi.selected_port_id.clone(),
             accuracy_enabled: app.playback_ctl.accuracy.enabled,
@@ -1344,6 +1348,7 @@ impl Grooph {
                 layout: LayoutSettings::default(),
                 counting: state.counting,
                 flash_enabled: state.flash_enabled,
+                show_score_tab: state.show_score_tab,
                 guide: state.guide,
                 platform,
                 renaming_preset: None,
@@ -1367,9 +1372,14 @@ impl Grooph {
             },
         };
         app.editor.active_preset = app.matching_preset();
-        // The page the More screen was opened from, then the saved tab.
-        app.select_tab(state.document.tab());
-        app.select_tab(state.tab);
+        // The page the More screen was opened from, then the saved tab;
+        // Practice for the score tab while it is hidden.
+        let shown = |tab| match tab {
+            Tab::Score if !state.show_score_tab => Tab::Practice,
+            tab => tab,
+        };
+        app.select_tab(shown(state.document.tab()));
+        app.select_tab(shown(state.tab));
         // A link opens after the saved tab, so its tab wins.
         if let Some(query) = query {
             app.open_link_from_url(&query);
