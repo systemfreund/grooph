@@ -393,7 +393,9 @@ impl Grooph {
                     let mut bar_action = None;
                     if self.ui.mode == Mode::Edit && calibration.is_none() {
                         let bars = self.editor.doc().score.len();
-                        let menu = BarMenu { metronome: self.metronome_mode(), bars };
+                        let metronome = self.metronome_mode();
+                        let clean_up = !metronome && self.can_clean_up_current_measure();
+                        let menu = BarMenu { metronome, bars, clean_up };
                         if (resp.secondary_clicked() || resp.long_touched())
                             && let Some(pos) = resp.interact_pointer_pos()
                             && let Some(idx) = (0..bars).find(|&idx| {
@@ -442,6 +444,7 @@ impl Grooph {
                             }
                         }
                         Some(BarAction::Duplicate) => self.duplicate_current_measure(),
+                        Some(BarAction::CleanUp) => self.clean_up_current_measure(),
                         Some(BarAction::Clear) => self.clear_current_measure(),
                         Some(BarAction::Delete) => self.remove_current_measure(),
                         None => {}
@@ -711,6 +714,8 @@ enum BarAction {
     /// A long press on a bar: the menu is for that bar.
     Select(usize),
     Duplicate,
+    /// Respell the bar for reading (see `Grooph::clean_up_current_measure`).
+    CleanUp,
     Clear,
     Delete,
 }
@@ -720,6 +725,8 @@ enum BarAction {
 struct BarMenu {
     metronome: bool,
     bars: usize,
+    /// "Clean up bar" would change the bar; greyed out otherwise.
+    clean_up: bool,
 }
 
 impl BarMenu {
@@ -732,6 +739,9 @@ impl BarMenu {
         ui.set_min_width(BAR_MENU_WIDTH);
         if !self.metronome && row(ui, "Duplicate bar".into(), true) {
             *action = Some(BarAction::Duplicate);
+        }
+        if !self.metronome && row(ui, "Clean up bar".into(), self.clean_up) {
+            *action = Some(BarAction::CleanUp);
         }
         if row(ui, (if self.metronome { "Clear" } else { "Clear bar" }).into(), true) {
             *action = Some(BarAction::Clear);

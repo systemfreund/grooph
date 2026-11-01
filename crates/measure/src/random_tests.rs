@@ -274,3 +274,54 @@ fn random_scores_round_trip_through_notation_long() {
         run_notation_round_trips(seed, 5000);
     }
 }
+
+/// Clean up random measures: the result is valid, sounds the same (every
+/// head at the same tick) and a second cleanup changes nothing.
+fn run_random_cleanups(seed: u64, measures: usize) -> (usize, usize) {
+    let durations = durations();
+    let meters = meters();
+    let mut rng = Rng::new(seed);
+    let (mut cleaned, mut left) = (0, 0);
+    for i in 0..measures {
+        let mut m = Measure::new(pick(&mut rng, &meters));
+        for _ in 0..rng.below(30) {
+            random_edit(&mut m, &mut rng, &durations, &meters);
+        }
+        if m.first_voice().respelled().is_none() {
+            left += 1;
+            continue;
+        }
+        cleaned += 1;
+        let once = m.cleaned_up();
+        let place = format!("seed {seed}, measure {i}: {m:?} in {}", m.time_signature());
+        if let Err(e) = check_invariants(&once) {
+            panic!("{place}: cleaned up to {once:?}: {e}");
+        }
+        let sound = |m: &Measure| -> Vec<_> {
+            m.head_onsets().into_iter().map(|o| (o.tick, o.voice, o.head)).collect()
+        };
+        assert_eq!(sound(&once), sound(&m), "{place}: cleaned up to {once:?}");
+        let twice = once.cleaned_up();
+        if let Some(diff) =
+            score_difference(&Score::new(vec![once.clone()]), &Score::new(vec![twice]))
+        {
+            panic!("{place}: a second cleanup changed it: {diff}");
+        }
+    }
+    (cleaned, left)
+}
+
+#[test]
+fn random_cleanups_keep_the_rhythm() {
+    let (cleaned, left) = run_random_cleanups(SEED, 2000);
+    // Most measures can be cleaned up; tuplets inside beats may not.
+    assert!(cleaned > 4 * left, "{cleaned} cleaned, {left} left as they are");
+}
+
+#[test]
+#[ignore = "long run; cargo test -p grooph-measure -- --ignored"]
+fn random_cleanups_keep_the_rhythm_long() {
+    for seed in 1..=20 {
+        run_random_cleanups(seed, 10_000);
+    }
+}

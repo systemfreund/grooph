@@ -763,6 +763,46 @@ impl Grooph {
         });
     }
 
+    /// Respell the cursor's bar for reading, every voice (the bar menu's
+    /// "Clean up bar", see [`grooph_measure::Measure::clean_up`]): every
+    /// note stays where it starts, with its heads; only the written lengths
+    /// and the rests change. The cursor stays on the beat sounding at its
+    /// time. Not in the metronome.
+    pub(crate) fn clean_up_current_measure(&mut self) {
+        if self.metronome_mode() {
+            return;
+        }
+        self.with_undo_snapshot(|app| {
+            let doc = app.editor.doc_mut();
+            let cursor = doc.score.clamp_cursor(doc.cursor);
+            let onsets = |score: &Score| {
+                grooph_measure::grid::DEFAULT_GRID
+                    .compute_onset_ticks(score.voice_at(cursor).beats())
+            };
+            let tick = onsets(&doc.score).get(cursor.beat_idx).copied().unwrap_or(0);
+            if !doc.score.measures_mut()[cursor.measure_idx].clean_up() {
+                return false;
+            }
+            let beat_idx =
+                onsets(&doc.score).iter().take_while(|&&t| t <= tick).count().saturating_sub(1);
+            doc.cursor = Cursor { beat_idx, ..cursor };
+            true
+        });
+    }
+
+    /// Whether "Clean up bar" would change the cursor's bar.
+    pub(crate) fn can_clean_up_current_measure(&self) -> bool {
+        let doc = self.editor.doc();
+        let cursor = doc.score.clamp_cursor(doc.cursor);
+        let measure = &doc.score.measures()[cursor.measure_idx];
+        measure
+            .cleaned_up()
+            .voices()
+            .iter()
+            .zip(measure.voices())
+            .any(|(a, b)| a.beats() != b.beats())
+    }
+
     /// Remove the currently active measure. Does nothing if only one measure
     /// remains (Score invariant: at least one measure).
     pub(crate) fn remove_current_measure(&mut self) {

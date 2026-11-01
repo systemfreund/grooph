@@ -643,7 +643,7 @@ pub fn generate_measure(
     let ts = settings.time_signature;
     check_time_signature(ts)?;
     let (drawn, style) = draw(settings, rng);
-    let beats = spelling::spell(ts.beat_unit, &drawn, style, rng);
+    let beats = spelling::spell(ts, &drawn, style, rng);
     Ok(write_measure(ts, &beats)?)
 }
 
@@ -1496,7 +1496,7 @@ mod tests {
                             };
                             for _ in 0..n {
                                 let (drawn, style) = draw(&st, &mut rng);
-                                let written = spelling::spell(beat_unit, &drawn, style, &mut rng);
+                                let written = spelling::spell(ts, &drawn, style, &mut rng);
                                 let m = write_measure(ts, &written).expect("spelling must build");
                                 let expected: Vec<Beat> = written
                                     .iter()

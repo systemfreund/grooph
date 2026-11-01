@@ -1543,6 +1543,23 @@ mod tests {
     }
 
     #[test]
+    fn the_bar_menu_cleans_up_the_cursors_bar() {
+        let mut app = editing("4/4 r:q S:h S:q ; K:h r:e K:e r:q | 3/4 q q q");
+        // The cursor on the snare of beat 4 stays on it.
+        app.editor.doc_mut().cursor = Cursor::at(0, 2);
+        assert!(app.can_clean_up_current_measure());
+        app.clean_up_current_measure();
+        assert_eq!(text(&app), "4/4 r:q S:q r:q S:q ; K:q r:q r:e K:e r:q | 3/4 q q q");
+        assert_eq!(app.editor.doc().cursor, Cursor::at(0, 3));
+        assert!(app.editor.doc().dirty);
+        // Clean already: nothing to do, nothing to undo.
+        assert!(!app.can_clean_up_current_measure());
+        app.clean_up_current_measure();
+        apply(&mut app, "edit.undo");
+        assert_eq!(text(&app), "4/4 r:q S:h S:q ; K:h r:e K:e r:q | 3/4 q q q");
+    }
+
+    #[test]
     fn the_one_line_has_no_instruments_to_pick() {
         let mut app = editing("4/4 q (q) r:q q");
         app.pick_instrument(grooph_measure::Instrument::Kick);
