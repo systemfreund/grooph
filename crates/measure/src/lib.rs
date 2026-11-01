@@ -22,6 +22,7 @@ pub mod tempo;
 pub mod time_signature;
 pub mod tuplet;
 mod voice;
+pub mod voicing;
 
 use BeatKind::Note;
 use BeatKind::Rest;
@@ -36,6 +37,7 @@ use std::fmt::{Debug, Formatter};
 pub use time_signature::{InvalidTimeSignature, ParseTimeSignatureError, TimeSignature};
 pub use tuplet::{TupletAnchor, TupletGroupId, TupletRegistry};
 pub use voice::{DifferentMeter, Measure, VoiceBar, VoiceIdx};
+pub use voicing::Voicing;
 
 /// Logical Beat-Index within a measure (0-based)
 pub type BeatIdx = usize;

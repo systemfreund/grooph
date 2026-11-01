@@ -31,7 +31,7 @@ use grooph_measure::duration::s;
 use grooph_measure::grid::DEFAULT_GRID;
 use grooph_measure::{
     Beat, BeatIdx, BeatKind, Instrument, MeasureIdx, Score, StaffKind, TimeSignature, VoiceBar,
-    VoiceIdx,
+    VoiceIdx, Voicing,
 };
 
 /// Configuration for laying out an entire [`Score`].
@@ -538,8 +538,8 @@ pub struct HeadHit {
 /// nearest `pos` ([`Staff::instrument_near`]). On a staff of one line that
 /// is its rhythm, and the voice is the one on `pos`'s side of the line. On
 /// the kit's staff the voice is the one whose note nearest `pos.x` has a
-/// head of that instrument, else the instrument's default voice.
-pub fn hit_test_head(staff: &StaffLayout, pos: Pos2) -> Option<HeadHit> {
+/// head of that instrument, else the one `voicing` writes it in.
+pub fn hit_test_head(staff: &StaffLayout, pos: Pos2, voicing: &Voicing) -> Option<HeadHit> {
     let (voice, measure_idx, beat_idx) = hit_test_voice(staff, pos)?;
     let system =
         staff.systems.iter().find(|s| pos.y < s.rect.bottom()).or_else(|| staff.systems.last())?;
@@ -566,7 +566,7 @@ pub fn hit_test_head(staff: &StaffLayout, pos: Pos2) -> Option<HeadHit> {
         (note.kind == BeatKind::Note && heads.into_iter().any(at_place)).then_some((v, beat))
     });
     let (voice, beat_idx) = holding.unwrap_or_else(|| {
-        let v = instrument.default_voice().min(placed.voices.len() - 1);
+        let v = voicing.voice_of(instrument).min(placed.voices.len() - 1);
         (v, nearest_note(&placed.voices[v], pos.x))
     });
     Some(HeadHit { measure_idx, voice, beat_idx, instrument })
@@ -734,7 +734,7 @@ mod tests {
         let notes = &system.measures[0].voices[0].notes;
         let at = |beat: usize, pos: f32| {
             let tap = Pos2::new(notes[beat].center.x, system.y_baseline - pos * half_ss);
-            let hit = hit_test_head(&staff, tap).unwrap();
+            let hit = hit_test_head(&staff, tap, &Voicing::default()).unwrap();
             (hit.voice, hit.beat_idx, hit.instrument)
         };
         // The snare under the hi-hat, both in the upper voice.
@@ -747,11 +747,18 @@ mod tests {
         // No kick on the third beat's lower voice: a rest there, its voice.
         assert_eq!(at(2, -3.0), (1, 1, Kick));
 
+        // A rule that writes the snare below: with none to find, a tap on
+        // its place goes to the lower voice.
+        assert_eq!(at(2, 1.2).0, 0);
+        let tap = Pos2::new(notes[2].center.x, system.y_baseline - 1.2 * half_ss);
+        let hit = hit_test_head(&staff, tap, &Voicing::CYMBALS_ABOVE).unwrap();
+        assert_eq!((hit.voice, hit.instrument), (1, Snare));
+
         // On the one line, its rhythm.
         let line = grooph_measure::notation::parse_score("4/4 q q q q").unwrap();
         let staff = build_staff_layout(&line, &o);
         let tap = Pos2::new(staff.systems[0].measures[0].layout().notes[1].center.x, 10.0);
-        let hit = hit_test_head(&staff, tap).unwrap();
+        let hit = hit_test_head(&staff, tap, &Voicing::default()).unwrap();
         assert_eq!((hit.voice, hit.beat_idx, hit.instrument), (0, 1, Rhythm));
     }
 

@@ -9,7 +9,7 @@
 //! values write on a rest (`Grooph::edit_instrument`). Accent, ghost and the
 //! techniques go to the head they mean (`Grooph::aimed` in `tool_palette`).
 //! The cursor goes to the instrument's voice, the feet below, the hands above
-//! (`Instrument::default_voice`), unless it is there already in the other,
+//! (the score's `Voicing`), unless it is there already in the other,
 //! onto the beat sounding then. A tap on a head on the staff picks that
 //! instrument. The library's "New drum groove" starts a score
 //! on the kit's staff.
@@ -19,7 +19,9 @@ use crate::Mode;
 use crate::documents::Document;
 use crate::shell::Tab;
 use crate::state::PendingLoad;
-use grooph_measure::{Cursor, Instrument, Measure, Score, StaffKind, TimeSignature, VoiceIdx};
+use grooph_measure::{
+    Cursor, Instrument, Measure, Score, StaffKind, TimeSignature, VoiceIdx, Voicing,
+};
 
 /// The name of `instrument` on its button.
 pub(crate) fn instrument_label(instrument: Instrument) -> &'static str {
@@ -53,14 +55,12 @@ pub(crate) fn instrument_short(instrument: Instrument) -> &'static str {
     }
 }
 
-/// A kit score's two voices, hands above and feet below.
-const KIT_VOICES: usize = 2;
-
-/// A new drum groove: one bar of `ts`, its two voices of rests, on the kit's staff.
-pub(crate) fn empty_groove(ts: TimeSignature) -> Score {
+/// A new drum groove: one bar of `ts`, a voice of rests for each of the
+/// `voicing`'s, on the kit's staff.
+pub(crate) fn empty_groove(ts: TimeSignature, voicing: Voicing) -> Score {
     let mut bar = Measure::new(ts);
-    bar.fill_voices(KIT_VOICES);
-    Score::single(bar).with_staff(StaffKind::Kit)
+    bar.fill_voices(voicing.voices());
+    Score::single(bar).with_staff(StaffKind::Kit).with_voicing(voicing)
 }
 
 impl Grooph {
@@ -68,7 +68,8 @@ impl Grooph {
     /// voice (see [`Grooph::go_to_voice`]).
     pub(crate) fn pick_instrument(&mut self, instrument: Instrument) {
         self.editor.instrument = instrument;
-        self.go_to_voice(instrument.default_voice());
+        let voice = self.editor.doc().score.voicing.voice_of(instrument);
+        self.go_to_voice(voice);
     }
 
     /// A tap on an instrument's cell: it becomes the picked one and its head
@@ -82,7 +83,8 @@ impl Grooph {
             .map(|(_, at)| at.voice);
         self.editor.instrument = instrument;
         let steps = self.editor.doc().history.pushed();
-        self.go_to_voice(there.unwrap_or(instrument.default_voice()));
+        let usual = self.editor.doc().score.voicing.voice_of(instrument);
+        self.go_to_voice(there.unwrap_or(usual));
         self.apply_tool(crate::tool_palette::tool("modify.toggle.head"));
         // A voice the bar had to get first is part of the same step.
         if self.editor.doc().history.pushed() == steps + 2 {
@@ -96,7 +98,10 @@ impl Grooph {
     pub(crate) fn go_to_voice(&mut self, voice: VoiceIdx) {
         let cursor = self.editor.doc().score.clamp_cursor(self.editor.doc().cursor);
         let kit = !self.staff_model().one_line();
-        if kit && self.current_measure().voices().len() <= voice && voice < KIT_VOICES {
+        if kit
+            && self.current_measure().voices().len() <= voice
+            && voice < self.editor.doc().score.voicing.voices()
+        {
             self.with_undo_snapshot(|app| {
                 app.current_measure_mut().fill_voices(voice + 1);
                 true
@@ -121,7 +126,7 @@ impl Grooph {
     pub(crate) fn new_kit_score(&mut self) {
         self.stop_transport();
         self.show_document(Document::Score);
-        let groove = empty_groove(self.current_measure().time_signature());
+        let groove = empty_groove(self.current_measure().time_signature(), Voicing::default());
         self.with_undo_snapshot(|app| {
             let doc = app.editor.doc_mut();
             doc.score = groove;

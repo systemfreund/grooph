@@ -74,8 +74,9 @@ spread across callers.
   every head, `set_kind_of` turns a rest into a plain note of an instrument
   and back (`set_kind`: the one line's `Rhythm`).
   On the one line every note is one `Instrument::Rhythm` head;
-  `Instrument::staff_pos`/`notehead`/`default_voice` hold the drumkit
-  legend for kit scores (#251-#255). Beats saved before heads (`kind`,
+  `Instrument::staff_pos`/`notehead` hold the drumkit
+  legend for kit scores (#251-#255); `Score::voicing` (`Voicing`, the set of
+  instruments entered in the lower voice) says which voice a new head goes to. Beats saved before heads (`kind`,
   `accented`, `soft`) load as one `Rhythm` head (`RawBeat`).
   The editing operations of a voice take the instrument they mean (see
   "Kit editing"): accent and ghost change its head, `toggle_head` adds or
@@ -157,8 +158,8 @@ spread across callers.
 6. Kit editing (`grooph-app`'s `kit_palette`): on a staff of several
    instruments the tool grid's first row has a toggle per instrument
    (`Grooph::tap_instrument`): it adds the instrument's head to the cursor's
-   beat, in the voice where it already is there, else its default voice,
-   onto the beat sounding then (`Score::cursor_in_voice`; a kit measure
+   beat, in the voice where it already is there, else the voice the score's
+   `Voicing` writes it in, onto the beat sounding then (`Score::cursor_in_voice`; a kit measure
    without that voice gets it, `Measure::fill_voices`), or takes the head
    away; the cell shows as picked while the head is on the beat
    (`heads_at_cursor`). The instrument tapped, or of a head tapped on the
@@ -189,8 +190,8 @@ spread across callers.
    before and after each tool in `apply_tool`, so a doubling the score
    already has does not block other edits). A score loaded from a link
    or a saved pattern is made so first (`Score::undouble_instruments`):
-   a doubled head stays in its instrument's usual voice, its accent going
-   along, and leaves the other, and the score is marked unsaved; so is a
+   a doubled head stays in the voice the score's `Voicing` writes its
+   instrument in, its accent going along, and leaves the other, and the score is marked unsaved; so is a
    score restored from the saved session. The one line edits as before:
    its pen is `Rhythm`, and the kit's tools do nothing there.
 7. Both staves are one model, `grooph_layout::staff::Staff`, which

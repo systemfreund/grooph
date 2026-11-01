@@ -1557,4 +1557,32 @@ mod tests {
         apply(&mut app, "modify.toggle.accent");
         assert_eq!(text(&app), "4/4 q (q) >q q");
     }
+
+    #[test]
+    fn kit_input_follows_the_voicing_of_the_score() {
+        use grooph_measure::Instrument::{HiHat, Kick, Snare};
+        use grooph_measure::Voicing;
+        // Cymbals above: the snare goes below, with the feet.
+        let mut app = editing("4/4 H:q H:q H:q H:q ; K:q r:q K:q r:q");
+        app.editor.doc_mut().score.voicing = Voicing::CYMBALS_ABOVE;
+        app.editor.doc_mut().cursor = Cursor::in_voice(0, 0, 1);
+        app.tap_instrument(Snare);
+        assert_eq!(text(&app), "4/4 H:q H:q H:q H:q ; K:q S:q K:q r:q");
+        assert_eq!(app.editor.doc().cursor, Cursor::in_voice(0, 1, 1));
+        // One voice: the kick goes above, into the hands' voice.
+        let mut app = editing("4/4 H:q H:q H:q H:q");
+        app.editor.doc_mut().score.voicing = Voicing::ONE_VOICE;
+        app.tap_instrument(Kick);
+        assert_eq!(text(&app), "4/4 K-H:q H:q H:q H:q");
+        assert_eq!(app.editor.doc().cursor, Cursor::in_voice(0, 0, 0));
+        app.pick_instrument(HiHat);
+        assert_eq!(app.editor.doc().cursor, Cursor::in_voice(0, 0, 0));
+        // A new groove has the voices of its rule.
+        let groove = crate::kit_palette::empty_groove(
+            grooph_measure::TimeSignature::FOUR_FOUR,
+            Voicing::ONE_VOICE,
+        );
+        assert_eq!(groove.measures()[0].voices().len(), 1);
+        assert_eq!(groove.voicing, Voicing::ONE_VOICE);
+    }
 }
