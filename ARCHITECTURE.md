@@ -167,9 +167,12 @@ spread across callers.
    the note values write it on a rest. Marks go to the head they mean
    (`Grooph::aimed`): a cell per technique (`Modifier::ToggleTechnique`)
    plays the head of an instrument played that way on the beat so, or plainly
-   again, so no instrument needs picking first; the cells are in the
-   instruments' row, after them, and only the ones that fit the beat are
-   there (`grid_rows`' `technique`);
+   again, so no instrument needs picking first; the cells (`Cell::Technique`)
+   are in the instruments' row, one per instrument that plays the technique,
+   right of that instrument's cell and only while it has a head on the beat
+   (`grid_rows`' `technique`): they open out of it in 150 ms on a tinted
+   background that joins the group, and `row_lines` keeps a group in one line;
+   a tap picks their instrument and applies the mark;
    accent and ghost go to the picked instrument's head if it is on the beat,
    else the snare, kick, toms, hi-hat, ride, crash (`AIM_ORDER`), which
    becomes the picked one, its cell ringed where several heads are on the
@@ -709,7 +712,7 @@ grooph's metronome runs inside AI chats as an
 
 The tool palette (`tool_palette_panel`) is one grid for every editor
 (Practice, Score, the metronome's click bar): rows of cells
-(`tool_palette::grid_rows`), on the kit its instruments and the techniques of the beat, then
+(`tool_palette::grid_rows`), on the kit its instruments, each with the techniques of its head on the beat, then
 the meter, the head modifiers (accent, ghost, dot) and the rests, and the note values with the tuplets, each
 row going on in the next line only where it does not fit. Undo and redo
 (`BAR_TOOLS`) are in the editor's bar (`editor_bar`), right after play, Done

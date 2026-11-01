@@ -43,6 +43,8 @@ fn button_kind(kind: &ToolKind) -> ButtonKind {
 }
 
 /// Room between the grid's cells.
+/// How long a technique group takes to open out of its instrument.
+const OPEN_SECONDS: f32 = 0.15;
 const GRID_GAP: f32 = 4.0;
 /// The narrowest a cell gets before the grid takes fewer columns.
 const MIN_CELL: f32 = 54.0;
@@ -117,6 +119,9 @@ pub(crate) enum Cell {
     Tool(&'static Tool),
     /// Picks the instrument the tools write and change (the kit's).
     Instrument(Instrument),
+    /// A technique of the instrument before it, opened out to its right
+    /// while that instrument has a head on the beat; a tap aims it there.
+    Technique(Instrument, &'static Tool),
 }
 
 /// The tool with `id`.
@@ -139,26 +144,59 @@ fn technique_name(technique: Technique) -> &'static str {
 }
 
 /// The grid's rows, top to bottom; a row wider than the grid goes on in the
-/// next line. On the kit the instruments come first, with the techniques
-/// `technique` shows after them in the same row; on the one line there are
-/// neither.
-pub(crate) fn grid_rows(kit: bool, technique: &dyn Fn(&'static Tool) -> bool) -> Vec<Vec<Cell>> {
+/// next line. On the kit the instruments come first, each followed by the
+/// techniques `technique` shows for it; on the one line there are neither.
+pub(crate) fn grid_rows(
+    kit: bool,
+    technique: &dyn Fn(Instrument, &'static Tool) -> bool,
+) -> Vec<Vec<Cell>> {
     let tools = |ids: &[&str]| ids.iter().map(|id| Cell::Tool(tool(id))).collect::<Vec<_>>();
     let mut rows = Vec::new();
     if kit {
-        let mut instruments: Vec<_> = KIT_ORDER.iter().map(|&i| Cell::Instrument(i)).collect();
-        instruments.extend(
-            all_tools()
-                .iter()
-                .filter(|t| matches!(t.kind, ToolKind::Modify(Modifier::ToggleTechnique(_))))
-                .filter(|&t| technique(t))
-                .map(Cell::Tool),
-        );
+        let mut instruments = Vec::new();
+        for &i in &KIT_ORDER {
+            instruments.push(Cell::Instrument(i));
+            for t in all_tools() {
+                if let ToolKind::Modify(Modifier::ToggleTechnique(tech)) = t.kind
+                    && i.allows(tech)
+                    && technique(i, t)
+                {
+                    instruments.push(Cell::Technique(i, t));
+                }
+            }
+        }
         rows.push(instruments);
     }
     rows.push(tools(&HEAD_TOOLS));
     rows.push(tools(&VALUE_TOOLS));
     rows
+}
+
+/// `row` as lines of at most `columns` cells: an instrument and its
+/// techniques stay in one line unless they are more than a line.
+fn row_lines(row: &[Cell], columns: usize) -> Vec<&[Cell]> {
+    let mut lines = Vec::new();
+    let mut start = 0;
+    let mut i = 0;
+    while i < row.len() {
+        let mut end = i + 1;
+        while end < row.len() && matches!(row[end], Cell::Technique(..)) {
+            end += 1;
+        }
+        if end - start > columns && i > start {
+            lines.push(&row[start..i]);
+            start = i;
+        }
+        while end - start > columns {
+            lines.push(&row[start..start + columns]);
+            start += columns;
+        }
+        i = end;
+    }
+    if start < row.len() {
+        lines.push(&row[start..]);
+    }
+    lines
 }
 
 /// The grid's columns and the size of its cells, `width` wide.
@@ -189,9 +227,11 @@ impl Grooph {
     fn tool_grid_scroll(&mut self, ui: &mut Ui) {
         // Sized up front: a bottom panel offers the height it had.
         // The techniques the cursor's beat can take, no others.
-        let rows = grid_rows(!self.staff_model().one_line(), &|t| self.cell_enabled(Cell::Tool(t)));
+        let heads = self.heads_at_cursor();
+        let rows =
+            grid_rows(!self.staff_model().one_line(), &|i, _| heads.iter().any(|&(h, _)| h == i));
         let (columns, cell) = grid_metrics(ui.available_width());
-        let lines: usize = rows.iter().map(|r| r.len().div_ceil(columns)).sum();
+        let lines: usize = rows.iter().map(|r| row_lines(r, columns).len()).sum();
         let height = lines as f32 * (cell.y + GRID_GAP) - GRID_GAP;
         let height = height.min(MAX_GRID_SHARE * ui.ctx().content_rect().height());
         egui::ScrollArea::vertical()
@@ -209,13 +249,50 @@ impl Grooph {
         let left = ui.max_rect().left() + (width - used) / 2.0;
         let mut top = ui.cursor().top();
         let mut clicked = None;
+        let ctx = ui.ctx().clone();
+        let tint = ui.visuals().selection.bg_fill.gamma_multiply(0.6);
+        let clip = ui.clip_rect();
         for row in rows {
-            for line in row.chunks(columns) {
-                for (col, &c) in line.iter().enumerate() {
+            for line in row_lines(row, columns) {
+                let rect_of = |col: usize| {
                     let min = Pos2::new(left + col as f32 * (cell.x + GRID_GAP), top);
-                    if self.grid_cell(ui, Rect::from_min_size(min, cell), c).clicked() {
+                    Rect::from_min_size(min, cell)
+                };
+                let mut open = 1.0;
+                let mut group_start = 0;
+                for (col, &c) in line.iter().enumerate() {
+                    let rect = rect_of(col);
+                    if let Cell::Instrument(i) = c {
+                        group_start = col;
+                        // The techniques open out to the right, from their
+                        // instrument; the ones to the right just move.
+                        let has = matches!(line.get(col + 1), Some(Cell::Technique(..)));
+                        open = ctx.animate_bool_with_time(
+                            ui.make_persistent_id(("tool_grid_open", i)),
+                            has,
+                            OPEN_SECONDS,
+                        );
+                        if has {
+                            let last = line[col + 1..]
+                                .iter()
+                                .take_while(|c| matches!(c, Cell::Technique(..)))
+                                .count();
+                            let end = rect_of(col + last).right();
+                            let shown = rect.right() + (end - rect.right()) * open;
+                            let group = Rect::from_min_max(rect.min, Pos2::new(shown, rect.max.y))
+                                .expand(GRID_GAP / 2.0);
+                            ui.painter().rect_filled(group, 8.0, tint);
+                        }
+                    }
+                    if let Cell::Technique(..) = c {
+                        let start = rect_of(group_start).right();
+                        let shown = start + (rect.right() - start) * open;
+                        ui.set_clip_rect(clip.intersect(Rect::everything_left_of(shown)));
+                    }
+                    if self.grid_cell(ui, rect, c).clicked() {
                         clicked = Some(c);
                     }
+                    ui.set_clip_rect(clip);
                 }
                 top += cell.y + GRID_GAP;
             }
@@ -230,6 +307,10 @@ impl Grooph {
         match clicked {
             Some(Cell::Tool(t)) => self.apply_tool(t),
             Some(Cell::Instrument(i)) => self.tap_instrument(i),
+            Some(Cell::Technique(i, t)) => {
+                self.editor.instrument = i;
+                self.apply_tool(t);
+            }
             None => {}
         }
     }
@@ -240,6 +321,21 @@ impl Grooph {
     fn cell_selected(&self, cell: Cell) -> bool {
         match cell {
             Cell::Instrument(i) => self.heads_at_cursor().iter().any(|&(h, _)| h == i),
+            Cell::Technique(i, t) => {
+                let ToolKind::Modify(Modifier::ToggleTechnique(tech)) = t.kind else {
+                    return false;
+                };
+                let score = &self.editor.doc().score;
+                self.heads_at_cursor().into_iter().any(|(h, at)| {
+                    h == i
+                        && score
+                            .voice_at(at)
+                            .beats()
+                            .get(at.beat_idx)
+                            .and_then(|b| b.heads().get(i))
+                            .is_some_and(|h| h.technique() == tech)
+                })
+            }
             Cell::Tool(Tool { kind: ToolKind::Modify(Modifier::ToggleTechnique(t)), .. }) => {
                 let (pen, at) = self.aimed(Modifier::ToggleTechnique(*t));
                 let score = &self.editor.doc().score;
@@ -339,7 +435,7 @@ impl Grooph {
                 ToolKind::Modify(modifier) => self.modifier_applies(modifier),
                 _ => true,
             },
-            Cell::Instrument(_) => true,
+            Cell::Instrument(_) | Cell::Technique(..) => true,
         }
     }
 
@@ -401,7 +497,7 @@ impl Grooph {
         let enabled = self.cell_enabled(cell);
         let selected = self.cell_selected(cell);
         let (key, label, hover) = match cell {
-            Cell::Tool(t) => {
+            Cell::Tool(t) | Cell::Technique(_, t) => {
                 let hover = match t.kind {
                     ToolKind::Modify(Modifier::ToggleTechnique(technique)) => {
                         technique_name(technique).to_owned()
@@ -430,7 +526,11 @@ impl Grooph {
                 (instrument_short(i), instrument_short(i), hover)
             }
         };
-        let id = ui.make_persistent_id(("tool_grid", key));
+        let parent = match cell {
+            Cell::Technique(i, _) => Some(i),
+            _ => None,
+        };
+        let id = ui.make_persistent_id(("tool_grid", key, parent));
         let sense = if enabled { Sense::click() } else { Sense::hover() };
         let response = ui.interact(rect, id, sense);
         response
@@ -1108,26 +1208,53 @@ mod tests {
             app
         };
         let techniques = |app: &Grooph| {
-            let rows = grid_rows(true, &|t| app.cell_enabled(Cell::Tool(t)));
-            // The first row: the nine instruments, then what fits the beat.
+            let heads = app.heads_at_cursor();
+            let rows = grid_rows(true, &|i, _| heads.iter().any(|&(h, _)| h == i));
+            // The first row: the instruments, each with its techniques after it.
             rows[0]
                 .iter()
                 .filter_map(|c| match c {
-                    Cell::Tool(t) => Some(t.id),
-                    Cell::Instrument(_) => None,
+                    Cell::Technique(i, t) => Some((*i, t.id)),
+                    _ => None,
                 })
                 .collect::<Vec<_>>()
         };
+        use grooph_measure::Instrument::{HiHat, Snare};
         assert_eq!(
             techniques(&app_at(0)),
-            ["modify.technique.cross_stick", "modify.technique.rimshot"]
+            [(Snare, "modify.technique.cross_stick"), (Snare, "modify.technique.rimshot")]
         );
         assert_eq!(
             techniques(&app_at(1)),
-            ["modify.technique.open", "modify.technique.half_open", "modify.technique.closed"]
+            [
+                (HiHat, "modify.technique.open"),
+                (HiHat, "modify.technique.half_open"),
+                (HiHat, "modify.technique.closed")
+            ]
         );
+        // The row right after the snare's cell is the snare's.
+        let rows = grid_rows(true, &|i, _| i == Snare);
+        let at = rows[0].iter().position(|c| *c == Cell::Instrument(Snare)).unwrap();
+        assert!(matches!(rows[0][at + 1], Cell::Technique(Snare, _)));
         // A rest has none.
         assert!(techniques(&app_at(2)).is_empty());
+    }
+
+    #[test]
+    fn an_instrument_and_its_techniques_stay_in_a_line() {
+        use super::{Cell, grid_rows, row_lines};
+        let row = grid_rows(true, &|_, _| true).remove(0);
+        for columns in [4, 5, 6, 9] {
+            let lines = row_lines(&row, columns);
+            assert_eq!(lines.iter().map(|l| l.len()).sum::<usize>(), row.len());
+            for line in &lines {
+                assert!(line.len() <= columns);
+                // Never starts on a technique unless its group is longer than a line.
+                if matches!(line[0], Cell::Technique(..)) {
+                    assert!(columns < 5);
+                }
+            }
+        }
     }
 
     #[test]
@@ -1135,11 +1262,11 @@ mod tests {
         use super::{Cell, grid_rows};
         use crate::tools::{Modifier, ToolKind};
         let tools = |kit| {
-            grid_rows(kit, &|_| true)
+            grid_rows(kit, &|_, _| true)
                 .into_iter()
                 .flatten()
                 .filter_map(|c| match c {
-                    Cell::Tool(t) => Some(t.id),
+                    Cell::Tool(t) | Cell::Technique(_, t) => Some(t.id),
                     _ => None,
                 })
                 .collect::<Vec<_>>()
@@ -1151,17 +1278,24 @@ mod tests {
         for t in all_tools().iter().filter(|t| t.show_in_palette) {
             let in_grid = !super::BAR_TOOLS.contains(&t.id);
             let count = tools(true).iter().filter(|&&id| id == t.id).count();
-            assert_eq!(count, usize::from(in_grid), "{}", t.id);
+            // A technique has a cell for every instrument that plays it.
+            if kit_only(t) {
+                assert!(count >= 1, "{}", t.id);
+            } else {
+                assert_eq!(count, usize::from(in_grid), "{}", t.id);
+            }
             assert_eq!(tools(false).contains(&t.id), in_grid && !kit_only(t), "{}", t.id);
         }
         // The kit adds its instruments, whose cells add and take away a
         // head: no cell for that tool.
         assert!(!tools(true).contains(&"modify.toggle.head"));
         assert!(!tools(false).contains(&"modify.toggle.head"));
-        let cells = grid_rows(true, &|_| true).into_iter().flatten().collect::<Vec<_>>();
+        let cells = grid_rows(true, &|_, _| true).into_iter().flatten().collect::<Vec<_>>();
         let instruments = cells.iter().filter(|c| matches!(c, Cell::Instrument(_))).count();
         assert_eq!(instruments, 9);
-        assert!(grid_rows(false, &|_| true).iter().flatten().all(|c| matches!(c, Cell::Tool(_))));
+        assert!(
+            grid_rows(false, &|_, _| true).iter().flatten().all(|c| matches!(c, Cell::Tool(_)))
+        );
     }
 
     #[test]
