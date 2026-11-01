@@ -14,7 +14,7 @@ use grooph_layout::pixel_layout::{
 };
 use grooph_measure::BeatKind::{Note, Rest};
 use grooph_measure::duration::{Duration, TupletKind};
-use grooph_measure::{Cursor, Instrument, Measure, StaffKind, Technique, VoiceIdx};
+use grooph_measure::{Cursor, Instrument, Measure, StaffKind, Technique};
 use grooph_render::measure::{draw_notes, draw_time_signature};
 use log::info;
 use tools::EditOp;
@@ -105,8 +105,6 @@ pub(crate) enum Cell {
     Tool(&'static Tool),
     /// Picks the instrument the tools write and change (the kit's).
     Instrument(Instrument),
-    /// Moves the cursor to a voice of the kit: 0 the hands, 1 the feet.
-    Voice(VoiceIdx),
 }
 
 /// The tool with `id`.
@@ -129,16 +127,14 @@ fn technique_name(technique: Technique) -> &'static str {
 }
 
 /// The grid's rows, top to bottom; a row wider than the grid goes on in the
-/// next line. On the kit the instruments and voices come first and the
+/// next line. On the kit the instruments come first and the
 /// head modifiers get the kit's; on the one line they are left out.
 pub(crate) fn grid_rows(kit: bool) -> Vec<Vec<Cell>> {
     let tools = |ids: &[&str]| ids.iter().map(|id| Cell::Tool(tool(id))).collect::<Vec<_>>();
     let mut heads = tools(&HEAD_TOOLS);
     let mut rows = Vec::new();
     if kit {
-        let mut instruments: Vec<Cell> = KIT_ORDER.iter().map(|&i| Cell::Instrument(i)).collect();
-        instruments.extend([Cell::Voice(0), Cell::Voice(1)]);
-        rows.push(instruments);
+        rows.push(KIT_ORDER.iter().map(|&i| Cell::Instrument(i)).collect());
         heads.push(Cell::Tool(tool("modify.toggle.head")));
         heads.extend(
             all_tools()
@@ -164,7 +160,7 @@ fn grid_metrics(width: f32) -> (usize, Vec2) {
 impl Grooph {
     /// The editor's tools as a grid in the thumb's reach, the same in every
     /// editor (Practice, Score, the metronome's click bar): on the kit its
-    /// instruments and voices, then the meter and the head modifiers, the
+    /// instruments, then the meter and the head modifiers, the
     /// note values and rests, and the tuplets. Undo, redo and clear are in
     /// the editor's bar ([`BAR_TOOLS`]).
     pub(super) fn tool_palette_panel(&mut self, ui: &mut Ui) {
@@ -215,7 +211,6 @@ impl Grooph {
         match clicked {
             Some(Cell::Tool(t)) => self.apply_tool(t),
             Some(Cell::Instrument(i)) => self.pick_instrument(i),
-            Some(Cell::Voice(v)) => self.go_to_voice(v),
             None => {}
         }
     }
@@ -225,7 +220,6 @@ impl Grooph {
     fn cell_selected(&self, cell: Cell) -> bool {
         match cell {
             Cell::Instrument(i) => i == self.edit_instrument(),
-            Cell::Voice(v) => v == self.editor.doc().cursor.voice,
             Cell::Tool(Tool { kind: ToolKind::Modify(Modifier::ToggleTechnique(t)), .. }) => {
                 let cursor = self.editor.doc().cursor;
                 self.current_voice()
@@ -250,7 +244,7 @@ impl Grooph {
                 }
                 _ => true,
             },
-            Cell::Instrument(_) | Cell::Voice(_) => true,
+            Cell::Instrument(_) => true,
         }
     }
 
@@ -282,8 +276,6 @@ impl Grooph {
             Cell::Instrument(i) => {
                 (instrument_short(i), instrument_short(i), instrument_label(i).to_owned())
             }
-            Cell::Voice(0) => ("voice.hands", "Hands", "Edit the hands' voice, above".to_owned()),
-            Cell::Voice(_) => ("voice.feet", "Feet", "Edit the feet's voice, below".to_owned()),
         };
         let id = ui.make_persistent_id(("tool_grid", key));
         let sense = if enabled { Sense::click() } else { Sense::hover() };
@@ -888,11 +880,10 @@ mod tests {
             assert_eq!(count, usize::from(in_grid), "{}", t.id);
             assert_eq!(tools(false).contains(&t.id), in_grid && !kit_only(t), "{}", t.id);
         }
-        // The kit adds its instruments, voices and "+/−".
+        // The kit adds its instruments and "+/−".
         assert!(tools(true).contains(&"modify.toggle.head"));
         assert!(!tools(false).contains(&"modify.toggle.head"));
         let cells = grid_rows(true).into_iter().flatten().collect::<Vec<_>>();
-        assert!(cells.contains(&Cell::Voice(0)) && cells.contains(&Cell::Voice(1)));
         let instruments = cells.iter().filter(|c| matches!(c, Cell::Instrument(_))).count();
         assert_eq!(instruments, 9);
         assert!(grid_rows(false).iter().flatten().all(|c| matches!(c, Cell::Tool(_))));
@@ -923,9 +914,8 @@ mod tests {
         app.editor.doc_mut().cursor = Cursor::in_voice(0, 0, 0);
         apply(&mut app, "modify.technique.cross_stick");
         assert_eq!(text(&app), "4/4 Sx-H:q H:q H:q H:q ; K:q r:q K:q r:q");
-        // The picked instrument and voice show as picked.
+        // The picked instrument shows as picked.
         assert!(app.cell_selected(Cell::Instrument(Snare)));
-        assert!(app.cell_selected(Cell::Voice(0)) && !app.cell_selected(Cell::Voice(1)));
     }
 
     #[test]

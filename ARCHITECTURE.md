@@ -161,7 +161,7 @@ spread across callers.
    picks its instrument too. Picking one moves the cursor to its default
    voice, onto the beat sounding then (`Score::cursor_in_voice`), and a
    kit measure without that voice gets it (`Measure::fill_voices`);
-   "Hands"/"Feet" move it to a voice. "+/−" (H) adds or removes the head
+   a tap on the other voice edits that one. "+/−" (H) adds or removes the head
    on the cursor's beat; a cell per technique (`Modifier::ToggleTechnique`)
    plays it that way or plainly again, greyed out where the instrument has
    no such technique, and O steps through them.
@@ -694,13 +694,13 @@ grooph's metronome runs inside AI chats as an
 
 The tool palette (`tool_palette_panel`) is one grid for every editor
 (Practice, Score, the metronome's click bar): rows of cells
-(`tool_palette::grid_rows`), on the kit its instruments and voices, then
+(`tool_palette::grid_rows`), on the kit its instruments, then
 the meter and the head modifiers (accent, ghost, dot, and the kit's "+/−"
 and techniques), the note values and rests, and the tuplets. Undo, redo and
 clear (`BAR_TOOLS`) are in the editor's bar (`editor_bar`), right after
-play and before the editor's own buttons (Practice/Score: add/remove bar;
-the metronome: Clicks/Counter with a counter rhythm), which
-go in a second line on a narrow screen. The
+play and before the editor's own buttons (Practice/Score: add/remove bar),
+which go in a second line on a narrow screen. A voice is picked by a tap on
+it, or on the kit by picking an instrument. The
 columns follow the width (`grid_metrics`, cells 54 to 64 px wide), a row
 wider than the grid goes on in the next line, and past 45% of the screen's
 height the grid scrolls, so the staff stays in view.

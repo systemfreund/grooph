@@ -6,7 +6,6 @@
 use crate::documents::Document;
 use crate::generator::GeneratorState;
 use crate::metronome_view::FillLook;
-use crate::metronome_view::MetronomeVoice;
 use crate::metronome_view::ratio_label;
 use crate::pickers::{Picker, ROW_HEIGHT, shown_groups, silent_bars_label, swing_label};
 use crate::share::paint_share_icon;
@@ -1374,22 +1373,10 @@ impl Grooph {
     }
 
     /// Play button and a way back to the ring above the tool palette, while
-    /// the click bar is edited note by note.
+    /// the click bar is edited note by note. A tap on a voice's line picks
+    /// the voice the palette edits.
     fn metronome_edit_bar(&mut self, ui: &mut Ui) {
-        // With a counter rhythm: which of the two voices the palette edits
-        // (a tap on its line picks it too).
-        let counter = self.counter_bar().is_some();
-        self.editor_bar(ui, "metronome_edit_bar", counter, |app, ui| {
-            let voice = app.edited_voice();
-            for (v, label) in
-                [(MetronomeVoice::Click, "Clicks"), (MetronomeVoice::Counter, "Counter")]
-            {
-                let button = Button::new(RichText::new(label).size(16.0)).selected(voice == v);
-                if ui.add(button).clicked() {
-                    app.select_voice(v);
-                }
-            }
-        });
+        self.editor_bar(ui, "metronome_edit_bar", false, |_, _| {});
     }
 
     /// An editor's bar above the tool grid: play, undo, redo and clear, the

@@ -9,8 +9,8 @@
 //! "+/−" adds it to the beat or takes it away, and a technique's cell plays
 //! it that way. Picking one, in the grid or by a tap on its head, moves the
 //! cursor to its voice: the feet below, the hands above
-//! (`Instrument::default_voice`); "Hands" and "Feet" move it to a voice for a
-//! head off its usual side. The library's "New drum groove" starts a score
+//! (`Instrument::default_voice`); a tap on a beat of the other voice edits
+//! that one, for a head off its usual side. The library's "New drum groove" starts a score
 //! on the kit's staff.
 
 use crate::Grooph;
