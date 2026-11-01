@@ -361,6 +361,11 @@ pub(crate) struct UiShell {
     /// it shrinks as the tool grid opens, and the cursor's bar is brought
     /// into view again.
     pub(crate) followed_view_height: f32,
+    /// A finger has touched the screen: the staff leaves its drags to the
+    /// scroll area from then on (see `staff_sense`).
+    pub(crate) touch_seen: bool,
+    /// A finger is on the screen now.
+    pub(crate) touching: bool,
     pub(crate) shell: ShellState,
     /// Setting whose picker dialog is open.
     pub(crate) picker: Option<Picker>,

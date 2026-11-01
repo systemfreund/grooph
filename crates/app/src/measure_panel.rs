@@ -294,7 +294,10 @@ impl Grooph {
                     self.ui.followed_cursor = followed;
                     self.ui.followed_view_height = view_height;
 
-                    let (rect, resp) = ui.allocate_exact_size(staff.total_size, staff_sense(ui));
+                    let (rect, resp) = ui.allocate_exact_size(
+                        staff.total_size,
+                        staff_sense(ui, &mut self.ui.touch_seen, &mut self.ui.touching),
+                    );
                     let ghost_rect =
                         ghost.as_ref().and_then(|g| staff.placed(g.len() - 1)).map(|p| p.rect);
 
@@ -400,7 +403,16 @@ impl Grooph {
                         &timing,
                         render_opts.staff_space(),
                     );
-                    self.handle_input(resp, &staff, with_ring, ghost_rect);
+                    // The first finger's drag, before the staff leaves its
+                    // drags to the scroll area, scrolls by hand.
+                    if resp.dragged() && ui.input(|i| i.any_touches()) {
+                        ui.scroll_with_delta_animation(
+                            resp.drag_delta(),
+                            eframe::egui::style::ScrollAnimation::none(),
+                        );
+                    } else {
+                        self.handle_input(resp, &staff, with_ring, ghost_rect);
+                    }
                     match bar_action {
                         Some(BarAction::Select(idx)) => {
                             let doc = self.editor.doc_mut();
@@ -652,11 +664,18 @@ impl Grooph {
 }
 
 /// What the staff reacts to: a tap everywhere, and a mouse also its drag
-/// (it moves the edit cursor). A finger's drag is left to the scroll area,
-/// which scrolls with its momentum and its give at the ends, as the tool
-/// grid does.
-fn staff_sense(ui: &egui::Ui) -> egui::Sense {
-    match ui.input(|i| i.any_touches()) {
+/// (it moves the edit cursor). Once a finger has touched the screen a drag
+/// is left to the scroll area, which scrolls with its momentum and its give
+/// at the ends, as the tool grid does. The hit test uses the previous
+/// frame's widgets, so this is decided from the touches seen before, not
+/// the ones of this frame: the first finger's drag is scrolled by hand.
+fn staff_sense(ui: &egui::Ui, touch_seen: &mut bool, touching: &mut bool) -> egui::Sense {
+    // Not changed under a finger that is dragging: a gesture keeps the
+    // sense it started with.
+    let now = ui.input(|i| i.any_touches());
+    *touch_seen |= *touching && !now;
+    *touching = now;
+    match *touch_seen {
         true => egui::Sense::click(),
         false => egui::Sense::click_and_drag(),
     }

@@ -1455,6 +1455,8 @@ impl Grooph {
                 staff_em: 40.0,
                 followed_cursor: None,
                 followed_view_height: 0.0,
+                touch_seen: false,
+                touching: false,
                 shell: ShellState::default(),
                 picker: None,
                 picker_return: None,
@@ -2199,6 +2201,33 @@ mod tests {
         assert_eq!(app.tab(), Tab::Practice);
         assert_eq!(format_score(&app.editor.doc().score).unwrap(), "3/4 q q e e");
         assert!(!app.editor.docs.score.score.staff.is_line());
+    }
+
+    #[test]
+    fn after_a_finger_the_staff_leaves_its_drags_to_the_scroll_area() {
+        use super::Grooph;
+        use eframe::egui::{Event, TouchDeviceId, TouchId, TouchPhase, pos2};
+
+        let ctx = eframe::egui::Context::default();
+        let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let mut app = Grooph::new(&cc);
+        app.select_tab(Tab::Score);
+        app.edit_page();
+        let touch = |phase| Event::Touch {
+            device_id: TouchDeviceId(0),
+            id: TouchId(0),
+            phase,
+            pos: pos2(100.0, 100.0),
+            force: None,
+        };
+        shell_frame(&mut app, &ctx, 0.0, vec![]);
+        assert!(!app.ui.touch_seen);
+        // The finger is down: not yet, a gesture keeps its sense.
+        shell_frame(&mut app, &ctx, 0.1, vec![touch(TouchPhase::Start)]);
+        assert!(!app.ui.touch_seen);
+        shell_frame(&mut app, &ctx, 0.2, vec![touch(TouchPhase::End)]);
+        shell_frame(&mut app, &ctx, 0.3, vec![]);
+        assert!(app.ui.touch_seen);
     }
 
     #[test]
