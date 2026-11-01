@@ -820,7 +820,6 @@ impl Grooph {
         // drum grooves, opens in Practice.
         if score.staff.is_line() {
             let undoubled = self.replace_practice_from_link(score);
-            self.editor.docs.practice.active_pattern_id = Some(id);
             self.editor.docs.practice.dirty = undoubled;
             self.playback_ctl.bpm = bpm;
             self.playback_ctl.playback.reset();
@@ -2209,8 +2208,47 @@ mod tests {
         app.request_load_pattern(id);
         assert_eq!(app.tab(), Tab::Practice);
         assert_eq!(format_score(&app.editor.doc().score).unwrap(), "4/4 h h");
-        assert_eq!(app.editor.docs.practice.active_pattern_id, Some(id));
         assert!(!app.editor.docs.practice.dirty);
+    }
+
+    #[test]
+    fn the_bar_meter_picker_swallows_the_shortcuts() {
+        use super::{Grooph, TransportState};
+        use eframe::egui::{Event, Key, Modifiers};
+
+        let ctx = eframe::egui::Context::default();
+        let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let mut app = Grooph::new(&cc);
+        app.select_tab(Tab::Score);
+        app.edit_page();
+        app.apply_tool(crate::tool_palette::tool("meta.change_time_signature"));
+        let space = Event::Key {
+            key: Key::Space,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: Modifiers::NONE,
+        };
+        shell_frame(&mut app, &ctx, 0.0, vec![space]);
+        assert_eq!(app.playback_ctl.transport_state, TransportState::Stopped);
+        assert_eq!(app.ui.mode, super::Mode::Edit);
+    }
+
+    #[test]
+    fn the_editor_draws_timing_marks_beside_its_ghost_bar() {
+        use super::Grooph;
+
+        let ctx = eframe::egui::Context::default();
+        let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let mut app = Grooph::new(&cc);
+        app.select_tab(Tab::Practice);
+        app.playback_ctl.accuracy.enabled = true;
+        app.edit_page();
+        // A run's marks are on the staff while the editor shows the ghost bar.
+        app.playback_ctl.accuracy.tracker.on_playback_start(Some(0.0));
+        assert!(app.playback_ctl.accuracy.tracker.has_marks());
+        shell_frame(&mut app, &ctx, 0.0, vec![]);
+        shell_frame(&mut app, &ctx, 0.1, vec![]);
     }
 
     #[test]

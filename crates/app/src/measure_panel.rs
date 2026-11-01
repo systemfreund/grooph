@@ -202,6 +202,9 @@ impl Grooph {
                         shown.push(last.empty_like(last.time_signature()));
                         shown
                     });
+                    // Timing, marks and the playback cursor go by the bars
+                    // that play, never the ghost bar.
+                    let played = score;
                     let score = ghost.as_ref().unwrap_or(score);
                     let staff = build_staff_layout(score, &staff_opts);
                     // One row fits the height, so nothing above or below
@@ -229,7 +232,7 @@ impl Grooph {
                     // and X for this frame.
                     if let Some(playback) = playback_local
                         && let Some((m_idx, x)) =
-                            grooph_render::staff::current_cursor_x(score, &staff, playback)
+                            grooph_render::staff::current_cursor_x(played, &staff, playback)
                         && let Some(placed) = staff.placed(m_idx)
                     {
                         // The row is centred vertically, but the offset
@@ -410,7 +413,7 @@ impl Grooph {
 
                     self.draw_accuracy_markers(
                         ui,
-                        score,
+                        played,
                         &staff,
                         &timing,
                         render_opts.staff_space(),
@@ -523,7 +526,8 @@ impl Grooph {
         self.calibration_source().is_some() || self.accuracy_active()
     }
 
-    /// Marks on the notes of `score`, the score `staff` was laid out from.
+    /// Marks on the notes of `score`, the score `staff` was laid out from
+    /// (maybe with the ghost bar after it).
     fn draw_accuracy_markers(
         &self,
         ui: &egui::Ui,
@@ -550,7 +554,8 @@ impl Grooph {
         let global_onsets_u64: Vec<u64> = global_beats.iter().map(|gb| gb.onset_tick).collect();
 
         for system in &staff.systems {
-            for placed in &system.measures {
+            // Not the ghost bar after the score's last.
+            for placed in system.measures.iter().filter(|p| p.measure_idx < score.len()) {
                 self.draw_accuracy_markers_for_measure(
                     ui,
                     score,

@@ -11,6 +11,11 @@ impl Grooph {
             return;
         }
         ui.input(|i| {
+            // The bar's meter picker swallows the shortcuts, as its dialog
+            // did: no edits behind it; it closes itself.
+            if self.ui.picker == Some(crate::pickers::Picker::BarMeter) {
+                return;
+            }
             // During a calibration: no editing, but Space still stops
             // (= cancels) it.
             if self.playback_ctl.play_along.calibration.is_some() {
