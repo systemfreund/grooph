@@ -1411,13 +1411,25 @@ impl Grooph {
                         self.toggle_playback();
                     }
                     ui.add_space(8.0);
-                    self.bar_tool_buttons(ui);
+                    let size = self.bar_tool_buttons(ui);
                     if one_line && let Some(extra) = extra.take() {
                         extra(self, ui);
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         // Back to the page's card and options sheet.
-                        let done = ui.button(RichText::new("✔").size(26.0)).on_hover_text("Done");
+                        // A check mark drawn in, as big as the trash can,
+                        // in a button as big as the others.
+                        let done = ui.add(Button::new("").min_size(size)).on_hover_text("Done");
+                        let r = done.rect.shrink2(vec2(0.32, 0.36) * done.rect.size());
+                        let color = ui.style().interact(&done).fg_stroke.color;
+                        ui.painter().line(
+                            vec![
+                                r.left_center() + vec2(0.0, 0.05 * r.height()),
+                                r.center_bottom() - vec2(0.12 * r.width(), 0.0),
+                                r.right_top(),
+                            ],
+                            egui::Stroke::new(2.5, color),
+                        );
                         if done.clicked() {
                             self.leave_editor();
                         }
@@ -1430,7 +1442,9 @@ impl Grooph {
     }
 
     /// Undo, redo and clear, in an editor's bar ([`BAR_TOOLS`]).
-    fn bar_tool_buttons(&mut self, ui: &mut Ui) {
+    /// Their size.
+    fn bar_tool_buttons(&mut self, ui: &mut Ui) -> egui::Vec2 {
+        let mut size = egui::Vec2::ZERO;
         for id in BAR_TOOLS {
             let t = tool(id);
             let enabled = match t.kind {
@@ -1442,10 +1456,13 @@ impl Grooph {
                 Some(sc) => format!("{} ({})", bar_tool_name(t), sc.label()),
                 None => bar_tool_name(t).to_owned(),
             };
-            if ui.add_enabled(enabled, Button::new(t.label)).on_hover_text(hover).clicked() {
+            let button = ui.add_enabled(enabled, Button::new(t.label)).on_hover_text(hover);
+            size = size.max(button.rect.size());
+            if button.clicked() {
                 self.apply_tool(t);
             }
         }
+        size
     }
 
     /// "More" tab: a screen of its own, without the staff. A list at the
