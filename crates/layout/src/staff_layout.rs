@@ -817,7 +817,7 @@ mod tests {
         }
         let (placed, _, _) = kit("6/8 S:e r:e S:e S:e S:e S:e ; K:q. r:q.");
         let feet = &placed.voices[1].notes;
-        assert_eq!(feet[1].staff_pos, -3, "the feet's rest below the middle line");
+        assert_eq!(feet[1].staff_pos, -4, "the feet's rest below the middle line");
         assert!(feet[1].ledgers.is_empty());
         // Half rests of the lower voice sit on the bottom line, with no
         // ledger line through the staff: in 7/8 and in 4/4.

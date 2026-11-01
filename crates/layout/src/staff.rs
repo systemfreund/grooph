@@ -219,7 +219,7 @@ fn line_rest_place(beat: &Beat, voicing: Voicing) -> i8 {
 /// hangs from the fourth line), in its voice's half with two, clear of the
 /// other's notes: a half rest on the fourth or first line, a whole rest
 /// hanging from the fourth or second, the others in the second space up or
-/// down from the middle line.
+/// down from the middle line (the lower one a half space lower still, clear of the heads in the first space).
 fn kit_rest_place(beat: &Beat, voicing: Voicing) -> i8 {
     let base = beat.duration.base_note();
     match (voicing.shared, voicing.stem_down, base) {
@@ -230,7 +230,7 @@ fn kit_rest_place(beat: &Beat, voicing: Voicing) -> i8 {
         (true, false, _) => 3,
         (true, true, NoteValue::Whole) => -2,
         (true, true, NoteValue::Half) => -4,
-        (true, true, _) => -3,
+        (true, true, _) => -4,
     }
 }
 
