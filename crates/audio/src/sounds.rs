@@ -6,16 +6,18 @@
 //! any [`Sound`]. When the rhythm or the counter rhythm plays the metronome's
 //! sound, its samples play higher, so the voices stay apart by ear.
 //!
-//! Every hit has a [`Level`] (strong, normal or soft), and a sound has one
-//! recording per level ([`SampleSet`]); a sound without a soft recording
-//! plays its normal one there, quieter through the mixer. `Click` is the
+//! Every hit has a [`Level`] (strong, normal or soft). A sampled sound or kit
+//! instrument has a normal recording and optionally a strong and a soft one
+//! ([`SampleSet`]); a level without its own recording plays the normal one,
+//! at the voice's mixer volume for that level, or, in the kit, louder or
+//! quieter by a fixed stand-in gain. `Click` is the
 //! configurable click from [`AudioSettings`] (waveform, base frequency,
 //! decay, noise), pitched per sound type. Every other sound plays short WAV
 //! samples embedded in the binary (see [`SampleId`]) with the volume of the
 //! mixer.
 //!
-//! The heads of a drum kit score play the kit: one sample per instrument and
-//! technique ([`kit_sample`]), whatever sounds the voices have; a
+//! The heads of a drum kit score play the kit: a [`SampleSet`] per
+//! instrument and technique ([`kit_samples`]), whatever sounds the voices have; a
 //! [`Instrument::Rhythm`] head is the rhythm voice's.
 
 use crate::schedule::{KitHit, SoundType};
@@ -57,22 +59,16 @@ impl Sound {
     }
 
     /// The recordings of this sound; `None` for the synthesized click.
+    /// Claves and xylophone have no accent recording as such: their higher
+    /// hit or note is the accent.
     fn samples(self) -> Option<SampleSet> {
         Some(match self {
             Sound::Click => return None,
-            Sound::Claves => SampleSet {
-                strong: SampleId::CLAVES_HIGH,
-                normal: SampleId::CLAVES_LOW,
-                soft: None,
-            },
-            Sound::Snare => SampleSet {
-                strong: SampleId::SNARE_ACCENT,
-                normal: SampleId::SNARE,
-                soft: Some(SampleId::SNARE_GHOST),
-            },
-            Sound::Xylophone => {
-                SampleSet { strong: SampleId::XYLO_HIGH, normal: SampleId::XYLO_LOW, soft: None }
-            }
+            Sound::Claves => SampleSet::new(SampleId::ClavesLow).with_strong(SampleId::ClavesHigh),
+            Sound::Snare => SampleSet::new(SampleId::Snare)
+                .with_strong(SampleId::SnareAccent)
+                .with_soft(SampleId::SnareGhost),
+            Sound::Xylophone => SampleSet::new(SampleId::XyloLow).with_strong(SampleId::XyloHigh),
         })
     }
 }
@@ -85,20 +81,59 @@ pub(crate) enum Level {
     Soft,
 }
 
-/// The recordings of a sound, one per [`Level`].
+/// The recordings of a sound or a kit instrument: a normal one, and
+/// optionally one for strong and one for soft hits. A level without its own
+/// recording plays the normal one in its place ([`SampleSet::at`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct SampleSet {
-    strong: SampleId,
     normal: SampleId,
-    /// A quiet recording; without one, soft hits play `normal`.
+    strong: Option<SampleId>,
     soft: Option<SampleId>,
 }
 
+/// Volume of the normal recording standing in for a missing strong or soft
+/// one, relative to a normal hit ([`SampleSet::stand_in_gain`]).
+const STAND_IN_STRONG_GAIN: f32 = 4.0 / 3.0;
+const STAND_IN_SOFT_GAIN: f32 = 0.4;
+
 impl SampleSet {
+    /// A set of one recording, which plays at every level.
+    const fn new(normal: SampleId) -> Self {
+        Self { normal, strong: None, soft: None }
+    }
+
+    const fn with_strong(self, strong: SampleId) -> Self {
+        Self { strong: Some(strong), ..self }
+    }
+
+    const fn with_soft(self, soft: SampleId) -> Self {
+        Self { soft: Some(soft), ..self }
+    }
+
+    /// The recording of `level`, or the normal one where there is none.
     fn at(&self, level: Level) -> SampleId {
+        self.recorded(level).unwrap_or(self.normal)
+    }
+
+    /// The set's own recording of `level`, if it has one.
+    fn recorded(&self, level: Level) -> Option<SampleId> {
         match level {
             Level::Strong => self.strong,
-            Level::Normal => self.normal,
-            Level::Soft => self.soft.unwrap_or(self.normal),
+            Level::Normal => Some(self.normal),
+            Level::Soft => self.soft,
+        }
+    }
+
+    /// Volume of a hit at `level` relative to a normal one where nothing
+    /// else sets it: 1.0 where the set has a recording of the level (the
+    /// recording carries the dynamics), louder or quieter where the normal
+    /// recording stands in. The voices have a mixer volume per level
+    /// instead; the kit, with one volume per instrument, uses this.
+    fn stand_in_gain(&self, level: Level) -> f32 {
+        match (level, self.recorded(level)) {
+            (_, Some(_)) => 1.0,
+            (Level::Strong, None) => STAND_IN_STRONG_GAIN,
+            (_, None) => STAND_IN_SOFT_GAIN,
         }
     }
 }
@@ -113,70 +148,65 @@ struct SampleFile {
     bytes: &'static [u8],
 }
 
-/// A sample of the drum kit (`samples/kit`, made by its `synth.py`).
-macro_rules! kit_file {
-    ($name:literal) => {
-        SampleFile { name: $name, bytes: include_bytes!(concat!("../samples/kit/", $name)) }
+/// Declares [`SampleId`] and its files in one table, so an id cannot point
+/// at another id's file.
+macro_rules! samples {
+    ($($id:ident => $path:literal,)*) => {
+        /// An embedded sample, decoded on first use.
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        pub(crate) enum SampleId {
+            $($id,)*
+        }
+
+        impl SampleId {
+            /// Every sample, in declaration order (its index).
+            const ALL: &[SampleId] = &[$(SampleId::$id,)*];
+
+            fn file(self) -> SampleFile {
+                match self {
+                    $(SampleId::$id => SampleFile {
+                        name: $path,
+                        bytes: include_bytes!(concat!("../samples/", $path)),
+                    },)*
+                }
+            }
+        }
     };
 }
 
-/// Every embedded sample; [`SampleId`] indexes into it.
-const SAMPLES: &[SampleFile] = &[
-    SampleFile { name: "claves3.wav", bytes: include_bytes!("../samples/claves3.wav") },
-    SampleFile { name: "claves4.wav", bytes: include_bytes!("../samples/claves4.wav") },
-    SampleFile { name: "snare-normal.wav", bytes: include_bytes!("../samples/snare-normal.wav") },
-    SampleFile { name: "snare-accent.wav", bytes: include_bytes!("../samples/snare-accent.wav") },
-    SampleFile { name: "snare-ghost.wav", bytes: include_bytes!("../samples/snare-ghost.wav") },
-    SampleFile { name: "xylo-high.wav", bytes: include_bytes!("../samples/xylo-high.wav") },
-    SampleFile { name: "xylo-low.wav", bytes: include_bytes!("../samples/xylo-low.wav") },
-    kit_file!("kick.wav"),
-    kit_file!("cross-stick.wav"),
-    kit_file!("hihat-closed.wav"),
-    kit_file!("hihat-half.wav"),
-    kit_file!("hihat-open.wav"),
-    kit_file!("hihat-foot.wav"),
-    kit_file!("ride.wav"),
-    kit_file!("ride-bell.wav"),
-    kit_file!("crash.wav"),
-    kit_file!("crash-choke.wav"),
-    kit_file!("tom-high.wav"),
-    kit_file!("tom-mid.wav"),
-    kit_file!("tom-floor.wav"),
-];
-
-/// An embedded sample, decoded on first use.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct SampleId(usize);
+samples! {
+    ClavesHigh => "claves3.wav",
+    ClavesLow => "claves4.wav",
+    Snare => "snare-normal.wav",
+    SnareAccent => "snare-accent.wav",
+    SnareGhost => "snare-ghost.wav",
+    XyloHigh => "xylo-high.wav",
+    XyloLow => "xylo-low.wav",
+    // The drum kit (`samples/kit`, made by its `synth.py`).
+    Kick => "kit/kick.wav",
+    CrossStick => "kit/cross-stick.wav",
+    HiHatClosed => "kit/hihat-closed.wav",
+    HiHatHalf => "kit/hihat-half.wav",
+    HiHatOpen => "kit/hihat-open.wav",
+    HiHatFoot => "kit/hihat-foot.wav",
+    Ride => "kit/ride.wav",
+    RideBell => "kit/ride-bell.wav",
+    Crash => "kit/crash.wav",
+    CrashChoke => "kit/crash-choke.wav",
+    TomHigh => "kit/tom-high.wav",
+    TomMid => "kit/tom-mid.wav",
+    TomFloor => "kit/tom-floor.wav",
+}
 
 impl SampleId {
-    const CLAVES_HIGH: SampleId = SampleId(0);
-    const CLAVES_LOW: SampleId = SampleId(1);
-    const SNARE: SampleId = SampleId(2);
-    const SNARE_ACCENT: SampleId = SampleId(3);
-    const SNARE_GHOST: SampleId = SampleId(4);
-    const XYLO_HIGH: SampleId = SampleId(5);
-    const XYLO_LOW: SampleId = SampleId(6);
-    const KICK: SampleId = SampleId(7);
-    const CROSS_STICK: SampleId = SampleId(8);
-    const HIHAT_CLOSED: SampleId = SampleId(9);
-    const HIHAT_HALF: SampleId = SampleId(10);
-    const HIHAT_OPEN: SampleId = SampleId(11);
-    const HIHAT_FOOT: SampleId = SampleId(12);
-    const RIDE: SampleId = SampleId(13);
-    const RIDE_BELL: SampleId = SampleId(14);
-    const CRASH: SampleId = SampleId(15);
-    const CRASH_CHOKE: SampleId = SampleId(16);
-    const TOM_HIGH: SampleId = SampleId(17);
-    const TOM_MID: SampleId = SampleId(18);
-    const TOM_FLOOR: SampleId = SampleId(19);
-
     /// The decoded sample; an unreadable file becomes silence (logged once).
     fn data(self) -> Arc<SampleData> {
         static DECODED: OnceLock<Vec<Arc<SampleData>>> = OnceLock::new();
         let all = DECODED.get_or_init(|| {
-            SAMPLES
+            SampleId::ALL
                 .iter()
-                .map(|file| {
+                .map(|id| {
+                    let file = id.file();
                     Arc::new(wav::decode(file.bytes).unwrap_or_else(|err| {
                         log::error!("Cannot decode sample {}: {err:?}", file.name);
                         SampleData { rate: 44_100, frames: Vec::new() }
@@ -184,7 +214,7 @@ impl SampleId {
                 })
                 .collect()
         });
-        all[self.0].clone()
+        all[self as usize].clone()
     }
 }
 
@@ -255,7 +285,7 @@ impl SoundType {
     pub(crate) fn patch(self, settings: &AudioSettings) -> Patch {
         if let SoundType::Kit(hit) = self {
             let gain = self.profile(settings).gain;
-            return Patch::Sample { data: kit_sample(hit).data(), rate: 1.0, gain };
+            return Patch::Sample { data: kit_samples(hit).at(hit.level).data(), rate: 1.0, gain };
         }
         let metronome = settings.metronome_sound;
         let sound = if self.is_rhythm() {
@@ -275,43 +305,46 @@ impl SoundType {
     }
 }
 
-/// The kit's sample for `hit`. The snare has a recording per level; the
-/// other instruments play theirs quieter or louder through the mixer
-/// ([`KitHit::level_gain`]).
-fn kit_sample(hit: KitHit) -> SampleId {
+/// The kit's recordings for `hit`'s instrument and technique. The snare has
+/// one per level; the other instruments have one, played louder or quieter
+/// in place of the others ([`KitHit::level_gain`]).
+fn kit_samples(hit: KitHit) -> SampleSet {
     use Instrument::*;
     use Technique::*;
-    match (hit.instrument, hit.technique) {
-        (Snare, CrossStick) => SampleId::CROSS_STICK,
-        (Snare, Rimshot) => SampleId::SNARE_ACCENT,
-        (Snare, _) => Sound::Snare.samples().expect("recorded").at(hit.level),
-        (Kick, _) => SampleId::KICK,
-        (HiHat, Open) => SampleId::HIHAT_OPEN,
-        (HiHat, HalfOpen) => SampleId::HIHAT_HALF,
-        (HiHat, _) => SampleId::HIHAT_CLOSED,
-        (HiHatFoot, _) => SampleId::HIHAT_FOOT,
-        (Ride, Bell) => SampleId::RIDE_BELL,
-        (Ride, _) => SampleId::RIDE,
-        (Crash, Choke) => SampleId::CRASH_CHOKE,
-        (Crash, _) => SampleId::CRASH,
-        (HighTom, _) => SampleId::TOM_HIGH,
-        (MidTom, _) => SampleId::TOM_MID,
-        (FloorTom, _) => SampleId::TOM_FLOOR,
+    let snare = Sound::Snare.samples().expect("recorded");
+    SampleSet::new(match (hit.instrument, hit.technique) {
+        (Snare, CrossStick) => SampleId::CrossStick,
+        // No rimshot recording: the snare's accent stands in.
+        (Snare, Rimshot) => SampleId::SnareAccent,
+        (Snare, _) => return snare,
+        (Kick, _) => SampleId::Kick,
+        (HiHat, Open) => SampleId::HiHatOpen,
+        (HiHat, HalfOpen) => SampleId::HiHatHalf,
+        (HiHat, _) => SampleId::HiHatClosed,
+        (HiHatFoot, _) => SampleId::HiHatFoot,
+        (Ride, Bell) => SampleId::RideBell,
+        (Ride, _) => SampleId::Ride,
+        (Crash, Choke) => SampleId::CrashChoke,
+        (Crash, _) => SampleId::Crash,
+        (HighTom, _) => SampleId::TomHigh,
+        (MidTom, _) => SampleId::TomMid,
+        (FloorTom, _) => SampleId::TomFloor,
         // Never scheduled as a kit hit: the rhythm voice plays it.
-        (Rhythm, _) => Sound::Snare.samples().expect("recorded").at(hit.level),
-    }
+        (Rhythm, _) => return snare,
+    })
 }
 
+/// Volume of a normal kit hit relative to its instrument's in the mixer,
+/// leaving room for the accents.
+const KIT_NORMAL_GAIN: f32 = 0.75;
+
 impl KitHit {
-    /// Volume of the hit's level, relative to its instrument's in the mixer.
-    /// The snare's soft recording is quiet already.
+    /// Volume of the hit relative to its instrument's in the mixer: a
+    /// recorded level plays at the normal volume, its recording carrying the
+    /// dynamics; a level without one plays the normal recording louder or
+    /// quieter ([`SampleSet::stand_in_gain`]).
     pub(crate) fn level_gain(self) -> f32 {
-        match self.level {
-            Level::Strong => 1.0,
-            Level::Normal => 0.75,
-            Level::Soft if self.instrument == Instrument::Snare => 0.6,
-            Level::Soft => 0.3,
-        }
+        KIT_NORMAL_GAIN * kit_samples(self).stand_in_gain(self.level)
     }
 }
 
@@ -362,10 +395,10 @@ mod tests {
             other => panic!("sample expected, got {other:?}"),
         };
         let (high, gain) = sample(SoundType::Downbeat);
-        assert_eq!(high, SampleId::CLAVES_HIGH.data());
+        assert_eq!(high, SampleId::ClavesHigh.data());
         assert_eq!(gain, settings.downbeat);
         let (low, gain) = sample(SoundType::PrimaryBeat);
-        assert_eq!(low, SampleId::CLAVES_LOW.data());
+        assert_eq!(low, SampleId::ClavesLow.data());
         assert_eq!(gain, settings.primary);
         // Both claves are audible out of the box.
         assert!(settings.downbeat > 0.0 && settings.primary > 0.0);
@@ -386,7 +419,7 @@ mod tests {
         };
         // Claves against claves play higher, against the click as recorded.
         let (data, rate) = rate_of(Sound::Claves, Sound::Claves).unwrap();
-        assert_eq!(data, SampleId::CLAVES_LOW.data());
+        assert_eq!(data, SampleId::ClavesLow.data());
         assert_eq!(rate, SAME_SOUND_RATE);
         assert_eq!(rate_of(Sound::Claves, Sound::Click).unwrap().1, 1.0);
         // The click is pitched above the metronome's.
@@ -409,7 +442,7 @@ mod tests {
             Patch::Sample { data, rate, .. } => (data, rate),
             other => panic!("sample expected, got {other:?}"),
         };
-        let (high, low) = (SampleId::XYLO_HIGH.data(), SampleId::XYLO_LOW.data());
+        let (high, low) = (SampleId::XyloHigh.data(), SampleId::XyloLow.data());
         assert_eq!(sample(SoundType::Downbeat), (high.clone(), 1.0));
         assert_eq!(sample(SoundType::PrimaryBeat), (low.clone(), 1.0));
         assert_eq!(sample(SoundType::CountIn).0, low);
@@ -430,10 +463,10 @@ mod tests {
             Patch::Sample { data, gain, .. } => (data, gain),
             other => panic!("sample expected, got {other:?}"),
         };
-        assert_eq!(sample(SoundType::CounterStrong).0, SampleId::SNARE_ACCENT.data());
-        assert_eq!(sample(SoundType::CounterMedium).0, SampleId::SNARE.data());
+        assert_eq!(sample(SoundType::CounterStrong).0, SampleId::SnareAccent.data());
+        assert_eq!(sample(SoundType::CounterMedium).0, SampleId::Snare.data());
         let (ghost, gain) = sample(SoundType::CounterSoft);
-        assert_eq!(ghost, SampleId::SNARE_GHOST.data());
+        assert_eq!(ghost, SampleId::SnareGhost.data());
         // The soft clicks' volume scales the ghost recording directly.
         assert!((gain - crate::schedule::COUNTER_SOFT_GAIN * settings.counter).abs() < 1e-6);
     }
@@ -446,20 +479,20 @@ mod tests {
             Patch::Sample { data, gain, .. } => (data, gain),
             other => panic!("sample expected, got {other:?}"),
         };
-        assert_eq!(sample(SoundType::Beat), (SampleId::SNARE.data(), settings.beat));
+        assert_eq!(sample(SoundType::Beat), (SampleId::Snare.data(), settings.beat));
         assert_eq!(
             sample(SoundType::AccentedBeat),
-            (SampleId::SNARE_ACCENT.data(), settings.accent)
+            (SampleId::SnareAccent.data(), settings.accent)
         );
         // The ghost volume scales the quiet ghost recording like any other sample.
-        assert_eq!(sample(SoundType::Ghost), (SampleId::SNARE_GHOST.data(), settings.ghost));
+        assert_eq!(sample(SoundType::Ghost), (SampleId::SnareGhost.data(), settings.ghost));
     }
 
     #[test]
     fn snare_dynamics_get_louder_from_ghost_to_accent() {
         let peak = |id: SampleId| id.data().frames.iter().fold(0.0f32, |m, x| m.max(x.abs()));
         let (ghost, normal, accent) =
-            (peak(SampleId::SNARE_GHOST), peak(SampleId::SNARE), peak(SampleId::SNARE_ACCENT));
+            (peak(SampleId::SnareGhost), peak(SampleId::Snare), peak(SampleId::SnareAccent));
         assert!(ghost < normal && normal < accent, "{ghost} {normal} {accent}");
     }
 
@@ -485,7 +518,7 @@ mod tests {
                 Patch::Click { .. } => None,
             })
             .collect();
-        let (high, low) = (SampleId::CLAVES_HIGH.data(), SampleId::CLAVES_LOW.data());
+        let (high, low) = (SampleId::ClavesHigh.data(), SampleId::ClavesLow.data());
         assert_eq!(samples, vec![high, low.clone(), low.clone(), low]);
     }
 
@@ -500,7 +533,7 @@ mod tests {
             Patch::Sample { data, .. } => data,
             other => panic!("sample expected, got {other:?}"),
         };
-        let ghost = SampleId::SNARE_GHOST.data();
+        let ghost = SampleId::SnareGhost.data();
         for soft in [SoundType::SoftBeat, SoundType::CountInSoft, SoundType::CounterSoft] {
             assert_eq!(sample(soft), ghost, "{soft:?}");
         }
@@ -508,7 +541,7 @@ mod tests {
         let claves = AudioSettings { metronome_sound: Sound::Claves, ..settings };
         assert!(matches!(
             SoundType::SoftBeat.patch(&claves),
-            Patch::Sample { data, .. } if data == SampleId::CLAVES_LOW.data()
+            Patch::Sample { data, .. } if data == SampleId::ClavesLow.data()
         ));
     }
 
@@ -526,12 +559,12 @@ mod tests {
             }
         };
         let claves = Sound::Claves;
-        assert_eq!(sample(claves, SoundType::AccentedBeat).0, SampleId::CLAVES_HIGH.data());
-        assert_eq!(sample(claves, SoundType::Beat), (SampleId::CLAVES_LOW.data(), 1.0));
-        assert_eq!(sample(claves, SoundType::Ghost).0, SampleId::CLAVES_LOW.data());
+        assert_eq!(sample(claves, SoundType::AccentedBeat).0, SampleId::ClavesHigh.data());
+        assert_eq!(sample(claves, SoundType::Beat), (SampleId::ClavesLow.data(), 1.0));
+        assert_eq!(sample(claves, SoundType::Ghost).0, SampleId::ClavesLow.data());
         let xylo = Sound::Xylophone;
-        assert_eq!(sample(xylo, SoundType::AccentedBeat).0, SampleId::XYLO_HIGH.data());
-        assert_eq!(sample(xylo, SoundType::Beat).0, SampleId::XYLO_LOW.data());
+        assert_eq!(sample(xylo, SoundType::AccentedBeat).0, SampleId::XyloHigh.data());
+        assert_eq!(sample(xylo, SoundType::Beat).0, SampleId::XyloLow.data());
     }
 
     #[test]
@@ -567,19 +600,21 @@ mod tests {
             Patch::Sample { data, rate, .. } => (data, rate),
             other => panic!("sample expected, got {other:?}"),
         };
-        assert_eq!(sample(SoundType::Downbeat), (SampleId::SNARE_ACCENT.data(), 1.0));
-        assert_eq!(sample(SoundType::PrimaryBeat), (SampleId::SNARE.data(), 1.0));
-        assert_eq!(sample(SoundType::CountIn).0, SampleId::SNARE.data());
+        assert_eq!(sample(SoundType::Downbeat), (SampleId::SnareAccent.data(), 1.0));
+        assert_eq!(sample(SoundType::PrimaryBeat), (SampleId::Snare.data(), 1.0));
+        assert_eq!(sample(SoundType::CountIn).0, SampleId::Snare.data());
         // A snare counter rhythm plays higher against it.
         assert_eq!(sample(SoundType::CounterMedium).1, SAME_SOUND_RATE);
     }
 
     #[test]
     fn embedded_samples_decode() {
-        for (i, file) in SAMPLES.iter().enumerate() {
+        for (i, &id) in SampleId::ALL.iter().enumerate() {
+            assert_eq!(id as usize, i, "{id:?}");
+            let file = id.file();
             let data = wav::decode(file.bytes).unwrap_or_else(|e| panic!("{}: {e:?}", file.name));
             assert!(!data.frames.is_empty(), "{} is empty", file.name);
-            assert_eq!(*SampleId(i).data(), data);
+            assert_eq!(*id.data(), data);
         }
     }
 
@@ -614,20 +649,37 @@ mod tests {
 
     #[test]
     fn the_kit_snare_plays_its_recording_per_level() {
-        let at = |level| {
-            kit_sample(KitHit {
-                instrument: Instrument::Snare,
-                technique: Technique::Normal,
-                level,
-            })
-        };
-        assert_eq!(at(Level::Strong), SampleId::SNARE_ACCENT);
-        assert_eq!(at(Level::Normal), SampleId::SNARE);
-        assert_eq!(at(Level::Soft), SampleId::SNARE_GHOST);
-        // Other instruments have one recording, played quieter.
-        let kick = |level| {
-            kit_sample(KitHit { instrument: Instrument::Kick, technique: Technique::Normal, level })
-        };
+        let hit = |instrument, level| KitHit { instrument, technique: Technique::Normal, level };
+        let at = |level| kit_samples(hit(Instrument::Snare, level)).at(level);
+        assert_eq!(at(Level::Strong), SampleId::SnareAccent);
+        assert_eq!(at(Level::Normal), SampleId::Snare);
+        assert_eq!(at(Level::Soft), SampleId::SnareGhost);
+        // Its recordings carry the dynamics: every level at one volume.
+        let snare = |level| hit(Instrument::Snare, level).level_gain();
+        assert_eq!(snare(Level::Strong), snare(Level::Normal));
+        assert_eq!(snare(Level::Soft), snare(Level::Normal));
+        // Other instruments have one recording, played louder or quieter.
+        let kick = |level| kit_samples(hit(Instrument::Kick, level)).at(level);
         assert_eq!(kick(Level::Soft), kick(Level::Strong));
+        let kick = |level| hit(Instrument::Kick, level).level_gain();
+        assert!(
+            kick(Level::Soft) < kick(Level::Normal) && kick(Level::Normal) < kick(Level::Strong)
+        );
+    }
+
+    #[test]
+    fn a_missing_recording_is_stood_in_for_by_the_normal_one() {
+        let set = SampleSet::new(SampleId::Kick);
+        for level in [Level::Strong, Level::Normal, Level::Soft] {
+            assert_eq!(set.at(level), SampleId::Kick);
+        }
+        assert_eq!(set.stand_in_gain(Level::Normal), 1.0);
+        assert!(set.stand_in_gain(Level::Strong) > 1.0);
+        assert!(set.stand_in_gain(Level::Soft) < 1.0);
+        let full = set.with_strong(SampleId::SnareAccent).with_soft(SampleId::SnareGhost);
+        assert_eq!(full.at(Level::Strong), SampleId::SnareAccent);
+        assert_eq!(full.at(Level::Soft), SampleId::SnareGhost);
+        assert_eq!(full.stand_in_gain(Level::Strong), 1.0);
+        assert_eq!(full.stand_in_gain(Level::Soft), 1.0);
     }
 }
