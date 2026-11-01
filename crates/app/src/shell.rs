@@ -638,16 +638,17 @@ impl Grooph {
             }
             // A rhythm page's editor leaves the staff all the room above
             // its palette.
+            // The editor's bar at the very bottom, the grid above it.
             Tab::Practice | Tab::Score => {
-                self.tool_palette_panel(ui);
                 self.edit_bar(ui);
+                self.tool_palette_panel(ui);
             }
             Tab::Metronome if self.ui.mode == Mode::Edit => {
                 // No ring here: what was hovered on it is gone, also when
                 // Done brings the ring back with the staff of this frame.
                 self.editor.metronome.forget_hover();
-                self.tool_palette_panel(ui);
                 self.metronome_edit_bar(ui);
+                self.tool_palette_panel(ui);
                 self.metronome_card(ui);
             }
             Tab::Metronome => self.metronome_page(ui),
@@ -1360,7 +1361,7 @@ impl Grooph {
         }
     }
 
-    /// Play button and measure controls above the tool palette, as wide as it.
+    /// Play button and measure controls below the tool palette, as wide as it.
     fn edit_bar(&mut self, ui: &mut Ui) {
         self.editor_bar(ui, "shell_edit_bar", true, |app, ui| {
             if ui.button("➕").on_hover_text("Add a bar").clicked() {
@@ -1372,14 +1373,14 @@ impl Grooph {
         });
     }
 
-    /// Play button and a way back to the ring above the tool palette, while
+    /// Play button and a way back to the ring below the tool palette, while
     /// the click bar is edited note by note. A tap on a voice's line picks
     /// the voice the palette edits.
     fn metronome_edit_bar(&mut self, ui: &mut Ui) {
         self.editor_bar(ui, "metronome_edit_bar", false, |_, _| {});
     }
 
-    /// An editor's bar above the tool grid: play, undo, redo and clear, the
+    /// An editor's bar below the tool grid: play, undo, redo and clear, the
     /// editor's own buttons (`extra`, if `has_extra`), and Done on the right.
     /// Where they do not all fit in one line, the editor's own buttons go
     /// in a second one below.
@@ -1416,7 +1417,8 @@ impl Grooph {
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         // Back to the page's card and options sheet.
-                        if ui.button(RichText::new("Done").size(18.0)).clicked() {
+                        let done = ui.button(RichText::new("✔").size(26.0)).on_hover_text("Done");
+                        if done.clicked() {
                             self.leave_editor();
                         }
                     });
