@@ -695,7 +695,7 @@ impl Grooph {
         let pen = self.edit_instrument();
         let result = self.current_voice_mut().set_tuplet(idx, tuplet_spec, true, pen);
         match &result {
-            Some(Modification::DissolveTuplet(tuplet_idx, _)) => {
+            Some(Modification::DissolveTuplet(tuplet_idx)) => {
                 let new_len = self.current_voice().beats().len();
                 if new_len > 0 {
                     self.editor.doc_mut().cursor.beat_idx = tuplet_idx.start_idx.min(new_len - 1);
@@ -703,7 +703,7 @@ impl Grooph {
                     self.editor.doc_mut().cursor.beat_idx = 0;
                 }
             }
-            Some(Modification::SetTuplet(group_span, ..)) => {
+            Some(Modification::SetTuplet(group_span)) => {
                 self.editor.doc_mut().cursor.beat_idx =
                     (group_span.end_idx + 1).min(self.current_voice().beats().len() - 1);
             }

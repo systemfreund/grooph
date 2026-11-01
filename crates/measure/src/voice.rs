@@ -7,10 +7,10 @@
 
 use crate::BeatKind::Rest;
 use crate::beat::StoredBeat;
-use crate::duration::{Duration, NoteValue};
+use crate::duration::{Duration, NoteValue, TupletSpec};
 use crate::editing::Modification;
 use crate::grid::DEFAULT_GRID;
-use crate::tuplet::{TupletGroup, TupletMark};
+use crate::tuplet::{TupletGroup, TupletMark, span_ticks};
 use crate::{Beat, BeatKind, Instrument, InvalidMeasure, MeasureError, TimeSignature, Voicing};
 use either::Either;
 use serde::{Deserialize, Serialize};
@@ -160,8 +160,10 @@ impl VoiceBar {
 }
 
 /// The beats of `raw` with their tuplet marks: as saved, or made from the
-/// group ids and anchors of a voice saved before marks. A run of beats with
-/// one id is a group (a lone beat is none, as it was then).
+/// group ids and anchors of a voice saved before marks. A run of two or
+/// more tuplets with one id is a group. Other ids mark nothing: a lone beat
+/// or a plain beat was in no group then either; a lone tuplet is then
+/// outside a group, which the editor never saved and loading rejects.
 fn marked_beats(raw: RawVoice) -> Result<Vec<Beat>, InvalidMeasure> {
     let RawVoice { beats: stored, anchors } = raw;
     let mut beats: Vec<Beat> = stored.iter().map(|s| s.beat).collect();
@@ -176,7 +178,7 @@ fn marked_beats(raw: RawVoice) -> Result<Vec<Beat>, InvalidMeasure> {
             .get(&id)
             .ok_or(InvalidMeasure::UnknownTupletGroup { idx, id })?;
         let len = stored[idx..].iter().take_while(|s| s.group_id == Some(id)).count();
-        if len >= 2 {
+        if len >= 2 && stored[idx..idx + len].iter().all(|s| s.beat.duration.is_tuplet()) {
             beats[idx].tuplet = Some(TupletMark::Start { base: anchor.base_hint });
             for beat in &mut beats[idx + 1..idx + len] {
                 beat.tuplet = Some(TupletMark::Continue);
@@ -194,15 +196,20 @@ fn check_tuplet_groups(beats: &[Beat]) -> Result<(), InvalidMeasure> {
     let mut idx = 0;
     while idx < beats.len() {
         let beat = &beats[idx];
-        match (beat.tuplet, beat.duration.as_tuplet_spec()) {
+        let (base, spec) = match (beat.tuplet, beat.duration.as_tuplet_spec()) {
             (None, None) => {
                 idx += 1;
                 continue;
             }
-            (Some(TupletMark::Start { .. }), Some(_)) => {}
+            (Some(TupletMark::Start { base }), Some(spec)) => (base, spec),
             _ => return Err(InvalidMeasure::OutsideTupletGroup { idx }),
-        }
-        let group = TupletGroup::starting_at(beats, idx).expect("a group starts here");
+        };
+        // A start without a beat to continue it is a group of one.
+        let Some(group) = TupletGroup::starting_at(beats, idx) else {
+            let ticks = DEFAULT_GRID.ticks_of(&beat.duration).map_or(0, u64::from);
+            let expected = span_ticks(TupletSpec { base, ..spec });
+            return Err(InvalidMeasure::TupletGroupLength { idx, ticks, expected });
+        };
         let members = &beats[group.start_idx..=group.end_idx];
         if let Some(off) = members.iter().position(|b| {
             !b.duration.as_tuplet_spec().is_some_and(|spec| spec.same_grid(&group.spec))
@@ -212,7 +219,7 @@ fn check_tuplet_groups(beats: &[Beat]) -> Result<(), InvalidMeasure> {
         let ticks: u64 =
             members.iter().filter_map(|b| DEFAULT_GRID.ticks_of(&b.duration)).map(u64::from).sum();
         let expected = group.span_ticks();
-        if members.len() < 2 || ticks != u64::from(expected) {
+        if ticks != u64::from(expected) {
             return Err(InvalidMeasure::TupletGroupLength { idx, ticks, expected });
         }
         idx = group.end_idx + 1;

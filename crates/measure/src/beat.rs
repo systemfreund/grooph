@@ -202,6 +202,9 @@ impl TryFrom<RawBeat> for Beat {
     type Error = &'static str;
 
     fn try_from(raw: RawBeat) -> Result<Self, Self::Error> {
+        // A beat read on its own drops an old group id: only a voice can
+        // turn ids into marks (see `StoredBeat`), and no saved data holds a
+        // tuplet beat outside its voice.
         StoredBeat::try_from(raw).map(|stored| stored.beat)
     }
 }

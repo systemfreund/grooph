@@ -51,7 +51,8 @@ impl TupletGroup {
     }
 
     /// The group starting at `start_idx` of `beats`, by its marks. `None`
-    /// if no group starts there.
+    /// if no group of two or more beats starts there (a lone `Start` is in
+    /// no group; loading rejects it).
     pub(crate) fn starting_at(beats: &[Beat], start_idx: BeatIdx) -> Option<TupletGroup> {
         let first = beats.get(start_idx)?;
         let Some(TupletMark::Start { base }) = first.tuplet else {
@@ -62,7 +63,11 @@ impl TupletGroup {
             .iter()
             .take_while(|b| b.tuplet == Some(TupletMark::Continue))
             .count();
-        Some(TupletGroup { start_idx, end_idx: start_idx + len, spec: TupletSpec { n, m, base } })
+        (len >= 1).then_some(TupletGroup {
+            start_idx,
+            end_idx: start_idx + len,
+            spec: TupletSpec { n, m, base },
+        })
     }
 }
 

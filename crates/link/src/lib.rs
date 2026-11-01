@@ -985,11 +985,6 @@ mod tests {
         }
     }
 
-    /// How many beats each tuplet group of `bar` holds, in order.
-    fn tuplet_groups(bar: &Measure) -> Vec<usize> {
-        bar.first_voice().tuplet_groups().iter().map(|g| g.end_idx - g.start_idx + 1).collect()
-    }
-
     #[test]
     fn edited_poly_clicks_are_written_out() {
         let mut link = parse("ts=4/4&poly=3:2");
@@ -1019,9 +1014,8 @@ mod tests {
         ] {
             let written = parse(&format!("ts={ts}&counter={counter}")).counter.unwrap();
             let poly = parse(&format!("ts={ts}&poly={ratio}")).counter.unwrap();
-            // `Beat`'s == leaves out the tuplet groups: compare them too.
-            assert_eq!(format_bar(&written), format_bar(&poly), "{ratio} in {ts}");
-            assert_eq!(tuplet_groups(&written), tuplet_groups(&poly), "{ratio} in {ts}");
+            // `==` compares the beats with their tuplet groups.
+            assert!(written == poly, "{ratio} in {ts}: {written:?} vs {poly:?}");
         }
     }
 

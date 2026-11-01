@@ -12,8 +12,8 @@ use either::Either;
 #[derive(Debug)]
 pub enum Modification {
     SetBeat(BeatIdx, Beat),                            // contains the new beat
-    SetTuplet(TupletGroup, TupletSpec),                // contains the new state
-    DissolveTuplet(TupletGroup, TupletSpec),           // contains the dissolved tuplet spec
+    SetTuplet(TupletGroup),                            // the new group
+    DissolveTuplet(TupletGroup),                       // the dissolved group
     ToggleKind(BeatIdx, BeatKind),                     // contains the new beat kind
     ToggleAccent(BeatIdx, bool),                       // contains the new accented state
     ToggleSoft(BeatIdx, bool),                         // contains the new soft state
@@ -209,7 +209,7 @@ impl VoiceBar {
                         && let Some(group_span) =
                             self.convert_to_tuplet(start_idx, *tuplet_spec, overwrite)
                     {
-                        result = Some(Modification::SetTuplet(group_span, *tuplet_spec));
+                        result = Some(Modification::SetTuplet(group_span));
                         // Carry the remembered notes over to the new group
                         if let Some(ref src) = captured_offsets {
                             let _ = self.apply_tuplet_projection_at(start_idx, src);
@@ -237,7 +237,7 @@ impl VoiceBar {
                             self.beats[i].set_heads(heads);
                         }
                     }
-                    result = Some(Modification::SetTuplet(group_span, *next_target));
+                    result = Some(Modification::SetTuplet(group_span));
                 }
             }
         };
@@ -252,7 +252,7 @@ impl VoiceBar {
     ///   the heads of the first; an accent anywhere in the group moves to
     ///   it.
     /// - The new beats are in no tuplet group.
-    /// - Returns the dissolved span and spec, or `None` if `idx` is not in a
+    /// - Returns the dissolved group, or `None` if `idx` is not in a
     ///   tuplet.
     pub fn dissolve_tuplet_group(&mut self, idx: BeatIdx) -> Option<Modification> {
         if idx >= self.beats.len() {
@@ -260,7 +260,7 @@ impl VoiceBar {
         }
 
         if let Some(tuplet_group) = self.tuplet_group_at(idx) {
-            let TupletGroup { start_idx, end_idx, spec } = tuplet_group;
+            let TupletGroup { start_idx, end_idx, .. } = tuplet_group;
             // The heads of the group's first note, and whether it held an
             // accent
             let group = &self.beats[start_idx..=end_idx];
@@ -281,7 +281,7 @@ impl VoiceBar {
                 }
             }
 
-            Some(DissolveTuplet(tuplet_group, spec))
+            Some(DissolveTuplet(tuplet_group))
         } else {
             None
         }
@@ -604,14 +604,11 @@ mod tests {
 
         assert_matches!(
             m.first_voice_mut().dissolve_tuplet_group(1),
-            Some(DissolveTuplet(
-                TupletGroup {
-                    start_idx: 0,
-                    end_idx: 2,
-                    spec: TupletSpec { n: 3, m: 2, base: Eighth }
-                },
-                TupletSpec { n: 3, m: 2, base: Eighth }
-            ))
+            Some(DissolveTuplet(TupletGroup {
+                start_idx: 0,
+                end_idx: 2,
+                spec: TupletSpec { n: 3, m: 2, base: Eighth }
+            }))
         );
 
         // The first new beat is an accented note
@@ -639,14 +636,11 @@ mod tests {
 
         assert_matches!(
             m.first_voice_mut().dissolve_tuplet_group(1),
-            Some(DissolveTuplet(
-                TupletGroup {
-                    start_idx: 0,
-                    end_idx: 2,
-                    spec: TupletSpec { n: 3, m: 2, base: Eighth }
-                },
-                TupletSpec { n: 3, m: 2, base: Eighth }
-            ))
+            Some(DissolveTuplet(TupletGroup {
+                start_idx: 0,
+                end_idx: 2,
+                spec: TupletSpec { n: 3, m: 2, base: Eighth }
+            }))
         );
 
         assert!(m.first_voice().beats()[0].tuplet.is_none());

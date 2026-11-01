@@ -1138,6 +1138,9 @@ mod tests {
             broken(",tuplet:Some(Start(base:Eighth))", "")
                 .contains("does not fit its tuplet group")
         );
+        // Starts that nothing continues: groups of one.
+        let alone = saved.replace("tuplet:Some(Continue)", "tuplet:Some(Start(base:Eighth))");
+        assert!(read(&alone).unwrap_err().contains("the tuplet group at beat 1"), "{alone}");
         assert!(
             broken("Start(base:Eighth)", "Start(base:Quarter)")
                 .contains("the tuplet group at beat 1")
@@ -1193,6 +1196,19 @@ mod tests {
         let group = m.first_voice().tuplet_group_at(1).unwrap();
         assert_eq!((group.start_idx, group.end_idx, group.spec.base), (0, 1, Eighth));
         assert!(round_trips(&m));
+        // Ids on plain beats, alone or in a run, mark nothing, as then.
+        let plain = old_voice(
+            &[("Simple(Eighth)", Some(1)), ("Simple(Eighth)", Some(1))],
+            &anchor(1, "Eighth"),
+        );
+        assert!(read(&plain).unwrap().first_voice().tuplet_groups().is_empty());
+        // A lone tuplet was outside a group then too: the editor never saved
+        // one, and it does not load.
+        let lone = old_voice(
+            &[(t8, Some(1)), (t8, Some(2)), (t8, Some(3))],
+            &format!("{},{},{}", anchor(1, "Eighth"), anchor(2, "Eighth"), anchor(3, "Eighth")),
+        );
+        assert!(read(&lone).unwrap_err().contains("does not fit its tuplet group"));
         // An id without its anchor.
         let unknown =
             old_voice(&[(t8, Some(1)), (t8, Some(1)), (t8, Some(1))], &anchor(2, "Eighth"));
