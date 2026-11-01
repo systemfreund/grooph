@@ -794,13 +794,7 @@ impl Grooph {
     pub(crate) fn can_clean_up_current_measure(&self) -> bool {
         let doc = self.editor.doc();
         let cursor = doc.score.clamp_cursor(doc.cursor);
-        let measure = &doc.score.measures()[cursor.measure_idx];
-        measure
-            .cleaned_up()
-            .voices()
-            .iter()
-            .zip(measure.voices())
-            .any(|(a, b)| a.beats() != b.beats())
+        doc.score.measures()[cursor.measure_idx].needs_clean_up()
     }
 
     /// Remove the currently active measure. Does nothing if only one measure

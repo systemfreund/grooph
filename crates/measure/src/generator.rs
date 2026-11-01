@@ -993,6 +993,74 @@ mod tests {
     }
 
     #[test]
+    fn seeded_scores_are_written_as_before() {
+        // Pinned output, the same as before the spelling moved to
+        // `crate::spelling`: a change to the spelling rules shows here.
+        let cases = [
+            (
+                TimeSignature::FOUR_FOUR,
+                Subdivision::Sixteenths,
+                5,
+                0.3,
+                1,
+                "4/4 s s s s r:e e r:e e e e | s e s r:e e r:e s r:s s s e | r:s s s s r:s e s s s r:e r:q | r:s s s s r:q r:e e r:s s s s",
+            ),
+            (
+                TimeSignature::FOUR_FOUR,
+                Subdivision::Mixed,
+                4,
+                0.0,
+                2,
+                "4/4 r:q s e s s e s r:t8 t8 t8 | e q e r:e s s s e r:s | e e r:t8 t8 t8 q r:e s s | r:e e r:t8 r:t8 t8 s e. r:t8 t8 r:t8",
+            ),
+            (
+                TimeSignature::THREE_FOUR,
+                Subdivision::Eighths,
+                3,
+                0.5,
+                3,
+                "3/4 r:h r:e e | q r:q q | q e q. | r:h r:q",
+            ),
+            (
+                TimeSignature::SIX_EIGHT,
+                Subdivision::Sixteenths,
+                5,
+                0.3,
+                4,
+                "6/8 s s s e. e e s s | r:q. r:e r:s e s | e r:q r:q. | s s e s s e. r:s e",
+            ),
+            (
+                TimeSignature::SEVEN_EIGHT.with_grouping(2),
+                Subdivision::Sixteenths,
+                4,
+                0.2,
+                5,
+                "3+2+2/8 e s s s r:s s r:s r:s s r:e s s | s s e. s r:e e r:q | r:q. r:e e r:e e | s s s e r:s e e r:e e",
+            ),
+            (
+                ts(7, 16),
+                Subdivision::Sixteenths,
+                5,
+                0.0,
+                6,
+                "7/16 r:s s r:e. r:s s | e r:e s r:e | s s e s r:s s | s s r:s e r:s s",
+            ),
+        ];
+        for (time_signature, subdivision, complexity, space, seed, want) in cases {
+            let st = GeneratorSettings {
+                subdivision,
+                complexity,
+                bars: 4,
+                time_signature,
+                space,
+                ..Default::default()
+            };
+            let score = generate_score(&st, &mut Rng::new(seed)).unwrap();
+            assert_eq!(crate::notation::format_score(&score).unwrap(), want);
+        }
+    }
+
+    #[test]
     fn every_supported_meter_generates_beyond_the_offered_ones() {
         // Also meters the app does not offer, like 4/16 (one group of
         // four, drawn as two eighths).

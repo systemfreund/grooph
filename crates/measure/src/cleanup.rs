@@ -232,7 +232,19 @@ impl VoiceBar {
     }
 }
 
+/// Whether `a` and `b` have the same beats, tuplet groups included
+/// ([`Beat`]'s `PartialEq` leaves them out).
+pub(crate) fn same_beats(a: &VoiceBar, b: &VoiceBar) -> bool {
+    a.beats == b.beats
+        && a.beats.iter().zip(&b.beats).all(|(x, y)| x.tuplet_group_id == y.tuplet_group_id)
+}
+
 impl Measure {
+    /// Whether [`Measure::clean_up`] would change a voice.
+    pub fn needs_clean_up(&self) -> bool {
+        self.voices().iter().any(|v| v.respelled().is_some_and(|r| !same_beats(v, &r)))
+    }
+
     /// The measure with every voice [respelled](VoiceBar::respelled): the
     /// editor's "Clean up". A voice that cannot be respelled stays as it
     /// is.
@@ -251,7 +263,7 @@ impl Measure {
                 continue;
             };
             let old = self.voice_mut(idx).expect("voice in range");
-            if old.beats != voice.beats {
+            if !same_beats(old, &voice) {
                 *old = voice;
                 changed = true;
             }
@@ -382,6 +394,19 @@ mod tests {
             cleaned("4/4 H:e H:e S-H:e H:e H:e H:e S-H:e H:e ; K:h r:e K:e r:q"),
             "4/4 H:e H:e S-H:e H:e H:e H:e S-H:e H:e ; K:q r:q r:e K:e r:q"
         );
+    }
+
+    #[test]
+    fn a_stale_group_id_on_a_plain_note_is_cleaned_up() {
+        let mut m = measure("4/4 q q q q");
+        let voice = m.first_voice_mut();
+        let id = voice.tuplets.register(3, 2, 1, crate::duration::NoteValue::Eighth);
+        voice.beats[0].tuplet_group_id = Some(id);
+        assert!(m.needs_clean_up());
+        assert!(m.clean_up());
+        assert_eq!(m.first_voice().beats()[0].tuplet_group_id, None);
+        assert!(m.first_voice().tuplets().is_empty());
+        assert!(!m.needs_clean_up());
     }
 
     #[test]
