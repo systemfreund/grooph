@@ -1,4 +1,5 @@
 mod beat;
+mod cleanup;
 pub mod click;
 pub mod counter;
 pub mod counting;
@@ -16,6 +17,7 @@ pub mod onsets;
 #[cfg(test)]
 mod random_tests;
 pub mod score;
+mod spelling;
 pub mod swing;
 pub mod tap_tempo;
 pub mod tempo;

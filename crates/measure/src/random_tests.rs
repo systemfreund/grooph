@@ -274,3 +274,68 @@ fn random_scores_round_trip_through_notation_long() {
         run_notation_round_trips(seed, 5000);
     }
 }
+
+/// Clean up random measures: the result is valid, sounds the same (every
+/// head at the same tick) and a second cleanup changes nothing.
+fn run_random_cleanups(seed: u64, measures: usize) -> (usize, usize) {
+    let durations = durations();
+    let meters = meters();
+    let mut rng = Rng::new(seed);
+    let (mut cleaned, mut left) = (0, 0);
+    for i in 0..measures {
+        let mut m = Measure::new(pick(&mut rng, &meters));
+        for _ in 0..rng.below(30) {
+            random_edit(&mut m, &mut rng, &durations, &meters);
+        }
+        // Half of them with a second voice of its own rhythm.
+        if rng.chance(0.5) {
+            let mut lower = Measure::new(m.time_signature());
+            for _ in 0..rng.below(30) {
+                random_edit(&mut lower, &mut rng, &durations, &[m.time_signature()]);
+            }
+            m.push_voices(&lower).expect("one meter");
+        }
+        // A voice that cannot be respelled stays as it is next to one that
+        // can; only a measure of such voices is skipped.
+        if m.voices().iter().all(|v| v.respelled().is_none()) {
+            left += 1;
+            continue;
+        }
+        cleaned += 1;
+        let once = m.cleaned_up();
+        let place = format!("seed {seed}, measure {i}: {m:?} in {}", m.time_signature());
+        for voice in 0..once.voices().len() {
+            let single = once.single_voice(voice).expect("voice in range");
+            if let Err(e) = check_invariants(&single) {
+                panic!("{place}: cleaned up to {once:?}, voice {voice}: {e}");
+            }
+        }
+        let sound = |m: &Measure| -> Vec<_> {
+            m.head_onsets().into_iter().map(|o| (o.tick, o.voice, o.head)).collect()
+        };
+        assert_eq!(sound(&once), sound(&m), "{place}: cleaned up to {once:?}");
+        let twice = once.cleaned_up();
+        for voice in 0..once.voices().len() {
+            let [a, b] = [&once, &twice].map(|m| m.single_voice(voice).expect("voice in range"));
+            if let Some(diff) = score_difference(&Score::new(vec![a]), &Score::new(vec![b])) {
+                panic!("{place}: a second cleanup changed voice {voice}: {diff}");
+            }
+        }
+    }
+    (cleaned, left)
+}
+
+#[test]
+fn random_cleanups_keep_the_rhythm() {
+    let (cleaned, left) = run_random_cleanups(SEED, 2000);
+    // Most measures can be cleaned up; tuplets inside beats may not.
+    assert!(cleaned > 4 * left, "{cleaned} cleaned, {left} left as they are");
+}
+
+#[test]
+#[ignore = "long run; cargo test -p grooph-measure -- --ignored"]
+fn random_cleanups_keep_the_rhythm_long() {
+    for seed in 1..=20 {
+        run_random_cleanups(seed, 10_000);
+    }
+}

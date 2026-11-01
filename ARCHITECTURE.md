@@ -102,8 +102,9 @@ spread across callers.
   the x/16 groups (`Eighth`, `DottedEighth`) the patterns of their own span. Triplets/mixed fall back to
   8ths/16ths in x/8, x/16 is always 16ths (`effective_subdivision`). A figure
   only fixes the note onsets; `generator/spelling.rs` then picks each note's
-  length (up to the next onset or shorter, early stops inside a beat from
-  level 4) and writes notes and rests for the whole measure: notes cross beats
+  length at random (up to the next onset or shorter, early stops inside a beat from
+  level 4) and `grooph_measure::spelling` writes notes and rests for the whole measure from
+  the onsets (on a thirty-second grid): notes cross beats
   only as one value without a tie (dotted quarter or half from a beat, quarter
   or dotted quarter from the "and") inside a half bar (x/4 beats grouped like
   the eighths of n/8) or as a half centred on its boundary (`4 2 4`), never
@@ -112,6 +113,22 @@ spread across callers.
   the two-level rhythmic parsing rule); triplet figures
   are written as drawn. Measures are written via `set_beat`, so
   they obey the same invariants as edited ones. Seed `Rng` for reproducibility.
+- Clean up (`grooph_measure::cleanup`, the bar menu's "Clean up bar"):
+  `VoiceBar::respelled` writes a voice again from its onsets with the same
+  spelling rules, deterministically: a drum hit does not sustain, so only
+  where each note starts (with its heads) is the rhythm. Each note lasts
+  up to the next one but only to the end of its beat (a backbeat reads
+  `4-rest 4 4-rest 4`), rests merge per beat and into half rests at the
+  start of a pair of beats, `x/8` and `x/16` keep to their beat groups as
+  picked. Tuplets stay as written with the beats they share; a tuplet of
+  rests only becomes a plain rest, and one whose notes all start on the
+  plain grid (a triplet with only its first note) is respelled as plain
+  notes; a voice whose tuplet starts or ends
+  inside a beat where no beat starts stays as it is (`None`).
+  `Measure::clean_up` does every voice; applying it twice changes
+  nothing. `VoiceBar::from_onsets` writes a voice from ticks and heads
+  alone, for moving heads between voices. An empty bar is per-beat rests in
+  the model; the whole rest is the layout's (`RenderPlan::bar_rest`).
 - Note: `Beat` `PartialEq` ignores `tuplet_group_id`. Compare the field explicitly
   if grouping matters.
 
@@ -731,7 +748,8 @@ stored, and never reached by the playback cursor: `draw_staff` and
 `current_cursor_x` take the bars that play, `loop_bars`); a tap on it appends a bar like the last one (`Grooph::push_measure`)
 and puts the cursor there. The bar menu (`BarMenu`), from a "⋯" in the top
 right corner of the cursor's bar or a long press (right click) on a bar,
-duplicates, clears (every voice) or deletes it; in the metronome it only
+cleans up (every voice, greyed out where nothing would change; see
+"Clean up"), duplicates, clears (every voice) or deletes it; in the metronome it only
 clears the voice being edited. A modifier's cell is greyed out where it
 would change nothing on the cursor's beat (`modifier_applies`, tried on a
 copy of the bar): an accent on a rest, a dot without room, a technique

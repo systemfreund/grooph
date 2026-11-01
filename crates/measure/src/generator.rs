@@ -187,7 +187,7 @@ impl BeatSpan {
     }
 
     /// Length of the span in sixteenths.
-    fn sixteenths(self) -> u32 {
+    pub(crate) fn sixteenths(self) -> u32 {
         match self {
             BeatSpan::Quarter => 4,
             BeatSpan::DottedQuarter => 6,
@@ -643,7 +643,7 @@ pub fn generate_measure(
     let ts = settings.time_signature;
     check_time_signature(ts)?;
     let (drawn, style) = draw(settings, rng);
-    let beats = spelling::spell(ts.beat_unit, &drawn, style, rng);
+    let beats = spelling::spell(ts, &drawn, style, rng);
     Ok(write_measure(ts, &beats)?)
 }
 
@@ -990,6 +990,141 @@ mod tests {
             .map(|g| g.span)
             .collect::<std::collections::HashSet<_>>();
         assert_eq!(spans, [BeatSpan::Eighth, BeatSpan::DottedEighth].into());
+    }
+
+    #[test]
+    fn seeded_scores_are_written_as_before() {
+        // Pinned output, the same as before the spelling moved to
+        // `crate::spelling`: a change to the spelling rules shows here.
+        let cases = [
+            (
+                TimeSignature::FOUR_FOUR,
+                Subdivision::Sixteenths,
+                5,
+                0.3,
+                1,
+                "4/4 s s s s r:e e r:e e e e | s e s r:e e r:e s r:s s s e | r:s s s s r:s e s s s r:e r:q | r:s s s s r:q r:e e r:s s s s",
+            ),
+            (
+                TimeSignature::FOUR_FOUR,
+                Subdivision::Mixed,
+                4,
+                0.0,
+                2,
+                "4/4 r:q s e s s e s r:t8 t8 t8 | e q e r:e s s s e r:s | e e r:t8 t8 t8 q r:e s s | r:e e r:t8 r:t8 t8 s e. r:t8 t8 r:t8",
+            ),
+            (
+                TimeSignature::THREE_FOUR,
+                Subdivision::Eighths,
+                3,
+                0.5,
+                3,
+                "3/4 r:h r:e e | q r:q q | q e q. | r:h r:q",
+            ),
+            (
+                TimeSignature::SIX_EIGHT,
+                Subdivision::Sixteenths,
+                5,
+                0.3,
+                4,
+                "6/8 s s s e. e e s s | r:q. r:e r:s e s | e r:q r:q. | s s e s s e. r:s e",
+            ),
+            (
+                TimeSignature::SEVEN_EIGHT.with_grouping(2),
+                Subdivision::Sixteenths,
+                4,
+                0.2,
+                5,
+                "3+2+2/8 e s s s r:s s r:s r:s s r:e s s | s s e. s r:e e r:q | r:q. r:e e r:e e | s s s e r:s e e r:e e",
+            ),
+            (
+                ts(7, 16),
+                Subdivision::Sixteenths,
+                5,
+                0.0,
+                6,
+                "7/16 r:s s r:e. r:s s | e r:e s r:e | s s e s r:s s | s s r:s e r:s s",
+            ),
+        ];
+        for (time_signature, subdivision, complexity, space, seed, want) in cases {
+            let st = GeneratorSettings {
+                subdivision,
+                complexity,
+                bars: 4,
+                time_signature,
+                space,
+                ..Default::default()
+            };
+            let score = generate_score(&st, &mut Rng::new(seed)).unwrap();
+            assert_eq!(crate::notation::format_score(&score).unwrap(), want);
+        }
+    }
+
+    /// FNV-1a over the written scores of every offered meter, grouping,
+    /// subdivision, level and two space settings, seeded.
+    fn all_scores_hash() -> u64 {
+        let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+        for beat_unit in TimeSignature::BEAT_UNITS {
+            for beats in TimeSignature::beat_range(beat_unit).unwrap() {
+                let meter = ts(beats, beat_unit);
+                for grouping in 0..meter.groupings().len() {
+                    let time_signature = meter.with_grouping(grouping as u8);
+                    if !supports_time_signature(time_signature) {
+                        continue;
+                    }
+                    for &subdivision in offered_subdivisions(time_signature) {
+                        for complexity in 1..=MAX_COMPLEXITY {
+                            for space in [0.0, 0.5] {
+                                let st = GeneratorSettings {
+                                    subdivision,
+                                    complexity,
+                                    bars: 2,
+                                    time_signature,
+                                    space,
+                                    ..Default::default()
+                                };
+                                let seed = u64::from(beats) << 8 | u64::from(complexity);
+                                let score = generate_score(&st, &mut Rng::new(seed)).unwrap();
+                                let text = crate::notation::format_score(&score).unwrap();
+                                for byte in text.bytes().chain(*b"\n") {
+                                    hash = (hash ^ u64::from(byte)).wrapping_mul(0x100_0000_01b3);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        hash
+    }
+
+    #[test]
+    fn every_offered_meter_is_written_as_before() {
+        // The same as before the spelling moved to `crate::spelling`. A
+        // change here is a change to how the generator spells.
+        assert_eq!(all_scores_hash(), 6_586_938_195_223_420_292);
+    }
+
+    #[test]
+    fn every_supported_meter_generates_beyond_the_offered_ones() {
+        // Also meters the app does not offer, like 4/16 (one group of
+        // four, drawn as two eighths).
+        let mut rng = Rng::new(4);
+        for beat_unit in [4, 8, 16] {
+            for beats in 1..=TimeSignature::MAX_BEATS {
+                let ts = ts(beats, beat_unit);
+                if !supports_time_signature(ts) {
+                    continue;
+                }
+                let st = GeneratorSettings {
+                    time_signature: ts,
+                    ..settings(Subdivision::Sixteenths, MAX_COMPLEXITY)
+                };
+                for _ in 0..10 {
+                    generate_measure(&st, &mut rng).unwrap();
+                }
+            }
+        }
     }
 
     #[test]
@@ -1496,7 +1631,7 @@ mod tests {
                             };
                             for _ in 0..n {
                                 let (drawn, style) = draw(&st, &mut rng);
-                                let written = spelling::spell(beat_unit, &drawn, style, &mut rng);
+                                let written = spelling::spell(ts, &drawn, style, &mut rng);
                                 let m = write_measure(ts, &written).expect("spelling must build");
                                 let expected: Vec<Beat> = written
                                     .iter()

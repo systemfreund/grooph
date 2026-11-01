@@ -126,6 +126,11 @@ impl TupletRegistry {
         }
     }
 
+    /// Keep the anchors of the groups `keep` names, drop the others.
+    pub(crate) fn retain(&mut self, mut keep: impl FnMut(TupletGroupId) -> bool) {
+        self.anchors.retain(|_, anchor| keep(anchor.id));
+    }
+
     pub fn is_empty(&self) -> bool {
         self.anchors.is_empty()
     }

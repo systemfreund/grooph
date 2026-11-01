@@ -343,6 +343,16 @@ impl std::fmt::Display for DifferentMeter {
 impl std::error::Error for DifferentMeter {}
 
 impl VoiceBar {
+    /// A voice of `beats` in `time_signature`, which the caller has made
+    /// fill it (see [`VoiceBar`]'s invariant).
+    pub(crate) fn from_parts(
+        beats: Vec<Beat>,
+        time_signature: TimeSignature,
+        tuplets: TupletRegistry,
+    ) -> Self {
+        Self { beats, time_signature, tuplets }
+    }
+
     fn new_init(time_signature: TimeSignature, init: BeatKind) -> Self {
         let mut s = Self { beats: Vec::new(), time_signature, tuplets: TupletRegistry::new() };
         s.fill_measure(init, &[Duration::Simple(time_signature.beat_note_value().unwrap())]);
