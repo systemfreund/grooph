@@ -460,6 +460,23 @@ mod tests {
     }
 
     #[test]
+    fn an_open_editor_reopens_on_its_page() {
+        let (mut app, _) = app_with_groove();
+        app.ui.show_score_tab = true;
+        for tab in [Tab::Metronome, Tab::Practice, Tab::Score] {
+            app.select_tab(tab);
+            app.ui.mode = Mode::Edit;
+            let back = restart(&PersistedState::from_app(&app));
+            assert_eq!(back.tab(), tab);
+            assert_eq!(back.ui.mode, Mode::Edit, "{tab:?}");
+            // Closed, it stays closed.
+            app.leave_editor();
+            let back = restart(&PersistedState::from_app(&app));
+            assert_eq!(back.ui.mode, Mode::Playback, "{tab:?}");
+        }
+    }
+
+    #[test]
     fn the_score_tab_is_hidden_until_the_developer_setting_shows_it() {
         let (mut app, groove) = app_with_groove();
         assert!(!app.ui.show_score_tab);

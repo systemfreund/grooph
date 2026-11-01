@@ -211,6 +211,8 @@ pub(crate) struct PersistedState {
     metronome_meter: TimeSignature,
     /// Tab open when the state was saved, reopened at the next start.
     tab: Tab,
+    /// The page's editor was open, reopened with the tab.
+    editing: bool,
 }
 
 impl Default for PersistedState {
@@ -245,6 +247,7 @@ impl Default for PersistedState {
             counter_names: Vec::new(),
             metronome_meter: TimeSignature::FOUR_FOUR,
             tab: Tab::Metronome,
+            editing: false,
         }
     }
 }
@@ -283,6 +286,7 @@ impl PersistedState {
             counter_names: app.counter_bars().names().to_vec(),
             metronome_meter: app.metronome_meter(),
             tab: app.tab(),
+            editing: app.ui.mode == Mode::Edit,
         }
     }
 }
@@ -1486,6 +1490,10 @@ impl Grooph {
         };
         app.select_tab(shown(state.document.tab()));
         app.select_tab(shown(state.tab));
+        // The editor of that page, if it was open.
+        if state.editing && app.ui.mode == Mode::Playback && !app.embedded() {
+            app.ui.mode = Mode::Edit;
+        }
         // A link opens after the saved tab, so its tab wins.
         if let Some(query) = query {
             app.open_link_from_url(&query);
@@ -2723,6 +2731,7 @@ mod tests {
         assert_eq!(PersistedState::default().tab, Tab::Metronome);
         let older: PersistedState = ron::from_str("(version: 2)").unwrap();
         assert_eq!(older.tab, Tab::Metronome);
+        assert!(!older.editing);
     }
 
     #[test]
