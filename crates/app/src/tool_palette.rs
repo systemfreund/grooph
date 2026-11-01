@@ -502,18 +502,20 @@ impl Grooph {
         let cursor = self.editor.doc().score.clamp_cursor(self.editor.doc().cursor);
         let beat = self.current_voice().beats().get(cursor.beat_idx)?;
         let base = beat.duration.base_note();
-        let duration = match beat.duration {
-            _ if dot => Duration::Dotted { base, dots: 1 },
-            Duration::Dotted { dots: 1, .. } => Duration::Dotted { base, dots: 1 },
-            _ => Duration::Simple(base),
+        // Accent and ghost mean the note, whatever its dot; the dot's cell
+        // is the dotted value, a rest where the beat is one.
+        let duration = match dot {
+            true => Duration::Dotted { base, dots: 1 },
+            false => Duration::Simple(base),
         };
+        let kind = if dot { beat.kind() } else { Note };
         // A button's measure holds a dotted quarter, eighth or sixteenth.
         if matches!(duration, Duration::Dotted { .. })
             && !matches!(base, NoteValue::Quarter | NoteValue::Eighth | NoteValue::Sixteenth)
         {
             return None;
         }
-        let template = BeatTemplate { duration, kind: Note, accented, soft };
+        let template = BeatTemplate { duration, kind, accented, soft };
         Some(Grooph::build_button_measure(template))
     }
 
@@ -1447,9 +1449,11 @@ mod tests {
         assert_eq!(shown(&app, "modify.toggle.accent"), (e, true, false));
         assert_eq!(shown(&app, "modify.toggle.soft"), (e, false, true));
         assert_eq!(shown(&app, "modify.toggle.dotted"), (e_dot, false, false));
-        // A dotted beat keeps its dot under the accent.
+        // Accent and ghost mean the note: the beat's dot is left out.
         app.editor.doc_mut().cursor = Cursor::at(0, 2);
-        assert_eq!(shown(&app, "modify.toggle.accent"), (e_dot, true, false));
+        assert_eq!(shown(&app, "modify.toggle.accent"), (e, true, false));
+        assert_eq!(shown(&app, "modify.toggle.soft"), (e, false, true));
+        assert_eq!(shown(&app, "modify.toggle.dotted"), (e_dot, false, false));
         assert!(app.modifier_preview(tool("insert.note.q")).is_none());
         // A half note shows its accent; the dot keeps its own label, as a
         // button cannot hold a dotted half.
@@ -1457,6 +1461,20 @@ mod tests {
         let h = Duration::Simple(NoteValue::Half);
         assert_eq!(shown(&app, "modify.toggle.accent"), (h, true, false));
         assert!(app.modifier_preview(tool("modify.toggle.dotted")).is_none());
+    }
+
+    #[test]
+    fn the_dot_shows_a_rest_where_the_cursor_is_on_one() {
+        use grooph_measure::BeatKind;
+        let mut app = editing("4/4 e r:e e e q q");
+        let preview = |app: &Grooph| {
+            let m = app.modifier_preview(super::tool("modify.toggle.dotted")).unwrap();
+            m.first_voice().beats()[0].kind()
+        };
+        app.editor.doc_mut().cursor = Cursor::at(0, 0);
+        assert_eq!(preview(&app), BeatKind::Note);
+        app.editor.doc_mut().cursor = Cursor::at(0, 1);
+        assert_eq!(preview(&app), BeatKind::Rest);
     }
 
     #[test]
