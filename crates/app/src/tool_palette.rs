@@ -531,6 +531,10 @@ impl Grooph {
                         "Add the instrument here, or take it away".to_owned()
                     }
                     ToolKind::InsertBeat(_) if selected => "Dissolve the tuplet".to_owned(),
+                    // The meter with its grouping, which the cell leaves out.
+                    _ if matches!(button_kind(&t.kind), ButtonKind::TimeSignature) => {
+                        format!("{}: {}", t.label, self.current_measure().time_signature())
+                    }
                     _ => t.label.to_owned(),
                 };
                 let hover = match t.shortcuts.first() {
@@ -637,7 +641,7 @@ impl Grooph {
         };
         let ts = self.current_measure().time_signature();
         let layout = build_time_sig_layout(&ts, rect.center().x, &opts);
-        draw_time_signature(painter, &layout, ts, &font_id, color);
+        draw_time_signature(painter, &layout, &font_id, color);
     }
 
     pub(super) fn apply_tool(&mut self, tool: &Tool) {

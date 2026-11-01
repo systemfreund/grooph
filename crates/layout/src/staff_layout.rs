@@ -250,8 +250,6 @@ pub const LEGIBILITY_FLOOR_EM: f32 = 9.0;
 pub const ROOM_BELOW_EM: f32 = 0.65;
 /// Room below the staff line when count labels are drawn under the notes.
 pub const ROOM_BELOW_WITH_LABELS_EM: f32 = 1.0;
-/// Room below the staff line for a meter's grouping written under it.
-pub const ROOM_BELOW_GROUPING_EM: f32 = 0.95;
 
 /// Room past the tips of full-length stems, in em: enough for the beams and
 /// flags at the tips.
@@ -448,17 +446,6 @@ pub fn build_staff_layout(score: &Score, opts: &StaffOpts) -> StaffLayout {
         above: room.above.max(line_room(staff.top())),
         below: room.below.max(line_room(staff.bottom())),
     };
-    // A meter with an unusual grouping has it written below (see
-    // grooph-render's `draw_time_signature`).
-    let grouping_shown = score
-        .measures()
-        .iter()
-        .zip(&show_ts)
-        .any(|(m, &shown)| shown && m.time_signature().grouping != 0);
-    if grouping_shown {
-        room.below = room.below.max(ROOM_BELOW_GROUPING_EM);
-    }
-
     // 5. Stack one measure per row, each stretched to fill `available`.
     let row_height = room.height() * effective_opts.em;
     // Rows are taller above the line (stems, beams, tuplets) than below it.
@@ -1050,24 +1037,6 @@ mod tests {
         assert!(
             placed.iter().all(|m| !m.show_time_signature && m.layout().time_signature.is_none())
         );
-    }
-
-    #[test]
-    fn a_shown_grouping_gets_room_below_the_line() {
-        let em = 20.0;
-        let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(4000.0, 100.0));
-        let staff_opts = StaffOpts { time_signature_first: true, ..opts(em, rect) };
-        let room = |ts: TimeSignature, opts: &StaffOpts| {
-            build_staff_layout(&Score::single(Measure::new(ts)), opts).room.below
-        };
-        let usual = TimeSignature::SEVEN_EIGHT;
-        let unusual = "2+2+3/8".parse::<TimeSignature>().unwrap();
-        assert_ne!(unusual.grouping, 0);
-        assert!(room(unusual, &staff_opts) >= ROOM_BELOW_GROUPING_EM);
-        assert!(room(usual, &staff_opts) < ROOM_BELOW_GROUPING_EM);
-        // Not shown, no room for it.
-        let hidden = StaffOpts { time_signature_first: false, ..staff_opts };
-        assert!(room(unusual, &hidden) < ROOM_BELOW_GROUPING_EM);
     }
 
     #[test]
