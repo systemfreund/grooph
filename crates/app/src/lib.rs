@@ -1455,7 +1455,7 @@ impl Grooph {
                 staff_em: 40.0,
                 followed_cursor: None,
                 followed_view_height: 0.0,
-                touch_seen: false,
+                touch_seen: platform::finger_is_the_pointer(),
                 touching: false,
                 shell: ShellState::default(),
                 picker: None,

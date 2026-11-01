@@ -666,9 +666,11 @@ impl Grooph {
 /// What the staff reacts to: a tap everywhere, and a mouse also its drag
 /// (it moves the edit cursor). Once a finger has touched the screen a drag
 /// is left to the scroll area, which scrolls with its momentum and its give
-/// at the ends, as the tool grid does. The hit test uses the previous
-/// frame's widgets, so this is decided from the touches seen before, not
-/// the ones of this frame: the first finger's drag is scrolled by hand.
+/// at the ends, as the tool grid does. A phone or tablet is known to have
+/// a finger as its pointer from the start (`platform::finger_is_the_pointer`).
+/// Otherwise the hit test, which uses the previous frame's widgets, leaves
+/// it to the touches seen before, not the ones of this frame: the first
+/// finger's drag is scrolled by hand.
 fn staff_sense(ui: &egui::Ui, touch_seen: &mut bool, touching: &mut bool) -> egui::Sense {
     // Not changed under a finger that is dragging: a gesture keeps the
     // sense it started with.
