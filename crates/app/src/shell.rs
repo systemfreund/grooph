@@ -44,7 +44,7 @@ const PLAY_BUTTON_SIZE: f32 = 68.0;
 const SIDE_BUTTON_SIZE: f32 = 52.0;
 /// The width from which an editor's bar holds its own buttons in its one
 /// line, next to undo, redo and clear (see [`Grooph::editor_bar`]).
-const ONE_LINE_EDIT_BAR: f32 = 560.0;
+const ONE_LINE_EDIT_BAR: f32 = 480.0;
 /// Most height the metronome tab's staff takes, however wide the window;
 /// the ring below takes the rest.
 const METRONOME_STAFF_MAX: f32 = 220.0;
@@ -1369,11 +1369,6 @@ impl Grooph {
             }
             if ui.button("➖").on_hover_text("Remove this bar").clicked() {
                 app.remove_current_measure();
-            }
-            // The editor has no options sheet: the count's picker opens
-            // from here.
-            if ui.button("1 &").on_hover_text("Count labels").clicked() {
-                app.ui.picker = Some(Picker::Counting);
             }
         });
     }
