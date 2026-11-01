@@ -1381,6 +1381,7 @@ impl Grooph {
                 },
                 button_measures,
                 instrument: Instrument::Snare,
+                kit_tapped: None,
                 library: state.library,
                 presets: state.presets,
                 active_preset: None,
@@ -2179,16 +2180,26 @@ mod tests {
     }
 
     #[test]
-    fn a_tap_at_an_instruments_place_writes_it_on_the_kit() {
+    fn a_tap_on_a_beat_writes_the_picked_instrument_on_the_kit() {
         use super::{Grooph, Mode};
         use eframe::egui::{Context, Event, Modifiers, PointerButton, pos2};
+        use grooph_measure::Instrument::{HiHat, Snare};
         use grooph_measure::notation::{format_score, parse_score};
 
         let groove = "4/4 H:e H:e H:e H:e H:e H:e H:e H:e ; K:q r:q K:q r:q";
-        let tap = |app: &mut Grooph, ctx: &Context, time: &mut f64, y: f32| {
+        let ctx = Context::default();
+        let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let mut app = Grooph::new(&cc);
+        app.ui.show_score_tab = true;
+        app.select_tab(Tab::Score);
+        app.editor.doc_mut().score = parse_score(groove).unwrap();
+        app.ui.mode = Mode::Edit;
+        let mut time = 0.0;
+        shell_frame(&mut app, &ctx, time, vec![]);
+        let mut tap = |app: &mut Grooph, y: f32| {
             let pos = pos2(195.0, y);
             // Taps apart, so no two make a double click.
-            *time += 1.0;
+            time += 1.0;
             for pressed in [true, false] {
                 let event = Event::PointerButton {
                     pos,
@@ -2196,78 +2207,29 @@ mod tests {
                     pressed,
                     modifiers: Modifiers::NONE,
                 };
-                *time += 0.05;
-                shell_frame(app, ctx, *time, vec![Event::PointerMoved(pos), event]);
+                time += 0.05;
+                shell_frame(app, &ctx, time, vec![Event::PointerMoved(pos), event]);
             }
             format_score(&app.editor.doc().score).unwrap()
         };
-        let (mut added, mut picked) = (0, 0);
-        // Over the first bar, above the ghost bar below it.
-        for y in (6..=72).step_by(6) {
-            let ctx = Context::default();
-            let cc = eframe::CreationContext::_new_kittest(ctx.clone());
-            let mut app = Grooph::new(&cc);
-            app.ui.show_score_tab = true;
-            app.select_tab(Tab::Score);
-            app.editor.doc_mut().score = parse_score(groove).unwrap();
-            app.ui.mode = Mode::Edit;
-            let mut time = 0.0;
-            shell_frame(&mut app, &ctx, time, vec![]);
-            let y = y as f32;
-            let first = tap(&mut app, &ctx, &mut time, y);
-            if first == groove {
-                // A head that was there is picked; a second tap takes it away
-                // (unless the tap missed the staff).
-                if tap(&mut app, &ctx, &mut time, y) != groove {
-                    picked += 1;
-                }
-            } else {
-                // An empty place gets the head; a second tap takes it away.
-                added += 1;
-                assert_eq!(tap(&mut app, &ctx, &mut time, y), groove, "y {y}: {first}");
-            }
+        // The snare goes on the tapped beat at any height on the staff, and
+        // a second tap takes it away.
+        app.editor.instrument = Snare;
+        let with_snare = "4/4 H:e H:e H:e H:e S-H:e H:e H:e H:e ; K:q r:q K:q r:q";
+        for y in [12.0, 42.0, 66.0] {
+            assert_eq!(tap(&mut app, y), with_snare, "y {y}");
+            assert_eq!(tap(&mut app, y), groove, "y {y}");
         }
-        assert!(added > 0 && picked > 0, "added {added}, picked {picked}");
-    }
-
-    #[test]
-    fn a_tap_below_the_line_edits_the_lower_voice() {
-        use super::{Grooph, Mode};
-        use eframe::egui::{Event, Modifiers, PointerButton, pos2};
-        use grooph_measure::Cursor;
-        use grooph_measure::notation::parse_score;
-
-        let ctx = eframe::egui::Context::default();
-        let cc = eframe::CreationContext::_new_kittest(ctx.clone());
-        let mut app = Grooph::new(&cc);
-        app.select_tab(Tab::Score);
-        app.edit_page();
-        app.editor.doc_mut().score =
-            parse_score("4/4 H:e H:e H:e H:e H:e H:e H:e H:e ; K:q K:q K:q K:q").unwrap();
-        app.ui.mode = Mode::Edit;
-        let mut time = 0.0;
-        let mut tap = |app: &mut Grooph, y: f32| {
-            let pos = pos2(195.0, y);
-            for pressed in [true, false] {
-                let event = Event::PointerButton {
-                    pos,
-                    button: PointerButton::Primary,
-                    pressed,
-                    modifiers: Modifiers::NONE,
-                };
-                time += 0.5;
-                shell_frame(app, &ctx, time, vec![Event::PointerMoved(pos), event]);
-            }
-            app.editor.doc().cursor
-        };
-        shell_frame(&mut app, &ctx, 0.0, vec![]);
-        // Down from the top of the staff: the hands first, then the kick.
-        // Down the middle of the staff: the hands' fifth eighth, then the
-        // kick's third quarter.
-        let cursors: Vec<Cursor> = (0..100).step_by(4).map(|y| tap(&mut app, y as f32)).collect();
-        let kick = cursors.iter().position(|c| c.voice == 1).expect("a tap on the kick");
-        assert!(cursors[..kick].contains(&Cursor::in_voice(0, 0, 4)), "{cursors:?}");
-        assert_eq!(cursors[kick], Cursor::in_voice(0, 1, 2));
+        // A head that is there is picked first, for its accent or technique.
+        app.editor.instrument = HiHat;
+        assert_eq!(tap(&mut app, 42.0), groove);
+        assert_eq!(tap(&mut app, 42.0), "4/4 H:e H:e H:e H:e r:e H:e H:e H:e ; K:q r:q K:q r:q");
+        assert_eq!(app.editor.instrument, HiHat);
+        assert_eq!(app.editor.doc().cursor, grooph_measure::Cursor::in_voice(0, 0, 4));
+        // The kick's beat is in the lower voice, its third quarter here.
+        app.editor.instrument = grooph_measure::Instrument::Kick;
+        assert_eq!(tap(&mut app, 12.0), "4/4 H:e H:e H:e H:e r:e H:e H:e H:e ; K:q r:q K:q r:q");
+        assert_eq!(app.editor.doc().cursor, grooph_measure::Cursor::in_voice(0, 1, 2));
     }
 
     #[test]

@@ -11,7 +11,7 @@ use grooph_layout::pixel_layout::{NoteLayout, compute_em, onset_head};
 use grooph_layout::staff_layout::{
     LEGIBILITY_FLOOR_EM, LOWER_VOICE_LABEL_ROOM_EM, PlacedMeasure, ROOM_BELOW_EM,
     ROOM_BELOW_WITH_LABELS_EM, StaffLayout, StaffOpts, build_staff_layout, hit_test_head,
-    hit_test_voice,
+    hit_test_instrument, hit_test_voice,
 };
 use grooph_measure::grid::DEFAULT_GRID;
 use grooph_measure::tempo::ScoreTiming;
@@ -639,29 +639,36 @@ impl Grooph {
             // Not the ghost bar's rests.
             && hit.measure_idx < self.editor.doc().score.len()
         {
-            // A tap on another voice edits that voice from now on: in the
-            // metronome tab the click bar or its counter rhythm. On the
-            // kit's staff it also picks the instrument whose head it is on.
-            let before = (self.editor.doc().cursor, self.editor.instrument);
-            let cursor = Cursor::in_voice(hit.measure_idx, hit.voice, hit.beat_idx);
-            self.editor.doc_mut().cursor = cursor;
+            // On the kit a tap writes the instrument picked in the grid on
+            // the tapped beat, whatever its height: a beat without it gets
+            // its head, one with it is picked, and a second tap on the
+            // picked head takes it away.
             if !self.staff_model().one_line() {
-                self.editor.instrument = hit.instrument;
-                // On the kit a tap at an instrument's place writes it: an
-                // empty place gets its head, a head is picked, and a second
-                // tap on the picked head takes it away.
+                let pen = self.editor.instrument;
+                let Some(hit) = hit_test_instrument(staff, pos, pen) else {
+                    return;
+                };
+                let cursor = Cursor::in_voice(hit.measure_idx, hit.voice, hit.beat_idx);
+                self.editor.doc_mut().cursor = cursor;
                 if resp.clicked() {
                     let there = self
                         .current_voice()
                         .beats()
                         .get(hit.beat_idx)
-                        .is_some_and(|b| b.heads().get(hit.instrument).is_some());
-                    if !there || before == (cursor, hit.instrument) {
+                        .is_some_and(|b| b.heads().get(pen).is_some());
+                    let again = self.editor.kit_tapped == Some((cursor, pen));
+                    if !there || again {
                         self.apply_tool(crate::tool_palette::tool("modify.toggle.head"));
                     }
+                    // After a head goes away, the next tap writes it again.
+                    self.editor.kit_tapped = (!again).then_some((cursor, pen));
                 }
                 return;
             }
+            // A tap on another voice edits that voice from now on: in the
+            // metronome tab the click bar or its counter rhythm.
+            self.editor.doc_mut().cursor =
+                Cursor::in_voice(hit.measure_idx, hit.voice, hit.beat_idx);
 
             if resp.double_clicked()
                 && let Some(tool) = all_tools()
