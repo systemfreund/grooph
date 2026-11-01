@@ -8,9 +8,11 @@
 //! (`Grooph::tap_instrument`) and makes it the picked one, the head the note
 //! values write on a rest (`Grooph::edit_instrument`). Accent, ghost and the
 //! techniques go to the head they mean (`Grooph::aimed` in `tool_palette`).
-//! The cursor goes to the instrument's voice, the feet below, the hands above
-//! (the score's `Voicing`), unless it is there already in the other,
-//! onto the beat sounding then. A tap on a head on the staff picks that
+//! The cursor goes to the voice the instrument's head would be entered in:
+//! where it is on the beat already, else where it is elsewhere in the measure,
+//! else voice 0 of a measure of one voice that holds notes, else the one the
+//! score's `Voicing` writes it in (the feet below, the hands above), onto the
+//! beat sounding then. A tap on a head on the staff picks that
 //! instrument. The library's "New drum groove" starts a score
 //! on the kit's staff.
 
@@ -68,8 +70,15 @@ impl Grooph {
     /// voice (see [`Grooph::go_to_voice`]).
     pub(crate) fn pick_instrument(&mut self, instrument: Instrument) {
         self.editor.instrument = instrument;
-        let voice = self.editor.doc().score.voicing.voice_of(instrument);
+        let voice = self.voice_for(instrument);
         self.go_to_voice(voice);
+    }
+
+    /// The voice a new head of `instrument` goes to in the cursor's
+    /// measure: where it already is, else the measure's own style, else the
+    /// score's rule (see [`Measure::voice_for`]).
+    fn voice_for(&self, instrument: Instrument) -> VoiceIdx {
+        self.current_measure().voice_for(instrument, &self.editor.doc().score.voicing)
     }
 
     /// A tap on an instrument's cell: it becomes the picked one and its head
@@ -83,8 +92,8 @@ impl Grooph {
             .map(|(_, at)| at.voice);
         self.editor.instrument = instrument;
         let steps = self.editor.doc().history.pushed();
-        let usual = self.editor.doc().score.voicing.voice_of(instrument);
-        self.go_to_voice(there.unwrap_or(usual));
+        let voice = there.unwrap_or_else(|| self.voice_for(instrument));
+        self.go_to_voice(voice);
         self.apply_tool(crate::tool_palette::tool("modify.toggle.head"));
         // A voice the bar had to get first is part of the same step.
         if self.editor.doc().history.pushed() == steps + 2 {

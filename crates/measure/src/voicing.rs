@@ -43,6 +43,9 @@ impl Voicing {
             | bit(Instrument::FloorTom),
     };
 
+    /// The named voicings, the default first.
+    pub const PRESETS: [Self; 3] = [Self::HANDS_FEET, Self::ONE_VOICE, Self::CYMBALS_ABOVE];
+
     /// The voicing with `lower` in the lower voice. The one line's rhythm is
     /// always in the upper.
     pub fn from_lower(lower: impl IntoIterator<Item = Instrument>) -> Self {

@@ -1,5 +1,5 @@
 use crate::grid::DEFAULT_GRID;
-use crate::{BeatIdx, Measure, VoiceBar, VoiceIdx, Voicing};
+use crate::{BeatIdx, Instrument, Measure, VoiceBar, VoiceIdx, Voicing};
 use serde::{Deserialize, Serialize};
 
 pub type MeasureIdx = usize;
@@ -108,6 +108,46 @@ impl Score {
     pub fn undouble_instruments(&mut self) -> bool {
         let voicing = self.voicing;
         self.measures.iter_mut().fold(false, |any, m| m.undouble_instruments(&voicing) | any)
+    }
+
+    /// The voicing the content of this kit score shows, for a score whose
+    /// rule was not stored (a link): for each instrument the voice it is in
+    /// most often, counting the measures of two voices or more, as a
+    /// measure of one is a fill made so on purpose (all measures, if none
+    /// has two). The first of the presets (`default` before the others)
+    /// that agrees with every instrument the content has a voice for is
+    /// the result; if none does, those instruments in their voices and
+    /// the rest as `default` has them. A score of the one line gets
+    /// `default`.
+    pub fn derive_voicing(&self, default: Voicing) -> Voicing {
+        if self.staff != StaffKind::Kit {
+            return default;
+        }
+        let multi = self.measures.iter().any(|m| m.voices().len() > 1);
+        // Per instrument: heads in the upper voice, heads in the lower.
+        let mut count = [[0usize; 2]; Instrument::ALL.len()];
+        for m in self.measures.iter().filter(|m| !multi || m.voices().len() > 1) {
+            for (v, voice) in m.voices().iter().enumerate() {
+                let heads = voice.beats().iter().flat_map(|b| b.heads().iter());
+                // The one line's rhythm is always above, in no voicing.
+                for head in heads.filter(|h| h.instrument() != Instrument::Rhythm) {
+                    count[head.instrument() as usize][usize::from(v > 0)] += 1;
+                }
+            }
+        }
+        // `Some(true)` for lower, `None` where the content has no hint.
+        let hint = |i: Instrument| {
+            let [up, down] = count[i as usize];
+            (up != down).then_some(down > up)
+        };
+        let agrees = |v: &Voicing| {
+            Instrument::ALL.into_iter().all(|i| hint(i).is_none_or(|lower| v.is_lower(i) == lower))
+        };
+        std::iter::once(default).chain(Voicing::PRESETS).find(agrees).unwrap_or_else(|| {
+            Voicing::from_lower(
+                Instrument::ALL.into_iter().filter(|&i| hint(i).unwrap_or(default.is_lower(i))),
+            )
+        })
     }
 
     /// The measures, taken out of the score: at least one.
@@ -298,6 +338,25 @@ mod tests {
         assert_eq!(on(&one, 5, 1), Cursor::in_voice(0, 1, 2));
         score.measures_mut()[0].fill_voices(2);
         assert_eq!(score.measures()[0].voices().len(), 2);
+    }
+
+    #[test]
+    fn a_voicing_derived_from_content_that_fits_no_preset_is_custom() {
+        use Instrument::{FloorTom, HiHat, Kick, Snare};
+        let derive = |text: &str| {
+            crate::notation::parse_score(text).unwrap().derive_voicing(Voicing::default())
+        };
+        // Kick and floor tom below, snare and hi-hat above: no preset.
+        let custom = derive("4/4 S-H:q H:q H:q H:q ; K-FT:q r:q K:q r:q");
+        assert_eq!(custom, Voicing::from_lower([Kick, FloorTom, Instrument::HiHatFoot]));
+        assert!(!custom.is_lower(Snare) && !custom.is_lower(HiHat));
+        // The hi-hat foot has no hint and is below as the default has it.
+        assert!(custom.is_lower(Instrument::HiHatFoot));
+        // A rhythm head in the lower voice is no hint: still one voice.
+        let mixed = derive("4/4 K-H:q H:q S-H:q H:q ; q q q q");
+        assert_eq!(mixed, Voicing::ONE_VOICE);
+        // The one line keeps the default.
+        assert_eq!(derive("4/4 q q q q"), Voicing::default());
     }
 
     #[test]

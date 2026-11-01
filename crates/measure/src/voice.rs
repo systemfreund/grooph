@@ -216,6 +216,25 @@ impl Measure {
         Measure { voices: vec![VoiceBar::new_init(time_signature, Rest); self.voices.len()] }
     }
 
+    /// The voice a new head of `instrument` goes to in this measure when it
+    /// is not on the beat already: the voice that has the instrument
+    /// somewhere in the measure; a measure of one voice that holds notes
+    /// stays so (voice 0, a fill made on purpose in a two-voice score);
+    /// otherwise the voice `voicing` writes the instrument in.
+    pub fn voice_for(&self, instrument: Instrument, voicing: &Voicing) -> VoiceIdx {
+        let has = |voice: &VoiceBar, i: Instrument| {
+            voice.beats().iter().any(|b| b.heads().get(i).is_some())
+        };
+        if let Some(v) = self.voices.iter().position(|voice| has(voice, instrument)) {
+            return v;
+        }
+        let holds_notes = Instrument::ALL.into_iter().any(|i| has(&self.voices[0], i));
+        if self.voices.len() == 1 && holds_notes {
+            return 0;
+        }
+        voicing.voice_of(instrument)
+    }
+
     /// Add voices of rests below this measure's until it has `count`.
     pub fn fill_voices(&mut self, count: usize) {
         let ts = self.time_signature();
