@@ -72,26 +72,24 @@ const KIT_ORDER: [Instrument; 9] = [
 
 /// The tools in the editors' bars, next to play, not in the grid.
 pub(crate) const BAR_TOOLS: [&str; 2] = ["edit.undo", "edit.redo"];
-/// The head modifiers' tools, after the meter and before the kit's.
-const HEAD_TOOLS: [&str; 4] = [
+/// The meter, the head modifiers and the rests: the first row of tools,
+/// the kit's modifiers after them.
+const HEAD_TOOLS: [&str; 8] = [
     "meta.change_time_signature",
     "modify.toggle.accent",
     "modify.toggle.soft",
     "modify.toggle.dotted",
-];
-/// The note values, then their rests.
-const VALUE_TOOLS: [&str; 8] = [
-    "insert.note.q",
-    "insert.note.e",
-    "insert.note.s",
-    "insert.note.th",
     "insert.rest.q",
     "insert.rest.e",
     "insert.rest.s",
     "insert.rest.th",
 ];
-/// The tuplets.
-const TUPLET_TOOLS: [&str; 6] = [
+/// The note values, then the tuplets, in one row.
+const VALUE_TOOLS: [&str; 10] = [
+    "insert.note.q",
+    "insert.note.e",
+    "insert.note.s",
+    "insert.note.th",
     "insert.tuplet.t8",
     "insert.tuplet.t16",
     "insert.tuplet.qt16",
@@ -146,7 +144,6 @@ pub(crate) fn grid_rows(kit: bool) -> Vec<Vec<Cell>> {
     }
     rows.push(heads);
     rows.push(tools(&VALUE_TOOLS));
-    rows.push(tools(&TUPLET_TOOLS));
     rows
 }
 
@@ -161,8 +158,8 @@ fn grid_metrics(width: f32) -> (usize, Vec2) {
 impl Grooph {
     /// The editor's tools as a grid in the thumb's reach, the same in every
     /// editor (Practice, Score, the metronome's click bar): on the kit its
-    /// instruments, then the meter and the head modifiers, the
-    /// note values and rests, and the tuplets. Undo and redo are in
+    /// instruments, then the meter, the head modifiers and the rests, and
+    /// the note values with the tuplets. Undo and redo are in
     /// the editor's bar ([`BAR_TOOLS`]).
     pub(super) fn tool_palette_panel(&mut self, ui: &mut Ui) {
         egui::Panel::bottom("tool_palette")

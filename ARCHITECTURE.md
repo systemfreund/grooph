@@ -697,8 +697,9 @@ grooph's metronome runs inside AI chats as an
 The tool palette (`tool_palette_panel`) is one grid for every editor
 (Practice, Score, the metronome's click bar): rows of cells
 (`tool_palette::grid_rows`), on the kit its instruments, then
-the meter and the head modifiers (accent, ghost, dot, and the kit's "+/−"
-and techniques), the note values and rests, and the tuplets. Undo and redo
+the meter, the head modifiers (accent, ghost, dot) and the rests (on the kit
+then "+/−" and the techniques), and the note values with the tuplets, each
+row going on in the next line only where it does not fit. Undo and redo
 (`BAR_TOOLS`) are in the editor's bar (`editor_bar`), right after play, Done
 on the right. In Practice and Score the staff shows a dashed, empty "ghost
 bar" after the last bar (`measure_panel`: laid out with the score, never
