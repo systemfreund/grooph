@@ -175,8 +175,9 @@ spread across callers.
    a tap picks their instrument and applies the mark;
    accent and ghost go to the picked instrument's head if it is on the beat,
    else the snare, kick, toms, hi-hat, ride, crash (`AIM_ORDER`), which
-   becomes the picked one, its cell ringed where several heads are on the
-   beat. O steps through the techniques.
+   becomes the picked one. The picked instrument's cell is always ringed
+   (what the note values write, even on a rest), brighter where it is the
+   head several on the beat aim at. O steps through the techniques.
    The library's "New drum groove" starts one bar of two voices on the
    kit's staff, asking first if the score has unsaved changes
    (`PendingLoad::NewKitScore`); it is offered while the score tab is

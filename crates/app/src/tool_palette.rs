@@ -574,12 +574,16 @@ impl Grooph {
             visuals.weak_bg_fill.gamma_multiply(ui.visuals().disabled_alpha())
         };
         painter.rect(rect, visuals.corner_radius, fill, visuals.bg_stroke, StrokeKind::Inside);
-        // With several heads on the beat, the one accent and ghost go to.
-        if let Cell::Instrument(i) = cell
-            && self.is_aimed(i)
-        {
-            let ring = egui::Stroke::new(2.0, ui.visuals().selection.stroke.color);
-            painter.rect_stroke(rect, visuals.corner_radius, ring, StrokeKind::Inside);
+        // The instrument the note values write, picked or not on the beat;
+        // with several heads on the beat, the one accent and ghost go to.
+        if let Cell::Instrument(i) = cell {
+            let aimed = self.is_aimed(i);
+            if aimed || i == self.edit_instrument() {
+                let color = ui.visuals().selection.stroke.color;
+                let ring =
+                    egui::Stroke::new(2.0, color.gamma_multiply(if aimed { 1.0 } else { 0.6 }));
+                painter.rect_stroke(rect, visuals.corner_radius, ring, StrokeKind::Inside);
+            }
         }
         let color = if enabled { visuals.text_color() } else { ui.visuals().weak_text_color() };
         let inner = rect.shrink(NOTATION_PADDING);
