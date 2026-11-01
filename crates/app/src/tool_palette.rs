@@ -72,6 +72,19 @@ const KIT_ORDER: [Instrument; 9] = [
 
 /// The tools in the editors' bars, next to play, not in the grid.
 pub(crate) const BAR_TOOLS: [&str; 2] = ["edit.undo", "edit.redo"];
+/// Which head accent and ghost go to, of several on a beat, if the picked
+/// instrument has none there.
+const AIM_ORDER: [Instrument; 9] = [
+    Instrument::Snare,
+    Instrument::Kick,
+    Instrument::HighTom,
+    Instrument::MidTom,
+    Instrument::FloorTom,
+    Instrument::HiHat,
+    Instrument::Ride,
+    Instrument::Crash,
+    Instrument::HiHatFoot,
+];
 /// The meter, the head modifiers and the rests: the first row of tools,
 /// the kit's modifiers after them.
 const HEAD_TOOLS: [&str; 8] = [
@@ -134,7 +147,6 @@ pub(crate) fn grid_rows(kit: bool) -> Vec<Vec<Cell>> {
     let mut rows = Vec::new();
     if kit {
         rows.push(KIT_ORDER.iter().map(|&i| Cell::Instrument(i)).collect());
-        heads.push(Cell::Tool(tool("modify.toggle.head")));
         heads.extend(
             all_tools()
                 .iter()
@@ -214,27 +226,90 @@ impl Grooph {
         );
         match clicked {
             Some(Cell::Tool(t)) => self.apply_tool(t),
-            Some(Cell::Instrument(i)) => self.pick_instrument(i),
+            Some(Cell::Instrument(i)) => self.tap_instrument(i),
             None => {}
         }
     }
 
-    /// Whether `cell` shows as picked: the instrument, the technique of the
-    /// picked instrument's head on the cursor's beat, or the tuplet it is in.
+    /// Whether `cell` shows as picked: an instrument with a head on the
+    /// cursor's beat, the technique of the head a technique's cell means
+    /// there, or the tuplet the beat is in.
     fn cell_selected(&self, cell: Cell) -> bool {
         match cell {
-            Cell::Instrument(i) => i == self.edit_instrument(),
+            Cell::Instrument(i) => self.heads_at_cursor().iter().any(|&(h, _)| h == i),
             Cell::Tool(Tool { kind: ToolKind::Modify(Modifier::ToggleTechnique(t)), .. }) => {
-                let cursor = self.editor.doc().cursor;
-                self.current_voice()
+                let (pen, at) = self.aimed(Modifier::ToggleTechnique(*t));
+                let score = &self.editor.doc().score;
+                score
+                    .voice_at(at)
                     .beats()
-                    .get(cursor.beat_idx)
-                    .and_then(|b| b.heads().get(self.edit_instrument()))
+                    .get(at.beat_idx)
+                    .and_then(|b| b.heads().get(pen))
                     .is_some_and(|h| h.technique() == *t)
             }
             // The tuplet the cursor is in: a tap on it dissolves the group.
             Cell::Tool(t) => self.in_tuplet_of(t),
         }
+    }
+
+    /// The heads on the beat the cursor is on, whichever voice has them
+    /// (the beat sounding at the cursor's time in each), with where each is.
+    pub(super) fn heads_at_cursor(&self) -> Vec<(Instrument, Cursor)> {
+        let score = &self.editor.doc().score;
+        let cursor = score.clamp_cursor(self.editor.doc().cursor);
+        (0..self.current_measure().voices().len())
+            .flat_map(|voice| {
+                let at = score.cursor_in_voice(cursor, voice);
+                let beat = score.voice_at(at).beats().get(at.beat_idx).copied();
+                let heads: Vec<_> = beat.iter().flat_map(|b| b.heads().iter()).collect();
+                heads.into_iter().map(|h| (h.instrument(), at)).collect::<Vec<_>>()
+            })
+            .collect()
+    }
+
+    /// The head and its place that `modifier` changes on the kit. A head
+    /// mark means a head on the cursor's beat the mark fits: a technique's
+    /// is of an instrument played that way, so no instrument is picked
+    /// first. Of several, the picked instrument's, else the snare, kick,
+    /// toms, hi-hat, ride, crash. Anything else, and the one line, edits the
+    /// picked instrument at the cursor.
+    fn aimed(&self, modifier: Modifier) -> (Instrument, Cursor) {
+        let score = &self.editor.doc().score;
+        let at = score.clamp_cursor(self.editor.doc().cursor);
+        let pen = self.edit_instrument();
+        if self.staff_model().one_line() {
+            return (pen, at);
+        }
+        let fits: fn(Modifier, Instrument) -> bool = |modifier, i| match modifier {
+            Modifier::ToggleAccent | Modifier::ToggleSoft => true,
+            Modifier::ToggleTechnique(t) => i.allows(t),
+            Modifier::CycleTechnique => i.techniques().len() > 1,
+            _ => false,
+        };
+        if !matches!(
+            modifier,
+            Modifier::ToggleAccent
+                | Modifier::ToggleSoft
+                | Modifier::ToggleTechnique(_)
+                | Modifier::CycleTechnique
+        ) {
+            return (pen, at);
+        }
+        let heads: Vec<_> =
+            self.heads_at_cursor().into_iter().filter(|&(i, _)| fits(modifier, i)).collect();
+        let rank = |i: Instrument| AIM_ORDER.iter().position(|&o| o == i).unwrap_or(usize::MAX);
+        heads
+            .iter()
+            .find(|&&(i, _)| i == pen)
+            .or_else(|| heads.iter().min_by_key(|&&(i, _)| rank(i)))
+            .copied()
+            .unwrap_or((pen, at))
+    }
+
+    /// Whether the picked instrument's cell is the one accent and ghost mean,
+    /// of several heads on the beat: it gets a ring.
+    fn is_aimed(&self, instrument: Instrument) -> bool {
+        self.heads_at_cursor().len() > 1 && self.aimed(Modifier::ToggleAccent).0 == instrument
     }
 
     /// Whether the cursor's beat is in a group of `tool`'s tuplet.
@@ -271,7 +346,7 @@ impl Grooph {
     /// a beat with room, without a drum struck by both voices. Tried on a
     /// copy of the cursor's bar.
     fn modifier_applies(&self, modifier: Modifier) -> bool {
-        let cursor = self.editor.doc().score.clamp_cursor(self.editor.doc().cursor);
+        let (pen, cursor) = self.aimed(modifier);
         let mut measure = self.current_measure().clone();
         let Some(voice) = measure.voice_mut(cursor.voice) else {
             return false;
@@ -280,7 +355,7 @@ impl Grooph {
             return false;
         }
         let idx = cursor.beat_idx.min(voice.beats().len() - 1);
-        if !modify(voice, idx, self.edit_instrument(), modifier) {
+        if !modify(voice, idx, pen, modifier) {
             return false;
         }
         // The kit refuses an edit that has two voices strike one drum.
@@ -345,7 +420,11 @@ impl Grooph {
                 (t.id, label, hover)
             }
             Cell::Instrument(i) => {
-                (instrument_short(i), instrument_short(i), instrument_label(i).to_owned())
+                let hover = match selected {
+                    true => format!("Take the {} away", instrument_label(i).to_lowercase()),
+                    false => format!("Add the {}", instrument_label(i).to_lowercase()),
+                };
+                (instrument_short(i), instrument_short(i), hover)
             }
         };
         let id = ui.make_persistent_id(("tool_grid", key));
@@ -367,6 +446,13 @@ impl Grooph {
             visuals.weak_bg_fill.gamma_multiply(ui.visuals().disabled_alpha())
         };
         painter.rect(rect, visuals.corner_radius, fill, visuals.bg_stroke, StrokeKind::Inside);
+        // With several heads on the beat, the one accent and ghost go to.
+        if let Cell::Instrument(i) = cell
+            && self.is_aimed(i)
+        {
+            let ring = egui::Stroke::new(2.0, ui.visuals().selection.stroke.color);
+            painter.rect_stroke(rect, visuals.corner_radius, ring, StrokeKind::Inside);
+        }
         let color = if enabled { visuals.text_color() } else { ui.visuals().weak_text_color() };
         let inner = rect.shrink(NOTATION_PADDING);
         match cell {
@@ -548,6 +634,17 @@ impl Grooph {
                 true
             }
             ToolKind::Modify(modifier) => {
+                if beats_len == 0 {
+                    return false;
+                }
+                // A head mark goes to the head it means, which becomes the
+                // picked one, so the next mark follows it.
+                let (aimed, at) = self.aimed(modifier);
+                if !self.staff_model().one_line() {
+                    self.editor.instrument = aimed;
+                    self.editor.doc_mut().cursor = at;
+                }
+                let beats_len = self.current_voice().beats().len();
                 if beats_len == 0 {
                     return false;
                 }
@@ -926,15 +1023,77 @@ mod tests {
         let mut app = editing("4/4 S-H:q H:q H:q H:q ; S:q r:q K:h");
         app.editor.instrument = Snare;
         app.editor.doc_mut().cursor = Cursor::in_voice(0, 0, 3);
+        // The accent goes to the head on the beat, the kick's here.
         apply(&mut app, "modify.toggle.accent");
-        assert_eq!(text(&app), "4/4 S-H:q H:q H:q H:q ; S:q r:q K:h");
+        assert_eq!(text(&app), "4/4 S-H:q H:q H:q H:q ; S:q r:q >K:h");
+        app.editor.instrument = Snare;
+        app.editor.doc_mut().cursor = Cursor::in_voice(0, 0, 3);
         apply(&mut app, "modify.toggle.head");
-        assert_eq!(text(&app), "4/4 S-H:q H:q H:q S-H:q ; S:q r:q K:h");
+        assert_eq!(text(&app), "4/4 S-H:q H:q H:q S-H:q ; S:q r:q >K:h");
         app.editor.doc_mut().cursor = Cursor::in_voice(0, 0, 2);
         apply(&mut app, "modify.toggle.head");
         app.editor.doc_mut().cursor = Cursor::in_voice(0, 1, 1);
         apply(&mut app, "modify.toggle.head");
-        assert_eq!(text(&app), "4/4 S-H:q H:q S-H:q S-H:q ; S:q S:q K:h");
+        assert_eq!(text(&app), "4/4 S-H:q H:q S-H:q S-H:q ; S:q S:q >K:h");
+    }
+
+    #[test]
+    fn an_instrument_cell_adds_or_takes_away_its_head() {
+        use super::Cell;
+        use grooph_measure::Instrument::{HiHat, Kick, Snare};
+        let mut app = editing("4/4 H:q H:q H:q H:q ; K:q r:q K:q r:q");
+        app.editor.doc_mut().cursor = Cursor::in_voice(0, 0, 1);
+        let lit = |app: &Grooph, i| app.cell_selected(Cell::Instrument(i));
+        assert!(lit(&app, HiHat) && !lit(&app, Snare) && !lit(&app, Kick));
+        // The snare joins the hi-hat; the cursor stays.
+        app.tap_instrument(Snare);
+        assert_eq!(text(&app), "4/4 H:q S-H:q H:q H:q ; K:q r:q K:q r:q");
+        assert_eq!(app.editor.doc().cursor, Cursor::in_voice(0, 0, 1));
+        assert!(lit(&app, HiHat) && lit(&app, Snare) && !lit(&app, Kick));
+        // A second tap takes it away again.
+        app.tap_instrument(Snare);
+        assert_eq!(text(&app), "4/4 H:q H:q H:q H:q ; K:q r:q K:q r:q");
+        assert!(!lit(&app, Snare));
+        // The kick goes below, to the feet's beat sounding then, and the
+        // cursor goes with it.
+        app.tap_instrument(Kick);
+        assert_eq!(text(&app), "4/4 H:q H:q H:q H:q ; K:q K:q K:q r:q");
+        assert_eq!(app.editor.doc().cursor, Cursor::in_voice(0, 1, 1));
+        assert!(lit(&app, Kick) && lit(&app, HiHat));
+        // Every tap undoes.
+        for _ in 0..3 {
+            apply(&mut app, "edit.undo");
+        }
+        assert_eq!(text(&app), "4/4 H:q H:q H:q H:q ; K:q r:q K:q r:q");
+    }
+
+    #[test]
+    fn a_mark_goes_to_the_head_it_means() {
+        use grooph_measure::Instrument::{HiHat, Kick, Ride, Snare};
+        let mut app = editing("4/4 S-H:q H:q H:q H:q ; K:q r:q K:q r:q");
+        app.editor.instrument = Kick;
+        app.editor.doc_mut().cursor = Cursor::in_voice(0, 0, 0);
+        // A technique goes to the head played that way: the hi-hat opens,
+        // the snare takes a rimshot, whichever instrument is picked.
+        apply(&mut app, "modify.technique.open");
+        assert_eq!(text(&app), "4/4 S-Ho:q H:q H:q H:q ; K:q r:q K:q r:q");
+        assert_eq!(app.editor.instrument, HiHat);
+        apply(&mut app, "modify.technique.rimshot");
+        assert_eq!(text(&app), "4/4 Sr-Ho:q H:q H:q H:q ; K:q r:q K:q r:q");
+        assert_eq!(app.editor.instrument, Snare);
+        // An accent goes to the picked instrument's head if it is on the
+        // beat, else to the snare first.
+        app.editor.instrument = HiHat;
+        apply(&mut app, "modify.toggle.accent");
+        assert_eq!(text(&app), "4/4 Sr->Ho:q H:q H:q H:q ; K:q r:q K:q r:q");
+        app.editor.instrument = Ride;
+        apply(&mut app, "modify.toggle.soft");
+        assert_eq!(app.editor.instrument, Snare);
+        // The cell of the head accent and ghost go to has a ring when there
+        // are several.
+        assert!(app.is_aimed(Snare) && !app.is_aimed(HiHat));
+        app.editor.doc_mut().cursor = Cursor::in_voice(0, 0, 1);
+        assert!(!app.is_aimed(HiHat));
     }
 
     #[test]
@@ -961,8 +1120,9 @@ mod tests {
             assert_eq!(count, usize::from(in_grid), "{}", t.id);
             assert_eq!(tools(false).contains(&t.id), in_grid && !kit_only(t), "{}", t.id);
         }
-        // The kit adds its instruments and "+/−".
-        assert!(tools(true).contains(&"modify.toggle.head"));
+        // The kit adds its instruments, whose cells add and take away a
+        // head: no cell for that tool.
+        assert!(!tools(true).contains(&"modify.toggle.head"));
         assert!(!tools(false).contains(&"modify.toggle.head"));
         let cells = grid_rows(true).into_iter().flatten().collect::<Vec<_>>();
         let instruments = cells.iter().filter(|c| matches!(c, Cell::Instrument(_))).count();
@@ -986,16 +1146,24 @@ mod tests {
         assert_eq!(text(&app), "4/4 S-H:q Hc:q H:q H:q ; K:q r:q K:q r:q");
         apply(&mut app, "modify.technique.closed");
         assert_eq!(text(&app), "4/4 S-H:q H:q H:q H:q ; K:q r:q K:q r:q");
-        // The snare and the kick are not played open.
-        for instrument in [Snare, Kick] {
+        // A technique is offered where a head played that way is on the
+        // beat, whichever instrument is picked: the snare and the kick are
+        // not played open, the hi-hat on the beat is.
+        for instrument in [Snare, Kick, HiHat] {
             app.editor.instrument = instrument;
-            assert!(!app.cell_enabled(Cell::Tool(open)));
+            assert!(app.cell_enabled(Cell::Tool(open)));
         }
-        app.editor.instrument = Snare;
+        let mut bare = editing("4/4 S:q H:q r:q r:q ; K:q r:q K:q r:q");
+        for (beat, enabled) in [(0, false), (1, true)] {
+            bare.editor.doc_mut().cursor = Cursor::in_voice(0, 0, beat);
+            assert_eq!(bare.cell_enabled(Cell::Tool(open)), enabled, "beat {beat}");
+        }
+        app.editor.instrument = Kick;
         app.editor.doc_mut().cursor = Cursor::in_voice(0, 0, 0);
         apply(&mut app, "modify.technique.cross_stick");
         assert_eq!(text(&app), "4/4 Sx-H:q H:q H:q H:q ; K:q r:q K:q r:q");
-        // The picked instrument shows as picked.
+        // The head it went to is the picked one now, and shows as picked.
+        assert_eq!(app.editor.instrument, Snare);
         assert!(app.cell_selected(Cell::Instrument(Snare)));
     }
 
@@ -1019,23 +1187,18 @@ mod tests {
         let mut app = editing("4/4 S-H:q H:q H:q H:q ; K:q r:q K:q r:q");
         app.editor.instrument = Snare;
         app.editor.doc_mut().cursor = Cursor::in_voice(0, 0, 1);
-        // No snare on the beat to accent, but one to add.
-        assert!(!app.cell_enabled(cell("modify.toggle.accent")));
-        assert!(app.cell_enabled(cell("modify.toggle.head")));
+        // No snare on the beat, the accent goes to the hi-hat there; no head
+        // that plays a rimshot.
+        assert!(app.cell_enabled(cell("modify.toggle.accent")));
         assert!(!app.cell_enabled(cell("modify.technique.rimshot")));
         app.editor.doc_mut().cursor = Cursor::in_voice(0, 0, 0);
         assert!(app.cell_enabled(cell("modify.technique.rimshot")));
-        // Not the snare below where it is above already.
-        app.editor.doc_mut().cursor = Cursor::in_voice(0, 1, 0);
-        assert!(!app.cell_enabled(cell("modify.toggle.head")));
-        // The hi-hat opens where it is; the kick has no such technique.
-        app.editor.instrument = HiHat;
+        // The hi-hat on the beat opens, whichever instrument is picked.
+        app.editor.instrument = Kick;
         app.editor.doc_mut().cursor = Cursor::in_voice(0, 0, 1);
         assert!(app.cell_enabled(cell("modify.technique.open")));
-        app.editor.instrument = Kick;
-        app.editor.doc_mut().cursor = Cursor::in_voice(0, 1, 0);
-        assert!(!app.cell_enabled(cell("modify.technique.open")));
         assert!(app.cell_enabled(cell("modify.toggle.accent")));
+        let _ = HiHat;
     }
 
     #[test]

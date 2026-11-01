@@ -4,13 +4,14 @@
 //! instruments; on the one line every note is its rhythm, and the tools edit
 //! it as before.
 //!
-//! The picked instrument is the head the tools mean (`Grooph::edit_instrument`):
-//! the note values write it on a rest, accent and ghost change its head,
-//! "+/−" adds it to the beat or takes it away, and a technique's cell plays
-//! it that way. Picking one, in the grid or by a tap on its head, moves the
-//! cursor to its voice: the feet below, the hands above
-//! (`Instrument::default_voice`); a tap on a beat of the other voice edits
-//! that one, for a head off its usual side. The library's "New drum groove" starts a score
+//! An instrument's cell toggles its head on the cursor's beat
+//! (`Grooph::tap_instrument`) and makes it the picked one, the head the note
+//! values write on a rest (`Grooph::edit_instrument`). Accent, ghost and the
+//! techniques go to the head they mean (`Grooph::aimed` in `tool_palette`).
+//! The cursor goes to the instrument's voice, the feet below, the hands above
+//! (`Instrument::default_voice`), unless it is there already in the other,
+//! onto the beat sounding then. A tap on a head on the staff picks that
+//! instrument. The library's "New drum groove" starts a score
 //! on the kit's staff.
 
 use crate::Grooph;
@@ -61,6 +62,20 @@ impl Grooph {
     pub(crate) fn pick_instrument(&mut self, instrument: Instrument) {
         self.editor.instrument = instrument;
         self.go_to_voice(instrument.default_voice());
+    }
+
+    /// A tap on an instrument's cell: it becomes the picked one and its head
+    /// on the cursor's beat is added or taken away, in the voice where it
+    /// already is there, else its usual one. The cursor stays at its time.
+    pub(crate) fn tap_instrument(&mut self, instrument: Instrument) {
+        let there = self
+            .heads_at_cursor()
+            .into_iter()
+            .find(|&(i, _)| i == instrument)
+            .map(|(_, at)| at.voice);
+        self.editor.instrument = instrument;
+        self.go_to_voice(there.unwrap_or(instrument.default_voice()));
+        self.apply_tool(crate::tool_palette::tool("modify.toggle.head"));
     }
 
     /// Move the cursor to `voice` of its measure, onto the beat sounding

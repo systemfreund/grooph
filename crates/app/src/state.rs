@@ -276,9 +276,6 @@ pub(crate) struct EditorState {
     /// The instrument picked in the kit's palette or by a tap on its head:
     /// the tools write and change its heads (see `Grooph::edit_instrument`).
     pub(crate) instrument: Instrument,
-    /// The kit's beat and instrument the last tap on the staff wrote or
-    /// picked: a second tap there takes the head away.
-    pub(crate) kit_tapped: Option<(Cursor, Instrument)>,
     /// User-saved, named patterns (score + tempo), the score tab's.
     /// Persisted across sessions.
     pub(crate) library: PatternLibrary,

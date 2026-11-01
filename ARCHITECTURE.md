@@ -155,16 +155,23 @@ spread across callers.
    the accent a technique's sign (o, +, the choke's mark) stacks
    (`notes::place_marks`). Every kit row starts with the percussion clef.
 6. Kit editing (`grooph-app`'s `kit_palette`): on a staff of several
-   instruments the tool grid's first row picks the instrument the tools mean
-   (`EditorState::instrument`; `Grooph::edit_instrument` gives it, or the
-   staff's own on the one line, `Staff::instrument_or`). A tap on a head
-   picks its instrument too. Picking one moves the cursor to its default
-   voice, onto the beat sounding then (`Score::cursor_in_voice`), and a
-   kit measure without that voice gets it (`Measure::fill_voices`);
-   a tap on the other voice edits that one. "+/−" (H) adds or removes the head
-   on the cursor's beat; a cell per technique (`Modifier::ToggleTechnique`)
-   plays it that way or plainly again, greyed out where the instrument has
-   no such technique, and O steps through them.
+   instruments the tool grid's first row has a toggle per instrument
+   (`Grooph::tap_instrument`): it adds the instrument's head to the cursor's
+   beat, in the voice where it already is there, else its default voice,
+   onto the beat sounding then (`Score::cursor_in_voice`; a kit measure
+   without that voice gets it, `Measure::fill_voices`), or takes the head
+   away; the cell shows as picked while the head is on the beat
+   (`heads_at_cursor`). The instrument tapped, or of a head tapped on the
+   staff, is the picked one (`EditorState::instrument`; `Grooph::edit_instrument`
+   gives it, or the staff's own on the one line, `Staff::instrument_or`):
+   the note values write it on a rest. Marks go to the head they mean
+   (`Grooph::aimed`): a cell per technique (`Modifier::ToggleTechnique`)
+   plays the head of an instrument played that way on the beat so, or plainly
+   again, greyed out where none is, so no instrument needs picking first;
+   accent and ghost go to the picked instrument's head if it is on the beat,
+   else the snare, kick, toms, hi-hat, ride, crash (`AIM_ORDER`), which
+   becomes the picked one, its cell ringed where several heads are on the
+   beat. O steps through the techniques.
    The library's "New drum groove" starts one bar of two voices on the
    kit's staff, asking first if the score has unsaved changes
    (`PendingLoad::NewKitScore`); it is offered while the score tab is
@@ -702,7 +709,7 @@ The tool palette (`tool_palette_panel`) is one grid for every editor
 (Practice, Score, the metronome's click bar): rows of cells
 (`tool_palette::grid_rows`), on the kit its instruments, then
 the meter, the head modifiers (accent, ghost, dot) and the rests (on the kit
-then "+/−" and the techniques), and the note values with the tuplets, each
+then the techniques), and the note values with the tuplets, each
 row going on in the next line only where it does not fit. Undo and redo
 (`BAR_TOOLS`) are in the editor's bar (`editor_bar`), right after play, Done
 on the right. In Practice and Score the staff shows a dashed, empty "ghost
@@ -717,12 +724,7 @@ copy of the bar): an accent on a rest, a dot without room, a technique
 without the head or its instrument's. Accent, ghost and dot show the cursor's beat as they
 would change it (`modifier_preview`): its value with the mark. The tuplet the cursor's beat is
 in shows as picked (`cell_selected`); a tap on it dissolves the group. A voice is picked by a tap on
-it, or on the kit by picking an instrument. On the kit a tap on a beat
-writes the instrument picked in the grid, at any height (a pen;
-`hit_test_instrument` finds the beat of its voice): a beat without it gets
-its head, one with it is picked, and a second tap on the same beat takes the
-head away (`handle_input`, `EditorState::kit_tapped`, through
-`modify.toggle.head`). The
+it, or on the kit by tapping an instrument. The
 columns follow the width of the page's column (`grid_metrics`, cells 54 to
 64 px wide; grid and bar both in `centered_column`, so on a wide screen they
 line up with the cards), a row

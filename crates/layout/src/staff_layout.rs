@@ -569,53 +569,20 @@ pub fn hit_test_head(staff: &StaffLayout, pos: Pos2) -> Option<HeadHit> {
     // Staff positions are half staff spaces, an eighth of an em.
     let half_ss = em * 0.125;
     let instrument = model.instrument_near((system.y_baseline - pos.y) / half_ss);
-    Some(head_hit(placed, system.y_baseline, half_ss, measure_idx, instrument, pos.x))
-}
-
-/// Like [`hit_test_head`], for `instrument` whatever the height of `pos`:
-/// the beat of the instrument's voice nearest `pos.x`. `None` off the
-/// staff, and on a staff without `instrument`.
-pub fn hit_test_instrument(
-    staff: &StaffLayout,
-    pos: Pos2,
-    instrument: Instrument,
-) -> Option<HeadHit> {
-    let (_, measure_idx, _) = hit_test_voice(staff, pos)?;
-    let system =
-        staff.systems.iter().find(|s| pos.y < s.rect.bottom()).or_else(|| staff.systems.last())?;
-    let placed = system.measures.iter().find(|p| p.measure_idx == measure_idx)?;
-    if !Staff::of(placed.staff).instruments.contains(&instrument) {
-        return None;
-    }
-    let em = placed.voices.iter().flat_map(|l| l.notes.first()).map(|n| n.head.size).next()?;
-    Some(head_hit(placed, system.y_baseline, em * 0.125, measure_idx, instrument, pos.x))
-}
-
-/// The beat nearest `x` of the voice of `placed` with a head of
-/// `instrument` there, else of the instrument's default voice.
-fn head_hit(
-    placed: &PlacedMeasure,
-    y_baseline: f32,
-    half_ss: f32,
-    measure_idx: MeasureIdx,
-    instrument: Instrument,
-    x: f32,
-) -> HeadHit {
-    let model = Staff::of(placed.staff);
     let place = model.place_of(instrument);
     let at_place =
-        |g: &PlacedGlyph| ((y_baseline - g.origin.y) / half_ss).round() == f32::from(place);
+        |g: &PlacedGlyph| ((system.y_baseline - g.origin.y) / half_ss).round() == f32::from(place);
     let holding = placed.voices.iter().enumerate().find_map(|(v, layout)| {
-        let beat = nearest_note(layout, x);
+        let beat = nearest_note(layout, pos.x);
         let note = layout.notes.get(beat)?;
         let heads = std::iter::once(&note.head).chain(&note.chord);
         (note.kind == BeatKind::Note && heads.into_iter().any(at_place)).then_some((v, beat))
     });
     let (voice, beat_idx) = holding.unwrap_or_else(|| {
         let v = instrument.default_voice().min(placed.voices.len() - 1);
-        (v, nearest_note(&placed.voices[v], x))
+        (v, nearest_note(&placed.voices[v], pos.x))
     });
-    HeadHit { measure_idx, voice, beat_idx, instrument }
+    Some(HeadHit { measure_idx, voice, beat_idx, instrument })
 }
 
 /// Index of the note of `layout` nearest `x`.
