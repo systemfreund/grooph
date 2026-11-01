@@ -711,6 +711,9 @@ fn bar_menu_chip(ui: &mut egui::Ui, bar: Rect) -> Response {
     resp
 }
 
+/// How much of the ghost bar's rests the veil hides (of 255).
+const GHOST_VEIL: u8 = 230;
+
 /// The editor's ghost bar in `rect`: its rests veiled, a dashed frame and a
 /// "+" in the middle, brighter under the pointer.
 fn draw_ghost_bar(ui: &egui::Ui, rect: Rect, hovered: bool) {
@@ -720,9 +723,12 @@ fn draw_ghost_bar(ui: &egui::Ui, rect: Rect, hovered: bool) {
     painter.rect_filled(
         rect,
         4.0,
-        egui::Color32::from_rgba_unmultiplied(bg.r(), bg.g(), bg.b(), 230),
+        egui::Color32::from_rgba_unmultiplied(bg.r(), bg.g(), bg.b(), GHOST_VEIL),
     );
-    let color = if hovered { visuals.text_color() } else { visuals.weak_text_color() };
+    // The frame and "+" in the veiled staff's color, a little brighter
+    // under the pointer.
+    let veil = if hovered { 0.6 } else { f32::from(GHOST_VEIL) / 255.0 };
+    let color = visuals.text_color().lerp_to_gamma(bg, veil);
     let frame = rect.shrink(4.0);
     let stroke = egui::Stroke::new(1.5, color);
     let corners = [frame.left_top(), frame.right_top(), frame.right_bottom(), frame.left_bottom()];
