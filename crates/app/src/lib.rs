@@ -2179,6 +2179,58 @@ mod tests {
     }
 
     #[test]
+    fn a_tap_at_an_instruments_place_writes_it_on_the_kit() {
+        use super::{Grooph, Mode};
+        use eframe::egui::{Context, Event, Modifiers, PointerButton, pos2};
+        use grooph_measure::notation::{format_score, parse_score};
+
+        let groove = "4/4 H:e H:e H:e H:e H:e H:e H:e H:e ; K:q r:q K:q r:q";
+        let tap = |app: &mut Grooph, ctx: &Context, time: &mut f64, y: f32| {
+            let pos = pos2(195.0, y);
+            // Taps apart, so no two make a double click.
+            *time += 1.0;
+            for pressed in [true, false] {
+                let event = Event::PointerButton {
+                    pos,
+                    button: PointerButton::Primary,
+                    pressed,
+                    modifiers: Modifiers::NONE,
+                };
+                *time += 0.05;
+                shell_frame(app, ctx, *time, vec![Event::PointerMoved(pos), event]);
+            }
+            format_score(&app.editor.doc().score).unwrap()
+        };
+        let (mut added, mut picked) = (0, 0);
+        // Over the first bar, above the ghost bar below it.
+        for y in (6..=72).step_by(6) {
+            let ctx = Context::default();
+            let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+            let mut app = Grooph::new(&cc);
+            app.ui.show_score_tab = true;
+            app.select_tab(Tab::Score);
+            app.editor.doc_mut().score = parse_score(groove).unwrap();
+            app.ui.mode = Mode::Edit;
+            let mut time = 0.0;
+            shell_frame(&mut app, &ctx, time, vec![]);
+            let y = y as f32;
+            let first = tap(&mut app, &ctx, &mut time, y);
+            if first == groove {
+                // A head that was there is picked; a second tap takes it away
+                // (unless the tap missed the staff).
+                if tap(&mut app, &ctx, &mut time, y) != groove {
+                    picked += 1;
+                }
+            } else {
+                // An empty place gets the head; a second tap takes it away.
+                added += 1;
+                assert_eq!(tap(&mut app, &ctx, &mut time, y), groove, "y {y}: {first}");
+            }
+        }
+        assert!(added > 0 && picked > 0, "added {added}, picked {picked}");
+    }
+
+    #[test]
     fn a_tap_below_the_line_edits_the_lower_voice() {
         use super::{Grooph, Mode};
         use eframe::egui::{Event, Modifiers, PointerButton, pos2};

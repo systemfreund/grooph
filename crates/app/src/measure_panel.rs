@@ -642,10 +642,25 @@ impl Grooph {
             // A tap on another voice edits that voice from now on: in the
             // metronome tab the click bar or its counter rhythm. On the
             // kit's staff it also picks the instrument whose head it is on.
-            self.editor.doc_mut().cursor =
-                Cursor::in_voice(hit.measure_idx, hit.voice, hit.beat_idx);
+            let before = (self.editor.doc().cursor, self.editor.instrument);
+            let cursor = Cursor::in_voice(hit.measure_idx, hit.voice, hit.beat_idx);
+            self.editor.doc_mut().cursor = cursor;
             if !self.staff_model().one_line() {
                 self.editor.instrument = hit.instrument;
+                // On the kit a tap at an instrument's place writes it: an
+                // empty place gets its head, a head is picked, and a second
+                // tap on the picked head takes it away.
+                if resp.clicked() {
+                    let there = self
+                        .current_voice()
+                        .beats()
+                        .get(hit.beat_idx)
+                        .is_some_and(|b| b.heads().get(hit.instrument).is_some());
+                    if !there || before == (cursor, hit.instrument) {
+                        self.apply_tool(crate::tool_palette::tool("modify.toggle.head"));
+                    }
+                }
+                return;
             }
 
             if resp.double_clicked()
