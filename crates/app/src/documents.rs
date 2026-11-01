@@ -493,7 +493,10 @@ mod tests {
         let app = restart(&state);
         assert_eq!(app.tab(), Tab::Score);
         // The score tab is for drum grooves: a rhythm saved there starts a
-        // new groove of its meter.
+        // new groove of its meter, and the rhythm is kept in the library.
+        let kept = app.editor.library.patterns.last().expect("the rhythm is kept");
+        assert_eq!(text(&kept.score), text(&old));
+        assert_eq!(kept.bpm, state.bpm);
         assert!(!app.editor.docs.score.score.staff.is_line());
         assert_eq!(
             app.editor.docs.score.score.measures()[0].time_signature(),

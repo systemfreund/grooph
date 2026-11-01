@@ -43,6 +43,18 @@ impl UndoHistory {
         Some(next)
     }
 
+    /// The number of steps that can be undone.
+    pub fn len(&self) -> usize {
+        self.past.len()
+    }
+
+    /// Fold the last step into the one before, so one undo takes back both.
+    pub fn fold_last(&mut self) {
+        if self.past.len() >= 2 {
+            self.past.pop_back();
+        }
+    }
+
     pub fn can_undo(&self) -> bool {
         !self.past.is_empty()
     }

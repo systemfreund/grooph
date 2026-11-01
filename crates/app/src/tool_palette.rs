@@ -1201,6 +1201,12 @@ mod tests {
             apply(&mut app, "edit.undo");
         }
         assert_eq!(text(&app), "4/4 H:q H:q H:q H:q ; K:q r:q K:q r:q");
+        // A bar without the kick's voice gets it with the kick, in one step.
+        let mut app = editing("4/4 H:q H:q H:q H:q");
+        app.tap_instrument(Kick);
+        assert!(text(&app).contains(';'));
+        apply(&mut app, "edit.undo");
+        assert_eq!(text(&app), "4/4 H:q H:q H:q H:q");
     }
 
     #[test]

@@ -819,7 +819,9 @@ impl Grooph {
         // A rhythm of the one line, saved before the score tab was for
         // drum grooves, opens in Practice.
         if score.staff.is_line() {
-            self.replace_practice_from_link(score);
+            let undoubled = self.replace_practice_from_link(score);
+            self.editor.docs.practice.active_pattern_id = Some(id);
+            self.editor.docs.practice.dirty = undoubled;
             self.playback_ctl.bpm = bpm;
             self.playback_ctl.playback.reset();
             self.ui.picker = None;
@@ -1364,11 +1366,17 @@ impl Grooph {
         let mut generator =
             GeneratorState::new(state.generator_settings, state.endless, state.ghost_notes);
         // The score tab edits a drum groove: a rhythm of the one line saved
-        // there before starts it afresh (rhythms are Practice's).
+        // there before starts it afresh (rhythms are Practice's). One with
+        // unsaved changes goes to the library, so nothing is lost.
         let score_doc = state.score_doc.into_doc(&state.library);
         let score_doc = if score_doc.score.staff == grooph_measure::StaffKind::Kit {
             score_doc
         } else {
+            if score_doc.dirty {
+                let names = state.library.patterns.iter().map(|p| p.name.as_str());
+                let name = library::next_default_name("Pattern", names);
+                state.library.add(name, score_doc.score.clone(), state.bpm);
+            }
             let ts = score_doc.score.measures()[0].time_signature();
             RhythmDoc::new(kit_palette::empty_groove(ts), Cursor::start())
         };
@@ -2201,6 +2209,14 @@ mod tests {
         assert_eq!(app.tab(), Tab::Practice);
         assert_eq!(format_score(&app.editor.doc().score).unwrap(), "3/4 q q e e");
         assert!(!app.editor.docs.score.score.staff.is_line());
+        // So does one from the library, as the pattern loaded and unchanged.
+        let id = app.editor.library.add("Old".into(), parse_score("4/4 h h").unwrap(), 90);
+        app.select_tab(Tab::Score);
+        app.request_load_pattern(id);
+        assert_eq!(app.tab(), Tab::Practice);
+        assert_eq!(format_score(&app.editor.doc().score).unwrap(), "4/4 h h");
+        assert_eq!(app.editor.docs.practice.active_pattern_id, Some(id));
+        assert!(!app.editor.docs.practice.dirty);
     }
 
     #[test]

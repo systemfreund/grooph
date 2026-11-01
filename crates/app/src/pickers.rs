@@ -665,17 +665,19 @@ impl Grooph {
             .max_height(meter_grid_height(ui, self.embedded()))
             .show(ui, |ui| meter_grid(ui, &all_time_signatures(), current, 2, &family))
             .inner;
-        if let Some(ts) = picked.filter(|&ts| ts != current) {
-            self.with_undo_snapshot(|g| {
+        match picked {
+            // A meter the bar cannot take leaves the picker open.
+            Some(ts) if ts != current => self.with_undo_snapshot(|g| {
                 if g.current_measure_mut().set_time_signature(ts).is_err() {
                     return false;
                 }
                 let doc = g.editor.doc_mut();
                 doc.cursor = doc.score.clamp_cursor(doc.cursor);
                 true
-            });
+            }),
+            Some(_) => true,
+            None => false,
         }
-        picked.is_some()
     }
 
     /// Which of the metronome meter's ready-made click bars the click bar
