@@ -120,7 +120,11 @@ impl Grooph {
                 // earlier frame, e.g. one before endless mode removed a
                 // row.
                 let playing = self.playback_ctl.transport_state == TransportState::Playing;
-                let mut scroll_area = egui::ScrollArea::both().animated(!playing);
+                // No scroll bar: the wheel, a finger or the cursor scroll
+                // the score, and a bar fading in over the notes distracts.
+                let mut scroll_area = egui::ScrollArea::both()
+                    .animated(!playing)
+                    .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden);
                 let playback = &mut self.playback_ctl.playback;
                 if std::mem::take(&mut playback.rows_removed)
                     && let Some(offset) = playback.scroll.value_at(ui.input(|i| i.time))
@@ -382,7 +386,7 @@ impl Grooph {
                         render_opts.staff_space(),
                     );
                     // A finger dragging over the notes scrolls the score,
-                    // as on the scroll bar; a mouse drags the edit cursor.
+                    // as the mouse wheel does; a mouse drags the edit cursor.
                     if resp.dragged() && ui.input(|i| i.any_touches()) {
                         ui.scroll_with_delta_animation(
                             resp.drag_delta(),
