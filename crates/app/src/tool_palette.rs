@@ -70,7 +70,7 @@ const KIT_ORDER: [Instrument; 9] = [
 ];
 
 /// The tools in the editors' bars, next to play, not in the grid.
-pub(crate) const BAR_TOOLS: [&str; 3] = ["edit.undo", "edit.redo", "meta.reset_measure"];
+pub(crate) const BAR_TOOLS: [&str; 2] = ["edit.undo", "edit.redo"];
 /// The head modifiers' tools, after the meter and before the kit's.
 const HEAD_TOOLS: [&str; 4] = [
     "meta.change_time_signature",
@@ -161,7 +161,7 @@ impl Grooph {
     /// The editor's tools as a grid in the thumb's reach, the same in every
     /// editor (Practice, Score, the metronome's click bar): on the kit its
     /// instruments, then the meter and the head modifiers, the
-    /// note values and rests, and the tuplets. Undo, redo and clear are in
+    /// note values and rests, and the tuplets. Undo and redo are in
     /// the editor's bar ([`BAR_TOOLS`]).
     pub(super) fn tool_palette_panel(&mut self, ui: &mut Ui) {
         egui::Panel::bottom("tool_palette")
@@ -931,7 +931,7 @@ mod tests {
         let kit_only = |t: &crate::tools::Tool| {
             matches!(t.kind, ToolKind::Modify(Modifier::ToggleTechnique(_)))
         };
-        // Undo, redo and clear are in the editor's bar instead.
+        // Undo and redo are in the editor's bar instead, clear in the bar menu.
         for t in all_tools().iter().filter(|t| t.show_in_palette) {
             let in_grid = !super::BAR_TOOLS.contains(&t.id);
             let count = tools(true).iter().filter(|&&id| id == t.id).count();
@@ -1050,6 +1050,36 @@ mod tests {
         app.select_tab(Tab::Metronome);
         let bars = app.editor.doc().score.len();
         app.push_measure();
+        assert_eq!(app.editor.doc().score.len(), bars);
+    }
+
+    #[test]
+    fn the_bar_menu_duplicates_clears_and_deletes_the_cursors_bar() {
+        let mut app = editing("4/4 H:q H:q H:q H:q ; K:h K:h | 3/4 q q q");
+        app.editor.doc_mut().cursor = Cursor::in_voice(0, 1, 1);
+        app.duplicate_current_measure();
+        assert_eq!(
+            text(&app),
+            "4/4 H:q H:q H:q H:q ; K:h K:h | H:q H:q H:q H:q ; K:h K:h | 3/4 q q q"
+        );
+        // The cursor goes to the copy, to the same beat.
+        assert_eq!(app.editor.doc().cursor, Cursor::in_voice(1, 1, 1));
+        // Clear empties every voice of the bar.
+        app.clear_current_measure();
+        assert_eq!(
+            text(&app),
+            "4/4 H:q H:q H:q H:q ; K:h K:h | r:q r:q r:q r:q ; r:q r:q r:q r:q | 3/4 q q q"
+        );
+        app.remove_current_measure();
+        assert_eq!(text(&app), "4/4 H:q H:q H:q H:q ; K:h K:h | 3/4 q q q");
+        apply(&mut app, "edit.undo");
+        apply(&mut app, "edit.undo");
+        apply(&mut app, "edit.undo");
+        assert_eq!(text(&app), "4/4 H:q H:q H:q H:q ; K:h K:h | 3/4 q q q");
+        // The metronome's one bar is not duplicated.
+        app.select_tab(Tab::Metronome);
+        let bars = app.editor.doc().score.len();
+        app.duplicate_current_measure();
         assert_eq!(app.editor.doc().score.len(), bars);
     }
 

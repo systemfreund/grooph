@@ -504,7 +504,7 @@ pub fn all_tools() -> &'static [Tool] {
             group: ToolGroup::Meta,
             kind: ToolKind::Meta(MetaOp::ResetMeasure),
             shortcuts: &[],
-            show_in_palette: true,
+            show_in_palette: false,
         },
         Tool {
             id: "meta.change_time_signature",

@@ -41,9 +41,6 @@ const CARD_VALUE_SIZE: f32 = 26.0;
 const CARD_METER_EM: f32 = 34.0;
 const PLAY_BUTTON_SIZE: f32 = 68.0;
 const SIDE_BUTTON_SIZE: f32 = 52.0;
-/// The width from which an editor's bar holds its own buttons in its one
-/// line, next to undo, redo and clear (see [`Grooph::editor_bar`]).
-const ONE_LINE_EDIT_BAR: f32 = 360.0;
 /// Most height the metronome tab's staff takes, however wide the window;
 /// the ring below takes the rest.
 const METRONOME_STAFF_MAX: f32 = 220.0;
@@ -640,14 +637,14 @@ impl Grooph {
             // its palette.
             // The editor's bar at the very bottom, the grid above it.
             Tab::Practice | Tab::Score => {
-                self.edit_bar(ui);
+                self.editor_bar(ui, "shell_edit_bar");
                 self.tool_palette_panel(ui);
             }
             Tab::Metronome if self.ui.mode == Mode::Edit => {
                 // No ring here: what was hovered on it is gone, also when
                 // Done brings the ring back with the staff of this frame.
                 self.editor.metronome.forget_hover();
-                self.metronome_edit_bar(ui);
+                self.editor_bar(ui, "metronome_edit_bar");
                 self.tool_palette_panel(ui);
                 self.metronome_card(ui);
             }
@@ -1361,42 +1358,17 @@ impl Grooph {
         }
     }
 
-    /// Play button and measure controls below the tool palette, as wide as it.
-    /// A bar is added by a tap on the ghost bar after the last one.
-    fn edit_bar(&mut self, ui: &mut Ui) {
-        self.editor_bar(ui, "shell_edit_bar", true, |app, ui| {
-            if ui.button("➖").on_hover_text("Remove this bar").clicked() {
-                app.remove_current_measure();
-            }
-        });
-    }
-
-    /// Play button and a way back to the ring below the tool palette, while
-    /// the click bar is edited note by note. A tap on a voice's line picks
-    /// the voice the palette edits.
-    fn metronome_edit_bar(&mut self, ui: &mut Ui) {
-        self.editor_bar(ui, "metronome_edit_bar", false, |_, _| {});
-    }
-
-    /// An editor's bar below the tool grid: play, undo, redo and clear, the
-    /// editor's own buttons (`extra`, if `has_extra`), and Done on the right.
-    /// Where they do not all fit in one line, the editor's own buttons go
-    /// in a second one below.
-    fn editor_bar(
-        &mut self,
-        ui: &mut Ui,
-        id: &'static str,
-        has_extra: bool,
-        extra: impl FnOnce(&mut Self, &mut Ui),
-    ) {
+    /// An editor's bar below the tool grid: play, undo and redo, and Done
+    /// on the right. A bar is added by a tap on the ghost bar after the
+    /// last one, and duplicated, cleared or deleted in the bar menu ("⋯"
+    /// on the cursor's bar, see `measure_panel`).
+    fn editor_bar(&mut self, ui: &mut Ui, id: &'static str) {
         egui::Panel::bottom(id)
             .frame(
                 Frame::new().fill(ui.visuals().panel_fill).inner_margin(Margin::symmetric(12, 6)),
             )
             .show_separator_line(false)
             .show(ui, |ui| {
-                let one_line = !has_extra || ui.available_width() >= ONE_LINE_EDIT_BAR;
-                let mut extra = has_extra.then_some(extra);
                 ui.horizontal(|ui| {
                     let playing = self.playback_ctl.transport_state == TransportState::Playing;
                     let fill = ui.visuals().selection.bg_fill;
@@ -1410,13 +1382,10 @@ impl Grooph {
                     }
                     ui.add_space(8.0);
                     let size = self.bar_tool_buttons(ui);
-                    if one_line && let Some(extra) = extra.take() {
-                        extra(self, ui);
-                    }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         // Back to the page's card and options sheet.
-                        // A check mark drawn in, as big as the trash can,
-                        // in a button as big as the others.
+                        // A check mark drawn in, in a button as big as
+                        // undo and redo.
                         let done = ui.add(Button::new("").min_size(size)).on_hover_text("Done");
                         let r = done.rect.shrink2(vec2(0.32, 0.36) * done.rect.size());
                         let color = ui.style().interact(&done).fg_stroke.color;
@@ -1433,13 +1402,10 @@ impl Grooph {
                         }
                     });
                 });
-                if let Some(extra) = extra {
-                    ui.horizontal(|ui| extra(self, ui));
-                }
             });
     }
 
-    /// Undo, redo and clear, in an editor's bar ([`BAR_TOOLS`]).
+    /// Undo and redo, in an editor's bar ([`BAR_TOOLS`]).
     /// Their size.
     fn bar_tool_buttons(&mut self, ui: &mut Ui) -> egui::Vec2 {
         let mut size = egui::Vec2::ZERO;
@@ -1526,8 +1492,7 @@ fn beta_pill(painter: &egui::Painter, left_top: egui::Pos2) {
 fn bar_tool_name(tool: &Tool) -> &'static str {
     match tool.kind {
         ToolKind::Edit(EditOp::Undo) => "Undo",
-        ToolKind::Edit(EditOp::Redo) => "Redo",
-        _ => "Clear the bar",
+        _ => "Redo",
     }
 }
 

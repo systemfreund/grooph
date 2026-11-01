@@ -346,6 +346,27 @@ impl Grooph {
                         draw_ghost_bar(ui, ghost, hovered);
                     }
 
+                    // The bar menu: a "⋯" on the cursor's bar, or a long
+                    // press (right click) on any bar.
+                    let mut bar_action = None;
+                    if self.ui.mode == Mode::Edit && calibration.is_none() {
+                        let bars = self.editor.doc().score.len();
+                        let menu = BarMenu { metronome: self.metronome_mode(), bars };
+                        if (resp.secondary_clicked() || resp.long_touched())
+                            && let Some(pos) = resp.interact_pointer_pos()
+                            && let Some(idx) = (0..bars).find(|&idx| {
+                                staff.placed(idx).is_some_and(|p| p.rect.contains(pos))
+                            })
+                        {
+                            bar_action = Some(BarAction::Select(idx));
+                        }
+                        resp.context_menu(|ui| menu.items(ui, &mut bar_action));
+                        if let Some(placed) = staff.placed(staff_cursor.measure_idx) {
+                            let chip = bar_menu_chip(ui, placed.rect);
+                            egui::Popup::menu(&chip).show(|ui| menu.items(ui, &mut bar_action));
+                        }
+                    }
+
                     if self.playback_ctl.playback.bar_muted
                         && let Some((m_idx, _)) = playback_local
                         && let Some(placed) = staff.placed(m_idx)
@@ -369,6 +390,19 @@ impl Grooph {
                         );
                     } else {
                         self.handle_input(resp, &staff, with_ring, ghost_rect);
+                    }
+                    match bar_action {
+                        Some(BarAction::Select(idx)) => {
+                            let doc = self.editor.doc_mut();
+                            if doc.cursor.measure_idx != idx {
+                                let cursor = Cursor { measure_idx: idx, beat_idx: 0, ..doc.cursor };
+                                doc.cursor = doc.score.clamp_cursor(cursor);
+                            }
+                        }
+                        Some(BarAction::Duplicate) => self.duplicate_current_measure(),
+                        Some(BarAction::Clear) => self.clear_current_measure(),
+                        Some(BarAction::Delete) => self.remove_current_measure(),
+                        None => {}
                     }
                 });
             });
@@ -615,6 +649,66 @@ impl Grooph {
             }
         }
     }
+}
+
+/// What the bar menu does to the cursor's bar, after the staff is drawn.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum BarAction {
+    /// A long press on a bar: the menu is for that bar.
+    Select(usize),
+    Duplicate,
+    Clear,
+    Delete,
+}
+
+/// The bar menu's entries: in the metronome's one bar only "Clear".
+#[derive(Clone, Copy)]
+struct BarMenu {
+    metronome: bool,
+    bars: usize,
+}
+
+impl BarMenu {
+    fn items(self, ui: &mut egui::Ui, action: &mut Option<BarAction>) {
+        ui.set_min_width(140.0);
+        if !self.metronome && ui.button("Duplicate bar").clicked() {
+            *action = Some(BarAction::Duplicate);
+        }
+        if ui.button(if self.metronome { "Clear" } else { "Clear bar" }).clicked() {
+            *action = Some(BarAction::Clear);
+        }
+        if !self.metronome {
+            let delete = egui::RichText::new("Delete bar").color(ui.visuals().error_fg_color);
+            if ui.add_enabled(self.bars > 1, egui::Button::new(delete)).clicked() {
+                *action = Some(BarAction::Delete);
+            }
+        }
+    }
+}
+
+/// The "⋯" in the top right corner of the cursor's bar (`bar`), which
+/// opens the bar menu.
+fn bar_menu_chip(ui: &mut egui::Ui, bar: Rect) -> Response {
+    let size = egui::vec2(24.0, 16.0);
+    let rect = Rect::from_min_size(bar.right_top() + egui::vec2(-size.x - 1.0, 0.0), size);
+    let resp = ui
+        // Drawn small, so it stays clear of marks above the last beat; the
+        // finger gets more room.
+        .interact(rect.expand(6.0), ui.scope_id().with("bar_menu"), egui::Sense::click())
+        .on_hover_text("Bar menu");
+    let visuals = ui.style().interact(&resp);
+    let painter = ui.painter();
+    painter.rect(
+        rect,
+        visuals.corner_radius,
+        visuals.weak_bg_fill,
+        visuals.bg_stroke,
+        egui::StrokeKind::Inside,
+    );
+    for dx in [-5.0, 0.0, 5.0] {
+        painter.circle_filled(rect.center() + egui::vec2(dx, 0.0), 1.6, visuals.fg_stroke.color);
+    }
+    resp
 }
 
 /// The editor's ghost bar in `rect`: its rests veiled, a dashed frame and a

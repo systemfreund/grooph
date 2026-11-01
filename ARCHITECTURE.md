@@ -698,13 +698,15 @@ The tool palette (`tool_palette_panel`) is one grid for every editor
 (Practice, Score, the metronome's click bar): rows of cells
 (`tool_palette::grid_rows`), on the kit its instruments, then
 the meter and the head modifiers (accent, ghost, dot, and the kit's "+/−"
-and techniques), the note values and rests, and the tuplets. Undo, redo and
-clear (`BAR_TOOLS`) are in the editor's bar (`editor_bar`), right after
-play and before the editor's own buttons (Practice/Score: remove bar),
-which go in a second line on a narrow screen. In Practice and Score the staff
-shows a dashed, empty "ghost bar" after the last bar (`measure_panel`: laid
-out with the score, never stored); a tap on it appends a bar like the last
-one (`Grooph::push_measure`) and puts the cursor there. A modifier's cell is greyed out where it
+and techniques), the note values and rests, and the tuplets. Undo and redo
+(`BAR_TOOLS`) are in the editor's bar (`editor_bar`), right after play, Done
+on the right. In Practice and Score the staff shows a dashed, empty "ghost
+bar" after the last bar (`measure_panel`: laid out with the score, never
+stored); a tap on it appends a bar like the last one (`Grooph::push_measure`)
+and puts the cursor there. The bar menu (`BarMenu`), from a "⋯" in the top
+right corner of the cursor's bar or a long press (right click) on a bar,
+duplicates, clears (every voice) or deletes it; in the metronome it only
+clears the voice being edited. A modifier's cell is greyed out where it
 would change nothing on the cursor's beat (`modifier_applies`, tried on a
 copy of the bar): an accent on a rest, a dot without room, a technique
 without the head or its instrument's. Accent, ghost and dot show the cursor's beat as they

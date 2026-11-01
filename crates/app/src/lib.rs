@@ -732,6 +732,40 @@ impl Grooph {
         });
     }
 
+    /// Put a copy of the cursor's bar right after it and move the cursor
+    /// there, to the same beat (the bar menu). Not in the metronome's one bar.
+    pub(crate) fn duplicate_current_measure(&mut self) {
+        if self.metronome_mode() {
+            return;
+        }
+        self.with_undo_snapshot(|app| {
+            let doc = app.editor.doc_mut();
+            let cursor = doc.score.clamp_cursor(doc.cursor);
+            let copy = doc.score.measures()[cursor.measure_idx].clone();
+            doc.score.insert(cursor.measure_idx + 1, copy);
+            doc.cursor = Cursor { measure_idx: cursor.measure_idx + 1, ..cursor };
+            true
+        });
+    }
+
+    /// Empty the cursor's bar, every voice of it (the bar menu). In the
+    /// metronome only the click bar or counter rhythm being edited.
+    pub(crate) fn clear_current_measure(&mut self) {
+        if self.metronome_mode() {
+            self.apply_tool(tool_palette::tool("meta.reset_measure"));
+            return;
+        }
+        self.with_undo_snapshot(|app| {
+            let doc = app.editor.doc_mut();
+            let cursor = doc.score.clamp_cursor(doc.cursor);
+            let measure = &doc.score.measures()[cursor.measure_idx];
+            let empty = measure.empty_like(measure.time_signature());
+            doc.score.measures_mut()[cursor.measure_idx] = empty;
+            doc.cursor = Cursor { beat_idx: 0, ..cursor };
+            true
+        });
+    }
+
     /// Remove the currently active measure. Does nothing if only one measure
     /// remains (Score invariant: at least one measure).
     pub(crate) fn remove_current_measure(&mut self) {
