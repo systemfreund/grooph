@@ -678,21 +678,30 @@ struct BarMenu {
 
 impl BarMenu {
     fn items(self, ui: &mut egui::Ui, action: &mut Option<BarAction>) {
-        ui.set_min_width(140.0);
-        if !self.metronome && ui.button("Duplicate bar").clicked() {
+        // Rows as tall as a finger's touch, as wide as the menu.
+        let row = |ui: &mut egui::Ui, text: egui::RichText, enabled: bool| {
+            let size = egui::vec2(ui.available_width().max(BAR_MENU_WIDTH), BAR_MENU_ROW);
+            ui.add_enabled(enabled, egui::Button::new(text).min_size(size)).clicked()
+        };
+        ui.set_min_width(BAR_MENU_WIDTH);
+        if !self.metronome && row(ui, "Duplicate bar".into(), true) {
             *action = Some(BarAction::Duplicate);
         }
-        if ui.button(if self.metronome { "Clear" } else { "Clear bar" }).clicked() {
+        if row(ui, (if self.metronome { "Clear" } else { "Clear bar" }).into(), true) {
             *action = Some(BarAction::Clear);
         }
         if !self.metronome {
             let delete = egui::RichText::new("Delete bar").color(ui.visuals().error_fg_color);
-            if ui.add_enabled(self.bars > 1, egui::Button::new(delete)).clicked() {
+            if row(ui, delete, self.bars > 1) {
                 *action = Some(BarAction::Delete);
             }
         }
     }
 }
+
+/// The bar menu's width and the height of its rows, a finger's touch.
+const BAR_MENU_WIDTH: f32 = 160.0;
+const BAR_MENU_ROW: f32 = 44.0;
 
 /// The "⋯" in the top right corner of the cursor's bar (`bar`), which
 /// opens the bar menu.
