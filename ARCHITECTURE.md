@@ -585,7 +585,7 @@ grooph's metronome runs inside AI chats as an
   (beats in x/4, every eighth or sixteenth in x/8 and x/16, stored as the
   meter's click bar) and it has no counter rhythm, whatever it had when it
   was last picked. The metronome's meter and the rhythm's never change each
-  other (Practice's meter picker, the score editor's time signature dialog). The staff gets a share of the free height
+  other (Practice's meter picker, the editor's meter cell, which opens `Picker::BarMeter`, the metronome's meter grid on the cursor's bar). The staff gets a share of the free height
   (`METRONOME_STAFF_SHARE`), the ring the rest; the options sheet folds away
   like Practice's (shared `options_collapsed`). While playing, the click and beat being heard light
   up and the middle shows the bar number. Switching into or out of the tab

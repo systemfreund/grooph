@@ -628,7 +628,7 @@ impl Grooph {
         }
         // An editor has the screen to itself: Done leaves it, and the tool
         // grid gets the tab bar's room.
-        if !matches!(self.ui.mode, Mode::Edit | Mode::TimeSignature(_)) {
+        if self.ui.mode != Mode::Edit {
             self.tab_bar(ui, tab);
         }
         let playing = self.ui.mode == Mode::Playback;

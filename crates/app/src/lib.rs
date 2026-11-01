@@ -29,7 +29,6 @@ mod share;
 mod shell;
 mod state;
 mod style;
-mod time_signature_dialog;
 mod tool_palette;
 pub mod tools;
 mod undo;
@@ -92,8 +91,6 @@ pub(crate) enum Mode {
     Playback,
     /// The "More" tab's list of dialogs.
     MoreMenu,
-    /// The time signature dialog, holding the meter being picked.
-    TimeSignature(TimeSignature),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -417,10 +414,6 @@ impl App for Grooph {
             self.calibration_window(ui);
         }
 
-        if matches!(self.ui.mode, Mode::TimeSignature(_)) {
-            self.time_signature_dialog(ui);
-        }
-
         if self.ui.pending_load.is_some() && !embedded {
             self.load_confirm_dialog(ui);
         }
@@ -547,10 +540,10 @@ impl Grooph {
         }
     }
 
-    /// Whether the score or the metronome's clicks are being edited: the Edit
-    /// tab, its time signature dialog, or "Edit clicks" in the Metronome tab.
+    /// Whether the score or the metronome's clicks are being edited: a page's
+    /// editor, or "Edit clicks" in the Metronome tab.
     pub(crate) fn editing(&self) -> bool {
-        matches!(self.ui.mode, Mode::Edit | Mode::TimeSignature(_))
+        self.ui.mode == Mode::Edit
     }
 
     /// Tempo backbone of the working score, including swing. Must agree with
@@ -1095,7 +1088,6 @@ impl Grooph {
             return true;
         }
         ui.mode = match ui.mode {
-            Mode::TimeSignature(_) => Mode::Edit,
             // A page's editor ("Done"), back to the page itself.
             Mode::Edit => {
                 ui.shell.options_collapsed = true;
@@ -2583,8 +2575,6 @@ mod tests {
         assert!(!app.playback_options().gap.enabled);
         app.select_tab(Tab::Score);
         app.edit_page();
-        app.ui.mode = super::Mode::TimeSignature(TimeSignature::FOUR_FOUR);
-        assert!(!app.playback_options().gap.enabled);
         // The setting itself stays on, and bars are muted again after editing.
         assert!(app.playback_ctl.audio_cfg.gap.enabled);
         app.select_tab(Tab::Practice);

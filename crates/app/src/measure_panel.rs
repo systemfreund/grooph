@@ -636,8 +636,7 @@ impl Grooph {
             self.push_measure();
             return;
         }
-        if !matches!(self.ui.mode, Mode::TimeSignature(_))
-            && (resp.clicked() || resp.dragged())
+        if (resp.clicked() || resp.dragged())
             && let Some(pos) = resp.interact_pointer_pos()
             && let Some(hit) = hit_test_head(staff, pos)
             // Not the ghost bar's rests.

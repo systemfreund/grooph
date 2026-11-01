@@ -1,5 +1,4 @@
 use crate::Grooph;
-use crate::Mode;
 use crate::shell::Tab;
 use crate::tools::matching_tool;
 use eframe::egui;
@@ -12,10 +11,6 @@ impl Grooph {
             return;
         }
         ui.input(|i| {
-            // Modal dialogs swallow global shortcuts; their own UI provides Cancel/Confirm.
-            if matches!(self.ui.mode, Mode::TimeSignature(_)) {
-                return;
-            }
             // During a calibration: no editing, but Space still stops
             // (= cancels) it.
             if self.playback_ctl.play_along.calibration.is_some() {

@@ -665,7 +665,7 @@ impl Grooph {
                 return;
             }
             ToolKind::Meta(MetaOp::ChangeTimeSignature) => {
-                self.ui.mode = Mode::TimeSignature(self.current_measure().time_signature());
+                self.ui.picker = Some(Picker::BarMeter);
                 return;
             }
             ToolKind::Navigate(op) => {
@@ -713,8 +713,7 @@ impl Grooph {
                 Modifier::ToggleHead | Modifier::CycleTechnique | Modifier::ToggleTechnique(_)
             )
         );
-        // Tools only run in edit mode, and not while a modal dialog is open.
-        // Mode::TimeSignature is a sub-state of editing but blocks tool actions.
+        // Tools only run in edit mode.
         matches!(self.ui.mode, Mode::Edit) && !(kit_only && self.staff_model().one_line())
     }
 
@@ -1290,6 +1289,15 @@ mod tests {
         assert!(!app.cell_selected(cell("modify.toggle.accent")));
         apply(&mut app, "modify.toggle.soft");
         assert!(!app.cell_selected(cell("modify.toggle.soft")));
+    }
+
+    #[test]
+    fn the_meter_cell_opens_the_meter_picker_of_the_bar() {
+        use crate::pickers::Picker;
+        let mut app = editing("4/4 S:q H:q r:q r:q ; K:q r:q K:q r:q");
+        apply(&mut app, "meta.change_time_signature");
+        assert_eq!(app.ui.picker, Some(Picker::BarMeter));
+        assert_eq!(app.ui.mode, crate::Mode::Edit);
     }
 
     #[test]

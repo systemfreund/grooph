@@ -389,8 +389,6 @@ mod tests {
         // meter dialog.
         app.edit_page();
         assert!(!app.endless_runs());
-        app.ui.mode = Mode::TimeSignature(grooph_measure::TimeSignature::FOUR_FOUR);
-        assert!(!app.endless_runs());
         app.select_tab(Tab::Score);
         assert!(!app.endless_runs());
         app.start_playback();
