@@ -139,22 +139,24 @@ fn technique_name(technique: Technique) -> &'static str {
 }
 
 /// The grid's rows, top to bottom; a row wider than the grid goes on in the
-/// next line. On the kit the instruments come first and the
-/// head modifiers get the kit's; on the one line they are left out.
-pub(crate) fn grid_rows(kit: bool) -> Vec<Vec<Cell>> {
+/// next line. On the kit the instruments come first, with the techniques
+/// `technique` shows after them in the same row; on the one line there are
+/// neither.
+pub(crate) fn grid_rows(kit: bool, technique: &dyn Fn(&'static Tool) -> bool) -> Vec<Vec<Cell>> {
     let tools = |ids: &[&str]| ids.iter().map(|id| Cell::Tool(tool(id))).collect::<Vec<_>>();
-    let mut heads = tools(&HEAD_TOOLS);
     let mut rows = Vec::new();
     if kit {
-        rows.push(KIT_ORDER.iter().map(|&i| Cell::Instrument(i)).collect());
-        heads.extend(
+        let mut instruments: Vec<_> = KIT_ORDER.iter().map(|&i| Cell::Instrument(i)).collect();
+        instruments.extend(
             all_tools()
                 .iter()
                 .filter(|t| matches!(t.kind, ToolKind::Modify(Modifier::ToggleTechnique(_))))
+                .filter(|&t| technique(t))
                 .map(Cell::Tool),
         );
+        rows.push(instruments);
     }
-    rows.push(heads);
+    rows.push(tools(&HEAD_TOOLS));
     rows.push(tools(&VALUE_TOOLS));
     rows
 }
@@ -186,7 +188,8 @@ impl Grooph {
 
     fn tool_grid_scroll(&mut self, ui: &mut Ui) {
         // Sized up front: a bottom panel offers the height it had.
-        let rows = grid_rows(!self.staff_model().one_line());
+        // The techniques the cursor's beat can take, no others.
+        let rows = grid_rows(!self.staff_model().one_line(), &|t| self.cell_enabled(Cell::Tool(t)));
         let (columns, cell) = grid_metrics(ui.available_width());
         let lines: usize = rows.iter().map(|r| r.len().div_ceil(columns)).sum();
         let height = lines as f32 * (cell.y + GRID_GAP) - GRID_GAP;
@@ -1097,11 +1100,42 @@ mod tests {
     }
 
     #[test]
+    fn the_techniques_in_the_instruments_row_are_the_beats() {
+        use super::{Cell, grid_rows};
+        let app_at = |beat| {
+            let mut app = editing("4/4 S:q H:q r:q r:q ; K:q r:q K:q r:q");
+            app.editor.doc_mut().cursor = Cursor::in_voice(0, 0, beat);
+            app
+        };
+        let techniques = |app: &Grooph| {
+            let rows = grid_rows(true, &|t| app.cell_enabled(Cell::Tool(t)));
+            // The first row: the nine instruments, then what fits the beat.
+            rows[0]
+                .iter()
+                .filter_map(|c| match c {
+                    Cell::Tool(t) => Some(t.id),
+                    Cell::Instrument(_) => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            techniques(&app_at(0)),
+            ["modify.technique.cross_stick", "modify.technique.rimshot"]
+        );
+        assert_eq!(
+            techniques(&app_at(1)),
+            ["modify.technique.open", "modify.technique.half_open", "modify.technique.closed"]
+        );
+        // A rest has none.
+        assert!(techniques(&app_at(2)).is_empty());
+    }
+
+    #[test]
     fn the_grid_offers_every_tool_of_the_palette() {
         use super::{Cell, grid_rows};
         use crate::tools::{Modifier, ToolKind};
         let tools = |kit| {
-            grid_rows(kit)
+            grid_rows(kit, &|_| true)
                 .into_iter()
                 .flatten()
                 .filter_map(|c| match c {
@@ -1124,10 +1158,10 @@ mod tests {
         // head: no cell for that tool.
         assert!(!tools(true).contains(&"modify.toggle.head"));
         assert!(!tools(false).contains(&"modify.toggle.head"));
-        let cells = grid_rows(true).into_iter().flatten().collect::<Vec<_>>();
+        let cells = grid_rows(true, &|_| true).into_iter().flatten().collect::<Vec<_>>();
         let instruments = cells.iter().filter(|c| matches!(c, Cell::Instrument(_))).count();
         assert_eq!(instruments, 9);
-        assert!(grid_rows(false).iter().flatten().all(|c| matches!(c, Cell::Tool(_))));
+        assert!(grid_rows(false, &|_| true).iter().flatten().all(|c| matches!(c, Cell::Tool(_))));
     }
 
     #[test]
