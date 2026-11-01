@@ -19,7 +19,7 @@ use crate::Mode;
 use crate::documents::Document;
 use crate::shell::Tab;
 use crate::state::PendingLoad;
-use grooph_measure::{Cursor, Instrument, Measure, Score, StaffKind, VoiceIdx};
+use grooph_measure::{Cursor, Instrument, Measure, Score, StaffKind, TimeSignature, VoiceIdx};
 
 /// The name of `instrument` on its button.
 pub(crate) fn instrument_label(instrument: Instrument) -> &'static str {
@@ -55,6 +55,13 @@ pub(crate) fn instrument_short(instrument: Instrument) -> &'static str {
 
 /// A kit score's two voices, hands above and feet below.
 const KIT_VOICES: usize = 2;
+
+/// A new drum groove: one bar of `ts`, its two voices of rests, on the kit's staff.
+pub(crate) fn empty_groove(ts: TimeSignature) -> Score {
+    let mut bar = Measure::new(ts);
+    bar.fill_voices(KIT_VOICES);
+    Score::single(bar).with_staff(StaffKind::Kit)
+}
 
 impl Grooph {
     /// Make `instrument` the one the tools write and change, and edit its
@@ -109,11 +116,10 @@ impl Grooph {
     pub(crate) fn new_kit_score(&mut self) {
         self.stop_transport();
         self.show_document(Document::Score);
-        let mut bar = Measure::new(self.current_measure().time_signature());
-        bar.fill_voices(KIT_VOICES);
+        let groove = empty_groove(self.current_measure().time_signature());
         self.with_undo_snapshot(|app| {
             let doc = app.editor.doc_mut();
-            doc.score = Score::single(bar).with_staff(StaffKind::Kit);
+            doc.score = groove;
             doc.cursor = Cursor::start();
             doc.active_pattern_id = None;
             true

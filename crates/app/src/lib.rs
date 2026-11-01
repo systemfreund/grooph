@@ -823,6 +823,16 @@ impl Grooph {
         // A drum struck by two voices at once is a change to save.
         let undoubled = score.undouble_instruments();
         let bpm = pattern.bpm;
+        // A rhythm of the one line, saved before the score tab was for
+        // drum grooves, opens in Practice.
+        if score.staff.is_line() {
+            self.replace_practice_from_link(score);
+            self.playback_ctl.bpm = bpm;
+            self.playback_ctl.playback.reset();
+            self.ui.picker = None;
+            self.select_tab(Tab::Practice);
+            return;
+        }
 
         // The score tab's score is replaced.
         self.stop_transport();
@@ -950,11 +960,14 @@ impl Grooph {
     }
 
     /// Whether `link`'s rhythm opens on the practice page: shared from
-    /// there, or while the score tab is hidden (a developer setting), so
-    /// it does not open on a page the user does not have, nor ask about
-    /// that page's unsaved changes.
+    /// there, a rhythm of the one line (the score tab is for drum grooves),
+    /// or while the score tab is hidden (a developer setting), so it does
+    /// not open on a page the user does not have, nor ask about that
+    /// page's unsaved changes.
     fn opens_on_practice(&self, link: &SharedLink) -> bool {
-        link.practice || !self.ui.show_score_tab
+        link.practice
+            || !self.ui.show_score_tab
+            || matches!(&link.content, Some(LinkContent::Score(s)) if s.staff.is_line())
     }
 
     /// A rhythm shared from the practice page replaces its rhythm, as a new
@@ -1360,7 +1373,15 @@ impl Grooph {
 
         let mut generator =
             GeneratorState::new(state.generator_settings, state.endless, state.ghost_notes);
+        // The score tab edits a drum groove: a rhythm of the one line saved
+        // there before starts it afresh (rhythms are Practice's).
         let score_doc = state.score_doc.into_doc(&state.library);
+        let score_doc = if score_doc.score.staff == grooph_measure::StaffKind::Kit {
+            score_doc
+        } else {
+            let ts = score_doc.score.measures()[0].time_signature();
+            RhythmDoc::new(kit_palette::empty_groove(ts), Cursor::start())
+        };
         // Saved before Practice had its own: Practice starts with a new rhythm.
         let practice_doc = match state.practice_doc {
             Some(doc) => doc.into_doc(&state.library),
@@ -1645,7 +1666,8 @@ mod tests {
         let mut app = Grooph::new(&cc);
         app.select_tab(Tab::Score);
         app.edit_page();
-        app.editor.doc_mut().score = Score::single(Measure::new(TimeSignature::new(3, 4)));
+        app.editor.doc_mut().score = Score::single(Measure::new(TimeSignature::new(3, 4)))
+            .with_staff(grooph_measure::StaffKind::Kit);
         let rhythm = app.editor.doc().score.clone();
         app.save_pattern_as();
         let id = app.editor.doc().active_pattern_id.unwrap();
@@ -2096,7 +2118,8 @@ mod tests {
         app.select_tab(Tab::More);
         // The click bar has no changes; the rhythm behind it has.
         app.editor.doc_mut().dirty = false;
-        let score = Score::single(Measure::new(TimeSignature::new(3, 4)));
+        let score = Score::single(Measure::new(TimeSignature::new(3, 4)))
+            .with_staff(grooph_measure::StaffKind::Kit);
         app.open_link(SharedLink {
             content: Some(LinkContent::Score(score)),
             ..Default::default()
@@ -2128,9 +2151,14 @@ mod tests {
 
         let cc = eframe::CreationContext::_new_kittest(eframe::egui::Context::default());
         let mut from = Grooph::new(&cc);
-        for (tab, rhythm) in [(Tab::Practice, "4/4 q e e q q"), (Tab::Score, "3/4 q q e e")] {
+        for (tab, rhythm) in
+            [(Tab::Practice, "4/4 q e e q q"), (Tab::Score, "3/4 H:q S-H:q H:q ; K:q r:q r:q")]
+        {
             from.select_tab(tab);
             from.editor.doc_mut().score = parse_score(rhythm).unwrap();
+            if tab == Tab::Score {
+                from.editor.doc_mut().score.staff = grooph_measure::StaffKind::Kit;
+            }
             let url = from.share_link_url().unwrap();
             let query = url.split_once('?').unwrap().1;
             let mut to = Grooph::new(&cc);
@@ -2153,7 +2181,33 @@ mod tests {
         to.open_link(grooph_link::parse_query(url.split_once('?').unwrap().1).unwrap().unwrap());
         assert!(to.ui.pending_load.is_none());
         assert_eq!(to.tab(), Tab::Practice);
-        assert_eq!(format_score(&to.editor.doc().score).unwrap(), "3/4 q q e e");
+        assert_eq!(
+            format_score(&to.editor.doc().score).unwrap(),
+            "3/4 H:q S-H:q H:q ; K:q r:q r:q"
+        );
+    }
+
+    #[test]
+    fn a_rhythm_of_the_one_line_opens_on_practice_never_in_the_score_tab() {
+        use super::Grooph;
+        use grooph_measure::notation::{format_score, parse_score};
+
+        let cc = eframe::CreationContext::_new_kittest(eframe::egui::Context::default());
+        let mut app = Grooph::new(&cc);
+        app.ui.show_score_tab = true;
+        app.select_tab(Tab::Score);
+        // The score tab starts with a groove, not a rhythm.
+        assert!(!app.editor.doc().score.staff.is_line());
+        let url = {
+            let mut from = Grooph::new(&cc);
+            from.select_tab(Tab::Practice);
+            from.editor.doc_mut().score = parse_score("3/4 q q e e").unwrap();
+            from.share_link_url().unwrap()
+        };
+        app.open_link(grooph_link::parse_query(url.split_once('?').unwrap().1).unwrap().unwrap());
+        assert_eq!(app.tab(), Tab::Practice);
+        assert_eq!(format_score(&app.editor.doc().score).unwrap(), "3/4 q q e e");
+        assert!(!app.editor.docs.score.score.staff.is_line());
     }
 
     #[test]

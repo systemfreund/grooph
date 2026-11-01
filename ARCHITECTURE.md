@@ -627,7 +627,11 @@ grooph's metronome runs inside AI chats as an
 - Three documents (`crates/app/src/documents.rs`), one per page: the
   metronome's click bar, Practice's generated rhythm (thrown away freely)
   and the score tab's score (written, loaded from the library or opened
-  from a score link). Each keeps its score, cursor, undo history, dirty flag
+  from a score link). The score tab's score is always a drum groove on the
+  kit's staff (`kit_palette::empty_groove` starts one, also for a saved
+  state with a rhythm there); a rhythm of the one line from a link or the
+  library opens on Practice instead (`opens_on_practice`, `load_pattern`).
+  Each keeps its score, cursor, undo history, dirty flag
   and pattern (`RhythmDoc`, all three in `EditorState::docs`).
 - Each page edits its own document in place: the metronome's "Edit clicks",
   Practice's ✏ ("Edit rhythm") and the score tab's ✏ (`edit_page`) open
