@@ -12,6 +12,7 @@ use crate::editing::Modification;
 use crate::grid::DEFAULT_GRID;
 use crate::{
     Beat, BeatKind, Instrument, InvalidMeasure, MeasureError, TimeSignature, TupletRegistry,
+    Voicing,
 };
 use either::Either;
 use serde::{Deserialize, Serialize};
@@ -248,10 +249,10 @@ impl Measure {
     /// Strike each drum of the kit by one voice at a time again (see
     /// [`Measure::doubled_instruments`]), for a score made elsewhere, such
     /// as an old link: a head struck by two voices at once stays in the
-    /// voice its instrument is written in ([`Instrument::default_voice`]),
+    /// voice `voicing` writes its instrument in,
     /// or the uppermost, and leaves the others, its accent going along. A
     /// beat left without heads is a rest. Reports whether one was doubled.
-    pub fn undouble_instruments(&mut self) -> bool {
+    pub fn undouble_instruments(&mut self, voicing: &Voicing) -> bool {
         let doubled = self.doubled_instruments();
         for &(tick, instrument) in &doubled {
             let hits: Vec<(VoiceIdx, usize)> = (self.voices.iter().enumerate())
@@ -265,7 +266,7 @@ impl Measure {
                 })
                 .collect();
             let Some(&keep) =
-                hits.iter().find(|&&(v, _)| v == instrument.default_voice()).or(hits.first())
+                hits.iter().find(|&&(v, _)| v == voicing.voice_of(instrument)).or(hits.first())
             else {
                 continue;
             };

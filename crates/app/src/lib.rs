@@ -1386,7 +1386,10 @@ impl Grooph {
             score_doc
         } else {
             let ts = score_doc.score.measures()[0].time_signature();
-            RhythmDoc::new(kit_palette::empty_groove(ts), Cursor::start())
+            RhythmDoc::new(
+                kit_palette::empty_groove(ts, grooph_measure::Voicing::default()),
+                Cursor::start(),
+            )
         };
         // Saved before Practice had its own: Practice starts with a new rhythm.
         let practice_doc = match state.practice_doc {

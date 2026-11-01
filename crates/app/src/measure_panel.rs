@@ -669,7 +669,7 @@ impl Grooph {
         }
         if (resp.clicked() || resp.dragged())
             && let Some(pos) = resp.interact_pointer_pos()
-            && let Some(hit) = hit_test_head(staff, pos)
+            && let Some(hit) = hit_test_head(staff, pos, &self.editor.doc().score.voicing)
             // Not the ghost bar's rests.
             && hit.measure_idx < self.editor.doc().score.len()
         {

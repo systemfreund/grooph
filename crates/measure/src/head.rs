@@ -106,16 +106,6 @@ impl Instrument {
     pub fn allows(self, technique: Technique) -> bool {
         self.techniques().contains(&technique)
     }
-
-    /// The voice of a kit score the instrument's heads go to by default:
-    /// the feet (kick, hi-hat foot) below, in the second voice; the hands
-    /// above, in the first. The one line's rhythm is in the first.
-    pub const fn default_voice(self) -> crate::VoiceIdx {
-        match self {
-            Instrument::Kick | Instrument::HiHatFoot => 1,
-            _ => 0,
-        }
-    }
 }
 
 /// How a head is played, beyond accent and ghost. Each instrument allows

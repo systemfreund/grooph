@@ -74,8 +74,9 @@ spread across callers.
   every head, `set_kind_of` turns a rest into a plain note of an instrument
   and back (`set_kind`: the one line's `Rhythm`).
   On the one line every note is one `Instrument::Rhythm` head;
-  `Instrument::staff_pos`/`notehead`/`default_voice` hold the drumkit
-  legend for kit scores (#251-#255). Beats saved before heads (`kind`,
+  `Instrument::staff_pos`/`notehead` hold the drumkit
+  legend for kit scores (#251-#255); `Score::voicing` (`Voicing`, the set of
+  instruments entered in the lower voice) says which voice a new head goes to. Beats saved before heads (`kind`,
   `accented`, `soft`) load as one `Rhythm` head (`RawBeat`).
   The editing operations of a voice take the instrument they mean (see
   "Kit editing"): accent and ghost change its head, `toggle_head` adds or

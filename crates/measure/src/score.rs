@@ -1,5 +1,5 @@
 use crate::grid::DEFAULT_GRID;
-use crate::{BeatIdx, Measure, VoiceBar, VoiceIdx};
+use crate::{BeatIdx, Measure, VoiceBar, VoiceIdx, Voicing};
 use serde::{Deserialize, Serialize};
 
 pub type MeasureIdx = usize;
@@ -15,6 +15,10 @@ pub struct Score {
     /// The staff the score is written on.
     #[serde(default, skip_serializing_if = "StaffKind::is_line")]
     pub staff: StaffKind,
+    /// Which voice each instrument of a kit is entered in. It only says where
+    /// new heads go; the heads already written stay where they are.
+    #[serde(default, skip_serializing_if = "Voicing::is_default")]
+    pub voicing: Voicing,
     measures: Vec<Measure>,
 }
 
@@ -40,6 +44,8 @@ impl StaffKind {
 struct RawScore {
     #[serde(default)]
     staff: StaffKind,
+    #[serde(default)]
+    voicing: Voicing,
     measures: Vec<Measure>,
 }
 
@@ -62,7 +68,7 @@ impl TryFrom<RawScore> for Score {
         if raw.measures.is_empty() {
             return Err(EmptyScore);
         }
-        Ok(Self { staff: raw.staff, measures: raw.measures })
+        Ok(Self { staff: raw.staff, voicing: raw.voicing, measures: raw.measures })
     }
 }
 
@@ -70,7 +76,7 @@ impl Score {
     /// `measures` on one line. Panics if there are none.
     pub fn new(measures: Vec<Measure>) -> Self {
         assert!(!measures.is_empty(), "a score needs at least one measure");
-        Self { staff: StaffKind::Line, measures }
+        Self { staff: StaffKind::Line, voicing: Voicing::default(), measures }
     }
 
     /// The score on `staff` instead.
@@ -90,11 +96,18 @@ impl Score {
         &mut self.measures
     }
 
+    /// The score with `voicing` as the rule for new heads.
+    pub fn with_voicing(self, voicing: Voicing) -> Self {
+        Self { voicing, ..self }
+    }
+
     /// Strike each drum of the kit by one voice at a time in every measure
-    /// (see [`Measure::undouble_instruments`]). Reports whether one was
+    /// (see [`Measure::undouble_instruments`]), keeping a doubled drum in
+    /// the voice of the score's [`Voicing`]. Reports whether one was
     /// doubled.
     pub fn undouble_instruments(&mut self) -> bool {
-        self.measures.iter_mut().fold(false, |any, m| m.undouble_instruments() | any)
+        let voicing = self.voicing;
+        self.measures.iter_mut().fold(false, |any, m| m.undouble_instruments(&voicing) | any)
     }
 
     /// The measures, taken out of the score: at least one.
@@ -288,6 +301,29 @@ mod tests {
     }
 
     #[test]
+    fn the_voicing_is_saved_only_when_it_is_not_the_default() {
+        let score = crate::notation::parse_score("4/4 H:q H:q H:q H:q ; K:q r:q K:q r:q").unwrap();
+        let plain = ron::to_string(&score).unwrap();
+        assert!(!plain.contains("voicing"), "{plain}");
+        // A score saved before the voicing loads as hands and feet.
+        assert_eq!(ron::from_str::<Score>(&plain).unwrap().voicing, Voicing::HANDS_FEET);
+        for voicing in [Voicing::ONE_VOICE, Voicing::CYMBALS_ABOVE] {
+            let text = ron::to_string(&score.clone().with_voicing(voicing)).unwrap();
+            assert!(text.contains("voicing"), "{text}");
+            assert_eq!(ron::from_str::<Score>(&text).unwrap().voicing, voicing);
+        }
+    }
+
+    #[test]
+    fn a_doubled_drum_stays_in_the_voice_of_the_voicing() {
+        use crate::notation::{format_score, parse_score};
+        let mut score = parse_score("4/4 S-H:q H:q H:h ; S:q K:q K:h").unwrap();
+        score.voicing = Voicing::CYMBALS_ABOVE;
+        assert!(score.undouble_instruments());
+        assert_eq!(format_score(&score).unwrap(), "4/4 H:q H:q H:h ; S:q K:q K:h");
+    }
+
+    #[test]
     fn score_single_constructor_yields_one_measure() {
         let m = Measure::new(TimeSignature::FOUR_FOUR);
         let s = Score::single(m);
@@ -388,7 +424,8 @@ mod tests {
 
     #[test]
     fn clamp_cursor_on_a_hand_built_empty_score_is_the_start() {
-        let empty = Score { staff: StaffKind::Line, measures: Vec::new() };
+        let empty =
+            Score { staff: StaffKind::Line, voicing: Voicing::default(), measures: Vec::new() };
         assert_eq!(empty.clamp_cursor(Cursor::in_voice(3, 1, 2)), Cursor::start());
     }
 
