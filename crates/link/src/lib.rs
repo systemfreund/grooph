@@ -140,13 +140,7 @@ fn parse_query_with_default_version(
             "click" => click = Some(value),
             "counter" => counter = Some(value),
             "poly" => poly = Some(value.parse::<Ratio>().map_err(|e| format!("poly: {e}"))?),
-            "page" => {
-                practice = match value.as_str() {
-                    "practice" => true,
-                    "score" => false,
-                    _ => return Err(format!("invalid page '{value}' (practice or score)")),
-                }
-            }
+            "page" => practice = parse_page(&value)?,
             _ => {}
         }
     }
@@ -236,6 +230,15 @@ fn parse_query_with_default_version(
         // Only a rhythm has a page to pick.
         let practice = practice && matches!(content, Some(LinkContent::Score(_)));
         Ok(Some(SharedLink { bpm, swing, content, click, counter, poly, practice }))
+    }
+}
+
+/// Whether `page` opens the rhythm on the Practice page.
+fn parse_page(value: &str) -> Result<bool, String> {
+    match value {
+        "practice" => Ok(true),
+        "score" => Ok(false),
+        _ => Err(format!("invalid page '{value}' (practice or score)")),
     }
 }
 
