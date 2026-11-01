@@ -21,9 +21,8 @@ impl Grooph {
 
             ui.collapsing("Mouse/Finger controls", |ui| {
                 let text = RichText::new(
-                    "       Click/Tap: Move cursor
-            Drag: Move cursor
-Double-click/Tap: Toggle Note/Rest",
+                    "Click/Tap: Move cursor
+Drag: Move cursor",
                 )
                 .monospace()
                 .size(16.0);

@@ -3,7 +3,6 @@ use crate::accuracy::{AccuracyMark, HitGrade, clamp_diff_to_beat_window};
 use crate::guide::{Guide, anchor_intensity};
 use crate::metronome_view::MetronomeVoice;
 use crate::playback_clock::{advance_tick, next_count_in};
-use crate::tools::{Modifier, ToolKind, all_tools};
 use crate::{Mode, TransportState};
 use eframe::egui;
 use eframe::egui::{FontId, Frame, Rect, Response, Stroke};
@@ -645,14 +644,6 @@ impl Grooph {
                 Cursor::in_voice(hit.measure_idx, hit.voice, hit.beat_idx);
             if !self.staff_model().one_line() {
                 self.editor.instrument = hit.instrument;
-            }
-
-            if resp.double_clicked()
-                && let Some(tool) = all_tools()
-                    .iter()
-                    .find(|t| matches!(t.kind, ToolKind::Modify(Modifier::ToggleRestNote)))
-            {
-                self.apply_tool(tool);
             }
         }
     }
