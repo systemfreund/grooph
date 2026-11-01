@@ -699,7 +699,10 @@ the meter and the head modifiers (accent, ghost, dot, and the kit's "+/−"
 and techniques), the note values and rests, and the tuplets. Undo, redo and
 clear (`BAR_TOOLS`) are in the editor's bar (`editor_bar`), right after
 play and before the editor's own buttons (Practice/Score: add/remove bar),
-which go in a second line on a narrow screen. A voice is picked by a tap on
+which go in a second line on a narrow screen. A modifier's cell is greyed out where it
+would change nothing on the cursor's beat (`modifier_applies`, tried on a
+copy of the bar): an accent on a rest, a dot without room, a technique
+without the head or its instrument's. A voice is picked by a tap on
 it, or on the kit by picking an instrument. The
 columns follow the width (`grid_metrics`, cells 54 to 64 px wide), a row
 wider than the grid goes on in the next line, and past 45% of the screen's

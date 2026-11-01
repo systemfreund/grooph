@@ -14,7 +14,7 @@ use grooph_layout::pixel_layout::{
 };
 use grooph_measure::BeatKind::{Note, Rest};
 use grooph_measure::duration::{Duration, TupletKind};
-use grooph_measure::{Cursor, Instrument, Measure, StaffKind, Technique};
+use grooph_measure::{Cursor, Instrument, Measure, StaffKind, Technique, VoiceBar};
 use grooph_render::measure::{draw_notes, draw_time_signature};
 use log::info;
 use tools::EditOp;
@@ -239,13 +239,36 @@ impl Grooph {
             Cell::Tool(t) => match t.kind {
                 ToolKind::Edit(EditOp::Undo) => self.can_undo(),
                 ToolKind::Edit(EditOp::Redo) => self.can_redo(),
-                ToolKind::Modify(Modifier::ToggleTechnique(technique)) => {
-                    self.edit_instrument().allows(technique)
-                }
+                ToolKind::Modify(Modifier::CycleTuplet) => true,
+                ToolKind::Modify(modifier) => self.modifier_applies(modifier),
                 _ => true,
             },
             Cell::Instrument(_) => true,
         }
+    }
+
+    /// Whether `modifier` changes the cursor's beat: an accent needs a head
+    /// of the picked instrument there, not a rest; the dot a value it fits
+    /// in the bar; a technique a head its instrument plays that way; "+/−"
+    /// a beat with room, without a drum struck by both voices. Tried on a
+    /// copy of the cursor's bar.
+    fn modifier_applies(&self, modifier: Modifier) -> bool {
+        let cursor = self.editor.doc().score.clamp_cursor(self.editor.doc().cursor);
+        let mut measure = self.current_measure().clone();
+        let Some(voice) = measure.voice_mut(cursor.voice) else {
+            return false;
+        };
+        if voice.beats().is_empty() {
+            return false;
+        }
+        let idx = cursor.beat_idx.min(voice.beats().len() - 1);
+        if !modify(voice, idx, self.edit_instrument(), modifier) {
+            return false;
+        }
+        // The kit refuses an edit that has two voices strike one drum.
+        let before = self.current_measure().doubled_instruments();
+        self.staff_model().one_line()
+            || measure.doubled_instruments().iter().all(|d| before.contains(d))
     }
 
     /// One cell of the grid in `rect`, framed like a button.
@@ -477,21 +500,10 @@ impl Grooph {
                 }
                 let idx = self.editor.doc().cursor.beat_idx.min(beats_len - 1);
                 let pen = self.edit_instrument();
-                let result = match modifier {
-                    Modifier::ToggleDotted { dots: _ } => {
-                        self.current_voice_mut().toggle_dotted(idx)
-                    }
-                    Modifier::ToggleAccent => self.current_voice_mut().toggle_accent(idx, pen),
-                    Modifier::ToggleSoft => self.current_voice_mut().toggle_soft(idx, pen),
-                    Modifier::ToggleRestNote => self.current_voice_mut().toggle_beat_kind(idx, pen),
-                    Modifier::CycleTuplet => self.set_tuplet(idx, None),
-                    Modifier::ToggleHead => self.current_voice_mut().toggle_head(idx, pen),
-                    Modifier::CycleTechnique => self.current_voice_mut().cycle_technique(idx, pen),
-                    Modifier::ToggleTechnique(technique) => {
-                        self.current_voice_mut().toggle_technique(idx, pen, technique)
-                    }
-                };
-                result.is_some()
+                match modifier {
+                    Modifier::CycleTuplet => self.set_tuplet(idx, None).is_some(),
+                    _ => modify(self.current_voice_mut(), idx, pen, modifier),
+                }
             }
             ToolKind::Delete(op) => {
                 if beats_len == 0 {
@@ -521,6 +533,23 @@ impl Grooph {
             }
         }
     }
+}
+
+/// Apply `modifier` to the beat at `idx` of `voice`, for the head of
+/// `pen`; whether it changed anything. Not for [`Modifier::CycleTuplet`],
+/// which needs the score.
+fn modify(voice: &mut VoiceBar, idx: usize, pen: Instrument, modifier: Modifier) -> bool {
+    match modifier {
+        Modifier::ToggleDotted { dots: _ } => voice.toggle_dotted(idx),
+        Modifier::ToggleAccent => voice.toggle_accent(idx, pen),
+        Modifier::ToggleSoft => voice.toggle_soft(idx, pen),
+        Modifier::ToggleRestNote => voice.toggle_beat_kind(idx, pen),
+        Modifier::ToggleHead => voice.toggle_head(idx, pen),
+        Modifier::CycleTechnique => voice.cycle_technique(idx, pen),
+        Modifier::ToggleTechnique(technique) => voice.toggle_technique(idx, pen, technique),
+        Modifier::CycleTuplet => None,
+    }
+    .is_some()
 }
 
 /// Padding (px) between a [`notation_button`]'s frame and its notes.
@@ -916,6 +945,45 @@ mod tests {
         assert_eq!(text(&app), "4/4 Sx-H:q H:q H:q H:q ; K:q r:q K:q r:q");
         // The picked instrument shows as picked.
         assert!(app.cell_selected(Cell::Instrument(Snare)));
+    }
+
+    #[test]
+    fn a_modifier_is_offered_where_it_changes_the_beat() {
+        use super::Cell;
+        use grooph_measure::Instrument::{HiHat, Kick, Snare};
+        let cell = |id| Cell::Tool(all_tools().iter().find(|t| t.id == id).unwrap());
+        let mut app = editing("4/4 q r:q q q");
+        // An accent, a ghost and a dot on a note, none on a rest.
+        for id in ["modify.toggle.accent", "modify.toggle.soft", "modify.toggle.dotted"] {
+            assert!(app.cell_enabled(cell(id)), "{id}");
+            app.editor.doc_mut().cursor = Cursor::at(0, 1);
+            assert_eq!(app.cell_enabled(cell(id)), id == "modify.toggle.dotted", "{id}");
+            app.editor.doc_mut().cursor = Cursor::at(0, 0);
+        }
+        // No room for a dot on the last beat.
+        app.editor.doc_mut().cursor = Cursor::at(0, 3);
+        assert!(!app.cell_enabled(cell("modify.toggle.dotted")));
+
+        let mut app = editing("4/4 S-H:q H:q H:q H:q ; K:q r:q K:q r:q");
+        app.editor.instrument = Snare;
+        app.editor.doc_mut().cursor = Cursor::in_voice(0, 0, 1);
+        // No snare on the beat to accent, but one to add.
+        assert!(!app.cell_enabled(cell("modify.toggle.accent")));
+        assert!(app.cell_enabled(cell("modify.toggle.head")));
+        assert!(!app.cell_enabled(cell("modify.technique.rimshot")));
+        app.editor.doc_mut().cursor = Cursor::in_voice(0, 0, 0);
+        assert!(app.cell_enabled(cell("modify.technique.rimshot")));
+        // Not the snare below where it is above already.
+        app.editor.doc_mut().cursor = Cursor::in_voice(0, 1, 0);
+        assert!(!app.cell_enabled(cell("modify.toggle.head")));
+        // The hi-hat opens where it is; the kick has no such technique.
+        app.editor.instrument = HiHat;
+        app.editor.doc_mut().cursor = Cursor::in_voice(0, 0, 1);
+        assert!(app.cell_enabled(cell("modify.technique.open")));
+        app.editor.instrument = Kick;
+        app.editor.doc_mut().cursor = Cursor::in_voice(0, 1, 0);
+        assert!(!app.cell_enabled(cell("modify.technique.open")));
+        assert!(app.cell_enabled(cell("modify.toggle.accent")));
     }
 
     #[test]
