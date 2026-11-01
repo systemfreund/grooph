@@ -153,40 +153,56 @@ impl VoiceBar {
                 kept.push(Kept { units, beats });
             }
         }
-        // The plain beats in the beats of a kept tuplet stay with it.
+        // The other beats, one by one, and the silent tuplets as a whole.
+        let mut others: Vec<(Range<u32>, &[Beat])> = Vec::new();
+        for (idx, beat) in self.beats.iter().enumerate() {
+            if !in_group(idx) {
+                others.push((
+                    to_unit(ticks[idx])?..to_unit(end_of(idx))?,
+                    std::slice::from_ref(beat),
+                ));
+            }
+        }
+        for range in silent {
+            let units = to_unit(ticks[*range.start()])?..to_unit(end_of(*range.end()))?;
+            others.push((units, &self.beats[range]));
+        }
+        // The beats of the meter a kept tuplet is in are kept as written,
+        // and so is every other beat sounding in them, with the beats of
+        // the meter it reaches into.
         let mut spans = spelling::meter_spans(ts)?;
+        let overlap =
+            |s: &spelling::Span, units: &Range<u32>| s.start < units.end && units.start < s.end();
         for k in &kept {
-            for span in
-                spans.iter_mut().filter(|s| s.start < k.units.end && k.units.start < s.end())
-            {
+            for span in spans.iter_mut().filter(|s| overlap(s, &k.units)) {
                 span.verbatim = true;
             }
         }
-        let in_kept_beats =
-            |unit: u32| spans.iter().any(|s| s.verbatim && s.start <= unit && unit < s.end());
+        loop {
+            let mut grew = false;
+            for (units, _) in &others {
+                if spans.iter().any(|s| s.verbatim && overlap(s, units)) {
+                    for span in spans.iter_mut().filter(|s| !s.verbatim && overlap(s, units)) {
+                        span.verbatim = true;
+                        grew = true;
+                    }
+                }
+            }
+            if !grew {
+                break;
+            }
+        }
         let mut notes = Vec::new();
         let mut plain: Vec<Kept> = Vec::new();
-        for (idx, beat) in self.beats.iter().enumerate() {
-            if in_group(idx) {
-                continue;
-            }
-            let unit = to_unit(ticks[idx])?;
-            if in_kept_beats(unit) {
+        for (units, beats) in others {
+            if spans.iter().any(|s| s.verbatim && overlap(s, &units)) {
                 // Kept as written next to the tuplet, rests too.
-                let end = to_unit(end_of(idx))?;
-                plain.push(Kept { units: unit..end, beats: std::slice::from_ref(beat) });
-            } else if beat.is_note() {
-                notes.push((unit, *beat));
+                plain.push(Kept { units, beats });
+            } else if beats[0].is_note() {
+                notes.push((units.start, beats[0]));
             }
         }
-        // A silent tuplet in kept beats stays too: its time is no rest yet.
-        for range in silent {
-            let unit = to_unit(ticks[*range.start()])?;
-            if in_kept_beats(unit) {
-                let units = unit..to_unit(end_of(*range.end()))?;
-                plain.push(Kept { units, beats: &self.beats[range] });
-            }
-        }
+        notes.sort_by_key(|&(unit, _)| unit);
         kept.extend(plain);
         kept.sort_by_key(|k| k.units.start);
         rewrite(ts, &notes, &kept, self.tuplets.clone())
@@ -339,8 +355,12 @@ mod tests {
         assert_eq!(cleaned("4/4 t8 r:t8 t8 q r:q e r:e"), "4/4 t8 r:t8 t8 q r:q q");
         // A tuplet of rests only becomes a plain rest.
         assert_eq!(cleaned("4/4 q r:t8 r:t8 r:t8 r:h"), "4/4 q r:q r:h");
-        // A tuplet from the "and" keeps the beats it shares as written.
+        // A tuplet from the "and" keeps the beats it shares as written,
+        // and a note from there into the next beat keeps that one too.
         assert_eq!(cleaned("4/4 e t8 t8 t8 e r:h"), "4/4 e t8 t8 t8 e r:h");
+        assert_eq!(cleaned("4/4 e t8 t8 t8 q r:e q"), "4/4 e t8 t8 t8 q r:e q");
+        assert_eq!(cleaned("4/4 e t8 t8 t8 q e r:s r:s s s"), "4/4 e t8 t8 t8 q e r:e s s");
+        assert_eq!(cleaned("4/4 e t8 t8 t8 q e q"), "4/4 e t8 t8 t8 q e q");
         let m = measure("4/4 t8 t8 t8 h e r:e");
         let once = m.cleaned_up();
         let groups = once.first_voice().tuplet_groups();

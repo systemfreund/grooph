@@ -287,25 +287,37 @@ fn run_random_cleanups(seed: u64, measures: usize) -> (usize, usize) {
         for _ in 0..rng.below(30) {
             random_edit(&mut m, &mut rng, &durations, &meters);
         }
-        if m.first_voice().respelled().is_none() {
+        // Half of them with a second voice of its own rhythm.
+        if rng.chance(0.5) {
+            let mut lower = Measure::new(m.time_signature());
+            for _ in 0..rng.below(30) {
+                random_edit(&mut lower, &mut rng, &durations, &[m.time_signature()]);
+            }
+            m.push_voices(&lower).expect("one meter");
+        }
+        if m.voices().iter().any(|v| v.respelled().is_none()) {
             left += 1;
             continue;
         }
         cleaned += 1;
         let once = m.cleaned_up();
         let place = format!("seed {seed}, measure {i}: {m:?} in {}", m.time_signature());
-        if let Err(e) = check_invariants(&once) {
-            panic!("{place}: cleaned up to {once:?}: {e}");
+        for voice in 0..once.voices().len() {
+            let single = once.single_voice(voice).expect("voice in range");
+            if let Err(e) = check_invariants(&single) {
+                panic!("{place}: cleaned up to {once:?}, voice {voice}: {e}");
+            }
         }
         let sound = |m: &Measure| -> Vec<_> {
             m.head_onsets().into_iter().map(|o| (o.tick, o.voice, o.head)).collect()
         };
         assert_eq!(sound(&once), sound(&m), "{place}: cleaned up to {once:?}");
         let twice = once.cleaned_up();
-        if let Some(diff) =
-            score_difference(&Score::new(vec![once.clone()]), &Score::new(vec![twice]))
-        {
-            panic!("{place}: a second cleanup changed it: {diff}");
+        for voice in 0..once.voices().len() {
+            let [a, b] = [&once, &twice].map(|m| m.single_voice(voice).expect("voice in range"));
+            if let Some(diff) = score_difference(&Score::new(vec![a]), &Score::new(vec![b])) {
+                panic!("{place}: a second cleanup changed voice {voice}: {diff}");
+            }
         }
     }
     (cleaned, left)

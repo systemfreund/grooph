@@ -72,8 +72,23 @@ pub(crate) fn meter_spans(ts: TimeSignature) -> Option<Vec<Span>> {
         ),
         8 | 16 => {
             let unit = 16 / u32::from(ts.beat_unit) * UNITS_PER_SIXTEENTH;
-            let groups = ts.groups();
-            (groups.iter().map(|&g| u32::from(g) * unit).collect(), vec![1; groups.len()])
+            // Groups longer than three in twos, with a three at the end
+            // for an odd length, as the generator draws them (4/16).
+            let lens: Vec<u32> = ts
+                .groups()
+                .iter()
+                .flat_map(|&g| {
+                    let threes = u32::from(g > 3 && g % 2 == 1);
+                    let twos = if g > 3 { (u32::from(g) - 3 * threes) / 2 } else { 0 };
+                    let whole = (g <= 3).then_some(u32::from(g));
+                    std::iter::repeat_n(2, twos as usize)
+                        .chain(std::iter::repeat_n(3, threes as usize))
+                        .chain(whole)
+                })
+                .map(|g| g * unit)
+                .collect();
+            let count = lens.len();
+            (lens, vec![1; count])
         }
         _ => return None,
     };

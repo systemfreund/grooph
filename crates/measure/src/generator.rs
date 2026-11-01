@@ -993,6 +993,28 @@ mod tests {
     }
 
     #[test]
+    fn every_supported_meter_generates_beyond_the_offered_ones() {
+        // Also meters the app does not offer, like 4/16 (one group of
+        // four, drawn as two eighths).
+        let mut rng = Rng::new(4);
+        for beat_unit in [4, 8, 16] {
+            for beats in 1..=TimeSignature::MAX_BEATS {
+                let ts = ts(beats, beat_unit);
+                if !supports_time_signature(ts) {
+                    continue;
+                }
+                let st = GeneratorSettings {
+                    time_signature: ts,
+                    ..settings(Subdivision::Sixteenths, MAX_COMPLEXITY)
+                };
+                for _ in 0..10 {
+                    generate_measure(&st, &mut rng).unwrap();
+                }
+            }
+        }
+    }
+
+    #[test]
     fn three_sixteenth_ladder_follows_the_triplet_ladder() {
         let at = |level| patterns(Subdivision::Sixteenths, BeatSpan::DottedEighth, level);
         assert_eq!(at(1), set(&["---", "x--", "xxx"]));
