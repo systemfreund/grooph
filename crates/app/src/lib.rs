@@ -855,6 +855,17 @@ impl Grooph {
     /// Entry point for the load button: if the working score has unsaved changes,
     /// defer to the confirmation dialog; otherwise load immediately.
     pub(crate) fn request_load_pattern(&mut self, id: u64) {
+        // A rhythm of the one line goes to Practice, which a load replaces
+        // without asking: the score tab's changes are not at stake.
+        if self
+            .editor
+            .library
+            .get(id)
+            .is_some_and(|p| p.score.staff == grooph_measure::StaffKind::Line)
+        {
+            self.load_pattern(id);
+            return;
+        }
         let dirty = self.editor.docs.score.dirty;
         if self.editor.docs.score.active_pattern_id == Some(id) && !dirty {
             // Already loaded and unchanged.
@@ -2205,7 +2216,11 @@ mod tests {
         // So does one from the library, as the pattern loaded and unchanged.
         let id = app.editor.library.add("Old".into(), parse_score("4/4 h h").unwrap(), 90);
         app.select_tab(Tab::Score);
+        // Without asking about the score tab's changes, which it leaves alone.
+        app.editor.docs.score.dirty = true;
         app.request_load_pattern(id);
+        assert!(app.ui.pending_load.is_none());
+        assert!(app.editor.docs.score.dirty);
         assert_eq!(app.tab(), Tab::Practice);
         assert_eq!(format_score(&app.editor.doc().score).unwrap(), "4/4 h h");
         assert!(!app.editor.docs.practice.dirty);

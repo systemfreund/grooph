@@ -218,8 +218,8 @@ fn line_rest_place(beat: &Beat, voicing: Voicing) -> i8 {
 /// A rest on the kit's staff: in the middle with one voice (a whole rest
 /// hangs from the fourth line), in its voice's half with two, clear of the
 /// other's notes: a half rest on the fourth or first line, a whole rest
-/// hanging from the fourth or second, the others in the second space up or
-/// down from the middle line (both a half space further out, clear of the heads and the top and bottom line).
+/// hanging from the fourth or second, the others centred on the top or
+/// bottom line, clear of the other voice's heads.
 fn kit_rest_place(beat: &Beat, voicing: Voicing) -> i8 {
     let base = beat.duration.base_note();
     match (voicing.shared, voicing.stem_down, base) {
