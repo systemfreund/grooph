@@ -722,7 +722,8 @@ row going on in the next line only where it does not fit. Undo and redo
 (`BAR_TOOLS`) are in the editor's bar (`editor_bar`), right after play, Done
 on the right. In Practice and Score the staff shows a dashed, empty "ghost
 bar" after the last bar (`measure_panel`: laid out with the score, never
-stored); a tap on it appends a bar like the last one (`Grooph::push_measure`)
+stored, and never reached by the playback cursor: `draw_staff` and
+`current_cursor_x` take the bars that play, `loop_bars`); a tap on it appends a bar like the last one (`Grooph::push_measure`)
 and puts the cursor there. The bar menu (`BarMenu`), from a "⋯" in the top
 right corner of the cursor's bar or a long press (right click) on a bar,
 duplicates, clears (every voice) or deletes it; in the metronome it only

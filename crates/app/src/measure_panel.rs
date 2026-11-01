@@ -202,8 +202,8 @@ impl Grooph {
                         shown.push(last.empty_like(last.time_signature()));
                         shown
                     });
-                    // Timing, marks and the playback cursor go by the bars
-                    // that play, never the ghost bar.
+                    // Timing marks and the playback cursor go by the bars
+                    // that play: the cursor never enters the ghost bar.
                     let played = score;
                     let score = ghost.as_ref().unwrap_or(score);
                     let staff = build_staff_layout(score, &staff_opts);
@@ -231,8 +231,12 @@ impl Grooph {
                     // the shared helper to find the cursor's actual home measure
                     // and X for this frame.
                     if let Some(playback) = playback_local
-                        && let Some((m_idx, x)) =
-                            grooph_render::staff::current_cursor_x(played, &staff, playback)
+                        && let Some((m_idx, x)) = grooph_render::staff::current_cursor_x(
+                            score,
+                            &staff,
+                            playback,
+                            0..played.len(),
+                        )
                         && let Some(placed) = staff.placed(m_idx)
                     {
                         // The row is centred vertically, but the offset
@@ -357,6 +361,7 @@ impl Grooph {
                         cursor,
                         lit,
                         playback,
+                        0..played.len(),
                         marks,
                         count_config.as_ref(),
                         &render_opts,

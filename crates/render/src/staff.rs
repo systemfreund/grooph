@@ -15,6 +15,7 @@ use grooph_layout::staff::Staff;
 use grooph_layout::staff_layout::{PlacedMeasure, StaffLayout, StaffOpts};
 use grooph_measure::counting::CountConfig;
 use grooph_measure::{Cursor, MeasureIdx, Score, StaffKind, VoiceIdx};
+use std::ops::Range;
 
 /// The count labels' reference line, above the lowest ink of a bar with a
 /// lower voice, in em: the labels sit 0.75 em under it, so 0.3 em under the
@@ -38,7 +39,10 @@ pub enum PlaybackMarks {
 /// `Some((measure_idx, local_tick))` referring to the **active** measure (the
 /// one currently being audibly played). The *visual* cursor may live in a
 /// different measure during the wrap animation — see [`current_cursor_x`].
-/// `marks` says whether the line or a guide anchor shows it. `lit` draws
+/// `loop_bars` are the bars that play, in a loop: the cursor goes on from
+/// the last to the first of them, never into a bar after them (the
+/// editor's ghost bar). `marks` says whether the line or a guide anchor
+/// shows it. `lit` draws
 /// the note it points at in the highlight colour.
 #[expect(clippy::too_many_arguments)]
 pub fn draw_staff(
@@ -48,6 +52,7 @@ pub fn draw_staff(
     cursor: Option<Cursor>,
     lit: Option<Cursor>,
     playback: Option<(MeasureIdx, f64)>,
+    loop_bars: Range<MeasureIdx>,
     marks: PlaybackMarks,
     count_config: Option<&CountConfig>,
     staff_opts: &StaffOpts,
@@ -76,8 +81,9 @@ pub fn draw_staff(
     // Resolve the *visual* cursor location once per frame. Phase 1 of a
     // measure's last note keeps the cursor in that measure; Phase 2 hands it
     // off to the next one (wrapping at the score end).
-    let visual_cursor =
-        playback.filter(|_| playback_line).and_then(|p| current_cursor_x(score, staff, p));
+    let visual_cursor = playback
+        .filter(|_| playback_line)
+        .and_then(|p| current_cursor_x(score, staff, p, loop_bars));
 
     for system in &staff.systems {
         // Continuous staff lines per system, so adjacent measures look
@@ -192,8 +198,10 @@ pub fn beat_anchor_pos(
 /// - Phase 1: cursor lives in the currently playing measure
 ///   (`playback.0`). Returned as `(playback.0, x)`.
 /// - Phase 2 (end of the last note, see [`last_note_split`]): cursor lives in
-///   `(playback.0 + 1) % score.len()`, entering from the left. Returned as
-///   that measure's index plus its entering X.
+///   the next measure of `loop_bars`, the bars that play (after its last
+///   one, its first), entering from the left. Returned as that measure's
+///   index plus its entering X. A bar laid out past them (the editor's
+///   ghost bar) is never entered.
 ///
 /// Returns `None` if there is no visible cursor (e.g. score empty, layout
 /// empty, or the relevant measure has no notes).
@@ -201,15 +209,19 @@ pub fn current_cursor_x(
     score: &Score,
     staff: &StaffLayout,
     playback: (MeasureIdx, f64),
+    loop_bars: Range<MeasureIdx>,
 ) -> Option<(MeasureIdx, f32)> {
     let (play_idx, local_tick) = playback;
-    if score.is_empty() {
+    if score.is_empty() || loop_bars.is_empty() {
         return None;
     }
 
     let active_measure = score.measures().get(play_idx)?;
     let active_placed = staff.placed(play_idx)?;
-    let next_idx = (play_idx + 1) % score.len();
+    let next_idx = match play_idx + 1 < loop_bars.end {
+        true => play_idx + 1,
+        false => loop_bars.start,
+    };
     let next_placed = staff.placed(next_idx)?;
     let split = last_note_split(&active_placed.voices, active_placed.rect, &next_placed.voices);
 
@@ -329,7 +341,7 @@ mod tests {
         let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
             color = highlight_color(ui.visuals());
             let marks = PlaybackMarks::Line;
-            draw_staff(ui, &both, &staff, None, Some(lit), None, marks, None, &opts);
+            draw_staff(ui, &both, &staff, None, Some(lit), None, 0..1, marks, None, &opts);
         });
         output.textures_delta.clear();
         let placed = staff.placed(0).unwrap();
@@ -390,7 +402,7 @@ mod tests {
         let th = grooph_measure::grid::DEFAULT_GRID
             .ticks_of(&grooph_measure::duration::th())
             .unwrap() as f64;
-        let x = |tick: f64| current_cursor_x(&score, &staff, (0, tick)).unwrap().1;
+        let x = |tick: f64| current_cursor_x(&score, &staff, (0, tick), 0..1).unwrap().1;
         // On each kick the line is at its head, halfway between two of them
         // halfway between their heads.
         for (i, kick) in lower.iter().take(4).enumerate() {
@@ -404,6 +416,23 @@ mod tests {
     }
 
     #[test]
+    fn the_playback_line_goes_on_within_the_bars_that_play() {
+        // Three bars laid out, the third the editor's ghost bar.
+        let score = parse_score("4/4 q q q q | q q q q | q q q q").unwrap();
+        let staff = build_staff_layout(&score, &opts());
+        let ts = score.measures()[0].time_signature();
+        let end = grooph_measure::grid::DEFAULT_GRID.ticks_per_measure(&ts) as f64 - 1.0;
+        let next = |at, bars| current_cursor_x(&score, &staff, (at, end), bars).unwrap().0;
+        // At the end of the last bar that plays the line enters the first,
+        // not the ghost bar.
+        assert_eq!(next(1, 0..2), 0);
+        assert_eq!(next(0, 0..2), 1);
+        // Bars played on their own loop among themselves.
+        assert_eq!(next(1, 1..2), 1);
+        assert_eq!(next(2, 1..3), 1);
+    }
+
+    #[test]
     fn count_labels_sit_over_a_lower_voices_notes() {
         use grooph_measure::counting::{CountConfig, Subdivision};
         let (score, staff) = busy_kick();
@@ -413,7 +442,7 @@ mod tests {
         let marks = PlaybackMarks::Line;
         let opts = opts();
         let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
-            draw_staff(ui, &score, &staff, None, None, None, marks, Some(&config), &opts);
+            draw_staff(ui, &score, &staff, None, None, None, 0..1, marks, Some(&config), &opts);
         });
         output.textures_delta.clear();
         let ands: Vec<f32> = output
