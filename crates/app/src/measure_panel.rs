@@ -227,8 +227,14 @@ impl Grooph {
                         // the top or bottom of the score.
                         let view_height = ui.clip_rect().height();
                         let max_offset = (staff.total_size.y - view_height).max(0.0);
-                        let row_offset = (placed.rect.center().y - origin.y - view_height / 2.0)
+                        let centred = (placed.rect.center().y - origin.y - view_height / 2.0)
                             .clamp(0.0, max_offset);
+                        // A row already in view stays where it is: starting
+                        // to play must not scroll the staff to the ghost bar.
+                        let shown = (ui.clip_rect().top() - origin.y).clamp(0.0, max_offset);
+                        let in_view = placed.rect.top() - origin.y >= shown
+                            && placed.rect.bottom() - origin.y <= shown + view_height;
+                        let row_offset = if in_view { shown } else { centred };
                         let now = ui.input(|i| i.time);
                         let playback = &mut self.playback_ctl.playback;
                         let offset = playback.scroll.update(row_offset, now);
@@ -747,14 +753,12 @@ fn draw_ghost_bar(ui: &egui::Ui, rect: Rect, hovered: bool) {
             4.0,
         ));
     }
-    let size = (0.5 * frame.height()).clamp(16.0, 48.0);
-    painter.text(
-        rect.center(),
-        egui::Align2::CENTER_CENTER,
-        "+",
-        FontId::proportional(size),
-        color,
-    );
+    // Drawn as two bars, thicker than the font's "+".
+    let arm = (0.2 * frame.height()).clamp(7.0, 20.0);
+    let thick = egui::Stroke::new((arm / 5.0).max(2.5), color);
+    let c = rect.center();
+    painter.line_segment([c - egui::vec2(arm, 0.0), c + egui::vec2(arm, 0.0)], thick);
+    painter.line_segment([c - egui::vec2(0.0, arm), c + egui::vec2(0.0, arm)], thick);
 }
 
 /// Dim a bar silenced by the gap click, so the silence reads as intended.
