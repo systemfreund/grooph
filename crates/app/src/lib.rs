@@ -1559,6 +1559,25 @@ mod tests {
     }
 
     #[test]
+    fn an_editor_folds_the_options_sheet_as_it_opens() {
+        use super::Grooph;
+
+        let ctx = eframe::egui::Context::default();
+        let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let mut app = Grooph::new(&cc);
+        for tab in [Tab::Practice, Tab::Score, Tab::Metronome] {
+            app.select_tab(tab);
+            app.ui.shell.options_collapsed = false;
+            shell_frame(&mut app, &ctx, 0.0, vec![]);
+            app.edit_page();
+            shell_frame(&mut app, &ctx, 0.1, vec![]);
+            // Folded already, so Done shows no sheet sliding shut.
+            assert!(app.ui.shell.options_collapsed, "{tab:?}");
+            app.leave_editor();
+        }
+    }
+
+    #[test]
     fn more_leaves_the_playing_metronome_alone() {
         use super::{Grooph, Mode, TransportState};
 

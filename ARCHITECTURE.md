@@ -659,8 +659,9 @@ grooph's metronome runs inside AI chats as an
   Each of Metronome, Practice and Score is in `Mode::Playback` (its card) or
   `Mode::Edit` (tool palette above an edit bar at the bottom with Done as
   ✔, and no tab bar: Done,
-  Esc or Back leave the editor, `leave_editor`, and fold the options sheet
-  away so the page itself shows) on its own document; Esc
+  Esc or Back leave the editor, `leave_editor`, and the page itself shows:
+  `shell_ui` folds the options sheet as the editor opens, its animation
+  snapped shut, so it does not slide shut after Done) on its own document; Esc
   switches between the two, Back closes the editor. The tab is derived from
   the document (`tab`), More from `Mode::MoreMenu`. More stays in front of
   an open metronome and leaves it playing (`advance_unseen_playback` moves

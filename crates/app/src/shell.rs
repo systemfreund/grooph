@@ -41,6 +41,8 @@ const CARD_VALUE_SIZE: f32 = 26.0;
 const CARD_METER_EM: f32 = 34.0;
 const PLAY_BUTTON_SIZE: f32 = 68.0;
 const SIDE_BUTTON_SIZE: f32 = 52.0;
+/// The options sheet's animation (see [`Grooph::sheet_options`]).
+const SHEET_OPTIONS_ID: &str = "shell_sheet_options";
 /// Most height the metronome tab's staff takes, however wide the window;
 /// the ring below takes the rest.
 const METRONOME_STAFF_MAX: f32 = 220.0;
@@ -618,6 +620,12 @@ impl Grooph {
 
     pub(super) fn shell_ui(&mut self, ui: &mut Ui) {
         let tab = self.tab();
+        // An editor folds the options sheet away as it opens, at once, so
+        // Done brings back the page without the sheet sliding shut.
+        if self.ui.mode == Mode::Edit {
+            self.ui.shell.options_collapsed = true;
+            ui.ctx().animate_bool_with_time(Id::unique(SHEET_OPTIONS_ID), false, 0.0);
+        }
         // An editor has the screen to itself: Done leaves it, and the tool
         // grid gets the tab bar's room.
         if !matches!(self.ui.mode, Mode::Edit | Mode::TimeSignature(_)) {
@@ -975,7 +983,7 @@ impl Grooph {
         card: Option<SheetCard>,
         add_rows: impl FnOnce(&mut Self, &mut Ui),
     ) -> Option<(LayerId, Rect)> {
-        let id = Id::unique("shell_sheet_options");
+        let id = Id::unique(SHEET_OPTIONS_ID);
         let openness = ui.ctx().animate_bool_responsive(id, !self.ui.shell.options_collapsed);
         let SheetCard { rect: card, shadow_painter, shadow_slot } = card?;
         if openness <= 0.0 || !card.is_positive() {

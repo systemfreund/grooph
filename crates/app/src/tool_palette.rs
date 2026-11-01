@@ -277,7 +277,8 @@ impl Grooph {
 
     /// A modifier's cell shows the cursor's beat as it modifies it: its value
     /// with the accent, the ghost note's parentheses or the dot. `None` for
-    /// the other tools, and for a value the dot cannot show (a dotted 32nd).
+    /// the other tools, and for a value the dot cannot show (a dotted half,
+    /// whole or 32nd: the cell keeps its own label).
     fn modifier_preview(&self, tool: &Tool) -> Option<Measure> {
         let (accented, soft, dot) = match tool.kind {
             ToolKind::Modify(Modifier::ToggleAccent) => (true, false, false),
@@ -293,7 +294,10 @@ impl Grooph {
             Duration::Dotted { dots: 1, .. } => Duration::Dotted { base, dots: 1 },
             _ => Duration::Simple(base),
         };
-        if matches!(duration, Duration::Dotted { .. }) && base == NoteValue::ThirtySecond {
+        // A button's measure holds a dotted quarter, eighth or sixteenth.
+        if matches!(duration, Duration::Dotted { .. })
+            && !matches!(base, NoteValue::Quarter | NoteValue::Eighth | NoteValue::Sixteenth)
+        {
             return None;
         }
         let template = BeatTemplate { duration, kind: Note, accented, soft };
@@ -1038,6 +1042,12 @@ mod tests {
         app.editor.doc_mut().cursor = Cursor::at(0, 2);
         assert_eq!(shown(&app, "modify.toggle.accent"), (e_dot, true, false));
         assert!(app.modifier_preview(tool("insert.note.q")).is_none());
+        // A half note shows its accent; the dot keeps its own label, as a
+        // button cannot hold a dotted half.
+        app.editor.doc_mut().cursor = Cursor::at(0, 4);
+        let h = Duration::Simple(NoteValue::Half);
+        assert_eq!(shown(&app, "modify.toggle.accent"), (h, true, false));
+        assert!(app.modifier_preview(tool("modify.toggle.dotted")).is_none());
     }
 
     #[test]
