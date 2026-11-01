@@ -128,7 +128,9 @@ impl Score {
         let mut count = [[0usize; 2]; Instrument::ALL.len()];
         for m in self.measures.iter().filter(|m| !multi || m.voices().len() > 1) {
             for (v, voice) in m.voices().iter().enumerate() {
-                for head in voice.beats().iter().flat_map(|b| b.heads().iter()) {
+                let heads = voice.beats().iter().flat_map(|b| b.heads().iter());
+                // The one line's rhythm is always above, in no voicing.
+                for head in heads.filter(|h| h.instrument() != Instrument::Rhythm) {
                     count[head.instrument() as usize][usize::from(v > 0)] += 1;
                 }
             }
@@ -350,6 +352,9 @@ mod tests {
         assert!(!custom.is_lower(Snare) && !custom.is_lower(HiHat));
         // The hi-hat foot has no hint and is below as the default has it.
         assert!(custom.is_lower(Instrument::HiHatFoot));
+        // A rhythm head in the lower voice is no hint: still one voice.
+        let mixed = derive("4/4 K-H:q H:q S-H:q H:q ; q q q q");
+        assert_eq!(mixed, Voicing::ONE_VOICE);
         // The one line keeps the default.
         assert_eq!(derive("4/4 q q q q"), Voicing::default());
     }

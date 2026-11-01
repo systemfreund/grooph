@@ -1631,6 +1631,10 @@ mod tests {
         assert_eq!(rule(hands_feet), Voicing::HANDS_FEET);
         assert_eq!(rule(one), Voicing::ONE_VOICE);
         assert_eq!(rule(cymbals), Voicing::CYMBALS_ABOVE);
+        // The same when the link opens on the practice page (score tab hidden).
+        let mut app = editing(cymbals);
+        app.replace_practice_from_link(app.editor.doc().score.clone());
+        assert_eq!(app.editor.doc().score.voicing, Voicing::CYMBALS_ABOVE);
         // A fill in one voice does not change the rule.
         let fill = format!("{cymbals} | S:s S:s T1:s T1:s T2:s T2:s FT:s FT:s K-CR:q r:q");
         assert_eq!(rule(&fill), Voicing::CYMBALS_ABOVE);

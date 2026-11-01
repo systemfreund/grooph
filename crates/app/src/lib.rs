@@ -981,6 +981,8 @@ impl Grooph {
     /// one from the generator would. Reports as
     /// [`Self::replace_score_from_link`].
     fn replace_practice_from_link(&mut self, mut score: Score) -> bool {
+        // A kit score link opens here while the score tab is hidden.
+        score.voicing = score.derive_voicing(grooph_measure::Voicing::default());
         let undoubled = score.undouble_instruments();
         self.stop_transport();
         self.show_document(Document::Practice);
