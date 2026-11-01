@@ -43,7 +43,7 @@ const PLAY_BUTTON_SIZE: f32 = 68.0;
 const SIDE_BUTTON_SIZE: f32 = 52.0;
 /// The width from which an editor's bar holds its own buttons in its one
 /// line, next to undo, redo and clear (see [`Grooph::editor_bar`]).
-const ONE_LINE_EDIT_BAR: f32 = 480.0;
+const ONE_LINE_EDIT_BAR: f32 = 360.0;
 /// Most height the metronome tab's staff takes, however wide the window;
 /// the ring below takes the rest.
 const METRONOME_STAFF_MAX: f32 = 220.0;
@@ -1362,11 +1362,9 @@ impl Grooph {
     }
 
     /// Play button and measure controls below the tool palette, as wide as it.
+    /// A bar is added by a tap on the ghost bar after the last one.
     fn edit_bar(&mut self, ui: &mut Ui) {
         self.editor_bar(ui, "shell_edit_bar", true, |app, ui| {
-            if ui.button("➕").on_hover_text("Add a bar").clicked() {
-                app.append_measure();
-            }
             if ui.button("➖").on_hover_text("Remove this bar").clicked() {
                 app.remove_current_measure();
             }

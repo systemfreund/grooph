@@ -715,21 +715,19 @@ impl Grooph {
         result
     }
 
-    /// Append a new empty measure after the current one. The new measure
-    /// inherits the time signature and the voices of the active measure.
-    /// Moves the cursor to the start of the new measure, in its voice.
-    pub(crate) fn append_measure(&mut self) {
-        // The metronome's document is one bar: its meter's clicks.
+    /// Add an empty bar after the last one, like it, and move the cursor
+    /// there (the editor's ghost bar). Not in the metronome's one bar.
+    pub(crate) fn push_measure(&mut self) {
         if self.metronome_mode() {
             return;
         }
         self.with_undo_snapshot(|app| {
-            let current = app.current_measure();
-            let new_measure = current.empty_like(current.time_signature());
-            let insert_at = app.editor.doc().cursor.measure_idx + 1;
-            app.editor.doc_mut().score.insert(insert_at, new_measure);
-            app.editor.doc_mut().cursor.measure_idx = insert_at;
-            app.editor.doc_mut().cursor.beat_idx = 0;
+            let doc = app.editor.doc_mut();
+            let last = &doc.score.measures()[doc.score.len() - 1];
+            let new_measure = last.empty_like(last.time_signature());
+            doc.score.push(new_measure);
+            let cursor = Cursor { measure_idx: doc.score.len() - 1, beat_idx: 0, ..doc.cursor };
+            doc.cursor = doc.score.clamp_cursor(cursor);
             true
         });
     }

@@ -171,6 +171,19 @@ impl Grooph {
                     let score = calibration
                         .as_ref()
                         .unwrap_or(&self.editor.docs.get(self.editor.document).score);
+                    // A rhythm's editor shows an empty "ghost" bar after the
+                    // last one: a tap there adds a bar. Laid out with the
+                    // score, drawn veiled.
+                    let ghost = (self.ui.mode == Mode::Edit
+                        && !self.metronome_mode()
+                        && calibration.is_none())
+                    .then(|| {
+                        let mut shown = score.clone();
+                        let last = &score.measures()[score.len() - 1];
+                        shown.push(last.empty_like(last.time_signature()));
+                        shown
+                    });
+                    let score = ghost.as_ref().unwrap_or(score);
                     let staff = build_staff_layout(score, &staff_opts);
                     // One row fits the height, so nothing above or below
                     // the staff (accents, count labels) is cut off on a
@@ -263,6 +276,8 @@ impl Grooph {
 
                     let (rect, resp) =
                         ui.allocate_exact_size(staff.total_size, egui::Sense::click_and_drag());
+                    let ghost_rect =
+                        ghost.as_ref().and_then(|g| staff.placed(g.len() - 1)).map(|p| p.rect);
 
                     let cursor = (self.ui.mode == Mode::Edit).then_some(staff_cursor);
                     let playback = playback_local;
@@ -326,6 +341,11 @@ impl Grooph {
                         ui.ctx().request_repaint();
                     }
 
+                    if let Some(ghost) = ghost_rect {
+                        let hovered = resp.hover_pos().is_some_and(|p| ghost.contains(p));
+                        draw_ghost_bar(ui, ghost, hovered);
+                    }
+
                     if self.playback_ctl.playback.bar_muted
                         && let Some((m_idx, _)) = playback_local
                         && let Some(placed) = staff.placed(m_idx)
@@ -348,7 +368,7 @@ impl Grooph {
                             eframe::egui::style::ScrollAnimation::none(),
                         );
                     } else {
-                        self.handle_input(resp, &staff, with_ring);
+                        self.handle_input(resp, &staff, with_ring, ghost_rect);
                     }
                 });
             });
@@ -536,7 +556,15 @@ impl Grooph {
 
     /// `with_ring`: under the metronome's ring a tap changes the tapped
     /// click's level, as on the ring.
-    fn handle_input(&mut self, resp: Response, staff: &StaffLayout, with_ring: bool) {
+    /// `ghost`: where the editor's ghost bar is, which a tap turns into a
+    /// bar at the end.
+    fn handle_input(
+        &mut self,
+        resp: Response,
+        staff: &StaffLayout,
+        with_ring: bool,
+        ghost: Option<Rect>,
+    ) {
         // While playing along, a touch or click on the staff is a hit, not an edit.
         if self.tap_capture_active() {
             if resp.contains_pointer() && resp.ctx.input(|i| i.pointer.any_pressed()) {
@@ -555,10 +583,19 @@ impl Grooph {
             }
             return;
         }
+        if resp.clicked()
+            && let Some(ghost) = ghost
+            && resp.interact_pointer_pos().is_some_and(|p| ghost.contains(p))
+        {
+            self.push_measure();
+            return;
+        }
         if !matches!(self.ui.mode, Mode::TimeSignature(_))
             && (resp.clicked() || resp.dragged())
             && let Some(pos) = resp.interact_pointer_pos()
             && let Some(hit) = hit_test_head(staff, pos)
+            // Not the ghost bar's rests.
+            && hit.measure_idx < self.editor.doc().score.len()
         {
             // A tap on another voice edits that voice from now on: in the
             // metronome tab the click bar or its counter rhythm. On the
@@ -578,6 +615,39 @@ impl Grooph {
             }
         }
     }
+}
+
+/// The editor's ghost bar in `rect`: its rests veiled, a dashed frame and a
+/// "+" in the middle, brighter under the pointer.
+fn draw_ghost_bar(ui: &egui::Ui, rect: Rect, hovered: bool) {
+    let visuals = ui.visuals();
+    let bg = visuals.panel_fill;
+    let painter = ui.painter();
+    painter.rect_filled(
+        rect,
+        4.0,
+        egui::Color32::from_rgba_unmultiplied(bg.r(), bg.g(), bg.b(), 230),
+    );
+    let color = if hovered { visuals.text_color() } else { visuals.weak_text_color() };
+    let frame = rect.shrink(4.0);
+    let stroke = egui::Stroke::new(1.5, color);
+    let corners = [frame.left_top(), frame.right_top(), frame.right_bottom(), frame.left_bottom()];
+    for i in 0..4 {
+        painter.extend(egui::Shape::dashed_line(
+            &[corners[i], corners[(i + 1) % 4]],
+            stroke,
+            6.0,
+            4.0,
+        ));
+    }
+    let size = (0.5 * frame.height()).clamp(16.0, 48.0);
+    painter.text(
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
+        "+",
+        FontId::proportional(size),
+        color,
+    );
 }
 
 /// Dim a bar silenced by the gap click, so the silence reads as intended.

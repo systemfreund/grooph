@@ -804,12 +804,11 @@ mod tests {
         apply(&mut two, "nav.end");
         assert_eq!(two.editor.doc().cursor, Cursor::in_voice(1, 1, 1));
         // A new measure has the voices of the one before.
-        app.editor.doc_mut().cursor = Cursor::in_voice(0, 1, 0);
-        app.append_measure();
-        assert_eq!(app.editor.doc().cursor, Cursor::in_voice(1, 1, 0));
-        assert_eq!(app.editor.doc().score.measures()[1].voices().len(), 2);
-        app.remove_current_measure();
-        assert_eq!(app.editor.doc().cursor, Cursor::in_voice(1, 1, 0));
+        two.push_measure();
+        assert_eq!(two.editor.doc().cursor, Cursor::in_voice(2, 1, 0));
+        assert_eq!(two.editor.doc().score.measures()[2].voices().len(), 2);
+        two.remove_current_measure();
+        assert_eq!(two.editor.doc().cursor.voice, 1);
     }
 
     #[test]
@@ -1035,6 +1034,23 @@ mod tests {
         app.editor.doc_mut().cursor = Cursor::at(0, 2);
         assert_eq!(shown(&app, "modify.toggle.accent"), (e_dot, true, false));
         assert!(app.modifier_preview(tool("insert.note.q")).is_none());
+    }
+
+    #[test]
+    fn the_ghost_bar_adds_a_bar_at_the_end() {
+        let mut app = editing("4/4 H:q H:q H:q H:q ; K:h K:h | 3/4 q q q");
+        app.editor.doc_mut().cursor = Cursor::in_voice(0, 1, 1);
+        app.push_measure();
+        assert_eq!(text(&app), "4/4 H:q H:q H:q H:q ; K:h K:h | 3/4 q q q | r:q r:q r:q");
+        // The cursor goes there, in the voice it can.
+        assert_eq!(app.editor.doc().cursor, Cursor::at(2, 0));
+        apply(&mut app, "edit.undo");
+        assert_eq!(text(&app), "4/4 H:q H:q H:q H:q ; K:h K:h | 3/4 q q q");
+        // Not in the metronome's one bar.
+        app.select_tab(Tab::Metronome);
+        let bars = app.editor.doc().score.len();
+        app.push_measure();
+        assert_eq!(app.editor.doc().score.len(), bars);
     }
 
     #[test]
