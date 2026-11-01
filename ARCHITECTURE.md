@@ -715,7 +715,8 @@ clears the voice being edited. A modifier's cell is greyed out where it
 would change nothing on the cursor's beat (`modifier_applies`, tried on a
 copy of the bar): an accent on a rest, a dot without room, a technique
 without the head or its instrument's. Accent, ghost and dot show the cursor's beat as they
-would change it (`modifier_preview`): its value with the mark. A voice is picked by a tap on
+would change it (`modifier_preview`): its value with the mark. The tuplet the cursor's beat is
+in shows as picked (`cell_selected`); a tap on it dissolves the group. A voice is picked by a tap on
 it, or on the kit by picking an instrument. The
 columns follow the width of the page's column (`grid_metrics`, cells 54 to
 64 px wide; grid and bar both in `centered_column`, so on a wide screen they

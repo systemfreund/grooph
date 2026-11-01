@@ -219,8 +219,8 @@ impl Grooph {
         }
     }
 
-    /// Whether `cell` shows as picked: the instrument, the voice, or the
-    /// technique of the picked instrument's head on the cursor's beat.
+    /// Whether `cell` shows as picked: the instrument, the technique of the
+    /// picked instrument's head on the cursor's beat, or the tuplet it is in.
     fn cell_selected(&self, cell: Cell) -> bool {
         match cell {
             Cell::Instrument(i) => i == self.edit_instrument(),
@@ -232,8 +232,22 @@ impl Grooph {
                     .and_then(|b| b.heads().get(self.edit_instrument()))
                     .is_some_and(|h| h.technique() == *t)
             }
-            Cell::Tool(_) => false,
+            // The tuplet the cursor is in: a tap on it dissolves the group.
+            Cell::Tool(t) => self.in_tuplet_of(t),
         }
+    }
+
+    /// Whether the cursor's beat is in a group of `tool`'s tuplet.
+    fn in_tuplet_of(&self, tool: &Tool) -> bool {
+        let ToolKind::InsertBeat(BeatTemplate { duration: Duration::Tuplet(spec), .. }) = tool.kind
+        else {
+            return false;
+        };
+        let cursor = self.editor.doc().score.clamp_cursor(self.editor.doc().cursor);
+        self.current_voice()
+            .beats()
+            .get(cursor.beat_idx)
+            .is_some_and(|b| b.duration == Duration::Tuplet(spec))
     }
 
     /// Whether `cell` does something now: undo and redo with a step to take,
@@ -317,6 +331,7 @@ impl Grooph {
                     ToolKind::Modify(Modifier::ToggleHead) => {
                         "Add the instrument here, or take it away".to_owned()
                     }
+                    ToolKind::InsertBeat(_) if selected => "Dissolve the tuplet".to_owned(),
                     _ => t.label.to_owned(),
                 };
                 let hover = match t.shortcuts.first() {
@@ -1048,6 +1063,22 @@ mod tests {
         let h = Duration::Simple(NoteValue::Half);
         assert_eq!(shown(&app, "modify.toggle.accent"), (h, true, false));
         assert!(app.modifier_preview(tool("modify.toggle.dotted")).is_none());
+    }
+
+    #[test]
+    fn the_cursors_tuplet_is_marked_and_a_tap_dissolves_it() {
+        let mut app = editing("4/4 t8 t8 t8 q q q");
+        use super::{Cell, tool};
+        let cell = |id| Cell::Tool(tool(id));
+        assert!(app.cell_selected(cell("insert.tuplet.t8")));
+        assert!(!app.cell_selected(cell("insert.tuplet.t16")));
+        assert!(!app.cell_selected(cell("insert.note.e")));
+        apply(&mut app, "insert.tuplet.t8");
+        assert!(!text(&app).contains("t8"), "{}", text(&app));
+        assert!(!app.cell_selected(cell("insert.tuplet.t8")));
+        // Outside a group, nothing is marked.
+        app.editor.doc_mut().cursor = Cursor::at(0, app.current_voice().beats().len() - 1);
+        assert!(!app.cell_selected(cell("insert.tuplet.t8")));
     }
 
     #[test]
