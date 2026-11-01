@@ -938,7 +938,7 @@ impl Grooph {
 
     /// The measure a tool button shows: one beat of `template`, or a whole
     /// group for a tuplet, in a time signature it fills exactly.
-    fn build_button_measure(template: BeatTemplate) -> Measure {
+    pub(crate) fn build_button_measure(template: BeatTemplate) -> Measure {
         let denominator = template.duration.base_note().denominator();
         let time_signature = match template.duration {
             Duration::Tuplet(TupletSpec { m, .. }) => TimeSignature::new(m, denominator),
@@ -966,13 +966,14 @@ impl Grooph {
                 };
                 measure.first_voice_mut().set_beat(0, beat).unwrap();
             }
-            Duration::Simple(..) => {
-                if template.accented {
-                    measure.first_voice_mut().toggle_accent(0, Instrument::Rhythm);
-                }
-                if template.soft {
-                    measure.first_voice_mut().toggle_soft(0, Instrument::Rhythm);
-                }
+            Duration::Simple(..) => {}
+        }
+        if !matches!(template.duration, Duration::Tuplet(..)) {
+            if template.accented {
+                measure.first_voice_mut().toggle_accent(0, Instrument::Rhythm);
+            }
+            if template.soft {
+                measure.first_voice_mut().toggle_soft(0, Instrument::Rhythm);
             }
         }
 

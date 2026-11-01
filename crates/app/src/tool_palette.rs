@@ -1,7 +1,7 @@
 use crate::Grooph;
 use crate::kit_palette::{instrument_label, instrument_short};
 use crate::pickers::Picker;
-use crate::tools::{DeleteOp, MetaOp, Modifier, NavOp, Tool, ToolKind, all_tools};
+use crate::tools::{BeatTemplate, DeleteOp, MetaOp, Modifier, NavOp, Tool, ToolKind, all_tools};
 use crate::{Mode, tools};
 use eframe::egui;
 use eframe::egui::scroll_area::ScrollBarVisibility;
@@ -13,7 +13,7 @@ use grooph_layout::pixel_layout::{
     LayoutOpts, MeasureLayout, build_measure_layout, build_time_sig_layout, compute_em,
 };
 use grooph_measure::BeatKind::{Note, Rest};
-use grooph_measure::duration::{Duration, TupletKind};
+use grooph_measure::duration::{Duration, NoteValue, TupletKind};
 use grooph_measure::{Cursor, Instrument, Measure, StaffKind, Technique, VoiceBar};
 use grooph_render::measure::{draw_notes, draw_time_signature};
 use log::info;
@@ -271,6 +271,31 @@ impl Grooph {
             || measure.doubled_instruments().iter().all(|d| before.contains(d))
     }
 
+    /// A modifier's cell shows the cursor's beat as it modifies it: its value
+    /// with the accent, the ghost note's parentheses or the dot. `None` for
+    /// the other tools, and for a value the dot cannot show (a dotted 32nd).
+    fn modifier_preview(&self, tool: &Tool) -> Option<Measure> {
+        let (accented, soft, dot) = match tool.kind {
+            ToolKind::Modify(Modifier::ToggleAccent) => (true, false, false),
+            ToolKind::Modify(Modifier::ToggleSoft) => (false, true, false),
+            ToolKind::Modify(Modifier::ToggleDotted { .. }) => (false, false, true),
+            _ => return None,
+        };
+        let cursor = self.editor.doc().score.clamp_cursor(self.editor.doc().cursor);
+        let beat = self.current_voice().beats().get(cursor.beat_idx)?;
+        let base = beat.duration.base_note();
+        let duration = match beat.duration {
+            _ if dot => Duration::Dotted { base, dots: 1 },
+            Duration::Dotted { dots: 1, .. } => Duration::Dotted { base, dots: 1 },
+            _ => Duration::Simple(base),
+        };
+        if matches!(duration, Duration::Dotted { .. }) && base == NoteValue::ThirtySecond {
+            return None;
+        }
+        let template = BeatTemplate { duration, kind: Note, accented, soft };
+        Some(Grooph::build_button_measure(template))
+    }
+
     /// One cell of the grid in `rect`, framed like a button.
     fn grid_cell(&self, ui: &mut Ui, rect: Rect, cell: Cell) -> Response {
         let enabled = self.cell_enabled(cell);
@@ -323,8 +348,13 @@ impl Grooph {
         let inner = rect.shrink(NOTATION_PADDING);
         match cell {
             Cell::Tool(t) if matches!(button_kind(&t.kind), ButtonKind::Note) => {
-                let measure = &self.editor.button_measures[t.id];
-                paint_notation(ui, inner, measure, self.ui.music_font_id.family.clone(), color);
+                let family = self.ui.music_font_id.family.clone();
+                match self.modifier_preview(t) {
+                    Some(measure) => paint_notation(ui, inner, &measure, family, color),
+                    None => {
+                        paint_notation(ui, inner, &self.editor.button_measures[t.id], family, color)
+                    }
+                }
             }
             Cell::Tool(t) if matches!(button_kind(&t.kind), ButtonKind::TimeSignature) => {
                 self.paint_time_signature(ui, inner, color);
@@ -984,6 +1014,27 @@ mod tests {
         app.editor.doc_mut().cursor = Cursor::in_voice(0, 1, 0);
         assert!(!app.cell_enabled(cell("modify.technique.open")));
         assert!(app.cell_enabled(cell("modify.toggle.accent")));
+    }
+
+    #[test]
+    fn a_modifier_shows_the_cursors_beat() {
+        use grooph_measure::duration::{Duration, NoteValue};
+        let tool = |id| all_tools().iter().find(|t| t.id == id).unwrap();
+        let mut app = editing("4/4 e e e. s h");
+        let shown = |app: &Grooph, id| {
+            let m = app.modifier_preview(tool(id)).unwrap();
+            let b = m.first_voice().beats()[0];
+            (b.duration, b.accented(), b.soft())
+        };
+        let e = Duration::Simple(NoteValue::Eighth);
+        let e_dot = Duration::Dotted { base: NoteValue::Eighth, dots: 1 };
+        assert_eq!(shown(&app, "modify.toggle.accent"), (e, true, false));
+        assert_eq!(shown(&app, "modify.toggle.soft"), (e, false, true));
+        assert_eq!(shown(&app, "modify.toggle.dotted"), (e_dot, false, false));
+        // A dotted beat keeps its dot under the accent.
+        app.editor.doc_mut().cursor = Cursor::at(0, 2);
+        assert_eq!(shown(&app, "modify.toggle.accent"), (e_dot, true, false));
+        assert!(app.modifier_preview(tool("insert.note.q")).is_none());
     }
 
     #[test]
