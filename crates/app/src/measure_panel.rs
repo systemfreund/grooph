@@ -294,8 +294,7 @@ impl Grooph {
                     self.ui.followed_cursor = followed;
                     self.ui.followed_view_height = view_height;
 
-                    let (rect, resp) =
-                        ui.allocate_exact_size(staff.total_size, egui::Sense::click_and_drag());
+                    let (rect, resp) = ui.allocate_exact_size(staff.total_size, staff_sense(ui));
                     let ghost_rect =
                         ghost.as_ref().and_then(|g| staff.placed(g.len() - 1)).map(|p| p.rect);
 
@@ -401,16 +400,7 @@ impl Grooph {
                         &timing,
                         render_opts.staff_space(),
                     );
-                    // A finger dragging over the notes scrolls the score,
-                    // as the mouse wheel does; a mouse drags the edit cursor.
-                    if resp.dragged() && ui.input(|i| i.any_touches()) {
-                        ui.scroll_with_delta_animation(
-                            resp.drag_delta(),
-                            eframe::egui::style::ScrollAnimation::none(),
-                        );
-                    } else {
-                        self.handle_input(resp, &staff, with_ring, ghost_rect);
-                    }
+                    self.handle_input(resp, &staff, with_ring, ghost_rect);
                     match bar_action {
                         Some(BarAction::Select(idx)) => {
                             let doc = self.editor.doc_mut();
@@ -658,6 +648,17 @@ impl Grooph {
                 self.editor.instrument = hit.instrument;
             }
         }
+    }
+}
+
+/// What the staff reacts to: a tap everywhere, and a mouse also its drag
+/// (it moves the edit cursor). A finger's drag is left to the scroll area,
+/// which scrolls with its momentum and its give at the ends, as the tool
+/// grid does.
+fn staff_sense(ui: &egui::Ui) -> egui::Sense {
+    match ui.input(|i| i.any_touches()) {
+        true => egui::Sense::click(),
+        false => egui::Sense::click_and_drag(),
     }
 }
 
