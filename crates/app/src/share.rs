@@ -1,7 +1,6 @@
 //! Sharing the working score or the metronome as a link: the share icon, the
 //! system share sheet or clipboard, and the short "Link copied" notice.
 
-use crate::documents::Document;
 use crate::{Grooph, platform};
 use eframe::egui::{Color32, Painter, Rect, Shape, Stroke, Ui, pos2, vec2};
 use grooph_link::{LinkContent, SharedLink};
@@ -66,8 +65,6 @@ impl Grooph {
             counter: self.metronome_mode().then(|| self.counter_bar()).flatten(),
             // Written as `poly` while its clicks are the ratio's.
             poly: self.metronome_mode().then(|| self.counter_ratio().map(|(r, _)| r)).flatten(),
-            // The rhythm opens where it was shared from.
-            practice: self.document() == Document::Practice,
         }
     }
 

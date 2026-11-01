@@ -278,10 +278,10 @@ spread across callers.
   buttons write only when they were edited (`SharedLink::poly`). `llms.txt`
   and the MCP tool offer only `poly`: models get the notation wrong too often. A score link replaces the score
   tab's score (and opens that tab) through `PendingLoad::Link` and the
-  unsaved-changes dialog; a generator link, or a score link with
-  `page=practice` (`SharedLink::practice`, written when shared from
-  Practice), replaces Practice's rhythm without asking; so does any score
-  link while the score tab is hidden (`opens_on_practice`). The share buttons (`share_link`) build a link with
+  unsaved-changes dialog; a generator link, or a score link of the one
+  line (the score tab edits drum grooves only), replaces Practice's rhythm
+  without asking; so does any score link while the score tab is hidden
+  (`opens_on_practice`). The share buttons (`share_link`) build a link with
   `SharedLink::to_url`.
 - The link format is documented for AI agents in
   `crates/app/assets/seo/llms.txt`; keep it in sync.
@@ -702,8 +702,7 @@ grooph's metronome runs inside AI chats as an
   get tighter staff spacing, so glyphs are bigger on phones.
 - While a tempo ramp runs, the card shows the tempo being played ("BPM now").
 - Share (right of play; not in the editors) builds a score link with tempo
-  and swing, which opens on the page it was shared from (Practice adds
-  `page=practice`); on the web it opens the system share sheet
+  and swing; on the web it opens the system share sheet
   (`platform::open_share_sheet`, Web Share API), else copies the link. In the
   Metronome tab, share (right of play) builds a `ts` link with tempo, swing
   and the click bar instead.

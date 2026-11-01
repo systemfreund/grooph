@@ -959,14 +959,12 @@ impl Grooph {
         }
     }
 
-    /// Whether `link`'s rhythm opens on the practice page: shared from
-    /// there, a rhythm of the one line (the score tab is for drum grooves),
-    /// or while the score tab is hidden (a developer setting), so it does
-    /// not open on a page the user does not have, nor ask about that
-    /// page's unsaved changes.
+    /// Whether `link`'s rhythm opens on the practice page: a rhythm of the
+    /// one line (the score tab is for drum grooves), or while the score tab
+    /// is hidden (a developer setting), so it does not open on a page the
+    /// user does not have, nor ask about that page's unsaved changes.
     fn opens_on_practice(&self, link: &SharedLink) -> bool {
-        link.practice
-            || !self.ui.show_score_tab
+        !self.ui.show_score_tab
             || matches!(&link.content, Some(LinkContent::Score(s)) if s.staff.is_line())
     }
 

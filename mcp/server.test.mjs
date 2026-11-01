@@ -261,7 +261,7 @@ test("the link keys are the parser's", () => {
   const source = fs.readFileSync(path.join(here, "../crates/link/src/lib.rs"), "utf8");
   const parse = source.slice(source.indexOf("fn parse_query_with_default_version"), source.indexOf("let swing = match"));
   const keys = [...parse.matchAll(/^\s*"(\w+)" =>/gm)].map((m) => m[1]);
-  assert.deepEqual([...METRONOME_KEYS, ...GENERATOR_KEYS, "v", "r", "page"].sort(), keys.sort());
+  assert.deepEqual([...METRONOME_KEYS, ...GENERATOR_KEYS, "v", "r"].sort(), keys.sort());
 });
 
 test("a link that is no metronome is an error", async () => {
