@@ -1,5 +1,5 @@
 use crate::grid::DEFAULT_GRID;
-use crate::{BeatIdx, Measure, VoiceBar, VoiceIdx, Voicing};
+use crate::{BeatIdx, Instrument, Measure, VoiceBar, VoiceIdx, Voicing};
 use serde::{Deserialize, Serialize};
 
 pub type MeasureIdx = usize;
@@ -108,6 +108,47 @@ impl Score {
     pub fn undouble_instruments(&mut self) -> bool {
         let voicing = self.voicing;
         self.measures.iter_mut().fold(false, |any, m| m.undouble_instruments(&voicing) | any)
+    }
+
+    /// The voicing the content of this kit score shows, for a score whose
+    /// rule was not stored (a link): for each instrument the voice it is in
+    /// most often, counting the measures of two voices or more, as a
+    /// measure of one is a fill made so on purpose (all measures, if none
+    /// has two). The first of the presets (`default` before the others)
+    /// that agrees with every instrument the content has a voice for is
+    /// the result; if none does, those instruments in their voices and
+    /// the rest as `default` has them. A score of the one line gets
+    /// `default`.
+    pub fn derive_voicing(&self, default: Voicing) -> Voicing {
+        if self.staff != StaffKind::Kit {
+            return default;
+        }
+        let multi = self.measures.iter().any(|m| m.voices().len() > 1);
+        // Per instrument: heads in the upper voice, heads in the lower.
+        let mut count = [[0usize; 2]; Instrument::ALL.len()];
+        for m in self.measures.iter().filter(|m| !multi || m.voices().len() > 1) {
+            for (v, voice) in m.voices().iter().enumerate() {
+                for head in voice.beats().iter().flat_map(|b| b.heads().iter()) {
+                    count[head.instrument() as usize][usize::from(v > 0)] += 1;
+                }
+            }
+        }
+        // `Some(true)` for lower, `None` where the content has no hint.
+        let hint = |i: Instrument| {
+            let [up, down] = count[i as usize];
+            (up != down).then_some(down > up)
+        };
+        let agrees = |v: &Voicing| {
+            Instrument::ALL.into_iter().all(|i| hint(i).is_none_or(|lower| v.is_lower(i) == lower))
+        };
+        [default, Voicing::HANDS_FEET, Voicing::ONE_VOICE, Voicing::CYMBALS_ABOVE]
+            .into_iter()
+            .find(agrees)
+            .unwrap_or_else(|| {
+                Voicing::from_lower(
+                    Instrument::ALL.into_iter().filter(|&i| hint(i).unwrap_or(default.is_lower(i))),
+                )
+            })
     }
 
     /// The measures, taken out of the score: at least one.

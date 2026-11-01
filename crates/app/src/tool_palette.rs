@@ -1202,11 +1202,16 @@ mod tests {
         }
         assert_eq!(text(&app), "4/4 H:q H:q H:q H:q ; K:q r:q K:q r:q");
         // A bar without the kick's voice gets it with the kick, in one step.
-        let mut app = editing("4/4 H:q H:q H:q H:q");
+        let mut app = editing("4/4 r:q r:q r:q r:q");
+        app.editor.doc_mut().score.staff = grooph_measure::StaffKind::Kit;
         app.tap_instrument(Kick);
         assert!(text(&app).contains(';'));
         apply(&mut app, "edit.undo");
-        assert_eq!(text(&app), "4/4 H:q H:q H:q H:q");
+        assert_eq!(text(&app), "kit 4/4 r:q r:q r:q r:q");
+        // A bar of one voice with notes stays one voice.
+        let mut app = editing("4/4 H:q H:q H:q H:q");
+        app.tap_instrument(Kick);
+        assert_eq!(text(&app), "4/4 K-H:q H:q H:q H:q");
     }
 
     #[test]
@@ -1584,5 +1589,50 @@ mod tests {
         );
         assert_eq!(groove.measures()[0].voices().len(), 1);
         assert_eq!(groove.voicing, Voicing::ONE_VOICE);
+    }
+
+    #[test]
+    fn kit_input_follows_the_style_of_the_measure() {
+        use grooph_measure::Instrument::{Kick, Snare};
+        // The snare is down in this measure, though the rule has it up.
+        let mut app = editing("4/4 H:q H:q H:q H:q ; S:q r:q S:q r:q");
+        app.editor.doc_mut().cursor = Cursor::in_voice(0, 0, 1);
+        app.tap_instrument(Snare);
+        assert_eq!(text(&app), "4/4 H:q H:q H:q H:q ; S:q S:q S:q r:q");
+        assert_eq!(app.editor.doc().cursor, Cursor::in_voice(0, 1, 1));
+        // So does picking it on a beat where it is not.
+        app.editor.doc_mut().cursor = Cursor::in_voice(0, 0, 3);
+        app.pick_instrument(Snare);
+        assert_eq!(app.editor.doc().cursor, Cursor::in_voice(0, 1, 3));
+        // A single-voice fill stays one voice: the kick goes above.
+        let mut app = editing("4/4 S:s S:s T1:s T1:s T2:s T2:s FT:s FT:s S:q r:q");
+        app.editor.doc_mut().cursor = Cursor::in_voice(0, 0, 8);
+        app.tap_instrument(Kick);
+        assert_eq!(app.current_measure().voices().len(), 1);
+        assert_eq!(app.editor.doc().cursor, Cursor::in_voice(0, 0, 8));
+        // An empty measure follows the rule.
+        let mut app = editing("4/4 r:q r:q r:q r:q");
+        app.editor.doc_mut().score.staff = grooph_measure::StaffKind::Kit;
+        app.tap_instrument(Kick);
+        assert_eq!(app.editor.doc().cursor, Cursor::in_voice(0, 1, 0));
+    }
+
+    #[test]
+    fn the_rule_of_a_link_comes_from_its_content() {
+        use grooph_measure::Voicing;
+        let rule = |notation: &str| {
+            let mut app = editing(notation);
+            app.replace_score_from_link(app.editor.doc().score.clone());
+            app.editor.doc().score.voicing
+        };
+        let hands_feet = "4/4 H:e H:e S-H:e H:e H:e H:e S-H:e H:e ; K:q r:q K:e K:e r:q";
+        let one = "4/4 K-H:e H:e S-H:e H:e K-H:e K-H:e S-H:e H:e";
+        let cymbals = "4/4 H:e H:e H:e H:e H:e H:e H:e H:e ; K:q S:q K:e K:e S:q";
+        assert_eq!(rule(hands_feet), Voicing::HANDS_FEET);
+        assert_eq!(rule(one), Voicing::ONE_VOICE);
+        assert_eq!(rule(cymbals), Voicing::CYMBALS_ABOVE);
+        // A fill in one voice does not change the rule.
+        let fill = format!("{cymbals} | S:s S:s T1:s T1:s T2:s T2:s FT:s FT:s K-CR:q r:q");
+        assert_eq!(rule(&fill), Voicing::CYMBALS_ABOVE);
     }
 }
