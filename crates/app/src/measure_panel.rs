@@ -71,9 +71,9 @@ impl Grooph {
             // No percussion clef: on a single line it says nothing
             // the line doesn't, and every row starts alike.
             layout_clef_first: false,
-            // The compact card in a chat has no meter in
-            // a card: the staff shows it.
-            time_signature_first: self.compact_card(),
+            // The compact card in a chat has no meter in a card: the staff
+            // shows it. So does the score tab's, whatever its meters.
+            time_signature_first: self.compact_card() || self.tab() == crate::shell::Tab::Score,
             room_below_em: if count_config.is_some() {
                 ROOM_BELOW_WITH_LABELS_EM
             } else {

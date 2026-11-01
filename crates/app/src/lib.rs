@@ -2201,6 +2201,30 @@ mod tests {
     }
 
     #[test]
+    fn the_score_tab_always_shows_its_meter() {
+        use super::Grooph;
+        use eframe::egui::{Pos2, RawInput, Rect, vec2};
+
+        let ctx = eframe::egui::Context::default();
+        let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let mut app = Grooph::new(&cc);
+        app.ui.show_score_tab = true;
+        let rect = Rect::from_min_size(Pos2::ZERO, vec2(390.0, 300.0));
+        let first = |app: &mut Grooph, tab| {
+            app.select_tab(tab);
+            let mut shown = false;
+            let input = RawInput { screen_rect: Some(rect), ..Default::default() };
+            let mut output = ctx.run_ui(input, |ui| {
+                shown = app.staff_opts(ui, rect).time_signature_first;
+            });
+            output.textures_delta.clear();
+            shown
+        };
+        assert!(first(&mut app, Tab::Score));
+        assert!(!first(&mut app, Tab::Practice));
+    }
+
+    #[test]
     fn a_kit_link_opens_and_shares_the_groove() {
         use super::Grooph;
         use grooph_measure::StaffKind;
@@ -2245,7 +2269,7 @@ mod tests {
         app.ui.mode = Mode::Edit;
         let mut time = 0.0;
         let mut tap = |app: &mut Grooph, y: f32| {
-            let pos = pos2(195.0, y);
+            let pos = pos2(215.0, y);
             for pressed in [true, false] {
                 let event = Event::PointerButton {
                     pos,
