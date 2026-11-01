@@ -186,8 +186,23 @@ impl Score {
         let to = self.clamp_cursor(Cursor { voice, ..from });
         let onsets = |c: Cursor| DEFAULT_GRID.compute_onset_ticks(self.voice_at(c).beats());
         let tick = onsets(from).get(from.beat_idx).copied().unwrap_or(0);
-        let beat_idx = onsets(to).iter().take_while(|&&t| t <= tick).count().saturating_sub(1);
-        Cursor { beat_idx, ..to }
+        self.cursor_at_tick(to, tick)
+    }
+
+    /// Where `cursor`'s beat starts, in ticks from the start of its measure.
+    pub fn tick_of(&self, cursor: Cursor) -> u32 {
+        let cursor = self.clamp_cursor(cursor);
+        let onsets = DEFAULT_GRID.compute_onset_ticks(self.voice_at(cursor).beats());
+        onsets.get(cursor.beat_idx).copied().unwrap_or(0)
+    }
+
+    /// `cursor` moved within its voice onto the beat sounding at `tick`
+    /// (ticks from the start of its measure).
+    pub fn cursor_at_tick(&self, cursor: Cursor, tick: u32) -> Cursor {
+        let cursor = self.clamp_cursor(cursor);
+        let onsets = DEFAULT_GRID.compute_onset_ticks(self.voice_at(cursor).beats());
+        let beat_idx = onsets.iter().take_while(|&&t| t <= tick).count().saturating_sub(1);
+        Cursor { beat_idx, ..cursor }
     }
 
     /// Whether a note of any voice plays an instrument of the kit

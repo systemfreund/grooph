@@ -163,9 +163,19 @@ impl VoiceBar {
                 ));
             }
         }
-        for range in silent {
-            let units = to_unit(ticks[*range.start()])?..to_unit(end_of(*range.end()))?;
-            others.push((units, &self.beats[range]));
+        // A silent tuplet is a plain rest where one value fills it, also
+        // where it stays as written next to a kept tuplet.
+        let mut silent_units = Vec::new();
+        for range in &silent {
+            silent_units.push(to_unit(ticks[*range.start()])?..to_unit(end_of(*range.end()))?);
+        }
+        let rests: Vec<Option<Beat>> = silent_units
+            .iter()
+            .map(|u| spelling::duration_of(u.end - u.start).map(Beat::rest))
+            .collect();
+        for ((range, units), rest) in silent.into_iter().zip(silent_units).zip(&rests) {
+            let beats = rest.as_ref().map_or(&self.beats[range], std::slice::from_ref);
+            others.push((units, beats));
         }
         // The beats of the meter a kept tuplet is in are kept as written,
         // and so is every other beat sounding in them, with the beats of
@@ -233,10 +243,12 @@ impl VoiceBar {
 }
 
 /// Whether `a` and `b` have the same beats, tuplet groups included
-/// ([`Beat`]'s `PartialEq` leaves them out).
+/// ([`Beat`]'s `PartialEq` leaves them out), and as many tuplet anchors
+/// (a respelled voice only drops anchors no beat names).
 pub(crate) fn same_beats(a: &VoiceBar, b: &VoiceBar) -> bool {
     a.beats == b.beats
         && a.beats.iter().zip(&b.beats).all(|(x, y)| x.tuplet_group_id == y.tuplet_group_id)
+        && a.tuplets.len() == b.tuplets.len()
 }
 
 impl Measure {
@@ -394,6 +406,23 @@ mod tests {
             cleaned("4/4 H:e H:e S-H:e H:e H:e H:e S-H:e H:e ; K:h r:e K:e r:q"),
             "4/4 H:e H:e S-H:e H:e H:e H:e S-H:e H:e ; K:q r:q r:e K:e r:q"
         );
+    }
+
+    #[test]
+    fn a_silent_tuplet_next_to_a_kept_one_becomes_a_rest() {
+        assert_eq!(
+            cleaned("4/4 t16 t16 t16 r:t16 r:t16 r:t16 r:q r:h"),
+            "4/4 t16 t16 t16 r:e r:q r:h"
+        );
+    }
+
+    #[test]
+    fn an_orphan_anchor_is_cleaned_up() {
+        let mut m = measure("4/4 q q q q");
+        m.first_voice_mut().tuplets.register(3, 2, 1, crate::duration::NoteValue::Eighth);
+        assert!(m.needs_clean_up());
+        assert!(m.clean_up());
+        assert!(m.first_voice().tuplets().is_empty());
     }
 
     #[test]

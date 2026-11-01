@@ -1060,6 +1060,51 @@ mod tests {
         }
     }
 
+    /// FNV-1a over the written scores of every offered meter, grouping,
+    /// subdivision, level and two space settings, seeded.
+    fn all_scores_hash() -> u64 {
+        let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+        for beat_unit in TimeSignature::BEAT_UNITS {
+            for beats in TimeSignature::beat_range(beat_unit).unwrap() {
+                let meter = ts(beats, beat_unit);
+                for grouping in 0..meter.groupings().len() {
+                    let time_signature = meter.with_grouping(grouping as u8);
+                    if !supports_time_signature(time_signature) {
+                        continue;
+                    }
+                    for &subdivision in offered_subdivisions(time_signature) {
+                        for complexity in 1..=MAX_COMPLEXITY {
+                            for space in [0.0, 0.5] {
+                                let st = GeneratorSettings {
+                                    subdivision,
+                                    complexity,
+                                    bars: 2,
+                                    time_signature,
+                                    space,
+                                    ..Default::default()
+                                };
+                                let seed = u64::from(beats) << 8 | u64::from(complexity);
+                                let score = generate_score(&st, &mut Rng::new(seed)).unwrap();
+                                let text = crate::notation::format_score(&score).unwrap();
+                                for byte in text.bytes().chain(*b"\n") {
+                                    hash = (hash ^ u64::from(byte)).wrapping_mul(0x100_0000_01b3);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        hash
+    }
+
+    #[test]
+    fn every_offered_meter_is_written_as_before() {
+        // The same as before the spelling moved to `crate::spelling`. A
+        // change here is a change to how the generator spells.
+        assert_eq!(all_scores_hash(), 6_586_938_195_223_420_292);
+    }
+
     #[test]
     fn every_supported_meter_generates_beyond_the_offered_ones() {
         // Also meters the app does not offer, like 4/16 (one group of

@@ -775,17 +775,11 @@ impl Grooph {
         self.with_undo_snapshot(|app| {
             let doc = app.editor.doc_mut();
             let cursor = doc.score.clamp_cursor(doc.cursor);
-            let onsets = |score: &Score| {
-                grooph_measure::grid::DEFAULT_GRID
-                    .compute_onset_ticks(score.voice_at(cursor).beats())
-            };
-            let tick = onsets(&doc.score).get(cursor.beat_idx).copied().unwrap_or(0);
+            let tick = doc.score.tick_of(cursor);
             if !doc.score.measures_mut()[cursor.measure_idx].clean_up() {
                 return false;
             }
-            let beat_idx =
-                onsets(&doc.score).iter().take_while(|&&t| t <= tick).count().saturating_sub(1);
-            doc.cursor = Cursor { beat_idx, ..cursor };
+            doc.cursor = doc.score.cursor_at_tick(cursor, tick);
             true
         });
     }
