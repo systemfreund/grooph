@@ -122,6 +122,10 @@ impl Grooph {
                 let playing = self.playback_ctl.transport_state == TransportState::Playing;
                 // No scroll bar: the wheel, a finger or the cursor scroll
                 // the score, and a bar fading in over the notes distracts.
+                // Nor egui's shading at an edge with more beyond it: as
+                // the cursor scrolls a staff a little wider than the
+                // screen, it would move from one side to the other.
+                ui.spacing_mut().scroll.fade.strength = 0.0;
                 let mut scroll_area = egui::ScrollArea::both()
                     .animated(!playing)
                     .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden);
