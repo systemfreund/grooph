@@ -120,8 +120,10 @@ spread across callers.
   up to the next one but only to the end of its beat (a backbeat reads
   `4-rest 4 4-rest 4`), rests merge per beat and into half rests at the
   start of a pair of beats, `x/8` and `x/16` keep to their beat groups as
-  picked. Tuplets stay as written with the beats they share (a tuplet of
-  rests only becomes a plain rest); a voice whose tuplet starts or ends
+  picked. Tuplets stay as written with the beats they share; a tuplet of
+  rests only becomes a plain rest, and one whose notes all start on the
+  plain grid (a triplet with only its first note) is respelled as plain
+  notes; a voice whose tuplet starts or ends
   inside a beat where no beat starts stays as it is (`None`).
   `Measure::clean_up` does every voice; applying it twice changes
   nothing. `VoiceBar::from_onsets` writes a voice from ticks and heads

@@ -142,40 +142,46 @@ impl VoiceBar {
         if (0..self.beats.len()).any(|i| self.beats[i].duration.is_tuplet() && !in_group(i)) {
             return None;
         }
+        // A tuplet whose notes all start on the plain grid (a triplet with
+        // its first note only) is a plain rhythm written as a tuplet: its
+        // notes are respelled like the others. A tuplet of rests only is a
+        // rest. Other tuplets are kept as written.
         let mut kept = Vec::new();
+        // Every other beat, one by one, and those tuplets as a whole: where
+        // they are, the beats to keep if they stay as written, and the
+        // notes to respell if not.
+        type Other<'a> = (Range<u32>, &'a [Beat], Vec<(u32, Beat)>);
+        let mut others: Vec<Other> = Vec::new();
         let mut silent = Vec::new();
         for g in &groups {
             let beats = &self.beats[g.start_idx..=g.end_idx];
             let units = to_unit(ticks[g.start_idx])?..to_unit(end_of(g.end_idx))?;
-            if beats.iter().all(Beat::is_rest) {
-                silent.push(g.start_idx..=g.end_idx);
-            } else {
-                kept.push(Kept { units, beats });
+            let plain_notes: Option<Vec<(u32, Beat)>> = (g.start_idx..=g.end_idx)
+                .filter(|&i| self.beats[i].is_note())
+                .map(|i| to_unit(ticks[i]).map(|unit| (unit, self.beats[i])))
+                .collect();
+            match plain_notes {
+                Some(notes) if notes.is_empty() => silent.push((units, beats)),
+                Some(notes) => others.push((units, beats, notes)),
+                None => kept.push(Kept { units, beats }),
             }
         }
-        // The other beats, one by one, and the silent tuplets as a whole.
-        let mut others: Vec<(Range<u32>, &[Beat])> = Vec::new();
         for (idx, beat) in self.beats.iter().enumerate() {
             if !in_group(idx) {
-                others.push((
-                    to_unit(ticks[idx])?..to_unit(end_of(idx))?,
-                    std::slice::from_ref(beat),
-                ));
+                let units = to_unit(ticks[idx])?..to_unit(end_of(idx))?;
+                let notes = if beat.is_note() { vec![(units.start, *beat)] } else { vec![] };
+                others.push((units, std::slice::from_ref(beat), notes));
             }
         }
         // A silent tuplet is a plain rest where one value fills it, also
         // where it stays as written next to a kept tuplet.
-        let mut silent_units = Vec::new();
-        for range in &silent {
-            silent_units.push(to_unit(ticks[*range.start()])?..to_unit(end_of(*range.end()))?);
-        }
-        let rests: Vec<Option<Beat>> = silent_units
+        let rests: Vec<Option<Beat>> = silent
             .iter()
-            .map(|u| spelling::duration_of(u.end - u.start).map(Beat::rest))
+            .map(|(u, _)| spelling::duration_of(u.end - u.start).map(Beat::rest))
             .collect();
-        for ((range, units), rest) in silent.into_iter().zip(silent_units).zip(&rests) {
-            let beats = rest.as_ref().map_or(&self.beats[range], std::slice::from_ref);
-            others.push((units, beats));
+        for ((units, beats), rest) in silent.into_iter().zip(&rests) {
+            let beats = rest.as_ref().map_or(beats, std::slice::from_ref);
+            others.push((units, beats, vec![]));
         }
         // The beats of the meter a kept tuplet is in are kept as written,
         // and so is every other beat sounding in them, with the beats of
@@ -190,7 +196,7 @@ impl VoiceBar {
         }
         loop {
             let mut grew = false;
-            for (units, _) in &others {
+            for (units, ..) in &others {
                 if spans.iter().any(|s| s.verbatim && overlap(s, units)) {
                     for span in spans.iter_mut().filter(|s| !s.verbatim && overlap(s, units)) {
                         span.verbatim = true;
@@ -204,12 +210,12 @@ impl VoiceBar {
         }
         let mut notes = Vec::new();
         let mut plain: Vec<Kept> = Vec::new();
-        for (units, beats) in others {
+        for (units, beats, free) in others {
             if spans.iter().any(|s| s.verbatim && overlap(s, &units)) {
                 // Kept as written next to the tuplet, rests too.
                 plain.push(Kept { units, beats });
-            } else if beats[0].is_note() {
-                notes.push((units.start, beats[0]));
+            } else {
+                notes.extend(free);
             }
         }
         notes.sort_by_key(|&(unit, _)| unit);
@@ -379,6 +385,12 @@ mod tests {
         assert_eq!(cleaned("4/4 t8 r:t8 t8 q r:q e r:e"), "4/4 t8 r:t8 t8 q r:q q");
         // A tuplet of rests only becomes a plain rest.
         assert_eq!(cleaned("4/4 q r:t8 r:t8 r:t8 r:h"), "4/4 q r:q r:h");
+        // So does a tuplet whose notes all start on the plain grid.
+        assert_eq!(
+            cleaned("4/4 H:q H:q H:q H:q ; K:h K:t8 r:t8 r:t8 r:q"),
+            "4/4 H:q H:q H:q H:q ; K:q r:q K:q r:q"
+        );
+        assert_eq!(cleaned("4/4 st16 r:st16 r:st16 st16 r:st16 r:st16 r:q r:h"), "4/4 e e r:q r:h");
         // A tuplet from the "and" keeps the beats it shares as written,
         // and a note from there into the next beat keeps that one too.
         assert_eq!(cleaned("4/4 e t8 t8 t8 e r:h"), "4/4 e t8 t8 t8 e r:h");
