@@ -1,6 +1,7 @@
 use eframe::egui;
 use eframe::egui::{Color32, Pos2, Stroke};
 use grooph_layout::pixel_layout::{LayoutOpts, NoteLayout};
+use grooph_measure::duration::NoteValue;
 
 use crate::glyph::draw_glyph;
 
@@ -25,18 +26,36 @@ pub(super) fn draw_beat(
 /// How far a stem stops short of its tip under a flag, in stem thicknesses.
 const FLAG_STEM_INSET: f32 = 1.5;
 
-/// The stem as drawn, from the head to the tip. Under a flag it stops
-/// short of the tip: the flag's top is drawn for the font's thin stem and
-/// slopes away from it, so a thicker stem, rounded to whole pixels, would
-/// show its corner above the flag. The flag covers the stem's last stretch
-/// on its own.
+/// The stem as drawn, from the head to the tip. Where a flag or a beam
+/// covers the tip, the stem stops short of it, inside the flag or beam:
+/// egui rounds a line's ends to pixels and adds a pixel of anti-aliasing
+/// past them, while beams and glyphs round on their own, so a stem reaching
+/// the tip showed above the beam or flag at some zooms and positions. Under
+/// a flag also because the flag's top is drawn for the font's thin stem and
+/// slopes away from it, so a thicker stem shows its corner above it.
 fn drawn_stem(note: &NoteLayout, opts: &LayoutOpts) -> Option<[Pos2; 2]> {
     let stem = note.stem?;
+    let inset = if note.flag.is_some() {
+        FLAG_STEM_INSET * opts.stem_thickness()
+    } else if beamed(note) {
+        // Into the middle of the outermost beam.
+        0.5 * opts.beam_thickness()
+    } else {
+        0.0
+    };
     let mut tip = stem.p2;
-    if note.flag.is_some() {
-        tip.y -= (stem.p2.y - stem.p1.y).signum() * FLAG_STEM_INSET * opts.stem_thickness();
-    }
+    tip.y -= (stem.p2.y - stem.p1.y).signum() * inset;
     Some([stem.p1, tip])
+}
+
+/// Whether the note's stem ends in a beam: a stemlet, or a note shorter
+/// than a quarter without a flag.
+fn beamed(note: &NoteLayout) -> bool {
+    let short = matches!(
+        note.duration.base_note(),
+        NoteValue::Eighth | NoteValue::Sixteenth | NoteValue::ThirtySecond
+    );
+    note.stemlet || (short && note.flag.is_none())
 }
 
 #[cfg(test)]
@@ -86,6 +105,29 @@ mod tests {
             assert!(short > opts.stem_thickness(), "stem_down {stem_down}: {short}");
             let flag = eighth.flag.unwrap().ink();
             assert!(flag.y_range().contains(p2.y), "stem_down {stem_down}: {p2:?} {flag:?}");
+        }
+    }
+
+    #[test]
+    fn a_beamed_stem_ends_in_the_middle_of_its_beam() {
+        for stem_down in [false, true] {
+            let opts = opts(stem_down);
+            let mut measure = Measure::new(TimeSignature::new(2, 8));
+            measure.first_voice_mut().set_beat(0, Beat::note(e())).unwrap();
+            measure.first_voice_mut().set_beat(1, Beat::note(e())).unwrap();
+            let layout = build_measure_layout(measure.first_voice(), &opts);
+            let beam = layout.beams[0].rect;
+            for note in &layout.notes {
+                assert!(note.flag.is_none());
+                let stem = note.stem.unwrap();
+                let [p1, p2] = drawn_stem(note, &opts).unwrap();
+                assert_eq!(p1, stem.p1);
+                let mid = beam.center().y;
+                assert!(
+                    (p2.y - mid).abs() < 0.1 * beam.height(),
+                    "stem_down {stem_down}: {p2:?} {beam:?}"
+                );
+            }
         }
     }
 }
