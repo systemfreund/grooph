@@ -504,6 +504,7 @@ fn rhythm_block(notation: &str, attrs: &str, caption: &str) -> Result<String, St
         click: None,
         counter: None,
         poly: None,
+        practice: false,
     };
     let href = link.to_url("/").ok_or_else(|| format!("rhythm '{notation}' has no link form"))?;
 

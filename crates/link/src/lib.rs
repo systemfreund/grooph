@@ -19,6 +19,7 @@
 //! | `click`   | Click bar of the meter of `r` (its first measure) or `ts`: one measure in the text notation, without the time signature (`>` strong, plain medium, `(e)` soft, rest off), on the one line |
 //! | `poly`    | Polyrhythm `n:m` (n clicks in the time of m beat units) the metronome plays against the click bar of `ts`, its counter bar built as the app's picker does (see [`grooph_measure::counter`]); needs `ts` without `r` or the generator |
 //! | `counter` | The counter rhythm written out like `click`, for one whose clicks were edited; otherwise as `poly`. Not together with `poly` |
+//! | `page`    | Where `r` opens: `practice` on the Practice page; without it, on the Score page |
 //!
 //! Any of `sub`, `lvl`, `bars`, `space` or `seed` selects the generator;
 //! unknown parameters are ignored. [`SharedLink::to_url`] is the inverse of
@@ -64,6 +65,9 @@ pub struct SharedLink {
     /// The ratio `counter` was picked as. [`SharedLink::to_url`] writes it
     /// as `poly` while `counter` is that ratio's bar, else the bar itself.
     pub poly: Option<Ratio>,
+    /// The rhythm (`r`) opens on the Practice page, not the Score page
+    /// (`page=practice`).
+    pub practice: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -109,6 +113,7 @@ fn parse_query_with_default_version(
     let mut poly = None;
     let mut groups = None;
     let mut subdivision = None;
+    let mut practice = false;
 
     for pair in query.trim_start_matches('?').split('&').filter(|p| !p.is_empty()) {
         let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
@@ -135,6 +140,13 @@ fn parse_query_with_default_version(
             "click" => click = Some(value),
             "counter" => counter = Some(value),
             "poly" => poly = Some(value.parse::<Ratio>().map_err(|e| format!("poly: {e}"))?),
+            "page" => {
+                practice = match value.as_str() {
+                    "practice" => true,
+                    "score" => false,
+                    _ => return Err(format!("invalid page '{value}' (practice or score)")),
+                }
+            }
             _ => {}
         }
     }
@@ -221,7 +233,9 @@ fn parse_query_with_default_version(
     if bpm.is_none() && swing.is_none() && content.is_none() {
         Ok(None)
     } else {
-        Ok(Some(SharedLink { bpm, swing, content, click, counter, poly }))
+        // Only a rhythm has a page to pick.
+        let practice = practice && matches!(content, Some(LinkContent::Score(_)));
+        Ok(Some(SharedLink { bpm, swing, content, click, counter, poly, practice }))
     }
 }
 
@@ -408,6 +422,9 @@ impl SharedLink {
                 Some(ratio) => params.push(("poly", ratio.to_string())),
                 None => params.push(("counter", format_bar(bar)?)),
             }
+        }
+        if self.practice && matches!(self.content, Some(LinkContent::Score(_))) {
+            params.push(("page", "practice".into()));
         }
         // The version alone opens nothing.
         if params.len() == 1 {
@@ -837,6 +854,7 @@ mod tests {
             click: None,
             counter: None,
             poly: None,
+            practice: false,
         };
         let url = generator.to_url("https://grooph.app/").unwrap();
         assert_eq!(
@@ -1134,6 +1152,31 @@ mod tests {
     }
 
     #[test]
+    fn a_rhythm_opens_on_the_practice_page_with_page_practice() {
+        let score = parse_score("4/4 q e e q q").unwrap();
+        let link = SharedLink {
+            content: Some(LinkContent::Score(score)),
+            practice: true,
+            ..SharedLink::default()
+        };
+        let url = link.to_url("https://grooph.app/").unwrap();
+        assert_eq!(url, "https://grooph.app/?v=2&r=4/4+q+e+e+q+q&page=practice");
+        assert!(parse(url.split_once('?').unwrap().1).practice);
+        // Without it, and with `page=score`, the Score page.
+        assert!(!parse("r=q+q+q+q").practice);
+        assert!(!parse("r=q+q+q+q&page=score").practice);
+        // Only a rhythm has a page.
+        assert!(!parse("ts=3/4&page=practice").practice);
+        let metronome = SharedLink {
+            content: Some(LinkContent::Metronome(TimeSignature::THREE_FOUR)),
+            practice: true,
+            ..SharedLink::default()
+        };
+        assert!(!metronome.to_url("/").unwrap().contains("page"));
+        assert!(parse_query("r=q+q+q+q&page=metronome").is_err());
+    }
+
+    #[test]
     fn score_link_round_trips() {
         let score = parse_score("3/4 >q t8 t8 r:t8 e e | e. s q r:q").unwrap();
         let link = SharedLink {
@@ -1143,6 +1186,7 @@ mod tests {
             click: None,
             counter: None,
             poly: None,
+            practice: false,
         };
         let url = link.to_url("https://grooph.app/").unwrap();
         assert_eq!(url, "https://grooph.app/?v=2&bpm=96&r=3/4+%3Eq+t8+t8+r:t8+e+e+%7C+e.+s+q+r:q");

@@ -878,7 +878,7 @@ impl Grooph {
     /// asks first if it has unsaved changes; a generator link replaces
     /// Practice's rhythm, a metronome or tempo-only link applies right away.
     pub(crate) fn open_link(&mut self, link: SharedLink) {
-        let replaces_score = matches!(link.content, Some(LinkContent::Score(_)));
+        let replaces_score = matches!(link.content, Some(LinkContent::Score(_))) && !link.practice;
         if replaces_score && self.editor.docs.score.dirty {
             self.ui.pending_load = Some(PendingLoad::Link(Box::new(link)));
         } else {
@@ -887,14 +887,18 @@ impl Grooph {
     }
 
     pub(crate) fn apply_link(&mut self, link: SharedLink) {
-        // Each content opens on its own page: a score link on the score tab,
-        // a generator link on Practice, a metronome link on the metronome
-        // (below, with its meter and click bar).
+        // Each content opens on its own page: a score link on the score tab
+        // (on Practice if shared from there), a generator link on Practice,
+        // a metronome link on the metronome (below, with its meter and
+        // click bar).
         let metronome = matches!(link.content, Some(LinkContent::Metronome(_)));
         let replaces_rhythm =
             matches!(link.content, Some(LinkContent::Score(_) | LinkContent::Generator { .. }));
         let mut undoubled = false;
         match link.content {
+            Some(LinkContent::Score(score)) if link.practice => {
+                undoubled = self.replace_practice_from_link(score);
+            }
             Some(LinkContent::Score(score)) => undoubled = self.replace_score_from_link(score),
             Some(LinkContent::Metronome(ts)) => {
                 self.stop_transport();
@@ -941,6 +945,23 @@ impl Grooph {
             // taken from one of them.
             self.editor.doc_mut().dirty = undoubled;
         }
+    }
+
+    /// A rhythm shared from the practice page replaces its rhythm, as a new
+    /// one from the generator would. Reports as
+    /// [`Self::replace_score_from_link`].
+    fn replace_practice_from_link(&mut self, mut score: Score) -> bool {
+        let undoubled = score.undouble_instruments();
+        self.stop_transport();
+        self.show_document(Document::Practice);
+        self.with_undo_snapshot(|app| {
+            app.editor.doc_mut().score = score;
+            app.editor.doc_mut().cursor = Cursor::start();
+            true
+        });
+        self.ui.picker = None;
+        self.ui.mode = Mode::Playback;
+        undoubled
     }
 
     /// Reports whether a drum struck by two voices at once was taken from
@@ -2081,6 +2102,30 @@ mod tests {
         assert_eq!(format_score(score).unwrap(), "4/4 >S-H:q H:q H:h ; r:q K:q K:h");
         // No longer the link's groove: a change to save.
         assert!(app.editor.doc().dirty);
+    }
+
+    #[test]
+    fn a_shared_rhythm_opens_on_the_page_it_was_shared_from() {
+        use super::Grooph;
+        use grooph_measure::notation::{format_score, parse_score};
+
+        let cc = eframe::CreationContext::_new_kittest(eframe::egui::Context::default());
+        let mut from = Grooph::new(&cc);
+        for (tab, rhythm) in [(Tab::Practice, "4/4 q e e q q"), (Tab::Score, "3/4 q q e e")] {
+            from.select_tab(tab);
+            from.editor.doc_mut().score = parse_score(rhythm).unwrap();
+            let url = from.share_link_url().unwrap();
+            let query = url.split_once('?').unwrap().1;
+            let mut to = Grooph::new(&cc);
+            let practice_before = format_score(&to.editor.docs.practice.score).unwrap();
+            to.open_link(grooph_link::parse_query(query).unwrap().unwrap());
+            assert_eq!(to.tab(), tab, "{url}");
+            assert_eq!(format_score(&to.editor.doc().score).unwrap(), rhythm);
+            // The other page keeps its rhythm.
+            if tab == Tab::Score {
+                assert_eq!(format_score(&to.editor.docs.practice.score).unwrap(), practice_before);
+            }
+        }
     }
 
     #[test]
