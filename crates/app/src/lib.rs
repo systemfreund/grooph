@@ -818,7 +818,7 @@ impl Grooph {
         let bpm = pattern.bpm;
         // A rhythm of the one line, saved before the score tab was for
         // drum grooves, opens in Practice.
-        if score.staff.is_line() {
+        if score.staff == grooph_measure::StaffKind::Line {
             let undoubled = self.replace_practice_from_link(score);
             self.editor.docs.practice.dirty = undoubled;
             self.playback_ctl.bpm = bpm;
@@ -959,7 +959,7 @@ impl Grooph {
     /// user does not have, nor ask about that page's unsaved changes.
     fn opens_on_practice(&self, link: &SharedLink) -> bool {
         !self.ui.show_score_tab
-            || matches!(&link.content, Some(LinkContent::Score(s)) if s.staff.is_line())
+            || matches!(&link.content, Some(LinkContent::Score(s)) if s.staff == grooph_measure::StaffKind::Line)
     }
 
     /// A rhythm shared from the practice page replaces its rhythm, as a new
@@ -2191,7 +2191,7 @@ mod tests {
         app.ui.show_score_tab = true;
         app.select_tab(Tab::Score);
         // The score tab starts with a groove, not a rhythm.
-        assert!(!app.editor.doc().score.staff.is_line());
+        assert!(app.editor.doc().score.staff == grooph_measure::StaffKind::Kit);
         let url = {
             let mut from = Grooph::new(&cc);
             from.select_tab(Tab::Practice);
@@ -2201,7 +2201,7 @@ mod tests {
         app.open_link(grooph_link::parse_query(url.split_once('?').unwrap().1).unwrap().unwrap());
         assert_eq!(app.tab(), Tab::Practice);
         assert_eq!(format_score(&app.editor.doc().score).unwrap(), "3/4 q q e e");
-        assert!(!app.editor.docs.score.score.staff.is_line());
+        assert!(app.editor.docs.score.score.staff == grooph_measure::StaffKind::Kit);
         // So does one from the library, as the pattern loaded and unchanged.
         let id = app.editor.library.add("Old".into(), parse_score("4/4 h h").unwrap(), 90);
         app.select_tab(Tab::Score);

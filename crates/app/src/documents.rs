@@ -494,7 +494,7 @@ mod tests {
         assert_eq!(app.tab(), Tab::Score);
         // The score tab is for drum grooves: a rhythm saved there starts a
         // new groove of its meter.
-        assert!(!app.editor.docs.score.score.staff.is_line());
+        assert!(app.editor.docs.score.score.staff == grooph_measure::StaffKind::Kit);
         assert_eq!(
             app.editor.docs.score.score.measures()[0].time_signature(),
             old.measures()[0].time_signature()

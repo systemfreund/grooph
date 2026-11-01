@@ -30,7 +30,7 @@ pub enum StaffKind {
 }
 
 impl StaffKind {
-    pub fn is_line(&self) -> bool {
+    fn is_line(&self) -> bool {
         *self == StaffKind::Line
     }
 }

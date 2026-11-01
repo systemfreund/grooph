@@ -81,11 +81,11 @@ impl Grooph {
             .find(|&(i, _)| i == instrument)
             .map(|(_, at)| at.voice);
         self.editor.instrument = instrument;
-        let steps = self.editor.doc().history.len();
+        let steps = self.editor.doc().history.pushed();
         self.go_to_voice(there.unwrap_or(instrument.default_voice()));
         self.apply_tool(crate::tool_palette::tool("modify.toggle.head"));
         // A voice the bar had to get first is part of the same step.
-        if self.editor.doc().history.len() == steps + 2 {
+        if self.editor.doc().history.pushed() == steps + 2 {
             self.editor.doc_mut().history.fold_last();
         }
     }

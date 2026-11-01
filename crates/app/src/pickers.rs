@@ -1039,4 +1039,14 @@ mod tests {
             Some("2+2+3")
         );
     }
+
+    #[test]
+    fn a_meter_is_named_with_its_grouping() {
+        // Simple, compound and odd: the grouping only where it is a choice.
+        assert_eq!(time_signature_label(TimeSignature::FOUR_FOUR), "4/4");
+        assert_eq!(time_signature_label(TimeSignature::new(6, 8)), "6/8 (3+3)");
+        let odd = TimeSignature::new(7, 8);
+        assert_eq!(time_signature_label(odd), format!("7/8 ({})", odd.groups_label()));
+        assert_ne!(time_signature_label(odd.with_grouping(1)), time_signature_label(odd));
+    }
 }
