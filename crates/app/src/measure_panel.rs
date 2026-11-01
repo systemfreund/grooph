@@ -67,7 +67,7 @@ impl Grooph {
             accent_displacement: 0.07,
             min_measure_width_em,
             note_width_em,
-            system_spacing_em: 0.2,
+            system_spacing_em: 0.05,
             // No percussion clef: on a single line it says nothing
             // the line doesn't, and every row starts alike.
             layout_clef_first: false,
