@@ -1022,8 +1022,11 @@ impl Grooph {
         }
         ui.mode = match ui.mode {
             Mode::TimeSignature(_) => Mode::Edit,
-            // A page's editor ("Done").
-            Mode::Edit => Mode::Playback,
+            // A page's editor ("Done"), back to the page itself.
+            Mode::Edit => {
+                ui.shell.options_collapsed = true;
+                Mode::Playback
+            }
             // The options sheet, when unfolded.
             _ if practice_page && !ui.shell.options_collapsed => {
                 ui.shell.options_collapsed = true;
@@ -1045,11 +1048,18 @@ impl Grooph {
 
     /// Esc: into or out of the page's editor.
     fn toggle_edit(&mut self) {
-        self.ui.mode = match self.ui.mode {
-            Mode::Edit => Mode::Playback,
-            Mode::Playback => Mode::Edit,
-            _ => return,
-        };
+        match self.ui.mode {
+            Mode::Edit => self.leave_editor(),
+            Mode::Playback => self.ui.mode = Mode::Edit,
+            _ => {}
+        }
+    }
+
+    /// Done: back from a page's editor to the page itself, its options sheet
+    /// folded away, so the card, ring or staff shows.
+    pub(crate) fn leave_editor(&mut self) {
+        self.ui.mode = Mode::Playback;
+        self.ui.shell.options_collapsed = true;
     }
 
     fn audio_state(&self) -> PlayerState {
@@ -1492,6 +1502,28 @@ mod tests {
         assert!(app.back());
         assert!(app.ui.shell.options_collapsed);
         assert!(!app.back());
+        // Leaving an editor, by back, Esc or Done, shows the page itself:
+        // its sheet folds away too.
+        for tab in [Tab::Practice, Tab::Metronome] {
+            app.select_tab(tab);
+            for leave in [
+                Grooph::back as fn(&mut Grooph) -> bool,
+                |app| {
+                    app.toggle_edit();
+                    true
+                },
+                |app| {
+                    app.leave_editor();
+                    true
+                },
+            ] {
+                app.ui.shell.options_collapsed = false;
+                app.edit_page();
+                assert!(leave(&mut app));
+                assert_eq!(app.ui.mode, Mode::Playback, "{tab:?}");
+                assert!(app.ui.shell.options_collapsed, "{tab:?}");
+            }
+        }
     }
 
     #[test]

@@ -1417,7 +1417,7 @@ impl Grooph {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         // Back to the page's card and options sheet.
                         if ui.button(RichText::new("Done").size(18.0)).clicked() {
-                            self.ui.mode = Mode::Playback;
+                            self.leave_editor();
                         }
                     });
                 });
