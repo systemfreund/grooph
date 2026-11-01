@@ -737,11 +737,11 @@ impl BarMenu {
             ui.add_enabled(enabled, egui::Button::new(text).min_size(size)).clicked()
         };
         ui.set_min_width(BAR_MENU_WIDTH);
-        if !self.metronome && row(ui, "Duplicate bar".into(), true) {
-            *action = Some(BarAction::Duplicate);
-        }
         if !self.metronome && row(ui, "Clean up bar".into(), self.clean_up) {
             *action = Some(BarAction::CleanUp);
+        }
+        if !self.metronome && row(ui, "Duplicate bar".into(), true) {
+            *action = Some(BarAction::Duplicate);
         }
         if row(ui, (if self.metronome { "Clear" } else { "Clear bar" }).into(), true) {
             *action = Some(BarAction::Clear);

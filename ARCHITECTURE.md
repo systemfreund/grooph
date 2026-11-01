@@ -744,8 +744,8 @@ stored, and never reached by the playback cursor: `draw_staff` and
 `current_cursor_x` take the bars that play, `loop_bars`); a tap on it appends a bar like the last one (`Grooph::push_measure`)
 and puts the cursor there. The bar menu (`BarMenu`), from a "⋯" in the top
 right corner of the cursor's bar or a long press (right click) on a bar,
-duplicates, cleans up (every voice, greyed out where nothing would change;
-see "Clean up"), clears (every voice) or deletes it; in the metronome it only
+cleans up (every voice, greyed out where nothing would change; see
+"Clean up"), duplicates, clears (every voice) or deletes it; in the metronome it only
 clears the voice being edited. A modifier's cell is greyed out where it
 would change nothing on the cursor's beat (`modifier_applies`, tried on a
 copy of the bar): an accent on a rest, a dot without room, a technique
