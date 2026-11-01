@@ -19,7 +19,8 @@ pub(crate) enum SoundType {
     SoftBeat,
     AccentedBeat,
     Beat,
-    /// Quiet subdivision hit where no note is written.
+    /// Quiet rhythm hit: a soft (ghost) note written on the line, or a
+    /// generated one on a free subdivision slot.
     Ghost,
     /// Click of the count-in bar before playback starts.
     CountIn,
@@ -44,12 +45,15 @@ pub(crate) struct KitHit {
 }
 
 impl SoundType {
-    /// What `onset` plays: the rhythm voice's note, accented or not, for a
-    /// head on the one line, the kit for the others.
+    /// What `onset` plays: the rhythm voice's note, accented, plain or soft,
+    /// for a head on the one line, the kit for the others. A soft head on
+    /// the line is a written ghost note: it plays like the generated ones,
+    /// with the soft recording and the ghost volume of the mixer.
     fn of_head(onset: &HeadOnset) -> Self {
         let head = onset.head;
         match head.instrument() {
             Instrument::Rhythm if head.accented() => SoundType::AccentedBeat,
+            Instrument::Rhythm if head.soft() => SoundType::Ghost,
             Instrument::Rhythm => SoundType::Beat,
             instrument => {
                 let level = if head.accented() {
@@ -568,7 +572,7 @@ mod tests {
     }
 
     #[test]
-    fn a_line_score_plays_its_notes_as_before() {
+    fn a_line_score_plays_its_notes_at_their_level() {
         let score = grooph_measure::notation::parse_score("4/4 q >e (e) r:q q").unwrap();
         let timing = ScoreTiming::from_score(&score, 120);
         let s = Schedule::build(&score, &timing, None, &ClickBars::default());
@@ -584,8 +588,8 @@ mod tests {
             [
                 (0, SoundType::Beat),
                 (q, SoundType::AccentedBeat),
-                // A written ghost note on the line plays as a plain note.
-                (q + q / 2, SoundType::Beat),
+                // A written ghost note on the line plays as a ghost note.
+                (q + q / 2, SoundType::Ghost),
                 (3 * q, SoundType::Beat),
             ]
         );
