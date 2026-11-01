@@ -141,14 +141,11 @@ impl Score {
         let agrees = |v: &Voicing| {
             Instrument::ALL.into_iter().all(|i| hint(i).is_none_or(|lower| v.is_lower(i) == lower))
         };
-        [default, Voicing::HANDS_FEET, Voicing::ONE_VOICE, Voicing::CYMBALS_ABOVE]
-            .into_iter()
-            .find(agrees)
-            .unwrap_or_else(|| {
-                Voicing::from_lower(
-                    Instrument::ALL.into_iter().filter(|&i| hint(i).unwrap_or(default.is_lower(i))),
-                )
-            })
+        std::iter::once(default).chain(Voicing::PRESETS).find(agrees).unwrap_or_else(|| {
+            Voicing::from_lower(
+                Instrument::ALL.into_iter().filter(|&i| hint(i).unwrap_or(default.is_lower(i))),
+            )
+        })
     }
 
     /// The measures, taken out of the score: at least one.
@@ -339,6 +336,22 @@ mod tests {
         assert_eq!(on(&one, 5, 1), Cursor::in_voice(0, 1, 2));
         score.measures_mut()[0].fill_voices(2);
         assert_eq!(score.measures()[0].voices().len(), 2);
+    }
+
+    #[test]
+    fn a_voicing_derived_from_content_that_fits_no_preset_is_custom() {
+        use Instrument::{FloorTom, HiHat, Kick, Snare};
+        let derive = |text: &str| {
+            crate::notation::parse_score(text).unwrap().derive_voicing(Voicing::default())
+        };
+        // Kick and floor tom below, snare and hi-hat above: no preset.
+        let custom = derive("4/4 S-H:q H:q H:q H:q ; K-FT:q r:q K:q r:q");
+        assert_eq!(custom, Voicing::from_lower([Kick, FloorTom, Instrument::HiHatFoot]));
+        assert!(!custom.is_lower(Snare) && !custom.is_lower(HiHat));
+        // The hi-hat foot has no hint and is below as the default has it.
+        assert!(custom.is_lower(Instrument::HiHatFoot));
+        // The one line keeps the default.
+        assert_eq!(derive("4/4 q q q q"), Voicing::default());
     }
 
     #[test]

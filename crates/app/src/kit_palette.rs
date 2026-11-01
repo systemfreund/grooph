@@ -8,10 +8,11 @@
 //! (`Grooph::tap_instrument`) and makes it the picked one, the head the note
 //! values write on a rest (`Grooph::edit_instrument`). Accent, ghost and the
 //! techniques go to the head they mean (`Grooph::aimed` in `tool_palette`).
-//! The cursor goes to the instrument's voice, the feet below, the hands above
-//! (the score's `Voicing`) unless the measure is written otherwise, as the
-//! instrument is already in the other voice or the measure has one voice; or unless it is there already in the other,
-//! onto the beat sounding then. A tap on a head on the staff picks that
+//! The cursor goes to the voice the instrument's head would be entered in:
+//! where it is on the beat already, else where it is elsewhere in the measure,
+//! else voice 0 of a measure of one voice that holds notes, else the one the
+//! score's `Voicing` writes it in (the feet below, the hands above), onto the
+//! beat sounding then. A tap on a head on the staff picks that
 //! instrument. The library's "New drum groove" starts a score
 //! on the kit's staff.
 
