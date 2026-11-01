@@ -78,7 +78,8 @@ pull requests from forks are not deployed.
 
 ### Important testing gotchas
 
-- `Beat`'s `PartialEq` ignores `tuplet_group_id`. If tuplet grouping matters, compare `tuplet_group_id` explicitly.
+- `Beat`'s `PartialEq` includes its tuplet mark (`Beat::tuplet`). Beats made by hand have none, so compare
+  durations and heads of a measure's beats with `beat::unmarked(..)`, and groups with `tuplet_groups()`.
 - When you insert a tuplet beat (e.g., `t8()`), the remaining tuplets in that group auto-fill as rests to complete the
   group.
 - `set_beat` may absorb/fill following beats to keep the measure valid (including auto-filling rests).

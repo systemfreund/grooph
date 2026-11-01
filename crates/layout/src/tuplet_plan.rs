@@ -53,16 +53,15 @@ pub(crate) fn detect_tuplet_spans(measure: &VoiceBar) -> Vec<TupletSpan> {
     measure
         .tuplet_groups()
         .into_iter()
-        .filter_map(|group| {
-            let anchor = measure.tuplets().get(group.id)?;
+        .map(|group| {
             let contains_rest = (group.start_idx..=group.end_idx).any(|i| beats[i].is_rest());
-            Some(TupletSpan {
-                count: anchor.n,
+            TupletSpan {
+                count: group.spec.n,
                 start: group.start_idx,
                 end: group.end_idx,
-                base: anchor.base_hint,
+                base: group.spec.base,
                 contains_rest,
-            })
+            }
         })
         .collect()
 }

@@ -63,8 +63,8 @@ Read the changed code in context, not just the diff lines. Open callers and call
 - **Rust specifics:** `unsafe` without a `// SAFETY:` comment (edition 2024 rules apply), needless
   clones or allocations in hot loops (rendering, scheduling), lossy `as` casts on durations and ticks,
   public API changes in library crates that ripple through the workspace.
-- **Tests:** tests that assert too little, or compare `Beat`s with `==` where the tuplet group matters
-  (`Beat`'s `PartialEq` ignores `tuplet_group_id`).
+- **Tests:** tests that assert too little, or strip tuplet marks (`beat::unmarked`) where the tuplet
+  group matters.
 
 **Music domain.** grooph is a notation and rhythm tool, so check the music, not just the code:
 

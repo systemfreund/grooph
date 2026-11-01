@@ -62,7 +62,7 @@ spread across callers.
   the slice, and `push`, `insert`, `remove` and `truncate` keep at least
   one measure. Measures saved before voices (beats and tuplets inline) load as one
   voice (`RawMeasure`).
-- `Beat` is a slot of the rhythm, `duration` and `tuplet_group_id`, and what
+- `Beat` is a slot of the rhythm, `duration` and `tuplet` (its place in a tuplet group), and what
   is played in it, its `Heads` (`grooph_measure::head`): none is a rest, one a
   note, several a chord on one stem (at most one per `Instrument`, sorted from
   the foot up, at most `MAX_HEADS`). Each `Head` has its `Instrument`,
@@ -90,7 +90,14 @@ spread across callers.
 - `DEFAULT_GRID` defines the valid duration grid and tick calculations.
 - Tuplets:
   - A tuplet beat automatically creates the remaining beats of the group.
-  - Groups are tracked via `tuplet_group_id` and `tuplet_anchors`.
+  - Groups are positions, not names (`grooph_measure::tuplet`): the first beat carries
+    `TupletMark::Start { base }`, the others `TupletMark::Continue`. The ratio comes from the beats'
+    `TupletSpec`, the span is `m` of the group's base (`TupletGroup::span_ticks`), which can differ from
+    the first beat's value (`t4 t8` in a triplet of eighths). `tuplet_group_at`/`tuplet_groups` read
+    them as `TupletGroup { start_idx, end_idx, spec }`. Voices saved before marks (`tuplet_group_id` on
+    the beats, `tuplet_anchors` beside them) are converted on load (`OldAnchors` in `voice.rs`).
+  - Loading checks whole groups: every tuplet in a group, two or more beats of one ratio that fill the
+    span, no mark outside a group (`check_tuplet_groups`).
   - `set_beat` can absorb/fill following beats to keep the measure consistent.
 - Generator (`grooph_measure::generator`): builds random measures for
   sight-reading from per-beat figures (onset patterns, see Groupings). `GeneratorSettings` = subdivision,
@@ -112,8 +119,8 @@ spread across callers.
   the two-level rhythmic parsing rule); triplet figures
   are written as drawn. Measures are written via `set_beat`, so
   they obey the same invariants as edited ones. Seed `Rng` for reproducibility.
-- Note: `Beat` `PartialEq` ignores `tuplet_group_id`. Compare the field explicitly
-  if grouping matters.
+- `Beat`, `VoiceBar` and `Measure` compare with `==` including their tuplet groups. Tests that build
+  expected beats by hand (without marks) compare `beat::unmarked(..)`.
 
 ## Rendering pipeline
 
@@ -801,7 +808,7 @@ If you add new tools/shortcuts, remember:
   `q()`, `e()`, `s()`, `th()`, `t8()`, `t16()`, `t32()`, `qt16()`.
 - Recommended: `Measure::set_beat` + `Beat::note/rest(...)` for targeted changes.
 - Low-level checks: `DEFAULT_GRID.ticks_of(...)` and `compute_onset_ticks(...)`.
-- Tuplet tests: note auto-fill and `tuplet_group_id` comparisons.
+- Tuplet tests: note auto-fill and the groups (`tuplet_groups()`, or `==` on the measure).
 
 ## Change navigation (quick)
 

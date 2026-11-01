@@ -560,12 +560,11 @@ fn measure_grid(measure: &Measure) -> String {
     );
     let mut i = 0;
     while i < beats.len() {
-        match beats[i].tuplet_group_id {
-            Some(id) => {
-                let end = beats[i..].iter().position(|b| b.tuplet_group_id != Some(id));
-                let end = end.map_or(beats.len(), |n| i + n);
+        match measure.first_voice().tuplet_group_at(i) {
+            Some(group) => {
+                let end = group.end_idx + 1;
                 let ticks: u32 = beats[i..end].iter().map(ticks_of).sum();
-                let n = beats[i].duration.as_tuplet_spec().map_or(0, |s| s.n);
+                let n = group.spec.n;
                 let _ = write!(
                     out,
                     "<span class=\"tuplet\" style=\"flex:{ticks}\"><span class=\"bracket\">{n}</span><span class=\"inner\">"

@@ -615,7 +615,7 @@ fn draw(settings: &GeneratorSettings, rng: &mut Rng) -> (Vec<spelling::Drawn>, s
 }
 
 /// Write `beats` (duration, note?) into a fresh measure via `set_beat`, so
-/// the result carries the same invariants (tuplet groups, anchors) as an
+/// the result carries the same invariants (whole tuplet groups) as an
 /// edited one.
 fn write_measure(ts: TimeSignature, beats: &[(Duration, bool)]) -> Result<Measure, MeasureError> {
     let mut measure = Measure::new(ts);
@@ -661,6 +661,7 @@ pub fn generate_score(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::beat::unmarked;
     use crate::duration::{Duration, NoteValue, e, h, q, s};
     use crate::grid::DEFAULT_GRID;
 
@@ -762,22 +763,37 @@ mod tests {
         for cell in figures_of(BeatSpan::Quarter) {
             let cells = [cell; 4];
             let m = build_measure(TimeSignature::FOUR_FOUR, &cells).expect("figure must build");
-            assert_eq!(m.first_voice().beats(), &expected_beats(&cells), "{:?}", cell.pattern());
+            assert_eq!(
+                unmarked(m.first_voice().beats()),
+                expected_beats(&cells),
+                "{:?}",
+                cell.pattern()
+            );
         }
         for cell in figures_of(BeatSpan::DottedQuarter) {
             let cells = [cell; 4];
             let m = build_measure(TimeSignature::TWELVE_EIGHT, &cells).expect("figure must build");
-            assert_eq!(m.first_voice().beats(), &expected_beats(&cells), "{:?}", cell.pattern());
+            assert_eq!(
+                unmarked(m.first_voice().beats()),
+                expected_beats(&cells),
+                "{:?}",
+                cell.pattern()
+            );
         }
         // 12/16 = 3+3+3+3, 10/16 = 3+3+2+2.
         for three in figures_of(BeatSpan::DottedEighth) {
             let cells = [three; 4];
             let m = build_measure(ts(12, 16), &cells).expect("figure must build");
-            assert_eq!(m.first_voice().beats(), &expected_beats(&cells), "{:?}", three.pattern());
+            assert_eq!(
+                unmarked(m.first_voice().beats()),
+                expected_beats(&cells),
+                "{:?}",
+                three.pattern()
+            );
             for two in figures_of(BeatSpan::Eighth) {
                 let cells = [three, three, two, two];
                 let m = build_measure(ts(10, 16), &cells).expect("figure must build");
-                assert_eq!(m.first_voice().beats(), &expected_beats(&cells));
+                assert_eq!(unmarked(m.first_voice().beats()), expected_beats(&cells));
             }
         }
     }
@@ -789,14 +805,14 @@ mod tests {
             for b in figures_of(BeatSpan::Quarter) {
                 let cells = [a, b, b, a];
                 let m = build_measure(TimeSignature::FOUR_FOUR, &cells).expect("pair must build");
-                assert_eq!(m.first_voice().beats(), &expected_beats(&cells));
+                assert_eq!(unmarked(m.first_voice().beats()), expected_beats(&cells));
             }
         }
         for a in figures_of(BeatSpan::DottedQuarter) {
             for b in figures_of(BeatSpan::DottedQuarter) {
                 let cells = [a, b];
                 let m = build_measure(TimeSignature::SIX_EIGHT, &cells).expect("pair must build");
-                assert_eq!(m.first_voice().beats(), &expected_beats(&cells));
+                assert_eq!(unmarked(m.first_voice().beats()), expected_beats(&cells));
             }
         }
     }
@@ -809,10 +825,10 @@ mod tests {
             for two in figures_of(BeatSpan::Quarter).filter(|c| !c.pattern.triplet) {
                 let five = [three, two];
                 let m = build_measure(TimeSignature::FIVE_EIGHT, &five).expect("5/8 must build");
-                assert_eq!(m.first_voice().beats(), &expected_beats(&five));
+                assert_eq!(unmarked(m.first_voice().beats()), expected_beats(&five));
                 let seven = [two, three, two];
                 let m = build_measure(TimeSignature::SEVEN_EIGHT, &seven).expect("7/8 must build");
-                assert_eq!(m.first_voice().beats(), &expected_beats(&seven));
+                assert_eq!(unmarked(m.first_voice().beats()), expected_beats(&seven));
             }
         }
     }
@@ -822,10 +838,8 @@ mod tests {
         let triplets = figures_of(BeatSpan::Quarter).find(|f| f.pattern() == "xxx").unwrap();
         let m = build_measure(TimeSignature::TWO_FOUR, &[triplets, triplets]).unwrap();
         assert_eq!(m.first_voice().tuplet_groups().len(), 2);
-        assert_ne!(
-            m.first_voice().beats()[0].tuplet_group_id,
-            m.first_voice().beats()[3].tuplet_group_id
-        );
+        let starts: Vec<_> = m.first_voice().tuplet_groups().iter().map(|g| g.start_idx).collect();
+        assert_eq!(starts, [0, 3]);
     }
 
     #[test]
@@ -1503,8 +1517,8 @@ mod tests {
                                     .map(|&(d, n)| Beat::new(d, if n { Note } else { Rest }))
                                     .collect();
                                 assert_eq!(
-                                    m.first_voice().beats(),
-                                    &expected,
+                                    unmarked(m.first_voice().beats()),
+                                    expected,
                                     "{ts} written verbatim"
                                 );
                                 let cells = drawn.iter().map(|d| d.figure).collect();

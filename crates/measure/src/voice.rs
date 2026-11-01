@@ -6,16 +6,15 @@
 //! of a measure never part.
 
 use crate::BeatKind::Rest;
-use crate::duration::Duration;
-use crate::editing::GroupSpan;
+use crate::beat::StoredBeat;
+use crate::duration::{Duration, NoteValue};
 use crate::editing::Modification;
 use crate::grid::DEFAULT_GRID;
-use crate::{
-    Beat, BeatKind, Instrument, InvalidMeasure, MeasureError, TimeSignature, TupletRegistry,
-    Voicing,
-};
+use crate::tuplet::{TupletGroup, TupletMark};
+use crate::{Beat, BeatKind, Instrument, InvalidMeasure, MeasureError, TimeSignature, Voicing};
 use either::Either;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
 
 /// Index of a voice in its [`Measure`]: 0 is the first, the upper one.
@@ -31,7 +30,7 @@ pub type VoiceIdx = usize;
 /// Code names the voice it reads or edits: [`Measure::first_voice`] is the
 /// upper one (the only one of a click bar or a line rhythm),
 /// [`Measure::voices`] and [`Measure::voice_mut`] reach the others.
-#[derive(Clone, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Deserialize)]
 #[serde(try_from = "RawMeasure")]
 pub struct Measure {
     /// Never empty; every voice in the same meter.
@@ -41,19 +40,17 @@ pub struct Measure {
 /// One voice of a [`Measure`]: a sequence of beats filling its meter.
 ///
 /// Invariant: the beats have supported durations and fill the measure
-/// exactly, every beat in a tuplet group has an anchor, and the beats of
-/// every group of two or more fill its anchor's span.
+/// exactly; a beat is in a tuplet group exactly if its duration is a tuplet;
+/// every group is two or more beats of its first beat's ratio that fill the
+/// group's span (see [`crate::tuplet`]).
 /// The constructors and editing methods keep it; deserializing checks it
 /// (see [`InvalidMeasure`]).
-#[derive(Clone, Serialize)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct VoiceBar {
     pub(crate) beats: Vec<Beat>,
-    /// The meter of its measure, set by the measure only (this module).
-    #[serde(skip)]
+    /// The meter of its measure, set by the measure only (this module);
+    /// saved with the measure.
     time_signature: TimeSignature,
-    /// Tuplet group anchors + id allocator.
-    #[serde(flatten)]
-    pub(crate) tuplets: TupletRegistry,
 }
 
 /// A [`Measure`] as saved, before its invariant is checked: with its
@@ -64,17 +61,32 @@ struct RawMeasure {
     #[serde(default, deserialize_with = "present")]
     voices: Option<Vec<RawVoice>>,
     #[serde(default, deserialize_with = "present")]
-    beats: Option<Vec<Beat>>,
+    beats: Option<Vec<StoredBeat>>,
     #[serde(flatten)]
-    tuplets: TupletRegistry,
+    anchors: OldAnchors,
 }
 
 /// A [`VoiceBar`] as saved.
 #[derive(Deserialize)]
 struct RawVoice {
-    beats: Vec<Beat>,
+    beats: Vec<StoredBeat>,
     #[serde(flatten)]
-    tuplets: TupletRegistry,
+    anchors: OldAnchors,
+}
+
+/// The tuplet groups of a voice saved before [`TupletMark`]s: its beats
+/// name their group by an id, and this table the group's base by the id.
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct OldAnchors {
+    tuplet_anchors: HashMap<u32, OldAnchor>,
+}
+
+/// A group of [`OldAnchors`]; of its other fields only the base counts,
+/// the rest follows from the beats.
+#[derive(Deserialize)]
+struct OldAnchor {
+    base_hint: NoteValue,
 }
 
 /// A field that is there, as `Some` (a missing one is `None` by default).
@@ -88,10 +100,10 @@ impl TryFrom<RawMeasure> for Measure {
     type Error = InvalidMeasure;
 
     fn try_from(raw: RawMeasure) -> Result<Self, Self::Error> {
-        let RawMeasure { time_signature, voices, beats, tuplets } = raw;
+        let RawMeasure { time_signature, voices, beats, anchors } = raw;
         let voices = match (voices, beats) {
             (Some(voices), _) if !voices.is_empty() => voices,
-            (_, Some(beats)) => vec![RawVoice { beats, tuplets }],
+            (_, Some(beats)) => vec![RawVoice { beats, anchors }],
             _ => return Err(InvalidMeasure::NoVoice),
         };
         let voices = voices
@@ -113,10 +125,20 @@ impl Serialize for Measure {
     }
 }
 
+impl Serialize for VoiceBar {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        // A map, like the voices saved with their tuplet anchors.
+        use serde::ser::SerializeMap;
+        let mut map = serializer.serialize_map(Some(1))?;
+        map.serialize_entry("beats", &self.beats)?;
+        map.end()
+    }
+}
+
 impl VoiceBar {
     /// The voice saved as `raw`, in `time_signature`, if it holds.
     fn checked(raw: RawVoice, time_signature: TimeSignature) -> Result<Self, InvalidMeasure> {
-        let RawVoice { beats, mut tuplets } = raw;
+        let beats = marked_beats(raw)?;
         let mut ticks = 0u64;
         for (idx, beat) in beats.iter().enumerate() {
             // `supports` first: `ticks_of` overflows on durations like a
@@ -127,34 +149,75 @@ impl VoiceBar {
                 .flatten()
                 .ok_or(InvalidMeasure::UnsupportedDuration { idx })?;
             ticks += u64::from(beat_ticks);
-            if let Some(id) = beat.tuplet_group_id
-                && tuplets.get(id).is_none()
-            {
-                return Err(InvalidMeasure::UnknownTupletGroup { idx, id });
-            }
         }
         let expected = DEFAULT_GRID.ticks_per_measure(&time_signature);
         if ticks != u64::from(expected) {
             return Err(InvalidMeasure::WrongLength { ticks, expected });
         }
-        // Anchors saved at or above the next id would be overwritten.
-        tuplets.reserve_anchor_ids();
-        let measure = VoiceBar { beats, time_signature, tuplets };
-        // Like everywhere else, a lone beat with a group id counts as no group
-        // (see `tuplet_group_at`): nothing reads its anchor's span.
-        for GroupSpan { start_idx, end_idx, id } in measure.tuplet_groups() {
-            let ticks: u64 = measure.beats[start_idx..=end_idx]
-                .iter()
-                .filter_map(|b| DEFAULT_GRID.ticks_of(&b.duration))
-                .map(u64::from)
-                .sum();
-            let expected = measure.tuplets.get(id).map_or(0, |a| a.target_ticks);
-            if ticks != u64::from(expected) {
-                return Err(InvalidMeasure::TupletGroupLength { id, ticks, expected });
+        check_tuplet_groups(&beats)?;
+        Ok(VoiceBar { beats, time_signature })
+    }
+}
+
+/// The beats of `raw` with their tuplet marks: as saved, or made from the
+/// group ids and anchors of a voice saved before marks. A run of beats with
+/// one id is a group (a lone beat is none, as it was then).
+fn marked_beats(raw: RawVoice) -> Result<Vec<Beat>, InvalidMeasure> {
+    let RawVoice { beats: stored, anchors } = raw;
+    let mut beats: Vec<Beat> = stored.iter().map(|s| s.beat).collect();
+    let mut idx = 0;
+    while idx < stored.len() {
+        let Some(id) = stored[idx].group_id else {
+            idx += 1;
+            continue;
+        };
+        let anchor = anchors
+            .tuplet_anchors
+            .get(&id)
+            .ok_or(InvalidMeasure::UnknownTupletGroup { idx, id })?;
+        let len = stored[idx..].iter().take_while(|s| s.group_id == Some(id)).count();
+        if len >= 2 {
+            beats[idx].tuplet = Some(TupletMark::Start { base: anchor.base_hint });
+            for beat in &mut beats[idx + 1..idx + len] {
+                beat.tuplet = Some(TupletMark::Continue);
             }
         }
-        Ok(measure)
+        idx += len;
     }
+    Ok(beats)
+}
+
+/// Whether the tuplet marks of `beats` make whole groups: every tuplet in a
+/// group, every group two or more beats of one ratio that fill its span,
+/// and no mark outside a group.
+fn check_tuplet_groups(beats: &[Beat]) -> Result<(), InvalidMeasure> {
+    let mut idx = 0;
+    while idx < beats.len() {
+        let beat = &beats[idx];
+        match (beat.tuplet, beat.duration.as_tuplet_spec()) {
+            (None, None) => {
+                idx += 1;
+                continue;
+            }
+            (Some(TupletMark::Start { .. }), Some(_)) => {}
+            _ => return Err(InvalidMeasure::OutsideTupletGroup { idx }),
+        }
+        let group = TupletGroup::starting_at(beats, idx).expect("a group starts here");
+        let members = &beats[group.start_idx..=group.end_idx];
+        if let Some(off) = members.iter().position(|b| {
+            !b.duration.as_tuplet_spec().is_some_and(|spec| spec.same_grid(&group.spec))
+        }) {
+            return Err(InvalidMeasure::OutsideTupletGroup { idx: idx + off });
+        }
+        let ticks: u64 =
+            members.iter().filter_map(|b| DEFAULT_GRID.ticks_of(&b.duration)).map(u64::from).sum();
+        let expected = group.span_ticks();
+        if members.len() < 2 || ticks != u64::from(expected) {
+            return Err(InvalidMeasure::TupletGroupLength { idx, ticks, expected });
+        }
+        idx = group.end_idx + 1;
+    }
+    Ok(())
 }
 
 impl Measure {
@@ -344,7 +407,7 @@ impl std::error::Error for DifferentMeter {}
 
 impl VoiceBar {
     fn new_init(time_signature: TimeSignature, init: BeatKind) -> Self {
-        let mut s = Self { beats: Vec::new(), time_signature, tuplets: TupletRegistry::new() };
+        let mut s = Self { beats: Vec::new(), time_signature };
         s.fill_measure(init, &[Duration::Simple(time_signature.beat_note_value().unwrap())]);
         s
     }
@@ -377,15 +440,11 @@ impl VoiceBar {
             while i >= 0 && used > new_max {
                 let idx = i as usize;
                 let beat = self.beats[idx];
-                if let Some(GroupSpan { start_idx, end_idx, id: group_id }) =
-                    self.tuplet_group_at(idx)
-                {
+                if let Some(TupletGroup { start_idx, end_idx, .. }) = self.tuplet_group_at(idx) {
                     // Sum ticks for the span and remove it
                     let span_ticks: u32 = (start_idx..=end_idx)
                         .map(|k| DEFAULT_GRID.ticks_of(&self.beats[k].duration).unwrap_or(0))
                         .sum();
-                    // Remove anchor entry if present
-                    self.tuplets.unregister(group_id);
                     self.beats.drain(start_idx..=end_idx);
                     used = used.saturating_sub(span_ticks);
                     i = start_idx as isize - 1;

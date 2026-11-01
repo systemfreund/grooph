@@ -1,7 +1,7 @@
 use crate::beat::BeatKind::{Note, Rest};
 use crate::duration::Duration;
 use crate::head::{Head, Heads, Instrument};
-use crate::tuplet::TupletGroupId;
+use crate::tuplet::TupletMark;
 use serde::{Deserialize, Serialize};
 use std::fmt::{Debug, Formatter};
 
@@ -13,15 +13,18 @@ pub enum BeatKind {
 
 /// A slot of the rhythm, and what is played in it.
 ///
-/// The slot is the duration, maybe in a tuplet group: what the measure's
-/// rules keep filled. What is played are the [`Heads`]: none for a rest,
+/// The slot is the duration, maybe in a tuplet group (see [`TupletMark`]):
+/// what the measure's rules keep filled. What is played are the [`Heads`]: none for a rest,
 /// one for a note, several for a chord (see [`crate::head`]).
-#[derive(Copy, Clone, Eq, Serialize, Deserialize)]
+#[derive(Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(try_from = "RawBeat")]
 pub struct Beat {
     pub duration: Duration,
     heads: Heads,
-    pub tuplet_group_id: Option<TupletGroupId>,
+    /// Its place in a tuplet group. [`crate::VoiceBar::set_beat`] sets it
+    /// from the slot; a beat made elsewhere has none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tuplet: Option<TupletMark>,
 }
 
 impl Beat {
@@ -50,7 +53,7 @@ impl Beat {
 
     /// A beat playing `heads`, a rest if there are none.
     pub fn with_heads(duration: Duration, heads: Heads) -> Self {
-        Self { duration, heads, tuplet_group_id: None }
+        Self { duration, heads, tuplet: None }
     }
 
     pub fn heads(&self) -> &Heads {
@@ -148,13 +151,6 @@ impl Beat {
     }
 }
 
-impl PartialEq for Beat {
-    fn eq(&self, other: &Self) -> bool {
-        // Excludes `tuplet_group_id` from the comparison
-        self.duration == other.duration && self.heads == other.heads
-    }
-}
-
 impl Debug for Beat {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         if self.is_rest() {
@@ -168,12 +164,23 @@ impl Debug for Beat {
     }
 }
 
+/// `beats` without their tuplet marks, to compare durations and heads with
+/// beats made by hand.
+#[cfg(test)]
+pub(crate) fn unmarked(beats: &[Beat]) -> Vec<Beat> {
+    beats.iter().map(|b| Beat { tuplet: None, ..*b }).collect()
+}
+
 /// A [`Beat`] as saved: with its heads, or as before them with a kind and
-/// the flags of its one head.
+/// the flags of its one head; in a tuplet group by its mark, or as before
+/// marks by the id of its group (see [`StoredBeat`]).
 #[derive(Deserialize)]
 struct RawBeat {
     duration: Duration,
-    tuplet_group_id: Option<TupletGroupId>,
+    #[serde(default)]
+    tuplet: Option<TupletMark>,
+    #[serde(default)]
+    tuplet_group_id: Option<u32>,
     #[serde(default, deserialize_with = "present")]
     heads: Option<Heads>,
     #[serde(default, deserialize_with = "present")]
@@ -195,10 +202,27 @@ impl TryFrom<RawBeat> for Beat {
     type Error = &'static str;
 
     fn try_from(raw: RawBeat) -> Result<Self, Self::Error> {
+        StoredBeat::try_from(raw).map(|stored| stored.beat)
+    }
+}
+
+/// A [`Beat`] as saved in a voice, with the id of its tuplet group if it was
+/// saved before [`TupletMark`]s: the voice turns the ids into marks.
+#[derive(Deserialize)]
+#[serde(try_from = "RawBeat")]
+pub(crate) struct StoredBeat {
+    pub(crate) beat: Beat,
+    pub(crate) group_id: Option<u32>,
+}
+
+impl TryFrom<RawBeat> for StoredBeat {
+    type Error = &'static str;
+
+    fn try_from(raw: RawBeat) -> Result<Self, Self::Error> {
         let mut beat = match (raw.heads, raw.kind) {
-            (Some(heads), _) => Self::with_heads(raw.duration, heads),
+            (Some(heads), _) => Beat::with_heads(raw.duration, heads),
             (None, Some(kind)) => {
-                let mut beat = Self::new(raw.duration, kind);
+                let mut beat = Beat::new(raw.duration, kind);
                 // Saved both soft and accented, the accent wins, as it is
                 // written and played.
                 beat.set_soft(raw.soft);
@@ -207,17 +231,19 @@ impl TryFrom<RawBeat> for Beat {
             }
             (None, None) => return Err("a beat needs its heads"),
         };
-        beat.tuplet_group_id = raw.tuplet_group_id;
-        Ok(beat)
+        beat.tuplet = raw.tuplet;
+        // An id counts only where there are no marks yet.
+        let group_id = raw.tuplet_group_id.filter(|_| raw.tuplet.is_none());
+        Ok(StoredBeat { beat, group_id })
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::duration::NoteValue;
     use crate::duration::{e, t8};
     use crate::head::Technique;
-    use crate::tuplet::TupletGroupId;
 
     #[test]
     fn a_beat_saved_before_heads_opens_as_one_rhythm_head() {
@@ -228,9 +254,9 @@ mod tests {
         assert_eq!(beat, accented);
         let old = "(duration: Simple(Eighth), kind: Rest, accented: false, soft: false, \
                    tuplet_group_id: Some(3))";
-        let beat: Beat = ron::from_str(old).unwrap();
-        assert!(beat.is_rest());
-        assert_eq!(beat.tuplet_group_id.map(|id| id.as_u32()), Some(3));
+        let stored: StoredBeat = ron::from_str(old).unwrap();
+        assert!(stored.beat.is_rest());
+        assert_eq!(stored.group_id, Some(3));
         let old = "(duration: Simple(Eighth), kind: Note, accented: false, soft: true, \
                    tuplet_group_id: None)";
         let beat: Beat = ron::from_str(old).unwrap();
@@ -245,10 +271,9 @@ mod tests {
         let mut ghost = Head::new(Instrument::Snare);
         ghost.set_soft(true);
         let mut beat = Beat::with_heads(t8(), Heads::new([open, ghost]).unwrap());
-        beat.tuplet_group_id = Some(TupletGroupId(2));
+        beat.tuplet = Some(TupletMark::Start { base: NoteValue::Eighth });
         let back: Beat = ron::from_str(&ron::to_string(&beat).unwrap()).unwrap();
         assert_eq!(back, beat);
-        assert_eq!(back.tuplet_group_id, beat.tuplet_group_id);
         assert!(back.soft() && !back.accented());
         assert!(
             ron::from_str::<Beat>("(duration: Simple(Eighth), tuplet_group_id: None)").is_err()

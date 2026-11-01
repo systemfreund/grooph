@@ -3,15 +3,17 @@ use crate::duration::NoteValue::{Eighth, Sixteenth};
 use crate::duration::{Duration, NoteValue, TupletSpec};
 use crate::editing::Modification::{DissolveTuplet, ToggleAccent};
 use crate::grid::DEFAULT_GRID;
-use crate::tuplet::TupletGroupId;
-use crate::{Beat, BeatIdx, BeatKind, Head, Heads, Instrument, Technique, TimeSignature, VoiceBar};
+use crate::{
+    Beat, BeatIdx, BeatKind, Head, Heads, Instrument, Technique, TimeSignature, TupletGroup,
+    VoiceBar,
+};
 use either::Either;
 
 #[derive(Debug)]
 pub enum Modification {
     SetBeat(BeatIdx, Beat),                            // contains the new beat
-    SetTuplet(GroupSpan, TupletSpec),                  // contains the new state
-    DissolveTuplet(GroupSpan, TupletSpec),             // contains the dissolved tuplet spec
+    SetTuplet(TupletGroup, TupletSpec),                // contains the new state
+    DissolveTuplet(TupletGroup, TupletSpec),           // contains the dissolved tuplet spec
     ToggleKind(BeatIdx, BeatKind),                     // contains the new beat kind
     ToggleAccent(BeatIdx, bool),                       // contains the new accented state
     ToggleSoft(BeatIdx, bool),                         // contains the new soft state
@@ -19,13 +21,6 @@ pub enum Modification {
     ToggleHead(BeatIdx, Instrument, bool),             // contains whether the head is there now
     SetTechnique(BeatIdx, Instrument, Technique),      // contains the new technique
     ChangeTimeSignature(TimeSignature, TimeSignature), // (old, new)
-}
-
-#[derive(Debug, PartialEq, Eq)]
-pub struct GroupSpan {
-    pub id: TupletGroupId,
-    pub start_idx: BeatIdx,
-    pub end_idx: BeatIdx, // inclusive
 }
 
 pub const CYCLE_TUPLET_SPECS: [TupletSpec; 5] = [
@@ -256,7 +251,7 @@ impl VoiceBar {
     /// - If the group held a note, the first new beat becomes a note, of
     ///   the heads of the first; an accent anywhere in the group moves to
     ///   it.
-    /// - Clears `tuplet_group_id` in the span and unregisters the anchor.
+    /// - The new beats are in no tuplet group.
     /// - Returns the dissolved span and spec, or `None` if `idx` is not in a
     ///   tuplet.
     pub fn dissolve_tuplet_group(&mut self, idx: BeatIdx) -> Option<Modification> {
@@ -264,7 +259,8 @@ impl VoiceBar {
             return None;
         }
 
-        if let Some(GroupSpan { start_idx, end_idx, id: group_id }) = self.tuplet_group_at(idx) {
+        if let Some(tuplet_group) = self.tuplet_group_at(idx) {
+            let TupletGroup { start_idx, end_idx, spec } = tuplet_group;
             // The heads of the group's first note, and whether it held an
             // accent
             let group = &self.beats[start_idx..=end_idx];
@@ -273,13 +269,10 @@ impl VoiceBar {
 
             self.beats.drain(start_idx..=end_idx);
 
-            let anchor = self.tuplets.get(group_id).unwrap();
-            let span_ticks = anchor.target_ticks;
-            self.fill_at(start_idx, span_ticks, &[], Either::Right(Rest)).unwrap();
+            self.fill_at(start_idx, tuplet_group.span_ticks(), &[], Either::Right(Rest)).unwrap();
 
             // Make the first new beat a note and carry the accent over
             if start_idx < self.beats.len() {
-                self.beats[start_idx].tuplet_group_id = None;
                 if let Some(heads) = first_note {
                     self.beats[start_idx].set_heads(heads);
                 }
@@ -288,12 +281,7 @@ impl VoiceBar {
                 }
             }
 
-            self.tuplets.unregister(group_id).map(|anchor| {
-                DissolveTuplet(
-                    GroupSpan { start_idx, end_idx, id: group_id },
-                    TupletSpec { n: anchor.n, m: anchor.m, base: anchor.base_hint },
-                )
-            })
+            Some(DissolveTuplet(tuplet_group, spec))
         } else {
             None
         }
@@ -310,8 +298,7 @@ impl VoiceBar {
         if group.start_idx != start_idx {
             return None;
         }
-        let anchor = self.tuplets.get(group.id)?;
-        let span_ticks = anchor.target_ticks;
+        let span_ticks = group.span_ticks();
         let onsets = DEFAULT_GRID.compute_onset_ticks(&self.beats);
         let start_onset = onsets[start_idx];
 
@@ -395,15 +382,14 @@ impl VoiceBar {
     /// - Returns `None` without changes if `idx` is out of range or already
     ///   in a tuplet.
     /// - Otherwise replaces the beat with a tuplet beat of the same kind
-    ///   (note or rest) via `set_beat`, which registers the anchor and fills
-    ///   the rest of the group. If the measure has no room, it stays
+    ///   (note or rest) via `set_beat`, which fills the rest of the group. If the measure has no room, it stays
     ///   unchanged and this returns `None`.
     fn convert_to_tuplet(
         &mut self,
         idx: usize,
         tuplet_spec: TupletSpec,
         overwrite: bool,
-    ) -> Option<GroupSpan> {
+    ) -> Option<TupletGroup> {
         if idx >= self.beats.len() {
             return None;
         }
@@ -414,8 +400,7 @@ impl VoiceBar {
 
         // Protection: Stop if we would absorb a note and overwrite is false
         if !overwrite {
-            let base_ticks = DEFAULT_GRID.ticks_of(&Duration::Simple(tuplet_spec.base)).unwrap();
-            let group_span = (tuplet_spec.m as u32) * base_ticks;
+            let group_span = crate::tuplet::span_ticks(tuplet_spec);
 
             let mut consumed = 0u32;
             let mut k = idx;
@@ -444,7 +429,7 @@ mod tests {
     use super::*;
     use crate::duration::NoteValue::Eighth;
     use crate::duration::{e, t8};
-    use crate::{Beat, Measure, TimeSignature};
+    use crate::{Beat, Measure, TimeSignature, TupletMark};
     use std::assert_matches;
 
     #[test]
@@ -620,13 +605,17 @@ mod tests {
         assert_matches!(
             m.first_voice_mut().dissolve_tuplet_group(1),
             Some(DissolveTuplet(
-                GroupSpan { start_idx: 0, end_idx: 2, id: TupletGroupId(1) },
+                TupletGroup {
+                    start_idx: 0,
+                    end_idx: 2,
+                    spec: TupletSpec { n: 3, m: 2, base: Eighth }
+                },
                 TupletSpec { n: 3, m: 2, base: Eighth }
             ))
         );
 
         // The first new beat is an accented note
-        assert!(m.first_voice().beats()[0].tuplet_group_id.is_none());
+        assert!(m.first_voice().beats()[0].tuplet.is_none());
         assert_eq!(m.first_voice().beats()[0].kind(), Note);
         assert!(
             m.first_voice().beats()[0].accented(),
@@ -641,7 +630,7 @@ mod tests {
         // so convert straight from it
         assert_matches!(
             m.first_voice_mut().convert_to_tuplet(0, TupletSpec { n: 3, m: 2, base: Eighth }, true),
-            Some(GroupSpan { start_idx: 0, end_idx: 2, id: _ })
+            Some(TupletGroup { start_idx: 0, end_idx: 2, .. })
         );
         // All three slots are rests
         for i in 0..3 {
@@ -651,12 +640,16 @@ mod tests {
         assert_matches!(
             m.first_voice_mut().dissolve_tuplet_group(1),
             Some(DissolveTuplet(
-                GroupSpan { start_idx: 0, end_idx: 2, id: TupletGroupId(1) },
+                TupletGroup {
+                    start_idx: 0,
+                    end_idx: 2,
+                    spec: TupletSpec { n: 3, m: 2, base: Eighth }
+                },
                 TupletSpec { n: 3, m: 2, base: Eighth }
             ))
         );
 
-        assert!(m.first_voice().beats()[0].tuplet_group_id.is_none());
+        assert!(m.first_voice().beats()[0].tuplet.is_none());
         assert_eq!(m.first_voice().beats()[0].kind(), Rest);
         assert!(!m.first_voice().beats()[0].accented());
     }
@@ -667,23 +660,20 @@ mod tests {
         // Default fill: four quarter rests
         assert_matches!(
             m.first_voice_mut().convert_to_tuplet(0, TupletSpec { n: 3, m: 2, base: Eighth }, true),
-            Some(GroupSpan { start_idx: 0, end_idx: 2, id: _ }),
+            Some(TupletGroup { start_idx: 0, end_idx: 2, .. }),
             "Conversion to triplet should succeed"
         );
 
-        // Three triplet eighths at the first three positions, sharing a group id
-        let id0 = m.first_voice().beats()[0].tuplet_group_id;
-        assert!(id0.is_some());
+        // Three triplet eighths at the first three positions, in one group
         for i in 0..3 {
             assert_eq!(m.first_voice().beats()[i].duration, t8());
-            assert_eq!(m.first_voice().beats()[i].tuplet_group_id, id0);
+            assert_eq!(m.first_voice().tuplet_group_at(i).map(|g| g.start_idx), Some(0));
         }
 
-        // The anchor spans one quarter
-        let gid = id0.unwrap();
-        let anchor = m.first_voice().tuplets().get(gid).expect("anchor must exist");
+        // The group spans one quarter
+        let group = m.first_voice().tuplet_group_at(0).unwrap();
         let base_quarter_ticks = DEFAULT_GRID.ticks_of(&Duration::Simple(Eighth)).unwrap() * 2;
-        assert_eq!(anchor.target_ticks, base_quarter_ticks);
+        assert_eq!(group.span_ticks(), base_quarter_ticks);
     }
 
     #[test]
@@ -715,9 +705,12 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            m.first_voice().beats().to_vec(),
+            crate::beat::unmarked(m.first_voice().beats()),
             vec![Beat::note(t8()), Beat::note(t8()), Beat::note(t8())]
         );
+        let marks: Vec<_> = m.first_voice().beats().iter().map(|b| b.tuplet).collect();
+        let (start, cont) = (TupletMark::Start { base: Eighth }, TupletMark::Continue);
+        assert_eq!(marks, [Some(start), Some(cont), Some(cont)]);
     }
 
     #[test]
@@ -732,9 +725,12 @@ mod tests {
             )
             .unwrap();
         assert_eq!(
-            m.first_voice().beats().to_vec(),
+            crate::beat::unmarked(m.first_voice().beats()),
             vec![Beat::note(t8()), Beat::note(t8()), Beat::note(t8())]
         );
+        let marks: Vec<_> = m.first_voice().beats().iter().map(|b| b.tuplet).collect();
+        let (start, cont) = (TupletMark::Start { base: Eighth }, TupletMark::Continue);
+        assert_eq!(marks, [Some(start), Some(cont), Some(cont)]);
     }
 
     #[test]
@@ -749,10 +745,10 @@ mod tests {
                 TupletSpec { n: 3, m: 2, base: Eighth },
                 false
             ),
-            Some(GroupSpan { start_idx: 0, end_idx: 2, id: _ }),
+            Some(TupletGroup { start_idx: 0, end_idx: 2, .. }),
         );
         // Should have created a tuplet group at 0
-        assert!(m.first_voice().beats()[0].tuplet_group_id.is_some());
+        assert!(m.first_voice().beats()[0].tuplet.is_some());
     }
 
     #[test]
@@ -773,7 +769,7 @@ mod tests {
         );
         // Verify state unchanged (idx 1 is still Note)
         assert_eq!(m.first_voice().beats()[1].kind(), Note);
-        assert!(m.first_voice().beats()[0].tuplet_group_id.is_none());
+        assert!(m.first_voice().beats()[0].tuplet.is_none());
     }
 
     #[test]
@@ -786,9 +782,9 @@ mod tests {
         // Try to convert idx 0 to Triplet Eighths (span Q). Overwrite=true.
         assert_matches!(
             m.first_voice_mut().convert_to_tuplet(0, TupletSpec { n: 3, m: 2, base: Eighth }, true),
-            Some(GroupSpan { start_idx: 0, end_idx: 2, id: _ }),
+            Some(TupletGroup { start_idx: 0, end_idx: 2, .. }),
         );
         // Verify tuplet created
-        assert!(m.first_voice().beats()[0].tuplet_group_id.is_some());
+        assert!(m.first_voice().beats()[0].tuplet.is_some());
     }
 }

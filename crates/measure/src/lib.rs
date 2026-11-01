@@ -28,14 +28,14 @@ use BeatKind::Note;
 use BeatKind::Rest;
 pub use beat::{Beat, BeatKind};
 use duration::{Duration, TupletSpec};
-use editing::{GroupSpan, Modification};
+use editing::Modification;
 use either::Either;
 use grid::DEFAULT_GRID;
 pub use head::{Head, Heads, Instrument, Technique};
 pub use score::{Cursor, EmptyScore, MeasureIdx, Score, StaffKind};
 use std::fmt::{Debug, Formatter};
 pub use time_signature::{InvalidTimeSignature, ParseTimeSignatureError, TimeSignature};
-pub use tuplet::{TupletAnchor, TupletGroupId, TupletRegistry};
+pub use tuplet::{TupletGroup, TupletMark};
 pub use voice::{DifferentMeter, Measure, VoiceBar, VoiceIdx};
 pub use voicing::Voicing;
 
@@ -82,10 +82,15 @@ pub enum InvalidMeasure {
     UnsupportedDuration { idx: BeatIdx },
     /// The beats do not fill the measure exactly.
     WrongLength { ticks: u64, expected: u32 },
-    /// The beat at `idx` is in a tuplet group without an anchor.
-    UnknownTupletGroup { idx: BeatIdx, id: TupletGroupId },
-    /// The beats of a tuplet group do not fill its anchor's span.
-    TupletGroupLength { id: TupletGroupId, ticks: u64, expected: u32 },
+    /// The beat at `idx`, saved before tuplet marks, names a tuplet group
+    /// without an anchor.
+    UnknownTupletGroup { idx: BeatIdx, id: u32 },
+    /// The beat at `idx` is a tuplet outside a group, in a group of another
+    /// ratio, or marked for a group without being a tuplet.
+    OutsideTupletGroup { idx: BeatIdx },
+    /// The tuplet group starting at `idx` is one beat or does not fill its
+    /// span.
+    TupletGroupLength { idx: BeatIdx, ticks: u64, expected: u32 },
 }
 
 impl std::fmt::Display for InvalidMeasure {
@@ -99,10 +104,13 @@ impl std::fmt::Display for InvalidMeasure {
                 write!(f, "beats span {ticks} ticks, the measure {expected}")
             }
             Self::UnknownTupletGroup { idx, id } => {
-                write!(f, "beat {idx} is in tuplet group {} without an anchor", id.as_u32())
+                write!(f, "beat {idx} is in tuplet group {id} without an anchor")
             }
-            Self::TupletGroupLength { id, ticks, expected } => {
-                write!(f, "tuplet group {} spans {ticks} ticks, its anchor {expected}", id.as_u32())
+            Self::OutsideTupletGroup { idx } => {
+                write!(f, "beat {idx} does not fit its tuplet group")
+            }
+            Self::TupletGroupLength { idx, ticks, expected } => {
+                write!(f, "the tuplet group at beat {idx} spans {ticks} ticks, not {expected}")
             }
         }
     }
@@ -111,11 +119,6 @@ impl std::fmt::Display for InvalidMeasure {
 impl std::error::Error for InvalidMeasure {}
 
 impl VoiceBar {
-    /// Read-only access to the tuplet anchor registry.
-    pub fn tuplets(&self) -> &TupletRegistry {
-        &self.tuplets
-    }
-
     /// Expose a read-only view of beats
     pub fn beats(&self) -> &Vec<Beat> {
         &self.beats
@@ -152,8 +155,8 @@ impl VoiceBar {
 
     /// Validate a `set_beat` request and classify the resulting operation.
     ///
-    /// Returns the classification, the adjusted new beat (with tuplet group id
-    /// inherited from the slot when the grid stays the same), and the slot's
+    /// Returns the classification, the adjusted new beat (with the slot's tuplet
+    /// mark when the grid stays the same), and the slot's
     /// previous duration (handy for downstream handlers that gate on the old
     /// tuplet grid). Errors mirror the public `set_beat` contract.
     fn classify_replacement(
@@ -175,12 +178,14 @@ impl VoiceBar {
         }
 
         // Inside a tuplet slot only a same-grid tuplet replacement is allowed,
-        // and it must inherit the existing group id.
+        // and it takes the slot's place in the group. Outside one, the beat is
+        // in no group (a new group gets its marks below).
         let mut new_beat = beat;
+        new_beat.tuplet = None;
         if let Some(spec_old) = dur_old.as_tuplet_spec() {
             match beat.duration.as_tuplet_spec() {
                 Some(spec_new) if spec_new.same_grid(&spec_old) => {
-                    new_beat.tuplet_group_id = self.beats[idx].tuplet_group_id;
+                    new_beat.tuplet = self.beats[idx].tuplet;
                 }
                 _ => {
                     return Err(MeasureError::Unfillable {
@@ -217,8 +222,8 @@ impl VoiceBar {
 
     /// Replace `[idx..]` with a freshly created tuplet group described by `spec`.
     ///
-    /// Consumes following beats until the group span (`m * base`) is covered, allocates
-    /// a stable group id + anchor, inserts `new_beat` followed by `n-1` matching rests,
+    /// Consumes following beats until the group span (`m * base`) is covered, inserts
+    /// `new_beat` (marked as the group's start) followed by `n-1` matching rests,
     /// and reinstates any overrun as rests after the group.
     fn insert_tuplet_group_at(
         &mut self,
@@ -226,14 +231,13 @@ impl VoiceBar {
         new_beat: Beat,
         spec: TupletSpec,
     ) -> Result<(), MeasureError> {
-        let TupletSpec { n, m, base } = spec;
+        let TupletSpec { n, base, .. } = spec;
         let old = self.beats[idx];
         let old_ticks = DEFAULT_GRID.ticks_of(&self.beats[idx].duration).unwrap();
         let new_ticks = DEFAULT_GRID.ticks_of(&new_beat.duration).unwrap();
         let max_ticks = self.max_ticks();
 
-        let base_ticks = DEFAULT_GRID.ticks_of(&Duration::Simple(base)).unwrap();
-        let group_span = (m as u32) * base_ticks;
+        let group_span = tuplet::span_ticks(spec);
 
         // Collect ticks from idx forward until we cover group_span
         let mut consumed = 0u32;
@@ -243,8 +247,8 @@ impl VoiceBar {
                 // Not enough space in this measure to span the tuplet group
                 return self.overflow_err(new_ticks, max_ticks - old_ticks);
             }
-            // Never grow across an existing tuplet group boundary with different id
-            if self.beats[k].tuplet_group_id.is_some() {
+            // Never grow into an existing tuplet group
+            if self.beats[k].tuplet.is_some() {
                 return self.unfillable_err(group_span);
             }
             // If we encounter a tuplet of a different grid (different n/m), refuse
@@ -265,19 +269,16 @@ impl VoiceBar {
 
         self.beats.drain(idx..k);
 
-        // Allocate a stable id and register an anchor for this group
-        let id = self.tuplets.register(n, m, group_span, base);
-
         // Insert the tuplet items: first the requested beat, then n-1 rests of same tuplet duration
         let mut first = new_beat;
-        first.tuplet_group_id = Some(id);
+        first.tuplet = Some(TupletMark::Start { base });
         self.beats.insert(idx, first);
         // Preserve the prior accent on the first inserted beat
         self.beats[idx].carry_accents_from(&old);
         let mut insert_at = idx + 1;
         for _ in 1..n {
             let mut r = Beat::rest(new_beat.duration);
-            r.tuplet_group_id = Some(id);
+            r.tuplet = Some(TupletMark::Continue);
             self.beats.insert(insert_at, r);
             insert_at += 1;
         }
@@ -310,8 +311,8 @@ impl VoiceBar {
 
         // A tuplet note may not fill its whole group alone (e.g. one 2:3
         // quarter in a 2:3 eighth group): a group needs two notes.
-        if let Some(anchor) = self.beats[idx].tuplet_group_id.and_then(|id| self.tuplets.get(id))
-            && new_ticks >= anchor.target_ticks
+        if let Some(group) = self.tuplet_group_at(idx)
+            && new_ticks >= group.span_ticks()
         {
             return self.overflow_err(new_ticks, max_ticks - old_ticks);
         }
@@ -341,7 +342,7 @@ impl VoiceBar {
                     .unwrap_or_default();
                 // When growing, the consumed remainder after the enlarged beat
                 // should preserve the original beat's kind (Note vs Rest) and metadata
-                // (e.g. tuplet ids), but adapt to the new duration.
+                // (its tuplet mark, a later beat of the group), but adapt to the new duration.
                 self.fill_at(p, new_ticks_rest, &allowed, Either::Left(b))?;
                 remaining_to_consume = 0;
             }
@@ -363,7 +364,10 @@ impl VoiceBar {
             .as_tuplet_spec()
             .map(|s| DEFAULT_GRID.tuplet_grid_durations(s.n, s.m))
             .unwrap_or_default();
-        self.fill_at(idx + 1, leftover, &allowed, Either::Left(self.beats[idx].with_kind(Rest)))
+        // The filler follows the beat in its group, if it is in one.
+        let mut filler = self.beats[idx].with_kind(Rest);
+        filler.tuplet = TupletMark::follower(filler.tuplet);
+        self.fill_at(idx + 1, leftover, &allowed, Either::Left(filler))
     }
 
     fn compute_ticks_to_absorb(&self, idx: BeatIdx, dur_old: Duration, need: u32) -> u32 {
@@ -371,14 +375,14 @@ impl VoiceBar {
         let mut k = idx + 1;
         while k < self.beats.len() {
             let t = DEFAULT_GRID.ticks_of(&self.beats[k].duration).unwrap();
-            // Respect tuplet id/group boundaries when growing
+            // Respect tuplet group boundaries when growing
             match dur_old {
                 // If we are inside a tuplet slot, limit absorption strictly to the bounds and grid of
                 // the current tuplet group.
                 Duration::Tuplet { .. } => {
-                    // If current slot is part of an id-annotated group, never cross to a different id
-                    if let Some(cur_id) = self.beats[idx].tuplet_group_id
-                        && self.beats[k].tuplet_group_id == Some(cur_id)
+                    // The group goes on as long as its beats continue it
+                    if self.beats[idx].tuplet.is_some()
+                        && self.beats[k].tuplet == Some(TupletMark::Continue)
                     {
                         absorb_ticks += t;
                     } else {
@@ -388,7 +392,7 @@ impl VoiceBar {
                 // Absorb from following beats freely if we are not inside a tuplet slot.
                 _ => {
                     // But do not cross into any tuplet group (protected region)
-                    if self.beats[k].tuplet_group_id.is_some() {
+                    if self.beats[k].tuplet.is_some() {
                         break;
                     }
                     absorb_ticks += t;
@@ -402,59 +406,18 @@ impl VoiceBar {
         absorb_ticks
     }
 
-    /// Inclusive index range of the tuplet group that contains the beat at `idx`,
-    /// together with the group's stable id.
-    ///
-    /// Returns `None` if the beat is not part of a tuplet group or if the group
-    /// has only a single beat (a degenerate state that callers treat as "no group").
-    pub fn tuplet_group_at(&self, idx: BeatIdx) -> Option<GroupSpan> {
-        let id = self.beats.get(idx)?.tuplet_group_id?;
-        let start_idx = self.tuplet_group_start(idx, id);
-        let end_exclusive = self.tuplet_group_end(idx, id);
-        if end_exclusive - start_idx < 2 {
-            return None;
-        }
-        Some(GroupSpan { start_idx, end_idx: end_exclusive - 1, id })
+    /// The tuplet group that contains the beat at `idx`, if it is in one.
+    pub fn tuplet_group_at(&self, idx: BeatIdx) -> Option<TupletGroup> {
+        self.beats.get(idx)?.tuplet?;
+        let start = self.beats[..=idx]
+            .iter()
+            .rposition(|b| matches!(b.tuplet, Some(TupletMark::Start { .. })))?;
+        TupletGroup::starting_at(&self.beats, start).filter(|g| g.end_idx >= idx)
     }
 
-    /// All tuplet groups in beat order. Singleton groups are skipped (see
-    /// [`Measure::tuplet_group_at`]).
-    pub fn tuplet_groups(&self) -> Vec<GroupSpan> {
-        let mut out = Vec::new();
-        let mut i = 0;
-        while i < self.beats.len() {
-            let Some(id) = self.beats[i].tuplet_group_id else {
-                i += 1;
-                continue;
-            };
-            // Only emit on the first beat of a group
-            if i > 0 && self.beats[i - 1].tuplet_group_id == Some(id) {
-                i += 1;
-                continue;
-            }
-            let end_exclusive = self.tuplet_group_end(i, id);
-            if end_exclusive - i >= 2 {
-                out.push(GroupSpan { start_idx: i, end_idx: end_exclusive - 1, id });
-            }
-            i = end_exclusive;
-        }
-        out
-    }
-
-    fn tuplet_group_start(&self, idx: BeatIdx, id: TupletGroupId) -> BeatIdx {
-        let mut start = idx;
-        while start > 0 && self.beats[start - 1].tuplet_group_id == Some(id) {
-            start -= 1;
-        }
-        start
-    }
-
-    fn tuplet_group_end(&self, idx: BeatIdx, id: TupletGroupId) -> BeatIdx {
-        let mut end = idx + 1;
-        while end < self.beats.len() && self.beats[end].tuplet_group_id == Some(id) {
-            end += 1;
-        }
-        end
+    /// All tuplet groups in beat order.
+    pub fn tuplet_groups(&self) -> Vec<TupletGroup> {
+        (0..self.beats.len()).filter_map(|i| TupletGroup::starting_at(&self.beats, i)).collect()
     }
 
     /// Return a vector with the absolute position (1-based) of each beat as floats.
@@ -865,16 +828,8 @@ mod tests {
         m.first_voice_mut().set_beat(2, Beat::rest(t8())).unwrap();
 
         assert_eq!(&durations_of(&m), &[t8(), t16(), t8(), t16()]);
-        assert_eq!(
-            m.first_voice().beats().iter().enumerate().find_map(|(idx, beat)| {
-                if !matches!(beat.tuplet_group_id, Some(TupletGroupId(1))) {
-                    Some(idx)
-                } else {
-                    None
-                }
-            }),
-            None
-        );
+        let groups = m.first_voice().tuplet_groups();
+        assert_eq!(groups.iter().map(|g| (g.start_idx, g.end_idx)).collect::<Vec<_>>(), [(0, 3)]);
     }
 
     #[test]
@@ -1020,21 +975,7 @@ mod tests {
 
     fn round_trips(m: &Measure) -> bool {
         let back = read(&ron::to_string(m).unwrap()).unwrap_or_else(|err| panic!("{m:?}: {err}"));
-        // `Beat`'s `PartialEq` ignores the tuplet group: compare it and its anchor too.
-        let groups = |v: &VoiceBar| -> Vec<_> {
-            v.beats()
-                .iter()
-                .map(|b| b.tuplet_group_id.map(|id| (id, v.tuplets().get(id).cloned())))
-                .collect()
-        };
-        back.time_signature() == m.time_signature()
-            && back.voices().len() == m.voices().len()
-            && back.voices().iter().zip(m.voices()).all(|(b, v)| {
-                b.time_signature() == v.time_signature()
-                    && b.beats() == v.beats()
-                    && groups(b) == groups(v)
-                    && b.tuplets().len() == v.tuplets().len()
-            })
+        back == *m
     }
 
     fn parse(notation: &str) -> Measure {
@@ -1067,7 +1008,7 @@ mod tests {
         assert!(m.voice(1).unwrap().beats()[0].is_note());
         m.voice_mut(1).unwrap().set_beat(3, Beat::note(q())).unwrap();
 
-        // Every voice comes back with its beats, tuplet groups and anchors.
+        // Every voice comes back with its beats and tuplet groups.
         assert!(round_trips(&m));
         let first_only = parse("2/4 r:q q");
         assert!(!crate::click::same_bar(&first_only, &m), "the second voice counts");
@@ -1190,29 +1131,71 @@ mod tests {
             broken(quarter, "duration:Tuplet((n:0,m:0,base:Quarter))")
                 .contains("unsupported duration")
         );
-        // A tuplet group without an anchor, and one its beats do not fill.
+        // A group cut short, a tuplet outside a group, a group of another
+        // base, a mark on a beat that is no tuplet.
+        assert!(broken(",tuplet:Some(Continue)", "").contains("the tuplet group at beat 1"));
         assert!(
-            broken("tuplet_group_id:Some(1)", "tuplet_group_id:Some(9)")
-                .contains("without an anchor")
+            broken(",tuplet:Some(Start(base:Eighth))", "")
+                .contains("does not fit its tuplet group")
         );
-        assert!(broken("m:2,target_ticks", "m:3,target_ticks").contains("tuplet group 1 spans"));
+        assert!(
+            broken("Start(base:Eighth)", "Start(base:Quarter)")
+                .contains("the tuplet group at beat 1")
+        );
+        assert!(
+            broken("Simple(Quarter),heads:[])", "Simple(Quarter),heads:[],tuplet:Some(Continue))")
+                .contains("does not fit its tuplet group")
+        );
+    }
+
+    /// A voice saved before tuplet marks: beats named their group by an id,
+    /// and a table of anchors held each group's base.
+    fn old_voice(beats: &[(&str, Option<u32>)], anchors: &str) -> String {
+        let beats: Vec<String> = beats
+            .iter()
+            .map(|(d, id)| {
+                let id = id.map_or("None".to_string(), |id| format!("Some({id})"));
+                format!("(duration:{d},heads:[],tuplet_group_id:{id})")
+            })
+            .collect();
+        format!(
+            r#"{{"time_signature":(beats:1,beat_unit:4),"beats":[{}],"tuplet_anchors":{{{anchors}}},"next_tuplet_id":9}}"#,
+            beats.join(",")
+        )
     }
 
     #[test]
-    fn deserializing_never_hands_out_a_saved_tuplet_id_again() {
-        let mut m = Measure::new(TimeSignature::FOUR_FOUR);
-        m.first_voice_mut().set_beat(0, Beat::note(t8())).unwrap();
-        let saved = ron::to_string(&m).unwrap();
-        assert!(saved.contains("\"next_tuplet_id\":2"), "{saved}");
-        let saved = saved.replace("\"next_tuplet_id\":2", "\"next_tuplet_id\":1");
-        let mut back = read(&saved).unwrap();
-        back.first_voice_mut().set_beat(3, Beat::note(t8())).unwrap();
-        let first = back.first_voice().beats()[0].tuplet_group_id.unwrap();
-        let second = back.first_voice().beats()[3].tuplet_group_id.unwrap();
-        assert_ne!(first, second);
-        assert!(
-            back.first_voice().tuplets().get(first).is_some()
-                && back.first_voice().tuplets().get(second).is_some()
+    fn tuplet_ids_saved_before_marks_become_groups() {
+        let t8 = "Tuplet((n:3,m:2,base:Eighth))";
+        let t16 = "Tuplet((n:3,m:2,base:Sixteenth))";
+        let t4 = "Tuplet((n:3,m:2,base:Quarter))";
+        let anchor =
+            |id: u32, base: &str| format!("{id}:(id:{id},n:3,m:2,target_ticks:0,base_hint:{base})");
+        // Two groups of sixteenths side by side stay two.
+        let two = old_voice(
+            &[
+                (t16, Some(1)),
+                (t16, Some(1)),
+                (t16, Some(1)),
+                (t16, Some(2)),
+                (t16, Some(2)),
+                (t16, Some(2)),
+            ],
+            &format!("{},{}", anchor(1, "Sixteenth"), anchor(2, "Sixteenth")),
         );
+        let m = read(&two).unwrap();
+        let spans: Vec<_> =
+            m.first_voice().tuplet_groups().iter().map(|g| (g.start_idx, g.end_idx)).collect();
+        assert_eq!(spans, [(0, 2), (3, 5)]);
+        // A group of eighths that starts with a quarter keeps its base.
+        let longer_first = old_voice(&[(t4, Some(1)), (t8, Some(1))], &anchor(1, "Eighth"));
+        let m = read(&longer_first).unwrap();
+        let group = m.first_voice().tuplet_group_at(1).unwrap();
+        assert_eq!((group.start_idx, group.end_idx, group.spec.base), (0, 1, Eighth));
+        assert!(round_trips(&m));
+        // An id without its anchor.
+        let unknown =
+            old_voice(&[(t8, Some(1)), (t8, Some(1)), (t8, Some(1))], &anchor(2, "Eighth"));
+        assert!(read(&unknown).unwrap_err().contains("without an anchor"));
     }
 }

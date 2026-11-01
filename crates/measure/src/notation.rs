@@ -18,6 +18,10 @@
 //!   sixteenths in the time of six). Tuplets of other ratios are written `n:m` and their
 //!   note value (`w` `h` `q` `e` `s` `th`), e.g. `7:5e` for seven eighths in
 //!   the time of five. Every note of a tuplet group is written out.
+//! - A tuplet group spans `m` of its first note's value (`t8 t8 t8` a
+//!   quarter). A group of another span is written in brackets and spans its
+//!   notes: `[t4 t8]` is a triplet of eighths that starts with a triplet
+//!   quarter, `[t8 t8 t8 t8 t8 t8]` one triplet of quarters.
 //! - `r:` makes a rest (`r:q`), `>` accents a note (`>e`), parentheses make
 //!   it a soft (ghost) note (`(e)`).
 //!
@@ -57,7 +61,7 @@ use crate::duration::{Duration, NoteValue, TupletSpec};
 use crate::grid::DEFAULT_GRID;
 use crate::{
     Beat, Head, Heads, Instrument, Measure, MeasureError, ParseTimeSignatureError, Score,
-    StaffKind, Technique, TimeSignature,
+    StaffKind, Technique, TimeSignature, VoiceBar,
 };
 use std::fmt::{Display, Formatter};
 
@@ -119,6 +123,9 @@ pub enum NotationError {
     /// The beat cannot be placed here, e.g. an incomplete tuplet group or a
     /// duration that would leave an unfillable gap.
     DoesNotFit { at: Place, token: String },
+    /// Brackets that do not hold exactly one tuplet group, e.g. `[t8 t8 q]`
+    /// or an unclosed `[`.
+    InvalidBrackets { at: Place, token: String },
 }
 
 impl Display for NotationError {
@@ -163,6 +170,10 @@ impl Display for NotationError {
             DoesNotFit { at, token } => write!(
                 f,
                 "{at}: '{token}' cannot be placed here (tuplet groups must be complete, e.g. t8 t8 t8)"
+            ),
+            InvalidBrackets { at, token } => write!(
+                f,
+                "{at}: '{token}' - brackets hold one whole tuplet group of two or more notes of one ratio, e.g. [t4 t8]"
             ),
         }
     }
@@ -364,26 +375,45 @@ fn ticks_as_fraction(ticks: u32) -> String {
     format!("{}/{}", ticks / g, whole / g)
 }
 
-fn build_measure(
-    ts: TimeSignature,
-    tokens: &[(&str, Beat)],
-    at: Place,
-) -> Result<Measure, NotationError> {
+/// A beat as written, and whether it opens or closes brackets around its
+/// tuplet group.
+struct Token<'a> {
+    text: &'a str,
+    beat: Beat,
+    opens: bool,
+    closes: bool,
+}
+
+fn build_measure(ts: TimeSignature, tokens: &[Token], at: Place) -> Result<Measure, NotationError> {
     let mut m = Measure::new(ts);
-    for (idx, (token, beat)) in tokens.iter().enumerate() {
+    let mut open_group: Option<usize> = None;
+    for (idx, token) in tokens.iter().enumerate() {
+        let brackets = || NotationError::InvalidBrackets { at, token: token.text.to_string() };
         if idx >= m.first_voice().beats().len() {
-            return Err(NotationError::TooLong { at, token: token.to_string() });
+            return Err(NotationError::TooLong { at, token: token.text.to_string() });
         }
-        m.first_voice_mut().set_beat(idx, *beat).map_err(|err| match err {
-            MeasureError::Overflow { .. } => {
-                NotationError::TooLong { at, token: token.to_string() }
+        if token.opens {
+            if open_group.is_some() {
+                return Err(brackets());
             }
-            MeasureError::Unfillable { .. } => {
-                NotationError::DoesNotFit { at, token: token.to_string() }
-            }
-        })?;
+            // Start the group on the span of its notes, then write them in.
+            let start = bracket_group_start(&tokens[idx..]).ok_or_else(brackets)?;
+            set_beat(&mut m, idx, Beat::rest(start), token, at)?;
+            open_group = Some(idx);
+        }
+        set_beat(&mut m, idx, token.beat, token, at)?;
         // `set_beat` keeps the accent of the slot it overwrites; play ours.
-        m.first_voice_mut().set_heads(idx, *beat.heads());
+        m.first_voice_mut().set_heads(idx, *token.beat.heads());
+        if token.closes {
+            let group = m.first_voice().tuplet_group_at(idx);
+            match (open_group.take(), group) {
+                (Some(start), Some(g)) if g.start_idx == start && g.end_idx == idx => {}
+                _ => return Err(brackets()),
+            }
+        }
+    }
+    if let Some(start) = open_group {
+        return Err(NotationError::InvalidBrackets { at, token: tokens[start].text.to_string() });
     }
     if m.first_voice().beats().len() > tokens.len() {
         let missing: u32 = m.first_voice().beats()[tokens.len()..]
@@ -393,6 +423,46 @@ fn build_measure(
         return Err(NotationError::TooShort { at, missing: ticks_as_fraction(missing) });
     }
     Ok(m)
+}
+
+fn set_beat(
+    m: &mut Measure,
+    idx: usize,
+    beat: Beat,
+    token: &Token,
+    at: Place,
+) -> Result<(), NotationError> {
+    m.first_voice_mut().set_beat(idx, beat).map_err(|err| match err {
+        MeasureError::Overflow { .. } => {
+            NotationError::TooLong { at, token: token.text.to_string() }
+        }
+        MeasureError::Unfillable { .. } => {
+            NotationError::DoesNotFit { at, token: token.text.to_string() }
+        }
+    })
+}
+
+/// The duration a bracketed group starting with `tokens` begins as: its
+/// ratio on the base its notes span `m` of. `None` if the brackets do not
+/// close on two or more tuplets of one ratio that span `m` of a note value.
+fn bracket_group_start(tokens: &[Token]) -> Option<Duration> {
+    let len = 1 + tokens.iter().position(|t| t.closes)?;
+    let spec = tokens[0].beat.duration.as_tuplet_spec()?;
+    let mut ticks = 0;
+    for (i, t) in tokens[..len].iter().enumerate() {
+        if (i > 0 && t.opens)
+            || !t.beat.duration.as_tuplet_spec().is_some_and(|s| s.same_grid(&spec))
+        {
+            return None;
+        }
+        ticks += DEFAULT_GRID.ticks_of(&t.beat.duration)?;
+    }
+    let base_ticks =
+        (len >= 2 && ticks % u32::from(spec.m) == 0).then(|| ticks / u32::from(spec.m))?;
+    let base = crate::grid::NOTE_VALUES
+        .into_iter()
+        .find(|&v| DEFAULT_GRID.ticks_of(&Duration::Simple(v)) == Some(base_ticks))?;
+    Some(Duration::Tuplet(TupletSpec { base, ..spec }))
 }
 
 /// Parse a score from the text notation described in the [module docs](self).
@@ -419,7 +489,8 @@ pub fn parse_score(input: &str) -> Result<Score, NotationError> {
         let mut measure: Option<Measure> = None;
         for (v, text) in chunk.split(';').enumerate() {
             let at = Place { measure: i + 1, voice: v + 1 };
-            let mut beats: Vec<(&str, Beat)> = Vec::new();
+            let mut beats: Vec<Token> = Vec::new();
+            let mut opens = false;
             for token in text.split_whitespace() {
                 // Duration codes never contain '/', so any token with one is a meter.
                 if token.contains('/') {
@@ -435,7 +506,39 @@ pub fn parse_score(input: &str) -> Result<Score, NotationError> {
                     ts = new_ts;
                     continue;
                 }
-                beats.push((token, parse_beat(token, at)?));
+                // Brackets around a tuplet group, on its first and last note
+                // or on their own.
+                let (open, rest) = match token.strip_prefix('[') {
+                    Some(rest) => (true, rest),
+                    None => (false, token),
+                };
+                let (close, rest) = match rest.strip_suffix(']') {
+                    Some(rest) => (true, rest),
+                    None => (false, rest),
+                };
+                if open && opens {
+                    return Err(NotationError::InvalidBrackets { at, token: token.to_string() });
+                }
+                opens |= open;
+                if rest.is_empty() {
+                    match beats.last_mut() {
+                        Some(last) if close && !opens => last.closes = true,
+                        _ if open && !close => {}
+                        _ => {
+                            return Err(NotationError::InvalidBrackets {
+                                at,
+                                token: token.to_string(),
+                            });
+                        }
+                    }
+                    continue;
+                }
+                let beat = parse_beat(rest, at)?;
+                beats.push(Token { text: token, beat, opens, closes: close });
+                opens = false;
+            }
+            if opens {
+                return Err(NotationError::InvalidBrackets { at, token: "[".to_string() });
             }
             if beats.is_empty() {
                 return Err(NotationError::EmptyMeasure { at });
@@ -480,14 +583,24 @@ pub fn format_score(score: &Score) -> Option<String> {
             out.push_str(&format!("{ts} "));
             prev_ts = Some(ts);
         }
-        let voices: Option<Vec<String>> = m
-            .voices()
-            .iter()
-            .map(|v| Some(v.beats().iter().map(format_beat).collect::<Option<Vec<_>>>()?.join(" ")))
-            .collect();
+        let voices: Option<Vec<String>> = m.voices().iter().map(format_voice).collect();
         out.push_str(&voices?.join(" ; "));
     }
     Some(out)
+}
+
+/// The beats of `voice` as tokens, a tuplet group in brackets where its
+/// span is not `m` of its first note's value.
+fn format_voice(voice: &VoiceBar) -> Option<String> {
+    let mut tokens = voice.beats().iter().map(format_beat).collect::<Option<Vec<_>>>()?;
+    for group in voice.tuplet_groups() {
+        let first = voice.beats()[group.start_idx].duration.as_tuplet_spec()?;
+        if first.base != group.spec.base {
+            tokens[group.start_idx].insert(0, '[');
+            tokens[group.end_idx].push(']');
+        }
+    }
+    Some(tokens.join(" "))
 }
 
 /// `beat` as a token: a rest, a note of the one line, or a note of the kit.
@@ -534,20 +647,6 @@ mod tests {
         score.measures()[measure].first_voice().beats().clone()
     }
 
-    /// Which beats share a tuplet group, independent of the group ids: each
-    /// beat maps to the index of the first beat in its group (`None` outside
-    /// tuplets).
-    fn group_partition(m: &Measure) -> Vec<Option<usize>> {
-        let beats = m.first_voice().beats();
-        beats
-            .iter()
-            .map(|b| {
-                let id = b.tuplet_group_id?;
-                beats.iter().position(|other| other.tuplet_group_id == Some(id))
-            })
-            .collect()
-    }
-
     #[test]
     fn parses_simple_measure_with_default_time_signature() {
         let score = parse_score("q e e r:q >q").unwrap();
@@ -566,12 +665,12 @@ mod tests {
         let score = parse_score("t8 r:t8 t8 q qt16 qt16 qt16 qt16 qt16 q").unwrap();
         let beats = beats_of(&score, 0);
         assert_eq!(beats.len(), 10);
-        assert_eq!(beats[1], Beat::rest(t8()));
-        let group = beats[0].tuplet_group_id;
-        assert!(group.is_some());
-        assert!(beats[..3].iter().all(|b| b.tuplet_group_id == group));
+        assert_eq!(beats[1].duration, t8());
+        assert!(beats[1].is_rest());
+        let groups = score.measures()[0].first_voice().tuplet_groups();
+        let spans: Vec<_> = groups.iter().map(|g| (g.start_idx, g.end_idx)).collect();
+        assert_eq!(spans, [(0, 2), (4, 8)]);
         assert!(beats[4..9].iter().all(|b| b.duration == qt16()));
-        assert_ne!(beats[4].tuplet_group_id, group);
     }
 
     #[test]
@@ -638,12 +737,70 @@ mod tests {
     }
 
     #[test]
+    fn a_group_of_another_span_is_written_in_brackets() {
+        use crate::duration::NoteValue::Eighth as EighthValue;
+        // A triplet of eighths whose first note became a quarter.
+        let mut longer_first = Measure::new(TimeSignature::FOUR_FOUR);
+        let voice = longer_first.first_voice_mut();
+        voice.set_tuplet(0, None, false, Instrument::Rhythm).unwrap();
+        voice.modify_beat(0, Quarter, None, Instrument::Rhythm).unwrap();
+        // A triplet of quarters of six eighths.
+        let mut six = Measure::new(TimeSignature::FOUR_FOUR);
+        let voice = six.first_voice_mut();
+        voice.set_tuplet(
+            0,
+            Some(TupletSpec { n: 3, m: 2, base: Quarter }),
+            false,
+            Instrument::Rhythm,
+        );
+        for idx in [0, 2, 4] {
+            voice.modify_beat(idx, EighthValue, None, Instrument::Rhythm).unwrap();
+        }
+        for (m, text) in [
+            (longer_first, "4/4 [t4 t8] r:q r:q r:q"),
+            (six, "4/4 [t8 r:t8 t8 r:t8 t8 r:t8] r:q r:q"),
+        ] {
+            let score = Score::new(vec![m]);
+            assert_eq!(format_score(&score).unwrap(), text);
+            assert!(parse_score(text).unwrap().measures() == score.measures(), "{text}");
+        }
+        // Brackets on their own, and a group of its first note's span.
+        let spaced = parse_score("4/4 [ t4 t8 ] r:q r:q r:q").unwrap();
+        assert_eq!(format_score(&spaced).unwrap(), "4/4 [t4 t8] r:q r:q r:q");
+        assert_eq!(
+            format_score(&parse_score("4/4 [t8 t8 t8] q h").unwrap()).unwrap(),
+            "4/4 t8 t8 t8 q h"
+        );
+    }
+
+    #[test]
+    fn brackets_hold_one_whole_tuplet_group() {
+        let brackets = |token: &str| NotationError::InvalidBrackets {
+            at: Place::measure(1),
+            token: token.into(),
+        };
+        for (text, token) in [
+            ("[t8 t8 q] q q", "[t8"),
+            ("[t8] t8 t8 q h", "[t8]"),
+            ("[t4 t8 r:q r:q r:q", "[t4"),
+            ("t4 t8] r:q r:q r:q", "t8]"),
+            ("[t4 [t8] r:q r:q r:q", "[t4"),
+            ("[t8 t8 t8 st16 st16 st16] h", "[t8"),
+            ("[] q q q q", "[]"),
+            ("[ [t4 t8] r:q r:q r:q", "[t4"),
+        ] {
+            assert_eq!(parse_score(text).unwrap_err(), brackets(token), "{text}");
+        }
+    }
+
+    #[test]
     fn tuplets_of_any_ratio_are_written_n_m_and_their_value() {
         let score = parse_score("5/8 7:5e 7:5e r:7:5e 7:5e >7:5e 7:5e (7:5e)").unwrap();
         let beats = beats_of(&score, 0);
         let seven = Duration::Tuplet(TupletSpec { n: 7, m: 5, base: Eighth });
         assert!(beats.iter().all(|b| b.duration == seven));
-        assert_eq!(group_partition(&score.measures()[0]), vec![Some(0); 7]);
+        let groups = score.measures()[0].first_voice().tuplet_groups();
+        assert_eq!(groups.iter().map(|g| (g.start_idx, g.end_idx)).collect::<Vec<_>>(), [(0, 6)]);
         assert_eq!(format_score(&score).unwrap(), "5/8 7:5e 7:5e r:7:5e 7:5e >7:5e 7:5e (7:5e)");
         // A listed tuplet keeps its code.
         assert_eq!(
@@ -736,10 +893,7 @@ mod tests {
                 let parsed = parse_score(&text).unwrap();
                 assert_eq!(score.len(), parsed.len(), "{text}");
                 for (a, b) in score.measures().iter().zip(parsed.measures()) {
-                    assert_eq!(a.first_voice().beats(), b.first_voice().beats(), "{text}");
-                    assert_eq!(a.time_signature(), b.time_signature());
-                    // `Beat`'s `PartialEq` ignores tuplet groups; compare them too.
-                    assert_eq!(group_partition(a), group_partition(b), "{text}");
+                    assert!(a == b, "{text}");
                 }
             }
         }
@@ -800,7 +954,7 @@ mod tests {
         let line =
             parse_score("2/4 t8 t8 t8 q | q. e | 5/8 7:5e 7:5e 7:5e 7:5e 7:5e 7:5e 7:5e").unwrap();
         for (kit, plain) in score.measures().iter().zip(line.measures()) {
-            assert_eq!(group_partition(kit), group_partition(plain));
+            assert_eq!(kit.first_voice().tuplet_groups(), plain.first_voice().tuplet_groups());
         }
     }
 

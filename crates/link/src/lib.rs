@@ -987,9 +987,7 @@ mod tests {
 
     /// How many beats each tuplet group of `bar` holds, in order.
     fn tuplet_groups(bar: &Measure) -> Vec<usize> {
-        let ids: Vec<_> =
-            bar.first_voice().beats().iter().filter_map(|b| b.tuplet_group_id).collect();
-        ids.chunk_by(|a, b| a == b).map(<[_]>::len).collect()
+        bar.first_voice().tuplet_groups().iter().map(|g| g.end_idx - g.start_idx + 1).collect()
     }
 
     #[test]
@@ -1150,6 +1148,29 @@ mod tests {
         assert_eq!(link.bpm, Some(96));
         let Some(LinkContent::Score(parsed)) = link.content else { panic!("expected a score") };
         assert_eq!(format_score(&parsed), format_score(&score));
+    }
+
+    #[test]
+    fn a_link_keeps_a_tuplet_group_whose_first_note_was_changed() {
+        use grooph_measure::Instrument::Rhythm;
+        use grooph_measure::duration::NoteValue::Quarter;
+        // Triplet, then its first note a quarter: a triplet of eighths that
+        // starts with a triplet quarter.
+        let mut m = Measure::new(TimeSignature::FOUR_FOUR);
+        m.first_voice_mut().set_tuplet(0, None, false, Rhythm).unwrap();
+        m.first_voice_mut().modify_beat(0, Quarter, None, Rhythm).unwrap();
+        let score = Score::new(vec![m]);
+        let link = SharedLink {
+            bpm: Some(90),
+            content: Some(LinkContent::Score(score.clone())),
+            ..SharedLink::default()
+        };
+        let url = link.to_url("https://grooph.app/").unwrap();
+        assert_eq!(url, "https://grooph.app/?v=2&bpm=90&r=4/4+%5Bt4+t8%5D+r:q+r:q+r:q");
+        let Some(LinkContent::Score(back)) = parse(url.split_once('?').unwrap().1).content else {
+            panic!("{url} opens no score");
+        };
+        assert!(back.measures() == score.measures());
     }
 
     #[test]

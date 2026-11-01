@@ -1,163 +1,95 @@
-//! Tuplet group identity and registry.
+//! Tuplet groups.
 //!
-//! Beats that belong to the same tuplet group share a stable
-//! [`TupletGroupId`]; the [`TupletRegistry`] owns the per-group [`TupletAnchor`]
-//! metadata (n:m ratio, frozen tick span, base hint) and hands out fresh ids.
+//! The beats of a tuplet group stand next to each other in their voice. The
+//! first carries [`TupletMark::Start`] with the group's base note value, the
+//! others [`TupletMark::Continue`]. Everything else follows from the beats:
+//! the ratio `n:m` is the one of their [`TupletSpec`]s, and the group spans
+//! `m` of its base (see [`TupletGroup::span_ticks`]), so it ends where its
+//! beats fill that span.
+//!
+//! The marks are positions, not names: two voices with the same beats and
+//! groups are equal, and saving them needs no table on the side.
 
-use crate::duration::{Duration, NoteValue};
+use crate::duration::{Duration, NoteValue, TupletSpec};
 use crate::grid::DEFAULT_GRID;
+use crate::{Beat, BeatIdx};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
-/// Stable identifier for a tuplet group within a [`crate::Measure`].
-///
-/// Wraps a `u32` for type-safety so that "tuplet group id" can't be confused
-/// with a beat index or anchor count. The wire format matches a plain `u32`.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct TupletGroupId(pub u32);
+/// Where a beat stands in its tuplet group.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TupletMark {
+    /// The first beat of a group of `m` `base` notes' time (the `m` of the
+    /// beats' ratio). The base can differ from the first beat's own value:
+    /// a triplet of eighths can start with a triplet quarter.
+    Start { base: NoteValue },
+    /// A later beat of the group started before it.
+    Continue,
+}
 
-impl TupletGroupId {
-    pub const fn new(id: u32) -> Self {
-        Self(id)
-    }
-    pub const fn as_u32(self) -> u32 {
-        self.0
+impl TupletMark {
+    /// The mark of a beat behind this one in the same group.
+    pub(crate) fn follower(mark: Option<TupletMark>) -> Option<TupletMark> {
+        mark.map(|_| TupletMark::Continue)
     }
 }
 
-impl From<u32> for TupletGroupId {
-    fn from(id: u32) -> Self {
-        Self(id)
+/// A tuplet group of a voice: its beats and its ratio.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct TupletGroup {
+    pub start_idx: BeatIdx,
+    /// Inclusive.
+    pub end_idx: BeatIdx,
+    /// The group's ratio on its base note value: `n` notes of `base` in the
+    /// time of `m`. The beats are of this ratio, with their own values.
+    pub spec: TupletSpec,
+}
+
+impl TupletGroup {
+    /// The group's length in grid ticks: `m` of its base.
+    pub fn span_ticks(&self) -> u32 {
+        span_ticks(self.spec)
+    }
+
+    /// The group starting at `start_idx` of `beats`, by its marks. `None`
+    /// if no group starts there.
+    pub(crate) fn starting_at(beats: &[Beat], start_idx: BeatIdx) -> Option<TupletGroup> {
+        let first = beats.get(start_idx)?;
+        let Some(TupletMark::Start { base }) = first.tuplet else {
+            return None;
+        };
+        let TupletSpec { n, m, .. } = first.duration.as_tuplet_spec()?;
+        let len = beats[start_idx + 1..]
+            .iter()
+            .take_while(|b| b.tuplet == Some(TupletMark::Continue))
+            .count();
+        Some(TupletGroup { start_idx, end_idx: start_idx + len, spec: TupletSpec { n, m, base } })
     }
 }
 
-/// Stable anchor describing a tuplet group span and semantics.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(from = "StoredAnchor")]
-pub struct TupletAnchor {
-    pub id: TupletGroupId,
-    pub n: u8,
-    pub m: u8,
-    /// Frozen logical span = ticks(Simple(base_hint)) * m
-    pub target_ticks: u32,
-    /// Intended base for UI/export; not authoritative for grid validity
-    pub base_hint: NoteValue,
-}
-
-/// A [`TupletAnchor`] as saved. Its span is recomputed on load: it was saved
-/// in the ticks of the grid of its time, which grows with the durations.
-#[derive(Deserialize)]
-struct StoredAnchor {
-    id: TupletGroupId,
-    n: u8,
-    m: u8,
-    target_ticks: u32,
-    base_hint: NoteValue,
-}
-
-impl From<StoredAnchor> for TupletAnchor {
-    fn from(a: StoredAnchor) -> Self {
-        let StoredAnchor { id, n, m, target_ticks, base_hint } = a;
-        let target_ticks = DEFAULT_GRID
-            .ticks_of(&Duration::Simple(base_hint))
-            .map_or(target_ticks, |base| u32::from(m) * base);
-        Self { id, n, m, target_ticks, base_hint }
-    }
-}
-
-/// Registry of tuplet anchors for a measure.
-///
-/// Encapsulates the anchor table plus id allocation so that callers cannot
-/// accidentally register two anchors under the same id or leak an unregistered
-/// id back onto a beat.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(default)]
-pub struct TupletRegistry {
-    /// Stored map keyed by raw `u32`. Keeping the raw key keeps the JSON wire
-    /// format identical to the previous `HashMap<u32, TupletAnchor>` and lets
-    /// HashMap hash on a primitive.
-    #[serde(rename = "tuplet_anchors")]
-    anchors: HashMap<u32, TupletAnchor>,
-    /// Next id to hand out from [`Self::register`].
-    #[serde(rename = "next_tuplet_id")]
-    next: u32,
-}
-
-impl Default for TupletRegistry {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl TupletRegistry {
-    pub fn new() -> Self {
-        Self { anchors: HashMap::new(), next: 1 }
-    }
-
-    /// Allocate a fresh id and store an anchor for it. Returns the new id.
-    pub fn register(
-        &mut self,
-        n: u8,
-        m: u8,
-        target_ticks: u32,
-        base_hint: NoteValue,
-    ) -> TupletGroupId {
-        let id = TupletGroupId(self.next);
-        self.next = self.next.saturating_add(1);
-        self.anchors.insert(id.0, TupletAnchor { id, n, m, target_ticks, base_hint });
-        id
-    }
-
-    /// Drop the anchor for `id` and return it if it existed.
-    pub fn unregister(&mut self, id: TupletGroupId) -> Option<TupletAnchor> {
-        self.anchors.remove(&id.0)
-    }
-
-    /// Look up the anchor for `id`.
-    pub fn get(&self, id: TupletGroupId) -> Option<&TupletAnchor> {
-        self.anchors.get(&id.0)
-    }
-
-    /// Make sure [`Self::register`] hands out no id of an anchor again.
-    pub(crate) fn reserve_anchor_ids(&mut self) {
-        if let Some(max) = self.anchors.keys().max() {
-            self.next = self.next.max(max.saturating_add(1));
-        }
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.anchors.is_empty()
-    }
-
-    pub fn len(&self) -> usize {
-        self.anchors.len()
-    }
+/// `m` of `spec`'s base in grid ticks: the span of a group of `spec`.
+pub(crate) fn span_ticks(spec: TupletSpec) -> u32 {
+    let base = DEFAULT_GRID.ticks_of(&Duration::Simple(spec.base)).unwrap_or(0);
+    u32::from(spec.m) * base
 }
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::duration::{q, t8};
-    use crate::{Beat, Measure, TimeSignature};
+    use crate::{Measure, TimeSignature};
 
     #[test]
-    fn saved_spans_are_recomputed_on_the_current_grid() {
+    fn a_group_spans_m_of_its_base() {
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
         m.first_voice_mut().set_beat(0, Beat::note(t8())).unwrap();
-        let saved = ron::to_string(&m).unwrap();
-        let span = m
-            .first_voice()
-            .tuplets()
-            .get(m.first_voice().beats()[0].tuplet_group_id.unwrap())
-            .unwrap()
-            .target_ticks;
-        // Saved when the grid had half as many ticks.
-        let old =
-            saved.replace(&format!("target_ticks:{span}"), &format!("target_ticks:{}", span / 2));
-        assert_ne!(old, saved);
-        let mut back: Measure = ron::from_str(&old).unwrap();
-        assert!(back.first_voice_mut().dissolve_tuplet_group(0).is_some());
-        assert_eq!(back.first_voice().beats()[0].duration, q());
-        assert_eq!(back.first_voice().beats().len(), 4);
+        let group = m.first_voice().tuplet_group_at(1).unwrap();
+        assert_eq!((group.start_idx, group.end_idx), (0, 2));
+        assert_eq!(group.span_ticks(), DEFAULT_GRID.ticks_of(&q()).unwrap());
+        assert_eq!(
+            m.first_voice().beats()[0].tuplet,
+            Some(TupletMark::Start { base: NoteValue::Eighth })
+        );
+        assert_eq!(m.first_voice().beats()[2].tuplet, Some(TupletMark::Continue));
+        assert_eq!(m.first_voice().beats()[3].tuplet, None);
     }
 }
