@@ -747,6 +747,13 @@ mod tests {
         // No kick on the third beat's lower voice: a rest there, its voice.
         assert_eq!(at(2, -3.0), (1, 1, Kick));
 
+        // A rule that writes the snare below: with none to find, a tap on
+        // its place goes to the lower voice.
+        assert_eq!(at(2, 1.2).0, 0);
+        let tap = Pos2::new(notes[2].center.x, system.y_baseline - 1.2 * half_ss);
+        let hit = hit_test_head(&staff, tap, &Voicing::CYMBALS_ABOVE).unwrap();
+        assert_eq!((hit.voice, hit.instrument), (1, Snare));
+
         // On the one line, its rhythm.
         let line = grooph_measure::notation::parse_score("4/4 q q q q").unwrap();
         let staff = build_staff_layout(&line, &o);
