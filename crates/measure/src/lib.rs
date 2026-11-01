@@ -1202,6 +1202,16 @@ mod tests {
             &anchor(1, "Eighth"),
         );
         assert!(read(&plain).unwrap().first_voice().tuplet_groups().is_empty());
+        // A plain beat in a run leaves the tuplets around it their group.
+        let mixed = old_voice(
+            &[("Simple(Quarter)", Some(1)), (t8, Some(1)), (t8, Some(1)), (t8, Some(1))],
+            &anchor(1, "Eighth"),
+        )
+        .replace("beats:1,", "beats:2,");
+        let m = read(&mixed).unwrap();
+        let spans: Vec<_> =
+            m.first_voice().tuplet_groups().iter().map(|g| (g.start_idx, g.end_idx)).collect();
+        assert_eq!(spans, [(1, 3)]);
         // A lone tuplet was outside a group then too: the editor never saved
         // one, and it does not load.
         let lone = old_voice(

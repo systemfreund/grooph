@@ -160,10 +160,10 @@ impl VoiceBar {
 }
 
 /// The beats of `raw` with their tuplet marks: as saved, or made from the
-/// group ids and anchors of a voice saved before marks. A run of two or
-/// more tuplets with one id is a group. Other ids mark nothing: a lone beat
-/// or a plain beat was in no group then either; a lone tuplet is then
-/// outside a group, which the editor never saved and loading rejects.
+/// group ids and anchors of a voice saved before marks. Two or more tuplets
+/// in a row with one id are a group. Other ids mark nothing: a plain beat
+/// is in no group; a lone tuplet is then outside a group, which the editor
+/// never saved and loading rejects.
 fn marked_beats(raw: RawVoice) -> Result<Vec<Beat>, InvalidMeasure> {
     let RawVoice { beats: stored, anchors } = raw;
     let mut beats: Vec<Beat> = stored.iter().map(|s| s.beat).collect();
@@ -178,9 +178,12 @@ fn marked_beats(raw: RawVoice) -> Result<Vec<Beat>, InvalidMeasure> {
             .get(&id)
             .ok_or(InvalidMeasure::UnknownTupletGroup { idx, id })?;
         let len = stored[idx..].iter().take_while(|s| s.group_id == Some(id)).count();
-        if len >= 2 && stored[idx..idx + len].iter().all(|s| s.beat.duration.is_tuplet()) {
-            beats[idx].tuplet = Some(TupletMark::Start { base: anchor.base_hint });
-            for beat in &mut beats[idx + 1..idx + len] {
+        // Each stretch of two or more tuplets in the run is a group; its
+        // plain beats are in none.
+        let run = &mut beats[idx..idx + len];
+        for tuplets in run.split_mut(|b| !b.duration.is_tuplet()).filter(|t| t.len() >= 2) {
+            tuplets[0].tuplet = Some(TupletMark::Start { base: anchor.base_hint });
+            for beat in &mut tuplets[1..] {
                 beat.tuplet = Some(TupletMark::Continue);
             }
         }
