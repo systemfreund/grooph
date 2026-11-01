@@ -16,6 +16,11 @@ use grooph_layout::staff_layout::{PlacedMeasure, StaffLayout, StaffOpts};
 use grooph_measure::counting::CountConfig;
 use grooph_measure::{Cursor, MeasureIdx, Score, StaffKind, VoiceIdx};
 
+/// The count labels' reference line, above the lowest ink of a bar with a
+/// lower voice, in em: the labels sit 0.75 em under it, so 0.3 em under the
+/// ink, which their text (0.4 em high) clears.
+const COUNT_LABEL_DROP_EM: f32 = 0.45;
+
 /// How the staff marks the playback position.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum PlaybackMarks {
@@ -126,12 +131,26 @@ pub fn draw_staff(
                 lit_in(0, placed.measure_idx),
             );
             if let Some(config) = lower_counts {
+                // Right under this bar's own lowest notes (stems, beams and
+                // tuplet brackets too), not at the row's bottom, which the
+                // tallest bar of the score sets for every row.
+                let em = staff_opts.em;
+                let lowest = placed
+                    .voices
+                    .iter()
+                    .filter_map(|v| v.notes_ink())
+                    .map(|ink| ink.bottom())
+                    .fold(f32::NAN, f32::max);
+                let under = match lowest.is_nan() {
+                    true => placed.rect.bottom(),
+                    false => (lowest - COUNT_LABEL_DROP_EM * em).min(placed.rect.bottom()),
+                };
                 draw_count_layer(
                     ui.painter(),
                     &score.measures()[placed.measure_idx],
                     &placed.voices,
                     &staff_opts.voice_opts_for(placed, 0),
-                    placed.rect.bottom(),
+                    under,
                     config,
                     color,
                     measure_count_tick,
