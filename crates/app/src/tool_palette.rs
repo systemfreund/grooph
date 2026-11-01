@@ -87,20 +87,17 @@ const AIM_ORDER: [Instrument; 9] = [
     Instrument::Crash,
     Instrument::HiHatFoot,
 ];
-/// The meter, the head modifiers and the rests: the first row of tools,
-/// the kit's modifiers after them.
-const HEAD_TOOLS: [&str; 8] = [
+/// The tools in one row, going on in the next line where it does not fit:
+/// the meter, the rests, the head modifiers, the note values, the tuplets.
+const TOOLS: [&str; 18] = [
     "meta.change_time_signature",
-    "modify.toggle.accent",
-    "modify.toggle.soft",
-    "modify.toggle.dotted",
     "insert.rest.q",
     "insert.rest.e",
     "insert.rest.s",
     "insert.rest.th",
-];
-/// The note values, then the tuplets, in one row.
-const VALUE_TOOLS: [&str; 10] = [
+    "modify.toggle.accent",
+    "modify.toggle.soft",
+    "modify.toggle.dotted",
     "insert.note.q",
     "insert.note.e",
     "insert.note.s",
@@ -167,8 +164,7 @@ pub(crate) fn grid_rows(
         }
         rows.push(instruments);
     }
-    rows.push(tools(&HEAD_TOOLS));
-    rows.push(tools(&VALUE_TOOLS));
+    rows.push(tools(&TOOLS));
     rows
 }
 
@@ -210,8 +206,8 @@ fn grid_metrics(width: f32) -> (usize, Vec2) {
 impl Grooph {
     /// The editor's tools as a grid in the thumb's reach, the same in every
     /// editor (Practice, Score, the metronome's click bar): on the kit its
-    /// instruments, then the meter, the head modifiers and the rests, and
-    /// the note values with the tuplets. Undo and redo are in
+    /// instruments, then one row of the meter, the rests, the head
+    /// modifiers, the note values and the tuplets. Undo and redo are in
     /// the editor's bar ([`BAR_TOOLS`]).
     pub(super) fn tool_palette_panel(&mut self, ui: &mut Ui) {
         egui::Panel::bottom("tool_palette")
