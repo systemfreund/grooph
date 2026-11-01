@@ -1,6 +1,6 @@
 use crate::Grooph;
 use crate::kit_palette::{instrument_label, instrument_short};
-use crate::pickers::Picker;
+use crate::pickers::{Picker, time_signature_label};
 use crate::shell::centered_column;
 use crate::tools::{BeatTemplate, DeleteOp, MetaOp, Modifier, NavOp, Tool, ToolKind, all_tools};
 use crate::{Mode, tools};
@@ -533,7 +533,10 @@ impl Grooph {
                     ToolKind::InsertBeat(_) if selected => "Dissolve the tuplet".to_owned(),
                     // The meter with its grouping, which the cell leaves out.
                     _ if matches!(button_kind(&t.kind), ButtonKind::TimeSignature) => {
-                        format!("{}: {}", t.label, self.current_measure().time_signature())
+                        format!(
+                            "Meter {}",
+                            time_signature_label(self.current_measure().time_signature())
+                        )
                     }
                     _ => t.label.to_owned(),
                 };
