@@ -62,35 +62,18 @@ impl Span {
 
 /// The beats of `ts`: quarters in `x/4`, grouped like the eighths of `n/8`;
 /// the beat groups in `x/8` and `x/16` (6/8 = 3+3, 7/8 as picked), each a
-/// group of its own. `None` for other beat units.
+/// group of its own (as [`crate::generator::beat_groups`]). `None` where
+/// the generator has no beats for `ts` (other beat units, 1/8).
 pub(crate) fn meter_spans(ts: TimeSignature) -> Option<Vec<Span>> {
-    let beats = usize::from(ts.beats);
-    let (lens, groups): (Vec<u32>, Vec<u8>) = match ts.beat_unit {
-        4 => (
-            vec![4 * UNITS_PER_SIXTEENTH; beats],
-            crate::grouping::compound_groups(ts.beats).into_owned(),
-        ),
-        8 | 16 => {
-            let unit = 16 / u32::from(ts.beat_unit) * UNITS_PER_SIXTEENTH;
-            // Groups longer than three in twos, with a three at the end
-            // for an odd length, as the generator draws them (4/16).
-            let lens: Vec<u32> = ts
-                .groups()
-                .iter()
-                .flat_map(|&g| {
-                    let threes = u32::from(g > 3 && g % 2 == 1);
-                    let twos = if g > 3 { (u32::from(g) - 3 * threes) / 2 } else { 0 };
-                    let whole = (g <= 3).then_some(u32::from(g));
-                    std::iter::repeat_n(2, twos as usize)
-                        .chain(std::iter::repeat_n(3, threes as usize))
-                        .chain(whole)
-                })
-                .map(|g| g * unit)
-                .collect();
-            let count = lens.len();
-            (lens, vec![1; count])
-        }
-        _ => return None,
+    // The generator's beats, the one source of where the beats are:
+    // groups longer than three in twos, with a three at the end (4/16).
+    let lens: Vec<u32> = crate::generator::beat_groups(ts)?
+        .iter()
+        .map(|span| span.sixteenths() * UNITS_PER_SIXTEENTH)
+        .collect();
+    let groups: Vec<u8> = match ts.beat_unit {
+        4 => crate::grouping::compound_groups(ts.beats).into_owned(),
+        _ => vec![1; lens.len()],
     };
     let mut beats_of_group = groups
         .iter()

@@ -187,7 +187,7 @@ impl BeatSpan {
     }
 
     /// Length of the span in sixteenths.
-    fn sixteenths(self) -> u32 {
+    pub(crate) fn sixteenths(self) -> u32 {
         match self {
             BeatSpan::Quarter => 4,
             BeatSpan::DottedQuarter => 6,

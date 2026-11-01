@@ -295,7 +295,9 @@ fn run_random_cleanups(seed: u64, measures: usize) -> (usize, usize) {
             }
             m.push_voices(&lower).expect("one meter");
         }
-        if m.voices().iter().any(|v| v.respelled().is_none()) {
+        // A voice that cannot be respelled stays as it is next to one that
+        // can; only a measure of such voices is skipped.
+        if m.voices().iter().all(|v| v.respelled().is_none()) {
             left += 1;
             continue;
         }
