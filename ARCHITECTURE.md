@@ -712,7 +712,9 @@ copy of the bar): an accent on a rest, a dot without room, a technique
 without the head or its instrument's. Accent, ghost and dot show the cursor's beat as they
 would change it (`modifier_preview`): its value with the mark. A voice is picked by a tap on
 it, or on the kit by picking an instrument. The
-columns follow the width (`grid_metrics`, cells 54 to 64 px wide), a row
+columns follow the width of the page's column (`grid_metrics`, cells 54 to
+64 px wide; grid and bar both in `centered_column`, so on a wide screen they
+line up with the cards), a row
 wider than the grid goes on in the next line, and past 45% of the screen's
 height the grid scrolls, so the staff stays in view.
 

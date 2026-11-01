@@ -1,6 +1,7 @@
 use crate::Grooph;
 use crate::kit_palette::{instrument_label, instrument_short};
 use crate::pickers::Picker;
+use crate::shell::centered_column;
 use crate::tools::{BeatTemplate, DeleteOp, MetaOp, Modifier, NavOp, Tool, ToolKind, all_tools};
 use crate::{Mode, tools};
 use eframe::egui;
@@ -168,19 +169,25 @@ impl Grooph {
             .show_separator_line(false)
             .resizable(false)
             .show_collapsible(ui, &mut (self.ui.mode == Mode::Edit), |ui| {
-                // Sized up front: a bottom panel offers the height it had.
-                let rows = grid_rows(!self.staff_model().one_line());
-                let (columns, cell) = grid_metrics(ui.available_width());
-                let lines: usize = rows.iter().map(|r| r.len().div_ceil(columns)).sum();
-                let height = lines as f32 * (cell.y + GRID_GAP) - GRID_GAP;
-                let height = height.min(MAX_GRID_SHARE * ui.ctx().content_rect().height());
-                egui::ScrollArea::vertical()
-                    .id_salt("tool_grid")
-                    .min_scrolled_height(height)
-                    .max_height(height)
-                    .scroll_bar_visibility(ScrollBarVisibility::AlwaysHidden)
-                    .show(ui, |ui| self.tool_grid(ui, &rows));
+                // In the page's column, as the editor's bar below it: on a
+                // wide screen as wide as the cards, not the window.
+                centered_column(ui, |ui| self.tool_grid_scroll(ui));
             });
+    }
+
+    fn tool_grid_scroll(&mut self, ui: &mut Ui) {
+        // Sized up front: a bottom panel offers the height it had.
+        let rows = grid_rows(!self.staff_model().one_line());
+        let (columns, cell) = grid_metrics(ui.available_width());
+        let lines: usize = rows.iter().map(|r| r.len().div_ceil(columns)).sum();
+        let height = lines as f32 * (cell.y + GRID_GAP) - GRID_GAP;
+        let height = height.min(MAX_GRID_SHARE * ui.ctx().content_rect().height());
+        egui::ScrollArea::vertical()
+            .id_salt("tool_grid")
+            .min_scrolled_height(height)
+            .max_height(height)
+            .scroll_bar_visibility(ScrollBarVisibility::AlwaysHidden)
+            .show(ui, |ui| self.tool_grid(ui, &rows));
     }
 
     fn tool_grid(&mut self, ui: &mut Ui, rows: &[Vec<Cell>]) {

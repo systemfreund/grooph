@@ -100,7 +100,7 @@ pub(crate) fn subdivision_short_label(s: Subdivision) -> &'static str {
 
 /// Lay out `add` in a column at most [`COLUMN_MAX_WIDTH`] wide, centered in
 /// the space left.
-fn centered_column<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
+pub(crate) fn centered_column<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
     let avail = ui.available_rect_before_wrap();
     let width = avail.width().min(COLUMN_MAX_WIDTH);
     let rect = Rect::from_min_size(
@@ -1369,38 +1369,41 @@ impl Grooph {
             )
             .show_separator_line(false)
             .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    let playing = self.playback_ctl.transport_state == TransportState::Playing;
-                    let fill = ui.visuals().selection.bg_fill;
-                    let icon = ui.visuals().selection.stroke.color;
-                    if round_button(ui, SIDE_BUTTON_SIZE, fill, icon, |painter, rect, color| {
-                        paint_play_icon(painter, rect, color, playing)
-                    })
-                    .clicked()
-                    {
-                        self.toggle_playback();
-                    }
-                    ui.add_space(8.0);
-                    let size = self.bar_tool_buttons(ui);
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        // Back to the page's card and options sheet.
-                        // A check mark drawn in, in a button as big as
-                        // undo and redo.
-                        let done = ui.add(Button::new("").min_size(size)).on_hover_text("Done");
-                        let r = done.rect.shrink2(vec2(0.32, 0.36) * done.rect.size());
-                        let color = ui.style().interact(&done).fg_stroke.color;
-                        ui.painter().line(
-                            vec![
-                                r.left_center() + vec2(0.0, 0.05 * r.height()),
-                                r.center_bottom() - vec2(0.12 * r.width(), 0.0),
-                                r.right_top(),
-                            ],
-                            egui::Stroke::new(2.5, color),
-                        );
-                        if done.clicked() {
-                            self.leave_editor();
+                // In the grid's column, so play and Done line up with it.
+                centered_column(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        let playing = self.playback_ctl.transport_state == TransportState::Playing;
+                        let fill = ui.visuals().selection.bg_fill;
+                        let icon = ui.visuals().selection.stroke.color;
+                        if round_button(ui, SIDE_BUTTON_SIZE, fill, icon, |painter, rect, color| {
+                            paint_play_icon(painter, rect, color, playing)
+                        })
+                        .clicked()
+                        {
+                            self.toggle_playback();
                         }
-                    });
+                        ui.add_space(8.0);
+                        let size = self.bar_tool_buttons(ui);
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            // Back to the page's card and options sheet.
+                            // A check mark drawn in, in a button as big as
+                            // undo and redo.
+                            let done = ui.add(Button::new("").min_size(size)).on_hover_text("Done");
+                            let r = done.rect.shrink2(vec2(0.32, 0.36) * done.rect.size());
+                            let color = ui.style().interact(&done).fg_stroke.color;
+                            ui.painter().line(
+                                vec![
+                                    r.left_center() + vec2(0.0, 0.05 * r.height()),
+                                    r.center_bottom() - vec2(0.12 * r.width(), 0.0),
+                                    r.right_top(),
+                                ],
+                                egui::Stroke::new(2.5, color),
+                            );
+                            if done.clicked() {
+                                self.leave_editor();
+                            }
+                        });
+                    })
                 });
             });
     }
