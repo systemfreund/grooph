@@ -3,7 +3,6 @@ use crate::accuracy::{AccuracyMark, HitGrade, clamp_diff_to_beat_window};
 use crate::guide::{Guide, anchor_intensity};
 use crate::metronome_view::MetronomeVoice;
 use crate::playback_clock::{advance_tick, next_count_in};
-use crate::tools::{Modifier, ToolKind, all_tools};
 use crate::{Mode, TransportState};
 use eframe::egui;
 use eframe::egui::{FontId, Frame, Rect, Response, Stroke};
@@ -72,9 +71,9 @@ impl Grooph {
             // No percussion clef: on a single line it says nothing
             // the line doesn't, and every row starts alike.
             layout_clef_first: false,
-            // The compact card in a chat has no meter in
-            // a card: the staff shows it.
-            time_signature_first: self.compact_card(),
+            // The compact card in a chat has no meter in a card: the staff
+            // shows it. So does the score tab's, whatever its meters.
+            time_signature_first: self.compact_card() || self.tab() == crate::shell::Tab::Score,
             room_below_em: if count_config.is_some() {
                 ROOM_BELOW_WITH_LABELS_EM
             } else {
@@ -120,7 +119,27 @@ impl Grooph {
                 // earlier frame, e.g. one before endless mode removed a
                 // row.
                 let playing = self.playback_ctl.transport_state == TransportState::Playing;
-                let mut scroll_area = egui::ScrollArea::both().animated(!playing);
+                // No scroll bar: the wheel, a finger or the cursor scroll
+                // the score, and a bar fading in over the notes distracts.
+                // Nor egui's shading at an edge with more beyond it: as
+                // the cursor scrolls a staff a little wider than the
+                // screen, it would move from one side to the other.
+                ui.spacing_mut().scroll.fade.strength = 0.0;
+                let mut scroll_area = egui::ScrollArea::both()
+                    .animated(!playing)
+                    .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+                    // egui turns drag-to-scroll on only after it has seen a touch, so
+                    // the very first swipe would be lost on a phone. Where a finger is
+                    // known to be the pointer the scroll area takes drags from the start;
+                    // otherwise the staff's own click-and-drag sense wins them anyway.
+                    .scroll_source(egui::scroll_area::ScrollSource {
+                        drag: if self.ui.touch_seen {
+                            egui::scroll_area::DragScroll::Always
+                        } else {
+                            egui::scroll_area::DragScroll::OnTouch
+                        },
+                        ..Default::default()
+                    });
                 let playback = &mut self.playback_ctl.playback;
                 if std::mem::take(&mut playback.rows_removed)
                     && let Some(offset) = playback.scroll.value_at(ui.input(|i| i.time))
@@ -171,6 +190,22 @@ impl Grooph {
                     let score = calibration
                         .as_ref()
                         .unwrap_or(&self.editor.docs.get(self.editor.document).score);
+                    // A rhythm's editor shows an empty "ghost" bar after the
+                    // last one: a tap there adds a bar. Laid out with the
+                    // score, drawn veiled.
+                    let ghost = (self.ui.mode == Mode::Edit
+                        && !self.metronome_mode()
+                        && calibration.is_none())
+                    .then(|| {
+                        let mut shown = score.clone();
+                        let last = &score.measures()[score.len() - 1];
+                        shown.push(last.empty_like(last.time_signature()));
+                        shown
+                    });
+                    // Timing marks and the playback cursor go by the bars
+                    // that play: the cursor never enters the ghost bar.
+                    let played = score;
+                    let score = ghost.as_ref().unwrap_or(score);
                     let staff = build_staff_layout(score, &staff_opts);
                     // One row fits the height, so nothing above or below
                     // the staff (accents, count labels) is cut off on a
@@ -196,8 +231,12 @@ impl Grooph {
                     // the shared helper to find the cursor's actual home measure
                     // and X for this frame.
                     if let Some(playback) = playback_local
-                        && let Some((m_idx, x)) =
-                            grooph_render::staff::current_cursor_x(score, &staff, playback)
+                        && let Some((m_idx, x)) = grooph_render::staff::current_cursor_x(
+                            score,
+                            &staff,
+                            playback,
+                            0..played.len(),
+                        )
                         && let Some(placed) = staff.placed(m_idx)
                     {
                         // The row is centred vertically, but the offset
@@ -207,8 +246,14 @@ impl Grooph {
                         // the top or bottom of the score.
                         let view_height = ui.clip_rect().height();
                         let max_offset = (staff.total_size.y - view_height).max(0.0);
-                        let row_offset = (placed.rect.center().y - origin.y - view_height / 2.0)
+                        let centred = (placed.rect.center().y - origin.y - view_height / 2.0)
                             .clamp(0.0, max_offset);
+                        // A row already in view stays where it is: starting
+                        // to play must not scroll the staff to the ghost bar.
+                        let shown = (ui.clip_rect().top() - origin.y).clamp(0.0, max_offset);
+                        let in_view = placed.rect.top() - origin.y >= shown
+                            && placed.rect.bottom() - origin.y <= shown + view_height;
+                        let row_offset = if in_view { shown } else { centred };
                         let now = ui.input(|i| i.time);
                         let playback = &mut self.playback_ctl.playback;
                         let offset = playback.scroll.update(row_offset, now);
@@ -238,13 +283,19 @@ impl Grooph {
                     // Bring the edit cursor into view when it moves. `Align::None`
                     // means "scroll just enough to make visible"; following only
                     // on a move leaves the user free to scroll away from it.
+                    // Again when the view resizes (the tool grid opening
+                    // under it), as the bar must still be whole in it.
                     // Gated on Stopped so it doesn't clobber the playback
                     // re-centering above.
                     let editing = self.ui.mode == Mode::Edit
                         && self.playback_ctl.transport_state == TransportState::Stopped;
                     let staff_cursor = self.editor.doc().cursor;
                     let followed = editing.then_some(staff_cursor);
-                    if followed != self.ui.followed_cursor
+                    let view_height = ui.clip_rect().height();
+                    let resized = followed.is_some()
+                        && view_height > 1.0
+                        && (view_height - self.ui.followed_view_height).abs() > 0.5;
+                    if (followed != self.ui.followed_cursor || resized)
                         && let Some(placed) = staff.placed(staff_cursor.measure_idx)
                         && let Some(layout) = placed.voices.get(staff_cursor.voice)
                         && let Some(note) = layout.notes.get(staff_cursor.beat_idx)
@@ -260,9 +311,14 @@ impl Grooph {
                         );
                     }
                     self.ui.followed_cursor = followed;
+                    self.ui.followed_view_height = view_height;
 
-                    let (rect, resp) =
-                        ui.allocate_exact_size(staff.total_size, egui::Sense::click_and_drag());
+                    let (rect, resp) = ui.allocate_exact_size(
+                        staff.total_size,
+                        staff_sense(ui, &mut self.ui.touch_seen, &mut self.ui.touching),
+                    );
+                    let ghost_rect =
+                        ghost.as_ref().and_then(|g| staff.placed(g.len() - 1)).map(|p| p.rect);
 
                     let cursor = (self.ui.mode == Mode::Edit).then_some(staff_cursor);
                     let playback = playback_local;
@@ -305,6 +361,7 @@ impl Grooph {
                         cursor,
                         lit,
                         playback,
+                        0..played.len(),
                         marks,
                         count_config.as_ref(),
                         &render_opts,
@@ -326,6 +383,32 @@ impl Grooph {
                         ui.ctx().request_repaint();
                     }
 
+                    if let Some(ghost) = ghost_rect {
+                        let hovered = resp.hover_pos().is_some_and(|p| ghost.contains(p));
+                        draw_ghost_bar(ui, ghost, hovered);
+                    }
+
+                    // The bar menu: a "⋯" on the cursor's bar, or a long
+                    // press (right click) on any bar.
+                    let mut bar_action = None;
+                    if self.ui.mode == Mode::Edit && calibration.is_none() {
+                        let bars = self.editor.doc().score.len();
+                        let menu = BarMenu { metronome: self.metronome_mode(), bars };
+                        if (resp.secondary_clicked() || resp.long_touched())
+                            && let Some(pos) = resp.interact_pointer_pos()
+                            && let Some(idx) = (0..bars).find(|&idx| {
+                                staff.placed(idx).is_some_and(|p| p.rect.contains(pos))
+                            })
+                        {
+                            bar_action = Some(BarAction::Select(idx));
+                        }
+                        resp.context_menu(|ui| menu.items(ui, &mut bar_action));
+                        if let Some(placed) = staff.placed(staff_cursor.measure_idx) {
+                            let chip = bar_menu_chip(ui, placed.rect);
+                            egui::Popup::menu(&chip).show(|ui| menu.items(ui, &mut bar_action));
+                        }
+                    }
+
                     if self.playback_ctl.playback.bar_muted
                         && let Some((m_idx, _)) = playback_local
                         && let Some(placed) = staff.placed(m_idx)
@@ -335,20 +418,33 @@ impl Grooph {
 
                     self.draw_accuracy_markers(
                         ui,
-                        score,
+                        played,
                         &staff,
                         &timing,
                         render_opts.staff_space(),
                     );
-                    // A finger dragging over the notes scrolls the score,
-                    // as on the scroll bar; a mouse drags the edit cursor.
+                    // The first finger's drag, before the staff leaves its
+                    // drags to the scroll area, scrolls by hand.
                     if resp.dragged() && ui.input(|i| i.any_touches()) {
                         ui.scroll_with_delta_animation(
                             resp.drag_delta(),
                             eframe::egui::style::ScrollAnimation::none(),
                         );
                     } else {
-                        self.handle_input(resp, &staff, with_ring);
+                        self.handle_input(resp, &staff, with_ring, ghost_rect);
+                    }
+                    match bar_action {
+                        Some(BarAction::Select(idx)) => {
+                            let doc = self.editor.doc_mut();
+                            if doc.cursor.measure_idx != idx {
+                                let cursor = Cursor { measure_idx: idx, beat_idx: 0, ..doc.cursor };
+                                doc.cursor = doc.score.clamp_cursor(cursor);
+                            }
+                        }
+                        Some(BarAction::Duplicate) => self.duplicate_current_measure(),
+                        Some(BarAction::Clear) => self.clear_current_measure(),
+                        Some(BarAction::Delete) => self.remove_current_measure(),
+                        None => {}
                     }
                 });
             });
@@ -428,15 +524,15 @@ impl Grooph {
     }
 
     /// Whether the staff shows accuracy marks: while calibrating, and with
-    /// accuracy on outside the metronome tab. The tracker keeps the marks of
+    /// accuracy on in Practice. The tracker keeps the marks of
     /// the last practice run, keyed by onset, so they would land on the
     /// click bar's notes.
     pub(crate) fn shows_accuracy_marks(&self) -> bool {
-        self.calibration_source().is_some()
-            || (self.playback_ctl.accuracy.enabled && !self.metronome_mode())
+        self.calibration_source().is_some() || self.accuracy_active()
     }
 
-    /// Marks on the notes of `score`, the score `staff` was laid out from.
+    /// Marks on the notes of `score`, the score `staff` was laid out from
+    /// (maybe with the ghost bar after it).
     fn draw_accuracy_markers(
         &self,
         ui: &egui::Ui,
@@ -463,7 +559,8 @@ impl Grooph {
         let global_onsets_u64: Vec<u64> = global_beats.iter().map(|gb| gb.onset_tick).collect();
 
         for system in &staff.systems {
-            for placed in &system.measures {
+            // Not the ghost bar after the score's last.
+            for placed in system.measures.iter().filter(|p| p.measure_idx < score.len()) {
                 self.draw_accuracy_markers_for_measure(
                     ui,
                     score,
@@ -536,7 +633,15 @@ impl Grooph {
 
     /// `with_ring`: under the metronome's ring a tap changes the tapped
     /// click's level, as on the ring.
-    fn handle_input(&mut self, resp: Response, staff: &StaffLayout, with_ring: bool) {
+    /// `ghost`: where the editor's ghost bar is, which a tap turns into a
+    /// bar at the end.
+    fn handle_input(
+        &mut self,
+        resp: Response,
+        staff: &StaffLayout,
+        with_ring: bool,
+        ghost: Option<Rect>,
+    ) {
         // While playing along, a touch or click on the staff is a hit, not an edit.
         if self.tap_capture_active() {
             if resp.contains_pointer() && resp.ctx.input(|i| i.pointer.any_pressed()) {
@@ -555,10 +660,18 @@ impl Grooph {
             }
             return;
         }
-        if !matches!(self.ui.mode, Mode::TimeSignature(_))
-            && (resp.clicked() || resp.dragged())
+        if resp.clicked()
+            && let Some(ghost) = ghost
+            && resp.interact_pointer_pos().is_some_and(|p| ghost.contains(p))
+        {
+            self.push_measure();
+            return;
+        }
+        if (resp.clicked() || resp.dragged())
             && let Some(pos) = resp.interact_pointer_pos()
             && let Some(hit) = hit_test_head(staff, pos)
+            // Not the ghost bar's rests.
+            && hit.measure_idx < self.editor.doc().score.len()
         {
             // A tap on another voice edits that voice from now on: in the
             // metronome tab the click bar or its counter rhythm. On the
@@ -568,16 +681,134 @@ impl Grooph {
             if !self.staff_model().one_line() {
                 self.editor.instrument = hit.instrument;
             }
+        }
+    }
+}
 
-            if resp.double_clicked()
-                && let Some(tool) = all_tools()
-                    .iter()
-                    .find(|t| matches!(t.kind, ToolKind::Modify(Modifier::ToggleRestNote)))
-            {
-                self.apply_tool(tool);
+/// What the staff reacts to: a tap everywhere, and a mouse also its drag
+/// (it moves the edit cursor). Once a finger has touched the screen a drag
+/// is left to the scroll area, which scrolls with its momentum and its give
+/// at the ends, as the tool grid does. A phone or tablet is known to have
+/// a finger as its pointer from the start (`platform::finger_is_the_pointer`).
+/// Otherwise the hit test, which uses the previous frame's widgets, leaves
+/// it to the touches seen before, not the ones of this frame: the first
+/// finger's drag is scrolled by hand.
+fn staff_sense(ui: &egui::Ui, touch_seen: &mut bool, touching: &mut bool) -> egui::Sense {
+    // Not changed under a finger that is dragging: a gesture keeps the
+    // sense it started with.
+    let now = ui.input(|i| i.any_touches());
+    *touch_seen |= *touching && !now;
+    *touching = now;
+    match *touch_seen {
+        true => egui::Sense::click(),
+        false => egui::Sense::click_and_drag(),
+    }
+}
+
+/// What the bar menu does to the cursor's bar, after the staff is drawn.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum BarAction {
+    /// A long press on a bar: the menu is for that bar.
+    Select(usize),
+    Duplicate,
+    Clear,
+    Delete,
+}
+
+/// The bar menu's entries: in the metronome's one bar only "Clear".
+#[derive(Clone, Copy)]
+struct BarMenu {
+    metronome: bool,
+    bars: usize,
+}
+
+impl BarMenu {
+    fn items(self, ui: &mut egui::Ui, action: &mut Option<BarAction>) {
+        // Rows as tall as a finger's touch, as wide as the menu.
+        let row = |ui: &mut egui::Ui, text: egui::RichText, enabled: bool| {
+            let size = egui::vec2(ui.available_width().max(BAR_MENU_WIDTH), BAR_MENU_ROW);
+            ui.add_enabled(enabled, egui::Button::new(text).min_size(size)).clicked()
+        };
+        ui.set_min_width(BAR_MENU_WIDTH);
+        if !self.metronome && row(ui, "Duplicate bar".into(), true) {
+            *action = Some(BarAction::Duplicate);
+        }
+        if row(ui, (if self.metronome { "Clear" } else { "Clear bar" }).into(), true) {
+            *action = Some(BarAction::Clear);
+        }
+        if !self.metronome {
+            let delete = egui::RichText::new("Delete bar").color(ui.visuals().error_fg_color);
+            if row(ui, delete, self.bars > 1) {
+                *action = Some(BarAction::Delete);
             }
         }
     }
+}
+
+/// The bar menu's width and the height of its rows, a finger's touch.
+const BAR_MENU_WIDTH: f32 = 160.0;
+const BAR_MENU_ROW: f32 = 44.0;
+
+/// The "⋯" in the top right corner of the cursor's bar (`bar`), which
+/// opens the bar menu.
+fn bar_menu_chip(ui: &mut egui::Ui, bar: Rect) -> Response {
+    let size = egui::vec2(24.0, 16.0);
+    let rect = Rect::from_min_size(bar.right_top() + egui::vec2(-size.x - 1.0, 0.0), size);
+    let resp = ui
+        // Drawn small, so it stays clear of marks above the last beat; the
+        // finger gets more room.
+        .interact(rect.expand(6.0), ui.scope_id().with("bar_menu"), egui::Sense::click())
+        .on_hover_text("Bar menu");
+    let visuals = ui.style().interact(&resp);
+    let painter = ui.painter();
+    painter.rect(
+        rect,
+        visuals.corner_radius,
+        visuals.weak_bg_fill,
+        visuals.bg_stroke,
+        egui::StrokeKind::Inside,
+    );
+    for dx in [-5.0, 0.0, 5.0] {
+        painter.circle_filled(rect.center() + egui::vec2(dx, 0.0), 1.6, visuals.fg_stroke.color);
+    }
+    resp
+}
+
+/// How much of the ghost bar's rests the veil hides (of 255).
+const GHOST_VEIL: u8 = 230;
+
+/// The editor's ghost bar in `rect`: its rests veiled, a dashed frame and a
+/// "+" in the middle, brighter under the pointer.
+fn draw_ghost_bar(ui: &egui::Ui, rect: Rect, hovered: bool) {
+    let visuals = ui.visuals();
+    let bg = visuals.panel_fill;
+    let painter = ui.painter();
+    painter.rect_filled(
+        rect,
+        4.0,
+        egui::Color32::from_rgba_unmultiplied(bg.r(), bg.g(), bg.b(), GHOST_VEIL),
+    );
+    // The frame and "+" in the veiled staff's color, a little brighter
+    // under the pointer.
+    let veil = if hovered { 0.6 } else { f32::from(GHOST_VEIL) / 255.0 };
+    let color = visuals.text_color().lerp_to_gamma(bg, veil);
+    let frame = rect.shrink(4.0);
+    let stroke = egui::Stroke::new(1.5, color);
+    let corners = [frame.left_top(), frame.right_top(), frame.right_bottom(), frame.left_bottom()];
+    for i in 0..4 {
+        painter.extend(egui::Shape::dashed_line(
+            &[corners[i], corners[(i + 1) % 4]],
+            stroke,
+            6.0,
+            4.0,
+        ));
+    }
+    // Drawn as two bars, thicker than the font's "+".
+    let arm = (0.2 * frame.height()).clamp(7.0, 20.0);
+    let thick = egui::Stroke::new((arm / 5.0).max(2.5), color);
+    let c = rect.center();
+    painter.line_segment([c - egui::vec2(arm, 0.0), c + egui::vec2(arm, 0.0)], thick);
+    painter.line_segment([c - egui::vec2(0.0, arm), c + egui::vec2(0.0, arm)], thick);
 }
 
 /// Dim a bar silenced by the gap click, so the silence reads as intended.

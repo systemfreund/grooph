@@ -37,7 +37,7 @@ impl Grooph {
     /// Link to what is on screen: in the metronome its meter, tempo, click
     /// bar and counter rhythm; else the working score at the current tempo
     /// and swing, with the click bar of its first meter if that is not the
-    /// default.
+    /// default, opening on the page it was shared from (Practice or Score).
     pub(crate) fn share_link_url(&self) -> Option<String> {
         let url = self.shared_link().to_url(&platform::share_base_url());
         if url.is_none() {

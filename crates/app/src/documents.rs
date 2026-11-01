@@ -389,8 +389,6 @@ mod tests {
         // meter dialog.
         app.edit_page();
         assert!(!app.endless_runs());
-        app.ui.mode = Mode::TimeSignature(grooph_measure::TimeSignature::FOUR_FOUR);
-        assert!(!app.endless_runs());
         app.select_tab(Tab::Score);
         assert!(!app.endless_runs());
         app.start_playback();
@@ -494,9 +492,14 @@ mod tests {
         state.show_score_tab = true;
         let app = restart(&state);
         assert_eq!(app.tab(), Tab::Score);
-        assert_eq!(score_text(&app), text(&old));
-        assert_eq!(app.editor.docs.score.cursor, Cursor::at(0, 2));
-        assert!(app.editor.docs.score.dirty);
+        // The score tab is for drum grooves: a rhythm saved there starts a
+        // new groove of its meter.
+        assert!(app.editor.docs.score.score.staff == grooph_measure::StaffKind::Kit);
+        assert_eq!(
+            app.editor.docs.score.score.measures()[0].time_signature(),
+            old.measures()[0].time_signature()
+        );
+        assert!(!app.editor.docs.score.dirty);
         // Practice starts with a new rhythm of its settings.
         assert_ne!(practice_text(&app), text(&old));
         let bars = app.editor.generator.effective_bars();

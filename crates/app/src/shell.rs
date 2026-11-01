@@ -6,11 +6,11 @@
 use crate::documents::Document;
 use crate::generator::GeneratorState;
 use crate::metronome_view::FillLook;
-use crate::metronome_view::MetronomeVoice;
 use crate::metronome_view::ratio_label;
 use crate::pickers::{Picker, ROW_HEIGHT, shown_groups, silent_bars_label, swing_label};
 use crate::share::paint_share_icon;
-use crate::tool_palette::{notation_size, paint_none, paint_notation};
+use crate::tool_palette::{BAR_TOOLS, notation_size, paint_none, paint_notation, tool};
+use crate::tools::{EditOp, Tool, ToolKind};
 use crate::{CountingBase, Grooph, Mode, TransportState};
 use eframe::egui;
 use eframe::egui::layers::ShapeIdx;
@@ -41,6 +41,8 @@ const CARD_VALUE_SIZE: f32 = 26.0;
 const CARD_METER_EM: f32 = 34.0;
 const PLAY_BUTTON_SIZE: f32 = 68.0;
 const SIDE_BUTTON_SIZE: f32 = 52.0;
+/// The options sheet's animation (see [`Grooph::sheet_options`]).
+const SHEET_OPTIONS_ID: &str = "shell_sheet_options";
 /// Most height the metronome tab's staff takes, however wide the window;
 /// the ring below takes the rest.
 const METRONOME_STAFF_MAX: f32 = 220.0;
@@ -100,7 +102,7 @@ pub(crate) fn subdivision_short_label(s: Subdivision) -> &'static str {
 
 /// Lay out `add` in a column at most [`COLUMN_MAX_WIDTH`] wide, centered in
 /// the space left.
-fn centered_column<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
+pub(crate) fn centered_column<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
     let avail = ui.available_rect_before_wrap();
     let width = avail.width().min(COLUMN_MAX_WIDTH);
     let rect = Rect::from_min_size(
@@ -618,7 +620,17 @@ impl Grooph {
 
     pub(super) fn shell_ui(&mut self, ui: &mut Ui) {
         let tab = self.tab();
-        self.tab_bar(ui, tab);
+        // An editor folds the options sheet away as it opens, at once, so
+        // Done brings back the page without the sheet sliding shut.
+        if self.ui.mode == Mode::Edit {
+            self.ui.shell.options_collapsed = true;
+            ui.ctx().animate_bool_with_time(Id::unique(SHEET_OPTIONS_ID), false, 0.0);
+        }
+        // An editor has the screen to itself: Done leaves it, and the tool
+        // grid gets the tab bar's room.
+        if self.ui.mode != Mode::Edit {
+            self.tab_bar(ui, tab);
+        }
         let playing = self.ui.mode == Mode::Playback;
         match tab {
             Tab::Practice if playing => {
@@ -631,16 +643,17 @@ impl Grooph {
             }
             // A rhythm page's editor leaves the staff all the room above
             // its palette.
+            // The editor's bar at the very bottom, the grid above it.
             Tab::Practice | Tab::Score => {
+                self.editor_bar(ui, "shell_edit_bar");
                 self.tool_palette_panel(ui);
-                self.edit_bar(ui);
             }
             Tab::Metronome if self.ui.mode == Mode::Edit => {
                 // No ring here: what was hovered on it is gone, also when
                 // Done brings the ring back with the staff of this frame.
                 self.editor.metronome.forget_hover();
+                self.editor_bar(ui, "metronome_edit_bar");
                 self.tool_palette_panel(ui);
-                self.metronome_edit_bar(ui);
                 self.metronome_card(ui);
             }
             Tab::Metronome => self.metronome_page(ui),
@@ -894,10 +907,10 @@ impl Grooph {
         self.fold_sheet_on_flick(ui, sheet.response.rect, options);
     }
 
-    /// The score tab's options: Practice's, without those of the generator.
+    /// The score tab's options: Practice's, without those of the generator and
+    /// the timing feedback.
     fn score_rows(&mut self, ui: &mut Ui) {
         self.guide_row(ui);
-        self.timing_feedback_row(ui);
         self.shared_rows(ui);
     }
 
@@ -970,7 +983,7 @@ impl Grooph {
         card: Option<SheetCard>,
         add_rows: impl FnOnce(&mut Self, &mut Ui),
     ) -> Option<(LayerId, Rect)> {
-        let id = Id::unique("shell_sheet_options");
+        let id = Id::unique(SHEET_OPTIONS_ID);
         let openness = ui.ctx().animate_bool_responsive(id, !self.ui.shell.options_collapsed);
         let SheetCard { rect: card, shadow_painter, shadow_slot } = card?;
         if openness <= 0.0 || !card.is_positive() {
@@ -1353,97 +1366,78 @@ impl Grooph {
         }
     }
 
-    /// Play button and measure controls above the tool palette, as wide as it.
-    fn edit_bar(&mut self, ui: &mut Ui) {
-        egui::Panel::bottom("shell_edit_bar")
+    /// An editor's bar below the tool grid: play, undo and redo, and Done
+    /// on the right. A bar is added by a tap on the ghost bar after the
+    /// last one, and duplicated, cleared or deleted in the bar menu ("⋯"
+    /// on the cursor's bar, see `measure_panel`).
+    fn editor_bar(&mut self, ui: &mut Ui, id: &'static str) {
+        egui::Panel::bottom(id)
             .frame(
                 Frame::new().fill(ui.visuals().panel_fill).inner_margin(Margin::symmetric(12, 6)),
             )
             .show_separator_line(false)
             .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    let playing = self.playback_ctl.transport_state == TransportState::Playing;
-                    let fill = ui.visuals().selection.bg_fill;
-                    let icon = ui.visuals().selection.stroke.color;
-                    if round_button(ui, SIDE_BUTTON_SIZE, fill, icon, |painter, rect, color| {
-                        paint_play_icon(painter, rect, color, playing)
-                    })
-                    .clicked()
-                    {
-                        self.toggle_playback();
-                    }
-                    ui.add_space(8.0);
-                    ui.label(format!(
-                        "{}/{}",
-                        self.editor.doc().cursor.measure_idx + 1,
-                        self.editor.doc().score.len()
-                    ));
-                    if ui.button("➕").on_hover_text("Add a bar").clicked() {
-                        self.append_measure();
-                    }
-                    if ui.button("➖").on_hover_text("Remove this bar").clicked() {
-                        self.remove_current_measure();
-                    }
-                    // The editor has no options sheet: the count's picker
-                    // opens from here.
-                    if ui.button("1 &").on_hover_text("Count labels").clicked() {
-                        self.ui.picker = Some(Picker::Counting);
-                    }
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        // Back to the page's card and options sheet.
-                        if ui.button(RichText::new("Done").size(18.0)).clicked() {
-                            self.ui.mode = Mode::Playback;
+                // In the grid's column, so play and Done line up with it.
+                centered_column(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        let playing = self.playback_ctl.transport_state == TransportState::Playing;
+                        let fill = ui.visuals().selection.bg_fill;
+                        let icon = ui.visuals().selection.stroke.color;
+                        if round_button(ui, SIDE_BUTTON_SIZE, fill, icon, |painter, rect, color| {
+                            paint_play_icon(painter, rect, color, playing)
+                        })
+                        .clicked()
+                        {
+                            self.toggle_playback();
                         }
-                    });
+                        ui.add_space(8.0);
+                        let size = self.bar_tool_buttons(ui);
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            // Back to the page's card and options sheet.
+                            // A check mark drawn in, in a button as big as
+                            // undo and redo.
+                            let done = ui.add(Button::new("").min_size(size)).on_hover_text("Done");
+                            let r = done.rect.shrink2(vec2(0.32, 0.36) * done.rect.size());
+                            let color = ui.style().interact(&done).fg_stroke.color;
+                            ui.painter().line(
+                                vec![
+                                    r.left_center() + vec2(0.0, 0.05 * r.height()),
+                                    r.center_bottom() - vec2(0.12 * r.width(), 0.0),
+                                    r.right_top(),
+                                ],
+                                egui::Stroke::new(2.5, color),
+                            );
+                            if done.clicked() {
+                                self.leave_editor();
+                            }
+                        });
+                    })
                 });
             });
     }
 
-    /// Play button and a way back to the ring above the tool palette, while
-    /// the click bar is edited note by note.
-    fn metronome_edit_bar(&mut self, ui: &mut Ui) {
-        egui::Panel::bottom("metronome_edit_bar")
-            .frame(
-                Frame::new().fill(ui.visuals().panel_fill).inner_margin(Margin::symmetric(12, 6)),
-            )
-            .show_separator_line(false)
-            .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    let playing = self.playback_ctl.transport_state == TransportState::Playing;
-                    let fill = ui.visuals().selection.bg_fill;
-                    let icon = ui.visuals().selection.stroke.color;
-                    if round_button(ui, SIDE_BUTTON_SIZE, fill, icon, |painter, rect, color| {
-                        paint_play_icon(painter, rect, color, playing)
-                    })
-                    .clicked()
-                    {
-                        self.toggle_playback();
-                    }
-                    ui.add_space(8.0);
-                    // With a counter rhythm: which of the two voices the
-                    // palette edits (a tap on its line picks it too).
-                    if self.counter_bar().is_some() {
-                        let voice = self.edited_voice();
-                        for (v, label) in [
-                            (MetronomeVoice::Click, "Clicks"),
-                            (MetronomeVoice::Counter, "Counter"),
-                        ] {
-                            let button =
-                                Button::new(RichText::new(label).size(16.0)).selected(voice == v);
-                            if ui.add(button).clicked() {
-                                self.select_voice(v);
-                            }
-                        }
-                    } else {
-                        ui.label("Click bar");
-                    }
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button(RichText::new("Done").size(18.0)).clicked() {
-                            self.ui.mode = Mode::Playback;
-                        }
-                    });
-                });
-            });
+    /// Undo and redo, in an editor's bar ([`BAR_TOOLS`]).
+    /// Their size.
+    fn bar_tool_buttons(&mut self, ui: &mut Ui) -> egui::Vec2 {
+        let mut size = egui::Vec2::ZERO;
+        for id in BAR_TOOLS {
+            let t = tool(id);
+            let enabled = match t.kind {
+                ToolKind::Edit(EditOp::Undo) => self.can_undo(),
+                ToolKind::Edit(EditOp::Redo) => self.can_redo(),
+                _ => true,
+            };
+            let hover = match t.shortcuts.first() {
+                Some(sc) => format!("{} ({})", bar_tool_name(t), sc.label()),
+                None => bar_tool_name(t).to_owned(),
+            };
+            let button = ui.add_enabled(enabled, Button::new(t.label)).on_hover_text(hover);
+            size = size.max(button.rect.size());
+            if button.clicked() {
+                self.apply_tool(t);
+            }
+        }
+        size
     }
 
     /// "More" tab: a screen of its own, without the staff. A list at the
@@ -1503,6 +1497,14 @@ fn beta_pill(painter: &egui::Painter, left_top: egui::Pos2) {
     let rect = egui::Rect::from_min_size(left_top, text.size() + vec2(8.0, 2.0));
     painter.rect_filled(rect, rect.height() / 2.0, BADGE_FILL);
     painter.galley(rect.min + vec2(4.0, 1.0), text, BADGE_TEXT);
+}
+
+/// What a tool of the editor's bar does, on its hover.
+fn bar_tool_name(tool: &Tool) -> &'static str {
+    match tool.kind {
+        ToolKind::Edit(EditOp::Undo) => "Undo",
+        _ => "Redo",
+    }
 }
 
 #[cfg(test)]

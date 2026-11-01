@@ -1,5 +1,4 @@
 use crate::Grooph;
-use crate::Mode;
 use crate::shell::Tab;
 use crate::tools::matching_tool;
 use eframe::egui;
@@ -12,8 +11,9 @@ impl Grooph {
             return;
         }
         ui.input(|i| {
-            // Modal dialogs swallow global shortcuts; their own UI provides Cancel/Confirm.
-            if matches!(self.ui.mode, Mode::TimeSignature(_)) {
+            // The bar's meter picker swallows the shortcuts, as its dialog
+            // did: no edits behind it; it closes itself.
+            if self.ui.picker == Some(crate::pickers::Picker::BarMeter) {
                 return;
             }
             // During a calibration: no editing, but Space still stops

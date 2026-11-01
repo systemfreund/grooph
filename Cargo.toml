@@ -72,7 +72,7 @@ serde = { version = "1.0", features = ["derive"] }
 thiserror = "2.0"
 wasm-bindgen = "0.2.108"
 wasm-bindgen-futures = "0.4.56"
-web-sys = { version = "0.3", features = ["Document", "Element", "HtmlElement", "Event", "EventTarget", "History", "KeyboardEvent", "Location", "Navigator", "Performance", "RequestCache", "RequestInit", "Response", "VisibilityState", "VisualViewport", "WakeLock", "WakeLockSentinel", "WakeLockType", "Window"] }
+web-sys = { version = "0.3", features = ["Document", "Element", "HtmlElement", "Event", "EventTarget", "History", "KeyboardEvent", "Location", "MediaQueryList", "Navigator", "Performance", "RequestCache", "RequestInit", "Response", "VisibilityState", "VisualViewport", "WakeLock", "WakeLockSentinel", "WakeLockType", "Window"] }
 
 [profile.release]
 opt-level = "z"

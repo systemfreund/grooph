@@ -16,11 +16,13 @@ pub(crate) struct UndoHistory {
     past: VecDeque<EditorSnapshot>,
     future: Vec<EditorSnapshot>,
     limit: usize,
+    /// Steps pushed so far, also past the limit.
+    pushed: u64,
 }
 
 impl UndoHistory {
     pub fn new(limit: usize) -> Self {
-        Self { past: VecDeque::new(), future: Vec::new(), limit }
+        Self { past: VecDeque::new(), future: Vec::new(), limit, pushed: 0 }
     }
 
     pub fn push(&mut self, snap: EditorSnapshot) {
@@ -29,6 +31,7 @@ impl UndoHistory {
         }
         self.past.push_back(snap);
         self.future.clear();
+        self.pushed += 1;
     }
 
     pub fn pop_undo(&mut self, current: EditorSnapshot) -> Option<EditorSnapshot> {
@@ -41,6 +44,19 @@ impl UndoHistory {
         let next = self.future.pop()?;
         self.past.push_back(current);
         Some(next)
+    }
+
+    /// The number of steps pushed so far, which grows also once the
+    /// limit drops the oldest.
+    pub fn pushed(&self) -> u64 {
+        self.pushed
+    }
+
+    /// Fold the last step into the one before, so one undo takes back both.
+    pub fn fold_last(&mut self) {
+        if self.past.len() >= 2 {
+            self.past.pop_back();
+        }
     }
 
     pub fn can_undo(&self) -> bool {
@@ -70,6 +86,20 @@ mod tests {
 
     fn beat_at(snap: &EditorSnapshot) -> usize {
         snap.cursor.beat_idx
+    }
+
+    #[test]
+    fn two_steps_fold_into_one_also_at_the_limit() {
+        let mut h = UndoHistory::new(2);
+        h.push(snap(1));
+        h.push(snap(2));
+        let before = h.pushed();
+        h.push(snap(3));
+        h.push(snap(4));
+        // The limit dropped the oldest, but the two pushes still count.
+        assert_eq!(h.pushed(), before + 2);
+        h.fold_last();
+        assert_eq!(beat_at(&h.pop_undo(snap(5)).unwrap()), 3);
     }
 
     #[test]

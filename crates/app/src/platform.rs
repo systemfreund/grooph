@@ -66,6 +66,21 @@ pub(crate) fn tap_time(kind: TapKind) -> f64 {
     now
 }
 
+/// Whether the main pointer is a finger (a phone or tablet): known before
+/// the first touch. Only the web asks; natively a finger is seen by its
+/// first touch.
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn finger_is_the_pointer() -> bool {
+    web_sys::window()
+        .and_then(|w| w.match_media("(pointer: coarse)").ok().flatten())
+        .is_some_and(|query| query.matches())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn finger_is_the_pointer() -> bool {
+    false
+}
+
 /// Seed for the rhythm generator. Uses the browser's crypto RNG on the web
 /// and the system clock natively.
 #[cfg(target_arch = "wasm32")]

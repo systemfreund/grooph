@@ -155,14 +155,29 @@ spread across callers.
    the accent a technique's sign (o, +, the choke's mark) stacks
    (`notes::place_marks`). Every kit row starts with the percussion clef.
 6. Kit editing (`grooph-app`'s `kit_palette`): on a staff of several
-   instruments a row above the tools picks the instrument the tools mean
-   (`EditorState::instrument`; `Grooph::edit_instrument` gives it, or the
-   staff's own on the one line, `Staff::instrument_or`). A tap on a head
-   picks its instrument too. Picking one moves the cursor to its default
-   voice, onto the beat sounding then (`Score::cursor_in_voice`), and a
-   kit measure without that voice gets it (`Measure::fill_voices`);
-   "Upper"/"Lower" move it to a voice. "+/−" (H) adds or removes the head
-   on the cursor's beat, "Technique" (O) steps through its techniques.
+   instruments the tool grid's first row has a toggle per instrument
+   (`Grooph::tap_instrument`): it adds the instrument's head to the cursor's
+   beat, in the voice where it already is there, else its default voice,
+   onto the beat sounding then (`Score::cursor_in_voice`; a kit measure
+   without that voice gets it, `Measure::fill_voices`), or takes the head
+   away; the cell shows as picked while the head is on the beat
+   (`heads_at_cursor`). The instrument tapped, or of a head tapped on the
+   staff, is the picked one (`EditorState::instrument`; `Grooph::edit_instrument`
+   gives it, or the staff's own on the one line, `Staff::instrument_or`):
+   the note values write it on a rest. Marks go to the head they mean
+   (`Grooph::aimed`): a cell per technique (`Modifier::ToggleTechnique`)
+   plays the head of an instrument played that way on the beat so, or plainly
+   again, so no instrument needs picking first; the cells (`Cell::Technique`)
+   are in the instruments' row, one per instrument that plays the technique,
+   right of that instrument's cell and only while it has a head on the beat
+   (`grid_rows`' `technique`): they open out of it in 150 ms on a tinted
+   background that joins the group, and `row_lines` keeps a group in one line;
+   a tap picks their instrument and applies the mark;
+   accent and ghost go to the picked instrument's head if it is on the beat,
+   else the snare, kick, toms, hi-hat, ride, crash (`AIM_ORDER`), which
+   becomes the picked one. The picked instrument's cell is always ringed
+   (what the note values write, even on a rest), brighter where it is the
+   head several on the beat aim at. O steps through the techniques.
    The library's "New drum groove" starts one bar of two voices on the
    kit's staff, asking first if the score has unsaved changes
    (`PendingLoad::NewKitScore`); it is offered while the score tab is
@@ -264,8 +279,10 @@ spread across callers.
   buttons write only when they were edited (`SharedLink::poly`). `llms.txt`
   and the MCP tool offer only `poly`: models get the notation wrong too often. A score link replaces the score
   tab's score (and opens that tab) through `PendingLoad::Link` and the
-  unsaved-changes dialog; a generator link replaces Practice's rhythm
-  without asking. The share buttons (`share_link`) build a link with
+  unsaved-changes dialog; a generator link, or a score link of the one
+  line (the score tab edits drum grooves only), replaces Practice's rhythm
+  without asking; so does any score link while the score tab is hidden
+  (`opens_on_practice`). The share buttons (`share_link`) build a link with
   `SharedLink::to_url`.
 - The link format is documented for AI agents in
   `crates/app/assets/seo/llms.txt`; keep it in sync.
@@ -568,7 +585,7 @@ grooph's metronome runs inside AI chats as an
   (beats in x/4, every eighth or sixteenth in x/8 and x/16, stored as the
   meter's click bar) and it has no counter rhythm, whatever it had when it
   was last picked. The metronome's meter and the rhythm's never change each
-  other (Practice's meter picker, the score editor's time signature dialog). The staff gets a share of the free height
+  other (Practice's meter picker, the editor's meter cell, which opens `Picker::BarMeter`, the metronome's meter grid on the cursor's bar). The staff gets a share of the free height
   (`METRONOME_STAFF_SHARE`), the ring the rest; the options sheet folds away
   like Practice's (shared `options_collapsed`). While playing, the click and beat being heard light
   up and the middle shows the bar number. Switching into or out of the tab
@@ -611,7 +628,11 @@ grooph's metronome runs inside AI chats as an
 - Three documents (`crates/app/src/documents.rs`), one per page: the
   metronome's click bar, Practice's generated rhythm (thrown away freely)
   and the score tab's score (written, loaded from the library or opened
-  from a score link). Each keeps its score, cursor, undo history, dirty flag
+  from a score link). The score tab's score is always a drum groove on the
+  kit's staff (`kit_palette::empty_groove` starts one, also for a saved
+  state with a rhythm there); a rhythm of the one line from a link or the
+  library opens on Practice instead (`opens_on_practice`, `load_pattern`).
+  Each keeps its score, cursor, undo history, dirty flag
   and pattern (`RhythmDoc`, all three in `EditorState::docs`).
 - Each page edits its own document in place: the metronome's "Edit clicks",
   Practice's ✏ ("Edit rhythm") and the score tab's ✏ (`edit_page`) open
@@ -655,7 +676,11 @@ grooph's metronome runs inside AI chats as an
   share), More (`Mode::MoreMenu`, a screen of its own without the staff: a
   list at the bottom whose rows open pickers, Theme is picked in its row).
   Each of Metronome, Practice and Score is in `Mode::Playback` (its card) or
-  `Mode::Edit` (tool palette + edit bar with Done) on its own document; Esc
+  `Mode::Edit` (tool palette above an edit bar at the bottom with Done as
+  ✔, and no tab bar: Done,
+  Esc or Back leave the editor, `leave_editor`, and the page itself shows:
+  `shell_ui` folds the options sheet as the editor opens, its animation
+  snapped shut, so it does not slide shut after Done) on its own document; Esc
   switches between the two, Back closes the editor. The tab is derived from
   the document (`tab`), More from `Mode::MoreMenu`. More stays in front of
   an open metronome and leaves it playing (`advance_unseen_playback` moves
@@ -689,8 +714,34 @@ grooph's metronome runs inside AI chats as an
 - Keyboard handling: `crates/app/src/keyboard_input.rs`.
 - Measure operations: `grooph_measure::editing::{Modification, set_tuplet, ...}`.
 
+The tool palette (`tool_palette_panel`) is one grid for every editor
+(Practice, Score, the metronome's click bar): rows of cells
+(`tool_palette::grid_rows`), on the kit its instruments, each with the techniques of its head on the beat, then
+one row of the meter, the rests, the head modifiers (accent, ghost, dot), the note values and the tuplets, each
+row going on in the next line only where it does not fit. Undo and redo
+(`BAR_TOOLS`) are in the editor's bar (`editor_bar`), right after play, Done
+on the right. In Practice and Score the staff shows a dashed, empty "ghost
+bar" after the last bar (`measure_panel`: laid out with the score, never
+stored, and never reached by the playback cursor: `draw_staff` and
+`current_cursor_x` take the bars that play, `loop_bars`); a tap on it appends a bar like the last one (`Grooph::push_measure`)
+and puts the cursor there. The bar menu (`BarMenu`), from a "⋯" in the top
+right corner of the cursor's bar or a long press (right click) on a bar,
+duplicates, clears (every voice) or deletes it; in the metronome it only
+clears the voice being edited. A modifier's cell is greyed out where it
+would change nothing on the cursor's beat (`modifier_applies`, tried on a
+copy of the bar): an accent on a rest, a dot without room, a technique
+without the head or its instrument's. Accent, ghost and dot show the cursor's beat as they
+would change it (`modifier_preview`): its value with the mark. The tuplet the cursor's beat is
+in shows as picked (`cell_selected`); a tap on it dissolves the group. A voice is picked by a tap on
+it, or on the kit by tapping an instrument. The
+columns follow the width of the page's column (`grid_metrics`, cells 54 to
+64 px wide; grid and bar both in `centered_column`, so on a wide screen they
+line up with the cards), a row
+wider than the grid goes on in the next line, and past 45% of the screen's
+height the grid scrolls, so the staff stays in view.
+
 If you add new tools/shortcuts, remember:
-- Tool registry + palette
+- Tool registry + palette (`grid_rows`)
 - Keyboard input
 - UI help text
 

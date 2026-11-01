@@ -8,9 +8,9 @@ use grooph_layout::pixel_layout::{
     BeamLayout, LayoutOpts, MeasureLayout, NoteLayout, TimeSignatureLayout, TupletLayout,
     build_measure_layout, onset_head,
 };
+use grooph_measure::Measure;
 use grooph_measure::counting::{CountConfig, CountSlot, build_count_slots};
 use grooph_measure::grid::DEFAULT_GRID;
-use grooph_measure::{Measure, TimeSignature};
 
 pub fn draw_measure(
     ui: &mut egui::Ui,
@@ -96,7 +96,7 @@ pub(crate) fn render_measure_at(
         draw_glyph(painter, clef, &opts.font_id.family, color);
     }
     if let Some(ts_layout) = &measure_layout.time_signature {
-        draw_time_signature(painter, ts_layout, measure.time_signature(), &opts.font_id, color);
+        draw_time_signature(painter, ts_layout, &opts.font_id, color);
     }
 
     draw_notes(painter, measure_layout, color, lit, opts);
@@ -123,33 +123,16 @@ fn draw_staff_line_segment(painter: &Painter, rect: Rect, y: f32, em: f32, color
     painter.hline(Rangef::new(rect.left(), rect.right()), y, Stroke::new(0.02 * em, color));
 }
 
-/// Draws the meter digits at the laid-out positions, with a grouping other
-/// than the usual one written below them.
+/// Draws the meter digits at the laid-out positions. A grouping is not
+/// written on the staff: the meter's picker shows it.
 pub fn draw_time_signature(
     painter: &Painter,
     ts_layout: &TimeSignatureLayout,
-    ts: TimeSignature,
     font_id: &FontId,
     color: Color32,
 ) {
     for digit in ts_layout.beats.iter().chain(&ts_layout.beat_unit) {
         draw_glyph(painter, digit, &font_id.family, color);
-    }
-    // A grouping other than the usual one is written below the meter, e.g.
-    // "2+2+3" under 7/8.
-    if ts.grouping != 0
-        && let (Some(first), Some(last)) = (ts_layout.beat_unit.first(), ts_layout.beat_unit.last())
-    {
-        let em = font_id.size;
-        let font = FontId::proportional(0.28 * em);
-        let label = painter.layout_no_wrap(ts.groups_label(), font, color);
-        // Centered under the digits, but wider than they are: moved right
-        // where it would leave the drawing area at the left.
-        let x = (first.origin.x + last.origin.x + last.glyph.advance * em * 0.25) / 2.0;
-        let left = (x - label.size().x / 2.0).max(painter.clip_rect().left() + 1.0);
-        // The digit reaches a staff space (a quarter em) below its origin.
-        let pos = egui::pos2(left, first.origin.y + 0.3 * em);
-        painter.galley(pos, label, color);
     }
 }
 

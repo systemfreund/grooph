@@ -119,6 +119,16 @@ fn paren_reach(opts: &LayoutOpts) -> f32 {
     opts.head_half_width() + c::SOFT_PAREN_GAP_SS * ss + glyphs::NOTEHEAD_PAREN_LEFT.ink(ss).width()
 }
 
+/// The size a beat's head or rest is set at: a rest of a kit bar of two
+/// voices a little smaller than a note, as drum charts have it, so the two
+/// voices' rests and notes do not crowd each other.
+fn head_size(beat: &Beat, opts: &LayoutOpts) -> f32 {
+    match !beat.is_note() && opts.shared_line && !opts.staff_model().one_line() {
+        true => opts.em * c::KIT_REST_SCALE,
+        false => opts.em,
+    }
+}
+
 /// The parentheses around a soft note's head centered at `center`. They
 /// are taller than the head: on a shared line they move off it, away from
 /// the other voice, their inner ends level with the head's edge on the line.
@@ -238,7 +248,7 @@ fn compute_x_extents(beat: &Beat, in_beam: bool, opts: &LayoutOpts) -> (f32, f32
     } else {
         // A ledger line may reach past the rest: it doesn't widen it, so the
         // voice is spaced as on a line of its own.
-        let head = PlacedGlyph::centered(head_glyph(beat), 0.0, 0.0, opts.em).ink();
+        let head = PlacedGlyph::centered(head_glyph(beat), 0.0, 0.0, head_size(beat, opts)).ink();
         (head.left(), head.right())
     };
 
@@ -488,7 +498,7 @@ pub(super) fn build_note_layout(
             .collect();
         let head = match placed.last() {
             Some((head, _)) => *head,
-            None => PlacedGlyph::centered(head_glyph(b), center.x, cy, opts.em),
+            None => PlacedGlyph::centered(head_glyph(b), center.x, cy, head_size(b, opts)),
         };
         let others: Vec<PlacedGlyph> = placed.iter().rev().skip(1).map(|(g, _)| *g).collect();
         let parens: Vec<PlacedGlyph> = placed

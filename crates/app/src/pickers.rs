@@ -56,6 +56,8 @@ pub(crate) enum Picker {
     Preset,
     /// The metronome tab's meter.
     MetronomeMeter,
+    /// The meter of the bar an editor is on.
+    BarMeter,
     /// A ready-made click bar for the metronome meter.
     ClickFill,
     /// The metronome's counter rhythm and its sound.
@@ -411,7 +413,7 @@ impl Grooph {
                 Picker::Guide => "Guide",
                 Picker::Counting => "Count labels",
                 Picker::Preset => "Preset",
-                Picker::MetronomeMeter => "Time signature",
+                Picker::MetronomeMeter | Picker::BarMeter => "Time signature",
                 Picker::ClickFill => "Subdivision",
                 Picker::Polyrhythm => "Polyrhythm",
                 Picker::SilentBars => "Silent bars",
@@ -445,6 +447,7 @@ impl Grooph {
                     preset.is_some()
                 }
                 Picker::MetronomeMeter => self.metronome_meter_choices(ui),
+                Picker::BarMeter => self.bar_meter_choices(ui),
                 Picker::ClickFill => self.click_fill_choices(ui),
                 Picker::Polyrhythm => self.polyrhythm_choices(ui),
                 Picker::SilentBars => {
@@ -650,6 +653,31 @@ impl Grooph {
             self.set_metronome_meter(ts);
         }
         picked.is_some()
+    }
+
+    /// The meter of the editor's bar, grouping too, as the metronome's
+    /// picker offers it: the bar takes it as an undoable change, or keeps
+    /// its notes' meter where they do not fit it.
+    fn bar_meter_choices(&mut self, ui: &mut Ui) -> bool {
+        let family = self.ui.music_font_id.family.clone();
+        let current = self.current_measure().time_signature();
+        let picked = egui::ScrollArea::vertical()
+            .max_height(meter_grid_height(ui, self.embedded()))
+            .show(ui, |ui| meter_grid(ui, &all_time_signatures(), current, 2, &family))
+            .inner;
+        match picked {
+            // A meter the bar cannot take leaves the picker open.
+            Some(ts) if ts != current => self.with_undo_snapshot(|g| {
+                if g.current_measure_mut().set_time_signature(ts).is_err() {
+                    return false;
+                }
+                let doc = g.editor.doc_mut();
+                doc.cursor = doc.score.clamp_cursor(doc.cursor);
+                true
+            }),
+            Some(_) => true,
+            None => false,
+        }
     }
 
     /// Which of the metronome meter's ready-made click bars the click bar
@@ -1010,5 +1038,15 @@ mod tests {
             shown_groups(TimeSignature::new(7, 16).with_grouping(1)).as_deref(),
             Some("2+2+3")
         );
+    }
+
+    #[test]
+    fn a_meter_is_named_with_its_grouping() {
+        // Simple, compound and odd: the grouping only where it is a choice.
+        assert_eq!(time_signature_label(TimeSignature::FOUR_FOUR), "4/4");
+        assert_eq!(time_signature_label(TimeSignature::new(6, 8)), "6/8 (3+3)");
+        let odd = TimeSignature::new(7, 8);
+        assert_eq!(time_signature_label(odd), format!("7/8 ({})", odd.groups_label()));
+        assert_ne!(time_signature_label(odd.with_grouping(1)), time_signature_label(odd));
     }
 }
