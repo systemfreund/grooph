@@ -268,7 +268,8 @@ spread across callers.
   tab's score (and opens that tab) through `PendingLoad::Link` and the
   unsaved-changes dialog; a generator link, or a score link with
   `page=practice` (`SharedLink::practice`, written when shared from
-  Practice), replaces Practice's rhythm without asking. The share buttons (`share_link`) build a link with
+  Practice), replaces Practice's rhythm without asking; so does any score
+  link while the score tab is hidden (`opens_on_practice`). The share buttons (`share_link`) build a link with
   `SharedLink::to_url`.
 - The link format is documented for AI agents in
   `crates/app/assets/seo/llms.txt`; keep it in sync.

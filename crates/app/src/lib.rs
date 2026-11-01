@@ -878,7 +878,8 @@ impl Grooph {
     /// asks first if it has unsaved changes; a generator link replaces
     /// Practice's rhythm, a metronome or tempo-only link applies right away.
     pub(crate) fn open_link(&mut self, link: SharedLink) {
-        let replaces_score = matches!(link.content, Some(LinkContent::Score(_))) && !link.practice;
+        let replaces_score =
+            matches!(link.content, Some(LinkContent::Score(_))) && !self.opens_on_practice(&link);
         if replaces_score && self.editor.docs.score.dirty {
             self.ui.pending_load = Some(PendingLoad::Link(Box::new(link)));
         } else {
@@ -888,7 +889,8 @@ impl Grooph {
 
     pub(crate) fn apply_link(&mut self, link: SharedLink) {
         // Each content opens on its own page: a score link on the score tab
-        // (on Practice if shared from there), a generator link on Practice,
+        // (on Practice if shared from there, or while the score tab is
+        // hidden), a generator link on Practice,
         // a metronome link on the metronome (below, with its meter and
         // click bar).
         let metronome = matches!(link.content, Some(LinkContent::Metronome(_)));
@@ -896,7 +898,7 @@ impl Grooph {
             matches!(link.content, Some(LinkContent::Score(_) | LinkContent::Generator { .. }));
         let mut undoubled = false;
         match link.content {
-            Some(LinkContent::Score(score)) if link.practice => {
+            Some(LinkContent::Score(score)) if self.opens_on_practice(&link) => {
                 undoubled = self.replace_practice_from_link(score);
             }
             Some(LinkContent::Score(score)) => undoubled = self.replace_score_from_link(score),
@@ -945,6 +947,14 @@ impl Grooph {
             // taken from one of them.
             self.editor.doc_mut().dirty = undoubled;
         }
+    }
+
+    /// Whether `link`'s rhythm opens on the practice page: shared from
+    /// there, or while the score tab is hidden (a developer setting), so
+    /// it does not open on a page the user does not have, nor ask about
+    /// that page's unsaved changes.
+    fn opens_on_practice(&self, link: &SharedLink) -> bool {
+        link.practice || !self.ui.show_score_tab
     }
 
     /// A rhythm shared from the practice page replaces its rhythm, as a new
@@ -2072,6 +2082,7 @@ mod tests {
 
         let cc = eframe::CreationContext::_new_kittest(eframe::egui::Context::default());
         let mut app = Grooph::new(&cc);
+        app.ui.show_score_tab = true;
         app.select_tab(Tab::Score);
         app.edit_page();
         app.editor.doc_mut().dirty = true;
@@ -2117,6 +2128,7 @@ mod tests {
             let url = from.share_link_url().unwrap();
             let query = url.split_once('?').unwrap().1;
             let mut to = Grooph::new(&cc);
+            to.ui.show_score_tab = true;
             let practice_before = format_score(&to.editor.docs.practice.score).unwrap();
             to.open_link(grooph_link::parse_query(query).unwrap().unwrap());
             assert_eq!(to.tab(), tab, "{url}");
@@ -2126,6 +2138,16 @@ mod tests {
                 assert_eq!(format_score(&to.editor.docs.practice.score).unwrap(), practice_before);
             }
         }
+        // With the score tab hidden, a score's link opens on Practice, without
+        // asking about the hidden score's changes.
+        let url = from.share_link_url().unwrap();
+        let mut to = Grooph::new(&cc);
+        assert!(!to.ui.show_score_tab);
+        to.editor.docs.score.dirty = true;
+        to.open_link(grooph_link::parse_query(url.split_once('?').unwrap().1).unwrap().unwrap());
+        assert!(to.ui.pending_load.is_none());
+        assert_eq!(to.tab(), Tab::Practice);
+        assert_eq!(format_score(&to.editor.doc().score).unwrap(), "3/4 q q e e");
     }
 
     #[test]
@@ -2136,6 +2158,7 @@ mod tests {
         let ctx = eframe::egui::Context::default();
         let cc = eframe::CreationContext::_new_kittest(ctx.clone());
         let mut app = Grooph::new(&cc);
+        app.ui.show_score_tab = true;
         let groove = "4/4 H:e S-H:e H:e H:e H:e S-H:e Ho:e Hc:e ; K:q r:q K:q r:q";
         let query = format!("v=2&bpm=96&r={}", groove.replace(' ', "+").replace(';', "%3B"));
         app.open_link(grooph_link::parse_query(&query).unwrap().unwrap());
