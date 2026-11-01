@@ -1366,17 +1366,11 @@ impl Grooph {
         let mut generator =
             GeneratorState::new(state.generator_settings, state.endless, state.ghost_notes);
         // The score tab edits a drum groove: a rhythm of the one line saved
-        // there before starts it afresh (rhythms are Practice's). One with
-        // unsaved changes goes to the library, so nothing is lost.
+        // there before starts it afresh (rhythms are Practice's).
         let score_doc = state.score_doc.into_doc(&state.library);
         let score_doc = if score_doc.score.staff == grooph_measure::StaffKind::Kit {
             score_doc
         } else {
-            if score_doc.dirty {
-                let names = state.library.patterns.iter().map(|p| p.name.as_str());
-                let name = library::next_default_name("Pattern", names);
-                state.library.add(name, score_doc.score.clone(), state.bpm);
-            }
             let ts = score_doc.score.measures()[0].time_signature();
             RhythmDoc::new(kit_palette::empty_groove(ts), Cursor::start())
         };
