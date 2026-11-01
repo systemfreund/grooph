@@ -127,7 +127,19 @@ impl Grooph {
                 ui.spacing_mut().scroll.fade.strength = 0.0;
                 let mut scroll_area = egui::ScrollArea::both()
                     .animated(!playing)
-                    .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden);
+                    .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+                    // egui turns drag-to-scroll on only after it has seen a touch, so
+                    // the very first swipe would be lost on a phone. Where a finger is
+                    // known to be the pointer the scroll area takes drags from the start;
+                    // otherwise the staff's own click-and-drag sense wins them anyway.
+                    .scroll_source(egui::scroll_area::ScrollSource {
+                        drag: if self.ui.touch_seen {
+                            egui::scroll_area::DragScroll::Always
+                        } else {
+                            egui::scroll_area::DragScroll::OnTouch
+                        },
+                        ..Default::default()
+                    });
                 let playback = &mut self.playback_ctl.playback;
                 if std::mem::take(&mut playback.rows_removed)
                     && let Some(offset) = playback.scroll.value_at(ui.input(|i| i.time))
