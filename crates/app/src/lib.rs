@@ -1151,7 +1151,7 @@ impl Grooph {
         self.playback_ctl.play_along.engaged = false;
         self.playback_ctl.accuracy.tracker.dismiss_summary();
         // The metronome plays no rhythm to play along with.
-        if self.playback_ctl.accuracy.enabled && !self.metronome_mode() {
+        if self.accuracy_active() {
             self.playback_ctl.accuracy.tracker.on_playback_start(accuracy_start);
         } else {
             self.playback_ctl.accuracy.tracker.on_playback_stop();
@@ -1200,6 +1200,12 @@ impl Grooph {
             TransportState::Playing => self.stop_transport(),
         }
         info!("Toggle playback: {:?}", self.playback_ctl.transport_state);
+    }
+
+    /// Whether timing feedback is at work: switched on, and in Practice, the
+    /// rhythm to play along with (not the score's, not the metronome's).
+    pub(crate) fn accuracy_active(&self) -> bool {
+        self.playback_ctl.accuracy.enabled && !self.metronome_mode() && self.tab() != Tab::Score
     }
 
     fn set_accuracy_enabled(&mut self, enabled: bool) {

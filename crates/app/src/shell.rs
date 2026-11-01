@@ -907,10 +907,10 @@ impl Grooph {
         self.fold_sheet_on_flick(ui, sheet.response.rect, options);
     }
 
-    /// The score tab's options: Practice's, without those of the generator.
+    /// The score tab's options: Practice's, without those of the generator and
+    /// the timing feedback.
     fn score_rows(&mut self, ui: &mut Ui) {
         self.guide_row(ui);
-        self.timing_feedback_row(ui);
         self.shared_rows(ui);
     }
 

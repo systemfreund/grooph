@@ -141,11 +141,7 @@ impl Grooph {
             Some(source) => source == HitSource::Tap,
             // In the metronome there is no rhythm to play along with; taps
             // edit the ring.
-            None => {
-                !self.metronome_mode()
-                    && self.playback_ctl.accuracy.enabled
-                    && self.playback_ctl.play_along.settings.tap_enabled
-            }
+            None => self.accuracy_active() && self.playback_ctl.play_along.settings.tap_enabled,
         }
     }
 
@@ -189,7 +185,7 @@ impl Grooph {
             None => {
                 self.playback_ctl.play_along.settings.mic_enabled
                     && (now < self.playback_ctl.mic.monitor_until
-                        || playing && self.playback_ctl.accuracy.enabled && !self.metronome_mode())
+                        || playing && self.accuracy_active())
             }
         }
     }
@@ -262,7 +258,9 @@ impl Grooph {
         tap_hits.extend(self.drain_key_taps(ui));
 
         let calibrating = self.calibration_source();
-        if !self.playback_ctl.accuracy.enabled && calibrating.is_none() {
+        if !(self.playback_ctl.accuracy.enabled && self.tab() != crate::shell::Tab::Score)
+            && calibrating.is_none()
+        {
             return;
         }
         if self.playback_ctl.transport_state != TransportState::Playing {

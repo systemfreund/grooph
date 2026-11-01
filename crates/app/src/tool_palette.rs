@@ -316,7 +316,7 @@ impl Grooph {
     }
 
     /// Whether `cell` shows as picked: an instrument with a head on the
-    /// cursor's beat, the technique of the head a technique's cell means
+    /// cursor's beat, a toggle that is on, the technique of the head a technique's cell means
     /// there, or the tuplet the beat is in.
     fn cell_selected(&self, cell: Cell) -> bool {
         match cell {
@@ -345,6 +345,31 @@ impl Grooph {
                     .get(at.beat_idx)
                     .and_then(|b| b.heads().get(pen))
                     .is_some_and(|h| h.technique() == *t)
+            }
+            // The toggles show whether they are on: the accent and the ghost
+            // note of the head they mean, the dot of the beat.
+            Cell::Tool(Tool {
+                kind: ToolKind::Modify(m @ (Modifier::ToggleAccent | Modifier::ToggleSoft)),
+                ..
+            }) => {
+                let (pen, at) = self.aimed(*m);
+                let score = &self.editor.doc().score;
+                score
+                    .voice_at(at)
+                    .beats()
+                    .get(at.beat_idx)
+                    .and_then(|b| b.heads().get(pen))
+                    .is_some_and(|h| match m {
+                        Modifier::ToggleAccent => h.accented(),
+                        _ => h.soft(),
+                    })
+            }
+            Cell::Tool(Tool { kind: ToolKind::Modify(Modifier::ToggleDotted { .. }), .. }) => {
+                let cursor = self.editor.doc().score.clamp_cursor(self.editor.doc().cursor);
+                self.current_voice()
+                    .beats()
+                    .get(cursor.beat_idx)
+                    .is_some_and(|b| matches!(b.duration, Duration::Dotted { .. }))
             }
             // The tuplet the cursor is in: a tap on it dissolves the group.
             Cell::Tool(t) => self.in_tuplet_of(t),
@@ -1238,6 +1263,25 @@ mod tests {
         assert!(matches!(rows[0][at + 1], Cell::Technique(Snare, _)));
         // A rest has none.
         assert!(techniques(&app_at(2)).is_empty());
+    }
+
+    #[test]
+    fn the_toggles_show_whether_they_are_on() {
+        use super::Cell;
+        let mut app = editing("4/4 S:q H:q r:q r:q ; K:q r:q K:q r:q");
+        let cell = |id| Cell::Tool(super::tool(id));
+        for id in ["modify.toggle.accent", "modify.toggle.soft", "modify.toggle.dotted"] {
+            assert!(!app.cell_selected(cell(id)), "{id}");
+        }
+        app.editor.doc_mut().cursor = Cursor::in_voice(0, 0, 0);
+        apply(&mut app, "modify.toggle.accent");
+        assert!(app.cell_selected(cell("modify.toggle.accent")));
+        assert!(!app.cell_selected(cell("modify.toggle.soft")));
+        apply(&mut app, "modify.toggle.soft");
+        assert!(app.cell_selected(cell("modify.toggle.soft")));
+        assert!(!app.cell_selected(cell("modify.toggle.accent")));
+        apply(&mut app, "modify.toggle.soft");
+        assert!(!app.cell_selected(cell("modify.toggle.soft")));
     }
 
     #[test]
