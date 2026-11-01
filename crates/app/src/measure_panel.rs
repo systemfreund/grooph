@@ -264,13 +264,19 @@ impl Grooph {
                     // Bring the edit cursor into view when it moves. `Align::None`
                     // means "scroll just enough to make visible"; following only
                     // on a move leaves the user free to scroll away from it.
+                    // Again when the view resizes (the tool grid opening
+                    // under it), as the bar must still be whole in it.
                     // Gated on Stopped so it doesn't clobber the playback
                     // re-centering above.
                     let editing = self.ui.mode == Mode::Edit
                         && self.playback_ctl.transport_state == TransportState::Stopped;
                     let staff_cursor = self.editor.doc().cursor;
                     let followed = editing.then_some(staff_cursor);
-                    if followed != self.ui.followed_cursor
+                    let view_height = ui.clip_rect().height();
+                    let resized = followed.is_some()
+                        && view_height > 1.0
+                        && (view_height - self.ui.followed_view_height).abs() > 0.5;
+                    if (followed != self.ui.followed_cursor || resized)
                         && let Some(placed) = staff.placed(staff_cursor.measure_idx)
                         && let Some(layout) = placed.voices.get(staff_cursor.voice)
                         && let Some(note) = layout.notes.get(staff_cursor.beat_idx)
@@ -286,6 +292,7 @@ impl Grooph {
                         );
                     }
                     self.ui.followed_cursor = followed;
+                    self.ui.followed_view_height = view_height;
 
                     let (rect, resp) =
                         ui.allocate_exact_size(staff.total_size, egui::Sense::click_and_drag());

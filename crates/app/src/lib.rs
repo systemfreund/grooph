@@ -1454,6 +1454,7 @@ impl Grooph {
                 narrow_screen: false,
                 staff_em: 40.0,
                 followed_cursor: None,
+                followed_view_height: 0.0,
                 shell: ShellState::default(),
                 picker: None,
                 picker_return: None,

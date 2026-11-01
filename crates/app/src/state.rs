@@ -357,6 +357,10 @@ pub(crate) struct UiShell {
     /// Edit cursor the staff last scrolled into view. The staff follows the
     /// cursor only when it moves, so the user can scroll away from it.
     pub(crate) followed_cursor: Option<Cursor>,
+    /// The staff view's height when the cursor was last brought into view:
+    /// it shrinks as the tool grid opens, and the cursor's bar is brought
+    /// into view again.
+    pub(crate) followed_view_height: f32,
     pub(crate) shell: ShellState,
     /// Setting whose picker dialog is open.
     pub(crate) picker: Option<Picker>,
