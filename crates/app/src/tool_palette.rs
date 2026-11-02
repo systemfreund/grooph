@@ -95,31 +95,33 @@ const AIM_ORDER: [Instrument; 9] = [
     Instrument::Crash,
     Instrument::HiHatFoot,
 ];
-/// The tools in one row, going on in the next line where it does not fit:
-/// the meter, the rests, the head modifiers, the note values, the tuplets.
+/// The tools in one row, going on in the next line where it does not fit,
+/// the most used first: the note values, short to long, the rests in the
+/// same order under them, the head modifiers, the tuplets, the meter last,
+/// as it is set once per exercise.
 const TOOLS: [&str; 22] = [
-    "meta.change_time_signature",
-    "insert.rest.w",
-    "insert.rest.h",
-    "insert.rest.q",
-    "insert.rest.e",
-    "insert.rest.s",
-    "insert.rest.th",
-    "modify.toggle.accent",
-    "modify.toggle.soft",
-    "modify.toggle.dotted",
-    "insert.note.w",
-    "insert.note.h",
     "insert.note.q",
     "insert.note.e",
     "insert.note.s",
     "insert.note.th",
+    "insert.note.h",
+    "insert.note.w",
+    "insert.rest.q",
+    "insert.rest.e",
+    "insert.rest.s",
+    "insert.rest.th",
+    "insert.rest.h",
+    "insert.rest.w",
+    "modify.toggle.accent",
+    "modify.toggle.soft",
+    "modify.toggle.dotted",
     "insert.tuplet.t8",
     "insert.tuplet.t16",
     "insert.tuplet.qt16",
     "insert.tuplet.st16",
     "insert.tuplet.spt16",
     "insert.tuplet.nt16",
+    "meta.change_time_signature",
 ];
 
 /// One cell of the tool grid.
@@ -189,8 +191,8 @@ fn grid_height(lines: usize, cell: f32, screen: f32) -> f32 {
 impl Grooph {
     /// The editor's tools as a grid in the thumb's reach, the same in every
     /// editor (Practice, Score, the metronome's click bar): on the kit its
-    /// instruments, then one row of the meter, the rests, the head
-    /// modifiers, the note values and the tuplets. Undo and redo are in
+    /// instruments, then one row of the note values, the rests, the head
+    /// modifiers, the tuplets and the meter. Undo and redo are in
     /// the editor's bar ([`BAR_TOOLS`]).
     pub(super) fn tool_palette_panel(&mut self, ui: &mut Ui) {
         egui::Panel::bottom("tool_palette")
@@ -1159,7 +1161,9 @@ mod tests {
                     _ => None,
                 })
                 .collect();
-            assert_eq!(values, VALUE_BUTTONS, "{kind:?}");
+            // The palette's order is its own: the same values.
+            assert_eq!(values.len(), VALUE_BUTTONS.len(), "{kind:?}");
+            assert!(VALUE_BUTTONS.iter().all(|v| values.contains(v)), "{kind:?}");
         }
         let tuplets: Vec<_> = templates()
             .filter_map(|(d, _)| match d {
