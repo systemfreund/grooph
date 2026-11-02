@@ -194,24 +194,27 @@ spread across callers.
 6. Kit editing (`grooph-app`'s `kit_palette`): on a staff of several
    instruments the tool grid's first row has a toggle per instrument
    (`Grooph::tap_instrument`): it adds the instrument's head to the cursor's
-   beat, in the voice where it already is there, else where it is elsewhere
-   in the measure, else voice 0 of a measure of one voice that holds notes,
-   else the voice the score's `Voicing` writes it in (`Measure::voice_for`),
-   onto the beat sounding then (`Score::cursor_in_voice`; a kit measure
-   without that voice gets it, `Measure::fill_voices`), or takes the head
-   away; the cell shows as picked while the head is on the beat
+   beat, played the usual way, in the voice where it already is there, else
+   where it is elsewhere in the measure, else voice 0 of a measure of one
+   voice that holds notes, else the voice the score's `Voicing` writes it in
+   (`Measure::voice_for`), onto the beat sounding then
+   (`Score::cursor_in_voice`; a kit measure without that voice gets it,
+   `Measure::fill_voices`). A tap on a head there plays it with the
+   instrument's next technique (`Instrument::techniques`), after the last it
+   takes it away; a long press (a right click, `Grooph::hold_instrument`)
+   takes it away however it is played. The row is always the nine cells
+   (`grid_rows`, `KIT_ORDER`), so none move; each shows the head on the beat
+   as on the staff, with the technique's sign (`paint_instrument`), faded
+   where there is none, its short name in bold (drawn twice, a pixel apart:
+   egui's font has no bold face) and a dot per technique, the one played
+   lit. The cell shows as picked while the head is on the beat
    (`heads_at_cursor`). The instrument tapped, or of a head tapped on the
    staff, is the picked one (`EditorState::instrument`; `Grooph::edit_instrument`
    gives it, or the staff's own on the one line, `Staff::instrument_or`):
    the note values write it on a rest. Marks go to the head they mean
-   (`Grooph::aimed`): a cell per technique (`Modifier::ToggleTechnique`)
-   plays the head of an instrument played that way on the beat so, or plainly
-   again, so no instrument needs picking first; the cells (`Cell::Technique`)
-   are in the instruments' row, one per instrument that plays the technique,
-   right of that instrument's cell and only while it has a head on the beat
-   (`grid_rows`' `technique`): they open out of it in 150 ms on a tinted
-   background that joins the group, and `row_lines` keeps a group in one line;
-   a tap picks their instrument and applies the mark;
+   (`Grooph::aimed`): a technique tool (`Modifier::ToggleTechnique`, not in
+   the grid) plays the head of an instrument played that way on the beat
+   so, or plainly again, so no instrument needs picking first;
    accent and ghost go to the picked instrument's head if it is on the beat,
    else the snare, kick, toms, hi-hat, ride, crash (`AIM_ORDER`), which
    becomes the picked one. The picked instrument's cell is always ringed

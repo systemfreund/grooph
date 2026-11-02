@@ -4,10 +4,11 @@
 //! instruments; on the one line every note is its rhythm, and the tools edit
 //! it as before.
 //!
-//! An instrument's cell toggles its head on the cursor's beat
-//! (`Grooph::tap_instrument`) and makes it the picked one, the head the note
+//! An instrument's cell steps its head on the cursor's beat through none,
+//! the usual stroke and its techniques (`Grooph::tap_instrument`; a long
+//! press takes it away) and makes it the picked one, the head the note
 //! values write on a rest (`Grooph::edit_instrument`). Accent, ghost and the
-//! techniques go to the head they mean (`Grooph::aimed` in `tool_palette`).
+//! technique tools go to the head they mean (`Grooph::aimed` in `tool_palette`).
 //! The cursor goes to the voice the instrument's head would be entered in:
 //! where it is on the beat already, else where it is elsewhere in the measure,
 //! else voice 0 of a measure of one voice that holds notes, else the one the
@@ -82,9 +83,29 @@ impl Grooph {
     }
 
     /// A tap on an instrument's cell: it becomes the picked one and its head
-    /// on the cursor's beat is added or taken away, in the voice where it
-    /// already is there, else its usual one. The cursor stays at its time.
+    /// on the cursor's beat steps on: none there is added, played the usual
+    /// way; one there is played with the instrument's next technique, after
+    /// the last it is taken away (see [`Instrument::techniques`]). It stays
+    /// in the voice where it is, a new one goes to its usual one. The cursor
+    /// stays at its time.
     pub(crate) fn tap_instrument(&mut self, instrument: Instrument) {
+        let next = match self.technique_at_cursor(instrument) {
+            Some(t) => instrument.techniques().iter().skip_while(|&&o| o != t).nth(1).is_some(),
+            None => false,
+        };
+        let tool = if next { "modify.cycle_technique" } else { "modify.toggle.head" };
+        self.strike(instrument, tool);
+    }
+
+    /// A long press (a right click) on an instrument's cell: its head on the
+    /// cursor's beat is taken away however it is played, or added.
+    pub(crate) fn hold_instrument(&mut self, instrument: Instrument) {
+        self.strike(instrument, "modify.toggle.head");
+    }
+
+    /// Pick `instrument`, go to the voice of its head on the cursor's beat
+    /// (or of a new one) and apply the tool `id` there.
+    fn strike(&mut self, instrument: Instrument, id: &str) {
         let there = self
             .heads_at_cursor()
             .into_iter()
@@ -94,7 +115,7 @@ impl Grooph {
         let steps = self.editor.doc().history.pushed();
         let voice = there.unwrap_or_else(|| self.voice_for(instrument));
         self.go_to_voice(voice);
-        self.apply_tool(crate::tool_palette::tool("modify.toggle.head"));
+        self.apply_tool(crate::tool_palette::tool(id));
         // A voice the bar had to get first is part of the same step.
         if self.editor.doc().history.pushed() == steps + 2 {
             self.editor.doc_mut().history.fold_last();
