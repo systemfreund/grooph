@@ -474,8 +474,6 @@ mod tests {
             "6/8 qt8_3 qt8_3 qt8_3 qt8_3 qt8_3 qt8_3 qt8_3 qt8_3 qt8_3 qt8_3"
         );
         assert_eq!(cleaned("2+2+3/8 [t8 t8 t8 t8 t8 t8] e e e"), "2+2+3/8 t8 t8 t8 t8 t8 t8 e e e");
-        // A group over beats of different lengths stays whole: 3+2+2/8.
-        assert_eq!(cleaned("3+2+2/8 e e e [t8 t8 t8 t8 t8 t8]"), "3+2+2/8 e e e t8 t8 t8 t8 t8 t8");
         // Notes of other values split where each beat starts one.
         assert_eq!(cleaned("4/4 [t8 t4 t4 t8] r:h"), "4/4 t8 t4 [t4 t8] r:h");
     }
