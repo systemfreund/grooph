@@ -255,7 +255,13 @@ fn merge_in_tuplets(beats: &mut Vec<Beat>, spans: &[spelling::Span]) {
 /// and rests merged (see [`merge_in_tuplets`]), if any merge.
 fn merged_group(members: &[Beat], start: u32, spans: &[spelling::Span]) -> Option<Vec<Beat>> {
     let spec = members[0].duration.as_tuplet_spec()?;
-    let values = DEFAULT_GRID.tuplet_grid_durations(spec.n, spec.m);
+    // Every supported value of the ratio, not only the common ones: a 5:3
+    // quarter holds two 5:3 eighths.
+    let values: Vec<Duration> = crate::grid::NOTE_VALUES
+        .into_iter()
+        .map(|base| Duration::Tuplet(TupletSpec { base, ..spec }))
+        .filter(|d| DEFAULT_GRID.supports(d))
+        .collect();
     let value_of =
         |ticks: u32| values.iter().copied().find(|d| DEFAULT_GRID.ticks_of(d) == Some(ticks));
     let beat_end = |tick: u32| {
@@ -650,10 +656,16 @@ mod tests {
         assert_eq!(cleaned("4/4 t8 r:t8 t8 t8 r:t8 t8 r:h"), "4/4 [t4 t8] [t4 t8] r:h");
         // Rests next to each other merge.
         assert_eq!(cleaned("4/4 r:t8 r:t8 t8 q r:h"), "4/4 [r:t4 t8] q r:h");
-        // Only into one value of the ratio: 5:3 has no quarter in 6/8.
+        // Into any value of the ratio: a 5:3 quarter in 6/8.
         assert_eq!(
             cleaned("6/8 qt8_3 r:qt8_3 qt8_3 qt8_3 qt8_3 r:q."),
-            "6/8 qt8_3 r:qt8_3 qt8_3 qt8_3 qt8_3 r:q."
+            "6/8 [5:3q qt8_3 qt8_3 qt8_3] r:q."
+        );
+        // And the longest that fits: of four rests after it, a note in a
+        // sextuplet takes three as a 6:4 quarter; five places are no value.
+        assert_eq!(
+            cleaned("4/4 st16 st16 r:st16 r:st16 r:st16 r:st16 r:q r:h"),
+            "4/4 st16 6:4q r:st16 r:q r:h"
         );
         assert_eq!(cleaned("2+2+3/8 t8 r:t8 t8 q r:q."), "2+2+3/8 [t4 t8] q r:q.");
         assert_eq!(cleaned("4/4 t8 t8 r:t8 q r:h"), "4/4 t8 t4 q r:h");
