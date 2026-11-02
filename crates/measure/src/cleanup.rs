@@ -11,13 +11,15 @@
 //! beat and into half rests at the start of a pair of beats.
 //!
 //! Tuplets stay as written, with the beats they share a beat with; a
-//! tuplet of rests only becomes plain rests. [`VoiceBar::from_onsets`]
+//! tuplet of rests only becomes plain rests. A tuplet group over several
+//! beats is written as one group per beat where its notes allow
+//! (twelve triplet eighths as four triplets, not one triplet of halves). [`VoiceBar::from_onsets`]
 //! writes a voice from onsets alone, e.g. for heads moved between voices.
 
 use crate::duration::q;
 use crate::grid::DEFAULT_GRID;
 use crate::spelling::{self, Lengths, Piece};
-use crate::{Beat, Heads, Measure, TimeSignature, VoiceBar};
+use crate::{Beat, Heads, Measure, TimeSignature, TupletMark, VoiceBar};
 use std::ops::Range;
 
 /// Grid ticks in a unit of [`crate::spelling`], a thirty-second.
@@ -117,6 +119,57 @@ fn rewrite(ts: TimeSignature, notes: &[(u32, Beat)], kept: &[Kept]) -> Option<Vo
     Some(voice)
 }
 
+/// Write each tuplet group of `beats` that spans whole beats of the meter
+/// (`spans`) as one group per beat, where it can be: a beat starts on each
+/// beat, every beat holds two or more of them, and a beat is `m` of a note
+/// value. Twelve triplet eighths of a triplet of halves over a 4/4 bar are
+/// read as four triplets of eighths, one per beat. Only the marks change.
+fn split_at_beats(beats: &mut [Beat], spans: &[spelling::Span]) {
+    let ticks = DEFAULT_GRID.compute_onset_ticks(beats);
+    let groups: Vec<_> = (0..beats.len())
+        .filter_map(|i| crate::tuplet::TupletGroup::starting_at(beats, i))
+        .collect();
+    for group in groups {
+        let unit = unit_ticks();
+        let start = ticks[group.start_idx];
+        let end = start + group.span_ticks();
+        let inside: Vec<_> =
+            spans.iter().filter(|s| start <= s.start * unit && s.end() * unit <= end).collect();
+        let covers = inside.first().is_some_and(|s| s.start * unit == start)
+            && inside.last().is_some_and(|s| s.end() * unit == end)
+            && inside.len() >= 2;
+        if !covers {
+            continue;
+        }
+        // The first beat of the group in each beat of the meter, with its base.
+        let mut firsts = Vec::new();
+        for span in &inside {
+            let Some(first) =
+                (group.start_idx..=group.end_idx).find(|&i| ticks[i] == span.start * unit)
+            else {
+                break;
+            };
+            let after = (first..=group.end_idx).take_while(|&i| ticks[i] < span.end() * unit);
+            let Some(base) = crate::tuplet::base_spanning(span.len * unit, group.spec.m) else {
+                break;
+            };
+            if after.count() < 2 {
+                break;
+            }
+            firsts.push((first, base));
+        }
+        if firsts.len() != inside.len() {
+            continue;
+        }
+        for beat in &mut beats[group.start_idx..=group.end_idx] {
+            beat.tuplet = Some(TupletMark::Continue);
+        }
+        for (first, base) in firsts {
+            beats[first].tuplet = Some(TupletMark::Start { base });
+        }
+    }
+}
+
 impl VoiceBar {
     /// The voice written again from its onsets (see the module docs): the
     /// same notes at the same times, with the same heads, spelled for
@@ -126,6 +179,14 @@ impl VoiceBar {
     /// quarters, eighths or sixteenths, or a tuplet that starts or ends
     /// inside a beat where no beat of the voice starts.
     pub fn respelled(&self) -> Option<VoiceBar> {
+        // Groups over beats first: each of their beats is then respelled
+        // or kept like any tuplet inside one beat.
+        let mut split = self.clone();
+        split_at_beats(&mut split.beats, &spelling::meter_spans(self.time_signature())?);
+        split.respelled_by_beat()
+    }
+
+    fn respelled_by_beat(&self) -> Option<VoiceBar> {
         let ts = self.time_signature();
         let ticks = DEFAULT_GRID.compute_onset_ticks(&self.beats);
         let end_of =
@@ -382,6 +443,39 @@ mod tests {
         let once = m.cleaned_up();
         let groups = once.first_voice().tuplet_groups();
         assert_eq!(groups.len(), 1);
+    }
+
+    #[test]
+    fn a_tuplet_over_beats_is_written_per_beat() {
+        // The 3:4 polyrhythm, each triplet half in four: four triplets of
+        // eighths. The notes stay, the groups follow the beats.
+        let m = measure("4/4 [t8 t8 t8 t8 t8 t8 t8 t8 t8 t8 t8 t8]");
+        assert_eq!(m.first_voice().tuplet_groups().len(), 1);
+        assert!(m.needs_clean_up());
+        let once = m.cleaned_up();
+        let groups = once.first_voice().tuplet_groups();
+        assert_eq!(groups.len(), 4);
+        assert!(groups.iter().all(|g| g.spec.base == crate::duration::NoteValue::Eighth));
+        assert_eq!(
+            cleaned("4/4 [t8 t8 t8 t8 t8 t8 t8 t8 t8 t8 t8 t8]"),
+            "4/4 t8 t8 t8 t8 t8 t8 t8 t8 t8 t8 t8 t8"
+        );
+        // Six eighths of a triplet of quarters: two triplets of eighths.
+        assert_eq!(cleaned("4/4 [t8 t8 t8 t8 t8 t8] r:h"), "4/4 t8 t8 t8 t8 t8 t8 r:h");
+        // A note over a beat keeps the group whole.
+        assert_eq!(cleaned("4/4 t2 t8 t8 t8 t8 t2"), "4/4 t2 t8 t8 t8 t8 t2");
+        assert_eq!(cleaned("4/4 t4 t4 t4 t4 t4 t4"), "4/4 t4 t4 t4 t4 t4 t4");
+        assert_eq!(cleaned("4/4 t4 t4 t4 r:h"), "4/4 t4 t4 t4 r:h");
+        // Compound and odd meters split at their own beats: ten quintuplet
+        // eighths over a 6/8 bar are five per dotted quarter, a triplet of
+        // quarters over the twos of 2+2+3/8 one triplet of eighths each.
+        assert_eq!(
+            cleaned("6/8 [qt8_3 qt8_3 qt8_3 qt8_3 qt8_3 qt8_3 qt8_3 qt8_3 qt8_3 qt8_3]"),
+            "6/8 qt8_3 qt8_3 qt8_3 qt8_3 qt8_3 qt8_3 qt8_3 qt8_3 qt8_3 qt8_3"
+        );
+        assert_eq!(cleaned("2+2+3/8 [t8 t8 t8 t8 t8 t8] e e e"), "2+2+3/8 t8 t8 t8 t8 t8 t8 e e e");
+        // Notes of other values split where each beat starts one.
+        assert_eq!(cleaned("4/4 [t8 t4 t4 t8] r:h"), "4/4 t8 t4 [t4 t8] r:h");
     }
 
     #[test]
