@@ -1085,6 +1085,19 @@ pub(crate) fn paint_notation(
         let measure_layout = build_measure_layout(measure.first_voice(), &opts);
         let painter = &ui.painter_at(rect);
         draw_notes(painter, &measure_layout, color, None, &opts);
+        // A half rest sits on the staff's line, a whole rest hangs from it:
+        // without the line the two look alike, so the cell draws it under
+        // the one and over the other.
+        let stroke = egui::Stroke::new(opts.staff_line_thickness(), color);
+        let reach = 0.4 * opts.staff_space();
+        for note in &measure_layout.notes {
+            if note.kind == Rest
+                && matches!(note.duration.base_note(), NoteValue::Half | NoteValue::Whole)
+            {
+                let (ink, y) = (note.head.ink(), opts.y_of(0));
+                painter.hline(ink.left() - reach..=ink.right() + reach, y, stroke);
+            }
+        }
     }
 }
 
