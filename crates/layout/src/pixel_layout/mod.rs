@@ -564,6 +564,33 @@ mod tests {
     }
 
     #[test]
+    fn a_whole_note_has_a_whole_head_and_no_stem() {
+        use grooph_measure::duration::w;
+        let mut m = Measure::new(TimeSignature::FOUR_FOUR);
+        m.first_voice_mut().set_beat(0, Beat::note(w())).unwrap();
+        let em = 20.0;
+        let opts = LayoutOpts {
+            rect: Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(200.0, 100.0)),
+            font_id: FontId::new(em, FontFamily::Proportional),
+            pixels_per_point: 1.0,
+            em,
+            layout_clef: false,
+            layout_time_signature: false,
+            y_offset: 0.0,
+            stem_length_factor: 2.0,
+            stem_thickness_factor: 0.1,
+            accent_displacement: 0.0,
+            stem_down: false,
+            shared_line: false,
+            staff: StaffKind::Line,
+        };
+        let layout = build_measure_layout(m.first_voice(), &opts);
+        assert_eq!(layout.notes.len(), 1);
+        assert!(layout.notes[0].stem.is_none());
+        assert_eq!(layout.notes[0].head.glyph, glyphs::NOTEHEAD_WHOLE);
+    }
+
+    #[test]
     fn test_accent_positioning_relative_to_bbox() {
         use grooph_measure::duration::q;
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);

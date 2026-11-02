@@ -3,7 +3,7 @@ use crate::glyphs;
 use crate::render_plan::RenderPlan;
 use crate::staff::rest_takes_ledgers;
 use egui::{Pos2, Rect};
-use grooph_measure::duration::Duration;
+use grooph_measure::duration::{Duration, NoteValue};
 use grooph_measure::grid::DEFAULT_GRID;
 use grooph_measure::{Beat, BeatKind, VoiceBar};
 
@@ -449,7 +449,9 @@ pub(super) fn build_note_layout(
         // the snapped stem.
         let mut stem: Option<Line> = None;
 
-        if is_note || stemlet {
+        // A whole note has no stem.
+        let stemless = b.duration.base_note() == NoteValue::Whole;
+        if (is_note && !stemless) || stemlet {
             let stem_len_factor = if in_beam || needs_flag { 1.0 } else { 0.85 };
             let stem_len = opts.stem_length() * stem_len_factor;
             // Down stems hang off the head's left side.

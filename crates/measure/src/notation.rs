@@ -182,10 +182,10 @@ impl Display for NotationError {
 impl std::error::Error for NotationError {}
 
 /// Durations with a notation code, in the order of [`crate::duration::COMMON_DURATIONS`].
-const CODES: [(&str, Duration); 25] = {
+const CODES: [(&str, Duration); 26] = {
     use crate::duration::{
         e, h, nt16, q, qt4, qt8, qt8_3, qt16, s, spt4, spt8, spt16, spt16_6, st8, st16, t2, t8,
-        t16, t32, th,
+        t16, t32, th, w,
     };
     const fn dotted(base: NoteValue) -> Duration {
         Duration::Dotted { base, dots: 1 }
@@ -216,6 +216,7 @@ const CODES: [(&str, Duration); 25] = {
         ("qt8_3", qt8_3()),
         ("spt16_6", spt16_6()),
         ("h.", dotted(NoteValue::Half)),
+        ("w", w()),
     ]
 };
 
@@ -645,6 +646,20 @@ mod tests {
 
     fn beats_of(score: &Score, measure: usize) -> Vec<Beat> {
         score.measures()[measure].first_voice().beats().clone()
+    }
+
+    #[test]
+    fn wholes_and_dotted_halves_have_codes() {
+        let score = parse_score("4/4 w").unwrap();
+        assert_eq!(beats_of(&score, 0), vec![Beat::note(crate::duration::w())]);
+        assert_eq!(format_score(&score).unwrap(), "4/4 w");
+        let score = parse_score("3/4 h.").unwrap();
+        assert_eq!(format_score(&score).unwrap(), "3/4 h.");
+        // A whole rest is the value of a bar of four quarters only.
+        assert_eq!(format_score(&parse_score("4/4 r:w").unwrap()).unwrap(), "4/4 r:w");
+        assert!(parse_score("8/8 r:w").is_err());
+        assert!(parse_score("3/2 r:w").is_err());
+        assert!(parse_score("3/4 w").is_err());
     }
 
     #[test]

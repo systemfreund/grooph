@@ -97,8 +97,9 @@ const AIM_ORDER: [Instrument; 9] = [
 ];
 /// The tools in one row, going on in the next line where it does not fit:
 /// the meter, the rests, the head modifiers, the note values, the tuplets.
-const TOOLS: [&str; 20] = [
+const TOOLS: [&str; 22] = [
     "meta.change_time_signature",
+    "insert.rest.w",
     "insert.rest.h",
     "insert.rest.q",
     "insert.rest.e",
@@ -107,6 +108,7 @@ const TOOLS: [&str; 20] = [
     "modify.toggle.accent",
     "modify.toggle.soft",
     "modify.toggle.dotted",
+    "insert.note.w",
     "insert.note.h",
     "insert.note.q",
     "insert.note.e",
@@ -1128,7 +1130,7 @@ mod tests {
     #[test]
     fn the_palette_offers_the_values_clean_up_writes() {
         use crate::tools::{BeatTemplate, ToolKind};
-        use grooph_measure::duration::Duration;
+        use grooph_measure::duration::{Duration, NoteValue};
         use grooph_measure::editing::{TUPLET_TOOLS, VALUE_BUTTONS};
         let templates = || {
             super::TOOLS.iter().filter_map(|id| match super::tool(id).kind {
@@ -1139,7 +1141,8 @@ mod tests {
         for kind in [grooph_measure::BeatKind::Note, grooph_measure::BeatKind::Rest] {
             let values: Vec<_> = templates()
                 .filter_map(|(d, k)| match d {
-                    Duration::Simple(v) if k == kind => Some(v),
+                    // The whole is entered by hand only; Clean up never writes it.
+                    Duration::Simple(v) if k == kind && v != NoteValue::Whole => Some(v),
                     _ => None,
                 })
                 .collect();
@@ -1214,6 +1217,25 @@ mod tests {
         last.editor.doc_mut().cursor = Cursor::at(0, 3);
         assert!(!last.cell_enabled(cell("insert.note.h")));
         assert!(last.cell_enabled(cell("insert.note.q")));
+    }
+
+    #[test]
+    fn wholes_are_entered_by_hand_and_never_dotted() {
+        let mut app = editing("4/4 q q q q");
+        app.editor.doc_mut().cursor = Cursor::at(0, 0);
+        apply(&mut app, "insert.note.w");
+        assert_eq!(text(&app), "4/4 w");
+        apply(&mut app, "insert.rest.w");
+        assert_eq!(text(&app), "4/4 r:w");
+        // The dot has no whole to make.
+        apply(&mut app, "modify.toggle.dotted");
+        assert_eq!(text(&app), "4/4 r:w");
+        // A whole rest is no value of a bar of another length.
+        let mut app = editing("3/4 q q q");
+        app.editor.doc_mut().cursor = Cursor::at(0, 0);
+        apply(&mut app, "insert.rest.w");
+        apply(&mut app, "insert.note.w");
+        assert_eq!(text(&app), "3/4 q q q");
     }
 
     #[test]

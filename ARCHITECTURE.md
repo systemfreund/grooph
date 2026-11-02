@@ -790,6 +790,11 @@ wider than the grid goes on in the next line, and past three and a half
 lines or 45% of the screen's height the grid scrolls, so the staff stays in
 view (the half line cut off shows there is more).
 
+The whole note (`w`) and whole rest (`r:w`) are on the grid and in the palette, but only entered by hand: Clean up, the
+generator and the fill (`best_fill_for_gap`) never write them. A whole note has the wide whole head and no stem; a
+whole rest value is valid only in a bar of four quarters (`whole_rest_fits`), the empty bar's whole rest in any
+meter is the layout's.
+
 If you add new tools/shortcuts, remember:
 - Tool registry + palette (`grid_rows`)
 - Keyboard input
