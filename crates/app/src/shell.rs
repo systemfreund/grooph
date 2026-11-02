@@ -39,7 +39,10 @@ const CARD_CELL_HEIGHT: f32 = 64.0;
 const CARD_VALUE_SIZE: f32 = 26.0;
 /// Music font size of a meter in the card: its two numbers stacked are this high.
 const CARD_METER_EM: f32 = 34.0;
-const PLAY_BUTTON_SIZE: f32 = 68.0;
+const PLAY_BUTTON_SIZE: f32 = 56.0;
+/// The smaller round buttons beside play in the sheets (🎲, ✏, share): still
+/// above [`MIN_TOUCH_TARGET`].
+const TRANSPORT_SIDE_SIZE: f32 = 48.0;
 const SIDE_BUTTON_SIZE: f32 = 52.0;
 /// The options sheet's animation (see [`Grooph::sheet_options`]).
 const SHEET_OPTIONS_ID: &str = "shell_sheet_options";
@@ -503,6 +506,17 @@ fn round_button_at(
     resp
 }
 
+/// A side button in a transport `row`: at its left or right end, centered
+/// on the row's height.
+fn side_button_rect(row: Rect, left: bool) -> Rect {
+    let x = if left {
+        row.left() + TRANSPORT_SIDE_SIZE / 2.0
+    } else {
+        row.right() - TRANSPORT_SIDE_SIZE / 2.0
+    };
+    Rect::from_center_size(pos2(x, row.center().y), Vec2::splat(TRANSPORT_SIDE_SIZE))
+}
+
 /// Handle on top of an options sheet: tap to fold the options away.
 /// Returns whether it was tapped.
 fn sheet_handle(ui: &mut Ui) -> bool {
@@ -519,7 +533,7 @@ fn sheet_handle(ui: &mut Ui) -> bool {
     ui.interact(target, ui.auto_id_with("sheet_handle"), Sense::click()).clicked()
 }
 
-const SHEET_HANDLE_HEIGHT: f32 = 22.0;
+const SHEET_HANDLE_HEIGHT: f32 = 12.0;
 /// Smallest touch target, in points (Apple's and Claude's guidelines).
 const MIN_TOUCH_TARGET: f32 = 44.0;
 
@@ -537,7 +551,7 @@ fn sheet_card(ui: &mut Ui, add_contents: impl FnOnce(&mut Ui)) -> SheetCard {
     let rect = Frame::new()
         .fill(card_fill(ui))
         .corner_radius(CARD_RADIUS)
-        .inner_margin(Margin { left: 12, right: 12, top: 0, bottom: 12 })
+        .inner_margin(Margin { left: 12, right: 12, top: 0, bottom: 8 })
         .show(ui, add_contents)
         .response
         .rect;
@@ -860,8 +874,8 @@ impl Grooph {
             .frame(Frame::new().fill(ui.visuals().panel_fill).inner_margin(Margin {
                 left: 12,
                 right: 12,
-                top: 8,
-                bottom: 8,
+                top: 6,
+                bottom: 6,
             }))
             .show_separator_line(false)
             .show(ui, |ui| {
@@ -888,8 +902,8 @@ impl Grooph {
             .frame(Frame::new().fill(ui.visuals().panel_fill).inner_margin(Margin {
                 left: 12,
                 right: 12,
-                top: 8,
-                bottom: 8,
+                top: 6,
+                bottom: 6,
             }))
             .show_separator_line(false)
             .show(ui, |ui| {
@@ -925,7 +939,7 @@ impl Grooph {
         let text = ui.visuals().strong_text_color();
         if round_button_at(
             ui,
-            Rect::from_min_size(row.min, size),
+            side_button_rect(row, true),
             Id::unique("score_edit"),
             side_fill,
             text,
@@ -934,7 +948,7 @@ impl Grooph {
                     rect.center(),
                     Align2::CENTER_CENTER,
                     "✏",
-                    FontId::proportional(30.0),
+                    FontId::proportional(22.0),
                     color,
                 );
             },
@@ -960,7 +974,7 @@ impl Grooph {
         }
         if round_button_at(
             ui,
-            Rect::from_min_size(row.right_top() - vec2(PLAY_BUTTON_SIZE, 0.0), size),
+            side_button_rect(row, false),
             Id::unique("score_share"),
             side_fill,
             text,
@@ -1164,7 +1178,12 @@ impl Grooph {
     fn metronome_sheet(&mut self, ui: &mut Ui) {
         let mut card = None;
         let sheet = egui::Panel::bottom("shell_metronome")
-            .frame(Frame::new().fill(ui.visuals().panel_fill).inner_margin(Margin::same(12)))
+            .frame(Frame::new().fill(ui.visuals().panel_fill).inner_margin(Margin {
+                left: 12,
+                right: 12,
+                top: 6,
+                bottom: 6,
+            }))
             .show_separator_line(false)
             .show(ui, |ui| {
                 centered_column(ui, |ui| {
@@ -1191,8 +1210,10 @@ impl Grooph {
             ui.add_space(4.0);
         }
         let playing = self.playback_ctl.transport_state == TransportState::Playing;
-        let (row, _) =
-            ui.allocate_exact_size(vec2(ui.available_width(), PLAY_BUTTON_SIZE), Sense::hover());
+        // Embedded, the meter and tempo cells beside play set the height.
+        let height =
+            if self.embedded() { PLAY_BUTTON_SIZE.max(CARD_CELL_HEIGHT) } else { PLAY_BUTTON_SIZE };
+        let (row, _) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
         let size = Vec2::splat(PLAY_BUTTON_SIZE);
         let fill = ui.visuals().selection.bg_fill;
         let icon = ui.visuals().selection.stroke.color;
@@ -1214,7 +1235,7 @@ impl Grooph {
         }
         if round_button_at(
             ui,
-            Rect::from_min_size(row.right_top() - vec2(PLAY_BUTTON_SIZE, 0.0), size),
+            side_button_rect(row, false),
             Id::unique("metronome_share"),
             ui.visuals().extreme_bg_color,
             ui.visuals().strong_text_color(),
@@ -1289,9 +1310,9 @@ impl Grooph {
         let (row, _) =
             ui.allocate_exact_size(vec2(ui.available_width(), PLAY_BUTTON_SIZE), Sense::hover());
         let size = Vec2::splat(PLAY_BUTTON_SIZE);
-        let new_rect = Rect::from_min_size(row.min, size);
+        let new_rect = side_button_rect(row, true);
         let play_rect = Rect::from_center_size(row.center(), size);
-        let share_rect = Rect::from_min_size(row.right_top() - vec2(PLAY_BUTTON_SIZE, 0.0), size);
+        let share_rect = side_button_rect(row, false);
 
         let side_fill = ui.visuals().extreme_bg_color;
         let text = ui.visuals().strong_text_color();
@@ -1308,7 +1329,7 @@ impl Grooph {
                         rect.center(),
                         Align2::CENTER_CENTER,
                         "🎲",
-                        FontId::proportional(32.0),
+                        FontId::proportional(24.0),
                         color,
                     );
                 },
