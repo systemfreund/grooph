@@ -4,7 +4,7 @@
 //! the seed and step that reproduce it.
 
 use crate::duration::{COMMON_DURATIONS, Duration, NoteValue, TupletSpec};
-use crate::editing::CYCLE_TUPLET_SPECS;
+use crate::editing::{TUPLET_TOOLS, VALUE_BUTTONS};
 use crate::generator::Rng;
 use crate::grid::DEFAULT_GRID;
 use crate::notation::{format_score, parse_score};
@@ -112,7 +112,7 @@ fn random_edit(
             }
         }
         8 => {
-            let spec = if rng.chance(0.3) { None } else { Some(pick(rng, &CYCLE_TUPLET_SPECS)) };
+            let spec = pick(rng, &TUPLET_TOOLS);
             let overwrite = rng.chance(0.5);
             m.first_voice_mut().set_tuplet(idx, spec, overwrite, crate::Instrument::Rhythm);
             format!("set_tuplet({idx}, {spec:?}, {overwrite})")
@@ -277,6 +277,23 @@ fn run_random_cleanups(seed: u64, measures: usize) -> (usize, usize) {
             m.head_onsets().into_iter().map(|o| (o.tick, o.voice, o.head)).collect()
         };
         assert_eq!(sound(&once), sound(&m), "{place}: cleaned up to {once:?}");
+        // Only what the editor can write: a tuplet value is one that was
+        // there, or a value button's in a ratio that was there or of a
+        // tuplet tool.
+        let specs = |m: &Measure| -> Vec<TupletSpec> {
+            m.voices()
+                .iter()
+                .flat_map(|v| v.beats().iter().filter_map(|b| b.duration.as_tuplet_spec()))
+                .collect()
+        };
+        let before = specs(&m);
+        for spec in specs(&once) {
+            let ratio = |s: &TupletSpec| (s.n, s.m);
+            let written = before.contains(&spec)
+                || (VALUE_BUTTONS.contains(&spec.base)
+                    && before.iter().chain(&TUPLET_TOOLS).any(|s| ratio(s) == ratio(&spec)));
+            assert!(written, "{place}: cleaned up to {once:?}, with {spec:?}");
+        }
         let twice = once.cleaned_up();
         for voice in 0..once.voices().len() {
             let [a, b] = [&once, &twice].map(|m| m.single_voice(voice).expect("voice in range"));

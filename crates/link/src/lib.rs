@@ -1151,7 +1151,9 @@ mod tests {
         // Triplet, then its first note a quarter: a triplet of eighths that
         // starts with a triplet quarter.
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
-        m.first_voice_mut().set_tuplet(0, None, false, Rhythm).unwrap();
+        m.first_voice_mut()
+            .set_tuplet(0, grooph_measure::editing::TUPLET_TOOLS[0], false, Rhythm)
+            .unwrap();
         m.first_voice_mut().modify_beat(0, Quarter, None, Rhythm).unwrap();
         let score = Score::new(vec![m]);
         let link = SharedLink {

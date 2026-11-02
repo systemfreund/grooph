@@ -23,12 +23,22 @@ pub enum Modification {
     ChangeTimeSignature(TimeSignature, TimeSignature), // (old, new)
 }
 
-pub const CYCLE_TUPLET_SPECS: [TupletSpec; 5] = [
-    TupletSpec { n: 3, m: 2, base: Eighth }, // t8 - 1/8 triplets
-    TupletSpec { n: 5, m: 4, base: Sixteenth }, // qt16 - 1/16 quintuplets
-    TupletSpec { n: 6, m: 4, base: Sixteenth }, // s16 - 1/16 sextuplets
-    TupletSpec { n: 7, m: 4, base: Sixteenth }, // spt16 - 1/16 septuplets
-    TupletSpec { n: 9, m: 8, base: Sixteenth }, // nt16 - 1/16 nonuplets
+/// The note values of the editor's value buttons (notes and rests). On a
+/// tuplet note a button gives its value in the group's ratio
+/// ([`VoiceBar::modify_beat`]). Clean up writes no other value, so all it
+/// writes can be entered by hand.
+pub const VALUE_BUTTONS: [NoteValue; 4] =
+    [NoteValue::Quarter, Eighth, Sixteenth, NoteValue::ThirtySecond];
+
+/// The tuplets of the editor's tuplet tools. Clean up writes a group in
+/// no other ratio than its own or one of these.
+pub const TUPLET_TOOLS: [TupletSpec; 6] = [
+    TupletSpec { n: 3, m: 2, base: Eighth },
+    TupletSpec { n: 3, m: 2, base: Sixteenth },
+    TupletSpec { n: 5, m: 4, base: Sixteenth },
+    TupletSpec { n: 6, m: 4, base: Sixteenth },
+    TupletSpec { n: 7, m: 4, base: Sixteenth },
+    TupletSpec { n: 9, m: 8, base: Sixteenth },
 ];
 
 impl VoiceBar {
@@ -165,49 +175,37 @@ impl VoiceBar {
         }
     }
 
-    /// Make the beat at `idx` a tuplet group of `tuplet_spec`, or the next
-    /// of [`CYCLE_TUPLET_SPECS`]; dissolve its group if it is one of that
-    /// spec already. The slots of a new group are notes: of the heads of
-    /// the note it is made of, or of `instrument` for a rest.
+    /// Make the beat at `idx` a tuplet group of `tuplet_spec`; dissolve its
+    /// group if it is one of that spec already. The slots of a new group
+    /// are notes: of the heads of the note it is made of, or of
+    /// `instrument` for a rest.
     pub fn set_tuplet(
         &mut self,
         idx: BeatIdx,
-        tuplet_spec: Option<TupletSpec>,
+        tuplet_spec: TupletSpec,
         overwrite: bool,
         instrument: Instrument,
     ) -> Option<Modification> {
         let start_idx = self.tuplet_group_at(idx).map_or(idx, |g| g.start_idx);
         let cur_beat = self.beats()[start_idx];
         let mut result: Option<Modification> = None;
-        let mut captured_offsets: Option<Vec<(u32, Heads)>> = None;
         match cur_beat.duration {
             Duration::Tuplet(current_spec) => {
-                let next_target = if let Some(explicit_tuplet) = &tuplet_spec {
-                    if current_spec == *explicit_tuplet {
-                        // Dissolve if the same tuplet is requested
-                        None
-                    } else {
-                        Some(explicit_tuplet)
-                    }
-                } else {
-                    // Cycle tuplets:
-                    CYCLE_TUPLET_SPECS
-                        .iter()
-                        .position(|spec| *spec == current_spec)
-                        .and_then(|next_idx| CYCLE_TUPLET_SPECS.get(next_idx + 1))
-                };
+                // The same tuplet again dissolves it.
+                let next_target = (current_spec != tuplet_spec).then_some(tuplet_spec);
 
                 // Dissolve current group from its start
                 // Remember where the notes sit, but only when there is a next target
-                if next_target.is_some() {
-                    captured_offsets = self.tuplet_group_note_offsets(start_idx);
-                }
+                let captured_offsets = match next_target {
+                    Some(_) => self.tuplet_group_note_offsets(start_idx),
+                    None => None,
+                };
                 result = self.dissolve_tuplet_group(start_idx);
                 if let Some(DissolveTuplet(..)) = result {
                     // Try to convert to the next target if defined, also at group start
                     if let Some(tuplet_spec) = next_target
                         && let Some(group_span) =
-                            self.convert_to_tuplet(start_idx, *tuplet_spec, overwrite)
+                            self.convert_to_tuplet(start_idx, tuplet_spec, overwrite)
                     {
                         result = Some(Modification::SetTuplet(group_span));
                         // Carry the remembered notes over to the new group
@@ -218,13 +216,7 @@ impl VoiceBar {
                 }
             }
             _ => {
-                let next_target = if let Some(explicit_tuplet) = &tuplet_spec {
-                    explicit_tuplet
-                } else {
-                    &CYCLE_TUPLET_SPECS[0]
-                };
-
-                if let Some(group_span) = self.convert_to_tuplet(start_idx, *next_target, overwrite)
+                if let Some(group_span) = self.convert_to_tuplet(start_idx, tuplet_spec, overwrite)
                 {
                     // A new tuplet group starts with every slot as a note,
                     // of the instruments of the one it was made of.
@@ -453,12 +445,7 @@ mod tests {
         let mut score = parse_score("4/4 >S-(H):q H:q r:h ; K:h K:h").unwrap();
         let hands = score.measures_mut()[0].voice_mut(0).unwrap();
         hands
-            .set_tuplet(
-                0,
-                Some(TupletSpec { n: 3, m: 2, base: Eighth }),
-                true,
-                crate::Instrument::Rhythm,
-            )
+            .set_tuplet(0, TupletSpec { n: 3, m: 2, base: Eighth }, true, crate::Instrument::Rhythm)
             .unwrap();
         let text = format_score(&score).unwrap();
         assert!(text.starts_with("4/4 >S-(H):t8"), "{text}");
@@ -515,13 +502,13 @@ mod tests {
         // From a chord: every slot of the group plays its instruments, plain.
         let mut score = parse_score("4/4 >S-Ho:q r:q r:h").unwrap();
         let hands = score.measures_mut()[0].first_voice_mut();
-        hands.set_tuplet(0, Some(triplet), true, Kick).unwrap();
+        hands.set_tuplet(0, triplet, true, Kick).unwrap();
         let text = format_score(&score).unwrap();
         assert!(text.starts_with("4/4 >S-Ho:t8 S-H:t8 S-H:t8"), "{text}");
-        // To the next tuplet and dissolved, the notes keep their heads as they
+        // To another tuplet and dissolved, the notes keep their heads as they
         // are, the open hi-hat too.
         let hands = score.measures_mut()[0].first_voice_mut();
-        hands.set_tuplet(0, None, true, Kick).unwrap();
+        hands.set_tuplet(0, TupletSpec { n: 5, m: 4, base: Sixteenth }, true, Kick).unwrap();
         let text = format_score(&score).unwrap();
         assert!(text.starts_with("4/4 >S-Ho:qt16 r:qt16 S-H:qt16 S-H:qt16"), "{text}");
         let hands = score.measures_mut()[0].first_voice_mut();
@@ -530,13 +517,20 @@ mod tests {
         assert!(text.starts_with("4/4 >S-Ho:"), "{text}");
         // From a rest: notes of the instrument given.
         let mut rest = parse_score("4/4 H:q r:q r:h").unwrap();
-        rest.measures_mut()[0].first_voice_mut().set_tuplet(1, Some(triplet), true, Snare).unwrap();
+        rest.measures_mut()[0].first_voice_mut().set_tuplet(1, triplet, true, Snare).unwrap();
         assert!(format_score(&rest).unwrap().starts_with("4/4 H:q S:t8 S:t8 S:t8"));
         // On the one line too, a ghost note stays a ghost note.
         let mut line = parse_score("4/4 (q) r:q r:h").unwrap();
         let voice = line.measures_mut()[0].first_voice_mut();
-        voice.set_tuplet(0, Some(triplet), true, crate::Instrument::Rhythm).unwrap();
-        voice.set_tuplet(0, None, true, crate::Instrument::Rhythm).unwrap();
+        voice.set_tuplet(0, triplet, true, crate::Instrument::Rhythm).unwrap();
+        voice
+            .set_tuplet(
+                0,
+                TupletSpec { n: 5, m: 4, base: Sixteenth },
+                true,
+                crate::Instrument::Rhythm,
+            )
+            .unwrap();
         voice.dissolve_tuplet_group(0).unwrap();
         let text = format_score(&line).unwrap();
         assert!(text.starts_with("4/4 (q)") || text.starts_with("4/4 (e)"), "{text}");
@@ -690,12 +684,7 @@ mod tests {
         let mut m = Measure::new(TimeSignature::ONE_FOUR);
         m.first_voice_mut().set_beat(0, Beat::note(Duration::Simple(Eighth))).unwrap();
         m.first_voice_mut()
-            .set_tuplet(
-                0,
-                Some(TupletSpec { n: 3, m: 2, base: Eighth }),
-                true,
-                crate::Instrument::Rhythm,
-            )
+            .set_tuplet(0, TupletSpec { n: 3, m: 2, base: Eighth }, true, crate::Instrument::Rhythm)
             .unwrap();
 
         assert_eq!(
@@ -711,12 +700,7 @@ mod tests {
     fn convert_to_tuplet_initializes_rests_when_source_is_rest() {
         let mut m = Measure::new(TimeSignature::TWO_EIGHT);
         m.first_voice_mut()
-            .set_tuplet(
-                0,
-                Some(TupletSpec { n: 3, m: 2, base: Eighth }),
-                true,
-                crate::Instrument::Rhythm,
-            )
+            .set_tuplet(0, TupletSpec { n: 3, m: 2, base: Eighth }, true, crate::Instrument::Rhythm)
             .unwrap();
         assert_eq!(
             crate::beat::unmarked(m.first_voice().beats()),

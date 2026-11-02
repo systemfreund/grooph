@@ -186,10 +186,7 @@ fn marked_beats(raw: RawVoice) -> Result<Vec<Beat>, InvalidMeasure> {
         for tuplets in run.split_mut(|b| !b.duration.is_tuplet()).filter(|t| t.len() >= 2) {
             let base = if mixed { spanned_base(tuplets) } else { None };
             let base = base.unwrap_or(anchor.base_hint);
-            tuplets[0].tuplet = Some(TupletMark::Start { base });
-            for beat in &mut tuplets[1..] {
-                beat.tuplet = Some(TupletMark::Continue);
-            }
+            crate::tuplet::mark_group(tuplets, base);
         }
         idx += len;
     }

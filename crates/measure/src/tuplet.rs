@@ -26,6 +26,17 @@ pub enum TupletMark {
     Continue,
 }
 
+/// Mark `beats` as one tuplet group on `base`: the first starts it, the
+/// others continue it.
+pub(crate) fn mark_group(beats: &mut [Beat], base: NoteValue) {
+    for beat in beats.iter_mut() {
+        beat.tuplet = Some(TupletMark::Continue);
+    }
+    if let Some(first) = beats.first_mut() {
+        first.tuplet = Some(TupletMark::Start { base });
+    }
+}
+
 impl TupletMark {
     /// The mark of a beat behind this one in the same group.
     pub(crate) fn follower(mark: Option<TupletMark>) -> Option<TupletMark> {

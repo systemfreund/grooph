@@ -24,7 +24,6 @@ pub enum Modifier {
     ToggleAccent,
     ToggleSoft,
     ToggleRestNote,
-    CycleTuplet,
     /// Add the chosen instrument's head to the beat, or take it away: on a
     /// staff of several instruments.
     ToggleHead,
@@ -170,7 +169,7 @@ pub fn all_tools() -> &'static [Tool] {
     use BeatKind::*;
     use Duration::*;
 
-    static ALL: [Tool; 38] = [
+    static ALL: [Tool; 37] = [
         Tool {
             id: "edit.undo",
             label: "⟲",
@@ -377,13 +376,6 @@ pub fn all_tools() -> &'static [Tool] {
             kind: ToolKind::Modify(Modifier::ToggleTechnique(Technique::Choke)),
             shortcuts: &[],
             show_in_palette: true,
-        },
-        Tool {
-            id: "modify.cycle_tuplet",
-            label: "Cycle Tuplet",
-            kind: ToolKind::Modify(Modifier::CycleTuplet),
-            shortcuts: &[Shortcut::plain(Key::T)],
-            show_in_palette: false,
         },
         Tool {
             id: "insert.tuplet.t8",

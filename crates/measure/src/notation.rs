@@ -741,17 +741,14 @@ mod tests {
         // A triplet of eighths whose first note became a quarter.
         let mut longer_first = Measure::new(TimeSignature::FOUR_FOUR);
         let voice = longer_first.first_voice_mut();
-        voice.set_tuplet(0, None, false, Instrument::Rhythm).unwrap();
+        voice
+            .set_tuplet(0, TupletSpec { n: 3, m: 2, base: EighthValue }, false, Instrument::Rhythm)
+            .unwrap();
         voice.modify_beat(0, Quarter, None, Instrument::Rhythm).unwrap();
         // A triplet of quarters of six eighths.
         let mut six = Measure::new(TimeSignature::FOUR_FOUR);
         let voice = six.first_voice_mut();
-        voice.set_tuplet(
-            0,
-            Some(TupletSpec { n: 3, m: 2, base: Quarter }),
-            false,
-            Instrument::Rhythm,
-        );
+        voice.set_tuplet(0, TupletSpec { n: 3, m: 2, base: Quarter }, false, Instrument::Rhythm);
         for idx in [0, 2, 4] {
             voice.modify_beat(idx, EighthValue, None, Instrument::Rhythm).unwrap();
         }

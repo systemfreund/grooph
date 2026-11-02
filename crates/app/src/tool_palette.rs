@@ -452,7 +452,6 @@ impl Grooph {
             Cell::Tool(t) => match t.kind {
                 ToolKind::Edit(EditOp::Undo) => self.can_undo(),
                 ToolKind::Edit(EditOp::Redo) => self.can_redo(),
-                ToolKind::Modify(Modifier::CycleTuplet) => true,
                 ToolKind::Modify(modifier) => self.modifier_applies(modifier),
                 _ => true,
             },
@@ -756,7 +755,7 @@ impl Grooph {
                     Duration::Simple(_) => {
                         self.set_beat(idx, template.duration.base_note(), Some(template.kind))
                     }
-                    Duration::Tuplet(spec) => self.set_tuplet(idx, Some(spec)),
+                    Duration::Tuplet(spec) => self.set_tuplet(idx, spec),
                     _ => None,
                 };
                 result.is_some()
@@ -786,10 +785,7 @@ impl Grooph {
                 }
                 let idx = self.editor.doc().cursor.beat_idx.min(beats_len - 1);
                 let pen = self.edit_instrument();
-                match modifier {
-                    Modifier::CycleTuplet => self.set_tuplet(idx, None).is_some(),
-                    _ => modify(self.current_voice_mut(), idx, pen, modifier),
-                }
+                modify(self.current_voice_mut(), idx, pen, modifier)
             }
             ToolKind::Delete(op) => {
                 if beats_len == 0 {
@@ -822,8 +818,7 @@ impl Grooph {
 }
 
 /// Apply `modifier` to the beat at `idx` of `voice`, for the head of
-/// `pen`; whether it changed anything. Not for [`Modifier::CycleTuplet`],
-/// which needs the score.
+/// `pen`; whether it changed anything.
 fn modify(voice: &mut VoiceBar, idx: usize, pen: Instrument, modifier: Modifier) -> bool {
     match modifier {
         Modifier::ToggleDotted { dots: _ } => voice.toggle_dotted(idx),
@@ -833,7 +828,6 @@ fn modify(voice: &mut VoiceBar, idx: usize, pen: Instrument, modifier: Modifier)
         Modifier::ToggleHead => voice.toggle_head(idx, pen),
         Modifier::CycleTechnique => voice.cycle_technique(idx, pen),
         Modifier::ToggleTechnique(technique) => voice.toggle_technique(idx, pen, technique),
-        Modifier::CycleTuplet => None,
     }
     .is_some()
 }
@@ -1013,6 +1007,37 @@ mod tests {
         app.editor.doc_mut().score = parse_score(score).unwrap();
         app.ui.mode = Mode::Edit;
         app
+    }
+
+    /// Clean up writes only what the palette can enter, by the measure
+    /// crate's lists of the palette's values; they stay the same.
+    #[test]
+    fn the_palette_offers_the_values_clean_up_writes() {
+        use crate::tools::{BeatTemplate, ToolKind};
+        use grooph_measure::duration::Duration;
+        use grooph_measure::editing::{TUPLET_TOOLS, VALUE_BUTTONS};
+        let templates = || {
+            super::TOOLS.iter().filter_map(|id| match super::tool(id).kind {
+                ToolKind::InsertBeat(BeatTemplate { duration, kind, .. }) => Some((duration, kind)),
+                _ => None,
+            })
+        };
+        for kind in [grooph_measure::BeatKind::Note, grooph_measure::BeatKind::Rest] {
+            let values: Vec<_> = templates()
+                .filter_map(|(d, k)| match d {
+                    Duration::Simple(v) if k == kind => Some(v),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(values, VALUE_BUTTONS, "{kind:?}");
+        }
+        let tuplets: Vec<_> = templates()
+            .filter_map(|(d, _)| match d {
+                Duration::Tuplet(spec) => Some(spec),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(tuplets, TUPLET_TOOLS);
     }
 
     fn apply(app: &mut Grooph, id: &str) {

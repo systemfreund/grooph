@@ -83,7 +83,7 @@ spread across callers.
   removes it, `cycle_technique` steps through its techniques, and a rest
   made a note (a duration, Enter, a tuplet) gets its head. A tuplet keeps
   the notes it is made of: a new group's slots play plain heads of its
-  note's instruments (`Heads::plain`), a next tuplet or a dissolved one
+  note's instruments (`Heads::plain`), another tuplet or a dissolved one
   moves each note's heads as they are.
 - `Duration` is `Simple`, `Dotted`, or `Tuplet(TupletSpec { n, m, base })`.
 - `Measure::set_beat` guarantees a valid measure length and fills gaps.
@@ -133,8 +133,17 @@ spread across callers.
   notes; a group over several beats becomes one group per beat where a
   note of it starts on each beat, each beat holds two or more of its
   notes and the beat is `m` of a note value
-  (subdivided triplet halves read as triplets of eighths, beat by beat); a voice whose tuplet starts or ends
-  inside a beat where no beat starts stays as it is (`None`).
+  (subdivided triplet halves read as triplets of eighths, beat by beat),
+  and a tuplet is written on the coarsest places its notes allow, in its
+  ratio's lowest terms (a sextuplet sounding on every other note is a
+  triplet of eighths); inside a tuplet notes last up to the next one and
+  rests merge, as far as one value of its ratio lasts and within the
+  beat (`t8 r:t8 t8` is `t4 t8`); a voice whose tuplet starts or ends
+  inside a beat where no beat starts stays as it is (`None`). Clean up
+  writes only tuplets the editor can enter: values of its value buttons
+  (`editing::VALUE_BUTTONS`) in the group's own ratio or one of its
+  tuplet tools (`editing::TUPLET_TOOLS`); a test keeps both lists equal
+  to the palette's, so a new button widens Clean up too.
   `Measure::clean_up` does every voice; applying it twice changes
   nothing. `VoiceBar::from_onsets` writes a voice from ticks and heads
   alone, for moving heads between voices. An empty bar is per-beat rests in
