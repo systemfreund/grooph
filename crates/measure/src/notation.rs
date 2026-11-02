@@ -182,7 +182,7 @@ impl Display for NotationError {
 impl std::error::Error for NotationError {}
 
 /// Durations with a notation code, in the order of [`crate::duration::COMMON_DURATIONS`].
-const CODES: [(&str, Duration); 24] = {
+const CODES: [(&str, Duration); 25] = {
     use crate::duration::{
         e, h, nt16, q, qt4, qt8, qt8_3, qt16, s, spt4, spt8, spt16, spt16_6, st8, st16, t2, t8,
         t16, t32, th,
@@ -215,6 +215,7 @@ const CODES: [(&str, Duration); 24] = {
         ("spt8", spt8()),
         ("qt8_3", qt8_3()),
         ("spt16_6", spt16_6()),
+        ("h.", dotted(NoteValue::Half)),
     ]
 };
 

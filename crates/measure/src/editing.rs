@@ -27,8 +27,8 @@ pub enum Modification {
 /// tuplet note a button gives its value in the group's ratio
 /// ([`VoiceBar::modify_beat`]). Clean up writes no other value, so all it
 /// writes can be entered by hand.
-pub const VALUE_BUTTONS: [NoteValue; 4] =
-    [NoteValue::Quarter, Eighth, Sixteenth, NoteValue::ThirtySecond];
+pub const VALUE_BUTTONS: [NoteValue; 5] =
+    [NoteValue::Half, NoteValue::Quarter, Eighth, Sixteenth, NoteValue::ThirtySecond];
 
 /// The tuplets of the editor's tuplet tools. Clean up writes a group in
 /// no other ratio than its own or one of these.

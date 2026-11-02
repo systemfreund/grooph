@@ -57,6 +57,9 @@ const MAX_COLUMNS: usize = 16;
 /// The share of the screen's height the grid takes at most; past it the
 /// grid scrolls, and the staff above stays in view.
 const MAX_GRID_SHARE: f32 = 0.45;
+/// The most lines of cells the grid shows; past them it scrolls. The half
+/// line cut off shows there is more, as the scroll bar is hidden.
+const MAX_GRID_LINES: f32 = 3.5;
 
 /// The kit's instruments in the grid's order, cymbals and drums from left to
 /// right as they stand, then the feet.
@@ -89,8 +92,9 @@ const AIM_ORDER: [Instrument; 9] = [
 ];
 /// The tools in one row, going on in the next line where it does not fit:
 /// the meter, the rests, the head modifiers, the note values, the tuplets.
-const TOOLS: [&str; 18] = [
+const TOOLS: [&str; 20] = [
     "meta.change_time_signature",
+    "insert.rest.h",
     "insert.rest.q",
     "insert.rest.e",
     "insert.rest.s",
@@ -98,6 +102,7 @@ const TOOLS: [&str; 18] = [
     "modify.toggle.accent",
     "modify.toggle.soft",
     "modify.toggle.dotted",
+    "insert.note.h",
     "insert.note.q",
     "insert.note.e",
     "insert.note.s",
@@ -203,6 +208,15 @@ fn grid_metrics(width: f32) -> (usize, Vec2) {
     (columns, Vec2::new(cell, cell.min(MAX_CELL_HEIGHT)))
 }
 
+/// The height the grid of `lines` lines of cells `cell` high takes on a
+/// screen `screen` high: all of them, but at most [`MAX_GRID_LINES`] and
+/// [`MAX_GRID_SHARE`] of the screen.
+fn grid_height(lines: usize, cell: f32, screen: f32) -> f32 {
+    let all = lines as f32 * (cell + GRID_GAP) - GRID_GAP;
+    let most = MAX_GRID_LINES * (cell + GRID_GAP) - GRID_GAP;
+    all.min(most).min(MAX_GRID_SHARE * screen)
+}
+
 impl Grooph {
     /// The editor's tools as a grid in the thumb's reach, the same in every
     /// editor (Practice, Score, the metronome's click bar): on the kit its
@@ -228,8 +242,7 @@ impl Grooph {
             grid_rows(!self.staff_model().one_line(), &|i, _| heads.iter().any(|&(h, _)| h == i));
         let (columns, cell) = grid_metrics(ui.available_width());
         let lines: usize = rows.iter().map(|r| row_lines(r, columns).len()).sum();
-        let height = lines as f32 * (cell.y + GRID_GAP) - GRID_GAP;
-        let height = height.min(MAX_GRID_SHARE * ui.ctx().content_rect().height());
+        let height = grid_height(lines, cell.y, ui.ctx().content_rect().height());
         egui::ScrollArea::vertical()
             .id_salt("tool_grid")
             .min_scrolled_height(height)
@@ -485,8 +498,8 @@ impl Grooph {
 
     /// A modifier's cell shows the cursor's beat as it modifies it: its value
     /// with the accent, the ghost note's parentheses or the dot. `None` for
-    /// the other tools, and for a value the dot cannot show (a dotted half,
-    /// whole or 32nd: the cell keeps its own label).
+    /// the other tools, and for a value the dot cannot show (a dotted whole
+    /// or 32nd: the cell keeps its own label).
     fn modifier_preview(&self, tool: &Tool) -> Option<Measure> {
         let (accented, soft, dot) = match tool.kind {
             ToolKind::Modify(Modifier::ToggleAccent) => (true, false, false),
@@ -504,9 +517,13 @@ impl Grooph {
             false => Duration::Simple(base),
         };
         let kind = if dot { beat.kind() } else { Note };
-        // A button's measure holds a dotted quarter, eighth or sixteenth.
+        // A button's measure holds a dotted half, quarter, eighth or
+        // sixteenth.
         if matches!(duration, Duration::Dotted { .. })
-            && !matches!(base, NoteValue::Quarter | NoteValue::Eighth | NoteValue::Sixteenth)
+            && !matches!(
+                base,
+                NoteValue::Half | NoteValue::Quarter | NoteValue::Eighth | NoteValue::Sixteenth
+            )
         {
             return None;
         }
@@ -1009,6 +1026,17 @@ mod tests {
         app
     }
 
+    #[test]
+    fn the_grid_shows_three_lines_and_a_half_at_most() {
+        use super::grid_height;
+        // Three lines fit whole.
+        assert_eq!(grid_height(3, 60.0, 1000.0), 3.0 * 64.0 - 4.0);
+        // More are cut half a line below the third.
+        assert_eq!(grid_height(6, 60.0, 1000.0), 3.5 * 64.0 - 4.0);
+        // A low screen keeps its share for the staff.
+        assert_eq!(grid_height(3, 60.0, 300.0), 0.45 * 300.0);
+    }
+
     /// Clean up writes only what the palette can enter, by the measure
     /// crate's lists of the palette's values; they stay the same.
     #[test]
@@ -1064,6 +1092,21 @@ mod tests {
         assert_eq!(text(&app), "4/4 H:q H:q H:q H:q ; r:q r:q r:q r:q");
         apply(&mut app, "edit.undo");
         assert_eq!(text(&app), "4/4 H:q H:q H:q H:q ; K:h K:q r:q");
+    }
+
+    #[test]
+    fn halves_are_entered_and_dotted() {
+        let mut app = editing("4/4 q q q q");
+        app.editor.doc_mut().cursor = Cursor::at(0, 0);
+        apply(&mut app, "insert.note.h");
+        assert_eq!(text(&app), "4/4 h q q");
+        app.editor.doc_mut().cursor = Cursor::at(0, 1);
+        apply(&mut app, "insert.rest.h");
+        assert_eq!(text(&app), "4/4 h r:h");
+        // And dotted.
+        app.editor.doc_mut().cursor = Cursor::at(0, 0);
+        apply(&mut app, "modify.toggle.dotted");
+        assert_eq!(text(&app), "4/4 h. r:q");
     }
 
     #[test]
@@ -1487,12 +1530,12 @@ mod tests {
         assert_eq!(shown(&app, "modify.toggle.soft"), (e, false, true));
         assert_eq!(shown(&app, "modify.toggle.dotted"), (e_dot, false, false));
         assert!(app.modifier_preview(tool("insert.note.q")).is_none());
-        // A half note shows its accent; the dot keeps its own label, as a
-        // button cannot hold a dotted half.
+        // A half note shows its accent, and the dot a dotted half.
         app.editor.doc_mut().cursor = Cursor::at(0, 4);
         let h = Duration::Simple(NoteValue::Half);
+        let h_dot = Duration::Dotted { base: NoteValue::Half, dots: 1 };
         assert_eq!(shown(&app, "modify.toggle.accent"), (h, true, false));
-        assert!(app.modifier_preview(tool("modify.toggle.dotted")).is_none());
+        assert_eq!(shown(&app, "modify.toggle.dotted"), (h_dot, false, false));
     }
 
     #[test]
