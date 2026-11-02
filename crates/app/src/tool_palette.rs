@@ -487,8 +487,8 @@ impl Grooph {
 
     /// A modifier's cell shows the cursor's beat as it modifies it: its value
     /// with the accent, the ghost note's parentheses or the dot. `None` for
-    /// the other tools, and for a value the dot cannot show (a dotted half,
-    /// whole or 32nd: the cell keeps its own label).
+    /// the other tools, and for a value the dot cannot show (a dotted whole
+    /// or 32nd: the cell keeps its own label).
     fn modifier_preview(&self, tool: &Tool) -> Option<Measure> {
         let (accented, soft, dot) = match tool.kind {
             ToolKind::Modify(Modifier::ToggleAccent) => (true, false, false),
@@ -506,9 +506,13 @@ impl Grooph {
             false => Duration::Simple(base),
         };
         let kind = if dot { beat.kind() } else { Note };
-        // A button's measure holds a dotted quarter, eighth or sixteenth.
+        // A button's measure holds a dotted half, quarter, eighth or
+        // sixteenth.
         if matches!(duration, Duration::Dotted { .. })
-            && !matches!(base, NoteValue::Quarter | NoteValue::Eighth | NoteValue::Sixteenth)
+            && !matches!(
+                base,
+                NoteValue::Half | NoteValue::Quarter | NoteValue::Eighth | NoteValue::Sixteenth
+            )
         {
             return None;
         }
@@ -1069,7 +1073,7 @@ mod tests {
     }
 
     #[test]
-    fn halves_are_entered() {
+    fn halves_are_entered_and_dotted() {
         let mut app = editing("4/4 q q q q");
         app.editor.doc_mut().cursor = Cursor::at(0, 0);
         apply(&mut app, "insert.note.h");
@@ -1077,6 +1081,10 @@ mod tests {
         app.editor.doc_mut().cursor = Cursor::at(0, 1);
         apply(&mut app, "insert.rest.h");
         assert_eq!(text(&app), "4/4 h r:h");
+        // And dotted.
+        app.editor.doc_mut().cursor = Cursor::at(0, 0);
+        apply(&mut app, "modify.toggle.dotted");
+        assert_eq!(text(&app), "4/4 h. r:q");
     }
 
     #[test]
@@ -1500,12 +1508,12 @@ mod tests {
         assert_eq!(shown(&app, "modify.toggle.soft"), (e, false, true));
         assert_eq!(shown(&app, "modify.toggle.dotted"), (e_dot, false, false));
         assert!(app.modifier_preview(tool("insert.note.q")).is_none());
-        // A half note shows its accent; the dot keeps its own label, as a
-        // button cannot hold a dotted half.
+        // A half note shows its accent, and the dot a dotted half.
         app.editor.doc_mut().cursor = Cursor::at(0, 4);
         let h = Duration::Simple(NoteValue::Half);
+        let h_dot = Duration::Dotted { base: NoteValue::Half, dots: 1 };
         assert_eq!(shown(&app, "modify.toggle.accent"), (h, true, false));
-        assert!(app.modifier_preview(tool("modify.toggle.dotted")).is_none());
+        assert_eq!(shown(&app, "modify.toggle.dotted"), (h_dot, false, false));
     }
 
     #[test]

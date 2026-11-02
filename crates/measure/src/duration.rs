@@ -262,7 +262,7 @@ pub fn human_readable(d: &Duration) -> String {
     }
 }
 
-pub const COMMON_DURATIONS: [Duration; 24] = [
+pub const COMMON_DURATIONS: [Duration; 25] = [
     q(),
     e(),
     s(),
@@ -271,22 +271,23 @@ pub const COMMON_DURATIONS: [Duration; 24] = [
     Duration::Dotted { base: Eighth, dots: 1 },  // dotted 1/8
     Duration::Dotted { base: Sixteenth, dots: 1 }, // dotted 1/16
     Duration::Tuplet(TupletSpec { n: 3, m: 2, base: Quarter }),
-    t8(),      // triplet 1/8
-    t16(),     // triplet 1/16
-    t32(),     // triplet 1/32
-    qt16(),    // quintuplet 1/16
-    st8(),     // sextuplet 1/8
-    st16(),    // sextuplet 1/16
-    spt16(),   // septuplet 1/16
-    nt16(),    // nonuplet 1/16
-    qt4(),     // quintuplet 1/4
-    spt4(),    // septuplet 1/4
-    h(),       // 1/2
-    t2(),      // triplet 1/2
-    qt8(),     // quintuplet 1/8
-    spt8(),    // septuplet 1/8
-    qt8_3(),   // quintuplet 1/8 over a dotted quarter
-    spt16_6(), // septuplet 1/16 over a dotted quarter
+    t8(),                                     // triplet 1/8
+    t16(),                                    // triplet 1/16
+    t32(),                                    // triplet 1/32
+    qt16(),                                   // quintuplet 1/16
+    st8(),                                    // sextuplet 1/8
+    st16(),                                   // sextuplet 1/16
+    spt16(),                                  // septuplet 1/16
+    nt16(),                                   // nonuplet 1/16
+    qt4(),                                    // quintuplet 1/4
+    spt4(),                                   // septuplet 1/4
+    h(),                                      // 1/2
+    t2(),                                     // triplet 1/2
+    qt8(),                                    // quintuplet 1/8
+    spt8(),                                   // septuplet 1/8
+    qt8_3(),                                  // quintuplet 1/8 over a dotted quarter
+    spt16_6(),                                // septuplet 1/16 over a dotted quarter
+    Duration::Dotted { base: Half, dots: 1 }, // dotted 1/2
 ];
 
 pub const fn q() -> Duration {
