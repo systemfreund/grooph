@@ -77,6 +77,18 @@ pub(crate) fn span_ticks(spec: TupletSpec) -> u32 {
     u32::from(spec.m) * base
 }
 
+/// The base a group of ratio `_:m` has if it spans `ticks`: the note value
+/// `m` of which make `ticks`, if there is one. The inverse of [`span_ticks`].
+pub(crate) fn base_spanning(ticks: u32, m: u8) -> Option<NoteValue> {
+    let m = u32::from(m);
+    if m == 0 || !ticks.is_multiple_of(m) {
+        return None;
+    }
+    crate::grid::NOTE_VALUES
+        .into_iter()
+        .find(|&v| DEFAULT_GRID.ticks_of(&Duration::Simple(v)) == Some(ticks / m))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

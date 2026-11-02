@@ -198,12 +198,10 @@ fn marked_beats(raw: RawVoice) -> Result<Vec<Beat>, InvalidMeasure> {
 
 /// The note value `tuplets` span `m` of, if there is one.
 fn spanned_base(tuplets: &[Beat]) -> Option<NoteValue> {
-    let m = u32::from(tuplets[0].duration.as_tuplet_spec()?.m);
+    let m = tuplets[0].duration.as_tuplet_spec()?.m;
     let ticks: u32 =
         tuplets.iter().map(|b| DEFAULT_GRID.ticks_of(&b.duration)).sum::<Option<_>>()?;
-    crate::grid::NOTE_VALUES
-        .into_iter()
-        .find(|&v| DEFAULT_GRID.ticks_of(&Duration::Simple(v)).map(|t| t * m) == Some(ticks))
+    crate::tuplet::base_spanning(ticks, m)
 }
 
 /// Whether the tuplet marks of `beats` make whole groups: every tuplet in a

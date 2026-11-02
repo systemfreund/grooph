@@ -256,7 +256,9 @@ impl Score {
     }
 
     /// Whether `other` has the same meters and beats, measure by measure:
-    /// everything that decides how the score sounds.
+    /// everything that decides how the score sounds. The beats' tuplet
+    /// groups count too, though two groupings of the same durations sound
+    /// alike: such scores differ only in how they are written.
     pub fn same_beats(&self, other: &Score) -> bool {
         self.len() == other.len()
             && self.measures.iter().zip(&other.measures).all(|(a, b)| crate::click::same_bar(a, b))

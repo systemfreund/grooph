@@ -220,7 +220,8 @@ fn subdivision_name(d: Duration) -> String {
     }
 }
 
-/// Whether two bars hold the same meter and beats, in every voice.
+/// Whether two bars hold the same meter and beats, in every voice, tuplet
+/// groups included.
 pub fn same_bar(a: &Measure, b: &Measure) -> bool {
     a.time_signature() == b.time_signature()
         && a.voices().len() == b.voices().len()

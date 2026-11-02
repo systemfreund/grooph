@@ -457,11 +457,10 @@ fn bracket_group_start(tokens: &[Token]) -> Option<Duration> {
         }
         ticks += DEFAULT_GRID.ticks_of(&t.beat.duration)?;
     }
-    let base_ticks =
-        (len >= 2 && ticks % u32::from(spec.m) == 0).then(|| ticks / u32::from(spec.m))?;
-    let base = crate::grid::NOTE_VALUES
-        .into_iter()
-        .find(|&v| DEFAULT_GRID.ticks_of(&Duration::Simple(v)) == Some(base_ticks))?;
+    if len < 2 {
+        return None;
+    }
+    let base = crate::tuplet::base_spanning(ticks, spec.m)?;
     Some(Duration::Tuplet(TupletSpec { base, ..spec }))
 }
 
