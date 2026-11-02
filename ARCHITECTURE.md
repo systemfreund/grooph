@@ -136,7 +136,9 @@ spread across callers.
   (subdivided triplet halves read as triplets of eighths, beat by beat),
   and a tuplet is written on the coarsest places its notes allow, in its
   ratio's lowest terms (a sextuplet sounding on every other note is a
-  triplet of eighths); a voice whose tuplet starts or ends
+  triplet of eighths); inside a tuplet notes last up to the next one and
+  rests merge, as far as one value of its ratio lasts and within the
+  beat (`t8 r:t8 t8` is `t4 t8`); a voice whose tuplet starts or ends
   inside a beat where no beat starts stays as it is (`None`).
   `Measure::clean_up` does every voice; applying it twice changes
   nothing. `VoiceBar::from_onsets` writes a voice from ticks and heads

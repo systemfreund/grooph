@@ -15,7 +15,9 @@
 //! beats is written as one group per beat where its notes allow (twelve
 //! triplet eighths as four triplets, not one triplet of halves), and a
 //! tuplet on the coarsest places its notes allow (a sextuplet sounding on
-//! every other note as a triplet of eighths). [`VoiceBar::from_onsets`]
+//! every other note as a triplet of eighths). Inside a tuplet, notes last
+//! up to the next one and rests merge, as far as one value of its ratio
+//! lasts (`t8 r:t8 t8` is `t4 t8`). [`VoiceBar::from_onsets`]
 //! writes a voice from onsets alone, e.g. for heads moved between voices.
 
 use crate::duration::{Duration, TupletSpec, q};
@@ -235,6 +237,73 @@ fn reduced_group(members: &[Beat], span: u32) -> Option<Vec<Beat>> {
     Some(out)
 }
 
+/// Spell the notes inside each tuplet group like plain ones: a note lasts
+/// up to the next one (`t8 r:t8 t8` is `t4 t8`) and rests next to each
+/// other merge (`r:t8 r:t8 t8` is `r:t4 t8`), as far as one value of the
+/// group's ratio lasts and never over a beat of the meter (`spans`). The
+/// onsets stay; a group left with fewer than two beats stays as it is.
+fn merge_in_tuplets(beats: &mut Vec<Beat>, spans: &[spelling::Span]) {
+    let mut idx = 0;
+    while idx < beats.len() {
+        let Some(group) = crate::tuplet::TupletGroup::starting_at(beats, idx) else {
+            idx += 1;
+            continue;
+        };
+        let start = DEFAULT_GRID.compute_onset_ticks(beats)[group.start_idx];
+        let members = &beats[group.start_idx..=group.end_idx];
+        let merged = merged_group(members, start, spans).unwrap_or_else(|| members.to_vec());
+        let len = merged.len();
+        beats.splice(group.start_idx..=group.end_idx, merged);
+        idx = group.start_idx + len;
+    }
+}
+
+/// The beats of a tuplet group (`members`, from tick `start`) with notes
+/// and rests merged (see [`merge_in_tuplets`]), if any merge.
+fn merged_group(members: &[Beat], start: u32, spans: &[spelling::Span]) -> Option<Vec<Beat>> {
+    let spec = members[0].duration.as_tuplet_spec()?;
+    let values = DEFAULT_GRID.tuplet_grid_durations(spec.n, spec.m);
+    let value_of =
+        |ticks: u32| values.iter().copied().find(|d| DEFAULT_GRID.ticks_of(d) == Some(ticks));
+    let beat_end = |tick: u32| {
+        spans.iter().map(|s| s.end() * unit_ticks()).find(|&end| end > tick).unwrap_or(u32::MAX)
+    };
+    let len = |b: &Beat| DEFAULT_GRID.ticks_of(&b.duration).unwrap_or(0);
+    let mut out: Vec<Beat> = Vec::new();
+    let (mut i, mut at) = (0, start);
+    while i < members.len() {
+        let first = members[i];
+        let limit = beat_end(at);
+        // Take as many following rests as one value lasts.
+        let mut best = (1, len(&first));
+        let mut total = len(&first);
+        for (j, next) in members.iter().enumerate().skip(i + 1) {
+            if !next.is_rest() || at + total + len(next) > limit {
+                break;
+            }
+            total += len(next);
+            if value_of(total).is_some() {
+                best = (j + 1 - i, total);
+            }
+        }
+        let mut beat = first;
+        if best.0 > 1 {
+            beat.duration = value_of(best.1)?;
+        }
+        out.push(beat);
+        at += best.1;
+        i += best.0;
+    }
+    if out.len() == members.len() || out.len() < 2 {
+        return None;
+    }
+    for beat in &mut out {
+        beat.tuplet = Some(TupletMark::Continue);
+    }
+    out[0].tuplet = members[0].tuplet;
+    Some(out)
+}
+
 impl VoiceBar {
     /// The voice written again from its onsets (see the module docs): the
     /// same notes at the same times, with the same heads, spelled for
@@ -248,7 +317,9 @@ impl VoiceBar {
         // or kept like any tuplet inside one beat.
         let mut split = self.clone();
         reduce_tuplets(&mut split.beats);
-        split_at_beats(&mut split.beats, &spelling::meter_spans(self.time_signature())?);
+        let spans = spelling::meter_spans(self.time_signature())?;
+        split_at_beats(&mut split.beats, &spans);
+        merge_in_tuplets(&mut split.beats, &spans);
         split.respelled_by_beat()
     }
 
@@ -490,7 +561,7 @@ mod tests {
 
     #[test]
     fn tuplets_stay_as_written() {
-        assert_eq!(cleaned("4/4 t8 r:t8 t8 q r:q e r:e"), "4/4 t8 r:t8 t8 q r:q q");
+        assert_eq!(cleaned("4/4 t8 r:t8 t8 q r:q e r:e"), "4/4 [t4 t8] q r:q q");
         // A tuplet of rests only becomes a plain rest.
         assert_eq!(cleaned("4/4 q r:t8 r:t8 r:t8 r:h"), "4/4 q r:q r:h");
         // So does a tuplet whose notes all start on the plain grid.
@@ -554,7 +625,7 @@ mod tests {
         );
         assert_eq!(
             cleaned("4/4 st16 r:st16 r:st16 r:st16 st16 r:st16 r:q r:h"),
-            "4/4 t8 r:t8 t8 r:q r:h"
+            "4/4 [t4 t8] r:q r:h"
         );
         // Ten quintuplet sixteenths over a dotted quarter, every other one:
         // five quintuplet eighths.
@@ -564,15 +635,35 @@ mod tests {
             cleaned("2+2+3/8 st16 r:st16 st16 r:st16 st16 r:st16 r:q r:q."),
             "2+2+3/8 t8 t8 t8 r:q r:q."
         );
-        // Kept: every note sounding, a note off the coarser places, and a
-        // ratio with no coarser places (5:4).
-        for kept in [
-            "4/4 st16 st16 st16 st16 st16 st16 r:q r:h",
-            "4/4 st16 st16 r:st16 r:st16 st16 r:st16 r:q r:h",
-            "4/4 qt16 r:qt16 qt16 r:qt16 qt16 r:q r:h",
-        ] {
-            assert_eq!(cleaned(kept), kept);
-        }
+        // A note off the coarser places keeps the sextuplet; its notes
+        // still last up to the next one.
+        assert_eq!(
+            cleaned("4/4 st16 st16 r:st16 r:st16 st16 r:st16 r:q r:h"),
+            "4/4 st16 st8 r:st16 st8 r:q r:h"
+        );
+        // A ratio with no coarser places (5:4) only merges.
+        assert_eq!(
+            cleaned("4/4 qt16 r:qt16 qt16 r:qt16 qt16 r:q r:h"),
+            "4/4 [qt8 qt8 qt16] r:q r:h"
+        );
+        // Kept: a sextuplet with every note sounding.
+        let full = "4/4 st16 st16 st16 st16 st16 st16 r:q r:h";
+        assert_eq!(cleaned(full), full);
+    }
+
+    #[test]
+    fn notes_in_a_tuplet_last_to_the_next_one() {
+        // The shuffle: a note held over the rest after it.
+        assert_eq!(cleaned("4/4 t8 r:t8 t8 t8 r:t8 t8 r:h"), "4/4 [t4 t8] [t4 t8] r:h");
+        // Rests next to each other merge.
+        assert_eq!(cleaned("4/4 r:t8 r:t8 t8 q r:h"), "4/4 [r:t4 t8] q r:h");
+        // Only into one value of the ratio: 5:3 has no quarter in 6/8.
+        assert_eq!(
+            cleaned("6/8 qt8_3 r:qt8_3 qt8_3 qt8_3 qt8_3 r:q."),
+            "6/8 qt8_3 r:qt8_3 qt8_3 qt8_3 qt8_3 r:q."
+        );
+        assert_eq!(cleaned("2+2+3/8 t8 r:t8 t8 q r:q."), "2+2+3/8 [t4 t8] q r:q.");
+        assert_eq!(cleaned("4/4 t8 t8 r:t8 q r:h"), "4/4 t8 t4 q r:h");
     }
 
     #[test]
