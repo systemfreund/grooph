@@ -131,7 +131,8 @@ spread across callers.
   rests only becomes a plain rest, and one whose notes all start on the
   plain grid (a triplet with only its first note) is respelled as plain
   notes; a group over several beats becomes one group per beat where a
-  note of it starts on each beat and the beat is `m` of a note value
+  note of it starts on each beat, each beat holds two or more of its
+  notes and the beat is `m` of a note value
   (subdivided triplet halves read as triplets of eighths, beat by beat); a voice whose tuplet starts or ends
   inside a beat where no beat starts stays as it is (`None`).
   `Measure::clean_up` does every voice; applying it twice changes
