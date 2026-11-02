@@ -165,11 +165,9 @@ fn split_at_beats(beats: &mut [Beat], spans: &[spelling::Span]) {
         if firsts.len() != inside.len() {
             continue;
         }
-        for beat in &mut beats[group.start_idx..=group.end_idx] {
-            beat.tuplet = Some(TupletMark::Continue);
-        }
-        for (first, base) in firsts {
-            beats[first].tuplet = Some(TupletMark::Start { base });
+        let ends = firsts.iter().skip(1).map(|&(i, _)| i).chain([group.end_idx + 1]);
+        for (&(first, base), end) in firsts.iter().zip(ends) {
+            crate::tuplet::mark_group(&mut beats[first..end], base);
         }
     }
 }
@@ -182,23 +180,33 @@ fn split_at_beats(beats: &mut [Beat], spans: &[spelling::Span]) {
 /// terms (6:4 is written 3:2). Each note takes one place, rests fill the
 /// others; the span, and so the onsets, stay.
 fn reduce_tuplets(beats: &mut Vec<Beat>) {
+    rewrite_groups(beats, |members, _, span| reduced_group(members, span));
+}
+
+/// Replace the beats of each tuplet group of `beats` by what `rewrite`
+/// gives for them (its beats, onset tick and span), where it gives some.
+fn rewrite_groups(
+    beats: &mut Vec<Beat>,
+    mut rewrite: impl FnMut(&[Beat], u32, u32) -> Option<Vec<Beat>>,
+) {
     let mut idx = 0;
     while idx < beats.len() {
         let Some(group) = crate::tuplet::TupletGroup::starting_at(beats, idx) else {
             idx += 1;
             continue;
         };
-        let members = &beats[group.start_idx..=group.end_idx];
-        let reduced =
-            reduced_group(members, group.span_ticks()).unwrap_or_else(|| members.to_vec());
-        let len = reduced.len();
-        beats.splice(group.start_idx..=group.end_idx, reduced);
+        let start = DEFAULT_GRID.compute_onset_ticks(beats)[group.start_idx];
+        let range = group.start_idx..=group.end_idx;
+        let len = match rewrite(&beats[range.clone()], start, group.span_ticks()) {
+            Some(new) => {
+                let len = new.len();
+                beats.splice(range, new);
+                len
+            }
+            None => group.end_idx + 1 - group.start_idx,
+        };
         idx = group.start_idx + len;
     }
-}
-
-fn gcd(a: u32, b: u32) -> u32 {
-    if b == 0 { a } else { gcd(b, a % b) }
 }
 
 /// The beats of a tuplet group (`members`, over `span` ticks) on the
@@ -208,14 +216,14 @@ fn reduced_group(members: &[Beat], span: u32) -> Option<Vec<Beat>> {
     let ticks = DEFAULT_GRID.compute_onset_ticks(members);
     let notes: Vec<(u32, Beat)> =
         members.iter().zip(&ticks).filter(|(b, _)| b.is_note()).map(|(b, &t)| (t, *b)).collect();
-    let step = notes.iter().fold(span, |g, &(t, _)| gcd(g, t));
+    let step = notes.iter().fold(span, |g, &(t, _)| crate::math::gcd(g, t));
     let shortest = members.iter().filter_map(|b| DEFAULT_GRID.ticks_of(&b.duration)).min()?;
     let places = span / step;
     if step <= shortest || places < 2 {
         return None;
     }
     // The value of the ratio in lowest terms that lasts `step`.
-    let common = gcd(u32::from(n), u32::from(m));
+    let common = crate::math::gcd(u32::from(n), u32::from(m));
     let (n, m) =
         (u8::try_from(u32::from(n) / common).ok()?, u8::try_from(u32::from(m) / common).ok()?);
     let value = crate::grid::NOTE_VALUES.into_iter().find(|&v| {
@@ -230,10 +238,7 @@ fn reduced_group(members: &[Beat], span: u32) -> Option<Vec<Beat>> {
         beat.duration = duration;
         out[(t / step) as usize] = beat;
     }
-    for beat in &mut out {
-        beat.tuplet = Some(TupletMark::Continue);
-    }
-    out[0].tuplet = Some(TupletMark::Start { base });
+    crate::tuplet::mark_group(&mut out, base);
     Some(out)
 }
 
@@ -243,19 +248,7 @@ fn reduced_group(members: &[Beat], span: u32) -> Option<Vec<Beat>> {
 /// group's ratio lasts and never over a beat of the meter (`spans`). The
 /// onsets stay; a group left with fewer than two beats stays as it is.
 fn merge_in_tuplets(beats: &mut Vec<Beat>, spans: &[spelling::Span]) {
-    let mut idx = 0;
-    while idx < beats.len() {
-        let Some(group) = crate::tuplet::TupletGroup::starting_at(beats, idx) else {
-            idx += 1;
-            continue;
-        };
-        let start = DEFAULT_GRID.compute_onset_ticks(beats)[group.start_idx];
-        let members = &beats[group.start_idx..=group.end_idx];
-        let merged = merged_group(members, start, spans).unwrap_or_else(|| members.to_vec());
-        let len = merged.len();
-        beats.splice(group.start_idx..=group.end_idx, merged);
-        idx = group.start_idx + len;
-    }
+    rewrite_groups(beats, |members, start, _| merged_group(members, start, spans));
 }
 
 /// The beats of a tuplet group (`members`, from tick `start`) with notes
@@ -297,10 +290,10 @@ fn merged_group(members: &[Beat], start: u32, spans: &[spelling::Span]) -> Optio
     if out.len() == members.len() || out.len() < 2 {
         return None;
     }
-    for beat in &mut out {
-        beat.tuplet = Some(TupletMark::Continue);
-    }
-    out[0].tuplet = members[0].tuplet;
+    let Some(TupletMark::Start { base }) = members[0].tuplet else {
+        return None;
+    };
+    crate::tuplet::mark_group(&mut out, base);
     Some(out)
 }
 
