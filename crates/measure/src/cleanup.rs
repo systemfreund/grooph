@@ -421,6 +421,16 @@ mod tests {
     }
 
     #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "tuplet groups")]
+    fn a_voice_put_together_checks_its_tuplet_groups() {
+        // Half a group: its last beats without the first.
+        let m = measure("4/4 t8 t8 t8 q r:h");
+        let beats = m.first_voice().beats()[1..].to_vec();
+        VoiceBar::from_parts(beats, TimeSignature::FOUR_FOUR);
+    }
+
+    #[test]
     fn clean_up_says_whether_it_changed_the_measure() {
         let mut m = measure("4/4 r:q h q");
         assert!(m.clean_up());

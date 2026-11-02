@@ -432,8 +432,10 @@ impl std::error::Error for DifferentMeter {}
 
 impl VoiceBar {
     /// A voice of `beats` in `time_signature`, which the caller has made
-    /// fill it (see [`VoiceBar`]'s invariant).
+    /// fill it (see [`VoiceBar`]'s invariant), with whole tuplet groups.
+    /// Debug builds check the groups: this goes around `set_beat`.
     pub(crate) fn from_parts(beats: Vec<Beat>, time_signature: TimeSignature) -> Self {
+        debug_assert_eq!(check_tuplet_groups(&beats), Ok(()), "tuplet groups of {beats:?}");
         Self { beats, time_signature }
     }
 
