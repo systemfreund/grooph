@@ -195,7 +195,7 @@ fn build_subdivisions(ts: TimeSignature) -> Vec<Subdivision> {
         let Some(bar) = subdivided_click_bar(ts, parts) else {
             continue;
         };
-        if options.iter().any(|o| same_bar(&o.bar, &bar)) {
+        if options.iter().any(|o| o.bar == bar) {
             continue;
         }
         let Some(&first) = bar.first_voice().beats().first() else { continue };
@@ -207,7 +207,7 @@ fn build_subdivisions(ts: TimeSignature) -> Vec<Subdivision> {
 
 /// The subdivision `bar` is, if the picker offers it in its meter.
 pub fn subdivision_of(bar: &Measure) -> Option<Subdivision> {
-    subdivisions(bar.time_signature()).iter().find(|o| same_bar(&o.bar, bar)).cloned()
+    subdivisions(bar.time_signature()).iter().find(|o| o.bar == *bar).cloned()
 }
 
 /// "Sixteenths", "Eighth triplets", "Quintuplets": clicks of duration `d`.
@@ -220,16 +220,8 @@ fn subdivision_name(d: Duration) -> String {
     }
 }
 
-/// Whether two bars hold the same meter and beats, in every voice, tuplet
-/// groups included.
-pub fn same_bar(a: &Measure, b: &Measure) -> bool {
-    a.time_signature() == b.time_signature()
-        && a.voices().len() == b.voices().len()
-        && a.voices().iter().zip(b.voices()).all(|(u, v)| u.beats() == v.beats())
-}
-
 /// The click bar of every meter: its [`meter_click_bar`] unless one was set.
-#[derive(Clone, Default, Serialize, Deserialize)]
+#[derive(Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct ClickBars {
     /// Bars that differ from the default, at most one per meter.
@@ -241,15 +233,6 @@ impl std::fmt::Debug for ClickBars {
         f.debug_list().entries(self.custom.iter().map(|m| m.time_signature())).finish()
     }
 }
-
-impl PartialEq for ClickBars {
-    fn eq(&self, other: &Self) -> bool {
-        self.custom.len() == other.custom.len()
-            && self.custom.iter().zip(&other.custom).all(|(a, b)| same_bar(a, b))
-    }
-}
-
-impl Eq for ClickBars {}
 
 impl ClickBars {
     /// The bar `ts` clicks.
@@ -266,7 +249,7 @@ impl ClickBars {
     pub fn set(&mut self, bar: Measure) {
         let ts = bar.time_signature();
         self.custom.retain(|m| m.time_signature() != ts);
-        if !same_bar(&bar, &meter_click_bar(ts)) {
+        if bar != meter_click_bar(ts) {
             self.custom.push(bar);
         }
     }

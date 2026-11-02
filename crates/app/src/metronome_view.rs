@@ -31,7 +31,7 @@ use crate::{Grooph, TransportState};
 use eframe::egui;
 use eframe::egui::epaint::PathShape;
 use eframe::egui::{Align2, Color32, FontId, Mesh, Pos2, Sense, Shape, Stroke, Ui, vec2};
-use grooph_measure::click::{ClickBars, ClickLevel, meter_click_bar, same_bar, subdivisions};
+use grooph_measure::click::{ClickBars, ClickLevel, meter_click_bar, subdivisions};
 use grooph_measure::counter::{
     CounterBars, Ratio, click_level, counter_bar, counter_clicks, counter_ratios, is_ratio_bar,
     named_ratio_of, respelled,
@@ -467,7 +467,7 @@ impl Grooph {
         if !self.metronome_mode() {
             return;
         }
-        if same_bar(&bar, &self.click_bar()) {
+        if bar == self.click_bar() {
             return;
         }
         let bar = metronome_bar(bar, self.counter_bar().as_ref());
@@ -537,9 +537,7 @@ impl Grooph {
         let bar = ratio.and_then(|r| counter_bar(ts, r));
         let unchanged = match (&self.counter_bar(), &bar) {
             (None, None) => true,
-            (Some(a), Some(b)) => {
-                same_bar(a, b) && self.playback_ctl.audio_cfg.counter.name(ts) == ratio
-            }
+            (Some(a), Some(b)) => a == b && self.playback_ctl.audio_cfg.counter.name(ts) == ratio,
             _ => false,
         };
         if unchanged {
@@ -1234,15 +1232,14 @@ mod tests {
     #[test]
     fn picked_meters_click_their_beat_unit() {
         let ts = TimeSignature::FOUR_FOUR;
-        assert!(same_bar(&meter_click_bar(ts), &default_click_bar(ts)));
+        assert!(meter_click_bar(ts) == default_click_bar(ts));
         let ts = TimeSignature::SEVEN_EIGHT;
-        assert!(same_bar(&meter_click_bar(ts), &bar("7/8 >e (e) e (e) (e) e (e)")));
+        assert!(meter_click_bar(ts) == bar("7/8 >e (e) e (e) (e) e (e)"));
         let ts: TimeSignature = "5/16".parse().unwrap();
         assert_eq!(meter_click_bar(ts).first_voice().beats().len(), 5);
         // Its name in the Subdivision picker.
         let fills = click_fills(TimeSignature::SEVEN_EIGHT);
-        let name =
-            fills.iter().find(|f| same_bar(&f.bar, &meter_click_bar(TimeSignature::SEVEN_EIGHT)));
+        let name = fills.iter().find(|f| f.bar == meter_click_bar(TimeSignature::SEVEN_EIGHT));
         assert_eq!(name.map(|f| f.name.as_str()), Some("Eighths"));
     }
 
@@ -1565,7 +1562,7 @@ mod tests {
             app.current_voice_mut().set_click_level(0, ClickLevel::Off);
             true
         });
-        assert!(same_bar(&app.click_bar(), &click));
+        assert!(app.click_bar() == click);
         let bars = app.counter_bars();
         let counter = bars.for_meter(TimeSignature::FOUR_FOUR);
         assert_eq!(counter.map(|c| click_level(c, 0)), Some(ClickLevel::Off));
@@ -1595,10 +1592,10 @@ mod tests {
         let bars = app.counter_bars();
         let counter = bars.for_meter(TimeSignature::FOUR_FOUR);
         assert_eq!(counter.map(|c| click_level(c, 2)), Some(ClickLevel::Strong));
-        assert!(same_bar(&app.click_bar(), &click));
+        assert!(app.click_bar() == click);
         // Back to the clicks: the edit stays, the click bar is the editor's.
         app.select_voice(MetronomeVoice::Click);
-        assert!(same_bar(&app.click_bar(), &click));
+        assert!(app.click_bar() == click);
         assert_eq!(app.counter_bar().map(|c| click_level(&c, 2)), Some(ClickLevel::Strong));
     }
 
@@ -1648,15 +1645,15 @@ mod tests {
         // Undoing the click edit leaves the counter alone...
         app.undo();
         assert_eq!(app.edited_voice(), MetronomeVoice::Click);
-        assert!(same_bar(&app.click_bar(), &default_click_bar(TimeSignature::FOUR_FOUR)));
-        assert!(same_bar(&app.counter_bar().unwrap(), &counter_edited));
+        assert!(app.click_bar() == default_click_bar(TimeSignature::FOUR_FOUR));
+        assert!(app.counter_bar().unwrap() == counter_edited);
         // ...and undoing the counter edit goes back to editing the counter,
         // never writing it into the click bar.
         app.undo();
         assert_eq!(app.edited_voice(), MetronomeVoice::Counter);
         let plain = counter_bar(TimeSignature::FOUR_FOUR, Ratio { n: 3, span: 4 }).unwrap();
-        assert!(same_bar(&app.counter_bar().unwrap(), &plain));
-        assert!(same_bar(&app.click_bar(), &default_click_bar(TimeSignature::FOUR_FOUR)));
+        assert!(app.counter_bar().unwrap() == plain);
+        assert!(app.click_bar() == default_click_bar(TimeSignature::FOUR_FOUR));
     }
 
     #[test]
@@ -1667,9 +1664,9 @@ mod tests {
         let click_edited = app.click_bar();
         app.select_voice(MetronomeVoice::Counter);
         app.undo();
-        assert!(!same_bar(&app.click_bar(), &click_edited));
+        assert!(app.click_bar() != click_edited);
         app.redo();
-        assert!(same_bar(&app.click_bar(), &click_edited));
+        assert!(app.click_bar() == click_edited);
         assert!(app.counter_bar().is_some());
     }
 
@@ -1681,10 +1678,9 @@ mod tests {
         app.set_counter_ratio(None);
         assert_eq!(app.edited_voice(), MetronomeVoice::Click);
         assert!(app.counter_bar().is_none());
-        assert!(same_bar(
-            &app.editor.doc().score.measures()[0],
-            &default_click_bar(TimeSignature::FOUR_FOUR)
-        ));
+        assert!(
+            app.editor.doc().score.measures()[0] == default_click_bar(TimeSignature::FOUR_FOUR)
+        );
         // Without a counter there is no lower voice to pick.
         app.select_voice(MetronomeVoice::Counter);
         assert_eq!(app.edited_voice(), MetronomeVoice::Click);
@@ -1712,7 +1708,7 @@ mod tests {
         app.set_metronome_meter(TimeSignature::FOUR_FOUR);
         assert_eq!(app.edited_voice(), MetronomeVoice::Click);
         assert!(app.counter_bar().is_none());
-        assert!(same_bar(&app.click_bar(), &default_click_bar(TimeSignature::FOUR_FOUR)));
+        assert!(app.click_bar() == default_click_bar(TimeSignature::FOUR_FOUR));
         // ...and with it closed.
         app.set_counter_ratio(Some(Ratio { n: 3, span: 4 }));
         app.select_tab(Tab::Practice);
@@ -1750,11 +1746,11 @@ mod tests {
         assert!(app.metronome_mode());
         assert_eq!(app.tab(), Tab::Metronome);
         assert_eq!(app.metronome_meter(), ts);
-        assert!(same_bar(&app.click_bar(), &click));
+        assert!(app.click_bar() == click);
         assert_eq!(app.counter_ratio(), Some((ratio, false)));
-        assert!(same_bar(&app.playback_options().click.for_meter(ts), &click));
+        assert!(app.playback_options().click.for_meter(ts) == click);
         // 4/4 keeps its edited click bar.
-        assert!(same_bar(&app.click_bars().for_meter(TimeSignature::FOUR_FOUR), &four));
+        assert!(app.click_bars().for_meter(TimeSignature::FOUR_FOUR) == four);
     }
 
     #[test]
@@ -1765,9 +1761,9 @@ mod tests {
         let click = app.click_bar();
         let ts = TimeSignature::FOUR_FOUR;
         // Played and saved right away, with no frame in between...
-        assert!(same_bar(&app.playback_options().click.for_meter(ts), &click));
+        assert!(app.playback_options().click.for_meter(ts) == click);
         let saved = crate::PersistedState::from_app(&app);
-        assert!(same_bar(&saved.click_bars.for_meter(ts), &click));
+        assert!(saved.click_bars.for_meter(ts) == click);
         assert_eq!(
             saved.counter_bars.with_names(&saved.counter_names).ratio(ts),
             Some(Ratio { n: 3, span: 4 })
@@ -1775,11 +1771,11 @@ mod tests {
         assert_eq!(saved.metronome_meter, ts);
         // ...and outside the tab: Practice's 4/4 bars click it too.
         app.select_tab(Tab::Practice);
-        assert!(same_bar(&app.click_bar(), &click));
-        assert!(same_bar(&app.playback_options().click.for_meter(ts), &click));
+        assert!(app.click_bar() == click);
+        assert!(app.playback_options().click.for_meter(ts) == click);
         // Another meter picked outside the tab keeps 4/4's in the settings.
         app.set_metronome_meter(TimeSignature::THREE_FOUR);
-        assert!(same_bar(&app.click_bars().for_meter(ts), &click));
+        assert!(app.click_bars().for_meter(ts) == click);
         assert!(app.counter_bars().for_meter(ts).is_some());
     }
 
@@ -1794,14 +1790,14 @@ mod tests {
         app.undo();
         app.undo();
         assert_eq!(app.metronome_meter(), TimeSignature::FOUR_FOUR);
-        assert!(same_bar(&app.click_bar(), &four));
+        assert!(app.click_bar() == four);
         // The 3/4 edit undone, its bar is the meter's own again.
-        assert!(!same_bar(&app.click_bars().for_meter(TimeSignature::THREE_FOUR), &three));
+        assert!(app.click_bars().for_meter(TimeSignature::THREE_FOUR) != three);
         app.redo();
         app.redo();
         assert_eq!(app.metronome_meter(), TimeSignature::THREE_FOUR);
-        assert!(same_bar(&app.click_bar(), &three));
-        assert!(same_bar(&app.click_bars().for_meter(TimeSignature::FOUR_FOUR), &four));
+        assert!(app.click_bar() == three);
+        assert!(app.click_bars().for_meter(TimeSignature::FOUR_FOUR) == four);
     }
 
     /// Storage holding one saved app state.
@@ -1847,18 +1843,18 @@ mod tests {
         cc.storage = Some(&storage);
         let loaded = Grooph::new(&cc);
         assert_eq!(loaded.metronome_meter(), TimeSignature::SEVEN_EIGHT);
-        assert!(same_bar(&loaded.click_bar(), &click));
-        assert!(same_bar(&loaded.counter_bar().unwrap(), &counter));
+        assert!(loaded.click_bar() == click);
+        assert!(loaded.counter_bar().unwrap() == counter);
         assert_eq!(loaded.counter_ratio(), ratio);
-        assert!(same_bar(&loaded.click_bars().for_meter(TimeSignature::THREE_FOUR), &three));
+        assert!(loaded.click_bars().for_meter(TimeSignature::THREE_FOUR) == three);
         // The link opens the same clicks in a fresh app.
         let cc = eframe::CreationContext::_new_kittest(eframe::egui::Context::default());
         let mut fresh = Grooph::new(&cc);
         fresh.open_link(grooph_link::parse_query(url.split_once('?').unwrap().1).unwrap().unwrap());
         assert!(fresh.metronome_mode());
         assert_eq!(fresh.metronome_meter(), TimeSignature::SEVEN_EIGHT);
-        assert!(same_bar(&fresh.click_bar(), &click));
-        assert!(same_bar(&fresh.counter_bar().unwrap(), &counter));
+        assert!(fresh.click_bar() == click);
+        assert!(fresh.counter_bar().unwrap() == counter);
         assert_eq!(fresh.counter_ratio(), ratio);
     }
 }

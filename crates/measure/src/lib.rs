@@ -999,7 +999,7 @@ mod tests {
         assert!(m.first_voice().tuplet_group_at(0).is_some());
         // Saved again, it has its voices.
         let again: Measure = ron::from_str(&ron::to_string(&m).unwrap()).unwrap();
-        assert!(crate::click::same_bar(&again, &m));
+        assert!(again == m);
     }
 
     #[test]
@@ -1018,7 +1018,7 @@ mod tests {
         // Every voice comes back with its beats and tuplet groups.
         assert!(round_trips(&m));
         let first_only = parse("2/4 r:q q");
-        assert!(!crate::click::same_bar(&first_only, &m), "the second voice counts");
+        assert!(first_only != m, "the second voice counts");
         assert!(
             ron::from_str::<Measure>(r#"{"time_signature":(beats:2,beat_unit:4),"voices":[]}"#)
                 .unwrap_err()

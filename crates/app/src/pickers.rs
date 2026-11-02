@@ -16,7 +16,6 @@ use eframe::egui::{
 };
 use grooph_audio::{GapClick, GapMode, GapMute, Sound};
 use grooph_measure::TimeSignature;
-use grooph_measure::click::same_bar;
 use grooph_measure::counter::{Ratio, own_ratios, step_clicks, step_span};
 use grooph_measure::counting::CountingSystem;
 use grooph_measure::generator::{
@@ -685,7 +684,7 @@ impl Grooph {
     /// below it.
     pub(crate) fn current_click_fill(&self) -> Option<usize> {
         let bar = self.click_bar();
-        click_fills(self.metronome_meter()).iter().position(|f| same_bar(&f.bar, &bar))
+        click_fills(self.metronome_meter()).iter().position(|f| f.bar == bar)
     }
 
     /// Ready-made click bars of the metronome meter. Returns whether one was
