@@ -869,7 +869,7 @@ fn paint_instrument(
     let (w, h) = (rect.width(), rect.height());
     // Bold: egui's font has no bold face, so the name is drawn twice, whole
     // pixels apart (text is snapped to them).
-    let size = 0.2 * h;
+    let size = 0.23 * h;
     let ppp = ui.ctx().pixels_per_point();
     let bold = (0.07 * size * ppp).round().max(1.0) / ppp;
     let at = rect.left_top() + Vec2::new(0.1 * w, 0.06 * h);
@@ -882,16 +882,14 @@ fn paint_instrument(
     let played = technique.unwrap_or_default();
     let head = head_glyph_for(instrument, played, Duration::Simple(NoteValue::Quarter)).glyph;
     let head_size = 0.8 * h;
-    let head_center = Pos2::new(rect.center().x, rect.top() + 0.6 * h);
+    let head_center = Pos2::new(rect.center().x, rect.top() + 0.64 * h);
     paint_glyph_centered(&painter, head, head_center, head_size, &family, ink);
     if let Some(sign) = technique_sign(played) {
         let sign_size = 0.6 * h;
         let ss = sign_size / 4.0;
         let head_top = head_center.y - head.ne[1] * head_size / 4.0;
-        let sign_center = Pos2::new(
-            rect.center().x + 0.17 * w,
-            head_top - 0.04 * h - 0.5 * (sign.ne[1] - sign.sw[1]) * ss,
-        );
+        let sign_center =
+            Pos2::new(rect.center().x, head_top - 0.02 * h - 0.5 * (sign.ne[1] - sign.sw[1]) * ss);
         paint_glyph_centered(&painter, sign, sign_center, sign_size, &family, ink);
     }
     // One dot per technique, where there are several.
