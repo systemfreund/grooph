@@ -179,10 +179,14 @@ fn marked_beats(raw: RawVoice) -> Result<Vec<Beat>, InvalidMeasure> {
             .ok_or(InvalidMeasure::UnknownTupletGroup { idx, id })?;
         let len = stored[idx..].iter().take_while(|s| s.group_id == Some(id)).count();
         // Each stretch of two or more tuplets in the run is a group; its
-        // plain beats are in none.
+        // plain beats are in none. The anchor's base spanned the whole run:
+        // in a run with plain beats the stretch takes the base it spans.
         let run = &mut beats[idx..idx + len];
+        let mixed = run.iter().any(|b| !b.duration.is_tuplet());
         for tuplets in run.split_mut(|b| !b.duration.is_tuplet()).filter(|t| t.len() >= 2) {
-            tuplets[0].tuplet = Some(TupletMark::Start { base: anchor.base_hint });
+            let base = if mixed { spanned_base(tuplets) } else { None };
+            let base = base.unwrap_or(anchor.base_hint);
+            tuplets[0].tuplet = Some(TupletMark::Start { base });
             for beat in &mut tuplets[1..] {
                 beat.tuplet = Some(TupletMark::Continue);
             }
@@ -190,6 +194,16 @@ fn marked_beats(raw: RawVoice) -> Result<Vec<Beat>, InvalidMeasure> {
         idx += len;
     }
     Ok(beats)
+}
+
+/// The note value `tuplets` span `m` of, if there is one.
+fn spanned_base(tuplets: &[Beat]) -> Option<NoteValue> {
+    let m = u32::from(tuplets[0].duration.as_tuplet_spec()?.m);
+    let ticks: u32 =
+        tuplets.iter().map(|b| DEFAULT_GRID.ticks_of(&b.duration)).sum::<Option<_>>()?;
+    crate::grid::NOTE_VALUES
+        .into_iter()
+        .find(|&v| DEFAULT_GRID.ticks_of(&Duration::Simple(v)).map(|t| t * m) == Some(ticks))
 }
 
 /// Whether the tuplet marks of `beats` make whole groups: every tuplet in a
@@ -205,6 +219,7 @@ fn check_tuplet_groups(beats: &[Beat]) -> Result<(), InvalidMeasure> {
                 continue;
             }
             (Some(TupletMark::Start { base }), Some(spec)) => (base, spec),
+            (Some(_), None) => return Err(InvalidMeasure::MarkOnPlainBeat { idx }),
             _ => return Err(InvalidMeasure::OutsideTupletGroup { idx }),
         };
         // A start without a beat to continue it is a group of one.

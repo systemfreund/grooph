@@ -86,8 +86,10 @@ pub enum InvalidMeasure {
     /// without an anchor.
     UnknownTupletGroup { idx: BeatIdx, id: u32 },
     /// The beat at `idx` is a tuplet outside a group, in a group of another
-    /// ratio, or marked for a group without being a tuplet.
+    /// ratio, or continues no group.
     OutsideTupletGroup { idx: BeatIdx },
+    /// The beat at `idx` is no tuplet but marked for a tuplet group.
+    MarkOnPlainBeat { idx: BeatIdx },
     /// The tuplet group starting at `idx` is one beat or does not fill its
     /// span.
     TupletGroupLength { idx: BeatIdx, ticks: u64, expected: u32 },
@@ -108,6 +110,9 @@ impl std::fmt::Display for InvalidMeasure {
             }
             Self::OutsideTupletGroup { idx } => {
                 write!(f, "beat {idx} does not fit its tuplet group")
+            }
+            Self::MarkOnPlainBeat { idx } => {
+                write!(f, "beat {idx} is no tuplet but marked for a tuplet group")
             }
             Self::TupletGroupLength { idx, ticks, expected } => {
                 write!(f, "the tuplet group at beat {idx} spans {ticks} ticks, not {expected}")
@@ -1147,7 +1152,7 @@ mod tests {
         );
         assert!(
             broken("Simple(Quarter),heads:[])", "Simple(Quarter),heads:[],tuplet:Some(Continue))")
-                .contains("does not fit its tuplet group")
+                .contains("no tuplet but marked")
         );
     }
 
@@ -1202,16 +1207,20 @@ mod tests {
             &anchor(1, "Eighth"),
         );
         assert!(read(&plain).unwrap().first_voice().tuplet_groups().is_empty());
-        // A plain beat in a run leaves the tuplets around it their group.
-        let mixed = old_voice(
-            &[("Simple(Quarter)", Some(1)), (t8, Some(1)), (t8, Some(1)), (t8, Some(1))],
-            &anchor(1, "Eighth"),
-        )
-        .replace("beats:1,", "beats:2,");
-        let m = read(&mixed).unwrap();
-        let spans: Vec<_> =
-            m.first_voice().tuplet_groups().iter().map(|g| (g.start_idx, g.end_idx)).collect();
-        assert_eq!(spans, [(1, 3)]);
+        // A plain beat in a run leaves the tuplets around it a group of the
+        // span they fill; the anchor's base spanned the plain beat too.
+        for base in ["Eighth", "Quarter"] {
+            let mixed = old_voice(
+                &[("Simple(Quarter)", Some(1)), (t8, Some(1)), (t8, Some(1)), (t8, Some(1))],
+                &anchor(1, base),
+            )
+            .replace("beats:1,", "beats:2,");
+            let m = read(&mixed).unwrap();
+            let groups = m.first_voice().tuplet_groups();
+            let spans: Vec<_> =
+                groups.iter().map(|g| (g.start_idx, g.end_idx, g.spec.base)).collect();
+            assert_eq!(spans, [(1, 3, Eighth)], "{base}");
+        }
         // A lone tuplet was outside a group then too: the editor never saved
         // one, and it does not load.
         let lone = old_voice(
