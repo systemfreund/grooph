@@ -12,11 +12,13 @@
 //!
 //! Tuplets stay as written, with the beats they share a beat with; a
 //! tuplet of rests only becomes plain rests. A tuplet group over several
-//! beats is written as one group per beat where its notes allow
-//! (twelve triplet eighths as four triplets, not one triplet of halves). [`VoiceBar::from_onsets`]
+//! beats is written as one group per beat where its notes allow (twelve
+//! triplet eighths as four triplets, not one triplet of halves), and a
+//! tuplet on the coarsest places its notes allow (a sextuplet sounding on
+//! every other note as a triplet of eighths). [`VoiceBar::from_onsets`]
 //! writes a voice from onsets alone, e.g. for heads moved between voices.
 
-use crate::duration::q;
+use crate::duration::{Duration, TupletSpec, q};
 use crate::grid::DEFAULT_GRID;
 use crate::spelling::{self, Lengths, Piece};
 use crate::{Beat, Heads, Measure, TimeSignature, TupletMark, VoiceBar};
@@ -170,6 +172,69 @@ fn split_at_beats(beats: &mut [Beat], spans: &[spelling::Span]) {
     }
 }
 
+/// Write each tuplet group of `beats` on the coarsest places its notes
+/// allow: a sextuplet of sixteenths that sounds on every other note is a
+/// triplet of eighths. The places are the longest value that divides the
+/// group's span and every onset of a note in it, if that is longer than
+/// the group's shortest beat and a value of the group's ratio in lowest
+/// terms (6:4 is written 3:2). Each note takes one place, rests fill the
+/// others; the span, and so the onsets, stay.
+fn reduce_tuplets(beats: &mut Vec<Beat>) {
+    let mut idx = 0;
+    while idx < beats.len() {
+        let Some(group) = crate::tuplet::TupletGroup::starting_at(beats, idx) else {
+            idx += 1;
+            continue;
+        };
+        let members = &beats[group.start_idx..=group.end_idx];
+        let reduced =
+            reduced_group(members, group.span_ticks()).unwrap_or_else(|| members.to_vec());
+        let len = reduced.len();
+        beats.splice(group.start_idx..=group.end_idx, reduced);
+        idx = group.start_idx + len;
+    }
+}
+
+fn gcd(a: u32, b: u32) -> u32 {
+    if b == 0 { a } else { gcd(b, a % b) }
+}
+
+/// The beats of a tuplet group (`members`, over `span` ticks) on the
+/// coarsest places its notes allow (see [`reduce_tuplets`]), if coarser.
+fn reduced_group(members: &[Beat], span: u32) -> Option<Vec<Beat>> {
+    let TupletSpec { n, m, .. } = members[0].duration.as_tuplet_spec()?;
+    let ticks = DEFAULT_GRID.compute_onset_ticks(members);
+    let notes: Vec<(u32, Beat)> =
+        members.iter().zip(&ticks).filter(|(b, _)| b.is_note()).map(|(b, &t)| (t, *b)).collect();
+    let step = notes.iter().fold(span, |g, &(t, _)| gcd(g, t));
+    let shortest = members.iter().filter_map(|b| DEFAULT_GRID.ticks_of(&b.duration)).min()?;
+    let places = span / step;
+    if step <= shortest || places < 2 {
+        return None;
+    }
+    // The value of the ratio in lowest terms that lasts `step`.
+    let common = gcd(u32::from(n), u32::from(m));
+    let (n, m) =
+        (u8::try_from(u32::from(n) / common).ok()?, u8::try_from(u32::from(m) / common).ok()?);
+    let value = crate::grid::NOTE_VALUES.into_iter().find(|&v| {
+        let d = Duration::Tuplet(TupletSpec { n, m, base: v });
+        DEFAULT_GRID.supports(&d) && DEFAULT_GRID.ticks_of(&d) == Some(step)
+    })?;
+    let duration = Duration::Tuplet(TupletSpec { n, m, base: value });
+    let base = crate::tuplet::base_spanning(span, m)?;
+    let mut out: Vec<Beat> = (0..places).map(|_| Beat::rest(duration)).collect();
+    for (t, note) in notes {
+        let mut beat = note;
+        beat.duration = duration;
+        out[(t / step) as usize] = beat;
+    }
+    for beat in &mut out {
+        beat.tuplet = Some(TupletMark::Continue);
+    }
+    out[0].tuplet = Some(TupletMark::Start { base });
+    Some(out)
+}
+
 impl VoiceBar {
     /// The voice written again from its onsets (see the module docs): the
     /// same notes at the same times, with the same heads, spelled for
@@ -182,6 +247,7 @@ impl VoiceBar {
         // Groups over beats first: each of their beats is then respelled
         // or kept like any tuplet inside one beat.
         let mut split = self.clone();
+        reduce_tuplets(&mut split.beats);
         split_at_beats(&mut split.beats, &spelling::meter_spans(self.time_signature())?);
         split.respelled_by_beat()
     }
@@ -476,6 +542,37 @@ mod tests {
         assert_eq!(cleaned("2+2+3/8 [t8 t8 t8 t8 t8 t8] e e e"), "2+2+3/8 t8 t8 t8 t8 t8 t8 e e e");
         // Notes of other values split where each beat starts one.
         assert_eq!(cleaned("4/4 [t8 t4 t4 t8] r:h"), "4/4 t8 t4 [t4 t8] r:h");
+    }
+
+    #[test]
+    fn a_tuplet_is_written_on_the_coarsest_places_its_notes_allow() {
+        // A sextuplet sounding on every other note is a triplet of eighths;
+        // accents and ghost notes stay on their notes.
+        assert_eq!(
+            cleaned("4/4 >st16 r:st16 (st16) r:st16 st16 r:st16 r:q r:h"),
+            "4/4 >t8 (t8) t8 r:q r:h"
+        );
+        assert_eq!(
+            cleaned("4/4 st16 r:st16 r:st16 r:st16 st16 r:st16 r:q r:h"),
+            "4/4 t8 r:t8 t8 r:q r:h"
+        );
+        // Ten quintuplet sixteenths over a dotted quarter, every other one:
+        // five quintuplet eighths.
+        let ten = "10:6s r:10:6s ".repeat(5);
+        assert_eq!(cleaned(&format!("6/8 {}r:q.", ten)), "6/8 qt8_3 qt8_3 qt8_3 qt8_3 qt8_3 r:q.");
+        assert_eq!(
+            cleaned("2+2+3/8 st16 r:st16 st16 r:st16 st16 r:st16 r:q r:q."),
+            "2+2+3/8 t8 t8 t8 r:q r:q."
+        );
+        // Kept: every note sounding, a note off the coarser places, and a
+        // ratio with no coarser places (5:4).
+        for kept in [
+            "4/4 st16 st16 st16 st16 st16 st16 r:q r:h",
+            "4/4 st16 st16 r:st16 r:st16 st16 r:st16 r:q r:h",
+            "4/4 qt16 r:qt16 qt16 r:qt16 qt16 r:q r:h",
+        ] {
+            assert_eq!(cleaned(kept), kept);
+        }
     }
 
     #[test]

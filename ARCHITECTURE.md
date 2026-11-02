@@ -133,7 +133,10 @@ spread across callers.
   notes; a group over several beats becomes one group per beat where a
   note of it starts on each beat, each beat holds two or more of its
   notes and the beat is `m` of a note value
-  (subdivided triplet halves read as triplets of eighths, beat by beat); a voice whose tuplet starts or ends
+  (subdivided triplet halves read as triplets of eighths, beat by beat),
+  and a tuplet is written on the coarsest places its notes allow, in its
+  ratio's lowest terms (a sextuplet sounding on every other note is a
+  triplet of eighths); a voice whose tuplet starts or ends
   inside a beat where no beat starts stays as it is (`None`).
   `Measure::clean_up` does every voice; applying it twice changes
   nothing. `VoiceBar::from_onsets` writes a voice from ticks and heads
