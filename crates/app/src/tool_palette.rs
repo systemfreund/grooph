@@ -15,7 +15,7 @@ use grooph_layout::pixel_layout::{
     LayoutOpts, MeasureLayout, PlacedGlyph, build_measure_layout, build_time_sig_layout, compute_em,
 };
 use grooph_measure::BeatKind::{Note, Rest};
-use grooph_measure::duration::{Duration, NoteValue, TupletKind};
+use grooph_measure::duration::{Duration, NoteValue, TupletKind, TupletSpec, human_readable};
 use grooph_measure::{Cursor, Instrument, Measure, StaffKind, Technique, VoiceBar};
 use grooph_render::draw_glyph;
 use grooph_render::measure::{draw_notes, draw_time_signature};
@@ -50,6 +50,9 @@ const GRID_GAP: f32 = 4.0;
 const MIN_CELL: f32 = 54.0;
 /// The widest a cell gets: on a wide screen the grid stays in the middle.
 const MAX_CELL: f32 = 64.0;
+/// The share of a value button's height its tuplet number takes, over the
+/// value, while the cursor is in a tuplet.
+const TUPLET_NUMBER_BAND: f32 = 0.3;
 /// The tallest a cell gets; narrower ones are square.
 const MAX_CELL_HEIGHT: f32 = 64.0;
 /// The most columns the grid has, on a wide screen.
@@ -388,6 +391,9 @@ impl Grooph {
                 ToolKind::Edit(EditOp::Undo) => self.can_undo(),
                 ToolKind::Edit(EditOp::Redo) => self.can_redo(),
                 ToolKind::Modify(modifier) => self.modifier_applies(modifier),
+                ToolKind::InsertBeat(
+                    template @ BeatTemplate { duration: Duration::Simple(_), .. },
+                ) => self.value_applies(template),
                 _ => true,
             },
             Cell::Instrument(_) => true,
@@ -416,6 +422,42 @@ impl Grooph {
         let before = self.current_measure().doubled_instruments();
         self.staff_model().one_line()
             || measure.doubled_instruments().iter().all(|d| before.contains(d))
+    }
+
+    /// Whether a value button changes the cursor's beat: the value fits
+    /// there (in a tuplet, in the group from the cursor on), without a drum
+    /// struck by both voices. Tried on a copy of the cursor's bar.
+    fn value_applies(&self, template: BeatTemplate) -> bool {
+        let cursor = self.editor.doc().score.clamp_cursor(self.editor.doc().cursor);
+        let mut measure = self.current_measure().clone();
+        let Some(voice) = measure.voice_mut(cursor.voice) else {
+            return false;
+        };
+        if voice.beats().is_empty() {
+            return false;
+        }
+        let idx = cursor.beat_idx.min(voice.beats().len() - 1);
+        let base = template.duration.base_note();
+        let pen = self.edit_instrument();
+        if voice.modify_beat(idx, base, Some(template.kind), pen).is_none() {
+            return false;
+        }
+        let before = self.current_measure().doubled_instruments();
+        self.staff_model().one_line()
+            || measure.doubled_instruments().iter().all(|d| before.contains(d))
+    }
+
+    /// The tuplet value a value button writes on the cursor's beat: its
+    /// value in the ratio of the tuplet the beat is in ([`VoiceBar::modify_beat`]).
+    /// `None` for the other tools and off a tuplet.
+    fn value_in_tuplet(&self, tool: &Tool) -> Option<TupletSpec> {
+        let ToolKind::InsertBeat(BeatTemplate { duration: Duration::Simple(base), .. }) = tool.kind
+        else {
+            return None;
+        };
+        let cursor = self.editor.doc().score.clamp_cursor(self.editor.doc().cursor);
+        let spec = self.current_voice().beats().get(cursor.beat_idx)?.duration.as_tuplet_spec()?;
+        Some(TupletSpec { base, ..spec })
     }
 
     /// A modifier's cell shows the cursor's beat as it modifies it: its value
@@ -467,6 +509,16 @@ impl Grooph {
                         "Add the instrument here, or take it away".to_owned()
                     }
                     ToolKind::InsertBeat(_) if selected => "Dissolve the tuplet".to_owned(),
+                    // In a tuplet a value button writes the value of its ratio.
+                    ToolKind::InsertBeat(BeatTemplate { kind, .. })
+                        if let Some(spec) = self.value_in_tuplet(t) =>
+                    {
+                        let value = human_readable(&Duration::Tuplet(spec));
+                        match kind {
+                            Rest => format!("{value} rest"),
+                            Note => value,
+                        }
+                    }
                     // The meter with its grouping, which the cell leaves out.
                     _ if matches!(button_kind(&t.kind), ButtonKind::TimeSignature) => {
                         format!(
@@ -527,6 +579,24 @@ impl Grooph {
                 let technique = self.technique_at_cursor(i);
                 let family = self.ui.music_font_id.family.clone();
                 paint_instrument(ui, rect, i, technique, family, color);
+            }
+            // In a tuplet a value button shows its value with the tuplet's
+            // number over it, as the group is written.
+            Cell::Tool(t) if let Some(spec) = self.value_in_tuplet(t) => {
+                let family = self.ui.music_font_id.family.clone();
+                let band = inner.height() * TUPLET_NUMBER_BAND;
+                let (top, below) = inner.split_top_bottom_at_y(inner.top() + band);
+                // The digits of the staff's tuplet numbers.
+                let digits: String =
+                    grooph_layout::glyphs::tuplet_glyphs(spec.n).iter().map(|g| g.ch).collect();
+                painter.text(
+                    top.center(),
+                    Align2::CENTER_CENTER,
+                    digits,
+                    FontId::new(1.8 * band, family.clone()),
+                    color,
+                );
+                paint_notation(ui, below, &self.editor.button_measures[t.id], family, color);
             }
             Cell::Tool(t) if matches!(button_kind(&t.kind), ButtonKind::Note) => {
                 let family = self.ui.music_font_id.family.clone();
@@ -1104,6 +1174,42 @@ mod tests {
         assert_eq!(text(&app), "4/4 H:q H:q H:q H:q ; r:q r:q r:q r:q");
         apply(&mut app, "edit.undo");
         assert_eq!(text(&app), "4/4 H:q H:q H:q H:q ; K:h K:q r:q");
+    }
+
+    #[test]
+    fn value_buttons_show_their_value_in_the_cursors_tuplet() {
+        use super::Cell;
+        use grooph_measure::duration::{NoteValue, TupletSpec};
+        let cell = |id| Cell::Tool(super::tool(id));
+        let value = |app: &Grooph, id| app.value_in_tuplet(super::tool(id));
+        let mut app = editing("4/4 qt16 qt16 qt16 qt16 qt16 r:q r:h");
+        app.editor.doc_mut().cursor = Cursor::at(0, 0);
+        // In a quintuplet of sixteenths "8" writes a quintuplet eighth.
+        let eighth = TupletSpec { n: 5, m: 4, base: NoteValue::Eighth };
+        assert_eq!(value(&app, "insert.note.e"), Some(eighth));
+        assert_eq!(value(&app, "insert.rest.e"), Some(eighth));
+        assert!(app.cell_enabled(cell("insert.note.e")));
+        // A quintuplet quarter takes four of its five places.
+        assert!(app.cell_enabled(cell("insert.note.q")));
+        assert!(!app.cell_enabled(cell("insert.note.h")));
+        // On its last place only a sixteenth or shorter fits.
+        app.editor.doc_mut().cursor = Cursor::at(0, 4);
+        assert!(!app.cell_enabled(cell("insert.note.e")));
+        assert!(app.cell_enabled(cell("insert.note.s")));
+        assert!(app.cell_enabled(cell("insert.note.th")));
+        // The tuplet tools stay as they are.
+        assert_eq!(value(&app, "insert.tuplet.t8"), None);
+        // Off a tuplet the buttons are plain values, greyed where they do
+        // not fit in the bar.
+        app.editor.doc_mut().cursor = Cursor::at(0, 5);
+        assert_eq!(value(&app, "insert.note.e"), None);
+        assert!(app.cell_enabled(cell("insert.note.h")));
+        app.editor.doc_mut().cursor = Cursor::at(0, 6);
+        assert!(app.cell_enabled(cell("insert.note.h")));
+        let mut last = editing("4/4 q q q q");
+        last.editor.doc_mut().cursor = Cursor::at(0, 3);
+        assert!(!last.cell_enabled(cell("insert.note.h")));
+        assert!(last.cell_enabled(cell("insert.note.q")));
     }
 
     #[test]
