@@ -4,7 +4,7 @@
 //! the seed and step that reproduce it.
 
 use crate::duration::{COMMON_DURATIONS, Duration, NoteValue, TupletSpec};
-use crate::editing::{CYCLE_TUPLET_SPECS, TUPLET_TOOLS, VALUE_BUTTONS};
+use crate::editing::{TUPLET_TOOLS, VALUE_BUTTONS};
 use crate::generator::Rng;
 use crate::grid::DEFAULT_GRID;
 use crate::notation::{format_score, parse_score};
@@ -112,7 +112,7 @@ fn random_edit(
             }
         }
         8 => {
-            let spec = if rng.chance(0.3) { None } else { Some(pick(rng, &CYCLE_TUPLET_SPECS)) };
+            let spec = pick(rng, &TUPLET_TOOLS);
             let overwrite = rng.chance(0.5);
             m.first_voice_mut().set_tuplet(idx, spec, overwrite, crate::Instrument::Rhythm);
             format!("set_tuplet({idx}, {spec:?}, {overwrite})")

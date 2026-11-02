@@ -691,7 +691,7 @@ impl Grooph {
         result
     }
 
-    fn set_tuplet(&mut self, idx: usize, tuplet_spec: Option<TupletSpec>) -> Option<Modification> {
+    fn set_tuplet(&mut self, idx: usize, tuplet_spec: TupletSpec) -> Option<Modification> {
         let pen = self.edit_instrument();
         let result = self.current_voice_mut().set_tuplet(idx, tuplet_spec, true, pen);
         match &result {

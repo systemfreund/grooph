@@ -83,7 +83,7 @@ spread across callers.
   removes it, `cycle_technique` steps through its techniques, and a rest
   made a note (a duration, Enter, a tuplet) gets its head. A tuplet keeps
   the notes it is made of: a new group's slots play plain heads of its
-  note's instruments (`Heads::plain`), a next tuplet or a dissolved one
+  note's instruments (`Heads::plain`), another tuplet or a dissolved one
   moves each note's heads as they are.
 - `Duration` is `Simple`, `Dotted`, or `Tuplet(TupletSpec { n, m, base })`.
 - `Measure::set_beat` guarantees a valid measure length and fills gaps.

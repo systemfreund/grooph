@@ -452,7 +452,6 @@ impl Grooph {
             Cell::Tool(t) => match t.kind {
                 ToolKind::Edit(EditOp::Undo) => self.can_undo(),
                 ToolKind::Edit(EditOp::Redo) => self.can_redo(),
-                ToolKind::Modify(Modifier::CycleTuplet) => true,
                 ToolKind::Modify(modifier) => self.modifier_applies(modifier),
                 _ => true,
             },
@@ -756,7 +755,7 @@ impl Grooph {
                     Duration::Simple(_) => {
                         self.set_beat(idx, template.duration.base_note(), Some(template.kind))
                     }
-                    Duration::Tuplet(spec) => self.set_tuplet(idx, Some(spec)),
+                    Duration::Tuplet(spec) => self.set_tuplet(idx, spec),
                     _ => None,
                 };
                 result.is_some()
@@ -786,10 +785,7 @@ impl Grooph {
                 }
                 let idx = self.editor.doc().cursor.beat_idx.min(beats_len - 1);
                 let pen = self.edit_instrument();
-                match modifier {
-                    Modifier::CycleTuplet => self.set_tuplet(idx, None).is_some(),
-                    _ => modify(self.current_voice_mut(), idx, pen, modifier),
-                }
+                modify(self.current_voice_mut(), idx, pen, modifier)
             }
             ToolKind::Delete(op) => {
                 if beats_len == 0 {
@@ -822,8 +818,7 @@ impl Grooph {
 }
 
 /// Apply `modifier` to the beat at `idx` of `voice`, for the head of
-/// `pen`; whether it changed anything. Not for [`Modifier::CycleTuplet`],
-/// which needs the score.
+/// `pen`; whether it changed anything.
 fn modify(voice: &mut VoiceBar, idx: usize, pen: Instrument, modifier: Modifier) -> bool {
     match modifier {
         Modifier::ToggleDotted { dots: _ } => voice.toggle_dotted(idx),
@@ -833,7 +828,6 @@ fn modify(voice: &mut VoiceBar, idx: usize, pen: Instrument, modifier: Modifier)
         Modifier::ToggleHead => voice.toggle_head(idx, pen),
         Modifier::CycleTechnique => voice.cycle_technique(idx, pen),
         Modifier::ToggleTechnique(technique) => voice.toggle_technique(idx, pen, technique),
-        Modifier::CycleTuplet => None,
     }
     .is_some()
 }
