@@ -17,8 +17,7 @@
 use crate::duration::q;
 use crate::grid::DEFAULT_GRID;
 use crate::spelling::{self, Lengths, Piece};
-use crate::{Beat, Heads, Measure, TimeSignature, TupletRegistry, VoiceBar};
-use std::collections::HashSet;
+use crate::{Beat, Heads, Measure, TimeSignature, VoiceBar};
 use std::ops::Range;
 
 /// Grid ticks in a unit of [`crate::spelling`], a thirty-second.
@@ -40,12 +39,7 @@ struct Kept<'a> {
 /// and duration-free content it plays, ascending) and the `kept` runs.
 /// `None` if a kept run does not cover whole beats of the meter or a note
 /// falls inside one.
-fn rewrite(
-    ts: TimeSignature,
-    notes: &[(u32, Beat)],
-    kept: &[Kept],
-    mut tuplets: TupletRegistry,
-) -> Option<VoiceBar> {
+fn rewrite(ts: TimeSignature, notes: &[(u32, Beat)], kept: &[Kept]) -> Option<VoiceBar> {
     let mut spans = spelling::meter_spans(ts)?;
     for run in kept {
         let covered =
@@ -98,7 +92,7 @@ fn rewrite(
                 let (_, note) = next_note.next()?;
                 let mut beat = *note;
                 beat.duration = duration;
-                beat.tuplet_group_id = None;
+                beat.tuplet = None;
                 beats.push(beat);
             }
             Piece::Rest(duration) => beats.push(Beat::rest(duration)),
@@ -113,9 +107,9 @@ fn rewrite(
             }
         }
     }
-    let groups: HashSet<_> = beats.iter().filter_map(|b| b.tuplet_group_id).collect();
-    tuplets.retain(|id| groups.contains(&id));
-    let voice = VoiceBar::from_parts(beats, ts, tuplets);
+    // Kept tuplets are copied whole, with their marks; respelled notes
+    // lose theirs.
+    let voice = VoiceBar::from_parts(beats, ts);
     debug_assert_eq!(
         voice.beats.iter().filter_map(|b| DEFAULT_GRID.ticks_of(&b.duration)).sum::<u32>(),
         DEFAULT_GRID.ticks_per_measure(&ts)
@@ -221,7 +215,7 @@ impl VoiceBar {
         notes.sort_by_key(|&(unit, _)| unit);
         kept.extend(plain);
         kept.sort_by_key(|k| k.units.start);
-        rewrite(ts, &notes, &kept, self.tuplets.clone())
+        rewrite(ts, &notes, &kept)
     }
 
     /// A voice of `ts` playing `heads` at each tick of `notes` (ticks from
@@ -244,23 +238,14 @@ impl VoiceBar {
             }
             written.push((unit, Beat::with_heads(q(), heads)));
         }
-        rewrite(ts, &written, &[], TupletRegistry::new())
+        rewrite(ts, &written, &[])
     }
-}
-
-/// Whether `a` and `b` have the same beats, tuplet groups included
-/// ([`Beat`]'s `PartialEq` leaves them out), and as many tuplet anchors
-/// (a respelled voice only drops anchors no beat names).
-pub(crate) fn same_beats(a: &VoiceBar, b: &VoiceBar) -> bool {
-    a.beats == b.beats
-        && a.beats.iter().zip(&b.beats).all(|(x, y)| x.tuplet_group_id == y.tuplet_group_id)
-        && a.tuplets.len() == b.tuplets.len()
 }
 
 impl Measure {
     /// Whether [`Measure::clean_up`] would change a voice.
     pub fn needs_clean_up(&self) -> bool {
-        self.voices().iter().any(|v| v.respelled().is_some_and(|r| !same_beats(v, &r)))
+        self.voices().iter().any(|v| v.respelled().is_some_and(|r| *v != r))
     }
 
     /// The measure with every voice [respelled](VoiceBar::respelled): the
@@ -281,7 +266,7 @@ impl Measure {
                 continue;
             };
             let old = self.voice_mut(idx).expect("voice in range");
-            if !same_beats(old, &voice) {
+            if *old != voice {
                 *old = voice;
                 changed = true;
             }
@@ -319,11 +304,7 @@ mod tests {
         assert_eq!(ticks(&once), ticks(&m), "onsets of {input}");
         let twice = once.cleaned_up();
         assert_eq!(text(&twice), text(&once), "cleaning {input} twice");
-        for (a, b) in once.voices().iter().zip(twice.voices()) {
-            let ids =
-                |v: &VoiceBar| v.beats().iter().map(|b| b.tuplet_group_id).collect::<Vec<_>>();
-            assert_eq!(ids(a), ids(b));
-        }
+        assert_eq!(twice, once, "cleaning {input} twice");
         text(&once)
     }
 
@@ -401,14 +382,14 @@ mod tests {
         let once = m.cleaned_up();
         let groups = once.first_voice().tuplet_groups();
         assert_eq!(groups.len(), 1);
-        assert_eq!(once.first_voice().tuplets().len(), 1);
     }
 
     #[test]
-    fn a_dropped_tuplet_loses_its_anchor() {
+    fn a_dropped_tuplet_leaves_no_marks() {
         let m = measure("4/4 q r:t8 r:t8 r:t8 r:h");
-        assert_eq!(m.first_voice().tuplets().len(), 1);
-        assert!(m.cleaned_up().first_voice().tuplets().is_empty());
+        assert_eq!(m.first_voice().tuplet_groups().len(), 1);
+        let once = m.cleaned_up();
+        assert!(once.first_voice().beats().iter().all(|b| b.tuplet.is_none()));
     }
 
     #[test]
@@ -429,25 +410,24 @@ mod tests {
     }
 
     #[test]
-    fn an_orphan_anchor_is_cleaned_up() {
+    fn a_stale_mark_on_a_plain_note_is_cleaned_up() {
         let mut m = measure("4/4 q q q q");
-        m.first_voice_mut().tuplets.register(3, 2, 1, crate::duration::NoteValue::Eighth);
+        let base = crate::duration::NoteValue::Eighth;
+        m.first_voice_mut().beats[0].tuplet = Some(crate::TupletMark::Start { base });
         assert!(m.needs_clean_up());
         assert!(m.clean_up());
-        assert!(m.first_voice().tuplets().is_empty());
+        assert_eq!(m.first_voice().beats()[0].tuplet, None);
+        assert!(!m.needs_clean_up());
     }
 
     #[test]
-    fn a_stale_group_id_on_a_plain_note_is_cleaned_up() {
-        let mut m = measure("4/4 q q q q");
-        let voice = m.first_voice_mut();
-        let id = voice.tuplets.register(3, 2, 1, crate::duration::NoteValue::Eighth);
-        voice.beats[0].tuplet_group_id = Some(id);
-        assert!(m.needs_clean_up());
-        assert!(m.clean_up());
-        assert_eq!(m.first_voice().beats()[0].tuplet_group_id, None);
-        assert!(m.first_voice().tuplets().is_empty());
-        assert!(!m.needs_clean_up());
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "tuplet groups")]
+    fn a_voice_put_together_checks_its_tuplet_groups() {
+        // Half a group: its last beats without the first.
+        let m = measure("4/4 t8 t8 t8 q r:h");
+        let beats = m.first_voice().beats()[1..].to_vec();
+        VoiceBar::from_parts(beats, TimeSignature::FOUR_FOUR);
     }
 
     #[test]

@@ -56,7 +56,7 @@ fn check_invariants(m: &Measure) -> Result<(), String> {
         if b.duration.is_tuplet() && m.first_voice().tuplet_group_at(i).is_none() {
             return Err(format!("tuplet beat {i} is outside a group"));
         }
-        if !b.duration.is_tuplet() && b.tuplet_group_id.is_some() {
+        if !b.duration.is_tuplet() && b.tuplet.is_some() {
             return Err(format!("plain beat {i} is in a tuplet group"));
         }
     }
@@ -64,22 +64,12 @@ fn check_invariants(m: &Measure) -> Result<(), String> {
     if total != want {
         return Err(format!("beats take {total} ticks, the meter {want}"));
     }
-    for g in m.first_voice().tuplet_groups() {
-        let Some(anchor) = m.first_voice().tuplets().get(g.id) else {
-            return Err(format!("group {:?} has no anchor", g.id));
-        };
-        // Groups of one ratio can have different note values, so each is
-        // measured against its own anchor.
-        let span: u32 = m.first_voice().beats()[g.start_idx..=g.end_idx]
-            .iter()
-            .map(|b| DEFAULT_GRID.ticks_of(&b.duration).unwrap())
-            .sum();
-        if span != anchor.target_ticks {
-            return Err(format!(
-                "group {}..={} takes {span} ticks, its anchor {}",
-                g.start_idx, g.end_idx, anchor.target_ticks
-            ));
-        }
+    // The rules a saved measure is read back with: whole tuplet groups.
+    let saved = ron::to_string(m).map_err(|e| e.to_string())?;
+    match ron::from_str::<Measure>(&saved) {
+        Ok(back) if back == *m => {}
+        Ok(back) => return Err(format!("reads back as {back:?}")),
+        Err(e) => return Err(format!("does not read back: {e}")),
     }
     Ok(())
 }
@@ -179,20 +169,7 @@ fn random_score(rng: &mut Rng, durations: &[Duration], meters: &[TimeSignature])
     Score::new(measures)
 }
 
-/// Which beats share a tuplet group, independent of the group ids.
-fn group_partition(m: &Measure) -> Vec<Option<usize>> {
-    let beats = m.first_voice().beats();
-    beats
-        .iter()
-        .map(|b| {
-            let id = b.tuplet_group_id?;
-            beats.iter().position(|other| other.tuplet_group_id == Some(id))
-        })
-        .collect()
-}
-
-/// Why `b` differs from `a`, if it does. Beats are compared with their
-/// tuplet groups, which `Beat`'s `PartialEq` ignores.
+/// Why `b` differs from `a`, if it does.
 fn score_difference(a: &Score, b: &Score) -> Option<String> {
     if a.len() != b.len() {
         return Some(format!("{} measures, then {}", a.len(), b.len()));
@@ -205,27 +182,16 @@ fn score_difference(a: &Score, b: &Score) -> Option<String> {
                 mb.time_signature()
             ));
         }
-        if ma.first_voice().beats() != mb.first_voice().beats() {
-            return Some(format!("measure {i}: {ma:?} became {mb:?}"));
-        }
-        if group_partition(ma) != group_partition(mb) {
-            return Some(format!("measure {i}: tuplet groups changed in {ma:?}"));
+        if ma != mb {
+            let groups = |m: &Measure| m.first_voice().tuplet_groups();
+            return Some(format!(
+                "measure {i}: {ma:?} {:?} became {mb:?} {:?}",
+                groups(ma),
+                groups(mb)
+            ));
         }
     }
     None
-}
-
-/// Whether a tuplet group of `m` holds notes of another value than the one
-/// its span was built from, like `t4 t8` in a group of eighth triplets. The
-/// model allows them, but the editor does not build them and the notation
-/// cannot write them: it reads a group's span from its first note.
-fn has_regrouped_tuplets(m: &Measure) -> bool {
-    m.first_voice().tuplet_groups().iter().any(|g| {
-        let base = m.first_voice().tuplets().get(g.id).map(|a| a.base_hint);
-        m.first_voice().beats()[g.start_idx..=g.end_idx]
-            .iter()
-            .any(|b| b.duration.as_tuplet_spec().map(|s| s.base) != base)
-    })
 }
 
 fn run_notation_round_trips(seed: u64, scores: usize) {
@@ -234,9 +200,6 @@ fn run_notation_round_trips(seed: u64, scores: usize) {
     let mut rng = Rng::new(seed);
     for i in 0..scores {
         let score = random_score(&mut rng, &durations, &meters);
-        if score.measures().iter().any(has_regrouped_tuplets) {
-            continue;
-        }
         let text = format_score(&score)
             .unwrap_or_else(|| panic!("seed {seed}, score {i}: no notation for {score:?}"));
         let parsed = parse_score(&text)

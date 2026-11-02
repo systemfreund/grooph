@@ -11,7 +11,7 @@
 //! eighths in the time of five). [`CounterBars`]
 //! keeps the counter rhythm of each meter that has one.
 
-use crate::click::{ClickLevel, same_bar};
+use crate::click::ClickLevel;
 use crate::duration::NoteValue::{Eighth, Half, Quarter, Sixteenth, ThirtySecond};
 use crate::duration::{Duration, TupletSpec};
 use crate::grid::{DEFAULT_GRID, is_general_tuplet};
@@ -61,7 +61,7 @@ impl std::str::FromStr for Ratio {
 /// Whether `bar` is `ratio`'s own counter bar, no click edited: the one
 /// rule for showing it as the ratio, in the app and in links (`poly`).
 pub fn is_ratio_bar(bar: &Measure, ratio: Ratio) -> bool {
-    counter_bar(bar.time_signature(), ratio).is_some_and(|m| same_bar(&m, bar))
+    counter_bar(bar.time_signature(), ratio).is_some_and(|m| m == *bar)
 }
 
 /// The counter bar of `ratio` in `ts`, every click medium (the click bar
@@ -336,7 +336,7 @@ pub fn respelled(bar: Measure) -> Measure {
 /// The counter bar of each meter that has one, and the ratio it was picked
 /// as where that has a common factor (4:2 plays 2:1's bar). Saved as the
 /// bars alone; the names are kept apart (see [`CounterBars::names`]).
-#[derive(Clone, Default, Serialize, Deserialize)]
+#[derive(Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(from = "Vec<Measure>", into = "Vec<Measure>")]
 pub struct CounterBars {
     bars: Vec<Measure>,
@@ -360,16 +360,6 @@ impl std::fmt::Debug for CounterBars {
         f.debug_list().entries(self.bars.iter().map(|m| m.time_signature())).finish()
     }
 }
-
-impl PartialEq for CounterBars {
-    fn eq(&self, other: &Self) -> bool {
-        self.bars.len() == other.bars.len()
-            && self.bars.iter().zip(&other.bars).all(|(a, b)| same_bar(a, b))
-            && self.names == other.names
-    }
-}
-
-impl Eq for CounterBars {}
 
 impl CounterBars {
     /// The counter bar of `ts`, `None` if it has none.
@@ -505,7 +495,7 @@ mod tests {
         assert_eq!(click_level(&new, 10), ClickLevel::Medium);
         let mut bars = CounterBars::default();
         bars.set("5/4".parse().unwrap(), Some(new.clone()));
-        assert!(same_bar(bars.for_meter("5/4".parse().unwrap()).unwrap(), &new));
+        assert!(*bars.for_meter("5/4".parse().unwrap()).unwrap() == new);
     }
 
     #[test]
