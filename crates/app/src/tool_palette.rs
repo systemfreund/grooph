@@ -1015,6 +1015,37 @@ mod tests {
         app
     }
 
+    /// Clean up writes only what the palette can enter, by the measure
+    /// crate's lists of the palette's values; they stay the same.
+    #[test]
+    fn the_palette_offers_the_values_clean_up_writes() {
+        use crate::tools::{BeatTemplate, ToolKind};
+        use grooph_measure::duration::Duration;
+        use grooph_measure::editing::{TUPLET_TOOLS, VALUE_BUTTONS};
+        let templates = || {
+            super::TOOLS.iter().filter_map(|id| match super::tool(id).kind {
+                ToolKind::InsertBeat(BeatTemplate { duration, kind, .. }) => Some((duration, kind)),
+                _ => None,
+            })
+        };
+        for kind in [grooph_measure::BeatKind::Note, grooph_measure::BeatKind::Rest] {
+            let values: Vec<_> = templates()
+                .filter_map(|(d, k)| match d {
+                    Duration::Simple(v) if k == kind => Some(v),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(values, VALUE_BUTTONS, "{kind:?}");
+        }
+        let tuplets: Vec<_> = templates()
+            .filter_map(|(d, _)| match d {
+                Duration::Tuplet(spec) => Some(spec),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(tuplets, TUPLET_TOOLS);
+    }
+
     fn apply(app: &mut Grooph, id: &str) {
         let tool = all_tools().iter().find(|t| t.id == id).unwrap();
         app.apply_tool(tool);

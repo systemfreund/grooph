@@ -23,6 +23,24 @@ pub enum Modification {
     ChangeTimeSignature(TimeSignature, TimeSignature), // (old, new)
 }
 
+/// The note values of the editor's value buttons (notes and rests). On a
+/// tuplet note a button gives its value in the group's ratio
+/// ([`VoiceBar::modify_beat`]). Clean up writes no other value, so all it
+/// writes can be entered by hand.
+pub const VALUE_BUTTONS: [NoteValue; 4] =
+    [NoteValue::Quarter, Eighth, Sixteenth, NoteValue::ThirtySecond];
+
+/// The tuplets of the editor's tuplet tools. Clean up writes a group in
+/// no other ratio than its own or one of these.
+pub const TUPLET_TOOLS: [TupletSpec; 6] = [
+    TupletSpec { n: 3, m: 2, base: Eighth },
+    TupletSpec { n: 3, m: 2, base: Sixteenth },
+    TupletSpec { n: 5, m: 4, base: Sixteenth },
+    TupletSpec { n: 6, m: 4, base: Sixteenth },
+    TupletSpec { n: 7, m: 4, base: Sixteenth },
+    TupletSpec { n: 9, m: 8, base: Sixteenth },
+];
+
 pub const CYCLE_TUPLET_SPECS: [TupletSpec; 5] = [
     TupletSpec { n: 3, m: 2, base: Eighth }, // t8 - 1/8 triplets
     TupletSpec { n: 5, m: 4, base: Sixteenth }, // qt16 - 1/16 quintuplets

@@ -139,7 +139,11 @@ spread across callers.
   triplet of eighths); inside a tuplet notes last up to the next one and
   rests merge, as far as one value of its ratio lasts and within the
   beat (`t8 r:t8 t8` is `t4 t8`); a voice whose tuplet starts or ends
-  inside a beat where no beat starts stays as it is (`None`).
+  inside a beat where no beat starts stays as it is (`None`). Clean up
+  writes only tuplets the editor can enter: values of its value buttons
+  (`editing::VALUE_BUTTONS`) in the group's own ratio or one of its
+  tuplet tools (`editing::TUPLET_TOOLS`); a test keeps both lists equal
+  to the palette's, so a new button widens Clean up too.
   `Measure::clean_up` does every voice; applying it twice changes
   nothing. `VoiceBar::from_onsets` writes a voice from ticks and heads
   alone, for moving heads between voices. An empty bar is per-beat rests in

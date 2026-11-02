@@ -17,10 +17,14 @@
 //! tuplet on the coarsest places its notes allow (a sextuplet sounding on
 //! every other note as a triplet of eighths). Inside a tuplet, notes last
 //! up to the next one and rests merge, as far as one value of its ratio
-//! lasts (`t8 r:t8 t8` is `t4 t8`). [`VoiceBar::from_onsets`]
+//! lasts (`t8 r:t8 t8` is `t4 t8`). Only tuplets the editor can enter
+//! are written: values of its value buttons, in the group's own ratio or
+//! one of its tuplet tools ([`crate::editing::VALUE_BUTTONS`],
+//! [`crate::editing::TUPLET_TOOLS`]). [`VoiceBar::from_onsets`]
 //! writes a voice from onsets alone, e.g. for heads moved between voices.
 
 use crate::duration::{Duration, TupletSpec, q};
+use crate::editing::{TUPLET_TOOLS, VALUE_BUTTONS};
 use crate::grid::DEFAULT_GRID;
 use crate::spelling::{self, Lengths, Piece};
 use crate::{Beat, Heads, Measure, TimeSignature, TupletMark, VoiceBar};
@@ -222,11 +226,15 @@ fn reduced_group(members: &[Beat], span: u32) -> Option<Vec<Beat>> {
     if step <= shortest || places < 2 {
         return None;
     }
-    // The value of the ratio in lowest terms that lasts `step`.
+    // The value of the ratio in lowest terms that lasts `step`: one the
+    // editor can write, of a value button in a ratio of its tuplet tools.
     let common = crate::math::gcd(u32::from(n), u32::from(m));
     let (n, m) =
         (u8::try_from(u32::from(n) / common).ok()?, u8::try_from(u32::from(m) / common).ok()?);
-    let value = crate::grid::NOTE_VALUES.into_iter().find(|&v| {
+    if common > 1 && !TUPLET_TOOLS.iter().any(|s| (s.n, s.m) == (n, m)) {
+        return None;
+    }
+    let value = VALUE_BUTTONS.into_iter().find(|&v| {
         let d = Duration::Tuplet(TupletSpec { n, m, base: v });
         DEFAULT_GRID.supports(&d) && DEFAULT_GRID.ticks_of(&d) == Some(step)
     })?;
@@ -255,9 +263,9 @@ fn merge_in_tuplets(beats: &mut Vec<Beat>, spans: &[spelling::Span]) {
 /// and rests merged (see [`merge_in_tuplets`]), if any merge.
 fn merged_group(members: &[Beat], start: u32, spans: &[spelling::Span]) -> Option<Vec<Beat>> {
     let spec = members[0].duration.as_tuplet_spec()?;
-    // Every supported value of the ratio, not only the common ones: a 5:3
-    // quarter holds two 5:3 eighths.
-    let values: Vec<Duration> = crate::grid::NOTE_VALUES
+    // The value buttons' values in the ratio, as the editor writes them
+    // on a note of the group: a 5:3 quarter holds two 5:3 eighths.
+    let values: Vec<Duration> = VALUE_BUTTONS
         .into_iter()
         .map(|base| Duration::Tuplet(TupletSpec { base, ..spec }))
         .filter(|d| DEFAULT_GRID.supports(d))
@@ -626,10 +634,13 @@ mod tests {
             cleaned("4/4 st16 r:st16 r:st16 r:st16 st16 r:st16 r:q r:h"),
             "4/4 [t4 t8] r:q r:h"
         );
-        // Ten quintuplet sixteenths over a dotted quarter, every other one:
-        // five quintuplet eighths.
+        // Ten 10:6 sixteenths over a dotted quarter, every other one: no
+        // tuplet tool writes 5:3, so they stay 10:6, as eighths.
         let ten = "10:6s r:10:6s ".repeat(5);
-        assert_eq!(cleaned(&format!("6/8 {}r:q.", ten)), "6/8 qt8_3 qt8_3 qt8_3 qt8_3 qt8_3 r:q.");
+        assert_eq!(
+            cleaned(&format!("6/8 {}r:q.", ten)),
+            "6/8 [10:6e 10:6e 10:6e 10:6e 10:6e] r:q."
+        );
         assert_eq!(
             cleaned("2+2+3/8 st16 r:st16 st16 r:st16 st16 r:st16 r:q r:q."),
             "2+2+3/8 t8 t8 t8 r:q r:q."
