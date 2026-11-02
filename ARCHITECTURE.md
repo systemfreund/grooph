@@ -779,8 +779,9 @@ it, or on the kit by tapping an instrument. The
 columns follow the width of the page's column (`grid_metrics`, cells 54 to
 64 px wide; grid and bar both in `centered_column`, so on a wide screen they
 line up with the cards), a row
-wider than the grid goes on in the next line, and past 45% of the screen's
-height the grid scrolls, so the staff stays in view.
+wider than the grid goes on in the next line, and past three and a half
+lines or 45% of the screen's height the grid scrolls, so the staff stays in
+view (the half line cut off shows there is more).
 
 If you add new tools/shortcuts, remember:
 - Tool registry + palette (`grid_rows`)

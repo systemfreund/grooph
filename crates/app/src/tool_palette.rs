@@ -57,6 +57,9 @@ const MAX_COLUMNS: usize = 16;
 /// The share of the screen's height the grid takes at most; past it the
 /// grid scrolls, and the staff above stays in view.
 const MAX_GRID_SHARE: f32 = 0.45;
+/// The most lines of cells the grid shows; past them it scrolls. The half
+/// line cut off shows there is more, as the scroll bar is hidden.
+const MAX_GRID_LINES: f32 = 3.5;
 
 /// The kit's instruments in the grid's order, cymbals and drums from left to
 /// right as they stand, then the feet.
@@ -205,6 +208,15 @@ fn grid_metrics(width: f32) -> (usize, Vec2) {
     (columns, Vec2::new(cell, cell.min(MAX_CELL_HEIGHT)))
 }
 
+/// The height the grid of `lines` lines of cells `cell` high takes on a
+/// screen `screen` high: all of them, but at most [`MAX_GRID_LINES`] and
+/// [`MAX_GRID_SHARE`] of the screen.
+fn grid_height(lines: usize, cell: f32, screen: f32) -> f32 {
+    let all = lines as f32 * (cell + GRID_GAP) - GRID_GAP;
+    let most = MAX_GRID_LINES * (cell + GRID_GAP) - GRID_GAP;
+    all.min(most).min(MAX_GRID_SHARE * screen)
+}
+
 impl Grooph {
     /// The editor's tools as a grid in the thumb's reach, the same in every
     /// editor (Practice, Score, the metronome's click bar): on the kit its
@@ -230,8 +242,7 @@ impl Grooph {
             grid_rows(!self.staff_model().one_line(), &|i, _| heads.iter().any(|&(h, _)| h == i));
         let (columns, cell) = grid_metrics(ui.available_width());
         let lines: usize = rows.iter().map(|r| row_lines(r, columns).len()).sum();
-        let height = lines as f32 * (cell.y + GRID_GAP) - GRID_GAP;
-        let height = height.min(MAX_GRID_SHARE * ui.ctx().content_rect().height());
+        let height = grid_height(lines, cell.y, ui.ctx().content_rect().height());
         egui::ScrollArea::vertical()
             .id_salt("tool_grid")
             .min_scrolled_height(height)
@@ -1013,6 +1024,17 @@ mod tests {
         app.editor.doc_mut().score = parse_score(score).unwrap();
         app.ui.mode = Mode::Edit;
         app
+    }
+
+    #[test]
+    fn the_grid_shows_three_lines_and_a_half_at_most() {
+        use super::grid_height;
+        // Three lines fit whole.
+        assert_eq!(grid_height(3, 60.0, 1000.0), 3.0 * 64.0 - 4.0);
+        // More are cut half a line below the third.
+        assert_eq!(grid_height(6, 60.0, 1000.0), 3.5 * 64.0 - 4.0);
+        // A low screen keeps its share for the staff.
+        assert_eq!(grid_height(3, 60.0, 300.0), 0.45 * 300.0);
     }
 
     /// Clean up writes only what the palette can enter, by the measure
