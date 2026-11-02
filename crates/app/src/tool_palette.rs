@@ -89,8 +89,9 @@ const AIM_ORDER: [Instrument; 9] = [
 ];
 /// The tools in one row, going on in the next line where it does not fit:
 /// the meter, the rests, the head modifiers, the note values, the tuplets.
-const TOOLS: [&str; 18] = [
+const TOOLS: [&str; 20] = [
     "meta.change_time_signature",
+    "insert.rest.h",
     "insert.rest.q",
     "insert.rest.e",
     "insert.rest.s",
@@ -98,6 +99,7 @@ const TOOLS: [&str; 18] = [
     "modify.toggle.accent",
     "modify.toggle.soft",
     "modify.toggle.dotted",
+    "insert.note.h",
     "insert.note.q",
     "insert.note.e",
     "insert.note.s",
@@ -1064,6 +1066,17 @@ mod tests {
         assert_eq!(text(&app), "4/4 H:q H:q H:q H:q ; r:q r:q r:q r:q");
         apply(&mut app, "edit.undo");
         assert_eq!(text(&app), "4/4 H:q H:q H:q H:q ; K:h K:q r:q");
+    }
+
+    #[test]
+    fn halves_are_entered() {
+        let mut app = editing("4/4 q q q q");
+        app.editor.doc_mut().cursor = Cursor::at(0, 0);
+        apply(&mut app, "insert.note.h");
+        assert_eq!(text(&app), "4/4 h q q");
+        app.editor.doc_mut().cursor = Cursor::at(0, 1);
+        apply(&mut app, "insert.rest.h");
+        assert_eq!(text(&app), "4/4 h r:h");
     }
 
     #[test]
