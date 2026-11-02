@@ -51,8 +51,10 @@ const MIN_CELL: f32 = 54.0;
 /// The widest a cell gets: on a wide screen the grid stays in the middle.
 const MAX_CELL: f32 = 64.0;
 /// The share of a value button's height its tuplet number takes, over the
-/// value, while the cursor is in a tuplet.
-const TUPLET_NUMBER_BAND: f32 = 0.3;
+/// value, while the cursor is in a tuplet, below a margin of
+/// [`TUPLET_NUMBER_MARGIN`] of it.
+const TUPLET_NUMBER_BAND: f32 = 0.25;
+const TUPLET_NUMBER_MARGIN: f32 = 0.16;
 /// The tallest a cell gets; narrower ones are square.
 const MAX_CELL_HEIGHT: f32 = 64.0;
 /// The most columns the grid has, on a wide screen.
@@ -585,7 +587,9 @@ impl Grooph {
             Cell::Tool(t) if let Some(spec) = self.value_in_tuplet(t) => {
                 let family = self.ui.music_font_id.family.clone();
                 let band = inner.height() * TUPLET_NUMBER_BAND;
-                let (top, below) = inner.split_top_bottom_at_y(inner.top() + band);
+                let margin = inner.height() * TUPLET_NUMBER_MARGIN;
+                let (_, rest) = inner.split_top_bottom_at_y(inner.top() + margin);
+                let (top, below) = rest.split_top_bottom_at_y(rest.top() + band);
                 // The digits of the staff's tuplet numbers.
                 let digits: String =
                     grooph_layout::glyphs::tuplet_glyphs(spec.n).iter().map(|g| g.ch).collect();
@@ -593,7 +597,7 @@ impl Grooph {
                     top.center(),
                     Align2::CENTER_CENTER,
                     digits,
-                    FontId::new(1.8 * band, family.clone()),
+                    FontId::new(2.0 * band, family.clone()),
                     color,
                 );
                 paint_notation(ui, below, &self.editor.button_measures[t.id], family, color);
