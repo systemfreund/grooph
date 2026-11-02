@@ -5,10 +5,14 @@ use super::Glyph;
 
 pub const NOTEHEAD_BLACK: Glyph =
     Glyph { ch: '\u{E0A4}', advance: 1.18, sw: [0.0, -0.5], ne: [1.18, 0.5] };
+pub const NOTEHEAD_WHOLE: Glyph =
+    Glyph { ch: '\u{E0A2}', advance: 1.688, sw: [0.0, -0.5], ne: [1.688, 0.5] };
 pub const NOTEHEAD_HALF: Glyph =
     Glyph { ch: '\u{E0A3}', advance: 1.18, sw: [0.0, -0.5], ne: [1.18, 0.5] };
 pub const NOTEHEAD_X_BLACK: Glyph =
     Glyph { ch: '\u{E0A9}', advance: 1.16, sw: [0.0, -0.5], ne: [1.16, 0.5] };
+pub const NOTEHEAD_X_WHOLE: Glyph =
+    Glyph { ch: '\u{E0A7}', advance: 1.508, sw: [0.0, -0.5], ne: [1.508, 0.5] };
 pub const NOTEHEAD_X_HALF: Glyph =
     Glyph { ch: '\u{E0A8}', advance: 1.336, sw: [0.0, -0.5], ne: [1.336, 0.5] };
 pub const NOTEHEAD_CIRCLE_X: Glyph =

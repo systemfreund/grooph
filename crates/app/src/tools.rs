@@ -4,7 +4,7 @@
 //! can be rendered dynamically without hardcoding entries in `app.rs`.
 
 use eframe::egui::{InputState, Key};
-use grooph_measure::duration::NoteValue::{Eighth, Half, Quarter, Sixteenth, ThirtySecond};
+use grooph_measure::duration::NoteValue::{Eighth, Half, Quarter, Sixteenth, ThirtySecond, Whole};
 use grooph_measure::duration::{Duration, TupletSpec};
 use grooph_measure::{BeatKind, Technique};
 
@@ -169,7 +169,7 @@ pub fn all_tools() -> &'static [Tool] {
     use BeatKind::*;
     use Duration::*;
 
-    static ALL: [Tool; 39] = [
+    static ALL: [Tool; 41] = [
         Tool {
             id: "edit.undo",
             label: "⟲",
@@ -188,6 +188,18 @@ pub fn all_tools() -> &'static [Tool] {
             show_in_palette: true,
         },
         // Notes
+        Tool {
+            id: "insert.note.w",
+            label: "Whole",
+            kind: ToolKind::InsertBeat(BeatTemplate {
+                duration: Simple(Whole),
+                kind: Note,
+                accented: false,
+                soft: false,
+            }),
+            shortcuts: &[],
+            show_in_palette: true,
+        },
         Tool {
             id: "insert.note.h",
             label: "Half",
@@ -249,6 +261,18 @@ pub fn all_tools() -> &'static [Tool] {
             show_in_palette: true,
         },
         // Rests
+        Tool {
+            id: "insert.rest.w",
+            label: "Whole rest",
+            kind: ToolKind::InsertBeat(BeatTemplate {
+                duration: Simple(Whole),
+                kind: Rest,
+                accented: false,
+                soft: false,
+            }),
+            shortcuts: &[],
+            show_in_palette: true,
+        },
         Tool {
             id: "insert.rest.h",
             label: "Half rest",

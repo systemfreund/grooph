@@ -43,11 +43,12 @@ pub fn rest_glyph_for_duration(d: Duration) -> Glyph {
     }
 }
 
-/// Hollow for halves (and wholes), filled for the rest. Both heads have the
-/// same size and stem anchors.
+/// Hollow for halves, the wider whole head for wholes, filled for the rest.
+/// The half and the filled head have the same size and stem anchors.
 pub fn notehead_glyph_for_duration(d: Duration) -> Glyph {
     match d.base_note() {
-        Half | Whole => NOTEHEAD_HALF,
+        Whole => NOTEHEAD_WHOLE,
+        Half => NOTEHEAD_HALF,
         _ => NOTEHEAD_BLACK,
     }
 }
@@ -71,6 +72,16 @@ impl HeadGlyph {
 /// cross-stick is a circled x, a rimshot a slashed head, the ride's bell a
 /// diamond (Weinberg).
 pub fn head_glyph_for(instrument: Instrument, technique: Technique, d: Duration) -> HeadGlyph {
+    // A whole note has no stem: its heads keep no anchors.
+    if d.base_note() == Whole
+        && !matches!(technique, Technique::CrossStick | Technique::Rimshot | Technique::Bell)
+    {
+        let glyph = match instrument.notehead() {
+            Notehead::Cross => NOTEHEAD_X_WHOLE,
+            Notehead::Normal => NOTEHEAD_WHOLE,
+        };
+        return HeadGlyph::of(glyph, [0.0, 0.0], [0.0, 0.0]);
+    }
     let hollow = matches!(d.base_note(), Half | Whole);
     match (technique, instrument.notehead(), hollow) {
         (Technique::CrossStick, ..) => HeadGlyph::of(

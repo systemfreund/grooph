@@ -184,6 +184,12 @@ impl VoiceBar {
             });
         }
 
+        if beat.is_rest() && !voice::whole_rest_fits(&beat.duration, &self.time_signature()) {
+            return Err(MeasureError::Unfillable {
+                attempted: DEFAULT_GRID.ticks_to_whole_notes(new_ticks),
+            });
+        }
+
         // Inside a tuplet slot only a same-grid tuplet replacement is allowed,
         // and it takes the slot's place in the group. Outside one, the beat is
         // in no group (a new group gets its marks below).
@@ -505,11 +511,15 @@ impl VoiceBar {
         idx: BeatIdx,
         instrument: Instrument,
     ) -> Option<Modification> {
+        let ts = self.time_signature();
         if let Some(b) = self.beats.get_mut(idx) {
             let new_kind = match b.kind() {
                 Rest => Note,
                 Note => Rest,
             };
+            if new_kind == Rest && !voice::whole_rest_fits(&b.duration, &ts) {
+                return None;
+            }
             *b = b.with_kind_of(new_kind, instrument);
             Some(Modification::ToggleKind(idx, new_kind))
         } else {

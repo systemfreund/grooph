@@ -135,6 +135,14 @@ impl Serialize for VoiceBar {
     }
 }
 
+/// Whether `duration` as a rest is allowed in `time_signature`: a whole rest
+/// value is only valid in a bar of exactly four quarters (or two halves).
+pub(crate) fn whole_rest_fits(duration: &Duration, time_signature: &TimeSignature) -> bool {
+    *duration != Duration::Simple(NoteValue::Whole)
+        || matches!(time_signature.beat_unit, 2 | 4)
+            && DEFAULT_GRID.ticks_per_measure(time_signature) == DEFAULT_GRID.ticks_per_whole
+}
+
 impl VoiceBar {
     /// The voice saved as `raw`, in `time_signature`, if it holds.
     fn checked(raw: RawVoice, time_signature: TimeSignature) -> Result<Self, InvalidMeasure> {
@@ -148,6 +156,11 @@ impl VoiceBar {
                 .then(|| DEFAULT_GRID.ticks_of(&beat.duration))
                 .flatten()
                 .ok_or(InvalidMeasure::UnsupportedDuration { idx })?;
+            // A whole rest value is the bar's four quarters; the empty bar of
+            // any meter is drawn as one by the layout, not written as one.
+            if beat.is_rest() && !whole_rest_fits(&beat.duration, &time_signature) {
+                return Err(InvalidMeasure::UnsupportedDuration { idx });
+            }
             ticks += u64::from(beat_ticks);
         }
         let expected = DEFAULT_GRID.ticks_per_measure(&time_signature);

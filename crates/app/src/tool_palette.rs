@@ -95,29 +95,33 @@ const AIM_ORDER: [Instrument; 9] = [
     Instrument::Crash,
     Instrument::HiHatFoot,
 ];
-/// The tools in one row, going on in the next line where it does not fit:
-/// the meter, the rests, the head modifiers, the note values, the tuplets.
-const TOOLS: [&str; 20] = [
-    "meta.change_time_signature",
-    "insert.rest.h",
-    "insert.rest.q",
-    "insert.rest.e",
-    "insert.rest.s",
-    "insert.rest.th",
-    "modify.toggle.accent",
-    "modify.toggle.soft",
-    "modify.toggle.dotted",
-    "insert.note.h",
+/// The tools in one row, going on in the next line where it does not fit,
+/// the most used first: the note values, short to long, the rests in the
+/// same order under them, the head modifiers, the tuplets, the meter last,
+/// as it is set once per exercise.
+const TOOLS: [&str; 22] = [
     "insert.note.q",
     "insert.note.e",
     "insert.note.s",
     "insert.note.th",
+    "insert.note.h",
+    "insert.note.w",
+    "insert.rest.q",
+    "insert.rest.e",
+    "insert.rest.s",
+    "insert.rest.th",
+    "insert.rest.h",
+    "insert.rest.w",
+    "modify.toggle.accent",
+    "modify.toggle.soft",
+    "modify.toggle.dotted",
     "insert.tuplet.t8",
     "insert.tuplet.t16",
     "insert.tuplet.qt16",
     "insert.tuplet.st16",
     "insert.tuplet.spt16",
     "insert.tuplet.nt16",
+    "meta.change_time_signature",
 ];
 
 /// One cell of the tool grid.
@@ -187,8 +191,8 @@ fn grid_height(lines: usize, cell: f32, screen: f32) -> f32 {
 impl Grooph {
     /// The editor's tools as a grid in the thumb's reach, the same in every
     /// editor (Practice, Score, the metronome's click bar): on the kit its
-    /// instruments, then one row of the meter, the rests, the head
-    /// modifiers, the note values and the tuplets. Undo and redo are in
+    /// instruments, then one row of the note values, the rests, the head
+    /// modifiers, the tuplets and the meter. Undo and redo are in
     /// the editor's bar ([`BAR_TOOLS`]).
     pub(super) fn tool_palette_panel(&mut self, ui: &mut Ui) {
         egui::Panel::bottom("tool_palette")
@@ -1083,6 +1087,19 @@ pub(crate) fn paint_notation(
         let measure_layout = build_measure_layout(measure.first_voice(), &opts);
         let painter = &ui.painter_at(rect);
         draw_notes(painter, &measure_layout, color, None, &opts);
+        // A half rest sits on the staff's line, a whole rest hangs from it:
+        // without the line the two look alike, so the cell draws it under
+        // the one and over the other.
+        let stroke = egui::Stroke::new(opts.staff_line_thickness(), color);
+        let reach = 0.4 * opts.staff_space();
+        for note in &measure_layout.notes {
+            if note.kind == Rest
+                && matches!(note.duration.base_note(), NoteValue::Half | NoteValue::Whole)
+            {
+                let (ink, y) = (note.head.ink(), opts.y_of(0));
+                painter.hline(ink.left() - reach..=ink.right() + reach, y, stroke);
+            }
+        }
     }
 }
 
@@ -1128,7 +1145,7 @@ mod tests {
     #[test]
     fn the_palette_offers_the_values_clean_up_writes() {
         use crate::tools::{BeatTemplate, ToolKind};
-        use grooph_measure::duration::Duration;
+        use grooph_measure::duration::{Duration, NoteValue};
         use grooph_measure::editing::{TUPLET_TOOLS, VALUE_BUTTONS};
         let templates = || {
             super::TOOLS.iter().filter_map(|id| match super::tool(id).kind {
@@ -1139,11 +1156,14 @@ mod tests {
         for kind in [grooph_measure::BeatKind::Note, grooph_measure::BeatKind::Rest] {
             let values: Vec<_> = templates()
                 .filter_map(|(d, k)| match d {
-                    Duration::Simple(v) if k == kind => Some(v),
+                    // The whole is entered by hand only; Clean up never writes it.
+                    Duration::Simple(v) if k == kind && v != NoteValue::Whole => Some(v),
                     _ => None,
                 })
                 .collect();
-            assert_eq!(values, VALUE_BUTTONS, "{kind:?}");
+            // The palette's order is its own: the same values.
+            assert_eq!(values.len(), VALUE_BUTTONS.len(), "{kind:?}");
+            assert!(VALUE_BUTTONS.iter().all(|v| values.contains(v)), "{kind:?}");
         }
         let tuplets: Vec<_> = templates()
             .filter_map(|(d, _)| match d {
@@ -1214,6 +1234,25 @@ mod tests {
         last.editor.doc_mut().cursor = Cursor::at(0, 3);
         assert!(!last.cell_enabled(cell("insert.note.h")));
         assert!(last.cell_enabled(cell("insert.note.q")));
+    }
+
+    #[test]
+    fn wholes_are_entered_by_hand_and_never_dotted() {
+        let mut app = editing("4/4 q q q q");
+        app.editor.doc_mut().cursor = Cursor::at(0, 0);
+        apply(&mut app, "insert.note.w");
+        assert_eq!(text(&app), "4/4 w");
+        apply(&mut app, "insert.rest.w");
+        assert_eq!(text(&app), "4/4 r:w");
+        // The dot has no whole to make.
+        apply(&mut app, "modify.toggle.dotted");
+        assert_eq!(text(&app), "4/4 r:w");
+        // A whole rest is no value of a bar of another length.
+        let mut app = editing("3/4 q q q");
+        app.editor.doc_mut().cursor = Cursor::at(0, 0);
+        apply(&mut app, "insert.rest.w");
+        apply(&mut app, "insert.note.w");
+        assert_eq!(text(&app), "3/4 q q q");
     }
 
     #[test]
