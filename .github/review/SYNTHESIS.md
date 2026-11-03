@@ -18,6 +18,8 @@ following `REVIEW.md`. You turn their answers into one review. A script posts yo
   thread has their answers in `replies`; `discussion` holds what they wrote since the first review, in the conversation of the pull request and in
   inline comments outside the threads of open findings (with `path` and `line`). Entries written since the last run carry
   `"new": true`; they are also in the prompt. Both only come from people with write access to the repository.
+- `prior.json` also lists `withdrawn`: the findings withdrawn earlier, with their `id`, `title` and `reason` (the
+  newest 40). Their ids are closed and are not to be used again.
 - `diff-since-prior.patch` (only when `prior.json` exists and the comparison worked): what changed since then.
 
 The pull request itself: `gh pr view <PR> --json title,body,commits`, `gh pr diff <PR>`, and the checked-out files
@@ -35,6 +37,12 @@ at the head commit. `REVIEW.md` says what matters in this repository.
    `x.rs`, only a style preference, caught by clippy or the compiler, …). A design finding (`REVIEW.md` §3,
    "Design and maintainability") is not a style preference when its reason holds: check that the rule, the
    duplicated helper or the second copy it names really exists.
+   **Compare each finding with `withdrawn` in `prior.json`.** A finding that is about the same thing as a withdrawn
+   one, in other words, for another line or for the same code moved, is not new: check whether the `reason` still
+   holds at the head commit (the code it rests on is unchanged, see `diff-since-prior.patch`; the argument still
+   applies). If it does, put the finding in `discarded` with the reason "withdrawn as F7: <the reason in a few
+   words>" and do not list it in `findings`. Report it again only when the code changed in a way that voids the
+   reason, and say so in its `body`.
 3. **Set the severity yourself** (`high`, `medium`, `low` as defined in `REVIEW.md` §4) after verifying; do not
    just take the highest a reviewer gave. Correct `file` and `line` to the place the problem really is, preferably
    a line inside the diff.
