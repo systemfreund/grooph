@@ -56,7 +56,9 @@ pub(crate) fn drift_chart(ui: &mut egui::Ui, drift: &Drift) {
     response.on_hover_text(
         "Each dot is a hit, the line your average over about a bar: \
          drifting off the middle line means getting ahead of or behind \
-         the click. Shaded: silent bars. Crosses: missed notes",
+         the click. The band is the perfect window of notes that are not \
+         fast; fast notes get a narrower one, so a dot in it can still be \
+         good. Shaded: silent bars. Crosses: missed notes",
     );
     // Below the chart, where it hides no dot or cross.
     ui.label(

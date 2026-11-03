@@ -120,6 +120,9 @@ mod tests {
         assert_eq!(trend, vec![0.0, -40.0 / 3.0, -80.0 / 3.0, -40.0]);
         // Joined, and cut at the run's end.
         assert_eq!(drift.silent, vec![(2.0, 4.0)]);
+        // Silent bars in a row inside the run make one stretch.
+        let drift = log.finish([(11.0, 12.0), (12.0, 13.0)].into_iter()).unwrap();
+        assert_eq!(drift.silent, vec![(1.0, 3.0)]);
     }
 
     #[test]

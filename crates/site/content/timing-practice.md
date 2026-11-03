@@ -79,7 +79,8 @@ your average does.
 
 Below Tight, a chart shows the run over time: a dot for each hit, higher when late and
 lower when early, and a line for your average over about a bar. If the line wanders off
-the middle, you are rushing or dragging; the band around the middle is the perfect window.
+the middle, you are rushing or dragging; the band around the middle is the perfect window
+for notes that are not fast.
 Silent bars are shaded and missed notes are crosses along the bottom. The counts above sit
 under **Details**, which is folded away when the summary also shows the tables for a
 counter rhythm or silent bars.

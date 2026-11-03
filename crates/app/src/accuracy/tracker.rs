@@ -664,6 +664,22 @@ mod tests {
     }
 
     #[test]
+    fn an_edit_drops_the_hits_before_it_from_the_chart() {
+        let score = score_of_quarters(&[TimeSignature::FOUR_FOUR]);
+        let timing = ScoreTiming::from_score(&score, 120);
+        let mut tracker = AccuracyTracker::new();
+        tracker.on_playback_start_at(0.0, 0.0);
+        tracker.record_hit(0.010, &timing, &score);
+        tracker.record_hit(0.510, &timing, &score);
+        tracker.clear_for_edit();
+        tracker.record_hit(1.0, &timing, &score);
+        tracker.record_hit(1.5, &timing, &score);
+        tracker.on_playback_stop();
+        let drift = tracker.last_drift().expect("two hits after the edit");
+        assert_eq!(drift.hits.iter().map(|h| h.delta_ms.round()).collect::<Vec<_>>(), [0.0, 0.0]);
+    }
+
+    #[test]
     fn dropping_leading_ticks_moves_the_marks_back() {
         let score = score_of_quarters(&[TimeSignature::FOUR_FOUR, TimeSignature::FOUR_FOUR]);
         let timing = ScoreTiming::from_score(&score, 120);
