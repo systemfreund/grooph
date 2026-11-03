@@ -1621,6 +1621,11 @@ mod tests {
         app.select_tab(Tab::Practice);
         app.playback_ctl.accuracy.enabled = true;
         assert!(app.shows_accuracy_marks());
+        // Quarters: a generated rhythm can be all rests.
+        app.editor.docs.practice.score = Score::single(Measure::new_init(
+            TimeSignature::FOUR_FOUR,
+            grooph_measure::BeatKind::Note,
+        ));
         app.playback_ctl.accuracy.tracker.on_playback_start_at(0.0, 0.0);
         let timing = app.score_timing();
         let score = app.played_score().clone();

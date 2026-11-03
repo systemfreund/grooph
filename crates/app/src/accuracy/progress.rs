@@ -41,8 +41,9 @@ pub(super) fn update_progress(
         return;
     };
     // A step back by less than half the loop is no wrap: the clock was
-    // anchored ahead of the delayed time misses are judged at (see
-    // `Grooph::miss_delay_s`). Wait until it gets there.
+    // anchored ahead of the delayed time misses are judged at. Wait until
+    // it gets there. Holds while that delay stays below half the loop
+    // (`miss_delay_s` in play_along.rs keeps it to a quarter).
     if current_tick < last_tick && last_tick - current_tick < total * 0.5 {
         return;
     }

@@ -272,6 +272,24 @@ mod tests {
     }
 
     #[test]
+    fn a_late_hit_after_the_loop_end_counts_for_the_next_loop() {
+        // One bar of quarters at 120 BPM loops every 2 s.
+        let score = score_of_quarters(&[TimeSignature::FOUR_FOUR]);
+        let timing = ScoreTiming::from_score(&score, 120);
+        let mut tracker = AccuracyTracker::new();
+        tracker.on_playback_start_at(0.0, 0.0);
+        // The delayed cursor is still in the first loop (all missed) when a
+        // hit on the next loop's first note comes in.
+        tracker.update_progress(1.9, &timing, &score);
+        tracker.record_hit(2.02, &timing, &score);
+        // Past that note's window: it was hit, not missed.
+        tracker.update_progress(2.3, &timing, &score);
+        let summary = tracker.live_summary().unwrap();
+        assert_eq!((summary.hits, summary.misses), (1, 4));
+        assert!(matches!(tracker.mark_for_onset(0), Some(AccuracyMark::Hit { .. })));
+    }
+
+    #[test]
     fn progress_waits_when_anchored_ahead_of_its_clock() {
         let score = score_of_quarters(&[TimeSignature::FOUR_FOUR]);
         let timing = ScoreTiming::from_score(&score, 120);
