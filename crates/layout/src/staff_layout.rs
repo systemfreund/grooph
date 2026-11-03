@@ -384,11 +384,19 @@ pub fn build_staff_layout(score: &Score, opts: &StaffOpts) -> StaffLayout {
                     ..plan_measure_with(v, shares_line)
                 })
                 .collect();
-            // With the lower voice's rests left out (not just veiled), the
-            // upper voice's are set at full size, as with one voice.
             if let [upper, lower] = &mut plans[..] {
-                upper.full_rests =
-                    upper.rests == RestDisplay::Drawn && lower.rests == RestDisplay::Hidden;
+                // Both voices empty: one whole rest for both, where a voice
+                // alone has it (the upper voice's, veiled with its rests).
+                if upper.bar_rest && lower.bar_rest {
+                    lower.rests = RestDisplay::Hidden;
+                    upper.full_rests = upper.rests != RestDisplay::Hidden;
+                } else {
+                    // With the lower voice's rests left out (not just
+                    // veiled), the upper voice's are set at full size, as
+                    // with one voice.
+                    upper.full_rests =
+                        upper.rests == RestDisplay::Drawn && lower.rests == RestDisplay::Hidden;
+                }
             }
             plans
         })
@@ -962,11 +970,27 @@ mod tests {
         let score = parse_score("4/4 S:q S:q S:q S:q ; K:q r:q r:h").unwrap();
         let staff = build_staff_layout(&score, &on);
         assert!(staff.placed(0).unwrap().voices[1].notes.iter().all(|n| !n.hidden));
-        // Both voices empty: each its own whole rest, apart.
-        let score = parse_score("4/4 r:h r:h ; r:h r:h").unwrap();
+        // Both voices empty: one whole rest for both, hanging from the
+        // fourth line at full size; the lower voice's beats keep their
+        // hidden places.
+        let score = parse_score("kit 4/4 r:h r:h ; r:h r:h").unwrap();
         let staff = build_staff_layout(&score, &on);
         let [upper, lower] = &staff.placed(0).unwrap().voices[..] else { panic!("two voices") };
-        assert!(upper.notes[0].head.origin.y < lower.notes[0].head.origin.y);
+        let ss = on.rescaled(staff.scale).staff_space();
+        let fourth = staff.systems[0].y_baseline - ss;
+        assert_eq!(upper.notes[0].head.glyph, REST_WHOLE);
+        assert!((upper.notes[0].head.origin.y - fourth).abs() < 0.01, "{:?}", upper.notes[0]);
+        assert_eq!(upper.notes[0].head.size, on.rescaled(staff.scale).em);
+        assert!(lower.notes.iter().all(|n| n.hidden && n.glyphs().next().is_none()));
+        // With both voices' rests hidden the editor veils the one rest.
+        let mut score = score;
+        score.hidden_rests = grooph_measure::HiddenRests::Both;
+        let veiled = StaffOpts { veil_hidden_rests: true, ..on.clone() };
+        let staff = build_staff_layout(&score, &veiled);
+        let [upper, lower] = &staff.placed(0).unwrap().voices[..] else { panic!("two voices") };
+        assert!(upper.notes[0].veiled && !upper.notes[0].hidden);
+        assert!((upper.notes[0].head.origin.y - fourth).abs() < 0.01, "{:?}", upper.notes[0]);
+        assert!(lower.notes.iter().all(|n| n.hidden));
         // Off, the rests stay as written.
         let off = build_staff_layout(
             &parse_score("4/4 S:q S:q S:q S:q ; r:h r:h").unwrap(),

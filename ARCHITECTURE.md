@@ -154,7 +154,9 @@ spread across callers.
   hidden, they keep their layouts for the labels, the cursor and taps; the editor draws them veiled
   (`StaffOpts::veil_hidden_rests`, `NoteLayout::veiled`). With the lower voice's rests hidden, the upper
   voice's are set at full size (`RenderPlan::full_rests`), each in the middle where it keeps clear of the lower
-  voice's ink, else in its half. The score tab's Rests row picks it.
+  voice's ink, else in its half. A bar of two empty voices has one whole rest for both (the upper voice's,
+  where a voice alone has it; the lower voice's beats are hidden), as Gould writes a rest the voices share. The
+  score tab's Rests row picks it.
 - `Beat`, `VoiceBar` and `Measure` compare with `==` including their tuplet groups. Tests that build
   expected beats by hand (without marks) compare `beat::unmarked(..)`.
 
