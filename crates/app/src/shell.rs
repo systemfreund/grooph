@@ -685,21 +685,17 @@ impl Grooph {
         self.settings_picker(ui);
     }
 
-    /// The metronome tab above the tab bar: its card, options sheet and ring.
-    /// The staff goes in the room left.
-    /// Embedded, meter and tempo sit next to the play button instead, so the
-    /// staff and the ring get the card's room.
+    /// The metronome tab above the tab bar: its options sheet, with meter and
+    /// tempo, and the ring, with play in its middle. The staff goes in the
+    /// room left.
     pub(crate) fn metronome_page(&mut self, ui: &mut Ui) {
         self.metronome_sheet(ui);
-        if !self.embedded() {
-            self.metronome_card(ui);
-        }
-        self.staff_and_ring(ui, false);
+        self.staff_and_ring(ui);
     }
 
     /// The ring below the space left, the staff above it as tall as it
-    /// needs (see [`Self::metronome_ring`] for `play_in_middle`).
-    pub(crate) fn staff_and_ring(&mut self, ui: &mut Ui, play_in_middle: bool) {
+    /// needs.
+    pub(crate) fn staff_and_ring(&mut self, ui: &mut Ui) {
         let room = ui.available_height().max(0.0);
         let max = if self.counter_bar().is_some() {
             METRONOME_TWO_STAFF_MAX
@@ -711,7 +707,7 @@ impl Grooph {
         // or layout shows at once.
         let staff = self.metronome_staff_height(ui, ui.available_width()).min(max).min(room);
         let height = room - staff;
-        self.metronome_ring(ui, height, play_in_middle);
+        self.metronome_ring(ui, height);
     }
 
     fn tab_bar(&mut self, ui: &mut Ui, current: Tab) {
@@ -1193,7 +1189,7 @@ impl Grooph {
         }
     }
 
-    /// Metronome options and the play button.
+    /// Metronome options, meter and tempo.
     fn metronome_sheet(&mut self, ui: &mut Ui) {
         let mut card = None;
         let sheet = egui::Panel::bottom("shell_metronome")
@@ -1219,32 +1215,14 @@ impl Grooph {
         self.fold_sheet_on_flick(ui, sheet.response.rect, options);
     }
 
-    /// Centered play button, with share on the right; embedded, meter and
-    /// tempo on either side instead (see [`Self::metronome_page`]).
+    /// Meter on the left, tempo with − and + in the middle, share on the
+    /// right (not embedded): play is the ring's middle.
     fn metronome_transport(&mut self, ui: &mut Ui) {
         self.status_line(ui);
-        let playing = self.playback_ctl.transport_state == TransportState::Playing;
-        // Embedded, the meter and tempo cells beside play set the height.
-        let height =
-            if self.embedded() { PLAY_BUTTON_SIZE.max(CARD_CELL_HEIGHT) } else { PLAY_BUTTON_SIZE };
-        let (row, _) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
-        let size = Vec2::splat(PLAY_BUTTON_SIZE);
-        let fill = ui.visuals().selection.bg_fill;
-        let icon = ui.visuals().selection.stroke.color;
-        if round_button_at(
-            ui,
-            Rect::from_center_size(row.center(), size),
-            Id::unique("metronome_play"),
-            fill,
-            icon,
-            |painter, rect, color| paint_play_icon(painter, rect, color, playing),
-        )
-        .clicked()
-        {
-            self.toggle_playback();
-        }
+        let (row, _) =
+            ui.allocate_exact_size(vec2(ui.available_width(), CARD_CELL_HEIGHT), Sense::hover());
+        self.transport_cells(ui, row);
         if self.embedded() {
-            self.transport_cells(ui, row);
             return;
         }
         if round_button_at(
@@ -1262,21 +1240,18 @@ impl Grooph {
         }
     }
 
-    /// Meter left and tempo right of the play button in `row`, as in the
-    /// card; a tap opens the picker.
+    /// Meter at the left of `row` and tempo in its middle, as in the card (a
+    /// tap opens the picker), with − and + beside the tempo.
     fn transport_cells(&mut self, ui: &mut Ui, row: Rect) {
-        const GAP: f32 = 12.0;
-        const MAX_WIDTH: f32 = 140.0;
+        const METER_WIDTH: f32 = 76.0;
+        const TEMPO_WIDTH: f32 = 72.0;
+        const STEP_SIZE: f32 = 40.0;
         let music = self.ui.music_font_id.family.clone();
-        let width = ((row.width() - PLAY_BUTTON_SIZE) / 2.0 - GAP).min(MAX_WIDTH);
-        let size = vec2(width, CARD_CELL_HEIGHT);
-        let left = row.center() - vec2(PLAY_BUTTON_SIZE / 2.0 + GAP + width / 2.0, 0.0);
-        let right = row.center() + vec2(PLAY_BUTTON_SIZE / 2.0 + GAP + width / 2.0, 0.0);
+        let meter = Rect::from_min_size(row.left_top(), vec2(METER_WIDTH, CARD_CELL_HEIGHT));
+        let tempo = Rect::from_center_size(row.center(), vec2(TEMPO_WIDTH, CARD_CELL_HEIGHT));
         let mut picked = None;
-        for ((picker, label, value), center) in
-            self.metronome_cells().into_iter().zip([left, right])
+        for ((picker, label, value), rect) in self.metronome_cells().into_iter().zip([meter, tempo])
         {
-            let rect = Rect::from_center_size(center, size);
             let builder = UiBuilder::new().max_rect(rect).id_salt(label);
             if ui.scope_builder(builder, |ui| card_cell(ui, label, &value, &music)).inner.clicked()
             {
@@ -1285,6 +1260,30 @@ impl Grooph {
         }
         if picked.is_some() {
             self.ui.picker = picked;
+        }
+        let mut step = 0;
+        let steps = [("−", -1, "Slower", tempo.left()), ("+", 1, "Faster", tempo.right())];
+        for (text, delta, hint, edge) in steps {
+            let x = edge + delta as f32 * (2.0 + STEP_SIZE / 2.0);
+            let rect = Rect::from_center_size(pos2(x, row.center().y), Vec2::splat(STEP_SIZE));
+            let paint = |painter: &Painter, rect: Rect, color: Color32| {
+                painter.text(
+                    rect.center(),
+                    Align2::CENTER_CENTER,
+                    text,
+                    FontId::proportional(22.0),
+                    color,
+                );
+            };
+            let id = Id::unique("metronome_step").with(delta);
+            let fill = ui.visuals().extreme_bg_color;
+            let color = ui.visuals().strong_text_color();
+            if round_button_at(ui, rect, id, fill, color, paint).on_hover_text(hint).clicked() {
+                step = delta;
+            }
+        }
+        if step != 0 {
+            self.step_bpm(step);
         }
     }
 

@@ -283,7 +283,7 @@ impl Grooph {
         }
         if self.compact_card() {
             self.tempo_row(ui);
-            self.staff_and_ring(ui, true);
+            self.staff_and_ring(ui);
         } else {
             self.metronome_page(ui);
         }
@@ -376,7 +376,7 @@ impl Grooph {
     }
 
     /// One BPM faster (`delta` 1) or slower (-1), within the tempo range.
-    fn step_bpm(&mut self, delta: i64) {
+    pub(crate) fn step_bpm(&mut self, delta: i64) {
         let bpm = (i64::from(self.playback_ctl.bpm) + delta).clamp(MIN_BPM.into(), MAX_BPM.into());
         self.playback_ctl.bpm = bpm as u32;
         self.handle_bpm_change();

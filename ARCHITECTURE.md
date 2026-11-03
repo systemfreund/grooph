@@ -400,9 +400,9 @@ grooph's metronome runs inside AI chats as an
   (count-in beats on it while counting in, stop while playing); no menus or popovers, as Claude's guidelines ask. The view
   passes the display mode as `groophHost.displayMode`/`displayModes` and
   asks for fullscreen with `ui/request-display-mode`. In fullscreen, or on
-  a host without it, it is the Metronome tab without the tab bar and the
-  card on top: meter and tempo sit left and right of the play button, the
-  options sheet has "Open in grooph" instead of share and no "Edit clicks". The theme follows
+  a host without it, it is the Metronome tab without the tab bar (meter,
+  tempo with − and + in the bar, play in the ring's middle, as in the app);
+  the options sheet has "Open in grooph" instead of share and no "Edit clicks". The theme follows
   the host (`groophHost.theme`, the view calls `groophHost.repaint`), and so
   do its colors: the view resolves the host's style variables
   (`hostContext.styles.variables`, may use `light-dark()`) to
@@ -614,7 +614,7 @@ grooph's metronome runs inside AI chats as an
   session on every change.
 
 - Metronome tab (`crates/app/src/metronome_view.rs`): its own meter
-  (persisted, picked in the tab's card), separate from the generator's.
+  (persisted, picked in the tab's bar), separate from the generator's.
   The tab's document (`EditorState::docs.metronome`, see "Rhythm
   documents") is the one source of the meter's click bar and counter
   rhythm, open or not, and its bar's meter is the metronome's
@@ -641,8 +641,10 @@ grooph's metronome runs inside AI chats as an
   was last picked. The metronome's meter and the rhythm's never change each
   other (Practice's meter picker, the editor's meter cell, which opens `Picker::BarMeter`, the metronome's meter grid on the cursor's bar). The staff gets a share of the free height
   (`METRONOME_STAFF_SHARE`), the ring the rest; the options sheet folds away
-  like Practice's (shared `options_collapsed`). While playing, the click and beat being heard light
-  up and the middle shows the bar number. Switching into or out of the tab
+  like Practice's (shared `options_collapsed`); its bar holds the meter, the
+  tempo with − and + and share. The ring's middle is the play button
+  (count-in beats on it while counting in, stop while playing). While
+  playing, the click and beat being heard light up. Switching into or out of the tab
   stops playback.
 
 ## Play along (accuracy)
@@ -781,7 +783,7 @@ grooph's metronome runs inside AI chats as an
 - Share (right of play; not in the editors) builds a score link with tempo
   and swing; on the web it opens the system share sheet
   (`platform::open_share_sheet`, Web Share API), else copies the link. In the
-  Metronome tab, share (right of play) builds a `ts` link with tempo, swing
+  Metronome tab, share (right in the bar) builds a `ts` link with tempo, swing
   and the click bar instead.
 - Keyboard shortcuts are ignored while a text field has the focus.
 
