@@ -16,7 +16,8 @@ following `REVIEW.md`. You turn their answers into one review. A script posts yo
 - `prior.json` (only from the second run on): the findings of the previous review that were still open, with their
   `id` (`F1`, `F2`, …), and the commit that review saw (`reviewed_sha`). A finding people answered in its inline
   thread has their answers in `replies`; `discussion` holds what they wrote since the first review, in the conversation of the pull request and in
-  inline comments outside the threads of open findings (with `path` and `line`). Both only come from people with write access to the repository.
+  inline comments outside the threads of open findings (with `path` and `line`). Entries written since the last run carry
+  `"new": true`; they are also in the prompt. Both only come from people with write access to the repository.
 - `diff-since-prior.patch` (only when `prior.json` exists and the comparison worked): what changed since then.
 
 The pull request itself: `gh pr view <PR> --json title,body,commits`, `gh pr diff <PR>`, and the checked-out files

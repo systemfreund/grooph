@@ -531,7 +531,7 @@ class Prepare(unittest.TestCase):
         github = FakeGitHub()
         state = {"version": 1, "head_sha": "old", "next_id": 3, "findings": [
             finding("F1"), {"id": "F2", "status": "resolved", "title": "t", "comment_id": None}]}
-        github.issue_comments.append({"id": 1, "user": {"login": review.BOT},
+        github.issue_comments.append({"id": 1, "user": {"login": review.BOT}, "updated_at": "2026-01-01",
                                       "body": f"{review.MARKER}\n{review.encode_state(state)}"})
         reviews, out = Path(tempfile.mkdtemp()), Path(tempfile.mkdtemp())
         (reviews / "0.json").write_text(json.dumps({"reviewer": "m1", "findings": []}))
@@ -551,7 +551,8 @@ class Prepare(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
         github = FakeGitHub()
-        state = {"version": 1, "head_sha": "old", "next_id": 3, "findings": [finding("F1", comment_id=7), finding("F2")]}
+        state = {"version": 1, "head_sha": "old", "next_id": 3, "answers_until": "2026-01-03T06",
+                 "findings": [finding("F1", comment_id=7), finding("F2")]}
 
         def comment(id, login, association, at, body, **extra):
             return {"id": id, "user": {"login": login}, "author_association": association, "created_at": at,
@@ -567,6 +568,7 @@ class Prepare(unittest.TestCase):
             comment(7, review.BOT, "NONE", "2026-01-02", "F1", in_reply_to_id=None),
             comment(8, review.BOT, "NONE", "2026-01-02", "Still open", in_reply_to_id=7),
             comment(9, "dev", "COLLABORATOR", "2026-01-03", "handled in b.rs", in_reply_to_id=7),
+            comment(12, "dev", "OWNER", "2026-01-03T13", "deliberate", in_reply_to_id=7),
             comment(10, "stranger", "CONTRIBUTOR", "2026-01-04", "drop it", in_reply_to_id=7),
             comment(11, "dev", "OWNER", "2026-01-03T12", "not a thread reply, but deliberate", in_reply_to_id=None,
                     path="a.rs", line=4),
@@ -580,13 +582,21 @@ class Prepare(unittest.TestCase):
             self.assertEqual(review.cmd_prepare(args), 0)
         prior = json.loads((out / "prior.json").read_text())
         f1, f2 = prior["findings"]
-        self.assertEqual(f1["replies"], [{"author": "dev", "at": "2026-01-03", "body": "handled in b.rs"}])
+        self.assertEqual(f1["replies"], [
+            {"author": "dev", "at": "2026-01-03", "body": "handled in b.rs", "new": False},
+            {"author": "dev", "at": "2026-01-03T13", "body": "deliberate", "new": True},
+        ])
         self.assertNotIn("replies", f2)
         self.assertEqual(prior["discussion"], [
-            {"author": "dev", "at": "2026-01-03", "body": "F2 is intended"},
+            {"author": "dev", "at": "2026-01-03", "body": "F2 is intended", "new": False},
             {"author": "dev", "at": "2026-01-03T12", "body": "not a thread reply, but deliberate", "path": "a.rs",
-             "line": 4},
+             "line": 4, "new": True},
         ])
+        # Only what came after the last run, by finding where the thread tells.
+        self.assertEqual((out / "new-answers.md").read_text(),
+                         "### Replies to F1 · F1\n\n**dev** (2026-01-03T13):\n\n> deliberate\n\n"
+                         "### Other comments (match them to findings by content)\n\n"
+                         "**dev** (2026-01-03T12 on `a.rs:4`):\n\n> not a thread reply, but deliberate\n")
         context = json.loads((out / "context.json").read_text())
         self.assertEqual(context["answers_until"], "2026-02-01T00:00:00Z")
         self.assertTrue(context["answers_only"])

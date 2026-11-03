@@ -275,6 +275,15 @@ jobs:
           python3 .github/review/review.py prepare --repo "$GITHUB_REPOSITORY" --pr "$PR" --head "$HEAD" \
             --reviews review-output --out review-input "$@"
 
+      - name: Read the new answers
+        id: answers
+        # prepare writes them only when there are some; they go straight into the prompt.
+        run: |
+          if [ -s review-input/new-answers.md ]; then
+            delimiter="EOF_$(openssl rand -hex 16)"
+            { echo "text<<$delimiter"; cat review-input/new-answers.md; echo "$delimiter"; } >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Synthesize
         uses: ./.github/actions/opencode-review
         with:
@@ -293,6 +302,13 @@ jobs:
             follow it exactly; the inputs are in review-input/. Do not post anything to GitHub and
             do not modify any files: your final answer is the JSON object described there, and
             nothing else.
+            ${{ steps.answers.outputs.text && format('
+
+            People answered the previous review since its last run. Decide each finding they answer
+            as SYNTHESIS.md says (step 5); the answers are also in review-input/prior.json, marked
+            "new": true:
+
+            {0}', steps.answers.outputs.text) || '' }}
 
       - name: Upload the synthesis
         if: ${{ !cancelled() }}

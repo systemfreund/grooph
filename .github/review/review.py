@@ -189,6 +189,37 @@ def discussion(summary, comments, review_comments=(), open_findings=()):
     return sorted(conversation + inline, key=lambda c: c["at"])
 
 
+def mark_new(prior, seen):
+    """Marks each reply and discussion entry written after the last run (`seen`) with `"new": true`."""
+    for entry in [r for f in prior["findings"] for r in f.get("replies", [])] + prior["discussion"]:
+        entry["new"] = entry["at"] > seen
+
+
+# The text goes into the synthesis prompt; keep it well below the size of one command-line argument.
+MAX_NEW_ANSWERS = 50000
+
+
+def new_answers_text(prior):
+    """The answers since the last run as Markdown, by finding where the answer is in its thread."""
+    def quote(entry):
+        where = f" on `{entry['path']}:{entry['line']}`" if entry.get("path") else ""
+        return f"**{entry['author']}** ({entry['at']}{where}):\n\n" + "\n".join(
+            "> " + row for row in entry["body"].splitlines()) + "\n"
+
+    parts = []
+    for f in prior["findings"]:
+        new = [r for r in f.get("replies", []) if r.get("new")]
+        if new:
+            parts.append(f"### Replies to {f['id']} · {f.get('title') or ''}\n\n" + "\n".join(map(quote, new)))
+    new = [d for d in prior["discussion"] if d.get("new")]
+    if new:
+        parts.append("### Other comments (match them to findings by content)\n\n" + "\n".join(map(quote, new)))
+    text = "\n".join(parts)
+    if len(text) > MAX_NEW_ANSWERS:
+        text = text[:MAX_NEW_ANSWERS] + "\n\n[cut here; all answers are in prior.json, marked \"new\": true]\n"
+    return text
+
+
 def new_answers(summary, state, review_comments, comments):
     """Answers the synthesis has not seen yet: replies in the thread of an open finding, and comments in the
     conversation that name a finding."""
@@ -268,7 +299,11 @@ def cmd_prepare(args):
             "findings": with_replies(open_findings, review_comments),
             "discussion": discussion(summary, comments, review_comments, open_findings),
         }
+        mark_new(prior, state.get("answers_until") or summary["updated_at"])
         (out / "prior.json").write_text(json.dumps(prior, indent=2, ensure_ascii=False))
+        text = new_answers_text(prior)
+        if text:
+            (out / "new-answers.md").write_text(text)
         diff = gh(
             "api",
             "-H",
