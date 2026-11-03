@@ -23,7 +23,8 @@ name: Code review
 # newer review cancels the running one. With the automatic triggers on (see
 # `on:`), every push to a pull request starts a review.
 #
-# A comment, or "Run workflow" with mode `answers`, runs only the synthesis again,
+# A comment (through code-review-answers.yml, once the comments stop), or "Run
+# workflow" with mode `answers`, runs only the synthesis again,
 # with the reviews of the last run, when someone with write access answered a
 # finding since: a reply in its thread, or a comment in the conversation that
 # names it (F3). `review.py rerun` decides; it looks at all answers since the last
@@ -40,10 +41,11 @@ name: Code review
 #
 # Needs the repository secret VENICE_API_KEY.
 
-# Only started by hand for now, to keep the cost down: the automatic triggers (pull_request with
-# [opened, reopened, ready_for_review, synchronize], issue_comment and pull_request_review_comment, each
-# with [created]) are switched off. The jobs still handle those events, so adding them back here turns
-# the automatic reviews and the comment runs on again.
+# Full reviews are only started by hand for now, to keep the cost down: the pull_request trigger (with
+# [opened, reopened, ready_for_review, synchronize]) is switched off. The jobs still handle it, so adding it
+# back here turns the automatic reviews on again. Comments start an answers run through
+# code-review-answers.yml, which waits until the comments stop and then runs this workflow with mode
+# `answers`; the jobs here still handle issue_comment and pull_request_review_comment too.
 on:
   workflow_dispatch:
     inputs:
@@ -273,6 +275,15 @@ jobs:
           python3 .github/review/review.py prepare --repo "$GITHUB_REPOSITORY" --pr "$PR" --head "$HEAD" \
             --reviews review-output --out review-input "$@"
 
+      - name: Read the new answers
+        id: answers
+        # prepare writes them only when there are some; they go straight into the prompt.
+        run: |
+          if [ -s review-input/new-answers.md ]; then
+            delimiter="EOF_$(openssl rand -hex 16)"
+            { echo "text<<$delimiter"; cat review-input/new-answers.md; echo "$delimiter"; } >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Synthesize
         uses: ./.github/actions/opencode-review
         with:
@@ -291,6 +302,13 @@ jobs:
             follow it exactly; the inputs are in review-input/. Do not post anything to GitHub and
             do not modify any files: your final answer is the JSON object described there, and
             nothing else.
+            ${{ steps.answers.outputs.text && format('
+
+            People answered the previous review since its last run. Decide each finding they answer
+            as SYNTHESIS.md says (step 5); the answers are also in review-input/prior.json, marked
+            "new": true:
+
+            {0}', steps.answers.outputs.text) || '' }}
 
       - name: Upload the synthesis
         if: ${{ !cancelled() }}

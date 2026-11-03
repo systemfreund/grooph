@@ -33,6 +33,8 @@ FINDING_MARKER = "<!-- grooph-finding:{} -->"
 FINDING_MARKER_RE = re.compile(r"<!-- grooph-finding:(F\d+) -->")
 FINDING_ID_RE = re.compile(r"\bF\d+\b")
 UPDATED_RE = re.compile(r"^> \*\*Updated in `[^`]+`\*\*, see the latest reply\.\n\n")
+# What a finding is about, set by the synthesis; the review lenses' areas (REVIEW.md §1-3, the Rust review).
+DOMAINS = {"requirements", "correctness", "music", "design", "rust"}
 SEVERITY_ICON = {"high": "🔴", "medium": "🟠", "low": "🟡"}
 VERDICT_ICON = {"met": "✅ Met", "partly": "⚠️ Partly met", "not_met": "❌ Not met", "unclear": "❓ Unclear"}
 # GitHub rejects comments over 65536 characters.
@@ -171,13 +173,53 @@ def with_replies(findings, review_comments):
     return [{**f, "replies": replies[f["comment_id"]]} if f.get("comment_id") in replies else f for f in findings]
 
 
-def discussion(summary, comments):
-    """What people wrote in the conversation of the pull request since the first review."""
-    return [
+def discussion(summary, comments, review_comments=(), open_findings=()):
+    """What people wrote in the pull request since the first review: in the conversation, and in inline comments
+    that are not a reply in the thread of an open finding (those are in `replies`). A comment that answers a
+    finding may be posted as a new inline comment or in the conversation without naming it."""
+    threads = {f["comment_id"] for f in open_findings if f.get("comment_id")}
+    inline = [
+        {**human_comment(c), "path": c.get("path"), "line": c.get("line")}
+        for c in review_comments
+        if from_people(c) and c.get("in_reply_to_id") not in threads and c["created_at"] > summary["created_at"]
+    ]
+    conversation = [
         human_comment(c)
         for c in comments
         if c["id"] != summary["id"] and from_people(c) and c["created_at"] > summary["created_at"]
     ]
+    return sorted(conversation + inline, key=lambda c: c["at"])
+
+
+def mark_new(prior, seen):
+    """Marks each reply and discussion entry written after the last run (`seen`) with `"new": true`."""
+    for entry in [r for f in prior["findings"] for r in f.get("replies", [])] + prior["discussion"]:
+        entry["new"] = entry["at"] > seen
+
+
+# The text goes into the synthesis prompt; keep it well below the size of one command-line argument.
+MAX_NEW_ANSWERS = 50000
+
+
+def new_answers_text(prior):
+    """The answers since the last run as Markdown, by finding where the answer is in its thread."""
+    def quote(entry):
+        where = f" on `{entry['path']}:{entry['line']}`" if entry.get("path") else ""
+        return f"**{entry['author']}** ({entry['at']}{where}):\n\n" + "\n".join(
+            "> " + row for row in entry["body"].splitlines()) + "\n"
+
+    parts = []
+    for f in prior["findings"]:
+        new = [r for r in f.get("replies", []) if r.get("new")]
+        if new:
+            parts.append(f"### Replies to {f['id']} · {f.get('title') or ''}\n\n" + "\n".join(map(quote, new)))
+    new = [d for d in prior["discussion"] if d.get("new")]
+    if new:
+        parts.append("### Other comments (match them to findings by content)\n\n" + "\n".join(map(quote, new)))
+    text = "\n".join(parts)
+    if len(text) > MAX_NEW_ANSWERS:
+        text = text[:MAX_NEW_ANSWERS] + "\n\n[cut here; all answers are in prior.json, marked \"new\": true]\n"
+    return text
 
 
 def new_answers(summary, state, review_comments, comments):
@@ -253,12 +295,17 @@ def cmd_prepare(args):
     prior = None
     if state:
         open_findings = [f for f in state["findings"] if f["status"] == "open"]
+        review_comments = gh_paginated(f"repos/{args.repo}/pulls/{args.pr}/comments")
         prior = {
             "reviewed_sha": state["head_sha"],
-            "findings": with_replies(open_findings, gh_paginated(f"repos/{args.repo}/pulls/{args.pr}/comments")),
-            "discussion": discussion(summary, comments),
+            "findings": with_replies(open_findings, review_comments),
+            "discussion": discussion(summary, comments, review_comments, open_findings),
         }
+        mark_new(prior, state.get("answers_until") or summary["updated_at"])
         (out / "prior.json").write_text(json.dumps(prior, indent=2, ensure_ascii=False))
+        text = new_answers_text(prior)
+        if text:
+            (out / "new-answers.md").write_text(text)
         diff = gh(
             "api",
             "-H",
@@ -345,6 +392,7 @@ def merge_state(prior, synthesis, head):
     still_open = set()
     for item in synthesis.get("findings") or []:
         fields = {k: item.get(k) for k in ("severity", "title", "file", "body")}
+        fields["domain"] = item.get("domain") if item.get("domain") in DOMAINS else None
         fields["line"] = as_line(item.get("line"))
         fields["found_by"] = item.get("found_by") or []
         f = by_id.get(item.get("id"))
@@ -383,7 +431,7 @@ def merge_state(prior, synthesis, head):
 def encode_state(state, limit=None, closed=True):
     """The hidden state block. `limit` shortens the text of open findings, `closed=False` drops closed ones."""
     # Closed findings only need what the "Resolved earlier" list and the reply to their thread need.
-    kept = ("id", "status", "title", "resolution", "resolved_in", "comment_id", "replied")
+    kept = ("id", "status", "title", "domain", "resolution", "resolved_in", "comment_id", "replied")
 
     def store(f):
         if f["status"] != "open":
