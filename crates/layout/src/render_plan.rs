@@ -23,7 +23,7 @@ pub struct RenderPlan {
     /// Tuplet runs (logical start..=end in beat indices). Whether the tuplet can be shown as
     /// number-only or requires a bracket is decided here based on musical semantics, not pixels.
     pub tuplets: Vec<TupletPlan>,
-    /// Draw the measure, all rests (see [`rests_only`]), as one whole rest
+    /// Draw the voice, all rests (see [`rests_only`]), as one whole rest
     /// in its middle: the usual rest for an empty bar in every meter. Set
     /// by the staff layout; the beats keep their layouts, only hidden.
     pub bar_rest: bool,

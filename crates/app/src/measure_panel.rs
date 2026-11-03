@@ -85,9 +85,10 @@ impl Grooph {
             } else {
                 0.0
             },
-            // While editing every rest stays to be picked, and
-            // in the metronome every click its own to tap.
-            bar_rests: self.ui.mode != Mode::Edit && !self.metronome_mode(),
+            // In the metronome every click is its own to tap. The editor
+            // shows the whole rest too: its beats keep their places for the
+            // cursor and the taps.
+            bar_rests: !self.metronome_mode(),
         }
     }
 

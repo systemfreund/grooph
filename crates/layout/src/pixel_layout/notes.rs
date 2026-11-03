@@ -560,14 +560,15 @@ pub(super) fn build_note_layout(
     note_layout
 }
 
-/// Draw the rests of an empty bar as one whole rest, hanging from the line
-/// in the middle of the note area; its other rests are hidden. Every beat
-/// keeps its place, for the count labels and the playback cursor.
+/// Draw the rests of an empty voice as one whole rest, hanging from the line
+/// in the middle of the note area (in the voice's half with two voices on
+/// the kit's staff); its other rests are hidden. Every beat keeps its place,
+/// for the count labels, the playback cursor and the editor's.
 fn bar_rest(notes: &mut [NoteLayout], rect: &Rect, opts: &LayoutOpts) {
     for (i, note) in notes.iter_mut().enumerate() {
         note.dots.clear();
         if i == 0 {
-            let y = opts.y_of(opts.staff_model().bar_rest_pos());
+            let y = opts.y_of(opts.staff_model().bar_rest_pos(opts.voicing()));
             note.head = PlacedGlyph::centered(glyphs::REST_WHOLE, rect.center().x, y, opts.em);
         } else {
             note.hidden = true;

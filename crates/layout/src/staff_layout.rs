@@ -71,9 +71,9 @@ pub struct StaffOpts {
     /// Room under a lower voice's notes in em, for count labels: 0 or
     /// [`LOWER_VOICE_LABEL_ROOM_EM`].
     pub lower_label_room_em: f32,
-    /// Draw a measure of rests only as one whole rest (see
-    /// [`RenderPlan::bar_rest`]), unless a lower voice shares its line. Off
-    /// while editing, so each rest shows and can be picked.
+    /// Draw a voice of rests only as one whole rest (see
+    /// [`RenderPlan::bar_rest`]), unless another voice shares its line. Off
+    /// in the metronome, where every click is its own to tap.
     pub bar_rests: bool,
 }
 
@@ -340,20 +340,20 @@ pub fn build_staff_layout(score: &Score, opts: &StaffOpts) -> StaffLayout {
         .collect();
 
     // 2. natural widths at the baseline em. Each voice is planned (beams,
-    // tuplets) once, for its width and its layout. With several voices they
-    // share the staff and no bar shows as one whole rest. Sharing one line,
-    // every beamed rest is then a stemlet, clear of the line; on the kit's
-    // five lines rests have their own places, so they stay rests, as in
-    // drum notation.
+    // tuplets) once, for its width and its layout. A voice of rests only
+    // shows as one whole rest, in its half with several voices on the kit's
+    // five lines. Sharing one line it does not: every beamed rest is then a
+    // stemlet, clear of the line; on the kit's five lines rests have their
+    // own places, so they stay rests, as in drum notation.
     let voices = |i: usize| score.measures()[i].voices();
     let plans: Vec<Vec<RenderPlan>> = (0..score.len())
         .map(|i| {
-            let shared = voices(i).len() > 1;
+            let shares_line = voices(i).len() > 1 && staff.one_line();
             voices(i)
                 .iter()
                 .map(|v| RenderPlan {
-                    bar_rest: opts.bar_rests && !shared && rests_only(v),
-                    ..plan_measure_with(v, shared && staff.one_line())
+                    bar_rest: opts.bar_rests && !shares_line && rests_only(v),
+                    ..plan_measure_with(v, shares_line)
                 })
                 .collect()
         })
@@ -870,6 +870,64 @@ mod tests {
         assert_eq!(rest.head.glyph, crate::glyphs::REST_WHOLE);
         let fourth = empty.y_baseline - o.rescaled(staff.scale).staff_space();
         assert!((rest.head.origin.y - fourth).abs() < 0.01, "{rest:?}");
+    }
+
+    #[test]
+    fn an_empty_voice_hangs_its_whole_rest_in_its_half_of_the_kit() {
+        use crate::glyphs::REST_WHOLE;
+        use grooph_measure::notation::parse_score;
+        let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(900.0, 400.0));
+        let on = StaffOpts { bar_rests: true, ..opts(20.0, rect) };
+        // (score, the empty voice, the line it hangs from, in staff spaces
+        // above the middle line). The other voice keeps its notes.
+        for (text, voice, line) in [
+            ("4/4 S:q S:q S:q S:q ; r:h r:h", 1, -1.0),
+            ("3/4 H:q H:q H:q ; r:h r:q", 1, -1.0),
+            ("7/8 H:e H:e H:e H:e H:e H:e H:e ; r:q r:q. r:q", 1, -1.0),
+            ("4/4 r:h r:h ; K:q K:q K:q K:q", 0, 1.0),
+            ("3/4 r:q r:h ; K:q K:q K:q", 0, 1.0),
+        ] {
+            let score = parse_score(text).unwrap();
+            let staff = build_staff_layout(&score, &on);
+            let placed = staff.placed(0).unwrap();
+            let ss = on.rescaled(staff.scale).staff_space();
+            let empty = &placed.voices[voice].notes;
+            assert_eq!(empty[0].head.glyph, REST_WHOLE, "{text}");
+            assert!(empty[1..].iter().all(|n| n.hidden), "{text}");
+            let want = staff.systems[0].y_baseline - line * ss;
+            assert!((empty[0].head.origin.y - want).abs() < 0.01, "{text}: {:?}", empty[0]);
+            // The other voice's notes are untouched.
+            let other = &placed.voices[1 - voice].notes;
+            assert!(other.iter().all(|n| !n.hidden && n.head.glyph != REST_WHOLE), "{text}");
+        }
+        // A voice with a note keeps its rests, in the lower voice too.
+        let score = parse_score("4/4 S:q S:q S:q S:q ; K:q r:q r:h").unwrap();
+        let staff = build_staff_layout(&score, &on);
+        assert!(staff.placed(0).unwrap().voices[1].notes.iter().all(|n| !n.hidden));
+        // Both voices empty: each its own whole rest, apart.
+        let score = parse_score("4/4 r:h r:h ; r:h r:h").unwrap();
+        let staff = build_staff_layout(&score, &on);
+        let [upper, lower] = &staff.placed(0).unwrap().voices[..] else { panic!("two voices") };
+        assert!(upper.notes[0].head.origin.y < lower.notes[0].head.origin.y);
+        // Off, the rests stay as written.
+        let off = build_staff_layout(
+            &parse_score("4/4 S:q S:q S:q S:q ; r:h r:h").unwrap(),
+            &opts(20.0, rect),
+        );
+        assert!(off.placed(0).unwrap().voices[1].notes.iter().all(|n| !n.hidden));
+    }
+
+    #[test]
+    fn two_voices_sharing_the_one_line_keep_their_rests() {
+        use grooph_measure::notation::parse_score;
+        let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(900.0, 400.0));
+        let on = StaffOpts { bar_rests: true, ..opts(20.0, rect) };
+        let score =
+            with_lower(&parse_score("4/4 q q q q").unwrap(), &parse_score("4/4 r:h r:h").unwrap());
+        let staff = build_staff_layout(&score, &on);
+        let placed = staff.placed(0).unwrap();
+        assert_eq!(placed.voices.len(), 2);
+        assert!(placed.voices.iter().all(|v| v.notes.iter().all(|n| !n.hidden)));
     }
 
     #[test]
@@ -1473,7 +1531,15 @@ mod tests {
             let other = &staff.placed(1).unwrap().layout().notes;
             assert!(other.iter().all(|n| !n.hidden));
         }
-        // Off (while editing) and in triplets, the rests stay as written.
+        // The hidden beats keep their places: taps and the editor's cursor
+        // still find each beat.
+        let score = parse_score("3/4 r:h r:q").unwrap();
+        let staff = build_staff_layout(&score, &on);
+        let notes = &staff.placed(0).unwrap().layout().notes;
+        for (i, note) in notes.iter().enumerate() {
+            assert_eq!(hit_test_staff(&staff, note.center), Some((0, i)));
+        }
+        // Off (the metronome) and in triplets, the rests stay as written.
         let score = parse_score("4/4 r:h r:h").unwrap();
         let off = build_staff_layout(&score, &opts(em, rect));
         assert!(off.placed(0).unwrap().layout().notes.iter().all(|n| !n.hidden));

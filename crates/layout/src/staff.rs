@@ -145,10 +145,11 @@ impl Staff {
         }
     }
 
-    /// Where an empty bar's whole rest hangs: as a whole rest of a voice
-    /// alone.
-    pub fn bar_rest_pos(&self) -> i8 {
-        (self.rest_place)(&Beat::rest(Duration::Simple(NoteValue::Whole)), Voicing::default())
+    /// Where an empty voice's whole rest hangs: as a whole rest of a voice
+    /// of `voicing` does, so with two voices on the kit's staff each in its
+    /// own half. (Not drawn on a shared line: see [`Staff::shares_line`].)
+    pub fn bar_rest_pos(&self, voicing: Voicing) -> i8 {
+        (self.rest_place)(&Beat::rest(Duration::Simple(NoteValue::Whole)), voicing)
     }
 
     /// The ledger lines a glyph at `pos` needs: one at every line position
@@ -197,8 +198,9 @@ fn clear_of_line(rest: glyphs::Glyph, below: bool) -> i8 {
 /// from it. On a line shared by two voices each rest clears the line on its
 /// voice's side, and a lower voice's half rest, which would sit on it,
 /// moves to a ledger line a staff space below. (A whole rest, hanging from
-/// the line, would need one above in the upper voice, but no meter holds a
-/// whole note.)
+/// the line, would need one above in the upper voice. It keeps the line: the
+/// whole rest value is rare, only in 4/4 (`whole_rest_fits`), and an empty
+/// voice's whole rest is not drawn on a shared line.)
 fn line_rest_place(beat: &Beat, voicing: Voicing) -> i8 {
     debug_assert_eq!(beat.kind(), BeatKind::Rest);
     let base = beat.duration.base_note();
