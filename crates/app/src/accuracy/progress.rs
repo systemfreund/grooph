@@ -5,18 +5,27 @@ use grooph_measure::tempo::ScoreTiming;
 
 use super::session::{
     AccuracyMark, GlobalBeatOnset, RecordingData, TRACKED_VOICES, VoiceTally,
-    compute_global_beat_onsets, tallies_of,
+    compute_global_beat_onsets, loop_offset, tallies_of,
 };
 
-/// Advance the progress cursor and mark any note onsets whose hit window has
-/// elapsed as `Miss`. Wraps detected when the global tick decreases across a
-/// frame (= score loop just completed).
+/// Advance the progress cursor to `delay_s` before `now_seconds` and mark
+/// any note onsets whose hit window has elapsed as `Miss`. Wraps detected
+/// when the global tick decreases across a frame (= score loop just
+/// completed).
 pub(super) fn update_progress(
     data: &mut RecordingData,
     now_seconds: f64,
+    delay_s: f64,
     timing: &ScoreTiming,
     score: &Score,
 ) {
+    // A longer delay than before moves the cursor's time back, as anchoring
+    // the clock does.
+    if delay_s > data.miss_delay_s {
+        data.anchored_ahead = true;
+    }
+    data.miss_delay_s = delay_s;
+    let now_seconds = now_seconds - delay_s;
     let total_ticks = timing.total_loop_ticks();
     if total_ticks == 0 || timing.total_loop_seconds() <= 0.0 {
         return;
@@ -40,12 +49,16 @@ pub(super) fn update_progress(
         data.last_tick = Some(current_tick);
         return;
     };
-    // A step back by less than half the loop is no wrap: the clock was
-    // anchored ahead of the delayed time misses are judged at. Wait until
-    // it gets there. Holds while that delay stays below half the loop
-    // (`miss_delay_s` in play_along.rs keeps it to a quarter).
-    if current_tick < last_tick && last_tick - current_tick < total * 0.5 {
-        return;
+    // Right after anchoring the clock, a step back by less than half the
+    // loop is no wrap: the anchor is ahead of the delayed time misses are
+    // judged at. Wait until that gets there. Holds while the delay stays
+    // below half the loop (`miss_delay_s` in play_along.rs keeps it to a
+    // quarter). Otherwise a step back is a wrap, also after a long stall.
+    if data.anchored_ahead {
+        if current_tick < last_tick && loop_offset(current_tick - last_tick, total) == 0 {
+            return;
+        }
+        data.anchored_ahead = false;
     }
     let epsilon = total.max(1.0) * 1e-9;
     if current_tick + epsilon >= last_tick && current_tick < last_tick {

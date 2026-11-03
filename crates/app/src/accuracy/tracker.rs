@@ -152,8 +152,20 @@ impl AccuracyTracker {
         timing: &ScoreTiming,
         score: &Score,
     ) {
+        self.update_progress_behind(now_seconds, 0.0, timing, score);
+    }
+
+    /// [`Self::update_progress`], judging misses `delay_s` behind the clock
+    /// so that hits delayed by input latency are in.
+    pub(crate) fn update_progress_behind(
+        &mut self,
+        now_seconds: f64,
+        delay_s: f64,
+        timing: &ScoreTiming,
+        score: &Score,
+    ) {
         if let Some(data) = self.session.data_mut() {
-            update_progress(data, now_seconds, timing, score);
+            update_progress(data, now_seconds, delay_s, timing, score);
         }
     }
 }
@@ -287,6 +299,73 @@ mod tests {
         let summary = tracker.live_summary().unwrap();
         assert_eq!((summary.hits, summary.misses), (1, 4));
         assert!(matches!(tracker.mark_for_onset(0), Some(AccuracyMark::Hit { .. })));
+    }
+
+    #[test]
+    fn a_hit_after_the_cursor_wrapped_counts_for_the_loop_before() {
+        let score = score_of_quarters(&[TimeSignature::FOUR_FOUR]);
+        let timing = ScoreTiming::from_score(&score, 120);
+        let mut tracker = AccuracyTracker::new();
+        tracker.on_playback_start_at(0.0, 0.0);
+        tracker.update_progress(1.9, &timing, &score);
+        tracker.update_progress(2.1, &timing, &score);
+        // Later than any delay: a hit on the first loop's last note (1.5 s).
+        // It counts, but leaves the second loop's last note to be missed.
+        tracker.record_hit(1.5, &timing, &score);
+        tracker.update_progress(3.9, &timing, &score);
+        let summary = tracker.live_summary().unwrap();
+        assert_eq!((summary.hits, summary.misses), (1, 8));
+        assert!(matches!(tracker.mark_for_onset(3 * 5040), Some(AccuracyMark::Miss)));
+    }
+
+    #[test]
+    fn an_early_hit_on_the_next_loop_after_the_cursor_wrapped_counts_now() {
+        let score = score_of_quarters(&[TimeSignature::FOUR_FOUR]);
+        let timing = ScoreTiming::from_score(&score, 120);
+        let mut tracker = AccuracyTracker::new();
+        tracker.on_playback_start_at(0.0, 0.0);
+        tracker.update_progress(1.9, &timing, &score);
+        // The cursor has just wrapped when an early hit on the new loop's
+        // first note (played at 1.98 s) comes in: it is that note's.
+        tracker.update_progress(2.01, &timing, &score);
+        tracker.record_hit(1.98, &timing, &score);
+        tracker.update_progress(2.4, &timing, &score);
+        let summary = tracker.live_summary().unwrap();
+        assert_eq!((summary.hits, summary.misses), (1, 4));
+        assert!(matches!(tracker.mark_for_onset(0), Some(AccuracyMark::Hit { .. })));
+    }
+
+    #[test]
+    fn a_long_stall_still_wraps() {
+        let score = score_of_quarters(&[TimeSignature::FOUR_FOUR]);
+        let timing = ScoreTiming::from_score(&score, 120);
+        let mut tracker = AccuracyTracker::new();
+        tracker.on_playback_start_at(0.0, 0.0);
+        tracker.update_progress(1.6, &timing, &score);
+        // No frame for 1.9 s (a background tab): the cursor lands a little
+        // before where it was, a loop later. That is a wrap, not a wait.
+        tracker.update_progress(3.5, &timing, &score);
+        assert_eq!(tracker.live_summary(), None);
+        tracker.record_hit(3.5, &timing, &score);
+        // First loop: 4 missed; second loop: 3 missed before the hit.
+        assert_eq!(tracker.live_summary().unwrap().misses, 7);
+    }
+
+    #[test]
+    fn a_longer_delay_waits_instead_of_wrapping() {
+        let score = score_of_quarters(&[TimeSignature::FOUR_FOUR]);
+        let timing = ScoreTiming::from_score(&score, 120);
+        let mut tracker = AccuracyTracker::new();
+        tracker.on_playback_start_at(0.0, 0.0);
+        tracker.update_progress_behind(1.0, 0.06, &timing, &score);
+        // A MIDI device with a 300 ms offset connects: the judged time
+        // steps back, which is no wrap.
+        tracker.update_progress_behind(1.05, 0.36, &timing, &score);
+        tracker.update_progress_behind(1.3, 0.36, &timing, &score);
+        tracker.record_hit(0.0, &timing, &score);
+        let summary = tracker.live_summary().unwrap();
+        // The first two notes were missed, no more: no wrap.
+        assert_eq!(summary.misses, 2);
     }
 
     #[test]

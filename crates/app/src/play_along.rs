@@ -123,19 +123,13 @@ pub(crate) const MAX_INPUT_OFFSET_MS: f32 = 300.0;
 const HIT_DELIVERY_MARGIN_S: f64 = 0.06;
 
 /// How long after a note's hit window closes it is judged missed: by then
-/// a hit in the window has arrived, even with the largest input latency
-/// set. Judged earlier, a late hit would first show a miss and then count
-/// as a hit as well. At most a quarter of the loop, which the tracker's
-/// progress needs to tell a wrap from waiting.
-fn miss_delay_s(settings: &PlayAlongSettings, calibrating: bool, loop_seconds: f64) -> f64 {
-    let offset_ms = if calibrating {
-        0.0
-    } else {
-        [HitSource::Midi, HitSource::Tap, HitSource::Mic]
-            .map(|s| settings.offset_ms(s))
-            .into_iter()
-            .fold(0.0_f32, f32::max)
-    };
+/// a hit in the window has arrived, even with the largest input latency of
+/// the `sources` in use (their offsets; a calibration passes none). Judged
+/// earlier, a late hit would first show a miss and then count as a hit as
+/// well. At most a quarter of the loop, which the tracker's progress needs
+/// to tell a wrap from waiting.
+fn miss_delay_s(settings: &PlayAlongSettings, sources: &[HitSource], loop_seconds: f64) -> f64 {
+    let offset_ms = sources.iter().map(|&s| settings.offset_ms(s)).fold(0.0_f32, f32::max);
     (f64::from(offset_ms) / 1000.0 + HIT_DELIVERY_MARGIN_S).min(loop_seconds / 4.0)
 }
 
@@ -305,6 +299,16 @@ impl Grooph {
         let active = calibrating.is_some()
             || (midi_connected && use_midi)
             || self.playback_ctl.play_along.engaged;
+        // The sources whose offset hits get: a calibration's get none.
+        let offset_sources: Vec<HitSource> = [
+            (HitSource::Midi, use_midi && midi_connected),
+            (HitSource::Tap, use_taps),
+            (HitSource::Mic, use_mic),
+        ]
+        .into_iter()
+        .filter(|&(_, used)| used && calibrating.is_none())
+        .map(|(s, _)| s)
+        .collect();
 
         // The score hasn't started yet: keep re-anchoring the session at "now"
         // and ignore hits; `realign_accuracy_clock` fixes the anchor exactly
@@ -346,8 +350,8 @@ impl Grooph {
                     let time = time - offset_ms as f64 / 1000.0;
                     deltas.extend(tracker.record_hit(time, &timing, score));
                 }
-                let delay = miss_delay_s(&settings, calibrating.is_some(), total_loop_seconds);
-                tracker.update_progress(now - delay, &timing, score);
+                let delay = miss_delay_s(&settings, &offset_sources, total_loop_seconds);
+                tracker.update_progress_behind(now, delay, &timing, score);
             }
             played
         };
@@ -478,15 +482,21 @@ mod tests {
 
     #[test]
     fn misses_wait_for_the_largest_input_latency() {
-        let mut s =
-            PlayAlongSettings { mic_offset_ms: 120.0, tap_offset_ms: -40.0, ..Default::default() };
+        let mut s = PlayAlongSettings {
+            mic_offset_ms: 120.0,
+            tap_offset_ms: -40.0,
+            midi_offset_ms: 200.0,
+            ..Default::default()
+        };
         let margin = HIT_DELIVERY_MARGIN_S;
-        assert!((miss_delay_s(&s, false, 2.0) - (0.12 + margin)).abs() < 1e-9);
+        let used = [HitSource::Tap, HitSource::Mic];
+        // The unused MIDI input's offset does not count.
+        assert!((miss_delay_s(&s, &used, 2.0) - (0.12 + margin)).abs() < 1e-9);
         // A calibration measures the raw latency: no offset.
-        assert!((miss_delay_s(&s, true, 2.0) - margin).abs() < 1e-9);
+        assert!((miss_delay_s(&s, &[], 2.0) - margin).abs() < 1e-9);
         // Never more than a quarter of a short loop.
         s.mic_offset_ms = MAX_INPUT_OFFSET_MS;
-        assert!((miss_delay_s(&s, false, 0.4) - 0.1).abs() < 1e-9);
+        assert!((miss_delay_s(&s, &used, 0.4) - 0.1).abs() < 1e-9);
     }
 
     #[test]

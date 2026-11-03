@@ -191,7 +191,7 @@ pub(crate) fn compute_global_beat_onsets(
             let voices = note_ticks
                 .iter()
                 .enumerate()
-                .filter(|(_, ticks)| ticks.contains(&onset.tick))
+                .filter(|(_, ticks)| ticks.binary_search(&onset.tick).is_ok())
                 .fold(0, |bits, (v, _)| bits | 1 << v);
             out.push(GlobalBeatOnset {
                 onset_tick: start + onset.tick as u64,
@@ -203,6 +203,18 @@ pub(crate) fn compute_global_beat_onsets(
         }
     }
     out
+}
+
+/// How many loops ahead (+1) or back (-1) a point `diff` ticks from
+/// another lies, taking the closer way round a loop of `total` ticks.
+pub(super) fn loop_offset(diff: f64, total: f64) -> i32 {
+    if diff > total * 0.5 {
+        1
+    } else if diff < -total * 0.5 {
+        -1
+    } else {
+        0
+    }
 }
 
 /// Distance in performed ticks from the beat at `idx` to the closer of its
@@ -237,6 +249,11 @@ pub(super) struct RecordingData {
     /// Last observed global tick within the score loop. `None` means
     /// `update_progress` hasn't run yet for this session (or was reset).
     pub(super) last_tick: Option<f64>,
+    /// `last_tick` was set by anchoring the clock (start, realign), ahead of
+    /// the delayed time misses are judged at, which has not caught up yet.
+    pub(super) anchored_ahead: bool,
+    /// How far behind the clock the last progress judged misses (s).
+    pub(super) miss_delay_s: f64,
     /// Accuracy marks keyed by *global* onset tick across the score loop.
     pub(super) marks_by_onset: HashMap<u64, AccuracyMark>,
     /// Note onsets (global) that already received a hit in the current
@@ -312,6 +329,8 @@ impl RecordingData {
         Self {
             start_time,
             last_tick,
+            anchored_ahead: true,
+            miss_delay_s: 0.0,
             marks_by_onset: HashMap::new(),
             hits_in_loop: HashSet::new(),
             hits_next_loop: HashSet::new(),
@@ -382,6 +401,7 @@ impl RecordingSession {
         if let Self::Recording(d) = self {
             d.start_time = start_time;
             d.last_tick = Some(last_tick);
+            d.anchored_ahead = true;
         }
     }
 }

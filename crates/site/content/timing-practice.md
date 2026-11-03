@@ -19,10 +19,12 @@ bpm=70&sub=16&lvl=2&bars=2
 
 ### Tapping
 
-1. Make sure **Timing feedback** on the **Practice** tab is switched on, then press play.
+1. Make sure **Timing feedback** is switched on in the options of the **Practice** or
+   the **Metronome** tab, then press play.
 2. Tap every note: press **J** on the keyboard, or touch or click the staff.
 
-While you play along, touching the staff counts as a hit and does not move the cursor.
+While you play along, touching the staff (or the metronome's ring) counts as a hit and
+does not move the cursor or change a click.
 You can pick another tap key or switch tapping off under **More → Play along**.
 
 ### Microphone
@@ -31,7 +33,8 @@ You can pick another tap key or switch tapping off under **More → Play along**
    microphone when the browser asks.
 2. Hit your sticks, pad or hands and watch the level meter: hits should cross the red
    threshold mark, the click on its own should stay below it. Move the threshold if not.
-3. Make sure **Timing feedback** on the **Practice** tab is switched on, then press play.
+3. Make sure **Timing feedback** is switched on in the options of the **Practice** or
+   the **Metronome** tab, then press play.
 
 Sharp sounds work best: sticks on sticks, a practice pad, a rim or claps. The microphone
 only listens while you play along. On an iPhone or iPad with a headset, grooph listens
@@ -42,7 +45,8 @@ through the device's own microphone, because headset microphones filter out hits
 1. Connect the MIDI device to your computer (USB or Bluetooth MIDI).
 2. Open grooph in a browser with Web MIDI support, such as Chrome or Edge.
 3. Open **More → MIDI input** and pick the device. If it is not listed, press **Look for devices**.
-4. Make sure **Timing feedback** on the **Practice** tab is switched on, then press play.
+4. Make sure **Timing feedback** is switched on in the options of the **Practice** or
+   the **Metronome** tab, then press play.
 
 Any key or pad counts as a hit, so you can use whichever sound you like.
 
@@ -70,6 +74,15 @@ and the spread. Fast notes get tighter windows, at most a fifth (perfect) and tw
 (good) of the gap to the neighbouring note, so a hit can't be "good" when it is nearly on
 the next note. While you play, the score and the average deviation are shown above the
 play button, which is handy in endless mode.
+
+## Playing along to the metronome
+
+In the **Metronome** tab every click you can hear is a note to hit, subdivisions and soft
+clicks included; muted clicks are not. The markers show on the click staff and on the
+ring. With a **Polyrhythm** on, both rhythms count: a click both play counts for both, the
+line above the play button shows each rhythm's score and the summary lists the click
+and the counter rhythm side by side. Silent bars are a good test: keep playing through
+them and see whether you are still on time when the click comes back.
 
 ## Exercises
 

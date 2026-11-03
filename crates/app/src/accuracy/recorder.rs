@@ -4,7 +4,7 @@ use log::info;
 
 use super::session::{
     AccuracyMark, GlobalBeatOnset, HitWindows, RecordingData, compute_global_beat_onsets,
-    neighbour_gap_ticks, tallies_of,
+    loop_offset, neighbour_gap_ticks, tallies_of,
 };
 
 /// Record an incoming MIDI hit at `timestamp` (seconds, MIDI clock). The hit
@@ -43,19 +43,10 @@ pub(super) fn record_hit(
     // The note's loop relative to the progress cursor's, whose sets track
     // the hits: the hit may lie across the loop's end from the note, and
     // the cursor (judging misses with a delay) across it from the hit.
-    let note_loop = |raw_diff: f64| -> i32 {
-        if raw_diff > total * 0.5 {
-            1
-        } else if raw_diff < -total * 0.5 {
-            -1
-        } else {
-            0
-        }
-    };
-    let hit_loop = data.last_tick.map_or(0, |cursor| note_loop(cursor - hit_global));
-    let loop_offset = hit_loop + note_loop(raw_diff);
-    let wrap_next = loop_offset > 0;
-    let wrap_prev = loop_offset < 0;
+    let hit_loop = data.last_tick.map_or(0, |cursor| loop_offset(cursor - hit_global, total));
+    let note_loop = hit_loop + loop_offset(raw_diff, total);
+    let wrap_next = note_loop > 0;
+    let wrap_prev = note_loop < 0;
     let already_hit = if wrap_next {
         data.hits_next_loop.contains(&global_onset)
     } else {
