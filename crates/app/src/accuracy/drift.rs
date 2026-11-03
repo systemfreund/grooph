@@ -46,8 +46,10 @@ impl DriftLog {
         // The average over about a bar centred on each hit: the drift,
         // without the scatter of single hits.
         let times: Vec<f64> = hits.iter().map(|(h, _)| h.t).collect();
+        // A hit without a bar length (no tempo) has no bar to average over.
         let trend = hits
             .iter()
+            .filter(|&&(_, bar_s)| bar_s > 0.0)
             .map(|&(hit, bar_s)| {
                 let from = times.partition_point(|&t| t < hit.t - bar_s / 2.0);
                 let to = times.partition_point(|&t| t <= hit.t + bar_s / 2.0);
@@ -87,6 +89,7 @@ pub(crate) struct Drift {
     /// In time order.
     pub hits: Vec<DriftHit>,
     /// The average deviation over about a bar around each hit: (t, ms).
+    /// Hits without a bar length are left out.
     pub trend: Vec<(f64, f64)>,
     /// When the missed notes were due.
     pub misses: Vec<f64>,
@@ -117,6 +120,16 @@ mod tests {
         assert_eq!(trend, vec![0.0, -40.0 / 3.0, -80.0 / 3.0, -40.0]);
         // Joined, and cut at the run's end.
         assert_eq!(drift.silent, vec![(2.0, 4.0)]);
+    }
+
+    #[test]
+    fn hits_without_a_bar_length_stay_out_of_the_trend() {
+        let mut log = DriftLog::default();
+        log.push_hit(0.0, 10.0, HitGrade::Perfect, 0.0);
+        log.push_hit(1.0, -10.0, HitGrade::Perfect, 2.0);
+        let drift = log.finish(std::iter::empty()).unwrap();
+        assert_eq!(drift.hits.len(), 2);
+        assert_eq!(drift.trend, vec![(1.0, 0.0)]);
     }
 
     #[test]

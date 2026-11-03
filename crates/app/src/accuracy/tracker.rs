@@ -333,6 +333,15 @@ mod tests {
         let (start, end) = drift.silent[0];
         assert!((start - 2.0).abs() < 1e-6 && (end - 4.0).abs() < 1e-6, "{start} {end}");
 
+        // Gone with the summary, and when the next run starts.
+        let mut dismissed = play_bars(&hits, |_| None);
+        dismissed.dismiss_summary();
+        assert!(dismissed.last_drift().is_none());
+        let mut restarted = play_bars(&hits, |_| None);
+        assert!(restarted.last_drift().is_some());
+        restarted.on_playback_start(None);
+        assert!(restarted.last_drift().is_none());
+
         // The engine a little ahead of the session's clock, or behind it,
         // does not move a note to another bar.
         for skew in [-0.05, 0.05] {

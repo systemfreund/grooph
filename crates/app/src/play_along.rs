@@ -415,8 +415,12 @@ impl Grooph {
                 }
                 ui.add_space(4.0);
                 // Folded away under the tables, which need the room on a phone.
+                // Its own open state with and without the tables: opened in a
+                // plain run, it still starts folded under the tables.
+                let tables = voices.is_some() || bars.is_some();
                 egui::CollapsingHeader::new("Details")
-                    .default_open(voices.is_none() && bars.is_none())
+                    .id_salt(("run_details", tables))
+                    .default_open(!tables)
                     .show(ui, |ui| summary_grid(ui, &summary));
                 if let Some([click, counter]) = voices {
                     ui.add_space(8.0);
