@@ -3,7 +3,7 @@ use grooph_measure::tempo::ScoreTiming;
 use log::info;
 
 use super::session::{
-    AccuracyMark, GlobalBeatOnset, GradedHit, HitWindows, RecordingData,
+    AccuracyMark, BarEvent, GlobalBeatOnset, GradedHit, HitWindows, RecordingData,
     compute_global_beat_onsets, loop_offset, neighbour_gap_ticks, tallies_of,
 };
 
@@ -52,17 +52,20 @@ pub(super) fn record_hit(
     } else {
         !wrap_prev && data.hits_in_loop.contains(&global_onset)
     };
-    if already_hit {
-        data.counters.extra += 1;
-        tallies_of(&mut data.voice_tallies, voices).for_each(|t| t.counters.extra += 1);
-        return None;
-    }
-
     // Convert tick delta to ms using the onset measure's local rate. Since
     // |diff_ticks| stays close to a single beat width, the choice of measure
     // has negligible impact for cross-measure hits.
     let tps = timing.ticks_per_sec_in_measure(onset_m_idx);
     let delta_ms = if tps > 0.0 { (diff_ticks / tps) * 1000.0 } else { 0.0 };
+    // When the note was due, for the bar it is in.
+    let note_s = timestamp - delta_ms / 1000.0;
+
+    if already_hit {
+        data.counters.extra += 1;
+        tallies_of(&mut data.voice_tallies, voices).for_each(|t| t.counters.extra += 1);
+        data.bars.push(note_s, BarEvent::Extra);
+        return None;
+    }
 
     // The gap to the closest neighbouring onset, as heard, narrows the
     // grading windows for fast notes.
@@ -77,10 +80,9 @@ pub(super) fn record_hit(
     data.counters.push_hit(grade);
     data.tight.push(graded, data.stats.mean_ms().unwrap_or(0.0));
     for tally in tallies_of(&mut data.voice_tallies, voices) {
-        tally.stats.push(delta_ms);
-        tally.counters.push_hit(grade);
-        tally.tight.push(graded, tally.stats.mean_ms().unwrap_or(0.0));
+        tally.push_hit(graded, grade);
     }
+    data.bars.push(note_s, BarEvent::Hit(graded, grade));
     data.marks_by_onset.insert(global_onset, AccuracyMark::Hit { diff_ticks, grade });
     if wrap_next {
         data.hits_next_loop.insert(global_onset);

@@ -322,9 +322,84 @@ pub(super) struct RecordingData {
     /// The same tallies per tracked voice. A note several voices play at
     /// once counts for each of them.
     pub(super) voice_tallies: [VoiceTally; TRACKED_VOICES],
+    /// The same tallies for the bars with the click and the silent ones.
+    pub(super) bars: BarTimeline,
 }
 
-/// Hit stats and counters of one voice.
+/// A judged note, kept until the state of its bar is known.
+#[derive(Clone, Copy)]
+pub(super) enum BarEvent {
+    Hit(GradedHit, HitGrade),
+    Miss,
+    Extra,
+}
+
+/// The notes of the bars with the click and of the silent bars, once the
+/// gap click is on. A frame learns a bar's state from the audio engine only
+/// well inside the bar, where the two clocks cannot disagree on which bar
+/// it is; the notes judged until then wait.
+#[derive(Default)]
+pub(super) struct BarTimeline {
+    /// When the click went off or on, in seconds on the session's clock:
+    /// each change at the start of a bar, its state up to the next one.
+    changes: Vec<(f64, bool)>,
+    /// Judged notes, by their time, whose bar is not known yet.
+    pending: Vec<(f64, BarEvent)>,
+    /// The end of the last bar seen.
+    known_until: f64,
+    /// Bars with the click (0) and silent bars (1).
+    pub(super) tallies: [VoiceTally; 2],
+}
+
+/// Notes at a bar's start come from ticks and offsets, a hair off it.
+const BAR_EDGE_S: f64 = 1e-3;
+
+impl BarTimeline {
+    pub(super) fn push(&mut self, note_s: f64, event: BarEvent) {
+        self.pending.push((note_s, event));
+    }
+
+    /// The bar from `start_s` to `end_s` is silent or not; `None` while the
+    /// gap click is off. Tallies the waiting notes up to the bar's end.
+    pub(super) fn observe(&mut self, bar: Option<(f64, f64, bool)>) {
+        let Some((start_s, end_s, muted)) = bar else {
+            self.pending.clear();
+            return;
+        };
+        if self.changes.last().is_none_or(|&(_, last)| last != muted) {
+            self.changes.push((start_s, muted));
+        }
+        self.known_until = end_s;
+        self.settle();
+    }
+
+    /// Tally the waiting notes in the bars seen so far. Also at the end of
+    /// a run, whose last bar is not seen again.
+    pub(super) fn settle(&mut self) {
+        let mut pending = std::mem::take(&mut self.pending);
+        pending.retain(|&(note_s, event)| {
+            if note_s + BAR_EDGE_S >= self.known_until {
+                return true;
+            }
+            // Before the first bar seen, the bar is unknown: left out.
+            if let Some(muted) = self.muted_at(note_s) {
+                self.tallies[usize::from(muted)].push(event);
+            }
+            false
+        });
+        self.pending = pending;
+    }
+
+    /// Whether the note at `note_s` was in a silent bar; `None` before the
+    /// first bar seen. A note on a bar's start belongs to that bar.
+    fn muted_at(&self, note_s: f64) -> Option<bool> {
+        let i = self.changes.partition_point(|&(t, _)| t <= note_s + BAR_EDGE_S);
+        i.checked_sub(1).map(|i| self.changes[i].1)
+    }
+}
+
+/// Hit stats and counters of a part of a run: one voice, or the bars with
+/// or without the click.
 #[derive(Clone, Default)]
 pub(super) struct VoiceTally {
     pub stats: AccuracyStats,
@@ -333,6 +408,20 @@ pub(super) struct VoiceTally {
 }
 
 impl VoiceTally {
+    pub(super) fn push_hit(&mut self, hit: GradedHit, grade: HitGrade) {
+        self.stats.push(hit.delta_ms);
+        self.counters.push_hit(grade);
+        self.tight.push(hit, self.stats.mean_ms().unwrap_or(0.0));
+    }
+
+    fn push(&mut self, event: BarEvent) {
+        match event {
+            BarEvent::Hit(hit, grade) => self.push_hit(hit, grade),
+            BarEvent::Miss => self.counters.misses += 1,
+            BarEvent::Extra => self.counters.extra += 1,
+        }
+    }
+
     /// `None` while the voice had no note to hit yet.
     fn summary(&self) -> Option<RunSummary> {
         if self.stats.count + self.counters.misses == 0 {
@@ -373,6 +462,16 @@ impl RecordingData {
         self.voice_tallies.each_ref().map(|t| t.summary().filter(|_| any_hit))
     }
 
+    /// The notes in bars with the click and in silent bars, as
+    /// [`Self::voice_summaries`]: `None` for both unless the gap click
+    /// silenced a bar.
+    pub(super) fn bar_summaries(&self) -> [Option<RunSummary>; 2] {
+        let tallies = &self.bars.tallies;
+        let silent = tallies[1].stats.count + tallies[1].counters.misses > 0;
+        let any_hit = self.stats.count > 0;
+        tallies.each_ref().map(|t| t.summary().filter(|_| silent && any_hit))
+    }
+
     /// `None` until the first hit: a run without hits has nothing to show.
     pub(super) fn summary(&self) -> Option<RunSummary> {
         self.stats.mean_ms()?;
@@ -392,6 +491,7 @@ impl RecordingData {
             counters: RunCounters::default(),
             tight: TightTally::default(),
             voice_tallies: Default::default(),
+            bars: BarTimeline::default(),
         }
     }
 }
@@ -434,6 +534,7 @@ impl RecordingSession {
             d.counters = RunCounters::default();
             d.tight = TightTally::default();
             d.voice_tallies = Default::default();
+            d.bars = BarTimeline::default();
             d.last_tick = None;
         }
     }

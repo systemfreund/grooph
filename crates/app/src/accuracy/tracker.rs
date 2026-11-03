@@ -18,6 +18,9 @@ pub(crate) struct AccuracyTracker {
     last_summary: Option<RunSummary>,
     /// That run per tracked voice.
     last_voice_summaries: [Option<RunSummary>; TRACKED_VOICES],
+    /// That run's bars with the click and silent bars, if the gap click
+    /// silenced any.
+    last_bar_summaries: [Option<RunSummary>; 2],
     /// Marks of that run, kept on the staff after stopping until the next
     /// run starts or the score is edited.
     last_marks: HashMap<u64, AccuracyMark>,
@@ -75,11 +78,15 @@ impl AccuracyTracker {
     }
 
     fn end_session(&mut self) {
+        if let Some(data) = self.session.data_mut() {
+            data.bars.settle();
+        }
         if let Some(data) = self.session.data()
             && let Some(summary) = data.summary()
         {
             self.last_summary = Some(summary);
             self.last_voice_summaries = data.voice_summaries();
+            self.last_bar_summaries = data.bar_summaries();
             self.last_marks = data.marks_by_onset.clone();
         }
         self.session.stop();
@@ -102,6 +109,44 @@ impl AccuracyTracker {
     /// The last finished run per tracked voice, as [`Self::last_summary`].
     pub(crate) fn last_voice_summaries(&self) -> [Option<RunSummary>; TRACKED_VOICES] {
         self.last_voice_summaries
+    }
+
+    /// The last finished run in bars with the click and in silent bars, as
+    /// [`Self::last_summary`]; both `None` unless a bar was silent.
+    pub(crate) fn last_bar_summaries(&self) -> [Option<RunSummary>; 2] {
+        self.last_bar_summaries
+    }
+
+    /// The audio engine plays a bar the gap click silences (`Some(true)`)
+    /// or one with the click (`Some(false)`) at `now_seconds`; `None` while
+    /// the gap click is off. Only a frame well inside a bar tells which bar
+    /// it is: around its edges, the engine's bar and the session's clock may
+    /// be a frame apart.
+    pub(crate) fn observe_bar(
+        &mut self,
+        now_seconds: f64,
+        muted: Option<bool>,
+        timing: &ScoreTiming,
+    ) {
+        let Some(data) = self.session.data_mut() else {
+            return;
+        };
+        let Some(muted) = muted else {
+            data.bars.observe(None);
+            return;
+        };
+        let elapsed = now_seconds - data.start_time;
+        if timing.total_loop_seconds() <= 0.0 || elapsed < 0.0 {
+            return;
+        }
+        let (measure, local) = timing.to_local(timing.seconds_to_global_tick(elapsed));
+        let length = timing.ticks_per_measure(measure) as f64;
+        let tps = timing.ticks_per_sec_in_measure(measure);
+        if tps <= 0.0 || !(0.25..=0.75).contains(&(local / length)) {
+            return;
+        }
+        let start_s = now_seconds - local / tps;
+        data.bars.observe(Some((start_s, start_s + length / tps, muted)));
     }
 
     pub(crate) fn dismiss_summary(&mut self) {
@@ -226,6 +271,60 @@ mod tests {
             AccuracyMark::Hit { diff_ticks: diff, .. } => assert!(diff.abs() < 1e-6, "diff={diff}"),
             _ => panic!("expected a hit"),
         }
+    }
+
+    /// Plays three bars of quarters at 120 BPM, frame by frame, the second
+    /// bar silent: `hits` (seconds) in order, the engine's bar at each
+    /// frame's time as `muted` says.
+    fn play_bars(hits: &[f64], muted: impl Fn(f64) -> Option<bool>) -> AccuracyTracker {
+        let score = score_of_quarters(&[TimeSignature::FOUR_FOUR]);
+        let timing = ScoreTiming::from_score(&score, 120);
+        let mut tracker = AccuracyTracker::new();
+        tracker.on_playback_start_at(0.0, 0.0);
+        let mut hits = hits.iter().copied().peekable();
+        for frame in 1..=360 {
+            let now = frame as f64 / 60.0;
+            while let Some(hit) = hits.next_if(|&h| h <= now) {
+                tracker.record_hit(hit, &timing, &score);
+            }
+            tracker.update_progress(now, &timing, &score);
+            tracker.observe_bar(now, muted(now), &timing);
+        }
+        tracker.on_playback_stop();
+        tracker
+    }
+
+    #[test]
+    fn silent_bars_are_scored_apart() {
+        // On time with the click; 30 ms late and one note missed in the
+        // silent bar; the click's return hit 10 ms early, a bar later.
+        let hits = [0.0, 0.5, 1.0, 1.5, 2.03, 2.53, 3.03, 3.99, 4.5, 5.0, 5.5];
+        // Bars of 2 s.
+        let tracker = play_bars(&hits, |now| Some((now / 2.0) as u64 == 1));
+        let [Some(audible), Some(silent)] = tracker.last_bar_summaries() else {
+            panic!("a bar was silent");
+        };
+        assert_eq!((silent.hits, silent.misses), (3, 1));
+        assert!((silent.mean_ms - 30.0).abs() < 1e-6, "{}", silent.mean_ms);
+        // The early hit on the next downbeat belongs to the bar it is for.
+        assert_eq!((audible.hits, audible.misses), (8, 0));
+        assert!((audible.mean_ms + 1.25).abs() < 1e-6, "{}", audible.mean_ms);
+        assert_eq!(tracker.last_summary().map(|s| (s.hits, s.misses)), Some((11, 1)));
+
+        // The engine a little ahead of the session's clock, or behind it,
+        // does not move a note to another bar.
+        for skew in [-0.05, 0.05] {
+            let skewed = play_bars(&hits, |now| Some(((now + skew) / 2.0) as u64 == 1));
+            assert_eq!(skewed.last_bar_summaries(), tracker.last_bar_summaries());
+        }
+    }
+
+    #[test]
+    fn no_bar_scores_without_a_silent_bar() {
+        let hits = [0.0, 0.5, 1.0, 1.5, 2.0];
+        assert_eq!(play_bars(&hits, |_| Some(false)).last_bar_summaries(), [None, None]);
+        // The gap click off.
+        assert_eq!(play_bars(&hits, |_| None).last_bar_summaries(), [None, None]);
     }
 
     #[test]
