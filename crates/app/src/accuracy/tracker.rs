@@ -250,6 +250,10 @@ mod tests {
         let total = tracker.live_summary().unwrap();
         assert_eq!((total.hits, total.misses), (2, 1));
 
+        // Tight counts per voice, each graded around its own voice's
+        // average: the click's one hit is perfect around itself.
+        assert_eq!(click.tight, (1, 0));
+
         tracker.on_playback_stop();
         assert_eq!(tracker.last_voice_summaries(), [Some(click), Some(counter)]);
     }
@@ -496,6 +500,8 @@ mod tests {
         assert_eq!(live.extra, 1);
         assert_eq!(live.misses, 2);
         assert!((live.mean_ms - 5.0).abs() < 1e-6);
+        // Graded around their average, live as well.
+        assert_eq!(live.tight, (2, 0));
 
         tracker.on_playback_stop();
         assert_eq!(tracker.last_summary(), Some(live));

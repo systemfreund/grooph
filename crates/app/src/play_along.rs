@@ -384,6 +384,11 @@ impl Grooph {
             .anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 24.0))
             .show(ui.ctx(), |ui| {
                 ui.heading(format!("{:.0}%", summary.score_percent()));
+                ui.label(format!("Tight {:.0}%", summary.tight_percent())).on_hover_text(
+                    "The score with every hit measured against your own average \
+                     deviation instead of the click: how steady your playing is, \
+                     even if you are always a little early or late",
+                );
                 ui.add_space(4.0);
                 summary_grid(ui, &summary);
                 // Against a counter rhythm, how each rhythm went.

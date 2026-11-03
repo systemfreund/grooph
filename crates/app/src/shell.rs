@@ -1382,17 +1382,21 @@ impl Grooph {
         roll
     }
 
-    /// One line above the transport buttons: the live timing score and the
-    /// average deviation while playing along, or a short note after a link
-    /// was copied.
+    /// One line above the transport buttons: the live timing score, the
+    /// average deviation and the tight score while playing along, or a
+    /// short note after a link was copied.
     fn status_line(&mut self, ui: &mut Ui) {
         let text = if self.link_copied_recently(ui) {
             Some("Link copied".to_owned())
         } else {
             let tracker = &self.playback_ctl.accuracy.tracker;
             tracker.live_summary().map(|summary| {
-                let mut text =
-                    format!("Timing {:.0}%  {:+.0} ms", summary.score_percent(), summary.mean_ms);
+                let mut text = format!(
+                    "Timing {:.0}%  {:+.0} ms  tight {:.0}%",
+                    summary.score_percent(),
+                    summary.mean_ms,
+                    summary.tight_percent()
+                );
                 // Against a counter rhythm, each rhythm's score as well.
                 if let [Some(click), Some(counter)] = tracker.live_voice_summaries()
                     && self.metronome_mode()
