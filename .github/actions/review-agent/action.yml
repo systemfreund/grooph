@@ -1,0 +1,51 @@
+name: Review agent step
+description: >-
+  Runs one review agent with the model named in `model`: `anthropic/<model>` with Claude Code,
+  anything else (`venice/<model>`) with OpenCode. Writes its final JSON answer to a file.
+
+inputs:
+  reviewer:
+    required: true
+  model:
+    description: anthropic/<model> (Claude Code) or <provider>/<model> from opencode.json (OpenCode)
+    required: true
+  kind:
+    description: general, rust or synthesis
+    required: true
+  prompt:
+    required: true
+  out:
+    required: true
+  claude-oauth-token:
+    description: For anthropic/ models
+    required: false
+  venice-api-key:
+    description: For the other models
+    required: false
+  github-token:
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - if: startsWith(inputs.model, 'anthropic/')
+      uses: ./.github/actions/claude-review
+      with:
+        reviewer: ${{ inputs.reviewer }}
+        model: ${{ inputs.model }}
+        kind: ${{ inputs.kind }}
+        out: ${{ inputs.out }}
+        prompt: ${{ inputs.prompt }}
+        oauth-token: ${{ inputs.claude-oauth-token }}
+        github-token: ${{ inputs.github-token }}
+
+    - if: ${{ !startsWith(inputs.model, 'anthropic/') }}
+      uses: ./.github/actions/opencode-review
+      with:
+        reviewer: ${{ inputs.reviewer }}
+        model: ${{ inputs.model }}
+        kind: ${{ inputs.kind }}
+        out: ${{ inputs.out }}
+        prompt: ${{ inputs.prompt }}
+        venice-api-key: ${{ inputs.venice-api-key }}
+        github-token: ${{ inputs.github-token }}

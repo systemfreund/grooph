@@ -31,13 +31,14 @@ name: Code review
 # review, so an answers run that cancels a waiting one loses nothing. An answers
 # run never cancels a review.
 #
-# OpenCode runs the read-only `review` agent from opencode.json; every model
-# used here must be listed there. Only the publish job can write to the pull
+# A model named `anthropic/<model>` runs in Claude Code (.github/actions/claude-review), read-only; any
+# other, `venice/<model>`, in OpenCode (.github/actions/opencode-review), as the read-only `review` agent of
+# opencode.json, where every such model must be listed. Only the publish job can write to the pull
 # request, and it runs no model. The scripts and instructions come from the
 # PR's head, so a change to them is tried on its own PR; that is why PRs from
 # forks are never reviewed, not even through "Run workflow".
 #
-# Needs the repository secret VENICE_API_KEY.
+# Needs the repository secret CLAUDE_CODE_OAUTH_TOKEN for `anthropic/` models and VENICE_API_KEY for the others.
 
 # Full reviews are only started by hand for now, to keep the cost down: the pull_request trigger (with
 # [opened, reopened, ready_for_review, synchronize]) is switched off. The jobs still handle it, so adding it
@@ -49,7 +50,7 @@ on:
         description: Pull request number to review
         required: true
       models:
-        description: 'Models for the general review, as a JSON list, e.g. ["venice/deepseek-v4-1-flash"]. Leave blank for the default list'
+        description: 'Models for the general review, as a JSON list, e.g. ["anthropic/claude-sonnet-5-5", "venice/deepseek-v4-1-flash"]. Leave blank for the default list'
         required: false
       mode:
         description: 'review: review the head commit in full. answers: only the synthesis again, with the reviews of the last run, after answers to its findings'
@@ -66,13 +67,12 @@ concurrency:
   cancel-in-progress: ${{ inputs.mode != 'answers' }}
 
 env:
-  # Default models of the general review. GLM 5.3 (venice/z-ai-glm-5-3, its
-  # runs failed too often), Kimi K2.7 Code (venice/kimi-k2-7-code) and Claude
-  # Sonnet 5.5 (venice/claude-sonnet-5-5) are left out but stay in
-  # opencode.json for manual runs.
-  DEFAULT_MODELS: '["venice/deepseek-v4-1-flash"]'
-  RUST_MODEL: venice/deepseek-v4-1-flash
-  SYNTHESIS_MODEL: venice/deepseek-v4-1-flash
+  # Default models of the general review. The Venice models (venice/deepseek-v4-1-flash, which
+  # was the default, venice/z-ai-glm-5-3, whose runs failed too often, venice/kimi-k2-7-code and
+  # venice/claude-sonnet-5-5) stay in opencode.json for manual runs.
+  DEFAULT_MODELS: '["anthropic/claude-sonnet-5-5"]'
+  RUST_MODEL: anthropic/claude-sonnet-5-5
+  SYNTHESIS_MODEL: anthropic/claude-sonnet-5-5
 
 jobs:
   setup:
@@ -179,12 +179,13 @@ jobs:
           persist-credentials: false
 
       - name: Review
-        uses: ./.github/actions/opencode-review
+        uses: ./.github/actions/review-agent
         with:
           reviewer: ${{ matrix.reviewer.name }}
           model: ${{ matrix.reviewer.model }}
           kind: ${{ matrix.reviewer.kind }}
           out: review-output/${{ strategy.job-index }}.json
+          claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           venice-api-key: ${{ secrets.VENICE_API_KEY }}
           github-token: ${{ github.token }}
           prompt: |
@@ -272,12 +273,13 @@ jobs:
           fi
 
       - name: Synthesize
-        uses: ./.github/actions/opencode-review
+        uses: ./.github/actions/review-agent
         with:
           reviewer: synthesis
           model: ${{ env.SYNTHESIS_MODEL }}
           kind: synthesis
           out: review-input/synthesis.json
+          claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           venice-api-key: ${{ secrets.VENICE_API_KEY }}
           github-token: ${{ github.token }}
           prompt: |
