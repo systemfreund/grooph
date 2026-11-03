@@ -3,8 +3,8 @@ use grooph_measure::tempo::ScoreTiming;
 use log::info;
 
 use super::session::{
-    AccuracyMark, GlobalBeatOnset, HitWindows, RecordingData, compute_global_beat_onsets,
-    loop_offset, neighbour_gap_ticks, tallies_of,
+    AccuracyMark, GlobalBeatOnset, GradedHit, HitWindows, RecordingData,
+    compute_global_beat_onsets, loop_offset, neighbour_gap_ticks, tallies_of,
 };
 
 /// Record an incoming MIDI hit at `timestamp` (seconds, MIDI clock). The hit
@@ -73,9 +73,12 @@ pub(super) fn record_hit(
 
     data.stats.push(delta_ms);
     data.counters.push_hit(grade);
+    let graded = GradedHit { delta_ms, windows };
+    data.graded.push(graded);
     for tally in tallies_of(&mut data.voice_tallies, voices) {
         tally.stats.push(delta_ms);
         tally.counters.push_hit(grade);
+        tally.graded.push(graded);
     }
     data.marks_by_onset.insert(global_onset, AccuracyMark::Hit { diff_ticks, grade });
     if wrap_next {

@@ -70,7 +70,11 @@ close to the notes for a whole exercise before you raise the tempo.
 
 When you stop, grooph sums up the run: a score in percent, how many hits were perfect
 (within 25 ms), good (within 60 ms) or off, missed notes, extra hits, your average deviation
-and the spread. Fast notes get tighter windows, at most a fifth (perfect) and two fifths
+and the spread. Below the score, **Tight** grades every hit against your own average
+deviation instead of the click: if you play steadily a little early or late, your timing
+score suffers but Tight stays high, so you can tell an offset from unsteady playing.
+
+Fast notes get tighter windows, at most a fifth (perfect) and two fifths
 (good) of the gap to the neighbouring note, so a hit can't be "good" when it is nearly on
 the next note. While you play, the score and the average deviation are shown above the
 play button, which is handy in endless mode.

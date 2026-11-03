@@ -94,6 +94,24 @@ impl HitWindows {
     }
 }
 
+/// A hit's deviation and the windows of its note, kept to grade it again
+/// against the run's own average (see [`RunSummary::tight_percent`]).
+#[derive(Clone, Copy)]
+pub(super) struct GradedHit {
+    pub delta_ms: f64,
+    pub windows: HitWindows,
+}
+
+/// Perfect and good hits among `hits` when graded around `mean_ms` instead
+/// of the click.
+fn tight_counts(hits: &[GradedHit], mean_ms: f64) -> (u64, u64) {
+    hits.iter().fold((0, 0), |(perfect, good), h| match h.windows.grade(h.delta_ms - mean_ms) {
+        HitGrade::Perfect => (perfect + 1, good),
+        HitGrade::Good => (perfect, good + 1),
+        HitGrade::Off => (perfect, good),
+    })
+}
+
 /// Hit/miss tallies of one recording session, beyond the raw delta stats.
 #[derive(Clone, Copy, Default)]
 pub(super) struct RunCounters {
@@ -126,6 +144,10 @@ pub(crate) struct RunSummary {
     pub mean_ms: f64,
     /// Standard deviation of the deviations.
     pub spread_ms: f64,
+    /// Perfect and good hits when graded around `mean_ms` instead of the
+    /// click: how tight the playing is, whatever its offset.
+    pub tight_perfect: u64,
+    pub tight_good: u64,
 }
 
 impl RunSummary {
@@ -137,11 +159,22 @@ impl RunSummary {
     /// 0–100: perfect hits count fully, good ones half; misses and extra
     /// hits count against the score.
     pub(crate) fn score_percent(&self) -> f64 {
+        self.percent_of(self.perfect, self.good)
+    }
+
+    /// [`Self::score_percent`] with every hit graded around the run's
+    /// average deviation: playing steadily early or late scores as high as
+    /// on the click.
+    pub(crate) fn tight_percent(&self) -> f64 {
+        self.percent_of(self.tight_perfect, self.tight_good)
+    }
+
+    fn percent_of(&self, perfect: u64, good: u64) -> f64 {
         let total = self.hits + self.misses + self.extra;
         if total == 0 {
             return 0.0;
         }
-        (self.perfect as f64 + 0.5 * self.good as f64) / total as f64 * 100.0
+        (perfect as f64 + 0.5 * good as f64) / total as f64 * 100.0
     }
 }
 
@@ -265,16 +298,18 @@ pub(super) struct RecordingData {
     pub(super) hits_next_loop: HashSet<u64>,
     pub(super) stats: AccuracyStats,
     pub(super) counters: RunCounters,
+    pub(super) graded: Vec<GradedHit>,
     /// The same tallies per tracked voice. A note several voices play at
     /// once counts for each of them.
     pub(super) voice_tallies: [VoiceTally; TRACKED_VOICES],
 }
 
 /// Hit stats and counters of one voice.
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Default)]
 pub(super) struct VoiceTally {
     pub stats: AccuracyStats,
     pub counters: RunCounters,
+    pub graded: Vec<GradedHit>,
 }
 
 impl VoiceTally {
@@ -283,15 +318,24 @@ impl VoiceTally {
         if self.stats.count + self.counters.misses == 0 {
             return None;
         }
-        Some(RunSummary {
-            hits: self.stats.count,
-            misses: self.counters.misses,
-            extra: self.counters.extra,
-            perfect: self.counters.perfect,
-            good: self.counters.good,
-            mean_ms: self.stats.mean_ms().unwrap_or(0.0),
-            spread_ms: self.stats.spread_ms().unwrap_or(0.0),
-        })
+        Some(run_summary(&self.stats, &self.counters, &self.graded))
+    }
+}
+
+/// The summary of `stats`, `counters` and the `graded` hits behind them.
+fn run_summary(stats: &AccuracyStats, counters: &RunCounters, graded: &[GradedHit]) -> RunSummary {
+    let mean_ms = stats.mean_ms().unwrap_or(0.0);
+    let (tight_perfect, tight_good) = tight_counts(graded, mean_ms);
+    RunSummary {
+        hits: stats.count,
+        misses: counters.misses,
+        extra: counters.extra,
+        perfect: counters.perfect,
+        good: counters.good,
+        mean_ms,
+        spread_ms: stats.spread_ms().unwrap_or(0.0),
+        tight_perfect,
+        tight_good,
     }
 }
 
@@ -308,21 +352,13 @@ impl RecordingData {
     /// notes, or before the run's first hit.
     pub(super) fn voice_summaries(&self) -> [Option<RunSummary>; TRACKED_VOICES] {
         let any_hit = self.stats.count > 0;
-        self.voice_tallies.map(|t| t.summary().filter(|_| any_hit))
+        self.voice_tallies.each_ref().map(|t| t.summary().filter(|_| any_hit))
     }
 
     /// `None` until the first hit: a run without hits has nothing to show.
     pub(super) fn summary(&self) -> Option<RunSummary> {
-        let mean_ms = self.stats.mean_ms()?;
-        Some(RunSummary {
-            hits: self.stats.count,
-            misses: self.counters.misses,
-            extra: self.counters.extra,
-            perfect: self.counters.perfect,
-            good: self.counters.good,
-            mean_ms,
-            spread_ms: self.stats.spread_ms().unwrap_or(0.0),
-        })
+        self.stats.mean_ms()?;
+        Some(run_summary(&self.stats, &self.counters, &self.graded))
     }
 
     fn new(start_time: f64, last_tick: Option<f64>) -> Self {
@@ -336,6 +372,7 @@ impl RecordingData {
             hits_next_loop: HashSet::new(),
             stats: AccuracyStats::default(),
             counters: RunCounters::default(),
+            graded: Vec::new(),
             voice_tallies: Default::default(),
         }
     }
@@ -377,6 +414,7 @@ impl RecordingSession {
             d.hits_next_loop.clear();
             d.stats.reset();
             d.counters = RunCounters::default();
+            d.graded.clear();
             d.voice_tallies = Default::default();
             d.last_tick = None;
         }
@@ -419,7 +457,17 @@ mod tests {
     use super::*;
 
     fn summary(hits: u64, perfect: u64, good: u64, misses: u64, extra: u64) -> RunSummary {
-        RunSummary { hits, misses, extra, perfect, good, mean_ms: 0.0, spread_ms: 0.0 }
+        RunSummary {
+            hits,
+            misses,
+            extra,
+            perfect,
+            good,
+            mean_ms: 0.0,
+            spread_ms: 0.0,
+            tight_perfect: perfect,
+            tight_good: good,
+        }
     }
 
     #[test]
@@ -429,6 +477,24 @@ mod tests {
         assert_eq!(s.off(), 2);
         assert!((s.score_percent() - 50.0).abs() < 1e-9);
         assert_eq!(summary(0, 0, 0, 0, 0).score_percent(), 0.0);
+    }
+
+    #[test]
+    fn steady_early_hits_are_tight_but_off_the_click() {
+        let windows = HitWindows::for_gap_ms(500.0);
+        // Always about 40 ms early: "good" on the click, perfect around the
+        // average.
+        let graded: Vec<GradedHit> =
+            [-38.0, -42.0, -40.0, -41.0].map(|delta_ms| GradedHit { delta_ms, windows }).to_vec();
+        let mut stats = AccuracyStats::default();
+        let mut counters = RunCounters::default();
+        for h in &graded {
+            stats.push(h.delta_ms);
+            counters.push_hit(windows.grade(h.delta_ms));
+        }
+        let s = run_summary(&stats, &counters, &graded);
+        assert!((s.score_percent() - 50.0).abs() < 1e-9);
+        assert!((s.tight_percent() - 100.0).abs() < 1e-9);
     }
 
     #[test]
