@@ -1,0 +1,54 @@
+name: Code review answers
+
+# Starts one answers run of code-review.yml after people stop commenting on a pull request.
+#
+# An agent that answers a review usually posts several comments in a row. Started by the first, the
+# synthesis would miss the rest and run again for them. Here every comment from someone with write access
+# starts a run that waits QUIET_SECONDS; a newer comment on the same PR cancels the waiting run and
+# waits again. Only the run that is not cancelled starts code-review.yml with mode `answers`, which reads
+# all answers since the last review (`review.py rerun`) and does nothing if none answers a finding.
+#
+# A run started with GITHUB_TOKEN through workflow_dispatch is the one kind GitHub lets that token start.
+# Like every comment-triggered workflow, this file is read from the default branch.
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+
+concurrency:
+  group: code-review-quiet-${{ github.event.pull_request.number || github.event.issue.number }}
+  cancel-in-progress: true
+
+env:
+  QUIET_SECONDS: 180
+
+jobs:
+  start:
+    # Only comments on pull requests, from people with write access (as review.py reads them), not from bots.
+    if: >-
+      (github.event_name == 'pull_request_review_comment' || github.event.issue.pull_request) &&
+      contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association) &&
+      github.event.comment.user.type != 'Bot'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: write
+      pull-requests: read
+    steps:
+      - name: Wait for the comments to stop
+        run: sleep "$QUIET_SECONDS"
+
+      - name: Start the answers run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number || github.event.issue.number }}
+        run: |
+          # code-review.yml refuses forks with an error; skip them quietly here.
+          if [ "$(gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json isCrossRepository --jq .isCrossRepository)" = true ]; then
+            echo "#$PR comes from a fork; forks are not reviewed."
+            exit 0
+          fi
+          gh workflow run code-review.yml --repo "$GITHUB_REPOSITORY" --ref "${{ github.event.repository.default_branch }}" \
+            -f pr="$PR" -f mode=answers
