@@ -4,7 +4,7 @@
 
 use crate::accuracy::{GOOD_WINDOW_MS, PERFECT_WINDOW_MS, RunSummary};
 use crate::calibration::Calibration;
-use crate::drift_chart::drift_chart;
+use crate::drift_chart::{beat_position_strip, drift_chart};
 use crate::platform::{TapKind, tap_time};
 use crate::{Grooph, TransportState, clock};
 use eframe::egui;
@@ -412,6 +412,10 @@ impl Grooph {
                 if let Some(drift) = tracker.last_drift() {
                     ui.add_space(4.0);
                     drift_chart(ui, drift);
+                }
+                if let Some(positions) = tracker.last_positions() {
+                    ui.add_space(4.0);
+                    beat_position_strip(ui, positions, self.ui.counting.system);
                 }
                 ui.add_space(4.0);
                 // Folded away under the tables, which need the room on a phone.

@@ -4,6 +4,7 @@ use grooph_measure::Score;
 use grooph_measure::tempo::ScoreTiming;
 
 use super::drift::Drift;
+use super::positions::BeatPositions;
 use super::progress::update_progress;
 use super::recorder::record_hit;
 use super::session::{AccuracyMark, RecordingSession, RunSummary, TRACKED_VOICES, shift_marks};
@@ -24,6 +25,8 @@ pub(crate) struct AccuracyTracker {
     last_bar_summaries: [Option<RunSummary>; 2],
     /// That run over time.
     last_drift: Option<Drift>,
+    /// That run by position in the beat.
+    last_positions: Option<BeatPositions>,
     /// Marks of that run, kept on the staff after stopping until the next
     /// run starts or the score is edited.
     last_marks: HashMap<u64, AccuracyMark>,
@@ -55,6 +58,7 @@ impl AccuracyTracker {
     pub(crate) fn on_playback_start(&mut self, now_seconds: Option<f64>) {
         self.last_summary = None;
         self.last_drift = None;
+        self.last_positions = None;
         self.last_marks.clear();
         match now_seconds {
             Some(t) => self.session.start(t, Some(0.0)),
@@ -92,6 +96,7 @@ impl AccuracyTracker {
             self.last_voice_summaries = data.voice_summaries();
             self.last_bar_summaries = data.bar_summaries();
             self.last_drift = data.drift.finish(data.bars.silent_spans());
+            self.last_positions = data.positions.finish(summary.mean_ms);
             self.last_marks = data.marks_by_onset.clone();
         }
         self.session.stop();
@@ -158,9 +163,17 @@ impl AccuracyTracker {
         self.last_drift.as_ref()
     }
 
+    /// The last finished run by position in the beat, as
+    /// [`Self::last_summary`]; `None` unless its notes fell on two
+    /// positions.
+    pub(crate) fn last_positions(&self) -> Option<&BeatPositions> {
+        self.last_positions.as_ref()
+    }
+
     pub(crate) fn dismiss_summary(&mut self) {
         self.last_summary = None;
         self.last_drift = None;
+        self.last_positions = None;
     }
 
     pub(crate) fn clear_for_edit(&mut self) {
@@ -763,5 +776,31 @@ mod tests {
         tracker.record_hit(0.0, &timing, &score);
         tracker.discard_session();
         assert!(tracker.last_summary().is_none());
+    }
+
+    #[test]
+    fn early_downbeats_and_late_offbeats_show_apart() {
+        let bar = "e e e e e e e e";
+        let score =
+            grooph_measure::notation::parse_score(&format!("4/4 {bar} | {bar} | {bar} | {bar}"))
+                .unwrap();
+        let timing = ScoreTiming::from_score(&score, 120);
+        let mut tracker = AccuracyTracker::new();
+        tracker.on_playback_start_at(0.0, 0.0);
+        // Eighths of 0.25 s: the beats 20 ms early, the "&"s 20 ms late,
+        // from the second note on (the first early hit is before the start).
+        for i in 1..17 {
+            let off = if i % 2 == 0 { -0.02 } else { 0.02 };
+            tracker.record_hit(i as f64 * 0.25 + off, &timing, &score);
+        }
+        tracker.on_playback_stop();
+        assert!(tracker.last_summary().unwrap().mean_ms.abs() < 1e-6);
+        let positions = tracker.last_positions().expect("two positions");
+        let means: Vec<(u8, f64)> =
+            positions.positions.iter().map(|p| (p.pos.parts, p.mean_ms.unwrap().round())).collect();
+        assert_eq!(means, [(1, -20.0), (2, 20.0)]);
+        assert!(positions.notable.is_some());
+        tracker.dismiss_summary();
+        assert!(tracker.last_positions().is_none());
     }
 }

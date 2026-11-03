@@ -138,6 +138,9 @@ fn process_segment(
                 let note_s = cursor.seconds_at(note_tick, gb.measure_idx);
                 data.bars.push(note_s, BarEvent::Miss);
                 data.drift.push_miss(note_s);
+                if let Some(pos) = gb.position {
+                    data.positions.push_miss(pos);
+                }
             }
             data.hits_in_loop.remove(&gb.onset_tick);
         }
