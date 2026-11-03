@@ -23,7 +23,11 @@
 //! and the voice of the cursor, last tapped on the staff or the ring, is the
 //! one edited (see [`MetronomeVoice`]).
 
+use crate::accuracy::{
+    AccuracyMark, HitGrade, clamp_diff_to_beat_window, compute_global_beat_onsets,
+};
 use crate::documents::Document;
+use crate::measure_panel::{grade_color, reference_color};
 use crate::pickers::shown_groups;
 use crate::shell::paint_meter;
 use crate::state::CountInState;
@@ -776,6 +780,8 @@ impl Grooph {
             0.72 * radius - dot_radius - 4.0
         };
 
+        self.paint_ring_marks(painter, center, radius, counter.is_some(), visuals.dark_mode);
+
         // The play button in the middle, as big as the room inside the dots
         // or the counter ring leaves (at least a finger's width).
         let button = play_in_middle.then(|| (0.75 * hand_from).max(22.0).min(hand_from));
@@ -861,11 +867,93 @@ impl Grooph {
             visuals.weak_text_color(),
         );
 
-        if resp.clicked() {
+        // While playing along, a touch or click on the ring is a hit, not an edit.
+        if self.tap_capture_active() {
+            if resp.contains_pointer() && ui.input(|i| i.pointer.any_pressed()) {
+                self.push_pointer_tap();
+            }
+        } else if resp.clicked() {
             match resp.interact_pointer_pos().and_then(on_ring) {
                 Some(RingHit::Click(idx)) => self.cycle_click_level(idx),
                 Some(RingHit::Counter(idx)) => self.cycle_counter_level(idx),
                 None => {}
+            }
+        }
+    }
+}
+
+impl Grooph {
+    /// The timing marks of the clicks played along to, as on the staff: a
+    /// dot where the hit landed, joined to its click's start, or a cross for
+    /// a missed click. Those of the click bar inside the outer ring, those of
+    /// the counter rhythm just outside its ring.
+    fn paint_ring_marks(
+        &self,
+        painter: &egui::Painter,
+        center: Pos2,
+        radius: f32,
+        with_counter: bool,
+        dark: bool,
+    ) {
+        let tracker = &self.playback_ctl.accuracy.tracker;
+        if !self.shows_accuracy_marks() || !tracker.has_marks() {
+            return;
+        }
+        let score = self.played_score();
+        let timing = self.score_timing();
+        let total = timing.total_loop_ticks() as f64;
+        let Some(bar) = score.measures().first().filter(|_| total > 0.0) else {
+            return;
+        };
+        let onsets: Vec<u64> =
+            compute_global_beat_onsets(score, &timing).iter().map(|o| o.onset_tick).collect();
+        let size = (0.025 * radius).max(2.5);
+        for (voice, ring) in [(MetronomeVoice::Click, 0.82), (MetronomeVoice::Counter, 0.755)] {
+            if voice == MetronomeVoice::Counter && !with_counter {
+                continue;
+            }
+            let at = ring * radius;
+            let Some(beats) = bar.voice(voice.idx()).map(|v| v.beats()) else {
+                continue;
+            };
+            let ticks = DEFAULT_GRID.compute_onset_ticks(beats);
+            for (beat, &tick) in beats.iter().zip(&ticks) {
+                let tick = u64::from(tick);
+                if !beat.is_note() {
+                    continue;
+                }
+                let Some(mark) = tracker.mark_for_onset(tick) else {
+                    continue;
+                };
+                let turn = tick as f32 / total as f32;
+                match mark {
+                    AccuracyMark::Hit { diff_ticks, grade } => {
+                        let idx = onsets.binary_search(&tick).unwrap_or(0);
+                        let diff = clamp_diff_to_beat_window(diff_ticks, idx, &onsets, total);
+                        let hit_turn = turn + (diff / total) as f32;
+                        let reference = Stroke::new(0.5 * size, reference_color(dark));
+                        painter.line_segment(
+                            [at_turn(center, at - size, turn), at_turn(center, at + size, turn)],
+                            reference,
+                        );
+                        painter.add(PathShape::line(
+                            arc(center, at, turn.min(hit_turn), turn.max(hit_turn)),
+                            reference,
+                        ));
+                        painter.circle_filled(
+                            at_turn(center, at, hit_turn),
+                            size,
+                            grade_color(grade, dark),
+                        );
+                    }
+                    AccuracyMark::Miss => {
+                        let stroke = Stroke::new(0.6 * size, grade_color(HitGrade::Off, dark));
+                        let mid = at_turn(center, at, turn);
+                        for d in [vec2(1.0, 1.0), vec2(1.0, -1.0)] {
+                            painter.line_segment([mid - d * size, mid + d * size], stroke);
+                        }
+                    }
+                }
             }
         }
     }
@@ -1526,20 +1614,27 @@ mod tests {
     }
 
     #[test]
-    fn practice_accuracy_marks_stay_out_of_the_metronome() {
+    fn timing_feedback_works_in_the_metronome_and_clears_on_a_page_change() {
         let cc = eframe::CreationContext::_new_kittest(egui::Context::default());
         let mut app = Grooph::new(&cc);
         // A fresh app opens the metronome; start from practice.
         app.select_tab(Tab::Practice);
         app.playback_ctl.accuracy.enabled = true;
         assert!(app.shows_accuracy_marks());
-        // The marks of a practice run would land on the click bar's notes.
+        app.playback_ctl.accuracy.tracker.on_playback_start_at(0.0, 0.0);
+        let timing = app.score_timing();
+        let score = app.played_score().clone();
+        app.playback_ctl.accuracy.tracker.record_hit(0.0, &timing, &score);
+        assert!(app.playback_ctl.accuracy.tracker.live_summary().is_some());
+        // The practice run's marks would land on the click bar's notes: the
+        // page change clears them (see `show_document`).
         app.select_tab(Tab::Metronome);
-        assert!(!app.shows_accuracy_marks());
-        // Back in practice they would belong to the rhythm again (a page
-        // change clears the last run's marks, see `show_document`).
-        app.select_tab(Tab::Practice);
+        assert!(app.accuracy_active());
         assert!(app.shows_accuracy_marks());
+        assert!(app.playback_ctl.accuracy.tracker.live_summary().is_none());
+        // Not in the score tab.
+        app.select_tab(Tab::Score);
+        assert!(!app.accuracy_active());
     }
 
     #[test]

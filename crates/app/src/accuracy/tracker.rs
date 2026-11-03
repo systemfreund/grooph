@@ -5,7 +5,7 @@ use grooph_measure::tempo::ScoreTiming;
 
 use super::progress::update_progress;
 use super::recorder::record_hit;
-use super::session::{AccuracyMark, RecordingSession, RunSummary, shift_marks};
+use super::session::{AccuracyMark, RecordingSession, RunSummary, TRACKED_VOICES, shift_marks};
 
 /// Coordinates the accuracy-recording session. Holds a `RecordingSession`
 /// that is either `Idle` (no playback) or `Recording` (playback active with
@@ -16,6 +16,8 @@ pub(crate) struct AccuracyTracker {
     session: RecordingSession,
     /// Evaluation of the last finished run with at least one hit.
     last_summary: Option<RunSummary>,
+    /// That run per tracked voice.
+    last_voice_summaries: [Option<RunSummary>; TRACKED_VOICES],
     /// Marks of that run, kept on the staff after stopping until the next
     /// run starts or the score is edited.
     last_marks: HashMap<u64, AccuracyMark>,
@@ -77,6 +79,7 @@ impl AccuracyTracker {
             && let Some(summary) = data.summary()
         {
             self.last_summary = Some(summary);
+            self.last_voice_summaries = data.voice_summaries();
             self.last_marks = data.marks_by_onset.clone();
         }
         self.session.stop();
@@ -89,6 +92,16 @@ impl AccuracyTracker {
 
     pub(crate) fn last_summary(&self) -> Option<RunSummary> {
         self.last_summary
+    }
+
+    /// Running evaluation of the current session per tracked voice.
+    pub(crate) fn live_voice_summaries(&self) -> [Option<RunSummary>; TRACKED_VOICES] {
+        self.session.data().map_or([None; TRACKED_VOICES], |d| d.voice_summaries())
+    }
+
+    /// The last finished run per tracked voice, as [`Self::last_summary`].
+    pub(crate) fn last_voice_summaries(&self) -> [Option<RunSummary>; TRACKED_VOICES] {
+        self.last_voice_summaries
     }
 
     pub(crate) fn dismiss_summary(&mut self) {
@@ -201,6 +214,43 @@ mod tests {
             AccuracyMark::Hit { diff_ticks: diff, .. } => assert!(diff.abs() < 1e-6, "diff={diff}"),
             _ => panic!("expected a hit"),
         }
+    }
+
+    #[test]
+    fn hits_and_misses_count_for_each_voice_with_a_note_there() {
+        // Click quarters above, counter eighths on the first beat below.
+        let score = grooph_measure::notation::parse_score("2/4 q q ; e e r:q").unwrap();
+        let timing = ScoreTiming::from_score(&score, 120);
+        let q = DEFAULT_GRID.ticks_per_beat(&TimeSignature::TWO_FOUR) as f64;
+        let mut tracker = AccuracyTracker::new();
+        tracker.on_playback_start_at(0.0, 0.0);
+        // The shared downbeat and the counter's second eighth are hit; the
+        // click's second quarter is missed.
+        tracker.record_hit(timing.global_tick_to_seconds(0.0), &timing, &score);
+        tracker.record_hit(timing.global_tick_to_seconds(q / 2.0), &timing, &score);
+        tracker.update_progress(timing.global_tick_to_seconds(1.9 * q), &timing, &score);
+
+        let [Some(click), Some(counter)] = tracker.live_voice_summaries() else {
+            panic!("both voices have notes");
+        };
+        assert_eq!((click.hits, click.misses), (1, 1));
+        assert_eq!((counter.hits, counter.misses), (2, 0));
+        let total = tracker.live_summary().unwrap();
+        assert_eq!((total.hits, total.misses), (2, 1));
+
+        tracker.on_playback_stop();
+        assert_eq!(tracker.last_voice_summaries(), [Some(click), Some(counter)]);
+    }
+
+    #[test]
+    fn a_voice_without_notes_has_no_summary() {
+        let score = score_of_quarters(&[TimeSignature::FOUR_FOUR]);
+        let timing = ScoreTiming::from_score(&score, 120);
+        let mut tracker = AccuracyTracker::new();
+        tracker.on_playback_start_at(0.0, 0.0);
+        assert_eq!(tracker.live_voice_summaries(), [None, None]);
+        tracker.record_hit(0.0, &timing, &score);
+        assert!(matches!(tracker.live_voice_summaries(), [Some(_), None]));
     }
 
     #[test]

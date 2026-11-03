@@ -3,7 +3,10 @@ use std::collections::{HashMap, HashSet};
 use grooph_measure::Score;
 use grooph_measure::tempo::ScoreTiming;
 
-use super::session::{AccuracyMark, GlobalBeatOnset, RecordingData, compute_global_beat_onsets};
+use super::session::{
+    AccuracyMark, GlobalBeatOnset, RecordingData, TRACKED_VOICES, VoiceTally,
+    compute_global_beat_onsets, tallies_of,
+};
 
 /// Advance the progress cursor and mark any note onsets whose hit window has
 /// elapsed as `Miss`. Wraps detected when the global tick decreases across a
@@ -52,6 +55,7 @@ pub(super) fn update_progress(
             &mut data.marks_by_onset,
             &mut data.hits_in_loop,
             &mut data.counters.misses,
+            &mut data.voice_tallies,
         );
     } else {
         // Score-loop wrapped.
@@ -64,6 +68,7 @@ pub(super) fn update_progress(
             &mut data.marks_by_onset,
             &mut data.hits_in_loop,
             &mut data.counters.misses,
+            &mut data.voice_tallies,
         );
         data.hits_in_loop = std::mem::take(&mut data.hits_next_loop);
         process_segment(
@@ -75,6 +80,7 @@ pub(super) fn update_progress(
             &mut data.marks_by_onset,
             &mut data.hits_in_loop,
             &mut data.counters.misses,
+            &mut data.voice_tallies,
         );
     }
 
@@ -91,6 +97,7 @@ fn process_segment(
     marks_by_onset: &mut HashMap<u64, AccuracyMark>,
     hits_in_loop: &mut HashSet<u64>,
     misses: &mut u64,
+    voice_tallies: &mut [VoiceTally; TRACKED_VOICES],
 ) {
     if global_beats.is_empty() {
         return;
@@ -116,6 +123,7 @@ fn process_segment(
             if !hits_in_loop.contains(&gb.onset_tick) {
                 marks_by_onset.insert(gb.onset_tick, AccuracyMark::Miss);
                 *misses += 1;
+                tallies_of(voice_tallies, gb.voices).for_each(|t| t.counters.misses += 1);
             }
             hits_in_loop.remove(&gb.onset_tick);
         }

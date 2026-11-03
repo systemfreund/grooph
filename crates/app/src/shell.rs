@@ -1100,6 +1100,10 @@ impl Grooph {
             self.ui.mode = Mode::Edit;
         }
         self.polyrhythm_row(ui);
+        // The view in a chat has no input to play along with.
+        if !self.embedded() {
+            self.timing_feedback_row(ui);
+        }
         self.shared_rows(ui);
     }
 
@@ -1218,12 +1222,7 @@ impl Grooph {
     /// Centered play button, with share on the right; embedded, meter and
     /// tempo on either side instead (see [`Self::metronome_page`]).
     fn metronome_transport(&mut self, ui: &mut Ui) {
-        if self.link_copied_recently(ui) {
-            ui.vertical_centered(|ui| {
-                ui.label(RichText::new("Link copied").size(16.0).weak());
-            });
-            ui.add_space(4.0);
-        }
+        self.status_line(ui);
         let playing = self.playback_ctl.transport_state == TransportState::Playing;
         // Embedded, the meter and tempo cells beside play set the height.
         let height =
@@ -1390,8 +1389,21 @@ impl Grooph {
         let text = if self.link_copied_recently(ui) {
             Some("Link copied".to_owned())
         } else {
-            self.playback_ctl.accuracy.tracker.live_summary().map(|summary| {
-                format!("Timing {:.0}%  {:+.0} ms", summary.score_percent(), summary.mean_ms)
+            let tracker = &self.playback_ctl.accuracy.tracker;
+            tracker.live_summary().map(|summary| {
+                let mut text =
+                    format!("Timing {:.0}%  {:+.0} ms", summary.score_percent(), summary.mean_ms);
+                // Against a counter rhythm, each rhythm's score as well.
+                if let [Some(click), Some(counter)] = tracker.live_voice_summaries()
+                    && self.metronome_mode()
+                {
+                    text += &format!(
+                        "  ·  click {:.0}%  counter {:.0}%",
+                        click.score_percent(),
+                        counter.score_percent()
+                    );
+                }
+                text
             })
         };
         if let Some(text) = text {

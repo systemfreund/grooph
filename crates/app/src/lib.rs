@@ -1201,7 +1201,6 @@ impl Grooph {
         let accuracy_start = midi_connected.then(clock::now_seconds);
         self.playback_ctl.play_along.engaged = false;
         self.playback_ctl.accuracy.tracker.dismiss_summary();
-        // The metronome plays no rhythm to play along with.
         if self.accuracy_active() {
             self.playback_ctl.accuracy.tracker.on_playback_start(accuracy_start);
         } else {
@@ -1253,10 +1252,11 @@ impl Grooph {
         info!("Toggle playback: {:?}", self.playback_ctl.transport_state);
     }
 
-    /// Whether timing feedback is at work: switched on, and in Practice, the
-    /// rhythm to play along with (not the score's, not the metronome's).
+    /// Whether timing feedback is at work: switched on, and in Practice (the
+    /// rhythm to play along with) or the metronome (its clicks and counter
+    /// rhythm), not in the score tab. Never in the view in a chat.
     pub(crate) fn accuracy_active(&self) -> bool {
-        self.playback_ctl.accuracy.enabled && !self.metronome_mode() && self.tab() != Tab::Score
+        self.playback_ctl.accuracy.enabled && !self.embedded() && self.tab() != Tab::Score
     }
 
     fn set_accuracy_enabled(&mut self, enabled: bool) {

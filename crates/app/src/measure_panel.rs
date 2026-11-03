@@ -856,7 +856,7 @@ const MARK_WIDTH_PER_HEAD: f32 = 0.25;
 /// and differ in lightness. No red/green pair. The grade is shown by shape as
 /// well (off hits get an arrowhead, misses a cross), so colour is never the
 /// only cue.
-fn grade_color(grade: HitGrade, dark: bool) -> egui::Color32 {
+pub(crate) fn grade_color(grade: HitGrade, dark: bool) -> egui::Color32 {
     match (grade, dark) {
         (HitGrade::Perfect, false) => egui::Color32::from_rgb(51, 102, 204),
         (HitGrade::Perfect, true) => egui::Color32::from_rgb(102, 204, 238),
@@ -868,7 +868,7 @@ fn grade_color(grade: HitGrade, dark: bool) -> egui::Color32 {
 }
 
 /// The note's zero line and the connector to the hit.
-fn reference_color(dark: bool) -> egui::Color32 {
+pub(crate) fn reference_color(dark: bool) -> egui::Color32 {
     if dark { egui::Color32::from_gray(150) } else { egui::Color32::from_gray(120) }
 }
 

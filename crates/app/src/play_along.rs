@@ -139,8 +139,6 @@ impl Grooph {
         }
         match self.calibration_source() {
             Some(source) => source == HitSource::Tap,
-            // In the metronome there is no rhythm to play along with; taps
-            // edit the ring.
             None => self.accuracy_active() && self.playback_ctl.play_along.settings.tap_enabled,
         }
     }
@@ -258,9 +256,7 @@ impl Grooph {
         tap_hits.extend(self.drain_key_taps(ui));
 
         let calibrating = self.calibration_source();
-        if !(self.playback_ctl.accuracy.enabled && self.tab() != crate::shell::Tab::Score)
-            && calibrating.is_none()
-        {
+        if !self.accuracy_active() && calibrating.is_none() {
             return;
         }
         if self.playback_ctl.transport_state != TransportState::Playing {
@@ -364,6 +360,14 @@ impl Grooph {
                 ui.heading(format!("{:.0}%", summary.score_percent()));
                 ui.add_space(4.0);
                 summary_grid(ui, &summary);
+                // Against a counter rhythm, how each rhythm went.
+                if let [Some(click), Some(counter)] =
+                    self.playback_ctl.accuracy.tracker.last_voice_summaries()
+                    && self.metronome_mode()
+                {
+                    ui.add_space(8.0);
+                    voice_grid(ui, &click, &counter);
+                }
                 ui.add_space(8.0);
                 if ui.button("Close").clicked() {
                     close = true;
@@ -405,6 +409,26 @@ fn summary_grid(ui: &mut egui::Ui, summary: &RunSummary) {
         ui.label("Spread");
         ui.label(format!("± {:.0} ms", summary.spread_ms));
         ui.end_row();
+    });
+}
+
+/// The click bar's and the counter rhythm's results side by side.
+fn voice_grid(ui: &mut egui::Ui, click: &RunSummary, counter: &RunSummary) {
+    egui::Grid::new("run_summary_voices").num_columns(3).spacing([16.0, 4.0]).show(ui, |ui| {
+        let row = |ui: &mut egui::Ui, label: &str, value: &dyn Fn(&RunSummary) -> String| {
+            ui.label(label);
+            ui.label(value(click));
+            ui.label(value(counter));
+            ui.end_row();
+        };
+        ui.label("");
+        ui.strong("Click");
+        ui.strong("Counter");
+        ui.end_row();
+        row(ui, "Score", &|s| format!("{:.0}%", s.score_percent()));
+        row(ui, "Hits", &|s| s.hits.to_string());
+        row(ui, "Missed notes", &|s| s.misses.to_string());
+        row(ui, "Average", &|s| if s.hits == 0 { "–".to_owned() } else { early_late(s.mean_ms) });
     });
 }
 
