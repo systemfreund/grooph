@@ -314,6 +314,10 @@ fn clear_rests(layouts: &mut [(MeasureLayout, LayoutOpts)], alone: [bool; 2]) {
             }
         }
     }
+    let drawn = |l: &MeasureLayout| l.notes.iter().any(|n| n.kind == BeatKind::Rest && !n.hidden);
+    if !drawn(upper) && !drawn(lower) {
+        return;
+    }
     let gap = REST_GAP_SS * up_opts.staff_space();
     for _ in 0..MAX_REST_STEPS {
         let (up_ink, low_ink) = (note_inks(upper), note_inks(lower));
@@ -1011,6 +1015,8 @@ mod tests {
             assert_eq!(empty[0].head.size, on.rescaled(staff.scale).em, "{text}");
             let want = staff.systems[0].y_baseline - line * ss;
             assert!((empty[0].head.origin.y - want).abs() < 0.01, "{text}: {:?}", empty[0]);
+            // Its center goes with it, for the cursor and taps.
+            assert!((empty[0].center.y - want).abs() < 0.01, "{text}: {:?}", empty[0]);
             // The other voice's notes are untouched.
             let other = &placed.voices[1 - voice].notes;
             assert!(other.iter().all(|n| !n.hidden && n.head.glyph != REST_WHOLE), "{text}");

@@ -571,6 +571,8 @@ fn bar_rest(notes: &mut [NoteLayout], rect: &Rect, opts: &LayoutOpts) {
         if i == 0 {
             note.staff_pos = opts.staff_model().bar_rest_pos();
             let y = opts.y_of(note.staff_pos);
+            // The beat keeps its x, for the cursor and the labels.
+            note.center.y = y;
             note.head = PlacedGlyph::centered(glyphs::REST_WHOLE, rect.center().x, y, opts.em);
         } else {
             note.hidden = true;
