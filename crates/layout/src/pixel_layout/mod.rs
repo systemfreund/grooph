@@ -295,6 +295,9 @@ pub struct NoteLayout {
     /// A rest of an empty bar, drawn as the bar's whole rest by its first
     /// beat (see [`RenderPlan::bar_rest`]): the others are not drawn.
     pub hidden: bool,
+    /// A rest the score leaves out (see [`crate::render_plan::RestDisplay`]),
+    /// drawn faintly in the editor.
+    pub veiled: bool,
     /// The parentheses of each soft (ghost) head.
     pub parens: Vec<PlacedGlyph>,
     /// Ledger lines of the heads or the half or whole rest off the staff

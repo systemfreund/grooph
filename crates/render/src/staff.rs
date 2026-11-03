@@ -321,6 +321,7 @@ mod tests {
             room_below_em: ROOM_BELOW_EM,
             lower_label_room_em: 0.0,
             bar_rests: false,
+            veil_hidden_rests: false,
         }
     }
 

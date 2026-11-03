@@ -1,6 +1,6 @@
 use super::{LayoutOpts, Line, NoteLayout, PlacedGlyph, c, requires_flag};
 use crate::glyphs;
-use crate::render_plan::RenderPlan;
+use crate::render_plan::{RenderPlan, RestDisplay};
 use crate::staff::rest_takes_ledgers;
 use egui::{Pos2, Rect};
 use grooph_measure::duration::{Duration, NoteValue};
@@ -542,6 +542,7 @@ pub(super) fn build_note_layout(
             chord: others,
             stemlet,
             hidden: false,
+            veiled: false,
             parens,
             ledgers,
             dots,
@@ -556,6 +557,16 @@ pub(super) fn build_note_layout(
 
     if render_plan.bar_rest {
         bar_rest(&mut note_layout, rect, opts);
+    }
+    let rests = note_layout.iter_mut().filter(|n| n.kind == BeatKind::Rest);
+    match render_plan.rests {
+        RestDisplay::Drawn => {}
+        RestDisplay::Veiled => rests.for_each(|n| n.veiled = true),
+        RestDisplay::Hidden => rests.for_each(|n| {
+            n.hidden = true;
+            n.dots.clear();
+            n.ledgers.clear();
+        }),
     }
     note_layout
 }

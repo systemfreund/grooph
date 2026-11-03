@@ -149,6 +149,10 @@ spread across callers.
   alone, for moving heads between voices. An empty bar is per-beat rests in
   the model; the whole rest is the layout's (`RenderPlan::bar_rest`), also in
   the editor and, on the kit's staff, for an empty voice among several (in its half; not on a shared line).
+  `Score::hidden_rests` (`HiddenRests`, #322; the link's `hiderests`) leaves out the rests of the lower
+  voice or of both in the kit's bars of two voices, an empty voice's whole rest too (`RenderPlan::rests`):
+  hidden, they keep their layouts for the labels, the cursor and taps; the editor draws them veiled
+  (`StaffOpts::veil_hidden_rests`, `NoteLayout::veiled`). The score tab's Rests row picks it.
 - `Beat`, `VoiceBar` and `Measure` compare with `==` including their tuplet groups. Tests that build
   expected beats by hand (without marks) compare `beat::unmarked(..)`.
 

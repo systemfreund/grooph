@@ -23,7 +23,7 @@ use crate::pixel_layout::{
     LayoutOpts, MeasureLayout, build_measure_layout_at, build_measure_layout_with_plan, clef_width,
     min_note_area_width, note_advances, note_area_offset, note_lead, time_sig_width,
 };
-use crate::render_plan::{RenderPlan, plan_measure_with, rests_only};
+use crate::render_plan::{RenderPlan, RestDisplay, plan_measure_with, rests_only};
 use crate::staff::{Staff, Voicing};
 use crate::{calculate_shared_x_centers, shared_min_width};
 use egui::{FontId, Pos2, Rect, Vec2, pos2, vec2};
@@ -75,6 +75,10 @@ pub struct StaffOpts {
     /// [`RenderPlan::bar_rest`]), unless another voice shares its line. Off
     /// in the metronome, where every click is its own to tap.
     pub bar_rests: bool,
+    /// Draw the rests the score leaves out ([`Score::hidden_rests`]) faintly
+    /// instead of not at all: in the editor, where they are still picked
+    /// and replaced.
+    pub veil_hidden_rests: bool,
 }
 
 impl StaffOpts {
@@ -344,16 +348,27 @@ pub fn build_staff_layout(score: &Score, opts: &StaffOpts) -> StaffLayout {
     // shows as one whole rest, in its half with several voices on the kit's
     // five lines. Sharing one line it does not: every beamed rest is then a
     // stemlet, clear of the line; on the kit's five lines rests have their
-    // own places, so they stay rests, as in drum notation.
+    // own places, so they stay rests, as in drum notation. There the score
+    // may leave out the rests of a voice in a bar of two (veiled while
+    // editing), the whole rest of an empty voice too.
     let voices = |i: usize| score.measures()[i].voices();
+    let hidden = match opts.veil_hidden_rests {
+        true => RestDisplay::Veiled,
+        false => RestDisplay::Hidden,
+    };
     let plans: Vec<Vec<RenderPlan>> = (0..score.len())
         .map(|i| {
-            let shares_line =
-                staff.shares_line(Voicing { shared: voices(i).len() > 1, stem_down: false });
+            let several = voices(i).len() > 1;
+            let shares_line = staff.shares_line(Voicing { shared: several, stem_down: false });
             voices(i)
                 .iter()
-                .map(|v| RenderPlan {
+                .enumerate()
+                .map(|(voice, v)| RenderPlan {
                     bar_rest: opts.bar_rests && !shares_line && rests_only(v),
+                    rests: match several && !shares_line && score.hidden_rests.hides(voice) {
+                        true => hidden,
+                        false => RestDisplay::Drawn,
+                    },
                     ..plan_measure_with(v, shares_line)
                 })
                 .collect()
@@ -617,6 +632,7 @@ mod tests {
             room_below_em: ROOM_BELOW_EM,
             lower_label_room_em: 0.0,
             bar_rests: false,
+            veil_hidden_rests: false,
         }
     }
 
@@ -921,6 +937,88 @@ mod tests {
             &opts(20.0, rect),
         );
         assert!(off.placed(0).unwrap().voices[1].notes.iter().all(|n| !n.hidden));
+    }
+
+    #[test]
+    fn a_score_hides_the_rests_of_the_lower_voice_or_of_both() {
+        use grooph_measure::HiddenRests;
+        use grooph_measure::notation::parse_score;
+        let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(900.0, 400.0));
+        let on = StaffOpts { bar_rests: true, ..opts(20.0, rect) };
+        // A groove with rests in both voices, an empty lower voice, a bar
+        // of one voice.
+        let text = "kit 4/4 H:e r:e H:e H:e S:q r:q ; K:q r:q K:q r:q | 4/4 H:h H:h ; r:h r:h | 4/4 S:q r:q S:h";
+        // The rests drawn, (hidden, veiled), per bar and voice.
+        let rests = |hidden, veil| {
+            let mut score = parse_score(text).unwrap();
+            score.hidden_rests = hidden;
+            let opts = StaffOpts { veil_hidden_rests: veil, ..on.clone() };
+            let staff = build_staff_layout(&score, &opts);
+            (0..3)
+                .map(|i| {
+                    let placed = staff.placed(i).unwrap();
+                    let voices = placed.voices.iter().map(|v| {
+                        let rests = v.notes.iter().filter(|n| n.kind == BeatKind::Rest);
+                        let gone =
+                            rests.clone().filter(|n| n.hidden && n.glyphs().next().is_none());
+                        (gone.count(), rests.filter(|n| n.veiled).count())
+                    });
+                    voices.collect::<Vec<_>>()
+                })
+                .collect::<Vec<_>>()
+        };
+        // Shown: an empty voice is one whole rest, its other rest hidden.
+        assert_eq!(
+            rests(HiddenRests::None, false),
+            [vec![(0, 0), (0, 0)], vec![(0, 0), (1, 0)], vec![(0, 0)]]
+        );
+        // The lower voice's rests and whole rest go; a bar of one voice
+        // keeps its rest.
+        assert_eq!(
+            rests(HiddenRests::Lower, false),
+            [vec![(0, 0), (2, 0)], vec![(0, 0), (2, 0)], vec![(0, 0)]]
+        );
+        assert_eq!(
+            rests(HiddenRests::Both, false),
+            [vec![(2, 0), (2, 0)], vec![(0, 0), (2, 0)], vec![(0, 0)]]
+        );
+        // In the editor they are veiled, the empty voice's whole rest too.
+        assert_eq!(
+            rests(HiddenRests::Lower, true),
+            [vec![(0, 0), (0, 2)], vec![(0, 0), (1, 2)], vec![(0, 0)]]
+        );
+        assert_eq!(
+            rests(HiddenRests::Both, true),
+            [vec![(0, 2), (0, 2)], vec![(0, 0), (1, 2)], vec![(0, 0)]]
+        );
+        // The hidden rests keep their places for taps and the cursor.
+        let mut score = parse_score(text).unwrap();
+        score.hidden_rests = HiddenRests::Both;
+        let staff = build_staff_layout(&score, &on);
+        let lower = &staff.placed(0).unwrap().voices[1].notes;
+        assert!(lower[1].hidden);
+        assert_eq!(hit_test_voice(&staff, lower[1].center), Some((1, 0, 1)));
+        // A dotted rest takes its dot with it.
+        let mut score = parse_score("kit 6/8 H:e H:e H:e H:e H:e H:e ; K:e r:e r:e r:q.").unwrap();
+        score.hidden_rests = HiddenRests::Lower;
+        let staff = build_staff_layout(&score, &on);
+        let dotted = &staff.placed(0).unwrap().voices[1].notes[3];
+        assert!(dotted.hidden && dotted.dots.is_empty() && dotted.glyphs().next().is_none());
+    }
+
+    #[test]
+    fn two_voices_sharing_the_one_line_keep_their_rests_even_hidden() {
+        use grooph_measure::HiddenRests;
+        use grooph_measure::notation::parse_score;
+        let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(900.0, 400.0));
+        let mut score = with_lower(
+            &parse_score("4/4 q r:q q q").unwrap(),
+            &parse_score("4/4 q r:q r:h").unwrap(),
+        );
+        score.hidden_rests = HiddenRests::Both;
+        let staff = build_staff_layout(&score, &opts(20.0, rect));
+        let placed = staff.placed(0).unwrap();
+        assert!(placed.voices.iter().all(|v| v.notes.iter().all(|n| !n.hidden && !n.veiled)));
     }
 
     #[test]

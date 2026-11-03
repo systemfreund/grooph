@@ -19,6 +19,7 @@
 //! | `click`   | Click bar of the meter of `r` (its first measure) or `ts`: one measure in the text notation, without the time signature (`>` strong, plain medium, `(e)` soft, rest off), on the one line |
 //! | `poly`    | Polyrhythm `n:m` (n clicks in the time of m beat units) the metronome plays against the click bar of `ts`, its counter bar built as the app's picker does (see [`grooph_measure::counter`]); needs `ts` without `r` or the generator |
 //! | `counter` | The counter rhythm written out like `click`, for one whose clicks were edited; otherwise as `poly`. Not together with `poly` |
+//! | `hiderests` | The rests the drum kit's staff of `r` leaves out in bars of two voices: `lower` (the feet's) or `both`; default none ([`HiddenRests`]) |
 //!
 //! Any of `sub`, `lvl`, `bars`, `space` or `seed` selects the generator;
 //! unknown parameters are ignored. [`SharedLink::to_url`] is the inverse of
@@ -44,7 +45,9 @@ use grooph_measure::grid::DEFAULT_GRID;
 use grooph_measure::notation::{format_score, parse_score};
 use grooph_measure::swing::{MAX_SWING_PERCENT, MIN_SWING_PERCENT, Swing, SwingUnit};
 use grooph_measure::tempo::{MAX_BPM, MIN_BPM};
-use grooph_measure::{Measure, ParseTimeSignatureError, Score, StaffKind, TimeSignature};
+use grooph_measure::{
+    HiddenRests, Measure, ParseTimeSignatureError, Score, StaffKind, TimeSignature,
+};
 use std::fmt::Write as _;
 
 /// Version [`SharedLink::to_url`] writes as `v`.
@@ -109,6 +112,7 @@ fn parse_query_with_default_version(
     let mut poly = None;
     let mut groups = None;
     let mut subdivision = None;
+    let mut hidden_rests = None;
 
     for pair in query.trim_start_matches('?').split('&').filter(|p| !p.is_empty()) {
         let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
@@ -135,6 +139,7 @@ fn parse_query_with_default_version(
             "click" => click = Some(value),
             "counter" => counter = Some(value),
             "poly" => poly = Some(value.parse::<Ratio>().map_err(|e| format!("poly: {e}"))?),
+            "hiderests" => hidden_rests = Some(parse_hidden_rests(&value)?),
             _ => {}
         }
     }
@@ -151,6 +156,9 @@ fn parse_query_with_default_version(
         (Some(ts), Some(text)) => Some(grouped(ts, &text)?),
     };
 
+    if hidden_rests.is_some() && rhythm.is_none() {
+        return Err("hiderests needs a rhythm (r)".into());
+    }
     let generator =
         sub.is_some() || lvl.is_some() || bars.is_some() || space.is_some() || seed.is_some();
     let content = if let Some(text) = rhythm {
@@ -162,7 +170,9 @@ fn parse_query_with_default_version(
             Some(ts) => format!("{ts} {text}"),
             None => text,
         };
-        Some(LinkContent::Score(parse_score(&text).map_err(|e| format!("rhythm: {e}"))?))
+        let mut score = parse_score(&text).map_err(|e| format!("rhythm: {e}"))?;
+        score.hidden_rests = hidden_rests.unwrap_or_default();
+        Some(LinkContent::Score(score))
     } else if generator {
         let defaults = GeneratorSettings::default();
         let time_signature = ts.unwrap_or(defaults.time_signature);
@@ -289,6 +299,24 @@ fn subdivision_bar(ts: TimeSignature, code: &str) -> Result<Measure, String> {
     Err(format!("subdivision {code} does not fit {ts}: it takes {}", codes.join(", ")))
 }
 
+/// `hiderests`' value: `lower` or `both`.
+fn parse_hidden_rests(value: &str) -> Result<HiddenRests, String> {
+    match value {
+        "lower" => Ok(HiddenRests::Lower),
+        "both" => Ok(HiddenRests::Both),
+        _ => Err(format!("hiderests '{value}': expected lower or both")),
+    }
+}
+
+/// The `hiderests` value of `hidden`, none for the default.
+fn hidden_rests_code(hidden: HiddenRests) -> Option<&'static str> {
+    match hidden {
+        HiddenRests::None => None,
+        HiddenRests::Lower => Some("lower"),
+        HiddenRests::Both => Some("both"),
+    }
+}
+
 /// `ts` and, unless it is the usual one, `groups` for the meter `ts`.
 fn push_meter(params: &mut Vec<(&str, String)>, ts: TimeSignature) {
     params.push(("ts", format!("{}/{}", ts.beats, ts.beat_unit)));
@@ -373,7 +401,12 @@ impl SharedLink {
         }
         match &self.content {
             None => {}
-            Some(LinkContent::Score(score)) => params.push(("r", format_score(score)?)),
+            Some(LinkContent::Score(score)) => {
+                params.push(("r", format_score(score)?));
+                if let Some(code) = hidden_rests_code(score.hidden_rests) {
+                    params.push(("hiderests", code.into()));
+                }
+            }
             Some(LinkContent::Metronome(ts)) => push_meter(&mut params, *ts),
             Some(LinkContent::Generator { settings, seed }) => {
                 if settings.time_signature != TimeSignature::FOUR_FOUR {
@@ -678,6 +711,33 @@ mod tests {
 
     fn parse(query: &str) -> SharedLink {
         parse_query(query).unwrap().unwrap()
+    }
+
+    #[test]
+    fn a_rhythm_link_carries_the_rests_its_score_hides() {
+        let text = "4/4 H:e H:e S-H:e H:e H:e H:e S-H:e H:e ; K:q r:q K:q r:q";
+        for (hidden, query) in [
+            (HiddenRests::None, None),
+            (HiddenRests::Lower, Some("hiderests=lower")),
+            (HiddenRests::Both, Some("hiderests=both")),
+        ] {
+            let mut score = parse_score(text).unwrap();
+            score.hidden_rests = hidden;
+            let link =
+                SharedLink { content: Some(LinkContent::Score(score)), ..Default::default() };
+            let url = link.to_url("/").unwrap();
+            assert_eq!(url.contains("hiderests"), query.is_some(), "{url}");
+            if let Some(query) = query {
+                assert!(url.ends_with(query), "{url}");
+            }
+            let Some(LinkContent::Score(back)) = parse(url.strip_prefix("/?").unwrap()).content
+            else {
+                panic!("{url}")
+            };
+            assert_eq!(back.hidden_rests, hidden, "{url}");
+        }
+        assert!(parse_query("r=q+q+q+q&hiderests=upper").unwrap_err().contains("lower or both"));
+        assert!(parse_query("ts=4/4&hiderests=lower").unwrap_err().contains("needs a rhythm"));
     }
 
     #[test]

@@ -2388,6 +2388,30 @@ mod tests {
     }
 
     #[test]
+    fn the_editor_veils_the_rests_the_score_hides() {
+        use super::Grooph;
+        use eframe::egui::{Pos2, RawInput, Rect, vec2};
+
+        let ctx = eframe::egui::Context::default();
+        let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let mut app = Grooph::new(&cc);
+        let rect = Rect::from_min_size(Pos2::ZERO, vec2(390.0, 300.0));
+        let veiled = |app: &Grooph| {
+            let mut veil = false;
+            let input = RawInput { screen_rect: Some(rect), ..Default::default() };
+            let mut output = ctx.run_ui(input, |ui| {
+                veil = app.staff_opts(ui, rect).veil_hidden_rests;
+            });
+            output.textures_delta.clear();
+            veil
+        };
+        app.select_tab(Tab::Score);
+        assert!(!veiled(&app), "playing");
+        app.ui.mode = super::Mode::Edit;
+        assert!(veiled(&app), "editing");
+    }
+
+    #[test]
     fn a_kit_link_opens_and_shares_the_groove() {
         use super::Grooph;
         use grooph_measure::StaffKind;

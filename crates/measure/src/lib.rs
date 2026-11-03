@@ -34,7 +34,7 @@ use editing::Modification;
 use either::Either;
 use grid::DEFAULT_GRID;
 pub use head::{Head, Heads, Instrument, Technique};
-pub use score::{Cursor, EmptyScore, MeasureIdx, Score, StaffKind};
+pub use score::{Cursor, EmptyScore, HiddenRests, MeasureIdx, Score, StaffKind};
 use std::fmt::{Debug, Formatter};
 pub use time_signature::{InvalidTimeSignature, ParseTimeSignatureError, TimeSignature};
 pub use tuplet::{TupletGroup, TupletMark};

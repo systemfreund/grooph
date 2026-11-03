@@ -7,7 +7,9 @@ use crate::documents::Document;
 use crate::generator::GeneratorState;
 use crate::metronome_view::FillLook;
 use crate::metronome_view::ratio_label;
-use crate::pickers::{Picker, ROW_HEIGHT, shown_groups, silent_bars_label, swing_label};
+use crate::pickers::{
+    Picker, ROW_HEIGHT, hidden_rests_label, shown_groups, silent_bars_label, swing_label,
+};
 use crate::share::paint_share_icon;
 use crate::tool_palette::{BAR_TOOLS, notation_size, paint_none, paint_notation, tool};
 use crate::tools::{EditOp, Tool, ToolKind};
@@ -21,10 +23,10 @@ use eframe::egui::{
 };
 use grooph_layout::glyphs::ts_glyphs;
 use grooph_layout::pixel_layout::PlacedGlyph;
-use grooph_measure::TimeSignature;
 use grooph_measure::counter::Ratio;
 use grooph_measure::generator::{Subdivision, effective_subdivision};
 use grooph_measure::swing::MIN_SWING_PERCENT;
+use grooph_measure::{StaffKind, TimeSignature};
 use grooph_render::draw_glyph;
 use serde::{Deserialize, Serialize};
 
@@ -925,7 +927,20 @@ impl Grooph {
     /// the timing feedback.
     fn score_rows(&mut self, ui: &mut Ui) {
         self.guide_row(ui);
+        self.hidden_rests_row(ui);
         self.shared_rows(ui);
+    }
+
+    /// The rests a kit score leaves out in bars of two voices; opens its
+    /// picker. Not on the one line, where every rest stays.
+    fn hidden_rests_row(&mut self, ui: &mut Ui) {
+        let score = &self.editor.doc().score;
+        if score.staff != StaffKind::Kit {
+            return;
+        }
+        if value_row(ui, "Rests", hidden_rests_label(score.hidden_rests)).clicked() {
+            self.ui.picker = Some(Picker::HiddenRests);
+        }
     }
 
     /// ✏ (the editor), play and share, as Practice's 🎲, play and share.

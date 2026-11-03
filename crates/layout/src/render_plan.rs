@@ -27,6 +27,23 @@ pub struct RenderPlan {
     /// in its middle: the usual rest for an empty bar in every meter. Set
     /// by the staff layout; the beats keep their layouts, only hidden.
     pub bar_rest: bool,
+    /// How the voice's rests show (see [`grooph_measure::HiddenRests`]),
+    /// the whole rest of [`RenderPlan::bar_rest`] too. Set by the staff
+    /// layout.
+    pub rests: RestDisplay,
+}
+
+/// How a voice's rests show.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum RestDisplay {
+    #[default]
+    Drawn,
+    /// Left out by the score, but drawn faintly so the editor can still
+    /// show, pick and replace them ([`crate::pixel_layout::NoteLayout::veiled`]).
+    Veiled,
+    /// Left out: not drawn, though each keeps its layout for the count
+    /// labels, the playback cursor and hit testing.
+    Hidden,
 }
 
 /// Build the logical `RenderPlan` for a measure.
@@ -43,7 +60,7 @@ pub fn plan_measure_with(measure: &VoiceBar, stemlets: bool) -> RenderPlan {
     let BeamPlan { groups: beams } = compute_beam_plan_with(measure, stemlets);
     let tuplets = compute_tuplet_plan(measure, &beams);
 
-    RenderPlan { beams, tuplets, bar_rest: false }
+    RenderPlan { beams, tuplets, bar_rest: false, rests: RestDisplay::Drawn }
 }
 
 /// Whether `measure` holds rests only, none of them in a tuplet: an empty
