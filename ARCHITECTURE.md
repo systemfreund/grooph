@@ -147,7 +147,8 @@ spread across callers.
   `Measure::clean_up` does every voice; applying it twice changes
   nothing. `VoiceBar::from_onsets` writes a voice from ticks and heads
   alone, for moving heads between voices. An empty bar is per-beat rests in
-  the model; the whole rest is the layout's (`RenderPlan::bar_rest`).
+  the model; the whole rest is the layout's (`RenderPlan::bar_rest`), also in
+  the editor and, on the kit's staff, for an empty voice among several (in its half; not on a shared line).
 - `Beat`, `VoiceBar` and `Measure` compare with `==` including their tuplet groups. Tests that build
   expected beats by hand (without marks) compare `beat::unmarked(..)`.
 
