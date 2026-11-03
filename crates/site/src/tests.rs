@@ -1,5 +1,6 @@
 use super::*;
 use grooph_link::parse_query;
+use grooph_measure::TimeSignature;
 
 fn page(path: &str, section: &str, markdown: &str) -> Page {
     Page {
@@ -28,18 +29,35 @@ fn hrefs(html: &str) -> Vec<String> {
 
 #[test]
 fn counting_syllables() {
-    let four = TimeSignature::FOUR_FOUR;
-    let beat = DEFAULT_GRID.ticks_per_beat(&four);
-    assert_eq!(count_syllable(0, four), "1");
-    assert_eq!(count_syllable(beat * 2, four), "3");
-    assert_eq!(count_syllable(beat / 4, four), "e");
-    assert_eq!(count_syllable(beat / 2, four), "&");
-    assert_eq!(count_syllable(beat * 3 / 4, four), "a");
-    assert_eq!(count_syllable(beat + beat / 3, four), "trip");
-    assert_eq!(count_syllable(beat + beat * 2 / 3, four), "let");
-    assert_eq!(count_syllable(beat / 8, four), "·");
-    let eight = TimeSignature::SEVEN_EIGHT;
-    assert_eq!(count_syllable(DEFAULT_GRID.ticks_per_beat(&eight) * 6, eight), "7");
+    let four = Measure::new(TimeSignature::FOUR_FOUR);
+    let counts = Counts::of(&four);
+    let beat = DEFAULT_GRID.ticks_per_beat(&TimeSignature::FOUR_FOUR);
+    assert_eq!(counts.syllable(0), "1");
+    assert_eq!(counts.syllable(beat * 2), "3");
+    assert_eq!(counts.syllable(beat / 4), "e");
+    assert_eq!(counts.syllable(beat / 2), "&");
+    assert_eq!(counts.syllable(beat * 3 / 4), "a");
+    assert_eq!(counts.syllable(beat + beat / 3), "trip");
+    assert_eq!(counts.syllable(beat + beat * 2 / 3), "let");
+    assert_eq!(counts.syllable(beat / 8), "·");
+    assert!(counts.on_beat(beat) && !counts.on_beat(beat / 2));
+}
+
+/// The guide counts x/8 in groups, as the app's counting overlay does.
+#[test]
+fn counting_syllables_follow_the_beat_groups() {
+    let six = Measure::new(TimeSignature::SIX_EIGHT);
+    let counts = Counts::of(&six);
+    let eighth = DEFAULT_GRID.ticks_per_beat(&TimeSignature::SIX_EIGHT);
+    let said: Vec<String> = (0..6).map(|i| counts.syllable(i * eighth)).collect();
+    assert_eq!(said, ["1", "la", "li", "2", "la", "li"]);
+    assert_eq!(counts.syllable(eighth / 2), "ta");
+    assert!(counts.on_beat(3 * eighth) && !counts.on_beat(eighth));
+
+    let seven = Measure::new(TimeSignature::SEVEN_EIGHT);
+    let counts = Counts::of(&seven);
+    let said: Vec<String> = (0..7).map(|i| counts.syllable(i * eighth)).collect();
+    assert_eq!(said, ["1", "&", "2", "la", "li", "3", "&"]);
 }
 
 #[test]
