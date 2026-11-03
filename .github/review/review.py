@@ -191,6 +191,18 @@ def discussion(summary, comments, review_comments=(), open_findings=()):
     return sorted(conversation + inline, key=lambda c: c["at"])
 
 
+# Withdrawn findings the synthesis is told about; the newest first, older ones are unlikely to come back.
+MAX_WITHDRAWN = 40
+
+
+def withdrawn_findings(state):
+    """The findings withdrawn so far with the reason, so that a reviewer reporting one again is recognised."""
+    withdrawn = [f for f in state["findings"] if f["status"] == "withdrawn"]
+    withdrawn.sort(key=lambda f: int(f["id"][1:]), reverse=True)
+    return [{"id": f["id"], "title": f.get("title"), "reason": f.get("resolution") or ""}
+            for f in withdrawn[:MAX_WITHDRAWN]]
+
+
 def mark_new(prior, seen):
     """Marks each reply and discussion entry written after the last run (`seen`) with `"new": true`."""
     for entry in [r for f in prior["findings"] for r in f.get("replies", [])] + prior["discussion"]:
@@ -301,6 +313,7 @@ def cmd_prepare(args):
             "findings": with_replies(open_findings, review_comments),
             "discussion": discussion(summary, comments, review_comments, open_findings),
         }
+        prior["withdrawn"] = withdrawn_findings(state)
         mark_new(prior, state.get("answers_until") or summary["updated_at"])
         (out / "prior.json").write_text(json.dumps(prior, indent=2, ensure_ascii=False))
         text = new_answers_text(prior)

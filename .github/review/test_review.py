@@ -560,8 +560,10 @@ class Prepare(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
         github = FakeGitHub()
-        state = {"version": 1, "head_sha": "old", "next_id": 3, "answers_until": "2026-01-03T06",
-                 "findings": [finding("F1", comment_id=7), finding("F2")]}
+        state = {"version": 1, "head_sha": "old", "next_id": 5, "answers_until": "2026-01-03T06",
+                 "findings": [finding("F1", comment_id=7), finding("F2"),
+                              {"id": "F3", "status": "withdrawn", "title": "slow", "resolution": "cheap"},
+                              {"id": "F4", "status": "resolved", "title": "fixed", "resolution": "done"}]}
 
         def comment(id, login, association, at, body, **extra):
             return {"id": id, "user": {"login": login}, "author_association": association, "created_at": at,
@@ -591,6 +593,7 @@ class Prepare(unittest.TestCase):
             self.assertEqual(review.cmd_prepare(args), 0)
         prior = json.loads((out / "prior.json").read_text())
         f1, f2 = prior["findings"]
+        self.assertEqual(prior["withdrawn"], [{"id": "F3", "title": "slow", "reason": "cheap"}])
         self.assertEqual(f1["replies"], [
             {"author": "dev", "at": "2026-01-03", "body": "handled in b.rs", "new": False},
             {"author": "dev", "at": "2026-01-03T13", "body": "deliberate", "new": True},
