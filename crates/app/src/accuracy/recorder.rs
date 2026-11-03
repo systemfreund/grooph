@@ -83,6 +83,8 @@ pub(super) fn record_hit(
         tally.push_hit(graded, grade);
     }
     data.bars.push(note_s, BarEvent::Hit(graded, grade));
+    let bar_s = if tps > 0.0 { timing.ticks_per_measure(onset_m_idx) as f64 / tps } else { 0.0 };
+    data.drift.push_hit(note_s, delta_ms, grade, bar_s);
     data.marks_by_onset.insert(global_onset, AccuracyMark::Hit { diff_ticks, grade });
     if wrap_next {
         data.hits_next_loop.insert(global_onset);

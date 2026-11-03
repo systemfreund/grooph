@@ -135,7 +135,9 @@ fn process_segment(
                 data.counters.misses += 1;
                 tallies_of(&mut data.voice_tallies, gb.voices).for_each(|t| t.counters.misses += 1);
                 let note_tick = window_end - (next - cur) * 0.5;
-                data.bars.push(cursor.seconds_at(note_tick, gb.measure_idx), BarEvent::Miss);
+                let note_s = cursor.seconds_at(note_tick, gb.measure_idx);
+                data.bars.push(note_s, BarEvent::Miss);
+                data.drift.push_miss(note_s);
             }
             data.hits_in_loop.remove(&gb.onset_tick);
         }

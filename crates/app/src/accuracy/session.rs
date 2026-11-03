@@ -5,6 +5,8 @@ use grooph_measure::Score;
 use grooph_measure::grid::DEFAULT_GRID;
 use grooph_measure::tempo::ScoreTiming;
 
+use super::drift::DriftLog;
+
 #[derive(Clone, Copy)]
 pub(crate) enum AccuracyMark {
     /// Deviation in ticks (negative = early) and how well it landed.
@@ -324,6 +326,8 @@ pub(super) struct RecordingData {
     pub(super) voice_tallies: [VoiceTally; TRACKED_VOICES],
     /// The same tallies for the bars with the click and the silent ones.
     pub(super) bars: BarTimeline,
+    /// The run over time, for its chart.
+    pub(super) drift: DriftLog,
 }
 
 /// A judged note, kept until the state of its bar is known.
@@ -388,6 +392,11 @@ impl BarTimeline {
             false
         });
         self.pending = pending;
+    }
+
+    /// The silent bars seen: start and end.
+    pub(super) fn silent_spans(&self) -> impl Iterator<Item = (f64, f64)> + '_ {
+        self.seen.iter().filter(|&&(_, _, muted)| muted).map(|&(start, end, _)| (start, end))
     }
 
     /// Whether the note at `note_s` was in a silent bar; `None` in a bar no
@@ -494,6 +503,7 @@ impl RecordingData {
             tight: TightTally::default(),
             voice_tallies: Default::default(),
             bars: BarTimeline::default(),
+            drift: DriftLog::default(),
         }
     }
 }
@@ -537,6 +547,7 @@ impl RecordingSession {
             d.tight = TightTally::default();
             d.voice_tallies = Default::default();
             d.bars = BarTimeline::default();
+            d.drift = DriftLog::default();
             d.last_tick = None;
         }
     }

@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use grooph_measure::Score;
 use grooph_measure::tempo::ScoreTiming;
 
+use super::drift::Drift;
 use super::progress::update_progress;
 use super::recorder::record_hit;
 use super::session::{AccuracyMark, RecordingSession, RunSummary, TRACKED_VOICES, shift_marks};
@@ -21,6 +22,8 @@ pub(crate) struct AccuracyTracker {
     /// That run's bars with the click and silent bars, if the gap click
     /// silenced any.
     last_bar_summaries: [Option<RunSummary>; 2],
+    /// That run over time.
+    last_drift: Option<Drift>,
     /// Marks of that run, kept on the staff after stopping until the next
     /// run starts or the score is edited.
     last_marks: HashMap<u64, AccuracyMark>,
@@ -51,6 +54,7 @@ impl AccuracyTracker {
 
     pub(crate) fn on_playback_start(&mut self, now_seconds: Option<f64>) {
         self.last_summary = None;
+        self.last_drift = None;
         self.last_marks.clear();
         match now_seconds {
             Some(t) => self.session.start(t, Some(0.0)),
@@ -87,6 +91,7 @@ impl AccuracyTracker {
             self.last_summary = Some(summary);
             self.last_voice_summaries = data.voice_summaries();
             self.last_bar_summaries = data.bar_summaries();
+            self.last_drift = data.drift.finish(data.bars.silent_spans());
             self.last_marks = data.marks_by_onset.clone();
         }
         self.session.stop();
@@ -147,8 +152,15 @@ impl AccuracyTracker {
         data.bars.observe(Some((start_s, start_s + length, muted)));
     }
 
+    /// The last finished run over time, as [`Self::last_summary`]; `None`
+    /// with fewer than two hits.
+    pub(crate) fn last_drift(&self) -> Option<&Drift> {
+        self.last_drift.as_ref()
+    }
+
     pub(crate) fn dismiss_summary(&mut self) {
         self.last_summary = None;
+        self.last_drift = None;
     }
 
     pub(crate) fn clear_for_edit(&mut self) {
@@ -308,6 +320,18 @@ mod tests {
         assert_eq!((audible.hits, audible.misses), (8, 0));
         assert!((audible.mean_ms + 1.25).abs() < 1e-6, "{}", audible.mean_ms);
         assert_eq!(tracker.last_summary().map(|s| (s.hits, s.misses)), Some((11, 1)));
+        // Over time: every hit and the missed note at its note's time, and
+        // the silent bar shaded.
+        let drift = tracker.last_drift().expect("hits recorded");
+        assert_eq!(drift.hits.len(), 11);
+        assert!(
+            (drift.hits[4].t - 2.0).abs() < 1e-6 && (drift.hits[4].delta_ms - 30.0).abs() < 1e-6
+        );
+        assert_eq!(drift.misses.len(), 1);
+        assert!((drift.misses[0] - 3.5).abs() < 1e-6, "{:?}", drift.misses);
+        assert_eq!(drift.silent.len(), 1);
+        let (start, end) = drift.silent[0];
+        assert!((start - 2.0).abs() < 1e-6 && (end - 4.0).abs() < 1e-6, "{start} {end}");
 
         // The engine a little ahead of the session's clock, or behind it,
         // does not move a note to another bar.

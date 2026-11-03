@@ -4,6 +4,7 @@
 
 use crate::accuracy::{GOOD_WINDOW_MS, PERFECT_WINDOW_MS, RunSummary};
 use crate::calibration::Calibration;
+use crate::drift_chart::drift_chart;
 use crate::platform::{TapKind, tap_time};
 use crate::{Grooph, TransportState, clock};
 use eframe::egui;
@@ -393,20 +394,31 @@ impl Grooph {
                      deviation instead of the click: how steady your playing is, \
                      even if you are always a little early or late",
                 );
-                ui.add_space(4.0);
-                summary_grid(ui, &summary);
+                let tracker = &self.playback_ctl.accuracy.tracker;
                 // Against a counter rhythm, how each rhythm went.
-                if let [Some(click), Some(counter)] =
-                    self.playback_ctl.accuracy.tracker.last_voice_summaries()
-                    && self.metronome_mode()
-                {
+                let voices = match tracker.last_voice_summaries() {
+                    [Some(click), Some(counter)] if self.metronome_mode() => Some([click, counter]),
+                    _ => None,
+                };
+                // With silent bars, how the playing held up without the click.
+                let bars = match tracker.last_bar_summaries() {
+                    [Some(audible), Some(silent)] => Some([audible, silent]),
+                    _ => None,
+                };
+                if let Some(drift) = tracker.last_drift() {
+                    ui.add_space(4.0);
+                    drift_chart(ui, drift);
+                }
+                ui.add_space(4.0);
+                // Folded away under the tables, which need the room on a phone.
+                egui::CollapsingHeader::new("Details")
+                    .default_open(voices.is_none() && bars.is_none())
+                    .show(ui, |ui| summary_grid(ui, &summary));
+                if let Some([click, counter]) = voices {
                     ui.add_space(8.0);
                     split_grid(ui, "run_summary_voices", ["Click", "Counter"], [&click, &counter]);
                 }
-                // With silent bars, how the playing held up without the click.
-                if let [Some(audible), Some(silent)] =
-                    self.playback_ctl.accuracy.tracker.last_bar_summaries()
-                {
+                if let Some([audible, silent]) = bars {
                     ui.add_space(8.0);
                     split_grid(
                         ui,

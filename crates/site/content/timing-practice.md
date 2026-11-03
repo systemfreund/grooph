@@ -77,6 +77,13 @@ While you play, the score, the average deviation and Tight are shown above the p
 button as they stand, which is handy in endless mode. Tight settles after a few bars, once
 your average does.
 
+Below Tight, a chart shows the run over time: a dot for each hit, higher when late and
+lower when early, and a line for your average over about a bar. If the line wanders off
+the middle, you are rushing or dragging; the band around the middle is the perfect window.
+Silent bars are shaded and missed notes are crosses along the bottom. The counts above sit
+under **Details**, which is folded away when the summary also shows the tables for a
+counter rhythm or silent bars.
+
 Fast notes get tighter windows, at most a fifth (perfect) and two fifths
 (good) of the gap to the neighbouring note, so a hit can't be "good" when it is nearly on
 the next note.
