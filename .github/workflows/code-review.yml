@@ -23,15 +23,13 @@ name: Code review
 # newer review cancels the running one. With the automatic triggers on (see
 # `on:`), every push to a pull request starts a review.
 #
-# A comment (through code-review-answers.yml, once the comments stop), or "Run
-# workflow" with mode `answers`, runs only the synthesis again,
+# "Run workflow" with mode `answers`, which code-review-answers.yml starts once
+# the comments on a pull request stop, runs only the synthesis again,
 # with the reviews of the last run, when someone with write access answered a
 # finding since: a reply in its thread, or a comment in the conversation that
 # names it (F3). `review.py rerun` decides; it looks at all answers since the last
 # review, so an answers run that cancels a waiting one loses nothing. An answers
-# run never cancels a review. Comment runs use the workflow file of the default
-# branch (GitHub's rule for issue_comment), but still the scripts and
-# instructions of the PR's head.
+# run never cancels a review.
 #
 # OpenCode runs the read-only `review` agent from opencode.json; every model
 # used here must be listed there. Only the publish job can write to the pull
@@ -43,9 +41,7 @@ name: Code review
 
 # Full reviews are only started by hand for now, to keep the cost down: the pull_request trigger (with
 # [opened, reopened, ready_for_review, synchronize]) is switched off. The jobs still handle it, so adding it
-# back here turns the automatic reviews on again. Comments start an answers run through
-# code-review-answers.yml, which waits until the comments stop and then runs this workflow with mode
-# `answers`; the jobs here still handle issue_comment and pull_request_review_comment too.
+# back here turns the automatic reviews on again.
 on:
   workflow_dispatch:
     inputs:
@@ -61,14 +57,13 @@ on:
         options: [review, answers]
         default: review
 
-# Answers runs (comments, or mode `answers`) get their own group: in a shared one, they would replace a
+# Answers runs get their own group: in a shared one, they would replace a
 # review that is still waiting. A newer answers run does replace a waiting one, which loses nothing (see
 # above), and a review that lands during an answers run wins: publish then drops the answers run's result.
 concurrency:
   group: >-
-    code-review-${{ github.event.pull_request.number || github.event.issue.number || inputs.pr
-    }}${{ (endsWith(github.event_name, 'comment') || inputs.mode == 'answers') && '-answers' || '' }}
-  cancel-in-progress: ${{ !(endsWith(github.event_name, 'comment') || inputs.mode == 'answers') }}
+    code-review-${{ github.event.pull_request.number || inputs.pr }}${{ inputs.mode == 'answers' && '-answers' || '' }}
+  cancel-in-progress: ${{ inputs.mode != 'answers' }}
 
 env:
   # Default models of the general review. GLM 5.3 (venice/z-ai-glm-5-3, its
@@ -81,14 +76,11 @@ env:
 
 jobs:
   setup:
-    # Skip drafts, PRs from forks (they get no secrets), and comments on issues.
+    # Skip drafts and PRs from forks (they get no secrets).
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'pull_request' && !github.event.pull_request.draft &&
-       github.event.pull_request.head.repo.full_name == github.repository) ||
-      (github.event_name == 'pull_request_review_comment' &&
-       github.event.pull_request.head.repo.full_name == github.repository) ||
-      (github.event_name == 'issue_comment' && github.event.issue.pull_request)
+       github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -105,9 +97,8 @@ jobs:
       - id: pick
         env:
           GH_TOKEN: ${{ github.token }}
-          PR: ${{ github.event.pull_request.number || github.event.issue.number || inputs.pr }}
+          PR: ${{ github.event.pull_request.number || inputs.pr }}
           MODELS: ${{ inputs.models || env.DEFAULT_MODELS }}
-          COMMENT: ${{ github.event_name == 'issue_comment' || github.event_name == 'pull_request_review_comment' }}
           ANSWERS: ${{ inputs.mode == 'answers' }}
         run: |
           if ! [[ "$PR" =~ ^[0-9]+$ ]]; then
@@ -118,15 +109,11 @@ jobs:
           # head with the Venice key, and the publish job with a token that can write.
           read -r head cross <<< "$(gh pr view "$PR" --repo "$GITHUB_REPOSITORY" \
             --json headRefOid,isCrossRepository --jq '"\(.headRefOid) \(.isCrossRepository)"')"
-          if [ "$cross" = true ] && [ "$COMMENT" = true ]; then
-            echo "#$PR comes from a fork; forks are not reviewed."
-            echo "mode=skip" >> "$GITHUB_OUTPUT"
-            exit 0
-          elif [ "$cross" = true ]; then
+          if [ "$cross" = true ]; then
             echo "::error::#$PR comes from a fork; forks are not reviewed."
             exit 1
           fi
-          if [ "$COMMENT" = true ] || [ "$ANSWERS" = true ]; then
+          if [ "$ANSWERS" = true ]; then
             echo "mode=answers" >> "$GITHUB_OUTPUT"
           else
             echo "mode=review" >> "$GITHUB_OUTPUT"
