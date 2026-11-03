@@ -27,10 +27,13 @@
 //! structured data. Invalid rhythms or links fail the build, naming the file.
 
 use grooph_link::{LinkContent, SharedLink, parse_query_current};
+use grooph_measure::counting::{
+    CountConfig, CountSlot, CountingSystem, Subdivision, build_count_slots,
+};
 use grooph_measure::grid::DEFAULT_GRID;
 use grooph_measure::notation::parse_score;
 use grooph_measure::swing::{Swing, SwingUnit};
-use grooph_measure::{Beat, BeatKind, Measure, TimeSignature};
+use grooph_measure::{Beat, BeatKind, Measure};
 use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
@@ -540,11 +543,12 @@ fn measure_grid(measure: &Measure) -> String {
     let ts = measure.time_signature();
     let beats = measure.first_voice().beats();
     let onsets = DEFAULT_GRID.compute_onset_ticks(beats);
+    let counts = Counts::of(measure);
     let spoken: Vec<String> = beats
         .iter()
         .zip(&onsets)
         .map(|(b, &t)| {
-            let syllable = count_syllable(t, ts);
+            let syllable = counts.syllable(t);
             match (b.kind(), b.accented()) {
                 (BeatKind::Rest, _) => format!("({syllable})"),
                 (BeatKind::Note, true) => format!("{syllable}!"),
@@ -570,13 +574,13 @@ fn measure_grid(measure: &Measure) -> String {
                     "<span class=\"tuplet\" style=\"flex:{ticks}\"><span class=\"bracket\">{n}</span><span class=\"inner\">"
                 );
                 for k in i..end {
-                    out.push_str(&cell(&beats[k], onsets[k], ts));
+                    out.push_str(&cell(&beats[k], onsets[k], &counts));
                 }
                 out.push_str("</span></span>");
                 i = end;
             }
             None => {
-                out.push_str(&cell(&beats[i], onsets[i], ts));
+                out.push_str(&cell(&beats[i], onsets[i], &counts));
                 i += 1;
             }
         }
@@ -589,34 +593,57 @@ fn ticks_of(beat: &Beat) -> u32 {
     DEFAULT_GRID.ticks_of(&beat.duration).unwrap_or(0)
 }
 
-fn cell(beat: &Beat, onset: u32, ts: TimeSignature) -> String {
+fn cell(beat: &Beat, onset: u32, counts: &Counts) -> String {
     let class = match (beat.kind(), beat.accented()) {
         (BeatKind::Rest, _) => "cell rest",
         (BeatKind::Note, true) => "cell note accent",
         (BeatKind::Note, false) => "cell note",
     };
-    let on_beat = onset.is_multiple_of(DEFAULT_GRID.ticks_per_beat(&ts));
     format!(
         "<span class=\"{class}{}\" style=\"flex:{}\"><i></i><b>{}</b></span>",
-        if on_beat { " beat" } else { "" },
+        if counts.on_beat(onset) { " beat" } else { "" },
         ticks_of(beat),
-        esc(&count_syllable(onset, ts))
+        esc(&counts.syllable(onset))
     )
 }
 
-/// Counting syllable of an onset: the beat number on the beat, then
-/// "e & a" for sixteenths and "trip let" for triplets.
-pub fn count_syllable(onset: u32, ts: TimeSignature) -> String {
-    let beat = DEFAULT_GRID.ticks_per_beat(&ts);
-    let (n, pos) = (onset / beat + 1, onset % beat);
-    match pos {
-        0 => n.to_string(),
-        p if p * 2 == beat => "&".into(),
-        p if p * 4 == beat => "e".into(),
-        p if p * 4 == beat * 3 => "a".into(),
-        p if p * 3 == beat => "trip".into(),
-        p if p * 3 == beat * 2 => "let".into(),
-        _ => "·".into(),
+/// The counts of a measure as the app's counting overlay says them in
+/// numbers ([`CountingSystem::Numbers`]), from the coarsest subdivision to
+/// the finest: "1 2 3 4", "1 la li 2 la li" in 6/8, "1 & 2 la li 3 &" in 7/8.
+pub struct Counts {
+    /// Each subdivision's slots, coarsest first; the first is the beats'.
+    by_subdivision: Vec<Vec<CountSlot>>,
+}
+
+impl Counts {
+    /// Coarsest first, so a note is named by the plainest count on it: the
+    /// "&" of halves before the "&" of quarters, triplets before sixteenths.
+    const SUBDIVISIONS: [Subdivision; 4] =
+        [Subdivision::Beats, Subdivision::Halves, Subdivision::Triplets, Subdivision::Quarters];
+
+    pub fn of(measure: &Measure) -> Self {
+        let by_subdivision = Self::SUBDIVISIONS
+            .iter()
+            .map(|&subdivision| {
+                let config = CountConfig { subdivision, system: CountingSystem::Numbers };
+                build_count_slots(measure, &config)
+            })
+            .collect();
+        Counts { by_subdivision }
+    }
+
+    /// The syllable at `onset`, "·" where no subdivision counts.
+    pub fn syllable(&self, onset: u32) -> String {
+        self.by_subdivision
+            .iter()
+            .find_map(|slots| slots.iter().find(|s| s.start_tick == onset)?.label.clone())
+            .unwrap_or_else(|| "·".into())
+    }
+
+    /// Whether `onset` starts a beat: a count group, e.g. each dotted
+    /// quarter of 6/8.
+    pub fn on_beat(&self, onset: u32) -> bool {
+        self.by_subdivision[0].iter().any(|s| s.start_tick == onset)
     }
 }
 

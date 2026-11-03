@@ -467,7 +467,8 @@ grooph's metronome runs inside AI chats as an
   `description`, `section` (Metronome, Sight-reading, Learn, Features),
   optional `heading` and `order`.
 - Fenced blocks: ` ```rhythm bpm=90 swing=66 | Caption ` (text notation,
-  rendered as a grid with counting syllables and a play link), ` ```open |
+  rendered as a grid with counting syllables from the app's counting
+  overlay (`CountingSystem::Numbers`) and a play link), ` ```open |
   Label ` (link query, rendered as a button), ` ```pages ` (list of a
   section). `## FAQ` with `### Question` headings becomes FAQPage data.
 - Runs as a Trunk `post_build` hook (see `Trunk.toml`), so `trunk build`

@@ -69,4 +69,6 @@ They are simply easy syllables that keep the four notes even. Some teachers use
 
 ### How do I count sixteenths in 6/8?
 
-In 6/8 the eighth note is the beat unit, so a sixteenth is half a beat: "1 & 2 & 3 &".
+6/8 is felt in two beats of three eighths each, counted "1 la li 2 la li". Sixteenths
+split each eighth once more: "1 ta la ta li ta 2 ta la ta li ta", as grooph's counting
+overlay shows it.
