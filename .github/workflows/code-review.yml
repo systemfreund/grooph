@@ -72,7 +72,7 @@ env:
   # venice/claude-sonnet-5-5) stay in opencode.json for manual runs.
   DEFAULT_MODELS: '["anthropic/claude-sonnet-5-5"]'
   RUST_MODEL: anthropic/claude-sonnet-5-5
-  SYNTHESIS_MODEL: anthropic/claude-sonnet-5-5
+  SYNTHESIS_MODEL: anthropic/claude-opus-5-5
 
 jobs:
   setup:
