@@ -73,13 +73,13 @@ When you stop, grooph sums up the run: a score in percent, how many hits were pe
 and the spread. Below the score, **Tight** grades every hit against your own average
 deviation instead of the click: if you play steadily a little early or late, your timing
 score suffers but Tight stays high, so you can tell an offset from unsteady playing.
-While you play, the line above the transport buttons shows the score, the average
-deviation and Tight as they stand. Tight settles after a few bars, once your average does.
+While you play, the score, the average deviation and Tight are shown above the play
+button as they stand, which is handy in endless mode. Tight settles after a few bars, once
+your average does.
 
 Fast notes get tighter windows, at most a fifth (perfect) and two fifths
 (good) of the gap to the neighbouring note, so a hit can't be "good" when it is nearly on
-the next note. While you play, the score and the average deviation are shown above the
-play button, which is handy in endless mode.
+the next note.
 
 ## Playing along to the metronome
 

@@ -115,6 +115,9 @@ fn tight_counts(hits: &[GradedHit], mean_ms: f64) -> (u64, u64) {
 /// The hits of a run kept for its tight counts, and those counts. The
 /// average moves with every hit and can turn an earlier hit's grade, so
 /// each new hit grades all of them again: once per hit, not per frame.
+/// That is O(n) per hit and keeps every hit of the run, a few microseconds
+/// and some kilobytes even for an hour of endless mode. Should that ever
+/// matter, sorted deltas per window size give the counts in O(log n).
 #[derive(Clone, Default)]
 pub(super) struct TightTally {
     hits: Vec<GradedHit>,
