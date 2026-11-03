@@ -30,6 +30,7 @@ mod share;
 mod shell;
 mod state;
 mod style;
+mod tokens;
 mod tool_palette;
 pub mod tools;
 mod undo;

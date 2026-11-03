@@ -3,6 +3,7 @@ use crate::accuracy::{AccuracyMark, HitGrade, clamp_diff_to_beat_window};
 use crate::guide::{Guide, anchor_intensity};
 use crate::metronome_view::MetronomeVoice;
 use crate::playback_clock::{advance_tick, next_count_in};
+use crate::tokens;
 use crate::{Mode, TransportState};
 use eframe::egui;
 use eframe::egui::{FontId, Frame, Rect, Response, Stroke};
@@ -374,7 +375,7 @@ impl Grooph {
                     let flash = self.playback_ctl.playback.flash_shown();
                     if flash > 0.01 {
                         let dark = ui.visuals().dark_mode;
-                        let base = if dark { egui::Color32::GREEN } else { egui::Color32::BLUE };
+                        let base = tokens::FLASH.get(dark);
                         let alpha = (0.8 * flash).clamp(0.0, 0.8);
                         let color = egui::Color32::from_rgba_unmultiplied(
                             base.r(),
@@ -851,25 +852,19 @@ fn primary_beat_index(ts: &TimeSignature, local_tick: f64) -> u32 {
 const MARK_MIN_WIDTH: f32 = 3.0;
 const MARK_WIDTH_PER_HEAD: f32 = 0.25;
 
-/// Marker colour of a grade (misses use `Off`): blue, orange/yellow and
-/// purple stay apart for red-green and blue-yellow colour vision deficiencies
-/// and differ in lightness. No red/green pair. The grade is shown by shape as
-/// well (off hits get an arrowhead, misses a cross), so colour is never the
-/// only cue.
+/// Marker colour of a grade (misses use `Off`, see [`tokens::GRADE_PERFECT`]).
 pub(crate) fn grade_color(grade: HitGrade, dark: bool) -> egui::Color32 {
-    match (grade, dark) {
-        (HitGrade::Perfect, false) => egui::Color32::from_rgb(51, 102, 204),
-        (HitGrade::Perfect, true) => egui::Color32::from_rgb(102, 204, 238),
-        (HitGrade::Good, false) => egui::Color32::from_rgb(215, 140, 0),
-        (HitGrade::Good, true) => egui::Color32::from_rgb(240, 228, 66),
-        (HitGrade::Off, false) => egui::Color32::from_rgb(153, 0, 102),
-        (HitGrade::Off, true) => egui::Color32::from_rgb(200, 80, 255),
+    match grade {
+        HitGrade::Perfect => tokens::GRADE_PERFECT,
+        HitGrade::Good => tokens::GRADE_GOOD,
+        HitGrade::Off => tokens::GRADE_OFF,
     }
+    .get(dark)
 }
 
 /// The note's zero line and the connector to the hit.
 pub(crate) fn reference_color(dark: bool) -> egui::Color32 {
-    if dark { egui::Color32::from_gray(150) } else { egui::Color32::from_gray(120) }
+    tokens::GRADE_REFERENCE.get(dark)
 }
 
 /// A hit: a bar where it landed, joined to the note's zero line. Perfect and

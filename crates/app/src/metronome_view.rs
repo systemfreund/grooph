@@ -29,6 +29,7 @@ use crate::accuracy::{
 use crate::documents::Document;
 use crate::measure_panel::{grade_color, reference_color};
 use crate::state::CountInState;
+use crate::tokens;
 use crate::{Grooph, TransportState};
 use eframe::egui;
 use eframe::egui::epaint::PathShape;
@@ -120,11 +121,7 @@ impl MetronomeState {
 /// background and the lit one, and the lit one is a saturated blue, so the
 /// click being played stands out by lightness and by hue.
 fn ring_colors(dark_mode: bool) -> (Color32, Color32) {
-    if dark_mode {
-        (Color32::from_gray(90), Color32::from_rgb(100, 175, 255))
-    } else {
-        (Color32::from_gray(175), Color32::from_rgb(25, 118, 210))
-    }
+    (tokens::RING_IDLE.get(dark_mode), tokens::RING_LIT.get(dark_mode))
 }
 
 /// Thickness of a segment of `level`, as a share of the ring radius. Off is
