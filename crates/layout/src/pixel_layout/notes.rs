@@ -589,7 +589,9 @@ pub(super) fn move_rest(note: &mut NoteLayout, pos: i8, opts: &LayoutOpts) {
     note.head.origin.y += dy;
     // Only half and whole rests keep to the lines and take ledger lines.
     let with_ledgers = [glyphs::REST_HALF, glyphs::REST_WHOLE].contains(&note.head.glyph);
-    note.ledgers = ledgers_of(&[(note.head, pos, with_ledgers)], opts);
+    if !note.hidden {
+        note.ledgers = ledgers_of(&[(note.head, pos, with_ledgers)], opts);
+    }
     let on_line = opts.staff_model().on_line(pos, with_ledgers);
     let y = opts.y_of(pos) - if on_line { opts.em * c::DOT_Y_OFFSET_EM } else { 0.0 };
     for dot in &mut note.dots {

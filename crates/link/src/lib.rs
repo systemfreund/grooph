@@ -301,11 +301,10 @@ fn subdivision_bar(ts: TimeSignature, code: &str) -> Result<Measure, String> {
 
 /// `hiderests`' value: `lower` or `both`.
 fn parse_hidden_rests(value: &str) -> Result<HiddenRests, String> {
-    match value {
-        "lower" => Ok(HiddenRests::Lower),
-        "both" => Ok(HiddenRests::Both),
-        _ => Err(format!("hiderests '{value}': expected lower or both")),
-    }
+    HiddenRests::ALL
+        .into_iter()
+        .find(|&hidden| hidden_rests_code(hidden) == Some(value))
+        .ok_or_else(|| format!("hiderests '{value}': expected lower or both"))
 }
 
 /// The `hiderests` value of `hidden`, none for the default.
@@ -716,19 +715,16 @@ mod tests {
     #[test]
     fn a_rhythm_link_carries_the_rests_its_score_hides() {
         let text = "4/4 H:e H:e S-H:e H:e H:e H:e S-H:e H:e ; K:q r:q K:q r:q";
-        for (hidden, query) in [
-            (HiddenRests::None, None),
-            (HiddenRests::Lower, Some("hiderests=lower")),
-            (HiddenRests::Both, Some("hiderests=both")),
-        ] {
+        for hidden in HiddenRests::ALL {
+            let query = hidden_rests_code(hidden).map(|code| format!("hiderests={code}"));
             let mut score = parse_score(text).unwrap();
             score.hidden_rests = hidden;
             let link =
                 SharedLink { content: Some(LinkContent::Score(score)), ..Default::default() };
             let url = link.to_url("/").unwrap();
             assert_eq!(url.contains("hiderests"), query.is_some(), "{url}");
-            if let Some(query) = query {
-                assert!(url.ends_with(query), "{url}");
+            if let Some(query) = &query {
+                assert!(url.ends_with(query.as_str()), "{url}");
             }
             let Some(LinkContent::Score(back)) = parse(url.strip_prefix("/?").unwrap()).content
             else {

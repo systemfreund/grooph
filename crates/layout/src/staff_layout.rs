@@ -294,20 +294,24 @@ const REST_GAP_SS: f32 = 0.5;
 /// How many staff spaces a rest moves at most toward its voice's side.
 const MAX_REST_STEPS: usize = 8;
 
-/// Place the rests of the kit's two voices: each a staff space off the
-/// middle toward its voice's side (the upper up, the lower down), so it
+/// Place the rests of the kit's voices: each a staff space off the middle
+/// toward its voice's side (the upper up, the lower ones down), so it
 /// shows whose it is, or in the middle, where a voice alone has it, when
-/// the other voice's rests are hidden (`alone`, upper then lower). Then a
-/// rest that comes within [`REST_GAP_SS`] of the other voice's notes,
+/// the other side's rests are hidden (`alone`, upper then lower). Then a
+/// rest that comes within [`REST_GAP_SS`] of the other side's notes,
 /// beams or rests moves on a staff space at a time, only as far as it must,
 /// as Gould writes; a half or whole rest so stays on a line, and rests of
-/// both voices at one time move apart together. A hidden rest takes its
-/// voice's side too, where a tap finds its voice.
+/// both sides at one time move apart together. A hidden rest takes its
+/// voice's side too, where a tap finds its voice. A third voice and later
+/// ones go with the lower voice, their stems down like its stems.
 fn clear_rests(layouts: &mut [(MeasureLayout, LayoutOpts)], alone: [bool; 2]) {
-    let [(upper, up_opts), (lower, low_opts)] = layouts else { return };
-    for (layout, opts, alone, by) in
-        [(&mut *upper, &*up_opts, alone[0], 2), (&mut *lower, &*low_opts, alone[1], -2)]
-    {
+    let Some(((upper, up_opts), lowers)) = layouts.split_first_mut() else { return };
+    if lowers.is_empty() {
+        return;
+    }
+    let sides = std::iter::once((&mut *upper, &*up_opts, alone[0], 2))
+        .chain(lowers.iter_mut().map(|(l, o)| (l, &*o, alone[1], -2)));
+    for (layout, opts, alone, by) in sides {
         for note in layout.notes.iter_mut().filter(|n| n.kind == BeatKind::Rest && !n.stemlet) {
             if !alone || note.hidden {
                 move_rest(note, note.staff_pos + by, opts);
@@ -315,14 +319,17 @@ fn clear_rests(layouts: &mut [(MeasureLayout, LayoutOpts)], alone: [bool; 2]) {
         }
     }
     let drawn = |l: &MeasureLayout| l.notes.iter().any(|n| n.kind == BeatKind::Rest && !n.hidden);
-    if !drawn(upper) && !drawn(lower) {
+    if !drawn(upper) && !lowers.iter().any(|(l, _)| drawn(l)) {
         return;
     }
     let gap = REST_GAP_SS * up_opts.staff_space();
     for _ in 0..MAX_REST_STEPS {
-        let (up_ink, low_ink) = (note_inks(upper), note_inks(lower));
+        let up_ink = note_inks(upper);
+        let low_ink: Vec<Rect> = lowers.iter().flat_map(|(l, _)| note_inks(l)).collect();
         let up = step_rests(upper, up_opts, &low_ink, 2, gap);
-        let down = step_rests(lower, low_opts, &up_ink, -2, gap);
+        let down = lowers
+            .iter_mut()
+            .fold(false, |moved, (l, o)| step_rests(l, o, &up_ink, -2, gap) | moved);
         if !up && !down {
             break;
         }
@@ -1178,6 +1185,15 @@ mod tests {
         let score = parse_score(both).unwrap();
         let staff = build_staff_layout(&score, &on);
         assert_eq!(staff.placed(0).unwrap().voices[1].notes[1].staff_pos, -4);
+        // A third voice goes with the lower voice: its rests sit below the
+        // middle, clear of the upper voice's.
+        let score =
+            parse_score("kit 4/4 H:q r:q H:q r:q ; K:q K:q K:q K:q ; r:q HF:q r:q HF:q").unwrap();
+        let staff = build_staff_layout(&score, &on);
+        let voices = &staff.placed(0).unwrap().voices;
+        assert_eq!(voices.len(), 3);
+        assert!(voices[0].notes[1].staff_pos > 0, "{:?}", voices[0].notes[1]);
+        assert!(voices[2].notes[0].staff_pos < 0, "{:?}", voices[2].notes[0]);
         // An empty upper voice's whole rest, its lower rests hidden, hangs
         // from the fourth line, where a voice alone has it.
         let mut score = parse_score("kit 4/4 r:h r:h ; K:q FT:q K:q FT:q").unwrap();
