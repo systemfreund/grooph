@@ -119,17 +119,6 @@ fn paren_reach(opts: &LayoutOpts) -> f32 {
     opts.head_half_width() + c::SOFT_PAREN_GAP_SS * ss + glyphs::NOTEHEAD_PAREN_LEFT.ink(ss).width()
 }
 
-/// The size a beat's head or rest is set at: a rest of a kit bar of two
-/// voices a little smaller than a note, as drum charts have it, so the two
-/// voices' rests and notes do not crowd each other; at full size where the
-/// other voice's rests are hidden (`full_rests`, [`RenderPlan::full_rests`]).
-fn head_size(beat: &Beat, full_rests: bool, opts: &LayoutOpts) -> f32 {
-    match !beat.is_note() && !full_rests && opts.shared_line && !opts.staff_model().one_line() {
-        true => opts.em * c::KIT_REST_SCALE,
-        false => opts.em,
-    }
-}
-
 /// The parentheses around a soft note's head centered at `center`. They
 /// are taller than the head: on a shared line they move off it, away from
 /// the other voice, their inner ends level with the head's edge on the line.
@@ -223,12 +212,7 @@ fn dot_glyphs(
 /// shift pass: the head or rest, its parentheses and dots, and an ungrouped
 /// flag. Stems are not yet known here, so the flag is placed from
 /// `opts.stem_offset()`.
-fn compute_x_extents(
-    beat: &Beat,
-    in_beam: bool,
-    full_rests: bool,
-    opts: &LayoutOpts,
-) -> (f32, f32) {
+fn compute_x_extents(beat: &Beat, in_beam: bool, opts: &LayoutOpts) -> (f32, f32) {
     let ss = opts.staff_space();
     let is_note = beat.is_note();
     let needs_flag = requires_flag(beat.duration);
@@ -254,9 +238,7 @@ fn compute_x_extents(
     } else {
         // A ledger line may reach past the rest: it doesn't widen it, so the
         // voice is spaced as on a line of its own.
-        let head =
-            PlacedGlyph::centered(head_glyph(beat), 0.0, 0.0, head_size(beat, full_rests, opts))
-                .ink();
+        let head = PlacedGlyph::centered(head_glyph(beat), 0.0, 0.0, opts.em).ink();
         (head.left(), head.right())
     };
 
@@ -361,13 +343,9 @@ fn in_beam_flags(beats: &[Beat], render_plan: &RenderPlan) -> Vec<bool> {
 
 /// Least distance (px) each beat needs to the next note head, or to the
 /// barline for the last one, so their glyphs don't overlap.
-/// `full_rests`: see [`head_size`].
-fn min_advances(beats: &[Beat], in_beam: &[bool], full_rests: bool, opts: &LayoutOpts) -> Vec<f32> {
-    let extents: Vec<(f32, f32)> = beats
-        .iter()
-        .zip(in_beam)
-        .map(|(b, &ib)| compute_x_extents(b, ib, full_rests, opts))
-        .collect();
+fn min_advances(beats: &[Beat], in_beam: &[bool], opts: &LayoutOpts) -> Vec<f32> {
+    let extents: Vec<(f32, f32)> =
+        beats.iter().zip(in_beam).map(|(b, &ib)| compute_x_extents(b, ib, opts)).collect();
     let gap = c::COLLISION_MIN_GAP_EM * opts.em;
     let needs: Vec<f32> = (0..beats.len())
         .map(|i| match extents.get(i + 1) {
@@ -394,7 +372,7 @@ pub(super) fn note_advances(
     opts: &LayoutOpts,
 ) -> Vec<f32> {
     let beats = measure.beats();
-    min_advances(beats, &in_beam_flags(beats, render_plan), render_plan.full_rests, opts)
+    min_advances(beats, &in_beam_flags(beats, render_plan), opts)
 }
 
 /// Narrowest note area in which no glyph overlaps the next one or the
@@ -428,7 +406,7 @@ pub(super) fn build_note_layout(
             beats,
             rect.width(),
             c::NOTE_LEAD_EM * opts.em,
-            &min_advances(beats, &in_beam_flags, render_plan.full_rests, opts),
+            &min_advances(beats, &in_beam_flags, opts),
         ),
     }
     .into_iter()
@@ -512,12 +490,7 @@ pub(super) fn build_note_layout(
             .collect();
         let head = match placed.last() {
             Some((head, _)) => *head,
-            None => PlacedGlyph::centered(
-                head_glyph(b),
-                center.x,
-                cy,
-                head_size(b, render_plan.full_rests, opts),
-            ),
+            None => PlacedGlyph::centered(head_glyph(b), center.x, cy, opts.em),
         };
         let others: Vec<PlacedGlyph> = placed.iter().rev().skip(1).map(|(g, _)| *g).collect();
         let parens: Vec<PlacedGlyph> = placed
@@ -596,13 +569,28 @@ fn bar_rest(notes: &mut [NoteLayout], rect: &Rect, opts: &LayoutOpts) {
     for (i, note) in notes.iter_mut().enumerate() {
         note.dots.clear();
         if i == 0 {
-            let y = opts.y_of(opts.staff_model().bar_rest_pos(opts.voicing()));
-            // At the size the voice's rests have (a kit bar of two voices
-            // sets them a little smaller).
-            let size = note.head.size;
-            note.head = PlacedGlyph::centered(glyphs::REST_WHOLE, rect.center().x, y, size);
+            note.staff_pos = opts.staff_model().bar_rest_pos();
+            let y = opts.y_of(note.staff_pos);
+            note.head = PlacedGlyph::centered(glyphs::REST_WHOLE, rect.center().x, y, opts.em);
         } else {
             note.hidden = true;
         }
+    }
+}
+
+/// Move the rest `note` to the staff position `pos`, its dots and ledger
+/// lines with it.
+pub(super) fn move_rest(note: &mut NoteLayout, pos: i8, opts: &LayoutOpts) {
+    let dy = opts.y_of(pos) - opts.y_of(note.staff_pos);
+    note.staff_pos = pos;
+    note.center.y += dy;
+    note.head.origin.y += dy;
+    // Only half and whole rests keep to the lines and take ledger lines.
+    let with_ledgers = [glyphs::REST_HALF, glyphs::REST_WHOLE].contains(&note.head.glyph);
+    note.ledgers = ledgers_of(&[(note.head, pos, with_ledgers)], opts);
+    let on_line = opts.staff_model().on_line(pos, with_ledgers);
+    let y = opts.y_of(pos) - if on_line { opts.em * c::DOT_Y_OFFSET_EM } else { 0.0 };
+    for dot in &mut note.dots {
+        dot.origin.y += y - dot.ink().center().y;
     }
 }

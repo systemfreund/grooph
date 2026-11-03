@@ -146,10 +146,10 @@ impl Staff {
     }
 
     /// Where an empty voice's whole rest hangs: as a whole rest of a voice
-    /// of `voicing` does, so with two voices on the kit's staff each in its
-    /// own half. (Not drawn on a shared line: see [`Staff::shares_line`].)
-    pub fn bar_rest_pos(&self, voicing: Voicing) -> i8 {
-        (self.rest_place)(&Beat::rest(Duration::Simple(NoteValue::Whole)), voicing)
+    /// alone. (Not drawn on a shared line: see [`Staff::shares_line`]; on
+    /// the kit's staff the staff layout moves it clear of another voice.)
+    pub fn bar_rest_pos(&self) -> i8 {
+        (self.rest_place)(&Beat::rest(Duration::Simple(NoteValue::Whole)), Voicing::default())
     }
 
     /// The ledger lines a glyph at `pos` needs: one at every line position
@@ -217,22 +217,14 @@ fn line_rest_place(beat: &Beat, voicing: Voicing) -> i8 {
     }
 }
 
-/// A rest on the kit's staff: in the middle with one voice (a whole rest
-/// hangs from the fourth line), in its voice's half with two, clear of the
-/// other's notes: a half rest on the fourth or first line, a whole rest
-/// hanging from the fourth or second, the others centred on the top or
-/// bottom line, clear of the other voice's heads.
-fn kit_rest_place(beat: &Beat, voicing: Voicing) -> i8 {
-    let base = beat.duration.base_note();
-    match (voicing.shared, voicing.stem_down, base) {
-        (false, _, NoteValue::Whole) => 2,
-        (false, ..) => 0,
-        (true, false, NoteValue::Whole) => 2,
-        (true, false, NoteValue::Half) => 2,
-        (true, false, _) => 4,
-        (true, true, NoteValue::Whole) => -2,
-        (true, true, NoteValue::Half) => -4,
-        (true, true, _) => -4,
+/// A rest on the kit's staff: in the middle (a whole rest hangs from the
+/// fourth line), with one voice or two. With two the staff layout moves it
+/// toward its voice's side only as far as the other voice needs
+/// (`staff_layout::clear_rests`).
+fn kit_rest_place(beat: &Beat, _voicing: Voicing) -> i8 {
+    match beat.duration.base_note() {
+        NoteValue::Whole => 2,
+        _ => 0,
     }
 }
 
