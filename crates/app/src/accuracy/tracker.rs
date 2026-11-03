@@ -254,6 +254,39 @@ mod tests {
     }
 
     #[test]
+    fn a_late_hit_judged_after_its_delay_is_no_miss() {
+        // Quarters at 120 BPM: the second note's window closes at 0.75 s.
+        let score = score_of_quarters(&[TimeSignature::FOUR_FOUR]);
+        let timing = ScoreTiming::from_score(&score, 120);
+        let mut tracker = AccuracyTracker::new();
+        tracker.on_playback_start_at(0.0, 0.0);
+        // A hit on it (0.5 s) arrives at 0.8 s with 200 ms latency: misses
+        // are judged 0.26 s behind, so not yet.
+        let delay = 0.26;
+        tracker.update_progress(0.8 - delay, &timing, &score);
+        tracker.record_hit(0.8 - 0.3, &timing, &score);
+        tracker.update_progress(1.2 - delay, &timing, &score);
+        let summary = tracker.live_summary().unwrap();
+        assert_eq!((summary.hits, summary.misses), (1, 1), "the first note was missed");
+        assert!(matches!(tracker.mark_for_onset(0), Some(AccuracyMark::Miss)));
+    }
+
+    #[test]
+    fn progress_waits_when_anchored_ahead_of_its_clock() {
+        let score = score_of_quarters(&[TimeSignature::FOUR_FOUR]);
+        let timing = ScoreTiming::from_score(&score, 120);
+        let tpb = DEFAULT_GRID.ticks_per_beat(&TimeSignature::FOUR_FOUR) as f64;
+        let mut tracker = AccuracyTracker::new();
+        // Anchored (e.g. after a tempo change) at the second beat, then
+        // asked about a time a little before it: no wrap, no misses.
+        tracker.on_playback_start_at(0.0, tpb);
+        tracker.update_progress(timing.global_tick_to_seconds(0.8 * tpb), &timing, &score);
+        tracker.update_progress(timing.global_tick_to_seconds(1.2 * tpb), &timing, &score);
+        assert!(tracker.mark_for_onset(0).is_none());
+        assert!(tracker.mark_for_onset(2 * tpb as u64).is_none());
+    }
+
+    #[test]
     fn record_hit_ignores_rest_beats() {
         // Measure with a rest in the middle. Use a 2/4 measure: beat 0 = note,
         // beat 1 = rest (default Rest in Measure::new). After set_beat(0, q),

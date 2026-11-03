@@ -118,6 +118,27 @@ impl PlayAlongSettings {
 /// Input latency offsets are limited to this range (ms).
 pub(crate) const MAX_INPUT_OFFSET_MS: f32 = 300.0;
 
+/// How long a hit may take to reach the app beyond its source's offset: a
+/// frame, a batch of microphone input (s).
+const HIT_DELIVERY_MARGIN_S: f64 = 0.06;
+
+/// How long after a note's hit window closes it is judged missed: by then
+/// a hit in the window has arrived, even with the largest input latency
+/// set. Judged earlier, a late hit would first show a miss and then count
+/// as a hit as well. At most a quarter of the loop, which the tracker's
+/// progress needs to tell a wrap from waiting.
+fn miss_delay_s(settings: &PlayAlongSettings, calibrating: bool, loop_seconds: f64) -> f64 {
+    let offset_ms = if calibrating {
+        0.0
+    } else {
+        [HitSource::Midi, HitSource::Tap, HitSource::Mic]
+            .map(|s| settings.offset_ms(s))
+            .into_iter()
+            .fold(0.0_f32, f32::max)
+    };
+    (f64::from(offset_ms) / 1000.0 + HIT_DELIVERY_MARGIN_S).min(loop_seconds / 4.0)
+}
+
 #[derive(Default)]
 pub(crate) struct PlayAlongState {
     pub(crate) settings: PlayAlongSettings,
@@ -325,7 +346,8 @@ impl Grooph {
                     let time = time - offset_ms as f64 / 1000.0;
                     deltas.extend(tracker.record_hit(time, &timing, score));
                 }
-                tracker.update_progress(now, &timing, score);
+                let delay = miss_delay_s(&settings, calibrating.is_some(), total_loop_seconds);
+                tracker.update_progress(now - delay, &timing, score);
             }
             played
         };
@@ -452,6 +474,19 @@ mod tests {
         assert_eq!(early_late(0.3), "on time");
         assert_eq!(early_late(-12.4), "12 ms early");
         assert_eq!(early_late(7.6), "8 ms late");
+    }
+
+    #[test]
+    fn misses_wait_for_the_largest_input_latency() {
+        let mut s =
+            PlayAlongSettings { mic_offset_ms: 120.0, tap_offset_ms: -40.0, ..Default::default() };
+        let margin = HIT_DELIVERY_MARGIN_S;
+        assert!((miss_delay_s(&s, false, 2.0) - (0.12 + margin)).abs() < 1e-9);
+        // A calibration measures the raw latency: no offset.
+        assert!((miss_delay_s(&s, true, 2.0) - margin).abs() < 1e-9);
+        // Never more than a quarter of a short loop.
+        s.mic_offset_ms = MAX_INPUT_OFFSET_MS;
+        assert!((miss_delay_s(&s, false, 0.4) - 0.1).abs() < 1e-9);
     }
 
     #[test]

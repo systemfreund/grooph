@@ -40,6 +40,12 @@ pub(super) fn update_progress(
         data.last_tick = Some(current_tick);
         return;
     };
+    // A step back by less than half the loop is no wrap: the clock was
+    // anchored ahead of the delayed time misses are judged at (see
+    // `Grooph::miss_delay_s`). Wait until it gets there.
+    if current_tick < last_tick && last_tick - current_tick < total * 0.5 {
+        return;
+    }
     let epsilon = total.max(1.0) * 1e-9;
     if current_tick + epsilon >= last_tick && current_tick < last_tick {
         current_tick = last_tick;
