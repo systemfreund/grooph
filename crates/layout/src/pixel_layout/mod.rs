@@ -49,8 +49,6 @@ mod c {
     pub const BEAM_BASELINE_OFFSET: f32 = 0.95; // × beam_thickness
     /// A stemlet's share of a stem's length, from the beam toward the line.
     pub const STEMLET_LENGTH_FACTOR: f32 = 0.7;
-    /// A rest of a kit bar of two voices, of a note's size.
-    pub const KIT_REST_SCALE: f32 = 0.75;
 
     /// Width reserved for the percussion clef.
     pub const CLEF_WIDTH_EM: f32 = 1.1;
@@ -295,6 +293,9 @@ pub struct NoteLayout {
     /// A rest of an empty bar, drawn as the bar's whole rest by its first
     /// beat (see [`RenderPlan::bar_rest`]): the others are not drawn.
     pub hidden: bool,
+    /// A rest the score leaves out (see [`crate::render_plan::RestDisplay`]),
+    /// drawn faintly in the editor.
+    pub veiled: bool,
     /// The parentheses of each soft (ghost) head.
     pub parens: Vec<PlacedGlyph>,
     /// Ledger lines of the heads or the half or whole rest off the staff
@@ -412,6 +413,12 @@ pub fn build_measure_layout_with_plan(
     opts: &LayoutOpts,
 ) -> MeasureLayout {
     lay_out_measure(measure, render_plan, None, opts)
+}
+
+/// Move the rest `note` to the staff position `pos`, its dots and ledger
+/// lines with it (the kit's staff moves a rest clear of another voice).
+pub fn move_rest(note: &mut NoteLayout, pos: i8, opts: &LayoutOpts) {
+    notes::move_rest(note, pos, opts);
 }
 
 /// [`build_measure_layout_with_plan`] with the notes at `x_centers`, from

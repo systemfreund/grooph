@@ -20,10 +20,11 @@
 
 use crate::PlacedGlyph;
 use crate::pixel_layout::{
-    LayoutOpts, MeasureLayout, build_measure_layout_at, build_measure_layout_with_plan, clef_width,
-    min_note_area_width, note_advances, note_area_offset, note_lead, time_sig_width,
+    LayoutOpts, MeasureLayout, NoteLayout, build_measure_layout_at, build_measure_layout_with_plan,
+    clef_width, min_note_area_width, move_rest, note_advances, note_area_offset, note_lead,
+    time_sig_width,
 };
-use crate::render_plan::{RenderPlan, plan_measure_with, rests_only};
+use crate::render_plan::{RenderPlan, RestDisplay, plan_measure_with, rests_only};
 use crate::staff::{Staff, Voicing};
 use crate::{calculate_shared_x_centers, shared_min_width};
 use egui::{FontId, Pos2, Rect, Vec2, pos2, vec2};
@@ -75,6 +76,10 @@ pub struct StaffOpts {
     /// [`RenderPlan::bar_rest`]), unless another voice shares its line. Off
     /// in the metronome, where every click is its own to tap.
     pub bar_rests: bool,
+    /// Draw the rests the score leaves out ([`Score::hidden_rests`]) faintly
+    /// instead of not at all: in the editor, where they are still picked
+    /// and replaced.
+    pub veil_hidden_rests: bool,
 }
 
 impl StaffOpts {
@@ -282,6 +287,89 @@ impl RowRoom {
     }
 }
 
+/// Least room between a rest and the other voice on the kit's staff, in
+/// staff spaces.
+const REST_GAP_SS: f32 = 0.5;
+
+/// How many staff spaces a rest moves at most toward its voice's side.
+const MAX_REST_STEPS: usize = 8;
+
+/// Place the rests of the kit's voices: each a staff space off the middle
+/// toward its voice's side (the upper up, the lower ones down), so it
+/// shows whose it is, or in the middle, where a voice alone has it, when
+/// the other side's rests are hidden (`alone`, upper then lower). Then a
+/// rest that comes within [`REST_GAP_SS`] of the other side's notes,
+/// beams or rests moves on a staff space at a time, only as far as it must,
+/// as Gould writes; a half or whole rest so stays on a line, and rests of
+/// both sides at one time move apart together. A hidden rest takes its
+/// voice's side too, where a tap finds its voice. A third voice and later
+/// ones go with the lower voice, their stems down like its stems.
+fn clear_rests(layouts: &mut [(MeasureLayout, LayoutOpts)], alone: [bool; 2]) {
+    let Some(((upper, up_opts), lowers)) = layouts.split_first_mut() else { return };
+    if lowers.is_empty() {
+        return;
+    }
+    let sides = std::iter::once((&mut *upper, &*up_opts, alone[0], 2))
+        .chain(lowers.iter_mut().map(|(l, o)| (l, &*o, alone[1], -2)));
+    for (layout, opts, alone, by) in sides {
+        for note in layout.notes.iter_mut().filter(|n| n.kind == BeatKind::Rest && !n.stemlet) {
+            if !alone || note.hidden {
+                move_rest(note, note.staff_pos + by, opts);
+            }
+        }
+    }
+    let drawn = |l: &MeasureLayout| l.notes.iter().any(|n| n.kind == BeatKind::Rest && !n.hidden);
+    if !drawn(upper) && !lowers.iter().any(|(l, _)| drawn(l)) {
+        return;
+    }
+    let gap = REST_GAP_SS * up_opts.staff_space();
+    for _ in 0..MAX_REST_STEPS {
+        let up_ink = note_inks(upper);
+        let low_ink: Vec<Rect> = lowers.iter().flat_map(|(l, _)| note_inks(l)).collect();
+        let up = step_rests(upper, up_opts, &low_ink, 2, gap);
+        let down = lowers
+            .iter_mut()
+            .fold(false, |moved, (l, o)| step_rests(l, o, &up_ink, -2, gap) | moved);
+        if !up && !down {
+            break;
+        }
+    }
+}
+
+/// One step of [`clear_rests`]: the drawn rests of `layout` that come
+/// within `gap` of `other` move `by` staff positions. Reports whether one
+/// moved.
+fn step_rests(
+    layout: &mut MeasureLayout,
+    opts: &LayoutOpts,
+    other: &[Rect],
+    by: i8,
+    gap: f32,
+) -> bool {
+    let mut moved = false;
+    for note in &mut layout.notes {
+        let drawn = note.kind == BeatKind::Rest && !note.hidden && !note.stemlet;
+        let near = || note_inks_of(note).any(|r| other.iter().any(|o| o.intersects(r.expand(gap))));
+        if drawn && near() {
+            move_rest(note, note.staff_pos + by, opts);
+            moved = true;
+        }
+    }
+    moved
+}
+
+/// The ink of `note`: its glyphs, its stem and ledger lines.
+fn note_inks_of(note: &NoteLayout) -> impl Iterator<Item = Rect> + '_ {
+    let lines = note.stem.iter().chain(&note.ledgers).map(|l| Rect::from_two_pos(l.p1, l.p2));
+    note.glyphs().map(PlacedGlyph::ink).chain(lines)
+}
+
+/// The ink of `layout`'s notes and beams, piece by piece.
+fn note_inks(layout: &MeasureLayout) -> Vec<Rect> {
+    let notes = layout.notes.iter().flat_map(note_inks_of);
+    notes.chain(layout.beams.iter().map(|b| b.rect)).collect()
+}
+
 /// How far the notes of `layout` reach above and below the line of its
 /// voice, in em.
 fn ink_reach_em(layout: &MeasureLayout, opts: &LayoutOpts) -> RowRoom {
@@ -344,19 +432,39 @@ pub fn build_staff_layout(score: &Score, opts: &StaffOpts) -> StaffLayout {
     // shows as one whole rest, in its half with several voices on the kit's
     // five lines. Sharing one line it does not: every beamed rest is then a
     // stemlet, clear of the line; on the kit's five lines rests have their
-    // own places, so they stay rests, as in drum notation.
+    // own places, so they stay rests, as in drum notation. There the score
+    // may leave out the rests of a voice in a bar of two (veiled while
+    // editing), the whole rest of an empty voice too.
     let voices = |i: usize| score.measures()[i].voices();
+    let hidden = match opts.veil_hidden_rests {
+        true => RestDisplay::Veiled,
+        false => RestDisplay::Hidden,
+    };
     let plans: Vec<Vec<RenderPlan>> = (0..score.len())
         .map(|i| {
-            let shares_line =
-                staff.shares_line(Voicing { shared: voices(i).len() > 1, stem_down: false });
-            voices(i)
+            let several = voices(i).len() > 1;
+            let shares_line = staff.shares_line(Voicing { shared: several, stem_down: false });
+            let mut plans: Vec<RenderPlan> = voices(i)
                 .iter()
-                .map(|v| RenderPlan {
+                .enumerate()
+                .map(|(voice, v)| RenderPlan {
                     bar_rest: opts.bar_rests && !shares_line && rests_only(v),
+                    rests: match several && !shares_line && score.hidden_rests.hides(voice) {
+                        true => hidden,
+                        false => RestDisplay::Drawn,
+                    },
                     ..plan_measure_with(v, shares_line)
                 })
-                .collect()
+                .collect();
+            // Both voices empty: one whole rest for both, where a voice alone
+            // has it (the upper voice's, veiled with its rests).
+            if let [upper, lower] = &mut plans[..]
+                && upper.bar_rest
+                && lower.bar_rest
+            {
+                lower.rests = RestDisplay::Hidden;
+            }
+            plans
         })
         .collect();
     let voice_opts = |i: usize, opts: LayoutOpts| -> Vec<LayoutOpts> {
@@ -421,13 +529,18 @@ pub fn build_staff_layout(score: &Score, opts: &StaffOpts) -> StaffLayout {
             area,
             note_lead(effective_opts.em),
         );
-        voices(i)
+        let mut layouts: Vec<(MeasureLayout, LayoutOpts)> = voices(i)
             .iter()
             .zip(&plans[i])
             .zip(per_voice)
             .zip(&xs)
             .map(|(((v, plan), o), xs)| (build_measure_layout_at(v, plan, xs, &o), o))
-            .collect()
+            .collect();
+        if !staff.one_line() {
+            let hidden = |v: usize| plans[i][v].rests == RestDisplay::Hidden;
+            clear_rests(&mut layouts, [hidden(1), hidden(0)]);
+        }
+        layouts
     };
     let reaches: Vec<Vec<RowRoom>> = (0..score.len())
         .map(|i| {
@@ -617,6 +730,7 @@ mod tests {
             room_below_em: ROOM_BELOW_EM,
             lower_label_room_em: 0.0,
             bar_rests: false,
+            veil_hidden_rests: false,
         }
     }
 
@@ -841,18 +955,23 @@ mod tests {
         }
         let (placed, _, _) = kit("6/8 S:e r:e S:e S:e S:e S:e ; K:q. r:q.");
         let feet = &placed.voices[1].notes;
+        // Clear of the snare above it: two staff spaces below the middle.
         assert_eq!(feet[1].staff_pos, -4, "the feet's rest below the middle line");
         assert!(feet[1].ledgers.is_empty());
-        // Half rests of the lower voice sit on the bottom line, with no
-        // ledger line through the staff: in 7/8 and in 4/4.
-        for text in ["7/8 H:e H:e H:e H:e H:e H:e H:e ; K:e r:e r:e r:h", "4/4 S:h S:h ; r:h r:h"] {
+        // Half rests of the lower voice sit on the second line, a staff
+        // space below a voice alone's, or on the bottom line clear of a
+        // snare, with no ledger line through the staff: in 7/8 and in 4/4.
+        for (text, pos) in [
+            ("7/8 H:e H:e H:e H:e H:e H:e H:e ; K:e r:e r:e r:h", -2),
+            ("4/4 S:h S:h ; r:h r:h", -4),
+        ] {
             let (placed, _, _) = kit(text);
             for rest in
                 placed.voices[1].notes.iter().filter(|n| n.kind == grooph_measure::BeatKind::Rest)
             {
                 assert!(rest.ledgers.is_empty(), "{text}: {rest:?}");
                 if rest.duration.base_note() == grooph_measure::duration::NoteValue::Half {
-                    assert_eq!(rest.staff_pos, -4, "{text}");
+                    assert_eq!(rest.staff_pos, pos, "{text}");
                 }
             }
         }
@@ -880,15 +999,17 @@ mod tests {
         let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(900.0, 400.0));
         let on = StaffOpts { bar_rests: true, ..opts(20.0, rect) };
         // (score, the empty voice, the line it hangs from, in staff spaces
-        // above the middle line). The other voice keeps its notes.
+        // above the middle line): a staff space toward its voice's side from
+        // the fourth line, where a voice alone has it, and on where the
+        // other voice is near (the snare). The other voice keeps its notes.
         for (text, voice, line) in [
             ("4/4 S:q S:q S:q S:q ; r:h r:h", 1, -1.0),
-            ("3/4 H:q H:q H:q ; r:h r:q", 1, -1.0),
-            ("7/8 H:e H:e H:e H:e H:e H:e H:e ; r:q r:q. r:q", 1, -1.0),
-            ("4/4 r:h r:h ; K:q K:q K:q K:q", 0, 1.0),
-            ("3/4 r:q r:h ; K:q K:q K:q", 0, 1.0),
+            ("3/4 H:q H:q H:q ; r:h r:q", 1, 0.0),
+            ("7/8 H:e H:e H:e H:e H:e H:e H:e ; r:q r:q. r:q", 1, 0.0),
+            ("4/4 r:h r:h ; K:q K:q K:q K:q", 0, 2.0),
+            ("3/4 r:q r:h ; K:q K:q K:q", 0, 2.0),
             ("6/8 S:e S:e S:e S:e S:e S:e ; r:q. r:q.", 1, -1.0),
-            ("6/8 r:q. r:q. ; K:q. K:q.", 0, 1.0),
+            ("6/8 r:q. r:q. ; K:q. K:q.", 0, 2.0),
         ] {
             let score = parse_score(text).unwrap();
             let staff = build_staff_layout(&score, &on);
@@ -897,11 +1018,12 @@ mod tests {
             let empty = &placed.voices[voice].notes;
             assert_eq!(empty[0].head.glyph, REST_WHOLE, "{text}");
             assert!(empty[1..].iter().all(|n| n.hidden), "{text}");
-            // At the size the voice's rests have, smaller than a note.
-            assert_eq!(empty[0].head.size, empty[1].head.size, "{text}");
-            assert!(empty[0].head.size < on.em, "{text}");
+            // At full size, as every rest.
+            assert_eq!(empty[0].head.size, on.rescaled(staff.scale).em, "{text}");
             let want = staff.systems[0].y_baseline - line * ss;
             assert!((empty[0].head.origin.y - want).abs() < 0.01, "{text}: {:?}", empty[0]);
+            // Its center goes with it, for the cursor and taps.
+            assert!((empty[0].center.y - want).abs() < 0.01, "{text}: {:?}", empty[0]);
             // The other voice's notes are untouched.
             let other = &placed.voices[1 - voice].notes;
             assert!(other.iter().all(|n| !n.hidden && n.head.glyph != REST_WHOLE), "{text}");
@@ -910,17 +1032,191 @@ mod tests {
         let score = parse_score("4/4 S:q S:q S:q S:q ; K:q r:q r:h").unwrap();
         let staff = build_staff_layout(&score, &on);
         assert!(staff.placed(0).unwrap().voices[1].notes.iter().all(|n| !n.hidden));
-        // Both voices empty: each its own whole rest, apart.
-        let score = parse_score("4/4 r:h r:h ; r:h r:h").unwrap();
+        // Both voices empty: one whole rest for both, hanging from the
+        // fourth line at full size; the lower voice's beats keep their
+        // hidden places.
+        let score = parse_score("kit 4/4 r:h r:h ; r:h r:h").unwrap();
         let staff = build_staff_layout(&score, &on);
         let [upper, lower] = &staff.placed(0).unwrap().voices[..] else { panic!("two voices") };
-        assert!(upper.notes[0].head.origin.y < lower.notes[0].head.origin.y);
+        let ss = on.rescaled(staff.scale).staff_space();
+        let fourth = staff.systems[0].y_baseline - ss;
+        assert_eq!(upper.notes[0].head.glyph, REST_WHOLE);
+        assert!((upper.notes[0].head.origin.y - fourth).abs() < 0.01, "{:?}", upper.notes[0]);
+        assert_eq!(upper.notes[0].head.size, on.rescaled(staff.scale).em);
+        assert!(lower.notes.iter().all(|n| n.hidden && n.glyphs().next().is_none()));
+        // With both voices' rests hidden the editor veils the one rest.
+        let mut score = score;
+        score.hidden_rests = grooph_measure::HiddenRests::Both;
+        let veiled = StaffOpts { veil_hidden_rests: true, ..on.clone() };
+        let staff = build_staff_layout(&score, &veiled);
+        let [upper, lower] = &staff.placed(0).unwrap().voices[..] else { panic!("two voices") };
+        assert!(upper.notes[0].veiled && !upper.notes[0].hidden);
+        assert!((upper.notes[0].head.origin.y - fourth).abs() < 0.01, "{:?}", upper.notes[0]);
+        assert!(lower.notes.iter().all(|n| n.hidden));
         // Off, the rests stay as written.
         let off = build_staff_layout(
             &parse_score("4/4 S:q S:q S:q S:q ; r:h r:h").unwrap(),
             &opts(20.0, rect),
         );
         assert!(off.placed(0).unwrap().voices[1].notes.iter().all(|n| !n.hidden));
+    }
+
+    #[test]
+    fn a_score_hides_the_rests_of_the_lower_voice_or_of_both() {
+        use grooph_measure::HiddenRests;
+        use grooph_measure::notation::parse_score;
+        let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(900.0, 400.0));
+        let on = StaffOpts { bar_rests: true, ..opts(20.0, rect) };
+        // A groove with rests in both voices, an empty lower voice, a bar
+        // of one voice.
+        let text = "kit 4/4 H:e r:e H:e H:e S:q r:q ; K:q r:q K:q r:q | 4/4 H:h H:h ; r:h r:h | 4/4 S:q r:q S:h";
+        // The rests drawn, (hidden, veiled), per bar and voice.
+        let rests = |hidden, veil| {
+            let mut score = parse_score(text).unwrap();
+            score.hidden_rests = hidden;
+            let opts = StaffOpts { veil_hidden_rests: veil, ..on.clone() };
+            let staff = build_staff_layout(&score, &opts);
+            (0..3)
+                .map(|i| {
+                    let placed = staff.placed(i).unwrap();
+                    let voices = placed.voices.iter().map(|v| {
+                        let rests = v.notes.iter().filter(|n| n.kind == BeatKind::Rest);
+                        let gone =
+                            rests.clone().filter(|n| n.hidden && n.glyphs().next().is_none());
+                        (gone.count(), rests.filter(|n| n.veiled).count())
+                    });
+                    voices.collect::<Vec<_>>()
+                })
+                .collect::<Vec<_>>()
+        };
+        // Shown: an empty voice is one whole rest, its other rest hidden.
+        assert_eq!(
+            rests(HiddenRests::None, false),
+            [vec![(0, 0), (0, 0)], vec![(0, 0), (1, 0)], vec![(0, 0)]]
+        );
+        // The lower voice's rests and whole rest go; a bar of one voice
+        // keeps its rest.
+        assert_eq!(
+            rests(HiddenRests::Lower, false),
+            [vec![(0, 0), (2, 0)], vec![(0, 0), (2, 0)], vec![(0, 0)]]
+        );
+        assert_eq!(
+            rests(HiddenRests::Both, false),
+            [vec![(2, 0), (2, 0)], vec![(0, 0), (2, 0)], vec![(0, 0)]]
+        );
+        // In the editor they are veiled, the empty voice's whole rest too.
+        assert_eq!(
+            rests(HiddenRests::Lower, true),
+            [vec![(0, 0), (0, 2)], vec![(0, 0), (1, 2)], vec![(0, 0)]]
+        );
+        assert_eq!(
+            rests(HiddenRests::Both, true),
+            [vec![(0, 2), (0, 2)], vec![(0, 0), (1, 2)], vec![(0, 0)]]
+        );
+        // The hidden rests keep their places for taps and the cursor.
+        let mut score = parse_score(text).unwrap();
+        score.hidden_rests = HiddenRests::Both;
+        let staff = build_staff_layout(&score, &on);
+        let lower = &staff.placed(0).unwrap().voices[1].notes;
+        assert!(lower[1].hidden);
+        assert_eq!(hit_test_voice(&staff, lower[1].center), Some((1, 0, 1)));
+        // A dotted rest takes its dot with it.
+        let mut score = parse_score("kit 6/8 H:e H:e H:e H:e H:e H:e ; K:e r:e r:e r:q.").unwrap();
+        score.hidden_rests = HiddenRests::Lower;
+        let staff = build_staff_layout(&score, &on);
+        let dotted = &staff.placed(0).unwrap().voices[1].notes[3];
+        assert!(dotted.hidden && dotted.dots.is_empty() && dotted.glyphs().next().is_none());
+    }
+
+    #[test]
+    fn rests_move_toward_their_voice_only_as_far_as_the_other_voice_needs() {
+        use grooph_measure::HiddenRests;
+        use grooph_measure::notation::parse_score;
+        let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(900.0, 400.0));
+        let on = StaffOpts { bar_rests: true, ..opts(20.0, rect) };
+        // (score, hidden, veiled, the upper rests: beat, staff position).
+        // A rest starts a staff space toward its voice's side, or in the
+        // middle with the other voice's rests hidden, and moves on a staff
+        // space at a time while it comes near the other voice: over a
+        // kick's head, a snare, a hi-hat foot's.
+        let kick = "kit 4/4 H:e H:e S-H:e r:e H:e r:e S-H:e H:e ; K:q r:q K:e K:e r:q";
+        let snare = "kit 4/4 H:e H:e r:e H:e H:e H:e r:e H:e ; K:q S:q K:e S:e r:q";
+        let foot = "kit 4/4 H:e r:e H:e r:e r:q H:q ; HF:q HF:q HF:q HF:q";
+        let both = "kit 4/4 H:q r:q H:q r:q ; K:q r:q K:q r:q";
+        for (text, hidden, veil, want) in [
+            (kick, HiddenRests::None, false, vec![(3, 2), (5, 2)]),
+            (snare, HiddenRests::None, false, vec![(2, 6), (6, 4)]),
+            (both, HiddenRests::None, false, vec![(1, 4), (3, 4)]),
+            (kick, HiddenRests::Lower, false, vec![(3, 0), (5, 2)]),
+            (snare, HiddenRests::Lower, false, vec![(2, 6), (6, 0)]),
+            (foot, HiddenRests::Lower, false, vec![(1, 0), (3, 0), (4, 2)]),
+            // Veiled, the lower rests are there: the upper ones keep to
+            // their side.
+            (kick, HiddenRests::Lower, true, vec![(3, 2), (5, 2)]),
+        ] {
+            let mut score = parse_score(text).unwrap();
+            score.hidden_rests = hidden;
+            let opts = StaffOpts { veil_hidden_rests: veil, ..on.clone() };
+            let staff = build_staff_layout(&score, &opts);
+            let em = opts.rescaled(staff.scale).em;
+            let [upper, lower] = &staff.placed(0).unwrap().voices[..] else { panic!("two voices") };
+            for (beat, pos) in want {
+                let rest = &upper.notes[beat];
+                assert_eq!(rest.kind, BeatKind::Rest, "{text}");
+                assert_eq!(rest.staff_pos, pos, "{text} {hidden:?} beat {beat}");
+            }
+            // Every drawn rest is at full size and keeps clear of the other
+            // voice.
+            let gap = REST_GAP_SS * opts.rescaled(staff.scale).staff_space() - 0.01;
+            for (voice, other) in [(upper, lower), (lower, upper)] {
+                let other = note_inks(other);
+                for rest in voice.notes.iter().filter(|n| n.kind == BeatKind::Rest && !n.hidden) {
+                    assert_eq!(rest.head.size, em, "{text}");
+                    let ink = rest.head.ink().expand(gap);
+                    assert!(
+                        other.iter().all(|o| !o.intersects(ink)),
+                        "{text} {hidden:?}: {rest:?}"
+                    );
+                }
+            }
+        }
+        // The rests of both voices at one time move apart together, as far
+        // either way.
+        let score = parse_score(both).unwrap();
+        let staff = build_staff_layout(&score, &on);
+        assert_eq!(staff.placed(0).unwrap().voices[1].notes[1].staff_pos, -4);
+        // A third voice goes with the lower voice: its rests sit below the
+        // middle, clear of the upper voice's.
+        let score =
+            parse_score("kit 4/4 H:q r:q H:q r:q ; K:q K:q K:q K:q ; r:q HF:q r:q HF:q").unwrap();
+        let staff = build_staff_layout(&score, &on);
+        let voices = &staff.placed(0).unwrap().voices;
+        assert_eq!(voices.len(), 3);
+        assert!(voices[0].notes[1].staff_pos > 0, "{:?}", voices[0].notes[1]);
+        assert!(voices[2].notes[0].staff_pos < 0, "{:?}", voices[2].notes[0]);
+        // An empty upper voice's whole rest, its lower rests hidden, hangs
+        // from the fourth line, where a voice alone has it.
+        let mut score = parse_score("kit 4/4 r:h r:h ; K:q FT:q K:q FT:q").unwrap();
+        score.hidden_rests = HiddenRests::Lower;
+        let staff = build_staff_layout(&score, &on);
+        let rest = &staff.placed(0).unwrap().voices[0].notes[0];
+        assert_eq!(rest.head.glyph, crate::glyphs::REST_WHOLE);
+        assert_eq!(rest.staff_pos, 2);
+    }
+
+    #[test]
+    fn two_voices_sharing_the_one_line_keep_their_rests_even_hidden() {
+        use grooph_measure::HiddenRests;
+        use grooph_measure::notation::parse_score;
+        let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(900.0, 400.0));
+        let mut score = with_lower(
+            &parse_score("4/4 q r:q q q").unwrap(),
+            &parse_score("4/4 q r:q r:h").unwrap(),
+        );
+        score.hidden_rests = HiddenRests::Both;
+        let staff = build_staff_layout(&score, &opts(20.0, rect));
+        let placed = staff.placed(0).unwrap();
+        assert!(placed.voices.iter().all(|v| v.notes.iter().all(|n| !n.hidden && !n.veiled)));
     }
 
     #[test]
@@ -983,7 +1279,7 @@ mod tests {
         assert_eq!(hands[2].signs[0].glyph, crate::glyphs::SIGN_CLOSED);
         assert_eq!(hands[3].parens.len(), 2, "the ghost snare's parentheses");
         let feet = &placed.voices[1].notes;
-        assert!(feet[1].staff_pos < 0 && feet[1].head.ink().top() > line, "kick rests below");
+        assert!(feet[1].staff_pos < 0 && feet[1].center.y > line, "kick rests below");
         assert!(feet[0].stem.unwrap().p2.y > line, "stems down");
         // One voice alone keeps its rests in the middle.
         let (placed, _, _) = kit("2/4 S:q r:q");

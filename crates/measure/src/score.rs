@@ -19,7 +19,42 @@ pub struct Score {
     /// new heads go; the heads already written stay where they are.
     #[serde(default, skip_serializing_if = "Voicing::is_default")]
     pub voicing: Voicing,
+    /// Whose rests the kit's staff leaves out in bars of two voices.
+    #[serde(default, skip_serializing_if = "HiddenRests::is_none")]
+    pub hidden_rests: HiddenRests,
     measures: Vec<Measure>,
+}
+
+/// The rests a kit score leaves out in its bars of two voices, as drum
+/// charts often do where the rhythm reads clearly without them. A bar of
+/// one voice, and the one line, keep every rest.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum HiddenRests {
+    /// Every rest is written.
+    #[default]
+    None,
+    /// The lower voice's rests (the feet) are left out.
+    Lower,
+    /// The rests of both voices are left out.
+    Both,
+}
+
+impl HiddenRests {
+    /// The choices, the default first.
+    pub const ALL: [Self; 3] = [Self::None, Self::Lower, Self::Both];
+
+    fn is_none(&self) -> bool {
+        *self == Self::None
+    }
+
+    /// Whether the rests of `voice` are left out, in a bar of two voices.
+    pub fn hides(self, voice: VoiceIdx) -> bool {
+        match self {
+            Self::None => false,
+            Self::Lower => voice > 0,
+            Self::Both => true,
+        }
+    }
 }
 
 /// The staff a score is written on.
@@ -46,6 +81,8 @@ struct RawScore {
     staff: StaffKind,
     #[serde(default)]
     voicing: Voicing,
+    #[serde(default)]
+    hidden_rests: HiddenRests,
     measures: Vec<Measure>,
 }
 
@@ -68,7 +105,12 @@ impl TryFrom<RawScore> for Score {
         if raw.measures.is_empty() {
             return Err(EmptyScore);
         }
-        Ok(Self { staff: raw.staff, voicing: raw.voicing, measures: raw.measures })
+        Ok(Self {
+            staff: raw.staff,
+            voicing: raw.voicing,
+            hidden_rests: raw.hidden_rests,
+            measures: raw.measures,
+        })
     }
 }
 
@@ -76,7 +118,12 @@ impl Score {
     /// `measures` on one line. Panics if there are none.
     pub fn new(measures: Vec<Measure>) -> Self {
         assert!(!measures.is_empty(), "a score needs at least one measure");
-        Self { staff: StaffKind::Line, voicing: Voicing::default(), measures }
+        Self {
+            staff: StaffKind::Line,
+            voicing: Voicing::default(),
+            hidden_rests: HiddenRests::None,
+            measures,
+        }
     }
 
     /// The score on `staff` instead.
@@ -390,6 +437,25 @@ mod tests {
     }
 
     #[test]
+    fn the_hidden_rests_are_saved_only_when_some_are_hidden() {
+        let score = crate::notation::parse_score("4/4 H:q H:q H:q H:q ; K:q r:q K:q r:q").unwrap();
+        let plain = ron::to_string(&score).unwrap();
+        assert!(!plain.contains("hidden_rests"), "{plain}");
+        // A score saved before the setting shows every rest.
+        assert_eq!(ron::from_str::<Score>(&plain).unwrap().hidden_rests, HiddenRests::None);
+        for hidden in [HiddenRests::Lower, HiddenRests::Both] {
+            let mut with = score.clone();
+            with.hidden_rests = hidden;
+            let text = ron::to_string(&with).unwrap();
+            assert!(text.contains("hidden_rests"), "{text}");
+            assert_eq!(ron::from_str::<Score>(&text).unwrap().hidden_rests, hidden);
+        }
+        assert!(!HiddenRests::None.hides(0) && !HiddenRests::None.hides(1));
+        assert!(!HiddenRests::Lower.hides(0) && HiddenRests::Lower.hides(1));
+        assert!(HiddenRests::Both.hides(0) && HiddenRests::Both.hides(1));
+    }
+
+    #[test]
     fn a_doubled_drum_stays_in_the_voice_of_the_voicing() {
         use crate::notation::{format_score, parse_score};
         let mut score = parse_score("4/4 S-H:q H:q H:h ; S:q K:q K:h").unwrap();
@@ -499,8 +565,12 @@ mod tests {
 
     #[test]
     fn clamp_cursor_on_a_hand_built_empty_score_is_the_start() {
-        let empty =
-            Score { staff: StaffKind::Line, voicing: Voicing::default(), measures: Vec::new() };
+        let empty = Score {
+            staff: StaffKind::Line,
+            voicing: Voicing::default(),
+            hidden_rests: HiddenRests::None,
+            measures: Vec::new(),
+        };
         assert_eq!(empty.clamp_cursor(Cursor::in_voice(3, 1, 2)), Cursor::start());
     }
 

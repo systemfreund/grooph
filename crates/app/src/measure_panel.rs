@@ -89,6 +89,8 @@ impl Grooph {
             // shows the whole rest too: its beats keep their places for the
             // cursor and the taps.
             bar_rests: !self.metronome_mode(),
+            // The rests the score leaves out stay to be picked and replaced.
+            veil_hidden_rests: self.ui.mode == Mode::Edit,
         }
     }
 

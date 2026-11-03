@@ -66,6 +66,7 @@ fn pattern_preview(ui: &mut egui::Ui, score: &Score, width: f32, look: &PreviewL
         room_below_em: ROOM_BELOW_EM,
         lower_label_room_em: 0.0,
         bar_rests: true,
+        veil_hidden_rests: false,
     };
     // The first bar: two side by side would each need about 170 pt even
     // for quarters, with the meter, more than a phone's dialog has.

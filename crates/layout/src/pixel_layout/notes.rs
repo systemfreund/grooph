@@ -1,6 +1,6 @@
 use super::{LayoutOpts, Line, NoteLayout, PlacedGlyph, c, requires_flag};
 use crate::glyphs;
-use crate::render_plan::RenderPlan;
+use crate::render_plan::{RenderPlan, RestDisplay};
 use crate::staff::rest_takes_ledgers;
 use egui::{Pos2, Rect};
 use grooph_measure::duration::{Duration, NoteValue};
@@ -117,16 +117,6 @@ fn head_glyph(beat: &Beat) -> glyphs::Glyph {
 fn paren_reach(opts: &LayoutOpts) -> f32 {
     let ss = opts.staff_space();
     opts.head_half_width() + c::SOFT_PAREN_GAP_SS * ss + glyphs::NOTEHEAD_PAREN_LEFT.ink(ss).width()
-}
-
-/// The size a beat's head or rest is set at: a rest of a kit bar of two
-/// voices a little smaller than a note, as drum charts have it, so the two
-/// voices' rests and notes do not crowd each other.
-fn head_size(beat: &Beat, opts: &LayoutOpts) -> f32 {
-    match !beat.is_note() && opts.shared_line && !opts.staff_model().one_line() {
-        true => opts.em * c::KIT_REST_SCALE,
-        false => opts.em,
-    }
 }
 
 /// The parentheses around a soft note's head centered at `center`. They
@@ -248,7 +238,7 @@ fn compute_x_extents(beat: &Beat, in_beam: bool, opts: &LayoutOpts) -> (f32, f32
     } else {
         // A ledger line may reach past the rest: it doesn't widen it, so the
         // voice is spaced as on a line of its own.
-        let head = PlacedGlyph::centered(head_glyph(beat), 0.0, 0.0, head_size(beat, opts)).ink();
+        let head = PlacedGlyph::centered(head_glyph(beat), 0.0, 0.0, opts.em).ink();
         (head.left(), head.right())
     };
 
@@ -500,7 +490,7 @@ pub(super) fn build_note_layout(
             .collect();
         let head = match placed.last() {
             Some((head, _)) => *head,
-            None => PlacedGlyph::centered(head_glyph(b), center.x, cy, head_size(b, opts)),
+            None => PlacedGlyph::centered(head_glyph(b), center.x, cy, opts.em),
         };
         let others: Vec<PlacedGlyph> = placed.iter().rev().skip(1).map(|(g, _)| *g).collect();
         let parens: Vec<PlacedGlyph> = placed
@@ -542,6 +532,7 @@ pub(super) fn build_note_layout(
             chord: others,
             stemlet,
             hidden: false,
+            veiled: false,
             parens,
             ledgers,
             dots,
@@ -557,6 +548,16 @@ pub(super) fn build_note_layout(
     if render_plan.bar_rest {
         bar_rest(&mut note_layout, rect, opts);
     }
+    let rests = note_layout.iter_mut().filter(|n| n.kind == BeatKind::Rest);
+    match render_plan.rests {
+        RestDisplay::Drawn => {}
+        RestDisplay::Veiled => rests.for_each(|n| n.veiled = true),
+        RestDisplay::Hidden => rests.for_each(|n| {
+            n.hidden = true;
+            n.dots.clear();
+            n.ledgers.clear();
+        }),
+    }
     note_layout
 }
 
@@ -568,13 +569,32 @@ fn bar_rest(notes: &mut [NoteLayout], rect: &Rect, opts: &LayoutOpts) {
     for (i, note) in notes.iter_mut().enumerate() {
         note.dots.clear();
         if i == 0 {
-            let y = opts.y_of(opts.staff_model().bar_rest_pos(opts.voicing()));
-            // At the size the voice's rests have (a kit bar of two voices
-            // sets them a little smaller).
-            let size = note.head.size;
-            note.head = PlacedGlyph::centered(glyphs::REST_WHOLE, rect.center().x, y, size);
+            note.staff_pos = opts.staff_model().bar_rest_pos();
+            let y = opts.y_of(note.staff_pos);
+            // The beat keeps its x, for the cursor and the labels.
+            note.center.y = y;
+            note.head = PlacedGlyph::centered(glyphs::REST_WHOLE, rect.center().x, y, opts.em);
         } else {
             note.hidden = true;
         }
+    }
+}
+
+/// Move the rest `note` to the staff position `pos`, its dots and ledger
+/// lines with it.
+pub(super) fn move_rest(note: &mut NoteLayout, pos: i8, opts: &LayoutOpts) {
+    let dy = opts.y_of(pos) - opts.y_of(note.staff_pos);
+    note.staff_pos = pos;
+    note.center.y += dy;
+    note.head.origin.y += dy;
+    // Only half and whole rests keep to the lines and take ledger lines.
+    let with_ledgers = [glyphs::REST_HALF, glyphs::REST_WHOLE].contains(&note.head.glyph);
+    if !note.hidden {
+        note.ledgers = ledgers_of(&[(note.head, pos, with_ledgers)], opts);
+    }
+    let on_line = opts.staff_model().on_line(pos, with_ledgers);
+    let y = opts.y_of(pos) - if on_line { opts.em * c::DOT_Y_OFFSET_EM } else { 0.0 };
+    for dot in &mut note.dots {
+        dot.origin.y += y - dot.ink().center().y;
     }
 }

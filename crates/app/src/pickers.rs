@@ -15,7 +15,6 @@ use eframe::egui::{
     Button, Color32, FontFamily, FontId, Id, Modal, Rect, Response, RichText, Ui, vec2,
 };
 use grooph_audio::{GapClick, GapMode, GapMute, Sound};
-use grooph_measure::TimeSignature;
 use grooph_measure::counter::{Ratio, own_ratios, step_clicks, step_span};
 use grooph_measure::counting::CountingSystem;
 use grooph_measure::generator::{
@@ -25,6 +24,7 @@ use grooph_measure::generator::{
 use grooph_measure::swing::{MAX_SWING_PERCENT, MIN_SWING_PERCENT, SwingUnit};
 use grooph_measure::tap_tempo::{TapPulse, tap_pulse};
 use grooph_measure::tempo::{MAX_BPM, MIN_BPM};
+use grooph_measure::{HiddenRests, TimeSignature};
 use std::ops::RangeInclusive;
 
 /// Height of a touch-friendly row or button.
@@ -63,6 +63,8 @@ pub(crate) enum Picker {
     Polyrhythm,
     /// Bars the click drops out of, to practise inner time.
     SilentBars,
+    /// The rests a kit score leaves out in bars of two voices.
+    HiddenRests,
     /// The sounds of the rhythm, the metronome and the counter rhythm.
     Sounds,
     /// The MIDI device the play-along listens to.
@@ -77,6 +79,15 @@ pub(crate) enum Picker {
     Settings,
     /// Contact, keybindings and touch controls.
     Help,
+}
+
+/// The rests shown with `hidden` left out.
+pub(crate) fn hidden_rests_label(hidden: HiddenRests) -> &'static str {
+    match hidden {
+        HiddenRests::None => "Show all",
+        HiddenRests::Lower => "Hide lower voice",
+        HiddenRests::Both => "Hide both voices",
+    }
 }
 
 pub(crate) fn counting_system_name(system: CountingSystem) -> &'static str {
@@ -416,6 +427,7 @@ impl Grooph {
                 Picker::ClickFill => "Subdivision",
                 Picker::Polyrhythm => "Polyrhythm",
                 Picker::SilentBars => "Silent bars",
+                Picker::HiddenRests => "Rests",
                 Picker::Sounds => "Sounds",
                 Picker::MidiInput => "MIDI input",
                 Picker::PlayAlong => "Play along",
@@ -453,6 +465,7 @@ impl Grooph {
                     self.silent_bars_choices(ui);
                     false
                 }
+                Picker::HiddenRests => self.hidden_rests_choices(ui),
                 Picker::Sounds => {
                     self.sound_choices(ui);
                     false
@@ -847,6 +860,26 @@ impl Grooph {
         let picked = choice_grid(ui, &bases, counting.base, 1);
         if let Some(base) = picked {
             counting.base = base;
+        }
+        picked.is_some()
+    }
+
+    /// Which rests the score leaves out in its bars of two voices; picking
+    /// closes the dialog. An edit of the score, undone as one.
+    fn hidden_rests_choices(&mut self, ui: &mut Ui) -> bool {
+        ui.weak(
+            "In bars with two voices. Drum charts often leave out the rests of the feet, or of both voices. The editor shows them faintly.",
+        );
+        ui.add_space(8.0);
+        let options: Vec<_> =
+            HiddenRests::ALL.into_iter().map(|h| (h, hidden_rests_label(h).to_owned())).collect();
+        let current = self.editor.doc().score.hidden_rests;
+        let picked = choice_grid(ui, &options, current, 1);
+        if let Some(hidden) = picked.filter(|&h| h != current) {
+            self.with_undo_snapshot(|app| {
+                app.editor.doc_mut().score.hidden_rests = hidden;
+                true
+            });
         }
         picked.is_some()
     }

@@ -426,6 +426,10 @@ pub fn draw_notes(
     draw_tuplets(painter, &measure_layout.tuplets, opts, color);
 }
 
+/// How much of its color a rest the score leaves out keeps in the editor
+/// ([`NoteLayout::veiled`]): faint, but there to be picked.
+const VEILED_REST_OPACITY: f32 = 0.3;
+
 /// Per-note glyphs: head, stem, flag, dots, accent. The note `lit` names
 /// is drawn in its colour.
 pub fn draw_note_glyphs(
@@ -437,6 +441,7 @@ pub fn draw_note_glyphs(
 ) {
     for (idx, note) in notes.iter().enumerate() {
         let color = lit.filter(|&(i, _)| i == idx).map_or(color, |(_, c)| c);
+        let color = if note.veiled { color.gamma_multiply(VEILED_REST_OPACITY) } else { color };
         draw_beat(painter, note, opts, color);
     }
 }

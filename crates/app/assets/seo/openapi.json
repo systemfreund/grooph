@@ -52,6 +52,12 @@
             "example": "3+2+2"
           },
           {
+            "name": "hiderests",
+            "in": "query",
+            "description": "For a drum-kit rhythm in `r` (written `kit ...` with two voices split by `;`): leave out the rests of the lower voice (`lower`) or of both voices (`both`) on the staff. Default: every rest is shown. Needs `r`.",
+            "schema": { "type": "string", "enum": ["lower", "both"] }
+          },
+          {
             "name": "sub",
             "in": "query",
             "description": "Generator: subdivision of the random rhythm (`3` = triplets).",
