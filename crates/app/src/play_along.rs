@@ -413,9 +413,11 @@ impl Grooph {
                     ui.add_space(4.0);
                     drift_chart(ui, drift);
                 }
-                if let Some(positions) = tracker.last_positions() {
+                if let Some(positions) =
+                    tracker.last_positions().and_then(|t| t.in_system(self.ui.counting.system))
+                {
                     ui.add_space(4.0);
-                    beat_position_strip(ui, positions, self.ui.counting.system);
+                    beat_position_strip(ui, &positions);
                 }
                 ui.add_space(4.0);
                 // Folded away under the tables, which need the room on a phone.

@@ -52,6 +52,15 @@ impl AccuracyStats {
         Some((self.sum_sq_ms / n - mean * mean).max(0.0).sqrt())
     }
 
+    /// Add the hits of `other`.
+    pub(super) fn merge(&mut self, other: &Self) {
+        self.count = self.count.saturating_add(other.count);
+        self.sum_ms += other.sum_ms;
+        self.sum_abs_ms += other.sum_abs_ms;
+        self.sum_sq_ms += other.sum_sq_ms;
+        self.last_delta_ms = other.last_delta_ms.or(self.last_delta_ms);
+    }
+
     pub(super) fn push(&mut self, delta_ms: f64) {
         self.count = self.count.saturating_add(1);
         self.sum_ms += delta_ms;

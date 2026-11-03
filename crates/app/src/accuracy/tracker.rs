@@ -4,7 +4,7 @@ use grooph_measure::Score;
 use grooph_measure::tempo::ScoreTiming;
 
 use super::drift::Drift;
-use super::positions::BeatPositions;
+use super::positions::PositionTallies;
 use super::progress::update_progress;
 use super::recorder::record_hit;
 use super::session::{AccuracyMark, RecordingSession, RunSummary, TRACKED_VOICES, shift_marks};
@@ -26,7 +26,7 @@ pub(crate) struct AccuracyTracker {
     /// That run over time.
     last_drift: Option<Drift>,
     /// That run by position in the beat.
-    last_positions: Option<BeatPositions>,
+    last_positions: Option<PositionTallies>,
     /// Marks of that run, kept on the staff after stopping until the next
     /// run starts or the score is edited.
     last_marks: HashMap<u64, AccuracyMark>,
@@ -166,7 +166,7 @@ impl AccuracyTracker {
     /// The last finished run by position in the beat, as
     /// [`Self::last_summary`]; `None` unless its notes fell on two
     /// positions.
-    pub(crate) fn last_positions(&self) -> Option<&BeatPositions> {
+    pub(crate) fn last_positions(&self) -> Option<&PositionTallies> {
         self.last_positions.as_ref()
     }
 
@@ -795,7 +795,10 @@ mod tests {
         }
         tracker.on_playback_stop();
         assert!(tracker.last_summary().unwrap().mean_ms.abs() < 1e-6);
-        let positions = tracker.last_positions().expect("two positions");
+        let positions = tracker
+            .last_positions()
+            .and_then(|t| t.in_system(grooph_measure::counting::CountingSystem::Numbers))
+            .expect("two positions");
         let means: Vec<(u8, f64)> =
             positions.positions.iter().map(|p| (p.pos.parts, p.mean_ms.unwrap().round())).collect();
         assert_eq!(means, [(1, -20.0), (2, 20.0)]);

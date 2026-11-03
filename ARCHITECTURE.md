@@ -678,7 +678,8 @@ grooph's metronome runs inside AI chats as an
   with the painter, no plot crate), `BeatPositions` (the hits and misses
   per position in the beat, `accuracy/positions.rs`; each onset's position
   comes from `counting::position_in_beat`, the coarsest count with a part
-  there, every beat's start being one position) for the strip under it,
+  there, every beat's start being one position; positions the counting
+  system names the same are merged when the strip is drawn) for the strip under it,
   and the run's marks, drawn on the staff (and the metronome's ring) until
   the next run or an edit. Hits and misses are also tallied for each of the
   first two voices (`VoiceTally`; a note several voices play counts for

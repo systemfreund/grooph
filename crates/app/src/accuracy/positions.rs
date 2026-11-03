@@ -1,7 +1,7 @@
 //! A run by position in the beat, for the strip under the drift chart:
 //! whether the offbeats, the "e"s or the "la"s sit apart from the rest.
 
-use grooph_measure::counting::CountPos;
+use grooph_measure::counting::{CountPos, CountingSystem};
 
 use super::session::AccuracyStats;
 
@@ -22,14 +22,22 @@ pub(super) fn position_key(pos: CountPos) -> CountPos {
     }
 }
 
+/// The label `system` gives `pos`, its place as a fraction where it says
+/// nothing.
+pub(crate) fn position_label(pos: &CountPos, system: CountingSystem) -> String {
+    system.label(pos).unwrap_or_else(|| format!("{}/{}", pos.part, pos.parts))
+}
+
+type Tally = (CountPos, AccuracyStats, u64);
+
 /// What a run collects per position while it plays.
 #[derive(Default)]
 pub(super) struct PositionLog {
-    tallies: Vec<(CountPos, AccuracyStats, u64)>,
+    tallies: Vec<Tally>,
 }
 
 impl PositionLog {
-    fn tally(&mut self, pos: CountPos) -> &mut (CountPos, AccuracyStats, u64) {
+    fn tally(&mut self, pos: CountPos) -> &mut Tally {
         let key = position_key(pos);
         let i = match self.tallies.iter().position(|(p, ..)| *p == key) {
             Some(i) => i,
@@ -50,30 +58,60 @@ impl PositionLog {
     }
 
     /// The finished run, `overall_ms` its average deviation. `None` unless
-    /// notes fell on at least two positions: one has nothing to compare.
-    pub(super) fn finish(&self, overall_ms: f64) -> Option<BeatPositions> {
-        if self.tallies.len() < 2 {
-            return None;
+    /// notes fell on at least two positions.
+    pub(super) fn finish(&self, overall_ms: f64) -> Option<PositionTallies> {
+        (self.tallies.len() >= 2)
+            .then(|| PositionTallies { tallies: self.tallies.clone(), overall_ms })
+    }
+}
+
+/// A finished run's tallies per position, to be shown in a counting system.
+#[derive(Clone)]
+pub(crate) struct PositionTallies {
+    tallies: Vec<Tally>,
+    overall_ms: f64,
+}
+
+impl PositionTallies {
+    /// The run by position as `system` names them: positions it names the
+    /// same (the "&" of a 4/4 beat and of a 7/8 pair) are one. `None` unless
+    /// two of them have enough hits to compare.
+    pub(crate) fn in_system(&self, system: CountingSystem) -> Option<BeatPositions> {
+        let mut sorted = self.tallies.clone();
+        // Through the beat; the parts of a short beat before a long one's.
+        sorted.sort_by(|a, b| {
+            let at = |p: &CountPos| p.part as f64 / p.parts as f64;
+            at(&a.0).total_cmp(&at(&b.0)).then(a.0.units.cmp(&b.0.units))
+        });
+        let mut merged: Vec<(String, Tally)> = Vec::new();
+        for (pos, stats, misses) in sorted {
+            let label = position_label(&pos, system);
+            match merged.iter_mut().find(|(l, _)| *l == label) {
+                Some((_, (_, s, m))) => {
+                    s.merge(&stats);
+                    *m += misses;
+                }
+                None => merged.push((label, (pos, stats, misses))),
+            }
         }
-        let mut positions: Vec<PositionTiming> = self
-            .tallies
-            .iter()
-            .map(|(pos, stats, misses)| {
+        let positions: Vec<PositionTiming> = merged
+            .into_iter()
+            .map(|(label, (pos, stats, misses))| {
                 let shown = stats.count >= MIN_POSITION_HITS;
                 PositionTiming {
-                    pos: *pos,
+                    pos,
+                    label,
                     hits: stats.count,
-                    misses: *misses,
+                    misses,
                     mean_ms: stats.mean_ms().filter(|_| shown),
                     spread_ms: stats.spread_ms().filter(|_| shown),
                 }
             })
             .collect();
-        // Through the beat; the parts of a short beat before a long one's.
-        positions.sort_by(|a, b| {
-            let at = |p: &CountPos| p.part as f64 / p.parts as f64;
-            at(&a.pos).total_cmp(&at(&b.pos)).then(a.pos.units.cmp(&b.pos.units))
-        });
+        if positions.iter().filter(|p| p.mean_ms.is_some()).count() < 2 {
+            return None;
+        }
+        let overall_ms = self.overall_ms;
         let notable = positions
             .iter()
             .enumerate()
@@ -87,10 +125,12 @@ impl PositionLog {
 }
 
 /// One position of a finished run.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct PositionTiming {
     /// Beat 1 stands for every beat.
     pub pos: CountPos,
+    /// As the counting system names it.
+    pub label: String,
     pub hits: u64,
     pub misses: u64,
     /// `None` below [`MIN_POSITION_HITS`] hits.
@@ -114,23 +154,35 @@ pub(crate) struct BeatPositions {
 mod tests {
     use super::*;
 
+    const NUMBERS: CountingSystem = CountingSystem::Numbers;
+
     fn pos(units: u8, beat: u32, part: u8, parts: u8) -> CountPos {
         CountPos { units, uneven: false, beat, part, parts }
+    }
+
+    fn finish(log: &PositionLog, overall_ms: f64) -> Option<BeatPositions> {
+        log.finish(overall_ms)?.in_system(NUMBERS)
     }
 
     #[test]
     fn every_beat_start_is_one_position() {
         let mut log = PositionLog::default();
-        log.push_hit(pos(1, 1, 0, 1), 0.0);
-        log.push_hit(pos(1, 3, 0, 1), 0.0);
-        log.push_hit(pos(3, 2, 0, 1), 0.0);
+        for _ in 0..2 {
+            log.push_hit(pos(1, 1, 0, 1), 0.0);
+            log.push_hit(pos(1, 3, 0, 1), 0.0);
+            log.push_hit(pos(3, 2, 0, 1), 0.0);
+        }
+        for _ in 0..4 {
+            log.push_hit(pos(1, 2, 1, 2), 0.0);
+        }
         log.push_miss(pos(1, 2, 1, 2));
-        let positions = log.finish(0.0).unwrap();
-        assert_eq!(positions.positions.len(), 2);
-        assert_eq!(positions.positions[0].hits, 3);
-        assert_eq!(positions.positions[1].misses, 1);
+        log.push_miss(pos(1, 1, 1, 4));
+        let positions = finish(&log, 0.0).unwrap();
+        let rows: Vec<(&str, u64, u64)> =
+            positions.positions.iter().map(|p| (p.label.as_str(), p.hits, p.misses)).collect();
+        assert_eq!(rows, [("1", 6, 0), ("e", 0, 1), ("&", 4, 1)]);
         // Too few hits for an average.
-        assert_eq!(positions.positions[0].mean_ms, None);
+        assert_eq!(positions.positions[1].mean_ms, None);
     }
 
     #[test]
@@ -141,7 +193,7 @@ mod tests {
             log.push_hit(pos(1, 1, 3, 4), 12.0);
             log.push_hit(pos(1, 1, 0, 1), -20.0);
         }
-        let positions = log.finish(7.0).unwrap();
+        let positions = finish(&log, 7.0).unwrap();
         let parts: Vec<(u8, u8)> =
             positions.positions.iter().map(|p| (p.pos.part, p.pos.parts)).collect();
         assert_eq!(parts, [(0, 1), (1, 2), (3, 4)]);
@@ -161,14 +213,44 @@ mod tests {
         for _ in 0..7 {
             log.push_hit(pos(1, 1, 1, 4), 80.0);
         }
-        assert_eq!(log.finish(0.0).unwrap().notable, None);
+        assert_eq!(finish(&log, 0.0).unwrap().notable, None);
     }
 
     #[test]
-    fn one_position_has_nothing_to_compare() {
+    fn positions_named_the_same_are_one() {
+        // The "&" of a 4/4 beat and of a 7/8 pair.
+        let pair = CountPos { units: 2, uneven: true, beat: 2, part: 1, parts: 2 };
+        let mut log = PositionLog::default();
+        for _ in 0..2 {
+            log.push_hit(pos(1, 1, 1, 2), 10.0);
+            log.push_hit(pair, 20.0);
+        }
+        for _ in 0..4 {
+            log.push_hit(pos(1, 1, 0, 1), 0.0);
+        }
+        let positions = finish(&log, 0.0).unwrap();
+        assert_eq!(positions.positions.len(), 2);
+        assert_eq!(positions.positions[1].hits, 4);
+        assert_eq!(positions.positions[1].mean_ms, Some(15.0));
+        // Gordon names them apart ("de", "be"): too few hits each.
+        let tallies = log.finish(0.0).unwrap();
+        assert!(tallies.in_system(CountingSystem::Gordon).is_none());
+    }
+
+    #[test]
+    fn nothing_to_compare_on_one_position_or_without_two_averages() {
         let mut log = PositionLog::default();
         log.push_hit(pos(1, 1, 0, 1), 5.0);
         log.push_hit(pos(1, 2, 0, 1), 5.0);
         assert!(log.finish(5.0).is_none());
+        // Two positions, but only one with enough hits.
+        log.push_hit(pos(1, 1, 1, 2), 5.0);
+        log.push_hit(pos(1, 1, 0, 1), 5.0);
+        log.push_hit(pos(1, 1, 0, 1), 5.0);
+        assert!(finish(&log, 5.0).is_none());
+        for _ in 0..3 {
+            log.push_hit(pos(1, 1, 1, 2), 5.0);
+        }
+        assert!(finish(&log, 5.0).is_some());
     }
 }

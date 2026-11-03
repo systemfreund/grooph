@@ -90,8 +90,8 @@ dashed line is your average over the whole run. A position needs four hits for a
 If one position sits more than 10 ms from your average over at least eight hits, a
 sentence names it, for example that your "&"s come late while the beats are early, which
 the overall average hides. With six or more positions only that one keeps its number;
-hover over a column for the others. The strip is left out when all notes fall on the
-beat. The counts above sit
+hover over a column for the others. The strip is left out unless two positions have
+four hits each, so not when all notes fall on the beat. The counts above sit
 under **Details**, which is folded away when the summary also shows the tables for a
 counter rhythm or silent bars.
 

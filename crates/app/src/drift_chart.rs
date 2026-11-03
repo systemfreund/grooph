@@ -7,7 +7,6 @@ use crate::accuracy::{
 };
 use crate::measure_panel::{grade_color, reference_color};
 use eframe::egui::{self, Pos2, Rect, Stroke, pos2, vec2};
-use grooph_measure::counting::{CountPos, CountingSystem};
 
 const HEIGHT: f32 = 84.0;
 const MAX_WIDTH: f32 = 340.0;
@@ -86,12 +85,6 @@ fn strip_range_ms(positions: &BeatPositions) -> f64 {
     ((max / 10.0).ceil() * 10.0).clamp(20.0, 150.0)
 }
 
-/// What `system` says on `pos`, its place as a fraction where it says
-/// nothing.
-pub(crate) fn position_label(pos: &CountPos, system: CountingSystem) -> String {
-    system.label(pos).unwrap_or_else(|| format!("{}/{}", pos.part, pos.parts))
-}
-
 /// A signed deviation as people say it: "12 ms late", "4 ms early".
 fn late_or_early(ms: f64) -> String {
     let side = if ms < 0.0 { "early" } else { "late" };
@@ -99,17 +92,14 @@ fn late_or_early(ms: f64) -> String {
 }
 
 /// The sentence on the position that stands out, if one does.
-pub(crate) fn notable_sentence(
-    positions: &BeatPositions,
-    system: CountingSystem,
-) -> Option<String> {
+fn notable_sentence(positions: &BeatPositions) -> Option<String> {
     let p = positions.positions.get(positions.notable?)?;
     let off = p.mean_ms? - positions.overall_ms;
     let way = if off < 0.0 { "earlier" } else { "later" };
     let at = if p.pos.parts <= 1 {
         "On the beat".to_string()
     } else {
-        format!("On \u{201c}{}\u{201d}", position_label(&p.pos, system))
+        format!("On \u{201c}{}\u{201d}", p.label)
     };
     Some(format!("{at} you play {:.0} ms {way} than on average", off.abs()))
 }
@@ -132,13 +122,9 @@ fn position_hover(p: &PositionTiming, label: &str) -> String {
 /// The run's average per position in the beat, one column each in the
 /// order of the beat: a bar from the click's line to the average (late up),
 /// a whisker for the spread, the perfect window as a band and the run's
-/// average as a dashed line. Under it the positions as counted in `system`
+/// average as a dashed line. Under it the positions as counted
 /// and their averages, and a sentence on the one that stands out.
-pub(crate) fn beat_position_strip(
-    ui: &mut egui::Ui,
-    positions: &BeatPositions,
-    system: CountingSystem,
-) {
+pub(crate) fn beat_position_strip(ui: &mut egui::Ui, positions: &BeatPositions) {
     let columns = positions.positions.len().max(1);
     let width = ui.available_width().min(MAX_WIDTH);
     let (rect, response) = ui.allocate_exact_size(vec2(width, STRIP_HEIGHT), egui::Sense::hover());
@@ -173,7 +159,7 @@ pub(crate) fn beat_position_strip(
     let mut labels = Vec::with_capacity(columns);
     for (i, p) in positions.positions.iter().enumerate() {
         let col = column(i);
-        let label = position_label(&p.pos, system);
+        let label = p.label.clone();
         let x = col.center().x;
         if let Some(mean) = p.mean_ms {
             let grade = if mean.abs() <= PERFECT_WINDOW_MS {
@@ -226,7 +212,7 @@ pub(crate) fn beat_position_strip(
             visuals.weak_text_color(),
         );
     }
-    if let Some(sentence) = notable_sentence(positions, system) {
+    if let Some(sentence) = notable_sentence(positions) {
         ui.label(sentence);
     }
     response.on_hover_text(
@@ -262,10 +248,17 @@ mod tests {
         assert_eq!(range_ms(&drift_of(&[400.0])), 150.0);
     }
 
-    fn timing(part: u8, parts: u8, hits: u64, mean_ms: Option<f64>) -> PositionTiming {
+    fn timing(part: u8, parts: u8, label: &str, mean_ms: Option<f64>) -> PositionTiming {
         PositionTiming {
-            pos: CountPos { units: 1, uneven: false, beat: 1, part, parts },
-            hits,
+            pos: grooph_measure::counting::CountPos {
+                units: 1,
+                uneven: false,
+                beat: 1,
+                part,
+                parts,
+            },
+            label: label.to_string(),
+            hits: 8,
             misses: 0,
             mean_ms,
             spread_ms: mean_ms.map(|_| 5.0),
@@ -275,21 +268,20 @@ mod tests {
     #[test]
     fn the_sentence_names_the_position_against_the_average() {
         let positions = BeatPositions {
-            positions: vec![timing(0, 1, 8, Some(-20.0)), timing(1, 2, 8, Some(20.0))],
+            positions: vec![timing(0, 1, "1", Some(-20.0)), timing(1, 2, "&", Some(20.0))],
             overall_ms: 0.0,
             notable: Some(1),
         };
-        let numbers = CountingSystem::Numbers;
         assert_eq!(
-            notable_sentence(&positions, numbers).as_deref(),
+            notable_sentence(&positions).as_deref(),
             Some("On \u{201c}&\u{201d} you play 20 ms later than on average")
         );
         let on_the_beat = BeatPositions { notable: Some(0), ..positions.clone() };
         assert_eq!(
-            notable_sentence(&on_the_beat, CountingSystem::Takadimi).as_deref(),
+            notable_sentence(&on_the_beat).as_deref(),
             Some("On the beat you play 20 ms earlier than on average")
         );
-        assert_eq!(notable_sentence(&BeatPositions { notable: None, ..positions }, numbers), None);
+        assert_eq!(notable_sentence(&BeatPositions { notable: None, ..positions }), None);
         assert_eq!(strip_range_ms(&on_the_beat), 30.0);
     }
 }
