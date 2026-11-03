@@ -29,6 +29,25 @@ class ParseEvents(unittest.TestCase):
         ]
         self.assertEqual(review.parse_events(lines), {"findings": [{"title": "x"}]})
 
+    def test_takes_the_answer_of_claude_code(self):
+        lines = [
+            json.dumps({"type": "system", "subtype": "init"}),
+            json.dumps({"type": "assistant", "message": {"content": [
+                {"type": "text", "text": "Let me look."}, {"type": "tool_use", "name": "Read", "input": {}}]}}),
+            json.dumps({"type": "user", "message": {"content": [{"type": "tool_result", "content": "x"}]}}),
+            json.dumps({"type": "assistant", "message": {"content": [
+                {"type": "text", "text": '```json\n{"findings": [{"title": "x"}]}\n```'}]}}),
+            json.dumps({"type": "result", "subtype": "success", "is_error": False,
+                        "result": '```json\n{"findings": [{"title": "x"}]}\n```'}),
+        ]
+        self.assertEqual(review.parse_events(lines), {"findings": [{"title": "x"}]})
+
+    def test_reports_the_failure_of_claude_code(self):
+        lines = [json.dumps({"type": "result", "subtype": "success", "is_error": True, "result": "Invalid API key"})]
+        self.assertEqual(review.parse_events(lines), {"error": "Invalid API key"})
+        lines = [json.dumps({"type": "result", "subtype": "error_max_turns", "is_error": True})]
+        self.assertEqual(review.parse_events(lines), {"error": "error_max_turns"})
+
     def test_adds_missing_findings(self):
         lines = [json.dumps({"type": "text", "part": {"text": '{"requirements": []}'}})]
         self.assertEqual(review.parse_events(lines), {"requirements": [], "findings": []})

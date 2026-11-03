@@ -95,18 +95,30 @@ def parse_json_answer(text):
 
 
 def parse_events(lines):
-    """The answer in `opencode run --format json` output, or {"error": ...}."""
+    """The answer in the output of `opencode run --format json` or `claude -p --output-format stream-json`,
+    or {"error": ...}."""
     texts, errors = [], []
     for line in lines:
         try:
             event = json.loads(line)
         except json.JSONDecodeError:
             continue
-        if event.get("type") == "text":
+        kind = event.get("type")
+        if kind == "text":
             texts.append(event["part"].get("text", ""))
-        elif event.get("type") == "error":
+        elif kind == "error":
             error = event.get("error") or {}
             errors.append((error.get("data") or {}).get("message") or error.get("name") or "unknown error")
+        elif kind == "assistant":
+            # Claude Code: a message holds text blocks and tool calls.
+            texts += [b.get("text", "") for b in (event.get("message") or {}).get("content") or []
+                      if b.get("type") == "text"]
+        elif kind == "result":
+            # Claude Code's last event: the final text, or why the run failed.
+            if event.get("is_error"):
+                errors.append(str(event.get("result") or "; ".join(event.get("errors") or []) or event.get("subtype")))
+            elif isinstance(event.get("result"), str):
+                texts.append(event["result"])
 
     # The final answer is the last text; earlier texts are remarks between tool calls.
     for text in reversed(texts):
@@ -122,7 +134,7 @@ def cmd_extract(args):
     if events.exists():
         answer = parse_events(events.read_text().splitlines())
     else:
-        answer = {"error": "OpenCode did not run"}
+        answer = {"error": "the reviewer did not run"}
     result = {**answer, "reviewer": args.reviewer, "model": args.model, "kind": args.kind}
     Path(args.out).write_text(json.dumps(result, indent=2, ensure_ascii=False))
     if "error" in result:
