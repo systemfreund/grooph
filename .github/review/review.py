@@ -171,13 +171,22 @@ def with_replies(findings, review_comments):
     return [{**f, "replies": replies[f["comment_id"]]} if f.get("comment_id") in replies else f for f in findings]
 
 
-def discussion(summary, comments):
-    """What people wrote in the conversation of the pull request since the first review."""
-    return [
+def discussion(summary, comments, review_comments=(), open_findings=()):
+    """What people wrote in the pull request since the first review: in the conversation, and in inline comments
+    that are not a reply in the thread of an open finding (those are in `replies`). A comment that answers a
+    finding may be posted as a new inline comment or in the conversation without naming it."""
+    threads = {f["comment_id"] for f in open_findings if f.get("comment_id")}
+    inline = [
+        {**human_comment(c), "path": c.get("path"), "line": c.get("line")}
+        for c in review_comments
+        if from_people(c) and c.get("in_reply_to_id") not in threads and c["created_at"] > summary["created_at"]
+    ]
+    conversation = [
         human_comment(c)
         for c in comments
         if c["id"] != summary["id"] and from_people(c) and c["created_at"] > summary["created_at"]
     ]
+    return sorted(conversation + inline, key=lambda c: c["at"])
 
 
 def new_answers(summary, state, review_comments, comments):
@@ -253,10 +262,11 @@ def cmd_prepare(args):
     prior = None
     if state:
         open_findings = [f for f in state["findings"] if f["status"] == "open"]
+        review_comments = gh_paginated(f"repos/{args.repo}/pulls/{args.pr}/comments")
         prior = {
             "reviewed_sha": state["head_sha"],
-            "findings": with_replies(open_findings, gh_paginated(f"repos/{args.repo}/pulls/{args.pr}/comments")),
-            "discussion": discussion(summary, comments),
+            "findings": with_replies(open_findings, review_comments),
+            "discussion": discussion(summary, comments, review_comments, open_findings),
         }
         (out / "prior.json").write_text(json.dumps(prior, indent=2, ensure_ascii=False))
         diff = gh(

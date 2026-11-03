@@ -568,6 +568,8 @@ class Prepare(unittest.TestCase):
             comment(8, review.BOT, "NONE", "2026-01-02", "Still open", in_reply_to_id=7),
             comment(9, "dev", "COLLABORATOR", "2026-01-03", "handled in b.rs", in_reply_to_id=7),
             comment(10, "stranger", "CONTRIBUTOR", "2026-01-04", "drop it", in_reply_to_id=7),
+            comment(11, "dev", "OWNER", "2026-01-03T12", "not a thread reply, but deliberate", in_reply_to_id=None,
+                    path="a.rs", line=4),
         ]
         reviews, out = Path(tempfile.mkdtemp()), Path(tempfile.mkdtemp())
         (reviews / "0.json").write_text(json.dumps({"reviewer": "m1", "findings": []}))
@@ -580,7 +582,11 @@ class Prepare(unittest.TestCase):
         f1, f2 = prior["findings"]
         self.assertEqual(f1["replies"], [{"author": "dev", "at": "2026-01-03", "body": "handled in b.rs"}])
         self.assertNotIn("replies", f2)
-        self.assertEqual(prior["discussion"], [{"author": "dev", "at": "2026-01-03", "body": "F2 is intended"}])
+        self.assertEqual(prior["discussion"], [
+            {"author": "dev", "at": "2026-01-03", "body": "F2 is intended"},
+            {"author": "dev", "at": "2026-01-03T12", "body": "not a thread reply, but deliberate", "path": "a.rs",
+             "line": 4},
+        ])
         context = json.loads((out / "context.json").read_text())
         self.assertEqual(context["answers_until"], "2026-02-01T00:00:00Z")
         self.assertTrue(context["answers_only"])

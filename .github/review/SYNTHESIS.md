@@ -15,8 +15,8 @@ following `REVIEW.md`. You turn their answers into one review. A script posts yo
   (`general` or `rust`) added. Entries with an `error` field failed and contain nothing else.
 - `prior.json` (only from the second run on): the findings of the previous review that were still open, with their
   `id` (`F1`, `F2`, …), and the commit that review saw (`reviewed_sha`). A finding people answered in its inline
-  thread has their answers in `replies`; `discussion` holds what they wrote in the conversation of the pull request
-  since the first review. Both only come from people with write access to the repository.
+  thread has their answers in `replies`; `discussion` holds what they wrote since the first review, in the conversation of the pull request and in
+  inline comments outside the threads of open findings (with `path` and `line`). Both only come from people with write access to the repository.
 - `diff-since-prior.patch` (only when `prior.json` exists and the comparison worked): what changed since then.
 
 The pull request itself: `gh pr view <PR> --json title,body,commits`, `gh pr diff <PR>`, and the checked-out files
@@ -45,7 +45,8 @@ at the head commit. `REVIEW.md` says what matters in this repository.
    - fixed: put it in `resolved` with its `id` and a short note on what fixed it (see `diff-since-prior.patch`);
    - wrong after all: put it in `withdrawn` with its `id` and why.
 
-   Read the `replies` of a finding and the `discussion` first: the author may explain why the code is right, point
+   Read the `replies` of a finding and the `discussion` first (a comment in the `discussion` can answer a finding
+   without naming it or being a reply in its thread; match it by content): the author may explain why the code is right, point
    to where it is handled, or say that something is intended. Check such an argument against the code and the
    requirements like a reviewer's claim. If it holds, withdraw the finding (or lower its severity, or list it in
    `discarded` when a reviewer reports it again) and say so in the note; if it does not, keep the finding and
