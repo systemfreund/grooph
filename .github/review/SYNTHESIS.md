@@ -38,6 +38,14 @@ at the head commit. `REVIEW.md` says what matters in this repository.
 3. **Set the severity yourself** (`high`, `medium`, `low` as defined in `REVIEW.md` §4) after verifying; do not
    just take the highest a reviewer gave. Correct `file` and `line` to the place the problem really is, preferably
    a line inside the diff.
+   Also set its `domain`: what the finding is about, whoever reported it.
+   - `requirements`: a requirement not met or only partly met (`REVIEW.md` §1-2);
+   - `correctness`: a bug or weak spot in the first list of `REVIEW.md` §3 (edge cases, error handling, shared
+     links, audio and timing, native vs. WebAssembly, state and undo, tests);
+   - `music`: notation, rhythm invariants, the meaning of stored values, layout, guide pages (§3 "Music domain");
+   - `design`: §3 "Design and maintainability";
+   - `rust`: Rust-specific (ownership, `unsafe`, idioms, crate APIs) and nothing of the above.
+   When a finding fits several, take the one whose rule it breaks most directly.
 4. **Merge the requirements.** Take the requirements of the general reviewers (the Rust review has none), merge
    them into one list and decide each verdict yourself by checking the code. Where reviewers disagree, check
    which is right. Use the requirements source the reviewers agree on, or the best one.
@@ -81,6 +89,7 @@ Your final answer is a single JSON object and nothing else (a ```json fence arou
       "file": "crates/midi/src/input.rs",
       "line": 476,
       "body": "What goes wrong, when, and a suggested fix.",
+      "domain": "correctness",
       "found_by": ["venice/claude-sonnet-5-5", "venice/deepseek-v4-1-flash"]
     }
   ],

@@ -85,6 +85,8 @@ def collect(repo, pr):
             "withdrawn_kind": classify_withdrawn(f.get("resolution")) if f["status"] == "withdrawn" else None,
             "resolution": f.get("resolution"),
             "severity": severity or "unknown",
+            # Set by the synthesis since it was asked to; older findings have none.
+            "domain": f.get("domain") or "unknown",
             "found_by": found_by or ["unknown"],
             "answered": answered,
             "unread": unread,
@@ -106,6 +108,32 @@ def table(title, groups):
     return "\n".join(rows) + "\n"
 
 
+def lens(reviewer):
+    """The lens of a reviewer named "<lens> · <model>"; a plain model name is the general review."""
+    return reviewer.split(" · ")[0] if " · " in reviewer else "general"
+
+
+def off_lens(findings):
+    """Findings a lens reported outside its domain, and how many of them its own lens found too."""
+    rows = ["### Outside the reporting lens", "",
+            "| lens | with domain | outside its domain | of those also found by the domain's lens | outside, fixed |",
+            "|---|---|---|---|---|"]
+    by_lens = defaultdict(list)
+    for f in findings:
+        if f["domain"] != "unknown":
+            for r in f["found_by"]:
+                if lens(r) != "general":
+                    by_lens[lens(r)].append(f)
+    if not by_lens:
+        return "No finding with a domain from a focused lens yet.\n"
+    for name, fs in sorted(by_lens.items()):
+        outside = [f for f in fs if f["domain"] != name]
+        also = [f for f in outside if any(lens(r) == f["domain"] for r in f["found_by"])]
+        fixed = sum(f["status"] == "resolved" for f in outside)
+        rows.append(f"| {name} | {len(fs)} | {len(outside)} | {len(also)} | {fixed} |")
+    return "\n".join(rows) + "\n"
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--repo", default="systemfreund/grooph")
@@ -115,9 +143,10 @@ def main():
     if args.json:
         with open(args.json, "w") as fh:
             json.dump(findings, fh, indent=1, ensure_ascii=False)
-    by_reviewer, by_severity = defaultdict(list), defaultdict(list)
+    by_reviewer, by_severity, by_domain = defaultdict(list), defaultdict(list), defaultdict(list)
     for f in findings:
         by_severity[f["severity"]].append(f)
+        by_domain[f["domain"]].append(f)
         for r in f["found_by"]:
             by_reviewer[r].append(f)
     prs = {f["pr"] for f in findings}
@@ -125,6 +154,8 @@ def main():
     print(table("All", {"all": findings}))
     print(table("By severity", by_severity))
     print(table("By reviewer (a finding counts for each reviewer that found it)", by_reviewer))
+    print(table("By domain (set by the synthesis)", by_domain))
+    print(off_lens(findings))
     merged_open = [f for f in findings if f["merged"] and f["status"] == "open"]
     print(f"Merged with open findings: {len({f['pr'] for f in merged_open})} PRs, {len(merged_open)} findings, "
           f"{sum(f['answered'] for f in merged_open)} of them answered by a person, "

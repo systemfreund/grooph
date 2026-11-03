@@ -128,6 +128,12 @@ class MergeState(unittest.TestCase):
         self.assertEqual(state["findings"][0]["line"], 4)
         self.assertEqual(state["findings"][0]["title"], "new title")
 
+    def test_keeps_the_domain_the_synthesis_gives(self):
+        state, _ = merged([finding("F1", domain="music")], {"findings": [
+            {"id": "F1", "title": "kept"}, {"title": "n", "domain": "design"}, {"title": "m", "domain": "style"}]})
+        # Left out: the previous one; not one of DOMAINS: none.
+        self.assertEqual([f["domain"] for f in state["findings"]], ["music", "design", None])
+
     def test_a_resolved_finding_waits_for_its_reply(self):
         state, _ = merged([finding("F1", comment_id=5)], {"resolved": [{"id": "F1", "note": "n"}]})
         self.assertIs(state["findings"][0]["replied"], False)
@@ -159,10 +165,13 @@ class Summary(unittest.TestCase):
         self.assertIn("⚠️ Reviewer **m2** failed", body)
 
     def test_closed_findings_are_stored_without_their_text(self):
-        state, resolved = merged([finding("F1", body="long text")], {"resolved": [{"id": "F1", "note": "n"}]})
+        state, resolved = merged([finding("F1", body="long text", domain="rust")],
+                                 {"resolved": [{"id": "F1", "note": "n"}]})
         stored = review.read_state({"body": self.render(state, resolved=resolved)})
         self.assertNotIn("body", stored["findings"][0])
         self.assertEqual(stored["findings"][0]["resolution"], "n")
+        # The statistics need it after the finding is closed.
+        self.assertEqual(stored["findings"][0]["domain"], "rust")
 
     def test_shortens_the_visible_text_before_the_stored_one(self):
         findings = [{"title": f"t{i}", "body": "x" * 3000, "line": i} for i in range(12)]

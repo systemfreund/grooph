@@ -33,6 +33,8 @@ FINDING_MARKER = "<!-- grooph-finding:{} -->"
 FINDING_MARKER_RE = re.compile(r"<!-- grooph-finding:(F\d+) -->")
 FINDING_ID_RE = re.compile(r"\bF\d+\b")
 UPDATED_RE = re.compile(r"^> \*\*Updated in `[^`]+`\*\*, see the latest reply\.\n\n")
+# What a finding is about, set by the synthesis; the review lenses' areas (REVIEW.md §1-3, the Rust review).
+DOMAINS = {"requirements", "correctness", "music", "design", "rust"}
 SEVERITY_ICON = {"high": "🔴", "medium": "🟠", "low": "🟡"}
 VERDICT_ICON = {"met": "✅ Met", "partly": "⚠️ Partly met", "not_met": "❌ Not met", "unclear": "❓ Unclear"}
 # GitHub rejects comments over 65536 characters.
@@ -390,6 +392,7 @@ def merge_state(prior, synthesis, head):
     still_open = set()
     for item in synthesis.get("findings") or []:
         fields = {k: item.get(k) for k in ("severity", "title", "file", "body")}
+        fields["domain"] = item.get("domain") if item.get("domain") in DOMAINS else None
         fields["line"] = as_line(item.get("line"))
         fields["found_by"] = item.get("found_by") or []
         f = by_id.get(item.get("id"))
@@ -428,7 +431,7 @@ def merge_state(prior, synthesis, head):
 def encode_state(state, limit=None, closed=True):
     """The hidden state block. `limit` shortens the text of open findings, `closed=False` drops closed ones."""
     # Closed findings only need what the "Resolved earlier" list and the reply to their thread need.
-    kept = ("id", "status", "title", "resolution", "resolved_in", "comment_id", "replied")
+    kept = ("id", "status", "title", "domain", "resolution", "resolved_in", "comment_id", "replied")
 
     def store(f):
         if f["status"] != "open":
