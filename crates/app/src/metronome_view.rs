@@ -28,8 +28,6 @@ use crate::accuracy::{
 };
 use crate::documents::Document;
 use crate::measure_panel::{grade_color, reference_color};
-use crate::pickers::shown_groups;
-use crate::shell::paint_meter;
 use crate::state::CountInState;
 use crate::{Grooph, TransportState};
 use eframe::egui;
@@ -657,18 +655,17 @@ impl Grooph {
     }
 
     /// The ring with the click bar, `height` tall at the bottom of the space
-    /// left between the panels. With `play_in_middle` (the inline view in a
-    /// chat) its middle is the play button.
-    pub(crate) fn metronome_ring(&mut self, ui: &mut Ui, height: f32, play_in_middle: bool) {
+    /// left between the panels; its middle is the play button.
+    pub(crate) fn metronome_ring(&mut self, ui: &mut Ui, height: f32) {
         egui::Panel::bottom("metronome_ring")
             .exact_size(height)
             .resizable(false)
             .show_separator_line(false)
             .frame(egui::Frame::new().fill(ui.visuals().panel_fill))
-            .show(ui, |ui| self.ring(ui, play_in_middle));
+            .show(ui, |ui| self.ring(ui));
     }
 
-    fn ring(&mut self, ui: &mut Ui, play_in_middle: bool) {
+    fn ring(&mut self, ui: &mut Ui) {
         // Nothing hovered unless the ring is drawn below.
         self.editor.metronome.ring_hover = None;
         let bar = self.click_bar();
@@ -683,10 +680,6 @@ impl Grooph {
         let counter_now = current_turn.and_then(|t| {
             counter_spans.iter().position(|&(_, start, end)| (start..end).contains(&t))
         });
-        let bar_state = match self.playback_ctl.audio.as_mut() {
-            Some(audio) if tick.is_some() => audio.bar_state(),
-            _ => None,
-        };
         if tick.is_some() {
             ui.ctx().request_repaint();
         }
@@ -784,8 +777,8 @@ impl Grooph {
 
         // The play button in the middle, as big as the room inside the dots
         // or the counter ring leaves (at least a finger's width).
-        let button = play_in_middle.then(|| (0.75 * hand_from).max(22.0).min(hand_from));
-        let hand_from = button.map_or(hand_from, |r| r + 4.0);
+        let button = (0.75 * hand_from).max(22.0).min(hand_from);
+        let hand_from = button + 4.0;
 
         // A hand while playing, from inside the dots (or across both rings
         // with a counter rhythm, so it shows where the clicks of the two
@@ -800,76 +793,22 @@ impl Grooph {
             );
         }
 
-        // Middle: the beat being counted during the count-in, the bar number
-        // while playing, else the meter (and the counter rhythm's ratio).
+        // The beat being counted during the count-in shows on the button.
         let count_in_beat = current_turn
             .filter(|_| self.playback_ctl.playback.count_in == CountInState::Active)
             .map(|t| if self.count_in_click_heard(&ts) { count_in_beat(t, &ts) } else { 1 });
-        if let Some(button) = button {
-            let playing = self.playback_ctl.transport_state == TransportState::Playing;
-            let tapped = paint_play_middle(ui, &resp, center, button, playing, count_in_beat);
-            if tapped {
-                self.toggle_playback();
-            } else if resp.clicked() {
-                match resp.interact_pointer_pos().and_then(on_ring) {
-                    Some(RingHit::Click(idx)) => self.cycle_click_level(idx),
-                    Some(RingHit::Counter(idx)) => self.cycle_counter_level(idx),
-                    None => {}
-                }
-            }
+        let playing = self.playback_ctl.transport_state == TransportState::Playing;
+        if paint_play_middle(ui, &resp, center, button, playing, count_in_beat) {
+            self.toggle_playback();
             return;
         }
-        let caption = match counter.as_ref().and(self.counter_ratio()) {
-            Some(ratio) => ratio_label(ratio),
-            None if counter.is_some() => "custom".to_owned(),
-            // Under the meter: its beat groups when there are several.
-            None => shown_groups(ts).unwrap_or_default(),
-        };
-        let (big, small) = match (count_in_beat, bar_state) {
-            (Some(beat), _) => (Some(beat.to_string()), String::new()),
-            (None, Some(b)) => {
-                (Some((b.bar + 1).to_string()), if muted { "muted" } else { "bar" }.to_owned())
-            }
-            // The meter, stacked in the music font as in the settings card.
-            (None, None) => (None, caption),
-        };
-        // Smaller inside the counter ring.
-        let scale = if counter.is_some() { 0.8 } else { 1.0 };
-        match big {
-            Some(text) => {
-                painter.text(
-                    center - vec2(0.0, 0.08 * scale * radius),
-                    Align2::CENTER_CENTER,
-                    text,
-                    FontId::proportional(0.42 * scale * radius),
-                    visuals.strong_text_color(),
-                );
-            }
-            None => {
-                // Alone it sits in the middle; above a caption, smaller and higher.
-                let (lift, em) = if small.is_empty() { (0.0, 0.5) } else { (0.12, 0.44) };
-                paint_meter(
-                    painter,
-                    ts,
-                    center - vec2(0.0, lift * scale * radius),
-                    em * scale * radius,
-                    1.1 * scale * radius,
-                    &self.ui.music_font_id.family,
-                    visuals.strong_text_color(),
-                );
-            }
-        }
-        painter.text(
-            center + vec2(0.0, 0.26 * scale * radius),
-            Align2::CENTER_CENTER,
-            small,
-            FontId::proportional((0.14 * scale * radius).clamp(13.0, 22.0)),
-            visuals.weak_text_color(),
-        );
 
-        // While playing along, a touch or click on the ring is a hit, not an edit.
+        // While playing along, a touch or click on the ring is a hit, not an
+        // edit; a press on the button is none.
         if self.tap_capture_active() {
-            if resp.contains_pointer() && ui.input(|i| i.pointer.any_pressed()) {
+            let on_button = |pos: Pos2| (pos - center).length() <= button;
+            let off_button = !ui.input(|i| i.pointer.press_origin()).is_some_and(on_button);
+            if off_button && resp.contains_pointer() && ui.input(|i| i.pointer.any_pressed()) {
                 self.push_pointer_tap();
             }
         } else if resp.clicked() {
@@ -1458,7 +1397,7 @@ mod tests {
 
     /// A height on the staff where `voice` reports its notes, from the top.
     fn staff_row(app: &mut Grooph, ctx: &egui::Context, voice: MetronomeVoice) -> f32 {
-        (100..500)
+        (0..500)
             .step_by(4)
             .map(|y| y as f32)
             .find(|&y| {
@@ -1497,6 +1436,30 @@ mod tests {
         assert_eq!(level(&app), before.next());
         tap(&mut app, &ctx, pos);
         assert_eq!(level(&app), before.next().next());
+    }
+
+    #[test]
+    fn a_tap_in_the_middle_of_the_ring_plays_and_stops() {
+        let ctx = egui::Context::default();
+        let mut app = metronome_on(&ctx, TimeSignature::FOUR_FOUR);
+        // The ring's top and bottom along the middle of the screen.
+        let on_ring: Vec<f32> = (0..844)
+            .step_by(4)
+            .map(|y| y as f32)
+            .filter(|&y| {
+                hover(&mut app, &ctx, Pos2::new(195.0, y));
+                app.editor.metronome.ring_hover.is_some()
+            })
+            .collect();
+        let (top, bottom) = (on_ring[0], on_ring[on_ring.len() - 1]);
+        let middle = Pos2::new(195.0, (top + bottom) / 2.0);
+        let clicks = app.click_bar();
+        tap(&mut app, &ctx, middle);
+        assert_eq!(app.playback_ctl.transport_state, TransportState::Playing);
+        tap(&mut app, &ctx, middle);
+        assert_eq!(app.playback_ctl.transport_state, TransportState::Stopped);
+        // No click changed its level.
+        assert_eq!(app.click_bar(), clicks);
     }
 
     #[test]
