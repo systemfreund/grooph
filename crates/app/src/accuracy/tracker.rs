@@ -139,14 +139,12 @@ impl AccuracyTracker {
         if timing.total_loop_seconds() <= 0.0 || elapsed < 0.0 {
             return;
         }
-        let (measure, local) = timing.to_local(timing.seconds_to_global_tick(elapsed));
-        let length = timing.ticks_per_measure(measure) as f64;
-        let tps = timing.ticks_per_sec_in_measure(measure);
-        if tps <= 0.0 || !(0.25..=0.75).contains(&(local / length)) {
+        let (into, length) = timing.measure_span_at(elapsed);
+        if length <= 0.0 || !(0.25..=0.75).contains(&(into / length)) {
             return;
         }
-        let start_s = now_seconds - local / tps;
-        data.bars.observe(Some((start_s, start_s + length / tps, muted)));
+        let start_s = now_seconds - into;
+        data.bars.observe(Some((start_s, start_s + length, muted)));
     }
 
     pub(crate) fn dismiss_summary(&mut self) {

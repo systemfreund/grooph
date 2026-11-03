@@ -340,9 +340,9 @@ pub(super) enum BarEvent {
 /// it is; the notes judged until then wait.
 #[derive(Default)]
 pub(super) struct BarTimeline {
-    /// When the click went off or on, in seconds on the session's clock:
-    /// each change at the start of a bar, its state up to the next one.
-    changes: Vec<(f64, bool)>,
+    /// The bars seen, in seconds on the session's clock: start, end and
+    /// whether they were silent. A bar no frame saw is not in here.
+    seen: Vec<(f64, f64, bool)>,
     /// Judged notes, by their time, whose bar is not known yet.
     pending: Vec<(f64, BarEvent)>,
     /// The end of the last bar seen.
@@ -366,8 +366,8 @@ impl BarTimeline {
             self.pending.clear();
             return;
         };
-        if self.changes.last().is_none_or(|&(_, last)| last != muted) {
-            self.changes.push((start_s, muted));
+        if self.seen.last().is_none_or(|&(last, _, _)| start_s - last > BAR_EDGE_S) {
+            self.seen.push((start_s, end_s, muted));
         }
         self.known_until = end_s;
         self.settle();
@@ -381,7 +381,7 @@ impl BarTimeline {
             if note_s + BAR_EDGE_S >= self.known_until {
                 return true;
             }
-            // Before the first bar seen, the bar is unknown: left out.
+            // A bar no frame saw is unknown: left out.
             if let Some(muted) = self.muted_at(note_s) {
                 self.tallies[usize::from(muted)].push(event);
             }
@@ -390,11 +390,13 @@ impl BarTimeline {
         self.pending = pending;
     }
 
-    /// Whether the note at `note_s` was in a silent bar; `None` before the
-    /// first bar seen. A note on a bar's start belongs to that bar.
+    /// Whether the note at `note_s` was in a silent bar; `None` in a bar no
+    /// frame saw. A note on a bar's start belongs to that bar.
     fn muted_at(&self, note_s: f64) -> Option<bool> {
-        let i = self.changes.partition_point(|&(t, _)| t <= note_s + BAR_EDGE_S);
-        i.checked_sub(1).map(|i| self.changes[i].1)
+        let note_s = note_s + BAR_EDGE_S;
+        let i = self.seen.partition_point(|&(start, _, _)| start <= note_s).checked_sub(1)?;
+        let (_, end, muted) = self.seen[i];
+        (note_s < end).then_some(muted)
     }
 }
 
@@ -661,6 +663,30 @@ mod tests {
         assert_eq!(s.tight, (2, 1));
         let s = summary_of(&[(-30.0, slow), (0.0, slow), (0.0, slow)], 0, 0);
         assert_eq!(s.tight, (3, 0));
+    }
+
+    #[test]
+    fn notes_in_a_bar_no_frame_saw_are_left_out() {
+        let hit = |delta_ms| {
+            let windows = HitWindows::for_gap_ms(500.0);
+            BarEvent::Hit(GradedHit { delta_ms, windows }, windows.grade(delta_ms))
+        };
+        let mut bars = BarTimeline::default();
+        // Bars of 2 s: silent, then one with the click no frame saw (a
+        // stall), then silent again.
+        bars.push(1.0, hit(10.0));
+        bars.observe(Some((0.0, 2.0, true)));
+        bars.push(2.0, hit(20.0));
+        bars.push(3.0, BarEvent::Miss);
+        bars.push(4.0, hit(30.0));
+        bars.observe(Some((4.0, 6.0, true)));
+        bars.push(5.9995, BarEvent::Extra);
+        bars.settle();
+        let [audible, silent] = &bars.tallies;
+        assert_eq!(audible.stats.count + audible.counters.misses, 0);
+        assert_eq!((silent.stats.count, silent.counters.misses), (2, 0));
+        // Within the edge of the next bar: not seen either.
+        assert_eq!(silent.counters.extra, 0);
     }
 
     #[test]

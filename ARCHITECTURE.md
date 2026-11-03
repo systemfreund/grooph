@@ -679,8 +679,9 @@ grooph's metronome runs inside AI chats as an
   click and the silent bars (`BarTimeline`). Each judged note waits with its
   time until a frame well inside its bar reads `Audio::bar_state` (via
   `PlaybackState::bar_muted`); near a bar's edges the engine's bar and the
-  session's clock may be a frame apart. The notes of the last bar seen are
-  tallied when the run ends.
+  session's clock may be a frame apart (`ScoreTiming::measure_span_at`
+  gives the bar's span). Notes in a bar no frame saw are left out; those of
+  the last bar seen are tallied when the run ends.
 - Misses are judged behind the clock by the largest offset of the sources in
   use plus a delivery margin (`miss_delay_s`, at most a quarter of the loop),
   so a hit delayed by input latency is in before its note is judged. The

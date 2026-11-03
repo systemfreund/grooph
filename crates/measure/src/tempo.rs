@@ -170,6 +170,15 @@ impl ScoreTiming {
         self.measure_seconds_starts[idx]
     }
 
+    /// The measure playing `seconds` into the score, wrapped over the loop
+    /// as [`Self::seconds_to_global_tick`]: how far into it that is and how
+    /// long it lasts, both in seconds.
+    pub fn measure_span_at(&self, seconds: f64) -> (f64, f64) {
+        let (idx, local_tick) = self.to_local(self.seconds_to_global_tick(seconds));
+        let spt = self.seconds_per_tick[idx];
+        (local_tick * spt, self.measure_ticks[idx] as f64 * spt)
+    }
+
     /// Forward: `(measure_idx, local_tick) → global_tick`.
     pub fn to_global_tick(&self, measure_idx: usize, local_tick: u32) -> u64 {
         self.measure_starts[measure_idx] + local_tick as u64
@@ -254,6 +263,23 @@ mod tests {
 
     fn score_of(ts: &[TimeSignature]) -> Score {
         Score::new(ts.iter().map(|t| Measure::new(*t)).collect())
+    }
+
+    #[test]
+    fn measure_span_at_finds_each_meter_and_wraps() {
+        // 2 s of 4/4, then 1.5 s of 3/4 at 120 BPM.
+        let t = ScoreTiming::from_score(
+            &score_of(&[TimeSignature::FOUR_FOUR, TimeSignature::THREE_FOUR]),
+            120,
+        );
+        let close = |(a, b): (f64, f64), (c, d): (f64, f64)| {
+            assert!((a - c).abs() < 1e-9 && (b - d).abs() < 1e-9, "{a} {b}");
+        };
+        close(t.measure_span_at(0.5), (0.5, 2.0));
+        close(t.measure_span_at(2.75), (0.75, 1.5));
+        // The next loop.
+        close(t.measure_span_at(4.0), (0.5, 2.0));
+        close(t.measure_span_at(5.75), (0.25, 1.5));
     }
 
     #[test]
