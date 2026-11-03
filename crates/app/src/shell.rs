@@ -11,6 +11,7 @@ use crate::pickers::{
     Picker, ROW_HEIGHT, hidden_rests_label, shown_groups, silent_bars_label, swing_label,
 };
 use crate::share::paint_share_icon;
+use crate::tokens;
 use crate::tool_palette::{BAR_TOOLS, notation_size, paint_none, paint_notation, tool};
 use crate::tools::{EditOp, Tool, ToolKind};
 use crate::{CountingBase, Grooph, Mode, TransportState};
@@ -280,11 +281,16 @@ fn badged_switch_row(ui: &mut Ui, label: &str, badge: Option<&str>, on: &mut boo
 /// The switch at the right end of `row`, `how_on` along its way to on.
 fn paint_switch(painter: &Painter, row: Rect, on: bool, how_on: f32, visuals: &egui::Visuals) {
     let switch = Rect::from_center_size(row.right_center() - vec2(30.0, 0.0), vec2(52.0, 30.0));
-    let fill = if on { visuals.selection.bg_fill } else { switch_off_fill(visuals) };
+    let fill =
+        if on { visuals.selection.bg_fill } else { tokens::SWITCH_OFF.get(visuals.dark_mode) };
     painter.rect_filled(switch, 15, fill);
     let radius = 12.0;
     let x = egui::lerp((switch.left() + 15.0)..=(switch.right() - 15.0), how_on);
-    painter.circle_filled(pos2(x, switch.center().y), radius, Color32::WHITE);
+    painter.circle_filled(
+        pos2(x, switch.center().y),
+        radius,
+        tokens::SWITCH_KNOB.get(visuals.dark_mode),
+    );
 }
 
 /// Width of the switch's own tap area at the right end of a [`split_row`].
@@ -345,16 +351,9 @@ fn paint_badge(painter: &Painter, left: Pos2, text: &str) {
     painter.galley(pill.center() - galley.size() / 2.0, galley, Color32::PLACEHOLDER);
 }
 
-/// The colours of a badge such as "BETA", in a settings row or on a tab:
-/// orange, the same in both themes.
-const BADGE_FILL: Color32 = Color32::from_rgb(0xD9, 0x6B, 0x1E);
-const BADGE_TEXT: Color32 = Color32::WHITE;
-
-/// Track colour of a switch that is off. It has to differ from the white
-/// knob, so the light theme gets a grey instead of its white field colour.
-fn switch_off_fill(visuals: &egui::Visuals) -> Color32 {
-    if visuals.dark_mode { visuals.extreme_bg_color } else { Color32::from_gray(190) }
-}
+/// The colours of a badge such as "BETA": the same in both themes.
+const BADGE_FILL: Color32 = tokens::BADGE.light;
+const BADGE_TEXT: Color32 = tokens::ON_BADGE.light;
 
 /// Full-width row with a label, the current value and a chevron.
 /// `value`, cut short with "…" to be at most `room` wide in a row's value font.

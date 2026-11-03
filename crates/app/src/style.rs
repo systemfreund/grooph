@@ -1,24 +1,17 @@
 use crate::Grooph;
+use crate::tokens;
 use eframe::egui;
-use eframe::egui::{Color32, Margin, Vec2, Visuals};
+use eframe::egui::{Margin, Vec2, Visuals};
 
 /// Text that reads at WCAG AA (4.5:1) on cards and panels: egui's dark text
 /// (3.8:1 on a card) and its weak text in both themes (2.3 to 2.9:1) are
 /// too faint.
 pub(crate) fn readable_text(visuals: &mut Visuals) {
-    let (text, weak) = if visuals.dark_mode {
-        (Some(Color32::from_gray(200)), Color32::from_gray(170))
-    } else {
-        // egui's light text (gray 80, 6.5:1) is fine.
-        (None, Color32::from_gray(95))
-    };
-    if let Some(text) = text {
-        let widgets = &mut visuals.widgets;
-        for widget in [&mut widgets.noninteractive, &mut widgets.inactive] {
-            widget.fg_stroke.color = text;
-        }
-    }
-    visuals.weak_text_color = Some(weak);
+    let dark = visuals.dark_mode;
+    let widgets = &mut visuals.widgets;
+    widgets.noninteractive.fg_stroke.color = tokens::TEXT.get(dark);
+    widgets.inactive.fg_stroke.color = tokens::TEXT_BUTTON.get(dark);
+    visuals.weak_text_color = Some(tokens::TEXT_WEAK.get(dark));
 }
 
 impl Grooph {
