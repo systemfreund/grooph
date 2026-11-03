@@ -24,7 +24,7 @@ use crate::pixel_layout::{
     min_note_area_width, note_advances, note_area_offset, note_lead, time_sig_width,
 };
 use crate::render_plan::{RenderPlan, plan_measure_with, rests_only};
-use crate::staff::Staff;
+use crate::staff::{Staff, Voicing};
 use crate::{calculate_shared_x_centers, shared_min_width};
 use egui::{FontId, Pos2, Rect, Vec2, pos2, vec2};
 use grooph_measure::duration::s;
@@ -348,7 +348,8 @@ pub fn build_staff_layout(score: &Score, opts: &StaffOpts) -> StaffLayout {
     let voices = |i: usize| score.measures()[i].voices();
     let plans: Vec<Vec<RenderPlan>> = (0..score.len())
         .map(|i| {
-            let shares_line = voices(i).len() > 1 && staff.one_line();
+            let shares_line =
+                staff.shares_line(Voicing { shared: voices(i).len() > 1, stem_down: false });
             voices(i)
                 .iter()
                 .map(|v| RenderPlan {
@@ -886,6 +887,8 @@ mod tests {
             ("7/8 H:e H:e H:e H:e H:e H:e H:e ; r:q r:q. r:q", 1, -1.0),
             ("4/4 r:h r:h ; K:q K:q K:q K:q", 0, 1.0),
             ("3/4 r:q r:h ; K:q K:q K:q", 0, 1.0),
+            ("6/8 S:e S:e S:e S:e S:e S:e ; r:q. r:q.", 1, -1.0),
+            ("6/8 r:q. r:q. ; K:q. K:q.", 0, 1.0),
         ] {
             let score = parse_score(text).unwrap();
             let staff = build_staff_layout(&score, &on);
@@ -894,6 +897,9 @@ mod tests {
             let empty = &placed.voices[voice].notes;
             assert_eq!(empty[0].head.glyph, REST_WHOLE, "{text}");
             assert!(empty[1..].iter().all(|n| n.hidden), "{text}");
+            // At the size the voice's rests have, smaller than a note.
+            assert_eq!(empty[0].head.size, empty[1].head.size, "{text}");
+            assert!(empty[0].head.size < on.em, "{text}");
             let want = staff.systems[0].y_baseline - line * ss;
             assert!((empty[0].head.origin.y - want).abs() < 0.01, "{text}: {:?}", empty[0]);
             // The other voice's notes are untouched.

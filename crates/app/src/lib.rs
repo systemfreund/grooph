@@ -2361,6 +2361,33 @@ mod tests {
     }
 
     #[test]
+    fn the_editor_shows_an_empty_bar_as_a_whole_rest_the_metronome_does_not() {
+        use super::Grooph;
+        use eframe::egui::{Pos2, RawInput, Rect, vec2};
+
+        let ctx = eframe::egui::Context::default();
+        let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let mut app = Grooph::new(&cc);
+        let rect = Rect::from_min_size(Pos2::ZERO, vec2(390.0, 300.0));
+        let bar_rests = |app: &Grooph| {
+            let mut shown = false;
+            let input = RawInput { screen_rect: Some(rect), ..Default::default() };
+            let mut output = ctx.run_ui(input, |ui| {
+                shown = app.staff_opts(ui, rect).bar_rests;
+            });
+            output.textures_delta.clear();
+            shown
+        };
+        app.select_tab(Tab::Practice);
+        assert!(bar_rests(&app), "playing");
+        app.ui.mode = super::Mode::Edit;
+        assert!(bar_rests(&app), "editing");
+        app.select_tab(Tab::Metronome);
+        assert!(app.metronome_mode());
+        assert!(!bar_rests(&app), "the metronome");
+    }
+
+    #[test]
     fn a_kit_link_opens_and_shares_the_groove() {
         use super::Grooph;
         use grooph_measure::StaffKind;

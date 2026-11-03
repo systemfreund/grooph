@@ -569,7 +569,10 @@ fn bar_rest(notes: &mut [NoteLayout], rect: &Rect, opts: &LayoutOpts) {
         note.dots.clear();
         if i == 0 {
             let y = opts.y_of(opts.staff_model().bar_rest_pos(opts.voicing()));
-            note.head = PlacedGlyph::centered(glyphs::REST_WHOLE, rect.center().x, y, opts.em);
+            // At the size the voice's rests have (a kit bar of two voices
+            // sets them a little smaller).
+            let size = note.head.size;
+            note.head = PlacedGlyph::centered(glyphs::REST_WHOLE, rect.center().x, y, size);
         } else {
             note.hidden = true;
         }
