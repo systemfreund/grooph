@@ -388,7 +388,11 @@ impl Grooph {
             .resizable(false)
             .anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 24.0))
             .show(ui.ctx(), |ui| {
-                ui.heading(format!("{:.0}%", summary.score_percent()));
+                // Named as in the status line while playing.
+                ui.heading(format!("Timing {:.0}%", summary.score_percent())).on_hover_text(
+                    "Measured against the click: perfect hits count fully, good \
+                     ones half; missed notes and extra hits count against it",
+                );
                 ui.label(format!("Tight {:.0}%", summary.tight_percent())).on_hover_text(
                     "The score with every hit measured against your own average \
                      deviation instead of the click: how steady your playing is, \
