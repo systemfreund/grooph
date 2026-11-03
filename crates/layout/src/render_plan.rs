@@ -31,6 +31,11 @@ pub struct RenderPlan {
     /// the whole rest of [`RenderPlan::bar_rest`] too. Set by the staff
     /// layout.
     pub rests: RestDisplay,
+    /// Set this voice's rests at full size, not smaller as among two
+    /// voices on the kit's staff: the other voice's rests are hidden. Set
+    /// by the staff layout, which also moves them to the middle where the
+    /// other voice leaves room.
+    pub full_rests: bool,
 }
 
 /// How a voice's rests show.
@@ -60,7 +65,7 @@ pub fn plan_measure_with(measure: &VoiceBar, stemlets: bool) -> RenderPlan {
     let BeamPlan { groups: beams } = compute_beam_plan_with(measure, stemlets);
     let tuplets = compute_tuplet_plan(measure, &beams);
 
-    RenderPlan { beams, tuplets, bar_rest: false, rests: RestDisplay::Drawn }
+    RenderPlan { beams, tuplets, bar_rest: false, rests: RestDisplay::Drawn, full_rests: false }
 }
 
 /// Whether `measure` holds rests only, none of them in a tuplet: an empty

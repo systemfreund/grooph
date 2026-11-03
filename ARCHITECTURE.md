@@ -152,7 +152,9 @@ spread across callers.
   `Score::hidden_rests` (`HiddenRests`, #322; the link's `hiderests`) leaves out the rests of the lower
   voice or of both in the kit's bars of two voices, an empty voice's whole rest too (`RenderPlan::rests`):
   hidden, they keep their layouts for the labels, the cursor and taps; the editor draws them veiled
-  (`StaffOpts::veil_hidden_rests`, `NoteLayout::veiled`). The score tab's Rests row picks it.
+  (`StaffOpts::veil_hidden_rests`, `NoteLayout::veiled`). With the lower voice's rests hidden, the upper
+  voice's are set at full size (`RenderPlan::full_rests`), each in the middle where it keeps clear of the lower
+  voice's ink, else in its half. The score tab's Rests row picks it.
 - `Beat`, `VoiceBar` and `Measure` compare with `==` including their tuplet groups. Tests that build
   expected beats by hand (without marks) compare `beat::unmarked(..)`.
 

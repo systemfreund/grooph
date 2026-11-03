@@ -20,8 +20,8 @@
 
 use crate::PlacedGlyph;
 use crate::pixel_layout::{
-    LayoutOpts, MeasureLayout, build_measure_layout_at, build_measure_layout_with_plan, clef_width,
-    min_note_area_width, note_advances, note_area_offset, note_lead, time_sig_width,
+    LayoutOpts, MeasureLayout, NoteLayout, build_measure_layout_at, build_measure_layout_with_plan,
+    clef_width, min_note_area_width, note_advances, note_area_offset, note_lead, time_sig_width,
 };
 use crate::render_plan::{RenderPlan, RestDisplay, plan_measure_with, rests_only};
 use crate::staff::{Staff, Voicing};
@@ -286,6 +286,18 @@ impl RowRoom {
     }
 }
 
+/// The ink of `note`: its glyphs, its stem and ledger lines.
+fn note_inks_of(note: &NoteLayout) -> impl Iterator<Item = Rect> + '_ {
+    let lines = note.stem.iter().chain(&note.ledgers).map(|l| Rect::from_two_pos(l.p1, l.p2));
+    note.glyphs().map(PlacedGlyph::ink).chain(lines)
+}
+
+/// The ink of `layout`'s notes and beams, piece by piece.
+fn note_inks(layout: &MeasureLayout) -> Vec<Rect> {
+    let notes = layout.notes.iter().flat_map(note_inks_of);
+    notes.chain(layout.beams.iter().map(|b| b.rect)).collect()
+}
+
 /// How far the notes of `layout` reach above and below the line of its
 /// voice, in em.
 fn ink_reach_em(layout: &MeasureLayout, opts: &LayoutOpts) -> RowRoom {
@@ -360,7 +372,7 @@ pub fn build_staff_layout(score: &Score, opts: &StaffOpts) -> StaffLayout {
         .map(|i| {
             let several = voices(i).len() > 1;
             let shares_line = staff.shares_line(Voicing { shared: several, stem_down: false });
-            voices(i)
+            let mut plans: Vec<RenderPlan> = voices(i)
                 .iter()
                 .enumerate()
                 .map(|(voice, v)| RenderPlan {
@@ -371,7 +383,14 @@ pub fn build_staff_layout(score: &Score, opts: &StaffOpts) -> StaffLayout {
                     },
                     ..plan_measure_with(v, shares_line)
                 })
-                .collect()
+                .collect();
+            // With the lower voice's rests left out (not just veiled), the
+            // upper voice's are set at full size, as with one voice.
+            if let [upper, lower] = &mut plans[..] {
+                upper.full_rests =
+                    upper.rests == RestDisplay::Drawn && lower.rests == RestDisplay::Hidden;
+            }
+            plans
         })
         .collect();
     let voice_opts = |i: usize, opts: LayoutOpts| -> Vec<LayoutOpts> {
@@ -436,13 +455,30 @@ pub fn build_staff_layout(score: &Score, opts: &StaffOpts) -> StaffLayout {
             area,
             note_lead(effective_opts.em),
         );
-        voices(i)
+        let mut layouts: Vec<(MeasureLayout, LayoutOpts)> = voices(i)
             .iter()
             .zip(&plans[i])
             .zip(per_voice)
             .zip(&xs)
             .map(|(((v, plan), o), xs)| (build_measure_layout_at(v, plan, xs, &o), o))
-            .collect()
+            .collect();
+        if plans[i][0].full_rests {
+            // Each of the upper voice's rests goes where a voice alone has
+            // it, in the middle, where it keeps clear of the lower voice.
+            let alone = LayoutOpts { shared_line: false, ..layouts[0].1.clone() };
+            let middle = build_measure_layout_at(&voices(i)[0], &plans[i][0], &xs[0], &alone);
+            let lower = note_inks(&layouts[1].0);
+            let gap = 0.25 * alone.staff_space();
+            for (note, moved) in layouts[0].0.notes.iter_mut().zip(middle.notes) {
+                let clear = || {
+                    note_inks_of(&moved).all(|r| lower.iter().all(|l| !l.intersects(r.expand(gap))))
+                };
+                if note.kind == BeatKind::Rest && clear() {
+                    *note = moved;
+                }
+            }
+        }
+        layouts
     };
     let reaches: Vec<Vec<RowRoom>> = (0..score.len())
         .map(|i| {
@@ -1004,6 +1040,50 @@ mod tests {
         let staff = build_staff_layout(&score, &on);
         let dotted = &staff.placed(0).unwrap().voices[1].notes[3];
         assert!(dotted.hidden && dotted.dots.is_empty() && dotted.glyphs().next().is_none());
+    }
+
+    #[test]
+    fn with_the_lower_rests_hidden_the_upper_rests_are_full_size_in_the_middle_where_free() {
+        use grooph_measure::HiddenRests;
+        use grooph_measure::notation::parse_score;
+        let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(900.0, 400.0));
+        let on = StaffOpts { bar_rests: true, ..opts(20.0, rect) };
+        // (score, hidden, veiled, the upper rests: beat, staff position).
+        // Over a kick's head an eighth rest stays up; over nothing, or a
+        // hi-hat foot below the staff, it goes to the middle.
+        let kick = "kit 4/4 H:e H:e S-H:e r:e H:e r:e S-H:e H:e ; K:q r:q K:e K:e r:q";
+        let snare = "kit 4/4 H:e H:e r:e H:e H:e H:e r:e H:e ; K:q S:q K:e S:e r:q";
+        let foot = "kit 4/4 H:e r:e H:e r:e r:q H:q ; HF:q HF:q HF:q HF:q";
+        for (text, hidden, veil, want, full) in [
+            (kick, HiddenRests::Lower, false, vec![(3, 0), (5, 4)], true),
+            (snare, HiddenRests::Lower, false, vec![(2, 4), (6, 0)], true),
+            (foot, HiddenRests::Lower, false, vec![(1, 0), (3, 0), (4, 0)], true),
+            // Shown or veiled, the lower rests are there: the upper ones
+            // keep their half, smaller.
+            (kick, HiddenRests::None, false, vec![(3, 4), (5, 4)], false),
+            (kick, HiddenRests::Lower, true, vec![(3, 4), (5, 4)], false),
+        ] {
+            let mut score = parse_score(text).unwrap();
+            score.hidden_rests = hidden;
+            let opts = StaffOpts { veil_hidden_rests: veil, ..on.clone() };
+            let staff = build_staff_layout(&score, &opts);
+            let em = opts.rescaled(staff.scale).em;
+            let upper = &staff.placed(0).unwrap().voices[0].notes;
+            for (beat, pos) in want {
+                let rest = &upper[beat];
+                assert_eq!(rest.kind, BeatKind::Rest, "{text}");
+                assert_eq!(rest.staff_pos, pos, "{text} {hidden:?} beat {beat}");
+                assert_eq!(rest.head.size == em, full, "{text} {hidden:?} beat {beat}");
+            }
+        }
+        // An empty upper voice's whole rest hangs from the fourth line, at
+        // full size.
+        let mut score = parse_score("kit 4/4 r:h r:h ; K:q FT:q K:q FT:q").unwrap();
+        score.hidden_rests = HiddenRests::Lower;
+        let staff = build_staff_layout(&score, &on);
+        let rest = &staff.placed(0).unwrap().voices[0].notes[0];
+        assert_eq!(rest.head.glyph, crate::glyphs::REST_WHOLE);
+        assert_eq!(rest.head.size, on.rescaled(staff.scale).em);
     }
 
     #[test]

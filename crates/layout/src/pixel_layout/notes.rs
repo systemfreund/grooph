@@ -121,9 +121,10 @@ fn paren_reach(opts: &LayoutOpts) -> f32 {
 
 /// The size a beat's head or rest is set at: a rest of a kit bar of two
 /// voices a little smaller than a note, as drum charts have it, so the two
-/// voices' rests and notes do not crowd each other.
-fn head_size(beat: &Beat, opts: &LayoutOpts) -> f32 {
-    match !beat.is_note() && opts.shared_line && !opts.staff_model().one_line() {
+/// voices' rests and notes do not crowd each other; at full size where the
+/// other voice's rests are hidden (`full_rests`, [`RenderPlan::full_rests`]).
+fn head_size(beat: &Beat, full_rests: bool, opts: &LayoutOpts) -> f32 {
+    match !beat.is_note() && !full_rests && opts.shared_line && !opts.staff_model().one_line() {
         true => opts.em * c::KIT_REST_SCALE,
         false => opts.em,
     }
@@ -222,7 +223,12 @@ fn dot_glyphs(
 /// shift pass: the head or rest, its parentheses and dots, and an ungrouped
 /// flag. Stems are not yet known here, so the flag is placed from
 /// `opts.stem_offset()`.
-fn compute_x_extents(beat: &Beat, in_beam: bool, opts: &LayoutOpts) -> (f32, f32) {
+fn compute_x_extents(
+    beat: &Beat,
+    in_beam: bool,
+    full_rests: bool,
+    opts: &LayoutOpts,
+) -> (f32, f32) {
     let ss = opts.staff_space();
     let is_note = beat.is_note();
     let needs_flag = requires_flag(beat.duration);
@@ -248,7 +254,9 @@ fn compute_x_extents(beat: &Beat, in_beam: bool, opts: &LayoutOpts) -> (f32, f32
     } else {
         // A ledger line may reach past the rest: it doesn't widen it, so the
         // voice is spaced as on a line of its own.
-        let head = PlacedGlyph::centered(head_glyph(beat), 0.0, 0.0, head_size(beat, opts)).ink();
+        let head =
+            PlacedGlyph::centered(head_glyph(beat), 0.0, 0.0, head_size(beat, full_rests, opts))
+                .ink();
         (head.left(), head.right())
     };
 
@@ -353,9 +361,13 @@ fn in_beam_flags(beats: &[Beat], render_plan: &RenderPlan) -> Vec<bool> {
 
 /// Least distance (px) each beat needs to the next note head, or to the
 /// barline for the last one, so their glyphs don't overlap.
-fn min_advances(beats: &[Beat], in_beam: &[bool], opts: &LayoutOpts) -> Vec<f32> {
-    let extents: Vec<(f32, f32)> =
-        beats.iter().zip(in_beam).map(|(b, &ib)| compute_x_extents(b, ib, opts)).collect();
+/// `full_rests`: see [`head_size`].
+fn min_advances(beats: &[Beat], in_beam: &[bool], full_rests: bool, opts: &LayoutOpts) -> Vec<f32> {
+    let extents: Vec<(f32, f32)> = beats
+        .iter()
+        .zip(in_beam)
+        .map(|(b, &ib)| compute_x_extents(b, ib, full_rests, opts))
+        .collect();
     let gap = c::COLLISION_MIN_GAP_EM * opts.em;
     let needs: Vec<f32> = (0..beats.len())
         .map(|i| match extents.get(i + 1) {
@@ -382,7 +394,7 @@ pub(super) fn note_advances(
     opts: &LayoutOpts,
 ) -> Vec<f32> {
     let beats = measure.beats();
-    min_advances(beats, &in_beam_flags(beats, render_plan), opts)
+    min_advances(beats, &in_beam_flags(beats, render_plan), render_plan.full_rests, opts)
 }
 
 /// Narrowest note area in which no glyph overlaps the next one or the
@@ -416,7 +428,7 @@ pub(super) fn build_note_layout(
             beats,
             rect.width(),
             c::NOTE_LEAD_EM * opts.em,
-            &min_advances(beats, &in_beam_flags, opts),
+            &min_advances(beats, &in_beam_flags, render_plan.full_rests, opts),
         ),
     }
     .into_iter()
@@ -500,7 +512,12 @@ pub(super) fn build_note_layout(
             .collect();
         let head = match placed.last() {
             Some((head, _)) => *head,
-            None => PlacedGlyph::centered(head_glyph(b), center.x, cy, head_size(b, opts)),
+            None => PlacedGlyph::centered(
+                head_glyph(b),
+                center.x,
+                cy,
+                head_size(b, render_plan.full_rests, opts),
+            ),
         };
         let others: Vec<PlacedGlyph> = placed.iter().rev().skip(1).map(|(g, _)| *g).collect();
         let parens: Vec<PlacedGlyph> = placed
