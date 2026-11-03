@@ -1,4 +1,9 @@
-<!-- Closes #<issue> (if there is one) -->
+## Issue
+
+Closes #<number>
+
+<!-- Name every issue this implements: "Closes #n" closes it when the PR is merged, "Part of #n" does not.
+     Replace the line above; without an issue, write "No issue" so that it is clear none was forgotten. -->
 
 ## What this changes
 
