@@ -668,8 +668,9 @@ grooph's metronome runs inside AI chats as an
 - The session (`accuracy::AccuracyTracker`) runs while MIDI is connected or
   after the first tap or microphone hit of a run. Stopping keeps a `RunSummary` (hits, perfect/
   good/off windows, misses, extra hits, mean, spread, and the tight counts:
-  the hits graded again around the run's mean, from the kept `GradedHit`s)
-  for the "Your run" window
+  the hits graded again around the run's mean; `TightTally` keeps the
+  `GradedHit`s and regrades them on each new hit, since the mean moves, so
+  the live status line can show them too) for the "Your run" window
   and the run's marks, drawn on the staff (and the metronome's ring) until
   the next run or an edit. Hits and misses are also tallied for each of the
   first two voices (`VoiceTally`; a note several voices play counts for

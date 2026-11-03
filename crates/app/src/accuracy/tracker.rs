@@ -76,10 +76,10 @@ impl AccuracyTracker {
 
     fn end_session(&mut self) {
         if let Some(data) = self.session.data()
-            && let Some(summary) = data.summary(true)
+            && let Some(summary) = data.summary()
         {
             self.last_summary = Some(summary);
-            self.last_voice_summaries = data.voice_summaries(true);
+            self.last_voice_summaries = data.voice_summaries();
             self.last_marks = data.marks_by_onset.clone();
         }
         self.session.stop();
@@ -87,7 +87,7 @@ impl AccuracyTracker {
 
     /// Running evaluation of the current session.
     pub(crate) fn live_summary(&self) -> Option<RunSummary> {
-        self.session.data()?.summary(false)
+        self.session.data()?.summary()
     }
 
     pub(crate) fn last_summary(&self) -> Option<RunSummary> {
@@ -96,7 +96,7 @@ impl AccuracyTracker {
 
     /// Running evaluation of the current session per tracked voice.
     pub(crate) fn live_voice_summaries(&self) -> [Option<RunSummary>; TRACKED_VOICES] {
-        self.session.data().map_or([None; TRACKED_VOICES], |d| d.voice_summaries(false))
+        self.session.data().map_or([None; TRACKED_VOICES], |d| d.voice_summaries())
     }
 
     /// The last finished run per tracked voice, as [`Self::last_summary`].
@@ -250,16 +250,12 @@ mod tests {
         let total = tracker.live_summary().unwrap();
         assert_eq!((total.hits, total.misses), (2, 1));
 
-        tracker.on_playback_stop();
-        // Kept with their tight counts, each graded around its own voice's
+        // Tight counts per voice, each graded around its own voice's
         // average: the click's one hit is perfect around itself.
-        let [Some(last_click), Some(last_counter)] = tracker.last_voice_summaries() else {
-            panic!("kept");
-        };
-        assert_eq!(last_click, RunSummary { tight: last_click.tight, ..click });
-        assert_eq!(last_counter, RunSummary { tight: last_counter.tight, ..counter });
-        assert_eq!(click.tight, None);
-        assert_eq!(last_click.tight, Some((1, 0)));
+        assert_eq!(click.tight, (1, 0));
+
+        tracker.on_playback_stop();
+        assert_eq!(tracker.last_voice_summaries(), [Some(click), Some(counter)]);
     }
 
     #[test]
@@ -504,10 +500,11 @@ mod tests {
         assert_eq!(live.extra, 1);
         assert_eq!(live.misses, 2);
         assert!((live.mean_ms - 5.0).abs() < 1e-6);
+        // Graded around their average, live as well.
+        assert_eq!(live.tight, (2, 0));
 
         tracker.on_playback_stop();
-        // The finished run also grades its hits around their average.
-        assert_eq!(tracker.last_summary(), Some(RunSummary { tight: Some((2, 0)), ..live }));
+        assert_eq!(tracker.last_summary(), Some(live));
         tracker.dismiss_summary();
         assert!(tracker.last_summary().is_none());
     }

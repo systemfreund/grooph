@@ -71,14 +71,15 @@ pub(super) fn record_hit(
     let windows = HitWindows::for_gap_ms(gap_ms);
     let grade = windows.grade(delta_ms);
 
+    // Each run and voice grades its hits again around its new average.
+    let graded = GradedHit { delta_ms, windows };
     data.stats.push(delta_ms);
     data.counters.push_hit(grade);
-    let graded = GradedHit { delta_ms, windows };
-    data.graded.push(graded);
+    data.tight.push(graded, data.stats.mean_ms().unwrap_or(0.0));
     for tally in tallies_of(&mut data.voice_tallies, voices) {
         tally.stats.push(delta_ms);
         tally.counters.push_hit(grade);
-        tally.graded.push(graded);
+        tally.tight.push(graded, tally.stats.mean_ms().unwrap_or(0.0));
     }
     data.marks_by_onset.insert(global_onset, AccuracyMark::Hit { diff_ticks, grade });
     if wrap_next {

@@ -112,6 +112,24 @@ fn tight_counts(hits: &[GradedHit], mean_ms: f64) -> (u64, u64) {
     })
 }
 
+/// The hits of a run kept for its tight counts, and those counts. The
+/// average moves with every hit and can turn an earlier hit's grade, so
+/// each new hit grades all of them again: once per hit, not per frame.
+#[derive(Clone, Default)]
+pub(super) struct TightTally {
+    hits: Vec<GradedHit>,
+    counts: (u64, u64),
+}
+
+impl TightTally {
+    /// Add `hit` and grade all hits again around `mean_ms`, the average
+    /// including it.
+    pub(super) fn push(&mut self, hit: GradedHit, mean_ms: f64) {
+        self.hits.push(hit);
+        self.counts = tight_counts(&self.hits, mean_ms);
+    }
+}
+
 /// Hit/miss tallies of one recording session, beyond the raw delta stats.
 #[derive(Clone, Copy, Default)]
 pub(super) struct RunCounters {
@@ -145,9 +163,8 @@ pub(crate) struct RunSummary {
     /// Standard deviation of the deviations.
     pub spread_ms: f64,
     /// Perfect and good hits when graded around `mean_ms` instead of the
-    /// click: how tight the playing is, whatever its offset. Only for a
-    /// finished run: it grades every hit again.
-    pub tight: Option<(u64, u64)>,
+    /// click: how tight the playing is, whatever its offset.
+    pub tight: (u64, u64),
 }
 
 impl RunSummary {
@@ -165,8 +182,8 @@ impl RunSummary {
     /// [`Self::score_percent`] with every hit graded around the run's
     /// average deviation: playing steadily early or late scores as high as
     /// on the click.
-    pub(crate) fn tight_percent(&self) -> Option<f64> {
-        self.tight.map(|(perfect, good)| self.percent_of(perfect, good))
+    pub(crate) fn tight_percent(&self) -> f64 {
+        self.percent_of(self.tight.0, self.tight.1)
     }
 
     fn percent_of(&self, perfect: u64, good: u64) -> f64 {
@@ -298,7 +315,7 @@ pub(super) struct RecordingData {
     pub(super) hits_next_loop: HashSet<u64>,
     pub(super) stats: AccuracyStats,
     pub(super) counters: RunCounters,
-    pub(super) graded: Vec<GradedHit>,
+    pub(super) tight: TightTally,
     /// The same tallies per tracked voice. A note several voices play at
     /// once counts for each of them.
     pub(super) voice_tallies: [VoiceTally; TRACKED_VOICES],
@@ -309,26 +326,21 @@ pub(super) struct RecordingData {
 pub(super) struct VoiceTally {
     pub stats: AccuracyStats,
     pub counters: RunCounters,
-    pub graded: Vec<GradedHit>,
+    pub tight: TightTally,
 }
 
 impl VoiceTally {
     /// `None` while the voice had no note to hit yet.
-    fn summary(&self, tight: bool) -> Option<RunSummary> {
+    fn summary(&self) -> Option<RunSummary> {
         if self.stats.count + self.counters.misses == 0 {
             return None;
         }
-        Some(run_summary(&self.stats, &self.counters, tight.then_some(&self.graded[..])))
+        Some(run_summary(&self.stats, &self.counters, &self.tight))
     }
 }
 
-/// The summary of `stats` and `counters`, with the tight counts of the
-/// `graded` hits behind them if given.
-fn run_summary(
-    stats: &AccuracyStats,
-    counters: &RunCounters,
-    graded: Option<&[GradedHit]>,
-) -> RunSummary {
+/// The summary of `stats`, `counters` and the `tight` counts of the same hits.
+fn run_summary(stats: &AccuracyStats, counters: &RunCounters, tight: &TightTally) -> RunSummary {
     let mean_ms = stats.mean_ms().unwrap_or(0.0);
     RunSummary {
         hits: stats.count,
@@ -338,7 +350,7 @@ fn run_summary(
         good: counters.good,
         mean_ms,
         spread_ms: stats.spread_ms().unwrap_or(0.0),
-        tight: graded.map(|hits| tight_counts(hits, mean_ms)),
+        tight: tight.counts,
     }
 }
 
@@ -353,17 +365,15 @@ pub(super) fn tallies_of(
 impl RecordingData {
     /// Per tracked voice, as [`Self::summary`]: `None` for a voice without
     /// notes, or before the run's first hit.
-    pub(super) fn voice_summaries(&self, tight: bool) -> [Option<RunSummary>; TRACKED_VOICES] {
+    pub(super) fn voice_summaries(&self) -> [Option<RunSummary>; TRACKED_VOICES] {
         let any_hit = self.stats.count > 0;
-        self.voice_tallies.each_ref().map(|t| t.summary(tight).filter(|_| any_hit))
+        self.voice_tallies.each_ref().map(|t| t.summary().filter(|_| any_hit))
     }
 
     /// `None` until the first hit: a run without hits has nothing to show.
-    /// With `tight`, the tight counts too, which grade every hit again: for
-    /// the end of a run, not every frame.
-    pub(super) fn summary(&self, tight: bool) -> Option<RunSummary> {
+    pub(super) fn summary(&self) -> Option<RunSummary> {
         self.stats.mean_ms()?;
-        Some(run_summary(&self.stats, &self.counters, tight.then_some(&self.graded[..])))
+        Some(run_summary(&self.stats, &self.counters, &self.tight))
     }
 
     fn new(start_time: f64, last_tick: Option<f64>) -> Self {
@@ -377,7 +387,7 @@ impl RecordingData {
             hits_next_loop: HashSet::new(),
             stats: AccuracyStats::default(),
             counters: RunCounters::default(),
-            graded: Vec::new(),
+            tight: TightTally::default(),
             voice_tallies: Default::default(),
         }
     }
@@ -419,7 +429,7 @@ impl RecordingSession {
             d.hits_next_loop.clear();
             d.stats.reset();
             d.counters = RunCounters::default();
-            d.graded.clear();
+            d.tight = TightTally::default();
             d.voice_tallies = Default::default();
             d.last_tick = None;
         }
@@ -470,7 +480,7 @@ mod tests {
             good,
             mean_ms: 0.0,
             spread_ms: 0.0,
-            tight: Some((perfect, good)),
+            tight: (perfect, good),
         }
     }
 
@@ -492,14 +502,15 @@ mod tests {
             [-38.0, -42.0, -40.0, -41.0].map(|delta_ms| GradedHit { delta_ms, windows }).to_vec();
         let mut stats = AccuracyStats::default();
         let mut counters = RunCounters::default();
-        for h in &graded {
+        let mut tight = TightTally::default();
+        for &h in &graded {
             stats.push(h.delta_ms);
             counters.push_hit(windows.grade(h.delta_ms));
+            tight.push(h, stats.mean_ms().unwrap());
         }
-        let s = run_summary(&stats, &counters, Some(&graded));
+        let s = run_summary(&stats, &counters, &tight);
         assert!((s.score_percent() - 50.0).abs() < 1e-9);
-        assert_eq!(s.tight_percent(), Some(100.0));
-        assert_eq!(run_summary(&stats, &counters, None).tight_percent(), None);
+        assert_eq!(s.tight_percent(), 100.0);
     }
 
     /// The summary of hits with these deviations and windows, plus misses
@@ -509,11 +520,13 @@ mod tests {
             hits.iter().map(|&(delta_ms, windows)| GradedHit { delta_ms, windows }).collect();
         let mut stats = AccuracyStats::default();
         let mut counters = RunCounters { misses, extra, ..Default::default() };
-        for h in &graded {
+        let mut tight = TightTally::default();
+        for &h in &graded {
             stats.push(h.delta_ms);
             counters.push_hit(h.windows.grade(h.delta_ms));
+            tight.push(h, stats.mean_ms().unwrap());
         }
-        run_summary(&stats, &counters, Some(&graded))
+        run_summary(&stats, &counters, &tight)
     }
 
     #[test]
@@ -521,7 +534,7 @@ mod tests {
         let w = HitWindows::for_gap_ms(500.0);
         let s = summary_of(&[(-30.0, w), (30.0, w), (-10.0, w), (10.0, w)], 1, 1);
         assert_eq!(s.mean_ms, 0.0);
-        assert_eq!(s.tight_percent(), Some(s.score_percent()));
+        assert_eq!(s.tight_percent(), s.score_percent());
     }
 
     #[test]
@@ -529,7 +542,7 @@ mod tests {
         let w = HitWindows::for_gap_ms(500.0);
         // Two hits perfect around their average, one miss, one extra: 2 of 4.
         let s = summary_of(&[(-40.0, w), (-40.0, w)], 1, 1);
-        assert_eq!(s.tight_percent(), Some(50.0));
+        assert_eq!(s.tight_percent(), 50.0);
     }
 
     #[test]
@@ -541,9 +554,9 @@ mod tests {
         // slow note it would be perfect.
         let s = summary_of(&[(-30.0, fast), (0.0, slow), (0.0, slow)], 0, 0);
         assert_eq!(s.mean_ms, -10.0);
-        assert_eq!(s.tight, Some((2, 1)));
+        assert_eq!(s.tight, (2, 1));
         let s = summary_of(&[(-30.0, slow), (0.0, slow), (0.0, slow)], 0, 0);
-        assert_eq!(s.tight, Some((3, 0)));
+        assert_eq!(s.tight, (3, 0));
     }
 
     #[test]

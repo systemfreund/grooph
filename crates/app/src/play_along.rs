@@ -384,8 +384,7 @@ impl Grooph {
             .anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 24.0))
             .show(ui.ctx(), |ui| {
                 ui.heading(format!("{:.0}%", summary.score_percent()));
-                let tight = summary.tight_percent().unwrap_or(0.0);
-                ui.label(format!("Tight {tight:.0}%")).on_hover_text(
+                ui.label(format!("Tight {:.0}%", summary.tight_percent())).on_hover_text(
                     "The score with every hit measured against your own average \
                      deviation instead of the click: how steady your playing is, \
                      even if you are always a little early or late",
