@@ -672,8 +672,10 @@ grooph's metronome runs inside AI chats as an
   good/off windows, misses, extra hits, mean, spread, and the tight counts:
   the hits graded again around the run's mean; `TightTally` keeps the
   `GradedHit`s and regrades them on each new hit, since the mean moves, so
-  the live status line can show them too) for the "Your run" window
-  and the run's marks, drawn on the staff (and the metronome's ring) until
+  the live status line can show them too) for the "Your run" window,
+  a `Drift` (each hit's deviation at its note's time, misses, silent
+  stretches; `accuracy/drift.rs`) for its chart (`drift_chart.rs`, drawn
+  with the painter, no plot crate), and the run's marks, drawn on the staff (and the metronome's ring) until
   the next run or an edit. Hits and misses are also tallied for each of the
   first two voices (`VoiceTally`; a note several voices play counts for
   each), which the metronome shows for its click bar and counter rhythm.

@@ -2,6 +2,7 @@ mod accuracy;
 mod calibration;
 mod clock;
 mod documents;
+mod drift_chart;
 mod embed;
 mod generator;
 mod guide;
