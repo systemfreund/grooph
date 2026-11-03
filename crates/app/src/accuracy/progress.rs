@@ -1,11 +1,9 @@
-use std::collections::{HashMap, HashSet};
-
 use grooph_measure::Score;
 use grooph_measure::tempo::ScoreTiming;
 
 use super::session::{
-    AccuracyMark, GlobalBeatOnset, RecordingData, TRACKED_VOICES, VoiceTally,
-    compute_global_beat_onsets, loop_offset, tallies_of,
+    AccuracyMark, BarEvent, GlobalBeatOnset, RecordingData, compute_global_beat_onsets,
+    loop_offset, tallies_of,
 };
 
 /// Advance the progress cursor to `delay_s` before `now_seconds` and mark
@@ -65,59 +63,51 @@ pub(super) fn update_progress(
         current_tick = last_tick;
     }
 
-    if current_tick >= last_tick {
-        process_segment(
-            &global_beats,
-            last_tick,
-            current_tick,
-            0.0,
-            total,
-            &mut data.marks_by_onset,
-            &mut data.hits_in_loop,
-            &mut data.counters.misses,
-            &mut data.voice_tallies,
-        );
+    // Where the cursor is, on the ticks of the segments: past the loop's
+    // end after a wrap. Misses are dated back from it.
+    let wrapped = current_tick < last_tick;
+    let cursor = Cursor {
+        seconds: now_seconds,
+        tick: current_tick + if wrapped { total } else { 0.0 },
+        timing,
+    };
+    if !wrapped {
+        process_segment(data, &global_beats, last_tick, current_tick, 0.0, total, &cursor);
     } else {
         // Score-loop wrapped.
-        process_segment(
-            &global_beats,
-            last_tick,
-            total,
-            0.0,
-            total,
-            &mut data.marks_by_onset,
-            &mut data.hits_in_loop,
-            &mut data.counters.misses,
-            &mut data.voice_tallies,
-        );
+        process_segment(data, &global_beats, last_tick, total, 0.0, total, &cursor);
         data.hits_in_loop = std::mem::take(&mut data.hits_next_loop);
-        process_segment(
-            &global_beats,
-            0.0,
-            current_tick,
-            total,
-            total,
-            &mut data.marks_by_onset,
-            &mut data.hits_in_loop,
-            &mut data.counters.misses,
-            &mut data.voice_tallies,
-        );
+        process_segment(data, &global_beats, 0.0, current_tick, total, total, &cursor);
     }
 
     data.last_tick = Some(current_tick);
 }
 
-#[expect(clippy::too_many_arguments)]
+/// The progress cursor this frame: its time and its tick.
+struct Cursor<'a> {
+    seconds: f64,
+    tick: f64,
+    timing: &'a ScoreTiming,
+}
+
+impl Cursor<'_> {
+    /// When the note at `tick` (on the cursor's ticks) was due.
+    fn seconds_at(&self, tick: f64, measure_idx: usize) -> f64 {
+        let tps = self.timing.ticks_per_sec_in_measure(measure_idx);
+        if tps > 0.0 { self.seconds - (self.tick - tick) / tps } else { self.seconds }
+    }
+}
+
+/// Mark the notes whose hit window closed between `start` and `end` (plus
+/// `segment_offset`) and that got no hit as missed.
 fn process_segment(
+    data: &mut RecordingData,
     global_beats: &[GlobalBeatOnset],
     start: f64,
     end: f64,
     segment_offset: f64,
     total_loop_ticks: f64,
-    marks_by_onset: &mut HashMap<u64, AccuracyMark>,
-    hits_in_loop: &mut HashSet<u64>,
-    misses: &mut u64,
-    voice_tallies: &mut [VoiceTally; TRACKED_VOICES],
+    cursor: &Cursor,
 ) {
     if global_beats.is_empty() {
         return;
@@ -140,12 +130,14 @@ fn process_segment(
         }
         let in_range = window_end > seg_start && window_end <= seg_end;
         if in_range {
-            if !hits_in_loop.contains(&gb.onset_tick) {
-                marks_by_onset.insert(gb.onset_tick, AccuracyMark::Miss);
-                *misses += 1;
-                tallies_of(voice_tallies, gb.voices).for_each(|t| t.counters.misses += 1);
+            if !data.hits_in_loop.contains(&gb.onset_tick) {
+                data.marks_by_onset.insert(gb.onset_tick, AccuracyMark::Miss);
+                data.counters.misses += 1;
+                tallies_of(&mut data.voice_tallies, gb.voices).for_each(|t| t.counters.misses += 1);
+                let note_tick = window_end - (next - cur) * 0.5;
+                data.bars.push(cursor.seconds_at(note_tick, gb.measure_idx), BarEvent::Miss);
             }
-            hits_in_loop.remove(&gb.onset_tick);
+            data.hits_in_loop.remove(&gb.onset_tick);
         }
     }
 }

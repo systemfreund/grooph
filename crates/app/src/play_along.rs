@@ -336,6 +336,9 @@ impl Grooph {
         }
         // The tracker leaves `self` while it reads the tracked score, which
         // borrows `self`: no copy of the score per frame.
+        // Whether the bar playing now is silent, for the notes judged so far.
+        let bar_muted = (self.playback_options().gap.enabled && calibrating.is_none())
+            .then_some(self.playback_ctl.playback.bar_muted);
         let mut tracker = std::mem::take(&mut self.playback_ctl.accuracy.tracker);
         let mut deltas = Vec::new();
         let played = {
@@ -352,6 +355,7 @@ impl Grooph {
                 }
                 let delay = miss_delay_s(&settings, &offset_sources, total_loop_seconds);
                 tracker.update_progress_behind(now, delay, &timing, score);
+                tracker.observe_bar(now, bar_muted, &timing);
             }
             played
         };
@@ -397,7 +401,19 @@ impl Grooph {
                     && self.metronome_mode()
                 {
                     ui.add_space(8.0);
-                    voice_grid(ui, &click, &counter);
+                    split_grid(ui, "run_summary_voices", ["Click", "Counter"], [&click, &counter]);
+                }
+                // With silent bars, how the playing held up without the click.
+                if let [Some(audible), Some(silent)] =
+                    self.playback_ctl.accuracy.tracker.last_bar_summaries()
+                {
+                    ui.add_space(8.0);
+                    split_grid(
+                        ui,
+                        "run_summary_bars",
+                        ["With click", "Silent bars"],
+                        [&audible, &silent],
+                    );
                 }
                 ui.add_space(8.0);
                 if ui.button("Close").clicked() {
@@ -443,18 +459,18 @@ fn summary_grid(ui: &mut egui::Ui, summary: &RunSummary) {
     });
 }
 
-/// The click bar's and the counter rhythm's results side by side.
-fn voice_grid(ui: &mut egui::Ui, click: &RunSummary, counter: &RunSummary) {
-    egui::Grid::new("run_summary_voices").num_columns(3).spacing([16.0, 4.0]).show(ui, |ui| {
+/// Two parts of a run side by side, under `titles`.
+fn split_grid(ui: &mut egui::Ui, id: &str, titles: [&str; 2], parts: [&RunSummary; 2]) {
+    egui::Grid::new(id).num_columns(3).spacing([16.0, 4.0]).show(ui, |ui| {
         let row = |ui: &mut egui::Ui, label: &str, value: &dyn Fn(&RunSummary) -> String| {
             ui.label(label);
-            ui.label(value(click));
-            ui.label(value(counter));
+            ui.label(value(parts[0]));
+            ui.label(value(parts[1]));
             ui.end_row();
         };
         ui.label("");
-        ui.strong("Click");
-        ui.strong("Counter");
+        ui.strong(titles[0]);
+        ui.strong(titles[1]);
         ui.end_row();
         row(ui, "Score", &|s| format!("{:.0}%", s.score_percent()));
         row(ui, "Hits", &|s| s.hits.to_string());

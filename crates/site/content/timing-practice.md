@@ -88,7 +88,9 @@ clicks included; muted clicks are not. The markers show on the click staff and o
 ring. With a **Polyrhythm** on, both rhythms count: a click both play counts for both, the
 line above the play button shows each rhythm's score and the summary lists the click
 and the counter rhythm side by side. Silent bars are a good test: keep playing through
-them and see whether you are still on time when the click comes back.
+them and see whether you are still on time when the click comes back. With silent bars
+on, here and in the other tabs, the summary also puts the bars with the click and the
+silent bars side by side, so you see how much you drift once the click is gone.
 
 ## Exercises
 
