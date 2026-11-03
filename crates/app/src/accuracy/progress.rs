@@ -3,17 +3,29 @@ use std::collections::{HashMap, HashSet};
 use grooph_measure::Score;
 use grooph_measure::tempo::ScoreTiming;
 
-use super::session::{AccuracyMark, GlobalBeatOnset, RecordingData, compute_global_beat_onsets};
+use super::session::{
+    AccuracyMark, GlobalBeatOnset, RecordingData, TRACKED_VOICES, VoiceTally,
+    compute_global_beat_onsets, loop_offset, tallies_of,
+};
 
-/// Advance the progress cursor and mark any note onsets whose hit window has
-/// elapsed as `Miss`. Wraps detected when the global tick decreases across a
-/// frame (= score loop just completed).
+/// Advance the progress cursor to `delay_s` before `now_seconds` and mark
+/// any note onsets whose hit window has elapsed as `Miss`. Wraps detected
+/// when the global tick decreases across a frame (= score loop just
+/// completed).
 pub(super) fn update_progress(
     data: &mut RecordingData,
     now_seconds: f64,
+    delay_s: f64,
     timing: &ScoreTiming,
     score: &Score,
 ) {
+    // A longer delay than before moves the cursor's time back, as anchoring
+    // the clock does.
+    if delay_s > data.miss_delay_s {
+        data.anchored_ahead = true;
+    }
+    data.miss_delay_s = delay_s;
+    let now_seconds = now_seconds - delay_s;
     let total_ticks = timing.total_loop_ticks();
     if total_ticks == 0 || timing.total_loop_seconds() <= 0.0 {
         return;
@@ -37,6 +49,17 @@ pub(super) fn update_progress(
         data.last_tick = Some(current_tick);
         return;
     };
+    // Right after anchoring the clock, a step back by less than half the
+    // loop is no wrap: the anchor is ahead of the delayed time misses are
+    // judged at. Wait until that gets there. Holds while the delay stays
+    // below half the loop (`miss_delay_s` in play_along.rs keeps it to a
+    // quarter). Otherwise a step back is a wrap, also after a long stall.
+    if data.anchored_ahead {
+        if current_tick < last_tick && loop_offset(current_tick - last_tick, total) == 0 {
+            return;
+        }
+        data.anchored_ahead = false;
+    }
     let epsilon = total.max(1.0) * 1e-9;
     if current_tick + epsilon >= last_tick && current_tick < last_tick {
         current_tick = last_tick;
@@ -52,6 +75,7 @@ pub(super) fn update_progress(
             &mut data.marks_by_onset,
             &mut data.hits_in_loop,
             &mut data.counters.misses,
+            &mut data.voice_tallies,
         );
     } else {
         // Score-loop wrapped.
@@ -64,6 +88,7 @@ pub(super) fn update_progress(
             &mut data.marks_by_onset,
             &mut data.hits_in_loop,
             &mut data.counters.misses,
+            &mut data.voice_tallies,
         );
         data.hits_in_loop = std::mem::take(&mut data.hits_next_loop);
         process_segment(
@@ -75,6 +100,7 @@ pub(super) fn update_progress(
             &mut data.marks_by_onset,
             &mut data.hits_in_loop,
             &mut data.counters.misses,
+            &mut data.voice_tallies,
         );
     }
 
@@ -91,6 +117,7 @@ fn process_segment(
     marks_by_onset: &mut HashMap<u64, AccuracyMark>,
     hits_in_loop: &mut HashSet<u64>,
     misses: &mut u64,
+    voice_tallies: &mut [VoiceTally; TRACKED_VOICES],
 ) {
     if global_beats.is_empty() {
         return;
@@ -116,6 +143,7 @@ fn process_segment(
             if !hits_in_loop.contains(&gb.onset_tick) {
                 marks_by_onset.insert(gb.onset_tick, AccuracyMark::Miss);
                 *misses += 1;
+                tallies_of(voice_tallies, gb.voices).for_each(|t| t.counters.misses += 1);
             }
             hits_in_loop.remove(&gb.onset_tick);
         }

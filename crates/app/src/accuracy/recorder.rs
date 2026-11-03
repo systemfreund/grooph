@@ -4,7 +4,7 @@ use log::info;
 
 use super::session::{
     AccuracyMark, GlobalBeatOnset, HitWindows, RecordingData, compute_global_beat_onsets,
-    neighbour_gap_ticks,
+    loop_offset, neighbour_gap_ticks, tallies_of,
 };
 
 /// Record an incoming MIDI hit at `timestamp` (seconds, MIDI clock). The hit
@@ -38,9 +38,15 @@ pub(super) fn record_hit(
     let (beat_idx, diff_ticks, raw_diff) = best_match(hit_global, total, &beats)?;
     let global_onset = beats[beat_idx].onset_tick;
     let onset_m_idx = beats[beat_idx].measure_idx;
+    let voices = beats[beat_idx].voices;
 
-    let wrap_next = raw_diff > total * 0.5;
-    let wrap_prev = raw_diff < -total * 0.5;
+    // The note's loop relative to the progress cursor's, whose sets track
+    // the hits: the hit may lie across the loop's end from the note, and
+    // the cursor (judging misses with a delay) across it from the hit.
+    let hit_loop = data.last_tick.map_or(0, |cursor| loop_offset(cursor - hit_global, total));
+    let note_loop = hit_loop + loop_offset(raw_diff, total);
+    let wrap_next = note_loop > 0;
+    let wrap_prev = note_loop < 0;
     let already_hit = if wrap_next {
         data.hits_next_loop.contains(&global_onset)
     } else {
@@ -48,6 +54,7 @@ pub(super) fn record_hit(
     };
     if already_hit {
         data.counters.extra += 1;
+        tallies_of(&mut data.voice_tallies, voices).for_each(|t| t.counters.extra += 1);
         return None;
     }
 
@@ -66,6 +73,10 @@ pub(super) fn record_hit(
 
     data.stats.push(delta_ms);
     data.counters.push_hit(grade);
+    for tally in tallies_of(&mut data.voice_tallies, voices) {
+        tally.stats.push(delta_ms);
+        tally.counters.push_hit(grade);
+    }
     data.marks_by_onset.insert(global_onset, AccuracyMark::Hit { diff_ticks, grade });
     if wrap_next {
         data.hits_next_loop.insert(global_onset);

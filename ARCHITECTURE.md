@@ -652,7 +652,11 @@ grooph's metronome runs inside AI chats as an
   hits are stamped on one clock (`crates/app/src/clock.rs`); MIDI and
   microphone timestamps are moved onto it by their age. On the web taps use the DOM event `timeStamp` (`web.rs`), natively
   the frame time. Each source has its own input offset (`PlayAlongSettings`).
-- While tap capture is active, staff presses are hits, not edits.
+- While tap capture is active, staff presses (and presses on the metronome's
+  ring) are hits, not edits.
+- Where (`Grooph::accuracy_active`): with Timing feedback on, in Practice and
+  in the metronome tab (its click bar and counter rhythm), never in the score
+  tab or embedded in a chat.
 - Microphone (`crates/mic`): a hit starts where the first sample crosses the
   threshold; 40 ms after it are ignored. On the web an AudioWorklet forwards
   1024-frame blocks to the page, whose context time is mapped onto
@@ -664,7 +668,15 @@ grooph's metronome runs inside AI chats as an
 - The session (`accuracy::AccuracyTracker`) runs while MIDI is connected or
   after the first tap or microphone hit of a run. Stopping keeps a `RunSummary` (hits, perfect/
   good/off windows, misses, extra hits, mean, spread) for the "Your run" window
-  and the run's marks, drawn on the staff until the next run or an edit.
+  and the run's marks, drawn on the staff (and the metronome's ring) until
+  the next run or an edit. Hits and misses are also tallied for each of the
+  first two voices (`VoiceTally`; a note several voices play counts for
+  each), which the metronome shows for its click bar and counter rhythm.
+- Misses are judged behind the clock by the largest offset of the sources in
+  use plus a delivery margin (`miss_delay_s`, at most a quarter of the loop),
+  so a hit delayed by input latency is in before its note is judged. The
+  progress cursor waits after anchoring the clock (`anchored_ahead`), and a
+  hit's loop set follows the note's loop relative to that cursor.
 - Grading (`accuracy::session::HitWindows`): perfect ≤ 25 ms, good ≤ 60 ms,
   narrowed to 1/5 and 2/5 of the gap to the closest neighbouring onset (as
   heard) for fast notes. Markers are coloured by grade.

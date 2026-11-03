@@ -574,6 +574,15 @@ mod tests {
     }
 
     #[test]
+    fn timing_feedback_stays_off_in_a_chat() {
+        let (_, mut app) = embedded_app("?v=2&ts=4/4&embed=mcp");
+        assert!(app.metronome_mode());
+        app.playback_ctl.accuracy.enabled = true;
+        assert!(!app.accuracy_active());
+        assert!(!app.shows_accuracy_marks());
+    }
+
+    #[test]
     fn another_metronome_stops_this_one_and_never_starts_it() {
         use crate::TransportState;
         let (_, mut app) = embedded_app("?v=2&ts=4/4&embed=mcp");

@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use grooph_measure::MeasureIdx;
 use grooph_measure::Score;
+use grooph_measure::grid::DEFAULT_GRID;
 use grooph_measure::tempo::ScoreTiming;
 
 #[derive(Clone, Copy)]
@@ -156,7 +157,14 @@ pub(crate) struct GlobalBeatOnset {
     pub performed_tick: u64,
     pub is_note: bool,
     pub measure_idx: MeasureIdx,
+    /// The voices with a note here, one bit each from the first (see
+    /// [`TRACKED_VOICES`]).
+    pub voices: u8,
 }
+
+/// Voices tallied on their own as well: the metronome's click bar and its
+/// counter rhythm.
+pub(crate) const TRACKED_VOICES: usize = 2;
 
 /// Flatten the onsets of every measure into a vector of score-global onset
 /// ticks (Notes + Rests): each tick where a beat of any voice starts, once,
@@ -169,16 +177,44 @@ pub(crate) fn compute_global_beat_onsets(
     let mut out = Vec::new();
     for (m_idx, measure) in score.measures().iter().enumerate() {
         let start = timing.measure_start_tick(m_idx);
+        // Note ticks of each tracked voice.
+        let note_ticks: Vec<Vec<u32>> = measure
+            .voices()
+            .iter()
+            .take(TRACKED_VOICES)
+            .map(|v| {
+                let ticks = DEFAULT_GRID.compute_onset_ticks(v.beats());
+                v.beats().iter().zip(ticks).filter(|(b, _)| b.is_note()).map(|(_, t)| t).collect()
+            })
+            .collect();
         for onset in measure.onsets() {
+            let voices = note_ticks
+                .iter()
+                .enumerate()
+                .filter(|(_, ticks)| ticks.binary_search(&onset.tick).is_ok())
+                .fold(0, |bits, (v, _)| bits | 1 << v);
             out.push(GlobalBeatOnset {
                 onset_tick: start + onset.tick as u64,
                 performed_tick: timing.performed_global_tick(m_idx, onset.tick),
                 is_note: onset.is_note,
                 measure_idx: m_idx,
+                voices,
             });
         }
     }
     out
+}
+
+/// How many loops ahead (+1) or back (-1) a point `diff` ticks from
+/// another lies, taking the closer way round a loop of `total` ticks.
+pub(super) fn loop_offset(diff: f64, total: f64) -> i32 {
+    if diff > total * 0.5 {
+        1
+    } else if diff < -total * 0.5 {
+        -1
+    } else {
+        0
+    }
 }
 
 /// Distance in performed ticks from the beat at `idx` to the closer of its
@@ -213,6 +249,11 @@ pub(super) struct RecordingData {
     /// Last observed global tick within the score loop. `None` means
     /// `update_progress` hasn't run yet for this session (or was reset).
     pub(super) last_tick: Option<f64>,
+    /// `last_tick` was set by anchoring the clock (start, realign), ahead of
+    /// the delayed time misses are judged at, which has not caught up yet.
+    pub(super) anchored_ahead: bool,
+    /// How far behind the clock the last progress judged misses (s).
+    pub(super) miss_delay_s: f64,
     /// Accuracy marks keyed by *global* onset tick across the score loop.
     pub(super) marks_by_onset: HashMap<u64, AccuracyMark>,
     /// Note onsets (global) that already received a hit in the current
@@ -224,9 +265,52 @@ pub(super) struct RecordingData {
     pub(super) hits_next_loop: HashSet<u64>,
     pub(super) stats: AccuracyStats,
     pub(super) counters: RunCounters,
+    /// The same tallies per tracked voice. A note several voices play at
+    /// once counts for each of them.
+    pub(super) voice_tallies: [VoiceTally; TRACKED_VOICES],
+}
+
+/// Hit stats and counters of one voice.
+#[derive(Clone, Copy, Default)]
+pub(super) struct VoiceTally {
+    pub stats: AccuracyStats,
+    pub counters: RunCounters,
+}
+
+impl VoiceTally {
+    /// `None` while the voice had no note to hit yet.
+    fn summary(&self) -> Option<RunSummary> {
+        if self.stats.count + self.counters.misses == 0 {
+            return None;
+        }
+        Some(RunSummary {
+            hits: self.stats.count,
+            misses: self.counters.misses,
+            extra: self.counters.extra,
+            perfect: self.counters.perfect,
+            good: self.counters.good,
+            mean_ms: self.stats.mean_ms().unwrap_or(0.0),
+            spread_ms: self.stats.spread_ms().unwrap_or(0.0),
+        })
+    }
+}
+
+/// The tallies of the voices in `voices` (see [`GlobalBeatOnset::voices`]).
+pub(super) fn tallies_of(
+    tallies: &mut [VoiceTally; TRACKED_VOICES],
+    voices: u8,
+) -> impl Iterator<Item = &mut VoiceTally> {
+    tallies.iter_mut().enumerate().filter(move |(v, _)| voices & 1 << v != 0).map(|(_, t)| t)
 }
 
 impl RecordingData {
+    /// Per tracked voice, as [`Self::summary`]: `None` for a voice without
+    /// notes, or before the run's first hit.
+    pub(super) fn voice_summaries(&self) -> [Option<RunSummary>; TRACKED_VOICES] {
+        let any_hit = self.stats.count > 0;
+        self.voice_tallies.map(|t| t.summary().filter(|_| any_hit))
+    }
+
     /// `None` until the first hit: a run without hits has nothing to show.
     pub(super) fn summary(&self) -> Option<RunSummary> {
         let mean_ms = self.stats.mean_ms()?;
@@ -245,11 +329,14 @@ impl RecordingData {
         Self {
             start_time,
             last_tick,
+            anchored_ahead: true,
+            miss_delay_s: 0.0,
             marks_by_onset: HashMap::new(),
             hits_in_loop: HashSet::new(),
             hits_next_loop: HashSet::new(),
             stats: AccuracyStats::default(),
             counters: RunCounters::default(),
+            voice_tallies: Default::default(),
         }
     }
 }
@@ -290,6 +377,7 @@ impl RecordingSession {
             d.hits_next_loop.clear();
             d.stats.reset();
             d.counters = RunCounters::default();
+            d.voice_tallies = Default::default();
             d.last_tick = None;
         }
     }
@@ -313,6 +401,7 @@ impl RecordingSession {
         if let Self::Recording(d) = self {
             d.start_time = start_time;
             d.last_tick = Some(last_tick);
+            d.anchored_ahead = true;
         }
     }
 }
@@ -383,6 +472,7 @@ mod tests {
             performed_tick: t,
             is_note: true,
             measure_idx: 0,
+            voices: 1,
         };
         let beats = [beat(0), beat(10), beat(40)];
         // First beat: previous neighbour is the last beat, 60 ticks back across the wrap.

@@ -118,6 +118,21 @@ impl PlayAlongSettings {
 /// Input latency offsets are limited to this range (ms).
 pub(crate) const MAX_INPUT_OFFSET_MS: f32 = 300.0;
 
+/// How long a hit may take to reach the app beyond its source's offset: a
+/// frame, a batch of microphone input (s).
+const HIT_DELIVERY_MARGIN_S: f64 = 0.06;
+
+/// How long after a note's hit window closes it is judged missed: by then
+/// a hit in the window has arrived, even with the largest input latency of
+/// the `sources` in use (their offsets; a calibration passes none). Judged
+/// earlier, a late hit would first show a miss and then count as a hit as
+/// well. At most a quarter of the loop, which the tracker's progress needs
+/// to tell a wrap from waiting.
+fn miss_delay_s(settings: &PlayAlongSettings, sources: &[HitSource], loop_seconds: f64) -> f64 {
+    let offset_ms = sources.iter().map(|&s| settings.offset_ms(s)).fold(0.0_f32, f32::max);
+    (f64::from(offset_ms) / 1000.0 + HIT_DELIVERY_MARGIN_S).min(loop_seconds / 4.0)
+}
+
 #[derive(Default)]
 pub(crate) struct PlayAlongState {
     pub(crate) settings: PlayAlongSettings,
@@ -139,8 +154,6 @@ impl Grooph {
         }
         match self.calibration_source() {
             Some(source) => source == HitSource::Tap,
-            // In the metronome there is no rhythm to play along with; taps
-            // edit the ring.
             None => self.accuracy_active() && self.playback_ctl.play_along.settings.tap_enabled,
         }
     }
@@ -258,9 +271,7 @@ impl Grooph {
         tap_hits.extend(self.drain_key_taps(ui));
 
         let calibrating = self.calibration_source();
-        if !(self.playback_ctl.accuracy.enabled && self.tab() != crate::shell::Tab::Score)
-            && calibrating.is_none()
-        {
+        if !self.accuracy_active() && calibrating.is_none() {
             return;
         }
         if self.playback_ctl.transport_state != TransportState::Playing {
@@ -288,6 +299,16 @@ impl Grooph {
         let active = calibrating.is_some()
             || (midi_connected && use_midi)
             || self.playback_ctl.play_along.engaged;
+        // The sources whose offset hits get: a calibration's get none.
+        let offset_sources: Vec<HitSource> = [
+            (HitSource::Midi, use_midi && midi_connected),
+            (HitSource::Tap, use_taps),
+            (HitSource::Mic, use_mic),
+        ]
+        .into_iter()
+        .filter(|&(_, used)| used && calibrating.is_none())
+        .map(|(s, _)| s)
+        .collect();
 
         // The score hasn't started yet: keep re-anchoring the session at "now"
         // and ignore hits; `realign_accuracy_clock` fixes the anchor exactly
@@ -329,7 +350,8 @@ impl Grooph {
                     let time = time - offset_ms as f64 / 1000.0;
                     deltas.extend(tracker.record_hit(time, &timing, score));
                 }
-                tracker.update_progress(now, &timing, score);
+                let delay = miss_delay_s(&settings, &offset_sources, total_loop_seconds);
+                tracker.update_progress_behind(now, delay, &timing, score);
             }
             played
         };
@@ -364,6 +386,14 @@ impl Grooph {
                 ui.heading(format!("{:.0}%", summary.score_percent()));
                 ui.add_space(4.0);
                 summary_grid(ui, &summary);
+                // Against a counter rhythm, how each rhythm went.
+                if let [Some(click), Some(counter)] =
+                    self.playback_ctl.accuracy.tracker.last_voice_summaries()
+                    && self.metronome_mode()
+                {
+                    ui.add_space(8.0);
+                    voice_grid(ui, &click, &counter);
+                }
                 ui.add_space(8.0);
                 if ui.button("Close").clicked() {
                     close = true;
@@ -408,6 +438,26 @@ fn summary_grid(ui: &mut egui::Ui, summary: &RunSummary) {
     });
 }
 
+/// The click bar's and the counter rhythm's results side by side.
+fn voice_grid(ui: &mut egui::Ui, click: &RunSummary, counter: &RunSummary) {
+    egui::Grid::new("run_summary_voices").num_columns(3).spacing([16.0, 4.0]).show(ui, |ui| {
+        let row = |ui: &mut egui::Ui, label: &str, value: &dyn Fn(&RunSummary) -> String| {
+            ui.label(label);
+            ui.label(value(click));
+            ui.label(value(counter));
+            ui.end_row();
+        };
+        ui.label("");
+        ui.strong("Click");
+        ui.strong("Counter");
+        ui.end_row();
+        row(ui, "Score", &|s| format!("{:.0}%", s.score_percent()));
+        row(ui, "Hits", &|s| s.hits.to_string());
+        row(ui, "Missed notes", &|s| s.misses.to_string());
+        row(ui, "Average", &|s| if s.hits == 0 { "–".to_owned() } else { early_late(s.mean_ms) });
+    });
+}
+
 fn early_late(ms: f64) -> String {
     let rounded = ms.round();
     if rounded == 0.0 {
@@ -428,6 +478,25 @@ mod tests {
         assert_eq!(early_late(0.3), "on time");
         assert_eq!(early_late(-12.4), "12 ms early");
         assert_eq!(early_late(7.6), "8 ms late");
+    }
+
+    #[test]
+    fn misses_wait_for_the_largest_input_latency() {
+        let mut s = PlayAlongSettings {
+            mic_offset_ms: 120.0,
+            tap_offset_ms: -40.0,
+            midi_offset_ms: 200.0,
+            ..Default::default()
+        };
+        let margin = HIT_DELIVERY_MARGIN_S;
+        let used = [HitSource::Tap, HitSource::Mic];
+        // The unused MIDI input's offset does not count.
+        assert!((miss_delay_s(&s, &used, 2.0) - (0.12 + margin)).abs() < 1e-9);
+        // A calibration measures the raw latency: no offset.
+        assert!((miss_delay_s(&s, &[], 2.0) - margin).abs() < 1e-9);
+        // Never more than a quarter of a short loop.
+        s.mic_offset_ms = MAX_INPUT_OFFSET_MS;
+        assert!((miss_delay_s(&s, &used, 0.4) - 0.1).abs() < 1e-9);
     }
 
     #[test]
