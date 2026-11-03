@@ -151,6 +151,50 @@ pub fn build_count_slots(measure: &Measure, config: &CountConfig) -> Vec<CountSl
     slots
 }
 
+/// Where in its beat `tick` of a measure in `ts` falls, in the coarsest
+/// count that has a position there: a beat's start is part 0 of 1, an
+/// offbeat eighth in 4/4 part 1 of 2, its "a" part 3 of 4, the "la" of a
+/// 6/8 beat part 1 of 3. `None` off every count (32nds, quintuplets) and
+/// past the measure's end.
+pub fn position_in_beat(ts: &TimeSignature, tick: u32) -> Option<CountPos> {
+    use Subdivision::{Beats, Halves, Quarters, Triplets};
+    let ticks_per_beat = DEFAULT_GRID.ticks_per_beat(ts);
+    let measure_ticks = DEFAULT_GRID.ticks_per_measure(ts);
+    if ticks_per_beat == 0 || tick >= measure_ticks {
+        return None;
+    }
+    let groups = default_groups_for(ts);
+    let uneven = groups.windows(2).any(|w| w[0] != w[1]);
+    let mut start_tick = 0;
+    for (beat, &units) in (1..).zip(groups.iter()) {
+        let end_tick = (start_tick + units as u32 * ticks_per_beat).min(measure_ticks);
+        if tick >= end_tick {
+            start_tick = end_tick;
+            continue;
+        }
+        let (offset, ticks) = (tick - start_tick, end_tick - start_tick);
+        let mut parts: Vec<u32> = [Beats, Halves, Quarters, Triplets]
+            .into_iter()
+            .filter(|s| s.fits(ts))
+            .map(|s| s.parts(ts, units))
+            .collect();
+        parts.sort_unstable();
+        // The fewest parts with one starting at the tick.
+        return parts
+            .into_iter()
+            .filter(|&n| n > 0 && n <= u8::MAX as u32 && ticks.is_multiple_of(n))
+            .find(|&n| (offset * n).is_multiple_of(ticks))
+            .map(|n| CountPos {
+                units,
+                uneven,
+                beat,
+                part: (offset * n / ticks) as u8,
+                parts: n as u8,
+            });
+    }
+    None
+}
+
 /// Counting in numbers, by the beat as the other systems do: the beat's
 /// number, then its parts. A beat of one unit is "1 & 2 &", "1 e & a" or "1
 /// trip let"; a group of eighths takes the Eastman syllables, "1 & 2 la li"
@@ -376,5 +420,39 @@ mod tests {
         assert_eq!(gordon("7/8 q q. q", Triplets), "du be du ba bi du be");
         assert_eq!(gordon("5/8 q. q", Triplets), "du ba bi du be");
         assert_eq!(gordon("7/8 q q. q", Halves), "du ta be ta du ta ba ta bi ta du ta be ta");
+    }
+
+    #[test]
+    fn position_in_beat_takes_the_coarsest_count() {
+        let at = |ts: TimeSignature, tick: u32| {
+            position_in_beat(&ts, tick).map(|p| (p.beat, p.part, p.parts))
+        };
+        let q = DEFAULT_GRID.ticks_per_beat(&TimeSignature::FOUR_FOUR);
+        let four = TimeSignature::FOUR_FOUR;
+        assert_eq!(at(four, 0), Some((1, 0, 1)));
+        assert_eq!(at(four, q), Some((2, 0, 1)));
+        assert_eq!(at(four, q + q / 2), Some((2, 1, 2)));
+        assert_eq!(at(four, q / 4), Some((1, 1, 4)));
+        assert_eq!(at(four, q * 3 / 4), Some((1, 3, 4)));
+        assert_eq!(at(four, q / 3), Some((1, 1, 3)));
+        assert_eq!(at(four, q * 2 / 3), Some((1, 2, 3)));
+        // A 32nd is on no count, and the measure ends.
+        assert_eq!(at(four, q / 8), None);
+        assert_eq!(at(four, q * 4), None);
+
+        // 6/8: the eighths of a beat, then its sixteenths.
+        let six = TimeSignature::SIX_EIGHT;
+        let e = DEFAULT_GRID.ticks_per_beat(&six);
+        assert_eq!(at(six, e), Some((1, 1, 3)));
+        assert_eq!(at(six, 3 * e), Some((2, 0, 1)));
+        assert_eq!(at(six, e / 2), Some((1, 1, 6)));
+
+        // 7/8 in 2+2+3: the "&" of a pair, the "li" of the three.
+        let seven = TimeSignature::SEVEN_EIGHT.with_grouping(1);
+        let pos = position_in_beat(&seven, e).unwrap();
+        assert_eq!((pos.units, pos.uneven, pos.beat, pos.part, pos.parts), (2, true, 1, 1, 2));
+        let pos = position_in_beat(&seven, 6 * e).unwrap();
+        assert_eq!((pos.units, pos.beat, pos.part, pos.parts), (3, 3, 2, 3));
+        assert_eq!(CountingSystem::Numbers.label(&pos).as_deref(), Some("li"));
     }
 }
