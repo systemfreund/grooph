@@ -13,6 +13,7 @@ mod kit_palette;
 mod library;
 mod library_panel;
 mod measure_panel;
+mod metronome_bars;
 mod metronome_trainer;
 mod metronome_view;
 mod midi_input;
@@ -55,7 +56,8 @@ use crate::documents::{Document, Documents, RhythmDoc};
 use crate::embed::{Embed, EmbedParams, embed_params};
 use crate::generator::GeneratorState;
 use crate::library::PatternLibrary;
-use crate::metronome_view::{MetronomeState, metronome_bar};
+use crate::metronome_bars::SavedMetronome;
+use crate::metronome_view::MetronomeState;
 use crate::platform::{PlatformRuntime, VisibilityEvent};
 use crate::play_along::PlayAlongState;
 use crate::presets::PresetLibrary;
@@ -77,8 +79,6 @@ use eframe::epaint::{FontFamily, FontId};
 use eframe::{App, CreationContext, egui};
 use grooph_audio::{AudioSettings, GapClick, PlaybackOptions, Played, PlayerState};
 use grooph_link::{LinkContent, SharedLink};
-use grooph_measure::click::ClickBars;
-use grooph_measure::counter::{CounterBars, Ratio};
 use grooph_measure::counting::{CountConfig, CountingSystem, Subdivision, build_count_slots};
 use grooph_measure::duration::NoteValue::*;
 use grooph_measure::editing::Modification;
@@ -125,7 +125,7 @@ pub struct Grooph {
     pub(crate) ui: UiShell,
 }
 
-pub(crate) const PERSISTED_STATE_VERSION: u8 = 4;
+pub(crate) const PERSISTED_STATE_VERSION: u8 = 5;
 
 /// A rhythm document as saved: the same entry for the score tab's and
 /// Practice's.
@@ -202,11 +202,9 @@ pub(crate) struct PersistedState {
     devices: DeviceSettings,
     feedback: FeedbackSettings,
     view: ViewSettings,
-    click_bars: ClickBars,
-    counter_bars: CounterBars,
-    /// The ratio each counter bar was picked as (see [`CounterBars::names`]).
-    counter_names: Vec<(TimeSignature, Ratio)>,
-    metronome_meter: TimeSignature,
+    /// The metronome's click bars, counter rhythms and ratio names of
+    /// every meter, and the meter it clicks.
+    metronome: SavedMetronome,
     /// Tab open when the state was saved, reopened at the next start.
     tab: Tab,
     /// The page's editor was open, reopened with the tab.
@@ -235,10 +233,7 @@ impl Default for PersistedState {
             devices: DeviceSettings::default(),
             feedback: FeedbackSettings::default(),
             view: ViewSettings::default(),
-            click_bars: ClickBars::default(),
-            counter_bars: CounterBars::default(),
-            counter_names: Vec::new(),
-            metronome_meter: TimeSignature::FOUR_FOUR,
+            metronome: SavedMetronome::default(),
             tab: Tab::Metronome,
             editing: false,
         }
@@ -262,10 +257,7 @@ impl PersistedState {
             devices: ctl.devices.clone(),
             feedback: ctl.feedback,
             view: app.ui.view,
-            click_bars: app.click_bars(),
-            counter_bars: app.counter_bars(),
-            counter_names: app.counter_bars().names().to_vec(),
-            metronome_meter: app.metronome_meter(),
+            metronome: SavedMetronome::of(&docs.metronome),
             tab: app.tab(),
             editing: app.ui.mode == Mode::Edit,
         }
@@ -613,9 +605,7 @@ impl Grooph {
         EditorSnapshot {
             score: self.editor.doc().score.clone(),
             cursor: self.editor.doc().cursor,
-            counter_name: self
-                .metronome_mode()
-                .then(|| self.playback_ctl.audio_cfg.counter.name(self.metronome_meter())),
+            meters: self.editor.doc().meters.clone(),
         }
     }
 
@@ -644,19 +634,13 @@ impl Grooph {
         }
     }
 
-    /// Bring back `snap`'s score and cursor. In the metronome tab the
-    /// meter may change with it: the current one keeps its bars.
+    /// Bring back `snap`'s score and cursor, and in the metronome tab every
+    /// meter's bars with them.
     fn restore_snapshot(&mut self, snap: EditorSnapshot) {
-        if self.metronome_mode() {
-            self.store_metronome_bars();
-        }
         let doc = self.editor.doc_mut();
         doc.score = snap.score;
         doc.cursor = snap.cursor;
-        // The counter rhythm's bar is the document's, its name the settings'.
-        if let Some(name) = snap.counter_name {
-            self.playback_ctl.audio_cfg.counter.set_ratio(self.metronome_meter(), name);
-        }
+        doc.meters = snap.meters;
     }
 
     fn undo(&mut self) {
@@ -1390,15 +1374,7 @@ impl Grooph {
             editor: EditorState {
                 document: Document::Score,
                 docs: Documents {
-                    // The click bar and counter rhythm of its meter: from
-                    // here on they are kept in it alone.
-                    metronome: RhythmDoc::new(
-                        Score::single(metronome_bar(
-                            state.click_bars.for_meter(state.metronome_meter),
-                            state.counter_bars.for_meter(state.metronome_meter),
-                        )),
-                        Cursor::start(),
-                    ),
+                    metronome: state.metronome.into_doc(),
                     practice: practice_doc,
                     score: score_doc,
                 },
@@ -1415,11 +1391,7 @@ impl Grooph {
                 transport_state: TransportState::Stopped,
                 settings: state.playback,
                 audio: None,
-                audio_cfg: AudioConfig {
-                    settings: state.audio_settings,
-                    click: state.click_bars,
-                    counter: state.counter_bars.with_names(&state.counter_names),
-                },
+                audio_cfg: AudioConfig { settings: state.audio_settings },
                 playback: PlaybackState::default(),
                 devices: state.devices,
                 feedback: state.feedback,

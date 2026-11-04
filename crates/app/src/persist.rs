@@ -9,11 +9,14 @@
 //! a backup key that later saves leave alone. The documents and the settings
 //! groups ([`crate::settings`]) are restored field by field too.
 
+use crate::metronome_bars::{MeterBars, SavedMetronome};
 use crate::settings::{
     DeviceSettings, FeedbackSettings, GeneratorConfig, PlaybackSettings, ViewSettings,
 };
 use crate::{PERSISTED_STATE_VERSION, PersistedState, SavedDoc};
-use grooph_measure::{BeatIdx, Cursor, Measure, Score};
+use grooph_measure::click::ClickBars;
+use grooph_measure::counter::{CounterBars, Ratio};
+use grooph_measure::{BeatIdx, Cursor, Measure, Score, TimeSignature};
 use log::{info, warn};
 use ron::value::RawValue;
 use serde::de::{Deserialize, DeserializeOwned, Deserializer, MapAccess, Visitor};
@@ -237,7 +240,50 @@ fn migrate(version: u8, fields: &mut Vec<(String, Box<RawValue>)>) -> bool {
             fields.push(("presets".to_owned(), presets));
         }
     }
+    if version < 5 {
+        // Version 4 kept the metronome's bars of the meter it clicked in
+        // its document and those of the others in the settings, saved as
+        // four fields; version 5 as one.
+        carried &= join_metronome(fields);
+    }
     carried
+}
+
+/// Moves the metronome's four fields of version 4 into one
+/// ([`SavedMetronome`]). Whether each was stored at most once and read.
+fn join_metronome(fields: &mut Vec<Field>) -> bool {
+    const OLD: [&str; 4] = ["click_bars", "counter_bars", "counter_names", "metronome_meter"];
+    if !OLD.iter().any(|name| field(fields, name).is_some()) {
+        return true;
+    }
+    let mut carried = true;
+    // Each falls back alone, as it did as a field of its own.
+    let clicks: Vec<Measure> = take_read(fields, OLD[0], &mut carried).unwrap_or_default();
+    let counters: Vec<Measure> = take_read(fields, OLD[1], &mut carried).unwrap_or_default();
+    let names: Vec<(TimeSignature, Ratio)> =
+        take_read(fields, OLD[2], &mut carried).unwrap_or_default();
+    let meter = take_read(fields, OLD[3], &mut carried).unwrap_or(TimeSignature::FOUR_FOUR);
+    let mut click = ClickBars::default();
+    let mut meters = vec![meter];
+    for bar in clicks {
+        meters.push(bar.time_signature());
+        click.set(bar);
+    }
+    meters.extend(counters.iter().map(Measure::time_signature));
+    let counter = CounterBars::from(counters).with_names(&names);
+    let mut bars: Vec<MeterBars> = Vec::new();
+    for ts in meters {
+        if bars.iter().any(|b| b.meter() == ts) {
+            continue;
+        }
+        bars.push(MeterBars::new(click.for_meter(ts), counter.for_meter(ts), counter.name(ts)));
+    }
+    bars.retain(|b| *b != MeterBars::plain(b.meter()));
+    let saved = SavedMetronome { meter, bars };
+    match ron::to_string(&saved) {
+        Ok(ron) => push_ron(fields, "metronome", ron) && carried,
+        Err(_) => false,
+    }
 }
 
 /// Moves the flat `fields` named in `groups` into their groups. Whether
@@ -313,6 +359,7 @@ fn repair_field(name: &str, raw: &RawValue) -> Option<(Box<RawValue>, Vec<String
         "devices" => repair::<DeviceSettings>(raw),
         "feedback" => repair::<FeedbackSettings>(raw),
         "view" => repair::<ViewSettings>(raw),
+        "metronome" => repair::<SavedMetronome>(raw),
         _ => None,
     }
 }
@@ -358,6 +405,19 @@ fn field<'a>(fields: &'a [(String, Box<RawValue>)], name: &str) -> Option<&'a Ra
 fn take(fields: &mut Vec<(String, Box<RawValue>)>, name: &str) -> Option<Box<RawValue>> {
     let idx = fields.iter().position(|(n, _)| n == name)?;
     Some(fields.remove(idx).1)
+}
+
+/// Takes every field `name` and reads the last one as a `T`, `None` if
+/// there is none; clears `carried` if it was stored twice or does not read.
+fn take_read<T: DeserializeOwned>(
+    fields: &mut Vec<Field>,
+    name: &str,
+    carried: &mut bool,
+) -> Option<T> {
+    let (raw, once) = take_last(fields, name);
+    let value = raw.map(|raw| raw.into_rust::<T>().ok());
+    *carried &= once && value.as_ref().is_none_or(Option::is_some);
+    value.flatten()
 }
 
 /// Takes every field `name`: the last one counts, as in [`restore`]. Also
@@ -412,6 +472,7 @@ mod tests {
         restore, struct_ron,
     };
     use crate::guide::Guide;
+    use crate::metronome_bars::MeterBars;
     use crate::play_along::{PlayAlongSettings, TapKey};
     use crate::presets::{PresetSettings, builtin_presets};
     use crate::settings::{
@@ -423,6 +484,8 @@ mod tests {
         StickingSettings,
     };
     use grooph_audio::{AudioSettings, GapClick, GapMode, Sound, TempoRamp};
+    use grooph_measure::click::{ClickLevel, meter_click_bar};
+    use grooph_measure::counter::{Ratio, counter_bar, counter_ratios};
     use grooph_measure::counting::CountingSystem;
     use grooph_measure::duration::e;
     use grooph_measure::generator::{GeneratorSettings, Subdivision};
@@ -802,6 +865,83 @@ mod tests {
         assert_eq!(s.version, PERSISTED_STATE_VERSION);
         let want = ron::to_string(&every_setting_changed()).unwrap();
         assert_eq!(ron::to_string(&s).unwrap(), want);
+    }
+
+    /// The metronome fields of a version 4 state: 3/4 with an edited click
+    /// bar, 4/4 with a counter rhythm picked as 6:4 (3:2's bar), and 7/8,
+    /// clicked, with both. Also the bars each meter has then.
+    fn version_4_metronome() -> (String, TimeSignature, Vec<MeterBars>) {
+        let (three, four, seven) =
+            (TimeSignature::THREE_FOUR, TimeSignature::FOUR_FOUR, TimeSignature::SEVEN_EIGHT);
+        let mut click_3 = meter_click_bar(three);
+        click_3.first_voice_mut().set_click_level(1, ClickLevel::Off);
+        let mut click_7 = meter_click_bar(seven);
+        click_7.first_voice_mut().set_click_level(0, ClickLevel::Off);
+        let six_four = Ratio { n: 6, span: 4 };
+        let counter_4 = counter_bar(four, six_four).unwrap();
+        let ratio_7 = counter_ratios(seven)[0];
+        let mut counter_7 = counter_bar(seven, ratio_7).unwrap();
+        counter_7.first_voice_mut().set_click_level(0, ClickLevel::Strong);
+        let fields = format!(
+            "click_bars:{},counter_bars:{},counter_names:{},metronome_meter:{}",
+            ron::to_string(&vec![&click_3, &click_7]).unwrap(),
+            ron::to_string(&vec![&counter_4, &counter_7]).unwrap(),
+            ron::to_string(&vec![(four, six_four)]).unwrap(),
+            ron::to_string(&seven).unwrap(),
+        );
+        let bars = vec![
+            MeterBars::new(click_3, None, None),
+            MeterBars::new(meter_click_bar(four), Some(&counter_4), Some(six_four)),
+            MeterBars::new(click_7, Some(&counter_7), None),
+        ];
+        (fields, seven, bars)
+    }
+
+    #[test]
+    fn a_version_4_metronome_is_migrated_without_loss() {
+        let (fields, meter, bars) = version_4_metronome();
+        let (s, backup) = restore(Some(&format!("(version:4,{fields})")));
+        assert!(backup.is_none());
+        let doc = s.metronome.into_doc();
+        assert_eq!(doc.clicked_bars().meter(), meter);
+        for want in bars {
+            assert_eq!(doc.meter_bars(want.meter()), want);
+        }
+        assert_eq!(
+            doc.meter_bars(TimeSignature::TWO_FOUR),
+            MeterBars::plain(TimeSignature::TWO_FOUR)
+        );
+    }
+
+    #[test]
+    fn a_version_4_metronome_field_that_does_not_read_falls_back_alone() {
+        let (fields, meter, bars) = version_4_metronome();
+        let names = fields.find("counter_names:").unwrap();
+        let end = names + fields[names..].find(",metronome_meter").unwrap();
+        let broken = format!("{}counter_names:Unknown{}", &fields[..names], &fields[end..]);
+        let (s, backup) = restore(Some(&format!("(version:4,{broken})")));
+        assert!(backup.is_some());
+        let doc = s.metronome.into_doc();
+        assert_eq!(doc.clicked_bars().meter(), meter);
+        for want in bars {
+            // Only the name is gone.
+            let want = MeterBars { name: None, ..want };
+            assert_eq!(doc.meter_bars(want.meter()), want);
+        }
+    }
+
+    #[test]
+    fn the_metronome_restores_field_by_field() {
+        let (fields, _, _) = version_4_metronome();
+        let (s, _) = restore(Some(&format!("(version:4,{fields})")));
+        let saved = ron::to_string(&s).unwrap();
+        assert_eq!(restore(Some(&saved)).0.metronome, s.metronome);
+        let broken = saved.replacen("metronome:(meter:", "metronome:(meter:Unknown,old:", 1);
+        let (restored, backup) = restore(Some(&broken));
+        assert!(backup.is_some());
+        // The meter falls back alone; the bars stay.
+        assert_eq!(restored.metronome.meter, TimeSignature::FOUR_FOUR);
+        assert_eq!(restored.metronome.bars, s.metronome.bars);
     }
 
     #[test]

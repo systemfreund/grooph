@@ -1,4 +1,4 @@
-use grooph_measure::counter::Ratio;
+use crate::metronome_bars::MetronomeBars;
 use grooph_measure::{Cursor, Score};
 use std::collections::VecDeque;
 
@@ -7,9 +7,9 @@ pub(crate) const DEFAULT_UNDO_LIMIT: usize = 200;
 pub(crate) struct EditorSnapshot {
     pub score: Score,
     pub cursor: Cursor,
-    /// The ratio the counter rhythm was picked as, taken in the metronome
-    /// tab only: `score` holds its bar, the audio settings its name.
-    pub counter_name: Option<Option<Ratio>>,
+    /// The rest of the metronome's document: every meter's bars but the
+    /// one `score` clicks, and that one's ratio name.
+    pub meters: MetronomeBars,
 }
 
 pub(crate) struct UndoHistory {
@@ -80,7 +80,7 @@ mod tests {
         EditorSnapshot {
             score: Score::single(m),
             cursor: Cursor::at(0, beat_idx),
-            counter_name: None,
+            meters: MetronomeBars::default(),
         }
     }
 
@@ -166,8 +166,11 @@ mod tests {
         let mut m = Measure::new(TimeSignature::FOUR_FOUR);
         m.first_voice_mut().set_beat(0, Beat::note(q())).unwrap();
         let mut score = Score::single(m);
-        let snap =
-            EditorSnapshot { score: score.clone(), cursor: Cursor::start(), counter_name: None };
+        let snap = EditorSnapshot {
+            score: score.clone(),
+            cursor: Cursor::start(),
+            meters: MetronomeBars::default(),
+        };
 
         let mut h = UndoHistory::new(10);
         h.push(snap);
@@ -177,7 +180,11 @@ mod tests {
 
         // restored snapshot retains original beat count (before mutation)
         let restored = h
-            .pop_undo(EditorSnapshot { score, cursor: Cursor::start(), counter_name: None })
+            .pop_undo(EditorSnapshot {
+                score,
+                cursor: Cursor::start(),
+                meters: MetronomeBars::default(),
+            })
             .unwrap();
         // the mutation added a beat to the *source* score but the snapshot is independent
         // we just check that pop returns something with a distinct measure state
