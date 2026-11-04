@@ -21,7 +21,7 @@ use grooph_measure::click::ClickBars;
 use grooph_measure::counter::CounterBars;
 use grooph_measure::swing::Swing;
 use grooph_measure::tap_tempo::TapTempo;
-use grooph_measure::{Cursor, Instrument, Measure};
+use grooph_measure::{Instrument, Measure};
 use grooph_mic::MicInput;
 use grooph_midi::MidiInput;
 use std::collections::HashMap;
@@ -355,13 +355,9 @@ pub(crate) struct UiShell {
     /// Em the staff was last drawn at, so the metronome ring's hand is as
     /// wide as the playback cursor.
     pub(crate) staff_em: f32,
-    /// Edit cursor the staff last scrolled into view. The staff follows the
-    /// cursor only when it moves, so the user can scroll away from it.
-    pub(crate) followed_cursor: Option<Cursor>,
-    /// The staff view's height when the cursor was last brought into view:
-    /// it shrinks as the tool grid opens, and the cursor's bar is brought
-    /// into view again.
-    pub(crate) followed_view_height: f32,
+    /// The edit cursor the staff last followed, and the view's height then
+    /// (see `measure_panel::edit_cursor_target`).
+    pub(crate) followed: crate::measure_panel::EditFollow,
     /// A finger has touched the screen: the staff leaves its drags to the
     /// scroll area from then on (see `staff_sense`).
     pub(crate) touch_seen: bool,

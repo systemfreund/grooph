@@ -7,7 +7,8 @@
 //! [`Grooph::played_bpm`], [`Grooph::playback_options`]): no page's
 //! document, the tempo or an option is touched, and the page shown stays.
 
-use crate::play_along::{HitSource, MAX_INPUT_OFFSET_MS};
+use crate::documents::{Document, Documents};
+use crate::play_along::{HitSource, MAX_INPUT_OFFSET_MS, PlayAlongState};
 use crate::{Grooph, TransportState};
 use eframe::egui;
 use grooph_measure::Score;
@@ -76,11 +77,31 @@ fn median(mut values: Vec<f64>) -> Option<f64> {
     })
 }
 
-impl Grooph {
+impl PlayAlongState {
     /// The calibration whose run plays: the one place that checks the phase.
-    fn running_calibration(&self) -> Option<&Calibration> {
-        let cal = self.playback_ctl.play_along.calibration.as_ref()?;
+    pub(crate) fn running_calibration(&self) -> Option<&Calibration> {
+        let cal = self.calibration.as_ref()?;
         (cal.phase == CalibrationPhase::Running).then_some(cal)
+    }
+}
+
+/// The score the transport plays and hits are measured against: the
+/// calibration's click bar during a run, else `document`'s. Taking the parts
+/// that hold it, not the app, it can be borrowed while other parts change
+/// (see `measure_panel::ShownScore`).
+pub(crate) fn played_score<'a>(
+    docs: &'a Documents,
+    document: Document,
+    play_along: &'a PlayAlongState,
+) -> &'a Score {
+    play_along.running_calibration().map_or(&docs.get(document).score, |cal| &cal.score)
+}
+
+impl Grooph {
+    /// The calibration whose run plays (see
+    /// [`PlayAlongState::running_calibration`]).
+    fn running_calibration(&self) -> Option<&Calibration> {
+        self.playback_ctl.play_along.running_calibration()
     }
 
     /// Source being calibrated while the calibration click runs.
@@ -98,7 +119,7 @@ impl Grooph {
     /// The metronome's is its click bar, played as clicks
     /// ([`grooph_audio::Played::Clicks`]).
     pub(crate) fn played_score(&self) -> &Score {
-        self.running_calibration().map_or(&self.editor.doc().score, |cal| &cal.score)
+        played_score(&self.editor.docs, self.editor.document, &self.playback_ctl.play_along)
     }
 
     /// The tempo setting played: the calibration's own during a run.
