@@ -537,6 +537,7 @@ pub(super) fn build_note_layout(
             ledgers,
             dots,
             stem,
+            stem_inset: chord.first().map_or(0.0, |h| h.glyph.stem_inset),
             flag,
             accent: None,
             signs: Vec::new(),

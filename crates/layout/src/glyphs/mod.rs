@@ -59,11 +59,19 @@ pub struct HeadGlyph {
     pub glyph: Glyph,
     pub stem_up_se: [f32; 2],
     pub stem_down_nw: [f32; 2],
+    /// How far the stem starts past its anchor, in stem thicknesses, on a
+    /// head whose hole the anchor borders: the anchors are for Bravura's
+    /// thinner stem, and ours reached into the hole with its inner corner.
+    pub stem_inset: f32,
 }
 
 impl HeadGlyph {
     const fn of(glyph: Glyph, stem_up_se: [f32; 2], stem_down_nw: [f32; 2]) -> Self {
-        HeadGlyph { glyph, stem_up_se, stem_down_nw }
+        HeadGlyph { glyph, stem_up_se, stem_down_nw, stem_inset: 0.0 }
+    }
+
+    const fn inset(self, stem_inset: f32) -> Self {
+        HeadGlyph { stem_inset, ..self }
     }
 }
 
@@ -84,11 +92,13 @@ pub fn head_glyph_for(instrument: Instrument, technique: Technique, d: Duration)
     }
     let hollow = matches!(d.base_note(), Half | Whole);
     match (technique, instrument.notehead(), hollow) {
+        // The stem meets the circle at its middle.
         (Technique::CrossStick, ..) => HeadGlyph::of(
             NOTEHEAD_CIRCLE_X,
             NOTEHEAD_CIRCLE_X_STEM_UP_SE,
             NOTEHEAD_CIRCLE_X_STEM_DOWN_NW,
-        ),
+        )
+        .inset(1.0),
         (Technique::Rimshot, ..) => HeadGlyph::of(
             NOTEHEAD_SLASHED_BLACK,
             NOTEHEAD_SLASHED_BLACK_STEM_UP_SE,
@@ -112,6 +122,7 @@ pub fn head_glyph_for(instrument: Instrument, technique: Technique, d: Duration)
         }
         (_, Notehead::Normal, true) => {
             HeadGlyph::of(NOTEHEAD_HALF, NOTEHEAD_HALF_STEM_UP_SE, NOTEHEAD_HALF_STEM_DOWN_NW)
+                .inset(0.5)
         }
     }
 }
@@ -178,5 +189,22 @@ mod tests {
         assert_eq!((black.advance, black.sw, black.ne), (half.advance, half.sw, half.ne));
         assert_eq!(NOTEHEAD_BLACK_STEM_UP_SE, NOTEHEAD_HALF_STEM_UP_SE);
         assert_eq!(NOTEHEAD_BLACK_STEM_DOWN_NW, NOTEHEAD_HALF_STEM_DOWN_NW);
+    }
+
+    #[test]
+    fn only_heads_with_a_hole_at_the_stem_start_it_further_out() {
+        use grooph_measure::duration::{h, q};
+        let inset = |i, t, d| head_glyph_for(i, t, d).stem_inset;
+        assert!(inset(Instrument::Snare, Technique::Normal, h()) > 0.0);
+        assert!(inset(Instrument::Snare, Technique::CrossStick, q()) > 0.0);
+        for (i, t, d) in [
+            (Instrument::Snare, Technique::Normal, q()),
+            (Instrument::HiHat, Technique::Normal, h()),
+            (Instrument::HiHat, Technique::Normal, q()),
+            (Instrument::Snare, Technique::Rimshot, h()),
+            (Instrument::Ride, Technique::Bell, h()),
+        ] {
+            assert_eq!(inset(i, t, d), 0.0, "{i:?} {t:?} {d:?}");
+        }
     }
 }
