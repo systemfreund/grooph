@@ -34,8 +34,9 @@ Dependencies point one way, from the app down to the model:
 - `layout`, `audio` and `link` build on `measure`; `render` on `layout` and `measure`; `site` on `link` and
   `measure`. `layout` takes geometry types and text measurement from egui but paints nothing; drawing is
   `render`'s job. `audio` and `link` know nothing about the GUI.
-- `midi` and `mic` stand alone: they deliver input events and know nothing about the model. Both stamp their
-  events with `clock`, the app's clock, so a MIDI hit, a microphone hit and a tap compare directly.
+- `midi` and `mic` stand alone: they deliver input events and know nothing about the model. Both read `clock`, the
+  app's clock (MIDI counts from when its `MidiInput` opened), and the app moves their hits onto its timeline by
+  their age, so a MIDI hit, a microphone hit and a tap compare directly.
 - `app` ties everything together: state, panels, persistence, undo. `android` only wraps `app`.
 
 Music rules (durations, onsets, grouping, counting) belong in `measure`, not in `app` or a panel, so the
@@ -655,7 +656,7 @@ grooph's metronome runs inside AI chats as an
 
 - Hit sources (`crates/app/src/play_along.rs`): MIDI NoteOns, microphone hits
   and taps (tap key, default `J`, or a press on the staff while playing). All
-  hits are stamped on one clock (`crates/app/src/clock.rs`); MIDI and
+  hits are stamped on one clock (`grooph_clock::now_seconds`, `crates/clock`); MIDI and
   microphone timestamps are moved onto it by their age. On the web taps use the DOM event `timeStamp` (`web.rs`), natively
   the frame time. Each source has its own input offset (`PlayAlongSettings`).
 - While tap capture is active, staff presses (and presses on the metronome's
