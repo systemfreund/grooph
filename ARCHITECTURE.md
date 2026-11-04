@@ -751,8 +751,10 @@ grooph's metronome runs inside AI chats as an
   and the score tab's score (written, loaded from the library or opened
   from a score link), on the kit's staff or the one line (#352): the
   library's "New drum groove" and "New rhythm" start one
-  (`Grooph::new_score`; `kit_palette::empty_groove` also starts a fresh
-  state). Every library pattern opens there, on either staff; while the
+  (`Grooph::new_score`; `kit_palette::empty_groove` is also the score tab's
+  score of a fresh state, `PersistedState::default`, while a saved score
+  whose field does not read falls back to the one line's bar, which the
+  score tab shows as it is). Every library pattern opens there, on either staff; while the
   score tab is hidden, one of the one line opens on Practice
   (`pattern_opens_on_practice`). A score link of the one line opens on
   Practice unless shared from the score tab (`opens_on_practice`).

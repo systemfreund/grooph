@@ -464,6 +464,22 @@ mod tests {
     }
 
     #[test]
+    fn a_rhythm_of_the_one_line_in_the_score_tab_is_kept_over_a_restart() {
+        let mut from = app();
+        from.ui.show_score_tab = true;
+        from.new_score(grooph_measure::StaffKind::Line);
+        from.editor.doc_mut().score = parse_score("3/4 q e e q").unwrap();
+        let state = PersistedState::from_app(&from);
+        let back = restart(&state);
+        assert_eq!(back.tab(), Tab::Score);
+        assert!(back.editor.docs.score.score.staff == grooph_measure::StaffKind::Line);
+        assert_eq!(score_text(&back), "3/4 q e e q");
+        // A fresh start still has an empty drum groove there.
+        let fresh = app();
+        assert!(fresh.editor.docs.score.score.staff == grooph_measure::StaffKind::Kit);
+    }
+
+    #[test]
     fn an_open_editor_reopens_on_its_page() {
         let (mut app, _) = app_with_groove();
         app.ui.show_score_tab = true;
