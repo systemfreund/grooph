@@ -983,7 +983,7 @@ mod tests {
             let head = Head::new(instrument).with_technique(technique).unwrap();
             let beat = Beat::with_heads(q(), Heads::one(head));
             let written = format!("1/4 {text}:q");
-            assert_eq!(beats_of(&parse_score(&written).unwrap(), 0), [beat.clone()], "{text}");
+            assert_eq!(beats_of(&parse_score(&written).unwrap(), 0), [beat], "{text}");
             assert_eq!(format_beat(&beat).unwrap(), format!("{text}:q"));
         }
     }
