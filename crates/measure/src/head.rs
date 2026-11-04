@@ -45,68 +45,229 @@ pub enum Notehead {
     Cross,
 }
 
-impl Instrument {
-    pub const ALL: [Instrument; 10] = [
-        Instrument::Rhythm,
-        Instrument::HiHatFoot,
-        Instrument::Kick,
-        Instrument::FloorTom,
-        Instrument::Snare,
-        Instrument::MidTom,
-        Instrument::HighTom,
-        Instrument::Ride,
-        Instrument::HiHat,
-        Instrument::Crash,
-    ];
+/// The mixer's volume an instrument plays at (`KitVolumes` in the audio
+/// crate): one per group of the kit.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum MixerGroup {
+    Kick,
+    Snare,
+    /// The hi-hat, played by stick or by foot.
+    HiHat,
+    Toms,
+    /// Ride and crash.
+    Cymbals,
+}
 
-    /// Where the instrument's heads sit, in half staff spaces up from the
-    /// middle line of a five-line staff (the one line of a rhythm staff):
-    /// the usual drumkit legend (Weinberg, Gould).
-    pub const fn staff_pos(self) -> i8 {
-        match self {
-            Instrument::Rhythm => 0,
-            Instrument::HiHatFoot => -5,
-            Instrument::Kick => -3,
-            Instrument::FloorTom => -1,
-            Instrument::Snare => 1,
-            Instrument::MidTom => 2,
-            Instrument::HighTom => 3,
-            Instrument::Ride => 4,
-            Instrument::HiHat => 5,
-            Instrument::Crash => 6,
+/// A technique an instrument is played with, and the letter written after
+/// the instrument's code for it in the text notation.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct TechniqueSpec {
+    pub technique: Technique,
+    /// None for the usual stroke. A letter is unique per instrument only:
+    /// `c` is a closed hi-hat and a choked crash.
+    pub letter: Option<char>,
+}
+
+/// Everything about an instrument, in one place: its entry in
+/// [`Instrument::REGISTER`].
+#[derive(Debug)]
+pub struct InstrumentSpec {
+    pub instrument: Instrument,
+    /// Its code in the text notation (`K`, `HF`); none for the one line's
+    /// rhythm, whose notes are written without one.
+    pub code: Option<&'static str>,
+    /// Its name on its button.
+    pub label: &'static str,
+    /// Its short name on its cell of the tool grid.
+    pub short_label: &'static str,
+    /// Where its heads sit, in half staff spaces up from the middle line of
+    /// a five-line staff (the one line of a rhythm staff): the usual
+    /// drumkit legend (Weinberg, Gould).
+    pub staff_pos: i8,
+    /// The shape of its heads, played the usual way (see [`Technique`] for
+    /// the ones that change it).
+    pub notehead: Notehead,
+    /// The techniques it is played with, [`Technique::Normal`] first.
+    pub techniques: &'static [TechniqueSpec],
+    /// The mixer volume it plays at; the rhythm's is the snare's.
+    pub mixer: MixerGroup,
+}
+
+const fn played(technique: Technique, letter: char) -> TechniqueSpec {
+    TechniqueSpec { technique, letter: Some(letter) }
+}
+
+const NORMAL: TechniqueSpec = TechniqueSpec { technique: Technique::Normal, letter: None };
+
+impl Instrument {
+    /// Every instrument, in the order of the enum (a [`Voicing`] keys its
+    /// bits by that order).
+    ///
+    /// [`Voicing`]: crate::Voicing
+    pub const REGISTER: [InstrumentSpec; 10] = {
+        use Instrument as I;
+        use Technique as T;
+        [
+            InstrumentSpec {
+                instrument: I::Rhythm,
+                code: None,
+                label: "Rhythm",
+                short_label: "R",
+                staff_pos: 0,
+                notehead: Notehead::Normal,
+                techniques: &[NORMAL],
+                mixer: MixerGroup::Snare,
+            },
+            InstrumentSpec {
+                instrument: I::HiHatFoot,
+                code: Some("HF"),
+                label: "Hi-hat foot",
+                short_label: "HF",
+                staff_pos: -5,
+                notehead: Notehead::Cross,
+                techniques: &[NORMAL],
+                mixer: MixerGroup::HiHat,
+            },
+            InstrumentSpec {
+                instrument: I::Kick,
+                code: Some("K"),
+                label: "Kick",
+                short_label: "BD",
+                staff_pos: -3,
+                notehead: Notehead::Normal,
+                techniques: &[NORMAL],
+                mixer: MixerGroup::Kick,
+            },
+            InstrumentSpec {
+                instrument: I::FloorTom,
+                code: Some("FT"),
+                label: "Floor tom",
+                short_label: "FT",
+                staff_pos: -1,
+                notehead: Notehead::Normal,
+                techniques: &[NORMAL, played(T::Rimshot, 'r')],
+                mixer: MixerGroup::Toms,
+            },
+            InstrumentSpec {
+                instrument: I::Snare,
+                code: Some("S"),
+                label: "Snare",
+                short_label: "SN",
+                staff_pos: 1,
+                notehead: Notehead::Normal,
+                techniques: &[NORMAL, played(T::CrossStick, 'x'), played(T::Rimshot, 'r')],
+                mixer: MixerGroup::Snare,
+            },
+            InstrumentSpec {
+                instrument: I::MidTom,
+                code: Some("T2"),
+                label: "Tom 2",
+                short_label: "T2",
+                staff_pos: 2,
+                notehead: Notehead::Normal,
+                techniques: &[NORMAL, played(T::Rimshot, 'r')],
+                mixer: MixerGroup::Toms,
+            },
+            InstrumentSpec {
+                instrument: I::HighTom,
+                code: Some("T1"),
+                label: "Tom 1",
+                short_label: "T1",
+                staff_pos: 3,
+                notehead: Notehead::Normal,
+                techniques: &[NORMAL, played(T::Rimshot, 'r')],
+                mixer: MixerGroup::Toms,
+            },
+            InstrumentSpec {
+                instrument: I::Ride,
+                code: Some("RD"),
+                label: "Ride",
+                short_label: "RD",
+                staff_pos: 4,
+                notehead: Notehead::Cross,
+                techniques: &[NORMAL, played(T::Bell, 'b')],
+                mixer: MixerGroup::Cymbals,
+            },
+            InstrumentSpec {
+                instrument: I::HiHat,
+                code: Some("H"),
+                label: "Hi-hat",
+                short_label: "HH",
+                staff_pos: 5,
+                notehead: Notehead::Cross,
+                techniques: &[
+                    NORMAL,
+                    played(T::Open, 'o'),
+                    played(T::HalfOpen, 'h'),
+                    played(T::Closed, 'c'),
+                ],
+                mixer: MixerGroup::HiHat,
+            },
+            InstrumentSpec {
+                instrument: I::Crash,
+                code: Some("CR"),
+                label: "Crash",
+                short_label: "CR",
+                staff_pos: 6,
+                notehead: Notehead::Cross,
+                techniques: &[NORMAL, played(T::Choke, 'c')],
+                mixer: MixerGroup::Cymbals,
+            },
+        ]
+    };
+
+    /// Every instrument, in the order of the register.
+    pub const ALL: [Instrument; 10] = {
+        let mut all = [Instrument::Rhythm; 10];
+        let mut i = 0;
+        while i < all.len() {
+            all[i] = Self::REGISTER[i].instrument;
+            i += 1;
         }
+        all
+    };
+
+    /// The instrument's entry in the register.
+    pub const fn spec(self) -> &'static InstrumentSpec {
+        &REGISTER[self as usize]
+    }
+
+    /// Where the instrument's heads sit (see [`InstrumentSpec::staff_pos`]).
+    pub const fn staff_pos(self) -> i8 {
+        self.spec().staff_pos
     }
 
     /// The shape of the instrument's heads, played the usual way (see
     /// [`Technique`] for the ones that change it).
     pub const fn notehead(self) -> Notehead {
-        match self {
-            Instrument::HiHatFoot | Instrument::Ride | Instrument::HiHat | Instrument::Crash => {
-                Notehead::Cross
-            }
-            _ => Notehead::Normal,
-        }
+        self.spec().notehead
     }
 
     /// The techniques the instrument is played with, [`Technique::Normal`]
     /// first.
-    pub const fn techniques(self) -> &'static [Technique] {
-        use Technique::*;
-        match self {
-            Instrument::Rhythm | Instrument::Kick | Instrument::HiHatFoot => &[Normal],
-            Instrument::Snare => &[Normal, CrossStick, Rimshot],
-            Instrument::FloorTom | Instrument::MidTom | Instrument::HighTom => &[Normal, Rimshot],
-            Instrument::Ride => &[Normal, Bell],
-            Instrument::HiHat => &[Normal, Open, HalfOpen, Closed],
-            Instrument::Crash => &[Normal, Choke],
-        }
+    pub fn techniques(self) -> impl ExactSizeIterator<Item = Technique> + Clone {
+        self.spec().techniques.iter().map(|t| t.technique)
     }
 
     /// Whether the instrument is played with `technique`.
     pub fn allows(self, technique: Technique) -> bool {
-        self.techniques().contains(&technique)
+        self.techniques().any(|t| t == technique)
+    }
+
+    /// The instrument's name on its button.
+    pub const fn label(self) -> &'static str {
+        self.spec().label
+    }
+
+    /// The instrument's short name on its cell of the tool grid.
+    pub const fn short_label(self) -> &'static str {
+        self.spec().short_label
     }
 }
+
+/// [`Instrument::REGISTER`] as a static, so that [`Instrument::spec`] can
+/// hand out references to its entries.
+static REGISTER: [InstrumentSpec; 10] = Instrument::REGISTER;
 
 /// How a head is played, beyond accent and ghost. Each instrument allows
 /// some ([`Instrument::techniques`]).
@@ -209,9 +370,10 @@ impl Head {
     /// The head played with its instrument's next technique, after the
     /// last one the usual way again (see [`Instrument::techniques`]).
     pub fn with_next_technique(self) -> Self {
-        let techniques = self.instrument.techniques();
-        let at = techniques.iter().position(|&t| t == self.technique).unwrap_or(0);
-        Self { technique: techniques[(at + 1) % techniques.len()], ..self }
+        let mut techniques = self.instrument.techniques();
+        let at = techniques.clone().position(|t| t == self.technique).unwrap_or(0);
+        let next = techniques.nth((at + 1) % techniques.len()).expect("in range");
+        Self { technique: next, ..self }
     }
 
     /// The head played with `technique`, if its instrument allows it.
@@ -421,6 +583,23 @@ mod tests {
     }
 
     #[test]
+    fn every_instrument_has_its_entry_with_letters_unique_per_instrument() {
+        for (at, spec) in Instrument::REGISTER.iter().enumerate() {
+            let i = spec.instrument;
+            assert_eq!(i as usize, at, "{i:?} out of the enum's order");
+            assert_eq!(i.spec().instrument, i);
+            assert_eq!(Instrument::ALL[at], i);
+            let (first, others) = spec.techniques.split_first().expect("{i:?} has techniques");
+            assert_eq!(*first, TechniqueSpec { technique: Technique::Normal, letter: None });
+            let mut letters: Vec<char> =
+                others.iter().map(|t| t.letter.expect("a letter")).collect();
+            letters.sort();
+            letters.dedup();
+            assert_eq!(letters.len(), others.len(), "{i:?}: a letter twice");
+        }
+    }
+
+    #[test]
     fn a_head_takes_only_its_instruments_techniques() {
         let hh = Head::new(Instrument::HiHat);
         assert_eq!(hh.with_technique(Technique::Open).unwrap().technique(), Technique::Open);
@@ -429,7 +608,7 @@ mod tests {
             Err(InvalidTechnique { instrument: Instrument::Snare, technique: Technique::Bell })
         );
         for i in Instrument::ALL {
-            assert_eq!(i.techniques()[0], Technique::Normal, "{i:?}");
+            assert_eq!(i.techniques().next(), Some(Technique::Normal), "{i:?}");
         }
     }
 
