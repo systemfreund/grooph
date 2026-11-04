@@ -426,51 +426,58 @@ mod tests {
     #[test]
     fn stickings_are_written_one_per_column_r_above_l() {
         let score = parse_score("4/4 S:q@R S:q@L S:q@R S:q ; FT:q r:q FT:q@L r:q").unwrap();
-        let rows = TextRows { sticking: Some(Side::Below), ..TextRows::default() };
-        let opts = StaffOpts { text_rows: rows, ..opts() };
-        let staff = build_staff_layout(&score, &opts);
-        let ctx = egui::Context::default();
-        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
-            draw_staff(
-                ui,
-                &score,
-                &staff,
-                None,
-                None,
-                None,
-                0..1,
-                PlaybackMarks::Line,
-                None,
-                &opts,
-            );
-        });
-        output.textures_delta.clear();
-        let mut letters: Vec<(String, f32, f32)> = output
-            .shapes
-            .iter()
-            .filter_map(|c| match &c.shape {
-                egui::Shape::Text(text) if ["R", "L"].contains(&text.galley.text()) => {
-                    let at = c.shape.visual_bounding_rect().center();
-                    Some((text.galley.text().to_owned(), at.x, at.y))
-                }
-                _ => None,
-            })
-            .collect();
-        // By column (the letters' own widths differ a little), then top first.
-        letters.sort_by(|a, b| {
-            (a.1 / 4.0).round().total_cmp(&(b.1 / 4.0).round()).then(a.2.total_cmp(&b.2))
-        });
-        let names: Vec<&str> = letters.iter().map(|l| l.0.as_str()).collect();
-        // The third column has R above and L below it: both hands.
-        assert_eq!(names, ["R", "L", "R", "L"]);
-        let placed = staff.placed(0).unwrap();
-        let heads: Vec<f32> = placed.voices[0].notes.iter().map(|n| n.center.x).collect();
-        for (letter, column) in letters.iter().zip([0, 1, 2, 2]) {
-            assert!((letter.1 - heads[column]).abs() < 1.0, "{letters:?}");
+        for side in [Side::Below, Side::Above] {
+            let rows = TextRows { sticking: Some(side), ..TextRows::default() };
+            let opts = StaffOpts { text_rows: rows, ..opts() };
+            let staff = build_staff_layout(&score, &opts);
+            let ctx = egui::Context::default();
+            let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                draw_staff(
+                    ui,
+                    &score,
+                    &staff,
+                    None,
+                    None,
+                    None,
+                    0..1,
+                    PlaybackMarks::Line,
+                    None,
+                    &opts,
+                );
+            });
+            output.textures_delta.clear();
+            let mut letters: Vec<(String, f32, f32)> = output
+                .shapes
+                .iter()
+                .filter_map(|c| match &c.shape {
+                    egui::Shape::Text(text) if ["R", "L"].contains(&text.galley.text()) => {
+                        let at = c.shape.visual_bounding_rect().center();
+                        Some((text.galley.text().to_owned(), at.x, at.y))
+                    }
+                    _ => None,
+                })
+                .collect();
+            // By column (the letters' own widths differ a little), then top first.
+            letters.sort_by(|a, b| {
+                (a.1 / 4.0).round().total_cmp(&(b.1 / 4.0).round()).then(a.2.total_cmp(&b.2))
+            });
+            let names: Vec<&str> = letters.iter().map(|l| l.0.as_str()).collect();
+            // The third column has R above and L below it: both hands.
+            assert_eq!(names, ["R", "L", "R", "L"], "{side:?}");
+            let placed = staff.placed(0).unwrap();
+            let heads: Vec<f32> = placed.voices[0].notes.iter().map(|n| n.center.x).collect();
+            for (letter, column) in letters.iter().zip([0, 1, 2, 2]) {
+                assert!((letter.1 - heads[column]).abs() < 1.0, "{letters:?}");
+            }
+            assert!(letters[2].2 + 1.0 < letters[3].2, "R above L");
+            // Single letters share one line, the one next to the notes.
+            assert!((letters[0].2 - letters[1].2).abs() < 1.0, "{side:?}: {letters:?}");
+            let near = match side {
+                Side::Below => letters[2].2,
+                Side::Above => letters[3].2,
+            };
+            assert!((letters[0].2 - near).abs() < 1.0, "{side:?}: {letters:?}");
         }
-        assert!(letters[2].2 < letters[3].2, "R above L");
-        assert!((letters[0].2 - letters[2].2).abs() < 1.0, "R on the upper line");
-        assert!((letters[1].2 - letters[3].2).abs() < 1.0, "L on the lower line");
     }
 
     #[test]

@@ -226,9 +226,9 @@ spread across callers.
    (`PlacedMeasure::text_rows`) clear of its notes' ink (accents, technique
    marks, the crash's head) and the staff's middle; on one side the
    sticking sits next to the notes and the count outside it. A bar's
-   sticking row is two lines high where a column shows both hands (R on
-   the upper line, L on the lower), one where it has stickings, none
-   without; every row of the staff gets the room of the tallest
+   sticking row is two lines high where a column shows both hands (R
+   above L there; single letters stay on the line next to the notes), one
+   where it has stickings, none without; every row of the staff gets the room of the tallest
    (`RowRoom`). `grooph_render` draws them at their lines.
 6. Kit editing (`grooph-app`'s `kit_palette`): on a staff of several
    instruments the tool grid's first row has a toggle per instrument

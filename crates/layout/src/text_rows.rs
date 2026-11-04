@@ -77,7 +77,8 @@ const INK_GAP_EM: f32 = 0.075;
 pub(crate) const TEXT_MARGIN_EM: f32 = 0.025;
 
 /// The lines a measure's sticking row takes: none without a sticking, two
-/// where a column shows both hands (R above L), else one.
+/// where a column shows both hands (R above L), else one. Single letters
+/// stay on the line next to the notes.
 pub fn sticking_lines(measure: &Measure) -> usize {
     let stickings = measure.stickings();
     if stickings.iter().any(|&(_, s)| s == Sticking::Both) {

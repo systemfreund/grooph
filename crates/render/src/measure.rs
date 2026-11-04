@@ -8,7 +8,7 @@ use grooph_layout::pixel_layout::{
     BeamLayout, LayoutOpts, MeasureLayout, NoteLayout, TimeSignatureLayout, TupletLayout,
     build_measure_layout, onset_head,
 };
-use grooph_layout::text_rows::PlacedTextRow;
+use grooph_layout::text_rows::{PlacedTextRow, Side};
 use grooph_measure::Measure;
 use grooph_measure::counting::{CountConfig, CountSlot, build_count_slots};
 use grooph_measure::grid::DEFAULT_GRID;
@@ -543,8 +543,8 @@ fn active_label_start(
 
 /// The stickings of `measure`, laid out as `voices`, in `row`: one sign
 /// per column ([`Measure::stickings`]) under or over the head standing for
-/// it. A row of two lines writes R on the upper one and L on the lower,
-/// both hands as R above L; a row of one line its one letter.
+/// it. A single letter goes on the line next to the notes; both hands
+/// take both lines of the row, R above L.
 pub fn draw_stickings(
     painter: &Painter,
     measure: &Measure,
@@ -560,12 +560,15 @@ pub fn draw_stickings(
             continue;
         };
         let x = head.center.x;
-        for &letter in sticking.letters() {
-            // On two lines the left hand's is the lower one.
-            let y = match letter {
-                "L" => row.lines[row.lines.len() - 1],
-                _ => row.lines[0],
-            };
+        let letters = sticking.letters();
+        // One letter goes on the line next to the notes; a column for both
+        // hands stacks R above L, reaching out onto the second line.
+        let ys: Vec<f32> = match (letters.len(), row.side, row.lines.as_slice()) {
+            (1, Side::Above, [.., last]) => vec![*last],
+            (1, _, [first, ..]) => vec![*first],
+            (_, _, lines) => lines.to_vec(),
+        };
+        for (&letter, y) in letters.iter().zip(ys) {
             painter.text(pos2(x, y), Align2::CENTER_CENTER, letter, font.clone(), color);
         }
     }
