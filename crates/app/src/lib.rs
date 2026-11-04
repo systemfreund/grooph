@@ -28,6 +28,7 @@ mod presets;
 mod settings_panel;
 mod share;
 mod shell;
+mod staff_cache;
 mod state;
 mod style;
 mod tokens;

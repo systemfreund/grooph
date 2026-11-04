@@ -9,7 +9,7 @@ pub type MeasureIdx = usize;
 /// Invariant: `measures` is never empty. The field is private so that only
 /// the constructors and mutators here, which uphold it, change the list;
 /// deserializing checks it (see [`EmptyScore`]).
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(try_from = "RawScore")]
 pub struct Score {
     /// The staff the score is written on.
