@@ -955,7 +955,16 @@ If you add new tools/shortcuts, remember:
   playback state, the cursor and `dirty`/`active_pattern_id` in line; `with_undo_snapshot`, `undo`/`redo` and
   `replace_score` call it. A new kind of change gets a variant there. The audio plan, the staff layout and the
   onsets are pulled every frame and need no report.
-- Staff on screen: `crates/app/src/measure_panel.rs`; the metronome's ring: `metronome_view.rs`.
+- Staff on screen: `crates/app/src/measure_panel.rs`; the metronome's ring: `metronome_view.rs`. `measure_panel`
+  runs its steps in order, each a function of the parts it needs: `panel_frame` (playback moves on, the guide's
+  anchor; a `PanelFrame`), `ShownScore::of` (the played score, the ghost bar) and `fit_to_height` (layout and
+  shrink-to-fit), `follow_playback`/`playing_row_offset` and `follow_edit_cursor`/`edit_cursor_target`
+  (auto-scroll), `hover_with_ring`, `draw_staff_view` (staff, flash, ghost bar), `bar_menu` (returns a
+  `BarAction`), `draw_playing_marks` (muted bar, accuracy marks), then `staff_input` and `apply_bar_action`. Room
+  for the staff goes into `staff_opts` or `fit_to_height`; a new overlay into `draw_staff_view` (under the bar menu)
+  or `draw_playing_marks` (over it); new input into `staff_input`, or a new `BarAction` the panel applies last,
+  once nothing borrows the score. The decisions (`fit_to_height`, `playing_row_offset`, `edit_cursor_target`) are
+  free functions with unit tests; keep egui out of them.
 - Playback cursor and count-in: `crates/app/src/playback_clock.rs`; play along: `play_along.rs` and
   `accuracy/` (`session.rs` onsets and grades, `recorder.rs` hits, `progress.rs` misses).
 - Model/rules: `crates/measure/src/lib.rs`, `voice.rs`, `editing.rs`, `fill.rs`, `notation.rs` (text notation),

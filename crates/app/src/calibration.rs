@@ -7,7 +7,7 @@
 //! [`Grooph::played_bpm`], [`Grooph::playback_options`]): no page's
 //! document, the tempo or an option is touched, and the page shown stays.
 
-use crate::play_along::{HitSource, MAX_INPUT_OFFSET_MS};
+use crate::play_along::{HitSource, MAX_INPUT_OFFSET_MS, PlayAlongState};
 use crate::{Grooph, TransportState};
 use eframe::egui;
 use grooph_measure::Score;
@@ -76,11 +76,24 @@ fn median(mut values: Vec<f64>) -> Option<f64> {
     })
 }
 
-impl Grooph {
+impl PlayAlongState {
     /// The calibration whose run plays: the one place that checks the phase.
-    fn running_calibration(&self) -> Option<&Calibration> {
-        let cal = self.playback_ctl.play_along.calibration.as_ref()?;
+    pub(crate) fn running_calibration(&self) -> Option<&Calibration> {
+        let cal = self.calibration.as_ref()?;
         (cal.phase == CalibrationPhase::Running).then_some(cal)
+    }
+
+    /// The click bar of the calibration whose run plays.
+    pub(crate) fn calibration_score(&self) -> Option<&Score> {
+        self.running_calibration().map(|cal| &cal.score)
+    }
+}
+
+impl Grooph {
+    /// The calibration whose run plays (see
+    /// [`PlayAlongState::running_calibration`]).
+    fn running_calibration(&self) -> Option<&Calibration> {
+        self.playback_ctl.play_along.running_calibration()
     }
 
     /// Source being calibrated while the calibration click runs.
