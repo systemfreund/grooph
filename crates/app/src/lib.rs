@@ -720,16 +720,22 @@ impl Grooph {
         let pen = self.edit_instrument();
         let result = self.current_voice_mut().modify_beat(idx, base, beat_kind, pen);
         if result.is_some() {
-            let new_len = self.current_voice().beats().len();
-            if new_len > 0 {
-                let last = new_len - 1;
-                if self.editor.doc().cursor.beat_idx < last {
-                    self.editor.doc_mut().cursor.beat_idx += 1;
-                }
-            }
+            self.step_cursor(|_| true);
         }
 
         result
+    }
+
+    /// After a tool wrote on the cursor's beat (a note, a rest, a
+    /// sticking), move the cursor on to the next beat of its voice in the
+    /// bar that `fits`; it stays if there is none.
+    pub(crate) fn step_cursor(&mut self, fits: impl Fn(&Beat) -> bool) {
+        let from = self.editor.doc().cursor.beat_idx;
+        let next =
+            self.current_voice().beats().iter().enumerate().skip(from + 1).find(|(_, b)| fits(b));
+        if let Some((idx, _)) = next {
+            self.editor.doc_mut().cursor.beat_idx = idx;
+        }
     }
 
     fn set_tuplet(&mut self, idx: usize, tuplet_spec: TupletSpec) -> Option<Modification> {

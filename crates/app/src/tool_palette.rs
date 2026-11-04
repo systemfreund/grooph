@@ -911,7 +911,18 @@ impl Grooph {
                 }
                 let idx = self.editor.doc().cursor.beat_idx.min(beats_len - 1);
                 let pen = self.edit_instrument();
-                modify(self.current_voice_mut(), idx, pen, modifier)
+                let changed = modify(self.current_voice_mut(), idx, pen, modifier);
+                // A sticking written moves on to the next beat played by
+                // hand, as a note does to the next beat; one taken away, and
+                // the marks a beat may get several of, stay.
+                if changed
+                    && let Modifier::ToggleSticking(_) = modifier
+                    && self.current_voice().beats()[idx].sticking().is_some()
+                {
+                    self.editor.doc_mut().cursor.beat_idx = idx;
+                    self.step_cursor(grooph_measure::Beat::takes_sticking);
+                }
+                changed
             }
             ToolKind::Delete(op) => {
                 if beats_len == 0 {
@@ -1523,15 +1534,20 @@ mod tests {
             app.editor.doc_mut().cursor = Cursor::in_voice(0, 0, 1);
             assert!(app.cell_enabled(cell(ToolId::ModifyStickingRight)), "{score}");
             apply(&mut app, ToolId::ModifyStickingRight);
+            // On to the next beat played by hand, if there is one.
+            app.editor.doc_mut().cursor = Cursor::in_voice(0, 0, 1);
             apply(&mut app, ToolId::ModifyStickingBoth);
             assert_eq!(text(&app), set);
+            app.editor.doc_mut().cursor = Cursor::in_voice(0, 0, 1);
             assert!(app.cell_selected(cell(ToolId::ModifyStickingBoth)));
             assert!(!app.cell_selected(cell(ToolId::ModifyStickingRight)));
             app.undo();
             assert!(text(&app).contains("q@R"), "{}", text(&app));
-            // Tapped again, it goes.
+            // Tapped again, it goes, and the cursor stays.
+            app.editor.doc_mut().cursor = Cursor::in_voice(0, 0, 1);
             apply(&mut app, ToolId::ModifyStickingRight);
             assert_eq!(text(&app), score);
+            assert_eq!(app.editor.doc().cursor, Cursor::in_voice(0, 0, 1));
         }
         // Not on the kick or a rest.
         let mut app = editing("4/4 S-H:q H:q r:h ; K:q r:q K:q r:q");
@@ -1541,6 +1557,30 @@ mod tests {
             apply(&mut app, ToolId::ModifyStickingLeft);
             assert!(!text(&app).contains('@'));
         }
+    }
+
+    #[test]
+    fn a_sticking_moves_the_cursor_on_to_the_next_beat_played_by_hand() {
+        use ToolId::{ModifyStickingLeft as L, ModifyStickingRight as R};
+        // A paradiddle, tap after tap.
+        let mut app = editing("4/4 e e e e e e e e");
+        for id in [R, L, R, R, L, R, L, L] {
+            apply(&mut app, id);
+        }
+        assert_eq!(text(&app), "4/4 e@R e@L e@R e@R e@L e@R e@L e@L");
+        // At the last beat it stays.
+        assert_eq!(app.editor.doc().cursor.beat_idx, 7);
+        // Past a rest, and on the kit past the kick's beats.
+        let mut app = editing("4/4 e r:e e e h");
+        apply(&mut app, R);
+        assert_eq!(app.editor.doc().cursor.beat_idx, 2);
+        let mut app = editing("4/4 S:q K:q H:q K:q");
+        apply(&mut app, R);
+        assert_eq!(app.editor.doc().cursor, Cursor::in_voice(0, 0, 2));
+        // The other marks stay on their beat: a beat may get several.
+        let mut app = editing("4/4 q q q q");
+        apply(&mut app, ToolId::ModifyToggleAccent);
+        assert_eq!(app.editor.doc().cursor.beat_idx, 0);
     }
 
     #[test]

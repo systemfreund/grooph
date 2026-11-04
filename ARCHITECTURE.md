@@ -102,6 +102,10 @@ spread across callers.
   `VoiceBar::from_onsets` keep it on the note they keep. `Measure::stickings`
   gives one per column (tick) across the voices: the same one stays, different
   ones or both hands are both (written R above L).
+  A sticking button that writes one moves the cursor on to the next beat
+  of its voice in the bar that takes one (`Grooph::step_cursor`, as a note
+  or rest moves on to the next beat), so R L R R … is tapped in a row; one
+  taken away, and accent, ghost, dot and techniques, stay on their beat.
 - `Duration` is `Simple`, `Dotted`, or `Tuplet(TupletSpec { n, m, base })`.
 - `Measure::set_beat` guarantees a valid measure length and fills gaps.
 - `DEFAULT_GRID` defines the valid duration grid and tick calculations.
