@@ -6,44 +6,20 @@ use eframe::egui::{
 };
 use grooph_layout::pixel_layout::{
     BeamLayout, LayoutOpts, MeasureLayout, NoteLayout, TimeSignatureLayout, TupletLayout,
-    build_measure_layout, onset_head,
+    onset_head,
 };
 use grooph_layout::text_rows::{PlacedTextRow, Side};
 use grooph_measure::Measure;
 use grooph_measure::counting::{CountConfig, CountSlot, build_count_slots};
 use grooph_measure::grid::DEFAULT_GRID;
 
-pub fn draw_measure(
-    ui: &mut egui::Ui,
-    measure: &Measure,
-    opts: &LayoutOpts,
-    cursor_idx: Option<usize>,
-    playback_tick: Option<f64>,
-    count_config: Option<&CountConfig>,
-) -> MeasureLayout {
-    let measure_layout = build_measure_layout(measure.first_voice(), opts);
-    render_measure_at(
-        ui,
-        measure,
-        &measure_layout,
-        opts,
-        cursor_idx,
-        playback_tick.map(|t| (t, highlight_color(ui.visuals()))),
-        count_config,
-        true,
-        None,
-        None,
-    );
-    measure_layout
-}
-
 /// Render a measure given a pre-built `MeasureLayout`.
 ///
 /// `draw_staff_line` controls whether the horizontal staff line is drawn —
 /// the multi-measure renderer turns it off and draws one continuous line per
 /// system instead. All cursor/playback drawing is scoped to this measure; the
-/// caller decides whether to forward `cursor_idx` / `count_tick` based on
-/// the active measure.
+/// caller decides whether to forward `cursor_idx` based on the active
+/// measure. The count and sticking rows are the staff's (`draw_staff`).
 ///
 /// `cursor_x` is the pre-computed playback cursor X (in the same coordinate
 /// space as `measure_layout`). The cursor's home measure depends on the
@@ -55,19 +31,15 @@ pub fn draw_measure(
 /// `lit` draws one note (its index) in the given colour instead of the text
 /// colour.
 ///
-/// The function orchestrates independent decoration phases — counting layer,
-/// staff line, clef + time signature, notes/beams/tuplets, edit cursor,
-/// playback cursor. Each phase is a small helper; reorder or extend by
-/// editing this function.
-#[expect(clippy::too_many_arguments)]
+/// The function orchestrates independent decoration phases — staff line,
+/// clef + time signature, notes/beams/tuplets, edit cursor, playback
+/// cursor. Each phase is a small helper; reorder or extend by editing this
+/// function.
 pub(crate) fn render_measure_at(
     ui: &mut egui::Ui,
-    measure: &Measure,
     measure_layout: &MeasureLayout,
     opts: &LayoutOpts,
     cursor_idx: Option<usize>,
-    count_tick: Option<(f64, Color32)>,
-    count_config: Option<&CountConfig>,
     draw_staff_line: bool,
     cursor_x: Option<f32>,
     lit: Option<(usize, Color32)>,
@@ -75,22 +47,6 @@ pub(crate) fn render_measure_at(
     let color = ui.visuals().text_color();
     let painter = ui.painter();
     let rect = opts.rect;
-
-    if let Some(config) = count_config {
-        // Under the line, inside the measure's rect.
-        let label_y = (opts.y_center() + 0.75 * opts.em).min(rect.bottom() - 0.2 * opts.em);
-        draw_count_layer(
-            painter,
-            measure,
-            std::slice::from_ref(measure_layout),
-            opts,
-            label_y,
-            opts.em * 0.4,
-            config,
-            ui.visuals().text_color(),
-            count_tick,
-        );
-    }
 
     if draw_staff_line {
         draw_staff_line_segment(painter, rect, opts.y_center(), opts.em, color);
@@ -629,6 +585,7 @@ fn compute_label_xs(
 mod tests {
     use super::*;
     use eframe::egui::{FontFamily, FontId, Pos2};
+    use grooph_layout::pixel_layout::build_measure_layout;
     use grooph_measure::counting::Subdivision;
     use grooph_measure::duration::{Duration, NoteValue, e, q, s, t8};
     use grooph_measure::{Beat, Measure, TimeSignature};

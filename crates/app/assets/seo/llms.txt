@@ -55,7 +55,7 @@ A ratio that does not fit the meter (7:5 in 4/4) shows an error that lists the r
 - Durations: `h` half, `q` quarter, `e` eighth, `s` sixteenth, `th` thirty-second; dotted `q.` `e.` `s.`.
 - Tuplets (write every note of the group): `t2` `t4` `t8` `t16` `t32` triplets (3 in the time of 2, e.g. `t4` is a quarter-note triplet), `qt4` `qt8` `qt16` quintuplets (5:4), `st8` `st16` sextuplets (6:4), `spt4` `spt8` `spt16` septuplets (7:4), `nt16` nonuplet sixteenths (9:8); over a dotted quarter `qt8_3` (5 eighths in the time of 3) and `spt16_6` (7 sixteenths in the time of 6). Any other ratio is `n:m` plus a note value (`w` `h` `q` `e` `s` `th`), e.g. `7:5e` for seven eighths in the time of five.
 - Rest: prefix `r:` (e.g. `r:q`, `r:t8`). Accent: prefix `>` (e.g. `>e`). Ghost (soft) note: parentheses (e.g. `(e)`).
-- Sticking (which hand plays a note): `@R`, `@L` or `@RL` (both) after the note (e.g. `q@R`, `(e)@L`); not on rests.
+- Sticking (which hand plays a note): `@R`, `@L` or `@RL` (both) after the note (e.g. `q@R`, `(e)@L`); not on rests, and not in `click`.
 - A time signature such as `3/4` may start a measure; it applies until the next one. Default is 4/4.
 - Each measure must add up exactly to its time signature.
 - In 4/4: `q q e e q` is quarter, quarter, two eighths, quarter. `s s s s q t8 t8 t8 r:q` is four sixteenths, a quarter, an eighth-note triplet and a quarter rest.

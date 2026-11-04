@@ -182,7 +182,8 @@ spread across callers.
 
 1. `grooph_layout::pixel_layout::build_measure_layout` computes `MeasureLayout`
    (note/beam/tuplet positions) from `Measure` and `LayoutOpts`.
-2. `grooph_render::measure::draw_measure` renders the result with egui.
+2. `grooph_render` renders the result with egui (`staff::draw_staff`, one
+   measure each with `measure::render_measure_at`).
 3. The font `Bravura.otf` (SMuFL) lives in `crates/app/assets/fonts`.
 4. `grooph_layout::staff_layout::build_staff_layout` lays out a score, one
    measure per row, every voice of a measure (`PlacedMeasure::voices`, one

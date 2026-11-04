@@ -118,11 +118,9 @@ pub fn draw_staff(
                 count_tick.filter(|(idx, _, _)| *idx == placed.measure_idx).map(|(_, t, c)| (t, c));
             render_placed_measure(
                 ui,
-                score,
                 placed,
                 staff_opts,
                 cursor_in(0),
-                measure_count_tick,
                 cursor_x,
                 lit_in(0, placed.measure_idx),
             );
@@ -231,14 +229,11 @@ pub fn current_cursor_x(
     Some((play_idx, x))
 }
 
-#[expect(clippy::too_many_arguments)]
 fn render_placed_measure(
     ui: &mut egui::Ui,
-    score: &Score,
     placed: &PlacedMeasure,
     staff_opts: &StaffOpts,
     cursor: Option<Cursor>,
-    count_tick: Option<(f64, Color32)>,
     cursor_x: Option<f32>,
     lit: Option<(usize, Color32)>,
 ) {
@@ -250,13 +245,9 @@ fn render_placed_measure(
 
     render_measure_at(
         ui,
-        &score.measures()[placed.measure_idx],
         placed.layout(),
         &per_opts,
         cursor_idx,
-        count_tick,
-        // Drawn with the staff's rows of text.
-        None,
         /* draw_staff_line = */ false,
         cursor_x,
         lit,
