@@ -892,13 +892,41 @@ If you add new tools/shortcuts, remember:
 
 ## Change navigation (quick)
 
-- UI/State/UX: `crates/app/src/lib.rs` and panels (`*_panel.rs`).
-- Model/rules: `crates/measure/src/lib.rs`, `editing.rs`, `fill.rs`.
-- Layout/geometry: `crates/layout/src/pixel_layout.rs`, `render_plan.rs`.
-- Drawing: `crates/render/src/measure.rs`, `beat.rs`.
-- Audio: `crates/audio/src/lib.rs`.
-- MIDI: `crates/midi/src/input.rs`.
-- Microphone: `crates/mic/src/` (detector, `native.rs`, `web.rs`).
+- App shell, tabs, options sheets, More menu: `crates/app/src/shell.rs`; dialogs: `pickers.rs`.
+- App state and the frame loop: `crates/app/src/lib.rs` (`Grooph`), `state.rs` (its parts), `documents.rs`
+  (the three pages' documents), `undo.rs`.
+- Saved state: `crates/app/src/lib.rs` (`PersistedState`), `persist.rs` (field-wise restore, migration, backup).
+- Editing: `crates/app/src/tool_palette.rs` (grid, applying a tool), `tools.rs` (tool registry, shortcuts),
+  `kit_palette.rs` (the kit's instruments).
+- Staff on screen: `crates/app/src/measure_panel.rs`; the metronome's ring: `metronome_view.rs`.
+- Playback cursor and count-in: `crates/app/src/playback_clock.rs`; play along: `play_along.rs` and
+  `accuracy/` (`session.rs` onsets and grades, `recorder.rs` hits, `progress.rs` misses).
+- Model/rules: `crates/measure/src/lib.rs`, `voice.rs`, `editing.rs`, `fill.rs`, `notation.rs` (text notation),
+  `tempo.rs` (`ScoreTiming`), `counting.rs`, `click.rs`, `counter.rs`.
+- Layout/geometry: `crates/layout/src/staff_layout.rs` (a score in rows), `pixel_layout/` (one measure:
+  `mod.rs`, `notes.rs`, `beams.rs`, `tuplets.rs`), `staff.rs` (lines, instrument places), `render_plan.rs`.
+- Drawing: `crates/render/src/measure.rs`, `staff.rs`, `beat.rs`.
+- Audio: `crates/audio/src/lib.rs` (engine, plan swap), `schedule.rs`, `tick_source.rs`, `sounds.rs`, `output.rs`.
+- Links: `crates/link/src/lib.rs`; MCP server: `mcp/`, `functions/mcp.js`.
+- MIDI: `crates/midi/src/input.rs`. Microphone: `crates/mic/src/` (detector, `native.rs`, `web.rs`).
+- Platform: `crates/app/src/platform.rs` (web/native twins), `web.rs` (browser glue), `host.rs` (Android).
+
+## Web runtime assumptions
+
+The web build runs on the browser's one thread, and some code relies on that:
+
+- `crates/app/src/web.rs` and `update_check.rs` keep browser state in `thread_local!`s (visibility changes,
+  raw key presses, a cancelled pointer, the embed's play and stop requests, the build found on the server),
+  written by DOM callbacks and read by the frame, which never run at the same time.
+- DOM callbacks registered for the page's lifetime are leaked on purpose (`Closure::forget`): the page
+  never removes them, and a dropped closure would throw when the browser calls it.
+- `crates/app/src/embed.rs` keeps the embed's fullscreen flag in a `static AtomicBool` (`FULLSCREEN`), set
+  from a host message and read in the frame; `Relaxed` ordering is enough on one thread.
+- `crates/measure/src/click.rs` and `counter.rs` cache bars per meter in `thread_local!`s; each thread (a
+  test, natively) has its own.
+
+The audio thread is the exception natively: it shares only `PlaybackState` behind a mutex with the UI
+(see "Audio, playback, counting").
 
 ## Notes for LLM agents
 

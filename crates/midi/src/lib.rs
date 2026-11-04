@@ -16,7 +16,3 @@ pub type MidiNote = u8;
 
 /// MIDI velocity type (0-127)
 pub type MidiVelocity = u8;
-
-/// Backwards-compatible aliases for platform-specific names.
-pub type NativeMidiInput = MidiInput;
-pub type WebMidiInput = MidiInput;
