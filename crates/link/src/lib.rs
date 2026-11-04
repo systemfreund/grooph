@@ -45,7 +45,7 @@ use grooph_measure::generator::{
 use grooph_measure::grid::DEFAULT_GRID;
 use grooph_measure::notation::{format_score, parse_score};
 use grooph_measure::swing::{MAX_SWING_PERCENT, MIN_SWING_PERCENT, Swing, SwingUnit};
-use grooph_measure::tempo::{MAX_BPM, MIN_BPM};
+use grooph_measure::tempo::{DEFAULT_BPM, MAX_BPM, MIN_BPM};
 use grooph_measure::{
     HiddenRests, Measure, ParseTimeSignatureError, Score, StaffKind, TimeSignature,
 };
@@ -474,10 +474,6 @@ impl SharedLink {
         Some(format!("{base}?{}", query.join("&")))
     }
 }
-
-/// The tempo without a `bpm`; the app starts at it too (crates/app
-/// `PersistedState`).
-pub const DEFAULT_BPM: u32 = 120;
 
 /// What `link` opens, in the terms the user sees: the meter with its
 /// grouping and where its groups start, the tempo, the click bar (by its

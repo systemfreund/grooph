@@ -1,7 +1,7 @@
 use crate::accuracy::AccuracyState;
 use crate::documents::{Document, Documents};
 use crate::generator::GeneratorState;
-use crate::guide::{AnchorFlash, Guide};
+use crate::guide::AnchorFlash;
 use crate::library::PatternLibrary;
 use crate::library_panel::{LibraryItem, LibraryTab};
 use crate::metronome_view::MetronomeState;
@@ -10,34 +10,26 @@ use crate::pickers::Picker;
 use crate::platform::PlatformRuntime;
 use crate::play_along::PlayAlongState;
 use crate::presets::{PresetId, PresetLibrary};
+use crate::settings::{DeviceSettings, FeedbackSettings, PlaybackSettings, ViewSettings};
 use crate::shell::ShellState;
-use crate::{CountingSettings, Host, Mode, StickingSettings, TransportState};
+use crate::{Host, Mode, TransportState};
 use eframe::egui::TextStyle;
 use eframe::egui::emath::{ease_in_ease_out, lerp};
 use eframe::epaint::FontId;
-use grooph_audio::{Audio, AudioSettings, GapClick, TempoRamp};
+use grooph_audio::{Audio, AudioSettings};
 use grooph_link::SharedLink;
 use grooph_measure::click::ClickBars;
 use grooph_measure::counter::CounterBars;
-use grooph_measure::swing::Swing;
 use grooph_measure::tap_tempo::TapTempo;
 use grooph_measure::{Instrument, Measure};
 use grooph_mic::MicInput;
 use grooph_midi::MidiInput;
 use std::collections::HashMap;
 
+#[derive(Default)]
 pub(crate) struct AudioConfig {
+    /// Sounds and volumes (the mixer).
     pub(crate) settings: AudioSettings,
-    pub(crate) offset: f32,
-    pub(crate) latency_enabled: bool,
-    /// Play one bar of clicks before playback starts.
-    pub(crate) count_in: bool,
-    /// Swing feel of the playback (notation stays straight).
-    pub(crate) swing: Swing,
-    /// Metronome trainer: muted bars.
-    pub(crate) gap: GapClick,
-    /// Metronome trainer: stepwise tempo change from `bpm`.
-    pub(crate) ramp: TempoRamp,
     /// What the metronome clicks in each meter but its own: the click bar
     /// of the metronome's meter is in its document (`docs.metronome`), and
     /// this entry is only where it is put when the meter changes. Read
@@ -47,29 +39,6 @@ pub(crate) struct AudioConfig {
     /// (`Grooph::counter_bars`), and the ratio each was picked as, also
     /// the metronome meter's.
     pub(crate) counter: CounterBars,
-}
-
-impl AudioConfig {
-    /// The latency offset in seconds, 0 while switched off.
-    pub(crate) fn latency_s(&self) -> f64 {
-        if self.latency_enabled { self.offset as f64 } else { 0.0 }
-    }
-}
-
-impl Default for AudioConfig {
-    fn default() -> Self {
-        Self {
-            settings: AudioSettings::default(),
-            offset: 0.0,
-            latency_enabled: true,
-            count_in: false,
-            swing: Swing::default(),
-            gap: GapClick::default(),
-            ramp: TempoRamp::default(),
-            click: ClickBars::default(),
-            counter: CounterBars::default(),
-        }
-    }
 }
 
 pub(crate) struct LayoutSettings {
@@ -243,7 +212,6 @@ impl ScrollTween {
 pub(crate) struct MidiState {
     pub(crate) input: Option<MidiInput>,
     pub(crate) available_ports: Vec<String>,
-    pub(crate) selected_port_id: Option<String>,
 }
 
 /// Microphone hit input. Open only while it is needed: in use, the
@@ -297,9 +265,14 @@ pub(crate) struct EditorState {
 /// microphone and tap input, and the accuracy tracker that ties hits to score onsets.
 pub(crate) struct PlaybackController {
     pub(crate) transport_state: TransportState,
-    pub(crate) bpm: u32,
+    /// Tempo, count-in, swing and the metronome trainer.
+    pub(crate) settings: PlaybackSettings,
     pub(crate) audio: Option<Audio>,
     pub(crate) audio_cfg: AudioConfig,
+    /// Output latency and the MIDI input port.
+    pub(crate) devices: DeviceSettings,
+    /// Timing feedback, beat flash and play-along input.
+    pub(crate) feedback: FeedbackSettings,
     pub(crate) playback: PlaybackState,
     pub(crate) accuracy: AccuracyState,
     pub(crate) midi: MidiState,
@@ -307,54 +280,41 @@ pub(crate) struct PlaybackController {
     pub(crate) play_along: PlayAlongState,
 }
 
-/// UI shell state: which panel is visible, font configuration, layout knobs,
-/// counting overlay settings, and the platform abstraction for visibility /
-/// wake-lock.
+/// UI shell state, one group per feature besides the mode and the platform
+/// glue. A new field goes into its feature's group, or a new group.
 pub(crate) struct UiShell {
     pub(crate) mode: Mode,
+    pub(crate) platform: PlatformRuntime,
+    pub(crate) fonts: Fonts,
+    pub(crate) layout: LayoutSettings,
+    /// Counting, sticking, guide and the score tab switch.
+    pub(crate) view: ViewSettings,
+    pub(crate) staff: StaffView,
+    pub(crate) library: LibraryUi,
+    pub(crate) dialogs: Dialogs,
+    pub(crate) shell: ShellState,
+    /// Share sheet and permissions of the app around this one (Android).
+    pub(crate) host: Option<Box<dyn Host>>,
+    /// `Some` when the app runs embedded in a chat (see [`crate::embed`]).
+    pub(crate) embed: Option<crate::embed::Embed>,
+}
+
+/// The music font and the text sizes the style scales.
+pub(crate) struct Fonts {
     pub(crate) music_font_id: FontId,
     pub(crate) font_bump: f32,
     pub(crate) baseline_dark: Option<Vec<(TextStyle, f32)>>,
     pub(crate) baseline_light: Option<Vec<(TextStyle, f32)>>,
-    pub(crate) layout: LayoutSettings,
-    pub(crate) counting: CountingSettings,
-    pub(crate) sticking: StickingSettings,
-    /// Whether the staff flashes on every beat while playing. Off by default.
-    pub(crate) flash_enabled: bool,
-    /// Whether the tab bar shows the score tab, which is not finished yet
-    /// (a developer setting, off by default). A link or pattern that opens
-    /// the score tab still shows it while it is open.
-    pub(crate) show_score_tab: bool,
-    /// What the practice staff shows while it plays.
-    pub(crate) guide: Guide,
-    pub(crate) platform: PlatformRuntime,
-    /// User preset whose row in the preset picker is being renamed. Not persisted.
-    pub(crate) renaming_preset: Option<u64>,
-    /// Saved pattern whose card in the library is being renamed. Not persisted.
-    pub(crate) renaming_pattern: Option<u64>,
-    /// The name being typed for the card being renamed; it becomes the name
-    /// on ✔ or Enter only. Not persisted.
-    pub(crate) rename_typed: String,
-    /// Load awaiting the "discard unsaved changes?" confirmation. `Some` shows
-    /// the confirm dialog. Not persisted.
-    pub(crate) pending_load: Option<PendingLoad>,
-    /// Why a shared link could not be opened; `Some` shows an error dialog.
-    pub(crate) link_error: Option<String>,
-    /// UI time of the last "copy link" click, for a short confirmation.
-    pub(crate) link_copied_at: Option<f64>,
-    /// The library item saved last and the UI time, for "✓ Saved" on its
-    /// card. Not persisted.
-    pub(crate) library_saved: Option<(LibraryItem, f64)>,
-    /// A library card to scroll into view once: the one just saved.
-    pub(crate) scroll_to_library_item: Option<LibraryItem>,
-    /// The half of the library shown. Not persisted.
-    pub(crate) library_tab: LibraryTab,
+}
+
+/// The staff on screen: its size, what it follows and how it is touched.
+pub(crate) struct StaffView {
     /// The window is phone-sized: the staff packs its notes tighter. Set
     /// every frame.
     pub(crate) narrow_screen: bool,
     /// Em the staff was last drawn at, so the metronome ring's hand is as
     /// wide as the playback cursor.
-    pub(crate) staff_em: f32,
+    pub(crate) em: f32,
     /// The edit cursor the staff last followed, and the view's height then
     /// (see `measure_panel::edit_cursor_target`).
     pub(crate) followed: crate::measure_panel::EditFollow,
@@ -363,7 +323,49 @@ pub(crate) struct UiShell {
     pub(crate) touch_seen: bool,
     /// A finger is on the screen now.
     pub(crate) touching: bool,
-    pub(crate) shell: ShellState,
+}
+
+impl Default for StaffView {
+    fn default() -> Self {
+        Self {
+            narrow_screen: false,
+            em: 40.0,
+            followed: Default::default(),
+            touch_seen: crate::platform::finger_is_the_pointer(),
+            touching: false,
+        }
+    }
+}
+
+/// The library's and the preset picker's state on screen. Not persisted.
+#[derive(Default)]
+pub(crate) struct LibraryUi {
+    /// User preset whose row in the preset picker is being renamed.
+    pub(crate) renaming_preset: Option<u64>,
+    /// Saved pattern whose card in the library is being renamed.
+    pub(crate) renaming_pattern: Option<u64>,
+    /// The name being typed for the card being renamed; it becomes the name
+    /// on ✔ or Enter only.
+    pub(crate) rename_typed: String,
+    /// The library item saved last and the UI time, for "✓ Saved" on its
+    /// card.
+    pub(crate) saved: Option<(LibraryItem, f64)>,
+    /// A library card to scroll into view once: the one just saved.
+    pub(crate) scroll_to: Option<LibraryItem>,
+    /// The half of the library shown.
+    pub(crate) tab: LibraryTab,
+}
+
+/// Dialogs, pickers and short confirmations. Not persisted.
+#[derive(Default)]
+pub(crate) struct Dialogs {
+    /// Load awaiting the "discard unsaved changes?" confirmation. `Some` shows
+    /// the confirm dialog.
+    pub(crate) pending_load: Option<PendingLoad>,
+    /// Why a shared link could not be opened; `Some` shows an error dialog.
+    pub(crate) link_error: Option<String>,
+    /// UI time of the last "copy link" click, for a short confirmation.
+    pub(crate) link_copied_at: Option<f64>,
     /// Setting whose picker dialog is open.
     pub(crate) picker: Option<Picker>,
     /// Picker that opened the one in [`Self::picker`] and comes back when
@@ -371,10 +373,6 @@ pub(crate) struct UiShell {
     pub(crate) picker_return: Option<Picker>,
     /// Taps of the tap-tempo buttons (tempo picker).
     pub(crate) tap_tempo: TapTempo,
-    /// Share sheet and permissions of the app around this one (Android).
-    pub(crate) host: Option<Box<dyn Host>>,
-    /// `Some` when the app runs embedded in a chat (see [`crate::embed`]).
-    pub(crate) embed: Option<crate::embed::Embed>,
 }
 
 /// Something that replaces the working score once unsaved changes are dealt with.

@@ -40,7 +40,7 @@ impl Grooph {
     /// the ring below gets (see `Grooph::staff_and_ring`), which must not in
     /// turn decide its size.
     pub(crate) fn staff_opts(&self, ui: &egui::Ui, viewport_rect: Rect) -> StaffOpts {
-        let width_cap_factor = if self.ui.narrow_screen {
+        let width_cap_factor = if self.ui.staff.narrow_screen {
             // Let the measure width alone decide the size.
             self.ui.layout.width_cap_factor.max(0.2)
         } else {
@@ -52,12 +52,12 @@ impl Grooph {
         } else {
             compute_em(&viewport_rect, width_cap_factor, ui)
         };
-        let font_id = FontId::new(em, self.ui.music_font_id.family.clone());
+        let font_id = FontId::new(em, self.ui.fonts.music_font_id.family.clone());
 
         // Tighter spacing on narrow screens makes the glyphs
         // bigger: the staff shrinks its em until a measure
         // full of sixteenths fits the width.
-        let narrow = self.ui.narrow_screen;
+        let narrow = self.ui.staff.narrow_screen;
         let (min_measure_width_em, note_width_em) = if narrow { (2.0, 0.36) } else { (6.0, 0.6) };
         StaffOpts {
             rect: viewport_rect,
@@ -124,7 +124,8 @@ impl Grooph {
                 let available = ui.available_size();
                 let playing = self.playback_ctl.transport_state == TransportState::Playing;
                 let playback = &mut self.playback_ctl.playback;
-                let scroll_area = staff_scroll_area(ui, playback, playing, self.ui.touch_seen);
+                let scroll_area =
+                    staff_scroll_area(ui, playback, playing, self.ui.staff.touch_seen);
                 scroll_area.show(ui, |ui| self.staff_view(ui, available));
             });
         });
@@ -161,16 +162,16 @@ impl Grooph {
         // (grow-to-fill / shrink-toward-floor) — rescale font/metrics to
         // match before drawing, so glyph size agrees with `staff`'s positions.
         let render_opts = staff_opts.rescaled(staff.scale);
-        self.ui.staff_em = render_opts.em;
+        self.ui.staff.em = render_opts.em;
 
         follow_playback(ui, &mut self.playback_ctl.playback, &shown, &staff, &frame, view);
         let cursor = self.editor.doc().cursor;
         let editing = edit && self.playback_ctl.transport_state == TransportState::Stopped;
-        follow_edit_cursor(ui, &staff, cursor, editing, view, &mut self.ui.followed);
+        follow_edit_cursor(ui, &staff, cursor, editing, view, &mut self.ui.staff.followed);
 
         let (rect, resp) = ui.allocate_exact_size(
             staff.total_size,
-            staff_sense(ui, &mut self.ui.touch_seen, &mut self.ui.touching),
+            staff_sense(ui, &mut self.ui.staff.touch_seen, &mut self.ui.staff.touching),
         );
         let ghost_rect = shown.ghost_rect(&staff);
         let with_ring = metronome && !edit;
@@ -388,7 +389,7 @@ impl Grooph {
     /// global tick.
     fn advance_playback(&mut self, ui: &egui::Ui, timing: &ScoreTiming) -> f64 {
         let now = ui.input(|i| i.time);
-        let latency_s = self.playback_ctl.audio_cfg.latency_s();
+        let latency_s = self.playback_ctl.devices.latency_s();
         let audio = self.playback_ctl.audio.as_ref();
         let playback = &mut self.playback_ctl.playback;
         // The output is still waking up: the cursor waits at the start for
@@ -426,7 +427,7 @@ impl Grooph {
             .measures()
             .get(m_idx)
             .map_or(0, |m| primary_beat_index(&m.time_signature(), local_tick));
-        let flash_enabled = self.ui.flash_enabled;
+        let flash_enabled = self.playback_ctl.feedback.flash_enabled;
         self.playback_ctl
             .playback
             .reach_flash_beat((m_idx, primary_beat_in_measure), flash_enabled);

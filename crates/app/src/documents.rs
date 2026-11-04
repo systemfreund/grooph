@@ -243,11 +243,11 @@ mod tests {
         let changed = |app: &Grooph| practice_text(app) != text(&unset);
         // 🎲, a setting, a preset, a generator link, also from the score tab.
         set_aside(&mut app);
-        app.finish_generator_change(app.editor.generator.settings, false, true);
+        app.finish_generator_change(app.editor.generator.config.settings, false, true);
         assert!(changed(&app));
         set_aside(&mut app);
-        let before = app.editor.generator.settings;
-        app.editor.generator.settings.complexity = 3;
+        let before = app.editor.generator.config.settings;
+        app.editor.generator.config.settings.complexity = 3;
         app.finish_generator_change(before, false, false);
         assert!(changed(&app));
         set_aside(&mut app);
@@ -258,7 +258,7 @@ mod tests {
         let link = grooph_link::parse_query("v=2&sub=16&lvl=2&bars=1&seed=7").unwrap().unwrap();
         app.open_link(link);
         assert_eq!(app.tab(), Tab::Practice);
-        assert!(app.ui.pending_load.is_none(), "Practice's rhythm is not asked for");
+        assert!(app.ui.dialogs.pending_load.is_none(), "Practice's rhythm is not asked for");
         assert!(changed(&app));
         assert_eq!(score_text(&app), groove);
         assert!(app.editor.docs.score.dirty);
@@ -269,7 +269,7 @@ mod tests {
         let (mut app, _) = app_with_groove();
         assert!(app.editor.docs.score.dirty);
         app.open_link(grooph_link::parse_query("v=2&bpm=120").unwrap().unwrap());
-        assert_eq!(app.playback_ctl.bpm, 120);
+        assert_eq!(app.playback_ctl.settings.bpm, 120);
         assert!(app.editor.docs.score.dirty);
     }
 
@@ -279,10 +279,10 @@ mod tests {
     fn a_metronome_links_tempo_leaves_a_clean_score_alone() {
         let (mut app, _) = app_with_groove();
         app.editor.docs.score.dirty = false;
-        app.playback_ctl.bpm = 100;
+        app.playback_ctl.settings.bpm = 100;
         app.open_link(grooph_link::parse_query("v=2&bpm=120&ts=3/4").unwrap().unwrap());
         assert!(app.metronome_mode());
-        assert_eq!(app.playback_ctl.bpm, 120);
+        assert_eq!(app.playback_ctl.settings.bpm, 120);
         assert!(!app.editor.docs.score.dirty);
     }
 
@@ -291,7 +291,7 @@ mod tests {
         let (mut app, _) = app_with_groove();
         app.save_active_pattern();
         app.select_tab(Tab::Practice);
-        app.playback_ctl.bpm = 100;
+        app.playback_ctl.settings.bpm = 100;
         app.open_link(grooph_link::parse_query("v=2&bpm=120").unwrap().unwrap());
         assert!(app.editor.docs.score.dirty);
     }
@@ -345,7 +345,7 @@ mod tests {
         let mut app = app();
         // An untitled score stays as it is.
         app.select_tab(Tab::Practice);
-        app.playback_ctl.bpm += 5;
+        app.playback_ctl.settings.bpm += 5;
         app.score_changed(ScoreChange::Tempo);
         assert!(!app.editor.docs.score.dirty);
         // A saved pattern keeps its tempo: changed anywhere, it can be saved.
@@ -354,7 +354,7 @@ mod tests {
         for tab in [Tab::Practice, Tab::Metronome] {
             app.select_tab(tab);
             app.editor.docs.score.dirty = false;
-            app.playback_ctl.bpm += 5;
+            app.playback_ctl.settings.bpm += 5;
             app.score_changed(ScoreChange::Tempo);
             assert!(app.editor.docs.score.dirty, "{tab:?}");
             assert_eq!(app.editor.docs.score.active_pattern_id, Some(id));
@@ -366,9 +366,9 @@ mod tests {
         let (mut app, _) = app_with_groove();
         app.save_active_pattern();
         app.select_tab(Tab::Practice);
-        app.playback_ctl.bpm = 1;
+        app.playback_ctl.settings.bpm = 1;
         app.apply_preset(PresetId::BuiltIn(1));
-        assert_ne!(app.playback_ctl.bpm, 1);
+        assert_ne!(app.playback_ctl.settings.bpm, 1);
         assert!(app.editor.docs.score.dirty);
     }
 
@@ -384,7 +384,7 @@ mod tests {
     #[test]
     fn endless_mode_runs_on_practices_rhythm_only() {
         let mut app = app();
-        app.editor.generator.endless = true;
+        app.editor.generator.config.endless = true;
         app.select_tab(Tab::Practice);
         assert!(app.endless_runs());
         app.select_tab(Tab::More);
@@ -443,7 +443,7 @@ mod tests {
     #[test]
     fn both_rhythm_documents_are_saved_from_any_page() {
         let (mut app, groove) = app_with_groove();
-        app.ui.show_score_tab = true;
+        app.ui.view.show_score_tab = true;
         app.select_tab(Tab::Practice);
         let practice = practice_text(&app);
         for tab in [Tab::Practice, Tab::Metronome, Tab::More, Tab::Score] {
@@ -466,7 +466,7 @@ mod tests {
     #[test]
     fn a_rhythm_of_the_one_line_in_the_score_tab_is_kept_over_a_restart() {
         let mut from = app();
-        from.ui.show_score_tab = true;
+        from.ui.view.show_score_tab = true;
         from.new_score(grooph_measure::StaffKind::Line);
         from.editor.doc_mut().score = parse_score("3/4 q e e q").unwrap();
         let state = PersistedState::from_app(&from);
@@ -482,7 +482,7 @@ mod tests {
     #[test]
     fn an_open_editor_reopens_on_its_page() {
         let (mut app, _) = app_with_groove();
-        app.ui.show_score_tab = true;
+        app.ui.view.show_score_tab = true;
         for tab in [Tab::Metronome, Tab::Practice, Tab::Score] {
             app.select_tab(tab);
             app.ui.mode = Mode::Edit;
@@ -499,7 +499,7 @@ mod tests {
     #[test]
     fn the_score_tab_is_hidden_until_the_developer_setting_shows_it() {
         let (mut app, groove) = app_with_groove();
-        assert!(!app.ui.show_score_tab);
+        assert!(!app.ui.view.show_score_tab);
         // Saved on the score tab, it reopens on Practice, with its score.
         app.select_tab(Tab::Score);
         let state = PersistedState::from_app(&app);
@@ -507,9 +507,9 @@ mod tests {
         assert_eq!(back.tab(), Tab::Practice);
         assert_eq!(score_text(&back), groove);
         // Shown, the setting is kept and the score tab reopens.
-        app.ui.show_score_tab = true;
+        app.ui.view.show_score_tab = true;
         let back = restart(&PersistedState::from_app(&app));
-        assert!(back.ui.show_score_tab);
+        assert!(back.ui.view.show_score_tab);
         assert_eq!(back.tab(), Tab::Score);
     }
 
@@ -526,7 +526,7 @@ mod tests {
         let (mut state, backup) = crate::persist::restore(Some(&ron));
         assert!(backup.is_none());
         assert_eq!(state.tab, Tab::Score);
-        state.show_score_tab = true;
+        state.view.show_score_tab = true;
         let app = restart(&state);
         assert_eq!(app.tab(), Tab::Score);
         // The score tab holds rhythms of the one line too: it keeps the one

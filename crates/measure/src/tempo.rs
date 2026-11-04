@@ -21,6 +21,8 @@ use crate::swing::Swing;
 pub const MIN_BPM: u32 = 20;
 /// Fastest tempo the app offers, in BPM.
 pub const MAX_BPM: u32 = 300;
+/// The tempo the app starts at, and a link or preset without one has.
+pub const DEFAULT_BPM: u32 = 120;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ScoreTiming {

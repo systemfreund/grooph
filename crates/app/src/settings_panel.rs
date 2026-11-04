@@ -84,11 +84,11 @@ impl Grooph {
             });
 
             egui::CollapsingHeader::new("Audio Latency").default_open(false).show(ui, |ui| {
-                ui.checkbox(&mut self.playback_ctl.audio_cfg.latency_enabled, "Enabled");
-                ui.add_enabled_ui(self.playback_ctl.audio_cfg.latency_enabled, |ui| {
+                ui.checkbox(&mut self.playback_ctl.devices.latency_enabled, "Enabled");
+                ui.add_enabled_ui(self.playback_ctl.devices.latency_enabled, |ui| {
                     ui.label("Offset:");
                     ui.add(
-                        egui::DragValue::new(&mut self.playback_ctl.audio_cfg.offset)
+                        egui::DragValue::new(&mut self.playback_ctl.devices.offset)
                             .range(-0.5..=0.5)
                             .speed(0.001)
                             .suffix("s"),
@@ -98,7 +98,10 @@ impl Grooph {
             });
 
             egui::CollapsingHeader::new("Playback").default_open(false).show(ui, |ui| {
-                ui.checkbox(&mut self.ui.flash_enabled, "Flash staff on every beat");
+                ui.checkbox(
+                    &mut self.playback_ctl.feedback.flash_enabled,
+                    "Flash staff on every beat",
+                );
             });
 
             egui::CollapsingHeader::new("Tempo Ramp").default_open(false).show(ui, |ui| {
@@ -106,7 +109,7 @@ impl Grooph {
             });
 
             egui::CollapsingHeader::new("Developer settings").default_open(false).show(ui, |ui| {
-                ui.checkbox(&mut self.ui.show_score_tab, "Show the Score tab (beta)");
+                ui.checkbox(&mut self.ui.view.show_score_tab, "Show the Score tab (beta)");
                 ui.separator();
                 ui.label("Size:");
                 ui.add(

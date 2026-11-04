@@ -124,7 +124,7 @@ impl Grooph {
 
     /// The tempo setting played: the calibration's own during a run.
     pub(crate) fn played_bpm(&self) -> u32 {
-        if self.calibrating() { CALIBRATION_BPM } else { self.playback_ctl.bpm }
+        if self.calibrating() { CALIBRATION_BPM } else { self.playback_ctl.settings.bpm }
     }
 
     pub(crate) fn start_calibration(&mut self, source: HitSource) {
@@ -152,7 +152,7 @@ impl Grooph {
         let max = MAX_INPUT_OFFSET_MS as f64;
         let offset_ms = offset.round().clamp(-max, max) as f32;
         cal.phase = CalibrationPhase::Done { offset_ms, spread_ms: spread.round() as f32 };
-        *self.playback_ctl.play_along.settings.offset_ms_mut(cal.source) = offset_ms;
+        *self.playback_ctl.feedback.play_along.offset_ms_mut(cal.source) = offset_ms;
         self.stop_transport();
     }
 
@@ -171,7 +171,7 @@ impl Grooph {
         let source = cal.source;
         let phase = cal.phase;
         let hits = cal.hits();
-        let tap_key = self.playback_ctl.play_along.settings.tap_key;
+        let tap_key = self.playback_ctl.feedback.play_along.tap_key;
         let total = CALIBRATION_WARMUP + CALIBRATION_HITS;
 
         enum Action {

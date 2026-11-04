@@ -94,7 +94,7 @@ const DEFAULT_SWING_PERCENT: u8 = 66;
 
 /// Bars of the generated score; endless mode never loops.
 fn bars_label(generator: &GeneratorState) -> String {
-    if generator.endless { "∞".to_owned() } else { generator.effective_bars().to_string() }
+    if generator.config.endless { "∞".to_owned() } else { generator.effective_bars().to_string() }
 }
 
 pub(crate) fn subdivision_short_label(s: Subdivision) -> &'static str {
@@ -720,7 +720,7 @@ impl Grooph {
         // shows it, or while it is open (from a link or a pattern).
         let tabs: Vec<_> = TABS
             .into_iter()
-            .filter(|&(tab, ..)| tab != Tab::Score || self.ui.show_score_tab || tab == current)
+            .filter(|&(tab, ..)| tab != Tab::Score || self.ui.view.show_score_tab || tab == current)
             .collect();
         let mut picked = None;
         egui::Panel::bottom("shell_tabs")
@@ -770,7 +770,7 @@ impl Grooph {
 
     /// Generator settings and tempo as big values; a tap opens the picker.
     fn settings_card(&mut self, ui: &mut Ui) {
-        let settings = &self.editor.generator.settings;
+        let settings = &self.editor.generator.config.settings;
         let subdivision = effective_subdivision(settings.subdivision, settings.time_signature);
         let level = if settings.custom_figures_enabled {
             "Custom".to_owned()
@@ -789,7 +789,11 @@ impl Grooph {
             // While a tempo ramp runs: the tempo being played.
             match self.playback_ctl.playback.ramp_bpm {
                 Some(bpm) => (Picker::Bpm, "BPM now", CardValue::Text(bpm.to_string())),
-                None => (Picker::Bpm, "BPM", CardValue::Text(self.playback_ctl.bpm.to_string())),
+                None => (
+                    Picker::Bpm,
+                    "BPM",
+                    CardValue::Text(self.playback_ctl.settings.bpm.to_string()),
+                ),
             },
         ];
 
@@ -803,7 +807,11 @@ impl Grooph {
             (Picker::Library, "Score", CardValue::Text(self.score_title())),
             match self.playback_ctl.playback.ramp_bpm {
                 Some(bpm) => (Picker::Bpm, "BPM now", CardValue::Text(bpm.to_string())),
-                None => (Picker::Bpm, "BPM", CardValue::Text(self.playback_ctl.bpm.to_string())),
+                None => (
+                    Picker::Bpm,
+                    "BPM",
+                    CardValue::Text(self.playback_ctl.settings.bpm.to_string()),
+                ),
             },
         ];
         self.card(ui, &cells);
@@ -821,14 +829,18 @@ impl Grooph {
             (Picker::MetronomeMeter, "Meter", CardValue::Meter(self.metronome_meter())),
             match self.playback_ctl.playback.ramp_bpm {
                 Some(bpm) => (Picker::Bpm, "BPM now", CardValue::Text(bpm.to_string())),
-                None => (Picker::Bpm, "BPM", CardValue::Text(self.playback_ctl.bpm.to_string())),
+                None => (
+                    Picker::Bpm,
+                    "BPM",
+                    CardValue::Text(self.playback_ctl.settings.bpm.to_string()),
+                ),
             },
         ]
     }
 
     /// Card of labelled values on top; a tap opens the value's picker.
     fn card(&mut self, ui: &mut Ui, cells: &[(Picker, &str, CardValue)]) {
-        let music = self.ui.music_font_id.family.clone();
+        let music = self.ui.fonts.music_font_id.family.clone();
         let mut picked = None;
         egui::Panel::top("shell_card")
             .frame(Frame::new().fill(ui.visuals().panel_fill).inner_margin(Margin {
@@ -856,14 +868,14 @@ impl Grooph {
                 });
             });
         if picked.is_some() {
-            self.ui.picker = picked;
+            self.ui.dialogs.picker = picked;
         }
     }
 
     /// Practice options plus the big "new rhythm" and play buttons.
     fn options_sheet(&mut self, ui: &mut Ui) {
-        let before = self.editor.generator.settings;
-        let endless_before = self.editor.generator.endless;
+        let before = self.editor.generator.config.settings;
+        let endless_before = self.editor.generator.config.endless;
         let mut roll = false;
         let mut card = None;
 
@@ -930,11 +942,11 @@ impl Grooph {
     /// Where the stickings go, and the switch that shows or hides them;
     /// in the tabs where they are written.
     fn sticking_row(&mut self, ui: &mut Ui) {
-        let sticking = &mut self.ui.sticking;
+        let sticking = &mut self.ui.view.sticking;
         let side = crate::pickers::SIDES.iter().find(|(a, _)| *a == sticking.above);
         let side = side.map_or("", |(_, label)| label);
         if split_row(ui, "Sticking", side, &mut sticking.shown).clicked() {
-            self.ui.picker = Some(Picker::Sticking);
+            self.ui.dialogs.picker = Some(Picker::Sticking);
         }
     }
 
@@ -946,7 +958,7 @@ impl Grooph {
             return;
         }
         if value_row(ui, "Rests", hidden_rests_label(score.hidden_rests)).clicked() {
-            self.ui.picker = Some(Picker::HiddenRests);
+            self.ui.dialogs.picker = Some(Picker::HiddenRests);
         }
     }
 
@@ -1091,11 +1103,11 @@ impl Grooph {
     }
 
     fn metronome_rows(&mut self, ui: &mut Ui) {
-        let family = self.ui.music_font_id.family.clone();
+        let family = self.ui.fonts.music_font_id.family.clone();
         let look = self.click_fill_look();
         let label = self.click_fill_label();
         if notation_value_row(ui, "Subdivision", look.as_ref(), &label, family).clicked() {
-            self.ui.picker = Some(Picker::ClickFill);
+            self.ui.dialogs.picker = Some(Picker::ClickFill);
         }
         // Embedded there is no tool palette to edit them with, and the
         // transport row has no room for the link: it is a row here.
@@ -1122,7 +1134,7 @@ impl Grooph {
         let Some(restore) = self.counter_to_restore() else {
             // The meter has no counter rhythm to switch on.
             if value_row(ui, "Polyrhythm", &self.counter_label()).clicked() {
-                self.ui.picker = Some(Picker::Polyrhythm);
+                self.ui.dialogs.picker = Some(Picker::Polyrhythm);
             }
             return;
         };
@@ -1130,7 +1142,7 @@ impl Grooph {
         let value = if was_on { self.counter_label() } else { ratio_label((restore, false)) };
         let mut on = was_on;
         if split_row(ui, "Polyrhythm", &value, &mut on).clicked() {
-            self.ui.picker = Some(Picker::Polyrhythm);
+            self.ui.dialogs.picker = Some(Picker::Polyrhythm);
         }
         if on != was_on {
             self.set_counter_ratio(on.then_some(restore));
@@ -1139,7 +1151,7 @@ impl Grooph {
 
     /// Straight or swung; the switch brings back the last swing.
     fn swing_row(&mut self, ui: &mut Ui) {
-        let swing = &mut self.playback_ctl.audio_cfg.swing;
+        let swing = &mut self.playback_ctl.settings.swing;
         if !swing.is_straight() {
             self.ui.shell.last_swing_percent = swing.percent;
         }
@@ -1148,7 +1160,7 @@ impl Grooph {
         let was_on = !swing.is_straight();
         let mut on = was_on;
         if split_row(ui, "Swing", &value, &mut on).clicked() {
-            self.ui.picker = Some(Picker::Swing);
+            self.ui.dialogs.picker = Some(Picker::Swing);
         }
         if on != was_on {
             swing.percent = if on { shown } else { MIN_SWING_PERCENT };
@@ -1158,11 +1170,11 @@ impl Grooph {
     /// The last rows of both sheets, the same in each tab.
     fn shared_rows(&mut self, ui: &mut Ui) {
         self.counting_row(ui);
-        switch_row(ui, "Count-in", &mut self.playback_ctl.audio_cfg.count_in);
-        let gap = &mut self.playback_ctl.audio_cfg.gap;
+        switch_row(ui, "Count-in", &mut self.playback_ctl.settings.count_in);
+        let gap = &mut self.playback_ctl.settings.gap_click;
         let silent = silent_bars_label(gap);
         if split_row(ui, "Silent bars", &silent, &mut gap.enabled).clicked() {
-            self.ui.picker = Some(Picker::SilentBars);
+            self.ui.dialogs.picker = Some(Picker::SilentBars);
         }
         self.swing_row(ui);
     }
@@ -1170,12 +1182,12 @@ impl Grooph {
     /// The count under the staff, shown in every tab; opens its picker. The
     /// switch brings back the last count that fits the score.
     fn counting_row(&mut self, ui: &mut Ui) {
-        if self.ui.counting.base != CountingBase::Off {
-            self.ui.shell.last_counting = Some(self.ui.counting.base);
+        if self.ui.view.counting.base != CountingBase::Off {
+            self.ui.shell.last_counting = Some(self.ui.view.counting.base);
         }
         // Everything read from the score first, so it is borrowed, not copied.
         let score = self.played_score();
-        let counting = &self.ui.counting;
+        let counting = &self.ui.view.counting;
         let restore = self.ui.shell.last_counting.filter(|b| b.fits(score)).or_else(|| {
             CountingBase::ALL.into_iter().find(|&b| b != CountingBase::Off && b.fits(score))
         });
@@ -1187,16 +1199,16 @@ impl Grooph {
         let label = shown.label(counting.system, score);
         let Some(restore) = restore else {
             if value_row(ui, "Count labels", &label).clicked() {
-                self.ui.picker = Some(Picker::Counting);
+                self.ui.dialogs.picker = Some(Picker::Counting);
             }
             return;
         };
         let mut on = was_on;
         if split_row(ui, "Count labels", &label, &mut on).clicked() {
-            self.ui.picker = Some(Picker::Counting);
+            self.ui.dialogs.picker = Some(Picker::Counting);
         }
         if on != was_on {
-            self.ui.counting.base = if on { restore } else { CountingBase::Off };
+            self.ui.view.counting.base = if on { restore } else { CountingBase::Off };
         }
     }
 
@@ -1257,7 +1269,7 @@ impl Grooph {
         const METER_WIDTH: f32 = 76.0;
         const TEMPO_WIDTH: f32 = 72.0;
         const STEP_SIZE: f32 = 40.0;
-        let music = self.ui.music_font_id.family.clone();
+        let music = self.ui.fonts.music_font_id.family.clone();
         let meter = Rect::from_min_size(row.left_top(), vec2(METER_WIDTH, CARD_CELL_HEIGHT));
         let tempo = Rect::from_center_size(row.center(), vec2(TEMPO_WIDTH, CARD_CELL_HEIGHT));
         let mut picked = None;
@@ -1270,7 +1282,7 @@ impl Grooph {
             }
         }
         if picked.is_some() {
-            self.ui.picker = picked;
+            self.ui.dialogs.picker = picked;
         }
         let mut step = 0;
         let steps = [("−", -1, "Slower", tempo.left()), ("+", 1, "Faster", tempo.right())];
@@ -1300,10 +1312,10 @@ impl Grooph {
 
     fn option_rows(&mut self, ui: &mut Ui) {
         if value_row(ui, "Preset", &self.active_preset_label()).clicked() {
-            self.ui.picker = Some(Picker::Preset);
+            self.ui.dialogs.picker = Some(Picker::Preset);
         }
         let generator = &mut self.editor.generator;
-        switch_row(ui, "Ghost notes", &mut generator.ghost_notes);
+        switch_row(ui, "Ghost notes", &mut generator.config.ghost_notes);
         self.guide_row(ui);
         self.timing_feedback_row(ui);
         self.sticking_row(ui);
@@ -1316,13 +1328,13 @@ impl Grooph {
 
     fn guide_row(&mut self, ui: &mut Ui) {
         let ts = self.guide_meter();
-        if value_row(ui, "Guide", self.ui.guide.in_meter(&ts).label()).clicked() {
-            self.ui.picker = Some(Picker::Guide);
+        if value_row(ui, "Guide", self.ui.view.guide.in_meter(&ts).label()).clicked() {
+            self.ui.dialogs.picker = Some(Picker::Guide);
         }
     }
 
     fn timing_feedback_row(&mut self, ui: &mut Ui) {
-        let mut accuracy = self.playback_ctl.accuracy.enabled;
+        let mut accuracy = self.playback_ctl.feedback.accuracy_enabled;
         if badged_switch_row(ui, "Timing feedback", Some("BETA"), &mut accuracy) {
             self.set_accuracy_enabled(accuracy);
         }
@@ -1342,7 +1354,7 @@ impl Grooph {
         let side_fill = ui.visuals().extreme_bg_color;
         let text = ui.visuals().strong_text_color();
         // Endless mode rolls new bars by itself, and each play starts afresh.
-        let roll = !self.editor.generator.endless
+        let roll = !self.editor.generator.config.endless
             && round_button_at(
                 ui,
                 new_rect,
@@ -1522,32 +1534,32 @@ impl Grooph {
     /// The rows of the More menu.
     fn more_menu(&mut self, ui: &mut Ui) {
         if value_row(ui, "📁   Library", "").clicked() {
-            self.ui.picker = Some(Picker::Library);
+            self.ui.dialogs.picker = Some(Picker::Library);
         }
         if value_row(ui, "🔈   Mixer", "").clicked() {
-            self.ui.picker = Some(Picker::Mixer);
+            self.ui.dialogs.picker = Some(Picker::Mixer);
         }
         // The sounds are picked here rather than deep in Settings; the
         // click's own parameters stay there.
         if value_row(ui, "🔔   Sounds", "").clicked() {
-            self.ui.picker = Some(Picker::Sounds);
+            self.ui.dialogs.picker = Some(Picker::Sounds);
         }
         if value_row(ui, "🎹   MIDI input", &self.midi_input_label()).clicked() {
             // A device plugged in since shows up.
             self.refresh_midi_ports();
-            self.ui.picker = Some(Picker::MidiInput);
+            self.ui.dialogs.picker = Some(Picker::MidiInput);
         }
         // Next to the MIDI device it listens to: the other inputs and every
         // latency.
         if value_row(ui, "🎯   Play along", &self.play_along_label()).clicked() {
-            self.ui.picker = Some(Picker::PlayAlong);
+            self.ui.dialogs.picker = Some(Picker::PlayAlong);
         }
         if value_row(ui, "⚙   Settings", "").clicked() {
-            self.ui.picker = Some(Picker::Settings);
+            self.ui.dialogs.picker = Some(Picker::Settings);
         }
         theme_row(ui);
         if value_row(ui, "?   Help", "").clicked() {
-            self.ui.picker = Some(Picker::Help);
+            self.ui.dialogs.picker = Some(Picker::Help);
         }
     }
 }

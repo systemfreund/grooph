@@ -5,6 +5,7 @@
 use crate::documents::Document;
 use crate::platform::random_seed;
 use crate::score_change::{Origin, ScoreChange};
+use crate::settings::GeneratorConfig;
 use crate::{Grooph, TransportState, clock};
 use grooph_measure::generator::{GeneratorSettings, Rng, generate_measure, generate_score};
 use grooph_measure::tempo::ScoreTiming;
@@ -15,27 +16,23 @@ use log::warn;
 pub(crate) const ENDLESS_START_BARS: usize = 2;
 
 pub(crate) struct GeneratorState {
-    pub(crate) settings: GeneratorSettings,
-    /// Keep adding measures while playing instead of looping the score.
-    pub(crate) endless: bool,
-    /// Play quiet ghost notes on the free slots of the generator subdivision.
-    pub(crate) ghost_notes: bool,
+    pub(crate) config: GeneratorConfig,
     rng: Rng,
 }
 
 impl GeneratorState {
-    pub(crate) fn new(settings: GeneratorSettings, endless: bool, ghost_notes: bool) -> Self {
-        Self { settings, endless, ghost_notes, rng: Rng::new(random_seed()) }
+    pub(crate) fn new(config: GeneratorConfig) -> Self {
+        Self { config, rng: Rng::new(random_seed()) }
     }
 
     /// Bars to generate: endless mode starts with [`ENDLESS_START_BARS`].
     pub(crate) fn effective_bars(&self) -> usize {
-        if self.endless { ENDLESS_START_BARS } else { self.settings.bars.max(1) }
+        if self.config.endless { ENDLESS_START_BARS } else { self.config.settings.bars.max(1) }
     }
 
     /// A new rhythm with the current settings, `None` if it fails.
     pub(crate) fn generate(&mut self) -> Option<Score> {
-        let settings = GeneratorSettings { bars: self.effective_bars(), ..self.settings };
+        let settings = GeneratorSettings { bars: self.effective_bars(), ..self.config.settings };
         generate_score(&settings, &mut self.rng)
             .inspect_err(|err| warn!("Rhythm generation failed: {err:?}"))
             .ok()
@@ -53,8 +50,8 @@ impl Grooph {
         roll: bool,
     ) {
         if roll
-            || self.editor.generator.settings != before
-            || endless_before != self.editor.generator.endless
+            || self.editor.generator.config.settings != before
+            || endless_before != self.editor.generator.config.endless
         {
             self.generate_new_score();
         }
@@ -89,7 +86,7 @@ impl Grooph {
     /// tab and Practice's editor play their score as it is, and the
     /// metronome plays no rhythm.
     pub(crate) fn endless_runs(&self) -> bool {
-        self.editor.generator.endless
+        self.editor.generator.config.endless
             && self.document() == Document::Practice
             && !self.editing()
             && !self.calibrating()
@@ -138,15 +135,16 @@ impl Grooph {
     }
 
     fn append_endless_measure(&mut self, timing: &ScoreTiming) {
-        let measure =
-            match generate_measure(&self.editor.generator.settings, &mut self.editor.generator.rng)
-            {
-                Ok(measure) => measure,
-                Err(err) => {
-                    warn!("Endless mode: cannot add a measure: {err:?}");
-                    return;
-                }
-            };
+        let measure = match generate_measure(
+            &self.editor.generator.config.settings,
+            &mut self.editor.generator.rng,
+        ) {
+            Ok(measure) => measure,
+            Err(err) => {
+                warn!("Endless mode: cannot add a measure: {err:?}");
+                return;
+            }
+        };
         // Settle the hit windows on the old timing: the loop gets longer, so
         // the accuracy clock is anchored again below.
         let tracker = &mut self.playback_ctl.accuracy.tracker;

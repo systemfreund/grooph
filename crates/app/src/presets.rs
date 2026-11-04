@@ -7,24 +7,20 @@
 //! live in [`PresetLibrary`] and are persisted with the app state.
 
 use crate::library::next_default_name;
+use crate::settings::{GeneratorConfig, PlaybackSettings};
 use grooph_audio::{GapClick, GapMode, GapMute, Sound, TempoRamp};
 use grooph_measure::TimeSignature;
 use grooph_measure::generator::{GeneratorSettings, Subdivision};
 use grooph_measure::swing::{Swing, SwingUnit};
 use serde::{Deserialize, Serialize};
 
-/// Everything a preset restores.
+/// Everything a preset restores: the app's playback and generator settings
+/// groups ([`crate::settings`]) and the sound of both voices.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub(crate) struct PresetSettings {
-    pub(crate) generator: GeneratorSettings,
-    pub(crate) bpm: u32,
-    pub(crate) swing: Swing,
-    pub(crate) ghost_notes: bool,
-    pub(crate) count_in: bool,
-    pub(crate) endless: bool,
-    pub(crate) gap_click: GapClick,
-    pub(crate) tempo_ramp: TempoRamp,
+    pub(crate) playback: PlaybackSettings,
+    pub(crate) generator: GeneratorConfig,
     pub(crate) metronome_sound: Sound,
     pub(crate) rhythm_sound: Sound,
 }
@@ -32,14 +28,8 @@ pub(crate) struct PresetSettings {
 impl Default for PresetSettings {
     fn default() -> Self {
         Self {
-            generator: GeneratorSettings::default(),
-            bpm: 120,
-            swing: Swing::default(),
-            ghost_notes: false,
-            count_in: false,
-            endless: false,
-            gap_click: GapClick::default(),
-            tempo_ramp: TempoRamp::default(),
+            playback: PlaybackSettings::default(),
+            generator: GeneratorConfig::default(),
             metronome_sound: Sound::METRONOME_DEFAULT,
             rhythm_sound: Sound::RHYTHM_DEFAULT,
         }
@@ -118,102 +108,116 @@ pub(crate) fn all(library: &PresetLibrary) -> Vec<(PresetId, String)> {
     builtin.chain(user).collect()
 }
 
+/// The generator group of a built-in preset (neither endless nor with
+/// ghost notes).
 fn generator(
     subdivision: Subdivision,
     complexity: u8,
     bars: usize,
     time_signature: TimeSignature,
     space: f32,
-) -> GeneratorSettings {
-    GeneratorSettings {
+) -> GeneratorConfig {
+    let settings = GeneratorSettings {
         subdivision,
         complexity,
         bars,
         time_signature,
         space,
         ..GeneratorSettings::default()
-    }
+    };
+    GeneratorConfig { settings, ..GeneratorConfig::default() }
+}
+
+/// A built-in preset with the default sounds.
+fn preset(generator: GeneratorConfig, playback: PlaybackSettings) -> PresetSettings {
+    PresetSettings { playback, generator, ..PresetSettings::default() }
 }
 
 /// The presets shipped with the app.
 pub(crate) fn builtin_presets() -> Vec<(&'static str, PresetSettings)> {
     let four_four = TimeSignature::FOUR_FOUR;
-    let base = PresetSettings { count_in: true, ..PresetSettings::default() };
+    let base = PlaybackSettings { count_in: true, ..PlaybackSettings::default() };
     vec![
         (
             "8ths warm-up",
-            PresetSettings {
-                generator: generator(Subdivision::Eighths, 1, 4, four_four, 0.2),
-                bpm: 80,
-                ..base
-            },
+            preset(
+                generator(Subdivision::Eighths, 1, 4, four_four, 0.2),
+                PlaybackSettings { bpm: 80, ..base },
+            ),
         ),
         (
             "16th funk",
-            PresetSettings {
-                generator: generator(Subdivision::Sixteenths, 3, 2, four_four, 0.3),
-                bpm: 90,
-                swing: Swing { unit: SwingUnit::Sixteenths, percent: 56 },
-                ghost_notes: true,
-                ..base
-            },
+            preset(
+                GeneratorConfig {
+                    ghost_notes: true,
+                    ..generator(Subdivision::Sixteenths, 3, 2, four_four, 0.3)
+                },
+                PlaybackSettings {
+                    bpm: 90,
+                    swing: Swing { unit: SwingUnit::Sixteenths, percent: 56 },
+                    ..base
+                },
+            ),
         ),
         (
             "Triplet shuffle",
-            PresetSettings {
-                generator: generator(Subdivision::Triplets, 2, 4, four_four, 0.2),
-                bpm: 90,
-                ..base
-            },
+            preset(
+                generator(Subdivision::Triplets, 2, 4, four_four, 0.2),
+                PlaybackSettings { bpm: 90, ..base },
+            ),
         ),
         (
             "Sparse reading",
-            PresetSettings {
-                generator: generator(Subdivision::Sixteenths, 2, 4, four_four, 0.7),
-                bpm: 70,
-                endless: true,
-                ..base
-            },
+            preset(
+                GeneratorConfig {
+                    endless: true,
+                    ..generator(Subdivision::Sixteenths, 2, 4, four_four, 0.7)
+                },
+                PlaybackSettings { bpm: 70, ..base },
+            ),
         ),
         (
             "7/8 groove",
-            PresetSettings {
-                generator: generator(Subdivision::Sixteenths, 2, 4, TimeSignature::new(7, 8), 0.2),
+            preset(
+                generator(Subdivision::Sixteenths, 2, 4, TimeSignature::new(7, 8), 0.2),
                 // BPM counts quarters: the eighths run at 100 per minute.
-                bpm: 50,
-                ..base
-            },
+                PlaybackSettings { bpm: 50, ..base },
+            ),
         ),
         (
             "Inner time (gap click)",
-            PresetSettings {
-                generator: generator(Subdivision::Eighths, 2, 4, four_four, 0.2),
-                bpm: 90,
-                gap_click: GapClick {
-                    enabled: true,
-                    mode: GapMode::Pattern,
-                    on_bars: 2,
-                    off_bars: 2,
-                    mute: GapMute::Metronome,
-                    ..GapClick::default()
+            preset(
+                generator(Subdivision::Eighths, 2, 4, four_four, 0.2),
+                PlaybackSettings {
+                    bpm: 90,
+                    gap_click: GapClick {
+                        enabled: true,
+                        mode: GapMode::Pattern,
+                        on_bars: 2,
+                        off_bars: 2,
+                        mute: GapMute::Metronome,
+                        ..GapClick::default()
+                    },
+                    ..base
                 },
-                ..base
-            },
+            ),
         ),
         (
             "Speed builder",
-            PresetSettings {
-                generator: generator(Subdivision::Sixteenths, 1, 2, four_four, 0.1),
-                bpm: 70,
-                tempo_ramp: TempoRamp {
-                    enabled: true,
-                    target_bpm: 110,
-                    step_bpm: 5,
-                    every: 4,
-                    ..TempoRamp::default()
+            preset(
+                generator(Subdivision::Sixteenths, 1, 2, four_four, 0.1),
+                PlaybackSettings {
+                    bpm: 70,
+                    tempo_ramp: TempoRamp {
+                        enabled: true,
+                        target_bpm: 110,
+                        step_bpm: 5,
+                        every: 4,
+                        ..TempoRamp::default()
+                    },
+                    ..base
                 },
-                ..base
-            },
+            ),
         ),
     ]
 }
@@ -222,7 +226,7 @@ pub(crate) fn builtin_presets() -> Vec<(&'static str, PresetSettings)> {
 mod tests {
     use super::*;
     use grooph_measure::generator::supports_time_signature;
-    use grooph_measure::tempo::{MAX_BPM, MIN_BPM};
+    use grooph_measure::tempo::{DEFAULT_BPM, MAX_BPM, MIN_BPM};
 
     #[test]
     fn add_names_and_numbers_presets() {
@@ -239,11 +243,12 @@ mod tests {
         let mut lib = PresetLibrary::default();
         let a = lib.add("a", PresetSettings::default());
         let b = lib.add("b", PresetSettings::default());
-        let faster = PresetSettings { bpm: 150, ..PresetSettings::default() };
+        let mut faster = PresetSettings::default();
+        faster.playback.bpm = 150;
         assert!(lib.update(b, faster));
         assert!(!lib.update(42, faster));
-        assert_eq!(lib.get(a).unwrap().settings.bpm, 120);
-        assert_eq!(lib.get(b).unwrap().settings.bpm, 150);
+        assert_eq!(lib.get(a).unwrap().settings.playback.bpm, DEFAULT_BPM);
+        assert_eq!(lib.get(b).unwrap().settings.playback.bpm, 150);
         lib.remove(a);
         assert!(lib.get(a).is_none());
         // Ids are not reused after a delete.
@@ -263,8 +268,10 @@ mod tests {
 
     #[test]
     fn missing_fields_fall_back_to_defaults() {
-        let settings: PresetSettings = ron::from_str("(bpm: 95)").unwrap();
-        assert_eq!(settings, PresetSettings { bpm: 95, ..PresetSettings::default() });
+        let settings: PresetSettings = ron::from_str("(playback: (bpm: 95))").unwrap();
+        let mut want = PresetSettings::default();
+        want.playback.bpm = 95;
+        assert_eq!(settings, want);
     }
 
     #[test]
@@ -285,10 +292,11 @@ mod tests {
     #[test]
     fn builtin_presets_are_playable() {
         for (name, settings) in builtin_presets() {
-            assert!(supports_time_signature(settings.generator.time_signature), "{name}");
-            assert!((MIN_BPM..=MAX_BPM).contains(&settings.bpm), "{name}");
+            let generator = settings.generator.settings;
+            assert!(supports_time_signature(generator.time_signature), "{name}");
+            assert!((MIN_BPM..=MAX_BPM).contains(&settings.playback.bpm), "{name}");
             let mut rng = grooph_measure::generator::Rng::new(1);
-            grooph_measure::generator::generate_score(&settings.generator, &mut rng)
+            grooph_measure::generator::generate_score(&generator, &mut rng)
                 .unwrap_or_else(|e| panic!("{name}: {e:?}"));
         }
     }

@@ -6,8 +6,12 @@
 //! the library and presets. Here each field is read on its own, so a field
 //! that does not read falls back to its default alone, older versions are
 //! migrated, and whenever anything was dropped the stored text is kept under
-//! a backup key that later saves leave alone.
+//! a backup key that later saves leave alone. The documents and the settings
+//! groups ([`crate::settings`]) are restored field by field too.
 
+use crate::settings::{
+    DeviceSettings, FeedbackSettings, GeneratorConfig, PlaybackSettings, ViewSettings,
+};
 use crate::{PERSISTED_STATE_VERSION, PersistedState, SavedDoc};
 use grooph_measure::{BeatIdx, Cursor, Measure, Score};
 use log::{info, warn};
@@ -18,6 +22,73 @@ use std::fmt;
 /// The fields holding a rhythm document ([`SavedDoc`]), whose own fields
 /// are restored one by one too.
 const DOC_FIELDS: [&str; 2] = ["score_doc", "practice_doc"];
+
+/// The settings groups of version 4, each with the flat fields of earlier
+/// versions it is made of: (name before, name in the group).
+const SETTINGS_GROUPS: [(&str, &[(&str, &str)]); 5] = [
+    (
+        "playback",
+        &[
+            ("bpm", "bpm"),
+            ("count_in", "count_in"),
+            ("swing", "swing"),
+            ("gap_click", "gap_click"),
+            ("tempo_ramp", "tempo_ramp"),
+        ],
+    ),
+    (
+        "generator",
+        &[
+            ("generator_settings", "settings"),
+            ("endless", "endless"),
+            ("ghost_notes", "ghost_notes"),
+        ],
+    ),
+    (
+        "devices",
+        &[
+            ("audio_latency_enabled", "latency_enabled"),
+            ("audio_offset", "offset"),
+            ("midi_selected_port_id", "midi_port_id"),
+        ],
+    ),
+    (
+        "feedback",
+        &[
+            ("accuracy_enabled", "accuracy_enabled"),
+            ("flash_enabled", "flash_enabled"),
+            ("play_along", "play_along"),
+        ],
+    ),
+    (
+        "view",
+        &[
+            ("counting", "counting"),
+            ("sticking", "sticking"),
+            ("guide", "guide"),
+            ("show_score_tab", "show_score_tab"),
+        ],
+    ),
+];
+
+/// The groups of a preset's settings from version 4 on, and the flat fields
+/// of a preset saved before.
+const PRESET_GROUPS: [(&str, &[(&str, &str)]); 2] = [
+    (
+        "playback",
+        &[
+            ("bpm", "bpm"),
+            ("count_in", "count_in"),
+            ("swing", "swing"),
+            ("gap_click", "gap_click"),
+            ("tempo_ramp", "tempo_ramp"),
+        ],
+    ),
+    (
+        "generator",
+        &[("generator", "settings"), ("endless", "endless"), ("ghost_notes", "ghost_notes")],
+    ),
+];
 
 /// Prefix of the keys the stored text is backed up under, followed by the
 /// version it was saved with (`grooph_state_backup_v2`, then `_v2_2`, ...).
@@ -68,16 +139,15 @@ pub(crate) fn restore(saved: Option<&str>) -> (PersistedState, Option<StateBacku
     let version = stored_version.flatten().unwrap_or(PERSISTED_STATE_VERSION);
     let migrated = version < PERSISTED_STATE_VERSION && migrate(version, &mut fields);
     fields.retain(|(name, _)| name != "version");
-    // Within a document too, a field that does not read falls back alone.
-    let mut doc_dropped = false;
+    // Within a document or a settings group too, a field that does not read
+    // falls back alone.
+    let mut nested_dropped = false;
     for (name, raw) in &mut fields {
-        if DOC_FIELDS.contains(&name.as_str())
-            && let Some((repaired, dropped)) = repair_doc(raw)
-        {
+        if let Some((repaired, dropped)) = repair_field(name, raw) {
             for field in &dropped {
                 warn!("Saved state: `{name}.{field}` does not read, using its default");
             }
-            doc_dropped |= !dropped.is_empty();
+            nested_dropped |= !dropped.is_empty();
             *raw = repaired;
         }
     }
@@ -94,7 +164,7 @@ pub(crate) fn restore(saved: Option<&str>) -> (PersistedState, Option<StateBacku
     });
 
     let complete = dropped.is_empty()
-        && !doc_dropped
+        && !nested_dropped
         && read_together
         && version_read
         && (version == PERSISTED_STATE_VERSION || migrated);
@@ -156,7 +226,74 @@ fn migrate(version: u8, fields: &mut Vec<(String, Box<RawValue>)>) -> bool {
             carried &= push_ron(fields, "practice_doc", format!("Some({doc})"));
         }
     }
+    if version < 4 {
+        // Version 3 kept every setting in a flat field, the presets' too;
+        // version 4 in one group per feature.
+        carried &= group_fields(fields, &SETTINGS_GROUPS);
+        if let Some(raw) = take(fields, "presets") {
+            // Kept as it was when it is no library: the text is backed up.
+            let (presets, regrouped) = regroup_presets(&raw).unwrap_or((raw, false));
+            carried &= regrouped;
+            fields.push(("presets".to_owned(), presets));
+        }
+    }
     carried
+}
+
+/// Moves the flat `fields` named in `groups` into their groups. Whether
+/// each was stored at most once, and each group reads as RON.
+fn group_fields(fields: &mut Vec<Field>, groups: &[(&str, &[(&str, &str)])]) -> bool {
+    let mut carried = true;
+    // All taken first: a group may have the name of a field it replaces.
+    let grouped: Vec<(&str, Vec<Field>)> = groups
+        .iter()
+        .map(|(group, members)| {
+            let members = members
+                .iter()
+                .filter_map(|(before, name)| {
+                    let (raw, once) = take_last(fields, before);
+                    carried &= once;
+                    Some(((*name).to_owned(), raw?))
+                })
+                .collect();
+            (*group, members)
+        })
+        .collect();
+    for (group, members) in grouped {
+        if !members.is_empty() {
+            carried &= push_ron(fields, group, struct_ron(&members));
+        }
+    }
+    carried
+}
+
+/// A preset library saved before version 4 with each preset's settings in
+/// groups, and whether each field of them was stored once; `None` when it
+/// is no library of presets.
+fn regroup_presets(raw: &RawValue) -> Option<(Box<RawValue>, bool)> {
+    let Fields(mut library) = raw.into_rust().ok()?;
+    let mut regrouped = true;
+    for (name, raw) in &mut library {
+        if name != "presets" {
+            continue;
+        }
+        let presets: Vec<Fields> = raw.into_rust().ok()?;
+        let mut items = Vec::new();
+        for Fields(mut preset) in presets {
+            for (name, raw) in &mut preset {
+                if name == "settings" {
+                    let Fields(mut settings) = raw.into_rust().ok()?;
+                    regrouped &= group_fields(&mut settings, &PRESET_GROUPS);
+                    *raw = RawValue::from_boxed_ron(struct_ron(&settings).into_boxed_str()).ok()?;
+                }
+            }
+            items.push(struct_ron(&preset));
+        }
+        let list = format!("[{}]", items.join(","));
+        *raw = RawValue::from_boxed_ron(list.into_boxed_str()).ok()?;
+    }
+    let library = RawValue::from_boxed_ron(struct_ron(&library).into_boxed_str()).ok()?;
+    Some((library, regrouped))
 }
 
 /// Adds the field `name` with the value `ron`; whether it reads as RON.
@@ -165,15 +302,30 @@ fn push_ron(fields: &mut Vec<(String, Box<RawValue>)>, name: &str, ron: String) 
     raw.map(|raw| fields.push((name.to_owned(), raw))).is_ok()
 }
 
-/// A stored document (`(…)` or `Some((…))`) with only its fields that read,
+/// The stored field `name` with only its own fields that read, and the names
+/// of the ones dropped, for a document or a settings group; `None` for any
+/// other field, which reads or drops as a whole.
+fn repair_field(name: &str, raw: &RawValue) -> Option<(Box<RawValue>, Vec<String>)> {
+    match name {
+        _ if DOC_FIELDS.contains(&name) => repair::<SavedDoc>(raw),
+        "playback" => repair::<PlaybackSettings>(raw),
+        "generator" => repair::<GeneratorConfig>(raw),
+        "devices" => repair::<DeviceSettings>(raw),
+        "feedback" => repair::<FeedbackSettings>(raw),
+        "view" => repair::<ViewSettings>(raw),
+        _ => None,
+    }
+}
+
+/// A stored struct `T` (`(…)` or `Some((…))`) with only its fields that read,
 /// and the names of the ones dropped; `None` for `None` or for text that is
 /// no struct, which then reads or drops as a whole.
-fn repair_doc(raw: &RawValue) -> Option<(Box<RawValue>, Vec<String>)> {
+fn repair<T: DeserializeOwned>(raw: &RawValue) -> Option<(Box<RawValue>, Vec<String>)> {
     let (Fields(fields), some) = match raw.into_rust::<Fields>() {
         Ok(fields) => (fields, false),
         Err(_) => (raw.into_rust::<Option<Fields>>().ok()??, true),
     };
-    let (kept, dropped) = partition_fields::<SavedDoc>(&fields);
+    let (kept, dropped) = partition_fields::<T>(&fields);
     let doc = struct_ron(kept);
     let doc = if some { format!("Some({doc})") } else { doc };
     let dropped = dropped.into_iter().map(|(name, _)| name.clone()).collect();
@@ -255,11 +407,26 @@ impl<'de> Deserialize<'de> for Fields {
 
 #[cfg(test)]
 mod tests {
-    use super::{BACKUP_KEY_PREFIX, DOC_FIELDS, Fields, StateBackup, field, restore};
-    use crate::presets::builtin_presets;
+    use super::{
+        BACKUP_KEY_PREFIX, DOC_FIELDS, Fields, SETTINGS_GROUPS, StateBackup, field, repair_field,
+        restore, struct_ron,
+    };
+    use crate::guide::Guide;
+    use crate::play_along::{PlayAlongSettings, TapKey};
+    use crate::presets::{PresetSettings, builtin_presets};
+    use crate::settings::{
+        DeviceSettings, FeedbackSettings, GeneratorConfig, PlaybackSettings, ViewSettings,
+    };
     use crate::shell::Tab;
-    use crate::{PERSISTED_STATE_VERSION, PersistedState, SavedDoc};
+    use crate::{
+        CountingBase, CountingSettings, PERSISTED_STATE_VERSION, PersistedState, SavedDoc,
+        StickingSettings,
+    };
+    use grooph_audio::{AudioSettings, GapClick, GapMode, Sound, TempoRamp};
+    use grooph_measure::counting::CountingSystem;
     use grooph_measure::duration::e;
+    use grooph_measure::generator::{GeneratorSettings, Subdivision};
+    use grooph_measure::swing::{Swing, SwingUnit};
     use grooph_measure::{Beat, Cursor, Measure, Score, TimeSignature};
     use ron::value::RawValue;
     use std::collections::HashMap;
@@ -267,7 +434,8 @@ mod tests {
     /// A saved state with a pattern in the library, a user preset and a
     /// non-default tempo and tab.
     fn saved_state() -> PersistedState {
-        let mut s = PersistedState { bpm: 93, tab: Tab::Score, ..Default::default() };
+        let mut s = PersistedState { tab: Tab::Score, ..Default::default() };
+        s.playback.bpm = 93;
         let mut m = Measure::new(TimeSignature::THREE_FOUR);
         m.first_voice_mut().set_beat(0, Beat::note(e())).unwrap();
         s.library.add("Groove".into(), Score::single(m), 93);
@@ -289,7 +457,7 @@ mod tests {
     fn a_complete_state_restores_without_backup() {
         let (s, backup) = restore(Some(&saved_ron()));
         assert_library_and_presets_kept(&s);
-        assert_eq!(s.bpm, 93);
+        assert_eq!(s.playback.bpm, 93);
         assert_eq!(s.tab, Tab::Score);
         assert!(backup.is_none());
         assert!(restore(None).1.is_none());
@@ -303,7 +471,7 @@ mod tests {
         let (s, backup) = restore(Some(&saved));
         assert_eq!(s.tab, PersistedState::default().tab);
         assert_library_and_presets_kept(&s);
-        assert_eq!(s.bpm, 93);
+        assert_eq!(s.playback.bpm, 93);
         let backup = backup.expect("the stored text is backed up");
         assert_eq!(backup.ron, saved);
         assert_eq!(backup.version, PERSISTED_STATE_VERSION);
@@ -338,7 +506,7 @@ mod tests {
             assert!(doc.dirty);
             assert!(s.score_doc.dirty && s.practice_doc.as_ref().unwrap().dirty);
             assert_library_and_presets_kept(&s);
-            assert_eq!(s.bpm, 93);
+            assert_eq!(s.playback.bpm, 93);
             assert_eq!(backup.unwrap().ron, saved);
         }
     }
@@ -346,8 +514,12 @@ mod tests {
     /// The fields of a version 2 state: the score tab's document flat, and
     /// Practice's rhythm as `practice_score` if `practice`.
     fn version_2_state(practice: bool) -> String {
+        // The settings flat as in version 3, the score tab's document as
+        // `saved_state`'s.
         let state = saved_state();
-        let fields = ron::to_string(&state).unwrap();
+        let fields = STATE_V3;
+        let saved_doc = format!("score_doc:{}", ron::to_string(&state.score_doc).unwrap());
+        assert!(fields.contains(&saved_doc));
         let (doc, practice_doc) = (&state.score_doc, state.practice_doc.as_ref());
         assert!(practice_doc.is_none());
         let start = fields.find("score_doc:").unwrap();
@@ -369,7 +541,7 @@ mod tests {
         };
         let fields = format!("{}{flat}{practice}{}", &fields[..start], &fields[end..]);
         let fields = fields.replace(",practice_doc:None", "");
-        fields.replacen(&format!("version:{PERSISTED_STATE_VERSION}"), "version:2", 1)
+        fields.replacen("version:3", "version:2", 1)
     }
 
     fn practice_score() -> Score {
@@ -403,7 +575,7 @@ mod tests {
                 None => assert!(!practice),
             }
             assert_library_and_presets_kept(&s);
-            assert_eq!(s.bpm, 93);
+            assert_eq!(s.playback.bpm, 93);
             let doc = s.score_doc.into_doc(&s.library);
             assert_eq!(doc.active_pattern_id, Some(pattern));
             assert!(doc.dirty);
@@ -461,9 +633,9 @@ mod tests {
 
     #[test]
     fn a_field_stored_twice_keeps_the_last_and_is_backed_up() {
-        let saved = saved_ron().replacen('(', "(bpm:60,", 1);
+        let saved = saved_ron().replacen('(', "(playback:(bpm:60),", 1);
         let (s, backup) = restore(Some(&saved));
-        assert_eq!(s.bpm, 93);
+        assert_eq!(s.playback.bpm, 93);
         assert_library_and_presets_kept(&s);
         assert_eq!(backup.unwrap().ron, saved);
     }
@@ -471,8 +643,197 @@ mod tests {
     #[test]
     fn text_that_does_not_read_is_backed_up() {
         let (s, backup) = restore(Some("(bpm: 93, library: ("));
-        assert_eq!(s.bpm, PersistedState::default().bpm);
+        assert_eq!(s.playback.bpm, PersistedState::default().playback.bpm);
         assert_eq!(backup.unwrap().ron, "(bpm: 93, library: (");
+    }
+
+    /// A state saved with version 3 (`testdata/state_v3.ron`, written by
+    /// the app before the settings groups) in which every setting differs
+    /// from its default, and a user preset's too; with a pattern in the
+    /// library.
+    const STATE_V3: &str = include_str!("testdata/state_v3.ron");
+
+    /// The settings of [`STATE_V3`], in groups.
+    fn every_setting_changed() -> PersistedState {
+        let mut s = PersistedState {
+            playback: PlaybackSettings {
+                bpm: 93,
+                count_in: true,
+                swing: Swing { unit: SwingUnit::Sixteenths, percent: 61 },
+                gap_click: GapClick {
+                    enabled: true,
+                    mode: GapMode::Random,
+                    on_bars: 3,
+                    off_bars: 1,
+                    ..GapClick::default()
+                },
+                tempo_ramp: TempoRamp {
+                    enabled: true,
+                    target_bpm: 140,
+                    step_bpm: 4,
+                    every: 3,
+                    keep_reached: true,
+                    ..TempoRamp::default()
+                },
+            },
+            generator: GeneratorConfig {
+                settings: GeneratorSettings {
+                    subdivision: Subdivision::Triplets,
+                    complexity: 3,
+                    bars: 4,
+                    time_signature: TimeSignature::THREE_FOUR,
+                    space: 0.6,
+                    custom_figures_enabled: true,
+                    ..GeneratorSettings::default()
+                },
+                endless: true,
+                ghost_notes: true,
+            },
+            devices: DeviceSettings {
+                latency_enabled: false,
+                offset: 0.042,
+                midi_port_id: Some("port-7".into()),
+            },
+            feedback: FeedbackSettings {
+                accuracy_enabled: true,
+                flash_enabled: true,
+                play_along: PlayAlongSettings {
+                    tap_enabled: false,
+                    tap_key: TapKey::D,
+                    mic_enabled: true,
+                    midi_offset_ms: 12.5,
+                    ..PlayAlongSettings::default()
+                },
+            },
+            view: ViewSettings {
+                counting: CountingSettings {
+                    base: CountingBase::Triplet,
+                    system: CountingSystem::Takadimi,
+                    above: true,
+                },
+                sticking: StickingSettings { shown: false, above: true },
+                guide: Guide::EverySecondBar,
+                show_score_tab: true,
+            },
+            audio_settings: AudioSettings {
+                downbeat: 0.31,
+                metronome_sound: Sound::Claves,
+                ..AudioSettings::default()
+            },
+            tab: Tab::Practice,
+            editing: true,
+            ..PersistedState::default()
+        };
+        let mut preset = builtin_presets()[1].1;
+        preset.playback.bpm = 77;
+        preset.playback.count_in = false;
+        preset.playback.tempo_ramp.enabled = true;
+        preset.playback.gap_click.enabled = true;
+        preset.generator.endless = true;
+        preset.metronome_sound = Sound::Xylophone;
+        preset.rhythm_sound = Sound::Click;
+        s.presets.add("Mine", preset);
+        let mut m = Measure::new(TimeSignature::THREE_FOUR);
+        m.first_voice_mut().set_beat(0, Beat::note(e())).unwrap();
+        s.library.add("Groove".into(), Score::single(m), 93);
+        s
+    }
+
+    /// The fields of a struct's RON that differ from those of `default`.
+    fn changed_fields(value: &str, default: &str) -> Vec<String> {
+        let Fields(value) = ron::from_str(value).unwrap();
+        let Fields(default) = ron::from_str(default).unwrap();
+        value
+            .iter()
+            .filter(|(name, raw)| {
+                field(&default, name).is_none_or(|d| d.get_ron() != raw.get_ron())
+            })
+            .map(|(name, _)| name.clone())
+            .collect()
+    }
+
+    #[test]
+    fn every_settings_group_is_restored_field_by_field() {
+        // A group without its arm in `repair_field` would read as a whole.
+        let saved = ron::to_string(&every_setting_changed()).unwrap();
+        let Fields(fields) = ron::from_str(&saved).unwrap();
+        for (group, members) in SETTINGS_GROUPS {
+            let raw = field(&fields, group).unwrap_or_else(|| panic!("{group} is saved"));
+            let (_, broken) = members[0];
+            let Fields(mut inner) = raw.into_rust().unwrap();
+            let value = inner.iter_mut().find(|(name, _)| name == broken).unwrap();
+            value.1 = RawValue::from_boxed_ron("Unknown".into()).unwrap();
+            let raw = RawValue::from_boxed_ron(struct_ron(&inner).into_boxed_str()).unwrap();
+            let (_, dropped) = repair_field(group, &raw).unwrap_or_else(|| panic!("{group}"));
+            assert_eq!(dropped, [broken], "{group}");
+        }
+    }
+
+    #[test]
+    fn every_setting_of_the_test_state_differs_from_its_default() {
+        let s = every_setting_changed();
+        let d = PersistedState::default();
+        let groups = [
+            (ron::to_string(&s.playback), ron::to_string(&d.playback)),
+            (ron::to_string(&s.generator), ron::to_string(&d.generator)),
+            (ron::to_string(&s.devices), ron::to_string(&d.devices)),
+            (ron::to_string(&s.feedback), ron::to_string(&d.feedback)),
+            (ron::to_string(&s.view), ron::to_string(&d.view)),
+        ];
+        for ((value, default), (group, members)) in groups.into_iter().zip(SETTINGS_GROUPS) {
+            let (value, default) = (value.unwrap(), default.unwrap());
+            let all: Vec<_> = members.iter().map(|(_, name)| name.to_string()).collect();
+            assert_eq!(changed_fields(&value, &default), all, "{group}");
+        }
+        // The user preset, in every group.
+        let preset = ron::to_string(&s.presets.presets[0].settings).unwrap();
+        let default = ron::to_string(&PresetSettings::default()).unwrap();
+        let all = ["playback", "generator", "metronome_sound", "rhythm_sound"];
+        assert_eq!(changed_fields(&preset, &default), all);
+        assert_ne!(s.tab, d.tab);
+        assert_ne!(s.editing, d.editing);
+    }
+
+    #[test]
+    fn a_version_3_state_is_migrated_without_loss() {
+        assert!(STATE_V3.starts_with("(version:3,"));
+        let (s, backup) = restore(Some(STATE_V3));
+        assert!(backup.is_none());
+        assert_eq!(s.version, PERSISTED_STATE_VERSION);
+        let want = ron::to_string(&every_setting_changed()).unwrap();
+        assert_eq!(ron::to_string(&s).unwrap(), want);
+    }
+
+    #[test]
+    fn a_state_of_this_version_restores_every_setting() {
+        let saved = ron::to_string(&every_setting_changed()).unwrap();
+        let (s, backup) = restore(Some(&saved));
+        assert!(backup.is_none());
+        assert_eq!(ron::to_string(&s).unwrap(), saved);
+    }
+
+    #[test]
+    fn a_setting_that_does_not_read_falls_back_alone() {
+        // In a group, and in a flat field of version 3 that goes into one.
+        let current = ron::to_string(&every_setting_changed()).unwrap();
+        for (saved, broken) in [
+            (current.as_str(), "guide:EverySecondBar"),
+            (STATE_V3, "guide:EverySecondBar"),
+            (current.as_str(), "swing:(unit:Sixteenths,percent:61)"),
+            (STATE_V3, "swing:(unit:Sixteenths,percent:61)"),
+        ] {
+            assert_eq!(saved.matches(broken).count(), 1, "{broken}");
+            let saved = saved.replace(broken, &broken.replace(':', ":Unknown"));
+            let (s, backup) = restore(Some(&saved));
+            let mut want = every_setting_changed();
+            want.view.guide = Guide::default();
+            if broken.starts_with("swing") {
+                want.view.guide = Guide::EverySecondBar;
+                want.playback.swing = Swing::default();
+            }
+            assert_eq!(ron::to_string(&s).unwrap(), ron::to_string(&want).unwrap(), "{broken}");
+            assert_eq!(backup.unwrap().ron, saved);
+        }
     }
 
     #[test]
@@ -496,7 +857,7 @@ mod tests {
         let (s, backup) = restore(Some(&saved));
         assert_eq!(ron::to_string(&s.score_doc.score), ron::to_string(&Score::single(m)));
         assert_eq!(s.score_doc.cursor, Cursor::at(0, 2));
-        assert_eq!(s.bpm, 87);
+        assert_eq!(s.playback.bpm, 87);
         assert_eq!(s.version, PERSISTED_STATE_VERSION);
         assert_eq!(backup.unwrap().version, 1);
     }

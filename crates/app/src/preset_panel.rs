@@ -8,19 +8,12 @@ use crate::score_change::ScoreChange;
 impl Grooph {
     /// The current settings as a preset.
     pub(crate) fn preset_snapshot(&self) -> PresetSettings {
-        let generator = &self.editor.generator;
-        let audio = &self.playback_ctl.audio_cfg;
+        let sounds = &self.playback_ctl.audio_cfg.settings;
         PresetSettings {
-            generator: generator.settings,
-            bpm: self.playback_ctl.bpm,
-            swing: audio.swing,
-            ghost_notes: generator.ghost_notes,
-            count_in: audio.count_in,
-            endless: generator.endless,
-            gap_click: audio.gap,
-            tempo_ramp: audio.ramp,
-            metronome_sound: audio.settings.metronome_sound,
-            rhythm_sound: audio.settings.rhythm_sound,
+            playback: self.playback_ctl.settings,
+            generator: self.editor.generator.config,
+            metronome_sound: sounds.metronome_sound,
+            rhythm_sound: sounds.rhythm_sound,
         }
     }
 
@@ -29,19 +22,13 @@ impl Grooph {
         let Some((_, preset)) = presets::lookup(&self.editor.presets, id) else {
             return;
         };
-        let generator = &mut self.editor.generator;
-        generator.settings = preset.generator;
-        generator.ghost_notes = preset.ghost_notes;
-        generator.endless = preset.endless;
-        let audio = &mut self.playback_ctl.audio_cfg;
-        audio.swing = preset.swing;
-        audio.count_in = preset.count_in;
-        audio.gap = preset.gap_click;
-        audio.ramp = preset.tempo_ramp;
-        audio.settings.metronome_sound = preset.metronome_sound;
-        audio.settings.rhythm_sound = preset.rhythm_sound;
-        if self.playback_ctl.bpm != preset.bpm {
-            self.playback_ctl.bpm = preset.bpm;
+        self.editor.generator.config = preset.generator;
+        let sounds = &mut self.playback_ctl.audio_cfg.settings;
+        sounds.metronome_sound = preset.metronome_sound;
+        sounds.rhythm_sound = preset.rhythm_sound;
+        let tempo_changed = self.playback_ctl.settings.bpm != preset.playback.bpm;
+        self.playback_ctl.settings = preset.playback;
+        if tempo_changed {
             self.score_changed(ScoreChange::Tempo);
         }
         self.editor.active_preset = Some(id);

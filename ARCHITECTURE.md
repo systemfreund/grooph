@@ -268,7 +268,7 @@ spread across callers.
    kit's staff, asking first if the score has unsaved changes
    (`PendingLoad::NewKitScore`); it is offered while the score tab is
    shown. That tab is not finished: the tab bar hides it, with its
-   "BETA" pill, until the developer setting `UiState::show_score_tab`
+   "BETA" pill, until the developer setting `ViewSettings::show_score_tab`
    shows it, but a link or pattern still opens it. A drum is struck by one voice at a time:
    a tool whose edit makes two voices strike an instrument of the kit at
    the same tick is refused (`Measure::doubled_instruments`, compared
@@ -563,8 +563,9 @@ grooph's metronome runs inside AI chats as an
   when the count-in ends.
 
 - Presets (`crates/app/src/presets.rs`, UI and apply/snapshot in
-  `preset_panel.rs`): `PresetSettings` = `GeneratorSettings` + BPM, swing, ghost
-  notes, count-in, endless, gap click, tempo ramp and both voice sounds. Built-in
+  `preset_panel.rs`): `PresetSettings` = the app's `PlaybackSettings` (BPM,
+  count-in, swing, gap click, tempo ramp) and `GeneratorConfig` (generator
+  settings, endless, ghost notes) groups and both voice sounds. Built-in
   presets are code (`builtin_presets`, addressed as `PresetId::BuiltIn(index)`),
   never stored; user presets live in `PresetLibrary` in `PersistedState`.
   `active_preset` is not persisted; at startup it is the first preset equal to
@@ -829,7 +830,7 @@ grooph's metronome runs inside AI chats as an
 - The staff's em is capped so one row fits the panel's height. The row's
   height is measured from its laid-out notes (`StaffLayout::room`,
   `RowRoom::height`).
-- Windows narrower than `NARROW_MAX_WIDTH` (600 pt, `UiShell::narrow_screen`)
+- Windows narrower than `NARROW_MAX_WIDTH` (600 pt, `StaffView::narrow_screen`)
   get tighter staff spacing, so glyphs are bigger on phones.
 - While a tempo ramp runs, the card shows the tempo being played ("BPM now").
 - Share (right of play; not in the editors) builds a score link with tempo
@@ -947,6 +948,17 @@ If you add new tools/shortcuts, remember:
 - App state and the frame loop: `crates/app/src/lib.rs` (`Grooph`), `state.rs` (its parts), `documents.rs`
   (the three pages' documents), `undo.rs`.
 - Saved state: `crates/app/src/lib.rs` (`PersistedState`), `persist.rs` (field-wise restore, migration, backup).
+- Settings: `crates/app/src/settings.rs`, one `serde` group per feature (`PlaybackSettings`, `GeneratorConfig`,
+  `DeviceSettings`, `FeedbackSettings`, `ViewSettings`; the sounds are `grooph_audio::AudioSettings`). The same
+  struct is held at runtime, saved in `PersistedState` and, for playback and the generator, in presets, so
+  `from_app`, the restore and `preset_snapshot`/`apply_preset` copy groups. A new setting is a field in its group
+  (with `#[serde(default)]` from the group, it falls back alone, see `persist::repair_field`), or a new group:
+  then it gets an entry in `PersistedState` and `repair_field`. Renaming or moving a saved field bumps
+  `PERSISTED_STATE_VERSION` with a step in `persist::migrate` (version 4 moved the flat fields of version 3 into
+  the groups, `SETTINGS_GROUPS`/`PRESET_GROUPS`). The default tempo is `grooph_measure::tempo::DEFAULT_BPM`.
+- UI state: `UiShell` (`state.rs`) holds `mode`, `platform` and feature groups only (`Fonts`, `LayoutSettings`,
+  `ViewSettings`, `StaffView`, `LibraryUi`, `Dialogs`, `ShellState`, the host and the embed). No new field goes
+  directly into `UiShell` or `PlaybackState`: it goes into its feature's group, or a new group.
 - Editing: `crates/app/src/tool_palette.rs` (grid, applying a tool), `tools.rs` (tool registry, shortcuts),
   `kit_palette.rs` (the kit's instruments).
 - After a score or timing change: `crates/app/src/score_change.rs`. Call sites make the change, then report its

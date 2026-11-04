@@ -627,7 +627,7 @@ impl Grooph {
         let playback = &self.playback_ctl.playback;
         let heard = match playback.last_update {
             Some(last) => playback.heard_tick + (now - last).max(0.0) * ticks_per_sec,
-            None => tick - self.playback_ctl.audio_cfg.latency_s() * ticks_per_sec,
+            None => tick - self.playback_ctl.devices.latency_s() * ticks_per_sec,
         };
         Some(heard.rem_euclid(bar_ticks.max(1.0)))
     }
@@ -646,7 +646,7 @@ impl Grooph {
         };
         let bar_ticks = DEFAULT_GRID.ticks_per_measure(ts) as f64;
         let ticks_per_sec = self.score_timing().ticks_per_sec_in_measure(0);
-        tick - self.playback_ctl.audio_cfg.latency_s() * ticks_per_sec >= -bar_ticks
+        tick - self.playback_ctl.devices.latency_s() * ticks_per_sec >= -bar_ticks
     }
 
     /// The ring with the click bar, `height` tall at the bottom of the space
@@ -781,7 +781,7 @@ impl Grooph {
         // cursor.
         if let Some(turn) = current_turn.filter(|_| !muted) {
             let to = radius + thickness(ClickLevel::Strong) * radius / 2.0 + 4.0;
-            let stroke = playback_cursor_stroke(self.ui.staff_em, highlight_color(visuals));
+            let stroke = playback_cursor_stroke(self.ui.staff.em, highlight_color(visuals));
             painter.line_segment(
                 [at_turn(center, hand_from, turn), at_turn(center, to, turn)],
                 stroke,
@@ -1333,7 +1333,7 @@ mod tests {
         };
         let mut output = ctx.run_ui(input, |ui| {
             app.apply_style(ui);
-            app.ui.narrow_screen = true;
+            app.ui.staff.narrow_screen = true;
             app.shell_ui(ui);
         });
         output.textures_delta.clear();
@@ -1577,7 +1577,7 @@ mod tests {
         let mut app = Grooph::new(&cc);
         // A fresh app opens the metronome; start from practice.
         app.select_tab(Tab::Practice);
-        app.playback_ctl.accuracy.enabled = true;
+        app.playback_ctl.feedback.accuracy_enabled = true;
         assert!(app.shows_accuracy_marks());
         // Quarters: a generated rhythm can be all rests.
         app.editor.docs.practice.score = Score::single(Measure::new_init(

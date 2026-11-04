@@ -208,7 +208,7 @@ mod tests {
         let cc = crate::test_support::creation_context(egui::Context::default());
         let mut app = Grooph::new(&cc);
         app.select_tab(Tab::Practice);
-        app.playback_ctl.accuracy.enabled = true;
+        app.playback_ctl.feedback.accuracy_enabled = true;
         let ts = TimeSignature::FOUR_FOUR;
         let doc = app.editor.doc_mut();
         doc.score = quarters(&[ts, ts]);
@@ -402,7 +402,7 @@ mod tests {
     fn a_tempo_change_anchors_the_clock_and_marks_the_shown_score_unsaved() {
         let mut app = practice_app();
         play_at(&mut app, 30.0);
-        app.playback_ctl.bpm += 10;
+        app.playback_ctl.settings.bpm += 10;
         let before = clock::now_seconds();
         app.score_changed(ScoreChange::Tempo);
         assert_anchored_at(&app, 30.0, before);

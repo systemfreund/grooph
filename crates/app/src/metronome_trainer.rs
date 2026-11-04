@@ -38,7 +38,7 @@ impl Grooph {
         if self.calibrating() {
             return TempoRamp::default();
         }
-        let mut ramp = self.playback_ctl.audio_cfg.ramp;
+        let mut ramp = self.playback_ctl.settings.tempo_ramp;
         if self.endless_runs() {
             ramp.unit = RampUnit::Bars;
         }
@@ -46,9 +46,9 @@ impl Grooph {
     }
 
     pub(crate) fn tempo_ramp_settings(&mut self, ui: &mut egui::Ui) {
-        let start = self.playback_ctl.bpm;
+        let start = self.playback_ctl.settings.bpm;
         let endless = self.endless_runs();
-        let ramp = &mut self.playback_ctl.audio_cfg.ramp;
+        let ramp = &mut self.playback_ctl.settings.tempo_ramp;
         ui.checkbox(&mut ramp.enabled, "Change the tempo while playing")
             .on_hover_text("Starts at the BPM setting and steps towards the target tempo");
         ui.add_enabled_ui(ramp.enabled, |ui| {

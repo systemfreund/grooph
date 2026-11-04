@@ -17,7 +17,9 @@ impl Grooph {
         if !input.is_connected() {
             return "Off".to_owned();
         }
-        midi.selected_port_id
+        self.playback_ctl
+            .devices
+            .midi_port_id
             .as_ref()
             .and_then(|id| input.find_port_index_by_id(id))
             .and_then(|idx| midi.available_ports.get(idx))
@@ -29,6 +31,7 @@ impl Grooph {
     /// reconnects the chosen one if it is back.
     pub(crate) fn refresh_midi_ports(&mut self) {
         let midi = &mut self.playback_ctl.midi;
+        let port_id = &self.playback_ctl.devices.midi_port_id;
         let Some(input) = midi.input.as_mut() else {
             return;
         };
@@ -39,7 +42,7 @@ impl Grooph {
             Ok(ports) => midi.available_ports = ports,
             Err(e) => warn!("Failed to get MIDI input ports: {}", e),
         }
-        if let Some(port_id) = midi.selected_port_id.as_ref()
+        if let Some(port_id) = port_id.as_ref()
             && let Some(idx) = input.find_port_index_by_id(port_id)
             && !input.is_connected()
             && let Err(e) = input.connect(idx)
@@ -57,13 +60,14 @@ impl Grooph {
         );
         ui.add_space(8.0);
         let midi = &mut self.playback_ctl.midi;
+        let port_id = &mut self.playback_ctl.devices.midi_port_id;
         let Some(input) = midi.input.as_mut() else {
             ui.label("MIDI input is not available here.");
             return false;
         };
         let current = input
             .is_connected()
-            .then(|| midi.selected_port_id.as_ref().and_then(|id| input.find_port_index_by_id(id)))
+            .then(|| port_id.as_ref().and_then(|id| input.find_port_index_by_id(id)))
             .flatten();
         let options: Vec<_> = std::iter::once((None, "Off".to_owned()))
             .chain(midi.available_ports.iter().enumerate().map(|(i, name)| (Some(i), name.clone())))
@@ -81,13 +85,13 @@ impl Grooph {
         match picked {
             Some(None) => {
                 let _ = input.disconnect();
-                midi.selected_port_id = None;
+                *port_id = None;
                 ui.data_mut(|d| d.remove::<String>(failed_id));
                 close = true;
             }
             Some(Some(idx)) => match input.connect(idx) {
                 Ok(()) => {
-                    midi.selected_port_id = input.port_id(idx);
+                    *port_id = input.port_id(idx);
                     ui.data_mut(|d| d.remove::<String>(failed_id));
                     close = true;
                 }
@@ -95,7 +99,7 @@ impl Grooph {
                     // `connect` closed the old connection first, so nothing
                     // is connected now; forget the old port too.
                     warn!("Failed to connect MIDI input: {}", e);
-                    midi.selected_port_id = None;
+                    *port_id = None;
                     let name = midi.available_ports[idx].clone();
                     ui.data_mut(|d| d.insert_temp(failed_id, name));
                 }
