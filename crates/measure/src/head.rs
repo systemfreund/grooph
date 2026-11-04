@@ -33,6 +33,7 @@ pub enum Instrument {
     HighTom,
     Ride,
     HiHat,
+    /// The last variant: [`Instrument::COUNT`] counts up to it.
     Crash,
 }
 
@@ -216,8 +217,10 @@ pub static REGISTER: [InstrumentSpec; Instrument::COUNT] = {
 };
 
 impl Instrument {
-    /// How many instruments there are.
-    pub const COUNT: usize = 10;
+    /// How many instruments there are. It sizes [`REGISTER`], so a variant
+    /// added before [`Instrument::Crash`] without a register entry fails to
+    /// compile. Keep `Crash` last, or name the new last variant here.
+    pub const COUNT: usize = Instrument::Crash as usize + 1;
 
     /// Every instrument, in the order of the register.
     pub const ALL: [Instrument; Self::COUNT] = {
