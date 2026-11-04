@@ -408,7 +408,8 @@ impl<'de> Deserialize<'de> for Fields {
 #[cfg(test)]
 mod tests {
     use super::{
-        BACKUP_KEY_PREFIX, DOC_FIELDS, Fields, SETTINGS_GROUPS, StateBackup, field, restore,
+        BACKUP_KEY_PREFIX, DOC_FIELDS, Fields, SETTINGS_GROUPS, StateBackup, field, repair_field,
+        restore, struct_ron,
     };
     use crate::guide::Guide;
     use crate::play_along::{PlayAlongSettings, TapKey};
@@ -749,6 +750,23 @@ mod tests {
             })
             .map(|(name, _)| name.clone())
             .collect()
+    }
+
+    #[test]
+    fn every_settings_group_is_restored_field_by_field() {
+        // A group without its arm in `repair_field` would read as a whole.
+        let saved = ron::to_string(&every_setting_changed()).unwrap();
+        let Fields(fields) = ron::from_str(&saved).unwrap();
+        for (group, members) in SETTINGS_GROUPS {
+            let raw = field(&fields, group).unwrap_or_else(|| panic!("{group} is saved"));
+            let (_, broken) = members[0];
+            let Fields(mut inner) = raw.into_rust().unwrap();
+            let value = inner.iter_mut().find(|(name, _)| name == broken).unwrap();
+            value.1 = RawValue::from_boxed_ron("Unknown".into()).unwrap();
+            let raw = RawValue::from_boxed_ron(struct_ron(&inner).into_boxed_str()).unwrap();
+            let (_, dropped) = repair_field(group, &raw).unwrap_or_else(|| panic!("{group}"));
+            assert_eq!(dropped, [broken], "{group}");
+        }
     }
 
     #[test]
