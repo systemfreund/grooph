@@ -139,18 +139,7 @@ impl MicInput {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn now_seconds() -> f64 {
-    use std::sync::OnceLock;
-    use std::time::Instant;
-    static ORIGIN: OnceLock<Instant> = OnceLock::new();
-    ORIGIN.get_or_init(Instant::now).elapsed().as_secs_f64()
-}
-
-#[cfg(target_arch = "wasm32")]
-pub(crate) fn now_seconds() -> f64 {
-    web_sys::window().and_then(|w| w.performance()).map(|p| p.now() / 1000.0).unwrap_or(0.0)
-}
+pub(crate) use grooph_clock::now_seconds;
 
 /// Whether `label` names an iPhone's or iPad's built-in microphone.
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]

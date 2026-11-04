@@ -2,9 +2,8 @@
 
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex, PoisonError};
-#[cfg(not(target_arch = "wasm32"))]
-use std::time::Instant;
 
+use grooph_clock::OffsetTracker;
 use midir::{Ignore, MidiInput as MidirInput, MidiInputConnection, MidiInputPort};
 
 use crate::source::MidiMessageSource;
@@ -19,49 +18,22 @@ const MIDI_STOP: u8 = 0xFC;
 /// MIDI continue message byte
 const MIDI_CONTINUE: u8 = 0xFB;
 
-#[cfg(not(target_arch = "wasm32"))]
-pub(crate) type ClockInstant = Instant;
-
-#[cfg(target_arch = "wasm32")]
+/// A time on the app clock ([`grooph_clock::now_seconds`]), in seconds.
 pub(crate) type ClockInstant = f64;
 
 #[inline]
 pub(crate) fn clock_now() -> ClockInstant {
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        Instant::now()
-    }
-
-    #[cfg(target_arch = "wasm32")]
-    {
-        web_sys::js_sys::Date::now() / 1000.0
-    }
+    grooph_clock::now_seconds()
 }
 
 #[inline]
 pub(crate) fn clock_interval_seconds(now: ClockInstant, last: ClockInstant) -> f32 {
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        now.duration_since(last).as_secs_f32()
-    }
-
-    #[cfg(target_arch = "wasm32")]
-    {
-        (now - last) as f32
-    }
+    (now - last) as f32
 }
 
 #[inline]
 pub(crate) fn clock_elapsed_seconds(now: ClockInstant, origin: ClockInstant) -> f64 {
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        now.duration_since(origin).as_secs_f64()
-    }
-
-    #[cfg(target_arch = "wasm32")]
-    {
-        now - origin
-    }
+    now - origin
 }
 
 /// MIDI input events for note handling
@@ -384,29 +356,17 @@ impl MidiClockState {
 /// Maps midir's timestamps (microseconds since an origin each backend picks)
 /// onto the app clock, so hit timing does not depend on how late the callback
 /// runs. The offset between the two is read with every message; callback
-/// latency only makes a reading larger, so the smallest recent one is kept.
+/// latency only makes a reading larger ([`OffsetTracker`]).
 #[derive(Default)]
 struct TimestampMap {
-    offset: Option<f64>,
+    offset: OffsetTracker,
 }
 
 impl TimestampMap {
-    /// How far the kept offset may drift up per message (s): follows the slow
-    /// drift between the two clocks.
-    const DRIFT: f64 = 1e-5;
-    /// A reading this far above the kept offset means the backend's clock
-    /// jumped (e.g. restarted); start over from it.
-    const JUMP: f64 = 0.05;
-
     /// The app-clock time (s) of a message stamped `micros`, received at `now`.
     fn map(&mut self, micros: u64, now: f64) -> f64 {
         let stamped = micros as f64 / 1e6;
-        let reading = now - stamped;
-        let offset = match self.offset {
-            Some(kept) if reading - kept < Self::JUMP => reading.min(kept + Self::DRIFT),
-            _ => reading,
-        };
-        self.offset = Some(offset);
+        let offset = self.offset.observe(now - stamped);
         // Never later than the message arrived.
         (stamped + offset).min(now)
     }

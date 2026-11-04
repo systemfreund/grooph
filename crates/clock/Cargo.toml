@@ -1,0 +1,15 @@
+[package]
+name = "grooph-clock"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+# The one monotonic clock of the app and its input devices, and the mapping
+# of a device's own timestamps onto it.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+web-sys = { workspace = true }
+
+[lints]
+workspace = true

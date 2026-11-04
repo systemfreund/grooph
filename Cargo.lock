@@ -1705,6 +1705,7 @@ dependencies = [
  "env_logger",
  "getrandom",
  "grooph-audio",
+ "grooph-clock",
  "grooph-layout",
  "grooph-link",
  "grooph-measure",
@@ -1730,6 +1731,13 @@ dependencies = [
  "log",
  "rodio",
  "serde",
+ "web-sys",
+]
+
+[[package]]
+name = "grooph-clock"
+version = "0.1.0"
+dependencies = [
  "web-sys",
 ]
 
@@ -1769,6 +1777,7 @@ name = "grooph-mic"
 version = "0.1.0"
 dependencies = [
  "cpal",
+ "grooph-clock",
  "js-sys",
  "log",
  "wasm-bindgen",
@@ -1780,9 +1789,9 @@ dependencies = [
 name = "grooph-midi"
 version = "0.1.0"
 dependencies = [
+ "grooph-clock",
  "midir",
  "thiserror 2.0.21",
- "web-sys",
 ]
 
 [[package]]

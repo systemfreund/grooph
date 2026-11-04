@@ -1,6 +1,8 @@
 //! Web input: `getUserMedia` into an AudioWorklet that forwards sample
 //! blocks to the page, where the detector runs.
 
+use grooph_clock::OffsetTracker;
+
 use crate::{MicStatus, OnsetDetector, Shared, is_builtin_ios_mic, now_seconds};
 use js_sys::{Array, Float32Array, Object, Reflect};
 use std::cell::{Cell, RefCell};
@@ -212,28 +214,15 @@ async fn start(shared: Arc<Shared>, inner: &Inner) -> Result<(), JsValue> {
 /// Maps audio context time to the `performance.now()` timeline. The offset
 /// between the two is read whenever a block arrives; `currentTime` lags by
 /// up to a render quantum and messages may arrive late, which both only make
-/// a reading larger, so the smallest recent one is kept.
+/// a reading larger ([`OffsetTracker`]).
 #[derive(Default)]
 struct ContextClock {
-    offset: Option<f64>,
+    offset: OffsetTracker,
 }
 
 impl ContextClock {
-    /// How far the kept offset may drift up per block (s): follows the slow
-    /// drift between the two clocks.
-    const DRIFT: f64 = 1e-5;
-    /// A reading this far above the kept offset means the audio clock jumped
-    /// (a glitch or a stall); start over from it.
-    const JUMP: f64 = 0.05;
-
     fn map(&mut self, ctx: &AudioContext, context_time: f64) -> f64 {
-        let reading = now_seconds() - ctx.current_time();
-        let offset = match self.offset {
-            Some(kept) if reading - kept < Self::JUMP => reading.min(kept + Self::DRIFT),
-            _ => reading,
-        };
-        self.offset = Some(offset);
-        context_time + offset
+        context_time + self.offset.observe(now_seconds() - ctx.current_time())
     }
 }
 

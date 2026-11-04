@@ -7,9 +7,9 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+grooph-clock = { workspace = true }
 thiserror = { workspace = true }
 midir = { workspace = true }
-web-sys = { workspace = true }
 
 [lints]
 workspace = true

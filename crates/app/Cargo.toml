@@ -12,6 +12,7 @@ grooph-audio = { workspace = true }
 grooph-layout = { workspace = true }
 grooph-link = { workspace = true }
 grooph-render = { workspace = true }
+grooph-clock = { workspace = true }
 grooph-midi = { workspace = true }
 grooph-mic = { workspace = true }
 eframe = { workspace = true }

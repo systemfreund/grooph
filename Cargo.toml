@@ -4,6 +4,7 @@ members = [
     "crates/android",
     "crates/app",
     "crates/audio",
+    "crates/clock",
     "crates/layout",
     "crates/link",
     "crates/link-check",
@@ -35,6 +36,7 @@ todo = "warn"
 
 [workspace.dependencies]
 grooph-audio = { path = "crates/audio" }
+grooph-clock = { path = "crates/clock" }
 grooph-layout = { path = "crates/layout" }
 grooph-link = { path = "crates/link" }
 grooph-measure = { path = "crates/measure" }
