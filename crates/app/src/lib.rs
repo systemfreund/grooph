@@ -227,7 +227,14 @@ impl Default for PersistedState {
     fn default() -> Self {
         Self {
             version: PERSISTED_STATE_VERSION,
-            score_doc: SavedDoc::default(),
+            // The score tab starts with an empty drum groove.
+            score_doc: SavedDoc {
+                score: kit_palette::empty_groove(
+                    TimeSignature::FOUR_FOUR,
+                    grooph_measure::Voicing::default(),
+                ),
+                ..SavedDoc::default()
+            },
             practice_doc: None,
             document: Document::Score,
             bpm: grooph_link::DEFAULT_BPM,
@@ -882,9 +889,9 @@ impl Grooph {
         // A drum struck by two voices at once is a change to save.
         let undoubled = score.undouble_instruments();
         let bpm = pattern.bpm;
-        // A rhythm of the one line, saved before the score tab was for
-        // drum grooves, opens in Practice.
-        if score.staff == grooph_measure::StaffKind::Line {
+        // Every pattern opens in the score tab, on either staff; while that
+        // tab is hidden, a rhythm of the one line opens in Practice.
+        if self.pattern_opens_on_practice(&score) {
             self.replace_practice_from_link(score);
             self.playback_ctl.bpm = bpm;
             self.ui.picker = None;
@@ -912,14 +919,9 @@ impl Grooph {
     /// Entry point for the load button: if the working score has unsaved changes,
     /// defer to the confirmation dialog; otherwise load immediately.
     pub(crate) fn request_load_pattern(&mut self, id: u64) {
-        // A rhythm of the one line goes to Practice, which a load replaces
-        // without asking: the score tab's changes are not at stake.
-        if self
-            .editor
-            .library
-            .get(id)
-            .is_some_and(|p| p.score.staff == grooph_measure::StaffKind::Line)
-        {
+        // A rhythm for Practice, which a load replaces without asking: the
+        // score tab's changes are not at stake.
+        if self.editor.library.get(id).is_some_and(|p| self.pattern_opens_on_practice(&p.score)) {
             self.load_pattern(id);
             return;
         }
@@ -1014,13 +1016,22 @@ impl Grooph {
         }
     }
 
-    /// Whether `link`'s rhythm opens on the practice page: a rhythm of the
-    /// one line (the score tab is for drum grooves), or while the score tab
-    /// is hidden (a developer setting), so it does not open on a page the
-    /// user does not have, nor ask about that page's unsaved changes.
+    /// Whether `link`'s rhythm opens on the practice page: one of the one
+    /// line not shared from the score tab (as every link from before), or
+    /// any while the score tab is hidden (a developer setting), so it does
+    /// not open on a page the user does not have, nor ask about that page's
+    /// unsaved changes.
     fn opens_on_practice(&self, link: &SharedLink) -> bool {
         !self.ui.show_score_tab
-            || matches!(&link.content, Some(LinkContent::Score(s)) if s.staff == grooph_measure::StaffKind::Line)
+            || (!link.score_tab
+                && matches!(&link.content, Some(LinkContent::Score(s)) if s.staff == grooph_measure::StaffKind::Line))
+    }
+
+    /// Whether a library pattern of `score` opens on the practice page: one
+    /// of the one line while the score tab is hidden. Otherwise every pattern
+    /// opens in the score tab.
+    fn pattern_opens_on_practice(&self, score: &Score) -> bool {
+        !self.ui.show_score_tab && score.staff == grooph_measure::StaffKind::Line
     }
 
     /// A rhythm shared from the practice page replaces its rhythm, as a new
@@ -1051,7 +1062,7 @@ impl Grooph {
         match pending {
             PendingLoad::Pattern(id) => self.load_pattern(id),
             PendingLoad::Link(link) => self.apply_link(*link),
-            PendingLoad::NewKitScore => self.new_kit_score(),
+            PendingLoad::NewScore(staff) => self.new_score(staff),
         }
     }
 
@@ -1398,18 +1409,7 @@ impl Grooph {
 
         let mut generator =
             GeneratorState::new(state.generator_settings, state.endless, state.ghost_notes);
-        // The score tab edits a drum groove: a rhythm of the one line saved
-        // there before starts it afresh (rhythms are Practice's).
         let score_doc = state.score_doc.into_doc(&state.library);
-        let score_doc = if score_doc.score.staff == grooph_measure::StaffKind::Kit {
-            score_doc
-        } else {
-            let ts = score_doc.score.measures()[0].time_signature();
-            RhythmDoc::new(
-                kit_palette::empty_groove(ts, grooph_measure::Voicing::default()),
-                Cursor::start(),
-            )
-        };
         // Saved before Practice had its own: Practice starts with a new rhythm.
         let practice_doc = match state.practice_doc {
             Some(doc) => doc.into_doc(&state.library),
@@ -2224,7 +2224,7 @@ mod tests {
     }
 
     #[test]
-    fn a_rhythm_of_the_one_line_opens_on_practice_never_in_the_score_tab() {
+    fn a_rhythm_of_the_one_line_opens_where_it_was_shared_from() {
         use super::Grooph;
         use grooph_measure::notation::{format_score, parse_score};
 
@@ -2232,29 +2232,77 @@ mod tests {
         let mut app = Grooph::new(&cc);
         app.ui.show_score_tab = true;
         app.select_tab(Tab::Score);
-        // The score tab starts with a groove, not a rhythm.
         assert!(app.editor.doc().score.staff == grooph_measure::StaffKind::Kit);
-        let url = {
+        // Shared from Practice, or written before the score tab said so:
+        // Practice, without touching the score tab.
+        let shared_from = |tab| {
             let mut from = Grooph::new(&cc);
-            from.select_tab(Tab::Practice);
+            from.ui.show_score_tab = true;
+            from.select_tab(tab);
             from.editor.doc_mut().score = parse_score("3/4 q q e e").unwrap();
             from.share_link_url().unwrap()
         };
+        for url in [shared_from(Tab::Practice), "https://grooph.app/?v=2&r=3/4+q+q+e+e".into()] {
+            assert!(!url.contains("p=score"), "{url}");
+            app.select_tab(Tab::Score);
+            app.open_link(
+                grooph_link::parse_query(url.split_once('?').unwrap().1).unwrap().unwrap(),
+            );
+            assert_eq!(app.tab(), Tab::Practice, "{url}");
+            assert_eq!(format_score(&app.editor.doc().score).unwrap(), "3/4 q q e e");
+            assert!(app.editor.docs.score.score.staff == grooph_measure::StaffKind::Kit);
+        }
+        // Shared from the score tab: the score tab.
+        let url = shared_from(Tab::Score);
+        assert!(url.ends_with("&p=score"), "{url}");
         app.open_link(grooph_link::parse_query(url.split_once('?').unwrap().1).unwrap().unwrap());
-        assert_eq!(app.tab(), Tab::Practice);
-        assert_eq!(format_score(&app.editor.doc().score).unwrap(), "3/4 q q e e");
-        assert!(app.editor.docs.score.score.staff == grooph_measure::StaffKind::Kit);
-        // So does one from the library, as the pattern loaded and unchanged.
-        let id = app.editor.library.add("Old".into(), parse_score("4/4 h h").unwrap(), 90);
-        app.select_tab(Tab::Score);
-        // Without asking about the score tab's changes, which it leaves alone.
+        assert_eq!(app.tab(), Tab::Score);
+        assert_eq!(format_score(&app.editor.docs.score.score).unwrap(), "3/4 q q e e");
+        // While the score tab is hidden, Practice.
+        let mut hidden = Grooph::new(&cc);
+        hidden
+            .open_link(grooph_link::parse_query(url.split_once('?').unwrap().1).unwrap().unwrap());
+        assert_eq!(hidden.tab(), Tab::Practice);
+        assert_eq!(format_score(&hidden.editor.doc().score).unwrap(), "3/4 q q e e");
+    }
+
+    #[test]
+    fn every_library_pattern_opens_in_the_score_tab() {
+        use super::Grooph;
+        use grooph_measure::notation::{format_score, parse_score};
+
+        let cc = crate::test_support::creation_context(eframe::egui::Context::default());
+        let mut app = Grooph::new(&cc);
+        app.ui.show_score_tab = true;
+        // A rhythm of the one line, as saved before the score tab wrote them.
+        let old = app.editor.library.add("Old".into(), parse_score("4/4 h h").unwrap(), 90);
+        let groove = parse_score("kit 4/4 H:q S-H:q H:q S-H:q ; K:h K:h").unwrap();
+        let groove = app.editor.library.add("Groove".into(), groove, 100);
+        for (id, rhythm) in [(old, "4/4 h h"), (groove, "4/4 H:q S-H:q H:q S-H:q ; K:h K:h")] {
+            app.select_tab(Tab::Practice);
+            let practice_before = format_score(&app.editor.docs.practice.score).unwrap();
+            app.request_load_pattern(id);
+            assert!(app.ui.pending_load.is_none());
+            assert_eq!(app.tab(), Tab::Score);
+            assert_eq!(format_score(&app.editor.doc().score).unwrap(), rhythm);
+            assert_eq!(app.editor.docs.score.active_pattern_id, Some(id));
+            assert_eq!(format_score(&app.editor.docs.practice.score).unwrap(), practice_before);
+        }
+        // Over unsaved changes in the score tab, it asks first, on either staff.
         app.editor.docs.score.dirty = true;
-        app.request_load_pattern(id);
+        app.request_load_pattern(old);
+        assert!(
+            matches!(app.ui.pending_load, Some(crate::state::PendingLoad::Pattern(id)) if id == old)
+        );
+        // While the score tab is hidden, the one line's opens in Practice, as
+        // before, without asking about the score tab's changes.
+        app.ui.pending_load = None;
+        app.ui.show_score_tab = false;
+        app.request_load_pattern(old);
         assert!(app.ui.pending_load.is_none());
-        assert!(app.editor.docs.score.dirty);
         assert_eq!(app.tab(), Tab::Practice);
         assert_eq!(format_score(&app.editor.doc().score).unwrap(), "4/4 h h");
-        assert!(!app.editor.docs.practice.dirty);
+        assert!(app.editor.docs.score.dirty);
     }
 
     #[test]

@@ -11,8 +11,8 @@ use eframe::egui::{
     UiBuilder, vec2,
 };
 use grooph_layout::staff_layout::{ROOM_BELOW_EM, StaffOpts, build_staff_layout};
-use grooph_measure::Score;
 use grooph_measure::generator::effective_subdivision;
+use grooph_measure::{Score, StaffKind};
 use grooph_render::staff::{PlaybackMarks, draw_staff};
 
 /// Glyph size of a pattern's preview.
@@ -463,10 +463,17 @@ impl Grooph {
             ui.weak("The score is not saved.");
         }
         ui.add_space(4.0);
-        // A drum groove is a score of its own, on the kit's staff, shown
-        // in the score tab: offered while that tab is.
-        if self.ui.show_score_tab && ui.button("🎼 New drum groove").clicked() {
-            self.request_new_kit_score();
+        // A new score of the score tab, on the kit's staff or the one
+        // line: offered while that tab is shown.
+        if self.ui.show_score_tab {
+            ui.horizontal(|ui| {
+                if ui.button("🎼 New drum groove").clicked() {
+                    self.request_new_score(StaffKind::Kit);
+                }
+                if ui.button("🎵 New rhythm").clicked() {
+                    self.request_new_score(StaffKind::Line);
+                }
+            });
         }
         ui.add_space(8.0);
         if self.editor.library.patterns.is_empty() {
@@ -618,8 +625,12 @@ impl Grooph {
                 "The link replaces the current measure, which has unsaved changes. Save first?",
                 "Open link",
             ),
-            Some(PendingLoad::NewKitScore) => (
+            Some(PendingLoad::NewScore(StaffKind::Kit)) => (
                 "A new drum groove replaces the current score, which has unsaved changes. Save first?",
+                "Start",
+            ),
+            Some(PendingLoad::NewScore(StaffKind::Line)) => (
+                "A new rhythm replaces the current score, which has unsaved changes. Save first?",
                 "Start",
             ),
         };

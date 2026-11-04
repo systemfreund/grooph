@@ -366,10 +366,13 @@ spread across callers.
   and the MCP tool offer only `poly`: models get the notation wrong too often. A score link replaces the score
   tab's score (and opens that tab) through `PendingLoad::Link` and the
   unsaved-changes dialog; a generator link, or a score link of the one
-  line (the score tab edits drum grooves only), replaces Practice's rhythm
-  without asking; so does any score link while the score tab is hidden
-  (`opens_on_practice`). The share buttons (`share_link`) build a link with
-  `SharedLink::to_url`.
+  line without `p=score`, replaces Practice's rhythm without asking; so
+  does any score link while the score tab is hidden (`opens_on_practice`).
+  `p=score` (`SharedLink::score_tab`, only with `r`) says the score was
+  shared from the score tab, which a rhythm of the one line opens on too;
+  links without it, all those from before, keep the rule by the staff. The
+  share buttons (`share_link`) build a link with `SharedLink::to_url` and
+  write `p=score` on the score tab.
 - The link format is documented for AI agents in
   `crates/app/assets/seo/llms.txt`; keep it in sync.
 
@@ -746,10 +749,13 @@ grooph's metronome runs inside AI chats as an
 - Three documents (`crates/app/src/documents.rs`), one per page: the
   metronome's click bar, Practice's generated rhythm (thrown away freely)
   and the score tab's score (written, loaded from the library or opened
-  from a score link). The score tab's score is always a drum groove on the
-  kit's staff (`kit_palette::empty_groove` starts one, also for a saved
-  state with a rhythm there); a rhythm of the one line from a link or the
-  library opens on Practice instead (`opens_on_practice`, `load_pattern`).
+  from a score link), on the kit's staff or the one line (#352): the
+  library's "New drum groove" and "New rhythm" start one
+  (`Grooph::new_score`; `kit_palette::empty_groove` also starts a fresh
+  state). Every library pattern opens there, on either staff; while the
+  score tab is hidden, one of the one line opens on Practice
+  (`pattern_opens_on_practice`). A score link of the one line opens on
+  Practice unless shared from the score tab (`opens_on_practice`).
   Each keeps its score, cursor, undo history, dirty flag
   and pattern (`RhythmDoc`, all three in `EditorState::docs`).
 - Each page edits its own document in place: the metronome's "Edit clicks",

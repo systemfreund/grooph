@@ -15,7 +15,7 @@
 //! score's `Voicing` writes it in (the feet below, the hands above), onto the
 //! beat sounding then. A tap on a head on the staff picks that
 //! instrument. The library's "New drum groove" starts a score
-//! on the kit's staff.
+//! on the kit's staff, its "New rhythm" one on the one line.
 
 use crate::Grooph;
 use crate::Mode;
@@ -109,23 +109,27 @@ impl Grooph {
         doc.cursor = doc.score.cursor_in_voice(cursor, voice);
     }
 
-    /// Start a new drum groove in the score tab, asking first if its score
-    /// has unsaved changes (as a pattern loaded from the library does).
-    pub(crate) fn request_new_kit_score(&mut self) {
+    /// Start a new score in the score tab, on `staff`, asking first if its
+    /// score has unsaved changes (as a pattern loaded from the library does).
+    pub(crate) fn request_new_score(&mut self, staff: StaffKind) {
         match self.editor.docs.score.dirty {
-            true => self.ui.pending_load = Some(PendingLoad::NewKitScore),
-            false => self.new_kit_score(),
+            true => self.ui.pending_load = Some(PendingLoad::NewScore(staff)),
+            false => self.new_score(staff),
         }
     }
 
-    /// Replace the score tab's score with a new drum groove, one bar of the
-    /// current meter with its two voices of rests on the kit's staff (an
-    /// undoable change), and edit it.
-    pub(crate) fn new_kit_score(&mut self) {
+    /// Replace the score tab's score with a new one, one bar of the current
+    /// meter (an undoable change), and edit it: a drum groove with its two
+    /// voices of rests on the kit's staff, or a bar of rests on the one line.
+    pub(crate) fn new_score(&mut self, staff: StaffKind) {
         self.stop_transport();
         self.show_document(Document::Score);
-        let groove = empty_groove(self.current_measure().time_signature(), Voicing::default());
-        self.replace_score(groove, Origin::New);
+        let ts = self.current_measure().time_signature();
+        let score = match staff {
+            StaffKind::Kit => empty_groove(ts, Voicing::default()),
+            StaffKind::Line => Score::single(Measure::new(ts)),
+        };
+        self.replace_score(score, Origin::New);
         self.ui.picker = None;
         self.select_tab(Tab::Score);
         self.ui.mode = Mode::Edit;

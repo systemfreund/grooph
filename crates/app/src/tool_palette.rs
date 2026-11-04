@@ -1544,10 +1544,52 @@ mod tests {
     }
 
     #[test]
+    fn a_new_rhythm_of_the_one_line_is_written_saved_and_loaded_in_the_score_tab() {
+        let mut app = editing("kit 3/4 H:q H:q H:q ; K:h.");
+        app.ui.show_score_tab = true;
+        app.new_score(grooph_measure::StaffKind::Line);
+        assert_eq!(app.tab(), Tab::Score);
+        assert_eq!(app.ui.mode, Mode::Edit);
+        assert_eq!(text(&app), "3/4 r:q r:q r:q");
+        // The one line's tools: no instruments, heads or techniques.
+        let rows = super::grid_rows(!app.staff_model().one_line(), true);
+        assert_eq!(rows.len(), 1);
+        assert!(!rows[0].iter().any(|c| matches!(c, super::Cell::Instrument(_))));
+        assert!(!app.tool_applicable(ToolId::ModifyToggleHead.tool()));
+        assert!(app.tool_applicable(ToolId::ModifyStickingRight.tool()));
+        for _ in 0..2 {
+            apply(&mut app, ToolId::InsertNoteE);
+        }
+        assert_eq!(text(&app), "3/4 e e r:q r:q");
+        apply(&mut app, ToolId::EditUndo);
+        assert_eq!(text(&app), "3/4 e r:e r:q r:q");
+        // The new score is undone too, back to the groove.
+        while app.can_undo() {
+            apply(&mut app, ToolId::EditUndo);
+        }
+        assert_eq!(text(&app), "3/4 H:q H:q H:q ; K:h.");
+        while app.can_redo() {
+            apply(&mut app, ToolId::EditRedo);
+        }
+        assert_eq!(text(&app), "3/4 e e r:q r:q");
+        // Saved and loaded again in the score tab.
+        let id = app.save_pattern_as();
+        app.new_score(grooph_measure::StaffKind::Kit);
+        app.select_tab(Tab::Practice);
+        app.request_load_pattern(id);
+        // Past "Discard" for the new groove, a change not saved.
+        let pending = app.ui.pending_load.take().unwrap();
+        app.finish_pending_load(pending);
+        assert_eq!(app.tab(), Tab::Score);
+        assert_eq!(text(&app), "3/4 e e r:q r:q");
+        assert!(!app.editor.doc().dirty);
+    }
+
+    #[test]
     fn the_rock_groove_can_be_entered_on_the_kit() {
         use grooph_measure::Instrument::{HiHat, Kick, Snare};
         let mut app = editing("4/4 q q q q");
-        app.new_kit_score();
+        app.new_score(grooph_measure::StaffKind::Kit);
         assert_eq!(text(&app), "kit 4/4 r:q r:q r:q r:q ; r:q r:q r:q r:q");
         // The hi-hat's eighths, step by step.
         app.pick_instrument(HiHat);

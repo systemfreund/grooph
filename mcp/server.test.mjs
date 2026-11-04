@@ -261,8 +261,9 @@ test("the link keys are the parser's", () => {
   const source = fs.readFileSync(path.join(here, "../crates/link/src/lib.rs"), "utf8");
   const parse = source.slice(source.indexOf("fn parse_query_with_default_version"), source.indexOf("let swing = match"));
   const keys = [...parse.matchAll(/^\s*"(\w+)" =>/gm)].map((m) => m[1]);
-  // `hiderests` goes with `r` only: a link with it is a rhythm already.
-  assert.deepEqual([...METRONOME_KEYS, ...GENERATOR_KEYS, "v", "r", "hiderests"].sort(), keys.sort());
+  // `hiderests` and `p` (the score tab) go with `r` only: a link with them is
+  // a rhythm already, which the tool does not open.
+  assert.deepEqual([...METRONOME_KEYS, ...GENERATOR_KEYS, "v", "r", "hiderests", "p"].sort(), keys.sort());
 });
 
 test("a link that is no metronome is an error", async () => {
@@ -270,6 +271,9 @@ test("a link that is no metronome is an error", async () => {
   const rhythm = await call({ link: "https://grooph.app/?v=2&r=q+q+q+q", bpm: 90 });
   assert.equal(rhythm.isError, true);
   assert.match(rhythm.content[0].text, /rhythm, not a metronome/);
+  // So is one shared from the score tab.
+  const scoreTab = await call({ link: "https://grooph.app/?v=2&r=q+q+q+q&p=score", bpm: 90 });
+  assert.match(scoreTab.content[0].text, /rhythm, not a metronome/);
   assert.match((await call({ link: "https://grooph.app/?v=2&bpm=90" })).content[0].text, /no time signature/);
   // Version 1 counted bpm in the meter's beat unit: not taken over as quarters.
   assert.match((await call({ link: "https://grooph.app/?bpm=140&ts=7/8", subdivision: "s" })).content[0].text, /old link/);
