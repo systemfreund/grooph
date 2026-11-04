@@ -9,8 +9,8 @@ use eframe::egui;
 use eframe::egui::{FontId, Frame, Rect, Response, Stroke};
 use grooph_layout::pixel_layout::{NoteLayout, compute_em, onset_head};
 use grooph_layout::staff_layout::{
-    LEGIBILITY_FLOOR_EM, LOWER_VOICE_LABEL_ROOM_EM, PlacedMeasure, ROOM_BELOW_EM,
-    ROOM_BELOW_WITH_LABELS_EM, StaffLayout, StaffOpts, hit_test_head, hit_test_voice,
+    LEGIBILITY_FLOOR_EM, PlacedMeasure, ROOM_BELOW_EM, StaffLayout, StaffOpts, hit_test_head,
+    hit_test_voice,
 };
 use grooph_measure::grid::DEFAULT_GRID;
 use grooph_measure::tempo::ScoreTiming;
@@ -49,7 +49,6 @@ impl Grooph {
             compute_em(&viewport_rect, width_cap_factor, ui)
         };
         let font_id = FontId::new(em, self.ui.music_font_id.family.clone());
-        let count_config = self.build_count_config();
 
         // Tighter spacing on narrow screens makes the glyphs
         // bigger: the staff shrinks its em until a measure
@@ -74,17 +73,9 @@ impl Grooph {
             // The compact card in a chat has no meter in a card: the staff
             // shows it. So does the score tab's, whatever its meters.
             time_signature_first: self.compact_card() || self.tab() == crate::shell::Tab::Score,
-            room_below_em: if count_config.is_some() {
-                ROOM_BELOW_WITH_LABELS_EM
-            } else {
-                ROOM_BELOW_EM
-            },
-            // With a lower voice, count labels go under it.
-            lower_label_room_em: if count_config.is_some() {
-                LOWER_VOICE_LABEL_ROOM_EM
-            } else {
-                0.0
-            },
+            room_below_em: ROOM_BELOW_EM,
+            // The count labels and the stickings, each on its side.
+            text_rows: self.text_rows(),
             // In the metronome every click is its own to tap. The editor
             // shows the whole rest too: its beats keep their places for the
             // cursor and the taps.

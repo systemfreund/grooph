@@ -923,7 +923,19 @@ impl Grooph {
     fn score_rows(&mut self, ui: &mut Ui) {
         self.guide_row(ui);
         self.hidden_rests_row(ui);
+        self.sticking_row(ui);
         self.shared_rows(ui);
+    }
+
+    /// Where the stickings go, and the switch that shows or hides them;
+    /// in the tabs where they are written.
+    fn sticking_row(&mut self, ui: &mut Ui) {
+        let sticking = &mut self.ui.sticking;
+        let side = crate::pickers::SIDES.iter().find(|(a, _)| *a == sticking.above);
+        let side = side.map_or("", |(_, label)| label);
+        if split_row(ui, "Sticking", side, &mut sticking.shown).clicked() {
+            self.ui.picker = Some(Picker::Sticking);
+        }
     }
 
     /// The rests a kit score leaves out in bars of two voices; opens its
@@ -1294,6 +1306,7 @@ impl Grooph {
         switch_row(ui, "Ghost notes", &mut generator.ghost_notes);
         self.guide_row(ui);
         self.timing_feedback_row(ui);
+        self.sticking_row(ui);
         self.shared_rows(ui);
         // Edited here, as the metronome's "Edit clicks".
         if value_row(ui, "Edit rhythm", "✏").clicked() {

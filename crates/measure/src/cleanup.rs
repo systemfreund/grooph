@@ -27,7 +27,7 @@ use crate::duration::{Duration, TupletSpec, q};
 use crate::editing::{TUPLET_TOOLS, VALUE_BUTTONS};
 use crate::grid::DEFAULT_GRID;
 use crate::spelling::{self, Lengths, Piece};
-use crate::{Beat, Heads, Measure, TimeSignature, TupletMark, VoiceBar};
+use crate::{Beat, Measure, TimeSignature, TupletMark, VoiceBar};
 use std::ops::Range;
 
 /// Grid ticks in a unit of [`crate::spelling`], a thirty-second.
@@ -423,25 +423,28 @@ impl VoiceBar {
         rewrite(ts, &notes, &kept)
     }
 
-    /// A voice of `ts` playing `heads` at each tick of `notes` (ticks from
-    /// the start of the measure, ascending), written as
+    /// A voice of `ts` playing the heads and sticking of a note at each
+    /// tick of `notes` (ticks from the start of the measure, ascending; the
+    /// notes' durations and tuplet marks do not count), written as
     /// [`VoiceBar::respelled`] writes notes. `None` if a tick is off the
     /// thirty-second grid, outside the measure or given twice, if a note
     /// has no heads, or for a meter not over quarters, eighths or
     /// sixteenths.
     pub fn from_onsets(
         ts: TimeSignature,
-        notes: impl IntoIterator<Item = (u32, Heads)>,
+        notes: impl IntoIterator<Item = (u32, Beat)>,
     ) -> Option<VoiceBar> {
         let end = to_unit(DEFAULT_GRID.ticks_per_measure(&ts))?;
         let mut written: Vec<(u32, Beat)> = Vec::new();
-        for (tick, heads) in notes {
+        for (tick, note) in notes {
             let unit = to_unit(tick)?;
             let after_last = written.last().is_none_or(|&(last, _)| last < unit);
-            if heads.is_empty() || unit >= end || !after_last {
+            if note.is_rest() || unit >= end || !after_last {
                 return None;
             }
-            written.push((unit, Beat::with_heads(q(), heads)));
+            let mut beat = Beat::with_heads(q(), *note.heads());
+            beat.set_sticking(note.sticking()).expect("a note's heads");
+            written.push((unit, beat));
         }
         rewrite(ts, &written, &[])
     }
@@ -739,7 +742,7 @@ mod tests {
     fn from_onsets_writes_a_voice() {
         let ts = TimeSignature::FOUR_FOUR;
         let q = DEFAULT_GRID.ticks_per_beat(&ts);
-        let kick = || Heads::new([Head::new(Instrument::Kick)]).unwrap();
+        let kick = || Beat::note_of(crate::duration::e(), Instrument::Kick);
         let voice = VoiceBar::from_onsets(ts, [(0, kick()), (q * 5 / 2, kick())]).unwrap();
         let mut m = Measure::new(ts);
         *m.first_voice_mut() = voice;
@@ -747,5 +750,24 @@ mod tests {
         assert!(VoiceBar::from_onsets(ts, [(q, kick()), (0, kick())]).is_none());
         assert!(VoiceBar::from_onsets(ts, [(4 * q, kick())]).is_none());
         assert!(VoiceBar::from_onsets(ts, [(1, kick())]).is_none());
+        // A note keeps its sticking.
+        let snare = measure("4/4 S:e@L r:e r:h.").first_voice().beats()[0];
+        let voice = VoiceBar::from_onsets(ts, [(q, snare)]).unwrap();
+        *m.first_voice_mut() = voice;
+        assert_eq!(text(&m), "4/4 r:q S:q@L r:h");
+    }
+
+    #[test]
+    fn clean_up_keeps_each_notes_sticking() {
+        for (before, after) in [
+            ("4/4 S:e@R S:e@L H:h@RL r:q", "4/4 S:e@R S:e@L H:q@RL r:h"),
+            ("4/4 q@R h@L q@R", "4/4 q@R q@L r:q q@R"),
+            ("4/4 t8@R t8@L t8 r:q r:h", "4/4 t8@R t8@L t8 r:q r:h"),
+            ("4/4 st16@R r:st16 st16@L r:st16 st16 r:st16 r:q r:h", "4/4 t8@R t8@L t8 r:q r:h"),
+        ] {
+            let mut m = measure(before);
+            m.clean_up();
+            assert_eq!(text(&m), after, "{before}");
+        }
     }
 }

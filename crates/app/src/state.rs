@@ -11,7 +11,7 @@ use crate::platform::PlatformRuntime;
 use crate::play_along::PlayAlongState;
 use crate::presets::{PresetId, PresetLibrary};
 use crate::shell::ShellState;
-use crate::{CountingSettings, Host, Mode, TransportState};
+use crate::{CountingSettings, Host, Mode, StickingSettings, TransportState};
 use eframe::egui::TextStyle;
 use eframe::egui::emath::{ease_in_ease_out, lerp};
 use eframe::epaint::FontId;
@@ -318,6 +318,7 @@ pub(crate) struct UiShell {
     pub(crate) baseline_light: Option<Vec<(TextStyle, f32)>>,
     pub(crate) layout: LayoutSettings,
     pub(crate) counting: CountingSettings,
+    pub(crate) sticking: StickingSettings,
     /// Whether the staff flashes on every beat while playing. Off by default.
     pub(crate) flash_enabled: bool,
     /// Whether the tab bar shows the score tab, which is not finished yet

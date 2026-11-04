@@ -39,6 +39,9 @@ const FILL_TILE_SIZE: f32 = 48.0;
 /// Swing amounts offered in the swing picker (percent of a pair).
 const SWING_PRESETS: [u8; 6] = [MIN_SWING_PERCENT, 55, 60, 66, 70, MAX_SWING_PERCENT];
 
+/// The sides of the staff a row of text goes on, as `above` and its name.
+pub(crate) const SIDES: [(bool, &str); 2] = [(true, "Above"), (false, "Below")];
+
 /// Setting edited in the picker dialog ([`Grooph::settings_picker`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Picker {
@@ -50,8 +53,10 @@ pub(crate) enum Picker {
     Swing,
     /// What the staff shows while playing.
     Guide,
-    /// The count under the staff and the words it is spoken in.
+    /// The count under the staff, the words it is spoken in and its side.
     Counting,
+    /// The side of the staff the stickings go on.
+    Sticking,
     Preset,
     /// The metronome tab's meter.
     MetronomeMeter,
@@ -422,6 +427,7 @@ impl Grooph {
                 Picker::Swing => "Swing",
                 Picker::Guide => "Guide",
                 Picker::Counting => "Count labels",
+                Picker::Sticking => "Sticking",
                 Picker::Preset => "Preset",
                 Picker::MetronomeMeter | Picker::BarMeter => "Time signature",
                 Picker::ClickFill => "Subdivision",
@@ -453,6 +459,7 @@ impl Grooph {
                 }
                 Picker::Guide => self.guide_choices(ui),
                 Picker::Counting => self.counting_choices(ui),
+                Picker::Sticking => self.sticking_choices(ui),
                 Picker::Preset => {
                     preset = self.preset_cards(ui);
                     preset.is_some()
@@ -840,9 +847,9 @@ impl Grooph {
         picked.is_some()
     }
 
-    /// The words to count in, then the count itself; picking a count closes
-    /// the dialog. Counts too fine for every measure of the shown score are
-    /// left out, unless one is already chosen.
+    /// The words to count in, the side of the staff, then the count itself;
+    /// picking a count closes the dialog. Counts too fine for every measure
+    /// of the shown score are left out, unless one is already chosen.
     fn counting_choices(&mut self, ui: &mut Ui) -> bool {
         let score = &self.editor.doc().score;
         let counting = &mut self.ui.counting;
@@ -850,6 +857,12 @@ impl Grooph {
             CountingSystem::ALL.map(|s| (s, counting_system_name(s).to_owned())).into();
         if let Some(system) = choice_grid(ui, &systems, counting.system, 3) {
             counting.system = system;
+        }
+        ui.add_space(8.0);
+        if let Some(above) =
+            choice_grid(ui, &SIDES.map(|(a, l)| (a, l.to_owned())), counting.above, 2)
+        {
+            counting.above = above;
         }
         ui.add_space(8.0);
         let bases: Vec<_> = CountingBase::ALL
@@ -860,6 +873,19 @@ impl Grooph {
         let picked = choice_grid(ui, &bases, counting.base, 1);
         if let Some(base) = picked {
             counting.base = base;
+        }
+        picked.is_some()
+    }
+
+    /// The side of the staff the stickings go on; picking closes the
+    /// dialog and shows them.
+    fn sticking_choices(&mut self, ui: &mut Ui) -> bool {
+        ui.weak("Which hand plays each note: R, L, or both as R above L.");
+        ui.add_space(8.0);
+        let sticking = &mut self.ui.sticking;
+        let picked = choice_grid(ui, &SIDES.map(|(a, l)| (a, l.to_owned())), sticking.above, 2);
+        if let Some(above) = picked {
+            *sticking = crate::StickingSettings { shown: true, above };
         }
         picked.is_some()
     }

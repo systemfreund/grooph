@@ -6,7 +6,7 @@
 use eframe::egui::{InputState, Key};
 use grooph_measure::duration::NoteValue::{Eighth, Half, Quarter, Sixteenth, ThirtySecond, Whole};
 use grooph_measure::duration::{Duration, TupletSpec};
-use grooph_measure::{BeatKind, Technique};
+use grooph_measure::{BeatKind, Sticking, Technique};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BeatTemplate {
@@ -32,6 +32,9 @@ pub enum Modifier {
     /// Play the chosen instrument's head with this technique, or the usual
     /// way again if it already is.
     ToggleTechnique(Technique),
+    /// Write this sticking on the beat, or none if it has it already: on a
+    /// beat played by hand.
+    ToggleSticking(Sticking),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -174,6 +177,9 @@ pub enum ToolId {
     ModifyTechniqueRimshot,
     ModifyTechniqueBell,
     ModifyTechniqueChoke,
+    ModifyStickingRight,
+    ModifyStickingLeft,
+    ModifyStickingBoth,
     InsertTupletT8,
     InsertTupletT16,
     InsertTupletQt16,
@@ -221,6 +227,9 @@ impl ToolId {
             ToolId::ModifyTechniqueRimshot => "modify.technique.rimshot",
             ToolId::ModifyTechniqueBell => "modify.technique.bell",
             ToolId::ModifyTechniqueChoke => "modify.technique.choke",
+            ToolId::ModifyStickingRight => "modify.sticking.right",
+            ToolId::ModifyStickingLeft => "modify.sticking.left",
+            ToolId::ModifyStickingBoth => "modify.sticking.both",
             ToolId::InsertTupletT8 => "insert.tuplet.t8",
             ToolId::InsertTupletT16 => "insert.tuplet.t16",
             ToolId::InsertTupletQt16 => "insert.tuplet.qt16",
@@ -535,6 +544,28 @@ pub fn all_tools() -> &'static [Tool] {
             kind: ToolKind::Modify(Modifier::ToggleTechnique(Technique::Choke)),
             shortcuts: &[],
             show_in_palette: false,
+        },
+        // Sticking
+        Tool {
+            id: ToolId::ModifyStickingRight,
+            label: "Right hand",
+            kind: ToolKind::Modify(Modifier::ToggleSticking(Sticking::Right)),
+            shortcuts: &[Shortcut::plain(Key::R)],
+            show_in_palette: true,
+        },
+        Tool {
+            id: ToolId::ModifyStickingLeft,
+            label: "Left hand",
+            kind: ToolKind::Modify(Modifier::ToggleSticking(Sticking::Left)),
+            shortcuts: &[Shortcut::plain(Key::L)],
+            show_in_palette: true,
+        },
+        Tool {
+            id: ToolId::ModifyStickingBoth,
+            label: "Both hands",
+            kind: ToolKind::Modify(Modifier::ToggleSticking(Sticking::Both)),
+            shortcuts: &[Shortcut::plain(Key::B)],
+            show_in_palette: true,
         },
         Tool {
             id: ToolId::InsertTupletT8,

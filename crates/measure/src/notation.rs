@@ -24,6 +24,9 @@
 //!   quarter, `[t8 t8 t8 t8 t8 t8]` one triplet of quarters.
 //! - `r:` makes a rest (`r:q`), `>` accents a note (`>e`), parentheses make
 //!   it a soft (ghost) note (`(e)`).
+//! - A [`Sticking`] follows a note after `@`: `q@R` right hand, `(e)@L`
+//!   left, `q@RL` both hands. Only a note played by hand takes one (not a
+//!   rest, the kick or the hi-hat's foot).
 //!
 //! ## Drum kit
 //!
@@ -44,6 +47,7 @@
 //!   [`Technique`](crate::Technique): `Ho` open, `Hh` half-open, `Hc` closed
 //!   hi-hat, `Sx` cross-stick, `Sr` (`T1r`, ...) rimshot, `RDb` ride bell,
 //!   `CRc` choked crash.
+//! - A chord takes one sticking: `S-H:e@R`.
 //! - `;` separates the voices of a measure: the first with its stems up, the
 //!   second below it (see [`Measure::voices`]). Every voice fills the measure;
 //!   a time signature comes before the first.
@@ -62,7 +66,7 @@ use crate::duration::{Duration, NoteValue, TupletSpec};
 use crate::grid::DEFAULT_GRID;
 use crate::{
     Beat, Head, Heads, Instrument, Measure, MeasureError, ParseTimeSignatureError, Score,
-    StaffKind, TimeSignature, VoiceBar,
+    StaffKind, Sticking, TimeSignature, VoiceBar,
 };
 use std::fmt::{Display, Formatter};
 
@@ -115,6 +119,9 @@ pub enum NotationError {
     InvalidTechnique { at: Place, token: String },
     /// A chord with an instrument twice or more heads than a beat holds.
     InvalidChord { at: Place, token: String },
+    /// A sticking other than `@R`, `@L` or `@RL`, or on a beat not played
+    /// by hand, e.g. `r:q@R` or `K:q@L`.
+    InvalidSticking { at: Place, token: String },
     /// A measure or voice without beats (e.g. `q q q q | | q q q q`).
     EmptyMeasure { at: Place },
     /// The beats exceed the measure length.
@@ -155,6 +162,9 @@ impl Display for NotationError {
             ),
             InvalidTechnique { at, token } => {
                 write!(f, "{at}: '{token}' - the instrument is not played that way")
+            }
+            InvalidSticking { at, token } => {
+                write!(f, "{at}: '{token}' - a sticking is @R, @L or @RL, on a note played by hand")
             }
             InvalidChord { at, token } => write!(
                 f,
@@ -321,12 +331,34 @@ fn parse_kit_beat(token: &str, at: Place) -> Result<Beat, NotationError> {
     Ok(Beat::with_heads(duration, heads))
 }
 
+/// The code of `sticking` after `@`.
+fn sticking_code(sticking: Sticking) -> &'static str {
+    match sticking {
+        Sticking::Right => "R",
+        Sticking::Left => "L",
+        Sticking::Both => "RL",
+    }
+}
+
+/// A beat with its sticking, if it has one: `q@R`, `S-H:e@RL`.
 fn parse_beat(token: &str, at: Place) -> Result<Beat, NotationError> {
+    let Some((text, code)) = token.split_once('@') else {
+        return parse_unstuck_beat(token, at);
+    };
+    let invalid = || NotationError::InvalidSticking { at, token: token.to_string() };
+    let sticking = Sticking::ALL.into_iter().find(|&s| sticking_code(s) == code);
+    let mut beat = parse_unstuck_beat(text, at)?;
+    beat.set_sticking(Some(sticking.ok_or_else(invalid)?)).map_err(|_| invalid())?;
+    Ok(beat)
+}
+
+/// A beat without a sticking.
+fn parse_unstuck_beat(token: &str, at: Place) -> Result<Beat, NotationError> {
     if is_kit_token(token) {
         return parse_kit_beat(token, at);
     }
     if let Some(inner) = token.strip_prefix('(').and_then(|t| t.strip_suffix(')')) {
-        let mut beat = parse_beat(inner, at)?;
+        let mut beat = parse_unstuck_beat(inner, at)?;
         if beat.is_rest() || beat.accented() {
             return Err(NotationError::InvalidSoft { at, token: token.to_string() });
         }
@@ -385,8 +417,11 @@ fn build_measure(ts: TimeSignature, tokens: &[Token], at: Place) -> Result<Measu
             open_group = Some(idx);
         }
         set_beat(&mut m, idx, token.beat, token, at)?;
-        // `set_beat` keeps the accent of the slot it overwrites; play ours.
-        m.first_voice_mut().set_heads(idx, *token.beat.heads());
+        // `set_beat` keeps the accent and sticking of the slot it
+        // overwrites; play ours.
+        let voice = m.first_voice_mut();
+        voice.set_heads(idx, *token.beat.heads());
+        voice.set_sticking(idx, token.beat.sticking()).expect("the token's heads");
         if token.closes {
             let group = m.first_voice().tuplet_group_at(idx);
             match (open_group.take(), group) {
@@ -585,8 +620,17 @@ fn format_voice(voice: &VoiceBar) -> Option<String> {
     Some(tokens.join(" "))
 }
 
-/// `beat` as a token: a rest, a note of the one line, or a note of the kit.
+/// `beat` as a token: a rest, a note of the one line, or a note of the kit,
+/// with its sticking.
 fn format_beat(beat: &Beat) -> Option<String> {
+    let token = format_unstuck_beat(beat)?;
+    Some(match beat.sticking() {
+        Some(sticking) => format!("{token}@{}", sticking_code(sticking)),
+        None => token,
+    })
+}
+
+fn format_unstuck_beat(beat: &Beat) -> Option<String> {
     let code = code_of(&beat.duration)?;
     let heads: Vec<&Head> = beat.heads().iter().collect();
     Some(match heads[..] {
@@ -866,6 +910,38 @@ mod tests {
         let grouped = TimeSignature::SEVEN_EIGHT.with_grouping(1);
         assert_eq!(ts, [TimeSignature::SEVEN_EIGHT, grouped, grouped]);
         assert_eq!(format_score(&score).unwrap(), text);
+    }
+
+    #[test]
+    fn stickings_follow_their_notes() {
+        use crate::Sticking::{Both, Left, Right};
+        let text = "4/4 q@R (e)@L >e@RL [t4@R t8@L] r:q | S-H:e@R K:e H:e@L r:e r:h ; K:q r:q r:h";
+        let score = parse_score(text).unwrap();
+        let stickings = |m: usize, v: usize| -> Vec<_> {
+            score.measures()[m].voices()[v].beats().iter().map(Beat::sticking).collect()
+        };
+        assert_eq!(
+            stickings(0, 0),
+            [Some(Right), Some(Left), Some(Both), Some(Right), Some(Left), None]
+        );
+        assert!(score.measures()[0].first_voice().beats()[1].soft());
+        assert_eq!(stickings(1, 0)[..3], [Some(Right), None, Some(Left)]);
+        assert_eq!(format_score(&score).unwrap(), text);
+        for wrong in [
+            "4/4 r:q@R q q q",
+            "4/4 K:q@L r:q r:h",
+            "4/4 q@X q q q",
+            "4/4 q@ q q q",
+            "4/4 q@R@L q q q",
+        ] {
+            assert!(
+                matches!(parse_score(wrong), Err(NotationError::InvalidSticking { .. })),
+                "{wrong}"
+            );
+        }
+        // A score without stickings reads and writes as before.
+        let plain = "4/4 S-H:e H:e r:q r:h ; K:q r:q r:h";
+        assert!(!format_score(&parse_score(plain).unwrap()).unwrap().contains('@'));
     }
 
     #[test]

@@ -26,6 +26,7 @@ pub mod pixel_layout;
 pub mod render_plan;
 pub mod staff;
 pub mod staff_layout;
+pub mod text_rows;
 pub mod tuplet_plan;
 
 pub use basis::{calculate_shared_x_centers, calculate_x_centers, shared_min_width};

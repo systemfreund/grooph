@@ -5,22 +5,18 @@
 
 use crate::measure::{
     beat_anchor_x, draw_beat_anchor, draw_count_layer, draw_edit_cursor, draw_notes,
-    highlight_color, last_note_entering_frac, last_note_split, playback_cursor_entering_x,
-    playback_cursor_x, render_measure_at,
+    draw_stickings, highlight_color, last_note_entering_frac, last_note_split,
+    playback_cursor_entering_x, playback_cursor_x, render_measure_at,
 };
 use eframe::egui;
 use eframe::egui::{Color32, Rangef, Stroke};
 use grooph_layout::glyphs;
 use grooph_layout::staff::Staff;
 use grooph_layout::staff_layout::{PlacedMeasure, StaffLayout, StaffOpts};
+use grooph_layout::text_rows::TextRowKind;
 use grooph_measure::counting::CountConfig;
 use grooph_measure::{Cursor, MeasureIdx, Score, StaffKind, VoiceIdx};
 use std::ops::Range;
-
-/// The count labels' reference line, above the lowest ink of a bar with a
-/// lower voice, in em: the labels sit 0.75 em under it, so 0.3 em under the
-/// ink, which their text (0.4 em high) clears.
-const COUNT_LABEL_DROP_EM: f32 = 0.45;
 
 /// How the staff marks the playback position.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -116,51 +112,41 @@ pub fn draw_staff(
                 }
             }
 
-            // With a lower voice the count labels go under the whole staff.
-            let (count_config, lower_counts) = match placed.voices.len() {
-                1 => (count_config, None),
-                _ => (None, count_config),
-            };
             // Only the active measure lights a label, so a wrap-in cursor
             // doesn't light labels in the next measure before its turn.
             let measure_count_tick =
                 count_tick.filter(|(idx, _, _)| *idx == placed.measure_idx).map(|(_, t, c)| (t, c));
             render_placed_measure(
                 ui,
-                score,
                 placed,
                 staff_opts,
                 cursor_in(0),
-                measure_count_tick,
-                count_config,
                 cursor_x,
                 lit_in(0, placed.measure_idx),
             );
-            if let Some(config) = lower_counts {
-                // Right under this bar's own lowest notes (stems, beams and
-                // tuplet brackets too), not at the row's bottom, which the
-                // tallest bar of the score sets for every row.
-                let em = staff_opts.em;
-                let lowest = placed
-                    .voices
-                    .iter()
-                    .filter_map(|v| v.notes_ink())
-                    .map(|ink| ink.bottom())
-                    .fold(f32::NAN, f32::max);
-                let under = match lowest.is_nan() {
-                    true => placed.rect.bottom(),
-                    false => (lowest - COUNT_LABEL_DROP_EM * em).min(placed.rect.bottom()),
-                };
-                draw_count_layer(
-                    ui.painter(),
-                    &score.measures()[placed.measure_idx],
-                    &placed.voices,
-                    &staff_opts.voice_opts_for(placed, 0),
-                    under,
-                    config,
-                    color,
-                    measure_count_tick,
-                );
+            // The rows of text along the bar, where the layout put them:
+            // clear of this bar's own notes, on their side of the staff.
+            let measure = &score.measures()[placed.measure_idx];
+            for row in &placed.text_rows {
+                match row.kind {
+                    TextRowKind::Count => {
+                        let Some(config) = count_config else { continue };
+                        draw_count_layer(
+                            ui.painter(),
+                            measure,
+                            &placed.voices,
+                            &staff_opts.voice_opts_for(placed, 0),
+                            row.lines[0],
+                            row.text_size(),
+                            config,
+                            color,
+                            measure_count_tick,
+                        );
+                    }
+                    TextRowKind::Sticking => {
+                        draw_stickings(ui.painter(), measure, &placed.voices, row, color);
+                    }
+                }
             }
         }
 
@@ -243,15 +229,11 @@ pub fn current_cursor_x(
     Some((play_idx, x))
 }
 
-#[expect(clippy::too_many_arguments)]
 fn render_placed_measure(
     ui: &mut egui::Ui,
-    score: &Score,
     placed: &PlacedMeasure,
     staff_opts: &StaffOpts,
     cursor: Option<Cursor>,
-    count_tick: Option<(f64, Color32)>,
-    count_config: Option<&CountConfig>,
     cursor_x: Option<f32>,
     lit: Option<(usize, Color32)>,
 ) {
@@ -263,12 +245,9 @@ fn render_placed_measure(
 
     render_measure_at(
         ui,
-        &score.measures()[placed.measure_idx],
         placed.layout(),
         &per_opts,
         cursor_idx,
-        count_tick,
-        count_config,
         /* draw_staff_line = */ false,
         cursor_x,
         lit,
@@ -300,6 +279,7 @@ mod tests {
     use super::*;
     use eframe::egui::{FontFamily, FontId, Pos2, Rect, vec2};
     use grooph_layout::staff_layout::{ROOM_BELOW_EM, build_staff_layout};
+    use grooph_layout::text_rows::{Side, TextRows};
     use grooph_measure::notation::parse_score;
 
     fn opts() -> StaffOpts {
@@ -319,7 +299,7 @@ mod tests {
             layout_clef_first: false,
             time_signature_first: false,
             room_below_em: ROOM_BELOW_EM,
-            lower_label_room_em: 0.0,
+            text_rows: Default::default(),
             bar_rests: false,
             veil_hidden_rests: false,
         }
@@ -387,7 +367,8 @@ mod tests {
     /// that following them differs from following the upper voice.
     fn busy_kick() -> (Score, StaffLayout) {
         let score = parse_score("4/4 H:h H:h ; K:th K:th K:th K:th r:e r:q r:h").unwrap();
-        let mut staff = build_staff_layout(&score, &opts());
+        let rows = TextRows { count: Some(Side::Below), ..TextRows::default() };
+        let mut staff = build_staff_layout(&score, &StaffOpts { text_rows: rows, ..opts() });
         let lower = &mut staff.systems[0].measures[0].voices[1].notes;
         for note in &mut lower[1..5] {
             note.center.x += 3.0;
@@ -431,6 +412,63 @@ mod tests {
         // Bars played on their own loop among themselves.
         assert_eq!(next(1, 1..2), 1);
         assert_eq!(next(2, 1..3), 1);
+    }
+
+    #[test]
+    fn stickings_are_written_one_per_column_r_above_l() {
+        let score = parse_score("4/4 S:q@R S:q@L S:q@R S:q ; FT:q r:q FT:q@L r:q").unwrap();
+        for side in [Side::Below, Side::Above] {
+            let rows = TextRows { sticking: Some(side), ..TextRows::default() };
+            let opts = StaffOpts { text_rows: rows, ..opts() };
+            let staff = build_staff_layout(&score, &opts);
+            let ctx = egui::Context::default();
+            let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                draw_staff(
+                    ui,
+                    &score,
+                    &staff,
+                    None,
+                    None,
+                    None,
+                    0..1,
+                    PlaybackMarks::Line,
+                    None,
+                    &opts,
+                );
+            });
+            output.textures_delta.clear();
+            let mut letters: Vec<(String, f32, f32)> = output
+                .shapes
+                .iter()
+                .filter_map(|c| match &c.shape {
+                    egui::Shape::Text(text) if ["R", "L"].contains(&text.galley.text()) => {
+                        let at = c.shape.visual_bounding_rect().center();
+                        Some((text.galley.text().to_owned(), at.x, at.y))
+                    }
+                    _ => None,
+                })
+                .collect();
+            // By column (the letters' own widths differ a little), then top first.
+            letters.sort_by(|a, b| {
+                (a.1 / 4.0).round().total_cmp(&(b.1 / 4.0).round()).then(a.2.total_cmp(&b.2))
+            });
+            let names: Vec<&str> = letters.iter().map(|l| l.0.as_str()).collect();
+            // The third column has R above and L below it: both hands.
+            assert_eq!(names, ["R", "L", "R", "L"], "{side:?}");
+            let placed = staff.placed(0).unwrap();
+            let heads: Vec<f32> = placed.voices[0].notes.iter().map(|n| n.center.x).collect();
+            for (letter, column) in letters.iter().zip([0, 1, 2, 2]) {
+                assert!((letter.1 - heads[column]).abs() < 1.0, "{letters:?}");
+            }
+            assert!(letters[2].2 + 1.0 < letters[3].2, "R above L");
+            // Single letters share one line, the one next to the notes.
+            assert!((letters[0].2 - letters[1].2).abs() < 1.0, "{side:?}: {letters:?}");
+            let near = match side {
+                Side::Below => letters[2].2,
+                Side::Above => letters[3].2,
+            };
+            assert!((letters[0].2 - near).abs() < 1.0, "{side:?}: {letters:?}");
+        }
     }
 
     #[test]

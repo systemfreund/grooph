@@ -59,6 +59,14 @@ pub enum MixerGroup {
     Cymbals,
 }
 
+/// What plays an instrument: a hand (with a stick) or a foot (on a pedal).
+/// Only beats with a hand instrument carry a sticking ([`crate::Sticking`]).
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Limb {
+    Hand,
+    Foot,
+}
+
 /// A technique an instrument is played with, and the letter written after
 /// the instrument's code for it in the text notation.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -92,6 +100,9 @@ pub struct InstrumentSpec {
     pub techniques: &'static [TechniqueSpec],
     /// The mixer volume it plays at; the rhythm's is the snare's.
     pub mixer: MixerGroup,
+    /// Whether a hand or a foot plays it; the one line's rhythm is played
+    /// by hand.
+    pub limb: Limb,
 }
 
 const fn played(technique: Technique, letter: char) -> TechniqueSpec {
@@ -117,6 +128,7 @@ pub static REGISTER: [InstrumentSpec; Instrument::COUNT] = {
             notehead: Notehead::Normal,
             techniques: &[NORMAL],
             mixer: MixerGroup::Snare,
+            limb: Limb::Hand,
         },
         InstrumentSpec {
             instrument: I::HiHatFoot,
@@ -127,6 +139,7 @@ pub static REGISTER: [InstrumentSpec; Instrument::COUNT] = {
             notehead: Notehead::Cross,
             techniques: &[NORMAL],
             mixer: MixerGroup::HiHat,
+            limb: Limb::Foot,
         },
         InstrumentSpec {
             instrument: I::Kick,
@@ -137,6 +150,7 @@ pub static REGISTER: [InstrumentSpec; Instrument::COUNT] = {
             notehead: Notehead::Normal,
             techniques: &[NORMAL],
             mixer: MixerGroup::Kick,
+            limb: Limb::Foot,
         },
         InstrumentSpec {
             instrument: I::FloorTom,
@@ -147,6 +161,7 @@ pub static REGISTER: [InstrumentSpec; Instrument::COUNT] = {
             notehead: Notehead::Normal,
             techniques: &[NORMAL, played(T::Rimshot, 'r')],
             mixer: MixerGroup::Toms,
+            limb: Limb::Hand,
         },
         InstrumentSpec {
             instrument: I::Snare,
@@ -157,6 +172,7 @@ pub static REGISTER: [InstrumentSpec; Instrument::COUNT] = {
             notehead: Notehead::Normal,
             techniques: &[NORMAL, played(T::CrossStick, 'x'), played(T::Rimshot, 'r')],
             mixer: MixerGroup::Snare,
+            limb: Limb::Hand,
         },
         InstrumentSpec {
             instrument: I::MidTom,
@@ -167,6 +183,7 @@ pub static REGISTER: [InstrumentSpec; Instrument::COUNT] = {
             notehead: Notehead::Normal,
             techniques: &[NORMAL, played(T::Rimshot, 'r')],
             mixer: MixerGroup::Toms,
+            limb: Limb::Hand,
         },
         InstrumentSpec {
             instrument: I::HighTom,
@@ -177,6 +194,7 @@ pub static REGISTER: [InstrumentSpec; Instrument::COUNT] = {
             notehead: Notehead::Normal,
             techniques: &[NORMAL, played(T::Rimshot, 'r')],
             mixer: MixerGroup::Toms,
+            limb: Limb::Hand,
         },
         InstrumentSpec {
             instrument: I::Ride,
@@ -187,6 +205,7 @@ pub static REGISTER: [InstrumentSpec; Instrument::COUNT] = {
             notehead: Notehead::Cross,
             techniques: &[NORMAL, played(T::Bell, 'b')],
             mixer: MixerGroup::Cymbals,
+            limb: Limb::Hand,
         },
         InstrumentSpec {
             instrument: I::HiHat,
@@ -202,6 +221,7 @@ pub static REGISTER: [InstrumentSpec; Instrument::COUNT] = {
                 played(T::Closed, 'c'),
             ],
             mixer: MixerGroup::HiHat,
+            limb: Limb::Hand,
         },
         InstrumentSpec {
             instrument: I::Crash,
@@ -212,6 +232,7 @@ pub static REGISTER: [InstrumentSpec; Instrument::COUNT] = {
             notehead: Notehead::Cross,
             techniques: &[NORMAL, played(T::Choke, 'c')],
             mixer: MixerGroup::Cymbals,
+            limb: Limb::Hand,
         },
     ]
 };
@@ -268,6 +289,11 @@ impl Instrument {
     /// The instrument's short name on its cell of the tool grid.
     pub const fn short_label(self) -> &'static str {
         self.spec().short_label
+    }
+
+    /// Whether a hand plays the instrument (see [`InstrumentSpec::limb`]).
+    pub const fn is_hand(self) -> bool {
+        matches!(self.spec().limb, Limb::Hand)
     }
 }
 
@@ -605,22 +631,23 @@ mod tests {
     #[test]
     fn the_register_keeps_the_values_of_the_tables_it_replaced() {
         use Instrument::*;
+        use Limb::{Foot, Hand};
         use MixerGroup as M;
         use Notehead::{Cross, Normal};
         #[rustfmt::skip]
         let expected = [
-            (Rhythm, None, "Rhythm", "R", 0, Normal, M::Snare),
-            (HiHatFoot, Some("HF"), "Hi-hat foot", "HF", -5, Cross, M::HiHat),
-            (Kick, Some("K"), "Kick", "BD", -3, Normal, M::Kick),
-            (FloorTom, Some("FT"), "Floor tom", "FT", -1, Normal, M::Toms),
-            (Snare, Some("S"), "Snare", "SN", 1, Normal, M::Snare),
-            (MidTom, Some("T2"), "Tom 2", "T2", 2, Normal, M::Toms),
-            (HighTom, Some("T1"), "Tom 1", "T1", 3, Normal, M::Toms),
-            (Ride, Some("RD"), "Ride", "RD", 4, Cross, M::Cymbals),
-            (HiHat, Some("H"), "Hi-hat", "HH", 5, Cross, M::HiHat),
-            (Crash, Some("CR"), "Crash", "CR", 6, Cross, M::Cymbals),
+            (Rhythm, None, "Rhythm", "R", 0, Normal, M::Snare, Hand),
+            (HiHatFoot, Some("HF"), "Hi-hat foot", "HF", -5, Cross, M::HiHat, Foot),
+            (Kick, Some("K"), "Kick", "BD", -3, Normal, M::Kick, Foot),
+            (FloorTom, Some("FT"), "Floor tom", "FT", -1, Normal, M::Toms, Hand),
+            (Snare, Some("S"), "Snare", "SN", 1, Normal, M::Snare, Hand),
+            (MidTom, Some("T2"), "Tom 2", "T2", 2, Normal, M::Toms, Hand),
+            (HighTom, Some("T1"), "Tom 1", "T1", 3, Normal, M::Toms, Hand),
+            (Ride, Some("RD"), "Ride", "RD", 4, Cross, M::Cymbals, Hand),
+            (HiHat, Some("H"), "Hi-hat", "HH", 5, Cross, M::HiHat, Hand),
+            (Crash, Some("CR"), "Crash", "CR", 6, Cross, M::Cymbals, Hand),
         ];
-        for (i, code, label, short, pos, notehead, mixer) in expected {
+        for (i, code, label, short, pos, notehead, mixer, limb) in expected {
             let spec = i.spec();
             assert_eq!(
                 (
@@ -629,9 +656,10 @@ mod tests {
                     spec.short_label,
                     spec.staff_pos,
                     spec.notehead,
-                    spec.mixer
+                    spec.mixer,
+                    spec.limb
                 ),
-                (code, label, short, pos, notehead, mixer),
+                (code, label, short, pos, notehead, mixer, limb),
                 "{i:?}"
             );
         }
