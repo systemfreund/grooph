@@ -12,6 +12,8 @@ user-facing overview is README.md.
 - `crates/render`: Draws the layout with egui (notes, beams, tuplets, cursor).
 - `crates/audio`: Metronome synth (rodio), scheduling based on the measure.
 - `crates/midi`: MIDI input abstraction (midir).
+- `crates/clock`: The app's monotonic clock (`performance.now()` on the web) and `OffsetTracker`, which maps a device's
+  timestamps onto it; shared by `app`, `midi` and `mic` so every hit lives on one timeline.
 - `crates/mic`: Microphone hit detection (cpal natively, `getUserMedia` + AudioWorklet on the web).
 - `crates/link`: Shareable links (URL query parameters <-> score/generator/metronome).
 - `crates/site`: Static guide pages for grooph.app, generated from Markdown at build time.
@@ -32,7 +34,9 @@ Dependencies point one way, from the app down to the model:
 - `layout`, `audio` and `link` build on `measure`; `render` on `layout` and `measure`; `site` on `link` and
   `measure`. `layout` takes geometry types and text measurement from egui but paints nothing; drawing is
   `render`'s job. `audio` and `link` know nothing about the GUI.
-- `midi` and `mic` stand alone: they deliver input events and know nothing about the model.
+- `midi` and `mic` stand alone: they deliver input events and know nothing about the model. Both read `clock`, the
+  app's clock (MIDI counts from when its `MidiInput` opened), and the app moves their hits onto its timeline by
+  their age, so a MIDI hit, a microphone hit and a tap compare directly.
 - `app` ties everything together: state, panels, persistence, undo. `android` only wraps `app`.
 
 Music rules (durations, onsets, grouping, counting) belong in `measure`, not in `app` or a panel, so the
@@ -652,7 +656,7 @@ grooph's metronome runs inside AI chats as an
 
 - Hit sources (`crates/app/src/play_along.rs`): MIDI NoteOns, microphone hits
   and taps (tap key, default `J`, or a press on the staff while playing). All
-  hits are stamped on one clock (`crates/app/src/clock.rs`); MIDI and
+  hits are stamped on one clock (`grooph_clock::now_seconds`, `crates/clock`); MIDI and
   microphone timestamps are moved onto it by their age. On the web taps use the DOM event `timeStamp` (`web.rs`), natively
   the frame time. Each source has its own input offset (`PlayAlongSettings`).
 - While tap capture is active, staff presses (and presses on the metronome's
@@ -676,7 +680,12 @@ grooph's metronome runs inside AI chats as an
   the live status line can show them too) for the "Your run" window,
   a `Drift` (each hit's deviation at its note's time, misses, silent
   stretches; `accuracy/drift.rs`) for its chart (`drift_chart.rs`, drawn
-  with the painter, no plot crate), and the run's marks, drawn on the staff (and the metronome's ring) until
+  with the painter, no plot crate), `BeatPositions` (the hits and misses
+  per position in the beat, `accuracy/positions.rs`; each onset's position
+  comes from `counting::position_in_beat`, the coarsest count with a part
+  there, every beat's start being one position; positions the counting
+  system names the same are merged when the strip is drawn) for the strip under it,
+  and the run's marks, drawn on the staff (and the metronome's ring) until
   the next run or an edit. Hits and misses are also tallied for each of the
   first two voices (`VoiceTally`; a note several voices play counts for
   each), which the metronome shows for its click bar and counter rhythm.

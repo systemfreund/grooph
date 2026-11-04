@@ -14,9 +14,9 @@ default = ["device"]
 device = ["dep:midir"]
 
 [dependencies]
+grooph-clock = { workspace = true }
 thiserror = { workspace = true }
 midir = { workspace = true, optional = true }
-web-sys = { workspace = true }
 
 [lints]
 workspace = true

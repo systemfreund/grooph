@@ -2,10 +2,12 @@ use std::collections::{HashMap, HashSet};
 
 use grooph_measure::MeasureIdx;
 use grooph_measure::Score;
+use grooph_measure::counting::{CountPos, position_in_beat};
 use grooph_measure::grid::DEFAULT_GRID;
 use grooph_measure::tempo::ScoreTiming;
 
 use super::drift::DriftLog;
+use super::positions::PositionLog;
 
 #[derive(Clone, Copy)]
 pub(crate) enum AccuracyMark {
@@ -48,6 +50,15 @@ impl AccuracyStats {
         let mean = self.mean_ms()?;
         let n = self.count as f64;
         Some((self.sum_sq_ms / n - mean * mean).max(0.0).sqrt())
+    }
+
+    /// Add the hits of `other`.
+    pub(super) fn merge(&mut self, other: &Self) {
+        self.count = self.count.saturating_add(other.count);
+        self.sum_ms += other.sum_ms;
+        self.sum_abs_ms += other.sum_abs_ms;
+        self.sum_sq_ms += other.sum_sq_ms;
+        self.last_delta_ms = other.last_delta_ms.or(self.last_delta_ms);
     }
 
     pub(super) fn push(&mut self, delta_ms: f64) {
@@ -215,6 +226,8 @@ pub(crate) struct GlobalBeatOnset {
     /// The voices with a note here, one bit each from the first (see
     /// [`TRACKED_VOICES`]).
     pub voices: u8,
+    /// Where in its beat the onset lies, as written; `None` off every count.
+    pub position: Option<CountPos>,
 }
 
 /// Voices tallied on their own as well: the metronome's click bar and its
@@ -232,6 +245,7 @@ pub(crate) fn compute_global_beat_onsets(
     let mut out = Vec::new();
     for (m_idx, measure) in score.measures().iter().enumerate() {
         let start = timing.measure_start_tick(m_idx);
+        let ts = measure.time_signature();
         // Note ticks of each tracked voice.
         let note_ticks: Vec<Vec<u32>> = measure
             .voices()
@@ -254,6 +268,7 @@ pub(crate) fn compute_global_beat_onsets(
                 is_note: onset.is_note,
                 measure_idx: m_idx,
                 voices,
+                position: position_in_beat(&ts, onset.tick),
             });
         }
     }
@@ -328,6 +343,8 @@ pub(super) struct RecordingData {
     pub(super) bars: BarTimeline,
     /// The run over time, for its chart.
     pub(super) drift: DriftLog,
+    /// The run by position in the beat.
+    pub(super) positions: PositionLog,
 }
 
 /// A judged note, kept until the state of its bar is known.
@@ -504,6 +521,7 @@ impl RecordingData {
             voice_tallies: Default::default(),
             bars: BarTimeline::default(),
             drift: DriftLog::default(),
+            positions: PositionLog::default(),
         }
     }
 }
@@ -548,6 +566,7 @@ impl RecordingSession {
             d.voice_tallies = Default::default();
             d.bars = BarTimeline::default();
             d.drift = DriftLog::default();
+            d.positions = PositionLog::default();
             d.last_tick = None;
         }
     }
@@ -742,6 +761,7 @@ mod tests {
             is_note: true,
             measure_idx: 0,
             voices: 1,
+            position: None,
         };
         let beats = [beat(0), beat(10), beat(40)];
         // First beat: previous neighbour is the last beat, 60 ticks back across the wrap.

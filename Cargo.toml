@@ -4,6 +4,7 @@ members = [
     "crates/android",
     "crates/app",
     "crates/audio",
+    "crates/clock",
     "crates/layout",
     "crates/link",
     "crates/link-check",
@@ -37,6 +38,7 @@ todo = "warn"
 # The device crates leave their devices to the app's `devices` feature, so a
 # build without it needs no audio system headers (see crates/app/Cargo.toml).
 grooph-audio = { path = "crates/audio", default-features = false }
+grooph-clock = { path = "crates/clock" }
 grooph-layout = { path = "crates/layout" }
 grooph-link = { path = "crates/link" }
 grooph-measure = { path = "crates/measure" }
