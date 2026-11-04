@@ -23,9 +23,7 @@
 //! and the voice of the cursor, last tapped on the staff or the ring, is the
 //! one edited (see [`MetronomeVoice`]).
 
-use crate::accuracy::{
-    AccuracyMark, HitGrade, clamp_diff_to_beat_window, compute_global_beat_onsets,
-};
+use crate::accuracy::{AccuracyMark, HitGrade, clamp_diff_to_beat_window, global_beat_onsets};
 use crate::documents::Document;
 use crate::measure_panel::{grade_color, reference_color};
 use crate::state::CountInState;
@@ -842,7 +840,7 @@ impl Grooph {
             return;
         };
         let onsets: Vec<u64> =
-            compute_global_beat_onsets(score, &timing).iter().map(|o| o.onset_tick).collect();
+            global_beat_onsets(score, &timing).iter().map(|o| o.onset_tick).collect();
         let size = (0.025 * radius).max(2.5);
         for (voice, ring) in [(MetronomeVoice::Click, 0.82), (MetronomeVoice::Counter, 0.755)] {
             if voice == MetronomeVoice::Counter && !with_counter {

@@ -4,7 +4,7 @@ use log::info;
 
 use super::session::{
     AccuracyMark, BarEvent, GlobalBeatOnset, GradedHit, HitWindows, RecordingData,
-    compute_global_beat_onsets, loop_offset, neighbour_gap_ticks, tallies_of,
+    global_beat_onsets, loop_offset, neighbour_gap_ticks, tallies_of,
 };
 
 /// Record an incoming MIDI hit at `timestamp` (seconds, MIDI clock). The hit
@@ -34,7 +34,7 @@ pub(super) fn record_hit(
 
     // One pass over the score's onsets serves the match and the gap to the
     // neighbouring notes.
-    let beats = compute_global_beat_onsets(score, timing);
+    let beats = global_beat_onsets(score, timing);
     let (beat_idx, diff_ticks, raw_diff) = best_match(hit_global, total, &beats)?;
     let global_onset = beats[beat_idx].onset_tick;
     let onset_m_idx = beats[beat_idx].measure_idx;
