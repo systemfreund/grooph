@@ -172,13 +172,13 @@ impl Grooph {
             return;
         }
 
-        let now_seconds = clock::now_seconds();
-        let start_time =
-            now_seconds - timing.global_tick_to_seconds(self.playback_ctl.playback.smooth_tick);
-        self.playback_ctl
-            .accuracy
-            .tracker
-            .realign_start_time(start_time, self.playback_ctl.playback.smooth_tick);
+        // On the loop as it is now: a change that shortened it can leave
+        // the cursor past its end until the next frame wraps it, which the
+        // session would take for a wrap, judging the loop so far as missed.
+        let tick =
+            self.playback_ctl.playback.smooth_tick.rem_euclid(timing.total_loop_ticks() as f64);
+        let start_time = clock::now_seconds() - timing.global_tick_to_seconds(tick);
+        self.playback_ctl.accuracy.tracker.realign_start_time(start_time, tick);
     }
 }
 
@@ -277,6 +277,24 @@ mod tests {
         app.undo();
         assert_eq!(app.current_measure().time_signature(), TimeSignature::FOUR_FOUR);
         assert_anchored_at(&app, tick, before);
+    }
+
+    /// An edit that shortens the loop past the cursor anchors the clock on
+    /// the cursor's place in the new loop, so the next frame is no wrap
+    /// that judges the notes before it as missed.
+    #[test]
+    fn an_edit_that_shortens_the_loop_anchors_the_clock_inside_it() {
+        let mut app = practice_app();
+        let bar = app.score_timing().measure_start_tick(1) as f64;
+        play_at(&mut app, bar + 10.0);
+        let before = clock::now_seconds();
+        app.with_undo_snapshot(|app| app.editor.doc_mut().score.remove(1).is_some());
+        assert_anchored_at(&app, 10.0, before);
+        let timing = app.score_timing();
+        let score = app.played_score().clone();
+        let tracker = &mut app.playback_ctl.accuracy.tracker;
+        tracker.update_progress(clock::now_seconds(), &timing, &score);
+        assert_eq!(tracker.live_summary().map_or(0, |s| s.misses), 0);
     }
 
     #[test]
