@@ -49,7 +49,7 @@ impl Grooph {
 
     /// What [`Self::share_link_url`] links to.
     pub(crate) fn shared_link(&self) -> SharedLink {
-        let swing = self.playback_ctl.audio_cfg.swing;
+        let swing = self.playback_ctl.settings.swing;
         let click = self.click_bars();
         let (content, meter) = if self.metronome_mode() {
             (LinkContent::Metronome(self.metronome_meter()), Some(self.metronome_meter()))
@@ -59,7 +59,7 @@ impl Grooph {
             (LinkContent::Score(score.clone()), meter)
         };
         SharedLink {
-            bpm: Some(self.playback_ctl.bpm),
+            bpm: Some(self.playback_ctl.settings.bpm),
             swing: (!swing.is_straight()).then_some(swing),
             content: Some(content),
             click: meter.and_then(|ts| click.custom_for(ts)).cloned(),
@@ -83,7 +83,7 @@ impl Grooph {
         };
         if !shared {
             ui.ctx().copy_text(url);
-            self.ui.link_copied_at = Some(ui.input(|i| i.time));
+            self.ui.dialogs.link_copied_at = Some(ui.input(|i| i.time));
         }
     }
 
@@ -91,7 +91,8 @@ impl Grooph {
     /// while the notice shows, so it goes away on time.
     pub(crate) fn link_copied_recently(&self, ui: &Ui) -> bool {
         let now = ui.input(|i| i.time);
-        let recent = self.ui.link_copied_at.is_some_and(|at| now - at < LINK_COPIED_NOTICE_S);
+        let recent =
+            self.ui.dialogs.link_copied_at.is_some_and(|at| now - at < LINK_COPIED_NOTICE_S);
         if recent {
             ui.ctx().request_repaint_after_secs(0.5);
         }

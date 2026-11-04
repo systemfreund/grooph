@@ -107,7 +107,7 @@ impl Grooph {
         if self.metronome_mode() || self.editing() || self.calibration_source().is_some() {
             Guide::Line
         } else {
-            self.ui.guide
+            self.ui.view.guide
         }
     }
 
@@ -257,7 +257,7 @@ mod tests {
         app.select_tab(crate::shell::Tab::Practice);
         let measure = Grooph::default_measure();
         app.editor.doc_mut().score = grooph_measure::Score::new(vec![measure; bars]);
-        app.ui.guide = guide;
+        app.ui.view.guide = guide;
         app
     }
 

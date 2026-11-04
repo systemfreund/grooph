@@ -113,7 +113,7 @@ impl Grooph {
     /// score has unsaved changes (as a pattern loaded from the library does).
     pub(crate) fn request_new_score(&mut self, staff: StaffKind) {
         match self.editor.docs.score.dirty {
-            true => self.ui.pending_load = Some(PendingLoad::NewScore(staff)),
+            true => self.ui.dialogs.pending_load = Some(PendingLoad::NewScore(staff)),
             false => self.new_score(staff),
         }
     }
@@ -130,7 +130,7 @@ impl Grooph {
             StaffKind::Line => Score::single(Measure::new(ts)),
         };
         self.replace_score(score, Origin::New);
-        self.ui.picker = None;
+        self.ui.dialogs.picker = None;
         self.select_tab(Tab::Score);
         self.ui.mode = Mode::Edit;
         self.pick_instrument(self.editor.instrument);

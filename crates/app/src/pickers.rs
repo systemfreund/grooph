@@ -394,11 +394,11 @@ impl Grooph {
     /// Dialog for the setting in [`crate::state::UiShell::picker`], opened
     /// from the settings card and the options sheet.
     pub(crate) fn settings_picker(&mut self, ui: &mut Ui) {
-        let Some(picker) = self.ui.picker else {
+        let Some(picker) = self.ui.dialogs.picker else {
             return;
         };
-        let before = self.editor.generator.settings;
-        let endless_before = self.editor.generator.endless;
+        let before = self.editor.generator.config.settings;
+        let endless_before = self.editor.generator.config.endless;
         // The mixer gets as wide as its sliders, if the screen has room.
         let max_width = match picker {
             Picker::Mixer => mixer_width(ui).map_or(380.0, |w| w.max(380.0)),
@@ -520,10 +520,10 @@ impl Grooph {
             ctx.request_repaint();
         }
         if modal.inner || modal.should_close() {
-            self.ui.picker = self.ui.picker_return.take();
-            self.ui.tap_tempo.reset();
-            self.ui.renaming_preset = None;
-            self.ui.renaming_pattern = None;
+            self.ui.dialogs.picker = self.ui.dialogs.picker_return.take();
+            self.ui.dialogs.tap_tempo.reset();
+            self.ui.library.renaming_preset = None;
+            self.ui.library.renaming_pattern = None;
         }
 
         // After the generator check, which would generate a second rhythm.
@@ -543,8 +543,8 @@ impl Grooph {
     }
 
     fn time_signature_choices(&mut self, ui: &mut Ui) -> bool {
-        let family = self.ui.music_font_id.family.clone();
-        let settings = &mut self.editor.generator.settings;
+        let family = self.ui.fonts.music_font_id.family.clone();
+        let settings = &mut self.editor.generator.config.settings;
         let picked = egui::ScrollArea::vertical()
             .max_height(meter_grid_height(ui, false))
             .show(ui, |ui| meter_grid(ui, &time_signatures(), settings.time_signature, 2, &family))
@@ -556,7 +556,7 @@ impl Grooph {
     }
 
     fn subdivision_choices(&mut self, ui: &mut Ui) -> bool {
-        let settings = &mut self.editor.generator.settings;
+        let settings = &mut self.editor.generator.config.settings;
         let shown = effective_subdivision(settings.subdivision, settings.time_signature);
         let options: Vec<_> = offered_subdivisions(settings.time_signature)
             .iter()
@@ -572,7 +572,7 @@ impl Grooph {
     /// Complexity levels; picking one turns custom groupings off. The grouping
     /// picker below lets the user hand-pick instead.
     fn complexity_choices(&mut self, ui: &mut Ui) -> bool {
-        let settings = &mut self.editor.generator.settings;
+        let settings = &mut self.editor.generator.config.settings;
         let current = if settings.custom_figures_enabled { 0 } else { settings.complexity };
         let options: Vec<_> = (1..=MAX_COMPLEXITY).map(|l| (l, l.to_string())).collect();
         let picked = choice_grid(ui, &options, current, MAX_COMPLEXITY as usize);
@@ -604,14 +604,14 @@ impl Grooph {
         let generator = &mut self.editor.generator;
         let mut options: Vec<_> = (1..=MAX_BARS).map(|b| (Some(b), b.to_string())).collect();
         options.push((None, "Endless".to_owned()));
-        let current = (!generator.endless).then_some(generator.settings.bars.max(1));
+        let current = (!generator.config.endless).then_some(generator.config.settings.bars.max(1));
         let picked = choice_grid(ui, &options, current, 4);
         match picked {
             Some(Some(bars)) => {
-                generator.settings.bars = bars;
-                generator.endless = false;
+                generator.config.settings.bars = bars;
+                generator.config.endless = false;
             }
-            Some(None) => generator.endless = true,
+            Some(None) => generator.config.endless = true,
             None => {}
         }
         picked.is_some()
@@ -619,7 +619,7 @@ impl Grooph {
 
     /// Big tempo display with steppers, a slider and tap tempo.
     fn bpm_editor(&mut self, ui: &mut Ui) {
-        let mut bpm = self.playback_ctl.bpm;
+        let mut bpm = self.playback_ctl.settings.bpm;
         ui.vertical_centered(|ui| {
             ui.label(RichText::new(bpm.to_string()).size(56.0).strong());
         });
@@ -648,13 +648,13 @@ impl Grooph {
             ui.vertical_centered(|ui| ui.weak(format!("Tap in {}", pulse.name())));
         }
         if tap.clicked()
-            && let Some(tapped) = self.ui.tap_tempo.tap(ui.input(|i| i.time), pulse)
+            && let Some(tapped) = self.ui.dialogs.tap_tempo.tap(ui.input(|i| i.time), pulse)
         {
             bpm = tapped;
         }
 
-        if bpm != self.playback_ctl.bpm {
-            self.playback_ctl.bpm = bpm;
+        if bpm != self.playback_ctl.settings.bpm {
+            self.playback_ctl.settings.bpm = bpm;
             self.score_changed(ScoreChange::Tempo);
         }
     }
@@ -662,7 +662,7 @@ impl Grooph {
     /// Meter of the metronome tab: any the editor offers. Returns whether
     /// one was picked.
     fn metronome_meter_choices(&mut self, ui: &mut Ui) -> bool {
-        let family = self.ui.music_font_id.family.clone();
+        let family = self.ui.fonts.music_font_id.family.clone();
         let current = self.metronome_meter();
         let picked = egui::ScrollArea::vertical()
             .max_height(meter_grid_height(ui, self.embedded()))
@@ -678,7 +678,7 @@ impl Grooph {
     /// picker offers it: the bar takes it as an undoable change, or keeps
     /// its notes' meter where they do not fit it.
     fn bar_meter_choices(&mut self, ui: &mut Ui) -> bool {
-        let family = self.ui.music_font_id.family.clone();
+        let family = self.ui.fonts.music_font_id.family.clone();
         let current = self.current_measure().time_signature();
         let picked = egui::ScrollArea::vertical()
             .max_height(meter_grid_height(ui, self.embedded()))
@@ -714,7 +714,7 @@ impl Grooph {
     fn click_fill_choices(&mut self, ui: &mut Ui) -> bool {
         let fills = click_fills(self.metronome_meter());
         let current = self.current_click_fill();
-        let family = self.ui.music_font_id.family.clone();
+        let family = self.ui.fonts.music_font_id.family.clone();
         let mut picked = None;
         // Nine tiles wrap to many rows on a narrow phone: they scroll where
         // they would push "Done" off the screen.
@@ -839,10 +839,10 @@ impl Grooph {
             .filter(|g| g.offered_in(&ts))
             .map(|g| (g, g.label().to_owned()))
             .collect();
-        let current = self.ui.guide.in_meter(&ts);
+        let current = self.ui.view.guide.in_meter(&ts);
         let picked = choice_grid(ui, &options, current, 1);
         if let Some(guide) = picked {
-            self.ui.guide = guide;
+            self.ui.view.guide = guide;
         }
         picked.is_some()
     }
@@ -852,7 +852,7 @@ impl Grooph {
     /// of the shown score are left out, unless one is already chosen.
     fn counting_choices(&mut self, ui: &mut Ui) -> bool {
         let score = &self.editor.doc().score;
-        let counting = &mut self.ui.counting;
+        let counting = &mut self.ui.view.counting;
         let systems: Vec<_> =
             CountingSystem::ALL.map(|s| (s, counting_system_name(s).to_owned())).into();
         if let Some(system) = choice_grid(ui, &systems, counting.system, 3) {
@@ -882,7 +882,7 @@ impl Grooph {
     fn sticking_choices(&mut self, ui: &mut Ui) -> bool {
         ui.weak("Which hand plays each note: R, L, or both as R above L.");
         ui.add_space(8.0);
-        let sticking = &mut self.ui.sticking;
+        let sticking = &mut self.ui.view.sticking;
         let picked = choice_grid(ui, &SIDES.map(|(a, l)| (a, l.to_owned())), sticking.above, 2);
         if let Some(above) = picked {
             *sticking = crate::StickingSettings { shown: true, above };
@@ -913,7 +913,7 @@ impl Grooph {
     /// Off, a pattern of sounding and silent bars, or silent bars at random;
     /// and whether the notes go quiet too.
     fn silent_bars_choices(&mut self, ui: &mut Ui) {
-        let gap = &mut self.playback_ctl.audio_cfg.gap;
+        let gap = &mut self.playback_ctl.settings.gap_click;
         ui.weak("The click drops out for some bars, so you keep the time yourself.");
         ui.add_space(8.0);
         let modes = [
@@ -960,7 +960,7 @@ impl Grooph {
     }
 
     fn swing_choices(&mut self, ui: &mut Ui) {
-        let swing = &mut self.playback_ctl.audio_cfg.swing;
+        let swing = &mut self.playback_ctl.settings.swing;
         let options: Vec<_> = SWING_PRESETS.iter().map(|&p| (p, swing_label(p))).collect();
         if let Some(percent) = choice_grid(ui, &options, swing.percent, 3) {
             swing.percent = percent;
@@ -985,8 +985,8 @@ impl Grooph {
     /// Groupings". While custom figures are off, the tiles show which figures
     /// the complexity level unlocks; picking a tile switches to a custom selection seeded from it.
     pub(crate) fn figures_picker(&mut self, ui: &mut egui::Ui) {
-        let family = self.ui.music_font_id.family.clone();
-        let settings = &mut self.editor.generator.settings;
+        let family = self.ui.fonts.music_font_id.family.clone();
+        let settings = &mut self.editor.generator.config.settings;
         let ts = settings.time_signature;
         let preset = complexity_figures(settings.subdivision, ts, settings.complexity);
 

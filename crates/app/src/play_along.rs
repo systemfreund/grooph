@@ -136,7 +136,6 @@ fn miss_delay_s(settings: &PlayAlongSettings, sources: &[HitSource], loop_second
 
 #[derive(Default)]
 pub(crate) struct PlayAlongState {
-    pub(crate) settings: PlayAlongSettings,
     /// A tap or microphone hit arrived during this run: these keep the
     /// accuracy session alive even without MIDI. Without it, a run nobody plays along to would only
     /// collect misses.
@@ -155,7 +154,7 @@ impl Grooph {
         }
         match self.calibration_source() {
             Some(source) => source == HitSource::Tap,
-            None => self.accuracy_active() && self.playback_ctl.play_along.settings.tap_enabled,
+            None => self.accuracy_active() && self.playback_ctl.feedback.play_along.tap_enabled,
         }
     }
 
@@ -197,7 +196,7 @@ impl Grooph {
         match self.calibration_source() {
             Some(source) => playing && source == HitSource::Mic,
             None => {
-                self.playback_ctl.play_along.settings.mic_enabled
+                self.playback_ctl.feedback.play_along.mic_enabled
                     && (now < self.playback_ctl.mic.monitor_until
                         || playing && self.accuracy_active())
             }
@@ -207,7 +206,7 @@ impl Grooph {
     /// Open or close the microphone as needed and keep its threshold current.
     fn sync_mic(&mut self, ctx: &egui::Context, now: f64) {
         let wanted = self.mic_wanted(now);
-        let threshold_db = self.playback_ctl.play_along.settings.mic_threshold_db;
+        let threshold_db = self.playback_ctl.feedback.play_along.mic_threshold_db;
         let mic = &mut self.playback_ctl.mic;
         match (&mic.input, wanted) {
             (None, true) => {
@@ -245,7 +244,7 @@ impl Grooph {
     }
 
     fn drain_key_taps(&mut self, ui: &egui::Ui) -> Vec<f64> {
-        let tap_key = self.playback_ctl.play_along.settings.tap_key;
+        let tap_key = self.playback_ctl.feedback.play_along.tap_key;
         if !self.tap_capture_active() || ui.ctx().egui_wants_keyboard_input() {
             return Vec::new();
         }
@@ -279,7 +278,7 @@ impl Grooph {
             return;
         }
 
-        let settings = self.playback_ctl.play_along.settings;
+        let settings = self.playback_ctl.feedback.play_along;
         let midi_connected = self.midi_connected();
         let use_midi = calibrating.is_none_or(|s| s == HitSource::Midi);
         let use_taps = calibrating.map_or(settings.tap_enabled, |s| s == HitSource::Tap);
@@ -424,8 +423,9 @@ impl Grooph {
                         ui.add_space(4.0);
                         drift_chart(ui, drift);
                     }
-                    if let Some(positions) =
-                        tracker.last_positions().and_then(|t| t.in_system(self.ui.counting.system))
+                    if let Some(positions) = tracker
+                        .last_positions()
+                        .and_then(|t| t.in_system(self.ui.view.counting.system))
                     {
                         ui.add_space(4.0);
                         beat_position_strip(ui, &positions);

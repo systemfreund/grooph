@@ -340,8 +340,8 @@ impl Grooph {
     /// The compact card's top row: the tempo as notation writes it
     /// (`♩ = 140`) with − and + beside it, and the fullscreen button.
     fn tempo_row(&mut self, ui: &mut Ui) {
-        let music = self.ui.music_font_id.family.clone();
-        let bpm = self.playback_ctl.playback.ramp_bpm.unwrap_or(self.playback_ctl.bpm);
+        let music = self.ui.fonts.music_font_id.family.clone();
+        let bpm = self.playback_ctl.playback.ramp_bpm.unwrap_or(self.playback_ctl.settings.bpm);
         let mut step = 0;
         let mut fullscreen = false;
         let frame = Frame::new().fill(ui.visuals().panel_fill).inner_margin(Margin {
@@ -378,17 +378,18 @@ impl Grooph {
 
     /// One BPM faster (`delta` 1) or slower (-1), within the tempo range.
     pub(crate) fn step_bpm(&mut self, delta: i64) {
-        let bpm = (i64::from(self.playback_ctl.bpm) + delta).clamp(MIN_BPM.into(), MAX_BPM.into());
-        self.playback_ctl.bpm = bpm as u32;
+        let bpm = (i64::from(self.playback_ctl.settings.bpm) + delta)
+            .clamp(MIN_BPM.into(), MAX_BPM.into());
+        self.playback_ctl.settings.bpm = bpm as u32;
         self.score_changed(ScoreChange::Tempo);
     }
 
     /// The metronome's settings, for the model.
     pub(crate) fn model_context(&self) -> ModelContext {
         let ts = self.metronome_meter();
-        let bpm = self.playback_ctl.bpm;
+        let bpm = self.playback_ctl.settings.bpm;
         let playing = self.playback_ctl.transport_state == TransportState::Playing;
-        let cfg = &self.playback_ctl.audio_cfg;
+        let cfg = &self.playback_ctl.settings;
         let click_bar = self.click_bar();
         // The same description as the tool's result (grooph_link::describe):
         // the meter's grouping, where the clicks fall, the polyrhythm, swing.
@@ -432,8 +433,8 @@ impl Grooph {
             text += ", count-in";
             fields.push(("countIn", Field::Bool(true)));
         }
-        if cfg.gap.enabled {
-            let silent = silent_bars_label(&cfg.gap);
+        if cfg.gap_click.enabled {
+            let silent = silent_bars_label(&cfg.gap_click);
             text += &format!(", silent bars {silent}");
             fields.push(("silentBars", Field::Text(silent)));
         }
@@ -444,7 +445,7 @@ impl Grooph {
             fields.push(("link", Field::Text(link)));
         }
         // A link that could not be opened: the model can call again.
-        if let Some(error) = &self.ui.link_error {
+        if let Some(error) = &self.ui.dialogs.link_error {
             text = format!("The tool's link could not be opened: {error}. {text}");
             fields.push(("error", Field::Text(error.clone())));
         }
@@ -578,7 +579,7 @@ mod tests {
     fn timing_feedback_stays_off_in_a_chat() {
         let (_, mut app) = embedded_app("?v=2&ts=4/4&embed=mcp");
         assert!(app.metronome_mode());
-        app.playback_ctl.accuracy.enabled = true;
+        app.playback_ctl.feedback.accuracy_enabled = true;
         assert!(!app.accuracy_active());
         assert!(!app.shows_accuracy_marks());
     }
@@ -600,7 +601,7 @@ mod tests {
         let (ctx, app) = embedded_app("?v=2&bpm=140&ts=7/8&click=>q+r:q.+(q)&embed=mcp&theme=dark");
         assert!(app.embedded());
         assert!(app.metronome_mode());
-        assert_eq!(app.playback_ctl.bpm, 140);
+        assert_eq!(app.playback_ctl.settings.bpm, 140);
         assert_eq!(app.metronome_meter().to_string(), "7/8");
         assert_eq!(ctx.options(|o| o.theme_preference), Theme::Dark.into());
         let context = app.model_context();
@@ -610,7 +611,7 @@ mod tests {
         assert!(context.fields.contains(&("bpm", Field::Number(140.0))));
         assert!(context.fields.contains(&("click", Field::Text(">q r:q. (q)".into()))));
         assert!(context.fields.contains(&("playing", Field::Bool(false))));
-        assert!(app.ui.link_error.is_none());
+        assert!(app.ui.dialogs.link_error.is_none());
     }
 
     #[test]
@@ -633,7 +634,7 @@ mod tests {
     #[test]
     fn a_wrong_link_shows_its_error_in_the_view() {
         let (_, app) = embedded_app("?v=2&ts=7/8&counter=t4+t4+t4&embed=mcp");
-        assert!(app.ui.link_error.is_some());
+        assert!(app.ui.dialogs.link_error.is_some());
         assert!(app.metronome_mode());
         let text = app.model_context().text;
         assert!(text.starts_with("The tool's link could not be opened: counter"), "{text}");
@@ -783,7 +784,7 @@ mod tests {
             assert_eq!(app.compact_card(), compact);
             let screen = Rect::from_min_size(Pos2::ZERO, vec2(width, height));
             for picker in [None, Some(crate::pickers::Picker::MetronomeMeter)] {
-                app.ui.picker = picker;
+                app.ui.dialogs.picker = picker;
                 let input = RawInput { screen_rect: Some(screen), ..Default::default() };
                 let mut output = ctx.run_ui(input, |ui| {
                     app.apply_style(ui);
@@ -802,11 +803,11 @@ mod tests {
             let input = RawInput { screen_rect: Some(screen), ..Default::default() };
             let mut output = ctx.run_ui(input, |ui| {
                 app.apply_style(ui);
-                app.ui.narrow_screen = ui.available_width() < crate::shell::NARROW_MAX_WIDTH;
+                app.ui.staff.narrow_screen = ui.available_width() < crate::shell::NARROW_MAX_WIDTH;
                 app.embed_ui(ui);
             });
             output.textures_delta.clear();
-            app.ui.staff_em
+            app.ui.staff.em
         };
         for compact in [true, false] {
             let fresh = |width| {
@@ -829,14 +830,14 @@ mod tests {
     fn the_tempo_buttons_step_the_bpm_within_its_range() {
         let (_, mut app) = embedded_app("?v=2&bpm=21&ts=4/4&embed=mcp");
         app.step_bpm(1);
-        assert_eq!(app.playback_ctl.bpm, 22);
+        assert_eq!(app.playback_ctl.settings.bpm, 22);
         for _ in 0..5 {
             app.step_bpm(-1);
         }
-        assert_eq!(app.playback_ctl.bpm, 20);
-        app.playback_ctl.bpm = 300;
+        assert_eq!(app.playback_ctl.settings.bpm, 20);
+        app.playback_ctl.settings.bpm = 300;
         app.step_bpm(1);
-        assert_eq!(app.playback_ctl.bpm, 300);
+        assert_eq!(app.playback_ctl.settings.bpm, 300);
     }
 
     #[test]

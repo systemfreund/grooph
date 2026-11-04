@@ -23,7 +23,7 @@ const REPEAT_EVERY: f64 = 0.05;
 impl Grooph {
     /// The inputs that count as hits, for the More menu's row, or "Off".
     pub(crate) fn play_along_label(&self) -> String {
-        let settings = &self.playback_ctl.play_along.settings;
+        let settings = &self.playback_ctl.feedback.play_along;
         let midi = self.playback_ctl.midi.input.as_ref().is_some_and(|input| input.is_connected());
         let inputs: Vec<_> =
             [(settings.tap_enabled, "Tap"), (settings.mic_enabled, "Mic"), (midi, "MIDI")]
@@ -44,7 +44,7 @@ impl Grooph {
             ui.weak("Play along and see how early or late every hit is.");
             ui.add_space(4.0);
 
-            let settings = &mut self.playback_ctl.play_along.settings;
+            let settings = &mut self.playback_ctl.feedback.play_along;
             switch_row(ui, "Tap", &mut settings.tap_enabled);
             if settings.tap_enabled {
                 ui.weak("Touch the staff or press the key while it plays.");
@@ -62,7 +62,7 @@ impl Grooph {
             if settings.mic_enabled {
                 ui.weak("Sticks, a pad or claps. With a headset on a phone, the phone listens.");
                 self.mic_settings(ui);
-                let settings = &mut self.playback_ctl.play_along.settings;
+                let settings = &mut self.playback_ctl.feedback.play_along;
                 if latency_row(ui, &mut settings.mic_offset_ms) {
                     calibrate = Some(HitSource::Mic);
                 }
@@ -74,12 +74,12 @@ impl Grooph {
             if value_row(ui, "MIDI", &self.midi_input_label()).clicked() {
                 // A device plugged in since shows up.
                 self.refresh_midi_ports();
-                self.ui.picker = Some(Picker::MidiInput);
+                self.ui.dialogs.picker = Some(Picker::MidiInput);
                 // Back here afterwards, where the device's latency row shows.
-                self.ui.picker_return = Some(Picker::PlayAlong);
+                self.ui.dialogs.picker_return = Some(Picker::PlayAlong);
             }
             if midi_connected {
-                let settings = &mut self.playback_ctl.play_along.settings;
+                let settings = &mut self.playback_ctl.feedback.play_along;
                 if latency_row(ui, &mut settings.midi_offset_ms) {
                     calibrate = Some(HitSource::Midi);
                 }
@@ -123,7 +123,7 @@ impl Grooph {
             mic.level_db = input.take_peak_db().max(mic.level_db - METER_FALL_DB);
             ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
         }
-        let threshold_db = &mut self.playback_ctl.play_along.settings.mic_threshold_db;
+        let threshold_db = &mut self.playback_ctl.feedback.play_along.mic_threshold_db;
         ui.add_space(4.0);
         level_meter(ui, mic.level_db, *threshold_db);
         ui.add_space(4.0);

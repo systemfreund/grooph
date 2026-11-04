@@ -654,13 +654,13 @@ impl Grooph {
         match cell {
             Cell::Instrument(i) => {
                 let technique = self.technique_at_cursor(i);
-                let family = self.ui.music_font_id.family.clone();
+                let family = self.ui.fonts.music_font_id.family.clone();
                 paint_instrument(ui, rect, i, technique, family, color);
             }
             // In a tuplet a value button shows its value with the tuplet's
             // number over it, as the group is written.
             Cell::Tool(t) if let Some(spec) = self.value_in_tuplet(t) => {
-                let family = self.ui.music_font_id.family.clone();
+                let family = self.ui.fonts.music_font_id.family.clone();
                 let band = inner.height() * TUPLET_NUMBER_BAND;
                 let margin = inner.height() * TUPLET_NUMBER_MARGIN;
                 let (_, rest) = inner.split_top_bottom_at_y(inner.top() + margin);
@@ -678,7 +678,7 @@ impl Grooph {
                 paint_notation(ui, below, &self.editor.button_measures[&t.id], family, color);
             }
             Cell::Tool(t) if matches!(button_kind(&t.kind), ButtonKind::Note) => {
-                let family = self.ui.music_font_id.family.clone();
+                let family = self.ui.fonts.music_font_id.family.clone();
                 match self.modifier_preview(t) {
                     Some(measure) => paint_notation(ui, inner, &measure, family, color),
                     None => paint_notation(
@@ -745,7 +745,7 @@ impl Grooph {
     fn paint_time_signature(&self, ui: &Ui, rect: Rect, color: Color32) {
         let painter = &ui.painter_at(rect);
         let em = compute_em(&rect, 0.7, ui);
-        let font_id = FontId::new(em, self.ui.music_font_id.family.clone());
+        let font_id = FontId::new(em, self.ui.fonts.music_font_id.family.clone());
         let opts = LayoutOpts {
             rect,
             font_id: font_id.clone(),
@@ -783,11 +783,11 @@ impl Grooph {
             }
             // The click bar's meter is the metronome's: pick it there.
             ToolKind::Meta(MetaOp::ChangeTimeSignature) if self.metronome_mode() => {
-                self.ui.picker = Some(Picker::MetronomeMeter);
+                self.ui.dialogs.picker = Some(Picker::MetronomeMeter);
                 return;
             }
             ToolKind::Meta(MetaOp::ChangeTimeSignature) => {
-                self.ui.picker = Some(Picker::BarMeter);
+                self.ui.dialogs.picker = Some(Picker::BarMeter);
                 return;
             }
             ToolKind::Navigate(op) => {
@@ -1586,7 +1586,7 @@ mod tests {
     #[test]
     fn a_new_rhythm_of_the_one_line_is_written_saved_and_loaded_in_the_score_tab() {
         let mut app = editing("kit 3/4 H:q H:q H:q ; K:h.");
-        app.ui.show_score_tab = true;
+        app.ui.view.show_score_tab = true;
         app.new_score(grooph_measure::StaffKind::Line);
         assert_eq!(app.tab(), Tab::Score);
         assert_eq!(app.ui.mode, Mode::Edit);
@@ -1618,7 +1618,7 @@ mod tests {
         app.select_tab(Tab::Practice);
         app.request_load_pattern(id);
         // Past "Discard" for the new groove, a change not saved.
-        let pending = app.ui.pending_load.take().unwrap();
+        let pending = app.ui.dialogs.pending_load.take().unwrap();
         app.finish_pending_load(pending);
         assert_eq!(app.tab(), Tab::Score);
         assert_eq!(text(&app), "3/4 e e r:q r:q");
@@ -1842,7 +1842,7 @@ mod tests {
         use crate::pickers::Picker;
         let mut app = editing("4/4 S:q H:q r:q r:q ; K:q r:q K:q r:q");
         apply(&mut app, ToolId::MetaChangeTimeSignature);
-        assert_eq!(app.ui.picker, Some(Picker::BarMeter));
+        assert_eq!(app.ui.dialogs.picker, Some(Picker::BarMeter));
         assert_eq!(app.ui.mode, crate::Mode::Edit);
     }
 

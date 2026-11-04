@@ -307,7 +307,7 @@ pub(crate) enum SaveAs {
 
 /// The line under a preset's name: meter, notes, level and tempo.
 fn preset_summary(settings: &PresetSettings) -> String {
-    let generator = &settings.generator;
+    let generator = &settings.generator.settings;
     let notes = effective_subdivision(generator.subdivision, generator.time_signature);
     let level = if generator.custom_figures_enabled {
         "Custom".to_owned()
@@ -318,7 +318,7 @@ fn preset_summary(settings: &PresetSettings) -> String {
         "{} · {} · {level} · {} BPM",
         generator.time_signature,
         subdivision_short_label(notes),
-        settings.bpm
+        settings.playback.bpm
     )
 }
 
@@ -346,17 +346,17 @@ impl Grooph {
                 .zip([(LibraryTab::Rhythms, "Rhythms"), (LibraryTab::Presets, "Presets")])
             {
                 let size = vec2(col.available_width(), ROW_HEIGHT);
-                let button = Button::new(label).selected(self.ui.library_tab == tab).min_size(size);
-                if col.add(button).clicked() && self.ui.library_tab != tab {
+                let button = Button::new(label).selected(self.ui.library.tab == tab).min_size(size);
+                if col.add(button).clicked() && self.ui.library.tab != tab {
                     // The halves share the name being typed.
-                    self.ui.library_tab = tab;
-                    self.ui.renaming_pattern = None;
-                    self.ui.renaming_preset = None;
+                    self.ui.library.tab = tab;
+                    self.ui.library.renaming_pattern = None;
+                    self.ui.library.renaming_preset = None;
                 }
             }
         });
         ui.add_space(8.0);
-        match self.ui.library_tab {
+        match self.ui.library.tab {
             LibraryTab::Rhythms => {
                 self.rhythms(ui);
                 None
@@ -373,18 +373,18 @@ impl Grooph {
     fn card_notices(&mut self, ui: &egui::Ui) -> (Option<LibraryItem>, Option<LibraryItem>) {
         let now = ui.input(|i| i.time);
         let just_saved =
-            self.ui.library_saved.filter(|(_, at)| now - at < SAVED_NOTICE_S).map(|(item, _)| item);
+            self.ui.library.saved.filter(|(_, at)| now - at < SAVED_NOTICE_S).map(|(item, _)| item);
         if just_saved.is_some() {
             ui.ctx().request_repaint_after_secs(0.5);
         }
-        (just_saved, self.ui.scroll_to_library_item.take())
+        (just_saved, self.ui.library.scroll_to.take())
     }
 
     /// The card of `item` says "✓ Saved" from UI time `now` on and scrolls
     /// into view.
     fn saved(&mut self, item: LibraryItem, now: f64) {
-        self.ui.library_saved = Some((item, now));
-        self.ui.scroll_to_library_item = Some(item);
+        self.ui.library.saved = Some((item, now));
+        self.ui.library.scroll_to = Some(item);
     }
 
     /// What a save button of the rhythms asked for; a new pattern opens its
@@ -394,8 +394,8 @@ impl Grooph {
             SaveAs::Update => self.save_active_pattern(),
             SaveAs::New => {
                 let id = self.save_pattern_as();
-                self.ui.renaming_pattern = Some(id);
-                self.ui.rename_typed =
+                self.ui.library.renaming_pattern = Some(id);
+                self.ui.library.rename_typed =
                     self.editor.library.get(id).map(|p| p.name.clone()).unwrap_or_default();
                 id
             }
@@ -414,8 +414,8 @@ impl Grooph {
             }
             _ => {
                 let id = self.save_preset_as("");
-                self.ui.renaming_preset = Some(id);
-                self.ui.rename_typed =
+                self.ui.library.renaming_preset = Some(id);
+                self.ui.library.rename_typed =
                     self.editor.presets.get(id).map(|p| p.name.clone()).unwrap_or_default();
                 id
             }
@@ -465,7 +465,7 @@ impl Grooph {
         ui.add_space(4.0);
         // A new score of the score tab, on the kit's staff or the one
         // line: offered while that tab is shown.
-        if self.ui.show_score_tab {
+        if self.ui.view.show_score_tab {
             ui.horizontal(|ui| {
                 if ui.button("🎼 New drum groove").clicked() {
                     self.request_new_score(StaffKind::Kit);
@@ -485,11 +485,11 @@ impl Grooph {
         let mut picked = None;
         let (just_saved, scroll_to) = self.card_notices(ui);
         let look = &PreviewLook {
-            family: self.ui.music_font_id.family.clone(),
+            family: self.ui.fonts.music_font_id.family.clone(),
             stem_length_factor: self.ui.layout.stem_length_factor,
         };
-        let renaming = &mut self.ui.renaming_pattern;
-        let typed = &mut self.ui.rename_typed;
+        let renaming = &mut self.ui.library.renaming_pattern;
+        let typed = &mut self.ui.library.rename_typed;
         egui::ScrollArea::vertical().max_height(dialog_scroll_height(ui)).show(ui, |ui| {
             for pattern in &mut self.editor.library.patterns {
                 let id = pattern.id;
@@ -519,11 +519,11 @@ impl Grooph {
         });
         match picked {
             Some((id, CardAction::Load)) => {
-                self.ui.renaming_pattern = None;
+                self.ui.library.renaming_pattern = None;
                 self.request_load_pattern(id);
             }
             Some((id, CardAction::Delete)) => {
-                self.ui.renaming_pattern = None;
+                self.ui.library.renaming_pattern = None;
                 self.delete_pattern(id);
             }
             _ => {}
@@ -543,8 +543,8 @@ impl Grooph {
         let mut picked = None;
         let mut to_delete = None;
         let (just_saved, scroll_to) = self.card_notices(ui);
-        let renaming = &mut self.ui.renaming_preset;
-        let typed = &mut self.ui.rename_typed;
+        let renaming = &mut self.ui.library.renaming_preset;
+        let typed = &mut self.ui.library.rename_typed;
         let builtin = presets::builtin_presets();
         egui::ScrollArea::vertical().max_height(dialog_scroll_height(ui)).show(ui, |ui| {
             for preset in &mut self.editor.presets.presets {
@@ -607,16 +607,16 @@ impl Grooph {
         // Its rhythm is generated, not the metronome's click bar.
         self.leave_metronome();
         self.apply_preset(id);
-        self.ui.renaming_preset = None;
-        self.ui.picker = None;
+        self.ui.library.renaming_preset = None;
+        self.ui.dialogs.picker = None;
         self.select_tab(Tab::Practice);
     }
 
     /// Modal shown when loading a pattern or opening a shared link would
     /// discard unsaved changes. Offers to save first, discard, or cancel.
-    /// Reads/clears `ui.pending_load`.
+    /// Reads/clears `ui.dialogs.pending_load`.
     pub(super) fn load_confirm_dialog(&mut self, ui: &mut egui::Ui) {
-        let (message, action) = match &self.ui.pending_load {
+        let (message, action) = match &self.ui.dialogs.pending_load {
             None => return,
             Some(PendingLoad::Pattern(_)) => {
                 ("The current measure has unsaved changes. Save before loading?", "Load")
@@ -652,16 +652,16 @@ impl Grooph {
             match choice_buttons(ui, width, &[&save, &discard, "Cancel"]) {
                 Some(0) => {
                     self.save_active_pattern();
-                    if let Some(pending) = self.ui.pending_load.take() {
+                    if let Some(pending) = self.ui.dialogs.pending_load.take() {
                         self.finish_pending_load(pending);
                     }
                 }
                 Some(1) => {
-                    if let Some(pending) = self.ui.pending_load.take() {
+                    if let Some(pending) = self.ui.dialogs.pending_load.take() {
                         self.finish_pending_load(pending);
                     }
                 }
-                Some(_) => self.ui.pending_load = None,
+                Some(_) => self.ui.dialogs.pending_load = None,
                 None => {}
             }
         });
@@ -669,7 +669,7 @@ impl Grooph {
 
     /// Shown when the app was opened with a link it cannot read.
     pub(super) fn link_error_dialog(&mut self, ui: &mut egui::Ui) {
-        let Some(err) = &self.ui.link_error else {
+        let Some(err) = &self.ui.dialogs.link_error else {
             return;
         };
         let mut close = false;
@@ -684,7 +684,7 @@ impl Grooph {
                 close = ui.button("OK").clicked();
             });
         if close {
-            self.ui.link_error = None;
+            self.ui.dialogs.link_error = None;
         }
     }
 }

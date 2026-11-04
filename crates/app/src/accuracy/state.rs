@@ -2,24 +2,27 @@ use crate::TransportState;
 
 use super::tracker::AccuracyTracker;
 
-/// UI-level wrapper around `AccuracyTracker` that adds an `enabled` toggle and
-/// reacts to the toggle in the context of the current transport state.
+/// UI-level wrapper around `AccuracyTracker` that reacts to the timing
+/// feedback switch (`FeedbackSettings::accuracy_enabled`) in the context of
+/// the current transport state.
 pub(crate) struct AccuracyState {
     pub(crate) tracker: AccuracyTracker,
-    pub(crate) enabled: bool,
+}
+
+impl Default for AccuracyState {
+    fn default() -> Self {
+        Self { tracker: AccuracyTracker::new() }
+    }
 }
 
 impl AccuracyState {
-    pub(crate) fn new(enabled: bool) -> Self {
-        Self { tracker: AccuracyTracker::new(), enabled }
-    }
-
-    pub(crate) fn set_enabled(&mut self, enabled: bool, transport: TransportState) {
-        if self.enabled == enabled {
+    /// Switch timing feedback (`enabled`, the setting) on or off.
+    pub(crate) fn set_enabled(&mut self, enabled: &mut bool, on: bool, transport: TransportState) {
+        if *enabled == on {
             return;
         }
-        self.enabled = enabled;
-        if enabled {
+        *enabled = on;
+        if on {
             if transport == TransportState::Playing {
                 self.tracker.on_playback_stop();
             } else {
