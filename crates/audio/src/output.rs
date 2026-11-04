@@ -14,23 +14,22 @@ use std::sync::{Arc, Mutex};
 pub(crate) struct Output {
     /// Samples the source rendered, see [`MetronomeSource::rendered`].
     rendered: Arc<AtomicU64>,
-    // Declared before the stream, so it is dropped before the stream it
+    // Declared before the device sink, so it is dropped before the sink it
     // plays on.
-    _sink: rodio::Sink,
-    _stream: rodio::OutputStream,
+    _player: rodio::Player,
+    _sink: rodio::MixerDeviceSink,
 }
 
 #[cfg(all(not(target_arch = "wasm32"), feature = "playback"))]
 impl Output {
     pub(crate) fn open(shared: Arc<Mutex<PlaybackState>>) -> Result<Self, String> {
-        let stream =
-            rodio::OutputStreamBuilder::open_default_stream().map_err(|e| e.to_string())?;
-        let sink = rodio::Sink::connect_new(stream.mixer());
+        let sink = rodio::DeviceSinkBuilder::open_default_sink().map_err(|e| e.to_string())?;
+        let player = rodio::Player::connect_new(sink.mixer());
         let source = MetronomeSource::new(shared);
         let rendered = source.rendered();
-        sink.append(source);
-        sink.play();
-        Ok(Self { rendered, _sink: sink, _stream: stream })
+        player.append(source);
+        player.play();
+        Ok(Self { rendered, _player: player, _sink: sink })
     }
 
     /// Whether the device plays: it asked for the first samples.
@@ -71,7 +70,7 @@ impl Output {
 pub(crate) struct Output {
     /// Samples the source rendered, see [`MetronomeSource::rendered`].
     rendered: Arc<AtomicU64>,
-    stream: cpal::platform::WebAudioStream,
+    stream: cpal::Stream,
     /// The context was seen running.
     ran: std::cell::Cell<bool>,
 }
@@ -80,15 +79,15 @@ pub(crate) struct Output {
 impl Output {
     pub(crate) fn open(shared: Arc<Mutex<PlaybackState>>) -> Result<Self, String> {
         use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-        let host = cpal::platform::WebAudioHost::new().map_err(|e| e.to_string())?;
+        let host = cpal::default_host();
         let device = host.default_output_device().ok_or("no output device")?;
         let config = device.default_output_config().map_err(|e| e.to_string())?;
         let channels = usize::from(config.channels()).max(1);
-        let mut source = MetronomeSource::with_sample_rate(shared, config.sample_rate().0);
+        let mut source = MetronomeSource::with_sample_rate(shared, config.sample_rate());
         let rendered = source.rendered();
         let stream = device
             .build_output_stream(
-                &config.config(),
+                config.config(),
                 move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
                     for frame in data.chunks_mut(channels) {
                         frame.fill(source.next().unwrap_or(0.0));
@@ -102,10 +101,17 @@ impl Output {
         Ok(Self { rendered, stream, ran: std::cell::Cell::new(false) })
     }
 
+    /// The stream's `AudioContext`, which cpal keeps behind its web stream.
+    fn audio_context(&self) -> &web_sys::AudioContext {
+        match self.stream.as_inner() {
+            cpal::platform::StreamInner::WebAudio(stream) => stream.audio_context(),
+        }
+    }
+
     /// Whether the context plays. It starts suspended, and cpal renders its
     /// first buffers before it runs, so the samples alone do not tell.
     pub(crate) fn started(&self) -> bool {
-        let ctx = self.stream.audio_context();
+        let ctx = self.audio_context();
         ctx.state() == web_sys::AudioContextState::Running && ctx.current_time() > 0.0
     }
 
@@ -113,7 +119,7 @@ impl Output {
     /// interrupted it, as iOS does when the Bluetooth device goes away. It
     /// does not come back without a tap, and cpal never resumes it.
     pub(crate) fn lost(&self) -> bool {
-        let running = self.stream.audio_context().state() == web_sys::AudioContextState::Running;
+        let running = self.audio_context().state() == web_sys::AudioContextState::Running;
         if running {
             self.ran.set(true);
         }

@@ -999,17 +999,22 @@ impl Source for MetronomeSource {
         None // Infinite
     }
 
-    fn channels(&self) -> u16 {
-        1
+    fn channels(&self) -> rodio::ChannelCount {
+        rodio::ChannelCount::MIN
     }
 
-    fn sample_rate(&self) -> u32 {
-        self.sample_rate
+    fn sample_rate(&self) -> rodio::SampleRate {
+        rodio_rate(self.sample_rate)
     }
 
     fn total_duration(&self) -> Option<Duration> {
         None
     }
+}
+
+/// `rate` as rodio takes it; a device never reports 0 Hz.
+pub(crate) fn rodio_rate(rate: u32) -> rodio::SampleRate {
+    rodio::SampleRate::new(rate).unwrap_or(rodio::SampleRate::MIN)
 }
 
 #[cfg(all(not(target_arch = "wasm32"), feature = "playback"))]
@@ -1019,8 +1024,8 @@ fn device_sample_rate() -> u32 {
     if let Some(dev) = host.default_output_device()
         && let Ok(cfg) = dev.default_output_config()
     {
-        debug!("Using default output device sample rate: {}", cfg.sample_rate().0);
-        return cfg.sample_rate().0;
+        debug!("Using default output device sample rate: {}", cfg.sample_rate());
+        return cfg.sample_rate();
     }
     // fallback
     info!("Failed to get default output device config, falling back to default sample rate");

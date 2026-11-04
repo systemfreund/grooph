@@ -1,0 +1,11 @@
+# `cargo audit` (CI job `audit` in .github/workflows/rust.yml).
+[advisories]
+ignore = [
+    # quick-xml 0.36/0.37: slow parsing of crafted XML. Only native Linux
+    # builds have it, from egui-winit's accessibility (D-Bus introspection
+    # XML of the session's own AT-SPI bus) and from wayland-scanner at build
+    # time, both reading XML of the system, not of users. Gone once egui's
+    # dependencies move to quick-xml 0.41.
+    "RUSTSEC-2026-0194",
+    "RUSTSEC-2026-0195",
+]

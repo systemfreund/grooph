@@ -12,7 +12,8 @@ pub(crate) struct Backend {
 impl Backend {
     pub(crate) fn open(shared: Arc<Shared>) -> Result<Self, String> {
         let chosen = cpal::default_host().default_input_device().ok_or("No microphone found")?;
-        let name = chosen.name().unwrap_or_else(|_| "Microphone".into());
+        let name =
+            chosen.description().map_or_else(|_| "Microphone".into(), |d| d.name().to_owned());
         let supported = chosen.default_input_config().map_err(|e| e.to_string())?;
         let config: StreamConfig = supported.config();
         let stream = match supported.sample_format() {
@@ -38,18 +39,18 @@ where
     f32: FromSample<T>,
 {
     let channels = config.channels.max(1) as usize;
-    let mut detector = OnsetDetector::new(config.sample_rate.0, shared.threshold_db());
+    let mut detector = OnsetDetector::new(config.sample_rate, shared.threshold_db());
     let mut hits = Vec::new();
     let mut peak = 0f32;
     let errors = shared.clone();
     device
         .build_input_stream(
-            config,
+            *config,
             move |data: &[T], info: &InputCallbackInfo| {
                 let now = now_seconds();
                 // The block was captured this long before the callback runs.
                 let ts = info.timestamp();
-                let delay = ts.callback.duration_since(&ts.capture).unwrap_or_default();
+                let delay = ts.callback.duration_since(ts.capture);
                 detector.set_threshold_db(shared.threshold_db());
                 let first_channel = data.chunks(channels).map(|frame| frame[0].to_sample::<f32>());
                 peak =
