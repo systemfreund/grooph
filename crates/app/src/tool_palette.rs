@@ -2,7 +2,7 @@ use crate::Grooph;
 use crate::kit_palette::{instrument_label, instrument_short};
 use crate::pickers::{Picker, time_signature_label};
 use crate::shell::centered_column;
-use crate::tools::{BeatTemplate, DeleteOp, MetaOp, Modifier, NavOp, Tool, ToolKind, all_tools};
+use crate::tools::{BeatTemplate, DeleteOp, MetaOp, Modifier, NavOp, Tool, ToolId, ToolKind};
 use crate::{Mode, tools};
 use eframe::egui;
 use eframe::egui::scroll_area::ScrollBarVisibility;
@@ -81,7 +81,7 @@ const KIT_ORDER: [Instrument; 9] = [
 ];
 
 /// The tools in the editors' bars, next to play, not in the grid.
-pub(crate) const BAR_TOOLS: [&str; 2] = ["edit.undo", "edit.redo"];
+pub(crate) const BAR_TOOLS: [ToolId; 2] = [ToolId::EditUndo, ToolId::EditRedo];
 /// Which head accent and ghost go to, of several on a beat, if the picked
 /// instrument has none there.
 const AIM_ORDER: [Instrument; 9] = [
@@ -99,29 +99,29 @@ const AIM_ORDER: [Instrument; 9] = [
 /// the most used first: the note values, short to long, the rests in the
 /// same order under them, the head modifiers, the tuplets, the meter last,
 /// as it is set once per exercise.
-const TOOLS: [&str; 22] = [
-    "insert.note.q",
-    "insert.note.e",
-    "insert.note.s",
-    "insert.note.th",
-    "insert.note.h",
-    "insert.note.w",
-    "insert.rest.q",
-    "insert.rest.e",
-    "insert.rest.s",
-    "insert.rest.th",
-    "insert.rest.h",
-    "insert.rest.w",
-    "modify.toggle.accent",
-    "modify.toggle.soft",
-    "modify.toggle.dotted",
-    "insert.tuplet.t8",
-    "insert.tuplet.t16",
-    "insert.tuplet.qt16",
-    "insert.tuplet.st16",
-    "insert.tuplet.spt16",
-    "insert.tuplet.nt16",
-    "meta.change_time_signature",
+const TOOLS: [ToolId; 22] = [
+    ToolId::InsertNoteQ,
+    ToolId::InsertNoteE,
+    ToolId::InsertNoteS,
+    ToolId::InsertNoteTh,
+    ToolId::InsertNoteH,
+    ToolId::InsertNoteW,
+    ToolId::InsertRestQ,
+    ToolId::InsertRestE,
+    ToolId::InsertRestS,
+    ToolId::InsertRestTh,
+    ToolId::InsertRestH,
+    ToolId::InsertRestW,
+    ToolId::ModifyToggleAccent,
+    ToolId::ModifyToggleSoft,
+    ToolId::ModifyToggleDotted,
+    ToolId::InsertTupletT8,
+    ToolId::InsertTupletT16,
+    ToolId::InsertTupletQt16,
+    ToolId::InsertTupletSt16,
+    ToolId::InsertTupletSpt16,
+    ToolId::InsertTupletNt16,
+    ToolId::MetaChangeTimeSignature,
 ];
 
 /// One cell of the tool grid.
@@ -132,11 +132,6 @@ pub(crate) enum Cell {
     /// steps its head on the cursor's beat through its techniques
     /// (`Grooph::tap_instrument`), a long press takes it away.
     Instrument(Instrument),
-}
-
-/// The tool with `id`.
-pub(crate) fn tool(id: &str) -> &'static Tool {
-    all_tools().iter().find(|t| t.id == id).expect("a tool of the palette")
 }
 
 /// What `technique` is, on its button's hover.
@@ -157,7 +152,7 @@ fn technique_name(technique: Technique) -> &'static str {
 /// next line. On the kit its instruments come first, always the same nine
 /// cells; on the one line there are none.
 pub(crate) fn grid_rows(kit: bool) -> Vec<Vec<Cell>> {
-    let tools = |ids: &[&str]| ids.iter().map(|id| Cell::Tool(tool(id))).collect::<Vec<_>>();
+    let tools = |ids: &[ToolId]| ids.iter().map(|&id| Cell::Tool(id.tool())).collect::<Vec<_>>();
     let mut rows = Vec::new();
     if kit {
         rows.push(KIT_ORDER.iter().map(|&i| Cell::Instrument(i)).collect());
@@ -542,7 +537,7 @@ impl Grooph {
                     ToolKind::Modify(Modifier::ToggleHead) => "+/−",
                     _ => t.label,
                 };
-                (t.id, label, hover)
+                (t.id.name(), label, hover)
             }
             Cell::Instrument(i) => {
                 (instrument_short(i), instrument_short(i), self.instrument_hover(i))
@@ -604,15 +599,19 @@ impl Grooph {
                     FontId::new(2.0 * band, family.clone()),
                     color,
                 );
-                paint_notation(ui, below, &self.editor.button_measures[t.id], family, color);
+                paint_notation(ui, below, &self.editor.button_measures[&t.id], family, color);
             }
             Cell::Tool(t) if matches!(button_kind(&t.kind), ButtonKind::Note) => {
                 let family = self.ui.music_font_id.family.clone();
                 match self.modifier_preview(t) {
                     Some(measure) => paint_notation(ui, inner, &measure, family, color),
-                    None => {
-                        paint_notation(ui, inner, &self.editor.button_measures[t.id], family, color)
-                    }
+                    None => paint_notation(
+                        ui,
+                        inner,
+                        &self.editor.button_measures[&t.id],
+                        family,
+                        color,
+                    ),
                 }
             }
             Cell::Tool(t) if matches!(button_kind(&t.kind), ButtonKind::TimeSignature) => {
@@ -734,7 +733,7 @@ impl Grooph {
             changed
         });
         if committed {
-            info!("applied tool: {}", tool.id);
+            info!("applied tool: {}", tool.id.name());
         }
     }
 
@@ -1115,7 +1114,7 @@ fn notes_ink(layout: &MeasureLayout) -> Rect {
 #[cfg(test)]
 mod tests {
     use crate::shell::Tab;
-    use crate::tools::all_tools;
+    use crate::tools::{ToolId, all_tools};
     use crate::{Grooph, Mode};
     use grooph_measure::Cursor;
     use grooph_measure::notation::{format_score, parse_score};
@@ -1148,7 +1147,7 @@ mod tests {
         use grooph_measure::duration::{Duration, NoteValue};
         use grooph_measure::editing::{TUPLET_TOOLS, VALUE_BUTTONS};
         let templates = || {
-            super::TOOLS.iter().filter_map(|id| match super::tool(id).kind {
+            super::TOOLS.iter().filter_map(|&id| match id.tool().kind {
                 ToolKind::InsertBeat(BeatTemplate { duration, kind, .. }) => Some((duration, kind)),
                 _ => None,
             })
@@ -1174,8 +1173,8 @@ mod tests {
         assert_eq!(tuplets, TUPLET_TOOLS);
     }
 
-    fn apply(app: &mut Grooph, id: &str) {
-        let tool = all_tools().iter().find(|t| t.id == id).unwrap();
+    fn apply(app: &mut Grooph, id: ToolId) {
+        let tool = id.tool();
         app.apply_tool(tool);
     }
 
@@ -1187,16 +1186,16 @@ mod tests {
     fn the_tools_edit_the_voice_of_the_cursor() {
         let mut app = editing("4/4 H:q H:q H:q H:q ; K:h K:h");
         app.editor.doc_mut().cursor = Cursor::in_voice(0, 1, 1);
-        apply(&mut app, "insert.note.q");
+        apply(&mut app, ToolId::InsertNoteQ);
         // The kick keeps its head in a new duration; the hands stay.
         assert_eq!(text(&app), "4/4 H:q H:q H:q H:q ; K:h K:q r:q");
-        apply(&mut app, "modify.toggle.rest_note");
+        apply(&mut app, ToolId::ModifyToggleRestNote);
         assert_eq!(app.editor.doc().cursor, Cursor::in_voice(0, 1, 2));
         assert!(app.editor.doc().score.measures()[0].voice(1).unwrap().beats()[2].is_note());
-        apply(&mut app, "edit.undo");
-        apply(&mut app, "meta.reset_measure");
+        apply(&mut app, ToolId::EditUndo);
+        apply(&mut app, ToolId::MetaResetMeasure);
         assert_eq!(text(&app), "4/4 H:q H:q H:q H:q ; r:q r:q r:q r:q");
-        apply(&mut app, "edit.undo");
+        apply(&mut app, ToolId::EditUndo);
         assert_eq!(text(&app), "4/4 H:q H:q H:q H:q ; K:h K:q r:q");
     }
 
@@ -1204,54 +1203,54 @@ mod tests {
     fn value_buttons_show_their_value_in_the_cursors_tuplet() {
         use super::Cell;
         use grooph_measure::duration::{NoteValue, TupletSpec};
-        let cell = |id| Cell::Tool(super::tool(id));
-        let value = |app: &Grooph, id| app.value_in_tuplet(super::tool(id));
+        let cell = |id: ToolId| Cell::Tool(id.tool());
+        let value = |app: &Grooph, id: ToolId| app.value_in_tuplet(id.tool());
         let mut app = editing("4/4 qt16 qt16 qt16 qt16 qt16 r:q r:h");
         app.editor.doc_mut().cursor = Cursor::at(0, 0);
         // In a quintuplet of sixteenths "8" writes a quintuplet eighth.
         let eighth = TupletSpec { n: 5, m: 4, base: NoteValue::Eighth };
-        assert_eq!(value(&app, "insert.note.e"), Some(eighth));
-        assert_eq!(value(&app, "insert.rest.e"), Some(eighth));
-        assert!(app.cell_enabled(cell("insert.note.e")));
+        assert_eq!(value(&app, ToolId::InsertNoteE), Some(eighth));
+        assert_eq!(value(&app, ToolId::InsertRestE), Some(eighth));
+        assert!(app.cell_enabled(cell(ToolId::InsertNoteE)));
         // A quintuplet quarter takes four of its five places.
-        assert!(app.cell_enabled(cell("insert.note.q")));
-        assert!(!app.cell_enabled(cell("insert.note.h")));
+        assert!(app.cell_enabled(cell(ToolId::InsertNoteQ)));
+        assert!(!app.cell_enabled(cell(ToolId::InsertNoteH)));
         // On its last place only a sixteenth or shorter fits.
         app.editor.doc_mut().cursor = Cursor::at(0, 4);
-        assert!(!app.cell_enabled(cell("insert.note.e")));
-        assert!(app.cell_enabled(cell("insert.note.s")));
-        assert!(app.cell_enabled(cell("insert.note.th")));
+        assert!(!app.cell_enabled(cell(ToolId::InsertNoteE)));
+        assert!(app.cell_enabled(cell(ToolId::InsertNoteS)));
+        assert!(app.cell_enabled(cell(ToolId::InsertNoteTh)));
         // The tuplet tools stay as they are.
-        assert_eq!(value(&app, "insert.tuplet.t8"), None);
+        assert_eq!(value(&app, ToolId::InsertTupletT8), None);
         // Off a tuplet the buttons are plain values, greyed where they do
         // not fit in the bar.
         app.editor.doc_mut().cursor = Cursor::at(0, 5);
-        assert_eq!(value(&app, "insert.note.e"), None);
-        assert!(app.cell_enabled(cell("insert.note.h")));
+        assert_eq!(value(&app, ToolId::InsertNoteE), None);
+        assert!(app.cell_enabled(cell(ToolId::InsertNoteH)));
         app.editor.doc_mut().cursor = Cursor::at(0, 6);
-        assert!(app.cell_enabled(cell("insert.note.h")));
+        assert!(app.cell_enabled(cell(ToolId::InsertNoteH)));
         let mut last = editing("4/4 q q q q");
         last.editor.doc_mut().cursor = Cursor::at(0, 3);
-        assert!(!last.cell_enabled(cell("insert.note.h")));
-        assert!(last.cell_enabled(cell("insert.note.q")));
+        assert!(!last.cell_enabled(cell(ToolId::InsertNoteH)));
+        assert!(last.cell_enabled(cell(ToolId::InsertNoteQ)));
     }
 
     #[test]
     fn wholes_are_entered_by_hand_and_never_dotted() {
         let mut app = editing("4/4 q q q q");
         app.editor.doc_mut().cursor = Cursor::at(0, 0);
-        apply(&mut app, "insert.note.w");
+        apply(&mut app, ToolId::InsertNoteW);
         assert_eq!(text(&app), "4/4 w");
-        apply(&mut app, "insert.rest.w");
+        apply(&mut app, ToolId::InsertRestW);
         assert_eq!(text(&app), "4/4 r:w");
         // The dot has no whole to make.
-        apply(&mut app, "modify.toggle.dotted");
+        apply(&mut app, ToolId::ModifyToggleDotted);
         assert_eq!(text(&app), "4/4 r:w");
         // A whole rest is no value of a bar of another length.
         let mut app = editing("3/4 q q q");
         app.editor.doc_mut().cursor = Cursor::at(0, 0);
-        apply(&mut app, "insert.rest.w");
-        apply(&mut app, "insert.note.w");
+        apply(&mut app, ToolId::InsertRestW);
+        apply(&mut app, ToolId::InsertNoteW);
         assert_eq!(text(&app), "3/4 q q q");
     }
 
@@ -1259,14 +1258,14 @@ mod tests {
     fn halves_are_entered_and_dotted() {
         let mut app = editing("4/4 q q q q");
         app.editor.doc_mut().cursor = Cursor::at(0, 0);
-        apply(&mut app, "insert.note.h");
+        apply(&mut app, ToolId::InsertNoteH);
         assert_eq!(text(&app), "4/4 h q q");
         app.editor.doc_mut().cursor = Cursor::at(0, 1);
-        apply(&mut app, "insert.rest.h");
+        apply(&mut app, ToolId::InsertRestH);
         assert_eq!(text(&app), "4/4 h r:h");
         // And dotted.
         app.editor.doc_mut().cursor = Cursor::at(0, 0);
-        apply(&mut app, "modify.toggle.dotted");
+        apply(&mut app, ToolId::ModifyToggleDotted);
         assert_eq!(text(&app), "4/4 h. r:q");
     }
 
@@ -1274,19 +1273,19 @@ mod tests {
     fn the_cursor_keeps_its_voice_from_measure_to_measure() {
         let mut app = editing("4/4 H:h H:h ; K:q K:q K:q K:q | H:h H:h ; K:h K:h | q q q q");
         app.editor.doc_mut().cursor = Cursor::in_voice(0, 1, 3);
-        apply(&mut app, "nav.right");
+        apply(&mut app, ToolId::NavRight);
         assert_eq!(app.editor.doc().cursor, Cursor::in_voice(1, 1, 0));
-        apply(&mut app, "nav.left");
+        apply(&mut app, ToolId::NavLeft);
         assert_eq!(app.editor.doc().cursor, Cursor::in_voice(0, 1, 3));
-        apply(&mut app, "nav.start");
+        apply(&mut app, ToolId::NavStart);
         assert_eq!(app.editor.doc().cursor, Cursor::in_voice(0, 1, 0));
         // The last measure has one voice.
-        apply(&mut app, "nav.end");
+        apply(&mut app, ToolId::NavEnd);
         assert_eq!(app.editor.doc().cursor, Cursor::at(2, 3));
         // Into a last measure with two, End keeps the voice.
         let mut two = editing("4/4 H:h H:h ; K:q K:q K:q K:q | H:h H:h ; K:h K:h");
         two.editor.doc_mut().cursor = Cursor::in_voice(0, 1, 1);
-        apply(&mut two, "nav.end");
+        apply(&mut two, ToolId::NavEnd);
         assert_eq!(two.editor.doc().cursor, Cursor::in_voice(1, 1, 1));
         // A new measure has the voices of the one before.
         two.push_measure();
@@ -1300,10 +1299,10 @@ mod tests {
     fn a_line_score_edits_as_before() {
         let mut app = editing("4/4 >q (q) q q");
         app.editor.doc_mut().cursor = Cursor::at(0, 1);
-        apply(&mut app, "insert.note.e");
+        apply(&mut app, ToolId::InsertNoteE);
         assert_eq!(text(&app), "4/4 >q e r:e q q");
         assert_eq!(app.editor.doc().cursor, Cursor::at(0, 2));
-        apply(&mut app, "meta.reset_measure");
+        apply(&mut app, ToolId::MetaResetMeasure);
         assert_eq!(text(&app), "4/4 r:q r:q r:q r:q");
     }
 
@@ -1317,47 +1316,47 @@ mod tests {
         app.pick_instrument(HiHat);
         assert_eq!(app.editor.doc().cursor, Cursor::in_voice(0, 0, 0));
         for _ in 0..8 {
-            apply(&mut app, "insert.note.e");
+            apply(&mut app, ToolId::InsertNoteE);
         }
         // The snare on two and four, on the hi-hat's stem.
         app.pick_instrument(Snare);
         for beat in [1, 5] {
             app.editor.doc_mut().cursor = Cursor::in_voice(0, 0, beat);
-            apply(&mut app, "modify.toggle.head");
+            apply(&mut app, ToolId::ModifyToggleHead);
         }
         // The hi-hat opens on the last but one eighth and closes on the last.
         app.pick_instrument(HiHat);
         app.editor.doc_mut().cursor = Cursor::in_voice(0, 0, 6);
-        apply(&mut app, "modify.cycle_technique");
+        apply(&mut app, ToolId::ModifyCycleTechnique);
         app.editor.doc_mut().cursor = Cursor::in_voice(0, 0, 7);
         for _ in 0..3 {
-            apply(&mut app, "modify.cycle_technique");
+            apply(&mut app, ToolId::ModifyCycleTechnique);
         }
         // The kick goes below, to the feet's voice, on the beat sounding.
         app.pick_instrument(Kick);
         assert_eq!(app.editor.doc().cursor, Cursor::in_voice(0, 1, 3));
         for beat in [0, 2] {
             app.editor.doc_mut().cursor = Cursor::in_voice(0, 1, beat);
-            apply(&mut app, "modify.toggle.rest_note");
+            apply(&mut app, ToolId::ModifyToggleRestNote);
         }
         assert_eq!(text(&app), "4/4 H:e S-H:e H:e H:e H:e S-H:e Ho:e Hc:e ; K:q r:q K:q r:q");
         // Accent and ghost change the picked instrument's head alone.
         app.pick_instrument(Snare);
         app.editor.doc_mut().cursor = Cursor::in_voice(0, 0, 1);
-        apply(&mut app, "modify.toggle.accent");
+        apply(&mut app, ToolId::ModifyToggleAccent);
         app.editor.doc_mut().cursor = Cursor::in_voice(0, 0, 5);
-        apply(&mut app, "modify.toggle.soft");
+        apply(&mut app, ToolId::ModifyToggleSoft);
         assert!(text(&app).starts_with("4/4 H:e >S-H:e H:e H:e H:e (S)-H:e"), "{}", text(&app));
         // Taking the snare away leaves the hi-hat; the hi-hat's head away
         // on a beat of its own leaves a rest.
-        apply(&mut app, "modify.toggle.head");
+        apply(&mut app, ToolId::ModifyToggleHead);
         app.pick_instrument(HiHat);
         app.editor.doc_mut().cursor = Cursor::in_voice(0, 0, 2);
-        apply(&mut app, "modify.toggle.head");
+        apply(&mut app, ToolId::ModifyToggleHead);
         assert!(text(&app).starts_with("4/4 H:e >S-H:e r:e H:e H:e H:e"), "{}", text(&app));
         // Every step undoes, back to the empty kit bar.
         while app.can_undo() && app.editor.doc().score.staff == grooph_measure::StaffKind::Kit {
-            apply(&mut app, "edit.undo");
+            apply(&mut app, ToolId::EditUndo);
         }
         assert_eq!(text(&app), "4/4 q q q q");
     }
@@ -1369,17 +1368,17 @@ mod tests {
         app.editor.instrument = Snare;
         // The snare is above on the first beat: not below as well.
         app.editor.doc_mut().cursor = Cursor::in_voice(0, 1, 0);
-        apply(&mut app, "modify.toggle.head");
+        apply(&mut app, ToolId::ModifyToggleHead);
         app.editor.doc_mut().cursor = Cursor::in_voice(0, 1, 1);
-        apply(&mut app, "modify.toggle.rest_note");
+        apply(&mut app, ToolId::ModifyToggleRestNote);
         assert_eq!(text(&app), "4/4 S-H:q H:q H:q H:q ; K:q S:q K:q r:q");
         // Below on the second beat, so not above there.
         app.editor.doc_mut().cursor = Cursor::in_voice(0, 0, 1);
-        apply(&mut app, "modify.toggle.head");
+        apply(&mut app, ToolId::ModifyToggleHead);
         assert_eq!(text(&app), "4/4 S-H:q H:q H:q H:q ; K:q S:q K:q r:q");
         assert_eq!(app.editor.doc().cursor, Cursor::in_voice(0, 0, 1));
         // A refused edit leaves nothing to undo.
-        apply(&mut app, "edit.undo");
+        apply(&mut app, ToolId::EditUndo);
         assert_eq!(text(&app), "4/4 S-H:q H:q H:q H:q ; K:q r:q K:q r:q");
 
         // A snare in both voices already (links and patterns are loaded
@@ -1389,16 +1388,16 @@ mod tests {
         app.editor.instrument = Snare;
         app.editor.doc_mut().cursor = Cursor::in_voice(0, 0, 3);
         // The accent goes to the head on the beat, the kick's here.
-        apply(&mut app, "modify.toggle.accent");
+        apply(&mut app, ToolId::ModifyToggleAccent);
         assert_eq!(text(&app), "4/4 S-H:q H:q H:q H:q ; S:q r:q >K:h");
         app.editor.instrument = Snare;
         app.editor.doc_mut().cursor = Cursor::in_voice(0, 0, 3);
-        apply(&mut app, "modify.toggle.head");
+        apply(&mut app, ToolId::ModifyToggleHead);
         assert_eq!(text(&app), "4/4 S-H:q H:q H:q S-H:q ; S:q r:q >K:h");
         app.editor.doc_mut().cursor = Cursor::in_voice(0, 0, 2);
-        apply(&mut app, "modify.toggle.head");
+        apply(&mut app, ToolId::ModifyToggleHead);
         app.editor.doc_mut().cursor = Cursor::in_voice(0, 1, 1);
-        apply(&mut app, "modify.toggle.head");
+        apply(&mut app, ToolId::ModifyToggleHead);
         assert_eq!(text(&app), "4/4 S-H:q H:q S-H:q S-H:q ; S:q S:q >K:h");
     }
 
@@ -1431,7 +1430,7 @@ mod tests {
         app.hold_instrument(Snare);
         assert_eq!(text(&app), "4/4 H:q H:q H:q H:q ; K:q r:q K:q r:q");
         for _ in 0..3 {
-            apply(&mut app, "edit.undo");
+            apply(&mut app, ToolId::EditUndo);
         }
         // The kick goes below, to the feet's beat sounding then, and the
         // cursor goes with it.
@@ -1441,7 +1440,7 @@ mod tests {
         assert!(lit(&app, Kick) && lit(&app, HiHat));
         // Every tap undoes.
         for _ in 0..5 {
-            apply(&mut app, "edit.undo");
+            apply(&mut app, ToolId::EditUndo);
         }
         assert_eq!(text(&app), "4/4 H:q H:q H:q H:q ; K:q r:q K:q r:q");
         // A bar without the kick's voice gets it with the kick, in one step.
@@ -1449,7 +1448,7 @@ mod tests {
         app.editor.doc_mut().score.staff = grooph_measure::StaffKind::Kit;
         app.tap_instrument(Kick);
         assert!(text(&app).contains(';'));
-        apply(&mut app, "edit.undo");
+        apply(&mut app, ToolId::EditUndo);
         assert_eq!(text(&app), "kit 4/4 r:q r:q r:q r:q");
         // A bar of one voice with notes stays one voice.
         let mut app = editing("4/4 H:q H:q H:q H:q");
@@ -1465,19 +1464,19 @@ mod tests {
         app.editor.doc_mut().cursor = Cursor::in_voice(0, 0, 0);
         // A technique goes to the head played that way: the hi-hat opens,
         // the snare takes a rimshot, whichever instrument is picked.
-        apply(&mut app, "modify.technique.open");
+        apply(&mut app, ToolId::ModifyTechniqueOpen);
         assert_eq!(text(&app), "4/4 S-Ho:q H:q H:q H:q ; K:q r:q K:q r:q");
         assert_eq!(app.editor.instrument, HiHat);
-        apply(&mut app, "modify.technique.rimshot");
+        apply(&mut app, ToolId::ModifyTechniqueRimshot);
         assert_eq!(text(&app), "4/4 Sr-Ho:q H:q H:q H:q ; K:q r:q K:q r:q");
         assert_eq!(app.editor.instrument, Snare);
         // An accent goes to the picked instrument's head if it is on the
         // beat, else to the snare first.
         app.editor.instrument = HiHat;
-        apply(&mut app, "modify.toggle.accent");
+        apply(&mut app, ToolId::ModifyToggleAccent);
         assert_eq!(text(&app), "4/4 Sr->Ho:q H:q H:q H:q ; K:q r:q K:q r:q");
         app.editor.instrument = Ride;
-        apply(&mut app, "modify.toggle.soft");
+        apply(&mut app, ToolId::ModifyToggleSoft);
         assert_eq!(app.editor.instrument, Snare);
         // The cell of the head accent and ghost go to has a ring when there
         // are several.
@@ -1503,26 +1502,27 @@ mod tests {
     fn the_toggles_show_whether_they_are_on() {
         use super::Cell;
         let mut app = editing("4/4 S:q H:q r:q r:q ; K:q r:q K:q r:q");
-        let cell = |id| Cell::Tool(super::tool(id));
-        for id in ["modify.toggle.accent", "modify.toggle.soft", "modify.toggle.dotted"] {
+        let cell = |id: ToolId| Cell::Tool(id.tool());
+        for id in [ToolId::ModifyToggleAccent, ToolId::ModifyToggleSoft, ToolId::ModifyToggleDotted]
+        {
             assert!(!app.cell_selected(cell(id)), "{id}");
         }
         app.editor.doc_mut().cursor = Cursor::in_voice(0, 0, 0);
-        apply(&mut app, "modify.toggle.accent");
-        assert!(app.cell_selected(cell("modify.toggle.accent")));
-        assert!(!app.cell_selected(cell("modify.toggle.soft")));
-        apply(&mut app, "modify.toggle.soft");
-        assert!(app.cell_selected(cell("modify.toggle.soft")));
-        assert!(!app.cell_selected(cell("modify.toggle.accent")));
-        apply(&mut app, "modify.toggle.soft");
-        assert!(!app.cell_selected(cell("modify.toggle.soft")));
+        apply(&mut app, ToolId::ModifyToggleAccent);
+        assert!(app.cell_selected(cell(ToolId::ModifyToggleAccent)));
+        assert!(!app.cell_selected(cell(ToolId::ModifyToggleSoft)));
+        apply(&mut app, ToolId::ModifyToggleSoft);
+        assert!(app.cell_selected(cell(ToolId::ModifyToggleSoft)));
+        assert!(!app.cell_selected(cell(ToolId::ModifyToggleAccent)));
+        apply(&mut app, ToolId::ModifyToggleSoft);
+        assert!(!app.cell_selected(cell(ToolId::ModifyToggleSoft)));
     }
 
     #[test]
     fn the_meter_cell_opens_the_meter_picker_of_the_bar() {
         use crate::pickers::Picker;
         let mut app = editing("4/4 S:q H:q r:q r:q ; K:q r:q K:q r:q");
-        apply(&mut app, "meta.change_time_signature");
+        apply(&mut app, ToolId::MetaChangeTimeSignature);
         assert_eq!(app.ui.picker, Some(Picker::BarMeter));
         assert_eq!(app.ui.mode, crate::Mode::Edit);
     }
@@ -1550,13 +1550,15 @@ mod tests {
         }
         // The kit adds its instruments, whose cells add and take away a
         // head: no cell for that tool.
-        assert!(!tools(true).contains(&"modify.toggle.head"));
-        assert!(!tools(false).contains(&"modify.toggle.head"));
+        assert!(!tools(true).contains(&ToolId::ModifyToggleHead));
+        assert!(!tools(false).contains(&ToolId::ModifyToggleHead));
         // The techniques are the instruments' cells' too: no cells of their own.
-        assert!(!tools(true).iter().any(|&id| matches!(
-            super::tool(id).kind,
-            ToolKind::Modify(Modifier::ToggleTechnique(_))
-        )));
+        assert!(
+            !tools(true).iter().any(|&id| matches!(
+                id.tool().kind,
+                ToolKind::Modify(Modifier::ToggleTechnique(_))
+            ))
+        );
         let cells = grid_rows(true).into_iter().flatten().collect::<Vec<_>>();
         let instruments = cells.iter().filter(|c| matches!(c, Cell::Instrument(_))).count();
         assert_eq!(instruments, 9);
@@ -1567,17 +1569,17 @@ mod tests {
     fn a_technique_is_offered_for_the_instruments_that_play_it() {
         use super::Cell;
         use grooph_measure::Instrument::{HiHat, Kick, Snare};
-        let open = all_tools().iter().find(|t| t.id == "modify.technique.open").unwrap();
+        let open = all_tools().iter().find(|t| t.id == ToolId::ModifyTechniqueOpen).unwrap();
         let mut app = editing("4/4 S-H:q H:q H:q H:q ; K:q r:q K:q r:q");
         app.editor.instrument = HiHat;
         app.editor.doc_mut().cursor = Cursor::in_voice(0, 0, 1);
         assert!(app.cell_enabled(Cell::Tool(open)));
         assert!(!app.cell_selected(Cell::Tool(open)));
-        apply(&mut app, "modify.technique.open");
+        apply(&mut app, ToolId::ModifyTechniqueOpen);
         assert!(app.cell_selected(Cell::Tool(open)));
-        apply(&mut app, "modify.technique.closed");
+        apply(&mut app, ToolId::ModifyTechniqueClosed);
         assert_eq!(text(&app), "4/4 S-H:q Hc:q H:q H:q ; K:q r:q K:q r:q");
-        apply(&mut app, "modify.technique.closed");
+        apply(&mut app, ToolId::ModifyTechniqueClosed);
         assert_eq!(text(&app), "4/4 S-H:q H:q H:q H:q ; K:q r:q K:q r:q");
         // A technique is offered where a head played that way is on the
         // beat, whichever instrument is picked: the snare and the kick are
@@ -1593,7 +1595,7 @@ mod tests {
         }
         app.editor.instrument = Kick;
         app.editor.doc_mut().cursor = Cursor::in_voice(0, 0, 0);
-        apply(&mut app, "modify.technique.cross_stick");
+        apply(&mut app, ToolId::ModifyTechniqueCrossStick);
         assert_eq!(text(&app), "4/4 Sx-H:q H:q H:q H:q ; K:q r:q K:q r:q");
         // The head it went to is the picked one now, and shows as picked.
         assert_eq!(app.editor.instrument, Snare);
@@ -1604,40 +1606,41 @@ mod tests {
     fn a_modifier_is_offered_where_it_changes_the_beat() {
         use super::Cell;
         use grooph_measure::Instrument::{HiHat, Kick, Snare};
-        let cell = |id| Cell::Tool(all_tools().iter().find(|t| t.id == id).unwrap());
+        let cell = |id: ToolId| Cell::Tool(id.tool());
         let mut app = editing("4/4 q r:q q q");
         // An accent, a ghost and a dot on a note, none on a rest.
-        for id in ["modify.toggle.accent", "modify.toggle.soft", "modify.toggle.dotted"] {
+        for id in [ToolId::ModifyToggleAccent, ToolId::ModifyToggleSoft, ToolId::ModifyToggleDotted]
+        {
             assert!(app.cell_enabled(cell(id)), "{id}");
             app.editor.doc_mut().cursor = Cursor::at(0, 1);
-            assert_eq!(app.cell_enabled(cell(id)), id == "modify.toggle.dotted", "{id}");
+            assert_eq!(app.cell_enabled(cell(id)), id == ToolId::ModifyToggleDotted, "{id}");
             app.editor.doc_mut().cursor = Cursor::at(0, 0);
         }
         // No room for a dot on the last beat.
         app.editor.doc_mut().cursor = Cursor::at(0, 3);
-        assert!(!app.cell_enabled(cell("modify.toggle.dotted")));
+        assert!(!app.cell_enabled(cell(ToolId::ModifyToggleDotted)));
 
         let mut app = editing("4/4 S-H:q H:q H:q H:q ; K:q r:q K:q r:q");
         app.editor.instrument = Snare;
         app.editor.doc_mut().cursor = Cursor::in_voice(0, 0, 1);
         // No snare on the beat, the accent goes to the hi-hat there; no head
         // that plays a rimshot.
-        assert!(app.cell_enabled(cell("modify.toggle.accent")));
-        assert!(!app.cell_enabled(cell("modify.technique.rimshot")));
+        assert!(app.cell_enabled(cell(ToolId::ModifyToggleAccent)));
+        assert!(!app.cell_enabled(cell(ToolId::ModifyTechniqueRimshot)));
         app.editor.doc_mut().cursor = Cursor::in_voice(0, 0, 0);
-        assert!(app.cell_enabled(cell("modify.technique.rimshot")));
+        assert!(app.cell_enabled(cell(ToolId::ModifyTechniqueRimshot)));
         // The hi-hat on the beat opens, whichever instrument is picked.
         app.editor.instrument = Kick;
         app.editor.doc_mut().cursor = Cursor::in_voice(0, 0, 1);
-        assert!(app.cell_enabled(cell("modify.technique.open")));
-        assert!(app.cell_enabled(cell("modify.toggle.accent")));
+        assert!(app.cell_enabled(cell(ToolId::ModifyTechniqueOpen)));
+        assert!(app.cell_enabled(cell(ToolId::ModifyToggleAccent)));
         let _ = HiHat;
     }
 
     #[test]
     fn a_modifier_shows_the_cursors_beat() {
         use grooph_measure::duration::{Duration, NoteValue};
-        let tool = |id| all_tools().iter().find(|t| t.id == id).unwrap();
+        let tool = |id: ToolId| id.tool();
         let mut app = editing("4/4 e e e. s h");
         let shown = |app: &Grooph, id| {
             let m = app.modifier_preview(tool(id)).unwrap();
@@ -1646,21 +1649,21 @@ mod tests {
         };
         let e = Duration::Simple(NoteValue::Eighth);
         let e_dot = Duration::Dotted { base: NoteValue::Eighth, dots: 1 };
-        assert_eq!(shown(&app, "modify.toggle.accent"), (e, true, false));
-        assert_eq!(shown(&app, "modify.toggle.soft"), (e, false, true));
-        assert_eq!(shown(&app, "modify.toggle.dotted"), (e_dot, false, false));
+        assert_eq!(shown(&app, ToolId::ModifyToggleAccent), (e, true, false));
+        assert_eq!(shown(&app, ToolId::ModifyToggleSoft), (e, false, true));
+        assert_eq!(shown(&app, ToolId::ModifyToggleDotted), (e_dot, false, false));
         // Accent and ghost mean the note: the beat's dot is left out.
         app.editor.doc_mut().cursor = Cursor::at(0, 2);
-        assert_eq!(shown(&app, "modify.toggle.accent"), (e, true, false));
-        assert_eq!(shown(&app, "modify.toggle.soft"), (e, false, true));
-        assert_eq!(shown(&app, "modify.toggle.dotted"), (e_dot, false, false));
-        assert!(app.modifier_preview(tool("insert.note.q")).is_none());
+        assert_eq!(shown(&app, ToolId::ModifyToggleAccent), (e, true, false));
+        assert_eq!(shown(&app, ToolId::ModifyToggleSoft), (e, false, true));
+        assert_eq!(shown(&app, ToolId::ModifyToggleDotted), (e_dot, false, false));
+        assert!(app.modifier_preview(ToolId::InsertNoteQ.tool()).is_none());
         // A half note shows its accent, and the dot a dotted half.
         app.editor.doc_mut().cursor = Cursor::at(0, 4);
         let h = Duration::Simple(NoteValue::Half);
         let h_dot = Duration::Dotted { base: NoteValue::Half, dots: 1 };
-        assert_eq!(shown(&app, "modify.toggle.accent"), (h, true, false));
-        assert_eq!(shown(&app, "modify.toggle.dotted"), (h_dot, false, false));
+        assert_eq!(shown(&app, ToolId::ModifyToggleAccent), (h, true, false));
+        assert_eq!(shown(&app, ToolId::ModifyToggleDotted), (h_dot, false, false));
     }
 
     #[test]
@@ -1668,7 +1671,7 @@ mod tests {
         use grooph_measure::BeatKind;
         let mut app = editing("4/4 e r:e e e q q");
         let preview = |app: &Grooph| {
-            let m = app.modifier_preview(super::tool("modify.toggle.dotted")).unwrap();
+            let m = app.modifier_preview(ToolId::ModifyToggleDotted.tool()).unwrap();
             m.first_voice().beats()[0].kind()
         };
         app.editor.doc_mut().cursor = Cursor::at(0, 0);
@@ -1680,17 +1683,17 @@ mod tests {
     #[test]
     fn the_cursors_tuplet_is_marked_and_a_tap_dissolves_it() {
         let mut app = editing("4/4 t8 t8 t8 q q q");
-        use super::{Cell, tool};
-        let cell = |id| Cell::Tool(tool(id));
-        assert!(app.cell_selected(cell("insert.tuplet.t8")));
-        assert!(!app.cell_selected(cell("insert.tuplet.t16")));
-        assert!(!app.cell_selected(cell("insert.note.e")));
-        apply(&mut app, "insert.tuplet.t8");
+        use super::Cell;
+        let cell = |id: ToolId| Cell::Tool(id.tool());
+        assert!(app.cell_selected(cell(ToolId::InsertTupletT8)));
+        assert!(!app.cell_selected(cell(ToolId::InsertTupletT16)));
+        assert!(!app.cell_selected(cell(ToolId::InsertNoteE)));
+        apply(&mut app, ToolId::InsertTupletT8);
         assert!(!text(&app).contains("t8"), "{}", text(&app));
-        assert!(!app.cell_selected(cell("insert.tuplet.t8")));
+        assert!(!app.cell_selected(cell(ToolId::InsertTupletT8)));
         // Outside a group, nothing is marked.
         app.editor.doc_mut().cursor = Cursor::at(0, app.current_voice().beats().len() - 1);
-        assert!(!app.cell_selected(cell("insert.tuplet.t8")));
+        assert!(!app.cell_selected(cell(ToolId::InsertTupletT8)));
     }
 
     #[test]
@@ -1701,7 +1704,7 @@ mod tests {
         assert_eq!(text(&app), "4/4 H:q H:q H:q H:q ; K:h K:h | 3/4 q q q | r:q r:q r:q");
         // The cursor goes there, in the voice it can.
         assert_eq!(app.editor.doc().cursor, Cursor::at(2, 0));
-        apply(&mut app, "edit.undo");
+        apply(&mut app, ToolId::EditUndo);
         assert_eq!(text(&app), "4/4 H:q H:q H:q H:q ; K:h K:h | 3/4 q q q");
         // Not in the metronome's one bar.
         app.select_tab(Tab::Metronome);
@@ -1729,9 +1732,9 @@ mod tests {
         );
         app.remove_current_measure();
         assert_eq!(text(&app), "4/4 H:q H:q H:q H:q ; K:h K:h | 3/4 q q q");
-        apply(&mut app, "edit.undo");
-        apply(&mut app, "edit.undo");
-        apply(&mut app, "edit.undo");
+        apply(&mut app, ToolId::EditUndo);
+        apply(&mut app, ToolId::EditUndo);
+        apply(&mut app, ToolId::EditUndo);
         assert_eq!(text(&app), "4/4 H:q H:q H:q H:q ; K:h K:h | 3/4 q q q");
         // The metronome's one bar is not duplicated.
         app.select_tab(Tab::Metronome);
@@ -1753,7 +1756,7 @@ mod tests {
         // Clean already: nothing to do, nothing to undo.
         assert!(!app.can_clean_up_current_measure());
         app.clean_up_current_measure();
-        apply(&mut app, "edit.undo");
+        apply(&mut app, ToolId::EditUndo);
         assert_eq!(text(&app), "4/4 r:q S:h S:q ; K:h r:e K:e r:q | 3/4 q q q");
     }
 
@@ -1762,14 +1765,14 @@ mod tests {
         let mut app = editing("4/4 q (q) r:q q");
         app.pick_instrument(grooph_measure::Instrument::Kick);
         assert_eq!(app.editor.doc().cursor, Cursor::at(0, 0));
-        apply(&mut app, "modify.toggle.head");
-        apply(&mut app, "modify.cycle_technique");
-        apply(&mut app, "modify.technique.open");
+        apply(&mut app, ToolId::ModifyToggleHead);
+        apply(&mut app, ToolId::ModifyCycleTechnique);
+        apply(&mut app, ToolId::ModifyTechniqueOpen);
         assert_eq!(text(&app), "4/4 q (q) r:q q");
         // The tools write the line's rhythm, as before.
         app.editor.doc_mut().cursor = Cursor::at(0, 2);
-        apply(&mut app, "modify.toggle.rest_note");
-        apply(&mut app, "modify.toggle.accent");
+        apply(&mut app, ToolId::ModifyToggleRestNote);
+        apply(&mut app, ToolId::ModifyToggleAccent);
         assert_eq!(text(&app), "4/4 q (q) >q q");
     }
 
