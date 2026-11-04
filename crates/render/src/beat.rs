@@ -1,5 +1,5 @@
 use eframe::egui;
-use eframe::egui::{Color32, Pos2, Stroke};
+use eframe::egui::{Color32, Pos2, Rect, Stroke};
 use grooph_layout::pixel_layout::{LayoutOpts, NoteLayout};
 use grooph_measure::duration::NoteValue;
 
@@ -12,7 +12,7 @@ pub(super) fn draw_beat(
     color: Color32,
 ) {
     if let Some(stem) = drawn_stem(note, opts) {
-        painter.line_segment(stem, Stroke::new(opts.stem_thickness(), color));
+        draw_stem(painter, stem, note.stem_inset, opts.stem_thickness(), color);
     }
     let stroke = Stroke::new(opts.staff_line_thickness(), color);
     for ledger in &note.ledgers {
@@ -21,6 +21,32 @@ pub(super) fn draw_beat(
     for glyph in note.glyphs() {
         draw_glyph(painter, glyph, &opts.font_id.family, color);
     }
+}
+
+/// The stem from `base` to `tip`, `thickness` wide. Started `inset` stem
+/// thicknesses past its base, it ends there in a round end on the head's
+/// side, out of the head's hole, and keeps its outer edge straight to the
+/// base so it meets the head's outline without a notch.
+fn draw_stem(
+    painter: &egui::Painter,
+    [base, tip]: [Pos2; 2],
+    inset: f32,
+    thickness: f32,
+    color: Color32,
+) {
+    let stroke = Stroke::new(thickness, color);
+    if inset <= 0.0 {
+        painter.line_segment([base, tip], stroke);
+        return;
+    }
+    let r = 0.5 * thickness;
+    let dir = (tip.y - base.y).signum();
+    let cap = Pos2::new(base.x, base.y + dir * (inset * thickness + r));
+    painter.line_segment([cap, tip], stroke);
+    painter.circle_filled(cap, r, color);
+    // A down stem has its head on the right, an up stem on the left.
+    let outer = Pos2::new(base.x - dir * r, base.y);
+    painter.rect_filled(Rect::from_two_pos(outer, cap), 0.0, color);
 }
 
 /// How far a stem stops short of its tip under a flag, in stem thicknesses.

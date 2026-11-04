@@ -303,6 +303,9 @@ pub struct NoteLayout {
     pub ledgers: Vec<Line>,
     pub dots: Vec<PlacedGlyph>,
     pub stem: Option<Line>,
+    /// How far the drawn stem starts past `stem`'s base, in stem
+    /// thicknesses (see [`crate::glyphs::HeadGlyph::stem_inset`]).
+    pub stem_inset: f32,
     pub flag: Option<PlacedGlyph>,
     pub accent: Option<PlacedGlyph>,
     /// The signs of the heads' techniques (an open or closed hi-hat, a
@@ -409,6 +412,7 @@ impl NoteLayout {
             ledgers,
             dots,
             stem,
+            stem_inset: _,
             flag,
             accent,
             signs,
