@@ -1,4 +1,6 @@
 use std::cell::RefCell;
+use std::collections::VecDeque;
+use std::rc::Rc;
 
 use crate::Grooph;
 use crate::kit_palette::{instrument_label, instrument_short};
@@ -1072,83 +1074,127 @@ pub(crate) fn paint_notation(
     family: FontFamily,
     color: Color32,
 ) {
-    // Size the glyphs by the first note; rest-only measures use rest sizing.
-    let Some(first) = measure.first_voice().beats().first() else {
+    let Some(laid_out) = notation_layout(ui, rect, measure, family) else {
         return;
     };
-    let template = measure.first_voice().beats().iter().find(|b| b.is_note()).unwrap_or(first);
-    {
-        let cap_factor = match (template.kind(), template.duration) {
-            (Rest, _) => 0.8,
-            (Note, Duration::Tuplet(spec)) if matches!(spec.kind(), TupletKind::Nonuplet) => 0.35,
-            (Note, Duration::Tuplet(..)) => 0.4,
-            _ => 0.7,
-        };
-
-        let em = compute_em(&rect, cap_factor, ui);
-
-        let y_offset = match (template.kind(), template.duration) {
-            (Rest, _) => 2.0,
-            (Note, Duration::Tuplet(..)) => 22.0,
-            _ => 20.0,
-        };
-
-        let make_opts = |em: f32, rect: Rect| -> LayoutOpts {
-            LayoutOpts {
-                rect,
-                font_id: FontId::new(em, family.clone()),
-                pixels_per_point: ui.ctx().pixels_per_point(),
-                em,
-                layout_clef: false,
-                layout_time_signature: false,
-                y_offset,
-                stem_length_factor: 0.8,
-                stem_thickness_factor: 0.06,
-                accent_displacement: 0.1,
-                stem_down: false,
-                shared_line: false,
-                staff: StaffKind::Line,
-            }
-        };
-
-        // Probe pass: lay the measure out at the size chosen from the
-        // template beat, then take the ink of what it draws (note glyphs
-        // incl. flags, and tuplet brackets/numbers) instead of
-        // trusting the fixed factors above. Scale it to fill the tile
-        // along whichever axis it reaches first, and center it: a
-        // trailing unbeamed flag or a tuplet number stays inside, a single
-        // note grows to the tile's height.
-        let content = notes_ink(&build_measure_layout(measure.first_voice(), &make_opts(em, rect)));
-        let avail = rect.shrink(NOTATION_MARGIN * rect.height());
-        let content_size = Vec2::new((content.width()).max(1.0), (content.height()).max(1.0));
-        let scale = (avail.width() / content_size.x).min(avail.height() / content_size.y);
-        // No glyph larger than a quarter note filling the tile would be:
-        // rests and flags keep their size next to the notes.
-        let fitted_em = (em * scale).min(avail.height() / QUARTER_INK_EM);
-        // Re-measure at the new size (glyph widths don't scale perfectly
-        // linearly) and center the content in the tile.
-        let fitted =
-            notes_ink(&build_measure_layout(measure.first_voice(), &make_opts(fitted_em, rect)));
-        let (final_em, final_rect) = (fitted_em, rect.translate(rect.center() - fitted.center()));
-
-        let opts = make_opts(final_em, final_rect);
-        let measure_layout = build_measure_layout(measure.first_voice(), &opts);
-        let painter = &ui.painter_at(rect);
-        draw_notes(painter, &measure_layout, color, None, &opts);
-        // A half rest sits on the staff's line, a whole rest hangs from it:
-        // without the line the two look alike, so the cell draws it under
-        // the one and over the other.
-        let stroke = egui::Stroke::new(opts.staff_line_thickness(), color);
-        let reach = 0.4 * opts.staff_space();
-        for note in &measure_layout.notes {
-            if note.kind == Rest
-                && matches!(note.duration.base_note(), NoteValue::Half | NoteValue::Whole)
-            {
-                let (ink, y) = (note.head.ink(), opts.y_of(0));
-                painter.hline(ink.left() - reach..=ink.right() + reach, y, stroke);
-            }
+    let (opts, measure_layout) = &*laid_out;
+    let painter = &ui.painter_at(rect);
+    draw_notes(painter, measure_layout, color, None, opts);
+    // A half rest sits on the staff's line, a whole rest hangs from it:
+    // without the line the two look alike, so the cell draws it under
+    // the one and over the other.
+    let stroke = egui::Stroke::new(opts.staff_line_thickness(), color);
+    let reach = 0.4 * opts.staff_space();
+    for note in &measure_layout.notes {
+        if note.kind == Rest
+            && matches!(note.duration.base_note(), NoteValue::Half | NoteValue::Whole)
+        {
+            let (ink, y) = (note.head.ink(), opts.y_of(0));
+            painter.hline(ink.left() - reach..=ink.right() + reach, y, stroke);
         }
     }
+}
+
+/// The layout [`paint_notation`] draws `measure` with in `rect`, and its
+/// options. Fitting it to the tile takes three layouts, and the palette
+/// draws dozens of tiles every frame that only change with the window, the
+/// zoom or the cursor's bar, so the last few hundred are kept.
+fn notation_layout(
+    ui: &Ui,
+    rect: Rect,
+    measure: &Measure,
+    family: FontFamily,
+) -> Option<Rc<(LayoutOpts, MeasureLayout)>> {
+    /// More than the palette, the bar's buttons and the kit's tiles show
+    /// at once.
+    const KEPT: usize = 256;
+    type Kept = VecDeque<(Rect, f32, FontFamily, Measure, Rc<(LayoutOpts, MeasureLayout)>)>;
+    thread_local! {
+        static KEPT_NOTATION: RefCell<Kept> = const { RefCell::new(VecDeque::new()) };
+    }
+    let ppp = ui.ctx().pixels_per_point();
+    let found = KEPT_NOTATION.with_borrow(|kept| {
+        kept.iter()
+            .find(|(r, p, f, m, _)| *r == rect && *p == ppp && *f == family && m == measure)
+            .map(|(.., laid_out)| Rc::clone(laid_out))
+    });
+    if found.is_some() {
+        return found;
+    }
+    let laid_out = Rc::new(fit_notation(ui, rect, measure, family.clone())?);
+    KEPT_NOTATION.with_borrow_mut(|kept| {
+        kept.push_front((rect, ppp, family, measure.clone(), Rc::clone(&laid_out)));
+        kept.truncate(KEPT);
+    });
+    Some(laid_out)
+}
+
+/// Lays `measure` out to fill `rect` ([`notation_layout`]).
+fn fit_notation(
+    ui: &Ui,
+    rect: Rect,
+    measure: &Measure,
+    family: FontFamily,
+) -> Option<(LayoutOpts, MeasureLayout)> {
+    // Size the glyphs by the first note; rest-only measures use rest sizing.
+    let first = measure.first_voice().beats().first()?;
+    let template = measure.first_voice().beats().iter().find(|b| b.is_note()).unwrap_or(first);
+    let cap_factor = match (template.kind(), template.duration) {
+        (Rest, _) => 0.8,
+        (Note, Duration::Tuplet(spec)) if matches!(spec.kind(), TupletKind::Nonuplet) => 0.35,
+        (Note, Duration::Tuplet(..)) => 0.4,
+        _ => 0.7,
+    };
+
+    let em = compute_em(&rect, cap_factor, ui);
+
+    let y_offset = match (template.kind(), template.duration) {
+        (Rest, _) => 2.0,
+        (Note, Duration::Tuplet(..)) => 22.0,
+        _ => 20.0,
+    };
+
+    let make_opts = |em: f32, rect: Rect| -> LayoutOpts {
+        LayoutOpts {
+            rect,
+            font_id: FontId::new(em, family.clone()),
+            pixels_per_point: ui.ctx().pixels_per_point(),
+            em,
+            layout_clef: false,
+            layout_time_signature: false,
+            y_offset,
+            stem_length_factor: 0.8,
+            stem_thickness_factor: 0.06,
+            accent_displacement: 0.1,
+            stem_down: false,
+            shared_line: false,
+            staff: StaffKind::Line,
+        }
+    };
+
+    // Probe pass: lay the measure out at the size chosen from the
+    // template beat, then take the ink of what it draws (note glyphs
+    // incl. flags, and tuplet brackets/numbers) instead of
+    // trusting the fixed factors above. Scale it to fill the tile
+    // along whichever axis it reaches first, and center it: a
+    // trailing unbeamed flag or a tuplet number stays inside, a single
+    // note grows to the tile's height.
+    let content = notes_ink(&build_measure_layout(measure.first_voice(), &make_opts(em, rect)));
+    let avail = rect.shrink(NOTATION_MARGIN * rect.height());
+    let content_size = Vec2::new((content.width()).max(1.0), (content.height()).max(1.0));
+    let scale = (avail.width() / content_size.x).min(avail.height() / content_size.y);
+    // No glyph larger than a quarter note filling the tile would be:
+    // rests and flags keep their size next to the notes.
+    let fitted_em = (em * scale).min(avail.height() / QUARTER_INK_EM);
+    // Re-measure at the new size (glyph widths don't scale perfectly
+    // linearly) and center the content in the tile.
+    let fitted =
+        notes_ink(&build_measure_layout(measure.first_voice(), &make_opts(fitted_em, rect)));
+    let (final_em, final_rect) = (fitted_em, rect.translate(rect.center() - fitted.center()));
+
+    let opts = make_opts(final_em, final_rect);
+    let measure_layout = build_measure_layout(measure.first_voice(), &opts);
+    Some((opts, measure_layout))
 }
 
 /// Bounding rect (in the same pixel space as `LayoutOpts::rect`) of the ink
@@ -1191,6 +1237,31 @@ mod tests {
         app.editor.doc_mut().score = parse_score(score).unwrap();
         app.ui.mode = Mode::Edit;
         app
+    }
+
+    #[test]
+    fn a_tiles_notation_is_kept_until_its_tile_or_bar_changes() {
+        use super::notation_layout;
+        use eframe::egui::{self, FontFamily, Pos2, Rect};
+        use std::rc::Rc;
+        let ctx = egui::Context::default();
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let eighths = parse_score("4/4 e e q h").unwrap().measures()[0].clone();
+            let quarter = parse_score("4/4 q q q q").unwrap().measures()[0].clone();
+            let tile = Rect::from_min_size(Pos2::new(10.0, 10.0), egui::vec2(60.0, 40.0));
+            let family = FontFamily::Proportional;
+            let at = |rect: Rect, m: &grooph_measure::Measure| {
+                notation_layout(ui, rect, m, family.clone()).unwrap()
+            };
+            let first = at(tile, &eighths);
+            assert!(Rc::ptr_eq(&first, &at(tile, &eighths.clone())));
+            assert!(!Rc::ptr_eq(&first, &at(tile, &quarter)));
+            assert!(!Rc::ptr_eq(&first, &at(tile.translate(egui::vec2(64.0, 0.0)), &eighths)));
+            // What is kept is what laying it out again gives.
+            let again = super::fit_notation(ui, tile, &eighths, family.clone()).unwrap();
+            assert_eq!(format!("{:?}", first.1), format!("{:?}", again.1));
+        });
+        output.textures_delta.clear();
     }
 
     #[test]
