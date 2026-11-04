@@ -10,6 +10,7 @@
 //! the playback cursor — those concerns live in `tick_source` and the
 //! orchestrator in `lib.rs`.
 
+use crate::rodio_rate;
 use crate::sounds::{Noise, Patch, Tone};
 use crate::wav::SampleData;
 use rodio::Source;
@@ -107,11 +108,15 @@ impl VoiceMixer {
         let voice = match patch {
             Patch::Click { tone, noise, gain } => {
                 let hz = tone.hz.max(1.0);
-                let tone_signal: Signal =
-                    Box::new(SignalGenerator::new(self.sample_rate, hz, tone.waveform.to_rodio()));
+                let tone_signal: Signal = Box::new(SignalGenerator::new(
+                    rodio_rate(self.sample_rate),
+                    hz,
+                    tone.waveform.to_rodio(),
+                ));
                 let noise = noise.map(|n| {
-                    let signal: Signal =
-                        Box::new(WhiteUniform::new(self.sample_rate).high_pass(n.hpf_hz as u32));
+                    let signal: Signal = Box::new(
+                        WhiteUniform::new(rodio_rate(self.sample_rate)).high_pass(n.hpf_hz as u32),
+                    );
                     (signal, n)
                 });
                 ActiveVoice::Click { tone_signal, tone, noise, age: 0.0, gain }

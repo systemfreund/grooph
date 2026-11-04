@@ -41,7 +41,7 @@ grooph-measure = { path = "crates/measure" }
 grooph-mic = { path = "crates/mic" }
 grooph-midi = { path = "crates/midi" }
 grooph-render = { path = "crates/render" }
-cpal = { version = "0.16", features = ["wasm-bindgen"] }
+cpal = { version = "0.18", features = ["wasm-bindgen"] }
 # eframe's defaults without accesskit, which NativeActivity on Android cannot
 # use, and without a renderer; the app crate turns accesskit back on everywhere
 # else and picks the renderer per target (wgpu natively, glow on the web).
@@ -62,11 +62,11 @@ egui = { version = "0.37", features = ["monochrome_emoji_fonts"] }
 egui_extras = { version = "0.37", features = ["image", "svg"] }
 either = "1.15.0"
 env_logger = "0.11.8"
-getrandom = { version = "0.3.3", features = ["wasm_js"] }
+getrandom = { version = "0.4", features = ["wasm_js"] }
 js-sys = "0.3.85"
 log = "0.4.29"
 midir = "0.11"
-rodio = { version = "0.21", features = ["playback", "noise"] }
+rodio = { version = "0.23", features = ["playback", "noise"] }
 ron = "0.12"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

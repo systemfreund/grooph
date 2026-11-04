@@ -42,6 +42,21 @@ jobs:
         cargo build --release --target wasm32-unknown-unknown --package grooph-link-check
         node --test mcp/server.test.mjs
 
+  audit:
+    # Known vulnerabilities in Cargo.lock (RustSec). Accepted ones are listed
+    # with the reason in .cargo/audit.toml. Not a dependency of the deploy:
+    # a new advisory shows here without holding back a release.
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install cargo-audit
+      uses: taiki-e/install-action@v2
+      with:
+        tool: cargo-audit@0.22.2
+    - name: Audit the dependencies
+      run: cargo audit
+
   web:
     # Build the web app on every push and pull request, so a WASM-only
     # break shows up before merging. The deploy publishes this build.
