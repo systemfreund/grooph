@@ -3,7 +3,6 @@ use std::collections::VecDeque;
 use std::rc::Rc;
 
 use crate::Grooph;
-use crate::kit_palette::{instrument_label, instrument_short};
 use crate::pickers::{Picker, time_signature_label};
 use crate::shell::centered_column;
 use crate::tools::{BeatTemplate, DeleteOp, MetaOp, Modifier, NavOp, Tool, ToolId, ToolKind};
@@ -590,9 +589,7 @@ impl Grooph {
                 };
                 (t.id.name(), label, hover)
             }
-            Cell::Instrument(i) => {
-                (instrument_short(i), instrument_short(i), self.instrument_hover(i))
-            }
+            Cell::Instrument(i) => (i.short_label(), i.short_label(), self.instrument_hover(i)),
         };
         let id = ui.make_persistent_id(("tool_grid", key));
         let sense = if enabled { Sense::click() } else { Sense::hover() };
@@ -685,8 +682,8 @@ impl Grooph {
 
     /// What a tap and a long press on `instrument`'s cell do now.
     fn instrument_hover(&self, instrument: Instrument) -> String {
-        let name = instrument_label(instrument);
-        let techniques = instrument.techniques();
+        let name = instrument.label();
+        let techniques: Vec<_> = instrument.techniques().collect();
         let Some(technique) = self.technique_at_cursor(instrument) else {
             return format!("Add the {}", name.to_lowercase());
         };
@@ -1002,7 +999,7 @@ fn paint_instrument(
     let bold = (0.07 * size * ppp).round().max(1.0) / ppp;
     let at = rect.left_top() + Vec2::new(0.1 * w, 0.06 * h);
     let font = FontId::proportional(size);
-    let name = instrument_short(instrument);
+    let name = instrument.short_label();
     for dx in [0.0, bold] {
         painter.text(at + Vec2::new(dx, 0.0), Align2::LEFT_TOP, name, font.clone(), color);
     }
@@ -1027,7 +1024,7 @@ fn paint_instrument(
         let step = 0.11 * h;
         let y = rect.bottom() - 0.09 * h;
         let first = rect.center().x - step * (techniques.len() - 1) as f32 / 2.0;
-        for (n, &t) in techniques.iter().enumerate() {
+        for (n, t) in techniques.enumerate() {
             let lit = technique == Some(t);
             let dot = if lit { color } else { color.gamma_multiply(0.35) };
             painter.circle_filled(Pos2::new(first + step * n as f32, y), radius, dot);

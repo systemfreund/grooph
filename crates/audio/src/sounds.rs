@@ -623,7 +623,7 @@ mod tests {
         let settings = AudioSettings::default();
         let mut samples = Vec::new();
         for instrument in Instrument::ALL.into_iter().filter(|&i| i != Instrument::Rhythm) {
-            for &technique in instrument.techniques() {
+            for technique in instrument.techniques() {
                 let hit = KitHit { instrument, technique, level: Level::Normal };
                 let Patch::Sample { data, rate, .. } = SoundType::Kit(hit).patch(&settings) else {
                     panic!("{instrument:?} {technique:?}: sample expected");

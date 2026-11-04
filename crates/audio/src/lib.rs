@@ -16,6 +16,7 @@ use crate::voices::VoiceMixer;
 use grooph_measure::click::ClickBars;
 use grooph_measure::generator::Subdivision;
 use grooph_measure::grid::DEFAULT_GRID;
+use grooph_measure::head::MixerGroup;
 use grooph_measure::swing::Swing;
 use grooph_measure::tempo::ScoreTiming;
 use grooph_measure::{Instrument, Score};
@@ -119,12 +120,12 @@ impl Default for KitVolumes {
 impl KitVolumes {
     /// The volume `instrument` plays at.
     pub fn of(&self, instrument: Instrument) -> f32 {
-        match instrument {
-            Instrument::Kick => self.kick,
-            Instrument::Snare | Instrument::Rhythm => self.snare,
-            Instrument::HiHat | Instrument::HiHatFoot => self.hihat,
-            Instrument::HighTom | Instrument::MidTom | Instrument::FloorTom => self.toms,
-            Instrument::Ride | Instrument::Crash => self.cymbals,
+        match instrument.spec().mixer {
+            MixerGroup::Kick => self.kick,
+            MixerGroup::Snare => self.snare,
+            MixerGroup::HiHat => self.hihat,
+            MixerGroup::Toms => self.toms,
+            MixerGroup::Cymbals => self.cymbals,
         }
     }
 

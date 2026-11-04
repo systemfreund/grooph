@@ -40,9 +40,10 @@
 //!   foot up; any order reads.
 //! - Each head is accented with `>` or a ghost note in parentheses: `>S-H:q`,
 //!   `K-(S):e`.
-//! - A lowercase letter after an instrument plays it with a [`Technique`]: `Ho`
-//!   open, `Hh` half-open, `Hc` closed hi-hat, `Sx` cross-stick, `Sr` (`T1r`,
-//!   ...) rimshot, `RDb` ride bell, `CRc` choked crash.
+//! - A lowercase letter after an instrument plays it with a
+//!   [`Technique`](crate::Technique): `Ho` open, `Hh` half-open, `Hc` closed
+//!   hi-hat, `Sx` cross-stick, `Sr` (`T1r`, ...) rimshot, `RDb` ride bell,
+//!   `CRc` choked crash.
 //! - `;` separates the voices of a measure: the first with its stems up, the
 //!   second below it (see [`Measure::voices`]). Every voice fills the measure;
 //!   a time signature comes before the first.
@@ -61,7 +62,7 @@ use crate::duration::{Duration, NoteValue, TupletSpec};
 use crate::grid::DEFAULT_GRID;
 use crate::{
     Beat, Head, Heads, Instrument, Measure, MeasureError, ParseTimeSignatureError, Score,
-    StaffKind, Technique, TimeSignature, VoiceBar,
+    StaffKind, TimeSignature, VoiceBar,
 };
 use std::fmt::{Display, Formatter};
 
@@ -256,33 +257,11 @@ pub(crate) fn code_of(duration: &Duration) -> Option<String> {
     DEFAULT_GRID.supports(duration).then(|| format!("{n}:{m}{code}"))
 }
 
-/// Codes of the drum kit's instruments.
-const INSTRUMENT_CODES: [(&str, Instrument); 9] = [
-    ("K", Instrument::Kick),
-    ("S", Instrument::Snare),
-    ("H", Instrument::HiHat),
-    ("HF", Instrument::HiHatFoot),
-    ("RD", Instrument::Ride),
-    ("CR", Instrument::Crash),
-    ("T1", Instrument::HighTom),
-    ("T2", Instrument::MidTom),
-    ("FT", Instrument::FloorTom),
-];
-
-/// The letter written after an instrument for `technique`, none for the
-/// usual stroke. A letter means one technique per instrument (`c` is a
-/// closed hi-hat and a choked crash).
-const fn technique_letter(technique: Technique) -> Option<char> {
-    match technique {
-        Technique::Normal => None,
-        Technique::Open => Some('o'),
-        Technique::HalfOpen => Some('h'),
-        Technique::Closed => Some('c'),
-        Technique::CrossStick => Some('x'),
-        Technique::Rimshot => Some('r'),
-        Technique::Bell => Some('b'),
-        Technique::Choke => Some('c'),
-    }
+/// The kit instrument written `code` (see [`InstrumentSpec::code`]).
+///
+/// [`InstrumentSpec::code`]: crate::head::InstrumentSpec::code
+fn instrument_of(code: &str) -> Option<Instrument> {
+    Instrument::ALL.into_iter().find(|i| i.spec().code == Some(code))
 }
 
 /// Whether `token` is a note of the kit: its heads (after `>` or `(`) start
@@ -308,19 +287,21 @@ fn parse_head(text: &str, token: &str, at: Place) -> Result<Head, NotationError>
     }
     let split = text.find(|c: char| c.is_ascii_lowercase()).unwrap_or(text.len());
     let (code, letter) = text.split_at(split);
-    let (_, instrument) = INSTRUMENT_CODES.iter().find(|(c, _)| *c == code).ok_or_else(unknown)?;
-    let mut head = Head::new(*instrument);
+    let instrument = instrument_of(code).ok_or_else(unknown)?;
+    let mut head = Head::new(instrument);
     if !letter.is_empty() {
         let mut letters = letter.chars();
         let (Some(letter), None) = (letters.next(), letters.next()) else {
             return Err(unknown());
         };
         let technique = instrument
-            .techniques()
+            .spec()
+            .techniques
             .iter()
-            .find(|t| technique_letter(**t) == Some(letter))
+            .find(|t| t.letter == Some(letter))
             .ok_or_else(|| NotationError::InvalidTechnique { at, token: token.to_string() })?;
-        head = head.with_technique(*technique).expect("one of the instrument's techniques");
+        head =
+            head.with_technique(technique.technique).expect("one of the instrument's techniques");
     }
     head.set_accented(accented);
     head.set_soft(soft);
@@ -624,8 +605,10 @@ fn format_beat(beat: &Beat) -> Option<String> {
 
 /// `head` of the kit as written in a chord, e.g. `>S`, `(Sx)` or `Ho`.
 fn format_head(head: &Head) -> Option<String> {
-    let (code, _) = INSTRUMENT_CODES.iter().find(|(_, i)| *i == head.instrument())?;
-    let letter = technique_letter(head.technique()).map(String::from).unwrap_or_default();
+    let spec = head.instrument().spec();
+    let code = spec.code?;
+    let letter = spec.techniques.iter().find(|t| t.technique == head.technique());
+    let letter = letter.and_then(|t| t.letter).map(String::from).unwrap_or_default();
     let text = format!("{code}{letter}");
     Some(match (head.accented(), head.soft()) {
         (true, _) => format!(">{text}"),
@@ -637,6 +620,7 @@ fn format_head(head: &Head) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Technique;
     use crate::duration::{e, q, qt16, s, t8};
     use crate::generator::{GeneratorSettings, Rng, Subdivision, generate_score};
 
@@ -971,9 +955,44 @@ mod tests {
     }
 
     #[test]
+    fn every_code_and_letter_reads_as_before() {
+        use Instrument::*;
+        use Technique::*;
+        let heads = [
+            ("K", Kick, Normal),
+            ("S", Snare, Normal),
+            ("Sx", Snare, CrossStick),
+            ("Sr", Snare, Rimshot),
+            ("H", HiHat, Normal),
+            ("Ho", HiHat, Open),
+            ("Hh", HiHat, HalfOpen),
+            ("Hc", HiHat, Closed),
+            ("HF", HiHatFoot, Normal),
+            ("RD", Ride, Normal),
+            ("RDb", Ride, Bell),
+            ("CR", Crash, Normal),
+            ("CRc", Crash, Choke),
+            ("T1", HighTom, Normal),
+            ("T1r", HighTom, Rimshot),
+            ("T2", MidTom, Normal),
+            ("T2r", MidTom, Rimshot),
+            ("FT", FloorTom, Normal),
+            ("FTr", FloorTom, Rimshot),
+        ];
+        for (text, instrument, technique) in heads {
+            let head = Head::new(instrument).with_technique(technique).unwrap();
+            let beat = Beat::with_heads(q(), Heads::one(head));
+            let written = format!("1/4 {text}:q");
+            assert_eq!(beats_of(&parse_score(&written).unwrap(), 0), [beat], "{text}");
+            assert_eq!(format_beat(&beat).unwrap(), format!("{text}:q"));
+        }
+    }
+
+    #[test]
     fn every_head_of_the_kit_reads_back_as_written() {
-        for &(_, instrument) in &INSTRUMENT_CODES {
-            for &technique in instrument.techniques() {
+        let coded = Instrument::ALL.into_iter().filter(|i| i.spec().code.is_some());
+        for instrument in coded {
+            for technique in instrument.techniques() {
                 for (accented, soft) in [(false, false), (true, false), (false, true)] {
                     let mut head = Head::new(instrument).with_technique(technique).unwrap();
                     head.set_accented(accented);
@@ -986,8 +1005,9 @@ mod tests {
             }
         }
         // Every kit instrument has a code; the one line has none.
-        let coded = INSTRUMENT_CODES.map(|(_, i)| i);
-        assert!(Instrument::ALL.iter().all(|i| coded.contains(i) == (*i != Instrument::Rhythm)));
+        assert!(
+            Instrument::ALL.iter().all(|i| i.spec().code.is_some() == (*i != Instrument::Rhythm))
+        );
     }
 
     #[test]

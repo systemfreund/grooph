@@ -27,38 +27,6 @@ use grooph_measure::{
     Cursor, Instrument, Measure, Score, StaffKind, TimeSignature, VoiceIdx, Voicing,
 };
 
-/// The name of `instrument` on its button.
-pub(crate) fn instrument_label(instrument: Instrument) -> &'static str {
-    match instrument {
-        Instrument::Rhythm => "Rhythm",
-        Instrument::HiHatFoot => "Hi-hat foot",
-        Instrument::Kick => "Kick",
-        Instrument::FloorTom => "Floor tom",
-        Instrument::Snare => "Snare",
-        Instrument::MidTom => "Tom 2",
-        Instrument::HighTom => "Tom 1",
-        Instrument::Ride => "Ride",
-        Instrument::HiHat => "Hi-hat",
-        Instrument::Crash => "Crash",
-    }
-}
-
-/// The short name of `instrument` on its cell of the tool grid.
-pub(crate) fn instrument_short(instrument: Instrument) -> &'static str {
-    match instrument {
-        Instrument::Rhythm => "R",
-        Instrument::HiHatFoot => "HF",
-        Instrument::Kick => "BD",
-        Instrument::FloorTom => "FT",
-        Instrument::Snare => "SN",
-        Instrument::MidTom => "T2",
-        Instrument::HighTom => "T1",
-        Instrument::Ride => "RD",
-        Instrument::HiHat => "HH",
-        Instrument::Crash => "CR",
-    }
-}
-
 /// A new drum groove: one bar of `ts`, a voice of rests for each of the
 /// `voicing`'s, on the kit's staff.
 pub(crate) fn empty_groove(ts: TimeSignature, voicing: Voicing) -> Score {
@@ -91,7 +59,7 @@ impl Grooph {
     /// stays at its time.
     pub(crate) fn tap_instrument(&mut self, instrument: Instrument) {
         let next = match self.technique_at_cursor(instrument) {
-            Some(t) => instrument.techniques().iter().skip_while(|&&o| o != t).nth(1).is_some(),
+            Some(t) => instrument.techniques().skip_while(|&o| o != t).nth(1).is_some(),
             None => false,
         };
         let tool = if next { ToolId::ModifyCycleTechnique } else { ToolId::ModifyToggleHead };
