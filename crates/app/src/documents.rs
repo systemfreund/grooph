@@ -273,6 +273,19 @@ mod tests {
         assert!(app.editor.docs.score.dirty);
     }
 
+    /// A metronome link's tempo is the metronome's: it leaves the score
+    /// tab's clean score as it is, also when opened from the score tab.
+    #[test]
+    fn a_metronome_links_tempo_leaves_a_clean_score_alone() {
+        let (mut app, _) = app_with_groove();
+        app.editor.docs.score.dirty = false;
+        app.playback_ctl.bpm = 100;
+        app.open_link(grooph_link::parse_query("v=2&bpm=120&ts=3/4").unwrap().unwrap());
+        assert!(app.metronome_mode());
+        assert_eq!(app.playback_ctl.bpm, 120);
+        assert!(!app.editor.docs.score.dirty);
+    }
+
     #[test]
     fn a_tempo_link_marks_a_saved_score_unsaved() {
         let (mut app, _) = app_with_groove();

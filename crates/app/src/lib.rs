@@ -963,9 +963,7 @@ impl Grooph {
         // Each content opens on its own page: a score link on the score tab
         // (on Practice if shared from there, or while the score tab is
         // hidden), a generator link on Practice,
-        // a metronome link on the metronome (below, with its meter and
-        // click bar).
-        let metronome = matches!(link.content, Some(LinkContent::Metronome(_)));
+        // a metronome link on the metronome, with its meter and click bar.
         let replaces_rhythm =
             matches!(link.content, Some(LinkContent::Score(_) | LinkContent::Generator { .. }));
         match link.content {
@@ -978,6 +976,10 @@ impl Grooph {
                 // The meter plays the link's counter rhythm, or none; a
                 // `poly` link's as picked in the app.
                 self.set_metronome_clicks(ts, link.poly, link.counter.clone());
+                // Before its tempo, which is then the metronome's, not a
+                // change of the page shown before.
+                self.show_document(Document::Metronome);
+                self.ui.mode = Mode::Playback;
             }
             Some(LinkContent::Generator { settings, seed }) => {
                 self.stop_transport();
@@ -1009,10 +1011,6 @@ impl Grooph {
         }
         if let Some(bar) = link.click {
             self.set_meter_click_bar(bar);
-        }
-        if metronome {
-            self.show_document(Document::Metronome);
-            self.ui.mode = Mode::Playback;
         }
     }
 
