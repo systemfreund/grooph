@@ -13,7 +13,8 @@ Rust developers and focuses on crate-specific behaviors and APIs that matter whe
   and tests cleanly with the default toolchain (no special flags required). Native builds need the ALSA headers
   (`libasound2-dev` on Debian/Ubuntu) for the devices; without them, `cargo test --workspace --no-default-features`
   builds and runs every test with the app's `devices` feature off (opening a device then fails). A test must not need a
-  real device.
+  real device. CI does not build this configuration: after changing a device crate's backend code (`midi`'s `input.rs`,
+  `audio`'s `output.rs`, `mic`), run it once.
 - Workspace layout (`crates/`, shared versions in the root Cargo.toml under `[workspace.dependencies]`):
     - `measure` (grooph-measure): the music model: durations, beats, measures, scores, time signatures, the
       generator, counting, swing, tempo. No GUI dependencies.
