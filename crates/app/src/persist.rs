@@ -15,7 +15,7 @@ use crate::settings::{
 };
 use crate::{PERSISTED_STATE_VERSION, PersistedState, SavedDoc};
 use grooph_measure::click::ClickBars;
-use grooph_measure::counter::{CounterBars, Ratio};
+use grooph_measure::counter::{Ratio, named_ratio_of, respelled};
 use grooph_measure::{BeatIdx, Cursor, Measure, Score, TimeSignature};
 use log::{info, warn};
 use ron::value::RawValue;
@@ -270,13 +270,17 @@ fn join_metronome(fields: &mut Vec<Field>) -> bool {
         click.set(bar);
     }
     meters.extend(counters.iter().map(Measure::time_signature));
-    let counter = CounterBars::from(counters).with_names(&names);
     let mut bars: Vec<MeterBars> = Vec::new();
     for ts in meters {
         if bars.iter().any(|b| b.meter() == ts) {
             continue;
         }
-        bars.push(MeterBars::new(click.for_meter(ts), counter.for_meter(ts), counter.name(ts)));
+        // In today's spelling, and named only as a ratio its bar is.
+        let counter = counters.iter().find(|m| m.time_signature() == ts).cloned().map(respelled);
+        let name = names.iter().rev().find(|&&(t, _)| t == ts).map(|&(_, r)| r);
+        let name = name
+            .filter(|&r| counter.as_ref().is_some_and(|c| named_ratio_of(c, Some(r)) == Some(r)));
+        bars.push(MeterBars::new(click.for_meter(ts), counter.as_ref(), name));
     }
     bars.retain(|b| *b != MeterBars::plain(b.meter()));
     let saved = SavedMetronome { meter, bars };

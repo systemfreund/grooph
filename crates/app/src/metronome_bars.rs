@@ -195,3 +195,29 @@ impl SavedMetronome {
         doc
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use grooph_measure::click::ClickLevel;
+    use grooph_measure::counter::counter_bar;
+
+    #[test]
+    fn another_meter_keeps_a_name_while_its_bar_is_that_ratios() {
+        let ts: TimeSignature = "2/4".parse().unwrap();
+        let (four_two, three_two) = (Ratio { n: 4, span: 2 }, Ratio { n: 3, span: 2 });
+        // 4:2 plays 2:1's bar; with its clicks edited it is still 4:2.
+        let mut edited = counter_bar(ts, four_two).unwrap();
+        edited.first_voice_mut().set_click_level(1, ClickLevel::Strong);
+        let mut bars = MetronomeBars::default();
+        bars.keep(MeterBars::new(meter_click_bar(ts), Some(&edited), Some(four_two)));
+        assert_eq!(bars.other(ts).unwrap().name, Some(four_two));
+        // Another ratio's bar drops the name.
+        let other = counter_bar(ts, three_two).unwrap();
+        bars.keep(MeterBars::new(meter_click_bar(ts), Some(&other), Some(four_two)));
+        assert_eq!(bars.other(ts).unwrap().name, None);
+        // Plain bars are not kept.
+        bars.keep(MeterBars::plain(ts));
+        assert_eq!(bars, MetronomeBars::default());
+    }
+}
