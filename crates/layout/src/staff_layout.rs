@@ -41,7 +41,7 @@ use grooph_measure::{
 /// knobs (`min_measure_width_em`, `note_width_em`, `system_spacing_em`,
 /// `layout_clef_first`, `time_signature_first`). The per-measure `rect`, `layout_clef` and
 /// `layout_time_signature` are derived per measure during layout.
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub struct StaffOpts {
     pub rect: Rect,
     pub font_id: FontId,
@@ -195,6 +195,31 @@ impl PlacedMeasure {
 }
 
 impl StaffLayout {
+    /// Moves the whole staff by `d`, as if it had been laid out with its
+    /// `rect` moved by `d`. Lines are snapped to device pixels during
+    /// layout, so that holds exactly only for `d` in whole device pixels.
+    pub fn translate(&mut self, d: Vec2) {
+        // Spelled out, so a new field cannot be left behind.
+        let StaffLayout { systems, total_size: _, scale: _, room: _ } = self;
+        for SystemLayout { y_baseline, rect, measures } in systems {
+            *y_baseline += d.y;
+            *rect = rect.translate(d);
+            for placed in measures {
+                let PlacedMeasure {
+                    measure_idx: _,
+                    rect,
+                    y_offset: _,
+                    staff: _,
+                    voices,
+                    show_clef: _,
+                    show_time_signature: _,
+                } = placed;
+                *rect = rect.translate(d);
+                voices.iter_mut().for_each(|v| v.translate(d));
+            }
+        }
+    }
+
     /// Find the placed measure for a given measure index across all systems.
     pub fn placed(&self, measure_idx: MeasureIdx) -> Option<&PlacedMeasure> {
         self.systems.iter().flat_map(|s| s.measures.iter()).find(|m| m.measure_idx == measure_idx)
@@ -760,6 +785,42 @@ mod tests {
             m.first_voice_mut().set_beat(i, Beat::note(q())).unwrap();
         }
         m
+    }
+
+    /// A staff moved by whole device pixels is the staff laid out there,
+    /// snapped lines included: the measure panel moves a kept layout as the
+    /// view scrolls instead of laying it out again.
+    #[test]
+    fn a_staff_moved_by_whole_pixels_is_the_one_laid_out_there() {
+        use grooph_measure::notation::parse_score;
+        let numbers = |l: &StaffLayout| -> Vec<f32> {
+            format!("{l:.4?}")
+                .split(|c: char| !(c.is_ascii_digit() || c == '.' || c == '-'))
+                .filter_map(|n| n.parse().ok())
+                .collect()
+        };
+        for (ppp, d) in [(1.0, egui::vec2(3.0, -117.0)), (2.0, egui::vec2(-0.5, 40.5))] {
+            for text in [
+                "4/4 >q (e) e t8 t8 t8 q | 3/4 q q q | 7/8 e. s e e e s s e",
+                "kit 4/4 >S-H:q H:q (S):e H:e H:q ; K:h r:q K:q | 4/4 H:e H:e r:q H:h ; K:q r:q K:h",
+            ] {
+                let score = parse_score(text).unwrap();
+                let at = |min: Pos2| {
+                    let mut o = opts(20.0, Rect::from_min_size(min, egui::vec2(300.0, 900.0)));
+                    o.pixels_per_point = ppp;
+                    o.y_offset = 1.3;
+                    build_staff_layout(&score, &o)
+                };
+                let start = Pos2::new(12.25, 30.75);
+                let mut moved = at(start);
+                moved.translate(d);
+                let (moved, built) = (numbers(&moved), numbers(&at(start + d)));
+                assert_eq!(moved.len(), built.len(), "{text}");
+                for (m, b) in moved.iter().zip(&built) {
+                    assert!((m - b).abs() < 1e-3, "{text} at {ppp}: {m} vs {b}");
+                }
+            }
+        }
     }
 
     /// The staff lays each measure out once, on a line at y = 0, and moves

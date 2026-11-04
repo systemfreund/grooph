@@ -1,3 +1,5 @@
+use std::cell::RefCell;
+
 use crate::Grooph;
 use crate::kit_palette::{instrument_label, instrument_short};
 use crate::pickers::{Picker, time_signature_label};
@@ -396,14 +398,61 @@ impl Grooph {
             Cell::Tool(t) => match t.kind {
                 ToolKind::Edit(EditOp::Undo) => self.can_undo(),
                 ToolKind::Edit(EditOp::Redo) => self.can_redo(),
-                ToolKind::Modify(modifier) => self.modifier_applies(modifier),
+                ToolKind::Modify(modifier) => {
+                    self.applies(Trial::Modify(modifier), || self.modifier_applies(modifier))
+                }
                 ToolKind::InsertBeat(
                     template @ BeatTemplate { duration: Duration::Simple(_), .. },
-                ) => self.value_applies(template),
+                ) => self.applies(Trial::Value(template), || self.value_applies(template)),
                 _ => true,
             },
             Cell::Instrument(_) => true,
         }
+    }
+
+    /// Whether the edit `trial` stands for changes the cursor's beat, by
+    /// `check` (which tries it on a copy of the cursor's bar), remembered
+    /// until the bar, the cursor, the picked instrument or the staff change.
+    /// The grid asks for each of its cells every frame, and the answers only
+    /// change with an edit or a move.
+    fn applies(&self, trial: Trial, check: impl FnOnce() -> bool) -> bool {
+        type Kept = Option<(TrialState, Vec<(Trial, bool)>)>;
+        thread_local! {
+            static KEPT: RefCell<Kept> = const { RefCell::new(None) };
+        }
+        let doc = self.editor.doc();
+        let cursor = doc.score.clamp_cursor(doc.cursor);
+        let now = |state: &TrialState| {
+            state.cursor == cursor
+                && state.instrument == self.editor.instrument
+                && state.staff == doc.score.staff
+                && state.measure == *self.current_measure()
+        };
+        let known = KEPT.with_borrow(|kept| match kept {
+            Some((state, answers)) if now(state) => {
+                answers.iter().find(|(t, _)| *t == trial).map(|&(_, a)| a)
+            }
+            _ => None,
+        });
+        if let Some(answer) = known {
+            return answer;
+        }
+        let answer = check();
+        KEPT.with_borrow_mut(|kept| {
+            if !kept.as_ref().is_some_and(|(state, _)| now(state)) {
+                let state = TrialState {
+                    measure: self.current_measure().clone(),
+                    cursor,
+                    instrument: self.editor.instrument,
+                    staff: doc.score.staff,
+                };
+                *kept = Some((state, Vec::new()));
+            }
+            if let Some((_, answers)) = kept {
+                answers.push((trial, answer));
+            }
+        });
+        answer
     }
 
     /// Whether `modifier` changes the cursor's beat: an accent needs a head
@@ -1110,6 +1159,22 @@ pub(crate) fn paint_notation(
 /// close enough to the top of the tile to be clipped.
 fn notes_ink(layout: &MeasureLayout) -> Rect {
     layout.notes_ink().unwrap_or(Rect::ZERO)
+}
+
+/// An edit a grid cell would make, tried to tell whether the cell does
+/// something now ([`Grooph::applies`]).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Trial {
+    Modify(Modifier),
+    Value(BeatTemplate),
+}
+
+/// What the answers of [`Grooph::applies`] depend on.
+struct TrialState {
+    measure: Measure,
+    cursor: Cursor,
+    instrument: Instrument,
+    staff: StaffKind,
 }
 
 #[cfg(test)]
