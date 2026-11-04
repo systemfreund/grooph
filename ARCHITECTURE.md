@@ -768,7 +768,7 @@ grooph's metronome runs inside AI chats as an
 - The library and the unsaved-changes checks reach the score tab's document
   as `docs.score`, from any page and without closing the metronome. A tempo
   change marks it unsaved on the score tab, and on any page when it is a
-  saved pattern (`mark_tempo_unsaved`).
+  saved pattern (`ScoreChange::Tempo`, see Change navigation).
 - Persistence saves the rhythm documents and the page: each document as
   one `SavedDoc` (score, cursor, `dirty`, `active_pattern_id`), the score
   tab's as `score_doc`, Practice's as `practice_doc`, and `document` the
@@ -937,6 +937,12 @@ If you add new tools/shortcuts, remember:
 - Saved state: `crates/app/src/lib.rs` (`PersistedState`), `persist.rs` (field-wise restore, migration, backup).
 - Editing: `crates/app/src/tool_palette.rs` (grid, applying a tool), `tools.rs` (tool registry, shortcuts),
   `kit_palette.rs` (the kit's instruments).
+- After a score or timing change: `crates/app/src/score_change.rs`. Call sites make the change, then report its
+  kind to `score_changed` (`ScoreChange`: an edit or undo/redo, a replaced score and its `Origin`, Endless adding or
+  dropping a bar, the tempo, the played timing, another document). It alone brings the accuracy session, the
+  playback state, the cursor and `dirty`/`active_pattern_id` in line; `with_undo_snapshot`, `undo`/`redo` and
+  `replace_score` call it. A new kind of change gets a variant there. The audio plan, the staff layout and the
+  onsets are pulled every frame and need no report.
 - Staff on screen: `crates/app/src/measure_panel.rs`; the metronome's ring: `metronome_view.rs`.
 - Playback cursor and count-in: `crates/app/src/playback_clock.rs`; play along: `play_along.rs` and
   `accuracy/` (`session.rs` onsets and grades, `recorder.rs` hits, `progress.rs` misses).

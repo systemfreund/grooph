@@ -25,6 +25,7 @@ mod play_along_settings;
 mod playback_clock;
 mod preset_panel;
 mod presets;
+mod score_change;
 mod settings_panel;
 mod share;
 mod shell;
@@ -58,6 +59,7 @@ use crate::metronome_view::{MetronomeState, metronome_bar};
 use crate::platform::{PlatformRuntime, VisibilityEvent};
 use crate::play_along::{PlayAlongSettings, PlayAlongState};
 use crate::presets::PresetLibrary;
+use crate::score_change::{Origin, ScoreChange};
 use crate::shell::{ShellState, Tab};
 use crate::state::{
     AudioConfig, CountInState, EditorState, LayoutSettings, MicState, MidiState, PendingLoad,
@@ -603,10 +605,6 @@ impl Grooph {
         self.playback_ctl.playback.ramp_bpm.unwrap_or(self.played_bpm())
     }
 
-    fn clear_accuracy_for_edit(&mut self) {
-        self.playback_ctl.accuracy.tracker.clear_for_edit();
-    }
-
     pub(crate) fn current_measure(&self) -> &Measure {
         self.editor.doc().score.current(self.editor.doc().cursor.measure_idx)
     }
@@ -640,7 +638,7 @@ impl Grooph {
         self.editor.doc_mut().score.voice_at_mut(cursor)
     }
 
-    fn current_snapshot(&self) -> EditorSnapshot {
+    pub(crate) fn current_snapshot(&self) -> EditorSnapshot {
         EditorSnapshot {
             score: self.editor.doc().score.clone(),
             cursor: self.editor.doc().cursor,
@@ -659,7 +657,8 @@ impl Grooph {
     }
 
     /// Snapshot the current state, run `op`, and commit only if it reports a change.
-    /// On commit, clears redo and accuracy edit state. On no-op, the snapshot is discarded.
+    /// On commit, clears redo and reports the edit ([`ScoreChange::Edited`]).
+    /// On no-op, the snapshot is discarded.
     pub(crate) fn with_undo_snapshot<F>(&mut self, op: F) -> bool
     where
         F: FnOnce(&mut Self) -> bool,
@@ -667,8 +666,7 @@ impl Grooph {
         let snap = self.current_snapshot();
         if op(self) {
             self.editor.doc_mut().history.push(snap);
-            self.clear_accuracy_for_edit();
-            self.editor.doc_mut().dirty = true;
+            self.score_changed(ScoreChange::Edited);
             true
         } else {
             false
@@ -694,8 +692,7 @@ impl Grooph {
         let current = self.current_snapshot();
         if let Some(prev) = self.editor.doc_mut().history.pop_undo(current) {
             self.restore_snapshot(prev);
-            self.clear_accuracy_for_edit();
-            self.editor.doc_mut().dirty = true;
+            self.score_changed(ScoreChange::Edited);
         }
     }
 
@@ -703,8 +700,7 @@ impl Grooph {
         let current = self.current_snapshot();
         if let Some(next) = self.editor.doc_mut().history.pop_redo(current) {
             self.restore_snapshot(next);
-            self.clear_accuracy_for_edit();
-            self.editor.doc_mut().dirty = true;
+            self.score_changed(ScoreChange::Edited);
         }
     }
 
@@ -889,10 +885,8 @@ impl Grooph {
         // A rhythm of the one line, saved before the score tab was for
         // drum grooves, opens in Practice.
         if score.staff == grooph_measure::StaffKind::Line {
-            let undoubled = self.replace_practice_from_link(score);
-            self.editor.docs.practice.dirty = undoubled;
+            self.replace_practice_from_link(score);
             self.playback_ctl.bpm = bpm;
-            self.playback_ctl.playback.reset();
             self.ui.picker = None;
             self.select_tab(Tab::Practice);
             return;
@@ -901,15 +895,8 @@ impl Grooph {
         // The score tab's score is replaced.
         self.stop_transport();
         self.show_document(Document::Score);
-        self.with_undo_snapshot(|app| {
-            app.editor.doc_mut().score = score;
-            app.editor.doc_mut().cursor = Cursor::start();
-            true
-        });
+        self.replace_score(score, Origin::Pattern { id, undoubled });
         self.playback_ctl.bpm = bpm;
-        self.playback_ctl.playback.reset();
-        self.editor.doc_mut().active_pattern_id = Some(id);
-        self.editor.doc_mut().dirty = undoubled;
         self.show_loaded_pattern();
     }
 
@@ -981,12 +968,11 @@ impl Grooph {
         let metronome = matches!(link.content, Some(LinkContent::Metronome(_)));
         let replaces_rhythm =
             matches!(link.content, Some(LinkContent::Score(_) | LinkContent::Generator { .. }));
-        let mut undoubled = false;
         match link.content {
             Some(LinkContent::Score(score)) if self.opens_on_practice(&link) => {
-                undoubled = self.replace_practice_from_link(score);
+                self.replace_practice_from_link(score);
             }
-            Some(LinkContent::Score(score)) => undoubled = self.replace_score_from_link(score),
+            Some(LinkContent::Score(score)) => self.replace_score_from_link(score),
             Some(LinkContent::Metronome(ts)) => {
                 self.stop_transport();
                 // The meter plays the link's counter rhythm, or none; a
@@ -1009,12 +995,14 @@ impl Grooph {
             && bpm != self.playback_ctl.bpm
         {
             self.playback_ctl.bpm = bpm;
-            // A rhythm from the link is clean below; otherwise the tempo
-            // is a change of the saved score, as in the BPM picker.
-            if !replaces_rhythm {
-                self.mark_tempo_unsaved();
-            }
-            self.handle_bpm_change();
+            // A rhythm from the link is clean (see `Origin::Link`);
+            // otherwise the tempo is a change of the saved score, as in the
+            // BPM picker.
+            self.score_changed(if replaces_rhythm {
+                ScoreChange::Timing
+            } else {
+                ScoreChange::Tempo
+            });
         }
         if let Some(swing) = link.swing {
             self.playback_ctl.audio_cfg.swing = swing;
@@ -1022,15 +1010,9 @@ impl Grooph {
         if let Some(bar) = link.click {
             self.set_meter_click_bar(bar);
         }
-        self.playback_ctl.playback.reset();
         if metronome {
             self.show_document(Document::Metronome);
             self.ui.mode = Mode::Playback;
-        } else if replaces_rhythm {
-            // The content is reproducible from the link, so it is not
-            // "unsaved", unless a drum struck by two voices at once was
-            // taken from one of them.
-            self.editor.doc_mut().dirty = undoubled;
         }
     }
 
@@ -1044,40 +1026,26 @@ impl Grooph {
     }
 
     /// A rhythm shared from the practice page replaces its rhythm, as a new
-    /// one from the generator would. Reports as
-    /// [`Self::replace_score_from_link`].
-    fn replace_practice_from_link(&mut self, mut score: Score) -> bool {
+    /// one from the generator would.
+    fn replace_practice_from_link(&mut self, mut score: Score) {
         // A kit score link opens here while the score tab is hidden.
         score.voicing = score.derive_voicing(grooph_measure::Voicing::default());
         let undoubled = score.undouble_instruments();
         self.stop_transport();
         self.show_document(Document::Practice);
-        self.with_undo_snapshot(|app| {
-            app.editor.doc_mut().score = score;
-            app.editor.doc_mut().cursor = Cursor::start();
-            true
-        });
+        self.replace_score(score, Origin::Link { undoubled });
         self.ui.picker = None;
         self.ui.mode = Mode::Playback;
-        undoubled
     }
 
-    /// Reports whether a drum struck by two voices at once was taken from
-    /// one of them (see [`Score::undouble_instruments`]).
-    fn replace_score_from_link(&mut self, mut score: Score) -> bool {
+    fn replace_score_from_link(&mut self, mut score: Score) {
         // The link has no rule; the content shows it.
         score.voicing = score.derive_voicing(grooph_measure::Voicing::default());
         let undoubled = score.undouble_instruments();
         self.stop_transport();
         self.show_document(Document::Score);
-        self.with_undo_snapshot(|app| {
-            app.editor.doc_mut().score = score;
-            app.editor.doc_mut().cursor = Cursor::start();
-            true
-        });
-        self.editor.doc_mut().active_pattern_id = None;
+        self.replace_score(score, Origin::Link { undoubled });
         self.show_loaded_pattern();
-        undoubled
     }
 
     /// Run a pending load after the unsaved-changes dialog.
@@ -1268,7 +1236,7 @@ impl Grooph {
             && self.playback_ctl.play_along.calibration.is_none()
         {
             self.playback_ctl.bpm = bpm;
-            self.mark_tempo_unsaved();
+            self.score_changed(ScoreChange::Tempo);
         }
         if self.playback_ctl.play_along.calibration.is_some() {
             self.playback_ctl.accuracy.tracker.discard_session();
@@ -1300,34 +1268,6 @@ impl Grooph {
     fn set_accuracy_enabled(&mut self, enabled: bool) {
         let transport = self.playback_ctl.transport_state;
         self.playback_ctl.accuracy.set_enabled(enabled, transport);
-    }
-
-    fn handle_bpm_change(&mut self) {
-        self.realign_accuracy_clock();
-    }
-
-    /// Re-anchor the accuracy session to the current playback position, e.g.
-    /// after a tempo change or when the count-in bar ends.
-    pub(crate) fn realign_accuracy_clock(&mut self) {
-        if self.playback_ctl.transport_state != TransportState::Playing {
-            return;
-        }
-        if !self.playback_ctl.accuracy.tracker.has_start_time() {
-            return;
-        }
-
-        let timing = self.score_timing();
-        if timing.total_loop_seconds() <= 0.0 {
-            return;
-        }
-
-        let now_seconds = clock::now_seconds();
-        let start_time =
-            now_seconds - timing.global_tick_to_seconds(self.playback_ctl.playback.smooth_tick);
-        self.playback_ctl
-            .accuracy
-            .tracker
-            .realign_start_time(start_time, self.playback_ctl.playback.smooth_tick);
     }
 
     fn default_measure() -> Measure {

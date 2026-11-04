@@ -3,6 +3,7 @@
 
 use crate::Grooph;
 use crate::presets::{self, PresetId, PresetSettings};
+use crate::score_change::ScoreChange;
 
 impl Grooph {
     /// The current settings as a preset.
@@ -41,8 +42,7 @@ impl Grooph {
         audio.settings.rhythm_sound = preset.rhythm_sound;
         if self.playback_ctl.bpm != preset.bpm {
             self.playback_ctl.bpm = preset.bpm;
-            self.mark_tempo_unsaved();
-            self.handle_bpm_change();
+            self.score_changed(ScoreChange::Tempo);
         }
         self.editor.active_preset = Some(id);
         self.generate_new_score();

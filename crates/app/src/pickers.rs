@@ -7,6 +7,7 @@ use crate::guide::Guide;
 use crate::metronome_view::{FillLook, click_fills, ratio_label};
 use crate::mixer_panel::mixer_width;
 use crate::platform;
+use crate::score_change::ScoreChange;
 use crate::shell::paint_grouped_meter;
 use crate::tool_palette::{TOOL_PALETTE_BUTTON_SIZE, none_button, notation_button};
 use crate::{CountingBase, Grooph};
@@ -654,8 +655,7 @@ impl Grooph {
 
         if bpm != self.playback_ctl.bpm {
             self.playback_ctl.bpm = bpm;
-            self.mark_tempo_unsaved();
-            self.handle_bpm_change();
+            self.score_changed(ScoreChange::Tempo);
         }
     }
 
