@@ -677,8 +677,7 @@ impl<'a> ShownScore<'a> {
         play_along: &'a PlayAlongState,
         ghost: bool,
     ) -> Self {
-        // As `Grooph::played_score`.
-        let played = play_along.calibration_score().unwrap_or(&docs.get(document).score);
+        let played = crate::calibration::played_score(docs, document, play_along);
         let ghost = ghost.then(|| {
             let mut shown = played.clone();
             let last = &played.measures()[played.len() - 1];

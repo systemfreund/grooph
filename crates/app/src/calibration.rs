@@ -7,6 +7,7 @@
 //! [`Grooph::played_bpm`], [`Grooph::playback_options`]): no page's
 //! document, the tempo or an option is touched, and the page shown stays.
 
+use crate::documents::{Document, Documents};
 use crate::play_along::{HitSource, MAX_INPUT_OFFSET_MS, PlayAlongState};
 use crate::{Grooph, TransportState};
 use eframe::egui;
@@ -82,11 +83,18 @@ impl PlayAlongState {
         let cal = self.calibration.as_ref()?;
         (cal.phase == CalibrationPhase::Running).then_some(cal)
     }
+}
 
-    /// The click bar of the calibration whose run plays.
-    pub(crate) fn calibration_score(&self) -> Option<&Score> {
-        self.running_calibration().map(|cal| &cal.score)
-    }
+/// The score the transport plays and hits are measured against: the
+/// calibration's click bar during a run, else `document`'s. Taking the parts
+/// that hold it, not the app, it can be borrowed while other parts change
+/// (see `measure_panel::ShownScore`).
+pub(crate) fn played_score<'a>(
+    docs: &'a Documents,
+    document: Document,
+    play_along: &'a PlayAlongState,
+) -> &'a Score {
+    play_along.running_calibration().map_or(&docs.get(document).score, |cal| &cal.score)
 }
 
 impl Grooph {
@@ -111,7 +119,7 @@ impl Grooph {
     /// The metronome's is its click bar, played as clicks
     /// ([`grooph_audio::Played::Clicks`]).
     pub(crate) fn played_score(&self) -> &Score {
-        self.running_calibration().map_or(&self.editor.doc().score, |cal| &cal.score)
+        played_score(&self.editor.docs, self.editor.document, &self.playback_ctl.play_along)
     }
 
     /// The tempo setting played: the calibration's own during a run.
