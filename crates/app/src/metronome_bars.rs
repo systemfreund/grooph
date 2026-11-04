@@ -106,7 +106,14 @@ impl MetronomeBars {
 impl RhythmDoc {
     /// The metronome document's bars of the meter it clicks.
     pub(crate) fn clicked_bars(&self) -> MeterBars {
-        MeterBars { bar: self.score.measures()[0].clone(), name: self.meters.name }
+        let bar = self.score.measures()[0].clone();
+        // A bar of a kept meter written into the score directly, not through
+        // `click_meter`, would hide that meter's kept bars.
+        debug_assert!(
+            self.meters.other(bar.time_signature()).is_none(),
+            "the metronome's score turned to a kept meter without click_meter"
+        );
+        MeterBars { bar, name: self.meters.name }
     }
 
     /// The metronome document's bars of `ts`: the clicked meter's, else
