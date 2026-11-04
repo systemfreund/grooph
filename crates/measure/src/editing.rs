@@ -4,8 +4,8 @@ use crate::duration::{Duration, NoteValue, TupletSpec};
 use crate::editing::Modification::{DissolveTuplet, ToggleAccent};
 use crate::grid::DEFAULT_GRID;
 use crate::{
-    Beat, BeatIdx, BeatKind, Head, Heads, Instrument, Technique, TimeSignature, TupletGroup,
-    VoiceBar,
+    Beat, BeatIdx, BeatKind, Head, Heads, Instrument, Sticking, Technique, TimeSignature,
+    TupletGroup, VoiceBar,
 };
 use either::Either;
 
@@ -20,6 +20,7 @@ pub enum Modification {
     ToggleDotted(BeatIdx, u8),                         // contains the new dot count
     ToggleHead(BeatIdx, Instrument, bool),             // contains whether the head is there now
     SetTechnique(BeatIdx, Instrument, Technique),      // contains the new technique
+    SetSticking(BeatIdx, Option<Sticking>),            // contains the new sticking
     ChangeTimeSignature(TimeSignature, TimeSignature), // (old, new)
 }
 
@@ -110,6 +111,15 @@ impl VoiceBar {
         let to = if head.technique() == technique { Technique::Normal } else { technique };
         *head = head.with_technique(to).ok()?;
         Some(Modification::SetTechnique(idx, instrument, to))
+    }
+
+    /// Write `sticking` on the beat at `idx`, or none if it has it already.
+    /// `None` on a beat without a hand instrument, as it takes none.
+    pub fn toggle_sticking(&mut self, idx: BeatIdx, sticking: Sticking) -> Option<Modification> {
+        let b = self.beats.get_mut(idx)?;
+        let to = (b.sticking() != Some(sticking)).then_some(sticking);
+        b.set_sticking(to).ok()?;
+        Some(Modification::SetSticking(idx, to))
     }
 
     /// Toggle dotted (one dot) for the beat at `idx`.
@@ -241,8 +251,8 @@ impl VoiceBar {
     ///
     /// - Replaces the group's whole span with plain (non-tuplet) rests.
     /// - If the group held a note, the first new beat becomes a note, of
-    ///   the heads of the first; an accent anywhere in the group moves to
-    ///   it.
+    ///   the heads and sticking of the first; an accent anywhere in the
+    ///   group moves to it.
     /// - The new beats are in no tuplet group.
     /// - Returns the dissolved group, or `None` if `idx` is not in a
     ///   tuplet.
@@ -256,7 +266,7 @@ impl VoiceBar {
             // The heads of the group's first note, and whether it held an
             // accent
             let group = &self.beats[start_idx..=end_idx];
-            let first_note = group.iter().find(|b| b.is_note()).map(|b| *b.heads());
+            let first_note = group.iter().find(|b| b.is_note()).copied();
             let had_any_accent = group.iter().any(Beat::accented);
 
             self.beats.drain(start_idx..=end_idx);
@@ -265,8 +275,9 @@ impl VoiceBar {
 
             // Make the first new beat a note and carry the accent over
             if start_idx < self.beats.len() {
-                if let Some(heads) = first_note {
-                    self.beats[start_idx].set_heads(heads);
+                if let Some(note) = first_note {
+                    self.beats[start_idx].set_heads(*note.heads());
+                    self.beats[start_idx].set_sticking(note.sticking()).expect("a note's heads");
                 }
                 if had_any_accent && !self.beats[start_idx].accented() {
                     self.beats[start_idx].set_accented(true);
@@ -280,12 +291,12 @@ impl VoiceBar {
     }
 
     /// Onsets of the notes in the tuplet group starting at `start_idx`, as
-    /// `(offset_ticks, heads)`: grid ticks from the group start, sorted
-    /// ascending, with the note's heads as they are (accent, ghost and
-    /// technique).
+    /// `(offset_ticks, note)`: grid ticks from the group start, sorted
+    /// ascending, with the note as it is (its heads with accent, ghost and
+    /// technique, and its sticking).
     ///
     /// `None` if no tuplet group starts at `start_idx`.
-    fn tuplet_group_note_offsets(&self, start_idx: BeatIdx) -> Option<Vec<(u32, Heads)>> {
+    fn tuplet_group_note_offsets(&self, start_idx: BeatIdx) -> Option<Vec<(u32, Beat)>> {
         let group = self.tuplet_group_at(start_idx)?;
         if group.start_idx != start_idx {
             return None;
@@ -294,9 +305,9 @@ impl VoiceBar {
         let onsets = DEFAULT_GRID.compute_onset_ticks(&self.beats);
         let start_onset = onsets[start_idx];
 
-        let mut offsets: Vec<(u32, Heads)> = (group.start_idx..=group.end_idx)
+        let mut offsets: Vec<(u32, Beat)> = (group.start_idx..=group.end_idx)
             .filter(|&i| self.beats[i].is_note())
-            .map(|i| ((onsets[i] - start_onset).min(span_ticks), *self.beats[i].heads()))
+            .map(|i| ((onsets[i] - start_onset).min(span_ticks), self.beats[i]))
             .collect();
         offsets.sort_by_key(|e| e.0);
         Some(offsets)
@@ -309,13 +320,14 @@ impl VoiceBar {
     /// - Computes the new group's slot onsets relative to its start.
     /// - Greedily assigns each source note to the nearest free slot (the lower
     ///   index wins a tie), so no slot gets two notes.
-    /// - All other slots become rests; the heads follow their source note.
+    /// - All other slots become rests; the heads and the sticking follow
+    ///   their source note.
     ///
     /// Returns `false` if no tuplet group starts at `start_idx`.
     fn apply_tuplet_projection_at(
         &mut self,
         start_idx: BeatIdx,
-        source_offsets: &[(u32, Heads)],
+        source_offsets: &[(u32, Beat)],
     ) -> bool {
         let Some(group) = self.tuplet_group_at(start_idx) else {
             return false;
@@ -343,7 +355,7 @@ impl VoiceBar {
 
         // Greedy: give each source note the nearest free slot
         let mut used = vec![false; tlen];
-        for &(src_rel, heads) in source_offsets.iter() {
+        for &(src_rel, note) in source_offsets.iter() {
             // Find the nearest free slot
             let mut best_k: Option<BeatIdx> = None;
             let mut best_dist: u32 = u32::MAX;
@@ -360,7 +372,8 @@ impl VoiceBar {
             }
             if let Some(k) = best_k {
                 let ti = target_rel[k].1;
-                self.beats[ti].set_heads(heads);
+                self.beats[ti].set_heads(*note.heads());
+                self.beats[ti].set_sticking(note.sticking()).expect("a note's heads");
                 used[k] = true;
             }
         }
@@ -459,6 +472,77 @@ mod tests {
             !bar.first_voice().beats()[1].soft(),
             "a duration change on the one line drops the ghost, as before"
         );
+    }
+
+    #[test]
+    fn a_sticking_stays_on_its_note_when_notes_before_it_change() {
+        use crate::Sticking::{Both, Left, Right};
+        use crate::notation::{format_score, parse_score};
+        let mut score = parse_score("4/4 S:q H:q S:q@L H:q@R ; K:h K:h").unwrap();
+        let text = |s: &crate::Score| format_score(s).unwrap();
+        let hands = score.measures_mut()[0].voice_mut(0).unwrap();
+        // A note split before it: the sticking moves along with its note.
+        hands.modify_beat(0, Eighth, None, crate::Instrument::Rhythm).unwrap();
+        assert_eq!(text(&score), "4/4 S:e r:e H:q S:q@L H:q@R ; K:h K:h");
+        // A note grown over the next: the sticking moves back with it.
+        let hands = score.measures_mut()[0].voice_mut(0).unwrap();
+        hands.modify_beat(0, NoteValue::Half, None, crate::Instrument::Rhythm).unwrap();
+        assert_eq!(text(&score), "4/4 S:h S:q@L H:q@R ; K:h K:h");
+        // A tuplet made of a note before it.
+        let hands = score.measures_mut()[0].voice_mut(0).unwrap();
+        hands.modify_beat(0, NoteValue::Quarter, None, crate::Instrument::Rhythm).unwrap();
+        let spec = TupletSpec { n: 3, m: 2, base: Eighth };
+        hands.set_tuplet(0, spec, true, crate::Instrument::Rhythm).unwrap();
+        assert_eq!(text(&score), "4/4 S:t8 S:t8 S:t8 r:q S:q@L H:q@R ; K:h K:h");
+
+        // The beat's own edits keep it: a new value, a dot, a head added
+        // or taken away while a hand plays it.
+        let mut score = parse_score("4/4 S:q@R r:q r:h ; K:q r:q r:h").unwrap();
+        let hands = score.measures_mut()[0].voice_mut(0).unwrap();
+        hands.modify_beat(0, Eighth, None, crate::Instrument::Rhythm).unwrap();
+        hands.toggle_dotted(0).unwrap();
+        hands.toggle_head(0, crate::Instrument::HiHat).unwrap();
+        hands.toggle_head(0, crate::Instrument::Snare).unwrap();
+        assert_eq!(text(&score), "4/4 H:e.@R r:s r:q r:h ; K:q r:q r:h");
+        // A tuplet made of it, and dissolved again.
+        let hands = score.measures_mut()[0].voice_mut(0).unwrap();
+        hands.modify_beat(0, NoteValue::Quarter, None, crate::Instrument::Rhythm).unwrap();
+        let spec = TupletSpec { n: 3, m: 2, base: Eighth };
+        hands.set_tuplet(0, spec, true, crate::Instrument::Rhythm).unwrap();
+        assert_eq!(hands.beats()[0].sticking(), Some(Right));
+        hands
+            .set_tuplet(
+                0,
+                TupletSpec { n: 5, m: 4, base: NoteValue::Sixteenth },
+                true,
+                crate::Instrument::Rhythm,
+            )
+            .unwrap();
+        assert_eq!(hands.beats()[0].sticking(), Some(Right), "carried to the next tuplet");
+        hands
+            .set_tuplet(
+                0,
+                TupletSpec { n: 5, m: 4, base: NoteValue::Sixteenth },
+                true,
+                crate::Instrument::Rhythm,
+            )
+            .unwrap();
+        assert_eq!(text(&score), "4/4 H:q@R r:q r:h ; K:q r:q r:h");
+        // Without a hand left it goes.
+        let mut score = parse_score("4/4 K-S:q@L r:q r:h").unwrap();
+        let voice = score.measures_mut()[0].first_voice_mut();
+        voice.toggle_head(0, crate::Instrument::Snare).unwrap();
+        assert_eq!(voice.beats()[0].sticking(), None);
+        assert!(voice.toggle_sticking(0, Left).is_none(), "the kick alone takes none");
+        assert!(voice.toggle_sticking(1, Left).is_none(), "nor a rest");
+        // The tool sets, changes and takes it away again.
+        let mut score = parse_score("4/4 q q q q").unwrap();
+        let voice = score.measures_mut()[0].first_voice_mut();
+        voice.toggle_sticking(1, Both).unwrap();
+        voice.toggle_sticking(2, Left).unwrap();
+        voice.toggle_sticking(2, Right).unwrap();
+        voice.toggle_sticking(1, Both).unwrap();
+        assert_eq!(text(&score), "4/4 q q q@R q");
     }
 
     #[test]

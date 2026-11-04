@@ -1,6 +1,7 @@
 use crate::beat::BeatKind::{Note, Rest};
 use crate::duration::Duration;
 use crate::head::{Head, Heads, Instrument};
+use crate::sticking::Sticking;
 use crate::tuplet::TupletMark;
 use serde::{Deserialize, Serialize};
 use std::fmt::{Debug, Formatter};
@@ -15,7 +16,8 @@ pub enum BeatKind {
 ///
 /// The slot is the duration, maybe in a tuplet group (see [`TupletMark`]):
 /// what the measure's rules keep filled. What is played are the [`Heads`]: none for a rest,
-/// one for a note, several for a chord (see [`crate::head`]).
+/// one for a note, several for a chord (see [`crate::head`]). A beat with a
+/// hand instrument may carry a [`Sticking`].
 #[derive(Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(try_from = "RawBeat")]
 pub struct Beat {
@@ -25,6 +27,10 @@ pub struct Beat {
     /// from the slot; a beat made elsewhere has none.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tuplet: Option<TupletMark>,
+    /// Which hand plays it: only on a beat with a hand instrument
+    /// ([`Beat::takes_sticking`]).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sticking: Option<Sticking>,
 }
 
 impl Beat {
@@ -53,16 +59,39 @@ impl Beat {
 
     /// A beat playing `heads`, a rest if there are none.
     pub fn with_heads(duration: Duration, heads: Heads) -> Self {
-        Self { duration, heads, tuplet: None }
+        Self { duration, heads, tuplet: None, sticking: None }
     }
 
     pub fn heads(&self) -> &Heads {
         &self.heads
     }
 
-    /// Play `heads` in this slot instead, a rest if there are none.
+    /// Play `heads` in this slot instead, a rest if there are none. The
+    /// sticking stays while a hand instrument is left.
     pub fn set_heads(&mut self, heads: Heads) {
         self.heads = heads;
+        self.sticking = self.sticking.filter(|_| self.takes_sticking());
+    }
+
+    /// Which hand plays the beat, if that is written.
+    pub fn sticking(&self) -> Option<Sticking> {
+        self.sticking
+    }
+
+    /// Whether the beat can carry a sticking: a head of it is played by
+    /// hand ([`Instrument::is_hand`]).
+    pub fn takes_sticking(&self) -> bool {
+        self.heads.iter().any(|h| h.instrument().is_hand())
+    }
+
+    /// Write `sticking` on the beat, or none. Fails, and changes nothing,
+    /// for a sticking on a beat that takes none.
+    pub fn set_sticking(&mut self, sticking: Option<Sticking>) -> Result<(), NoHand> {
+        if sticking.is_some() && !self.takes_sticking() {
+            return Err(NoHand);
+        }
+        self.sticking = sticking;
+        Ok(())
     }
 
     /// The head of `instrument`, to change its accent, ghost or technique.
@@ -106,11 +135,15 @@ impl Beat {
 
     /// Take the accents of `old`, the beat this one replaces: each head the
     /// accent of `old`'s head of its instrument, a head `old` has not the
-    /// accent of `old` as a whole. No change on a rest.
+    /// accent of `old` as a whole. No change on a rest. A beat without a
+    /// sticking of its own takes `old`'s too, if it takes one.
     pub fn carry_accents_from(&mut self, old: &Beat) {
         for head in self.heads.iter_mut() {
             let accented = old.heads.get(head.instrument()).map_or(old.accented(), Head::accented);
             head.set_accented(accented);
+        }
+        if self.sticking.is_none() && self.takes_sticking() {
+            self.sticking = old.sticking;
         }
     }
 
@@ -130,8 +163,8 @@ impl Beat {
     /// becomes a plain head of `instrument`.
     pub fn set_kind_of(&mut self, kind: BeatKind, instrument: Instrument) {
         match kind {
-            Rest => self.heads = Heads::NONE,
-            Note if self.is_rest() => self.heads = Heads::one(Head::new(instrument)),
+            Rest => self.set_heads(Heads::NONE),
+            Note if self.is_rest() => self.set_heads(Heads::one(Head::new(instrument))),
             Note => {}
         }
     }
@@ -164,6 +197,19 @@ impl Debug for Beat {
     }
 }
 
+/// A sticking on a beat without a hand instrument: a rest, or only the
+/// kick or the hi-hat's foot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NoHand;
+
+impl std::fmt::Display for NoHand {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_str("a sticking needs a beat played by hand")
+    }
+}
+
+impl std::error::Error for NoHand {}
+
 /// `beats` without their tuplet marks, to compare durations and heads with
 /// beats made by hand.
 #[cfg(test)]
@@ -189,6 +235,8 @@ struct RawBeat {
     accented: bool,
     #[serde(default)]
     soft: bool,
+    #[serde(default)]
+    sticking: Option<Sticking>,
 }
 
 /// A field that is there, as `Some` (a missing one is `None` by default).
@@ -235,6 +283,9 @@ impl TryFrom<RawBeat> for StoredBeat {
             (None, None) => return Err("a beat needs its heads"),
         };
         beat.tuplet = raw.tuplet;
+        // A sticking saved on a beat without a hand is left out, as the
+        // editor never writes one there.
+        let _ = beat.set_sticking(raw.sticking);
         // An id counts only where there are no marks yet.
         let group_id = raw.tuplet_group_id.filter(|_| raw.tuplet.is_none());
         Ok(StoredBeat { beat, group_id })
@@ -281,6 +332,35 @@ mod tests {
         assert!(
             ron::from_str::<Beat>("(duration: Simple(Eighth), tuplet_group_id: None)").is_err()
         );
+    }
+
+    #[test]
+    fn a_sticking_needs_a_hand_and_round_trips() {
+        let mut beat = Beat::with_heads(
+            e(),
+            Heads::new([Head::new(Instrument::Kick), Head::new(Instrument::HiHat)]).unwrap(),
+        );
+        beat.set_sticking(Some(Sticking::Left)).unwrap();
+        let text = ron::to_string(&beat).unwrap();
+        let back: Beat = ron::from_str(&text).unwrap();
+        assert_eq!(back.sticking(), Some(Sticking::Left));
+        assert_eq!(back, beat);
+        // Without a sticking nothing more is saved.
+        assert!(!ron::to_string(&Beat::note(e())).unwrap().contains("sticking"));
+        // The kick alone takes none; the hi-hat taken away takes it along.
+        let mut heads = *beat.heads();
+        heads.remove(Instrument::HiHat);
+        beat.set_heads(heads);
+        assert_eq!(beat.sticking(), None);
+        assert_eq!(beat.set_sticking(Some(Sticking::Right)), Err(NoHand));
+        assert_eq!(Beat::rest(e()).set_sticking(Some(Sticking::Right)), Err(NoHand));
+        let mut line = Beat::note(e());
+        line.set_sticking(Some(Sticking::Both)).unwrap();
+        line.set_kind(Rest);
+        assert_eq!(line.sticking(), None, "a rest has no hand");
+        // A saved sticking without a hand is dropped.
+        let kick = "(duration: Simple(Eighth), heads: [(instrument: Kick)], sticking: Some(Right))";
+        assert_eq!(ron::from_str::<Beat>(kick).unwrap().sticking(), None);
     }
 
     #[test]

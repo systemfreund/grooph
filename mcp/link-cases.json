@@ -7,5 +7,6 @@
   { "args": { "ts": "7/8", "groups": "3+2+2", "bpm": 140, "subdivision": "s" }, "query": "v=2&bpm=140&ts=7/8&groups=3%2B2%2B2&subdivision=s" },
   { "args": { "ts": "4/4", "subdivision": "t8", "poly": "3:2" }, "query": "v=2&ts=4/4&subdivision=t8&poly=3:2" },
   { "args": { "ts": "4/4", "swing": 66, "su": 8 }, "query": "v=2&ts=4/4&swing=66" },
-  { "args": { "ts": "3/4", "click": ">q (q) (q)", "poly": "4:3" }, "query": "v=2&ts=3/4&click=%3Eq+%28q%29+%28q%29&poly=4:3" }
+  { "args": { "ts": "3/4", "click": ">q (q) (q)", "poly": "4:3" }, "query": "v=2&ts=3/4&click=%3Eq+%28q%29+%28q%29&poly=4:3" },
+  { "args": { "ts": "4/4", "click": ">q@R q@L (q)@RL q" }, "query": "v=2&ts=4/4&click=%3Eq@R+q@L+%28q%29@RL+q" }
 ]

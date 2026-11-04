@@ -96,7 +96,7 @@ export function metronomeQuery(input) {
   const encode = (value) =>
     Array.from(new TextEncoder().encode(value), (b) => {
       const c = String.fromCharCode(b);
-      if (/[A-Za-z0-9\-_.~/:]/.test(c)) return c;
+      if (/[A-Za-z0-9\-_.~/:@]/.test(c)) return c;
       return b === 32 ? "+" : "%" + b.toString(16).toUpperCase().padStart(2, "0");
     }).join("");
   const text = (value) => (value === undefined || value === null ? "" : String(value).trim());

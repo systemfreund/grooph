@@ -683,15 +683,22 @@ fn hex_value(digit: u8) -> u8 {
     }
 }
 
-/// Encode a query value; keeps the notation's `/`, `:` and `.` readable and
-/// writes spaces as `+`.
+/// Encode a query value; keeps the notation's `/`, `:`, `.` and `@` (a
+/// sticking) readable and writes spaces as `+`.
 fn percent_encode(value: &str) -> String {
     let mut out = String::with_capacity(value.len());
     for b in value.bytes() {
         match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' | b'/' | b':' => {
-                out.push(b as char)
-            }
+            b'A'..=b'Z'
+            | b'a'..=b'z'
+            | b'0'..=b'9'
+            | b'-'
+            | b'_'
+            | b'.'
+            | b'~'
+            | b'/'
+            | b':'
+            | b'@' => out.push(b as char),
             b' ' => out.push('+'),
             _ => out.push_str(&format!("%{b:02X}")),
         }
@@ -734,6 +741,30 @@ mod tests {
         }
         assert!(parse_query("r=q+q+q+q&hiderests=upper").unwrap_err().contains("lower or both"));
         assert!(parse_query("ts=4/4&hiderests=lower").unwrap_err().contains("needs a rhythm"));
+    }
+
+    #[test]
+    fn a_rhythm_link_carries_its_stickings() {
+        for text in [
+            "4/4 S-H:e@R H:e@L S-H:e@RL H:e r:h ; K:q r:q K:q r:q",
+            "4/4 q@R q@L (q)@RL >q",
+        ] {
+            let score = parse_score(text).unwrap();
+            let link =
+                SharedLink { content: Some(LinkContent::Score(score)), ..Default::default() };
+            let url = link.to_url("/").unwrap();
+            assert!(url.contains("@R+") && !url.contains("%40"), "{url}");
+            let Some(LinkContent::Score(back)) = parse(url.strip_prefix("/?").unwrap()).content
+            else {
+                panic!("{url}")
+            };
+            assert_eq!(format_score(&back).unwrap(), text);
+        }
+        // Written out, too.
+        let Some(LinkContent::Score(back)) = parse("r=4/4+q%40R+q%40L+h").content else {
+            panic!()
+        };
+        assert_eq!(format_score(&back).unwrap(), "4/4 q@R q@L h");
     }
 
     #[test]

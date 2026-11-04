@@ -18,6 +18,7 @@ pub mod onsets;
 mod random_tests;
 pub mod score;
 mod spelling;
+pub mod sticking;
 pub mod swing;
 pub mod tap_tempo;
 pub mod tempo;
@@ -28,7 +29,7 @@ pub mod voicing;
 
 use BeatKind::Note;
 use BeatKind::Rest;
-pub use beat::{Beat, BeatKind};
+pub use beat::{Beat, BeatKind, NoHand};
 use duration::{Duration, TupletSpec};
 use editing::Modification;
 use either::Either;
@@ -36,6 +37,7 @@ use grid::DEFAULT_GRID;
 pub use head::{Head, Heads, Instrument, Technique};
 pub use score::{Cursor, EmptyScore, HiddenRests, MeasureIdx, Score, StaffKind};
 use std::fmt::{Debug, Formatter};
+pub use sticking::Sticking;
 pub use time_signature::{InvalidTimeSignature, ParseTimeSignatureError, TimeSignature};
 pub use tuplet::{TupletGroup, TupletMark};
 pub use voice::{DifferentMeter, Measure, VoiceBar, VoiceIdx};
@@ -456,6 +458,16 @@ impl VoiceBar {
         if let Some(beat) = self.beats.get_mut(idx) {
             beat.set_heads(heads);
         }
+    }
+
+    /// Write `sticking` on the beat at `idx`, or none (see
+    /// [`Beat::set_sticking`]). No-op if `idx` is out of bounds.
+    pub fn set_sticking(
+        &mut self,
+        idx: BeatIdx,
+        sticking: Option<sticking::Sticking>,
+    ) -> Result<(), NoHand> {
+        self.beats.get_mut(idx).map_or(Ok(()), |beat| beat.set_sticking(sticking))
     }
 
     /// Turn the beat at `idx` into a rest; it loses its accent and soft flag.
