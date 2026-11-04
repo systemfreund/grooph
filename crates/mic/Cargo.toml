@@ -6,12 +6,19 @@ authors.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
+[features]
+default = ["device"]
+# Natively, the input device (cpal, which needs the audio system's headers,
+# e.g. libasound2-dev). Without it there is no microphone: for tests on
+# machines without those headers. The web uses getUserMedia either way.
+device = ["dep:cpal"]
+
 [dependencies]
 grooph-clock = { workspace = true }
 log = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-cpal = { workspace = true }
+cpal = { workspace = true, optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 js-sys = { workspace = true }

@@ -6,6 +6,14 @@ authors.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
+[features]
+default = ["playback"]
+# Natively, the output device (rodio through cpal, which needs the audio
+# system's headers, e.g. libasound2-dev). Without it the engine runs but
+# plays nowhere: for tests on machines without those headers. The web build
+# plays through cpal's WebAudio either way.
+playback = ["rodio/playback"]
+
 [dependencies]
 grooph-measure = { workspace = true }
 log = { workspace = true }

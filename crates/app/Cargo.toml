@@ -6,6 +6,15 @@ authors.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
+[features]
+default = ["devices"]
+# Audio output, the microphone and MIDI input. Natively they need the audio
+# system's headers (libasound2-dev on Linux). Without them the app still
+# builds and its tests run, but opening a device fails:
+# `cargo test --workspace --no-default-features`. CI does not build this
+# configuration, so run it after changing a device crate's backend code.
+devices = ["grooph-audio/playback", "grooph-mic/device", "grooph-midi/device"]
+
 [dependencies]
 grooph-measure = { workspace = true }
 grooph-audio = { workspace = true }

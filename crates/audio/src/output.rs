@@ -1,12 +1,16 @@
 //! The output device the metronome plays on. Natively through rodio; on the
 //! web through a cpal stream of its own, whose `AudioContext` (which rodio
-//! keeps hidden) tells when the browser takes the output away.
+//! keeps hidden) tells when the browser takes the output away. Natively
+//! without the `playback` feature there is no output: tests build without the
+//! audio system's headers.
 
-use crate::{MetronomeSource, PlaybackState};
+#[cfg(any(target_arch = "wasm32", feature = "playback"))]
+use crate::MetronomeSource;
+use crate::PlaybackState;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), feature = "playback"))]
 pub(crate) struct Output {
     /// Samples the source rendered, see [`MetronomeSource::rendered`].
     rendered: Arc<AtomicU64>,
@@ -16,7 +20,7 @@ pub(crate) struct Output {
     _stream: rodio::OutputStream,
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), feature = "playback"))]
 impl Output {
     pub(crate) fn open(shared: Arc<Mutex<PlaybackState>>) -> Result<Self, String> {
         let stream =
@@ -36,6 +40,28 @@ impl Output {
 
     /// Native devices give no sign of their own; the watchdog in
     /// [`crate::Audio`] notices when they stop.
+    pub(crate) fn lost(&self) -> bool {
+        false
+    }
+}
+
+/// Built without the `playback` feature (tests on machines without the
+/// audio system's headers): there is no device to play on.
+#[cfg(all(not(target_arch = "wasm32"), not(feature = "playback")))]
+pub(crate) struct Output {
+    rendered: Arc<AtomicU64>,
+}
+
+#[cfg(all(not(target_arch = "wasm32"), not(feature = "playback")))]
+impl Output {
+    pub(crate) fn open(_shared: Arc<Mutex<PlaybackState>>) -> Result<Self, String> {
+        Err("built without audio playback (feature `playback`)".into())
+    }
+
+    pub(crate) fn started(&self) -> bool {
+        false
+    }
+
     pub(crate) fn lost(&self) -> bool {
         false
     }

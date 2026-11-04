@@ -568,7 +568,7 @@ mod tests {
 
     fn embedded_app(query: &str) -> (eframe::egui::Context, Grooph) {
         let ctx = eframe::egui::Context::default();
-        let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let cc = crate::test_support::creation_context(ctx.clone());
         let app = Grooph::new_with(&cc, embed_params(query), Some(query.to_owned()));
         (ctx, app)
     }

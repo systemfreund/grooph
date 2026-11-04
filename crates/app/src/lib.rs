@@ -31,6 +31,8 @@ mod shell;
 mod staff_cache;
 mod state;
 mod style;
+#[cfg(test)]
+mod test_support;
 mod tokens;
 mod tool_palette;
 pub mod tools;
@@ -1619,7 +1621,7 @@ mod tests {
         use super::{Grooph, Mode};
         use crate::pickers::Picker;
 
-        let cc = eframe::CreationContext::_new_kittest(eframe::egui::Context::default());
+        let cc = crate::test_support::creation_context(eframe::egui::Context::default());
         let mut app = Grooph::new(&cc);
         app.select_tab(Tab::More);
         app.ui.picker = Some(Picker::Settings);
@@ -1672,7 +1674,7 @@ mod tests {
         use super::Grooph;
 
         let ctx = eframe::egui::Context::default();
-        let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let cc = crate::test_support::creation_context(ctx.clone());
         let mut app = Grooph::new(&cc);
         for tab in [Tab::Practice, Tab::Score, Tab::Metronome] {
             app.select_tab(tab);
@@ -1690,7 +1692,7 @@ mod tests {
     fn more_leaves_the_playing_metronome_alone() {
         use super::{Grooph, Mode, TransportState};
 
-        let cc = eframe::CreationContext::_new_kittest(eframe::egui::Context::default());
+        let cc = crate::test_support::creation_context(eframe::egui::Context::default());
         let mut app = Grooph::new(&cc);
         app.select_tab(Tab::Metronome);
         app.start_playback();
@@ -1713,7 +1715,7 @@ mod tests {
         use super::{Grooph, Mode, TransportState};
         use crate::pickers::Picker;
 
-        let cc = eframe::CreationContext::_new_kittest(eframe::egui::Context::default());
+        let cc = crate::test_support::creation_context(eframe::egui::Context::default());
         let mut app = Grooph::new(&cc);
         app.select_tab(Tab::Score);
         app.edit_page();
@@ -1783,7 +1785,7 @@ mod tests {
         use eframe::egui::{Pos2, RawInput, Rect, vec2};
 
         let ctx = eframe::egui::Context::default();
-        let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let cc = crate::test_support::creation_context(ctx.clone());
         let mut app = Grooph::new(&cc);
         app.ui.picker = Some(Picker::Mixer);
         let mut frame = |width: f32| {
@@ -1819,7 +1821,7 @@ mod tests {
         use grooph_measure::duration::{e, q, s, t8};
 
         let ctx = eframe::egui::Context::default();
-        let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let cc = crate::test_support::creation_context(ctx.clone());
         let mut app = Grooph::new(&cc);
         app.select_tab(Tab::Score);
         app.edit_page();
@@ -1854,7 +1856,7 @@ mod tests {
         use crate::pickers::Picker;
         use crate::presets::{PresetId, builtin_presets};
 
-        let cc = eframe::CreationContext::_new_kittest(eframe::egui::Context::default());
+        let cc = crate::test_support::creation_context(eframe::egui::Context::default());
         let mut app = Grooph::new(&cc);
         // Through the metronome: the click bar stays the metronome's.
         app.select_tab(Tab::Metronome);
@@ -1880,7 +1882,7 @@ mod tests {
         use eframe::egui::{Pos2, RawInput, Rect, Shape, vec2};
 
         let ctx = eframe::egui::Context::default();
-        let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let cc = crate::test_support::creation_context(ctx.clone());
         let mut app = Grooph::new(&cc);
         app.ui.library_tab = LibraryTab::Presets;
         let texts = |app: &mut Grooph| {
@@ -1924,7 +1926,7 @@ mod tests {
         use eframe::egui::{Pos2, RawInput, Rect, vec2};
 
         let ctx = eframe::egui::Context::default();
-        let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let cc = crate::test_support::creation_context(ctx.clone());
         let mut app = Grooph::new(&cc);
         app.select_tab(Tab::Practice);
         app.save_preset_as("Mine");
@@ -1984,7 +1986,7 @@ mod tests {
         use super::Grooph;
 
         let ctx = eframe::egui::Context::default();
-        let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let cc = crate::test_support::creation_context(ctx.clone());
         let mut app = Grooph::new(&cc);
         app.select_tab(Tab::Practice);
         app.editor.generator.endless = true;
@@ -2005,7 +2007,7 @@ mod tests {
         use super::Grooph;
 
         let ctx = eframe::egui::Context::default();
-        let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let cc = crate::test_support::creation_context(ctx.clone());
         let mut app = Grooph::new(&cc);
         app.select_tab(Tab::Practice);
         app.editor.generator.endless = true;
@@ -2033,7 +2035,7 @@ mod tests {
         use eframe::egui::{Event, Key, Modifiers};
 
         let ctx = eframe::egui::Context::default();
-        let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let cc = crate::test_support::creation_context(ctx.clone());
         let mut app = Grooph::new(&cc);
         app.select_tab(Tab::More);
         app.ui.picker = Some(Picker::Mixer);
@@ -2064,7 +2066,7 @@ mod tests {
         use super::Grooph;
         use crate::presets::{PresetId, builtin_presets};
 
-        let cc = eframe::CreationContext::_new_kittest(eframe::egui::Context::default());
+        let cc = crate::test_support::creation_context(eframe::egui::Context::default());
         let mut app = Grooph::new(&cc);
         app.select_tab(Tab::Score);
         app.edit_page();
@@ -2103,7 +2105,7 @@ mod tests {
     fn a_load_that_asks_first_leaves_the_metronome_playing() {
         use super::{Grooph, TransportState};
 
-        let cc = eframe::CreationContext::_new_kittest(eframe::egui::Context::default());
+        let cc = crate::test_support::creation_context(eframe::egui::Context::default());
         let mut app = Grooph::new(&cc);
         app.select_tab(Tab::Score);
         app.edit_page();
@@ -2131,7 +2133,7 @@ mod tests {
         use eframe::egui::Id;
 
         let ctx = eframe::egui::Context::default();
-        let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let cc = crate::test_support::creation_context(ctx.clone());
         let mut app = Grooph::new(&cc);
         app.select_tab(Tab::Score);
         app.edit_page();
@@ -2159,7 +2161,7 @@ mod tests {
         use super::Grooph;
         use grooph_link::{LinkContent, SharedLink};
 
-        let cc = eframe::CreationContext::_new_kittest(eframe::egui::Context::default());
+        let cc = crate::test_support::creation_context(eframe::egui::Context::default());
         let mut app = Grooph::new(&cc);
         app.ui.show_score_tab = true;
         app.select_tab(Tab::Score);
@@ -2184,7 +2186,7 @@ mod tests {
         use super::Grooph;
         use grooph_measure::notation::format_score;
 
-        let cc = eframe::CreationContext::_new_kittest(eframe::egui::Context::default());
+        let cc = crate::test_support::creation_context(eframe::egui::Context::default());
         let mut app = Grooph::new(&cc);
         let groove = "4/4 S-H:q H:q H:h ; >S:q K:q K:h";
         let query = format!("v=2&r={}", groove.replace(' ', "+").replace(';', "%3B"));
@@ -2200,7 +2202,7 @@ mod tests {
         use super::Grooph;
         use grooph_measure::notation::{format_score, parse_score};
 
-        let cc = eframe::CreationContext::_new_kittest(eframe::egui::Context::default());
+        let cc = crate::test_support::creation_context(eframe::egui::Context::default());
         let mut from = Grooph::new(&cc);
         for (tab, rhythm) in
             [(Tab::Practice, "4/4 q e e q q"), (Tab::Score, "3/4 H:q S-H:q H:q ; K:q r:q r:q")]
@@ -2243,7 +2245,7 @@ mod tests {
         use super::Grooph;
         use grooph_measure::notation::{format_score, parse_score};
 
-        let cc = eframe::CreationContext::_new_kittest(eframe::egui::Context::default());
+        let cc = crate::test_support::creation_context(eframe::egui::Context::default());
         let mut app = Grooph::new(&cc);
         app.ui.show_score_tab = true;
         app.select_tab(Tab::Score);
@@ -2278,7 +2280,7 @@ mod tests {
         use eframe::egui::{Event, Key, Modifiers};
 
         let ctx = eframe::egui::Context::default();
-        let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let cc = crate::test_support::creation_context(ctx.clone());
         let mut app = Grooph::new(&cc);
         app.select_tab(Tab::Score);
         app.edit_page();
@@ -2300,7 +2302,7 @@ mod tests {
         use super::Grooph;
 
         let ctx = eframe::egui::Context::default();
-        let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let cc = crate::test_support::creation_context(ctx.clone());
         let mut app = Grooph::new(&cc);
         app.select_tab(Tab::Practice);
         app.playback_ctl.accuracy.enabled = true;
@@ -2318,7 +2320,7 @@ mod tests {
         use eframe::egui::{Event, TouchDeviceId, TouchId, TouchPhase, pos2};
 
         let ctx = eframe::egui::Context::default();
-        let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let cc = crate::test_support::creation_context(ctx.clone());
         let mut app = Grooph::new(&cc);
         app.select_tab(Tab::Score);
         app.edit_page();
@@ -2345,7 +2347,7 @@ mod tests {
         use eframe::egui::{Pos2, RawInput, Rect, vec2};
 
         let ctx = eframe::egui::Context::default();
-        let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let cc = crate::test_support::creation_context(ctx.clone());
         let mut app = Grooph::new(&cc);
         app.ui.show_score_tab = true;
         let rect = Rect::from_min_size(Pos2::ZERO, vec2(390.0, 300.0));
@@ -2369,7 +2371,7 @@ mod tests {
         use eframe::egui::{Pos2, RawInput, Rect, vec2};
 
         let ctx = eframe::egui::Context::default();
-        let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let cc = crate::test_support::creation_context(ctx.clone());
         let mut app = Grooph::new(&cc);
         let rect = Rect::from_min_size(Pos2::ZERO, vec2(390.0, 300.0));
         let bar_rests = |app: &Grooph| {
@@ -2396,7 +2398,7 @@ mod tests {
         use eframe::egui::{Pos2, RawInput, Rect, vec2};
 
         let ctx = eframe::egui::Context::default();
-        let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let cc = crate::test_support::creation_context(ctx.clone());
         let mut app = Grooph::new(&cc);
         let rect = Rect::from_min_size(Pos2::ZERO, vec2(390.0, 300.0));
         let veiled = |app: &Grooph| {
@@ -2420,7 +2422,7 @@ mod tests {
         use grooph_measure::StaffKind;
 
         let ctx = eframe::egui::Context::default();
-        let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let cc = crate::test_support::creation_context(ctx.clone());
         let mut app = Grooph::new(&cc);
         app.ui.show_score_tab = true;
         let groove = "4/4 H:e S-H:e H:e H:e H:e S-H:e Ho:e Hc:e ; K:q r:q K:q r:q";
@@ -2450,7 +2452,7 @@ mod tests {
         use grooph_measure::notation::parse_score;
 
         let ctx = eframe::egui::Context::default();
-        let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let cc = crate::test_support::creation_context(ctx.clone());
         let mut app = Grooph::new(&cc);
         app.select_tab(Tab::Score);
         app.edit_page();
@@ -2486,7 +2488,7 @@ mod tests {
     fn deleting_the_rhythm_behind_the_metronome_forgets_it() {
         use super::Grooph;
 
-        let cc = eframe::CreationContext::_new_kittest(eframe::egui::Context::default());
+        let cc = crate::test_support::creation_context(eframe::egui::Context::default());
         let mut app = Grooph::new(&cc);
         app.select_tab(Tab::Score);
         app.edit_page();
@@ -2506,7 +2508,7 @@ mod tests {
         use eframe::egui::{Event, Key, Modifiers};
 
         let ctx = eframe::egui::Context::default();
-        let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let cc = crate::test_support::creation_context(ctx.clone());
         let mut app = Grooph::new(&cc);
         app.select_tab(Tab::Score);
         app.edit_page();
@@ -2553,7 +2555,7 @@ mod tests {
         use super::Grooph;
         use crate::library_panel::{LibraryItem, SaveAs};
 
-        let cc = eframe::CreationContext::_new_kittest(eframe::egui::Context::default());
+        let cc = crate::test_support::creation_context(eframe::egui::Context::default());
         let mut app = Grooph::new(&cc);
         app.select_tab(Tab::Score);
         app.edit_page();
@@ -2585,7 +2587,7 @@ mod tests {
         use eframe::egui::Id;
 
         let ctx = eframe::egui::Context::default();
-        let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let cc = crate::test_support::creation_context(ctx.clone());
         let mut app = Grooph::new(&cc);
         let mut time = 0.0;
         for picker in [Picker::Mixer, Picker::Settings, Picker::Help, Picker::Preset] {
@@ -2638,7 +2640,7 @@ mod tests {
         use grooph_measure::swing::Swing;
 
         for page in [Tab::Metronome, Tab::Practice, Tab::Score] {
-            let cc = eframe::CreationContext::_new_kittest(eframe::egui::Context::default());
+            let cc = crate::test_support::creation_context(eframe::egui::Context::default());
             let mut app = Grooph::new(&cc);
             app.playback_ctl.bpm = 133;
             app.playback_ctl.audio_cfg.swing =
@@ -2697,7 +2699,7 @@ mod tests {
         use crate::calibration::{CALIBRATION_HITS, CALIBRATION_WARMUP};
         use crate::play_along::HitSource;
 
-        let cc = eframe::CreationContext::_new_kittest(eframe::egui::Context::default());
+        let cc = crate::test_support::creation_context(eframe::egui::Context::default());
         let mut app = Grooph::new(&cc);
         app.select_tab(Tab::More);
         let before = user_state(&app);
@@ -2721,7 +2723,7 @@ mod tests {
     fn the_metronome_measures_hits_against_its_clicks() {
         use super::Grooph;
 
-        let cc = eframe::CreationContext::_new_kittest(eframe::egui::Context::default());
+        let cc = crate::test_support::creation_context(eframe::egui::Context::default());
         let mut app = Grooph::new(&cc);
         app.select_tab(Tab::Metronome);
         // It plays its own document as clicks, and hits count against it.
@@ -2740,7 +2742,7 @@ mod tests {
         use super::Grooph;
         use grooph_measure::counter::Ratio;
 
-        let cc = eframe::CreationContext::_new_kittest(eframe::egui::Context::default());
+        let cc = crate::test_support::creation_context(eframe::egui::Context::default());
         let mut app = Grooph::new(&cc);
         app.select_tab(Tab::Metronome);
         let first = app.counter_choices().first().copied();
@@ -2773,7 +2775,7 @@ mod tests {
     fn muted_bars_sound_while_editing() {
         use super::Grooph;
 
-        let cc = eframe::CreationContext::_new_kittest(eframe::egui::Context::default());
+        let cc = crate::test_support::creation_context(eframe::egui::Context::default());
         let mut app = Grooph::new(&cc);
         app.playback_ctl.audio_cfg.gap.enabled = true;
         for tab in [Tab::Practice, Tab::Metronome] {

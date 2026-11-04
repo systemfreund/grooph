@@ -829,11 +829,15 @@ struct MetronomeSource {
 }
 
 impl MetronomeSource {
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(all(not(target_arch = "wasm32"), feature = "playback"))]
     fn new(shared: Arc<Mutex<PlaybackState>>) -> Self {
         Self::with_sample_rate(shared, device_sample_rate())
     }
 
+    #[cfg_attr(
+        all(not(target_arch = "wasm32"), not(feature = "playback")),
+        allow(dead_code, reason = "only an output device makes a source")
+    )]
     fn with_sample_rate(shared: Arc<Mutex<PlaybackState>>, sample_rate: u32) -> Self {
         let (local_params, is_playing, starts) = {
             let state = lock(&shared);
@@ -862,6 +866,10 @@ impl MetronomeSource {
     }
 
     /// Counter of the samples rendered, see [`Output::rendered`].
+    #[cfg_attr(
+        all(not(target_arch = "wasm32"), not(feature = "playback")),
+        allow(dead_code, reason = "only an output device makes a source")
+    )]
     fn rendered(&self) -> Arc<AtomicU64> {
         Arc::clone(&self.rendered)
     }
@@ -1004,7 +1012,7 @@ impl Source for MetronomeSource {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), feature = "playback"))]
 fn device_sample_rate() -> u32 {
     use rodio::cpal::traits::{DeviceTrait, HostTrait};
     let host = rodio::cpal::default_host();
