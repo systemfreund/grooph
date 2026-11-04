@@ -116,7 +116,7 @@ impl Grooph {
         let steps = self.editor.doc().history.pushed();
         let voice = there.unwrap_or_else(|| self.voice_for(instrument));
         self.go_to_voice(voice);
-        self.apply_tool(crate::tool_palette::tool(id));
+        self.apply_tool(id.tool());
         // A voice the bar had to get first is part of the same step.
         if self.editor.doc().history.pushed() == steps + 2 {
             self.editor.doc_mut().history.fold_last();

@@ -751,7 +751,7 @@ impl Grooph {
     /// metronome only the click bar or counter rhythm being edited.
     pub(crate) fn clear_current_measure(&mut self) {
         if self.metronome_mode() {
-            self.apply_tool(tool_palette::tool(ToolId::MetaResetMeasure));
+            self.apply_tool(ToolId::MetaResetMeasure.tool());
             return;
         }
         self.with_undo_snapshot(|app| {
@@ -2281,7 +2281,7 @@ mod tests {
         let mut app = Grooph::new(&cc);
         app.select_tab(Tab::Score);
         app.edit_page();
-        app.apply_tool(crate::tool_palette::tool(crate::tools::ToolId::MetaChangeTimeSignature));
+        app.apply_tool(crate::tools::ToolId::MetaChangeTimeSignature.tool());
         let space = Event::Key {
             key: Key::Space,
             physical_key: None,

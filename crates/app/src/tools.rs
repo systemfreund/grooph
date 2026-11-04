@@ -238,6 +238,11 @@ impl ToolId {
         }
     }
 
+    /// How many tools there are: `all_tools` has one entry per variant, so its
+    /// array is this long and an id without an entry fails to compile. Keep
+    /// [`ToolId::NavEnd`] last, or name the new last variant here.
+    pub const COUNT: usize = ToolId::NavEnd as usize + 1;
+
     /// The tool it names.
     pub fn tool(self) -> &'static Tool {
         &all_tools()[self as usize]
@@ -275,7 +280,7 @@ pub fn all_tools() -> &'static [Tool] {
     use BeatKind::*;
     use Duration::*;
 
-    static ALL: [Tool; 41] = [
+    static ALL: [Tool; ToolId::COUNT] = [
         Tool {
             id: ToolId::EditUndo,
             label: "⟲",

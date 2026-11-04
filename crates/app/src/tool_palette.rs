@@ -134,11 +134,6 @@ pub(crate) enum Cell {
     Instrument(Instrument),
 }
 
-/// The tool with `id`.
-pub(crate) fn tool(id: ToolId) -> &'static Tool {
-    id.tool()
-}
-
 /// What `technique` is, on its button's hover.
 fn technique_name(technique: Technique) -> &'static str {
     match technique {
@@ -157,7 +152,7 @@ fn technique_name(technique: Technique) -> &'static str {
 /// next line. On the kit its instruments come first, always the same nine
 /// cells; on the one line there are none.
 pub(crate) fn grid_rows(kit: bool) -> Vec<Vec<Cell>> {
-    let tools = |ids: &[ToolId]| ids.iter().map(|&id| Cell::Tool(tool(id))).collect::<Vec<_>>();
+    let tools = |ids: &[ToolId]| ids.iter().map(|&id| Cell::Tool(id.tool())).collect::<Vec<_>>();
     let mut rows = Vec::new();
     if kit {
         rows.push(KIT_ORDER.iter().map(|&i| Cell::Instrument(i)).collect());
@@ -1152,7 +1147,7 @@ mod tests {
         use grooph_measure::duration::{Duration, NoteValue};
         use grooph_measure::editing::{TUPLET_TOOLS, VALUE_BUTTONS};
         let templates = || {
-            super::TOOLS.iter().filter_map(|&id| match super::tool(id).kind {
+            super::TOOLS.iter().filter_map(|&id| match id.tool().kind {
                 ToolKind::InsertBeat(BeatTemplate { duration, kind, .. }) => Some((duration, kind)),
                 _ => None,
             })
@@ -1208,8 +1203,8 @@ mod tests {
     fn value_buttons_show_their_value_in_the_cursors_tuplet() {
         use super::Cell;
         use grooph_measure::duration::{NoteValue, TupletSpec};
-        let cell = |id| Cell::Tool(super::tool(id));
-        let value = |app: &Grooph, id| app.value_in_tuplet(super::tool(id));
+        let cell = |id: ToolId| Cell::Tool(id.tool());
+        let value = |app: &Grooph, id: ToolId| app.value_in_tuplet(id.tool());
         let mut app = editing("4/4 qt16 qt16 qt16 qt16 qt16 r:q r:h");
         app.editor.doc_mut().cursor = Cursor::at(0, 0);
         // In a quintuplet of sixteenths "8" writes a quintuplet eighth.
@@ -1507,7 +1502,7 @@ mod tests {
     fn the_toggles_show_whether_they_are_on() {
         use super::Cell;
         let mut app = editing("4/4 S:q H:q r:q r:q ; K:q r:q K:q r:q");
-        let cell = |id| Cell::Tool(super::tool(id));
+        let cell = |id: ToolId| Cell::Tool(id.tool());
         for id in [ToolId::ModifyToggleAccent, ToolId::ModifyToggleSoft, ToolId::ModifyToggleDotted]
         {
             assert!(!app.cell_selected(cell(id)), "{id}");
@@ -1558,10 +1553,12 @@ mod tests {
         assert!(!tools(true).contains(&ToolId::ModifyToggleHead));
         assert!(!tools(false).contains(&ToolId::ModifyToggleHead));
         // The techniques are the instruments' cells' too: no cells of their own.
-        assert!(!tools(true).iter().any(|&id| matches!(
-            super::tool(id).kind,
-            ToolKind::Modify(Modifier::ToggleTechnique(_))
-        )));
+        assert!(
+            !tools(true).iter().any(|&id| matches!(
+                id.tool().kind,
+                ToolKind::Modify(Modifier::ToggleTechnique(_))
+            ))
+        );
         let cells = grid_rows(true).into_iter().flatten().collect::<Vec<_>>();
         let instruments = cells.iter().filter(|c| matches!(c, Cell::Instrument(_))).count();
         assert_eq!(instruments, 9);
@@ -1660,7 +1657,7 @@ mod tests {
         assert_eq!(shown(&app, ToolId::ModifyToggleAccent), (e, true, false));
         assert_eq!(shown(&app, ToolId::ModifyToggleSoft), (e, false, true));
         assert_eq!(shown(&app, ToolId::ModifyToggleDotted), (e_dot, false, false));
-        assert!(app.modifier_preview(tool(ToolId::InsertNoteQ)).is_none());
+        assert!(app.modifier_preview(ToolId::InsertNoteQ.tool()).is_none());
         // A half note shows its accent, and the dot a dotted half.
         app.editor.doc_mut().cursor = Cursor::at(0, 4);
         let h = Duration::Simple(NoteValue::Half);
@@ -1674,7 +1671,7 @@ mod tests {
         use grooph_measure::BeatKind;
         let mut app = editing("4/4 e r:e e e q q");
         let preview = |app: &Grooph| {
-            let m = app.modifier_preview(super::tool(ToolId::ModifyToggleDotted)).unwrap();
+            let m = app.modifier_preview(ToolId::ModifyToggleDotted.tool()).unwrap();
             m.first_voice().beats()[0].kind()
         };
         app.editor.doc_mut().cursor = Cursor::at(0, 0);
@@ -1686,8 +1683,8 @@ mod tests {
     #[test]
     fn the_cursors_tuplet_is_marked_and_a_tap_dissolves_it() {
         let mut app = editing("4/4 t8 t8 t8 q q q");
-        use super::{Cell, tool};
-        let cell = |id| Cell::Tool(tool(id));
+        use super::Cell;
+        let cell = |id: ToolId| Cell::Tool(id.tool());
         assert!(app.cell_selected(cell(ToolId::InsertTupletT8)));
         assert!(!app.cell_selected(cell(ToolId::InsertTupletT16)));
         assert!(!app.cell_selected(cell(ToolId::InsertNoteE)));
