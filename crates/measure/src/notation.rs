@@ -955,6 +955,40 @@ mod tests {
     }
 
     #[test]
+    fn every_code_and_letter_reads_as_before() {
+        use Instrument::*;
+        use Technique::*;
+        let heads = [
+            ("K", Kick, Normal),
+            ("S", Snare, Normal),
+            ("Sx", Snare, CrossStick),
+            ("Sr", Snare, Rimshot),
+            ("H", HiHat, Normal),
+            ("Ho", HiHat, Open),
+            ("Hh", HiHat, HalfOpen),
+            ("Hc", HiHat, Closed),
+            ("HF", HiHatFoot, Normal),
+            ("RD", Ride, Normal),
+            ("RDb", Ride, Bell),
+            ("CR", Crash, Normal),
+            ("CRc", Crash, Choke),
+            ("T1", HighTom, Normal),
+            ("T1r", HighTom, Rimshot),
+            ("T2", MidTom, Normal),
+            ("T2r", MidTom, Rimshot),
+            ("FT", FloorTom, Normal),
+            ("FTr", FloorTom, Rimshot),
+        ];
+        for (text, instrument, technique) in heads {
+            let head = Head::new(instrument).with_technique(technique).unwrap();
+            let beat = Beat::with_heads(q(), Heads::one(head));
+            let written = format!("1/4 {text}:q");
+            assert_eq!(beats_of(&parse_score(&written).unwrap(), 0), [beat.clone()], "{text}");
+            assert_eq!(format_beat(&beat).unwrap(), format!("{text}:q"));
+        }
+    }
+
+    #[test]
     fn every_head_of_the_kit_reads_back_as_written() {
         let coded = Instrument::ALL.into_iter().filter(|i| i.spec().code.is_some());
         for instrument in coded {

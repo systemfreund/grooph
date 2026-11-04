@@ -78,7 +78,7 @@ spread across callers.
   every head, `set_kind_of` turns a rest into a plain note of an instrument
   and back (`set_kind`: the one line's `Rhythm`).
   On the one line every note is one `Instrument::Rhythm` head;
-  `Instrument::REGISTER` describes each instrument once (`InstrumentSpec`:
+  `head::REGISTER` describes each instrument once (`InstrumentSpec`:
   notation code, labels, staff position and notehead of the drumkit legend
   for kit scores (#251-#255), techniques with their notation letters, mixer
   group); `ALL`, `staff_pos`, `notehead`, `techniques`, the notation, the
