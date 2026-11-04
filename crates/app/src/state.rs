@@ -272,7 +272,7 @@ pub(crate) struct EditorState {
     pub(crate) docs: Documents,
     /// Prebuilt measures for note/rest/tuplet tool buttons to avoid per-frame
     /// reconstruction.
-    pub(crate) button_measures: HashMap<&'static str, Measure>,
+    pub(crate) button_measures: HashMap<crate::tools::ToolId, Measure>,
     /// The instrument picked in the kit's palette or by a tap on its head:
     /// the tools write and change its heads (see `Grooph::edit_instrument`).
     pub(crate) instrument: Instrument,
