@@ -238,9 +238,9 @@ impl ToolId {
         }
     }
 
-    /// How many tools there are: `all_tools` has one entry per variant, so its
-    /// array is this long and an id without an entry fails to compile. Keep
-    /// [`ToolId::NavEnd`] last, or name the new last variant here.
+    /// How many tools there are. It sizes `all_tools`' array, so a variant
+    /// added before [`ToolId::NavEnd`] without a table entry fails to compile.
+    /// Keep `NavEnd` last, or name the new last variant here.
     pub const COUNT: usize = ToolId::NavEnd as usize + 1;
 
     /// The tool it names.
