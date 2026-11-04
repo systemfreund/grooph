@@ -1,7 +1,7 @@
 use crate::glyphs::{self, Glyph};
 use crate::render_plan::{RenderPlan, plan_measure};
 use crate::staff::{Staff, Voicing};
-use egui::{FontId, Pos2, Rect};
+use egui::{FontId, Pos2, Rect, Vec2};
 use grooph_measure::duration::{Duration, NoteValue};
 use grooph_measure::onsets::Onset;
 use grooph_measure::{BeatKind, StaffKind, TimeSignature, VoiceBar};
@@ -362,6 +362,75 @@ impl MeasureLayout {
             .map(|l| Rect::from_two_pos(l.p1, l.p2));
         let beams = self.beams.iter().map(|b| b.rect);
         glyphs.chain(lines).chain(beams).reduce(|a, b| a.union(b))
+    }
+
+    /// Move everything by `d`. The layout snaps nothing to pixels
+    /// vertically (the renderer does), so a layout moved down a row is the
+    /// one built in that row; [`crate::staff_layout::build_staff_layout`]
+    /// relies on that to lay out each measure only once.
+    pub fn translate(&mut self, d: Vec2) {
+        // Spelled out, so a new field cannot be left behind.
+        let MeasureLayout { beams, notes, tuplets, clef, time_signature, notes_left_edge } = self;
+        for beam in beams {
+            beam.rect = beam.rect.translate(d);
+        }
+        for note in notes {
+            note.translate(d);
+        }
+        for tuplet in tuplets {
+            let TupletLayout { count: _, number, bracket } = tuplet;
+            shift(number, d);
+            bracket.iter_mut().for_each(|l| l.translate(d));
+        }
+        if let Some(clef) = clef {
+            clef.origin += d;
+        }
+        if let Some(TimeSignatureLayout { beats, beat_unit, width: _ }) = time_signature {
+            shift(beats, d);
+            shift(beat_unit, d);
+        }
+        *notes_left_edge += d.x;
+    }
+}
+
+impl NoteLayout {
+    fn translate(&mut self, d: Vec2) {
+        let NoteLayout {
+            center,
+            staff_pos: _,
+            duration: _,
+            kind: _,
+            head,
+            chord,
+            stemlet: _,
+            hidden: _,
+            veiled: _,
+            parens,
+            ledgers,
+            dots,
+            stem,
+            flag,
+            accent,
+            signs,
+        } = self;
+        *center += d;
+        head.origin += d;
+        for glyphs in [chord, parens, dots, signs] {
+            shift(glyphs, d);
+        }
+        for glyph in [flag, accent].into_iter().flatten() {
+            glyph.origin += d;
+        }
+        for line in ledgers.iter_mut().chain(stem.as_mut()) {
+            line.translate(d);
+        }
+    }
+}
+
+impl Line {
+    fn translate(&mut self, d: Vec2) {
+        self.p1 += d;
+        self.p2 += d;
     }
 }
 

@@ -10,8 +10,7 @@ use eframe::egui::{FontId, Frame, Rect, Response, Stroke};
 use grooph_layout::pixel_layout::{NoteLayout, compute_em, onset_head};
 use grooph_layout::staff_layout::{
     LEGIBILITY_FLOOR_EM, LOWER_VOICE_LABEL_ROOM_EM, PlacedMeasure, ROOM_BELOW_EM,
-    ROOM_BELOW_WITH_LABELS_EM, StaffLayout, StaffOpts, build_staff_layout, hit_test_head,
-    hit_test_voice,
+    ROOM_BELOW_WITH_LABELS_EM, StaffLayout, StaffOpts, hit_test_head, hit_test_voice,
 };
 use grooph_measure::grid::DEFAULT_GRID;
 use grooph_measure::tempo::ScoreTiming;
@@ -101,7 +100,7 @@ impl Grooph {
         let margins = staff_margins(ui.style());
         let rect = Rect::from_min_size(ui.cursor().min, egui::vec2(width - margins.x, 1.0e4));
         let opts = self.staff_opts(ui, rect);
-        build_staff_layout(&self.editor.doc().score, &opts).total_size.y + margins.y
+        crate::staff_cache::staff_layout(&self.editor.doc().score, &opts).total_size.y + margins.y
     }
 
     pub(super) fn measure_panel(&mut self, ui: &mut egui::Ui) {
@@ -210,7 +209,7 @@ impl Grooph {
                     // that play: the cursor never enters the ghost bar.
                     let played = score;
                     let score = ghost.as_ref().unwrap_or(score);
-                    let staff = build_staff_layout(score, &staff_opts);
+                    let staff = crate::staff_cache::staff_layout(score, &staff_opts);
                     // One row fits the height, so nothing above or below
                     // the staff (accents, count labels) is cut off on a
                     // short, wide panel.
@@ -219,7 +218,7 @@ impl Grooph {
                         let floor = LEGIBILITY_FLOOR_EM / em;
                         let staff_opts =
                             staff_opts.rescaled((available.y / row_height).max(floor.min(1.0)));
-                        let staff = build_staff_layout(score, &staff_opts);
+                        let staff = crate::staff_cache::staff_layout(score, &staff_opts);
                         (staff_opts, staff)
                     } else {
                         (staff_opts, staff)
@@ -563,7 +562,7 @@ impl Grooph {
         // One flat list of global onsets across the whole score. Used by
         // `clamp_diff_to_beat_window`, which needs the global neighbours of
         // each note.
-        let global_beats = crate::accuracy::compute_global_beat_onsets(score, timing);
+        let global_beats = crate::accuracy::global_beat_onsets(score, timing);
         let global_onsets_u64: Vec<u64> = global_beats.iter().map(|gb| gb.onset_tick).collect();
 
         for system in &staff.systems {

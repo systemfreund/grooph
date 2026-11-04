@@ -28,6 +28,7 @@ mod presets;
 mod settings_panel;
 mod share;
 mod shell;
+mod staff_cache;
 mod state;
 mod style;
 #[cfg(test)]
@@ -63,7 +64,7 @@ use crate::state::{
     PlaybackController, PlaybackState, UiShell,
 };
 use crate::tools::ToolKind;
-use crate::tools::{BeatTemplate, Modifier, all_tools};
+use crate::tools::{BeatTemplate, Modifier, ToolId, all_tools};
 use crate::undo::EditorSnapshot;
 use eframe::egui::{Context, Ui};
 use eframe::epaint::text::{FontInsert, InsertFontFamily};
@@ -753,7 +754,7 @@ impl Grooph {
     /// metronome only the click bar or counter rhythm being edited.
     pub(crate) fn clear_current_measure(&mut self) {
         if self.metronome_mode() {
-            self.apply_tool(tool_palette::tool("meta.reset_measure"));
+            self.apply_tool(ToolId::MetaResetMeasure.tool());
             return;
         }
         self.with_undo_snapshot(|app| {
@@ -1338,7 +1339,7 @@ impl Grooph {
         state.audio_settings = state.audio_settings.clamped();
 
         // Precompute button measures for all insert-beat tools
-        let mut button_measures: HashMap<&'static str, Measure> = HashMap::new();
+        let mut button_measures: HashMap<crate::tools::ToolId, Measure> = HashMap::new();
         for t in all_tools() {
             match t.kind {
                 ToolKind::InsertBeat(template) => {
@@ -2283,7 +2284,7 @@ mod tests {
         let mut app = Grooph::new(&cc);
         app.select_tab(Tab::Score);
         app.edit_page();
-        app.apply_tool(crate::tool_palette::tool("meta.change_time_signature"));
+        app.apply_tool(crate::tools::ToolId::MetaChangeTimeSignature.tool());
         let space = Event::Key {
             key: Key::Space,
             physical_key: None,

@@ -373,6 +373,10 @@ impl Grooph {
     }
 
     /// Evaluation of the last run, shown once playback has stopped.
+    /// The summary window's height outside its scrolled content: its offset
+    /// from the top, title bar and Close button.
+    const SUMMARY_CHROME: f32 = 170.0;
+
     pub(crate) fn run_summary_window(&mut self, ui: &mut egui::Ui) {
         if self.playback_ctl.transport_state != TransportState::Stopped
             || self.playback_ctl.play_along.calibration.is_some()
@@ -388,59 +392,72 @@ impl Grooph {
             .resizable(false)
             .anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 24.0))
             .show(ui.ctx(), |ui| {
-                // Named as in the status line while playing.
-                ui.heading(format!("Timing {:.0}%", summary.score_percent())).on_hover_text(
-                    "Measured against the click: perfect hits count fully, good \
-                     ones half; missed notes and extra hits count against it",
-                );
-                ui.label(format!("Tight {:.0}%", summary.tight_percent())).on_hover_text(
-                    "The score with every hit measured against your own average \
-                     deviation instead of the click: how steady your playing is, \
-                     even if you are always a little early or late",
-                );
-                let tracker = &self.playback_ctl.accuracy.tracker;
-                // Against a counter rhythm, how each rhythm went.
-                let voices = match tracker.last_voice_summaries() {
-                    [Some(click), Some(counter)] if self.metronome_mode() => Some([click, counter]),
-                    _ => None,
-                };
-                // With silent bars, how the playing held up without the click.
-                let bars = match tracker.last_bar_summaries() {
-                    [Some(audible), Some(silent)] => Some([audible, silent]),
-                    _ => None,
-                };
-                if let Some(drift) = tracker.last_drift() {
-                    ui.add_space(4.0);
-                    drift_chart(ui, drift);
-                }
-                if let Some(positions) =
-                    tracker.last_positions().and_then(|t| t.in_system(self.ui.counting.system))
-                {
-                    ui.add_space(4.0);
-                    beat_position_strip(ui, &positions);
-                }
-                ui.add_space(4.0);
-                // Folded away under the tables, which need the room on a phone.
-                // Its own open state with and without the tables: opened in a
-                // plain run, it still starts folded under the tables.
-                let tables = voices.is_some() || bars.is_some();
-                egui::CollapsingHeader::new("Details")
-                    .id_salt(("run_details", tables))
-                    .default_open(!tables)
-                    .show(ui, |ui| summary_grid(ui, &summary));
-                if let Some([click, counter]) = voices {
-                    ui.add_space(8.0);
-                    split_grid(ui, "run_summary_voices", ["Click", "Counter"], [&click, &counter]);
-                }
-                if let Some([audible, silent]) = bars {
-                    ui.add_space(8.0);
-                    split_grid(
-                        ui,
-                        "run_summary_bars",
-                        ["With click", "Silent bars"],
-                        [&audible, &silent],
+                // Scrolls when the details and tables open on a phone; the
+                // Close button below stays in view.
+                let max_height =
+                    (ui.ctx().content_rect().height() - Self::SUMMARY_CHROME).max(160.0);
+                egui::ScrollArea::vertical().max_height(max_height).show(ui, |ui| {
+                    // Named as in the status line while playing.
+                    ui.heading(format!("Timing {:.0}%", summary.score_percent())).on_hover_text(
+                        "Measured against the click: perfect hits count fully, good \
+                         ones half; missed notes and extra hits count against it",
                     );
-                }
+                    ui.label(format!("Tight {:.0}%", summary.tight_percent())).on_hover_text(
+                        "The score with every hit measured against your own average \
+                         deviation instead of the click: how steady your playing is, \
+                         even if you are always a little early or late",
+                    );
+                    let tracker = &self.playback_ctl.accuracy.tracker;
+                    // Against a counter rhythm, how each rhythm went.
+                    let voices = match tracker.last_voice_summaries() {
+                        [Some(click), Some(counter)] if self.metronome_mode() => {
+                            Some([click, counter])
+                        }
+                        _ => None,
+                    };
+                    // With silent bars, how the playing held up without the click.
+                    let bars = match tracker.last_bar_summaries() {
+                        [Some(audible), Some(silent)] => Some([audible, silent]),
+                        _ => None,
+                    };
+                    if let Some(drift) = tracker.last_drift() {
+                        ui.add_space(4.0);
+                        drift_chart(ui, drift);
+                    }
+                    if let Some(positions) =
+                        tracker.last_positions().and_then(|t| t.in_system(self.ui.counting.system))
+                    {
+                        ui.add_space(4.0);
+                        beat_position_strip(ui, &positions);
+                    }
+                    ui.add_space(4.0);
+                    // Folded away under the tables, which need the room on a phone.
+                    // Its own open state with and without the tables: opened in a
+                    // plain run, it still starts folded under the tables.
+                    let tables = voices.is_some() || bars.is_some();
+                    egui::CollapsingHeader::new("Details")
+                        .id_salt(("run_details", tables))
+                        .default_open(!tables)
+                        .show(ui, |ui| summary_grid(ui, &summary));
+                    if let Some([click, counter]) = voices {
+                        ui.add_space(8.0);
+                        split_grid(
+                            ui,
+                            "run_summary_voices",
+                            ["Click", "Counter"],
+                            [&click, &counter],
+                        );
+                    }
+                    if let Some([audible, silent]) = bars {
+                        ui.add_space(8.0);
+                        split_grid(
+                            ui,
+                            "run_summary_bars",
+                            ["With click", "Silent bars"],
+                            [&audible, &silent],
+                        );
+                    }
+                });
                 ui.add_space(8.0);
                 if ui.button("Close").clicked() {
                     close = true;

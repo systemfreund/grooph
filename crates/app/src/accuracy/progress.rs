@@ -2,8 +2,8 @@ use grooph_measure::Score;
 use grooph_measure::tempo::ScoreTiming;
 
 use super::session::{
-    AccuracyMark, BarEvent, GlobalBeatOnset, RecordingData, compute_global_beat_onsets,
-    loop_offset, tallies_of,
+    AccuracyMark, BarEvent, GlobalBeatOnset, RecordingData, global_beat_onsets, loop_offset,
+    tallies_of,
 };
 
 /// Advance the progress cursor to `delay_s` before `now_seconds` and mark
@@ -33,7 +33,7 @@ pub(super) fn update_progress(
         return;
     }
     let total = total_ticks as f64;
-    let global_beats = compute_global_beat_onsets(score, timing);
+    let global_beats = global_beat_onsets(score, timing);
     if global_beats.is_empty() {
         return;
     }

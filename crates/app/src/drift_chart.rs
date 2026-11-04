@@ -69,7 +69,8 @@ pub(crate) fn drift_chart(ui: &mut egui::Ui, drift: &Drift) {
     );
 }
 
-const STRIP_HEIGHT: f32 = 60.0;
+/// As high as the drift chart above it.
+const STRIP_HEIGHT: f32 = HEIGHT;
 /// From this many columns on, only the position that stands out keeps its
 /// number under the strip; the others show theirs on hover.
 const CROWDED_COLUMNS: usize = 6;
