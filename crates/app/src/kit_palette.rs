@@ -20,12 +20,11 @@
 use crate::Grooph;
 use crate::Mode;
 use crate::documents::Document;
+use crate::score_change::Origin;
 use crate::shell::Tab;
 use crate::state::PendingLoad;
 use crate::tools::ToolId;
-use grooph_measure::{
-    Cursor, Instrument, Measure, Score, StaffKind, TimeSignature, VoiceIdx, Voicing,
-};
+use grooph_measure::{Instrument, Measure, Score, StaffKind, TimeSignature, VoiceIdx, Voicing};
 
 /// A new drum groove: one bar of `ts`, a voice of rests for each of the
 /// `voicing`'s, on the kit's staff.
@@ -126,13 +125,7 @@ impl Grooph {
         self.stop_transport();
         self.show_document(Document::Score);
         let groove = empty_groove(self.current_measure().time_signature(), Voicing::default());
-        self.with_undo_snapshot(|app| {
-            let doc = app.editor.doc_mut();
-            doc.score = groove;
-            doc.cursor = Cursor::start();
-            doc.active_pattern_id = None;
-            true
-        });
+        self.replace_score(groove, Origin::New);
         self.ui.picker = None;
         self.select_tab(Tab::Score);
         self.ui.mode = Mode::Edit;

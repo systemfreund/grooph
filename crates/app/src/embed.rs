@@ -9,6 +9,7 @@
 //! wake lock, MIDI, the microphone and calibration.
 
 use crate::pickers::silent_bars_label;
+use crate::score_change::ScoreChange;
 use crate::{Grooph, TransportState, platform};
 use eframe::egui::{
     self, Align, Button, Color32, Context, Event, FontId, Frame, Layout, Margin, PointerButton,
@@ -379,7 +380,7 @@ impl Grooph {
     pub(crate) fn step_bpm(&mut self, delta: i64) {
         let bpm = (i64::from(self.playback_ctl.bpm) + delta).clamp(MIN_BPM.into(), MAX_BPM.into());
         self.playback_ctl.bpm = bpm as u32;
-        self.handle_bpm_change();
+        self.score_changed(ScoreChange::Tempo);
     }
 
     /// The metronome's settings, for the model.

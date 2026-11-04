@@ -4,10 +4,11 @@
 
 use crate::documents::Document;
 use crate::platform::random_seed;
+use crate::score_change::{Origin, ScoreChange};
 use crate::{Grooph, TransportState, clock};
 use grooph_measure::generator::{GeneratorSettings, Rng, generate_measure, generate_score};
 use grooph_measure::tempo::ScoreTiming;
-use grooph_measure::{Cursor, MeasureIdx, Score};
+use grooph_measure::{MeasureIdx, Score};
 use log::warn;
 
 /// Measures endless mode starts with: the one being played and the next.
@@ -63,25 +64,24 @@ impl Grooph {
     /// Only ever Practice's: the score tab's score is never replaced by a
     /// generated rhythm, whatever page this is called from.
     pub(crate) fn generate_new_score(&mut self) {
+        self.generate_score_from(Origin::New);
+    }
+
+    /// Like [`Self::generate_new_score`], but reseeds the generator first so
+    /// the same settings and seed give the same rhythm (shared links) until the
+    /// generator itself changes. The rhythm is the link's, so not unsaved.
+    pub(crate) fn generate_new_score_with_seed(&mut self, seed: Option<u64>) {
+        self.editor.generator.rng = Rng::new(seed.unwrap_or_else(random_seed));
+        self.generate_score_from(Origin::Link { undoubled: false });
+    }
+
+    fn generate_score_from(&mut self, origin: Origin) {
         // Nothing changes, the page shown neither, when it cannot generate.
         let Some(score) = self.editor.generator.generate() else {
             return;
         };
         self.show_document(Document::Practice);
-        self.with_undo_snapshot(|app| {
-            app.editor.doc_mut().score = score;
-            app.editor.doc_mut().cursor = Cursor::start();
-            true
-        });
-        self.editor.doc_mut().active_pattern_id = None;
-    }
-
-    /// Like [`Self::generate_new_score`], but reseeds the generator first so
-    /// the same settings and seed give the same rhythm (shared links) until the
-    /// generator itself changes.
-    pub(crate) fn generate_new_score_with_seed(&mut self, seed: Option<u64>) {
-        self.editor.generator.rng = Rng::new(seed.unwrap_or_else(random_seed));
-        self.generate_new_score();
+        self.replace_score(score, origin);
     }
 
     /// Whether endless mode drives the played score: Practice's rhythm, on
@@ -152,7 +152,7 @@ impl Grooph {
         let tracker = &mut self.playback_ctl.accuracy.tracker;
         tracker.update_progress(clock::now_seconds(), timing, &self.editor.doc().score);
         self.editor.doc_mut().score.push(measure);
-        self.after_endless_change();
+        self.score_changed(ScoreChange::Appended);
     }
 
     fn drop_first_measure(&mut self, timing: &ScoreTiming) {
@@ -162,43 +162,6 @@ impl Grooph {
             return;
         }
         let ticks = u64::from(timing.ticks_per_measure(0));
-        tracker.drop_leading_ticks(ticks);
-        if let Some(audio) = self.playback_ctl.audio.as_mut() {
-            audio.drop_leading_ticks(ticks);
-        }
-
-        // Everything moves back by one measure: the cursors by its ticks, the
-        // view by one row, so nothing on screen jumps.
-        let playback = &mut self.playback_ctl.playback;
-        playback.smooth_tick = (playback.smooth_tick - ticks as f64).max(0.0);
-        playback.heard_tick = (playback.heard_tick - ticks as f64).max(0.0);
-        playback.scroll.shift(-playback.row_pitch);
-        playback.rows_removed = true;
-        playback.rows_above_view -= 1;
-        if let Some((m_idx, _)) = &mut playback.last_primary_beat {
-            *m_idx = m_idx.saturating_sub(1);
-        }
-        if let Some((m_idx, _)) = &mut playback.guide_bar {
-            *m_idx = m_idx.saturating_sub(1);
-        }
-        if let Some(anchor) = &mut playback.anchor {
-            anchor.measure_idx = anchor.measure_idx.saturating_sub(1);
-        }
-        // In the same voice; on the dropped measure, from the start of the
-        // one that took its place.
-        let cursor = self.editor.doc().cursor;
-        let moved = match cursor.measure_idx {
-            0 => Cursor { beat_idx: 0, ..cursor },
-            m => Cursor { measure_idx: m - 1, ..cursor },
-        };
-        let doc = self.editor.doc_mut();
-        doc.cursor = doc.score.clamp_cursor(moved);
-        self.after_endless_change();
-    }
-
-    fn after_endless_change(&mut self) {
-        self.realign_accuracy_clock();
-        self.editor.doc_mut().active_pattern_id = None;
-        self.editor.doc_mut().dirty = true;
+        self.score_changed(ScoreChange::DroppedFront { ticks });
     }
 }

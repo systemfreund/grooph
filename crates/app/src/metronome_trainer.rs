@@ -1,6 +1,7 @@
 //! App side of the metronome trainer: follows the bar the audio engine plays
 //! to apply the tempo ramp to the UI timing and to show muted bars.
 
+use crate::score_change::ScoreChange;
 use crate::{Grooph, TransportState};
 use eframe::egui;
 use grooph_audio::{RampEnd, RampUnit, TempoRamp};
@@ -25,7 +26,7 @@ impl Grooph {
         self.playback_ctl.playback.bar_muted = bar.is_some_and(|b| b.muted);
         if self.playback_ctl.playback.ramp_bpm != ramp_bpm {
             self.playback_ctl.playback.ramp_bpm = ramp_bpm;
-            self.realign_accuracy_clock();
+            self.score_changed(ScoreChange::Timing);
         }
     }
 }

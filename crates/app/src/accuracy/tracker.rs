@@ -76,6 +76,12 @@ impl AccuracyTracker {
         self.session.realign(start_time, last_tick);
     }
 
+    /// The running session's clock anchor and progress cursor (tick).
+    #[cfg(test)]
+    pub(crate) fn anchor(&self) -> Option<(f64, Option<f64>)> {
+        self.session.data().map(|d| (d.start_time, d.last_tick))
+    }
+
     pub(crate) fn on_playback_stop(&mut self) {
         self.end_session();
     }

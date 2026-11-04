@@ -14,6 +14,7 @@
 //! [`EditorState::document`]: crate::state::EditorState::document
 //! [`EditorState::doc`]: crate::state::EditorState::doc
 
+use crate::score_change::ScoreChange;
 use crate::shell::Tab;
 use crate::state::EditorState;
 use crate::undo::{DEFAULT_UNDO_LIMIT, UndoHistory};
@@ -126,8 +127,7 @@ impl Grooph {
             self.open_metronome();
         }
         self.editor.document = doc;
-        self.playback_ctl.playback.reset();
-        self.playback_ctl.accuracy.tracker.clear_for_edit();
+        self.score_changed(ScoreChange::Switched);
     }
 
     /// The score tab's name for its score: the saved pattern's, "Untitled"
@@ -139,16 +139,6 @@ impl Grooph {
             .and_then(|id| self.editor.library.get(id))
             .map_or_else(|| "Untitled".to_owned(), |p| p.name.clone());
         if doc.dirty { format!("{name} •") } else { name }
-    }
-
-    /// The tempo changed: a saved score keeps its tempo, so that is an
-    /// unsaved change of the score tab's score when it is shown or is a
-    /// saved pattern, whichever page the tempo was changed on.
-    pub(crate) fn mark_tempo_unsaved(&mut self) {
-        let doc = &mut self.editor.docs.score;
-        if self.editor.document == Document::Score || doc.active_pattern_id.is_some() {
-            doc.dirty = true;
-        }
     }
 
     /// Pattern `id` was deleted: no document is it any more.
@@ -174,6 +164,7 @@ impl Grooph {
 mod tests {
     use super::Document;
     use crate::presets::PresetId;
+    use crate::score_change::ScoreChange;
     use crate::shell::Tab;
     use crate::{APP_STATE_KEY, Grooph, Mode, PersistedState};
     use grooph_measure::notation::{format_score, parse_score};
@@ -342,7 +333,7 @@ mod tests {
         // An untitled score stays as it is.
         app.select_tab(Tab::Practice);
         app.playback_ctl.bpm += 5;
-        app.mark_tempo_unsaved();
+        app.score_changed(ScoreChange::Tempo);
         assert!(!app.editor.docs.score.dirty);
         // A saved pattern keeps its tempo: changed anywhere, it can be saved.
         let (mut app, _) = app_with_groove();
@@ -351,7 +342,7 @@ mod tests {
             app.select_tab(tab);
             app.editor.docs.score.dirty = false;
             app.playback_ctl.bpm += 5;
-            app.mark_tempo_unsaved();
+            app.score_changed(ScoreChange::Tempo);
             assert!(app.editor.docs.score.dirty, "{tab:?}");
             assert_eq!(app.editor.docs.score.active_pattern_id, Some(id));
         }
