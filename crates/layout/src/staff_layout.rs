@@ -508,9 +508,11 @@ pub fn build_staff_layout(score: &Score, opts: &StaffOpts) -> StaffLayout {
         if widest > 0.0 { (available / widest).clamp(shrink_floor_scale, 1.0) } else { 1.0 };
     let effective_opts = opts.rescaled(em_scale);
 
-    // 4. Lay out every measure once to measure the room the rows need, which
-    // places the staff line in its row, then again in its row. Nothing is
-    // snapped vertically, so the second layout only moves the first.
+    // 4. Lay out every measure once, on a line at y = 0, to measure the
+    // room the rows need, which places the staff line in its row; then move
+    // each layout down into its row. Nothing is snapped vertically, so the
+    // moved layout is the one built in the row
+    // ([`MeasureLayout::translate`]).
     let left = opts.rect.left();
     let widths: Vec<f32> = widths_min.iter().map(|w| (w * em_scale).max(available)).collect();
     let lay_out = |i: usize, rect: Rect, y_offset: f32| -> Vec<(MeasureLayout, LayoutOpts)> {
@@ -542,11 +544,12 @@ pub fn build_staff_layout(score: &Score, opts: &StaffOpts) -> StaffLayout {
         }
         layouts
     };
-    let reaches: Vec<Vec<RowRoom>> = (0..score.len())
-        .map(|i| {
-            let rect = Rect::from_min_size(pos2(left, 0.0), vec2(widths[i], 0.0));
-            lay_out(i, rect, 0.0).iter().map(|(layout, o)| ink_reach_em(layout, o)).collect()
-        })
+    let laid_out: Vec<Vec<(MeasureLayout, LayoutOpts)>> = (0..score.len())
+        .map(|i| lay_out(i, Rect::from_min_size(pos2(left, 0.0), vec2(widths[i], 0.0)), 0.0))
+        .collect();
+    let reaches: Vec<Vec<RowRoom>> = laid_out
+        .iter()
+        .map(|voices| voices.iter().map(|(layout, o)| ink_reach_em(layout, o)).collect())
         .collect();
     let mut room = row_room(&reaches, opts);
     // Lines past the middle one need their room: the kit's reach two staff
@@ -569,9 +572,17 @@ pub fn build_staff_layout(score: &Score, opts: &StaffOpts) -> StaffLayout {
     let mut systems: Vec<SystemLayout> = Vec::with_capacity(score.len());
     let mut max_row_width = 0.0f32;
 
-    for (i, &width) in widths.iter().enumerate() {
+    for (i, (&width, voices)) in widths.iter().zip(laid_out).enumerate() {
         let rect = Rect::from_min_size(pos2(left, y_acc), vec2(width, row_height));
-        let voices = lay_out(i, rect, y_offset).into_iter().map(|(layout, _)| layout).collect();
+        // From the line at y = 0 to the row's.
+        let down = vec2(0.0, rect.center().y + y_offset);
+        let voices = voices
+            .into_iter()
+            .map(|(mut layout, _)| {
+                layout.translate(down);
+                layout
+            })
+            .collect();
         max_row_width = max_row_width.max(width);
         systems.push(SystemLayout {
             y_baseline: rect.center().y + y_offset,
@@ -749,6 +760,55 @@ mod tests {
             m.first_voice_mut().set_beat(i, Beat::note(q())).unwrap();
         }
         m
+    }
+
+    /// The staff lays each measure out once, on a line at y = 0, and moves
+    /// it into its row: the same layout as one built in the row. With two
+    /// voices that holds for the lower, stem-down voice too, and after
+    /// `clear_rests` has moved the rests apart.
+    #[test]
+    fn a_moved_measure_layout_is_the_one_built_in_its_row() {
+        use crate::pixel_layout::build_measure_layout;
+        use grooph_measure::notation::parse_score;
+        let em = 20.0;
+        for text in [
+            "4/4 >q (e) e t8 t8 t8 q",
+            "7/8 e. s e e e s s e",
+            "kit 4/4 >S-H:q H:q (S):e H:e H:q ; K:h r:q K:q",
+            "kit 4/4 H:e H:e r:q H:e H:e H:q ; K:q r:q K:e K:e r:q",
+            "4/4 qt16 qt16 qt16 qt16 qt16 q h",
+        ] {
+            let score = parse_score(text).unwrap();
+            let voices = score.measures()[0].voices();
+            let at = |top: f32, y_offset: f32| {
+                let rect = Rect::from_min_max(Pos2::new(5.0, top), Pos2::new(405.0, top));
+                let mut o = opts(em, rect).measure_opts(rect, y_offset, true, true, score.staff);
+                o.font_id = FontId::new(em, FontFamily::Proportional);
+                let mut layouts: Vec<(MeasureLayout, LayoutOpts)> = (0..voices.len())
+                    .map(|v| {
+                        let o = StaffOpts::voice_of(o.clone(), v, voices.len());
+                        (build_measure_layout(&voices[v], &o), o)
+                    })
+                    .collect();
+                clear_rests(&mut layouts, [false, false]);
+                layouts
+            };
+            // Equal up to rounding: every number of the two, in order.
+            let numbers = |l: &MeasureLayout| -> Vec<f32> {
+                format!("{l:.4?}")
+                    .split(|c: char| !(c.is_ascii_digit() || c == '.' || c == '-'))
+                    .filter_map(|n| n.parse().ok())
+                    .collect()
+            };
+            for ((mut moved, _), (built, _)) in at(0.0, 0.0).into_iter().zip(at(132.5, 3.25)) {
+                moved.translate(egui::vec2(0.0, 132.5 + 3.25));
+                let (moved, built) = (numbers(&moved), numbers(&built));
+                assert_eq!(moved.len(), built.len(), "{text}");
+                for (m, b) in moved.iter().zip(&built) {
+                    assert!((m - b).abs() < 1e-3, "{text}: {m} vs {b}");
+                }
+            }
+        }
     }
 
     #[test]

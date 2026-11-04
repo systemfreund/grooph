@@ -563,7 +563,7 @@ impl Grooph {
         // One flat list of global onsets across the whole score. Used by
         // `clamp_diff_to_beat_window`, which needs the global neighbours of
         // each note.
-        let global_beats = crate::accuracy::compute_global_beat_onsets(score, timing);
+        let global_beats = crate::accuracy::global_beat_onsets(score, timing);
         let global_onsets_u64: Vec<u64> = global_beats.iter().map(|gb| gb.onset_tick).collect();
 
         for system in &staff.systems {

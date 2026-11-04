@@ -1,4 +1,6 @@
-use std::collections::{HashMap, HashSet};
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::rc::Rc;
 
 use grooph_measure::MeasureIdx;
 use grooph_measure::Score;
@@ -273,6 +275,33 @@ pub(crate) fn compute_global_beat_onsets(
         }
     }
     out
+}
+
+/// [`compute_global_beat_onsets`] of the last few scores asked for. The
+/// progress cursor and the staff's marks ask every frame, the recorder on
+/// every hit, mostly for the one score being played, which only changes on
+/// an edit, a tempo change or an endless rotation. Telling a score from the
+/// kept ones compares its measures, which is cheaper than finding its
+/// onsets again and allocates nothing.
+pub(crate) fn global_beat_onsets(score: &Score, timing: &ScoreTiming) -> Rc<[GlobalBeatOnset]> {
+    /// The scores kept: the metronome's, Practice's and the score tab's,
+    /// and one more for a document that was just swapped.
+    const KEPT: usize = 4;
+    type Kept = VecDeque<(Score, ScoreTiming, Rc<[GlobalBeatOnset]>)>;
+    thread_local! {
+        static KEPT_ONSETS: RefCell<Kept> = const { RefCell::new(VecDeque::new()) };
+    }
+    KEPT_ONSETS.with_borrow_mut(|kept| {
+        if let Some((_, _, onsets)) =
+            kept.iter().find(|(s, t, _)| t == timing && s.same_beats(score))
+        {
+            return Rc::clone(onsets);
+        }
+        let onsets: Rc<[GlobalBeatOnset]> = compute_global_beat_onsets(score, timing).into();
+        kept.push_front((score.clone(), timing.clone(), Rc::clone(&onsets)));
+        kept.truncate(KEPT);
+        onsets
+    })
 }
 
 /// How many loops ahead (+1) or back (-1) a point `diff` ticks from
@@ -792,5 +821,23 @@ mod tests {
         // The kick between the hi-hats is a note to hit; a tick is listed once.
         assert_eq!(ticks, [(0, true), (q / 2, true), (q, true), (2 * q, true), (3 * q, true)]);
         assert!(onsets.iter().skip(3).all(|o| o.measure_idx == 1));
+    }
+
+    #[test]
+    fn onsets_are_found_again_only_for_another_score_or_tempo() {
+        use grooph_measure::notation::parse_score;
+        let score = parse_score("4/4 q q q q").unwrap();
+        let timing = ScoreTiming::from_score(&score, 120);
+        let first = global_beat_onsets(&score, &timing);
+        assert!(Rc::ptr_eq(&first, &global_beat_onsets(&score.clone(), &timing)));
+
+        let faster = ScoreTiming::from_score(&score, 140);
+        assert!(!Rc::ptr_eq(&first, &global_beat_onsets(&score, &faster)));
+        let edited = parse_score("4/4 q q h").unwrap();
+        let onsets = global_beat_onsets(&edited, &timing);
+        assert_eq!(onsets.len(), compute_global_beat_onsets(&edited, &timing).len());
+        assert_eq!(onsets.len(), 3);
+        // The first is still kept.
+        assert!(Rc::ptr_eq(&first, &global_beat_onsets(&score, &timing)));
     }
 }
