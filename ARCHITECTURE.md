@@ -342,8 +342,8 @@ spread across callers.
   `(S)`, a technique as a lowercase letter (`Ho`, `Hc`, `Sx`, `RDb`, `CRc`);
   instruments `K S H HF RD CR T1 T2 FT` (`InstrumentSpec::code`; cymbals take two
   letters so `R` never reads as `r:`). A sticking follows a note after `@` (`q@R`,
-  `(e)@L`, `S-H:e@RL` for both hands), only on a note played by hand; links
-  keep the `@` unencoded (`percent_encode`, `mcp/link.js`). `;` separates the voices of a
+  `(e)@L`, `S-H:e@RL` for both hands), only on a note played by hand; rhythm links
+  keep the `@` unencoded (`percent_encode`; a click bar has no stickings). `;` separates the voices of a
   measure. Errors name the place (`Place`: measure and voice). A score with
   no note of the kit on the kit's staff (an empty kit bar) starts with
   `kit`; `format_score` writes it only then.
