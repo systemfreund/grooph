@@ -3,10 +3,14 @@
 //!
 //! Natively the input comes from cpal; on the web from `getUserMedia` through
 //! an AudioWorklet that forwards sample blocks to the page. Both run the same
-//! [`OnsetDetector`].
+//! [`OnsetDetector`]. Natively without the `device` feature there is no
+//! input (tests on machines without the audio system's headers).
 
 mod detector;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), feature = "device"))]
+mod native;
+#[cfg(all(not(target_arch = "wasm32"), not(feature = "device")))]
+#[path = "no_device.rs"]
 mod native;
 #[cfg(target_arch = "wasm32")]
 mod web;
@@ -44,6 +48,10 @@ pub(crate) struct Shared {
 }
 
 impl Shared {
+    #[cfg_attr(
+        all(not(target_arch = "wasm32"), not(feature = "device")),
+        allow(dead_code, reason = "only an input device reads it")
+    )]
     fn threshold_db(&self) -> f32 {
         f32::from_bits(self.threshold_db.load(Ordering::Relaxed))
     }
@@ -56,6 +64,10 @@ impl Shared {
     /// Hand over the hits and peak level gathered so far, and reset them.
     /// The input callback runs on the audio thread and must not wait: while
     /// the app holds the lock, both are kept and go with the next block.
+    #[cfg_attr(
+        all(not(target_arch = "wasm32"), not(feature = "device")),
+        allow(dead_code, reason = "only an input device pushes hits")
+    )]
     pub(crate) fn push(&self, hits: &mut Vec<f64>, peak: &mut f32) {
         let mut state = match self.state.try_lock() {
             Ok(state) => state,
@@ -139,18 +151,7 @@ impl MicInput {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn now_seconds() -> f64 {
-    use std::sync::OnceLock;
-    use std::time::Instant;
-    static ORIGIN: OnceLock<Instant> = OnceLock::new();
-    ORIGIN.get_or_init(Instant::now).elapsed().as_secs_f64()
-}
-
-#[cfg(target_arch = "wasm32")]
-pub(crate) fn now_seconds() -> f64 {
-    web_sys::window().and_then(|w| w.performance()).map(|p| p.now() / 1000.0).unwrap_or(0.0)
-}
+pub(crate) use grooph_clock::now_seconds;
 
 /// Whether `label` names an iPhone's or iPad's built-in microphone.
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]

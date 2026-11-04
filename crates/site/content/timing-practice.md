@@ -81,7 +81,17 @@ Below Tight, a chart shows the run over time: a dot for each hit, higher when la
 lower when early, and a line for your average over about a bar. If the line wanders off
 the middle, you are rushing or dragging; the band around the middle is the perfect window
 for notes that are not fast.
-Silent bars are shaded and missed notes are crosses along the bottom. The counts above sit
+Silent bars are shaded and missed notes are crosses along the bottom.
+
+Under the chart, a strip shows your average per position in the beat, named as in the
+counting overlay: "1", "e", "&" and "a", "trip" and "let", or "la" and "li" in 6/8. A bar
+above the middle line means you play that position late on average, below early; the
+dashed line is your average over the whole run. A position needs four hits for a bar.
+If one position sits more than 10 ms from your average over at least eight hits, a
+sentence names it, for example that your "&"s come late while the beats are early, which
+the overall average hides. With six or more positions only that one keeps its number;
+hover over a column for the others. The strip is left out unless two positions have
+four hits each, so not when all notes fall on the beat. The counts above sit
 under **Details**, which is folded away when the summary also shows the tables for a
 counter rhythm or silent bars.
 

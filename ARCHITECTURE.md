@@ -12,6 +12,8 @@ user-facing overview is README.md.
 - `crates/render`: Draws the layout with egui (notes, beams, tuplets, cursor).
 - `crates/audio`: Metronome synth (rodio), scheduling based on the measure.
 - `crates/midi`: MIDI input abstraction (midir).
+- `crates/clock`: The app's monotonic clock (`performance.now()` on the web) and `OffsetTracker`, which maps a device's
+  timestamps onto it; shared by `app`, `midi` and `mic` so every hit lives on one timeline.
 - `crates/mic`: Microphone hit detection (cpal natively, `getUserMedia` + AudioWorklet on the web).
 - `crates/link`: Shareable links (URL query parameters <-> score/generator/metronome).
 - `crates/site`: Static guide pages for grooph.app, generated from Markdown at build time.
@@ -32,7 +34,9 @@ Dependencies point one way, from the app down to the model:
 - `layout`, `audio` and `link` build on `measure`; `render` on `layout` and `measure`; `site` on `link` and
   `measure`. `layout` takes geometry types and text measurement from egui but paints nothing; drawing is
   `render`'s job. `audio` and `link` know nothing about the GUI.
-- `midi` and `mic` stand alone: they deliver input events and know nothing about the model.
+- `midi` and `mic` stand alone: they deliver input events and know nothing about the model. Both read `clock`, the
+  app's clock (MIDI counts from when its `MidiInput` opened), and the app moves their hits onto its timeline by
+  their age, so a MIDI hit, a microphone hit and a tap compare directly.
 - `app` ties everything together: state, panels, persistence, undo. `android` only wraps `app`.
 
 Music rules (durations, onsets, grouping, counting) belong in `measure`, not in `app` or a panel, so the
@@ -652,7 +656,7 @@ grooph's metronome runs inside AI chats as an
 
 - Hit sources (`crates/app/src/play_along.rs`): MIDI NoteOns, microphone hits
   and taps (tap key, default `J`, or a press on the staff while playing). All
-  hits are stamped on one clock (`crates/app/src/clock.rs`); MIDI and
+  hits are stamped on one clock (`grooph_clock::now_seconds`, `crates/clock`); MIDI and
   microphone timestamps are moved onto it by their age. On the web taps use the DOM event `timeStamp` (`web.rs`), natively
   the frame time. Each source has its own input offset (`PlayAlongSettings`).
 - While tap capture is active, staff presses (and presses on the metronome's
@@ -676,7 +680,12 @@ grooph's metronome runs inside AI chats as an
   the live status line can show them too) for the "Your run" window,
   a `Drift` (each hit's deviation at its note's time, misses, silent
   stretches; `accuracy/drift.rs`) for its chart (`drift_chart.rs`, drawn
-  with the painter, no plot crate), and the run's marks, drawn on the staff (and the metronome's ring) until
+  with the painter, no plot crate), `BeatPositions` (the hits and misses
+  per position in the beat, `accuracy/positions.rs`; each onset's position
+  comes from `counting::position_in_beat`, the coarsest count with a part
+  there, every beat's start being one position; positions the counting
+  system names the same are merged when the strip is drawn) for the strip under it,
+  and the run's marks, drawn on the staff (and the metronome's ring) until
   the next run or an edit. Hits and misses are also tallied for each of the
   first two voices (`VoiceTally`; a note several voices play counts for
   each), which the metronome shows for its click bar and counter rhythm.
@@ -892,13 +901,41 @@ If you add new tools/shortcuts, remember:
 
 ## Change navigation (quick)
 
-- UI/State/UX: `crates/app/src/lib.rs` and panels (`*_panel.rs`).
-- Model/rules: `crates/measure/src/lib.rs`, `editing.rs`, `fill.rs`.
-- Layout/geometry: `crates/layout/src/pixel_layout.rs`, `render_plan.rs`.
-- Drawing: `crates/render/src/measure.rs`, `beat.rs`.
-- Audio: `crates/audio/src/lib.rs`.
-- MIDI: `crates/midi/src/input.rs`.
-- Microphone: `crates/mic/src/` (detector, `native.rs`, `web.rs`).
+- App shell, tabs, options sheets, More menu: `crates/app/src/shell.rs`; dialogs: `pickers.rs`.
+- App state and the frame loop: `crates/app/src/lib.rs` (`Grooph`), `state.rs` (its parts), `documents.rs`
+  (the three pages' documents), `undo.rs`.
+- Saved state: `crates/app/src/lib.rs` (`PersistedState`), `persist.rs` (field-wise restore, migration, backup).
+- Editing: `crates/app/src/tool_palette.rs` (grid, applying a tool), `tools.rs` (tool registry, shortcuts),
+  `kit_palette.rs` (the kit's instruments).
+- Staff on screen: `crates/app/src/measure_panel.rs`; the metronome's ring: `metronome_view.rs`.
+- Playback cursor and count-in: `crates/app/src/playback_clock.rs`; play along: `play_along.rs` and
+  `accuracy/` (`session.rs` onsets and grades, `recorder.rs` hits, `progress.rs` misses).
+- Model/rules: `crates/measure/src/lib.rs`, `voice.rs`, `editing.rs`, `fill.rs`, `notation.rs` (text notation),
+  `tempo.rs` (`ScoreTiming`), `counting.rs`, `click.rs`, `counter.rs`.
+- Layout/geometry: `crates/layout/src/staff_layout.rs` (a score in rows), `pixel_layout/` (one measure:
+  `mod.rs`, `notes.rs`, `beams.rs`, `tuplets.rs`), `staff.rs` (lines, instrument places), `render_plan.rs`.
+- Drawing: `crates/render/src/measure.rs`, `staff.rs`, `beat.rs`.
+- Audio: `crates/audio/src/lib.rs` (engine, plan swap), `schedule.rs`, `tick_source.rs`, `sounds.rs`, `output.rs`.
+- Links: `crates/link/src/lib.rs`; MCP server: `mcp/`, `functions/mcp.js`.
+- MIDI: `crates/midi/src/input.rs`. Microphone: `crates/mic/src/` (detector, `native.rs`, `web.rs`).
+- Platform: `crates/app/src/platform.rs` (web/native twins), `web.rs` (browser glue), `host.rs` (Android).
+
+## Web runtime assumptions
+
+The web build runs on the browser's one thread, and some code relies on that:
+
+- `crates/app/src/web.rs` and `update_check.rs` keep browser state in `thread_local!`s (visibility changes,
+  raw key presses, a cancelled pointer, the embed's play and stop requests, the build found on the server),
+  written by DOM callbacks and read by the frame, which never run at the same time.
+- DOM callbacks registered for the page's lifetime are leaked on purpose (`Closure::forget`): the page
+  never removes them, and a dropped closure would throw when the browser calls it.
+- `crates/app/src/embed.rs` keeps the embed's fullscreen flag in a `static AtomicBool` (`FULLSCREEN`), set
+  from a host message and read in the frame; `Relaxed` ordering is enough on one thread.
+- `crates/measure/src/click.rs` and `counter.rs` cache bars per meter in `thread_local!`s; each thread (a
+  test, natively) has its own.
+
+The audio thread is the exception natively: it shares only `PlaybackState` behind a mutex with the UI
+(see "Audio, playback, counting").
 
 ## Notes for LLM agents
 

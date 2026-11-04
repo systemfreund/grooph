@@ -144,9 +144,120 @@ fn key_label(k: Key) -> String {
     }
 }
 
+/// Names a tool of [`all_tools`], in its order there.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ToolId {
+    EditUndo,
+    EditRedo,
+    InsertNoteW,
+    InsertNoteH,
+    InsertNoteQ,
+    InsertNoteE,
+    InsertNoteS,
+    InsertNoteTh,
+    InsertRestW,
+    InsertRestH,
+    InsertRestQ,
+    InsertRestE,
+    InsertRestS,
+    InsertRestTh,
+    ModifyToggleDotted,
+    ModifyToggleAccent,
+    ModifyToggleSoft,
+    ModifyToggleRestNote,
+    ModifyToggleHead,
+    ModifyCycleTechnique,
+    ModifyTechniqueOpen,
+    ModifyTechniqueHalfOpen,
+    ModifyTechniqueClosed,
+    ModifyTechniqueCrossStick,
+    ModifyTechniqueRimshot,
+    ModifyTechniqueBell,
+    ModifyTechniqueChoke,
+    InsertTupletT8,
+    InsertTupletT16,
+    InsertTupletQt16,
+    InsertTupletSt16,
+    InsertTupletSpt16,
+    InsertTupletNt16,
+    MetaResetMeasure,
+    MetaChangeTimeSignature,
+    EditDeleteForward,
+    EditDeleteBackward,
+    NavLeft,
+    NavRight,
+    NavStart,
+    NavEnd,
+}
+
+impl ToolId {
+    /// The tool's stable name, e.g. `insert.note.q` (in logs).
+    pub const fn name(self) -> &'static str {
+        match self {
+            ToolId::EditUndo => "edit.undo",
+            ToolId::EditRedo => "edit.redo",
+            ToolId::InsertNoteW => "insert.note.w",
+            ToolId::InsertNoteH => "insert.note.h",
+            ToolId::InsertNoteQ => "insert.note.q",
+            ToolId::InsertNoteE => "insert.note.e",
+            ToolId::InsertNoteS => "insert.note.s",
+            ToolId::InsertNoteTh => "insert.note.th",
+            ToolId::InsertRestW => "insert.rest.w",
+            ToolId::InsertRestH => "insert.rest.h",
+            ToolId::InsertRestQ => "insert.rest.q",
+            ToolId::InsertRestE => "insert.rest.e",
+            ToolId::InsertRestS => "insert.rest.s",
+            ToolId::InsertRestTh => "insert.rest.th",
+            ToolId::ModifyToggleDotted => "modify.toggle.dotted",
+            ToolId::ModifyToggleAccent => "modify.toggle.accent",
+            ToolId::ModifyToggleSoft => "modify.toggle.soft",
+            ToolId::ModifyToggleRestNote => "modify.toggle.rest_note",
+            ToolId::ModifyToggleHead => "modify.toggle.head",
+            ToolId::ModifyCycleTechnique => "modify.cycle_technique",
+            ToolId::ModifyTechniqueOpen => "modify.technique.open",
+            ToolId::ModifyTechniqueHalfOpen => "modify.technique.half_open",
+            ToolId::ModifyTechniqueClosed => "modify.technique.closed",
+            ToolId::ModifyTechniqueCrossStick => "modify.technique.cross_stick",
+            ToolId::ModifyTechniqueRimshot => "modify.technique.rimshot",
+            ToolId::ModifyTechniqueBell => "modify.technique.bell",
+            ToolId::ModifyTechniqueChoke => "modify.technique.choke",
+            ToolId::InsertTupletT8 => "insert.tuplet.t8",
+            ToolId::InsertTupletT16 => "insert.tuplet.t16",
+            ToolId::InsertTupletQt16 => "insert.tuplet.qt16",
+            ToolId::InsertTupletSt16 => "insert.tuplet.st16",
+            ToolId::InsertTupletSpt16 => "insert.tuplet.spt16",
+            ToolId::InsertTupletNt16 => "insert.tuplet.nt16",
+            ToolId::MetaResetMeasure => "meta.reset_measure",
+            ToolId::MetaChangeTimeSignature => "meta.change_time_signature",
+            ToolId::EditDeleteForward => "edit.delete.forward",
+            ToolId::EditDeleteBackward => "edit.delete.backward",
+            ToolId::NavLeft => "nav.left",
+            ToolId::NavRight => "nav.right",
+            ToolId::NavStart => "nav.start",
+            ToolId::NavEnd => "nav.end",
+        }
+    }
+
+    /// How many tools there are. It sizes `all_tools`' array, so a variant
+    /// added before [`ToolId::NavEnd`] without a table entry fails to compile.
+    /// Keep `NavEnd` last, or name the new last variant here.
+    pub const COUNT: usize = ToolId::NavEnd as usize + 1;
+
+    /// The tool it names.
+    pub fn tool(self) -> &'static Tool {
+        &all_tools()[self as usize]
+    }
+}
+
+impl std::fmt::Display for ToolId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.name())
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Tool {
-    pub id: &'static str,
+    pub id: ToolId,
     pub label: &'static str,
     pub kind: ToolKind,
     pub shortcuts: &'static [Shortcut],
@@ -169,16 +280,16 @@ pub fn all_tools() -> &'static [Tool] {
     use BeatKind::*;
     use Duration::*;
 
-    static ALL: [Tool; 41] = [
+    static ALL: [Tool; ToolId::COUNT] = [
         Tool {
-            id: "edit.undo",
+            id: ToolId::EditUndo,
             label: "⟲",
             kind: ToolKind::Edit(EditOp::Undo),
             shortcuts: &[Shortcut { key: Key::Z, shift: false, command: true }],
             show_in_palette: true,
         },
         Tool {
-            id: "edit.redo",
+            id: ToolId::EditRedo,
             label: "⟳",
             kind: ToolKind::Edit(EditOp::Redo),
             shortcuts: &[
@@ -189,7 +300,7 @@ pub fn all_tools() -> &'static [Tool] {
         },
         // Notes
         Tool {
-            id: "insert.note.w",
+            id: ToolId::InsertNoteW,
             label: "Whole",
             kind: ToolKind::InsertBeat(BeatTemplate {
                 duration: Simple(Whole),
@@ -201,7 +312,7 @@ pub fn all_tools() -> &'static [Tool] {
             show_in_palette: true,
         },
         Tool {
-            id: "insert.note.h",
+            id: ToolId::InsertNoteH,
             label: "Half",
             kind: ToolKind::InsertBeat(BeatTemplate {
                 duration: Simple(Half),
@@ -213,7 +324,7 @@ pub fn all_tools() -> &'static [Tool] {
             show_in_palette: true,
         },
         Tool {
-            id: "insert.note.q",
+            id: ToolId::InsertNoteQ,
             label: "Quarter",
             kind: ToolKind::InsertBeat(BeatTemplate {
                 duration: Simple(Quarter),
@@ -225,7 +336,7 @@ pub fn all_tools() -> &'static [Tool] {
             show_in_palette: true,
         },
         Tool {
-            id: "insert.note.e",
+            id: ToolId::InsertNoteE,
             label: "Eighth",
             kind: ToolKind::InsertBeat(BeatTemplate {
                 duration: Simple(Eighth),
@@ -237,7 +348,7 @@ pub fn all_tools() -> &'static [Tool] {
             show_in_palette: true,
         },
         Tool {
-            id: "insert.note.s",
+            id: ToolId::InsertNoteS,
             label: "Sixteenth",
             kind: ToolKind::InsertBeat(BeatTemplate {
                 duration: Simple(Sixteenth),
@@ -249,7 +360,7 @@ pub fn all_tools() -> &'static [Tool] {
             show_in_palette: true,
         },
         Tool {
-            id: "insert.note.th",
+            id: ToolId::InsertNoteTh,
             label: "Thirty-Second",
             kind: ToolKind::InsertBeat(BeatTemplate {
                 duration: Simple(ThirtySecond),
@@ -262,7 +373,7 @@ pub fn all_tools() -> &'static [Tool] {
         },
         // Rests
         Tool {
-            id: "insert.rest.w",
+            id: ToolId::InsertRestW,
             label: "Whole rest",
             kind: ToolKind::InsertBeat(BeatTemplate {
                 duration: Simple(Whole),
@@ -274,7 +385,7 @@ pub fn all_tools() -> &'static [Tool] {
             show_in_palette: true,
         },
         Tool {
-            id: "insert.rest.h",
+            id: ToolId::InsertRestH,
             label: "Half rest",
             kind: ToolKind::InsertBeat(BeatTemplate {
                 duration: Simple(Half),
@@ -286,7 +397,7 @@ pub fn all_tools() -> &'static [Tool] {
             show_in_palette: true,
         },
         Tool {
-            id: "insert.rest.q",
+            id: ToolId::InsertRestQ,
             label: "Quarter rest",
             kind: ToolKind::InsertBeat(BeatTemplate {
                 duration: Simple(Quarter),
@@ -298,7 +409,7 @@ pub fn all_tools() -> &'static [Tool] {
             show_in_palette: true,
         },
         Tool {
-            id: "insert.rest.e",
+            id: ToolId::InsertRestE,
             label: "Eighth rest",
             kind: ToolKind::InsertBeat(BeatTemplate {
                 duration: Simple(Eighth),
@@ -310,7 +421,7 @@ pub fn all_tools() -> &'static [Tool] {
             show_in_palette: true,
         },
         Tool {
-            id: "insert.rest.s",
+            id: ToolId::InsertRestS,
             label: "Sixteenth rest",
             kind: ToolKind::InsertBeat(BeatTemplate {
                 duration: Simple(Sixteenth),
@@ -322,7 +433,7 @@ pub fn all_tools() -> &'static [Tool] {
             show_in_palette: true,
         },
         Tool {
-            id: "insert.rest.th",
+            id: ToolId::InsertRestTh,
             label: "Thirty-Second rest",
             kind: ToolKind::InsertBeat(BeatTemplate {
                 duration: Simple(ThirtySecond),
@@ -335,98 +446,98 @@ pub fn all_tools() -> &'static [Tool] {
         },
         // Modifiers
         Tool {
-            id: "modify.toggle.dotted",
+            id: ToolId::ModifyToggleDotted,
             label: "Toggle Dotted",
             kind: ToolKind::Modify(Modifier::ToggleDotted { dots: 1 }),
             shortcuts: &[Shortcut::plain(Key::Period)],
             show_in_palette: true,
         },
         Tool {
-            id: "modify.toggle.accent",
+            id: ToolId::ModifyToggleAccent,
             label: "Toggle Accent",
             kind: ToolKind::Modify(Modifier::ToggleAccent),
             shortcuts: &[Shortcut::plain(Key::A)],
             show_in_palette: true,
         },
         Tool {
-            id: "modify.toggle.soft",
+            id: ToolId::ModifyToggleSoft,
             label: "Toggle Soft",
             kind: ToolKind::Modify(Modifier::ToggleSoft),
             shortcuts: &[Shortcut::plain(Key::G)],
             show_in_palette: true,
         },
         Tool {
-            id: "modify.toggle.rest_note",
+            id: ToolId::ModifyToggleRestNote,
             label: "Toggle Note/Rest",
             kind: ToolKind::Modify(Modifier::ToggleRestNote),
             shortcuts: &[Shortcut::plain(Key::Enter)],
             show_in_palette: false,
         },
         Tool {
-            id: "modify.toggle.head",
+            id: ToolId::ModifyToggleHead,
             label: "Toggle Instrument",
             kind: ToolKind::Modify(Modifier::ToggleHead),
             shortcuts: &[Shortcut::plain(Key::H)],
             show_in_palette: false,
         },
         Tool {
-            id: "modify.cycle_technique",
+            id: ToolId::ModifyCycleTechnique,
             label: "Cycle Technique",
             kind: ToolKind::Modify(Modifier::CycleTechnique),
             shortcuts: &[Shortcut::plain(Key::O)],
             show_in_palette: false,
         },
         Tool {
-            id: "modify.technique.open",
+            id: ToolId::ModifyTechniqueOpen,
             label: "o",
             kind: ToolKind::Modify(Modifier::ToggleTechnique(Technique::Open)),
             shortcuts: &[],
             show_in_palette: false,
         },
         Tool {
-            id: "modify.technique.half_open",
+            id: ToolId::ModifyTechniqueHalfOpen,
             label: "ø",
             kind: ToolKind::Modify(Modifier::ToggleTechnique(Technique::HalfOpen)),
             shortcuts: &[],
             show_in_palette: false,
         },
         Tool {
-            id: "modify.technique.closed",
+            id: ToolId::ModifyTechniqueClosed,
             label: "+",
             kind: ToolKind::Modify(Modifier::ToggleTechnique(Technique::Closed)),
             shortcuts: &[],
             show_in_palette: false,
         },
         Tool {
-            id: "modify.technique.cross_stick",
+            id: ToolId::ModifyTechniqueCrossStick,
             label: "×st",
             kind: ToolKind::Modify(Modifier::ToggleTechnique(Technique::CrossStick)),
             shortcuts: &[],
             show_in_palette: false,
         },
         Tool {
-            id: "modify.technique.rimshot",
+            id: ToolId::ModifyTechniqueRimshot,
             label: "rim",
             kind: ToolKind::Modify(Modifier::ToggleTechnique(Technique::Rimshot)),
             shortcuts: &[],
             show_in_palette: false,
         },
         Tool {
-            id: "modify.technique.bell",
+            id: ToolId::ModifyTechniqueBell,
             label: "bell",
             kind: ToolKind::Modify(Modifier::ToggleTechnique(Technique::Bell)),
             shortcuts: &[],
             show_in_palette: false,
         },
         Tool {
-            id: "modify.technique.choke",
+            id: ToolId::ModifyTechniqueChoke,
             label: "ch",
             kind: ToolKind::Modify(Modifier::ToggleTechnique(Technique::Choke)),
             shortcuts: &[],
             show_in_palette: false,
         },
         Tool {
-            id: "insert.tuplet.t8",
+            id: ToolId::InsertTupletT8,
             label: "Triplet (1/8)",
             kind: ToolKind::InsertBeat(BeatTemplate {
                 duration: Tuplet(TupletSpec { n: 3, m: 2, base: Eighth }),
@@ -438,7 +549,7 @@ pub fn all_tools() -> &'static [Tool] {
             show_in_palette: true,
         },
         Tool {
-            id: "insert.tuplet.t16",
+            id: ToolId::InsertTupletT16,
             label: "Triplet (1/16)",
             kind: ToolKind::InsertBeat(BeatTemplate {
                 duration: Tuplet(TupletSpec { n: 3, m: 2, base: Sixteenth }),
@@ -450,7 +561,7 @@ pub fn all_tools() -> &'static [Tool] {
             show_in_palette: true,
         },
         Tool {
-            id: "insert.tuplet.qt16",
+            id: ToolId::InsertTupletQt16,
             label: "Quintuplet (1/16)",
             kind: ToolKind::InsertBeat(BeatTemplate {
                 duration: Tuplet(TupletSpec { n: 5, m: 4, base: Sixteenth }),
@@ -462,7 +573,7 @@ pub fn all_tools() -> &'static [Tool] {
             show_in_palette: true,
         },
         Tool {
-            id: "insert.tuplet.st16",
+            id: ToolId::InsertTupletSt16,
             label: "Sextuplet (1/16)",
             kind: ToolKind::InsertBeat(BeatTemplate {
                 duration: Tuplet(TupletSpec { n: 6, m: 4, base: Sixteenth }),
@@ -474,7 +585,7 @@ pub fn all_tools() -> &'static [Tool] {
             show_in_palette: true,
         },
         Tool {
-            id: "insert.tuplet.spt16",
+            id: ToolId::InsertTupletSpt16,
             label: "Septuplet (1/16)",
             kind: ToolKind::InsertBeat(BeatTemplate {
                 duration: Tuplet(TupletSpec { n: 7, m: 4, base: Sixteenth }),
@@ -486,7 +597,7 @@ pub fn all_tools() -> &'static [Tool] {
             show_in_palette: true,
         },
         Tool {
-            id: "insert.tuplet.nt16",
+            id: ToolId::InsertTupletNt16,
             label: "Nonuplet (1/16)",
             kind: ToolKind::InsertBeat(BeatTemplate {
                 duration: Tuplet(TupletSpec { n: 9, m: 8, base: Sixteenth }),
@@ -498,14 +609,14 @@ pub fn all_tools() -> &'static [Tool] {
             show_in_palette: true,
         },
         Tool {
-            id: "meta.reset_measure",
+            id: ToolId::MetaResetMeasure,
             label: "🗑",
             kind: ToolKind::Meta(MetaOp::ResetMeasure),
             shortcuts: &[],
             show_in_palette: false,
         },
         Tool {
-            id: "meta.change_time_signature",
+            id: ToolId::MetaChangeTimeSignature,
             label: "4/4",
             kind: ToolKind::Meta(MetaOp::ChangeTimeSignature),
             shortcuts: &[],
@@ -513,14 +624,14 @@ pub fn all_tools() -> &'static [Tool] {
         },
         // Beat removal — keyboard-only
         Tool {
-            id: "edit.delete.forward",
+            id: ToolId::EditDeleteForward,
             label: "Delete",
             kind: ToolKind::Delete(DeleteOp::Forward),
             shortcuts: &[Shortcut::plain(Key::Delete)],
             show_in_palette: false,
         },
         Tool {
-            id: "edit.delete.backward",
+            id: ToolId::EditDeleteBackward,
             label: "Backspace",
             kind: ToolKind::Delete(DeleteOp::Backward),
             shortcuts: &[Shortcut::plain(Key::Backspace)],
@@ -528,28 +639,28 @@ pub fn all_tools() -> &'static [Tool] {
         },
         // Cursor navigation — keyboard-only
         Tool {
-            id: "nav.left",
+            id: ToolId::NavLeft,
             label: "←",
             kind: ToolKind::Navigate(NavOp::Left),
             shortcuts: &[Shortcut::plain(Key::ArrowLeft)],
             show_in_palette: false,
         },
         Tool {
-            id: "nav.right",
+            id: ToolId::NavRight,
             label: "→",
             kind: ToolKind::Navigate(NavOp::Right),
             shortcuts: &[Shortcut::plain(Key::ArrowRight)],
             show_in_palette: false,
         },
         Tool {
-            id: "nav.start",
+            id: ToolId::NavStart,
             label: "Home",
             kind: ToolKind::Navigate(NavOp::Start),
             shortcuts: &[Shortcut::plain(Key::Home)],
             show_in_palette: false,
         },
         Tool {
-            id: "nav.end",
+            id: ToolId::NavEnd,
             label: "End",
             kind: ToolKind::Navigate(NavOp::End),
             shortcuts: &[Shortcut::plain(Key::End)],
@@ -558,4 +669,22 @@ pub fn all_tools() -> &'static [Tool] {
     ];
 
     &ALL
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// [`ToolId::tool`] looks a tool up by its place in [`all_tools`].
+    #[test]
+    fn every_id_names_its_own_tool() {
+        for (i, tool) in all_tools().iter().enumerate() {
+            assert_eq!(tool.id as usize, i, "{}", tool.id);
+            assert_eq!(tool.id.tool(), tool);
+        }
+        let mut names: Vec<_> = all_tools().iter().map(|t| t.id.name()).collect();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), all_tools().len());
+    }
 }

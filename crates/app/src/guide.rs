@@ -252,7 +252,7 @@ mod tests {
     }
 
     fn practice_app(bars: usize, guide: Guide) -> Grooph {
-        let cc = eframe::CreationContext::_new_kittest(eframe::egui::Context::default());
+        let cc = crate::test_support::creation_context(eframe::egui::Context::default());
         let mut app = Grooph::new(&cc);
         app.select_tab(crate::shell::Tab::Practice);
         let measure = Grooph::default_measure();

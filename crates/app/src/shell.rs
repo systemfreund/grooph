@@ -12,7 +12,7 @@ use crate::pickers::{
 };
 use crate::share::paint_share_icon;
 use crate::tokens;
-use crate::tool_palette::{BAR_TOOLS, notation_size, paint_none, paint_notation, tool};
+use crate::tool_palette::{BAR_TOOLS, notation_size, paint_none, paint_notation};
 use crate::tools::{EditOp, Tool, ToolKind};
 use crate::{CountingBase, Grooph, Mode, TransportState};
 use eframe::egui;
@@ -1471,7 +1471,7 @@ impl Grooph {
     fn bar_tool_buttons(&mut self, ui: &mut Ui) -> egui::Vec2 {
         let mut size = egui::Vec2::ZERO;
         for id in BAR_TOOLS {
-            let t = tool(id);
+            let t = id.tool();
             let enabled = match t.kind {
                 ToolKind::Edit(EditOp::Undo) => self.can_undo(),
                 ToolKind::Edit(EditOp::Redo) => self.can_redo(),

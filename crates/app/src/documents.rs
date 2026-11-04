@@ -181,7 +181,7 @@ mod tests {
     use std::collections::HashMap;
 
     fn app() -> Grooph {
-        let cc = eframe::CreationContext::_new_kittest(eframe::egui::Context::default());
+        let cc = crate::test_support::creation_context(eframe::egui::Context::default());
         Grooph::new(&cc)
     }
 
@@ -431,7 +431,7 @@ mod tests {
     fn restart(state: &PersistedState) -> Grooph {
         let mut storage = MemoryStorage::default();
         eframe::set_value(&mut storage, APP_STATE_KEY, state);
-        let mut cc = eframe::CreationContext::_new_kittest(eframe::egui::Context::default());
+        let mut cc = crate::test_support::creation_context(eframe::egui::Context::default());
         cc.storage = Some(&storage);
         Grooph::new(&cc)
     }

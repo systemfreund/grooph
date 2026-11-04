@@ -4,7 +4,7 @@ use log::info;
 
 use super::session::{
     AccuracyMark, BarEvent, GlobalBeatOnset, GradedHit, HitWindows, RecordingData,
-    compute_global_beat_onsets, loop_offset, neighbour_gap_ticks, tallies_of,
+    global_beat_onsets, loop_offset, neighbour_gap_ticks, tallies_of,
 };
 
 /// Record an incoming MIDI hit at `timestamp` (seconds, MIDI clock). The hit
@@ -34,11 +34,12 @@ pub(super) fn record_hit(
 
     // One pass over the score's onsets serves the match and the gap to the
     // neighbouring notes.
-    let beats = compute_global_beat_onsets(score, timing);
+    let beats = global_beat_onsets(score, timing);
     let (beat_idx, diff_ticks, raw_diff) = best_match(hit_global, total, &beats)?;
     let global_onset = beats[beat_idx].onset_tick;
     let onset_m_idx = beats[beat_idx].measure_idx;
     let voices = beats[beat_idx].voices;
+    let position = beats[beat_idx].position;
 
     // The note's loop relative to the progress cursor's, whose sets track
     // the hits: the hit may lie across the loop's end from the note, and
@@ -85,6 +86,9 @@ pub(super) fn record_hit(
     data.bars.push(note_s, BarEvent::Hit(graded, grade));
     let bar_s = if tps > 0.0 { timing.ticks_per_measure(onset_m_idx) as f64 / tps } else { 0.0 };
     data.drift.push_hit(note_s, delta_ms, grade, bar_s);
+    if let Some(pos) = position {
+        data.positions.push_hit(pos, delta_ms);
+    }
     data.marks_by_onset.insert(global_onset, AccuracyMark::Hit { diff_ticks, grade });
     if wrap_next {
         data.hits_next_loop.insert(global_onset);

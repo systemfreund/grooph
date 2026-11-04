@@ -1,11 +1,15 @@
-use std::collections::{HashMap, HashSet};
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::rc::Rc;
 
 use grooph_measure::MeasureIdx;
 use grooph_measure::Score;
+use grooph_measure::counting::{CountPos, position_in_beat};
 use grooph_measure::grid::DEFAULT_GRID;
 use grooph_measure::tempo::ScoreTiming;
 
 use super::drift::DriftLog;
+use super::positions::PositionLog;
 
 #[derive(Clone, Copy)]
 pub(crate) enum AccuracyMark {
@@ -48,6 +52,15 @@ impl AccuracyStats {
         let mean = self.mean_ms()?;
         let n = self.count as f64;
         Some((self.sum_sq_ms / n - mean * mean).max(0.0).sqrt())
+    }
+
+    /// Add the hits of `other`.
+    pub(super) fn merge(&mut self, other: &Self) {
+        self.count = self.count.saturating_add(other.count);
+        self.sum_ms += other.sum_ms;
+        self.sum_abs_ms += other.sum_abs_ms;
+        self.sum_sq_ms += other.sum_sq_ms;
+        self.last_delta_ms = other.last_delta_ms.or(self.last_delta_ms);
     }
 
     pub(super) fn push(&mut self, delta_ms: f64) {
@@ -215,6 +228,8 @@ pub(crate) struct GlobalBeatOnset {
     /// The voices with a note here, one bit each from the first (see
     /// [`TRACKED_VOICES`]).
     pub voices: u8,
+    /// Where in its beat the onset lies, as written; `None` off every count.
+    pub position: Option<CountPos>,
 }
 
 /// Voices tallied on their own as well: the metronome's click bar and its
@@ -232,6 +247,7 @@ pub(crate) fn compute_global_beat_onsets(
     let mut out = Vec::new();
     for (m_idx, measure) in score.measures().iter().enumerate() {
         let start = timing.measure_start_tick(m_idx);
+        let ts = measure.time_signature();
         // Note ticks of each tracked voice.
         let note_ticks: Vec<Vec<u32>> = measure
             .voices()
@@ -254,10 +270,38 @@ pub(crate) fn compute_global_beat_onsets(
                 is_note: onset.is_note,
                 measure_idx: m_idx,
                 voices,
+                position: position_in_beat(&ts, onset.tick),
             });
         }
     }
     out
+}
+
+/// [`compute_global_beat_onsets`] of the last few scores asked for. The
+/// progress cursor and the staff's marks ask every frame, the recorder on
+/// every hit, mostly for the one score being played, which only changes on
+/// an edit, a tempo change or an endless rotation. Telling a score from the
+/// kept ones compares its measures, which is cheaper than finding its
+/// onsets again and allocates nothing.
+pub(crate) fn global_beat_onsets(score: &Score, timing: &ScoreTiming) -> Rc<[GlobalBeatOnset]> {
+    /// The scores kept: the metronome's, Practice's and the score tab's,
+    /// and one more for a document that was just swapped.
+    const KEPT: usize = 4;
+    type Kept = VecDeque<(Score, ScoreTiming, Rc<[GlobalBeatOnset]>)>;
+    thread_local! {
+        static KEPT_ONSETS: RefCell<Kept> = const { RefCell::new(VecDeque::new()) };
+    }
+    KEPT_ONSETS.with_borrow_mut(|kept| {
+        if let Some((_, _, onsets)) =
+            kept.iter().find(|(s, t, _)| t == timing && s.same_beats(score))
+        {
+            return Rc::clone(onsets);
+        }
+        let onsets: Rc<[GlobalBeatOnset]> = compute_global_beat_onsets(score, timing).into();
+        kept.push_front((score.clone(), timing.clone(), Rc::clone(&onsets)));
+        kept.truncate(KEPT);
+        onsets
+    })
 }
 
 /// How many loops ahead (+1) or back (-1) a point `diff` ticks from
@@ -328,6 +372,8 @@ pub(super) struct RecordingData {
     pub(super) bars: BarTimeline,
     /// The run over time, for its chart.
     pub(super) drift: DriftLog,
+    /// The run by position in the beat.
+    pub(super) positions: PositionLog,
 }
 
 /// A judged note, kept until the state of its bar is known.
@@ -504,6 +550,7 @@ impl RecordingData {
             voice_tallies: Default::default(),
             bars: BarTimeline::default(),
             drift: DriftLog::default(),
+            positions: PositionLog::default(),
         }
     }
 }
@@ -548,6 +595,7 @@ impl RecordingSession {
             d.voice_tallies = Default::default();
             d.bars = BarTimeline::default();
             d.drift = DriftLog::default();
+            d.positions = PositionLog::default();
             d.last_tick = None;
         }
     }
@@ -742,6 +790,7 @@ mod tests {
             is_note: true,
             measure_idx: 0,
             voices: 1,
+            position: None,
         };
         let beats = [beat(0), beat(10), beat(40)];
         // First beat: previous neighbour is the last beat, 60 ticks back across the wrap.
@@ -772,5 +821,23 @@ mod tests {
         // The kick between the hi-hats is a note to hit; a tick is listed once.
         assert_eq!(ticks, [(0, true), (q / 2, true), (q, true), (2 * q, true), (3 * q, true)]);
         assert!(onsets.iter().skip(3).all(|o| o.measure_idx == 1));
+    }
+
+    #[test]
+    fn onsets_are_found_again_only_for_another_score_or_tempo() {
+        use grooph_measure::notation::parse_score;
+        let score = parse_score("4/4 q q q q").unwrap();
+        let timing = ScoreTiming::from_score(&score, 120);
+        let first = global_beat_onsets(&score, &timing);
+        assert!(Rc::ptr_eq(&first, &global_beat_onsets(&score.clone(), &timing)));
+
+        let faster = ScoreTiming::from_score(&score, 140);
+        assert!(!Rc::ptr_eq(&first, &global_beat_onsets(&score, &faster)));
+        let edited = parse_score("4/4 q q h").unwrap();
+        let onsets = global_beat_onsets(&edited, &timing);
+        assert_eq!(onsets.len(), compute_global_beat_onsets(&edited, &timing).len());
+        assert_eq!(onsets.len(), 3);
+        // The first is still kept.
+        assert!(Rc::ptr_eq(&first, &global_beat_onsets(&score, &timing)));
     }
 }
