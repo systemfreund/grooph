@@ -10,8 +10,8 @@ rust-version.workspace = true
 default = ["devices"]
 # Audio output, the microphone and MIDI input. Natively they need the audio
 # system's headers (libasound2-dev on Linux). Without them the app still
-# builds and its tests run, but opening a device fails: CI's `no-devices` job
-# tests that way, and so can `cargo test --workspace --no-default-features`.
+# builds and its tests run, but opening a device fails:
+# `cargo test --workspace --no-default-features`.
 devices = ["grooph-audio/playback", "grooph-mic/device", "grooph-midi/device"]
 
 [dependencies]

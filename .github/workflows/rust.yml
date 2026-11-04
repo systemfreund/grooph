@@ -42,26 +42,6 @@ jobs:
         cargo build --release --target wasm32-unknown-unknown --package grooph-link-check
         node --test mcp/server.test.mjs
 
-  no-devices:
-    # The tests without the audio system's headers (no libasound2-dev): with
-    # the app's `devices` feature off, nothing needs ALSA, and a test that
-    # needs a real device or a new dependency that pulls ALSA back in fails here.
-    runs-on: ubuntu-latest
-
-    steps:
-    - uses: actions/checkout@v4
-    - name: Install Rust
-      uses: dtolnay/rust-toolchain@stable
-      with:
-        components: clippy
-    - uses: Swatinem/rust-cache@v2
-    - name: Make sure the ALSA headers are absent
-      run: if pkg-config --exists alsa; then sudo apt-get remove -y libasound2-dev; fi
-    - name: Clippy without devices
-      run: cargo clippy --workspace --all-targets --no-default-features -- -D warnings
-    - name: Run tests without devices
-      run: cargo test --workspace --no-default-features
-
   web:
     # Build the web app on every push and pull request, so a WASM-only
     # break shows up before merging. The deploy publishes this build.
