@@ -1384,7 +1384,7 @@ mod tests {
 
     /// A phone-sized app in the Metronome tab, clicking `meter`'s default bar.
     fn metronome_on(ctx: &egui::Context, meter: TimeSignature) -> Grooph {
-        let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let cc = crate::test_support::creation_context(ctx.clone());
         let mut app = Grooph::new(&cc);
         app.select_tab(crate::shell::Tab::Metronome);
         app.set_metronome_meter(meter);
@@ -1531,7 +1531,7 @@ mod tests {
     #[test]
     fn ring_and_staff_report_the_hovered_note() {
         let ctx = egui::Context::default();
-        let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let cc = crate::test_support::creation_context(ctx.clone());
         let mut app = Grooph::new(&cc);
         app.select_tab(crate::shell::Tab::Metronome);
         app.set_metronome_meter(TimeSignature::FOUR_FOUR);
@@ -1565,7 +1565,7 @@ mod tests {
     }
 
     fn metronome_app() -> Grooph {
-        let cc = eframe::CreationContext::_new_kittest(egui::Context::default());
+        let cc = crate::test_support::creation_context(egui::Context::default());
         let mut app = Grooph::new(&cc);
         app.select_tab(Tab::Practice);
         app.set_metronome_meter(TimeSignature::FOUR_FOUR);
@@ -1575,7 +1575,7 @@ mod tests {
 
     #[test]
     fn timing_feedback_works_in_the_metronome_and_clears_on_a_page_change() {
-        let cc = eframe::CreationContext::_new_kittest(egui::Context::default());
+        let cc = crate::test_support::creation_context(egui::Context::default());
         let mut app = Grooph::new(&cc);
         // A fresh app opens the metronome; start from practice.
         app.select_tab(Tab::Practice);
@@ -1881,7 +1881,7 @@ mod tests {
     fn the_metronome_clicks_come_back_from_a_save_and_a_link() {
         use eframe::App;
 
-        let cc = eframe::CreationContext::_new_kittest(eframe::egui::Context::default());
+        let cc = crate::test_support::creation_context(eframe::egui::Context::default());
         let mut app = Grooph::new(&cc);
         app.select_tab(Tab::Metronome);
         app.set_metronome_meter(TimeSignature::THREE_FOUR);
@@ -1899,7 +1899,7 @@ mod tests {
         // Saved as the settings always were, and loaded into the document.
         let mut storage = SavedState::default();
         app.save(&mut storage);
-        let mut cc = eframe::CreationContext::_new_kittest(eframe::egui::Context::default());
+        let mut cc = crate::test_support::creation_context(eframe::egui::Context::default());
         cc.storage = Some(&storage);
         let loaded = Grooph::new(&cc);
         assert_eq!(loaded.metronome_meter(), TimeSignature::SEVEN_EIGHT);
@@ -1908,7 +1908,7 @@ mod tests {
         assert_eq!(loaded.counter_ratio(), ratio);
         assert!(loaded.click_bars().for_meter(TimeSignature::THREE_FOUR) == three);
         // The link opens the same clicks in a fresh app.
-        let cc = eframe::CreationContext::_new_kittest(eframe::egui::Context::default());
+        let cc = crate::test_support::creation_context(eframe::egui::Context::default());
         let mut fresh = Grooph::new(&cc);
         fresh.open_link(grooph_link::parse_query(url.split_once('?').unwrap().1).unwrap().unwrap());
         assert!(fresh.metronome_mode());

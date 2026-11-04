@@ -1121,7 +1121,7 @@ mod tests {
     use grooph_measure::notation::{format_score, parse_score};
 
     fn editing(score: &str) -> Grooph {
-        let cc = eframe::CreationContext::_new_kittest(eframe::egui::Context::default());
+        let cc = crate::test_support::creation_context(eframe::egui::Context::default());
         let mut app = Grooph::new(&cc);
         app.select_tab(Tab::Score);
         app.editor.doc_mut().score = parse_score(score).unwrap();

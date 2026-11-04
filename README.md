@@ -94,7 +94,7 @@ grooph is written in Rust with [egui](https://github.com/emilk/egui):
 - Run the desktop app: `cargo run --bin grooph-app` (on Linux, install the ALSA headers
   first, e.g. `libasound2-dev`)
 - Run the web app: `trunk serve`
-- Run the tests: `cargo test --workspace` and, for the MCP server, `node --test mcp/server.test.mjs`
+- Run the tests: `cargo test --workspace` (without the ALSA headers: `cargo test --workspace --no-default-features`) and, for the MCP server, `node --test mcp/server.test.mjs`
 
 [ARCHITECTURE.md](ARCHITECTURE.md) describes how the code is organised,
 including the Android build, and [AGENTS.md](AGENTS.md) the development

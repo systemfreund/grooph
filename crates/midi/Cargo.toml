@@ -6,9 +6,16 @@ authors.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
+[features]
+default = ["device"]
+# The MIDI backend (midir; natively it needs the audio system's headers,
+# e.g. libasound2-dev). Without it `MidiInput::new` fails: for tests on
+# machines without those headers.
+device = ["dep:midir"]
+
 [dependencies]
 thiserror = { workspace = true }
-midir = { workspace = true }
+midir = { workspace = true, optional = true }
 web-sys = { workspace = true }
 
 [lints]

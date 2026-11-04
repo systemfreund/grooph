@@ -5,6 +5,9 @@ use std::sync::{Arc, Mutex, PoisonError};
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::Instant;
 
+#[cfg(not(feature = "device"))]
+use crate::no_device::{Ignore, MidiInputConnection, MidiInputPort, MidirInput};
+#[cfg(feature = "device")]
 use midir::{Ignore, MidiInput as MidirInput, MidiInputConnection, MidiInputPort};
 
 use crate::source::MidiMessageSource;
@@ -425,6 +428,14 @@ pub struct MidiInput {
     clock_origin: ClockInstant,
 }
 
+#[cfg_attr(
+    not(feature = "device"),
+    allow(
+        unreachable_code,
+        unused_variables,
+        reason = "without a MIDI backend the port and connection types are uninhabited, so code past them never runs"
+    )
+)]
 impl MidiInput {
     fn new_midir_input() -> Result<MidirInput> {
         let mut midi_in = MidirInput::new(MIDI_CLIENT_NAME)?;

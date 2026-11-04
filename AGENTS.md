@@ -11,7 +11,9 @@ Rust developers and focuses on crate-specific behaviors and APIs that matter whe
 - Toolchain/edition: Rust edition 2024 on stable, at least the `rust-version` in the root Cargo.toml. Lints are
   shared through `[workspace.lints]` there; every crate opts in with `[lints] workspace = true`. The workspace builds
   and tests cleanly with the default toolchain (no special flags required). Native builds need the ALSA headers
-  (`libasound2-dev` on Debian/Ubuntu).
+  (`libasound2-dev` on Debian/Ubuntu) for the devices; without them, `cargo test --workspace --no-default-features`
+  builds and runs every test with the app's `devices` feature off (opening a device then fails). CI's `no-devices` job
+  runs it that way, so a test must not need a real device.
 - Workspace layout (`crates/`, shared versions in the root Cargo.toml under `[workspace.dependencies]`):
     - `measure` (grooph-measure): the music model: durations, beats, measures, scores, time signatures, the
       generator, counting, swing, tempo. No GUI dependencies.

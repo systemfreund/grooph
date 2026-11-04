@@ -18,24 +18,28 @@ pub enum Error {
     MidiError(String),
 }
 
+#[cfg(feature = "device")]
 impl From<midir::InitError> for Error {
     fn from(e: midir::InitError) -> Self {
         Error::MidiError(e.to_string())
     }
 }
 
+#[cfg(feature = "device")]
 impl From<midir::SendError> for Error {
     fn from(e: midir::SendError) -> Self {
         Error::SendFailed(e.to_string())
     }
 }
 
+#[cfg(feature = "device")]
 impl From<midir::ConnectError<midir::MidiOutput>> for Error {
     fn from(e: midir::ConnectError<midir::MidiOutput>) -> Self {
         Error::ConnectionFailed(e.to_string())
     }
 }
 
+#[cfg(feature = "device")]
 impl From<midir::ConnectError<midir::MidiInput>> for Error {
     fn from(e: midir::ConnectError<midir::MidiInput>) -> Self {
         Error::ConnectionFailed(e.to_string())

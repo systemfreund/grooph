@@ -5,6 +5,8 @@
 
 mod error;
 mod input;
+#[cfg(not(feature = "device"))]
+mod no_device;
 mod source;
 
 pub use error::{Error, Result};
