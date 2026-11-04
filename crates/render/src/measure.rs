@@ -8,6 +8,7 @@ use grooph_layout::pixel_layout::{
     BeamLayout, LayoutOpts, MeasureLayout, NoteLayout, TimeSignatureLayout, TupletLayout,
     build_measure_layout, onset_head,
 };
+use grooph_layout::text_rows::PlacedTextRow;
 use grooph_measure::Measure;
 use grooph_measure::counting::{CountConfig, CountSlot, build_count_slots};
 use grooph_measure::grid::DEFAULT_GRID;
@@ -76,12 +77,15 @@ pub(crate) fn render_measure_at(
     let rect = opts.rect;
 
     if let Some(config) = count_config {
+        // Under the line, inside the measure's rect.
+        let label_y = (opts.y_center() + 0.75 * opts.em).min(rect.bottom() - 0.2 * opts.em);
         draw_count_layer(
             painter,
             measure,
             std::slice::from_ref(measure_layout),
             opts,
-            opts.y_center(),
+            label_y,
+            opts.em * 0.4,
             config,
             ui.visuals().text_color(),
             count_tick,
@@ -177,15 +181,17 @@ pub fn playback_cursor_stroke(em: f32, base: Color32) -> Stroke {
     Stroke::new(0.1 * em, Color32::from_rgba_unmultiplied(base.r(), base.g(), base.b(), 100))
 }
 
-/// The count labels of `measure`, laid out as `voices`, under the line at
-/// `baseline_y`. The label at the tick of `count_tick` is lit in its colour.
+/// The count labels of `measure`, laid out as `voices`, centred on
+/// `label_y`, `size` high. The label at the tick of `count_tick` is lit in
+/// its colour.
 #[expect(clippy::too_many_arguments)]
 pub(crate) fn draw_count_layer(
     painter: &Painter,
     measure: &Measure,
     voices: &[MeasureLayout],
     opts: &LayoutOpts,
-    baseline_y: f32,
+    label_y: f32,
+    size: f32,
     config: &CountConfig,
     text_color: Color32,
     count_tick: Option<(f64, Color32)>,
@@ -204,8 +210,8 @@ pub(crate) fn draw_count_layer(
         measure,
         voices,
         opts.rect,
-        baseline_y,
-        opts.em,
+        label_y,
+        size,
         text_color,
         highlight_color,
         &slots,
@@ -482,8 +488,8 @@ fn draw_count_labels(
     measure: &Measure,
     voices: &[MeasureLayout],
     rect: Rect,
-    baseline_y: f32,
-    em: f32,
+    label_y: f32,
+    size: f32,
     base_color: Color32,
     highlight_color: Color32,
     slots: &[CountSlot],
@@ -500,8 +506,7 @@ fn draw_count_labels(
     let active_start = active_label_start(&selected, playback_tick, measure);
     let xs = compute_label_xs(&selected, measure, voices, rect, total_ticks);
 
-    let font = FontId::new(em * 0.4, FontFamily::Proportional);
-    let label_y = (baseline_y + 0.75 * em).min(rect.bottom() - 0.2 * em);
+    let font = FontId::new(size, FontFamily::Proportional);
     let label_color =
         Color32::from_rgba_unmultiplied(base_color.r(), base_color.g(), base_color.b(), 200);
 
@@ -534,6 +539,36 @@ fn active_label_start(
     }
 
     slots.iter().find(|s| t >= s.start_tick as f64 && t < s.end_tick as f64).map(|s| s.start_tick)
+}
+
+/// The stickings of `measure`, laid out as `voices`, in `row`: one sign
+/// per column ([`Measure::stickings`]) under or over the head standing for
+/// it. A row of two lines writes R on the upper one and L on the lower,
+/// both hands as R above L; a row of one line its one letter.
+pub fn draw_stickings(
+    painter: &Painter,
+    measure: &Measure,
+    voices: &[MeasureLayout],
+    row: &PlacedTextRow,
+    color: Color32,
+) {
+    let onsets = measure.onsets();
+    let font = FontId::new(row.text_size(), FontFamily::Proportional);
+    for (tick, sticking) in measure.stickings() {
+        let Some(head) = onsets.iter().find(|o| o.tick == tick).and_then(|o| onset_head(voices, o))
+        else {
+            continue;
+        };
+        let x = head.center.x;
+        for &letter in sticking.letters() {
+            // On two lines the left hand's is the lower one.
+            let y = match letter {
+                "L" => row.lines[row.lines.len() - 1],
+                _ => row.lines[0],
+            };
+            painter.text(pos2(x, y), Align2::CENTER_CENTER, letter, font.clone(), color);
+        }
+    }
 }
 
 /// Compute X positions for all selected count labels.

@@ -19,7 +19,7 @@ use grooph_layout::pixel_layout::{
 };
 use grooph_measure::BeatKind::{Note, Rest};
 use grooph_measure::duration::{Duration, NoteValue, TupletKind, TupletSpec, human_readable};
-use grooph_measure::{Cursor, Instrument, Measure, StaffKind, Technique, VoiceBar};
+use grooph_measure::{Cursor, Instrument, Measure, StaffKind, Sticking, Technique, VoiceBar};
 use grooph_render::draw_glyph;
 use grooph_render::measure::{draw_notes, draw_time_signature};
 use log::info;
@@ -100,9 +100,9 @@ const AIM_ORDER: [Instrument; 9] = [
 ];
 /// The tools in one row, going on in the next line where it does not fit,
 /// the most used first: the note values, short to long, the rests in the
-/// same order under them, the head modifiers, the tuplets, the meter last,
-/// as it is set once per exercise.
-const TOOLS: [ToolId; 22] = [
+/// same order under them, the head modifiers, the stickings, the tuplets,
+/// the meter last, as it is set once per exercise.
+const TOOLS: [ToolId; 25] = [
     ToolId::InsertNoteQ,
     ToolId::InsertNoteE,
     ToolId::InsertNoteS,
@@ -118,6 +118,9 @@ const TOOLS: [ToolId; 22] = [
     ToolId::ModifyToggleAccent,
     ToolId::ModifyToggleSoft,
     ToolId::ModifyToggleDotted,
+    ToolId::ModifyStickingRight,
+    ToolId::ModifyStickingLeft,
+    ToolId::ModifyStickingBoth,
     ToolId::InsertTupletT8,
     ToolId::InsertTupletT16,
     ToolId::InsertTupletQt16,
@@ -153,9 +156,17 @@ fn technique_name(technique: Technique) -> &'static str {
 
 /// The grid's rows, top to bottom; a row wider than the grid goes on in the
 /// next line. On the kit its instruments come first, always the same nine
-/// cells; on the one line there are none.
-pub(crate) fn grid_rows(kit: bool) -> Vec<Vec<Cell>> {
-    let tools = |ids: &[ToolId]| ids.iter().map(|&id| Cell::Tool(id.tool())).collect::<Vec<_>>();
+/// cells; on the one line there are none. The stickings only where they
+/// are written (`sticking`): not on the metronome's clicks.
+pub(crate) fn grid_rows(kit: bool, sticking: bool) -> Vec<Vec<Cell>> {
+    let tools = |ids: &[ToolId]| {
+        ids.iter()
+            .filter(|id| {
+                sticking || !matches!(id.tool().kind, ToolKind::Modify(Modifier::ToggleSticking(_)))
+            })
+            .map(|&id| Cell::Tool(id.tool()))
+            .collect::<Vec<_>>()
+    };
     let mut rows = Vec::new();
     if kit {
         rows.push(KIT_ORDER.iter().map(|&i| Cell::Instrument(i)).collect());
@@ -205,7 +216,7 @@ impl Grooph {
 
     fn tool_grid_scroll(&mut self, ui: &mut Ui) {
         // Sized up front: a bottom panel offers the height it had.
-        let rows = grid_rows(!self.staff_model().one_line());
+        let rows = grid_rows(!self.staff_model().one_line(), !self.metronome_mode());
         let (columns, cell) = grid_metrics(ui.available_width());
         let lines: usize = rows.iter().map(|r| row_lines(r, columns).len()).sum();
         let height = grid_height(lines, cell.y, ui.ctx().content_rect().height());
@@ -294,6 +305,14 @@ impl Grooph {
                     .beats()
                     .get(cursor.beat_idx)
                     .is_some_and(|b| matches!(b.duration, Duration::Dotted { .. }))
+            }
+            // The sticking the beat has: a tap takes it away.
+            Cell::Tool(Tool { kind: ToolKind::Modify(Modifier::ToggleSticking(s)), .. }) => {
+                let cursor = self.editor.doc().score.clamp_cursor(self.editor.doc().cursor);
+                self.current_voice()
+                    .beats()
+                    .get(cursor.beat_idx)
+                    .is_some_and(|b| b.sticking() == Some(*s))
             }
             // The tuplet the cursor is in: a tap on it dissolves the group.
             Cell::Tool(t) => self.in_tuplet_of(t),
@@ -559,6 +578,9 @@ impl Grooph {
                     ToolKind::Modify(Modifier::ToggleHead) => {
                         "Add the instrument here, or take it away".to_owned()
                     }
+                    ToolKind::Modify(Modifier::ToggleSticking(_)) if selected => {
+                        format!("{}: tap to take it away", t.label)
+                    }
                     ToolKind::InsertBeat(_) if selected => "Dissolve the tuplet".to_owned(),
                     // In a tuplet a value button writes the value of its ratio.
                     ToolKind::InsertBeat(BeatTemplate { kind, .. })
@@ -585,6 +607,12 @@ impl Grooph {
                 };
                 let label = match t.kind {
                     ToolKind::Modify(Modifier::ToggleHead) => "+/−",
+                    // The letters the staff writes; both hands R above L.
+                    ToolKind::Modify(Modifier::ToggleSticking(s)) => match s {
+                        Sticking::Right => "R",
+                        Sticking::Left => "L",
+                        Sticking::Both => "R\nL",
+                    },
                     _ => t.label,
                 };
                 (t.id.name(), label, hover)
@@ -664,6 +692,18 @@ impl Grooph {
             }
             Cell::Tool(t) if matches!(button_kind(&t.kind), ButtonKind::TimeSignature) => {
                 self.paint_time_signature(ui, inner, color);
+            }
+            Cell::Tool(Tool { kind: ToolKind::Modify(Modifier::ToggleSticking(_)), .. }) => {
+                // As on the staff, two letters stacked where both hands play.
+                let lines = label.lines().count() as f32;
+                let size = 0.42 / lines.max(1.0).sqrt() * rect.height();
+                painter.text(
+                    rect.center(),
+                    Align2::CENTER_CENTER,
+                    label,
+                    FontId::proportional(size),
+                    color,
+                );
             }
             _ => {
                 // Words smaller than marks and short labels.
@@ -795,8 +835,12 @@ impl Grooph {
                 Modifier::ToggleHead | Modifier::CycleTechnique | Modifier::ToggleTechnique(_)
             )
         );
+        // The metronome's clicks are played by no hand.
+        let sticking = matches!(tool.kind, ToolKind::Modify(Modifier::ToggleSticking(_)));
         // Tools only run in edit mode.
-        matches!(self.ui.mode, Mode::Edit) && !(kit_only && self.staff_model().one_line())
+        matches!(self.ui.mode, Mode::Edit)
+            && !(kit_only && self.staff_model().one_line())
+            && !(sticking && self.metronome_mode())
     }
 
     /// Moves the cursor according to `op`. Non-mutating; never produces an undo snapshot.
@@ -910,6 +954,7 @@ fn modify(voice: &mut VoiceBar, idx: usize, pen: Instrument, modifier: Modifier)
         Modifier::ToggleHead => voice.toggle_head(idx, pen),
         Modifier::CycleTechnique => voice.cycle_technique(idx, pen),
         Modifier::ToggleTechnique(technique) => voice.toggle_technique(idx, pen, technique),
+        Modifier::ToggleSticking(sticking) => voice.toggle_sticking(idx, sticking),
     }
     .is_some()
 }
@@ -1467,6 +1512,38 @@ mod tests {
     }
 
     #[test]
+    fn a_sticking_is_set_on_beats_played_by_hand_and_undone() {
+        use super::Cell;
+        let cell = |id: ToolId| Cell::Tool(id.tool());
+        for (score, set) in [
+            ("4/4 q q q q", "4/4 q q@RL q q"),
+            ("4/4 S-H:q H:q r:h ; K:q r:q K:q r:q", "4/4 S-H:q H:q@RL r:h ; K:q r:q K:q r:q"),
+        ] {
+            let mut app = editing(score);
+            app.editor.doc_mut().cursor = Cursor::in_voice(0, 0, 1);
+            assert!(app.cell_enabled(cell(ToolId::ModifyStickingRight)), "{score}");
+            apply(&mut app, ToolId::ModifyStickingRight);
+            apply(&mut app, ToolId::ModifyStickingBoth);
+            assert_eq!(text(&app), set);
+            assert!(app.cell_selected(cell(ToolId::ModifyStickingBoth)));
+            assert!(!app.cell_selected(cell(ToolId::ModifyStickingRight)));
+            app.undo();
+            assert!(text(&app).contains("q@R"), "{}", text(&app));
+            // Tapped again, it goes.
+            apply(&mut app, ToolId::ModifyStickingRight);
+            assert_eq!(text(&app), score);
+        }
+        // Not on the kick or a rest.
+        let mut app = editing("4/4 S-H:q H:q r:h ; K:q r:q K:q r:q");
+        for at in [Cursor::in_voice(0, 1, 0), Cursor::in_voice(0, 1, 1)] {
+            app.editor.doc_mut().cursor = at;
+            assert!(!app.cell_enabled(cell(ToolId::ModifyStickingLeft)), "{at:?}");
+            apply(&mut app, ToolId::ModifyStickingLeft);
+            assert!(!text(&app).contains('@'));
+        }
+    }
+
+    #[test]
     fn the_rock_groove_can_be_entered_on_the_kit() {
         use grooph_measure::Instrument::{HiHat, Kick, Snare};
         let mut app = editing("4/4 q q q q");
@@ -1649,7 +1726,7 @@ mod tests {
     fn the_instruments_row_is_the_same_on_every_beat() {
         use super::{Cell, grid_rows, row_lines};
         // Nine cells, whatever the beat holds: none move when a head comes or goes.
-        let row = grid_rows(true).remove(0);
+        let row = grid_rows(true, true).remove(0);
         assert_eq!(row, super::KIT_ORDER.map(Cell::Instrument).to_vec());
         for columns in [4, 5, 6, 9] {
             let lines = row_lines(&row, columns);
@@ -1692,7 +1769,7 @@ mod tests {
         use super::{Cell, grid_rows};
         use crate::tools::{Modifier, ToolKind};
         let tools = |kit| {
-            grid_rows(kit)
+            grid_rows(kit, true)
                 .into_iter()
                 .flatten()
                 .filter_map(|c| match c {
@@ -1719,10 +1796,14 @@ mod tests {
                 ToolKind::Modify(Modifier::ToggleTechnique(_))
             ))
         );
-        let cells = grid_rows(true).into_iter().flatten().collect::<Vec<_>>();
+        let cells = grid_rows(true, true).into_iter().flatten().collect::<Vec<_>>();
         let instruments = cells.iter().filter(|c| matches!(c, Cell::Instrument(_))).count();
         assert_eq!(instruments, 9);
-        assert!(grid_rows(false).iter().flatten().all(|c| matches!(c, Cell::Tool(_))));
+        assert!(grid_rows(false, true).iter().flatten().all(|c| matches!(c, Cell::Tool(_))));
+        // The metronome's clicks are played by no hand: no stickings there.
+        let sticking = |c: &Cell| matches!(c, Cell::Tool(t) if matches!(t.kind, ToolKind::Modify(Modifier::ToggleSticking(_))));
+        assert_eq!(grid_rows(false, true).iter().flatten().filter(|c| sticking(c)).count(), 3);
+        assert!(!grid_rows(false, false).iter().flatten().any(sticking));
     }
 
     #[test]

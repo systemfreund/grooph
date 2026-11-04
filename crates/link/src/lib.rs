@@ -745,10 +745,9 @@ mod tests {
 
     #[test]
     fn a_rhythm_link_carries_its_stickings() {
-        for text in [
-            "4/4 S-H:e@R H:e@L S-H:e@RL H:e r:h ; K:q r:q K:q r:q",
-            "4/4 q@R q@L (q)@RL >q",
-        ] {
+        for text in
+            ["4/4 S-H:e@R H:e@L S-H:e@RL H:e r:h ; K:q r:q K:q r:q", "4/4 q@R q@L (q)@RL >q"]
+        {
             let score = parse_score(text).unwrap();
             let link =
                 SharedLink { content: Some(LinkContent::Score(score)), ..Default::default() };
@@ -761,9 +760,7 @@ mod tests {
             assert_eq!(format_score(&back).unwrap(), text);
         }
         // Written out, too.
-        let Some(LinkContent::Score(back)) = parse("r=4/4+q%40R+q%40L+h").content else {
-            panic!()
-        };
+        let Some(LinkContent::Score(back)) = parse("r=4/4+q%40R+q%40L+h").content else { panic!() };
         assert_eq!(format_score(&back).unwrap(), "4/4 q@R q@L h");
     }
 

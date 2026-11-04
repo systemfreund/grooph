@@ -193,6 +193,7 @@ pub(crate) struct PersistedState {
     audio_latency_enabled: bool,
     audio_offset: f32,
     counting: CountingSettings,
+    sticking: StickingSettings,
     flash_enabled: bool,
     /// See [`UiState::show_score_tab`].
     show_score_tab: bool,
@@ -232,6 +233,7 @@ impl Default for PersistedState {
             audio_latency_enabled: true,
             audio_offset: 0.0,
             counting: CountingSettings::default(),
+            sticking: StickingSettings::default(),
             flash_enabled: false,
             show_score_tab: false,
             guide: Guide::default(),
@@ -271,6 +273,7 @@ impl PersistedState {
             audio_latency_enabled: app.playback_ctl.audio_cfg.latency_enabled,
             audio_offset: app.playback_ctl.audio_cfg.offset,
             counting: app.ui.counting,
+            sticking: app.ui.sticking,
             flash_enabled: app.ui.flash_enabled,
             show_score_tab: app.ui.show_score_tab,
             guide: app.ui.guide,
@@ -347,17 +350,45 @@ impl CountingBase {
 }
 
 /// The counting overlay: a subdivision to count in (or `Off`, which hides
-/// the overlay), in numbers or syllables.
+/// the overlay), in numbers or syllables, under or over the staff. A
+/// reading preference, not part of the score.
 #[derive(Serialize, Deserialize, Clone, Copy)]
 #[serde(from = "StoredCountingSettings")]
 struct CountingSettings {
     base: CountingBase,
     system: CountingSystem,
+    /// Over the staff instead of under it.
+    above: bool,
 }
 
 impl Default for CountingSettings {
     fn default() -> Self {
-        Self { base: CountingBase::Off, system: CountingSystem::Numbers }
+        Self { base: CountingBase::Off, system: CountingSystem::Numbers, above: false }
+    }
+}
+
+/// Where the staff writes the stickings of the score ([`grooph_measure::Sticking`]):
+/// under or over it, or not at all. A reading preference, not part of the
+/// score or its links.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(default)]
+struct StickingSettings {
+    shown: bool,
+    /// Over the staff instead of under it.
+    above: bool,
+}
+
+impl Default for StickingSettings {
+    fn default() -> Self {
+        Self { shown: true, above: false }
+    }
+}
+
+/// The side of the staff a row of text goes on.
+fn text_side(above: bool) -> grooph_layout::text_rows::Side {
+    match above {
+        true => grooph_layout::text_rows::Side::Above,
+        false => grooph_layout::text_rows::Side::Below,
     }
 }
 
@@ -373,6 +404,8 @@ struct StoredCountingSettings {
     base: CountingBase,
     #[serde(default)]
     system: CountingSystem,
+    #[serde(default)]
+    above: bool,
 }
 
 fn yes() -> bool {
@@ -382,9 +415,9 @@ fn yes() -> bool {
 impl From<StoredCountingSettings> for CountingSettings {
     fn from(s: StoredCountingSettings) -> Self {
         if s.enabled && s.show_labels {
-            Self { base: s.base, system: s.system }
+            Self { base: s.base, system: s.system, above: s.above }
         } else {
-            Self { system: s.system, ..Self::default() }
+            Self { system: s.system, above: s.above, ..Self::default() }
         }
     }
 }
@@ -1312,6 +1345,17 @@ impl Grooph {
         Some(CountConfig { subdivision, system: counting.system })
     }
 
+    /// The rows of text the staff shows and their sides: the count while
+    /// it is on, the stickings while they are, except in the metronome,
+    /// whose clicks are played by no hand.
+    fn text_rows(&self) -> grooph_layout::text_rows::TextRows {
+        let sticking = self.ui.sticking;
+        grooph_layout::text_rows::TextRows {
+            count: self.build_count_config().map(|_| text_side(self.ui.counting.above)),
+            sticking: (sticking.shown && !self.metronome_mode()).then(|| text_side(sticking.above)),
+        }
+    }
+
     pub fn new(cc: &CreationContext) -> Self {
         // Read before the link is opened, which clears the query.
         let query = platform::link_query();
@@ -1494,6 +1538,7 @@ impl Grooph {
                 baseline_light: None,
                 layout: LayoutSettings::default(),
                 counting: state.counting,
+                sticking: state.sticking,
                 flash_enabled: state.flash_enabled,
                 show_score_tab: state.show_score_tab,
                 guide: state.guide,
@@ -2862,11 +2907,45 @@ mod tests {
 
     #[test]
     fn counting_settings_round_trip() {
-        let c =
-            CountingSettings { base: CountingBase::Sixteenth, system: CountingSystem::Takadimi };
+        let c = CountingSettings {
+            base: CountingBase::Sixteenth,
+            system: CountingSystem::Takadimi,
+            above: true,
+        };
         let back = load(&ron::to_string(&c).unwrap());
         assert!(back.base == CountingBase::Sixteenth);
         assert_eq!(back.system, CountingSystem::Takadimi);
+        assert!(back.above);
+        // Saved before the side, the count is under the staff.
+        assert!(!load("(base: Ands, system: Numbers)").above);
+    }
+
+    #[test]
+    fn the_text_rows_are_a_view_setting_saved_with_the_app() {
+        use super::{Grooph, StickingSettings, persist};
+        use grooph_layout::text_rows::{Side, TextRows};
+        let cc = crate::test_support::creation_context(eframe::egui::Context::default());
+        let mut app = Grooph::new(&cc);
+        app.select_tab(Tab::Score);
+        // By default the stickings go under the staff, the count (once on)
+        // under them.
+        assert_eq!(app.text_rows(), TextRows { sticking: Some(Side::Below), count: None });
+        app.ui.counting.base = CountingBase::Ands;
+        app.ui.counting.above = true;
+        app.ui.sticking = StickingSettings { shown: false, above: true };
+        assert_eq!(app.text_rows(), TextRows { sticking: None, count: Some(Side::Above) });
+        let saved = ron::to_string(&PersistedState::from_app(&app)).unwrap();
+        let (state, _) = persist::restore(Some(&saved));
+        assert_eq!(state.sticking, StickingSettings { shown: false, above: true });
+        assert!(state.counting.above);
+        // A state saved before stickings shows them under the staff.
+        let (state, _) = persist::restore(Some("(version: 3)"));
+        assert_eq!(state.sticking, StickingSettings::default());
+        // Not part of the score or its link.
+        app.editor.doc_mut().score =
+            grooph_measure::notation::parse_score("4/4 q@R q q q").unwrap();
+        let score = ron::to_string(&app.editor.doc().score).unwrap();
+        assert!(!score.contains("above") && !score.contains("shown"));
     }
 
     #[test]

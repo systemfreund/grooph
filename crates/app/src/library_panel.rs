@@ -64,7 +64,7 @@ fn pattern_preview(ui: &mut egui::Ui, score: &Score, width: f32, look: &PreviewL
         // The bar stands on its own: say its meter.
         time_signature_first: true,
         room_below_em: ROOM_BELOW_EM,
-        lower_label_room_em: 0.0,
+        text_rows: Default::default(),
         bar_rests: true,
         veil_hidden_rests: false,
     };

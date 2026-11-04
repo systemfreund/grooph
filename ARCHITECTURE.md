@@ -81,7 +81,7 @@ spread across callers.
   `head::REGISTER` describes each instrument once (`InstrumentSpec`:
   notation code, labels, staff position and notehead of the drumkit legend
   for kit scores (#251-#255), techniques with their notation letters, mixer
-  group); `ALL`, `staff_pos`, `notehead`, `techniques`, the notation, the
+  group, and whether a hand or a foot plays it, `Limb`); `ALL`, `staff_pos`, `notehead`, `techniques`, the notation, the
   palette labels and `KitVolumes::of` read from it; `Score::voicing` (`Voicing`, the set of
   instruments entered in the lower voice) says which voice a new head goes to when the measure does not say otherwise (`Measure::voice_for`). Beats saved before heads (`kind`,
   `accented`, `soft`) load as one `Rhythm` head (`RawBeat`).
@@ -92,6 +92,16 @@ spread across callers.
   the notes it is made of: a new group's slots play plain heads of its
   note's instruments (`Heads::plain`), another tuplet or a dissolved one
   moves each note's heads as they are.
+- Sticking (`grooph_measure::sticking`, #348): a beat with a hand instrument
+  (`Instrument::is_hand`; the one line's `Rhythm` too, not the kick or the
+  hi-hat's foot) may carry one `Sticking` (R, L or both) for all its heads,
+  a field of the `Beat` like its tuplet mark, so it moves with its note when
+  notes before it are inserted, deleted or split. Any voice can carry them.
+  `Beat::set_heads` drops it with the last hand instrument; `set_beat`
+  (`carry_accents_from`), a tuplet made, changed or dissolved, Clean up and
+  `VoiceBar::from_onsets` keep it on the note they keep. `Measure::stickings`
+  gives one per column (tick) across the voices: the same one stays, different
+  ones or both hands are both (written R above L).
 - `Duration` is `Simple`, `Dotted`, or `Tuplet(TupletSpec { n, m, base })`.
 - `Measure::set_beat` guarantees a valid measure length and fills gaps.
 - `DEFAULT_GRID` defines the valid duration grid and tick calculations.
@@ -208,6 +218,18 @@ spread across callers.
    beamed group's stems all reach its beams (`beams::reach_beams`). Past
    the accent a technique's sign (o, +, the choke's mark) stacks
    (`notes::place_marks`). Every kit row starts with the percussion clef.
+   Rows of text along the staff (`grooph_layout::text_rows`): the count
+   labels and the stickings, each above or below the staff or off
+   (`StaffOpts::text_rows`, from the app's view settings `CountingSettings`
+   and `StickingSettings`, not the score or its links; no stickings in the
+   metronome). `build_staff_layout` places them per bar
+   (`PlacedMeasure::text_rows`) clear of its notes' ink (accents, technique
+   marks, the crash's head) and the staff's middle; on one side the
+   sticking sits next to the notes and the count outside it. A bar's
+   sticking row is two lines high where a column shows both hands (R on
+   the upper line, L on the lower), one where it has stickings, none
+   without; every row of the staff gets the room of the tallest
+   (`RowRoom`). `grooph_render` draws them at their lines.
 6. Kit editing (`grooph-app`'s `kit_palette`): on a staff of several
    instruments the tool grid's first row has a toggle per instrument
    (`Grooph::tap_instrument`): it adds the instrument's head to the cursor's
@@ -318,7 +340,9 @@ spread across callers.
   `K-H:e` (`-`, not `+`, which links read as a space), per head `>S` and
   `(S)`, a technique as a lowercase letter (`Ho`, `Hc`, `Sx`, `RDb`, `CRc`);
   instruments `K S H HF RD CR T1 T2 FT` (`InstrumentSpec::code`; cymbals take two
-  letters so `R` never reads as `r:`). `;` separates the voices of a
+  letters so `R` never reads as `r:`). A sticking follows a note after `@` (`q@R`,
+  `(e)@L`, `S-H:e@RL` for both hands), only on a note played by hand; links
+  keep the `@` unencoded (`percent_encode`, `mcp/link.js`). `;` separates the voices of a
   measure. Errors name the place (`Place`: measure and voice). A score with
   no note of the kit on the kit's staff (an empty kit bar) starts with
   `kit`; `format_score` writes it only then.
@@ -810,7 +834,9 @@ grooph's metronome runs inside AI chats as an
 The tool palette (`tool_palette_panel`) is one grid for every editor
 (Practice, Score, the metronome's click bar): rows of cells
 (`tool_palette::grid_rows`), on the kit its instruments, each with the techniques of its head on the beat, then
-one row of the note values, the rests, the head modifiers (accent, ghost, dot), the tuplets and the meter, each
+one row of the note values, the rests, the head modifiers (accent, ghost, dot), the stickings (R, L and both,
+`Modifier::ToggleSticking`, greyed out on a beat without a hand instrument, not in the metronome), the tuplets and
+the meter, each
 row going on in the next line only where it does not fit. Undo and redo
 (`BAR_TOOLS`) are in the editor's bar (`editor_bar`), right after play, Done
 on the right. In Practice and Score the staff shows a dashed, empty "ghost

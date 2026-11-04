@@ -26,6 +26,7 @@ use crate::pixel_layout::{
 };
 use crate::render_plan::{RenderPlan, RestDisplay, plan_measure_with, rests_only};
 use crate::staff::{Staff, Voicing};
+use crate::text_rows::{PlacedTextRow, TEXT_MARGIN_EM, TextRows};
 use crate::{calculate_shared_x_centers, shared_min_width};
 use egui::{FontId, Pos2, Rect, Vec2, pos2, vec2};
 use grooph_measure::duration::s;
@@ -66,12 +67,11 @@ pub struct StaffOpts {
     /// meters show it on the first measure and every change regardless.
     pub time_signature_first: bool,
     /// Room below the staff line in em, at least: rests, accents and timing
-    /// marks need [`ROOM_BELOW_EM`], count labels
-    /// [`ROOM_BELOW_WITH_LABELS_EM`].
+    /// marks need [`ROOM_BELOW_EM`].
     pub room_below_em: f32,
-    /// Room under a lower voice's notes in em, for count labels: 0 or
-    /// [`LOWER_VOICE_LABEL_ROOM_EM`].
-    pub lower_label_room_em: f32,
+    /// The rows of text along the staff (count labels, stickings) and
+    /// their sides; each row of the staff gets their room.
+    pub text_rows: TextRows,
     /// Draw a voice of rests only as one whole rest (see
     /// [`RenderPlan::bar_rest`]), unless another voice shares its line. Off
     /// in the metronome, where every click is its own to tap.
@@ -156,6 +156,8 @@ pub struct PlacedMeasure {
     pub staff: StaffKind,
     /// The layout of each voice of the measure, the first one upper.
     pub voices: Vec<MeasureLayout>,
+    /// The rows of text along it, as [`StaffOpts::text_rows`] asks for.
+    pub text_rows: Vec<PlacedTextRow>,
     pub show_clef: bool,
     pub show_time_signature: bool,
 }
@@ -211,11 +213,13 @@ impl StaffLayout {
                     y_offset: _,
                     staff: _,
                     voices,
+                    text_rows,
                     show_clef: _,
                     show_time_signature: _,
                 } = placed;
                 *rect = rect.translate(d);
                 voices.iter_mut().for_each(|v| v.translate(d));
+                text_rows.iter_mut().for_each(|r| r.translate(d.y));
             }
         }
     }
@@ -278,17 +282,12 @@ pub const LEGIBILITY_FLOOR_EM: f32 = 9.0;
 
 /// Room below the staff line for rests, accents and timing marks, in em.
 pub const ROOM_BELOW_EM: f32 = 0.65;
-/// Room below the staff line when count labels are drawn under the notes.
-pub const ROOM_BELOW_WITH_LABELS_EM: f32 = 1.0;
 
 /// Room past the tips of full-length stems, in em: enough for the beams and
 /// flags at the tips.
 const STEM_MARGIN_EM: f32 = 0.15;
 /// Space kept between the notes' ink and the edge of a row, in em.
 const INK_MARGIN_EM: f32 = 0.1;
-
-/// Room below a lower voice for count labels, in em.
-pub const LOWER_VOICE_LABEL_ROOM_EM: f32 = 0.5;
 
 /// How far the rows of a staff reach above and below the staff line, in em.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -406,20 +405,33 @@ fn ink_reach_em(layout: &MeasureLayout, opts: &LayoutOpts) -> RowRoom {
 
 /// The room the rows of a staff need, from how far each measure's notes
 /// reach above and below their line ([`ink_reach_em`]), with the lower
-/// voice's if the staff has one. Every row gets the same room, so rows don't
+/// voice's if the staff has one, and its rows of text (`texts`, how far
+/// they reach). Every row gets the same room, so rows don't
 /// shift from one to the next. It always has room for full-length stems
 /// (`stem_length_factor` is user configurable) and `opts.room_below_em`, and
 /// grows for whatever reaches further: accents, tuplet brackets and numbers.
-fn row_room(reaches: &[Vec<RowRoom>], opts: &StaffOpts) -> RowRoom {
+fn row_room(reaches: &[Vec<RowRoom>], texts: RowRoom, opts: &StaffOpts) -> RowRoom {
     let past_stems =
         |reach: f32| (opts.stem_length_factor + STEM_MARGIN_EM).max(reach + INK_MARGIN_EM);
     let upper = reaches.iter().map(|r| r[0]).fold(RowRoom::NONE, RowRoom::max);
     let mut room_below = opts.room_below_em.max(upper.below + INK_MARGIN_EM);
     if let Some(lower) = reaches.iter().flat_map(|r| r.iter().skip(1).copied()).reduce(RowRoom::max)
     {
-        room_below = room_below.max(past_stems(lower.below) + opts.lower_label_room_em);
+        room_below = room_below.max(past_stems(lower.below));
     }
-    RowRoom { above: past_stems(upper.above), below: room_below }
+    RowRoom { above: past_stems(upper.above), below: room_below }.max(texts)
+}
+
+/// How far the rows of text of a measure laid out on a line at y = 0 reach
+/// above and below it, in em, with a margin past them.
+fn text_reach_em(rows: &[PlacedTextRow], em: f32) -> RowRoom {
+    rows.iter().fold(RowRoom::NONE, |room, row| {
+        let margin = TEXT_MARGIN_EM * em;
+        room.max(RowRoom {
+            above: (margin - row.top()).max(0.0) / em,
+            below: (row.bottom() + margin).max(0.0) / em,
+        })
+    })
 }
 
 /// Build the pixel layout for an entire score.
@@ -576,7 +588,19 @@ pub fn build_staff_layout(score: &Score, opts: &StaffOpts) -> StaffLayout {
         .iter()
         .map(|voices| voices.iter().map(|(layout, o)| ink_reach_em(layout, o)).collect())
         .collect();
-    let mut room = row_room(&reaches, opts);
+    // The rows of text of each measure, clear of its notes.
+    let em = effective_opts.em;
+    let text_rows: Vec<Vec<PlacedTextRow>> = laid_out
+        .iter()
+        .enumerate()
+        .map(|(i, voices)| {
+            let ink = voices.iter().filter_map(|(l, _)| l.notes_ink()).reduce(|a, b| a.union(b));
+            let lines = crate::text_rows::sticking_lines(&score.measures()[i]);
+            crate::text_rows::place(opts.text_rows, lines, ink, 0.0, em)
+        })
+        .collect();
+    let texts = text_rows.iter().fold(RowRoom::NONE, |r, rows| r.max(text_reach_em(rows, em)));
+    let mut room = row_room(&reaches, texts, opts);
     // Lines past the middle one need their room: the kit's reach two staff
     // spaces either way. A staff position is half a staff space, an eighth
     // of an em.
@@ -597,10 +621,12 @@ pub fn build_staff_layout(score: &Score, opts: &StaffOpts) -> StaffLayout {
     let mut systems: Vec<SystemLayout> = Vec::with_capacity(score.len());
     let mut max_row_width = 0.0f32;
 
-    for (i, (&width, voices)) in widths.iter().zip(laid_out).enumerate() {
+    for (i, ((&width, voices), mut texts)) in widths.iter().zip(laid_out).zip(text_rows).enumerate()
+    {
         let rect = Rect::from_min_size(pos2(left, y_acc), vec2(width, row_height));
         // From the line at y = 0 to the row's.
         let down = vec2(0.0, rect.center().y + y_offset);
+        texts.iter_mut().for_each(|r| r.translate(down.y));
         let voices = voices
             .into_iter()
             .map(|(mut layout, _)| {
@@ -617,6 +643,7 @@ pub fn build_staff_layout(score: &Score, opts: &StaffOpts) -> StaffLayout {
                 rect,
                 y_offset,
                 voices,
+                text_rows: texts,
                 staff: score.staff,
                 show_clef: show_clef[i],
                 show_time_signature: show_ts[i],
@@ -744,6 +771,7 @@ fn nearest_note(layout: &MeasureLayout, x: f32) -> BeatIdx {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::text_rows::Side;
     use egui::{FontFamily, FontId, Pos2, Rect};
     use grooph_measure::duration::q;
     use grooph_measure::{Beat, Measure, Score, TimeSignature};
@@ -764,7 +792,7 @@ mod tests {
             layout_clef_first: true,
             time_signature_first: false,
             room_below_em: ROOM_BELOW_EM,
-            lower_label_room_em: 0.0,
+            text_rows: TextRows::default(),
             bar_rests: false,
             veil_hidden_rests: false,
         }
@@ -1848,8 +1876,10 @@ mod tests {
             measure_with_quarters(TimeSignature::FOUR_FOUR),
             measure_with_quarters(TimeSignature::FOUR_FOUR),
         ]);
-        for below in [ROOM_BELOW_EM, ROOM_BELOW_WITH_LABELS_EM] {
-            let staff_opts = StaffOpts { room_below_em: below, ..opts(em, rect) };
+        let counted = TextRows { count: Some(Side::Below), ..TextRows::default() };
+        // Count labels under the notes take the room they always had.
+        for (below, text_rows) in [(ROOM_BELOW_EM, TextRows::default()), (1.0, counted)] {
+            let staff_opts = StaffOpts { text_rows, ..opts(em, rect) };
             let staff = build_staff_layout(&score, &staff_opts);
             for system in &staff.systems {
                 let placed = &system.measures[0];
@@ -1915,9 +1945,100 @@ mod tests {
         let lower = parse_score("4/4 e e e e e e e e").unwrap();
         let without = build_staff_layout(&with_lower(&upper, &lower), &opts(em, rect)).room;
         assert!(without.below >= 3.5 + STEM_MARGIN_EM);
-        let labels = StaffOpts { lower_label_room_em: LOWER_VOICE_LABEL_ROOM_EM, ..opts(em, rect) };
-        let with = build_staff_layout(&with_lower(&upper, &lower), &labels).room;
-        assert!((with.below - without.below - LOWER_VOICE_LABEL_ROOM_EM).abs() < 1e-4);
+        let text_rows = TextRows { count: Some(Side::Below), ..TextRows::default() };
+        let labels = StaffOpts { text_rows, ..opts(em, rect) };
+        let staff = build_staff_layout(&with_lower(&upper, &lower), &labels);
+        assert!(staff.room.below > without.below);
+        // The labels go under the lower voice's stems.
+        let placed = &staff.systems[0].measures[0];
+        let lowest = placed.voices[1].notes_ink().unwrap().bottom();
+        let row = &placed.text_rows[0];
+        assert!(row.top() >= lowest && row.bottom() <= placed.rect.bottom(), "{row:?}");
+    }
+
+    /// The rows of text of the first measure of `text` laid out with
+    /// `rows`, and the measure.
+    fn text_rows_of(text: &str, rows: TextRows) -> PlacedMeasure {
+        use grooph_measure::notation::parse_score;
+        let rect = Rect::from_min_max(Pos2::ZERO, Pos2::new(600.0, 400.0));
+        let opts = StaffOpts { text_rows: rows, ..opts(20.0, rect) };
+        build_staff_layout(&parse_score(text).unwrap(), &opts).systems[0].measures[0].clone()
+    }
+
+    /// The ink of every voice of `placed`.
+    fn ink_of(placed: &PlacedMeasure) -> Rect {
+        placed.voices.iter().filter_map(|v| v.notes_ink()).reduce(|a, b| a.union(b)).unwrap()
+    }
+
+    #[test]
+    fn text_rows_go_on_their_side_clear_of_the_notes() {
+        use crate::text_rows::TextRowKind::{Count, Sticking};
+        let groove = "4/4 >CR-K:e@R H:e@L Ho-S:e@R H:e@L >S-H:e@R H:e@L S-H:e@R H:e@L ; \
+                      K:q r:q K:q r:q";
+        for side in [Side::Above, Side::Below] {
+            let rows = TextRows { sticking: Some(side), count: Some(side) };
+            let placed = text_rows_of(groove, rows);
+            let ink = ink_of(&placed);
+            let kinds: Vec<_> = placed.text_rows.iter().map(|r| (r.kind, r.lines.len())).collect();
+            assert_eq!(kinds, [(Sticking, 1), (Count, 1)], "{side:?}");
+            let [sticking, count] = &placed.text_rows[..] else { unreachable!() };
+            match side {
+                // Over the crash, its accent and the open hi-hat's circle,
+                // the count outside the sticking.
+                Side::Above => {
+                    assert!(sticking.bottom() <= ink.top(), "{sticking:?} {ink:?}");
+                    assert!(count.bottom() <= sticking.top());
+                    assert!(count.top() >= placed.rect.top());
+                }
+                Side::Below => {
+                    assert!(sticking.top() >= ink.bottom());
+                    assert!(count.top() >= sticking.bottom());
+                    assert!(count.bottom() <= placed.rect.bottom());
+                }
+            }
+        }
+        // On different sides each sits next to the notes.
+        let rows = TextRows { sticking: Some(Side::Above), count: Some(Side::Below) };
+        let placed = text_rows_of(groove, rows);
+        let ink = ink_of(&placed);
+        let sides: Vec<_> = placed.text_rows.iter().map(|r| (r.kind, r.side)).collect();
+        assert_eq!(sides, [(Sticking, Side::Above), (Count, Side::Below)]);
+        assert!(placed.text_rows[0].bottom() <= ink.top());
+        assert!(placed.text_rows[1].top() >= ink.bottom());
+        // Off, or without a sticking in the bar, there is no sticking row.
+        let off = text_rows_of(groove, TextRows { count: Some(Side::Below), sticking: None });
+        assert_eq!(off.text_rows.len(), 1);
+        let none =
+            text_rows_of("4/4 q q q q", TextRows { sticking: Some(Side::Below), count: None });
+        assert!(none.text_rows.is_empty());
+    }
+
+    #[test]
+    fn a_sticking_row_with_both_hands_is_two_lines_high() {
+        use grooph_measure::notation::parse_score;
+        let rows = TextRows { sticking: Some(Side::Below), count: Some(Side::Below) };
+        // Different hands in the voices of one column are both hands too.
+        for text in ["4/4 q@R q@RL q@L q", "4/4 S:q@R S:q r:h ; FT:q@L r:q r:h"] {
+            let placed = text_rows_of(text, rows);
+            let sticking = &placed.text_rows[0];
+            assert_eq!(sticking.lines.len(), 2, "{text}");
+            assert!(sticking.lines[0] < sticking.lines[1], "R above L");
+            assert!(placed.text_rows[1].top() >= sticking.bottom());
+        }
+        // Every row of the staff gets the room of the tallest.
+        let rect = Rect::from_min_max(Pos2::ZERO, Pos2::new(600.0, 400.0));
+        let opts = StaffOpts { text_rows: rows, ..opts(20.0, rect) };
+        let room = |text: &str| build_staff_layout(&parse_score(text).unwrap(), &opts).room;
+        let one = room("4/4 q@R q@L q q");
+        let two = room("4/4 q@R q@L q q | q@RL q q q");
+        assert!((two.below - one.below - crate::text_rows::LINE_EM).abs() < 1e-4);
+        assert!(room("4/4 q q q q").below < one.below);
+        let above = TextRows { sticking: Some(Side::Above), count: None };
+        let opts = StaffOpts { text_rows: above, ..opts.clone() };
+        let high = build_staff_layout(&parse_score("4/4 q@RL q q q").unwrap(), &opts);
+        let placed = &high.systems[0].measures[0];
+        assert!(placed.text_rows[0].top() >= placed.rect.top());
+        assert!(placed.text_rows[0].bottom() <= ink_of(placed).top());
     }
 
     #[test]
