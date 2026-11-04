@@ -22,6 +22,7 @@ use crate::Mode;
 use crate::documents::Document;
 use crate::shell::Tab;
 use crate::state::PendingLoad;
+use crate::tools::ToolId;
 use grooph_measure::{
     Cursor, Instrument, Measure, Score, StaffKind, TimeSignature, VoiceIdx, Voicing,
 };
@@ -93,19 +94,19 @@ impl Grooph {
             Some(t) => instrument.techniques().iter().skip_while(|&&o| o != t).nth(1).is_some(),
             None => false,
         };
-        let tool = if next { "modify.cycle_technique" } else { "modify.toggle.head" };
+        let tool = if next { ToolId::ModifyCycleTechnique } else { ToolId::ModifyToggleHead };
         self.strike(instrument, tool);
     }
 
     /// A long press (a right click) on an instrument's cell: its head on the
     /// cursor's beat is taken away however it is played, or added.
     pub(crate) fn hold_instrument(&mut self, instrument: Instrument) {
-        self.strike(instrument, "modify.toggle.head");
+        self.strike(instrument, ToolId::ModifyToggleHead);
     }
 
     /// Pick `instrument`, go to the voice of its head on the cursor's beat
     /// (or of a new one) and apply the tool `id` there.
-    fn strike(&mut self, instrument: Instrument, id: &str) {
+    fn strike(&mut self, instrument: Instrument, id: ToolId) {
         let there = self
             .heads_at_cursor()
             .into_iter()
