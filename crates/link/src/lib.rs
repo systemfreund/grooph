@@ -20,6 +20,7 @@
 //! | `poly`    | Polyrhythm `n:m` (n clicks in the time of m beat units) the metronome plays against the click bar of `ts`, its counter bar built as the app's picker does (see [`grooph_measure::counter`]); needs `ts` without `r` or the generator |
 //! | `counter` | The counter rhythm written out like `click`, for one whose clicks were edited; otherwise as `poly`. Not together with `poly` |
 //! | `hiderests` | The rests the drum kit's staff of `r` leaves out in bars of two voices: `lower` (the feet's) or `both`; default none ([`HiddenRests`]) |
+//! | `p`       | The page `r` was shared from: `score` for the score tab, where it opens again ([`SharedLink::score_tab`]); without it a rhythm of the one line opens on the practice page, a kit's on the score tab |
 //!
 //! Any of `sub`, `lvl`, `bars`, `space` or `seed` selects the generator;
 //! unknown parameters are ignored. [`SharedLink::to_url`] is the inverse of
@@ -67,6 +68,9 @@ pub struct SharedLink {
     /// The ratio `counter` was picked as. [`SharedLink::to_url`] writes it
     /// as `poly` while `counter` is that ratio's bar, else the bar itself.
     pub poly: Option<Ratio>,
+    /// The score was shared from the score tab and opens there, also on
+    /// the one line (`p=score`; needs a score).
+    pub score_tab: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -113,6 +117,7 @@ fn parse_query_with_default_version(
     let mut groups = None;
     let mut subdivision = None;
     let mut hidden_rests = None;
+    let mut score_tab = false;
 
     for pair in query.trim_start_matches('?').split('&').filter(|p| !p.is_empty()) {
         let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
@@ -140,6 +145,7 @@ fn parse_query_with_default_version(
             "counter" => counter = Some(value),
             "poly" => poly = Some(value.parse::<Ratio>().map_err(|e| format!("poly: {e}"))?),
             "hiderests" => hidden_rests = Some(parse_hidden_rests(&value)?),
+            "p" => score_tab = parse_page(&value)?,
             _ => {}
         }
     }
@@ -158,6 +164,9 @@ fn parse_query_with_default_version(
 
     if hidden_rests.is_some() && rhythm.is_none() {
         return Err("hiderests needs a rhythm (r)".into());
+    }
+    if score_tab && rhythm.is_none() {
+        return Err("p needs a rhythm (r)".into());
     }
     let generator =
         sub.is_some() || lvl.is_some() || bars.is_some() || space.is_some() || seed.is_some();
@@ -231,7 +240,7 @@ fn parse_query_with_default_version(
     if bpm.is_none() && swing.is_none() && content.is_none() {
         Ok(None)
     } else {
-        Ok(Some(SharedLink { bpm, swing, content, click, counter, poly }))
+        Ok(Some(SharedLink { bpm, swing, content, click, counter, poly, score_tab }))
     }
 }
 
@@ -297,6 +306,14 @@ fn subdivision_bar(ts: TimeSignature, code: &str) -> Result<Measure, String> {
     }
     let codes: Vec<&str> = options.iter().map(|o| o.code.as_str()).collect();
     Err(format!("subdivision {code} does not fit {ts}: it takes {}", codes.join(", ")))
+}
+
+/// The page of `p`: `score` is the score tab.
+fn parse_page(value: &str) -> Result<bool, String> {
+    match value {
+        "score" => Ok(true),
+        _ => Err(format!("p must be score, got '{value}'")),
+    }
 }
 
 /// `hiderests`' value: `lower` or `both`.
@@ -408,6 +425,9 @@ impl SharedLink {
                 params.push(("r", format_score(score)?));
                 if let Some(code) = hidden_rests_code(score.hidden_rests) {
                     params.push(("hiderests", code.into()));
+                }
+                if self.score_tab {
+                    params.push(("p", "score".into()));
                 }
             }
             Some(LinkContent::Metronome(ts)) => push_meter(&mut params, *ts),
@@ -748,6 +768,30 @@ mod tests {
     }
 
     #[test]
+    fn a_rhythm_link_says_it_was_shared_from_the_score_tab() {
+        for text in ["4/4 q q e e q", "kit 4/4 H:q S-H:q H:q S-H:q ; K:h K:h"] {
+            let score = parse_score(text).unwrap();
+            for score_tab in [false, true] {
+                let link = SharedLink {
+                    content: Some(LinkContent::Score(score.clone())),
+                    score_tab,
+                    ..Default::default()
+                };
+                let url = link.to_url("/").unwrap();
+                assert_eq!(url.ends_with("&p=score"), score_tab, "{url}");
+                let back = parse(url.strip_prefix("/?").unwrap());
+                assert_eq!(back.score_tab, score_tab, "{url}");
+                assert!(matches!(back.content, Some(LinkContent::Score(s)) if s == score));
+            }
+        }
+        // Links without it, such as every link from before, are no score tab's.
+        assert!(!parse("v=2&r=q+q+q+q").score_tab);
+        assert!(parse_query("r=q+q+q+q&p=practice").unwrap_err().contains("p must be score"));
+        assert!(parse_query("ts=4/4&p=score").unwrap_err().contains("needs a rhythm"));
+        assert!(parse_query("sub=8&p=score").unwrap_err().contains("needs a rhythm"));
+    }
+
+    #[test]
     fn a_rhythm_link_carries_its_stickings() {
         for text in
             ["4/4 S-H:e@R H:e@L S-H:e@RL H:e r:h ; K:q r:q K:q r:q", "4/4 q@R q@L (q)@RL >q"]
@@ -929,6 +973,7 @@ mod tests {
             click: None,
             counter: None,
             poly: None,
+            score_tab: false,
         };
         let url = generator.to_url("https://grooph.app/").unwrap();
         assert_eq!(
@@ -1227,6 +1272,7 @@ mod tests {
             click: None,
             counter: None,
             poly: None,
+            score_tab: false,
         };
         let url = link.to_url("https://grooph.app/").unwrap();
         assert_eq!(url, "https://grooph.app/?v=2&bpm=96&r=3/4+%3Eq+t8+t8+r:t8+e+e+%7C+e.+s+q+r:q");
