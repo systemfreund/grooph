@@ -1214,7 +1214,9 @@ enum Trial {
     Value(BeatTemplate),
 }
 
-/// What the answers of [`Grooph::applies`] depend on.
+/// What the answers of [`Grooph::applies`] depend on. Every state that
+/// `modifier_applies`, `value_applies` and `aimed` read must be a field
+/// here, or the grid shows an answer from before it changed.
 struct TrialState {
     measure: Measure,
     cursor: Cursor,
@@ -1237,6 +1239,31 @@ mod tests {
         app.editor.doc_mut().score = parse_score(score).unwrap();
         app.ui.mode = Mode::Edit;
         app
+    }
+
+    /// The grid's answers are kept between frames, and change with the
+    /// cursor's bar, the cursor and the staff.
+    #[test]
+    fn a_cells_answer_follows_the_cursor_the_bar_and_the_staff() {
+        use super::Cell;
+        let dotted = || Cell::Tool(ToolId::ModifyToggleDotted.tool());
+        let mut app = editing("4/4 q q q q");
+        app.editor.doc_mut().cursor = Cursor::at(0, 0);
+        let first = app.cell_enabled(dotted());
+        assert_eq!(app.cell_enabled(dotted()), first);
+        // The last beat has no room for a dot.
+        app.editor.doc_mut().cursor = Cursor::at(0, 3);
+        assert!(!app.cell_enabled(dotted()));
+        // A shorter last beat has.
+        app.editor.doc_mut().score = parse_score("4/4 q q q e e").unwrap();
+        app.editor.doc_mut().cursor = Cursor::at(0, 3);
+        assert!(app.cell_enabled(dotted()));
+        // The kit, with no head on the beat, takes no accent; the line does.
+        let accent = || Cell::Tool(ToolId::ModifyToggleAccent.tool());
+        app.editor.doc_mut().score = parse_score("4/4 q q q q").unwrap();
+        let on_line = app.cell_enabled(accent());
+        app.editor.doc_mut().score = parse_score("kit 4/4 r:q r:q r:q r:q").unwrap();
+        assert_ne!(app.cell_enabled(accent()), on_line);
     }
 
     #[test]

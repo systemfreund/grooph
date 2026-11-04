@@ -23,27 +23,48 @@ pub(crate) fn staff_layout(score: &Score, opts: &StaffOpts) -> Rc<StaffLayout> {
     /// The staffs kept: the panel's, its version shrunk to fit a short
     /// panel, the metronome's height probe, and one for a score just swapped.
     const KEPT: usize = 4;
-    type Kept = VecDeque<(Score, StaffOpts, Rc<StaffLayout>)>;
     thread_local! {
-        static KEPT_STAFFS: RefCell<Kept> = const { RefCell::new(VecDeque::new()) };
+        static KEPT_STAFFS: RefCell<VecDeque<Kept>> = const { RefCell::new(VecDeque::new()) };
     }
     KEPT_STAFFS.with_borrow_mut(|kept| {
-        if let Some((_, _, staff)) = kept.iter().find(|(s, o, _)| o == opts && s == score) {
-            return Rc::clone(staff);
+        if let Some(k) = kept.iter().find(|k| k.opts == *opts && k.score == *score) {
+            return Rc::clone(&k.staff);
         }
-        let moved = kept.iter().find_map(|(s, o, staff)| {
-            let d = whole_pixel_move(o, opts)?;
-            (s == score).then(|| {
-                let mut staff = StaffLayout::clone(staff);
+        // Moved from the staff it was laid out as, never from a moved copy,
+        // so that rounding cannot add up over many scrolled frames.
+        let moved = kept.iter().find_map(|k| {
+            let d = whole_pixel_move(&k.built_opts, opts)?;
+            (k.score == *score).then(|| {
+                let mut staff = StaffLayout::clone(&k.built);
                 staff.translate(d);
-                staff
+                (Rc::new(staff), k.built_opts.clone(), Rc::clone(&k.built))
             })
         });
-        let staff = Rc::new(moved.unwrap_or_else(|| build_staff_layout(score, opts)));
-        kept.push_front((score.clone(), opts.clone(), Rc::clone(&staff)));
+        let (staff, built_opts, built) = moved.unwrap_or_else(|| {
+            let staff = Rc::new(build_staff_layout(score, opts));
+            (Rc::clone(&staff), opts.clone(), staff)
+        });
+        kept.push_front(Kept {
+            score: score.clone(),
+            opts: opts.clone(),
+            staff: Rc::clone(&staff),
+            built_opts,
+            built,
+        });
         kept.truncate(KEPT);
         staff
     })
+}
+
+/// A kept staff, and the staff it was moved from.
+struct Kept {
+    score: Score,
+    opts: StaffOpts,
+    staff: Rc<StaffLayout>,
+    /// The options `built` was laid out with: `opts` for a staff laid out,
+    /// those of its source for a moved one.
+    built_opts: StaffOpts,
+    built: Rc<StaffLayout>,
 }
 
 /// How far `to`'s rect lies from `from`'s, when that is all that tells them
@@ -87,6 +108,15 @@ mod tests {
         }
     }
 
+    /// Every number of `staff`, in order, to compare two staffs up to
+    /// rounding.
+    fn numbers(staff: &StaffLayout) -> Vec<f32> {
+        format!("{staff:.4?}")
+            .split(|c: char| !(c.is_ascii_digit() || c == '.' || c == '-'))
+            .filter_map(|n| n.parse().ok())
+            .collect()
+    }
+
     #[test]
     fn a_staff_is_kept_until_its_score_or_options_change() {
         let score = parse_score("4/4 q q e e q | 3/4 q h").unwrap();
@@ -118,5 +148,26 @@ mod tests {
         let moved = staff_layout(&score, &scrolled);
         let built = build_staff_layout(&score, &scrolled);
         assert_eq!(format!("{moved:.3?}"), format!("{built:.3?}"));
+    }
+
+    #[test]
+    fn a_staff_scrolled_many_times_is_moved_from_the_one_laid_out() {
+        let score = parse_score("4/4 q q e e q | 3/4 q h | 4/4 e e e e e e e e").unwrap();
+        let start = opts(Pos2::new(10.0, 20.0));
+        staff_layout(&score, &start);
+        // A long scroll, one device pixel a frame: each move starts from the
+        // staff laid out, so the last one is that staff moved once.
+        for frame in 1..=600 {
+            let at = opts(Pos2::new(10.0, 20.0 - 0.5 * frame as f32));
+            let moved = staff_layout(&score, &at);
+            if frame % 150 == 0 {
+                let built = build_staff_layout(&score, &at);
+                let (moved, built) = (numbers(&moved), numbers(&built));
+                assert_eq!(moved.len(), built.len());
+                for (m, b) in moved.iter().zip(&built) {
+                    assert!((m - b).abs() < 2e-3, "frame {frame}: {m} vs {b}");
+                }
+            }
+        }
     }
 }
