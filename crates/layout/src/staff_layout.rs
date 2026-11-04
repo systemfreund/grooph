@@ -763,7 +763,9 @@ mod tests {
     }
 
     /// The staff lays each measure out once, on a line at y = 0, and moves
-    /// it into its row: the same layout as one built in the row.
+    /// it into its row: the same layout as one built in the row. With two
+    /// voices that holds for the lower, stem-down voice too, and after
+    /// `clear_rests` has moved the rests apart.
     #[test]
     fn a_moved_measure_layout_is_the_one_built_in_its_row() {
         use crate::pixel_layout::build_measure_layout;
@@ -773,25 +775,24 @@ mod tests {
             "4/4 >q (e) e t8 t8 t8 q",
             "7/8 e. s e e e s s e",
             "kit 4/4 >S-H:q H:q (S):e H:e H:q ; K:h r:q K:q",
+            "kit 4/4 H:e H:e r:q H:e H:e H:q ; K:q r:q K:e K:e r:q",
             "4/4 qt16 qt16 qt16 qt16 qt16 q h",
         ] {
             let score = parse_score(text).unwrap();
-            let voice = &score.measures()[0].voices()[0];
+            let voices = score.measures()[0].voices();
             let at = |top: f32, y_offset: f32| {
-                let mut o =
-                    opts(em, Rect::from_min_max(Pos2::new(5.0, top), Pos2::new(405.0, top)))
-                        .measure_opts(
-                            Rect::from_min_max(Pos2::new(5.0, top), Pos2::new(405.0, top)),
-                            y_offset,
-                            true,
-                            true,
-                            score.staff,
-                        );
+                let rect = Rect::from_min_max(Pos2::new(5.0, top), Pos2::new(405.0, top));
+                let mut o = opts(em, rect).measure_opts(rect, y_offset, true, true, score.staff);
                 o.font_id = FontId::new(em, FontFamily::Proportional);
-                build_measure_layout(voice, &o)
+                let mut layouts: Vec<(MeasureLayout, LayoutOpts)> = (0..voices.len())
+                    .map(|v| {
+                        let o = StaffOpts::voice_of(o.clone(), v, voices.len());
+                        (build_measure_layout(&voices[v], &o), o)
+                    })
+                    .collect();
+                clear_rests(&mut layouts, [false, false]);
+                layouts
             };
-            let mut moved = at(0.0, 0.0);
-            moved.translate(egui::vec2(0.0, 132.5 + 3.25));
             // Equal up to rounding: every number of the two, in order.
             let numbers = |l: &MeasureLayout| -> Vec<f32> {
                 format!("{l:.4?}")
@@ -799,10 +800,13 @@ mod tests {
                     .filter_map(|n| n.parse().ok())
                     .collect()
             };
-            let (moved, built) = (numbers(&moved), numbers(&at(132.5, 3.25)));
-            assert_eq!(moved.len(), built.len(), "{text}");
-            for (m, b) in moved.iter().zip(&built) {
-                assert!((m - b).abs() < 1e-3, "{text}: {m} vs {b}");
+            for ((mut moved, _), (built, _)) in at(0.0, 0.0).into_iter().zip(at(132.5, 3.25)) {
+                moved.translate(egui::vec2(0.0, 132.5 + 3.25));
+                let (moved, built) = (numbers(&moved), numbers(&built));
+                assert_eq!(moved.len(), built.len(), "{text}");
+                for (m, b) in moved.iter().zip(&built) {
+                    assert!((m - b).abs() < 1e-3, "{text}: {m} vs {b}");
+                }
             }
         }
     }
