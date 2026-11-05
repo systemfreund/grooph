@@ -536,6 +536,8 @@ fn sheet_handle(ui: &mut Ui) -> bool {
 }
 
 const SHEET_HANDLE_HEIGHT: f32 = 12.0;
+/// The options sheet's rows show at least this high, also on a short screen.
+const SHEET_MIN_ROWS_HEIGHT: f32 = 160.0;
 /// Smallest touch target, in points (Apple's and Claude's guidelines).
 const MIN_TOUCH_TARGET: f32 = 44.0;
 
@@ -1025,8 +1027,8 @@ impl Grooph {
 
     /// The sheet's options, sliding up out of its top edge over the screen
     /// above, so the staff keeps its size. One state for both sheets, so
-    /// switching tabs doesn't replay the animation. Returns the layer and rect
-    /// they cover while shown.
+    /// switching tabs doesn't replay the animation. Too many rows for the room
+    /// scroll. Returns the layer and the rect a flick on them starts in.
     fn sheet_options(
         &mut self,
         ui: &Ui,
@@ -1041,10 +1043,17 @@ impl Grooph {
         }
         // Height of the rows, measured when last shown.
         let rows_id = id.with("rows_height");
+        let top_id = id.with("pressed_at_top");
         let rows = ui.data(|d| d.get_temp::<f32>(rows_id)).unwrap_or(240.0);
+        // The rows rise no higher than a third of the screen down, so the
+        // card and staff above stay in sight; past that they scroll.
+        let screen = ui.ctx().content_rect();
+        let room = card.top() - SHEET_HANDLE_HEIGHT - (screen.top() + screen.height() / 3.0);
+        let visible = rows.min(room.max(SHEET_MIN_ROWS_HEIGHT));
+        let scrolls = visible < rows;
         // Covers the card's own handle, so the two read as one sheet growing.
         let bottom = card.top() + SHEET_HANDLE_HEIGHT;
-        let top = bottom - SHEET_HANDLE_HEIGHT - openness * rows;
+        let top = bottom - SHEET_HANDLE_HEIGHT - openness * visible;
         let rect = Rect::from_x_y_ranges(card.x_range(), top..=bottom);
         let area = egui::Area::new(id)
             .order(Order::Middle)
@@ -1078,17 +1087,38 @@ impl Grooph {
                     if sheet_handle(ui) {
                         self.ui.shell.options_collapsed = !self.ui.shell.options_collapsed;
                     }
-                    let start = ui.cursor().top();
-                    add_rows(self, ui);
-                    ui.add_space(8.0);
-                    let height = ui.min_rect().bottom() - start;
+                    let scroll = egui::ScrollArea::vertical()
+                        .id_salt(id.with("rows"))
+                        .max_height(visible)
+                        .auto_shrink([false, true])
+                        .show(ui, |ui| {
+                            add_rows(self, ui);
+                            ui.add_space(8.0);
+                        });
+                    let height = scroll.content_size.y;
                     ui.data_mut(|d| d.insert_temp(rows_id, height));
+                    // Whether the rows were scrolled to the top as the
+                    // finger went down, for the flick below.
+                    if ui.input(|i| i.pointer.any_pressed()) {
+                        let at_top = scroll.state.clamped_offset().y <= 0.5;
+                        ui.data_mut(|d| d.insert_temp(top_id, at_top));
+                    }
                 });
             });
         if openness < 1.0 {
             ui.ctx().request_repaint();
         }
-        Some((area.response.layer_id, rect))
+        // Rows that scroll take vertical drags themselves, as a sheet on
+        // iOS: only a drag that starts with them at the top folds the sheet
+        // (a drag up from there scrolls, the sheet is open already), else
+        // only the handle does.
+        let at_top = ui.data(|d| d.get_temp::<bool>(top_id)).unwrap_or(true);
+        let flick = if scrolls && !at_top {
+            rect.with_max_y(rect.top() + SHEET_HANDLE_HEIGHT)
+        } else {
+            rect
+        };
+        Some((area.response.layer_id, flick))
     }
 
     /// Flicking a sheet up opens its options, flicking it down folds them.
@@ -1648,6 +1678,139 @@ mod tests {
         let ctx = Context::default();
         assert_eq!(fired(&drag(&ctx, pos2(200.0, 700.0), vec2(0.0, -80.0))), [true]);
         assert_eq!(fired(&drag(&ctx, pos2(200.0, 650.0), vec2(0.0, 80.0))), [false]);
+    }
+
+    /// Runs the app's shell on a screen of `size`.
+    fn shell_frame(
+        app: &mut crate::Grooph,
+        ctx: &Context,
+        size: egui::Vec2,
+        time: f64,
+        events: Vec<Event>,
+    ) {
+        let screen = Rect::from_min_size(Pos2::ZERO, size);
+        let input =
+            RawInput { screen_rect: Some(screen), time: Some(time), events, ..Default::default() };
+        let mut output = ctx.run_ui(input, |ui| {
+            app.apply_style(ui);
+            app.shell_ui(ui);
+        });
+        output.textures_delta.clear();
+    }
+
+    /// The app on `tab` with its options sheet slid all the way open on a
+    /// screen of `size`; the sheet's rect and the height of all its rows.
+    fn open_sheet(tab: super::Tab, size: egui::Vec2) -> (Context, crate::Grooph, Rect, f32) {
+        let ctx = Context::default();
+        let cc = crate::test_support::creation_context(ctx.clone());
+        let mut app = crate::Grooph::new(&cc);
+        app.select_tab(tab);
+        app.ui.shell.options_collapsed = false;
+        for i in 0..40 {
+            shell_frame(&mut app, &ctx, size, i as f64 * 0.05, vec![]);
+        }
+        let id = egui::Id::unique(super::SHEET_OPTIONS_ID);
+        let sheet = ctx.memory(|m| m.area_rect(id)).unwrap();
+        let rows = ctx.data(|d| d.get_temp::<f32>(id.with("rows_height"))).unwrap();
+        (ctx, app, sheet, rows)
+    }
+
+    /// A drag by `dy` from `from`, starting at `t`.
+    fn drag_app(
+        app: &mut crate::Grooph,
+        ctx: &Context,
+        size: egui::Vec2,
+        from: Pos2,
+        dy: f32,
+        t: f64,
+    ) {
+        shell_frame(app, ctx, size, t, vec![Event::PointerMoved(from), button(from, true)]);
+        for step in 1..=6 {
+            let pos = from + vec2(0.0, dy * step as f32 / 6.0);
+            shell_frame(app, ctx, size, t + step as f64 * 0.016, vec![Event::PointerMoved(pos)]);
+        }
+        shell_frame(app, ctx, size, t + 0.112, vec![button(from + vec2(0.0, dy), false)]);
+    }
+
+    /// Scrolls what is under `at` by `dy` (a wheel here; a finger on a
+    /// phone) and lets it settle, starting at `t`.
+    fn wheel_app(
+        app: &mut crate::Grooph,
+        ctx: &Context,
+        size: egui::Vec2,
+        at: Pos2,
+        dy: f32,
+        t: f64,
+    ) {
+        let wheel = Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: vec2(0.0, dy),
+            phase: egui::TouchPhase::Move,
+            source: egui::MouseWheelSource::Unknown,
+            modifiers: Modifiers::NONE,
+        };
+        shell_frame(app, ctx, size, t, vec![Event::PointerMoved(at), wheel]);
+        for i in 1..40 {
+            shell_frame(app, ctx, size, t + i as f64 * 0.05, vec![]);
+        }
+    }
+
+    const SMALL_PHONE: egui::Vec2 = vec2(375.0, 667.0);
+
+    #[test]
+    fn many_options_scroll_below_the_top_third_of_a_small_phone() {
+        use super::Tab;
+        for tab in [Tab::Practice, Tab::Metronome, Tab::Score] {
+            let (_, _, sheet, _) = open_sheet(tab, SMALL_PHONE);
+            assert!(sheet.top() >= SMALL_PHONE.y / 3.0 - 0.5, "{tab:?}: {sheet:?}");
+        }
+    }
+
+    #[test]
+    fn scrolled_options_fold_from_their_top_or_the_handle_only() {
+        let size = SMALL_PHONE;
+        let (ctx, mut app, sheet, rows) = open_sheet(super::Tab::Practice, size);
+        // Practice's rows don't all fit.
+        assert!(rows > sheet.height(), "{rows} {sheet:?}");
+        // Scrolled down a little, a drag down is for scrolling back, also
+        // from the first row just under the handle: the sheet stays.
+        wheel_app(&mut app, &ctx, size, sheet.center(), -80.0, 2.0);
+        drag_app(&mut app, &ctx, size, sheet.center(), 90.0, 4.0);
+        assert!(!app.ui.shell.options_collapsed);
+        wheel_app(&mut app, &ctx, size, sheet.center(), -80.0, 5.0);
+        let first_row = sheet.center_top() + vec2(0.0, super::SHEET_HANDLE_HEIGHT + 8.0);
+        drag_app(&mut app, &ctx, size, first_row, 90.0, 7.0);
+        assert!(!app.ui.shell.options_collapsed);
+        // The handle folds it.
+        wheel_app(&mut app, &ctx, size, sheet.center(), -80.0, 8.0);
+        let handle = sheet.center_top() + vec2(0.0, super::SHEET_HANDLE_HEIGHT / 2.0);
+        drag_app(&mut app, &ctx, size, handle, 90.0, 10.0);
+        assert!(app.ui.shell.options_collapsed);
+        // Back at the top, a drag down on the rows folds it.
+        app.ui.shell.options_collapsed = false;
+        for i in 0..40 {
+            shell_frame(&mut app, &ctx, size, 11.0 + i as f64 * 0.05, vec![]);
+        }
+        wheel_app(&mut app, &ctx, size, sheet.center(), 400.0, 14.0);
+        drag_app(&mut app, &ctx, size, sheet.center(), 90.0, 16.0);
+        assert!(app.ui.shell.options_collapsed);
+    }
+
+    #[test]
+    fn options_that_fit_show_whole_and_fold_on_a_drag_anywhere() {
+        let size = vec2(390.0, 1400.0);
+        let (ctx, mut app, sheet, rows) = open_sheet(super::Tab::Practice, size);
+        // All of the rows are shown: nothing to scroll.
+        assert!(sheet.height() >= rows, "{rows} {sheet:?}");
+        drag_app(&mut app, &ctx, size, sheet.center(), 90.0, 2.0);
+        assert!(app.ui.shell.options_collapsed);
+    }
+
+    #[test]
+    fn options_keep_their_least_height_on_a_short_screen() {
+        let (_, _, sheet, _) = open_sheet(super::Tab::Practice, vec2(375.0, 420.0));
+        let shown = sheet.height() - super::SHEET_HANDLE_HEIGHT;
+        assert!(shown >= super::SHEET_MIN_ROWS_HEIGHT - 0.5, "{sheet:?}");
     }
 
     #[test]
