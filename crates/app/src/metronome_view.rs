@@ -1857,7 +1857,7 @@ mod tests {
     }
 
     #[test]
-    fn a_rhythms_link_with_a_click_bar_clicks_it() {
+    fn a_rhythms_link_clicks_as_it_was_shared() {
         let (mut app, _, four) = app_with_edited_meters();
         app.select_tab(Tab::Practice);
         let mut link = app.shared_link();
@@ -1866,7 +1866,11 @@ mod tests {
         other.select_tab(Tab::Practice);
         other.apply_link(link);
         assert!(other.playback_ctl.settings.metronome_click);
-        assert!(other.playback_options().click.for_meter(TimeSignature::FOUR_FOUR) == four.click());
+        assert!(other.playback_options().click.for_meter(TimeSignature::FOUR_FOUR) == four.click()); // One without a click bar plays the standard click again.
+        let mut plain = app.shared_link();
+        plain.click = None;
+        other.apply_link(plain);
+        assert!(!other.playback_ctl.settings.metronome_click);
     }
 
     #[test]

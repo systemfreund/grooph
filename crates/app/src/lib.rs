@@ -975,12 +975,13 @@ impl Grooph {
         if let Some(swing) = link.swing {
             self.playback_ctl.settings.swing = swing;
         }
+        // A rhythm's link plays the click it was shared with: its click bar
+        // if it carries one, else the standard click.
+        if shares_score {
+            self.playback_ctl.settings.metronome_click = link.click.is_some();
+        }
         if let Some(bar) = link.click {
             self.set_meter_click_bar(bar);
-            // A rhythm's link plays the click bar it was shared with.
-            if shares_score {
-                self.playback_ctl.settings.metronome_click = true;
-            }
         }
     }
 

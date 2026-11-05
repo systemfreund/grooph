@@ -644,7 +644,7 @@ grooph's metronome runs inside AI chats as an
   link's first meter in text notation without the time signature (e.g.
   `>q r:q. (q)`); shared links carry it when it is not the default and is
   played (from Practice or the score tab only with the "Metronome" click;
-  a rhythm's link that carries one picks it), and
+  a rhythm's link picks "Metronome" if it carries one, else "Standard"), and
   write a picker option as `subdivision=<code>` instead (`subdivision_of`);
   a link takes one of the two.
 

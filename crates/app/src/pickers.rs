@@ -17,7 +17,6 @@ use eframe::egui::{
     Button, Color32, FontFamily, FontId, Id, Modal, Rect, Response, RichText, Ui, vec2,
 };
 use grooph_audio::{GapClick, GapMode, GapMute, Sound};
-use grooph_measure::click::ClickBars;
 use grooph_measure::counter::{Ratio, own_ratios, step_clicks, step_span};
 use grooph_measure::counting::CountingSystem;
 use grooph_measure::generator::{
@@ -918,11 +917,16 @@ impl Grooph {
             stem_length_factor: self.ui.layout.stem_length_factor,
         };
         let metronome = self.playback_ctl.settings.metronome_click;
-        let click = if metronome { self.click_bars() } else { ClickBars::default() };
-        for ts in self.played_meters() {
-            let bar = Score::single(click.for_meter(ts));
-            pattern_preview(ui, &bar, ui.available_width(), &look);
-        }
+        let click = self.played_click_bars();
+        // A score of many meters scrolls where it would push the buttons and
+        // "Done" off the screen.
+        let room = (ui.ctx().content_rect().height() - 360.0).max(120.0);
+        egui::ScrollArea::vertical().max_height(room).show(ui, |ui| {
+            for ts in self.played_meters() {
+                let bar = Score::single(click.for_meter(ts));
+                pattern_preview(ui, &bar, ui.available_width(), &look);
+            }
+        });
         ui.add_space(8.0);
         let options = [false, true].map(|m| (m, click_source_label(m).to_owned()));
         if let Some(metronome) = choice_grid(ui, &options, metronome, 2) {
