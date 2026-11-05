@@ -635,7 +635,7 @@ grooph's metronome runs inside AI chats as an
   click" option (`PlaybackSettings::metronome_click`, off by default, one
   setting for both) is on, else every meter's default bar
   (`Grooph::played_click_bars`). The option's row names the played score's
-  meters that have an edited bar. `Schedule::build` plays strong as `Downbeat`,
+  meters that have an edited bar ("4/4 edited"), or says "no edits". `Schedule::build` plays strong as `Downbeat`,
   medium as `PrimaryBeat`, soft as `SoftBeat` (mixer "Soft"), at the swung
   position of each note. The count-in and calibration
   ignore the click bars. Link parameter `click` is the click bar of the

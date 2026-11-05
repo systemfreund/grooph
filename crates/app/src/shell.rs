@@ -1216,9 +1216,10 @@ impl Grooph {
     fn metronome_click_row(&mut self, ui: &mut Ui) {
         let meters = self.edited_click_meters();
         let edited = if meters.is_empty() {
-            "none".to_owned()
+            "no edits".to_owned()
         } else {
-            meters.iter().map(ToString::to_string).collect::<Vec<_>>().join(", ")
+            let meters = meters.iter().map(ToString::to_string).collect::<Vec<_>>();
+            format!("{} edited", meters.join(", "))
         };
         value_switch_row(
             ui,
