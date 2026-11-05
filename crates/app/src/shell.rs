@@ -1041,6 +1041,7 @@ impl Grooph {
         }
         // Height of the rows, measured when last shown.
         let rows_id = id.with("rows_height");
+        let top_id = id.with("pressed_at_top");
         let rows = ui.data(|d| d.get_temp::<f32>(rows_id)).unwrap_or(240.0);
         // The rows rise no higher than a third of the screen down, so the
         // card and staff above stay in sight; past that they scroll.
@@ -1094,14 +1095,24 @@ impl Grooph {
                         });
                     let height = scroll.content_size.y;
                     ui.data_mut(|d| d.insert_temp(rows_id, height));
+                    // Whether the rows were scrolled to the top as the
+                    // finger went down, for the flick below.
+                    if ui.input(|i| i.pointer.any_pressed()) {
+                        let at_top = scroll.state.clamped_offset().y <= 0.5;
+                        ui.data_mut(|d| d.insert_temp(top_id, at_top));
+                    }
                 });
             });
         if openness < 1.0 {
             ui.ctx().request_repaint();
         }
-        // Rows that scroll take vertical drags themselves: then only the
-        // handle folds the sheet on a flick.
-        let flick = if scrolls { rect.with_max_y(rect.top() + MIN_TOUCH_TARGET) } else { rect };
+        // Rows that scroll take vertical drags themselves, as a sheet on
+        // iOS: only a drag that starts with them at the top folds the sheet
+        // (a drag up from there scrolls, the sheet is open already), else
+        // only the handle does.
+        let at_top = ui.data(|d| d.get_temp::<bool>(top_id)).unwrap_or(true);
+        let flick =
+            if scrolls && !at_top { rect.with_max_y(rect.top() + MIN_TOUCH_TARGET) } else { rect };
         Some((area.response.layer_id, flick))
     }
 
@@ -1682,8 +1693,8 @@ mod tests {
             let sheet = ctx.memory(|m| m.area_rect(id)).unwrap();
             assert!(sheet.top() >= 667.0 / 3.0 - 0.5, "{tab:?}: {sheet:?}");
         }
-        // Practice's rows don't all fit: a drag on them is for scrolling and
-        // leaves the sheet open.
+        // Practice's rows don't all fit: a drag on them scrolls them, and
+        // folds the sheet only from the top.
         app.select_tab(Tab::Practice);
         let id = egui::Id::unique(SHEET_OPTIONS_ID);
         let sheet = ctx.memory(|m| m.area_rect(id)).unwrap();
@@ -1691,15 +1702,39 @@ mod tests {
         let full = ctx.data(|d| d.get_temp::<f32>(rows)).unwrap();
         assert!(full > sheet.height(), "{full} {sheet:?}");
         let from = sheet.center();
-        let mut t = 2.0;
-        small_phone_frame(&mut app, &ctx, t, vec![Event::PointerMoved(from), button(from, true)]);
-        for step in 1..=6 {
+        let drag = |app: &mut crate::Grooph, dy: f32, mut t: f64| {
+            let press = vec![Event::PointerMoved(from), button(from, true)];
+            small_phone_frame(app, &ctx, t, press);
+            for step in 1..=6 {
+                t += 0.016;
+                let pos = from + vec2(0.0, dy * step as f32 / 6.0);
+                small_phone_frame(app, &ctx, t, vec![Event::PointerMoved(pos)]);
+            }
             t += 0.016;
-            let pos = from + vec2(0.0, 15.0 * step as f32);
-            small_phone_frame(&mut app, &ctx, t, vec![Event::PointerMoved(pos)]);
-        }
-        small_phone_frame(&mut app, &ctx, t + 0.016, vec![button(from + vec2(0.0, 90.0), false)]);
+            small_phone_frame(app, &ctx, t, vec![button(from + vec2(0.0, dy), false)]);
+        };
+        // The rows scrolled down a little (a wheel here; a finger on a
+        // phone): a drag down is for scrolling back, the sheet stays.
+        let wheel = |dy: f32| Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: vec2(0.0, dy),
+            phase: egui::TouchPhase::Move,
+            source: egui::MouseWheelSource::Unknown,
+            modifiers: Modifiers::NONE,
+        };
+        let settle = |app: &mut crate::Grooph, events: Vec<Event>, t: f64| {
+            small_phone_frame(app, &ctx, t, [vec![Event::PointerMoved(from)], events].concat());
+            for i in 1..40 {
+                small_phone_frame(app, &ctx, t + i as f64 * 0.05, vec![]);
+            }
+        };
+        settle(&mut app, vec![wheel(-80.0)], 2.0);
+        drag(&mut app, 90.0, 4.0);
         assert!(!app.ui.shell.options_collapsed);
+        // Back at the top, a drag down folds it.
+        settle(&mut app, vec![wheel(400.0)], 6.0);
+        drag(&mut app, 90.0, 8.0);
+        assert!(app.ui.shell.options_collapsed);
     }
 
     #[test]
