@@ -14,6 +14,7 @@
 //! [`EditorState::document`]: crate::state::EditorState::document
 //! [`EditorState::doc`]: crate::state::EditorState::doc
 
+use crate::metronome_bars::MetronomeBars;
 use crate::score_change::ScoreChange;
 use crate::shell::Tab;
 use crate::state::EditorState;
@@ -52,6 +53,9 @@ pub(crate) struct RhythmDoc {
     pub(crate) history: UndoHistory,
     pub(crate) dirty: bool,
     pub(crate) active_pattern_id: Option<u64>,
+    /// The metronome's document only: the ratio name of the meter its score
+    /// clicks and every other meter's bars (see [`crate::metronome_bars`]).
+    pub(crate) meters: MetronomeBars,
 }
 
 impl RhythmDoc {
@@ -64,6 +68,7 @@ impl RhythmDoc {
             history: UndoHistory::new(DEFAULT_UNDO_LIMIT),
             dirty: false,
             active_pattern_id: None,
+            meters: MetronomeBars::default(),
         }
     }
 }

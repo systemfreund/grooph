@@ -18,8 +18,6 @@ use eframe::egui::emath::{ease_in_ease_out, lerp};
 use eframe::epaint::FontId;
 use grooph_audio::{Audio, AudioSettings};
 use grooph_link::SharedLink;
-use grooph_measure::click::ClickBars;
-use grooph_measure::counter::CounterBars;
 use grooph_measure::tap_tempo::TapTempo;
 use grooph_measure::{Instrument, Measure};
 use grooph_mic::MicInput;
@@ -28,17 +26,9 @@ use std::collections::HashMap;
 
 #[derive(Default)]
 pub(crate) struct AudioConfig {
-    /// Sounds and volumes (the mixer).
+    /// Sounds and volumes (the mixer). The metronome's click bars are its
+    /// document's (see [`crate::metronome_bars`]).
     pub(crate) settings: AudioSettings,
-    /// What the metronome clicks in each meter but its own: the click bar
-    /// of the metronome's meter is in its document (`docs.metronome`), and
-    /// this entry is only where it is put when the meter changes. Read
-    /// every meter's through `Grooph::click_bars`.
-    pub(crate) click: ClickBars,
-    /// The counter rhythm of each meter that has one, as `click`
-    /// (`Grooph::counter_bars`), and the ratio each was picked as, also
-    /// the metronome meter's.
-    pub(crate) counter: CounterBars,
 }
 
 pub(crate) struct LayoutSettings {

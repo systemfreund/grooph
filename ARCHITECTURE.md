@@ -629,7 +629,7 @@ grooph's metronome runs inside AI chats as an
   9 clicks (group starts keep their level, the rest are soft). `subdivisions`
   lists the subdivision picker's options (`none` for the default bar, then
   each split by its notes' code: `e`, `s`, `t16`, …). `ClickBars`
-  (in `AudioConfig`, persisted) keeps the bars that differ from the default,
+  (built from the metronome's document, see below) keeps the bars that differ from the default,
   keyed by the whole `TimeSignature` including its grouping, and applies to
   all playback in that meter. `Schedule::build` plays strong as `Downbeat`,
   medium as `PrimaryBeat`, soft as `SoftBeat` (mixer "Soft"), at the swung
@@ -657,16 +657,19 @@ grooph's metronome runs inside AI chats as an
 - Metronome tab (`crates/app/src/metronome_view.rs`): its own meter
   (persisted, picked in the tab's bar), separate from the generator's.
   The tab's document (`EditorState::docs.metronome`, see "Rhythm
-  documents") is the one source of the meter's click bar and counter
-  rhythm, open or not, and its bar's meter is the metronome's
-  (`metronome_meter`), so the staff, tool palette and undo work on them
-  directly. The audio settings (`AudioConfig::click`/`counter`) keep the
-  other meters' bars and the counter ratios' names; their entry for the
-  metronome's meter is not read. `click_bars`/`counter_bars` give every
-  meter's, the metronome's from its document: persistence takes both,
-  and the audio engine takes the click bars when it plays a rhythm. When the document turns to another meter (a
-  picked meter, undo, a link), `store_metronome_bars` puts the old meter's
-  bars into the settings first. A metronome link sets the meter and clicks
+  documents") is the one owner of every meter's click bar, counter rhythm
+  and ratio name (`metronome_bars.rs`, one `MeterBars` per meter), open or
+  not. Its score is the bars of the meter it clicks, and that bar's meter
+  is the metronome's (`metronome_meter`), so the staff, tool palette and
+  undo work on them directly; `RhythmDoc::meters` (`MetronomeBars`) holds
+  that meter's ratio name and the other meters' bars. Both are in the undo
+  snapshot, so a meter change, a click edit and a ratio pick undo as one.
+  The meter changes only through `RhythmDoc::click_meter` (picker, link,
+  undo restores the whole document), which keeps the old meter's bars;
+  `keep_meter_bars` sets a meter's bars without changing the meter (a
+  link's click bar). `click_bars`/`meter_bars` read them: the audio engine
+  takes the click bars when it plays a rhythm, persistence saves them as
+  one `SavedMetronome`. A metronome link sets the meter and clicks
   in place, also with the tab open; a preset, which needs a rhythm, closes
   it with `leave_metronome`, which shows the practice page. The audio engine
   plays the document itself as clicks (`Played::Clicks`): its first voice
@@ -955,7 +958,8 @@ If you add new tools/shortcuts, remember:
   (with `#[serde(default)]` from the group, it falls back alone, see `persist::repair_field`), or a new group:
   then it gets an entry in `PersistedState` and `repair_field`. Renaming or moving a saved field bumps
   `PERSISTED_STATE_VERSION` with a step in `persist::migrate` (version 4 moved the flat fields of version 3 into
-  the groups, `SETTINGS_GROUPS`/`PRESET_GROUPS`). The default tempo is `grooph_measure::tempo::DEFAULT_BPM`.
+  the groups, `SETTINGS_GROUPS`/`PRESET_GROUPS`; version 5 joined the metronome's `click_bars`, `counter_bars`,
+  `counter_names` and `metronome_meter` into `metronome`). The default tempo is `grooph_measure::tempo::DEFAULT_BPM`.
 - UI state: `UiShell` (`state.rs`) holds `mode`, `platform` and feature groups only (`Fonts`, `LayoutSettings`,
   `ViewSettings`, `StaffView`, `LibraryUi`, `Dialogs`, `ShellState`, the host and the embed). No new field goes
   directly into `UiShell` or `PlaybackState`: it goes into its feature's group, or a new group.

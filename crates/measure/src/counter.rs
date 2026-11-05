@@ -8,8 +8,7 @@
 //! as long; where there is none (three against four has no half-note
 //! triplet), a shorter value with rests up to the next click, and where
 //! that fails too, a tuplet of the ratio over the span (7:5 in 5/8 is seven
-//! eighths in the time of five). [`CounterBars`]
-//! keeps the counter rhythm of each meter that has one.
+//! eighths in the time of five).
 
 use crate::click::ClickLevel;
 use crate::duration::NoteValue::{Eighth, Half, Quarter, Sixteenth, ThirtySecond};
@@ -333,94 +332,6 @@ pub fn respelled(bar: Measure) -> Measure {
     current
 }
 
-/// The counter bar of each meter that has one, and the ratio it was picked
-/// as where that has a common factor (4:2 plays 2:1's bar). Saved as the
-/// bars alone; the names are kept apart (see [`CounterBars::names`]).
-#[derive(Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(from = "Vec<Measure>", into = "Vec<Measure>")]
-pub struct CounterBars {
-    bars: Vec<Measure>,
-    names: Vec<(TimeSignature, Ratio)>,
-}
-
-impl From<Vec<Measure>> for CounterBars {
-    fn from(bars: Vec<Measure>) -> Self {
-        Self { bars: bars.into_iter().map(respelled).collect(), names: Vec::new() }
-    }
-}
-
-impl From<CounterBars> for Vec<Measure> {
-    fn from(bars: CounterBars) -> Self {
-        bars.bars
-    }
-}
-
-impl std::fmt::Debug for CounterBars {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_list().entries(self.bars.iter().map(|m| m.time_signature())).finish()
-    }
-}
-
-impl CounterBars {
-    /// The counter bar of `ts`, `None` if it has none.
-    pub fn for_meter(&self, ts: TimeSignature) -> Option<&Measure> {
-        self.bars.iter().find(|m| m.time_signature() == ts)
-    }
-
-    /// Give `ts` the counter bar `bar` (of that meter), or none. The ratio
-    /// it was picked as stays while `bar` is that ratio's.
-    pub fn set(&mut self, ts: TimeSignature, bar: Option<Measure>) {
-        self.bars.retain(|m| m.time_signature() != ts);
-        self.bars.extend(bar.filter(|m| m.time_signature() == ts).map(respelled));
-        let named = self.name(ts);
-        let kept = self.for_meter(ts).and_then(|bar| named_ratio_of(bar, named));
-        self.names.retain(|&(t, _)| t != ts);
-        self.names.extend(kept.filter(|&r| Some(r) == named).map(|r| (ts, r)));
-    }
-
-    /// Give `ts` the counter bar `bar` from elsewhere (a link), named as
-    /// its simplest ratio, whatever `ts`'s bar was picked as.
-    pub fn replace(&mut self, ts: TimeSignature, bar: Option<Measure>) {
-        self.names.retain(|&(t, _)| t != ts);
-        self.set(ts, bar);
-    }
-
-    /// Give `ts` the counter bar of `ratio`, picked as that ratio, or none.
-    pub fn set_ratio(&mut self, ts: TimeSignature, ratio: Option<Ratio>) {
-        self.bars.retain(|m| m.time_signature() != ts);
-        self.bars.extend(ratio.and_then(|r| counter_bar(ts, r)));
-        self.names.retain(|&(t, _)| t != ts);
-        self.names.extend(ratio.filter(|_| self.for_meter(ts).is_some()).map(|r| (ts, r)));
-    }
-
-    /// The ratio `ts`'s counter bar was picked as, if any.
-    pub fn name(&self, ts: TimeSignature) -> Option<Ratio> {
-        self.names.iter().find(|&&(t, _)| t == ts).map(|&(_, r)| r)
-    }
-
-    /// The ratio `ts`'s counter bar plays: the one it was picked as, else
-    /// the simplest (see [`named_ratio_of`]).
-    pub fn ratio(&self, ts: TimeSignature) -> Option<Ratio> {
-        named_ratio_of(self.for_meter(ts)?, self.name(ts))
-    }
-
-    /// The ratio each bar was picked as, to save next to the bars.
-    pub fn names(&self) -> &[(TimeSignature, Ratio)] {
-        &self.names
-    }
-
-    /// These bars, picked as `names` where they are those ratios' bars.
-    pub fn with_names(mut self, names: &[(TimeSignature, Ratio)]) -> Self {
-        for &(ts, r) in names {
-            if self.for_meter(ts).is_some_and(|bar| named_ratio_of(bar, Some(r)) == Some(r)) {
-                self.names.retain(|&(t, _)| t != ts);
-                self.names.push((ts, r));
-            }
-        }
-        self
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -493,9 +404,6 @@ mod tests {
         assert!(text(&new).starts_with("5/4 >st16 r:st16 r:st16 r:st16 r:st16 r:st16 r:st16"));
         assert_eq!(click_level(&new, 5), ClickLevel::Off);
         assert_eq!(click_level(&new, 10), ClickLevel::Medium);
-        let mut bars = CounterBars::default();
-        bars.set("5/4".parse().unwrap(), Some(new.clone()));
-        assert!(*bars.for_meter("5/4".parse().unwrap()).unwrap() == new);
     }
 
     #[test]
@@ -690,20 +598,6 @@ mod tests {
     }
 
     #[test]
-    fn bars_are_kept_per_meter() {
-        let mut bars = CounterBars::default();
-        let four = TimeSignature::FOUR_FOUR;
-        bars.set(four, counter_bar(four, Ratio { n: 3, span: 4 }));
-        assert!(bars.for_meter(four).is_some());
-        assert!(bars.for_meter(TimeSignature::THREE_FOUR).is_none());
-        // A bar of another meter is not stored.
-        bars.set(TimeSignature::THREE_FOUR, counter_bar(four, Ratio { n: 5, span: 4 }));
-        assert!(bars.for_meter(TimeSignature::THREE_FOUR).is_none());
-        bars.set(four, None);
-        assert_eq!(bars, CounterBars::default());
-    }
-
-    #[test]
     fn a_ratio_with_a_common_factor_keeps_its_name() {
         let ts: TimeSignature = "2/4".parse().unwrap();
         let r = |n, span| Ratio { n, span };
@@ -713,28 +607,5 @@ mod tests {
         assert_eq!(ratio_of(&bar), Some(r(2, 1)));
         assert_eq!(named_ratio_of(&bar, Some(r(4, 2))), Some(r(4, 2)));
         assert_eq!(named_ratio_of(&bar, Some(r(3, 2))), Some(r(2, 1)));
-        let mut bars = CounterBars::default();
-        bars.set_ratio(ts, Some(r(4, 2)));
-        assert_eq!(bars.ratio(ts), Some(r(4, 2)));
-        // Clicks edited, still 4:2; another bar drops the name.
-        let mut edited = bar.clone();
-        edited.first_voice_mut().set_click_level(1, ClickLevel::Strong);
-        bars.set(ts, Some(edited));
-        assert_eq!(bars.ratio(ts), Some(r(4, 2)));
-        bars.set(ts, counter_bar(ts, r(3, 2)));
-        assert_eq!(bars.name(ts), None);
-        // Saved as the bars and the names apart.
-        bars.set_ratio(ts, Some(r(4, 2)));
-        let saved: Vec<Measure> = bars.clone().into();
-        let loaded = CounterBars::from(saved).with_names(bars.names());
-        assert_eq!(loaded, bars);
-        assert_eq!(CounterBars::from(Vec::new()).with_names(bars.names()), CounterBars::default());
-        // The same bar from a link is 2:1.
-        let mut linked = bars.clone();
-        linked.replace(ts, Some(bar.clone()));
-        assert_eq!(linked.ratio(ts), Some(r(2, 1)));
-        // Picked again as 2:1, it is 2:1.
-        bars.set_ratio(ts, Some(r(2, 1)));
-        assert_eq!(bars.ratio(ts), Some(r(2, 1)));
     }
 }
