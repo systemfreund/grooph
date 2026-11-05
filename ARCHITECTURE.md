@@ -661,13 +661,16 @@ grooph's metronome runs inside AI chats as an
   and ratio name (`metronome_bars.rs`, one `MeterBars` per meter), open or
   not. Its score is the bars of the meter it clicks, and that bar's meter
   is the metronome's (`metronome_meter`), so the staff, tool palette and
-  undo work on them directly; `RhythmDoc::meters` (`MetronomeBars`) holds
-  that meter's ratio name and the other meters' bars. Both are in the undo
-  snapshot, so a meter change, a click edit and a ratio pick undo as one.
-  The meter changes only through `RhythmDoc::click_meter` (picker, link,
-  undo restores the whole document), which keeps the old meter's bars;
-  `keep_meter_bars` sets a meter's bars without changing the meter (a
-  link's click bar). `click_bars`/`meter_bars` read them: the audio engine
+  undo work on them through the `Doc` trait; `MetronomeDoc`'s private
+  `MetronomeBars` holds that meter's ratio name and the other meters' bars.
+  Both are in the undo snapshot, so a meter change, a click edit and a
+  ratio pick undo as one. The score is private to `metronome_bars.rs`, so
+  the compiler keeps meter changes to `MetronomeDoc::click_meter` (picker,
+  link; undo restores the whole document), which keeps the old meter's
+  bars, and `keep_meter_bars`, which sets a meter's bars without changing
+  the meter (a link's click bar, a ratio pick). Every other edit goes
+  through `Doc::edit_score`, which takes back (and reports, as `None`) one
+  that would change the meter or add a bar. `click_bars`/`meter_bars` read them: the audio engine
   takes the click bars when it plays a rhythm, persistence saves them as
   one `SavedMetronome`. A metronome link sets the meter and clicks
   in place, also with the tab open; a preset, which needs a rhythm, closes
@@ -766,8 +769,12 @@ grooph's metronome runs inside AI chats as an
   score tab is hidden, one of the one line opens on Practice
   (`pattern_opens_on_practice`). A score link of the one line opens on
   Practice unless shared from the score tab (`opens_on_practice`).
-  Each keeps its score, cursor, undo history, dirty flag
-  and pattern (`RhythmDoc`, all three in `EditorState::docs`).
+  Each keeps its score, cursor and undo history (the `Doc` trait, all
+  three in `EditorState::docs`); Practice's and the score tab's
+  (`RhythmDoc`) also their dirty flag and pattern, the metronome's
+  (`MetronomeDoc`) every meter's bars. `EditorState::doc`/`doc_mut` give
+  the shown one as `dyn Doc`, whose score changes only through
+  `edit_score`; `rhythm_doc_mut` gives it unless it is the metronome's.
 - Each page edits its own document in place: the metronome's "Edit clicks",
   Practice's ✏ ("Edit rhythm") and the score tab's ✏ (`edit_page`) open
   `Mode::Edit` on the page shown, Done, Back and Esc close it. Nothing is

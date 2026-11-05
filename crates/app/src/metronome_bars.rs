@@ -2,14 +2,19 @@
 //!
 //! Each meter has a click bar, optionally a counter rhythm, and the ratio
 //! that rhythm was picked as ([`MeterBars`]). The metronome's document
-//! ([`RhythmDoc`]) owns them: the meter it clicks is its score, the one bar
-//! the staff and the tools edit, and every other meter's are in its
+//! ([`MetronomeDoc`]) owns them: the meter it clicks is its score, the one
+//! bar the staff and the tools edit, and every other meter's are in its
 //! [`MetronomeBars`]. Both are in the document's undo snapshot, so a meter
-//! change, a click edit and a ratio pick undo as one. The meter changes only
-//! through [`RhythmDoc::click_meter`], which keeps the old meter's bars.
+//! change, a click edit and a ratio pick undo as one.
+//!
+//! The score is private to this module. The meter changes only through
+//! [`MetronomeDoc::click_meter`] and [`MetronomeDoc::keep_meter_bars`], which
+//! keep the old meter's bars; every other edit goes through
+//! [`Doc::edit_score_by`], which refuses one that changes the meter.
 
-use crate::documents::RhythmDoc;
+use crate::documents::Doc;
 use crate::metronome_view::{MetronomeVoice, metronome_bar};
+use crate::undo::{DEFAULT_UNDO_LIMIT, EditorSnapshot, UndoHistory};
 use grooph_measure::click::{ClickBars, meter_click_bar};
 use grooph_measure::counter::{Ratio, named_ratio_of, respelled};
 use grooph_measure::{Cursor, Measure, Score, TimeSignature};
@@ -75,11 +80,11 @@ impl MeterBars {
 
 /// The part of the metronome's document besides its score: the ratio name
 /// of the meter it clicks, whose bar is the score, and every other meter's
-/// bars. Empty in the other documents.
+/// bars. Empty in the other documents' undo snapshots.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct MetronomeBars {
     /// The ratio the score's counter rhythm was picked as.
-    pub(crate) name: Option<Ratio>,
+    name: Option<Ratio>,
     /// The other meters' bars that are not their plain ones, one per meter.
     others: Vec<MeterBars>,
 }
@@ -103,23 +108,46 @@ impl MetronomeBars {
     }
 }
 
-impl RhythmDoc {
+/// The metronome's document: the click bar of the meter it clicks, as a
+/// one-bar score, and every other meter's bars. It has no saved pattern and
+/// no unsaved mark.
+pub(crate) struct MetronomeDoc {
+    score: Score,
+    cursor: Cursor,
+    history: UndoHistory,
+    meters: MetronomeBars,
+}
+
+impl MetronomeDoc {
+    /// A document clicking `bars`, with nothing kept and nothing to undo.
+    fn new(bars: MeterBars) -> Self {
+        Self {
+            score: Score::single(bars.bar),
+            cursor: Cursor::start(),
+            history: UndoHistory::new(DEFAULT_UNDO_LIMIT),
+            meters: MetronomeBars { name: bars.name, others: Vec::new() },
+        }
+    }
+
+    /// The meter it clicks.
+    pub(crate) fn meter(&self) -> TimeSignature {
+        self.score.measures()[0].time_signature()
+    }
+
+    /// The ratio the clicked meter's counter rhythm was picked as.
+    pub(crate) fn counter_name(&self) -> Option<Ratio> {
+        self.meters.name
+    }
+
     /// The metronome document's bars of the meter it clicks.
     pub(crate) fn clicked_bars(&self) -> MeterBars {
-        let bar = self.score.measures()[0].clone();
-        // A bar of a kept meter written into the score directly, not through
-        // `click_meter`, would hide that meter's kept bars.
-        debug_assert!(
-            self.meters.other(bar.time_signature()).is_none(),
-            "the metronome's score turned to a kept meter without click_meter"
-        );
-        MeterBars { bar, name: self.meters.name }
+        MeterBars { bar: self.score.measures()[0].clone(), name: self.meters.name }
     }
 
     /// The metronome document's bars of `ts`: the clicked meter's, else
     /// those kept, else its plain ones.
     pub(crate) fn meter_bars(&self, ts: TimeSignature) -> MeterBars {
-        if ts == self.score.measures()[0].time_signature() {
+        if ts == self.meter() {
             return self.clicked_bars();
         }
         self.meters.other(ts).cloned().unwrap_or_else(|| MeterBars::plain(ts))
@@ -161,6 +189,62 @@ impl RhythmDoc {
     }
 }
 
+impl Doc for MetronomeDoc {
+    fn score(&self) -> &Score {
+        &self.score
+    }
+
+    fn cursor(&self) -> Cursor {
+        self.cursor
+    }
+
+    fn cursor_mut(&mut self) -> &mut Cursor {
+        &mut self.cursor
+    }
+
+    fn history(&self) -> &UndoHistory {
+        &self.history
+    }
+
+    fn history_mut(&mut self) -> &mut UndoHistory {
+        &mut self.history
+    }
+
+    fn snapshot(&self) -> EditorSnapshot {
+        EditorSnapshot {
+            score: self.score.clone(),
+            cursor: self.cursor,
+            meters: self.meters.clone(),
+        }
+    }
+
+    fn restore(&mut self, snap: EditorSnapshot) {
+        self.score = snap.score;
+        self.cursor = snap.cursor;
+        self.meters = snap.meters;
+    }
+
+    /// An edit that would change the meter, or leave other than one bar,
+    /// is taken back: the meter changes only through
+    /// [`MetronomeDoc::click_meter`] and [`MetronomeDoc::keep_meter_bars`],
+    /// which keep the old meter's bars.
+    fn edit_score_by(&mut self, edit: &mut dyn FnMut(&mut Score)) -> bool {
+        let before = self.score.clone();
+        edit(&mut self.score);
+        let meter = before.measures()[0].time_signature();
+        let kept = match self.score.measures() {
+            [bar] => bar.time_signature() == meter,
+            _ => false,
+        };
+        if !kept {
+            log::warn!("an edit would have changed the metronome's meter or bar; taken back");
+            self.score = before;
+            self.cursor = self.score.clamp_cursor(self.cursor);
+        }
+        kept
+    }
+}
+
 /// The metronome's bars as saved: the meter it clicks and every meter's
 /// bars that are not its plain ones.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -177,7 +261,7 @@ impl Default for SavedMetronome {
 }
 
 impl SavedMetronome {
-    pub(crate) fn of(doc: &RhythmDoc) -> Self {
+    pub(crate) fn of(doc: &MetronomeDoc) -> Self {
         let clicked = doc.clicked_bars();
         let bars = std::iter::once(clicked.clone())
             .filter(|b| !b.is_plain())
@@ -188,8 +272,8 @@ impl SavedMetronome {
 
     /// The metronome's document again, with nothing to undo. Of a meter
     /// saved twice the last counts.
-    pub(crate) fn into_doc(self) -> RhythmDoc {
-        let mut doc = RhythmDoc::new(Score::single(meter_click_bar(self.meter)), Cursor::start());
+    pub(crate) fn into_doc(self) -> MetronomeDoc {
+        let mut doc = MetronomeDoc::new(MeterBars::plain(self.meter));
         let mut clicked = MeterBars::plain(self.meter);
         for bars in self.bars.into_iter().map(MeterBars::respelled) {
             if bars.meter() == self.meter {
@@ -226,5 +310,41 @@ mod tests {
         // Plain bars are not kept.
         bars.keep(MeterBars::plain(ts));
         assert_eq!(bars, MetronomeBars::default());
+    }
+
+    /// An edit of the score keeps the meter and the one bar: one that would
+    /// change them is taken back and reported, so the new meter's kept bars
+    /// are not hidden by it.
+    #[test]
+    fn an_edit_cannot_change_the_meter() {
+        let (four, three) = (TimeSignature::FOUR_FOUR, TimeSignature::THREE_FOUR);
+        let mut edited = meter_click_bar(three);
+        edited.first_voice_mut().set_click_level(0, ClickLevel::Off);
+        let mut doc = MetronomeDoc::new(MeterBars::plain(three));
+        doc.keep_meter_bars(MeterBars::new(edited.clone(), None, None));
+        doc.click_meter(MeterBars::plain(four));
+        let doc: &mut dyn Doc = &mut doc;
+        // A beat edit stays.
+        doc.edit_score(|s| {
+            s.measures_mut()[0].first_voice_mut().set_click_level(1, ClickLevel::Off)
+        });
+        let clicked = doc.score().clone();
+        assert_ne!(clicked, Score::single(meter_click_bar(four)));
+        // A meter change, by a bar's meter or by a whole score, does not.
+        let set = doc.edit_score(|s| s.measures_mut()[0].set_time_signature(three));
+        assert!(set.is_none());
+        assert_eq!(*doc.score(), clicked);
+        assert_eq!(doc.edit_score(|s| *s = Score::single(meter_click_bar(three))), None);
+        assert_eq!(*doc.score(), clicked);
+        // Nor does a second bar, even of the same meter.
+        assert_eq!(doc.edit_score(|s| s.push(meter_click_bar(four))), None);
+        assert_eq!(*doc.score(), clicked);
+        // 3/4 kept its edited bar, and comes back with it through
+        // `click_meter`.
+        let snap = doc.snapshot();
+        let mut doc = MetronomeDoc::new(MeterBars::plain(four));
+        doc.restore(snap);
+        doc.click_meter(doc.meter_bars(three));
+        assert_eq!(doc.clicked_bars().click(), edited);
     }
 }

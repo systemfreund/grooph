@@ -2,11 +2,13 @@
 //! generated rhythm and the score tab's own score (written, loaded from the
 //! library or opened from a link).
 //!
-//! Each keeps its score, cursor, undo history, dirty flag and pattern
-//! ([`RhythmDoc`]), and each page edits its own in place: the metronome's
-//! "Edit clicks", Practice's ✏ and the score tab's ✏. The page shown, or the
-//! one the More screen was opened from, is [`EditorState::document`]; the
-//! staff, the tools and undo work on its document ([`EditorState::doc`]).
+//! Each keeps its score, cursor and undo history ([`Doc`]); Practice's and
+//! the score tab's ([`RhythmDoc`]) also their dirty flag and pattern, the
+//! metronome's ([`MetronomeDoc`]) every meter's bars. Each page edits its own
+//! in place: the metronome's "Edit clicks", Practice's ✏ and the score tab's
+//! ✏. The page shown, or the one the More screen was opened from, is
+//! [`EditorState::document`]; the staff, the tools and undo work on its
+//! document ([`EditorState::doc`]).
 //! The generator only ever writes Practice's document (see
 //! [`Grooph::generate_new_score`]), so a written score is never replaced by a
 //! generated rhythm.
@@ -14,11 +16,11 @@
 //! [`EditorState::document`]: crate::state::EditorState::document
 //! [`EditorState::doc`]: crate::state::EditorState::doc
 
-use crate::metronome_bars::MetronomeBars;
+use crate::metronome_bars::{MetronomeBars, MetronomeDoc};
 use crate::score_change::ScoreChange;
 use crate::shell::Tab;
 use crate::state::EditorState;
-use crate::undo::{DEFAULT_UNDO_LIMIT, UndoHistory};
+use crate::undo::{DEFAULT_UNDO_LIMIT, EditorSnapshot, UndoHistory};
 use crate::{Grooph, Mode};
 use grooph_measure::{Cursor, Score};
 use serde::{Deserialize, Serialize};
@@ -46,16 +48,44 @@ impl Document {
     }
 }
 
-/// A page's document: its score and how far it was edited.
+/// What the staff, the tools, playback and undo use of any page's
+/// document.
+pub(crate) trait Doc {
+    fn score(&self) -> &Score;
+    fn cursor(&self) -> Cursor;
+    fn cursor_mut(&mut self) -> &mut Cursor;
+    fn history(&self) -> &UndoHistory;
+    fn history_mut(&mut self) -> &mut UndoHistory;
+    /// The document as undo keeps it.
+    fn snapshot(&self) -> EditorSnapshot;
+    /// Bring back `snap`, taken of this document.
+    fn restore(&mut self, snap: EditorSnapshot);
+    /// Run `edit` on the score; whether the edit was kept. See
+    /// [`edit_score`](#method.edit_score).
+    fn edit_score_by(&mut self, edit: &mut dyn FnMut(&mut Score)) -> bool;
+}
+
+impl dyn Doc + '_ {
+    /// Change the score with `edit`: the tools, click levels, tuplets and
+    /// the bar menu. The metronome's document takes back an edit that
+    /// changes its meter or its one bar (see [`MetronomeDoc`]): then `None`,
+    /// else what `edit` returned.
+    pub(crate) fn edit_score<R>(&mut self, edit: impl FnOnce(&mut Score) -> R) -> Option<R> {
+        let mut edit = Some(edit);
+        let mut out = None;
+        let kept = self.edit_score_by(&mut |score| out = edit.take().map(|edit| edit(score)));
+        out.filter(|_| kept)
+    }
+}
+
+/// Practice's or the score tab's document: its score and how far it was
+/// edited.
 pub(crate) struct RhythmDoc {
     pub(crate) score: Score,
     pub(crate) cursor: Cursor,
     pub(crate) history: UndoHistory,
     pub(crate) dirty: bool,
     pub(crate) active_pattern_id: Option<u64>,
-    /// The metronome's document only: the ratio name of the meter its score
-    /// clicks and every other meter's bars (see [`crate::metronome_bars`]).
-    pub(crate) meters: MetronomeBars,
 }
 
 impl RhythmDoc {
@@ -68,20 +98,59 @@ impl RhythmDoc {
             history: UndoHistory::new(DEFAULT_UNDO_LIMIT),
             dirty: false,
             active_pattern_id: None,
+        }
+    }
+}
+
+impl Doc for RhythmDoc {
+    fn score(&self) -> &Score {
+        &self.score
+    }
+
+    fn cursor(&self) -> Cursor {
+        self.cursor
+    }
+
+    fn cursor_mut(&mut self) -> &mut Cursor {
+        &mut self.cursor
+    }
+
+    fn history(&self) -> &UndoHistory {
+        &self.history
+    }
+
+    fn history_mut(&mut self) -> &mut UndoHistory {
+        &mut self.history
+    }
+
+    fn snapshot(&self) -> EditorSnapshot {
+        EditorSnapshot {
+            score: self.score.clone(),
+            cursor: self.cursor,
             meters: MetronomeBars::default(),
         }
+    }
+
+    fn restore(&mut self, snap: EditorSnapshot) {
+        self.score = snap.score;
+        self.cursor = snap.cursor;
+    }
+
+    fn edit_score_by(&mut self, edit: &mut dyn FnMut(&mut Score)) -> bool {
+        edit(&mut self.score);
+        true
     }
 }
 
 /// The three documents.
 pub(crate) struct Documents {
-    pub(crate) metronome: RhythmDoc,
+    pub(crate) metronome: MetronomeDoc,
     pub(crate) practice: RhythmDoc,
     pub(crate) score: RhythmDoc,
 }
 
 impl Documents {
-    pub(crate) fn get(&self, doc: Document) -> &RhythmDoc {
+    pub(crate) fn get(&self, doc: Document) -> &dyn Doc {
         match doc {
             Document::Metronome => &self.metronome,
             Document::Practice => &self.practice,
@@ -89,23 +158,49 @@ impl Documents {
         }
     }
 
-    pub(crate) fn get_mut(&mut self, doc: Document) -> &mut RhythmDoc {
+    pub(crate) fn get_mut(&mut self, doc: Document) -> &mut dyn Doc {
         match doc {
             Document::Metronome => &mut self.metronome,
             Document::Practice => &mut self.practice,
             Document::Score => &mut self.score,
         }
     }
+
+    /// `doc`, unless it is the metronome's, which has no pattern and no
+    /// unsaved mark.
+    pub(crate) fn rhythm_mut(&mut self, doc: Document) -> Option<&mut RhythmDoc> {
+        match doc {
+            Document::Metronome => None,
+            Document::Practice => Some(&mut self.practice),
+            Document::Score => Some(&mut self.score),
+        }
+    }
 }
 
 impl EditorState {
     /// The document of the page shown (or behind the More screen).
-    pub(crate) fn doc(&self) -> &RhythmDoc {
+    pub(crate) fn doc(&self) -> &dyn Doc {
         self.docs.get(self.document)
     }
 
-    pub(crate) fn doc_mut(&mut self) -> &mut RhythmDoc {
+    pub(crate) fn doc_mut(&mut self) -> &mut dyn Doc {
         self.docs.get_mut(self.document)
+    }
+
+    /// The document of the page shown, which is not the metronome's.
+    #[cfg(test)]
+    pub(crate) fn rhythm_doc(&self) -> &RhythmDoc {
+        match self.document {
+            Document::Metronome => panic!("the metronome's document is no RhythmDoc"),
+            Document::Practice => &self.docs.practice,
+            Document::Score => &self.docs.score,
+        }
+    }
+
+    /// The document of the page shown, unless it is the metronome's (see
+    /// [`Documents::rhythm_mut`]).
+    pub(crate) fn rhythm_doc_mut(&mut self) -> Option<&mut RhythmDoc> {
+        self.docs.rhythm_mut(self.document)
     }
 }
 
@@ -149,7 +244,7 @@ impl Grooph {
     /// Pattern `id` was deleted: no document is it any more.
     pub(crate) fn forget_pattern(&mut self, id: u64) {
         let docs = &mut self.editor.docs;
-        for doc in [&mut docs.metronome, &mut docs.practice, &mut docs.score] {
+        for doc in [&mut docs.practice, &mut docs.score] {
             if doc.active_pattern_id == Some(id) {
                 doc.active_pattern_id = None;
             }
@@ -201,7 +296,7 @@ mod tests {
         let groove =
             parse_score("4/4 H:e S-H:e H:e H:e H:e S-H:e H:e H:e ; K:q r:q K:q r:q").unwrap();
         app.with_undo_snapshot(|app| {
-            app.editor.doc_mut().score = groove;
+            app.editor.doc_mut().edit_score(|s| *s = groove);
             true
         });
         let groove = score_text(&app);
@@ -220,7 +315,7 @@ mod tests {
         assert_eq!(app.ui.mode, Mode::Edit);
         assert_eq!(app.document(), Document::Practice);
         app.with_undo_snapshot(|app| {
-            app.editor.doc_mut().score = parse_score("4/4 q q q q").unwrap();
+            app.editor.doc_mut().edit_score(|s| *s = parse_score("4/4 q q q q").unwrap());
             true
         });
         assert_eq!(practice_text(&app), text(&parse_score("4/4 q q q q").unwrap()));
@@ -473,7 +568,7 @@ mod tests {
         let mut from = app();
         from.ui.view.show_score_tab = true;
         from.new_score(grooph_measure::StaffKind::Line);
-        from.editor.doc_mut().score = parse_score("3/4 q e e q").unwrap();
+        from.editor.doc_mut().edit_score(|s| *s = parse_score("3/4 q e e q").unwrap());
         let state = PersistedState::from_app(&from);
         let back = restart(&state);
         assert_eq!(back.tab(), Tab::Score);

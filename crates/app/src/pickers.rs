@@ -25,7 +25,7 @@ use grooph_measure::generator::{
 use grooph_measure::swing::{MAX_SWING_PERCENT, MIN_SWING_PERCENT, SwingUnit};
 use grooph_measure::tap_tempo::{TapPulse, tap_pulse};
 use grooph_measure::tempo::{MAX_BPM, MIN_BPM};
-use grooph_measure::{HiddenRests, TimeSignature};
+use grooph_measure::{HiddenRests, Score, TimeSignature};
 use std::ops::RangeInclusive;
 
 /// Height of a touch-friendly row or button.
@@ -687,11 +687,13 @@ impl Grooph {
         match picked {
             // A meter the bar cannot take leaves the picker open.
             Some(ts) if ts != current => self.with_undo_snapshot(|g| {
-                if g.current_measure_mut().set_time_signature(ts).is_err() {
+                let doc = g.editor.doc_mut();
+                let measure_idx = doc.cursor().measure_idx;
+                let set = |score: &mut Score| score.current_mut(measure_idx).set_time_signature(ts);
+                if !matches!(doc.edit_score(set), Some(Ok(_))) {
                     return false;
                 }
-                let doc = g.editor.doc_mut();
-                doc.cursor = doc.score.clamp_cursor(doc.cursor);
+                *doc.cursor_mut() = doc.score().clamp_cursor(doc.cursor());
                 true
             }),
             Some(_) => true,
@@ -851,7 +853,7 @@ impl Grooph {
     /// picking a count closes the dialog. Counts too fine for every measure
     /// of the shown score are left out, unless one is already chosen.
     fn counting_choices(&mut self, ui: &mut Ui) -> bool {
-        let score = &self.editor.doc().score;
+        let score = self.editor.doc().score();
         let counting = &mut self.ui.view.counting;
         let systems: Vec<_> =
             CountingSystem::ALL.map(|s| (s, counting_system_name(s).to_owned())).into();
@@ -899,12 +901,11 @@ impl Grooph {
         ui.add_space(8.0);
         let options: Vec<_> =
             HiddenRests::ALL.into_iter().map(|h| (h, hidden_rests_label(h).to_owned())).collect();
-        let current = self.editor.doc().score.hidden_rests;
+        let current = self.editor.doc().score().hidden_rests;
         let picked = choice_grid(ui, &options, current, 1);
         if let Some(hidden) = picked.filter(|&h| h != current) {
             self.with_undo_snapshot(|app| {
-                app.editor.doc_mut().score.hidden_rests = hidden;
-                true
+                app.editor.doc_mut().edit_score(|s| s.hidden_rests = hidden).is_some()
             });
         }
         picked.is_some()

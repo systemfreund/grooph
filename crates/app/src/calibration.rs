@@ -94,7 +94,7 @@ pub(crate) fn played_score<'a>(
     document: Document,
     play_along: &'a PlayAlongState,
 ) -> &'a Score {
-    play_along.running_calibration().map_or(&docs.get(document).score, |cal| &cal.score)
+    play_along.running_calibration().map_or(docs.get(document).score(), |cal| &cal.score)
 }
 
 impl Grooph {
