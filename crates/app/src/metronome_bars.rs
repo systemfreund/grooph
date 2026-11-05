@@ -224,18 +224,24 @@ impl Doc for MetronomeDoc {
         self.meters = snap.meters;
     }
 
-    /// An edit that would change the meter is taken back: the meter
-    /// changes only through [`MetronomeDoc::click_meter`] and
-    /// [`MetronomeDoc::keep_meter_bars`], which keep the old meter's bars.
-    fn edit_score_by(&mut self, edit: &mut dyn FnMut(&mut Score)) {
+    /// An edit that would change the meter, or leave other than one bar,
+    /// is taken back: the meter changes only through
+    /// [`MetronomeDoc::click_meter`] and [`MetronomeDoc::keep_meter_bars`],
+    /// which keep the old meter's bars.
+    fn edit_score_by(&mut self, edit: &mut dyn FnMut(&mut Score)) -> bool {
         let before = self.score.clone();
         edit(&mut self.score);
         let meter = before.measures()[0].time_signature();
-        if self.score.measures().first().map(Measure::time_signature) != Some(meter) {
-            log::warn!("an edit would have changed the metronome's meter; taken back");
+        let kept = match self.score.measures() {
+            [bar] => bar.time_signature() == meter,
+            _ => false,
+        };
+        if !kept {
+            log::warn!("an edit would have changed the metronome's meter or bar; taken back");
             self.score = before;
             self.cursor = self.score.clamp_cursor(self.cursor);
         }
+        kept
     }
 }
 
@@ -306,8 +312,9 @@ mod tests {
         assert_eq!(bars, MetronomeBars::default());
     }
 
-    /// An edit of the score keeps the meter: one that would change it is
-    /// taken back, so the new meter's kept bars are not hidden by it.
+    /// An edit of the score keeps the meter and the one bar: one that would
+    /// change them is taken back and reported, so the new meter's kept bars
+    /// are not hidden by it.
     #[test]
     fn an_edit_cannot_change_the_meter() {
         let (four, three) = (TimeSignature::FOUR_FOUR, TimeSignature::THREE_FOUR);
@@ -325,9 +332,12 @@ mod tests {
         assert_ne!(clicked, Score::single(meter_click_bar(four)));
         // A meter change, by a bar's meter or by a whole score, does not.
         let set = doc.edit_score(|s| s.measures_mut()[0].set_time_signature(three));
-        assert!(set.is_ok());
+        assert!(set.is_none());
         assert_eq!(*doc.score(), clicked);
-        doc.edit_score(|s| *s = Score::single(meter_click_bar(three)));
+        assert_eq!(doc.edit_score(|s| *s = Score::single(meter_click_bar(three))), None);
+        assert_eq!(*doc.score(), clicked);
+        // Nor does a second bar, even of the same meter.
+        assert_eq!(doc.edit_score(|s| s.push(meter_click_bar(four))), None);
         assert_eq!(*doc.score(), clicked);
         // 3/4 kept its edited bar, and comes back with it through
         // `click_meter`.

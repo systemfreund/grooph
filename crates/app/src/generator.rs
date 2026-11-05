@@ -156,7 +156,7 @@ impl Grooph {
     fn drop_first_measure(&mut self, timing: &ScoreTiming) {
         let tracker = &mut self.playback_ctl.accuracy.tracker;
         tracker.update_progress(clock::now_seconds(), timing, self.editor.doc().score());
-        if self.editor.doc_mut().edit_score(|score| score.remove(0)).is_none() {
+        if self.editor.doc_mut().edit_score(|score| score.remove(0)).flatten().is_none() {
             return;
         }
         let ticks = u64::from(timing.ticks_per_measure(0));

@@ -101,10 +101,12 @@ impl Grooph {
             && voice < self.editor.doc().score().voicing.voices()
         {
             self.with_undo_snapshot(|app| {
-                app.editor.doc_mut().edit_score(|score| {
-                    score.current_mut(cursor.measure_idx).fill_voices(voice + 1);
-                });
-                true
+                app.editor
+                    .doc_mut()
+                    .edit_score(|score| {
+                        score.current_mut(cursor.measure_idx).fill_voices(voice + 1)
+                    })
+                    .is_some()
             });
         }
         let doc = self.editor.doc_mut();

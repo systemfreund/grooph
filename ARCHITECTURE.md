@@ -669,8 +669,8 @@ grooph's metronome runs inside AI chats as an
   link; undo restores the whole document), which keeps the old meter's
   bars, and `keep_meter_bars`, which sets a meter's bars without changing
   the meter (a link's click bar, a ratio pick). Every other edit goes
-  through `Doc::edit_score`, which takes back one that would change the
-  meter. `click_bars`/`meter_bars` read them: the audio engine
+  through `Doc::edit_score`, which takes back (and reports, as `None`) one
+  that would change the meter or add a bar. `click_bars`/`meter_bars` read them: the audio engine
   takes the click bars when it plays a rhythm, persistence saves them as
   one `SavedMetronome`. A metronome link sets the meter and clicks
   in place, also with the tab open; a preset, which needs a rhythm, closes

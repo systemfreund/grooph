@@ -60,19 +60,21 @@ pub(crate) trait Doc {
     fn snapshot(&self) -> EditorSnapshot;
     /// Bring back `snap`, taken of this document.
     fn restore(&mut self, snap: EditorSnapshot);
-    /// Run `edit` on the score. See [`edit_score`](#method.edit_score).
-    fn edit_score_by(&mut self, edit: &mut dyn FnMut(&mut Score));
+    /// Run `edit` on the score; whether the edit was kept. See
+    /// [`edit_score`](#method.edit_score).
+    fn edit_score_by(&mut self, edit: &mut dyn FnMut(&mut Score)) -> bool;
 }
 
 impl dyn Doc + '_ {
     /// Change the score with `edit`: the tools, click levels, tuplets and
     /// the bar menu. The metronome's document takes back an edit that
-    /// changes its meter (see [`MetronomeDoc`]).
-    pub(crate) fn edit_score<R>(&mut self, edit: impl FnOnce(&mut Score) -> R) -> R {
+    /// changes its meter or its one bar (see [`MetronomeDoc`]): then `None`,
+    /// else what `edit` returned.
+    pub(crate) fn edit_score<R>(&mut self, edit: impl FnOnce(&mut Score) -> R) -> Option<R> {
         let mut edit = Some(edit);
         let mut out = None;
-        self.edit_score_by(&mut |score| out = edit.take().map(|edit| edit(score)));
-        out.expect("edit_score_by runs the edit")
+        let kept = self.edit_score_by(&mut |score| out = edit.take().map(|edit| edit(score)));
+        out.filter(|_| kept)
     }
 }
 
@@ -134,8 +136,9 @@ impl Doc for RhythmDoc {
         self.cursor = snap.cursor;
     }
 
-    fn edit_score_by(&mut self, edit: &mut dyn FnMut(&mut Score)) {
+    fn edit_score_by(&mut self, edit: &mut dyn FnMut(&mut Score)) -> bool {
         edit(&mut self.score);
+        true
     }
 }
 

@@ -593,7 +593,10 @@ impl Grooph {
 
     /// Change the voice the cursor is in with `edit` (see
     /// [`documents::Doc::edit_score`]).
-    pub(crate) fn edit_current_voice<R>(&mut self, edit: impl FnOnce(&mut VoiceBar) -> R) -> R {
+    pub(crate) fn edit_current_voice<R>(
+        &mut self,
+        edit: impl FnOnce(&mut VoiceBar) -> R,
+    ) -> Option<R> {
         let cursor = self.editor.doc().score().clamp_cursor(self.editor.doc().cursor());
         self.editor.doc_mut().edit_score(|score| edit(score.voice_at_mut(cursor)))
     }
@@ -656,7 +659,8 @@ impl Grooph {
         beat_kind: Option<BeatKind>,
     ) -> Option<Modification> {
         let pen = self.edit_instrument();
-        let result = self.edit_current_voice(|voice| voice.modify_beat(idx, base, beat_kind, pen));
+        let result =
+            self.edit_current_voice(|voice| voice.modify_beat(idx, base, beat_kind, pen)).flatten();
         if result.is_some() {
             self.step_cursor(|_| true);
         }
@@ -678,7 +682,9 @@ impl Grooph {
 
     fn set_tuplet(&mut self, idx: usize, tuplet_spec: TupletSpec) -> Option<Modification> {
         let pen = self.edit_instrument();
-        let result = self.edit_current_voice(|voice| voice.set_tuplet(idx, tuplet_spec, true, pen));
+        let result = self
+            .edit_current_voice(|voice| voice.set_tuplet(idx, tuplet_spec, true, pen))
+            .flatten();
         match &result {
             Some(Modification::DissolveTuplet(tuplet_idx)) => {
                 let new_len = self.current_voice().beats().len();
@@ -766,7 +772,9 @@ impl Grooph {
             let doc = app.editor.doc_mut();
             let cursor = doc.score().clamp_cursor(doc.cursor());
             let tick = doc.score().tick_of(cursor);
-            if !doc.edit_score(|score| score.measures_mut()[cursor.measure_idx].clean_up()) {
+            if doc.edit_score(|score| score.measures_mut()[cursor.measure_idx].clean_up())
+                != Some(true)
+            {
                 return false;
             }
             *doc.cursor_mut() = doc.score().cursor_at_tick(cursor, tick);

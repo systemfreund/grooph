@@ -889,11 +889,11 @@ impl Grooph {
             ToolKind::Meta(MetaOp::ResetMeasure) => {
                 // The voice being edited; the others stay.
                 let cursor = self.editor.doc().score().clamp_cursor(self.editor.doc().cursor());
-                self.editor.doc_mut().edit_score(|score| {
+                let cleared = self.editor.doc_mut().edit_score(|score| {
                     score.measures_mut()[cursor.measure_idx].clear_voice(cursor.voice, Rest);
                 });
                 *self.editor.doc_mut().cursor_mut() = Cursor { beat_idx: 0, ..cursor };
-                true
+                cleared.is_some()
             }
             ToolKind::Modify(modifier) => {
                 if beats_len == 0 {
@@ -912,7 +912,8 @@ impl Grooph {
                 }
                 let idx = self.editor.doc().cursor().beat_idx.min(beats_len - 1);
                 let pen = self.edit_instrument();
-                let changed = self.edit_current_voice(|voice| modify(voice, idx, pen, modifier));
+                let changed = self.edit_current_voice(|voice| modify(voice, idx, pen, modifier))
+                    == Some(true);
                 // A sticking written moves on to the next beat played by
                 // hand, as a note does to the next beat; one taken away, and
                 // the marks a beat may get several of, stay.

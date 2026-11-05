@@ -432,7 +432,9 @@ impl Grooph {
         }
         let bar = metronome_bar(bar, self.counter_bar().as_ref());
         self.with_undo_snapshot(|app| {
-            app.editor.doc_mut().edit_score(|s| *s = Score::single(bar));
+            if app.editor.doc_mut().edit_score(|s| *s = Score::single(bar)).is_none() {
+                return false;
+            }
             *app.editor.doc_mut().cursor_mut() = Cursor::start();
             true
         });
@@ -546,10 +548,13 @@ impl Grooph {
         let level = click_level(&counter, idx).next();
         let voice = MetronomeVoice::Counter.idx();
         self.with_undo_snapshot(|app| {
-            app.editor.doc_mut().edit_score(|score| {
+            let set = app.editor.doc_mut().edit_score(|score| {
                 let bar = &mut score.measures_mut()[0];
                 bar.voice_mut(voice).expect("checked above").set_click_level(idx, level);
             });
+            if set.is_none() {
+                return false;
+            }
             *app.editor.doc_mut().cursor_mut() = Cursor::in_voice(0, voice, idx);
             true
         });
@@ -568,7 +573,7 @@ impl Grooph {
                 bar.first_voice_mut().set_click_level(idx, level.next());
                 true
             });
-            if !set {
+            if set != Some(true) {
                 return false;
             }
             *app.editor.doc_mut().cursor_mut() =

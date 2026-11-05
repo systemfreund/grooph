@@ -690,7 +690,7 @@ impl Grooph {
                 let doc = g.editor.doc_mut();
                 let measure_idx = doc.cursor().measure_idx;
                 let set = |score: &mut Score| score.current_mut(measure_idx).set_time_signature(ts);
-                if doc.edit_score(set).is_err() {
+                if !matches!(doc.edit_score(set), Some(Ok(_))) {
                     return false;
                 }
                 *doc.cursor_mut() = doc.score().clamp_cursor(doc.cursor());
@@ -905,8 +905,7 @@ impl Grooph {
         let picked = choice_grid(ui, &options, current, 1);
         if let Some(hidden) = picked.filter(|&h| h != current) {
             self.with_undo_snapshot(|app| {
-                app.editor.doc_mut().edit_score(|s| s.hidden_rests = hidden);
-                true
+                app.editor.doc_mut().edit_score(|s| s.hidden_rests = hidden).is_some()
             });
         }
         picked.is_some()

@@ -252,7 +252,7 @@ mod tests {
     fn an_edit_clears_the_marks_and_marks_the_score_unsaved() {
         let mut app = practice_app();
         app.with_undo_snapshot(|app| {
-            app.edit_current_voice(|voice| voice.set_beat(0, Beat::rest(q())).is_ok())
+            app.edit_current_voice(|voice| voice.set_beat(0, Beat::rest(q())).is_ok()) == Some(true)
         });
         assert!(marks_cleared(&app));
         let doc = &app.editor.docs.practice;
@@ -296,7 +296,9 @@ mod tests {
         let bar = app.score_timing().measure_start_tick(1) as f64;
         play_at(&mut app, bar + 10.0);
         let before = clock::now_seconds();
-        app.with_undo_snapshot(|app| app.editor.doc_mut().edit_score(|s| s.remove(1)).is_some());
+        app.with_undo_snapshot(|app| {
+            app.editor.doc_mut().edit_score(|s| s.remove(1)).flatten().is_some()
+        });
         assert_anchored_at(&app, 10.0, before);
         let timing = app.score_timing();
         let score = app.played_score().clone();
