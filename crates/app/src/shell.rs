@@ -1111,8 +1111,11 @@ impl Grooph {
         // (a drag up from there scrolls, the sheet is open already), else
         // only the handle does.
         let at_top = ui.data(|d| d.get_temp::<bool>(top_id)).unwrap_or(true);
-        let flick =
-            if scrolls && !at_top { rect.with_max_y(rect.top() + MIN_TOUCH_TARGET) } else { rect };
+        let flick = if scrolls && !at_top {
+            rect.with_max_y(rect.top() + SHEET_HANDLE_HEIGHT)
+        } else {
+            rect
+        };
         Some((area.response.layer_id, flick))
     }
 
@@ -1664,9 +1667,15 @@ mod tests {
         assert_eq!(fired(&drag(&ctx, pos2(200.0, 650.0), vec2(0.0, 80.0))), [false]);
     }
 
-    /// Runs the app's shell at the size of a small phone (375 × 667).
-    fn small_phone_frame(app: &mut crate::Grooph, ctx: &Context, time: f64, events: Vec<Event>) {
-        let screen = Rect::from_min_size(Pos2::ZERO, vec2(375.0, 667.0));
+    /// Runs the app's shell on a screen of `size`.
+    fn shell_frame(
+        app: &mut crate::Grooph,
+        ctx: &Context,
+        size: egui::Vec2,
+        time: f64,
+        events: Vec<Event>,
+    ) {
+        let screen = Rect::from_min_size(Pos2::ZERO, size);
         let input =
             RawInput { screen_rect: Some(screen), time: Some(time), events, ..Default::default() };
         let mut output = ctx.run_ui(input, |ui| {
@@ -1676,65 +1685,119 @@ mod tests {
         output.textures_delta.clear();
     }
 
-    #[test]
-    fn many_options_scroll_below_the_top_third_of_a_small_phone() {
-        use super::{SHEET_OPTIONS_ID, Tab};
+    /// The app on `tab` with its options sheet slid all the way open on a
+    /// screen of `size`; the sheet's rect and the height of all its rows.
+    fn open_sheet(tab: super::Tab, size: egui::Vec2) -> (Context, crate::Grooph, Rect, f32) {
         let ctx = Context::default();
         let cc = crate::test_support::creation_context(ctx.clone());
         let mut app = crate::Grooph::new(&cc);
-        for tab in [Tab::Practice, Tab::Metronome] {
-            app.select_tab(tab);
-            app.ui.shell.options_collapsed = false;
-            // Long enough for the sheet to slide all the way open.
-            for i in 0..40 {
-                small_phone_frame(&mut app, &ctx, i as f64 * 0.05, vec![]);
-            }
-            let id = egui::Id::unique(SHEET_OPTIONS_ID);
-            let sheet = ctx.memory(|m| m.area_rect(id)).unwrap();
-            assert!(sheet.top() >= 667.0 / 3.0 - 0.5, "{tab:?}: {sheet:?}");
+        app.select_tab(tab);
+        app.ui.shell.options_collapsed = false;
+        for i in 0..40 {
+            shell_frame(&mut app, &ctx, size, i as f64 * 0.05, vec![]);
         }
-        // Practice's rows don't all fit: a drag on them scrolls them, and
-        // folds the sheet only from the top.
-        app.select_tab(Tab::Practice);
-        let id = egui::Id::unique(SHEET_OPTIONS_ID);
+        let id = egui::Id::unique(super::SHEET_OPTIONS_ID);
         let sheet = ctx.memory(|m| m.area_rect(id)).unwrap();
-        let rows = id.with("rows_height");
-        let full = ctx.data(|d| d.get_temp::<f32>(rows)).unwrap();
-        assert!(full > sheet.height(), "{full} {sheet:?}");
-        let from = sheet.center();
-        let drag = |app: &mut crate::Grooph, dy: f32, mut t: f64| {
-            let press = vec![Event::PointerMoved(from), button(from, true)];
-            small_phone_frame(app, &ctx, t, press);
-            for step in 1..=6 {
-                t += 0.016;
-                let pos = from + vec2(0.0, dy * step as f32 / 6.0);
-                small_phone_frame(app, &ctx, t, vec![Event::PointerMoved(pos)]);
-            }
-            t += 0.016;
-            small_phone_frame(app, &ctx, t, vec![button(from + vec2(0.0, dy), false)]);
-        };
-        // The rows scrolled down a little (a wheel here; a finger on a
-        // phone): a drag down is for scrolling back, the sheet stays.
-        let wheel = |dy: f32| Event::MouseWheel {
+        let rows = ctx.data(|d| d.get_temp::<f32>(id.with("rows_height"))).unwrap();
+        (ctx, app, sheet, rows)
+    }
+
+    /// A drag by `dy` from `from`, starting at `t`.
+    fn drag_app(
+        app: &mut crate::Grooph,
+        ctx: &Context,
+        size: egui::Vec2,
+        from: Pos2,
+        dy: f32,
+        t: f64,
+    ) {
+        shell_frame(app, ctx, size, t, vec![Event::PointerMoved(from), button(from, true)]);
+        for step in 1..=6 {
+            let pos = from + vec2(0.0, dy * step as f32 / 6.0);
+            shell_frame(app, ctx, size, t + step as f64 * 0.016, vec![Event::PointerMoved(pos)]);
+        }
+        shell_frame(app, ctx, size, t + 0.112, vec![button(from + vec2(0.0, dy), false)]);
+    }
+
+    /// Scrolls what is under `at` by `dy` (a wheel here; a finger on a
+    /// phone) and lets it settle, starting at `t`.
+    fn wheel_app(
+        app: &mut crate::Grooph,
+        ctx: &Context,
+        size: egui::Vec2,
+        at: Pos2,
+        dy: f32,
+        t: f64,
+    ) {
+        let wheel = Event::MouseWheel {
             unit: egui::MouseWheelUnit::Point,
             delta: vec2(0.0, dy),
             phase: egui::TouchPhase::Move,
             source: egui::MouseWheelSource::Unknown,
             modifiers: Modifiers::NONE,
         };
-        let settle = |app: &mut crate::Grooph, events: Vec<Event>, t: f64| {
-            small_phone_frame(app, &ctx, t, [vec![Event::PointerMoved(from)], events].concat());
-            for i in 1..40 {
-                small_phone_frame(app, &ctx, t + i as f64 * 0.05, vec![]);
-            }
-        };
-        settle(&mut app, vec![wheel(-80.0)], 2.0);
-        drag(&mut app, 90.0, 4.0);
+        shell_frame(app, ctx, size, t, vec![Event::PointerMoved(at), wheel]);
+        for i in 1..40 {
+            shell_frame(app, ctx, size, t + i as f64 * 0.05, vec![]);
+        }
+    }
+
+    const SMALL_PHONE: egui::Vec2 = vec2(375.0, 667.0);
+
+    #[test]
+    fn many_options_scroll_below_the_top_third_of_a_small_phone() {
+        use super::Tab;
+        for tab in [Tab::Practice, Tab::Metronome, Tab::Score] {
+            let (_, _, sheet, _) = open_sheet(tab, SMALL_PHONE);
+            assert!(sheet.top() >= SMALL_PHONE.y / 3.0 - 0.5, "{tab:?}: {sheet:?}");
+        }
+    }
+
+    #[test]
+    fn scrolled_options_fold_from_their_top_or_the_handle_only() {
+        let size = SMALL_PHONE;
+        let (ctx, mut app, sheet, rows) = open_sheet(super::Tab::Practice, size);
+        // Practice's rows don't all fit.
+        assert!(rows > sheet.height(), "{rows} {sheet:?}");
+        // Scrolled down a little, a drag down is for scrolling back, also
+        // from the first row just under the handle: the sheet stays.
+        wheel_app(&mut app, &ctx, size, sheet.center(), -80.0, 2.0);
+        drag_app(&mut app, &ctx, size, sheet.center(), 90.0, 4.0);
         assert!(!app.ui.shell.options_collapsed);
-        // Back at the top, a drag down folds it.
-        settle(&mut app, vec![wheel(400.0)], 6.0);
-        drag(&mut app, 90.0, 8.0);
+        wheel_app(&mut app, &ctx, size, sheet.center(), -80.0, 5.0);
+        let first_row = sheet.center_top() + vec2(0.0, super::SHEET_HANDLE_HEIGHT + 8.0);
+        drag_app(&mut app, &ctx, size, first_row, 90.0, 7.0);
+        assert!(!app.ui.shell.options_collapsed);
+        // The handle folds it.
+        wheel_app(&mut app, &ctx, size, sheet.center(), -80.0, 8.0);
+        let handle = sheet.center_top() + vec2(0.0, super::SHEET_HANDLE_HEIGHT / 2.0);
+        drag_app(&mut app, &ctx, size, handle, 90.0, 10.0);
         assert!(app.ui.shell.options_collapsed);
+        // Back at the top, a drag down on the rows folds it.
+        app.ui.shell.options_collapsed = false;
+        for i in 0..40 {
+            shell_frame(&mut app, &ctx, size, 11.0 + i as f64 * 0.05, vec![]);
+        }
+        wheel_app(&mut app, &ctx, size, sheet.center(), 400.0, 14.0);
+        drag_app(&mut app, &ctx, size, sheet.center(), 90.0, 16.0);
+        assert!(app.ui.shell.options_collapsed);
+    }
+
+    #[test]
+    fn options_that_fit_show_whole_and_fold_on_a_drag_anywhere() {
+        let size = vec2(390.0, 1400.0);
+        let (ctx, mut app, sheet, rows) = open_sheet(super::Tab::Practice, size);
+        // All of the rows are shown: nothing to scroll.
+        assert!(sheet.height() >= rows, "{rows} {sheet:?}");
+        drag_app(&mut app, &ctx, size, sheet.center(), 90.0, 2.0);
+        assert!(app.ui.shell.options_collapsed);
+    }
+
+    #[test]
+    fn options_keep_their_least_height_on_a_short_screen() {
+        let (_, _, sheet, _) = open_sheet(super::Tab::Practice, vec2(375.0, 420.0));
+        let shown = sheet.height() - super::SHEET_HANDLE_HEIGHT;
+        assert!(shown >= super::SHEET_MIN_ROWS_HEIGHT - 0.5, "{sheet:?}");
     }
 
     #[test]
