@@ -742,6 +742,9 @@ mod tests {
                     keep_reached: true,
                     ..TempoRamp::default()
                 },
+                // Not in version 3.
+                click: true,
+                metronome_click: false,
             },
             generator: GeneratorConfig {
                 settings: GeneratorSettings {
@@ -954,6 +957,23 @@ mod tests {
         let (s, backup) = restore(Some(&saved));
         assert!(backup.is_none());
         assert_eq!(ron::to_string(&s).unwrap(), saved);
+    }
+
+    #[test]
+    fn the_click_settings_restore_in_the_state_and_a_preset() {
+        // Not in version 3, so at their defaults in `every_setting_changed`.
+        let mut state = every_setting_changed();
+        for playback in [&mut state.playback, &mut state.presets.presets[0].settings.playback] {
+            playback.click = false;
+            playback.metronome_click = true;
+        }
+        let saved = ron::to_string(&state).unwrap();
+        let (s, backup) = restore(Some(&saved));
+        assert!(backup.is_none());
+        for playback in [&s.playback, &s.presets.presets[0].settings.playback] {
+            assert!(!playback.click);
+            assert!(playback.metronome_click);
+        }
     }
 
     #[test]

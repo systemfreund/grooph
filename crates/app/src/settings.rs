@@ -30,6 +30,11 @@ pub(crate) struct PlaybackSettings {
     pub(crate) gap_click: GapClick,
     /// Metronome trainer: stepwise tempo change from `bpm`.
     pub(crate) tempo_ramp: TempoRamp,
+    /// Practice and the score tab click along with the rhythm.
+    pub(crate) click: bool,
+    /// Practice and the score tab click the click bars edited in the
+    /// metronome; off, each meter's own.
+    pub(crate) metronome_click: bool,
 }
 
 impl Default for PlaybackSettings {
@@ -40,6 +45,8 @@ impl Default for PlaybackSettings {
             swing: Swing::default(),
             gap_click: GapClick::default(),
             tempo_ramp: TempoRamp::default(),
+            click: true,
+            metronome_click: false,
         }
     }
 }

@@ -8,7 +8,8 @@ use crate::generator::GeneratorState;
 use crate::metronome_view::FillLook;
 use crate::metronome_view::ratio_label;
 use crate::pickers::{
-    Picker, ROW_HEIGHT, hidden_rests_label, shown_groups, silent_bars_label, swing_label,
+    Picker, ROW_HEIGHT, click_source_label, hidden_rests_label, shown_groups, silent_bars_label,
+    swing_label,
 };
 use crate::share::paint_share_icon;
 use crate::tokens;
@@ -937,6 +938,7 @@ impl Grooph {
         self.hidden_rests_row(ui);
         self.sticking_row(ui);
         self.shared_rows(ui);
+        self.metronome_click_row(ui);
     }
 
     /// Where the stickings go, and the switch that shows or hides them;
@@ -1179,6 +1181,16 @@ impl Grooph {
         self.swing_row(ui);
     }
 
+    /// The click played here, the standard one or the metronome's, which
+    /// opens its picker; the switch mutes it.
+    fn metronome_click_row(&mut self, ui: &mut Ui) {
+        let settings = &mut self.playback_ctl.settings;
+        let label = click_source_label(settings.metronome_click);
+        if split_row(ui, "Click", label, &mut settings.click).clicked() {
+            self.ui.dialogs.picker = Some(Picker::Click);
+        }
+    }
+
     /// The count under the staff, shown in every tab; opens its picker. The
     /// switch brings back the last count that fits the score.
     fn counting_row(&mut self, ui: &mut Ui) {
@@ -1320,6 +1332,7 @@ impl Grooph {
         self.timing_feedback_row(ui);
         self.sticking_row(ui);
         self.shared_rows(ui);
+        self.metronome_click_row(ui);
         // Edited here, as the metronome's "Edit clicks".
         if value_row(ui, "Edit rhythm", "✏").clicked() {
             self.edit_page();

@@ -282,6 +282,8 @@ pub enum Played {
     /// A rhythm, with the click bar of each measure's meter (`click`).
     #[default]
     Score,
+    /// A rhythm alone, without clicks; `click` does not apply.
+    Rhythm,
     /// Clicks only, as the metronome plays them: each measure is a click
     /// bar, its first voice the clicks and a second voice, if any, the
     /// counter rhythm ([`COUNTER_VOICE`]).
@@ -575,7 +577,10 @@ impl Audio {
         let options = &self.options;
         let timing = ScoreTiming::from_score(score, bpm).with_swing(options.swing);
         let schedule = match options.played {
-            Played::Score => Schedule::build(score, &timing, options.ghost_notes, &options.click),
+            Played::Score => {
+                Schedule::build(score, &timing, options.ghost_notes, Some(&options.click))
+            }
+            Played::Rhythm => Schedule::build(score, &timing, options.ghost_notes, None),
             Played::Clicks => Schedule::clicks(score, &timing),
         };
         let count_in = if options.count_in { count_in_plan(score).map(Arc::new) } else { None };
@@ -1120,7 +1125,7 @@ mod tests {
 
     fn plan_for(audio: &Audio, bpm: u32, score: &Score) -> Arc<PlaybackPlan> {
         let timing = ScoreTiming::from_score(score, bpm);
-        let schedule = Schedule::build(score, &timing, None, &audio.options.click);
+        let schedule = Schedule::build(score, &timing, None, Some(&audio.options.click));
         let count_in = count_in_plan(score).map(Arc::new);
         Arc::new(PlaybackPlan {
             bpm,

@@ -35,13 +35,13 @@ fn button_width(ui: &egui::Ui, text: &str) -> f32 {
 }
 
 /// How a preview draws the notes, taken from the main staff.
-struct PreviewLook {
-    family: FontFamily,
-    stem_length_factor: f32,
+pub(crate) struct PreviewLook {
+    pub(crate) family: FontFamily,
+    pub(crate) stem_length_factor: f32,
 }
 
 /// The first bar of `score` as notation in a row `width` wide.
-fn pattern_preview(ui: &mut egui::Ui, score: &Score, width: f32, look: &PreviewLook) {
+pub(crate) fn pattern_preview(ui: &mut egui::Ui, score: &Score, width: f32, look: &PreviewLook) {
     let (rect, _) =
         ui.allocate_exact_size(vec2(width, PREVIEW_HEIGHT_EM * PREVIEW_EM), Sense::hover());
     // Off screen in the list: no layout to build.

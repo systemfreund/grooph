@@ -4,6 +4,7 @@
 //! dialog.
 
 use crate::guide::Guide;
+use crate::library_panel::{PreviewLook, pattern_preview};
 use crate::metronome_view::{FillLook, click_fills, ratio_label};
 use crate::mixer_panel::mixer_width;
 use crate::platform;
@@ -58,6 +59,8 @@ pub(crate) enum Picker {
     Counting,
     /// The side of the staff the stickings go on.
     Sticking,
+    /// Whether Practice and the score tab click the metronome's click bars.
+    Click,
     Preset,
     /// The metronome tab's meter.
     MetronomeMeter,
@@ -85,6 +88,12 @@ pub(crate) enum Picker {
     Settings,
     /// Contact, keybindings and touch controls.
     Help,
+}
+
+/// The click Practice and the score tab play (see
+/// [`crate::settings::PlaybackSettings::metronome_click`]).
+pub(crate) fn click_source_label(metronome: bool) -> &'static str {
+    if metronome { "Metronome" } else { "Standard" }
 }
 
 /// The rests shown with `hidden` left out.
@@ -429,6 +438,7 @@ impl Grooph {
                 Picker::Guide => "Guide",
                 Picker::Counting => "Count labels",
                 Picker::Sticking => "Sticking",
+                Picker::Click => "Click",
                 Picker::Preset => "Preset",
                 Picker::MetronomeMeter | Picker::BarMeter => "Time signature",
                 Picker::ClickFill => "Subdivision",
@@ -461,6 +471,7 @@ impl Grooph {
                 Picker::Guide => self.guide_choices(ui),
                 Picker::Counting => self.counting_choices(ui),
                 Picker::Sticking => self.sticking_choices(ui),
+                Picker::Click => self.click_choices(ui),
                 Picker::Preset => {
                     preset = self.preset_cards(ui);
                     preset.is_some()
@@ -890,6 +901,39 @@ impl Grooph {
             *sticking = crate::StickingSettings { shown: true, above };
         }
         picked.is_some()
+    }
+
+    /// The click played here: every meter's standard click, or the click
+    /// bars edited in the metronome tab, with the bar each meter of the
+    /// rhythm clicks under the one chosen. Stays open on a pick, so the bars
+    /// can be compared.
+    fn click_choices(&mut self, ui: &mut Ui) -> bool {
+        ui.weak(
+            "Standard clicks every meter's beats. Metronome plays the clicks edited in the Metronome tab.",
+        );
+        ui.add_space(8.0);
+        let look = PreviewLook {
+            family: self.ui.fonts.music_font_id.family.clone(),
+            stem_length_factor: self.ui.layout.stem_length_factor,
+        };
+        let metronome = self.playback_ctl.settings.metronome_click;
+        let click = self.played_click_bars();
+        // A score of many meters scrolls where it would push the buttons and
+        // "Done" off the screen.
+        let room = (ui.ctx().content_rect().height() - 360.0).max(120.0);
+        egui::ScrollArea::vertical().max_height(room).show(ui, |ui| {
+            for ts in self.played_meters() {
+                let bar = Score::single(click.for_meter(ts));
+                pattern_preview(ui, &bar, ui.available_width(), &look);
+            }
+        });
+        ui.add_space(8.0);
+        let options = [false, true].map(|m| (m, click_source_label(m).to_owned()));
+        if let Some(metronome) = choice_grid(ui, &options, metronome, 2) {
+            self.playback_ctl.settings.metronome_click = metronome;
+            self.playback_ctl.settings.click = true;
+        }
+        false
     }
 
     /// Which rests the score leaves out in its bars of two voices; picking
