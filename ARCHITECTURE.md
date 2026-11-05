@@ -187,7 +187,9 @@ spread across callers.
 1. `grooph_layout::pixel_layout::build_measure_layout` computes `MeasureLayout`
    (note/beam/tuplet positions) from `Measure` and `LayoutOpts`.
 2. `grooph_render` renders the result with egui (`staff::draw_staff`, one
-   measure each with `measure::render_measure_at`).
+   measure each with `measure::render_measure_at`). What a staff is drawn
+   from (score, layout, options, cursor, playback marks) is one
+   `staff::RenderContext`; each layer takes what it needs from it.
 3. The font `Bravura.otf` (SMuFL) lives in `crates/app/assets/fonts`.
 4. `grooph_layout::staff_layout::build_staff_layout` lays out a score, one
    measure per row, every voice of a measure (`PlacedMeasure::voices`, one
@@ -305,9 +307,12 @@ spread across callers.
   (the note of the lowest numbered voice playing there, else the rest of the
   lowest numbered voice with a beat there). The accuracy
   reference (`compute_global_beat_onsets`) and ghost notes follow `onsets`;
-  the playback cursor, guide anchors, count labels (`Columns` in
-  `grooph_render::measure`) and accuracy marks too, at the head of the beat
-  standing for each onset.
+  the playback cursor, guide anchors, count labels, stickings and accuracy
+  marks too, at the head of the beat standing for each onset: each bar's
+  `TickMap` (`grooph_layout::tick_map`, `PlacedMeasure::ticks`) is the one
+  mapping from a tick to x for all of them. Picking a stretch of time, a bar
+  or a row on the staff is `hit_test_span`, `hit_test_bar` and
+  `hit_test_row` next to `hit_test_head`.
   The layout's shared spacing of voices (`basis::Columns`) takes its ticks
   from the same `onsets::merged`, so drawing and sound agree on them.
   A one-line score has one voice, so its onsets are its beats.
@@ -1000,7 +1005,7 @@ If you add new tools/shortcuts, remember:
   `accuracy/` (`session.rs` onsets and grades, `recorder.rs` hits, `progress.rs` misses).
 - Model/rules: `crates/measure/src/lib.rs`, `voice.rs`, `editing.rs`, `fill.rs`, `notation.rs` (text notation),
   `tempo.rs` (`ScoreTiming`), `counting.rs`, `click.rs`, `counter.rs`.
-- Layout/geometry: `crates/layout/src/staff_layout.rs` (a score in rows), `pixel_layout/` (one measure:
+- Layout/geometry: `crates/layout/src/staff_layout.rs` (a score in rows), `tick_map.rs` (tick to x), `pixel_layout/` (one measure:
   `mod.rs`, `notes.rs`, `beams.rs`, `tuplets.rs`), `staff.rs` (lines, instrument places), `render_plan.rs`.
 - Drawing: `crates/render/src/measure.rs`, `staff.rs`, `beat.rs`.
 - Audio: `crates/audio/src/lib.rs` (engine, plan swap), `schedule.rs`, `tick_source.rs`, `sounds.rs`, `output.rs`.

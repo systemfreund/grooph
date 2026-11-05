@@ -1,56 +1,46 @@
 use crate::beat::draw_beat;
 use crate::glyph::draw_glyph;
+use crate::staff::RenderContext;
 use eframe::egui;
 use eframe::egui::{
     Align2, Color32, FontFamily, FontId, Painter, Pos2, Rangef, Rect, Stroke, pos2,
 };
 use grooph_layout::pixel_layout::{
     BeamLayout, LayoutOpts, MeasureLayout, NoteLayout, TimeSignatureLayout, TupletLayout,
-    onset_head,
 };
+use grooph_layout::staff_layout::PlacedMeasure;
 use grooph_layout::text_rows::{PlacedTextRow, Side};
 use grooph_measure::Measure;
-use grooph_measure::counting::{CountConfig, CountSlot, build_count_slots};
+use grooph_measure::counting::{CountSlot, build_count_slots};
 use grooph_measure::grid::DEFAULT_GRID;
 
-/// Render a measure given a pre-built `MeasureLayout`.
-///
-/// `draw_staff_line` controls whether the horizontal staff line is drawn —
-/// the multi-measure renderer turns it off and draws one continuous line per
-/// system instead. All cursor/playback drawing is scoped to this measure; the
-/// caller decides whether to forward `cursor_idx` based on the active
-/// measure. The count and sticking rows are the staff's (`draw_staff`).
+/// Draws the upper voice of `placed`, a bar of `ctx`'s staff: clef, meter,
+/// notes, the edit cursor and the playback cursor. The staff lines, the
+/// lower voices and the rows of text are the staff's (`draw_staff`).
 ///
 /// `cursor_x` is the pre-computed playback cursor X (in the same coordinate
-/// space as `measure_layout`). The cursor's home measure depends on the
+/// space as the layout). The cursor's home measure depends on the
 /// playback phase: during the first half of a measure's last note the cursor
 /// lives in *this* measure, during the second half it visually moves into the
 /// following measure. The caller (`draw_staff`) decides via `current_cursor_x`
 /// and passes `Some(x)` only to the measure that actually hosts the cursor.
 ///
-/// `lit` draws one note (its index) in the given colour instead of the text
-/// colour.
+/// The note `ctx.lit` points at is drawn in the highlight colour.
 ///
-/// The function orchestrates independent decoration phases — staff line,
-/// clef + time signature, notes/beams/tuplets, edit cursor, playback
-/// cursor. Each phase is a small helper; reorder or extend by editing this
-/// function.
+/// The function orchestrates independent decoration phases — clef + time
+/// signature, notes/beams/tuplets, edit cursor, playback cursor. Each phase
+/// is a small helper; reorder or extend by editing this function.
 pub(crate) fn render_measure_at(
     ui: &mut egui::Ui,
-    measure_layout: &MeasureLayout,
-    opts: &LayoutOpts,
-    cursor_idx: Option<usize>,
-    draw_staff_line: bool,
+    ctx: &RenderContext,
+    placed: &PlacedMeasure,
     cursor_x: Option<f32>,
-    lit: Option<(usize, Color32)>,
 ) {
     let color = ui.visuals().text_color();
+    let highlight = highlight_color(ui.visuals());
     let painter = ui.painter();
-    let rect = opts.rect;
-
-    if draw_staff_line {
-        draw_staff_line_segment(painter, rect, opts.y_center(), opts.em, color);
-    }
+    let measure_layout = placed.layout();
+    let opts = ctx.opts.voice_opts_for(placed, 0);
 
     if let Some(clef) = &measure_layout.clef {
         draw_glyph(painter, clef, &opts.font_id.family, color);
@@ -59,15 +49,15 @@ pub(crate) fn render_measure_at(
         draw_time_signature(painter, ts_layout, &opts.font_id, color);
     }
 
-    draw_notes(painter, measure_layout, color, lit, opts);
+    let lit = ctx.lit_in(0, placed.measure_idx).map(|idx| (idx, highlight));
+    draw_notes(painter, measure_layout, color, lit, &opts);
 
-    if let Some(idx) = cursor_idx {
-        draw_edit_cursor(ui, painter, measure_layout, idx, opts);
+    if let Some(c) = ctx.cursor_in(0, placed.measure_idx) {
+        draw_edit_cursor(ui, painter, measure_layout, c.beat_idx, &opts);
     }
 
     if let Some(x) = cursor_x {
-        let color = highlight_color(ui.visuals());
-        draw_playback_cursor(painter, opts.y_center(), x, opts.em, color);
+        draw_playback_cursor(painter, opts.y_center(), x, opts.em, highlight);
     }
 }
 
@@ -77,10 +67,6 @@ pub(crate) fn render_measure_at(
 /// dark grey. So the dark theme takes yellow and the light one a vivid blue.
 pub fn highlight_color(visuals: &egui::Visuals) -> Color32 {
     if visuals.dark_mode { Color32::YELLOW } else { Color32::from_rgb(0, 110, 240) }
-}
-
-fn draw_staff_line_segment(painter: &Painter, rect: Rect, y: f32, em: f32, color: Color32) {
-    painter.hline(Rangef::new(rect.left(), rect.right()), y, Stroke::new(0.02 * em, color));
 }
 
 /// Draws the meter digits at the laid-out positions. A grouping is not
@@ -137,150 +123,48 @@ pub fn playback_cursor_stroke(em: f32, base: Color32) -> Stroke {
     Stroke::new(0.1 * em, Color32::from_rgba_unmultiplied(base.r(), base.g(), base.b(), 100))
 }
 
-/// The count labels of `measure`, laid out as `voices`, centred on
-/// `label_y`, `size` high. The label at the tick of `count_tick` is lit in
-/// its colour.
-#[expect(clippy::too_many_arguments)]
+/// The count labels of `placed`, a bar of `ctx`'s staff, in `row`, as
+/// `ctx.count_config` counts. The label at the tick of `count_tick` is lit
+/// in its colour.
+///
+/// A label marks the musical position `slot.start_tick` and is placed at
+/// its x in the bar's [`TickMap`](grooph_layout::tick_map::TickMap), where
+/// the playback cursor would be at that tick: over a note or rest starting
+/// there, so labels sit above the notes they count, whatever the spacing
+/// scheme; otherwise between the heads around it, or before the barline
+/// after the last one.
 pub(crate) fn draw_count_layer(
     painter: &Painter,
-    measure: &Measure,
-    voices: &[MeasureLayout],
-    opts: &LayoutOpts,
-    label_y: f32,
-    size: f32,
-    config: &CountConfig,
+    ctx: &RenderContext,
+    placed: &PlacedMeasure,
+    row: &PlacedTextRow,
     text_color: Color32,
     count_tick: Option<(f64, Color32)>,
 ) {
+    let Some(config) = ctx.count_config else { return };
+    let measure = &ctx.score.measures()[placed.measure_idx];
     let (playback_tick, highlight_color) = match count_tick {
         Some((tick, color)) => (Some(tick), color),
         None => (None, text_color),
     };
     let slots = build_count_slots(measure, config);
-    if slots.is_empty() {
+    let selected: Vec<&CountSlot> = slots.iter().filter(|s| s.label.is_some()).collect();
+    if selected.is_empty() || placed.ticks.bar_ticks() == 0 {
         return;
     }
-    let total_ticks = DEFAULT_GRID.ticks_per_measure(&measure.time_signature());
-    draw_count_labels(
-        painter,
-        measure,
-        voices,
-        opts.rect,
-        label_y,
-        size,
-        text_color,
-        highlight_color,
-        &slots,
-        playback_tick,
-        total_ticks,
-    );
-}
+    let active_start = active_label_start(&selected, playback_tick, measure);
 
-/// Where `measure` starts a beat in any of its voices ([`Measure::onsets`]),
-/// with the x of the head standing for each in `voices` (`None` where that
-/// voice's layout has no such note: a layout of another measure). The cursor and the count labels follow
-/// these, so a lower voice's notes between the upper voice's are counted
-/// and passed too; with one voice they are its beats.
-struct Columns {
-    ticks: Vec<u32>,
-    xs: Vec<Option<f32>>,
-}
+    let font = FontId::new(row.text_size(), FontFamily::Proportional);
+    let label_color =
+        Color32::from_rgba_unmultiplied(text_color.r(), text_color.g(), text_color.b(), 200);
 
-impl Columns {
-    fn new(measure: &Measure, voices: &[MeasureLayout]) -> Self {
-        let (ticks, xs) = measure
-            .onsets()
-            .iter()
-            .map(|o| (o.tick, onset_head(voices, o).map(|n| n.center.x)))
-            .unzip();
-        Columns { ticks, xs }
+    for slot in selected {
+        let Some(label) = &slot.label else { continue };
+        let x = placed.ticks.x_at_tick(slot.start_tick as f64);
+        let color =
+            if active_start == Some(slot.start_tick) { highlight_color } else { label_color };
+        painter.text(pos2(x, row.lines[0]), Align2::CENTER_CENTER, label, font.clone(), color);
     }
-
-    /// The column at or before `tick` (the first one starts at 0).
-    fn at(&self, tick: f64) -> Option<usize> {
-        self.ticks.iter().rposition(|&t| t as f64 <= tick)
-    }
-
-    /// Ticks from column `i` to the next, or to the barline at `total`.
-    fn span(&self, i: usize, total: f64) -> f64 {
-        let end = self.ticks.get(i + 1).map_or(total, |&t| t as f64);
-        end - self.ticks[i] as f64
-    }
-}
-
-/// Phase 1 cursor X — cursor lives inside *this* measure at `tick`, laid
-/// out as `voices`. It follows the onsets of all voices ([`Columns`]):
-///
-/// - Inside an onset (not the last): linear interpolation between the heads
-///   of consecutive onsets.
-/// - Last onset, `frac < split`: linear from its head to `rect.right()`
-///   (cursor extends past the last note head, fading out).
-/// - Last onset, `frac >= split`: returns `None`. The cursor visually moves
-///   into the *following* measure — call [`playback_cursor_entering_x`] there.
-///
-/// `split` (see [`last_note_split`]) is the share of the last onset's
-/// duration spent before the barline.
-///
-/// Returns `None` if the measure has no notes or zero total ticks, or the
-/// layout has no head for the onset (a layout of another measure).
-pub fn playback_cursor_x(
-    measure: &Measure,
-    voices: &[MeasureLayout],
-    rect: Rect,
-    tick: f64,
-    split: f64,
-) -> Option<f32> {
-    let ts = measure.time_signature();
-    let total_ticks = DEFAULT_GRID.ticks_per_measure(&ts) as f64;
-    if total_ticks <= 0.0 || voices.first()?.notes.is_empty() {
-        return None;
-    }
-    let t = clamp_tick_to_measure(tick, total_ticks);
-    let columns = Columns::new(measure, voices);
-
-    // Every voice starts at 0, so a column is at or before `t`.
-    let i = columns.at(t)?;
-    let start = columns.ticks[i] as f64;
-    let dur_ticks = columns.span(i, total_ticks);
-    let frac = if dur_ticks > 0.0 { (t - start) / dur_ticks } else { 0.0 };
-    // A layout of another measure has other notes: no cursor.
-    let x0 = columns.xs[i]?;
-
-    if let Some(&Some(x1)) = columns.xs.get(i + 1) {
-        // Normal onset: interpolate to the next one in this measure.
-        return Some(x0 + ((x1 - x0) * frac as f32));
-    }
-
-    // Last onset: split into two phases. Phase 1 covers frac in [0, split)
-    // and walks from the note head to the measure's right edge. Phase 2
-    // (frac >= split) renders in the following measure via
-    // `playback_cursor_entering_x`.
-    if frac < split {
-        let phase1_frac = (frac / split) as f32;
-        return Some(x0 + (rect.right() - x0) * phase1_frac);
-    }
-    None
-}
-
-/// X of the point in time `tick` of `measure`, for a guide anchor: a note's
-/// head at its onset, then on toward the next head (the barline after the
-/// last one) as the note goes on, so beat 4 of a half note on 3 sits
-/// halfway. `None` if the layout has no notes for it.
-pub fn beat_anchor_x(
-    measure: &Measure,
-    voices: &[MeasureLayout],
-    rect: Rect,
-    tick: f64,
-) -> Option<f32> {
-    let columns = Columns::new(measure, voices);
-    let i = columns.at(tick)?;
-    let start = columns.ticks[i] as f64;
-    let total_ticks = DEFAULT_GRID.ticks_per_measure(&measure.time_signature()) as f64;
-    let dur_ticks = columns.span(i, total_ticks);
-    let frac = if dur_ticks > 0.0 { ((tick - start) / dur_ticks).clamp(0.0, 1.0) } else { 0.0 };
-    let x0 = columns.xs[i]?;
-    let x1 = columns.xs.get(i + 1).copied().flatten().unwrap_or(rect.right());
-    Some(x0 + (x1 - x0) * frac as f32)
 }
 
 /// A guide anchor: a soft disc centred on `center`, at `intensity` (1 when
@@ -330,45 +214,6 @@ pub fn last_note_split(voices: &[MeasureLayout], rect: Rect, next_voices: &[Meas
     let out = (rect.right() - last).max(0.0);
     let into = (first.center.x - next.notes_left_edge).max(0.0);
     if out + into <= 0.0 { 0.5 } else { (out / (out + into)) as f64 }
-}
-
-/// If `local_tick` is in the last note past `split` (see [`last_note_split`]),
-/// returns the entry fraction mapped into `[0, 1]` for
-/// [`playback_cursor_entering_x`].
-/// Returns `None` for everything else (cursor stays in the current measure or
-/// hasn't reached the wrap point yet).
-pub fn last_note_entering_frac(measure: &Measure, local_tick: f64, split: f64) -> Option<f64> {
-    let ts = measure.time_signature();
-    let total_ticks = DEFAULT_GRID.ticks_per_measure(&ts) as f64;
-    if total_ticks <= 0.0 {
-        return None;
-    }
-    // The last onset of any voice, up to the barline.
-    let start = measure.onsets().last()?.tick as f64;
-    let dur_ticks = total_ticks - start;
-    if dur_ticks <= 0.0 {
-        return None;
-    }
-    let t = clamp_tick_to_measure(local_tick, total_ticks);
-    if t < start || t >= start + dur_ticks {
-        return None;
-    }
-    let frac = (t - start) / dur_ticks;
-    if frac < split {
-        return None;
-    }
-    if split >= 1.0 {
-        return Some(1.0);
-    }
-    Some((frac - split) / (1.0 - split))
-}
-
-fn clamp_tick_to_measure(tick: f64, total_ticks: f64) -> f64 {
-    if tick.is_sign_negative() {
-        return 0.0;
-    }
-    let m = tick % total_ticks;
-    if m.is_nan() { 0.0 } else { m }
 }
 
 /// Draw all foreground decorations (notes, beams, tuplets) in their canonical
@@ -438,42 +283,6 @@ pub fn draw_tuplets(
     }
 }
 
-#[expect(clippy::too_many_arguments)]
-fn draw_count_labels(
-    painter: &Painter,
-    measure: &Measure,
-    voices: &[MeasureLayout],
-    rect: Rect,
-    label_y: f32,
-    size: f32,
-    base_color: Color32,
-    highlight_color: Color32,
-    slots: &[CountSlot],
-    playback_tick: Option<f64>,
-    total_ticks: u32,
-) {
-    if total_ticks == 0 {
-        return;
-    }
-    let selected: Vec<&CountSlot> = slots.iter().filter(|s| s.label.is_some()).collect();
-    if selected.is_empty() {
-        return;
-    }
-    let active_start = active_label_start(&selected, playback_tick, measure);
-    let xs = compute_label_xs(&selected, measure, voices, rect, total_ticks);
-
-    let font = FontId::new(size, FontFamily::Proportional);
-    let label_color =
-        Color32::from_rgba_unmultiplied(base_color.r(), base_color.g(), base_color.b(), 200);
-
-    for (slot, &x) in selected.iter().zip(xs.iter()) {
-        let Some(label) = &slot.label else { continue };
-        let color =
-            if active_start == Some(slot.start_tick) { highlight_color } else { label_color };
-        painter.text(pos2(x, label_y), Align2::CENTER_CENTER, label, font.clone(), color);
-    }
-}
-
 fn active_label_start(
     slots: &[&CountSlot],
     playback_tick: Option<f64>,
@@ -497,25 +306,21 @@ fn active_label_start(
     slots.iter().find(|s| t >= s.start_tick as f64 && t < s.end_tick as f64).map(|s| s.start_tick)
 }
 
-/// The stickings of `measure`, laid out as `voices`, in `row`: one sign
+/// The stickings of `placed`, a bar of `ctx`'s staff, in `row`: one sign
 /// per column ([`Measure::stickings`]) under or over the head standing for
 /// it. A single letter goes on the line next to the notes; both hands
 /// take both lines of the row, R above L.
 pub fn draw_stickings(
     painter: &Painter,
-    measure: &Measure,
-    voices: &[MeasureLayout],
+    ctx: &RenderContext,
+    placed: &PlacedMeasure,
     row: &PlacedTextRow,
     color: Color32,
 ) {
-    let onsets = measure.onsets();
+    let measure = &ctx.score.measures()[placed.measure_idx];
     let font = FontId::new(row.text_size(), FontFamily::Proportional);
     for (tick, sticking) in measure.stickings() {
-        let Some(head) = onsets.iter().find(|o| o.tick == tick).and_then(|o| onset_head(voices, o))
-        else {
-            continue;
-        };
-        let x = head.center.x;
+        let Some(x) = placed.ticks.head_x_at(tick) else { continue };
         let letters = sticking.letters();
         // One letter goes on the line next to the notes; a column for both
         // hands stacks R above L, reaching out onto the second line.
@@ -530,63 +335,13 @@ pub fn draw_stickings(
     }
 }
 
-/// Compute X positions for all selected count labels.
-///
-/// A label marks the musical position `slot.start_tick`. It is placed where
-/// the playback cursor would be at that tick:
-/// - a note or rest starting exactly there: over its center, so labels sit
-///   above the notes they count, whatever the spacing scheme;
-/// - otherwise inside the beat that covers the tick, interpolated by tick
-///   between that beat's center and the next one's, or the barline
-///   (`rect.right()`) after the last beat. A label therefore never leaves its
-///   measure: the `&` of a closing quarter sits between the quarter and the
-///   barline, not in front of the next measure's `1`.
-///
-/// Measures without laid-out notes fall back to a uniform proportional
-/// mapping of the tick over the content area.
-fn compute_label_xs(
-    selected: &[&CountSlot],
-    measure: &Measure,
-    voices: &[MeasureLayout],
-    rect: Rect,
-    total_ticks: u32,
-) -> Vec<f32> {
-    let left = voices.first().map_or(rect.left(), |v| v.notes_left_edge);
-    let right = rect.right();
-    let columns = Columns::new(measure, voices);
-    let xs: Option<Vec<f32>> = columns.xs.iter().copied().collect();
-    let Some(xs) = xs.filter(|xs| total_ticks > 0 && !xs.is_empty()) else {
-        let content_w = right - left;
-        return selected
-            .iter()
-            .map(|s| left + s.start_tick as f32 / total_ticks.max(1) as f32 * content_w)
-            .collect();
-    };
-    let onsets = &columns.ticks;
-    let x_at = |tick: u32| -> f32 {
-        // Last onset at or before `tick`; the first one is at 0.
-        let i = onsets.iter().rposition(|&o| o <= tick).unwrap_or(0);
-        let x0 = xs[i];
-        let (next_tick, x1) = match onsets.get(i + 1) {
-            Some(&t) => (t, xs[i + 1]),
-            None => (total_ticks, right),
-        };
-        let span = next_tick.saturating_sub(onsets[i]);
-        if span == 0 || tick <= onsets[i] {
-            return x0;
-        }
-        let frac = (tick - onsets[i]).min(span) as f32 / span as f32;
-        x0 + (x1 - x0) * frac
-    };
-    selected.iter().map(|s| x_at(s.start_tick).clamp(left, right)).collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use eframe::egui::{FontFamily, FontId, Pos2};
     use grooph_layout::pixel_layout::build_measure_layout;
-    use grooph_measure::counting::Subdivision;
+    use grooph_layout::tick_map::TickMap;
+    use grooph_measure::counting::{CountConfig, Subdivision};
     use grooph_measure::duration::{Duration, NoteValue, e, q, s, t8};
     use grooph_measure::{Beat, Measure, TimeSignature};
 
@@ -703,7 +458,7 @@ mod tests {
     }
 
     /// Collect per-label x positions in slot-start-tick order, using the same
-    /// pipeline as `draw_count_labels`.
+    /// pipeline as `draw_count_layer`.
     fn label_xs(
         measure: &Measure,
         layout: &MeasureLayout,
@@ -711,9 +466,9 @@ mod tests {
         config: &CountConfig,
     ) -> Vec<f32> {
         let slots = build_count_slots(measure, config);
-        let selected: Vec<&CountSlot> = slots.iter().filter(|s| s.label.is_some()).collect();
-        let total_ticks = DEFAULT_GRID.ticks_per_measure(&measure.time_signature());
-        compute_label_xs(&selected, measure, std::slice::from_ref(layout), rect, total_ticks)
+        let map = TickMap::new(measure, std::slice::from_ref(layout), rect);
+        let selected = slots.iter().filter(|s| s.label.is_some());
+        selected.map(|s| map.x_at_tick(s.start_tick as f64)).collect()
     }
 
     #[test]
@@ -727,10 +482,8 @@ mod tests {
         let layout = build_measure_layout(eighths.first_voice(), &opts_for(rect));
         let bar_ticks = DEFAULT_GRID.ticks_per_measure(&TimeSignature::FOUR_FOUR) as f64;
         let tick = 0.85 * bar_ticks;
-        assert_eq!(
-            playback_cursor_x(&tens.measures()[0], std::slice::from_ref(&layout), rect, tick, 0.5),
-            None
-        );
+        let map = TickMap::new(&tens.measures()[0], std::slice::from_ref(&layout), rect);
+        assert_eq!(map.cursor_x(tick, 0.5), None);
     }
 
     #[test]
@@ -740,8 +493,8 @@ mod tests {
         let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(400.0, 100.0));
         let layout = build_measure_layout(m.first_voice(), &opts_for(rect));
         let quarter = DEFAULT_GRID.ticks_of(&q()).unwrap() as f64;
-        let voices = std::slice::from_ref(&layout);
-        let x = |beat: f64| beat_anchor_x(&m, voices, rect, beat * quarter).unwrap();
+        let map = TickMap::new(&m, std::slice::from_ref(&layout), rect);
+        let x = |beat: f64| map.x_at_tick(beat * quarter);
         let heads: Vec<f32> = layout.notes.iter().map(|n| n.center.x).collect();
         // Beat 1 on the eighth rest, 2 and 3 on their notes.
         assert_eq!(x(0.0), heads[0]);

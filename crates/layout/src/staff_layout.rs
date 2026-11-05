@@ -27,6 +27,7 @@ use crate::pixel_layout::{
 use crate::render_plan::{RenderPlan, RestDisplay, plan_measure_with, rests_only};
 use crate::staff::{Staff, Voicing};
 use crate::text_rows::{PlacedTextRow, TEXT_MARGIN_EM, TextRows};
+use crate::tick_map::TickMap;
 use crate::{calculate_shared_x_centers, shared_min_width};
 use egui::{FontId, Pos2, Rect, Vec2, pos2, vec2};
 use grooph_measure::duration::s;
@@ -35,6 +36,7 @@ use grooph_measure::{
     Beat, BeatIdx, BeatKind, Instrument, MeasureIdx, Score, StaffKind, TimeSignature, VoiceBar,
     VoiceIdx,
 };
+use std::ops::Range;
 
 /// Configuration for laying out an entire [`Score`].
 ///
@@ -158,6 +160,8 @@ pub struct PlacedMeasure {
     pub voices: Vec<MeasureLayout>,
     /// The rows of text along it, as [`StaffOpts::text_rows`] asks for.
     pub text_rows: Vec<PlacedTextRow>,
+    /// Where each tick of it is drawn.
+    pub ticks: TickMap,
     pub show_clef: bool,
     pub show_time_signature: bool,
 }
@@ -214,10 +218,12 @@ impl StaffLayout {
                     staff: _,
                     voices,
                     text_rows,
+                    ticks,
                     show_clef: _,
                     show_time_signature: _,
                 } = placed;
                 *rect = rect.translate(d);
+                ticks.translate(d.x);
                 voices.iter_mut().for_each(|v| v.translate(d));
                 text_rows.iter_mut().for_each(|r| r.translate(d.y));
             }
@@ -627,13 +633,14 @@ pub fn build_staff_layout(score: &Score, opts: &StaffOpts) -> StaffLayout {
         // From the line at y = 0 to the row's.
         let down = vec2(0.0, rect.center().y + y_offset);
         texts.iter_mut().for_each(|r| r.translate(down.y));
-        let voices = voices
+        let voices: Vec<MeasureLayout> = voices
             .into_iter()
             .map(|(mut layout, _)| {
                 layout.translate(down);
                 layout
             })
             .collect();
+        let ticks = TickMap::new(&score.measures()[i], &voices, rect);
         max_row_width = max_row_width.max(width);
         systems.push(SystemLayout {
             y_baseline: rect.center().y + y_offset,
@@ -644,6 +651,7 @@ pub fn build_staff_layout(score: &Score, opts: &StaffOpts) -> StaffLayout {
                 y_offset,
                 voices,
                 text_rows: texts,
+                ticks,
                 staff: score.staff,
                 show_clef: show_clef[i],
                 show_time_signature: show_ts[i],
@@ -752,6 +760,54 @@ pub fn hit_test_head(staff: &StaffLayout, pos: Pos2, score: &Score) -> Option<He
         (v, nearest_note(&placed.voices[v], pos.x))
     });
     Some(HeadHit { measure_idx, voice, beat_idx, instrument })
+}
+
+/// A stretch of time a position points at: in bar `measure_idx`, the ticks
+/// of one column ([`TickMap::edges`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SpanHit {
+    pub measure_idx: MeasureIdx,
+    pub ticks: Range<u32>,
+}
+
+/// The column of the bar at `pos` whose head is nearest `pos.x`, of any
+/// voice ([`TickMap::column_near`]), as the ticks from it to the next
+/// column or the end of the bar. The row is picked as in
+/// [`hit_test_voice`]. `None` for a bar without columns.
+pub fn hit_test_span(staff: &StaffLayout, pos: Pos2) -> Option<SpanHit> {
+    let placed = bar_at(staff, pos)?;
+    let i = placed.ticks.column_near(pos.x)?;
+    Some(SpanHit { measure_idx: placed.measure_idx, ticks: placed.ticks.edges(i).ticks })
+}
+
+/// The bar at `pos` and its rect: in the row at `pos.y` (clamped to the
+/// first and last row, as [`hit_test_voice`]), the bar nearest `pos.x`.
+pub fn hit_test_bar(staff: &StaffLayout, pos: Pos2) -> Option<(MeasureIdx, Rect)> {
+    bar_at(staff, pos).map(|p| (p.measure_idx, p.rect))
+}
+
+/// The row (system) at `pos.y`, clamped to the first and last, and its
+/// rect.
+pub fn hit_test_row(staff: &StaffLayout, pos: Pos2) -> Option<(usize, Rect)> {
+    let row = row_at(staff, pos)?;
+    Some((row, staff.systems[row].rect))
+}
+
+/// Index of the row at `pos.y`: the first whose bottom is below it, else
+/// the last.
+fn row_at(staff: &StaffLayout, pos: Pos2) -> Option<usize> {
+    staff
+        .systems
+        .iter()
+        .position(|s| pos.y < s.rect.bottom())
+        .or(staff.systems.len().checked_sub(1))
+}
+
+/// The bar of the row at `pos` nearest `pos.x`.
+fn bar_at(staff: &StaffLayout, pos: Pos2) -> Option<&PlacedMeasure> {
+    let measures = &staff.systems[row_at(staff, pos)?].measures;
+    let off = |p: &PlacedMeasure| (p.rect.left() - pos.x).max(pos.x - p.rect.right()).max(0.0);
+    measures.iter().min_by(|a, b| off(a).total_cmp(&off(b)))
 }
 
 /// Index of the note of `layout` nearest `x`.
@@ -1866,6 +1922,74 @@ mod tests {
             let hit = hit_test_staff(&staff, Pos2::new(x, system.rect.center().y));
             assert_eq!(hit.map(|h| h.0), Some(i));
         }
+    }
+
+    #[test]
+    fn hit_test_span_finds_a_column_of_either_voice() {
+        use grooph_measure::notation::parse_score;
+        let rect = Rect::from_min_max(Pos2::ZERO, Pos2::new(600.0, 100.0));
+        let score = parse_score("4/4 q q q q | h h ; r:e q q q e").unwrap();
+        let staff = build_staff_layout(&score, &opts(20.0, rect));
+        let q = DEFAULT_GRID.ticks_of(&q()).unwrap();
+        let e = q / 2;
+        let placed = staff.placed(1).unwrap();
+        let lower = &placed.voices[1].notes;
+        // On the lower voice's quarter on the `&` of 1: from there to its
+        // next quarter, on the `&` of 2.
+        let span = hit_test_span(&staff, lower[1].center).unwrap();
+        assert_eq!(span, SpanHit { measure_idx: 1, ticks: e..q + e });
+        // The upper voice's half on 3, to the lower voice's quarter after.
+        let upper = &placed.layout().notes;
+        let span = hit_test_span(&staff, upper[1].center).unwrap();
+        assert_eq!(span.ticks, 2 * q..2 * q + e);
+        // The last column ends at the bar's end.
+        let span = hit_test_span(&staff, Pos2::new(placed.rect.right(), lower[4].center.y));
+        assert_eq!(span.unwrap().ticks, 3 * q + e..4 * q);
+        // Another row, another bar.
+        let first = staff.placed(0).unwrap();
+        let span = hit_test_span(&staff, first.layout().notes[2].center).unwrap();
+        assert_eq!(span, SpanHit { measure_idx: 0, ticks: 2 * q..3 * q });
+    }
+
+    #[test]
+    fn hit_test_span_covers_a_tuplet_column() {
+        use grooph_measure::duration::t8;
+        use grooph_measure::notation::parse_score;
+        let rect = Rect::from_min_max(Pos2::ZERO, Pos2::new(600.0, 100.0));
+        let score = parse_score("2/4 t8 t8 t8 q").unwrap();
+        let staff = build_staff_layout(&score, &opts(20.0, rect));
+        let t = DEFAULT_GRID.ticks_of(&t8()).unwrap();
+        let notes = &staff.placed(0).unwrap().layout().notes;
+        for (i, note) in (0..).zip(&notes[..3]) {
+            let span = hit_test_span(&staff, note.center).unwrap();
+            assert_eq!(span.ticks, i * t..(i + 1) * t, "triplet {i}");
+        }
+        // Just right of the last triplet's head, still its column.
+        let near = notes[2].center + vec2(1.0, 0.0);
+        assert_eq!(hit_test_span(&staff, near).unwrap().ticks, 2 * t..3 * t);
+    }
+
+    #[test]
+    fn hit_test_bar_and_row_give_their_rects() {
+        let rect = Rect::from_min_max(Pos2::ZERO, Pos2::new(600.0, 100.0));
+        let score = Score::new(vec![
+            measure_with_quarters(TimeSignature::FOUR_FOUR),
+            measure_with_quarters(TimeSignature::THREE_FOUR),
+        ]);
+        let staff = build_staff_layout(&score, &opts(20.0, rect));
+        for (i, system) in staff.systems.iter().enumerate() {
+            let at = system.rect.center();
+            assert_eq!(hit_test_row(&staff, at), Some((i, system.rect)));
+            let bar = &system.measures[0];
+            assert_eq!(hit_test_bar(&staff, at), Some((bar.measure_idx, bar.rect)));
+            // Off to the side, the row's bar all the same.
+            let aside = Pos2::new(-50.0, at.y);
+            assert_eq!(hit_test_bar(&staff, aside), Some((bar.measure_idx, bar.rect)));
+        }
+        // Above and below every row: the first and the last.
+        assert_eq!(hit_test_row(&staff, Pos2::new(0.0, -1e6)).map(|r| r.0), Some(0));
+        assert_eq!(hit_test_row(&staff, Pos2::new(0.0, 1e6)).map(|r| r.0), Some(1));
+        assert_eq!(hit_test_bar(&staff, Pos2::new(0.0, 1e6)).map(|b| b.0), Some(1));
     }
 
     #[test]

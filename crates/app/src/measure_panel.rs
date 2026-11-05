@@ -10,7 +10,7 @@ use crate::tokens;
 use crate::{Mode, TransportState};
 use eframe::egui;
 use eframe::egui::{FontId, Frame, Rect, Response, Stroke};
-use grooph_layout::pixel_layout::{NoteLayout, compute_em, onset_head};
+use grooph_layout::pixel_layout::compute_em;
 use grooph_layout::staff_layout::{
     LEGIBILITY_FLOOR_EM, PlacedMeasure, ROOM_BELOW_EM, StaffLayout, StaffOpts, hit_test_head,
     hit_test_voice,
@@ -18,7 +18,7 @@ use grooph_layout::staff_layout::{
 use grooph_measure::grid::DEFAULT_GRID;
 use grooph_measure::tempo::ScoreTiming;
 use grooph_measure::{Cursor, Score, TimeSignature};
-use grooph_render::staff::{PlaybackMarks, draw_staff};
+use grooph_render::staff::{PlaybackMarks, RenderContext, draw_staff};
 use std::rc::Rc;
 
 /// The frames around the staff: the central panel's, and the canvas inside
@@ -244,18 +244,17 @@ impl Grooph {
                 }))
             };
         let cursor = (self.ui.mode == Mode::Edit).then_some(self.editor.doc().cursor());
-        draw_staff(
-            ui,
-            view.shown.score(),
-            view.staff,
+        let count_config = self.build_count_config();
+        let ctx = RenderContext {
+            count_config: count_config.as_ref(),
             cursor,
             lit,
-            frame.playing,
-            0..view.shown.played.len(),
+            playback: frame.playing,
+            loop_bars: 0..view.shown.played.len(),
             marks,
-            self.build_count_config().as_ref(),
-            view.render_opts,
-        );
+            ..RenderContext::new(view.shown.score(), view.staff, view.render_opts)
+        };
+        draw_staff(ui, &ctx);
 
         // Draw flash overlay (white on dark, black on light) with decay
         let flash = playback.flash_shown();
@@ -481,7 +480,6 @@ impl Grooph {
             for placed in system.measures.iter().filter(|p| p.measure_idx < score.len()) {
                 self.draw_accuracy_markers_for_measure(
                     ui,
-                    score,
                     placed,
                     timing,
                     &global_onsets_u64,
@@ -492,27 +490,21 @@ impl Grooph {
         }
     }
 
-    #[expect(clippy::too_many_arguments)]
     fn draw_accuracy_markers_for_measure(
         &self,
         ui: &egui::Ui,
-        score: &Score,
         placed: &PlacedMeasure,
         timing: &ScoreTiming,
         global_onsets_u64: &[u64],
         total_loop_ticks: f64,
         staff_space: f32,
     ) {
-        let measure = &score.measures()[placed.measure_idx];
         // Every onset of any voice, at the head standing for it.
-        let columns: Vec<(u32, &NoteLayout)> = measure
-            .onsets()
-            .iter()
-            .filter_map(|o| Some((o.tick, onset_head(&placed.voices, o)?)))
-            .collect();
+        let columns = placed.ticks.columns();
         let measure_start = timing.measure_start_tick(placed.measure_idx);
         let dark = ui.visuals().dark_mode;
-        for (idx, &(local_onset, note_layout)) in columns.iter().enumerate() {
+        for (idx, column) in columns.iter().enumerate() {
+            let note_layout = &placed.voices[column.voice].notes[column.beat_idx];
             if note_layout.kind != grooph_measure::BeatKind::Note {
                 continue;
             }
@@ -520,12 +512,12 @@ impl Grooph {
             let y = note_layout.center.y + staff_space * 0.65;
             let h = staff_space * 0.8;
             let width = (staff_space * MARK_WIDTH_PER_HEAD).max(MARK_MIN_WIDTH);
-            let note_x = note_layout.center.x;
+            let note_x = column.x;
             ui.painter().line_segment(
                 [egui::pos2(note_x, y), egui::pos2(note_x, y + h)],
                 Stroke::new(width * 0.5, reference_color(dark)),
             );
-            let global_onset = measure_start + local_onset as u64;
+            let global_onset = measure_start + column.tick as u64;
             let Some(mark) = self.playback_ctl.accuracy.tracker.mark_for_onset(global_onset) else {
                 continue;
             };
@@ -538,7 +530,7 @@ impl Grooph {
                         global_onsets_u64,
                         total_loop_ticks,
                     );
-                    let Some(px_per_tick) = local_pixels_per_tick(&columns, idx) else {
+                    let Some(px_per_tick) = placed.ticks.px_per_tick(idx) else {
                         continue;
                     };
                     let x = note_x + (diff_ticks * px_per_tick) as f32;
@@ -767,12 +759,9 @@ fn follow_playback(
     // the shared helper to find the cursor's actual home measure
     // and X for this frame.
     let Some(playing) = frame.playing else { return };
-    let Some((m_idx, x)) = grooph_render::staff::current_cursor_x(
-        shown.score(),
-        staff,
-        playing,
-        0..shown.played.len(),
-    ) else {
+    let Some((m_idx, x)) =
+        grooph_render::staff::current_cursor_x(staff, playing, 0..shown.played.len())
+    else {
         return;
     };
     let Some(placed) = staff.placed(m_idx) else { return };
@@ -1099,18 +1088,6 @@ fn paint_miss_mark(painter: &egui::Painter, note_x: f32, y: f32, h: f32, width: 
     let (left, right, top, bottom) = (note_x - half, note_x + half, mid_y - half, mid_y + half);
     painter.line_segment([egui::pos2(left, top), egui::pos2(right, bottom)], stroke);
     painter.line_segment([egui::pos2(left, bottom), egui::pos2(right, top)], stroke);
-}
-
-/// Pixels per tick around column `idx` of a measure's `columns` (onset tick
-/// and head), toward the next column or, for the last, from the one before.
-fn local_pixels_per_tick(columns: &[(u32, &NoteLayout)], idx: usize) -> Option<f64> {
-    let slope = |a: usize, b: usize| {
-        let (ta, na) = columns.get(a)?;
-        let (tb, nb) = columns.get(b)?;
-        let dt = (*tb as i64 - *ta as i64) as f64;
-        (dt != 0.0).then(|| (nb.center.x - na.center.x) as f64 / dt)
-    };
-    slope(idx, idx + 1).or_else(|| idx.checked_sub(1).and_then(|prev| slope(prev, idx)))
 }
 
 #[cfg(test)]
