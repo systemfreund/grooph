@@ -95,7 +95,7 @@ impl Grooph {
         let margins = staff_margins(ui.style());
         let rect = Rect::from_min_size(ui.cursor().min, egui::vec2(width - margins.x, 1.0e4));
         let opts = self.staff_opts(ui, rect);
-        crate::staff_cache::staff_layout(&self.editor.doc().score, &opts).total_size.y + margins.y
+        crate::staff_cache::staff_layout(self.editor.doc().score(), &opts).total_size.y + margins.y
     }
 
     /// The staff in its scroll area, one frame. The steps, in order:
@@ -165,7 +165,7 @@ impl Grooph {
         self.ui.staff.em = render_opts.em;
 
         follow_playback(ui, &mut self.playback_ctl.playback, &shown, &staff, &frame, view);
-        let cursor = self.editor.doc().cursor;
+        let cursor = self.editor.doc().cursor();
         let editing = edit && self.playback_ctl.transport_state == TransportState::Stopped;
         follow_edit_cursor(ui, &staff, cursor, editing, view, &mut self.ui.staff.followed);
 
@@ -243,7 +243,7 @@ impl Grooph {
                     (a.measure_idx, f64::from(a.tick), anchor_intensity(frame.now - a.at))
                 }))
             };
-        let cursor = (self.ui.mode == Mode::Edit).then_some(self.editor.doc().cursor);
+        let cursor = (self.ui.mode == Mode::Edit).then_some(self.editor.doc().cursor());
         draw_staff(
             ui,
             view.shown.score(),
@@ -290,7 +290,7 @@ impl Grooph {
         cursor_bar: usize,
     ) -> Option<BarAction> {
         let mut bar_action = None;
-        let bars = self.editor.doc().score.len();
+        let bars = self.editor.doc().score().len();
         let metronome = self.metronome_mode();
         // Respelling the bar only while a menu shows it.
         let clean_up = || !metronome && self.can_clean_up_current_measure();
@@ -356,9 +356,9 @@ impl Grooph {
         match action {
             Some(BarAction::Select(idx)) => {
                 let doc = self.editor.doc_mut();
-                if doc.cursor.measure_idx != idx {
-                    let cursor = Cursor { measure_idx: idx, beat_idx: 0, ..doc.cursor };
-                    doc.cursor = doc.score.clamp_cursor(cursor);
+                if doc.cursor().measure_idx != idx {
+                    let cursor = Cursor { measure_idx: idx, beat_idx: 0, ..doc.cursor() };
+                    *doc.cursor_mut() = doc.score().clamp_cursor(cursor);
                 }
             }
             Some(BarAction::Duplicate) => self.duplicate_current_measure(),
@@ -587,14 +587,14 @@ impl Grooph {
         }
         if (resp.clicked() || resp.dragged())
             && let Some(pos) = resp.interact_pointer_pos()
-            && let Some(hit) = hit_test_head(staff, pos, &self.editor.doc().score)
+            && let Some(hit) = hit_test_head(staff, pos, self.editor.doc().score())
             // Not the ghost bar's rests.
-            && hit.measure_idx < self.editor.doc().score.len()
+            && hit.measure_idx < self.editor.doc().score().len()
         {
             // A tap on another voice edits that voice from now on: in the
             // metronome tab the click bar or its counter rhythm. On the
             // kit's staff it also picks the instrument whose head it is on.
-            self.editor.doc_mut().cursor =
+            *self.editor.doc_mut().cursor_mut() =
                 Cursor::in_voice(hit.measure_idx, hit.voice, hit.beat_idx);
             if !self.staff_model().one_line() {
                 self.editor.instrument = hit.instrument;

@@ -569,17 +569,12 @@ impl Grooph {
     }
 
     pub(crate) fn current_measure(&self) -> &Measure {
-        self.editor.doc().score.current(self.editor.doc().cursor.measure_idx)
-    }
-
-    pub(crate) fn current_measure_mut(&mut self) -> &mut Measure {
-        let doc = self.editor.doc_mut();
-        doc.score.current_mut(doc.cursor.measure_idx)
+        self.editor.doc().score().current(self.editor.doc().cursor().measure_idx)
     }
 
     /// The staff the document is written on.
     pub(crate) fn staff_model(&self) -> &'static Staff {
-        Staff::of(self.editor.doc().score.staff)
+        Staff::of(self.editor.doc().score().staff)
     }
 
     /// The instrument the tools write and change: the chosen one on a staff
@@ -592,29 +587,27 @@ impl Grooph {
     pub(crate) fn current_voice(&self) -> &VoiceBar {
         self.editor
             .doc()
-            .score
-            .voice_at(self.editor.doc().score.clamp_cursor(self.editor.doc().cursor))
+            .score()
+            .voice_at(self.editor.doc().score().clamp_cursor(self.editor.doc().cursor()))
     }
 
-    pub(crate) fn current_voice_mut(&mut self) -> &mut VoiceBar {
-        let cursor = self.editor.doc().score.clamp_cursor(self.editor.doc().cursor);
-        self.editor.doc_mut().score.voice_at_mut(cursor)
+    /// Change the voice the cursor is in with `edit` (see
+    /// [`documents::Doc::edit_score`]).
+    pub(crate) fn edit_current_voice<R>(&mut self, edit: impl FnOnce(&mut VoiceBar) -> R) -> R {
+        let cursor = self.editor.doc().score().clamp_cursor(self.editor.doc().cursor());
+        self.editor.doc_mut().edit_score(|score| edit(score.voice_at_mut(cursor)))
     }
 
     pub(crate) fn current_snapshot(&self) -> EditorSnapshot {
-        EditorSnapshot {
-            score: self.editor.doc().score.clone(),
-            cursor: self.editor.doc().cursor,
-            meters: self.editor.doc().meters.clone(),
-        }
+        self.editor.doc().snapshot()
     }
 
     pub(crate) fn can_undo(&self) -> bool {
-        self.editor.doc().history.can_undo()
+        self.editor.doc().history().can_undo()
     }
 
     pub(crate) fn can_redo(&self) -> bool {
-        self.editor.doc().history.can_redo()
+        self.editor.doc().history().can_redo()
     }
 
     /// Snapshot the current state, run `op`, and commit only if it reports a change.
@@ -626,7 +619,7 @@ impl Grooph {
     {
         let snap = self.current_snapshot();
         if op(self) {
-            self.editor.doc_mut().history.push(snap);
+            self.editor.doc_mut().history_mut().push(snap);
             self.score_changed(ScoreChange::Edited);
             true
         } else {
@@ -637,15 +630,12 @@ impl Grooph {
     /// Bring back `snap`'s score and cursor, and in the metronome tab every
     /// meter's bars with them.
     fn restore_snapshot(&mut self, snap: EditorSnapshot) {
-        let doc = self.editor.doc_mut();
-        doc.score = snap.score;
-        doc.cursor = snap.cursor;
-        doc.meters = snap.meters;
+        self.editor.doc_mut().restore(snap);
     }
 
     fn undo(&mut self) {
         let current = self.current_snapshot();
-        if let Some(prev) = self.editor.doc_mut().history.pop_undo(current) {
+        if let Some(prev) = self.editor.doc_mut().history_mut().pop_undo(current) {
             self.restore_snapshot(prev);
             self.score_changed(ScoreChange::Edited);
         }
@@ -653,7 +643,7 @@ impl Grooph {
 
     fn redo(&mut self) {
         let current = self.current_snapshot();
-        if let Some(next) = self.editor.doc_mut().history.pop_redo(current) {
+        if let Some(next) = self.editor.doc_mut().history_mut().pop_redo(current) {
             self.restore_snapshot(next);
             self.score_changed(ScoreChange::Edited);
         }
@@ -666,7 +656,7 @@ impl Grooph {
         beat_kind: Option<BeatKind>,
     ) -> Option<Modification> {
         let pen = self.edit_instrument();
-        let result = self.current_voice_mut().modify_beat(idx, base, beat_kind, pen);
+        let result = self.edit_current_voice(|voice| voice.modify_beat(idx, base, beat_kind, pen));
         if result.is_some() {
             self.step_cursor(|_| true);
         }
@@ -678,28 +668,29 @@ impl Grooph {
     /// sticking), move the cursor on to the next beat of its voice in the
     /// bar that `fits`; it stays if there is none.
     pub(crate) fn step_cursor(&mut self, fits: impl Fn(&Beat) -> bool) {
-        let from = self.editor.doc().cursor.beat_idx;
+        let from = self.editor.doc().cursor().beat_idx;
         let next =
             self.current_voice().beats().iter().enumerate().skip(from + 1).find(|(_, b)| fits(b));
         if let Some((idx, _)) = next {
-            self.editor.doc_mut().cursor.beat_idx = idx;
+            self.editor.doc_mut().cursor_mut().beat_idx = idx;
         }
     }
 
     fn set_tuplet(&mut self, idx: usize, tuplet_spec: TupletSpec) -> Option<Modification> {
         let pen = self.edit_instrument();
-        let result = self.current_voice_mut().set_tuplet(idx, tuplet_spec, true, pen);
+        let result = self.edit_current_voice(|voice| voice.set_tuplet(idx, tuplet_spec, true, pen));
         match &result {
             Some(Modification::DissolveTuplet(tuplet_idx)) => {
                 let new_len = self.current_voice().beats().len();
                 if new_len > 0 {
-                    self.editor.doc_mut().cursor.beat_idx = tuplet_idx.start_idx.min(new_len - 1);
+                    self.editor.doc_mut().cursor_mut().beat_idx =
+                        tuplet_idx.start_idx.min(new_len - 1);
                 } else {
-                    self.editor.doc_mut().cursor.beat_idx = 0;
+                    self.editor.doc_mut().cursor_mut().beat_idx = 0;
                 }
             }
             Some(Modification::SetTuplet(group_span)) => {
-                self.editor.doc_mut().cursor.beat_idx =
+                self.editor.doc_mut().cursor_mut().beat_idx =
                     (group_span.end_idx + 1).min(self.current_voice().beats().len() - 1);
             }
             _ => {}
@@ -715,11 +706,12 @@ impl Grooph {
         }
         self.with_undo_snapshot(|app| {
             let doc = app.editor.doc_mut();
-            let last = &doc.score.measures()[doc.score.len() - 1];
-            let new_measure = last.empty_like(last.time_signature());
-            doc.score.push(new_measure);
-            let cursor = Cursor { measure_idx: doc.score.len() - 1, beat_idx: 0, ..doc.cursor };
-            doc.cursor = doc.score.clamp_cursor(cursor);
+            doc.edit_score(|score| {
+                let last = &score.measures()[score.len() - 1];
+                score.push(last.empty_like(last.time_signature()));
+            });
+            let cursor = Cursor { measure_idx: doc.score().len() - 1, beat_idx: 0, ..doc.cursor() };
+            *doc.cursor_mut() = doc.score().clamp_cursor(cursor);
             true
         });
     }
@@ -732,10 +724,12 @@ impl Grooph {
         }
         self.with_undo_snapshot(|app| {
             let doc = app.editor.doc_mut();
-            let cursor = doc.score.clamp_cursor(doc.cursor);
-            let copy = doc.score.measures()[cursor.measure_idx].clone();
-            doc.score.insert(cursor.measure_idx + 1, copy);
-            doc.cursor = Cursor { measure_idx: cursor.measure_idx + 1, ..cursor };
+            let cursor = doc.score().clamp_cursor(doc.cursor());
+            doc.edit_score(|score| {
+                let copy = score.measures()[cursor.measure_idx].clone();
+                score.insert(cursor.measure_idx + 1, copy);
+            });
+            *doc.cursor_mut() = Cursor { measure_idx: cursor.measure_idx + 1, ..cursor };
             true
         });
     }
@@ -749,11 +743,12 @@ impl Grooph {
         }
         self.with_undo_snapshot(|app| {
             let doc = app.editor.doc_mut();
-            let cursor = doc.score.clamp_cursor(doc.cursor);
-            let measure = &doc.score.measures()[cursor.measure_idx];
-            let empty = measure.empty_like(measure.time_signature());
-            doc.score.measures_mut()[cursor.measure_idx] = empty;
-            doc.cursor = Cursor { beat_idx: 0, ..cursor };
+            let cursor = doc.score().clamp_cursor(doc.cursor());
+            doc.edit_score(|score| {
+                let measure = &mut score.measures_mut()[cursor.measure_idx];
+                *measure = measure.empty_like(measure.time_signature());
+            });
+            *doc.cursor_mut() = Cursor { beat_idx: 0, ..cursor };
             true
         });
     }
@@ -769,12 +764,12 @@ impl Grooph {
         }
         self.with_undo_snapshot(|app| {
             let doc = app.editor.doc_mut();
-            let cursor = doc.score.clamp_cursor(doc.cursor);
-            let tick = doc.score.tick_of(cursor);
-            if !doc.score.measures_mut()[cursor.measure_idx].clean_up() {
+            let cursor = doc.score().clamp_cursor(doc.cursor());
+            let tick = doc.score().tick_of(cursor);
+            if !doc.edit_score(|score| score.measures_mut()[cursor.measure_idx].clean_up()) {
                 return false;
             }
-            doc.cursor = doc.score.cursor_at_tick(cursor, tick);
+            *doc.cursor_mut() = doc.score().cursor_at_tick(cursor, tick);
             true
         });
     }
@@ -782,21 +777,21 @@ impl Grooph {
     /// Whether "Clean up bar" would change the cursor's bar.
     pub(crate) fn can_clean_up_current_measure(&self) -> bool {
         let doc = self.editor.doc();
-        let cursor = doc.score.clamp_cursor(doc.cursor);
-        doc.score.measures()[cursor.measure_idx].needs_clean_up()
+        let cursor = doc.score().clamp_cursor(doc.cursor());
+        doc.score().measures()[cursor.measure_idx].needs_clean_up()
     }
 
     /// Remove the currently active measure. Does nothing if only one measure
     /// remains (Score invariant: at least one measure).
     pub(crate) fn remove_current_measure(&mut self) {
-        if self.editor.doc().score.len() <= 1 {
+        if self.editor.doc().score().len() <= 1 {
             return;
         }
         self.with_undo_snapshot(|app| {
-            let idx = app.editor.doc().cursor.measure_idx;
-            app.editor.doc_mut().score.remove(idx);
+            let idx = app.editor.doc().cursor().measure_idx;
+            app.editor.doc_mut().edit_score(|s| s.remove(idx));
             let doc = app.editor.doc_mut();
-            doc.cursor = doc.score.clamp_cursor(doc.cursor);
+            *doc.cursor_mut() = doc.score().clamp_cursor(doc.cursor());
             true
         });
     }
@@ -1461,6 +1456,7 @@ impl Grooph {
 #[cfg(test)]
 mod tests {
     use super::{CountingBase, CountingSettings, PersistedState};
+    use crate::documents::Doc;
     use crate::shell::Tab;
     use grooph_measure::counting::CountingSystem;
     use grooph_measure::{Measure, Score, TimeSignature};
@@ -1617,11 +1613,13 @@ mod tests {
         let mut app = Grooph::new(&cc);
         app.select_tab(Tab::Score);
         app.edit_page();
-        app.editor.doc_mut().score = Score::single(Measure::new(TimeSignature::new(3, 4)))
-            .with_staff(grooph_measure::StaffKind::Kit);
-        let rhythm = app.editor.doc().score.clone();
+        app.editor.doc_mut().edit_score(|s| {
+            *s = Score::single(Measure::new(TimeSignature::new(3, 4)))
+                .with_staff(grooph_measure::StaffKind::Kit)
+        });
+        let rhythm = app.editor.doc().score().clone();
         app.save_pattern_as();
-        let id = app.editor.doc().active_pattern_id.unwrap();
+        let id = app.editor.rhythm_doc().active_pattern_id.unwrap();
 
         // Through the metronome to More: the library leaves it open.
         app.select_tab(Tab::Metronome);
@@ -1649,11 +1647,11 @@ mod tests {
         app.request_load_pattern(id);
         assert_eq!(app.tab(), Tab::Score);
         assert_eq!(app.ui.dialogs.picker, None);
-        app.editor.doc_mut().active_pattern_id = None;
-        app.editor.doc_mut().dirty = true;
+        app.editor.rhythm_doc_mut().unwrap().active_pattern_id = None;
+        app.editor.rhythm_doc_mut().unwrap().dirty = true;
         // From the practice page too, which keeps its rhythm.
         app.select_tab(Tab::Practice);
-        let practice = format!("{:?}", app.editor.doc().score);
+        let practice = format!("{:?}", app.editor.doc().score());
         app.select_tab(Tab::More);
         app.ui.dialogs.picker = Some(Picker::Library);
         app.request_load_pattern(id);
@@ -1664,13 +1662,13 @@ mod tests {
         app.finish_pending_load(pending);
         assert_eq!(app.tab(), Tab::Score);
         assert_eq!(app.ui.dialogs.picker, None);
-        assert_eq!(app.editor.doc().active_pattern_id, Some(id));
+        assert_eq!(app.editor.rhythm_doc().active_pattern_id, Some(id));
         app.select_tab(Tab::Practice);
-        assert_eq!(format!("{:?}", app.editor.doc().score), practice);
+        assert_eq!(format!("{:?}", app.editor.doc().score()), practice);
         // Loading in the editor stays there.
         app.select_tab(Tab::Score);
         app.edit_page();
-        app.editor.doc_mut().active_pattern_id = None;
+        app.editor.rhythm_doc_mut().unwrap().active_pattern_id = None;
         app.request_load_pattern(id);
         assert_eq!(app.ui.mode, Mode::Edit);
     }
@@ -1731,7 +1729,7 @@ mod tests {
                 m.first_voice_mut().set_beat(i, Beat::note(d)).unwrap();
                 i += 1;
             }
-            app.editor.doc_mut().score = Score::new(vec![m.clone(), m]);
+            app.editor.doc_mut().edit_score(|s| *s = Score::new(vec![m.clone(), m]));
             app.save_pattern_as();
         }
         app.select_tab(Tab::More);
@@ -1758,7 +1756,7 @@ mod tests {
         let mut app = Grooph::new(&cc);
         // Through the metronome: the click bar stays the metronome's.
         app.select_tab(Tab::Metronome);
-        let click_bar = format!("{:?}", app.editor.doc().score);
+        let click_bar = format!("{:?}", app.editor.doc().score());
         app.select_tab(Tab::More);
         app.ui.dialogs.picker = Some(Picker::Library);
         let last = builtin_presets().len() - 1;
@@ -1772,7 +1770,7 @@ mod tests {
             builtin_presets()[last].1.generator.settings
         );
         app.select_tab(Tab::Metronome);
-        assert_eq!(format!("{:?}", app.editor.doc().score), click_bar);
+        assert_eq!(format!("{:?}", app.editor.doc().score()), click_bar);
     }
 
     #[test]
@@ -1900,7 +1898,7 @@ mod tests {
             shell_frame(&mut app, &ctx, time, vec![]);
             time += 0.1;
         }
-        assert!(app.editor.doc().score.len() <= 4, "{} bars", app.editor.doc().score.len());
+        assert!(app.editor.doc().score().len() <= 4, "{} bars", app.editor.doc().score().len());
     }
 
     #[test]
@@ -1914,7 +1912,7 @@ mod tests {
         app.editor.generator.config.endless = true;
         app.select_tab(Tab::Score);
         app.edit_page();
-        let score = format!("{:?}", app.editor.doc().score);
+        let score = format!("{:?}", app.editor.doc().score());
         app.playback_ctl.settings.bpm = 240;
         app.start_playback();
         // Also past the last bar and behind the More screen opened from Edit.
@@ -1926,7 +1924,7 @@ mod tests {
             shell_frame(&mut app, &ctx, time, vec![]);
             time += 0.5;
         }
-        assert_eq!(format!("{:?}", app.editor.doc().score), score);
+        assert_eq!(format!("{:?}", app.editor.doc().score()), score);
     }
 
     #[test]
@@ -1973,13 +1971,13 @@ mod tests {
         app.edit_page();
         // Rhythms: a new one while none is active, then the active one only
         // with changes.
-        app.editor.doc_mut().active_pattern_id = None;
+        app.editor.rhythm_doc_mut().unwrap().active_pattern_id = None;
         let target = app.rhythm_save_target();
         assert_eq!((target.overwrites, target.enabled), (None, true));
         app.save_pattern_as();
         let target = app.rhythm_save_target();
         assert!(target.overwrites.is_some() && !target.enabled);
-        app.editor.doc_mut().dirty = true;
+        app.editor.rhythm_doc_mut().unwrap().dirty = true;
         assert!(app.rhythm_save_target().enabled);
 
         // Presets: an unchanged built-in has nothing to save, a changed one
@@ -2011,11 +2009,10 @@ mod tests {
         app.select_tab(Tab::Score);
         app.edit_page();
         let id = app.save_pattern_as();
-        app.editor.doc_mut().dirty = true;
+        app.editor.rhythm_doc_mut().unwrap().dirty = true;
         app.select_tab(Tab::Metronome);
         app.start_playback();
         app.select_tab(Tab::More);
-        app.editor.doc_mut().active_pattern_id = None;
         app.request_load_pattern(id);
         assert!(app.ui.dialogs.pending_load.is_some());
         assert!(app.metronome_mode());
@@ -2024,7 +2021,7 @@ mod tests {
         let pending = app.ui.dialogs.pending_load.take().unwrap();
         app.finish_pending_load(pending);
         assert!(!app.metronome_mode());
-        assert_eq!(app.editor.doc().active_pattern_id, Some(id));
+        assert_eq!(app.editor.rhythm_doc().active_pattern_id, Some(id));
     }
 
     #[test]
@@ -2067,11 +2064,10 @@ mod tests {
         app.ui.view.show_score_tab = true;
         app.select_tab(Tab::Score);
         app.edit_page();
-        app.editor.doc_mut().dirty = true;
+        app.editor.rhythm_doc_mut().unwrap().dirty = true;
         app.select_tab(Tab::Metronome);
         app.select_tab(Tab::More);
-        // The click bar has no changes; the rhythm behind it has.
-        app.editor.doc_mut().dirty = false;
+        // The metronome has no unsaved changes; the rhythm behind it has.
         let score = Score::single(Measure::new(TimeSignature::new(3, 4)))
             .with_staff(grooph_measure::StaffKind::Kit);
         app.open_link(SharedLink {
@@ -2092,10 +2088,10 @@ mod tests {
         let groove = "4/4 S-H:q H:q H:h ; >S:q K:q K:h";
         let query = format!("v=2&r={}", groove.replace(' ', "+").replace(';', "%3B"));
         app.open_link(grooph_link::parse_query(&query).unwrap().unwrap());
-        let score = &app.editor.doc().score;
+        let score = app.editor.doc().score();
         assert_eq!(format_score(score).unwrap(), "4/4 >S-H:q H:q H:h ; r:q K:q K:h");
         // No longer the link's groove: a change to save.
-        assert!(app.editor.doc().dirty);
+        assert!(app.editor.rhythm_doc().dirty);
     }
 
     #[test]
@@ -2109,9 +2105,9 @@ mod tests {
             [(Tab::Practice, "4/4 q e e q q"), (Tab::Score, "3/4 H:q S-H:q H:q ; K:q r:q r:q")]
         {
             from.select_tab(tab);
-            from.editor.doc_mut().score = parse_score(rhythm).unwrap();
+            from.editor.doc_mut().edit_score(|s| *s = parse_score(rhythm).unwrap());
             if tab == Tab::Score {
-                from.editor.doc_mut().score.staff = grooph_measure::StaffKind::Kit;
+                from.editor.doc_mut().edit_score(|s| s.staff = grooph_measure::StaffKind::Kit);
             }
             let url = from.share_link_url().unwrap();
             let query = url.split_once('?').unwrap().1;
@@ -2120,7 +2116,7 @@ mod tests {
             let practice_before = format_score(&to.editor.docs.practice.score).unwrap();
             to.open_link(grooph_link::parse_query(query).unwrap().unwrap());
             assert_eq!(to.tab(), tab, "{url}");
-            assert_eq!(format_score(&to.editor.doc().score).unwrap(), rhythm);
+            assert_eq!(format_score(to.editor.doc().score()).unwrap(), rhythm);
             // The other page keeps its rhythm.
             if tab == Tab::Score {
                 assert_eq!(format_score(&to.editor.docs.practice.score).unwrap(), practice_before);
@@ -2136,7 +2132,7 @@ mod tests {
         assert!(to.ui.dialogs.pending_load.is_none());
         assert_eq!(to.tab(), Tab::Practice);
         assert_eq!(
-            format_score(&to.editor.doc().score).unwrap(),
+            format_score(to.editor.doc().score()).unwrap(),
             "3/4 H:q S-H:q H:q ; K:q r:q r:q"
         );
     }
@@ -2150,14 +2146,14 @@ mod tests {
         let mut app = Grooph::new(&cc);
         app.ui.view.show_score_tab = true;
         app.select_tab(Tab::Score);
-        assert!(app.editor.doc().score.staff == grooph_measure::StaffKind::Kit);
+        assert!(app.editor.doc().score().staff == grooph_measure::StaffKind::Kit);
         // Shared from Practice, or written before the score tab said so:
         // Practice, without touching the score tab.
         let shared_from = |tab| {
             let mut from = Grooph::new(&cc);
             from.ui.view.show_score_tab = true;
             from.select_tab(tab);
-            from.editor.doc_mut().score = parse_score("3/4 q q e e").unwrap();
+            from.editor.doc_mut().edit_score(|s| *s = parse_score("3/4 q q e e").unwrap());
             from.share_link_url().unwrap()
         };
         for url in [shared_from(Tab::Practice), "https://grooph.app/?v=2&r=3/4+q+q+e+e".into()] {
@@ -2167,7 +2163,7 @@ mod tests {
                 grooph_link::parse_query(url.split_once('?').unwrap().1).unwrap().unwrap(),
             );
             assert_eq!(app.tab(), Tab::Practice, "{url}");
-            assert_eq!(format_score(&app.editor.doc().score).unwrap(), "3/4 q q e e");
+            assert_eq!(format_score(app.editor.doc().score()).unwrap(), "3/4 q q e e");
             assert!(app.editor.docs.score.score.staff == grooph_measure::StaffKind::Kit);
         }
         // Shared from the score tab: the score tab.
@@ -2181,7 +2177,7 @@ mod tests {
         hidden
             .open_link(grooph_link::parse_query(url.split_once('?').unwrap().1).unwrap().unwrap());
         assert_eq!(hidden.tab(), Tab::Practice);
-        assert_eq!(format_score(&hidden.editor.doc().score).unwrap(), "3/4 q q e e");
+        assert_eq!(format_score(hidden.editor.doc().score()).unwrap(), "3/4 q q e e");
     }
 
     #[test]
@@ -2202,7 +2198,7 @@ mod tests {
             app.request_load_pattern(id);
             assert!(app.ui.dialogs.pending_load.is_none());
             assert_eq!(app.tab(), Tab::Score);
-            assert_eq!(format_score(&app.editor.doc().score).unwrap(), rhythm);
+            assert_eq!(format_score(app.editor.doc().score()).unwrap(), rhythm);
             assert_eq!(app.editor.docs.score.active_pattern_id, Some(id));
             assert_eq!(format_score(&app.editor.docs.practice.score).unwrap(), practice_before);
         }
@@ -2219,7 +2215,7 @@ mod tests {
         app.request_load_pattern(old);
         assert!(app.ui.dialogs.pending_load.is_none());
         assert_eq!(app.tab(), Tab::Practice);
-        assert_eq!(format_score(&app.editor.doc().score).unwrap(), "4/4 h h");
+        assert_eq!(format_score(app.editor.doc().score()).unwrap(), "4/4 h h");
         assert!(app.editor.docs.score.dirty);
     }
 
@@ -2377,14 +2373,14 @@ mod tests {
         let groove = "4/4 H:e S-H:e H:e H:e H:e S-H:e Ho:e Hc:e ; K:q r:q K:q r:q";
         let query = format!("v=2&bpm=96&r={}", groove.replace(' ', "+").replace(';', "%3B"));
         app.open_link(grooph_link::parse_query(&query).unwrap().unwrap());
-        assert_eq!(app.editor.doc().score.staff, StaffKind::Kit);
-        assert_eq!(app.editor.doc().score.measures()[0].voices().len(), 2);
+        assert_eq!(app.editor.doc().score().staff, StaffKind::Kit);
+        assert_eq!(app.editor.doc().score().measures()[0].voices().len(), 2);
         // It opens in the score tab; Practice keeps its rhythm.
         assert_eq!(app.tab(), Tab::Score);
         for (i, tab) in [Tab::Score, Tab::Practice, Tab::Score].into_iter().enumerate() {
             app.select_tab(tab);
             shell_frame(&mut app, &ctx, i as f64 * 0.1, vec![]);
-            assert_eq!(app.editor.doc().score.staff == StaffKind::Kit, tab == Tab::Score);
+            assert_eq!(app.editor.doc().score().staff == StaffKind::Kit, tab == Tab::Score);
         }
         // Sharing writes the groove back.
         let url = app.share_link_url().unwrap();
@@ -2405,8 +2401,9 @@ mod tests {
         let mut app = Grooph::new(&cc);
         app.select_tab(Tab::Score);
         app.edit_page();
-        app.editor.doc_mut().score =
-            parse_score("4/4 H:e H:e H:e H:e H:e H:e H:e H:e ; K:q K:q K:q K:q").unwrap();
+        app.editor.doc_mut().edit_score(|s| {
+            *s = parse_score("4/4 H:e H:e H:e H:e H:e H:e H:e H:e ; K:q K:q K:q K:q").unwrap()
+        });
         app.ui.mode = Mode::Edit;
         let mut time = 0.0;
         let mut tap = |app: &mut Grooph, y: f32| {
@@ -2421,7 +2418,7 @@ mod tests {
                 time += 0.5;
                 shell_frame(app, &ctx, time, vec![Event::PointerMoved(pos), event]);
             }
-            app.editor.doc().cursor
+            app.editor.doc().cursor()
         };
         shell_frame(&mut app, &ctx, 0.0, vec![]);
         // Down from the top of the staff: the hands first, then the kick.
@@ -2447,7 +2444,7 @@ mod tests {
         app.delete_pattern(id);
         app.select_tab(Tab::Score);
         app.edit_page();
-        assert_eq!(app.editor.doc().active_pattern_id, None);
+        assert_eq!(app.editor.rhythm_doc().active_pattern_id, None);
     }
 
     #[test]
@@ -2462,7 +2459,7 @@ mod tests {
         app.select_tab(Tab::Score);
         app.edit_page();
         app.select_tab(Tab::More);
-        let score = format!("{:?}", app.editor.doc().score);
+        let score = format!("{:?}", app.editor.doc().score());
         let key = |key, pressed| Event::Key {
             key,
             physical_key: None,
@@ -2487,7 +2484,7 @@ mod tests {
                 );
             }
         }
-        assert_eq!(format!("{:?}", app.editor.doc().score), score);
+        assert_eq!(format!("{:?}", app.editor.doc().score()), score);
         assert_eq!(app.tab(), Tab::More);
         // Space still plays.
         shell_frame(
@@ -2515,7 +2512,7 @@ mod tests {
         assert_eq!(app.ui.library.scroll_to, Some(LibraryItem::Pattern(id)));
         // Overwriting names no new pattern and opens no name.
         app.ui.library.renaming_pattern = None;
-        app.editor.doc_mut().dirty = true;
+        app.editor.rhythm_doc_mut().unwrap().dirty = true;
         assert_eq!(app.save_rhythm(SaveAs::Update, 2.0), id);
         assert_eq!(app.editor.library.patterns.len(), 1);
         assert_eq!(app.ui.library.renaming_pattern, None);
@@ -2556,20 +2553,18 @@ mod tests {
         let docs = &app.editor.docs;
         let audio = &app.playback_ctl.settings;
         format!(
-            "{:?} {:?} {:?} {:?} {:?} {:?} {:?} {:?} {:?} {} {} {} {} {} {} | {} {:?} {} {:?} {:?} {} {}",
-            docs.metronome.score,
+            "{:?} {:?} {:?} {:?} {:?} {:?} {:?} {:?} {} {} {} {} {} | {} {:?} {} {:?} {:?} {} {}",
+            docs.metronome.score(),
             docs.practice.score,
             docs.score.score,
-            docs.metronome.cursor,
+            docs.metronome.cursor(),
             docs.practice.cursor,
             docs.score.cursor,
-            docs.metronome.active_pattern_id,
             docs.practice.active_pattern_id,
             docs.score.active_pattern_id,
-            docs.metronome.dirty,
             docs.practice.dirty,
             docs.score.dirty,
-            docs.metronome.history.can_undo(),
+            docs.metronome.history().can_undo(),
             docs.practice.history.can_undo(),
             docs.score.history.can_undo(),
             app.playback_ctl.settings.bpm,
@@ -2678,7 +2673,7 @@ mod tests {
         // It plays its own document as clicks, and hits count against it.
         assert_eq!(
             format!("{:?}", app.played_score()),
-            format!("{:?}", app.editor.docs.metronome.score)
+            format!("{:?}", app.editor.docs.metronome.score())
         );
         assert!(app.played_score().measures()[0].first_voice().beats().iter().any(|b| b.is_note()));
         assert_eq!(app.playback_options().played, grooph_audio::Played::Clicks);
@@ -2846,9 +2841,10 @@ mod tests {
         let (state, _) = persist::restore(Some("(version: 3)"));
         assert_eq!(state.view.sticking, StickingSettings::default());
         // Not part of the score or its link.
-        app.editor.doc_mut().score =
-            grooph_measure::notation::parse_score("4/4 q@R q q q").unwrap();
-        let score = ron::to_string(&app.editor.doc().score).unwrap();
+        app.editor
+            .doc_mut()
+            .edit_score(|s| *s = grooph_measure::notation::parse_score("4/4 q@R q q q").unwrap());
+        let score = ron::to_string(app.editor.doc().score()).unwrap();
         assert!(!score.contains("above") && !score.contains("shown"));
     }
 

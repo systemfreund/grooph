@@ -95,7 +95,7 @@ impl Grooph {
     pub(crate) fn guide_meter(&self) -> TimeSignature {
         self.editor
             .doc()
-            .score
+            .score()
             .measures()
             .first()
             .map_or(TimeSignature::FOUR_FOUR, |m| m.time_signature())
@@ -256,7 +256,7 @@ mod tests {
         let mut app = Grooph::new(&cc);
         app.select_tab(crate::shell::Tab::Practice);
         let measure = Grooph::default_measure();
-        app.editor.doc_mut().score = grooph_measure::Score::new(vec![measure; bars]);
+        app.editor.doc_mut().edit_score(|s| *s = grooph_measure::Score::new(vec![measure; bars]));
         app.ui.view.guide = guide;
         app
     }

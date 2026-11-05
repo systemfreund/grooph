@@ -59,7 +59,9 @@ impl Grooph {
                 self.playback_ctl.accuracy.tracker.clear_for_edit();
                 // The bar's length may have changed while playing.
                 self.realign_accuracy_clock();
-                self.editor.doc_mut().dirty = true;
+                if let Some(doc) = self.editor.rhythm_doc_mut() {
+                    doc.dirty = true;
+                }
             }
             ScoreChange::Replaced(origin) => {
                 self.playback_ctl.accuracy.tracker.clear_for_edit();
@@ -73,10 +75,11 @@ impl Grooph {
                     Origin::Link { undoubled } => (None, undoubled),
                     Origin::New => (None, true),
                 };
-                let doc = self.editor.doc_mut();
-                doc.cursor = Cursor::start();
-                doc.active_pattern_id = pattern;
-                doc.dirty = dirty;
+                *self.editor.doc_mut().cursor_mut() = Cursor::start();
+                if let Some(doc) = self.editor.rhythm_doc_mut() {
+                    doc.active_pattern_id = pattern;
+                    doc.dirty = dirty;
+                }
             }
             ScoreChange::Appended => self.endless_changed(),
             ScoreChange::DroppedFront { ticks } => {
@@ -99,8 +102,8 @@ impl Grooph {
     /// undoable step.
     pub(crate) fn replace_score(&mut self, score: Score, origin: Origin) {
         let snap = self.current_snapshot();
-        self.editor.doc_mut().history.push(snap);
-        self.editor.doc_mut().score = score;
+        self.editor.doc_mut().history_mut().push(snap);
+        self.editor.doc_mut().edit_score(|s| *s = score);
         self.score_changed(ScoreChange::Replaced(origin));
     }
 
@@ -118,8 +121,10 @@ impl Grooph {
     fn endless_changed(&mut self) {
         // The loop got longer or shorter: anchor the clock again.
         self.realign_accuracy_clock();
-        self.editor.doc_mut().active_pattern_id = None;
-        self.editor.doc_mut().dirty = true;
+        if let Some(doc) = self.editor.rhythm_doc_mut() {
+            doc.active_pattern_id = None;
+            doc.dirty = true;
+        }
     }
 
     /// The score lost its first bar, `ticks` long: everything moves back by
@@ -147,13 +152,13 @@ impl Grooph {
         }
         // In the same voice; on the dropped measure, from the start of the
         // one that took its place.
-        let cursor = self.editor.doc().cursor;
+        let cursor = self.editor.doc().cursor();
         let moved = match cursor.measure_idx {
             0 => Cursor { beat_idx: 0, ..cursor },
             m => Cursor { measure_idx: m - 1, ..cursor },
         };
         let doc = self.editor.doc_mut();
-        doc.cursor = doc.score.clamp_cursor(moved);
+        *doc.cursor_mut() = doc.score().clamp_cursor(moved);
     }
 
     /// Re-anchor the accuracy session to the current playback position: its
@@ -210,7 +215,7 @@ mod tests {
         app.select_tab(Tab::Practice);
         app.playback_ctl.feedback.accuracy_enabled = true;
         let ts = TimeSignature::FOUR_FOUR;
-        let doc = app.editor.doc_mut();
+        let doc = &mut app.editor.docs.practice;
         doc.score = quarters(&[ts, ts]);
         doc.cursor = Cursor::at(1, 2);
         doc.dirty = false;
@@ -246,9 +251,11 @@ mod tests {
     #[test]
     fn an_edit_clears_the_marks_and_marks_the_score_unsaved() {
         let mut app = practice_app();
-        app.with_undo_snapshot(|app| app.current_voice_mut().set_beat(0, Beat::rest(q())).is_ok());
+        app.with_undo_snapshot(|app| {
+            app.edit_current_voice(|voice| voice.set_beat(0, Beat::rest(q())).is_ok())
+        });
         assert!(marks_cleared(&app));
-        let doc = app.editor.doc();
+        let doc = &app.editor.docs.practice;
         assert!(doc.dirty);
         assert_eq!(doc.active_pattern_id, Some(7));
         assert_eq!(doc.cursor, Cursor::at(1, 2));
@@ -266,8 +273,9 @@ mod tests {
         play_at(&mut app, tick);
         let before = clock::now_seconds();
         app.with_undo_snapshot(|app| {
-            app.editor.doc_mut().score =
-                quarters(&[TimeSignature::new(3, 4), TimeSignature::new(3, 4)]);
+            app.editor.doc_mut().edit_score(|s| {
+                *s = quarters(&[TimeSignature::new(3, 4), TimeSignature::new(3, 4)])
+            });
             true
         });
         assert!(marks_cleared(&app));
@@ -288,7 +296,7 @@ mod tests {
         let bar = app.score_timing().measure_start_tick(1) as f64;
         play_at(&mut app, bar + 10.0);
         let before = clock::now_seconds();
-        app.with_undo_snapshot(|app| app.editor.doc_mut().score.remove(1).is_some());
+        app.with_undo_snapshot(|app| app.editor.doc_mut().edit_score(|s| s.remove(1)).is_some());
         assert_anchored_at(&app, 10.0, before);
         let timing = app.score_timing();
         let score = app.played_score().clone();
@@ -311,7 +319,7 @@ mod tests {
             app.playback_ctl.playback.smooth_tick = 12.0;
             app.playback_ctl.playback.rows_above_view = 2;
             app.replace_score(quarters(&[ts]), origin);
-            let doc = app.editor.doc();
+            let doc = &app.editor.docs.practice;
             assert_eq!(doc.score.len(), 1);
             assert_eq!(doc.cursor, Cursor::start());
             assert_eq!((doc.active_pattern_id, doc.dirty), (pattern, dirty), "{origin:?}");
@@ -344,14 +352,15 @@ mod tests {
         play_at(&mut app, 30.0);
         let before = clock::now_seconds();
         app.editor
-            .doc_mut()
+            .docs
+            .practice
             .score
             .push(Measure::new_init(TimeSignature::FOUR_FOUR, BeatKind::Note));
         app.score_changed(ScoreChange::Appended);
         assert_anchored_at(&app, 30.0, before);
         // The run's marks stay.
         assert!(app.playback_ctl.accuracy.tracker.mark_for_onset(0).is_some());
-        let doc = app.editor.doc();
+        let doc = &app.editor.docs.practice;
         assert_eq!((doc.active_pattern_id, doc.dirty), (None, true));
         assert_eq!(doc.cursor, Cursor::at(1, 2));
     }
@@ -376,7 +385,7 @@ mod tests {
         playback.guide_bar = Some((1, 10.0));
         playback.anchor = Some(AnchorFlash { bar: 4, measure_idx: 1, tick: 0, at: 0.0 });
 
-        app.editor.doc_mut().score.remove(0);
+        app.editor.doc_mut().edit_score(|s| s.remove(0));
         let before = clock::now_seconds();
         app.score_changed(ScoreChange::DroppedFront { ticks });
 
@@ -393,7 +402,7 @@ mod tests {
         assert!(tracker.mark_for_onset(0).is_some());
         assert!(tracker.mark_for_onset(ticks).is_none());
         assert_anchored_at(&app, 10.0, before);
-        let doc = app.editor.doc();
+        let doc = &app.editor.docs.practice;
         assert_eq!(doc.cursor, Cursor::at(0, 2));
         assert_eq!((doc.active_pattern_id, doc.dirty), (None, true));
     }
@@ -408,7 +417,7 @@ mod tests {
         assert_anchored_at(&app, 30.0, before);
         // The marks stay; Practice's rhythm keeps no tempo.
         assert!(app.playback_ctl.accuracy.tracker.mark_for_onset(0).is_some());
-        assert!(!app.editor.doc().dirty);
+        assert!(!app.editor.docs.practice.dirty);
         // The score tab's score does.
         app.select_tab(Tab::Score);
         app.editor.docs.score.dirty = false;
@@ -425,7 +434,7 @@ mod tests {
         app.score_changed(ScoreChange::Timing);
         assert_anchored_at(&app, 30.0, before);
         assert!(app.playback_ctl.accuracy.tracker.mark_for_onset(0).is_some());
-        assert!(!app.editor.doc().dirty);
+        assert!(!app.editor.docs.practice.dirty);
         assert!(!app.editor.docs.score.dirty);
     }
 

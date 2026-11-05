@@ -101,13 +101,13 @@ impl Grooph {
     /// Added measures follow the current generator settings.
     pub(crate) fn update_endless(&mut self) {
         let playing = self.playback_ctl.transport_state == TransportState::Playing;
-        if !self.endless_runs() || !playing || self.editor.doc().score.is_empty() {
+        if !self.endless_runs() || !playing || self.editor.doc().score().is_empty() {
             return;
         }
 
         let timing = self.score_timing();
         let current = timing.measure_at_global_tick(self.playback_ctl.playback.smooth_tick);
-        if current + 1 >= self.editor.doc().score.len() {
+        if current + 1 >= self.editor.doc().score().len() {
             self.append_endless_measure(&timing);
         }
 
@@ -148,15 +148,15 @@ impl Grooph {
         // Settle the hit windows on the old timing: the loop gets longer, so
         // the accuracy clock is anchored again below.
         let tracker = &mut self.playback_ctl.accuracy.tracker;
-        tracker.update_progress(clock::now_seconds(), timing, &self.editor.doc().score);
-        self.editor.doc_mut().score.push(measure);
+        tracker.update_progress(clock::now_seconds(), timing, self.editor.doc().score());
+        self.editor.doc_mut().edit_score(|score| score.push(measure));
         self.score_changed(ScoreChange::Appended);
     }
 
     fn drop_first_measure(&mut self, timing: &ScoreTiming) {
         let tracker = &mut self.playback_ctl.accuracy.tracker;
-        tracker.update_progress(clock::now_seconds(), timing, &self.editor.doc().score);
-        if self.editor.doc_mut().score.remove(0).is_none() {
+        tracker.update_progress(clock::now_seconds(), timing, self.editor.doc().score());
+        if self.editor.doc_mut().edit_score(|score| score.remove(0)).is_none() {
             return;
         }
         let ticks = u64::from(timing.ticks_per_measure(0));

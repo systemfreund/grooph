@@ -953,7 +953,7 @@ impl Grooph {
     /// The rests a kit score leaves out in bars of two voices; opens its
     /// picker. Not on the one line, where every rest stays.
     fn hidden_rests_row(&mut self, ui: &mut Ui) {
-        let score = &self.editor.doc().score;
+        let score = self.editor.doc().score();
         if score.staff != StaffKind::Kit {
             return;
         }

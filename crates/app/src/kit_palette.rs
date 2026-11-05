@@ -47,7 +47,7 @@ impl Grooph {
     /// measure: where it already is, else the measure's own style, else the
     /// score's rule (see [`Measure::voice_for`]).
     fn voice_for(&self, instrument: Instrument) -> VoiceIdx {
-        self.current_measure().voice_for(instrument, &self.editor.doc().score.voicing)
+        self.current_measure().voice_for(instrument, &self.editor.doc().score().voicing)
     }
 
     /// A tap on an instrument's cell: it becomes the picked one and its head
@@ -80,13 +80,13 @@ impl Grooph {
             .find(|&(i, _)| i == instrument)
             .map(|(_, at)| at.voice);
         self.editor.instrument = instrument;
-        let steps = self.editor.doc().history.pushed();
+        let steps = self.editor.doc().history().pushed();
         let voice = there.unwrap_or_else(|| self.voice_for(instrument));
         self.go_to_voice(voice);
         self.apply_tool(id.tool());
         // A voice the bar had to get first is part of the same step.
-        if self.editor.doc().history.pushed() == steps + 2 {
-            self.editor.doc_mut().history.fold_last();
+        if self.editor.doc().history().pushed() == steps + 2 {
+            self.editor.doc_mut().history_mut().fold_last();
         }
     }
 
@@ -94,19 +94,21 @@ impl Grooph {
     /// then; a measure of the kit without that voice gets it, of rests (an
     /// undoable change). On the one line a measure keeps its voices.
     pub(crate) fn go_to_voice(&mut self, voice: VoiceIdx) {
-        let cursor = self.editor.doc().score.clamp_cursor(self.editor.doc().cursor);
+        let cursor = self.editor.doc().score().clamp_cursor(self.editor.doc().cursor());
         let kit = !self.staff_model().one_line();
         if kit
             && self.current_measure().voices().len() <= voice
-            && voice < self.editor.doc().score.voicing.voices()
+            && voice < self.editor.doc().score().voicing.voices()
         {
             self.with_undo_snapshot(|app| {
-                app.current_measure_mut().fill_voices(voice + 1);
+                app.editor.doc_mut().edit_score(|score| {
+                    score.current_mut(cursor.measure_idx).fill_voices(voice + 1);
+                });
                 true
             });
         }
         let doc = self.editor.doc_mut();
-        doc.cursor = doc.score.cursor_in_voice(cursor, voice);
+        *doc.cursor_mut() = doc.score().cursor_in_voice(cursor, voice);
     }
 
     /// Start a new score in the score tab, on `staff`, asking first if its

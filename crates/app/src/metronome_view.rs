@@ -24,7 +24,7 @@
 //! one edited (see [`MetronomeVoice`]).
 
 use crate::accuracy::{AccuracyMark, HitGrade, clamp_diff_to_beat_window, global_beat_onsets};
-use crate::documents::Document;
+use crate::documents::{Doc, Document};
 use crate::measure_panel::{grade_color, reference_color};
 use crate::metronome_bars::MeterBars;
 use crate::state::CountInState;
@@ -307,7 +307,7 @@ impl Grooph {
     /// the counter rhythm, if any, as its second voice. The document keeps
     /// the other meters' too (see [`crate::metronome_bars`]).
     fn metronome_doc_bar(&self) -> &Measure {
-        &self.editor.docs.metronome.score.measures()[0]
+        &self.editor.docs.metronome.score().measures()[0]
     }
 
     /// Bars in the score being played, for the tempo ramp's loops.
@@ -317,7 +317,7 @@ impl Grooph {
 
     /// Open the metronome's document, on its first click.
     pub(crate) fn open_metronome(&mut self) {
-        self.editor.docs.metronome.cursor = Cursor::start();
+        *self.editor.docs.metronome.cursor_mut() = Cursor::start();
         self.editor.metronome.forget_hover();
     }
 
@@ -345,7 +345,7 @@ impl Grooph {
 
     /// The ratio the metronome meter's counter rhythm was picked as.
     fn counter_name(&self) -> Option<Ratio> {
-        self.editor.docs.metronome.meters.name
+        self.editor.docs.metronome.counter_name()
     }
 
     /// `bar` from elsewhere (a link) is its meter's click bar from now on,
@@ -380,7 +380,7 @@ impl Grooph {
         if !self.metronome_mode() {
             return MetronomeVoice::Click;
         }
-        let cursor = self.editor.doc().score.clamp_cursor(self.editor.doc().cursor);
+        let cursor = self.editor.doc().score().clamp_cursor(self.editor.doc().cursor());
         MetronomeVoice::of(cursor.voice).unwrap_or_default()
     }
 
@@ -393,7 +393,7 @@ impl Grooph {
         }
         let voice = if self.counter_bar().is_some() { voice } else { MetronomeVoice::Click };
         if voice != self.edited_voice() {
-            self.editor.doc_mut().cursor = Cursor::in_voice(0, voice.idx(), 0);
+            *self.editor.doc_mut().cursor_mut() = Cursor::in_voice(0, voice.idx(), 0);
         }
     }
 
@@ -432,8 +432,8 @@ impl Grooph {
         }
         let bar = metronome_bar(bar, self.counter_bar().as_ref());
         self.with_undo_snapshot(|app| {
-            app.editor.doc_mut().score = Score::single(bar);
-            app.editor.doc_mut().cursor = Cursor::start();
+            app.editor.doc_mut().edit_score(|s| *s = Score::single(bar));
+            *app.editor.doc_mut().cursor_mut() = Cursor::start();
             true
         });
     }
@@ -503,16 +503,16 @@ impl Grooph {
         if unchanged {
             return;
         }
-        let new_bar = metronome_bar(self.click_bar(), bar.as_ref());
+        let name = ratio.filter(|_| bar.is_some());
+        let bars = MeterBars::new(self.click_bar(), bar.as_ref(), name);
         let on_counter = self.edited_voice() == MetronomeVoice::Counter;
         let edit = |app: &mut Self| {
             let doc = &mut app.editor.docs.metronome;
-            doc.meters.name = ratio.filter(|_| bar.is_some());
-            doc.score = Score::single(new_bar);
+            doc.keep_meter_bars(bars);
             if on_counter {
-                doc.cursor = Cursor::in_voice(0, MetronomeVoice::Counter.idx(), 0);
+                let cursor = Cursor::in_voice(0, MetronomeVoice::Counter.idx(), 0);
+                *doc.cursor_mut() = doc.score().clamp_cursor(cursor);
             }
-            doc.cursor = doc.score.clamp_cursor(doc.cursor);
             true
         };
         // Undoable in the tab, whose document's history it is.
@@ -546,9 +546,11 @@ impl Grooph {
         let level = click_level(&counter, idx).next();
         let voice = MetronomeVoice::Counter.idx();
         self.with_undo_snapshot(|app| {
-            let bar = &mut app.editor.doc_mut().score.measures_mut()[0];
-            bar.voice_mut(voice).expect("checked above").set_click_level(idx, level);
-            app.editor.doc_mut().cursor = Cursor::in_voice(0, voice, idx);
+            app.editor.doc_mut().edit_score(|score| {
+                let bar = &mut score.measures_mut()[0];
+                bar.voice_mut(voice).expect("checked above").set_click_level(idx, level);
+            });
+            *app.editor.doc_mut().cursor_mut() = Cursor::in_voice(0, voice, idx);
             true
         });
     }
@@ -558,12 +560,19 @@ impl Grooph {
     fn cycle_click_level(&mut self, idx: usize) {
         self.select_voice(MetronomeVoice::Click);
         self.with_undo_snapshot(|app| {
-            let bar = &mut app.editor.doc_mut().score.measures_mut()[0];
-            let Some(level) = bar.first_voice().beats().get(idx).map(ClickLevel::of) else {
+            let set = app.editor.doc_mut().edit_score(|score| {
+                let bar = &mut score.measures_mut()[0];
+                let Some(level) = bar.first_voice().beats().get(idx).map(ClickLevel::of) else {
+                    return false;
+                };
+                bar.first_voice_mut().set_click_level(idx, level.next());
+                true
+            });
+            if !set {
                 return false;
-            };
-            bar.first_voice_mut().set_click_level(idx, level.next());
-            app.editor.doc_mut().cursor = Cursor::in_voice(0, MetronomeVoice::Click.idx(), idx);
+            }
+            *app.editor.doc_mut().cursor_mut() =
+                Cursor::in_voice(0, MetronomeVoice::Click.idx(), idx);
             true
         });
     }
@@ -1567,19 +1576,19 @@ mod tests {
         let mut app = metronome_app();
         app.set_counter_ratio(Some(Ratio { n: 3, span: 4 }));
         // The editor holds click and counter as one bar of two voices.
-        assert_eq!(app.editor.doc().score.measures()[0].voices().len(), 2);
+        assert_eq!(app.editor.doc().score().measures()[0].voices().len(), 2);
         assert_eq!(app.edited_voice(), MetronomeVoice::Click);
         app.select_voice(MetronomeVoice::Counter);
-        assert_eq!(app.editor.doc().cursor, Cursor::in_voice(0, 1, 0));
+        assert_eq!(app.editor.doc().cursor(), Cursor::in_voice(0, 1, 0));
         assert_eq!(app.edited_voice(), MetronomeVoice::Counter);
         // A cursor moved into a voice edits it, as in a kit score.
-        app.editor.doc_mut().cursor = Cursor::in_voice(0, 0, 1);
+        *app.editor.doc_mut().cursor_mut() = Cursor::in_voice(0, 0, 1);
         assert_eq!(app.edited_voice(), MetronomeVoice::Click);
         // A tool edits the counter rhythm in its voice, not the clicks.
         let click = app.click_bar();
-        app.editor.doc_mut().cursor = Cursor::in_voice(0, 1, 0);
+        *app.editor.doc_mut().cursor_mut() = Cursor::in_voice(0, 1, 0);
         app.with_undo_snapshot(|app| {
-            app.current_voice_mut().set_click_level(0, ClickLevel::Off);
+            app.edit_current_voice(|voice| voice.set_click_level(0, ClickLevel::Off));
             true
         });
         assert!(app.click_bar() == click);
@@ -1605,7 +1614,7 @@ mod tests {
         assert_eq!(app.edited_voice(), MetronomeVoice::Counter);
         // The cursor is in the counter's voice; an edit goes to the counter.
         app.with_undo_snapshot(|app| {
-            app.current_voice_mut().set_click_level(2, ClickLevel::Strong);
+            app.edit_current_voice(|voice| voice.set_click_level(2, ClickLevel::Strong));
             true
         });
         let counter = app.meter_bars(TimeSignature::FOUR_FOUR).counter();
@@ -1697,7 +1706,7 @@ mod tests {
         assert_eq!(app.edited_voice(), MetronomeVoice::Click);
         assert!(app.counter_bar().is_none());
         assert!(
-            app.editor.doc().score.measures()[0] == default_click_bar(TimeSignature::FOUR_FOUR)
+            app.editor.doc().score().measures()[0] == default_click_bar(TimeSignature::FOUR_FOUR)
         );
         // Without a counter there is no lower voice to pick.
         app.select_voice(MetronomeVoice::Counter);
@@ -1783,7 +1792,7 @@ mod tests {
         let doc = saved.metronome.clone().into_doc();
         assert!(doc.meter_bars(ts).click() == click);
         let counter = doc.meter_bars(ts).counter().unwrap();
-        assert_eq!(named_ratio_of(&counter, doc.meters.name), Some(Ratio { n: 3, span: 4 }));
+        assert_eq!(named_ratio_of(&counter, doc.counter_name()), Some(Ratio { n: 3, span: 4 }));
         assert_eq!(saved.metronome.meter, ts);
         // ...and outside the tab: Practice's 4/4 bars click it too.
         app.select_tab(Tab::Practice);
