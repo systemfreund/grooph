@@ -4,6 +4,7 @@
 //! dialog.
 
 use crate::guide::Guide;
+use crate::library_panel::{PreviewLook, pattern_preview};
 use crate::metronome_view::{FillLook, click_fills, ratio_label};
 use crate::mixer_panel::mixer_width;
 use crate::platform;
@@ -16,6 +17,7 @@ use eframe::egui::{
     Button, Color32, FontFamily, FontId, Id, Modal, Rect, Response, RichText, Ui, vec2,
 };
 use grooph_audio::{GapClick, GapMode, GapMute, Sound};
+use grooph_measure::click::ClickBars;
 use grooph_measure::counter::{Ratio, own_ratios, step_clicks, step_span};
 use grooph_measure::counting::CountingSystem;
 use grooph_measure::generator::{
@@ -903,27 +905,31 @@ impl Grooph {
     }
 
     /// The click played here: every meter's standard click, or the click
-    /// bars edited in the metronome tab; picking closes the dialog.
+    /// bars edited in the metronome tab, with the bar each meter of the
+    /// rhythm clicks under the one chosen. Stays open on a pick, so the bars
+    /// can be compared.
     fn click_choices(&mut self, ui: &mut Ui) -> bool {
-        let meters = self.edited_click_meters();
-        let edited = if meters.is_empty() {
-            "No meter of this rhythm is edited there yet.".to_owned()
-        } else {
-            let meters = meters.iter().map(ToString::to_string).collect::<Vec<_>>();
-            format!("Edited there: {}.", meters.join(", "))
+        ui.weak(
+            "Standard clicks every meter's beats. Metronome plays the clicks edited in the Metronome tab.",
+        );
+        ui.add_space(8.0);
+        let look = PreviewLook {
+            family: self.ui.fonts.music_font_id.family.clone(),
+            stem_length_factor: self.ui.layout.stem_length_factor,
         };
-        ui.weak(format!(
-            "Standard clicks every meter's beats. Metronome plays the clicks edited in the Metronome tab. {edited}"
-        ));
+        let metronome = self.playback_ctl.settings.metronome_click;
+        let click = if metronome { self.click_bars() } else { ClickBars::default() };
+        for ts in self.played_meters() {
+            let bar = Score::single(click.for_meter(ts));
+            pattern_preview(ui, &bar, ui.available_width(), &look);
+        }
         ui.add_space(8.0);
         let options = [false, true].map(|m| (m, click_source_label(m).to_owned()));
-        let setting = &mut self.playback_ctl.settings.metronome_click;
-        let picked = choice_grid(ui, &options, *setting, 2);
-        if let Some(metronome) = picked {
-            *setting = metronome;
+        if let Some(metronome) = choice_grid(ui, &options, metronome, 2) {
+            self.playback_ctl.settings.metronome_click = metronome;
             self.playback_ctl.settings.click = true;
         }
-        picked.is_some()
+        false
     }
 
     /// Which rests the score leaves out in its bars of two voices; picking

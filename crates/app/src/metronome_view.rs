@@ -349,13 +349,11 @@ impl Grooph {
         }
     }
 
-    /// The meters of the played score whose click bar was edited in the
-    /// metronome, in the order they first come.
-    pub(crate) fn edited_click_meters(&self) -> Vec<TimeSignature> {
-        let click = self.click_bars();
+    /// The meters of the played score, in the order they first come.
+    pub(crate) fn played_meters(&self) -> Vec<TimeSignature> {
         let mut meters: Vec<TimeSignature> = Vec::new();
         for ts in self.played_score().measures().iter().map(|m| m.time_signature()) {
-            if !meters.contains(&ts) && click.custom_for(ts).is_some() {
+            if !meters.contains(&ts) {
                 meters.push(ts);
             }
         }
@@ -1843,8 +1841,6 @@ mod tests {
         assert!(!app.playback_ctl.settings.metronome_click);
         assert!(app.playback_options().click.for_meter(ts) == meter_click_bar(ts));
         assert!(app.shared_link().click.is_none());
-        // Practice's rhythm is 4/4: only that meter's edit is named.
-        assert_eq!(app.edited_click_meters(), vec![ts]);
         app.playback_ctl.settings.metronome_click = true;
         let click = app.playback_options().click;
         assert!(click.for_meter(ts) == four.click());
