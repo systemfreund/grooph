@@ -541,7 +541,7 @@ impl Grooph {
                 ..self.playback_ctl.settings.gap_click
             },
             ramp: self.played_ramp(),
-            click: self.click_bars(),
+            click: self.played_click_bars(),
             // The metronome plays its click bar and counter rhythm alone.
             played: if self.metronome_mode() { Played::Clicks } else { Played::Score },
         }
@@ -925,6 +925,7 @@ impl Grooph {
         // a metronome link on the metronome, with its meter and click bar.
         let replaces_rhythm =
             matches!(link.content, Some(LinkContent::Score(_) | LinkContent::Generator { .. }));
+        let shares_score = matches!(link.content, Some(LinkContent::Score(_)));
         match link.content {
             Some(LinkContent::Score(score)) if self.opens_on_practice(&link) => {
                 self.replace_practice_from_link(score);
@@ -970,6 +971,10 @@ impl Grooph {
         }
         if let Some(bar) = link.click {
             self.set_meter_click_bar(bar);
+            // A rhythm's link plays the click bar it was shared with.
+            if shares_score {
+                self.playback_ctl.settings.metronome_click = true;
+            }
         }
     }
 

@@ -630,13 +630,19 @@ grooph's metronome runs inside AI chats as an
   lists the subdivision picker's options (`none` for the default bar, then
   each split by its notes' code: `e`, `s`, `t16`, …). `ClickBars`
   (built from the metronome's document, see below) keeps the bars that differ from the default,
-  keyed by the whole `TimeSignature` including its grouping, and applies to
-  all playback in that meter. `Schedule::build` plays strong as `Downbeat`,
+  keyed by the whole `TimeSignature` including its grouping. The metronome
+  always plays them; Practice and the score tab only while the "Metronome
+  click" option (`PlaybackSettings::metronome_click`, off by default, one
+  setting for both) is on, else every meter's default bar
+  (`Grooph::played_click_bars`). The option's row names the played score's
+  meters that have an edited bar. `Schedule::build` plays strong as `Downbeat`,
   medium as `PrimaryBeat`, soft as `SoftBeat` (mixer "Soft"), at the swung
   position of each note. The count-in and calibration
   ignore the click bars. Link parameter `click` is the click bar of the
   link's first meter in text notation without the time signature (e.g.
-  `>q r:q. (q)`); shared links carry it when it is not the default, and
+  `>q r:q. (q)`); shared links carry it when it is not the default and is
+  played (from Practice or the score tab only while the option is on; a
+  rhythm's link that carries one turns the option on), and
   write a picker option as `subdivision=<code>` instead (`subdivision_of`);
   a link takes one of the two.
 

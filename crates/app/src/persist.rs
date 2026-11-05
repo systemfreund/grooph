@@ -742,6 +742,8 @@ mod tests {
                     keep_reached: true,
                     ..TempoRamp::default()
                 },
+                // Not in version 3.
+                metronome_click: false,
             },
             generator: GeneratorConfig {
                 settings: GeneratorSettings {

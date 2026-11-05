@@ -338,6 +338,30 @@ impl Grooph {
         self.editor.docs.metronome.click_bars()
     }
 
+    /// The click bars played: the metronome's own in its tab, and in
+    /// Practice and the score tab while "Metronome click" is on; else every
+    /// meter's own.
+    pub(crate) fn played_click_bars(&self) -> ClickBars {
+        if self.metronome_mode() || self.playback_ctl.settings.metronome_click {
+            self.click_bars()
+        } else {
+            ClickBars::default()
+        }
+    }
+
+    /// The meters of the played score whose click bar was edited in the
+    /// metronome, in the order they first come.
+    pub(crate) fn edited_click_meters(&self) -> Vec<TimeSignature> {
+        let click = self.click_bars();
+        let mut meters: Vec<TimeSignature> = Vec::new();
+        for ts in self.played_score().measures().iter().map(|m| m.time_signature()) {
+            if !meters.contains(&ts) && click.custom_for(ts).is_some() {
+                meters.push(ts);
+            }
+        }
+        meters
+    }
+
     /// The bars of meter `ts`, from the metronome's document.
     pub(crate) fn meter_bars(&self, ts: TimeSignature) -> MeterBars {
         self.editor.docs.metronome.meter_bars(ts)
@@ -1799,14 +1823,50 @@ mod tests {
         let counter = doc.meter_bars(ts).counter().unwrap();
         assert_eq!(named_ratio_of(&counter, doc.counter_name()), Some(Ratio { n: 3, span: 4 }));
         assert_eq!(saved.metronome.meter, ts);
-        // ...and outside the tab: Practice's 4/4 bars click it too.
+        // ...and outside the tab, while Practice clicks the metronome's.
         app.select_tab(Tab::Practice);
+        app.playback_ctl.settings.metronome_click = true;
         assert!(app.click_bar() == click);
         assert!(app.playback_options().click.for_meter(ts) == click);
         // Another meter picked outside the tab keeps 4/4's in the settings.
         app.set_metronome_meter(TimeSignature::THREE_FOUR);
         assert!(app.click_bars().for_meter(ts) == click);
         assert!(app.meter_bars(ts).counter().is_some());
+    }
+
+    #[test]
+    fn practice_clicks_the_metronomes_bars_only_when_asked() {
+        let (mut app, three, four) = app_with_edited_meters();
+        let ts = TimeSignature::FOUR_FOUR;
+        app.select_tab(Tab::Practice);
+        // Off by default: every meter's own click, also in a shared link.
+        assert!(!app.playback_ctl.settings.metronome_click);
+        assert!(app.playback_options().click.for_meter(ts) == meter_click_bar(ts));
+        assert!(app.shared_link().click.is_none());
+        // Practice's rhythm is 4/4: only that meter's edit is named.
+        assert_eq!(app.edited_click_meters(), vec![ts]);
+        app.playback_ctl.settings.metronome_click = true;
+        let click = app.playback_options().click;
+        assert!(click.for_meter(ts) == four.click());
+        assert!(click.for_meter(TimeSignature::THREE_FOUR) == three.click());
+        assert!(app.shared_link().click == Some(four.click()));
+        // The metronome always clicks its own.
+        app.playback_ctl.settings.metronome_click = false;
+        app.select_tab(Tab::Metronome);
+        assert!(app.playback_options().click.for_meter(ts) == four.click());
+    }
+
+    #[test]
+    fn a_rhythms_link_with_a_click_bar_clicks_it() {
+        let (mut app, _, four) = app_with_edited_meters();
+        app.select_tab(Tab::Practice);
+        let mut link = app.shared_link();
+        link.click = Some(four.click());
+        let mut other = metronome_app();
+        other.select_tab(Tab::Practice);
+        other.apply_link(link);
+        assert!(other.playback_ctl.settings.metronome_click);
+        assert!(other.playback_options().click.for_meter(TimeSignature::FOUR_FOUR) == four.click());
     }
 
     #[test]

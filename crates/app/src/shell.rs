@@ -278,6 +278,37 @@ fn badged_switch_row(ui: &mut Ui, label: &str, badge: Option<&str>, on: &mut boo
     resp.clicked()
 }
 
+/// [`switch_row`] with its value before the switch, as in a [`split_row`],
+/// but tapped anywhere to toggle. Returns whether it toggled.
+fn value_switch_row(ui: &mut Ui, label: &str, value: &str, on: &mut bool) -> bool {
+    let (rect, resp) =
+        ui.allocate_exact_size(vec2(ui.available_width(), ROW_HEIGHT), Sense::click());
+    if resp.clicked() {
+        *on = !*on;
+    }
+    let how_on = ui.ctx().animate_bool_responsive(resp.id, *on);
+    let visuals = ui.visuals();
+    let painter = ui.painter();
+    let label = painter.text(
+        rect.left_center() + vec2(4.0, 0.0),
+        Align2::LEFT_CENTER,
+        label,
+        FontId::proportional(19.0),
+        visuals.text_color(),
+    );
+    let right = rect.right() - SPLIT_SWITCH_WIDTH;
+    let value = cut_to_fit(painter, value, right - label.right() - 16.0);
+    painter.text(
+        pos2(right, rect.center().y),
+        Align2::RIGHT_CENTER,
+        value,
+        FontId::proportional(19.0),
+        visuals.weak_text_color(),
+    );
+    paint_switch(painter, rect, *on, how_on, visuals);
+    resp.clicked()
+}
+
 /// The switch at the right end of `row`, `how_on` along its way to on.
 fn paint_switch(painter: &Painter, row: Rect, on: bool, how_on: f32, visuals: &egui::Visuals) {
     let switch = Rect::from_center_size(row.right_center() - vec2(30.0, 0.0), vec2(52.0, 30.0));
@@ -937,6 +968,7 @@ impl Grooph {
         self.hidden_rests_row(ui);
         self.sticking_row(ui);
         self.shared_rows(ui);
+        self.metronome_click_row(ui);
     }
 
     /// Where the stickings go, and the switch that shows or hides them;
@@ -1179,6 +1211,23 @@ impl Grooph {
         self.swing_row(ui);
     }
 
+    /// Whether the click bars edited in the metronome click here too, with
+    /// the score's meters that have one.
+    fn metronome_click_row(&mut self, ui: &mut Ui) {
+        let meters = self.edited_click_meters();
+        let edited = if meters.is_empty() {
+            "none".to_owned()
+        } else {
+            meters.iter().map(ToString::to_string).collect::<Vec<_>>().join(", ")
+        };
+        value_switch_row(
+            ui,
+            "Metronome click",
+            &edited,
+            &mut self.playback_ctl.settings.metronome_click,
+        );
+    }
+
     /// The count under the staff, shown in every tab; opens its picker. The
     /// switch brings back the last count that fits the score.
     fn counting_row(&mut self, ui: &mut Ui) {
@@ -1320,6 +1369,7 @@ impl Grooph {
         self.timing_feedback_row(ui);
         self.sticking_row(ui);
         self.shared_rows(ui);
+        self.metronome_click_row(ui);
         // Edited here, as the metronome's "Edit clicks".
         if value_row(ui, "Edit rhythm", "✏").clicked() {
             self.edit_page();
