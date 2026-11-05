@@ -743,6 +743,7 @@ mod tests {
                     ..TempoRamp::default()
                 },
                 // Not in version 3.
+                click: true,
                 metronome_click: false,
             },
             generator: GeneratorConfig {

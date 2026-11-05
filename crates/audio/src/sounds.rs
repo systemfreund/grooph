@@ -505,7 +505,7 @@ mod tests {
         let score = Score::new(vec![Measure::new(TimeSignature::FOUR_FOUR)]);
         let timing = ScoreTiming::from_score(&score, 120);
         let mut sounds = Vec::new();
-        Schedule::build(&score, &timing, None, &ClickBars::default()).collect_in_range(
+        Schedule::build(&score, &timing, None, Some(&ClickBars::default())).collect_in_range(
             0,
             timing.total_loop_ticks() as f64,
             &mut sounds,

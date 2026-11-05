@@ -1835,7 +1835,7 @@ mod tests {
     }
 
     #[test]
-    fn practice_clicks_the_metronomes_bars_only_when_asked() {
+    fn practice_clicks_the_metronomes_bars_only_when_asked_and_can_be_muted() {
         let (mut app, three, four) = app_with_edited_meters();
         let ts = TimeSignature::FOUR_FOUR;
         app.select_tab(Tab::Practice);
@@ -1850,9 +1850,13 @@ mod tests {
         assert!(click.for_meter(ts) == four.click());
         assert!(click.for_meter(TimeSignature::THREE_FOUR) == three.click());
         assert!(app.shared_link().click == Some(four.click()));
+        // Muted, the rhythm plays alone.
+        app.playback_ctl.settings.click = false;
+        assert_eq!(app.playback_options().played, grooph_audio::Played::Rhythm);
         // The metronome always clicks its own.
         app.playback_ctl.settings.metronome_click = false;
         app.select_tab(Tab::Metronome);
+        assert_eq!(app.playback_options().played, grooph_audio::Played::Clicks);
         assert!(app.playback_options().click.for_meter(ts) == four.click());
     }
 

@@ -8,7 +8,8 @@ use crate::generator::GeneratorState;
 use crate::metronome_view::FillLook;
 use crate::metronome_view::ratio_label;
 use crate::pickers::{
-    Picker, ROW_HEIGHT, hidden_rests_label, shown_groups, silent_bars_label, swing_label,
+    Picker, ROW_HEIGHT, click_source_label, hidden_rests_label, shown_groups, silent_bars_label,
+    swing_label,
 };
 use crate::share::paint_share_icon;
 use crate::tokens;
@@ -274,37 +275,6 @@ fn badged_switch_row(ui: &mut Ui, label: &str, badge: Option<&str>, on: &mut boo
         paint_badge(painter, pos2(label_rect.right() + 8.0, rect.center().y), badge);
     }
 
-    paint_switch(painter, rect, *on, how_on, visuals);
-    resp.clicked()
-}
-
-/// [`switch_row`] with its value before the switch, as in a [`split_row`],
-/// but tapped anywhere to toggle. Returns whether it toggled.
-fn value_switch_row(ui: &mut Ui, label: &str, value: &str, on: &mut bool) -> bool {
-    let (rect, resp) =
-        ui.allocate_exact_size(vec2(ui.available_width(), ROW_HEIGHT), Sense::click());
-    if resp.clicked() {
-        *on = !*on;
-    }
-    let how_on = ui.ctx().animate_bool_responsive(resp.id, *on);
-    let visuals = ui.visuals();
-    let painter = ui.painter();
-    let label = painter.text(
-        rect.left_center() + vec2(4.0, 0.0),
-        Align2::LEFT_CENTER,
-        label,
-        FontId::proportional(19.0),
-        visuals.text_color(),
-    );
-    let right = rect.right() - SPLIT_SWITCH_WIDTH;
-    let value = cut_to_fit(painter, value, right - label.right() - 16.0);
-    painter.text(
-        pos2(right, rect.center().y),
-        Align2::RIGHT_CENTER,
-        value,
-        FontId::proportional(19.0),
-        visuals.weak_text_color(),
-    );
     paint_switch(painter, rect, *on, how_on, visuals);
     resp.clicked()
 }
@@ -1211,22 +1181,14 @@ impl Grooph {
         self.swing_row(ui);
     }
 
-    /// Whether the click bars edited in the metronome click here too, with
-    /// the score's meters that have one.
+    /// The click played here, the standard one or the metronome's, which
+    /// opens its picker; the switch mutes it.
     fn metronome_click_row(&mut self, ui: &mut Ui) {
-        let meters = self.edited_click_meters();
-        let edited = if meters.is_empty() {
-            "no edits".to_owned()
-        } else {
-            let meters = meters.iter().map(ToString::to_string).collect::<Vec<_>>();
-            format!("{} edited", meters.join(", "))
-        };
-        value_switch_row(
-            ui,
-            "Metronome click",
-            &edited,
-            &mut self.playback_ctl.settings.metronome_click,
-        );
+        let settings = &mut self.playback_ctl.settings;
+        let label = click_source_label(settings.metronome_click);
+        if split_row(ui, "Click", label, &mut settings.click).clicked() {
+            self.ui.dialogs.picker = Some(Picker::Click);
+        }
     }
 
     /// The count under the staff, shown in every tab; opens its picker. The

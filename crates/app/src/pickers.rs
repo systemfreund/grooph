@@ -58,6 +58,8 @@ pub(crate) enum Picker {
     Counting,
     /// The side of the staff the stickings go on.
     Sticking,
+    /// Whether Practice and the score tab click the metronome's click bars.
+    Click,
     Preset,
     /// The metronome tab's meter.
     MetronomeMeter,
@@ -85,6 +87,12 @@ pub(crate) enum Picker {
     Settings,
     /// Contact, keybindings and touch controls.
     Help,
+}
+
+/// The click Practice and the score tab play (see
+/// [`crate::settings::PlaybackSettings::metronome_click`]).
+pub(crate) fn click_source_label(metronome: bool) -> &'static str {
+    if metronome { "Metronome" } else { "Standard" }
 }
 
 /// The rests shown with `hidden` left out.
@@ -429,6 +437,7 @@ impl Grooph {
                 Picker::Guide => "Guide",
                 Picker::Counting => "Count labels",
                 Picker::Sticking => "Sticking",
+                Picker::Click => "Click",
                 Picker::Preset => "Preset",
                 Picker::MetronomeMeter | Picker::BarMeter => "Time signature",
                 Picker::ClickFill => "Subdivision",
@@ -461,6 +470,7 @@ impl Grooph {
                 Picker::Guide => self.guide_choices(ui),
                 Picker::Counting => self.counting_choices(ui),
                 Picker::Sticking => self.sticking_choices(ui),
+                Picker::Click => self.click_choices(ui),
                 Picker::Preset => {
                     preset = self.preset_cards(ui);
                     preset.is_some()
@@ -888,6 +898,30 @@ impl Grooph {
         let picked = choice_grid(ui, &SIDES.map(|(a, l)| (a, l.to_owned())), sticking.above, 2);
         if let Some(above) = picked {
             *sticking = crate::StickingSettings { shown: true, above };
+        }
+        picked.is_some()
+    }
+
+    /// The click played here: every meter's standard click, or the click
+    /// bars edited in the metronome tab; picking closes the dialog.
+    fn click_choices(&mut self, ui: &mut Ui) -> bool {
+        let meters = self.edited_click_meters();
+        let edited = if meters.is_empty() {
+            "No meter of this rhythm is edited there yet.".to_owned()
+        } else {
+            let meters = meters.iter().map(ToString::to_string).collect::<Vec<_>>();
+            format!("Edited there: {}.", meters.join(", "))
+        };
+        ui.weak(format!(
+            "Standard clicks every meter's beats. Metronome plays the clicks edited in the Metronome tab. {edited}"
+        ));
+        ui.add_space(8.0);
+        let options = [false, true].map(|m| (m, click_source_label(m).to_owned()));
+        let setting = &mut self.playback_ctl.settings.metronome_click;
+        let picked = choice_grid(ui, &options, *setting, 2);
+        if let Some(metronome) = picked {
+            *setting = metronome;
+            self.playback_ctl.settings.click = true;
         }
         picked.is_some()
     }

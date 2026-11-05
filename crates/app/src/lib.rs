@@ -543,7 +543,13 @@ impl Grooph {
             ramp: self.played_ramp(),
             click: self.played_click_bars(),
             // The metronome plays its click bar and counter rhythm alone.
-            played: if self.metronome_mode() { Played::Clicks } else { Played::Score },
+            played: if self.metronome_mode() {
+                Played::Clicks
+            } else if self.playback_ctl.settings.click {
+                Played::Score
+            } else {
+                Played::Rhythm
+            },
         }
     }
 
