@@ -293,7 +293,8 @@ impl Grooph {
         let metronome = self.metronome_mode();
         // Respelling the bar only while a menu shows it.
         let clean_up = || !metronome && self.can_clean_up_current_measure();
-        let menu = BarMenu { metronome, bars, clean_up: &clean_up };
+        let kit = !self.staff_model().one_line();
+        let menu = BarMenu { metronome, kit, bars, clean_up: &clean_up };
         if (resp.secondary_clicked() || resp.long_touched())
             && let Some(pos) = resp.interact_pointer_pos()
             && let Some(idx) =
@@ -362,6 +363,9 @@ impl Grooph {
             }
             Some(BarAction::Duplicate) => self.duplicate_current_measure(),
             Some(BarAction::CleanUp) => self.clean_up_current_measure(),
+            Some(BarAction::Revoice) => {
+                self.apply_tool(crate::tools::ToolId::MeasureRevoice.tool())
+            }
             Some(BarAction::Clear) => self.clear_current_measure(),
             Some(BarAction::Delete) => self.remove_current_measure(),
             None => {}
@@ -896,6 +900,8 @@ enum BarAction {
     Duplicate,
     /// Respell the bar for reading (see `Grooph::clean_up_current_measure`).
     CleanUp,
+    /// Pick how the bar's heads go into the voices (`Picker::Revoice`).
+    Revoice,
     Clear,
     Delete,
 }
@@ -904,6 +910,8 @@ enum BarAction {
 #[derive(Clone, Copy)]
 struct BarMenu<'a> {
     metronome: bool,
+    /// On the kit's staff: the bar can be revoiced.
+    kit: bool,
     bars: usize,
     /// Whether "Clean up bar" would change the bar; greyed out otherwise.
     /// Asked only while the menu is shown.
@@ -920,6 +928,9 @@ impl BarMenu<'_> {
         ui.set_min_width(BAR_MENU_WIDTH);
         if !self.metronome && row(ui, "Clean up bar".into(), (self.clean_up)()) {
             *action = Some(BarAction::CleanUp);
+        }
+        if !self.metronome && self.kit && row(ui, "Revoice bar…".into(), true) {
+            *action = Some(BarAction::Revoice);
         }
         if !self.metronome && row(ui, "Duplicate bar".into(), true) {
             *action = Some(BarAction::Duplicate);

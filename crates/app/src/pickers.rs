@@ -26,7 +26,7 @@ use grooph_measure::generator::{
 use grooph_measure::swing::{MAX_SWING_PERCENT, MIN_SWING_PERCENT, SwingUnit};
 use grooph_measure::tap_tempo::{TapPulse, tap_pulse};
 use grooph_measure::tempo::{MAX_BPM, MIN_BPM};
-use grooph_measure::{HiddenRests, Score, TimeSignature};
+use grooph_measure::{HiddenRests, Score, TimeSignature, Voicing};
 use std::ops::RangeInclusive;
 
 /// Height of a touch-friendly row or button.
@@ -74,6 +74,9 @@ pub(crate) enum Picker {
     SilentBars,
     /// The rests a kit score leaves out in bars of two voices.
     HiddenRests,
+    /// Which voice each instrument of the cursor's bar goes in, by a
+    /// preset or the score's rule ("Revoice measure…").
+    Revoice,
     /// The sounds of the rhythm, the metronome and the counter rhythm.
     Sounds,
     /// The MIDI device the play-along listens to.
@@ -445,6 +448,7 @@ impl Grooph {
                 Picker::Polyrhythm => "Polyrhythm",
                 Picker::SilentBars => "Silent bars",
                 Picker::HiddenRests => "Rests",
+                Picker::Revoice => "Revoice bar",
                 Picker::Sounds => "Sounds",
                 Picker::MidiInput => "MIDI input",
                 Picker::PlayAlong => "Play along",
@@ -485,6 +489,7 @@ impl Grooph {
                     false
                 }
                 Picker::HiddenRests => self.hidden_rests_choices(ui),
+                Picker::Revoice => self.revoice_choices(ui),
                 Picker::Sounds => {
                     self.sound_choices(ui);
                     false
@@ -951,6 +956,27 @@ impl Grooph {
             self.with_undo_snapshot(|app| {
                 app.editor.doc_mut().edit_score(|s| s.hidden_rests = hidden).is_some()
             });
+        }
+        picked.is_some()
+    }
+
+    /// The voicing presets and the score's rule, to sort the heads of the
+    /// cursor's bar into the voices by; picking revoices it (one undo step)
+    /// and closes the dialog. The score's rule stays.
+    fn revoice_choices(&mut self, ui: &mut Ui) -> bool {
+        ui.weak("Sorts the notes of this bar into the upper and lower voice. It sounds the same.");
+        ui.add_space(8.0);
+        let rule = self.editor.doc().score().voicing;
+        let options = [
+            (Some(Voicing::HANDS_FEET), "Hands/Feet".to_owned()),
+            (Some(Voicing::ONE_VOICE), "One voice".to_owned()),
+            (Some(Voicing::CYMBALS_ABOVE), "Cymbals above".to_owned()),
+            (Some(rule), "As the score".to_owned()),
+        ];
+        // Nothing shows as picked: each choice is an action.
+        let picked = choice_grid(ui, &options, None, 1).flatten();
+        if let Some(voicing) = picked {
+            self.revoice_current_measure(voicing);
         }
         picked.is_some()
     }

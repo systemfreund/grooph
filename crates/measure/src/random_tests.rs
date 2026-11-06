@@ -319,3 +319,120 @@ fn random_cleanups_keep_the_rhythm_long() {
         run_random_cleanups(seed, 10_000);
     }
 }
+
+/// `m` as a measure of the kit: each note of a voice plays one to three
+/// heads of the instruments `kit[voice]` (none in two voices), some of them
+/// accented or soft.
+fn on_the_kit(m: &mut Measure, rng: &mut Rng, kit: &[Vec<crate::Instrument>]) {
+    for (v, set) in kit.iter().enumerate().take(m.voices().len()) {
+        let voice = m.voice_mut(v).expect("voice in range");
+        for beat in voice.beats.iter_mut().filter(|b| b.is_note()) {
+            let mut heads = crate::Heads::NONE;
+            for _ in 0..1 + rng.below(3) {
+                let mut head = crate::Head::new(pick(rng, set));
+                head.set_accented(rng.chance(0.2));
+                head.set_soft(!head.accented() && rng.chance(0.2));
+                let _ = heads.insert(head);
+            }
+            beat.set_heads(heads);
+        }
+    }
+}
+
+/// Revoice random kit measures of two voices, tuplets among them, by every
+/// preset: each result is valid, sounds the same, has every head in the
+/// voice of the preset and no drum struck by two voices; and going from
+/// Hands/Feet to a preset and back gives every head its voice again.
+fn run_random_revoicings(seed: u64, measures: usize) -> (usize, usize, usize) {
+    use crate::{Instrument, Voicing};
+    let durations = durations();
+    let meters = meters();
+    let mut rng = Rng::new(seed);
+    let (mut revoiced, mut refused, mut stuck) = (0, 0, 0);
+    for i in 0..measures {
+        let mut m = Measure::new(pick(&mut rng, &meters));
+        for _ in 0..rng.below(30) {
+            random_edit(&mut m, &mut rng, &durations, &meters);
+        }
+        let mut lower = Measure::new(m.time_signature());
+        for _ in 0..rng.below(30) {
+            random_edit(&mut lower, &mut rng, &durations, &[m.time_signature()]);
+        }
+        m.push_voices(&lower).expect("one meter");
+        // The kit split at random between the voices.
+        let mut kit: [Vec<Instrument>; 2] = Default::default();
+        for i in Instrument::ALL.into_iter().filter(|&i| i != Instrument::Rhythm) {
+            kit[rng.below(2)].push(i);
+        }
+        if kit.iter().any(Vec::is_empty) {
+            kit = [vec![Instrument::HiHat, Instrument::Snare], vec![Instrument::Kick]];
+        }
+        on_the_kit(&mut m, &mut rng, &kit);
+        // Only valid measures (a whole rest can slip into a voice of
+        // another meter than 4/4; a second voice is not edited elsewhere).
+        if (0..2).any(|v| check_invariants(&m.single_voice(v).expect("two voices")).is_err()) {
+            continue;
+        }
+        let place = format!("seed {seed}, measure {i}: {m:?} in {}", m.time_signature());
+        let sound = |m: &Measure| -> Vec<_> {
+            let mut s: Vec<_> = m.head_onsets().into_iter().map(|o| (o.tick, o.head)).collect();
+            s.sort_by_key(|&(t, h)| (t, h.instrument()));
+            s
+        };
+        let voiced = |m: &Measure| -> Vec<_> {
+            let mut s: Vec<_> =
+                m.head_onsets().into_iter().map(|o| (o.tick, o.voice, o.head)).collect();
+            s.sort_by_key(|&(t, v, h)| (t, v, h.instrument()));
+            s
+        };
+        let Some(hands_feet) = m.revoiced(&Voicing::HANDS_FEET) else {
+            refused += 1;
+            continue;
+        };
+        for preset in Voicing::PRESETS {
+            let Some(r) = hands_feet.revoiced(&preset) else {
+                refused += 1;
+                continue;
+            };
+            revoiced += 1;
+            for voice in 0..r.voices().len() {
+                let single = r.single_voice(voice).expect("voice in range");
+                if let Err(e) = check_invariants(&single) {
+                    panic!("{place}: by {preset:?} {r:?}, voice {voice}: {e}");
+                }
+            }
+            assert_eq!(r.voices().len(), preset.voices(), "{place}: by {preset:?} {r:?}");
+            assert_eq!(sound(&r), sound(&m), "{place}: by {preset:?} {r:?}");
+            assert!(r.doubled_instruments().is_empty(), "{place}: by {preset:?} {r:?}");
+            for o in r.head_onsets() {
+                assert_eq!(o.voice, preset.voice_of(o.head.instrument()), "{place}: {r:?}");
+            }
+            // Back where it can go: tuplets of both voices that met in one
+            // group on its way may not part again.
+            let Some(back) = r.revoiced(&Voicing::HANDS_FEET) else {
+                stuck += 1;
+                continue;
+            };
+            assert_eq!(voiced(&back), voiced(&hands_feet), "{place}: by {preset:?} {r:?}");
+        }
+    }
+    (revoiced, refused, stuck)
+}
+
+#[test]
+fn random_revoicings_keep_the_sound() {
+    let (revoiced, refused, stuck) = run_random_revoicings(SEED, 1000);
+    // Only tuplets of both voices that cannot meet keep a measure as it is.
+    assert!(revoiced > 10 * refused, "{revoiced} revoiced, {refused} refused");
+    assert!(stuck * 1000 < revoiced, "{stuck} of {revoiced} not back");
+}
+
+#[test]
+#[ignore = "long run; cargo test -p grooph-measure -- --ignored"]
+fn random_revoicings_keep_the_sound_long() {
+    for seed in 1..=20 {
+        let (revoiced, refused, stuck) = run_random_revoicings(seed, 5000);
+        assert!(revoiced > 10 * refused, "seed {seed}: {revoiced} revoiced, {refused} refused");
+        assert!(stuck * 1000 < revoiced, "seed {seed}: {stuck} of {revoiced} not back");
+    }
+}
