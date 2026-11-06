@@ -13,7 +13,7 @@ use eframe::egui::{
 use grooph_layout::staff_layout::{ROOM_BELOW_EM, StaffOpts, build_staff_layout};
 use grooph_measure::generator::effective_subdivision;
 use grooph_measure::{Score, StaffKind};
-use grooph_render::staff::{PlaybackMarks, draw_staff};
+use grooph_render::staff::{PlaybackMarks, RenderContext, draw_staff};
 
 /// Glyph size of a pattern's preview.
 const PREVIEW_EM: f32 = 28.0;
@@ -74,18 +74,12 @@ pub(crate) fn pattern_preview(ui: &mut egui::Ui, score: &Score, width: f32, look
     let staff = build_staff_layout(&first, &opts);
     let mut clipped = ui.new_child(egui::UiBuilder::new().max_rect(rect));
     clipped.set_clip_rect(rect.intersect(ui.clip_rect()));
-    draw_staff(
-        &mut clipped,
-        &first,
-        &staff,
-        None,
-        None,
-        None,
-        0..1,
-        PlaybackMarks::Anchor(None),
-        None,
-        &opts.rescaled(staff.scale),
-    );
+    let opts = opts.rescaled(staff.scale);
+    let ctx = RenderContext {
+        marks: PlaybackMarks::Anchor(None),
+        ..RenderContext::new(&first, &staff, &opts)
+    };
+    draw_staff(&mut clipped, &ctx);
 }
 
 /// What a tap on a library card asks for.

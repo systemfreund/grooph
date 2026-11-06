@@ -4,15 +4,14 @@
 //! wrap animation across measure boundaries.
 
 use crate::measure::{
-    beat_anchor_x, draw_beat_anchor, draw_count_layer, draw_edit_cursor, draw_notes,
-    draw_stickings, highlight_color, last_note_entering_frac, last_note_split,
-    playback_cursor_entering_x, playback_cursor_x, render_measure_at,
+    draw_beat_anchor, draw_count_layer, draw_edit_cursor, draw_notes, draw_stickings,
+    highlight_color, last_note_split, playback_cursor_entering_x, render_measure_at,
 };
 use eframe::egui;
 use eframe::egui::{Color32, Rangef, Stroke};
 use grooph_layout::glyphs;
 use grooph_layout::staff::Staff;
-use grooph_layout::staff_layout::{PlacedMeasure, StaffLayout, StaffOpts};
+use grooph_layout::staff_layout::{StaffLayout, StaffOpts};
 use grooph_layout::text_rows::TextRowKind;
 use grooph_measure::counting::CountConfig;
 use grooph_measure::{Cursor, MeasureIdx, Score, StaffKind, VoiceIdx};
@@ -28,42 +27,74 @@ pub enum PlaybackMarks {
     Anchor(Option<(MeasureIdx, f64, f32)>),
 }
 
-/// Render a full score described by `staff` to `ui`.
-///
-/// `cursor` highlights the edit position in its voice; only the measure
-/// matching `cursor.measure_idx` gets a blinking cursor. `playback` is
-/// `Some((measure_idx, local_tick))` referring to the **active** measure (the
-/// one currently being audibly played). The *visual* cursor may live in a
-/// different measure during the wrap animation — see [`current_cursor_x`].
-/// `loop_bars` are the bars that play, in a loop: the cursor goes on from
-/// the last to the first of them, never into a bar after them (the
-/// editor's ghost bar). `marks` says whether the line or a guide anchor
-/// shows it. `lit` draws
-/// the note it points at in the highlight colour.
-#[expect(clippy::too_many_arguments)]
-pub fn draw_staff(
-    ui: &mut egui::Ui,
-    score: &Score,
-    staff: &StaffLayout,
-    cursor: Option<Cursor>,
-    lit: Option<Cursor>,
-    playback: Option<(MeasureIdx, f64)>,
-    loop_bars: Range<MeasureIdx>,
-    marks: PlaybackMarks,
-    count_config: Option<&CountConfig>,
-    staff_opts: &StaffOpts,
-) {
+/// What a staff is drawn from: the score, its layout and the options it
+/// was laid out with, and what is marked on it this frame. Every layer of
+/// the staff (notes, cursors, the rows of text, overlays) takes what it
+/// needs from here; a bar's points in time from its
+/// [`TickMap`](grooph_layout::tick_map::TickMap).
+pub struct RenderContext<'a> {
+    pub score: &'a Score,
+    /// `score` laid out.
+    pub staff: &'a StaffLayout,
+    /// The options `staff` was laid out with, rescaled by its scale.
+    pub opts: &'a StaffOpts,
+    /// How the count labels count, if they are shown.
+    pub count_config: Option<&'a CountConfig>,
+    /// The edit position in its voice; only the measure matching
+    /// `cursor.measure_idx` gets a blinking cursor.
+    pub cursor: Option<Cursor>,
+    /// The note drawn in the highlight colour.
+    pub lit: Option<Cursor>,
+    /// `(measure_idx, local_tick)` of the **active** measure (the one
+    /// currently being audibly played). The *visual* cursor may live in a
+    /// different measure during the wrap animation — see
+    /// [`current_cursor_x`].
+    pub playback: Option<(MeasureIdx, f64)>,
+    /// The bars that play, in a loop: the cursor goes on from the last to
+    /// the first of them, never into a bar after them (the editor's ghost
+    /// bar).
+    pub loop_bars: Range<MeasureIdx>,
+    /// Whether the line or a guide anchor shows the playback position.
+    pub marks: PlaybackMarks,
+}
+
+impl<'a> RenderContext<'a> {
+    /// `score` laid out as `staff` with `opts`, nothing marked on it, every
+    /// bar played.
+    pub fn new(score: &'a Score, staff: &'a StaffLayout, opts: &'a StaffOpts) -> Self {
+        RenderContext {
+            score,
+            staff,
+            opts,
+            count_config: None,
+            cursor: None,
+            lit: None,
+            playback: None,
+            loop_bars: 0..score.len(),
+            marks: PlaybackMarks::Line,
+        }
+    }
+
+    /// The edit cursor if it is in `voice` of the measure `measure_idx`.
+    pub(crate) fn cursor_in(&self, voice: VoiceIdx, measure_idx: MeasureIdx) -> Option<Cursor> {
+        self.cursor.filter(|c| c.voice == voice && c.measure_idx == measure_idx)
+    }
+
+    /// The lit note of `voice` in the measure `measure_idx`, if any.
+    pub(crate) fn lit_in(&self, voice: VoiceIdx, measure_idx: MeasureIdx) -> Option<usize> {
+        self.lit.filter(|c| c.voice == voice && c.measure_idx == measure_idx).map(|c| c.beat_idx)
+    }
+}
+
+/// Render the staff of `ctx` to `ui`.
+pub fn draw_staff(ui: &mut egui::Ui, ctx: &RenderContext) {
+    let (staff, staff_opts, playback) = (ctx.staff, ctx.opts, ctx.playback);
     let color = ui.visuals().text_color();
     let highlight = highlight_color(ui.visuals());
-    // The lit note of `voice` in the measure `measure_idx`, if any.
-    let lit_in = |voice: VoiceIdx, measure_idx: MeasureIdx| {
-        lit.filter(|c| c.voice == voice && c.measure_idx == measure_idx)
-            .map(|c| (c.beat_idx, highlight))
-    };
 
     // The count label to light: the one being played under the line, the
     // anchor's while it fades in from the label colour.
-    let (playback_line, count_tick) = match marks {
+    let (playback_line, count_tick) = match ctx.marks {
         PlaybackMarks::Line => (true, playback.map(|(idx, t)| (idx, t, highlight))),
         PlaybackMarks::Anchor(anchor) => (
             false,
@@ -79,7 +110,7 @@ pub fn draw_staff(
     // off to the next one (wrapping at the score end).
     let visual_cursor = playback
         .filter(|_| playback_line)
-        .and_then(|p| current_cursor_x(score, staff, p, loop_bars));
+        .and_then(|p| current_cursor_x(staff, p, ctx.loop_bars.clone()));
 
     for system in &staff.systems {
         // Continuous staff lines per system, so adjacent measures look
@@ -98,16 +129,12 @@ pub fn draw_staff(
             let cursor_x =
                 visual_cursor.filter(|(idx, _)| *idx == placed.measure_idx).map(|(_, x)| x);
 
-            // The cursor of `voice` in this measure, if any.
-            let cursor_in = |voice: VoiceIdx| {
-                cursor.filter(|c| c.voice == voice && c.measure_idx == placed.measure_idx)
-            };
             // The other voices' notes, below the shared line.
             for (voice, layout) in placed.voices.iter().enumerate().skip(1) {
                 let voice_opts = staff_opts.voice_opts_for(placed, voice);
-                let lit = lit_in(voice, placed.measure_idx);
+                let lit = ctx.lit_in(voice, placed.measure_idx).map(|idx| (idx, highlight));
                 draw_notes(ui.painter(), layout, color, lit, &voice_opts);
-                if let Some(c) = cursor_in(voice) {
+                if let Some(c) = ctx.cursor_in(voice, placed.measure_idx) {
                     draw_edit_cursor(ui, ui.painter(), layout, c.beat_idx, &voice_opts);
                 }
             }
@@ -116,35 +143,16 @@ pub fn draw_staff(
             // doesn't light labels in the next measure before its turn.
             let measure_count_tick =
                 count_tick.filter(|(idx, _, _)| *idx == placed.measure_idx).map(|(_, t, c)| (t, c));
-            render_placed_measure(
-                ui,
-                placed,
-                staff_opts,
-                cursor_in(0),
-                cursor_x,
-                lit_in(0, placed.measure_idx),
-            );
+            render_measure_at(ui, ctx, placed, cursor_x);
             // The rows of text along the bar, where the layout put them:
             // clear of this bar's own notes, on their side of the staff.
-            let measure = &score.measures()[placed.measure_idx];
             for row in &placed.text_rows {
                 match row.kind {
                     TextRowKind::Count => {
-                        let Some(config) = count_config else { continue };
-                        draw_count_layer(
-                            ui.painter(),
-                            measure,
-                            &placed.voices,
-                            &staff_opts.voice_opts_for(placed, 0),
-                            row.lines[0],
-                            row.text_size(),
-                            config,
-                            color,
-                            measure_count_tick,
-                        );
+                        draw_count_layer(ui.painter(), ctx, placed, row, color, measure_count_tick);
                     }
                     TextRowKind::Sticking => {
-                        draw_stickings(ui.painter(), measure, &placed.voices, row, color);
+                        draw_stickings(ui.painter(), ctx, placed, row, color);
                     }
                 }
             }
@@ -155,26 +163,28 @@ pub fn draw_staff(
         draw_barlines(ui, system, staff_opts, color);
     }
 
-    if let PlaybackMarks::Anchor(Some((idx, tick, intensity))) = marks
+    if let PlaybackMarks::Anchor(Some((idx, tick, intensity))) = ctx.marks
         && playback.is_some()
         && intensity > 0.0
-        && let Some(pos) = beat_anchor_pos(score, staff, idx, tick)
+        && let Some(pos) = beat_anchor_pos(staff, idx, tick)
     {
         draw_beat_anchor(ui.painter(), pos, staff_opts.em, highlight, intensity);
     }
 }
 
 /// Where a guide anchor at `tick` of measure `measure_idx` sits: on the
-/// staff line, at [`beat_anchor_x`].
+/// staff line, at the tick's x ([`TickMap::x_at_tick`]): a note's head at
+/// its onset, then on toward the next head (the barline after the last
+/// one) as the note goes on, so beat 4 of a half note on 3 sits halfway.
+///
+/// [`TickMap::x_at_tick`]: grooph_layout::tick_map::TickMap::x_at_tick
 pub fn beat_anchor_pos(
-    score: &Score,
     staff: &StaffLayout,
     measure_idx: MeasureIdx,
     tick: f64,
 ) -> Option<egui::Pos2> {
-    let measure = score.measures().get(measure_idx)?;
     let placed = staff.placed(measure_idx)?;
-    let x = beat_anchor_x(measure, &placed.voices, placed.rect, tick)?;
+    let x = placed.ticks.x_at_tick(tick);
     Some(egui::pos2(x, placed.rect.center().y + placed.y_offset))
 }
 
@@ -192,17 +202,15 @@ pub fn beat_anchor_pos(
 /// Returns `None` if there is no visible cursor (e.g. score empty, layout
 /// empty, or the relevant measure has no notes).
 pub fn current_cursor_x(
-    score: &Score,
     staff: &StaffLayout,
     playback: (MeasureIdx, f64),
     loop_bars: Range<MeasureIdx>,
 ) -> Option<(MeasureIdx, f32)> {
     let (play_idx, local_tick) = playback;
-    if score.is_empty() || loop_bars.is_empty() {
+    if loop_bars.is_empty() {
         return None;
     }
 
-    let active_measure = score.measures().get(play_idx)?;
     let active_placed = staff.placed(play_idx)?;
     let next_idx = match play_idx + 1 < loop_bars.end {
         true => play_idx + 1,
@@ -213,45 +221,14 @@ pub fn current_cursor_x(
 
     // Phase 2 first: if we're past the split of the active measure's last
     // note, the cursor visually belongs to the *next* measure.
-    if let Some(entry_frac) = last_note_entering_frac(active_measure, local_tick, split) {
+    if let Some(entry_frac) = active_placed.ticks.entering_frac(local_tick, split) {
         let x = playback_cursor_entering_x(next_placed.layout(), next_placed.rect, entry_frac)?;
         return Some((next_idx, x));
     }
 
     // Phase 1: cursor lives in the active measure.
-    let x = playback_cursor_x(
-        active_measure,
-        &active_placed.voices,
-        active_placed.rect,
-        local_tick,
-        split,
-    )?;
+    let x = active_placed.ticks.cursor_x(local_tick, split)?;
     Some((play_idx, x))
-}
-
-fn render_placed_measure(
-    ui: &mut egui::Ui,
-    placed: &PlacedMeasure,
-    staff_opts: &StaffOpts,
-    cursor: Option<Cursor>,
-    cursor_x: Option<f32>,
-    lit: Option<(usize, Color32)>,
-) {
-    let cursor_idx = cursor.filter(|c| c.measure_idx == placed.measure_idx).map(|c| c.beat_idx);
-
-    // Build a per-measure LayoutOpts from the placed rect/flags so the cursor
-    // and playback drawing get the right viewport.
-    let per_opts = staff_opts.voice_opts_for(placed, 0);
-
-    render_measure_at(
-        ui,
-        placed.layout(),
-        &per_opts,
-        cursor_idx,
-        /* draw_staff_line = */ false,
-        cursor_x,
-        lit,
-    );
 }
 
 fn draw_barlines(
@@ -280,6 +257,7 @@ mod tests {
     use eframe::egui::{FontFamily, FontId, Pos2, Rect, vec2};
     use grooph_layout::staff_layout::{ROOM_BELOW_EM, build_staff_layout};
     use grooph_layout::text_rows::{Side, TextRows};
+    use grooph_layout::tick_map::TickMap;
     use grooph_measure::notation::parse_score;
 
     fn opts() -> StaffOpts {
@@ -321,8 +299,10 @@ mod tests {
         let mut color = Color32::PLACEHOLDER;
         let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
             color = highlight_color(ui.visuals());
-            let marks = PlaybackMarks::Line;
-            draw_staff(ui, &both, &staff, None, Some(lit), None, 0..1, marks, None, &opts);
+            draw_staff(
+                ui,
+                &RenderContext { lit: Some(lit), ..RenderContext::new(&both, &staff, &opts) },
+            );
         });
         output.textures_delta.clear();
         let placed = staff.placed(0).unwrap();
@@ -369,22 +349,23 @@ mod tests {
         let score = parse_score("4/4 H:h H:h ; K:th K:th K:th K:th r:e r:q r:h").unwrap();
         let rows = TextRows { count: Some(Side::Below), ..TextRows::default() };
         let mut staff = build_staff_layout(&score, &StaffOpts { text_rows: rows, ..opts() });
-        let lower = &mut staff.systems[0].measures[0].voices[1].notes;
-        for note in &mut lower[1..5] {
+        let placed = &mut staff.systems[0].measures[0];
+        for note in &mut placed.voices[1].notes[1..5] {
             note.center.x += 3.0;
         }
+        placed.ticks = TickMap::new(&score.measures()[0], &placed.voices, placed.rect);
         (score, staff)
     }
 
     #[test]
     fn the_playback_line_passes_a_lower_voices_notes() {
-        let (score, staff) = busy_kick();
+        let (_, staff) = busy_kick();
         let placed = staff.placed(0).unwrap();
         let lower = &placed.voices[1].notes;
         let th = grooph_measure::grid::DEFAULT_GRID
             .ticks_of(&grooph_measure::duration::th())
             .unwrap() as f64;
-        let x = |tick: f64| current_cursor_x(&score, &staff, (0, tick), 0..1).unwrap().1;
+        let x = |tick: f64| current_cursor_x(&staff, (0, tick), 0..1).unwrap().1;
         // On each kick the line is at its head, halfway between two of them
         // halfway between their heads.
         for (i, kick) in lower.iter().take(4).enumerate() {
@@ -404,7 +385,7 @@ mod tests {
         let staff = build_staff_layout(&score, &opts());
         let ts = score.measures()[0].time_signature();
         let end = grooph_measure::grid::DEFAULT_GRID.ticks_per_measure(&ts) as f64 - 1.0;
-        let next = |at, bars| current_cursor_x(&score, &staff, (at, end), bars).unwrap().0;
+        let next = |at, bars| current_cursor_x(&staff, (at, end), bars).unwrap().0;
         // At the end of the last bar that plays the line enters the first,
         // not the ghost bar.
         assert_eq!(next(1, 0..2), 0);
@@ -423,18 +404,7 @@ mod tests {
             let staff = build_staff_layout(&score, &opts);
             let ctx = egui::Context::default();
             let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
-                draw_staff(
-                    ui,
-                    &score,
-                    &staff,
-                    None,
-                    None,
-                    None,
-                    0..1,
-                    PlaybackMarks::Line,
-                    None,
-                    &opts,
-                );
+                draw_staff(ui, &RenderContext::new(&score, &staff, &opts));
             });
             output.textures_delta.clear();
             let mut letters: Vec<(String, f32, f32)> = output
@@ -478,10 +448,13 @@ mod tests {
         let placed = staff.placed(0).unwrap();
         let config = CountConfig { subdivision: Subdivision::Halves, system: Default::default() };
         let ctx = egui::Context::default();
-        let marks = PlaybackMarks::Line;
         let opts = opts();
         let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
-            draw_staff(ui, &score, &staff, None, None, None, 0..1, marks, Some(&config), &opts);
+            let ctx = RenderContext {
+                count_config: Some(&config),
+                ..RenderContext::new(&score, &staff, &opts)
+            };
+            draw_staff(ui, &ctx);
         });
         output.textures_delta.clear();
         let ands: Vec<f32> = output
