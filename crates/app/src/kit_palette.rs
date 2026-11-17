@@ -142,8 +142,13 @@ impl Grooph {
         else {
             return false;
         };
-        self.editor.instrument = instrument;
-        self.put_revoiced(cursor, tick, measure)
+        // The instrument switched becomes the picked one, only with an edit.
+        let before = std::mem::replace(&mut self.editor.instrument, instrument);
+        let changed = self.put_revoiced(cursor, tick, measure);
+        if !changed {
+            self.editor.instrument = before;
+        }
+        changed
     }
 
     /// Revoice the cursor's measure by `voicing` ("Revoice measure…"): every

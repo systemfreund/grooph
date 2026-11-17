@@ -44,7 +44,9 @@ struct Group<'a> {
 /// `None` where the heads cannot be written so: a voice would hold more
 /// heads at a tick than a chord can ([`crate::head::MAX_HEADS`]), or
 /// tuplets of two voices that cannot meet (triplets and quintuplets over
-/// the same beat, groups that overlap in part) would come into one.
+/// the same beat, groups that overlap in part) would come into one, or a
+/// drum struck by two voices at once (from an old link, say) would come
+/// into one voice twice.
 pub fn revoice(
     measure: &Measure,
     voices: usize,
@@ -74,7 +76,7 @@ pub fn revoice(
     let mut out = Measure::new(ts);
     out.fill_voices(count);
     for (v, chords) in chords.iter().enumerate() {
-        let voice = kept_spelling(measure, chords).or_else(|| {
+        let voice = kept_spelling(measure, v, chords).or_else(|| {
             // Heads of a tuplet that start on the plain grid can do without
             // their group, where it does not fit the voice they go to.
             let thirty_second = DEFAULT_GRID.ticks_per_whole / 32;
@@ -126,9 +128,16 @@ fn playing(mut beat: Beat, chord: Option<&Chord>) -> Beat {
 }
 
 /// A voice of `measure` whose notes start on exactly the ticks of `chords`,
-/// playing them instead of its own heads.
-fn kept_spelling(measure: &Measure, chords: &BTreeMap<u32, Chord>) -> Option<VoiceBar> {
-    measure.voices().iter().find_map(|voice| {
+/// playing them instead of its own heads: voice `v` itself where it does,
+/// so a voice that keeps its notes keeps its spelling, else another.
+fn kept_spelling(
+    measure: &Measure,
+    v: VoiceIdx,
+    chords: &BTreeMap<u32, Chord>,
+) -> Option<VoiceBar> {
+    let voices = measure.voices();
+    let others = voices.iter().enumerate().filter(|&(i, _)| i != v).map(|(_, voice)| voice);
+    voices.get(v).into_iter().chain(others).find_map(|voice| {
         let ticks = DEFAULT_GRID.compute_onset_ticks(voice.beats());
         let notes = voice.beats().iter().zip(&ticks).filter(|(b, _)| b.is_note());
         if !notes.map(|(_, t)| t).eq(chords.keys()) {
@@ -355,6 +364,19 @@ mod tests {
         let m = measure("4/4 H:q. H:e r:h ; K:e r:q K:e r:h");
         let one = m.revoiced(&Voicing::ONE_VOICE).unwrap();
         assert_eq!(text(&one), "4/4 K-H:q. K-H:e r:h");
+    }
+
+    #[test]
+    fn revoicing_a_bar_already_in_the_preset_changes_nothing() {
+        // The lower voice sounds where the upper does, spelled its own way.
+        let m = measure("4/4 H:q. H:e r:h ; K:e r:q K:e r:h");
+        assert_eq!(m.revoiced(&Voicing::HANDS_FEET), Some(m.clone()));
+        for style in [HANDS_FEET, ONE_VOICE, CYMBALS_ABOVE] {
+            for preset in Voicing::PRESETS {
+                let once = measure(style).revoiced(&preset).unwrap();
+                assert_eq!(once.revoiced(&preset), Some(once.clone()), "{style} by {preset:?}");
+            }
+        }
     }
 
     #[test]

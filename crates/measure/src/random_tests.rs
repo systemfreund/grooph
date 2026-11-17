@@ -404,6 +404,8 @@ fn run_random_revoicings(seed: u64, measures: usize) -> (usize, usize, usize) {
             assert_eq!(r.voices().len(), preset.voices(), "{place}: by {preset:?} {r:?}");
             assert_eq!(sound(&r), sound(&m), "{place}: by {preset:?} {r:?}");
             assert!(r.doubled_instruments().is_empty(), "{place}: by {preset:?} {r:?}");
+            // A bar in the preset already stays as it is, spelling and all.
+            assert_eq!(r.revoiced(&preset).as_ref(), Some(&r), "{place}: by {preset:?} twice");
             for o in r.head_onsets() {
                 assert_eq!(o.voice, preset.voice_of(o.head.instrument()), "{place}: {r:?}");
             }
