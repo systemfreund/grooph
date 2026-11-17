@@ -16,6 +16,7 @@ pub mod notation;
 pub mod onsets;
 #[cfg(test)]
 mod random_tests;
+pub mod revoice;
 pub mod score;
 mod spelling;
 pub mod sticking;

@@ -141,6 +141,19 @@ spread across callers.
   the two-level rhythmic parsing rule); triplet figures
   are written as drawn. Measures are written via `set_beat`, so
   they obey the same invariants as edited ones. Seed `Rng` for reproducibility.
+- Revoicing (`grooph_measure::revoice`, #300): `revoice(measure, voices, target)` gives each head
+  (`head_onsets`) a voice and writes every voice again: heads at one tick in one voice are a chord,
+  accent, ghost, technique and sticking stay. A voice of the measure that sounds on exactly the
+  new ticks keeps its beats and tuplets (only the heads change), so the author's spelling survives;
+  otherwise the voice is written from its onsets and respelled as Clean up does. A head of a tuplet
+  brings its group along (rests where the voice does not play); groups of two voices over the same
+  time meet in one of their ratio (`merged_group`). `None` where tuplets cannot meet (triplets
+  and quintuplets over one beat) or a chord would get more than `MAX_HEADS`; the tools then leave
+  the bar alone. `Measure::revoiced(voicing)` sorts by a preset ("Revoice bar…" in the bar menu,
+  `Picker::Revoice`, tool `measure.revoice`), `Measure::with_voice_switched` moves one instrument
+  to the other voice, every head in the bar or the one at the cursor (`modify.voice.swap`,
+  Shift+V; `modify.voice.swap_one`, V). A lower voice left empty goes in a score of one voice.
+  Each is one undo step; the cursor stays at its time, in the voice its instrument went to.
 - Clean up (`grooph_measure::cleanup`, the bar menu's "Clean up bar"):
   `VoiceBar::respelled` writes a voice again from its onsets with the same
   spelling rules, deterministically: a drum hit does not sustain, so only

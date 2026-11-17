@@ -5,7 +5,9 @@ use std::rc::Rc;
 use crate::Grooph;
 use crate::pickers::{Picker, time_signature_label};
 use crate::shell::centered_column;
-use crate::tools::{BeatTemplate, DeleteOp, MetaOp, Modifier, NavOp, Tool, ToolId, ToolKind};
+use crate::tools::{
+    BeatTemplate, DeleteOp, MetaOp, Modifier, NavOp, Tool, ToolId, ToolKind, VoiceOp,
+};
 use crate::{Mode, tools};
 use eframe::egui;
 use eframe::egui::scroll_area::ScrollBarVisibility;
@@ -790,6 +792,10 @@ impl Grooph {
                 self.ui.dialogs.picker = Some(Picker::BarMeter);
                 return;
             }
+            ToolKind::Meta(MetaOp::Revoice) => {
+                self.ui.dialogs.picker = Some(Picker::Revoice);
+                return;
+            }
             ToolKind::Navigate(op) => {
                 self.execute_navigation(op);
                 return;
@@ -833,7 +839,8 @@ impl Grooph {
             tool.kind,
             ToolKind::Modify(
                 Modifier::ToggleHead | Modifier::CycleTechnique | Modifier::ToggleTechnique(_)
-            )
+            ) | ToolKind::Voice(_)
+                | ToolKind::Meta(MetaOp::Revoice)
         );
         // The metronome's clicks are played by no hand.
         let sticking = matches!(tool.kind, ToolKind::Modify(Modifier::ToggleSticking(_)));
@@ -946,8 +953,9 @@ impl Grooph {
                 };
                 true
             }
+            ToolKind::Voice(op) => self.switch_voice(op == VoiceOp::SwitchOne),
             ToolKind::Edit(_)
-            | ToolKind::Meta(MetaOp::ChangeTimeSignature)
+            | ToolKind::Meta(MetaOp::ChangeTimeSignature | MetaOp::Revoice)
             | ToolKind::Navigate(_) => {
                 debug_assert!(false, "non-mutating tool reached execute_mutating_tool");
                 false
@@ -2176,5 +2184,114 @@ mod tests {
         // A fill in one voice does not change the rule.
         let fill = format!("{cymbals} | S:s S:s T1:s T1:s T2:s T2:s FT:s FT:s K-CR:q r:q");
         assert_eq!(rule(&fill), Voicing::CYMBALS_ABOVE);
+    }
+
+    const HANDS_FEET: &str = "4/4 H:e H:e S-H:e H:e H:e H:e S-H:e H:e ; K:q r:q K:e K:e r:q";
+    const ONE_VOICE: &str = "4/4 K-H:e H:e S-H:e H:e K-H:e K-H:e S-H:e H:e";
+    const CYMBALS_ABOVE: &str = "4/4 H:e H:e H:e H:e H:e H:e H:e H:e ; K:q S:q K:e K:e S:q";
+
+    #[test]
+    fn switch_voice_moves_the_instrument_of_the_whole_measure() {
+        use grooph_measure::Instrument::Snare;
+        let mut app = editing(&format!("{HANDS_FEET} | 3/4 q q q"));
+        // The cursor on the snare of beat 2, the snare picked.
+        *app.editor.doc_mut().cursor_mut() = Cursor::in_voice(0, 0, 2);
+        app.editor.instrument = Snare;
+        apply(&mut app, ToolId::ModifyVoiceSwap);
+        assert_eq!(text(&app), format!("{CYMBALS_ABOVE} | 3/4 q q q"));
+        // The cursor stays at its time, in the snare's voice now.
+        assert_eq!(app.editor.doc().cursor(), Cursor::in_voice(0, 1, 1));
+        // And back up, as one step each.
+        apply(&mut app, ToolId::ModifyVoiceSwap);
+        assert_eq!(text(&app), format!("{HANDS_FEET} | 3/4 q q q"));
+        assert_eq!(app.editor.doc().cursor(), Cursor::in_voice(0, 0, 2));
+        apply(&mut app, ToolId::EditUndo);
+        assert_eq!(text(&app), format!("{CYMBALS_ABOVE} | 3/4 q q q"));
+        apply(&mut app, ToolId::EditUndo);
+        assert_eq!(text(&app), format!("{HANDS_FEET} | 3/4 q q q"));
+    }
+
+    #[test]
+    fn switch_voice_moves_one_note() {
+        use grooph_measure::Instrument::{HiHat, Kick};
+        let mut app = editing(HANDS_FEET);
+        // The kick on beat 1 is picked: only it goes up.
+        *app.editor.doc_mut().cursor_mut() = Cursor::in_voice(0, 1, 0);
+        app.editor.instrument = Kick;
+        apply(&mut app, ToolId::ModifyVoiceSwapOne);
+        assert_eq!(text(&app), "4/4 K-H:e H:e S-H:e H:e H:e H:e S-H:e H:e ; r:h K:e K:e r:q");
+        assert_eq!(app.editor.doc().cursor(), Cursor::in_voice(0, 0, 0));
+        // Without the picked instrument on the beat, its first head goes.
+        *app.editor.doc_mut().cursor_mut() = Cursor::in_voice(0, 0, 1);
+        app.editor.instrument = Kick;
+        apply(&mut app, ToolId::ModifyVoiceSwapOne);
+        assert_eq!(text(&app), "4/4 K-H:q S-H:e H:e H:e H:e S-H:e H:e ; r:e H:e r:q K:e K:e r:q");
+        assert_eq!(app.editor.instrument, HiHat);
+        assert_eq!(app.editor.doc().cursor(), Cursor::in_voice(0, 1, 1));
+        apply(&mut app, ToolId::EditUndo);
+        apply(&mut app, ToolId::EditUndo);
+        assert_eq!(text(&app), HANDS_FEET);
+    }
+
+    #[test]
+    fn switching_the_last_foot_up_drops_the_lower_voice_in_a_score_of_one_voice() {
+        use grooph_measure::Instrument::Kick;
+        use grooph_measure::Voicing;
+        let mut app = editing(HANDS_FEET);
+        app.editor.instrument = Kick;
+        apply(&mut app, ToolId::ModifyVoiceSwap);
+        // Hands/Feet keeps the lower voice, of rests.
+        assert_eq!(text(&app), format!("{ONE_VOICE} ; r:h r:h"));
+        let mut app = editing(HANDS_FEET);
+        app.editor.doc_mut().edit_score(|s| s.voicing = Voicing::ONE_VOICE);
+        app.editor.instrument = Kick;
+        apply(&mut app, ToolId::ModifyVoiceSwap);
+        assert_eq!(text(&app), ONE_VOICE);
+        assert_eq!(app.editor.doc().cursor(), Cursor::in_voice(0, 0, 0));
+        // And down again: the lower voice comes back.
+        apply(&mut app, ToolId::ModifyVoiceSwap);
+        assert_eq!(text(&app), HANDS_FEET);
+        assert_eq!(app.editor.doc().cursor(), Cursor::in_voice(0, 1, 0));
+    }
+
+    #[test]
+    fn revoice_measure_sorts_the_cursors_bar_by_a_preset() {
+        use grooph_measure::Instrument::Snare;
+        use grooph_measure::Voicing;
+        let mut app = editing(&format!("{HANDS_FEET} | {HANDS_FEET}"));
+        // The tool opens the picker; the bar menu offers it on the kit.
+        apply(&mut app, ToolId::MeasureRevoice);
+        assert_eq!(app.ui.dialogs.picker, Some(crate::pickers::Picker::Revoice));
+        app.ui.dialogs.picker = None;
+        *app.editor.doc_mut().cursor_mut() = Cursor::in_voice(1, 0, 2);
+        app.editor.instrument = Snare;
+        app.revoice_current_measure(Voicing::CYMBALS_ABOVE);
+        let rest = &HANDS_FEET[4..];
+        assert_eq!(text(&app), format!("{HANDS_FEET} | {}", &CYMBALS_ABOVE[4..]));
+        assert_eq!(app.editor.doc().cursor(), Cursor::in_voice(1, 1, 1));
+        app.revoice_current_measure(Voicing::ONE_VOICE);
+        assert_eq!(text(&app), format!("{HANDS_FEET} | {}", &ONE_VOICE[4..]));
+        // As the score: Hands/Feet again, the author's spelling kept.
+        let rule = app.editor.doc().score().voicing;
+        app.revoice_current_measure(rule);
+        assert_eq!(text(&app), format!("{HANDS_FEET} | {rest}"));
+        // Each was one step.
+        apply(&mut app, ToolId::EditUndo);
+        assert_eq!(text(&app), format!("{HANDS_FEET} | {}", &ONE_VOICE[4..]));
+        apply(&mut app, ToolId::EditUndo);
+        apply(&mut app, ToolId::EditUndo);
+        assert_eq!(text(&app), format!("{HANDS_FEET} | {rest}"));
+        // The rule of the score stays.
+        assert_eq!(app.editor.doc().score().voicing, Voicing::HANDS_FEET);
+    }
+
+    #[test]
+    fn the_voice_tools_are_the_kits() {
+        let mut app = editing("4/4 q q q q");
+        apply(&mut app, ToolId::ModifyVoiceSwap);
+        apply(&mut app, ToolId::ModifyVoiceSwapOne);
+        apply(&mut app, ToolId::MeasureRevoice);
+        assert_eq!(text(&app), "4/4 q q q q");
+        assert_eq!(app.ui.dialogs.picker, None);
     }
 }

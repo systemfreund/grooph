@@ -69,6 +69,7 @@ fn help_label(tool: &Tool) -> &'static str {
         ToolKind::Edit(EditOp::Redo) => "Redo",
         ToolKind::Meta(MetaOp::ResetMeasure) => "Reset measure",
         ToolKind::Meta(MetaOp::ChangeTimeSignature) => "Change time signature",
+        ToolKind::Meta(MetaOp::Revoice) => "Revoice measure",
         ToolKind::Delete(DeleteOp::Forward) => "Delete note (forward)",
         ToolKind::Delete(DeleteOp::Backward) => "Delete note (backward)",
         ToolKind::Navigate(NavOp::Left) => "Move cursor left",

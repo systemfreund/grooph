@@ -47,6 +47,17 @@ pub enum EditOp {
 pub enum MetaOp {
     ChangeTimeSignature,
     ResetMeasure,
+    /// Open the picker that revoices the cursor's measure by a preset.
+    Revoice,
+}
+
+/// Moving the picked instrument's heads to the other voice of the kit.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VoiceOp {
+    /// Every head of it in the cursor's measure.
+    SwitchMeasure,
+    /// Only its head at the cursor.
+    SwitchOne,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -71,6 +82,7 @@ pub enum ToolKind {
     Meta(MetaOp),
     Delete(DeleteOp),
     Navigate(NavOp),
+    Voice(VoiceOp),
 }
 
 impl ToolKind {
@@ -83,8 +95,9 @@ impl ToolKind {
             ToolKind::Modify(..) => true,
             ToolKind::Meta(MetaOp::ResetMeasure) => true,
             ToolKind::Delete(_) => true,
+            ToolKind::Voice(_) => true,
             ToolKind::Edit(_) => false,
-            ToolKind::Meta(MetaOp::ChangeTimeSignature) => false,
+            ToolKind::Meta(MetaOp::ChangeTimeSignature | MetaOp::Revoice) => false,
             ToolKind::Navigate(_) => false,
         }
     }
@@ -188,6 +201,9 @@ pub enum ToolId {
     InsertTupletNt16,
     MetaResetMeasure,
     MetaChangeTimeSignature,
+    MeasureRevoice,
+    ModifyVoiceSwap,
+    ModifyVoiceSwapOne,
     EditDeleteForward,
     EditDeleteBackward,
     NavLeft,
@@ -238,6 +254,9 @@ impl ToolId {
             ToolId::InsertTupletNt16 => "insert.tuplet.nt16",
             ToolId::MetaResetMeasure => "meta.reset_measure",
             ToolId::MetaChangeTimeSignature => "meta.change_time_signature",
+            ToolId::MeasureRevoice => "measure.revoice",
+            ToolId::ModifyVoiceSwap => "modify.voice.swap",
+            ToolId::ModifyVoiceSwapOne => "modify.voice.swap_one",
             ToolId::EditDeleteForward => "edit.delete.forward",
             ToolId::EditDeleteBackward => "edit.delete.backward",
             ToolId::NavLeft => "nav.left",
@@ -652,6 +671,28 @@ pub fn all_tools() -> &'static [Tool] {
             kind: ToolKind::Meta(MetaOp::ChangeTimeSignature),
             shortcuts: &[],
             show_in_palette: true,
+        },
+        // Voices of the kit — keyboard and menus; the grid has them later.
+        Tool {
+            id: ToolId::MeasureRevoice,
+            label: "Revoice measure…",
+            kind: ToolKind::Meta(MetaOp::Revoice),
+            shortcuts: &[],
+            show_in_palette: false,
+        },
+        Tool {
+            id: ToolId::ModifyVoiceSwap,
+            label: "Switch voice, whole measure",
+            kind: ToolKind::Voice(VoiceOp::SwitchMeasure),
+            shortcuts: &[Shortcut { key: Key::V, shift: true, command: false }],
+            show_in_palette: false,
+        },
+        Tool {
+            id: ToolId::ModifyVoiceSwapOne,
+            label: "Switch voice, this note",
+            kind: ToolKind::Voice(VoiceOp::SwitchOne),
+            shortcuts: &[Shortcut::plain(Key::V)],
+            show_in_palette: false,
         },
         // Beat removal — keyboard-only
         Tool {
