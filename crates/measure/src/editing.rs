@@ -234,9 +234,9 @@ impl VoiceBar {
                         true => cur_beat.heads().plain(),
                         false => Heads::one(Head::new(instrument)),
                     };
-                    for i in group_span.start_idx..=group_span.end_idx {
-                        if self.beats[i].is_rest() {
-                            self.beats[i].set_heads(heads);
+                    for beat in &mut self.beats[group_span.start_idx..=group_span.end_idx] {
+                        if beat.is_rest() {
+                            beat.set_heads(heads);
                         }
                     }
                     result = Some(Modification::SetTuplet(group_span));
@@ -349,8 +349,8 @@ impl VoiceBar {
         }
 
         // Start with every slot a rest without an accent
-        for j in group.start_idx..=group.end_idx {
-            self.beats[j].set_kind(Rest);
+        for beat in &mut self.beats[group.start_idx..=group.end_idx] {
+            beat.set_kind(Rest);
         }
 
         // Greedy: give each source note the nearest free slot
