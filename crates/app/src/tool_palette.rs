@@ -73,7 +73,7 @@ const MAX_GRID_LINES: f32 = 3.5;
 
 /// The kit's instruments in the grid's order, cymbals and drums from left to
 /// right as they stand, then the feet.
-const KIT_ORDER: [Instrument; 9] = [
+pub(crate) const KIT_ORDER: [Instrument; 9] = [
     Instrument::HiHat,
     Instrument::Ride,
     Instrument::Crash,
@@ -138,7 +138,8 @@ pub(crate) enum Cell {
     Tool(&'static Tool),
     /// Picks the instrument the tools write and change (the kit's); a tap
     /// steps its head on the cursor's beat through its techniques
-    /// (`Grooph::tap_instrument`), a long press takes it away.
+    /// (`Grooph::tap_instrument`), a long press moves it to the other voice
+    /// (`Grooph::hold_instrument`).
     Instrument(Instrument),
 }
 
@@ -156,10 +157,16 @@ fn technique_name(technique: Technique) -> &'static str {
     }
 }
 
+/// The kit's voice tools after the meter: "Switch voice" of the whole bar
+/// and of the note at the cursor. "Revoice bar…" is in the bar menu.
+const VOICE_TOOLS: [ToolId; 2] = [ToolId::ModifyVoiceSwap, ToolId::ModifyVoiceSwapOne];
+
 /// The grid's rows, top to bottom; a row wider than the grid goes on in the
 /// next line. On the kit its instruments come first, always the same nine
-/// cells; on the one line there are none. The stickings only where they
-/// are written (`sticking`): not on the metronome's clicks.
+/// cells, and its voice tools ([`VOICE_TOOLS`]) end the tools; on the one
+/// line there are none. The
+/// stickings only where they are written (`sticking`): not on the
+/// metronome's clicks.
 pub(crate) fn grid_rows(kit: bool, sticking: bool) -> Vec<Vec<Cell>> {
     let tools = |ids: &[ToolId]| {
         ids.iter()
@@ -173,7 +180,11 @@ pub(crate) fn grid_rows(kit: bool, sticking: bool) -> Vec<Vec<Cell>> {
     if kit {
         rows.push(KIT_ORDER.iter().map(|&i| Cell::Instrument(i)).collect());
     }
-    rows.push(tools(&TOOLS));
+    let mut row = tools(&TOOLS);
+    if kit {
+        row.extend(tools(&VOICE_TOOLS));
+    }
+    rows.push(row);
     rows
 }
 
@@ -242,8 +253,8 @@ impl Grooph {
                 for (col, &c) in line.iter().enumerate() {
                     let min = Pos2::new(left + col as f32 * (cell.x + GRID_GAP), top);
                     let response = self.grid_cell(ui, Rect::from_min_size(min, cell), c);
-                    // A long press (a right click) on an instrument takes
-                    // its head away; it is no click as well.
+                    // A long press (a right click) on an instrument moves
+                    // its head to the other voice; it is no click as well.
                     if response.secondary_clicked() && matches!(c, Cell::Instrument(_)) {
                         clicked = Some((c, true));
                     } else if response.clicked() {
@@ -615,6 +626,9 @@ impl Grooph {
                         Sticking::Left => "L",
                         Sticking::Both => "R\nL",
                     },
+                    // Words in two short lines, to fit the cell.
+                    ToolKind::Voice(VoiceOp::SwitchMeasure) => "↕\nBar",
+                    ToolKind::Voice(VoiceOp::SwitchOne) => "↕\nNote",
                     _ => t.label,
                 };
                 (t.id.name(), label, hover)
@@ -695,7 +709,10 @@ impl Grooph {
             Cell::Tool(t) if matches!(button_kind(&t.kind), ButtonKind::TimeSignature) => {
                 self.paint_time_signature(ui, inner, color);
             }
-            Cell::Tool(Tool { kind: ToolKind::Modify(Modifier::ToggleSticking(_)), .. }) => {
+            Cell::Tool(Tool {
+                kind: ToolKind::Modify(Modifier::ToggleSticking(_)) | ToolKind::Voice(_),
+                ..
+            }) => {
                 // As on the staff, two letters stacked where both hands play.
                 let lines = label.lines().count() as f32;
                 let size = 0.42 / lines.max(1.0).sqrt() * rect.height();
@@ -722,7 +739,7 @@ impl Grooph {
         response.on_hover_text(hover)
     }
 
-    /// What a tap and a long press on `instrument`'s cell do now.
+    /// What a tap on `instrument`'s cell does now.
     fn instrument_hover(&self, instrument: Instrument) -> String {
         let name = instrument.label();
         let techniques: Vec<_> = instrument.techniques().collect();
@@ -732,7 +749,7 @@ impl Grooph {
         let at = techniques.iter().position(|&t| t == technique).unwrap_or(0);
         match techniques.get(at + 1) {
             Some(&next) if techniques.len() > 1 => format!(
-                "{name}, {}: tap for {}, hold to take it away",
+                "{name}, {}: tap for {}",
                 technique_name(technique).to_lowercase(),
                 technique_name(next).to_lowercase()
             ),
@@ -1753,14 +1770,6 @@ mod tests {
         assert_eq!(played, [Some(Normal), Some(CrossStick), Some(Rimshot)]);
         assert_eq!(text(&app), "4/4 H:q H:q H:q H:q ; K:q r:q K:q r:q");
         assert!(!lit(&app, Snare));
-        // A long press takes it away however it is played.
-        app.tap_instrument(Snare);
-        app.tap_instrument(Snare);
-        app.hold_instrument(Snare);
-        assert_eq!(text(&app), "4/4 H:q H:q H:q H:q ; K:q r:q K:q r:q");
-        for _ in 0..3 {
-            apply(&mut app, ToolId::EditUndo);
-        }
         // The kick goes below, to the feet's beat sounding then, and the
         // cursor goes with it.
         app.tap_instrument(Kick);
@@ -1870,12 +1879,14 @@ mod tests {
                 })
                 .collect::<Vec<_>>()
         };
-        // Undo and redo are in the editor's bar instead, clear in the bar menu.
+        // Undo and redo are in the editor's bar instead, clear in the bar
+        // menu; the voice tools are the kit's.
         for t in all_tools().iter().filter(|t| t.show_in_palette) {
             let in_grid = !super::BAR_TOOLS.contains(&t.id);
             let count = tools(true).iter().filter(|&&id| id == t.id).count();
             assert_eq!(count, usize::from(in_grid), "{}", t.id);
-            assert_eq!(tools(false).contains(&t.id), in_grid, "{}", t.id);
+            let on_line = in_grid && !super::VOICE_TOOLS.contains(&t.id);
+            assert_eq!(tools(false).contains(&t.id), on_line, "{}", t.id);
         }
         // The kit adds its instruments, whose cells add and take away a
         // head: no cell for that tool.
@@ -2293,5 +2304,51 @@ mod tests {
         apply(&mut app, ToolId::MeasureRevoice);
         assert_eq!(text(&app), "4/4 q q q q");
         assert_eq!(app.ui.dialogs.picker, None);
+    }
+    #[test]
+    fn a_long_press_moves_the_instruments_note_to_the_other_voice() {
+        use grooph_measure::Instrument::{Kick, Snare};
+        use grooph_measure::Voicing;
+        let mut app = editing(HANDS_FEET);
+        // The cursor on the hi-hat and snare of beat 2.
+        *app.editor.doc_mut().cursor_mut() = Cursor::in_voice(0, 0, 2);
+        app.editor.instrument = Kick;
+        app.hold_instrument(Snare);
+        // Only that snare goes down, the cursor with it; the head stays.
+        assert_eq!(text(&app), "4/4 H:e H:e H:e H:e H:e H:e S-H:e H:e ; K:q S:q K:e K:e r:q");
+        assert_eq!(app.editor.doc().cursor(), Cursor::in_voice(0, 1, 1));
+        assert_eq!(app.editor.instrument, Snare);
+        assert_eq!(app.editor.doc().score().voicing, Voicing::HANDS_FEET);
+        apply(&mut app, ToolId::EditUndo);
+        assert_eq!(text(&app), HANDS_FEET);
+        // No kick on the beat: nothing moves, though others play there, and
+        // no step; the kick is picked.
+        *app.editor.doc_mut().cursor_mut() = Cursor::in_voice(0, 0, 2);
+        let steps = app.editor.doc().history().pushed();
+        app.hold_instrument(Kick);
+        assert_eq!(text(&app), HANDS_FEET);
+        assert_eq!(app.editor.doc().history().pushed(), steps);
+        assert_eq!(app.editor.instrument, Kick);
+    }
+
+    #[test]
+    fn the_voice_tools_end_the_kits_grid() {
+        use super::{Cell, grid_rows};
+        let tools = |kit| -> Vec<ToolId> {
+            grid_rows(kit, true)
+                .into_iter()
+                .flatten()
+                .filter_map(|c| match c {
+                    Cell::Tool(t) => Some(t.id),
+                    _ => None,
+                })
+                .collect()
+        };
+        let kit = tools(true);
+        let after_meter = kit.iter().position(|&id| id == ToolId::MetaChangeTimeSignature).unwrap();
+        assert_eq!(kit[after_meter + 1..], [ToolId::ModifyVoiceSwap, ToolId::ModifyVoiceSwapOne]);
+        // "Revoice bar…" is in the bar menu only.
+        assert!(!kit.contains(&ToolId::MeasureRevoice));
+        assert!(!tools(false).iter().any(|id| super::VOICE_TOOLS.contains(id)));
     }
 }

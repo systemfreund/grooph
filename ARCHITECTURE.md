@@ -154,6 +154,19 @@ spread across callers.
   to the other voice, every head in the bar or the one at the cursor (`modify.voice.swap`,
   Shift+V; `modify.voice.swap_one`, V). A lower voice left empty goes in a score of one voice.
   Each is one undo step; the cursor stays at its time, in the voice its instrument went to.
+  The kit's tool grid ends with both after the meter (`VOICE_TOOLS`); "Revoice bar…" stays in the
+  bar menu. A bar "Revoice bar…" cannot revoice stays, and
+  a short notice says so (`Grooph::notify`, `notice.rs`, about 3 s).
+- The score's rule (`app`'s `voicing_picker`, #301): the score tab's "Voicing" row opens
+  `Picker::Voicing`, a tile per preset with the cursor's bar revoiced by it (`voicing_preview`; a
+  bar without notes shows a 2/4 example) and "Custom", a switch per instrument (`KIT_ORDER`,
+  `Voicing::with_lower`). The picker edits a pending rule (`Dialogs::voicing_edit`); when it closes
+  changed, and revoicing would change a bar with notes, "Revoice existing measures too?" asks
+  (`Dialogs::voicing_prompt`): Yes sets the rule and revoices every bar, No the rule only, each one
+  undo step (`Grooph::set_voicing`); Cancel or dismissing it keeps the old rule. Otherwise the rule
+  is set without asking. A new drum groove gets the rule of the setting "Write new grooves as"
+  (`EditorSettings::new_groove_voicing`, a settings group of its own; "Use this score's" copies the
+  score tab's rule); scores from links and the library derive theirs from their content.
 - Clean up (`grooph_measure::cleanup`, the bar menu's "Clean up bar"):
   `VoiceBar::respelled` writes a voice again from its onsets with the same
   spelling rules, deterministically: a drum hit does not sustain, so only
@@ -261,7 +274,9 @@ spread across callers.
    `Measure::fill_voices`). A tap on a head there plays it with the
    instrument's next technique (`Instrument::techniques`), after the last it
    takes it away; a long press (a right click, `Grooph::hold_instrument`)
-   takes it away however it is played. The row is always the nine cells
+   moves the instrument's note at the cursor to the other voice
+   (`switch_voice(true)`, without falling back to another head; without
+   its head on the beat it only picks the instrument). The row is always the nine cells
    (`grid_rows`, `KIT_ORDER`), so none move; each shows the head on the beat
    as on the staff, with the technique's sign (`paint_instrument`), faded
    where there is none, its short name in bold (drawn twice, a pixel apart:

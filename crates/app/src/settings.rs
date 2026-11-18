@@ -11,6 +11,7 @@ use crate::guide::Guide;
 use crate::play_along::PlayAlongSettings;
 use crate::{CountingSettings, StickingSettings};
 use grooph_audio::{GapClick, TempoRamp};
+use grooph_measure::Voicing;
 use grooph_measure::generator::GeneratorSettings;
 use grooph_measure::swing::Swing;
 use grooph_measure::tempo::DEFAULT_BPM;
@@ -111,4 +112,13 @@ pub(crate) struct ViewSettings {
     /// (a developer setting, off by default). A link or pattern that opens
     /// the score tab still shows it while it is open.
     pub(crate) show_score_tab: bool,
+}
+
+/// How the editors write: the rule a new drum groove gets.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub(crate) struct EditorSettings {
+    /// The voicing of a new drum groove ("Write new grooves as"): a preset,
+    /// or one copied from a score.
+    pub(crate) new_groove_voicing: Voicing,
 }

@@ -74,6 +74,9 @@ pub(crate) enum Picker {
     SilentBars,
     /// The rests a kit score leaves out in bars of two voices.
     HiddenRests,
+    /// The score's voicing rule: which voice each instrument is entered
+    /// in (see `crate::voicing_picker`).
+    Voicing,
     /// Which voice each instrument of the cursor's bar goes in, by a
     /// preset or the score's rule ("Revoice measure…").
     Revoice,
@@ -406,6 +409,8 @@ impl Grooph {
     /// Dialog for the setting in [`crate::state::UiShell::picker`], opened
     /// from the settings card and the options sheet.
     pub(crate) fn settings_picker(&mut self, ui: &mut Ui) {
+        // Asked when the voicing picker closed, over what is under it.
+        self.voicing_prompt_dialog(ui);
         let Some(picker) = self.ui.dialogs.picker else {
             return;
         };
@@ -448,6 +453,7 @@ impl Grooph {
                 Picker::Polyrhythm => "Polyrhythm",
                 Picker::SilentBars => "Silent bars",
                 Picker::HiddenRests => "Rests",
+                Picker::Voicing => "Voicing",
                 Picker::Revoice => "Revoice bar",
                 Picker::Sounds => "Sounds",
                 Picker::MidiInput => "MIDI input",
@@ -489,6 +495,7 @@ impl Grooph {
                     false
                 }
                 Picker::HiddenRests => self.hidden_rests_choices(ui),
+                Picker::Voicing => self.voicing_choices(ui),
                 Picker::Revoice => self.revoice_choices(ui),
                 Picker::Sounds => {
                     self.sound_choices(ui);
@@ -537,6 +544,9 @@ impl Grooph {
         }
         if modal.inner || modal.should_close() {
             self.ui.dialogs.picker = self.ui.dialogs.picker_return.take();
+            if picker == Picker::Voicing {
+                self.close_voicing_picker();
+            }
             self.ui.dialogs.tap_tempo.reset();
             self.ui.library.renaming_preset = None;
             self.ui.library.renaming_pattern = None;

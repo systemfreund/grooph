@@ -685,13 +685,13 @@ impl Grooph {
 
 /// Widest a dialog gets: 380 points, less on a phone so that it keeps a
 /// margin to the screen edges.
-fn dialog_width(ctx: &egui::Context) -> f32 {
+pub(crate) fn dialog_width(ctx: &egui::Context) -> f32 {
     (ctx.content_rect().width() - 48.0).clamp(200.0, 380.0)
 }
 
 /// A dialog's buttons side by side, or stacked at full width when the row
 /// would be wider than `width`. Returns the index of the clicked one.
-fn choice_buttons(ui: &mut egui::Ui, width: f32, labels: &[&str]) -> Option<usize> {
+pub(crate) fn choice_buttons(ui: &mut egui::Ui, width: f32, labels: &[&str]) -> Option<usize> {
     let pad = ui.spacing().button_padding.x * 2.0;
     let gaps = ui.spacing().item_spacing.x * labels.len().saturating_sub(1) as f32;
     let row: f32 = labels

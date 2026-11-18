@@ -18,6 +18,7 @@ mod metronome_trainer;
 mod metronome_view;
 mod midi_input;
 mod mixer_panel;
+mod notice;
 mod persist;
 mod pickers;
 mod platform;
@@ -41,6 +42,7 @@ mod tool_palette;
 pub mod tools;
 mod undo;
 mod update_check;
+mod voicing_picker;
 #[cfg(target_arch = "wasm32")]
 mod web;
 
@@ -63,7 +65,8 @@ use crate::play_along::PlayAlongState;
 use crate::presets::PresetLibrary;
 use crate::score_change::{Origin, ScoreChange};
 use crate::settings::{
-    DeviceSettings, FeedbackSettings, GeneratorConfig, PlaybackSettings, ViewSettings,
+    DeviceSettings, EditorSettings, FeedbackSettings, GeneratorConfig, PlaybackSettings,
+    ViewSettings,
 };
 use crate::shell::{ShellState, Tab};
 use crate::state::{
@@ -202,6 +205,8 @@ pub(crate) struct PersistedState {
     devices: DeviceSettings,
     feedback: FeedbackSettings,
     view: ViewSettings,
+    /// How the editors write (the voicing of a new drum groove).
+    editor: EditorSettings,
     /// The metronome's click bars, counter rhythms and ratio names of
     /// every meter, and the meter it clicks.
     metronome: SavedMetronome,
@@ -233,6 +238,7 @@ impl Default for PersistedState {
             devices: DeviceSettings::default(),
             feedback: FeedbackSettings::default(),
             view: ViewSettings::default(),
+            editor: EditorSettings::default(),
             metronome: SavedMetronome::default(),
             tab: Tab::Metronome,
             editing: false,
@@ -257,6 +263,7 @@ impl PersistedState {
             devices: ctl.devices.clone(),
             feedback: ctl.feedback,
             view: app.ui.view,
+            editor: app.editor.settings,
             metronome: SavedMetronome::of(&docs.metronome),
             tab: app.tab(),
             editing: app.ui.mode == Mode::Edit,
@@ -428,6 +435,7 @@ impl App for Grooph {
         if self.ui.dialogs.link_error.is_some() {
             self.link_error_dialog(ui);
         }
+        self.notice_toast(ui);
 
         if !embedded {
             self.update_notice(ui, frame);
@@ -1395,6 +1403,7 @@ impl Grooph {
                 },
                 button_measures,
                 instrument: Instrument::Snare,
+                settings: state.editor,
                 library: state.library,
                 presets: state.presets,
                 active_preset: None,

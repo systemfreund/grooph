@@ -1410,6 +1410,33 @@ mod tests {
     }
 
     #[test]
+    fn a_rest_over_the_other_voices_heads_takes_one_ledger_line() {
+        use grooph_measure::notation::parse_score;
+        let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(900.0, 400.0));
+        let on = StaffOpts { bar_rests: true, ..opts(20.0, rect) };
+        // Every hi-hat in the lower voice, above the staff: the empty upper
+        // voice's whole rest moves above them, hanging from its own ledger
+        // line, only as far as it must.
+        let score = parse_score("kit 4/4 r:h r:h ; K-H:e H:e H:e K-H:e K-H:e H:e H:e H:e").unwrap();
+        let staff = build_staff_layout(&score, &on);
+        let scale = on.rescaled(staff.scale);
+        let [upper, lower] = &staff.placed(0).unwrap().voices[..] else { panic!("two voices") };
+        let other = note_inks(lower);
+        let gap = REST_GAP_SS * scale.staff_space() - 0.01;
+        let clear = |ink: Rect| other.iter().all(|o| !o.intersects(ink.expand(gap)));
+        let drawn: Vec<_> = upper.notes.iter().filter(|n| !n.hidden).collect();
+        assert_eq!(drawn.len(), 1);
+        for rest in drawn {
+            assert_eq!(rest.head.glyph, crate::glyphs::REST_WHOLE);
+            assert_eq!(rest.ledgers.len(), 1, "{rest:?}");
+            assert!(clear(rest.head.ink()), "{rest:?}");
+            // A staff space lower it would not be clear: it rose no further.
+            let lower_ink = rest.head.ink().translate(egui::vec2(0.0, scale.staff_space()));
+            assert!(!clear(lower_ink), "{rest:?}");
+        }
+    }
+
+    #[test]
     fn two_voices_sharing_the_one_line_keep_their_rests_even_hidden() {
         use grooph_measure::HiddenRests;
         use grooph_measure::notation::parse_score;

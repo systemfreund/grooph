@@ -11,7 +11,8 @@
 
 use crate::metronome_bars::{MeterBars, SavedMetronome};
 use crate::settings::{
-    DeviceSettings, FeedbackSettings, GeneratorConfig, PlaybackSettings, ViewSettings,
+    DeviceSettings, EditorSettings, FeedbackSettings, GeneratorConfig, PlaybackSettings,
+    ViewSettings,
 };
 use crate::{PERSISTED_STATE_VERSION, PersistedState, SavedDoc};
 use grooph_measure::click::ClickBars;
@@ -363,6 +364,7 @@ fn repair_field(name: &str, raw: &RawValue) -> Option<(Box<RawValue>, Vec<String
         "devices" => repair::<DeviceSettings>(raw),
         "feedback" => repair::<FeedbackSettings>(raw),
         "view" => repair::<ViewSettings>(raw),
+        "editor" => repair::<EditorSettings>(raw),
         "metronome" => repair::<SavedMetronome>(raw),
         _ => None,
     }
@@ -480,7 +482,8 @@ mod tests {
     use crate::play_along::{PlayAlongSettings, TapKey};
     use crate::presets::{PresetSettings, builtin_presets};
     use crate::settings::{
-        DeviceSettings, FeedbackSettings, GeneratorConfig, PlaybackSettings, ViewSettings,
+        DeviceSettings, EditorSettings, FeedbackSettings, GeneratorConfig, PlaybackSettings,
+        ViewSettings,
     };
     use crate::shell::Tab;
     use crate::{
@@ -494,7 +497,7 @@ mod tests {
     use grooph_measure::duration::e;
     use grooph_measure::generator::{GeneratorSettings, Subdivision};
     use grooph_measure::swing::{Swing, SwingUnit};
-    use grooph_measure::{Beat, Cursor, Measure, Score, TimeSignature};
+    use grooph_measure::{Beat, Cursor, Instrument, Measure, Score, TimeSignature, Voicing};
     use ron::value::RawValue;
     use std::collections::HashMap;
 
@@ -837,6 +840,28 @@ mod tests {
             let (_, dropped) = repair_field(group, &raw).unwrap_or_else(|| panic!("{group}"));
             assert_eq!(dropped, [broken], "{group}");
         }
+        // The groups that came after version 3, each with one of its fields.
+        const LATER_GROUPS: &[(&str, &str)] = &[("editor", "new_groove_voicing")];
+        for &(group, broken) in LATER_GROUPS {
+            let raw = format!("({broken}:Unknown)");
+            let raw = RawValue::from_boxed_ron(raw.into_boxed_str()).unwrap();
+            let (_, dropped) = repair_field(group, &raw).unwrap_or_else(|| panic!("{group}"));
+            assert_eq!(dropped, [broken], "{group}");
+        }
+    }
+
+    #[test]
+    fn the_voicing_of_new_grooves_is_restored() {
+        // Not in version 3, so at its default in `every_setting_changed`.
+        let mut state = every_setting_changed();
+        let custom = Voicing::from_lower([Instrument::Kick, Instrument::FloorTom]);
+        state.editor = EditorSettings { new_groove_voicing: custom };
+        let saved = ron::to_string(&state).unwrap();
+        let (s, backup) = restore(Some(&saved));
+        assert!(backup.is_none());
+        assert_eq!(s.editor.new_groove_voicing, custom);
+        // Saved before the setting: Hands/Feet.
+        assert_eq!(PersistedState::default().editor.new_groove_voicing, Voicing::HANDS_FEET);
     }
 
     #[test]
