@@ -75,6 +75,17 @@ impl Voicing {
         if self.lower == 0 { 1 } else { 2 }
     }
 
+    /// The voicing with `instrument` in the lower voice if `lower`, else in
+    /// the upper; the others where they are. The one line's rhythm stays
+    /// in the upper.
+    pub fn with_lower(self, instrument: Instrument, lower: bool) -> Self {
+        let lower = match lower && instrument != Instrument::Rhythm {
+            true => self.lower | bit(instrument),
+            false => self.lower & !bit(instrument),
+        };
+        Self { lower }
+    }
+
     /// The instruments in the lower voice, in the order of [`Instrument::ALL`].
     pub fn lower(&self) -> impl Iterator<Item = Instrument> + '_ {
         Instrument::ALL.into_iter().filter(|&i| self.is_lower(i))
@@ -125,6 +136,18 @@ mod tests {
         assert_eq!(v.voice_of(FloorTom), 1);
         assert_eq!(v.voice_of(Snare), 0);
         assert!(![Voicing::HANDS_FEET, Voicing::ONE_VOICE, Voicing::CYMBALS_ABOVE].contains(&v));
+    }
+
+    #[test]
+    fn one_instrument_moves_between_the_voices() {
+        let v = Voicing::HANDS_FEET.with_lower(Snare, true);
+        assert!(v.is_lower(Snare) && v.is_lower(Kick));
+        assert_eq!(v.with_lower(Snare, false), Voicing::HANDS_FEET);
+        assert_eq!(
+            Voicing::HANDS_FEET.with_lower(Kick, false).with_lower(HiHatFoot, false),
+            Voicing::ONE_VOICE
+        );
+        assert_eq!(Voicing::ONE_VOICE.with_lower(Rhythm, true), Voicing::ONE_VOICE);
     }
 
     #[test]

@@ -234,6 +234,8 @@ pub(crate) struct EditorState {
     /// The instrument picked in the kit's palette or by a tap on its head:
     /// the tools write and change its heads (see `Grooph::edit_instrument`).
     pub(crate) instrument: Instrument,
+    /// How the editors write: the voicing of a new drum groove. Persisted.
+    pub(crate) settings: crate::settings::EditorSettings,
     /// User-saved, named patterns (score + tempo), the score tab's.
     /// Persisted across sessions.
     pub(crate) library: PatternLibrary,
@@ -363,6 +365,13 @@ pub(crate) struct Dialogs {
     pub(crate) picker_return: Option<Picker>,
     /// Taps of the tap-tempo buttons (tempo picker).
     pub(crate) tap_tempo: TapTempo,
+    /// A short notice shown for a few seconds (see `Grooph::notify`).
+    pub(crate) notice: Option<crate::notice::Notice>,
+    /// The voicing picker's rule while it is open (see `Picker::Voicing`).
+    pub(crate) voicing_edit: Option<crate::voicing_picker::VoicingEdit>,
+    /// A rule picked whose answer to "Revoice existing measures too?" is
+    /// awaited; `Some` shows the question.
+    pub(crate) voicing_prompt: Option<grooph_measure::Voicing>,
 }
 
 /// Something that replaces the working score once unsaved changes are dealt with.

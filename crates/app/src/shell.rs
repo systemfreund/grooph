@@ -938,6 +938,7 @@ impl Grooph {
     fn score_rows(&mut self, ui: &mut Ui) {
         self.guide_row(ui);
         self.hidden_rests_row(ui);
+        self.voicing_row(ui);
         self.sticking_row(ui);
         self.shared_rows(ui);
         self.metronome_click_row(ui);
@@ -963,6 +964,19 @@ impl Grooph {
         }
         if value_row(ui, "Rests", hidden_rests_label(score.hidden_rests)).clicked() {
             self.ui.dialogs.picker = Some(Picker::HiddenRests);
+        }
+    }
+
+    /// The score's voicing rule, by its name; opens its picker. The score
+    /// tab's staff is the kit's, the one line has no voices to sort into.
+    fn voicing_row(&mut self, ui: &mut Ui) {
+        let score = self.editor.doc().score();
+        if score.staff != StaffKind::Kit {
+            return;
+        }
+        let name = crate::voicing_picker::voicing_label(score.voicing);
+        if value_row(ui, "Voicing", name).clicked() {
+            self.open_voicing_picker();
         }
     }
 
@@ -1811,6 +1825,54 @@ mod tests {
         let (_, _, sheet, _) = open_sheet(super::Tab::Practice, vec2(375.0, 420.0));
         let shown = sheet.height() - super::SHEET_HANDLE_HEIGHT;
         assert!(shown >= super::SHEET_MIN_ROWS_HEIGHT - 0.5, "{sheet:?}");
+    }
+
+    /// Runs the voicing row alone at the top of the screen with `events`;
+    /// the texts it painted.
+    fn voicing_row_frame(
+        app: &mut crate::Grooph,
+        ctx: &Context,
+        events: Vec<Event>,
+    ) -> Vec<String> {
+        let input = RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(390.0, 844.0))),
+            events,
+            ..Default::default()
+        };
+        let mut output = ctx.run_ui(input, |ui| app.voicing_row(ui));
+        output.textures_delta.clear();
+        output
+            .shapes
+            .iter()
+            .filter_map(|c| match &c.shape {
+                egui::Shape::Text(t) => Some(t.galley.text().to_owned()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_voicing_row_names_the_rule_and_opens_its_picker() {
+        use grooph_measure::Voicing;
+        let ctx = Context::default();
+        let cc = crate::test_support::creation_context(ctx.clone());
+        let mut app = crate::Grooph::new(&cc);
+        app.select_tab(super::Tab::Score);
+        for (voicing, name) in [
+            (Voicing::HANDS_FEET, "Hands/Feet"),
+            (Voicing::CYMBALS_ABOVE, "Cymbals above"),
+            (Voicing::from_lower([grooph_measure::Instrument::Snare]), "Custom"),
+        ] {
+            app.editor.doc_mut().edit_score(|s| s.voicing = voicing);
+            let texts = voicing_row_frame(&mut app, &ctx, vec![]);
+            assert!(texts.contains(&"Voicing".to_owned()), "{texts:?}");
+            assert!(texts.contains(&name.to_owned()), "{texts:?}");
+        }
+        let at = pos2(100.0, super::ROW_HEIGHT / 2.0);
+        voicing_row_frame(&mut app, &ctx, vec![Event::PointerMoved(at), button(at, true)]);
+        voicing_row_frame(&mut app, &ctx, vec![button(at, false)]);
+        assert_eq!(app.ui.dialogs.picker, Some(crate::pickers::Picker::Voicing));
+        assert_eq!(app.pending_voicing(), Some(app.editor.doc().score().voicing));
     }
 
     #[test]

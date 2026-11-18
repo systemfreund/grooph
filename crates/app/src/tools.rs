@@ -672,27 +672,28 @@ pub fn all_tools() -> &'static [Tool] {
             shortcuts: &[],
             show_in_palette: true,
         },
-        // Voices of the kit — keyboard and menus; the grid has them later.
+        // Voices of the kit: keys, the bar menu and the kit's grid (see
+        // `tool_palette::grid_rows`).
         Tool {
             id: ToolId::MeasureRevoice,
             label: "Revoice measure…",
             kind: ToolKind::Meta(MetaOp::Revoice),
             shortcuts: &[],
-            show_in_palette: false,
+            show_in_palette: true,
         },
         Tool {
             id: ToolId::ModifyVoiceSwap,
             label: "Switch voice, whole measure",
             kind: ToolKind::Voice(VoiceOp::SwitchMeasure),
             shortcuts: &[Shortcut { key: Key::V, shift: true, command: false }],
-            show_in_palette: false,
+            show_in_palette: true,
         },
         Tool {
             id: ToolId::ModifyVoiceSwapOne,
             label: "Switch voice, this note",
             kind: ToolKind::Voice(VoiceOp::SwitchOne),
             shortcuts: &[Shortcut::plain(Key::V)],
-            show_in_palette: false,
+            show_in_palette: true,
         },
         // Beat removal — keyboard-only
         Tool {

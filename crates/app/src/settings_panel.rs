@@ -1,7 +1,9 @@
 use crate::Grooph;
-use crate::pickers::dialog_scroll_height;
+use crate::pickers::{choice_grid, dialog_scroll_height};
+use crate::voicing_picker::voicing_label;
 use eframe::egui;
 use grooph_audio::Waveform;
+use grooph_measure::Voicing;
 
 impl Grooph {
     pub(super) fn settings_panel(&mut self, ui: &mut egui::Ui) {
@@ -104,6 +106,10 @@ impl Grooph {
                 );
             });
 
+            egui::CollapsingHeader::new("New grooves").default_open(false).show(ui, |ui| {
+                self.new_groove_settings(ui);
+            });
+
             egui::CollapsingHeader::new("Tempo Ramp").default_open(false).show(ui, |ui| {
                 self.tempo_ramp_settings(ui);
             });
@@ -126,5 +132,30 @@ impl Grooph {
                 );
             });
         });
+    }
+
+    /// "Write new grooves as": a preset, or the rule of the score tab's
+    /// score, copied as it is now.
+    fn new_groove_settings(&mut self, ui: &mut egui::Ui) {
+        let setting = self.editor.settings.new_groove_voicing;
+        ui.horizontal(|ui| {
+            ui.label("Write new grooves as");
+            ui.strong(voicing_label(setting));
+        });
+        let mut options: Vec<_> =
+            Voicing::PRESETS.map(|v| (Some(v), voicing_label(v).to_owned())).into();
+        options.push((None, "Use this score's".to_owned()));
+        // A custom rule is none of the tiles; "Use this score's" is an action.
+        match choice_grid(ui, &options, Some(setting), 2) {
+            Some(Some(voicing)) => self.editor.settings.new_groove_voicing = voicing,
+            Some(None) => self.use_score_voicing_for_new_grooves(),
+            None => {}
+        }
+    }
+
+    /// "Use this score's": new grooves get the score tab's rule as it is
+    /// now; later changes to that score leave the setting alone.
+    pub(crate) fn use_score_voicing_for_new_grooves(&mut self) {
+        self.editor.settings.new_groove_voicing = self.editor.docs.score.score.voicing;
     }
 }

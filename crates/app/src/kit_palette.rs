@@ -5,8 +5,9 @@
 //! it as before.
 //!
 //! An instrument's cell steps its head on the cursor's beat through none,
-//! the usual stroke and its techniques (`Grooph::tap_instrument`; a long
-//! press takes it away) and makes it the picked one, the head the note
+//! the usual stroke and its techniques, the last taking it away
+//! (`Grooph::tap_instrument`; a long press moves it to the other voice,
+//! `Grooph::hold_instrument`) and makes it the picked one, the head the note
 //! values write on a rest (`Grooph::edit_instrument`). Accent, ghost and the
 //! technique tools go to the head they mean (`Grooph::aimed` in `tool_palette`).
 //! The cursor goes to the voice the instrument's head would be entered in:
@@ -67,10 +68,16 @@ impl Grooph {
         self.strike(instrument, tool);
     }
 
-    /// A long press (a right click) on an instrument's cell: its head on the
-    /// cursor's beat is taken away however it is played, or added.
+    /// A long press (a right click) on an instrument's cell: its note at
+    /// the cursor goes to the other voice, as one undo step, and the cursor
+    /// with it. The instrument becomes the picked one; without its head on
+    /// the cursor's beat nothing else happens (no other head moves instead).
+    /// The score's rule stays.
     pub(crate) fn hold_instrument(&mut self, instrument: Instrument) {
-        self.strike(instrument, ToolId::ModifyToggleHead);
+        self.editor.instrument = instrument;
+        if self.heads_at_cursor().iter().any(|&(i, _)| i == instrument) {
+            self.with_undo_snapshot(|app| app.switch_voice(true));
+        }
     }
 
     /// Pick `instrument`, go to the voice of its head on the cursor's beat
@@ -154,17 +161,78 @@ impl Grooph {
     /// Revoice the cursor's measure by `voicing` ("Revoice measure…"): every
     /// head in the voice it writes the instrument in, as one undo step. The
     /// cursor stays at its time, in the voice of the picked instrument. A
-    /// measure whose tuplets cannot meet stays as it is.
+    /// measure whose tuplets cannot meet stays as it is, and a notice says so.
     pub(crate) fn revoice_current_measure(&mut self, voicing: Voicing) {
+        let mut stuck = false;
         self.with_undo_snapshot(|app| {
             let score = app.editor.doc().score();
             let cursor = score.clamp_cursor(app.editor.doc().cursor());
             let tick = score.tick_of(cursor);
             match app.current_measure().revoiced(&voicing) {
                 Some(measure) => app.put_revoiced(cursor, tick, measure),
-                None => false,
+                None => {
+                    stuck = true;
+                    false
+                }
             }
         });
+        if stuck {
+            self.notify("This bar stayed as it was");
+        }
+    }
+
+    /// Whether revoicing the score by `voicing` would change a bar that
+    /// has notes. A bar that cannot be revoiced stays, so it changes not.
+    pub(crate) fn revoicing_changes_a_bar(&self, voicing: Voicing) -> bool {
+        self.editor.doc().score().measures().iter().any(|m| {
+            !m.head_onsets().is_empty()
+                && m.revoiced(&voicing).is_some_and(|revoiced| revoiced != *m)
+        })
+    }
+
+    /// Make `voicing` the score's rule, as one undo step, and with
+    /// `revoice` sort the heads of every bar into its voices too. The
+    /// cursor stays at its time, in the voice of the picked instrument.
+    /// How many bars could not be revoiced and stayed as they were.
+    pub(crate) fn set_voicing(&mut self, voicing: Voicing, revoice: bool) -> usize {
+        let mut stuck = 0;
+        self.with_undo_snapshot(|app| {
+            let score = app.editor.doc().score();
+            let cursor = score.clamp_cursor(app.editor.doc().cursor());
+            let tick = score.tick_of(cursor);
+            let changed = app.editor.doc_mut().edit_score(|score| {
+                let before = score.voicing;
+                score.voicing = voicing;
+                let mut changed = before != voicing;
+                if revoice {
+                    for measure in score.measures_mut() {
+                        match measure.revoiced(&voicing) {
+                            Some(revoiced) if revoiced != *measure => {
+                                *measure = revoiced;
+                                changed = true;
+                            }
+                            Some(_) => {}
+                            None => stuck += 1,
+                        }
+                    }
+                }
+                changed
+            });
+            if changed != Some(true) {
+                return false;
+            }
+            let instrument = app.editor.instrument;
+            let measure = app.current_measure();
+            let there = measure
+                .head_onsets()
+                .into_iter()
+                .find(|o| o.tick == tick && o.head.instrument() == instrument);
+            let voice = there.map_or_else(|| measure.voice_for(instrument, &voicing), |o| o.voice);
+            let doc = app.editor.doc_mut();
+            *doc.cursor_mut() = doc.score().cursor_at_tick(Cursor { voice, ..cursor }, tick);
+            true
+        });
+        stuck
     }
 
     /// Put `measure` in place of the one of `cursor` (at `tick` in it) and
@@ -204,7 +272,7 @@ impl Grooph {
         self.show_document(Document::Score);
         let ts = self.current_measure().time_signature();
         let score = match staff {
-            StaffKind::Kit => empty_groove(ts, Voicing::default()),
+            StaffKind::Kit => empty_groove(ts, self.editor.settings.new_groove_voicing),
             StaffKind::Line => Score::single(Measure::new(ts)),
         };
         self.replace_score(score, Origin::New);
