@@ -679,7 +679,7 @@ pub fn all_tools() -> &'static [Tool] {
             label: "Revoice measure…",
             kind: ToolKind::Meta(MetaOp::Revoice),
             shortcuts: &[],
-            show_in_palette: true,
+            show_in_palette: false,
         },
         Tool {
             id: ToolId::ModifyVoiceSwap,

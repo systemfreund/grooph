@@ -158,10 +158,9 @@ fn technique_name(technique: Technique) -> &'static str {
 }
 
 /// The kit's voice tools after the meter: on a narrow screen "Switch voice"
-/// of the whole bar alone, on a wide one also of one note and "Revoice
-/// bar…".
-const VOICE_TOOLS: [ToolId; 3] =
-    [ToolId::ModifyVoiceSwap, ToolId::ModifyVoiceSwapOne, ToolId::MeasureRevoice];
+/// of the whole bar alone, on a wide one also of one note. "Revoice bar…"
+/// is in the bar menu.
+const VOICE_TOOLS: [ToolId; 2] = [ToolId::ModifyVoiceSwap, ToolId::ModifyVoiceSwapOne];
 
 /// The grid's rows, top to bottom; a row wider than the grid goes on in the
 /// next line. On the kit its instruments come first, always the same nine
@@ -633,7 +632,6 @@ impl Grooph {
                     // Words in two short lines, to fit the cell.
                     ToolKind::Voice(VoiceOp::SwitchMeasure) => "↕\nBar",
                     ToolKind::Voice(VoiceOp::SwitchOne) => "↕\nNote",
-                    ToolKind::Meta(MetaOp::Revoice) => "Re-\nvoice",
                     _ => t.label,
                 };
                 (t.id.name(), label, hover)
@@ -715,10 +713,7 @@ impl Grooph {
                 self.paint_time_signature(ui, inner, color);
             }
             Cell::Tool(Tool {
-                kind:
-                    ToolKind::Modify(Modifier::ToggleSticking(_))
-                    | ToolKind::Voice(_)
-                    | ToolKind::Meta(MetaOp::Revoice),
+                kind: ToolKind::Modify(Modifier::ToggleSticking(_)) | ToolKind::Voice(_),
                 ..
             }) => {
                 // As on the staff, two letters stacked where both hands play.
@@ -2358,14 +2353,14 @@ mod tests {
         let narrow = tools(true, true);
         assert_eq!(narrow.last(), Some(&ToolId::ModifyVoiceSwap));
         assert!(!narrow.contains(&ToolId::ModifyVoiceSwapOne));
-        assert!(!narrow.contains(&ToolId::MeasureRevoice));
         let wide = tools(true, false);
         let after_meter =
             wide.iter().position(|&id| id == ToolId::MetaChangeTimeSignature).unwrap();
-        assert_eq!(
-            wide[after_meter + 1..],
-            [ToolId::ModifyVoiceSwap, ToolId::ModifyVoiceSwapOne, ToolId::MeasureRevoice]
-        );
+        assert_eq!(wide[after_meter + 1..], [ToolId::ModifyVoiceSwap, ToolId::ModifyVoiceSwapOne]);
+        // "Revoice bar…" is in the bar menu only.
+        for narrow in [true, false] {
+            assert!(!tools(true, narrow).contains(&ToolId::MeasureRevoice));
+        }
         for narrow in [true, false] {
             assert!(!tools(false, narrow).iter().any(|id| super::VOICE_TOOLS.contains(id)));
         }
