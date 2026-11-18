@@ -157,18 +157,19 @@ fn technique_name(technique: Technique) -> &'static str {
     }
 }
 
-/// The kit's voice tool after the meter: "Switch voice" of the note at the
-/// cursor. The whole bar's is on the keyboard (Shift+V), "Revoice bar…" in
-/// the bar menu.
-const VOICE_TOOLS: [ToolId; 1] = [ToolId::ModifyVoiceSwapOne];
+/// The kit's voice tools after the meter: on a narrow screen "Switch voice"
+/// of the whole bar alone, on a wide one also of one note and "Revoice
+/// bar…".
+const VOICE_TOOLS: [ToolId; 3] =
+    [ToolId::ModifyVoiceSwap, ToolId::ModifyVoiceSwapOne, ToolId::MeasureRevoice];
 
 /// The grid's rows, top to bottom; a row wider than the grid goes on in the
 /// next line. On the kit its instruments come first, always the same nine
-/// cells, and its voice tools ([`VOICE_TOOLS`]) end the tools; on the one
-/// line there are none. The
+/// cells, and its voice tools ([`VOICE_TOOLS`]) end the tools, fewer of
+/// them on a `narrow` screen; on the one line there are none. The
 /// stickings only where they are written (`sticking`): not on the
 /// metronome's clicks.
-pub(crate) fn grid_rows(kit: bool, sticking: bool) -> Vec<Vec<Cell>> {
+pub(crate) fn grid_rows(kit: bool, sticking: bool, narrow: bool) -> Vec<Vec<Cell>> {
     let tools = |ids: &[ToolId]| {
         ids.iter()
             .filter(|id| {
@@ -183,7 +184,8 @@ pub(crate) fn grid_rows(kit: bool, sticking: bool) -> Vec<Vec<Cell>> {
     }
     let mut row = tools(&TOOLS);
     if kit {
-        row.extend(tools(&VOICE_TOOLS));
+        let voice_tools = if narrow { &VOICE_TOOLS[..1] } else { &VOICE_TOOLS[..] };
+        row.extend(tools(voice_tools));
     }
     rows.push(row);
     rows
@@ -230,7 +232,8 @@ impl Grooph {
 
     fn tool_grid_scroll(&mut self, ui: &mut Ui) {
         // Sized up front: a bottom panel offers the height it had.
-        let rows = grid_rows(!self.staff_model().one_line(), !self.metronome_mode());
+        let narrow = self.ui.staff.narrow_screen;
+        let rows = grid_rows(!self.staff_model().one_line(), !self.metronome_mode(), narrow);
         let (columns, cell) = grid_metrics(ui.available_width());
         let lines: usize = rows.iter().map(|r| row_lines(r, columns).len()).sum();
         let height = grid_height(lines, cell.y, ui.ctx().content_rect().height());
@@ -628,7 +631,9 @@ impl Grooph {
                         Sticking::Both => "R\nL",
                     },
                     // Words in two short lines, to fit the cell.
+                    ToolKind::Voice(VoiceOp::SwitchMeasure) => "↕\nBar",
                     ToolKind::Voice(VoiceOp::SwitchOne) => "↕\nNote",
+                    ToolKind::Meta(MetaOp::Revoice) => "Re-\nvoice",
                     _ => t.label,
                 };
                 (t.id.name(), label, hover)
@@ -710,7 +715,10 @@ impl Grooph {
                 self.paint_time_signature(ui, inner, color);
             }
             Cell::Tool(Tool {
-                kind: ToolKind::Modify(Modifier::ToggleSticking(_)) | ToolKind::Voice(_),
+                kind:
+                    ToolKind::Modify(Modifier::ToggleSticking(_))
+                    | ToolKind::Voice(_)
+                    | ToolKind::Meta(MetaOp::Revoice),
                 ..
             }) => {
                 // As on the staff, two letters stacked where both hands play.
@@ -1619,7 +1627,7 @@ mod tests {
         assert_eq!(app.ui.mode, Mode::Edit);
         assert_eq!(text(&app), "3/4 r:q r:q r:q");
         // The one line's tools: no instruments, heads or techniques.
-        let rows = super::grid_rows(!app.staff_model().one_line(), true);
+        let rows = super::grid_rows(!app.staff_model().one_line(), true, false);
         assert_eq!(rows.len(), 1);
         assert!(!rows[0].iter().any(|c| matches!(c, super::Cell::Instrument(_))));
         assert!(!app.tool_applicable(ToolId::ModifyToggleHead.tool()));
@@ -1827,7 +1835,7 @@ mod tests {
     fn the_instruments_row_is_the_same_on_every_beat() {
         use super::{Cell, grid_rows, row_lines};
         // Nine cells, whatever the beat holds: none move when a head comes or goes.
-        let row = grid_rows(true, true).remove(0);
+        let row = grid_rows(true, true, false).remove(0);
         assert_eq!(row, super::KIT_ORDER.map(Cell::Instrument).to_vec());
         for columns in [4, 5, 6, 9] {
             let lines = row_lines(&row, columns);
@@ -1870,7 +1878,7 @@ mod tests {
         use super::{Cell, grid_rows};
         use crate::tools::{Modifier, ToolKind};
         let tools = |kit| {
-            grid_rows(kit, true)
+            grid_rows(kit, true, false)
                 .into_iter()
                 .flatten()
                 .filter_map(|c| match c {
@@ -1899,14 +1907,17 @@ mod tests {
                 ToolKind::Modify(Modifier::ToggleTechnique(_))
             ))
         );
-        let cells = grid_rows(true, true).into_iter().flatten().collect::<Vec<_>>();
+        let cells = grid_rows(true, true, false).into_iter().flatten().collect::<Vec<_>>();
         let instruments = cells.iter().filter(|c| matches!(c, Cell::Instrument(_))).count();
         assert_eq!(instruments, 9);
-        assert!(grid_rows(false, true).iter().flatten().all(|c| matches!(c, Cell::Tool(_))));
+        assert!(grid_rows(false, true, false).iter().flatten().all(|c| matches!(c, Cell::Tool(_))));
         // The metronome's clicks are played by no hand: no stickings there.
         let sticking = |c: &Cell| matches!(c, Cell::Tool(t) if matches!(t.kind, ToolKind::Modify(Modifier::ToggleSticking(_))));
-        assert_eq!(grid_rows(false, true).iter().flatten().filter(|c| sticking(c)).count(), 3);
-        assert!(!grid_rows(false, false).iter().flatten().any(sticking));
+        assert_eq!(
+            grid_rows(false, true, false).iter().flatten().filter(|c| sticking(c)).count(),
+            3
+        );
+        assert!(!grid_rows(false, false, false).iter().flatten().any(sticking));
     }
 
     #[test]
@@ -2332,10 +2343,10 @@ mod tests {
     }
 
     #[test]
-    fn the_kits_grid_ends_with_switching_one_notes_voice() {
+    fn the_voice_tools_end_the_kits_grid_as_wide_as_it_has_room() {
         use super::{Cell, grid_rows};
-        let tools = |kit| -> Vec<ToolId> {
-            grid_rows(kit, true)
+        let tools = |kit, narrow| -> Vec<ToolId> {
+            grid_rows(kit, true, narrow)
                 .into_iter()
                 .flatten()
                 .filter_map(|c| match c {
@@ -2344,12 +2355,21 @@ mod tests {
                 })
                 .collect()
         };
-        let kit = tools(true);
-        let after_meter = kit.iter().position(|&id| id == ToolId::MetaChangeTimeSignature).unwrap();
-        assert_eq!(kit[after_meter + 1..], [ToolId::ModifyVoiceSwapOne]);
-        // The whole bar's switch and "Revoice bar…" are not in the grid.
-        assert!(!kit.contains(&ToolId::ModifyVoiceSwap));
-        assert!(!kit.contains(&ToolId::MeasureRevoice));
-        assert!(!tools(false).contains(&ToolId::ModifyVoiceSwapOne));
+        let narrow = tools(true, true);
+        assert_eq!(narrow.last(), Some(&ToolId::ModifyVoiceSwap));
+        assert!(!narrow.contains(&ToolId::ModifyVoiceSwapOne));
+        assert!(!narrow.contains(&ToolId::MeasureRevoice));
+        let wide = tools(true, false);
+        let after_meter =
+            wide.iter().position(|&id| id == ToolId::MetaChangeTimeSignature).unwrap();
+        assert_eq!(
+            wide[after_meter + 1..],
+            [ToolId::ModifyVoiceSwap, ToolId::ModifyVoiceSwapOne, ToolId::MeasureRevoice]
+        );
+        for narrow in [true, false] {
+            assert!(!tools(false, narrow).iter().any(|id| super::VOICE_TOOLS.contains(id)));
+        }
+        // The narrow screen is under 600 points.
+        assert_eq!(crate::shell::NARROW_MAX_WIDTH, 600.0);
     }
 }

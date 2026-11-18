@@ -154,7 +154,8 @@ spread across callers.
   to the other voice, every head in the bar or the one at the cursor (`modify.voice.swap`,
   Shift+V; `modify.voice.swap_one`, V). A lower voice left empty goes in a score of one voice.
   Each is one undo step; the cursor stays at its time, in the voice its instrument went to.
-  The kit's tool grid ends with `modify.voice.swap_one` after the meter (`VOICE_TOOLS`). A bar "Revoice bar…" cannot revoice stays, and
+  The kit's tool grid ends with them after the meter (`VOICE_TOOLS`): narrower than
+  `NARROW_MAX_WIDTH` only `modify.voice.swap`. A bar "Revoice bar…" cannot revoice stays, and
   a short notice says so (`Grooph::notify`, `notice.rs`, about 3 s).
 - The score's rule (`app`'s `voicing_picker`, #301): the score tab's "Voicing" row opens
   `Picker::Voicing`, a tile per preset with the cursor's bar revoiced by it (`voicing_preview`; a
