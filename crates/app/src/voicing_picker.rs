@@ -241,27 +241,25 @@ fn voicing_tile(
 /// side tapped, if it is the other.
 fn voice_switch(ui: &mut Ui, name: &str, lower: bool) -> Option<bool> {
     let mut picked = None;
-    ui.horizontal(|ui| {
-        let spacing = ui.spacing().item_spacing.x;
-        let button = 72.0;
-        let label = ui.available_width() - 2.0 * (button + spacing);
-        let (rect, _) = ui.allocate_exact_size(vec2(label, ROW_HEIGHT), Sense::hover());
-        ui.painter().text(
-            rect.left_center(),
-            egui::Align2::LEFT_CENTER,
-            name,
-            egui::FontId::proportional(17.0),
-            ui.visuals().text_color(),
-        );
-        for (down, text) in [(false, "▲ Up"), (true, "▼ Down")] {
-            let side = Button::new(RichText::new(text).size(16.0))
-                .selected(lower == down)
-                .min_size(vec2(button, ROW_HEIGHT));
-            if ui.add(side).on_hover_text(format!("{name}: {text}")).clicked() && lower != down {
-                picked = Some(down);
+    let width = ui.available_width();
+    ui.allocate_ui_with_layout(
+        vec2(width, ROW_HEIGHT),
+        egui::Layout::right_to_left(egui::Align::Center),
+        |ui| {
+            for (down, text) in [(true, "▼ Down"), (false, "▲ Up")] {
+                let side = Button::new(RichText::new(text).size(16.0))
+                    .selected(lower == down)
+                    .min_size(vec2(0.0, ROW_HEIGHT - 8.0));
+                if ui.add(side).on_hover_text(format!("{name}: {text}")).clicked() && lower != down
+                {
+                    picked = Some(down);
+                }
             }
-        }
-    });
+            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                ui.add(egui::Label::new(RichText::new(name).size(17.0)).truncate());
+            });
+        },
+    );
     picked
 }
 
