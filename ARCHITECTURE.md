@@ -721,7 +721,7 @@ grooph's metronome runs inside AI chats as an
   (its score; not while it is edited, `Mode::Edit`), never embedded in a
   chat. The switch is in each of these tabs' options sheet.
 - One-line scores: every hit (each MIDI NoteOn of any note and channel, tap
-  and microphone hit) is matched to the nearest onset of any voice, with no
+  and microphone hit) is matched to the nearest note of any voice, with no
   catch window; each onset is one note.
 - Kit scores (`StaffKind::Kit`): each head (an instrument at an onset) is one
   note, and hits, misses, extra hits, the score, drift, beat positions and
@@ -786,19 +786,23 @@ grooph's metronome runs inside AI chats as an
   progress cursor waits after anchoring the clock (`anchored_ahead`), and a
   hit's loop set follows the note's loop relative to that cursor.
 - Grading (`accuracy::session::HitWindows`): perfect ≤ 25 ms, good ≤ 60 ms,
-  narrowed to 1/5 and 2/5 of the gap to the closest neighbouring onset (as
+  narrowed to 1/5 and 2/5 of the gap to the closest neighbouring note (as
   heard; on a kit score, of the same instrument) for fast notes.
+- Rests are no neighbours (`link_neighbours`): they are often only how a
+  note's length is written, which a hit does not tell, so a note is judged
+  the same as a quarter or as an eighth and an eighth rest.
 - A note's window (`accuracy::session::note_window`) reaches on each side
-  halfway to the neighbouring entry of its instrument, at most the catch
+  halfway to the neighbouring note of its instrument, at most the catch
   window (`catch_window_ticks`: `KIT_CATCH_WINDOW_MS` on the kit, unbounded
-  on one line and so in the calibration). On a kit a hit counts for a note
-  only inside it, and the note is missed once it closes without a hit: the
-  windows to hit and to miss a note are one. On one line it ends the miss
-  window only, halfway to the next onset with rests; a hit goes to the
-  nearest note whatever the distance, as a hit on the note after a rest
-  would fall outside that window.
-- On a kit an instrument's last window can run on past the loop's end; it
-  closes in the next loop, on whichever frame gets there, and is judged
+  on one line and so in the calibration). A hit counts for a note only
+  inside it, and the note is missed once it closes without a hit: the
+  windows to hit and to miss a note are one, on both staffs. On one line
+  the nearest note's window always holds a hit; the catch window decides
+  whether a hit far from every note still counts for one (a crash a bar
+  away on the kit is extra, not a second late).
+- A window can run on past the loop's end (a note late in the loop whose
+  instrument's next note comes late in the next one, e.g. after rests at the
+  bar's start); it closes in the next loop, on whichever frame gets there, and is judged
   against the hits the loop before kept at the wrap (`hits_prev_loop`); in
   the first loop there is none to judge.
 - Marks are clamped to halfway to their neighbours, as written

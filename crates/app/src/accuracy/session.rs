@@ -81,7 +81,7 @@ pub(crate) const GOOD_WINDOW_MS: f64 = 60.0;
 /// checked with an e-kit.
 pub(crate) const KIT_CATCH_WINDOW_MS: f64 = 150.0;
 /// Fast notes narrow the windows to these shares of the gap to the closest
-/// neighbouring onset, so "good" stays well inside the note's own hit window.
+/// neighbouring note, so "good" stays well inside the note's own hit window.
 const PERFECT_GAP_SHARE: f64 = 0.2;
 const GOOD_GAP_SHARE: f64 = 0.4;
 
@@ -93,7 +93,7 @@ pub(super) struct HitWindows {
 }
 
 impl HitWindows {
-    /// Windows for a note whose closest neighbouring onset is `gap_ms` away.
+    /// Windows for a note whose closest neighbouring note is `gap_ms` away.
     pub(super) fn for_gap_ms(gap_ms: f64) -> Self {
         Self {
             perfect_ms: PERFECT_WINDOW_MS.min(gap_ms * PERFECT_GAP_SHARE),
@@ -259,9 +259,10 @@ impl NoteKey {
 
 /// What is judged at one point of the score, in score-global ticks: on a
 /// one-line score each onset of any voice, a note (matchable for accuracy)
-/// or a rest (only used as a structural anchor when computing per-note hit
-/// windows); on a kit score each head, one per instrument at an onset. The
-/// list is ordered by `onset_tick`, then by instrument.
+/// or a rest (judged and drawn on by nothing: rests are often only how a
+/// note's length is written, which a hit does not tell); on a kit score
+/// each head, one per instrument at an onset. The list is ordered by
+/// `onset_tick`, then by instrument.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct GlobalBeatOnset {
     /// Written onset; keys the accuracy marks with `instrument`.
@@ -362,13 +363,20 @@ pub(crate) fn compute_global_beat_onsets(
     out
 }
 
-/// Set each entry's `prev_same` and `next_same`: the entries of the same
-/// instrument around it on the loop. On one line every entry's neighbours
-/// are the entries next to it.
+/// Set each note's `prev_same` and `next_same`: the notes of the same
+/// instrument around it on the loop. On one line a note's neighbours are
+/// the notes before and after it. Rests are no neighbours, so that a note
+/// is judged the same however its length is written (a quarter, or an
+/// eighth and an eighth rest); a rest links to itself.
 pub(crate) fn link_neighbours(beats: &mut [GlobalBeatOnset]) {
     let mut first: HashMap<Instrument, usize> = HashMap::new();
     let mut last: HashMap<Instrument, usize> = HashMap::new();
     for i in 0..beats.len() {
+        if !beats[i].is_note {
+            beats[i].prev_same = i;
+            beats[i].next_same = i;
+            continue;
+        }
         let instrument = beats[i].instrument;
         first.entry(instrument).or_insert(i);
         if let Some(prev) = last.insert(instrument, i) {
@@ -433,10 +441,10 @@ pub(crate) enum TickKind {
     Performed,
 }
 
-/// Distance in ticks of `kind` from the entry at `idx` back to its
-/// neighbour of the same instrument and on to the next (notes or rests on
-/// one line) on the score loop: the whole loop for the only one. This
-/// defines a note's window, for grading and for drawing.
+/// Distance in ticks of `kind` from the note at `idx` back to its
+/// neighbouring note of the same instrument and on to the next on the score
+/// loop: the whole loop for the only one. This defines a note's window, for
+/// grading and for drawing.
 pub(crate) fn neighbour_gaps(
     beats: &[GlobalBeatOnset],
     idx: usize,
@@ -474,11 +482,12 @@ pub(crate) fn note_index(beats: &[GlobalBeatOnset], key: NoteKey) -> Option<usiz
 }
 
 /// How far the window of the note at `idx` reaches before and after it, in
-/// ticks as heard: half the gap to the neighbouring entry of its instrument
-/// on each side, at most `catch_ticks` (see [`catch_window_ticks`]). On a
-/// kit score a hit counts for the note only inside it, and the note is
-/// missed once it closes; on one line it only ends the miss window (a hit
-/// goes to the nearest note, see `recorder::record_hit`).
+/// ticks as heard: half the gap to the neighbouring note of its instrument
+/// on each side, at most `catch_ticks` (see [`catch_window_ticks`]). A hit
+/// counts for the note only inside it, and the note is missed once it
+/// closes without one: the windows to hit and to miss a note are one, on
+/// both staffs. On one line, without a catch window, the nearest note's
+/// window always holds the hit.
 pub(super) fn note_window(
     beats: &[GlobalBeatOnset],
     idx: usize,

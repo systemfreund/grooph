@@ -134,17 +134,16 @@ fn process_segment(
         if !gb.is_note {
             continue;
         }
-        // The note's window (see `note_window`): on one line it ends halfway
-        // to the next onset; on a kit with its catch window, at most halfway
-        // to the instrument's next head.
+        // The note's window (see `note_window`): halfway to the next note
+        // (on a kit, of its instrument), at most the catch window.
         let cur = gb.performed_tick as f64;
         let catch = catch_window_ticks(cursor.staff, cursor.timing, gb.measure_idx);
         let (_, after) = note_window(global_beats, i, total_loop_ticks, catch);
-        // A window ending past the loop's end (on a kit, an instrument's
-        // last note before its first one in the bar; on one line none, as
-        // every bar has an onset at its start) closes in the loop after its
-        // note's: it is judged there, against the hits of the loop before,
-        // and not in the first loop, which has none before it.
+        // A window ending past the loop's end (a note late in the loop
+        // whose instrument's next note comes late in the next one, e.g. after
+        // rests at the start of the bar) closes in the loop after its note's:
+        // it is judged there, against the hits of the loop before, and not in
+        // the first loop, which has none before it.
         let of_prev_loop = cur + after > total_loop_ticks;
         if of_prev_loop && data.loops == 0 {
             continue;

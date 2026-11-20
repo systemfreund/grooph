@@ -807,6 +807,97 @@ mod tests {
         assert_eq!((summary.perfect, summary.good, summary.off()), (0, 1, 1));
     }
 
+    /// Moves the progress cursor from `from` to `to` (s) in frames of 60 fps,
+    /// judging `delay_s` behind the clock.
+    fn frames_behind(
+        tracker: &mut AccuracyTracker,
+        (from, to): (f64, f64),
+        delay_s: f64,
+        score: &Score,
+        timing: &ScoreTiming,
+    ) {
+        let mut t = from;
+        while t < to {
+            t = (t + 1.0 / 60.0).min(to);
+            tracker.update_progress_behind(t, delay_s, timing, score);
+        }
+    }
+
+    #[test]
+    fn a_late_hit_on_a_note_before_a_rest_is_no_miss_as_well() {
+        use grooph_measure::notation::parse_score;
+        // A on 1 (0 s), a rest on 2, B on 3 (1 s) at 120 BPM. A played 400 ms
+        // late, nearer to A than to B, while the cursor judges 60 ms behind:
+        // the rest does not end A's window, so A is hit, not missed and hit.
+        let score = parse_score("4/4 q r:q q q").unwrap();
+        let timing = ScoreTiming::from_score(&score, 120);
+        let mut tracker = AccuracyTracker::new();
+        tracker.on_playback_start_at(0.0, 0.0);
+        frames_behind(&mut tracker, (0.0, 0.4), 0.06, &score, &timing);
+        let delta = tracker.record_hit(0.4, &timing, &score).expect("A's hit");
+        assert!((delta - 400.0).abs() < 1e-6);
+        frames_behind(&mut tracker, (0.4, 0.9), 0.06, &score, &timing);
+        let s = tracker.live_summary().unwrap();
+        assert_eq!((s.hits, s.misses, s.extra), (1, 0, 0));
+        assert!(matches!(tracker.mark_for_onset(0), Some(AccuracyMark::Hit { .. })));
+    }
+
+    #[test]
+    fn the_same_music_written_otherwise_is_judged_the_same() {
+        use grooph_measure::notation::parse_score;
+        // A quarter, or a sixteenth and rests: the same four hits to play.
+        // At 160 BPM a sixteenth's gap would narrow the first note's windows
+        // to 18.75/37.5 ms if the rest after it counted.
+        let run = |text: &str| {
+            let score = parse_score(text).unwrap();
+            let timing = ScoreTiming::from_score(&score, 160);
+            let mut tracker = AccuracyTracker::new();
+            tracker.on_playback_start_at(0.0, 0.0);
+            let beat = 60.0 / 160.0;
+            for hit in [0.020, beat - 0.050, 2.0 * beat + 0.140] {
+                tracker.record_hit(hit, &timing, &score);
+            }
+            frames_behind(&mut tracker, (0.0, 4.0 * beat - 0.05), 0.0, &score, &timing);
+            let grade = match tracker.mark_for_onset(0) {
+                Some(AccuracyMark::Hit { grade, .. }) => Some(grade),
+                _ => None,
+            };
+            (tracker.live_summary(), grade)
+        };
+        let quarters = run("4/4 q q q q");
+        assert_eq!(quarters, run("4/4 s r:s r:e q q q"));
+        // 20 ms late on a quarter's windows: perfect (narrowed by the rest it
+        // would only be good).
+        assert_eq!(quarters.1, Some(super::super::session::HitGrade::Perfect));
+    }
+
+    #[test]
+    fn a_bar_starting_with_rests_judges_its_last_note_past_the_loop_end() {
+        use grooph_measure::notation::parse_score;
+        // Notes at 1 s and 1.5 s of a 2 s loop: the last one's window ends
+        // halfway to the next loop's first note, at 2.25 s.
+        let score = parse_score("4/4 r:h q q").unwrap();
+        let timing = ScoreTiming::from_score(&score, 120);
+        let last = timing.seconds_to_global_tick(1.5).round() as u64;
+        let mut unplayed = AccuracyTracker::new();
+        unplayed.on_playback_start_at(0.0, 0.0);
+        unplayed.record_hit(1.0, &timing, &score);
+        frames_behind(&mut unplayed, (0.0, 2.2), 0.0, &score, &timing);
+        assert!(unplayed.mark_for_onset(last).is_none());
+        frames_behind(&mut unplayed, (2.2, 2.3), 0.0, &score, &timing);
+        assert!(matches!(unplayed.mark_for_onset(last), Some(AccuracyMark::Miss)));
+        // Played 600 ms late, after the loop's end: a hit, and no miss.
+        let mut late = AccuracyTracker::new();
+        late.on_playback_start_at(0.0, 0.0);
+        late.record_hit(1.0, &timing, &score);
+        frames_behind(&mut late, (0.0, 2.05), 0.0, &score, &timing);
+        let delta = late.record_hit(2.1, &timing, &score).expect("the last note's hit");
+        assert!((delta - 600.0).abs() < 1e-6);
+        frames_behind(&mut late, (2.05, 2.3), 0.0, &score, &timing);
+        let s = late.live_summary().unwrap();
+        assert_eq!((s.hits, s.misses, s.extra), (2, 0, 0));
+    }
+
     #[test]
     fn run_without_hits_leaves_no_summary() {
         let score = score_of_quarters(&[TimeSignature::FOUR_FOUR]);

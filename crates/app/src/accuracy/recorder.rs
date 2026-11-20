@@ -47,12 +47,8 @@ pub(super) fn record_hit(
     // One pass over the score's onsets serves the match and the gap to the
     // neighbouring notes.
     let beats = global_beat_onsets(score, timing);
-    // On one line a hit goes to the nearest note, whatever the distance: the
-    // windows there reach halfway to the next onset, rests included, which a
-    // hit on the note after a rest would fall outside of.
-    let matched = best_match(hit_global, total, &beats, instrument).filter(|&(idx, diff, _)| {
-        instrument.is_none() || in_note_window(&beats, idx, diff, total, timing, score.staff)
-    });
+    let matched = best_match(hit_global, total, &beats, instrument)
+        .filter(|&(idx, diff, _)| in_note_window(&beats, idx, diff, total, timing, score.staff));
     let Some((beat_idx, diff_ticks, raw_diff)) = matched else {
         // A kit's hit with no note of its instrument near: extra, drawn
         // from the note of any instrument nearest to it. (On one line only
