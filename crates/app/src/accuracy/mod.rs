@@ -14,6 +14,6 @@ pub(crate) use drift::DriftHit;
 pub(crate) use positions::{BeatPositions, MIN_POSITION_HITS, PositionTiming};
 pub(crate) use session::{
     AccuracyMark, GOOD_WINDOW_MS, GlobalBeatOnset, HitGrade, NoteKey, PERFECT_WINDOW_MS,
-    RunSummary, global_beat_onsets,
+    RunSummary, global_beat_onsets, note_index,
 };
 pub(crate) use state::AccuracyState;

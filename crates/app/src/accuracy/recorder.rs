@@ -92,16 +92,9 @@ pub(super) fn record_hit(
     let note_s = timestamp - delta_ms / 1000.0;
 
     if already_hit {
-        if let Some(instrument) = instrument {
-            push_extra(
-                data,
-                &beats,
-                (beat_idx, diff_ticks, raw_diff),
-                instrument,
-                hit_global,
-                total,
-            );
-        }
+        // On one line the instrument of every note.
+        let played = instrument.unwrap_or(Instrument::Rhythm);
+        push_extra(data, &beats, (beat_idx, diff_ticks, raw_diff), played, hit_global, total);
         data.counters.extra += 1;
         tallies_of(&mut data.voice_tallies, voices).for_each(|t| t.counters.extra += 1);
         data.bars.push(note_s, BarEvent::Extra);
@@ -140,8 +133,9 @@ pub(super) fn record_hit(
     Some(delta_ms)
 }
 
-/// Keep a kit's extra hit on `instrument` at `hit_global` for its mark,
-/// drawn from the note `anchor` (as [`best_match`] gives it).
+/// Keep an extra hit on `instrument` ([`Instrument::Rhythm`] on one line) at
+/// `hit_global` for its mark, drawn from the note `anchor` (as
+/// [`best_match`] gives it).
 fn push_extra(
     data: &mut RecordingData,
     beats: &[GlobalBeatOnset],

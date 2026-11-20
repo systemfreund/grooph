@@ -56,9 +56,8 @@ A score on the drum kit's staff, in the **Score** tab, is played on an electroni
 over MIDI. Every pad counts for its own instrument (the General MIDI drum map, which most
 e-kits follow on any channel), and every note head is judged on its own: in a chord of
 kick and hi-hat, each gets its own marker, and a kick does not count for the hi-hat. A hit
-more than 150 ms from the nearest note of its instrument counts as an extra hit, and so
-does a second hit on a note. An extra hit gets a purple ring where you played it, on its
-instrument's line, until that place comes round again. An open
+more than 150 ms from the nearest note of its instrument counts as an extra hit, and its
+ring sits on that instrument's line. An open
 hi-hat on a closed one, a rimshot or the ride's bell count like the plain stroke. Pads that
 are not in the map are ignored, and so is the hi-hat pedal unless the score has notes for
 it. Tapping and the microphone do not count on the drum kit's staff, and nothing is
@@ -77,7 +76,9 @@ headphones add a lot of delay, so calibrate again when you switch to or from the
 
 Each written note gets a marker. A marker left of the note means you played early, right
 of it late. Blue markers are perfect and orange ones good; hits that are off are purple and
-get an arrow pointing the way you were off. Notes you did not play get a purple cross. The
+get an arrow pointing the way you were off. Notes you did not play get a purple cross, and
+an extra hit (a note played twice) gets a purple ring where you played it, until that place
+comes round again. The
 colours are chosen to stay apart with colour vision deficiencies. The markers stay on the staff after you stop, so you can see
 where the run went wrong, until you play again or edit the rhythm. Try to keep the markers
 close to the notes for a whole exercise before you raise the tempo.

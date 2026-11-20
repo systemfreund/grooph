@@ -503,6 +503,7 @@ impl Grooph {
                     total_loop_ticks as f64,
                     staff_space,
                 );
+                self.draw_extra_marks_for_measure(ui, placed, timing, staff_space);
             }
         }
     }
@@ -526,8 +527,8 @@ impl Grooph {
                 continue;
             }
             // A note head is one staff space high.
-            let y = note_layout.center.y + staff_space * 0.65;
-            let h = staff_space * 0.8;
+            let y = note_layout.center.y + staff_space * LINE_MARK_TOP;
+            let h = staff_space * LINE_MARK_HEIGHT;
             let width = (staff_space * MARK_WIDTH_PER_HEAD).max(MARK_MIN_WIDTH);
             let note_x = column.x;
             ui.painter().line_segment(
@@ -618,9 +619,10 @@ impl Grooph {
         }
     }
 
-    /// The extra hits played in a kit score's bar: a ring where each was
-    /// played, on its instrument's line, placed from the note nearest to it
-    /// as a hit's mark is from its note.
+    /// The extra hits played in a bar: a ring where each was played, placed
+    /// from the note nearest to it as a hit's mark is from its note. On the
+    /// kit's staff on the line of the instrument played, on one line in the
+    /// row of the other marks.
     fn draw_extra_marks_for_measure(
         &self,
         ui: &egui::Ui,
@@ -646,9 +648,17 @@ impl Grooph {
             else {
                 continue;
             };
-            // `staff_pos` counts half staff spaces up.
-            let rise = f32::from(extra.instrument.staff_pos() - note.staff_pos);
-            let y = note.center.y - rise * staff_space * 0.5;
+            let y = match placed.staff {
+                // `staff_pos` counts half staff spaces up.
+                StaffKind::Kit => {
+                    let rise = f32::from(extra.instrument.staff_pos() - note.staff_pos);
+                    note.center.y - rise * staff_space * 0.5
+                }
+                // The middle of the row the hits' and misses' marks are in.
+                StaffKind::Line => {
+                    note.center.y + staff_space * (LINE_MARK_TOP + LINE_MARK_HEIGHT / 2.0)
+                }
+            };
             let x = column.x + (extra.diff_ticks * px_per_tick) as f32;
             paint_extra_mark(ui.painter(), egui::pos2(x, y), staff_space * 0.45, width, dark);
         }
@@ -1135,6 +1145,11 @@ fn primary_beat_index(ts: &TimeSignature, local_tick: f64) -> u32 {
     DEFAULT_GRID.primary_boundaries(ts).iter().take_while(|&&b| b as f64 <= local_tick).count()
         as u32
 }
+
+/// Where the row of marks under the one line starts below a note head's
+/// middle, and how high it is (staff spaces).
+const LINE_MARK_TOP: f32 = 0.65;
+const LINE_MARK_HEIGHT: f32 = 0.8;
 
 /// Accuracy marks scale with the note head, but never get thinner than this (px).
 const MARK_MIN_WIDTH: f32 = 3.0;

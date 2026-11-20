@@ -33,7 +33,7 @@ pub(crate) struct AccuracyTracker {
     /// Marks of that run, kept on the staff after stopping until the next
     /// run starts or the score is edited.
     last_marks: HashMap<NoteKey, AccuracyMark>,
-    /// That run's extra hits on a kit score, kept as its marks are.
+    /// That run's extra hits, kept as its marks are.
     last_extras: Vec<ExtraMark>,
 }
 
@@ -225,8 +225,8 @@ impl AccuracyTracker {
         self.mark_for_note(NoteKey { tick: global_onset_tick, instrument })
     }
 
-    /// The extra hits of a kit score to draw: the running session's, else
-    /// the last finished run's.
+    /// The extra hits to draw: the running session's, else the last
+    /// finished run's.
     pub(crate) fn extra_marks(&self) -> &[ExtraMark] {
         match self.session.data() {
             Some(data) => &data.extras,
@@ -1253,14 +1253,19 @@ mod kit_tests {
     }
 
     #[test]
-    fn one_line_extra_hits_get_no_mark() {
+    fn a_second_hit_on_one_line_is_marked_as_extra_too() {
         let score = score_of_quarters(&[TimeSignature::FOUR_FOUR]);
         let timing = ScoreTiming::from_score(&score, 120);
         let mut tracker = recording();
         tracker.record_hit(0.0, &timing, &score);
         tracker.record_hit(0.05, &timing, &score);
         assert_eq!(tracker.live_summary().unwrap().extra, 1);
-        assert!(tracker.extra_marks().is_empty());
+        let extras = tracker.extra_marks();
+        assert_eq!(extras.len(), 1);
+        assert_eq!((extras[0].instrument, extras[0].anchor_tick), (Instrument::Rhythm, 0));
+        assert!((extras[0].diff_ticks - ticks_of(&timing, 0.05)).abs() < 1e-6);
+        // Judged as before: the first hit keeps its mark.
+        assert!(matches!(tracker.mark_for_onset(0), Some(AccuracyMark::Hit { .. })));
     }
 
     #[test]

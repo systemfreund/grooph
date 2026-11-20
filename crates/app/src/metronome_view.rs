@@ -24,7 +24,7 @@
 //! one edited (see [`MetronomeVoice`]).
 
 use crate::accuracy::{
-    AccuracyMark, HitGrade, NoteKey, clamp_diff_to_note_window, global_beat_onsets,
+    AccuracyMark, HitGrade, NoteKey, clamp_diff_to_note_window, global_beat_onsets, note_index,
 };
 use crate::documents::{Doc, Document};
 use crate::measure_panel::{grade_color, reference_color};
@@ -893,6 +893,17 @@ impl Grooph {
                 }
             }
         }
+        // The extra hits, as on the staff: a ring where each was played,
+        // from the click nearest to it, on the ring of that click's voice.
+        let stroke = Stroke::new(0.5 * size, grade_color(HitGrade::Off, dark));
+        for extra in tracker.extra_marks() {
+            let Some(idx) = note_index(&onsets, NoteKey::onset(extra.anchor_tick)) else {
+                continue;
+            };
+            let ring = if onsets[idx].voices & 1 != 0 || !with_counter { 0.82 } else { 0.755 };
+            let turn = (extra.anchor_tick as f64 + extra.diff_ticks) / total;
+            painter.circle_stroke(at_turn(center, ring * radius, turn as f32), size, stroke);
+        }
     }
 }
 
@@ -1603,6 +1614,35 @@ mod tests {
         assert!(app.accuracy_active());
         app.ui.mode = crate::Mode::Edit;
         assert!(!app.accuracy_active());
+    }
+
+    #[test]
+    fn extra_hits_are_marked_on_every_page_and_cleared_on_a_page_change() {
+        let cc = crate::test_support::creation_context(eframe::egui::Context::default());
+        let mut app = Grooph::new(&cc);
+        app.select_tab(Tab::Practice);
+        app.playback_ctl.feedback.accuracy_enabled = true;
+        app.editor.docs.practice.score = Score::single(Measure::new_init(
+            TimeSignature::FOUR_FOUR,
+            grooph_measure::BeatKind::Note,
+        ));
+        app.playback_ctl.accuracy.tracker.on_playback_start_at(0.0, 0.0);
+        let timing = app.score_timing();
+        let score = app.played_score().clone();
+        // The first note played twice: the second hit is extra, and marked.
+        app.playback_ctl.accuracy.tracker.record_hit(0.0, &timing, &score);
+        app.playback_ctl.accuracy.tracker.record_hit(0.04, &timing, &score);
+        assert_eq!(app.playback_ctl.accuracy.tracker.extra_marks().len(), 1);
+        // The metronome draws the same marks; the page change clears them
+        // with the run's other marks.
+        app.select_tab(Tab::Metronome);
+        assert!(app.playback_ctl.accuracy.tracker.extra_marks().is_empty());
+        app.playback_ctl.accuracy.tracker.on_playback_start_at(0.0, 0.0);
+        let timing = app.score_timing();
+        let score = app.played_score().clone();
+        app.playback_ctl.accuracy.tracker.record_hit(0.0, &timing, &score);
+        app.playback_ctl.accuracy.tracker.record_hit(0.04, &timing, &score);
+        assert_eq!(app.playback_ctl.accuracy.tracker.extra_marks().len(), 1);
     }
 
     #[test]

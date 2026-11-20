@@ -217,10 +217,11 @@ impl RunSummary {
     }
 }
 
-/// A hit on a kit score that counted for no note: a hit of an instrument
-/// with no note of it near, or a second hit on a note. Drawn where it was
-/// played, on its instrument's line, as a hit is drawn from its note: from
-/// the note nearest to it, `diff_ticks` away.
+/// A hit that counted for no note: a second hit on a note, or on a kit
+/// score a hit of an instrument with no note of it near. Drawn where it was
+/// played (on a kit, on its instrument's line), as a hit is drawn from its
+/// note: from the note nearest to it, `diff_ticks` away. The staff and the
+/// metronome's ring draw the same marks, on every page and both staffs.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct ExtraMark {
     /// The written onset of the note nearest to the hit (of any
@@ -229,7 +230,7 @@ pub(crate) struct ExtraMark {
     pub measure_idx: MeasureIdx,
     /// From that note, as heard (negative = before it).
     pub diff_ticks: f64,
-    /// The instrument played.
+    /// The instrument played; [`Instrument::Rhythm`] on one line.
     pub instrument: Instrument,
     /// Where it was played on the loop, as heard.
     pub(super) performed_tick: f64,
@@ -518,8 +519,7 @@ pub(super) struct RecordingData {
     /// How often the progress cursor wrapped. From the first wrap on there
     /// is a loop before whose windows past the loop's end are to be judged.
     pub(super) loops: i64,
-    /// The extra hits of a kit score, until the cursor passes their place in
-    /// a later loop.
+    /// The extra hits, until the cursor passes their place in a later loop.
     pub(super) extras: Vec<ExtraMark>,
     pub(super) stats: AccuracyStats,
     pub(super) counters: RunCounters,
