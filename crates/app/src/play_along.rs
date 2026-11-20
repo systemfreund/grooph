@@ -149,14 +149,19 @@ pub(crate) struct PlayAlongState {
 
 impl Grooph {
     /// Whether taps are captured right now. Touches on the staff then count
-    /// as hits instead of moving the cursor.
+    /// as hits instead of moving the cursor. On a kit score always while
+    /// timing feedback is at work: there a touch is a tap that counts for
+    /// nothing, even with tapping switched off, but not an edit.
     pub(crate) fn tap_capture_active(&self) -> bool {
         if self.playback_ctl.transport_state != TransportState::Playing {
             return false;
         }
         match self.calibration_source() {
             Some(source) => source == HitSource::Tap,
-            None => self.accuracy_active() && self.playback_ctl.feedback.play_along.tap_enabled,
+            None => {
+                self.accuracy_active()
+                    && (self.playback_ctl.feedback.play_along.tap_enabled || self.plays_kit())
+            }
         }
     }
 
@@ -291,7 +296,12 @@ impl Grooph {
         // A kit score is played on an e-kit: its MIDI notes name the
         // instrument; taps and the microphone do not.
         let kit = self.plays_kit();
-        let has_foot = kit && has_instrument(self.played_score(), Instrument::HiHatFoot);
+        // Only looked up for a pedal hit: it walks the whole score.
+        let pedal_hit = midi_hits
+            .iter()
+            .any(|&(_, note)| gm_drum(note).is_some_and(|(i, _)| i == Instrument::HiHatFoot));
+        let has_foot =
+            kit && pedal_hit && has_instrument(self.played_score(), Instrument::HiHatFoot);
         let use_midi = calibrating.is_none_or(|s| s == HitSource::Midi);
         let use_taps = !kit && calibrating.map_or(settings.tap_enabled, |s| s == HitSource::Tap);
         let use_mic = !kit && calibrating.map_or(settings.mic_enabled, |s| s == HitSource::Mic);
@@ -647,7 +657,10 @@ mod tests {
         assert!(app.playback_ctl.play_along.engaged);
 
         let mut app = score_tab_playing(&ctx, "4/4 H-K:e H:e H-S:e H:e H-K:e H:e H-S:e H:e");
-        // A press on the staff stays a tap, which a kit score ignores.
+        // A press on the staff stays a tap, which a kit score ignores, also
+        // with tapping switched off.
+        assert!(app.tap_capture_active());
+        app.playback_ctl.feedback.play_along.tap_enabled = false;
         assert!(app.tap_capture_active());
         assert!(!app.mic_wanted(clock::now_seconds()));
         tap_frame(&mut app, &ctx);

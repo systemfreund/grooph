@@ -1008,6 +1008,26 @@ mod kit_tests {
     }
 
     #[test]
+    fn heads_are_judged_alike_in_an_odd_meter() {
+        // 7/8 (2+2+3) at 120 BPM: an eighth is 250 ms; kicks on 1, the
+        // second group and the third, hi-hat eighths throughout.
+        let score =
+            parse_score("7/8 H-K:e H:e H-K:e H:e H-K:e H:e H:e").expect("a kit groove in 7/8");
+        let timing = ScoreTiming::from_score(&score, 120);
+        let eighth = 0.25;
+        let mut tracker = recording();
+        // The kick of the second group 100 ms late: caught, off. A kick on
+        // the second eighth, 250 ms from both kicks around it: extra.
+        assert!(tracker.record_instrument_hit(2.0 * eighth + 0.1, Kick, &timing, &score).is_some());
+        assert_eq!(tracker.record_instrument_hit(eighth, Kick, &timing, &score), None);
+        tracker.record_instrument_hit(eighth, HiHat, &timing, &score);
+        assert_eq!(grade(&tracker, tick_at(&timing, 2.0 * eighth), Kick), Some(HitGrade::Off));
+        assert_eq!(grade(&tracker, tick_at(&timing, eighth), HiHat), Some(HitGrade::Perfect));
+        let live = tracker.live_summary().unwrap();
+        assert_eq!((live.hits, live.extra), (2, 1));
+    }
+
+    #[test]
     fn statistics_count_heads() {
         // One chord a bar; only its hi-hat is played, two loops.
         let score = parse_score("4/4 H-K:q r:q r:q r:q").unwrap();
