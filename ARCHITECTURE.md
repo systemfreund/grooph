@@ -781,7 +781,10 @@ grooph's metronome runs inside AI chats as an
   narrowed to 1/5 and 2/5 of the gap to the closest neighbouring onset (as
   heard; on a kit score, of the same instrument) for fast notes. A note is
   missed once its window, halfway to the next onset (of the same
-  instrument), closes without a hit. Markers are coloured by grade.
+  instrument), closes without a hit. On a kit an instrument's last window
+  can run on past the loop's end; it is judged against the hits the loop
+  before kept at the wrap (`hits_prev_loop`). Marks are clamped to the
+  same windows, as written (`accuracy::session::neighbour_gaps`). Markers are coloured by grade.
 - Calibration (`crates/app/src/calibration.rs`): plays a click bar of its own
   (4 quarters at 100 BPM, counted in, no swing, ghost notes, gap or ramp)
   and takes the median of the hits after a warm-up as the source's offset.

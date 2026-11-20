@@ -23,7 +23,9 @@
 //! and the voice of the cursor, last tapped on the staff or the ring, is the
 //! one edited (see [`MetronomeVoice`]).
 
-use crate::accuracy::{AccuracyMark, HitGrade, clamp_diff_to_beat_window, global_beat_onsets};
+use crate::accuracy::{
+    AccuracyMark, HitGrade, NoteKey, clamp_diff_to_note_window, global_beat_onsets,
+};
 use crate::documents::{Doc, Document};
 use crate::measure_panel::{grade_color, reference_color};
 use crate::metronome_bars::MeterBars;
@@ -837,8 +839,7 @@ impl Grooph {
         let Some(bar) = score.measures().first().filter(|_| total > 0.0) else {
             return;
         };
-        let onsets: Vec<u64> =
-            global_beat_onsets(score, &timing).iter().map(|o| o.onset_tick).collect();
+        let onsets = global_beat_onsets(score, &timing);
         let size = (0.025 * radius).max(2.5);
         for (voice, ring) in [(MetronomeVoice::Click, 0.82), (MetronomeVoice::Counter, 0.755)] {
             if voice == MetronomeVoice::Counter && !with_counter {
@@ -860,8 +861,12 @@ impl Grooph {
                 let turn = tick as f32 / total as f32;
                 match mark {
                     AccuracyMark::Hit { diff_ticks, grade } => {
-                        let idx = onsets.binary_search(&tick).unwrap_or(0);
-                        let diff = clamp_diff_to_beat_window(diff_ticks, idx, &onsets, total);
+                        let diff = clamp_diff_to_note_window(
+                            diff_ticks,
+                            &onsets,
+                            NoteKey::onset(tick),
+                            total,
+                        );
                         let hit_turn = turn + (diff / total) as f32;
                         let reference = Stroke::new(0.5 * size, reference_color(dark));
                         painter.line_segment(

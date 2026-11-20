@@ -71,11 +71,14 @@ pub(super) fn record_hit(
     let note_loop = hit_loop + loop_offset(raw_diff, total);
     let wrap_next = note_loop > 0;
     let wrap_prev = note_loop < 0;
-    let already_hit = if wrap_next {
-        data.hits_next_loop.contains(&global_onset)
+    let loop_hits = if wrap_next {
+        &mut data.hits_next_loop
+    } else if wrap_prev {
+        &mut data.hits_prev_loop
     } else {
-        !wrap_prev && data.hits_in_loop.contains(&global_onset)
+        &mut data.hits_in_loop
     };
+    let already_hit = !loop_hits.insert(global_onset);
     // Convert tick delta to ms using the onset measure's local rate. Since
     // |diff_ticks| stays close to a single beat width, the choice of measure
     // has negligible impact for cross-measure hits.
@@ -113,11 +116,6 @@ pub(super) fn record_hit(
         data.positions.push_hit(pos, delta_ms);
     }
     data.marks_by_onset.insert(global_onset, AccuracyMark::Hit { diff_ticks, grade });
-    if wrap_next {
-        data.hits_next_loop.insert(global_onset);
-    } else if !wrap_prev {
-        data.hits_in_loop.insert(global_onset);
-    }
     info!(
         "Accuracy hit: global_onset={:?} hit_global={:.2} delta_ms={:+.2} bpm={}",
         global_onset,

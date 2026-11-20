@@ -1027,6 +1027,84 @@ mod kit_tests {
         assert_eq!((live.hits, live.extra), (2, 1));
     }
 
+    /// Kicks on beat 2 (0.5 s) and on the bar's last sixteenth (1.875 s)
+    /// under hi-hat eighths at 120 BPM: the loop is 2 s, and the last kick's
+    /// window runs on past the loop's end, halfway to the next loop's first
+    /// kick (2.1875 s).
+    fn kicks_across_the_loop_end() -> (Score, ScoreTiming) {
+        let score = parse_score("4/4 H:e H:e H-K:e H:e H:e H:e H:e H:s K:s").unwrap();
+        let timing = ScoreTiming::from_score(&score, 120);
+        (score, timing)
+    }
+
+    #[test]
+    fn a_late_kick_across_the_loop_end_counts_for_the_loop_before() {
+        let (score, timing) = kicks_across_the_loop_end();
+        let last_kick = tick_at(&timing, 1.875);
+        let mut tracker = recording();
+        tracker.update_progress(1.95, &timing, &score);
+        // 140 ms late, in the next loop: within 150 ms and short of halfway
+        // to the next kick.
+        let delta = tracker.record_instrument_hit(2.015, Kick, &timing, &score).expect("caught");
+        assert!((delta - 140.0).abs() < 1e-6, "{delta}");
+        tracker.update_progress(2.3, &timing, &score);
+        assert_eq!(grade(&tracker, last_kick, Kick), Some(HitGrade::Off));
+        let live = tracker.live_summary().unwrap();
+        // The kick was hit, not missed as well; nothing extra.
+        assert_eq!(live.extra, 0);
+        assert!(!matches!(tracker.mark_for_head(last_kick, Kick), Some(AccuracyMark::Miss)));
+        // Its next loop's kick is missed when not played.
+        tracker.update_progress(3.95, &timing, &score);
+        tracker.update_progress(4.3, &timing, &score);
+        assert!(matches!(tracker.mark_for_head(last_kick, Kick), Some(AccuracyMark::Miss)));
+    }
+
+    #[test]
+    fn an_early_kick_before_the_loop_end_counts_for_the_next_loop() {
+        let (score, timing) = kicks_across_the_loop_end();
+        let first_kick = tick_at(&timing, 0.5);
+        let mut tracker = recording();
+        tracker.record_instrument_hit(1.875, Kick, &timing, &score);
+        tracker.update_progress(2.3, &timing, &score);
+        // 140 ms early on the next loop's first kick (2.5 s).
+        let delta = tracker.record_instrument_hit(2.36, Kick, &timing, &score).expect("caught");
+        assert!((delta + 140.0).abs() < 1e-6, "{delta}");
+        tracker.update_progress(3.0, &timing, &score);
+        assert_eq!(grade(&tracker, first_kick, Kick), Some(HitGrade::Off));
+        let live = tracker.live_summary().unwrap();
+        assert_eq!(live.extra, 0);
+        // Only the hi-hats went unplayed.
+        assert!(live.misses > 0);
+        assert!(!matches!(tracker.mark_for_head(first_kick, Kick), Some(AccuracyMark::Miss)));
+    }
+
+    #[test]
+    fn swung_heads_are_caught_where_they_sound() {
+        use grooph_measure::swing::{Swing, SwingUnit};
+        // Hi-hat eighths, kicks on 1 and on the "&" of 1, swung 75 %: the
+        // "&" sounds a sixteenth late, at 375 ms instead of 250 ms.
+        let score = parse_score("4/4 H-K:e H-K:e H:e H:e H:e H:e H:e H:e").unwrap();
+        let swing = Swing { unit: SwingUnit::Eighths, percent: 75 };
+        let timing = ScoreTiming::from_score(&score, 120).with_swing(swing);
+        let and = tick_at(&ScoreTiming::from_score(&score, 120), 0.25);
+        let performed = timing.performed_global_tick(0, and as u32);
+        assert_ne!(performed, and);
+        let sounds = timing.global_tick_to_seconds(performed as f64);
+        let mut tracker = recording();
+        // Dead on where it sounds: perfect, marked on the written note.
+        let delta = tracker.record_instrument_hit(sounds, Kick, &timing, &score).unwrap();
+        assert!(delta.abs() < 1e-6, "{delta}");
+        assert_eq!(grade(&tracker, and, Kick), Some(HitGrade::Perfect));
+        // 100 ms late on the swung kick: caught, off; 200 ms: extra.
+        let mut tracker = recording();
+        assert!(tracker.record_instrument_hit(sounds + 0.1, Kick, &timing, &score).is_some());
+        assert_eq!(grade(&tracker, and, Kick), Some(HitGrade::Off));
+        let mut tracker = recording();
+        tracker.record_instrument_hit(0.0, HiHat, &timing, &score);
+        assert_eq!(tracker.record_instrument_hit(sounds + 0.2, Kick, &timing, &score), None);
+        assert_eq!(tracker.live_summary().unwrap().extra, 1);
+    }
+
     #[test]
     fn statistics_count_heads() {
         // One chord a bar; only its hi-hat is played, two loops.

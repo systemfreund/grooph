@@ -1,6 +1,6 @@
 use crate::Grooph;
 use crate::accuracy::{
-    AccuracyMark, GlobalBeatOnset, HitGrade, clamp_diff_to_beat_window, clamp_diff_to_note_window,
+    AccuracyMark, GlobalBeatOnset, HitGrade, NoteKey, clamp_diff_to_note_window,
 };
 use crate::documents::{Document, Documents};
 use crate::guide::{Guide, anchor_intensity};
@@ -471,8 +471,8 @@ impl Grooph {
         if total_loop_ticks == 0 {
             return;
         }
-        // One flat list of global onsets across the whole score. Used by
-        // `clamp_diff_to_beat_window`, which needs the global neighbours of
+        // One flat list of the notes across the whole score. Used by
+        // `clamp_diff_to_note_window`, which needs the global neighbours of
         // each note.
         let global_beats = crate::accuracy::global_beat_onsets(score, timing);
         if score.staff == StaffKind::Kit {
@@ -491,8 +491,6 @@ impl Grooph {
             }
             return;
         }
-        let global_onsets_u64: Vec<u64> = global_beats.iter().map(|gb| gb.onset_tick).collect();
-
         for system in &staff.systems {
             // Not the ghost bar after the score's last.
             for placed in system.measures.iter().filter(|p| p.measure_idx < score.len()) {
@@ -500,7 +498,7 @@ impl Grooph {
                     ui,
                     placed,
                     timing,
-                    &global_onsets_u64,
+                    &global_beats,
                     total_loop_ticks as f64,
                     staff_space,
                 );
@@ -513,7 +511,7 @@ impl Grooph {
         ui: &egui::Ui,
         placed: &PlacedMeasure,
         timing: &ScoreTiming,
-        global_onsets_u64: &[u64],
+        global_beats: &[GlobalBeatOnset],
         total_loop_ticks: f64,
         staff_space: f32,
     ) {
@@ -541,11 +539,10 @@ impl Grooph {
             };
             match mark {
                 AccuracyMark::Hit { diff_ticks, grade } => {
-                    let global_idx = global_onsets_u64.binary_search(&global_onset).unwrap_or(0);
-                    let diff_ticks = clamp_diff_to_beat_window(
+                    let diff_ticks = clamp_diff_to_note_window(
                         diff_ticks,
-                        global_idx,
-                        global_onsets_u64,
+                        global_beats,
+                        NoteKey::onset(global_onset),
                         total_loop_ticks,
                     );
                     let Some(px_per_tick) = placed.ticks.px_per_tick(idx) else {
@@ -602,15 +599,10 @@ impl Grooph {
                             else {
                                 continue;
                             };
-                            let idx = global_beats
-                                .binary_search_by_key(&(global_onset, instrument), |b| {
-                                    (b.onset_tick, b.instrument)
-                                })
-                                .unwrap_or(0);
                             let diff_ticks = clamp_diff_to_note_window(
                                 diff_ticks,
                                 global_beats,
-                                idx,
+                                NoteKey { tick: global_onset, instrument },
                                 total_loop_ticks,
                             );
                             let x = note_x + (diff_ticks * px_per_tick) as f32;

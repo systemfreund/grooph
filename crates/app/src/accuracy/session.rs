@@ -402,13 +402,25 @@ pub(super) fn loop_offset(diff: f64, total: f64) -> i32 {
     }
 }
 
-/// Distance in performed ticks from the entry at `idx` back to its
+/// Which of an entry's ticks a distance is measured on.
+#[derive(Clone, Copy)]
+pub(crate) enum TickKind {
+    /// As written ([`GlobalBeatOnset::onset_tick`]): where marks are drawn.
+    Written,
+    /// As heard ([`GlobalBeatOnset::performed_tick`]): what hits are graded
+    /// against.
+    Performed,
+}
+
+/// Distance in ticks of `kind` from the entry at `idx` back to its
 /// neighbour of the same instrument and on to the next (notes or rests on
-/// one line) on the score loop: the whole loop for the only one.
-pub(super) fn neighbour_gaps_ticks(
+/// one line) on the score loop: the whole loop for the only one. This
+/// defines a note's window, for grading and for drawing.
+pub(crate) fn neighbour_gaps(
     beats: &[GlobalBeatOnset],
     idx: usize,
     total: f64,
+    kind: TickKind,
 ) -> (f64, f64) {
     let Some(beat) = beats.get(idx) else {
         return (total, total);
@@ -416,10 +428,28 @@ pub(super) fn neighbour_gaps_ticks(
     if beat.prev_same == idx {
         return (total, total);
     }
-    let cur = beat.performed_tick as f64;
-    let prev = beats[beat.prev_same].performed_tick as f64;
-    let next = beats[beat.next_same].performed_tick as f64;
+    let tick = |b: &GlobalBeatOnset| match kind {
+        TickKind::Written => b.onset_tick as f64,
+        TickKind::Performed => b.performed_tick as f64,
+    };
+    let cur = tick(beat);
+    let prev = tick(&beats[beat.prev_same]);
+    let next = tick(&beats[beat.next_same]);
     ((cur - prev).rem_euclid(total), (next - cur).rem_euclid(total))
+}
+
+/// [`neighbour_gaps`] as heard.
+pub(super) fn neighbour_gaps_ticks(
+    beats: &[GlobalBeatOnset],
+    idx: usize,
+    total: f64,
+) -> (f64, f64) {
+    neighbour_gaps(beats, idx, total, TickKind::Performed)
+}
+
+/// Where the note `key` is in `beats` (ordered by onset, then instrument).
+pub(crate) fn note_index(beats: &[GlobalBeatOnset], key: NoteKey) -> Option<usize> {
+    beats.binary_search_by_key(&(key.tick, key.instrument), |b| (b.onset_tick, b.instrument)).ok()
 }
 
 /// The closer of [`neighbour_gaps_ticks`].
@@ -461,6 +491,10 @@ pub(super) struct RecordingData {
     /// belong to the *next* score-loop iteration. Promoted to `hits_in_loop`
     /// when the score wraps.
     pub(super) hits_next_loop: HashSet<NoteKey>,
+    /// The hits of the loop before, kept at the wrap for the notes whose
+    /// window runs on past the loop's end (only on a kit score) and for late
+    /// hits on that loop's notes.
+    pub(super) hits_prev_loop: HashSet<NoteKey>,
     pub(super) stats: AccuracyStats,
     pub(super) counters: RunCounters,
     pub(super) tight: TightTally,
@@ -643,6 +677,7 @@ impl RecordingData {
             marks_by_onset: HashMap::new(),
             hits_in_loop: HashSet::new(),
             hits_next_loop: HashSet::new(),
+            hits_prev_loop: HashSet::new(),
             stats: AccuracyStats::default(),
             counters: RunCounters::default(),
             tight: TightTally::default(),
@@ -688,6 +723,7 @@ impl RecordingSession {
             d.marks_by_onset.clear();
             d.hits_in_loop.clear();
             d.hits_next_loop.clear();
+            d.hits_prev_loop.clear();
             d.stats.reset();
             d.counters = RunCounters::default();
             d.tight = TightTally::default();
@@ -710,6 +746,7 @@ impl RecordingSession {
             };
             shift(&mut d.hits_in_loop);
             shift(&mut d.hits_next_loop);
+            shift(&mut d.hits_prev_loop);
         }
     }
 
