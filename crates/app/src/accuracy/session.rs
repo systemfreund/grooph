@@ -495,6 +495,9 @@ pub(super) struct RecordingData {
     /// window runs on past the loop's end (only on a kit score) and for late
     /// hits on that loop's notes.
     pub(super) hits_prev_loop: HashSet<NoteKey>,
+    /// The progress cursor wrapped at least once: there is a loop before
+    /// whose windows past the loop's end are to be judged.
+    pub(super) looped: bool,
     pub(super) stats: AccuracyStats,
     pub(super) counters: RunCounters,
     pub(super) tight: TightTally,
@@ -678,6 +681,7 @@ impl RecordingData {
             hits_in_loop: HashSet::new(),
             hits_next_loop: HashSet::new(),
             hits_prev_loop: HashSet::new(),
+            looped: false,
             stats: AccuracyStats::default(),
             counters: RunCounters::default(),
             tight: TightTally::default(),
@@ -724,6 +728,7 @@ impl RecordingSession {
             d.hits_in_loop.clear();
             d.hits_next_loop.clear();
             d.hits_prev_loop.clear();
+            d.looped = false;
             d.stats.reset();
             d.counters = RunCounters::default();
             d.tight = TightTally::default();

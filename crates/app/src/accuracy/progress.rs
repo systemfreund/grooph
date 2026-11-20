@@ -81,6 +81,7 @@ pub(super) fn update_progress(
         // first one in the bar).
         let next = std::mem::take(&mut data.hits_next_loop);
         data.hits_prev_loop = std::mem::replace(&mut data.hits_in_loop, next);
+        data.looped = true;
         process_segment(data, &global_beats, 0.0, current_tick, total, total, &cursor);
     }
 
@@ -128,14 +129,18 @@ fn process_segment(
         let cur = gb.performed_tick as f64;
         let next = global_beats[gb.next_same].performed_tick as f64
             + if gb.next_same > i { 0.0 } else { total_loop_ticks };
-        let mut window_end = cur + (next - cur) * 0.5;
-        // After the wrap, a window ending past the loop's end is that of a
-        // note of the loop before. (On one line no window does: every bar
-        // has an onset at its start.)
-        let of_prev_loop = segment_offset > 0.0 && window_end >= segment_offset;
-        if window_end < segment_offset {
-            window_end += total_loop_ticks;
+        let half = (next - cur) * 0.5;
+        // A window ending past the loop's end (on a kit, an instrument's
+        // last note before its first one in the bar; on one line none, as
+        // every bar has an onset at its start) closes in the loop after its
+        // note's: it is judged there, against the hits of the loop before,
+        // and not in the first loop, which has none before it.
+        let of_prev_loop = cur + half > total_loop_ticks;
+        if of_prev_loop && !data.looped {
+            continue;
         }
+        let window_end =
+            cur + half + segment_offset - if of_prev_loop { total_loop_ticks } else { 0.0 };
         let in_range = window_end > seg_start && window_end <= seg_end;
         if in_range {
             let hit = if of_prev_loop {
@@ -147,7 +152,7 @@ fn process_segment(
                 data.marks_by_onset.insert(gb.key(), AccuracyMark::Miss);
                 data.counters.misses += 1;
                 tallies_of(&mut data.voice_tallies, gb.voices).for_each(|t| t.counters.misses += 1);
-                let note_tick = window_end - (next - cur) * 0.5;
+                let note_tick = window_end - half;
                 let note_s = cursor.seconds_at(note_tick, gb.measure_idx);
                 data.bars.push(note_s, BarEvent::Miss);
                 data.drift.push_miss(note_s);

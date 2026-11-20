@@ -1037,6 +1037,66 @@ mod kit_tests {
         (score, timing)
     }
 
+    /// Moves the progress cursor from `from` to `to` (s) in frames of 60 fps.
+    fn frames(
+        tracker: &mut AccuracyTracker,
+        from: f64,
+        to: f64,
+        score: &Score,
+        timing: &ScoreTiming,
+    ) {
+        let mut t = from;
+        while t < to {
+            t = (t + 1.0 / 60.0).min(to);
+            tracker.update_progress(t, timing, score);
+        }
+    }
+
+    #[test]
+    fn a_window_past_the_loop_end_closes_frames_after_the_wrap() {
+        let (score, timing) = kicks_across_the_loop_end();
+        let last_kick = tick_at(&timing, 1.875);
+        let mut tracker = recording();
+        tracker.record_instrument_hit(0.0, HiHat, &timing, &score);
+        // The first loop: no kick of a loop before it to judge.
+        frames(&mut tracker, 0.0, 0.3, &score, &timing);
+        assert!(tracker.mark_for_head(last_kick, Kick).is_none());
+        // The last kick goes unplayed: missed once its window closes,
+        // 0.1875 s into the next loop.
+        frames(&mut tracker, 0.3, 2.15, &score, &timing);
+        assert!(tracker.mark_for_head(last_kick, Kick).is_none());
+        frames(&mut tracker, 2.15, 2.25, &score, &timing);
+        assert!(matches!(tracker.mark_for_head(last_kick, Kick), Some(AccuracyMark::Miss)));
+        let misses = tracker.live_summary().unwrap().misses;
+        // Judged once (the next window to close is the hi-hat's at 2.375 s).
+        frames(&mut tracker, 2.25, 2.35, &score, &timing);
+        assert_eq!(tracker.live_summary().unwrap().misses, misses);
+    }
+
+    #[test]
+    fn a_late_kick_across_the_loop_end_is_no_miss_frame_by_frame() {
+        let (score, timing) = kicks_across_the_loop_end();
+        let last_kick = tick_at(&timing, 1.875);
+        // The same run without the kick: one miss more.
+        let mut unplayed = recording();
+        unplayed.record_instrument_hit(0.0, HiHat, &timing, &score);
+        frames(&mut unplayed, 0.0, 2.4, &score, &timing);
+        let all_missed = unplayed.live_summary().unwrap().misses;
+        assert!(matches!(unplayed.mark_for_head(last_kick, Kick), Some(AccuracyMark::Miss)));
+        // The hit comes in before or after the cursor wrapped.
+        for cursor_at in [1.95, 2.03] {
+            let mut tracker = recording();
+            tracker.record_instrument_hit(0.0, HiHat, &timing, &score);
+            frames(&mut tracker, 0.0, cursor_at, &score, &timing);
+            tracker.record_instrument_hit(2.015, Kick, &timing, &score).expect("caught");
+            frames(&mut tracker, cursor_at, 2.4, &score, &timing);
+            assert_eq!(grade(&tracker, last_kick, Kick), Some(HitGrade::Off), "{cursor_at}");
+            let live = tracker.live_summary().unwrap();
+            assert_eq!((live.hits, live.extra), (2, 0), "{cursor_at}");
+            assert_eq!(live.misses + 1, all_missed, "{cursor_at}");
+        }
+    }
+
     #[test]
     fn a_late_kick_across_the_loop_end_counts_for_the_loop_before() {
         let (score, timing) = kicks_across_the_loop_end();

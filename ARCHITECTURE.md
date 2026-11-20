@@ -782,8 +782,9 @@ grooph's metronome runs inside AI chats as an
   heard; on a kit score, of the same instrument) for fast notes. A note is
   missed once its window, halfway to the next onset (of the same
   instrument), closes without a hit. On a kit an instrument's last window
-  can run on past the loop's end; it is judged against the hits the loop
-  before kept at the wrap (`hits_prev_loop`). Marks are clamped to the
+  can run on past the loop's end; it closes in the next loop, on whichever
+  frame gets there, and is judged against the hits the loop before kept at
+  the wrap (`hits_prev_loop`); in the first loop there is none to judge. Marks are clamped to the
   same windows, as written (`accuracy::session::neighbour_gaps`). Markers are coloured by grade.
 - Calibration (`crates/app/src/calibration.rs`): plays a click bar of its own
   (4 quarters at 100 BPM, counted in, no swing, ghost notes, gap or ramp)
