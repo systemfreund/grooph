@@ -473,6 +473,38 @@ pub(crate) fn note_index(beats: &[GlobalBeatOnset], key: NoteKey) -> Option<usiz
     beats.binary_search_by_key(&(key.tick, key.instrument), |b| (b.onset_tick, b.instrument)).ok()
 }
 
+/// How far the window of the note at `idx` reaches before and after it, in
+/// ticks as heard: half the gap to the neighbouring entry of its instrument
+/// on each side, at most `catch_ticks` (see [`catch_window_ticks`]). On a
+/// kit score a hit counts for the note only inside it, and the note is
+/// missed once it closes; on one line it only ends the miss window (a hit
+/// goes to the nearest note, see `recorder::record_hit`).
+pub(super) fn note_window(
+    beats: &[GlobalBeatOnset],
+    idx: usize,
+    total: f64,
+    catch_ticks: f64,
+) -> (f64, f64) {
+    let (before, after) = neighbour_gaps_ticks(beats, idx, total);
+    ((before * 0.5).min(catch_ticks), (after * 0.5).min(catch_ticks))
+}
+
+/// The catch window of a note in `measure_idx`, in ticks:
+/// [`KIT_CATCH_WINDOW_MS`] on the kit's staff; unbounded on one line, where
+/// taps, the microphone and the calibration need every hit matched.
+pub(super) fn catch_window_ticks(
+    staff: StaffKind,
+    timing: &ScoreTiming,
+    measure_idx: usize,
+) -> f64 {
+    match staff {
+        StaffKind::Kit => {
+            KIT_CATCH_WINDOW_MS / 1000.0 * timing.ticks_per_sec_in_measure(measure_idx).max(0.0)
+        }
+        StaffKind::Line => f64::INFINITY,
+    }
+}
+
 /// The closer of [`neighbour_gaps_ticks`].
 pub(super) fn neighbour_gap_ticks(beats: &[GlobalBeatOnset], idx: usize, total: f64) -> f64 {
     let (before, after) = neighbour_gaps_ticks(beats, idx, total);

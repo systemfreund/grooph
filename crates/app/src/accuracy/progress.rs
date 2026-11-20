@@ -1,9 +1,9 @@
-use grooph_measure::Score;
 use grooph_measure::tempo::ScoreTiming;
+use grooph_measure::{Score, StaffKind};
 
 use super::session::{
-    AccuracyMark, BarEvent, GlobalBeatOnset, RecordingData, global_beat_onsets, loop_offset,
-    tallies_of,
+    AccuracyMark, BarEvent, GlobalBeatOnset, RecordingData, catch_window_ticks, global_beat_onsets,
+    loop_offset, note_window, tallies_of,
 };
 
 /// Advance the progress cursor to `delay_s` before `now_seconds` and mark
@@ -70,6 +70,7 @@ pub(super) fn update_progress(
         seconds: now_seconds,
         tick: current_tick + if wrapped { total } else { 0.0 },
         timing,
+        staff: score.staff,
     };
     if !wrapped {
         process_segment(data, &global_beats, last_tick, current_tick, 0.0, total, &cursor);
@@ -88,11 +89,14 @@ pub(super) fn update_progress(
     data.last_tick = Some(current_tick);
 }
 
-/// The progress cursor this frame: its time and its tick.
+/// The progress cursor this frame: its time and its tick, on the score
+/// played.
 struct Cursor<'a> {
     seconds: f64,
     tick: f64,
     timing: &'a ScoreTiming,
+    /// The score's staff, which sets its notes' catch window.
+    staff: StaffKind,
 }
 
 impl Cursor<'_> {
@@ -130,24 +134,23 @@ fn process_segment(
         if !gb.is_note {
             continue;
         }
-        // The window ends halfway to the next entry of the same
-        // instrument: on one line the next onset, on a kit the next head of
-        // the instrument.
+        // The note's window (see `note_window`): on one line it ends halfway
+        // to the next onset; on a kit with its catch window, at most halfway
+        // to the instrument's next head.
         let cur = gb.performed_tick as f64;
-        let next = global_beats[gb.next_same].performed_tick as f64
-            + if gb.next_same > i { 0.0 } else { total_loop_ticks };
-        let half = (next - cur) * 0.5;
+        let catch = catch_window_ticks(cursor.staff, cursor.timing, gb.measure_idx);
+        let (_, after) = note_window(global_beats, i, total_loop_ticks, catch);
         // A window ending past the loop's end (on a kit, an instrument's
         // last note before its first one in the bar; on one line none, as
         // every bar has an onset at its start) closes in the loop after its
         // note's: it is judged there, against the hits of the loop before,
         // and not in the first loop, which has none before it.
-        let of_prev_loop = cur + half > total_loop_ticks;
+        let of_prev_loop = cur + after > total_loop_ticks;
         if of_prev_loop && data.loops == 0 {
             continue;
         }
         let window_end =
-            cur + half + segment_offset - if of_prev_loop { total_loop_ticks } else { 0.0 };
+            cur + after + segment_offset - if of_prev_loop { total_loop_ticks } else { 0.0 };
         let in_range = window_end > seg_start && window_end <= seg_end;
         if in_range {
             let hit = if of_prev_loop {
@@ -159,7 +162,7 @@ fn process_segment(
                 data.marks_by_onset.insert(gb.key(), AccuracyMark::Miss);
                 data.counters.misses += 1;
                 tallies_of(&mut data.voice_tallies, gb.voices).for_each(|t| t.counters.misses += 1);
-                let note_tick = window_end - half;
+                let note_tick = window_end - after;
                 let note_s = cursor.seconds_at(note_tick, gb.measure_idx);
                 data.bars.push(note_s, BarEvent::Miss);
                 data.drift.push_miss(note_s);

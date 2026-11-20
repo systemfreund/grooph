@@ -3,8 +3,8 @@ use grooph_measure::{Instrument, Score, StaffKind};
 use log::info;
 
 use super::session::{
-    AccuracyMark, BarEvent, ExtraMark, GlobalBeatOnset, GradedHit, HitWindows, KIT_CATCH_WINDOW_MS,
-    RecordingData, global_beat_onsets, loop_offset, neighbour_gap_ticks, neighbour_gaps_ticks,
+    AccuracyMark, BarEvent, ExtraMark, GlobalBeatOnset, GradedHit, HitWindows, RecordingData,
+    catch_window_ticks, global_beat_onsets, loop_offset, neighbour_gap_ticks, note_window,
     tallies_of,
 };
 
@@ -15,7 +15,7 @@ use super::session::{
 /// The delta is converted to milliseconds using the onset measure's tempo.
 ///
 /// On a kit score the hit is on `instrument` and only matched against its
-/// heads, within the catch window ([`KIT_CATCH_WINDOW_MS`], at most half the
+/// heads, within the catch window ([`KIT_CATCH_WINDOW_MS`](super::session::KIT_CATCH_WINDOW_MS), at most half the
 /// gap to the instrument's neighbouring note); a hit without one there is
 /// extra. A hit without an instrument is ignored there. On one line
 /// `instrument` plays no part.
@@ -47,8 +47,11 @@ pub(super) fn record_hit(
     // One pass over the score's onsets serves the match and the gap to the
     // neighbouring notes.
     let beats = global_beat_onsets(score, timing);
+    // On one line a hit goes to the nearest note, whatever the distance: the
+    // windows there reach halfway to the next onset, rests included, which a
+    // hit on the note after a rest would fall outside of.
     let matched = best_match(hit_global, total, &beats, instrument).filter(|&(idx, diff, _)| {
-        instrument.is_none() || in_catch_window(&beats, idx, diff, total, timing)
+        instrument.is_none() || in_note_window(&beats, idx, diff, total, timing, score.staff)
     });
     let Some((beat_idx, diff_ticks, raw_diff)) = matched else {
         // A kit's hit with no note of its instrument near: extra, drawn
@@ -157,24 +160,21 @@ fn push_extra(
     });
 }
 
-/// Whether a hit `diff_ticks` from the kit's note at `idx` is in its catch
-/// window: at most [`KIT_CATCH_WINDOW_MS`] away, and at most half the gap
-/// to the same instrument's neighbouring note on its side.
-fn in_catch_window(
+/// Whether a hit `diff_ticks` from the note at `idx` is inside the note's
+/// window on its side (see [`note_window`]): on a kit at most
+/// [`KIT_CATCH_WINDOW_MS`](super::session::KIT_CATCH_WINDOW_MS) away, and at most half the gap to the same
+/// instrument's neighbouring note.
+fn in_note_window(
     beats: &[GlobalBeatOnset],
     idx: usize,
     diff_ticks: f64,
     total: f64,
     timing: &ScoreTiming,
+    staff: StaffKind,
 ) -> bool {
-    let tps = timing.ticks_per_sec_in_measure(beats[idx].measure_idx);
-    if tps <= 0.0 {
-        return false;
-    }
-    let (before, after) = neighbour_gaps_ticks(beats, idx, total);
-    let gap = if diff_ticks < 0.0 { before } else { after };
-    let limit = (KIT_CATCH_WINDOW_MS / 1000.0 * tps).min(gap * 0.5);
-    diff_ticks.abs() <= limit
+    let catch = catch_window_ticks(staff, timing, beats[idx].measure_idx);
+    let (before, after) = note_window(beats, idx, total, catch);
+    diff_ticks.abs() <= if diff_ticks < 0.0 { before } else { after }
 }
 
 /// Find the note onset closest to `hit_global` on the score-loop circle,

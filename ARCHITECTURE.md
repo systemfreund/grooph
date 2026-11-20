@@ -787,13 +787,22 @@ grooph's metronome runs inside AI chats as an
   hit's loop set follows the note's loop relative to that cursor.
 - Grading (`accuracy::session::HitWindows`): perfect ≤ 25 ms, good ≤ 60 ms,
   narrowed to 1/5 and 2/5 of the gap to the closest neighbouring onset (as
-  heard; on a kit score, of the same instrument) for fast notes. A note is
-  missed once its window, halfway to the next onset (of the same
-  instrument), closes without a hit. On a kit an instrument's last window
-  can run on past the loop's end; it closes in the next loop, on whichever
-  frame gets there, and is judged against the hits the loop before kept at
-  the wrap (`hits_prev_loop`); in the first loop there is none to judge. Marks are clamped to the
-  same windows, as written (`accuracy::session::neighbour_gaps`). Markers are coloured by grade.
+  heard; on a kit score, of the same instrument) for fast notes.
+- A note's window (`accuracy::session::note_window`) reaches on each side
+  halfway to the neighbouring entry of its instrument, at most the catch
+  window (`catch_window_ticks`: `KIT_CATCH_WINDOW_MS` on the kit, unbounded
+  on one line and so in the calibration). On a kit a hit counts for a note
+  only inside it, and the note is missed once it closes without a hit: the
+  windows to hit and to miss a note are one. On one line it ends the miss
+  window only, halfway to the next onset with rests; a hit goes to the
+  nearest note whatever the distance, as a hit on the note after a rest
+  would fall outside that window.
+- On a kit an instrument's last window can run on past the loop's end; it
+  closes in the next loop, on whichever frame gets there, and is judged
+  against the hits the loop before kept at the wrap (`hits_prev_loop`); in
+  the first loop there is none to judge.
+- Marks are clamped to halfway to their neighbours, as written
+  (`accuracy::session::neighbour_gaps`). Markers are coloured by grade.
 - Calibration (`crates/app/src/calibration.rs`): plays a click bar of its own
   (4 quarters at 100 BPM, counted in, no swing, ghost notes, gap or ramp)
   and takes the median of the hits after a warm-up as the source's offset.

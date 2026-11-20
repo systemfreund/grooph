@@ -1046,8 +1046,8 @@ mod kit_tests {
 
     /// Kicks on beat 2 (0.5 s) and on the bar's last sixteenth (1.875 s)
     /// under hi-hat eighths at 120 BPM: the loop is 2 s, and the last kick's
-    /// window runs on past the loop's end, halfway to the next loop's first
-    /// kick (2.1875 s).
+    /// window runs on past the loop's end, to its catch window's end
+    /// (2.025 s; halfway to the next loop's first kick would be 2.1875 s).
     fn kicks_across_the_loop_end() -> (Score, ScoreTiming) {
         let score = parse_score("4/4 H:e H:e H-K:e H:e H:e H:e H:e H:s K:s").unwrap();
         let timing = ScoreTiming::from_score(&score, 120);
@@ -1079,14 +1079,14 @@ mod kit_tests {
         frames(&mut tracker, 0.0, 0.3, &score, &timing);
         assert!(tracker.mark_for_head(last_kick, Kick).is_none());
         // The last kick goes unplayed: missed once its window closes,
-        // 0.1875 s into the next loop.
-        frames(&mut tracker, 0.3, 2.15, &score, &timing);
+        // 25 ms into the next loop.
+        frames(&mut tracker, 0.3, 2.0, &score, &timing);
         assert!(tracker.mark_for_head(last_kick, Kick).is_none());
-        frames(&mut tracker, 2.15, 2.25, &score, &timing);
+        frames(&mut tracker, 2.0, 2.05, &score, &timing);
         assert!(matches!(tracker.mark_for_head(last_kick, Kick), Some(AccuracyMark::Miss)));
         let misses = tracker.live_summary().unwrap().misses;
-        // Judged once (the next window to close is the hi-hat's at 2.375 s).
-        frames(&mut tracker, 2.25, 2.35, &score, &timing);
+        // Judged once (the next window to close is the hi-hat's at 2.125 s).
+        frames(&mut tracker, 2.05, 2.12, &score, &timing);
         assert_eq!(tracker.live_summary().unwrap().misses, misses);
     }
 
@@ -1100,8 +1100,9 @@ mod kit_tests {
         frames(&mut unplayed, 0.0, 2.4, &score, &timing);
         let all_missed = unplayed.live_summary().unwrap().misses;
         assert!(matches!(unplayed.mark_for_head(last_kick, Kick), Some(AccuracyMark::Miss)));
-        // The hit comes in before or after the cursor wrapped.
-        for cursor_at in [1.95, 2.03] {
+        // The hit comes in before or after the cursor wrapped, before the
+        // window closed (the miss delay keeps the cursor behind the hits).
+        for cursor_at in [1.95, 2.02] {
             let mut tracker = recording();
             tracker.record_instrument_hit(0.0, HiHat, &timing, &score);
             frames(&mut tracker, 0.0, cursor_at, &score, &timing);
@@ -1266,6 +1267,25 @@ mod kit_tests {
         assert!((extras[0].diff_ticks - ticks_of(&timing, 0.05)).abs() < 1e-6);
         // Judged as before: the first hit keeps its mark.
         assert!(matches!(tracker.mark_for_onset(0), Some(AccuracyMark::Hit { .. })));
+    }
+
+    #[test]
+    fn a_kit_note_is_missed_when_its_catch_window_closes() {
+        // A crash once a bar at 120 BPM: halfway to the next one is 1 s
+        // away, but it can only be hit within 150 ms.
+        let score = parse_score("4/4 H-CR:q H:q H:q H:q").unwrap();
+        let timing = ScoreTiming::from_score(&score, 120);
+        let mut tracker = recording();
+        tracker.record_instrument_hit(0.0, HiHat, &timing, &score);
+        frames(&mut tracker, 0.0, 0.14, &score, &timing);
+        assert!(tracker.mark_for_head(0, Instrument::Crash).is_none());
+        frames(&mut tracker, 0.14, 0.2, &score, &timing);
+        assert!(matches!(tracker.mark_for_head(0, Instrument::Crash), Some(AccuracyMark::Miss)));
+        // A crash after that is extra: the windows to hit and to miss a note
+        // are one.
+        assert_eq!(tracker.record_instrument_hit(0.2, Instrument::Crash, &timing, &score), None);
+        let live = tracker.live_summary().unwrap();
+        assert_eq!((live.hits, live.misses, live.extra), (1, 1, 1));
     }
 
     #[test]
