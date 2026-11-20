@@ -807,6 +807,13 @@ grooph's metronome runs inside AI chats as an
   the first loop there is none to judge.
 - Marks are clamped to halfway to their neighbours, as written
   (`accuracy::session::neighbour_gaps`). Markers are coloured by grade.
+- A mark is drawn where the hit landed on the score's ticks round the loop
+  (`measure_panel::staff_point`): an early hit on a bar's first note in the
+  bar before, one on the score's first note at the end of its last bar, a
+  late one past a bar's end in the next. Its connector then leaves the
+  note's bar at its edge and comes into the hit's bar from the other one
+  (`hit_path`). `MarkPainter` draws the marks of both staffs, `MarkRow`
+  gives their height in any bar from the line the layout puts heads on.
 - Calibration (`crates/app/src/calibration.rs`): plays a click bar of its own
   (4 quarters at 100 BPM, counted in, no swing, ghost notes, gap or ramp)
   and takes the median of the hits after a warm-up as the source's offset.
