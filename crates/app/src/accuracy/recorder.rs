@@ -3,7 +3,7 @@ use grooph_measure::{Instrument, Score, StaffKind};
 use log::info;
 
 use super::session::{
-    AccuracyMark, BarEvent, GlobalBeatOnset, GradedHit, HitWindows, KIT_CATCH_WINDOW_MS,
+    AccuracyMark, BarEvent, ExtraMark, GlobalBeatOnset, GradedHit, HitWindows, KIT_CATCH_WINDOW_MS,
     RecordingData, global_beat_onsets, loop_offset, neighbour_gap_ticks, neighbour_gaps_ticks,
     tallies_of,
 };
@@ -51,11 +51,15 @@ pub(super) fn record_hit(
         instrument.is_none() || in_catch_window(&beats, idx, diff, total, timing)
     });
     let Some((beat_idx, diff_ticks, raw_diff)) = matched else {
-        // A kit's hit with no note of its instrument near: extra. (On one
-        // line only a score without notes has no match.)
-        if instrument.is_some() {
+        // A kit's hit with no note of its instrument near: extra, drawn
+        // from the note of any instrument nearest to it. (On one line only
+        // a score without notes has no match.)
+        if let Some(instrument) = instrument {
             data.counters.extra += 1;
             data.bars.push(timestamp, BarEvent::Extra);
+            if let Some(anchor) = best_match(hit_global, total, &beats, None) {
+                push_extra(data, &beats, anchor, instrument, hit_global, total);
+            }
         }
         return None;
     };
@@ -88,6 +92,16 @@ pub(super) fn record_hit(
     let note_s = timestamp - delta_ms / 1000.0;
 
     if already_hit {
+        if let Some(instrument) = instrument {
+            push_extra(
+                data,
+                &beats,
+                (beat_idx, diff_ticks, raw_diff),
+                instrument,
+                hit_global,
+                total,
+            );
+        }
         data.counters.extra += 1;
         tallies_of(&mut data.voice_tallies, voices).for_each(|t| t.counters.extra += 1);
         data.bars.push(note_s, BarEvent::Extra);
@@ -124,6 +138,29 @@ pub(super) fn record_hit(
         timing.bpm()
     );
     Some(delta_ms)
+}
+
+/// Keep a kit's extra hit on `instrument` at `hit_global` for its mark,
+/// drawn from the note `anchor` (as [`best_match`] gives it).
+fn push_extra(
+    data: &mut RecordingData,
+    beats: &[GlobalBeatOnset],
+    (idx, diff_ticks, raw_diff): (usize, f64, f64),
+    instrument: Instrument,
+    hit_global: f64,
+    total: f64,
+) {
+    // The note's loop, as for a hit: relative to the progress cursor.
+    let hit_loop = data.last_tick.map_or(0, |cursor| loop_offset(cursor - hit_global, total));
+    let note_loop = hit_loop + loop_offset(raw_diff, total);
+    data.extras.push(ExtraMark {
+        anchor_tick: beats[idx].onset_tick,
+        measure_idx: beats[idx].measure_idx,
+        diff_ticks,
+        instrument,
+        performed_tick: hit_global,
+        loop_idx: data.loops + i64::from(note_loop),
+    });
 }
 
 /// Whether a hit `diff_ticks` from the kit's note at `idx` is in its catch

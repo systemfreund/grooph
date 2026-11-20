@@ -487,6 +487,7 @@ impl Grooph {
                         total_loop_ticks as f64,
                         staff_space,
                     );
+                    self.draw_extra_marks_for_measure(ui, placed, timing, staff_space);
                 }
             }
             return;
@@ -614,6 +615,42 @@ impl Grooph {
                     }
                 }
             }
+        }
+    }
+
+    /// The extra hits played in a kit score's bar: a ring where each was
+    /// played, on its instrument's line, placed from the note nearest to it
+    /// as a hit's mark is from its note.
+    fn draw_extra_marks_for_measure(
+        &self,
+        ui: &egui::Ui,
+        placed: &PlacedMeasure,
+        timing: &ScoreTiming,
+        staff_space: f32,
+    ) {
+        let measure_start = timing.measure_start_tick(placed.measure_idx);
+        let dark = ui.visuals().dark_mode;
+        let width = (staff_space * MARK_WIDTH_PER_HEAD).max(MARK_MIN_WIDTH);
+        let extras = self.playback_ctl.accuracy.tracker.extra_marks();
+        for extra in extras.iter().filter(|e| e.measure_idx == placed.measure_idx) {
+            let tick = extra.anchor_tick.saturating_sub(measure_start) as f64;
+            let Some(i) = placed.ticks.column_at(tick) else {
+                continue;
+            };
+            let column = &placed.ticks.columns()[i];
+            let Some(px_per_tick) = placed.ticks.px_per_tick(i) else {
+                continue;
+            };
+            let Some(note) =
+                placed.voices.get(column.voice).and_then(|v| v.notes.get(column.beat_idx))
+            else {
+                continue;
+            };
+            // `staff_pos` counts half staff spaces up.
+            let rise = f32::from(extra.instrument.staff_pos() - note.staff_pos);
+            let y = note.center.y - rise * staff_space * 0.5;
+            let x = column.x + (extra.diff_ticks * px_per_tick) as f32;
+            paint_extra_mark(ui.painter(), egui::pos2(x, y), staff_space * 0.45, width, dark);
         }
     }
 
@@ -1154,6 +1191,12 @@ fn paint_hit_mark(
             Stroke::NONE,
         ));
     }
+}
+
+/// An extra hit: a ring where it was played, in the colour of hits that are
+/// off, apart from a miss's cross and a hit's bar.
+fn paint_extra_mark(painter: &egui::Painter, at: egui::Pos2, radius: f32, width: f32, dark: bool) {
+    painter.circle_stroke(at, radius, Stroke::new(width * 0.8, grade_color(HitGrade::Off, dark)));
 }
 
 /// A missed note: a cross on the zero line.

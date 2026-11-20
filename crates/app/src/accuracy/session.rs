@@ -217,6 +217,26 @@ impl RunSummary {
     }
 }
 
+/// A hit on a kit score that counted for no note: a hit of an instrument
+/// with no note of it near, or a second hit on a note. Drawn where it was
+/// played, on its instrument's line, as a hit is drawn from its note: from
+/// the note nearest to it, `diff_ticks` away.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct ExtraMark {
+    /// The written onset of the note nearest to the hit (of any
+    /// instrument), score-global.
+    pub anchor_tick: u64,
+    pub measure_idx: MeasureIdx,
+    /// From that note, as heard (negative = before it).
+    pub diff_ticks: f64,
+    /// The instrument played.
+    pub instrument: Instrument,
+    /// Where it was played on the loop, as heard.
+    pub(super) performed_tick: f64,
+    /// The loop it was played in ([`RecordingData::loops`]).
+    pub(super) loop_idx: i64,
+}
+
 /// A note to hit: an onset of a one-line score, or one head (an
 /// instrument at an onset) of a kit score. Keys the accuracy marks and the
 /// hits of a loop.
@@ -495,9 +515,12 @@ pub(super) struct RecordingData {
     /// window runs on past the loop's end (only on a kit score) and for late
     /// hits on that loop's notes.
     pub(super) hits_prev_loop: HashSet<NoteKey>,
-    /// The progress cursor wrapped at least once: there is a loop before
-    /// whose windows past the loop's end are to be judged.
-    pub(super) looped: bool,
+    /// How often the progress cursor wrapped. From the first wrap on there
+    /// is a loop before whose windows past the loop's end are to be judged.
+    pub(super) loops: i64,
+    /// The extra hits of a kit score, until the cursor passes their place in
+    /// a later loop.
+    pub(super) extras: Vec<ExtraMark>,
     pub(super) stats: AccuracyStats,
     pub(super) counters: RunCounters,
     pub(super) tight: TightTally,
@@ -681,7 +704,8 @@ impl RecordingData {
             hits_in_loop: HashSet::new(),
             hits_next_loop: HashSet::new(),
             hits_prev_loop: HashSet::new(),
-            looped: false,
+            loops: 0,
+            extras: Vec::new(),
             stats: AccuracyStats::default(),
             counters: RunCounters::default(),
             tight: TightTally::default(),
@@ -728,7 +752,8 @@ impl RecordingSession {
             d.hits_in_loop.clear();
             d.hits_next_loop.clear();
             d.hits_prev_loop.clear();
-            d.looped = false;
+            d.loops = 0;
+            d.extras.clear();
             d.stats.reset();
             d.counters = RunCounters::default();
             d.tight = TightTally::default();
@@ -752,6 +777,7 @@ impl RecordingSession {
             shift(&mut d.hits_in_loop);
             shift(&mut d.hits_next_loop);
             shift(&mut d.hits_prev_loop);
+            d.extras = shift_extras(std::mem::take(&mut d.extras), ticks);
         }
     }
 
@@ -763,6 +789,21 @@ impl RecordingSession {
             d.anchored_ahead = true;
         }
     }
+}
+
+/// Extra hits moved back by `ticks` with their notes; the ones drawn from a
+/// note before it go.
+pub(super) fn shift_extras(extras: Vec<ExtraMark>, ticks: u64) -> Vec<ExtraMark> {
+    extras
+        .into_iter()
+        .filter_map(|e| {
+            Some(ExtraMark {
+                anchor_tick: e.anchor_tick.checked_sub(ticks)?,
+                performed_tick: e.performed_tick - ticks as f64,
+                ..e
+            })
+        })
+        .collect()
 }
 
 /// `key` moved back by `ticks`; `None` for a note before it.

@@ -81,7 +81,7 @@ pub(super) fn update_progress(
         // first one in the bar).
         let next = std::mem::take(&mut data.hits_next_loop);
         data.hits_prev_loop = std::mem::replace(&mut data.hits_in_loop, next);
-        data.looped = true;
+        data.loops += 1;
         process_segment(data, &global_beats, 0.0, current_tick, total, total, &cursor);
     }
 
@@ -119,6 +119,13 @@ fn process_segment(
     }
     let seg_start = segment_offset + start;
     let seg_end = segment_offset + end;
+    // The extra hits of an earlier loop go once the cursor passes their
+    // place again, as a note's mark changes when it is judged again.
+    let loops = data.loops;
+    data.extras.retain(|e| {
+        let at = e.performed_tick.rem_euclid(total_loop_ticks) + segment_offset;
+        e.loop_idx >= loops || !(at > seg_start && at <= seg_end)
+    });
     for (i, gb) in global_beats.iter().enumerate() {
         if !gb.is_note {
             continue;
@@ -136,7 +143,7 @@ fn process_segment(
         // note's: it is judged there, against the hits of the loop before,
         // and not in the first loop, which has none before it.
         let of_prev_loop = cur + half > total_loop_ticks;
-        if of_prev_loop && !data.looped {
+        if of_prev_loop && data.loops == 0 {
             continue;
         }
         let window_end =

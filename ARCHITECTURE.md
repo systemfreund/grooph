@@ -739,7 +739,11 @@ grooph's metronome runs inside AI chats as an
   (one per onset on one line), each linked to its instrument's neighbours
   (`prev_same`, `next_same`), which give the narrowed windows and the end of
   the miss window; marks are keyed by onset and instrument (`NoteKey`) and
-  drawn next to each head.
+  drawn next to each head. Extra hits (no note of the instrument in the
+  catch window, or a second hit on a head) are kept as `ExtraMark`s,
+  placed from the nearest note of any instrument as a hit is from its note,
+  and drawn as a ring at the instrument's line until the cursor passes
+  their place in a later loop; one-line scores draw no extra hits.
 - Microphone (`crates/mic`): a hit starts where the first sample crosses the
   threshold; 40 ms after it are ignored. On the web an AudioWorklet forwards
   1024-frame blocks to the page, whose context time is mapped onto
