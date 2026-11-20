@@ -19,8 +19,8 @@ bpm=70&sub=16&lvl=2&bars=2
 
 ### Tapping
 
-1. Make sure **Timing feedback** is switched on in the options of the **Practice** or
-   the **Metronome** tab, then press play.
+1. Make sure **Timing feedback** is switched on in the options of the **Practice**,
+   the **Metronome** or the **Score** tab, then press play.
 2. Tap every note: press **J** on the keyboard, or touch or click the staff.
 
 While you play along, touching the staff (or the metronome's ring) counts as a hit and
@@ -33,8 +33,8 @@ You can pick another tap key or switch tapping off under **More → Play along**
    microphone when the browser asks.
 2. Hit your sticks, pad or hands and watch the level meter: hits should cross the red
    threshold mark, the click on its own should stay below it. Move the threshold if not.
-3. Make sure **Timing feedback** is switched on in the options of the **Practice** or
-   the **Metronome** tab, then press play.
+3. Make sure **Timing feedback** is switched on in the options of the **Practice**,
+   the **Metronome** or the **Score** tab, then press play.
 
 Sharp sounds work best: sticks on sticks, a practice pad, a rim or claps. The microphone
 only listens while you play along. On an iPhone or iPad with a headset, grooph listens
@@ -45,10 +45,23 @@ through the device's own microphone, because headset microphones filter out hits
 1. Connect the MIDI device to your computer (USB or Bluetooth MIDI).
 2. Open grooph in a browser with Web MIDI support, such as Chrome or Edge.
 3. Open **More → MIDI input** and pick the device. If it is not listed, press **Look for devices**.
-4. Make sure **Timing feedback** is switched on in the options of the **Practice** or
-   the **Metronome** tab, then press play.
+4. Make sure **Timing feedback** is switched on in the options of the **Practice**,
+   the **Metronome** or the **Score** tab, then press play.
 
 Any key or pad counts as a hit, so you can use whichever sound you like.
+
+### Drum kit scores
+
+A score on the drum kit's staff, in the **Score** tab, is played on an electronic drum kit
+over MIDI. Every pad counts for its own instrument (the General MIDI drum map, which most
+e-kits follow on any channel), and every note head is judged on its own: in a chord of
+kick and hi-hat, each gets its own marker, and a kick does not count for the hi-hat. A hit
+more than 150 ms from the nearest note of its instrument counts as an extra hit, and its
+ring sits on that instrument's line. An open
+hi-hat on a closed one, a rimshot or the ride's bell count like the plain stroke. Pads that
+are not in the map are ignored, and so is the hi-hat pedal unless the score has notes for
+it. Tapping and the microphone do not count on the drum kit's staff, and nothing is
+judged while you edit the score.
 
 ## Calibrate the latency
 
@@ -63,7 +76,9 @@ headphones add a lot of delay, so calibrate again when you switch to or from the
 
 Each written note gets a marker. A marker left of the note means you played early, right
 of it late. Blue markers are perfect and orange ones good; hits that are off are purple and
-get an arrow pointing the way you were off. Notes you did not play get a purple cross. The
+get an arrow pointing the way you were off. Notes you did not play get a purple cross, and
+an extra hit (a note played twice) gets a purple ring where you played it, until that place
+comes round again. The
 colours are chosen to stay apart with colour vision deficiencies. The markers stay on the staff after you stop, so you can see
 where the run went wrong, until you play again or edit the rhythm. Try to keep the markers
 close to the notes for a whole exercise before you raise the tempo.

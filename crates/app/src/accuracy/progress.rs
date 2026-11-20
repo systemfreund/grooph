@@ -1,9 +1,9 @@
-use grooph_measure::Score;
 use grooph_measure::tempo::ScoreTiming;
+use grooph_measure::{Score, StaffKind};
 
 use super::session::{
-    AccuracyMark, BarEvent, GlobalBeatOnset, RecordingData, global_beat_onsets, loop_offset,
-    tallies_of,
+    AccuracyMark, BarEvent, GlobalBeatOnset, RecordingData, catch_window_ticks, global_beat_onsets,
+    loop_offset, note_window, tallies_of,
 };
 
 /// Advance the progress cursor to `delay_s` before `now_seconds` and mark
@@ -70,24 +70,33 @@ pub(super) fn update_progress(
         seconds: now_seconds,
         tick: current_tick + if wrapped { total } else { 0.0 },
         timing,
+        staff: score.staff,
     };
     if !wrapped {
         process_segment(data, &global_beats, last_tick, current_tick, 0.0, total, &cursor);
     } else {
         // Score-loop wrapped.
         process_segment(data, &global_beats, last_tick, total, 0.0, total, &cursor);
-        data.hits_in_loop = std::mem::take(&mut data.hits_next_loop);
+        // The loop just ended keeps its hits for the windows that run on
+        // past its end (on a kit, an instrument's last note before its
+        // first one in the bar).
+        let next = std::mem::take(&mut data.hits_next_loop);
+        data.hits_prev_loop = std::mem::replace(&mut data.hits_in_loop, next);
+        data.loops += 1;
         process_segment(data, &global_beats, 0.0, current_tick, total, total, &cursor);
     }
 
     data.last_tick = Some(current_tick);
 }
 
-/// The progress cursor this frame: its time and its tick.
+/// The progress cursor this frame: its time and its tick, on the score
+/// played.
 struct Cursor<'a> {
     seconds: f64,
     tick: f64,
     timing: &'a ScoreTiming,
+    /// The score's staff, which sets its notes' catch window.
+    staff: StaffKind,
 }
 
 impl Cursor<'_> {
@@ -114,27 +123,45 @@ fn process_segment(
     }
     let seg_start = segment_offset + start;
     let seg_end = segment_offset + end;
+    // The extra hits of an earlier loop go once the cursor passes their
+    // place again, as a note's mark changes when it is judged again.
+    let loops = data.loops;
+    data.extras.retain(|e| {
+        let at = e.performed_tick.rem_euclid(total_loop_ticks) + segment_offset;
+        e.loop_idx >= loops || !(at > seg_start && at <= seg_end)
+    });
     for (i, gb) in global_beats.iter().enumerate() {
         if !gb.is_note {
             continue;
         }
+        // The note's window (see `note_window`): halfway to the next note
+        // (on a kit, of its instrument), at most the catch window.
         let cur = gb.performed_tick as f64;
-        let next = if i + 1 < global_beats.len() {
-            global_beats[i + 1].performed_tick as f64
-        } else {
-            global_beats[0].performed_tick as f64 + total_loop_ticks
-        };
-        let mut window_end = cur + (next - cur) * 0.5;
-        if window_end < segment_offset {
-            window_end += total_loop_ticks;
+        let catch = catch_window_ticks(cursor.staff, cursor.timing, gb.measure_idx);
+        let (_, after) = note_window(global_beats, i, total_loop_ticks, catch);
+        // A window ending past the loop's end (a note late in the loop
+        // whose instrument's next note comes late in the next one, e.g. after
+        // rests at the start of the bar) closes in the loop after its note's:
+        // it is judged there, against the hits of the loop before, and not in
+        // the first loop, which has none before it.
+        let of_prev_loop = cur + after > total_loop_ticks;
+        if of_prev_loop && data.loops == 0 {
+            continue;
         }
+        let window_end =
+            cur + after + segment_offset - if of_prev_loop { total_loop_ticks } else { 0.0 };
         let in_range = window_end > seg_start && window_end <= seg_end;
         if in_range {
-            if !data.hits_in_loop.contains(&gb.onset_tick) {
-                data.marks_by_onset.insert(gb.onset_tick, AccuracyMark::Miss);
+            let hit = if of_prev_loop {
+                data.hits_prev_loop.remove(&gb.key())
+            } else {
+                data.hits_in_loop.remove(&gb.key())
+            };
+            if !hit {
+                data.marks_by_onset.insert(gb.key(), AccuracyMark::Miss);
                 data.counters.misses += 1;
                 tallies_of(&mut data.voice_tallies, gb.voices).for_each(|t| t.counters.misses += 1);
-                let note_tick = window_end - (next - cur) * 0.5;
+                let note_tick = window_end - after;
                 let note_s = cursor.seconds_at(note_tick, gb.measure_idx);
                 data.bars.push(note_s, BarEvent::Miss);
                 data.drift.push_miss(note_s);
@@ -142,7 +169,6 @@ fn process_segment(
                     data.positions.push_miss(pos);
                 }
             }
-            data.hits_in_loop.remove(&gb.onset_tick);
         }
     }
 }

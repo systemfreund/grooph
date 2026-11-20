@@ -1,5 +1,7 @@
 use crate::Grooph;
-use crate::accuracy::{AccuracyMark, HitGrade, clamp_diff_to_beat_window};
+use crate::accuracy::{
+    AccuracyMark, GlobalBeatOnset, HitGrade, NoteKey, clamp_diff_to_note_window,
+};
 use crate::documents::{Document, Documents};
 use crate::guide::{Guide, anchor_intensity};
 use crate::metronome_view::{MetronomeState, MetronomeVoice};
@@ -17,7 +19,7 @@ use grooph_layout::staff_layout::{
 };
 use grooph_measure::grid::DEFAULT_GRID;
 use grooph_measure::tempo::ScoreTiming;
-use grooph_measure::{Cursor, Score, TimeSignature};
+use grooph_measure::{Cursor, Instrument, Measure, Score, StaffKind, TimeSignature};
 use grooph_render::staff::{PlaybackMarks, RenderContext, draw_staff};
 use std::rc::Rc;
 
@@ -444,10 +446,10 @@ impl Grooph {
         tick
     }
 
-    /// Whether the staff shows accuracy marks: while calibrating, and with
-    /// accuracy on in Practice. The tracker keeps the marks of
-    /// the last practice run, keyed by onset, so they would land on the
-    /// click bar's notes.
+    /// Whether the staff shows accuracy marks: while calibrating, and
+    /// wherever timing feedback is at work (see `Grooph::accuracy_active`).
+    /// Changing the page clears the marks of the last run, keyed by onset,
+    /// so they do not land on another page's notes.
     pub(crate) fn shows_accuracy_marks(&self) -> bool {
         self.calibration_source().is_some() || self.accuracy_active()
     }
@@ -473,75 +475,144 @@ impl Grooph {
         if total_loop_ticks == 0 {
             return;
         }
-        // One flat list of global onsets across the whole score. Used by
-        // `clamp_diff_to_beat_window`, which needs the global neighbours of
+        // One flat list of the notes across the whole score. Used by
+        // `clamp_diff_to_note_window`, which needs the global neighbours of
         // each note.
         let global_beats = crate::accuracy::global_beat_onsets(score, timing);
-        let global_onsets_u64: Vec<u64> = global_beats.iter().map(|gb| gb.onset_tick).collect();
-
+        let marks = MarkPainter {
+            painter: ui.painter(),
+            staff,
+            score_len: score.len(),
+            kind: score.staff,
+            timing,
+            staff_space,
+            width: (staff_space * MARK_WIDTH_PER_HEAD).max(MARK_MIN_WIDTH),
+            dark: ui.visuals().dark_mode,
+        };
         for system in &staff.systems {
             // Not the ghost bar after the score's last.
             for placed in system.measures.iter().filter(|p| p.measure_idx < score.len()) {
-                self.draw_accuracy_markers_for_measure(
-                    ui,
-                    placed,
-                    timing,
-                    &global_onsets_u64,
-                    total_loop_ticks as f64,
-                    staff_space,
-                );
+                match score.staff {
+                    StaffKind::Kit => self.draw_head_marks_for_measure(
+                        &marks,
+                        placed,
+                        &score.measures()[placed.measure_idx],
+                        &global_beats,
+                    ),
+                    StaffKind::Line => {
+                        self.draw_accuracy_markers_for_measure(&marks, placed, &global_beats)
+                    }
+                }
             }
         }
+        self.draw_extra_marks(&marks);
     }
 
+    /// The marks of a one-line bar: one under the head standing for each
+    /// onset.
     fn draw_accuracy_markers_for_measure(
         &self,
-        ui: &egui::Ui,
+        marks: &MarkPainter,
         placed: &PlacedMeasure,
-        timing: &ScoreTiming,
-        global_onsets_u64: &[u64],
-        total_loop_ticks: f64,
-        staff_space: f32,
+        global_beats: &[GlobalBeatOnset],
     ) {
-        // Every onset of any voice, at the head standing for it.
-        let columns = placed.ticks.columns();
-        let measure_start = timing.measure_start_tick(placed.measure_idx);
-        let dark = ui.visuals().dark_mode;
-        for (idx, column) in columns.iter().enumerate() {
+        let total_loop_ticks = marks.timing.total_loop_ticks() as f64;
+        let measure_start = marks.timing.measure_start_tick(placed.measure_idx);
+        for column in placed.ticks.columns() {
             let note_layout = &placed.voices[column.voice].notes[column.beat_idx];
             if note_layout.kind != grooph_measure::BeatKind::Note {
                 continue;
             }
-            // A note head is one staff space high.
-            let y = note_layout.center.y + staff_space * 0.65;
-            let h = staff_space * 0.8;
-            let width = (staff_space * MARK_WIDTH_PER_HEAD).max(MARK_MIN_WIDTH);
+            let row = MarkRow::under_line(note_layout.staff_pos, marks.staff_space);
             let note_x = column.x;
-            ui.painter().line_segment(
-                [egui::pos2(note_x, y), egui::pos2(note_x, y + h)],
-                Stroke::new(width * 0.5, reference_color(dark)),
-            );
+            marks.paint_zero_line(placed, note_x, row);
             let global_onset = measure_start + column.tick as u64;
             let Some(mark) = self.playback_ctl.accuracy.tracker.mark_for_onset(global_onset) else {
                 continue;
             };
             match mark {
                 AccuracyMark::Hit { diff_ticks, grade } => {
-                    let global_idx = global_onsets_u64.binary_search(&global_onset).unwrap_or(0);
-                    let diff_ticks = clamp_diff_to_beat_window(
+                    let diff_ticks = clamp_diff_to_note_window(
                         diff_ticks,
-                        global_idx,
-                        global_onsets_u64,
+                        global_beats,
+                        NoteKey::onset(global_onset),
                         total_loop_ticks,
                     );
-                    let Some(px_per_tick) = placed.ticks.px_per_tick(idx) else {
+                    marks.paint_hit(placed, note_x, global_onset, diff_ticks, row, grade);
+                }
+                AccuracyMark::Miss => marks.paint_miss(placed, note_x, row),
+            }
+        }
+    }
+
+    /// The marks of a kit score's bar: one next to each head, at its
+    /// instrument's place on the staff.
+    fn draw_head_marks_for_measure(
+        &self,
+        marks: &MarkPainter,
+        placed: &PlacedMeasure,
+        measure: &Measure,
+        global_beats: &[GlobalBeatOnset],
+    ) {
+        let tracker = &self.playback_ctl.accuracy.tracker;
+        let total_loop_ticks = marks.timing.total_loop_ticks() as f64;
+        let measure_start = marks.timing.measure_start_tick(placed.measure_idx);
+        for (layout, bar) in placed.voices.iter().zip(measure.voices()) {
+            let ticks = DEFAULT_GRID.compute_onset_ticks(bar.beats());
+            for ((beat, &tick), note) in bar.beats().iter().zip(&ticks).zip(&layout.notes) {
+                if note.kind != grooph_measure::BeatKind::Note {
+                    continue;
+                }
+                let global_onset = measure_start + tick as u64;
+                let note_x = note.center.x;
+                for head in beat.heads().iter() {
+                    let instrument = head.instrument();
+                    let Some(mark) = tracker.mark_for_head(global_onset, instrument) else {
                         continue;
                     };
-                    let x = note_x + (diff_ticks * px_per_tick) as f32;
-                    paint_hit_mark(ui.painter(), note_x, x, y, h, width, grade, dark);
+                    let row = MarkRow::on_kit(instrument, marks.staff_space);
+                    match mark {
+                        AccuracyMark::Hit { diff_ticks, grade } => {
+                            let diff_ticks = clamp_diff_to_note_window(
+                                diff_ticks,
+                                global_beats,
+                                NoteKey { tick: global_onset, instrument },
+                                total_loop_ticks,
+                            );
+                            marks.paint_hit(placed, note_x, global_onset, diff_ticks, row, grade);
+                        }
+                        AccuracyMark::Miss => marks.paint_miss(placed, note_x, row),
+                    }
                 }
-                AccuracyMark::Miss => paint_miss_mark(ui.painter(), note_x, y, h, width, dark),
             }
+        }
+    }
+
+    /// The extra hits: a ring where each was played, placed from the note
+    /// nearest to it as a hit's mark is from its note, and in the bar where
+    /// that is (round the loop). On the kit's staff on the line of the
+    /// instrument played, on one line in the row of the other marks.
+    fn draw_extra_marks(&self, marks: &MarkPainter) {
+        for extra in self.playback_ctl.accuracy.tracker.extra_marks() {
+            let row = match marks.kind {
+                StaffKind::Kit => MarkRow::on_kit(extra.instrument, marks.staff_space),
+                StaffKind::Line => {
+                    // The row under the note it is placed from.
+                    let Some(anchor) = marks.point(extra.anchor_tick as f64) else {
+                        continue;
+                    };
+                    let Some(note) = anchor.note() else {
+                        continue;
+                    };
+                    MarkRow::under_line(note.staff_pos, marks.staff_space)
+                }
+            };
+            let Some(at) = marks.point(extra.anchor_tick as f64 + extra.diff_ticks) else {
+                continue;
+            };
+            let center = egui::pos2(at.x, row.mid_y(at.bar));
+            let radius = marks.staff_space * 0.45;
+            paint_extra_mark(marks.painter, center, radius, marks.width, marks.dark);
         }
     }
 
@@ -1034,6 +1105,13 @@ fn primary_beat_index(ts: &TimeSignature, local_tick: f64) -> u32 {
         as u32
 }
 
+/// Where the row of marks under the one line starts below a note head's
+/// middle, and how high it is (staff spaces).
+const LINE_MARK_TOP: f32 = 0.65;
+const LINE_MARK_HEIGHT: f32 = 0.8;
+/// How high a mark next to a kit head is (staff spaces).
+const KIT_MARK_HEIGHT: f32 = 1.2;
+
 /// Accuracy marks scale with the note head, but never get thinner than this (px).
 const MARK_MIN_WIDTH: f32 = 3.0;
 const MARK_WIDTH_PER_HEAD: f32 = 0.25;
@@ -1053,6 +1131,190 @@ pub(crate) fn reference_color(dark: bool) -> egui::Color32 {
     tokens::GRADE_REFERENCE.get(dark)
 }
 
+/// A point of the score on the staff: the bar it is drawn in, its tick in
+/// that bar and its x there.
+struct StaffPoint<'a> {
+    bar: &'a PlacedMeasure,
+    tick: f64,
+    x: f32,
+}
+
+impl StaffPoint<'_> {
+    /// The note the column at or before the point stands for; `None` on a
+    /// rest.
+    fn note(&self) -> Option<&grooph_layout::pixel_layout::NoteLayout> {
+        let column = &self.bar.ticks.columns()[self.bar.ticks.column_at(self.tick)?];
+        let note = self.bar.voices.get(column.voice)?.notes.get(column.beat_idx)?;
+        (note.kind == grooph_measure::BeatKind::Note).then_some(note)
+    }
+}
+
+/// Where a note's marks are drawn up and down, the same in every bar: around
+/// a staff position (half staff spaces up from the bar's line, where the
+/// layout puts heads), moved down by `offset`.
+#[derive(Clone, Copy)]
+struct MarkRow {
+    pos: i8,
+    offset: f32,
+    /// The marks' height.
+    h: f32,
+    /// Half a staff space: one staff position.
+    half_space: f32,
+}
+
+impl MarkRow {
+    /// Under a head of the one line at `pos`: the row of its marks.
+    fn under_line(pos: i8, staff_space: f32) -> Self {
+        let h = staff_space * LINE_MARK_HEIGHT;
+        Self {
+            pos,
+            offset: staff_space * LINE_MARK_TOP + h / 2.0,
+            h,
+            half_space: staff_space / 2.0,
+        }
+    }
+
+    /// On the kit's staff, on `instrument`'s line or space.
+    fn on_kit(instrument: Instrument, staff_space: f32) -> Self {
+        Self {
+            pos: instrument.staff_pos(),
+            offset: 0.0,
+            h: staff_space * KIT_MARK_HEIGHT,
+            half_space: staff_space / 2.0,
+        }
+    }
+
+    /// The middle of the marks in `bar`.
+    fn mid_y(&self, bar: &PlacedMeasure) -> f32 {
+        // The bar's line, as the layout places heads (`LayoutOpts::y_of`).
+        let line = bar.rect.center().y + bar.y_offset;
+        line - f32::from(self.pos) * self.half_space + self.offset
+    }
+
+    /// The top of the marks in `bar`.
+    fn top(&self, bar: &PlacedMeasure) -> f32 {
+        self.mid_y(bar) - self.h / 2.0
+    }
+}
+
+/// Where the score-global written `tick`, taken round the loop, is drawn on
+/// `staff`, the layout of a score of `score_len` bars: before the score's
+/// first note at the end of its last bar, past a bar's end in the next bar,
+/// wherever that is laid out.
+fn staff_point<'a>(
+    staff: &'a StaffLayout,
+    score_len: usize,
+    timing: &ScoreTiming,
+    tick: f64,
+) -> Option<StaffPoint<'a>> {
+    let total = timing.total_loop_ticks() as f64;
+    if total <= 0.0 {
+        return None;
+    }
+    let tick = tick.rem_euclid(total);
+    let m = timing.measure_at_global_tick(tick);
+    let bar = staff
+        .systems
+        .iter()
+        .flat_map(|s| &s.measures)
+        .find(|p| p.measure_idx == m && p.measure_idx < score_len)?;
+    let local = tick - timing.measure_start_tick(m) as f64;
+    Some(StaffPoint { bar, tick: local, x: bar.ticks.x_at_tick(local) })
+}
+
+/// How a hit's mark joins its note.
+#[derive(Debug, PartialEq)]
+enum HitPath {
+    /// In the note's bar, on the side it was off to.
+    InBar,
+    /// In another bar or round the loop: the connector leaves the note's
+    /// bar at `own_edge` and comes into the hit's bar at `hit_edge`.
+    Across { own_edge: f32, hit_edge: f32, early: bool },
+}
+
+/// How the mark of a hit at `at`, `early` or late on the note at `note_x` in
+/// `own`, joins the note: across the bars' edges when it landed in another
+/// bar, or in the same bar on the other side of the note (round the loop
+/// of a one-bar score).
+fn hit_path(own: &PlacedMeasure, note_x: f32, at: &StaffPoint, early: bool) -> HitPath {
+    let other_side = if early { at.x > note_x } else { at.x < note_x };
+    if at.bar.measure_idx == own.measure_idx && !other_side {
+        return HitPath::InBar;
+    }
+    let left = |bar: &PlacedMeasure| bar.layout().notes_left_edge;
+    let right = |bar: &PlacedMeasure| bar.rect.right();
+    if early {
+        HitPath::Across { own_edge: left(own), hit_edge: right(at.bar), early }
+    } else {
+        HitPath::Across { own_edge: right(own), hit_edge: left(at.bar), early }
+    }
+}
+
+/// Paints the accuracy marks on a laid-out staff.
+struct MarkPainter<'a> {
+    painter: &'a egui::Painter,
+    staff: &'a StaffLayout,
+    /// The score's bars; the staff may have a ghost bar after them.
+    score_len: usize,
+    kind: StaffKind,
+    timing: &'a ScoreTiming,
+    staff_space: f32,
+    /// The marks' stroke.
+    width: f32,
+    dark: bool,
+}
+
+impl MarkPainter<'_> {
+    /// Where the score-global written `tick` is drawn (see [`staff_point`]).
+    fn point(&self, tick: f64) -> Option<StaffPoint<'_>> {
+        staff_point(self.staff, self.score_len, self.timing, tick)
+    }
+
+    /// The note's zero line, which a hit's mark is measured from.
+    fn paint_zero_line(&self, bar: &PlacedMeasure, note_x: f32, row: MarkRow) {
+        let top = row.top(bar);
+        self.painter.line_segment(
+            [egui::pos2(note_x, top), egui::pos2(note_x, top + row.h)],
+            Stroke::new(self.width * 0.5, reference_color(self.dark)),
+        );
+    }
+
+    /// The mark of a hit `diff_ticks` from the note at `note_x` in `own`
+    /// (at score-global `note_tick`), drawn where it landed. Landed in
+    /// another bar or round the loop (early on the score's first note, late
+    /// on its last), the connector leaves the note's bar at its edge and
+    /// comes into the hit's bar from the other one.
+    fn paint_hit(
+        &self,
+        own: &PlacedMeasure,
+        note_x: f32,
+        note_tick: u64,
+        diff_ticks: f64,
+        row: MarkRow,
+        grade: HitGrade,
+    ) {
+        let Some(at) = self.point(note_tick as f64 + diff_ticks) else {
+            return;
+        };
+        let (painter, width, dark) = (self.painter, self.width, self.dark);
+        match hit_path(own, note_x, &at, diff_ticks < 0.0) {
+            HitPath::InBar => {
+                paint_hit_mark(painter, note_x, at.x, row.top(own), row.h, width, grade, dark);
+            }
+            HitPath::Across { own_edge, hit_edge, early } => {
+                paint_connector(painter, note_x, own_edge, row.mid_y(own), width, dark);
+                paint_connector(painter, hit_edge, at.x, row.mid_y(at.bar), width, dark);
+                paint_hit_bar(painter, at.x, row.top(at.bar), row.h, width, grade, early, dark);
+            }
+        }
+    }
+
+    /// A missed note's cross, on its zero line.
+    fn paint_miss(&self, bar: &PlacedMeasure, note_x: f32, row: MarkRow) {
+        paint_miss_mark(self.painter, note_x, row.top(bar), row.h, self.width, self.dark);
+    }
+}
+
 /// A hit: a bar where it landed, joined to the note's zero line. Perfect and
 /// good are plain bars; an off hit also gets an arrowhead pointing the way it
 /// was off (left = early, right = late).
@@ -1067,15 +1329,43 @@ fn paint_hit_mark(
     grade: HitGrade,
     dark: bool,
 ) {
-    let color = grade_color(grade, dark);
-    let mid_y = y + h * 0.5;
+    paint_connector(painter, note_x, x, y + h * 0.5, width, dark);
+    paint_hit_bar(painter, x, y, h, width, grade, x < note_x, dark);
+}
+
+/// The line joining a hit to its note's zero line, or a piece of it.
+fn paint_connector(
+    painter: &egui::Painter,
+    from_x: f32,
+    to_x: f32,
+    mid_y: f32,
+    width: f32,
+    dark: bool,
+) {
     painter.line_segment(
-        [egui::pos2(note_x, mid_y), egui::pos2(x, mid_y)],
+        [egui::pos2(from_x, mid_y), egui::pos2(to_x, mid_y)],
         Stroke::new(width * 0.5, reference_color(dark)),
     );
+}
+
+/// The bar where a hit landed, `y` its top and `h` its height; an off hit's
+/// arrowhead points left when `early`.
+#[expect(clippy::too_many_arguments)]
+fn paint_hit_bar(
+    painter: &egui::Painter,
+    x: f32,
+    y: f32,
+    h: f32,
+    width: f32,
+    grade: HitGrade,
+    early: bool,
+    dark: bool,
+) {
+    let color = grade_color(grade, dark);
+    let mid_y = y + h * 0.5;
     painter.line_segment([egui::pos2(x, y), egui::pos2(x, y + h)], Stroke::new(width, color));
     if grade == HitGrade::Off {
-        let dir = if x < note_x { -1.0 } else { 1.0 };
+        let dir = if early { -1.0 } else { 1.0 };
         let tip_x = x - dir * width * 0.5;
         let base_x = tip_x - dir * width * 2.0;
         let half = width * 1.4;
@@ -1091,6 +1381,12 @@ fn paint_hit_mark(
     }
 }
 
+/// An extra hit: a ring where it was played, in the colour of hits that are
+/// off, apart from a miss's cross and a hit's bar.
+fn paint_extra_mark(painter: &egui::Painter, at: egui::Pos2, radius: f32, width: f32, dark: bool) {
+    painter.circle_stroke(at, radius, Stroke::new(width * 0.8, grade_color(HitGrade::Off, dark)));
+}
+
 /// A missed note: a cross on the zero line.
 fn paint_miss_mark(painter: &egui::Painter, note_x: f32, y: f32, h: f32, width: f32, dark: bool) {
     let stroke = Stroke::new(width, grade_color(HitGrade::Off, dark));
@@ -1104,6 +1400,135 @@ fn paint_miss_mark(painter: &egui::Painter, note_x: f32, y: f32, h: f32, width: 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The staff of `text` at 120 BPM, laid out 600 px wide.
+    fn laid_out(text: &str) -> (Score, ScoreTiming, StaffLayout) {
+        let score = grooph_measure::notation::parse_score(text).unwrap();
+        let timing = ScoreTiming::from_score(&score, 120);
+        let em = 20.0;
+        let opts = StaffOpts {
+            rect: Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(600.0, 400.0)),
+            font_id: FontId::new(em, egui::FontFamily::Proportional),
+            pixels_per_point: 1.0,
+            em,
+            y_offset: 0.0,
+            stem_length_factor: 3.5,
+            stem_thickness_factor: 0.1,
+            accent_displacement: 0.0,
+            min_measure_width_em: 6.0,
+            note_width_em: 0.6,
+            system_spacing_em: 0.5,
+            layout_clef_first: true,
+            time_signature_first: false,
+            room_below_em: ROOM_BELOW_EM,
+            text_rows: Default::default(),
+            bar_rests: false,
+            veil_hidden_rests: false,
+        };
+        let staff = grooph_layout::staff_layout::build_staff_layout(&score, &opts);
+        (score, timing, staff)
+    }
+
+    fn bar(staff: &StaffLayout, idx: usize) -> &PlacedMeasure {
+        staff.systems.iter().flat_map(|s| &s.measures).find(|p| p.measure_idx == idx).unwrap()
+    }
+
+    #[test]
+    fn a_tick_round_the_loop_is_drawn_in_its_bar() {
+        let (score, timing, staff) = laid_out("4/4 q q q q | 4/4 q q q q");
+        let q = DEFAULT_GRID.ticks_per_beat(&TimeSignature::FOUR_FOUR) as f64;
+        let at = |tick: f64| staff_point(&staff, score.len(), &timing, tick).unwrap();
+        // Before the first note: at the end of the last bar, past its last note.
+        let early = at(-q / 4.0);
+        assert_eq!(early.bar.measure_idx, 1);
+        let last_head = bar(&staff, 1).ticks.columns()[3].x;
+        assert!(early.x > last_head && early.x <= bar(&staff, 1).rect.right());
+        // Past the first bar's end: in the second bar, after its first note.
+        let late = at(4.0 * q + q / 4.0);
+        assert_eq!(late.bar.measure_idx, 1);
+        assert!(late.x > bar(&staff, 1).ticks.columns()[0].x);
+        // Past the loop's end: in the first bar again.
+        assert_eq!(at(8.0 * q + q / 4.0).bar.measure_idx, 0);
+    }
+
+    #[test]
+    fn a_hit_in_another_bar_or_round_the_loop_crosses_the_edges() {
+        let (score, timing, staff) = laid_out("4/4 q q q q | 4/4 q q q q");
+        let q = DEFAULT_GRID.ticks_per_beat(&TimeSignature::FOUR_FOUR) as f64;
+        let at = |tick: f64| staff_point(&staff, score.len(), &timing, tick).unwrap();
+        let (first, second) = (bar(&staff, 0), bar(&staff, 1));
+        let head = |b: &PlacedMeasure, i: usize| b.ticks.columns()[i].x;
+        // Early on the score's first note: out at its bar's left, in at the
+        // last bar's right.
+        assert_eq!(
+            hit_path(first, head(first, 0), &at(-q / 4.0), true),
+            HitPath::Across {
+                own_edge: first.layout().notes_left_edge,
+                hit_edge: second.rect.right(),
+                early: true
+            }
+        );
+        // Late on the last note: out at the right, in at the first bar's left.
+        assert_eq!(
+            hit_path(second, head(second, 3), &at(8.0 * q + q / 4.0), false),
+            HitPath::Across {
+                own_edge: second.rect.right(),
+                hit_edge: first.layout().notes_left_edge,
+                early: false
+            }
+        );
+        // Early on the second bar's first note: into the first bar.
+        assert!(matches!(
+            hit_path(second, head(second, 0), &at(4.0 * q - q / 4.0), true),
+            HitPath::Across { early: true, .. }
+        ));
+        // Early on a note inside a bar: in the bar.
+        assert_eq!(hit_path(first, head(first, 1), &at(q - q / 4.0), true), HitPath::InBar);
+        assert_eq!(hit_path(first, head(first, 1), &at(q + q / 4.0), false), HitPath::InBar);
+    }
+
+    #[test]
+    fn round_the_loop_of_one_bar_the_hit_comes_in_at_the_other_end() {
+        let (score, timing, staff) = laid_out("4/4 q q q q");
+        let q = DEFAULT_GRID.ticks_per_beat(&TimeSignature::FOUR_FOUR) as f64;
+        let only = bar(&staff, 0);
+        let at = staff_point(&staff, score.len(), &timing, -q / 4.0).unwrap();
+        assert_eq!(at.bar.measure_idx, 0);
+        assert_eq!(
+            hit_path(only, only.ticks.columns()[0].x, &at, true),
+            HitPath::Across {
+                own_edge: only.layout().notes_left_edge,
+                hit_edge: only.rect.right(),
+                early: true
+            }
+        );
+    }
+
+    #[test]
+    fn a_rows_height_is_where_the_layout_puts_heads() {
+        for text in ["4/4 q q q q", "4/4 H-K:e H:e H-S:e H:e H-K:e H:e H-S:e H:e ; r:h HF:q r:q"] {
+            let (_, _, staff) = laid_out(text);
+            for placed in staff.systems.iter().flat_map(|s| &s.measures) {
+                for note in placed.voices.iter().flat_map(|v| &v.notes) {
+                    if note.kind != grooph_measure::BeatKind::Note {
+                        continue;
+                    }
+                    let row = MarkRow {
+                        pos: note.staff_pos,
+                        offset: 0.0,
+                        h: 1.0,
+                        half_space: staff_space_of(&staff) / 2.0,
+                    };
+                    assert!((row.mid_y(placed) - note.center.y).abs() < 1e-3, "{text}");
+                }
+            }
+        }
+    }
+
+    /// The staff space `staff` was laid out with (em 20, unscaled: a quarter of it).
+    fn staff_space_of(staff: &StaffLayout) -> f32 {
+        20.0 * staff.scale / 4.0
+    }
 
     fn flashes(ts: TimeSignature) -> Vec<u32> {
         let tpm = DEFAULT_GRID.ticks_per_measure(&ts);

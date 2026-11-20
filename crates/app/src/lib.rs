@@ -3,6 +3,7 @@ mod calibration;
 mod clock;
 mod documents;
 mod drift_chart;
+mod drum_map;
 mod embed;
 mod generator;
 mod guide;
@@ -1244,11 +1245,15 @@ impl Grooph {
         info!("Toggle playback: {:?}", self.playback_ctl.transport_state);
     }
 
-    /// Whether timing feedback is at work: switched on, and in Practice (the
-    /// rhythm to play along with) or the metronome (its clicks and counter
-    /// rhythm), not in the score tab. Never in the view in a chat.
+    /// Whether timing feedback is at work: switched on, in Practice (the
+    /// rhythm to play along with), the metronome (its clicks and counter
+    /// rhythm) and the score tab (its score, on one line or the kit's
+    /// staff), but not while the score tab's score is edited. Never in the
+    /// view in a chat.
     pub(crate) fn accuracy_active(&self) -> bool {
-        self.playback_ctl.feedback.accuracy_enabled && !self.embedded() && self.tab() != Tab::Score
+        self.playback_ctl.feedback.accuracy_enabled
+            && !self.embedded()
+            && !(self.document() == Document::Score && self.editing())
     }
 
     fn set_accuracy_enabled(&mut self, enabled: bool) {
