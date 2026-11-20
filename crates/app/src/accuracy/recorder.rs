@@ -1,26 +1,38 @@
-use grooph_measure::Score;
 use grooph_measure::tempo::ScoreTiming;
+use grooph_measure::{Instrument, Score, StaffKind};
 use log::info;
 
 use super::session::{
-    AccuracyMark, BarEvent, GlobalBeatOnset, GradedHit, HitWindows, RecordingData,
-    global_beat_onsets, loop_offset, neighbour_gap_ticks, tallies_of,
+    AccuracyMark, BarEvent, GlobalBeatOnset, GradedHit, HitWindows, KIT_CATCH_WINDOW_MS,
+    RecordingData, global_beat_onsets, loop_offset, neighbour_gap_ticks, neighbour_gaps_ticks,
+    tallies_of,
 };
 
-/// Record an incoming MIDI hit at `timestamp` (seconds, MIDI clock). The hit
-/// is mapped to a global tick via `timing`, then matched against the nearest
-/// note onset across the whole score (shortest signed distance on the loop),
-/// taking swing into account.
+/// Record an incoming hit at `timestamp` (seconds, on the shared clock). The
+/// hit is mapped to a global tick via `timing`, then matched against the
+/// nearest note onset across the whole score (shortest signed distance on
+/// the loop), taking swing into account.
 /// The delta is converted to milliseconds using the onset measure's tempo.
+///
+/// On a kit score the hit is on `instrument` and only matched against its
+/// heads, within the catch window ([`KIT_CATCH_WINDOW_MS`], at most half the
+/// gap to the instrument's neighbouring note); a hit without one there is
+/// extra. A hit without an instrument is ignored there. On one line
+/// `instrument` plays no part.
 ///
 /// Returns the delta in ms when the hit was matched to a note; a second hit
 /// on an already hit note counts as extra and returns `None`.
 pub(super) fn record_hit(
     data: &mut RecordingData,
     timestamp: f64,
+    instrument: Option<Instrument>,
     timing: &ScoreTiming,
     score: &Score,
 ) -> Option<f64> {
+    let instrument = match score.staff {
+        StaffKind::Kit => Some(instrument?),
+        StaffKind::Line => None,
+    };
     let total_ticks = timing.total_loop_ticks();
     if total_ticks == 0 || timing.total_loop_seconds() <= 0.0 {
         return None;
@@ -35,8 +47,19 @@ pub(super) fn record_hit(
     // One pass over the score's onsets serves the match and the gap to the
     // neighbouring notes.
     let beats = global_beat_onsets(score, timing);
-    let (beat_idx, diff_ticks, raw_diff) = best_match(hit_global, total, &beats)?;
-    let global_onset = beats[beat_idx].onset_tick;
+    let matched = best_match(hit_global, total, &beats, instrument).filter(|&(idx, diff, _)| {
+        instrument.is_none() || in_catch_window(&beats, idx, diff, total, timing)
+    });
+    let Some((beat_idx, diff_ticks, raw_diff)) = matched else {
+        // A kit's hit with no note of its instrument near: extra. (On one
+        // line only a score without notes has no match.)
+        if instrument.is_some() {
+            data.counters.extra += 1;
+            data.bars.push(timestamp, BarEvent::Extra);
+        }
+        return None;
+    };
+    let global_onset = beats[beat_idx].key();
     let onset_m_idx = beats[beat_idx].measure_idx;
     let voices = beats[beat_idx].voices;
     let position = beats[beat_idx].position;
@@ -96,7 +119,7 @@ pub(super) fn record_hit(
         data.hits_in_loop.insert(global_onset);
     }
     info!(
-        "Accuracy hit: global_onset={} hit_global={:.2} delta_ms={:+.2} bpm={}",
+        "Accuracy hit: global_onset={:?} hit_global={:.2} delta_ms={:+.2} bpm={}",
         global_onset,
         hit_global,
         delta_ms,
@@ -105,14 +128,40 @@ pub(super) fn record_hit(
     Some(delta_ms)
 }
 
+/// Whether a hit `diff_ticks` from the kit's note at `idx` is in its catch
+/// window: at most [`KIT_CATCH_WINDOW_MS`] away, and at most half the gap
+/// to the same instrument's neighbouring note on its side.
+fn in_catch_window(
+    beats: &[GlobalBeatOnset],
+    idx: usize,
+    diff_ticks: f64,
+    total: f64,
+    timing: &ScoreTiming,
+) -> bool {
+    let tps = timing.ticks_per_sec_in_measure(beats[idx].measure_idx);
+    if tps <= 0.0 {
+        return false;
+    }
+    let (before, after) = neighbour_gaps_ticks(beats, idx, total);
+    let gap = if diff_ticks < 0.0 { before } else { after };
+    let limit = (KIT_CATCH_WINDOW_MS / 1000.0 * tps).min(gap * 0.5);
+    diff_ticks.abs() <= limit
+}
+
 /// Find the note onset closest to `hit_global` on the score-loop circle,
-/// comparing against where each note is heard (swing).
+/// comparing against where each note is heard (swing). With `instrument`,
+/// only its heads.
 ///
 /// Returns `(index into beats, signed_diff_on_loop, raw_diff)`.
-fn best_match(hit_global: f64, total: f64, beats: &[GlobalBeatOnset]) -> Option<(usize, f64, f64)> {
+fn best_match(
+    hit_global: f64,
+    total: f64,
+    beats: &[GlobalBeatOnset],
+    instrument: Option<Instrument>,
+) -> Option<(usize, f64, f64)> {
     let mut best: Option<(usize, f64, f64)> = None;
     for (idx, beat) in beats.iter().enumerate() {
-        if !beat.is_note {
+        if !beat.is_note || instrument.is_some_and(|i| i != beat.instrument) {
             continue;
         }
         let raw_diff = hit_global - beat.performed_tick as f64;

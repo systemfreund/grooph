@@ -1,3 +1,5 @@
+use super::session::GlobalBeatOnset;
+
 /// Clamp a hit's `diff_ticks` to the half-distance to its neighbouring onsets,
 /// so the visual marker stays inside the beat's hit window. Operates on
 /// score-global beat onsets.
@@ -35,4 +37,31 @@ pub(crate) fn clamp_diff_to_beat_window(
     let left = -dist_prev * 0.5;
     let right = dist_next * 0.5;
     diff_ticks.clamp(left, right)
+}
+
+/// [`clamp_diff_to_beat_window`] for the entry at `idx` of `beats`, whose
+/// neighbours are the entries of its instrument (on a kit score, the heads
+/// of the same instrument).
+pub(crate) fn clamp_diff_to_note_window(
+    diff_ticks: f64,
+    beats: &[GlobalBeatOnset],
+    idx: usize,
+    total_loop_ticks: f64,
+) -> f64 {
+    let Some(beat) = beats.get(idx) else {
+        return diff_ticks;
+    };
+    if total_loop_ticks <= 0.0 {
+        return diff_ticks;
+    }
+    let half = total_loop_ticks * 0.5;
+    if beat.prev_same == idx {
+        return diff_ticks.clamp(-half, half);
+    }
+    let cur = beat.onset_tick as f64;
+    let prev = beats[beat.prev_same].onset_tick as f64;
+    let next = beats[beat.next_same].onset_tick as f64;
+    let before = (cur - prev).rem_euclid(total_loop_ticks);
+    let after = (next - cur).rem_euclid(total_loop_ticks);
+    diff_ticks.clamp(-before * 0.5, after * 0.5)
 }

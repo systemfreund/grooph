@@ -118,20 +118,20 @@ fn process_segment(
         if !gb.is_note {
             continue;
         }
+        // The window ends halfway to the next entry of the same
+        // instrument: on one line the next onset, on a kit the next head of
+        // the instrument.
         let cur = gb.performed_tick as f64;
-        let next = if i + 1 < global_beats.len() {
-            global_beats[i + 1].performed_tick as f64
-        } else {
-            global_beats[0].performed_tick as f64 + total_loop_ticks
-        };
+        let next = global_beats[gb.next_same].performed_tick as f64
+            + if gb.next_same > i { 0.0 } else { total_loop_ticks };
         let mut window_end = cur + (next - cur) * 0.5;
         if window_end < segment_offset {
             window_end += total_loop_ticks;
         }
         let in_range = window_end > seg_start && window_end <= seg_end;
         if in_range {
-            if !data.hits_in_loop.contains(&gb.onset_tick) {
-                data.marks_by_onset.insert(gb.onset_tick, AccuracyMark::Miss);
+            if !data.hits_in_loop.contains(&gb.key()) {
+                data.marks_by_onset.insert(gb.key(), AccuracyMark::Miss);
                 data.counters.misses += 1;
                 tallies_of(&mut data.voice_tallies, gb.voices).for_each(|t| t.counters.misses += 1);
                 let note_tick = window_end - (next - cur) * 0.5;
@@ -142,7 +142,7 @@ fn process_segment(
                     data.positions.push_miss(pos);
                 }
             }
-            data.hits_in_loop.remove(&gb.onset_tick);
+            data.hits_in_loop.remove(&gb.key());
         }
     }
 }

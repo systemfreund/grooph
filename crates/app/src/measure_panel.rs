@@ -1,5 +1,7 @@
 use crate::Grooph;
-use crate::accuracy::{AccuracyMark, HitGrade, clamp_diff_to_beat_window};
+use crate::accuracy::{
+    AccuracyMark, GlobalBeatOnset, HitGrade, clamp_diff_to_beat_window, clamp_diff_to_note_window,
+};
 use crate::documents::{Document, Documents};
 use crate::guide::{Guide, anchor_intensity};
 use crate::metronome_view::{MetronomeState, MetronomeVoice};
@@ -17,7 +19,7 @@ use grooph_layout::staff_layout::{
 };
 use grooph_measure::grid::DEFAULT_GRID;
 use grooph_measure::tempo::ScoreTiming;
-use grooph_measure::{Cursor, Score, TimeSignature};
+use grooph_measure::{Cursor, Measure, Score, StaffKind, TimeSignature};
 use grooph_render::staff::{PlaybackMarks, RenderContext, draw_staff};
 use std::rc::Rc;
 
@@ -440,10 +442,10 @@ impl Grooph {
         tick
     }
 
-    /// Whether the staff shows accuracy marks: while calibrating, and with
-    /// accuracy on in Practice. The tracker keeps the marks of
-    /// the last practice run, keyed by onset, so they would land on the
-    /// click bar's notes.
+    /// Whether the staff shows accuracy marks: while calibrating, and
+    /// wherever timing feedback is at work (see `Grooph::accuracy_active`).
+    /// Changing the page clears the marks of the last run, keyed by onset,
+    /// so they do not land on another page's notes.
     pub(crate) fn shows_accuracy_marks(&self) -> bool {
         self.calibration_source().is_some() || self.accuracy_active()
     }
@@ -473,6 +475,22 @@ impl Grooph {
         // `clamp_diff_to_beat_window`, which needs the global neighbours of
         // each note.
         let global_beats = crate::accuracy::global_beat_onsets(score, timing);
+        if score.staff == StaffKind::Kit {
+            for system in &staff.systems {
+                for placed in system.measures.iter().filter(|p| p.measure_idx < score.len()) {
+                    self.draw_head_marks_for_measure(
+                        ui,
+                        placed,
+                        &score.measures()[placed.measure_idx],
+                        timing,
+                        &global_beats,
+                        total_loop_ticks as f64,
+                        staff_space,
+                    );
+                }
+            }
+            return;
+        }
         let global_onsets_u64: Vec<u64> = global_beats.iter().map(|gb| gb.onset_tick).collect();
 
         for system in &staff.systems {
@@ -537,6 +555,72 @@ impl Grooph {
                     paint_hit_mark(ui.painter(), note_x, x, y, h, width, grade, dark);
                 }
                 AccuracyMark::Miss => paint_miss_mark(ui.painter(), note_x, y, h, width, dark),
+            }
+        }
+    }
+
+    /// The marks of a kit score's bar: one next to each head, at its
+    /// instrument's place on the staff.
+    #[expect(clippy::too_many_arguments)]
+    fn draw_head_marks_for_measure(
+        &self,
+        ui: &egui::Ui,
+        placed: &PlacedMeasure,
+        measure: &Measure,
+        timing: &ScoreTiming,
+        global_beats: &[GlobalBeatOnset],
+        total_loop_ticks: f64,
+        staff_space: f32,
+    ) {
+        let tracker = &self.playback_ctl.accuracy.tracker;
+        let measure_start = timing.measure_start_tick(placed.measure_idx);
+        let dark = ui.visuals().dark_mode;
+        let h = staff_space * 1.2;
+        let width = (staff_space * MARK_WIDTH_PER_HEAD).max(MARK_MIN_WIDTH);
+        for (layout, bar) in placed.voices.iter().zip(measure.voices()) {
+            let ticks = DEFAULT_GRID.compute_onset_ticks(bar.beats());
+            for ((beat, &tick), note) in bar.beats().iter().zip(&ticks).zip(&layout.notes) {
+                if note.kind != grooph_measure::BeatKind::Note {
+                    continue;
+                }
+                let global_onset = measure_start + tick as u64;
+                let note_x = note.center.x;
+                for head in beat.heads().iter() {
+                    let instrument = head.instrument();
+                    let Some(mark) = tracker.mark_for_head(global_onset, instrument) else {
+                        continue;
+                    };
+                    // `staff_pos` counts half staff spaces up.
+                    let rise = f32::from(instrument.staff_pos() - note.staff_pos);
+                    let y = note.center.y - rise * staff_space * 0.5 - h * 0.5;
+                    match mark {
+                        AccuracyMark::Hit { diff_ticks, grade } => {
+                            let Some(px_per_tick) = placed
+                                .ticks
+                                .column_at(tick as f64)
+                                .and_then(|i| placed.ticks.px_per_tick(i))
+                            else {
+                                continue;
+                            };
+                            let idx = global_beats
+                                .binary_search_by_key(&(global_onset, instrument), |b| {
+                                    (b.onset_tick, b.instrument)
+                                })
+                                .unwrap_or(0);
+                            let diff_ticks = clamp_diff_to_note_window(
+                                diff_ticks,
+                                global_beats,
+                                idx,
+                                total_loop_ticks,
+                            );
+                            let x = note_x + (diff_ticks * px_per_tick) as f32;
+                            paint_hit_mark(ui.painter(), note_x, x, y, h, width, grade, dark);
+                        }
+                        AccuracyMark::Miss => {
+                            paint_miss_mark(ui.painter(), note_x, y, h, width, dark);
+                        }
+                    }
+                }
             }
         }
     }

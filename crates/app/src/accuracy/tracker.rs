@@ -1,13 +1,15 @@
 use std::collections::HashMap;
 
-use grooph_measure::Score;
 use grooph_measure::tempo::ScoreTiming;
+use grooph_measure::{Instrument, Score};
 
 use super::drift::Drift;
 use super::positions::PositionTallies;
 use super::progress::update_progress;
 use super::recorder::record_hit;
-use super::session::{AccuracyMark, RecordingSession, RunSummary, TRACKED_VOICES, shift_marks};
+use super::session::{
+    AccuracyMark, NoteKey, RecordingSession, RunSummary, TRACKED_VOICES, shift_marks,
+};
 
 /// Coordinates the accuracy-recording session. Holds a `RecordingSession`
 /// that is either `Idle` (no playback) or `Recording` (playback active with
@@ -29,7 +31,7 @@ pub(crate) struct AccuracyTracker {
     last_positions: Option<PositionTallies>,
     /// Marks of that run, kept on the staff after stopping until the next
     /// run starts or the score is edited.
-    last_marks: HashMap<u64, AccuracyMark>,
+    last_marks: HashMap<NoteKey, AccuracyMark>,
 }
 
 impl AccuracyTracker {
@@ -200,24 +202,51 @@ impl AccuracyTracker {
         self.session.is_recording() || !self.last_marks.is_empty()
     }
 
-    /// Look up the accuracy mark for a score-global onset tick: the running
-    /// session's, else the last finished run's.
+    /// Look up the accuracy mark for a score-global onset tick of a
+    /// one-line score: the running session's, else the last finished run's.
     pub(crate) fn mark_for_onset(&self, global_onset_tick: u64) -> Option<AccuracyMark> {
+        self.mark_for_note(NoteKey::onset(global_onset_tick))
+    }
+
+    /// Look up the accuracy mark of the head of `instrument` at a
+    /// score-global onset tick of a kit score, as [`Self::mark_for_onset`].
+    pub(crate) fn mark_for_head(
+        &self,
+        global_onset_tick: u64,
+        instrument: Instrument,
+    ) -> Option<AccuracyMark> {
+        self.mark_for_note(NoteKey { tick: global_onset_tick, instrument })
+    }
+
+    fn mark_for_note(&self, key: NoteKey) -> Option<AccuracyMark> {
         let marks = match self.session.data() {
             Some(data) => &data.marks_by_onset,
             None => &self.last_marks,
         };
-        marks.get(&global_onset_tick).copied()
+        marks.get(&key).copied()
     }
 
-    /// Returns the hit's deviation in ms if it was matched to a note.
+    /// A hit on a one-line score (from any source). Returns the hit's
+    /// deviation in ms if it was matched to a note.
     pub(crate) fn record_hit(
         &mut self,
         timestamp: f64,
         timing: &ScoreTiming,
         score: &Score,
     ) -> Option<f64> {
-        record_hit(self.session.data_mut()?, timestamp, timing, score)
+        record_hit(self.session.data_mut()?, timestamp, None, timing, score)
+    }
+
+    /// A hit on `instrument`: on a kit score matched against its heads only
+    /// (see `recorder::record_hit`), on one line as [`Self::record_hit`].
+    pub(crate) fn record_instrument_hit(
+        &mut self,
+        timestamp: f64,
+        instrument: Instrument,
+        timing: &ScoreTiming,
+        score: &Score,
+    ) -> Option<f64> {
+        record_hit(self.session.data_mut()?, timestamp, Some(instrument), timing, score)
     }
 
     pub(crate) fn update_progress(
@@ -811,5 +840,190 @@ mod tests {
         assert!(positions.notable.is_some());
         tracker.dismiss_summary();
         assert!(tracker.last_positions().is_none());
+    }
+}
+
+/// Kit scores: each head is judged against the hits on its own instrument.
+#[cfg(test)]
+mod kit_tests {
+    use super::*;
+    use Instrument::{HiHat, HiHatFoot, Kick, Snare};
+    use grooph_measure::notation::parse_score;
+    use grooph_measure::{Instrument, StaffKind};
+
+    use super::super::session::{HitGrade, compute_global_beat_onsets};
+
+    /// Hi-hat eighths, snare on 2 and 4, kick on 1 and 3, at 120 BPM: an
+    /// eighth is 250 ms.
+    fn groove() -> (Score, ScoreTiming) {
+        let score =
+            parse_score("4/4 H-K:e H:e H-S:e H:e H-K:e H:e H-S:e H:e").expect("a kit groove");
+        assert_eq!(score.staff, StaffKind::Kit);
+        let timing = ScoreTiming::from_score(&score, 120);
+        (score, timing)
+    }
+
+    /// Global tick at `seconds` into the groove.
+    fn tick_at(timing: &ScoreTiming, seconds: f64) -> u64 {
+        timing.seconds_to_global_tick(seconds).round() as u64
+    }
+
+    fn recording() -> AccuracyTracker {
+        let mut tracker = AccuracyTracker::new();
+        tracker.on_playback_start_at(0.0, 0.0);
+        tracker
+    }
+
+    fn grade(tracker: &AccuracyTracker, tick: u64, instrument: Instrument) -> Option<HitGrade> {
+        match tracker.mark_for_head(tick, instrument)? {
+            AccuracyMark::Hit { grade, .. } => Some(grade),
+            AccuracyMark::Miss => None,
+        }
+    }
+
+    #[test]
+    fn each_head_is_one_entry() {
+        let (score, timing) = groove();
+        let onsets = compute_global_beat_onsets(&score, &timing);
+        // 8 hi-hats, 2 kicks, 2 snares.
+        assert_eq!(onsets.len(), 12);
+        let first: Vec<Instrument> =
+            onsets.iter().filter(|o| o.onset_tick == 0).map(|o| o.instrument).collect();
+        assert_eq!(first, [Kick, HiHat]);
+        assert!(onsets.iter().all(|o| o.is_note));
+    }
+
+    #[test]
+    fn a_chord_played_whole_is_two_hits_with_two_marks() {
+        let (score, timing) = groove();
+        let mut tracker = recording();
+        assert_eq!(tracker.record_instrument_hit(0.0, Kick, &timing, &score), Some(0.0));
+        assert_eq!(tracker.record_instrument_hit(0.0, HiHat, &timing, &score), Some(0.0));
+        assert_eq!(grade(&tracker, 0, Kick), Some(HitGrade::Perfect));
+        assert_eq!(grade(&tracker, 0, HiHat), Some(HitGrade::Perfect));
+        let live = tracker.live_summary().unwrap();
+        assert_eq!((live.hits, live.extra), (2, 0));
+    }
+
+    #[test]
+    fn a_head_left_out_of_a_chord_is_missed() {
+        let (score, timing) = groove();
+        let mut tracker = recording();
+        tracker.record_instrument_hit(0.0, HiHat, &timing, &score);
+        tracker.record_instrument_hit(0.25, HiHat, &timing, &score);
+        // The kick's window ends halfway to the next kick, at 0.5 s.
+        tracker.update_progress(0.55, &timing, &score);
+        assert!(matches!(tracker.mark_for_head(0, Kick), Some(AccuracyMark::Miss)));
+        assert_eq!(grade(&tracker, 0, HiHat), Some(HitGrade::Perfect));
+        let live = tracker.live_summary().unwrap();
+        assert_eq!((live.hits, live.misses, live.extra), (2, 1, 0));
+    }
+
+    #[test]
+    fn a_kick_where_no_kick_is_written_is_extra() {
+        let (score, timing) = groove();
+        let mut tracker = recording();
+        tracker.record_instrument_hit(0.0, HiHat, &timing, &score);
+        // Beat 2 has a snare and a hi-hat, no kick: 500 ms from either kick.
+        assert_eq!(tracker.record_instrument_hit(0.5, Kick, &timing, &score), None);
+        assert!(tracker.mark_for_head(0, Kick).is_none());
+        assert!(tracker.mark_for_head(tick_at(&timing, 0.5), Snare).is_none());
+        assert!(tracker.mark_for_head(tick_at(&timing, 1.0), Kick).is_none());
+        let live = tracker.live_summary().unwrap();
+        assert_eq!((live.hits, live.extra), (1, 1));
+        // Both kicks are still open, and missed when not played.
+        tracker.update_progress(1.9, &timing, &score);
+        assert!(matches!(tracker.mark_for_head(0, Kick), Some(AccuracyMark::Miss)));
+        assert!(matches!(
+            tracker.mark_for_head(tick_at(&timing, 1.0), Kick),
+            Some(AccuracyMark::Miss)
+        ));
+    }
+
+    #[test]
+    fn a_late_kick_counts_within_the_catch_window_only() {
+        let (score, timing) = groove();
+        let mut tracker = recording();
+        let delta = tracker.record_instrument_hit(0.1, Kick, &timing, &score).expect("caught");
+        assert!((delta - 100.0).abs() < 1e-6);
+        assert_eq!(grade(&tracker, 0, Kick), Some(HitGrade::Off));
+
+        let mut tracker = recording();
+        tracker.record_instrument_hit(0.0, HiHat, &timing, &score);
+        assert_eq!(tracker.record_instrument_hit(0.2, Kick, &timing, &score), None);
+        assert!(tracker.mark_for_head(0, Kick).is_none());
+        let live = tracker.live_summary().unwrap();
+        assert_eq!((live.hits, live.extra), (1, 1));
+    }
+
+    #[test]
+    fn the_catch_window_ends_halfway_to_the_instruments_next_note() {
+        // Hi-hat sixteenths at 120 BPM: 125 ms apart.
+        let score = parse_score("4/4 H:s H:s H:s H:s H:q H:q H:q").unwrap();
+        let timing = ScoreTiming::from_score(&score, 120);
+        let mut tracker = recording();
+        // 70 ms after the first: closer to the second, 55 ms early on it.
+        let delta = tracker.record_instrument_hit(0.07, HiHat, &timing, &score).unwrap();
+        assert!((delta + 55.0).abs() < 1e-6);
+        // The last sixteenth's window reaches 150 ms late, short of halfway
+        // to the quarter after it (250 ms): 140 ms late is caught.
+        let mut tracker = recording();
+        assert!(tracker.record_instrument_hit(0.375 + 0.14, HiHat, &timing, &score).is_some());
+    }
+
+    #[test]
+    fn hits_without_an_instrument_are_ignored_on_a_kit() {
+        let (score, timing) = groove();
+        let mut tracker = recording();
+        assert_eq!(tracker.record_hit(0.0, &timing, &score), None);
+        tracker.record_instrument_hit(0.25, HiHat, &timing, &score);
+        let live = tracker.live_summary().unwrap();
+        assert_eq!((live.hits, live.extra), (1, 0));
+    }
+
+    #[test]
+    fn the_hi_hat_foot_is_judged_where_written() {
+        let score = parse_score("4/4 H:q H:q H:q H:q ; K:q HF:q K:q HF:q").unwrap();
+        let timing = ScoreTiming::from_score(&score, 120);
+        let mut tracker = recording();
+        assert!(tracker.record_instrument_hit(0.5, HiHatFoot, &timing, &score).is_some());
+        assert_eq!(grade(&tracker, tick_at(&timing, 0.5), HiHatFoot), Some(HitGrade::Perfect));
+    }
+
+    #[test]
+    fn the_windows_narrow_by_the_instruments_own_neighbours() {
+        // Kick quarters under hi-hat sixteenths at 160 BPM: the sixteenths
+        // are 93.75 ms apart, which narrows their windows (perfect 18.75
+        // ms); the kicks are 375 ms apart and keep 25 ms.
+        let score = parse_score(
+            "4/4 H-K:s H:s H:s H:s H-K:s H:s H:s H:s H-K:s H:s H:s H:s H-K:s H:s H:s H:s",
+        )
+        .unwrap();
+        let timing = ScoreTiming::from_score(&score, 160);
+        let mut tracker = recording();
+        tracker.record_instrument_hit(0.020, Kick, &timing, &score);
+        tracker.record_instrument_hit(0.020, HiHat, &timing, &score);
+        assert_eq!(grade(&tracker, 0, Kick), Some(HitGrade::Perfect));
+        assert_eq!(grade(&tracker, 0, HiHat), Some(HitGrade::Good));
+    }
+
+    #[test]
+    fn statistics_count_heads() {
+        // One chord a bar; only its hi-hat is played, two loops.
+        let score = parse_score("4/4 H-K:q r:q r:q r:q").unwrap();
+        let timing = ScoreTiming::from_score(&score, 120);
+        let mut tracker = recording();
+        tracker.record_instrument_hit(0.010, HiHat, &timing, &score);
+        tracker.update_progress(1.9, &timing, &score);
+        tracker.record_instrument_hit(2.010, HiHat, &timing, &score);
+        tracker.update_progress(3.8, &timing, &score);
+        let live = tracker.live_summary().unwrap();
+        assert_eq!((live.hits, live.misses), (2, 2));
+        let [voice, _] = tracker.live_voice_summaries();
+        let voice = voice.expect("the first voice played");
+        assert_eq!((voice.hits, voice.misses), (2, 2));
+        tracker.on_playback_stop();
+        let drift = tracker.last_drift().expect("two hits");
+        assert_eq!((drift.hits.len(), drift.misses.len()), (2, 2));
     }
 }

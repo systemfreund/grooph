@@ -1593,8 +1593,10 @@ mod tests {
         assert!(app.accuracy_active());
         assert!(app.shows_accuracy_marks());
         assert!(app.playback_ctl.accuracy.tracker.live_summary().is_none());
-        // Not in the score tab.
+        // In the score tab too, but not while its score is edited.
         app.select_tab(Tab::Score);
+        assert!(app.accuracy_active());
+        app.ui.mode = crate::Mode::Edit;
         assert!(!app.accuracy_active());
     }
 

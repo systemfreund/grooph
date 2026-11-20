@@ -716,9 +716,30 @@ grooph's metronome runs inside AI chats as an
   the frame time. Each source has its own input offset (`PlayAlongSettings`).
 - While tap capture is active, staff presses (and presses on the metronome's
   ring) are hits, not edits.
-- Where (`Grooph::accuracy_active`): with Timing feedback on, in Practice and
-  in the metronome tab (its click bar and counter rhythm), never in the score
-  tab or embedded in a chat.
+- Where (`Grooph::accuracy_active`): with Timing feedback on, in Practice, in
+  the metronome tab (its click bar and counter rhythm) and in the score tab
+  (its score; not while it is edited, `Mode::Edit`), never embedded in a
+  chat. The switch is in each of these tabs' options sheet.
+- One-line scores: every hit (each MIDI NoteOn of any note and channel, tap
+  and microphone hit) is matched to the nearest onset of any voice, with no
+  catch window; each onset is one note.
+- Kit scores (`StaffKind::Kit`): each head (an instrument at an onset) is one
+  note, and hits, misses, extra hits, the score, drift, beat positions and
+  the voice and bar tallies all count heads. Only MIDI plays a kit: the drum
+  map (`crates/app/src/drum_map.rs`, a table note → instrument and
+  technique: General MIDI plus the e-kit notes 22, 26 and 58, on any
+  channel) gives each NoteOn its instrument. Notes the map does not list,
+  the hi-hat pedal on a score without hi-hat foot notes, taps and microphone
+  hits are ignored (a press on the staff stays a tap, the microphone stays
+  closed). The technique is read but not graded. A hit is matched only
+  against its instrument's heads within the catch window
+  (`KIT_CATCH_WINDOW_MS`, 150 ms, at most half the gap to the instrument's
+  neighbouring note on the hit's side); a hit with none there is extra.
+  `accuracy::session::global_beat_onsets` lists one entry per head there
+  (one per onset on one line), each linked to its instrument's neighbours
+  (`prev_same`, `next_same`), which give the narrowed windows and the end of
+  the miss window; marks are keyed by onset and instrument (`NoteKey`) and
+  drawn next to each head.
 - Microphone (`crates/mic`): a hit starts where the first sample crosses the
   threshold; 40 ms after it are ignored. On the web an AudioWorklet forwards
   1024-frame blocks to the page, whose context time is mapped onto
@@ -758,7 +779,9 @@ grooph's metronome runs inside AI chats as an
   hit's loop set follows the note's loop relative to that cursor.
 - Grading (`accuracy::session::HitWindows`): perfect ≤ 25 ms, good ≤ 60 ms,
   narrowed to 1/5 and 2/5 of the gap to the closest neighbouring onset (as
-  heard) for fast notes. Markers are coloured by grade.
+  heard; on a kit score, of the same instrument) for fast notes. A note is
+  missed once its window, halfway to the next onset (of the same
+  instrument), closes without a hit. Markers are coloured by grade.
 - Calibration (`crates/app/src/calibration.rs`): plays a click bar of its own
   (4 quarters at 100 BPM, counted in, no swing, ghost notes, gap or ramp)
   and takes the median of the hits after a warm-up as the source's offset.

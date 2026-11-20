@@ -5,9 +5,11 @@
 use crate::accuracy::{GOOD_WINDOW_MS, PERFECT_WINDOW_MS, RunSummary};
 use crate::calibration::Calibration;
 use crate::drift_chart::{beat_position_strip, drift_chart};
+use crate::drum_map::gm_drum;
 use crate::platform::{TapKind, tap_time};
 use crate::{Grooph, TransportState, clock};
 use eframe::egui;
+use grooph_measure::{Instrument, Score, StaffKind};
 use grooph_mic::{DEFAULT_THRESHOLD_DB, MicInput};
 use grooph_midi::MidiInputEvent;
 use log::debug;
@@ -166,8 +168,8 @@ impl Grooph {
         self.playback_ctl.midi.input.as_ref().is_some_and(|input| input.is_connected())
     }
 
-    /// MIDI NoteOns, stamped on the shared clock.
-    fn drain_midi_hits(&mut self, now: f64) -> Vec<f64> {
+    /// MIDI NoteOns, stamped on the shared clock, with their note numbers.
+    fn drain_midi_hits(&mut self, now: f64) -> Vec<(f64, u8)> {
         let Some(input) = self.playback_ctl.midi.input.as_ref() else {
             return Vec::new();
         };
@@ -177,7 +179,7 @@ impl Grooph {
             match event {
                 MidiInputEvent::NoteOn { channel, note, velocity, timestamp } => {
                     // Keep the event's age, move it onto the shared timeline.
-                    hits.push(now - (midi_now - timestamp).max(0.0));
+                    hits.push((now - (midi_now - timestamp).max(0.0), note));
                     debug!("MIDI NoteOn ch={} note={} vel={}", channel, note, velocity);
                 }
                 MidiInputEvent::NoteOff { channel, note, velocity, .. } => {
@@ -189,8 +191,14 @@ impl Grooph {
         hits
     }
 
-    /// Whether the microphone should listen: during a run that uses it, or
-    /// while the settings show its level.
+    /// Whether the score played is a kit's: its hits come from MIDI only,
+    /// each on an instrument (see [`kit_instrument`]).
+    fn plays_kit(&self) -> bool {
+        self.played_score().staff == StaffKind::Kit
+    }
+
+    /// Whether the microphone should listen: during a run that uses it (not
+    /// on a kit score), or while the settings show its level.
     fn mic_wanted(&self, now: f64) -> bool {
         let playing = self.playback_ctl.transport_state == TransportState::Playing;
         match self.calibration_source() {
@@ -198,7 +206,7 @@ impl Grooph {
             None => {
                 self.playback_ctl.feedback.play_along.mic_enabled
                     && (now < self.playback_ctl.mic.monitor_until
-                        || playing && self.accuracy_active())
+                        || playing && self.accuracy_active() && !self.plays_kit())
             }
         }
     }
@@ -280,20 +288,27 @@ impl Grooph {
 
         let settings = self.playback_ctl.feedback.play_along;
         let midi_connected = self.midi_connected();
+        // A kit score is played on an e-kit: its MIDI notes name the
+        // instrument; taps and the microphone do not.
+        let kit = self.plays_kit();
+        let has_foot = kit && has_instrument(self.played_score(), Instrument::HiHatFoot);
         let use_midi = calibrating.is_none_or(|s| s == HitSource::Midi);
-        let use_taps = calibrating.map_or(settings.tap_enabled, |s| s == HitSource::Tap);
-        let use_mic = calibrating.map_or(settings.mic_enabled, |s| s == HitSource::Mic);
-        let mut hits: Vec<(HitSource, f64)> = Vec::new();
+        let use_taps = !kit && calibrating.map_or(settings.tap_enabled, |s| s == HitSource::Tap);
+        let use_mic = !kit && calibrating.map_or(settings.mic_enabled, |s| s == HitSource::Mic);
+        let mut hits: Vec<(HitSource, f64, Option<Instrument>)> = Vec::new();
         if use_midi {
-            hits.extend(midi_hits.into_iter().map(|t| (HitSource::Midi, t)));
+            hits.extend(midi_hits.into_iter().filter_map(|(t, note)| {
+                let instrument = if kit { Some(kit_instrument(note, has_foot)?) } else { None };
+                Some((HitSource::Midi, t, instrument))
+            }));
         }
         if use_taps {
-            hits.extend(tap_hits.into_iter().map(|t| (HitSource::Tap, t)));
+            hits.extend(tap_hits.into_iter().map(|t| (HitSource::Tap, t, None)));
         }
         if use_mic {
-            hits.extend(mic_hits.into_iter().map(|t| (HitSource::Mic, t)));
+            hits.extend(mic_hits.into_iter().map(|t| (HitSource::Mic, t, None)));
         }
-        if hits.iter().any(|(s, _)| *s != HitSource::Midi) {
+        if hits.iter().any(|(s, ..)| *s != HitSource::Midi) {
             self.playback_ctl.play_along.engaged = true;
         }
         let active = calibrating.is_some()
@@ -346,12 +361,15 @@ impl Grooph {
             let played = total_loop_seconds > 0.0 && !score.measures().is_empty();
             if played {
                 hits.sort_by(|a, b| a.1.total_cmp(&b.1));
-                for (source, time) in hits {
+                for (source, time, instrument) in hits {
                     // A calibration measures the raw latency, so it ignores the offset.
                     let offset_ms =
                         if calibrating.is_some() { 0.0 } else { settings.offset_ms(source) };
                     let time = time - offset_ms as f64 / 1000.0;
-                    deltas.extend(tracker.record_hit(time, &timing, score));
+                    deltas.extend(match instrument {
+                        Some(i) => tracker.record_instrument_hit(time, i, &timing, score),
+                        None => tracker.record_hit(time, &timing, score),
+                    });
                 }
                 let delay = miss_delay_s(&settings, &offset_sources, total_loop_seconds);
                 tracker.update_progress_behind(now, delay, &timing, score);
@@ -469,6 +487,22 @@ impl Grooph {
     }
 }
 
+/// The instrument a MIDI `note` is judged on in a kit score: none for a
+/// note the drum map does not list, and none for the hi-hat pedal unless
+/// the score has hi-hat foot notes (`has_foot`); a drummer keeps time on it.
+/// The technique is not graded.
+fn kit_instrument(note: u8, has_foot: bool) -> Option<Instrument> {
+    let (instrument, _technique) = gm_drum(note)?;
+    (instrument != Instrument::HiHatFoot || has_foot).then_some(instrument)
+}
+
+/// Whether a head of `score` plays `instrument`.
+fn has_instrument(score: &Score, instrument: Instrument) -> bool {
+    score.measures().iter().any(|m| {
+        m.voices().iter().any(|v| v.beats().iter().any(|b| b.heads().get(instrument).is_some()))
+    })
+}
+
 fn summary_grid(ui: &mut egui::Ui, summary: &RunSummary) {
     egui::Grid::new("run_summary").num_columns(2).spacing([16.0, 4.0]).show(ui, |ui| {
         ui.label("Hits");
@@ -561,6 +595,95 @@ mod tests {
         // Never more than a quarter of a short loop.
         s.mic_offset_ms = MAX_INPUT_OFFSET_MS;
         assert!((miss_delay_s(&s, &used, 0.4) - 0.1).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_kit_judges_mapped_notes_and_the_pedal_only_where_written() {
+        assert_eq!(kit_instrument(36, false), Some(Instrument::Kick));
+        assert_eq!(kit_instrument(46, false), Some(Instrument::HiHat));
+        assert_eq!(kit_instrument(60, true), None);
+        assert_eq!(kit_instrument(56, true), None);
+        assert_eq!(kit_instrument(44, false), None);
+        assert_eq!(kit_instrument(44, true), Some(Instrument::HiHatFoot));
+    }
+
+    #[test]
+    fn a_score_has_the_instruments_of_its_heads() {
+        let score = grooph_measure::notation::parse_score("4/4 H:q H:q H:q H:q ; K:q HF:q K:q r:q")
+            .unwrap();
+        assert!(has_instrument(&score, Instrument::HiHatFoot));
+        assert!(has_instrument(&score, Instrument::Kick));
+        assert!(!has_instrument(&score, Instrument::Snare));
+    }
+
+    /// The app in the score tab with timing feedback on, playing `score`.
+    fn score_tab_playing(ctx: &egui::Context, score: &str) -> Grooph {
+        let cc = crate::test_support::creation_context(ctx.clone());
+        let mut app = Grooph::new(&cc);
+        app.select_tab(crate::Tab::Score);
+        app.playback_ctl.feedback.accuracy_enabled = true;
+        app.playback_ctl.feedback.play_along.mic_enabled = true;
+        app.editor.docs.score.score = grooph_measure::notation::parse_score(score).unwrap();
+        app.toggle_playback();
+        app
+    }
+
+    /// One frame of play-along input, with a tap on the staff.
+    fn tap_frame(app: &mut Grooph, ctx: &egui::Context) {
+        app.push_pointer_tap();
+        let mut output =
+            ctx.run_ui(egui::RawInput::default(), |ui| app.handle_play_along_input(ui));
+        output.textures_delta.clear();
+    }
+
+    #[test]
+    fn the_score_tab_takes_taps_and_the_mic_on_one_line_only() {
+        let ctx = egui::Context::default();
+        let mut app = score_tab_playing(&ctx, "4/4 q q q q");
+        assert!(app.accuracy_active());
+        assert!(app.tap_capture_active());
+        assert!(app.mic_wanted(clock::now_seconds()));
+        tap_frame(&mut app, &ctx);
+        assert!(app.playback_ctl.play_along.engaged);
+
+        let mut app = score_tab_playing(&ctx, "4/4 H-K:e H:e H-S:e H:e H-K:e H:e H-S:e H:e");
+        // A press on the staff stays a tap, which a kit score ignores.
+        assert!(app.tap_capture_active());
+        assert!(!app.mic_wanted(clock::now_seconds()));
+        tap_frame(&mut app, &ctx);
+        assert!(!app.playback_ctl.play_along.engaged);
+        assert!(!app.playback_ctl.accuracy.tracker.has_start_time());
+    }
+
+    #[test]
+    fn a_kit_run_in_the_score_tab_leaves_its_summary() {
+        let ctx = egui::Context::default();
+        let mut app = score_tab_playing(&ctx, "4/4 H-K:e H:e H-S:e H:e H-K:e H:e H-S:e H:e");
+        // As the first frame with MIDI connected would.
+        app.playback_ctl.accuracy.tracker.on_playback_start_at(0.0, 0.0);
+        let timing = app.score_timing();
+        let score = app.played_score().clone();
+        let tracker = &mut app.playback_ctl.accuracy.tracker;
+        tracker.record_instrument_hit(0.0, Instrument::Kick, &timing, &score);
+        tracker.record_instrument_hit(0.0, Instrument::HiHat, &timing, &score);
+        app.toggle_playback();
+        assert_eq!(app.playback_ctl.accuracy.tracker.last_summary().map(|s| s.hits), Some(2));
+    }
+
+    #[test]
+    fn nothing_is_judged_while_the_score_is_edited() {
+        let ctx = egui::Context::default();
+        let cc = crate::test_support::creation_context(ctx.clone());
+        let mut app = Grooph::new(&cc);
+        app.select_tab(crate::Tab::Score);
+        app.playback_ctl.feedback.accuracy_enabled = true;
+        app.ui.mode = crate::Mode::Edit;
+        app.toggle_playback();
+        assert!(!app.accuracy_active());
+        assert!(!app.tap_capture_active());
+        tap_frame(&mut app, &ctx);
+        assert!(!app.playback_ctl.play_along.engaged);
+        assert!(!app.playback_ctl.accuracy.tracker.has_start_time());
     }
 
     #[test]
