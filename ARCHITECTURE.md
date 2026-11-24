@@ -759,9 +759,9 @@ grooph's metronome runs inside AI chats as an
   channel) gives each NoteOn its instrument. A MIDI device can have its own
   drum map (`CustomDrumMap`, saved in `DeviceSettings::drum_maps`), which
   then replaces the table whole; a device without one plays by the table.
-  Maps are keyed by the port name without the ALSA ` client:port` numbers
-  at its end (`drum_map::device_key`), which change on replugging, so two
-  identical devices share one. They are learned in the drum map list
+  Maps are keyed by the port name (`drum_map::device_key`), under Linux
+  without the ALSA ` client:port` numbers at its end, which change on
+  replugging; two identical devices share one. They are learned in the drum map list
   (`crates/app/src/drum_map_list.rs`, Play along → MIDI input → Drum map:
   pick a row, hit the pad); while it is open, the device's NoteOns go to it
   alone, even with playback stopped, and opening it stops and discards a

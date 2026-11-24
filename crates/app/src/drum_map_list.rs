@@ -8,11 +8,11 @@
 //! device's NoteOns come here only: nothing is judged, even with playback
 //! stopped, and no sound plays.
 
-use crate::Grooph;
 use crate::drum_map::{
     Combo, CustomDrumMap, DrumMapEntry, GM_DRUM_MAP, combo_label, lookup, notes_of, offered_combos,
 };
 use crate::pickers::{Picker, ROW_HEIGHT, dialog_scroll_height};
+use crate::{Grooph, clock};
 use eframe::egui::{self, Button, RichText, Ui, vec2};
 
 /// How long a hit shows in the list (s).
@@ -34,6 +34,9 @@ pub(crate) struct DrumMapList {
     pub(crate) device: String,
     /// The row the next NoteOn is learned for.
     pub(crate) listening: Option<Combo>,
+    /// When the row started listening (shared clock, see [`clock`]): an
+    /// earlier NoteOn, read in the same frame, is not learned.
+    pub(crate) listening_since: f64,
     /// The last NoteOn and the UI time it came, shown for a moment.
     pub(crate) hit: Option<(ListHit, f64)>,
     /// *Reset to built-in* awaits its confirmation.
@@ -42,7 +45,13 @@ pub(crate) struct DrumMapList {
 
 impl DrumMapList {
     pub(crate) fn new(device: String) -> Self {
-        Self { device, listening: None, hit: None, confirm_reset: false }
+        Self {
+            device,
+            listening: None,
+            listening_since: f64::NEG_INFINITY,
+            hit: None,
+            confirm_reset: false,
+        }
     }
 }
 
@@ -67,16 +76,19 @@ impl Grooph {
         self.ui.dialogs.picker == Some(Picker::DrumMap) && self.ui.dialogs.drum_map.is_some()
     }
 
-    /// A NoteOn of `note` while the list is open, at UI time `time`: learned
-    /// for the listening row, which stops listening; with none listening,
+    /// A NoteOn of `note` at `at` (shared clock) while the list is open,
+    /// shown from UI time `time`: learned for the listening row, which stops
+    /// listening; with none listening, or one that started after the hit,
     /// shown on the row it plays or as not mapped.
-    pub(crate) fn drum_map_hit(&mut self, note: u8, time: f64) {
+    pub(crate) fn drum_map_hit(&mut self, note: u8, at: f64, time: f64) {
         let Some(list) = self.ui.dialogs.drum_map.as_mut() else {
             return;
         };
         let maps = &mut self.playback_ctl.devices.drum_maps;
-        let shown = match list.listening.take() {
+        let learning = list.listening.filter(|_| at >= list.listening_since);
+        let shown = match learning {
             Some(combo) => {
+                list.listening = None;
                 maps.entry(list.device.clone()).or_default().assign(note, combo);
                 ListHit::Row(combo)
             }
@@ -113,6 +125,8 @@ impl Grooph {
         let status = match (list.listening, hit) {
             (Some(combo), _) => format!("Hit a pad for {}…", combo_label(combo)),
             (None, Some(ListHit::Unmapped(note))) => format!("Note {note}: not mapped"),
+            // Also when its row is scrolled out of sight.
+            (None, Some(ListHit::Row(combo))) => combo_label(combo),
             _ => String::new(),
         };
         ui.label(RichText::new(status).strong());
@@ -144,6 +158,7 @@ impl Grooph {
                         if ui.add(button).clicked() {
                             // Tapped again it stops; another row takes over.
                             list.listening = (!listening).then_some(combo);
+                            list.listening_since = clock::now_seconds();
                         }
                         for note in notes_of(&entries, combo) {
                             let chip = Button::new(RichText::new(format!("{note} ✕")).size(14.0));
@@ -165,6 +180,8 @@ impl Grooph {
                 ui.horizontal(|ui| {
                     if ui.button("Reset").clicked() {
                         maps.remove(&list.device);
+                        // Hits after a reset show the built-in table.
+                        list.listening = None;
                         list.confirm_reset = false;
                     }
                     if ui.button("Cancel").clicked() {
@@ -184,9 +201,11 @@ impl Grooph {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::TransportState;
     use crate::drum_map::device_key;
-    use crate::test_support::{creation_context, frame, shows, tap};
-    use crate::{TransportState, clock};
+    use crate::test_support::creation_context;
+    #[cfg(not(target_os = "android"))]
+    use crate::test_support::{frame, shows, tap};
     use grooph_measure::{Instrument, Technique};
 
     const TD17: &str = "TD-17:TD-17 MIDI 1 24:0";
@@ -196,6 +215,8 @@ mod tests {
     }
 
     #[test]
+    // Reads the widgets through AccessKit, off on Android.
+    #[cfg(not(target_os = "android"))]
     fn opening_the_list_discards_the_run_playing() {
         let ctx = egui::Context::default();
         let mut app = app(&ctx);
@@ -226,7 +247,7 @@ mod tests {
         // Hits while it is open: none is recorded, no run starts.
         app.playback_ctl.play_along.pending_taps.push(clock::now_seconds());
         frame(&ctx, 0.0, vec![], |ui| app.handle_play_along_input(ui));
-        app.drum_map_hit(36, 0.0);
+        app.drum_map_hit(36, clock::now_seconds(), 0.0);
         app.toggle_playback();
         assert_eq!(app.playback_ctl.transport_state, TransportState::Stopped);
         assert!(!app.playback_ctl.accuracy.tracker.has_start_time());
@@ -251,26 +272,40 @@ mod tests {
         app.open_drum_map(key.clone());
         let snare = (Instrument::Snare, Technique::Normal);
         // Shown, not learned: the built-in table still applies.
-        app.drum_map_hit(36, 1.0);
+        app.drum_map_hit(36, clock::now_seconds(), 1.0);
         let list = app.ui.dialogs.drum_map.as_ref().unwrap();
         assert_eq!(list.hit, Some((ListHit::Row((Instrument::Kick, Technique::Normal)), 1.0)));
-        app.drum_map_hit(60, 2.0);
+        app.drum_map_hit(60, clock::now_seconds(), 2.0);
         let list = app.ui.dialogs.drum_map.as_ref().unwrap();
         assert_eq!(list.hit, Some((ListHit::Unmapped(60), 2.0)));
         assert!(app.playback_ctl.devices.drum_maps.is_empty());
 
         app.ui.dialogs.drum_map.as_mut().unwrap().listening = Some(snare);
-        app.drum_map_hit(36, 3.0);
+        app.drum_map_hit(36, clock::now_seconds(), 3.0);
         // One hit, one note.
-        app.drum_map_hit(60, 4.0);
+        app.drum_map_hit(60, clock::now_seconds(), 4.0);
         let map = &app.playback_ctl.devices.drum_maps[&key];
         assert_eq!(lookup(map.entries(), 36), Some(snare));
         assert_eq!(lookup(map.entries(), 60), None);
         assert_eq!(map.entries().iter().filter(|e| e.note == 36).count(), 1);
         assert_eq!(app.ui.dialogs.drum_map.as_ref().unwrap().listening, None);
+
+        // A NoteOn from before the row started listening is shown, not learned.
+        let list = app.ui.dialogs.drum_map.as_mut().unwrap();
+        list.listening = Some(snare);
+        list.listening_since = 10.0;
+        app.drum_map_hit(38, 9.9, 5.0);
+        let list = app.ui.dialogs.drum_map.as_ref().unwrap();
+        assert_eq!(list.listening, Some(snare));
+        assert_eq!(list.hit, Some((ListHit::Row(snare), 5.0)));
+        assert_eq!(lookup(app.playback_ctl.devices.drum_maps[&key].entries(), 38), Some(snare));
+        app.drum_map_hit(60, 10.0, 6.0);
+        assert_eq!(lookup(app.playback_ctl.devices.drum_maps[&key].entries(), 60), Some(snare));
     }
 
     #[test]
+    // Reads the widgets through AccessKit, off on Android.
+    #[cfg(not(target_os = "android"))]
     fn the_list_learns_removes_and_resets_by_tapping() {
         let ctx = egui::Context::default();
         let mut app = app(&ctx);
@@ -296,11 +331,17 @@ mod tests {
         assert_eq!(app.ui.dialogs.drum_map.as_ref().unwrap().listening, Some(bell));
         let shown = list(&mut app, 0.45, vec![]);
         assert!(shows(&shown, "Hit a pad for Ride · Bell…"));
-        app.drum_map_hit(61, 0.5);
+        app.drum_map_hit(61, clock::now_seconds(), 0.5);
         let shown = list(&mut app, 0.6, vec![]);
         assert!(shows(&shown, "61 ✕"));
+        // The row it plays shows in the status line too, besides its row.
+        let crash =
+            |shown: &[(String, egui::Rect)]| shown.iter().filter(|(l, _)| l == "Crash").count();
+        let before = crash(&shown);
+        app.drum_map_hit(49, clock::now_seconds(), 0.6);
+        assert!(crash(&list(&mut app, 0.65, vec![])) > before);
         // A note that plays nothing, shown for a moment.
-        app.drum_map_hit(99, 0.6);
+        app.drum_map_hit(99, clock::now_seconds(), 0.6);
         assert!(shows(&list(&mut app, 0.7, vec![]), "Note 99: not mapped"));
         assert!(!shows(&list(&mut app, 3.0, vec![]), "Note 99: not mapped"));
         // Removing a note: at once.
@@ -317,11 +358,16 @@ mod tests {
         list(&mut app, 3.7, tap(&shown, "Reset to built-in"));
         let shown = list(&mut app, 3.8, vec![]);
         assert!(app.playback_ctl.devices.drum_maps.contains_key(&key));
+        app.ui.dialogs.drum_map.as_mut().unwrap().listening =
+            Some((Instrument::Snare, Technique::Normal));
         list(&mut app, 3.9, tap(&shown, "Reset"));
+        assert_eq!(app.ui.dialogs.drum_map.as_ref().unwrap().listening, None);
         assert!(app.playback_ctl.devices.drum_maps.is_empty());
     }
 
     #[test]
+    // Reads the widgets through AccessKit, off on Android.
+    #[cfg(not(target_os = "android"))]
     fn the_device_picker_shows_the_drum_map_row_and_the_saved_maps() {
         let ctx = egui::Context::default();
         let mut app = app(&ctx);

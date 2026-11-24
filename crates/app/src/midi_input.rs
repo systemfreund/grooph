@@ -67,6 +67,11 @@ impl Grooph {
         let midi = &self.playback_ctl.midi;
         let Some(input) = midi.input.as_ref() else {
             ui.label("MIDI input is not available here.");
+            // The saved maps can still be deleted.
+            egui::ScrollArea::vertical()
+                .id_salt("midi_ports")
+                .max_height(dialog_scroll_height(ui))
+                .show(ui, |ui| self.saved_drum_maps(ui, &[]));
             return false;
         };
         let port_id = &self.playback_ctl.devices.midi_port_id;

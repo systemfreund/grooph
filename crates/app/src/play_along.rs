@@ -287,8 +287,8 @@ impl Grooph {
         // nothing is judged while it is open.
         if self.drum_map_open() {
             let time = ui.input(|i| i.time);
-            for (_, note) in midi_hits {
-                self.drum_map_hit(note, time);
+            for (at, note) in midi_hits {
+                self.drum_map_hit(note, at, time);
             }
             return;
         }

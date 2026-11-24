@@ -172,11 +172,22 @@ pub(crate) fn notes_of(map: &[DrumMapEntry], combo: Combo) -> Vec<u8> {
     notes
 }
 
-/// The key a device's drum map is saved under: its port name without the
-/// ALSA ` client:port` numbers at the end (`"TD-17:TD-17 MIDI 1 24:0"` →
-/// `"TD-17:TD-17 MIDI 1"`), which change when it is plugged in again. Any
-/// other name is its own key, so two identical devices share a map.
+/// The key a device's drum map is saved under. Under Linux (ALSA) its port
+/// name without the ` client:port` numbers at the end, which change when it
+/// is plugged in again; elsewhere (the web, macOS, Windows) the name as
+/// reported, where such numbers may be part of it. Two identical devices
+/// share a map.
 pub(crate) fn device_key(port_name: &str) -> &str {
+    if cfg!(all(target_os = "linux", not(target_arch = "wasm32"))) {
+        without_alsa_numbers(port_name)
+    } else {
+        port_name
+    }
+}
+
+/// `port_name` without ALSA's ` client:port` numbers at its end
+/// (`"TD-17:TD-17 MIDI 1 24:0"` → `"TD-17:TD-17 MIDI 1"`).
+fn without_alsa_numbers(port_name: &str) -> &str {
     let Some((rest, numbers)) = port_name.rsplit_once(' ') else {
         return port_name;
     };
@@ -349,21 +360,29 @@ mod tests {
         let mut custom = CustomDrumMap::default();
         custom.assign(60, (Kick, Normal));
         custom.remove(36);
-        maps.insert("TD-17:TD-17 MIDI 1".into(), custom);
-        // After replugging, under other ALSA numbers.
-        let map = map_for(&maps, Some("TD-17:TD-17 MIDI 1 28:0"));
+        maps.insert(device_key("TD-17:TD-17 MIDI 1 24:0").into(), custom);
+        let map = map_for(&maps, Some("TD-17:TD-17 MIDI 1 24:0"));
         assert_eq!(lookup(map, 60), Some((Kick, Normal)));
         assert_eq!(lookup(map, 36), None);
+        // After replugging, under other ALSA numbers.
+        if cfg!(all(target_os = "linux", not(target_arch = "wasm32"))) {
+            assert_eq!(map_for(&maps, Some("TD-17:TD-17 MIDI 1 28:0")), map);
+        }
         assert_eq!(map_for(&maps, Some("Other pad")), GM_DRUM_MAP);
     }
 
     #[test]
     fn the_device_key_drops_the_alsa_numbers() {
-        let key = device_key("TD-17:TD-17 MIDI 1 24:0");
+        let key = without_alsa_numbers("TD-17:TD-17 MIDI 1 24:0");
         assert_eq!(key, "TD-17:TD-17 MIDI 1");
-        assert_eq!(device_key("TD-17:TD-17 MIDI 1 28:0"), key);
+        assert_eq!(without_alsa_numbers("TD-17:TD-17 MIDI 1 28:0"), key);
         for name in ["TD-17", "Roland TD-17", "Pad 2:1x", "USB MIDI 1", ""] {
-            assert_eq!(device_key(name), name);
+            assert_eq!(without_alsa_numbers(name), name);
         }
+        // Only ALSA adds them: elsewhere they belong to the name.
+        let names = ["TD-17:TD-17 MIDI 1 24:0", "TD-17:TD-17 MIDI 1 28:0"];
+        let linux = cfg!(all(target_os = "linux", not(target_arch = "wasm32")));
+        assert_eq!(device_key(names[0]) == device_key(names[1]), linux);
+        assert_eq!(device_key("Studio Kit 1:0") == device_key("Studio Kit 2:0"), linux);
     }
 }

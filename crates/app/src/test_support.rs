@@ -10,9 +10,13 @@ pub(crate) fn creation_context(ctx: egui::Context) -> eframe::CreationContext<'s
     eframe::CreationContext::_new_kittest(ctx)
 }
 
+// AccessKit, which the helpers below read, is off on Android (see the
+// app's Cargo.toml): the tests using them run elsewhere.
+
 /// One frame of `ui` on a phone-sized screen at UI time `time`, with
 /// `events`; returns the labeled widgets and text it showed, each with its rect, as
 /// assistive technology reads them (AccessKit), to find what to tap next.
+#[cfg(not(target_os = "android"))]
 pub(crate) fn frame(
     ctx: &egui::Context,
     time: f64,
@@ -44,6 +48,7 @@ pub(crate) fn frame(
 
 /// The events of a tap on the widget labeled `label` among `widgets` (see
 /// [`frame`]); panics if none shows.
+#[cfg(not(target_os = "android"))]
 pub(crate) fn tap(widgets: &[(String, egui::Rect)], label: &str) -> Vec<egui::Event> {
     use egui::{Event, Modifiers, PointerButton};
     let Some((_, rect)) = widgets.iter().find(|(l, _)| l == label) else {
@@ -61,6 +66,7 @@ pub(crate) fn tap(widgets: &[(String, egui::Rect)], label: &str) -> Vec<egui::Ev
 }
 
 /// Whether a widget labeled `label` shows among `widgets`.
+#[cfg(not(target_os = "android"))]
 pub(crate) fn shows(widgets: &[(String, egui::Rect)], label: &str) -> bool {
     widgets.iter().any(|(l, _)| l == label)
 }
