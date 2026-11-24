@@ -360,9 +360,15 @@ pub(crate) struct Dialogs {
     pub(crate) link_copied_at: Option<f64>,
     /// Setting whose picker dialog is open.
     pub(crate) picker: Option<Picker>,
-    /// Picker that opened the one in [`Self::picker`] and comes back when
-    /// it closes (Play along's MIDI row opens the MIDI input picker).
-    pub(crate) picker_return: Option<Picker>,
+    /// Pickers that opened the one in [`Self::picker`], the last one on
+    /// top: each comes back when the one above it closes (Play along → MIDI
+    /// input → Drum map).
+    pub(crate) picker_return: Vec<Picker>,
+    /// The drum map list while it is open (see `Picker::DrumMap`).
+    pub(crate) drum_map: Option<crate::drum_map_list::DrumMapList>,
+    /// The device key of a saved drum map whose deletion awaits its
+    /// confirmation in the MIDI input picker.
+    pub(crate) delete_drum_map: Option<String>,
     /// Taps of the tap-tempo buttons (tempo picker).
     pub(crate) tap_tempo: TapTempo,
     /// A short notice shown for a few seconds (see `Grooph::notify`).
@@ -372,6 +378,20 @@ pub(crate) struct Dialogs {
     /// A rule picked whose answer to "Revoice existing measures too?" is
     /// awaited; `Some` shows the question.
     pub(crate) voicing_prompt: Option<grooph_measure::Voicing>,
+}
+
+impl Dialogs {
+    /// Closes the open picker: the one that opened it comes back. Ends what
+    /// lives only while a picker is open (tap tempo, the drum map list's
+    /// listening, a pending confirmation).
+    pub(crate) fn close_picker(&mut self) {
+        if self.picker.take() == Some(Picker::DrumMap) {
+            self.drum_map = None;
+        }
+        self.picker = self.picker_return.pop();
+        self.delete_drum_map = None;
+        self.tap_tempo.reset();
+    }
 }
 
 /// Something that replaces the working score once unsaved changes are dealt with.

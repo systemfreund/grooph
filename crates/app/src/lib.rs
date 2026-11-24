@@ -4,6 +4,7 @@ mod clock;
 mod documents;
 mod drift_chart;
 mod drum_map;
+mod drum_map_list;
 mod embed;
 mod generator;
 mod guide;
@@ -1122,10 +1123,9 @@ impl Grooph {
         {
             return true;
         }
-        if ui.dialogs.picker.take().is_some() {
+        if ui.dialogs.picker.is_some() {
             // As when the picker closes itself.
-            ui.dialogs.picker = ui.dialogs.picker_return.take();
-            ui.dialogs.tap_tempo.reset();
+            ui.dialogs.close_picker();
             return true;
         }
         ui.mode = match ui.mode {
@@ -1178,7 +1178,8 @@ impl Grooph {
     }
 
     fn start_playback(&mut self) {
-        if self.playback_ctl.transport_state == TransportState::Playing {
+        // The drum map list takes the MIDI input: no run while it is open.
+        if self.playback_ctl.transport_state == TransportState::Playing || self.drum_map_open() {
             return;
         }
         // Each run of endless mode is a new one, from two fresh bars.
@@ -1558,7 +1559,7 @@ mod tests {
         assert_eq!(app.ui.mode, Mode::MoreMenu);
         // The MIDI input picker opened from Play along goes back to it.
         app.ui.dialogs.picker = Some(Picker::MidiInput);
-        app.ui.dialogs.picker_return = Some(Picker::PlayAlong);
+        app.ui.dialogs.picker_return = vec![Picker::PlayAlong];
         assert!(app.back());
         assert_eq!(app.ui.dialogs.picker, Some(Picker::PlayAlong));
         assert!(app.back());

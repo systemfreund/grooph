@@ -766,6 +766,7 @@ mod tests {
                 latency_enabled: false,
                 offset: 0.042,
                 midi_port_id: Some("port-7".into()),
+                ..DeviceSettings::default()
             },
             feedback: FeedbackSettings {
                 accuracy_enabled: true,
@@ -862,6 +863,29 @@ mod tests {
         assert_eq!(s.editor.new_groove_voicing, custom);
         // Saved before the setting: Hands/Feet.
         assert_eq!(PersistedState::default().editor.new_groove_voicing, Voicing::HANDS_FEET);
+    }
+
+    #[test]
+    fn the_drum_maps_are_restored() {
+        use crate::drum_map::CustomDrumMap;
+        // Saved before drum maps, in this version and in version 3: none.
+        let saved = ron::to_string(&every_setting_changed()).unwrap();
+        let without = saved.replacen(",drum_maps:{}", "", 1);
+        assert_ne!(without, saved);
+        for old in [without.as_str(), STATE_V3] {
+            let (s, backup) = restore(Some(old));
+            assert!(backup.is_none());
+            assert!(s.devices.drum_maps.is_empty());
+        }
+        let mut state = every_setting_changed();
+        let mut map = CustomDrumMap::default();
+        map.assign(60, (Instrument::Kick, grooph_measure::Technique::Normal));
+        map.remove(36);
+        state.devices.drum_maps.insert("TD-17:TD-17 MIDI 1".into(), map);
+        let saved = ron::to_string(&state).unwrap();
+        let (s, backup) = restore(Some(&saved));
+        assert!(backup.is_none());
+        assert_eq!(s.devices.drum_maps, state.devices.drum_maps);
     }
 
     #[test]

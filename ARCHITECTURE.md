@@ -756,9 +756,18 @@ grooph's metronome runs inside AI chats as an
   the voice and bar tallies all count heads. Only MIDI plays a kit: the drum
   map (`crates/app/src/drum_map.rs`, a table note → instrument and
   technique: General MIDI plus the e-kit notes 22, 26 and 58, on any
-  channel) gives each NoteOn its instrument. Notes the map does not list,
-  the hi-hat pedal on a score without hi-hat foot notes, taps and microphone
-  hits are ignored (a press on the staff stays a tap, the microphone stays
+  channel) gives each NoteOn its instrument. A MIDI device can have its own
+  drum map (`CustomDrumMap`, saved in `DeviceSettings::drum_maps`), which
+  then replaces the table whole; a device without one plays by the table.
+  Maps are keyed by the port name without the ALSA ` client:port` numbers
+  at its end (`drum_map::device_key`), which change on replugging, so two
+  identical devices share one. They are learned in the drum map list
+  (`crates/app/src/drum_map_list.rs`, Play along → MIDI input → Drum map:
+  pick a row, hit the pad); while it is open, the device's NoteOns go to it
+  alone, even with playback stopped, and opening it stops and discards a
+  run. Notes the map does not list, the hi-hat pedal (by its mapped
+  instrument, not its note) on a score without hi-hat foot notes, taps and
+  microphone hits are ignored (a press on the staff stays a tap, the microphone stays
   closed). The technique is read but not graded. A hit is matched only
   against its instrument's heads within the catch window
   (`KIT_CATCH_WINDOW_MS`, 150 ms, at most half the gap to the instrument's
