@@ -8,11 +8,12 @@
 //! device's NoteOns come here only: nothing is judged, even with playback
 //! stopped, and no sound plays.
 
+use crate::Grooph;
 use crate::drum_map::{
     Combo, CustomDrumMap, DrumMapEntry, GM_DRUM_MAP, combo_label, lookup, notes_of, offered_combos,
 };
 use crate::pickers::{Picker, ROW_HEIGHT, dialog_scroll_height};
-use crate::{Grooph, clock};
+use crate::platform::{TapKind, tap_time};
 use eframe::egui::{self, Button, RichText, Ui, vec2};
 
 /// How long a hit shows in the list (s).
@@ -34,7 +35,7 @@ pub(crate) struct DrumMapList {
     pub(crate) device: String,
     /// The row the next NoteOn is learned for.
     pub(crate) listening: Option<Combo>,
-    /// When the row started listening (shared clock, see [`clock`]): an
+    /// When the row was tapped (shared clock, see [`crate::clock`]): an
     /// earlier NoteOn, read in the same frame, is not learned.
     pub(crate) listening_since: f64,
     /// The last NoteOn and the UI time it came, shown for a moment.
@@ -53,6 +54,15 @@ impl DrumMapList {
             confirm_reset: false,
         }
     }
+}
+
+/// When the tap on a row happened, on the shared clock, so that a pad hit
+/// right after it, read in the same frame, is learned. The web has the DOM
+/// event's time (the press); natively egui has no event times, so one
+/// frame before handling it is the earliest the tap can have been.
+fn row_tap_time(ui: &Ui) -> f64 {
+    let at = tap_time(TapKind::Pointer);
+    if cfg!(target_arch = "wasm32") { at } else { at - f64::from(ui.input(|i| i.unstable_dt)) }
 }
 
 impl Grooph {
@@ -158,7 +168,7 @@ impl Grooph {
                         if ui.add(button).clicked() {
                             // Tapped again it stops; another row takes over.
                             list.listening = (!listening).then_some(combo);
-                            list.listening_since = clock::now_seconds();
+                            list.listening_since = row_tap_time(ui);
                         }
                         for note in notes_of(&entries, combo) {
                             let chip = Button::new(RichText::new(format!("{note} ✕")).size(14.0));
@@ -201,11 +211,11 @@ impl Grooph {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::TransportState;
     use crate::drum_map::device_key;
     use crate::test_support::creation_context;
     #[cfg(not(target_os = "android"))]
     use crate::test_support::{frame, shows, tap};
+    use crate::{TransportState, clock};
     use grooph_measure::{Instrument, Technique};
 
     const TD17: &str = "TD-17:TD-17 MIDI 1 24:0";
@@ -322,6 +332,13 @@ mod tests {
         let shown = list(&mut app, 0.1, tap(&shown, "Snare · Rimshot"));
         let rimshot = (Instrument::Snare, Technique::Rimshot);
         assert_eq!(app.ui.dialogs.drum_map.as_ref().unwrap().listening, Some(rimshot));
+        // Natively the tap counts from a frame before it was handled: a pad
+        // hit read in that frame is learned, an older one is not.
+        if cfg!(not(target_arch = "wasm32")) {
+            let since = app.ui.dialogs.drum_map.as_ref().unwrap().listening_since;
+            assert!(since < clock::now_seconds() - 0.005);
+            assert!(since > clock::now_seconds() - 0.2);
+        }
         let shown = list(&mut app, 0.2, tap(&shown, "Snare · Rimshot"));
         assert_eq!(app.ui.dialogs.drum_map.as_ref().unwrap().listening, None);
         // Another row takes the listening.
