@@ -84,6 +84,9 @@ pub(crate) enum Picker {
     Sounds,
     /// The MIDI device the play-along listens to.
     MidiInput,
+    /// The connected MIDI device's drum map: which note plays what,
+    /// learned by hitting the pads (see `crate::drum_map_list`).
+    DrumMap,
     /// The inputs that count as hits and their latency.
     PlayAlong,
     /// Saved rhythms and practice presets: save, load, rename, delete.
@@ -457,6 +460,7 @@ impl Grooph {
                 Picker::Revoice => "Revoice bar",
                 Picker::Sounds => "Sounds",
                 Picker::MidiInput => "MIDI input",
+                Picker::DrumMap => "Drum map",
                 Picker::PlayAlong => "Play along",
                 Picker::Library => "Library",
                 Picker::Mixer => "Mixer",
@@ -502,6 +506,10 @@ impl Grooph {
                     false
                 }
                 Picker::MidiInput => self.midi_input_choices(ui),
+                Picker::DrumMap => {
+                    self.drum_map_list(ui);
+                    false
+                }
                 Picker::PlayAlong => {
                     calibrate = self.play_along_choices(ui);
                     false
@@ -524,7 +532,9 @@ impl Grooph {
                 }
             };
             ui.add_space(12.0);
-            picked || wide_button(ui, "Done", 19.0, ROW_HEIGHT).clicked()
+            // The drum map list goes back to the device it belongs to.
+            let done = if picker == Picker::DrumMap { "Back" } else { "Done" };
+            picked || wide_button(ui, done, 19.0, ROW_HEIGHT).clicked()
         });
         let visible = platform::visible_rect(&ctx);
         let keyboard_up = visible.height() < ctx.content_rect().height() - 1.0;
@@ -542,12 +552,13 @@ impl Grooph {
             ctx.data_mut(|d| d.insert_temp(keyboard_shift_id(), new_shift));
             ctx.request_repaint();
         }
-        if modal.inner || modal.should_close() {
-            self.ui.dialogs.picker = self.ui.dialogs.picker_return.take();
+        // Not when the picker opened another one this frame (MIDI input →
+        // Drum map).
+        if (modal.inner || modal.should_close()) && self.ui.dialogs.picker == Some(picker) {
+            self.ui.dialogs.close_picker();
             if picker == Picker::Voicing {
                 self.close_voicing_picker();
             }
-            self.ui.dialogs.tap_tempo.reset();
             self.ui.library.renaming_preset = None;
             self.ui.library.renaming_pattern = None;
         }

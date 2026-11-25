@@ -53,7 +53,7 @@ Any key or pad counts as a hit, so you can use whichever sound you like.
 ### Drum kit scores
 
 A score on the drum kit's staff, in the **Score** tab, is played on an electronic drum kit
-over MIDI. Every pad counts for its own instrument (the General MIDI drum map, which most
+over MIDI. Every pad counts for its own instrument (by default the General MIDI drum map, which most
 e-kits follow on any channel), and every note head is judged on its own: in a chord of
 kick and hi-hat, each gets its own marker, and a kick does not count for the hi-hat. A hit
 more than 150 ms from the nearest note of its instrument counts as an extra hit, and its
@@ -62,6 +62,12 @@ hi-hat on a closed one, a rimshot or the ride's bell count like the plain stroke
 are not in the map are ignored, and so is the hi-hat pedal unless the score has notes for
 it. Tapping and the microphone do not count on the drum kit's staff, and nothing is
 judged while you edit the score.
+
+If your kit, pad controller or trigger module sends other notes, teach grooph its own
+drum map: open **Play along → MIDI**, pick the device and tap **Drum map**. Tap a row,
+such as *Snare · Rimshot*, and hit the pad: its note now plays that instrument. Tap a
+note's ✕ to ignore it, or **Reset to built-in** to go back to the General MIDI map. Each
+device keeps its own map; a device without one uses the General MIDI map.
 
 ## Calibrate the latency
 

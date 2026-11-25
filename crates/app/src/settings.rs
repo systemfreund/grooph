@@ -7,6 +7,7 @@
 //! field by field (see [`crate::persist`]), and a field missing from a
 //! saved group reads as its default.
 
+use crate::drum_map::DrumMaps;
 use crate::guide::Guide;
 use crate::play_along::PlayAlongSettings;
 use crate::{CountingSettings, StickingSettings};
@@ -63,7 +64,8 @@ pub(crate) struct GeneratorConfig {
     pub(crate) ghost_notes: bool,
 }
 
-/// The devices of this machine: the output latency and the MIDI input.
+/// The devices of this machine: the output latency, the MIDI input and the
+/// MIDI devices' drum maps.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub(crate) struct DeviceSettings {
@@ -72,11 +74,14 @@ pub(crate) struct DeviceSettings {
     pub(crate) offset: f32,
     /// The MIDI input port played along on.
     pub(crate) midi_port_id: Option<String>,
+    /// The custom drum maps, by device key (see [`crate::drum_map`]); a
+    /// device without one plays by the built-in table.
+    pub(crate) drum_maps: DrumMaps,
 }
 
 impl Default for DeviceSettings {
     fn default() -> Self {
-        Self { latency_enabled: true, offset: 0.0, midi_port_id: None }
+        Self { latency_enabled: true, offset: 0.0, midi_port_id: None, drum_maps: DrumMaps::new() }
     }
 }
 

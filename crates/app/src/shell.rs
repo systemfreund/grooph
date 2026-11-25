@@ -376,6 +376,13 @@ fn cut_to_fit(painter: &Painter, value: &str, room: f32) -> String {
 pub(crate) fn value_row(ui: &mut Ui, label: &str, value: &str) -> Response {
     let (rect, resp) =
         ui.allocate_exact_size(vec2(ui.available_width(), ROW_HEIGHT), Sense::click());
+    // Painted, so the row gets its name here: the label and its value.
+    let name = if value.is_empty() {
+        label.trim().to_owned()
+    } else {
+        format!("{}: {value}", label.trim())
+    };
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &name));
     let visuals = ui.visuals();
     let painter = ui.painter();
     let label = painter.text(
