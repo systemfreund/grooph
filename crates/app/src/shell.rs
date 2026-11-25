@@ -1381,6 +1381,10 @@ impl Grooph {
         if value_row(ui, "Edit rhythm", "✏").clicked() {
             self.edit_page();
         }
+        // A new pattern, which opens in the score tab.
+        if value_row(ui, "Save rhythm", "💾").clicked() {
+            self.request_save_practice_rhythm(ui.input(|i| i.time));
+        }
     }
 
     fn guide_row(&mut self, ui: &mut Ui) {
@@ -1873,6 +1877,50 @@ mod tests {
         voicing_row_frame(&mut app, &ctx, vec![button(at, false)]);
         assert_eq!(app.ui.dialogs.picker, Some(crate::pickers::Picker::Voicing));
         assert_eq!(app.pending_voicing(), Some(app.editor.doc().score().voicing));
+    }
+
+    /// Runs Practice's option rows alone at the top of a tall screen with
+    /// `events`; the texts it painted, with their rects.
+    fn option_rows_frame(
+        app: &mut crate::Grooph,
+        ctx: &Context,
+        events: Vec<Event>,
+    ) -> Vec<(String, Rect)> {
+        let input = RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(390.0, 2000.0))),
+            events,
+            ..Default::default()
+        };
+        let mut output = ctx.run_ui(input, |ui| app.option_rows(ui));
+        output.textures_delta.clear();
+        output
+            .shapes
+            .iter()
+            .filter_map(|c| match &c.shape {
+                egui::Shape::Text(t) => {
+                    Some((t.galley.text().to_owned(), t.galley.rect.translate(t.pos.to_vec2())))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn practice_options_end_with_save_rhythm() {
+        let ctx = Context::default();
+        let cc = crate::test_support::creation_context(ctx.clone());
+        let mut app = crate::Grooph::new(&cc);
+        app.select_tab(super::Tab::Practice);
+        let texts = option_rows_frame(&mut app, &ctx, vec![]);
+        let labels: Vec<_> = texts.iter().map(|(t, _)| t.as_str()).collect();
+        let edit = labels.iter().position(|t| *t == "Edit rhythm").unwrap();
+        assert_eq!(&labels[edit..], ["Edit rhythm", "✏", "›", "Save rhythm", "💾", "›"]);
+        let at = texts[edit + 3].1.center();
+        option_rows_frame(&mut app, &ctx, vec![Event::PointerMoved(at), button(at, true)]);
+        option_rows_frame(&mut app, &ctx, vec![button(at, false)]);
+        assert_eq!(app.editor.library.patterns.len(), 1);
+        assert_eq!(app.ui.dialogs.picker, Some(crate::pickers::Picker::Library));
+        assert_eq!(app.ui.library.open_on_close, Some(app.editor.library.patterns[0].id));
     }
 
     #[test]

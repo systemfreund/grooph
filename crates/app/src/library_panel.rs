@@ -1,4 +1,5 @@
 use crate::Grooph;
+use crate::documents::Document;
 use crate::library::SavedPattern;
 use crate::pickers::ROW_HEIGHT;
 use crate::pickers::{dialog_scroll_height, note_focused_field};
@@ -290,6 +291,18 @@ fn save_buttons(ui: &mut egui::Ui, target: &SaveTarget) -> Option<SaveAs> {
     tapped
 }
 
+/// The rhythms' save buttons, by the page the library was opened from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RhythmSaving {
+    /// The score tab: "Save" and "Save as new" keep its score.
+    Score,
+    /// Practice: "Save as new" only, which saves its rhythm and opens it in
+    /// the score tab (see `Grooph::request_save_practice_rhythm`).
+    Practice,
+    /// The metronome: none, its click bar is no pattern.
+    Off,
+}
+
 /// What a save button asked for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SaveAs {
@@ -376,7 +389,7 @@ impl Grooph {
 
     /// The card of `item` says "✓ Saved" from UI time `now` on and scrolls
     /// into view.
-    fn saved(&mut self, item: LibraryItem, now: f64) {
+    pub(crate) fn saved(&mut self, item: LibraryItem, now: f64) {
         self.ui.library.saved = Some((item, now));
         self.ui.library.scroll_to = Some(item);
     }
@@ -445,18 +458,42 @@ impl Grooph {
         SaveTarget { overwrites, enabled: changed }
     }
 
-    /// Saved rhythms: a tap loads one onto the staff.
+    /// Which save buttons the rhythms have: those of the page the library
+    /// was opened from (the page shown, or behind the More screen).
+    pub(crate) fn rhythm_saving(&self) -> RhythmSaving {
+        match self.document() {
+            Document::Score => RhythmSaving::Score,
+            Document::Practice => RhythmSaving::Practice,
+            Document::Metronome => RhythmSaving::Off,
+        }
+    }
+
+    /// Saved rhythms: a tap opens one in the score tab.
     fn rhythms(&mut self, ui: &mut egui::Ui) {
         let active_id = self.editor.docs.score.active_pattern_id;
         let dirty = self.editor.docs.score.dirty;
-        let target = self.rhythm_save_target();
-        if let Some(save) = save_buttons(ui, &target) {
-            self.save_rhythm(save, ui.input(|i| i.time));
+        let now = ui.input(|i| i.time);
+        match self.rhythm_saving() {
+            RhythmSaving::Score => {
+                let target = self.rhythm_save_target();
+                if let Some(save) = save_buttons(ui, &target) {
+                    self.save_rhythm(save, now);
+                }
+                if target.overwrites.is_none() {
+                    ui.weak("The score is not saved.");
+                }
+                ui.add_space(4.0);
+            }
+            RhythmSaving::Practice => {
+                let size = vec2(ui.available_width(), ROW_HEIGHT);
+                if ui.add(Button::new("➕ Save as new").min_size(size)).clicked() {
+                    self.request_save_practice_rhythm(now);
+                }
+                ui.weak("Saves the practice rhythm, to edit in the score tab.");
+                ui.add_space(4.0);
+            }
+            RhythmSaving::Off => {}
         }
-        if target.overwrites.is_none() {
-            ui.weak("The score is not saved.");
-        }
-        ui.add_space(4.0);
         // A new score of the score tab, on the kit's staff or the one
         // line: offered while that tab is shown.
         if self.ui.view.show_score_tab {
@@ -600,6 +637,8 @@ impl Grooph {
     pub(crate) fn open_preset(&mut self, id: PresetId) {
         // Its rhythm is generated, not the metronome's click bar.
         self.leave_metronome();
+        // The practice page, not the score tab with a rhythm saved from it.
+        self.ui.library.open_on_close = None;
         self.apply_preset(id);
         self.ui.library.renaming_preset = None;
         self.ui.dialogs.picker = None;
@@ -627,8 +666,13 @@ impl Grooph {
                 "A new rhythm replaces the current score, which has unsaved changes. Save first?",
                 "Start",
             ),
+            Some(PendingLoad::PracticeRhythm) => (
+                "The saved rhythm opens in the score tab and replaces its score, which has unsaved changes. Save first?",
+                "Continue",
+            ),
         };
 
+        let now = ui.input(|i| i.time);
         // A modal, so that it comes up above the library dialog it is
         // asked from.
         let save = format!("Save & {action}");
@@ -647,12 +691,12 @@ impl Grooph {
                 Some(0) => {
                     self.save_active_pattern();
                     if let Some(pending) = self.ui.dialogs.pending_load.take() {
-                        self.finish_pending_load(pending);
+                        self.finish_pending_load(pending, now);
                     }
                 }
                 Some(1) => {
                     if let Some(pending) = self.ui.dialogs.pending_load.take() {
-                        self.finish_pending_load(pending);
+                        self.finish_pending_load(pending, now);
                     }
                 }
                 Some(_) => self.ui.dialogs.pending_load = None,
