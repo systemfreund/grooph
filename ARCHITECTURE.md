@@ -869,8 +869,9 @@ grooph's metronome runs inside AI chats as an
   changes ask first, `PendingLoad::PracticeRhythm`): the library opens on
   its name over Practice, and once it closes the pattern opens in the score
   tab (`LibraryUi::open_on_close`, `open_practice_save`, run every frame),
-  unless it was deleted or another pattern or a preset was opened
-  meanwhile. Practice's document keeps its rhythm and no pattern. A score
+  unless it was deleted, a preset was opened, or another score replaced
+  the score tab's meanwhile (a pattern, a new score, a link:
+  `replace_score` drops it). Practice's document keeps its rhythm and no pattern. A score
   link of the one line opens on Practice unless shared from the score tab
   (`opens_on_practice`).
   Each keeps its score, cursor and undo history (the `Doc` trait, all

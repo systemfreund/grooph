@@ -919,8 +919,6 @@ impl Grooph {
         // A drum struck by two voices at once is a change to save.
         let undoubled = score.undouble_instruments();
         let bpm = pattern.bpm;
-        // Another pattern loaded instead of one saved from Practice.
-        self.ui.library.open_on_close = None;
 
         self.stop_transport();
         self.show_document(Document::Score);
@@ -2429,6 +2427,44 @@ mod tests {
         app.open_practice_save();
         assert_eq!(text_of(&app.editor.docs.score.score), "4/4 e e q h");
         assert!(!app.editor.docs.score.dirty);
+    }
+
+    #[test]
+    fn another_score_in_the_score_tab_drops_the_rhythm_saved_from_practice() {
+        use grooph_link::{LinkContent, SharedLink};
+        use grooph_measure::StaffKind;
+
+        for staff in [StaffKind::Line, StaffKind::Kit] {
+            let mut app = practice_app(false);
+            app.ui.view.show_score_tab = true;
+            app.save_practice_rhythm(1.0);
+            // "New rhythm" / "New drum groove" in the library.
+            app.new_score(staff);
+            assert!(app.ui.library.open_on_close.is_none());
+            app.open_practice_save();
+            assert_eq!(app.editor.docs.score.score.staff, staff);
+            assert_eq!(app.editor.docs.score.active_pattern_id, None);
+        }
+
+        // Another pattern, or a score link.
+        let mut app = practice_app(false);
+        let other = app.editor.library.add("Other".into(), app.editor.docs.score.score.clone(), 90);
+        app.save_practice_rhythm(1.0);
+        app.request_load_pattern(other);
+        app.open_practice_save();
+        assert_eq!(app.editor.docs.score.active_pattern_id, Some(other));
+
+        let mut app = practice_app(false);
+        app.ui.view.show_score_tab = true;
+        app.save_practice_rhythm(1.0);
+        let score = grooph_measure::notation::parse_score("kit 4/4 H:h H:h ; K:w").unwrap();
+        app.open_link(SharedLink {
+            content: Some(LinkContent::Score(score)),
+            ..Default::default()
+        });
+        app.open_practice_save();
+        assert_eq!(app.editor.docs.score.active_pattern_id, None);
+        assert_eq!(text_of(&app.editor.docs.score.score), "4/4 H:h H:h ; K:w");
     }
 
     #[test]
