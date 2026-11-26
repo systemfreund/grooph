@@ -4,6 +4,7 @@ mod clock;
 mod documents;
 mod drift_chart;
 mod drum_map;
+mod drum_map_list;
 mod embed;
 mod generator;
 mod guide;
@@ -26,8 +27,6 @@ mod platform;
 mod play_along;
 mod play_along_settings;
 mod playback_clock;
-mod preset_panel;
-mod presets;
 mod score_change;
 mod settings;
 mod settings_panel;
@@ -63,11 +62,10 @@ use crate::metronome_bars::SavedMetronome;
 use crate::metronome_view::MetronomeState;
 use crate::platform::{PlatformRuntime, VisibilityEvent};
 use crate::play_along::PlayAlongState;
-use crate::presets::PresetLibrary;
 use crate::score_change::{Origin, ScoreChange};
 use crate::settings::{
     DeviceSettings, EditorSettings, FeedbackSettings, GeneratorConfig, PlaybackSettings,
-    ViewSettings,
+    TabPlayback, ViewSettings,
 };
 use crate::shell::{ShellState, Tab};
 use crate::state::{
@@ -129,7 +127,7 @@ pub struct Grooph {
     pub(crate) ui: UiShell,
 }
 
-pub(crate) const PERSISTED_STATE_VERSION: u8 = 5;
+pub(crate) const PERSISTED_STATE_VERSION: u8 = 6;
 
 /// A rhythm document as saved: the same entry for the score tab's and
 /// Practice's.
@@ -198,8 +196,14 @@ pub(crate) struct PersistedState {
     /// opened from.
     document: Document,
     library: PatternLibrary,
-    presets: PresetLibrary,
-    playback: PlaybackSettings,
+    /// The metronome's tempo, count-in, swing, silent bars, tempo ramp and
+    /// click; a state saved before each page had its own kept one group
+    /// `playback` for all three (see [`persist`]).
+    metronome_playback: PlaybackSettings,
+    /// Practice's.
+    practice_playback: PlaybackSettings,
+    /// The score tab's.
+    score_playback: PlaybackSettings,
     generator: GeneratorConfig,
     /// Sounds and volumes (the mixer).
     audio_settings: AudioSettings,
@@ -232,8 +236,9 @@ impl Default for PersistedState {
             practice_doc: None,
             document: Document::Score,
             library: PatternLibrary::default(),
-            presets: PresetLibrary::default(),
-            playback: PlaybackSettings::default(),
+            metronome_playback: PlaybackSettings::default(),
+            practice_playback: PlaybackSettings::default(),
+            score_playback: PlaybackSettings::default(),
             generator: GeneratorConfig::default(),
             audio_settings: AudioSettings::default(),
             devices: DeviceSettings::default(),
@@ -257,8 +262,9 @@ impl PersistedState {
             practice_doc: Some(SavedDoc::of(&docs.practice)),
             document: app.document(),
             library: app.editor.library.clone(),
-            presets: app.editor.presets.clone(),
-            playback: ctl.settings,
+            metronome_playback: ctl.settings.metronome,
+            practice_playback: ctl.settings.practice,
+            score_playback: ctl.settings.score,
             generator: app.editor.generator.config,
             audio_settings: ctl.audio_cfg.settings,
             devices: ctl.devices.clone(),
@@ -432,6 +438,7 @@ impl App for Grooph {
         if self.ui.dialogs.pending_load.is_some() && !embedded {
             self.load_confirm_dialog(ui);
         }
+        self.open_practice_save();
 
         if self.ui.dialogs.link_error.is_some() {
             self.link_error_dialog(ui);
@@ -461,7 +468,7 @@ impl App for Grooph {
         // If we should be playing audio but have no audio engine, try to create it (works after user gesture on iOS)
         if audio_state == PlayerState::Playing && self.playback_ctl.audio.is_none() {
             debug!("Creating audio engine.");
-            self.playback_ctl.audio = grooph_audio::Audio::new(self.playback_ctl.settings.bpm);
+            self.playback_ctl.audio = grooph_audio::Audio::new(self.tab_playback().bpm);
             if let Some(audio) = &mut self.playback_ctl.audio {
                 audio.set_seed(crate::platform::random_seed());
             }
@@ -531,6 +538,16 @@ pub fn web_options() -> eframe::WebOptions {
 }
 
 impl Grooph {
+    /// The playback settings of the page shown, or of the page the More
+    /// screen was opened from: each page has its own.
+    pub(crate) fn tab_playback(&self) -> &PlaybackSettings {
+        self.playback_ctl.settings.get(self.document())
+    }
+
+    pub(crate) fn tab_playback_mut(&mut self) -> &mut PlaybackSettings {
+        self.playback_ctl.settings.get_mut(self.editor.document)
+    }
+
     fn playback_options(&self) -> PlaybackOptions {
         // A calibration clicks every beat once counted in, whatever the
         // user's options.
@@ -539,22 +556,23 @@ impl Grooph {
         }
         let generator = &self.editor.generator;
         PlaybackOptions {
-            count_in: self.playback_ctl.settings.count_in,
+            count_in: self.tab_playback().count_in,
             // On the generator's grid: Practice's rhythm only.
             ghost_notes: (generator.config.ghost_notes && self.document() == Document::Practice)
                 .then_some(generator.config.settings.subdivision),
-            swing: self.playback_ctl.settings.swing,
+            swing: self.tab_playback().swing,
             // Editing always sounds every bar, so changes can be heard.
             gap: GapClick {
-                enabled: self.playback_ctl.settings.gap_click.enabled && !self.editing(),
-                ..self.playback_ctl.settings.gap_click
+                enabled: self.tab_playback().gap_click.enabled && !self.editing(),
+                mute: self.played_mute(),
+                ..self.tab_playback().gap_click
             },
             ramp: self.played_ramp(),
             click: self.played_click_bars(),
             // The metronome plays its click bar and counter rhythm alone.
             played: if self.metronome_mode() {
                 Played::Clicks
-            } else if self.playback_ctl.settings.click {
+            } else if self.tab_playback().click {
                 Played::Score
             } else {
                 Played::Rhythm
@@ -573,8 +591,7 @@ impl Grooph {
     /// including the tempo ramp of the bar being played.
     pub(crate) fn score_timing(&self) -> ScoreTiming {
         // A calibration plays without swing, as in `playback_options`.
-        let swing =
-            if self.calibrating() { Swing::default() } else { self.playback_ctl.settings.swing };
+        let swing = if self.calibrating() { Swing::default() } else { self.tab_playback().swing };
         ScoreTiming::from_score(self.played_score(), self.current_bpm()).with_swing(swing)
     }
 
@@ -825,7 +842,8 @@ impl Grooph {
     /// The library keeps the score tab's score, also when it is saved from
     /// another page.
     pub(crate) fn save_active_pattern(&mut self) -> u64 {
-        let bpm = self.playback_ctl.settings.bpm;
+        // With the score tab's tempo, whichever page it is saved from.
+        let bpm = self.playback_ctl.settings.score.bpm;
         let doc = &mut self.editor.docs.score;
         match doc.active_pattern_id {
             Some(id) if self.editor.library.contains(id) => {
@@ -841,7 +859,7 @@ impl Grooph {
     /// "Pattern N" and make it the active pattern.
     pub(crate) fn save_pattern_as(&mut self) -> u64 {
         let doc = &mut self.editor.docs.score;
-        let bpm = self.playback_ctl.settings.bpm;
+        let bpm = self.playback_ctl.settings.score.bpm;
         let names = self.editor.library.patterns.iter().map(|p| p.name.as_str());
         let name = library::next_default_name("Pattern", names);
         let id = self.editor.library.add(name, doc.score.clone(), bpm);
@@ -850,9 +868,64 @@ impl Grooph {
         id
     }
 
-    /// Replace the current score + tempo with the saved pattern `id`. The score
-    /// swap is undoable; the tempo change is applied directly (tempo is not part
-    /// of the undo snapshot). Transport is stopped so playback restarts cleanly.
+    /// Practice's rhythm as a new pattern under the next free "Pattern N",
+    /// with Practice's tempo. Practice's document stays a generator rhythm
+    /// without a pattern. Returns the pattern's id.
+    fn add_practice_pattern(&mut self) -> u64 {
+        let bpm = self.playback_ctl.settings.practice.bpm;
+        let names = self.editor.library.patterns.iter().map(|p| p.name.as_str());
+        let name = library::next_default_name("Pattern", names);
+        self.editor.library.add(name, self.editor.docs.practice.score.clone(), bpm)
+    }
+
+    /// "Save rhythm" on the practice page, and "Save as new" in the library
+    /// opened from there: Practice's rhythm becomes a new pattern, which
+    /// opens in the score tab. That replaces the score tab's score, so its
+    /// unsaved changes ask first. `now` is the UI time, for "✓ Saved".
+    pub(crate) fn request_save_practice_rhythm(&mut self, now: f64) {
+        if self.editor.docs.score.dirty {
+            self.ui.dialogs.pending_load = Some(PendingLoad::PracticeRhythm);
+        } else {
+            self.save_practice_rhythm(now);
+        }
+    }
+
+    /// Save Practice's rhythm as a new pattern and open the library with its
+    /// name to type. Practice stays the
+    /// page underneath; the pattern opens in the score tab once the library
+    /// closes (see [`Self::open_practice_save`]). Returns the pattern's id.
+    pub(crate) fn save_practice_rhythm(&mut self, now: f64) -> u64 {
+        let id = self.add_practice_pattern();
+        let library = &mut self.ui.library;
+        library.renaming_pattern = Some(id);
+        library.rename_typed =
+            self.editor.library.get(id).map(|p| p.name.clone()).unwrap_or_default();
+        library.open_on_close = Some(id);
+        self.ui.dialogs.picker = Some(pickers::Picker::Library);
+        self.saved(id, now);
+        id
+    }
+
+    /// Once the library is closed, the pattern just saved from Practice
+    /// opens in the score tab, unless it was deleted meanwhile. Run every
+    /// frame.
+    pub(crate) fn open_practice_save(&mut self) {
+        if self.ui.dialogs.picker == Some(pickers::Picker::Library) {
+            return;
+        }
+        if let Some(id) = self.ui.library.open_on_close.take()
+            && self.editor.library.contains(id)
+        {
+            self.load_pattern(id);
+        }
+    }
+
+    /// Replace the score tab's score + tempo with the saved pattern `id`,
+    /// and show the score tab: every pattern opens there, on either staff,
+    /// also while that tab is hidden (it shows in the tab bar then). The
+    /// score swap is undoable; the tempo change is applied directly (tempo
+    /// is not part of the undo snapshot). Transport is stopped so playback
+    /// restarts cleanly.
     pub(crate) fn load_pattern(&mut self, id: u64) {
         let Some(pattern) = self.editor.library.get(id) else {
             return;
@@ -861,21 +934,11 @@ impl Grooph {
         // A drum struck by two voices at once is a change to save.
         let undoubled = score.undouble_instruments();
         let bpm = pattern.bpm;
-        // Every pattern opens in the score tab, on either staff; while that
-        // tab is hidden, a rhythm of the one line opens in Practice.
-        if self.pattern_opens_on_practice(&score) {
-            self.replace_practice_from_link(score);
-            self.playback_ctl.settings.bpm = bpm;
-            self.ui.dialogs.picker = None;
-            self.select_tab(Tab::Practice);
-            return;
-        }
 
-        // The score tab's score is replaced.
         self.stop_transport();
         self.show_document(Document::Score);
         self.replace_score(score, Origin::Pattern { id, undoubled });
-        self.playback_ctl.settings.bpm = bpm;
+        self.playback_ctl.settings.score.bpm = bpm;
         self.show_loaded_pattern();
     }
 
@@ -891,15 +954,10 @@ impl Grooph {
     /// Entry point for the load button: if the working score has unsaved changes,
     /// defer to the confirmation dialog; otherwise load immediately.
     pub(crate) fn request_load_pattern(&mut self, id: u64) {
-        // A rhythm for Practice, which a load replaces without asking: the
-        // score tab's changes are not at stake.
-        if self.editor.library.get(id).is_some_and(|p| self.pattern_opens_on_practice(&p.score)) {
-            self.load_pattern(id);
-            return;
-        }
         let dirty = self.editor.docs.score.dirty;
         if self.editor.docs.score.active_pattern_id == Some(id) && !dirty {
             // Already loaded and unchanged.
+            self.ui.library.open_on_close = None;
             self.show_document(Document::Score);
             self.show_loaded_pattern();
             return;
@@ -915,6 +973,11 @@ impl Grooph {
     pub(crate) fn delete_pattern(&mut self, id: u64) {
         self.editor.library.remove(id);
         self.forget_pattern(id);
+        // Saved from Practice and deleted before the library closed: the
+        // score tab keeps its score.
+        if self.ui.library.open_on_close == Some(id) {
+            self.ui.library.open_on_close = None;
+        }
         if matches!(self.ui.dialogs.pending_load, Some(PendingLoad::Pattern(p)) if p == id) {
             self.ui.dialogs.pending_load = None;
         }
@@ -969,9 +1032,9 @@ impl Grooph {
             None => {}
         }
         if let Some(bpm) = link.bpm
-            && bpm != self.playback_ctl.settings.bpm
+            && bpm != self.tab_playback().bpm
         {
-            self.playback_ctl.settings.bpm = bpm;
+            self.tab_playback_mut().bpm = bpm;
             // A rhythm from the link is clean (see `Origin::Link`);
             // otherwise the tempo is a change of the saved score, as in the
             // BPM picker.
@@ -982,12 +1045,12 @@ impl Grooph {
             });
         }
         if let Some(swing) = link.swing {
-            self.playback_ctl.settings.swing = swing;
+            self.tab_playback_mut().swing = swing;
         }
         // A rhythm's link plays the click it was shared with: its click bar
         // if it carries one, else the standard click.
         if shares_score {
-            self.playback_ctl.settings.metronome_click = link.click.is_some();
+            self.tab_playback_mut().metronome_click = link.click.is_some();
         }
         if let Some(bar) = link.click {
             self.set_meter_click_bar(bar);
@@ -1003,13 +1066,6 @@ impl Grooph {
         !self.ui.view.show_score_tab
             || (!link.score_tab
                 && matches!(&link.content, Some(LinkContent::Score(s)) if s.staff == grooph_measure::StaffKind::Line))
-    }
-
-    /// Whether a library pattern of `score` opens on the practice page: one
-    /// of the one line while the score tab is hidden. Otherwise every pattern
-    /// opens in the score tab.
-    fn pattern_opens_on_practice(&self, score: &Score) -> bool {
-        !self.ui.view.show_score_tab && score.staff == grooph_measure::StaffKind::Line
     }
 
     /// A rhythm shared from the practice page replaces its rhythm, as a new
@@ -1035,12 +1091,16 @@ impl Grooph {
         self.show_loaded_pattern();
     }
 
-    /// Run a pending load after the unsaved-changes dialog.
-    pub(crate) fn finish_pending_load(&mut self, pending: PendingLoad) {
+    /// Run a pending load after the unsaved-changes dialog. `now` is the
+    /// UI time, for "✓ Saved".
+    pub(crate) fn finish_pending_load(&mut self, pending: PendingLoad, now: f64) {
         match pending {
             PendingLoad::Pattern(id) => self.load_pattern(id),
             PendingLoad::Link(link) => self.apply_link(*link),
             PendingLoad::NewScore(staff) => self.new_score(staff),
+            PendingLoad::PracticeRhythm => {
+                self.save_practice_rhythm(now);
+            }
         }
     }
 
@@ -1117,15 +1177,13 @@ impl Grooph {
         let ui = &mut self.ui;
         if ui.dialogs.link_error.take().is_some()
             || ui.dialogs.pending_load.take().is_some()
-            || ui.library.renaming_preset.take().is_some()
             || ui.library.renaming_pattern.take().is_some()
         {
             return true;
         }
-        if ui.dialogs.picker.take().is_some() {
+        if ui.dialogs.picker.is_some() {
             // As when the picker closes itself.
-            ui.dialogs.picker = ui.dialogs.picker_return.take();
-            ui.dialogs.tap_tempo.reset();
+            ui.dialogs.close_picker();
             return true;
         }
         ui.mode = match ui.mode {
@@ -1178,7 +1236,8 @@ impl Grooph {
     }
 
     fn start_playback(&mut self) {
-        if self.playback_ctl.transport_state == TransportState::Playing {
+        // The drum map list takes the MIDI input: no run while it is open.
+        if self.playback_ctl.transport_state == TransportState::Playing || self.drum_map_open() {
             return;
         }
         // Each run of endless mode is a new one, from two fresh bars.
@@ -1217,12 +1276,12 @@ impl Grooph {
             return;
         }
         self.playback_ctl.transport_state = TransportState::Stopped;
-        if self.playback_ctl.settings.tempo_ramp.keep_reached
+        if self.tab_playback().tempo_ramp.keep_reached
             && let Some(bpm) = self.playback_ctl.playback.ramp_bpm
-            && bpm != self.playback_ctl.settings.bpm
+            && bpm != self.tab_playback().bpm
             && self.playback_ctl.play_along.calibration.is_none()
         {
-            self.playback_ctl.settings.bpm = bpm;
+            self.tab_playback_mut().bpm = bpm;
             self.score_changed(ScoreChange::Tempo);
         }
         if self.playback_ctl.play_along.calibration.is_some() {
@@ -1410,15 +1469,17 @@ impl Grooph {
                 instrument: Instrument::Snare,
                 settings: state.editor,
                 library: state.library,
-                presets: state.presets,
-                active_preset: None,
                 state_backup,
                 metronome: MetronomeState::new(),
                 generator,
             },
             playback_ctl: PlaybackController {
                 transport_state: TransportState::Stopped,
-                settings: state.playback,
+                settings: TabPlayback {
+                    metronome: state.metronome_playback,
+                    practice: state.practice_playback,
+                    score: state.score_playback,
+                },
                 audio: None,
                 audio_cfg: AudioConfig { settings: state.audio_settings },
                 playback: PlaybackState::default(),
@@ -1448,7 +1509,6 @@ impl Grooph {
                 embed: embed.map(|params| Embed::new(&cc.egui_ctx, params)),
             },
         };
-        app.editor.active_preset = app.matching_preset();
         // The page the More screen was opened from, then the saved tab;
         // Practice for the score tab while it is hidden.
         let shown = |tab| match tab {
@@ -1490,7 +1550,7 @@ impl Grooph {
 #[cfg(test)]
 mod tests {
     use super::{CountingBase, CountingSettings, PersistedState};
-    use crate::documents::Doc;
+    use crate::documents::{Doc, Document};
     use crate::shell::Tab;
     use grooph_measure::counting::CountingSystem;
     use grooph_measure::{Measure, Score, TimeSignature};
@@ -1558,7 +1618,7 @@ mod tests {
         assert_eq!(app.ui.mode, Mode::MoreMenu);
         // The MIDI input picker opened from Play along goes back to it.
         app.ui.dialogs.picker = Some(Picker::MidiInput);
-        app.ui.dialogs.picker_return = Some(Picker::PlayAlong);
+        app.ui.dialogs.picker_return = vec![Picker::PlayAlong];
         assert!(app.back());
         assert_eq!(app.ui.dialogs.picker, Some(Picker::PlayAlong));
         assert!(app.back());
@@ -1693,7 +1753,7 @@ mod tests {
         assert_eq!(app.tab(), Tab::More);
         assert_eq!(app.ui.dialogs.picker, Some(Picker::Library));
         let pending = app.ui.dialogs.pending_load.take().unwrap();
-        app.finish_pending_load(pending);
+        app.finish_pending_load(pending, 0.0);
         assert_eq!(app.tab(), Tab::Score);
         assert_eq!(app.ui.dialogs.picker, None);
         assert_eq!(app.editor.rhythm_doc().active_pattern_id, Some(id));
@@ -1781,43 +1841,16 @@ mod tests {
     }
 
     #[test]
-    fn a_preset_from_the_library_opens_the_practice_page() {
-        use super::{Grooph, Mode};
-        use crate::pickers::Picker;
-        use crate::presets::{PresetId, builtin_presets};
-
-        let cc = crate::test_support::creation_context(eframe::egui::Context::default());
-        let mut app = Grooph::new(&cc);
-        // Through the metronome: the click bar stays the metronome's.
-        app.select_tab(Tab::Metronome);
-        let click_bar = format!("{:?}", app.editor.doc().score());
-        app.select_tab(Tab::More);
-        app.ui.dialogs.picker = Some(Picker::Library);
-        let last = builtin_presets().len() - 1;
-        app.open_preset(PresetId::BuiltIn(last));
-        assert_eq!(app.tab(), Tab::Practice);
-        assert_eq!(app.ui.mode, Mode::Playback);
-        assert_eq!(app.ui.dialogs.picker, None);
-        assert_eq!(app.editor.active_preset, Some(PresetId::BuiltIn(last)));
-        assert_eq!(
-            app.editor.generator.config.settings,
-            builtin_presets()[last].1.generator.settings
-        );
-        app.select_tab(Tab::Metronome);
-        assert_eq!(format!("{:?}", app.editor.doc().score()), click_bar);
-    }
-
-    #[test]
-    fn the_score_tabs_library_holds_rhythms_only() {
+    fn the_library_holds_rhythms_only() {
         use super::Grooph;
-        use crate::library_panel::LibraryTab;
         use crate::pickers::Picker;
         use eframe::egui::{Pos2, RawInput, Rect, Shape, vec2};
 
         let ctx = eframe::egui::Context::default();
         let cc = crate::test_support::creation_context(ctx.clone());
         let mut app = Grooph::new(&cc);
-        app.ui.library.tab = LibraryTab::Presets;
+        app.select_tab(Tab::Score);
+        app.save_pattern_as();
         let texts = |app: &mut Grooph| {
             let mut texts = Vec::new();
             for _ in 0..2 {
@@ -1839,58 +1872,24 @@ mod tests {
             }
             texts
         };
-        // From More: both halves.
-        app.select_tab(Tab::More);
-        app.ui.dialogs.picker = Some(Picker::Library);
-        assert!(texts(&mut app).iter().any(|t| t == "Presets"));
-        // From the score tab's card: its rhythms, no presets.
-        app.select_tab(Tab::Score);
-        app.ui.dialogs.picker = Some(Picker::Library);
-        let shown = texts(&mut app);
-        assert!(!shown.iter().any(|t| t == "Presets"), "{shown:?}");
-        assert!(shown.iter().any(|t| t.contains("Save as new")), "{shown:?}");
-    }
-
-    #[test]
-    fn library_and_preset_picker_render_at_phone_width() {
-        use super::Grooph;
-        use crate::library_panel::LibraryTab;
-        use crate::pickers::Picker;
-        use eframe::egui::{Pos2, RawInput, Rect, vec2};
-
-        let ctx = eframe::egui::Context::default();
-        let cc = crate::test_support::creation_context(ctx.clone());
-        let mut app = Grooph::new(&cc);
-        app.select_tab(Tab::Practice);
-        app.save_preset_as("Mine");
-        app.select_tab(Tab::More);
-        app.ui.dialogs.picker = Some(Picker::Library);
-        for tab in [LibraryTab::Rhythms, LibraryTab::Presets] {
-            app.ui.library.tab = tab;
-            for _ in 0..2 {
-                let screen = Rect::from_min_size(Pos2::ZERO, vec2(390.0, 844.0));
-                let input = RawInput { screen_rect: Some(screen), ..Default::default() };
-                let mut output = ctx.run_ui(input, |ui| {
-                    app.apply_style(ui);
-                    app.settings_picker(ui);
-                });
-                output.textures_delta.clear();
+        // From every page, and from More in front of each: the rhythms, no
+        // halves and no presets.
+        for tab in [Tab::Practice, Tab::Score, Tab::Metronome] {
+            for more in [false, true] {
+                app.select_tab(tab);
+                if more {
+                    app.select_tab(Tab::More);
+                }
+                app.ui.dialogs.picker = Some(Picker::Library);
+                let shown = texts(&mut app);
+                assert!(shown.iter().any(|t| t == "Pattern 1"), "{tab:?}: {shown:?}");
+                assert!(
+                    !shown.iter().any(|t| t == "Rhythms" || t.contains("Preset")),
+                    "{tab:?}: {shown:?}"
+                );
+                assert_eq!(app.ui.dialogs.picker, Some(Picker::Library));
             }
         }
-        assert_eq!(app.ui.dialogs.picker, Some(Picker::Library));
-        // The Preset picker on the practice page shows the same cards.
-        app.select_tab(Tab::Practice);
-        app.ui.dialogs.picker = Some(Picker::Preset);
-        for _ in 0..2 {
-            let screen = Rect::from_min_size(Pos2::ZERO, vec2(390.0, 844.0));
-            let input = RawInput { screen_rect: Some(screen), ..Default::default() };
-            let mut output = ctx.run_ui(input, |ui| {
-                app.apply_style(ui);
-                app.settings_picker(ui);
-            });
-            output.textures_delta.clear();
-        }
-        assert_eq!(app.ui.dialogs.picker, Some(Picker::Preset));
     }
 
     /// Runs frames of the shell at phone size, `time` seconds into the run,
@@ -1923,7 +1922,7 @@ mod tests {
         let mut app = Grooph::new(&cc);
         app.select_tab(Tab::Practice);
         app.editor.generator.config.endless = true;
-        app.playback_ctl.settings.bpm = 240;
+        app.tab_playback_mut().bpm = 240;
         app.start_playback();
         app.select_tab(Tab::More);
         // A minute at 240 BPM: sixty bars of 4/4 go by.
@@ -1947,7 +1946,7 @@ mod tests {
         app.select_tab(Tab::Score);
         app.edit_page();
         let score = format!("{:?}", app.editor.doc().score());
-        app.playback_ctl.settings.bpm = 240;
+        app.tab_playback_mut().bpm = 240;
         app.start_playback();
         // Also past the last bar and behind the More screen opened from Edit.
         let mut time = 0.0;
@@ -1997,7 +1996,6 @@ mod tests {
     #[test]
     fn save_is_off_while_there_is_nothing_new_to_save() {
         use super::Grooph;
-        use crate::presets::{PresetId, builtin_presets};
 
         let cc = crate::test_support::creation_context(eframe::egui::Context::default());
         let mut app = Grooph::new(&cc);
@@ -2013,25 +2011,6 @@ mod tests {
         assert!(target.overwrites.is_some() && !target.enabled);
         app.editor.rhythm_doc_mut().unwrap().dirty = true;
         assert!(app.rhythm_save_target().enabled);
-
-        // Presets: an unchanged built-in has nothing to save, a changed one
-        // saves a new preset.
-        app.select_tab(Tab::Practice);
-        app.apply_preset(PresetId::BuiltIn(0));
-        assert_eq!(app.editor.generator.config.settings, builtin_presets()[0].1.generator.settings);
-        let target = app.preset_save_target();
-        assert_eq!((target.overwrites, target.enabled), (None, false));
-        app.playback_ctl.settings.bpm += 1;
-        let target = app.preset_save_target();
-        assert_eq!((target.overwrites, target.enabled), (None, true));
-        let id = app.save_preset_as("");
-        let target = app.preset_save_target();
-        assert_eq!(target.overwrites, app.editor.presets.get(id).map(|p| p.name.clone()));
-        assert!(!target.enabled);
-        app.playback_ctl.settings.bpm += 1;
-        assert!(app.preset_save_target().enabled);
-        app.editor.active_preset = None;
-        assert!(app.preset_save_target().enabled);
     }
 
     #[test]
@@ -2053,7 +2032,7 @@ mod tests {
         assert_eq!(app.playback_ctl.transport_state, TransportState::Playing);
         // Loading after all puts the metronome away.
         let pending = app.ui.dialogs.pending_load.take().unwrap();
-        app.finish_pending_load(pending);
+        app.finish_pending_load(pending, 0.0);
         assert!(!app.metronome_mode());
         assert_eq!(app.editor.rhythm_doc().active_pattern_id, Some(id));
     }
@@ -2242,15 +2221,267 @@ mod tests {
         assert!(
             matches!(app.ui.dialogs.pending_load, Some(crate::state::PendingLoad::Pattern(id)) if id == old)
         );
-        // While the score tab is hidden, the one line's opens in Practice, as
-        // before, without asking about the score tab's changes.
+        // While the score tab is hidden, too: it then shows in the tab bar.
         app.ui.dialogs.pending_load = None;
+        app.editor.docs.score.dirty = false;
         app.ui.view.show_score_tab = false;
+        for (id, rhythm) in [(old, "4/4 h h"), (groove, "4/4 H:q S-H:q H:q S-H:q ; K:h K:h")] {
+            app.select_tab(Tab::Practice);
+            let practice_before = format_score(&app.editor.docs.practice.score).unwrap();
+            app.request_load_pattern(id);
+            assert!(app.ui.dialogs.pending_load.is_none());
+            assert_eq!(app.document(), super::Document::Score);
+            assert_eq!(app.tab(), Tab::Score);
+            assert_eq!(format_score(app.editor.doc().score()).unwrap(), rhythm);
+            assert_eq!(app.editor.docs.score.active_pattern_id, Some(id));
+            assert_eq!(app.editor.docs.practice.active_pattern_id, None);
+            assert_eq!(format_score(&app.editor.docs.practice.score).unwrap(), practice_before);
+        }
+        // And asks about the score tab's changes as well.
+        app.editor.docs.score.dirty = true;
         app.request_load_pattern(old);
-        assert!(app.ui.dialogs.pending_load.is_none());
+        assert!(app.ui.dialogs.pending_load.is_some());
+    }
+
+    /// An app on the practice page with a rhythm of its own, the score
+    /// tab's score clean or `dirty`.
+    fn practice_app(dirty: bool) -> super::Grooph {
+        use grooph_measure::notation::parse_score;
+        let cc = crate::test_support::creation_context(eframe::egui::Context::default());
+        let mut app = super::Grooph::new(&cc);
+        app.select_tab(Tab::Score);
+        app.editor.docs.score.score = parse_score("4/4 q q q q").unwrap();
+        app.editor.docs.score.dirty = dirty;
+        app.select_tab(Tab::Practice);
+        app.editor.docs.practice.score = parse_score("4/4 e e q h").unwrap();
+        app.tab_playback_mut().bpm = 97;
+        app
+    }
+
+    fn text_of(score: &Score) -> String {
+        grooph_measure::notation::format_score(score).unwrap()
+    }
+
+    #[test]
+    fn practice_saves_its_rhythm_and_opens_it_in_the_score_tab() {
+        use crate::pickers::Picker;
+
+        for show_score_tab in [false, true] {
+            let mut app = practice_app(false);
+            app.ui.view.show_score_tab = show_score_tab;
+            app.editor.library.add("Pattern 1".into(), app.editor.docs.score.score.clone(), 80);
+            app.start_playback();
+            app.request_save_practice_rhythm(2.0);
+            // One new pattern, Practice's rhythm at the current tempo.
+            assert_eq!(app.editor.library.patterns.len(), 2);
+            let id = app.editor.library.patterns[1].id;
+            let saved = app.editor.library.get(id).unwrap();
+            assert_eq!(saved.name, "Pattern 2");
+            assert_eq!(text_of(&saved.score), "4/4 e e q h");
+            assert_eq!(saved.bpm, 97);
+            // The library on its rhythms, with the name to type, over
+            // Practice.
+            assert_eq!(app.ui.dialogs.picker, Some(Picker::Library));
+            assert_eq!(app.ui.library.renaming_pattern, Some(id));
+            assert_eq!(app.ui.library.rename_typed, "Pattern 2");
+            assert_eq!(app.ui.library.saved, Some((id, 2.0)));
+            assert_eq!(app.document(), super::Document::Practice);
+            assert_eq!(app.tab(), Tab::Practice);
+            app.open_practice_save();
+            assert_eq!(app.tab(), Tab::Practice);
+            assert_eq!(text_of(&app.editor.docs.score.score), "4/4 q q q q");
+
+            // Closed: the score tab shows it, unchanged, and playback stops.
+            app.ui.dialogs.picker = None;
+            app.open_practice_save();
+            assert_eq!(app.tab(), Tab::Score);
+            assert_eq!(text_of(&app.editor.docs.score.score), "4/4 e e q h");
+            assert_eq!(app.editor.docs.score.active_pattern_id, Some(id));
+            assert!(!app.editor.docs.score.dirty);
+            assert_eq!(app.playback_ctl.transport_state, super::TransportState::Stopped);
+            // Practice keeps its rhythm, without a pattern.
+            assert_eq!(text_of(&app.editor.docs.practice.score), "4/4 e e q h");
+            assert_eq!(app.editor.docs.practice.active_pattern_id, None);
+            assert!(app.ui.library.open_on_close.is_none());
+
+            // Saving again gives a second pattern.
+            app.select_tab(Tab::Practice);
+            app.request_save_practice_rhythm(3.0);
+            assert_eq!(app.editor.library.patterns.len(), 3);
+            assert_eq!(app.editor.library.patterns[2].name, "Pattern 3");
+        }
+    }
+
+    #[test]
+    fn saving_from_practice_asks_about_the_score_tabs_changes() {
+        use crate::pickers::Picker;
+        use crate::state::PendingLoad;
+
+        // Cancel: nothing saved, nothing opened.
+        let mut app = practice_app(true);
+        app.request_save_practice_rhythm(1.0);
+        assert!(matches!(app.ui.dialogs.pending_load, Some(PendingLoad::PracticeRhythm)));
+        assert!(app.editor.library.patterns.is_empty());
+        assert_eq!(app.ui.dialogs.picker, None);
+        app.ui.dialogs.pending_load = None;
+        app.open_practice_save();
+        assert!(app.editor.library.patterns.is_empty());
         assert_eq!(app.tab(), Tab::Practice);
-        assert_eq!(format_score(app.editor.doc().score()).unwrap(), "4/4 h h");
+        assert_eq!(text_of(&app.editor.docs.score.score), "4/4 q q q q");
         assert!(app.editor.docs.score.dirty);
+        assert_eq!(text_of(&app.editor.docs.practice.score), "4/4 e e q h");
+
+        // "Save & …": the score tab's score is saved first.
+        let mut app = practice_app(true);
+        app.request_save_practice_rhythm(1.0);
+        let pending = app.ui.dialogs.pending_load.take().unwrap();
+        app.save_active_pattern();
+        app.finish_pending_load(pending, 1.0);
+        assert_eq!(app.editor.library.patterns.len(), 2);
+        assert_eq!(text_of(&app.editor.library.patterns[0].score), "4/4 q q q q");
+        let id = app.editor.library.patterns[1].id;
+        assert_eq!(text_of(&app.editor.library.patterns[1].score), "4/4 e e q h");
+        assert_eq!(app.ui.dialogs.picker, Some(Picker::Library));
+        app.ui.dialogs.picker = None;
+        app.open_practice_save();
+        assert_eq!(app.tab(), Tab::Score);
+        assert_eq!(app.editor.docs.score.active_pattern_id, Some(id));
+        assert!(!app.editor.docs.score.dirty);
+
+        // Without saving: only Practice's rhythm is saved.
+        let mut app = practice_app(true);
+        app.request_save_practice_rhythm(1.0);
+        let pending = app.ui.dialogs.pending_load.take().unwrap();
+        app.finish_pending_load(pending, 1.0);
+        assert_eq!(app.editor.library.patterns.len(), 1);
+        app.ui.dialogs.picker = None;
+        app.open_practice_save();
+        assert_eq!(text_of(&app.editor.docs.score.score), "4/4 e e q h");
+        assert!(!app.editor.docs.score.dirty);
+    }
+
+    #[test]
+    fn another_score_in_the_score_tab_drops_the_rhythm_saved_from_practice() {
+        use grooph_link::{LinkContent, SharedLink};
+        use grooph_measure::StaffKind;
+
+        for staff in [StaffKind::Line, StaffKind::Kit] {
+            let mut app = practice_app(false);
+            app.ui.view.show_score_tab = true;
+            app.save_practice_rhythm(1.0);
+            // "New rhythm" / "New drum groove" in the library.
+            app.new_score(staff);
+            assert!(app.ui.library.open_on_close.is_none());
+            app.open_practice_save();
+            assert_eq!(app.editor.docs.score.score.staff, staff);
+            assert_eq!(app.editor.docs.score.active_pattern_id, None);
+        }
+
+        // Another pattern, or a score link.
+        let mut app = practice_app(false);
+        let other = app.editor.library.add("Other".into(), app.editor.docs.score.score.clone(), 90);
+        app.save_practice_rhythm(1.0);
+        app.request_load_pattern(other);
+        app.open_practice_save();
+        assert_eq!(app.editor.docs.score.active_pattern_id, Some(other));
+
+        let mut app = practice_app(false);
+        app.ui.view.show_score_tab = true;
+        app.save_practice_rhythm(1.0);
+        let score = grooph_measure::notation::parse_score("kit 4/4 H:h H:h ; K:w").unwrap();
+        app.open_link(SharedLink {
+            content: Some(LinkContent::Score(score)),
+            ..Default::default()
+        });
+        app.open_practice_save();
+        assert_eq!(app.editor.docs.score.active_pattern_id, None);
+        assert_eq!(text_of(&app.editor.docs.score.score), "4/4 H:h H:h ; K:w");
+    }
+
+    #[test]
+    fn practice_saves_its_endless_bars_as_they_are() {
+        let mut app = practice_app(false);
+        app.editor.generator.config.endless = true;
+        app.generate_new_score();
+        let rhythm = text_of(&app.editor.docs.practice.score);
+        let id = app.save_practice_rhythm(1.0);
+        assert_eq!(text_of(&app.editor.library.get(id).unwrap().score), rhythm);
+    }
+
+    #[test]
+    fn a_rhythm_deleted_before_the_library_closes_does_not_open() {
+        let mut app = practice_app(false);
+        let id = app.save_practice_rhythm(1.0);
+        app.delete_pattern(id);
+        app.ui.dialogs.picker = None;
+        app.open_practice_save();
+        assert_eq!(app.tab(), Tab::Practice);
+        assert_eq!(text_of(&app.editor.docs.score.score), "4/4 q q q q");
+        assert!(app.editor.library.patterns.is_empty());
+    }
+
+    #[test]
+    fn the_library_saves_the_rhythm_of_the_page_it_was_opened_from() {
+        use crate::library_panel::RhythmSaving;
+
+        let mut app = practice_app(false);
+        assert_eq!(app.rhythm_saving(), RhythmSaving::Practice);
+        app.select_tab(Tab::More);
+        assert_eq!(app.rhythm_saving(), RhythmSaving::Practice);
+        app.select_tab(Tab::Score);
+        assert_eq!(app.rhythm_saving(), RhythmSaving::Score);
+        app.select_tab(Tab::More);
+        assert_eq!(app.rhythm_saving(), RhythmSaving::Score);
+        app.select_tab(Tab::Metronome);
+        app.select_tab(Tab::More);
+        assert_eq!(app.rhythm_saving(), RhythmSaving::Off);
+    }
+
+    /// Runs the shell with the library open on `tab`'s page; the texts it
+    /// painted.
+    fn library_texts(app: &mut super::Grooph, tab: Tab) -> Vec<String> {
+        let ctx = eframe::egui::Context::default();
+        app.select_tab(tab);
+        app.select_tab(Tab::More);
+        app.ui.dialogs.picker = Some(crate::pickers::Picker::Library);
+        let mut texts = vec![];
+        for i in 0..3 {
+            let input = eframe::egui::RawInput {
+                screen_rect: Some(eframe::egui::Rect::from_min_size(
+                    eframe::egui::Pos2::ZERO,
+                    eframe::egui::vec2(390.0, 844.0),
+                )),
+                time: Some(f64::from(i) * 0.1),
+                ..Default::default()
+            };
+            let mut output = ctx.run_ui(input, |ui| {
+                app.apply_style(ui);
+                app.shell_ui(ui);
+            });
+            output.textures_delta.clear();
+            texts = output
+                .shapes
+                .iter()
+                .filter_map(|c| match &c.shape {
+                    eframe::egui::Shape::Text(t) => Some(t.galley.text().to_owned()),
+                    _ => None,
+                })
+                .collect();
+        }
+        texts
+    }
+
+    #[test]
+    fn the_library_shows_the_save_buttons_of_its_page() {
+        let mut app = practice_app(false);
+        let texts = library_texts(&mut app, Tab::Score);
+        assert!(texts.iter().any(|t| t == "💾 Save"), "{texts:?}");
+        assert!(texts.iter().any(|t| t == "➕ Save as new"), "{texts:?}");
+        let texts = library_texts(&mut app, Tab::Practice);
+        assert!(!texts.iter().any(|t| t.starts_with("💾 Save")), "{texts:?}");
+        assert_eq!(texts.iter().filter(|t| *t == "➕ Save as new").count(), 1, "{texts:?}");
+        let texts = library_texts(&mut app, Tab::Metronome);
+        assert!(!texts.iter().any(|t| t.contains("Save")), "{texts:?}");
     }
 
     #[test]
@@ -2533,7 +2764,7 @@ mod tests {
     #[test]
     fn save_as_new_opens_the_name_and_says_saved() {
         use super::Grooph;
-        use crate::library_panel::{LibraryItem, SaveAs};
+        use crate::library_panel::SaveAs;
 
         let cc = crate::test_support::creation_context(eframe::egui::Context::default());
         let mut app = Grooph::new(&cc);
@@ -2542,22 +2773,14 @@ mod tests {
         let id = app.save_rhythm(SaveAs::New, 1.0);
         assert_eq!(app.ui.library.renaming_pattern, Some(id));
         assert_eq!(app.ui.library.rename_typed, app.editor.library.get(id).unwrap().name);
-        assert_eq!(app.ui.library.saved, Some((LibraryItem::Pattern(id), 1.0)));
-        assert_eq!(app.ui.library.scroll_to, Some(LibraryItem::Pattern(id)));
+        assert_eq!(app.ui.library.saved, Some((id, 1.0)));
+        assert_eq!(app.ui.library.scroll_to, Some(id));
         // Overwriting names no new pattern and opens no name.
         app.ui.library.renaming_pattern = None;
         app.editor.rhythm_doc_mut().unwrap().dirty = true;
         assert_eq!(app.save_rhythm(SaveAs::Update, 2.0), id);
         assert_eq!(app.editor.library.patterns.len(), 1);
         assert_eq!(app.ui.library.renaming_pattern, None);
-
-        app.select_tab(Tab::Practice);
-        let preset = app.save_preset(SaveAs::New, 3.0);
-        assert_eq!(app.ui.library.renaming_preset, Some(preset));
-        assert_eq!(app.ui.library.saved, Some((LibraryItem::Preset(preset), 3.0)));
-        app.playback_ctl.settings.bpm += 1;
-        assert_eq!(app.save_preset(SaveAs::Update, 4.0), preset);
-        assert_eq!(app.editor.presets.get(preset).unwrap().settings, app.preset_snapshot());
     }
 
     #[test]
@@ -2570,8 +2793,10 @@ mod tests {
         let cc = crate::test_support::creation_context(ctx.clone());
         let mut app = Grooph::new(&cc);
         let mut time = 0.0;
-        for picker in [Picker::Mixer, Picker::Settings, Picker::Help, Picker::Preset] {
-            app.select_tab(if picker == Picker::Preset { Tab::Practice } else { Tab::More });
+        // The tempo ramp shows all of its fields while on.
+        app.tab_playback_mut().tempo_ramp.enabled = true;
+        for picker in [Picker::Mixer, Picker::Settings, Picker::Help, Picker::TempoRamp] {
+            app.select_tab(Tab::More);
             app.ui.dialogs.picker = Some(picker);
             for _ in 0..3 {
                 time += 0.1;
@@ -2582,12 +2807,75 @@ mod tests {
         }
     }
 
+    #[test]
+    fn the_tempo_ramp_picker_fits_a_phone_held_sideways() {
+        use super::Grooph;
+        use crate::pickers::Picker;
+        use eframe::egui::{Id, Pos2, RawInput, Rect, vec2};
+
+        let ctx = eframe::egui::Context::default();
+        let cc = crate::test_support::creation_context(ctx.clone());
+        let mut app = Grooph::new(&cc);
+        app.select_tab(Tab::Practice);
+        app.tab_playback_mut().tempo_ramp.enabled = true;
+        app.ui.dialogs.picker = Some(Picker::TempoRamp);
+        let screen = Rect::from_min_size(Pos2::ZERO, vec2(844.0, 390.0));
+        for i in 0..3 {
+            let input = RawInput {
+                screen_rect: Some(screen),
+                time: Some(i as f64 * 0.1),
+                ..Default::default()
+            };
+            let mut output = ctx.run_ui(input, |ui| {
+                app.apply_style(ui);
+                app.shell_ui(ui);
+            });
+            output.textures_delta.clear();
+        }
+        let rect = ctx.memory(|m| m.area_rect(Id::unique("settings_picker"))).unwrap();
+        // Done, at its bottom, stays on the screen.
+        assert!(rect.top() >= 0.0 && rect.bottom() <= screen.height(), "{rect:?}");
+    }
+
+    #[test]
+    fn the_settings_have_no_tempo_ramp_section() {
+        use super::Grooph;
+        use crate::pickers::Picker;
+        use eframe::egui::{Pos2, RawInput, Rect, Shape, vec2};
+
+        let ctx = eframe::egui::Context::default();
+        let cc = crate::test_support::creation_context(ctx.clone());
+        let mut app = Grooph::new(&cc);
+        app.select_tab(Tab::More);
+        app.ui.dialogs.picker = Some(Picker::Settings);
+        let mut texts = Vec::new();
+        for _ in 0..2 {
+            let screen = Rect::from_min_size(Pos2::ZERO, vec2(390.0, 844.0));
+            let input = RawInput { screen_rect: Some(screen), ..Default::default() };
+            let mut output = ctx.run_ui(input, |ui| {
+                app.apply_style(ui);
+                app.settings_picker(ui);
+            });
+            output.textures_delta.clear();
+            texts = output
+                .shapes
+                .iter()
+                .filter_map(|clipped| match &clipped.shape {
+                    Shape::Text(text) => Some(text.galley.text().to_owned()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+        }
+        assert!(texts.iter().any(|t| t == "Developer settings"), "{texts:?}");
+        assert!(!texts.iter().any(|t| t.to_lowercase().contains("tempo ramp")), "{texts:?}");
+    }
+
     /// Everything a calibration run must leave alone, as text.
     fn user_state(app: &super::Grooph) -> String {
         let docs = &app.editor.docs;
         let audio = &app.playback_ctl.settings;
         format!(
-            "{:?} {:?} {:?} {:?} {:?} {:?} {:?} {:?} {} {} {} {} {} | {} {:?} {} {:?} {:?} {} {}",
+            "{:?} {:?} {:?} {:?} {:?} {:?} {:?} {:?} {} {} {} {} {} | {:?} {} {}",
             docs.metronome.score(),
             docs.practice.score,
             docs.score.score,
@@ -2601,11 +2889,7 @@ mod tests {
             docs.metronome.history().can_undo(),
             docs.practice.history.can_undo(),
             docs.score.history.can_undo(),
-            app.playback_ctl.settings.bpm,
-            audio.swing,
-            audio.count_in,
-            audio.gap_click,
-            audio.tempo_ramp,
+            audio,
             app.editor.generator.config.endless,
             app.editor.generator.config.ghost_notes,
         )
@@ -2620,13 +2904,13 @@ mod tests {
         for page in [Tab::Metronome, Tab::Practice, Tab::Score] {
             let cc = crate::test_support::creation_context(eframe::egui::Context::default());
             let mut app = Grooph::new(&cc);
-            app.playback_ctl.settings.bpm = 133;
-            app.playback_ctl.settings.swing =
+            app.select_tab(page);
+            app.tab_playback_mut().bpm = 133;
+            app.tab_playback_mut().swing =
                 Swing { unit: grooph_measure::swing::SwingUnit::Eighths, percent: 66 };
             app.editor.generator.config.endless = true;
             app.editor.generator.config.ghost_notes = true;
-            app.playback_ctl.settings.gap_click.enabled = true;
-            app.select_tab(page);
+            app.tab_playback_mut().gap_click.enabled = true;
             let document = app.document();
             app.select_tab(Tab::More);
             let before = user_state(&app);
@@ -2654,9 +2938,14 @@ mod tests {
             assert_eq!(app.document(), document, "{page:?}");
             assert_eq!(user_state(&app), before, "{page:?}");
             let saved = PersistedState::from_app(&app);
-            assert_eq!(saved.playback.bpm, 133);
+            let saved_playback = match document {
+                Document::Metronome => saved.metronome_playback,
+                Document::Practice => saved.practice_playback,
+                Document::Score => saved.score_playback,
+            };
+            assert_eq!(saved_playback.bpm, 133);
             assert_eq!(
-                saved.playback.swing,
+                saved_playback.swing,
                 Swing { unit: grooph_measure::swing::SwingUnit::Eighths, percent: 66 }
             );
             assert_eq!(
@@ -2742,11 +3031,79 @@ mod tests {
         let mut gap =
             GapClick { on_bars: 3, off_bars: 1, random_percent: 25, ..GapClick::default() };
         // Off shows what switching on brings back.
-        assert_eq!(silent_bars_label(&gap), "3 on · 1 off");
+        assert_eq!(silent_bars_label(&gap, gap.mute), "3 on · 1 off");
         gap.enabled = true;
-        assert_eq!(silent_bars_label(&gap), "3 on · 1 off");
+        assert_eq!(silent_bars_label(&gap, gap.mute), "3 on · 1 off");
         gap.mode = GapMode::Random;
-        assert_eq!(silent_bars_label(&gap), "Random 25%");
+        assert_eq!(silent_bars_label(&gap, gap.mute), "Random 25%");
+    }
+
+    #[test]
+    fn each_tab_has_its_own_playback_settings() {
+        use super::Grooph;
+        use grooph_audio::GapMute;
+        use grooph_measure::swing::{Swing, SwingUnit};
+
+        let cc = crate::test_support::creation_context(eframe::egui::Context::default());
+        let mut app = Grooph::new(&cc);
+        let tabs = [Tab::Metronome, Tab::Practice, Tab::Score];
+        // A setting of each kind changed on one page leaves the others alone.
+        let changes: [fn(&mut crate::settings::PlaybackSettings); 6] = [
+            |p| p.bpm = 77,
+            |p| p.count_in = !p.count_in,
+            |p| p.swing = Swing { unit: SwingUnit::Sixteenths, percent: 60 },
+            |p| {
+                p.gap_click.enabled = true;
+                p.gap_click.mute = GapMute::Counter;
+            },
+            |p| p.tempo_ramp.enabled = true,
+            |p| {
+                p.click = false;
+                p.metronome_click = true;
+            },
+        ];
+        for tab in tabs {
+            for change in changes {
+                let before = app.playback_ctl.settings;
+                app.select_tab(tab);
+                change(app.tab_playback_mut());
+                let after = app.playback_ctl.settings;
+                for other in tabs.into_iter().filter(|&t| t != tab) {
+                    app.select_tab(other);
+                    let doc = app.document();
+                    assert_eq!(after.get(doc), before.get(doc), "{tab:?} changed {other:?}");
+                    // Each tab shows its own values.
+                    assert_eq!(app.tab_playback(), before.get(doc));
+                }
+                app.select_tab(tab);
+                assert_ne!(app.tab_playback(), before.get(app.document()), "{tab:?}");
+                app.playback_ctl.settings = before;
+            }
+        }
+    }
+
+    #[test]
+    fn the_reached_tempo_is_kept_on_its_own_page() {
+        use super::Grooph;
+        for tab in [Tab::Metronome, Tab::Practice, Tab::Score] {
+            let cc = crate::test_support::creation_context(eframe::egui::Context::default());
+            let mut app = Grooph::new(&cc);
+            app.select_tab(tab);
+            let ramp = &mut app.tab_playback_mut().tempo_ramp;
+            (ramp.enabled, ramp.keep_reached) = (true, true);
+            let before = app.playback_ctl.settings;
+            app.start_playback();
+            app.playback_ctl.playback.ramp_bpm = Some(150);
+            app.stop_transport();
+            let after = app.playback_ctl.settings;
+            let doc = app.document();
+            assert_eq!(after.get(doc).bpm, 150, "{tab:?}");
+            for other in [Document::Metronome, Document::Practice, Document::Score] {
+                if other != doc {
+                    assert_eq!(after.get(other), before.get(other), "{tab:?}: {other:?}");
+                }
+            }
+        }
     }
 
     #[test]
@@ -2755,7 +3112,10 @@ mod tests {
 
         let cc = crate::test_support::creation_context(eframe::egui::Context::default());
         let mut app = Grooph::new(&cc);
-        app.playback_ctl.settings.gap_click.enabled = true;
+        let pages = &mut app.playback_ctl.settings;
+        for page in [&mut pages.metronome, &mut pages.practice, &mut pages.score] {
+            page.gap_click.enabled = true;
+        }
         for tab in [Tab::Practice, Tab::Metronome] {
             app.select_tab(tab);
             assert!(app.playback_options().gap.enabled, "{tab:?}");
@@ -2770,7 +3130,7 @@ mod tests {
         app.select_tab(Tab::Score);
         app.edit_page();
         // The setting itself stays on, and bars are muted again after editing.
-        assert!(app.playback_ctl.settings.gap_click.enabled);
+        assert!(app.tab_playback().gap_click.enabled);
         app.select_tab(Tab::Practice);
         assert!(app.playback_options().gap.enabled);
     }

@@ -5,7 +5,7 @@
 use crate::accuracy::{GOOD_WINDOW_MS, PERFECT_WINDOW_MS, RunSummary};
 use crate::calibration::Calibration;
 use crate::drift_chart::{beat_position_strip, drift_chart};
-use crate::drum_map::gm_drum;
+use crate::drum_map::{DrumMapEntry, lookup, map_for};
 use crate::platform::{TapKind, tap_time};
 use crate::{Grooph, TransportState, clock};
 use eframe::egui;
@@ -275,6 +275,15 @@ impl Grooph {
 
     /// Collect this frame's hits from all sources and feed them to the
     /// accuracy tracker; drives the session lifecycle and calibration.
+    /// Whether the bar playing now is silent, for the notes judged so far
+    /// (see `AccuracyTracker::observe_bar`); `None` while
+    /// the silent bars are off or a calibration runs. A bar that silences
+    /// only one layer of the metronome counts as silent too.
+    pub(crate) fn observed_bar_muted(&self) -> Option<bool> {
+        (self.playback_options().gap.enabled && self.calibration_source().is_none())
+            .then_some(self.playback_ctl.playback.bar_muted)
+    }
+
     pub(crate) fn handle_play_along_input(&mut self, ui: &egui::Ui) {
         let now = clock::now_seconds();
         self.sync_mic(ui.ctx(), now);
@@ -282,6 +291,16 @@ impl Grooph {
         let mic_hits = self.drain_mic_hits(now);
         let mut tap_hits = std::mem::take(&mut self.playback_ctl.play_along.pending_taps);
         tap_hits.extend(self.drain_key_taps(ui));
+
+        // The drum map list takes the NoteOns, also with playback stopped;
+        // nothing is judged while it is open.
+        if self.drum_map_open() {
+            let time = ui.input(|i| i.time);
+            for (at, note) in midi_hits {
+                self.drum_map_hit(note, at, time);
+            }
+            return;
+        }
 
         let calibrating = self.calibration_source();
         if !self.accuracy_active() && calibrating.is_none() {
@@ -296,21 +315,19 @@ impl Grooph {
         // A kit score is played on an e-kit: its MIDI notes name the
         // instrument; taps and the microphone do not.
         let kit = self.plays_kit();
-        // Only looked up for a pedal hit: it walks the whole score.
-        let pedal_hit = midi_hits
-            .iter()
-            .any(|&(_, note)| gm_drum(note).is_some_and(|(i, _)| i == Instrument::HiHatFoot));
-        let has_foot =
-            kit && pedal_hit && has_instrument(self.played_score(), Instrument::HiHatFoot);
         let use_midi = calibrating.is_none_or(|s| s == HitSource::Midi);
         let use_taps = !kit && calibrating.map_or(settings.tap_enabled, |s| s == HitSource::Tap);
         let use_mic = !kit && calibrating.map_or(settings.mic_enabled, |s| s == HitSource::Mic);
         let mut hits: Vec<(HitSource, f64, Option<Instrument>)> = Vec::new();
         if use_midi {
-            hits.extend(midi_hits.into_iter().filter_map(|(t, note)| {
-                let instrument = if kit { Some(kit_instrument(note, has_foot)?) } else { None };
-                Some((HitSource::Midi, t, instrument))
-            }));
+            // A kit plays by the connected device's drum map, or the
+            // built-in table.
+            let map = kit
+                .then(|| map_for(&self.playback_ctl.devices.drum_maps, self.connected_midi_port()));
+            let judged = judged_midi_hits(map, midi_hits, || {
+                has_instrument(self.played_score(), Instrument::HiHatFoot)
+            });
+            hits.extend(judged.into_iter().map(|(t, i)| (HitSource::Midi, t, i)));
         }
         if use_taps {
             hits.extend(tap_hits.into_iter().map(|t| (HitSource::Tap, t, None)));
@@ -361,9 +378,7 @@ impl Grooph {
         }
         // The tracker leaves `self` while it reads the tracked score, which
         // borrows `self`: no copy of the score per frame.
-        // Whether the bar playing now is silent, for the notes judged so far.
-        let bar_muted = (self.playback_options().gap.enabled && calibrating.is_none())
-            .then_some(self.playback_ctl.playback.bar_muted);
+        let bar_muted = self.observed_bar_muted();
         let mut tracker = std::mem::take(&mut self.playback_ctl.accuracy.tracker);
         let mut deltas = Vec::new();
         let played = {
@@ -497,13 +512,34 @@ impl Grooph {
     }
 }
 
-/// The instrument a MIDI `note` is judged on in a kit score: none for a
-/// note the drum map does not list, and none for the hi-hat pedal unless
-/// the score has hi-hat foot notes (`has_foot`); a drummer keeps time on it.
-/// The technique is not graded.
-fn kit_instrument(note: u8, has_foot: bool) -> Option<Instrument> {
-    let (instrument, _technique) = gm_drum(note)?;
+/// The instrument a MIDI `note` is judged on in a kit score, by the drum
+/// `map`: none for a note the map does not list, and none for the hi-hat
+/// pedal unless the score has hi-hat foot notes (`has_foot`); a drummer
+/// keeps time on it. The technique is not graded.
+fn kit_instrument(map: &[DrumMapEntry], note: u8, has_foot: bool) -> Option<Instrument> {
+    let (instrument, _technique) = lookup(map, note)?;
     (instrument != Instrument::HiHatFoot || has_foot).then_some(instrument)
+}
+
+/// The MIDI `hits` (time, note) that are judged. On a kit (`kit_map`, its
+/// drum map) each with its instrument (see [`kit_instrument`]); `has_foot`
+/// tells whether the score has hi-hat foot notes and is asked only for a
+/// pedal hit, since it walks the whole score. On one line (`None`) every
+/// NoteOn, with no instrument.
+fn judged_midi_hits(
+    kit_map: Option<&[DrumMapEntry]>,
+    hits: Vec<(f64, u8)>,
+    has_foot: impl FnOnce() -> bool,
+) -> Vec<(f64, Option<Instrument>)> {
+    let Some(map) = kit_map else {
+        return hits.into_iter().map(|(t, _)| (t, None)).collect();
+    };
+    let pedal =
+        |&(_, note): &(f64, u8)| lookup(map, note).is_some_and(|(i, _)| i == Instrument::HiHatFoot);
+    let has_foot = hits.iter().any(pedal) && has_foot();
+    hits.into_iter()
+        .filter_map(|(t, note)| Some((t, Some(kit_instrument(map, note, has_foot)?))))
+        .collect()
 }
 
 /// Whether a head of `score` plays `instrument`.
@@ -580,6 +616,27 @@ fn early_late(ms: f64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::drum_map::{CustomDrumMap, GM_DRUM_MAP};
+    use grooph_measure::Technique;
+
+    #[test]
+    fn a_bar_silencing_one_layer_is_observed_as_silent() {
+        use crate::shell::Tab;
+        use grooph_audio::GapMute;
+        let cc = crate::test_support::creation_context(eframe::egui::Context::default());
+        let mut app = crate::Grooph::new(&cc);
+        app.select_tab(Tab::Metronome);
+        assert_eq!(app.observed_bar_muted(), None);
+        app.tab_playback_mut().gap_click.enabled = true;
+        for mute in [GapMute::Counter, GapMute::ClickBar, GapMute::Metronome] {
+            let playback = &mut app.playback_ctl.playback;
+            playback.bar_muted = true;
+            playback.bar_mute = mute;
+            assert_eq!(app.observed_bar_muted(), Some(true), "{mute:?}");
+            app.playback_ctl.playback.bar_muted = false;
+            assert_eq!(app.observed_bar_muted(), Some(false), "{mute:?}");
+        }
+    }
 
     #[test]
     fn early_late_rounds_and_names_direction() {
@@ -609,12 +666,66 @@ mod tests {
 
     #[test]
     fn a_kit_judges_mapped_notes_and_the_pedal_only_where_written() {
-        assert_eq!(kit_instrument(36, false), Some(Instrument::Kick));
-        assert_eq!(kit_instrument(46, false), Some(Instrument::HiHat));
-        assert_eq!(kit_instrument(60, true), None);
-        assert_eq!(kit_instrument(56, true), None);
-        assert_eq!(kit_instrument(44, false), None);
-        assert_eq!(kit_instrument(44, true), Some(Instrument::HiHatFoot));
+        let gm = GM_DRUM_MAP;
+        assert_eq!(kit_instrument(gm, 36, false), Some(Instrument::Kick));
+        assert_eq!(kit_instrument(gm, 46, false), Some(Instrument::HiHat));
+        assert_eq!(kit_instrument(gm, 60, true), None);
+        assert_eq!(kit_instrument(gm, 56, true), None);
+        assert_eq!(kit_instrument(gm, 44, false), None);
+        assert_eq!(kit_instrument(gm, 44, true), Some(Instrument::HiHatFoot));
+    }
+
+    /// A custom map with Kick on 60 instead of 36 and Hi-hat foot on 30.
+    fn learned_map() -> CustomDrumMap {
+        let mut map = CustomDrumMap::default();
+        map.assign(60, (Instrument::Kick, Technique::Normal));
+        map.remove(36);
+        map.assign(30, (Instrument::HiHatFoot, Technique::Normal));
+        map
+    }
+
+    #[test]
+    fn a_custom_map_replaces_the_built_in_table_on_a_kit() {
+        let map = learned_map();
+        let hits = vec![(0.0, 60), (0.1, 36), (0.2, 38)];
+        let judged = judged_midi_hits(Some(map.entries()), hits, || unreachable!("no pedal"));
+        assert_eq!(judged, [(0.0, Some(Instrument::Kick)), (0.2, Some(Instrument::Snare))]);
+        // A 60 on a kick note is a hit; the 36 was never judged: no extra hit.
+        let ctx = egui::Context::default();
+        let mut app = score_tab_playing(&ctx, "4/4 H-K:e H:e H-S:e H:e H-K:e H:e H-S:e H:e");
+        app.playback_ctl.accuracy.tracker.on_playback_start_at(0.0, 0.0);
+        let timing = app.score_timing();
+        let score = app.played_score().clone();
+        let tracker = &mut app.playback_ctl.accuracy.tracker;
+        for (t, instrument) in
+            judged_midi_hits(Some(map.entries()), vec![(0.0, 60), (0.0, 36)], || false)
+        {
+            tracker.record_instrument_hit(t, instrument.unwrap(), &timing, &score);
+        }
+        app.toggle_playback();
+        let summary = app.playback_ctl.accuracy.tracker.last_summary().unwrap();
+        assert_eq!((summary.hits, summary.extra), (1, 0));
+    }
+
+    #[test]
+    fn the_pedal_rule_goes_by_the_mapped_instrument() {
+        let mut map = learned_map();
+        map.remove(44);
+        let pedal = vec![(0.0, 30)];
+        assert_eq!(judged_midi_hits(Some(map.entries()), pedal.clone(), || false), []);
+        assert_eq!(
+            judged_midi_hits(Some(map.entries()), pedal, || true),
+            [(0.0, Some(Instrument::HiHatFoot))]
+        );
+        // Removed, 44 plays nothing, even on a score with the pedal.
+        assert_eq!(judged_midi_hits(Some(map.entries()), vec![(0.0, 44)], || true), []);
+    }
+
+    #[test]
+    fn one_line_counts_every_note_whatever_the_map() {
+        let notes = vec![(0.0, 60), (0.1, 36), (0.2, 99), (0.3, 30)];
+        let judged = judged_midi_hits(None, notes, || unreachable!());
+        assert_eq!(judged, [(0.0, None), (0.1, None), (0.2, None), (0.3, None)]);
     }
 
     #[test]

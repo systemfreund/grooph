@@ -76,7 +76,7 @@ impl Grooph {
                 self.refresh_midi_ports();
                 self.ui.dialogs.picker = Some(Picker::MidiInput);
                 // Back here afterwards, where the device's latency row shows.
-                self.ui.dialogs.picker_return = Some(Picker::PlayAlong);
+                self.ui.dialogs.picker_return = vec![Picker::PlayAlong];
             }
             if midi_connected {
                 let settings = &mut self.playback_ctl.feedback.play_along;

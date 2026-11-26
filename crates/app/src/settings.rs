@@ -1,12 +1,13 @@
 //! The app's settings, one group per feature. Each group is the same struct
-//! at runtime, in the saved state ([`crate::PersistedState`]) and, where it
-//! applies, in presets ([`crate::presets::PresetSettings`]), so a new
+//! at runtime and in the saved state ([`crate::PersistedState`]), so a new
 //! setting is a field in its group and nothing else lists it by hand.
 //!
 //! Every field falls back to its default on its own: a group is restored
 //! field by field (see [`crate::persist`]), and a field missing from a
 //! saved group reads as its default.
 
+use crate::documents::Document;
+use crate::drum_map::DrumMaps;
 use crate::guide::Guide;
 use crate::play_along::PlayAlongSettings;
 use crate::{CountingSettings, StickingSettings};
@@ -18,7 +19,8 @@ use grooph_measure::tempo::DEFAULT_BPM;
 use serde::{Deserialize, Serialize};
 
 /// How the rhythm or click is played: tempo, count-in, swing and the
-/// metronome trainer (gap click, tempo ramp).
+/// metronome trainer (gap click, tempo ramp). Each page has its own
+/// ([`TabPlayback`]).
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub(crate) struct PlaybackSettings {
@@ -52,6 +54,34 @@ impl Default for PlaybackSettings {
     }
 }
 
+/// The playback settings of each page: the metronome's, Practice's and the
+/// score tab's. A change on one page leaves the others alone.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) struct TabPlayback {
+    pub(crate) metronome: PlaybackSettings,
+    pub(crate) practice: PlaybackSettings,
+    pub(crate) score: PlaybackSettings,
+}
+
+impl TabPlayback {
+    /// The settings of `doc`'s page.
+    pub(crate) fn get(&self, doc: Document) -> &PlaybackSettings {
+        match doc {
+            Document::Metronome => &self.metronome,
+            Document::Practice => &self.practice,
+            Document::Score => &self.score,
+        }
+    }
+
+    pub(crate) fn get_mut(&mut self, doc: Document) -> &mut PlaybackSettings {
+        match doc {
+            Document::Metronome => &mut self.metronome,
+            Document::Practice => &mut self.practice,
+            Document::Score => &mut self.score,
+        }
+    }
+}
+
 /// What Practice's rhythm generator writes, and how.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -63,7 +93,8 @@ pub(crate) struct GeneratorConfig {
     pub(crate) ghost_notes: bool,
 }
 
-/// The devices of this machine: the output latency and the MIDI input.
+/// The devices of this machine: the output latency, the MIDI input and the
+/// MIDI devices' drum maps.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub(crate) struct DeviceSettings {
@@ -72,11 +103,14 @@ pub(crate) struct DeviceSettings {
     pub(crate) offset: f32,
     /// The MIDI input port played along on.
     pub(crate) midi_port_id: Option<String>,
+    /// The custom drum maps, by device key (see [`crate::drum_map`]); a
+    /// device without one plays by the built-in table.
+    pub(crate) drum_maps: DrumMaps,
 }
 
 impl Default for DeviceSettings {
     fn default() -> Self {
-        Self { latency_enabled: true, offset: 0.0, midi_port_id: None }
+        Self { latency_enabled: true, offset: 0.0, midi_port_id: None, drum_maps: DrumMaps::new() }
     }
 }
 

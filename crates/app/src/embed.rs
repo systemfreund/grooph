@@ -8,6 +8,7 @@
 //! shows no tabs, menus or library, and leaves out the update check, the
 //! wake lock, MIDI, the microphone and calibration.
 
+use crate::documents::Document;
 use crate::pickers::silent_bars_label;
 use crate::score_change::ScoreChange;
 use crate::{Grooph, TransportState, platform};
@@ -341,7 +342,8 @@ impl Grooph {
     /// (`♩ = 140`) with − and + beside it, and the fullscreen button.
     fn tempo_row(&mut self, ui: &mut Ui) {
         let music = self.ui.fonts.music_font_id.family.clone();
-        let bpm = self.playback_ctl.playback.ramp_bpm.unwrap_or(self.playback_ctl.settings.bpm);
+        let bpm =
+            self.playback_ctl.playback.ramp_bpm.unwrap_or(self.playback_ctl.settings.metronome.bpm);
         let mut step = 0;
         let mut fullscreen = false;
         let frame = Frame::new().fill(ui.visuals().panel_fill).inner_margin(Margin {
@@ -376,20 +378,21 @@ impl Grooph {
         }
     }
 
-    /// One BPM faster (`delta` 1) or slower (-1), within the tempo range.
+    /// One BPM faster (`delta` 1) or slower (-1), within the tempo range:
+    /// the metronome's tempo.
     pub(crate) fn step_bpm(&mut self, delta: i64) {
-        let bpm = (i64::from(self.playback_ctl.settings.bpm) + delta)
-            .clamp(MIN_BPM.into(), MAX_BPM.into());
-        self.playback_ctl.settings.bpm = bpm as u32;
+        let metronome = &mut self.playback_ctl.settings.metronome;
+        let bpm = (i64::from(metronome.bpm) + delta).clamp(MIN_BPM.into(), MAX_BPM.into());
+        metronome.bpm = bpm as u32;
         self.score_changed(ScoreChange::Tempo);
     }
 
     /// The metronome's settings, for the model.
     pub(crate) fn model_context(&self) -> ModelContext {
         let ts = self.metronome_meter();
-        let bpm = self.playback_ctl.settings.bpm;
+        let cfg = &self.playback_ctl.settings.metronome;
+        let bpm = cfg.bpm;
         let playing = self.playback_ctl.transport_state == TransportState::Playing;
-        let cfg = &self.playback_ctl.settings;
         let click_bar = self.click_bar();
         // The same description as the tool's result (grooph_link::describe):
         // the meter's grouping, where the clicks fall, the polyrhythm, swing.
@@ -434,7 +437,8 @@ impl Grooph {
             fields.push(("countIn", Field::Bool(true)));
         }
         if cfg.gap_click.enabled {
-            let silent = silent_bars_label(&cfg.gap_click);
+            let silent =
+                silent_bars_label(&cfg.gap_click, self.played_mute_of(Document::Metronome));
             text += &format!(", silent bars {silent}");
             fields.push(("silentBars", Field::Text(silent)));
         }
@@ -597,11 +601,30 @@ mod tests {
     }
 
     #[test]
+    fn the_model_hears_the_metronomes_own_settings() {
+        use grooph_audio::GapMute;
+        let (_, mut app) = embedded_app("?v=2&bpm=140&ts=4/4&poly=3:2&embed=mcp");
+        assert_eq!(app.playback_ctl.settings.metronome.bpm, 140);
+        // The other pages' settings are not the metronome's.
+        app.playback_ctl.settings.practice.bpm = 61;
+        app.playback_ctl.settings.practice.count_in = true;
+        let gap = &mut app.playback_ctl.settings.metronome.gap_click;
+        (gap.enabled, gap.on_bars, gap.off_bars, gap.mute) = (true, 4, 4, GapMute::Counter);
+        let context = app.model_context();
+        assert!(context.text.contains("at 140 BPM"), "{}", context.text);
+        assert!(!context.text.contains("count-in"), "{}", context.text);
+        assert!(context.text.contains("silent bars Polyrhythm · 4 on · 4 off"), "{}", context.text);
+        app.step_bpm(1);
+        assert_eq!(app.playback_ctl.settings.metronome.bpm, 141);
+        assert_eq!(app.playback_ctl.settings.practice.bpm, 61);
+    }
+
+    #[test]
     fn an_embedded_app_opens_the_link_in_the_metronome() {
         let (ctx, app) = embedded_app("?v=2&bpm=140&ts=7/8&click=>q+r:q.+(q)&embed=mcp&theme=dark");
         assert!(app.embedded());
         assert!(app.metronome_mode());
-        assert_eq!(app.playback_ctl.settings.bpm, 140);
+        assert_eq!(app.tab_playback().bpm, 140);
         assert_eq!(app.metronome_meter().to_string(), "7/8");
         assert_eq!(ctx.options(|o| o.theme_preference), Theme::Dark.into());
         let context = app.model_context();
@@ -830,14 +853,14 @@ mod tests {
     fn the_tempo_buttons_step_the_bpm_within_its_range() {
         let (_, mut app) = embedded_app("?v=2&bpm=21&ts=4/4&embed=mcp");
         app.step_bpm(1);
-        assert_eq!(app.playback_ctl.settings.bpm, 22);
+        assert_eq!(app.tab_playback().bpm, 22);
         for _ in 0..5 {
             app.step_bpm(-1);
         }
-        assert_eq!(app.playback_ctl.settings.bpm, 20);
-        app.playback_ctl.settings.bpm = 300;
+        assert_eq!(app.tab_playback().bpm, 20);
+        app.tab_playback_mut().bpm = 300;
         app.step_bpm(1);
-        assert_eq!(app.playback_ctl.settings.bpm, 300);
+        assert_eq!(app.tab_playback().bpm, 300);
     }
 
     #[test]

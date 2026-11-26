@@ -1,5 +1,5 @@
 //! Picker dialogs for single settings (meter, notes, level, bars, tempo,
-//! swing, guide, counting, preset): a grid of big buttons that works by touch, opened from the
+//! swing, guide, counting): a grid of big buttons that works by touch, opened from the
 //! settings card and the options sheet. Also the grouping picker of the level
 //! dialog.
 
@@ -16,7 +16,7 @@ use eframe::egui;
 use eframe::egui::{
     Button, Color32, FontFamily, FontId, Id, Modal, Rect, Response, RichText, Ui, vec2,
 };
-use grooph_audio::{GapClick, GapMode, GapMute, Sound};
+use grooph_audio::{GapClick, GapMode, GapMute, RampEnd, RampUnit, Sound, TempoRamp};
 use grooph_measure::counter::{Ratio, own_ratios, step_clicks, step_span};
 use grooph_measure::counting::CountingSystem;
 use grooph_measure::generator::{
@@ -61,7 +61,6 @@ pub(crate) enum Picker {
     Sticking,
     /// Whether Practice and the score tab click the metronome's click bars.
     Click,
-    Preset,
     /// The metronome tab's meter.
     MetronomeMeter,
     /// The meter of the bar an editor is on.
@@ -72,6 +71,8 @@ pub(crate) enum Picker {
     Polyrhythm,
     /// Bars the click drops out of, to practise inner time.
     SilentBars,
+    /// The tempo changing step by step while playing.
+    TempoRamp,
     /// The rests a kit score leaves out in bars of two voices.
     HiddenRests,
     /// The score's voicing rule: which voice each instrument is entered
@@ -84,9 +85,12 @@ pub(crate) enum Picker {
     Sounds,
     /// The MIDI device the play-along listens to.
     MidiInput,
+    /// The connected MIDI device's drum map: which note plays what,
+    /// learned by hitting the pads (see `crate::drum_map_list`).
+    DrumMap,
     /// The inputs that count as hits and their latency.
     PlayAlong,
-    /// Saved rhythms and practice presets: save, load, rename, delete.
+    /// Saved rhythms: save, load, rename, delete.
     Library,
     /// The volumes of the voices.
     Mixer,
@@ -121,11 +125,39 @@ pub(crate) fn counting_system_name(system: CountingSystem) -> &'static str {
 
 /// Which bars go silent, in a few words, for the options row. Also while
 /// off, so the row shows what switching on brings back.
-pub(crate) fn silent_bars_label(gap: &GapClick) -> String {
-    match gap.mode {
+/// `mute` is the one played ([`Grooph::played_mute`]): one layer of the
+/// metronome comes first ("Polyrhythm · 4 on · 4 off").
+pub(crate) fn silent_bars_label(gap: &GapClick, mute: GapMute) -> String {
+    let bars = match gap.mode {
         GapMode::Pattern => format!("{} on · {} off", gap.on_bars, gap.off_bars),
         GapMode::Random => format!("Random {}%", gap.random_percent),
+    };
+    match mute {
+        GapMute::ClickBar | GapMute::Counter => format!("{} · {bars}", mute_label(mute)),
+        GapMute::Metronome | GapMute::Everything => bars,
     }
+}
+
+/// What a silent bar silences, as the picker names it.
+pub(crate) fn mute_label(mute: GapMute) -> &'static str {
+    match mute {
+        GapMute::Metronome => "All clicks",
+        GapMute::Everything => "Clicks and notes",
+        GapMute::ClickBar => "Click bar",
+        GapMute::Counter => "Polyrhythm",
+    }
+}
+
+/// Where the tempo ramp goes and how, for the options row: "→ 140 · +5 / 4
+/// bars". Also while off, so the row shows what switching on brings back.
+pub(crate) fn tempo_ramp_label(ramp: &TempoRamp, start: u32, endless: bool) -> String {
+    let sign = if ramp.target_bpm < start { '−' } else { '+' };
+    let unit = match ramp.unit {
+        RampUnit::Loops if !endless => "loops",
+        _ => "bars",
+    };
+    let unit = if ramp.every == 1 { &unit[..unit.len() - 1] } else { unit };
+    format!("→ {} · {sign}{} / {} {unit}", ramp.target_bpm, ramp.step_bpm, ramp.every)
 }
 
 pub(crate) fn swing_label(percent: u8) -> String {
@@ -422,8 +454,6 @@ impl Grooph {
             _ => 380.0,
         };
         let width = (ui.ctx().content_rect().width() - 48.0).clamp(200.0, max_width);
-        let mut preset = None;
-        let mut library_preset = None;
         let mut calibrate = None;
 
         // Moved up while an on-screen keyboard covers its focused field; the
@@ -447,16 +477,17 @@ impl Grooph {
                 Picker::Counting => "Count labels",
                 Picker::Sticking => "Sticking",
                 Picker::Click => "Click",
-                Picker::Preset => "Preset",
                 Picker::MetronomeMeter | Picker::BarMeter => "Time signature",
                 Picker::ClickFill => "Subdivision",
                 Picker::Polyrhythm => "Polyrhythm",
                 Picker::SilentBars => "Silent bars",
+                Picker::TempoRamp => "Tempo ramp",
                 Picker::HiddenRests => "Rests",
                 Picker::Voicing => "Voicing",
                 Picker::Revoice => "Revoice bar",
                 Picker::Sounds => "Sounds",
                 Picker::MidiInput => "MIDI input",
+                Picker::DrumMap => "Drum map",
                 Picker::PlayAlong => "Play along",
                 Picker::Library => "Library",
                 Picker::Mixer => "Mixer",
@@ -482,16 +513,16 @@ impl Grooph {
                 Picker::Counting => self.counting_choices(ui),
                 Picker::Sticking => self.sticking_choices(ui),
                 Picker::Click => self.click_choices(ui),
-                Picker::Preset => {
-                    preset = self.preset_cards(ui);
-                    preset.is_some()
-                }
                 Picker::MetronomeMeter => self.metronome_meter_choices(ui),
                 Picker::BarMeter => self.bar_meter_choices(ui),
                 Picker::ClickFill => self.click_fill_choices(ui),
                 Picker::Polyrhythm => self.polyrhythm_choices(ui),
                 Picker::SilentBars => {
                     self.silent_bars_choices(ui);
+                    false
+                }
+                Picker::TempoRamp => {
+                    self.tempo_ramp_choices(ui);
                     false
                 }
                 Picker::HiddenRests => self.hidden_rests_choices(ui),
@@ -502,13 +533,17 @@ impl Grooph {
                     false
                 }
                 Picker::MidiInput => self.midi_input_choices(ui),
+                Picker::DrumMap => {
+                    self.drum_map_list(ui);
+                    false
+                }
                 Picker::PlayAlong => {
                     calibrate = self.play_along_choices(ui);
                     false
                 }
                 Picker::Library => {
-                    library_preset = self.library_panel(ui);
-                    library_preset.is_some()
+                    self.library_panel(ui);
+                    false
                 }
                 Picker::Mixer => {
                     self.mixer_panel(ui);
@@ -524,7 +559,9 @@ impl Grooph {
                 }
             };
             ui.add_space(12.0);
-            picked || wide_button(ui, "Done", 19.0, ROW_HEIGHT).clicked()
+            // The drum map list goes back to the device it belongs to.
+            let done = if picker == Picker::DrumMap { "Back" } else { "Done" };
+            picked || wide_button(ui, done, 19.0, ROW_HEIGHT).clicked()
         });
         let visible = platform::visible_rect(&ctx);
         let keyboard_up = visible.height() < ctx.content_rect().height() - 1.0;
@@ -542,24 +579,18 @@ impl Grooph {
             ctx.data_mut(|d| d.insert_temp(keyboard_shift_id(), new_shift));
             ctx.request_repaint();
         }
-        if modal.inner || modal.should_close() {
-            self.ui.dialogs.picker = self.ui.dialogs.picker_return.take();
+        // Not when the picker opened another one this frame (MIDI input →
+        // Drum map).
+        if (modal.inner || modal.should_close()) && self.ui.dialogs.picker == Some(picker) {
+            self.ui.dialogs.close_picker();
             if picker == Picker::Voicing {
                 self.close_voicing_picker();
             }
-            self.ui.dialogs.tap_tempo.reset();
-            self.ui.library.renaming_preset = None;
             self.ui.library.renaming_pattern = None;
         }
 
         // After the generator check, which would generate a second rhythm.
         self.finish_generator_change(before, endless_before, false);
-        if let Some(id) = preset {
-            self.apply_preset(id);
-        }
-        if let Some(id) = library_preset {
-            self.open_preset(id);
-        }
         // After the generator check: the run plays its own bar and leaves the
         // pages and endless mode alone, so it is no generator change. The dialog stays open
         // under the calibration and shows the new latency afterwards.
@@ -645,7 +676,7 @@ impl Grooph {
 
     /// Big tempo display with steppers, a slider and tap tempo.
     fn bpm_editor(&mut self, ui: &mut Ui) {
-        let mut bpm = self.playback_ctl.settings.bpm;
+        let mut bpm = self.tab_playback().bpm;
         ui.vertical_centered(|ui| {
             ui.label(RichText::new(bpm.to_string()).size(56.0).strong());
         });
@@ -679,8 +710,8 @@ impl Grooph {
             bpm = tapped;
         }
 
-        if bpm != self.playback_ctl.settings.bpm {
-            self.playback_ctl.settings.bpm = bpm;
+        if bpm != self.tab_playback().bpm {
+            self.tab_playback_mut().bpm = bpm;
             self.score_changed(ScoreChange::Tempo);
         }
     }
@@ -931,7 +962,7 @@ impl Grooph {
             family: self.ui.fonts.music_font_id.family.clone(),
             stem_length_factor: self.ui.layout.stem_length_factor,
         };
-        let metronome = self.playback_ctl.settings.metronome_click;
+        let metronome = self.tab_playback().metronome_click;
         let click = self.played_click_bars();
         // A score of many meters scrolls where it would push the buttons and
         // "Done" off the screen.
@@ -945,8 +976,8 @@ impl Grooph {
         ui.add_space(8.0);
         let options = [false, true].map(|m| (m, click_source_label(m).to_owned()));
         if let Some(metronome) = choice_grid(ui, &options, metronome, 2) {
-            self.playback_ctl.settings.metronome_click = metronome;
-            self.playback_ctl.settings.click = true;
+            self.tab_playback_mut().metronome_click = metronome;
+            self.tab_playback_mut().click = true;
         }
         false
     }
@@ -994,7 +1025,9 @@ impl Grooph {
     /// Off, a pattern of sounding and silent bars, or silent bars at random;
     /// and whether the notes go quiet too.
     fn silent_bars_choices(&mut self, ui: &mut Ui) {
-        let gap = &mut self.playback_ctl.settings.gap_click;
+        let offered = self.offered_mutes();
+        let played = self.played_mute();
+        let gap = &mut self.playback_ctl.settings.get_mut(self.editor.document).gap_click;
         ui.weak("The click drops out for some bars, so you keep the time yourself.");
         ui.add_space(8.0);
         let modes = [
@@ -1029,19 +1062,73 @@ impl Grooph {
                 ui.add(egui::Slider::new(&mut gap.random_percent, 5..=90).show_value(false));
             }
         }
+        // The metronome without a polyrhythm silences all its clicks.
+        if offered.is_empty() {
+            return;
+        }
         ui.add_space(8.0);
         ui.label("Mute");
-        let mutes = [
-            (GapMute::Metronome, "Click only".to_owned()),
-            (GapMute::Everything, "Click and notes".to_owned()),
-        ];
-        if let Some(mute) = choice_grid(ui, &mutes, gap.mute, 2) {
+        let mutes: Vec<_> = offered.iter().map(|&m| (m, mute_label(m).to_owned())).collect();
+        // A value this page does not offer shows as the one it plays, and
+        // stays saved until another is picked.
+        if let Some(mute) = choice_grid(ui, &mutes, played, offered.len()) {
             gap.mute = mute;
         }
     }
 
+    /// Off or on, the target tempo, how far and how often it steps, what
+    /// happens at the target, and whether the reached tempo stays: the
+    /// page's own tempo ramp.
+    fn tempo_ramp_choices(&mut self, ui: &mut Ui) {
+        let start = self.tab_playback().bpm;
+        let endless = self.endless_runs();
+        let ramp = &mut self.playback_ctl.settings.get_mut(self.editor.document).tempo_ramp;
+        // Scrolls on a short screen (a phone held sideways), so Done stays
+        // in reach.
+        egui::ScrollArea::vertical().max_height(dialog_scroll_height(ui)).show(ui, |ui| {
+            ui.weak(format!("The tempo steps from {start} BPM towards a target while playing."));
+            ui.add_space(8.0);
+            let onoff = [(false, "Off".to_owned()), (true, "On".to_owned())];
+            if let Some(on) = choice_grid(ui, &onoff, ramp.enabled, 2) {
+                ramp.enabled = on;
+            }
+            if !ramp.enabled {
+                return;
+            }
+            ui.add_space(8.0);
+            count_stepper(ui, "Target BPM", &mut ramp.target_bpm, MIN_BPM..=MAX_BPM);
+            ui.spacing_mut().slider_width = ui.available_width();
+            ui.add(egui::Slider::new(&mut ramp.target_bpm, MIN_BPM..=MAX_BPM).show_value(false));
+            ui.add_space(4.0);
+            count_stepper(ui, "Step (BPM)", &mut ramp.step_bpm, 1..=50);
+            let loops = !endless && ramp.unit == RampUnit::Loops;
+            let unit = if loops { "Every (loops)" } else { "Every (bars)" };
+            count_stepper(ui, unit, &mut ramp.every, 1..=64);
+            // Endless mode never loops: it counts bars.
+            if !endless {
+                let units =
+                    [(RampUnit::Bars, "Bars".to_owned()), (RampUnit::Loops, "Loops".to_owned())];
+                if let Some(unit) = choice_grid(ui, &units, ramp.unit, 2) {
+                    ramp.unit = unit;
+                }
+            }
+            ui.add_space(8.0);
+            ui.label("At the target");
+            let ends = [
+                (RampEnd::Hold, "Hold".to_owned()),
+                (RampEnd::Restart, "Start over".to_owned()),
+                (RampEnd::Cycle, "Back down".to_owned()),
+            ];
+            if let Some(end) = choice_grid(ui, &ends, ramp.end, 3) {
+                ramp.end = end;
+            }
+            ui.add_space(8.0);
+            ui.checkbox(&mut ramp.keep_reached, "Keep the reached tempo after stopping");
+        });
+    }
+
     fn swing_choices(&mut self, ui: &mut Ui) {
-        let swing = &mut self.playback_ctl.settings.swing;
+        let swing = &mut self.playback_ctl.settings.get_mut(self.editor.document).swing;
         let options: Vec<_> = SWING_PRESETS.iter().map(|&p| (p, swing_label(p))).collect();
         if let Some(percent) = choice_grid(ui, &options, swing.percent, 3) {
             swing.percent = percent;

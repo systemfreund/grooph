@@ -17,7 +17,7 @@ fn android_main(app: winit::platform::android::activity::AndroidApp) {
         android_logger::Config::default().with_max_level(log::LevelFilter::Info).with_tag("grooph"),
     );
     // eframe finds no settings folder on Android; keep them in the app's own
-    // storage so presets, patterns and settings survive a restart.
+    // storage so patterns and settings survive a restart.
     let persistence_path = app.internal_data_path().map(|dir| dir.join("grooph.ron"));
     let insets = insets::SystemBars::new(app.clone());
     let activity = activity::Activity { app: app.clone() };

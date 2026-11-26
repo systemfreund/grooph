@@ -124,7 +124,7 @@ impl Grooph {
 
     /// The tempo setting played: the calibration's own during a run.
     pub(crate) fn played_bpm(&self) -> u32 {
-        if self.calibrating() { CALIBRATION_BPM } else { self.playback_ctl.settings.bpm }
+        if self.calibrating() { CALIBRATION_BPM } else { self.tab_playback().bpm }
     }
 
     pub(crate) fn start_calibration(&mut self, source: HitSource) {

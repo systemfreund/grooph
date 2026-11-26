@@ -1646,7 +1646,7 @@ mod tests {
         app.request_load_pattern(id);
         // Past "Discard" for the new groove, a change not saved.
         let pending = app.ui.dialogs.pending_load.take().unwrap();
-        app.finish_pending_load(pending);
+        app.finish_pending_load(pending, 0.0);
         assert_eq!(app.tab(), Tab::Score);
         assert_eq!(text(&app), "3/4 e e r:q r:q");
         assert!(!app.editor.rhythm_doc().dirty);

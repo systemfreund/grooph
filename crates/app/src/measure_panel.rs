@@ -12,6 +12,7 @@ use crate::tokens;
 use crate::{Mode, TransportState};
 use eframe::egui;
 use eframe::egui::{FontId, Frame, Rect, Response, Stroke};
+use grooph_audio::GapMute;
 use grooph_layout::pixel_layout::compute_em;
 use grooph_layout::staff_layout::{
     LEGIBILITY_FLOOR_EM, PlacedMeasure, ROOM_BELOW_EM, StaffLayout, StaffOpts, hit_test_head,
@@ -19,7 +20,9 @@ use grooph_layout::staff_layout::{
 };
 use grooph_measure::grid::DEFAULT_GRID;
 use grooph_measure::tempo::ScoreTiming;
-use grooph_measure::{Cursor, Instrument, Measure, Score, StaffKind, TimeSignature};
+use grooph_measure::{
+    Cursor, Instrument, Measure, MeasureIdx, Score, StaffKind, TimeSignature, VoiceIdx,
+};
 use grooph_render::staff::{PlaybackMarks, RenderContext, draw_staff};
 use std::rc::Rc;
 
@@ -233,10 +236,11 @@ impl Grooph {
         ghost_rect: Option<Rect>,
     ) {
         let playback = &self.playback_ctl.playback;
-        // A silent bar shows no playback position, like the
+        let silence = StaffSilence::of(playback, frame.playing);
+        // A bar silent as a whole shows no playback position, like the
         // metronome's ring: no line, no lit beat or count.
         let marks =
-            if playback.bar_muted {
+            if silence.hides_position {
                 PlaybackMarks::Anchor(None)
             } else if frame.guide == Guide::Line {
                 PlaybackMarks::Line
@@ -254,6 +258,7 @@ impl Grooph {
             playback: frame.playing,
             loop_bars: 0..view.shown.played.len(),
             marks,
+            faded: silence.faded,
             ..RenderContext::new(view.shown.score(), view.staff, view.render_opts)
         };
         draw_staff(ui, &ctx);
@@ -316,8 +321,7 @@ impl Grooph {
     /// chip: the veil on a bar the gap click silences, and the accuracy
     /// marks.
     fn draw_playing_marks(&self, ui: &egui::Ui, view: &StaffView, frame: &PanelFrame) {
-        if self.playback_ctl.playback.bar_muted
-            && let Some((m_idx, _)) = frame.playing
+        if let Some(m_idx) = StaffSilence::of(&self.playback_ctl.playback, frame.playing).veiled
             && let Some(placed) = view.staff.placed(m_idx)
         {
             draw_muted_bar(ui, placed.rect);
@@ -1084,6 +1088,36 @@ fn draw_ghost_bar(ui: &egui::Ui, rect: Rect, hovered: bool) {
     painter.line_segment([c - egui::vec2(0.0, arm), c + egui::vec2(0.0, arm)], thick);
 }
 
+/// How the bar being played shows on the staff while it is silent.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct StaffSilence {
+    /// No playback position: no line, no lit note or count. Only in a bar
+    /// silent as a whole; while one layer sounds, the position goes on.
+    hides_position: bool,
+    /// The bar under a veil with 🔇: silent as a whole.
+    veiled: Option<MeasureIdx>,
+    /// The voice of the bar drawn with faded ink: the metronome's layer it
+    /// silences while the other plays on.
+    faded: Option<(MeasureIdx, VoiceIdx)>,
+}
+
+impl StaffSilence {
+    /// For the bar `playing` is in (measure, local tick).
+    fn of(playback: &PlaybackState, playing: Option<(MeasureIdx, f64)>) -> Self {
+        let bar = playing.map(|(idx, _)| idx).filter(|_| playback.bar_muted);
+        let layer = match playback.bar_mute {
+            GapMute::ClickBar => Some(MetronomeVoice::Click.idx()),
+            GapMute::Counter => Some(MetronomeVoice::Counter.idx()),
+            GapMute::Metronome | GapMute::Everything => None,
+        };
+        Self {
+            hides_position: playback.bar_muted && layer.is_none(),
+            veiled: bar.filter(|_| layer.is_none()),
+            faded: bar.zip(layer),
+        }
+    }
+}
+
 /// Dim a bar silenced by the gap click, so the silence reads as intended.
 fn draw_muted_bar(ui: &egui::Ui, rect: Rect) {
     let bg = ui.visuals().panel_fill;
@@ -1400,6 +1434,35 @@ fn paint_miss_mark(painter: &egui::Painter, note_x: f32, y: f32, h: f32, width: 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_bar_silencing_one_layer_fades_its_voice_and_keeps_the_position() {
+        use crate::state::PlaybackState;
+        let silence = |muted, mute| {
+            let playback = PlaybackState { bar_muted: muted, bar_mute: mute, ..Default::default() };
+            StaffSilence::of(&playback, Some((2, 10.0)))
+        };
+        let counter = MetronomeVoice::Counter.idx();
+        assert_eq!(
+            silence(true, GapMute::Counter),
+            StaffSilence { hides_position: false, veiled: None, faded: Some((2, counter)) }
+        );
+        assert_eq!(
+            silence(true, GapMute::ClickBar),
+            StaffSilence { hides_position: false, veiled: None, faded: Some((2, 0)) }
+        );
+        // A bar silent as a whole: veiled, as before.
+        for mute in [GapMute::Metronome, GapMute::Everything] {
+            assert_eq!(
+                silence(true, mute),
+                StaffSilence { hides_position: true, veiled: Some(2), faded: None }
+            );
+        }
+        let sounding = StaffSilence { hides_position: false, veiled: None, faded: None };
+        for mute in [GapMute::Metronome, GapMute::ClickBar, GapMute::Counter] {
+            assert_eq!(silence(false, mute), sounding);
+        }
+    }
 
     /// The staff of `text` at 120 BPM, laid out 600 px wide.
     fn laid_out(text: &str) -> (Score, ScoreTiming, StaffLayout) {

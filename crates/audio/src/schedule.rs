@@ -86,8 +86,12 @@ impl SoundType {
     pub(crate) fn muted_by(self, mute: GapMute) -> bool {
         match self {
             SoundType::CountIn | SoundType::CountInSoft => false,
-            SoundType::Downbeat | SoundType::PrimaryBeat | SoundType::SoftBeat => true,
-            SoundType::CounterStrong | SoundType::CounterMedium | SoundType::CounterSoft => true,
+            SoundType::Downbeat | SoundType::PrimaryBeat | SoundType::SoftBeat => {
+                mute != GapMute::Counter
+            }
+            SoundType::CounterStrong | SoundType::CounterMedium | SoundType::CounterSoft => {
+                mute != GapMute::ClickBar
+            }
             SoundType::AccentedBeat | SoundType::Beat | SoundType::Ghost | SoundType::Kit(_) => {
                 mute == GapMute::Everything
             }
@@ -397,6 +401,40 @@ mod tests {
         let settings = AudioSettings { soft: 0.3, ..AudioSettings::default() };
         assert_eq!(SoundType::SoftBeat.profile(&settings).gain, 0.3);
         assert!(SoundType::SoftBeat.muted_by(GapMute::Metronome));
+    }
+
+    #[test]
+    fn each_mute_silences_its_sounds() {
+        use GapMute::*;
+        let kit = SoundType::Kit(KitHit {
+            instrument: Instrument::Snare,
+            technique: Technique::Normal,
+            level: Level::Normal,
+        });
+        let clicks = [SoundType::Downbeat, SoundType::PrimaryBeat, SoundType::SoftBeat];
+        let counter = [SoundType::CounterStrong, SoundType::CounterMedium, SoundType::CounterSoft];
+        let notes = [SoundType::AccentedBeat, SoundType::Beat, SoundType::Ghost, kit];
+        let count_in = [SoundType::CountIn, SoundType::CountInSoft];
+        // (mute, clicks, counter, notes)
+        for (mute, c, k, n) in [
+            (Metronome, true, true, false),
+            (Everything, true, true, true),
+            (ClickBar, true, false, false),
+            (Counter, false, true, false),
+        ] {
+            for s in clicks {
+                assert_eq!(s.muted_by(mute), c, "{s:?} by {mute:?}");
+            }
+            for s in counter {
+                assert_eq!(s.muted_by(mute), k, "{s:?} by {mute:?}");
+            }
+            for s in notes {
+                assert_eq!(s.muted_by(mute), n, "{s:?} by {mute:?}");
+            }
+            for s in count_in {
+                assert!(!s.muted_by(mute), "{s:?} by {mute:?}");
+            }
+        }
     }
 
     #[test]

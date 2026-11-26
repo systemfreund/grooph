@@ -3,19 +3,18 @@ use crate::documents::{Document, Documents};
 use crate::generator::GeneratorState;
 use crate::guide::AnchorFlash;
 use crate::library::PatternLibrary;
-use crate::library_panel::{LibraryItem, LibraryTab};
 use crate::metronome_view::MetronomeState;
 use crate::persist::StateBackup;
 use crate::pickers::Picker;
 use crate::platform::PlatformRuntime;
 use crate::play_along::PlayAlongState;
-use crate::presets::{PresetId, PresetLibrary};
-use crate::settings::{DeviceSettings, FeedbackSettings, PlaybackSettings, ViewSettings};
+use crate::settings::{DeviceSettings, FeedbackSettings, TabPlayback, ViewSettings};
 use crate::shell::ShellState;
 use crate::{Host, Mode, TransportState};
 use eframe::egui::TextStyle;
 use eframe::egui::emath::{ease_in_ease_out, lerp};
 use eframe::epaint::FontId;
+use grooph_audio::GapMute;
 use grooph_audio::{Audio, AudioSettings};
 use grooph_link::SharedLink;
 use grooph_measure::tap_tempo::TapTempo;
@@ -88,6 +87,9 @@ pub(crate) struct PlaybackState {
     pub(crate) ramp_bpm: Option<u32>,
     /// The gap click silences the bar being played.
     pub(crate) bar_muted: bool,
+    /// What it silences there: all of it, or one layer of the metronome
+    /// (the click bar or the counter rhythm).
+    pub(crate) bar_mute: GapMute,
     /// Vertical scroll that follows the playback cursor from row to row.
     pub(crate) scroll: ScrollTween,
     /// Distance from one row of the staff to the next, as last drawn.
@@ -124,11 +126,23 @@ impl PlaybackState {
         }
     }
 
-    /// How strongly the staff flash shows now. Dark in a silent bar, like
-    /// the anchors: checked when drawn, not when the beat is reached, as
+    /// The bar being played silences the click bar (alone or with the rest).
+    pub(crate) fn click_bar_muted(&self) -> bool {
+        self.bar_muted && self.bar_mute != GapMute::Counter
+    }
+
+    /// The bar being played silences the counter rhythm (alone or with the
+    /// rest).
+    pub(crate) fn counter_muted(&self) -> bool {
+        self.bar_muted && self.bar_mute != GapMute::ClickBar
+    }
+
+    /// How strongly the staff flash shows now. Dark in a bar whose click bar
+    /// is silent, like the anchors; it flashes on while only the counter
+    /// rhythm is. Checked when drawn, not when the beat is reached, as
     /// `bar_muted` can trail the cursor into the next bar by a frame.
     pub(crate) fn flash_shown(&self) -> f32 {
-        if self.bar_muted { 0.0 } else { self.flash_intensity }
+        if self.click_bar_muted() { 0.0 } else { self.flash_intensity }
     }
 }
 
@@ -241,11 +255,6 @@ pub(crate) struct EditorState {
     pub(crate) library: PatternLibrary,
     /// Rhythm generator settings and endless-mode state.
     pub(crate) generator: GeneratorState,
-    /// User-saved generator presets. Persisted across sessions.
-    pub(crate) presets: PresetLibrary,
-    /// Preset last loaded or saved; "Save" overwrites it when it is a user
-    /// preset. Not persisted.
-    pub(crate) active_preset: Option<PresetId>,
     /// The metronome tab's meter and what the pointer is on.
     pub(crate) metronome: MetronomeState,
     /// Saved state that did not restore completely, kept under a backup key
@@ -257,8 +266,9 @@ pub(crate) struct EditorState {
 /// microphone and tap input, and the accuracy tracker that ties hits to score onsets.
 pub(crate) struct PlaybackController {
     pub(crate) transport_state: TransportState,
-    /// Tempo, count-in, swing and the metronome trainer.
-    pub(crate) settings: PlaybackSettings,
+    /// Tempo, count-in, swing, the metronome trainer and the click, of
+    /// each page (see [`crate::Grooph::tab_playback`]).
+    pub(crate) settings: TabPlayback,
     pub(crate) audio: Option<Audio>,
     pub(crate) audio_cfg: AudioConfig,
     /// Output latency and the MIDI input port.
@@ -329,23 +339,21 @@ impl Default for StaffView {
     }
 }
 
-/// The library's and the preset picker's state on screen. Not persisted.
+/// The library's state on screen. Not persisted.
 #[derive(Default)]
 pub(crate) struct LibraryUi {
-    /// User preset whose row in the preset picker is being renamed.
-    pub(crate) renaming_preset: Option<u64>,
     /// Saved pattern whose card in the library is being renamed.
     pub(crate) renaming_pattern: Option<u64>,
     /// The name being typed for the card being renamed; it becomes the name
     /// on ✔ or Enter only.
     pub(crate) rename_typed: String,
-    /// The library item saved last and the UI time, for "✓ Saved" on its
-    /// card.
-    pub(crate) saved: Option<(LibraryItem, f64)>,
-    /// A library card to scroll into view once: the one just saved.
-    pub(crate) scroll_to: Option<LibraryItem>,
-    /// The half of the library shown.
-    pub(crate) tab: LibraryTab,
+    /// The pattern saved last and the UI time, for "✓ Saved" on its card.
+    pub(crate) saved: Option<(u64, f64)>,
+    /// A pattern's card to scroll into view once: the one just saved.
+    pub(crate) scroll_to: Option<u64>,
+    /// A pattern just saved from Practice, which opens in the score tab
+    /// once the library closes (see `Grooph::open_practice_save`).
+    pub(crate) open_on_close: Option<u64>,
 }
 
 /// Dialogs, pickers and short confirmations. Not persisted.
@@ -360,9 +368,15 @@ pub(crate) struct Dialogs {
     pub(crate) link_copied_at: Option<f64>,
     /// Setting whose picker dialog is open.
     pub(crate) picker: Option<Picker>,
-    /// Picker that opened the one in [`Self::picker`] and comes back when
-    /// it closes (Play along's MIDI row opens the MIDI input picker).
-    pub(crate) picker_return: Option<Picker>,
+    /// Pickers that opened the one in [`Self::picker`], the last one on
+    /// top: each comes back when the one above it closes (Play along → MIDI
+    /// input → Drum map).
+    pub(crate) picker_return: Vec<Picker>,
+    /// The drum map list while it is open (see `Picker::DrumMap`).
+    pub(crate) drum_map: Option<crate::drum_map_list::DrumMapList>,
+    /// The device key of a saved drum map whose deletion awaits its
+    /// confirmation in the MIDI input picker.
+    pub(crate) delete_drum_map: Option<String>,
     /// Taps of the tap-tempo buttons (tempo picker).
     pub(crate) tap_tempo: TapTempo,
     /// A short notice shown for a few seconds (see `Grooph::notify`).
@@ -374,12 +388,29 @@ pub(crate) struct Dialogs {
     pub(crate) voicing_prompt: Option<grooph_measure::Voicing>,
 }
 
+impl Dialogs {
+    /// Closes the open picker: the one that opened it comes back. Ends what
+    /// lives only while a picker is open (tap tempo, the drum map list's
+    /// listening, a pending confirmation).
+    pub(crate) fn close_picker(&mut self) {
+        if self.picker.take() == Some(Picker::DrumMap) {
+            self.drum_map = None;
+        }
+        self.picker = self.picker_return.pop();
+        self.delete_drum_map = None;
+        self.tap_tempo.reset();
+    }
+}
+
 /// Something that replaces the working score once unsaved changes are dealt with.
 pub(crate) enum PendingLoad {
     Pattern(u64),
     Link(Box<SharedLink>),
     /// A new score on this staff (see `Grooph::new_score`).
     NewScore(grooph_measure::StaffKind),
+    /// Practice's rhythm saved as a new pattern, which then opens in the
+    /// score tab (see `Grooph::save_practice_rhythm`).
+    PracticeRhythm,
 }
 
 #[cfg(test)]
@@ -416,6 +447,23 @@ mod tests {
         playback.reach_flash_beat((1, 0), true);
         playback.bar_muted = false;
         assert_eq!(playback.flash_shown(), 1.0);
+    }
+
+    #[test]
+    fn the_flash_follows_the_click_bar() {
+        for (mute, dark) in [
+            (GapMute::Metronome, true),
+            (GapMute::Everything, true),
+            (GapMute::ClickBar, true),
+            (GapMute::Counter, false),
+        ] {
+            let mut playback =
+                PlaybackState { bar_muted: true, bar_mute: mute, ..Default::default() };
+            playback.reach_flash_beat((0, 0), true);
+            assert_eq!(playback.flash_shown() == 0.0, dark, "{mute:?}");
+            playback.bar_muted = false;
+            assert_eq!(playback.flash_shown(), 1.0, "{mute:?}");
+        }
     }
 
     #[test]
