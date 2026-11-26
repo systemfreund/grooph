@@ -336,7 +336,7 @@ impl Grooph {
     /// Practice and the score tab while "Metronome click" is on; else every
     /// meter's own.
     pub(crate) fn played_click_bars(&self) -> ClickBars {
-        if self.metronome_mode() || self.playback_ctl.settings.metronome_click {
+        if self.metronome_mode() || self.tab_playback().metronome_click {
             self.click_bars()
         } else {
             ClickBars::default()
@@ -683,9 +683,9 @@ impl Grooph {
         let inner = COUNTER_RING * radius;
 
         let visuals = ui.visuals();
-        let muted = self.playback_ctl.playback.bar_muted;
+        let silence = RingSilence::of(&self.playback_ctl.playback);
         let (idle, lit) = ring_colors(visuals.dark_mode);
-        let base = if muted { idle.gamma_multiply(0.5) } else { idle };
+        let dimmed = |muted: bool| if muted { idle.gamma_multiply(0.5) } else { idle };
         let painter = ui.painter();
 
         // Tapped or hovered click: from the pointer's angle and its distance
@@ -720,7 +720,8 @@ impl Grooph {
 
         for (idx, (&(start, end), beat)) in spans.iter().zip(bar.first_voice().beats()).enumerate()
         {
-            let color = if current == Some(idx) && !muted { lit } else { base };
+            let muted = silence.click_bar;
+            let color = if current == Some(idx) && !muted { lit } else { dimmed(muted) };
             let segment = Segment { start, end, level: ClickLevel::of(beat), color };
             segment.paint(painter, center, radius, radius);
             if marked == Some(RingHit::Click(idx)) {
@@ -731,7 +732,8 @@ impl Grooph {
         // Where the hand starts, inside the innermost ring or dots.
         let hand_from = if let Some(counter) = &counter {
             for (i, &(idx, start, end)) in counter_spans.iter().enumerate() {
-                let color = if counter_now == Some(i) && !muted { lit } else { base };
+                let muted = silence.counter;
+                let color = if counter_now == Some(i) && !muted { lit } else { dimmed(muted) };
                 let level = click_level(counter, idx);
                 let segment = Segment { start, end, level, color };
                 let unit = COUNTER_THICKNESS * radius;
@@ -753,7 +755,8 @@ impl Grooph {
             let dot_now = current_turn.map(|t| (t * units as f32) as usize);
             for dot in 0..units {
                 let pos = at_turn(center, 0.72 * radius, dot as f32 / units as f32);
-                let color = if dot_now == Some(dot) && !muted { lit } else { base };
+                let muted = silence.click_bar;
+                let color = if dot_now == Some(dot) && !muted { lit } else { dimmed(muted) };
                 let r = if group_starts.contains(&dot) { dot_radius } else { 0.6 * dot_radius };
                 painter.circle_filled(pos, r, color);
             }
@@ -771,7 +774,7 @@ impl Grooph {
         // with a counter rhythm, so it shows where the clicks of the two
         // rhythms fall against each other). Drawn like the staff's playback
         // cursor.
-        if let Some(turn) = current_turn.filter(|_| !muted) {
+        if let Some(turn) = current_turn.filter(|_| silence.hand) {
             let to = radius + thickness(ClickLevel::Strong) * radius / 2.0 + 4.0;
             let stroke = playback_cursor_stroke(self.ui.staff.em, highlight_color(visuals));
             painter.line_segment(
@@ -1087,6 +1090,27 @@ fn segment_of_note(
 fn count_in_beat(turn: f32, ts: &TimeSignature) -> u32 {
     let units = ts.beats.max(1) as u32;
     ((turn * units as f32) as u32).min(units - 1) + 1
+}
+
+/// How a silent bar shows on the ring: the ring of each layer it silences
+/// is dimmed and lights nothing (the click bar's ring and its dots, or the
+/// counter rhythm's ring), and the hand is hidden in any silent bar.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct RingSilence {
+    pub(crate) click_bar: bool,
+    pub(crate) counter: bool,
+    /// The hand shows the playback position.
+    pub(crate) hand: bool,
+}
+
+impl RingSilence {
+    pub(crate) fn of(playback: &crate::state::PlaybackState) -> Self {
+        Self {
+            click_bar: playback.click_bar_muted(),
+            counter: playback.counter_muted(),
+            hand: !playback.bar_muted,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1862,7 +1886,7 @@ mod tests {
         assert_eq!(saved.metronome.meter, ts);
         // ...and outside the tab, while Practice clicks the metronome's.
         app.select_tab(Tab::Practice);
-        app.playback_ctl.settings.metronome_click = true;
+        app.tab_playback_mut().metronome_click = true;
         assert!(app.click_bar() == click);
         assert!(app.playback_options().click.for_meter(ts) == click);
         // Another meter picked outside the tab keeps 4/4's in the settings.
@@ -1877,19 +1901,19 @@ mod tests {
         let ts = TimeSignature::FOUR_FOUR;
         app.select_tab(Tab::Practice);
         // Off by default: every meter's own click, also in a shared link.
-        assert!(!app.playback_ctl.settings.metronome_click);
+        assert!(!app.tab_playback().metronome_click);
         assert!(app.playback_options().click.for_meter(ts) == meter_click_bar(ts));
         assert!(app.shared_link().click.is_none());
-        app.playback_ctl.settings.metronome_click = true;
+        app.tab_playback_mut().metronome_click = true;
         let click = app.playback_options().click;
         assert!(click.for_meter(ts) == four.click());
         assert!(click.for_meter(TimeSignature::THREE_FOUR) == three.click());
         assert!(app.shared_link().click == Some(four.click()));
         // Muted, the rhythm plays alone.
-        app.playback_ctl.settings.click = false;
+        app.tab_playback_mut().click = false;
         assert_eq!(app.playback_options().played, grooph_audio::Played::Rhythm);
         // The metronome always clicks its own.
-        app.playback_ctl.settings.metronome_click = false;
+        app.tab_playback_mut().metronome_click = false;
         app.select_tab(Tab::Metronome);
         assert_eq!(app.playback_options().played, grooph_audio::Played::Clicks);
         assert!(app.playback_options().click.for_meter(ts) == four.click());
@@ -1904,12 +1928,12 @@ mod tests {
         let mut other = metronome_app();
         other.select_tab(Tab::Practice);
         other.apply_link(link);
-        assert!(other.playback_ctl.settings.metronome_click);
+        assert!(other.tab_playback().metronome_click);
         assert!(other.playback_options().click.for_meter(TimeSignature::FOUR_FOUR) == four.click()); // One without a click bar plays the standard click again.
         let mut plain = app.shared_link();
         plain.click = None;
         other.apply_link(plain);
-        assert!(!other.playback_ctl.settings.metronome_click);
+        assert!(!other.tab_playback().metronome_click);
     }
 
     #[test]
@@ -1931,6 +1955,71 @@ mod tests {
         assert_eq!(app.metronome_meter(), TimeSignature::THREE_FOUR);
         assert!(app.click_bar() == three);
         assert!(app.click_bars().for_meter(TimeSignature::FOUR_FOUR) == four);
+    }
+
+    #[test]
+    fn a_silent_bar_dims_only_its_layer_on_the_ring() {
+        use crate::state::PlaybackState;
+        use grooph_audio::GapMute;
+        let silence = |muted, mute| {
+            RingSilence::of(&PlaybackState {
+                bar_muted: muted,
+                bar_mute: mute,
+                ..Default::default()
+            })
+        };
+        let ring = |click_bar, counter, hand| RingSilence { click_bar, counter, hand };
+        assert_eq!(silence(true, GapMute::Counter), ring(false, true, false));
+        assert_eq!(silence(true, GapMute::ClickBar), ring(true, false, false));
+        assert_eq!(silence(true, GapMute::Metronome), ring(true, true, false));
+        assert_eq!(silence(true, GapMute::Everything), ring(true, true, false));
+        for mute in [GapMute::Metronome, GapMute::ClickBar, GapMute::Counter] {
+            assert_eq!(silence(false, mute), ring(false, false, true));
+        }
+    }
+
+    #[test]
+    fn the_metronome_offers_its_layers_to_mute_with_a_polyrhythm() {
+        use grooph_audio::GapMute::*;
+        let mut app = metronome_app();
+        // Without a polyrhythm: no choice, all clicks.
+        assert!(app.offered_mutes().is_empty());
+        app.tab_playback_mut().gap_click.mute = Counter;
+        assert_eq!(app.played_mute(), Metronome);
+        app.set_counter_ratio(Some(Ratio { n: 3, span: 4 }));
+        assert_eq!(app.offered_mutes(), [Metronome, ClickBar, Counter]);
+        assert_eq!(app.played_mute(), Counter);
+        assert_eq!(app.playback_options().gap.mute, Counter);
+        // Clicks and notes, migrated from a shared setting, plays as all
+        // clicks here and stays saved.
+        app.tab_playback_mut().gap_click.mute = Everything;
+        assert_eq!(app.played_mute(), Metronome);
+        assert_eq!(app.tab_playback().gap_click.mute, Everything);
+        // Practice and the score tab: all clicks or clicks and notes; a
+        // layer of the metronome plays as all clicks there.
+        for tab in [Tab::Practice, Tab::Score] {
+            app.select_tab(tab);
+            assert_eq!(app.offered_mutes(), [Metronome, Everything], "{tab:?}");
+            app.tab_playback_mut().gap_click.mute = Counter;
+            assert_eq!(app.played_mute(), Metronome, "{tab:?}");
+            assert_eq!(app.tab_playback().gap_click.mute, Counter, "{tab:?}");
+            app.tab_playback_mut().gap_click.mute = Everything;
+            assert_eq!(app.played_mute(), Everything, "{tab:?}");
+        }
+    }
+
+    #[test]
+    fn the_silent_bars_row_names_the_layer_first() {
+        use crate::pickers::silent_bars_label;
+        use grooph_audio::{GapClick, GapMode, GapMute};
+        let pattern = GapClick { on_bars: 4, off_bars: 4, ..GapClick::default() };
+        let random = GapClick { mode: GapMode::Random, random_percent: 30, ..GapClick::default() };
+        assert_eq!(silent_bars_label(&pattern, GapMute::Counter), "Polyrhythm · 4 on · 4 off");
+        assert_eq!(silent_bars_label(&random, GapMute::ClickBar), "Click bar · Random 30%");
+        for mute in [GapMute::Metronome, GapMute::Everything] {
+            assert_eq!(silent_bars_label(&pattern, mute), "4 on · 4 off");
+            assert_eq!(silent_bars_label(&random, mute), "Random 30%");
+        }
     }
 
     /// An app in the metronome tab whose 3/4 and 4/4 have edited click

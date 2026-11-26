@@ -224,6 +224,26 @@ fn migrate(version: u8, fields: &mut Vec<(String, Box<RawValue>)>) -> bool {
         // four fields; version 5 as one.
         carried &= join_metronome(fields);
     }
+    if version < 6 {
+        // Version 5 kept one group of playback settings for all pages;
+        // version 6 one per page, each starting as a copy of it.
+        carried &= split_playback(fields);
+    }
+    carried
+}
+
+/// The fields of each page's playback settings ([`crate::settings::TabPlayback`]).
+const PLAYBACK_FIELDS: [&str; 3] = ["metronome_playback", "practice_playback", "score_playback"];
+
+/// Copies the shared `playback` group of version 5 into each page's.
+/// Whether it was stored at most once.
+fn split_playback(fields: &mut Vec<Field>) -> bool {
+    let (raw, mut carried) = take_last(fields, "playback");
+    if let Some(raw) = raw {
+        for name in PLAYBACK_FIELDS {
+            carried &= push_ron(fields, name, raw.get_ron().to_owned());
+        }
+    }
     carried
 }
 
@@ -322,7 +342,7 @@ fn push_ron(fields: &mut Vec<(String, Box<RawValue>)>, name: &str, ron: String) 
 fn repair_field(name: &str, raw: &RawValue) -> Option<(Box<RawValue>, Vec<String>)> {
     match name {
         _ if DOC_FIELDS.contains(&name) => repair::<SavedDoc>(raw),
-        "playback" => repair::<PlaybackSettings>(raw),
+        _ if PLAYBACK_FIELDS.contains(&name) => repair::<PlaybackSettings>(raw),
         "generator" => repair::<GeneratorConfig>(raw),
         "devices" => repair::<DeviceSettings>(raw),
         "feedback" => repair::<FeedbackSettings>(raw),
@@ -437,8 +457,8 @@ impl<'de> Deserialize<'de> for Fields {
 #[cfg(test)]
 mod tests {
     use super::{
-        BACKUP_KEY_PREFIX, DOC_FIELDS, Fields, SETTINGS_GROUPS, StateBackup, field, repair_field,
-        restore, struct_ron,
+        BACKUP_KEY_PREFIX, DOC_FIELDS, Fields, PLAYBACK_FIELDS, SETTINGS_GROUPS, StateBackup,
+        field, repair_field, restore, struct_ron,
     };
     use crate::guide::Guide;
     use crate::metronome_bars::MeterBars;
@@ -467,11 +487,27 @@ mod tests {
     /// and tab.
     fn saved_state() -> PersistedState {
         let mut s = PersistedState { tab: Tab::Score, ..Default::default() };
-        s.playback.bpm = 93;
+        for p in playbacks_mut(&mut s) {
+            p.bpm = 93;
+        }
         let mut m = Measure::new(TimeSignature::THREE_FOUR);
         m.first_voice_mut().set_beat(0, Beat::note(e())).unwrap();
         s.library.add("Groove".into(), Score::single(m), 93);
         s
+    }
+
+    /// The playback settings of the metronome, Practice and the score tab.
+    fn playbacks(s: &PersistedState) -> [&PlaybackSettings; 3] {
+        [&s.metronome_playback, &s.practice_playback, &s.score_playback]
+    }
+
+    fn playbacks_mut(s: &mut PersistedState) -> [&mut PlaybackSettings; 3] {
+        [&mut s.metronome_playback, &mut s.practice_playback, &mut s.score_playback]
+    }
+
+    /// The tempo of each page.
+    fn bpms(s: &PersistedState) -> [u32; 3] {
+        playbacks(s).map(|p| p.bpm)
     }
 
     fn saved_ron() -> String {
@@ -487,7 +523,7 @@ mod tests {
     fn a_complete_state_restores_without_backup() {
         let (s, backup) = restore(Some(&saved_ron()));
         assert_library_kept(&s);
-        assert_eq!(s.playback.bpm, 93);
+        assert_eq!(bpms(&s), [93; 3]);
         assert_eq!(s.tab, Tab::Score);
         assert!(backup.is_none());
         assert!(restore(None).1.is_none());
@@ -501,7 +537,7 @@ mod tests {
         let (s, backup) = restore(Some(&saved));
         assert_eq!(s.tab, PersistedState::default().tab);
         assert_library_kept(&s);
-        assert_eq!(s.playback.bpm, 93);
+        assert_eq!(bpms(&s), [93; 3]);
         let backup = backup.expect("the stored text is backed up");
         assert_eq!(backup.ron, saved);
         assert_eq!(backup.version, PERSISTED_STATE_VERSION);
@@ -536,7 +572,7 @@ mod tests {
             assert!(doc.dirty);
             assert!(s.score_doc.dirty && s.practice_doc.as_ref().unwrap().dirty);
             assert_library_kept(&s);
-            assert_eq!(s.playback.bpm, 93);
+            assert_eq!(bpms(&s), [93; 3]);
             assert_eq!(backup.unwrap().ron, saved);
         }
     }
@@ -605,7 +641,7 @@ mod tests {
                 None => assert!(!practice),
             }
             assert_library_kept(&s);
-            assert_eq!(s.playback.bpm, 93);
+            assert_eq!(bpms(&s), [93; 3]);
             let doc = s.score_doc.into_doc(&s.library);
             assert_eq!(doc.active_pattern_id, Some(pattern));
             assert!(doc.dirty);
@@ -663,9 +699,9 @@ mod tests {
 
     #[test]
     fn a_field_stored_twice_keeps_the_last_and_is_backed_up() {
-        let saved = saved_ron().replacen('(', "(playback:(bpm:60),", 1);
+        let saved = saved_ron().replacen('(', "(score_playback:(bpm:60),", 1);
         let (s, backup) = restore(Some(&saved));
-        assert_eq!(s.playback.bpm, 93);
+        assert_eq!(bpms(&s), [93; 3]);
         assert_library_kept(&s);
         assert_eq!(backup.unwrap().ron, saved);
     }
@@ -673,7 +709,7 @@ mod tests {
     #[test]
     fn text_that_does_not_read_is_backed_up() {
         let (s, backup) = restore(Some("(bpm: 93, library: ("));
-        assert_eq!(s.playback.bpm, PersistedState::default().playback.bpm);
+        assert_eq!(bpms(&s), bpms(&PersistedState::default()));
         assert_eq!(backup.unwrap().ron, "(bpm: 93, library: (");
     }
 
@@ -692,30 +728,33 @@ mod tests {
 
     /// The settings of [`STATE_V3`], in groups.
     fn every_setting_changed() -> PersistedState {
-        let mut s = PersistedState {
-            playback: PlaybackSettings {
-                bpm: 93,
-                count_in: true,
-                swing: Swing { unit: SwingUnit::Sixteenths, percent: 61 },
-                gap_click: GapClick {
-                    enabled: true,
-                    mode: GapMode::Random,
-                    on_bars: 3,
-                    off_bars: 1,
-                    ..GapClick::default()
-                },
-                tempo_ramp: TempoRamp {
-                    enabled: true,
-                    target_bpm: 140,
-                    step_bpm: 4,
-                    every: 3,
-                    keep_reached: true,
-                    ..TempoRamp::default()
-                },
-                // Not in version 3.
-                click: true,
-                metronome_click: false,
+        let playback = PlaybackSettings {
+            bpm: 93,
+            count_in: true,
+            swing: Swing { unit: SwingUnit::Sixteenths, percent: 61 },
+            gap_click: GapClick {
+                enabled: true,
+                mode: GapMode::Random,
+                on_bars: 3,
+                off_bars: 1,
+                ..GapClick::default()
             },
+            tempo_ramp: TempoRamp {
+                enabled: true,
+                target_bpm: 140,
+                step_bpm: 4,
+                every: 3,
+                keep_reached: true,
+                ..TempoRamp::default()
+            },
+            // Not in version 3.
+            click: true,
+            metronome_click: false,
+        };
+        let mut s = PersistedState {
+            metronome_playback: playback,
+            practice_playback: playback,
+            score_playback: playback,
             generator: GeneratorConfig {
                 settings: GeneratorSettings {
                     subdivision: Subdivision::Triplets,
@@ -789,7 +828,12 @@ mod tests {
         // A group without its arm in `repair_field` would read as a whole.
         let saved = ron::to_string(&every_setting_changed()).unwrap();
         let Fields(fields) = ron::from_str(&saved).unwrap();
-        for (group, members) in SETTINGS_GROUPS {
+        // The shared playback group of version 3 to 5 is one per page now.
+        let saved_groups = SETTINGS_GROUPS.iter().flat_map(|&(group, members)| {
+            let names = if group == "playback" { PLAYBACK_FIELDS.to_vec() } else { vec![group] };
+            names.into_iter().map(move |name| (name, members))
+        });
+        for (group, members) in saved_groups {
             let raw = field(&fields, group).unwrap_or_else(|| panic!("{group} is saved"));
             let (_, broken) = members[0];
             let Fields(mut inner) = raw.into_rust().unwrap();
@@ -852,7 +896,7 @@ mod tests {
         let s = every_setting_changed();
         let d = PersistedState::default();
         let groups = [
-            (ron::to_string(&s.playback), ron::to_string(&d.playback)),
+            (ron::to_string(&s.score_playback), ron::to_string(&d.score_playback)),
             (ron::to_string(&s.generator), ron::to_string(&d.generator)),
             (ron::to_string(&s.devices), ron::to_string(&d.devices)),
             (ron::to_string(&s.feedback), ron::to_string(&d.feedback)),
@@ -973,13 +1017,71 @@ mod tests {
     fn the_click_settings_restore() {
         // Not in version 3, so at their defaults in `every_setting_changed`.
         let mut state = every_setting_changed();
-        state.playback.click = false;
-        state.playback.metronome_click = true;
+        state.practice_playback.click = false;
+        state.score_playback.metronome_click = true;
         let saved = ron::to_string(&state).unwrap();
         let (s, backup) = restore(Some(&saved));
         assert!(backup.is_none());
-        assert!(!s.playback.click);
-        assert!(s.playback.metronome_click);
+        assert_eq!(playbacks(&s).map(|p| p.click), [true, false, true]);
+        assert_eq!(playbacks(&s).map(|p| p.metronome_click), [false, false, true]);
+    }
+
+    #[test]
+    fn each_pages_playback_settings_restore() {
+        let mut state = every_setting_changed();
+        state.metronome_playback.bpm = 61;
+        state.practice_playback.gap_click.mute = grooph_audio::GapMute::Everything;
+        state.score_playback.tempo_ramp.target_bpm = 180;
+        let saved = ron::to_string(&state).unwrap();
+        let (s, backup) = restore(Some(&saved));
+        assert!(backup.is_none());
+        assert_eq!(ron::to_string(&s).unwrap(), saved);
+        assert_eq!(bpms(&s), [61, 93, 93]);
+    }
+
+    /// [`every_setting_changed`] as version 5 saved it: one group of
+    /// playback settings for all pages.
+    fn version_5_state() -> String {
+        let state = every_setting_changed();
+        let saved = ron::to_string(&state).unwrap();
+        let group = ron::to_string(&state.score_playback).unwrap();
+        let per_page = PLAYBACK_FIELDS.map(|name| format!("{name}:{group}")).join(",");
+        assert!(saved.contains(&per_page), "{saved}");
+        saved.replacen(&per_page, &format!("playback:{group}"), 1).replacen(
+            &format!("version:{PERSISTED_STATE_VERSION}"),
+            "version:5",
+            1,
+        )
+    }
+
+    #[test]
+    fn a_version_5_state_gives_every_page_its_playback_settings() {
+        let saved = version_5_state();
+        assert!(saved.starts_with("(version:5,") && saved.contains("playback:(bpm:93,"), "{saved}");
+        let (s, backup) = restore(Some(&saved));
+        assert!(backup.is_none());
+        assert_eq!(s.version, PERSISTED_STATE_VERSION);
+        let want = every_setting_changed();
+        for (page, want) in playbacks(&s).into_iter().zip(playbacks(&want)) {
+            assert_eq!(page, want);
+        }
+        assert_eq!(ron::to_string(&s).unwrap(), ron::to_string(&want).unwrap());
+        // As it read before: the old names of the silent bars' mute.
+        for (old, mute) in [
+            ("Metronome", grooph_audio::GapMute::Metronome),
+            ("Everything", grooph_audio::GapMute::Everything),
+        ] {
+            let saved = saved.replacen("mute:Metronome", &format!("mute:{old}"), 1);
+            let (s, backup) = restore(Some(&saved));
+            assert!(backup.is_none());
+            assert!(playbacks(&s).iter().all(|p| p.gap_click.mute == mute), "{old}");
+        }
+        // A broken field of the group falls back alone, on every page.
+        let broken = saved.replacen("count_in:true", "count_in:Unknown", 1);
+        assert_ne!(broken, saved);
+        let (s, backup) = restore(Some(&broken));
+        assert!(backup.is_some());
+        assert!(playbacks(&s).iter().all(|p| !p.count_in && p.bpm == 93));
     }
 
     #[test]
@@ -991,7 +1093,7 @@ mod tests {
         let with_presets = format!("{},{presets})", saved.strip_suffix(')').unwrap());
         let (s, backup) = restore(Some(&with_presets));
         assert_library_kept(&s);
-        assert_eq!(s.playback.bpm, 93);
+        assert_eq!(bpms(&s), [93; 3]);
         assert_eq!(backup.expect("the presets are backed up").ron, with_presets);
         // Saved again, the state has none: no second backup.
         let resaved = ron::to_string(&s).unwrap();
@@ -1015,14 +1117,18 @@ mod tests {
             (current.as_str(), "swing:(unit:Sixteenths,percent:61)"),
             (STATE_V3, "swing:(unit:Sixteenths,percent:61)"),
         ] {
-            assert_eq!(saved.matches(broken).count(), 1, "{broken}");
+            // Once in version 3, once per page's playback settings since.
+            let times = if broken.starts_with("swing") && saved != STATE_V3 { 3 } else { 1 };
+            assert_eq!(saved.matches(broken).count(), times, "{broken}");
             let saved = saved.replace(broken, &broken.replace(':', ":Unknown"));
             let (s, backup) = restore(Some(&saved));
             let mut want = every_setting_changed();
             want.view.guide = Guide::default();
             if broken.starts_with("swing") {
                 want.view.guide = Guide::EverySecondBar;
-                want.playback.swing = Swing::default();
+                for p in playbacks_mut(&mut want) {
+                    p.swing = Swing::default();
+                }
             }
             assert_eq!(ron::to_string(&s).unwrap(), ron::to_string(&want).unwrap(), "{broken}");
             assert_eq!(backup.unwrap().ron, saved);
@@ -1050,7 +1156,7 @@ mod tests {
         let (s, backup) = restore(Some(&saved));
         assert_eq!(ron::to_string(&s.score_doc.score), ron::to_string(&Score::single(m)));
         assert_eq!(s.score_doc.cursor, Cursor::at(0, 2));
-        assert_eq!(s.playback.bpm, 87);
+        assert_eq!(bpms(&s), [87; 3]);
         assert_eq!(s.version, PERSISTED_STATE_VERSION);
         assert_eq!(backup.unwrap().version, 1);
     }

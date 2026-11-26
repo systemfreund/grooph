@@ -50,7 +50,7 @@ pub(crate) fn render_measure_at(
     }
 
     let lit = ctx.lit_in(0, placed.measure_idx).map(|idx| (idx, highlight));
-    draw_notes(painter, measure_layout, color, lit, &opts);
+    draw_notes(painter, measure_layout, ctx.ink(0, placed.measure_idx, color), lit, &opts);
 
     if let Some(c) = ctx.cursor_in(0, placed.measure_idx) {
         draw_edit_cursor(ui, painter, measure_layout, c.beat_idx, &opts);
@@ -236,6 +236,10 @@ pub fn draw_notes(
 /// How much of its color a rest the score leaves out keeps in the editor
 /// ([`NoteLayout::veiled`]): faint, but there to be picked.
 const VEILED_REST_OPACITY: f32 = 0.3;
+
+/// How much of its colour a faded voice keeps ([`RenderContext::faded`]):
+/// as much as a veiled rest.
+pub(crate) const FADED_VOICE_OPACITY: f32 = VEILED_REST_OPACITY;
 
 /// Per-note glyphs: head, stem, flag, dots, accent. The note `lit` names
 /// is drawn in its colour.

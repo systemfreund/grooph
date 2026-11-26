@@ -19,17 +19,22 @@ whether you rushed or dragged.
 - **Pattern** plays a number of bars, then mutes a number of bars, for example 2 on and 2
   off.
 - **Random** mutes each bar with the chance you set. The first bar always sounds.
-- **Click only** keeps the notes of your rhythm and only mutes the metronome.
-  **Click and notes** silences everything.
+- **All clicks** keeps the notes of your rhythm and only mutes the metronome.
+  **Clicks and notes** (Practice and Score) silences everything.
+- With a [polyrhythm](/metronome/polyrhythms/) in the Metronome tab you can also mute just one
+  layer: **Click bar** silences the main clicks and keeps the polyrhythm, **Polyrhythm**
+  silences the polyrhythm and keeps the click bar. That way you hold one rhythm on your own
+  while you hear the other.
 
-A muted bar is dimmed on the staff, so you can see the silence is meant. The count-in is
+A muted bar is dimmed on the staff, so you can see the silence is meant. When only one layer is
+muted, that layer is drawn faded on the staff and dimmed on the ring. The count-in is
 never muted, and while you edit (a page's editor or **Edit clicks**) every bar sounds, so you
 can hear your changes. With [timing practice](/timing-practice/) your hits in muted bars
 still count, so the result shows how well you kept the time on your own.
 
 ## Tempo ramp: speed trainer
 
-In the settings (**More → Settings**), under **Tempo Ramp**, switch on **Change the tempo while playing**. The ramp starts at the
+Tap **Tempo ramp** in the options of the Metronome, Practice or Score tab and switch it on. The ramp starts at the
 BPM at the top and goes towards the target tempo in steps, for example 5 BPM every
 4 bars or every loop of the rhythm. In endless mode the rhythm never loops, so the ramp
 counts in bars there. The tempo only changes at the start of a bar, and the
@@ -38,6 +43,9 @@ tempo being played is shown at the top as **BPM now**.
 At the target the ramp can **hold** the tempo, **start over** from the beginning or go
 **back down** and up again. Tick **Keep the reached tempo after stopping** if the next run
 should start where this one ended.
+
+Each tab keeps its own tempo, count-in, swing, silent bars and tempo ramp, so a setting for
+practising in the Metronome does not change Practice or Score.
 
 ## Tips
 

@@ -9,7 +9,7 @@ use crate::metronome_view::FillLook;
 use crate::metronome_view::ratio_label;
 use crate::pickers::{
     Picker, ROW_HEIGHT, click_source_label, hidden_rests_label, shown_groups, silent_bars_label,
-    swing_label,
+    swing_label, tempo_ramp_label,
 };
 use crate::share::paint_share_icon;
 use crate::tokens;
@@ -799,11 +799,7 @@ impl Grooph {
             // While a tempo ramp runs: the tempo being played.
             match self.playback_ctl.playback.ramp_bpm {
                 Some(bpm) => (Picker::Bpm, "BPM now", CardValue::Text(bpm.to_string())),
-                None => (
-                    Picker::Bpm,
-                    "BPM",
-                    CardValue::Text(self.playback_ctl.settings.bpm.to_string()),
-                ),
+                None => (Picker::Bpm, "BPM", CardValue::Text(self.tab_playback().bpm.to_string())),
             },
         ];
 
@@ -817,11 +813,7 @@ impl Grooph {
             (Picker::Library, "Score", CardValue::Text(self.score_title())),
             match self.playback_ctl.playback.ramp_bpm {
                 Some(bpm) => (Picker::Bpm, "BPM now", CardValue::Text(bpm.to_string())),
-                None => (
-                    Picker::Bpm,
-                    "BPM",
-                    CardValue::Text(self.playback_ctl.settings.bpm.to_string()),
-                ),
+                None => (Picker::Bpm, "BPM", CardValue::Text(self.tab_playback().bpm.to_string())),
             },
         ];
         self.card(ui, &cells);
@@ -839,11 +831,7 @@ impl Grooph {
             (Picker::MetronomeMeter, "Meter", CardValue::Meter(self.metronome_meter())),
             match self.playback_ctl.playback.ramp_bpm {
                 Some(bpm) => (Picker::Bpm, "BPM now", CardValue::Text(bpm.to_string())),
-                None => (
-                    Picker::Bpm,
-                    "BPM",
-                    CardValue::Text(self.playback_ctl.settings.bpm.to_string()),
-                ),
+                None => (Picker::Bpm, "BPM", CardValue::Text(self.tab_playback().bpm.to_string())),
             },
         ]
     }
@@ -1204,7 +1192,7 @@ impl Grooph {
 
     /// Straight or swung; the switch brings back the last swing.
     fn swing_row(&mut self, ui: &mut Ui) {
-        let swing = &mut self.playback_ctl.settings.swing;
+        let swing = &mut self.playback_ctl.settings.get_mut(self.editor.document).swing;
         if !swing.is_straight() {
             self.ui.shell.last_swing_percent = swing.percent;
         }
@@ -1220,22 +1208,35 @@ impl Grooph {
         }
     }
 
-    /// The last rows of both sheets, the same in each tab.
+    /// The last rows of both sheets, the same in each tab, each on the
+    /// tab's own settings.
     fn shared_rows(&mut self, ui: &mut Ui) {
         self.counting_row(ui);
-        switch_row(ui, "Count-in", &mut self.playback_ctl.settings.count_in);
-        let gap = &mut self.playback_ctl.settings.gap_click;
-        let silent = silent_bars_label(gap);
+        switch_row(ui, "Count-in", &mut self.tab_playback_mut().count_in);
+        let mute = self.played_mute();
+        let gap = &mut self.playback_ctl.settings.get_mut(self.editor.document).gap_click;
+        let silent = silent_bars_label(gap, mute);
         if split_row(ui, "Silent bars", &silent, &mut gap.enabled).clicked() {
             self.ui.dialogs.picker = Some(Picker::SilentBars);
         }
+        self.tempo_ramp_row(ui);
         self.swing_row(ui);
+    }
+
+    /// The tempo ramp: where it goes, and a switch; opens its picker.
+    fn tempo_ramp_row(&mut self, ui: &mut Ui) {
+        let endless = self.endless_runs();
+        let settings = self.tab_playback_mut();
+        let value = tempo_ramp_label(&settings.tempo_ramp, settings.bpm, endless);
+        if split_row(ui, "Tempo ramp", &value, &mut settings.tempo_ramp.enabled).clicked() {
+            self.ui.dialogs.picker = Some(Picker::TempoRamp);
+        }
     }
 
     /// The click played here, the standard one or the metronome's, which
     /// opens its picker; the switch mutes it.
     fn metronome_click_row(&mut self, ui: &mut Ui) {
-        let settings = &mut self.playback_ctl.settings;
+        let settings = self.tab_playback_mut();
         let label = click_source_label(settings.metronome_click);
         if split_row(ui, "Click", label, &mut settings.click).clicked() {
             self.ui.dialogs.picker = Some(Picker::Click);
@@ -1833,6 +1834,82 @@ mod tests {
         let (_, _, sheet, _) = open_sheet(super::Tab::Practice, vec2(375.0, 420.0));
         let shown = sheet.height() - super::SHEET_HANDLE_HEIGHT;
         assert!(shown >= super::SHEET_MIN_ROWS_HEIGHT - 0.5, "{sheet:?}");
+    }
+
+    /// Runs the rows every tab's options end with alone at the top of a
+    /// tall screen with `events`; the texts they painted.
+    fn shared_rows_frame(
+        app: &mut crate::Grooph,
+        ctx: &Context,
+        events: Vec<Event>,
+    ) -> Vec<String> {
+        let input = RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(390.0, 1400.0))),
+            events,
+            ..Default::default()
+        };
+        let mut output = ctx.run_ui(input, |ui| app.shared_rows(ui));
+        output.textures_delta.clear();
+        output
+            .shapes
+            .iter()
+            .filter_map(|c| match &c.shape {
+                egui::Shape::Text(t) => Some(t.galley.text().to_owned()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn every_tab_has_its_tempo_ramp_row() {
+        use super::Tab;
+        use crate::pickers::Picker;
+        let ctx = Context::default();
+        let cc = crate::test_support::creation_context(ctx.clone());
+        let mut app = crate::Grooph::new(&cc);
+        for (tab, target) in [(Tab::Metronome, 150), (Tab::Practice, 90), (Tab::Score, 160)] {
+            app.select_tab(tab);
+            app.tab_playback_mut().bpm = 120;
+            let ramp = &mut app.tab_playback_mut().tempo_ramp;
+            (ramp.target_bpm, ramp.step_bpm, ramp.every) = (target, 5, 4);
+            let texts = shared_rows_frame(&mut app, &ctx, vec![]);
+            let sign = if target < 120 { '−' } else { '+' };
+            let value = format!("→ {target} · {sign}5 / 4 bars");
+            for text in ["Tempo ramp", value.as_str(), "Silent bars", "Count-in"] {
+                assert!(texts.iter().any(|t| t == text), "{tab:?}: {text} in {texts:?}");
+            }
+        }
+        // A tap on the row (left of its switch) opens its picker.
+        let texts = shared_rows_frame(&mut app, &ctx, vec![]);
+        let row = texts.iter().position(|t| t == "Tempo ramp").unwrap();
+        assert!(row > 0);
+        app.ui.dialogs.picker = None;
+        // The rows: count labels, count-in, silent bars, tempo ramp.
+        let at = pos2(100.0, 3.5 * super::ROW_HEIGHT);
+        shared_rows_frame(&mut app, &ctx, vec![Event::PointerMoved(at), button(at, true)]);
+        shared_rows_frame(&mut app, &ctx, vec![button(at, false)]);
+        assert_eq!(app.ui.dialogs.picker, Some(Picker::TempoRamp));
+    }
+
+    #[test]
+    fn the_silent_bars_row_shows_the_metronomes_layer() {
+        use super::Tab;
+        use grooph_audio::GapMute;
+        use grooph_measure::counter::Ratio;
+        let ctx = Context::default();
+        let cc = crate::test_support::creation_context(ctx.clone());
+        let mut app = crate::Grooph::new(&cc);
+        app.select_tab(Tab::Metronome);
+        app.set_counter_ratio(Some(Ratio { n: 3, span: 2 }));
+        let gap = &mut app.tab_playback_mut().gap_click;
+        (gap.on_bars, gap.off_bars, gap.mute) = (4, 4, GapMute::Counter);
+        let texts = shared_rows_frame(&mut app, &ctx, vec![]);
+        // A phone's row may cut its end off.
+        assert!(texts.iter().any(|t| t.starts_with("Polyrhythm · 4 on")), "{texts:?}");
+        // Practice has its own silent bars.
+        app.select_tab(Tab::Practice);
+        let texts = shared_rows_frame(&mut app, &ctx, vec![]);
+        assert!(texts.iter().any(|t| t == "2 on · 2 off"), "{texts:?}");
     }
 
     /// Runs the voicing row alone at the top of the screen with `events`;

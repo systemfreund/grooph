@@ -110,10 +110,6 @@ impl Grooph {
                 self.new_groove_settings(ui);
             });
 
-            egui::CollapsingHeader::new("Tempo Ramp").default_open(false).show(ui, |ui| {
-                self.tempo_ramp_settings(ui);
-            });
-
             egui::CollapsingHeader::new("Developer settings").default_open(false).show(ui, |ui| {
                 ui.checkbox(&mut self.ui.view.show_score_tab, "Show the Score tab (beta)");
                 ui.separator();

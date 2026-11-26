@@ -49,7 +49,7 @@ impl Grooph {
 
     /// What [`Self::share_link_url`] links to.
     pub(crate) fn shared_link(&self) -> SharedLink {
-        let swing = self.playback_ctl.settings.swing;
+        let swing = self.tab_playback().swing;
         let click = self.played_click_bars();
         let (content, meter) = if self.metronome_mode() {
             (LinkContent::Metronome(self.metronome_meter()), Some(self.metronome_meter()))
@@ -59,7 +59,7 @@ impl Grooph {
             (LinkContent::Score(score.clone()), meter)
         };
         SharedLink {
-            bpm: Some(self.playback_ctl.settings.bpm),
+            bpm: Some(self.tab_playback().bpm),
             swing: (!swing.is_straight()).then_some(swing),
             content: Some(content),
             click: meter.and_then(|ts| click.custom_for(ts)).cloned(),

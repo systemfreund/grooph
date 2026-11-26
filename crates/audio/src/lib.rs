@@ -832,6 +832,10 @@ struct MetronomeSource {
     samples_processed: usize,
     /// `samples_processed` for the UI thread, updated every 1024 samples.
     rendered: Arc<AtomicU64>,
+    /// Every sound started, with the bar it sounded in (`None` in the
+    /// count-in), for the tests.
+    #[cfg(test)]
+    heard: Vec<(Option<u64>, SoundType)>,
 }
 
 impl MetronomeSource {
@@ -868,6 +872,8 @@ impl MetronomeSource {
             sample_rate,
             samples_processed: 0,
             rendered: Arc::default(),
+            #[cfg(test)]
+            heard: Vec::new(),
         }
     }
 
@@ -981,13 +987,16 @@ impl Iterator for MetronomeSource {
                 tempo_scale,
                 &mut self.triggered,
             );
-            let muted = self.current_bar().is_some_and(|b| b.muted);
+            let bar = self.current_bar();
+            let muted = bar.is_some_and(|b| b.muted);
             let mute = self.local_params.plan.gap.mute;
             for &sound in &self.triggered {
                 let settings = &self.local_params.audio_settings;
                 if (muted && sound.muted_by(mute)) || sound.profile(settings).gain <= 0.0 {
                     continue;
                 }
+                #[cfg(test)]
+                self.heard.push((bar.map(|b| b.bar), sound));
                 self.voices.trigger(sound.patch(&self.local_params.audio_settings));
             }
         }
@@ -1469,6 +1478,100 @@ mod tests {
         audio.update(&PlayerState::Stopped, 120, &score, 0.0);
         assert!(Arc::ptr_eq(&audio.built.as_ref().unwrap().1, &sent));
         assert!(!audio.shared_state.lock().unwrap().is_dirty);
+    }
+
+    /// The sounds heard over the count-in and the first `bars` bars of the
+    /// metronome's 4/4 click bar with 3:4 against it, with silent bars `gap`.
+    fn heard_with_gap(gap: GapClick, bars: u64) -> Vec<(Option<u64>, SoundType)> {
+        use grooph_measure::click::meter_click_bar;
+        use grooph_measure::counter::{Ratio, counter_bar};
+        let ts = TimeSignature::FOUR_FOUR;
+        let mut bar = meter_click_bar(ts);
+        bar.push_voices(&counter_bar(ts, Ratio { n: 3, span: 4 }).unwrap()).unwrap();
+        let score = Score::single(bar);
+        let mut audio = Audio::new(120).unwrap();
+        audio.set_seed(42);
+        audio.set_playback_options(PlaybackOptions {
+            played: Played::Clicks,
+            count_in: true,
+            gap,
+            ..Default::default()
+        });
+        audio.update(&PlayerState::Playing, 120, &score, 0.0);
+        let mut source = MetronomeSource::with_sample_rate(Arc::clone(&audio.shared_state), 8_000);
+        // A bar of 4/4 at 120 bpm is 2 s; the count-in one more.
+        for _ in 0..(8_000 * 2 * (bars + 1)) {
+            source.next();
+        }
+        source.heard.retain(|(bar, _)| bar.is_none_or(|b| b < bars));
+        source.heard
+    }
+
+    /// Of `heard`, the bars in which a sound of the click bar, and those in
+    /// which one of the counter rhythm sounded; and whether the count-in did.
+    fn layers_heard(heard: &[(Option<u64>, SoundType)]) -> (Vec<u64>, Vec<u64>, bool) {
+        let bars = |counter: bool| {
+            let mut bars: Vec<u64> = heard
+                .iter()
+                .filter(|(_, s)| !matches!(s, SoundType::CountIn | SoundType::CountInSoft))
+                .filter(|(_, s)| s.is_counter() == counter)
+                .filter_map(|(bar, _)| *bar)
+                .collect();
+            bars.dedup();
+            bars
+        };
+        let count_in = heard.iter().any(|(bar, s)| bar.is_none() && *s == SoundType::CountIn);
+        (bars(false), bars(true), count_in)
+    }
+
+    #[test]
+    fn silent_bars_can_silence_one_layer_of_the_metronome() {
+        let pattern = |mute| GapClick {
+            enabled: true,
+            mode: GapMode::Pattern,
+            on_bars: 4,
+            off_bars: 4,
+            mute,
+            ..GapClick::default()
+        };
+        let all: Vec<u64> = (0..16).collect();
+        let on: Vec<u64> = all.iter().copied().filter(|b| b % 8 < 4).collect();
+
+        let (clicks, counter, count_in) =
+            layers_heard(&heard_with_gap(pattern(GapMute::Counter), 16));
+        assert_eq!(counter, on);
+        assert_eq!(clicks, all);
+        assert!(count_in);
+
+        let (clicks, counter, count_in) =
+            layers_heard(&heard_with_gap(pattern(GapMute::ClickBar), 16));
+        assert_eq!(clicks, on);
+        assert_eq!(counter, all);
+        assert!(count_in);
+
+        // All clicks: both are silent in an off bar.
+        let (clicks, counter, count_in) =
+            layers_heard(&heard_with_gap(pattern(GapMute::Metronome), 16));
+        assert_eq!((clicks, counter), (on.clone(), on));
+        assert!(count_in);
+    }
+
+    #[test]
+    fn random_silent_bars_filter_only_the_chosen_layer() {
+        let random = |mute| GapClick {
+            enabled: true,
+            mode: GapMode::Random,
+            random_percent: 50,
+            mute,
+            ..GapClick::default()
+        };
+        let all: Vec<u64> = (0..16).collect();
+        let (clicks, counter, _) = layers_heard(&heard_with_gap(random(GapMute::Counter), 16));
+        assert_eq!(clicks, all);
+        assert!(counter.len() < all.len(), "{counter:?}");
+        let (clicks, counter, _) = layers_heard(&heard_with_gap(random(GapMute::ClickBar), 16));
+        assert_eq!(counter, all);
+        assert!(clicks.len() < all.len(), "{clicks:?}");
     }
 
     #[test]
