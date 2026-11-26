@@ -18,8 +18,7 @@ with no account and no installation, and natively on your computer.
   triplets or a mix, in five difficulty levels.
 - Pick 1 to 8 bars or play in endless mode, where new bars keep coming.
 - Choose the time signature, including odd meters like 5/4, 7/8 or 9/8.
-- Hand-pick the rhythm figures you want to work on, add rests, and save your
-  settings as presets.
+- Hand-pick the rhythm figures you want to work on and add rests.
 - Show counting syllables under the notes (numbers, Takadimi or Gordon) and
   let the staff flash on the beats instead of following a cursor.
 

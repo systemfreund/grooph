@@ -327,14 +327,6 @@ impl Grooph {
         self.editor.metronome.forget_hover();
     }
 
-    /// Close the metronome, if open, for something that needs a rhythm
-    /// (a preset): shows the practice page.
-    pub(crate) fn leave_metronome(&mut self) {
-        if self.metronome_mode() {
-            self.show_document(Document::Practice);
-        }
-    }
-
     /// The click bar of every meter, from the metronome's document.
     pub(crate) fn click_bars(&self) -> ClickBars {
         self.editor.docs.metronome.click_bars()
@@ -2028,13 +2020,6 @@ mod tests {
             },
             &|_| MeterBars::plain(three),
         );
-
-        // A preset leaves the metronome as it is.
-        let (mut app, three_was, four_was) = app_with_edited_meters();
-        app.apply_preset(crate::presets::PresetId::BuiltIn(1));
-        assert_eq!(app.metronome_meter(), four);
-        assert_eq!(app.meter_bars(four), four_was);
-        assert_eq!(app.meter_bars(three), three_was);
 
         // An embedded app clicks the link's meter and bars, the others their
         // plain ones.

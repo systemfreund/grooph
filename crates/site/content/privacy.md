@@ -18,7 +18,7 @@ Email: [hello@grooph.app](mailto:hello@grooph.app)
 
 ## Data stored on your device
 
-grooph remembers your settings, tempo, saved presets, rhythms and practice results so they
+grooph remembers your settings, tempo, saved rhythms and practice results so they
 are still there the next time you open it. In the browser this data is kept in the local
 storage of your browser; in the Android app it is kept in a file in the app's private
 storage. It never leaves your device and is not sent to us. You can delete it by clearing

@@ -101,6 +101,6 @@ mod tests {
         use super::next_default_name;
         let names = ["Pattern 1", "Pattern 3", "Groove", "Pattern x"];
         assert_eq!(next_default_name("Pattern", names.into_iter()), "Pattern 4");
-        assert_eq!(next_default_name("Preset", names.into_iter()), "Preset 1");
+        assert_eq!(next_default_name("Rhythm", names.into_iter()), "Rhythm 1");
     }
 }

@@ -27,8 +27,6 @@ mod platform;
 mod play_along;
 mod play_along_settings;
 mod playback_clock;
-mod preset_panel;
-mod presets;
 mod score_change;
 mod settings;
 mod settings_panel;
@@ -64,7 +62,6 @@ use crate::metronome_bars::SavedMetronome;
 use crate::metronome_view::MetronomeState;
 use crate::platform::{PlatformRuntime, VisibilityEvent};
 use crate::play_along::PlayAlongState;
-use crate::presets::PresetLibrary;
 use crate::score_change::{Origin, ScoreChange};
 use crate::settings::{
     DeviceSettings, EditorSettings, FeedbackSettings, GeneratorConfig, PlaybackSettings,
@@ -199,7 +196,6 @@ pub(crate) struct PersistedState {
     /// opened from.
     document: Document,
     library: PatternLibrary,
-    presets: PresetLibrary,
     playback: PlaybackSettings,
     generator: GeneratorConfig,
     /// Sounds and volumes (the mixer).
@@ -233,7 +229,6 @@ impl Default for PersistedState {
             practice_doc: None,
             document: Document::Score,
             library: PatternLibrary::default(),
-            presets: PresetLibrary::default(),
             playback: PlaybackSettings::default(),
             generator: GeneratorConfig::default(),
             audio_settings: AudioSettings::default(),
@@ -258,7 +253,6 @@ impl PersistedState {
             practice_doc: Some(SavedDoc::of(&docs.practice)),
             document: app.document(),
             library: app.editor.library.clone(),
-            presets: app.editor.presets.clone(),
             playback: ctl.settings,
             generator: app.editor.generator.config,
             audio_settings: ctl.audio_cfg.settings,
@@ -874,21 +868,19 @@ impl Grooph {
         }
     }
 
-    /// Save Practice's rhythm as a new pattern and open the library on the
-    /// practice page's rhythms with its name to type. Practice stays the
+    /// Save Practice's rhythm as a new pattern and open the library with its
+    /// name to type. Practice stays the
     /// page underneath; the pattern opens in the score tab once the library
     /// closes (see [`Self::open_practice_save`]). Returns the pattern's id.
     pub(crate) fn save_practice_rhythm(&mut self, now: f64) -> u64 {
         let id = self.add_practice_pattern();
         let library = &mut self.ui.library;
-        library.tab = library_panel::LibraryTab::Rhythms;
-        library.renaming_preset = None;
         library.renaming_pattern = Some(id);
         library.rename_typed =
             self.editor.library.get(id).map(|p| p.name.clone()).unwrap_or_default();
         library.open_on_close = Some(id);
         self.ui.dialogs.picker = Some(pickers::Picker::Library);
-        self.saved(library_panel::LibraryItem::Pattern(id), now);
+        self.saved(id, now);
         id
     }
 
@@ -1163,7 +1155,6 @@ impl Grooph {
         let ui = &mut self.ui;
         if ui.dialogs.link_error.take().is_some()
             || ui.dialogs.pending_load.take().is_some()
-            || ui.library.renaming_preset.take().is_some()
             || ui.library.renaming_pattern.take().is_some()
         {
             return true;
@@ -1456,8 +1447,6 @@ impl Grooph {
                 instrument: Instrument::Snare,
                 settings: state.editor,
                 library: state.library,
-                presets: state.presets,
-                active_preset: None,
                 state_backup,
                 metronome: MetronomeState::new(),
                 generator,
@@ -1494,7 +1483,6 @@ impl Grooph {
                 embed: embed.map(|params| Embed::new(&cc.egui_ctx, params)),
             },
         };
-        app.editor.active_preset = app.matching_preset();
         // The page the More screen was opened from, then the saved tab;
         // Practice for the score tab while it is hidden.
         let shown = |tab| match tab {
@@ -1827,43 +1815,16 @@ mod tests {
     }
 
     #[test]
-    fn a_preset_from_the_library_opens_the_practice_page() {
-        use super::{Grooph, Mode};
-        use crate::pickers::Picker;
-        use crate::presets::{PresetId, builtin_presets};
-
-        let cc = crate::test_support::creation_context(eframe::egui::Context::default());
-        let mut app = Grooph::new(&cc);
-        // Through the metronome: the click bar stays the metronome's.
-        app.select_tab(Tab::Metronome);
-        let click_bar = format!("{:?}", app.editor.doc().score());
-        app.select_tab(Tab::More);
-        app.ui.dialogs.picker = Some(Picker::Library);
-        let last = builtin_presets().len() - 1;
-        app.open_preset(PresetId::BuiltIn(last));
-        assert_eq!(app.tab(), Tab::Practice);
-        assert_eq!(app.ui.mode, Mode::Playback);
-        assert_eq!(app.ui.dialogs.picker, None);
-        assert_eq!(app.editor.active_preset, Some(PresetId::BuiltIn(last)));
-        assert_eq!(
-            app.editor.generator.config.settings,
-            builtin_presets()[last].1.generator.settings
-        );
-        app.select_tab(Tab::Metronome);
-        assert_eq!(format!("{:?}", app.editor.doc().score()), click_bar);
-    }
-
-    #[test]
-    fn the_score_tabs_library_holds_rhythms_only() {
+    fn the_library_holds_rhythms_only() {
         use super::Grooph;
-        use crate::library_panel::LibraryTab;
         use crate::pickers::Picker;
         use eframe::egui::{Pos2, RawInput, Rect, Shape, vec2};
 
         let ctx = eframe::egui::Context::default();
         let cc = crate::test_support::creation_context(ctx.clone());
         let mut app = Grooph::new(&cc);
-        app.ui.library.tab = LibraryTab::Presets;
+        app.select_tab(Tab::Score);
+        app.save_pattern_as();
         let texts = |app: &mut Grooph| {
             let mut texts = Vec::new();
             for _ in 0..2 {
@@ -1885,58 +1846,24 @@ mod tests {
             }
             texts
         };
-        // From More: both halves.
-        app.select_tab(Tab::More);
-        app.ui.dialogs.picker = Some(Picker::Library);
-        assert!(texts(&mut app).iter().any(|t| t == "Presets"));
-        // From the score tab's card: its rhythms, no presets.
-        app.select_tab(Tab::Score);
-        app.ui.dialogs.picker = Some(Picker::Library);
-        let shown = texts(&mut app);
-        assert!(!shown.iter().any(|t| t == "Presets"), "{shown:?}");
-        assert!(shown.iter().any(|t| t.contains("Save as new")), "{shown:?}");
-    }
-
-    #[test]
-    fn library_and_preset_picker_render_at_phone_width() {
-        use super::Grooph;
-        use crate::library_panel::LibraryTab;
-        use crate::pickers::Picker;
-        use eframe::egui::{Pos2, RawInput, Rect, vec2};
-
-        let ctx = eframe::egui::Context::default();
-        let cc = crate::test_support::creation_context(ctx.clone());
-        let mut app = Grooph::new(&cc);
-        app.select_tab(Tab::Practice);
-        app.save_preset_as("Mine");
-        app.select_tab(Tab::More);
-        app.ui.dialogs.picker = Some(Picker::Library);
-        for tab in [LibraryTab::Rhythms, LibraryTab::Presets] {
-            app.ui.library.tab = tab;
-            for _ in 0..2 {
-                let screen = Rect::from_min_size(Pos2::ZERO, vec2(390.0, 844.0));
-                let input = RawInput { screen_rect: Some(screen), ..Default::default() };
-                let mut output = ctx.run_ui(input, |ui| {
-                    app.apply_style(ui);
-                    app.settings_picker(ui);
-                });
-                output.textures_delta.clear();
+        // From every page, and from More in front of each: the rhythms, no
+        // halves and no presets.
+        for tab in [Tab::Practice, Tab::Score, Tab::Metronome] {
+            for more in [false, true] {
+                app.select_tab(tab);
+                if more {
+                    app.select_tab(Tab::More);
+                }
+                app.ui.dialogs.picker = Some(Picker::Library);
+                let shown = texts(&mut app);
+                assert!(shown.iter().any(|t| t == "Pattern 1"), "{tab:?}: {shown:?}");
+                assert!(
+                    !shown.iter().any(|t| t == "Rhythms" || t.contains("Preset")),
+                    "{tab:?}: {shown:?}"
+                );
+                assert_eq!(app.ui.dialogs.picker, Some(Picker::Library));
             }
         }
-        assert_eq!(app.ui.dialogs.picker, Some(Picker::Library));
-        // The Preset picker on the practice page shows the same cards.
-        app.select_tab(Tab::Practice);
-        app.ui.dialogs.picker = Some(Picker::Preset);
-        for _ in 0..2 {
-            let screen = Rect::from_min_size(Pos2::ZERO, vec2(390.0, 844.0));
-            let input = RawInput { screen_rect: Some(screen), ..Default::default() };
-            let mut output = ctx.run_ui(input, |ui| {
-                app.apply_style(ui);
-                app.settings_picker(ui);
-            });
-            output.textures_delta.clear();
-        }
-        assert_eq!(app.ui.dialogs.picker, Some(Picker::Preset));
     }
 
     /// Runs frames of the shell at phone size, `time` seconds into the run,
@@ -2043,7 +1970,6 @@ mod tests {
     #[test]
     fn save_is_off_while_there_is_nothing_new_to_save() {
         use super::Grooph;
-        use crate::presets::{PresetId, builtin_presets};
 
         let cc = crate::test_support::creation_context(eframe::egui::Context::default());
         let mut app = Grooph::new(&cc);
@@ -2059,25 +1985,6 @@ mod tests {
         assert!(target.overwrites.is_some() && !target.enabled);
         app.editor.rhythm_doc_mut().unwrap().dirty = true;
         assert!(app.rhythm_save_target().enabled);
-
-        // Presets: an unchanged built-in has nothing to save, a changed one
-        // saves a new preset.
-        app.select_tab(Tab::Practice);
-        app.apply_preset(PresetId::BuiltIn(0));
-        assert_eq!(app.editor.generator.config.settings, builtin_presets()[0].1.generator.settings);
-        let target = app.preset_save_target();
-        assert_eq!((target.overwrites, target.enabled), (None, false));
-        app.playback_ctl.settings.bpm += 1;
-        let target = app.preset_save_target();
-        assert_eq!((target.overwrites, target.enabled), (None, true));
-        let id = app.save_preset_as("");
-        let target = app.preset_save_target();
-        assert_eq!(target.overwrites, app.editor.presets.get(id).map(|p| p.name.clone()));
-        assert!(!target.enabled);
-        app.playback_ctl.settings.bpm += 1;
-        assert!(app.preset_save_target().enabled);
-        app.editor.active_preset = None;
-        assert!(app.preset_save_target().enabled);
     }
 
     #[test]
@@ -2331,13 +2238,11 @@ mod tests {
 
     #[test]
     fn practice_saves_its_rhythm_and_opens_it_in_the_score_tab() {
-        use crate::library_panel::{LibraryItem, LibraryTab};
         use crate::pickers::Picker;
 
         for show_score_tab in [false, true] {
             let mut app = practice_app(false);
             app.ui.view.show_score_tab = show_score_tab;
-            app.ui.library.tab = LibraryTab::Presets;
             app.editor.library.add("Pattern 1".into(), app.editor.docs.score.score.clone(), 80);
             app.start_playback();
             app.request_save_practice_rhythm(2.0);
@@ -2351,10 +2256,9 @@ mod tests {
             // The library on its rhythms, with the name to type, over
             // Practice.
             assert_eq!(app.ui.dialogs.picker, Some(Picker::Library));
-            assert_eq!(app.ui.library.tab, LibraryTab::Rhythms);
             assert_eq!(app.ui.library.renaming_pattern, Some(id));
             assert_eq!(app.ui.library.rename_typed, "Pattern 2");
-            assert_eq!(app.ui.library.saved, Some((LibraryItem::Pattern(id), 2.0)));
+            assert_eq!(app.ui.library.saved, Some((id, 2.0)));
             assert_eq!(app.document(), super::Document::Practice);
             assert_eq!(app.tab(), Tab::Practice);
             app.open_practice_save();
@@ -2834,7 +2738,7 @@ mod tests {
     #[test]
     fn save_as_new_opens_the_name_and_says_saved() {
         use super::Grooph;
-        use crate::library_panel::{LibraryItem, SaveAs};
+        use crate::library_panel::SaveAs;
 
         let cc = crate::test_support::creation_context(eframe::egui::Context::default());
         let mut app = Grooph::new(&cc);
@@ -2843,22 +2747,14 @@ mod tests {
         let id = app.save_rhythm(SaveAs::New, 1.0);
         assert_eq!(app.ui.library.renaming_pattern, Some(id));
         assert_eq!(app.ui.library.rename_typed, app.editor.library.get(id).unwrap().name);
-        assert_eq!(app.ui.library.saved, Some((LibraryItem::Pattern(id), 1.0)));
-        assert_eq!(app.ui.library.scroll_to, Some(LibraryItem::Pattern(id)));
+        assert_eq!(app.ui.library.saved, Some((id, 1.0)));
+        assert_eq!(app.ui.library.scroll_to, Some(id));
         // Overwriting names no new pattern and opens no name.
         app.ui.library.renaming_pattern = None;
         app.editor.rhythm_doc_mut().unwrap().dirty = true;
         assert_eq!(app.save_rhythm(SaveAs::Update, 2.0), id);
         assert_eq!(app.editor.library.patterns.len(), 1);
         assert_eq!(app.ui.library.renaming_pattern, None);
-
-        app.select_tab(Tab::Practice);
-        let preset = app.save_preset(SaveAs::New, 3.0);
-        assert_eq!(app.ui.library.renaming_preset, Some(preset));
-        assert_eq!(app.ui.library.saved, Some((LibraryItem::Preset(preset), 3.0)));
-        app.playback_ctl.settings.bpm += 1;
-        assert_eq!(app.save_preset(SaveAs::Update, 4.0), preset);
-        assert_eq!(app.editor.presets.get(preset).unwrap().settings, app.preset_snapshot());
     }
 
     #[test]
@@ -2871,8 +2767,8 @@ mod tests {
         let cc = crate::test_support::creation_context(ctx.clone());
         let mut app = Grooph::new(&cc);
         let mut time = 0.0;
-        for picker in [Picker::Mixer, Picker::Settings, Picker::Help, Picker::Preset] {
-            app.select_tab(if picker == Picker::Preset { Tab::Practice } else { Tab::More });
+        for picker in [Picker::Mixer, Picker::Settings, Picker::Help] {
+            app.select_tab(Tab::More);
             app.ui.dialogs.picker = Some(picker);
             for _ in 0..3 {
                 time += 0.1;

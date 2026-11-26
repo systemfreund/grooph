@@ -28,17 +28,7 @@ rolls a new one with the same settings.
 | **Space** | Adds whole-beat rests, from none to a lot. Good for practicing silence. In the **Level** dialog. |
 | **Groupings** | Instead of a level, pick exactly which one-beat figures may appear. In the **Level** dialog. |
 | **Ghost notes** | Quiet clicks on every free slot of the subdivision, to hear the grid. |
-| **Preset** | Recall a saved exercise. |
-
-## Presets
-
-A preset stores the generator settings together with everything you practise with them:
-tempo, swing, ghost notes, count-in, endless mode, silent bars, tempo ramp and the sounds.
-Tap **Preset** and pick one to restore all of it at once. In the same dialog you save the
-current settings as a new preset, update the active one, and rename or delete your own with
-the pencil button.
-A few built-in presets get you started, for example "16th funk" or "Speed builder"; they
-cannot be changed, but you can save a copy under a new name.
+| **Save rhythm** | Keeps the current rhythm and tempo in your library, where you can rename it and open it again. |
 
 ## How the levels work
 

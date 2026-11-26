@@ -392,7 +392,7 @@ pub(crate) fn value_row(ui: &mut Ui, label: &str, value: &str) -> Response {
         FontId::proportional(19.0),
         visuals.text_color(),
     );
-    // A long value (a device or preset name) is cut short before the label.
+    // A long value (a device name) is cut short before the label.
     let value = cut_to_fit(painter, value, rect.right() - 30.0 - label.right() - 16.0);
     painter.text(
         rect.right_center() - vec2(30.0, 0.0),
@@ -1374,9 +1374,6 @@ impl Grooph {
     }
 
     fn option_rows(&mut self, ui: &mut Ui) {
-        if value_row(ui, "Preset", &self.active_preset_label()).clicked() {
-            self.ui.dialogs.picker = Some(Picker::Preset);
-        }
         let generator = &mut self.editor.generator;
         switch_row(ui, "Ghost notes", &mut generator.config.ghost_notes);
         self.guide_row(ui);

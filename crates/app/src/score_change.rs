@@ -339,7 +339,7 @@ mod tests {
     }
 
     /// Fix: a new rhythm of the generator while playing (a changed setting,
-    /// a preset) plays on from the cursor, so the accuracy clock is anchored
+    /// 🎲) plays on from the cursor, so the accuracy clock is anchored
     /// there again on the new rhythm's timing.
     #[test]
     fn a_new_rhythm_while_playing_plays_on_and_anchors_the_clock_again() {
