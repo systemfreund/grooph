@@ -346,6 +346,9 @@ pub(crate) struct LibraryUi {
     pub(crate) scroll_to: Option<LibraryItem>,
     /// The half of the library shown.
     pub(crate) tab: LibraryTab,
+    /// A pattern just saved from Practice, which opens in the score tab
+    /// once the library closes (see `Grooph::open_practice_save`).
+    pub(crate) open_on_close: Option<u64>,
 }
 
 /// Dialogs, pickers and short confirmations. Not persisted.
@@ -400,6 +403,9 @@ pub(crate) enum PendingLoad {
     Link(Box<SharedLink>),
     /// A new score on this staff (see `Grooph::new_score`).
     NewScore(grooph_measure::StaffKind),
+    /// Practice's rhythm saved as a new pattern, which then opens in the
+    /// score tab (see `Grooph::save_practice_rhythm`).
+    PracticeRhythm,
 }
 
 #[cfg(test)]

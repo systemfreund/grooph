@@ -433,6 +433,7 @@ impl App for Grooph {
         if self.ui.dialogs.pending_load.is_some() && !embedded {
             self.load_confirm_dialog(ui);
         }
+        self.open_practice_save();
 
         if self.ui.dialogs.link_error.is_some() {
             self.link_error_dialog(ui);
@@ -851,9 +852,66 @@ impl Grooph {
         id
     }
 
-    /// Replace the current score + tempo with the saved pattern `id`. The score
-    /// swap is undoable; the tempo change is applied directly (tempo is not part
-    /// of the undo snapshot). Transport is stopped so playback restarts cleanly.
+    /// Practice's rhythm as a new pattern under the next free "Pattern N",
+    /// with the current tempo. Practice's document stays a generator rhythm
+    /// without a pattern. Returns the pattern's id.
+    fn add_practice_pattern(&mut self) -> u64 {
+        let bpm = self.playback_ctl.settings.bpm;
+        let names = self.editor.library.patterns.iter().map(|p| p.name.as_str());
+        let name = library::next_default_name("Pattern", names);
+        self.editor.library.add(name, self.editor.docs.practice.score.clone(), bpm)
+    }
+
+    /// "Save rhythm" on the practice page, and "Save as new" in the library
+    /// opened from there: Practice's rhythm becomes a new pattern, which
+    /// opens in the score tab. That replaces the score tab's score, so its
+    /// unsaved changes ask first. `now` is the UI time, for "✓ Saved".
+    pub(crate) fn request_save_practice_rhythm(&mut self, now: f64) {
+        if self.editor.docs.score.dirty {
+            self.ui.dialogs.pending_load = Some(PendingLoad::PracticeRhythm);
+        } else {
+            self.save_practice_rhythm(now);
+        }
+    }
+
+    /// Save Practice's rhythm as a new pattern and open the library on the
+    /// practice page's rhythms with its name to type. Practice stays the
+    /// page underneath; the pattern opens in the score tab once the library
+    /// closes (see [`Self::open_practice_save`]). Returns the pattern's id.
+    pub(crate) fn save_practice_rhythm(&mut self, now: f64) -> u64 {
+        let id = self.add_practice_pattern();
+        let library = &mut self.ui.library;
+        library.tab = library_panel::LibraryTab::Rhythms;
+        library.renaming_preset = None;
+        library.renaming_pattern = Some(id);
+        library.rename_typed =
+            self.editor.library.get(id).map(|p| p.name.clone()).unwrap_or_default();
+        library.open_on_close = Some(id);
+        self.ui.dialogs.picker = Some(pickers::Picker::Library);
+        self.saved(library_panel::LibraryItem::Pattern(id), now);
+        id
+    }
+
+    /// Once the library is closed, the pattern just saved from Practice
+    /// opens in the score tab, unless it was deleted meanwhile. Run every
+    /// frame.
+    pub(crate) fn open_practice_save(&mut self) {
+        if self.ui.dialogs.picker == Some(pickers::Picker::Library) {
+            return;
+        }
+        if let Some(id) = self.ui.library.open_on_close.take()
+            && self.editor.library.contains(id)
+        {
+            self.load_pattern(id);
+        }
+    }
+
+    /// Replace the score tab's score + tempo with the saved pattern `id`,
+    /// and show the score tab: every pattern opens there, on either staff,
+    /// also while that tab is hidden (it shows in the tab bar then). The
+    /// score swap is undoable; the tempo change is applied directly (tempo
+    /// is not part of the undo snapshot). Transport is stopped so playback
+    /// restarts cleanly.
     pub(crate) fn load_pattern(&mut self, id: u64) {
         let Some(pattern) = self.editor.library.get(id) else {
             return;
@@ -862,17 +920,7 @@ impl Grooph {
         // A drum struck by two voices at once is a change to save.
         let undoubled = score.undouble_instruments();
         let bpm = pattern.bpm;
-        // Every pattern opens in the score tab, on either staff; while that
-        // tab is hidden, a rhythm of the one line opens in Practice.
-        if self.pattern_opens_on_practice(&score) {
-            self.replace_practice_from_link(score);
-            self.playback_ctl.settings.bpm = bpm;
-            self.ui.dialogs.picker = None;
-            self.select_tab(Tab::Practice);
-            return;
-        }
 
-        // The score tab's score is replaced.
         self.stop_transport();
         self.show_document(Document::Score);
         self.replace_score(score, Origin::Pattern { id, undoubled });
@@ -892,15 +940,10 @@ impl Grooph {
     /// Entry point for the load button: if the working score has unsaved changes,
     /// defer to the confirmation dialog; otherwise load immediately.
     pub(crate) fn request_load_pattern(&mut self, id: u64) {
-        // A rhythm for Practice, which a load replaces without asking: the
-        // score tab's changes are not at stake.
-        if self.editor.library.get(id).is_some_and(|p| self.pattern_opens_on_practice(&p.score)) {
-            self.load_pattern(id);
-            return;
-        }
         let dirty = self.editor.docs.score.dirty;
         if self.editor.docs.score.active_pattern_id == Some(id) && !dirty {
             // Already loaded and unchanged.
+            self.ui.library.open_on_close = None;
             self.show_document(Document::Score);
             self.show_loaded_pattern();
             return;
@@ -916,6 +959,11 @@ impl Grooph {
     pub(crate) fn delete_pattern(&mut self, id: u64) {
         self.editor.library.remove(id);
         self.forget_pattern(id);
+        // Saved from Practice and deleted before the library closed: the
+        // score tab keeps its score.
+        if self.ui.library.open_on_close == Some(id) {
+            self.ui.library.open_on_close = None;
+        }
         if matches!(self.ui.dialogs.pending_load, Some(PendingLoad::Pattern(p)) if p == id) {
             self.ui.dialogs.pending_load = None;
         }
@@ -1006,13 +1054,6 @@ impl Grooph {
                 && matches!(&link.content, Some(LinkContent::Score(s)) if s.staff == grooph_measure::StaffKind::Line))
     }
 
-    /// Whether a library pattern of `score` opens on the practice page: one
-    /// of the one line while the score tab is hidden. Otherwise every pattern
-    /// opens in the score tab.
-    fn pattern_opens_on_practice(&self, score: &Score) -> bool {
-        !self.ui.view.show_score_tab && score.staff == grooph_measure::StaffKind::Line
-    }
-
     /// A rhythm shared from the practice page replaces its rhythm, as a new
     /// one from the generator would.
     fn replace_practice_from_link(&mut self, mut score: Score) {
@@ -1036,12 +1077,16 @@ impl Grooph {
         self.show_loaded_pattern();
     }
 
-    /// Run a pending load after the unsaved-changes dialog.
-    pub(crate) fn finish_pending_load(&mut self, pending: PendingLoad) {
+    /// Run a pending load after the unsaved-changes dialog. `now` is the
+    /// UI time, for "✓ Saved".
+    pub(crate) fn finish_pending_load(&mut self, pending: PendingLoad, now: f64) {
         match pending {
             PendingLoad::Pattern(id) => self.load_pattern(id),
             PendingLoad::Link(link) => self.apply_link(*link),
             PendingLoad::NewScore(staff) => self.new_score(staff),
+            PendingLoad::PracticeRhythm => {
+                self.save_practice_rhythm(now);
+            }
         }
     }
 
@@ -1694,7 +1739,7 @@ mod tests {
         assert_eq!(app.tab(), Tab::More);
         assert_eq!(app.ui.dialogs.picker, Some(Picker::Library));
         let pending = app.ui.dialogs.pending_load.take().unwrap();
-        app.finish_pending_load(pending);
+        app.finish_pending_load(pending, 0.0);
         assert_eq!(app.tab(), Tab::Score);
         assert_eq!(app.ui.dialogs.picker, None);
         assert_eq!(app.editor.rhythm_doc().active_pattern_id, Some(id));
@@ -2054,7 +2099,7 @@ mod tests {
         assert_eq!(app.playback_ctl.transport_state, TransportState::Playing);
         // Loading after all puts the metronome away.
         let pending = app.ui.dialogs.pending_load.take().unwrap();
-        app.finish_pending_load(pending);
+        app.finish_pending_load(pending, 0.0);
         assert!(!app.metronome_mode());
         assert_eq!(app.editor.rhythm_doc().active_pattern_id, Some(id));
     }
@@ -2243,15 +2288,270 @@ mod tests {
         assert!(
             matches!(app.ui.dialogs.pending_load, Some(crate::state::PendingLoad::Pattern(id)) if id == old)
         );
-        // While the score tab is hidden, the one line's opens in Practice, as
-        // before, without asking about the score tab's changes.
+        // While the score tab is hidden, too: it then shows in the tab bar.
         app.ui.dialogs.pending_load = None;
+        app.editor.docs.score.dirty = false;
         app.ui.view.show_score_tab = false;
+        for (id, rhythm) in [(old, "4/4 h h"), (groove, "4/4 H:q S-H:q H:q S-H:q ; K:h K:h")] {
+            app.select_tab(Tab::Practice);
+            let practice_before = format_score(&app.editor.docs.practice.score).unwrap();
+            app.request_load_pattern(id);
+            assert!(app.ui.dialogs.pending_load.is_none());
+            assert_eq!(app.document(), super::Document::Score);
+            assert_eq!(app.tab(), Tab::Score);
+            assert_eq!(format_score(app.editor.doc().score()).unwrap(), rhythm);
+            assert_eq!(app.editor.docs.score.active_pattern_id, Some(id));
+            assert_eq!(app.editor.docs.practice.active_pattern_id, None);
+            assert_eq!(format_score(&app.editor.docs.practice.score).unwrap(), practice_before);
+        }
+        // And asks about the score tab's changes as well.
+        app.editor.docs.score.dirty = true;
         app.request_load_pattern(old);
-        assert!(app.ui.dialogs.pending_load.is_none());
+        assert!(app.ui.dialogs.pending_load.is_some());
+    }
+
+    /// An app on the practice page with a rhythm of its own, the score
+    /// tab's score clean or `dirty`.
+    fn practice_app(dirty: bool) -> super::Grooph {
+        use grooph_measure::notation::parse_score;
+        let cc = crate::test_support::creation_context(eframe::egui::Context::default());
+        let mut app = super::Grooph::new(&cc);
+        app.select_tab(Tab::Score);
+        app.editor.docs.score.score = parse_score("4/4 q q q q").unwrap();
+        app.editor.docs.score.dirty = dirty;
+        app.select_tab(Tab::Practice);
+        app.editor.docs.practice.score = parse_score("4/4 e e q h").unwrap();
+        app.playback_ctl.settings.bpm = 97;
+        app
+    }
+
+    fn text_of(score: &Score) -> String {
+        grooph_measure::notation::format_score(score).unwrap()
+    }
+
+    #[test]
+    fn practice_saves_its_rhythm_and_opens_it_in_the_score_tab() {
+        use crate::library_panel::{LibraryItem, LibraryTab};
+        use crate::pickers::Picker;
+
+        for show_score_tab in [false, true] {
+            let mut app = practice_app(false);
+            app.ui.view.show_score_tab = show_score_tab;
+            app.ui.library.tab = LibraryTab::Presets;
+            app.editor.library.add("Pattern 1".into(), app.editor.docs.score.score.clone(), 80);
+            app.start_playback();
+            app.request_save_practice_rhythm(2.0);
+            // One new pattern, Practice's rhythm at the current tempo.
+            assert_eq!(app.editor.library.patterns.len(), 2);
+            let id = app.editor.library.patterns[1].id;
+            let saved = app.editor.library.get(id).unwrap();
+            assert_eq!(saved.name, "Pattern 2");
+            assert_eq!(text_of(&saved.score), "4/4 e e q h");
+            assert_eq!(saved.bpm, 97);
+            // The library on its rhythms, with the name to type, over
+            // Practice.
+            assert_eq!(app.ui.dialogs.picker, Some(Picker::Library));
+            assert_eq!(app.ui.library.tab, LibraryTab::Rhythms);
+            assert_eq!(app.ui.library.renaming_pattern, Some(id));
+            assert_eq!(app.ui.library.rename_typed, "Pattern 2");
+            assert_eq!(app.ui.library.saved, Some((LibraryItem::Pattern(id), 2.0)));
+            assert_eq!(app.document(), super::Document::Practice);
+            assert_eq!(app.tab(), Tab::Practice);
+            app.open_practice_save();
+            assert_eq!(app.tab(), Tab::Practice);
+            assert_eq!(text_of(&app.editor.docs.score.score), "4/4 q q q q");
+
+            // Closed: the score tab shows it, unchanged, and playback stops.
+            app.ui.dialogs.picker = None;
+            app.open_practice_save();
+            assert_eq!(app.tab(), Tab::Score);
+            assert_eq!(text_of(&app.editor.docs.score.score), "4/4 e e q h");
+            assert_eq!(app.editor.docs.score.active_pattern_id, Some(id));
+            assert!(!app.editor.docs.score.dirty);
+            assert_eq!(app.playback_ctl.transport_state, super::TransportState::Stopped);
+            // Practice keeps its rhythm, without a pattern.
+            assert_eq!(text_of(&app.editor.docs.practice.score), "4/4 e e q h");
+            assert_eq!(app.editor.docs.practice.active_pattern_id, None);
+            assert!(app.ui.library.open_on_close.is_none());
+
+            // Saving again gives a second pattern.
+            app.select_tab(Tab::Practice);
+            app.request_save_practice_rhythm(3.0);
+            assert_eq!(app.editor.library.patterns.len(), 3);
+            assert_eq!(app.editor.library.patterns[2].name, "Pattern 3");
+        }
+    }
+
+    #[test]
+    fn saving_from_practice_asks_about_the_score_tabs_changes() {
+        use crate::pickers::Picker;
+        use crate::state::PendingLoad;
+
+        // Cancel: nothing saved, nothing opened.
+        let mut app = practice_app(true);
+        app.request_save_practice_rhythm(1.0);
+        assert!(matches!(app.ui.dialogs.pending_load, Some(PendingLoad::PracticeRhythm)));
+        assert!(app.editor.library.patterns.is_empty());
+        assert_eq!(app.ui.dialogs.picker, None);
+        app.ui.dialogs.pending_load = None;
+        app.open_practice_save();
+        assert!(app.editor.library.patterns.is_empty());
         assert_eq!(app.tab(), Tab::Practice);
-        assert_eq!(format_score(app.editor.doc().score()).unwrap(), "4/4 h h");
+        assert_eq!(text_of(&app.editor.docs.score.score), "4/4 q q q q");
         assert!(app.editor.docs.score.dirty);
+        assert_eq!(text_of(&app.editor.docs.practice.score), "4/4 e e q h");
+
+        // "Save & …": the score tab's score is saved first.
+        let mut app = practice_app(true);
+        app.request_save_practice_rhythm(1.0);
+        let pending = app.ui.dialogs.pending_load.take().unwrap();
+        app.save_active_pattern();
+        app.finish_pending_load(pending, 1.0);
+        assert_eq!(app.editor.library.patterns.len(), 2);
+        assert_eq!(text_of(&app.editor.library.patterns[0].score), "4/4 q q q q");
+        let id = app.editor.library.patterns[1].id;
+        assert_eq!(text_of(&app.editor.library.patterns[1].score), "4/4 e e q h");
+        assert_eq!(app.ui.dialogs.picker, Some(Picker::Library));
+        app.ui.dialogs.picker = None;
+        app.open_practice_save();
+        assert_eq!(app.tab(), Tab::Score);
+        assert_eq!(app.editor.docs.score.active_pattern_id, Some(id));
+        assert!(!app.editor.docs.score.dirty);
+
+        // Without saving: only Practice's rhythm is saved.
+        let mut app = practice_app(true);
+        app.request_save_practice_rhythm(1.0);
+        let pending = app.ui.dialogs.pending_load.take().unwrap();
+        app.finish_pending_load(pending, 1.0);
+        assert_eq!(app.editor.library.patterns.len(), 1);
+        app.ui.dialogs.picker = None;
+        app.open_practice_save();
+        assert_eq!(text_of(&app.editor.docs.score.score), "4/4 e e q h");
+        assert!(!app.editor.docs.score.dirty);
+    }
+
+    #[test]
+    fn another_score_in_the_score_tab_drops_the_rhythm_saved_from_practice() {
+        use grooph_link::{LinkContent, SharedLink};
+        use grooph_measure::StaffKind;
+
+        for staff in [StaffKind::Line, StaffKind::Kit] {
+            let mut app = practice_app(false);
+            app.ui.view.show_score_tab = true;
+            app.save_practice_rhythm(1.0);
+            // "New rhythm" / "New drum groove" in the library.
+            app.new_score(staff);
+            assert!(app.ui.library.open_on_close.is_none());
+            app.open_practice_save();
+            assert_eq!(app.editor.docs.score.score.staff, staff);
+            assert_eq!(app.editor.docs.score.active_pattern_id, None);
+        }
+
+        // Another pattern, or a score link.
+        let mut app = practice_app(false);
+        let other = app.editor.library.add("Other".into(), app.editor.docs.score.score.clone(), 90);
+        app.save_practice_rhythm(1.0);
+        app.request_load_pattern(other);
+        app.open_practice_save();
+        assert_eq!(app.editor.docs.score.active_pattern_id, Some(other));
+
+        let mut app = practice_app(false);
+        app.ui.view.show_score_tab = true;
+        app.save_practice_rhythm(1.0);
+        let score = grooph_measure::notation::parse_score("kit 4/4 H:h H:h ; K:w").unwrap();
+        app.open_link(SharedLink {
+            content: Some(LinkContent::Score(score)),
+            ..Default::default()
+        });
+        app.open_practice_save();
+        assert_eq!(app.editor.docs.score.active_pattern_id, None);
+        assert_eq!(text_of(&app.editor.docs.score.score), "4/4 H:h H:h ; K:w");
+    }
+
+    #[test]
+    fn practice_saves_its_endless_bars_as_they_are() {
+        let mut app = practice_app(false);
+        app.editor.generator.config.endless = true;
+        app.generate_new_score();
+        let rhythm = text_of(&app.editor.docs.practice.score);
+        let id = app.save_practice_rhythm(1.0);
+        assert_eq!(text_of(&app.editor.library.get(id).unwrap().score), rhythm);
+    }
+
+    #[test]
+    fn a_rhythm_deleted_before_the_library_closes_does_not_open() {
+        let mut app = practice_app(false);
+        let id = app.save_practice_rhythm(1.0);
+        app.delete_pattern(id);
+        app.ui.dialogs.picker = None;
+        app.open_practice_save();
+        assert_eq!(app.tab(), Tab::Practice);
+        assert_eq!(text_of(&app.editor.docs.score.score), "4/4 q q q q");
+        assert!(app.editor.library.patterns.is_empty());
+    }
+
+    #[test]
+    fn the_library_saves_the_rhythm_of_the_page_it_was_opened_from() {
+        use crate::library_panel::RhythmSaving;
+
+        let mut app = practice_app(false);
+        assert_eq!(app.rhythm_saving(), RhythmSaving::Practice);
+        app.select_tab(Tab::More);
+        assert_eq!(app.rhythm_saving(), RhythmSaving::Practice);
+        app.select_tab(Tab::Score);
+        assert_eq!(app.rhythm_saving(), RhythmSaving::Score);
+        app.select_tab(Tab::More);
+        assert_eq!(app.rhythm_saving(), RhythmSaving::Score);
+        app.select_tab(Tab::Metronome);
+        app.select_tab(Tab::More);
+        assert_eq!(app.rhythm_saving(), RhythmSaving::Off);
+    }
+
+    /// Runs the shell with the library open on `tab`'s page; the texts it
+    /// painted.
+    fn library_texts(app: &mut super::Grooph, tab: Tab) -> Vec<String> {
+        let ctx = eframe::egui::Context::default();
+        app.select_tab(tab);
+        app.select_tab(Tab::More);
+        app.ui.dialogs.picker = Some(crate::pickers::Picker::Library);
+        let mut texts = vec![];
+        for i in 0..3 {
+            let input = eframe::egui::RawInput {
+                screen_rect: Some(eframe::egui::Rect::from_min_size(
+                    eframe::egui::Pos2::ZERO,
+                    eframe::egui::vec2(390.0, 844.0),
+                )),
+                time: Some(f64::from(i) * 0.1),
+                ..Default::default()
+            };
+            let mut output = ctx.run_ui(input, |ui| {
+                app.apply_style(ui);
+                app.shell_ui(ui);
+            });
+            output.textures_delta.clear();
+            texts = output
+                .shapes
+                .iter()
+                .filter_map(|c| match &c.shape {
+                    eframe::egui::Shape::Text(t) => Some(t.galley.text().to_owned()),
+                    _ => None,
+                })
+                .collect();
+        }
+        texts
+    }
+
+    #[test]
+    fn the_library_shows_the_save_buttons_of_its_page() {
+        let mut app = practice_app(false);
+        let texts = library_texts(&mut app, Tab::Score);
+        assert!(texts.iter().any(|t| t == "💾 Save"), "{texts:?}");
+        assert!(texts.iter().any(|t| t == "➕ Save as new"), "{texts:?}");
+        let texts = library_texts(&mut app, Tab::Practice);
+        assert!(!texts.iter().any(|t| t.starts_with("💾 Save")), "{texts:?}");
+        assert_eq!(texts.iter().filter(|t| *t == "➕ Save as new").count(), 1, "{texts:?}");
+        let texts = library_texts(&mut app, Tab::Metronome);
+        assert!(!texts.iter().any(|t| t.contains("Save")), "{texts:?}");
     }
 
     #[test]

@@ -101,6 +101,11 @@ impl Grooph {
     /// Replace the document's score with `score` from `origin`, as one
     /// undoable step.
     pub(crate) fn replace_score(&mut self, score: Score, origin: Origin) {
+        // Another score in the score tab (a pattern, a new score, a link)
+        // instead of the rhythm just saved from Practice.
+        if self.editor.document == Document::Score {
+            self.ui.library.open_on_close = None;
+        }
         let snap = self.current_snapshot();
         self.editor.doc_mut().history_mut().push(snap);
         self.editor.doc_mut().edit_score(|s| *s = score);

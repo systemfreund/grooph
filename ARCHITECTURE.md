@@ -870,10 +870,19 @@ grooph's metronome runs inside AI chats as an
   (`Grooph::new_score`; `kit_palette::empty_groove` is also the score tab's
   score of a fresh state, `PersistedState::default`, while a saved score
   whose field does not read falls back to the one line's bar, which the
-  score tab shows as it is). Every library pattern opens there, on either staff; while the
-  score tab is hidden, one of the one line opens on Practice
-  (`pattern_opens_on_practice`). A score link of the one line opens on
-  Practice unless shared from the score tab (`opens_on_practice`).
+  score tab shows as it is). Every library pattern opens there
+  (`load_pattern`), on either staff, also while the score tab is hidden
+  (it then shows in the tab bar while open); nothing loads into Practice.
+  Practice saves its rhythm as a new pattern ("Save rhythm 💾" in its
+  options sheet, `request_save_practice_rhythm`; the score tab's unsaved
+  changes ask first, `PendingLoad::PracticeRhythm`): the library opens on
+  its name over Practice, and once it closes the pattern opens in the score
+  tab (`LibraryUi::open_on_close`, `open_practice_save`, run every frame),
+  unless it was deleted, a preset was opened, or another score replaced
+  the score tab's meanwhile (a pattern, a new score, a link:
+  `replace_score` drops it). Practice's document keeps its rhythm and no pattern. A score
+  link of the one line opens on Practice unless shared from the score tab
+  (`opens_on_practice`).
   Each keeps its score, cursor and undo history (the `Doc` trait, all
   three in `EditorState::docs`); Practice's and the score tab's
   (`RhythmDoc`) also their dirty flag and pattern, the metronome's
@@ -930,13 +939,17 @@ grooph's metronome runs inside AI chats as an
   switches between the two, Back closes the editor. The tab is derived from
   the document (`tab`), More from `Mode::MoreMenu`. More stays in front of
   an open metronome and leaves it playing (`advance_unseen_playback` moves
-  the playback on without a staff); saving in the library leaves it playing
-  too, and a loaded pattern opens on the score tab.
+  the playback on without a staff); the library has no rhythm to save
+  there, and a loaded pattern opens on the score tab.
 - The library (`library_panel.rs`) has two halves, Rhythms and Presets, of
   the same cards (`library_card`); opened from the score tab's card it
   holds the rhythms only. Rhythms are the score tab's: a tap loads
-  one into it, Save keeps its score from any page (`docs.score`),
-  and its marks (active, unsaved) are its pattern's. A tap on a preset
+  one into it, and its marks (active, unsaved) are its pattern's. The save
+  buttons are those of the page the library was opened from
+  (`rhythm_saving`, by `EditorState::document`): from the score tab "Save"
+  and "Save as new" keep its score (`docs.score`), from Practice "Save as
+  new" saves Practice's rhythm as its "Save rhythm 💾" does, from the
+  metronome there are none. A tap on a preset
   applies it and opens the practice page (`open_preset`), ✏ renames or deletes, built-in
   presets have no ✏. The Preset picker on the practice page shows the same
   preset cards (`preset_cards`); a tap there applies the preset and stays.
