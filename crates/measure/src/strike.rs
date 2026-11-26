@@ -16,7 +16,7 @@
 //! again, and a tuplet left with rests only becomes a rest.
 
 use crate::cleanup::{merged_group, to_unit, unit_ticks};
-use crate::duration::Duration;
+use crate::duration::{Duration, TupletSpec};
 use crate::grid::DEFAULT_GRID;
 use crate::spelling::{self, Lengths, Piece};
 use crate::{Beat, BeatIdx, Head, Heads, Instrument, Measure, TupletGroup, VoiceBar, VoiceIdx};
@@ -104,23 +104,37 @@ fn group_at(voice: &VoiceBar, tick: u32) -> Option<(TupletGroup, u32, u32)> {
 
 /// The beats of a group of `group`'s ratio from `start` to `end`, a rest in
 /// every slot but a note at each of `notes` (ticks, ascending), merged as
-/// Clean up merges them. `None` where a note is off the group's slots.
+/// Clean up merges them. `None` where a note is off the group's slots, of
+/// values no shorter than `shortest` (ticks).
 fn tuplet_beats(
     group: TupletGroup,
     start: u32,
     end: u32,
     notes: &[(u32, Beat)],
+    shortest: u32,
     spans: &[spelling::Span],
 ) -> Option<Vec<Beat>> {
-    let slot = Duration::Tuplet(group.spec);
+    // The slots: the longest value of the ratio, from the group's base
+    // down to its `shortest` in the cursor's voice, that every note starts
+    // on (a triplet sixteenth in a triplet of eighths gives sixteenth slots).
+    let fits = |d: &Duration| {
+        DEFAULT_GRID.ticks_of(d).is_some_and(|len| {
+            len >= shortest
+                && (end - start).is_multiple_of(len)
+                && notes.iter().all(|&(t, _)| (t - start).is_multiple_of(len))
+        })
+    };
+    let slot = crate::grid::NOTE_VALUES
+        .into_iter()
+        .skip_while(|&v| v != group.spec.base)
+        .map(|base| Duration::Tuplet(TupletSpec { base, ..group.spec }))
+        .filter(|d| DEFAULT_GRID.supports(d))
+        .find(fits)?;
     let len = DEFAULT_GRID.ticks_of(&slot)?;
     let count = (end - start) / len;
     let mut beats: Vec<Beat> = (0..count).map(|_| Beat::rest(slot)).collect();
     for &(tick, note) in notes {
         let offset = tick - start;
-        if !offset.is_multiple_of(len) {
-            return None;
-        }
         let mut beat = note;
         beat.duration = slot;
         beats[(offset / len) as usize] = beat;
@@ -188,16 +202,20 @@ impl Measure {
         let split = bounds.iter().rposition(|b| b.start <= from)?;
         let a = bounds[split].start;
         let meter = meter_beats(&spans);
-        let last = [tick, tuplet.map_or(0, |(.., end)| end - 1), bounds[split].end - 1];
-        let last = last.into_iter().max().unwrap_or(tick);
+        let last = tuplet.map_or(tick, |(.., end)| end - 1).max(tick);
         let end_of_beat = meter.iter().find(|b| b.contains(&last))?.end;
-        let range = grown(a..end_of_beat, &meter, &[&pieces_of(target)]);
+        // What is split may sound on past the cursor's beat: it is cut
+        // there, the rest of it written as rests, and the beats after keep
+        // their spelling.
+        let others: Vec<Range<u32>> =
+            pieces_of(target).into_iter().filter(|p| *p != bounds[split]).collect();
+        let range = grown(a..end_of_beat, &meter, &[&others]);
         if range.start != a {
             return None;
         }
         let b = range.end;
         let inside: Range<usize> =
-            split..bounds.iter().position(|t| t.start >= b).unwrap_or(beats.len());
+            split..bounds.iter().position(|t| t.start >= b).unwrap_or(beats.len()).max(split + 1);
         // A tuplet of this voice in the span stays: nothing is written there.
         if beats[inside.clone()].iter().any(|beat| beat.duration.is_tuplet()) {
             return None;
@@ -283,15 +301,26 @@ impl Measure {
                             .collect();
                         notes.push((tick, new));
                         notes.sort_by_key(|&(t, _)| t);
-                        written.extend(tuplet_beats(group, start, end, &notes, &spans)?);
+                        let members =
+                            &self.voice(cursor_voice)?.beats()[group.start_idx..=group.end_idx];
+                        let shortest = members
+                            .iter()
+                            .filter_map(|b| DEFAULT_GRID.ticks_of(&b.duration))
+                            .min()?;
+                        written.extend(tuplet_beats(group, start, end, &notes, shortest, &spans)?);
                         group_done = true;
                     }
                 }
                 _ => written.push(beat),
             }
         }
+        let split_end = bounds[split].end;
+        if split_end > b {
+            let rests = spelling::rests(&spans, to_unit(b)?, to_unit(split_end)?);
+            written.extend(rests.into_iter().map(Beat::rest));
+        }
         let total: u32 = written.iter().filter_map(|b| DEFAULT_GRID.ticks_of(&b.duration)).sum();
-        if total != b - a {
+        if total != b.max(split_end) - a {
             return None;
         }
         let mut out_beats = beats[..inside.start].to_vec();
@@ -436,6 +465,21 @@ mod tests {
     }
 
     #[test]
+    fn what_is_split_is_cut_at_the_end_of_the_cursors_beat() {
+        // The rest sounds on into beat 2: cut there, the kick after it stays.
+        let input = format!("kit 4/4 {EIGHTHS} ; r:q. K:s r:s r:h");
+        assert_eq!(
+            started(&input, 0, 1, 1, Kick).unwrap(),
+            format!("kit 4/4 {EIGHTHS} ; r:e K:e r:e K:s r:s r:h")
+        );
+        let input = format!("kit 4/4 {EIGHTHS} ; K:h. r:q");
+        assert_eq!(
+            started(&input, 0, 1, 1, Kick).unwrap(),
+            format!("kit 4/4 {EIGHTHS} ; K:e K:e r:q r:q r:q")
+        );
+    }
+
+    #[test]
     fn x8_meters_split_within_their_beat_group() {
         let input = "kit 6/8 H:e H:e H:e H:e H:e H:e ; r:q. r:q.";
         assert_eq!(
@@ -463,6 +507,12 @@ mod tests {
         assert_eq!(
             started(&input, 0, 1, 1, Kick).unwrap(),
             format!("kit 4/4 {triplets} ; K:t8 K:t4 r:q r:h")
+        );
+        // A shorter value of the ratio where the cursor is on one.
+        let input = "kit 4/4 [H:t16 H:t16 H:t8 H:t8] H:q H:h ; r:q r:q r:h";
+        assert_eq!(
+            started(input, 0, 1, 1, Kick).unwrap(),
+            "kit 4/4 [H:t16 H:t16 H:t8 H:t8] H:q H:h ; [r:t16 K:t4 r:t16] r:q r:h"
         );
         // Against sixteenths, quintuplets or another tuplet: no.
         let input = format!("kit 4/4 {triplets} ; K:s K:s K:s K:s r:q r:h");
