@@ -1,5 +1,5 @@
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
 
 use grooph_measure::counting::{CountPos, position_in_beat};
@@ -7,6 +7,7 @@ use grooph_measure::grid::DEFAULT_GRID;
 use grooph_measure::tempo::ScoreTiming;
 use grooph_measure::{Instrument, MeasureIdx, Score, StaffKind};
 
+use super::align::Lanes;
 use super::drift::DriftLog;
 use super::positions::PositionLog;
 
@@ -76,8 +77,8 @@ pub(crate) const PERFECT_WINDOW_MS: f64 = 25.0;
 /// Hits within this distance (but outside the perfect window) count as "good".
 pub(crate) const GOOD_WINDOW_MS: f64 = 60.0;
 /// On a kit score a hit counts only for a note of its instrument at most
-/// this far away (and at most half the gap to that instrument's
-/// neighbouring note); otherwise it is extra. A starting value, to be
+/// this far away (and at most the gap to that instrument's neighbouring
+/// note); otherwise it is extra. A starting value, to be
 /// checked with an e-kit.
 pub(crate) const KIT_CATCH_WINDOW_MS: f64 = 150.0;
 /// Fast notes narrow the windows to these shares of the gap to the closest
@@ -431,49 +432,20 @@ pub(super) fn loop_offset(diff: f64, total: f64) -> i32 {
     }
 }
 
-/// Which of an entry's ticks a distance is measured on.
-#[derive(Clone, Copy)]
-pub(crate) enum TickKind {
-    /// As written ([`GlobalBeatOnset::onset_tick`]): where marks are drawn.
-    Written,
-    /// As heard ([`GlobalBeatOnset::performed_tick`]): what hits are graded
-    /// against.
-    Performed,
-}
-
-/// Distance in ticks of `kind` from the note at `idx` back to its
+/// Distance in ticks as written from the note at `idx` back to its
 /// neighbouring note of the same instrument and on to the next on the score
-/// loop: the whole loop for the only one. This defines a note's window, for
-/// grading and for drawing.
-pub(crate) fn neighbour_gaps(
-    beats: &[GlobalBeatOnset],
-    idx: usize,
-    total: f64,
-    kind: TickKind,
-) -> (f64, f64) {
+/// loop: the whole loop for the only one. Its marks are drawn within it.
+pub(crate) fn neighbour_gaps(beats: &[GlobalBeatOnset], idx: usize, total: f64) -> (f64, f64) {
     let Some(beat) = beats.get(idx) else {
         return (total, total);
     };
     if beat.prev_same == idx {
         return (total, total);
     }
-    let tick = |b: &GlobalBeatOnset| match kind {
-        TickKind::Written => b.onset_tick as f64,
-        TickKind::Performed => b.performed_tick as f64,
-    };
-    let cur = tick(beat);
-    let prev = tick(&beats[beat.prev_same]);
-    let next = tick(&beats[beat.next_same]);
+    let cur = beat.onset_tick as f64;
+    let prev = beats[beat.prev_same].onset_tick as f64;
+    let next = beats[beat.next_same].onset_tick as f64;
     ((cur - prev).rem_euclid(total), (next - cur).rem_euclid(total))
-}
-
-/// [`neighbour_gaps`] as heard.
-pub(super) fn neighbour_gaps_ticks(
-    beats: &[GlobalBeatOnset],
-    idx: usize,
-    total: f64,
-) -> (f64, f64) {
-    neighbour_gaps(beats, idx, total, TickKind::Performed)
 }
 
 /// Where the note `key` is in `beats` (ordered by onset, then instrument).
@@ -481,26 +453,11 @@ pub(crate) fn note_index(beats: &[GlobalBeatOnset], key: NoteKey) -> Option<usiz
     beats.binary_search_by_key(&(key.tick, key.instrument), |b| (b.onset_tick, b.instrument)).ok()
 }
 
-/// How far the window of the note at `idx` reaches before and after it, in
-/// ticks as heard: half the gap to the neighbouring note of its instrument
-/// on each side, at most `catch_ticks` (see [`catch_window_ticks`]). A hit
-/// counts for the note only inside it, and the note is missed once it
-/// closes without one: the windows to hit and to miss a note are one, on
-/// both staffs. On one line, without a catch window, the nearest note's
-/// window always holds the hit.
-pub(super) fn note_window(
-    beats: &[GlobalBeatOnset],
-    idx: usize,
-    total: f64,
-    catch_ticks: f64,
-) -> (f64, f64) {
-    let (before, after) = neighbour_gaps_ticks(beats, idx, total);
-    ((before * 0.5).min(catch_ticks), (after * 0.5).min(catch_ticks))
-}
-
 /// The catch window of a note in `measure_idx`, in ticks:
 /// [`KIT_CATCH_WINDOW_MS`] on the kit's staff; unbounded on one line, where
-/// taps, the microphone and the calibration need every hit matched.
+/// taps, the microphone and the calibration need every hit matched. A
+/// note's window reaches up to its neighbouring notes, at most this far
+/// (see [`Lane::window`](super::align::Lane::window)).
 pub(super) fn catch_window_ticks(
     staff: StaffKind,
     timing: &ScoreTiming,
@@ -512,12 +469,6 @@ pub(super) fn catch_window_ticks(
         }
         StaffKind::Line => f64::INFINITY,
     }
-}
-
-/// The closer of [`neighbour_gaps_ticks`].
-pub(super) fn neighbour_gap_ticks(beats: &[GlobalBeatOnset], idx: usize, total: f64) -> f64 {
-    let (before, after) = neighbour_gaps_ticks(beats, idx, total);
-    before.min(after)
 }
 
 /// State of a hit-recording session.
@@ -533,6 +484,13 @@ pub(super) enum RecordingSession {
     Recording(Box<RecordingData>),
 }
 
+/// The onsets and timing of the score being played, and its staff.
+pub(super) struct Played {
+    pub beats: Rc<[GlobalBeatOnset]>,
+    pub timing: ScoreTiming,
+    pub staff: StaffKind,
+}
+
 pub(super) struct RecordingData {
     pub(super) start_time: f64,
     /// Last observed global tick within the score loop. `None` means
@@ -546,17 +504,19 @@ pub(super) struct RecordingData {
     /// Accuracy marks keyed by *global* onset tick across the score loop
     /// and, on a kit score, the head's instrument.
     pub(super) marks_by_onset: HashMap<NoteKey, AccuracyMark>,
-    /// Notes (global) that already received a hit in the current
-    /// score-loop iteration. Prevents double-counting.
-    pub(super) hits_in_loop: HashSet<NoteKey>,
-    /// Hits whose `raw_diff` crossed the score-loop midpoint and therefore
-    /// belong to the *next* score-loop iteration. Promoted to `hits_in_loop`
-    /// when the score wraps.
-    pub(super) hits_next_loop: HashSet<NoteKey>,
-    /// The hits of the loop before, kept at the wrap for the notes whose
-    /// window runs on past the loop's end (only on a kit score) and for late
-    /// hits on that loop's notes.
-    pub(super) hits_prev_loop: HashSet<NoteKey>,
+    /// Where the lanes start (loop, tick as heard): the progress cursor
+    /// when the session started or its marks were cleared, or the first
+    /// hit's note before that. Notes before it are not judged.
+    pub(super) origin: Option<(i64, f64)>,
+    /// The open stretch of each instrument ([`Instrument::Rhythm`] on one
+    /// line): its hits and notes not final yet.
+    pub(super) lanes: Lanes,
+    /// The score the last progress judged, for finalising the open stretch
+    /// when the run stops.
+    pub(super) played: Option<Played>,
+    /// The progress cursor's time at the last progress (s, on the shared
+    /// clock): misses are dated back from it.
+    pub(super) cursor_s: f64,
     /// How often the progress cursor wrapped. From the first wrap on there
     /// is a loop before whose windows past the loop's end are to be judged.
     pub(super) loops: i64,
@@ -742,9 +702,10 @@ impl RecordingData {
             anchored_ahead: true,
             miss_delay_s: 0.0,
             marks_by_onset: HashMap::new(),
-            hits_in_loop: HashSet::new(),
-            hits_next_loop: HashSet::new(),
-            hits_prev_loop: HashSet::new(),
+            origin: last_tick.map(|tick| (0, tick)),
+            lanes: Lanes::new(),
+            played: None,
+            cursor_s: start_time,
             loops: 0,
             extras: Vec::new(),
             stats: AccuracyStats::default(),
@@ -790,9 +751,8 @@ impl RecordingSession {
     pub(super) fn clear_marks(&mut self) {
         if let Self::Recording(d) = self {
             d.marks_by_onset.clear();
-            d.hits_in_loop.clear();
-            d.hits_next_loop.clear();
-            d.hits_prev_loop.clear();
+            d.origin = None;
+            d.lanes.clear();
             d.loops = 0;
             d.extras.clear();
             d.stats.reset();
@@ -812,12 +772,15 @@ impl RecordingSession {
     pub(super) fn drop_leading_ticks(&mut self, ticks: u64) {
         if let Self::Recording(d) = self {
             d.marks_by_onset = shift_marks(std::mem::take(&mut d.marks_by_onset), ticks);
-            let shift = |set: &mut HashSet<NoteKey>| {
-                *set = set.iter().filter_map(|k| shift_key(*k, ticks)).collect();
-            };
-            shift(&mut d.hits_in_loop);
-            shift(&mut d.hits_next_loop);
-            shift(&mut d.hits_prev_loop);
+            for lane in d.lanes.values_mut() {
+                lane.drop_leading_ticks(ticks);
+            }
+            if let Some((_, tick)) = &mut d.origin {
+                *tick = (*tick - ticks as f64).max(0.0);
+            }
+            // Its onsets are no longer the score's: the next progress
+            // brings the new ones.
+            d.played = None;
             d.extras = shift_extras(std::mem::take(&mut d.extras), ticks);
         }
     }
@@ -828,6 +791,9 @@ impl RecordingSession {
             d.start_time = start_time;
             d.last_tick = Some(last_tick);
             d.anchored_ahead = true;
+            // After the marks were cleared, the lanes start here. The open
+            // stretch stays: its notes and hits keep their ticks.
+            d.origin.get_or_insert((d.loops, last_tick));
         }
     }
 }
@@ -1026,11 +992,11 @@ mod tests {
         let mut beats = [beat(0), beat(10), beat(40)];
         link_neighbours(&mut beats);
         // First beat: previous neighbour is the last beat, 60 ticks back across the wrap.
-        assert_eq!(neighbour_gap_ticks(&beats, 0, 100.0), 10.0);
-        assert_eq!(neighbour_gap_ticks(&beats, 2, 100.0), 30.0);
+        assert_eq!(neighbour_gaps(&beats, 0, 100.0), (60.0, 10.0));
+        assert_eq!(neighbour_gaps(&beats, 2, 100.0), (30.0, 60.0));
         let mut one = [beat(0)];
         link_neighbours(&mut one);
-        assert_eq!(neighbour_gap_ticks(&one, 0, 100.0), 100.0);
+        assert_eq!(neighbour_gaps(&one, 0, 100.0), (100.0, 100.0));
     }
 
     #[test]

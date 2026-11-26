@@ -1602,6 +1602,9 @@ mod tests {
         let timing = app.score_timing();
         let score = app.played_score().clone();
         app.playback_ctl.accuracy.tracker.record_hit(0.0, &timing, &score);
+        // Shown once final, halfway between the next two notes.
+        let at = 0.9 * timing.total_loop_seconds();
+        app.playback_ctl.accuracy.tracker.update_progress(at, &timing, &score);
         assert!(app.playback_ctl.accuracy.tracker.live_summary().is_some());
         // The practice run's marks would land on the click bar's notes: the
         // page change clears them (see `show_document`).
@@ -1632,6 +1635,9 @@ mod tests {
         // The first note played twice: the second hit is extra, and marked.
         app.playback_ctl.accuracy.tracker.record_hit(0.0, &timing, &score);
         app.playback_ctl.accuracy.tracker.record_hit(0.04, &timing, &score);
+        // Extra once the next note, which it might have been for, is final.
+        let at = 0.9 * timing.total_loop_seconds();
+        app.playback_ctl.accuracy.tracker.update_progress(at, &timing, &score);
         assert_eq!(app.playback_ctl.accuracy.tracker.extra_marks().len(), 1);
         // The metronome draws the same marks; the page change clears them
         // with the run's other marks.
@@ -1642,6 +1648,9 @@ mod tests {
         let score = app.played_score().clone();
         app.playback_ctl.accuracy.tracker.record_hit(0.0, &timing, &score);
         app.playback_ctl.accuracy.tracker.record_hit(0.04, &timing, &score);
+        // Extra once the next note, which it might have been for, is final.
+        let at = 0.9 * timing.total_loop_seconds();
+        app.playback_ctl.accuracy.tracker.update_progress(at, &timing, &score);
         assert_eq!(app.playback_ctl.accuracy.tracker.extra_marks().len(), 1);
     }
 

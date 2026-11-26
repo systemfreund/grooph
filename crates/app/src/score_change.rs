@@ -225,6 +225,9 @@ mod tests {
         let timing = app.score_timing();
         let score = app.played_score().clone();
         app.playback_ctl.accuracy.tracker.record_hit(0.0, &timing, &score);
+        // Final halfway between the next two notes.
+        let quarter = timing.global_tick_to_seconds(timing.ticks_per_measure(0) as f64 / 4.0);
+        app.playback_ctl.accuracy.tracker.update_progress(1.6 * quarter, &timing, &score);
         assert!(app.playback_ctl.accuracy.tracker.mark_for_onset(0).is_some());
         app
     }
@@ -376,6 +379,8 @@ mod tests {
         let score = app.played_score().clone();
         let at = timing.global_tick_to_seconds(ticks as f64);
         app.playback_ctl.accuracy.tracker.record_hit(at, &timing, &score);
+        let quarter = timing.global_tick_to_seconds(timing.ticks_per_measure(0) as f64 / 4.0);
+        app.playback_ctl.accuracy.tracker.update_progress(at + 1.6 * quarter, &timing, &score);
         let tick = ticks as f64 + 10.0;
         play_at(&mut app, tick);
         let playback = &mut app.playback_ctl.playback;
