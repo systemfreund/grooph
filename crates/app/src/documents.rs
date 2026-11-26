@@ -365,7 +365,7 @@ mod tests {
         let (mut app, _) = app_with_groove();
         assert!(app.editor.docs.score.dirty);
         app.open_link(grooph_link::parse_query("v=2&bpm=120").unwrap().unwrap());
-        assert_eq!(app.playback_ctl.settings.bpm, 120);
+        assert_eq!(app.tab_playback().bpm, 120);
         assert!(app.editor.docs.score.dirty);
     }
 
@@ -375,21 +375,56 @@ mod tests {
     fn a_metronome_links_tempo_leaves_a_clean_score_alone() {
         let (mut app, _) = app_with_groove();
         app.editor.docs.score.dirty = false;
-        app.playback_ctl.settings.bpm = 100;
+        app.tab_playback_mut().bpm = 100;
         app.open_link(grooph_link::parse_query("v=2&bpm=120&ts=3/4").unwrap().unwrap());
         assert!(app.metronome_mode());
-        assert_eq!(app.playback_ctl.settings.bpm, 120);
+        assert_eq!(app.tab_playback().bpm, 120);
         assert!(!app.editor.docs.score.dirty);
     }
 
     #[test]
-    fn a_tempo_link_marks_a_saved_score_unsaved() {
+    fn a_tempo_link_sets_the_tempo_of_the_page_shown_alone() {
         let (mut app, _) = app_with_groove();
         app.save_active_pattern();
+        let score_bpm = app.playback_ctl.settings.score.bpm;
         app.select_tab(Tab::Practice);
-        app.playback_ctl.settings.bpm = 100;
-        app.open_link(grooph_link::parse_query("v=2&bpm=120").unwrap().unwrap());
+        app.open_link(grooph_link::parse_query("v=2&bpm=133").unwrap().unwrap());
+        assert_eq!(app.playback_ctl.settings.practice.bpm, 133);
+        assert_eq!(app.playback_ctl.settings.score.bpm, score_bpm);
+        assert!(!app.editor.docs.score.dirty);
+        // In the score tab it is a change of the saved score.
+        app.select_tab(Tab::Score);
+        app.open_link(grooph_link::parse_query("v=2&bpm=134").unwrap().unwrap());
+        assert_eq!(app.playback_ctl.settings.score.bpm, 134);
         assert!(app.editor.docs.score.dirty);
+    }
+
+    #[test]
+    fn a_link_sets_the_tempo_of_the_page_it_opens() {
+        let mut app = app();
+        let bpms = |app: &Grooph| {
+            let s = &app.playback_ctl.settings;
+            [s.metronome.bpm, s.practice.bpm, s.score.bpm]
+        };
+        let before = bpms(&app);
+        // A metronome link, opened from the score tab: the metronome's.
+        app.select_tab(Tab::Score);
+        app.open_link(grooph_link::parse_query("v=2&bpm=71&ts=3/4").unwrap().unwrap());
+        assert_eq!(app.tab(), Tab::Metronome);
+        assert_eq!(bpms(&app), [71, before[1], before[2]]);
+        // A rhythm link with swing, shared from Practice: Practice's.
+        let link = "v=2&bpm=72&swing=60&r=4/4%20q%20q%20q%20q";
+        app.open_link(grooph_link::parse_query(link).unwrap().unwrap());
+        assert_eq!(app.tab(), Tab::Practice);
+        assert_eq!(bpms(&app), [71, 72, before[2]]);
+        assert_eq!(app.playback_ctl.settings.practice.swing.percent, 60);
+        assert!(app.playback_ctl.settings.metronome.swing.is_straight());
+        assert!(app.playback_ctl.settings.score.swing.is_straight());
+        // A written link carries the open page's values.
+        assert_eq!(app.shared_link().bpm, Some(72));
+        app.select_tab(Tab::Metronome);
+        assert_eq!(app.shared_link().bpm, Some(71));
+        assert_eq!(app.shared_link().swing, None);
     }
 
     #[test]
@@ -437,24 +472,54 @@ mod tests {
     }
 
     #[test]
-    fn a_tempo_change_on_another_page_marks_the_saved_score_unsaved() {
-        let mut app = app();
-        // An untitled score stays as it is.
-        app.select_tab(Tab::Practice);
-        app.playback_ctl.settings.bpm += 5;
-        app.score_changed(ScoreChange::Tempo);
-        assert!(!app.editor.docs.score.dirty);
-        // A saved pattern keeps its tempo: changed anywhere, it can be saved.
+    fn a_tempo_change_on_another_page_leaves_the_saved_score_alone() {
+        // Each page has its own tempo: a saved pattern's is the score tab's.
         let (mut app, _) = app_with_groove();
         let id = app.save_active_pattern();
         for tab in [Tab::Practice, Tab::Metronome] {
             app.select_tab(tab);
-            app.editor.docs.score.dirty = false;
-            app.playback_ctl.settings.bpm += 5;
+            app.tab_playback_mut().bpm += 5;
             app.score_changed(ScoreChange::Tempo);
-            assert!(app.editor.docs.score.dirty, "{tab:?}");
+            assert!(!app.editor.docs.score.dirty, "{tab:?}");
             assert_eq!(app.editor.docs.score.active_pattern_id, Some(id));
         }
+        // The score tab's own tempo is a change of its score.
+        app.select_tab(Tab::Score);
+        app.tab_playback_mut().bpm += 5;
+        app.score_changed(ScoreChange::Tempo);
+        assert!(app.editor.docs.score.dirty);
+    }
+
+    #[test]
+    fn the_library_keeps_the_score_tabs_tempo() {
+        let (mut app, _) = app_with_groove();
+        app.playback_ctl.settings.score.bpm = 101;
+        app.playback_ctl.settings.practice.bpm = 102;
+        app.playback_ctl.settings.metronome.bpm = 103;
+        // Saved from another page: the score tab's tempo.
+        app.select_tab(Tab::Practice);
+        let id = app.save_active_pattern();
+        assert_eq!(app.editor.library.get(id).unwrap().bpm, 101);
+        app.select_tab(Tab::Metronome);
+        let new = app.save_pattern_as();
+        assert_eq!(app.editor.library.get(new).unwrap().bpm, 101);
+        // Loading sets the score tab's tempo alone.
+        app.editor.library.update(id, app.editor.docs.score.score.clone(), 88);
+        app.load_pattern(id);
+        assert_eq!(app.tab(), Tab::Score);
+        let s = &app.playback_ctl.settings;
+        assert_eq!([s.metronome.bpm, s.practice.bpm, s.score.bpm], [103, 102, 88]);
+        // Practice's rhythm is saved with Practice's tempo, and opens in the
+        // score tab with it.
+        app.select_tab(Tab::Practice);
+        let saved = app.save_practice_rhythm(0.0);
+        assert_eq!(app.editor.library.get(saved).unwrap().bpm, 102);
+        app.ui.dialogs.picker = None;
+        app.open_practice_save();
+        assert_eq!(app.tab(), Tab::Score);
+        assert_eq!(app.playback_ctl.settings.score.bpm, 102);
+        assert_eq!(app.playback_ctl.settings.practice.bpm, 102);
+        assert_eq!(app.playback_ctl.settings.metronome.bpm, 103);
     }
 
     #[test]

@@ -8,12 +8,13 @@ use crate::persist::StateBackup;
 use crate::pickers::Picker;
 use crate::platform::PlatformRuntime;
 use crate::play_along::PlayAlongState;
-use crate::settings::{DeviceSettings, FeedbackSettings, PlaybackSettings, ViewSettings};
+use crate::settings::{DeviceSettings, FeedbackSettings, TabPlayback, ViewSettings};
 use crate::shell::ShellState;
 use crate::{Host, Mode, TransportState};
 use eframe::egui::TextStyle;
 use eframe::egui::emath::{ease_in_ease_out, lerp};
 use eframe::epaint::FontId;
+use grooph_audio::GapMute;
 use grooph_audio::{Audio, AudioSettings};
 use grooph_link::SharedLink;
 use grooph_measure::tap_tempo::TapTempo;
@@ -86,6 +87,9 @@ pub(crate) struct PlaybackState {
     pub(crate) ramp_bpm: Option<u32>,
     /// The gap click silences the bar being played.
     pub(crate) bar_muted: bool,
+    /// What it silences there: all of it, or one layer of the metronome
+    /// (the click bar or the counter rhythm).
+    pub(crate) bar_mute: GapMute,
     /// Vertical scroll that follows the playback cursor from row to row.
     pub(crate) scroll: ScrollTween,
     /// Distance from one row of the staff to the next, as last drawn.
@@ -122,11 +126,23 @@ impl PlaybackState {
         }
     }
 
-    /// How strongly the staff flash shows now. Dark in a silent bar, like
-    /// the anchors: checked when drawn, not when the beat is reached, as
+    /// The bar being played silences the click bar (alone or with the rest).
+    pub(crate) fn click_bar_muted(&self) -> bool {
+        self.bar_muted && self.bar_mute != GapMute::Counter
+    }
+
+    /// The bar being played silences the counter rhythm (alone or with the
+    /// rest).
+    pub(crate) fn counter_muted(&self) -> bool {
+        self.bar_muted && self.bar_mute != GapMute::ClickBar
+    }
+
+    /// How strongly the staff flash shows now. Dark in a bar whose click bar
+    /// is silent, like the anchors; it flashes on while only the counter
+    /// rhythm is. Checked when drawn, not when the beat is reached, as
     /// `bar_muted` can trail the cursor into the next bar by a frame.
     pub(crate) fn flash_shown(&self) -> f32 {
-        if self.bar_muted { 0.0 } else { self.flash_intensity }
+        if self.click_bar_muted() { 0.0 } else { self.flash_intensity }
     }
 }
 
@@ -250,8 +266,9 @@ pub(crate) struct EditorState {
 /// microphone and tap input, and the accuracy tracker that ties hits to score onsets.
 pub(crate) struct PlaybackController {
     pub(crate) transport_state: TransportState,
-    /// Tempo, count-in, swing and the metronome trainer.
-    pub(crate) settings: PlaybackSettings,
+    /// Tempo, count-in, swing, the metronome trainer and the click, of
+    /// each page (see [`crate::Grooph::tab_playback`]).
+    pub(crate) settings: TabPlayback,
     pub(crate) audio: Option<Audio>,
     pub(crate) audio_cfg: AudioConfig,
     /// Output latency and the MIDI input port.
@@ -430,6 +447,23 @@ mod tests {
         playback.reach_flash_beat((1, 0), true);
         playback.bar_muted = false;
         assert_eq!(playback.flash_shown(), 1.0);
+    }
+
+    #[test]
+    fn the_flash_follows_the_click_bar() {
+        for (mute, dark) in [
+            (GapMute::Metronome, true),
+            (GapMute::Everything, true),
+            (GapMute::ClickBar, true),
+            (GapMute::Counter, false),
+        ] {
+            let mut playback =
+                PlaybackState { bar_muted: true, bar_mute: mute, ..Default::default() };
+            playback.reach_flash_beat((0, 0), true);
+            assert_eq!(playback.flash_shown() == 0.0, dark, "{mute:?}");
+            playback.bar_muted = false;
+            assert_eq!(playback.flash_shown(), 1.0, "{mute:?}");
+        }
     }
 
     #[test]

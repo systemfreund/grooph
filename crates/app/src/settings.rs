@@ -6,6 +6,7 @@
 //! field by field (see [`crate::persist`]), and a field missing from a
 //! saved group reads as its default.
 
+use crate::documents::Document;
 use crate::drum_map::DrumMaps;
 use crate::guide::Guide;
 use crate::play_along::PlayAlongSettings;
@@ -18,7 +19,8 @@ use grooph_measure::tempo::DEFAULT_BPM;
 use serde::{Deserialize, Serialize};
 
 /// How the rhythm or click is played: tempo, count-in, swing and the
-/// metronome trainer (gap click, tempo ramp).
+/// metronome trainer (gap click, tempo ramp). Each page has its own
+/// ([`TabPlayback`]).
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub(crate) struct PlaybackSettings {
@@ -48,6 +50,34 @@ impl Default for PlaybackSettings {
             tempo_ramp: TempoRamp::default(),
             click: true,
             metronome_click: false,
+        }
+    }
+}
+
+/// The playback settings of each page: the metronome's, Practice's and the
+/// score tab's. A change on one page leaves the others alone.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) struct TabPlayback {
+    pub(crate) metronome: PlaybackSettings,
+    pub(crate) practice: PlaybackSettings,
+    pub(crate) score: PlaybackSettings,
+}
+
+impl TabPlayback {
+    /// The settings of `doc`'s page.
+    pub(crate) fn get(&self, doc: Document) -> &PlaybackSettings {
+        match doc {
+            Document::Metronome => &self.metronome,
+            Document::Practice => &self.practice,
+            Document::Score => &self.score,
+        }
+    }
+
+    pub(crate) fn get_mut(&mut self, doc: Document) -> &mut PlaybackSettings {
+        match doc {
+            Document::Metronome => &mut self.metronome,
+            Document::Practice => &mut self.practice,
+            Document::Score => &mut self.score,
         }
     }
 }

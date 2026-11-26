@@ -4,8 +4,9 @@
 //! wrap animation across measure boundaries.
 
 use crate::measure::{
-    draw_beat_anchor, draw_count_layer, draw_edit_cursor, draw_notes, draw_stickings,
-    highlight_color, last_note_split, playback_cursor_entering_x, render_measure_at,
+    FADED_VOICE_OPACITY, draw_beat_anchor, draw_count_layer, draw_edit_cursor, draw_notes,
+    draw_stickings, highlight_color, last_note_split, playback_cursor_entering_x,
+    render_measure_at,
 };
 use eframe::egui;
 use eframe::egui::{Color32, Rangef, Stroke};
@@ -56,6 +57,10 @@ pub struct RenderContext<'a> {
     pub loop_bars: Range<MeasureIdx>,
     /// Whether the line or a guide anchor shows the playback position.
     pub marks: PlaybackMarks,
+    /// A voice of a measure drawn with faded ink (heads, stems, beams,
+    /// flags, rests), as the veiled rests are: the layer a silent bar
+    /// silences while the other plays on.
+    pub faded: Option<(MeasureIdx, VoiceIdx)>,
 }
 
 impl<'a> RenderContext<'a> {
@@ -72,6 +77,17 @@ impl<'a> RenderContext<'a> {
             playback: None,
             loop_bars: 0..score.len(),
             marks: PlaybackMarks::Line,
+            faded: None,
+        }
+    }
+
+    /// The ink of `voice` in the measure `measure_idx`: `color`, faded if
+    /// it is the [`faded`](Self::faded) one.
+    pub(crate) fn ink(&self, voice: VoiceIdx, measure_idx: MeasureIdx, color: Color32) -> Color32 {
+        if self.faded == Some((measure_idx, voice)) {
+            color.gamma_multiply(FADED_VOICE_OPACITY)
+        } else {
+            color
         }
     }
 
@@ -133,7 +149,8 @@ pub fn draw_staff(ui: &mut egui::Ui, ctx: &RenderContext) {
             for (voice, layout) in placed.voices.iter().enumerate().skip(1) {
                 let voice_opts = staff_opts.voice_opts_for(placed, voice);
                 let lit = ctx.lit_in(voice, placed.measure_idx).map(|idx| (idx, highlight));
-                draw_notes(ui.painter(), layout, color, lit, &voice_opts);
+                let ink = ctx.ink(voice, placed.measure_idx, color);
+                draw_notes(ui.painter(), layout, ink, lit, &voice_opts);
                 if let Some(c) = ctx.cursor_in(voice, placed.measure_idx) {
                     draw_edit_cursor(ui, ui.painter(), layout, c.beat_idx, &voice_opts);
                 }
@@ -281,6 +298,68 @@ mod tests {
             bar_rests: false,
             veil_hidden_rests: false,
         }
+    }
+
+    #[test]
+    fn a_faded_voice_is_drawn_with_faded_ink_alone() {
+        let upper = parse_score("4/4 q q q q").unwrap();
+        let lower = parse_score("4/4 r:e q q q e").unwrap();
+        let opts = opts();
+        let mut both = upper.clone();
+        for (m, l) in both.measures_mut().iter_mut().zip(lower.measures()) {
+            m.push_voices(l).unwrap();
+        }
+        let staff = build_staff_layout(&both, &opts);
+        // The colour and the centre of each shape drawn, with `faded`.
+        let drawn = |faded| {
+            let ctx = egui::Context::default();
+            let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                draw_staff(
+                    ui,
+                    &RenderContext { faded, ..RenderContext::new(&both, &staff, &opts) },
+                );
+            });
+            output.textures_delta.clear();
+            let color = |shape: &egui::Shape| match shape {
+                egui::Shape::LineSegment { stroke, .. } => Some(stroke.color),
+                egui::Shape::Text(text) => Some(text.fallback_color),
+                egui::Shape::Rect(rect) => Some(rect.fill),
+                egui::Shape::Circle(circle) => Some(circle.fill),
+                _ => None,
+            };
+            let shapes: Vec<_> = output
+                .shapes
+                .iter()
+                .map(|c| (color(&c.shape), c.shape.visual_bounding_rect().center().x))
+                .collect();
+            shapes
+        };
+        let plain = drawn(None);
+        let placed = staff.placed(0).unwrap();
+        let mut changed_by = Vec::new();
+        for voice in [0, 1] {
+            let faded = drawn(Some((0, voice)));
+            assert_eq!(faded.len(), plain.len());
+            let changed: Vec<usize> =
+                (0..plain.len()).filter(|&i| faded[i].0 != plain[i].0).collect();
+            // Only made fainter.
+            for &i in &changed {
+                let (before, after) = (plain[i].0.unwrap(), faded[i].0.unwrap());
+                assert_eq!(after, before.gamma_multiply(FADED_VOICE_OPACITY), "voice {voice}");
+            }
+            // Each of the voice's notes has faded ink at it.
+            for note in &placed.voices[voice].notes {
+                let x = note.center.x;
+                assert!(
+                    changed.iter().any(|&i| (faded[i].1 - x).abs() < 0.5 * opts.em),
+                    "voice {voice}: nothing faded at {x}"
+                );
+            }
+            changed_by.push(changed);
+        }
+        // Each voice fades its own shapes, and the staff lines stay.
+        assert!(changed_by[0].iter().all(|i| !changed_by[1].contains(i)));
+        assert!(changed_by[0].len() + changed_by[1].len() < plain.len());
     }
 
     /// The voice and index of the note nearest (across) each shape drawn in

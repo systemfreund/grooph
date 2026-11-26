@@ -657,7 +657,7 @@ grooph's metronome runs inside AI chats as an
   (built from the metronome's document, see below) keeps the bars that differ from the default,
   keyed by the whole `TimeSignature` including its grouping. The metronome
   always plays them. Practice and the score tab have one "Click" row for
-  both: its switch (`PlaybackSettings::click`) mutes the click
+  both, each its own: its switch (`PlaybackSettings::click`) mutes the click
   (`Played::Rhythm`, no click bars; the count-in still clicks), its picker
   chooses "Standard", every meter's default bar (the default), or
   "Metronome", the edited bars (`PlaybackSettings::metronome_click`, see
@@ -678,14 +678,38 @@ grooph's metronome runs inside AI chats as an
 - `grooph_audio::{GapClick, TempoRamp}` (`crates/audio/src/trainer.rs`), carried in
   `PlaybackOptions`. Both depend only on the bar count since the score started
   (`TickSource::bars`, across loops), so nothing rebuilds the schedule.
-- Gap click: the audio thread decides per bar (`GapDecider`, random mode seeded via
+- Both are part of each page's `PlaybackSettings`: the metronome, Practice and
+  the score tab each have their own (`settings::TabPlayback`, read through
+  `Grooph::tab_playback`, the page shown or behind More), with tempo, count-in,
+  swing and click, so a practice setting on one page stays there. Count
+  labels, guide, timing feedback, sticking and the mixer are shared.
+- Gap click ("Silent bars"): the audio thread decides per bar (`GapDecider`, random mode seeded via
   `Audio::set_seed`) and filters triggers (`SoundType::muted_by`). The count-in is
-  never muted. `Audio::bar_state` publishes bar + muted flag; the measure panel
-  dims the muted bar.
-- Tempo ramp: `TempoRamp::bpm_for_bar` from the BPM setting; the audio thread
+  never muted. `GapMute` says what an off bar silences: `Metronome` every click
+  ("All clicks"), `Everything` clicks and notes, `ClickBar` the click bar's
+  clicks alone and `Counter` the counter rhythm's alone ("Click bar",
+  "Polyrhythm"). Practice and the score tab offer the first two, the metronome
+  with a counter rhythm all clicks and the two layers, without one no choice
+  (`Grooph::offered_mutes_of`); a value the page does not offer plays as all
+  clicks there and stays saved (`played_mute`, which `playback_options`
+  sends). The row's value names a layer first ("Polyrhythm · 4 on · 4 off",
+  `silent_bars_label`). `Audio::bar_state` publishes bar + muted flag
+  (`PlaybackState::bar_muted`, with the mute played in `bar_mute`). A bar
+  silent as a whole has a veil and 🔇 on the staff; a bar silencing one layer
+  draws that voice with faded ink (`RenderContext::faded`) and no veil
+  (`measure_panel::StaffSilence`). The ring dims the silent layer's ring
+  (`RingSilence`). A bar silent as a whole shows no playback position (no
+  line, no lit note, no hand on the ring); while one layer sounds, the
+  position and the hand go on. The
+  flash follows the click bar (`PlaybackState::flash_shown`), and timing
+  feedback counts any silent bar as silent. Silent bars are not in links and
+  not undoable.
+- Tempo ramp: `TempoRamp::bpm_for_bar` from the page's BPM setting; the audio thread
   scales ticks per sample, the UI (`metronome_trainer.rs`) uses the same tempo in
   `score_timing()` via `PlaybackState::ramp_bpm` and re-anchors the accuracy
-  session on every change.
+  session on every change. Each page's options sheet has a "Tempo ramp" row
+  next to "Silent bars" (`Picker::TempoRamp`); "Keep the reached tempo" sets
+  the tempo of the page that played (`stop_transport`).
 
 - Metronome tab (`crates/app/src/metronome_view.rs`): its own meter
   (persisted, picked in the tab's bar), separate from the generator's.
@@ -873,7 +897,13 @@ grooph's metronome runs inside AI chats as an
   the score tab's meanwhile (a pattern, a new score, a link:
   `replace_score` drops it). Practice's document keeps its rhythm and no pattern. A score
   link of the one line opens on Practice unless shared from the score tab
-  (`opens_on_practice`).
+  (`opens_on_practice`). The library keeps the score tab's tempo
+  (`PlaybackSettings` of the score tab, whichever page saves), loading sets
+  it, and "Save rhythm" stores Practice's. Only a tempo change in the score
+  tab marks its score unsaved (`ScoreChange::Tempo`). A link's tempo, swing
+  and click go to the page it opens (a tempo-only link: the page shown), and
+  a written link carries the open page's values; the embed and the MCP tool
+  report the metronome's.
   Each keeps its score, cursor and undo history (the `Doc` trait, all
   three in `EditorState::docs`); Practice's and the score tab's
   (`RhythmDoc`) also their dirty flag and pattern, the metronome's
@@ -1066,14 +1096,15 @@ If you add new tools/shortcuts, remember:
   The user's presets of the generator settings, saved until they were removed (`presets`), are dropped on
   restore without a version bump; a state with any is backed up once (`persist::take_presets`), so they are not
   lost without a trace.
-- Settings: `crates/app/src/settings.rs`, one `serde` group per feature (`PlaybackSettings`, `GeneratorConfig`,
+- Settings: `crates/app/src/settings.rs`, one `serde` group per feature (`PlaybackSettings`, one per page, `GeneratorConfig`,
   `DeviceSettings`, `FeedbackSettings`, `ViewSettings`; the sounds are `grooph_audio::AudioSettings`). The same
   struct is held at runtime and saved in `PersistedState`, so `from_app` and the restore copy groups. A new setting is a field in its group
   (with `#[serde(default)]` from the group, it falls back alone, see `persist::repair_field`), or a new group:
   then it gets an entry in `PersistedState` and `repair_field`. Renaming or moving a saved field bumps
   `PERSISTED_STATE_VERSION` with a step in `persist::migrate` (version 4 moved the flat fields of version 3 into
   the groups, `SETTINGS_GROUPS`; version 5 joined the metronome's `click_bars`, `counter_bars`,
-  `counter_names` and `metronome_meter` into `metronome`). The default tempo is `grooph_measure::tempo::DEFAULT_BPM`.
+  `counter_names` and `metronome_meter` into `metronome`; version 6 copied the shared `playback` group into
+  each page's `metronome_playback`, `practice_playback` and `score_playback`, `persist::split_playback`). The default tempo is `grooph_measure::tempo::DEFAULT_BPM`.
 - UI state: `UiShell` (`state.rs`) holds `mode`, `platform` and feature groups only (`Fonts`, `LayoutSettings`,
   `ViewSettings`, `StaffView`, `LibraryUi`, `Dialogs`, `ShellState`, the host and the embed). No new field goes
   directly into `UiShell` or `PlaybackState`: it goes into its feature's group, or a new group.

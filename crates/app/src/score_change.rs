@@ -25,8 +25,9 @@ pub(crate) enum ScoreChange {
     Appended,
     /// Endless mode dropped the first bar, `ticks` long.
     DroppedFront { ticks: u64 },
-    /// The BPM setting changed, the notes did not. A saved score keeps its
-    /// tempo, so this can be an unsaved change of the score tab's score.
+    /// The BPM setting of the page shown changed, the notes did not. A
+    /// saved score keeps its tempo, so in the score tab this is an unsaved
+    /// change of its score.
     Tempo,
     /// The tempo played changed, nothing to save: a ramp's step, or the
     /// tempo of a link that brought its own rhythm.
@@ -112,13 +113,12 @@ impl Grooph {
         self.score_changed(ScoreChange::Replaced(origin));
     }
 
-    /// A tempo change: a saved score keeps its tempo, so that is an unsaved
-    /// change of the score tab's score when it is shown or is a saved
-    /// pattern, whichever page the tempo was changed on.
+    /// A tempo change of the page shown: a saved score keeps its tempo, so
+    /// the score tab's tempo is an unsaved change of its score. Each page
+    /// has its own tempo, so a change on another page leaves it alone.
     fn mark_tempo_unsaved(&mut self) {
-        let doc = &mut self.editor.docs.score;
-        if self.editor.document == Document::Score || doc.active_pattern_id.is_some() {
-            doc.dirty = true;
+        if self.editor.document == Document::Score {
+            self.editor.docs.score.dirty = true;
         }
     }
 
@@ -418,7 +418,7 @@ mod tests {
     fn a_tempo_change_anchors_the_clock_and_marks_the_shown_score_unsaved() {
         let mut app = practice_app();
         play_at(&mut app, 30.0);
-        app.playback_ctl.settings.bpm += 10;
+        app.tab_playback_mut().bpm += 10;
         let before = clock::now_seconds();
         app.score_changed(ScoreChange::Tempo);
         assert_anchored_at(&app, 30.0, before);

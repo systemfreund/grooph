@@ -11,11 +11,24 @@ use serde::{Deserialize, Serialize};
 /// What a muted bar silences.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum GapMute {
-    /// Only downbeat and primary-beat clicks; notes still sound.
+    /// Every click (click bar and counter rhythm); notes still sound
+    /// ("All clicks").
     #[default]
     Metronome,
-    /// Clicks, notes and ghost notes.
+    /// Clicks, notes and ghost notes ("Clicks and notes").
     Everything,
+    /// Only the click bar's clicks; the counter rhythm sounds ("Click bar").
+    ClickBar,
+    /// Only the counter rhythm's clicks; the click bar sounds ("Polyrhythm").
+    Counter,
+}
+
+impl GapMute {
+    /// Whether a muted bar silences only one of the metronome's two layers
+    /// (the click bar or the counter rhythm), and the other still sounds.
+    pub fn one_layer(self) -> bool {
+        matches!(self, GapMute::ClickBar | GapMute::Counter)
+    }
 }
 
 /// How muted bars are chosen.

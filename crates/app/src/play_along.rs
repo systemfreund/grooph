@@ -275,6 +275,15 @@ impl Grooph {
 
     /// Collect this frame's hits from all sources and feed them to the
     /// accuracy tracker; drives the session lifecycle and calibration.
+    /// Whether the bar playing now is silent, for the notes judged so far
+    /// (see `AccuracyTracker::observe_bar`); `None` while
+    /// the silent bars are off or a calibration runs. A bar that silences
+    /// only one layer of the metronome counts as silent too.
+    pub(crate) fn observed_bar_muted(&self) -> Option<bool> {
+        (self.playback_options().gap.enabled && self.calibration_source().is_none())
+            .then_some(self.playback_ctl.playback.bar_muted)
+    }
+
     pub(crate) fn handle_play_along_input(&mut self, ui: &egui::Ui) {
         let now = clock::now_seconds();
         self.sync_mic(ui.ctx(), now);
@@ -369,9 +378,7 @@ impl Grooph {
         }
         // The tracker leaves `self` while it reads the tracked score, which
         // borrows `self`: no copy of the score per frame.
-        // Whether the bar playing now is silent, for the notes judged so far.
-        let bar_muted = (self.playback_options().gap.enabled && calibrating.is_none())
-            .then_some(self.playback_ctl.playback.bar_muted);
+        let bar_muted = self.observed_bar_muted();
         let mut tracker = std::mem::take(&mut self.playback_ctl.accuracy.tracker);
         let mut deltas = Vec::new();
         let played = {
@@ -611,6 +618,25 @@ mod tests {
     use super::*;
     use crate::drum_map::{CustomDrumMap, GM_DRUM_MAP};
     use grooph_measure::Technique;
+
+    #[test]
+    fn a_bar_silencing_one_layer_is_observed_as_silent() {
+        use crate::shell::Tab;
+        use grooph_audio::GapMute;
+        let cc = crate::test_support::creation_context(eframe::egui::Context::default());
+        let mut app = crate::Grooph::new(&cc);
+        app.select_tab(Tab::Metronome);
+        assert_eq!(app.observed_bar_muted(), None);
+        app.tab_playback_mut().gap_click.enabled = true;
+        for mute in [GapMute::Counter, GapMute::ClickBar, GapMute::Metronome] {
+            let playback = &mut app.playback_ctl.playback;
+            playback.bar_muted = true;
+            playback.bar_mute = mute;
+            assert_eq!(app.observed_bar_muted(), Some(true), "{mute:?}");
+            app.playback_ctl.playback.bar_muted = false;
+            assert_eq!(app.observed_bar_muted(), Some(false), "{mute:?}");
+        }
+    }
 
     #[test]
     fn early_late_rounds_and_names_direction() {

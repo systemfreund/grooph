@@ -1,11 +1,11 @@
 //! App side of the metronome trainer: follows the bar the audio engine plays
-//! to apply the tempo ramp to the UI timing and to show muted bars.
+//! to apply the tempo ramp to the UI timing and to show muted bars, and
+//! which of the silent bars' *Mute* values each page offers.
 
+use crate::documents::Document;
 use crate::score_change::ScoreChange;
 use crate::{Grooph, TransportState};
-use eframe::egui;
-use grooph_audio::{RampEnd, RampUnit, TempoRamp};
-use grooph_measure::tempo::{MAX_BPM, MIN_BPM};
+use grooph_audio::{GapMute, RampUnit, TempoRamp};
 
 impl Grooph {
     /// Track the ramp tempo and gap state of the bar being played. A tempo
@@ -24,6 +24,7 @@ impl Grooph {
             None => bpm,
         });
         self.playback_ctl.playback.bar_muted = bar.is_some_and(|b| b.muted);
+        self.playback_ctl.playback.bar_mute = self.played_mute();
         if self.playback_ctl.playback.ramp_bpm != ramp_bpm {
             self.playback_ctl.playback.ramp_bpm = ramp_bpm;
             self.score_changed(ScoreChange::Timing);
@@ -32,61 +33,47 @@ impl Grooph {
 }
 
 impl Grooph {
+    /// The *Mute* values the silent bars of `doc`'s page offer: Practice and
+    /// the score tab all clicks or clicks and notes, the metronome with a
+    /// polyrhythm all clicks or one of its layers, and without one no
+    /// choice (all clicks).
+    pub(crate) fn offered_mutes_of(&self, doc: Document) -> &'static [GapMute] {
+        match doc {
+            Document::Metronome if self.counter_bar().is_some() => {
+                &[GapMute::Metronome, GapMute::ClickBar, GapMute::Counter]
+            }
+            Document::Metronome => &[],
+            Document::Practice | Document::Score => &[GapMute::Metronome, GapMute::Everything],
+        }
+    }
+
+    /// [`Self::offered_mutes_of`] the page shown.
+    pub(crate) fn offered_mutes(&self) -> &'static [GapMute] {
+        self.offered_mutes_of(self.document())
+    }
+
+    /// What a silent bar of `doc`'s page silences: its saved *Mute* value
+    /// if the page offers it, else all clicks. The saved value stays.
+    pub(crate) fn played_mute_of(&self, doc: Document) -> GapMute {
+        let mute = self.playback_ctl.settings.get(doc).gap_click.mute;
+        if self.offered_mutes_of(doc).contains(&mute) { mute } else { GapMute::Metronome }
+    }
+
+    /// [`Self::played_mute_of`] the page shown.
+    pub(crate) fn played_mute(&self) -> GapMute {
+        self.played_mute_of(self.document())
+    }
+
     /// The tempo ramp as played: endless mode never loops, so there a ramp
     /// counted in loops counts in bars (see [`Self::endless_runs`]).
     pub(crate) fn played_ramp(&self) -> TempoRamp {
         if self.calibrating() {
             return TempoRamp::default();
         }
-        let mut ramp = self.playback_ctl.settings.tempo_ramp;
+        let mut ramp = self.tab_playback().tempo_ramp;
         if self.endless_runs() {
             ramp.unit = RampUnit::Bars;
         }
         ramp
-    }
-
-    pub(crate) fn tempo_ramp_settings(&mut self, ui: &mut egui::Ui) {
-        let start = self.playback_ctl.settings.bpm;
-        let endless = self.endless_runs();
-        let ramp = &mut self.playback_ctl.settings.tempo_ramp;
-        ui.checkbox(&mut ramp.enabled, "Change the tempo while playing")
-            .on_hover_text("Starts at the BPM setting and steps towards the target tempo");
-        ui.add_enabled_ui(ramp.enabled, |ui| {
-            ui.horizontal(|ui| {
-                ui.label(format!("From {start} to"));
-                ui.add(
-                    egui::DragValue::new(&mut ramp.target_bpm)
-                        .range(MIN_BPM..=MAX_BPM)
-                        .speed(0.1)
-                        .suffix(" BPM"),
-                );
-            });
-            ui.horizontal(|ui| {
-                ui.label("Step");
-                ui.add(egui::DragValue::new(&mut ramp.step_bpm).range(1..=50).speed(0.05));
-                ui.label("BPM every");
-                ui.add(egui::DragValue::new(&mut ramp.every).range(1..=64).speed(0.05));
-                if endless {
-                    ui.label("bars");
-                } else {
-                    egui::ComboBox::from_id_salt("ramp_unit")
-                        .selected_text(match ramp.unit {
-                            RampUnit::Bars => "bars",
-                            RampUnit::Loops => "loops",
-                        })
-                        .show_ui(ui, |ui| {
-                            ui.selectable_value(&mut ramp.unit, RampUnit::Bars, "bars");
-                            ui.selectable_value(&mut ramp.unit, RampUnit::Loops, "loops");
-                        });
-                }
-            });
-            ui.horizontal(|ui| {
-                ui.label("At the target:");
-                ui.radio_value(&mut ramp.end, RampEnd::Hold, "Hold");
-                ui.radio_value(&mut ramp.end, RampEnd::Restart, "Start over");
-                ui.radio_value(&mut ramp.end, RampEnd::Cycle, "Back down");
-            });
-            ui.checkbox(&mut ramp.keep_reached, "Keep the reached tempo after stopping");
-        });
     }
 }
