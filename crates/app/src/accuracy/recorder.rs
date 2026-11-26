@@ -97,7 +97,7 @@ pub(super) fn record_hit(
 /// origin.
 fn frontier(state: &mut LaneState, lane: &Lane, origin: Option<(i64, f64)>) -> Option<i64> {
     let n = match state.frontier {
-        Some((loop_idx, tick)) => lane.first_from(loop_idx, tick),
+        Some(note) => lane.find(note),
         None => {
             let (loop_idx, tick) = origin?;
             lane.at_or_before(lane.at(loop_idx, tick))
@@ -283,9 +283,13 @@ fn push_miss(data: &mut RecordingData, lane: &Lane, n: i64, cursor: f64) {
     data.marks_by_onset.insert(beat.key(), AccuracyMark::Miss);
     data.counters.misses += 1;
     tallies_of(&mut data.voice_tallies, beat.voices).for_each(|t| t.counters.misses += 1);
+    // When it was due, at the tempo that played then.
     let tps = lane.tps(n);
-    let note_s =
-        if tps > 0.0 { data.cursor_s - (cursor - lane.tick(n)) / tps } else { data.cursor_s };
+    let note_s = data.cursor_log.seconds_at(lane.tick(n)).unwrap_or(if tps > 0.0 {
+        data.cursor_s - (cursor - lane.tick(n)) / tps
+    } else {
+        data.cursor_s
+    });
     data.bars.push(note_s, BarEvent::Miss);
     data.drift.push_miss(note_s);
     if let Some(pos) = beat.position {

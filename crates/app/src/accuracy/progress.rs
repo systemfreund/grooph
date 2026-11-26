@@ -74,6 +74,9 @@ pub(super) fn update_progress(
     }
     data.last_tick = Some(current_tick);
     data.cursor_s = now_seconds;
+    // Notes are final at most about two loops after they were due.
+    let at = data.loops as f64 * total + current_tick;
+    data.cursor_log.push(at, now_seconds, 2.0 * total);
     finalise(data, Until::Cursor);
 }
 

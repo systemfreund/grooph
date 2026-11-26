@@ -43,12 +43,22 @@ pub(super) struct PendingHit {
     pub timestamp: f64,
 }
 
+/// Which note a lane's frontier is: its loop, its written onset (unique in
+/// its lane, and kept when swing changes) and where it sounded (global
+/// ticks), for when the score changed and the onset is gone.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct NoteAt {
+    pub loop_idx: i64,
+    pub onset: u64,
+    pub performed: u64,
+}
+
 /// The open stretch of one instrument.
 #[derive(Clone, Debug, Default)]
 pub(super) struct LaneState {
-    /// The first note not final yet: its loop and where it sounds (global
-    /// ticks). `None` until the lane starts at the session's origin.
-    pub frontier: Option<(i64, u64)>,
+    /// The first note not final yet. `None` until the lane starts at the
+    /// session's origin.
+    pub frontier: Option<NoteAt>,
     /// Where the last hit made final as a note's was played (loop, tick):
     /// a hit before it would cross that pair.
     pub floor: Option<(i64, f64)>,
@@ -60,8 +70,9 @@ impl LaneState {
     /// Move the lane back by `ticks` with its score, which lost them from
     /// its front.
     pub(super) fn drop_leading_ticks(&mut self, ticks: u64) {
-        if let Some((_, tick)) = &mut self.frontier {
-            *tick = tick.saturating_sub(ticks);
+        if let Some(note) = &mut self.frontier {
+            note.onset = note.onset.saturating_sub(ticks);
+            note.performed = note.performed.saturating_sub(ticks);
         }
         if let Some((_, tick)) = &mut self.floor {
             *tick -= ticks as f64;
@@ -106,7 +117,7 @@ impl<'a> Lane<'a> {
             .collect();
         // In the order they sound: swing can move a written note past one
         // of another voice (a swung "&" after a triplet's second note).
-        idx.sort_by_key(|&i| beats[i].performed_tick);
+        idx.sort_by_key(|&i| (beats[i].performed_tick, beats[i].onset_tick));
         Self { beats, idx, total, timing, staff }
     }
 
@@ -183,15 +194,21 @@ impl<'a> Lane<'a> {
         loop_idx * self.len() + j - 1
     }
 
-    /// The first occurrence in loop `loop_idx` sounding at or after `tick`.
-    pub(super) fn first_from(&self, loop_idx: i64, tick: u64) -> i64 {
-        let j = self.idx.partition_point(|&i| self.beats[i].performed_tick < tick) as i64;
-        loop_idx * self.len() + j
+    /// The occurrence `note` names: the lane's note written at its onset,
+    /// or, if the score has none there any more, the first sounding at or
+    /// after where it sounded.
+    pub(super) fn find(&self, note: NoteAt) -> i64 {
+        let written = self.idx.iter().position(|&i| self.beats[i].onset_tick == note.onset);
+        let j = written.unwrap_or_else(|| {
+            self.idx.partition_point(|&i| self.beats[i].performed_tick < note.performed)
+        }) as i64;
+        note.loop_idx * self.len() + j
     }
 
-    /// The frontier's form of occurrence `n`: its loop and where it sounds.
-    pub(super) fn key_of(&self, n: i64) -> (i64, u64) {
-        (self.loop_of(n), self.beats[self.beat(n)].performed_tick)
+    /// The frontier's form of occurrence `n`.
+    pub(super) fn key_of(&self, n: i64) -> NoteAt {
+        let beat = &self.beats[self.beat(n)];
+        NoteAt { loop_idx: self.loop_of(n), onset: beat.onset_tick, performed: beat.performed_tick }
     }
 
     /// Whether a hit at `x` is a candidate for any occurrence from `from` on.
@@ -298,7 +315,8 @@ mod tests {
         assert_eq!(lane.tick(8), total);
         assert_eq!(lane.tick(-1), -gap);
         assert_eq!(lane.at_or_before(total + 0.5 * gap), 8);
-        assert_eq!(lane.first_from(1, 0), 8);
+        assert_eq!(lane.find(lane.key_of(8)), 8);
+        assert_eq!(lane.find(NoteAt { loop_idx: 1, onset: 1, performed: 1 }), 9);
         // Halfway between the next two notes.
         assert_eq!(lane.final_at(0), 1.5 * gap);
         // The windows reach up to the neighbours.

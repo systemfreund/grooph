@@ -516,8 +516,10 @@ pub(super) struct RecordingData {
     /// when the run stops.
     pub(super) played: Option<Played>,
     /// The progress cursor's time at the last progress (s, on the shared
-    /// clock): misses are dated back from it.
+    /// clock).
     pub(super) cursor_s: f64,
+    /// Where the cursor was when, for dating misses.
+    pub(super) cursor_log: CursorLog,
     /// How often the progress cursor wrapped. From the first wrap on there
     /// is a loop before whose windows past the loop's end are to be judged.
     pub(super) loops: i64,
@@ -535,6 +537,44 @@ pub(super) struct RecordingData {
     pub(super) drift: DriftLog,
     /// The run by position in the beat.
     pub(super) positions: PositionLog,
+}
+
+/// Where the progress cursor was when, on the session's continuous timeline
+/// (loops · loop ticks + tick): a note is missed up to about a loop after
+/// it was due, and is dated by the tempo that played then, also if the
+/// tempo changed since.
+#[derive(Default)]
+pub(super) struct CursorLog {
+    /// (tick, seconds), in order.
+    samples: VecDeque<(f64, f64)>,
+}
+
+impl CursorLog {
+    /// The cursor is at `tick` at `seconds`; samples more than `keep` ticks
+    /// behind it go.
+    pub(super) fn push(&mut self, tick: f64, seconds: f64, keep: f64) {
+        if self.samples.back().is_some_and(|&(last, _)| tick < last) {
+            // The timeline started over.
+            self.samples.clear();
+        }
+        self.samples.push_back((tick, seconds));
+        while self.samples.get(1).is_some_and(|&(t, _)| t < tick - keep) {
+            self.samples.pop_front();
+        }
+    }
+
+    /// When the cursor passed `tick`; `None` outside what is kept.
+    pub(super) fn seconds_at(&self, tick: f64) -> Option<f64> {
+        let i = self.samples.partition_point(|&(t, _)| t < tick);
+        let &(t1, s1) = self.samples.get(i)?;
+        let &(t0, s0) = self.samples.get(i.checked_sub(1)?)?;
+        Some(if t1 > t0 { s0 + (s1 - s0) * (tick - t0) / (t1 - t0) } else { s1 })
+    }
+
+    /// The score lost `ticks` from its front.
+    pub(super) fn shift(&mut self, ticks: f64) {
+        self.samples.iter_mut().for_each(|(t, _)| *t -= ticks);
+    }
 }
 
 /// A judged note, kept until the state of its bar is known.
@@ -707,6 +747,7 @@ impl RecordingData {
             lanes: Lanes::new(),
             played: None,
             cursor_s: start_time,
+            cursor_log: CursorLog::default(),
             loops: 0,
             extras: Vec::new(),
             stats: AccuracyStats::default(),
@@ -754,6 +795,7 @@ impl RecordingSession {
             d.marks_by_onset.clear();
             d.origin = None;
             d.lanes.clear();
+            d.cursor_log = CursorLog::default();
             d.loops = 0;
             d.extras.clear();
             d.stats.reset();
@@ -782,6 +824,7 @@ impl RecordingSession {
             if let Some((_, tick)) = &mut d.origin {
                 *tick = (*tick - ticks as f64).max(0.0);
             }
+            d.cursor_log.shift(ticks as f64);
             // Its onsets are no longer the score's: the next progress
             // brings the new ones.
             d.played = None;

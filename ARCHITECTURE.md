@@ -876,7 +876,10 @@ grooph's metronome runs inside AI chats as an
   stops, the open stretch is aligned with the hits in and the summary
   includes it; a note whose window is still open then and has no hit is no
   miss. A lane runs in the order its notes sound (swing can move a note
-  past one of another voice). It starts at its note at or before the
+  past one of another voice); its first open note is kept by its written
+  onset (`NoteAt`), unique in the lane and kept when swing changes. A miss
+  is dated by when the cursor passed its note (`CursorLog`), at the tempo
+  that played then. It starts at its note at or before the
   session's origin (the cursor at the start, or where marks were cleared):
   a first hit a little late counts for it, but a note before the origin is
   never missed. Re-anchoring the clock keeps the open stretch, whose notes

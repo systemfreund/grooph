@@ -1816,4 +1816,83 @@ mod review_tests {
         assert_eq!((s.hits, s.misses, s.extra), (sounds.len() as u64, 0, 0));
         assert!(s.spread_ms < 1e-6);
     }
+
+    #[test]
+    fn notes_sounding_at_once_are_each_judged_once() {
+        // At 60 % swing the "&" and the quintuplet's third note both sound
+        // at 0.6 of a beat.
+        let score = parse_score("4/4 e e q h ; qt16 qt16 qt16 qt16 qt16 q h").unwrap();
+        let swing = Swing { unit: SwingUnit::Eighths, percent: 60 };
+        let timing = ScoreTiming::from_score(&score, 120).with_swing(swing);
+        let beats = compute_global_beat_onsets(&score, &timing);
+        let performed: Vec<u64> =
+            beats.iter().filter(|b| b.is_note).map(|b| b.performed_tick).collect();
+        let notes = performed.len() as u64;
+        let mut distinct = performed.clone();
+        distinct.dedup();
+        assert!(distinct.len() < performed.len(), "two notes sound at once");
+        let mut tracker = AccuracyTracker::new();
+        tracker.on_playback_start_at(0.0, 0.0);
+        tracker.record_hit(0.0, &timing, &score);
+        let mut now = 0.0;
+        while now < 1.9 {
+            now += 1.0 / 60.0;
+            tracker.update_progress(now, &timing, &score);
+        }
+        tracker.on_playback_stop();
+        // Each note judged once; the half at 1 s, its window open until the
+        // next loop, is no miss at the stop.
+        let s = tracker.last_summary().unwrap();
+        assert_eq!((s.hits, s.misses, s.extra), (1, notes - 2, 0));
+    }
+
+    #[test]
+    fn a_pending_note_stays_when_swing_changes() {
+        // Eighths swung 75 %: the first "&" sounds at 0.375 s.
+        let score = parse_score("4/4 e e e e e e e e").unwrap();
+        let straight = ScoreTiming::from_score(&score, 120);
+        let swung = straight.clone().with_swing(Swing { unit: SwingUnit::Eighths, percent: 75 });
+        let and = straight.total_loop_ticks() / 8;
+        let mut tracker = AccuracyTracker::new();
+        tracker.on_playback_start_at(0.0, 0.0);
+        tracker.record_hit(0.0, &swung, &score);
+        // The downbeat is final at 0.4375 s, the "&" open.
+        tracker.update_progress(0.45, &swung, &score);
+        assert!(tracker.mark_for_onset(0).is_some());
+        assert!(tracker.mark_for_onset(and).is_none());
+        // Swing off: the "&" now sounds before where it sounded.
+        tracker.update_progress(1.0, &straight, &score);
+        assert!(matches!(tracker.mark_for_onset(and), Some(AccuracyMark::Miss)));
+    }
+
+    #[test]
+    fn a_miss_is_dated_at_the_tempo_it_was_due_at() {
+        // Two bars of quarters at 120 BPM; the note at 1.5 s goes unplayed
+        // and is final at 2.25 s, but the tempo doubles at 2 s.
+        let score = parse_score("4/4 q q q q | 4/4 q q q q").unwrap();
+        let slow = ScoreTiming::from_score(&score, 120);
+        let fast = ScoreTiming::from_score(&score, 240);
+        let mut tracker = AccuracyTracker::new();
+        tracker.on_playback_start_at(0.0, 0.0);
+        let mut hits = [0.0, 0.5, 1.0].into_iter().peekable();
+        let mut now: f64 = 0.0;
+        while now < 2.0 {
+            now += 1.0 / 60.0;
+            while let Some(hit) = hits.next_if(|&h| h <= now) {
+                tracker.record_hit(hit, &slow, &score);
+            }
+            tracker.update_progress(now, &slow, &score);
+        }
+        // As a tempo change re-anchors the clock.
+        let tick = slow.seconds_to_global_tick(now);
+        tracker.realign_start_time(now - fast.global_tick_to_seconds(tick), tick);
+        while now < 2.5 {
+            now += 1.0 / 60.0;
+            tracker.update_progress(now, &fast, &score);
+        }
+        tracker.on_playback_stop();
+        let drift = tracker.last_drift().expect("three hits");
+        assert_eq!(drift.hits.len(), 3);
+        assert!(drift.misses.iter().any(|&t| (t - 1.5).abs() < 0.02), "{:?}", drift.misses);
+    }
 }
