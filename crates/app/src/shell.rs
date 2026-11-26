@@ -72,9 +72,10 @@ pub(crate) struct ShellState {
     /// The options sheet only shows its handle and the transport buttons.
     /// Folded at start, so the staff and the ring get the room.
     pub(crate) options_collapsed: bool,
-    /// What the switches of the split rows bring back: the last swing,
-    /// count labels and counter rhythm that were not off.
-    pub(crate) last_swing_percent: u8,
+    /// What the switches of the split rows bring back: the last swing of
+    /// each page (by [`Document`]), the count labels and counter rhythm
+    /// that were not off.
+    pub(crate) last_swing_percent: [u8; 3],
     pub(crate) last_counting: Option<CountingBase>,
     pub(crate) last_counter: Option<Ratio>,
 }
@@ -83,7 +84,7 @@ impl Default for ShellState {
     fn default() -> Self {
         Self {
             options_collapsed: true,
-            last_swing_percent: DEFAULT_SWING_PERCENT,
+            last_swing_percent: [DEFAULT_SWING_PERCENT; 3],
             last_counting: None,
             last_counter: None,
         }
@@ -1192,11 +1193,13 @@ impl Grooph {
 
     /// Straight or swung; the switch brings back the last swing.
     fn swing_row(&mut self, ui: &mut Ui) {
-        let swing = &mut self.playback_ctl.settings.get_mut(self.editor.document).swing;
+        let doc = self.editor.document;
+        let swing = &mut self.playback_ctl.settings.get_mut(doc).swing;
+        let last = &mut self.ui.shell.last_swing_percent[doc as usize];
         if !swing.is_straight() {
-            self.ui.shell.last_swing_percent = swing.percent;
+            *last = swing.percent;
         }
-        let shown = self.ui.shell.last_swing_percent;
+        let shown = *last;
         let value = format!("{} {}", swing_label(shown), swing.unit.label());
         let was_on = !swing.is_straight();
         let mut on = was_on;
@@ -1889,6 +1892,29 @@ mod tests {
         shared_rows_frame(&mut app, &ctx, vec![Event::PointerMoved(at), button(at, true)]);
         shared_rows_frame(&mut app, &ctx, vec![button(at, false)]);
         assert_eq!(app.ui.dialogs.picker, Some(Picker::TempoRamp));
+    }
+
+    #[test]
+    fn the_swing_switch_brings_back_its_own_tabs_swing() {
+        use super::Tab;
+        let ctx = Context::default();
+        let cc = crate::test_support::creation_context(ctx.clone());
+        let mut app = crate::Grooph::new(&cc);
+        // Practice at 60%, switched off.
+        app.select_tab(Tab::Practice);
+        app.tab_playback_mut().swing.percent = 60;
+        shared_rows_frame(&mut app, &ctx, vec![]);
+        app.tab_playback_mut().swing.percent = grooph_measure::swing::MIN_SWING_PERCENT;
+        // The metronome's options with its swing at 75%.
+        app.select_tab(Tab::Metronome);
+        app.tab_playback_mut().swing.percent = 75;
+        let texts = shared_rows_frame(&mut app, &ctx, vec![]);
+        assert!(texts.iter().any(|t| t.starts_with("75%")), "{texts:?}");
+        // Practice's row still offers its own 60%.
+        app.select_tab(Tab::Practice);
+        let texts = shared_rows_frame(&mut app, &ctx, vec![]);
+        assert!(texts.iter().any(|t| t.starts_with("60%")), "{texts:?}");
+        assert!(!texts.iter().any(|t| t.starts_with("75%")), "{texts:?}");
     }
 
     #[test]

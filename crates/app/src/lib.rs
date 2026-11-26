@@ -2808,6 +2808,36 @@ mod tests {
     }
 
     #[test]
+    fn the_tempo_ramp_picker_fits_a_phone_held_sideways() {
+        use super::Grooph;
+        use crate::pickers::Picker;
+        use eframe::egui::{Id, Pos2, RawInput, Rect, vec2};
+
+        let ctx = eframe::egui::Context::default();
+        let cc = crate::test_support::creation_context(ctx.clone());
+        let mut app = Grooph::new(&cc);
+        app.select_tab(Tab::Practice);
+        app.tab_playback_mut().tempo_ramp.enabled = true;
+        app.ui.dialogs.picker = Some(Picker::TempoRamp);
+        let screen = Rect::from_min_size(Pos2::ZERO, vec2(844.0, 390.0));
+        for i in 0..3 {
+            let input = RawInput {
+                screen_rect: Some(screen),
+                time: Some(i as f64 * 0.1),
+                ..Default::default()
+            };
+            let mut output = ctx.run_ui(input, |ui| {
+                app.apply_style(ui);
+                app.shell_ui(ui);
+            });
+            output.textures_delta.clear();
+        }
+        let rect = ctx.memory(|m| m.area_rect(Id::unique("settings_picker"))).unwrap();
+        // Done, at its bottom, stays on the screen.
+        assert!(rect.top() >= 0.0 && rect.bottom() <= screen.height(), "{rect:?}");
+    }
+
+    #[test]
     fn the_settings_have_no_tempo_ramp_section() {
         use super::Grooph;
         use crate::pickers::Picker;

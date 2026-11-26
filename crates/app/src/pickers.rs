@@ -1083,44 +1083,48 @@ impl Grooph {
         let start = self.tab_playback().bpm;
         let endless = self.endless_runs();
         let ramp = &mut self.playback_ctl.settings.get_mut(self.editor.document).tempo_ramp;
-        ui.weak(format!("The tempo steps from {start} BPM towards a target while playing."));
-        ui.add_space(8.0);
-        let onoff = [(false, "Off".to_owned()), (true, "On".to_owned())];
-        if let Some(on) = choice_grid(ui, &onoff, ramp.enabled, 2) {
-            ramp.enabled = on;
-        }
-        if !ramp.enabled {
-            return;
-        }
-        ui.add_space(8.0);
-        count_stepper(ui, "Target BPM", &mut ramp.target_bpm, MIN_BPM..=MAX_BPM);
-        ui.spacing_mut().slider_width = ui.available_width();
-        ui.add(egui::Slider::new(&mut ramp.target_bpm, MIN_BPM..=MAX_BPM).show_value(false));
-        ui.add_space(4.0);
-        count_stepper(ui, "Step (BPM)", &mut ramp.step_bpm, 1..=50);
-        let loops = !endless && ramp.unit == RampUnit::Loops;
-        let unit = if loops { "Every (loops)" } else { "Every (bars)" };
-        count_stepper(ui, unit, &mut ramp.every, 1..=64);
-        // Endless mode never loops: it counts bars.
-        if !endless {
-            let units =
-                [(RampUnit::Bars, "Bars".to_owned()), (RampUnit::Loops, "Loops".to_owned())];
-            if let Some(unit) = choice_grid(ui, &units, ramp.unit, 2) {
-                ramp.unit = unit;
+        // Scrolls on a short screen (a phone held sideways), so Done stays
+        // in reach.
+        egui::ScrollArea::vertical().max_height(dialog_scroll_height(ui)).show(ui, |ui| {
+            ui.weak(format!("The tempo steps from {start} BPM towards a target while playing."));
+            ui.add_space(8.0);
+            let onoff = [(false, "Off".to_owned()), (true, "On".to_owned())];
+            if let Some(on) = choice_grid(ui, &onoff, ramp.enabled, 2) {
+                ramp.enabled = on;
             }
-        }
-        ui.add_space(8.0);
-        ui.label("At the target");
-        let ends = [
-            (RampEnd::Hold, "Hold".to_owned()),
-            (RampEnd::Restart, "Start over".to_owned()),
-            (RampEnd::Cycle, "Back down".to_owned()),
-        ];
-        if let Some(end) = choice_grid(ui, &ends, ramp.end, 3) {
-            ramp.end = end;
-        }
-        ui.add_space(8.0);
-        ui.checkbox(&mut ramp.keep_reached, "Keep the reached tempo after stopping");
+            if !ramp.enabled {
+                return;
+            }
+            ui.add_space(8.0);
+            count_stepper(ui, "Target BPM", &mut ramp.target_bpm, MIN_BPM..=MAX_BPM);
+            ui.spacing_mut().slider_width = ui.available_width();
+            ui.add(egui::Slider::new(&mut ramp.target_bpm, MIN_BPM..=MAX_BPM).show_value(false));
+            ui.add_space(4.0);
+            count_stepper(ui, "Step (BPM)", &mut ramp.step_bpm, 1..=50);
+            let loops = !endless && ramp.unit == RampUnit::Loops;
+            let unit = if loops { "Every (loops)" } else { "Every (bars)" };
+            count_stepper(ui, unit, &mut ramp.every, 1..=64);
+            // Endless mode never loops: it counts bars.
+            if !endless {
+                let units =
+                    [(RampUnit::Bars, "Bars".to_owned()), (RampUnit::Loops, "Loops".to_owned())];
+                if let Some(unit) = choice_grid(ui, &units, ramp.unit, 2) {
+                    ramp.unit = unit;
+                }
+            }
+            ui.add_space(8.0);
+            ui.label("At the target");
+            let ends = [
+                (RampEnd::Hold, "Hold".to_owned()),
+                (RampEnd::Restart, "Start over".to_owned()),
+                (RampEnd::Cycle, "Back down".to_owned()),
+            ];
+            if let Some(end) = choice_grid(ui, &ends, ramp.end, 3) {
+                ramp.end = end;
+            }
+            ui.add_space(8.0);
+            ui.checkbox(&mut ramp.keep_reached, "Keep the reached tempo after stopping");
+        });
     }
 
     fn swing_choices(&mut self, ui: &mut Ui) {
