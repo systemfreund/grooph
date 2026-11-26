@@ -355,7 +355,7 @@ spread across callers.
   (`PlaybackMarks::Anchor`), not along the way.
   Bars are counted as played (`PlaybackState::bars_played`), so loops and
   endless mode keep the every-second-bar rhythm. The metronome and edit
-  tabs and calibration always use the line. Not part of presets or links.
+  tabs and calibration always use the line. Not part of links.
 - Counting overlay comes from `grooph_measure::counting`.
 - Swing (`grooph_measure::swing::Swing`, global, main menu next to BPM): 50%
   (off) to 75% (dotted), swung unit 8ths or 16ths. Notation stays straight;
@@ -556,7 +556,8 @@ grooph's metronome runs inside AI chats as an
   changing a setting regenerates Practice's rhythm (undoable; never the
   score tab's score, see "Rhythm documents"), 🎲 rolls a new rhythm
   with the same settings. Space and the grouping picker live in the Level
-  picker, presets (load, save, update, rename, delete) in the Preset picker.
+  picker. There are no presets of the generator settings (they were
+  removed); stored ones are dropped on restore, see "Saved state".
 - App glue: `crates/app/src/generator.rs`. Endless mode (Bars: Endless; on the practice page, not in its editor)
   starts with 2 fresh bars on every play (no 🎲 then) and never loops: once the cursor reaches the last measure
   a new one is added below it, and the first measure is removed once its row
@@ -594,15 +595,6 @@ grooph's metronome runs inside AI chats as an
   counts in all seven eighths) before the score; `Audio::playback_position` is negative meanwhile. The UI
   holds the cursor at 0 (`CountInState`) and re-anchors the accuracy session
   when the count-in ends.
-
-- Presets (`crates/app/src/presets.rs`, UI and apply/snapshot in
-  `preset_panel.rs`): `PresetSettings` = the app's `PlaybackSettings` (BPM,
-  count-in, swing, gap click, tempo ramp) and `GeneratorConfig` (generator
-  settings, endless, ghost notes) groups and both voice sounds. Built-in
-  presets are code (`builtin_presets`, addressed as `PresetId::BuiltIn(index)`),
-  never stored; user presets live in `PresetLibrary` in `PersistedState`.
-  `active_preset` is not persisted; at startup it is the first preset equal to
-  the current settings. Applying a preset regenerates the score.
 
 ## Sounds
 
@@ -714,8 +706,7 @@ grooph's metronome runs inside AI chats as an
   that would change the meter or add a bar. `click_bars`/`meter_bars` read them: the audio engine
   takes the click bars when it plays a rhythm, persistence saves them as
   one `SavedMetronome`. A metronome link sets the meter and clicks
-  in place, also with the tab open; a preset, which needs a rhythm, closes
-  it with `leave_metronome`, which shows the practice page. The audio engine
+  in place, also with the tab open. The audio engine
   plays the document itself as clicks (`Played::Clicks`): its first voice
   is the click bar, its second the counter rhythm, so only clicks sound and
   hits are measured against the same score; ghost notes, endless mode and play along are off there. Below the
@@ -878,7 +869,7 @@ grooph's metronome runs inside AI chats as an
   changes ask first, `PendingLoad::PracticeRhythm`): the library opens on
   its name over Practice, and once it closes the pattern opens in the score
   tab (`LibraryUi::open_on_close`, `open_practice_save`, run every frame),
-  unless it was deleted, a preset was opened, or another score replaced
+  unless it was deleted or another score replaced
   the score tab's meanwhile (a pattern, a new score, a link:
   `replace_score` drops it). Practice's document keeps its rhythm and no pattern. A score
   link of the one line opens on Practice unless shared from the score tab
@@ -899,7 +890,7 @@ grooph's metronome runs inside AI chats as an
 - The metronome's document holds its click bar and counter rhythm whether
   the tab is open or not; nothing copies them back and forth.
 - The generator writes Practice's document only: `generate_new_score` shows
-  it first, so no generator action (🎲, a setting, a preset, a generator
+  it first, so no generator action (🎲, a setting, a generator
   link, endless mode) replaces the score tab's score. Endless mode and ghost
   notes run on Practice's rhythm only.
 - The library and the unsaved-changes checks reach the score tab's document
@@ -941,18 +932,14 @@ grooph's metronome runs inside AI chats as an
   an open metronome and leaves it playing (`advance_unseen_playback` moves
   the playback on without a staff); the library has no rhythm to save
   there, and a loaded pattern opens on the score tab.
-- The library (`library_panel.rs`) has two halves, Rhythms and Presets, of
-  the same cards (`library_card`); opened from the score tab's card it
-  holds the rhythms only. Rhythms are the score tab's: a tap loads
-  one into it, and its marks (active, unsaved) are its pattern's. The save
+- The library (`library_panel.rs`) holds the saved rhythms as cards
+  (`library_card`), from every page. They are the score tab's: a tap loads
+  one into it, ✏ renames or deletes it, and its marks (active, unsaved) are its pattern's. The save
   buttons are those of the page the library was opened from
   (`rhythm_saving`, by `EditorState::document`): from the score tab "Save"
   and "Save as new" keep its score (`docs.score`), from Practice "Save as
   new" saves Practice's rhythm as its "Save rhythm 💾" does, from the
-  metronome there are none. A tap on a preset
-  applies it and opens the practice page (`open_preset`), ✏ renames or deletes, built-in
-  presets have no ✏. The Preset picker on the practice page shows the same
-  preset cards (`preset_cards`); a tap there applies the preset and stays.
+  metronome there are none.
 - Settings open in a `Modal` picker (`settings_picker`); generator changes go
   through `finish_generator_change`.
 - The staff's em is capped so one row fits the panel's height. The row's
@@ -1076,14 +1063,16 @@ If you add new tools/shortcuts, remember:
 - App state and the frame loop: `crates/app/src/lib.rs` (`Grooph`), `state.rs` (its parts), `documents.rs`
   (the three pages' documents), `undo.rs`.
 - Saved state: `crates/app/src/lib.rs` (`PersistedState`), `persist.rs` (field-wise restore, migration, backup).
+  The user's presets of the generator settings, saved until they were removed (`presets`), are dropped on
+  restore without a version bump; a state with any is backed up once (`persist::take_presets`), so they are not
+  lost without a trace.
 - Settings: `crates/app/src/settings.rs`, one `serde` group per feature (`PlaybackSettings`, `GeneratorConfig`,
   `DeviceSettings`, `FeedbackSettings`, `ViewSettings`; the sounds are `grooph_audio::AudioSettings`). The same
-  struct is held at runtime, saved in `PersistedState` and, for playback and the generator, in presets, so
-  `from_app`, the restore and `preset_snapshot`/`apply_preset` copy groups. A new setting is a field in its group
+  struct is held at runtime and saved in `PersistedState`, so `from_app` and the restore copy groups. A new setting is a field in its group
   (with `#[serde(default)]` from the group, it falls back alone, see `persist::repair_field`), or a new group:
   then it gets an entry in `PersistedState` and `repair_field`. Renaming or moving a saved field bumps
   `PERSISTED_STATE_VERSION` with a step in `persist::migrate` (version 4 moved the flat fields of version 3 into
-  the groups, `SETTINGS_GROUPS`/`PRESET_GROUPS`; version 5 joined the metronome's `click_bars`, `counter_bars`,
+  the groups, `SETTINGS_GROUPS`; version 5 joined the metronome's `click_bars`, `counter_bars`,
   `counter_names` and `metronome_meter` into `metronome`). The default tempo is `grooph_measure::tempo::DEFAULT_BPM`.
 - UI state: `UiShell` (`state.rs`) holds `mode`, `platform` and feature groups only (`Fonts`, `LayoutSettings`,
   `ViewSettings`, `StaffView`, `LibraryUi`, `Dialogs`, `ShellState`, the host and the embed). No new field goes

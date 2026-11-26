@@ -3,13 +3,11 @@ use crate::documents::{Document, Documents};
 use crate::generator::GeneratorState;
 use crate::guide::AnchorFlash;
 use crate::library::PatternLibrary;
-use crate::library_panel::{LibraryItem, LibraryTab};
 use crate::metronome_view::MetronomeState;
 use crate::persist::StateBackup;
 use crate::pickers::Picker;
 use crate::platform::PlatformRuntime;
 use crate::play_along::PlayAlongState;
-use crate::presets::{PresetId, PresetLibrary};
 use crate::settings::{DeviceSettings, FeedbackSettings, PlaybackSettings, ViewSettings};
 use crate::shell::ShellState;
 use crate::{Host, Mode, TransportState};
@@ -241,11 +239,6 @@ pub(crate) struct EditorState {
     pub(crate) library: PatternLibrary,
     /// Rhythm generator settings and endless-mode state.
     pub(crate) generator: GeneratorState,
-    /// User-saved generator presets. Persisted across sessions.
-    pub(crate) presets: PresetLibrary,
-    /// Preset last loaded or saved; "Save" overwrites it when it is a user
-    /// preset. Not persisted.
-    pub(crate) active_preset: Option<PresetId>,
     /// The metronome tab's meter and what the pointer is on.
     pub(crate) metronome: MetronomeState,
     /// Saved state that did not restore completely, kept under a backup key
@@ -329,23 +322,18 @@ impl Default for StaffView {
     }
 }
 
-/// The library's and the preset picker's state on screen. Not persisted.
+/// The library's state on screen. Not persisted.
 #[derive(Default)]
 pub(crate) struct LibraryUi {
-    /// User preset whose row in the preset picker is being renamed.
-    pub(crate) renaming_preset: Option<u64>,
     /// Saved pattern whose card in the library is being renamed.
     pub(crate) renaming_pattern: Option<u64>,
     /// The name being typed for the card being renamed; it becomes the name
     /// on ✔ or Enter only.
     pub(crate) rename_typed: String,
-    /// The library item saved last and the UI time, for "✓ Saved" on its
-    /// card.
-    pub(crate) saved: Option<(LibraryItem, f64)>,
-    /// A library card to scroll into view once: the one just saved.
-    pub(crate) scroll_to: Option<LibraryItem>,
-    /// The half of the library shown.
-    pub(crate) tab: LibraryTab,
+    /// The pattern saved last and the UI time, for "✓ Saved" on its card.
+    pub(crate) saved: Option<(u64, f64)>,
+    /// A pattern's card to scroll into view once: the one just saved.
+    pub(crate) scroll_to: Option<u64>,
     /// A pattern just saved from Practice, which opens in the score tab
     /// once the library closes (see `Grooph::open_practice_save`).
     pub(crate) open_on_close: Option<u64>,

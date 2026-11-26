@@ -263,7 +263,6 @@ impl Grooph {
 #[cfg(test)]
 mod tests {
     use super::Document;
-    use crate::presets::PresetId;
     use crate::score_change::ScoreChange;
     use crate::shell::Tab;
     use crate::{APP_STATE_KEY, Grooph, Mode, PersistedState};
@@ -341,7 +340,7 @@ mod tests {
         let unset = parse_score("5/4 q q q q q").unwrap();
         let set_aside = |app: &mut Grooph| app.editor.docs.practice.score = unset.clone();
         let changed = |app: &Grooph| practice_text(app) != text(&unset);
-        // 🎲, a setting, a preset, a generator link, also from the score tab.
+        // 🎲, a setting, a generator link, also from the score tab.
         set_aside(&mut app);
         app.finish_generator_change(app.editor.generator.config.settings, false, true);
         assert!(changed(&app));
@@ -349,9 +348,6 @@ mod tests {
         let before = app.editor.generator.config.settings;
         app.editor.generator.config.settings.complexity = 3;
         app.finish_generator_change(before, false, false);
-        assert!(changed(&app));
-        set_aside(&mut app);
-        app.apply_preset(PresetId::BuiltIn(1));
         assert!(changed(&app));
         set_aside(&mut app);
         app.select_tab(Tab::Score);
@@ -459,26 +455,6 @@ mod tests {
             assert!(app.editor.docs.score.dirty, "{tab:?}");
             assert_eq!(app.editor.docs.score.active_pattern_id, Some(id));
         }
-    }
-
-    #[test]
-    fn a_preset_with_another_tempo_marks_the_saved_score_unsaved() {
-        let (mut app, _) = app_with_groove();
-        app.save_active_pattern();
-        app.select_tab(Tab::Practice);
-        app.playback_ctl.settings.bpm = 1;
-        app.apply_preset(PresetId::BuiltIn(1));
-        assert_ne!(app.playback_ctl.settings.bpm, 1);
-        assert!(app.editor.docs.score.dirty);
-    }
-
-    #[test]
-    fn leaving_the_metronome_shows_practice() {
-        let mut app = app();
-        app.select_tab(Tab::Score);
-        app.select_tab(Tab::Metronome);
-        app.leave_metronome();
-        assert_eq!(app.document(), Document::Practice);
     }
 
     #[test]

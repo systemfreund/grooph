@@ -1,5 +1,5 @@
 //! Picker dialogs for single settings (meter, notes, level, bars, tempo,
-//! swing, guide, counting, preset): a grid of big buttons that works by touch, opened from the
+//! swing, guide, counting): a grid of big buttons that works by touch, opened from the
 //! settings card and the options sheet. Also the grouping picker of the level
 //! dialog.
 
@@ -61,7 +61,6 @@ pub(crate) enum Picker {
     Sticking,
     /// Whether Practice and the score tab click the metronome's click bars.
     Click,
-    Preset,
     /// The metronome tab's meter.
     MetronomeMeter,
     /// The meter of the bar an editor is on.
@@ -89,7 +88,7 @@ pub(crate) enum Picker {
     DrumMap,
     /// The inputs that count as hits and their latency.
     PlayAlong,
-    /// Saved rhythms and practice presets: save, load, rename, delete.
+    /// Saved rhythms: save, load, rename, delete.
     Library,
     /// The volumes of the voices.
     Mixer,
@@ -425,8 +424,6 @@ impl Grooph {
             _ => 380.0,
         };
         let width = (ui.ctx().content_rect().width() - 48.0).clamp(200.0, max_width);
-        let mut preset = None;
-        let mut library_preset = None;
         let mut calibrate = None;
 
         // Moved up while an on-screen keyboard covers its focused field; the
@@ -450,7 +447,6 @@ impl Grooph {
                 Picker::Counting => "Count labels",
                 Picker::Sticking => "Sticking",
                 Picker::Click => "Click",
-                Picker::Preset => "Preset",
                 Picker::MetronomeMeter | Picker::BarMeter => "Time signature",
                 Picker::ClickFill => "Subdivision",
                 Picker::Polyrhythm => "Polyrhythm",
@@ -486,10 +482,6 @@ impl Grooph {
                 Picker::Counting => self.counting_choices(ui),
                 Picker::Sticking => self.sticking_choices(ui),
                 Picker::Click => self.click_choices(ui),
-                Picker::Preset => {
-                    preset = self.preset_cards(ui);
-                    preset.is_some()
-                }
                 Picker::MetronomeMeter => self.metronome_meter_choices(ui),
                 Picker::BarMeter => self.bar_meter_choices(ui),
                 Picker::ClickFill => self.click_fill_choices(ui),
@@ -515,8 +507,8 @@ impl Grooph {
                     false
                 }
                 Picker::Library => {
-                    library_preset = self.library_panel(ui);
-                    library_preset.is_some()
+                    self.library_panel(ui);
+                    false
                 }
                 Picker::Mixer => {
                     self.mixer_panel(ui);
@@ -559,18 +551,11 @@ impl Grooph {
             if picker == Picker::Voicing {
                 self.close_voicing_picker();
             }
-            self.ui.library.renaming_preset = None;
             self.ui.library.renaming_pattern = None;
         }
 
         // After the generator check, which would generate a second rhythm.
         self.finish_generator_change(before, endless_before, false);
-        if let Some(id) = preset {
-            self.apply_preset(id);
-        }
-        if let Some(id) = library_preset {
-            self.open_preset(id);
-        }
         // After the generator check: the run plays its own bar and leaves the
         // pages and endless mode alone, so it is no generator change. The dialog stays open
         // under the calibration and shows the new latency afterwards.

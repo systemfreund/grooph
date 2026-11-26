@@ -1,6 +1,5 @@
 //! The app's settings, one group per feature. Each group is the same struct
-//! at runtime, in the saved state ([`crate::PersistedState`]) and, where it
-//! applies, in presets ([`crate::presets::PresetSettings`]), so a new
+//! at runtime and in the saved state ([`crate::PersistedState`]), so a new
 //! setting is a field in its group and nothing else lists it by hand.
 //!
 //! Every field falls back to its default on its own: a group is restored

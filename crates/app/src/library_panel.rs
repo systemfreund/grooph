@@ -3,8 +3,6 @@ use crate::documents::Document;
 use crate::library::SavedPattern;
 use crate::pickers::ROW_HEIGHT;
 use crate::pickers::{dialog_scroll_height, note_focused_field};
-use crate::presets::{self, PresetId, PresetSettings};
-use crate::shell::{Tab, subdivision_short_label};
 use crate::state::PendingLoad;
 use eframe::egui;
 use eframe::egui::{
@@ -12,7 +10,6 @@ use eframe::egui::{
     UiBuilder, vec2,
 };
 use grooph_layout::staff_layout::{ROOM_BELOW_EM, StaffOpts, build_staff_layout};
-use grooph_measure::generator::effective_subdivision;
 use grooph_measure::{Score, StaffKind};
 use grooph_render::staff::{PlaybackMarks, RenderContext, draw_staff};
 
@@ -100,24 +97,9 @@ const META_SIZE: f32 = 14.0;
 /// How long a card says "✓ Saved".
 const SAVED_NOTICE_S: f64 = 1.5;
 
-/// A saved rhythm or preset, for the "✓ Saved" notice and scrolling to it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum LibraryItem {
-    Pattern(u64),
-    Preset(u64),
-}
-
-/// The two halves of the library.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) enum LibraryTab {
-    #[default]
-    Rhythms,
-    Presets,
-}
-
 /// What a card shows besides its name.
 struct CardState {
-    /// What is on the staff or in the practice settings: an accent border.
+    /// The score tab's pattern: an accent border.
     active: bool,
     /// That has changes since: a dot after the name.
     unsaved: bool,
@@ -125,12 +107,12 @@ struct CardState {
     just_saved: bool,
     /// Scroll the card into view.
     scroll_to: bool,
-    /// Renaming is open. `None`: a built-in, without ✏.
-    editing: Option<bool>,
+    /// Renaming is open.
+    editing: bool,
 }
 
-/// One saved rhythm or preset: name, `meta` below it, ✏, and the first bar
-/// of `preview`'s score. A tap anywhere else on the card loads it; ✏ opens
+/// One saved rhythm: name, `meta` below it, ✏, and the first bar of
+/// `score`. A tap anywhere else on the card loads it; ✏ opens
 /// renaming and deleting under it. The new name is typed into `typed` and
 /// only becomes the name on ✔ or Enter, so closing renaming any other way
 /// leaves the old one.
@@ -139,7 +121,8 @@ fn library_card(
     name: &mut String,
     typed: &mut String,
     meta: String,
-    preview: Option<(&Score, &PreviewLook)>,
+    score: &Score,
+    look: &PreviewLook,
     state: CardState,
 ) -> Option<CardAction> {
     let CardState { active, unsaved, just_saved, scroll_to, editing } = state;
@@ -162,7 +145,7 @@ fn library_card(
                 ui.horizontal(|ui| {
                     let edit_size = vec2(button_width(ui, "✏"), ROW_HEIGHT);
                     let edit_room = edit_size.x + ui.spacing().item_spacing.x;
-                    let text_width = ui.available_width() - editing.map_or(0.0, |_| edit_room);
+                    let text_width = ui.available_width() - edit_room;
                     ui.vertical(|ui| {
                         ui.set_width(text_width);
                         let shown = if unsaved { format!("{name} •") } else { name.clone() };
@@ -179,18 +162,14 @@ fn library_card(
                         };
                         ui.add(Label::new(meta.size(META_SIZE)).truncate().selectable(false));
                     });
-                    if let Some(editing) = editing {
-                        let edit = Button::new("✏").selected(editing).min_size(edit_size);
-                        if ui.add(edit).on_hover_text("Rename or delete").clicked() {
-                            action = Some(CardAction::Edit);
-                        }
+                    let edit = Button::new("✏").selected(editing).min_size(edit_size);
+                    if ui.add(edit).on_hover_text("Rename or delete").clicked() {
+                        action = Some(CardAction::Edit);
                     }
                 });
-                if let Some((score, look)) = preview {
-                    let width = ui.available_width();
-                    pattern_preview(ui, score, width, look);
-                }
-                if editing == Some(true) {
+                let width = ui.available_width();
+                pattern_preview(ui, score, width, look);
+                if editing {
                     match rename_row(ui, typed) {
                         Some(Renamed::Done) => {
                             *name = typed.trim().to_owned();
@@ -312,23 +291,6 @@ pub(crate) enum SaveAs {
     New,
 }
 
-/// The line under a preset's name: meter, notes, level and tempo.
-fn preset_summary(settings: &PresetSettings) -> String {
-    let generator = &settings.generator.settings;
-    let notes = effective_subdivision(generator.subdivision, generator.time_signature);
-    let level = if generator.custom_figures_enabled {
-        "Custom".to_owned()
-    } else {
-        format!("Level {}", generator.complexity)
-    };
-    format!(
-        "{} · {} · {level} · {} BPM",
-        generator.time_signature,
-        subdivision_short_label(notes),
-        settings.playback.bpm
-    )
-}
-
 /// Bars and tempo, the line under a rhythm's name.
 fn pattern_summary(pattern: &SavedPattern) -> String {
     let bars = pattern.score.len();
@@ -337,61 +299,28 @@ fn pattern_summary(pattern: &SavedPattern) -> String {
 }
 
 impl Grooph {
-    /// Saved rhythms and practice presets, as cards: a tap loads one, ✏
-    /// renames or deletes it. Returns a preset tapped, for the caller to open
-    /// after its check for generator changes.
-    /// On the score tab it holds the score's rhythms only: a preset belongs
-    /// to the practice page.
-    pub(super) fn library_panel(&mut self, ui: &mut egui::Ui) -> Option<PresetId> {
-        if self.tab() == Tab::Score {
-            self.rhythms(ui);
-            return None;
-        }
-        ui.columns(2, |cols| {
-            for (col, (tab, label)) in cols
-                .iter_mut()
-                .zip([(LibraryTab::Rhythms, "Rhythms"), (LibraryTab::Presets, "Presets")])
-            {
-                let size = vec2(col.available_width(), ROW_HEIGHT);
-                let button = Button::new(label).selected(self.ui.library.tab == tab).min_size(size);
-                if col.add(button).clicked() && self.ui.library.tab != tab {
-                    // The halves share the name being typed.
-                    self.ui.library.tab = tab;
-                    self.ui.library.renaming_pattern = None;
-                    self.ui.library.renaming_preset = None;
-                }
-            }
-        });
-        ui.add_space(8.0);
-        match self.ui.library.tab {
-            LibraryTab::Rhythms => {
-                self.rhythms(ui);
-                None
-            }
-            LibraryTab::Presets => {
-                ui.weak("A tap opens the practice page with the preset's settings.");
-                ui.add_space(4.0);
-                self.preset_cards(ui)
-            }
-        }
+    /// Saved rhythms, as cards: a tap opens one in the score tab, ✏
+    /// renames or deletes it.
+    pub(super) fn library_panel(&mut self, ui: &mut egui::Ui) {
+        self.rhythms(ui);
     }
 
     /// The card that says "✓ Saved", and the one to scroll into view once.
-    fn card_notices(&mut self, ui: &egui::Ui) -> (Option<LibraryItem>, Option<LibraryItem>) {
+    fn card_notices(&mut self, ui: &egui::Ui) -> (Option<u64>, Option<u64>) {
         let now = ui.input(|i| i.time);
         let just_saved =
-            self.ui.library.saved.filter(|(_, at)| now - at < SAVED_NOTICE_S).map(|(item, _)| item);
+            self.ui.library.saved.filter(|(_, at)| now - at < SAVED_NOTICE_S).map(|(id, _)| id);
         if just_saved.is_some() {
             ui.ctx().request_repaint_after_secs(0.5);
         }
         (just_saved, self.ui.library.scroll_to.take())
     }
 
-    /// The card of `item` says "✓ Saved" from UI time `now` on and scrolls
-    /// into view.
-    pub(crate) fn saved(&mut self, item: LibraryItem, now: f64) {
-        self.ui.library.saved = Some((item, now));
-        self.ui.library.scroll_to = Some(item);
+    /// The card of pattern `id` says "✓ Saved" from UI time `now` on and
+    /// scrolls into view.
+    pub(crate) fn saved(&mut self, id: u64, now: f64) {
+        self.ui.library.saved = Some((id, now));
+        self.ui.library.scroll_to = Some(id);
     }
 
     /// What a save button of the rhythms asked for; a new pattern opens its
@@ -407,27 +336,7 @@ impl Grooph {
                 id
             }
         };
-        self.saved(LibraryItem::Pattern(id), now);
-        id
-    }
-
-    /// What a save button of the presets asked for; a new preset opens its
-    /// name. Returns the preset's id.
-    pub(crate) fn save_preset(&mut self, save: SaveAs, now: f64) -> u64 {
-        let id = match (save, self.editor.active_preset) {
-            (SaveAs::Update, Some(PresetId::User(id))) => {
-                self.editor.presets.update(id, self.preset_snapshot());
-                id
-            }
-            _ => {
-                let id = self.save_preset_as("");
-                self.ui.library.renaming_preset = Some(id);
-                self.ui.library.rename_typed =
-                    self.editor.presets.get(id).map(|p| p.name.clone()).unwrap_or_default();
-                id
-            }
-        };
-        self.saved(LibraryItem::Preset(id), now);
+        self.saved(id, now);
         id
     }
 
@@ -440,22 +349,6 @@ impl Grooph {
             overwrites: active.map(|p| p.name.clone()),
             enabled: active.is_none() || self.editor.docs.score.dirty,
         }
-    }
-
-    /// "Save" for the presets: the active user preset while the settings
-    /// differ from it; a new one for changed built-in settings or without
-    /// an active preset. An unchanged built-in has nothing to save.
-    pub(crate) fn preset_save_target(&self) -> SaveTarget {
-        let snapshot = self.preset_snapshot();
-        let active = self.editor.active_preset;
-        let changed = active
-            .and_then(|id| presets::lookup(&self.editor.presets, id))
-            .is_none_or(|(_, settings)| settings != snapshot);
-        let overwrites = match active {
-            Some(PresetId::User(id)) => self.editor.presets.get(id).map(|p| p.name.clone()),
-            _ => None,
-        };
-        SaveTarget { overwrites, enabled: changed }
     }
 
     /// Which save buttons the rhythms have: those of the page the library
@@ -524,18 +417,17 @@ impl Grooph {
         egui::ScrollArea::vertical().max_height(dialog_scroll_height(ui)).show(ui, |ui| {
             for pattern in &mut self.editor.library.patterns {
                 let id = pattern.id;
-                let item = LibraryItem::Pattern(id);
                 let active = active_id == Some(id);
                 let state = CardState {
                     active,
                     unsaved: active && dirty,
-                    just_saved: just_saved == Some(item),
-                    scroll_to: scroll_to == Some(item),
-                    editing: Some(*renaming == Some(id)),
+                    just_saved: just_saved == Some(id),
+                    scroll_to: scroll_to == Some(id),
+                    editing: *renaming == Some(id),
                 };
                 let meta = pattern_summary(pattern);
-                let preview = Some((&pattern.score, look));
-                let action = library_card(ui, &mut pattern.name, typed, meta, preview, state);
+                let action =
+                    library_card(ui, &mut pattern.name, typed, meta, &pattern.score, look, state);
                 match action {
                     Some(CardAction::Edit) => {
                         *renaming = if *renaming == Some(id) { None } else { Some(id) };
@@ -559,90 +451,6 @@ impl Grooph {
             }
             _ => {}
         }
-    }
-
-    /// Practice presets as cards, the user's and the built-in ones, in the
-    /// library and in the Preset picker alike. Returns the one tapped.
-    pub(crate) fn preset_cards(&mut self, ui: &mut egui::Ui) -> Option<PresetId> {
-        let snapshot = self.preset_snapshot();
-        let active = self.editor.active_preset;
-        if let Some(save) = save_buttons(ui, &self.preset_save_target()) {
-            self.save_preset(save, ui.input(|i| i.time));
-        }
-        ui.add_space(8.0);
-
-        let mut picked = None;
-        let mut to_delete = None;
-        let (just_saved, scroll_to) = self.card_notices(ui);
-        let renaming = &mut self.ui.library.renaming_preset;
-        let typed = &mut self.ui.library.rename_typed;
-        let builtin = presets::builtin_presets();
-        egui::ScrollArea::vertical().max_height(dialog_scroll_height(ui)).show(ui, |ui| {
-            for preset in &mut self.editor.presets.presets {
-                let id = preset.id;
-                let item = LibraryItem::Preset(id);
-                let is_active = active == Some(PresetId::User(id));
-                let state = CardState {
-                    active: is_active,
-                    unsaved: is_active && preset.settings != snapshot,
-                    just_saved: just_saved == Some(item),
-                    scroll_to: scroll_to == Some(item),
-                    editing: Some(*renaming == Some(id)),
-                };
-                let meta = preset_summary(&preset.settings);
-                let action = library_card(ui, &mut preset.name, typed, meta, None, state);
-                match action {
-                    Some(CardAction::Edit) => {
-                        *renaming = if *renaming == Some(id) { None } else { Some(id) };
-                        typed.clone_from(&preset.name);
-                    }
-                    Some(CardAction::Renamed) => *renaming = None,
-                    Some(CardAction::Load) => picked = Some(PresetId::User(id)),
-                    Some(CardAction::Delete) => {
-                        *renaming = None;
-                        to_delete = Some(id);
-                    }
-                    None => {}
-                }
-                ui.add_space(6.0);
-            }
-            ui.weak("Built in");
-            for (i, (name, settings)) in builtin.iter().enumerate() {
-                let id = PresetId::BuiltIn(i);
-                let is_active = active == Some(id);
-                let state = CardState {
-                    active: is_active,
-                    unsaved: is_active && *settings != snapshot,
-                    just_saved: false,
-                    scroll_to: false,
-                    editing: None,
-                };
-                let mut name = (*name).to_owned();
-                let meta = preset_summary(settings);
-                if let Some(CardAction::Load) =
-                    library_card(ui, &mut name, typed, meta, None, state)
-                {
-                    picked = Some(id);
-                }
-                ui.add_space(6.0);
-            }
-        });
-        if let Some(id) = to_delete {
-            self.delete_preset(id);
-        }
-        picked
-    }
-
-    /// Apply preset `id` from the library and open the practice page.
-    pub(crate) fn open_preset(&mut self, id: PresetId) {
-        // Its rhythm is generated, not the metronome's click bar.
-        self.leave_metronome();
-        // The practice page, not the score tab with a rhythm saved from it.
-        self.ui.library.open_on_close = None;
-        self.apply_preset(id);
-        self.ui.library.renaming_preset = None;
-        self.ui.dialogs.picker = None;
-        self.select_tab(Tab::Practice);
     }
 
     /// Modal shown when loading a pattern or opening a shared link would
