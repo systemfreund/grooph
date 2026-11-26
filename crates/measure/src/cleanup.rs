@@ -31,11 +31,11 @@ use crate::{Beat, Measure, TimeSignature, TupletMark, VoiceBar};
 use std::ops::Range;
 
 /// Grid ticks in a unit of [`crate::spelling`], a thirty-second.
-const fn unit_ticks() -> u32 {
+pub(crate) const fn unit_ticks() -> u32 {
     DEFAULT_GRID.ticks_per_whole / 32
 }
 
-fn to_unit(tick: u32) -> Option<u32> {
+pub(crate) fn to_unit(tick: u32) -> Option<u32> {
     tick.is_multiple_of(unit_ticks()).then(|| tick / unit_ticks())
 }
 
@@ -261,7 +261,11 @@ fn merge_in_tuplets(beats: &mut Vec<Beat>, spans: &[spelling::Span]) {
 
 /// The beats of a tuplet group (`members`, from tick `start`) with notes
 /// and rests merged (see [`merge_in_tuplets`]), if any merge.
-fn merged_group(members: &[Beat], start: u32, spans: &[spelling::Span]) -> Option<Vec<Beat>> {
+pub(crate) fn merged_group(
+    members: &[Beat],
+    start: u32,
+    spans: &[spelling::Span],
+) -> Option<Vec<Beat>> {
     let spec = members[0].duration.as_tuplet_spec()?;
     // The value buttons' values in the ratio, as the editor writes them
     // on a note of the group: a 5:3 quarter holds two 5:3 eighths.

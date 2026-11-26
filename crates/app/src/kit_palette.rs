@@ -11,10 +11,12 @@
 //! values write on a rest (`Grooph::edit_instrument`). Accent, ghost and the
 //! technique tools go to the head they mean (`Grooph::aimed` in `tool_palette`).
 //! The cursor goes to the voice the instrument's head would be entered in:
-//! where it is on the beat already, else where it is elsewhere in the measure,
-//! else voice 0 of a measure of one voice that holds notes, else the one the
-//! score's `Voicing` writes it in (the feet below, the hands above), onto the
-//! beat sounding then. A tap on a head on the staff picks that
+//! where it is at the cursor's time already, else where it is elsewhere in
+//! the measure, else voice 0 of a measure of one voice that holds notes,
+//! else the one the score's `Voicing` writes it in (the feet below, the
+//! hands above). The new head starts at the cursor's time: where nothing of
+//! that voice starts then, what sounds then is split
+//! (`Measure::start_note`). A tap on a head on the staff picks that
 //! instrument. The library's "New drum groove" starts a score
 //! on the kit's staff, its "New rhythm" one on the one line.
 
@@ -25,6 +27,7 @@ use crate::score_change::Origin;
 use crate::shell::Tab;
 use crate::state::PendingLoad;
 use crate::tools::ToolId;
+use grooph_measure::grid::DEFAULT_GRID;
 use grooph_measure::{
     Cursor, Instrument, Measure, Score, StaffKind, TimeSignature, VoiceIdx, Voicing,
 };
@@ -54,7 +57,7 @@ impl Grooph {
     }
 
     /// A tap on an instrument's cell: it becomes the picked one and its head
-    /// on the cursor's beat steps on: none there is added, played the usual
+    /// starting at the cursor's time steps on: none there is added, played the usual
     /// way; one there is played with the instrument's next technique, after
     /// the last it is taken away (see [`Instrument::techniques`]). It stays
     /// in the voice where it is, a new one goes to its usual one. The cursor
@@ -70,8 +73,8 @@ impl Grooph {
 
     /// A long press (a right click) on an instrument's cell: its note at
     /// the cursor goes to the other voice, as one undo step, and the cursor
-    /// with it. The instrument becomes the picked one; without its head on
-    /// the cursor's beat nothing else happens (no other head moves instead).
+    /// with it. The instrument becomes the picked one; without its head
+    /// starting at the cursor's time nothing else happens (no other head moves instead).
     /// The score's rule stays.
     pub(crate) fn hold_instrument(&mut self, instrument: Instrument) {
         self.editor.instrument = instrument;
@@ -80,8 +83,11 @@ impl Grooph {
         }
     }
 
-    /// Pick `instrument`, go to the voice of its head on the cursor's beat
-    /// (or of a new one) and apply the tool `id` there.
+    /// Pick `instrument`, go to the voice of its head at the cursor's time
+    /// (or of a new one) and apply the tool `id` there. Where nothing of
+    /// that voice starts then, a new note starts at that time
+    /// ([`Measure::start_note`]), the voice the bar has to get first
+    /// included, as one undo step; where none fits, a notice says so.
     fn strike(&mut self, instrument: Instrument, id: ToolId) {
         let there = self
             .heads_at_cursor()
@@ -89,8 +95,36 @@ impl Grooph {
             .find(|&(i, _)| i == instrument)
             .map(|(_, at)| at.voice);
         self.editor.instrument = instrument;
-        let steps = self.editor.doc().history().pushed();
         let voice = there.unwrap_or_else(|| self.voice_for(instrument));
+        let score = self.editor.doc().score();
+        let cursor = score.clamp_cursor(self.editor.doc().cursor());
+        let tick = score.tick_of(cursor);
+        let mut measure = self.current_measure().clone();
+        if !self.staff_model().one_line()
+            && measure.voices().len() <= voice
+            && voice < score.voicing.voices()
+        {
+            measure.fill_voices(voice + 1);
+        }
+        let starts_then = measure
+            .voice(voice)
+            .is_none_or(|v| DEFAULT_GRID.compute_onset_ticks(v.beats()).contains(&tick));
+        if !starts_then {
+            match measure.start_note(voice, tick, instrument, cursor.voice) {
+                Some(measure) => {
+                    self.with_undo_snapshot(|app| {
+                        let doc = app.editor.doc_mut();
+                        doc.edit_score(|score| score.measures_mut()[cursor.measure_idx] = measure);
+                        *doc.cursor_mut() =
+                            doc.score().cursor_at_tick(Cursor { voice, ..cursor }, tick);
+                        true
+                    });
+                }
+                None => self.notify("No note fits there in the other voice"),
+            }
+            return;
+        }
+        let steps = self.editor.doc().history().pushed();
         self.go_to_voice(voice);
         self.apply_tool(id.tool());
         // A voice the bar had to get first is part of the same step.
